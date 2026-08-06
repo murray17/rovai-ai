@@ -93,7 +93,7 @@ export function memberRuntimePresentation(
 
   const availabilityStatus = runtimeAvailabilityPresentation(availability, pending)
   const isPersistedSelection =
-    selectedRuntimeKind === agent.runtimeSelection?.adapterKind
+    selectedRuntimeKind === agent.runtimeConfiguration?.adapterKind
 
   if (!isPersistedSelection) return availabilityStatus
 
@@ -121,9 +121,6 @@ export function memberRuntimePresentation(
     return presentation('authentication_required', '请先完成该 Agent 运行时的登录。')
   }
 
-  if (agent.runtimeReadiness.status === 'configuration_incomplete') {
-    return presentation('unavailable', '请完成模型与权限配置后再执行。')
-  }
   if (agent.runtimeReadiness.status === 'needs_attention') {
     const environmentBlocker = [
       'runtime_probe_required',
@@ -146,14 +143,6 @@ export function memberRuntimePresentation(
     return availabilityStatus
   }
 
-  if (agent.runtimeReadiness.status === 'selected_unresolved') {
-    return availabilityStatus.status === 'unknown'
-      ? availabilityStatus
-      : presentation(
-          'unavailable',
-          'Agent 运行时已可用；请保存模型与权限配置后再执行。'
-        )
-  }
   if (agent.runtimeReadiness.status === 'needs_attention') {
     return presentation(
       'unavailable',
@@ -168,8 +157,6 @@ export function runtimeReadinessLabel(
 ): string {
   return ({
     runtime_not_configured: '未配置 Agent 运行时',
-    selected_unresolved: '暂时无法确认',
-    configuration_incomplete: '不可用',
     needs_attention: '不可用',
     ready: '可用'
   })[status]

@@ -723,7 +723,7 @@ mod tests {
         agent_profile::configure_test_runtime,
         collaboration::{
             AddCampMemberCommand, CollaborationService, CreateCampCommand, ExecutionRequest,
-            MessageAddressSpec, SendCampMessageCommand,
+            TestCampMessageAddress, TestCampMessageCommand,
         },
         command::{ActorRef, CommandEnvelope},
         context::{
@@ -861,7 +861,7 @@ mod tests {
             )
             .unwrap();
         let sent = collaboration
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut database,
                 &CommandEnvelope {
                     command_id: Uuid::new_v4().to_string(),
@@ -871,12 +871,12 @@ mod tests {
                     camp_id: Some(camp_id.clone()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: SendCampMessageCommand {
+                    payload: TestCampMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "Run with private execution evidence".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Explicit {
+                        address: TestCampMessageAddress::Explicit {
                             agent_ids: vec!["agent_2".to_string()],
                         },
                         reply_to_camp_message_id: None,

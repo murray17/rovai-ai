@@ -53,26 +53,29 @@ describe('Runtime user status projection', () => {
     expect(result.label).toBe('暂时无法确认')
   })
 
-  it('separates product availability from incomplete member configuration', () => {
-    const agent = profile({
-      status: 'selected_unresolved',
-      blockers: [{ code: 'runtime_selection_unresolved', detail: null }]
-    })
+  it('keeps an unsaved editor selection in product availability state', () => {
+    const agent = {
+      ...profile({
+        status: 'runtime_not_configured',
+        blockers: [{ code: 'runtime_not_configured', detail: null }]
+      }),
+      runtimeConfiguration: null
+    }
 
     expect(memberRuntimePresentation(
       agent,
       'kiro-cli',
       availability('ready')
     )).toEqual({
-      status: 'unavailable',
-      label: '不可用',
-      detail: 'Agent 运行时已可用；请保存模型与权限配置后再执行。'
+      status: 'available',
+      label: '可用',
+      detail: null
     })
   })
 
   it('uses the same outcome vocabulary for member list readiness', () => {
     expect(runtimeReadinessLabel('ready')).toBe('可用')
-    expect(runtimeReadinessLabel('selected_unresolved')).toBe('暂时无法确认')
+    expect(runtimeReadinessLabel('runtime_not_configured')).toBe('未配置 Agent 运行时')
     expect(runtimeReadinessLabel('needs_attention')).toBe('不可用')
   })
 })
@@ -118,8 +121,11 @@ function profile(
     growthTopic: '',
     defaultCapabilities: [],
     presence: 'present',
-    runtimeSelection: { adapterKind: 'kiro-cli' },
-    runtimePreference: null,
+    runtimeConfiguration: {
+      adapterKind: 'kiro-cli',
+      model: { mode: 'runtime_default' },
+      permissions: { adapterKind: 'kiro-cli', schemaVersion: 1, values: {} }
+    },
     runtimeReadiness,
     memberOrder: 0,
     version: 1,

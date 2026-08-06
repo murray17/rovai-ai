@@ -839,8 +839,8 @@ async function configureFrozenRuntimes(request) {
       : null
   }, 'frozen Runtime installations', 180_000)
   for (const member of FROZEN_TEAM) {
-    const before = await request('agents.get', { agentId: member.agentId })
-    const applied = await request('agents.runtime.set', {
+    const before = await request('members.get', { agentId: member.agentId })
+    const applied = await request('members.runtime.set', {
       commandId: crypto.randomUUID(),
       command: {
         agentId: member.agentId,
@@ -852,13 +852,13 @@ async function configureFrozenRuntimes(request) {
     }, 120_000)
     if (applied.status !== 'applied') throw new Error(`could not configure ${member.agentId}: ${JSON.stringify(applied)}`)
   }
-  const profiles = await request('agents.list')
+  const profiles = await request('members.list')
   for (const member of FROZEN_TEAM) {
     const profile = profiles.find((candidate) => candidate.agentId === member.agentId)
     if (!profile || profile.runtimeReadiness?.status !== 'ready'
-        || profile.runtimeSelection?.adapterKind !== member.adapterKind
-        || canonicalJson(profile.runtimePreference?.model) !== canonicalJson(member.model)
-        || canonicalJson(profile.runtimePreference?.permissions) !== canonicalJson(member.permissions)) {
+        || profile.runtimeConfiguration?.adapterKind !== member.adapterKind
+        || canonicalJson(profile.runtimeConfiguration?.model) !== canonicalJson(member.model)
+        || canonicalJson(profile.runtimeConfiguration?.permissions) !== canonicalJson(member.permissions)) {
       throw new Error(`frozen member Runtime drifted: ${member.agentId}`)
     }
   }
@@ -942,8 +942,7 @@ async function collectEnvironmentManifest({
       workingPrinciplesDigest: sha256(profile.workingPrinciples),
       growthTopicDigest: sha256(profile.growthTopic),
       defaultCapabilities: profile.defaultCapabilities,
-      runtimeSelection: profile.runtimeSelection,
-      runtimePreference: profile.runtimePreference,
+      runtimeConfiguration: profile.runtimeConfiguration,
       readiness: profile.runtimeReadiness
     })),
     runtimeInstallations,
@@ -980,12 +979,7 @@ async function collectEnvironmentManifest({
     productGit: manifest.productGit,
     releaseCore: manifest.releaseCore,
     host: manifest.host,
-    team: manifest.team.map(({ runtimePreference, ...profile }) => ({
-      ...profile,
-      runtimePreference: runtimePreference
-        ? Object.fromEntries(Object.entries(runtimePreference).filter(([key]) => key !== 'installationId'))
-        : runtimePreference
-    })),
+    team: manifest.team,
     runtimeInstallations: manifest.runtimeInstallations,
     builtinCli: manifest.builtinCli,
     ambientMcpIsolation: manifest.ambientMcpIsolation,

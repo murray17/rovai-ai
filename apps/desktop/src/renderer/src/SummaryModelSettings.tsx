@@ -52,10 +52,12 @@ export const SummaryModelSettings = forwardRef<SummaryModelSettingsHandle, {
   const [reloadSignal, setReloadSignal] = useState(0)
   const dirtyRef = useRef(false)
   const loadedRuntimeInstallationIdRef = useRef<string | null | undefined>(undefined)
-  const runtimeInstallationId = agent.runtimePreference?.installationId ?? null
   const installation = installations.find(
-    (candidate) => candidate.id === runtimeInstallationId
+    (candidate) => candidate.adapterKind === agent.runtimeConfiguration?.adapterKind
+      && candidate.installationClass === 'managed_default'
+      && candidate.authScope === 'default'
   ) ?? null
+  const runtimeInstallationId = installation?.id ?? null
   const models = useMemo(
     () => (installation?.snapshot?.models ?? []).filter((model) => !model.hidden && !model.deprecated),
     [installation]

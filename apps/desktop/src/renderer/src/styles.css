@@ -1235,9 +1235,7 @@ button:disabled { opacity: 0.52; cursor: default; }
   border: 1px solid var(--success);
   background: transparent;
 }
-.mention-profile-status .runtime-needs_attention i,
-.mention-profile-status .runtime-configuration_incomplete i,
-.mention-profile-status .runtime-selected_unresolved i { border-color: var(--attention); }
+.mention-profile-status .runtime-needs_attention i { border-color: var(--attention); }
 .mention-profile-fields {
   display: grid;
   gap: 9px;

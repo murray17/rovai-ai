@@ -7,7 +7,7 @@ date: 2026-07-31
 decision_scope: cross-version
 source_version: v0.26
 supersedes: []
-superseded_by: null
+superseded_by: ADR-0127
 ---
 
 # ADR-0082: Member-Owned Runtime Parameters and Explicit Configuration

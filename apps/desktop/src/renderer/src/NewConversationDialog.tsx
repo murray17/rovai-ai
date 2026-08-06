@@ -423,14 +423,12 @@ function readinessLabel(status: CampCreationPreflight['presentMembers'][number][
     ? '可用'
     : status === 'runtime_not_configured'
       ? '未配置 Agent 运行时'
-      : status === 'selected_unresolved'
-        ? '暂时无法确认'
-        : '不可用'
+      : '不可用'
 }
 
 function runtimeDetail(profile: AgentProfile | undefined): string {
-  if (!profile?.runtimeSelection) return '尚未选择 Agent 运行时'
-  return `${profile.runtimeSelection.adapterKind} · ${readinessLabel(profile.runtimeReadiness.status)}`
+  if (!profile?.runtimeConfiguration) return '尚未选择 Agent 运行时'
+  return `${profile.runtimeConfiguration.adapterKind} · ${readinessLabel(profile.runtimeReadiness.status)}`
 }
 
 export function workspaceCapability(workspace: WorkspaceInspection | null): {

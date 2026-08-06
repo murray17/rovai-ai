@@ -198,7 +198,8 @@ async function seedFixture() {
     return `(
       ${sqlLiteral(`message-${entry.key}`)}, ${sqlLiteral(campId)}, ${index + 1},
       'agent', ${sqlLiteral(entry.agentId)}, ${sqlLiteral(`run-${entry.key}`)},
-      ${sqlLiteral(body)}, 'default', '[]', ${sqlLiteral(`turn-${entry.key}`)},
+      ${sqlLiteral(body)}, ${sqlLiteral(JSON.stringify([{ kind: 'text', text: body }]))},
+      'default', '[]', ${sqlLiteral(`turn-${entry.key}`)},
       ${sqlLiteral(`run-${entry.key}`)}, 1,
       ${sqlLiteral(`2026-08-05T12:${String(index).padStart(2, '0')}:02Z`)},
       ${sqlLiteral(`2026-08-05T12:${String(index).padStart(2, '0')}:02Z`)}
@@ -248,7 +249,7 @@ async function seedFixture() {
     ) VALUES ${runRows};
     INSERT INTO camp_message(
       id, camp_id, sequence, author_type, author_id, source_agent_run_id,
-      body, address_mode, addressed_agent_ids_json, camp_turn_id,
+      body, structured_content_json, address_mode, addressed_agent_ids_json, camp_turn_id,
       agent_run_id, version, created_at, updated_at
     ) VALUES ${messageRows};
     UPDATE agent_run

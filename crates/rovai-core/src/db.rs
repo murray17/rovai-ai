@@ -44,7 +44,7 @@ pub struct Database {
 }
 
 const V043_DATA_CONTRACT_VERSION: &str = "v0.43";
-const V043_PROJECTION_SCHEMA_VERSION: i64 = 21;
+const V043_PROJECTION_SCHEMA_VERSION: i64 = 22;
 const V043_CLASSIFIER_VERSION: &str = "activity-v1";
 
 const V043_RESET_FILES: &[&str] = &[
@@ -1037,6 +1037,9 @@ impl Database {
             if !self.schema_migration_applied(57)? {
                 self.migrate_member_task_camp_contract_v57()?;
             }
+            if !self.schema_migration_applied(58)? {
+                self.migrate_structured_message_clean_break_v58()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -1257,6 +1260,9 @@ impl Database {
         }
         if !self.schema_migration_applied(57)? {
             self.migrate_member_task_camp_contract_v57()?;
+        }
+        if !self.schema_migration_applied(58)? {
+            self.migrate_structured_message_clean_break_v58()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -4141,7 +4147,7 @@ impl Database {
             DROP TABLE IF EXISTS codex_home_cleanup;
 
             UPDATE rovai_data_contract
-            SET contract_version = 'v0.43', projection_schema_version = 21,
+            SET contract_version = 'v0.43', projection_schema_version = 22,
                 classifier_version = 'activity-v1', updated_at = datetime('now')
             WHERE singleton = 1;
 
@@ -4170,11 +4176,80 @@ impl Database {
         self.connection.execute_batch(
             r#"
             UPDATE rovai_data_contract
-            SET projection_schema_version = 21, updated_at = datetime('now')
+            SET projection_schema_version = 22, updated_at = datetime('now')
             WHERE singleton = 1;
 
             INSERT INTO schema_migration(version, applied_at)
             VALUES (57, datetime('now'));
+            "#,
+        )?;
+        Ok(())
+    }
+
+    fn migrate_structured_message_clean_break_v58(&mut self) -> Result<()> {
+        self.connection.execute_batch(
+            r#"
+            DELETE FROM camp_message WHERE structured_content_json IS NULL;
+
+            UPDATE agent_profile
+            SET selected_runtime_adapter_kind = NULL,
+                default_runtime_installation_id = NULL,
+                default_model_selection_json = NULL,
+                default_permission_config_json = NULL
+            WHERE (selected_runtime_adapter_kind IS NOT NULL)
+                + (default_runtime_installation_id IS NOT NULL)
+                + (default_model_selection_json IS NOT NULL)
+                + (default_permission_config_json IS NOT NULL)
+              BETWEEN 1 AND 3;
+
+            DROP TRIGGER IF EXISTS camp_message_structured_content_insert;
+            DROP TRIGGER IF EXISTS camp_message_structured_content_update;
+            CREATE TRIGGER camp_message_structured_content_insert
+            BEFORE INSERT ON camp_message
+            WHEN NEW.structured_content_json IS NULL
+            BEGIN
+                SELECT RAISE(ABORT, 'CampMessage Structured Content is required');
+            END;
+            CREATE TRIGGER camp_message_structured_content_update
+            BEFORE UPDATE OF structured_content_json ON camp_message
+            WHEN NEW.structured_content_json IS NULL
+            BEGIN
+                SELECT RAISE(ABORT, 'CampMessage Structured Content is required');
+            END;
+
+            DROP TRIGGER IF EXISTS agent_profile_runtime_configuration_insert;
+            DROP TRIGGER IF EXISTS agent_profile_runtime_configuration_update;
+            CREATE TRIGGER agent_profile_runtime_configuration_insert
+            BEFORE INSERT ON agent_profile
+            WHEN ((NEW.selected_runtime_adapter_kind IS NOT NULL)
+                    + (NEW.default_runtime_installation_id IS NOT NULL)
+                    + (NEW.default_model_selection_json IS NOT NULL)
+                    + (NEW.default_permission_config_json IS NOT NULL))
+                 NOT IN (0, 4)
+            BEGIN
+                SELECT RAISE(ABORT, 'Member Runtime Configuration must be complete or absent');
+            END;
+            CREATE TRIGGER agent_profile_runtime_configuration_update
+            BEFORE UPDATE OF selected_runtime_adapter_kind,
+                             default_runtime_installation_id,
+                             default_model_selection_json,
+                             default_permission_config_json
+            ON agent_profile
+            WHEN ((NEW.selected_runtime_adapter_kind IS NOT NULL)
+                    + (NEW.default_runtime_installation_id IS NOT NULL)
+                    + (NEW.default_model_selection_json IS NOT NULL)
+                    + (NEW.default_permission_config_json IS NOT NULL))
+                 NOT IN (0, 4)
+            BEGIN
+                SELECT RAISE(ABORT, 'Member Runtime Configuration must be complete or absent');
+            END;
+
+            UPDATE rovai_data_contract
+            SET projection_schema_version = 22, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (58, datetime('now'));
             "#,
         )?;
         Ok(())
@@ -4585,7 +4660,7 @@ impl Database {
                 r#"
                 UPDATE agent_run
                 SET status = 'failed', ended_at = ?1,
-                    last_error_code = 'context_formatter_v7_required',
+                    last_error_code = 'context_formatter_v8_required',
                     wait_reason = NULL, wait_deadline_at = NULL,
                     runtime_recovery_required = 0,
                     execution_lease_owner = NULL,
@@ -4642,7 +4717,7 @@ impl Database {
                         CHECK(history_fence_version IN (0, 1)),
                     global_public_message_boundary INTEGER NOT NULL DEFAULT 0
                         CHECK(global_public_message_boundary >= 0),
-                    formatter_version INTEGER NOT NULL CHECK(formatter_version = 7),
+                    formatter_version INTEGER NOT NULL CHECK(formatter_version = 8),
                     rendered_payload_blob_id TEXT NOT NULL REFERENCES managed_blob(id),
                     rendered_payload_digest TEXT NOT NULL,
                     created_at TEXT NOT NULL
@@ -6083,7 +6158,7 @@ impl Database {
                 .transaction_with_behavior(TransactionBehavior::Immediate)?;
 
             // v0.06 is an intentional collaboration protocol reset. Agent profiles,
-            // their ordering, Adapter installations and user runtime preferences are
+            // their ordering, Adapter installations and user Runtime configurations are
             // retained; every Camp aggregate is discarded before the single Task
             // schema is rebuilt.
             for table in [
@@ -9148,7 +9223,8 @@ mod tests {
     fn v35_installs_directory_workspace_and_agent_run_git_observation_columns() {
         use crate::{
             collaboration::{
-                CollaborationService, CreateCampCommand, MessageAddressSpec, SendCampMessageCommand,
+                CollaborationService, CreateCampCommand, TestCampMessageAddress,
+                TestCampMessageCommand,
             },
             command::{ActorRef, CommandEnvelope},
         };
@@ -9210,7 +9286,7 @@ mod tests {
         assert_eq!(binding.1, workspace.to_string_lossy());
 
         CollaborationService::default()
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut database,
                 &CommandEnvelope {
                     command_id: "v35-indexed-message".to_string(),
@@ -9220,12 +9296,12 @@ mod tests {
                     camp_id: Some(camp_id.to_string()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: SendCampMessageCommand {
+                    payload: TestCampMessageCommand {
                         camp_id: camp_id.to_string(),
                         draft_revision: None,
                         body: "migration fixture".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
@@ -9349,6 +9425,8 @@ mod tests {
                     'agent_1', 1,
                     1, '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z'
                 );
+                DROP TRIGGER IF EXISTS camp_message_structured_content_insert;
+                DROP TRIGGER IF EXISTS camp_message_structured_content_update;
                 INSERT INTO camp_message(
                     id, camp_id, sequence, author_type, author_id,
                     source_agent_run_id, body, address_mode,
@@ -10181,6 +10259,15 @@ mod tests {
             .expect("legacy Installation fixture");
         database
             .connection()
+            .execute_batch(
+                r#"
+                DROP TRIGGER agent_profile_runtime_configuration_insert;
+                DROP TRIGGER agent_profile_runtime_configuration_update;
+                "#,
+            )
+            .expect("historical fixture should restore pre-v58 write semantics");
+        database
+            .connection()
             .execute(
                 r#"
                 UPDATE agent_profile
@@ -10689,7 +10776,7 @@ mod tests {
         use crate::{
             agent_profile::configure_test_runtime,
             collaboration::{
-                CollaborationService, CreateCampFromFirstMessageCommand, MessageAddressSpec,
+                CollaborationService, TestCampConversationCommand, TestCampMessageAddress,
             },
             command::{ActorRef, CommandEnvelope},
         };
@@ -10698,7 +10785,7 @@ mod tests {
         let mut database = Database::open(&directory).expect("database should open");
         configure_test_runtime(&database, &["agent_1"]);
         let created = CollaborationService::default()
-            .create_camp_from_first_message(
+            .create_test_camp_conversation(
                 &mut database,
                 &CommandEnvelope {
                     command_id: "v22-create".to_string(),
@@ -10708,11 +10795,11 @@ mod tests {
                     camp_id: None,
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: CreateCampFromFirstMessageCommand {
+                    payload: TestCampConversationCommand {
                         project_path: directory.join("workspace").to_string_lossy().to_string(),
                         project_binding_kind: crate::collaboration::ProjectBindingKind::Directory,
                         body: "legacy public trigger".to_string(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         purpose: "migration test".to_string(),
                         expected_output: "migration result".to_string(),
                     },
@@ -11170,6 +11257,8 @@ mod tests {
                         '2026-08-10T00:00:00Z'
                     );
 
+                DROP TRIGGER IF EXISTS camp_message_structured_content_insert;
+                DROP TRIGGER IF EXISTS camp_message_structured_content_update;
                 INSERT INTO camp_message(
                     id, camp_id, sequence, author_type, author_id, body,
                     content_digest, address_mode, addressed_agent_ids_json,
@@ -11498,7 +11587,7 @@ mod tests {
             .unwrap();
         assert_eq!(migration_count, 1);
         assert_eq!(cleanup_table_count, 0);
-        assert_eq!(contract, ("v0.43".to_string(), 21));
+        assert_eq!(contract, ("v0.43".to_string(), 22));
 
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
@@ -11536,7 +11625,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.43".to_string(), 21));
+        assert_eq!(contract, ("v0.43".to_string(), 22));
         let migration_count: i64 = reopened
             .connection()
             .query_row(
@@ -11548,6 +11637,52 @@ mod tests {
         assert_eq!(migration_count, 1);
 
         drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v58_requires_structured_content_and_sets_the_reset_marker() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v58-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        let contract: (i64, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT projection_schema_version,
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 58)
+                FROM rovai_data_contract WHERE singleton = 1
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(contract, (22, 1));
+        let error = database
+            .connection()
+            .execute(
+                "INSERT INTO camp_message(id, structured_content_json) VALUES ('null-content', NULL)",
+                [],
+            )
+            .expect_err("CampMessage without Structured Content must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("CampMessage Structured Content is required")
+        );
+        let runtime_error = database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET selected_runtime_adapter_kind = 'codex-cli' WHERE id = 'agent_1'",
+                [],
+            )
+            .expect_err("partial Member Runtime Configuration must be rejected");
+        assert!(
+            runtime_error
+                .to_string()
+                .contains("Member Runtime Configuration must be complete or absent")
+        );
+
+        drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 

@@ -116,7 +116,7 @@ try {
 
   running = await launchApp(dataDir, debugPort, 1440, 920)
   await setTheme(running.cdp, 'day')
-  const freshAgents = await request(running.cdp, 'agents.list')
+  const freshAgents = await request(running.cdp, 'members.list')
   assert(
     targetMemberIds.every((id) => freshAgents.some((agent) =>
       agent.agentId === id && agent.presence === 'present')),
@@ -132,12 +132,12 @@ try {
 
   running = await launchApp(dataDir, debugPort, 1440, 920)
   await setTheme(running.cdp, 'day')
-  const configuredAgents = await request(running.cdp, 'agents.list')
+  const configuredAgents = await request(running.cdp, 'members.list')
   assert(
     targetMemberIds.every((id) => configuredAgents.some((agent) =>
       agent.agentId === id
       && agent.runtimeReadiness.status === 'ready'
-      && agent.runtimeSelection?.adapterKind === 'codex-cli')),
+      && agent.runtimeConfiguration?.adapterKind === 'codex-cli')),
     `Acceptance Runtime is not ready for every target: ${JSON.stringify(configuredAgents)}`
   )
 
@@ -158,8 +158,8 @@ try {
   await reloadRenderer(running.cdp)
   await openCamp(running.cdp, campId)
   const initialSnapshot = await request(running.cdp, 'camps.snapshot', { campId })
-  assert(initialSnapshot.schemaVersion === 19,
-    `Camp snapshot schema is not v19: ${initialSnapshot.schemaVersion}`)
+  assert(initialSnapshot.schemaVersion === 21,
+    `Camp snapshot schema is not v21: ${initialSnapshot.schemaVersion}`)
   assert(
     deepEqual(initialSnapshot.members.map((member) => member.agentId), targetMemberIds),
     `Camp does not contain exactly the three target members: ${JSON.stringify(initialSnapshot.members)}`

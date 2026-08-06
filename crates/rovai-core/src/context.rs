@@ -11,9 +11,9 @@ const BUILTIN_CLI_CHARTER: &str = include_str!("../resources/charter-rovai-cli.m
 
 use crate::{
     agent_profile::{
-        AdapterKind, AdapterPermissionConfig, AgentRuntimePreference, FrozenAgentRuntimeConfig,
-        ModelSelection, PermissionOptionDescriptor, resolve_frozen_runtime,
-        resolve_frozen_runtime_preference, validate_stored_member_identity,
+        AdapterKind, AdapterPermissionConfig, FrozenAgentRuntimeConfig, ModelSelection,
+        PermissionOptionDescriptor, ResolvedRuntimeBinding, resolve_frozen_runtime,
+        resolve_frozen_runtime_binding, validate_stored_member_identity,
     },
     camp_content::{StructuredCampMessageContent, normalize_content, render_current_plain_text},
     command::{EntityReference, canonical_json_digest},
@@ -123,7 +123,8 @@ fn resolve_summary_runtime(
         .filter(|descriptor| descriptor.supported)
         .map(|descriptor| (descriptor.key, descriptor.recommended_value))
         .collect::<serde_json::Map<_, _>>();
-    let runtime_preference = AgentRuntimePreference {
+    let runtime_binding = ResolvedRuntimeBinding {
+        adapter_kind,
         installation_id: preference.installation_id.clone(),
         model: preference.model.clone(),
         permissions: AdapterPermissionConfig {
@@ -132,7 +133,7 @@ fn resolve_summary_runtime(
             values: Value::Object(values),
         },
     };
-    resolve_frozen_runtime_preference(transaction, &runtime_preference)?
+    resolve_frozen_runtime_binding(transaction, &runtime_binding)?
         .map_err(|blocker| anyhow::anyhow!("{}: {}", blocker.code, blocker.payload))
 }
 
@@ -2783,13 +2784,13 @@ fn load_current_input(database: &Database, snapshot: &RunSnapshot) -> Result<Cur
                 ],
                 |row| {
                     let source_inbox_message_id = row.get::<_, Option<String>>(4)?;
-                    let sender_member_id = row.get::<_, String>(2)?;
+                    let sender_agent_id = row.get::<_, String>(2)?;
                     Ok(CurrentInput {
                         id: row.get(0)?,
                         payload: json!({
                             "source": {
                                 "type": "member_call",
-                                "senderMemberId": sender_member_id,
+                                "senderAgentId": sender_agent_id,
                                 "senderName": row.get::<_, Option<String>>(5)?
                                     .unwrap_or_else(|| "Source Member".to_string()),
                             },
@@ -4711,7 +4712,8 @@ mod tests {
     use crate::{
         agent_profile::{
             AdapterCapabilitySnapshot, AdapterKind, AgentProfileService, InstallationSource,
-            SetAgentProfileRuntimeCommand, UpdateAgentProfileCommand, VerifiedManagedInstallation,
+            SetMemberRuntimeConfigurationCommand, UpdateAgentProfileCommand,
+            VerifiedManagedInstallation,
         },
         agent_runtime_adapter::SkillDeliveryGroupKey,
         camp_attachment::{CampAttachmentStore, consume_prepared_attachments},
@@ -4720,8 +4722,8 @@ mod tests {
             ReadDirection,
         },
         collaboration::{
-            AddCampMemberCommand, CollaborationService, ExecutionRequest, MessageAddressSpec,
-            SendCampMessageCommand, append_system_camp_message,
+            AddCampMemberCommand, CollaborationService, ExecutionRequest, TestCampMessageAddress,
+            TestCampMessageCommand, append_system_camp_message,
         },
         command::{ActorRef, CommandEnvelope, CommandResultStatus},
         mcp::{
@@ -4875,16 +4877,16 @@ mod tests {
                     camp_id: None,
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: SetAgentProfileRuntimeCommand {
+                    payload: SetMemberRuntimeConfigurationCommand {
                         agent_id: "agent_1".to_string(),
                         expected_version: profile.version,
                         adapter_kind: AdapterKind::CodexCli,
-                        model: Some(ModelSelection::RuntimeDefault),
-                        permissions: Some(AdapterPermissionConfig {
+                        model: ModelSelection::RuntimeDefault,
+                        permissions: AdapterPermissionConfig {
                             adapter_kind: AdapterKind::CodexCli,
                             schema_version: 1,
                             values: json!({}),
-                        }),
+                        },
                     },
                 },
             )
@@ -4897,7 +4899,7 @@ mod tests {
             )
             .unwrap();
         let camp = CollaborationService::default()
-            .create_camp_from_first_message(
+            .create_test_camp_conversation(
                 &mut database,
                 &CommandEnvelope {
                     command_id: Uuid::new_v4().to_string(),
@@ -4907,11 +4909,11 @@ mod tests {
                     camp_id: None,
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: crate::collaboration::CreateCampFromFirstMessageCommand {
+                    payload: crate::collaboration::TestCampConversationCommand {
                         project_path: directory.display().to_string(),
                         project_binding_kind: crate::collaboration::ProjectBindingKind::Directory,
                         body: "第一条公开问题".to_string(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         purpose: "回答用户".to_string(),
                         expected_output: "清楚结论".to_string(),
                     },
@@ -5014,7 +5016,7 @@ mod tests {
         body: &str,
     ) -> (String, String) {
         let result = CollaborationService::default()
-            .create_camp_from_first_message(
+            .create_test_camp_conversation(
                 database,
                 &CommandEnvelope {
                     command_id: Uuid::new_v4().to_string(),
@@ -5024,11 +5026,11 @@ mod tests {
                     camp_id: None,
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: crate::collaboration::CreateCampFromFirstMessageCommand {
+                    payload: crate::collaboration::TestCampConversationCommand {
                         project_path: directory.display().to_string(),
                         project_binding_kind: crate::collaboration::ProjectBindingKind::Directory,
                         body: body.to_string(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         purpose: "checkpoint 5 fixture".to_string(),
                         expected_output: "fixture".to_string(),
                     },
@@ -5075,7 +5077,7 @@ mod tests {
         assert_eq!(empty["truncated"], false);
 
         let late = CollaborationService::default()
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut fixture.database,
                 &CommandEnvelope {
                     command_id: Uuid::new_v4().to_string(),
@@ -5085,12 +5087,12 @@ mod tests {
                     camp_id: Some(fixture.camp_id.clone()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: SendCampMessageCommand {
+                    payload: TestCampMessageCommand {
                         camp_id: fixture.camp_id.clone(),
                         draft_revision: None,
                         body: "CURRENT_BOUNDARY_AFTER_MANIFEST".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
@@ -5270,7 +5272,7 @@ mod tests {
         assert_eq!(ordered["camps"][1]["title"], "FIRST_HISTORY_CAMP");
 
         CollaborationService::default()
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut fixture.database,
                 &CommandEnvelope {
                     command_id: Uuid::new_v4().to_string(),
@@ -5280,12 +5282,12 @@ mod tests {
                     camp_id: Some(first_camp_id.clone()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: SendCampMessageCommand {
+                    payload: TestCampMessageCommand {
                         camp_id: first_camp_id.clone(),
                         draft_revision: None,
                         body: "AFTER_FROZEN_BOUNDARY".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
@@ -5359,7 +5361,7 @@ mod tests {
             .unwrap();
 
         let second = CollaborationService::default()
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut fixture.database,
                 &CommandEnvelope {
                     command_id: Uuid::new_v4().to_string(),
@@ -5369,12 +5371,12 @@ mod tests {
                     camp_id: Some(fixture.camp_id.clone()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: SendCampMessageCommand {
+                    payload: TestCampMessageCommand {
                         camp_id: fixture.camp_id.clone(),
                         draft_revision: None,
                         body: "SECOND_RUN_SEQUENCE_ANCHOR".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
                             task_id: None,
@@ -5611,7 +5613,7 @@ mod tests {
         let mut fixture = fixture();
         let collaboration = CollaborationService::default();
         let current = collaboration
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut fixture.database,
                 &CommandEnvelope {
                     command_id: Uuid::new_v4().to_string(),
@@ -5621,7 +5623,7 @@ mod tests {
                     camp_id: Some(fixture.camp_id.clone()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: SendCampMessageCommand {
+                    payload: TestCampMessageCommand {
                         camp_id: fixture.camp_id.clone(),
                         draft_revision: None,
                         body: format!(
@@ -5629,7 +5631,7 @@ mod tests {
                             "长".repeat(5_000)
                         ),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
@@ -5641,7 +5643,7 @@ mod tests {
             .unwrap()
             .to_string();
         let child = collaboration
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut fixture.database,
                 &CommandEnvelope {
                     command_id: Uuid::new_v4().to_string(),
@@ -5651,12 +5653,12 @@ mod tests {
                     camp_id: Some(fixture.camp_id.clone()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: SendCampMessageCommand {
+                    payload: TestCampMessageCommand {
                         camp_id: fixture.camp_id.clone(),
                         draft_revision: None,
                         body: "thread child".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         reply_to_camp_message_id: Some(current_id.clone()),
                         execution: None,
                     },
@@ -5668,7 +5670,7 @@ mod tests {
             .unwrap()
             .to_string();
         let grandchild = collaboration
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut fixture.database,
                 &CommandEnvelope {
                     command_id: Uuid::new_v4().to_string(),
@@ -5678,12 +5680,12 @@ mod tests {
                     camp_id: Some(fixture.camp_id.clone()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: SendCampMessageCommand {
+                    payload: TestCampMessageCommand {
                         camp_id: fixture.camp_id.clone(),
                         draft_revision: None,
                         body: "thread grandchild".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         reply_to_camp_message_id: Some(child_id.clone()),
                         execution: None,
                     },
@@ -5695,7 +5697,7 @@ mod tests {
             .unwrap()
             .to_string();
         let historical = collaboration
-            .create_camp_from_first_message(
+            .create_test_camp_conversation(
                 &mut fixture.database,
                 &CommandEnvelope {
                     command_id: Uuid::new_v4().to_string(),
@@ -5705,11 +5707,11 @@ mod tests {
                     camp_id: None,
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: crate::collaboration::CreateCampFromFirstMessageCommand {
+                    payload: crate::collaboration::TestCampConversationCommand {
                         project_path: fixture.directory.display().to_string(),
                         project_binding_kind: crate::collaboration::ProjectBindingKind::Directory,
                         body: "HISTORY_SEARCH_ANCHOR from another Camp".to_string(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         purpose: "historical fixture".to_string(),
                         expected_output: "fixture".to_string(),
                     },
@@ -5765,7 +5767,7 @@ mod tests {
         };
 
         let late_camp = collaboration
-            .create_camp_from_first_message(
+            .create_test_camp_conversation(
                 &mut fixture.database,
                 &CommandEnvelope {
                     command_id: Uuid::new_v4().to_string(),
@@ -5775,11 +5777,11 @@ mod tests {
                     camp_id: None,
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: crate::collaboration::CreateCampFromFirstMessageCommand {
+                    payload: crate::collaboration::TestCampConversationCommand {
                         project_path: fixture.directory.display().to_string(),
                         project_binding_kind: crate::collaboration::ProjectBindingKind::Directory,
                         body: "LATE_JOINED_CAMP_MUST_STAY_HIDDEN".to_string(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         purpose: "late history fixture".to_string(),
                         expected_output: "fixture".to_string(),
                     },
@@ -6118,7 +6120,7 @@ mod tests {
             )
             .unwrap();
         collaboration
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut fixture.database,
                 &CommandEnvelope {
                     command_id: Uuid::new_v4().to_string(),
@@ -6128,12 +6130,12 @@ mod tests {
                     camp_id: Some(historical_camp_id.clone()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: SendCampMessageCommand {
+                    payload: TestCampMessageCommand {
                         camp_id: historical_camp_id.clone(),
                         draft_revision: None,
                         body: "AFTER_MANIFEST_MUST_STAY_HIDDEN".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
@@ -7726,7 +7728,7 @@ mod tests {
             .unwrap();
 
         let queued = CollaborationService::default()
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut fixture.database,
                 &CommandEnvelope {
                     command_id: Uuid::new_v4().to_string(),
@@ -7736,12 +7738,12 @@ mod tests {
                     camp_id: Some(fixture.camp_id.clone()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: SendCampMessageCommand {
+                    payload: TestCampMessageCommand {
                         camp_id: fixture.camp_id.clone(),
                         draft_revision: None,
                         body: "continue on the replacement binding".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
                             task_id: None,
@@ -8483,7 +8485,7 @@ mod tests {
         let service = CollaborationService::default();
         for index in 0..2 {
             let sent = service
-                .send_camp_message(
+                .send_test_camp_message(
                     &mut fixture.database,
                     &CommandEnvelope {
                         command_id: Uuid::new_v4().to_string(),
@@ -8493,12 +8495,12 @@ mod tests {
                         camp_id: Some(fixture.camp_id.clone()),
                         expected_versions: Vec::new(),
                         execution_epoch: None,
-                        payload: SendCampMessageCommand {
+                        payload: TestCampMessageCommand {
                             camp_id: fixture.camp_id.clone(),
                             draft_revision: None,
                             body: format!("未读消息 {index}: {}", "x".repeat(32_000)),
                             prepared_attachment_ids: Vec::new(),
-                            address: MessageAddressSpec::Default,
+                            address: TestCampMessageAddress::Default,
                             reply_to_camp_message_id: None,
                             execution: None,
                         },
@@ -8592,7 +8594,7 @@ mod tests {
         let mut fixture = fixture();
         for index in 0..2 {
             CollaborationService::default()
-                .send_camp_message(
+                .send_test_camp_message(
                     &mut fixture.database,
                     &CommandEnvelope {
                         command_id: Uuid::new_v4().to_string(),
@@ -8602,12 +8604,12 @@ mod tests {
                         camp_id: Some(fixture.camp_id.clone()),
                         expected_versions: Vec::new(),
                         execution_epoch: None,
-                        payload: SendCampMessageCommand {
+                        payload: TestCampMessageCommand {
                             camp_id: fixture.camp_id.clone(),
                             draft_revision: None,
                             body: format!("retry input {index}: {}", "x".repeat(32_000)),
                             prepared_attachment_ids: Vec::new(),
-                            address: MessageAddressSpec::Default,
+                            address: TestCampMessageAddress::Default,
                             reply_to_camp_message_id: None,
                             execution: None,
                         },
@@ -8747,16 +8749,16 @@ mod tests {
                     camp_id: None,
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: SetAgentProfileRuntimeCommand {
+                    payload: SetMemberRuntimeConfigurationCommand {
                         agent_id: "agent_2".to_string(),
                         expected_version: muwa.version,
                         adapter_kind: AdapterKind::CodexCli,
-                        model: Some(ModelSelection::RuntimeDefault),
-                        permissions: Some(AdapterPermissionConfig {
+                        model: ModelSelection::RuntimeDefault,
+                        permissions: AdapterPermissionConfig {
                             adapter_kind: AdapterKind::CodexCli,
                             schema_version: 1,
                             values: json!({}),
-                        }),
+                        },
                     },
                 },
             )
@@ -8783,7 +8785,7 @@ mod tests {
             .unwrap();
         for index in 0..2 {
             collaboration
-                .send_camp_message(
+                .send_test_camp_message(
                     &mut fixture.database,
                     &CommandEnvelope {
                         command_id: Uuid::new_v4().to_string(),
@@ -8793,12 +8795,12 @@ mod tests {
                         camp_id: Some(fixture.camp_id.clone()),
                         expected_versions: Vec::new(),
                         execution_epoch: None,
-                        payload: SendCampMessageCommand {
+                        payload: TestCampMessageCommand {
                             camp_id: fixture.camp_id.clone(),
                             draft_revision: None,
                             body: format!("shared compaction {index}: {}", "x".repeat(32_000)),
                             prepared_attachment_ids: Vec::new(),
-                            address: MessageAddressSpec::Default,
+                            address: TestCampMessageAddress::Default,
                             reply_to_camp_message_id: None,
                             execution: None,
                         },
@@ -8807,7 +8809,7 @@ mod tests {
                 .unwrap();
         }
         let queued = collaboration
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut fixture.database,
                 &CommandEnvelope {
                     command_id: Uuid::new_v4().to_string(),
@@ -8817,12 +8819,12 @@ mod tests {
                     camp_id: Some(fixture.camp_id.clone()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: SendCampMessageCommand {
+                    payload: TestCampMessageCommand {
                         camp_id: fixture.camp_id.clone(),
                         draft_revision: None,
                         body: "ask a second member to consume the same history".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Explicit {
+                        address: TestCampMessageAddress::Explicit {
                             agent_ids: vec!["agent_2".to_string()],
                         },
                         reply_to_camp_message_id: None,
@@ -9018,7 +9020,7 @@ mod tests {
         let collaboration = CollaborationService::default();
         for index in 0..2 {
             collaboration
-                .send_camp_message(
+                .send_test_camp_message(
                     &mut fixture.database,
                     &CommandEnvelope {
                         command_id: Uuid::new_v4().to_string(),
@@ -9028,12 +9030,12 @@ mod tests {
                         camp_id: Some(fixture.camp_id.clone()),
                         expected_versions: Vec::new(),
                         execution_epoch: None,
-                        payload: SendCampMessageCommand {
+                        payload: TestCampMessageCommand {
                             camp_id: fixture.camp_id.clone(),
                             draft_revision: None,
                             body: format!("configured summary {index}: {}", "x".repeat(32_000)),
                             prepared_attachment_ids: Vec::new(),
-                            address: MessageAddressSpec::Default,
+                            address: TestCampMessageAddress::Default,
                             reply_to_camp_message_id: None,
                             execution: None,
                         },
@@ -9112,7 +9114,7 @@ mod tests {
     fn single_oversized_message_is_truncated_only_in_segment_model_input() {
         let mut fixture = fixture();
         CollaborationService::default()
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut fixture.database,
                 &CommandEnvelope {
                     command_id: Uuid::new_v4().to_string(),
@@ -9122,12 +9124,12 @@ mod tests {
                     camp_id: Some(fixture.camp_id.clone()),
                     expected_versions: Vec::new(),
                     execution_epoch: None,
-                    payload: SendCampMessageCommand {
+                    payload: TestCampMessageCommand {
                         camp_id: fixture.camp_id.clone(),
                         draft_revision: None,
                         body: format!("oversized singleton: {}", "界".repeat(70_000)),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
@@ -9209,7 +9211,7 @@ mod tests {
         let collaboration = CollaborationService::default();
         for index in 0..2 {
             collaboration
-                .send_camp_message(
+                .send_test_camp_message(
                     &mut fixture.database,
                     &CommandEnvelope {
                         command_id: Uuid::new_v4().to_string(),
@@ -9219,12 +9221,12 @@ mod tests {
                         camp_id: Some(fixture.camp_id.clone()),
                         expected_versions: Vec::new(),
                         execution_epoch: None,
-                        payload: SendCampMessageCommand {
+                        payload: TestCampMessageCommand {
                             camp_id: fixture.camp_id.clone(),
                             draft_revision: None,
                             body: format!("lease input {index}: {}", "x".repeat(32_000)),
                             prepared_attachment_ids: Vec::new(),
-                            address: MessageAddressSpec::Default,
+                            address: TestCampMessageAddress::Default,
                             reply_to_camp_message_id: None,
                             execution: None,
                         },
@@ -9292,7 +9294,7 @@ mod tests {
         let collaboration = CollaborationService::default();
         for index in 0..40 {
             collaboration
-                .send_camp_message(
+                .send_test_camp_message(
                     &mut fixture.database,
                     &CommandEnvelope {
                         command_id: Uuid::new_v4().to_string(),
@@ -9302,12 +9304,12 @@ mod tests {
                         camp_id: Some(fixture.camp_id.clone()),
                         expected_versions: Vec::new(),
                         execution_epoch: None,
-                        payload: SendCampMessageCommand {
+                        payload: TestCampMessageCommand {
                             camp_id: fixture.camp_id.clone(),
                             draft_revision: None,
                             body: format!("history {index}: {}", "h".repeat(2_100)),
                             prepared_attachment_ids: Vec::new(),
-                            address: MessageAddressSpec::Default,
+                            address: TestCampMessageAddress::Default,
                             reply_to_camp_message_id: None,
                             execution: None,
                         },
@@ -9536,7 +9538,7 @@ mod tests {
         let collaboration = CollaborationService::default();
         for index in 0..2 {
             collaboration
-                .send_camp_message(
+                .send_test_camp_message(
                     &mut fixture.database,
                     &CommandEnvelope {
                         command_id: Uuid::new_v4().to_string(),
@@ -9546,12 +9548,12 @@ mod tests {
                         camp_id: Some(fixture.camp_id.clone()),
                         expected_versions: Vec::new(),
                         execution_epoch: None,
-                        payload: SendCampMessageCommand {
+                        payload: TestCampMessageCommand {
                             camp_id: fixture.camp_id.clone(),
                             draft_revision: None,
                             body: format!("oversized {index}: {}", "x".repeat(32_000)),
                             prepared_attachment_ids: Vec::new(),
-                            address: MessageAddressSpec::Default,
+                            address: TestCampMessageAddress::Default,
                             reply_to_camp_message_id: None,
                             execution: None,
                         },

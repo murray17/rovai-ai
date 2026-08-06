@@ -198,12 +198,6 @@ impl FromStr for InstallationClass {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProductRuntimeSelection {
-    pub adapter_kind: AdapterKind,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum ModelSelection {
@@ -226,7 +220,8 @@ pub struct AdapterPermissionConfig {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AgentRuntimePreference {
+pub(crate) struct ResolvedRuntimeBinding {
+    pub adapter_kind: AdapterKind,
     pub installation_id: String,
     pub model: ModelSelection,
     pub permissions: AdapterPermissionConfig,
@@ -234,7 +229,7 @@ pub struct AgentRuntimePreference {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct MemberRuntimeConfigurationDefaults {
+pub struct MemberRuntimeConfiguration {
     pub adapter_kind: AdapterKind,
     pub model: ModelSelection,
     pub permissions: AdapterPermissionConfig,
@@ -365,7 +360,7 @@ pub struct AdapterInstallationView {
     pub version: i64,
     pub referenced_profile_count: i64,
     pub snapshot: Option<AdapterCapabilitySnapshot>,
-    pub member_runtime_defaults: Option<MemberRuntimeConfigurationDefaults>,
+    pub member_runtime_defaults: Option<MemberRuntimeConfiguration>,
     pub last_probe_attempt: Option<AdapterProbeAttempt>,
     pub relocation_history: Vec<AdapterRelocationAudit>,
     pub created_at: String,
@@ -416,8 +411,6 @@ pub struct MemberCampMembershipView {
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeReadinessStatus {
     RuntimeNotConfigured,
-    SelectedUnresolved,
-    ConfigurationIncomplete,
     NeedsAttention,
     Ready,
 }
@@ -450,8 +443,7 @@ pub struct AgentProfileView {
     pub growth_topic: String,
     pub default_capabilities: Vec<String>,
     pub presence: String,
-    pub runtime_selection: Option<ProductRuntimeSelection>,
-    pub runtime_preference: Option<AgentRuntimePreference>,
+    pub runtime_configuration: Option<MemberRuntimeConfiguration>,
     pub runtime_readiness: RuntimeReadiness,
     pub member_order: i64,
     pub version: i64,
@@ -512,30 +504,28 @@ impl DomainCommand for SetAgentProfileAvatarCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SetAgentProfileRuntimeCommand {
+pub struct SetMemberRuntimeConfigurationCommand {
     pub agent_id: String,
     pub expected_version: i64,
     pub adapter_kind: AdapterKind,
-    #[serde(default)]
-    pub model: Option<ModelSelection>,
-    #[serde(default)]
-    pub permissions: Option<AdapterPermissionConfig>,
+    pub model: ModelSelection,
+    pub permissions: AdapterPermissionConfig,
 }
 
-impl sealed::Sealed for SetAgentProfileRuntimeCommand {}
-impl DomainCommand for SetAgentProfileRuntimeCommand {
+impl sealed::Sealed for SetMemberRuntimeConfigurationCommand {}
+impl DomainCommand for SetMemberRuntimeConfigurationCommand {
     const TYPE: &'static str = "agent_profile.runtime.set";
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ClearAgentProfileRuntimeCommand {
+pub struct ClearMemberRuntimeConfigurationCommand {
     pub agent_id: String,
     pub expected_version: i64,
 }
 
-impl sealed::Sealed for ClearAgentProfileRuntimeCommand {}
-impl DomainCommand for ClearAgentProfileRuntimeCommand {
+impl sealed::Sealed for ClearMemberRuntimeConfigurationCommand {}
+impl DomainCommand for ClearMemberRuntimeConfigurationCommand {
     const TYPE: &'static str = "agent_profile.runtime.clear";
 }
 
@@ -1563,7 +1553,7 @@ impl AgentProfileService {
     pub fn set_runtime(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<SetAgentProfileRuntimeCommand>,
+        envelope: &CommandEnvelope<SetMemberRuntimeConfigurationCommand>,
     ) -> Result<CommandExecution> {
         self.gateway.execute(database, envelope, |transaction| {
             let Some((version, presence)) =
@@ -1583,76 +1573,37 @@ impl AgentProfileService {
                     json!({ "agentId": envelope.payload.agent_id }),
                 ));
             }
-            let ready = ready_managed_runtime_snapshot(transaction, envelope.payload.adapter_kind)?;
-            let submitted_configuration = match (
-                envelope.payload.model.as_ref(),
-                envelope.payload.permissions.as_ref(),
-            ) {
-                (Some(model), Some(permissions)) => Some((model.clone(), permissions.clone())),
-                (None, None) => None,
-                _ => {
-                    return Ok(CommandHandlerResult::rejected(
-                        "runtime_configuration_incomplete",
-                        json!({ "adapterKind": envelope.payload.adapter_kind }),
-                    ));
-                }
+            let Some(ready) =
+                ready_managed_runtime_snapshot(transaction, envelope.payload.adapter_kind)?
+            else {
+                return Ok(CommandHandlerResult::rejected(
+                    "runtime_configuration_unavailable",
+                    json!({ "adapterKind": envelope.payload.adapter_kind }),
+                ));
             };
-            let configuration = match (ready.as_ref(), submitted_configuration) {
-                (None, None) => None,
-                (None, Some(_)) => {
-                    return Ok(CommandHandlerResult::rejected(
-                        "runtime_configuration_unavailable",
-                        json!({ "adapterKind": envelope.payload.adapter_kind }),
-                    ));
-                }
-                (Some(_), Some(configuration)) => Some(configuration),
-                (Some(ready), None) => Some((
-                    ModelSelection::RuntimeDefault,
-                    AdapterPermissionConfig {
-                        adapter_kind: envelope.payload.adapter_kind,
-                        schema_version: ready.permission_schema_version,
-                        values: AgentRuntimeAdapterRegistry::default()
-                            .member_permission_defaults(envelope.payload.adapter_kind),
-                    },
-                )),
+            if envelope.payload.permissions.adapter_kind != envelope.payload.adapter_kind {
+                return Ok(CommandHandlerResult::rejected(
+                    "runtime_permission_adapter_mismatch",
+                    json!({
+                        "adapterKind": envelope.payload.adapter_kind,
+                        "permissionAdapterKind": envelope.payload.permissions.adapter_kind,
+                    }),
+                ));
+            }
+            let binding = ResolvedRuntimeBinding {
+                adapter_kind: envelope.payload.adapter_kind,
+                installation_id: ready.installation_id.clone(),
+                model: envelope.payload.model.clone(),
+                permissions: envelope.payload.permissions.clone(),
             };
-            let (installation_id, model_json, permissions_json, result_code) = if let (
-                Some(ready),
-                Some((model, permissions)),
-            ) =
-                (ready.as_ref(), configuration)
-            {
-                if permissions.adapter_kind != envelope.payload.adapter_kind {
-                    return Ok(CommandHandlerResult::rejected(
-                        "runtime_permission_adapter_mismatch",
-                        json!({
-                            "adapterKind": envelope.payload.adapter_kind,
-                            "permissionAdapterKind": permissions.adapter_kind,
-                        }),
-                    ));
-                }
-                let preference = AgentRuntimePreference {
-                    installation_id: ready.installation_id.clone(),
-                    model,
-                    permissions,
-                };
-                if let Some(issue) = runtime_preference_issue(
-                    &ready.models_json,
-                    ready.permission_schema_version,
-                    &ready.permissions_json,
-                    &preference,
-                )? {
-                    return Ok(CommandHandlerResult::rejected(issue.code, issue.payload));
-                }
-                (
-                    Some(ready.installation_id.clone()),
-                    Some(serde_json::to_string(&preference.model)?),
-                    Some(serde_json::to_string(&preference.permissions)?),
-                    "agent_profile.runtime_configured",
-                )
-            } else {
-                (None, None, None, "agent_profile.product_runtime_selected")
-            };
+            if let Some(issue) = runtime_configuration_issue(
+                &ready.models_json,
+                ready.permission_schema_version,
+                &ready.permissions_json,
+                &binding,
+            )? {
+                return Ok(CommandHandlerResult::rejected(issue.code, issue.payload));
+            }
             let now = chrono::Utc::now().to_rfc3339();
             transaction.execute(
                 r#"
@@ -1667,9 +1618,9 @@ impl AgentProfileService {
                 params![
                     envelope.payload.agent_id,
                     envelope.payload.adapter_kind.as_str(),
-                    installation_id,
-                    model_json,
-                    permissions_json,
+                    ready.installation_id,
+                    serde_json::to_string(&binding.model)?,
+                    serde_json::to_string(&binding.permissions)?,
                     now,
                     envelope.payload.expected_version,
                 ],
@@ -1677,7 +1628,7 @@ impl AgentProfileService {
             Ok(profile_updated_result(
                 &envelope.payload.agent_id,
                 version + 1,
-                result_code,
+                "agent_profile.runtime_configured",
             ))
         })
     }
@@ -1685,7 +1636,7 @@ impl AgentProfileService {
     pub fn clear_runtime(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<ClearAgentProfileRuntimeCommand>,
+        envelope: &CommandEnvelope<ClearMemberRuntimeConfigurationCommand>,
     ) -> Result<CommandExecution> {
         self.gateway.execute(database, envelope, |transaction| {
             let Some((version, presence)) =
@@ -2296,20 +2247,16 @@ impl AgentProfileService {
             .context("invalid AgentProfile default capabilities")?;
         let personality_traits = serde_json::from_str(&raw.personality_traits_json)
             .context("invalid AgentProfile personality traits")?;
-        let runtime_selection = raw
-            .selected_runtime_adapter_kind
-            .as_deref()
-            .map(AdapterKind::from_str)
-            .transpose()?
-            .map(|adapter_kind| ProductRuntimeSelection { adapter_kind });
-        let runtime_preference = match (
+        let resolved_runtime_binding = match (
+            raw.selected_runtime_adapter_kind,
             raw.installation_id,
             raw.model_selection_json,
             raw.permission_config_json,
         ) {
-            (None, None, None) => None,
-            (Some(installation_id), Some(model), Some(permissions)) => {
-                Some(AgentRuntimePreference {
+            (None, None, None, None) => None,
+            (Some(adapter_kind), Some(installation_id), Some(model), Some(permissions)) => {
+                Some(ResolvedRuntimeBinding {
+                    adapter_kind: AdapterKind::from_str(&adapter_kind)?,
                     installation_id,
                     model: serde_json::from_str(&model)
                         .context("invalid AgentProfile model selection")?,
@@ -2317,14 +2264,17 @@ impl AgentProfileService {
                         .context("invalid AgentProfile permission configuration")?,
                 })
             }
-            _ => None,
+            _ => anyhow::bail!("AgentProfile Runtime configuration must be complete or absent"),
         };
-        let runtime_readiness = runtime_readiness(
-            database,
-            runtime_selection.as_ref(),
-            runtime_preference.as_ref(),
-            raw.has_partial_runtime_configuration,
-        )?;
+        let runtime_readiness = runtime_readiness(database, resolved_runtime_binding.as_ref())?;
+        let runtime_configuration =
+            resolved_runtime_binding
+                .as_ref()
+                .map(|binding| MemberRuntimeConfiguration {
+                    adapter_kind: binding.adapter_kind,
+                    model: binding.model.clone(),
+                    permissions: binding.permissions.clone(),
+                });
         Ok(AgentProfileView {
             agent_id: raw.id,
             display_name: raw.display_name,
@@ -2337,8 +2287,7 @@ impl AgentProfileService {
             growth_topic: raw.growth_topic,
             default_capabilities,
             presence: raw.presence,
-            runtime_selection,
-            runtime_preference,
+            runtime_configuration,
             runtime_readiness,
             member_order: raw.member_order,
             version: raw.version,
@@ -2366,7 +2315,6 @@ struct RawAgentProfile {
     installation_id: Option<String>,
     model_selection_json: Option<String>,
     permission_config_json: Option<String>,
-    has_partial_runtime_configuration: bool,
     member_order: i64,
     version: i64,
     created_at: String,
@@ -2379,14 +2327,6 @@ fn raw_agent_profile_from_row(row: &Row<'_>) -> rusqlite::Result<RawAgentProfile
     let installation_id = row.get::<_, Option<String>>(12)?;
     let model_selection_json = row.get::<_, Option<String>>(13)?;
     let permission_config_json = row.get::<_, Option<String>>(14)?;
-    let configured_count = [
-        installation_id.is_some(),
-        model_selection_json.is_some(),
-        permission_config_json.is_some(),
-    ]
-    .into_iter()
-    .filter(|configured| *configured)
-    .count();
     Ok(RawAgentProfile {
         id: row.get(0)?,
         display_name: row.get(1)?,
@@ -2403,7 +2343,6 @@ fn raw_agent_profile_from_row(row: &Row<'_>) -> rusqlite::Result<RawAgentProfile
         installation_id,
         model_selection_json,
         permission_config_json,
-        has_partial_runtime_configuration: configured_count != 0 && configured_count != 3,
         member_order: row.get(19)?,
         version: row.get(15)?,
         created_at: row.get(16)?,
@@ -2776,46 +2715,52 @@ pub fn resolve_frozen_runtime(
             json!({ "conversationId": conversation_id }),
         )));
     }
-    let Some(selected_runtime_adapter_kind) = selected_runtime_adapter_kind else {
-        return Ok(Err(runtime_blocker(
-            "runtime_not_configured",
-            json!({ "agentId": agent_id }),
-        )));
+    let (selected_runtime_adapter_kind, installation_id, model_json, permissions_json) = match (
+        selected_runtime_adapter_kind,
+        installation_id,
+        model_json,
+        permissions_json,
+    ) {
+        (None, None, None, None) => {
+            return Ok(Err(runtime_blocker(
+                "runtime_not_configured",
+                json!({ "agentId": agent_id }),
+            )));
+        }
+        (Some(adapter_kind), Some(installation_id), Some(model), Some(permissions)) => {
+            (adapter_kind, installation_id, model, permissions)
+        }
+        _ => {
+            return Ok(Err(runtime_blocker(
+                "runtime_configuration_invalid",
+                json!({ "agentId": agent_id }),
+            )));
+        }
     };
-    let (Some(installation_id), Some(model_json), Some(permissions_json)) =
-        (installation_id, model_json, permissions_json)
-    else {
-        return Ok(Err(runtime_blocker(
-            "runtime_selection_unresolved",
-            json!({
-                "agentId": agent_id,
-                "adapterKind": selected_runtime_adapter_kind,
-            }),
-        )));
-    };
-    let preference = AgentRuntimePreference {
+    let binding = ResolvedRuntimeBinding {
+        adapter_kind: AdapterKind::from_str(&selected_runtime_adapter_kind)?,
         installation_id: installation_id.clone(),
         model: serde_json::from_str(&model_json).context("invalid saved model selection")?,
         permissions: serde_json::from_str(&permissions_json)
             .context("invalid saved permission configuration")?,
     };
-    if preference.permissions.adapter_kind.as_str() != selected_runtime_adapter_kind {
+    if binding.permissions.adapter_kind != binding.adapter_kind {
         return Ok(Err(runtime_blocker(
-            "runtime_selection_resolution_mismatch",
+            "runtime_configuration_adapter_mismatch",
             json!({
                 "agentId": agent_id,
                 "adapterKind": selected_runtime_adapter_kind,
             }),
         )));
     }
-    resolve_frozen_runtime_preference(transaction, &preference)
+    resolve_frozen_runtime_binding(transaction, &binding)
 }
 
-pub(crate) fn resolve_frozen_runtime_preference(
+pub(crate) fn resolve_frozen_runtime_binding(
     transaction: &Transaction<'_>,
-    preference: &AgentRuntimePreference,
+    binding: &ResolvedRuntimeBinding,
 ) -> Result<std::result::Result<FrozenAgentRuntimeConfig, RuntimeConfigurationBlocker>> {
-    let installation_id = preference.installation_id.clone();
+    let installation_id = binding.installation_id.clone();
     let installation = transaction
         .query_row(
             r#"
@@ -2931,17 +2876,17 @@ pub(crate) fn resolve_frozen_runtime_preference(
             json!({ "installationId": installation_id }),
         )));
     };
-    if let Some(issue) = runtime_preference_issue(
+    if let Some(issue) = runtime_configuration_issue(
         &models_json,
         permission_schema_version,
         &permission_options_json,
-        preference,
+        binding,
     )? {
         return Ok(Err(runtime_blocker(issue.code, issue.payload)));
     }
 
     let adapter_kind = AdapterKind::from_str(&adapter_kind)?;
-    if adapter_kind != preference.permissions.adapter_kind {
+    if adapter_kind != binding.adapter_kind || adapter_kind != binding.permissions.adapter_kind {
         return Ok(Err(runtime_blocker(
             "runtime_permission_adapter_mismatch",
             json!({ "installationId": installation_id }),
@@ -2949,7 +2894,7 @@ pub(crate) fn resolve_frozen_runtime_preference(
     }
     let models: Vec<ModelDescriptor> =
         serde_json::from_str(&models_json).context("invalid Adapter model catalog")?;
-    let model = match resolve_model_selection(&models, &preference.model)? {
+    let model = match resolve_model_selection(&models, &binding.model)? {
         Ok(model) => model,
         Err(blocker) => return Ok(Err(blocker)),
     };
@@ -2971,7 +2916,7 @@ pub(crate) fn resolve_frozen_runtime_preference(
             executable_fingerprint: &executable_fingerprint,
             protocols: &protocols,
             native_session_compatibility_key: native_session_compatibility_key.as_deref(),
-            permissions: &preference.permissions,
+            permissions: &binding.permissions,
             permission_descriptors: &permission_descriptors,
         },
     ) {
@@ -2998,7 +2943,7 @@ pub(crate) fn resolve_frozen_runtime_preference(
         capabilities,
         protocol_version: projection.protocol_version,
         model,
-        permissions: preference.permissions.clone(),
+        permissions: binding.permissions.clone(),
         native_session_compatibility_key,
         binding_compatibility_digest: projection.binding_compatibility_digest,
         host_config_digest: projection.host_config_digest,
@@ -3197,33 +3142,13 @@ pub(crate) fn configure_test_runtime(database: &Database, agent_ids: &[&str]) {
 
 fn runtime_readiness(
     database: &Database,
-    selection: Option<&ProductRuntimeSelection>,
-    preference: Option<&AgentRuntimePreference>,
-    partial: bool,
+    binding: Option<&ResolvedRuntimeBinding>,
 ) -> Result<RuntimeReadiness> {
-    if selection.is_none() {
+    let Some(binding) = binding else {
         return Ok(RuntimeReadiness {
             status: RuntimeReadinessStatus::RuntimeNotConfigured,
             blockers: vec![RuntimeReadinessBlocker {
                 code: "runtime_not_configured".to_string(),
-                detail: None,
-            }],
-        });
-    }
-    if partial {
-        return Ok(RuntimeReadiness {
-            status: RuntimeReadinessStatus::ConfigurationIncomplete,
-            blockers: vec![RuntimeReadinessBlocker {
-                code: "runtime_configuration_incomplete".to_string(),
-                detail: None,
-            }],
-        });
-    }
-    let Some(preference) = preference else {
-        return Ok(RuntimeReadiness {
-            status: RuntimeReadinessStatus::SelectedUnresolved,
-            blockers: vec![RuntimeReadinessBlocker {
-                code: "runtime_selection_unresolved".to_string(),
                 detail: None,
             }],
         });
@@ -3242,7 +3167,7 @@ fn runtime_readiness(
               ON snapshot.installation_id = installation.id
             WHERE installation.id = ?1
             "#,
-            [&preference.installation_id],
+            [&binding.installation_id],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -3276,13 +3201,13 @@ fn runtime_readiness(
         return Ok(needs_attention("adapter_installation_disabled", None));
     }
     let adapter_kind = AdapterKind::from_str(&adapter_kind)?;
-    if selection.is_some_and(|selection| selection.adapter_kind != adapter_kind) {
+    if binding.adapter_kind != adapter_kind {
         return Ok(needs_attention(
-            "runtime_selection_resolution_mismatch",
+            "runtime_configuration_adapter_mismatch",
             None,
         ));
     }
-    if preference.permissions.adapter_kind != adapter_kind {
+    if binding.permissions.adapter_kind != adapter_kind {
         return Ok(needs_attention("runtime_permission_adapter_mismatch", None));
     }
     if stale_at.is_some() {
@@ -3312,11 +3237,11 @@ fn runtime_readiness(
     let Some(permission_options_json) = permission_options_json else {
         return Ok(needs_attention("runtime_probe_required", None));
     };
-    if let Some(issue) = runtime_preference_issue(
+    if let Some(issue) = runtime_configuration_issue(
         &model_catalog_json,
         permission_schema_version,
         &permission_options_json,
-        preference,
+        binding,
     )? {
         return Ok(needs_attention(issue.code, Some(issue.payload.to_string())));
     }
@@ -3512,28 +3437,28 @@ fn validate_command_name(command_name: &str) -> Result<()> {
     Ok(())
 }
 
-struct RuntimePreferenceIssue {
+struct RuntimeConfigurationIssue {
     code: &'static str,
     payload: Value,
 }
 
-fn runtime_preference_issue(
+fn runtime_configuration_issue(
     models_json: &str,
     permission_schema_version: i64,
     permissions_json: &str,
-    preference: &AgentRuntimePreference,
-) -> Result<Option<RuntimePreferenceIssue>> {
-    let issue = |code, payload| Some(RuntimePreferenceIssue { code, payload });
+    configuration: &ResolvedRuntimeBinding,
+) -> Result<Option<RuntimeConfigurationIssue>> {
+    let issue = |code, payload| Some(RuntimeConfigurationIssue { code, payload });
     let models: Vec<ModelDescriptor> =
         serde_json::from_str(models_json).context("invalid Adapter model catalog")?;
-    if matches!(preference.model, ModelSelection::RuntimeDefault)
+    if matches!(configuration.model, ModelSelection::RuntimeDefault)
         && !models
             .iter()
             .any(|model| model.is_default && !model.hidden && !model.deprecated)
     {
         return Ok(issue("runtime_default_model_unavailable", json!({})));
     }
-    if let ModelSelection::Explicit { model_id, options } = &preference.model {
+    if let ModelSelection::Explicit { model_id, options } = &configuration.model {
         if model_id.trim().is_empty() {
             return Ok(issue(
                 "runtime_model_unavailable",
@@ -3582,11 +3507,11 @@ fn runtime_preference_issue(
         }
     }
 
-    if preference.permissions.schema_version != permission_schema_version {
+    if configuration.permissions.schema_version != permission_schema_version {
         return Ok(issue(
             "runtime_permission_schema_mismatch",
             json!({
-                "configuredSchemaVersion": preference.permissions.schema_version,
+                "configuredSchemaVersion": configuration.permissions.schema_version,
                 "currentSchemaVersion": permission_schema_version,
             }),
         ));
@@ -3597,7 +3522,7 @@ fn runtime_preference_issue(
         .iter()
         .map(|descriptor| (descriptor.key.as_str(), descriptor))
         .collect::<BTreeMap<_, _>>();
-    let Some(values) = preference.permissions.values.as_object() else {
+    let Some(values) = configuration.permissions.values.as_object() else {
         return Ok(issue("runtime_permission_values_invalid", json!({})));
     };
     for (key, value) in values {
@@ -3637,7 +3562,7 @@ fn runtime_preference_issue(
 fn member_runtime_defaults_for_snapshot(
     adapter_kind: AdapterKind,
     snapshot: &AdapterCapabilitySnapshot,
-) -> Result<Option<MemberRuntimeConfigurationDefaults>> {
+) -> Result<Option<MemberRuntimeConfiguration>> {
     if snapshot.probe_status != "ready"
         || snapshot.authentication_status != "authenticated"
         || snapshot.stale_at.is_some()
@@ -3650,24 +3575,25 @@ fn member_runtime_defaults_for_snapshot(
         schema_version: snapshot.permission_schema_version,
         values: AgentRuntimeAdapterRegistry::default().member_permission_defaults(adapter_kind),
     };
-    let preference = AgentRuntimePreference {
+    let configuration = ResolvedRuntimeBinding {
+        adapter_kind,
         installation_id: String::new(),
         model: model.clone(),
         permissions: permissions.clone(),
     };
     let models_json = serde_json::to_string(&snapshot.models)?;
     let permissions_json = serde_json::to_string(&snapshot.permission_options)?;
-    if runtime_preference_issue(
+    if runtime_configuration_issue(
         &models_json,
         snapshot.permission_schema_version,
         &permissions_json,
-        &preference,
+        &configuration,
     )?
     .is_some()
     {
         return Ok(None);
     }
-    Ok(Some(MemberRuntimeConfigurationDefaults {
+    Ok(Some(MemberRuntimeConfiguration {
         adapter_kind,
         model,
         permissions,
@@ -4115,7 +4041,7 @@ mod tests {
         assert!(
             profiles
                 .iter()
-                .all(|profile| profile.runtime_preference.is_none())
+                .all(|profile| profile.runtime_configuration.is_none())
         );
         assert!(profiles.iter().all(|profile| {
             profile.runtime_readiness.status == RuntimeReadinessStatus::RuntimeNotConfigured
@@ -4338,12 +4264,19 @@ mod tests {
                 &mut database,
                 &user_command(
                     "set-runtime",
-                    SetAgentProfileRuntimeCommand {
+                    SetMemberRuntimeConfigurationCommand {
                         agent_id: profile_id.clone(),
                         expected_version: profile.version,
                         adapter_kind: AdapterKind::CodexCli,
-                        model: None,
-                        permissions: None,
+                        model: ModelSelection::RuntimeDefault,
+                        permissions: AdapterPermissionConfig {
+                            adapter_kind: AdapterKind::CodexCli,
+                            schema_version: 1,
+                            values: json!({
+                                "sandbox_mode": "danger-full-access",
+                                "approval_policy": "never",
+                            }),
+                        },
                     },
                 ),
             )
@@ -4352,14 +4285,14 @@ mod tests {
             .get_profile(&database, &profile_id)
             .expect("profile should load")
             .expect("profile should exist");
-        assert!(configured.runtime_preference.is_some());
+        assert!(configured.runtime_configuration.is_some());
         assert_eq!(
             configured.runtime_readiness.status,
             RuntimeReadinessStatus::Ready
         );
         assert_eq!(
             configured
-                .runtime_preference
+                .runtime_configuration
                 .as_ref()
                 .expect("configured Runtime")
                 .permissions
@@ -4391,16 +4324,22 @@ mod tests {
             RuntimeReadinessStatus::Ready,
             "profile reads must not synchronously hash executable contents"
         );
-        let runtime_preference = advisory
-            .runtime_preference
+        let runtime_configuration = advisory
+            .runtime_configuration
             .as_ref()
             .expect("configured profile should retain its Runtime")
             .clone();
+        let runtime_binding = ResolvedRuntimeBinding {
+            adapter_kind: runtime_configuration.adapter_kind,
+            installation_id: managed_installation_id.clone(),
+            model: runtime_configuration.model.clone(),
+            permissions: runtime_configuration.permissions.clone(),
+        };
         let transaction = database
             .connection_mut()
             .transaction()
             .expect("execution admission transaction");
-        let frozen = resolve_frozen_runtime_preference(&transaction, &runtime_preference)
+        let frozen = resolve_frozen_runtime_binding(&transaction, &runtime_binding)
             .expect("runtime resolution should be deterministic")
             .expect("message admission should use the last verified Runtime snapshot");
         assert_eq!(frozen.executable_fingerprint, executable_fingerprint);
@@ -4408,7 +4347,7 @@ mod tests {
         let verified_identity = service
             .verified_executable_identity(
                 &database,
-                &runtime_preference.installation_id,
+                &managed_installation_id,
                 &executable_path.to_string_lossy(),
                 &executable_fingerprint,
             )
@@ -4421,7 +4360,7 @@ mod tests {
             service
                 .mark_runtime_integrity_changed(
                     &mut database,
-                    &runtime_preference.installation_id,
+                    &managed_installation_id,
                     &executable_path.to_string_lossy(),
                     &executable_fingerprint,
                 )
@@ -4439,7 +4378,7 @@ mod tests {
             .connection_mut()
             .transaction()
             .expect("stale Runtime admission transaction");
-        let stale_frozen = resolve_frozen_runtime_preference(&transaction, &runtime_preference)
+        let stale_frozen = resolve_frozen_runtime_binding(&transaction, &runtime_binding)
             .expect("stale Runtime resolution should remain deterministic")
             .expect("message admission should retain the last verified Runtime snapshot");
         drop(transaction);
@@ -4459,12 +4398,7 @@ mod tests {
                 &user_command(
                     "record-changed-schema",
                     RecordAdapterCapabilitySnapshotCommand {
-                        installation_id: configured
-                            .runtime_preference
-                            .as_ref()
-                            .expect("runtime preference")
-                            .installation_id
-                            .clone(),
+                        installation_id: managed_installation_id.clone(),
                         expected_installation_version: 1,
                         snapshot: changed_schema,
                     },
@@ -4482,8 +4416,8 @@ mod tests {
         );
         assert_eq!(
             refreshed
-                .runtime_preference
-                .expect("refreshed runtime preference")
+                .runtime_configuration
+                .expect("refreshed Runtime configuration")
                 .permissions
                 .schema_version,
             1
@@ -4644,7 +4578,7 @@ mod tests {
     }
 
     #[test]
-    fn product_selection_persists_without_falling_back_to_a_custom_installation() {
+    fn runtime_configuration_never_falls_back_to_a_custom_installation() {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
         let installation = service
@@ -4672,32 +4606,29 @@ mod tests {
                 &mut database,
                 &user_command(
                     "set-mismatched-runtime",
-                    SetAgentProfileRuntimeCommand {
+                    SetMemberRuntimeConfigurationCommand {
                         agent_id: profile.agent_id,
                         expected_version: profile.version,
                         adapter_kind: AdapterKind::CopilotCli,
-                        model: None,
-                        permissions: None,
+                        model: ModelSelection::RuntimeDefault,
+                        permissions: AdapterPermissionConfig {
+                            adapter_kind: AdapterKind::CopilotCli,
+                            schema_version: 1,
+                            values: json!({}),
+                        },
                     },
                 ),
             )
-            .expect("unresolved Product Runtime selection should persist");
-        assert_eq!(result.result.code, "agent_profile.product_runtime_selected");
+            .expect("unavailable Runtime configuration should be rejected");
+        assert_eq!(result.result.code, "runtime_configuration_unavailable");
         let selected = service
             .get_profile(&database, "agent_2")
             .expect("profile should load")
             .expect("profile should exist");
-        assert_eq!(
-            selected
-                .runtime_selection
-                .as_ref()
-                .map(|selection| selection.adapter_kind),
-            Some(AdapterKind::CopilotCli)
-        );
-        assert!(selected.runtime_preference.is_none());
+        assert!(selected.runtime_configuration.is_none());
         assert_eq!(
             selected.runtime_readiness.status,
-            RuntimeReadinessStatus::SelectedUnresolved
+            RuntimeReadinessStatus::RuntimeNotConfigured
         );
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
@@ -4726,22 +4657,22 @@ mod tests {
                 &mut database,
                 &user_command(
                     "explicit-runtime-config",
-                    SetAgentProfileRuntimeCommand {
+                    SetMemberRuntimeConfigurationCommand {
                         agent_id: profile.agent_id.clone(),
                         expected_version: profile.version,
                         adapter_kind: AdapterKind::CodexCli,
-                        model: Some(ModelSelection::Explicit {
+                        model: ModelSelection::Explicit {
                             model_id: "gpt-test".to_string(),
                             options: json!({}),
-                        }),
-                        permissions: Some(AdapterPermissionConfig {
+                        },
+                        permissions: AdapterPermissionConfig {
                             adapter_kind: AdapterKind::CodexCli,
                             schema_version: 1,
                             values: json!({
                                 "sandbox_mode": "workspace-write",
                                 "approval_policy": "on-request",
                             }),
-                        }),
+                        },
                     },
                 ),
             )
@@ -4751,16 +4682,16 @@ mod tests {
             .get_profile(&database, &profile.agent_id)
             .unwrap()
             .unwrap();
-        let preference = configured.runtime_preference.as_ref().unwrap();
+        let configuration = configured.runtime_configuration.as_ref().unwrap();
         assert_eq!(
-            preference.model,
+            configuration.model,
             ModelSelection::Explicit {
                 model_id: "gpt-test".to_string(),
                 options: json!({}),
             }
         );
         assert_eq!(
-            preference.permissions.values,
+            configuration.permissions.values,
             json!({
                 "sandbox_mode": "workspace-write",
                 "approval_policy": "on-request",
@@ -4772,19 +4703,19 @@ mod tests {
                 &mut database,
                 &user_command(
                     "invalid-runtime-config",
-                    SetAgentProfileRuntimeCommand {
+                    SetMemberRuntimeConfigurationCommand {
                         agent_id: profile.agent_id.clone(),
                         expected_version: configured.version,
                         adapter_kind: AdapterKind::CodexCli,
-                        model: Some(ModelSelection::RuntimeDefault),
-                        permissions: Some(AdapterPermissionConfig {
+                        model: ModelSelection::RuntimeDefault,
+                        permissions: AdapterPermissionConfig {
                             adapter_kind: AdapterKind::CodexCli,
                             schema_version: 1,
                             values: json!({
                                 "sandbox_mode": "not-a-native-value",
                                 "approval_policy": "never",
                             }),
-                        }),
+                        },
                     },
                 ),
             )
@@ -4795,14 +4726,17 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(unchanged.version, configured.version);
-        assert_eq!(unchanged.runtime_preference, configured.runtime_preference);
+        assert_eq!(
+            unchanged.runtime_configuration,
+            configured.runtime_configuration
+        );
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
-    fn background_runtime_resolution_never_materializes_member_parameters() {
+    fn background_runtime_discovery_never_materializes_member_configuration() {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
         let profile = service.get_profile(&database, "agent_2").unwrap().unwrap();
@@ -4811,20 +4745,21 @@ mod tests {
                 &mut database,
                 &user_command(
                     "select-unresolved-codex",
-                    SetAgentProfileRuntimeCommand {
+                    SetMemberRuntimeConfigurationCommand {
                         agent_id: profile.agent_id.clone(),
                         expected_version: profile.version,
                         adapter_kind: AdapterKind::CodexCli,
-                        model: None,
-                        permissions: None,
+                        model: ModelSelection::RuntimeDefault,
+                        permissions: AdapterPermissionConfig {
+                            adapter_kind: AdapterKind::CodexCli,
+                            schema_version: 1,
+                            values: json!({}),
+                        },
                     },
                 ),
             )
             .unwrap();
-        assert_eq!(
-            selected.result.code,
-            "agent_profile.product_runtime_selected"
-        );
+        assert_eq!(selected.result.code, "runtime_configuration_unavailable");
 
         service
             .commit_verified_managed_installation(
@@ -4843,10 +4778,10 @@ mod tests {
             .get_profile(&database, &profile.agent_id)
             .unwrap()
             .unwrap();
-        assert!(still_unresolved.runtime_preference.is_none());
+        assert!(still_unresolved.runtime_configuration.is_none());
         assert_eq!(
             still_unresolved.runtime_readiness.status,
-            RuntimeReadinessStatus::SelectedUnresolved
+            RuntimeReadinessStatus::RuntimeNotConfigured
         );
 
         drop(database);
@@ -4968,12 +4903,19 @@ mod tests {
                 &mut database,
                 &user_command(
                     "select-managed-codex",
-                    SetAgentProfileRuntimeCommand {
+                    SetMemberRuntimeConfigurationCommand {
                         agent_id: profile.agent_id,
                         expected_version: profile.version,
                         adapter_kind: AdapterKind::CodexCli,
-                        model: None,
-                        permissions: None,
+                        model: ModelSelection::RuntimeDefault,
+                        permissions: AdapterPermissionConfig {
+                            adapter_kind: AdapterKind::CodexCli,
+                            schema_version: 1,
+                            values: json!({
+                                "sandbox_mode": "danger-full-access",
+                                "approval_policy": "never",
+                            }),
+                        },
                     },
                 ),
             )
@@ -5051,11 +4993,12 @@ mod tests {
         let resolved_profile = service.get_profile(&database, "agent_2").unwrap().unwrap();
         assert_eq!(
             resolved_profile
-                .runtime_preference
+                .runtime_configuration
                 .as_ref()
-                .map(|preference| preference.installation_id.as_str()),
-            Some(installation_id.as_str())
+                .map(|configuration| configuration.adapter_kind),
+            Some(AdapterKind::CodexCli)
         );
+        assert_eq!(relocated.id, installation_id);
         assert_eq!(
             resolved_profile.runtime_readiness.status,
             RuntimeReadinessStatus::Ready

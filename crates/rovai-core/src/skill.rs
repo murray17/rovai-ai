@@ -412,9 +412,12 @@ impl SkillLibraryService {
                     .iter()
                     .filter(|profile| profile.presence != "removed")
                     .filter(|profile| {
-                        profile.runtime_selection.as_ref().is_some_and(|selection| {
-                            matching_adapters.contains(&selection.adapter_kind)
-                        })
+                        profile
+                            .runtime_configuration
+                            .as_ref()
+                            .is_some_and(|configuration| {
+                                matching_adapters.contains(&configuration.adapter_kind)
+                            })
                     })
                     .map(|profile| SkillDeliveryGroupMemberView {
                         agent_id: profile.agent_id.clone(),

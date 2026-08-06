@@ -179,7 +179,7 @@ export function NotificationCenter({
           'notifications.createdSince',
           { afterSequence: creationCursor.current, limit: 100 }
         )
-        if (batch.schemaVersion !== 1) throw new Error('通知增量合同不兼容。')
+        if (batch.schemaVersion !== 2) throw new Error('通知增量合同不兼容。')
         if (batch.resetRequired) {
           creationCursor.current = batch.throughSequence
           break

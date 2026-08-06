@@ -129,9 +129,8 @@ describe('member runtime parameters', () => {
       growthTopic: '',
       defaultCapabilities: [],
       presence: 'present' as const,
-      runtimeSelection: { adapterKind: 'codex-cli' as const },
-      runtimePreference: {
-        installationId: codex.id,
+      runtimeConfiguration: {
+        adapterKind: 'codex-cli' as const,
         model: { mode: 'runtime_default' as const },
         permissions: {
           adapterKind: 'codex-cli' as const,
@@ -150,7 +149,7 @@ describe('member runtime parameters', () => {
       removedAt: null
     }
 
-    expect(runtimeEditorInstallation([codex], 'codex-cli', codex.id)?.id).toBe(codex.id)
+    expect(runtimeEditorInstallation([codex], 'codex-cli')?.id).toBe(codex.id)
     expect(runtimeDraftForMember(agent, 'codex-cli', codex, true)?.permissions.values).toEqual({
       sandbox_mode: 'workspace-write',
       approval_policy: 'on-request'

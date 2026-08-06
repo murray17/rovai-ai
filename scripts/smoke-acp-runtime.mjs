@@ -97,7 +97,7 @@ try {
       throw new Error(`Capability snapshot is not ready: ${JSON.stringify(installation)}`)
     }
 
-    const profile = await request('agents.get', { agentId })
+    const profile = await request('members.get', { agentId })
     const body = `Do not call tools or inspect files. Reply with exactly ${specification.token} and nothing else.`
     const purpose = `Verify the ${specification.adapterKind} ACP execution path without tools`
     const expectedOutput = `Exactly ${specification.token}`

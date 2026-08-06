@@ -84,13 +84,13 @@ const captures = {}
 try {
   running = await launchApp(freshDataDir, firstPort, 1440, 920)
   await setTheme(running.cdp, 'day')
-  const freshProfiles = await request(running.cdp, 'agents.list')
+  const freshProfiles = await request(running.cdp, 'members.list')
   assert(
     freshProfiles.length === 4
       && freshProfiles.every((profile) =>
         profile.presence === 'present'
-        && profile.runtimeSelection === null
-        && profile.runtimePreference === null
+        && profile.runtimeConfiguration === null
+        && profile.runtimeConfiguration === null
         && profile.runtimeReadiness.status === 'runtime_not_configured'),
     `Fresh Profile state is not present/no-Runtime: ${JSON.stringify(freshProfiles)}`
   )
@@ -284,7 +284,7 @@ try {
   await mouseClick(running.cdp, '.member-sidebar-home')
   await waitForSelector(running.cdp, '.new-conversation-workspace', 30_000)
   await openMembers(running.cdp)
-  const initialMemberOrder = (await request(running.cdp, 'agents.list'))
+  const initialMemberOrder = (await request(running.cdp, 'members.list'))
     .map((profile) => profile.agentId)
   await mouseClick(running.cdp, '.member-sidebar-actions button[aria-label="调整队员顺序"]')
   await waitForSelector(running.cdp, '[data-member-order-handle="agent_1"]')
@@ -429,7 +429,7 @@ try {
   await waitForExpression(running.cdp,
     `document.activeElement?.textContent?.trim() === '编辑身份'`)
   assert(
-    (await request(running.cdp, 'agents.get', { agentId: 'agent_1' })).displayName === '小狐狸',
+    (await request(running.cdp, 'members.get', { agentId: 'agent_1' })).displayName === '小狐狸',
     'Escaping the identity dialog persisted an unsaved theme-switch draft'
   )
   await waitForExpression(running.cdp, `!document.querySelector('.app-toast')`, 5_000)
@@ -506,7 +506,7 @@ try {
   await openMembers(running.cdp)
   await selectMember(running.cdp, '咕咕')
   await openMemberRuntimeTab(running.cdp)
-  const runtimeBeforeDraft = await request(running.cdp, 'agents.get', {
+  const runtimeBeforeDraft = await request(running.cdp, 'members.get', {
     agentId: 'agent_3'
   })
   const runtimeParametersState = await evaluate(running.cdp, `(() => {
@@ -628,13 +628,13 @@ try {
       && profile.runtimeReadiness.status === 'ready'
   )
   assert(
-    configuredRuntime.runtimePreference?.model.mode === 'explicit'
-      && configuredRuntime.runtimePreference.model.modelId === 'gpt-lifecycle-accept'
-      && configuredRuntime.runtimePreference.model.options.reasoning_effort === 'high'
-      && configuredRuntime.runtimePreference.permissions.values.sandbox_mode
+    configuredRuntime.runtimeConfiguration?.model.mode === 'explicit'
+      && configuredRuntime.runtimeConfiguration.model.modelId === 'gpt-lifecycle-accept'
+      && configuredRuntime.runtimeConfiguration.model.options.reasoning_effort === 'high'
+      && configuredRuntime.runtimeConfiguration.permissions.values.sandbox_mode
         === 'danger-full-access'
-      && configuredRuntime.runtimePreference.permissions.values.approval_policy === 'never',
-    `Member Runtime configuration was not saved atomically: ${JSON.stringify(configuredRuntime.runtimePreference)}`
+      && configuredRuntime.runtimeConfiguration.permissions.values.approval_policy === 'never',
+    `Member Runtime configuration was not saved atomically: ${JSON.stringify(configuredRuntime.runtimeConfiguration)}`
   )
   await waitForExpression(running.cdp, `(() => {
     const section = [...document.querySelectorAll('.member-section')]
@@ -676,8 +676,8 @@ try {
   await waitForText(running.cdp, '.app-toast', 'Agent 运行时已清除。')
   await waitForProfile(running.cdp, 'agent_3',
     (profile) => profile.presence === 'present'
-      && profile.runtimeSelection === null
-      && profile.runtimePreference === null)
+      && profile.runtimeConfiguration === null
+      && profile.runtimeConfiguration === null)
 
   await openCamp(running.cdp, campTitle)
   await waitForSelector(running.cdp, '.conversation-bubble.user .message-copy-button')
@@ -763,7 +763,7 @@ try {
     `(() => {
       const editor = document.querySelector('#camp-message')
       const token = editor?.querySelector(
-        '.structured-mention-token.member-mention[data-agent-profile-id="agent_1"]'
+        '.structured-mention-token.member-mention[data-agent-id="agent_1"]'
       )
       return editor?.textContent?.includes('@小狐狸')
         && token?.textContent?.includes('小狐狸')
@@ -775,12 +775,12 @@ try {
 
   await openMembers(running.cdp)
   await selectMember(running.cdp, '小兔')
-  const qiluBeforeRemoval = await request(running.cdp, 'agents.get', {
+  const qiluBeforeRemoval = await request(running.cdp, 'members.get', {
     agentId: 'agent_4'
   })
   assert(
-    qiluBeforeRemoval.runtimeSelection?.adapterKind === 'codex-cli'
-      && qiluBeforeRemoval.runtimePreference !== null,
+    qiluBeforeRemoval.runtimeConfiguration?.adapterKind === 'codex-cli'
+      && qiluBeforeRemoval.runtimeConfiguration !== null,
     'Removal retention fixture did not configure a Runtime for 小兔'
   )
   await openMemberMenuAction(running.cdp, '永久移除队员')
@@ -799,7 +799,7 @@ try {
     join(freshDataDir, 'rovai.sqlite'),
     'agent_4'
   )
-  const activeAfterRemoval = await request(running.cdp, 'agents.list')
+  const activeAfterRemoval = await request(running.cdp, 'members.list')
   assert(
     qiluAfterRemoval.presence === 'removed'
       && qiluAfterRemoval.removedAt
@@ -807,9 +807,8 @@ try {
       && qiluAfterRemoval.teamRole === qiluBeforeRemoval.teamRole
       && qiluAfterRemoval.avatarRef === qiluBeforeRemoval.avatarRef
       && qiluAfterRemoval.runtimeInstallationId
-        === qiluBeforeRemoval.runtimePreference.installationId
       && qiluAfterRemoval.selectedRuntimeAdapterKind
-        === qiluBeforeRemoval.runtimeSelection.adapterKind
+        === qiluBeforeRemoval.runtimeConfiguration.adapterKind
       && !activeAfterRemoval.some((profile) => profile.agentId === 'agent_4'),
     `Permanent removal did not retain identity/Runtime or hide the active Profile: ${JSON.stringify(qiluAfterRemoval)}`
   )
@@ -877,7 +876,7 @@ try {
   snapshot = await request(running.cdp, 'camps.snapshot', { campId })
   assert(
     snapshot.camp.defaultLeadAgentId === 'agent_2'
-      && !((await request(running.cdp, 'agents.list'))
+      && !((await request(running.cdp, 'members.list'))
         .some((profile) => profile.agentId === 'agent_4'))
       && (await historicalProfile(
         join(freshDataDir, 'rovai.sqlite'),
@@ -894,7 +893,7 @@ try {
   await simulateV14Database(join(upgradeDataDir, 'rovai.sqlite'))
 
   running = await launchApp(upgradeDataDir, firstPort + 4, 1440, 920)
-  const upgradedProfiles = await request(running.cdp, 'agents.list')
+  const upgradedProfiles = await request(running.cdp, 'members.list')
   const upgradedById = new Map(upgradedProfiles.map((profile) => [profile.agentId, profile]))
   assert(
     upgradedById.get('agent_1')?.presence === 'present'
@@ -902,10 +901,10 @@ try {
       && upgradedById.get('agent_3')?.presence === 'present'
       && upgradedById.get('agent_4')?.presence === 'away'
       && upgradedById.get('agent_1')?.displayName === '升级小狐狸'
-      && upgradedById.get('agent_1')?.runtimeSelection === null
-      && upgradedById.get('agent_4')?.runtimeSelection === null
-      && upgradedById.get('agent_1')?.runtimePreference === null
-      && upgradedById.get('agent_4')?.runtimePreference === null,
+      && upgradedById.get('agent_1')?.runtimeConfiguration === null
+      && upgradedById.get('agent_4')?.runtimeConfiguration === null
+      && upgradedById.get('agent_1')?.runtimeConfiguration === null
+      && upgradedById.get('agent_4')?.runtimeConfiguration === null,
     `v41 did not delete every legacy member Runtime configuration: ${JSON.stringify(upgradedProfiles)}`
   )
   assert(
@@ -926,7 +925,7 @@ try {
   running = null
 
   running = await launchApp(upgradeDataDir, firstPort + 5, 1040, 700)
-  const restartedUpgrade = await request(running.cdp, 'agents.list')
+  const restartedUpgrade = await request(running.cdp, 'members.list')
   assert(
     restartedUpgrade.find((profile) => profile.agentId === 'agent_1')?.presence === 'present'
       && restartedUpgrade.find((profile) => profile.agentId === 'agent_2')?.presence === 'away'
@@ -1076,11 +1075,14 @@ async function createCampFixture(databasePath, id, title, projectPath) {
     FROM agent_profile
     WHERE id IN ('agent_1', 'agent_2', 'agent_3', 'agent_4');
     INSERT INTO camp_message(
-      id, camp_id, sequence, author_type, author_id, body, address_mode,
+      id, camp_id, sequence, author_type, author_id, body,
+      structured_content_json, address_mode,
       addressed_agent_ids_json, version, created_at, updated_at
     ) VALUES (
       'message-lifecycle-user', ${sqlLiteral(id)}, 1, 'user', 'local-user',
-      '@luoke 验证用户消息复制', 'explicit', '["agent_1"]',
+      '@luoke 验证用户消息复制',
+      '[{"kind":"text","text":"@luoke 验证用户消息复制"}]',
+      'explicit', '["agent_1"]',
       1, datetime('now'), datetime('now')
     );
   `)
@@ -1110,8 +1112,8 @@ async function simulateV14Database(databasePath) {
 }
 
 async function setPresence(cdp, agentId, presence) {
-  const profile = await request(cdp, 'agents.get', { agentId })
-  const result = await request(cdp, 'agents.presence.set', {
+  const profile = await request(cdp, 'members.get', { agentId })
+  const result = await request(cdp, 'members.presence.set', {
     commandId: crypto.randomUUID(),
     command: {
       agentId,
@@ -1126,7 +1128,7 @@ async function setPresence(cdp, agentId, presence) {
 async function waitForProfile(cdp, agentId, predicate, timeoutMs = 30_000) {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
-    const profile = await request(cdp, 'agents.get', { agentId })
+    const profile = await request(cdp, 'members.get', { agentId })
     if (predicate(profile)) return profile
     await wait(100)
   }
@@ -1136,7 +1138,7 @@ async function waitForProfile(cdp, agentId, predicate, timeoutMs = 30_000) {
 async function waitForAgentOrder(cdp, expectedIds, timeoutMs = 30_000) {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
-    const ids = (await request(cdp, 'agents.list')).map((profile) => profile.agentId)
+    const ids = (await request(cdp, 'members.list')).map((profile) => profile.agentId)
     if (JSON.stringify(ids) === JSON.stringify(expectedIds)) return
     await wait(100)
   }

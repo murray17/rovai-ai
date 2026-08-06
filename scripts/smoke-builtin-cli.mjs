@@ -280,7 +280,7 @@ function assertBuiltinCliCapability(label, installation) {
 }
 
 async function createProfile(request, displayName) {
-  const result = await request('agents.create', {
+  const result = await request('members.create', {
     commandId: crypto.randomUUID(),
     command: {
       displayName,
@@ -299,8 +299,8 @@ async function createProfile(request, displayName) {
 }
 
 async function selectExplicitModel(request, agentId, adapterKind, modelId) {
-  const profile = await request('agents.get', { agentId })
-  const result = await request('agents.runtime.set', {
+  const profile = await request('members.get', { agentId })
+  const result = await request('members.runtime.set', {
     commandId: crypto.randomUUID(),
     command: {
       agentId,
@@ -311,13 +311,13 @@ async function selectExplicitModel(request, agentId, adapterKind, modelId) {
         modelId,
         options: { reasoning_effort: 'low' }
       },
-      permissions: profile.runtimePreference.permissions
+      permissions: profile.runtimeConfiguration.permissions
     }
   })
   if (result.status !== 'applied') {
     throw new Error(`Explicit Runtime model was not selected: ${JSON.stringify(result)}`)
   }
-  const resolved = await request('agents.get', { agentId })
+  const resolved = await request('members.get', { agentId })
   if (resolved.runtimeReadiness?.status !== 'ready') {
     throw new Error(`Explicit Runtime model is not ready: ${JSON.stringify(resolved)}`)
   }

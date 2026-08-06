@@ -83,7 +83,7 @@ try {
     throw new Error(`Antigravity capability snapshot is invalid: ${JSON.stringify(snapshot)}`)
   }
 
-  const profile = await request('agents.get', { agentId: 'agent_1' })
+  const profile = await request('members.get', { agentId: 'agent_1' })
 
   const first = await executeToken(
     request,

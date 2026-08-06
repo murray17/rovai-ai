@@ -107,7 +107,7 @@ export function MemberSidebar({
     setBusy(focusAgentId)
     setError(null)
     try {
-      const result = await window.rovai.request<StoredCommandResult>('agents.reorder', {
+      const result = await window.rovai.request<StoredCommandResult>('members.reorder', {
         commandId: crypto.randomUUID(),
         command: { orderedAgentIds }
       })
@@ -240,7 +240,7 @@ export function MemberSidebar({
                     sorting={sorting}
                     busy={busy !== null}
                     dragOver={dragOverAgentId === agent.agentId && dragAgentId !== agent.agentId}
-                    availability={runtimeAvailability.find((item) => item.runtimeKind === agent.runtimeSelection?.adapterKind) ?? null}
+                    availability={runtimeAvailability.find((item) => item.runtimeKind === agent.runtimeConfiguration?.adapterKind) ?? null}
                     runtimeDiscoveryPending={runtimeDiscoveryPending}
                     onSelect={onSelect}
                     onMove={moveMember}
@@ -310,13 +310,13 @@ function MemberSidebarRow({
 }): React.JSX.Element {
   const runtime = memberRuntimePresentation(
     agent,
-    agent.runtimeSelection?.adapterKind ?? null,
+    agent.runtimeConfiguration?.adapterKind ?? null,
     availability,
     runtimeDiscoveryPending
   )
   const compact = compactRuntimeState(runtime.status)
-  const product = agent.runtimeSelection?.adapterKind
-    ? adapterLabel(agent.runtimeSelection.adapterKind)
+  const product = agent.runtimeConfiguration?.adapterKind
+    ? adapterLabel(agent.runtimeConfiguration.adapterKind)
     : 'Agent 运行时'
   const runtimeLabel = `${agent.displayName}，${product}，${runtime.label}；打开运行配置`
   return (

@@ -283,8 +283,8 @@ async function configureRuntime(request, _health, agentId, adapterKind, modelId)
   if (!runtime.snapshot.models.some((model) => model.id === modelId)) {
     throw new Error(`${adapterKind} model is unavailable: ${modelId}`)
   }
-  const profile = await request('agents.get', { agentId })
-  const configured = await request('agents.runtime.set', {
+  const profile = await request('members.get', { agentId })
+  const configured = await request('members.runtime.set', {
     commandId: crypto.randomUUID(),
     command: {
       agentId,
@@ -297,8 +297,8 @@ async function configureRuntime(request, _health, agentId, adapterKind, modelId)
   if (configured.status !== 'applied') {
     throw new Error(`${adapterKind} explicit model was rejected: ${JSON.stringify(configured)}`)
   }
-  const resolved = await request('agents.get', { agentId })
-  if (resolved.runtimePreference?.model?.modelId !== modelId
+  const resolved = await request('members.get', { agentId })
+  if (resolved.runtimeConfiguration?.model?.modelId !== modelId
       || resolved.runtimeReadiness?.status !== 'ready') {
     throw new Error(`${adapterKind} explicit model was not frozen: ${JSON.stringify(resolved)}`)
   }

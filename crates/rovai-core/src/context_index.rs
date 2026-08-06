@@ -165,7 +165,7 @@ mod tests {
     use crate::{
         collaboration::{
             AddCampMemberCommand, CollaborationService, CreateCampCommand, CreateTaskCommand,
-            MessageAddressSpec, SendCampMessageCommand,
+            TestCampMessageAddress, TestCampMessageCommand,
         },
         command::{ActorRef, CommandEnvelope, CommandResultStatus},
     };
@@ -237,17 +237,17 @@ mod tests {
             .unwrap();
         let task_id = task.result.payload["taskId"].as_str().unwrap();
         let message = collaboration
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut database,
                 &user_envelope(
                     "send-index-message",
                     Some(&camp_id),
-                    SendCampMessageCommand {
+                    TestCampMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: format!("Review adr-49 PR-7 ISSUE-2 {task_id}; task-9 is not an ID."),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Explicit {
+                        address: TestCampMessageAddress::Explicit {
                             agent_ids: vec!["agent_1".to_string()],
                         },
                         reply_to_camp_message_id: None,
@@ -296,13 +296,14 @@ mod tests {
                 r#"
                 INSERT INTO camp_message(
                     id, camp_id, sequence, author_type, author_id,
-                    source_agent_run_id, body, content_digest,
+                    source_agent_run_id, body, structured_content_json, content_digest,
                     address_mode, addressed_agent_ids_json,
                     reply_to_camp_message_id, camp_turn_id, agent_run_id,
                     tombstoned_at, version, created_at, updated_at
                 )
                 SELECT 'tombstoned-index-message', id, last_message_sequence,
                        'system', 'test', NULL, 'secret-index-token',
+                       '[{"kind":"text","text":"secret-index-token"}]',
                        ?2, 'broadcast', '[]', NULL, NULL, NULL,
                        ?3, 1, ?3, ?3
                 FROM camp WHERE id = ?1

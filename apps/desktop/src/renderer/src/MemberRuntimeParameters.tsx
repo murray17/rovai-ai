@@ -28,13 +28,8 @@ type ModelFieldsProps = RuntimeParameterProps & {
 
 export function runtimeEditorInstallation(
   installations: AdapterInstallation[],
-  adapterKind: AdapterKind,
-  preferredInstallationId?: string | null
+  adapterKind: AdapterKind
 ): AdapterInstallation | null {
-  const preferred = preferredInstallationId
-    ? installations.find((installation) => installation.id === preferredInstallationId)
-    : null
-  if (preferred?.adapterKind === adapterKind) return preferred
   return installations.find((installation) => (
     installation.adapterKind === adapterKind
     && installation.installationClass === 'managed_default'
@@ -50,12 +45,12 @@ export function runtimeDraftForMember(
 ): MemberRuntimeDraft | null {
   if (
     usePersistedPreference
-    && agent.runtimeSelection?.adapterKind === adapterKind
-    && agent.runtimePreference?.permissions.adapterKind === adapterKind
+    && agent.runtimeConfiguration?.adapterKind === adapterKind
+    && agent.runtimeConfiguration?.permissions.adapterKind === adapterKind
   ) {
     return cloneRuntimeDraft({
-      model: agent.runtimePreference.model,
-      permissions: agent.runtimePreference.permissions
+      model: agent.runtimeConfiguration.model,
+      permissions: agent.runtimeConfiguration.permissions
     })
   }
   return installation?.memberRuntimeDefaults

@@ -2494,8 +2494,25 @@ mod tests {
             database
                 .connection()
                 .execute(
-                    "UPDATE agent_profile SET default_runtime_installation_id = ?1 WHERE id = ?2",
-                    params![installation_id, profile_id],
+                    r#"
+                    UPDATE agent_profile
+                    SET selected_runtime_adapter_kind = ?1,
+                        default_runtime_installation_id = ?2,
+                        default_model_selection_json = '{"mode":"runtime_default"}',
+                        default_permission_config_json = ?3
+                    WHERE id = ?4
+                    "#,
+                    params![
+                        adapter_kind,
+                        installation_id,
+                        serde_json::to_string(&serde_json::json!({
+                            "adapterKind": adapter_kind,
+                            "schemaVersion": 1,
+                            "values": {},
+                        }))
+                        .unwrap(),
+                        profile_id,
+                    ],
                 )
                 .unwrap();
         }

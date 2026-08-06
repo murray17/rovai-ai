@@ -17,7 +17,9 @@ last_updated: 2026-08-06
 > 前置版本：[v0.42 Built-in Tool CLI-only Transport](../v0.42/README.md)
 >
 > 长期决策：[ADR-0125](../../adr/0125-runtime-native-additive-external-mcp-projection.md)、
-> [ADR-0126](../../adr/0126-codex-native-home-and-external-session-ownership.md)
+> [ADR-0126](../../adr/0126-codex-native-home-and-external-session-ownership.md)、
+> [ADR-0127](../../adr/0127-atomic-member-runtime-configuration.md)、
+> [ADR-0128](../../adr/0128-structured-draft-only-user-message-submission.md)
 
 ## 版本目标
 
@@ -44,6 +46,11 @@ last_updated: 2026-08-06
 - Camp 不提供归档、回收站或恢复，只能存在或被永久删除；
 - Project 没有独立实体或生命周期，只是按 Camp 工作目录读取时派生的导航分组；
 - All Members Mention 显示为 `@所有队员`，结构化内容使用 `MemberMention(agentId)`。
+- 用户消息只接受精确 Draft Revision；所有 CampMessage 必须有 Structured Content，正文与寻址
+  只能由其派生；
+- AgentProfile 只公开原子 `runtimeConfiguration` 与 Runtime Readiness，Installation binding
+  仅留在 Core/Diagnostics；
+- IPC 产品命名空间统一为 `members.*`，不保留 `agents.*` 别名。
 
 ## 产品合同
 

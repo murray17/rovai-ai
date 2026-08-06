@@ -595,10 +595,10 @@ async function configureDefaultTeamRuntimes(core) {
   }
   const configured = []
   for (const member of team) {
-    const before = await core.request('agents.get', { agentId: member.agentId })
-    if (before.runtimeSelection?.adapterKind === member.adapterKind
-        && canonicalJson(before.runtimePreference?.model) === canonicalJson(member.model)
-        && canonicalJson(before.runtimePreference?.permissions) === canonicalJson(member.permissions)
+    const before = await core.request('members.get', { agentId: member.agentId })
+    if (before.runtimeConfiguration?.adapterKind === member.adapterKind
+        && canonicalJson(before.runtimeConfiguration?.model) === canonicalJson(member.model)
+        && canonicalJson(before.runtimeConfiguration?.permissions) === canonicalJson(member.permissions)
         && before.runtimeReadiness?.status === 'ready') {
       configured.push({
         agentId: member.agentId,
@@ -608,7 +608,7 @@ async function configureDefaultTeamRuntimes(core) {
       })
       continue
     }
-    const result = await core.request('agents.runtime.set', {
+    const result = await core.request('members.runtime.set', {
       commandId: crypto.randomUUID(),
       command: {
         agentId: member.agentId,
@@ -621,10 +621,10 @@ async function configureDefaultTeamRuntimes(core) {
     if (result.status !== 'applied') {
       throw new Error(`default Team Runtime update failed: ${JSON.stringify({ member: member.agentId, result })}`)
     }
-    const after = await core.request('agents.get', { agentId: member.agentId })
-    if (after.runtimeSelection?.adapterKind !== member.adapterKind
-        || canonicalJson(after.runtimePreference?.model) !== canonicalJson(member.model)
-        || canonicalJson(after.runtimePreference?.permissions) !== canonicalJson(member.permissions)
+    const after = await core.request('members.get', { agentId: member.agentId })
+    if (after.runtimeConfiguration?.adapterKind !== member.adapterKind
+        || canonicalJson(after.runtimeConfiguration?.model) !== canonicalJson(member.model)
+        || canonicalJson(after.runtimeConfiguration?.permissions) !== canonicalJson(member.permissions)
         || after.runtimeReadiness?.status !== 'ready') {
       throw new Error(`default Team Runtime verification failed: ${member.agentId}`)
     }

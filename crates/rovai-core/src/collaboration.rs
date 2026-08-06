@@ -22,7 +22,7 @@ use crate::{
         DomainCommandGateway, EntityReference, canonical_json_digest, sealed,
     },
     context::queue_async_camp_summaries,
-    context_index::{camp_message_content_digest, index_camp_message},
+    context_index::index_camp_message,
     conversation_input::cancel_turn_inputs,
     db::Database,
     execution_budget::{
@@ -85,14 +85,6 @@ impl ProjectBindingKind {
             Self::Directory => "directory",
         }
     }
-
-    fn parse(value: &str) -> Result<Self> {
-        match value {
-            "quick_chat" => Ok(Self::QuickChat),
-            "directory" => Ok(Self::Directory),
-            _ => anyhow::bail!("Camp project binding kind is invalid"),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -127,23 +119,6 @@ impl CampNameOrigin {
             Self::User => "user",
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateCampFromFirstMessageCommand {
-    pub project_binding_kind: ProjectBindingKind,
-    pub project_path: String,
-    pub body: String,
-    #[serde(default)]
-    pub address: MessageAddressSpec,
-    pub purpose: String,
-    pub expected_output: String,
-}
-
-impl sealed::Sealed for CreateCampFromFirstMessageCommand {}
-impl DomainCommand for CreateCampFromFirstMessageCommand {
-    const TYPE: &'static str = "camp.create_from_first_message";
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -209,28 +184,6 @@ impl DomainCommand for AddCampMemberCommand {
     const TYPE: &'static str = "camp.member.add";
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(tag = "mode", rename_all = "snake_case")]
-pub enum MessageAddressSpec {
-    #[default]
-    Default,
-    Explicit {
-        #[serde(rename = "agentIds")]
-        agent_ids: Vec<String>,
-    },
-    Broadcast,
-}
-
-impl MessageAddressSpec {
-    fn mode(&self) -> &'static str {
-        match self {
-            Self::Default => "default",
-            Self::Explicit { .. } => "explicit",
-            Self::Broadcast => "broadcast",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionRequest {
@@ -249,23 +202,47 @@ fn required_completion_role() -> String {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SendCampMessageCommand {
+pub struct SendUserCampDraftCommand {
     pub camp_id: String,
-    #[serde(default)]
-    pub draft_revision: Option<i64>,
-    #[serde(default)]
-    pub body: String,
-    #[serde(default)]
-    pub prepared_attachment_ids: Vec<String>,
-    #[serde(default)]
-    pub address: MessageAddressSpec,
+    pub draft_revision: i64,
     pub reply_to_camp_message_id: Option<String>,
     pub execution: Option<ExecutionRequest>,
 }
 
-impl sealed::Sealed for SendCampMessageCommand {}
-impl DomainCommand for SendCampMessageCommand {
-    const TYPE: &'static str = "camp.message.send";
+impl sealed::Sealed for SendUserCampDraftCommand {}
+impl DomainCommand for SendUserCampDraftCommand {
+    const TYPE: &'static str = "camp.message.send_user_draft";
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, Serialize)]
+pub(crate) enum TestCampMessageAddress {
+    Default,
+    Explicit { agent_ids: Vec<String> },
+    Broadcast,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct TestCampMessageCommand {
+    pub camp_id: String,
+    pub draft_revision: Option<i64>,
+    pub body: String,
+    pub prepared_attachment_ids: Vec<String>,
+    pub address: TestCampMessageAddress,
+    pub reply_to_camp_message_id: Option<String>,
+    pub execution: Option<ExecutionRequest>,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone)]
+pub(crate) struct TestCampConversationCommand {
+    pub project_binding_kind: ProjectBindingKind,
+    pub project_path: String,
+    pub body: String,
+    pub address: TestCampMessageAddress,
+    pub purpose: String,
+    pub expected_output: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -385,32 +362,6 @@ pub struct TaskListPage {
     pub truncated: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ExecutionTargetInspection {
-    pub agent_id: String,
-    pub conversation_id: Option<String>,
-    pub conversation_busy: bool,
-    pub earlier_run_queued: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ExecutionPreflightContext {
-    pub camp_id: String,
-    pub project_binding_kind: ProjectBindingKind,
-    pub project_path: String,
-    pub targets: Vec<ExecutionTargetInspection>,
-    pub addressing_blocker: Option<ExecutionPreflightBlocker>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ExecutionPreflightBlocker {
-    pub code: String,
-    pub detail: String,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SendInboxMessageCommand {
@@ -452,104 +403,167 @@ pub struct CollaborationService {
 }
 
 impl CollaborationService {
-    pub fn validate_create_from_first_message_input(
-        command: &CreateCampFromFirstMessageCommand,
-    ) -> Result<()> {
-        validate_project_path(&command.project_path)?;
-        if command.body.trim().is_empty()
-            || command.purpose.trim().is_empty()
-            || command.expected_output.trim().is_empty()
-        {
-            anyhow::bail!("First message, purpose, and expectedOutput must not be empty");
-        }
-        Ok(())
-    }
-
-    pub fn validate_send_message_input(command: &SendCampMessageCommand) -> Result<()> {
+    pub fn validate_send_message_input(command: &SendUserCampDraftCommand) -> Result<()> {
         validate_camp_message_input(command)
     }
 
-    pub fn inspect_execution_targets(
+    #[cfg(test)]
+    pub(crate) fn send_test_camp_message(
         &self,
-        database: &Database,
-        camp_id: &str,
-        address: &MessageAddressSpec,
-    ) -> Result<ExecutionPreflightContext> {
-        let connection = database.connection();
-        let camp = connection
-            .query_row(
-                r#"
-                SELECT project_binding_kind, project_path
-                FROM camp WHERE id = ?1
-                "#,
-                [camp_id],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-            )
-            .optional()?;
-        let Some((project_binding_kind, project_path)) = camp else {
-            anyhow::bail!("camp.not_found: Camp does not exist");
-        };
-        let actor = ActorRef::User {
-            user_id: "preflight".into(),
-        };
-        let (targets_to_inspect, addressing_blocker) =
-            match resolve_address(connection, camp_id, address, &actor)? {
-                AddressingOutcome::Resolved(resolution) if !resolution.targets.is_empty() => {
-                    (resolution.targets, None)
+        database: &mut Database,
+        envelope: &CommandEnvelope<TestCampMessageCommand>,
+    ) -> Result<CommandExecution> {
+        let draft_revision = if let Some(revision) = envelope.payload.draft_revision {
+            revision
+        } else {
+            let mut content = match &envelope.payload.address {
+                TestCampMessageAddress::Default => Vec::new(),
+                TestCampMessageAddress::Explicit { agent_ids } => agent_ids
+                    .iter()
+                    .cloned()
+                    .map(|agent_id| StructuredCampMessageSegment::MemberMention { agent_id })
+                    .collect(),
+                TestCampMessageAddress::Broadcast => {
+                    vec![StructuredCampMessageSegment::AllMembersMention]
                 }
-                AddressingOutcome::Resolved(_) => (
-                    Vec::new(),
-                    Some(ExecutionPreflightBlocker {
-                        code: "agent_unavailable".to_string(),
-                        detail: "No active Agent can receive this execution".to_string(),
-                    }),
-                ),
-                AddressingOutcome::Rejected(result) => (
-                    Vec::new(),
-                    Some(ExecutionPreflightBlocker {
-                        code: "agent_unavailable".to_string(),
-                        detail: format!(
-                            "{}: {}",
-                            result.code,
-                            result.payload["message"]
-                                .as_str()
-                                .unwrap_or("execution target is unavailable")
-                        ),
-                    }),
-                ),
             };
-        let mut targets = Vec::with_capacity(targets_to_inspect.len());
-        for target in targets_to_inspect {
-            let (active_count, queued_count): (i64, i64) = if let Some(conversation_id) =
-                target.conversation_id.as_deref()
-            {
-                connection.query_row(
-                        r#"
-                        SELECT
-                            COALESCE(SUM(CASE WHEN status IN ('running', 'waiting') THEN 1 ELSE 0 END), 0),
-                            COALESCE(SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END), 0)
-                        FROM agent_run WHERE conversation_id = ?1
-                        "#,
-                        [conversation_id],
-                        |row| Ok((row.get(0)?, row.get(1)?)),
-                    )?
-            } else {
-                (0, 0)
-            };
-            targets.push(ExecutionTargetInspection {
-                agent_id: target.agent_id,
-                conversation_id: target.conversation_id,
-                conversation_busy: active_count > 0,
-                earlier_run_queued: queued_count > 0,
+            content.push(StructuredCampMessageSegment::Text {
+                text: envelope.payload.body.clone(),
             });
+            let content = normalize_content(content);
+            validate_content(&content)?;
+            let now = chrono::Utc::now();
+            let expires_at = (now + chrono::Duration::hours(24)).to_rfc3339();
+            database.connection().execute(
+                r#"
+                INSERT INTO camp_composer_draft(
+                    camp_id, body, structured_content_json, revision,
+                    created_at, updated_at, expires_at
+                ) VALUES (?1, ?2, ?3, 1, ?4, ?4, ?5)
+                ON CONFLICT(camp_id) DO UPDATE SET
+                    body = excluded.body,
+                    structured_content_json = excluded.structured_content_json,
+                    revision = camp_composer_draft.revision + 1,
+                    updated_at = excluded.updated_at,
+                    expires_at = excluded.expires_at
+                "#,
+                params![
+                    envelope.payload.camp_id,
+                    envelope.payload.body,
+                    serde_json::to_string(&content)?,
+                    now.to_rfc3339(),
+                    expires_at,
+                ],
+            )?;
+            database.connection().query_row(
+                "SELECT revision FROM camp_composer_draft WHERE camp_id = ?1",
+                [&envelope.payload.camp_id],
+                |row| row.get(0),
+            )?
+        };
+        let command = CommandEnvelope {
+            command_id: envelope.command_id.clone(),
+            actor: envelope.actor.clone(),
+            camp_id: envelope.camp_id.clone(),
+            expected_versions: envelope.expected_versions.clone(),
+            execution_epoch: envelope.execution_epoch,
+            payload: SendUserCampDraftCommand {
+                camp_id: envelope.payload.camp_id.clone(),
+                draft_revision,
+                reply_to_camp_message_id: envelope.payload.reply_to_camp_message_id.clone(),
+                execution: envelope.payload.execution.clone(),
+            },
+        };
+        self.send_user_camp_draft(database, &command)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn create_test_camp_conversation(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<TestCampConversationCommand>,
+    ) -> Result<CommandExecution> {
+        let profiles = {
+            let mut statement = database.connection().prepare(
+                r#"
+                SELECT id,
+                       default_runtime_installation_id IS NOT NULL
+                       AND default_model_selection_json IS NOT NULL
+                       AND default_permission_config_json IS NOT NULL
+                FROM agent_profile
+                WHERE profile_status = 'present'
+                ORDER BY member_order, id
+                "#,
+            )?;
+            statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let default_lead_agent_id = profiles
+            .iter()
+            .find_map(|(agent_id, configured)| configured.then_some(agent_id.clone()))
+            .or_else(|| profiles.first().map(|(agent_id, _)| agent_id.clone()))
+            .context("test Camp requires at least one present member")?;
+        let member_agent_ids = profiles
+            .iter()
+            .map(|(agent_id, _)| agent_id.clone())
+            .collect::<Vec<_>>();
+        let created = self.create_camp(
+            database,
+            &CommandEnvelope {
+                command_id: format!("{}:camp", envelope.command_id),
+                actor: envelope.actor.clone(),
+                camp_id: None,
+                expected_versions: envelope.expected_versions.clone(),
+                execution_epoch: envelope.execution_epoch,
+                payload: CreateCampCommand {
+                    name: None,
+                    project_binding_kind: envelope.payload.project_binding_kind,
+                    project_path: envelope.payload.project_path.clone(),
+                    member_agent_ids,
+                    default_lead_agent_id,
+                    collaboration_mode: CampCollaborationMode::Peer,
+                },
+            },
+        )?;
+        if created.result.status == crate::command::CommandResultStatus::Rejected {
+            return Ok(created);
         }
-        Ok(ExecutionPreflightContext {
-            camp_id: camp_id.to_string(),
-            project_binding_kind: ProjectBindingKind::parse(&project_binding_kind)?,
-            project_path,
-            targets,
-            addressing_blocker,
-        })
+        let camp_id = created.result.payload["campId"]
+            .as_str()
+            .context("test Camp creation returned no Camp ID")?
+            .to_string();
+        let mut sent = self.send_test_camp_message(
+            database,
+            &CommandEnvelope {
+                command_id: format!("{}:message", envelope.command_id),
+                actor: envelope.actor.clone(),
+                camp_id: Some(camp_id.clone()),
+                expected_versions: envelope.expected_versions.clone(),
+                execution_epoch: envelope.execution_epoch,
+                payload: TestCampMessageCommand {
+                    camp_id: camp_id.clone(),
+                    draft_revision: None,
+                    body: envelope.payload.body.clone(),
+                    prepared_attachment_ids: Vec::new(),
+                    address: envelope.payload.address.clone(),
+                    reply_to_camp_message_id: None,
+                    execution: Some(ExecutionRequest {
+                        task_id: None,
+                        purpose: envelope.payload.purpose.clone(),
+                        expected_output: envelope.payload.expected_output.clone(),
+                        completion_role: required_completion_role(),
+                        budget: None,
+                    }),
+                },
+            },
+        )?;
+        if let Some(payload) = sent.result.payload.as_object_mut() {
+            payload.insert("campId".to_string(), Value::String(camp_id));
+        }
+        Ok(sent)
     }
 
     pub fn create_camp(
@@ -683,281 +697,6 @@ impl CollaborationService {
                     "defaultLeadAgentId": envelope.payload.default_lead_agent_id,
                     "collaborationMode": envelope.payload.collaboration_mode,
                     "memberCount": envelope.payload.member_agent_ids.len(),
-                    "projectBindingKind": envelope.payload.project_binding_kind,
-                    "projectPath": envelope.payload.project_path,
-                }),
-                Some(EntityReference {
-                    entity_type: "camp".to_string(),
-                    entity_id: camp_id.clone(),
-                }),
-            ))
-        })
-    }
-
-    pub fn create_camp_from_first_message(
-        &self,
-        database: &mut Database,
-        envelope: &CommandEnvelope<CreateCampFromFirstMessageCommand>,
-    ) -> Result<CommandExecution> {
-        Self::validate_create_from_first_message_input(&envelope.payload)?;
-        let title = normalized_camp_title(&envelope.payload.body);
-        let camp_id = Uuid::new_v4().to_string();
-        let camp_message_id = Uuid::new_v4().to_string();
-        let camp_turn_id = Uuid::new_v4().to_string();
-        let pending_dispatch_digest = canonical_json_digest(&serde_json::to_value(envelope)?)?;
-
-        self.gateway.execute(database, envelope, |transaction| {
-            let pending_execution_intent_id = match authorize_pending_execution_dispatch(
-                transaction,
-                &envelope.command_id,
-                &pending_dispatch_digest,
-            )? {
-                Ok(intent_id) => intent_id,
-                Err(rejection) => return Ok(rejection),
-            };
-            if !matches!(envelope.actor, ActorRef::User { .. }) {
-                return Ok(rejected(
-                    "camp.user_required",
-                    "Only a User can create a Camp from the new-conversation intake",
-                ));
-            }
-            let (profile_ids, initial_lead_id) = {
-                let mut statement = transaction.prepare(
-                    r#"
-                    SELECT id,
-                           default_runtime_installation_id IS NOT NULL
-                           AND default_model_selection_json IS NOT NULL
-                           AND default_permission_config_json IS NOT NULL
-                    FROM agent_profile
-                    WHERE profile_status = 'present'
-                    ORDER BY member_order, id
-                    "#,
-                )?;
-                let rows = statement
-                    .query_map([], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
-                    })?
-                    .collect::<rusqlite::Result<Vec<_>>>()?;
-                let initial_lead_id = rows
-                    .iter()
-                    .find_map(|(id, configured)| configured.then_some(id.clone()));
-                (
-                    rows.into_iter().map(|(id, _)| id).collect::<Vec<_>>(),
-                    initial_lead_id,
-                )
-            };
-            if profile_ids.is_empty() {
-                return Ok(rejected(
-                    "camp.no_present_members",
-                    "At least one present AgentProfile is required",
-                ));
-            }
-            let Some(initial_lead_id) = initial_lead_id else {
-                return Ok(rejected(
-                    "camp.no_runtime_configured_members",
-                    "At least one present member must have a configured Runtime",
-                ));
-            };
-
-            let now = camp_turn_execution_budget_now().to_rfc3339();
-            transaction.execute(
-                r#"
-                INSERT INTO camp(
-                    id, title, name_origin, collaboration_mode,
-                    project_binding_kind, project_path,
-                    default_lead_agent_id, last_message_sequence,
-                    version, created_at, updated_at
-                ) VALUES (
-                    ?1, ?2, 'generated', 'peer', ?3, ?4,
-                    NULL, 0, 1, ?5, ?5
-                )
-                "#,
-                params![
-                    camp_id,
-                    title,
-                    envelope.payload.project_binding_kind.as_str(),
-                    envelope.payload.project_path,
-                    now,
-                ],
-            )?;
-
-            let mut targets = Vec::with_capacity(profile_ids.len());
-            for profile_id in &profile_ids {
-                let conversation_id = Uuid::new_v4().to_string();
-                transaction.execute(
-                    r#"
-                    INSERT INTO camp_member(
-                        camp_id, agent_id, status, capability_overrides_json,
-                        leave_requested_at, leave_request_command_id,
-                        pending_default_lead_successor_agent_id,
-                        version, joined_at, left_at
-                    ) VALUES (?1, ?2, 'active', '{}', NULL, NULL, NULL, 1, ?3, NULL)
-                    "#,
-                    params![camp_id, profile_id, now],
-                )?;
-                transaction.execute(
-                    r#"
-                    INSERT INTO conversation(
-                        id, camp_id, agent_id,
-                        provider_override, model_override, action_permission_profile_ref,
-                        native_session_id, summary,
-                        summary_through_message_sequence,
-                        last_message_sequence,
-                        version, created_at, updated_at
-                    ) VALUES (?1, ?2, ?3, NULL, NULL, NULL, NULL, NULL, 0, 0, 1, ?4, ?4)
-                    "#,
-                    params![conversation_id, camp_id, profile_id, now],
-                )?;
-                targets.push(AddressTarget {
-                    agent_id: profile_id.clone(),
-                    conversation_id: Some(conversation_id),
-                });
-            }
-
-            let default_lead = targets
-                .iter()
-                .find(|target| target.agent_id == initial_lead_id)
-                .cloned()
-                .context("configured initial Lead must have a Conversation")?;
-            let lead_runtime = match resolve_frozen_runtime(
-                transaction,
-                default_lead
-                    .conversation_id
-                    .as_deref()
-                    .context("configured initial Lead must have a Conversation")?,
-                &default_lead.agent_id,
-            )? {
-                Ok(runtime) => runtime,
-                Err(blocker) => {
-                    delete_transient_camp(transaction, &camp_id)?;
-                    return Ok(CommandHandlerResult::rejected(
-                        blocker.code,
-                        blocker.payload,
-                    ));
-                }
-            };
-            if let Err(error) = build_effective_config(
-                transaction,
-                default_lead
-                    .conversation_id
-                    .as_deref()
-                    .context("configured initial Lead must have a Conversation")?,
-                &default_lead.agent_id,
-                &lead_runtime,
-            ) {
-                delete_transient_camp(transaction, &camp_id)?;
-                return Err(error);
-            }
-
-            transaction.execute(
-                r#"
-                UPDATE camp
-                SET default_lead_agent_id = ?2, version = version + 1, updated_at = ?3
-                WHERE id = ?1
-                "#,
-                params![camp_id, default_lead.agent_id, now],
-            )?;
-
-            let resolution = match resolve_address(
-                transaction,
-                &camp_id,
-                &envelope.payload.address,
-                &envelope.actor,
-            )? {
-                AddressingOutcome::Resolved(resolution) if !resolution.targets.is_empty() => {
-                    resolution
-                }
-                AddressingOutcome::Resolved(_) => {
-                    delete_transient_camp(transaction, &camp_id)?;
-                    return Ok(rejected(
-                        "camp_message.no_addressable_member",
-                        "First message requires at least one addressable Agent",
-                    ));
-                }
-                AddressingOutcome::Rejected(rejection) => {
-                    delete_transient_camp(transaction, &camp_id)?;
-                    return Ok(rejection);
-                }
-            };
-            let effective_configs = match prepare_agent_run_configs(transaction, &resolution)? {
-                Ok(configs) => configs,
-                Err(rejection) => {
-                    delete_transient_camp(transaction, &camp_id)?;
-                    return Ok(rejection);
-                }
-            };
-
-            let execution = ExecutionRequest {
-                task_id: None,
-                purpose: envelope.payload.purpose.clone(),
-                expected_output: envelope.payload.expected_output.clone(),
-                completion_role: required_completion_role(),
-                budget: None,
-            };
-            let frozen_execution_budget = match freeze_camp_turn_execution_budget(
-                execution.budget.as_ref(),
-                chrono::DateTime::parse_from_rfc3339(&now)?.with_timezone(&chrono::Utc),
-                i64::try_from(resolution.targets.len())
-                    .context("root AgentRun responsibility count overflow")?,
-            ) {
-                Ok(budget) => budget,
-                Err(error) => {
-                    delete_transient_camp(transaction, &camp_id)?;
-                    return Ok(rejected(
-                        "camp_turn.execution_budget_invalid",
-                        &error.to_string(),
-                    ));
-                }
-            };
-            append_domain_event(
-                transaction,
-                "camp.created",
-                Some(&camp_id),
-                Some(("camp", camp_id.as_str())),
-                &envelope.actor,
-                envelope.execution_epoch,
-                &json!({
-                    "title": title,
-                    "projectBindingKind": envelope.payload.project_binding_kind,
-                    "projectPath": envelope.payload.project_path,
-                    "defaultLeadAgentId": default_lead.agent_id,
-                    "memberCount": profile_ids.len(),
-                }),
-            )?;
-            let queued = queue_camp_message_and_runs(
-                transaction,
-                QueueCampMessageInput {
-                    camp_message_id: &camp_message_id,
-                    camp_turn_id: Some(&camp_turn_id),
-                    camp_id: &camp_id,
-                    body: &envelope.payload.body,
-                    structured_content: None,
-                    prepared_attachment_ids: &[],
-                    address_mode: envelope.payload.address.mode(),
-                    reply_to_camp_message_id: None,
-                    resolution: &resolution,
-                    execution: Some(&execution),
-                    frozen_execution_budget: Some(&frozen_execution_budget),
-                    effective_configs: Some(&effective_configs),
-                    workspace: None,
-                    actor: &envelope.actor,
-                    execution_epoch: envelope.execution_epoch,
-                    command_id: &envelope.command_id,
-                    now: &now,
-                    generated_camp_name: None,
-                },
-            )?;
-            consume_pending_execution_intent(transaction, pending_execution_intent_id.as_deref())?;
-
-            Ok(CommandHandlerResult::accepted(
-                "camp.created_and_queued",
-                json!({
-                    "campId": camp_id,
-                    "campMessageId": camp_message_id,
-                    "campTurnId": camp_turn_id,
-                    "agentRunIds": queued.agent_run_ids,
-                    "executionBudget": frozen_execution_budget,
-                    "defaultLeadAgentId": default_lead.agent_id,
                     "projectBindingKind": envelope.payload.project_binding_kind,
                     "projectPath": envelope.payload.project_path,
                 }),
@@ -1802,10 +1541,10 @@ impl CollaborationService {
             }))
     }
 
-    pub fn send_camp_message(
+    pub fn send_user_camp_draft(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<SendCampMessageCommand>,
+        envelope: &CommandEnvelope<SendUserCampDraftCommand>,
     ) -> Result<CommandExecution> {
         Self::validate_send_message_input(&envelope.payload)?;
         let camp_message_id = Uuid::new_v4().to_string();
@@ -1863,22 +1602,13 @@ impl CollaborationService {
                     "Reply target is outside the Camp",
                 ));
             }
-            let submission = if let Some(draft_revision) = envelope.payload.draft_revision {
-                match load_structured_draft_submission(
-                    transaction,
-                    &envelope.payload.camp_id,
-                    draft_revision,
-                )? {
-                    Ok(submission) => submission,
-                    Err(rejection) => return Ok(rejection),
-                }
-            } else {
-                CampMessageSubmission {
-                    body: envelope.payload.body.clone(),
-                    structured_content: None,
-                    prepared_attachment_ids: envelope.payload.prepared_attachment_ids.clone(),
-                    address: envelope.payload.address.clone(),
-                }
+            let submission = match load_structured_draft_submission(
+                transaction,
+                &envelope.payload.camp_id,
+                envelope.payload.draft_revision,
+            )? {
+                Ok(submission) => submission,
+                Err(rejection) => return Ok(rejection),
             };
             let mut resolution = match resolve_address(
                 transaction,
@@ -1953,7 +1683,7 @@ impl CollaborationService {
                     camp_turn_id: camp_turn_id.as_deref(),
                     camp_id: &envelope.payload.camp_id,
                     body: &submission.body,
-                    structured_content: submission.structured_content.as_deref(),
+                    structured_content: &submission.structured_content,
                     prepared_attachment_ids: &submission.prepared_attachment_ids,
                     address_mode: submission.address.mode(),
                     reply_to_camp_message_id: envelope.payload.reply_to_camp_message_id.as_deref(),
@@ -2651,9 +2381,26 @@ struct PreparedAgentRunConfig {
 
 struct CampMessageSubmission {
     body: String,
-    structured_content: Option<StructuredCampMessageContent>,
+    structured_content: StructuredCampMessageContent,
     prepared_attachment_ids: Vec<String>,
-    address: MessageAddressSpec,
+    address: CampMessageAddress,
+}
+
+#[derive(Debug, Clone)]
+enum CampMessageAddress {
+    Default,
+    Explicit { agent_ids: Vec<String> },
+    Broadcast,
+}
+
+impl CampMessageAddress {
+    fn mode(&self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Explicit { .. } => "explicit",
+            Self::Broadcast => "broadcast",
+        }
+    }
 }
 
 fn load_structured_draft_submission(
@@ -2722,11 +2469,11 @@ fn load_structured_draft_submission(
     }
 
     let address = if has_all_members_mention(&content) {
-        MessageAddressSpec::Broadcast
+        CampMessageAddress::Broadcast
     } else if mentioned_agent_ids.is_empty() {
-        MessageAddressSpec::Default
+        CampMessageAddress::Default
     } else {
-        MessageAddressSpec::Explicit {
+        CampMessageAddress::Explicit {
             agent_ids: mentioned_agent_ids,
         }
     };
@@ -2745,7 +2492,7 @@ fn load_structured_draft_submission(
     };
     Ok(Ok(CampMessageSubmission {
         body,
-        structured_content: Some(content),
+        structured_content: content,
         prepared_attachment_ids,
         address,
     }))
@@ -2756,7 +2503,7 @@ struct QueueCampMessageInput<'a> {
     camp_turn_id: Option<&'a str>,
     camp_id: &'a str,
     body: &'a str,
-    structured_content: Option<&'a [StructuredCampMessageSegment]>,
+    structured_content: &'a [StructuredCampMessageSegment],
     prepared_attachment_ids: &'a [String],
     address_mode: &'a str,
     reply_to_camp_message_id: Option<&'a str>,
@@ -2861,14 +2608,8 @@ fn queue_camp_message_and_runs(
         .map(|target| target.agent_id.clone())
         .collect::<Vec<_>>();
     let addressed_agent_ids_json = serde_json::to_string(&addressed_agent_ids)?;
-    let structured_content_json = input
-        .structured_content
-        .map(serde_json::to_string)
-        .transpose()?;
-    let content_digest = match input.structured_content {
-        Some(content) => canonical_content_digest(content)?,
-        None => camp_message_content_digest(input.body),
-    };
+    let structured_content_json = serde_json::to_string(input.structured_content)?;
+    let content_digest = canonical_content_digest(input.structured_content)?;
     transaction.execute(
         r#"
         INSERT INTO camp_message(
@@ -3088,18 +2829,23 @@ pub(crate) fn append_system_camp_message(
         |row| row.get(0),
     )?;
     let addressed_agent_ids_json = "[]";
+    let structured_content = vec![StructuredCampMessageSegment::Text {
+        text: body.to_string(),
+    }];
+    let structured_content_json = serde_json::to_string(&structured_content)?;
     transaction.execute(
         r#"
         INSERT INTO camp_message(
             id, camp_id, sequence,
-            author_type, author_id, source_agent_run_id, body, content_digest,
+            author_type, author_id, source_agent_run_id, body,
+            structured_content_json, content_digest,
             address_mode, addressed_agent_ids_json,
             reply_to_camp_message_id, camp_turn_id, agent_run_id,
             tombstoned_at, presentation_json, version, created_at, updated_at
         ) VALUES (
-            ?1, ?2, ?3, 'system', ?4, NULL, ?5, ?6,
-            'broadcast', ?7, NULL, NULL, NULL,
-            NULL, NULL, 1, ?8, ?8
+            ?1, ?2, ?3, 'system', ?4, NULL, ?5, ?6, ?7,
+            'broadcast', ?8, NULL, NULL, NULL,
+            NULL, NULL, 1, ?9, ?9
         )
         "#,
         params![
@@ -3108,7 +2854,8 @@ pub(crate) fn append_system_camp_message(
             sequence,
             component_id,
             body,
-            camp_message_content_digest(body),
+            structured_content_json,
+            canonical_content_digest(&structured_content)?,
             addressed_agent_ids_json,
             now,
         ],
@@ -3182,11 +2929,11 @@ enum AddressingOutcome {
 fn resolve_address(
     transaction: &Connection,
     camp_id: &str,
-    address: &MessageAddressSpec,
+    address: &CampMessageAddress,
     actor: &ActorRef,
 ) -> Result<AddressingOutcome> {
     match address {
-        MessageAddressSpec::Default => {
+        CampMessageAddress::Default => {
             let default_lead = transaction.query_row(
                 "SELECT default_lead_agent_id FROM camp WHERE id = ?1",
                 [camp_id],
@@ -3216,7 +2963,7 @@ fn resolve_address(
                 targets: vec![target],
             }))
         }
-        MessageAddressSpec::Explicit { agent_ids } => {
+        CampMessageAddress::Explicit { agent_ids } => {
             if agent_ids.is_empty() {
                 return Ok(AddressingOutcome::Rejected(rejected(
                     "camp_message.empty_explicit_address",
@@ -3242,7 +2989,7 @@ fn resolve_address(
                 targets,
             }))
         }
-        MessageAddressSpec::Broadcast => {
+        CampMessageAddress::Broadcast => {
             let sender_agent_id = match actor {
                 ActorRef::Agent { agent_id, .. } => Some(agent_id.as_str()),
                 _ => None,
@@ -3556,96 +3303,9 @@ fn actor_has_capability(
         }))
 }
 
-fn delete_transient_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<()> {
-    transaction.execute("DELETE FROM conversation WHERE camp_id = ?1", [camp_id])?;
-    transaction.execute("DELETE FROM camp_member WHERE camp_id = ?1", [camp_id])?;
-    transaction.execute("DELETE FROM camp WHERE id = ?1", [camp_id])?;
-    Ok(())
-}
-
-fn authorize_pending_execution_dispatch(
-    transaction: &Connection,
-    command_id: &str,
-    dispatch_digest: &str,
-) -> Result<std::result::Result<Option<String>, CommandHandlerResult>> {
-    let intent_id = format!("pending-execution:{command_id}");
-    let state = transaction
-        .query_row(
-            r#"
-            SELECT intent.status, job.status, intent.dispatch_digest
-            FROM pending_execution_intent AS intent
-            JOIN runtime_resolution_job AS job
-              ON job.pending_execution_intent_id = intent.id
-            WHERE intent.id = ?1
-            "#,
-            [&intent_id],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            },
-        )
-        .optional()?;
-    let Some((intent_status, job_status, persisted_dispatch_digest)) = state else {
-        return Ok(Ok(None));
-    };
-    if persisted_dispatch_digest != dispatch_digest {
-        return Ok(Err(rejected(
-            "pending_execution.request_mismatch",
-            "The resolved execution intent does not match this dispatch request",
-        )));
-    }
-    if intent_status == "cancelled" || job_status == "cancelled" {
-        return Ok(Err(rejected(
-            "pending_execution.cancelled",
-            "The pending execution request was cancelled before dispatch",
-        )));
-    }
-    if intent_status != "resolving" || job_status != "completed" {
-        return Ok(Err(rejected(
-            "pending_execution.not_ready",
-            "Runtime resolution has not completed for this execution request",
-        )));
-    }
-    Ok(Ok(Some(intent_id)))
-}
-
-fn consume_pending_execution_intent(
-    transaction: &Connection,
-    intent_id: Option<&str>,
-) -> Result<()> {
-    let Some(intent_id) = intent_id else {
-        return Ok(());
-    };
-    let now = chrono::Utc::now().to_rfc3339();
-    let updated = transaction.execute(
-        r#"
-        UPDATE pending_execution_intent
-        SET status = 'consumed', diagnostic_code = NULL, updated_at = ?2
-        WHERE id = ?1 AND status = 'resolving'
-          AND EXISTS (
-              SELECT 1 FROM runtime_resolution_job
-              WHERE pending_execution_intent_id = ?1
-                AND status = 'completed'
-          )
-        "#,
-        params![intent_id, now],
-    )?;
-    if updated != 1 {
-        anyhow::bail!("Pending Execution Intent changed before atomic dispatch");
-    }
-    Ok(())
-}
-
-fn validate_camp_message_input(command: &SendCampMessageCommand) -> Result<()> {
-    if let Some(draft_revision) = command.draft_revision {
-        if draft_revision < 1 {
-            anyhow::bail!("draftRevision must be a positive Core Revision");
-        }
-    } else if command.body.trim().is_empty() {
-        anyhow::bail!("Camp message body must not be empty");
+fn validate_camp_message_input(command: &SendUserCampDraftCommand) -> Result<()> {
+    if command.draft_revision < 1 {
+        anyhow::bail!("draftRevision must be a positive Core Revision");
     }
     if let Some(execution) = &command.execution {
         if execution.purpose.trim().is_empty() || execution.expected_output.trim().is_empty() {
@@ -4201,15 +3861,6 @@ fn generated_camp_name(body: &str) -> String {
         .chars()
         .take(CAMP_NAME_MAX_SCALARS)
         .collect()
-}
-
-fn normalized_camp_title(body: &str) -> String {
-    let generated = generated_camp_name(body);
-    if generated.is_empty() {
-        "未命名对话".to_string()
-    } else {
-        generated
-    }
 }
 
 fn camp_delete_blockers(transaction: &Connection, camp_id: &str) -> Result<Vec<Value>> {
@@ -4823,7 +4474,7 @@ mod tests {
     }
 
     #[test]
-    fn plain_at_text_does_not_resolve_legacy_handles() {
+    fn plain_at_text_never_becomes_member_routing() {
         let (mut database, directory) = test_database();
         configure_test_runtime(&database, &["agent_2"]);
         database
@@ -4835,16 +4486,16 @@ mod tests {
             .expect("member should become away");
         let service = CollaborationService::default();
         let result = service
-            .create_camp_from_first_message(
+            .create_test_camp_conversation(
                 &mut database,
                 &user_envelope(
                     "mention-away-member",
                     None,
-                    CreateCampFromFirstMessageCommand {
+                    TestCampConversationCommand {
                         project_path: directory.join("workspace").to_string_lossy().to_string(),
                         project_binding_kind: ProjectBindingKind::Directory,
                         body: "@luoke 请回答；邮箱 dev@muwa.example 不属于 mention。".to_string(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         purpose: "验证普通文本".to_string(),
                         expected_output: "回复".to_string(),
                     },
@@ -5127,7 +4778,6 @@ mod tests {
         assert_eq!(normalize_camp_name(&"😀".repeat(80)).chars().count(), 80);
         assert_eq!(normalize_camp_name(&"😀".repeat(81)).chars().count(), 81);
         assert_eq!(generated_camp_name(&"😀".repeat(81)).chars().count(), 80);
-        assert_eq!(normalized_camp_title(" \n\t "), "未命名对话");
     }
 
     #[test]
@@ -5137,17 +4787,17 @@ mod tests {
         let camp_id =
             create_camp_with_members(&service, &mut database, &directory, &["agent_1", "agent_2"]);
         let accepted = service
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut database,
                 &user_envelope(
                     "configured-camp-first-message",
                     Some(&camp_id),
-                    SendCampMessageCommand {
+                    TestCampMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "  第一条\n\t目标  ".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
                             task_id: None,
@@ -5190,17 +4840,17 @@ mod tests {
         let service = CollaborationService::default();
         let camp_id = create_camp_with_members(&service, &mut database, &directory, &["agent_1"]);
         let accepted = service
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut database,
                 &user_envelope(
                     "budgeted-initial-execution",
                     Some(&camp_id),
-                    SendCampMessageCommand {
+                    TestCampMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "在冻结预算内完成任务".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
                             task_id: None,
@@ -5270,17 +4920,17 @@ mod tests {
         let camp_id =
             create_camp_with_members(&service, &mut database, &directory, &["agent_1", "agent_2"]);
         let rejected = service
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut database,
                 &user_envelope(
                     "budget-too-small-for-root-fanout",
                     Some(&camp_id),
-                    SendCampMessageCommand {
+                    TestCampMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "两位队员一起处理".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Broadcast,
+                        address: TestCampMessageAddress::Broadcast,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
                             task_id: None,
@@ -5331,17 +4981,17 @@ mod tests {
             .unwrap()
             .to_string();
         let rejected = service
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut database,
                 &user_envelope(
                     "configured-camp-unready-send",
                     Some(&camp_id),
-                    SendCampMessageCommand {
+                    TestCampMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "请一起处理".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Explicit {
+                        address: TestCampMessageAddress::Explicit {
                             agent_ids: vec!["agent_1".to_string(), "agent_2".to_string()],
                         },
                         reply_to_camp_message_id: None,
@@ -5464,12 +5114,12 @@ mod tests {
             user_envelope(
                 command_id,
                 Some(&camp_id),
-                SendCampMessageCommand {
+                TestCampMessageCommand {
                     camp_id: camp_id.clone(),
                     draft_revision: None,
                     body: body.to_string(),
                     prepared_attachment_ids: Vec::new(),
-                    address: MessageAddressSpec::Default,
+                    address: TestCampMessageAddress::Default,
                     reply_to_camp_message_id: None,
                     execution: Some(ExecutionRequest {
                         task_id: None,
@@ -5506,7 +5156,7 @@ mod tests {
             .cancel(&mut database, &cancelled_intent)
             .unwrap();
         let cancelled = collaboration
-            .send_camp_message(&mut database, &cancelled_command)
+            .send_test_camp_message(&mut database, &cancelled_command)
             .unwrap();
         assert_eq!(cancelled.result.status, CommandResultStatus::Accepted);
         assert_eq!(row_count(&database, "camp_message"), 1);
@@ -5536,7 +5186,7 @@ mod tests {
             .unwrap();
         let changed_command = command("pending-mismatch", "被替换的请求");
         let accepted = collaboration
-            .send_camp_message(&mut database, &changed_command)
+            .send_test_camp_message(&mut database, &changed_command)
             .unwrap();
         assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
         assert_eq!(row_count(&database, "camp_message"), 2);
@@ -5557,91 +5207,20 @@ mod tests {
     }
 
     #[test]
-    fn first_message_creates_complete_camps_bound_to_the_same_directory() {
-        let (mut database, directory) = test_database();
-        configure_test_runtime(&database, &["agent_1", "agent_2"]);
-        let service = CollaborationService::default();
-        let project_path = directory.join("workspace");
-        let create = |command_id: &str, body: &str| {
-            user_envelope(
-                command_id,
-                None,
-                CreateCampFromFirstMessageCommand {
-                    project_path: project_path.to_string_lossy().to_string(),
-                    project_binding_kind: ProjectBindingKind::Directory,
-                    body: body.to_string(),
-                    address: MessageAddressSpec::Default,
-                    purpose: "回答用户问题".to_string(),
-                    expected_output: "公开回复".to_string(),
-                },
-            )
-        };
-        let first_envelope = create("first-camp", "  第一行\n  第二行  ");
-        let first = service
-            .create_camp_from_first_message(&mut database, &first_envelope)
-            .expect("first Camp should be created");
-        let replay = service
-            .create_camp_from_first_message(&mut database, &first_envelope)
-            .expect("same command should replay");
-        let second = service
-            .create_camp_from_first_message(&mut database, &create("second-camp", "另一个问题"))
-            .expect("second Camp should be created");
-
-        assert_eq!(first.result.status, CommandResultStatus::Accepted);
-        assert!(replay.replayed);
-        assert_eq!(first.result, replay.result);
-        let first_camp_id = first.result.payload["campId"].as_str().unwrap();
-        let second_camp_id = second.result.payload["campId"].as_str().unwrap();
-        let first_state: (String, String, String, String) = database
-            .connection()
-            .query_row(
-                r#"
-                SELECT title, project_binding_kind, project_path, default_lead_agent_id
-                FROM camp WHERE id = ?1
-                "#,
-                [first_camp_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .unwrap();
-        let second_state: (String, String) = database
-            .connection()
-            .query_row(
-                "SELECT project_binding_kind, project_path FROM camp WHERE id = ?1",
-                [second_camp_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(first_state.0, "第一行 第二行");
-        assert_eq!(first_state.1, "directory");
-        assert_eq!(second_state.0, "directory");
-        assert_eq!(first_state.2, second_state.1);
-        assert_eq!(first_state.3, "agent_1");
-        assert_eq!(row_count(&database, "camp"), 2);
-        assert_eq!(row_count(&database, "camp_member"), 8);
-        assert_eq!(row_count(&database, "conversation"), 8);
-        assert_eq!(row_count(&database, "camp_message"), 2);
-        assert_eq!(row_count(&database, "camp_turn"), 2);
-        assert_eq!(row_count(&database, "agent_run"), 2);
-
-        drop(database);
-        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
-    }
-
-    #[test]
-    fn first_message_can_explicitly_wake_multiple_ready_members() {
+    fn structured_mentions_can_wake_multiple_ready_members() {
         let (mut database, directory) = test_database();
         configure_test_runtime(&database, &["agent_1", "agent_2"]);
         let result = CollaborationService::default()
-            .create_camp_from_first_message(
+            .create_test_camp_conversation(
                 &mut database,
                 &user_envelope(
                     "mentioned-first-message",
                     None,
-                    CreateCampFromFirstMessageCommand {
+                    TestCampConversationCommand {
                         project_path: directory.join("workspace").to_string_lossy().to_string(),
                         project_binding_kind: ProjectBindingKind::Directory,
                         body: "@muwa 和 @luoke 请分别回答".to_string(),
-                        address: MessageAddressSpec::Explicit {
+                        address: TestCampMessageAddress::Explicit {
                             agent_ids: vec!["agent_2".to_string(), "agent_1".to_string()],
                         },
                         purpose: "并行回答".to_string(),
@@ -5680,80 +5259,6 @@ mod tests {
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
-
-    #[test]
-    fn first_message_rejection_leaves_no_partial_camp() {
-        let (mut database, directory) = test_database();
-        let service = CollaborationService::default();
-        let result = service
-            .create_camp_from_first_message(
-                &mut database,
-                &user_envelope(
-                    "no-ready-runtime",
-                    None,
-                    CreateCampFromFirstMessageCommand {
-                        project_path: directory.join("workspace").to_string_lossy().to_string(),
-                        project_binding_kind: ProjectBindingKind::Directory,
-                        body: "请回答".to_string(),
-                        address: MessageAddressSpec::Default,
-                        purpose: "回答".to_string(),
-                        expected_output: "回复".to_string(),
-                    },
-                ),
-            )
-            .expect("readiness failure should be a durable rejection");
-
-        assert_eq!(result.result.status, CommandResultStatus::Rejected);
-        assert_eq!(result.result.code, "camp.no_runtime_configured_members");
-        assert_eq!(row_count(&database, "camp"), 0);
-        assert_eq!(row_count(&database, "camp_member"), 0);
-        assert_eq!(row_count(&database, "conversation"), 0);
-        assert_eq!(row_count(&database, "camp_message"), 0);
-        assert_eq!(row_count(&database, "camp_turn"), 0);
-        assert_eq!(row_count(&database, "agent_run"), 0);
-        assert_eq!(row_count(&database, "event_log"), 1);
-
-        drop(database);
-        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
-    }
-
-    #[test]
-    fn first_message_rejects_an_unready_explicit_mention_without_a_partial_camp() {
-        let (mut database, directory) = test_database();
-        configure_test_runtime(&database, &["agent_1"]);
-        let result = CollaborationService::default()
-            .create_camp_from_first_message(
-                &mut database,
-                &user_envelope(
-                    "unready-mentioned-member",
-                    None,
-                    CreateCampFromFirstMessageCommand {
-                        project_path: directory.join("workspace").to_string_lossy().to_string(),
-                        project_binding_kind: ProjectBindingKind::Directory,
-                        body: "@muwa 请回答".to_string(),
-                        address: MessageAddressSpec::Explicit {
-                            agent_ids: vec!["agent_2".to_string()],
-                        },
-                        purpose: "回答".to_string(),
-                        expected_output: "回复".to_string(),
-                    },
-                ),
-            )
-            .expect("unready explicit target should be a durable rejection");
-
-        assert_eq!(result.result.status, CommandResultStatus::Rejected);
-        assert_eq!(result.result.code, "agent_run.runtime_not_ready");
-        assert_eq!(row_count(&database, "camp"), 0);
-        assert_eq!(row_count(&database, "camp_member"), 0);
-        assert_eq!(row_count(&database, "conversation"), 0);
-        assert_eq!(row_count(&database, "camp_message"), 0);
-        assert_eq!(row_count(&database, "camp_turn"), 0);
-        assert_eq!(row_count(&database, "agent_run"), 0);
-
-        drop(database);
-        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
-    }
-
     #[test]
     fn camp_rename_lead_change_and_quiescent_delete_are_versioned() {
         let (mut database, directory) = test_database();
@@ -5793,17 +5298,17 @@ mod tests {
             .expect("Default Lead should change");
         assert_eq!(changed.result.code, "camp.default_lead_changed");
         service
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut database,
                 &user_envelope(
                     "message-before-delete",
                     Some(&camp_id),
-                    SendCampMessageCommand {
+                    TestCampMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "仅保存历史".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
@@ -5811,17 +5316,17 @@ mod tests {
             )
             .expect("ordinary message should persist");
         let completed_execution = service
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut database,
                 &user_envelope(
                     "completed-execution-before-delete",
                     Some(&camp_id),
-                    SendCampMessageCommand {
+                    TestCampMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "执行后再删除".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
                             task_id: None,
@@ -5863,12 +5368,12 @@ mod tests {
             .unwrap();
         for index in 0..2 {
             service
-                .send_camp_message(
+                .send_test_camp_message(
                     &mut database,
                     &user_envelope(
                         &format!("summary-backlog-before-delete-{index}"),
                         Some(&camp_id),
-                        SendCampMessageCommand {
+                        TestCampMessageCommand {
                             camp_id: camp_id.clone(),
                             draft_revision: None,
                             body: format!(
@@ -5876,7 +5381,7 @@ mod tests {
                                 "x".repeat(32_000)
                             ),
                             prepared_attachment_ids: Vec::new(),
-                            address: MessageAddressSpec::Default,
+                            address: TestCampMessageAddress::Default,
                             reply_to_camp_message_id: None,
                             execution: None,
                         },
@@ -5943,16 +5448,16 @@ mod tests {
         configure_test_runtime(&database, &["agent_1"]);
         let service = CollaborationService::default();
         let created = service
-            .create_camp_from_first_message(
+            .create_test_camp_conversation(
                 &mut database,
                 &user_envelope(
                     "camp-with-running-work",
                     None,
-                    CreateCampFromFirstMessageCommand {
+                    TestCampConversationCommand {
                         project_path: directory.join("workspace").to_string_lossy().to_string(),
                         project_binding_kind: ProjectBindingKind::Directory,
                         body: "开始执行".to_string(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         purpose: "执行".to_string(),
                         expected_output: "结果".to_string(),
                     },
@@ -6003,18 +5508,18 @@ mod tests {
         let send = user_envelope(
             "send-plain-message",
             Some(&camp_id),
-            SendCampMessageCommand {
+            TestCampMessageCommand {
                 camp_id: camp_id.clone(),
                 draft_revision: None,
                 body: "只记录这条公共消息。".to_string(),
                 prepared_attachment_ids: Vec::new(),
-                address: MessageAddressSpec::Default,
+                address: TestCampMessageAddress::Default,
                 reply_to_camp_message_id: None,
                 execution: None,
             },
         );
         let result = service
-            .send_camp_message(&mut database, &send)
+            .send_test_camp_message(&mut database, &send)
             .expect("message should be stored");
 
         assert_eq!(result.result.status, CommandResultStatus::Applied);
@@ -6055,12 +5560,12 @@ mod tests {
         let send = user_envelope(
             "structured-mention-send",
             Some(&camp_id),
-            SendCampMessageCommand {
+            TestCampMessageCommand {
                 camp_id: camp_id.clone(),
                 draft_revision: Some(draft.revision),
                 body: "caller supplied body must be ignored".to_string(),
                 prepared_attachment_ids: vec!["caller-supplied-attachment".to_string()],
-                address: MessageAddressSpec::Broadcast,
+                address: TestCampMessageAddress::Broadcast,
                 reply_to_camp_message_id: None,
                 execution: Some(ExecutionRequest {
                     task_id: None,
@@ -6072,8 +5577,12 @@ mod tests {
             },
         );
 
-        let sent = service.send_camp_message(&mut database, &send).unwrap();
-        let replay = service.send_camp_message(&mut database, &send).unwrap();
+        let sent = service
+            .send_test_camp_message(&mut database, &send)
+            .unwrap();
+        let replay = service
+            .send_test_camp_message(&mut database, &send)
+            .unwrap();
         assert_eq!(sent.result.status, CommandResultStatus::Accepted);
         assert!(replay.replayed);
         assert_eq!(row_count(&database, "camp_message"), 1);
@@ -6154,17 +5663,17 @@ mod tests {
             )
             .unwrap();
         let result = service
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut database,
                 &user_envelope(
                     "structured-all-members-send",
                     Some(&camp_id),
-                    SendCampMessageCommand {
+                    TestCampMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: Some(draft.revision),
                         body: String::new(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
                             task_id: None,
@@ -6224,18 +5733,18 @@ mod tests {
         let invalid_send = user_envelope(
             "unavailable-structured-mention",
             Some(&camp_id),
-            SendCampMessageCommand {
+            TestCampMessageCommand {
                 camp_id: camp_id.clone(),
                 draft_revision: Some(unavailable.revision),
                 body: String::new(),
                 prepared_attachment_ids: Vec::new(),
-                address: MessageAddressSpec::Default,
+                address: TestCampMessageAddress::Default,
                 reply_to_camp_message_id: None,
                 execution: None,
             },
         );
         let invalid = service
-            .send_camp_message(&mut database, &invalid_send)
+            .send_test_camp_message(&mut database, &invalid_send)
             .unwrap();
         assert_eq!(invalid.result.code, "mention_target_unavailable");
         assert_eq!(row_count(&database, "camp_message"), 0);
@@ -6259,7 +5768,7 @@ mod tests {
             invalid_send.payload.clone(),
         );
         let stale = service
-            .send_camp_message(&mut database, &stale_send)
+            .send_test_camp_message(&mut database, &stale_send)
             .unwrap();
         assert_eq!(stale.result.code, "draft_changed");
         assert_eq!(row_count(&database, "camp_message"), 0);
@@ -6296,17 +5805,17 @@ mod tests {
             .unwrap();
 
         let result = service
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut database,
                 &user_envelope(
                     "send-message-with-attachment",
                     Some(&camp_id),
-                    SendCampMessageCommand {
+                    TestCampMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "请阅读附件。".to_string(),
                         prepared_attachment_ids: attachment_ids.clone(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
@@ -6346,29 +5855,29 @@ mod tests {
         let plain = user_envelope(
             "message-before-run",
             Some(&camp_id),
-            SendCampMessageCommand {
+            TestCampMessageCommand {
                 camp_id: camp_id.clone(),
                 draft_revision: None,
                 body: "公共前置信息".to_string(),
                 prepared_attachment_ids: Vec::new(),
-                address: MessageAddressSpec::Default,
+                address: TestCampMessageAddress::Default,
                 reply_to_camp_message_id: None,
                 execution: None,
             },
         );
         service
-            .send_camp_message(&mut database, &plain)
+            .send_test_camp_message(&mut database, &plain)
             .expect("prefix message should be stored");
 
         let fanout = user_envelope(
             "fanout-message",
             Some(&camp_id),
-            SendCampMessageCommand {
+            TestCampMessageCommand {
                 camp_id: camp_id.clone(),
                 draft_revision: None,
                 body: "请分别给出方案。".to_string(),
                 prepared_attachment_ids: Vec::new(),
-                address: MessageAddressSpec::Explicit {
+                address: TestCampMessageAddress::Explicit {
                     agent_ids: vec![
                         "agent_2".to_string(),
                         "agent_1".to_string(),
@@ -6386,10 +5895,10 @@ mod tests {
             },
         );
         let first = service
-            .send_camp_message(&mut database, &fanout)
+            .send_test_camp_message(&mut database, &fanout)
             .expect("fanout should be created");
         let replay = service
-            .send_camp_message(&mut database, &fanout)
+            .send_test_camp_message(&mut database, &fanout)
             .expect("fanout retry should replay");
 
         assert_eq!(first.result.status, CommandResultStatus::Accepted);
@@ -6822,17 +6331,17 @@ mod tests {
             .to_string();
 
         let trigger = service
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut database,
                 &user_envelope(
                     "start-luoke-task-run",
                     Some(&camp_id),
-                    SendCampMessageCommand {
+                    TestCampMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "请处理 Task".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Explicit {
+                        address: TestCampMessageAddress::Explicit {
                             agent_ids: vec!["agent_1".to_string()],
                         },
                         reply_to_camp_message_id: None,
@@ -7032,12 +6541,12 @@ mod tests {
         let trigger = user_envelope(
             "start-sender-run",
             Some(&camp_id),
-            SendCampMessageCommand {
+            TestCampMessageCommand {
                 camp_id: camp_id.clone(),
                 draft_revision: None,
                 body: "沐瓦先处理。".to_string(),
                 prepared_attachment_ids: Vec::new(),
-                address: MessageAddressSpec::Explicit {
+                address: TestCampMessageAddress::Explicit {
                     agent_ids: vec!["agent_2".to_string()],
                 },
                 reply_to_camp_message_id: None,
@@ -7051,7 +6560,7 @@ mod tests {
             },
         );
         let trigger_result = service
-            .send_camp_message(&mut database, &trigger)
+            .send_test_camp_message(&mut database, &trigger)
             .expect("sender Run should be queued");
         let sender_run_id = trigger_result.result.payload["agentRunIds"][0]
             .as_str()

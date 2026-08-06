@@ -11,13 +11,14 @@ use uuid::Uuid;
 
 use crate::{
     agent_profile::FrozenAgentRuntimeConfig,
+    camp_content::{StructuredCampMessageSegment, canonical_content_digest},
     collaboration::exhaust_camp_turn_execution_budget,
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
         DomainCommandGateway, EntityReference, sealed,
     },
     context::queue_async_camp_summaries,
-    context_index::{camp_message_content_digest, index_camp_message},
+    context_index::index_camp_message,
     conversation_input::{
         cancel_turn_inputs, turn_has_failed_or_cancelled_input, turn_has_pending_input,
     },
@@ -2380,21 +2381,26 @@ impl ExecutionRuntimeService {
             )?;
             let addressed_agents = active_camp_agent_ids(transaction, &target.camp_id)?;
             let addressed_agents_json = serde_json::to_string(&addressed_agents)?;
-            let content_digest = camp_message_content_digest(&envelope.payload.final_output);
+            let structured_content = vec![StructuredCampMessageSegment::Text {
+                text: envelope.payload.final_output.clone(),
+            }];
+            let structured_content_json = serde_json::to_string(&structured_content)?;
+            let content_digest = canonical_content_digest(&structured_content)?;
             let reply_to_camp_message_id =
                 (target.trigger_type == "camp_message").then_some(target.trigger_id.as_str());
             transaction.execute(
                 r#"
                 INSERT INTO camp_message(
                     id, camp_id, sequence,
-                    author_type, author_id, source_agent_run_id, body, content_digest,
+                    author_type, author_id, source_agent_run_id, body,
+                    structured_content_json, content_digest,
                     address_mode, addressed_agent_ids_json,
                     reply_to_camp_message_id, camp_turn_id, agent_run_id,
                     tombstoned_at, version, created_at, updated_at
                 ) VALUES (
-                    ?1, ?2, ?3, 'agent', ?4, ?5, ?6, ?7,
-                    'broadcast', ?8, ?9, ?10, ?5,
-                    NULL, 1, ?11, ?11
+                    ?1, ?2, ?3, 'agent', ?4, ?5, ?6, ?7, ?8,
+                    'broadcast', ?9, ?10, ?11, ?5,
+                    NULL, 1, ?12, ?12
                 )
                 "#,
                 params![
@@ -2404,6 +2410,7 @@ impl ExecutionRuntimeService {
                     target.agent_id,
                     target.agent_run_id,
                     envelope.payload.final_output,
+                    structured_content_json,
                     content_digest,
                     addressed_agents_json,
                     reply_to_camp_message_id,
@@ -3588,7 +3595,7 @@ mod tests {
         },
         collaboration::{
             AddCampMemberCommand, CollaborationService, CreateCampCommand, ExecutionRequest,
-            MessageAddressSpec, SendCampMessageCommand,
+            TestCampMessageAddress, TestCampMessageCommand,
         },
         command::CommandResultStatus,
         execution_budget::CampTurnExecutionBudgetRequest,
@@ -4067,17 +4074,17 @@ mod tests {
         let mut run_ids = Vec::new();
         for index in 0..2 {
             let turn = collaboration
-                .send_camp_message(
+                .send_test_camp_message(
                     &mut database,
                     &user_envelope(
                         &format!("runtime-turn-{index}"),
                         Some(&camp_id),
-                        SendCampMessageCommand {
+                        TestCampMessageCommand {
                             camp_id: camp_id.clone(),
                             draft_revision: None,
                             body: format!("执行职责 {index}"),
                             prepared_attachment_ids: Vec::new(),
-                            address: MessageAddressSpec::Default,
+                            address: TestCampMessageAddress::Default,
                             reply_to_camp_message_id: None,
                             execution: Some(ExecutionRequest {
                                 task_id: None,
@@ -4361,17 +4368,17 @@ mod tests {
             .unwrap();
         configure_test_runtime(&database, &["agent_2"]);
         let sent = collaboration
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut database,
                 &user_envelope(
                     "dispatch-reject-send",
                     Some(&camp_id),
-                    SendCampMessageCommand {
+                    TestCampMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "消息必须保留".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
                             task_id: None,
@@ -4482,17 +4489,17 @@ mod tests {
             .unwrap();
         configure_test_runtime(&database, &["agent_2"]);
         let sent = collaboration
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut database,
                 &user_envelope(
                     "budget-restart-send",
                     Some(&camp_id),
-                    SendCampMessageCommand {
+                    TestCampMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "执行一个受 deadline 约束的职责".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
                             task_id: None,
@@ -4694,17 +4701,17 @@ mod tests {
             .unwrap();
         configure_test_runtime(&database, &["agent_2"]);
         let sent = collaboration
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut database,
                 &user_envelope(
                     "cancel-send",
                     Some(&camp_id),
-                    SendCampMessageCommand {
+                    TestCampMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "开始一项可取消职责".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
                             task_id: None,
@@ -4888,17 +4895,17 @@ mod tests {
         }
         configure_test_runtime(&database, &["agent_2", "agent_1"]);
         let queued = collaboration
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut database,
                 &user_envelope(
                     "fanout-runtime-message",
                     Some(&camp_id),
-                    SendCampMessageCommand {
+                    TestCampMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "请独立分析并公开各自结论。".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Explicit {
+                        address: TestCampMessageAddress::Explicit {
                             agent_ids: vec!["agent_2".to_string(), "agent_1".to_string()],
                         },
                         reply_to_camp_message_id: None,

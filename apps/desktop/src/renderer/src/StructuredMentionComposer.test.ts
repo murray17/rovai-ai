@@ -70,7 +70,7 @@ describe('StructuredMentionComposer', () => {
     }))
 
     expect(markup).toContain('@改名后的洛可')
-    expect(markup).toContain('data-agent-profile-id="agent_1"')
+    expect(markup).toContain('data-agent-id="agent_1"')
   })
 
   it('offers a single all-members option and never removes an already-mentioned member', () => {

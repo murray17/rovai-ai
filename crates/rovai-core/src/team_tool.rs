@@ -1239,7 +1239,7 @@ impl TeamToolService {
             let model_payload = json!({
                 "source": {
                     "type": "member_call",
-                    "senderMemberId": current.agent_id,
+                    "senderAgentId": current.agent_id,
                     "senderName": sender_name,
                 },
                 "message": envelope.payload.content,
@@ -1377,8 +1377,8 @@ impl TeamToolService {
                     "acceptanceReceiptId": acceptance_receipt_id,
                     "commandId": envelope.command_id,
                     "campTurnId": current.camp_turn_id,
-                    "senderMemberId": current.agent_id,
-                    "recipientMemberId": recipient_agent_id,
+                    "senderAgentId": current.agent_id,
+                    "recipientAgentId": recipient_agent_id,
                     "sourceAgentRunId": current.agent_run_id,
                     "conversationInputId": conversation_input_id,
                     "inboxMessageId": inbox_message_id,
@@ -1968,7 +1968,7 @@ mod tests {
         agent_profile::configure_test_runtime,
         collaboration::{
             AddCampMemberCommand, CollaborationService, CreateCampCommand, CreateTaskCommand,
-            ExecutionRequest, MessageAddressSpec, SendCampMessageCommand,
+            ExecutionRequest, TestCampMessageAddress, TestCampMessageCommand,
         },
         command::{CommandGatewayError, CommandResultStatus},
         context::{
@@ -2064,17 +2064,17 @@ mod tests {
                 .expect("Task should be created");
             let task_id = task.result.payload["taskId"].as_str().unwrap().to_string();
             let send = collaboration
-                .send_camp_message(
+                .send_test_camp_message(
                     &mut database,
                     &user_envelope(
                         "queue-source-run",
                         Some(&camp_id),
-                        SendCampMessageCommand {
+                        TestCampMessageCommand {
                             camp_id: camp_id.clone(),
                             draft_revision: None,
                             body: "Start the collaboration".to_string(),
                             prepared_attachment_ids: Vec::new(),
-                            address: MessageAddressSpec::Explicit {
+                            address: TestCampMessageAddress::Explicit {
                                 agent_ids: vec!["agent_1".to_string()],
                             },
                             reply_to_camp_message_id: None,
@@ -2360,7 +2360,6 @@ mod tests {
         );
         for forbidden in [
             "senderAgentId",
-            "senderMemberId",
             "campId",
             "sourceAgentRunId",
             "executionEpoch",
@@ -2844,7 +2843,7 @@ mod tests {
         assert_eq!(target_run_id, None);
         let payload: Value = serde_json::from_str(&payload_json).unwrap();
         assert_eq!(payload["source"]["type"], "member_call");
-        assert_eq!(payload["source"]["senderMemberId"], "agent_1");
+        assert_eq!(payload["source"]["senderAgentId"], "agent_1");
         assert_eq!(payload["source"]["senderName"], "小狐狸");
         assert!(payload["source"].get("returnPolicy").is_none());
         assert_eq!(payload["message"], "Please handle persist-first");
@@ -3292,7 +3291,7 @@ mod tests {
         assert!(
             context
                 .rendered_payload
-                .contains("\"senderMemberId\": \"agent_1\"")
+                .contains("\"senderAgentId\": \"agent_1\"")
         );
         assert!(
             context

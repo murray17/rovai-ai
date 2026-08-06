@@ -53,7 +53,11 @@ describe('MCP settings', () => {
   it('keeps MCP assignment neutral for an Antigravity member', () => {
     const antigravity = {
       ...agent(),
-      runtimeSelection: { adapterKind: 'antigravity-app' as const }
+      runtimeConfiguration: {
+        adapterKind: 'antigravity-app' as const,
+        model: { mode: 'runtime_default' as const },
+        permissions: { adapterKind: 'antigravity-app' as const, schemaVersion: 1, values: {} }
+      }
     }
     const server: McpServerView = {
       serverId: '0241f33e-6ea5-4468-9f55-b048ffbbfdbf',
@@ -96,8 +100,7 @@ function agent(): AgentProfile {
     growthTopic: '',
     defaultCapabilities: [],
     presence: 'present',
-    runtimeSelection: null,
-    runtimePreference: null,
+    runtimeConfiguration: null,
     runtimeReadiness: { status: 'runtime_not_configured', blockers: [] },
     memberOrder: 0,
     version: 1,

@@ -118,7 +118,7 @@ try {
   await replaceLabeledInput(first.cdp, '名称', '小狐狸副本')
   await clickButton(first.cdp, '.member-dialog button', '创建')
   await waitForExpression(first.cdp, `!document.querySelector('.member-dialog')`, 30_000)
-  let presetCopy = (await request(first.cdp, 'agents.list'))
+  let presetCopy = (await request(first.cdp, 'members.list'))
     .find((profile) => profile.displayName === '小狐狸副本')
   assert(
     /^agent_[1-9]\d*$/.test(presetCopy?.agentId ?? '')
@@ -133,13 +133,13 @@ try {
   await clickElementContaining(first.cdp, '.member-avatar-dialog .member-preset-card', '小狐狸')
   await clickButton(first.cdp, '.member-avatar-dialog button', '保存角色图片')
   await waitForExpression(first.cdp, `!document.querySelector('.member-avatar-dialog')`, 30_000)
-  presetCopy = (await request(first.cdp, 'agents.list'))
+  presetCopy = (await request(first.cdp, 'members.list'))
     .find((profile) => profile.displayName === '小狐狸副本')
   assert(
     presetCopy?.avatarRef === 'rovai://member-avatar/builtin/luoke/v1',
     `Independent built-in appearance save failed: ${JSON.stringify(presetCopy)}`
   )
-  const canonicalLuoke = (await request(first.cdp, 'agents.list'))
+  const canonicalLuoke = (await request(first.cdp, 'members.list'))
     .find((profile) => profile.agentId === 'agent_1')
   assert(
     canonicalLuoke?.displayName === '小狐狸' && !Object.hasOwn(canonicalLuoke, 'handle'),
@@ -164,7 +164,7 @@ try {
   second = await launchApp(firstPort + 1, 1040, 700)
   await setTheme(second.cdp, 'night')
   await assertCanonicalSeedAvatars(second.cdp, 'Upgraded database')
-  const upgradedProfiles = await request(second.cdp, 'agents.list')
+  const upgradedProfiles = await request(second.cdp, 'members.list')
   const upgradedQilu = upgradedProfiles.find((profile) => profile.agentId === 'agent_4')
   const restartedCustom = upgradedProfiles.find(
     (profile) => profile.displayName === customDisplayName
@@ -189,7 +189,7 @@ try {
     30_000)
   await clickButton(second.cdp, '.member-dialog button', '保存身份')
   await waitForExpression(second.cdp, `!document.querySelector('.member-dialog')`, 30_000)
-  const readyCustom = (await request(second.cdp, 'agents.list'))
+  const readyCustom = (await request(second.cdp, 'members.list'))
     .find((profile) => profile.displayName === customDisplayName)
   assert(
     readyCustom?.runtimeReadiness?.status === 'ready',
@@ -239,7 +239,7 @@ try {
   await evaluate(second.cdp, `document.querySelector('.member-detail-menu summary')?.click()`)
   await clickButton(second.cdp, '.member-detail-menu [role="menuitem"]', '暂时离队')
   await waitForSelector(second.cdp, '.member-detail-statuses .presence-away')
-  const awayCustom = (await request(second.cdp, 'agents.list'))
+  const awayCustom = (await request(second.cdp, 'members.list'))
     .find((profile) => profile.displayName === customDisplayName)
   assert(awayCustom?.presence === 'away', 'Custom Profile did not become away')
 
@@ -266,7 +266,7 @@ try {
   await waitForExpression(third.cdp,
     `document.querySelector('.member-portrait img[src^="blob:"]')?.naturalWidth > 0`)
   assert(
-    (await request(third.cdp, 'agents.list'))
+    (await request(third.cdp, 'members.list'))
       .find((profile) => profile.displayName === customDisplayName)?.presence === 'away',
     'Away managed Profile disappeared after a rendition file was lost'
   )
@@ -310,7 +310,7 @@ try {
 }
 
 async function assertCanonicalSeedAvatars(cdp, context) {
-  const profiles = await request(cdp, 'agents.list')
+  const profiles = await request(cdp, 'members.list')
   for (const [profileId, role] of [['agent_1', 'luoke'], ['agent_2', 'muwa'], ['agent_3', 'mianzhi'], ['agent_4', 'qilu']]) {
     const profile = profiles.find((candidate) => candidate.agentId === profileId)
     assert(
@@ -369,7 +369,7 @@ async function assertThemeRendition(cdp, theme) {
 
 async function createManagedProfile(cdp, displayName) {
   const avatarRef = await saveManagedAvatar(cdp, '#39777a', '#7db8b6')
-  const result = await request(cdp, 'agents.create', {
+  const result = await request(cdp, 'members.create', {
     commandId: crypto.randomUUID(),
     command: {
       displayName,
@@ -382,8 +382,8 @@ async function createManagedProfile(cdp, displayName) {
   })
   assert(result.status === 'applied', `Could not create managed Profile: ${JSON.stringify(result)}`)
   const agentId = result.resultEntity.entityId
-  const profile = await request(cdp, 'agents.get', { agentId })
-  const avatarResult = await request(cdp, 'agents.avatar.set', {
+  const profile = await request(cdp, 'members.get', { agentId })
+  const avatarResult = await request(cdp, 'members.avatar.set', {
     commandId: crypto.randomUUID(),
     command: { agentId, expectedVersion: profile.version, avatarRef }
   })

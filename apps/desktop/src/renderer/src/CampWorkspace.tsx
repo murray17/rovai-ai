@@ -81,13 +81,10 @@ export function runtimeRecoveryReason(blockerCode: string): string {
       return '所选 Agent 运行时已停用'
     case 'runtime_probe_required':
       return 'Agent 运行时需要重新检查'
-    case 'runtime_selection_resolution_mismatch':
+    case 'runtime_configuration_adapter_mismatch':
       return '运行配置已变更，请重新选择'
     case 'conversation_runtime_override_unsupported':
       return '当前对话的运行配置不受支持'
-    case 'runtime_selection_unresolved':
-    case 'runtime_configuration_incomplete':
-      return '运行配置尚未完成'
     case 'runtime_model_adapter_mismatch':
     case 'runtime_model_unavailable':
     case 'runtime_permission_adapter_mismatch':
@@ -1181,8 +1178,8 @@ export function CampWorkspace({
                             <div className="message-body">
                               <div className="bubble-meta">
                                 <strong>{author}</strong>
-                                {campMessage.authorType === 'agent' && authorProfile?.runtimeSelection && (
-                                  <span>{runtimeAdapterLabel(authorProfile.runtimeSelection.adapterKind)}</span>
+                                {campMessage.authorType === 'agent' && authorProfile?.runtimeConfiguration && (
+                                  <span>{runtimeAdapterLabel(authorProfile.runtimeConfiguration.adapterKind)}</span>
                                 )}
                                 <time title={`#${campMessage.sequence}`}>{messageClockTime(campMessage.createdAt)}</time>
                               </div>
@@ -1966,8 +1963,8 @@ function mentionPresenceLabel(presence: AgentProfile['presence']): string {
 
 function mentionRuntimeLabel(profile: AgentProfile): string {
   const readiness = runtimeReadinessLabel(profile.runtimeReadiness.status)
-  return profile.runtimeSelection
-    ? `${runtimeAdapterLabel(profile.runtimeSelection.adapterKind)} · ${readiness}`
+  return profile.runtimeConfiguration
+    ? `${runtimeAdapterLabel(profile.runtimeConfiguration.adapterKind)} · ${readiness}`
     : readiness
 }
 
@@ -2282,7 +2279,7 @@ function StructuredMessageBody({
         return (
           <span
             className={`message-mention-token${available ? '' : ' is-unavailable'}${interactive ? ' is-interactive' : ''}`}
-            data-agent-profile-id={segment.agentId}
+            data-agent-id={segment.agentId}
             role={interactive ? 'button' : undefined}
             tabIndex={interactive ? 0 : undefined}
             aria-label={interactive && member ? `查看${member.displayName}的基础信息` : undefined}
@@ -2522,7 +2519,7 @@ function AgentRunConversationMessage({
       <div className="message-body">
         <div className="bubble-meta">
           <strong>{memberName}</strong>
-          {profile?.runtimeSelection && <span>{runtimeAdapterLabel(profile.runtimeSelection.adapterKind)}</span>}
+          {profile?.runtimeConfiguration && <span>{runtimeAdapterLabel(profile.runtimeConfiguration.adapterKind)}</span>}
           <time title={run.id}>{messageClockTime(run.startedAt ?? run.createdAt)}</time>
           {(cancelling || run.status !== 'cancelled') && (
             <span className={`run-message-state tone-${presentation.tone}`}>{presentation.label}</span>

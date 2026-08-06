@@ -157,7 +157,7 @@ pub struct CampMessageView {
     pub author_id: String,
     pub source_agent_run_id: Option<String>,
     pub body: String,
-    pub content: Option<StructuredCampMessageContent>,
+    pub content: StructuredCampMessageContent,
     pub attachments: Vec<CampMessageAttachmentView>,
     pub address_mode: String,
     pub addressed_agent_ids: Value,
@@ -1220,7 +1220,7 @@ fn load_messages(
                 row.get::<_, String>(4)?,
                 row.get::<_, Option<String>>(5)?,
                 row.get::<_, String>(6)?,
-                row.get::<_, Option<String>>(7)?,
+                row.get::<_, String>(7)?,
                 row.get::<_, String>(8)?,
                 addressed,
                 row.get::<_, Option<String>>(10)?,
@@ -1241,7 +1241,7 @@ fn load_messages(
                 author_type,
                 author_id,
                 source_agent_run_id,
-                stored_body,
+                _stored_body,
                 structured_content_json,
                 address_mode,
                 addressed,
@@ -1250,17 +1250,11 @@ fn load_messages(
                 presentation,
                 created_at,
             )| {
-                let content = structured_content_json
-                    .map(|value| {
-                        serde_json::from_str::<StructuredCampMessageContent>(&value)
-                            .map(normalize_content)
-                    })
-                    .transpose()
-                    .context("CampMessage Structured Content is invalid")?;
-                let body = match &content {
-                    Some(content) => render_structured_message_content(transaction, content)?,
-                    None => stored_body,
-                };
+                let content =
+                    serde_json::from_str::<StructuredCampMessageContent>(&structured_content_json)
+                        .map(normalize_content)
+                        .context("CampMessage Structured Content is invalid")?;
+                let body = render_structured_message_content(transaction, &content)?;
                 let mut attachment_statement = transaction.prepare(
                     r#"
                     SELECT id, display_name, media_type, byte_size, preview_kind
@@ -2397,9 +2391,9 @@ mod tests {
         camp_attachment::CampAttachmentStore,
         camp_content::StructuredCampMessageSegment as Segment,
         collaboration::{
-            AddCampMemberCommand, CollaborationService, CreateCampCommand,
-            CreateCampFromFirstMessageCommand, MessageAddressSpec, ProjectBindingKind,
-            RenameCampCommand, SendCampMessageCommand,
+            AddCampMemberCommand, CollaborationService, CreateCampCommand, ProjectBindingKind,
+            RenameCampCommand, TestCampConversationCommand, TestCampMessageAddress,
+            TestCampMessageCommand,
         },
         command::{ActorRef, CommandEnvelope},
     };
@@ -2420,7 +2414,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_projects_current_names_only_for_structured_messages() {
+    fn snapshot_projects_current_names_from_structured_mentions() {
         let directory = std::env::temp_dir().join(format!(
             "rovai-read-model-structured-message-{}",
             Uuid::new_v4()
@@ -2460,17 +2454,17 @@ mod tests {
             .save_content(&mut database, &camp_id, 0, content.clone())
             .unwrap();
         collaboration
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut database,
                 &user_envelope(
                     "send-structured-read-message",
                     Some(&camp_id),
-                    SendCampMessageCommand {
+                    TestCampMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: Some(draft.revision),
                         body: String::new(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
@@ -2478,17 +2472,17 @@ mod tests {
             )
             .unwrap();
         collaboration
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut database,
                 &user_envelope(
                     "send-legacy-read-message",
                     Some(&camp_id),
-                    SendCampMessageCommand {
+                    TestCampMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "旧消息仍是 @muwa".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
@@ -2519,9 +2513,14 @@ mod tests {
                 .is_none()
         );
         assert_eq!(snapshot.messages[0].body, "请 @木瓦（新名） 处理");
-        assert_eq!(snapshot.messages[0].content, Some(content));
+        assert_eq!(snapshot.messages[0].content, content);
         assert_eq!(snapshot.messages[1].body, "旧消息仍是 @muwa");
-        assert_eq!(snapshot.messages[1].content, None);
+        assert_eq!(
+            snapshot.messages[1].content,
+            vec![Segment::Text {
+                text: "旧消息仍是 @muwa".to_string(),
+            }]
+        );
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
@@ -2588,17 +2587,17 @@ mod tests {
             )
             .unwrap();
         collaboration
-            .send_camp_message(
+            .send_test_camp_message(
                 database,
                 &user_envelope(
                     &format!("navigation-message-{command_suffix}"),
                     Some(&camp_id),
-                    SendCampMessageCommand {
+                    TestCampMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: format!("用户消息 {command_suffix}"),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
@@ -2679,16 +2678,16 @@ mod tests {
         configure_test_runtime(&database, &["agent_1"]);
         let collaboration = CollaborationService::default();
         let created = collaboration
-            .create_camp_from_first_message(
+            .create_test_camp_conversation(
                 &mut database,
                 &user_envelope(
                     "navigation-running-camp",
                     None,
-                    CreateCampFromFirstMessageCommand {
+                    TestCampConversationCommand {
                         project_path: directory.join("workspace").to_string_lossy().to_string(),
                         project_binding_kind: crate::collaboration::ProjectBindingKind::Directory,
                         body: "请开始工作".to_string(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         purpose: "执行测试".to_string(),
                         expected_output: "测试结果".to_string(),
                     },
@@ -2837,17 +2836,17 @@ mod tests {
             )
             .unwrap();
         collaboration
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut database,
                 &user_envelope(
                     "read-first-message",
                     Some(&camp_id),
-                    SendCampMessageCommand {
+                    TestCampMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "快照内消息".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
@@ -2867,17 +2866,17 @@ mod tests {
         );
 
         collaboration
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut database,
                 &user_envelope(
                     "read-after-snapshot",
                     Some(&camp_id),
-                    SendCampMessageCommand {
+                    TestCampMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "快照后消息".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: None,
                     },
@@ -2936,16 +2935,16 @@ mod tests {
         let mut database = Database::open(&directory).unwrap();
         configure_test_runtime(&database, &["agent_1"]);
         let created = CollaborationService::default()
-            .create_camp_from_first_message(
+            .create_test_camp_conversation(
                 &mut database,
                 &user_envelope(
                     "evidence-page-create",
                     None,
-                    CreateCampFromFirstMessageCommand {
+                    TestCampConversationCommand {
                         project_path: workspace.to_string_lossy().to_string(),
                         project_binding_kind: ProjectBindingKind::Directory,
                         body: "记录执行过程".to_string(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         purpose: "验证执行过程分页".to_string(),
                         expected_output: "可恢复的执行过程".to_string(),
                     },
@@ -3104,16 +3103,16 @@ mod tests {
         let mut database = Database::open(&directory).unwrap();
         configure_test_runtime(&database, &["agent_1", "agent_2"]);
         let created = CollaborationService::default()
-            .create_camp_from_first_message(
+            .create_test_camp_conversation(
                 &mut database,
                 &user_envelope(
                     "context-read-create",
                     None,
-                    CreateCampFromFirstMessageCommand {
+                    TestCampConversationCommand {
                         project_path: directory.join("workspace").to_string_lossy().to_string(),
                         project_binding_kind: crate::collaboration::ProjectBindingKind::Directory,
                         body: "请协作检查上下文".to_string(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         purpose: "检查上下文".to_string(),
                         expected_output: "可读结果".to_string(),
                     },

@@ -6,6 +6,7 @@ import type {
   AdapterInstallation,
   AgentProfile,
   AgentRunExecutionEvidenceView,
+  CampMessageView,
   CampSnapshot,
   CanonicalRuntimeActivityView,
   HealthStatus
@@ -142,7 +143,7 @@ describe('task event projections', () => {
       authorId: presentation ? 'task-state' : 'local-user',
       sourceAgentRunId: null,
       body: presentation ? 'legacy task status' : id,
-      content: null,
+      content: [{ kind: 'text', text: presentation ? 'legacy task status' : id }],
       attachments: [],
       addressMode: presentation ? 'broadcast' : 'default',
       addressedAgentIds: [],
@@ -405,7 +406,7 @@ describe('task event projections', () => {
   })
 
   it('projects one terminal Stop outcome at the authoritative cancellation boundary', () => {
-    const userMessage = {
+    const userMessage: CampMessageView = {
       id: 'message-stop',
       sequence: 1,
       timelineGlobalSequence: 10,
@@ -413,7 +414,7 @@ describe('task event projections', () => {
       authorId: 'local-user',
       sourceAgentRunId: null,
       body: '停止这个执行',
-      content: null,
+      content: [{ kind: 'text', text: '停止这个执行' }],
       attachments: [],
       addressMode: 'default' as const,
       addressedAgentIds: ['agent-1'],
@@ -664,11 +665,8 @@ describe('task event projections', () => {
       agentId: 'agent_1',
       displayName: '洛可',
       memberOrder: 1,
-      runtimeSelection: {
-        adapterKind: 'codex-cli'
-      },
-      runtimePreference: {
-        installationId: 'installation-codex',
+      runtimeConfiguration: {
+        adapterKind: 'codex-cli',
         model: { mode: 'runtime_default' },
         permissions: {
           adapterKind: 'codex-cli',
@@ -997,7 +995,7 @@ describe('task event projections', () => {
       ...profile,
       agentId: 'agent_1',
       displayName: '洛可',
-      runtimePreference: null,
+      runtimeConfiguration: null,
       runtimeReadiness: { status: 'runtime_not_configured', blockers: [] }
     }
     const snapshot: CampSnapshot = {
@@ -1285,7 +1283,7 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-label="复制这条消息"')
     expect(markup).toContain('class="message-surface"')
     expect(markup).toContain('class="message-mention-token is-interactive"')
-    expect(markup).toContain('data-agent-profile-id="agent_2"')
+    expect(markup).toContain('data-agent-id="agent_2"')
     expect(markup).toContain('role="button"')
     expect(markup).toContain('tabindex="0"')
     expect(markup).toContain('aria-label="查看沐瓦的基础信息"')
@@ -1421,7 +1419,7 @@ describe('task event projections', () => {
         messages: [...snapshot.messages, {
           id: 'message-agent', sequence: 2, timelineGlobalSequence: 4,
           authorType: 'agent' as const, authorId: 'agent_2',
-          sourceAgentRunId: 'run-muwa', body: '复制入口已完成。', content: null, addressMode: 'broadcast' as const,
+          sourceAgentRunId: 'run-muwa', body: '复制入口已完成。', content: [{ kind: 'text', text: '复制入口已完成。' }], addressMode: 'broadcast' as const,
           attachments: [],
           addressedAgentIds: [], replyToCampMessageId: 'message-user',
           campTurnId: 'turn-1', presentation: null, createdAt: '2026-07-28T05:02:00Z'
@@ -1617,7 +1615,7 @@ describe('task event projections', () => {
   })
 
   it('renders delivered A2A content as a directed sender-authored conversation message', () => {
-    const legacyA2aMessage = {
+    const legacyA2aMessage: CampMessageView = {
       id: 'legacy-a2a-state',
       sequence: 1,
       timelineGlobalSequence: 2,
@@ -1625,7 +1623,7 @@ describe('task event projections', () => {
       authorId: 'a2a-state',
       sourceAgentRunId: null,
       body: 'legacy delivery status card',
-      content: null,
+      content: [{ kind: 'text', text: 'legacy delivery status card' }],
       attachments: [],
       addressMode: 'broadcast' as const,
       addressedAgentIds: [],
@@ -2315,14 +2313,14 @@ describe('task event projections', () => {
     expect(markup).toContain('选择产品并使用当前能力快照')
   })
 
-  it('persists a missing Product Runtime choice and links to its checks', () => {
+  it('keeps a missing Product Runtime as an unsaved draft and links to its checks', () => {
     const markup = renderToStaticMarkup(createElement(MemberRuntimeForm, {
       agent: {
         ...agentProfile(),
-        runtimeSelection: { adapterKind: 'copilot-cli' },
+        runtimeConfiguration: configuredRuntime('copilot-cli'),
         runtimeReadiness: {
-          status: 'selected_unresolved',
-          blockers: [{ code: 'runtime_selection_unresolved', detail: null }]
+          status: 'needs_attention',
+          blockers: [{ code: 'adapter_installation_missing', detail: null }]
         }
       },
       installations: [],
@@ -2334,7 +2332,7 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('GitHub Copilot')
-    expect(markup).toContain('未安装的 Agent 运行时也可以保存')
+    expect(markup).toContain('只会在 Agent 运行时可用并通过当前能力快照校验后原子保存')
     expect(markup).toContain('未安装')
     expect(markup).toContain('前往 Agent 运行时')
     expect(markup).toContain('<button class="primary-button" disabled="">保存运行时</button>')
@@ -2346,10 +2344,10 @@ describe('task event projections', () => {
     const markup = renderToStaticMarkup(createElement(MemberRuntimeForm, {
       agent: {
         ...agentProfile(),
-        runtimeSelection: { adapterKind: 'codebuddy-cli' },
+        runtimeConfiguration: configuredRuntime('codebuddy-cli'),
         runtimeReadiness: {
-          status: 'selected_unresolved',
-          blockers: [{ code: 'runtime_selection_unresolved', detail: null }]
+          status: 'needs_attention',
+          blockers: [{ code: 'runtime_authentication_required', detail: null }]
         }
       },
       installations: [],
@@ -2367,10 +2365,10 @@ describe('task event projections', () => {
     const markup = renderToStaticMarkup(createElement(MemberRuntimeForm, {
       agent: {
         ...agentProfile(),
-        runtimeSelection: { adapterKind: 'kiro-cli' },
+        runtimeConfiguration: configuredRuntime('kiro-cli'),
         runtimeReadiness: {
-          status: 'selected_unresolved',
-          blockers: [{ code: 'runtime_selection_unresolved', detail: null }]
+          status: 'needs_attention',
+          blockers: [{ code: 'runtime_probe_required', detail: null }]
         }
       },
       installations: [],
@@ -2394,7 +2392,7 @@ describe('task event projections', () => {
     const markup = renderToStaticMarkup(createElement(MemberRuntimeForm, {
       agent: {
         ...agentProfile(),
-        runtimeSelection: { adapterKind: 'kiro-cli' },
+        runtimeConfiguration: configuredRuntime('kiro-cli'),
         runtimeReadiness: { status: 'ready', blockers: [] }
       },
       installations: [],
@@ -2473,9 +2471,19 @@ function agentProfile(): AgentProfile {
     accent: '#39777a', teamRole: '开发者',
     professionalResponsibilities: '负责实现和验证。', personalityTraits: ['严谨'],
     workingPrinciples: '遵循项目规范。', growthTopic: '',
-    defaultCapabilities: [], presence: 'present', runtimeSelection: null, runtimePreference: null,
+    defaultCapabilities: [], presence: 'present', runtimeConfiguration: null,
     runtimeReadiness: { status: 'runtime_not_configured', blockers: [{ code: 'runtime_not_configured', detail: null }] },
     memberOrder: 0, version: 1, createdAt: '2026-07-22T00:00:00Z', updatedAt: '2026-07-22T00:00:00Z', removedAt: null
+  }
+}
+
+function configuredRuntime(
+  adapterKind: NonNullable<AgentProfile['runtimeConfiguration']>['adapterKind']
+): NonNullable<AgentProfile['runtimeConfiguration']> {
+  return {
+    adapterKind,
+    model: { mode: 'runtime_default' },
+    permissions: { adapterKind, schemaVersion: 1, values: {} }
   }
 }
 

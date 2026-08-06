@@ -7,7 +7,7 @@ date: 2026-08-03
 decision_scope: cross-version
 source_version: v0.33
 supersedes: []
-superseded_by: null
+superseded_by: ADR-0128
 ---
 
 # ADR-0096: Core-Owned Structured Mentions and Mention-Derived Camp Addressing

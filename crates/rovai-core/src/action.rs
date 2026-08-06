@@ -3487,7 +3487,7 @@ mod tests {
         agent_profile::configure_test_runtime,
         collaboration::{
             AddCampMemberCommand, CollaborationService, CreateCampCommand, ExecutionRequest,
-            MessageAddressSpec, SendCampMessageCommand,
+            TestCampMessageAddress, TestCampMessageCommand,
         },
         command::CommandResultStatus,
         read_model::ReadModelService,
@@ -3572,17 +3572,17 @@ mod tests {
             .unwrap();
         configure_test_runtime(&database, &["agent_2"]);
         let turn = collaboration
-            .send_camp_message(
+            .send_test_camp_message(
                 &mut database,
                 &user_envelope(
                     "start-run",
                     Some(&camp_id),
-                    SendCampMessageCommand {
+                    TestCampMessageCommand {
                         camp_id: camp_id.clone(),
                         draft_revision: None,
                         body: "执行一个受限动作".to_string(),
                         prepared_attachment_ids: Vec::new(),
-                        address: MessageAddressSpec::Default,
+                        address: TestCampMessageAddress::Default,
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
                             task_id: None,

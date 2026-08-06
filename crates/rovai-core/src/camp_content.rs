@@ -38,7 +38,7 @@ pub fn validate_content(content: &[StructuredCampMessageSegment]) -> Result<()> 
             }
             StructuredCampMessageSegment::MemberMention { agent_id } => {
                 if agent_id.is_empty() || agent_id.trim() != agent_id || agent_id.len() > 256 {
-                    anyhow::bail!("Member Mention requires a canonical Agent Profile ID");
+                    anyhow::bail!("Member Mention requires a canonical Agent ID");
                 }
             }
             StructuredCampMessageSegment::AllMembersMention => {}

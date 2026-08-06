@@ -133,11 +133,11 @@ try {
   if (firstMessage?.attachments?.length !== 1
       || firstManifests.length !== 2
       || firstManifests.some((manifest) =>
-        manifest.formatterVersion !== 5
+        manifest.formatterVersion !== 8
         || manifest.attachmentRefs?.length !== 1
         || manifest.attachmentRefs[0]?.attachmentId !== attachment.id
       )
-      || laterManifest?.formatterVersion !== 5
+      || laterManifest?.formatterVersion !== 8
       || laterManifest.attachmentRefs?.length !== 0) {
     throw new Error(`Frozen attachment context evidence is invalid: ${JSON.stringify({
       firstMessage,

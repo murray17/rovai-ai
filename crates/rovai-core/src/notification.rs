@@ -13,6 +13,7 @@ use crate::{
 
 const DEFAULT_PAGE_LIMIT: usize = 50;
 const MAX_PAGE_LIMIT: usize = 100;
+const IN_APP_NOTIFICATION_ITEM_SCHEMA_VERSION: i64 = 2;
 
 pub(crate) fn maintain_in_app_notification_retention(
     connection: &rusqlite::Connection,
@@ -243,7 +244,7 @@ impl InAppNotificationService {
             .flatten();
         transaction.commit()?;
         Ok(InAppNotificationInbox {
-            schema_version: 2,
+            schema_version: IN_APP_NOTIFICATION_ITEM_SCHEMA_VERSION,
             through_sequence,
             unread_count,
             items,
@@ -276,7 +277,7 @@ impl InAppNotificationService {
         if reset_required {
             transaction.commit()?;
             return Ok(InAppNotificationCreatedBatch {
-                schema_version: 1,
+                schema_version: IN_APP_NOTIFICATION_ITEM_SCHEMA_VERSION,
                 requested_after_sequence: after_sequence,
                 next_sequence: through_sequence,
                 through_sequence,
@@ -315,7 +316,7 @@ impl InAppNotificationService {
         };
         transaction.commit()?;
         Ok(InAppNotificationCreatedBatch {
-            schema_version: 1,
+            schema_version: IN_APP_NOTIFICATION_ITEM_SCHEMA_VERSION,
             requested_after_sequence: after_sequence,
             next_sequence,
             through_sequence,

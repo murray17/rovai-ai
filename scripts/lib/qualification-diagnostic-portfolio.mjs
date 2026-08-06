@@ -384,10 +384,10 @@ export async function verifyDiagnosticTrialConfiguration({
   }
   for (const observed of environmentManifest.team) {
     const expected = expectedMembers.get(legacyDiagnosticAgentId(observed.agentId))
-    const model = observed.runtimePreference?.model
-    const permissions = observed.runtimePreference?.permissions
+    const model = observed.runtimeConfiguration?.model
+    const permissions = observed.runtimeConfiguration?.permissions
     if (!expected
-        || observed.runtimeSelection?.adapterKind !== expected.adapterKind
+        || observed.runtimeConfiguration?.adapterKind !== expected.adapterKind
         || model?.modelId !== expected.modelId
         || asDigest(digestJson(model?.options ?? {})) !== expected.modelOptionsDigest
         || asDigest(digestJson(model)) !== expected.modelConfigurationDigest

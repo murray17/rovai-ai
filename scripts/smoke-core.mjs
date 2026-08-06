@@ -26,7 +26,7 @@ try {
 
   core = startCore(dataDir)
   const health = await core.request('health.check')
-  const profiles = await core.request('agents.list')
+  const profiles = await core.request('members.list')
   const initialNavigation = await core.request('navigation.snapshot')
   if (!health.core.ok || !health.database.ok || !health.git.installed) {
     throw new Error(`Core dependencies are not healthy: ${JSON.stringify(health)}`)

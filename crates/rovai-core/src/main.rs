@@ -37,12 +37,13 @@ use rovai_core::{
         RecordActionResultCommand, RecordObservedActionCommand, ResolveActionApprovalCommand,
     },
     agent_profile::{
-        AdapterInstallationView, AdapterKind, AgentProfileService, ClearAgentProfileRuntimeCommand,
-        CreateAdapterInstallationCommand, CreateAgentProfileCommand, ManagedProbeFailure,
-        RecordAdapterCapabilitySnapshotCommand, RemoveMemberCommand, ReorderAgentProfilesCommand,
-        RuntimeReadinessStatus, SetAgentProfileAvatarCommand, SetAgentProfileRuntimeCommand,
-        SetMemberPresenceCommand, UpdateAdapterInstallationCommand, UpdateAgentProfileCommand,
-        VerifiedManagedInstallation,
+        AdapterInstallationView, AdapterKind, AgentProfileService,
+        ClearMemberRuntimeConfigurationCommand, CreateAdapterInstallationCommand,
+        CreateAgentProfileCommand, ManagedProbeFailure, RecordAdapterCapabilitySnapshotCommand,
+        RemoveMemberCommand, ReorderAgentProfilesCommand, RuntimeReadinessStatus,
+        SetAgentProfileAvatarCommand, SetMemberPresenceCommand,
+        SetMemberRuntimeConfigurationCommand, UpdateAdapterInstallationCommand,
+        UpdateAgentProfileCommand, VerifiedManagedInstallation,
     },
     agent_runtime_adapter::{
         AcpProbeObservation, AgentRuntimeAdapterRegistry, AntigravityProbeObservation,
@@ -65,8 +66,8 @@ use rovai_core::{
     },
     collaboration::{
         CampCollaborationMode, ChangeDefaultLeadCommand, CollaborationService, CreateCampCommand,
-        CreateTaskCommand, DeleteCampCommand, ExecutionRequest, MessageAddressSpec,
-        ProjectBindingKind, ReconcileDefaultLeadCommand, RenameCampCommand, SendCampMessageCommand,
+        CreateTaskCommand, DeleteCampCommand, ExecutionRequest, ProjectBindingKind,
+        ReconcileDefaultLeadCommand, RenameCampCommand, SendUserCampDraftCommand,
         TaskAssigneeFilter, TaskAssigneeUpdate, TaskListQuery, TaskStatus, UpdateTaskCommand,
     },
     command::{
@@ -412,19 +413,6 @@ struct SendCampMessageParams {
     command_id: String,
     camp_id: String,
     draft_revision: i64,
-    reply_to_camp_message_id: Option<String>,
-    execution: Option<ExecutionRequest>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct LegacySendCampMessageParams {
-    command_id: String,
-    camp_id: String,
-    body: String,
-    #[serde(default)]
-    prepared_attachment_ids: Vec<String>,
-    address: MessageAddressSpec,
     reply_to_camp_message_id: Option<String>,
     execution: Option<ExecutionRequest>,
 }
@@ -1243,8 +1231,8 @@ impl Core {
                 .into_iter()
                 .filter_map(|profile| {
                     profile
-                        .runtime_selection
-                        .map(|selection| selection.adapter_kind)
+                        .runtime_configuration
+                        .map(|configuration| configuration.adapter_kind)
                 })
                 .collect::<BTreeSet<_>>();
             let installations = AgentProfileService::default()
@@ -1332,16 +1320,9 @@ impl Core {
             let result: Result<Value> = match intent.request_method.as_str() {
                 "camp.messages.send" => {
                     match serde_json::from_str::<SendCampMessageParams>(&intent.payload_json) {
-                        Ok(params) => self.send_camp_message_request(params).await,
-                        Err(current_error) => {
-                            match serde_json::from_str::<LegacySendCampMessageParams>(
-                                &intent.payload_json,
-                            ) {
-                                Ok(params) => self.send_legacy_camp_message_request(params).await,
-                                Err(legacy_error) => Err(anyhow::anyhow!(
-                                    "persisted pending send request is neither current ({current_error}) nor legacy-compatible ({legacy_error})"
-                                )),
-                            }
+                        Ok(params) => self.send_test_camp_message_request(params).await,
+                        Err(error) => {
+                            Err(error).context("persisted pending send request is invalid")
                         }
                     }
                 }
@@ -2093,13 +2074,13 @@ impl Core {
                 "version": env!("CARGO_PKG_VERSION"),
                 "dataDir": self.data_dir,
             })),
-            "agents.list" => {
+            "members.list" => {
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(
                     AgentProfileService::default().list_profiles(&database)?,
                 )?)
             }
-            "agents.get" => {
+            "members.get" => {
                 let params: AgentIdParams = serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
                 let profile = AgentProfileService::default()
@@ -2107,7 +2088,7 @@ impl Core {
                     .context("AgentProfile does not exist")?;
                 Ok(serde_json::to_value(profile)?)
             }
-            "agents.memberships.list" => {
+            "members.camps.list" => {
                 let params: AgentIdParams = serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(
@@ -2115,7 +2096,7 @@ impl Core {
                         .list_camp_memberships(&database, &params.agent_id)?,
                 )?)
             }
-            "agents.create" => {
+            "members.create" => {
                 let params: UserCommandParams<CreateAgentProfileCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
@@ -2125,7 +2106,7 @@ impl Core {
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
-            "agents.update" => {
+            "members.update" => {
                 let params: UserCommandParams<UpdateAgentProfileCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
@@ -2135,7 +2116,7 @@ impl Core {
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
-            "agents.avatar.set" => {
+            "members.avatar.set" => {
                 let params: UserCommandParams<SetAgentProfileAvatarCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
@@ -2145,8 +2126,8 @@ impl Core {
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
-            "agents.runtime.set" => {
-                let params: UserCommandParams<SetAgentProfileRuntimeCommand> =
+            "members.runtime.set" => {
+                let params: UserCommandParams<SetMemberRuntimeConfigurationCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let adapter_kind = params.command.adapter_kind;
                 let agent_id = params.command.agent_id.clone();
@@ -2173,8 +2154,8 @@ impl Core {
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
-            "agents.runtime.clear" => {
-                let params: UserCommandParams<ClearAgentProfileRuntimeCommand> =
+            "members.runtime.clear" => {
+                let params: UserCommandParams<ClearMemberRuntimeConfigurationCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let agent_id = params.command.agent_id.clone();
                 let mut database = self.database.lock().await;
@@ -2190,7 +2171,7 @@ impl Core {
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
-            "agents.presence.set" => {
+            "members.presence.set" => {
                 let params: UserCommandParams<SetMemberPresenceCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
@@ -2201,7 +2182,7 @@ impl Core {
                 self.reconcile_skills_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
-            "agents.removalPreview" => {
+            "members.removalPreview" => {
                 let params: AgentIdParams = serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(
@@ -2210,7 +2191,7 @@ impl Core {
                         .context("AgentProfile does not exist")?,
                 )?)
             }
-            "agents.remove" => {
+            "members.remove" => {
                 let params: UserCommandParams<RemoveMemberCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let agent_id = params.command.agent_id.clone();
@@ -2225,7 +2206,7 @@ impl Core {
                 self.reconcile_skills_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
-            "agents.reorder" => {
+            "members.reorder" => {
                 let params: UserCommandParams<ReorderAgentProfilesCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
@@ -2644,7 +2625,7 @@ impl Core {
                         agent_id: profile.agent_id,
                         display_name: profile.display_name,
                         member_order: profile.member_order,
-                        runtime_configured: profile.runtime_preference.is_some(),
+                        runtime_configured: profile.runtime_configuration.is_some(),
                         runtime_readiness: profile.runtime_readiness.status,
                     })
                     .collect::<Vec<_>>();
@@ -3007,7 +2988,7 @@ impl Core {
             }
             "camp.messages.send" => {
                 let params: SendCampMessageParams = serde_json::from_value(request.params.clone())?;
-                self.send_camp_message_request(params).await
+                self.send_test_camp_message_request(params).await
             }
             "runtime.pendingExecution.cancel" => {
                 let params: CancelPendingExecutionParams =
@@ -3249,7 +3230,7 @@ impl Core {
         }
     }
 
-    async fn send_camp_message_request(&self, params: SendCampMessageParams) -> Result<Value> {
+    async fn send_test_camp_message_request(&self, params: SendCampMessageParams) -> Result<Value> {
         let envelope = CommandEnvelope {
             command_id: params.command_id.clone(),
             actor: ActorRef::User {
@@ -3258,12 +3239,9 @@ impl Core {
             camp_id: Some(params.camp_id.clone()),
             expected_versions: Vec::new(),
             execution_epoch: None,
-            payload: SendCampMessageCommand {
+            payload: SendUserCampDraftCommand {
                 camp_id: params.camp_id.clone(),
-                draft_revision: Some(params.draft_revision),
-                body: String::new(),
-                prepared_attachment_ids: Vec::new(),
-                address: MessageAddressSpec::Default,
+                draft_revision: params.draft_revision,
                 reply_to_camp_message_id: params.reply_to_camp_message_id.clone(),
                 execution: params.execution.clone(),
             },
@@ -3297,58 +3275,7 @@ impl Core {
                     &attachment_ids,
                 )?;
             }
-            CollaborationService::default().send_camp_message(&mut database, &envelope)?
-        };
-        Ok(json!({
-            "commandResult": execution.result,
-            "replayed": execution.replayed,
-            "preflight": null,
-            "pendingExecution": null,
-        }))
-    }
-
-    async fn send_legacy_camp_message_request(
-        &self,
-        params: LegacySendCampMessageParams,
-    ) -> Result<Value> {
-        let envelope = CommandEnvelope {
-            command_id: params.command_id.clone(),
-            actor: ActorRef::User {
-                user_id: "local-user".to_string(),
-            },
-            camp_id: Some(params.camp_id.clone()),
-            expected_versions: Vec::new(),
-            execution_epoch: None,
-            payload: SendCampMessageCommand {
-                camp_id: params.camp_id.clone(),
-                draft_revision: None,
-                body: params.body.clone(),
-                prepared_attachment_ids: params.prepared_attachment_ids.clone(),
-                address: params.address.clone(),
-                reply_to_camp_message_id: params.reply_to_camp_message_id.clone(),
-                execution: params.execution.clone(),
-            },
-        };
-        CollaborationService::validate_send_message_input(&envelope.payload)?;
-        if let Some(replay) = {
-            let database = self.database.lock().await;
-            DomainCommandGateway.replay_if_recorded(&database, &envelope)?
-        } {
-            return Ok(json!({
-                "commandResult": replay.result,
-                "replayed": true,
-                "preflight": null,
-                "pendingExecution": null,
-            }));
-        }
-        let execution = {
-            let mut database = self.database.lock().await;
-            CampAttachmentStore::new(&self.data_dir).verify_send(
-                &database,
-                &params.camp_id,
-                &params.prepared_attachment_ids,
-            )?;
-            CollaborationService::default().send_camp_message(&mut database, &envelope)?
+            CollaborationService::default().send_user_camp_draft(&mut database, &envelope)?
         };
         Ok(json!({
             "commandResult": execution.result,

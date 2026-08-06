@@ -67,19 +67,24 @@ try {
     throw new Error(`Skill settings did not load the single bundled Skill: ${JSON.stringify(initialSkillState)}`)
   }
 
-  const runtimeSelection = await evaluate(cdp, `(async () => {
-    const profile = await window.rovai.request('agents.get', { agentId: 'agent_1' })
-    return window.rovai.request('agents.runtime.set', {
+  const runtimeConfiguration = await evaluate(cdp, `(async () => {
+    const profile = await window.rovai.request('members.get', { agentId: 'agent_1' })
+    const installation = (await window.rovai.request('runtime.installations.list'))
+      .find((candidate) => candidate.adapterKind === 'codex-cli' && candidate.memberRuntimeDefaults)
+    if (!installation) throw new Error('Codex Runtime defaults are unavailable')
+    return window.rovai.request('members.runtime.set', {
       commandId: crypto.randomUUID(),
       command: {
         agentId: profile.agentId,
         expectedVersion: profile.version,
-        adapterKind: 'codex-cli'
+        adapterKind: 'codex-cli',
+        model: installation.memberRuntimeDefaults.model,
+        permissions: installation.memberRuntimeDefaults.permissions
       }
     })
   })()`)
-  if (runtimeSelection?.status !== 'applied') {
-    throw new Error(`Skill member fixture Runtime selection failed: ${JSON.stringify(runtimeSelection)}`)
+  if (runtimeConfiguration?.status !== 'applied') {
+    throw new Error(`Skill member fixture Runtime selection failed: ${JSON.stringify(runtimeConfiguration)}`)
   }
   await openSection(cdp, 'MCP')
   await waitForExpression(cdp, `Boolean(document.querySelector('.mcp-settings'))`, 5_000)

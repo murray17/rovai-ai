@@ -157,16 +157,6 @@ export interface AdapterPermissionConfig {
   values: Record<string, unknown>
 }
 
-export interface AgentRuntimePreference {
-  installationId: string
-  model: ModelSelection
-  permissions: AdapterPermissionConfig
-}
-
-export interface ProductRuntimeSelection {
-  adapterKind: AdapterKind
-}
-
 export interface MemberRuntimeConfiguration {
   adapterKind: AdapterKind
   model: ModelSelection
@@ -175,8 +165,6 @@ export interface MemberRuntimeConfiguration {
 
 export type RuntimeReadinessStatus =
   | 'runtime_not_configured'
-  | 'selected_unresolved'
-  | 'configuration_incomplete'
   | 'needs_attention'
   | 'ready'
 
@@ -194,8 +182,7 @@ export interface AgentProfile {
   growthTopic: string
   defaultCapabilities: string[]
   presence: MemberPresence
-  runtimeSelection: ProductRuntimeSelection | null
-  runtimePreference: AgentRuntimePreference | null
+  runtimeConfiguration: MemberRuntimeConfiguration | null
   runtimeReadiness: {
     status: RuntimeReadinessStatus
     blockers: Array<{ code: string; detail: string | null }>
@@ -227,15 +214,15 @@ export interface SetAgentProfileAvatarCommand {
   avatarRef: string | null
 }
 
-export interface SetAgentProfileRuntimeCommand {
+export interface SetMemberRuntimeConfigurationCommand {
   agentId: string
   expectedVersion: number
   adapterKind: AdapterKind
-  model?: ModelSelection
-  permissions?: AdapterPermissionConfig
+  model: ModelSelection
+  permissions: AdapterPermissionConfig
 }
 
-export interface ClearAgentProfileRuntimeCommand {
+export interface ClearMemberRuntimeConfigurationCommand {
   agentId: string
   expectedVersion: number
 }
@@ -377,7 +364,6 @@ export interface HealthStatus {
 
 export type StartPreflightBlockerCode =
   | 'runtime_not_configured'
-  | 'runtime_configuration_incomplete'
   | 'runtime_probe_required'
   | 'runtime_snapshot_stale'
   | 'runtime_model_unavailable'
@@ -487,11 +473,6 @@ export interface PendingExecutionIntentView {
   attemptCount: number
   retryAfter: string | null
 }
-
-export type MessageAddressSpec =
-  | { mode: 'default' }
-  | { mode: 'explicit'; agentIds: string[] }
-  | { mode: 'broadcast' }
 
 export type CampCollaborationMode = 'peer' | 'lead_coordinated'
 
@@ -655,7 +636,7 @@ export interface CampMessageView {
   authorId: string
   sourceAgentRunId: string | null
   body: string
-  content: StructuredCampMessageContent | null
+  content: StructuredCampMessageContent
   attachments: CampMessageAttachmentView[]
   addressMode: 'default' | 'explicit' | 'broadcast'
   addressedAgentIds: string[]
@@ -963,7 +944,7 @@ export interface ContextManifestView {
   mcpExposure: McpExposureSnapshot
   mcpExposureDigest: string
   mcpProjectionDigest: string
-  formatterVersion: 6
+  formatterVersion: 8
   renderedPayloadDigest: string
   delivery: RuntimeInputDeliveryView | null
   createdAt: string
@@ -1125,7 +1106,7 @@ export interface InAppNotificationInbox {
 }
 
 export interface InAppNotificationCreatedBatch {
-  schemaVersion: 1
+  schemaVersion: 2
   requestedAfterSequence: number
   nextSequence: number
   throughSequence: number
@@ -1638,18 +1619,18 @@ export type CoreMethod =
   | 'runtime.product.ensure'
   | 'runtime.product.check'
   | 'runtime.pendingExecution.cancel'
-  | 'agents.list'
-  | 'agents.get'
-  | 'agents.memberships.list'
-  | 'agents.create'
-  | 'agents.update'
-  | 'agents.avatar.set'
-  | 'agents.runtime.set'
-  | 'agents.runtime.clear'
-  | 'agents.presence.set'
-  | 'agents.removalPreview'
-  | 'agents.remove'
-  | 'agents.reorder'
+  | 'members.list'
+  | 'members.get'
+  | 'members.camps.list'
+  | 'members.create'
+  | 'members.update'
+  | 'members.avatar.set'
+  | 'members.runtime.set'
+  | 'members.runtime.clear'
+  | 'members.presence.set'
+  | 'members.removalPreview'
+  | 'members.remove'
+  | 'members.reorder'
   | 'memory.list'
   | 'memory.get'
   | 'memory.create'

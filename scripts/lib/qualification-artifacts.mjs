@@ -368,20 +368,20 @@ export function buildQualificationEnvironmentArtifact({
     item
   ]))
   const runtimes = rawEnvironment.team.map((member) => {
-    const installation = installations.get(member.runtimeSelection.adapterKind)
+    const installation = installations.get(member.runtimeConfiguration.adapterKind)
     return {
       memberId: member.agentId,
-      adapter: member.runtimeSelection.adapterKind,
+      adapter: member.runtimeConfiguration.adapterKind,
       reportedVersion: installation?.reportedVersion ?? 'unavailable',
       executableDigest: withSha256Prefix(
         installation?.executableFingerprint ?? '0'.repeat(64)
       ),
-      configurationDigest: digest(member.runtimePreference ?? null),
+      configurationDigest: digest(member.runtimeConfiguration ?? null),
       capabilityDigest: withSha256Prefix(
         installation?.capabilitiesDigest ?? digestJson(null)
       ),
-      modelSnapshotId: member.runtimePreference?.model?.modelId ?? 'unavailable',
-      modelOptionsDigest: digest(member.runtimePreference?.model?.options ?? {}),
+      modelSnapshotId: member.runtimeConfiguration?.model?.modelId ?? 'unavailable',
+      modelOptionsDigest: digest(member.runtimeConfiguration?.model?.options ?? {}),
       readiness: member.readiness?.status === 'ready'
         ? 'ready'
         : member.readiness?.status === 'not_ready' ? 'not_ready' : 'indeterminate'

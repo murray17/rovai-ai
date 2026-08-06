@@ -244,7 +244,7 @@ export function App(): React.JSX.Element {
         nextMemoryProposals,
         nextNavigationPins
       ] = await Promise.all([
-        window.rovai.request<AgentProfile[]>('agents.list'),
+        window.rovai.request<AgentProfile[]>('members.list'),
         window.rovai.request<AdapterInstallation[]>('runtime.installations.list'),
         window.rovai.request<NavigationSnapshot>('navigation.snapshot'),
         window.rovai.request<HearthMemoryProposal[]>('memory.hearthProposals.list'),
@@ -286,7 +286,7 @@ export function App(): React.JSX.Element {
 
   const loadMemberData = useCallback(async (): Promise<void> => {
     const [nextAgents, nextInstallations] = await Promise.all([
-      window.rovai.request<AgentProfile[]>('agents.list'),
+      window.rovai.request<AgentProfile[]>('members.list'),
       window.rovai.request<AdapterInstallation[]>('runtime.installations.list')
     ])
     setAgents(nextAgents)
@@ -1627,7 +1627,7 @@ export function campCreationPreflightFromAgents(
       agentId: agent.agentId,
       displayName: agent.displayName,
       memberOrder: agent.memberOrder,
-      runtimeConfigured: agent.runtimeSelection !== null,
+      runtimeConfigured: agent.runtimeConfiguration !== null,
       runtimeReadiness: agent.runtimeReadiness.status
     }))
   const initialLeadAgentId = presentMembers

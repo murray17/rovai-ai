@@ -162,7 +162,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
 
   const runCommand = async (
     busyKey: string,
-    method: 'agents.create' | 'agents.update' | 'agents.avatar.set' | 'agents.runtime.set' | 'agents.runtime.clear' | 'agents.presence.set' | 'agents.remove' | 'agents.reorder',
+    method: 'members.create' | 'members.update' | 'members.avatar.set' | 'members.runtime.set' | 'members.runtime.clear' | 'members.presence.set' | 'members.remove' | 'members.reorder',
     command: unknown
   ): Promise<StoredCommandResult> => {
     setBusy(busyKey)
@@ -194,7 +194,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
   const saveIdentity = async (draft: IdentityDraft): Promise<void> => {
     const targetAgent = memberIdentityTargetAgent(identityDialog, selectedAgent)
     const identity = identityCommand(draft, targetAgent)
-    const method = targetAgent ? 'agents.update' : 'agents.create'
+    const method = targetAgent ? 'members.update' : 'members.create'
     const result = await runCommand('identity', method, identity)
     if (!targetAgent) {
       const createdId = result.resultEntity?.entityId ?? stringField(result.payload, 'agentId')
@@ -211,7 +211,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
       expectedVersion: selectedAgent.version,
       avatarRef
     }
-    await runCommand('avatar', 'agents.avatar.set', command)
+    await runCommand('avatar', 'members.avatar.set', command)
     if (
       previousAvatarRef
       && previousAvatarRef !== avatarRef
@@ -228,7 +228,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
     draft: MemberRuntimeDraft | null
   ): Promise<void> => {
     if (!selectedAgent) return
-    await runCommand('runtime', 'agents.runtime.set', {
+    await runCommand('runtime', 'members.runtime.set', {
       agentId: selectedAgent.agentId,
       expectedVersion: selectedAgent.version,
       adapterKind,
@@ -242,7 +242,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
 
   const clearRuntime = async (): Promise<void> => {
     if (!selectedAgent) return
-    await runCommand('runtime-clear', 'agents.runtime.clear', {
+    await runCommand('runtime-clear', 'members.runtime.clear', {
       agentId: selectedAgent.agentId,
       expectedVersion: selectedAgent.version
     })
@@ -261,7 +261,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
 
   const changePresence = async (presence: 'present' | 'away'): Promise<void> => {
     if (!selectedAgent) return
-    await runCommand(`presence-${presence}`, 'agents.presence.set', {
+    await runCommand(`presence-${presence}`, 'members.presence.set', {
       agentId: selectedAgent.agentId,
       expectedVersion: selectedAgent.version,
       presence
@@ -275,7 +275,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
     setBusy('remove-preview')
     setError(null)
     try {
-      const preview = await window.rovai.request<MemberRemovalPreview>('agents.removalPreview', {
+      const preview = await window.rovai.request<MemberRemovalPreview>('members.removalPreview', {
         agentId: selectedAgent.agentId
       })
       setRemoval({ preview, displayName: selectedAgent.displayName, confirmationName: '' })
@@ -288,7 +288,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
 
   const confirmRemoval = async (): Promise<void> => {
     if (!removal) return
-    await runCommand('remove', 'agents.remove', {
+    await runCommand('remove', 'members.remove', {
       agentId: removal.preview.agentId,
       expectedVersion: removal.preview.version,
       confirmationName: removal.displayName
@@ -587,11 +587,11 @@ function MemberDetailHeader({
   onRemove(trigger: HTMLButtonElement): void
 }): React.JSX.Element {
   const availability = runtimeAvailability.find(
-    (item) => item.runtimeKind === agent.runtimeSelection?.adapterKind
+    (item) => item.runtimeKind === agent.runtimeConfiguration?.adapterKind
   ) ?? null
   const runtime = memberRuntimePresentation(
     agent,
-    agent.runtimeSelection?.adapterKind ?? null,
+    agent.runtimeConfiguration?.adapterKind ?? null,
     availability,
     runtimeDiscoveryPending
   )
@@ -615,11 +615,11 @@ function MemberDetailHeader({
               className={`member-header-runtime status-${runtime.status}`}
               type="button"
               onClick={onRuntime}
-              aria-label={`${agent.runtimeSelection?.adapterKind ? adapterLabel(agent.runtimeSelection.adapterKind) : 'Agent 运行时'}，${runtime.label}；打开运行配置`}
+              aria-label={`${agent.runtimeConfiguration?.adapterKind ? adapterLabel(agent.runtimeConfiguration.adapterKind) : 'Agent 运行时'}，${runtime.label}；打开运行配置`}
               title="打开运行配置"
             >
               <i aria-hidden="true" />
-              <span>{agent.runtimeSelection?.adapterKind ? adapterLabel(agent.runtimeSelection.adapterKind) : 'Agent 运行时'}</span>
+              <span>{agent.runtimeConfiguration?.adapterKind ? adapterLabel(agent.runtimeConfiguration.adapterKind) : 'Agent 运行时'}</span>
               <strong>{runtime.label}</strong>
               <svg className="member-runtime-entry-arrow" viewBox="0 0 16 16" aria-hidden="true">
                 <path d="m6 3.5 4.5 4.5L6 12.5" />
@@ -916,20 +916,14 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
     selectedKind
       ? runtimeEditorInstallation(
           installations,
-          selectedKind,
-          !dirty && selectedKind === agent.runtimeSelection?.adapterKind
-            ? agent.runtimePreference?.installationId
-            : null
+          selectedKind
         )
       : null
   ), [
-    agent.runtimePreference?.installationId,
-    agent.runtimeSelection?.adapterKind,
-    dirty,
     installations,
     selectedKind
   ])
-  const canSave = dirty && !conflict
+  const canSave = dirty && !conflict && (!selectedKind || draft !== null)
   const runtimeStatus = memberRuntimePresentation(
     agent,
     selectedKind || null,
@@ -1028,7 +1022,7 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
               <option key={kind} value={kind}>{adapterLabel(kind)}</option>
             ))}
           </select>
-          <span className="field-help">未安装的 Agent 运行时也可以保存；该队员会保持不可执行，且不会回退到其他 Agent 运行时。</span>
+          <span className="field-help">完整的模型与权限参数只会在 Agent 运行时可用并通过当前能力快照校验后原子保存。</span>
         </label>
 
         <div className={`runtime-installation-summary status-${runtimeStatus.status}`} role="status" aria-live="polite">
@@ -1090,12 +1084,11 @@ function runtimeEditorState(
   agent: AgentProfile,
   installations: AdapterInstallation[]
 ): MemberRuntimeEditorState {
-  const selectedKind = agent.runtimeSelection?.adapterKind ?? ''
+  const selectedKind = agent.runtimeConfiguration?.adapterKind ?? ''
   if (!selectedKind) return { selectedKind: '', draft: null }
   const installation = runtimeEditorInstallation(
     installations,
-    selectedKind,
-    agent.runtimePreference?.installationId
+    selectedKind
   )
   return {
     selectedKind,
@@ -1108,10 +1101,7 @@ function runtimeEditorStateKey(state: MemberRuntimeEditorState): string {
 }
 
 function persistedRuntimeKey(agent: AgentProfile): string {
-  return JSON.stringify({
-    selection: agent.runtimeSelection,
-    preference: agent.runtimePreference
-  })
+  return JSON.stringify(agent.runtimeConfiguration)
 }
 
 function MemberIdentityDialog({ open, agent, agents, busy, returnFocusRef, onOpenChange, onSubmit }: {

@@ -266,8 +266,7 @@ test('Diagnostic Trial configuration gate binds exact identity, budget, members,
     }],
     team: memberInputs.map(({ member, model, permissions }) => ({
       agentId: member.agentId,
-      runtimeSelection: { adapterKind: member.adapterKind },
-      runtimePreference: { model, permissions }
+      runtimeConfiguration: { adapterKind: member.adapterKind, model, permissions }
     })),
     runtimeInstallations: ['codex-cli', 'opencode-cli', 'antigravity-app'].map(
       (adapterKind) => ({ adapterKind, executablePath: process.execPath })
@@ -283,7 +282,7 @@ test('Diagnostic Trial configuration gate binds exact identity, budget, members,
   })).ok, true)
 
   const drifted = structuredClone(environmentManifest)
-  drifted.team[0].runtimePreference.model.options.reasoning_effort = 'high'
+  drifted.team[0].runtimeConfiguration.model.options.reasoning_effort = 'high'
   const driftedResult = {
     ...result,
     environmentManifestDigest: digestJson(drifted)

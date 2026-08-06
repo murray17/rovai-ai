@@ -78,6 +78,8 @@ export function buildCollaborationLedger({
     ))) {
       throw new Error(`Collaboration Ledger call ${call.callId} has an unresolved Evidence Reference`)
     }
+    // The v0.34 ledger schema is sealed with these historical property names.
+    // Current Core input is Agent-ID based; this is an explicit version adapter only.
     calls.push({
       callId: call.callId,
       acceptanceReceiptId: call.acceptanceReceiptId,

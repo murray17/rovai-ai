@@ -36,7 +36,11 @@ describe('v0.29 member sidebar', () => {
       index === 0
         ? {
             ...profile('agent-ready', '沐瓦', '开发者', 'present'),
-            runtimeSelection: { adapterKind: 'codex-cli' as const },
+            runtimeConfiguration: {
+              adapterKind: 'codex-cli' as const,
+              model: { mode: 'runtime_default' as const },
+              permissions: { adapterKind: 'codex-cli' as const, schemaVersion: 1, values: {} }
+            },
             runtimeReadiness: { status: 'ready' as const, blockers: [] }
           }
         : profile(`agent-${index}`, `队员 ${index}`, index % 2 ? '研究员' : '设计师', 'present')
@@ -103,8 +107,7 @@ function profile(
     growthTopic: '',
     defaultCapabilities: [],
     presence,
-    runtimeSelection: null,
-    runtimePreference: null,
+    runtimeConfiguration: null,
     runtimeReadiness: {
       status: 'runtime_not_configured',
       blockers: [{ code: 'runtime_not_configured', detail: null }]

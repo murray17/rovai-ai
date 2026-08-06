@@ -243,8 +243,8 @@ async function configureRuntime(request, adapterKind) {
   if (!runtime.snapshot.models.some((model) => model.id === modelId)) {
     throw new Error(`${adapterKind} smoke model is unavailable: ${modelId}`)
   }
-  const profile = await request('agents.get', { agentId: 'agent_1' })
-  const configured = await request('agents.runtime.set', {
+  const profile = await request('members.get', { agentId: 'agent_1' })
+  const configured = await request('members.runtime.set', {
     commandId: crypto.randomUUID(),
     command: {
       agentId: 'agent_1',

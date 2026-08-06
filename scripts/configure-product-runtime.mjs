@@ -2,13 +2,25 @@ export async function configureProductRuntime(request, adapterKind, agentIds) {
   for (const agentId of agentIds) {
     let resolved = null
     for (let attempt = 0; attempt < 240; attempt += 1) {
-      const profile = await request('agents.get', { agentId })
-      const configured = await request('agents.runtime.set', {
+      await request('runtime.product.check', { runtimeKind: adapterKind })
+      const installation = (await request('runtime.installations.list')).find((candidate) =>
+        candidate.adapterKind === adapterKind
+          && candidate.installationClass === 'managed_default'
+          && candidate.authScope === 'default'
+          && candidate.memberRuntimeDefaults)
+      if (!installation) {
+        await new Promise((resolveWait) => setTimeout(resolveWait, 250))
+        continue
+      }
+      const profile = await request('members.get', { agentId })
+      const configured = await request('members.runtime.set', {
         commandId: crypto.randomUUID(),
         command: {
           agentId,
           expectedVersion: profile.version,
-          adapterKind
+          adapterKind,
+          model: installation.memberRuntimeDefaults.model,
+          permissions: installation.memberRuntimeDefaults.permissions
         }
       })
       if (configured.status !== 'applied') {
@@ -18,15 +30,14 @@ export async function configureProductRuntime(request, adapterKind, agentIds) {
           configured
         })}`)
       }
-      resolved = await request('agents.get', { agentId })
-      if (resolved.runtimeSelection?.adapterKind === adapterKind
+      resolved = await request('members.get', { agentId })
+      if (resolved.runtimeConfiguration?.adapterKind === adapterKind
           && resolved.runtimeReadiness?.status === 'ready') {
         break
       }
-      await request('runtime.product.check', { runtimeKind: adapterKind })
       await new Promise((resolveWait) => setTimeout(resolveWait, 250))
     }
-    if (resolved.runtimeSelection?.adapterKind !== adapterKind
+    if (resolved.runtimeConfiguration?.adapterKind !== adapterKind
         || resolved.runtimeReadiness?.status !== 'ready') {
       throw new Error(`Product Runtime was not resolved: ${JSON.stringify(resolved)}`)
     }

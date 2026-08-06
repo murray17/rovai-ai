@@ -81,4 +81,11 @@ last_updated: 2026-08-06
 - [x] 从当前 AgentProfile、CampMember 和 Camp 创建预检 DTO 删除 legacy handle，并删除普通
   `@文字` 的 handle/名称解析与 Renderer 重写；
 - [x] Runtime Context 名册使用 `members`，产品中文术语统一为“队员”；
+- [x] IPC 产品命名空间从 `agents.*` clean break 为 `members.*`，不保留别名；
+- [x] 用户 CampMessage 只允许精确 Draft Revision 写入，删除 body/address 旧发送与
+  `create_camp_from_first_message`；所有 CampMessage 强制 Structured Content；
+- [x] AgentProfile 公开 Runtime 合同收敛为原子 `runtimeConfiguration` 与 Readiness，
+  `ResolvedRuntimeBinding` 仅供 Core/Diagnostics；
+- [x] AgentRun Context formatter 升为 v8，并由 Rust/TypeScript 共用冻结 fixture；
+- [x] 通知 Inbox 与 CreatedBatch item schema 统一为 v2；
 - [x] v0.36 密封资格评测只在版本化适配边界投影其冻结历史字段，不进入当前产品契约。

@@ -11,7 +11,7 @@ let reopened
 
 try {
   first = startCore(dataDir)
-  const agents = await first.request('agents.list')
+  const agents = await first.request('members.list')
   if (agents.length !== 4) throw new Error(`Expected four Starter members: ${JSON.stringify(agents)}`)
   if (agents.some((agent) => agent.runtimeReadiness?.status !== 'runtime_not_configured')) {
     throw new Error(`Starter member unexpectedly has Runtime config: ${JSON.stringify(agents)}`)
@@ -19,7 +19,7 @@ try {
 
   const camps = await first.request('camps.list')
   if (camps.length !== 0) throw new Error(`Fresh member storage created an empty Camp: ${JSON.stringify(camps)}`)
-  const leadMemberships = await first.request('agents.memberships.list', {
+  const leadMemberships = await first.request('members.camps.list', {
     agentId: 'agent_1'
   })
   if (leadMemberships.length !== 0) {
@@ -34,7 +34,7 @@ try {
   }
 
   const createCommandId = crypto.randomUUID()
-  const createResult = await first.request('agents.create', {
+  const createResult = await first.request('members.create', {
     commandId: createCommandId,
     command: {
       displayName: 'Smoke Builder',
@@ -45,7 +45,7 @@ try {
       growthTopic: ''
     }
   })
-  const replay = await first.request('agents.create', {
+  const replay = await first.request('members.create', {
     commandId: createCommandId,
     command: {
       displayName: 'Smoke Builder',
@@ -63,24 +63,25 @@ try {
   }
   const agentId = createResult.resultEntity.entityId
 
-  const profile = await first.request('agents.get', { agentId })
-  const selectedRuntime = await first.request('agents.runtime.set', {
+  const profile = await first.request('members.get', { agentId })
+  const selectedRuntime = await first.request('members.runtime.set', {
     commandId: crypto.randomUUID(),
     command: {
       agentId,
       expectedVersion: profile.version,
-      adapterKind: 'qoder-cli'
+      adapterKind: 'qoder-cli',
+      model: { mode: 'runtime_default' },
+      permissions: { adapterKind: 'qoder-cli', schemaVersion: 1, values: {} }
     }
   })
-  if (selectedRuntime.status !== 'applied'
-      || selectedRuntime.code !== 'agent_profile.product_runtime_selected') {
-    throw new Error(`Product Runtime selection was not saved: ${JSON.stringify(selectedRuntime)}`)
+  if (selectedRuntime.status !== 'rejected'
+      || selectedRuntime.code !== 'runtime_configuration_unavailable') {
+    throw new Error(`Unavailable Runtime configuration was not rejected atomically: ${JSON.stringify(selectedRuntime)}`)
   }
-  const unresolvedProfile = await first.request('agents.get', { agentId })
+  const unresolvedProfile = await first.request('members.get', { agentId })
   const unresolvedInstallations = await first.request('runtime.installations.list')
-  if (unresolvedProfile.runtimeSelection?.adapterKind !== 'qoder-cli'
-      || unresolvedProfile.runtimeReadiness?.status !== 'selected_unresolved'
-      || unresolvedProfile.runtimePreference !== null
+  if (unresolvedProfile.runtimeConfiguration !== null
+      || unresolvedProfile.runtimeReadiness?.status !== 'runtime_not_configured'
       || unresolvedInstallations.some((installation) => installation.adapterKind === 'qoder-cli')) {
     throw new Error(`Missing Product Runtime did not remain unresolved without fallback: ${JSON.stringify({
       unresolvedProfile,
@@ -91,16 +92,15 @@ try {
   first = null
 
   reopened = startCore(dataDir)
-  const persistedProfile = await reopened.request('agents.get', { agentId })
+  const persistedProfile = await reopened.request('members.get', { agentId })
   const installations = await reopened.request('runtime.installations.list')
   if (Object.hasOwn(persistedProfile, 'handle')
       || persistedProfile.teamRole !== 'Developer'
       || persistedProfile.professionalResponsibilities !== 'Validates v0.27 member identity persistence.'
       || persistedProfile.personalityTraits?.join(',') !== 'Careful'
       || persistedProfile.workingPrinciples !== 'Do not execute during this smoke.'
-      || persistedProfile.runtimeSelection?.adapterKind !== 'qoder-cli'
-      || persistedProfile.runtimeReadiness?.status !== 'selected_unresolved'
-      || persistedProfile.runtimePreference !== null
+      || persistedProfile.runtimeConfiguration !== null
+      || persistedProfile.runtimeReadiness?.status !== 'runtime_not_configured'
       || installations.some((installation) => installation.adapterKind === 'qoder-cli')) {
     throw new Error(`Member configuration did not survive restart: ${JSON.stringify({
       persistedProfile,
@@ -114,7 +114,7 @@ try {
     ok: true,
     starterCount: agents.length,
     customAgentId: agentId,
-    selectedRuntimeKind: persistedProfile.runtimeSelection.adapterKind,
+    selectedRuntimeKind: null,
     selectedRuntimeReadiness: persistedProfile.runtimeReadiness.status,
     unconfiguredMemberCount: preflight.presentMembers
       .filter((member) => !member.runtimeConfigured).length,

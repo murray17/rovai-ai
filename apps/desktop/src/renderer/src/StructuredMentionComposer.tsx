@@ -524,7 +524,7 @@ export function StructuredMentionComposer({
               contentEditable={false}
               data-editor-segment="token"
               data-token-kind="member_mention"
-              data-agent-profile-id={segment.agentId}
+              data-agent-id={segment.agentId}
               role={interactive ? 'button' : undefined}
               tabIndex={interactive ? 0 : undefined}
               aria-label={interactive && member

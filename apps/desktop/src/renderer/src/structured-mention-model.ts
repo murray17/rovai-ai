@@ -101,7 +101,7 @@ export function insertMemberMention(
   state: StructuredMentionEditorState,
   agentId: string
 ): StructuredMentionEditorState {
-  if (!agentId.trim()) throw new Error('Member Mention requires an Agent Profile ID')
+  if (!agentId.trim()) throw new Error('Member Mention requires an Agent ID')
   return replaceStructuredSelection(state, [{
     kind: 'member_mention',
     agentId
