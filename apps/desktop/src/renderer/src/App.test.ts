@@ -1099,7 +1099,9 @@ describe('task event projections', () => {
     }
     for (const [section, heading] of Object.entries(contentBySection) as Array<[NavigationSettingsSection, string]>) {
       const markup = renderToStaticMarkup(createElement(SettingsView, { ...baseProps, section }))
-      expect(markup).toContain(heading)
+      expect(markup).toContain(`<h1>${heading}</h1>`)
+      expect(markup.match(/class="settings-page-heading"/g)).toHaveLength(1)
+      expect(markup).not.toContain('project-hero')
     }
   })
 

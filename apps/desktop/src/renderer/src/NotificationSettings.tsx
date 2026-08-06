@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { InAppNotificationPreference, StoredCommandResult } from '@contracts'
+import { SettingsPageHeader } from './SettingsPageHeader'
 
 type PreferenceKey =
   | 'headsUpEnabled'
@@ -68,12 +69,11 @@ export function NotificationSettings(): React.JSX.Element {
 
   return (
     <>
-      <section className="project-hero">
-        <div>
-          <h2>通知</h2>
-          <p>待审批和执行结果始终保存在通知中心；这里只控制新通知的临时浮层。</p>
-        </div>
-      </section>
+      <SettingsPageHeader
+        eyebrow="Settings / Notifications"
+        title="通知"
+        description="待审批和执行结果始终保存在通知中心；这里只控制新通知的临时浮层。"
+      />
       <section className="section-block notification-settings">
         <div className="section-heading">
           <div>

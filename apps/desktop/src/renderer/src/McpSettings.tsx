@@ -10,6 +10,7 @@ import type {
   McpMutationResult,
   McpServerView
 } from '@contracts'
+import { SettingsPageHeader } from './SettingsPageHeader'
 import { localizeExecutionEngineTerms } from './product-copy'
 
 type JsonEditor = {
@@ -264,21 +265,21 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
 
   return (
     <div className="mcp-settings">
-      <section className="project-hero mcp-hero">
-        <div>
-          <span className="mcp-eyebrow">SETTINGS · MCP</span>
-          <h2>MCP 配置</h2>
-          <p>统一管理外部 MCP Server，并决定每位队员在下一个 AgentRun 中可以使用哪些 MCP。</p>
-        </div>
-        <div className="project-actions">
-          <button className="quiet-button" type="button" onClick={() => void scan()} disabled={busy !== null || Boolean(config?.fileIssue)}>
-            {busy === 'scan' ? '正在读取…' : '从本机 Agent 导入'}
-          </button>
-          <button className="primary-button" type="button" onClick={() => setEditor({ serverId: null, definitionJson: NEW_SERVER_JSON })} disabled={busy !== null || Boolean(config?.fileIssue)}>
-            添加 MCP
-          </button>
-        </div>
-      </section>
+      <SettingsPageHeader
+        eyebrow="Settings / MCP"
+        title="MCP 配置"
+        description="统一管理外部 MCP Server，并决定每位队员在下一个 AgentRun 中可以使用哪些 MCP。"
+        aside={(
+          <>
+            <button className="quiet-button" type="button" onClick={() => void scan()} disabled={busy !== null || Boolean(config?.fileIssue)}>
+              {busy === 'scan' ? '正在读取…' : '从本机 Agent 导入'}
+            </button>
+            <button className="primary-button" type="button" onClick={() => setEditor({ serverId: null, definitionJson: NEW_SERVER_JSON })} disabled={busy !== null || Boolean(config?.fileIssue)}>
+              添加 MCP
+            </button>
+          </>
+        )}
+      />
 
       <details className="mcp-source-disclosure">
         <summary>
@@ -310,7 +311,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
             <span>{issueText(config.fileIssue)} 原文件内容未被修改；新的 AgentRun 将不投影外部 MCP。</span>
             <code>{config.path}</code>
           </div>
-          <div className="project-actions">
+          <div className="mcp-file-actions">
             <button className="quiet-button compact" type="button" onClick={() => void load()}>重新读取</button>
             <button className="quiet-button compact" type="button" onClick={() => void revealConfig()}>打开文件</button>
           </div>

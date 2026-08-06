@@ -13,7 +13,9 @@ describe('MCP settings', () => {
   it('renders a local empty-safe management surface before Core responds', () => {
     const markup = renderToStaticMarkup(createElement(McpSettings, { agents: [agent()] }))
 
-    expect(markup).toContain('<h2>MCP 配置</h2>')
+    expect(markup).toContain('class="settings-page-heading"')
+    expect(markup).toContain('<h1>MCP 配置</h1>')
+    expect(markup).not.toContain('project-hero')
     expect(markup).toContain('从本机 Agent 导入')
     expect(markup).toContain('添加 MCP')
     expect(markup).toContain('正在读取 MCP 配置')

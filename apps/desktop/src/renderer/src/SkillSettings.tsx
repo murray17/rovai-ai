@@ -12,6 +12,7 @@ import type {
   StoredCommandResult
 } from '@contracts'
 import { MemberAvatar } from './MemberAvatar'
+import { SettingsPageHeader } from './SettingsPageHeader'
 import { localizeExecutionEngineTerms } from './product-copy'
 
 type ImportTab = 'local' | 'github'
@@ -201,14 +202,12 @@ export function SkillSettings(): React.JSX.Element {
 
   return (
     <div className="skill-settings">
-      <header className="skill-page-heading">
-        <div>
-          <p className="skill-eyebrow">Settings / Skills</p>
-          <h1>Skill 管理</h1>
-          <p>管理 Rovai 内置与用户导入的 Skill，并为每个 Skill 独立选择 Runtime 生效组。</p>
-        </div>
-        <span className="skill-scope-note">应用全局配置</span>
-      </header>
+      <SettingsPageHeader
+        eyebrow="Settings / Skills"
+        title="Skill 管理"
+        description="管理 Rovai 内置与用户导入的 Skill，并为每个 Skill 独立选择 Runtime 生效组。"
+        aside={<span className="settings-page-note">应用全局配置</span>}
+      />
 
       {error && (
         <div className="skill-page-error" role="alert">

@@ -754,7 +754,9 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 - “返回 App”恢复进入设置前的一级页面和 Camp，不把用户强制送回 Quick Chat。
 - 再次进入设置时保留上次选择的设置分类，不强制重置到“Skill”。
 - 设置内容区使用自适应滚动面板，内部宽度
-  `min(980px, 可用宽度 - 42px)`；各页只有一个 Hero，不叠加通用 AppHeader。
+  `min(980px, 可用宽度 - 42px)`；Skill、MCP、Agent 运行时、外观、通知和诊断统一使用
+  同一个无外框设置页头：eyebrow、一级标题、说明、可选右侧操作区和底部分隔线。各页只允许
+  一个该共享页头，不叠加通用 AppHeader，也不得回退为带边框、圆角或背景卡片的 Hero。
   App Shell 右侧第一行叠加一条与页面表面同色的 50px 隐形拖拽栏，设置内容
   继续跨越两行，不因该拖拽栏下移。
 - 设置侧栏不显示健康 footer；诊断仍是设置分类并读取原有 Health Snapshot。
@@ -792,7 +794,7 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 > [v0.37 MCP 生产设计](../versions/v0.37/production-design.md) 替代。App Shell、Arctic Dawn
 > Token、状态、安全、响应式与无障碍规则继续有效。
 
-- Hero 标题“MCP”，说明它是应用级外部 MCP Library、按队员分配且不修改各 Agent 运行时
+- 共享设置页头标题“MCP”，说明它是应用级外部 MCP Library、按队员分配且不修改各 Agent 运行时
   的个人配置；操作为“从本机 Agent 导入 / ＋ 添加 MCP”。
 - 真源路径条显示当前权威 `~/.rovai/mcp.json` 或受控旧命名空间选择结果，并提供
   Finder 入口。UI 是该文件的图形编辑器，不建立 SQLite MCP 真源。

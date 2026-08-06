@@ -72,10 +72,13 @@ try {
     importDialog: Boolean(document.querySelector('.mcp-import-dialog')),
     publicPreview: document.querySelector('.mcp-source-panel pre')?.textContent ?? '',
     hiddenMetadataVisible: document.body.innerText.includes('_rovai'),
-    sourceSecretVisible: document.body.innerText.includes('rovai-secret-must-not-render')
+    sourceSecretVisible: document.body.innerText.includes('rovai-secret-must-not-render'),
+    sharedHeadingCount: document.querySelectorAll('.settings-page-heading').length,
+    legacyHeroCount: document.querySelectorAll('.project-hero').length,
+    heading: document.querySelector('.settings-page-heading h1')?.textContent
   }))()`)
   assert(
-    JSON.stringify(initial.subnav) === JSON.stringify(['技能', 'MCP', 'Agent 运行时', '外观', '通知', '诊断']),
+    JSON.stringify(initial.subnav) === JSON.stringify(['Skill', 'MCP', 'Agent 运行时', '外观', '通知', '诊断']),
     `Settings navigation is incorrect: ${JSON.stringify(initial)}`
   )
   assert(JSON.stringify(initial.serverNames) === JSON.stringify(['context7', 'playwright']), `Fresh reviewed defaults are incorrect: ${JSON.stringify(initial)}`)
@@ -83,6 +86,8 @@ try {
   assert(!initial.importDialog, 'MCP import scanned automatically on first load')
   assert(!initial.hiddenMetadataVisible, 'Hidden _rovai metadata reached the Renderer')
   assert(!initial.sourceSecretVisible, 'Source literal secret reached the Renderer before import')
+  assert(initial.sharedHeadingCount === 1 && initial.heading === 'MCP 配置', `MCP did not use the shared Settings heading: ${JSON.stringify(initial)}`)
+  assert(initial.legacyHeroCount === 0, `Legacy boxed Hero returned to MCP Settings: ${JSON.stringify(initial)}`)
 
   await clickButtonByText(cdp, '.mcp-settings button', '从本机 Agent 导入')
   await waitForExpression(cdp, `Boolean(document.querySelector('.mcp-import-dialog'))`, 30_000)
@@ -202,6 +207,27 @@ try {
   const finalNames = await evaluate(cdp, `[...document.querySelectorAll('.mcp-server-title > strong')].map((node) => node.textContent)`)
   assert(JSON.stringify(finalNames) === JSON.stringify(['context7', 'imported_docs', 'playwright']), `Delete did not converge: ${JSON.stringify(finalNames)}`)
 
+  const sharedSettingsHeadings = []
+  for (const [navigationLabel, expectedHeading] of [
+    ['Skill', 'Skill 管理'],
+    ['MCP', 'MCP 配置'],
+    ['Agent 运行时', 'Agent 运行时'],
+    ['外观', '外观'],
+    ['通知', '通知'],
+    ['诊断', '诊断']
+  ]) {
+    await clickButtonByText(cdp, '.settings-sidebar-menu button', navigationLabel)
+    await waitForExpression(cdp, `document.querySelector('.settings-page-heading h1')?.textContent === ${JSON.stringify(expectedHeading)}`, 10_000)
+    const headingState = await evaluate(cdp, `(() => ({
+      count: document.querySelectorAll('.settings-page-heading').length,
+      legacyHeroCount: document.querySelectorAll('.project-hero').length,
+      heading: document.querySelector('.settings-page-heading h1')?.textContent
+    }))()`)
+    assert(headingState.count === 1, `${navigationLabel} did not render exactly one shared Settings heading: ${JSON.stringify(headingState)}`)
+    assert(headingState.legacyHeroCount === 0, `${navigationLabel} rendered a legacy boxed Hero: ${JSON.stringify(headingState)}`)
+    sharedSettingsHeadings.push(headingState.heading)
+  }
+
   cdp.close()
   console.log(JSON.stringify({
     ok: true,
@@ -218,6 +244,7 @@ try {
     zoom200,
     reducedMotion,
     finalNames,
+    sharedSettingsHeadings,
     screenshots: [`${outputPrefix}-day.png`, `${outputPrefix}-night-preference-day-compact.png`]
   }, null, 2))
 } finally {
@@ -227,7 +254,7 @@ try {
     wait(2_000)
   ])
   if (app.exitCode === null) app.kill('SIGKILL')
-  await rm(fixtureRoot, { recursive: true, force: true })
+  await rm(fixtureRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 })
 }
 
 async function resize(cdp, width, height) {

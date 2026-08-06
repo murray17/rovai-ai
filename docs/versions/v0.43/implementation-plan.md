@@ -45,6 +45,7 @@ last_updated: 2026-08-06
 
 ## Checkpoint 5：Renderer 与诊断
 
+- [x] Skill、MCP、Agent 运行时、外观、通知与诊断统一使用无外框共享设置页头；
 - [x] MCP 配置页不按 Runtime capability 过滤、禁用或警告 Assignment；
 - [x] 诊断页显示 Antigravity Unsupported；Capability/Exposure 记录 projection mode 与
   same-name policy；

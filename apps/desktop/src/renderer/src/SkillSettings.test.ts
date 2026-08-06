@@ -12,6 +12,8 @@ describe('Skill settings', () => {
     expect(markup).toContain('正在读取 Skill Library')
     expect(markup).toContain('应用全局配置')
     expect(markup).toContain('管理 Rovai 内置与用户导入的 Skill')
+    expect(markup).toContain('class="settings-page-heading"')
+    expect(markup).toContain('<h1>Skill 管理</h1>')
     expect(markup).not.toContain('允许执行')
   })
 

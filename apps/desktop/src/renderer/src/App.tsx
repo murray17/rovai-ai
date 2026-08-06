@@ -51,6 +51,7 @@ import { NotificationCenter } from './NotificationCenter'
 import { NotificationSettings } from './NotificationSettings'
 import { SkillSettings } from './SkillSettings'
 import { McpSettings } from './McpSettings'
+import { SettingsPageHeader } from './SettingsPageHeader'
 import { MemoryLibrary } from './MemoryLibrary'
 import { formatMentionDisplayText } from './AgentMentionTextarea'
 import { localizeExecutionEngineTerms } from './product-copy'
@@ -1411,17 +1412,21 @@ export function SettingsView({
         {section === 'mcp' && <McpSettings agents={agents} />}
         {section === 'runtime' && (
           <>
-            <section className="project-hero">
-              <div><h2>Agent 运行时</h2><p>选择产品、检查可用性并管理 Rovai 自动发现的本机入口。</p></div>
-            </section>
+            <SettingsPageHeader
+              eyebrow="Settings / Runtime"
+              title="Agent 运行时"
+              description="选择产品、检查可用性并管理 Rovai 自动发现的本机入口。"
+            />
             <RuntimeInstallationsPanel health={health} installations={installations} onReload={onReload} />
           </>
         )}
         {section === 'appearance' && (
           <>
-            <section className="project-hero">
-              <div><h2>外观</h2><p>北极晨光 Day 已覆盖全部页面；Night 偏好暂时同样解析为 Day。</p></div>
-            </section>
+            <SettingsPageHeader
+              eyebrow="Settings / Appearance"
+              title="外观"
+              description="北极晨光 Day 已覆盖全部页面；Night 偏好暂时同样解析为 Day。"
+            />
             <AppearanceSettings
               appearance={appearance}
               disabled={busy === 'appearance'}
@@ -1432,7 +1437,17 @@ export function SettingsView({
         {section === 'notifications' && <NotificationSettings />}
         {section === 'diagnostics' && (
           <>
-            <section className="project-hero"><div><h2>诊断</h2><p>这里不会展示任何 Agent 运行时的 Token、登录信息或其他原始凭据。</p></div><div className="project-actions"><button className="quiet-button" onClick={onRefresh}>重新检测</button><button className="primary-button" onClick={onExport} disabled={busy === 'export'}>{busy === 'export' ? '正在导出…' : '导出诊断 JSON'}</button></div></section>
+            <SettingsPageHeader
+              eyebrow="Settings / Diagnostics"
+              title="诊断"
+              description="这里不会展示任何 Agent 运行时的 Token、登录信息或其他原始凭据。"
+              aside={(
+                <>
+                  <button className="quiet-button" type="button" onClick={onRefresh}>重新检测</button>
+                  <button className="primary-button" type="button" onClick={onExport} disabled={busy === 'export'}>{busy === 'export' ? '正在导出…' : '导出诊断 JSON'}</button>
+                </>
+              )}
+            />
             <section className="section-block"><div className="section-heading"><div><h2>本地依赖</h2></div><span className="health-score">{readyCount}/4 就绪</span></div><RuntimeHealth health={health} /></section>
             <section className="section-block diagnostics-card">
               <Diagnostic label="应用数据目录" value={health?.core.dataDir} />
