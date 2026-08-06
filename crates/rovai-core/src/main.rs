@@ -75,9 +75,8 @@ use rovai_core::{
         DomainCommandGateway, canonical_json_digest,
     },
     context::{
-        CharterDeliveryMode, ContextCompactionWork, ContextMaterialization, ContextService,
-        ContextSummaryModelPreference, DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
-        MaterializeContextRequest, PreparedContext, RecordContextSummaryInput,
+        CharterDeliveryMode, ContextMaterialization, ContextPayloadTooLarge, ContextService,
+        DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES, MaterializeContextRequest, PreparedContext,
         SkillExposurePreparation,
     },
     conversation_input::materialize_pending_inputs_at,
@@ -115,7 +114,7 @@ use rovai_core::{
     read_model::{READ_MODEL_SCHEMA_VERSION, ReadModelService},
     runtime::{
         AcknowledgeAgentRunCancellationCommand, AgentRunCancellationCandidate, AgentRunExecution,
-        AgentRunWorkspace, BindNativeSessionCommand, CancelCampTurnCommand, ClaimAgentRunCommand,
+        BindNativeSessionCommand, CancelCampTurnCommand, ClaimAgentRunCommand,
         ExecutionRuntimeService, FailAgentRunCommand, NativeSessionResumeDisposition,
         NativeSessionResumeFailure, PermissionSemantics,
         RecordCancelledAgentRunEndingGitObservationCommand, RejectAgentRunDispatchCommand,
@@ -531,13 +530,6 @@ struct RuntimeDiscoveryRescanParams {
 #[serde(rename_all = "camelCase")]
 struct CheckProductRuntimeParams {
     runtime_kind: rovai_core::agent_profile::AdapterKind,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SetContextSummaryModelParams {
-    expected_version: i64,
-    preference: Option<ContextSummaryModelPreference>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1365,154 +1357,6 @@ impl Core {
                 }
             }
         }
-    }
-
-    async fn dispatch_context_compactions(self: &Arc<Self>) {
-        let work = {
-            let mut database = self.database.lock().await;
-            ContextService.claim_next_compaction(&mut database)
-        };
-        let work = match work {
-            Ok(Some(work)) => work,
-            Ok(None) => return,
-            Err(error) => {
-                eprintln!("failed to claim Context Compaction: {error:#}");
-                return;
-            }
-        };
-        let core = self.clone();
-        tokio::spawn(async move {
-            let result = core.run_context_compaction(&work).await;
-            let mut database = core.database.lock().await;
-            match result {
-                Ok(summary) => {
-                    if let Err(error) = ContextService.record_summary(
-                        &mut database,
-                        &RecordContextSummaryInput {
-                            compaction_attempt_id: &work.attempt_id,
-                            lease_owner: &work.lease_owner,
-                            body: &summary,
-                            generator_version: &work.generator_version,
-                        },
-                    ) {
-                        let detail = format!("failed to persist generated summary: {error:#}");
-                        if let Err(failure) = ContextService.fail_summary(
-                            &mut database,
-                            &work.attempt_id,
-                            &work.lease_owner,
-                            "context_compaction_result_invalid",
-                            &detail,
-                        ) {
-                            eprintln!(
-                                "failed to close invalid Context Compaction {}: {failure:#}",
-                                work.attempt_id
-                            );
-                        }
-                    }
-                }
-                Err(error) => {
-                    if let Err(failure) = ContextService.fail_summary(
-                        &mut database,
-                        &work.attempt_id,
-                        &work.lease_owner,
-                        "context_compaction_failed",
-                        &format!("{error:#}"),
-                    ) {
-                        eprintln!(
-                            "failed to persist Context Compaction {} failure: {failure:#}",
-                            work.attempt_id
-                        );
-                    }
-                }
-            }
-        });
-    }
-
-    async fn run_context_compaction(&self, work: &ContextCompactionWork) -> Result<String> {
-        self.verify_runtime_integrity(
-            work.runtime.adapter_kind,
-            &work.runtime.installation_id,
-            &work.runtime.executable_path,
-            &work.runtime.executable_fingerprint,
-        )
-        .await?;
-        let root = self
-            .data_dir
-            .join("runtime-private")
-            .join("context-compaction")
-            .join(&work.attempt_id);
-        std::fs::create_dir_all(&root).with_context(|| {
-            format!(
-                "failed to create isolated Context Compaction directory {}",
-                root.display()
-            )
-        })?;
-        restrict_private_directory(&root)?;
-        let _cleanup = RemoveDirectoryOnDrop(root.clone());
-        let summary = match work.runtime.adapter_kind {
-            rovai_core::agent_profile::AdapterKind::CodexCli => {
-                CodexCliRuntimeAdapter::run_isolated_completion(&work.runtime, &root, &work.prompt)
-                    .await?
-            }
-            rovai_core::agent_profile::AdapterKind::OpencodeCli
-            | rovai_core::agent_profile::AdapterKind::CopilotCli
-            | rovai_core::agent_profile::AdapterKind::KiroCli
-            | rovai_core::agent_profile::AdapterKind::QoderCli
-            | rovai_core::agent_profile::AdapterKind::CodebuddyCli
-            | rovai_core::agent_profile::AdapterKind::QwenCode => {
-                AcpCliRuntimeAdapter::run_isolated_completion(&work.runtime, &root, &work.prompt)
-                    .await?
-            }
-            rovai_core::agent_profile::AdapterKind::ClaudeCodeCli => {
-                self.claude_code_cli
-                    .run(ClaudeCodeRunRequest {
-                        agent_run_id: format!("context-compaction:{}", work.attempt_id),
-                        execution_epoch: 1,
-                        workspace: AgentRunWorkspace {
-                            execution_root: root.to_string_lossy().to_string(),
-                            access: "read_only".to_string(),
-                            isolation: "shared".to_string(),
-                        },
-                        permission_semantics: PermissionSemantics::CoreEnforcedV1,
-                        runtime: work.runtime.clone(),
-                        prompt: work.prompt.clone(),
-                        resumable_native_session_id: None,
-                        new_native_session_id: None,
-                        session_bootstrap: None,
-                        builtin_tools: None,
-                        external_mcp_servers: BTreeMap::new(),
-                        attachment_access_root: None,
-                        persist_session: false,
-                    })
-                    .await?
-                    .final_output
-            }
-            rovai_core::agent_profile::AdapterKind::AntigravityApp => {
-                self.antigravity_app
-                    .run(AntigravityRunRequest {
-                        agent_run_id: format!("context-compaction:{}", work.attempt_id),
-                        execution_epoch: 1,
-                        workspace: AgentRunWorkspace {
-                            execution_root: root.to_string_lossy().to_string(),
-                            access: "read_only".to_string(),
-                            isolation: "shared".to_string(),
-                        },
-                        permission_semantics: PermissionSemantics::CoreEnforcedV1,
-                        runtime: work.runtime.clone(),
-                        prompt: work.prompt.clone(),
-                        resumable_native_session_id: None,
-                        attachment_access_root: None,
-                        builtin_tools: None,
-                    })
-                    .await?
-                    .final_output
-            }
-        };
-        let summary = summary.trim();
-        if summary.is_empty() {
-            anyhow::bail!("Context Compaction produced an empty summary");
-        }
-        Ok(summary.to_string())
     }
 
     async fn agent_run_runtime(
@@ -2385,24 +2229,6 @@ impl Core {
                 let params: RefreshAdapterInstallationParams =
                     serde_json::from_value(request.params.clone())?;
                 self.refresh_adapter_installation(params).await
-            }
-            "context.summaryModel.get" => {
-                let database = self.database.lock().await;
-                Ok(serde_json::to_value(
-                    ContextService.summary_model_config(&database)?,
-                )?)
-            }
-            "context.summaryModel.set" => {
-                let params: SetContextSummaryModelParams =
-                    serde_json::from_value(request.params.clone())?;
-                let mut database = self.database.lock().await;
-                Ok(serde_json::to_value(
-                    ContextService.set_summary_model_config(
-                        &mut database,
-                        params.expected_version,
-                        params.preference.as_ref(),
-                    )?,
-                )?)
             }
             "skills.list" => {
                 let database = self.database.lock().await;
@@ -3599,10 +3425,14 @@ impl Core {
                     "failed to launch AgentRun {}: {error:#}",
                     execution.agent_run_id
                 );
-                let error_code = error
-                    .downcast_ref::<AntigravityDeliveredFailure>()
-                    .map(|failure| failure.error_code)
-                    .unwrap_or("runtime_launch_failed");
+                let error_code = if error.downcast_ref::<ContextPayloadTooLarge>().is_some() {
+                    "context_payload_too_large"
+                } else {
+                    error
+                        .downcast_ref::<AntigravityDeliveredFailure>()
+                        .map(|failure| failure.error_code)
+                        .unwrap_or("runtime_launch_failed")
+                };
                 core.fail_claimed_agent_run(&execution, error_code, &error)
                     .await;
             }
@@ -3653,7 +3483,7 @@ impl Core {
                         expected_version: candidate.version,
                         error_code: error_code.to_string(),
                         error_detail: Some(format!("{error:#}")),
-                        manual_retry_allowed: true,
+                        manual_retry_allowed: error_code != "context_payload_too_large",
                     },
                 },
             )
@@ -4390,7 +4220,6 @@ impl Core {
                         "agentRunId": execution.agent_run_id,
                         "executionEpoch": execution.execution_epoch,
                         "reason": wait.reason,
-                        "compactionAttemptId": wait.compaction_attempt_id,
                     }),
                 );
                 Ok(None)
@@ -4424,7 +4253,6 @@ impl Core {
                         "agentRunId": execution.agent_run_id,
                         "executionEpoch": execution.execution_epoch,
                         "reason": wait.reason,
-                        "compactionAttemptId": wait.compaction_attempt_id,
                     }),
                 );
                 Ok(None)
@@ -6219,7 +6047,6 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
         || v2_recovery.deliveries_returned_to_pending != 0
         || v2_recovery.authorization_deliveries_failed_closed != 0
         || v2_recovery.input_deliveries_marked_unknown != 0
-        || v2_recovery.compaction_attempts_requeued != 0
     {
         eprintln!(
             "v0.02 recovery prepared: {}",
@@ -8197,7 +8024,6 @@ async fn process_agent_run_scheduler(
                 materialize_conversation_inputs(&core, &output).await;
                 core.dispatch_runtime_deliveries(&output).await;
                 core.dispatch_agent_run_cancellations(&output).await;
-                core.dispatch_context_compactions().await;
                 core.dispatch_agent_runs(&output).await;
             },
             _ = core.agent_run_cancellation_notify.notified() => {
@@ -8285,14 +8111,6 @@ async fn process_runtime_check_manager(
     checks.abort_all();
     while checks.join_next().await.is_some() {}
     core.runtime_checks_scheduled.write().await.clear();
-}
-
-struct RemoveDirectoryOnDrop(PathBuf);
-
-impl Drop for RemoveDirectoryOnDrop {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
 }
 
 #[cfg(unix)]

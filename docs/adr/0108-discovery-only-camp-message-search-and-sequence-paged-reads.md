@@ -12,6 +12,9 @@ superseded_by: null
 
 # ADR-0108: Discovery-Only Camp Message Search and Sequence-Paged Reads
 
+> [ADR-0129](0129-deterministic-bounded-raw-public-context-delivery.md) 删除其余 Camp Summary
+> 生成、持久化和 Core 上下文组成能力；本文的四项原始 CampMessage 检索合同继续有效。
+
 ## Context
 
 ADR-0051 introduced five model tools that separately search messages and summaries, read one

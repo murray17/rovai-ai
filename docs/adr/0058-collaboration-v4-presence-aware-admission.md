@@ -20,6 +20,9 @@ superseded_by: null
 > New Camp creation、为全部 CampMember 预建 Conversation、成员加入/恢复时预建
 > Conversation，以及“不持久化空 Camp”条款；本文其余 Presence、Addressing、
 > Execution Admission、Task 与永久删除语义继续有效。
+>
+> [ADR-0129](0129-deterministic-bounded-raw-public-context-delivery.md) 局部替代本文的
+> Conversation Summary、Camp Cursor 与公共消息上下文组成条款；其余协作与准入语义继续有效。
 
 ## Context
 

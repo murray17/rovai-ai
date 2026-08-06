@@ -1,8 +1,8 @@
 ---
 document_type: documentation-index
 authority: documentation-routing
-current_version: v0.43
-last_updated: 2026-08-06
+current_version: v0.44
+last_updated: 2026-08-07
 ---
 
 # Rovai-ai 文档导航
@@ -14,10 +14,11 @@ last_updated: 2026-08-06
 | 任务 | 必读资料 |
 |---|---|
 | 判断长期架构约束或修改领域、持久化、安全、Runtime 边界 | [ADR 索引](adr/README.md)及相关有效 ADR |
-| 判断当前版本目标、范围、进度或验收口径 | [当前版本 v0.43](versions/v0.43/README.md)及[实施计划](versions/v0.43/implementation-plan.md) |
+| 判断当前版本目标、范围、进度或验收口径 | [当前版本 v0.44](versions/v0.44/README.md)及[实施计划](versions/v0.44/implementation-plan.md) |
 | 查询已接入与候选 Agent Runtime 的实测兼容性 | [Runtime 兼容性清单](runtime-compatibility.md) |
 | 新增或修改 Runtime Activity 映射规则 | [Runtime Activity Mapping 维护指南](runtime-activity/README.md)及[Registry](runtime-activity/registry.md) |
 | 修改内置 Agent CLI、IPC、Envelope、receipt 或幂等合同 | [Built-in Tool Transport v1 合同](contracts/builtin-tool-transport-v1.md) |
+| 修改 AgentRun 公共消息窗口、正文截断、遗漏提示或投递 Profile | [ADR-0129](adr/0129-deterministic-bounded-raw-public-context-delivery.md)及[Context Delivery Profile v1](contracts/context-delivery-profile-v1.md) |
 | 理解内置 CLI、Core Router、Runtime Fleet、Bootstrap 与外部 MCP 的长期结构 | [Built-in Tool Runtime 架构](architecture/builtin-tool-runtime.md) |
 | 理解历史设计与演进原因 | [版本索引](versions/README.md)及对应历史版本；历史内容不能作为当前约束 |
 | 修改 Renderer UI/UX | [UI 规范索引](ui/README.md)；修改当前 Arctic Dawn Renderer 时继续读取[Arctic Dawn V3 设计规范](ui/arctic-dawn.md) |

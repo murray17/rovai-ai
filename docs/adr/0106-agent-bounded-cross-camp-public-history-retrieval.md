@@ -12,6 +12,9 @@ superseded_by: null
 
 # ADR-0106: Agent-Bounded Cross-Camp Public History Retrieval
 
+> [ADR-0129](0129-deterministic-bounded-raw-public-context-delivery.md) 删除 Summary 生成和
+> AgentRun 摘要组成条款；本文的 Agent-bounded 跨 Camp 原始消息检索边界继续有效。
+
 ## Context
 
 ADR-0051 deliberately derives one Camp from the current AgentRun fence and states that the Team

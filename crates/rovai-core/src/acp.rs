@@ -684,7 +684,6 @@ fn acp_prompt_id(host_instance_id: &str, request_id: u64) -> String {
 pub struct AcpRuntime {
     owner: AcpRuntimeOwner,
     host: Arc<AcpHost>,
-    owns_host: bool,
     mcp_projection_digest: String,
     session_id: RwLock<Option<String>>,
     execution_root: PathBuf,
@@ -700,7 +699,6 @@ impl AcpRuntime {
     fn from_host(
         owner: AcpRuntimeOwner,
         host: Arc<AcpHost>,
-        owns_host: bool,
         mcp_projection_digest: String,
         execution_root: PathBuf,
         attachment_access_root: Option<PathBuf>,
@@ -709,7 +707,6 @@ impl AcpRuntime {
         Arc::new(Self {
             owner,
             host,
-            owns_host,
             mcp_projection_digest,
             session_id: RwLock::new(None),
             execution_root,
@@ -1060,15 +1057,6 @@ impl AcpRuntime {
         Ok(json!({}))
     }
 
-    pub async fn shutdown(&self) {
-        if let Some(session_id) = self.session_id().await {
-            self.host.unbind_session(&session_id, &self.owner).await;
-        }
-        if self.owns_host {
-            self.host.shutdown().await;
-        }
-    }
-
     pub(crate) async fn detach(&self) {
         if let Some(session_id) = self.session_id().await {
             self.host.unbind_session(&session_id, &self.owner).await;
@@ -1111,143 +1099,6 @@ impl AcpCliRuntimeAdapter {
             private_runtime_dir,
             fleet,
         })
-    }
-
-    pub async fn run_isolated_completion(
-        frozen_runtime: &FrozenAgentRuntimeConfig,
-        cwd: &Path,
-        prompt: &str,
-    ) -> Result<String> {
-        if !launchable_acp_adapter(frozen_runtime.adapter_kind) {
-            bail!("ACP isolated completion received a non-ACP Adapter kind");
-        }
-        let workspace = AgentRunWorkspace {
-            execution_root: cwd.to_string_lossy().to_string(),
-            access: "read_only".to_string(),
-            isolation: "shared".to_string(),
-        };
-        let (incoming, mut receiver) = mpsc::unbounded_channel();
-        let private_runtime_dir = cwd.join(".rovai-runtime");
-        let external_mcp_servers = BTreeMap::new();
-        let host = AcpHost::spawn(
-            cwd,
-            &workspace,
-            PermissionSemantics::CoreEnforcedV1,
-            frozen_runtime,
-            incoming,
-            None,
-            false,
-            &external_mcp_servers,
-            &private_runtime_dir,
-            None,
-        )
-        .await?;
-        let owner = AcpRuntimeOwner {
-            agent_run_id: format!("context-compaction:{}", uuid::Uuid::new_v4()),
-            execution_epoch: 1,
-        };
-        let runtime = AcpRuntime::from_host(
-            owner.clone(),
-            host.clone(),
-            false,
-            "sha256:isolated-empty-mcp".to_string(),
-            cwd.to_path_buf(),
-            None,
-            "read_only".to_string(),
-        );
-        let result = timeout(Duration::from_secs(300), async {
-            runtime
-                .start_or_resume_session(
-                    None,
-                    false,
-                    frozen_runtime.model.model_id.as_str(),
-                    &frozen_runtime.model.options,
-                    &external_mcp_servers,
-                )
-                .await
-                .context("failed to start isolated ACP Session")?;
-            runtime
-                .start_prompt(prompt)
-                .await
-                .context("failed to start isolated ACP prompt")?;
-            loop {
-                let incoming = receiver
-                    .recv()
-                    .await
-                    .context("isolated ACP event channel closed")?;
-                match incoming {
-                    AcpIncoming::Message {
-                        agent_run_id,
-                        execution_epoch,
-                        message,
-                        ..
-                    } if agent_run_id == owner.agent_run_id
-                        && execution_epoch == owner.execution_epoch =>
-                    {
-                        let method = message
-                            .get("method")
-                            .and_then(Value::as_str)
-                            .unwrap_or("unknown");
-                        let params = message.get("params").cloned().unwrap_or(Value::Null);
-                        if let Some(id) = message.get("id").cloned() {
-                            if method == "session/request_permission" {
-                                match rejection_result(&params) {
-                                    Ok(response) => {
-                                        let _ = runtime.respond(id, response).await;
-                                    }
-                                    Err(error) => {
-                                        let _ = runtime
-                                            .respond_error(id, -32000, &format!("{error:#}"))
-                                            .await;
-                                    }
-                                }
-                            } else {
-                                let _ = runtime
-                                    .respond_error(
-                                        id,
-                                        -32601,
-                                        "Tools are disabled for context compaction",
-                                    )
-                                    .await;
-                            }
-                            bail!("isolated ACP compactor requested a tool through {method}");
-                        }
-                        runtime.observe_message(method, &params).await?;
-                        if isolated_acp_tool_event(method, &params) {
-                            let _ = runtime.cancel().await;
-                            bail!("isolated ACP compactor attempted a tool through {method}");
-                        }
-                        if method == "rovai/acp_prompt_completed" {
-                            if let Some(error) = params.get("error").and_then(Value::as_str) {
-                                bail!("isolated ACP prompt failed: {error}");
-                            }
-                            return runtime
-                                .final_agent_message()
-                                .await
-                                .context("isolated ACP prompt produced no final response");
-                        }
-                    }
-                    AcpIncoming::Exited {
-                        agent_run_id,
-                        execution_epoch,
-                        ..
-                    } if agent_run_id == owner.agent_run_id
-                        && execution_epoch == owner.execution_epoch =>
-                    {
-                        bail!("isolated ACP Host exited before completion");
-                    }
-                    _ => {}
-                }
-            }
-        })
-        .await;
-        let result = match result {
-            Ok(result) => result,
-            Err(_) => Err(anyhow::anyhow!("isolated ACP completion timed out")),
-        };
-        runtime.shutdown().await;
-        host.shutdown().await;
-        result
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1326,7 +1177,6 @@ impl AcpCliRuntimeAdapter {
                 execution_epoch,
             },
             host,
-            false,
             mcp_projection_digest.to_string(),
             execution_root,
             Some(attachment_access_root.to_path_buf()),
@@ -1461,16 +1311,6 @@ pub(crate) fn runtime_compatibility_digest(
         "mcpProjectionDigest": mcp_projection_digest,
         "attachmentAccessRoot": attachment_access_root,
     }))
-}
-
-fn isolated_acp_tool_event(method: &str, params: &Value) -> bool {
-    method == "session/update"
-        && matches!(
-            params
-                .pointer("/update/sessionUpdate")
-                .and_then(Value::as_str),
-            Some("tool_call" | "tool_call_update")
-        )
 }
 
 fn prepare_private_host_config(
@@ -2235,90 +2075,6 @@ mod tests {
             "ACP request counters restart for each Host"
         );
         assert_eq!(acp_prompt_id("host-a", 1), "acp-prompt-host-a-1");
-    }
-
-    fn isolated_smoke_runtime(kind: AdapterKind, model_id: &str) -> FrozenAgentRuntimeConfig {
-        let executable = health::find_adapter(kind).expect("Adapter CLI must be installed");
-        let permission_values = match kind {
-            AdapterKind::OpencodeCli => json!({"permission": "deny"}),
-            AdapterKind::CopilotCli => json!({"allow_all": "off"}),
-            AdapterKind::KiroCli => json!({}),
-            AdapterKind::QoderCli => json!({"permission_mode": "default"}),
-            AdapterKind::CodebuddyCli => json!({"permission_mode": "default"}),
-            AdapterKind::QwenCode => json!({"approval_mode": "default"}),
-            AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp => {
-                unreachable!()
-            }
-        };
-        FrozenAgentRuntimeConfig {
-            adapter_kind: kind,
-            installation_id: "smoke".to_string(),
-            installation_generation: 1,
-            search_environment_generation: 1,
-            executable_path: executable.to_string_lossy().to_string(),
-            auth_scope: "local-user".to_string(),
-            reported_version: "smoke".to_string(),
-            executable_fingerprint: rovai_core::agent_runtime_adapter::executable_fingerprint(
-                &executable,
-            )
-            .expect("Adapter executable should be readable"),
-            capabilities: vec!["acp.initialize".to_string()],
-            protocol_version: "acp-v1".to_string(),
-            model: rovai_core::agent_profile::ResolvedModelSelection {
-                source: "explicit".to_string(),
-                model_id: model_id.to_string(),
-                options: json!({}),
-            },
-            permissions: rovai_core::agent_profile::AdapterPermissionConfig {
-                adapter_kind: kind,
-                schema_version: 1,
-                values: permission_values,
-            },
-            native_session_compatibility_key: Some(format!("{}:acp-v1", kind.as_str())),
-            binding_compatibility_digest: "smoke-binding".to_string(),
-            host_config_digest: "smoke-host".to_string(),
-            config_digest: "smoke-config".to_string(),
-        }
-    }
-
-    #[tokio::test]
-    #[ignore = "manual local Runtime smoke"]
-    async fn isolated_opencode_completion_real_runtime_smoke() {
-        let runtime = isolated_smoke_runtime(AdapterKind::OpencodeCli, "opencode/big-pickle");
-        let directory = std::env::temp_dir().join(format!(
-            "rovai-opencode-compaction-smoke-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&directory).unwrap();
-        let output = AcpCliRuntimeAdapter::run_isolated_completion(
-            &runtime,
-            &directory,
-            "只输出这六个字：压缩路径可用",
-        )
-        .await
-        .unwrap();
-        assert!(output.contains("压缩路径可用"), "{output}");
-        std::fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[tokio::test]
-    #[ignore = "manual local Runtime smoke"]
-    async fn isolated_copilot_completion_real_runtime_smoke() {
-        let runtime = isolated_smoke_runtime(AdapterKind::CopilotCli, "auto");
-        let directory = std::env::temp_dir().join(format!(
-            "rovai-copilot-compaction-smoke-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&directory).unwrap();
-        let output = AcpCliRuntimeAdapter::run_isolated_completion(
-            &runtime,
-            &directory,
-            "只输出这六个字：压缩路径可用",
-        )
-        .await
-        .unwrap();
-        assert!(output.contains("压缩路径可用"), "{output}");
-        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

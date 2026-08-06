@@ -18,6 +18,9 @@ last_updated: 2026-08-06
 布局 2”，本节据此冻结 Composer 与历史 Mention 的共同呈现和点击行为；重新打包的 App
 已通过真实输入、点击、Enter/Space、Esc 焦点返回、拖选和截图验收。
 
+v0.44 进一步确认删除成员详情中的公共消息摘要模型配置和整个“高级设置”入口，同时完整
+保留 Member Runtime Parameters。该 UI 变更尚未实施，不能从本文 `accepted` 推断代码已完成。
+
 ## 权威边界
 
 1. 有效 ADR、`CONTEXT.md`、Core 合同和安全边界决定产品语义与可执行行为。
@@ -180,7 +183,7 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 - `team.call_member` 的已投递正文进入本地用户可见的 Camp 会话，按真实发送者显示
   `发送者 → @接收者`，并直接展示消息正文。
 - A2A 正文的权威对象仍是 InboxMessage，不复制为 CampMessage，不进入公共 FTS、
-  摘要、Shared Conversation 或无关 Agent 上下文。
+  Shared Conversation 或无关 Agent 上下文。
 - Activity 检查器按 ConversationInput 展示 `pending/materialized/failed/cancelled`、真实
   consuming Run，不展示 reply/correlation 假关联或回传责任。
 - ConversationInput 物化失败只进入 Activity/Audit；Core 不因此向来源队员创建消息或
@@ -617,7 +620,7 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   列收窄到约 190px，不裁掉主体。
 - 身份区右侧直接显示专业职责、性格底色、工作准则与成长课题，不再增加“身份高级项”
   折叠入口；Presence 操作位于身份区下方。之后依次是
-  Agent Runtime、Memory Capability/高级摘要设置和危险区。不得显示或允许编辑内部
+  Agent Runtime、Memory Capability 和危险区。不得显示或允许编辑内部
   handle，也不增加 Camp 数、消息数、记忆数或能力评分统计卡。
 - Presence 操作直接使用“暂时离队 / 归队”，不弹出 Camp successor Dialog；
   Runtime 配置变化不能自动改变 Presence。
@@ -642,12 +645,10 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   叠加第二条 Readiness 警告。
 - “允许写入记忆”是队员自身未来 AgentRun 的 Capability 配置，与应用级
   Agent Memory Write Policy 分离；关闭任一层都不能修改已有 Memory。
-- “高级设置”默认折叠，只在展开后读取 Camp 共享摘要模型。表单只提供当前队员
-  Runtime 默认模型或该 Runtime 提供的明确模型，不显示自动回退选项、说明段落、
-  模型来源框或未配置状态，不增加独立“上下文”设置页。未保存明确配置时 Core 既有
-  回退语义不变，但 Renderer 不再把它作为可保存选项。
-- 详情内部在可用宽度足够时两列，不足时单列；身份、Runtime、Memory 能力、高级设置
-  和危险区的阅读顺序保持一致。
+- 队员详情不渲染“高级设置”、对话压缩模型或任何 Summary provider/model 配置；相关
+  展开按钮、state、import、CSS 和测试随能力一起删除，不保留空入口。
+- 详情内部在可用宽度足够时两列，不足时单列；身份、Runtime、Memory 能力和危险区的
+  阅读顺序保持一致。
 
 ### 创建、编辑与移除
 
@@ -760,8 +761,8 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   App Shell 右侧第一行叠加一条与页面表面同色的 50px 隐形拖拽栏，设置内容
   继续跨越两行，不因该拖拽栏下移。
 - 设置侧栏不显示健康 footer；诊断仍是设置分类并读取原有 Health Snapshot。
-- 设置页不增加“上下文”或“记忆”分区；摘要模型在队员高级设置，记忆是一级
-  页面。
+- 设置页不增加“上下文”或“记忆”分区；公共消息摘要模型不再有任何配置表面，记忆仍是
+  一级页面。
 
 ### 技能
 
@@ -931,6 +932,8 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   旧 Approval 时间线卡、Quick Chat Composer、Header Stop/`•••`、Meridian 文案、
   Night Token 使用者、188px 设置二级导航、侧栏 Core 健康入口及无使用者的
   CSS/class/test fixture。
+- v0.44 删除 `MemberAdvancedSettings`、`SummaryModelSettings`、“高级设置”展开入口、
+  “对话压缩模型”文案及对应 state/import/CSS/test；不得删除 Member Runtime Parameters。
 - 删除 `rovai.rail-expanded` 等旧纯 UI 偏好，不迁移、不双读。Pin 使用新的
   `navigation.json`；ThemePreference 按已确认合同保留但全部解析为 Day。
 - Quick Chat 全栈切换与旧 `<userData>/lobby/` 精确删除遵守 ADR-0074；不增加

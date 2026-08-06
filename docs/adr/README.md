@@ -1,7 +1,7 @@
 ---
 document_type: adr-index
 authority: architecture-decisions
-last_updated: 2026-08-06
+last_updated: 2026-08-07
 ---
 
 # Rovai-ai Architecture Decision Records
@@ -97,24 +97,24 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0047](0047-user-initiated-memory-export-boundary.md) | User-Initiated Memory Export Boundary | `accepted` | [v0.10](../versions/v0.10/README.md) | — |
 | [ADR-0048](0048-rovai-product-identity-and-legacy-namespace.md) | Rovai-ai Product Identity and Controlled Legacy Namespace Migration | `accepted` | [v0.11](../versions/v0.11/README.md) | — |
 | [ADR-0049](0049-reproducible-context-delivery-v2.md) | Reproducible Context Delivery v2 | `superseded` | [v0.12](../versions/v0.12/README.md) | ← ADR-0009；→ ADR-0067 |
-| [ADR-0050](0050-camp-shared-progressive-summaries.md) | Camp-Shared Progressive Summaries | `accepted` | [v0.12](../versions/v0.12/README.md) | — |
-| [ADR-0051](0051-boundary-capped-context-retrieval.md) | Boundary-Capped Context Retrieval | `accepted` | [v0.12](../versions/v0.12/README.md) | — |
+| [ADR-0050](0050-camp-shared-progressive-summaries.md) | Camp-Shared Progressive Summaries | `superseded` | [v0.12](../versions/v0.12/README.md) | → ADR-0129 |
+| [ADR-0051](0051-boundary-capped-context-retrieval.md) | Boundary-Capped Context Retrieval | `accepted` | [v0.12](../versions/v0.12/README.md) | Summary/Coverage 上下文条款由 ADR-0129 局部替代；原始消息检索边界继续有效 |
 | [ADR-0052](0052-explicit-memory-revision-authority.md) | Explicit Memory Revision Authority | `superseded` | [v0.13](../versions/v0.13/README.md) | ← ADR-0021、ADR-0033；→ ADR-0069 |
 | [ADR-0053](0053-user-preauthorized-provisional-companion-lessons.md) | User-Preauthorized Provisional Companion Lessons | `superseded` | [v0.13](../versions/v0.13/README.md) | ← ADR-0032、ADR-0044；→ ADR-0055 |
 | [ADR-0054](0054-provisional-memory-safety-and-stewardship.md) | Provisional Memory Safety and Stewardship | `superseded` | [v0.13](../versions/v0.13/README.md) | ← ADR-0043、ADR-0046；→ ADR-0055 |
 | [ADR-0055](0055-explicit-opt-in-provisional-companion-lessons.md) | Explicit Opt-In Provisional Companion Lessons | `superseded` | [v0.13](../versions/v0.13/README.md) | ← ADR-0053、ADR-0054；→ ADR-0064 |
 | [ADR-0056](0056-controlled-member-avatar-assets.md) | Controlled Member Avatar References and Application-Managed Local Assets | `accepted` | [v0.14](../versions/v0.14/README.md) | 内置外观版本与升级保护条款见 ADR-0086；固定可读内置 Agent ID 条款见 ADR-0110 |
 | [ADR-0057](0057-member-presence-and-retained-removal.md) | Member Presence and Retained Permanent Removal | `accepted` | [v0.15](../versions/v0.15/README.md) | ← ADR-0041；Memory Capability 条款见 ADR-0069 |
-| [ADR-0058](0058-collaboration-v4-presence-aware-admission.md) | Collaboration v4: Presence-Aware Routing and Execution Admission | `accepted` | [v0.15](../versions/v0.15/README.md) | ← ADR-0012；Dynamic Task Context 条款见 ADR-0067；Camp 创建与 Conversation 分配条款见 ADR-0071 |
+| [ADR-0058](0058-collaboration-v4-presence-aware-admission.md) | Collaboration v4: Presence-Aware Routing and Execution Admission | `accepted` | [v0.15](../versions/v0.15/README.md) | ← ADR-0012；Dynamic Task Context 条款见 ADR-0067；Conversation Summary/Camp Cursor 条款见 ADR-0129；Camp 创建与 Conversation 分配条款见 ADR-0071 |
 | [ADR-0059](0059-runtime-owned-resource-permissions.md) | Runtime-Owned Resource Permissions and Path-Only Run Workspace | `accepted` | [v0.16](../versions/v0.16/README.md) | ← ADR-0015 |
-| [ADR-0060](0060-opaque-member-routing-identity.md) | Opaque Member Routing Identity and Globally Unique Names | `accepted` | [v0.16](../versions/v0.16/README.md) | 成员身份命名与提及规则细化 ADR-0057、ADR-0058；Base58 Routing ID 见 ADR-0110 |
-| [ADR-0061](0061-durable-agent-inaccessible-execution-evidence.md) | Durable User-Visible and Agent-Inaccessible Execution Evidence | `accepted` | [v0.17](../versions/v0.17/README.md) | 执行内容与 Read Side 边界细化 ADR-0013、ADR-0049 |
+| [ADR-0060](0060-opaque-member-routing-identity.md) | Opaque Member Routing Identity and Globally Unique Names | `accepted` | [v0.16](../versions/v0.16/README.md) | 成员身份命名与提及规则细化 ADR-0057、ADR-0058；Base58 Routing ID 见 ADR-0110；摘要模型配置入口由 ADR-0129 删除 |
+| [ADR-0061](0061-durable-agent-inaccessible-execution-evidence.md) | Durable User-Visible and Agent-Inaccessible Execution Evidence | `accepted` | [v0.17](../versions/v0.17/README.md) | 执行内容与 Read Side 边界细化 ADR-0013、ADR-0049；Summary 输入目标由 ADR-0129 删除 |
 | [ADR-0062](0062-interruptible-runs-and-unsettled-external-effects.md) | Interruptible Run Trees and Unsettled External Effects | `accepted` | [v0.17](../versions/v0.17/README.md) | 取消与恢复边界细化 ADR-0016、ADR-0059 |
 | [ADR-0063](0063-minimal-a2a-turn-envelope-and-reply-correlation.md) | Minimal A2A Turn Envelope and Trusted Reply Correlation | `superseded` | [v0.17](../versions/v0.17/README.md) | 局部替代 ADR-0049；→ ADR-0067 |
 | [ADR-0064](0064-default-on-bounded-automatic-partner-memory.md) | Default-On Bounded Automatic Partner Memory Formation | `superseded` | v0.18 | ← ADR-0055；→ ADR-0069 |
 | [ADR-0065](0065-verified-runtime-catalog-and-documentation-only-compatibility.md) | Verified Runtime Catalog and Documentation-Only Compatibility Evaluation | `accepted` | [v0.19](../versions/v0.19/README.md) | ← ADR-0016；受证明的 preserved-ambient Team attachment 见 ADR-0088 |
 | [ADR-0066](0066-managed-product-runtime-resolution.md) | Managed Product Runtime Discovery, Resolution, and Relocation | `accepted` | [v0.20](../versions/v0.20/README.md) | — |
-| [ADR-0067](0067-native-session-bootstrap-and-agentrun-context-v3.md) | Native Session Bootstrap and AgentRun Context v3 | `accepted` | [v0.21](../versions/v0.21/README.md) | ← ADR-0049、ADR-0063；局部替代 ADR-0014/ADR-0058 的 Task Context 条款；Bootstrap 身份与恢复条款见 ADR-0100 |
+| [ADR-0067](0067-native-session-bootstrap-and-agentrun-context-v3.md) | Native Session Bootstrap and AgentRun Context v3 | `accepted` | [v0.21](../versions/v0.21/README.md) | ← ADR-0049、ADR-0063；局部替代 ADR-0014/ADR-0058 的 Task Context 条款；Bootstrap 身份与恢复条款见 ADR-0100；公共消息上下文与边界条款见 ADR-0129 |
 | [ADR-0068](0068-brokered-memory-retrieval-and-session-entrypoint.md) | Brokered Memory Retrieval and Session Entrypoint | `accepted` | [v0.21](../versions/v0.21/README.md) | ← ADR-0035、ADR-0042 |
 | [ADR-0069](0069-single-effective-memory-and-scope-bounded-agent-mutation.md) | Single Effective Memory and Scope-Bounded Agent Mutation | `accepted` | [v0.21](../versions/v0.21/README.md) | ← ADR-0024、ADR-0025、ADR-0036～ADR-0040、ADR-0052、ADR-0064；局部替代 ADR-0057 的 Memory Capability 条款 |
 | [ADR-0070](0070-normalized-sqlite-memory-store-v2.md) | Normalized SQLite Memory Store v2 | `accepted` | [v0.21](../versions/v0.21/README.md) | ← ADR-0045 |
@@ -122,7 +122,7 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0072](0072-directory-workspace-and-dynamic-git-capability.md) | Directory Workspace Identity and Dynamic Git Capability | `accepted` | [v0.23](../versions/v0.23/README.md) | 局部替代 ADR-0071 的 Repository/Project Binding 条款；Quick Chat 命名与 binding literal 见 ADR-0074 |
 | [ADR-0073](0073-agent-authored-a2a-conversation-messages.md) | Agent-Authored A2A Conversation Messages | `accepted` | [v0.24](../versions/v0.24/README.md) | 细化 ADR-0014 的 A2A 用户可见呈现与 ADR-0013 的 Read Side 边界 |
 | [ADR-0074](0074-quick-chat-ubiquitous-language-and-binding-identity.md) | Quick Chat Ubiquitous Language and Binding Identity | `accepted` | [v0.24](../versions/v0.24/README.md) | 局部替代 ADR-0071、ADR-0072 的 Lobby 命名与 binding literal |
-| [ADR-0075](0075-runtime-integrity-at-change-and-execution-boundaries.md) | Runtime Integrity at Change and Execution Boundaries | `accepted` | [v0.24](../versions/v0.24/README.md) | 局部替代 ADR-0066 的发送准入与 fingerprint 时机 |
+| [ADR-0075](0075-runtime-integrity-at-change-and-execution-boundaries.md) | Runtime Integrity at Change and Execution Boundaries | `accepted` | [v0.24](../versions/v0.24/README.md) | 局部替代 ADR-0066 的发送准入与 fingerprint 时机；Context Compaction 执行路径由 ADR-0129 删除 |
 | [ADR-0076](0076-message-first-agent-run-dispatch-boundary.md) | Message-First AgentRun Dispatch Boundary | `accepted` | [v0.24](../versions/v0.24/README.md) | 局部替代 ADR-0058、ADR-0066、ADR-0075 的发送/执行检查时机 |
 | [ADR-0077](0077-responsive-camp-turn-cancellation-boundary.md) | Responsive CampTurn Cancellation Boundary | `accepted` | [v0.24](../versions/v0.24/README.md) | 细化 ADR-0062 的取消请求、Renderer 对账与 ending Git observation 时机 |
 | [ADR-0078](0078-navigation-projection-and-sidebar-wordmark-boundary.md) | Navigation Projection and Sidebar Wordmark Boundary | `accepted` | [v0.24](../versions/v0.24/README.md) | 细化 ADR-0048 的侧栏字标与 ADR-0074 的 Renderer 导航投影；不改变正式身份或领域合同 |
@@ -147,15 +147,15 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0097](0097-authority-preserving-benchmark-evidence-ledgers.md) | Authority-Preserving Benchmark Evidence Ledgers | `accepted` | [v0.34](../versions/v0.34/README.md) | 统一 Evidence Reference 与 Ledger schema，同时保留 Core、Runner、Runtime、Verifier、derived、Judge 的权威差异 |
 | [ADR-0098](0098-dual-replica-evidence-bound-semantic-judge.md) | Dual-Replica Evidence-Bound Semantic Judge Protocol | `accepted` | [v0.34](../versions/v0.34/README.md) | 以双 Replica、冻结 checklist、allowlist Evidence Pack 和 disagreement/unavailable 状态暴露 Judge 不稳定性 |
 | [ADR-0099](0099-cost-gated-independent-member-calls.md) | Cost-Gated Independent Member Calls Without Return Semantics | `accepted` | [v0.34](../versions/v0.34/README.md) | ← ADR-0091；局部替代 ADR-0093 的回传槽位与 ADR-0097 的回复闭环条款 |
-| [ADR-0100](0100-latest-member-identity-native-session-bootstrap.md) | Latest Member Identity in Native Session Bootstrap | `accepted` | [v0.35](../versions/v0.35/README.md) | ← ADR-0085；局部替代 ADR-0067 的 Bootstrap 结构、身份生命周期与完整字节恢复条款 |
+| [ADR-0100](0100-latest-member-identity-native-session-bootstrap.md) | Latest Member Identity in Native Session Bootstrap | `accepted` | [v0.35](../versions/v0.35/README.md) | ← ADR-0085；局部替代 ADR-0067 的 Bootstrap 结构、身份生命周期与完整字节恢复条款；Context Read Marker 由 ADR-0129 重定义 |
 | [ADR-0101](0101-outcome-only-collaboration-value-qualification-cases.md) | Outcome-Only Collaboration-Value Qualification Cases | `accepted` | [v0.36](../versions/v0.36/README.md) | 细化 ADR-0090/0095 的 Case admission、公开/withheld pairing 与无机械协作门禁 |
 | [ADR-0102](0102-immutable-diagnostic-portfolio-authority.md) | Immutable Diagnostic Portfolio Authority and Two-Repeat Stability | `accepted` | [v0.36](../versions/v0.36/README.md) | 独立于 Formal Suite 冻结四 Case、两次重复、append-only 状态与无聚合评分 |
 | [ADR-0103](0103-canonical-mcp-json-and-stable-assignment-identity.md) | Canonical MCP JSON and Stable Assignment Identity | `accepted` | [v0.37](../versions/v0.37/README.md) | 局部替代 ADR-0018 的 Schema、Assignment 关联键、默认定义和旧格式兼容条款 |
 | [ADR-0104](0104-rovai-preferred-mcp-projection-and-external-degradation.md) | Rovai-Preferred MCP Projection and Non-Blocking External Degradation | `superseded` | [v0.37](../versions/v0.37/README.md) | → ADR-0125 |
 | [ADR-0105](0105-runtime-group-assigned-skill-delivery.md) | Runtime-Group Assigned Rovai Skill Delivery | `accepted` | [v0.37](../versions/v0.37/README.md) | ← ADR-0017 |
-| [ADR-0106](0106-agent-bounded-cross-camp-public-history-retrieval.md) | Agent-Bounded Cross-Camp Public History Retrieval | `accepted` | [v0.40](../versions/v0.40/README.md) | 局部替代 ADR-0051 的“网关无跨 Camp 查询”条款 |
+| [ADR-0106](0106-agent-bounded-cross-camp-public-history-retrieval.md) | Agent-Bounded Cross-Camp Public History Retrieval | `accepted` | [v0.40](../versions/v0.40/README.md) | 局部替代 ADR-0051 的“网关无跨 Camp 查询”条款；Summary 上下文组成由 ADR-0129 删除 |
 | [ADR-0107](0107-camp-member-isolated-codex-home-and-agentrun-app-server.md) | Camp-Member Isolated Codex Home and AgentRun-Scoped App Server | `superseded` | [v0.39](../versions/v0.39/README.md) | → ADR-0126 |
-| [ADR-0108](0108-discovery-only-camp-message-search-and-sequence-paged-reads.md) | Discovery-Only Camp Message Search and Sequence-Paged Reads | `accepted` | [v0.40](../versions/v0.40/README.md) | 局部替代 ADR-0051 的五工具、Summary 读取、相关性分页与 window/thread 续读合同 |
+| [ADR-0108](0108-discovery-only-camp-message-search-and-sequence-paged-reads.md) | Discovery-Only Camp Message Search and Sequence-Paged Reads | `accepted` | [v0.40](../versions/v0.40/README.md) | 局部替代 ADR-0051 的五工具、Summary 读取、相关性分页与 window/thread 续读合同；Summary 生成与上下文组成由 ADR-0129 删除 |
 | [ADR-0109](0109-project-visible-bundled-skill-sources.md) | Project-Visible Bundled Skill Sources | `accepted` | [v0.40](../versions/v0.40/README.md) | 局部替代 ADR-0105 的唯一官方 Skill 条款 |
 | [ADR-0110](0110-internal-agent-uuid-and-monotonic-short-agent-id.md) | Internal Agent UUID and Monotonic Short Agent ID | `accepted` | [v0.40](../versions/v0.40/README.md) | 局部替代 ADR-0056 的固定可读内置 ID 与 ADR-0060 的 Base58 Routing ID 条款 |
 | [ADR-0111](0111-core-owned-canonical-runtime-activity.md) | Core-Owned Canonical Runtime Activity and Observation-Honest Lifecycle Projection | `accepted` | [v0.41](../versions/v0.41/README.md) | 细化 ADR-0059/ADR-0061 的 Runtime 观测、Evidence 与 Renderer 展示边界 |
@@ -170,9 +170,10 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0120](0120-run-epoch-pinned-identity-rules-and-frozen-binding-sets.md) | Run-Epoch-Pinned Identity Rules and Frozen Evidence Binding Sets | `superseded` | [v0.41](../versions/v0.41/README.md) | → ADR-0122；Binding Set/identity replay 推迟 |
 | [ADR-0121](0121-append-only-binding-ledger-and-sealed-binding-set-heads.md) | Append-Only Binding Ledger and Immutable Sealed Binding-Set Heads | `superseded` | [v0.41](../versions/v0.41/README.md) | → ADR-0122；Ledger/sealed head 不进入 v0.41 |
 | [ADR-0122](0122-current-canonical-activity-projection-and-deferred-identity-replay.md) | Current Canonical Activity Projection and Deferred Identity Replay | `accepted` | [v0.41](../versions/v0.41/README.md) | ← ADR-0119、ADR-0120、ADR-0121；当前 Projection + Mapping Registry，历史身份 replay 推迟 |
-| [ADR-0123](0123-exclusive-agentrun-runtime-fleet.md) | Exclusive AgentRun Runtime Processes and Resident Fleet Reuse | `accepted` | [v0.41](../versions/v0.41/README.md) | 细化 ADR-0082 的进程复用身份；局部替代 ADR-0018 的 Resident projection 终态清理与 ADR-0107 的 Codex 每 Run 进程生命周期 |
+| [ADR-0123](0123-exclusive-agentrun-runtime-fleet.md) | Exclusive AgentRun Runtime Processes and Resident Fleet Reuse | `accepted` | [v0.41](../versions/v0.41/README.md) | 细化 ADR-0082 的进程复用身份；局部替代 ADR-0018 的 Resident projection 终态清理与 ADR-0107 的 Codex 每 Run 进程生命周期；Context Compaction Job 由 ADR-0129 删除 |
 | [ADR-0124](0124-cli-only-transport-for-rovai-built-in-operations.md) | CLI-Only Transport for Rovai Built-in Operations | `accepted` | [v0.42](../versions/v0.42/README.md) | 以九 Runtime clean break 替代 ADR-0014/0018/0067/0069/0088/0089/0104 的内置 MCP 运输与成员级工具 Capability 条款；外部 MCP 不变 |
 | [ADR-0125](0125-runtime-native-additive-external-mcp-projection.md) | Runtime-Native Additive External MCP Projection | `accepted` | [v0.43](../versions/v0.43/README.md) | ← ADR-0104；局部替代 ADR-0018 的 exact/Project exclusion/Unsupported 准入条款 |
-| [ADR-0126](0126-codex-native-home-and-external-session-ownership.md) | Codex Native Home and External Session Ownership | `accepted` | [v0.43](../versions/v0.43/README.md) | ← ADR-0107；局部替代 ADR-0123 的 Codex Home compatibility identity |
+| [ADR-0126](0126-codex-native-home-and-external-session-ownership.md) | Codex Native Home and External Session Ownership | `accepted` | [v0.43](../versions/v0.43/README.md) | ← ADR-0107；局部替代 ADR-0123 的 Codex Home compatibility identity；摘要 Job 条款由 ADR-0129 删除 |
 | [ADR-0127](0127-atomic-member-runtime-configuration.md) | Atomic Member Runtime Configuration and Internal Resolved Binding | `accepted` | [v0.43](../versions/v0.43/README.md) | ← ADR-0082；局部替代 ADR-0066 的 AdapterKind-only 普通队员配置 |
 | [ADR-0128](0128-structured-draft-only-user-message-submission.md) | Structured Draft-Only User Camp Message Submission | `accepted` | [v0.43](../versions/v0.43/README.md) | ← ADR-0096；删除旧用户发送与 first-message Camp creation 边界 |
+| [ADR-0129](0129-deterministic-bounded-raw-public-context-delivery.md) | Deterministic Bounded Raw Public Context Delivery | `accepted` | [v0.44](../versions/v0.44/README.md) | ← ADR-0050；局部替代 ADR-0051、ADR-0058、ADR-0060、ADR-0061、ADR-0067、ADR-0075、ADR-0100、ADR-0106、ADR-0108、ADR-0123、ADR-0126 的 Summary/Compaction/公共上下文条款 |

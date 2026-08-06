@@ -17,7 +17,6 @@ use crate::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
         DomainCommandGateway, EntityReference, sealed,
     },
-    context::queue_async_camp_summaries,
     context_index::index_camp_message,
     conversation_input::{
         cancel_turn_inputs, turn_has_failed_or_cancelled_input, turn_has_pending_input,
@@ -2022,7 +2021,7 @@ impl ExecutionRuntimeService {
                     // The Team Tool credential and Binding identity were
                     // reserved before the Adapter started its MCP process.
                     // Completing that reservation must retain the secret,
-                    // generation, Context Read Marker and Charter state prepared
+                    // generation, accepted public boundary and Charter state prepared
                     // for this exact Native Session generation.
                     transaction.execute(
                         r#"
@@ -2065,7 +2064,7 @@ impl ExecutionRuntimeService {
                             native_binding_id = ?5,
                             native_binding_generation = ?6,
                             native_binding_secret_digest = NULL,
-                            native_read_through_camp_message_sequence = 0,
+                            last_accepted_public_boundary_sequence = 0,
                             native_charter_digest = NULL,
                             native_member_state_digest = NULL,
                             version = version + 1, updated_at = ?7
@@ -2283,7 +2282,7 @@ impl ExecutionRuntimeService {
                     native_session_compatibility_key = NULL,
                     native_binding_id = NULL,
                     native_binding_secret_digest = NULL,
-                    native_read_through_camp_message_sequence = 0,
+                    last_accepted_public_boundary_sequence = 0,
                     native_charter_digest = NULL,
                     native_member_state_digest = NULL,
                     version = version + 1,
@@ -2425,7 +2424,6 @@ impl ExecutionRuntimeService {
                 &envelope.payload.final_output,
                 &addressed_agents_json,
             )?;
-            queue_async_camp_summaries(transaction, &target.camp_id)?;
             let ending_git_observation = envelope
                 .payload
                 .ending_git_observation
@@ -3908,7 +3906,7 @@ mod tests {
                     native_adapter_installation_id, native_session_id,
                     native_binding_compatibility_digest, native_binding_id,
                     native_binding_generation, native_binding_secret_digest,
-                    native_read_through_camp_message_sequence,
+                    last_accepted_public_boundary_sequence,
                     native_charter_digest, native_member_state_digest,
                     version, created_at, updated_at
                 ) VALUES (

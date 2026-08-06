@@ -12,6 +12,7 @@ pub mod collaboration;
 pub mod command;
 pub mod context;
 pub mod context_contract;
+pub mod context_delivery;
 pub mod context_index;
 pub mod conversation_input;
 pub mod db;

@@ -20,6 +20,10 @@ superseded_by: null
 > 局部替代本文的 A2A `source` alias、reply correlation 和直接 ConversationMessage trigger，
 > 改由安全的 Member Call/Outcome ConversationInput 形成 CURRENT_INPUT。本文其余 Bootstrap、
 > 动态上下文、恢复与投递合同继续有效。
+>
+> [ADR-0129](0129-deterministic-bounded-raw-public-context-delivery.md) 局部替代本文的
+> SHARED_CONVERSATION 摘要、Coverage、Context Read Marker、ContextManifest 摘要引用和
+> Context Compaction 条款；Session Charter、Memory Entrypoint 及其他动态上下文区段继续有效。
 
 ## Context
 

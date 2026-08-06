@@ -54,6 +54,11 @@ v0.38 将历史上“每次 Task 状态变化一张不可变边界卡”替换�
 任务详情和审计。具体投影、旧消息兼容和验收合同见
 [v0.38 生产设计](../versions/v0.38/production-design.md)。
 
+v0.44 删除公共消息摘要系统后，队员详情同时删除 `MemberAdvancedSettings`、
+`SummaryModelSettings`、“高级设置”展开入口和“对话压缩模型”文案，不保留空壳。
+Member Runtime Parameters 及其模型、推理强度、权限与 sandbox 配置继续保留。该合同已经
+确认，但生产实现尚未开始，进度见[v0.44 实施计划](../versions/v0.44/implementation-plan.md)。
+
 ## 权威边界
 
 1. 有效 ADR、`CONTEXT.md`、Core 合同和安全边界决定领域语义与可执行行为。
@@ -134,6 +139,8 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   圆形取景拖拽、缩放、键盘微调与实际尺寸预览。
 - 队员页“运行配置”下保留默认收起的“运行参数”；九种 Runtime 使用专用模型与
   原生权限字段，Product Runtime、模型和权限通过唯一的“保存运行时”原子保存。
+- 队员详情在运行配置后只保留 Memory Capability 和危险区，不渲染“高级设置”或
+  摘要模型配置入口；这不删除或折叠 Member Runtime Parameters。
 - Runtime 检查与缓存由 Core 后台统一管理；队员页和 Agent 运行时设置只展示可操作结果，
   不显示“已找到”“尚未检查”等内部探测阶段，也不在配置保存时同步完整检查。
 - 记忆、技能、Agent 运行时、外观、诊断和创建新对话 Dialog 以 Arctic Dawn 详规为准；
@@ -210,3 +217,5 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   Runtime Smoke 限制单独记录在版本证据中。
 - [x] v0.28 全局通知入口、持久抽屉、未读徽标、浮层、设置、Focus Return 与
   reduced-motion 已通过 Core、Renderer 和隔离打包 App 验收。
+- [ ] v0.44 删除成员高级设置、摘要模型表单、相关 state/import/CSS/test，并验证所有
+  Member Runtime Parameters 仍可编辑和原子保存。

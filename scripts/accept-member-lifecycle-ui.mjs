@@ -343,49 +343,18 @@ try {
   await setViewport(running.cdp, 1440, 920)
   await selectMember(running.cdp, '小狐狸')
   await openMemberRuntimeTab(running.cdp)
-  const foldedSummaryState = await evaluate(running.cdp, `({
-    open: document.querySelector('.member-advanced-settings details')?.open,
-    mounted: Boolean(document.querySelector('.summary-model-settings'))
+  const removedSummarySettings = await evaluate(running.cdp, `({
+    advancedSettings: Boolean(document.querySelector('.member-advanced-settings')),
+    summarySettings: Boolean(document.querySelector('.summary-model-settings')),
+    text: document.querySelector('#member-runtime-panel')?.textContent
   })`)
   assert(
-    foldedSummaryState.open === false && foldedSummaryState.mounted === false,
-    `Summary model advanced settings were not folded by default: ${JSON.stringify(foldedSummaryState)}`
+    !removedSummarySettings.advancedSettings
+      && !removedSummarySettings.summarySettings
+      && !removedSummarySettings.text?.includes('对话压缩模型')
+      && !removedSummarySettings.text?.includes('Camp 共享摘要模型'),
+    `Removed summary settings are still visible: ${JSON.stringify(removedSummarySettings)}`
   )
-  await mouseClick(running.cdp, '.member-advanced-settings summary', '高级设置', true)
-  await waitForSelector(running.cdp, '.summary-model-settings')
-  await waitForText(running.cdp, '.summary-model-settings', '选择模型')
-  await waitForText(running.cdp, '.summary-model-settings', '当前队员的 Agent 运行时默认模型')
-  const summaryModelControls = await evaluate(running.cdp, `({
-    selectCount: document.querySelectorAll('.summary-model-settings select').length,
-    labels: [...document.querySelectorAll('.summary-model-settings .field-label')]
-      .map((node) => node.childNodes[0]?.textContent?.trim()),
-    options: [...document.querySelectorAll('.summary-model-settings option')]
-      .map((option) => option.textContent?.trim()),
-    sourceBox: Boolean(document.querySelector('.summary-model-settings .runtime-empty')),
-    saveDisabled: document.querySelector('.summary-model-settings button')?.disabled,
-    text: document.querySelector('.summary-model-settings')?.textContent
-  })`)
-  assert(
-    summaryModelControls.selectCount === 1
-      && summaryModelControls.labels.length === 1
-      && summaryModelControls.labels[0] === '模型'
-      && JSON.stringify(summaryModelControls.options) === JSON.stringify([
-        '选择模型',
-        '当前队员的 Agent 运行时默认模型'
-      ])
-      && !summaryModelControls.sourceBox
-      && summaryModelControls.saveDisabled === true
-      && !summaryModelControls.text?.includes('自动回退')
-      && !summaryModelControls.text?.includes('模型来源')
-      && !summaryModelControls.text?.includes('尚未配置')
-      && !summaryModelControls.text?.includes('这是所有 Camp 共享摘要使用的模型配置'),
-    `Summary model controls were not simplified: ${JSON.stringify(summaryModelControls)}`
-  )
-  captures.summaryModelSimplified = join(
-    outputDir,
-    'summary-model-simplified-day-1440x920.png'
-  )
-  await capture(running.cdp, captures.summaryModelSimplified)
   await assertExecutionEngineProductCopy(running.cdp)
   await setTheme(running.cdp, 'day')
   await openMemberMenuAction(running.cdp, '暂时离队')
@@ -954,7 +923,7 @@ try {
       memberPortraitResponsive1120_820_640NoOverflow: true,
       memberOrderDedicatedModeKeyboardRoundTrip: true,
       effective200PercentZoomReducedMotionAndForcedColors: true,
-      summaryModelAdvancedSettingsFoldedAndSimplified: true,
+      summaryModelAdvancedSettingsRemoved: true,
       memberHandlesHiddenAndDuplicateNameBlocked: true,
       campWhiteSurfacesStrongDividerAndPreservedRailMessageColors: true,
       userMessageSelectableAndCopyable: true,
@@ -1054,11 +1023,11 @@ async function installAcceptanceRuntime(databasePath, agentIds) {
 async function createCampFixture(databasePath, id, title, projectPath) {
   await runSql(databasePath, `
     INSERT INTO camp(
-      id, title, project_binding_kind, project_path, default_lead_agent_id, status,
+      id, title, project_binding_kind, project_path, default_lead_agent_id,
       last_message_sequence, version, created_at, updated_at
     ) VALUES (
       ${sqlLiteral(id)}, ${sqlLiteral(title)}, 'quick_chat', ${sqlLiteral(projectPath)},
-      'agent_1', 'active', 1, 1, datetime('now'), datetime('now')
+      'agent_1', 1, 1, datetime('now'), datetime('now')
     );
     INSERT INTO camp_member(
       camp_id, agent_id, status, capability_overrides_json,

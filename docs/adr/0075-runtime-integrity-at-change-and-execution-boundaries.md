@@ -12,6 +12,9 @@ superseded_by: null
 
 # ADR-0075: Runtime Integrity at Change and Execution Boundaries
 
+> [ADR-0129](0129-deterministic-bounded-raw-public-context-delivery.md) 删除等待摘要完成的
+> Context Compaction 执行路径；本文的 AgentRun Runtime integrity 检查与失败边界继续有效。
+
 ## Context
 
 Rovai-ai 为已验证 Runtime 保存 SHA-256 fingerprint，并在 AgentRun 中冻结该证据。

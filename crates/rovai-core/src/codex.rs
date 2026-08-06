@@ -655,46 +655,6 @@ impl CodexRuntime {
         native_mcp_server_names_from_config_read(&response)
     }
 
-    async fn start_isolated_thread(&self, cwd: &Path, model: Option<&str>) -> Result<String> {
-        self.start_or_resume_thread_with_config(
-            cwd,
-            None,
-            CodexThreadStartOptions {
-                developer_instructions: None,
-                sandbox: "read-only",
-                approval_policy: "never",
-                model: model.filter(|model| *model != "default"),
-                config: Some(json!({
-                "web_search": "disabled",
-                "include_apply_patch_tool": false,
-                "mcp_servers": {},
-                "tools": {"view_image": false},
-                "features": {
-                    "shell_tool": false,
-                    "unified_exec": false,
-                    "code_mode": false,
-                    "code_mode_only": false,
-                    "apply_patch_freeform": false,
-                    "web_search_request": false,
-                    "web_search_cached": false,
-                    "search_tool": false,
-                    "memory_tool": false,
-                    "collab": false,
-                    "multi_agent_v2": false,
-                    "apps": false,
-                    "tool_search": false,
-                    "plugins": false,
-                    "image_generation": false,
-                    "artifact": false
-                }
-                })),
-                runtime_workspace_roots: None,
-                ephemeral: true,
-            },
-        )
-        .await
-    }
-
     async fn start_or_resume_thread_with_config(
         &self,
         cwd: &Path,
@@ -832,11 +792,6 @@ impl CodexRuntime {
 
     pub fn agent_run_epoch(&self) -> Option<i64> {
         self.owner.agent_run_epoch()
-    }
-
-    pub async fn shutdown(&self) {
-        self.detach().await;
-        self.host.shutdown_and_reap().await;
     }
 
     pub(crate) async fn detach(&self) {
@@ -1050,109 +1005,6 @@ impl CodexCliRuntimeAdapter {
             incoming,
             fleet,
         }
-    }
-
-    pub async fn run_isolated_completion(
-        frozen_runtime: &FrozenAgentRuntimeConfig,
-        cwd: &Path,
-        prompt: &str,
-    ) -> Result<String> {
-        if frozen_runtime.adapter_kind != AdapterKind::CodexCli {
-            bail!("Codex isolated completion received another Adapter kind");
-        }
-        let (incoming, mut receiver) = mpsc::unbounded_channel();
-        let owner_id = format!("context-compaction:{}", uuid::Uuid::new_v4());
-        let host = CodexHost::spawn_with_executable(
-            Path::new(&frozen_runtime.executable_path),
-            cwd,
-            incoming,
-            None,
-        )
-        .await?;
-        let runtime = CodexRuntime::from_host(
-            CodexRuntimeOwner::AgentRun {
-                agent_run_id: owner_id.clone(),
-                execution_epoch: 1,
-            },
-            None,
-            host,
-        );
-        let model = frozen_runtime.model.model_id.as_str();
-        let selected_model = (model != "default").then_some(model);
-        let reasoning_effort = frozen_runtime.model.options["reasoning_effort"].as_str();
-        let result = async {
-            runtime
-                .start_isolated_thread(cwd, selected_model)
-                .await
-                .context("failed to start isolated Codex Session")?;
-            let turn_id = runtime
-                .start_turn_with_config(prompt, selected_model, reasoning_effort)
-                .await
-                .context("failed to start isolated Codex turn")?;
-            loop {
-                let incoming = receiver
-                    .recv()
-                    .await
-                    .context("isolated Codex event channel closed")?;
-                match incoming {
-                    CodexIncoming::Message {
-                        agent_run_id,
-                        execution_epoch,
-                        message,
-                        ..
-                    } if agent_run_id == owner_id && execution_epoch == 1 => {
-                        let method = message
-                            .get("method")
-                            .and_then(Value::as_str)
-                            .unwrap_or("unknown");
-                        let params = message.get("params").cloned().unwrap_or(Value::Null);
-                        if let Some(id) = message.get("id").cloned() {
-                            let _ = runtime
-                                .respond_error(id, "Tools are disabled for context compaction")
-                                .await;
-                            bail!("isolated Codex compactor requested a tool through {method}");
-                        }
-                        runtime.observe_agent_message(method, &params).await;
-                        if isolated_codex_tool_event(method, &params) {
-                            let _ = runtime.interrupt().await;
-                            bail!("isolated Codex compactor attempted a tool through {method}");
-                        }
-                        if method == "turn/completed" {
-                            let completed_turn_id = params
-                                .pointer("/turn/id")
-                                .and_then(Value::as_str)
-                                .unwrap_or(&turn_id);
-                            let status = params
-                                .pointer("/turn/status")
-                                .and_then(Value::as_str)
-                                .unwrap_or("failed");
-                            runtime.clear_turn(Some(completed_turn_id)).await;
-                            if status != "completed" {
-                                bail!("isolated Codex turn ended with status {status}");
-                            }
-                            return runtime
-                                .final_agent_message()
-                                .await
-                                .context("isolated Codex turn produced no final response");
-                        }
-                    }
-                    CodexIncoming::Exited {
-                        agent_run_id,
-                        execution_epoch,
-                        ..
-                    } if agent_run_id == owner_id && execution_epoch == 1 => {
-                        bail!("isolated Codex Host exited before completion");
-                    }
-                    _ => {}
-                }
-            }
-        };
-        let result = match timeout(Duration::from_secs(300), result).await {
-            Ok(result) => result,
-            Err(_) => Err(anyhow::anyhow!("isolated Codex completion timed out")),
-        };
-        runtime.shutdown().await;
-        result
     }
 
     pub async fn ensure_agent_run_runtime(
@@ -1390,24 +1242,6 @@ fn turn_start_request(
             );
     }
     request
-}
-
-fn isolated_codex_tool_event(method: &str, params: &Value) -> bool {
-    if method != "item/started" {
-        return false;
-    }
-    matches!(
-        params.pointer("/item/type").and_then(Value::as_str),
-        Some(
-            "commandExecution"
-                | "fileChange"
-                | "mcpToolCall"
-                | "dynamicToolCall"
-                | "webSearch"
-                | "imageGeneration"
-                | "collabToolCall"
-        )
-    )
 }
 
 #[derive(Debug, Clone)]
@@ -2003,55 +1837,6 @@ mod tests {
             config.pointer("/mcp_servers/rovai_docs/url"),
             Some(&json!("https://example.test/mcp"))
         );
-    }
-
-    #[tokio::test]
-    #[ignore = "manual local Runtime smoke"]
-    async fn isolated_completion_real_runtime_smoke() {
-        let executable = crate::health::find_codex().expect("Codex CLI must be installed");
-        let directory = std::env::temp_dir().join(format!(
-            "rovai-codex-compaction-smoke-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&directory).unwrap();
-        let runtime = FrozenAgentRuntimeConfig {
-            adapter_kind: AdapterKind::CodexCli,
-            installation_id: "smoke".to_string(),
-            installation_generation: 1,
-            search_environment_generation: 1,
-            executable_path: executable.to_string_lossy().to_string(),
-            auth_scope: "local-user".to_string(),
-            reported_version: "smoke".to_string(),
-            executable_fingerprint: rovai_core::agent_runtime_adapter::executable_fingerprint(
-                &executable,
-            )
-            .unwrap(),
-            capabilities: vec!["codex.app_server_v2".to_string()],
-            protocol_version: "codex-app-server-v2".to_string(),
-            model: rovai_core::agent_profile::ResolvedModelSelection {
-                source: "runtime_default".to_string(),
-                model_id: "default".to_string(),
-                options: json!({}),
-            },
-            permissions: rovai_core::agent_profile::AdapterPermissionConfig {
-                adapter_kind: AdapterKind::CodexCli,
-                schema_version: 1,
-                values: json!({}),
-            },
-            native_session_compatibility_key: Some("codex-cli:app-server-v2".to_string()),
-            binding_compatibility_digest: "smoke-binding".to_string(),
-            host_config_digest: "smoke-host".to_string(),
-            config_digest: "smoke-config".to_string(),
-        };
-        let output = CodexCliRuntimeAdapter::run_isolated_completion(
-            &runtime,
-            &directory,
-            "只输出这六个字：压缩路径可用",
-        )
-        .await
-        .unwrap();
-        assert!(output.contains("压缩路径可用"), "{output}");
-        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[tokio::test]

@@ -1384,19 +1384,15 @@ export function CampWorkspace({
                     </div>
                     <dl className="context-facts">
                       <div><dt>Bootstrap</dt><dd>{manifest.bootstrap.deliveryMode === 'native_append' ? 'Native append' : 'First payload'}</dd></div>
-                      <div><dt>公共边界</dt><dd>seq {manifest.campMessageBoundarySequence}</dd></div>
-                      <div><dt>原文消息</dt><dd>{manifest.rawMessageCount} 条</dd></div>
-                      <div><dt>覆盖基线</dt><dd>{manifest.coverageBaselineSequence ? `seq ≤ ${manifest.coverageBaselineSequence}` : '未使用'}</dd></div>
+                      <div><dt>已接受边界</dt><dd>seq {manifest.previousAcceptedPublicBoundarySequence ?? '—'}</dd></div>
+                      <div><dt>本次公共边界</dt><dd>seq {manifest.campMessageBoundarySequence}</dd></div>
+                      <div><dt>最近原文</dt><dd>{manifest.recentMessageCount} 条</dd></div>
+                      <div><dt>原始用户消息</dt><dd>{manifest.originatingPublicUserMessageRef ? '已追溯' : '不适用'}</dd></div>
+                      <div><dt>上下文投递</dt><dd>{manifest.contextDeliveryProfileVersion ? `Profile v${manifest.contextDeliveryProfileVersion}` : '历史格式'}</dd></div>
+                      <div><dt>整条省略</dt><dd>{manifest.omittedMessageCount ? `${manifest.omittedMessageCount} 条 · seq ${manifest.omittedMessageSequenceStart}–${manifest.omittedMessageSequenceEnd}` : '无'}</dd></div>
                       <div><dt>Binding</dt><dd>Generation {manifest.nativeBindingGeneration}</dd></div>
                       <div><dt>Formatter</dt><dd>v{manifest.formatterVersion}</dd></div>
                     </dl>
-
-                    {manifest.summaries.length > 0 && (
-                      <div className="context-subsection">
-                        <strong>Camp 共享摘要</strong>
-                        {manifest.summaries.map((summary) => <div className="context-summary-row" key={summary.id}><span>{summary.level === 'epoch' ? 'Epoch' : 'Segment'}{summary.inputTruncated ? ' · 输入截断' : ''}</span><code>seq {summary.fromSequence}–{summary.throughSequence}</code><small>{summary.generatorAdapterKind} · {modelName(summary.generatorModel)}</small></div>)}
-                      </div>
-                    )}
 
                     {manifest.runNoticeRefs.length > 0 && (
                       <div className="context-subsection">
@@ -1474,20 +1470,14 @@ export function CampWorkspace({
 
                     <details className="context-digests">
                       <summary>完整性与版本</summary>
-                      <dl><div><dt>Dynamic Payload</dt><dd><code>{manifest.renderedPayloadDigest}</code></dd></div><div><dt>Session Charter</dt><dd><code>{manifest.bootstrap.sessionCharterDigest}</code></dd></div><div><dt>Memory Entrypoint</dt><dd><code>{manifest.bootstrap.memoryEntrypointDigest}</code></dd></div><div><dt>Collaboration</dt><dd><code>{manifest.collaborationStateDigest}</code></dd></div><div><dt>Run Notices</dt><dd><code>{manifest.runNoticeDigest}</code></dd></div><div><dt>Attachments</dt><dd><code>{manifest.attachmentDigest}</code></dd></div><div><dt>Skill</dt><dd><code>{manifest.skillExposureDigest}</code></dd></div><div><dt>MCP</dt><dd><code>{manifest.mcpExposureDigest}</code></dd></div></dl>
+                      <dl><div><dt>Dynamic Payload</dt><dd><code>{manifest.renderedPayloadDigest}</code></dd></div>{manifest.contextDeliveryProfileDigest && <div><dt>Delivery Profile</dt><dd><code>{manifest.contextDeliveryProfileDigest}</code></dd></div>}<div><dt>Session Charter</dt><dd><code>{manifest.bootstrap.sessionCharterDigest}</code></dd></div><div><dt>Memory Entrypoint</dt><dd><code>{manifest.bootstrap.memoryEntrypointDigest}</code></dd></div><div><dt>Collaboration</dt><dd><code>{manifest.collaborationStateDigest}</code></dd></div><div><dt>Run Notices</dt><dd><code>{manifest.runNoticeDigest}</code></dd></div><div><dt>Attachments</dt><dd><code>{manifest.attachmentDigest}</code></dd></div><div><dt>Skill</dt><dd><code>{manifest.skillExposureDigest}</code></dd></div><div><dt>MCP</dt><dd><code>{manifest.mcpExposureDigest}</code></dd></div></dl>
                     </details>
                     {manifest.delivery?.lastError && <p className="context-alert">{manifest.delivery.lastError}</p>}
                   </article>
                 )
               })}
 
-              {snapshot.contextCompactions.length > 0 && (
-                <section className="compaction-history" aria-label="条件压缩记录">
-                  <div className="inspector-section-label"><span>条件压缩记录</span><small>仅超出预算时产生</small></div>
-                  {snapshot.contextCompactions.map((attempt) => <div className="compaction-row" key={attempt.id}><span className={`activity-status tone-${attempt.status === 'succeeded' ? 'success' : attempt.status === 'failed' ? 'danger' : 'attention'}`}>{attempt.status === 'succeeded' ? '已完成' : attempt.status === 'failed' ? '失败' : '处理中'}</span><div><strong>{attempt.level === 'epoch' ? 'Epoch 摘要' : 'Segment 摘要'}</strong><code>seq {attempt.fromSequence}–{attempt.throughSequence}</code><small>重试 {attempt.retryCount} · 等待 {attempt.waiterCount}</small>{attempt.errorCode && <small>{attempt.errorCode}</small>}</div></div>)}
-                </section>
-              )}
-              {snapshot.contextManifests.length === 0 && snapshot.contextCompactions.length === 0 && <EmptyInline text="AgentRun 首次调度后，冻结的上下文清单会出现在这里。" />}
+              {snapshot.contextManifests.length === 0 && <EmptyInline text="AgentRun 首次调度后，冻结的上下文清单会出现在这里。" />}
             </Tabs.Content>
             <Tabs.Content value="approvals" className="tab-scroll approvals-panel">
               {pendingApprovals.map((approval) => (
@@ -3142,12 +3132,4 @@ async function writeClipboardText(text: string): Promise<boolean> {
 
 function shortIdentity(value: string): string {
   return value.length <= 12 ? value : `${value.slice(0, 8)}…${value.slice(-4)}`
-}
-
-function modelName(value: unknown): string {
-  if (typeof value === 'string') return value
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return '模型未记录'
-  const record = value as Record<string, unknown>
-  const candidate = record.modelId ?? record.model_id ?? record.id
-  return typeof candidate === 'string' ? candidate : '模型已冻结'
 }

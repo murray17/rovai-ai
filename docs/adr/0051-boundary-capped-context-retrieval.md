@@ -17,6 +17,9 @@ superseded_by: null
 > [ADR-0108](0108-discovery-only-camp-message-search-and-sequence-paged-reads.md) 局部替代本文的
 > 五个 `context.*` 工具、模型可读 Summary、相关性分页以及 window/thread 续读合同；字面量
 > 查询安全、短查询有界回退、CampMessage 事实源、tombstone 过滤和硬响应预算继续有效。
+> [ADR-0129](0129-deterministic-bounded-raw-public-context-delivery.md) 进一步删除 Summary、
+> Coverage Baseline 与摘要回读假设，并冻结确定性原始消息窗口；`camp.read`/`camp.search`
+> 仍按 ContextManifest 上界访问原始消息，不按“已读/未读”过滤。
 
 ## Context
 

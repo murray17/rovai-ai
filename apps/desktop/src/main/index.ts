@@ -60,8 +60,6 @@ const allowedMethods = new Set<CoreMethod>([
   'memory.hearthProposals.accept',
   'memory.hearthProposals.reject',
   'memory.hearthProposals.rejectBatch',
-  'context.summaryModel.get',
-  'context.summaryModel.set',
   'runtime.installations.list',
   'runtime.installations.create',
   'runtime.installations.update',

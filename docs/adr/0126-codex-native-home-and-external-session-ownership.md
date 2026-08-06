@@ -18,6 +18,8 @@ superseded_by: null
 > 物理 Session 隔离；局部替代 [ADR-0123](0123-exclusive-agentrun-runtime-fleet.md) 的 Codex
 > Home compatibility identity。ADR-0123 的 AgentRun 独占 lease、Resident 配额、quiescence、
 > fencing 和 Core restart 语义继续有效。
+> [ADR-0129](0129-deterministic-bounded-raw-public-context-delivery.md) 删除 Camp 公共历史摘要
+> Job；本文关于普通 AgentRun 使用 Codex Native Home 及外部 Session 所有权的规则继续有效。
 
 ## Context
 

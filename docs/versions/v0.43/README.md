@@ -1,20 +1,23 @@
 ---
 document_type: version-overview
 version: v0.43
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
-design_status: accepted
-implementation_status: in_progress
+design_status: frozen
+implementation_status: closed_incomplete
 last_updated: 2026-08-06
 ---
 
 # Rovai-ai v0.43 Runtime-Native Additive MCP、Codex Native Home 与领域契约收敛
 
-> 状态：设计已确认，实施中。v0.43 把外部 MCP 从 exact/replacement 模型切换为
+> 状态：历史冻结。自动验证与代码打包已经完成，但真实 Runtime Smoke 未在冻结前全部完成，
+> 因此本版本不宣称完整验收通过。v0.43 把外部 MCP 从 exact/replacement 模型切换为
 > Runtime-native additive projection，让普通 Codex AgentRun 回到 Codex 原生 Home，并完成
 > Member、Agent ID、Task、Camp 生命周期与派生 Project 的 clean break。
 >
 > 前置版本：[v0.42 Built-in Tool CLI-only Transport](../v0.42/README.md)
+>
+> 后续版本：[v0.44 确定性有界原始公共消息上下文](../v0.44/README.md)
 >
 > 长期决策：[ADR-0125](../../adr/0125-runtime-native-additive-external-mcp-projection.md)、
 > [ADR-0126](../../adr/0126-codex-native-home-and-external-session-ownership.md)、

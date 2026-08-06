@@ -2113,7 +2113,7 @@ mod tests {
             .execute(
                 r#"
                 UPDATE agent_run
-                SET status = 'waiting', wait_reason = 'context_compaction'
+                SET status = 'waiting', wait_reason = 'runtime_recovery'
                 WHERE id = 'projection-run'
                 "#,
                 [],

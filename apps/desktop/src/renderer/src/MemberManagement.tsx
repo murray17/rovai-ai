@@ -44,10 +44,6 @@ import {
 } from './member-avatar-submit'
 import { invalidateManagedAvatarObjectUrl } from './managed-avatar-cache'
 import {
-  SummaryModelSettings,
-  type SummaryModelSettingsHandle
-} from './SummaryModelSettings'
-import {
   MemberRuntimeParameters,
   runtimeDraftForMember,
   runtimeEditorInstallation,
@@ -131,20 +127,18 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [runtimeDirty, setRuntimeDirty] = useState(false)
-  const [summaryDirty, setSummaryDirty] = useState(false)
   const [pendingTransition, setPendingTransition] = useState<GuardedTransition | null>(null)
   const identityReturnFocusRef = useRef<HTMLButtonElement | null>(null)
   const avatarReturnFocusRef = useRef<HTMLButtonElement | null>(null)
   const removalReturnFocusRef = useRef<HTMLButtonElement | null>(null)
   const runtimeFormRef = useRef<MemberRuntimeFormHandle>(null)
-  const summarySettingsRef = useRef<SummaryModelSettingsHandle>(null)
   const pendingTransitionRef = useRef<GuardedTransition | null>(null)
   const dirtyRef = useRef(false)
   const selectedAgent = agents.find((agent) => agent.agentId === selectedAgentId) ?? null
 
   useEffect(() => {
-    dirtyRef.current = runtimeDirty || summaryDirty
-  }, [runtimeDirty, summaryDirty])
+    dirtyRef.current = runtimeDirty
+  }, [runtimeDirty])
 
   useEffect(() => {
     if (activeTab !== 'runtime' || runtimeFocusRequest < 1) return undefined
@@ -299,9 +293,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
 
   const discardDrafts = useCallback((): void => {
     runtimeFormRef.current?.discard()
-    summarySettingsRef.current?.discard()
     setRuntimeDirty(false)
-    setSummaryDirty(false)
     dirtyRef.current = false
   }, [])
 
@@ -451,13 +443,6 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
                   onRuntimeSelected={checkRuntime}
                   onOpenRuntimeSettings={onOpenRuntimeSettings}
                 />
-                <MemberAdvancedSettings
-                  key={`advanced:${selectedAgent.agentId}`}
-                  ref={summarySettingsRef}
-                  agent={selectedAgent}
-                  installations={installations}
-                  onDirtyChange={setSummaryDirty}
-                />
               </div>
             </>
           )}
@@ -532,7 +517,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
               <Dialog.Close className="dialog-close" aria-label="继续编辑">×</Dialog.Close>
             </div>
             <Dialog.Description id="member-leave-description">
-              当前队员的运行配置或 Camp 共享摘要模型包含未保存更改。你可以继续编辑，或放弃更改后执行刚才的操作。
+              当前队员的运行配置包含未保存更改。你可以继续编辑，或放弃更改后执行刚才的操作。
             </Dialog.Description>
             <div className="dialog-actions">
               <button className="quiet-button" type="button" onClick={continueEditing}>继续编辑</button>
@@ -803,54 +788,6 @@ function ExpandableIdentityField({ label, lines, contentKey, children }: {
     </div>
   )
 }
-
-export const MemberAdvancedSettings = forwardRef<SummaryModelSettingsHandle, {
-  installations: AdapterInstallation[]
-  agent: AgentProfile
-  defaultOpen?: boolean
-  onDirtyChange?(dirty: boolean): void
-}>(function MemberAdvancedSettings({
-  installations,
-  agent,
-  defaultOpen = false,
-  onDirtyChange
-}, ref): React.JSX.Element {
-  const [open, setOpen] = useState(defaultOpen)
-  const [openedOnce, setOpenedOnce] = useState(defaultOpen)
-  const settingsRef = useRef<SummaryModelSettingsHandle>(null)
-  useImperativeHandle(ref, () => ({
-    discard(): void {
-      settingsRef.current?.discard()
-    }
-  }), [])
-  return (
-    <section className="member-section member-advanced-settings">
-      <details open={open} onToggle={(event) => {
-        const nextOpen = event.currentTarget.open
-        setOpen(nextOpen)
-        if (nextOpen) setOpenedOnce(true)
-      }}>
-        <summary>
-          <span>
-            <strong>高级设置</strong>
-            <small>Camp 共享摘要模型</small>
-          </span>
-          <i aria-hidden="true">⌄</i>
-        </summary>
-        {openedOnce && (
-          <div hidden={!open}>
-            <SummaryModelSettings
-              ref={settingsRef}
-              installations={installations}
-              agent={agent}
-              onDirtyChange={onDirtyChange}
-            />
-          </div>
-        )}
-      </details>
-    </section>
-  )
-})
 
 const PRODUCT_RUNTIMES: AdapterKind[] = [
   'claude-code-cli',

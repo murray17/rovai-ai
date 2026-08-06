@@ -2,19 +2,18 @@
 document_type: adr
 id: ADR-0050
 title: "Camp-Shared Progressive Summaries"
-status: accepted
+status: superseded
 date: 2026-07-26
 decision_scope: cross-version
 source_version: v0.12
 supersedes: []
-superseded_by: null
+superseded_by: ADR-0129
 ---
 
 # ADR-0050: Camp-Shared Progressive Summaries
 
-> [ADR-0108](0108-discovery-only-camp-message-search-and-sequence-paged-reads.md) 局部替代本文把
-> Camp Summary 暴露给模型搜索与全文读取的条款。Summary 表、生成协议、覆盖区间和 Core
-> 上下文组成职责继续有效；只有 `camp_summary_fts` 与模型可读 Summary 路径被移除。
+> 本决策已由 [ADR-0129](0129-deterministic-bounded-raw-public-context-delivery.md) 完整替代。
+> Segment/Epoch Summary、覆盖区间、生成调度、持久化和 AgentRun 摘要注入均不再构成当前约束。
 
 ## Context
 

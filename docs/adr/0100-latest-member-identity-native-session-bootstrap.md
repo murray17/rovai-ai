@@ -12,6 +12,10 @@ superseded_by: null
 
 # ADR-0100: Latest Member Identity in Native Session Bootstrap
 
+> [ADR-0129](0129-deterministic-bounded-raw-public-context-delivery.md) 仅重命名并重定义本文引用的
+> Context Read Marker 为 Accepted Public Context Boundary；Member Identity 与 Bootstrap
+> 生命周期规则继续有效。
+
 ## Context
 
 ADR-0085 placed the six-field Member Identity in every AgentRun Dynamic Context and froze it when

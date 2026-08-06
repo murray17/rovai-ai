@@ -12,3 +12,4 @@ Architecture 解释组件如何组成，Version 文档记录交付范围；它�
 | 合同 | 权威范围 |
 | --- | --- |
 | [Built-in Tool Transport v1](builtin-tool-transport-v1.md) | Agent CLI、catalog、输入、IPC、Envelope、receipt、幂等、lease 与错误结构 |
+| [Context Delivery Profile v1](context-delivery-profile-v1.md) | AgentRun 公共消息窗口、Unicode scalar 正文截断、历史字符预算、遗漏提示与 Manifest 证据 |

@@ -714,7 +714,7 @@ impl TeamToolService {
                     native_binding_id = ?4,
                     native_binding_generation = ?5,
                     native_binding_secret_digest = ?6,
-                    native_read_through_camp_message_sequence = 0,
+                    last_accepted_public_boundary_sequence = 0,
                     native_charter_digest = NULL,
                     native_member_state_digest = NULL,
                     version = version + 1,

@@ -2,11 +2,16 @@
 document_type: implementation-plan
 version: v0.43
 authority: implementation-plan-and-acceptance
-status: in_progress
+status: closed_incomplete
 last_updated: 2026-08-06
 ---
 
 # v0.43 实施与验收计划
+
+> 冻结结果：本计划已关闭但未完整验收。Checkpoint 7 中未勾选的真实 Runtime Smoke 在
+> v0.43 冻结前没有完成；保留原始勾选状态，不把自动验证或打包成功等同于 Runtime 实证。
+> v0.44 将删除公共历史摘要系统，而不是补做摘要 Job Smoke；其余未完成的 Runtime 证据若仍
+> 有产品价值，应在后续版本中重新立项并定义验收边界。
 
 ## Checkpoint 1：版本、ADR 与领域语言
 

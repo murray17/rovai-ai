@@ -15,6 +15,8 @@ superseded_by: null
 > [ADR-0110](0110-internal-agent-uuid-and-monotonic-short-agent-id.md) replaces the Base58 Member
 > Routing ID with a monotonic short Agent ID and confines the old handle to historical text
 > compatibility. This ADR's globally unique Member Name and structured Mention rules remain valid.
+> [ADR-0129](0129-deterministic-bounded-raw-public-context-delivery.md) 删除摘要模型配置、对应
+> IPC/持久化链路以及成员详情中的“高级设置”入口；成员身份与结构化 Mention 规则不变。
 
 ## Context
 

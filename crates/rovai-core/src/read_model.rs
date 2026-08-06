@@ -14,7 +14,7 @@ use crate::{
     skill_projection::SkillExposureSnapshot,
 };
 
-pub const READ_MODEL_SCHEMA_VERSION: i64 = 21;
+pub const READ_MODEL_SCHEMA_VERSION: i64 = 22;
 pub const EVENT_BATCH_SCHEMA_VERSION: i64 = 9;
 pub const NAVIGATION_SCHEMA_VERSION: i64 = 2;
 pub const EXECUTION_EVIDENCE_PAGE_SCHEMA_VERSION: i64 = 1;
@@ -312,21 +312,6 @@ pub struct ConversationInputView {
     pub terminal_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ContextSummaryView {
-    pub id: String,
-    pub level: String,
-    pub from_sequence: i64,
-    pub through_sequence: i64,
-    pub source_digest: String,
-    pub input_truncated: bool,
-    pub generator_adapter_kind: String,
-    pub generator_model: Value,
-    pub generator_version: String,
-    pub created_at: String,
-}
-
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ContextAttachmentMetadataView {
@@ -366,8 +351,15 @@ pub struct ContextManifestView {
     pub global_public_message_boundary: i64,
     pub history_camps: Vec<ContextManifestHistoryCampView>,
     pub raw_message_count: usize,
-    pub summaries: Vec<ContextSummaryView>,
-    pub coverage_baseline_sequence: Option<i64>,
+    pub previous_accepted_public_boundary_sequence: Option<i64>,
+    pub context_delivery_profile_version: Option<i64>,
+    pub context_delivery_profile: Option<Value>,
+    pub context_delivery_profile_digest: Option<String>,
+    pub originating_public_user_message_ref: Option<Value>,
+    pub recent_message_count: usize,
+    pub omitted_message_count: Option<i64>,
+    pub omitted_message_sequence_start: Option<i64>,
+    pub omitted_message_sequence_end: Option<i64>,
     pub collaboration_state_digest: String,
     pub run_notice_refs: Vec<String>,
     pub run_notice_digest: String,
@@ -415,25 +407,6 @@ pub struct NativeSessionBootstrapEvidenceView {
 pub struct CampAttachmentRefView {
     pub attachment_id: String,
     pub content_digest: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ContextCompactionView {
-    pub id: String,
-    pub level: String,
-    pub from_sequence: i64,
-    pub through_sequence: i64,
-    pub adapter_kind: String,
-    pub model: Value,
-    pub status: String,
-    pub generated_summary_id: Option<String>,
-    pub error_code: Option<String>,
-    pub retry_count: i64,
-    pub waiter_count: i64,
-    pub lease_expires_at: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -522,7 +495,6 @@ pub struct CampSnapshot {
     pub inbox_messages: Vec<InboxMessageView>,
     pub conversation_inputs: Vec<ConversationInputView>,
     pub context_manifests: Vec<ContextManifestView>,
-    pub context_compactions: Vec<ContextCompactionView>,
     pub approvals: Vec<ApprovalView>,
     pub actions: Vec<ActionView>,
     pub timeline: Vec<DomainEventView>,
@@ -692,7 +664,6 @@ impl ReadModelService {
         let inbox_messages = load_inbox_messages(&transaction, camp_id)?;
         let conversation_inputs = load_conversation_inputs(&transaction, camp_id)?;
         let context_manifests = load_context_manifests(&transaction, camp_id)?;
-        let context_compactions = load_context_compactions(&transaction, camp_id)?;
         let approvals = load_approvals(&transaction, camp_id)?;
         let actions = load_actions(&transaction, camp_id)?;
         let timeline = load_events(
@@ -717,7 +688,6 @@ impl ReadModelService {
             inbox_messages,
             conversation_inputs,
             context_manifests,
-            context_compactions,
             approvals,
             actions,
             timeline,
@@ -1811,29 +1781,36 @@ fn load_context_manifests(
 ) -> Result<Vec<ContextManifestView>> {
     let mut statement = transaction.prepare(
         r#"
-        SELECT context_manifest.id, context_manifest.agent_run_id,
-               context_manifest.native_binding_generation,
-               context_manifest.camp_message_boundary_sequence,
-               context_manifest.conversation_message_boundary_sequence,
-               context_manifest.raw_message_refs_json,
-               context_manifest.camp_summary_ids_json,
-               context_manifest.coverage_baseline_sequence,
-               context_manifest.collaboration_state_digest,
-               context_manifest.run_notice_refs_json,
-               context_manifest.run_notice_digest,
-               context_manifest.current_input_source_json,
-               context_manifest.attachment_refs_json,
-               context_manifest.attachment_digest,
-               context_manifest.skill_exposure_json,
-               context_manifest.skill_exposure_digest,
-               context_manifest.mcp_exposure_json,
-               context_manifest.mcp_exposure_digest,
-               context_manifest.mcp_projection_digest,
-               context_manifest.formatter_version,
-               context_manifest.rendered_payload_digest,
-               context_manifest.created_at,
-               context_manifest.history_fence_version,
-               context_manifest.global_public_message_boundary,
+        SELECT manifest.id, manifest.agent_run_id,
+               manifest.native_binding_generation,
+               manifest.camp_message_boundary_sequence,
+               manifest.conversation_message_boundary_sequence,
+               manifest.raw_message_refs_json,
+               manifest.collaboration_state_digest,
+               manifest.run_notice_refs_json,
+               manifest.run_notice_digest,
+               manifest.current_input_source_json,
+               manifest.attachment_refs_json,
+               manifest.attachment_digest,
+               manifest.skill_exposure_json,
+               manifest.skill_exposure_digest,
+               manifest.mcp_exposure_json,
+               manifest.mcp_exposure_digest,
+               manifest.mcp_projection_digest,
+               manifest.formatter_version,
+               manifest.rendered_payload_digest,
+               manifest.created_at,
+               manifest.history_fence_version,
+               manifest.global_public_message_boundary,
+               manifest.previous_accepted_public_boundary_sequence,
+               manifest.context_delivery_profile_version,
+               manifest.context_delivery_profile_json,
+               manifest.context_delivery_profile_digest,
+               manifest.originating_public_user_message_ref_json,
+               manifest.recent_message_refs_json,
+               manifest.omitted_message_count,
+               manifest.omitted_message_sequence_start,
+               manifest.omitted_message_sequence_end,
                json_object(
                    'id', bootstrap.id,
                    'conversationId', bootstrap.conversation_id,
@@ -1848,32 +1825,26 @@ fn load_context_manifests(
                    'deliveryMode', bootstrap.delivery_mode,
                    'createdAt', bootstrap.created_at
                ),
-               runtime_input_delivery.id,
-               runtime_input_delivery.execution_epoch,
-               runtime_input_delivery.status,
-               runtime_input_delivery.native_input_id,
-               runtime_input_delivery.boundary_camp_message_sequence,
-               runtime_input_delivery.prepared_at,
-               runtime_input_delivery.accepted_at,
-               runtime_input_delivery.resolved_at,
-               runtime_input_delivery.last_error,
-               runtime_input_delivery.updated_at
-        FROM context_manifest
+               delivery.id, delivery.execution_epoch, delivery.status,
+               delivery.native_input_id, delivery.boundary_camp_message_sequence,
+               delivery.prepared_at, delivery.accepted_at, delivery.resolved_at,
+               delivery.last_error, delivery.updated_at
+        FROM context_manifest AS manifest
         JOIN native_session_bootstrap_evidence AS bootstrap
-          ON bootstrap.id = context_manifest.bootstrap_evidence_id
-        JOIN agent_run ON agent_run.id = context_manifest.agent_run_id
+          ON bootstrap.id = manifest.bootstrap_evidence_id
+        JOIN agent_run ON agent_run.id = manifest.agent_run_id
         JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-        LEFT JOIN runtime_input_delivery
-          ON runtime_input_delivery.id = (
-              SELECT delivery.id
-              FROM runtime_input_delivery AS delivery
-              WHERE delivery.context_manifest_id = context_manifest.id
-              ORDER BY delivery.execution_epoch DESC,
-                       delivery.prepared_at DESC, delivery.id DESC
+        LEFT JOIN runtime_input_delivery AS delivery
+          ON delivery.id = (
+              SELECT candidate.id
+              FROM runtime_input_delivery AS candidate
+              WHERE candidate.context_manifest_id = manifest.id
+              ORDER BY candidate.execution_epoch DESC,
+                       candidate.prepared_at DESC, candidate.id DESC
               LIMIT 1
           )
         WHERE camp_turn.camp_id = ?1
-        ORDER BY context_manifest.created_at DESC, context_manifest.id
+        ORDER BY manifest.created_at DESC, manifest.id
         "#,
     )?;
     let rows = statement
@@ -1886,7 +1857,7 @@ fn load_context_manifests(
                 row.get::<_, i64>(4)?,
                 row.get::<_, String>(5)?,
                 row.get::<_, String>(6)?,
-                row.get::<_, Option<i64>>(7)?,
+                row.get::<_, String>(7)?,
                 row.get::<_, String>(8)?,
                 row.get::<_, String>(9)?,
                 row.get::<_, String>(10)?,
@@ -1896,135 +1867,134 @@ fn load_context_manifests(
                 row.get::<_, String>(14)?,
                 row.get::<_, String>(15)?,
                 row.get::<_, String>(16)?,
-                row.get::<_, String>(17)?,
+                row.get::<_, i64>(17)?,
                 row.get::<_, String>(18)?,
-                row.get::<_, i64>(19)?,
-                row.get::<_, String>(20)?,
-                row.get::<_, String>(21)?,
-                row.get::<_, i64>(22)?,
-                row.get::<_, i64>(23)?,
-                row.get::<_, String>(24)?,
+                row.get::<_, String>(19)?,
+                row.get::<_, i64>(20)?,
+                row.get::<_, i64>(21)?,
+                row.get::<_, Option<i64>>(22)?,
+                row.get::<_, Option<i64>>(23)?,
+                row.get::<_, Option<String>>(24)?,
                 row.get::<_, Option<String>>(25)?,
-                row.get::<_, Option<i64>>(26)?,
+                row.get::<_, Option<String>>(26)?,
                 row.get::<_, Option<String>>(27)?,
-                row.get::<_, Option<String>>(28)?,
+                row.get::<_, Option<i64>>(28)?,
                 row.get::<_, Option<i64>>(29)?,
-                row.get::<_, Option<String>>(30)?,
-                row.get::<_, Option<String>>(31)?,
+                row.get::<_, Option<i64>>(30)?,
+                row.get::<_, String>(31)?,
                 row.get::<_, Option<String>>(32)?,
-                row.get::<_, Option<String>>(33)?,
+                row.get::<_, Option<i64>>(33)?,
                 row.get::<_, Option<String>>(34)?,
+                row.get::<_, Option<String>>(35)?,
+                row.get::<_, Option<i64>>(36)?,
+                row.get::<_, Option<String>>(37)?,
+                row.get::<_, Option<String>>(38)?,
+                row.get::<_, Option<String>>(39)?,
+                row.get::<_, Option<String>>(40)?,
+                row.get::<_, Option<String>>(41)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     rows.into_iter()
-        .map(
-            |(
-                id,
-                agent_run_id,
-                native_binding_generation,
-                camp_message_boundary_sequence,
-                conversation_message_boundary_sequence,
-                raw_message_refs,
-                camp_summary_ids,
-                coverage_baseline_sequence,
-                collaboration_state_digest,
+        .map(|row| {
+            let raw_message_refs = serde_json::from_str::<Vec<Value>>(&row.5)
+                .context("ContextManifest raw message references are invalid")?;
+            let run_notice_refs = serde_json::from_str::<Vec<String>>(&row.7)
+                .context("ContextManifest Run Notice references are invalid")?;
+            let current_input_source = serde_json::from_str::<Value>(&row.9)
+                .context("ContextManifest Current Input source is invalid")?;
+            let attachment_refs = serde_json::from_str::<Vec<CampAttachmentRefView>>(&row.10)
+                .context("ContextManifest attachment references are invalid")?;
+            let skill_exposure = serde_json::from_str::<SkillExposureSnapshot>(&row.12)
+                .context("ContextManifest Skill exposure is invalid")?;
+            let mcp_exposure = serde_json::from_str::<McpExposureSnapshot>(&row.14)
+                .context("ContextManifest MCP exposure is invalid")?;
+            let context_delivery_profile = row
+                .24
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()
+                .context("ContextManifest delivery profile is invalid")?;
+            let originating_public_user_message_ref = row
+                .26
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()
+                .context("ContextManifest originating message reference is invalid")?;
+            let recent_message_count = row
+                .27
+                .as_deref()
+                .map(serde_json::from_str::<Vec<Value>>)
+                .transpose()
+                .context("ContextManifest recent message references are invalid")?
+                .map_or(0, |references| references.len());
+            let bootstrap = serde_json::from_str::<NativeSessionBootstrapEvidenceView>(&row.31)
+                .context("ContextManifest Native Session Bootstrap is invalid")?;
+            let delivery = row
+                .32
+                .clone()
+                .map(|id| {
+                    Ok::<RuntimeInputDeliveryView, anyhow::Error>(RuntimeInputDeliveryView {
+                        id,
+                        execution_epoch: row
+                            .33
+                            .context("Context delivery has no execution epoch")?,
+                        status: row.34.clone().context("Context delivery has no status")?,
+                        native_input_id: row.35.clone(),
+                        boundary_camp_message_sequence: row
+                            .36
+                            .context("Context delivery has no message boundary")?,
+                        prepared_at: row
+                            .37
+                            .clone()
+                            .context("Context delivery has no prepared time")?,
+                        accepted_at: row.38.clone(),
+                        resolved_at: row.39.clone(),
+                        last_error: row.40.clone(),
+                        updated_at: row
+                            .41
+                            .clone()
+                            .context("Context delivery has no updated time")?,
+                    })
+                })
+                .transpose()?;
+            Ok(ContextManifestView {
+                id: row.0.clone(),
+                agent_run_id: row.1,
+                bootstrap,
+                native_binding_generation: row.2,
+                camp_message_boundary_sequence: row.3,
+                conversation_message_boundary_sequence: row.4,
+                history_fence_version: row.20,
+                global_public_message_boundary: row.21,
+                history_camps: load_context_manifest_history_camps(transaction, &row.0)?,
+                raw_message_count: raw_message_refs.len(),
+                previous_accepted_public_boundary_sequence: row.22,
+                context_delivery_profile_version: row.23,
+                context_delivery_profile,
+                context_delivery_profile_digest: row.25,
+                originating_public_user_message_ref,
+                recent_message_count,
+                omitted_message_count: row.28,
+                omitted_message_sequence_start: row.29,
+                omitted_message_sequence_end: row.30,
+                collaboration_state_digest: row.6,
                 run_notice_refs,
-                run_notice_digest,
+                run_notice_digest: row.8,
                 current_input_source,
                 attachment_refs,
-                attachment_digest,
+                attachment_digest: row.11,
                 skill_exposure,
-                skill_exposure_digest,
+                skill_exposure_digest: row.13,
                 mcp_exposure,
-                mcp_exposure_digest,
-                mcp_projection_digest,
-                formatter_version,
-                rendered_payload_digest,
-                created_at,
-                history_fence_version,
-                global_public_message_boundary,
-                bootstrap,
-                delivery_id,
-                delivery_execution_epoch,
-                delivery_status,
-                native_input_id,
-                delivery_boundary_sequence,
-                prepared_at,
-                accepted_at,
-                resolved_at,
-                last_error,
-                delivery_updated_at,
-            )| {
-                let raw_message_refs = serde_json::from_str::<Vec<Value>>(&raw_message_refs)
-                    .context("ContextManifest raw message references are invalid")?;
-                let summary_ids = serde_json::from_str::<Vec<String>>(&camp_summary_ids)
-                    .context("ContextManifest Summary references are invalid")?;
-                let run_notice_refs = serde_json::from_str::<Vec<String>>(&run_notice_refs)
-                    .context("ContextManifest Run Notice references are invalid")?;
-                let current_input_source = serde_json::from_str::<Value>(&current_input_source)
-                    .context("ContextManifest Current Input source is invalid")?;
-                let attachment_refs =
-                    serde_json::from_str::<Vec<CampAttachmentRefView>>(&attachment_refs)
-                        .context("ContextManifest attachment references are invalid")?;
-                let skill_exposure = serde_json::from_str::<SkillExposureSnapshot>(&skill_exposure)
-                    .context("ContextManifest Skill exposure is invalid")?;
-                let mcp_exposure = serde_json::from_str::<McpExposureSnapshot>(&mcp_exposure)
-                    .context("ContextManifest MCP exposure is invalid")?;
-                let bootstrap =
-                    serde_json::from_str::<NativeSessionBootstrapEvidenceView>(&bootstrap)
-                        .context("ContextManifest Native Session Bootstrap is invalid")?;
-                let delivery = delivery_id
-                    .map(|delivery_id| {
-                        Ok::<RuntimeInputDeliveryView, anyhow::Error>(RuntimeInputDeliveryView {
-                            id: delivery_id,
-                            execution_epoch: delivery_execution_epoch
-                                .context("Context delivery has no execution epoch")?,
-                            status: delivery_status.context("Context delivery has no status")?,
-                            native_input_id,
-                            boundary_camp_message_sequence: delivery_boundary_sequence
-                                .context("Context delivery has no message boundary")?,
-                            prepared_at: prepared_at
-                                .context("Context delivery has no prepared time")?,
-                            accepted_at,
-                            resolved_at,
-                            last_error,
-                            updated_at: delivery_updated_at
-                                .context("Context delivery has no updated time")?,
-                        })
-                    })
-                    .transpose()?;
-                Ok(ContextManifestView {
-                    id: id.clone(),
-                    agent_run_id: agent_run_id.clone(),
-                    bootstrap,
-                    native_binding_generation,
-                    camp_message_boundary_sequence,
-                    conversation_message_boundary_sequence,
-                    history_fence_version,
-                    global_public_message_boundary,
-                    history_camps: load_context_manifest_history_camps(transaction, &id)?,
-                    raw_message_count: raw_message_refs.len(),
-                    summaries: load_context_summaries(transaction, camp_id, &summary_ids)?,
-                    coverage_baseline_sequence,
-                    collaboration_state_digest,
-                    run_notice_refs,
-                    run_notice_digest,
-                    current_input_source,
-                    attachment_refs,
-                    attachment_digest,
-                    skill_exposure,
-                    skill_exposure_digest,
-                    mcp_exposure,
-                    mcp_exposure_digest,
-                    mcp_projection_digest,
-                    formatter_version,
-                    rendered_payload_digest,
-                    delivery,
-                    created_at,
-                })
-            },
-        )
+                mcp_exposure_digest: row.15,
+                mcp_projection_digest: row.16,
+                formatter_version: row.17,
+                rendered_payload_digest: row.18,
+                delivery,
+                created_at: row.19,
+            })
+        })
         .collect()
 }
 
@@ -2050,138 +2020,6 @@ fn load_context_manifest_history_camps(
         })?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(Into::into)
-}
-
-fn load_context_summaries(
-    transaction: &Transaction<'_>,
-    camp_id: &str,
-    summary_ids: &[String],
-) -> Result<Vec<ContextSummaryView>> {
-    summary_ids
-        .iter()
-        .map(|summary_id| {
-            transaction
-                .query_row(
-                    r#"
-                    SELECT camp_summary.id, camp_summary.level,
-                           camp_summary.from_sequence,
-                           camp_summary.through_sequence,
-                           camp_summary.source_digest,
-                           camp_summary.input_truncated,
-                           camp_summary.generator_adapter_kind,
-                           camp_summary.generator_model_json,
-                           camp_summary.generator_version,
-                           camp_summary.created_at
-                    FROM camp_summary
-                    WHERE camp_summary.id = ?1 AND camp_summary.camp_id = ?2
-                    "#,
-                    params![summary_id, camp_id],
-                    |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, i64>(2)?,
-                            row.get::<_, i64>(3)?,
-                            row.get::<_, String>(4)?,
-                            row.get::<_, bool>(5)?,
-                            row.get::<_, String>(6)?,
-                            row.get::<_, String>(7)?,
-                            row.get::<_, String>(8)?,
-                            row.get::<_, String>(9)?,
-                        ))
-                    },
-                )
-                .with_context(|| format!("Context Summary {summary_id} is unavailable"))
-                .and_then(|row| {
-                    Ok(ContextSummaryView {
-                        id: row.0,
-                        level: row.1,
-                        from_sequence: row.2,
-                        through_sequence: row.3,
-                        source_digest: row.4,
-                        input_truncated: row.5,
-                        generator_adapter_kind: row.6,
-                        generator_model: serde_json::from_str(&row.7)
-                            .context("Context Summary generator model is invalid")?,
-                        generator_version: row.8,
-                        created_at: row.9,
-                    })
-                })
-        })
-        .collect()
-}
-
-fn load_context_compactions(
-    transaction: &Transaction<'_>,
-    camp_id: &str,
-) -> Result<Vec<ContextCompactionView>> {
-    let mut statement = transaction.prepare(
-        r#"
-        SELECT context_compaction_attempt.id,
-               context_compaction_attempt.level,
-               context_compaction_attempt.from_sequence,
-               context_compaction_attempt.through_sequence,
-               context_compaction_attempt.adapter_kind,
-               context_compaction_attempt.model_json,
-               context_compaction_attempt.status,
-               context_compaction_attempt.generated_summary_id,
-               context_compaction_attempt.error_code,
-               context_compaction_attempt.retry_count,
-               (
-                   SELECT COUNT(*) FROM context_compaction_waiter
-                   WHERE context_compaction_waiter.attempt_id =
-                       context_compaction_attempt.id
-               ),
-               context_compaction_attempt.lease_expires_at,
-               context_compaction_attempt.created_at,
-               context_compaction_attempt.updated_at
-        FROM context_compaction_attempt
-        WHERE context_compaction_attempt.camp_id = ?1
-        ORDER BY context_compaction_attempt.created_at DESC,
-                 context_compaction_attempt.id
-        "#,
-    )?;
-    let rows = statement
-        .query_map([camp_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, i64>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, String>(5)?,
-                row.get::<_, String>(6)?,
-                row.get::<_, Option<String>>(7)?,
-                row.get::<_, Option<String>>(8)?,
-                row.get::<_, i64>(9)?,
-                row.get::<_, i64>(10)?,
-                row.get::<_, Option<String>>(11)?,
-                row.get::<_, String>(12)?,
-                row.get::<_, String>(13)?,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    rows.into_iter()
-        .map(|row| {
-            Ok(ContextCompactionView {
-                id: row.0,
-                level: row.1,
-                from_sequence: row.2,
-                through_sequence: row.3,
-                adapter_kind: row.4,
-                model: serde_json::from_str(&row.5)
-                    .context("Context Compaction model is invalid")?,
-                status: row.6,
-                generated_summary_id: row.7,
-                error_code: row.8,
-                retry_count: row.9,
-                waiter_count: row.10,
-                lease_expires_at: row.11,
-                created_at: row.12,
-                updated_at: row.13,
-            })
-        })
-        .collect()
 }
 
 fn load_approvals(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<ApprovalView>> {
@@ -3090,291 +2928,6 @@ mod tests {
                 )
                 .is_err()
         );
-
-        drop(database);
-        std::fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[cfg(any())]
-    #[test]
-    fn camp_snapshot_projects_a2a_and_context_metadata_without_sensitive_bodies() {
-        let directory =
-            std::env::temp_dir().join(format!("rovai-context-read-model-test-{}", Uuid::new_v4()));
-        let mut database = Database::open(&directory).unwrap();
-        configure_test_runtime(&database, &["agent_1", "agent_2"]);
-        let created = CollaborationService::default()
-            .create_test_camp_conversation(
-                &mut database,
-                &user_envelope(
-                    "context-read-create",
-                    None,
-                    TestCampConversationCommand {
-                        project_path: directory.join("workspace").to_string_lossy().to_string(),
-                        project_binding_kind: crate::collaboration::ProjectBindingKind::Directory,
-                        body: "请协作检查上下文".to_string(),
-                        address: TestCampMessageAddress::Default,
-                        purpose: "检查上下文".to_string(),
-                        expected_output: "可读结果".to_string(),
-                    },
-                ),
-            )
-            .unwrap();
-        let camp_id = created.result.payload["campId"].as_str().unwrap();
-        let agent_run_id = created.result.payload["agentRunIds"][0].as_str().unwrap();
-        let (camp_turn_id, target_conversation_id): (String, String) = database
-            .connection()
-            .query_row(
-                "SELECT camp_turn_id, conversation_id FROM agent_run WHERE id = ?1",
-                [agent_run_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        let target_agent_id: String = database
-            .connection()
-            .query_row(
-                "SELECT agent_id FROM conversation WHERE id = ?1",
-                [&target_conversation_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let (sender_agent_id, source_conversation_id): (String, String) = database
-            .connection()
-            .query_row(
-                r#"
-                SELECT agent_id, id FROM conversation
-                WHERE camp_id = ?1 AND agent_id <> ?2
-                ORDER BY agent_id LIMIT 1
-                "#,
-                params![camp_id, target_agent_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        let blob = ManagedBlobStore::new(&directory)
-            .put_bytes(
-                &mut database,
-                b"SENSITIVE FROZEN PROMPT BODY",
-                "text/plain; charset=utf-8",
-                "sensitive",
-            )
-            .unwrap();
-        let now = chrono::Utc::now().to_rfc3339();
-        let summary_id = Uuid::new_v4().to_string();
-        let manifest_id = Uuid::new_v4().to_string();
-        let delivery_id = Uuid::new_v4().to_string();
-        let inbox_id = Uuid::new_v4().to_string();
-        let recipient_message_id = Uuid::new_v4().to_string();
-        let next_sequence: i64 = database
-            .connection()
-            .query_row(
-                "SELECT last_message_sequence + 1 FROM conversation WHERE id = ?1",
-                [&target_conversation_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        database
-            .connection()
-            .execute(
-                r#"
-                INSERT INTO conversation_message(
-                    id, conversation_id, sequence, author_type, author_id,
-                    body, source_inbox_message_id, camp_turn_id, created_at
-                ) VALUES (?1, ?2, ?3, 'agent', ?4, ?5, ?6, ?7, ?8)
-                "#,
-                params![
-                    recipient_message_id,
-                    target_conversation_id,
-                    next_sequence,
-                    sender_agent_id,
-                    "请检查输入物化",
-                    inbox_id,
-                    camp_turn_id,
-                    now,
-                ],
-            )
-            .unwrap();
-        database
-            .connection()
-            .execute(
-                "UPDATE conversation SET last_message_sequence = ?2 WHERE id = ?1",
-                params![target_conversation_id, next_sequence],
-            )
-            .unwrap();
-        database
-            .connection()
-            .execute(
-                r#"
-                INSERT INTO inbox_message(
-                    id, camp_id, sender_agent_id, recipient_agent_id, body,
-                    source_conversation_id, source_camp_turn_id,
-                    target_conversation_id, target_agent_run_id,
-                    correlation_id, idempotency_key, recipient_message_id,
-                    delivered_at, available_at, created_at, updated_at
-                ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-                    ?10, ?11, ?12, ?13, ?13, ?13, ?13
-                )
-                "#,
-                params![
-                    inbox_id,
-                    camp_id,
-                    sender_agent_id,
-                    target_agent_id,
-                    "请检查输入物化",
-                    source_conversation_id,
-                    camp_turn_id,
-                    target_conversation_id,
-                    agent_run_id,
-                    "correlation-read-test",
-                    "idempotency-read-test",
-                    recipient_message_id,
-                    now,
-                ],
-            )
-            .unwrap();
-        database
-            .connection()
-            .execute(
-                r#"
-                INSERT INTO camp_summary(
-                    id, camp_id, level, from_sequence, through_sequence,
-                    source_digest, input_truncated, source_summary_ids_json, body,
-                    generator_adapter_kind, generator_model_json,
-                    generator_version, created_at
-                ) VALUES (?1, ?2, 'segment', 1, 1, ?3, 0, '[]', ?4,
-                          'codex-cli', ?5, 'summary-v1', ?6)
-                "#,
-                params![
-                    summary_id,
-                    camp_id,
-                    "sha256:source",
-                    "SENSITIVE SUMMARY BODY",
-                    r#"{"modelId":"gpt-test"}"#,
-                    now,
-                ],
-            )
-            .unwrap();
-        database
-            .connection()
-            .execute(
-                r#"
-                INSERT INTO context_manifest(
-                    id, agent_run_id, native_binding_generation,
-                    camp_message_boundary_sequence,
-                    conversation_message_boundary_sequence,
-                    raw_message_refs_json, camp_summary_ids_json,
-                    coverage_baseline_sequence,
-                    attachment_metadata_json, work_brief_json,
-                    work_brief_digest, task_context_json, task_context_digest,
-                    control_signals_json,
-                    charter_digest, member_state_digest, formatter_version,
-                    rendered_payload_blob_id, rendered_payload_digest, created_at
-                ) VALUES (?1, ?2, 1, 1, ?3, ?4, ?5, NULL, ?6, '{}', ?7,
-                          ?8, ?9, ?10, ?11, ?12, 1, ?13, ?14, ?15)
-                "#,
-                params![
-                    manifest_id,
-                    agent_run_id,
-                    next_sequence,
-                    r#"[{"entityType":"camp_message","entityId":"message-1"}]"#,
-                    serde_json::to_string(&vec![summary_id.clone()]).unwrap(),
-                    r#"[{"attachmentId":"attachment-1","name":"review.txt","mediaType":"text/plain","byteSize":4096,"locationRef":"managed-blob://attachment-1","contentDigest":"sha256:attachment"}]"#,
-                    "sha256:brief",
-                    r#"{"schemaVersion":1,"tasks":[],"truncated":false,"omittedCount":0}"#,
-                    "sha256:task-context",
-                    r#"{"contextMode":"bootstrap"}"#,
-                    "sha256:charter",
-                    "sha256:members",
-                    blob.id,
-                    format!("sha256:{}", blob.sha256),
-                    now,
-                ],
-            )
-            .unwrap();
-        database
-            .connection()
-            .execute(
-                r#"
-                INSERT INTO runtime_input_delivery(
-                    id, agent_run_id, execution_epoch, context_manifest_id,
-                    native_binding_id, native_binding_generation,
-                    boundary_camp_message_sequence, dynamic_payload_digest,
-                    status, native_input_id, prepared_at, accepted_at,
-                    resolved_at, updated_at
-                ) VALUES (?1, ?2, 1, ?3, ?4, 1, 1, ?5, 'accepted',
-                          'native-input-1', ?6, ?6, ?6, ?6)
-                "#,
-                params![
-                    delivery_id,
-                    agent_run_id,
-                    manifest_id,
-                    Uuid::new_v4().to_string(),
-                    format!("sha256:{}", blob.sha256),
-                    now,
-                ],
-            )
-            .unwrap();
-        database
-            .connection()
-            .execute(
-                r#"
-                INSERT INTO context_compaction_attempt(
-                    id, camp_id, level, from_sequence, through_sequence,
-                    source_digest, input_truncated, source_summary_ids_json,
-                    adapter_kind, model_json, runtime_json,
-                    status, generated_summary_id,
-                    created_at, ended_at, updated_at
-                ) VALUES (?1, ?2, 'segment', 1, 1, ?3, 0, '[]',
-                          'codex-cli', ?4, '{}', 'succeeded', ?5, ?6, ?6, ?6)
-                "#,
-                params![
-                    Uuid::new_v4().to_string(),
-                    camp_id,
-                    "sha256:source",
-                    r#"{"modelId":"gpt-test"}"#,
-                    summary_id,
-                    now,
-                ],
-            )
-            .unwrap();
-
-        let snapshot = ReadModelService
-            .camp_snapshot(&mut database, camp_id)
-            .unwrap();
-        assert_eq!(snapshot.schema_version, READ_MODEL_SCHEMA_VERSION);
-        assert_eq!(snapshot.inbox_messages.len(), 1);
-        assert_eq!(snapshot.inbox_messages[0].body, "请检查输入物化");
-        assert_eq!(snapshot.agent_runs.len(), 1);
-        assert_eq!(
-            snapshot.agent_runs[0]
-                .workspace
-                .as_ref()
-                .map(|workspace| workspace.path.clone()),
-            Some(directory.join("workspace").to_string_lossy().to_string())
-        );
-        assert_eq!(
-            snapshot.agent_runs[0].permission_semantics,
-            "runtime_managed_v2"
-        );
-        assert_eq!(snapshot.context_manifests.len(), 1);
-        assert_eq!(
-            snapshot.context_manifests[0].context_mode.as_deref(),
-            Some("bootstrap")
-        );
-        assert_eq!(
-            snapshot.context_manifests[0].task_context_digest,
-            "sha256:task-context"
-        );
-        assert_eq!(snapshot.context_manifests[0].summaries.len(), 1);
-        assert_eq!(
-            snapshot.context_manifests[0].attachments[0].name,
-            "review.txt"
-        );
-        assert_eq!(snapshot.context_compactions.len(), 1);
-        let serialized = serde_json::to_string(&snapshot).unwrap();
-        assert!(!serialized.contains("executionRoot"));
-        assert!(!serialized.contains("\"access\":\"write\""));
-        assert!(!serialized.contains("SENSITIVE FROZEN PROMPT BODY"));
-        assert!(!serialized.contains("SENSITIVE SUMMARY BODY"));
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();

@@ -440,8 +440,6 @@ async function simulateV24AvatarSchema() {
         native_session_id = NULL,
         native_binding_compatibility_digest = NULL;
     UPDATE agent_run SET runtime_installation_id = NULL;
-    UPDATE context_summary_config
-    SET adapter_installation_id = NULL, model_json = NULL;
     DELETE FROM native_session_resume_attempt;
     DELETE FROM adapter_capability_snapshot;
     DELETE FROM adapter_probe_attempt;

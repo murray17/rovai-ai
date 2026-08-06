@@ -1697,10 +1697,6 @@ button.timeline-event-card:hover { border-color: var(--brand); background: var(-
 .context-subsection > strong, .context-subsection-title strong { font-size: 10px; }
 .context-subsection-title { display: flex; justify-content: space-between; gap: 8px; }
 .context-subsection-title small { color: var(--faint); font-size: 9px; }
-.context-summary-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 8px; align-items: center; padding: 6px 7px; border-radius: 5px; background: var(--evidence-canvas); }
-.context-summary-row span { color: var(--attention); font-size: 9px; font-weight: 700; }
-.context-summary-row code { justify-self: end; color: var(--muted); font: 9px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
-.context-summary-row small { grid-column: 1 / -1; overflow: hidden; color: var(--faint); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .context-attachment { display: grid; gap: 4px; padding: 7px; border: 1px solid var(--evidence-line); border-radius: 5px; background: var(--evidence-canvas); }
 .context-attachment > div { display: flex; min-width: 0; justify-content: space-between; gap: 8px; }
 .context-attachment strong, .context-attachment small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1722,12 +1718,6 @@ button.timeline-event-card:hover { border-color: var(--brand); background: var(-
 .context-digests dd { min-width: 0; margin: 0; }
 .context-digests code { display: block; overflow: hidden; color: var(--muted); font: 9px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .context-alert { margin: 10px 0 0; padding: 8px; border-left: 2px solid var(--danger); color: var(--danger); background: var(--danger-soft); font-size: 10px; line-height: 1.45; }
-.compaction-history { margin-top: 16px; }
-.compaction-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; align-items: start; padding: 9px 0; border-bottom: 1px solid var(--evidence-line); }
-.compaction-row > div { display: grid; min-width: 0; gap: 2px; }
-.compaction-row strong { font-size: 10px; }
-.compaction-row code { color: var(--muted); font: 9px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
-.compaction-row small { color: var(--danger); font-size: 9px; }
 details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-size: 11px; cursor: pointer; }
 .approval-card { margin-bottom: 12px; padding: 12px; border: 1px solid color-mix(in srgb, var(--attention) 38%, var(--evidence-line)); border-radius: 8px; background: color-mix(in srgb, var(--attention-soft) 48%, var(--evidence-surface)); }
 .approval-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -2662,31 +2652,6 @@ label.new-camp-mode-card { cursor: pointer; }
 .member-danger-zone h3 { margin: 0; color: var(--danger); font-size: 14px; }
 .member-danger-zone p { max-width: 560px; margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .member-danger-zone .danger-button { flex: 0 0 auto; }
-.member-advanced-settings > details > summary {
-  display: flex;
-  min-height: 42px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  cursor: pointer;
-  list-style: none;
-}
-.member-advanced-settings > details > summary::-webkit-details-marker { display: none; }
-.member-advanced-settings > details > summary span { display: grid; gap: 3px; }
-.member-advanced-settings > details > summary strong { font-size: 14px; }
-.member-advanced-settings > details > summary small { color: var(--muted); font-size: 10px; }
-.member-advanced-settings > details > summary i {
-  color: var(--muted);
-  font-size: 16px;
-  font-style: normal;
-  transition: transform 140ms ease;
-}
-.member-advanced-settings > details[open] > summary i { transform: rotate(180deg); }
-.summary-model-settings { display: grid; gap: 2px; margin-top: 14px; padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-subtle); }
-.summary-model-settings-form { display: grid; max-width: 720px; gap: 12px; }
-.summary-model-settings-form .dialog-actions { justify-content: space-between; }
-.summary-model-settings-form .dialog-actions span { color: var(--faint); font-size: 11px; }
-.summary-model-settings-form .dialog-actions button { margin-left: auto; }
 .member-status-note { margin-top: 10px; padding: 8px 10px; border-left: 3px solid var(--attention); color: var(--attention); background: var(--attention-soft); font-size: 11px; }
 .runtime-installation-summary { display: flex; min-height: 34px; flex-wrap: wrap; align-items: center; gap: 5px 10px; margin-top: 9px; color: var(--muted); font-size: 10.5px; }
 .runtime-installation-primary { display: flex; min-width: 0; align-items: center; gap: 9px; }

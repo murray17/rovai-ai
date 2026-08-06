@@ -15,6 +15,8 @@ superseded_by: null
 > [ADR-0126](0126-codex-native-home-and-external-session-ownership.md) 局部替代本文的 Codex
 > Isolated Home compatibility identity；AgentRun 独占 lease、Resident 配额、quiescence、
 > fencing 与 Core restart 语义继续有效。
+> [ADR-0129](0129-deterministic-bounded-raw-public-context-delivery.md) 删除 Context Compaction
+> 专用 Job/Runtime 路径；本文其余 AgentRun Fleet 语义继续有效。
 
 ## Context
 

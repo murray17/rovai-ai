@@ -52,7 +52,6 @@ import {
 } from './NewConversationDialog'
 import {
   MemberRuntimeForm,
-  MemberAdvancedSettings,
   MembersView,
   RuntimeInstallationsPanel,
   hasDuplicateMemberDisplayName,
@@ -999,7 +998,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'runtime_not_configured', blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 21,
+      schemaVersion: 22,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-1', title: 'Lead 调整', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1013,7 +1012,7 @@ describe('task event projections', () => {
       }],
       tasks: [], messages: [], turns: [], agentRuns: [], inboxMessages: [],
       conversationInputs: [],
-      contextManifests: [], contextCompactions: [], executionEvidence: [],
+      contextManifests: [], executionEvidence: [],
       approvals: [], actions: [], timeline: []
     }
     const markup = renderToStaticMarkup(createElement(CampWorkspace, {
@@ -1134,7 +1133,7 @@ describe('task event projections', () => {
       presence: 'away'
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 21,
+      schemaVersion: 22,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-empty', title: '暂无可用队员', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1148,7 +1147,7 @@ describe('task event projections', () => {
       }],
       tasks: [], messages: [], turns: [], agentRuns: [], inboxMessages: [],
       conversationInputs: [],
-      contextManifests: [], contextCompactions: [], executionEvidence: [],
+      contextManifests: [], executionEvidence: [],
       approvals: [], actions: [], timeline: []
     }
     const markup = renderToStaticMarkup(createElement(CampWorkspace, {
@@ -1187,7 +1186,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'ready' as const, blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 21,
+      schemaVersion: 22,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-live', title: '实现功能', projectBindingKind: 'directory', projectPath: '/repo',
@@ -1235,7 +1234,7 @@ describe('task event projections', () => {
         endedAt: null, updatedAt: '2026-07-28T05:01:00Z'
       }],
       inboxMessages: [], conversationInputs: [],
-      contextManifests: [], contextCompactions: [],
+      contextManifests: [],
       executionEvidence: [{
         id: 'evidence-1', agentRunId: 'run-muwa', executionEpoch: 1, sequence: 1,
         eventType: 'agent.reasoning.summary.delta', kind: 'reasoning_summary', phase: 'updated',
@@ -1570,7 +1569,7 @@ describe('task event projections', () => {
       resolvedAt: null
     }))
     const snapshot: CampSnapshot = {
-      schemaVersion: 21,
+      schemaVersion: 22,
       throughGlobalSequence: 2,
       camp: {
         id: 'camp-approval', title: '审批停靠区', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1591,7 +1590,7 @@ describe('task event projections', () => {
       })),
       tasks: [], messages: [], turns: [], agentRuns: [], inboxMessages: [],
       conversationInputs: [],
-      contextManifests: [], contextCompactions: [], executionEvidence: [],
+      contextManifests: [], executionEvidence: [],
       approvals, actions: [], timeline: []
     }
     const markup = renderToStaticMarkup(createElement(CampWorkspace, {
@@ -1669,7 +1668,7 @@ describe('task event projections', () => {
     expect(projected.map((item) => item.id)).toEqual(['inbox-delivered'])
 
     const snapshot: CampSnapshot = {
-      schemaVersion: 21,
+      schemaVersion: 22,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-a2a', title: 'Agent 协作', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1697,7 +1696,6 @@ describe('task event projections', () => {
         createdAt: '2026-07-30T03:00:01Z', materializedAt: '2026-07-30T03:00:02Z', terminalAt: null
       }],
       contextManifests: [],
-      contextCompactions: [],
       executionEvidence: [],
       approvals: [],
       actions: [],
@@ -1756,7 +1754,7 @@ describe('task event projections', () => {
 
   it('renders lightweight Task records as editable long-lived responsibilities', () => {
     const snapshot: CampSnapshot = {
-      schemaVersion: 21,
+      schemaVersion: 22,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-task', title: 'Task 管理', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1777,7 +1775,7 @@ describe('task event projections', () => {
       }],
       messages: [], turns: [], agentRuns: [], inboxMessages: [],
       conversationInputs: [], contextManifests: [],
-      contextCompactions: [], executionEvidence: [], approvals: [], actions: [], timeline: []
+      executionEvidence: [], approvals: [], actions: [], timeline: []
     }
     const markup = renderToStaticMarkup(createElement(TaskPanel, {
       snapshot,
@@ -1794,10 +1792,6 @@ describe('task event projections', () => {
   })
 
   it('explains context blockers and A2A delivery without relying on color', () => {
-    expect(agentRunPresentation({ status: 'waiting', waitReason: 'context_compaction' })).toEqual({
-      label: '压缩上下文',
-      tone: 'attention'
-    })
     expect(agentRunPresentation({ status: 'waiting', waitReason: 'delivery_unknown' })).toEqual({
       label: '投递待确认',
       tone: 'danger'
@@ -1810,7 +1804,6 @@ describe('task event projections', () => {
       tag: '正在停止',
       tone: 'neutral'
     })
-    expect(agentRunWaitDetail('context_overloaded')).toContain('没有静默裁剪')
     expect(inboxMessagePresentation({ deliveredAt: '2026-07-23T00:00:00Z', failedAt: null }, 'queued')).toEqual({
       label: '已排队',
       tone: 'neutral'
@@ -2167,29 +2160,6 @@ describe('task event projections', () => {
     expect(markup.indexOf('test-page-notice'))
       .toBeLessThan(markup.indexOf('member-empty'))
   })
-
-  it('keeps summary model settings folded until advanced settings are expanded', () => {
-    const folded = renderToStaticMarkup(createElement(MemberAdvancedSettings, {
-      installations: [codexInstallation()],
-      agent: agentProfile()
-    }))
-    const expanded = renderToStaticMarkup(createElement(MemberAdvancedSettings, {
-      installations: [codexInstallation()],
-      agent: agentProfile(),
-      defaultOpen: true
-    }))
-
-    expect(folded).toContain('高级设置')
-    expect(folded).not.toContain('正在读取摘要模型设置')
-    expect(folded).not.toContain('<details open')
-    expect(expanded).toContain('<details open')
-    expect(expanded).toContain('正在读取摘要模型设置')
-    expect(expanded).toContain('Camp 共享摘要')
-    expect(expanded).not.toContain('这是所有 Camp 共享摘要使用的模型配置')
-    expect(expanded).not.toContain('自动回退')
-    expect(expanded).not.toContain('执行引擎')
-  })
-
   it('does not expose a standalone context destination in settings navigation', () => {
     const markup = renderToStaticMarkup(createElement(SettingsView, {
       appearance: { preference: 'system', resolvedTheme: 'day' },

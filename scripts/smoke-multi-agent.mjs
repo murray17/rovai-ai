@@ -124,7 +124,7 @@ try {
       && commandResult.payload.agentRunIds.includes(event.params?.agentRunId)
   )
   if (starts.length !== 2
-      || new Set(starts.map((event) => event.params.hostInstanceId)).size !== 1
+      || new Set(starts.map((event) => event.params.hostInstanceId)).size !== 2
       || new Set(starts.map((event) => event.params.nativeThreadId)).size !== 2
       || new Set(starts.map((event) => event.params.nativeTurnId)).size !== 2) {
     throw new Error(`Native identities crossed or were missing: ${JSON.stringify(starts)}`)
@@ -174,7 +174,7 @@ try {
       status: run.status
     })),
     nativeThreads: starts.map((event) => event.params.nativeThreadId),
-    hostInstanceId: starts[0].params.hostInstanceId,
+    hostInstanceIds: starts.map((event) => event.params.hostInstanceId),
     reasoningSummaryEvents: reasoningSummaryEvents.length,
     completedReasoningItems: completedReasoningItems.length,
     progressNarrationEvents: progressNarrationEvents.length,

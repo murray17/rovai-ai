@@ -705,7 +705,7 @@ Adapter-derived evidence describing the Session-level semantics under which a Na
 _Avoid_: executable fingerprint, version lock, unconditional Resume, Conversation identity
 
 **Controlled Native Session Resume**:
-The single fenced, pre-input attempt to load an existing Native Session when compatibility is unknown for the current Installation generation. It cannot deliver Run input, invoke tools, or advance the Context Read Marker; success installs a verifiable binding, while failure or ambiguity fences the attempt before a replacement Session is created.
+The single fenced, pre-input attempt to load an existing Native Session when compatibility is unknown for the current Installation generation. It cannot deliver Run input, invoke tools, or advance the Accepted Public Context Boundary; success installs a verifiable binding, while failure or ambiguity fences the attempt before a replacement Session is created.
 _Avoid_: AgentRun retry, blind Resume, duplicate input delivery, Conversation replacement
 
 **Native Session Bootstrap**:
@@ -721,11 +721,11 @@ The stable Core Contract persisted as one Native Session Bootstrap Evidence comp
 _Avoid_: System Prompt replacement, Member Identity Bootstrap Projection, dynamic Run context, embedded tool catalog, security enforcement
 
 **AgentRun Dynamic Context**:
-The immutable model-facing payload for exactly one AgentRun, composed from required Current Input plus conditional Collaboration State, Shared Conversation and Run Notices. It contains no Member Identity Bootstrap Projection and no independently synthesized objective, responsibility, deliverable or Task snapshot.
+The immutable model-facing payload for exactly one AgentRun, composed from complete Current Input plus conditional Collaboration State, Shared Conversation and Run Notices. It contains no Member Identity Bootstrap Projection and no independently synthesized objective, responsibility, deliverable or Task snapshot.
 _Avoid_: Native Session Bootstrap, Member Identity Context, mutable live prompt, Work Brief, Task Context
 
 **ContextManifest**:
-The immutable Core evidence that freezes one AgentRun's dynamic input boundaries, Cross-Camp History Fence, selected source references, stable Bootstrap Evidence reference, formatter version, exact rendered AgentRun Dynamic Context and delivery target. Recovery reuses that dynamic payload byte-for-byte; it neither stores nor proves the transient Member Identity Bootstrap Projection, complete Bootstrap, or combined first payload.
+The immutable Core evidence that freezes one AgentRun's previous and current public-message boundaries, Cross-Camp History Fence, selected raw source references, context-delivery profile version and resolved profile evidence, stable Bootstrap Evidence reference, formatter version, exact rendered AgentRun Dynamic Context and delivery target. Public boundaries are internal evidence and are not rendered to the model. Recovery reuses the dynamic payload byte-for-byte; the Manifest neither stores nor proves the transient Member Identity Bootstrap Projection, complete Bootstrap, or combined first payload.
 _Avoid_: complete Runtime prompt evidence, Member Identity Snapshot, prompt template, live context query, proof the model understood input
 
 **Collaboration State**:
@@ -733,7 +733,7 @@ A bounded model-facing read state of Peer Member Identity Projections, emitted f
 _Avoid_: routing authority, Capability list, raw presence/readiness state, current task
 
 **Shared Conversation**:
-The bounded model-facing representation of public Camp history not already covered for the current Native Session, combining explicitly ranged summary bodies, ordered new messages and necessary retrieval guidance. Each message retains its source authority, summaries never outrank their sources, and Current Input is excluded to prevent duplication.
+The deterministic bounded model-facing representation of public Camp history newly eligible for the current Native Session. It contains the latest ordered raw public messages after per-message prefix truncation, an optional Core-derived Originating Public User Message for a Member Call, and an omission notice only when whole eligible messages were excluded. Current Input and private A2A content are excluded, and the previous/current public boundaries remain internal.
 _Avoid_: Context Briefing, Task state, private Conversation, Execution Evidence, current trigger
 
 **Run Notice**:
@@ -741,24 +741,36 @@ A fixed-template model-facing statement of an exceptional Run fact already deter
 _Avoid_: Control Signal, Work Brief, warning inferred from natural language, execution policy
 
 **Current Input**:
-The complete user or Member Call content that triggered one AgentRun, with trusted source type and stable Camp Attachment Paths when applicable. Member Call source metadata contains only the Core-derived `senderAgentId` and `senderName`; internal Run, Task, Inbox, lineage, and correlation IDs remain outside model input.
+The complete, never-truncated user or Member Call content that triggered one AgentRun, with trusted source type and stable Camp Attachment Paths when applicable. Member Call source metadata contains only the Core-derived `senderAgentId` and `senderName`; internal Run, Task, Inbox, lineage, and correlation IDs remain outside model input. If complete Current Input plus mandatory structure cannot fit the Runtime input limit after all eligible recent history is removed, dispatch fails terminally with `context_payload_too_large` before delivery acceptance.
 _Avoid_: Shared Conversation duplicate, Work Brief, model-generated source metadata, source reply alias
 
-**Context Read Marker**:
-The per-Native-Binding monotonic upper bound of public Camp message sequence covered for the current Native Session — by accepted verbatim input, by an accepted summary body, by being that Session's own current-generation output, or by lying behind a declared Coverage Baseline. Advancement proves delivery acceptance only — not that the model read or understood the content — and is independent of any retrieval-tool reads the Agent performs.
-_Avoid_: proof of reading, retrieval position
+**Accepted Public Context Boundary**:
+The one monotonic public CampMessage sequence boundary maintained for each Native Session. It records the current public boundary frozen by the most recent AgentRun whose input the Runtime accepted and ACKed; a new Native Session starts at zero. A new Run considers untombstoned public messages in `(previousAcceptedBoundary, currentManifestBoundary]`, and successful acceptance advances directly to the full current boundary even when whole messages were omitted from automatic context. Failure before ACK does not advance it. It is neither per-message read state nor a lower bound for `camp.read` or `camp.search`.
+_Avoid_: proof of reading, unread-message set, retrieval cursor, model-visible boundary
 
-**Coverage Baseline**:
-The sequence position an accepted AgentRun Dynamic Context may declare, behind which older public Camp history is not injected verbatim but is explicitly represented as retrievable in Shared Conversation. History behind the baseline counts as covered for the Context Read Marker while remaining reachable only through boundary-capped retrieval.
-_Avoid_: silent history skip, summary substitute, third summary level
+**Bounded Raw Public Messages**:
+The latest fixed-count subset of eligible public CampMessages, rendered in ascending sequence order after each body is reduced to an exact Unicode-scalar prefix. If the resulting bodies exceed the public-history character budget, whole messages are removed oldest-first. No reply ancestor, Mention, attachment relation, keyword, importance, or semantic completion changes selection.
+_Avoid_: summarized history, relevance window, reply-tree completion, token budget
+
+**Originating Public User Message**:
+The Core-derived first public user CampMessage in the current Member Call lineage, inherited unchanged by nested Member Calls. It is a separate Shared Conversation item, does not consume the recent-message count, follows the normal body-prefix and history-budget rules, and is deduplicated when already present among recent messages. `replyToMessageId` remains only a direct public CampMessage reply relation.
+_Avoid_: Agent-authored origin, A2A body, reply alias, duplicated history item
+
+**Omitted Public Messages Notice**:
+A fixed retrieval hint emitted only when one or more whole eligible public messages do not enter Shared Conversation. It reports the omitted count and minimum/maximum sequence without asserting their contents; body truncation on an included message is represented only by that message's `bodyTruncated`, `bodyLength`, and `nextBodyOffset` fields.
+_Avoid_: truncation warning, inferred missing content, automatic retrieval request
+
+**Context Delivery Profile**:
+An immutable application-owned versioned configuration that defines deterministic public-context limits independently from formatter wording. Profile v1 fixes `maxPublicMessages = 15`, `maxPublicHistoryChars = 24000`, and `maxMessageBodyChars = 2000`; it has no Member UI, IPC, or user-persisted setting, and each ContextManifest records the version plus resolved snapshot or digest used by the Run.
+_Avoid_: formatter constants, Member Runtime Parameters, mutable user preference, summary model configuration
 
 **Cross-Camp History Search**:
-An explicit, on-demand lookup by a running Agent within its Cross-Camp History Fence across public CampMessages of other surviving Camps in which the same AgentProfile remains a currently eligible CampMember. It is transient source retrieval rather than Memory; shared summaries, former membership, private Conversation or A2A content, and deleted Camps are outside it.
-_Avoid_: global Camp history, Archived Camp search, shared-summary retrieval, former-membership history, Memory recall, private Conversation search
+An explicit, on-demand lookup by a running Agent within its Cross-Camp History Fence across public CampMessages of other surviving Camps in which the same AgentProfile remains a currently eligible CampMember. It is transient source retrieval rather than Memory; former membership, private Conversation or A2A content, and deleted Camps are outside it.
+_Avoid_: global Camp history, Archived Camp search, former-membership history, Memory recall, private Conversation search
 
 **Camp History Retrieval**:
-The model-facing discovery and raw-read surface for original public CampMessages. Camp and relevance discovery return bounded Top-K anchors without pagination; stable Camp/message IDs locate evidence; only reply-tree and original-timeline collections continue with Camp sequence cursors. Shared summaries and attachment content remain outside the surface, and every call rederives authority from its current AgentRun rather than from an ID or cursor.
-_Avoid_: Summary retrieval, relevance-result traversal, attachment file access, bearer cursor, Memory recall
+The model-facing discovery and raw-read surface for original public CampMessages. Camp and relevance discovery return bounded Top-K anchors without pagination; stable Camp/message IDs locate evidence; only reply-tree and original-timeline collections continue with Camp sequence cursors. Attachment content remains outside the surface, and every call rederives authority from its current AgentRun rather than from an ID or cursor. `camp.read` and `camp.search` may return any currently authorized raw message at or below the ContextManifest boundary, including messages already delivered automatically; they do not filter for “unread” content, and they cannot reveal later messages above that frozen boundary.
+_Avoid_: Summary retrieval, unread-only retrieval, relevance-result traversal, attachment file access, bearer cursor, Memory recall
 
 **Cross-Camp History Fence**:
 The immutable maximum scope of one AgentRun's Cross-Camp History Search, pairing the exact set of eligible Camp Discovery Snapshots with one global public-message boundary. Live membership, Member Presence, Camp deletion and tombstones may only narrow it; later joins, renames and messages cannot expand or rewrite it.
@@ -767,14 +779,6 @@ _Avoid_: live Camp directory, bearer cursor, previous-Run authorization, current
 **Camp Discovery Snapshot**:
 The immutable discovery identity of one other Camp inside a Cross-Camp History Fence, containing its Camp ID, Camp Name and last visible public activity at the Fence boundary, with Camp creation as the fallback for an empty Camp. Camp discovery matches and orders this snapshot; later renames or activity do not rewrite it, while live authorization may remove it from results.
 _Avoid_: live Camp list item, Camp updated time, Archived Camp, cross-Run discovery cache
-
-**Segment Summary**:
-A Camp-owned, immutable, shared summary covering one contiguous range of public Camp messages, generated only from untombstoned CampMessage bodies and attachment metadata, and reused by every CampMember. Content unfit for summarization must never enter CampMessage in the first place.
-_Avoid_: per-Conversation summary, bootstrap summary, unread summary, private context
-
-**Epoch Summary**:
-A Camp-owned second-level summary covering one contiguous run of Segment Summaries. The summary hierarchy stops at two levels; summaries remain internal context-composition material, while on-demand history retrieval reads original CampMessages.
-_Avoid_: third-level summary, rolling global summary, whole-Camp digest, model retrieval result
 
 **Product Runtime Catalog**:
 The closed set of Agent Runtime products that Rovai-ai has integrated and can use to create AgentRuns. Catalog membership is independent of local discovery, installation, authentication, and current readiness; compatibility-evaluation candidates remain outside it.
@@ -1001,7 +1005,7 @@ tests, and an explicit architectural decision.
 _Avoid_: workspace deletion, Runtime reinstall, silent partial migration, historical Projection replay
 
 **AgentRun Execution Evidence**:
-A durable, append-only, user-visible record of provider-reported reasoning summaries, Agent progress narration, plans, steps, and structured tool/command/file lifecycle for exactly one AgentRun. It is authoritative SQLite state readable through the Camp Read Side until Camp deletion, while remaining absent by construction from CampMessage, ConversationMessage, FTS, summaries, ContextManifest payloads, later AgentRun input, A2A context, and Memory sources. It contains only normalized Runtime-public information, never hidden raw reasoning or invented progress.
+A durable, append-only, user-visible record of provider-reported reasoning summaries, Agent progress narration, plans, steps, and structured tool/command/file lifecycle for exactly one AgentRun. It is authoritative SQLite state readable through the Camp Read Side until Camp deletion, while remaining absent by construction from CampMessage, ConversationMessage, FTS, public-message context composition, ContextManifest payloads, later AgentRun input, A2A context, and Memory sources. It contains only normalized Runtime-public information, never hidden raw reasoning or invented progress.
 _Avoid_: chain of thought, Camp message, Renderer-only live cache, searchable Agent context, raw provider packet, Task completion evidence
 
 **Execution Evidence Content**:
@@ -1021,7 +1025,7 @@ An immutable Camp system message presentation for a Task state change, carrying 
 _Avoid_: A2A message, mutable current-state card, parsed English system body, Execution Evidence, synthetic message ordering
 
 **A2A Conversation Message**:
-The user-visible projection of one successfully delivered InboxMessage in the Camp conversation, rendered as the actual sender followed by `→ @recipient` and the authored body. It remains private A2A authority rather than CampMessage, so it does not enter public FTS, summaries, Shared Conversation, or unrelated Agent context. Delivery and target execution states remain Activity/Audit facts and are never synthesized as “delivered”, “executing”, or “returned” conversation messages.
+The user-visible projection of one successfully delivered InboxMessage in the Camp conversation, rendered as the actual sender followed by `→ @recipient` and the authored body. It remains private A2A authority rather than CampMessage, so it does not enter public FTS, Shared Conversation, or unrelated Agent context. Delivery and target execution states remain Activity/Audit facts and are never synthesized as “delivered”, “executing”, or “returned” conversation messages.
 _Avoid_: system message, lifecycle status card, copied CampMessage, public Agent context, synthetic result receipt
 
 **Conversation Input**:

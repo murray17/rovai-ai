@@ -269,17 +269,6 @@ export interface UpdateAdapterInstallationCommand {
   enabled: boolean
 }
 
-export interface ContextSummaryModelPreference {
-  installationId: string
-  model: ModelSelection
-}
-
-export interface ContextSummaryModelConfig {
-  preference: ContextSummaryModelPreference | null
-  version: number
-  updatedAt: string | null
-}
-
 export interface UserCommandRequest<T> {
   commandId: string
   command: T
@@ -829,19 +818,6 @@ export interface ConversationInputView {
   terminalAt: string | null
 }
 
-export interface ContextSummaryView {
-  id: string
-  level: 'segment' | 'epoch'
-  fromSequence: number
-  throughSequence: number
-  sourceDigest: string
-  inputTruncated: boolean
-  generatorAdapterKind: string
-  generatorModel: unknown
-  generatorVersion: string
-  createdAt: string
-}
-
 export interface RuntimeInputDeliveryView {
   id: string
   executionEpoch: number
@@ -931,8 +907,20 @@ export interface ContextManifestView {
   globalPublicMessageBoundary: number
   historyCamps: ContextManifestHistoryCampView[]
   rawMessageCount: number
-  summaries: ContextSummaryView[]
-  coverageBaselineSequence: number | null
+  previousAcceptedPublicBoundarySequence: number | null
+  contextDeliveryProfileVersion: number | null
+  contextDeliveryProfile: {
+    profileVersion: 1
+    maxPublicMessages: number
+    maxPublicHistoryChars: number
+    maxMessageBodyChars: number
+  } | null
+  contextDeliveryProfileDigest: string | null
+  originatingPublicUserMessageRef: unknown | null
+  recentMessageCount: number
+  omittedMessageCount: number | null
+  omittedMessageSequenceStart: number | null
+  omittedMessageSequenceEnd: number | null
   collaborationStateDigest: string
   runNoticeRefs: string[]
   runNoticeDigest: string
@@ -944,7 +932,7 @@ export interface ContextManifestView {
   mcpExposure: McpExposureSnapshot
   mcpExposureDigest: string
   mcpProjectionDigest: string
-  formatterVersion: 8
+  formatterVersion: 8 | 9
   renderedPayloadDigest: string
   delivery: RuntimeInputDeliveryView | null
   createdAt: string
@@ -954,23 +942,6 @@ export interface ContextManifestHistoryCampView {
   campId: string
   campTitle: string
   lastVisibleActivityAt: string
-}
-
-export interface ContextCompactionView {
-  id: string
-  level: 'segment' | 'epoch'
-  fromSequence: number
-  throughSequence: number
-  adapterKind: string
-  model: unknown
-  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
-  generatedSummaryId: string | null
-  errorCode: string | null
-  retryCount: number
-  waiterCount: number
-  leaseExpiresAt: string | null
-  createdAt: string
-  updatedAt: string
 }
 
 export interface ActionView {
@@ -1037,7 +1008,7 @@ export interface DomainEventView {
 }
 
 export interface CampSnapshot {
-  schemaVersion: 21
+  schemaVersion: 22
   throughGlobalSequence: number
   camp: {
     id: string
@@ -1058,7 +1029,6 @@ export interface CampSnapshot {
   inboxMessages: InboxMessageView[]
   conversationInputs: ConversationInputView[]
   contextManifests: ContextManifestView[]
-  contextCompactions: ContextCompactionView[]
   approvals: ActionApprovalView[]
   actions: ActionView[]
   timeline: DomainEventView[]
@@ -1649,8 +1619,6 @@ export type CoreMethod =
   | 'runtime.installations.create'
   | 'runtime.installations.update'
   | 'runtime.installations.refresh'
-  | 'context.summaryModel.get'
-  | 'context.summaryModel.set'
   | 'skills.list'
   | 'skills.get'
   | 'skills.deliveryGroups.list'

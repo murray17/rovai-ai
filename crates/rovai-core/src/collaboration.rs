@@ -21,7 +21,6 @@ use crate::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
         DomainCommandGateway, EntityReference, canonical_json_digest, sealed,
     },
-    context::queue_async_camp_summaries,
     context_index::index_camp_message,
     conversation_input::cancel_turn_inputs,
     db::Database,
@@ -2655,8 +2654,6 @@ fn queue_camp_message_and_runs(
         input.body,
         &addressed_agent_ids_json,
     )?;
-    queue_async_camp_summaries(transaction, input.camp_id)?;
-
     let mut agent_run_ids = Vec::new();
     if let (Some(execution), Some(camp_turn_id)) = (input.execution, input.camp_turn_id) {
         for target in &input.resolution.targets {
@@ -2867,7 +2864,6 @@ pub(crate) fn append_system_camp_message(
         body,
         addressed_agent_ids_json,
     )?;
-    queue_async_camp_summaries(transaction, camp_id)?;
     Ok(message_id)
 }
 
@@ -3977,22 +3973,6 @@ fn camp_delete_blockers(transaction: &Connection, camp_id: &str) -> Result<Vec<V
 }
 
 pub(crate) fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> Result<()> {
-    let now = chrono::Utc::now().to_rfc3339();
-    transaction.execute(
-        r#"
-        UPDATE context_compaction_attempt
-        SET status = 'cancelled',
-            lease_owner = NULL,
-            lease_expires_at = NULL,
-            error_code = COALESCE(error_code, 'camp.deleted'),
-            error_detail = COALESCE(error_detail, 'Camp was permanently deleted'),
-            ended_at = ?2,
-            updated_at = ?2
-        WHERE camp_id = ?1
-          AND status IN ('queued', 'running')
-        "#,
-        params![camp_id, now],
-    )?;
     transaction.execute(
         r#"
         DELETE FROM legacy_import_map
@@ -4047,13 +4027,6 @@ pub(crate) fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> 
     )?;
     transaction.execute(
         r#"
-        DELETE FROM context_compaction_attempt
-        WHERE camp_id = ?1
-        "#,
-        [camp_id],
-    )?;
-    transaction.execute(
-        r#"
         DELETE FROM context_manifest
         WHERE agent_run_id IN (
             SELECT agent_run.id
@@ -4073,11 +4046,6 @@ pub(crate) fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> 
         "#,
         [camp_id],
     )?;
-    transaction.execute(
-        "DELETE FROM camp_summary_frontier WHERE camp_id = ?1",
-        [camp_id],
-    )?;
-    transaction.execute("DELETE FROM camp_summary WHERE camp_id = ?1", [camp_id])?;
     transaction.execute(
         r#"
         DELETE FROM action_attempt
@@ -5366,30 +5334,6 @@ mod tests {
                 [agent_run_id],
             )
             .unwrap();
-        for index in 0..2 {
-            service
-                .send_test_camp_message(
-                    &mut database,
-                    &user_envelope(
-                        &format!("summary-backlog-before-delete-{index}"),
-                        Some(&camp_id),
-                        TestCampMessageCommand {
-                            camp_id: camp_id.clone(),
-                            draft_revision: None,
-                            body: format!(
-                                "summary backlog before delete {index}: {}",
-                                "x".repeat(32_000)
-                            ),
-                            prepared_attachment_ids: Vec::new(),
-                            address: TestCampMessageAddress::Default,
-                            reply_to_camp_message_id: None,
-                            execution: None,
-                        },
-                    ),
-                )
-                .expect("summary backlog should persist");
-        }
-        assert!(row_count(&database, "context_compaction_attempt") > 0);
         service
             .create_task(
                 &mut database,
@@ -5427,9 +5371,6 @@ mod tests {
         assert_eq!(row_count(&database, "conversation"), 0);
         assert_eq!(row_count(&database, "camp_message"), 0);
         assert_eq!(row_count(&database, "task"), 0);
-        assert_eq!(row_count(&database, "context_compaction_attempt"), 0);
-        assert_eq!(row_count(&database, "camp_summary_frontier"), 0);
-        assert_eq!(row_count(&database, "camp_summary"), 0);
         let foreign_key_violations: i64 = database
             .connection()
             .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {

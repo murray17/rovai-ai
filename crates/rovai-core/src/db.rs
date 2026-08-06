@@ -35,7 +35,6 @@ pub struct V2RecoverySummary {
     pub deliveries_returned_to_pending: i64,
     pub authorization_deliveries_failed_closed: i64,
     pub input_deliveries_marked_unknown: i64,
-    pub compaction_attempts_requeued: i64,
 }
 
 pub struct Database {
@@ -43,8 +42,8 @@ pub struct Database {
     path: PathBuf,
 }
 
-const V043_DATA_CONTRACT_VERSION: &str = "v0.43";
-const V043_PROJECTION_SCHEMA_VERSION: i64 = 22;
+const V044_DATA_CONTRACT_VERSION: &str = "v0.44";
+const V044_PROJECTION_SCHEMA_VERSION: i64 = 23;
 const V043_CLASSIFIER_VERSION: &str = "activity-v1";
 
 const V043_RESET_FILES: &[&str] = &[
@@ -103,8 +102,9 @@ fn has_current_v043_data_contract(path: &Path) -> bool {
     matches!(
         (marker, projection_exists),
         (Ok(Some((contract, schema, classifier))), Ok(true))
-            if contract == V043_DATA_CONTRACT_VERSION
-                && schema == V043_PROJECTION_SCHEMA_VERSION
+            if ((contract == V044_DATA_CONTRACT_VERSION
+                && schema == V044_PROJECTION_SCHEMA_VERSION)
+                || (contract == "v0.43" && schema == 22))
                 && classifier == V043_CLASSIFIER_VERSION
     )
 }
@@ -636,17 +636,6 @@ impl Database {
             "#,
             [&now],
         )? as i64;
-        let compaction_attempts_requeued = transaction.execute(
-            r#"
-            UPDATE context_compaction_attempt
-            SET status = 'queued', started_at = NULL,
-                lease_owner = NULL, lease_expires_at = NULL,
-                error_code = NULL, error_detail = NULL,
-                updated_at = ?1
-            WHERE status = 'running'
-            "#,
-            [&now],
-        )? as i64;
         transaction.execute(
             r#"
             UPDATE agent_run
@@ -763,7 +752,6 @@ impl Database {
             deliveries_returned_to_pending,
             authorization_deliveries_failed_closed,
             input_deliveries_marked_unknown,
-            compaction_attempts_requeued,
         };
         if summary.runs_waiting_for_recovery != 0
             || summary.actions_returned_to_prepared != 0
@@ -773,7 +761,6 @@ impl Database {
             || summary.deliveries_returned_to_pending != 0
             || summary.authorization_deliveries_failed_closed != 0
             || summary.input_deliveries_marked_unknown != 0
-            || summary.compaction_attempts_requeued != 0
         {
             transaction.execute(
                 r#"
@@ -1040,6 +1027,9 @@ impl Database {
             if !self.schema_migration_applied(58)? {
                 self.migrate_structured_message_clean_break_v58()?;
             }
+            if !self.schema_migration_applied(59)? {
+                self.migrate_deterministic_public_context_v59()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -1263,6 +1253,9 @@ impl Database {
         }
         if !self.schema_migration_applied(58)? {
             self.migrate_structured_message_clean_break_v58()?;
+        }
+        if !self.schema_migration_applied(59)? {
+            self.migrate_deterministic_public_context_v59()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -4252,6 +4245,267 @@ impl Database {
             VALUES (58, datetime('now'));
             "#,
         )?;
+        Ok(())
+    }
+
+    /// Replaces summary-backed AgentRun context with formatter v9's deterministic raw window.
+    /// Existing immutable v8 manifests and delivery receipts remain available as audit evidence;
+    /// active runs are failed closed because their input contract cannot change in place.
+    fn migrate_deterministic_public_context_v59(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let now = chrono::Utc::now().to_rfc3339();
+            transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'failed', ended_at = ?1,
+                    last_error_code = 'context_formatter_v9_required',
+                    wait_reason = NULL, wait_deadline_at = NULL,
+                    runtime_recovery_required = 0,
+                    execution_lease_owner = NULL,
+                    execution_lease_expires_at = NULL,
+                    manual_retry_allowed = 0,
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('queued', 'running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE camp_turn
+                SET status = 'failed', ended_at = ?1,
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute_batch(
+                r#"
+                CREATE TABLE context_manifest_v59 (
+                    id TEXT PRIMARY KEY,
+                    agent_run_id TEXT NOT NULL UNIQUE REFERENCES agent_run(id),
+                    bootstrap_evidence_id TEXT NOT NULL
+                        REFERENCES native_session_bootstrap_evidence(id),
+                    native_binding_generation INTEGER NOT NULL
+                        CHECK(native_binding_generation >= 1),
+                    camp_message_boundary_sequence INTEGER NOT NULL
+                        CHECK(camp_message_boundary_sequence >= 0),
+                    conversation_message_boundary_sequence INTEGER NOT NULL
+                        CHECK(conversation_message_boundary_sequence >= 0),
+                    raw_message_refs_json TEXT NOT NULL DEFAULT '[]',
+                    collaboration_state_digest TEXT NOT NULL,
+                    run_notice_refs_json TEXT NOT NULL DEFAULT '[]',
+                    run_notice_digest TEXT NOT NULL,
+                    current_input_source_json TEXT NOT NULL,
+                    attachment_refs_json TEXT NOT NULL DEFAULT '[]',
+                    attachment_digest TEXT NOT NULL,
+                    skill_exposure_json TEXT NOT NULL,
+                    skill_exposure_digest TEXT NOT NULL,
+                    mcp_exposure_json TEXT NOT NULL,
+                    mcp_exposure_digest TEXT NOT NULL,
+                    mcp_projection_digest TEXT NOT NULL,
+                    history_fence_version INTEGER NOT NULL DEFAULT 0
+                        CHECK(history_fence_version IN (0, 1)),
+                    global_public_message_boundary INTEGER NOT NULL DEFAULT 0
+                        CHECK(global_public_message_boundary >= 0),
+                    previous_accepted_public_boundary_sequence INTEGER
+                        CHECK(previous_accepted_public_boundary_sequence >= 0),
+                    context_delivery_profile_version INTEGER
+                        CHECK(context_delivery_profile_version >= 1),
+                    context_delivery_profile_json TEXT
+                        CHECK(context_delivery_profile_json IS NULL
+                              OR json_valid(context_delivery_profile_json)),
+                    context_delivery_profile_digest TEXT,
+                    originating_public_user_message_ref_json TEXT
+                        CHECK(originating_public_user_message_ref_json IS NULL
+                              OR json_valid(originating_public_user_message_ref_json)),
+                    recent_message_refs_json TEXT
+                        CHECK(recent_message_refs_json IS NULL
+                              OR json_valid(recent_message_refs_json)),
+                    omitted_message_count INTEGER CHECK(omitted_message_count >= 1),
+                    omitted_message_sequence_start INTEGER
+                        CHECK(omitted_message_sequence_start >= 1),
+                    omitted_message_sequence_end INTEGER
+                        CHECK(omitted_message_sequence_end >= omitted_message_sequence_start),
+                    formatter_version INTEGER NOT NULL
+                        CHECK(formatter_version IN (8, 9)),
+                    rendered_payload_blob_id TEXT NOT NULL REFERENCES managed_blob(id),
+                    rendered_payload_digest TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    CHECK(
+                        formatter_version = 8 OR (
+                            previous_accepted_public_boundary_sequence IS NOT NULL
+                            AND previous_accepted_public_boundary_sequence
+                                <= camp_message_boundary_sequence
+                            AND context_delivery_profile_version IS NOT NULL
+                            AND context_delivery_profile_json IS NOT NULL
+                            AND context_delivery_profile_digest IS NOT NULL
+                            AND recent_message_refs_json IS NOT NULL
+                        )
+                    ),
+                    CHECK(
+                        (omitted_message_count IS NULL
+                         AND omitted_message_sequence_start IS NULL
+                         AND omitted_message_sequence_end IS NULL)
+                        OR
+                        (omitted_message_count IS NOT NULL
+                         AND omitted_message_sequence_start IS NOT NULL
+                         AND omitted_message_sequence_end IS NOT NULL)
+                    )
+                );
+
+                INSERT INTO context_manifest_v59(
+                    id, agent_run_id, bootstrap_evidence_id,
+                    native_binding_generation,
+                    camp_message_boundary_sequence,
+                    conversation_message_boundary_sequence,
+                    raw_message_refs_json, collaboration_state_digest,
+                    run_notice_refs_json, run_notice_digest,
+                    current_input_source_json,
+                    attachment_refs_json, attachment_digest,
+                    skill_exposure_json, skill_exposure_digest,
+                    mcp_exposure_json, mcp_exposure_digest, mcp_projection_digest,
+                    history_fence_version, global_public_message_boundary,
+                    formatter_version, rendered_payload_blob_id,
+                    rendered_payload_digest, created_at
+                )
+                SELECT id, agent_run_id, bootstrap_evidence_id,
+                       native_binding_generation,
+                       camp_message_boundary_sequence,
+                       conversation_message_boundary_sequence,
+                       raw_message_refs_json, collaboration_state_digest,
+                       run_notice_refs_json, run_notice_digest,
+                       current_input_source_json,
+                       attachment_refs_json, attachment_digest,
+                       skill_exposure_json, skill_exposure_digest,
+                       mcp_exposure_json, mcp_exposure_digest, mcp_projection_digest,
+                       history_fence_version, global_public_message_boundary,
+                       formatter_version, rendered_payload_blob_id,
+                       rendered_payload_digest, created_at
+                FROM context_manifest;
+
+                CREATE TABLE context_manifest_history_camp_v59 (
+                    context_manifest_id TEXT NOT NULL
+                        REFERENCES context_manifest_v59(id) ON DELETE CASCADE,
+                    camp_id TEXT NOT NULL,
+                    camp_title TEXT NOT NULL,
+                    last_visible_activity_at TEXT NOT NULL,
+                    PRIMARY KEY(context_manifest_id, camp_id)
+                );
+                INSERT INTO context_manifest_history_camp_v59
+                SELECT * FROM context_manifest_history_camp;
+
+                CREATE TABLE runtime_input_delivery_v59 (
+                    id TEXT PRIMARY KEY,
+                    agent_run_id TEXT NOT NULL REFERENCES agent_run(id),
+                    execution_epoch INTEGER NOT NULL CHECK(execution_epoch >= 1),
+                    context_manifest_id TEXT NOT NULL REFERENCES context_manifest_v59(id),
+                    native_binding_id TEXT NOT NULL,
+                    native_binding_generation INTEGER NOT NULL
+                        CHECK(native_binding_generation >= 1),
+                    boundary_camp_message_sequence INTEGER NOT NULL
+                        CHECK(boundary_camp_message_sequence >= 0),
+                    dynamic_payload_digest TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN (
+                        'prepared', 'accepted', 'delivery_unknown', 'not_accepted'
+                    )),
+                    native_input_id TEXT,
+                    prepared_at TEXT NOT NULL,
+                    accepted_at TEXT,
+                    resolved_at TEXT,
+                    last_error TEXT,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(agent_run_id, execution_epoch),
+                    CHECK(
+                        (status = 'accepted' AND native_input_id IS NOT NULL
+                         AND accepted_at IS NOT NULL)
+                        OR status <> 'accepted'
+                    )
+                );
+                INSERT INTO runtime_input_delivery_v59
+                SELECT * FROM runtime_input_delivery;
+
+                DROP TABLE runtime_input_delivery;
+                DROP TABLE context_manifest_history_camp;
+                DROP TABLE context_manifest;
+                ALTER TABLE context_manifest_v59 RENAME TO context_manifest;
+                ALTER TABLE context_manifest_history_camp_v59
+                    RENAME TO context_manifest_history_camp;
+                ALTER TABLE runtime_input_delivery_v59 RENAME TO runtime_input_delivery;
+
+                CREATE INDEX context_manifest_blob_idx
+                    ON context_manifest(rendered_payload_blob_id);
+                CREATE INDEX context_manifest_bootstrap_idx
+                    ON context_manifest(bootstrap_evidence_id);
+                CREATE INDEX context_manifest_history_camp_lookup_idx
+                    ON context_manifest_history_camp(camp_id, context_manifest_id);
+                CREATE UNIQUE INDEX runtime_input_native_identity_unique
+                    ON runtime_input_delivery(native_binding_id, native_input_id)
+                    WHERE native_input_id IS NOT NULL;
+                CREATE INDEX runtime_input_reconcile_idx
+                    ON runtime_input_delivery(status, updated_at)
+                    WHERE status = 'delivery_unknown';
+
+                DROP TRIGGER IF EXISTS camp_summary_fts_insert;
+                DROP TRIGGER IF EXISTS camp_summary_fts_delete;
+                DROP TABLE IF EXISTS camp_summary_fts;
+                DROP TABLE IF EXISTS context_compaction_waiter;
+                DROP TABLE IF EXISTS context_compaction_attempt;
+                DROP TABLE IF EXISTS camp_summary_frontier;
+                DROP TABLE IF EXISTS context_summary_config;
+                DROP TABLE IF EXISTS camp_summary;
+
+                ALTER TABLE conversation
+                    RENAME COLUMN native_read_through_camp_message_sequence
+                    TO last_accepted_public_boundary_sequence;
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v0.44', projection_schema_version = 23,
+                    updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (59, datetime('now'));
+                "#,
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE conversation
+                SET native_adapter_installation_id = NULL,
+                    native_session_id = NULL,
+                    native_binding_compatibility_digest = NULL,
+                    native_binding_id = NULL,
+                    native_binding_generation = 0,
+                    native_binding_secret_digest = NULL,
+                    last_accepted_public_boundary_sequence = 0,
+                    native_charter_digest = NULL,
+                    native_member_state_digest = NULL,
+                    native_installation_generation = NULL,
+                    native_session_compatibility_key = NULL,
+                    version = version + 1,
+                    updated_at = ?1
+                "#,
+                [&now],
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v59 migration left a foreign-key violation in {table} row {row_id}");
+        }
         Ok(())
     }
 
@@ -10237,109 +10491,6 @@ mod tests {
     }
 
     #[test]
-    fn v31_discards_prelaunch_runtime_configuration_without_a_compatibility_layer() {
-        let directory = std::env::temp_dir().join(format!("rovai-db-v31-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
-        database
-            .connection()
-            .execute(
-                r#"
-                INSERT INTO adapter_installation(
-                    id, adapter_kind, executable_path, command_name,
-                    installation_class, source, auth_scope, enabled,
-                    generation, path_state, version, created_at, updated_at
-                ) VALUES (
-                    'legacy-installation', 'codex-cli', '/tmp/legacy-codex',
-                    'codex', 'custom', 'custom', 'default', 1,
-                    1, 'valid', 1, 'legacy', 'legacy'
-                )
-                "#,
-                [],
-            )
-            .expect("legacy Installation fixture");
-        database
-            .connection()
-            .execute_batch(
-                r#"
-                DROP TRIGGER agent_profile_runtime_configuration_insert;
-                DROP TRIGGER agent_profile_runtime_configuration_update;
-                "#,
-            )
-            .expect("historical fixture should restore pre-v58 write semantics");
-        database
-            .connection()
-            .execute(
-                r#"
-                UPDATE agent_profile
-                SET default_runtime_installation_id = 'legacy-installation',
-                    default_model_selection_json = '{"mode":"runtime_default"}',
-                    default_permission_config_json = '{}'
-                WHERE id = 'agent_1'
-                "#,
-                [],
-            )
-            .expect("legacy member Runtime fixture");
-        database
-            .connection()
-            .execute_batch(
-                r#"
-                DROP TABLE native_session_resume_attempt;
-                DROP TABLE adapter_relocation_audit;
-                DROP TABLE adapter_probe_attempt;
-                DROP TABLE runtime_resolution_job;
-                DROP TABLE pending_execution_intent;
-                DROP TABLE runtime_search_environment_state;
-                DELETE FROM schema_migration WHERE version = 31;
-                "#,
-            )
-            .expect("test should restore the pre-v31 Runtime schema");
-        drop(database);
-
-        let reopened = Database::open(&directory).expect("v31 database should reopen");
-        let installation_count: i64 = reopened
-            .connection()
-            .query_row("SELECT COUNT(*) FROM adapter_installation", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(installation_count, 0);
-        let profile_runtime: (Option<String>, Option<String>, Option<String>) = reopened
-            .connection()
-            .query_row(
-                r#"
-                SELECT default_runtime_installation_id,
-                       default_model_selection_json,
-                       default_permission_config_json
-                FROM agent_profile
-                WHERE id = 'agent_1'
-                "#,
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(profile_runtime, (None, None, None));
-        let migration_count: i64 = reopened
-            .connection()
-            .query_row(
-                "SELECT COUNT(*) FROM schema_migration WHERE version = 31",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(migration_count, 1);
-        let foreign_key_violations = reopened
-            .connection()
-            .prepare("PRAGMA foreign_key_check")
-            .unwrap()
-            .query_map([], |_| Ok(()))
-            .unwrap()
-            .count();
-        assert_eq!(foreign_key_violations, 0);
-        drop(reopened);
-        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
-    }
-
-    #[test]
     fn v32_installs_single_effective_memory_store_without_legacy_authority() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v32-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -10767,282 +10918,6 @@ mod tests {
             )
             .expect("v25 migration count");
         assert_eq!(migration_count, 1);
-        drop(reopened);
-        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
-    }
-
-    #[test]
-    fn v22_migrates_public_trigger_before_removing_materialized_message() {
-        use crate::{
-            agent_profile::configure_test_runtime,
-            collaboration::{
-                CollaborationService, TestCampConversationCommand, TestCampMessageAddress,
-            },
-            command::{ActorRef, CommandEnvelope},
-        };
-
-        let directory = std::env::temp_dir().join(format!("rovai-db-v22-test-{}", Uuid::new_v4()));
-        let mut database = Database::open(&directory).expect("database should open");
-        configure_test_runtime(&database, &["agent_1"]);
-        let created = CollaborationService::default()
-            .create_test_camp_conversation(
-                &mut database,
-                &CommandEnvelope {
-                    command_id: "v22-create".to_string(),
-                    actor: ActorRef::User {
-                        user_id: "local-user".to_string(),
-                    },
-                    camp_id: None,
-                    expected_versions: Vec::new(),
-                    execution_epoch: None,
-                    payload: TestCampConversationCommand {
-                        project_path: directory.join("workspace").to_string_lossy().to_string(),
-                        project_binding_kind: crate::collaboration::ProjectBindingKind::Directory,
-                        body: "legacy public trigger".to_string(),
-                        address: TestCampMessageAddress::Default,
-                        purpose: "migration test".to_string(),
-                        expected_output: "migration result".to_string(),
-                    },
-                },
-            )
-            .expect("legacy fixture should be created");
-        let camp_id = created.result.payload["campId"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let agent_run_id = created.result.payload["agentRunIds"][0]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let (conversation_id, camp_turn_id, camp_message_id): (String, String, String) = database
-            .connection()
-            .query_row(
-                r#"
-                SELECT agent_run.conversation_id, agent_run.camp_turn_id,
-                       agent_run.trigger_camp_message_id
-                FROM agent_run
-                WHERE agent_run.id = ?1
-                "#,
-                [&agent_run_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        let now = chrono::Utc::now().to_rfc3339();
-        database
-            .connection()
-            .execute(
-                r#"
-                INSERT INTO conversation_message(
-                    id, conversation_id, sequence, author_type, author_id,
-                    source_agent_run_id, body, source_camp_message_id,
-                    source_inbox_message_id, camp_turn_id, agent_run_id, created_at
-                ) VALUES (
-                    'legacy-materialized-trigger', ?1, 1, 'user', 'local-user',
-                    NULL, 'legacy public trigger', ?2, NULL, ?3, NULL, ?4
-                )
-                "#,
-                params![conversation_id, camp_message_id, camp_turn_id, now],
-            )
-            .unwrap();
-        database
-            .connection()
-            .execute(
-                r#"
-                UPDATE conversation
-                SET last_message_sequence = 1,
-                    native_read_through_camp_message_sequence = 1
-                WHERE id = ?1
-                "#,
-                [&conversation_id],
-            )
-            .unwrap();
-        database
-            .connection()
-            .execute(
-                r#"
-                UPDATE agent_run
-                SET trigger_camp_message_id = NULL,
-                    trigger_conversation_message_id = 'legacy-materialized-trigger',
-                    final_conversation_message_id = 'legacy-materialized-trigger',
-                    status = 'waiting',
-                    wait_reason = 'context_compaction',
-                    updated_at = ?2
-                WHERE id = ?1
-                "#,
-                params![agent_run_id, now],
-            )
-            .unwrap();
-        database
-            .connection()
-            .execute(
-                "UPDATE camp_turn SET status = 'waiting', updated_at = ?2 WHERE id = ?1",
-                params![camp_turn_id, now],
-            )
-            .unwrap();
-
-        database
-            .connection()
-            .execute_batch(
-                r#"
-                DROP TRIGGER camp_message_fts_insert;
-                DROP TRIGGER camp_message_fts_delete;
-                DROP TRIGGER camp_message_fts_update;
-                DROP TRIGGER IF EXISTS camp_summary_fts_insert;
-                DROP TRIGGER IF EXISTS camp_summary_fts_delete;
-                DROP TRIGGER camp_summary_immutable;
-                DROP TABLE camp_message_fts;
-                DROP TABLE IF EXISTS camp_summary_fts;
-                DROP TABLE context_compaction_waiter;
-                DROP TABLE context_compaction_attempt;
-                DROP TABLE camp_summary_frontier;
-                DROP TABLE camp_summary;
-                DROP TABLE context_summary_config;
-                DROP TABLE camp_message_reference;
-                DROP TABLE camp_message_mention;
-                DROP TABLE context_index_meta;
-
-                ALTER TABLE context_manifest DROP COLUMN camp_summary_ids_json;
-                ALTER TABLE context_manifest DROP COLUMN coverage_baseline_sequence;
-                ALTER TABLE context_manifest ADD COLUMN
-                    context_summary_ids_json TEXT NOT NULL DEFAULT '[]';
-                ALTER TABLE conversation
-                    RENAME COLUMN native_read_through_camp_message_sequence
-                    TO native_delivered_camp_message_sequence;
-                ALTER TABLE conversation ADD COLUMN
-                    last_seen_camp_message_sequence INTEGER NOT NULL DEFAULT 0;
-                ALTER TABLE camp_message DROP COLUMN content_digest;
-
-                CREATE TABLE context_summary (
-                    id TEXT PRIMARY KEY,
-                    conversation_id TEXT NOT NULL REFERENCES conversation(id)
-                );
-                CREATE TABLE context_compaction_attempt (
-                    id TEXT PRIMARY KEY,
-                    agent_run_id TEXT NOT NULL REFERENCES agent_run(id),
-                    conversation_id TEXT NOT NULL REFERENCES conversation(id)
-                );
-                INSERT INTO context_compaction_attempt(
-                    id, agent_run_id, conversation_id
-                )
-                SELECT 'legacy-attempt', id, conversation_id
-                FROM agent_run
-                WHERE id = (
-                    SELECT id FROM agent_run ORDER BY created_at LIMIT 1
-                );
-                DROP TABLE context_manifest_history_camp;
-                ALTER TABLE context_manifest DROP COLUMN global_public_message_boundary;
-                ALTER TABLE context_manifest DROP COLUMN history_fence_version;
-                DELETE FROM schema_migration WHERE version = 22;
-                DELETE FROM schema_migration WHERE version = 51;
-                "#,
-            )
-            .expect("test should restore the relevant pre-v22 shape");
-        drop(database);
-
-        let reopened = Database::open(&directory).expect("v22 database should reopen");
-        type MigratedRunState = (
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            String,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-        );
-        let run: MigratedRunState = reopened
-            .connection()
-            .query_row(
-                r#"
-                SELECT trigger_camp_message_id, trigger_conversation_message_id,
-                       final_conversation_message_id, status, wait_reason,
-                       last_error_code, ended_at
-                FROM agent_run
-                WHERE id = ?1
-                "#,
-                [&agent_run_id],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                        row.get(5)?,
-                        row.get(6)?,
-                    ))
-                },
-            )
-            .unwrap();
-        assert_eq!(run.0.as_deref(), Some(camp_message_id.as_str()));
-        assert_eq!(run.1, None);
-        assert_eq!(run.2, None);
-        assert_eq!(run.3, "cancelled");
-        assert_eq!(run.4, None);
-        assert_eq!(run.5.as_deref(), Some("superseded_by_v012_migration"));
-        assert!(run.6.is_some());
-        let materialized_count: i64 = reopened
-            .connection()
-            .query_row(
-                "SELECT COUNT(*) FROM conversation_message WHERE source_camp_message_id IS NOT NULL",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(materialized_count, 0);
-        let (marker, content_digest, turn_status): (i64, String, String) = reopened
-            .connection()
-            .query_row(
-                r#"
-                SELECT conversation.native_read_through_camp_message_sequence,
-                       camp_message.content_digest, camp_turn.status
-                FROM conversation
-                JOIN camp_message ON camp_message.id = ?2
-                JOIN camp_turn ON camp_turn.id = ?3
-                WHERE conversation.id = ?1
-                "#,
-                params![conversation_id, camp_message_id, camp_turn_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(
-            marker, 0,
-            "v51 must clear the native read marker after v22 restores the public trigger"
-        );
-        assert!(content_digest.starts_with("sha256:"));
-        assert_eq!(turn_status, "failed");
-        let old_marker_column: i64 = reopened
-            .connection()
-            .query_row(
-                r#"
-                SELECT COUNT(*) FROM pragma_table_info('conversation')
-                WHERE name IN (
-                    'native_delivered_camp_message_sequence',
-                    'last_seen_camp_message_sequence'
-                )
-                "#,
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(old_marker_column, 0);
-        let migration_count: i64 = reopened
-            .connection()
-            .query_row(
-                "SELECT COUNT(*) FROM schema_migration WHERE version = 22",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(migration_count, 1);
-        let foreign_key_violations = reopened
-            .connection()
-            .prepare("PRAGMA foreign_key_check")
-            .unwrap()
-            .query_map([], |_| Ok(()))
-            .unwrap()
-            .count();
-        assert_eq!(foreign_key_violations, 0);
-        assert_eq!(camp_id.len(), 36);
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
@@ -11625,7 +11500,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.43".to_string(), 22));
+        assert_eq!(contract, ("v0.44".to_string(), 22));
         let migration_count: i64 = reopened
             .connection()
             .query_row(
@@ -11656,7 +11531,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, (22, 1));
+        assert_eq!(contract, (23, 1));
         let error = database
             .connection()
             .execute(
@@ -11683,77 +11558,6 @@ mod tests {
         );
 
         drop(database);
-        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
-    }
-
-    #[test]
-    fn v51_adds_history_fences_and_removes_the_summary_search_index() {
-        let directory = std::env::temp_dir().join(format!("rovai-db-v51-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
-        database
-            .connection()
-            .execute_batch(
-                r#"
-                DROP TABLE context_manifest_history_camp;
-                ALTER TABLE context_manifest DROP COLUMN global_public_message_boundary;
-                ALTER TABLE context_manifest DROP COLUMN history_fence_version;
-                CREATE VIRTUAL TABLE camp_summary_fts USING fts5(
-                    body,
-                    content='camp_summary',
-                    content_rowid='rowid',
-                    tokenize='trigram'
-                );
-                DELETE FROM schema_migration WHERE version = 51;
-                "#,
-            )
-            .expect("test should restore the pre-v51 schema");
-        drop(database);
-
-        let reopened = Database::open(&directory).expect("v51 database should reopen");
-        let fence_columns: i64 = reopened
-            .connection()
-            .query_row(
-                r#"
-                SELECT COUNT(*) FROM pragma_table_info('context_manifest')
-                WHERE name IN (
-                    'history_fence_version',
-                    'global_public_message_boundary'
-                )
-                "#,
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let snapshot_table_count: i64 = reopened
-            .connection()
-            .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest_history_camp'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let summary_fts_count: i64 = reopened
-            .connection()
-            .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'camp_summary_fts'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let migration_count: i64 = reopened
-            .connection()
-            .query_row(
-                "SELECT COUNT(*) FROM schema_migration WHERE version = 51",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(fence_columns, 2);
-        assert_eq!(snapshot_table_count, 1);
-        assert_eq!(summary_fts_count, 0);
-        assert_eq!(migration_count, 1);
-
-        drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
@@ -11948,6 +11752,73 @@ mod tests {
         );
         transaction.commit().unwrap();
 
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v59_installs_raw_context_schema_and_removes_summary_storage() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai-v59-schema-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).unwrap();
+        let migration_applied: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 59",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_applied, 1);
+        let obsolete_tables: i64 = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT COUNT(*) FROM sqlite_master
+                WHERE type IN ('table', 'view') AND name IN (
+                    'camp_summary', 'camp_summary_frontier',
+                    'context_compaction_attempt', 'context_compaction_waiter',
+                    'context_summary_config', 'camp_summary_fts'
+                )
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(obsolete_tables, 0);
+        let conversation_columns = table_columns(database.connection(), "conversation").unwrap();
+        assert!(conversation_columns.contains(&"last_accepted_public_boundary_sequence".into()));
+        assert!(
+            !conversation_columns.contains(&"native_read_through_camp_message_sequence".into())
+        );
+        let manifest_columns = table_columns(database.connection(), "context_manifest").unwrap();
+        for required in [
+            "previous_accepted_public_boundary_sequence",
+            "context_delivery_profile_version",
+            "context_delivery_profile_json",
+            "context_delivery_profile_digest",
+            "originating_public_user_message_ref_json",
+            "recent_message_refs_json",
+            "omitted_message_count",
+            "omitted_message_sequence_start",
+            "omitted_message_sequence_end",
+        ] {
+            assert!(
+                manifest_columns.contains(&required.to_string()),
+                "missing {required}"
+            );
+        }
+        assert!(!manifest_columns.contains(&"camp_summary_ids_json".into()));
+        assert!(!manifest_columns.contains(&"coverage_baseline_sequence".into()));
+        let contract: (String, i64) = database
+            .connection()
+            .query_row(
+                "SELECT contract_version, projection_schema_version FROM rovai_data_contract WHERE singleton = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(contract, ("v0.44".to_string(), 23));
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }

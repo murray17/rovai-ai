@@ -12,6 +12,10 @@ superseded_by: null
 
 # ADR-0061: Durable User-Visible and Agent-Inaccessible Execution Evidence
 
+> [ADR-0129](0129-deterministic-bounded-raw-public-context-delivery.md) 删除 Segment/Epoch Summary
+> 及摘要模型输入目标；Execution Evidence 仍不得进入 CampMessage、FTS、Shared Conversation、
+> ContextManifest payload、A2A、Memory 或任何后续 AgentRun 输入。
+
 ## Context
 
 Rovai-ai 已能从部分 Runtime 接收 reasoning summary、进展说明、计划、步骤、命令和
