@@ -377,12 +377,8 @@ The required selection of one Initial Camp Membership member as the Camp's Defau
 _Avoid_: Runtime-determined Lead validity, Runtime fallback target, automatic recipient
 
 **Conversation**:
-One AgentProfile's long-lived private continuity inside one Camp, independent of whichever external Runtime currently serves it. Camp creation does not preallocate empty Conversations for Initial Camp Membership. An admitted execution submission atomically creates a missing Conversation only for each exact target alongside its CampMessage, CampTurn, and AgentRun; non-target members remain without Conversations until later targeted.
-_Avoid_: Camp, Native Session, AgentRun, public chat transcript
-
-**Isolated Codex Home**:
-The Rovai-owned persistent Codex state root for exactly one Camp and AgentProfile pair, reused by that private continuity across AgentRuns and containing its isolated Codex configuration and Native Session files. It survives CampMember leave/rejoin and AgentProfile Presence changes while the Camp exists, but it is neither a CampTurn/Task/AgentRun scope nor a live Runtime process.
-_Avoid_: global Codex Home, AgentRun Home, CampTurn Home, Task Home, Codex process pool
+One AgentProfile's long-lived private logical continuity inside one Camp, independent of whichever external Runtime currently serves it. Its privacy boundary is Rovai-owned routing and context, not physical isolation of an external Runtime's files or state. Camp creation does not preallocate empty Conversations for Initial Camp Membership; an admitted execution submission creates a missing Conversation only for each exact target.
+_Avoid_: Camp, Native Session, AgentRun, public chat transcript, external Runtime state container, physical filesystem isolation
 
 **Task**:
 An optional durable responsibility item inside one Camp, used when work must remain visible across messages, AgentRuns, or member coordination. `completed` records an authorized actor's declaration of completion, not verification by Rovai-ai Core. Tasks do not form a dependency DAG or a Core-enforced workflow. A Member Call may explicitly link one non-terminal Task assigned to its recipient at acceptance, but the frozen historical link neither transfers responsibility nor proves completion. Later Task completion, cancellation, or reassignment never cancels, fails, retargets, or wakes that accepted Conversation Input; its Run may observe the latest collaboration state and act accordingly. An A2A target Run never inherits the source Run's Task association. A Task may describe a filesystem path as ordinary semantic content, but it does not own or structurally transfer an AgentRun working directory.
@@ -701,8 +697,8 @@ The per-checklist state produced when the frozen independent Judge replicas retu
 _Avoid_: Hard Outcome conflict, low confidence, unavailable Judge, composite variance score
 
 **Native Session**:
-A replaceable external Runtime handle currently bound to a Conversation. It does not define the Conversation's identity or own Rovai-ai's portable context.
-_Avoid_: Conversation, Session Chain
+A replaceable external Runtime handle currently bound to a Conversation. Rovai-ai owns only the binding reference and portable context, not the Runtime's persisted Session files, retention, deletion, or physical isolation; deleting the Camp removes the binding without proving deletion of external Runtime state.
+_Avoid_: Conversation, Session Chain, Rovai-owned Session files, Camp deletion guarantee
 
 **Native Session Compatibility Key**:
 Adapter-derived evidence describing the Session-level semantics under which a Native Session is known reusable across a Runtime change. Path, fingerprint, or version changes require renewed probing but are not incompatibility by themselves; unknown compatibility permits one fenced Resume attempt before the binding is replaced.
@@ -1157,8 +1153,12 @@ The unique, user-editable object key of one entry in `mcpServers`, used as its o
 _Avoid_: MCP Server ID, immutable identity, Assignment key
 
 **MCP Runtime Name**:
-An ephemeral Adapter-private name used only when a Runtime cannot safely inject a Rovai-projected MCP Server under its canonical MCP Server Name. Its canonical-to-Runtime mapping is frozen into the AgentRun's MCP Exposure Snapshot and may be exposed in diagnostics, recovery data, or model-facing instructions, but it is never persisted to the MCP Configuration File or used as Server identity.
-_Avoid_: MCP Server Name, MCP Server ID, persistent alias, user-visible rename
+The canonical MCP Server Name presented to the target Runtime for one requested Projection entry. Current Adapters do not create private aliases; the separately recorded field exists only so Exposure can state the actual Runtime-facing name without treating it as Server identity.
+_Avoid_: MCP Server ID, persistent alias, user-visible rename, collision workaround
+
+**MCP Same-Name Policy**:
+The Adapter-declared rule for resolving a collision between a requested Rovai MCP Server and a Runtime-native Server with the same canonical MCP Server Name. `NativeWinsSkip` preserves the native Server and records the Rovai request as skipped; `RovaiWins` is valid only where the Adapter proves whole-definition precedence, never field-level merging. The policy and actual disposition are frozen into the AgentRun's MCP Exposure Snapshot.
+_Avoid_: universal Rovai precedence, universal native precedence, field merge, unrecorded collision
 
 **MCP Configuration File**:
 The application-global `~/.rovai/mcp.json` file that is the sole source of truth for external MCP Server definitions, enablement, immutable Server identities, and MCP Assignments. Its public `mcpServers` object contains only connection definitions, while one hidden sibling `_rovai` object contains schema version, identity, enablement, provenance, and Assignment state. Production code neither falls back to old brand paths nor migrates or accepts an old MCP schema; SQLite does not duplicate MCP Assignment truth. Parsing rejects duplicate JSON object keys rather than accepting last-key-wins behavior.
@@ -1173,36 +1173,40 @@ A strict `${NAME}` placeholder resolved by Core from the Agent Host environment 
 _Avoid_: Shell expansion, Runtime-specific variable syntax, persisted resolved credential
 
 **MCP Assignment**:
-The explicit relationship from an immutable MCP Server ID to one AgentProfile that requests the Server for that AgentProfile's future Runtime projection. Availability is application-global but authority is per Member; it is not inferred from Camp membership or MCP Server Name. It is not an AgentRun startup dependency: an unavailable external Server produces explicit degradation rather than blocking the base Run. Presence changes do not delete the Assignment, while away and removed Profiles cannot produce a new MCP Exposure Snapshot.
-_Avoid_: Camp MCP scope, Project MCP scope, automatic all-Agent exposure
+The explicit relationship from an immutable MCP Server ID to one AgentProfile that requests best-effort addition of that Server to the AgentProfile's future Runtime exposure. It is desired projection intent rather than an availability guarantee or AgentRun startup dependency: every omission or collision outcome is disclosed in the MCP Exposure Snapshot while the base Run may continue. Assignment configuration remains available independently of the AgentProfile's selected Runtime capability; Presence changes do not delete the Assignment, while away and removed Profiles cannot produce a new MCP Exposure Snapshot.
+_Avoid_: required Runtime dependency, guaranteed Server availability, Runtime-filtered configuration, Camp MCP scope, Project MCP scope, automatic all-Agent exposure
+
+**Additive MCP Projection**:
+An Adapter capability that preserves Runtime-native MCP Servers while attempting to add the ready Rovai MCP Servers requested for one AgentRun. Same-name handling is governed separately by MCP Same-Name Policy; once an Adapter finalizes an entry as ready, Runtime rejection fails startup rather than silently removing the entry, retrying empty, or switching to replacement semantics.
+_Avoid_: exact ambient isolation, replacement projection, empty-set fallback, best-effort transport claim
 
 **MCP Projection Input**:
 The immutable Definition, enablement, Assignment, resolved environment, and configuration-digest input captured when an AgentRun is created. Every startup attempt for that Run derives from this same input and never rereads the live MCP Configuration File.
 _Avoid_: final effective tool set, mutable settings view, retry-time config reload
 
 **MCP Exposure Snapshot**:
-The final immutable effective MCP result sealed after an AgentRun successfully establishes its Runtime Session, including requested and projected Servers, any canonical-to-Runtime name mapping, startup degradation attempts, and non-sensitive reason codes for Servers that were not projected. Recovery reuses it without retrying omitted Servers; changes affect only later AgentRuns without changing the Conversation identity.
+The final immutable effective MCP result sealed after an AgentRun successfully establishes its Runtime Session, including requested and projected Servers, the Adapter's MCP Same-Name Policy, every collision disposition, any canonical-to-Runtime name mapping, and non-sensitive reason codes for Servers that were not projected. Recovery reuses it without retrying omitted Servers; changes affect only later AgentRuns without changing the Conversation identity.
 _Avoid_: Native Session configuration identity, live mutable tool list, MCP Assignment
-
-**External MCP Degradation**:
-The explicit state in which a base AgentRun proceeds while one or all requested external MCP Servers are absent from its frozen projection. Definition-local readiness failures exclude only the affected Server; an invalid canonical file or an Adapter that cannot implement exact isolation and same-name precedence yields an empty external projection. If a version at or above its declared minimum explicitly rejects the normal external MCP injection during startup, the Adapter may record that rejection and retry once without user external MCPs. Degradation is recorded and diagnosable, never represented to the model as available, and never repaired by falling back to a same-named Runtime-native Server.
-_Avoid_: AgentRun admission failure, silent fallback, fabricated projection success
 
 **MCP Readiness Status**:
 A non-probing view derived from canonical configuration validity, environment and path readiness, Adapter capability, and the latest frozen AgentRun projection result. It does not start a Stdio Server, contact a remote endpoint, or claim that a configuration-ready Server is currently online.
 _Avoid_: live health check, connectivity guarantee, implicit third-party execution
 
+**MCP Projection Diagnostic**:
+The diagnostics-only read model of one Adapter's dynamic projection capability and one AgentRun's actual MCP Exposure Snapshot. An unsupported Runtime or skipped Server is disclosed here without hiding MCP configuration, preventing Assignment, changing Member eligibility, or adding warnings to the ordinary MCP configuration surface.
+_Avoid_: MCP configuration gate, Member capability restriction, ordinary settings warning, Assignment validation
+
 **External MCP Runtime Minimum**:
-The earliest Runtime version for which development-time acceptance proves an Adapter's required native MCP isolation and injection mechanism. Versions below the minimum are unsupported; versions at or above it continue to use the proven mechanism without an upper version cap or a user-machine capability Smoke. A newer Runtime is not disabled merely because Rovai-ai has not pinned that exact version.
+The earliest Runtime version for which development-time acceptance proves an Adapter's declared additive dynamic channel and Same-Name Policy. Versions below the minimum are unsupported; versions at or above it continue to use the proven mechanism without an upper version cap or a user-machine capability Smoke. A newer Runtime is not disabled merely because Rovai-ai has not pinned that exact version.
 _Avoid_: tested-version ceiling, exact-version allowlist, user-machine preflight Smoke
 
 **Real MCP Smoke**:
-A development-time acceptance run that launches an actual Runtime CLI against actual MCP protocol processes or reviewed remote endpoints. Same-name Smokes use distinguishable native and Rovai Server results to prove Rovai precedence and verify each Adapter's declared treatment of non-conflicting native Servers; default Smokes exercise Context7 and isolated Playwright. Missing prerequisites produce an explicit unverified result and can never be replaced by a mock success.
+A development-time acceptance run that launches an actual Runtime CLI against actual MCP protocol processes or reviewed remote endpoints. Same-name Smokes use distinguishable native and Rovai Server results to prove the Adapter-specific Same-Name Policy while separately proving that non-conflicting native Servers remain available; default Smokes exercise Context7 and isolated Playwright. Missing prerequisites produce an explicit unverified result and can never be replaced by a mock success.
 _Avoid_: user-machine startup probe, rendered-config snapshot, mocked protocol success
 
 **MCP Runtime Projection**:
-An ephemeral, Adapter-native configuration generated from one MCP Projection Input and injected when Rovai-ai launches or resumes an Agent CLI. A Rovai-projected external Server always takes precedence over a same-named Runtime-native Server; if the Adapter cannot implement that precedence, it reports external projection as unsupported and the base Run continues without external MCP. Treatment of non-conflicting native Servers remains governed by the Adapter's declared isolation policy. Projection may read Runtime-native configuration for discovery but never mutates user or project Runtime configuration; process flags, private configuration environments, or Rovai-managed `0600` temporary files carry every override. Rovai built-in operations never enter this projection. A successful Runtime Session seals the resulting facts into its MCP Exposure Snapshot.
-_Avoid_: Runtime personal MCP config, MCP source of truth, central MCP proxy
+The Adapter-native realization of one Additive MCP Projection when Rovai launches or resumes an Agent Runtime. It preserves Runtime-native configuration, applies the Adapter's Same-Name Policy without field merging, and never mutates user or project Runtime files; process arguments, Session configuration or Rovai-owned `0600` temporary files carry only the requested additions. An Unsupported Adapter performs no dynamic injection while the base Run continues. Rovai built-in operations never enter this projection, and a successful Runtime Session seals the final facts into its MCP Exposure Snapshot.
+_Avoid_: replacement config, Runtime personal MCP source of truth, central MCP proxy, empty-set retry
 
 **Built-in Tool Transport**:
 The sole model-facing path from an Agent Runtime through the `rovai` CLI and local Core IPC to Rovai-owned canonical Team, Task, Camp History, and Memory operations. It is a required AgentRun execution facility and remains separate from user-configured external MCP Runtime Projection.

@@ -43,11 +43,11 @@ pub struct Database {
     path: PathBuf,
 }
 
-const V041_DATA_CONTRACT_VERSION: &str = "v0.41";
-const V041_PROJECTION_SCHEMA_VERSION: i64 = 19;
-const V041_CLASSIFIER_VERSION: &str = "activity-v1";
+const V043_DATA_CONTRACT_VERSION: &str = "v0.43";
+const V043_PROJECTION_SCHEMA_VERSION: i64 = 20;
+const V043_CLASSIFIER_VERSION: &str = "activity-v1";
 
-const V041_RESET_FILES: &[&str] = &[
+const V043_RESET_FILES: &[&str] = &[
     "rovai.sqlite",
     "rovai.sqlite-wal",
     "rovai.sqlite-shm",
@@ -56,7 +56,7 @@ const V041_RESET_FILES: &[&str] = &[
     "lumen.sqlite-shm",
 ];
 
-const V041_RESET_DIRECTORIES: &[&str] = &[
+const V043_RESET_DIRECTORIES: &[&str] = &[
     "managed-blobs",
     "camp-attachments",
     "codex-homes",
@@ -71,7 +71,7 @@ const V041_RESET_DIRECTORIES: &[&str] = &[
     "runtime/qwen",
 ];
 
-fn has_current_v041_data_contract(path: &Path) -> bool {
+fn has_current_v043_data_contract(path: &Path) -> bool {
     if !path.exists() {
         return true;
     }
@@ -103,14 +103,14 @@ fn has_current_v041_data_contract(path: &Path) -> bool {
     matches!(
         (marker, projection_exists),
         (Ok(Some((contract, schema, classifier))), Ok(true))
-            if contract == V041_DATA_CONTRACT_VERSION
-                && schema == V041_PROJECTION_SCHEMA_VERSION
-                && classifier == V041_CLASSIFIER_VERSION
+            if contract == V043_DATA_CONTRACT_VERSION
+                && schema == V043_PROJECTION_SCHEMA_VERSION
+                && classifier == V043_CLASSIFIER_VERSION
     )
 }
 
-fn remove_v041_owned_state(data_dir: &Path) -> Result<()> {
-    for relative in V041_RESET_FILES {
+fn remove_v043_owned_state(data_dir: &Path) -> Result<()> {
+    for relative in V043_RESET_FILES {
         let path = data_dir.join(relative);
         match fs::symlink_metadata(&path) {
             Ok(metadata) if metadata.file_type().is_symlink() || metadata.is_file() => {
@@ -125,7 +125,7 @@ fn remove_v041_owned_state(data_dir: &Path) -> Result<()> {
             Err(error) => return Err(error).with_context(|| path.display().to_string()),
         }
     }
-    for relative in V041_RESET_DIRECTORIES {
+    for relative in V043_RESET_DIRECTORIES {
         let path = data_dir.join(relative);
         match fs::symlink_metadata(&path) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
@@ -455,14 +455,14 @@ impl Database {
         };
         let reset_reason = if !cfg!(test)
             && candidate_path.exists()
-            && !has_current_v041_data_contract(&candidate_path)
+            && !has_current_v043_data_contract(&candidate_path)
         {
             let reason = if candidate_path == legacy_path {
-                "legacy_or_missing_v041_data_contract"
+                "legacy_or_missing_v043_data_contract"
             } else {
-                "missing_or_incompatible_v041_data_contract"
+                "missing_or_incompatible_v043_data_contract"
             };
-            remove_v041_owned_state(data_dir)?;
+            remove_v043_owned_state(data_dir)?;
             Some(reason)
         } else {
             None
@@ -486,11 +486,9 @@ impl Database {
                 "UPDATE rovai_data_contract SET reset_reason = ?1, updated_at = datetime('now') WHERE singleton = 1",
                 [reason],
             )?;
-            eprintln!("v0.41 managed local-data reset completed: {reason}");
+            eprintln!("v0.43 managed local-data reset completed: {reason}");
         }
         database.seed_agents()?;
-        let aliases = database.agent_id_aliases()?;
-        crate::agent_identity::migrate_codex_home_agent_ids(data_dir, &aliases)?;
         Ok(database)
     }
 
@@ -1016,7 +1014,7 @@ impl Database {
                 self.migrate_skill_delivery_groups_v49()?;
             }
             if !self.schema_migration_applied(50)? {
-                self.migrate_codex_home_cleanup_v50()?;
+                self.migrate_reserved_v50()?;
             }
             if !self.schema_migration_applied(51)? {
                 self.migrate_camp_history_retrieval_v51()?;
@@ -1032,6 +1030,9 @@ impl Database {
             }
             if !self.schema_migration_applied(55)? {
                 self.migrate_runtime_compatibility_digest_v55()?;
+            }
+            if !self.schema_migration_applied(56)? {
+                self.migrate_additive_mcp_clean_break_v56()?;
             }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -1231,7 +1232,7 @@ impl Database {
             self.migrate_skill_delivery_groups_v49()?;
         }
         if !self.schema_migration_applied(50)? {
-            self.migrate_codex_home_cleanup_v50()?;
+            self.migrate_reserved_v50()?;
         }
         if !self.schema_migration_applied(51)? {
             self.migrate_camp_history_retrieval_v51()?;
@@ -1247,6 +1248,9 @@ impl Database {
         }
         if !self.schema_migration_applied(55)? {
             self.migrate_runtime_compatibility_digest_v55()?;
+        }
+        if !self.schema_migration_applied(56)? {
+            self.migrate_additive_mcp_clean_break_v56()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -4124,22 +4128,28 @@ impl Database {
         Ok(())
     }
 
-    fn migrate_codex_home_cleanup_v50(&mut self) -> Result<()> {
+    fn migrate_reserved_v50(&mut self) -> Result<()> {
         self.connection.execute_batch(
             r#"
-            CREATE TABLE codex_home_cleanup (
-                camp_id TEXT PRIMARY KEY,
-                requested_at TEXT NOT NULL,
-                attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
-                last_error TEXT,
-                next_retry_at TEXT,
-                updated_at TEXT NOT NULL
-            );
-            CREATE INDEX codex_home_cleanup_retry_idx
-                ON codex_home_cleanup(next_retry_at, requested_at);
-
             INSERT INTO schema_migration(version, applied_at)
             VALUES (50, datetime('now'));
+            "#,
+        )?;
+        Ok(())
+    }
+
+    fn migrate_additive_mcp_clean_break_v56(&mut self) -> Result<()> {
+        self.connection.execute_batch(
+            r#"
+            DROP TABLE IF EXISTS codex_home_cleanup;
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v0.43', projection_schema_version = 20,
+                classifier_version = 'activity-v1', updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (56, datetime('now'));
             "#,
         )?;
         Ok(())
@@ -8731,14 +8741,14 @@ mod tests {
     }
 
     #[test]
-    fn v041_never_reads_the_legacy_lumen_database_path() {
+    fn v043_never_reads_the_legacy_lumen_database_path() {
         let directory =
             std::env::temp_dir().join(format!("rovai-db-legacy-test-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&directory).unwrap();
         let legacy_path = directory.join("lumen.sqlite");
         drop(Connection::open(&legacy_path).unwrap());
 
-        let database = Database::open(&directory).expect("new v0.41 database should open");
+        let database = Database::open(&directory).expect("new v0.43 database should open");
         assert_eq!(database.path(), directory.join("rovai.sqlite"));
         drop(database);
 
@@ -11420,51 +11430,50 @@ mod tests {
     }
 
     #[test]
-    fn v50_creates_durable_codex_home_cleanup_records_without_a_camp_foreign_key() {
-        let directory = std::env::temp_dir().join(format!("rovai-db-v50-test-{}", Uuid::new_v4()));
+    fn v56_removes_the_obsolete_codex_home_cleanup_queue() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v56-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
         database
             .connection()
             .execute_batch(
                 r#"
-                DROP TABLE codex_home_cleanup;
-                DELETE FROM schema_migration WHERE version = 50;
+                CREATE TABLE codex_home_cleanup(camp_id TEXT PRIMARY KEY);
+                DELETE FROM schema_migration WHERE version = 56;
+                UPDATE rovai_data_contract
+                SET contract_version = 'v0.41', projection_schema_version = 19;
                 "#,
             )
-            .expect("test should restore the pre-v50 schema");
+            .unwrap();
         drop(database);
 
-        let reopened = Database::open(&directory).expect("v50 database should reopen");
-        reopened
-            .connection()
-            .execute(
-                r#"
-                INSERT INTO codex_home_cleanup(
-                    camp_id, requested_at, attempt_count, updated_at
-                ) VALUES (
-                    'already-deleted-camp', '2026-08-05T00:00:00Z', 0,
-                    '2026-08-05T00:00:00Z'
-                )
-                "#,
-                [],
-            )
-            .expect("cleanup records must outlive Camp rows");
+        let reopened = Database::open(&directory).expect("v56 database should reopen");
         let migration_count: i64 = reopened
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM schema_migration WHERE version = 50",
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 56",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        let cleanup_count: i64 = reopened
+        let cleanup_table_count: i64 = reopened
             .connection()
-            .query_row("SELECT COUNT(*) FROM codex_home_cleanup", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'codex_home_cleanup'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let contract: (String, i64) = reopened
+            .connection()
+            .query_row(
+                "SELECT contract_version, projection_schema_version FROM rovai_data_contract WHERE singleton = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
             .unwrap();
         assert_eq!(migration_count, 1);
-        assert_eq!(cleanup_count, 1);
+        assert_eq!(cleanup_table_count, 0);
+        assert_eq!(contract, ("v0.43".to_string(), 20));
 
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");

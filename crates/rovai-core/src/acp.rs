@@ -18,7 +18,7 @@ use rovai_core::{
         RuntimePermissionOption,
     },
     agent_profile::{AdapterKind, FrozenAgentRuntimeConfig},
-    agent_runtime_adapter::write_kiro_exact_agent_config,
+    agent_runtime_adapter::write_kiro_additive_agent_config,
     builtin_tool_transport::{BUILTIN_TOOL_CONTRACT_VERSION, builtin_tool_catalog_digest},
     command::canonical_json_digest,
     mcp::McpServerDefinition,
@@ -42,7 +42,7 @@ use crate::{
     },
     runtime_mcp::{
         EphemeralMcpConfigFile, external_acp_server, remove_stale_mcp_configs,
-        write_ephemeral_copilot_config, write_ephemeral_strict_mcp_config,
+        write_ephemeral_additive_mcp_config, write_ephemeral_copilot_config,
     },
 };
 
@@ -167,22 +167,6 @@ impl AcpHost {
     ) -> Result<Arc<Self>> {
         let private_config_root =
             prepare_private_host_config(private_runtime_dir, frozen_runtime.adapter_kind)?;
-        let disabled_copilot_servers = if frozen_runtime.adapter_kind == AdapterKind::CopilotCli {
-            discover_copilot_mcp_servers(frozen_runtime, cwd)
-                .await
-                .context("Copilot native MCP discovery failed")?
-        } else {
-            Vec::new()
-        };
-        if external_mcp_servers.keys().any(|runtime_name| {
-            disabled_copilot_servers
-                .iter()
-                .any(|native| native.eq_ignore_ascii_case(runtime_name))
-        }) {
-            bail!(
-                "mcp_config.explicit_rejection: Copilot native MCP collided with a frozen Rovai private alias"
-            );
-        }
         let mut command = Command::new(&frozen_runtime.executable_path);
         configure_active_runtime_command(&mut command);
         if let Some(config) = &builtin_tools {
@@ -199,7 +183,6 @@ impl AcpHost {
             external_mcp_servers,
             private_runtime_dir,
             private_config_root.as_deref(),
-            &disabled_copilot_servers,
             attachment_access_root,
         )
         .context("failed to configure ACP Runtime command")?;
@@ -270,7 +253,7 @@ impl AcpHost {
                 if frozen_runtime.adapter_kind == AdapterKind::CopilotCli {
                     // Copilot eagerly loads --additional-mcp-config before it
                     // replies to initialize. Preserve the original minimal
-                    // credential-file lifetime; strict v0.19 adapters retain
+                    // credential-file lifetime; native-config adapters retain
                     // their file because they may read it at Session creation.
                     host.ephemeral_config.lock().await.take();
                 }
@@ -676,10 +659,8 @@ impl AcpHost {
 fn diagnostic_is_explicit_mcp_rejection(diagnostic: &str) -> bool {
     let diagnostic = diagnostic.to_ascii_lowercase();
     [
-        "--strict-mcp-config",
         "--additional-mcp-config",
         "--mcp-config",
-        "--disable-mcp-server",
         "mcp config",
         "mcp configuration",
     ]
@@ -756,6 +737,7 @@ impl AcpRuntime {
         let mcp_servers = if !matches!(
             self.host.adapter_kind,
             AdapterKind::CopilotCli
+                | AdapterKind::KiroCli
                 | AdapterKind::QoderCli
                 | AdapterKind::CodebuddyCli
                 | AdapterKind::QwenCode
@@ -765,10 +747,8 @@ impl AcpRuntime {
                 .map(|(name, definition)| external_acp_server(name, definition))
                 .collect()
         } else {
-            // Copilot does not start stdio servers from ACP mcpServers. The
-            // strict v0.19 adapters receive their exact set from the private
-            // process config instead, avoiding duplicate names from two
-            // configuration channels.
+            // These adapters receive Rovai servers through their native
+            // additive configuration channel rather than ACP session fields.
             Vec::new()
         };
         let session_id = if let Some(session_id) = existing_session_id
@@ -1497,7 +1477,7 @@ fn prepare_private_host_config(
     private_runtime_dir: &Path,
     adapter_kind: AdapterKind,
 ) -> Result<Option<PathBuf>> {
-    if !launchable_acp_adapter(adapter_kind) {
+    if adapter_kind != AdapterKind::KiroCli {
         return Ok(None);
     }
     let root = private_runtime_dir
@@ -1513,35 +1493,6 @@ fn prepare_private_host_config(
     Ok(Some(root))
 }
 
-async fn discover_copilot_mcp_servers(
-    runtime: &FrozenAgentRuntimeConfig,
-    cwd: &Path,
-) -> Result<Vec<String>> {
-    let mut command = Command::new(&runtime.executable_path);
-    configure_active_runtime_command(&mut command);
-    command
-        .args(["mcp", "list", "--json"])
-        .current_dir(cwd)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    let output = timeout(Duration::from_secs(10), command.output())
-        .await
-        .context("Copilot MCP source discovery timed out")?
-        .context("failed to inspect Copilot MCP sources")?;
-    if !output.status.success() {
-        bail!("Copilot MCP source discovery failed; exact per-run isolation cannot be guaranteed");
-    }
-    let document = serde_json::from_slice::<Value>(&output.stdout)
-        .context("Copilot MCP source discovery returned invalid JSON")?;
-    let servers = document
-        .get("mcpServers")
-        .and_then(Value::as_object)
-        .context("Copilot MCP source discovery omitted mcpServers")?;
-    Ok(servers.keys().cloned().collect())
-}
-
 #[allow(clippy::too_many_arguments)]
 fn configure_runtime_command(
     command: &mut Command,
@@ -1552,7 +1503,6 @@ fn configure_runtime_command(
     external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
     private_runtime_dir: &Path,
     private_config_root: Option<&Path>,
-    disabled_copilot_servers: &[String],
     attachment_access_root: Option<&Path>,
 ) -> Result<Option<EphemeralMcpConfigFile>> {
     let values = runtime
@@ -1562,17 +1512,6 @@ fn configure_runtime_command(
         .context("ACP permission configuration must be an object")?;
     match runtime.adapter_kind {
         AdapterKind::OpencodeCli => {
-            let private_config_root =
-                private_config_root.context("OpenCode Host isolation directory is missing")?;
-            let xdg_config_home = private_config_root.join("xdg-config");
-            std::fs::create_dir_all(&xdg_config_home)?;
-            restrict_private_directory(&xdg_config_home)?;
-            command
-                .env("XDG_CONFIG_HOME", &xdg_config_home)
-                .env("OPENCODE_DISABLE_PROJECT_CONFIG", "true")
-                .env("OPENCODE_DISABLE_DEFAULT_PLUGINS", "true")
-                .env_remove("OPENCODE_CONFIG")
-                .env_remove("OPENCODE_CONFIG_DIR");
             let configured = values
                 .get("permission")
                 .and_then(Value::as_str)
@@ -1600,9 +1539,8 @@ fn configure_runtime_command(
                     }
                 }))?,
             );
-            // OpenCode receives the exact server list through ACP session/new
-            // or session/load. XDG and project config isolation above prevents
-            // user or repository MCP definitions from joining that list.
+            // OpenCode receives Rovai servers through ACP session/new or
+            // session/load while preserving its native configuration roots.
         }
         AdapterKind::CopilotCli => {
             let allow_all = values
@@ -1613,7 +1551,6 @@ fn configure_runtime_command(
                 && !(permission_semantics == PermissionSemantics::CoreEnforcedV1
                     && workspace.access == "read_only");
             health::configure_acp_command(command, runtime.adapter_kind, allow_all);
-            command.arg("--disable-builtin-mcps");
             if let Some(root) = attachment_access_root {
                 command.arg("--add-dir").arg(root);
             }
@@ -1623,9 +1560,6 @@ fn configure_runtime_command(
                     "--no-ask-user",
                     "--available-tools=",
                 ]);
-            }
-            for name in disabled_copilot_servers {
-                command.arg("--disable-mcp-server").arg(name);
             }
             if !external_mcp_servers.is_empty() {
                 let config =
@@ -1639,11 +1573,11 @@ fn configure_runtime_command(
         AdapterKind::KiroCli => {
             let private_config_root =
                 private_config_root.context("Kiro Host isolation directory is missing")?;
-            write_kiro_exact_agent_config(private_config_root)?;
+            write_kiro_additive_agent_config(private_config_root, external_mcp_servers)?;
             health::configure_acp_command(command, runtime.adapter_kind, false);
             // Kiro discovers the Rovai Agent from the Host process working
-            // directory. ACP session/new and session/load still receive the
-            // real AgentRun execution root and its exact MCP server list.
+            // directory. Native mcp.json sources remain enabled and the Agent
+            // adds the Rovai definitions with whole-definition precedence.
         }
         AdapterKind::QoderCli | AdapterKind::CodebuddyCli | AdapterKind::QwenCode => {
             let configured = match runtime.adapter_kind {
@@ -1688,21 +1622,10 @@ fn configure_runtime_command(
                 }
                 _ => unreachable!(),
             }
-            {
+            if !external_mcp_servers.is_empty() {
                 let config =
-                    write_ephemeral_strict_mcp_config(private_runtime_dir, external_mcp_servers)?;
+                    write_ephemeral_additive_mcp_config(private_runtime_dir, external_mcp_servers)?;
                 command.arg("--mcp-config").arg(config.path());
-                if !external_mcp_servers.is_empty()
-                    && matches!(
-                        runtime.adapter_kind,
-                        AdapterKind::QoderCli | AdapterKind::QwenCode
-                    )
-                {
-                    command.arg("--allowed-mcp-server-names");
-                    for name in external_mcp_servers.keys().map(String::as_str) {
-                        command.arg(name);
-                    }
-                }
                 return Ok(Some(config));
             }
         }

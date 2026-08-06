@@ -1524,7 +1524,6 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
                 </div>
                 <span>{item?.reportedVersion ?? adapterMaturityLabel(runtimeKind)}</span>
                 {presentation.detail && <small>{presentation.detail}</small>}
-                {runtimeKind === 'antigravity-app' && <small>内置操作通过本地 rovai CLI 执行；外部 MCP 保持运行时原生边界。</small>}
                 <small className="runtime-self-check">自查命令：<code>{help.selfCheckCommand}</code></small>
               </div>
               <div className="runtime-row-actions">
@@ -1785,10 +1784,10 @@ function adapterMaturityLabel(kind: AdapterKind): string {
     'opencode-cli': '测试',
     'copilot-cli': '测试',
     'claude-code-cli': '测试',
-    'kiro-cli': '实验性 · 私有 Agent + ACP MCP',
-    'qoder-cli': '实验性 · 严格 MCP',
-    'codebuddy-cli': '实验性 · 严格 MCP',
-    'qwen-code': '实验性 · MCP allowlist',
+    'kiro-cli': '实验性',
+    'qoder-cli': '实验性',
+    'codebuddy-cli': '实验性',
+    'qwen-code': '实验性',
     'antigravity-app': '实验性'
   })[kind]
 }

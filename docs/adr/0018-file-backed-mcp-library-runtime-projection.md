@@ -28,6 +28,10 @@ superseded_by: null
 > “AgentRun 终态立即删除 Runtime-native projection”条款：精确冻结的进程级投影、必要私有
 > 配置和 MCP 子进程可以保留到 Idle TTL、失效或容量淘汰关闭；本文的逐 Run 冻结、恢复输入、
 > 外部 MCP 真源、精确投影、权限和 redaction 条款继续有效。
+>
+> [ADR-0125](0125-runtime-native-additive-external-mcp-projection.md) 局部替代本文的 exact
+> per-Run Projection、Project 配置排除和 Unsupported 发送准入条款；MCP Library、Assignment、
+> frozen input、Exposure、权限与 redaction 继续有效。
 
 ## Context
 

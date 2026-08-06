@@ -426,7 +426,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
   )
 }
 
-function MemberMcpCard({
+export function MemberMcpCard({
   agent,
   servers,
   busy,

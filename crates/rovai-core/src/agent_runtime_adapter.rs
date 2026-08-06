@@ -21,6 +21,7 @@ use crate::{
     },
     command::canonical_json_digest,
     context_contract::native_binding_context_contract,
+    mcp::McpServerDefinition,
 };
 
 /// The stable, built-in boundary between Rovai-ai runtime configuration and a
@@ -242,15 +243,15 @@ pub struct SkillDiscoveryCapability {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExternalMcpProjection {
-    ExactPerRun,
+    AdditivePerRun,
     Unsupported,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AmbientMcpIsolation {
-    Exact,
-    PreservedUncontrolled,
+pub enum McpSameNamePolicy {
+    NativeWinsSkip,
+    RovaiWins,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -266,16 +267,16 @@ pub struct McpProjectionCapability {
     pub supports_stdio: bool,
     pub supports_streamable_http: bool,
     pub external_mcp_projection: ExternalMcpProjection,
-    pub ambient_mcp_isolation: AmbientMcpIsolation,
+    pub same_name_policy: Option<McpSameNamePolicy>,
     pub approval_control: McpApprovalControl,
 }
 
-fn exact_native_mcp_projection() -> McpProjectionCapability {
+fn additive_native_mcp_projection(same_name_policy: McpSameNamePolicy) -> McpProjectionCapability {
     McpProjectionCapability {
         supports_stdio: true,
         supports_streamable_http: true,
-        external_mcp_projection: ExternalMcpProjection::ExactPerRun,
-        ambient_mcp_isolation: AmbientMcpIsolation::Exact,
+        external_mcp_projection: ExternalMcpProjection::AdditivePerRun,
+        same_name_policy: Some(same_name_policy),
         approval_control: McpApprovalControl::RuntimeNative,
     }
 }
@@ -285,7 +286,7 @@ fn unsupported_external_mcp_projection() -> McpProjectionCapability {
         supports_stdio: false,
         supports_streamable_http: false,
         external_mcp_projection: ExternalMcpProjection::Unsupported,
-        ambient_mcp_isolation: AmbientMcpIsolation::PreservedUncontrolled,
+        same_name_policy: None,
         approval_control: McpApprovalControl::RuntimeNative,
     }
 }
@@ -356,14 +357,15 @@ pub struct ClaudeCodeProbeObservation {
 /// omits that flag.
 pub const ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID: &str = "antigravity://runtime-default";
 pub const CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID: &str = "claude-code://runtime-default";
-pub const KIRO_EXACT_AGENT_NAME: &str = "rovai";
+pub const KIRO_ADDITIVE_AGENT_NAME: &str = "rovai";
 
-/// Writes the Kiro custom Agent used by Rovai-ai ACP Hosts. The Agent is
-/// discovered from a private process working directory, while ACP Session
-/// requests retain the real AgentRun working directory. `includeMcpJson:
-/// false` prevents personal and repository `mcp.json` sources from being
-/// merged with the exact per-Session ACP projection.
-pub fn write_kiro_exact_agent_config(launch_root: &Path) -> Result<PathBuf> {
+/// Writes the Kiro custom Agent used by Rovai-ai ACP Hosts. Native MCP sources
+/// remain enabled; the Agent's `mcpServers` table contains only this Run's
+/// additive Rovai definitions.
+pub fn write_kiro_additive_agent_config(
+    launch_root: &Path,
+    mcp_servers: &BTreeMap<String, McpServerDefinition>,
+) -> Result<PathBuf> {
     let agent_directory = launch_root.join(".kiro/agents");
     std::fs::create_dir_all(&agent_directory).with_context(|| {
         format!(
@@ -371,20 +373,31 @@ pub fn write_kiro_exact_agent_config(launch_root: &Path) -> Result<PathBuf> {
             agent_directory.display()
         )
     })?;
-    let path = agent_directory.join(format!("{KIRO_EXACT_AGENT_NAME}.json"));
+    let path = agent_directory.join(format!("{KIRO_ADDITIVE_AGENT_NAME}.json"));
     std::fs::write(
         &path,
         serde_json::to_vec_pretty(&json!({
-            "name": KIRO_EXACT_AGENT_NAME,
-            "description": "Rovai-ai exact per-AgentRun ACP host",
+            "name": KIRO_ADDITIVE_AGENT_NAME,
+            "description": "Rovai-ai additive per-AgentRun ACP host",
             "prompt": null,
-            "mcpServers": {},
+            "mcpServers": mcp_servers.iter().map(|(name, definition)| {
+                let value = match definition {
+                    McpServerDefinition::Stdio { command, args, cwd, env } => json!({
+                        "type": "stdio", "command": command, "args": args,
+                        "cwd": cwd, "env": env
+                    }),
+                    McpServerDefinition::StreamableHttp { url, headers } => json!({
+                        "type": "http", "url": url, "headers": headers
+                    }),
+                };
+                (name.clone(), value)
+            }).collect::<serde_json::Map<_, _>>(),
             "tools": ["*"],
             "toolAliases": {},
             "allowedTools": [],
             "resources": [],
             "toolsSettings": {},
-            "includeMcpJson": false,
+            "includeMcpJson": true,
             "model": null
         }))?,
     )
@@ -489,7 +502,7 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::KiroCli
             | AdapterKind::QoderCli
             | AdapterKind::CodebuddyCli
-            | AdapterKind::QwenCode => exact_native_mcp_projection(),
+            | AdapterKind::QwenCode => additive_native_mcp_projection(McpSameNamePolicy::RovaiWins),
         }
     }
 
@@ -579,7 +592,7 @@ impl CodexCliAdapterPolicy {
             }
         }
         if ready {
-            append_exact_mcp_axes(&mut capabilities);
+            append_additive_mcp_axes(&mut capabilities, McpSameNamePolicy::NativeWinsSkip);
         }
         capabilities.sort();
         capabilities.dedup();
@@ -746,7 +759,7 @@ impl AgentRuntimeAdapter for CodexCliAdapterPolicy {
     }
 
     fn mcp_projection(&self) -> McpProjectionCapability {
-        exact_native_mcp_projection()
+        additive_native_mcp_projection(McpSameNamePolicy::NativeWinsSkip)
     }
 
     fn resolve_runtime(
@@ -857,7 +870,7 @@ impl ClaudeCodeCliAdapterPolicy {
                     capabilities.push(capability.to_string());
                 }
             }
-            append_exact_mcp_axes(&mut capabilities);
+            append_additive_mcp_axes(&mut capabilities, McpSameNamePolicy::RovaiWins);
         }
         capabilities.sort();
         capabilities.dedup();
@@ -963,7 +976,6 @@ impl AntigravityAppAdapterPolicy {
                 capabilities.push("builtin_cli.transport.unavailable".to_string());
             }
             capabilities.push("mcp.external_projection.unsupported".to_string());
-            capabilities.push("mcp.ambient_isolation.preserved_uncontrolled".to_string());
         }
         capabilities.sort();
         capabilities.dedup();
@@ -1090,7 +1102,7 @@ fn acp_capability_snapshot(
             capabilities.push("session.load".to_string());
         }
         capabilities.push(BUILTIN_TOOL_RUNTIME_CAPABILITY.to_string());
-        append_exact_mcp_axes(&mut capabilities);
+        append_additive_mcp_axes(&mut capabilities, McpSameNamePolicy::RovaiWins);
     }
     capabilities.sort();
     capabilities.dedup();
@@ -1126,11 +1138,15 @@ fn acp_capability_snapshot(
     })
 }
 
-fn append_exact_mcp_axes(capabilities: &mut Vec<String>) {
-    capabilities.extend([
-        "mcp.external_projection.exact_per_run".to_string(),
-        "mcp.ambient_isolation.exact".to_string(),
-    ]);
+fn append_additive_mcp_axes(capabilities: &mut Vec<String>, same_name_policy: McpSameNamePolicy) {
+    capabilities.push("mcp.external_projection.additive_per_run".to_string());
+    capabilities.push(format!(
+        "mcp.same_name_policy.{}",
+        match same_name_policy {
+            McpSameNamePolicy::NativeWinsSkip => "native_wins_skip",
+            McpSameNamePolicy::RovaiWins => "rovai_wins",
+        }
+    ));
 }
 
 fn acp_models(session_result: &Value) -> Result<Vec<ModelDescriptor>> {
@@ -1498,7 +1514,7 @@ impl AgentRuntimeAdapter for OpenCodeCliAdapterPolicy {
     }
 
     fn mcp_projection(&self) -> McpProjectionCapability {
-        exact_native_mcp_projection()
+        additive_native_mcp_projection(McpSameNamePolicy::RovaiWins)
     }
 
     fn resolve_runtime(
@@ -1525,7 +1541,7 @@ impl AgentRuntimeAdapter for CopilotCliAdapterPolicy {
     }
 
     fn mcp_projection(&self) -> McpProjectionCapability {
-        exact_native_mcp_projection()
+        additive_native_mcp_projection(McpSameNamePolicy::RovaiWins)
     }
 
     fn resolve_runtime(
@@ -1549,7 +1565,7 @@ impl AgentRuntimeAdapter for ClaudeCodeCliAdapterPolicy {
     }
 
     fn mcp_projection(&self) -> McpProjectionCapability {
-        exact_native_mcp_projection()
+        additive_native_mcp_projection(McpSameNamePolicy::RovaiWins)
     }
 
     fn resolve_runtime(
@@ -2313,9 +2329,16 @@ mod tests {
             assert!(capability.supports_streamable_http);
             assert_eq!(
                 capability.external_mcp_projection,
-                ExternalMcpProjection::ExactPerRun
+                ExternalMcpProjection::AdditivePerRun
             );
-            assert_eq!(capability.ambient_mcp_isolation, AmbientMcpIsolation::Exact);
+            assert_eq!(
+                capability.same_name_policy,
+                Some(if kind == AdapterKind::CodexCli {
+                    McpSameNamePolicy::NativeWinsSkip
+                } else {
+                    McpSameNamePolicy::RovaiWins
+                })
+            );
             assert_eq!(
                 capability.approval_control,
                 McpApprovalControl::RuntimeNative
@@ -2328,10 +2351,7 @@ mod tests {
             capability.external_mcp_projection,
             ExternalMcpProjection::Unsupported
         );
-        assert_eq!(
-            capability.ambient_mcp_isolation,
-            AmbientMcpIsolation::PreservedUncontrolled
-        );
+        assert_eq!(capability.same_name_policy, None);
         assert_eq!(
             capability.approval_control,
             McpApprovalControl::RuntimeNative

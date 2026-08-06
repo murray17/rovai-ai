@@ -8,7 +8,6 @@ pub mod camp_attachment;
 pub mod camp_content;
 pub mod camp_history;
 pub mod canonical_activity;
-pub mod codex_home;
 pub mod collaboration;
 pub mod command;
 pub mod context;

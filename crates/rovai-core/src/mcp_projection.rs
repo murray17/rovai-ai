@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
     io::Write,
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
@@ -14,13 +14,15 @@ use uuid::Uuid;
 
 use crate::{
     agent_profile::AdapterKind,
-    agent_runtime_adapter::{AgentRuntimeAdapterRegistry, ExternalMcpProjection},
+    agent_runtime_adapter::{
+        AgentRuntimeAdapterRegistry, ExternalMcpProjection, McpSameNamePolicy,
+    },
     command::canonical_json_digest,
     db::Database,
     mcp::{McpConfigStore, McpServerDefinition},
 };
 
-const MCP_PROJECTION_SCHEMA_VERSION: u32 = 1;
+const MCP_PROJECTION_SCHEMA_VERSION: u32 = 2;
 const MAX_PROJECTION_BYTES: u64 = 2 * 1024 * 1024;
 pub const LEGACY_EMPTY_MCP_EXPOSURE_DIGEST: &str = "sha256:legacy-empty-mcp-exposure";
 pub const LEGACY_EMPTY_MCP_PROJECTION_DIGEST: &str = "sha256:legacy-empty-mcp-projection";
@@ -31,6 +33,7 @@ pub const COPILOT_MCP_MINIMUM_VERSION: &str = "0.0.370";
 #[serde(rename_all = "snake_case")]
 pub enum McpExposureStatus {
     Ready,
+    SkippedNativeNameConflict,
     Disabled,
     Unassigned,
     AdapterUnsupported,
@@ -58,6 +61,8 @@ pub struct McpExposureSnapshot {
     pub schema_version: u32,
     pub config_digest: String,
     pub config_status: String,
+    pub projection_mode: ExternalMcpProjection,
+    pub same_name_policy: Option<McpSameNamePolicy>,
     pub warnings: Vec<String>,
     pub servers: Vec<McpExposureEntry>,
 }
@@ -68,6 +73,8 @@ impl Default for McpExposureSnapshot {
             schema_version: MCP_PROJECTION_SCHEMA_VERSION,
             config_digest: "sha256:empty-mcp-config".to_string(),
             config_status: "ready".to_string(),
+            projection_mode: ExternalMcpProjection::Unsupported,
+            same_name_policy: None,
             warnings: Vec::new(),
             servers: Vec::new(),
         }
@@ -94,14 +101,22 @@ pub struct PreparedMcpProjection {
 }
 
 impl PreparedMcpProjection {
-    pub fn degrade_external(&mut self, reason: &str) -> Result<()> {
+    pub fn finalize_native_name_conflicts(
+        &mut self,
+        native_mcp_server_names: &BTreeSet<String>,
+    ) -> Result<()> {
         for entry in &mut self.snapshot.servers {
-            if entry.status == McpExposureStatus::Ready {
-                entry.status = McpExposureStatus::AdapterUnsupported;
-                entry.reason = Some(reason.to_string());
+            if entry.status == McpExposureStatus::Ready
+                && self.snapshot.same_name_policy == Some(McpSameNamePolicy::NativeWinsSkip)
+                && native_mcp_server_names
+                    .iter()
+                    .any(|native| native.eq_ignore_ascii_case(&entry.runtime_name))
+            {
+                self.servers.remove(&entry.runtime_name);
+                entry.status = McpExposureStatus::SkippedNativeNameConflict;
+                entry.reason = Some("native_mcp_name_conflict".to_string());
             }
         }
-        self.servers.clear();
         self.exposure_digest = canonical_json_digest(&serde_json::to_value(&self.snapshot)?)?;
         Ok(())
     }
@@ -368,6 +383,7 @@ fn materialize_projection(
 ) -> Result<ProjectionFile> {
     let known = [request.agent_profile_id.to_string()].into_iter().collect();
     let (view, config) = config_store.get_with_raw(&known)?;
+    let capability = AgentRuntimeAdapterRegistry::default().mcp_projection(request.adapter_kind);
     let mut exposure = McpExposureSnapshot {
         schema_version: MCP_PROJECTION_SCHEMA_VERSION,
         config_digest: view.config_digest.clone(),
@@ -377,6 +393,8 @@ fn materialize_projection(
             "ready"
         }
         .to_string(),
+        projection_mode: capability.external_mcp_projection,
+        same_name_policy: capability.same_name_policy,
         warnings: Vec::new(),
         servers: Vec::new(),
     };
@@ -396,7 +414,6 @@ fn materialize_projection(
             .push("mcp_config_permissions_too_broad".to_string());
     }
     let mut servers = BTreeMap::new();
-    let capability = AgentRuntimeAdapterRegistry::default().mcp_projection(request.adapter_kind);
     let minimum_version_supported =
         runtime_version_supports_mcp(request.adapter_kind, request.reported_runtime_version);
     let Some(config) = config else {
@@ -451,8 +468,7 @@ fn materialize_projection(
         } else {
             match resolve_definition(&definition, request.execution_root) {
                 Ok(resolved) => {
-                    let runtime_name =
-                        projected_runtime_name(request.adapter_kind, &metadata.server_id, &name);
+                    let runtime_name = name.clone();
                     entry.runtime_name = runtime_name.clone();
                     servers.insert(runtime_name, resolved);
                 }
@@ -486,6 +502,8 @@ fn empty_legacy_projection(request: &McpProjectionRequest<'_>) -> ProjectionFile
             schema_version: MCP_PROJECTION_SCHEMA_VERSION,
             config_digest: "sha256:legacy-empty-mcp-config".to_string(),
             config_status: "ready".to_string(),
+            projection_mode: ExternalMcpProjection::Unsupported,
+            same_name_policy: None,
             warnings: Vec::new(),
             servers: Vec::new(),
         },
@@ -614,14 +632,6 @@ fn transport_name(definition: &McpServerDefinition) -> &'static str {
     }
 }
 
-fn projected_runtime_name(kind: AdapterKind, server_id: &str, requested_name: &str) -> String {
-    if kind != AdapterKind::CopilotCli {
-        return requested_name.to_string();
-    }
-    let compact_id = server_id.replace('-', "");
-    format!("rovai__{}", compact_id.chars().take(16).collect::<String>())
-}
-
 fn runtime_version_supports_mcp(kind: AdapterKind, reported_version: Option<&str>) -> bool {
     let minimum = match kind {
         AdapterKind::ClaudeCodeCli => [1, 0, 44],
@@ -734,6 +744,8 @@ fn validate_frozen_exposure(
     if projected.schema_version != frozen.schema_version
         || projected.config_digest != frozen.config_digest
         || projected.config_status != frozen.config_status
+        || projected.projection_mode != frozen.projection_mode
+        || projected.same_name_policy != frozen.same_name_policy
         || projected.servers.len() != frozen.servers.len()
     {
         anyhow::bail!("Frozen MCP exposure identity does not match its input projection");
@@ -747,14 +759,10 @@ fn validate_frozen_exposure(
         {
             anyhow::bail!("Frozen MCP exposure Server identity was changed");
         }
-        let unchanged = input == final_entry;
-        let runtime_degraded = input.status == McpExposureStatus::Ready
-            && final_entry.status == McpExposureStatus::AdapterUnsupported
-            && matches!(
-                final_entry.reason.as_deref(),
-                Some("runtime_rejected_external_mcp_config")
-            );
-        if !unchanged && !runtime_degraded {
+        let native_collision_finalized = input.status == McpExposureStatus::Ready
+            && final_entry.status == McpExposureStatus::SkippedNativeNameConflict
+            && final_entry.reason.as_deref() == Some("native_mcp_name_conflict");
+        if input != final_entry && !native_collision_finalized {
             anyhow::bail!("Frozen MCP exposure contains an invalid final Runtime state");
         }
     }
@@ -991,20 +999,20 @@ mod tests {
     }
 
     #[test]
-    fn tampered_projection_is_rejected_and_unsupported_adapter_degrades_only_external_mcp() {
+    fn tampered_projection_is_rejected_and_unsupported_adapter_skips_external_mcp() {
         let (root, database, store, service) = fixture();
         create_effective(&store, "docs", r#"{"command":"node"}"#);
         let run_id = Uuid::new_v4().to_string();
-        let degraded = service
+        let unsupported = service
             .prepare(
                 &database,
                 &store,
                 &request(&run_id, 1, &root, AdapterKind::AntigravityApp),
             )
             .unwrap();
-        assert!(degraded.servers.is_empty());
+        assert!(unsupported.servers.is_empty());
         assert_eq!(
-            degraded
+            unsupported
                 .snapshot
                 .servers
                 .iter()
@@ -1140,14 +1148,14 @@ mod tests {
     }
 
     #[test]
-    fn copilot_private_runtime_name_is_frozen_separately_from_the_server_name() {
+    fn codex_native_name_conflict_is_skipped_without_aliasing_or_overwrite() {
         let (root, database, store, service) = fixture();
         create_effective(&store, "docs", r#"{"command":"node"}"#);
         let run_id = Uuid::new_v4().to_string();
-        let mut copilot_request = request(&run_id, 1, &root, AdapterKind::CopilotCli);
-        copilot_request.reported_runtime_version = Some("1.0.0");
-        let prepared = service
-            .prepare(&database, &store, &copilot_request)
+        let codex_request = request(&run_id, 1, &root, AdapterKind::CodexCli);
+        let mut prepared = service.prepare(&database, &store, &codex_request).unwrap();
+        prepared
+            .finalize_native_name_conflicts(&BTreeSet::from(["Docs".to_string()]))
             .unwrap();
         let entry = prepared
             .snapshot
@@ -1155,14 +1163,21 @@ mod tests {
             .iter()
             .find(|entry| entry.name == "docs")
             .unwrap();
-        assert!(entry.runtime_name.starts_with("rovai__"));
-        assert_ne!(entry.runtime_name, entry.name);
-        assert!(prepared.servers.contains_key(&entry.runtime_name));
+        assert_eq!(entry.runtime_name, entry.name);
+        assert_eq!(entry.status, McpExposureStatus::SkippedNativeNameConflict);
+        assert_eq!(entry.reason.as_deref(), Some("native_mcp_name_conflict"));
+        assert!(prepared.servers.is_empty());
+        assert_eq!(
+            prepared.snapshot.same_name_policy,
+            Some(McpSameNamePolicy::NativeWinsSkip)
+        );
 
-        let mut recovered_request = request(&run_id, 2, &root, AdapterKind::CopilotCli);
-        recovered_request.reported_runtime_version = Some("99.0.0");
-        let recovered = service
+        let recovered_request = request(&run_id, 2, &root, AdapterKind::CodexCli);
+        let mut recovered = service
             .prepare(&database, &store, &recovered_request)
+            .unwrap();
+        recovered
+            .finalize_native_name_conflicts(&BTreeSet::from(["docs".to_string()]))
             .unwrap();
         assert_eq!(recovered.snapshot, prepared.snapshot);
         assert_eq!(recovered.servers, prepared.servers);

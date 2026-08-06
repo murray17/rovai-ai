@@ -50,8 +50,8 @@ pnpm build:desktop
 | `pnpm smoke:multi-agent` | Codex | 同一 CampTurn 的两个真实并发 AgentRun |
 | `pnpm smoke:builtin-cli` | 全部九种正式 Runtime | 每个真实 AgentRun 发现/describe 同一 catalog，调用十二项 CLI operation，验证冲突 recovery、release fence 与后续 Run 新 lease；任一 Runtime 缺失、未认证或漏项即失败 |
 | `pnpm smoke:skills` | Codex 默认；selector 接受全部九种 Product Runtime | `ROVAI_SKILL_SMOKE_ADAPTERS=all` 会逐一尝试九组真实投递与发现；只有本机 Runtime 已安装、已认证、已接入 AgentRun 且全部通过时才成功 |
-| `pnpm smoke:mcp` | Codex、Claude Code、OpenCode、Copilot；可选 CodeBuddy、Qwen Code | 默认前四种；逐 Run 临时 MCP 配置；OpenCode 默认使用 `opencode/mimo-v2.5-free` |
-| `pnpm smoke:mcp-projection` | Codex、Claude Code、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen Code | 通过真实 Core、Assignment、AgentRun Projection 与 ContextManifest 验证 Rovai 覆盖同名 Runtime 原生 MCP；Codex 另验证双向 stdio/HTTP transport replacement；默认八种 |
+| `pnpm smoke:mcp` | Codex、Claude Code、OpenCode、Copilot；可选 CodeBuddy、Qwen Code | 默认前四种；保留 Runtime 原生配置并逐 Run 追加 MCP；OpenCode 默认使用 `opencode/mimo-v2.5-free` |
+| `pnpm smoke:mcp-projection` | Codex、Claude Code、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen Code | 通过真实 Core、Assignment、AgentRun Projection 与 ContextManifest 验证原生配置保留及 Adapter-specific 同名策略；Codex 同名项应跳过，另外七种应由 Rovai 整项优先；默认八种 |
 | `pnpm smoke:memory-runtime` | Codex + Claude Code | 可只选一种；Claude 有 bounded model/budget 配置 |
 | `pnpm smoke:recovery` | OpenCode 默认 | 可选择其他产品 Runtime；创建 Git fixture 并杀死 Core 验证恢复 |
 

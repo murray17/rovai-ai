@@ -9,7 +9,7 @@ use anyhow::{Context, Result, bail};
 use rovai_core::{
     agent_profile::AdapterKind,
     agent_runtime_adapter::{
-        KIRO_EXACT_AGENT_NAME, executable_fingerprint, write_kiro_exact_agent_config,
+        KIRO_ADDITIVE_AGENT_NAME, executable_fingerprint, write_kiro_additive_agent_config,
     },
     runtime_discovery::configure_active_runtime_command,
 };
@@ -141,7 +141,7 @@ pub async fn codex_runtime_probe_at(path: &Path) -> AgentRuntimeProbeResult {
 }
 
 pub async fn acp_capability_probe_at(path: &Path, kind: AdapterKind) -> AcpCapabilityProbe {
-    acp_probe_at(path, kind, exact_acp_mcp_verified(kind)).await
+    acp_probe_at(path, kind, additive_acp_mcp_verified(kind)).await
 }
 
 pub async fn claude_code_capability_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
@@ -851,19 +851,19 @@ async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> 
         Ok((initialize_result, session_result)) => {
             let mut capabilities =
                 acp_observed_capabilities(kind, &initialize_result, session_result.as_ref());
-            let exact_mcp = exact_acp_mcp_verified(kind);
-            if exact_mcp {
-                capabilities.push("mcp.exact_per_run".to_string());
+            let additive_mcp = additive_acp_mcp_verified(kind);
+            if additive_mcp {
+                capabilities.push("mcp.additive_per_run".to_string());
             }
-            let status = if exact_mcp {
+            let status = if additive_mcp {
                 AgentRuntimeProbeStatus::Ready
             } else {
                 AgentRuntimeProbeStatus::MissingCapabilities
             };
-            let missing = if exact_mcp {
+            let missing = if additive_mcp {
                 Vec::new()
             } else {
-                vec!["mcp.exact_per_run".to_string()]
+                vec!["mcp.additive_per_run".to_string()]
             };
             AcpCapabilityProbe {
                 result: agent_probe_result(
@@ -874,8 +874,8 @@ async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> 
                     status,
                     capabilities,
                     missing,
-                    (!exact_mcp).then(|| {
-                        "ACP handshake succeeded, but this CLI cannot replace all ambient MCP sources with an exact per-AgentRun list in the verified build."
+                    (!additive_mcp).then(|| {
+                        "ACP handshake succeeded, but this CLI cannot add per-AgentRun MCP definitions in the verified build."
                             .to_string()
                     }),
                     probed_at,
@@ -922,7 +922,7 @@ async fn run_acp_probe(
     let probe_root = env::temp_dir().join(format!("rovai-acp-probe-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&probe_root)?;
     if kind == AdapterKind::KiroCli {
-        write_kiro_exact_agent_config(&probe_root)?;
+        write_kiro_additive_agent_config(&probe_root, &Default::default())?;
     }
     let mut command = runtime_command(path);
     configure_acp_command(&mut command, kind, false);
@@ -1051,13 +1051,10 @@ pub fn configure_acp_command(command: &mut Command, kind: AdapterKind, allow_all
             }
         }
         AdapterKind::KiroCli => {
-            command.args(["acp", "--agent", KIRO_EXACT_AGENT_NAME]);
+            command.args(["acp", "--agent", KIRO_ADDITIVE_AGENT_NAME]);
         }
-        AdapterKind::QoderCli => {
-            command.args(["--acp", "--strict-mcp-config"]);
-        }
-        AdapterKind::CodebuddyCli => {
-            command.args(["--acp", "--strict-mcp-config"]);
+        AdapterKind::QoderCli | AdapterKind::CodebuddyCli => {
+            command.arg("--acp");
         }
         AdapterKind::QwenCode => {
             command.arg("--acp");
@@ -1113,7 +1110,7 @@ fn acp_required_capabilities(kind: AdapterKind) -> Vec<String> {
         "session.update",
         "structured_permission_request",
         "workspace.additional_roots",
-        "mcp.exact_per_run",
+        "mcp.additive_per_run",
     ]
     .into_iter()
     .map(str::to_string)
@@ -1129,7 +1126,7 @@ fn acp_required_capabilities(kind: AdapterKind) -> Vec<String> {
     capabilities
 }
 
-fn exact_acp_mcp_verified(kind: AdapterKind) -> bool {
+fn additive_acp_mcp_verified(kind: AdapterKind) -> bool {
     matches!(
         kind,
         AdapterKind::OpencodeCli
@@ -1777,7 +1774,7 @@ mod tests {
     use rovai_core::agent_runtime_adapter::{AcpProbeObservation, AgentRuntimeAdapterRegistry};
 
     #[test]
-    fn v019_acp_launch_shapes_match_the_verified_cli_contracts() {
+    fn additive_acp_launch_shapes_match_the_verified_cli_contracts() {
         let arguments = |kind| {
             let mut command = Command::new("/usr/bin/true");
             configure_acp_command(&mut command, kind, false);
@@ -1787,23 +1784,17 @@ mod tests {
                 .map(|value| value.to_string_lossy().to_string())
                 .collect::<Vec<_>>()
         };
-        assert_eq!(
-            arguments(AdapterKind::QoderCli),
-            ["--acp", "--strict-mcp-config"]
-        );
-        assert_eq!(
-            arguments(AdapterKind::CodebuddyCli),
-            ["--acp", "--strict-mcp-config"]
-        );
+        assert_eq!(arguments(AdapterKind::QoderCli), ["--acp"]);
+        assert_eq!(arguments(AdapterKind::CodebuddyCli), ["--acp"]);
         assert_eq!(arguments(AdapterKind::QwenCode), ["--acp"]);
         assert_eq!(
             arguments(AdapterKind::KiroCli),
-            ["acp", "--agent", KIRO_EXACT_AGENT_NAME]
+            ["acp", "--agent", KIRO_ADDITIVE_AGENT_NAME]
         );
     }
 
     #[test]
-    fn only_locally_verified_acp_adapters_claim_exact_mcp() {
+    fn locally_verified_acp_adapters_claim_additive_mcp() {
         for kind in [
             AdapterKind::OpencodeCli,
             AdapterKind::CopilotCli,
@@ -1812,7 +1803,7 @@ mod tests {
             AdapterKind::CodebuddyCli,
             AdapterKind::QwenCode,
         ] {
-            assert!(exact_acp_mcp_verified(kind));
+            assert!(additive_acp_mcp_verified(kind));
         }
     }
 
@@ -1831,7 +1822,7 @@ mod tests {
             probe
                 .result
                 .capabilities
-                .contains(&"mcp.exact_per_run".to_string())
+                .contains(&"mcp.additive_per_run".to_string())
         );
         assert!(
             probe

@@ -23,7 +23,6 @@ use rovai_core::{
         AgentRuntimeAdapterRegistry, McpProjectionCapability, SkillDiscoveryCapability,
     },
     builtin_tool_transport::{BUILTIN_TOOL_CONTRACT_VERSION, builtin_tool_catalog_digest},
-    codex_home::{CodexHomeManager, PreparedCodexHome},
     command::canonical_json_digest,
     mcp::McpServerDefinition,
     runtime_discovery::configure_active_runtime_command,
@@ -133,10 +132,7 @@ pub(crate) struct CodexHost {
     routes: RwLock<HashMap<String, CodexThreadRoute>>,
     incoming: mpsc::UnboundedSender<CodexIncoming>,
     alive: AtomicBool,
-    #[cfg(test)]
-    home_path: PathBuf,
     executable_path: PathBuf,
-    prepared_home: Mutex<Option<PreparedCodexHome>>,
     builtin_tools: Option<BuiltinToolProcessConfig>,
 }
 
@@ -165,12 +161,9 @@ impl CodexHost {
     async fn spawn_with_executable(
         codex_path: &Path,
         cwd: &Path,
-        prepared_home: PreparedCodexHome,
-        expected_external_servers: &BTreeMap<String, McpServerDefinition>,
         incoming: mpsc::UnboundedSender<CodexIncoming>,
         builtin_tools: Option<BuiltinToolProcessConfig>,
     ) -> Result<Arc<Self>> {
-        let codex_home = prepared_home.path.clone();
         let mut command = Command::new(codex_path);
         configure_active_runtime_command(&mut command);
         if let Some(config) = &builtin_tools {
@@ -178,11 +171,10 @@ impl CodexHost {
         }
         #[cfg(unix)]
         command.as_std_mut().process_group(0);
-        let mut child = command
+        command
             .args(["app-server", "--listen", "stdio://"])
-            .current_dir(cwd)
-            .env("CODEX_HOME", &codex_home)
-            .env_remove("CODEX_SQLITE_HOME")
+            .current_dir(cwd);
+        let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -210,10 +202,7 @@ impl CodexHost {
             routes: RwLock::new(HashMap::new()),
             incoming,
             alive: AtomicBool::new(true),
-            #[cfg(test)]
-            home_path: codex_home.clone(),
             executable_path: codex_path.to_path_buf(),
-            prepared_home: Mutex::new(Some(prepared_home)),
             builtin_tools,
         });
         Self::spawn_stdout_reader(host.clone(), stdout);
@@ -242,32 +231,7 @@ impl CodexHost {
             host.shutdown().await;
             return Err(error.context("Codex app-server initialized notification failed"));
         }
-        if let Err(error) = host
-            .verify_isolated_config(&codex_home, cwd, expected_external_servers)
-            .await
-        {
-            host.shutdown().await;
-            return Err(error.context("Codex isolated configuration verification failed"));
-        }
         Ok(host)
-    }
-
-    async fn verify_isolated_config(
-        &self,
-        codex_home: &Path,
-        cwd: &Path,
-        expected_external_servers: &BTreeMap<String, McpServerDefinition>,
-    ) -> Result<()> {
-        let result = self
-            .rpc(
-                "config/read",
-                json!({
-                    "cwd": cwd.to_string_lossy(),
-                    "includeLayers": true,
-                }),
-            )
-            .await?;
-        verify_config_read_response(&result, codex_home, expected_external_servers)
     }
 
     fn spawn_stdout_reader(host: Arc<Self>, stdout: tokio::process::ChildStdout) {
@@ -530,7 +494,6 @@ impl CodexHost {
             let _ = child.kill().await;
             let _ = timeout(Duration::from_secs(1), child.wait()).await;
         }
-        self.prepared_home.lock().await.take();
     }
 
     async fn rpc(&self, method: &str, params: Value) -> Result<Value> {
@@ -602,9 +565,6 @@ pub struct CodexRuntime {
     owner: CodexRuntimeOwner,
     camp_id: Option<String>,
     host: Arc<CodexHost>,
-    #[cfg(test)]
-    home_path: PathBuf,
-    home_created_or_rebuilt: bool,
     thread_id: RwLock<Option<String>>,
     action_items: Mutex<HashMap<String, Value>>,
     streamed_agent_text: Mutex<String>,
@@ -628,6 +588,7 @@ pub struct CodexAgentThreadOptions<'a> {
     pub approval_policy: &'a str,
     pub model: Option<&'a str>,
     pub attachment_access_root: &'a Path,
+    pub external_mcp_servers: &'a BTreeMap<String, McpServerDefinition>,
 }
 
 impl CodexRuntime {
@@ -635,17 +596,11 @@ impl CodexRuntime {
         owner: CodexRuntimeOwner,
         camp_id: Option<String>,
         host: Arc<CodexHost>,
-        home_created_or_rebuilt: bool,
     ) -> Arc<Self> {
-        #[cfg(test)]
-        let home_path = host.home_path.clone();
         Arc::new(Self {
             owner,
             camp_id,
             host,
-            #[cfg(test)]
-            home_path,
-            home_created_or_rebuilt,
             thread_id: RwLock::new(None),
             action_items: Mutex::new(HashMap::new()),
             streamed_agent_text: Mutex::new(String::new()),
@@ -666,7 +621,11 @@ impl CodexRuntime {
                 sandbox: options.sandbox_mode,
                 approval_policy: options.approval_policy,
                 model: options.model.filter(|model| *model != "default"),
-                config: None,
+                config: if options.external_mcp_servers.is_empty() {
+                    None
+                } else {
+                    Some(codex_mcp_session_config(options.external_mcp_servers)?)
+                },
                 runtime_workspace_roots: Some(vec![
                     cwd.to_string_lossy().into_owned(),
                     options
@@ -678,6 +637,22 @@ impl CodexRuntime {
             },
         )
         .await
+    }
+
+    pub async fn discover_native_mcp_server_names(
+        &self,
+        cwd: &Path,
+    ) -> Result<std::collections::BTreeSet<String>> {
+        let response = self
+            .rpc(
+                "config/read",
+                json!({
+                    "cwd": cwd.to_string_lossy(),
+                    "includeLayers": true,
+                }),
+            )
+            .await?;
+        native_mcp_server_names_from_config_read(&response)
     }
 
     async fn start_isolated_thread(&self, cwd: &Path, model: Option<&str>) -> Result<String> {
@@ -883,10 +858,6 @@ impl CodexRuntime {
         self.host.child.lock().await.id()
     }
 
-    pub fn home_created_or_rebuilt(&self) -> bool {
-        self.home_created_or_rebuilt
-    }
-
     fn belongs_to_camp(&self, camp_id: &str) -> bool {
         self.camp_id.as_deref() == Some(camp_id)
     }
@@ -958,151 +929,80 @@ fn thread_start_or_resume_request(
     }
 }
 
-fn verify_config_read_response(
-    response: &Value,
-    codex_home: &Path,
-    expected_external_servers: &BTreeMap<String, McpServerDefinition>,
-) -> Result<()> {
-    let layers = response
-        .get("layers")
-        .and_then(Value::as_array)
-        .context("Codex config/read did not return configuration layers")?;
-    let expected_user_config = codex_home
-        .join("config.toml")
-        .canonicalize()
-        .context("isolated Codex config disappeared during verification")?;
-    let mut verified_user_layer = false;
-
-    for layer in layers {
-        let source = layer
-            .get("name")
-            .and_then(Value::as_object)
-            .context("Codex config layer has no source metadata")?;
-        let source_type = source
-            .get("type")
-            .and_then(Value::as_str)
-            .context("Codex config layer has no source type")?;
-        let disabled = layer
-            .get("disabledReason")
-            .is_some_and(|reason| !reason.is_null());
-        match source_type {
-            "user" if !disabled => {
-                let file = source
-                    .get("file")
-                    .and_then(Value::as_str)
-                    .context("active Codex user layer has no file path")?;
-                let file = PathBuf::from(file)
-                    .canonicalize()
-                    .with_context(|| format!("failed to resolve active Codex user layer {file}"))?;
-                if file != expected_user_config {
-                    bail!("Codex loaded a user config outside the Isolated Codex Home");
-                }
-                verify_user_mcp_layer(layer.get("config"), expected_external_servers)?;
-                verified_user_layer = true;
-            }
-            "user" => {}
-            "project" if !disabled => {
-                bail!("Codex enabled a project .codex configuration layer");
-            }
-            "project" => {}
-            "sessionFlags" => {
-                if layer_has_mcp_servers(layer.get("config")) {
-                    bail!("Codex app-server inherited an unexpected session MCP layer");
-                }
-            }
-            "mdm"
-            | "system"
-            | "enterpriseManaged"
-            | "legacyManagedConfigTomlFromFile"
-            | "legacyManagedConfigTomlFromMdm"
-                if !disabled && layer_has_mcp_servers(layer.get("config")) =>
-            {
-                bail!("managed Codex configuration injected top-level MCP servers");
-            }
-            "mdm"
-            | "system"
-            | "enterpriseManaged"
-            | "legacyManagedConfigTomlFromFile"
-            | "legacyManagedConfigTomlFromMdm" => {}
-            other => bail!("Codex returned an unsupported config layer source: {other}"),
+fn codex_mcp_session_config(
+    external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
+) -> Result<Value> {
+    let mut servers = serde_json::Map::new();
+    for (name, definition) in external_mcp_servers {
+        if name.trim().is_empty() || name.contains('\0') {
+            bail!("invalid Codex MCP server name");
         }
-    }
-    if !verified_user_layer {
-        bail!("Codex did not activate the Isolated Codex Home user config");
-    }
-    Ok(())
-}
-
-fn verify_user_mcp_layer(
-    config: Option<&Value>,
-    expected_external_servers: &BTreeMap<String, McpServerDefinition>,
-) -> Result<()> {
-    let servers = mcp_server_object(config);
-    let actual_names = servers
-        .map(|servers| servers.keys().map(String::as_str).collect::<HashSet<_>>())
-        .unwrap_or_default();
-    let expected_names = expected_external_servers
-        .keys()
-        .map(String::as_str)
-        .collect::<HashSet<_>>();
-    if actual_names != expected_names {
-        bail!("Codex user layer MCP names do not match the frozen Rovai projection");
-    }
-    let Some(servers) = servers else {
-        return Ok(());
-    };
-    for (name, definition) in expected_external_servers {
-        let actual = servers
-            .get(name)
-            .and_then(Value::as_object)
-            .with_context(|| format!("Codex MCP server {name} is not an object"))?;
-        match definition {
+        let value = match definition {
             McpServerDefinition::Stdio {
                 command,
                 args,
                 cwd,
                 env,
-            } => {
-                if actual.get("command").and_then(Value::as_str) != Some(command.as_str())
-                    || actual.get("url").is_some_and(|value| !value.is_null())
-                    || actual.get("args") != Some(&json!(args))
-                    || actual.get("cwd").and_then(Value::as_str) != cwd.as_deref()
-                    || actual.get("env") != Some(&json!(env))
-                    || actual.get("enabled").and_then(Value::as_bool) != Some(true)
-                {
-                    bail!("Codex MCP server {name} has a mixed or incorrect stdio transport");
-                }
-            }
-            McpServerDefinition::StreamableHttp { url, headers } => {
-                if actual.get("url").and_then(Value::as_str) != Some(url.as_str())
-                    || actual.get("command").is_some_and(|value| !value.is_null())
-                    || actual.get("http_headers") != Some(&json!(headers))
-                    || actual.get("enabled").and_then(Value::as_bool) != Some(true)
-                {
-                    bail!("Codex MCP server {name} has a mixed or incorrect HTTP transport");
-                }
-            }
+            } => json!({
+                "command": command,
+                "args": args,
+                "cwd": cwd,
+                "env": env,
+                "enabled": true,
+            }),
+            McpServerDefinition::StreamableHttp { url, headers } => json!({
+                "url": url,
+                "http_headers": headers,
+                "enabled": true,
+            }),
+        };
+        servers.insert(name.clone(), value);
+    }
+    Ok(json!({"mcp_servers": servers}))
+}
+
+fn native_mcp_server_names_from_config_read(
+    response: &Value,
+) -> Result<std::collections::BTreeSet<String>> {
+    if let Some(config) = response.get("config").and_then(Value::as_object) {
+        return Ok(config
+            .get("mcp_servers")
+            .or_else(|| config.get("mcpServers"))
+            .and_then(Value::as_object)
+            .map(|servers| servers.keys().cloned().collect())
+            .unwrap_or_default());
+    }
+    let layers = response
+        .get("layers")
+        .and_then(Value::as_array)
+        .context("Codex config/read omitted effective config and layers")?;
+    let mut names = std::collections::BTreeSet::new();
+    for layer in layers {
+        if layer
+            .get("disabledReason")
+            .is_some_and(|reason| !reason.is_null())
+        {
+            continue;
+        }
+        if let Some(servers) = layer
+            .get("config")
+            .and_then(Value::as_object)
+            .and_then(|config| {
+                config
+                    .get("mcp_servers")
+                    .or_else(|| config.get("mcpServers"))
+            })
+            .and_then(Value::as_object)
+        {
+            names.extend(servers.keys().cloned());
         }
     }
-    Ok(())
-}
-
-fn layer_has_mcp_servers(config: Option<&Value>) -> bool {
-    mcp_server_object(config).is_some_and(|servers| !servers.is_empty())
-}
-
-fn mcp_server_object(config: Option<&Value>) -> Option<&serde_json::Map<String, Value>> {
-    let config = config?.as_object()?;
-    config
-        .get("mcp_servers")
-        .or_else(|| config.get("mcpServers"))
-        .and_then(Value::as_object)
+    Ok(names)
 }
 
 pub struct CodexCliRuntimeAdapter {
     agent_run_runtimes: Mutex<HashMap<String, Arc<CodexRuntime>>>,
     runtime_creation: Mutex<()>,
-    home_manager: CodexHomeManager,
     incoming: mpsc::UnboundedSender<CodexIncoming>,
     fleet: Arc<AgentRuntimeFleetManager>,
 }
@@ -1114,7 +1014,6 @@ pub struct CodexAgentRunRuntimeRequest<'a> {
     pub agent_profile_id: &'a str,
     pub cwd: &'a Path,
     pub frozen_runtime: &'a FrozenAgentRuntimeConfig,
-    pub external_mcp_servers: &'a BTreeMap<String, McpServerDefinition>,
     pub runtime_compatibility_digest: &'a str,
     pub builtin_tools: &'a BuiltinToolProcessConfig,
 }
@@ -1143,13 +1042,11 @@ impl AgentRuntimeAdapter for CodexCliRuntimeAdapter {
 impl CodexCliRuntimeAdapter {
     pub fn new(
         incoming: mpsc::UnboundedSender<CodexIncoming>,
-        home_manager: CodexHomeManager,
         fleet: Arc<AgentRuntimeFleetManager>,
     ) -> Self {
         Self {
             agent_run_runtimes: Mutex::new(HashMap::new()),
             runtime_creation: Mutex::new(()),
-            home_manager,
             incoming,
             fleet,
         }
@@ -1165,13 +1062,9 @@ impl CodexCliRuntimeAdapter {
         }
         let (incoming, mut receiver) = mpsc::unbounded_channel();
         let owner_id = format!("context-compaction:{}", uuid::Uuid::new_v4());
-        let home_manager = CodexHomeManager::new(cwd)?;
-        let prepared_home = home_manager.prepare_job_home(cwd, cwd)?;
         let host = CodexHost::spawn_with_executable(
             Path::new(&frozen_runtime.executable_path),
             cwd,
-            prepared_home,
-            &BTreeMap::new(),
             incoming,
             None,
         )
@@ -1183,7 +1076,6 @@ impl CodexCliRuntimeAdapter {
             },
             None,
             host,
-            true,
         );
         let model = frozen_runtime.model.model_id.as_str();
         let selected_model = (model != "default").then_some(model);
@@ -1274,7 +1166,6 @@ impl CodexCliRuntimeAdapter {
             agent_profile_id,
             cwd,
             frozen_runtime,
-            external_mcp_servers,
             runtime_compatibility_digest,
             builtin_tools,
         } = request;
@@ -1313,17 +1204,9 @@ impl CodexCliRuntimeAdapter {
                     },
                 },
                 || async {
-                    let prepared_home = self.home_manager.prepare_agent_run_home(
-                        camp_id,
-                        agent_profile_id,
-                        cwd,
-                        external_mcp_servers,
-                    )?;
                     let host = CodexHost::spawn_with_executable(
                         Path::new(&frozen_runtime.executable_path),
                         cwd,
-                        prepared_home,
-                        external_mcp_servers,
                         self.incoming.clone(),
                         Some(builtin_tools.clone()),
                     )
@@ -1332,16 +1215,6 @@ impl CodexCliRuntimeAdapter {
                 },
             )
             .await?;
-        let home_created_or_rebuilt = !fleet_lease.reused
-            && fleet_lease
-                .host
-                .clone()
-                .into_codex()?
-                .prepared_home
-                .lock()
-                .await
-                .as_ref()
-                .is_some_and(|home| home.created_or_rebuilt);
         let _process_id = &fleet_lease.process_id;
         let _residency = fleet_lease.residency;
         let host = fleet_lease.host.into_codex()?;
@@ -1352,7 +1225,6 @@ impl CodexCliRuntimeAdapter {
             },
             Some(camp_id.to_string()),
             host,
-            home_created_or_rebuilt,
         );
         self.agent_run_runtimes
             .lock()
@@ -1473,7 +1345,6 @@ impl CodexCliRuntimeAdapter {
 pub(crate) fn runtime_compatibility_digest(
     frozen_runtime: &FrozenAgentRuntimeConfig,
     cwd: &Path,
-    external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
     attachment_access_root: &Path,
 ) -> Result<String> {
     let cwd = cwd
@@ -1485,7 +1356,6 @@ pub(crate) fn runtime_compatibility_digest(
         "runtimeConfigDigest": frozen_runtime.config_digest,
         "hostConfigDigest": frozen_runtime.host_config_digest,
         "executionRoot": cwd,
-        "externalMcpServers": external_mcp_servers,
         "builtinToolContractVersion": BUILTIN_TOOL_CONTRACT_VERSION,
         "builtinToolCatalogDigest": builtin_tool_catalog_digest()?,
         "attachmentAccessRoot": attachment_access_root,
@@ -2055,15 +1925,6 @@ pub fn completed_turn(params: &Value) -> Result<CompletedTurn> {
 mod tests {
     use super::*;
 
-    fn config_layer(source: Value, disabled_reason: Option<&str>, config: Value) -> Value {
-        json!({
-            "name": source,
-            "version": "test",
-            "disabledReason": disabled_reason,
-            "config": config,
-        })
-    }
-
     fn bootstrap_thread_options<'a>(bootstrap: &'a str) -> CodexThreadStartOptions<'a> {
         CodexThreadStartOptions {
             developer_instructions: Some(bootstrap),
@@ -2100,127 +1961,48 @@ mod tests {
     }
 
     #[test]
-    fn isolated_config_verification_accepts_only_the_expected_user_mcp_layer() {
-        let directory = std::env::temp_dir().join(format!(
-            "rovai-codex-config-verify-test-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&directory).unwrap();
-        std::fs::write(directory.join("config.toml"), "mcp_servers = {}\n").unwrap();
-        let servers = BTreeMap::from([
-            (
-                "docs".to_string(),
-                McpServerDefinition::Stdio {
-                    command: "node".to_string(),
-                    args: vec!["server.mjs".to_string()],
-                    cwd: None,
-                    env: BTreeMap::new(),
-                },
-            ),
-            (
-                "remote".to_string(),
-                McpServerDefinition::StreamableHttp {
-                    url: "https://example.test/mcp".to_string(),
-                    headers: BTreeMap::new(),
-                },
-            ),
-        ]);
-        let response = json!({
+    fn config_read_discovery_collects_effective_native_names_and_ignores_disabled_layers() {
+        let effective = json!({
+            "config": {
+                "mcp_servers": {
+                    "docs": {"command": "node"},
+                    "remote": {"url": "https://example.test/mcp"}
+                }
+            }
+        });
+        assert_eq!(
+            native_mcp_server_names_from_config_read(&effective).unwrap(),
+            ["docs".to_string(), "remote".to_string()]
+                .into_iter()
+                .collect()
+        );
+
+        let layered = json!({
             "layers": [
-                config_layer(
-                    json!({"type": "user", "file": directory.join("config.toml")}),
-                    None,
-                    json!({
-                        "mcp_servers": {
-                            "docs": {
-                                "command": "node",
-                                "args": ["server.mjs"],
-                                "env": {},
-                                "enabled": true
-                            },
-                            "remote": {
-                                "url": "https://example.test/mcp",
-                                "http_headers": {},
-                                "enabled": true
-                            }
-                        }
-                    }),
-                ),
-                config_layer(
-                    json!({"type": "project", "dotCodexFolder": "/tmp/project/.codex"}),
-                    Some("project is untrusted"),
-                    json!({"mcp_servers": {"ambient": {"command": "bad"}}}),
-                ),
+                {"disabledReason": null, "config": {"mcp_servers": {"native": {}}}},
+                {"disabledReason": "disabled", "config": {"mcp_servers": {"ignored": {}}}}
             ]
         });
-        verify_config_read_response(&response, &directory, &servers).unwrap();
-        std::fs::remove_dir_all(directory).unwrap();
+        assert_eq!(
+            native_mcp_server_names_from_config_read(&layered).unwrap(),
+            ["native".to_string()].into_iter().collect()
+        );
     }
 
     #[test]
-    fn isolated_config_verification_rejects_project_and_managed_mcp_layers() {
-        let directory = std::env::temp_dir().join(format!(
-            "rovai-codex-config-reject-test-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&directory).unwrap();
-        std::fs::write(directory.join("config.toml"), "mcp_servers = {}\n").unwrap();
-        let user = config_layer(
-            json!({"type": "user", "file": directory.join("config.toml")}),
-            None,
-            json!({"mcp_servers": {}}),
-        );
-        let active_project = json!({
-            "layers": [
-                user.clone(),
-                config_layer(
-                    json!({"type": "project", "dotCodexFolder": "/tmp/project/.codex"}),
-                    None,
-                    json!({}),
-                )
-            ]
-        });
-        assert!(
-            verify_config_read_response(&active_project, &directory, &BTreeMap::new()).is_err()
-        );
-        let managed_mcp = json!({
-            "layers": [
-                user,
-                config_layer(
-                    json!({"type": "system", "file": "/etc/codex/config.toml"}),
-                    None,
-                    json!({"mcp_servers": {"ambient": {"url": "https://bad.test"}}}),
-                )
-            ]
-        });
-        assert!(verify_config_read_response(&managed_mcp, &directory, &BTreeMap::new()).is_err());
-        std::fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[tokio::test]
-    #[ignore = "manual local Runtime smoke"]
-    async fn isolated_config_real_runtime_smoke() {
-        let executable = crate::health::find_codex().expect("Codex CLI must be installed");
-        let directory = std::env::temp_dir().join(format!(
-            "rovai-codex-config-runtime-smoke-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&directory).unwrap();
-        let manager = CodexHomeManager::new(&directory).unwrap();
-        let prepared = manager.prepare_job_home(&directory, &directory).unwrap();
-        let (incoming, _receiver) = mpsc::unbounded_channel();
-        let host = CodexHost::spawn_with_executable(
-            &executable,
-            &directory,
-            prepared,
-            &BTreeMap::new(),
-            incoming,
-            None,
-        )
-        .await
+    fn session_config_contains_only_finalized_additive_servers() {
+        let config = codex_mcp_session_config(&BTreeMap::from([(
+            "rovai_docs".to_string(),
+            McpServerDefinition::StreamableHttp {
+                url: "https://example.test/mcp".to_string(),
+                headers: BTreeMap::new(),
+            },
+        )]))
         .unwrap();
-        host.shutdown().await;
-        std::fs::remove_dir_all(directory).unwrap();
+        assert_eq!(
+            config.pointer("/mcp_servers/rovai_docs/url"),
+            Some(&json!("https://example.test/mcp"))
+        );
     }
 
     #[tokio::test]
@@ -2274,7 +2056,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "manual local Runtime smoke"]
-    async fn agent_runs_use_distinct_processes_and_camp_member_homes() {
+    async fn agent_runs_use_distinct_processes_and_native_home_sessions() {
         let executable = crate::health::find_codex().expect("Codex CLI must be installed");
         let directory = std::env::temp_dir().join(format!(
             "rovai-codex-agent-run-process-smoke-{}",
@@ -2284,18 +2066,7 @@ mod tests {
         std::fs::create_dir_all(&workspace).unwrap();
         std::fs::write(
             workspace.join("AGENTS.md"),
-            "# Isolated Home smoke instruction\n",
-        )
-        .unwrap();
-        std::fs::create_dir_all(workspace.join(".codex")).unwrap();
-        std::fs::write(
-            workspace.join(".codex/config.toml"),
-            r#"
-model = "project-model-must-not-load"
-
-[mcp_servers.context7]
-command = "/usr/bin/false"
-"#,
+            "# Native Home smoke instruction\n",
         )
         .unwrap();
         let runtime_config = FrozenAgentRuntimeConfig {
@@ -2327,17 +2098,9 @@ command = "/usr/bin/false"
             host_config_digest: "smoke-host".to_string(),
             config_digest: "smoke-config".to_string(),
         };
-        let manager = CodexHomeManager::new(&directory).unwrap();
         let fleet = Arc::new(AgentRuntimeFleetManager::new(Default::default()));
         let (incoming, mut receiver) = mpsc::unbounded_channel();
-        let adapter = CodexCliRuntimeAdapter::new(incoming, manager, fleet);
-        let external_servers = BTreeMap::from([(
-            "context7".to_string(),
-            McpServerDefinition::StreamableHttp {
-                url: "https://mcp.context7.com/mcp".to_string(),
-                headers: BTreeMap::new(),
-            },
-        )]);
+        let adapter = CodexCliRuntimeAdapter::new(incoming, fleet);
         let first_builtin_tools = BuiltinToolProcessConfig::create(
             &executable,
             &directory.join("builtin.sock"),
@@ -2352,7 +2115,6 @@ command = "/usr/bin/false"
                 agent_profile_id: "agent-1",
                 cwd: &workspace,
                 frozen_runtime: &runtime_config,
-                external_mcp_servers: &external_servers,
                 runtime_compatibility_digest: "test-digest-agent-1",
                 builtin_tools: &first_builtin_tools,
             })
@@ -2372,14 +2134,12 @@ command = "/usr/bin/false"
                 agent_profile_id: "agent-2",
                 cwd: &workspace,
                 frozen_runtime: &runtime_config,
-                external_mcp_servers: &external_servers,
                 runtime_compatibility_digest: "test-digest-agent-2",
                 builtin_tools: &second_builtin_tools,
             })
             .await
             .unwrap();
         assert_ne!(first.process_id().await, second.process_id().await);
-        assert_ne!(first.home_path, second.home_path);
         let (start_method, start_request) = thread_start_or_resume_request(
             &workspace,
             None,
@@ -2456,7 +2216,6 @@ command = "/usr/bin/false"
         .await
         .unwrap();
         let first_host = first.host_instance_id().to_string();
-        let first_home = first.home_path.clone();
         adapter.complete_agent_run("run-1", 1).await;
         let successor_builtin_tools = BuiltinToolProcessConfig::create(
             &executable,
@@ -2472,13 +2231,11 @@ command = "/usr/bin/false"
                 agent_profile_id: "agent-1",
                 cwd: &workspace,
                 frozen_runtime: &runtime_config,
-                external_mcp_servers: &external_servers,
                 runtime_compatibility_digest: "test-digest-agent-1",
                 builtin_tools: &successor_builtin_tools,
             })
             .await
             .unwrap();
-        assert_eq!(successor.home_path, first_home);
         assert_eq!(successor.host_instance_id(), first_host);
         let (resume_method, resume_request) = thread_start_or_resume_request(
             &workspace,

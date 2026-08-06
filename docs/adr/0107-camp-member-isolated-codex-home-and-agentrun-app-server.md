@@ -2,15 +2,17 @@
 document_type: adr
 id: ADR-0107
 title: Camp-Member Isolated Codex Home and AgentRun-Scoped App Server
-status: accepted
+status: superseded
 date: 2026-08-05
 decision_scope: cross-version
 source_version: v0.39
 supersedes: []
-superseded_by: null
+superseded_by: ADR-0126
 ---
 
 # ADR-0107: Camp-Member Isolated Codex Home and AgentRun-Scoped App Server
+
+> 本决策已由 [ADR-0126](0126-codex-native-home-and-external-session-ownership.md) 替代。
 
 > 本决策局部替代 [ADR-0018](0018-file-backed-mcp-library-runtime-projection.md) 对 Codex
 > 使用终态即删除临时 MCP 文件的要求，以及

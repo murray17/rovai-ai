@@ -2495,6 +2495,45 @@ describe('task event projections', () => {
     expect(markup).not.toContain('<strong>记忆</strong>')
   })
 
+  it('shows Antigravity external MCP support only in diagnostics', () => {
+    const health: HealthStatus = {
+      core: { ok: true, version: '0.0.1', dataDir: '/tmp/rovai' },
+      database: { ok: true, path: '/tmp/rovai/rovai.db' },
+      git: { installed: true, version: 'git version 2.0' },
+      runtimeCatalog: [],
+      runtimeAvailability: [productAvailability('antigravity-app', 'ready')],
+      searchEnvironment: {
+        generation: 1,
+        createdAt: '2026-08-06T00:00:00Z',
+        pathEntryCount: 1,
+        shell: {
+          status: 'captured',
+          interactive: false,
+          shellName: 'zsh',
+          entryCount: 1,
+          elapsedMillis: 1
+        }
+      }
+    }
+    const renderSettings = (section: 'diagnostics' | 'runtime' | 'mcp') => renderToStaticMarkup(createElement(SettingsView, {
+      appearance: { preference: 'system', resolvedTheme: 'day' },
+      health,
+      agents: [],
+      installations: [],
+      readyCount: 1,
+      busy: null,
+      section,
+      onRefresh: () => undefined,
+      onExport: () => undefined,
+      onReload: async () => undefined,
+      onThemeChange: () => undefined
+    }))
+
+    expect(renderSettings('diagnostics')).toContain('MCP Unsupported（保留原生配置）')
+    expect(renderSettings('runtime')).not.toContain('MCP Unsupported')
+    expect(renderSettings('mcp')).not.toContain('MCP Unsupported')
+  })
+
   it('renders long-term memory as a first-class scope and governance workbench', () => {
     const markup = renderToStaticMarkup(createElement(MemoryLibrary, {
       agents: [],

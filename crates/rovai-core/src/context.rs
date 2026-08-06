@@ -23,7 +23,7 @@ use crate::{
     },
     db::Database,
     managed_blob::ManagedBlobStore,
-    mcp_projection::{McpExposureSnapshot, McpExposureStatus, PreparedMcpProjection},
+    mcp_projection::{McpExposureSnapshot, PreparedMcpProjection},
     memory::{MemoryScopeKind, MemoryService, RelationshipDirection},
     skill::SkillLibraryService,
     skill_projection::{PreparedSkillExposure, SkillExposureSnapshot, SkillProjectionReconciler},
@@ -542,36 +542,6 @@ impl ContextService {
         )
     }
 
-    pub fn finalize_mcp_exposure(
-        &self,
-        database: &mut Database,
-        agent_run_id: &str,
-        prepared: &PreparedMcpProjection,
-    ) -> Result<()> {
-        let expected_digest = canonical_json_digest(&serde_json::to_value(&prepared.snapshot)?)?;
-        if expected_digest != prepared.exposure_digest {
-            anyhow::bail!("final MCP exposure digest is invalid");
-        }
-        let exposure_json = serde_json::to_string(&prepared.snapshot)?;
-        let changed = database.connection_mut().execute(
-            r#"
-            UPDATE context_manifest
-            SET mcp_exposure_json = ?1, mcp_exposure_digest = ?2
-            WHERE agent_run_id = ?3 AND mcp_projection_digest = ?4
-            "#,
-            rusqlite::params![
-                exposure_json,
-                prepared.exposure_digest,
-                agent_run_id,
-                prepared.projection_digest,
-            ],
-        )?;
-        if changed > 1 {
-            anyhow::bail!("multiple ContextManifests matched one AgentRun MCP exposure");
-        }
-        Ok(())
-    }
-
     pub fn prepare_skill_exposure(
         &self,
         database: &mut Database,
@@ -821,7 +791,6 @@ impl ContextService {
             coverage_baseline,
             shared_messages: &rendered_shared,
             run_notices: &run_notices,
-            mcp_exposure,
             current_input: &current_input_value,
         })?;
         let runtime_payload = if bootstrap_in_runtime_payload {
@@ -2939,7 +2908,6 @@ struct RenderPayloadInput<'a> {
     coverage_baseline: Option<i64>,
     shared_messages: &'a [SharedMessage],
     run_notices: &'a [RunNotice],
-    mcp_exposure: &'a McpExposureSnapshot,
     current_input: &'a Value,
 }
 
@@ -2992,30 +2960,6 @@ fn render_payload(input: RenderPayloadInput<'_>) -> Result<String> {
             &mut output,
             "RUN_NOTICES",
             &serde_json::to_value(input.run_notices)?,
-        )?;
-    }
-    let runtime_aliases = input
-        .mcp_exposure
-        .servers
-        .iter()
-        .filter(|server| {
-            server.status == McpExposureStatus::Ready && server.runtime_name != server.name
-        })
-        .map(|server| {
-            json!({
-                "logicalName": server.name,
-                "runtimeName": server.runtime_name,
-            })
-        })
-        .collect::<Vec<_>>();
-    if !runtime_aliases.is_empty() {
-        append_json_section(
-            &mut output,
-            "MCP_RUNTIME_NAMES",
-            &json!({
-                "instruction": "CURRENT_INPUT uses logical MCP server names. For each listed server, discover and invoke the exact runtimeName exposed to this Runtime; do not substitute a Runtime-native server with the logical name.",
-                "servers": runtime_aliases,
-            }),
         )?;
     }
     append_json_section(&mut output, "CURRENT_INPUT", input.current_input)?;
@@ -4824,81 +4768,6 @@ mod tests {
         run_id: String,
         execution_epoch: i64,
         native_binding_id: String,
-    }
-
-    #[test]
-    fn dynamic_payload_exposes_only_ready_mcp_runtime_aliases() {
-        let exposure = McpExposureSnapshot {
-            servers: vec![
-                crate::mcp_projection::McpExposureEntry {
-                    server_id: "server-1".to_string(),
-                    name: "rovai_smoke".to_string(),
-                    runtime_name: "rovai__6f589c15bba842e5".to_string(),
-                    transport: "stdio".to_string(),
-                    config_digest: "sha256:ready".to_string(),
-                    status: McpExposureStatus::Ready,
-                    reason: None,
-                },
-                crate::mcp_projection::McpExposureEntry {
-                    server_id: "server-2".to_string(),
-                    name: "disabled".to_string(),
-                    runtime_name: "private-disabled".to_string(),
-                    transport: "stdio".to_string(),
-                    config_digest: "sha256:disabled".to_string(),
-                    status: McpExposureStatus::Disabled,
-                    reason: Some("disabled".to_string()),
-                },
-            ],
-            ..McpExposureSnapshot::default()
-        };
-        let current_input = json!({"body": "Call rovai_smoke"});
-        let payload = render_payload(RenderPayloadInput {
-            collaboration_state: None,
-            summaries: &[],
-            coverage_baseline: None,
-            shared_messages: &[],
-            run_notices: &[],
-            mcp_exposure: &exposure,
-            current_input: &current_input,
-        })
-        .unwrap();
-
-        assert!(payload.contains("[MCP_RUNTIME_NAMES]"));
-        assert!(payload.contains("\"logicalName\": \"rovai_smoke\""));
-        assert!(payload.contains("\"runtimeName\": \"rovai__6f589c15bba842e5\""));
-        assert!(!payload.contains("private-disabled"));
-        assert!(
-            payload.find("[MCP_RUNTIME_NAMES]").unwrap() < payload.find("[CURRENT_INPUT]").unwrap()
-        );
-    }
-
-    #[test]
-    fn dynamic_payload_omits_mcp_runtime_names_without_aliases() {
-        let exposure = McpExposureSnapshot {
-            servers: vec![crate::mcp_projection::McpExposureEntry {
-                server_id: "server-1".to_string(),
-                name: "docs".to_string(),
-                runtime_name: "docs".to_string(),
-                transport: "stdio".to_string(),
-                config_digest: "sha256:ready".to_string(),
-                status: McpExposureStatus::Ready,
-                reason: None,
-            }],
-            ..McpExposureSnapshot::default()
-        };
-        let current_input = json!({"body": "Read docs"});
-        let payload = render_payload(RenderPayloadInput {
-            collaboration_state: None,
-            summaries: &[],
-            coverage_baseline: None,
-            shared_messages: &[],
-            run_notices: &[],
-            mcp_exposure: &exposure,
-            current_input: &current_input,
-        })
-        .unwrap();
-
-        assert!(!payload.contains("[MCP_RUNTIME_NAMES]"));
     }
 
     #[test]

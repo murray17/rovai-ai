@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.42
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -10,7 +10,7 @@ last_updated: 2026-08-06
 
 # Rovai-ai v0.42 Built-in Tool CLI-only Transport
 
-> 状态：实施与验收完成。v0.42 对 Rovai-owned built-in operations 执行一次本地 clean break：
+> 状态：历史版本，实施与验收完成。v0.42 对 Rovai-owned built-in operations 执行一次本地 clean break：
 > 九个正式 Runtime 统一通过 bundled `rovai` CLI 调用，旧内置 MCP transport 不保留回退、
 > 兼容、迁移或自动清理逻辑。
 >

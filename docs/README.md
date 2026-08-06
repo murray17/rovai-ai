@@ -1,7 +1,7 @@
 ---
 document_type: documentation-index
 authority: documentation-routing
-current_version: v0.42
+current_version: v0.43
 last_updated: 2026-08-06
 ---
 
@@ -14,7 +14,7 @@ last_updated: 2026-08-06
 | 任务 | 必读资料 |
 |---|---|
 | 判断长期架构约束或修改领域、持久化、安全、Runtime 边界 | [ADR 索引](adr/README.md)及相关有效 ADR |
-| 判断当前版本目标、范围、进度或验收口径 | [当前版本 v0.42](versions/v0.42/README.md)及[实施计划](versions/v0.42/implementation-plan.md) |
+| 判断当前版本目标、范围、进度或验收口径 | [当前版本 v0.43](versions/v0.43/README.md)及[实施计划](versions/v0.43/implementation-plan.md) |
 | 查询已接入与候选 Agent Runtime 的实测兼容性 | [Runtime 兼容性清单](runtime-compatibility.md) |
 | 新增或修改 Runtime Activity 映射规则 | [Runtime Activity Mapping 维护指南](runtime-activity/README.md)及[Registry](runtime-activity/registry.md) |
 | 修改内置 Agent CLI、IPC、Envelope、receipt 或幂等合同 | [Built-in Tool Transport v1 合同](contracts/builtin-tool-transport-v1.md) |

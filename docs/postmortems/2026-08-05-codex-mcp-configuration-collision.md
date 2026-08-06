@@ -7,10 +7,16 @@ systems:
   - codex-runtime-adapter
   - mcp-runtime-projection
   - macos-packaged-app
-last_updated: 2026-08-05
+last_updated: 2026-08-06
 ---
 
 # Codex MCP Configuration Collision and AgentRun Startup Failure
+
+> Current architecture note (2026-08-06): the isolated-Home remediation below is the historical
+> incident resolution, not the current product contract. v0.43 supersedes it with Codex Native Home,
+> app-server `config/read`, `NativeWinsSkip`, and thread-scoped additive MCP; see
+> [ADR-0125](../adr/0125-runtime-native-additive-external-mcp-projection.md) and
+> [ADR-0126](../adr/0126-codex-native-home-and-external-session-ownership.md).
 
 ## Executive summary
 

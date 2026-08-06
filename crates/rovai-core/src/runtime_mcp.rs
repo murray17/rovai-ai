@@ -10,7 +10,7 @@ use rovai_core::mcp::McpServerDefinition;
 use serde_json::{Map, Value, json};
 
 const COPILOT_CONFIG_PREFIX: &str = "copilot-mcp-";
-const STRICT_CONFIG_PREFIX: &str = "strict-mcp-";
+const ADDITIVE_CONFIG_PREFIX: &str = "additional-mcp-";
 const CONFIG_SUFFIX: &str = ".json";
 
 #[derive(Debug, Clone, Copy)]
@@ -19,13 +19,13 @@ enum NativeFileDialect {
     Copilot,
 }
 
-pub(crate) fn write_ephemeral_strict_mcp_config(
+pub(crate) fn write_ephemeral_additive_mcp_config(
     private_runtime_dir: &Path,
     external_servers: &BTreeMap<String, McpServerDefinition>,
 ) -> Result<EphemeralMcpConfigFile> {
     write_ephemeral_mcp_config(
         private_runtime_dir,
-        STRICT_CONFIG_PREFIX,
+        ADDITIVE_CONFIG_PREFIX,
         external_servers,
         NativeFileDialect::Standard,
     )
@@ -158,7 +158,7 @@ pub(crate) fn remove_stale_mcp_configs(private_runtime_dir: &Path) -> Result<()>
         let name = entry.file_name();
         let name = name.to_string_lossy();
         if entry.file_type()?.is_file()
-            && (name.starts_with(COPILOT_CONFIG_PREFIX) || name.starts_with(STRICT_CONFIG_PREFIX))
+            && (name.starts_with(COPILOT_CONFIG_PREFIX) || name.starts_with(ADDITIVE_CONFIG_PREFIX))
             && name.ends_with(CONFIG_SUFFIX)
         {
             fs::remove_file(entry.path())
@@ -232,7 +232,7 @@ mod tests {
             std::env::temp_dir().join(format!("rovai-runtime-mcp-test-{}", uuid::Uuid::new_v4()));
         let files = [
             write_ephemeral_copilot_config(&directory, &external_servers()).unwrap(),
-            write_ephemeral_strict_mcp_config(&directory, &external_servers()).unwrap(),
+            write_ephemeral_additive_mcp_config(&directory, &external_servers()).unwrap(),
         ];
         for file in files {
             let path = file.path().to_path_buf();

@@ -373,12 +373,14 @@ function mcpExposurePresentation(status: string): {
   switch (status) {
     case 'ready':
       return { label: '本轮可用', tone: 'success', mark: '✓' }
+    case 'skipped_native_name_conflict':
+      return { label: '同名原生配置优先', tone: 'attention', mark: '↘' }
     case 'disabled':
       return { label: '已停用', tone: 'neutral', mark: '–' }
     case 'unassigned':
       return { label: '未分配给队员', tone: 'neutral', mark: '–' }
     case 'adapter_unsupported':
-      return { label: 'Agent 运行时不支持', tone: 'attention', mark: '◐' }
+      return { label: '本轮未投影', tone: 'neutral', mark: '–' }
     case 'missing_environment':
       return { label: '缺少环境变量', tone: 'danger', mark: '!' }
     default:
@@ -1479,7 +1481,7 @@ export function CampWorkspace({
                             <div>
                               <strong>{server.name}</strong>
                               <small>{server.transport === 'stdio' ? 'STDIO' : 'Streamable HTTP'} · {presentation.label}</small>
-                              {server.reason && <code title={server.reason}>{server.reason}</code>}
+                              {server.reason && server.status !== 'adapter_unsupported' && <code title={server.reason}>{server.reason}</code>}
                             </div>
                             <code title={server.configDigest}>{shortIdentity(server.configDigest)}</code>
                           </div>

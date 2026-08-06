@@ -983,11 +983,14 @@ export interface SkillExposureSnapshot {
 }
 
 export interface McpExposureEntry {
+  serverId: string
   name: string
+  runtimeName: string
   transport: 'stdio' | 'streamable_http'
   configDigest: string
   status:
     | 'ready'
+    | 'skipped_native_name_conflict'
     | 'disabled'
     | 'unassigned'
     | 'adapter_unsupported'
@@ -997,9 +1000,11 @@ export interface McpExposureEntry {
 }
 
 export interface McpExposureSnapshot {
-  schemaVersion: 1
+  schemaVersion: 2
   configDigest: string
   configStatus: 'ready' | 'invalid'
+  projectionMode: 'additive_per_run' | 'unsupported'
+  sameNamePolicy: 'native_wins_skip' | 'rovai_wins' | null
   warnings: string[]
   servers: McpExposureEntry[]
 }

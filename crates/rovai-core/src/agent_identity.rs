@@ -1,9 +1,5 @@
-use std::{collections::BTreeMap, path::Path};
-
 use anyhow::{Context, Result, bail};
 use rusqlite::{Transaction, params};
-
-use crate::codex_home;
 
 pub const LUOKE_AGENT_ID: &str = "agent_1";
 pub const MUWA_AGENT_ID: &str = "agent_2";
@@ -53,18 +49,6 @@ pub fn allocate_agent_id(transaction: &Transaction<'_>) -> Result<String> {
         params![next],
     )?;
     format_agent_id(ordinal)
-}
-
-pub fn migrate_codex_home_agent_ids(
-    data_dir: &Path,
-    mappings: &BTreeMap<String, String>,
-) -> Result<()> {
-    if mappings.is_empty() {
-        return Ok(());
-    }
-    codex_home::migrate_agent_profile_ids(data_dir, mappings)
-        .context("failed to migrate Camp-member Codex Home Agent IDs")?;
-    Ok(())
 }
 
 #[cfg(test)]

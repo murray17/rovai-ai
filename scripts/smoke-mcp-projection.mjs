@@ -62,16 +62,16 @@ try {
     const adapterMarker = adapterName(adapterKind)
     const expected = adapterKind === 'codex-cli'
       ? [
-          `rovai-projection:${adapterMarker}`,
-          `rovai-projection-http:${adapterMarker}-http`,
-          `rovai-projection-stdio:${adapterMarker}-stdio`
+          `runtime-native:${adapterMarker}`,
+          `runtime-native:${adapterMarker}-http`,
+          `runtime-native-http:${adapterMarker}-stdio`
         ]
       : [`rovai-projection:${adapterMarker}`]
     const forbidden = adapterKind === 'codex-cli'
       ? [
-          `runtime-native:${adapterMarker}`,
-          `runtime-native:${adapterMarker}-http`,
-          `runtime-native-http:${adapterMarker}-stdio`
+          `rovai-projection:${adapterMarker}`,
+          `rovai-projection-http:${adapterMarker}-http`,
+          `rovai-projection-stdio:${adapterMarker}-stdio`
         ]
       : [`runtime-native:${adapterMarker}`]
     const startedAt = Date.now()
@@ -93,11 +93,10 @@ try {
       : [serverName]
     const exposures = expectedServers.map((name) => result.exposure?.servers?.find((server) => server.name === name))
     for (const exposure of exposures) {
-      assert(exposure?.status === 'ready', `${adapterKind} did not freeze a ready MCP exposure: ${JSON.stringify(result.exposure)}`)
+      const expectedStatus = adapterKind === 'codex-cli' ? 'skipped_native_name_conflict' : 'ready'
+      assert(exposure?.status === expectedStatus, `${adapterKind} did not freeze the expected MCP exposure status: ${JSON.stringify(result.exposure)}`)
       assert(
-        adapterKind === 'copilot-cli'
-          ? exposure.runtimeName.startsWith('rovai__')
-          : exposure.runtimeName === exposure.name,
+        exposure.runtimeName === exposure.name,
         `${adapterKind} froze an invalid Runtime MCP name: ${JSON.stringify(exposure)}`
       )
     }
@@ -114,7 +113,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    semantics: 'Rovai projection overrides the same-name Runtime-native MCP',
+    semantics: 'Runtime-native config is preserved; Codex skips collisions and other additive adapters give Rovai the whole-definition precedence',
     results
   }, null, 2))
 } finally {
@@ -264,10 +263,10 @@ async function configureRuntime(request, adapterKind) {
 async function runProjectedTool(request, workspace, adapterKind, adapterMarker, events) {
   const toolInstructions = adapterKind === 'codex-cli'
     ? [
-        `Call \`${serverName}.echo\` exactly once with text \`${adapterMarker}\`.`,
-        `Call \`${projectedHttpServerName}.echo\` exactly once with text \`${adapterMarker}-http\`.`,
-        `Call \`${projectedStdioServerName}.echo\` exactly once with text \`${adapterMarker}-stdio\`.`,
-        'Return all three tool results.'
+        `Call the Runtime-native MCP server named \`${serverName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}\`.`,
+        `Call the Runtime-native MCP server named \`${projectedHttpServerName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}-http\`.`,
+        `Call the Runtime-native MCP server named \`${projectedStdioServerName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}-stdio\`.`,
+        'Return all three tool results. The assigned Rovai definitions have the same names and must be skipped.'
       ]
     : [
         `Call the assigned MCP server named \`${serverName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}\`.`,
@@ -276,11 +275,11 @@ async function runProjectedTool(request, workspace, adapterKind, adapterMarker, 
   const created = await createConfiguredCampAndSend(request, {
     commandId: crypto.randomUUID(),
     workspace,
-    body: [...toolInstructions, 'Do not use a Runtime-native server with the same name.'].join('\n'),
+    body: toolInstructions.join('\n'),
     address: { mode: 'explicit', agentProfileIds: ['agent_1'] },
-    purpose: `Verify ${adapterKind} gives the frozen Rovai MCP Projection precedence over a same-name Runtime-native MCP.`,
+    purpose: `Verify ${adapterKind} preserves Runtime-native MCP and applies its declared same-name policy.`,
     expectedOutput: adapterKind === 'codex-cli'
-      ? `All three Rovai projection markers for ${adapterMarker}`
+      ? `All three Runtime-native markers for ${adapterMarker}`
       : `rovai-projection:${adapterMarker}`
   })
   if (created.status !== 'accepted' || !created.payload?.agentRunIds?.[0]) {

@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { AgentProfile, McpServerView } from '@contracts'
 import {
+  MemberMcpCard,
   McpSettings,
   importCompatibilityLabel,
   mcpTransportLabel
@@ -45,6 +46,38 @@ describe('MCP settings', () => {
     expect(importCompatibilityLabel('needs_input', 'none')).toContain('补充')
     expect(importCompatibilityLabel('portable', 'name_conflict')).toBe('名称冲突')
     expect(importCompatibilityLabel('unsupported', 'none')).toBe('不支持自动导入')
+  })
+
+  it('keeps MCP assignment neutral for an Antigravity member', () => {
+    const antigravity = {
+      ...agent(),
+      runtimeSelection: { adapterKind: 'antigravity-app' as const }
+    }
+    const server: McpServerView = {
+      serverId: '0241f33e-6ea5-4468-9f55-b048ffbbfdbf',
+      transport: 'stdio',
+      name: 'docs',
+      endpoint: 'node server.mjs',
+      enabled: true,
+      assignedAgentProfileIds: [],
+      source: 'user',
+      presetId: null,
+      riskLevel: 'standard',
+      riskAcknowledged: false,
+      definitionJson: '{"mcpServers":{"docs":{"command":"node"}}}'
+    }
+    const markup = renderToStaticMarkup(createElement(MemberMcpCard, {
+      agent: antigravity,
+      servers: [server],
+      busy: null,
+      disabled: false,
+      onAssignment: () => undefined
+    }))
+
+    expect(markup).toContain('<b>docs</b>')
+    expect(markup).toContain('type="checkbox"')
+    expect(markup).not.toContain('disabled=""')
+    expect(markup).not.toContain('Unsupported')
   })
 })
 

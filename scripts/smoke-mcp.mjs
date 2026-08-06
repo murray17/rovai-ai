@@ -73,7 +73,6 @@ async function runCodex({ node, fixture, prompt, temporary }) {
   const table = `{rovai_smoke={command=${tomlString(node)},args=[${tomlString(fixture)}],default_tools_approval_mode="approve"}}`
   const output = await run('codex', [
     'exec',
-    '--ignore-user-config',
     '--ephemeral',
     '--sandbox', 'read-only',
     '--color', 'never',
@@ -105,14 +104,12 @@ async function runClaude({ node, fixture, prompt, temporary }) {
     '--model', process.env.ROVAI_MCP_CLAUDE_MODEL ?? 'haiku',
     '--max-budget-usd', process.env.ROVAI_MCP_CLAUDE_BUDGET ?? '0.12',
     '--mcp-config', config,
-    '--strict-mcp-config',
     '--allowedTools=mcp__rovai_smoke__echo'
   ], {}, prompt)
   return { output, version: await run('claude', ['--version']) }
 }
 
 async function runOpenCode({ node, fixture, prompt, temporary }) {
-  const xdg = join(temporary, 'opencode-config')
   const config = JSON.stringify({
     permission: 'allow',
     mcp: {
@@ -125,23 +122,16 @@ async function runOpenCode({ node, fixture, prompt, temporary }) {
   })
   const output = await run('opencode', [
     'run',
-    '--pure',
     '--model', process.env.ROVAI_MCP_OPENCODE_MODEL ?? 'opencode/mimo-v2.5-free',
     '--format', 'json',
     prompt
   ], {
-    XDG_CONFIG_HOME: xdg,
-    OPENCODE_DISABLE_PROJECT_CONFIG: 'true',
-    OPENCODE_DISABLE_DEFAULT_PLUGINS: 'true',
     OPENCODE_CONFIG_CONTENT: config
   })
   return { output, version: await run('opencode', ['--version']) }
 }
 
 async function runCopilot({ node, fixture, prompt }) {
-  const discovered = JSON.parse(await run('copilot', ['mcp', 'list', '--json']))
-  const disable = Object.keys(discovered.mcpServers ?? {})
-    .flatMap((name) => ['--disable-mcp-server', name])
   const config = JSON.stringify({
     mcpServers: {
       rovai_smoke: {
@@ -153,8 +143,6 @@ async function runCopilot({ node, fixture, prompt }) {
     }
   })
   const output = await run('copilot', [
-    '--disable-builtin-mcps',
-    ...disable,
     '--additional-mcp-config', config,
     '--allow-all-tools',
     '--no-custom-instructions',
@@ -169,12 +157,11 @@ async function runCopilot({ node, fixture, prompt }) {
 }
 
 async function runCodeBuddy({ node, fixture, prompt, temporary }) {
-  const config = await writeStrictConfig(temporary, 'codebuddy', node, fixture)
+  const config = await writeAdditiveConfig(temporary, 'codebuddy', node, fixture)
   const output = await run('codebuddy', [
     '--print',
     '--output-format', 'json',
     '--permission-mode', 'bypassPermissions',
-    '--strict-mcp-config',
     '--mcp-config', config,
     '--allowedTools=mcp__rovai_smoke__echo',
     '--no-session-persistence',
@@ -184,18 +171,17 @@ async function runCodeBuddy({ node, fixture, prompt, temporary }) {
 }
 
 async function runQwen({ node, fixture, prompt, temporary }) {
-  const config = await writeStrictConfig(temporary, 'qwen', node, fixture)
+  const config = await writeAdditiveConfig(temporary, 'qwen', node, fixture)
   const output = await run('qwen', [
     '--prompt', prompt,
     '--output-format', 'json',
     '--approval-mode', 'yolo',
-    '--mcp-config', config,
-    '--allowed-mcp-server-names', 'rovai_smoke'
+    '--mcp-config', config
   ])
   return { output, version: await run('qwen', ['--version']) }
 }
 
-async function writeStrictConfig(temporary, runtime, node, fixture) {
+async function writeAdditiveConfig(temporary, runtime, node, fixture) {
   const config = join(temporary, `${runtime}-mcp.json`)
   await writeFile(config, `${JSON.stringify({
     mcpServers: {

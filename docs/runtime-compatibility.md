@@ -46,15 +46,22 @@ transport 结论，也不把特定模型固定为产品要求。
 
 ## External MCP 兼容性
 
-External MCP Library、Assignment 与 Runtime-native Projection 保持独立。以下是此前完成过
-External MCP 精确投影复核的 ACP Runtime；它们不再承担 Rovai built-in operations：
+External MCP Library、Assignment 与 Runtime-native Projection 保持独立。v0.43 已按
+[ADR-0125](adr/0125-runtime-native-additive-external-mcp-projection.md) 删除精确替换模型；下表记录
+当前实现通道。代码与确定性测试已经通过，原生不同名保留、同名整项优先和真实 tool call 仍须
+完成 Checkpoint 7 实机矩阵后才能作为发布证据。
 
-| Runtime | 历史验证版本 | External MCP 证据 | 当前边界 |
-|---|---:|---|---|
-| Kiro CLI | 2.15.1 | 私有 Custom Agent、`includeMcpJson: false`、同名投影 marker | 仅 External MCP |
-| Qoder CLI | 1.1.14 | `--acp --strict-mcp-config`、私有 MCP 文件与 allowlist | 仅 External MCP |
-| CodeBuddy | 2.132.0 | `--acp --strict-mcp-config`、私有 MCP 文件 | 仅 External MCP |
-| Qwen Code | 0.21.1 | `--acp`、CLI MCP config/server allowlist | 仅 External MCP |
+| Runtime | Projection / 同名策略 | 当前动态通道 | 实机发布证据 |
+|---|---|---|---|
+| Codex CLI | `AdditivePerRun` / `NativeWinsSkip` | app-server `config/read` discovery + thread `config.mcp_servers` | 待 v0.43 矩阵 |
+| OpenCode | `AdditivePerRun` / `RovaiWins` | ACP Session `mcpServers`，保留 native config roots | 待 v0.43 矩阵 |
+| GitHub Copilot | `AdditivePerRun` / `RovaiWins` | `--additional-mcp-config` | 待 v0.43 矩阵 |
+| Claude Code | `AdditivePerRun` / `RovaiWins` | `--mcp-config`，不使用 strict | 待 v0.43 矩阵 |
+| Kiro | `AdditivePerRun` / `RovaiWins` | Custom Agent `mcpServers` + `includeMcpJson: true` | 待 v0.43 矩阵 |
+| Qoder | `AdditivePerRun` / `RovaiWins` | native `--mcp-config`，不使用 strict/allowlist | 待 v0.43 矩阵 |
+| CodeBuddy | `AdditivePerRun` / `RovaiWins` | native `--mcp-config`，不使用 strict | 待 v0.43 矩阵 |
+| Qwen Code | `AdditivePerRun` / `RovaiWins` | native `--mcp-config`，不使用 allowlist | 待 v0.43 矩阵 |
+| Antigravity | `Unsupported` | 无不修改 Global/Workspace 文件的逐 Run 动态通道 | 诊断披露；配置页保持中立 |
 
 ## 历史：内置 MCP / Antigravity 专项复核
 
@@ -82,9 +89,9 @@ External MCP 精确投影复核的 ACP Runtime；它们不再承担 Rovai built-
 
 | Runtime | 调研版本 / 状态 | 观察结果 | 未接入原因 | 复核条件 |
 |---|---:|---|---|---|
-| Kimi CLI | 0.29.2 | ACP 可初始化；调用方 `mcpServers` 会与用户、项目、项目本地及插件 MCP 合并 | 当前版本只接入已验证精确 MCP 的新增 Runtime | 上游提供可验证的严格替换入口，或后续版本明确实现并披露“注入后保留原生配置”的准入 |
-| Grok CLI | 0.2.112；本机未登录 | ACP 可初始化；初始化阶段可观察到个人 MCP，未发现严格替换入口 | 缺少登录后的完整 Session 证据，且不满足当前精确 MCP 门槛 | 完成登录、真实 turn、恢复/取消与 MCP 行为复核；或后续版本明确采用较弱准入 |
-| Cursor Agent | 2025.09.18-7ae6800 | 支持 headless 与 resume；已验证入口会读取项目 `.cursor/mcp.json`，未发现每 Run 私有严格替换入口 | 不满足当前精确 MCP 门槛 | 上游提供私有 MCP 注入/替换合同，或后续版本明确采用较弱准入 |
+| Kimi CLI | 0.29.2 | ACP 可初始化；调用方 `mcpServers` 会与用户、项目、项目本地及插件 MCP 合并 | 尚未进入九 Runtime 产品目录，也没有 additive 同名与恢复矩阵 | 完成登录、真实 turn、恢复/取消、native preservation 与 same-name policy 复核 |
+| Grok CLI | 0.2.112；本机未登录 | ACP 可初始化；初始化阶段可观察到个人 MCP | 缺少登录后的完整 Session、工具与 additive precedence 证据 | 完成登录、真实 turn、恢复/取消与 MCP 行为复核 |
+| Cursor Agent | 2025.09.18-7ae6800 | 支持 headless 与 resume；已验证入口会读取项目 `.cursor/mcp.json` | 尚无稳定的逐 Run additive channel 与同名证据 | 上游提供动态追加入口并完成 native preservation、同名与恢复复核 |
 | TRAE | CLI 未公开；App 可用 | 官方 Enterprise 页面仍将 CLI 标为 coming soon；App 诊断日志会记录继承的进程环境，不适合作为当前 AgentRun 隔离入口 | 没有公开稳定 CLI/协议；App 自动化与凭据/环境边界尚无可接受合同 | 官方发布可脚本化协议并完成环境、认证、Session、取消和 MCP 隔离复核 |
 
 ## 后续准入规则
@@ -94,8 +101,9 @@ External MCP 精确投影复核的 ACP Runtime；它们不再承担 Rovai built-
   bash 能力但尚未通过矩阵，只能视为待验证，不能以理论支持替代证据。
 - Runtime 不得通过内置 MCP、native Plugin、stdio Bridge 或 ambient MCP 获得 Rovai built-in
   operations；也不得在 CLI 失败时静默回退到旧运输。
-- External MCP 继续以独立的精确 per-Run 投影合同验收；不能用于承载或模拟 Rovai built-in
-  operations，也不影响成员调用全部 built-in operations 的资格。
+- External MCP 继续以独立的 additive per-Run 投影合同验收；必须证明 native preservation、
+  Adapter-specific same-name policy、最终 Exposure 与 Ready 注入失败路径，且不能用于承载或模拟
+  Rovai built-in operations。
 - 已准入 Runtime 可以担任 Lead；兼容性差异不进入角色系统。
 
 ## 官方入口

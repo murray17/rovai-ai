@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.42
+current_version: v0.43
 last_updated: 2026-08-06
 ---
 
@@ -62,4 +62,5 @@ last_updated: 2026-08-06
 | v0.39 | `historical` | 已完成 Codex Isolated Home 与 AgentRun 进程隔离阻断修复 | [v0.39/README.md](v0.39/README.md) |
 | v0.40 | `historical` | Camp 历史检索工具收敛与 Agent-bounded 跨 Camp 原文读取 | [v0.40/README.md](v0.40/README.md) |
 | v0.41 | `historical` | 已完成跨 Runtime 统一运行活动语义、生命周期投影与观测诚实性 | [v0.41/README.md](v0.41/README.md) |
-| v0.42 | `current` | Rovai built-in operations 的九 Runtime CLI-only transport clean break | [v0.42/README.md](v0.42/README.md) |
+| v0.42 | `historical` | Rovai built-in operations 的九 Runtime CLI-only transport clean break | [v0.42/README.md](v0.42/README.md) |
+| v0.43 | `current` | Runtime-native additive external MCP 与 Codex Native Home 回退 | [v0.43/README.md](v0.43/README.md) |

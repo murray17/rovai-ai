@@ -2,15 +2,17 @@
 document_type: adr
 id: ADR-0104
 title: Rovai-Preferred MCP Projection and Non-Blocking External Degradation
-status: accepted
+status: superseded
 date: 2026-08-04
 decision_scope: cross-version
 source_version: v0.37
 supersedes: []
-superseded_by: null
+superseded_by: ADR-0125
 ---
 
 # ADR-0104: Rovai-Preferred MCP Projection and Non-Blocking External Degradation
+
+> 本决策已由 [ADR-0125](0125-runtime-native-additive-external-mcp-projection.md) 替代。
 
 > 后续 Codex 专项规范：[ADR-0107](0107-camp-member-isolated-codex-home-and-agentrun-app-server.md)
 > 以 Camp/AgentProfile 隔离 `CODEX_HOME` 和逐 AgentRun app-server 替代 Codex whole-table

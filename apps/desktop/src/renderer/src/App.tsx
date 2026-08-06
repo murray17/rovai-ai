@@ -1439,7 +1439,7 @@ export function SettingsView({
               <Diagnostic label="SQLite 数据库" value={health?.database.path} />
               <Diagnostic label="Git" value={health?.git.version} />
               {(health?.runtimeAvailability ?? []).map((candidate) => (
-                <Diagnostic key={candidate.runtimeKind} label={runtimeAdapterLabel(candidate.runtimeKind)} value={`${candidate.reportedVersion ?? '版本未知'} · ${runtimeAvailabilityPresentation(candidate).label}`} />
+                <Diagnostic key={candidate.runtimeKind} label={runtimeAdapterLabel(candidate.runtimeKind)} value={`${candidate.reportedVersion ?? '版本未知'} · ${runtimeAvailabilityPresentation(candidate).label} · MCP ${runtimeMcpProjectionSummary(candidate.runtimeKind)}`} />
               ))}
               <Diagnostic label="Agent 运行时能力" value={health ? runtimeCapabilitySummary(health) : null} />
             </section>
@@ -1647,6 +1647,12 @@ function runtimeCapabilitySummary(health: HealthStatus): string {
   return health.runtimeAvailability
     .map((candidate) => `${runtimeAdapterLabel(candidate.runtimeKind)} ${runtimeAvailabilityPresentation(candidate).label}`)
     .join(' · ')
+}
+
+function runtimeMcpProjectionSummary(kind: string): string {
+  if (kind === 'antigravity-app') return 'Unsupported（保留原生配置）'
+  if (kind === 'codex-cli') return 'AdditivePerRun · NativeWinsSkip'
+  return 'AdditivePerRun · RovaiWins'
 }
 
 function runtimeAdapterLabel(kind: string): string {

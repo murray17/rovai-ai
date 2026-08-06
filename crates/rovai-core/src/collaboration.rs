@@ -17,7 +17,6 @@ use crate::{
         has_all_members_mention, member_mention_ids, normalize_content, render_plain_text,
         validate_content,
     },
-    codex_home::enqueue_camp_home_cleanup,
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
         DomainCommandGateway, EntityReference, canonical_json_digest, sealed,
@@ -1312,7 +1311,6 @@ impl CollaborationService {
                 ));
             }
 
-            enqueue_camp_home_cleanup(transaction, &envelope.payload.camp_id)?;
             delete_camp_aggregate(transaction, &envelope.payload.camp_id)?;
             Ok(CommandHandlerResult::applied(
                 "camp.deleted",
@@ -6160,7 +6158,6 @@ mod tests {
         assert_eq!(row_count(&database, "context_compaction_attempt"), 0);
         assert_eq!(row_count(&database, "camp_summary_frontier"), 0);
         assert_eq!(row_count(&database, "camp_summary"), 0);
-        assert_eq!(row_count(&database, "codex_home_cleanup"), 1);
         let foreign_key_violations: i64 = database
             .connection()
             .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {

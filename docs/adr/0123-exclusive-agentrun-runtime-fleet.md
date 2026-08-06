@@ -12,6 +12,10 @@ superseded_by: null
 
 # ADR-0123: Exclusive AgentRun Runtime Processes and Resident Fleet Reuse
 
+> [ADR-0126](0126-codex-native-home-and-external-session-ownership.md) 局部替代本文的 Codex
+> Isolated Home compatibility identity；AgentRun 独占 lease、Resident 配额、quiescence、
+> fencing 与 Core restart 语义继续有效。
+
 ## Context
 
 Rovai-ai 当前存在三种不一致的 Runtime 进程生命周期：

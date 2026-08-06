@@ -24,7 +24,7 @@ use tokio::{
 
 use crate::{
     builtin_tool_runtime::BuiltinToolProcessConfig,
-    runtime_mcp::{remove_stale_mcp_configs, write_ephemeral_strict_mcp_config},
+    runtime_mcp::{remove_stale_mcp_configs, write_ephemeral_additive_mcp_config},
 };
 
 const MAX_CAPTURE_BYTES: usize = 2 * 1024 * 1024;
@@ -249,15 +249,14 @@ impl ClaudeCodeCliRuntimeAdapter {
         if !request.persist_session {
             command.arg("--no-session-persistence").arg("--tools=");
         }
-        let _external_mcp_config = {
-            let config = write_ephemeral_strict_mcp_config(
+        let _external_mcp_config = if request.external_mcp_servers.is_empty() {
+            None
+        } else {
+            let config = write_ephemeral_additive_mcp_config(
                 &self.private_runtime_dir,
                 &request.external_mcp_servers,
             )?;
-            command
-                .arg("--mcp-config")
-                .arg(config.path())
-                .arg("--strict-mcp-config");
+            command.arg("--mcp-config").arg(config.path());
             Some(config)
         };
         let mut child = command
@@ -370,14 +369,9 @@ impl ClaudeCodeCliRuntimeAdapter {
 
 fn explicit_mcp_config_rejection(stderr: &[u8]) -> bool {
     let diagnostic = String::from_utf8_lossy(stderr).to_ascii_lowercase();
-    [
-        "--strict-mcp-config",
-        "--mcp-config",
-        "mcp config",
-        "mcp configuration",
-    ]
-    .iter()
-    .any(|marker| diagnostic.contains(marker))
+    ["--mcp-config", "mcp config", "mcp configuration"]
+        .iter()
+        .any(|marker| diagnostic.contains(marker))
         && [
             "unknown option",
             "unrecognized option",

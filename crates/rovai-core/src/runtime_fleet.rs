@@ -159,7 +159,6 @@ pub(crate) struct FleetLease {
     pub process_id: String,
     pub host: RuntimeProcessHost,
     pub residency: FleetResidency,
-    pub reused: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -593,7 +592,6 @@ impl AgentRuntimeFleetManager {
             process_id,
             host,
             residency,
-            reused: false,
         })
     }
 
@@ -614,7 +612,6 @@ impl AgentRuntimeFleetManager {
             } else {
                 FleetResidency::Burst
             },
-            reused: true,
         })
     }
 
@@ -652,7 +649,6 @@ impl AgentRuntimeFleetManager {
             process_id,
             host,
             residency: FleetResidency::Resident,
-            reused: true,
         })
     }
 
