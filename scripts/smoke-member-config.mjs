@@ -20,14 +20,14 @@ try {
   const camps = await first.request('camps.list')
   if (camps.length !== 0) throw new Error(`Fresh member storage created an empty Camp: ${JSON.stringify(camps)}`)
   const leadMemberships = await first.request('agents.memberships.list', {
-    agentProfileId: 'agent_1'
+    agentId: 'agent_1'
   })
   if (leadMemberships.length !== 0) {
     throw new Error(`Fresh member unexpectedly belongs to a Camp: ${JSON.stringify(leadMemberships)}`)
   }
   const preflight = await first.request('camps.creationPreflight')
   if (!preflight.admissible
-      || !preflight.initialLeadAgentProfileId
+      || !preflight.initialLeadAgentId
       || preflight.presentMembers.length !== agents.length
       || preflight.presentMembers.some((member) => member.runtimeConfigured)) {
     throw new Error(`Unconfigured members failed structural preflight: ${JSON.stringify(preflight)}`)
@@ -61,13 +61,13 @@ try {
       || replay.resultEntity?.entityId !== createResult.resultEntity?.entityId) {
     throw new Error(`AgentProfile command did not replay: ${JSON.stringify({ createResult, replay })}`)
   }
-  const agentProfileId = createResult.resultEntity.entityId
+  const agentId = createResult.resultEntity.entityId
 
-  const profile = await first.request('agents.get', { agentProfileId })
+  const profile = await first.request('agents.get', { agentId })
   const selectedRuntime = await first.request('agents.runtime.set', {
     commandId: crypto.randomUUID(),
     command: {
-      agentProfileId,
+      agentId,
       expectedVersion: profile.version,
       adapterKind: 'qoder-cli'
     }
@@ -76,7 +76,7 @@ try {
       || selectedRuntime.code !== 'agent_profile.product_runtime_selected') {
     throw new Error(`Product Runtime selection was not saved: ${JSON.stringify(selectedRuntime)}`)
   }
-  const unresolvedProfile = await first.request('agents.get', { agentProfileId })
+  const unresolvedProfile = await first.request('agents.get', { agentId })
   const unresolvedInstallations = await first.request('runtime.installations.list')
   if (unresolvedProfile.runtimeSelection?.adapterKind !== 'qoder-cli'
       || unresolvedProfile.runtimeReadiness?.status !== 'selected_unresolved'
@@ -91,9 +91,9 @@ try {
   first = null
 
   reopened = startCore(dataDir)
-  const persistedProfile = await reopened.request('agents.get', { agentProfileId })
+  const persistedProfile = await reopened.request('agents.get', { agentId })
   const installations = await reopened.request('runtime.installations.list')
-  if (!/^[1-9A-HJ-NP-Za-km-z]{12}$/.test(persistedProfile.handle)
+  if (Object.hasOwn(persistedProfile, 'handle')
       || persistedProfile.teamRole !== 'Developer'
       || persistedProfile.professionalResponsibilities !== 'Validates v0.27 member identity persistence.'
       || persistedProfile.personalityTraits?.join(',') !== 'Careful'
@@ -113,7 +113,7 @@ try {
   console.log(JSON.stringify({
     ok: true,
     starterCount: agents.length,
-    customAgentProfileId: agentProfileId,
+    customAgentId: agentId,
     selectedRuntimeKind: persistedProfile.runtimeSelection.adapterKind,
     selectedRuntimeReadiness: persistedProfile.runtimeReadiness.status,
     unconfiguredMemberCount: preflight.presentMembers

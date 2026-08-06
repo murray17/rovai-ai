@@ -38,7 +38,7 @@ try {
 
   const preflight = await core.request('camps.creationPreflight')
   if (!preflight.admissible
-      || !preflight.initialLeadAgentProfileId
+      || !preflight.initialLeadAgentId
       || preflight.presentMembers.length !== profiles.length
       || preflight.presentMembers.some((member) => member.runtimeConfigured)) {
     throw new Error(`Structural Camp preflight rejected present members: ${JSON.stringify(preflight)}`)
@@ -62,21 +62,21 @@ try {
   const afterInspection = await core.request('navigation.snapshot')
   assertEmptyNavigation(afterInspection, 'workspace inspection')
 
-  const memberAgentProfileIds = preflight.presentMembers.map((member) => member.agentProfileId)
+  const memberAgentIds = preflight.presentMembers.map((member) => member.agentId)
   const ordinaryCamp = await core.request('camps.create', {
     commandId: crypto.randomUUID(),
     name: 'Ordinary directory Camp',
     workspace: { projectPath: ordinary.projectPath },
-    memberAgentProfileIds,
-    defaultLeadAgentProfileId: preflight.initialLeadAgentProfileId,
+    memberAgentIds,
+    defaultLeadAgentId: preflight.initialLeadAgentId,
     collaborationMode: 'peer'
   })
   const emptyGitCamp = await core.request('camps.create', {
     commandId: crypto.randomUUID(),
     name: 'Empty Git Camp',
     workspace: { projectPath: emptyGit.projectPath },
-    memberAgentProfileIds,
-    defaultLeadAgentProfileId: preflight.initialLeadAgentProfileId,
+    memberAgentIds,
+    defaultLeadAgentId: preflight.initialLeadAgentId,
     collaborationMode: 'peer'
   })
   if (ordinaryCamp.status !== 'applied' || emptyGitCamp.status !== 'applied') {

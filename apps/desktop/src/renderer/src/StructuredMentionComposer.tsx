@@ -31,7 +31,7 @@ import {
 } from './structured-mention-model'
 
 export interface StructuredMentionMember {
-  agentProfileId: string
+  agentId: string
   displayName: string
   avatarRef?: string | null
   mentionable?: boolean
@@ -44,7 +44,7 @@ export interface StructuredMentionQuery {
 }
 
 export type StructuredMentionOption =
-  | { kind: 'all_members'; label: '所有成员' }
+  | { kind: 'all_members'; label: '所有队员' }
   | { kind: 'member'; member: StructuredMentionMember }
 
 export interface StructuredMentionComposerProps {
@@ -73,8 +73,8 @@ export function structuredMentionOptions(
 ): StructuredMentionOption[] {
   const normalizedQuery = query.toLocaleLowerCase()
   const options: StructuredMentionOption[] = []
-  if ('所有成员'.includes(normalizedQuery)) {
-    options.push({ kind: 'all_members', label: '所有成员' })
+  if ('所有队员'.includes(normalizedQuery)) {
+    options.push({ kind: 'all_members', label: '所有队员' })
   }
   for (const member of members) {
     if (member.mentionable === false) continue
@@ -193,7 +193,7 @@ export function StructuredMentionComposer({
   const menuId = `${id || generatedId}-mention-options`
   const content = useMemo(() => normalizeStructuredMentionContent(value), [value])
   const memberById = useMemo(
-    () => new Map(members.map((member) => [member.agentProfileId, member])),
+    () => new Map(members.map((member) => [member.agentId, member])),
     [members]
   )
   const options = useMemo(
@@ -284,7 +284,7 @@ export function StructuredMentionComposer({
     }
     const next = option.kind === 'all_members'
       ? insertAllMembersMention(state)
-      : insertMemberMention(state, option.member.agentProfileId)
+      : insertMemberMention(state, option.member.agentId)
     setMentionQuery(null)
     emitState(next)
     window.requestAnimationFrame(() => editorRef.current?.focus())
@@ -492,7 +492,7 @@ export function StructuredMentionComposer({
                 data-token-kind="all_members_mention"
                 role={onActivateAllMembersMention ? 'button' : undefined}
                 tabIndex={onActivateAllMembersMention ? 0 : undefined}
-                aria-label={onActivateAllMembersMention ? '查看所有成员范围' : '提及所有成员'}
+                aria-label={onActivateAllMembersMention ? '查看所有队员范围' : '提及所有队员'}
                 aria-haspopup={onActivateAllMembersMention ? 'dialog' : undefined}
                 aria-expanded={onActivateAllMembersMention ? false : undefined}
                 key={`all-${index}`}
@@ -511,11 +511,11 @@ export function StructuredMentionComposer({
                   onActivateAllMembersMention(event.currentTarget, true)
                 }}
               >
-                @所有成员
+                @所有队员
               </span>
             )
           }
-          const member = memberById.get(segment.agentProfileId)
+          const member = memberById.get(segment.agentId)
           const unavailable = !member || member.mentionable === false
           const interactive = Boolean(member && !unavailable && onActivateMemberMention)
           return (
@@ -524,7 +524,7 @@ export function StructuredMentionComposer({
               contentEditable={false}
               data-editor-segment="token"
               data-token-kind="member_mention"
-              data-agent-profile-id={segment.agentProfileId}
+              data-agent-profile-id={segment.agentId}
               role={interactive ? 'button' : undefined}
               tabIndex={interactive ? 0 : undefined}
               aria-label={interactive && member
@@ -538,7 +538,7 @@ export function StructuredMentionComposer({
                 : interactive
                   ? `查看${member?.displayName ?? '队员'}的基础信息`
                   : undefined}
-              key={`member-${index}-${segment.agentProfileId}`}
+              key={`member-${index}-${segment.agentId}`}
               style={unavailable
                 ? { ...TOKEN_STYLE, textDecoration: 'line-through', textDecorationColor: 'var(--attention)' }
                 : interactive
@@ -617,7 +617,7 @@ export function StructuredMentionComposer({
               type="button"
               role="option"
               aria-selected={index === activeOption}
-              key={option.kind === 'all_members' ? 'all-members' : option.member.agentProfileId}
+              key={option.kind === 'all_members' ? 'all-members' : option.member.agentId}
               disabled={disabled}
               onPointerDown={(event) => event.preventDefault()}
               onMouseEnter={() => setActiveOption(index)}
@@ -627,8 +627,8 @@ export function StructuredMentionComposer({
                 {option.kind === 'all_members' ? '@' : option.member.displayName.slice(0, 1)}
               </span>
               <span>
-                <strong>{option.kind === 'all_members' ? '所有成员' : option.member.displayName}</strong>
-                <small>{option.kind === 'all_members' ? '@所有成员' : `@${option.member.displayName}`}</small>
+                <strong>{option.kind === 'all_members' ? '所有队员' : option.member.displayName}</strong>
+                <small>{option.kind === 'all_members' ? '@所有队员' : `@${option.member.displayName}`}</small>
               </span>
               <i aria-hidden="true" />
             </button>
@@ -671,7 +671,7 @@ function structuredContentEqual(
     if (!candidate || segment.kind !== candidate.kind) return false
     if (segment.kind === 'text' && candidate.kind === 'text') return segment.text === candidate.text
     if (segment.kind === 'member_mention' && candidate.kind === 'member_mention') {
-      return segment.agentProfileId === candidate.agentProfileId
+      return segment.agentId === candidate.agentId
     }
     return segment.kind === 'all_members_mention'
   })
@@ -684,8 +684,8 @@ function readStructuredContent(editor: HTMLDivElement): StructuredCampMessageCon
       const element = node as HTMLElement
       const tokenKind = element.dataset.tokenKind
       if (tokenKind === 'member_mention') {
-        const agentProfileId = element.dataset.agentProfileId
-        if (agentProfileId) content.push({ kind: 'member_mention', agentProfileId })
+        const agentId = element.dataset.agentId
+        if (agentId) content.push({ kind: 'member_mention', agentId })
         continue
       }
       if (tokenKind === 'all_members_mention') {

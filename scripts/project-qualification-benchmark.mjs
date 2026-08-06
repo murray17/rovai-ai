@@ -340,11 +340,11 @@ function renderReport(summary) {
 ## 结论
 
 - CAL-001 通过，因此本轮产生正式 Qualification Pass Rate：**${summary.score.passes}/${summary.score.validTrials}（${formatPercent(summary.formalPassRate)}）**。
-- 协作客观检查通过：**${summary.qualitySignals.collaborationAuditPasses}/${summary.score.validTrials}**，indeterminate：**${summary.qualitySignals.collaborationAuditIndeterminate}**；同成员单槽：**${summary.qualitySignals.singleSlotPasses}/${summary.score.validTrials}**；功能 Verifier：**${summary.qualitySignals.functionalVerificationPasses}/${summary.score.validTrials}**；变更边界：**${summary.qualitySignals.boundaryPasses}/${summary.score.validTrials}**。
+- 协作客观检查通过：**${summary.qualitySignals.collaborationAuditPasses}/${summary.score.validTrials}**，indeterminate：**${summary.qualitySignals.collaborationAuditIndeterminate}**；同队员单槽：**${summary.qualitySignals.singleSlotPasses}/${summary.score.validTrials}**；功能 Verifier：**${summary.qualitySignals.functionalVerificationPasses}/${summary.score.validTrials}**；变更边界：**${summary.qualitySignals.boundaryPasses}/${summary.score.validTrials}**。
 - ${summary.qualitySignals.pendingWhileBusyObservedTrials} 个 Trial 的权威快照直接捕获到“接收 Conversation 忙时 Input 保持 pending”，随后才物化为 recipient Run；其他 Trial 未形成可观察等待窗口。
 - 边界失败中有 ${summary.qualitySignals.modeOnlyBoundaryFailureTrials} 次仅改变文件 mode、内容摘要未变；这类结果仍按密封规则计 FAIL，但应作为下一版 fixture/harness 修正项。
 - 共观察到 ${summary.collaboration.observedAgentRuns} 个 Agent Run、${summary.collaboration.observedMemberCalls} 条 Member Call 和 ${summary.collaboration.completedTasks} 个 completed Task。
-- 成员 Run 累计时长：${renderDurations(summary.collaboration.memberRunDurations)}。
+- 队员 Run 累计时长：${renderDurations(summary.collaboration.memberRunDurations)}。
 - 轮询违规 Trial：${summary.collaboration.pollingViolationTrials}；失败 Verifier 分类：${failedCategories || '无'}；边界违规：${boundaryViolations || '无'}。
 - ${summary.collaboration.conclusion}
 
@@ -365,15 +365,15 @@ ${trialRows}
 1. Built-in CLI 协作调用是否可用应由协作审计回答，业务实现好坏由 Verifier 回答；不能再把任何总 FAIL 自动归因成运输失败。
 2. ${summary.qualitySignals.collaborationAuditPasses}/${summary.score.validTrials} 协作客观检查通过、${summary.qualitySignals.collaborationAuditIndeterminate} 个 indeterminate，${summary.collaboration.pollingViolationTrials} 次轮询违规；缺少 canonical receipt coverage 时不得把持久 Inbox 效果冒充 accepted-A2A 结论。
 3. \`Cargo.lock\` 类边界失败需要单列：内容变化可能是 Agent 增加依赖，纯 mode 变化也可能来自私有 fixture 的 0600 权限被工具规范化；两者不应使用同一个模糊错误码。
-4. 当前只有硬 Verifier 和协议审计，没有 Judge；因此可以确认完成度与协作纪律，不能量化每个成员贡献的语义价值。
+4. 当前只有硬 Verifier 和协议审计，没有 Judge；因此可以确认完成度与协作纪律，不能量化每个队员贡献的语义价值。
 5. Case 分项：${renderCaseFindings(summary.score.perCase)}。
 
 ## 下一版评测集优先级
 
 1. 报表固定拆成三轴：功能交付、协作协议、变更边界；总分仍严格，但诊断不能丢失失败来源。
 2. 物化 fixture 时规范化工作区文件 mode，或让边界比较把“内容未变、仅 0600→0644”记为独立 hygiene 信号，避免私有存储权限污染任务成绩。
-3. 增加专门的忙时 FIFO Case：B、C 的独立必要结果先后到达时，验证 A 的两个后续 Run 串行且无批处理；另加“callee 完成后不再联系任何成员”与 Core restart Case，证明不会合成额外 Input 或消息。
-4. 为隐藏 Verifier 输出稳定、安全的失败码，并保留脱敏 patch/命令摘要，才能区分需求漏项、测试误判和成员整合覆盖。
+3. 增加专门的忙时 FIFO Case：B、C 的独立必要结果先后到达时，验证 A 的两个后续 Run 串行且无批处理；另加“callee 完成后不再联系任何队员”与 Core restart Case，证明不会合成额外 Input 或消息。
+4. 为隐藏 Verifier 输出稳定、安全的失败码，并保留脱敏 patch/命令摘要，才能区分需求漏项、测试误判和队员整合覆盖。
 5. 使用同题 Lead-only 对照组计算 collaboration lift；否则只能说明 Team 能协作，不能说明协作比单 Agent 更好。
 6. Judge 暂不纳入本版本；未来若启用，应作为独立盲评维度，不能替代可执行 Verifier。
 
@@ -434,11 +434,11 @@ async function importIntoRovai({
       : null
     const workspace = await core.request('workspaces.inspect', { path: projectPath })
     const preflight = await core.request('camps.creationPreflight')
-    if (!preflight.admissible || !preflight.initialLeadAgentProfileId || preflight.presentMembers.length === 0) {
+    if (!preflight.admissible || !preflight.initialLeadAgentId || preflight.presentMembers.length === 0) {
       throw new Error(`local Rovai profile cannot create benchmark Camps: ${JSON.stringify(preflight)}`)
     }
     const frozenMembers = ['agent_1', 'agent_2', 'agent_3', 'agent_4']
-    const present = new Set(preflight.presentMembers.map((member) => member.agentProfileId))
+    const present = new Set(preflight.presentMembers.map((member) => member.agentId))
     if (frozenMembers.some((member) => !present.has(member))) {
       throw new Error('local Rovai profile does not contain the complete frozen benchmark Team')
     }
@@ -493,8 +493,8 @@ async function createEvidenceCamp({ core, commandPrefix, name, body, projectPath
     commandId: `${commandPrefix}:create`,
     name,
     workspace: { projectPath },
-    memberAgentProfileIds: members,
-    defaultLeadAgentProfileId: defaultLead,
+    memberAgentIds: members,
+    defaultLeadAgentId: defaultLead,
     collaborationMode: 'peer'
   })
   const campId = created.payload?.campId
@@ -526,14 +526,14 @@ function trialCampBody(summary, trial) {
     `- 变更边界：${trial.changeBoundaryPassed ? '通过' : `失败（${renderBoundaryViolations(trial.changeBoundaryViolations)}）`}\n` +
     `- 仅 mode 变化：${trial.modeOnlyChangedPaths.join(', ') || '无'}\n` +
     `- 协作客观检查：${trial.collaborationAuditStatus}\n` +
-    `- 同成员 Run 重叠：${trial.sameMemberRunOverlaps.length === 0 ? '无' : trial.sameMemberRunOverlaps.join(', ')}\n` +
+    `- 同队员 Run 重叠：${trial.sameMemberRunOverlaps.length === 0 ? '无' : trial.sameMemberRunOverlaps.join(', ')}\n` +
     `- 忙时 pending Input：${trial.schedulingEvidence.pendingWhileBusy ? `观察到（峰值 ${trial.schedulingEvidence.maxPendingWhileBusyInputs}）` : '未形成可观察窗口'}\n` +
     `- 编排收敛：${trial.orchestrationConvergence === 'pass' ? '是' : '否'}\n` +
     `- 耗时：${trial.durationSeconds.toFixed(1)} 秒\n` +
     `- Agent Runs：${trial.observedAgentRuns}\n` +
     `- Member Calls：${trial.observedMemberCalls}\n` +
     `- 完成 Task：${trial.collaborationMetrics.completedTasks ?? 0}\n` +
-    `- 执行成员：${trial.members.join(', ') || '无'}\n` +
+    `- 执行队员：${trial.members.join(', ') || '无'}\n` +
     `- 验证分类：${renderCategories(trial.verifierCategories)}\n` +
     `- 变更文件：${trial.changedPaths.join(', ') || '无'}\n` +
     `- Evidence ID：${trial.trialId}\n` +
@@ -549,7 +549,7 @@ function reviewCampBody(summary, projectPath) {
       `# Team Benchmark ${summary.suiteVersion} Review\n\n` +
       `正式 Qualification：${summary.score.passes} 通过 / ${summary.score.failures} 失败（${formatPercent(summary.formalPassRate)}）。CAL-001 已通过。\n\n` +
       `${cases}。\n\n` +
-      `协作协议 ${summary.qualitySignals.collaborationAuditPasses}/${summary.score.validTrials}，同成员单槽 ${summary.qualitySignals.singleSlotPasses}/${summary.score.validTrials}，忙时 pending 快照 ${summary.qualitySignals.pendingWhileBusyObservedTrials} 个 Trial，功能 Verifier ${summary.qualitySignals.functionalVerificationPasses}/${summary.score.validTrials}，变更边界 ${summary.qualitySignals.boundaryPasses}/${summary.score.validTrials}。共 ${summary.collaboration.observedAgentRuns} Runs / ${summary.collaboration.observedMemberCalls} Calls，轮询违规 ${summary.collaboration.pollingViolationTrials}。\n\n` +
+      `协作协议 ${summary.qualitySignals.collaborationAuditPasses}/${summary.score.validTrials}，同队员单槽 ${summary.qualitySignals.singleSlotPasses}/${summary.score.validTrials}，忙时 pending 快照 ${summary.qualitySignals.pendingWhileBusyObservedTrials} 个 Trial，功能 Verifier ${summary.qualitySignals.functionalVerificationPasses}/${summary.score.validTrials}，变更边界 ${summary.qualitySignals.boundaryPasses}/${summary.score.validTrials}。共 ${summary.collaboration.observedAgentRuns} Runs / ${summary.collaboration.observedMemberCalls} Calls，轮询违规 ${summary.collaboration.pollingViolationTrials}。\n\n` +
       `完整 Review：${join(projectPath, 'README.md')}\n` +
       `结构化结果：${join(projectPath, 'benchmark-summary.json')}`
   }
@@ -558,7 +558,7 @@ function reviewCampBody(summary, projectPath) {
     `12 个有效诊断样本：${summary.score.passes} 通过 / ${summary.score.failures} 失败（${formatPercent(summary.score.outcomeRate)}）。\n\n` +
     `正式 Qualification Pass Rate 不存在：前置校准失败，本轮不具备资格成绩。\n\n` +
     `${cases}。\n\n` +
-    `关键结论：12 次 Trial 全部只有默认 Lead，Member Call 为 0，因此只能评价 Lead 单体交付，不能评价 Team 协作能力。前置四成员校准虽证明消息可达，但以 ${summary.calibration.observedAgentRuns} 个 Run / ${summary.calibration.observedMemberCalls} 条 Member Call 未收敛。\n\n` +
+    `关键结论：12 次 Trial 全部只有默认 Lead，Member Call 为 0，因此只能评价 Lead 单体交付，不能评价 Team 协作能力。前置四队员校准虽证明消息可达，但以 ${summary.calibration.observedAgentRuns} 个 Run / ${summary.calibration.observedMemberCalls} 条 Member Call 未收敛。\n\n` +
     `完整 Review：${join(projectPath, 'README.md')}\n` +
     `结构化结果：${join(projectPath, 'benchmark-summary.json')}`
 }
@@ -566,25 +566,25 @@ function reviewCampBody(summary, projectPath) {
 async function configureDefaultTeamRuntimes(core) {
   const team = [
     {
-      agentProfileId: 'agent_1',
+      agentId: 'agent_1',
       adapterKind: 'codex-cli',
       model: { mode: 'explicit', modelId: 'gpt-5.6-sol', options: { reasoning_effort: 'medium' } },
       permissions: { adapterKind: 'codex-cli', schemaVersion: 1, values: { sandbox_mode: 'danger-full-access', approval_policy: 'never' } }
     },
     {
-      agentProfileId: 'agent_2',
+      agentId: 'agent_2',
       adapterKind: 'codex-cli',
       model: { mode: 'explicit', modelId: 'gpt-5.6-sol', options: { reasoning_effort: 'medium' } },
       permissions: { adapterKind: 'codex-cli', schemaVersion: 1, values: { sandbox_mode: 'danger-full-access', approval_policy: 'never' } }
     },
     {
-      agentProfileId: 'agent_3',
+      agentId: 'agent_3',
       adapterKind: 'opencode-cli',
       model: { mode: 'explicit', modelId: 'opencode/big-pickle', options: {} },
       permissions: { adapterKind: 'opencode-cli', schemaVersion: 1, values: { permission: 'allow' } }
     },
     {
-      agentProfileId: 'agent_4',
+      agentId: 'agent_4',
       adapterKind: 'antigravity-app',
       model: { mode: 'explicit', modelId: 'gemini-3.6-flash-high', options: {} },
       permissions: { adapterKind: 'antigravity-app', schemaVersion: 1, values: { mode: 'accept-edits', sandbox: 'on', dangerously_skip_permissions: 'off' } }
@@ -595,13 +595,13 @@ async function configureDefaultTeamRuntimes(core) {
   }
   const configured = []
   for (const member of team) {
-    const before = await core.request('agents.get', { agentProfileId: member.agentProfileId })
+    const before = await core.request('agents.get', { agentId: member.agentId })
     if (before.runtimeSelection?.adapterKind === member.adapterKind
         && canonicalJson(before.runtimePreference?.model) === canonicalJson(member.model)
         && canonicalJson(before.runtimePreference?.permissions) === canonicalJson(member.permissions)
         && before.runtimeReadiness?.status === 'ready') {
       configured.push({
-        agentProfileId: member.agentProfileId,
+        agentId: member.agentId,
         adapterKind: member.adapterKind,
         modelId: member.model.modelId,
         readiness: before.runtimeReadiness.status
@@ -611,7 +611,7 @@ async function configureDefaultTeamRuntimes(core) {
     const result = await core.request('agents.runtime.set', {
       commandId: crypto.randomUUID(),
       command: {
-        agentProfileId: member.agentProfileId,
+        agentId: member.agentId,
         expectedVersion: before.version,
         adapterKind: member.adapterKind,
         model: member.model,
@@ -619,17 +619,17 @@ async function configureDefaultTeamRuntimes(core) {
       }
     }, 120_000)
     if (result.status !== 'applied') {
-      throw new Error(`default Team Runtime update failed: ${JSON.stringify({ member: member.agentProfileId, result })}`)
+      throw new Error(`default Team Runtime update failed: ${JSON.stringify({ member: member.agentId, result })}`)
     }
-    const after = await core.request('agents.get', { agentProfileId: member.agentProfileId })
+    const after = await core.request('agents.get', { agentId: member.agentId })
     if (after.runtimeSelection?.adapterKind !== member.adapterKind
         || canonicalJson(after.runtimePreference?.model) !== canonicalJson(member.model)
         || canonicalJson(after.runtimePreference?.permissions) !== canonicalJson(member.permissions)
         || after.runtimeReadiness?.status !== 'ready') {
-      throw new Error(`default Team Runtime verification failed: ${member.agentProfileId}`)
+      throw new Error(`default Team Runtime verification failed: ${member.agentId}`)
     }
     configured.push({
-      agentProfileId: member.agentProfileId,
+      agentId: member.agentId,
       adapterKind: member.adapterKind,
       modelId: member.model.modelId,
       readiness: after.runtimeReadiness?.status ?? null
@@ -861,10 +861,10 @@ function findRunOverlaps(runGraph) {
     if (!left.startedAt || !left.endedAt) continue
     for (let otherIndex = index + 1; otherIndex < runGraph.length; otherIndex += 1) {
       const right = runGraph[otherIndex]
-      if (left.agentProfileId !== right.agentProfileId || !right.startedAt || !right.endedAt) continue
+      if (left.agentId !== right.agentId || !right.startedAt || !right.endedAt) continue
       if (Date.parse(left.startedAt) < Date.parse(right.endedAt)
           && Date.parse(right.startedAt) < Date.parse(left.endedAt)) {
-        if (!overlaps.includes(left.agentProfileId)) overlaps.push(left.agentProfileId)
+        if (!overlaps.includes(left.agentId)) overlaps.push(left.agentId)
       }
     }
   }
@@ -897,7 +897,7 @@ function sumRunDurations(runGraph) {
     if (!run.startedAt || !run.endedAt) continue
     const seconds = (Date.parse(run.endedAt) - Date.parse(run.startedAt)) / 1000
     if (!Number.isFinite(seconds) || seconds < 0) continue
-    values[run.agentProfileId] = Math.round(((values[run.agentProfileId] ?? 0) + seconds) * 10) / 10
+    values[run.agentId] = Math.round(((values[run.agentId] ?? 0) + seconds) * 10) / 10
   }
   return values
 }

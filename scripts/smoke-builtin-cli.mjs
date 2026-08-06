@@ -67,7 +67,7 @@ try {
   const workspace = await core.request('workspaces.inspect', { path: projectRoot })
 
   for (const specification of runtimeSpecifications) {
-    specification.agentProfileId = await createProfile(
+    specification.agentId = await createProfile(
       core.request,
       `${specification.label} CLI Verifier`
     )
@@ -78,17 +78,17 @@ try {
     specification.installation = await configureProductRuntime(
       core.request,
       specification.adapterKind,
-      [specification.agentProfileId, specification.recipientProfileId]
+      [specification.agentId, specification.recipientProfileId]
     )
     if (specification.adapterKind === 'codex-cli'
         && process.env.ROVAI_BUILTIN_CLI_CODEX_MODEL) {
-      for (const agentProfileId of [
-        specification.agentProfileId,
+      for (const agentId of [
+        specification.agentId,
         specification.recipientProfileId
       ]) {
         await selectExplicitModel(
           core.request,
-          agentProfileId,
+          agentId,
           specification.adapterKind,
           process.env.ROVAI_BUILTIN_CLI_CODEX_MODEL
         )
@@ -100,11 +100,11 @@ try {
   const historyCampId = await createCamp(core.request, {
     name: 'Built-in CLI Shared History',
     projectPath: workspace.projectPath,
-    memberAgentProfileIds: runtimeSpecifications.flatMap((value) => [
-      value.agentProfileId,
+    memberAgentIds: runtimeSpecifications.flatMap((value) => [
+      value.agentId,
       value.recipientProfileId
     ]),
-    defaultLeadAgentProfileId: runtimeSpecifications[0].agentProfileId
+    defaultLeadAgentId: runtimeSpecifications[0].agentId
   })
   await sendCampMessage(core.request, {
     campId: historyCampId,
@@ -122,8 +122,8 @@ try {
     specification.campId = await createCamp(core.request, {
       name: `${specification.label} Built-in CLI`,
       projectPath: workspace.projectPath,
-      memberAgentProfileIds: [specification.agentProfileId, specification.recipientProfileId],
-      defaultLeadAgentProfileId: specification.agentProfileId
+      memberAgentIds: [specification.agentId, specification.recipientProfileId],
+      defaultLeadAgentId: specification.agentId
     })
     await sendCampMessage(core.request, {
       campId: specification.campId,
@@ -227,7 +227,7 @@ try {
       throw new Error(`${specification.adapterKind} did not preserve logical Conversation identity`)
     }
     const recipientRun = recipientSnapshot.agentRuns.find((run) =>
-      run.agentProfileId === specification.recipientProfileId
+      run.agentId === specification.recipientProfileId
     )
 
     results.push({
@@ -298,12 +298,12 @@ async function createProfile(request, displayName) {
   return id
 }
 
-async function selectExplicitModel(request, agentProfileId, adapterKind, modelId) {
-  const profile = await request('agents.get', { agentProfileId })
+async function selectExplicitModel(request, agentId, adapterKind, modelId) {
+  const profile = await request('agents.get', { agentId })
   const result = await request('agents.runtime.set', {
     commandId: crypto.randomUUID(),
     command: {
-      agentProfileId,
+      agentId,
       expectedVersion: profile.version,
       adapterKind,
       model: {
@@ -317,7 +317,7 @@ async function selectExplicitModel(request, agentProfileId, adapterKind, modelId
   if (result.status !== 'applied') {
     throw new Error(`Explicit Runtime model was not selected: ${JSON.stringify(result)}`)
   }
-  const resolved = await request('agents.get', { agentProfileId })
+  const resolved = await request('agents.get', { agentId })
   if (resolved.runtimeReadiness?.status !== 'ready') {
     throw new Error(`Explicit Runtime model is not ready: ${JSON.stringify(resolved)}`)
   }
@@ -328,8 +328,8 @@ async function createCamp(request, input) {
     commandId: crypto.randomUUID(),
     name: input.name,
     workspace: { projectPath: input.projectPath },
-    memberAgentProfileIds: input.memberAgentProfileIds,
-    defaultLeadAgentProfileId: input.defaultLeadAgentProfileId,
+    memberAgentIds: input.memberAgentIds,
+    defaultLeadAgentId: input.defaultLeadAgentId,
     collaborationMode: 'peer'
   })
   const campId = result.payload?.campId
@@ -341,9 +341,9 @@ async function createCamp(request, input) {
 
 async function sendCampMessage(request, input) {
   const draft = await request('camp.composerDraft.get', { campId: input.campId })
-  const content = input.agentProfileId
+  const content = input.agentId
     ? [
-        { kind: 'member_mention', agentProfileId: input.agentProfileId },
+        { kind: 'member_mention', agentId: input.agentId },
         { kind: 'text', text: ` ${input.body}` }
       ]
     : [{ kind: 'text', text: input.body }]
@@ -366,7 +366,7 @@ async function startVerificationRun(coreClient, specification, resumed) {
   const scriptPath = resumed ? specification.resumeScriptPath : specification.scriptPath
   const sent = await sendCampMessage(coreClient.request, {
     campId: specification.campId,
-    agentProfileId: specification.agentProfileId,
+    agentId: specification.agentId,
     body: [
       'Run the local repository Built-in CLI transport qualification.',
       'The script was generated by this test and the Runtime process already has ROVAI_AGENT_CLI, ROVAI_CLI_CONTEXT, and ROVAI_RUN_TMP injected.',
@@ -425,7 +425,7 @@ async function waitForRecipientRun(coreClient, specification, recipientProfileId
   const resolvedApprovals = new Set()
   while (Date.now() < deadline) {
     const snapshot = await coreClient.request('camps.snapshot', { campId: specification.campId })
-    const candidates = snapshot.agentRuns.filter((run) => run.agentProfileId === recipientProfileId)
+    const candidates = snapshot.agentRuns.filter((run) => run.agentId === recipientProfileId)
     for (const candidate of candidates) {
       await resolvePendingApprovals(coreClient.request, snapshot, candidate.id, resolvedApprovals)
     }

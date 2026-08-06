@@ -282,16 +282,15 @@ struct CreateCampParams {
     command_id: String,
     name: Option<String>,
     workspace: Option<SelectedWorkspaceParams>,
-    member_agent_profile_ids: Vec<String>,
-    default_lead_agent_profile_id: String,
+    member_agent_ids: Vec<String>,
+    default_lead_agent_id: String,
     collaboration_mode: CampCollaborationMode,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CampCreationMember {
-    agent_profile_id: String,
-    handle: String,
+    agent_id: String,
     display_name: String,
     member_order: i64,
     runtime_configured: bool,
@@ -516,8 +515,8 @@ struct ResolveActionApprovalParams {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct AgentProfileIdParams {
-    agent_profile_id: String,
+struct AgentIdParams {
+    agent_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -651,7 +650,7 @@ impl AgentRunRuntime {
 }
 
 impl Core {
-    fn known_agent_profile_ids(database: &Database) -> Result<BTreeSet<String>> {
+    fn known_agent_ids(database: &Database) -> Result<BTreeSet<String>> {
         AgentProfileService::default().all_profile_ids(database)
     }
 
@@ -2101,19 +2100,19 @@ impl Core {
                 )?)
             }
             "agents.get" => {
-                let params: AgentProfileIdParams = serde_json::from_value(request.params.clone())?;
+                let params: AgentIdParams = serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
                 let profile = AgentProfileService::default()
-                    .get_profile(&database, &params.agent_profile_id)?
+                    .get_profile(&database, &params.agent_id)?
                     .context("AgentProfile does not exist")?;
                 Ok(serde_json::to_value(profile)?)
             }
             "agents.memberships.list" => {
-                let params: AgentProfileIdParams = serde_json::from_value(request.params.clone())?;
+                let params: AgentIdParams = serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(
                     AgentProfileService::default()
-                        .list_camp_memberships(&database, &params.agent_profile_id)?,
+                        .list_camp_memberships(&database, &params.agent_id)?,
                 )?)
             }
             "agents.create" => {
@@ -2150,7 +2149,7 @@ impl Core {
                 let params: UserCommandParams<SetAgentProfileRuntimeCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let adapter_kind = params.command.adapter_kind;
-                let agent_profile_id = params.command.agent_profile_id.clone();
+                let agent_id = params.command.agent_id.clone();
                 let (execution, needs_resolution) = {
                     let mut database = self.database.lock().await;
                     let execution = AgentProfileService::default().set_runtime(
@@ -2163,7 +2162,7 @@ impl Core {
                 };
                 if execution.result.status == CommandResultStatus::Applied {
                     self.runtime_fleet
-                        .invalidate_runtime_config(&agent_profile_id)
+                        .invalidate_runtime_config(&agent_id)
                         .await;
                 }
                 if needs_resolution {
@@ -2177,7 +2176,7 @@ impl Core {
             "agents.runtime.clear" => {
                 let params: UserCommandParams<ClearAgentProfileRuntimeCommand> =
                     serde_json::from_value(request.params.clone())?;
-                let agent_profile_id = params.command.agent_profile_id.clone();
+                let agent_id = params.command.agent_id.clone();
                 let mut database = self.database.lock().await;
                 let execution = AgentProfileService::default().clear_runtime(
                     &mut database,
@@ -2185,7 +2184,7 @@ impl Core {
                 )?;
                 if execution.result.status == CommandResultStatus::Applied {
                     self.runtime_fleet
-                        .invalidate_runtime_config(&agent_profile_id)
+                        .invalidate_runtime_config(&agent_id)
                         .await;
                     self.skill_reconcile_notify.notify_one();
                 }
@@ -2203,27 +2202,25 @@ impl Core {
                 Ok(serde_json::to_value(execution.result)?)
             }
             "agents.removalPreview" => {
-                let params: AgentProfileIdParams = serde_json::from_value(request.params.clone())?;
+                let params: AgentIdParams = serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(
                     AgentProfileService::default()
-                        .removal_preview(&database, &params.agent_profile_id)?
+                        .removal_preview(&database, &params.agent_id)?
                         .context("AgentProfile does not exist")?,
                 )?)
             }
             "agents.remove" => {
                 let params: UserCommandParams<RemoveMemberCommand> =
                     serde_json::from_value(request.params.clone())?;
-                let agent_profile_id = params.command.agent_profile_id.clone();
+                let agent_id = params.command.agent_id.clone();
                 let mut database = self.database.lock().await;
                 let execution = AgentProfileService::default().remove_member(
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
                 if execution.result.status == CommandResultStatus::Applied {
-                    self.runtime_fleet
-                        .invalidate_member(&agent_profile_id)
-                        .await;
+                    self.runtime_fleet.invalidate_member(&agent_id).await;
                 }
                 self.reconcile_skills_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
@@ -2458,19 +2455,19 @@ impl Core {
             }
             "mcp.config.get" => {
                 let database = self.database.lock().await;
-                let known_agents = Self::known_agent_profile_ids(&database)?;
+                let known_agents = Self::known_agent_ids(&database)?;
                 Ok(serde_json::to_value(self.mcp_config.get(&known_agents)?)?)
             }
             "mcp.config.repairPermissions" => {
                 let database = self.database.lock().await;
-                let known_agents = Self::known_agent_profile_ids(&database)?;
+                let known_agents = Self::known_agent_ids(&database)?;
                 self.mcp_config.repair_permissions()?;
                 Ok(serde_json::to_value(self.mcp_config.get(&known_agents)?)?)
             }
             "mcp.servers.create" => {
                 let params: CreateMcpServerParams = serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
-                let known_agents = Self::known_agent_profile_ids(&database)?;
+                let known_agents = Self::known_agent_ids(&database)?;
                 Ok(serde_json::to_value(
                     self.mcp_config.create(params, &known_agents)?,
                 )?)
@@ -2478,7 +2475,7 @@ impl Core {
             "mcp.servers.update" => {
                 let params: UpdateMcpServerParams = serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
-                let known_agents = Self::known_agent_profile_ids(&database)?;
+                let known_agents = Self::known_agent_ids(&database)?;
                 Ok(serde_json::to_value(
                     self.mcp_config.update(params, &known_agents)?,
                 )?)
@@ -2487,7 +2484,7 @@ impl Core {
                 let params: SetMcpServerEnabledParams =
                     serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
-                let known_agents = Self::known_agent_profile_ids(&database)?;
+                let known_agents = Self::known_agent_ids(&database)?;
                 Ok(serde_json::to_value(
                     self.mcp_config.set_enabled(params, &known_agents)?,
                 )?)
@@ -2496,7 +2493,7 @@ impl Core {
                 let params: SetMcpAssignmentParams =
                     serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
-                let known_agents = Self::known_agent_profile_ids(&database)?;
+                let known_agents = Self::known_agent_ids(&database)?;
                 Ok(serde_json::to_value(
                     self.mcp_config.set_assignment(params, &known_agents)?,
                 )?)
@@ -2504,14 +2501,14 @@ impl Core {
             "mcp.servers.delete" => {
                 let params: DeleteMcpServerParams = serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
-                let known_agents = Self::known_agent_profile_ids(&database)?;
+                let known_agents = Self::known_agent_ids(&database)?;
                 Ok(serde_json::to_value(
                     self.mcp_config.delete(params, &known_agents)?,
                 )?)
             }
             "mcp.import.scan" => {
                 let database = self.database.lock().await;
-                let known_agents = Self::known_agent_profile_ids(&database)?;
+                let known_agents = Self::known_agent_ids(&database)?;
                 Ok(serde_json::to_value(
                     McpImportScanner.scan(&self.mcp_config, &known_agents)?,
                 )?)
@@ -2519,7 +2516,7 @@ impl Core {
             "mcp.import.commit" => {
                 let params: CommitMcpImportParams = serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
-                let known_agents = Self::known_agent_profile_ids(&database)?;
+                let known_agents = Self::known_agent_ids(&database)?;
                 Ok(serde_json::to_value(
                     self.mcp_config.commit_import(params, &known_agents)?,
                 )?)
@@ -2644,19 +2641,18 @@ impl Core {
                     .into_iter()
                     .filter(|profile| profile.presence == "present")
                     .map(|profile| CampCreationMember {
-                        agent_profile_id: profile.id,
-                        handle: profile.handle,
+                        agent_id: profile.agent_id,
                         display_name: profile.display_name,
                         member_order: profile.member_order,
                         runtime_configured: profile.runtime_preference.is_some(),
                         runtime_readiness: profile.runtime_readiness.status,
                     })
                     .collect::<Vec<_>>();
-                let initial_lead_agent_profile_id = present_members
+                let initial_lead_agent_id = present_members
                     .iter()
                     .find(|member| member.runtime_readiness == RuntimeReadinessStatus::Ready)
                     .or_else(|| present_members.first())
-                    .map(|member| member.agent_profile_id.clone());
+                    .map(|member| member.agent_id.clone());
                 let blockers = if present_members.is_empty() {
                     vec![json!({
                         "code": "no_present_members",
@@ -2668,7 +2664,7 @@ impl Core {
                 Ok(json!({
                     "admissible": blockers.is_empty(),
                     "presentMembers": present_members,
-                    "initialLeadAgentProfileId": initial_lead_agent_profile_id,
+                    "initialLeadAgentId": initial_lead_agent_id,
                     "blockers": blockers,
                 }))
             }
@@ -2746,8 +2742,8 @@ impl Core {
                     name: params.name,
                     project_binding_kind,
                     project_path: inspection.project_path,
-                    member_agent_profile_ids: params.member_agent_profile_ids,
-                    default_lead_agent_profile_id: params.default_lead_agent_profile_id,
+                    member_agent_ids: params.member_agent_ids,
+                    default_lead_agent_id: params.default_lead_agent_id,
                     collaboration_mode: params.collaboration_mode,
                 };
                 let mut database = self.database.lock().await;
@@ -4521,7 +4517,7 @@ impl Core {
             &McpProjectionRequest {
                 agent_run_id: &execution.agent_run_id,
                 execution_epoch: execution.execution_epoch,
-                agent_profile_id: &execution.agent_profile_id,
+                agent_id: &execution.agent_id,
                 adapter_kind: execution.runtime.adapter_kind,
                 reported_runtime_version: Some(&execution.runtime.reported_version),
                 execution_root: &execution_root,
@@ -4838,7 +4834,7 @@ impl Core {
                 agent_run_id: &execution.agent_run_id,
                 execution_epoch: execution.execution_epoch,
                 camp_id: &execution.camp_id,
-                agent_profile_id: &execution.agent_profile_id,
+                agent_id: &execution.agent_id,
                 cwd: &execution_root,
                 frozen_runtime: &execution.runtime,
                 runtime_compatibility_digest: &runtime_compatibility_digest,
@@ -5000,7 +4996,7 @@ impl Core {
                     "campId": execution.camp_id,
                     "campTurnId": execution.camp_turn_id,
                     "agentRunId": execution.agent_run_id,
-                    "agentProfileId": execution.agent_profile_id,
+                    "agentId": execution.agent_id,
                     "executionEpoch": execution.execution_epoch,
                     "adapterKind": execution.runtime.adapter_kind,
                     "nativeThreadId": thread_id,
@@ -5041,7 +5037,7 @@ impl Core {
                 "campId": execution.camp_id,
                 "campTurnId": execution.camp_turn_id,
                 "agentRunId": execution.agent_run_id,
-                "agentProfileId": execution.agent_profile_id,
+                "agentId": execution.agent_id,
                 "executionEpoch": execution.execution_epoch,
                 "adapterKind": execution.runtime.adapter_kind,
                 "adapterInstallationId": execution.runtime.installation_id,
@@ -5142,7 +5138,7 @@ impl Core {
                 "campId": execution.camp_id,
                 "campTurnId": execution.camp_turn_id,
                 "agentRunId": execution.agent_run_id,
-                "agentProfileId": execution.agent_profile_id,
+                "agentId": execution.agent_id,
                 "executionEpoch": execution.execution_epoch,
                 "adapterKind": execution.runtime.adapter_kind,
                 "adapterInstallationId": execution.runtime.installation_id,
@@ -5403,7 +5399,7 @@ impl Core {
                 "campId": execution.camp_id,
                 "campTurnId": execution.camp_turn_id,
                 "agentRunId": execution.agent_run_id,
-                "agentProfileId": execution.agent_profile_id,
+                "agentId": execution.agent_id,
                 "executionEpoch": execution.execution_epoch,
                 "adapterKind": execution.runtime.adapter_kind,
                 "adapterInstallationId": execution.runtime.installation_id,
@@ -5640,7 +5636,7 @@ impl Core {
                 &execution.agent_run_id,
                 execution.execution_epoch,
                 &execution.camp_id,
-                &execution.agent_profile_id,
+                &execution.agent_id,
                 &execution.workspace,
                 execution.permission_semantics,
                 &execution.runtime,
@@ -5726,7 +5722,7 @@ impl Core {
                         &execution.agent_run_id,
                         execution.execution_epoch,
                         &execution.camp_id,
-                        &execution.agent_profile_id,
+                        &execution.agent_id,
                         &execution.workspace,
                         execution.permission_semantics,
                         &execution.runtime,
@@ -5824,7 +5820,7 @@ impl Core {
                     "campId": execution.camp_id,
                     "campTurnId": execution.camp_turn_id,
                     "agentRunId": execution.agent_run_id,
-                    "agentProfileId": execution.agent_profile_id,
+                    "agentId": execution.agent_id,
                     "executionEpoch": execution.execution_epoch,
                     "adapterKind": execution.runtime.adapter_kind,
                     "nativeThreadId": session_id,
@@ -5861,7 +5857,7 @@ impl Core {
                 "campId": execution.camp_id,
                 "campTurnId": execution.camp_turn_id,
                 "agentRunId": execution.agent_run_id,
-                "agentProfileId": execution.agent_profile_id,
+                "agentId": execution.agent_id,
                 "executionEpoch": execution.execution_epoch,
                 "adapterKind": execution.runtime.adapter_kind,
                 "adapterInstallationId": execution.runtime.installation_id,
@@ -6280,7 +6276,7 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
         Some(path) => path,
         None => McpConfigStore::default_path()?,
     });
-    mcp_config.migrate_agent_profile_ids(&database.agent_id_aliases()?)?;
+    mcp_config.migrate_agent_ids(&database.agent_id_aliases()?)?;
     let mcp_projection = McpProjectionService::new(&data_dir);
     skill_library.cleanup_expired_staging()?;
     skill_library.install_bundled_skills(&mut database)?;
@@ -7109,7 +7105,7 @@ async fn process_agent_run_acp_approval_request(
             &CommandEnvelope {
                 command_id: format!("runtime-action-prepare:{}", action_request.action_id),
                 actor: ActorRef::Agent {
-                    agent_profile_id: execution.agent_profile_id.clone(),
+                    agent_id: execution.agent_id.clone(),
                     source_agent_run_id: agent_run_id.to_string(),
                 },
                 camp_id: Some(execution.camp_id.clone()),
@@ -7243,7 +7239,7 @@ async fn record_acp_action_completion(
                 &CommandEnvelope {
                     command_id: format!("runtime-action-observed:{action_id}"),
                     actor: ActorRef::Agent {
-                        agent_profile_id: execution.agent_profile_id.clone(),
+                        agent_id: execution.agent_id.clone(),
                         source_agent_run_id: agent_run_id.to_string(),
                     },
                     camp_id: Some(execution.camp_id.clone()),
@@ -8016,7 +8012,7 @@ async fn process_agent_run_approval_request(
             &CommandEnvelope {
                 command_id: format!("runtime-action-prepare:{}", action_request.action_id),
                 actor: ActorRef::Agent {
-                    agent_profile_id: execution.agent_profile_id.clone(),
+                    agent_id: execution.agent_id.clone(),
                     source_agent_run_id: server_request.agent_run_id.to_string(),
                 },
                 camp_id: Some(execution.camp_id.clone()),

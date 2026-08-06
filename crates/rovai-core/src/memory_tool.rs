@@ -193,7 +193,7 @@ impl MemoryToolService {
                 &CommandEnvelope {
                     command_id,
                     actor: ActorRef::Agent {
-                        agent_profile_id: identity.agent_profile_id,
+                        agent_id: identity.agent_id,
                         source_agent_run_id: identity.agent_run_id,
                     },
                     camp_id: Some(identity.camp_id),
@@ -253,7 +253,7 @@ impl MemoryToolService {
                 &CommandEnvelope {
                     command_id,
                     actor: ActorRef::Agent {
-                        agent_profile_id: identity.agent_profile_id,
+                        agent_id: identity.agent_id,
                         source_agent_run_id: identity.agent_run_id,
                     },
                     camp_id: Some(identity.camp_id),

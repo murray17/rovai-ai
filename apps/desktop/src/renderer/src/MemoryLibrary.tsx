@@ -30,7 +30,7 @@ interface Draft {
   firstAgentId: string
   secondAgentId: string
   direction: MemoryDirection
-  directedActorAgentProfileId: string
+  directedActorAgentId: string
 }
 
 const initialDraft: Draft = {
@@ -41,7 +41,7 @@ const initialDraft: Draft = {
   firstAgentId: '',
   secondAgentId: '',
   direction: 'mutual',
-  directedActorAgentProfileId: ''
+  directedActorAgentId: ''
 }
 
 const scopeTabs: Array<[MemoryScopeKind, string]> = [
@@ -52,7 +52,7 @@ const scopeTabs: Array<[MemoryScopeKind, string]> = [
 
 const governanceTabs: Array<[GovernanceFilter, string]> = [
   ['all', '全部'],
-  ['agent', '伙伴形成'],
+  ['agent', '队员形成'],
   ['review', '建议复核'],
   ['stopped', '已停止沿用']
 ]
@@ -187,14 +187,14 @@ export function MemoryLibrary({
   }
 
   const openCreate = (): void => {
-    const firstAgentId = agents[0]?.id ?? ''
+    const firstAgentId = agents[0]?.agentId ?? ''
     setDraft({
       ...initialDraft,
       scope,
       kind: scope === 'relationship' ? 'agreement' : 'preference',
       firstAgentId,
-      secondAgentId: agents.find((agent) => agent.id !== firstAgentId)?.id ?? '',
-      directedActorAgentProfileId: firstAgentId
+      secondAgentId: agents.find((agent) => agent.agentId !== firstAgentId)?.agentId ?? '',
+      directedActorAgentId: firstAgentId
     })
     setEditor({ kind: 'create' })
   }
@@ -205,10 +205,10 @@ export function MemoryLibrary({
       kind: memory.kind ?? 'agreement',
       body: memory.currentBody ?? '',
       retrievalKeys: memory.currentRetrievalKeys.join(', '),
-      firstAgentId: memory.companionAgentProfileId ?? memory.relationshipAgentProfileIds[0] ?? '',
-      secondAgentId: memory.relationshipAgentProfileIds[1] ?? '',
+      firstAgentId: memory.companionAgentId ?? memory.relationshipAgentIds[0] ?? '',
+      secondAgentId: memory.relationshipAgentIds[1] ?? '',
       direction: memory.direction ?? 'mutual',
-      directedActorAgentProfileId: memory.directedActorAgentProfileId ?? ''
+      directedActorAgentId: memory.directedActorAgentId ?? ''
     })
     setEditor({ kind: 'revise', memory })
   }
@@ -234,13 +234,13 @@ export function MemoryLibrary({
     kind: draft.kind,
     body: draft.body.trim(),
     retrievalKeys: retrievalKeys(),
-    companionAgentProfileId: draft.scope === 'companion' ? draft.firstAgentId : null,
-    relationshipAgentProfileIds: draft.scope === 'relationship'
+    companionAgentId: draft.scope === 'companion' ? draft.firstAgentId : null,
+    relationshipAgentIds: draft.scope === 'relationship'
       ? [draft.firstAgentId, draft.secondAgentId]
       : [],
     direction: draft.scope === 'relationship' ? draft.direction : null,
-    directedActorAgentProfileId: draft.scope === 'relationship' && draft.direction === 'directed'
-      ? draft.directedActorAgentProfileId
+    directedActorAgentId: draft.scope === 'relationship' && draft.direction === 'directed'
+      ? draft.directedActorAgentId
       : null,
     reviewAfter: null
   })
@@ -387,7 +387,7 @@ export function MemoryLibrary({
       <div className="memory-summary-strip" aria-label="记忆概览">
         <div><strong>{activeCount}</strong><span>正在沿用</span></div>
         <div className={pending.length > 0 ? 'attention' : ''}><strong>{pending.length}</strong><span>Hearth 待确认</span></div>
-        <div><strong>{agentCount}</strong><span>伙伴形成</span></div>
+        <div><strong>{agentCount}</strong><span>队员形成</span></div>
         <div><strong>{reviewCount}</strong><span>建议复核</span></div>
       </div>
 
@@ -426,7 +426,7 @@ export function MemoryLibrary({
             </button>
           ))}
         </div>
-        <label className="memory-search"><span className="sr-only">搜索记忆</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索正文、Retrieval Keys 或伙伴" /></label>
+        <label className="memory-search"><span className="sr-only">搜索记忆</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索正文、Retrieval Keys 或队员" /></label>
       </div>
 
       <CapacityStrip library={library} scope={scope} />
@@ -496,7 +496,7 @@ function CapacityStrip({ library, scope }: { library: MemoryLibraryView | null; 
       {capacities.slice(0, 6).map((capacity) => (
         <span key={capacity.scopeKey}>
           <strong>{capacity.activeCount}/{capacity.maxCount}</strong> 总量
-          <small>{capacity.agentOriginCount}/{capacity.agentOriginMaxCount} 伙伴形成</small>
+          <small>{capacity.agentOriginCount}/{capacity.agentOriginMaxCount} 队员形成</small>
         </span>
       ))}
     </div>
@@ -536,9 +536,9 @@ function MemoryDetail({
 
       {people.length > 0 && (
         <section className="memory-detail-section">
-          <h4>适用伙伴</h4>
+          <h4>适用队员</h4>
           <div className="memory-people">
-            {people.map((agent) => <span key={agent.id}><MemberAvatar agentProfileId={agent.id} avatarRef={agent.avatarRef} displayName={agent.displayName} size="list" decorative /><strong>{agent.displayName}</strong></span>)}
+            {people.map((agent) => <span key={agent.agentId}><MemberAvatar agentId={agent.agentId} avatarRef={agent.avatarRef} displayName={agent.displayName} size="list" decorative /><strong>{agent.displayName}</strong></span>)}
             {memory.direction && <small>{directionLabel(memory, agents)}</small>}
           </div>
         </section>
@@ -558,7 +558,7 @@ function MemoryDetail({
         <h4>版本记录</h4>
         {memory.revisions.map((revision) => (
           <article key={revision.id}>
-            <span className={`memory-authority ${revision.actorKind === 'agent' ? 'agent-origin' : 'user-origin'}`}>{revision.actorKind === 'agent' ? '伙伴修订' : revision.actorKind === 'user' ? '用户修订' : '已清除'}</span>
+            <span className={`memory-authority ${revision.actorKind === 'agent' ? 'agent-origin' : 'user-origin'}`}>{revision.actorKind === 'agent' ? '队员修订' : revision.actorKind === 'user' ? '用户修订' : '已清除'}</span>
             <strong>{revision.body ?? '正文已清除'}</strong>
             {revision.retrievalKeys.length > 0 && <small>{revision.retrievalKeys.join(' · ')}</small>}
             <small>{formatTime(revision.createdAt)} · {shortId(revision.id)}</small>
@@ -622,7 +622,7 @@ function ProposalDrawer({
                 <div>
                   <span className="memory-catalog-meta"><KindBadge kind={proposal.kind} /><b>{proposal.action === 'add' ? '新增' : '修订'}</b>{proposal.stale && <strong className="memory-stale">基准已变化</strong>}</span>
                   <p>{proposal.body ?? '候选内容已清除'}</p>
-                  <small>{proposal.retrievalKeys.join(' · ')} · {agentName(proposal.proposedByAgentProfileId, agents)} 提议 · {formatTime(proposal.proposedAt)}</small>
+                  <small>{proposal.retrievalKeys.join(' · ')} · {agentName(proposal.proposedByAgentId, agents)} 提议 · {formatTime(proposal.proposedAt)}</small>
                 </div>
                 <footer>
                   <button className="quiet-button compact" type="button" onClick={() => void onReject(proposal)} disabled={busy !== null}>拒绝</button>
@@ -660,7 +660,7 @@ function MemoryEditorDialog({
   const keyBytes = keys.reduce((total, key) => total + new TextEncoder().encode(key).length, 0)
   const identityValid = draft.scope === 'hearth'
     || (draft.scope === 'companion' && draft.firstAgentId !== '')
-    || (draft.scope === 'relationship' && draft.kind !== 'preference' && draft.firstAgentId !== '' && draft.secondAgentId !== '' && draft.firstAgentId !== draft.secondAgentId && (draft.direction === 'mutual' || [draft.firstAgentId, draft.secondAgentId].includes(draft.directedActorAgentProfileId)))
+    || (draft.scope === 'relationship' && draft.kind !== 'preference' && draft.firstAgentId !== '' && draft.secondAgentId !== '' && draft.firstAgentId !== draft.secondAgentId && (draft.direction === 'mutual' || [draft.firstAgentId, draft.secondAgentId].includes(draft.directedActorAgentId)))
   const keysValid = keys.length >= 1 && keys.length <= 3 && keys.every((key) => new TextEncoder().encode(key).length >= 2 && new TextEncoder().encode(key).length <= 24) && keyBytes <= 48
   const bodyBytes = new TextEncoder().encode(draft.body).length
   return (
@@ -674,12 +674,12 @@ function MemoryEditorDialog({
             <div className="memory-editor-grid">
               <label className="field-label">范围<select value={draft.scope} disabled={identityLocked || busy} onChange={(event) => onDraft({ ...draft, scope: event.target.value as MemoryScopeKind })}><option value="hearth">共同约定</option><option value="companion">伙伴经验</option><option value="relationship">协作默契</option></select></label>
               <label className="field-label">类型<select value={draft.kind} disabled={(identityLocked && editor?.kind !== 'proposal') || busy} onChange={(event) => onDraft({ ...draft, kind: event.target.value as MemoryKind })}><option value="preference" disabled={draft.scope === 'relationship'}>偏好</option><option value="agreement">约定</option><option value="lesson">经验</option></select></label>
-              {draft.scope === 'companion' && <AgentSelect label="伙伴" value={draft.firstAgentId} agents={agents} disabled={identityLocked || busy} onChange={(firstAgentId) => onDraft({ ...draft, firstAgentId })} />}
+              {draft.scope === 'companion' && <AgentSelect label="队员" value={draft.firstAgentId} agents={agents} disabled={identityLocked || busy} onChange={(firstAgentId) => onDraft({ ...draft, firstAgentId })} />}
               {draft.scope === 'relationship' && <>
-                <AgentSelect label="伙伴 A" value={draft.firstAgentId} agents={agents} disabled={identityLocked || busy} onChange={(firstAgentId) => onDraft({ ...draft, firstAgentId })} />
-                <AgentSelect label="伙伴 B" value={draft.secondAgentId} agents={agents.filter((agent) => agent.id !== draft.firstAgentId)} disabled={identityLocked || busy} onChange={(secondAgentId) => onDraft({ ...draft, secondAgentId })} />
+                <AgentSelect label="队员 A" value={draft.firstAgentId} agents={agents} disabled={identityLocked || busy} onChange={(firstAgentId) => onDraft({ ...draft, firstAgentId })} />
+                <AgentSelect label="队员 B" value={draft.secondAgentId} agents={agents.filter((agent) => agent.agentId !== draft.firstAgentId)} disabled={identityLocked || busy} onChange={(secondAgentId) => onDraft({ ...draft, secondAgentId })} />
                 <label className="field-label">方向<select value={draft.direction} disabled={identityLocked || busy} onChange={(event) => onDraft({ ...draft, direction: event.target.value as MemoryDirection })}><option value="mutual">双方共同</option><option value="directed">单向</option></select></label>
-                {draft.direction === 'directed' && <AgentSelect label="责任方" value={draft.directedActorAgentProfileId} agents={agents.filter((agent) => [draft.firstAgentId, draft.secondAgentId].includes(agent.id))} disabled={identityLocked || busy} onChange={(directedActorAgentProfileId) => onDraft({ ...draft, directedActorAgentProfileId })} />}
+                {draft.direction === 'directed' && <AgentSelect label="责任方" value={draft.directedActorAgentId} agents={agents.filter((agent) => [draft.firstAgentId, draft.secondAgentId].includes(agent.agentId))} disabled={identityLocked || busy} onChange={(directedActorAgentId) => onDraft({ ...draft, directedActorAgentId })} />}
               </>}
             </div>
             <label className="field-label memory-body-field">Retrieval Keys<input value={draft.retrievalKeys} disabled={busy} placeholder="1–3 个关键词，使用逗号分隔" onChange={(event) => onDraft({ ...draft, retrievalKeys: event.target.value })} /><small>{keys.length}/3 项 · {keyBytes}/48 bytes</small></label>
@@ -693,7 +693,7 @@ function MemoryEditorDialog({
 }
 
 function AgentSelect({ label, value, agents, disabled, onChange }: { label: string; value: string; agents: AgentProfile[]; disabled: boolean; onChange(value: string): void }): React.JSX.Element {
-  return <label className="field-label">{label}<select value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}><option value="">请选择</option>{agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.displayName}</option>)}</select></label>
+  return <label className="field-label">{label}<select value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}><option value="">请选择</option>{agents.map((agent) => <option key={agent.agentId} value={agent.agentId}>{agent.displayName}</option>)}</select></label>
 }
 
 function EmptyMemory({ text }: { text: string }): React.JSX.Element {
@@ -726,7 +726,7 @@ function kindLabel(kind: MemoryKind | null): string {
 }
 
 function originLabel(origin: MemoryRecord['creationOrigin']): string {
-  return origin === 'agent' ? '伙伴形成' : origin === 'accepted_hearth_proposal' ? '伙伴提议 · 用户采纳' : origin === 'user' ? '用户创建' : '—'
+  return origin === 'agent' ? '队员形成' : origin === 'accepted_hearth_proposal' ? '队员提议 · 用户采纳' : origin === 'user' ? '用户创建' : '—'
 }
 
 function lifecycleLabel(lifecycle: MemoryRecord['lifecycle']): string {
@@ -735,10 +735,10 @@ function lifecycleLabel(lifecycle: MemoryRecord['lifecycle']): string {
 
 function memoryPeople(memory: MemoryRecord, agents: AgentProfile[]): AgentProfile[] {
   const ids = memory.scope === 'companion'
-    ? [memory.companionAgentProfileId]
-    : memory.scope === 'relationship' ? memory.relationshipAgentProfileIds : []
+    ? [memory.companionAgentId]
+    : memory.scope === 'relationship' ? memory.relationshipAgentIds : []
   return ids.flatMap((id) => {
-    const agent = agents.find((candidate) => candidate.id === id)
+    const agent = agents.find((candidate) => candidate.agentId === id)
     return agent ? [agent] : []
   })
 }
@@ -751,16 +751,16 @@ function memoryPeopleLabel(memory: MemoryRecord, agents: AgentProfile[]): string
 function directionLabel(memory: MemoryRecord, agents: AgentProfile[]): string {
   if (memory.direction === 'mutual') return '双方共同'
   if (memory.direction === 'directed') {
-    const actor = agentName(memory.directedActorAgentProfileId, agents)
-    const counterparty = agentName(memory.relationshipAgentProfileIds.find((id) => id !== memory.directedActorAgentProfileId), agents)
+    const actor = agentName(memory.directedActorAgentId, agents)
+    const counterparty = agentName(memory.relationshipAgentIds.find((id) => id !== memory.directedActorAgentId), agents)
     return `${actor} → ${counterparty}`
   }
   return ''
 }
 
 function agentName(id: string | null | undefined, agents: AgentProfile[]): string {
-  if (!id) return '未知伙伴'
-  return agents.find((agent) => agent.id === id)?.displayName ?? shortId(id)
+  if (!id) return '未知队员'
+  return agents.find((agent) => agent.agentId === id)?.displayName ?? shortId(id)
 }
 
 function shortId(value: string | null | undefined): string {

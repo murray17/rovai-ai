@@ -39,8 +39,8 @@ pub struct CreateCampCommand {
     pub name: Option<String>,
     pub project_binding_kind: ProjectBindingKind,
     pub project_path: String,
-    pub member_agent_profile_ids: Vec<String>,
-    pub default_lead_agent_profile_id: String,
+    pub member_agent_ids: Vec<String>,
+    pub default_lead_agent_id: String,
     pub collaboration_mode: CampCollaborationMode,
 }
 
@@ -59,8 +59,8 @@ impl CreateCampCommand {
             name: None,
             project_binding_kind: ProjectBindingKind::Directory,
             project_path,
-            member_agent_profile_ids: members.iter().map(|member| (*member).to_string()).collect(),
-            default_lead_agent_profile_id: default_lead.to_string(),
+            member_agent_ids: members.iter().map(|member| (*member).to_string()).collect(),
+            default_lead_agent_id: default_lead.to_string(),
             collaboration_mode: CampCollaborationMode::Peer,
         }
     }
@@ -199,7 +199,7 @@ impl DomainCommand for DeleteCampCommand {
 #[serde(rename_all = "camelCase")]
 pub struct AddCampMemberCommand {
     pub camp_id: String,
-    pub agent_profile_id: String,
+    pub agent_id: String,
     #[serde(default)]
     pub capability_overrides: Value,
 }
@@ -215,8 +215,8 @@ pub enum MessageAddressSpec {
     #[default]
     Default,
     Explicit {
-        #[serde(rename = "agentProfileIds")]
-        agent_profile_ids: Vec<String>,
+        #[serde(rename = "agentIds")]
+        agent_ids: Vec<String>,
     },
     Broadcast,
 }
@@ -308,8 +308,8 @@ pub enum TaskAssigneeUpdate {
     #[default]
     Unchanged,
     Assign {
-        #[serde(rename = "agentProfileId")]
-        agent_profile_id: String,
+        #[serde(rename = "agentId")]
+        agent_id: String,
     },
     Clear,
 }
@@ -356,8 +356,8 @@ pub enum TaskAssigneeFilter {
     Any,
     Unassigned,
     Agent {
-        #[serde(rename = "agentProfileId")]
-        agent_profile_id: String,
+        #[serde(rename = "agentId")]
+        agent_id: String,
     },
 }
 
@@ -388,7 +388,7 @@ pub struct TaskListPage {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionTargetInspection {
-    pub agent_profile_id: String,
+    pub agent_id: String,
     pub conversation_id: Option<String>,
     pub conversation_busy: bool,
     pub earlier_run_queued: bool,
@@ -479,34 +479,20 @@ impl CollaborationService {
         let camp = connection
             .query_row(
                 r#"
-                SELECT project_binding_kind, project_path, status
+                SELECT project_binding_kind, project_path
                 FROM camp WHERE id = ?1
                 "#,
                 [camp_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                    ))
-                },
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
             .optional()?;
-        let Some((project_binding_kind, project_path, status)) = camp else {
+        let Some((project_binding_kind, project_path)) = camp else {
             anyhow::bail!("camp.not_found: Camp does not exist");
         };
         let actor = ActorRef::User {
             user_id: "preflight".into(),
         };
-        let (targets_to_inspect, addressing_blocker) = if status != "active" {
-            (
-                Vec::new(),
-                Some(ExecutionPreflightBlocker {
-                    code: "agent_unavailable".to_string(),
-                    detail: "Archived Camp cannot start execution".to_string(),
-                }),
-            )
-        } else {
+        let (targets_to_inspect, addressing_blocker) =
             match resolve_address(connection, camp_id, address, &actor)? {
                 AddressingOutcome::Resolved(resolution) if !resolution.targets.is_empty() => {
                     (resolution.targets, None)
@@ -531,8 +517,7 @@ impl CollaborationService {
                         ),
                     }),
                 ),
-            }
-        };
+            };
         let mut targets = Vec::with_capacity(targets_to_inspect.len());
         for target in targets_to_inspect {
             let (active_count, queued_count): (i64, i64) = if let Some(conversation_id) =
@@ -552,7 +537,7 @@ impl CollaborationService {
                 (0, 0)
             };
             targets.push(ExecutionTargetInspection {
-                agent_profile_id: target.agent_profile_id,
+                agent_id: target.agent_id,
                 conversation_id: target.conversation_id,
                 conversation_busy: active_count > 0,
                 earlier_run_queued: queued_count > 0,
@@ -594,14 +579,14 @@ impl CollaborationService {
                     "This collaboration mode is not available",
                 ));
             }
-            if envelope.payload.member_agent_profile_ids.is_empty() {
+            if envelope.payload.member_agent_ids.is_empty() {
                 return Ok(rejected(
                     "camp.no_present_members",
                     "At least one present member is required",
                 ));
             }
             let mut unique_member_ids = HashSet::new();
-            for member_id in &envelope.payload.member_agent_profile_ids {
+            for member_id in &envelope.payload.member_agent_ids {
                 if !unique_member_ids.insert(member_id.as_str()) {
                     return Ok(rejected(
                         "camp.invalid_initial_member",
@@ -619,14 +604,13 @@ impl CollaborationService {
                     return Ok(CommandHandlerResult::rejected(
                         "camp.invalid_initial_member",
                         json!({
-                            "agentProfileId": member_id,
+                            "agentId": member_id,
                             "message": "Every initial member must still be present",
                         }),
                     ));
                 }
             }
-            if !unique_member_ids.contains(envelope.payload.default_lead_agent_profile_id.as_str())
-            {
+            if !unique_member_ids.contains(envelope.payload.default_lead_agent_id.as_str()) {
                 return Ok(rejected(
                     "camp.invalid_default_lead",
                     "Default Lead must belong to the selected member set",
@@ -643,11 +627,11 @@ impl CollaborationService {
                 INSERT INTO camp(
                     id, title, name_origin, collaboration_mode,
                     project_binding_kind, project_path,
-                    default_lead_agent_id, status, last_message_sequence,
-                    version, created_at, updated_at, archived_at
+                    default_lead_agent_id, last_message_sequence,
+                    version, created_at, updated_at
                 ) VALUES (
                     ?1, ?2, ?3, ?4, ?5, ?6,
-                    ?7, 'active', 0, 1, ?8, ?8, NULL
+                    ?7, 0, 1, ?8, ?8
                 )
                 "#,
                 params![
@@ -657,15 +641,15 @@ impl CollaborationService {
                     envelope.payload.collaboration_mode.as_str(),
                     envelope.payload.project_binding_kind.as_str(),
                     envelope.payload.project_path,
-                    envelope.payload.default_lead_agent_profile_id,
+                    envelope.payload.default_lead_agent_id,
                     now,
                 ],
             )?;
-            for member_id in &envelope.payload.member_agent_profile_ids {
+            for member_id in &envelope.payload.member_agent_ids {
                 transaction.execute(
                     r#"
                     INSERT INTO camp_member(
-                        camp_id, agent_profile_id, status, capability_overrides_json,
+                        camp_id, agent_id, status, capability_overrides_json,
                         leave_requested_at, leave_request_command_id,
                         pending_default_lead_successor_agent_id,
                         version, joined_at, left_at
@@ -687,8 +671,8 @@ impl CollaborationService {
                     "projectBindingKind": envelope.payload.project_binding_kind,
                     "projectPath": envelope.payload.project_path,
                     "collaborationMode": envelope.payload.collaboration_mode,
-                    "defaultLeadAgentId": envelope.payload.default_lead_agent_profile_id,
-                    "memberCount": envelope.payload.member_agent_profile_ids.len(),
+                    "defaultLeadAgentId": envelope.payload.default_lead_agent_id,
+                    "memberCount": envelope.payload.member_agent_ids.len(),
                 }),
             )?;
             Ok(CommandHandlerResult::applied(
@@ -696,9 +680,9 @@ impl CollaborationService {
                 json!({
                     "campId": camp_id,
                     "title": title,
-                    "defaultLeadAgentId": envelope.payload.default_lead_agent_profile_id,
+                    "defaultLeadAgentId": envelope.payload.default_lead_agent_id,
                     "collaborationMode": envelope.payload.collaboration_mode,
-                    "memberCount": envelope.payload.member_agent_profile_ids.len(),
+                    "memberCount": envelope.payload.member_agent_ids.len(),
                     "projectBindingKind": envelope.payload.project_binding_kind,
                     "projectPath": envelope.payload.project_path,
                 }),
@@ -737,12 +721,6 @@ impl CollaborationService {
                     "Only a User can create a Camp from the new-conversation intake",
                 ));
             }
-            if let Some(rejection) =
-                validate_exact_body_mentions(transaction, &envelope.payload.body, None)?
-            {
-                return Ok(rejection);
-            }
-
             let (profile_ids, initial_lead_id) = {
                 let mut statement = transaction.prepare(
                     r#"
@@ -787,11 +765,11 @@ impl CollaborationService {
                 INSERT INTO camp(
                     id, title, name_origin, collaboration_mode,
                     project_binding_kind, project_path,
-                    default_lead_agent_id, status, last_message_sequence,
-                    version, created_at, updated_at, archived_at
+                    default_lead_agent_id, last_message_sequence,
+                    version, created_at, updated_at
                 ) VALUES (
                     ?1, ?2, 'generated', 'peer', ?3, ?4,
-                    NULL, 'active', 0, 1, ?5, ?5, NULL
+                    NULL, 0, 1, ?5, ?5
                 )
                 "#,
                 params![
@@ -809,7 +787,7 @@ impl CollaborationService {
                 transaction.execute(
                     r#"
                     INSERT INTO camp_member(
-                        camp_id, agent_profile_id, status, capability_overrides_json,
+                        camp_id, agent_id, status, capability_overrides_json,
                         leave_requested_at, leave_request_command_id,
                         pending_default_lead_successor_agent_id,
                         version, joined_at, left_at
@@ -820,7 +798,7 @@ impl CollaborationService {
                 transaction.execute(
                     r#"
                     INSERT INTO conversation(
-                        id, camp_id, agent_profile_id,
+                        id, camp_id, agent_id,
                         provider_override, model_override, action_permission_profile_ref,
                         native_session_id, summary,
                         summary_through_message_sequence,
@@ -831,14 +809,14 @@ impl CollaborationService {
                     params![conversation_id, camp_id, profile_id, now],
                 )?;
                 targets.push(AddressTarget {
-                    agent_profile_id: profile_id.clone(),
+                    agent_id: profile_id.clone(),
                     conversation_id: Some(conversation_id),
                 });
             }
 
             let default_lead = targets
                 .iter()
-                .find(|target| target.agent_profile_id == initial_lead_id)
+                .find(|target| target.agent_id == initial_lead_id)
                 .cloned()
                 .context("configured initial Lead must have a Conversation")?;
             let lead_runtime = match resolve_frozen_runtime(
@@ -847,7 +825,7 @@ impl CollaborationService {
                     .conversation_id
                     .as_deref()
                     .context("configured initial Lead must have a Conversation")?,
-                &default_lead.agent_profile_id,
+                &default_lead.agent_id,
             )? {
                 Ok(runtime) => runtime,
                 Err(blocker) => {
@@ -864,7 +842,7 @@ impl CollaborationService {
                     .conversation_id
                     .as_deref()
                     .context("configured initial Lead must have a Conversation")?,
-                &default_lead.agent_profile_id,
+                &default_lead.agent_id,
                 &lead_runtime,
             ) {
                 delete_transient_camp(transaction, &camp_id)?;
@@ -877,7 +855,7 @@ impl CollaborationService {
                 SET default_lead_agent_id = ?2, version = version + 1, updated_at = ?3
                 WHERE id = ?1
                 "#,
-                params![camp_id, default_lead.agent_profile_id, now],
+                params![camp_id, default_lead.agent_id, now],
             )?;
 
             let resolution = match resolve_address(
@@ -942,7 +920,7 @@ impl CollaborationService {
                     "title": title,
                     "projectBindingKind": envelope.payload.project_binding_kind,
                     "projectPath": envelope.payload.project_path,
-                    "defaultLeadAgentId": default_lead.agent_profile_id,
+                    "defaultLeadAgentId": default_lead.agent_id,
                     "memberCount": profile_ids.len(),
                 }),
             )?;
@@ -979,7 +957,7 @@ impl CollaborationService {
                     "campTurnId": camp_turn_id,
                     "agentRunIds": queued.agent_run_ids,
                     "executionBudget": frozen_execution_budget,
-                    "defaultLeadAgentId": default_lead.agent_profile_id,
+                    "defaultLeadAgentId": default_lead.agent_id,
                     "projectBindingKind": envelope.payload.project_binding_kind,
                     "projectPath": envelope.payload.project_path,
                 }),
@@ -1167,26 +1145,14 @@ impl CollaborationService {
             }
             let camp = transaction
                 .query_row(
-                    "SELECT status, default_lead_agent_id, version FROM camp WHERE id = ?1",
+                    "SELECT default_lead_agent_id, version FROM camp WHERE id = ?1",
                     [&envelope.payload.camp_id],
-                    |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, Option<String>>(1)?,
-                            row.get::<_, i64>(2)?,
-                        ))
-                    },
+                    |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?)),
                 )
                 .optional()?;
-            let Some((camp_status, current_lead, version)) = camp else {
+            let Some((current_lead, version)) = camp else {
                 return Ok(rejected("camp.not_found", "Camp does not exist"));
             };
-            if camp_status != "active" {
-                return Ok(rejected(
-                    "camp.archived",
-                    "Archived Camp cannot reconcile its default Lead",
-                ));
-            }
 
             if let Some(current_lead_id) = current_lead.as_deref()
                 && is_active_member(transaction, &envelope.payload.camp_id, current_lead_id)?
@@ -1208,10 +1174,10 @@ impl CollaborationService {
             let successor = transaction
                 .query_row(
                     r#"
-                    SELECT camp_member.agent_profile_id
+                    SELECT camp_member.agent_id
                     FROM camp_member
                     JOIN agent_profile
-                      ON agent_profile.id = camp_member.agent_profile_id
+                      ON agent_profile.id = camp_member.agent_id
                     WHERE camp_member.camp_id = ?1
                       AND camp_member.status = 'active'
                       AND camp_member.leave_requested_at IS NULL
@@ -1329,20 +1295,14 @@ impl CollaborationService {
         self.gateway.execute(database, envelope, |transaction| {
             let camp_state = transaction
                 .query_row(
-                    "SELECT status, default_lead_agent_id FROM camp WHERE id = ?1",
+                    "SELECT default_lead_agent_id FROM camp WHERE id = ?1",
                     [&envelope.payload.camp_id],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+                    |row| row.get::<_, Option<String>>(0),
                 )
                 .optional()?;
-            let Some((camp_status, default_lead)) = camp_state else {
+            let Some(default_lead) = camp_state else {
                 return Ok(rejected("camp.not_found", "Camp does not exist"));
             };
-            if camp_status != "active" {
-                return Ok(rejected(
-                    "camp.archived",
-                    "Archived Camp cannot accept members",
-                ));
-            }
             if !actor_has_capability(
                 transaction,
                 &envelope.actor,
@@ -1358,7 +1318,7 @@ impl CollaborationService {
             let profile_status = transaction
                 .query_row(
                     "SELECT profile_status FROM agent_profile WHERE id = ?1",
-                    [&envelope.payload.agent_profile_id],
+                    [&envelope.payload.agent_id],
                     |row| row.get::<_, String>(0),
                 )
                 .optional()?;
@@ -1369,7 +1329,7 @@ impl CollaborationService {
                 r#"
                 SELECT COUNT(*)
                 FROM camp_member
-                JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
+                JOIN agent_profile ON agent_profile.id = camp_member.agent_id
                 WHERE camp_member.camp_id = ?1
                   AND camp_member.status = 'active'
                   AND camp_member.leave_requested_at IS NULL
@@ -1389,12 +1349,12 @@ impl CollaborationService {
             transaction.execute(
                 r#"
                 INSERT INTO camp_member(
-                    camp_id, agent_profile_id, status, capability_overrides_json,
+                    camp_id, agent_id, status, capability_overrides_json,
                     leave_requested_at, leave_request_command_id,
                     pending_default_lead_successor_agent_id,
                     version, joined_at, left_at
                 ) VALUES (?1, ?2, 'active', ?3, NULL, NULL, NULL, 1, ?4, NULL)
-                ON CONFLICT(camp_id, agent_profile_id) DO UPDATE SET
+                ON CONFLICT(camp_id, agent_id) DO UPDATE SET
                     status = 'active',
                     capability_overrides_json = excluded.capability_overrides_json,
                     leave_requested_at = NULL,
@@ -1405,7 +1365,7 @@ impl CollaborationService {
                 "#,
                 params![
                     envelope.payload.camp_id,
-                    envelope.payload.agent_profile_id,
+                    envelope.payload.agent_id,
                     serde_json::to_string(&envelope.payload.capability_overrides)?,
                     now,
                 ],
@@ -1418,18 +1378,14 @@ impl CollaborationService {
                     SET default_lead_agent_id = ?2, version = version + 1, updated_at = ?3
                     WHERE id = ?1 AND default_lead_agent_id IS NULL
                     "#,
-                    params![
-                        envelope.payload.camp_id,
-                        envelope.payload.agent_profile_id,
-                        now,
-                    ],
+                    params![envelope.payload.camp_id, envelope.payload.agent_id, now,],
                 )?;
             }
             append_domain_event(
                 transaction,
                 "camp.member_added",
                 Some(&envelope.payload.camp_id),
-                Some(("agent_profile", &envelope.payload.agent_profile_id)),
+                Some(("agent_profile", &envelope.payload.agent_id)),
                 &envelope.actor,
                 envelope.execution_epoch,
                 &json!({}),
@@ -1438,13 +1394,13 @@ impl CollaborationService {
                 "camp.member_added",
                 json!({
                     "campId": envelope.payload.camp_id,
-                    "agentProfileId": envelope.payload.agent_profile_id,
+                    "agentId": envelope.payload.agent_id,
                 }),
                 Some(EntityReference {
                     entity_type: "camp_member".to_string(),
                     entity_id: format!(
                         "{}:{}",
-                        envelope.payload.camp_id, envelope.payload.agent_profile_id
+                        envelope.payload.camp_id, envelope.payload.agent_id
                     ),
                 }),
             ))
@@ -1465,21 +1421,15 @@ impl CollaborationService {
                     "Task is outside the command Camp",
                 ));
             }
-            let camp_status = transaction
+            let camp_exists = transaction
                 .query_row(
-                    "SELECT status FROM camp WHERE id = ?1",
+                    "SELECT 1 FROM camp WHERE id = ?1",
                     [&envelope.payload.camp_id],
-                    |row| row.get::<_, String>(0),
+                    |row| row.get::<_, i64>(0),
                 )
                 .optional()?;
-            let Some(camp_status) = camp_status else {
+            if camp_exists.is_none() {
                 return Ok(rejected("camp.not_found", "Camp does not exist"));
-            };
-            if camp_status != "active" {
-                return Ok(rejected(
-                    "camp.archived",
-                    "Archived Camp cannot accept Tasks",
-                ));
             }
             if matches!(envelope.actor, ActorRef::System { .. }) {
                 return Ok(rejected(
@@ -1560,9 +1510,8 @@ impl CollaborationService {
                 .query_row(
                     r#"
                     SELECT task.camp_id, task.title, task.description, task.status,
-                           task.assignee_agent_id, task.version, camp.status
+                           task.assignee_agent_id, task.version
                     FROM task
-                    JOIN camp ON camp.id = task.camp_id
                     WHERE task.id = ?1
                     "#,
                     [&envelope.payload.task_id],
@@ -1574,7 +1523,6 @@ impl CollaborationService {
                             row.get::<_, String>(3)?,
                             row.get::<_, Option<String>>(4)?,
                             row.get::<_, i64>(5)?,
-                            row.get::<_, String>(6)?,
                         ))
                     },
                 )
@@ -1586,7 +1534,6 @@ impl CollaborationService {
                 current_status,
                 current_assignee,
                 current_version,
-                camp_status,
             )) = task
             else {
                 return Ok(rejected("task.not_found", "Task does not exist"));
@@ -1595,12 +1542,6 @@ impl CollaborationService {
                 return Ok(rejected(
                     "task.camp_mismatch",
                     "Task is outside the command Camp",
-                ));
-            }
-            if camp_status != "active" {
-                return Ok(rejected(
-                    "camp.archived",
-                    "Archived Camp cannot accept Tasks",
                 ));
             }
             if matches!(current_status.as_str(), "completed" | "cancelled") {
@@ -1636,20 +1577,20 @@ impl CollaborationService {
             {
                 return Ok(rejected(
                     "task.update_forbidden",
-                    "Agent can update its own Task or claim an unassigned Task; the Default Lead can update any active Camp Task",
+                    "Agent can update its own Task or claim an unassigned Task; the Default Lead can update any active Task in the Camp",
                 ));
             }
 
             let next_assignee = match &envelope.payload.assignee {
                 TaskAssigneeUpdate::Unchanged => current_assignee.clone(),
-                TaskAssigneeUpdate::Assign { agent_profile_id } => {
-                    if !is_active_member(transaction, &camp_id, agent_profile_id)? {
+                TaskAssigneeUpdate::Assign { agent_id } => {
+                    if !is_active_member(transaction, &camp_id, agent_id)? {
                         return Ok(rejected(
                             "task.assignee_unavailable",
                             "Task assignee is not an active Camp member",
                         ));
                     }
-                    Some(agent_profile_id.clone())
+                    Some(agent_id.clone())
                 }
                 TaskAssigneeUpdate::Clear => None,
             };
@@ -1798,8 +1739,8 @@ impl CollaborationService {
             .filter(|task| match &query.assignee {
                 TaskAssigneeFilter::Any => true,
                 TaskAssigneeFilter::Unassigned => task.assignee_agent_id.is_none(),
-                TaskAssigneeFilter::Agent { agent_profile_id } => {
-                    task.assignee_agent_id.as_deref() == Some(agent_profile_id)
+                TaskAssigneeFilter::Agent { agent_id } => {
+                    task.assignee_agent_id.as_deref() == Some(agent_id)
                 }
             })
             .filter(|task| {
@@ -1874,23 +1815,15 @@ impl CollaborationService {
             .as_ref()
             .map(|_| Uuid::new_v4().to_string());
         self.gateway.execute(database, envelope, |transaction| {
-            let camp_status = transaction
+            let camp_exists = transaction
                 .query_row(
-                    "SELECT status FROM camp WHERE id = ?1",
+                    "SELECT 1 FROM camp WHERE id = ?1",
                     [&envelope.payload.camp_id],
-                    |row| row.get::<_, String>(0),
+                    |row| row.get::<_, i64>(0),
                 )
                 .optional()?;
-            match camp_status.as_deref() {
-                None => return Ok(rejected("camp.not_found", "Camp does not exist")),
-                Some("archived") => {
-                    return Ok(rejected(
-                        "camp.archived",
-                        "Archived Camp cannot accept messages",
-                    ));
-                }
-                Some("active") => {}
-                Some(_) => return Ok(rejected("camp.invalid_status", "Camp status is invalid")),
+            if camp_exists.is_none() {
+                return Ok(rejected("camp.not_found", "Camp does not exist"));
             }
             if !actor_can_write_camp(
                 transaction,
@@ -1940,13 +1873,6 @@ impl CollaborationService {
                     Err(rejection) => return Ok(rejection),
                 }
             } else {
-                if let Some(rejection) = validate_exact_body_mentions(
-                    transaction,
-                    &envelope.payload.body,
-                    Some(&envelope.payload.camp_id),
-                )? {
-                    return Ok(rejection);
-                }
                 CampMessageSubmission {
                     body: envelope.payload.body.clone(),
                     structured_content: None,
@@ -2088,7 +2014,7 @@ impl CollaborationService {
         let inbox_message_id = Uuid::new_v4().to_string();
         self.gateway.execute(database, envelope, |transaction| {
             let ActorRef::Agent {
-                agent_profile_id: sender_agent_id,
+                agent_id: sender_agent_id,
                 source_agent_run_id,
             } = &envelope.actor
             else {
@@ -2147,7 +2073,7 @@ impl CollaborationService {
             let source_scope = transaction
                 .query_row(
                     r#"
-                    SELECT conversation.camp_id, conversation.agent_profile_id,
+                    SELECT conversation.camp_id, conversation.agent_id,
                            agent_run.camp_turn_id
                     FROM conversation
                     JOIN agent_run
@@ -2318,7 +2244,7 @@ impl CollaborationService {
                     transaction.execute(
                         r#"
                         INSERT INTO conversation(
-                            id, camp_id, agent_profile_id,
+                            id, camp_id, agent_id,
                             provider_override, model_override,
                             action_permission_profile_ref,
                             native_session_id, summary,
@@ -2764,18 +2690,18 @@ fn load_structured_draft_submission(
             .context("Camp Composer Draft contains invalid Structured Content")?,
     );
     validate_content(&content)?;
-    let mentioned_agent_profile_ids = member_mention_ids(&content);
+    let mentioned_agent_ids = member_mention_ids(&content);
     let mut member_names = BTreeMap::new();
-    for agent_profile_id in &mentioned_agent_profile_ids {
+    for agent_id in &mentioned_agent_ids {
         let display_name = transaction
             .query_row(
                 "SELECT display_name FROM agent_profile WHERE id = ?1",
-                [agent_profile_id],
+                [agent_id],
                 |row| row.get::<_, String>(0),
             )
             .optional()?;
         if display_name.is_none()
-            || active_address_target(transaction, camp_id, agent_profile_id)?.is_none()
+            || active_address_target(transaction, camp_id, agent_id)?.is_none()
         {
             return Ok(Err(rejected(
                 "mention_target_unavailable",
@@ -2783,13 +2709,11 @@ fn load_structured_draft_submission(
             )));
         }
         member_names.insert(
-            agent_profile_id.clone(),
+            agent_id.clone(),
             display_name.expect("checked Member Mention identity"),
         );
     }
-    let body = render_plain_text(&content, |agent_profile_id| {
-        member_names.get(agent_profile_id).cloned()
-    })?;
+    let body = render_plain_text(&content, |agent_id| member_names.get(agent_id).cloned())?;
     if body.trim().is_empty() {
         return Ok(Err(rejected(
             "camp_message.empty_body",
@@ -2799,11 +2723,11 @@ fn load_structured_draft_submission(
 
     let address = if has_all_members_mention(&content) {
         MessageAddressSpec::Broadcast
-    } else if mentioned_agent_profile_ids.is_empty() {
+    } else if mentioned_agent_ids.is_empty() {
         MessageAddressSpec::Default
     } else {
         MessageAddressSpec::Explicit {
-            agent_profile_ids: mentioned_agent_profile_ids,
+            agent_ids: mentioned_agent_ids,
         }
     };
     let prepared_attachment_ids = {
@@ -2934,7 +2858,7 @@ fn queue_camp_message_and_runs(
         .resolution
         .targets
         .iter()
-        .map(|target| target.agent_profile_id.clone())
+        .map(|target| target.agent_id.clone())
         .collect::<Vec<_>>();
     let addressed_agent_ids_json = serde_json::to_string(&addressed_agent_ids)?;
     let structured_content_json = input
@@ -2951,7 +2875,7 @@ fn queue_camp_message_and_runs(
             id, camp_id, sequence,
             author_type, author_id, source_agent_run_id, body,
             structured_content_json, content_digest,
-            address_mode, addressed_agent_profile_ids_json,
+            address_mode, addressed_agent_ids_json,
             reply_to_camp_message_id, camp_turn_id, agent_run_id,
             tombstoned_at, version, created_at, updated_at
         ) VALUES (
@@ -3006,12 +2930,12 @@ fn queue_camp_message_and_runs(
             )?;
             let prepared = input
                 .effective_configs
-                .and_then(|configs| configs.get(&target.agent_profile_id))
+                .and_then(|configs| configs.get(&target.agent_id))
                 .context("AgentRun target has no prepared Runtime configuration")?;
             let agent_run_id = Uuid::new_v4().to_string();
             let responsibility_key = execution.task_id.as_ref().map_or_else(
-                || format!("respond/{}", target.agent_profile_id),
-                |task_id| format!("execute/{task_id}/{}", target.agent_profile_id),
+                || format!("respond/{}", target.agent_id),
+                |task_id| format!("execute/{task_id}/{}", target.agent_id),
             );
             let workspace_json = input
                 .workspace
@@ -3078,7 +3002,7 @@ fn queue_camp_message_and_runs(
                     execution.completion_role,
                     serde_json::to_string(&prepared.effective_config)?,
                     workspace_json,
-                    format!("{}:{}", input.command_id, target.agent_profile_id),
+                    format!("{}:{}", input.command_id, target.agent_id),
                     prepared.runtime.adapter_kind.as_str(),
                     prepared.runtime.installation_id,
                     prepared.runtime.executable_path,
@@ -3110,7 +3034,7 @@ fn queue_camp_message_and_runs(
         &json!({
             "sequence": camp_sequence,
             "addressSource": input.resolution.source,
-            "addressedAgentProfileIds": addressed_agent_ids,
+            "addressedAgentIds": addressed_agent_ids,
             "campTurnId": input.camp_turn_id,
             "agentRunIds": agent_run_ids,
         }),
@@ -3169,7 +3093,7 @@ pub(crate) fn append_system_camp_message(
         INSERT INTO camp_message(
             id, camp_id, sequence,
             author_type, author_id, source_agent_run_id, body, content_digest,
-            address_mode, addressed_agent_profile_ids_json,
+            address_mode, addressed_agent_ids_json,
             reply_to_camp_message_id, camp_turn_id, agent_run_id,
             tombstoned_at, presentation_json, version, created_at, updated_at
         ) VALUES (
@@ -3202,7 +3126,7 @@ pub(crate) fn append_system_camp_message(
 
 #[derive(Debug, Clone)]
 struct AddressTarget {
-    agent_profile_id: String,
+    agent_id: String,
     conversation_id: Option<String>,
 }
 
@@ -3221,7 +3145,7 @@ fn ensure_resolution_conversations(
         transaction.execute(
             r#"
             INSERT INTO conversation(
-                id, camp_id, agent_profile_id,
+                id, camp_id, agent_id,
                 provider_override, model_override, action_permission_profile_ref,
                 native_session_id, summary,
                 summary_through_message_sequence,
@@ -3229,7 +3153,7 @@ fn ensure_resolution_conversations(
                 version, created_at, updated_at
             ) VALUES (?1, ?2, ?3, NULL, NULL, NULL, NULL, NULL, 0, 0, 1, ?4, ?4)
             "#,
-            params![conversation_id, camp_id, target.agent_profile_id, now],
+            params![conversation_id, camp_id, target.agent_id, now],
         )?;
         target.conversation_id = Some(conversation_id.clone());
         created.push(conversation_id);
@@ -3292,8 +3216,8 @@ fn resolve_address(
                 targets: vec![target],
             }))
         }
-        MessageAddressSpec::Explicit { agent_profile_ids } => {
-            if agent_profile_ids.is_empty() {
+        MessageAddressSpec::Explicit { agent_ids } => {
+            if agent_ids.is_empty() {
                 return Ok(AddressingOutcome::Rejected(rejected(
                     "camp_message.empty_explicit_address",
                     "Explicit address requires at least one Agent",
@@ -3301,12 +3225,11 @@ fn resolve_address(
             }
             let mut seen = HashSet::new();
             let mut targets = Vec::new();
-            for agent_profile_id in agent_profile_ids {
-                if !seen.insert(agent_profile_id) {
+            for agent_id in agent_ids {
+                if !seen.insert(agent_id) {
                     continue;
                 }
-                let Some(target) = active_address_target(transaction, camp_id, agent_profile_id)?
-                else {
+                let Some(target) = active_address_target(transaction, camp_id, agent_id)? else {
                     return Ok(AddressingOutcome::Rejected(rejected(
                         "camp_message.invalid_explicit_target",
                         "Every explicit target must be an active Camp member",
@@ -3321,38 +3244,35 @@ fn resolve_address(
         }
         MessageAddressSpec::Broadcast => {
             let sender_agent_id = match actor {
-                ActorRef::Agent {
-                    agent_profile_id, ..
-                } => Some(agent_profile_id.as_str()),
+                ActorRef::Agent { agent_id, .. } => Some(agent_id.as_str()),
                 _ => None,
             };
             let mut statement = transaction.prepare(
                 r#"
-                SELECT camp_member.agent_profile_id, conversation.id
+                SELECT camp_member.agent_id, conversation.id
                 FROM camp_member
                 JOIN camp ON camp.id = camp_member.camp_id
-                JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
+                JOIN agent_profile ON agent_profile.id = camp_member.agent_id
                 LEFT JOIN conversation
                   ON conversation.camp_id = camp_member.camp_id
-                 AND conversation.agent_profile_id = camp_member.agent_profile_id
+                 AND conversation.agent_id = camp_member.agent_id
                 WHERE camp_member.camp_id = ?1
-                  AND camp.status = 'active'
                   AND camp_member.status = 'active'
                   AND camp_member.leave_requested_at IS NULL
                   AND agent_profile.profile_status = 'present'
-                ORDER BY camp_member.joined_at, camp_member.agent_profile_id
+                ORDER BY camp_member.joined_at, camp_member.agent_id
                 "#,
             )?;
             let rows = statement.query_map([camp_id], |row| {
                 Ok(AddressTarget {
-                    agent_profile_id: row.get(0)?,
+                    agent_id: row.get(0)?,
                     conversation_id: row.get(1)?,
                 })
             })?;
             let mut targets = Vec::new();
             for row in rows {
                 let target = row?;
-                if sender_agent_id == Some(target.agent_profile_id.as_str()) {
+                if sender_agent_id == Some(target.agent_id.as_str()) {
                     continue;
                 }
                 targets.push(target);
@@ -3365,141 +3285,13 @@ fn resolve_address(
     }
 }
 
-fn validate_exact_body_mentions(
-    transaction: &Connection,
-    body: &str,
-    camp_id: Option<&str>,
-) -> Result<Option<CommandHandlerResult>> {
-    for mention in exact_body_handles(body) {
-        let profile = transaction
-            .query_row(
-                r#"
-                SELECT id, profile_status
-                FROM agent_profile
-                WHERE handle = ?1
-                "#,
-                [&mention],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-            )
-            .optional()?;
-        let profile = match profile {
-            Some(profile) => Some(profile),
-            None => profile_for_display_name_mention(transaction, body, &mention)?,
-        };
-        let Some((agent_profile_id, presence)) = profile else {
-            return Ok(Some(rejected(
-                "camp_message.unknown_mention",
-                "Mentioned name does not identify a member",
-            )));
-        };
-        if presence != "present" {
-            return Ok(Some(rejected(
-                "camp_message.unavailable_mention",
-                "Mentioned member is not present",
-            )));
-        }
-        if let Some(camp_id) = camp_id
-            && active_address_target(transaction, camp_id, &agent_profile_id)?.is_none()
-        {
-            return Ok(Some(rejected(
-                "camp_message.non_member_mention",
-                "Mentioned member is not a current member of this Camp",
-            )));
-        }
-    }
-    Ok(None)
-}
-
-fn exact_body_handles(body: &str) -> BTreeSet<String> {
-    let bytes = body.as_bytes();
-    let mut handles = BTreeSet::new();
-    let mut cursor = 0;
-    while cursor < bytes.len() {
-        if bytes[cursor] != b'@'
-            || (cursor > 0
-                && (bytes[cursor - 1].is_ascii_alphanumeric()
-                    || matches!(bytes[cursor - 1], b'_' | b'-')))
-        {
-            cursor += 1;
-            continue;
-        }
-        let start = cursor + 1;
-        if start >= bytes.len() || !bytes[start].is_ascii_alphanumeric() {
-            cursor += 1;
-            continue;
-        }
-        let mut end = start + 1;
-        while end < bytes.len()
-            && (bytes[end].is_ascii_alphanumeric() || matches!(bytes[end], b'_' | b'-'))
-        {
-            end += 1;
-        }
-        if let Ok(handle) = std::str::from_utf8(&bytes[start..end]) {
-            handles.insert(handle.to_string());
-        }
-        cursor = end;
-    }
-    handles
-}
-
-fn profile_for_display_name_mention(
-    transaction: &Connection,
-    body: &str,
-    leading_token: &str,
-) -> Result<Option<(String, String)>> {
-    let leading_token = leading_token.to_lowercase();
-    let mut statement =
-        transaction.prepare("SELECT id, profile_status, display_name FROM agent_profile")?;
-    let rows = statement.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-        ))
-    })?;
-    for row in rows {
-        let (agent_profile_id, presence, display_name) = row?;
-        let normalized = display_name.trim().to_lowercase();
-        let leading_name_token = normalized.split_whitespace().next().unwrap_or_default();
-        if normalized == leading_token
-            || (leading_name_token == leading_token
-                && body_contains_exact_mention(body, display_name.trim()))
-        {
-            return Ok(Some((agent_profile_id, presence)));
-        }
-    }
-    Ok(None)
-}
-
-fn body_contains_exact_mention(body: &str, label: &str) -> bool {
-    let needle = format!("@{label}");
-    let mut search_from = 0;
-    while let Some(relative_start) = body[search_from..].find(&needle) {
-        let start = search_from + relative_start;
-        let before = body[..start].chars().next_back();
-        let end = start + needle.len();
-        let after = body[end..].chars().next();
-        if before.is_none_or(|character| !mention_word_character(character))
-            && after.is_none_or(|character| !mention_word_character(character))
-        {
-            return true;
-        }
-        search_from = end;
-    }
-    false
-}
-
-fn mention_word_character(character: char) -> bool {
-    character.is_alphanumeric() || matches!(character, '_' | '-')
-}
-
 fn active_member_count(transaction: &Connection, camp_id: &str) -> Result<i64> {
     transaction
         .query_row(
             r#"
             SELECT COUNT(*)
             FROM camp_member
-            JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
+            JOIN agent_profile ON agent_profile.id = camp_member.agent_id
             WHERE camp_member.camp_id = ?1
               AND camp_member.status = 'active'
               AND camp_member.leave_requested_at IS NULL
@@ -3514,29 +3306,28 @@ fn active_member_count(transaction: &Connection, camp_id: &str) -> Result<i64> {
 fn active_address_target(
     transaction: &Connection,
     camp_id: &str,
-    agent_profile_id: &str,
+    agent_id: &str,
 ) -> Result<Option<AddressTarget>> {
     transaction
         .query_row(
             r#"
-            SELECT camp_member.agent_profile_id, conversation.id
+            SELECT camp_member.agent_id, conversation.id
             FROM camp_member
             JOIN camp ON camp.id = camp_member.camp_id
-            JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
+            JOIN agent_profile ON agent_profile.id = camp_member.agent_id
             LEFT JOIN conversation
               ON conversation.camp_id = camp_member.camp_id
-             AND conversation.agent_profile_id = camp_member.agent_profile_id
+             AND conversation.agent_id = camp_member.agent_id
             WHERE camp_member.camp_id = ?1
-              AND camp_member.agent_profile_id = ?2
-              AND camp.status = 'active'
+              AND camp_member.agent_id = ?2
               AND camp_member.status = 'active'
               AND camp_member.leave_requested_at IS NULL
               AND agent_profile.profile_status = 'present'
             "#,
-            params![camp_id, agent_profile_id],
+            params![camp_id, agent_id],
             |row| {
                 Ok(AddressTarget {
-                    agent_profile_id: row.get(0)?,
+                    agent_id: row.get(0)?,
                     conversation_id: row.get(1)?,
                 })
             },
@@ -3552,7 +3343,7 @@ fn actor_can_write_camp(
     camp_id: &str,
 ) -> Result<bool> {
     let ActorRef::Agent {
-        agent_profile_id,
+        agent_id,
         source_agent_run_id,
     } = actor
     else {
@@ -3569,22 +3360,17 @@ fn actor_can_write_camp(
         JOIN conversation ON conversation.id = agent_run.conversation_id
         JOIN camp_member
           ON camp_member.camp_id = camp_turn.camp_id
-         AND camp_member.agent_profile_id = conversation.agent_profile_id
-        JOIN agent_profile ON agent_profile.id = conversation.agent_profile_id
+         AND camp_member.agent_id = conversation.agent_id
+        JOIN agent_profile ON agent_profile.id = conversation.agent_id
         WHERE agent_run.id = ?1
           AND camp_turn.camp_id = ?2
-          AND conversation.agent_profile_id = ?3
+          AND conversation.agent_id = ?3
           AND agent_run.execution_epoch = ?4
           AND agent_run.status IN ('running', 'waiting')
           AND camp_member.status = 'active'
           AND camp_member.leave_requested_at IS NULL
         "#,
-        params![
-            source_agent_run_id,
-            camp_id,
-            agent_profile_id,
-            execution_epoch,
-        ],
+        params![source_agent_run_id, camp_id, agent_id, execution_epoch,],
         |row| row.get(0),
     )?;
     Ok(count == 1)
@@ -3599,10 +3385,10 @@ impl TaskReadScope {
     fn can_read(&self, task: &TaskRecord) -> bool {
         match self {
             Self::All => true,
-            Self::Member(agent_profile_id) => task
+            Self::Member(agent_id) => task
                 .assignee_agent_id
                 .as_deref()
-                .is_none_or(|assignee| assignee == agent_profile_id),
+                .is_none_or(|assignee| assignee == agent_id),
         }
     }
 }
@@ -3615,16 +3401,14 @@ fn task_read_scope(
 ) -> Result<TaskReadScope> {
     match actor {
         ActorRef::User { .. } => Ok(TaskReadScope::All),
-        ActorRef::Agent {
-            agent_profile_id, ..
-        } => {
+        ActorRef::Agent { agent_id, .. } => {
             if !actor_can_write_camp(connection, actor, execution_epoch, camp_id)? {
                 anyhow::bail!("task.query_forbidden: AgentRun is stale or outside the active Camp");
             }
             let is_default_lead: bool = connection
                 .query_row(
                     "SELECT default_lead_agent_id = ?2 FROM camp WHERE id = ?1",
-                    params![camp_id, agent_profile_id],
+                    params![camp_id, agent_id],
                     |row| row.get(0),
                 )
                 .optional()?
@@ -3632,7 +3416,7 @@ fn task_read_scope(
             if is_default_lead {
                 Ok(TaskReadScope::All)
             } else {
-                Ok(TaskReadScope::Member(agent_profile_id.clone()))
+                Ok(TaskReadScope::Member(agent_id.clone()))
             }
         }
         ActorRef::System { .. } => {
@@ -3685,31 +3469,24 @@ fn task_available_actions(
     }
     match actor {
         ActorRef::User { .. } => vec!["update".to_string()],
-        ActorRef::Agent {
-            agent_profile_id, ..
-        } if task.assignee_agent_id.as_deref() == Some(agent_profile_id) => {
+        ActorRef::Agent { agent_id, .. } if task.assignee_agent_id.as_deref() == Some(agent_id) => {
             vec!["update".to_string()]
         }
-        ActorRef::Agent {
-            agent_profile_id, ..
-        } if task.assignee_agent_id.is_none() => {
-            vec![format!("claim:{agent_profile_id}")]
+        ActorRef::Agent { agent_id, .. } if task.assignee_agent_id.is_none() => {
+            vec![format!("claim:{agent_id}")]
         }
         _ => Vec::new(),
     }
 }
 
 fn actor_is_default_lead(connection: &Connection, camp_id: &str, actor: &ActorRef) -> Result<bool> {
-    let ActorRef::Agent {
-        agent_profile_id, ..
-    } = actor
-    else {
+    let ActorRef::Agent { agent_id, .. } = actor else {
         return Ok(false);
     };
     connection
         .query_row(
             "SELECT default_lead_agent_id = ?2 FROM camp WHERE id = ?1",
-            params![camp_id, agent_profile_id],
+            params![camp_id, agent_id],
             |row| row.get(0),
         )
         .optional()
@@ -3921,29 +3698,25 @@ fn prepare_agent_run_configs(
             .conversation_id
             .as_deref()
             .context("Execution target has no admitted Conversation")?;
-        let runtime =
-            match resolve_frozen_runtime(transaction, conversation_id, &target.agent_profile_id)? {
-                Ok(runtime) => runtime,
-                Err(blocker) => {
-                    return Ok(Err(CommandHandlerResult::rejected(
-                        "agent_run.runtime_not_ready",
-                        json!({
-                            "agentProfileId": target.agent_profile_id,
-                            "conversationId": conversation_id,
-                            "blockerCode": blocker.code,
-                            "detail": blocker.payload,
-                        }),
-                    )));
-                }
-            };
-        let effective_config = build_effective_config(
-            transaction,
-            conversation_id,
-            &target.agent_profile_id,
-            &runtime,
-        )?;
+        let runtime = match resolve_frozen_runtime(transaction, conversation_id, &target.agent_id)?
+        {
+            Ok(runtime) => runtime,
+            Err(blocker) => {
+                return Ok(Err(CommandHandlerResult::rejected(
+                    "agent_run.runtime_not_ready",
+                    json!({
+                        "agentId": target.agent_id,
+                        "conversationId": conversation_id,
+                        "blockerCode": blocker.code,
+                        "detail": blocker.payload,
+                    }),
+                )));
+            }
+        };
+        let effective_config =
+            build_effective_config(transaction, conversation_id, &target.agent_id, &runtime)?;
         configs.insert(
-            target.agent_profile_id.clone(),
+            target.agent_id.clone(),
             PreparedAgentRunConfig {
                 effective_config,
                 runtime,
@@ -3956,7 +3729,7 @@ fn prepare_agent_run_configs(
 pub(crate) fn build_effective_config(
     transaction: &Transaction<'_>,
     conversation_id: &str,
-    agent_profile_id: &str,
+    agent_id: &str,
     runtime: &FrozenAgentRuntimeConfig,
 ) -> Result<Value> {
     let (
@@ -3973,13 +3746,13 @@ pub(crate) fn build_effective_config(
                camp_member.version,
                conversation.version
         FROM conversation
-        JOIN agent_profile ON agent_profile.id = conversation.agent_profile_id
+        JOIN agent_profile ON agent_profile.id = conversation.agent_id
         JOIN camp_member
           ON camp_member.camp_id = conversation.camp_id
-         AND camp_member.agent_profile_id = conversation.agent_profile_id
-        WHERE conversation.id = ?1 AND conversation.agent_profile_id = ?2
+         AND camp_member.agent_id = conversation.agent_id
+        WHERE conversation.id = ?1 AND conversation.agent_id = ?2
         "#,
-        params![conversation_id, agent_profile_id],
+        params![conversation_id, agent_id],
         |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -4022,7 +3795,7 @@ pub(crate) fn build_effective_config(
         );
     let mut snapshot = json!({
         "schemaVersion": 3,
-        "agentProfileId": agent_profile_id,
+        "agentId": agent_id,
         "agentProfileVersion": agent_profile_version,
         "campMemberVersion": camp_member_version,
         "conversationVersion": conversation_version,
@@ -4842,8 +4615,8 @@ fn validate_task_update_input(command: &UpdateTaskCommand) -> Result<()> {
     {
         anyhow::bail!("Task description must not exceed 20000 characters");
     }
-    if let TaskAssigneeUpdate::Assign { agent_profile_id } = &command.assignee
-        && agent_profile_id.trim().is_empty()
+    if let TaskAssigneeUpdate::Assign { agent_id } = &command.assignee
+        && agent_id.trim().is_empty()
     {
         anyhow::bail!("Task assignee must not be empty");
     }
@@ -4854,9 +4627,9 @@ fn task_creator_parts(actor: &ActorRef) -> Result<(&'static str, &str, Option<&s
     match actor {
         ActorRef::User { user_id } => Ok(("user", user_id, None)),
         ActorRef::Agent {
-            agent_profile_id,
+            agent_id,
             source_agent_run_id,
-        } => Ok(("agent", agent_profile_id, Some(source_agent_run_id))),
+        } => Ok(("agent", agent_id, Some(source_agent_run_id))),
         ActorRef::System { .. } => anyhow::bail!("System components cannot create business Tasks"),
     }
 }
@@ -4866,19 +4639,16 @@ fn agent_can_update_task(
     current_assignee: Option<&str>,
     assignee_update: &TaskAssigneeUpdate,
 ) -> bool {
-    let ActorRef::Agent {
-        agent_profile_id, ..
-    } = actor
-    else {
+    let ActorRef::Agent { agent_id, .. } = actor else {
         return matches!(actor, ActorRef::User { .. });
     };
     match current_assignee {
-        Some(assignee) => assignee == agent_profile_id,
+        Some(assignee) => assignee == agent_id,
         None => matches!(
             assignee_update,
             TaskAssigneeUpdate::Assign {
-                agent_profile_id: target
-            } if target == agent_profile_id
+                agent_id: target
+            } if target == agent_id
         ),
     }
 }
@@ -4920,9 +4690,9 @@ fn actor_parts(actor: &ActorRef) -> (&'static str, &str, Option<&str>) {
     match actor {
         ActorRef::User { user_id } => ("user", user_id, None),
         ActorRef::Agent {
-            agent_profile_id,
+            agent_id,
             source_agent_run_id,
-        } => ("agent", agent_profile_id, Some(source_agent_run_id)),
+        } => ("agent", agent_id, Some(source_agent_run_id)),
         ActorRef::System { component_id } => ("system", component_id, None),
     }
 }
@@ -4962,25 +4732,20 @@ pub(crate) fn append_domain_event(
     Ok(())
 }
 
-fn is_active_member(
-    transaction: &Transaction<'_>,
-    camp_id: &str,
-    agent_profile_id: &str,
-) -> Result<bool> {
+fn is_active_member(transaction: &Transaction<'_>, camp_id: &str, agent_id: &str) -> Result<bool> {
     let count: i64 = transaction.query_row(
         r#"
         SELECT COUNT(*)
         FROM camp_member
         JOIN camp ON camp.id = camp_member.camp_id
-        JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
+        JOIN agent_profile ON agent_profile.id = camp_member.agent_id
         WHERE camp_member.camp_id = ?1
-          AND camp_member.agent_profile_id = ?2
-          AND camp.status = 'active'
+          AND camp_member.agent_id = ?2
           AND camp_member.status = 'active'
           AND camp_member.leave_requested_at IS NULL
           AND agent_profile.profile_status = 'present'
         "#,
-        params![camp_id, agent_profile_id],
+        params![camp_id, agent_id],
         |row| row.get(0),
     )?;
     Ok(count == 1)
@@ -5039,7 +4804,7 @@ mod tests {
     fn agent_envelope<P>(
         command_id: &str,
         camp_id: &str,
-        agent_profile_id: &str,
+        agent_id: &str,
         source_agent_run_id: &str,
         execution_epoch: i64,
         payload: P,
@@ -5047,7 +4812,7 @@ mod tests {
         CommandEnvelope {
             command_id: command_id.to_string(),
             actor: ActorRef::Agent {
-                agent_profile_id: agent_profile_id.to_string(),
+                agent_id: agent_id.to_string(),
                 source_agent_run_id: source_agent_run_id.to_string(),
             },
             camp_id: Some(camp_id.to_string()),
@@ -5058,8 +4823,9 @@ mod tests {
     }
 
     #[test]
-    fn exact_mentions_reject_away_handles_without_creating_a_camp() {
+    fn plain_at_text_does_not_resolve_legacy_handles() {
         let (mut database, directory) = test_database();
+        configure_test_runtime(&database, &["agent_2"]);
         database
             .connection()
             .execute(
@@ -5079,14 +4845,15 @@ mod tests {
                         project_binding_kind: ProjectBindingKind::Directory,
                         body: "@luoke 请回答；邮箱 dev@muwa.example 不属于 mention。".to_string(),
                         address: MessageAddressSpec::Default,
-                        purpose: "验证精确 handle".to_string(),
-                        expected_output: "拒绝".to_string(),
+                        purpose: "验证普通文本".to_string(),
+                        expected_output: "回复".to_string(),
                     },
                 ),
             )
-            .expect("unavailable mention should be a durable rejection");
-        assert_eq!(result.result.code, "camp_message.unavailable_mention");
-        assert_eq!(row_count(&database, "camp"), 0);
+            .expect("plain text should not be parsed as a mention");
+        assert_eq!(result.result.status, CommandResultStatus::Accepted);
+        assert_eq!(row_count(&database, "camp"), 1);
+        assert_eq!(row_count(&database, "agent_run"), 1);
 
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
@@ -5208,8 +4975,8 @@ mod tests {
             name: Some("  重构\n\tMCP   设置页  ".to_string()),
             project_path: directory.join("workspace").to_string_lossy().to_string(),
             project_binding_kind: ProjectBindingKind::Directory,
-            member_agent_profile_ids: vec!["agent_2".to_string(), "agent_1".to_string()],
-            default_lead_agent_profile_id: "agent_1".to_string(),
+            member_agent_ids: vec!["agent_2".to_string(), "agent_1".to_string()],
+            default_lead_agent_id: "agent_1".to_string(),
             collaboration_mode: CampCollaborationMode::Peer,
         };
         let created = service
@@ -5282,8 +5049,8 @@ mod tests {
                     name,
                     project_path: directory.join("workspace").to_string_lossy().to_string(),
                     project_binding_kind: ProjectBindingKind::Directory,
-                    member_agent_profile_ids: members.into_iter().map(str::to_string).collect(),
-                    default_lead_agent_profile_id: lead.to_string(),
+                    member_agent_ids: members.into_iter().map(str::to_string).collect(),
+                    default_lead_agent_id: lead.to_string(),
                     collaboration_mode: mode,
                 },
             )
@@ -5398,7 +5165,7 @@ mod tests {
         let target: String = database
             .connection()
             .query_row(
-                "SELECT agent_profile_id FROM conversation WHERE camp_id = ?1",
+                "SELECT agent_id FROM conversation WHERE camp_id = ?1",
                 [&camp_id],
                 |row| row.get(0),
             )
@@ -5575,7 +5342,7 @@ mod tests {
                         body: "请一起处理".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Explicit {
-                            agent_profile_ids: vec!["agent_1".to_string(), "agent_2".to_string()],
+                            agent_ids: vec!["agent_1".to_string(), "agent_2".to_string()],
                         },
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
@@ -5611,7 +5378,7 @@ mod tests {
                     Some(&camp_id),
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
-                        agent_profile_id: "agent_2".to_string(),
+                        agent_id: "agent_2".to_string(),
                         capability_overrides: json!({}),
                     },
                 ),
@@ -5625,7 +5392,7 @@ mod tests {
             .execute(
                 r#"
                 INSERT INTO conversation(
-                    id, camp_id, agent_profile_id, last_message_sequence,
+                    id, camp_id, agent_id, last_message_sequence,
                     version, created_at, updated_at
                 ) VALUES (
                     'conversation-muwa-existing', ?1, 'agent_2', 0,
@@ -5641,7 +5408,7 @@ mod tests {
                 r#"
                 UPDATE camp_member
                 SET status = 'left', left_at = datetime('now')
-                WHERE camp_id = ?1 AND agent_profile_id = 'agent_2'
+                WHERE camp_id = ?1 AND agent_id = 'agent_2'
                 "#,
                 [&camp_id],
             )
@@ -5654,7 +5421,7 @@ mod tests {
                     Some(&camp_id),
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
-                        agent_profile_id: "agent_2".to_string(),
+                        agent_id: "agent_2".to_string(),
                         capability_overrides: json!({}),
                     },
                 ),
@@ -5667,7 +5434,7 @@ mod tests {
             .query_row(
                 r#"
                 SELECT id FROM conversation
-                WHERE camp_id = ?1 AND agent_profile_id = 'agent_2'
+                WHERE camp_id = ?1 AND agent_id = 'agent_2'
                 "#,
                 [&camp_id],
                 |row| row.get(0),
@@ -5875,7 +5642,7 @@ mod tests {
                         project_binding_kind: ProjectBindingKind::Directory,
                         body: "@muwa 和 @luoke 请分别回答".to_string(),
                         address: MessageAddressSpec::Explicit {
-                            agent_profile_ids: vec!["agent_2".to_string(), "agent_1".to_string()],
+                            agent_ids: vec!["agent_2".to_string(), "agent_1".to_string()],
                         },
                         purpose: "并行回答".to_string(),
                         expected_output: "两份公开回复".to_string(),
@@ -5897,7 +5664,7 @@ mod tests {
             .connection()
             .query_row(
                 r#"
-                SELECT address_mode, addressed_agent_profile_ids_json
+                SELECT address_mode, addressed_agent_ids_json
                 FROM camp_message WHERE camp_id = ?1
                 "#,
                 [camp_id],
@@ -5965,7 +5732,7 @@ mod tests {
                         project_binding_kind: ProjectBindingKind::Directory,
                         body: "@muwa 请回答".to_string(),
                         address: MessageAddressSpec::Explicit {
-                            agent_profile_ids: vec!["agent_2".to_string()],
+                            agent_ids: vec!["agent_2".to_string()],
                         },
                         purpose: "回答".to_string(),
                         expected_output: "回复".to_string(),
@@ -6270,16 +6037,16 @@ mod tests {
                 text: "普通文字 @luoke；请 ".to_string(),
             },
             Segment::MemberMention {
-                agent_profile_id: "agent_2".to_string(),
+                agent_id: "agent_2".to_string(),
             },
             Segment::Text {
                 text: " 和 ".to_string(),
             },
             Segment::MemberMention {
-                agent_profile_id: "agent_1".to_string(),
+                agent_id: "agent_1".to_string(),
             },
             Segment::MemberMention {
-                agent_profile_id: "agent_2".to_string(),
+                agent_id: "agent_2".to_string(),
             },
         ];
         let draft = store
@@ -6324,7 +6091,7 @@ mod tests {
             .query_row(
                 r#"
                 SELECT body, structured_content_json, address_mode,
-                       addressed_agent_profile_ids_json, content_digest
+                       addressed_agent_ids_json, content_digest
                 FROM camp_message
                 "#,
                 [],
@@ -6378,10 +6145,10 @@ mod tests {
                         text: " 请同步处理；".to_string(),
                     },
                     Segment::MemberMention {
-                        agent_profile_id: "agent_2".to_string(),
+                        agent_id: "agent_2".to_string(),
                     },
                     Segment::MemberMention {
-                        agent_profile_id: "agent_2".to_string(),
+                        agent_id: "agent_2".to_string(),
                     },
                 ],
             )
@@ -6424,7 +6191,7 @@ mod tests {
         let (mode, addressed): (String, String) = database
             .connection()
             .query_row(
-                "SELECT address_mode, addressed_agent_profile_ids_json FROM camp_message",
+                "SELECT address_mode, addressed_agent_ids_json FROM camp_message",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -6450,7 +6217,7 @@ mod tests {
                 &camp_id,
                 0,
                 vec![Segment::MemberMention {
-                    agent_profile_id: "agent_1".to_string(),
+                    agent_id: "agent_1".to_string(),
                 }],
             )
             .unwrap();
@@ -6602,7 +6369,7 @@ mod tests {
                 body: "请分别给出方案。".to_string(),
                 prepared_attachment_ids: Vec::new(),
                 address: MessageAddressSpec::Explicit {
-                    agent_profile_ids: vec![
+                    agent_ids: vec![
                         "agent_2".to_string(),
                         "agent_1".to_string(),
                         "agent_2".to_string(),
@@ -6744,7 +6511,7 @@ mod tests {
                         description: None,
                         status: Some(TaskStatus::InProgress),
                         assignee: TaskAssigneeUpdate::Assign {
-                            agent_profile_id: "agent_2".to_string(),
+                            agent_id: "agent_2".to_string(),
                         },
                     },
                 ),
@@ -7066,7 +6833,7 @@ mod tests {
                         body: "请处理 Task".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Explicit {
-                            agent_profile_ids: vec!["agent_1".to_string()],
+                            agent_ids: vec!["agent_1".to_string()],
                         },
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
@@ -7114,7 +6881,7 @@ mod tests {
             .unwrap();
         assert_eq!(user_tasks.len(), 2);
         let luoke_actor = ActorRef::Agent {
-            agent_profile_id: "agent_1".to_string(),
+            agent_id: "agent_1".to_string(),
             source_agent_run_id: source_agent_run_id.clone(),
         };
         let ordinary_tasks = service
@@ -7206,7 +6973,7 @@ mod tests {
                         description: None,
                         status: Some(TaskStatus::InProgress),
                         assignee: TaskAssigneeUpdate::Assign {
-                            agent_profile_id: "agent_1".to_string(),
+                            agent_id: "agent_1".to_string(),
                         },
                     },
                 ),
@@ -7271,7 +7038,7 @@ mod tests {
                 body: "沐瓦先处理。".to_string(),
                 prepared_attachment_ids: Vec::new(),
                 address: MessageAddressSpec::Explicit {
-                    agent_profile_ids: vec!["agent_2".to_string()],
+                    agent_ids: vec!["agent_2".to_string()],
                 },
                 reply_to_camp_message_id: None,
                 execution: Some(ExecutionRequest {
@@ -7317,7 +7084,7 @@ mod tests {
         let send = CommandEnvelope {
             command_id: "send-inbox".to_string(),
             actor: ActorRef::Agent {
-                agent_profile_id: "agent_2".to_string(),
+                agent_id: "agent_2".to_string(),
                 source_agent_run_id: sender_run_id.clone(),
             },
             camp_id: Some(camp_id.clone()),

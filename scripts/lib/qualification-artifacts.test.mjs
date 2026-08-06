@@ -321,7 +321,7 @@ function environmentFixture(result) {
     },
     case: result.case,
     team: [{
-      id: 'agent-lead',
+      agentId: 'agent-lead',
       runtimeSelection: { adapterKind: 'codex-cli' },
       runtimePreference: {
         model: { modelId: 'snapshot-model', options: {} },

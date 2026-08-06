@@ -207,7 +207,7 @@ pub struct TeamToolService {
 struct SenderIdentity {
     camp_id: String,
     conversation_id: String,
-    agent_profile_id: String,
+    agent_id: String,
     agent_run_id: String,
     execution_epoch: i64,
     camp_turn_id: String,
@@ -219,7 +219,7 @@ struct SenderIdentity {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RecordedTeamCommandIdentity {
     camp_id: String,
-    agent_profile_id: String,
+    agent_id: String,
     source_agent_run_id: String,
     execution_epoch: i64,
 }
@@ -227,7 +227,7 @@ struct RecordedTeamCommandIdentity {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthenticatedTeamToolRun {
     pub camp_id: String,
-    pub agent_profile_id: String,
+    pub agent_id: String,
     pub agent_run_id: String,
     pub execution_epoch: i64,
 }
@@ -255,7 +255,7 @@ impl TeamToolService {
         )?;
         Ok(AuthenticatedTeamToolRun {
             camp_id: identity.camp_id,
-            agent_profile_id: identity.agent_profile_id,
+            agent_id: identity.agent_id,
             agent_run_id: identity.agent_run_id,
             execution_epoch: identity.execution_epoch,
         })
@@ -277,7 +277,7 @@ impl TeamToolService {
         )?;
         Ok(AuthenticatedTeamToolRun {
             camp_id: identity.camp_id,
-            agent_profile_id: identity.agent_profile_id,
+            agent_id: identity.agent_id,
             agent_run_id: identity.agent_run_id,
             execution_epoch: identity.execution_epoch,
         })
@@ -307,7 +307,7 @@ impl TeamToolService {
         )?;
         Ok(AuthenticatedTeamToolRun {
             camp_id: identity.camp_id,
-            agent_profile_id: identity.agent_profile_id,
+            agent_id: identity.agent_id,
             agent_run_id: identity.agent_run_id,
             execution_epoch: identity.execution_epoch,
         })
@@ -357,7 +357,7 @@ impl TeamToolService {
                 let supplied_credential_digest = credential_digest(binding_credential);
                 let mut statement = database.connection().prepare(
                     r#"
-                    SELECT camp_turn.camp_id, conversation.agent_profile_id,
+                    SELECT camp_turn.camp_id, conversation.agent_id,
                            agent_run.id, agent_run.execution_epoch
                     FROM conversation
                     JOIN agent_run ON agent_run.conversation_id = conversation.id
@@ -379,7 +379,7 @@ impl TeamToolService {
                         |row| {
                             Ok(AuthenticatedTeamToolRun {
                                 camp_id: row.get(0)?,
-                                agent_profile_id: row.get(1)?,
+                                agent_id: row.get(1)?,
                                 agent_run_id: row.get(2)?,
                                 execution_epoch: row.get(3)?,
                             })
@@ -400,7 +400,7 @@ impl TeamToolService {
                         load_recorded_team_command_identity(database.connection(), &command_id)?;
                     if recorded.as_ref().is_some_and(|recorded| {
                         recorded.camp_id == candidate.camp_id
-                            && recorded.agent_profile_id == candidate.agent_profile_id
+                            && recorded.agent_id == candidate.agent_id
                             && recorded.source_agent_run_id == candidate.agent_run_id
                             && recorded.execution_epoch == candidate.execution_epoch
                     }) {
@@ -435,7 +435,7 @@ impl TeamToolService {
                 "recipient": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Stable AgentProfile ID of another active Camp member."
+                    "description": "Stable Agent ID of another active Camp Member."
                 },
                 "content": {
                     "type": "string",
@@ -592,8 +592,8 @@ impl TeamToolService {
                 JOIN conversation ON conversation.id = agent_run.conversation_id
                 JOIN camp_member
                   ON camp_member.camp_id = camp.id
-                 AND camp_member.agent_profile_id = conversation.agent_profile_id
-                JOIN agent_profile ON agent_profile.id = conversation.agent_profile_id
+                 AND camp_member.agent_id = conversation.agent_id
+                JOIN agent_profile ON agent_profile.id = conversation.agent_id
                 WHERE agent_run.id = ?1
                   AND agent_run.execution_epoch = ?2
                   AND agent_run.status = 'running'
@@ -602,7 +602,6 @@ impl TeamToolService {
                   AND camp_turn.cancel_requested_at IS NULL
                   AND camp_turn.execution_budget_exhausted_at IS NULL
                   AND camp_turn.execution_budget_deadline_at > ?3
-                  AND camp.status = 'active'
                   AND camp_member.status = 'active'
                   AND camp_member.leave_requested_at IS NULL
                 "#,
@@ -903,7 +902,7 @@ impl TeamToolService {
             let replay_envelope = CommandEnvelope {
                 command_id: command_id.clone(),
                 actor: ActorRef::Agent {
-                    agent_profile_id: recorded.agent_profile_id,
+                    agent_id: recorded.agent_id,
                     source_agent_run_id: recorded.source_agent_run_id,
                 },
                 camp_id: Some(recorded.camp_id),
@@ -927,7 +926,7 @@ impl TeamToolService {
         let envelope = CommandEnvelope {
             command_id,
             actor: ActorRef::Agent {
-                agent_profile_id: sender.agent_profile_id.clone(),
+                agent_id: sender.agent_id.clone(),
                 source_agent_run_id: sender.agent_run_id.clone(),
             },
             camp_id: Some(sender.camp_id.clone()),
@@ -954,7 +953,7 @@ impl TeamToolService {
             };
             if current.agent_run_id != sender.agent_run_id
                 || current.execution_epoch != sender.execution_epoch
-                || current.agent_profile_id != sender.agent_profile_id
+                || current.agent_id != sender.agent_id
                 || current.camp_id != sender.camp_id
                 || current.credential_digest != sender.credential_digest
             {
@@ -970,7 +969,7 @@ impl TeamToolService {
                 ));
             }
             let recipient_agent_id = envelope.payload.recipient.trim().to_string();
-            if current.agent_profile_id == recipient_agent_id {
+            if current.agent_id == recipient_agent_id {
                 return Ok(rejected(
                     "team_tool.self_send",
                     "team.call_member must target another Camp member",
@@ -1140,7 +1139,7 @@ impl TeamToolService {
                     )?;
                 }
                 let actor = ActorRef::Agent {
-                    agent_profile_id: current.agent_profile_id.clone(),
+                    agent_id: current.agent_id.clone(),
                     source_agent_run_id: current.agent_run_id.clone(),
                 };
                 let exhaustion = exhaust_camp_turn_execution_budget(
@@ -1222,7 +1221,7 @@ impl TeamToolService {
             )?;
             let sender_name: String = transaction.query_row(
                 "SELECT display_name FROM agent_profile WHERE id = ?1",
-                [&current.agent_profile_id],
+                [&current.agent_id],
                 |row| row.get(0),
             )?;
             let expected_output = member_call_expected_output(recipient_runtime.adapter_kind);
@@ -1234,13 +1233,13 @@ impl TeamToolService {
                 source_agent_run_id: current.agent_run_id.clone(),
                 a2a_root_agent_run_id: root_run_id.clone(),
                 a2a_depth: target_depth,
-                purpose: format!("Handle member call from {}", current.agent_profile_id),
+                purpose: format!("Handle member call from {}", current.agent_id),
                 expected_output,
             };
             let model_payload = json!({
                 "source": {
                     "type": "member_call",
-                    "senderMemberId": current.agent_profile_id,
+                    "senderMemberId": current.agent_id,
                     "senderName": sender_name,
                 },
                 "message": envelope.payload.content,
@@ -1279,7 +1278,7 @@ impl TeamToolService {
                 params![
                     inbox_message_id,
                     current.camp_id,
-                    current.agent_profile_id,
+                    current.agent_id,
                     recipient_agent_id,
                     envelope.payload.content,
                     serde_json::to_string(&references)?,
@@ -1305,7 +1304,7 @@ impl TeamToolService {
                     recipient_message_id,
                     recipient_conversation_id,
                     recipient_sequence,
-                    current.agent_profile_id,
+                    current.agent_id,
                     current.agent_run_id,
                     envelope.payload.content,
                     inbox_message_id,
@@ -1364,7 +1363,7 @@ impl TeamToolService {
             }
 
             let actor = ActorRef::Agent {
-                agent_profile_id: current.agent_profile_id.clone(),
+                agent_id: current.agent_id.clone(),
                 source_agent_run_id: current.agent_run_id.clone(),
             };
             append_domain_event(
@@ -1378,7 +1377,7 @@ impl TeamToolService {
                     "acceptanceReceiptId": acceptance_receipt_id,
                     "commandId": envelope.command_id,
                     "campTurnId": current.camp_turn_id,
-                    "senderMemberId": current.agent_profile_id,
+                    "senderMemberId": current.agent_id,
                     "recipientMemberId": recipient_agent_id,
                     "sourceAgentRunId": current.agent_run_id,
                     "conversationInputId": conversation_input_id,
@@ -1477,7 +1476,7 @@ impl TeamToolService {
                 &invocation.runtime_tool_call_id,
             )?,
             actor: ActorRef::Agent {
-                agent_profile_id: sender.agent_profile_id,
+                agent_id: sender.agent_id,
                 source_agent_run_id: sender.agent_run_id,
             },
             camp_id: Some(sender.camp_id.clone()),
@@ -1540,8 +1539,8 @@ impl TeamToolService {
             (_, true) => TaskAssigneeUpdate::Clear,
             (NullableInput::Missing, false) => TaskAssigneeUpdate::Unchanged,
             (NullableInput::Null, false) => TaskAssigneeUpdate::Clear,
-            (NullableInput::Value(agent_profile_id), false) => TaskAssigneeUpdate::Assign {
-                agent_profile_id: agent_profile_id.clone(),
+            (NullableInput::Value(agent_id), false) => TaskAssigneeUpdate::Assign {
+                agent_id: agent_id.clone(),
             },
         };
         let envelope = CommandEnvelope {
@@ -1551,7 +1550,7 @@ impl TeamToolService {
                 &invocation.runtime_tool_call_id,
             )?,
             actor: ActorRef::Agent {
-                agent_profile_id: sender.agent_profile_id,
+                agent_id: sender.agent_id,
                 source_agent_run_id: sender.agent_run_id,
             },
             camp_id: Some(sender.camp_id),
@@ -1616,15 +1615,15 @@ impl TeamToolService {
             (_, true) => TaskAssigneeFilter::Unassigned,
             (NullableInput::Missing, false) => TaskAssigneeFilter::Any,
             (NullableInput::Null, false) => TaskAssigneeFilter::Unassigned,
-            (NullableInput::Value(agent_profile_id), false) => TaskAssigneeFilter::Agent {
-                agent_profile_id: agent_profile_id.clone(),
+            (NullableInput::Value(agent_id), false) => TaskAssigneeFilter::Agent {
+                agent_id: agent_id.clone(),
             },
         };
         CollaborationService::default().query_visible_tasks(
             database,
             &sender.camp_id,
             &ActorRef::Agent {
-                agent_profile_id: sender.agent_profile_id,
+                agent_id: sender.agent_id,
                 source_agent_run_id: sender.agent_run_id,
             },
             Some(sender.execution_epoch),
@@ -1731,7 +1730,7 @@ fn resolve_sender_identity_by_digest(
         .query_row(
             r#"
             SELECT conversation.camp_id, conversation.id,
-                   conversation.agent_profile_id,
+                   conversation.agent_id,
                    agent_run.id, agent_run.execution_epoch,
                    agent_run.camp_turn_id,
                    agent_run.a2a_root_agent_run_id, agent_run.a2a_depth,
@@ -1743,8 +1742,8 @@ fn resolve_sender_identity_by_digest(
             JOIN camp ON camp.id = conversation.camp_id
             JOIN camp_member
               ON camp_member.camp_id = conversation.camp_id
-             AND camp_member.agent_profile_id = conversation.agent_profile_id
-            JOIN agent_profile ON agent_profile.id = conversation.agent_profile_id
+             AND camp_member.agent_id = conversation.agent_id
+            JOIN agent_profile ON agent_profile.id = conversation.agent_id
             JOIN agent_run ON agent_run.conversation_id = conversation.id
             JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
             WHERE conversation.native_binding_id = ?1
@@ -1757,7 +1756,6 @@ fn resolve_sender_identity_by_digest(
               AND agent_run.cancel_requested_at IS NULL
               AND camp_turn.status IN ('running', 'waiting')
               AND camp_turn.cancel_requested_at IS NULL
-              AND camp.status = 'active'
               AND camp_member.status = 'active'
               AND camp_member.leave_requested_at IS NULL
             "#,
@@ -1772,7 +1770,7 @@ fn resolve_sender_identity_by_digest(
                     SenderIdentity {
                         camp_id: row.get(0)?,
                         conversation_id: row.get(1)?,
-                        agent_profile_id: row.get(2)?,
+                        agent_id: row.get(2)?,
                         agent_run_id: row.get(3)?,
                         execution_epoch: row.get(4)?,
                         camp_turn_id: row.get(5)?,
@@ -1808,13 +1806,12 @@ fn resolve_recipient(
             SELECT conversation.id, agent_profile.display_name
             FROM camp_member
             JOIN camp ON camp.id = camp_member.camp_id
-            JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
+            JOIN agent_profile ON agent_profile.id = camp_member.agent_id
             LEFT JOIN conversation
               ON conversation.camp_id = camp_member.camp_id
-             AND conversation.agent_profile_id = camp_member.agent_profile_id
+             AND conversation.agent_id = camp_member.agent_id
             WHERE camp_member.camp_id = ?1
-              AND camp_member.agent_profile_id = ?2
-              AND camp.status = 'active'
+              AND camp_member.agent_id = ?2
               AND camp_member.status = 'active'
               AND camp_member.leave_requested_at IS NULL
               AND agent_profile.profile_status = 'present'
@@ -1851,7 +1848,7 @@ fn ensure_recipient_conversation(
     transaction.execute(
         r#"
         INSERT INTO conversation(
-            id, camp_id, agent_profile_id,
+            id, camp_id, agent_id,
             provider_override, model_override, action_permission_profile_ref,
             native_session_id, summary,
             summary_through_message_sequence,
@@ -1935,8 +1932,7 @@ fn load_recorded_team_command_identity(
             },
         )
         .optional()?;
-    let Some((camp_id, actor_type, agent_profile_id, source_agent_run_id, execution_epoch)) =
-        recorded
+    let Some((camp_id, actor_type, agent_id, source_agent_run_id, execution_epoch)) = recorded
     else {
         return Ok(None);
     };
@@ -1945,7 +1941,7 @@ fn load_recorded_team_command_identity(
     }
     Ok(Some(RecordedTeamCommandIdentity {
         camp_id: camp_id.context("recorded Team Tool command has no Camp")?,
-        agent_profile_id,
+        agent_id,
         source_agent_run_id: source_agent_run_id
             .context("recorded Team Tool command has no source AgentRun")?,
         execution_epoch: execution_epoch
@@ -2044,7 +2040,7 @@ mod tests {
                             Some(&camp_id),
                             AddCampMemberCommand {
                                 camp_id: camp_id.clone(),
-                                agent_profile_id: (*agent_id).to_string(),
+                                agent_id: (*agent_id).to_string(),
                                 capability_overrides: json!({}),
                             },
                         ),
@@ -2079,7 +2075,7 @@ mod tests {
                             body: "Start the collaboration".to_string(),
                             prepared_attachment_ids: Vec::new(),
                             address: MessageAddressSpec::Explicit {
-                                agent_profile_ids: vec!["agent_1".to_string()],
+                                agent_ids: vec!["agent_1".to_string()],
                             },
                             reply_to_camp_message_id: None,
                             execution: Some(ExecutionRequest {
@@ -2412,7 +2408,7 @@ mod tests {
             assert_eq!(properties["assigneeAgentId"]["type"], "string");
             for forbidden in [
                 "campId",
-                "agentProfileId",
+                "agentId",
                 "sourceAgentRunId",
                 "executionEpoch",
                 "commandId",
@@ -4270,7 +4266,7 @@ mod tests {
             .query_row(
                 r#"
                 SELECT (SELECT COUNT(*) FROM conversation
-                        WHERE camp_id = ?1 AND agent_profile_id = 'agent_2'),
+                        WHERE camp_id = ?1 AND agent_id = 'agent_2'),
                        (SELECT COUNT(*) FROM inbox_message),
                        (SELECT COUNT(*) FROM conversation_input)
                 "#,
@@ -4295,7 +4291,7 @@ mod tests {
             .query_row(
                 r#"
                 SELECT (SELECT COUNT(*) FROM conversation
-                        WHERE camp_id = ?1 AND agent_profile_id = 'agent_2'),
+                        WHERE camp_id = ?1 AND agent_id = 'agent_2'),
                        (SELECT COUNT(*) FROM inbox_message),
                        (SELECT COUNT(*) FROM conversation_input),
                        a2a_run_slots_allocated,
@@ -4451,7 +4447,7 @@ mod tests {
             .query_row(
                 r#"
                 SELECT (SELECT COUNT(*) FROM conversation
-                        WHERE camp_id = ?1 AND agent_profile_id = 'agent_2'),
+                        WHERE camp_id = ?1 AND agent_id = 'agent_2'),
                        (SELECT COUNT(*) FROM inbox_message),
                        a2a_run_slots_allocated,
                        execution_budget_exhaustion_reason
@@ -4484,7 +4480,7 @@ mod tests {
             .database
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM conversation WHERE camp_id = ?1 AND agent_profile_id = 'agent_2'",
+                "SELECT COUNT(*) FROM conversation WHERE camp_id = ?1 AND agent_id = 'agent_2'",
                 [&fixture.camp_id],
                 |row| row.get(0),
             )
@@ -4503,7 +4499,7 @@ mod tests {
             .database
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM conversation WHERE camp_id = ?1 AND agent_profile_id = 'agent_2'",
+                "SELECT COUNT(*) FROM conversation WHERE camp_id = ?1 AND agent_id = 'agent_2'",
                 [&fixture.camp_id],
                 |row| row.get(0),
             )
@@ -4527,10 +4523,10 @@ mod tests {
                         kind: MemoryKind::Agreement,
                         body: "Use the immutable context manifest during recovery.".to_string(),
                         retrieval_keys: vec!["immutable recovery".to_string()],
-                        companion_agent_profile_id: None,
-                        relationship_agent_profile_ids: Vec::new(),
+                        companion_agent_id: None,
+                        relationship_agent_ids: Vec::new(),
                         direction: None,
-                        directed_actor_agent_profile_id: None,
+                        directed_actor_agent_id: None,
                         review_after: None,
                     },
                 ),
@@ -5130,10 +5126,7 @@ mod tests {
                 assert_eq!(memory.kind, Some(kind));
                 assert_eq!(memory.direction, direction);
                 if direction == Some(RelationshipDirection::Directed) {
-                    assert_eq!(
-                        memory.directed_actor_agent_profile_id.as_deref(),
-                        Some("agent_1")
-                    );
+                    assert_eq!(memory.directed_actor_agent_id.as_deref(), Some("agent_1"));
                 }
             }
         }
@@ -5254,7 +5247,7 @@ mod tests {
                     r#"
                 SELECT candidate_relationship_agent_low_id,
                        candidate_relationship_agent_high_id,
-                       candidate_directed_actor_agent_profile_id
+                       candidate_directed_actor_agent_id
                 FROM memory_proposal
                 WHERE id = ?1
                 "#,
@@ -5298,7 +5291,7 @@ mod tests {
                 r#"
                 UPDATE camp_member
                 SET capability_overrides_json = ?3
-                WHERE camp_id = ?1 AND agent_profile_id = ?2
+                WHERE camp_id = ?1 AND agent_id = ?2
                 "#,
                 params![
                     fixture.camp_id,

@@ -161,12 +161,11 @@ impl SkillProjectionReconciler {
                  AND camp_member.status = 'active'
                  AND camp_member.leave_requested_at IS NULL
                 JOIN agent_profile
-                  ON agent_profile.id = camp_member.agent_profile_id
+                  ON agent_profile.id = camp_member.agent_id
                  AND agent_profile.profile_status = 'present'
                 JOIN adapter_installation AS installation
                   ON installation.id = agent_profile.default_runtime_installation_id
                  AND installation.enabled = 1
-                WHERE camp.status = 'active'
                 "#,
             )?;
             let rows = statement.query_map([], |row| {
@@ -1866,11 +1865,11 @@ mod tests {
             .execute(
                 r#"
                 INSERT INTO camp(
-                    id, title, project_binding_kind, project_path, status,
+                    id, title, project_binding_kind, project_path,
                     last_message_sequence, version, created_at, updated_at
                 ) VALUES (
                     'projection-camp', 'Projection', 'directory', ?1,
-                    'active', 0, 1, ?2, ?2
+                    0, 1, ?2, ?2
                 )
                 "#,
                 params![execution_root.to_string_lossy().as_ref(), now],
@@ -1881,7 +1880,7 @@ mod tests {
             .execute(
                 r#"
                 INSERT INTO conversation(
-                    id, camp_id, agent_profile_id, created_at, updated_at
+                    id, camp_id, agent_id, created_at, updated_at
                 ) VALUES (
                     'projection-conversation', 'projection-camp', 'agent_1', ?1, ?1
                 )
@@ -1945,7 +1944,7 @@ mod tests {
             .execute(
                 r#"
                 INSERT INTO conversation(
-                    id, camp_id, agent_profile_id, created_at, updated_at
+                    id, camp_id, agent_id, created_at, updated_at
                 ) VALUES (
                     'projection-conversation-new', 'projection-camp', 'agent_2', ?1, ?1
                 )
@@ -2505,11 +2504,11 @@ mod tests {
             .execute(
                 r#"
                 INSERT INTO camp(
-                    id, title, project_binding_kind, project_path, status,
+                    id, title, project_binding_kind, project_path,
                     last_message_sequence, version, created_at, updated_at
                 ) VALUES (
                     'known-root-camp', 'Known Root', 'directory', ?1,
-                    'active', 0, 1, ?2, ?2
+                    0, 1, ?2, ?2
                 )
                 "#,
                 params![root.to_string_lossy().as_ref(), now],
@@ -2521,7 +2520,7 @@ mod tests {
                 .execute(
                     r#"
                     INSERT INTO camp_member(
-                        camp_id, agent_profile_id, status,
+                        camp_id, agent_id, status,
                         capability_overrides_json, version, joined_at
                     ) VALUES (
                         'known-root-camp', ?1, 'active', '{}', 1, ?2

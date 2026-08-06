@@ -85,7 +85,7 @@ impl Default for McpExposureSnapshot {
 pub struct McpProjectionRequest<'a> {
     pub agent_run_id: &'a str,
     pub execution_epoch: i64,
-    pub agent_profile_id: &'a str,
+    pub agent_id: &'a str,
     pub adapter_kind: AdapterKind,
     pub reported_runtime_version: Option<&'a str>,
     pub execution_root: &'a Path,
@@ -381,7 +381,7 @@ fn materialize_projection(
     config_store: &McpConfigStore,
     request: &McpProjectionRequest<'_>,
 ) -> Result<ProjectionFile> {
-    let known = [request.agent_profile_id.to_string()].into_iter().collect();
+    let known = [request.agent_id.to_string()].into_iter().collect();
     let (view, config) = config_store.get_with_raw(&known)?;
     let capability = AgentRuntimeAdapterRegistry::default().mcp_projection(request.adapter_kind);
     let mut exposure = McpExposureSnapshot {
@@ -445,8 +445,7 @@ fn materialize_projection(
         if !metadata.enabled {
             entry.status = McpExposureStatus::Disabled;
         } else if !config.rovai.assignments.iter().any(|assignment| {
-            assignment.server_id == metadata.server_id
-                && assignment.agent_profile_id == request.agent_profile_id
+            assignment.server_id == metadata.server_id && assignment.agent_id == request.agent_id
         }) {
             entry.status = McpExposureStatus::Unassigned;
         } else if !minimum_version_supported
@@ -661,7 +660,7 @@ fn validate_request(request: &McpProjectionRequest<'_>) -> Result<()> {
     if request.execution_epoch < 1 {
         anyhow::bail!("MCP projection requires a positive execution epoch");
     }
-    if request.agent_profile_id.trim().is_empty() {
+    if request.agent_id.trim().is_empty() {
         anyhow::bail!("MCP projection requires an AgentProfile");
     }
     if !request.execution_root.is_dir() {
@@ -834,7 +833,7 @@ mod tests {
         McpProjectionRequest {
             agent_run_id: run_id,
             execution_epoch: epoch,
-            agent_profile_id: "agent_2",
+            agent_id: "agent_2",
             adapter_kind,
             reported_runtime_version: None,
             execution_root,
@@ -896,7 +895,7 @@ mod tests {
                     SetMcpAssignmentParams {
                         expected_config_digest: config.config_digest,
                         server_id,
-                        agent_profile_id: "agent_2".to_string(),
+                        agent_id: "agent_2".to_string(),
                         assigned: true,
                         acknowledge_high_risk: false,
                     },

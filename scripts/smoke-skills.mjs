@@ -277,17 +277,17 @@ async function applyCommand(method, command) {
   return result
 }
 
-async function configureRuntime(request, _health, agentProfileId, adapterKind, modelId) {
-  const runtime = await configureProductRuntime(request, adapterKind, [agentProfileId])
+async function configureRuntime(request, _health, agentId, adapterKind, modelId) {
+  const runtime = await configureProductRuntime(request, adapterKind, [agentId])
   if (!modelId) return runtime
   if (!runtime.snapshot.models.some((model) => model.id === modelId)) {
     throw new Error(`${adapterKind} model is unavailable: ${modelId}`)
   }
-  const profile = await request('agents.get', { agentProfileId })
+  const profile = await request('agents.get', { agentId })
   const configured = await request('agents.runtime.set', {
     commandId: crypto.randomUUID(),
     command: {
-      agentProfileId,
+      agentId,
       expectedVersion: profile.version,
       adapterKind,
       model: { mode: 'explicit', modelId, options: {} },
@@ -297,7 +297,7 @@ async function configureRuntime(request, _health, agentProfileId, adapterKind, m
   if (configured.status !== 'applied') {
     throw new Error(`${adapterKind} explicit model was rejected: ${JSON.stringify(configured)}`)
   }
-  const resolved = await request('agents.get', { agentProfileId })
+  const resolved = await request('agents.get', { agentId })
   if (resolved.runtimePreference?.model?.modelId !== modelId
       || resolved.runtimeReadiness?.status !== 'ready') {
     throw new Error(`${adapterKind} explicit model was not frozen: ${JSON.stringify(resolved)}`)
@@ -315,7 +315,7 @@ async function runNativeDiscovery(request, workspace, adapterKind, marker) {
     commandId: crypto.randomUUID(),
     workspace,
     body: prompt,
-    address: { mode: 'explicit', agentProfileIds: ['agent_1'] },
+    address: { mode: 'explicit', agentIds: ['agent_1'] },
     purpose: `Verify ${adapterKind} discovers the Rovai-ai-managed project Skill through its native directory.`,
     expectedOutput: 'Exactly the private verification value stored only in the Skill.'
   })

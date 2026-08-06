@@ -18,7 +18,7 @@ const MEMBER_AVATAR_PIXEL_SIZE: Readonly<
 }
 
 export interface MemberAvatarProps {
-  agentProfileId: string
+  agentId: string
   avatarRef: string | null
   displayName: string
   size?: MemberAvatarSize
@@ -27,7 +27,7 @@ export interface MemberAvatarProps {
 }
 
 export function MemberAvatar({
-  agentProfileId,
+  agentId,
   avatarRef,
   displayName,
   size = 'list',
@@ -47,7 +47,7 @@ export function MemberAvatar({
   const hasManagedImage = parsed?.kind === 'managed' && managed.url && !failed
   const hasBuiltinImage = parsed?.kind === 'builtin' && builtin && !failed
   const style = {
-    '--member-avatar-accent': identityColorToken(agentProfileId),
+    '--member-avatar-accent': identityColorToken(agentId),
     ...(size === 'bust'
       ? {}
       : { '--member-avatar-size': `${MEMBER_AVATAR_PIXEL_SIZE[size]}px` })

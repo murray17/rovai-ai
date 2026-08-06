@@ -16,7 +16,7 @@ describe('v0.29 member sidebar', () => {
   it('filters only by member name and team role', () => {
     const agents = [
       profile('agent_2', '沐瓦', '开发者', 'present'),
-      { ...profile('agent_1', '洛可', '研究员', 'away'), handle: 'secret-match' }
+      profile('agent_1', '洛可', '研究员', 'away')
     ]
     expect(filterMembers(agents, '开发')).toEqual([agents[0]])
     expect(filterMembers(agents, '洛可')).toEqual([agents[1]])
@@ -72,7 +72,7 @@ describe('v0.29 member sidebar', () => {
       agents,
       runtimeAvailability: [],
       runtimeDiscoveryPending: false,
-      selectedAgentId: agents[0]?.id ?? null,
+      selectedAgentId: agents[0]?.agentId ?? null,
       onBack: () => undefined,
       onSelect: () => undefined,
       onCreate: () => undefined,
@@ -92,8 +92,7 @@ function profile(
   presence: AgentProfile['presence']
 ): AgentProfile {
   return {
-    id,
-    handle: `${id}-handle`,
+    agentId: id,
     displayName,
     avatarRef: null,
     accent: '#39777a',

@@ -244,7 +244,7 @@ pub struct QueuedAgentRunCandidate {
     pub camp_id: String,
     pub camp_turn_id: String,
     pub conversation_id: String,
-    pub agent_profile_id: String,
+    pub agent_id: String,
     pub task_id: Option<String>,
     pub version: i64,
     pub permission_semantics: PermissionSemantics,
@@ -319,7 +319,7 @@ pub struct AgentRunExecution {
     pub camp_turn_id: String,
     pub conversation_id: String,
     pub conversation_version: i64,
-    pub agent_profile_id: String,
+    pub agent_id: String,
     pub task_id: Option<String>,
     pub version: i64,
     pub permission_semantics: PermissionSemantics,
@@ -710,7 +710,7 @@ impl ExecutionRuntimeService {
         let mut statement = database.connection().prepare(
             r#"
             SELECT agent_run.id, camp_turn.camp_id, agent_run.camp_turn_id,
-                   agent_run.conversation_id, conversation.agent_profile_id,
+                   agent_run.conversation_id, conversation.agent_id,
                    agent_run.task_id, agent_run.version,
                    agent_run.permission_semantics, camp.project_binding_kind,
                    camp.project_path, agent_run.effective_config_json,
@@ -721,15 +721,14 @@ impl ExecutionRuntimeService {
             JOIN conversation ON conversation.id = agent_run.conversation_id
             JOIN camp_member
               ON camp_member.camp_id = camp.id
-             AND camp_member.agent_profile_id = conversation.agent_profile_id
-            JOIN agent_profile ON agent_profile.id = conversation.agent_profile_id
+             AND camp_member.agent_id = conversation.agent_id
+            JOIN agent_profile ON agent_profile.id = conversation.agent_id
             WHERE (agent_run.status = 'queued'
                    OR (agent_run.status = 'waiting'
                        AND agent_run.wait_reason = 'runtime_recovery'
                        AND agent_run.runtime_recovery_required = 1))
               AND agent_run.input_ready_at IS NOT NULL
               AND agent_run.cancel_requested_at IS NULL
-              AND camp.status = 'active'
               AND camp_member.status = 'active'
               AND camp_member.leave_requested_at IS NULL
               AND camp_turn.status IN ('running', 'waiting')
@@ -803,7 +802,7 @@ impl ExecutionRuntimeService {
                     camp_id,
                     camp_turn_id,
                     conversation_id,
-                    agent_profile_id,
+                    agent_id,
                     task_id,
                     version,
                     permission_semantics,
@@ -817,7 +816,7 @@ impl ExecutionRuntimeService {
                         camp_id,
                         camp_turn_id,
                         conversation_id,
-                        agent_profile_id,
+                        agent_id,
                         task_id,
                         version,
                         permission_semantics: PermissionSemantics::parse(&permission_semantics)?,
@@ -850,7 +849,7 @@ impl ExecutionRuntimeService {
                 r#"
                 SELECT agent_run.id, camp_turn.camp_id, agent_run.camp_turn_id,
                        agent_run.conversation_id, conversation.version,
-                       conversation.agent_profile_id, agent_run.task_id,
+                       conversation.agent_id, agent_run.task_id,
                        agent_run.version, agent_run.permission_semantics,
                        agent_run.execution_epoch,
                        agent_run.status, agent_run.wait_reason,
@@ -946,7 +945,7 @@ impl ExecutionRuntimeService {
             camp_turn_id,
             conversation_id,
             conversation_version,
-            agent_profile_id,
+            agent_id,
             task_id,
             version,
             permission_semantics,
@@ -1021,7 +1020,7 @@ impl ExecutionRuntimeService {
             camp_turn_id,
             conversation_id,
             conversation_version,
-            agent_profile_id,
+            agent_id,
             task_id,
             version,
             permission_semantics: PermissionSemantics::parse(&permission_semantics)?,
@@ -2389,7 +2388,7 @@ impl ExecutionRuntimeService {
                 INSERT INTO camp_message(
                     id, camp_id, sequence,
                     author_type, author_id, source_agent_run_id, body, content_digest,
-                    address_mode, addressed_agent_profile_ids_json,
+                    address_mode, addressed_agent_ids_json,
                     reply_to_camp_message_id, camp_turn_id, agent_run_id,
                     tombstoned_at, version, created_at, updated_at
                 ) VALUES (
@@ -2402,7 +2401,7 @@ impl ExecutionRuntimeService {
                     final_camp_message_id,
                     target.camp_id,
                     camp_sequence,
-                    target.agent_profile_id,
+                    target.agent_id,
                     target.agent_run_id,
                     envelope.payload.final_output,
                     content_digest,
@@ -2827,7 +2826,7 @@ struct TerminalTarget {
     agent_run_id: String,
     camp_id: String,
     camp_turn_id: String,
-    agent_profile_id: String,
+    agent_id: String,
     trigger_type: String,
     trigger_id: String,
     status: String,
@@ -2847,7 +2846,7 @@ fn load_terminal_target(
         .query_row(
             r#"
             SELECT agent_run.id, camp_turn.camp_id, agent_run.camp_turn_id,
-                   conversation.agent_profile_id,
+                   conversation.agent_id,
                    camp_turn.trigger_type, camp_turn.trigger_id,
                    agent_run.status, agent_run.version, agent_run.execution_epoch,
                    agent_run.cancel_requested_at,
@@ -2864,7 +2863,7 @@ fn load_terminal_target(
                     agent_run_id: row.get(0)?,
                     camp_id: row.get(1)?,
                     camp_turn_id: row.get(2)?,
-                    agent_profile_id: row.get(3)?,
+                    agent_id: row.get(3)?,
                     trigger_type: row.get(4)?,
                     trigger_id: row.get(5)?,
                     status: row.get(6)?,
@@ -2959,10 +2958,10 @@ fn is_runtime_adapter(actor: &ActorRef) -> bool {
 fn active_camp_agent_ids(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<String>> {
     let mut statement = transaction.prepare(
         r#"
-        SELECT agent_profile_id
+        SELECT agent_id
         FROM camp_member
         WHERE camp_id = ?1 AND status = 'active' AND leave_requested_at IS NULL
-        ORDER BY joined_at, agent_profile_id
+        ORDER BY joined_at, agent_id
         "#,
     )?;
     Ok(statement
@@ -3123,8 +3122,7 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                    camp_turn.cancel_requested_at,
                    camp_turn.execution_budget_exhausted_at,
                    camp_turn.execution_budget_deadline_at,
-                   CASE WHEN camp.status = 'active'
-                             AND camp_member.status = 'active'
+                   CASE WHEN camp_member.status = 'active'
                              AND camp_member.leave_requested_at IS NULL
                         THEN 1 ELSE 0 END,
                    agent_profile.default_capabilities_json,
@@ -3133,10 +3131,10 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
             JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
             JOIN camp ON camp.id = camp_turn.camp_id
             JOIN conversation ON conversation.id = agent_run.conversation_id
-            JOIN agent_profile ON agent_profile.id = conversation.agent_profile_id
+            JOIN agent_profile ON agent_profile.id = conversation.agent_id
             JOIN camp_member
               ON camp_member.camp_id = camp.id
-             AND camp_member.agent_profile_id = conversation.agent_profile_id
+             AND camp_member.agent_id = conversation.agent_id
             WHERE agent_run.id = ?1
             "#,
             [run_id],
@@ -3535,11 +3533,11 @@ fn append_domain_event(
     let (actor_type, actor_id, source_agent_run_id) = match actor {
         ActorRef::User { user_id } => ("user", user_id.as_str(), None),
         ActorRef::Agent {
-            agent_profile_id,
+            agent_id,
             source_agent_run_id,
         } => (
             "agent",
-            agent_profile_id.as_str(),
+            agent_id.as_str(),
             Some(source_agent_run_id.as_str()),
         ),
         ActorRef::System { component_id } => ("system", component_id.as_str(), None),
@@ -3617,7 +3615,7 @@ mod tests {
             camp_turn_id: "turn-resume".to_string(),
             conversation_id: "conversation-resume".to_string(),
             conversation_version: 1,
-            agent_profile_id: "agent_1".to_string(),
+            agent_id: "agent_1".to_string(),
             task_id: None,
             version: 1,
             permission_semantics: PermissionSemantics::RuntimeManagedV2,
@@ -3704,11 +3702,11 @@ mod tests {
             .execute(
                 r#"
                 INSERT INTO camp(
-                    id, title, project_binding_kind, project_path, status,
+                    id, title, project_binding_kind, project_path,
                     last_message_sequence, version, created_at, updated_at
                 ) VALUES (
                     'camp-resume', 'Resume', 'directory', '/tmp',
-                    'active', 0, 1, ?1, ?1
+                    0, 1, ?1, ?1
                 )
                 "#,
                 [&now],
@@ -3719,7 +3717,7 @@ mod tests {
             .execute(
                 r#"
                 INSERT INTO conversation(
-                    id, camp_id, agent_profile_id,
+                    id, camp_id, agent_id,
                     native_adapter_installation_id, native_session_id,
                     native_binding_compatibility_digest,
                     native_installation_generation,
@@ -3884,11 +3882,11 @@ mod tests {
             .execute(
                 r#"
                 INSERT INTO camp(
-                    id, title, project_binding_kind, project_path, status,
+                    id, title, project_binding_kind, project_path,
                     last_message_sequence, version, created_at, updated_at
                 ) VALUES (
                     'restart-camp', 'Restart', 'directory', ?1,
-                    'active', 0, 1, ?2, ?2
+                    0, 1, ?2, ?2
                 )
                 "#,
                 params![directory.to_string_lossy().as_ref(), now],
@@ -3899,7 +3897,7 @@ mod tests {
             .execute(
                 r#"
                 INSERT INTO conversation(
-                    id, camp_id, agent_profile_id,
+                    id, camp_id, agent_id,
                     native_adapter_installation_id, native_session_id,
                     native_binding_compatibility_digest, native_binding_id,
                     native_binding_generation, native_binding_secret_digest,
@@ -3945,7 +3943,7 @@ mod tests {
             .connection()
             .query_row(
                 r#"
-                SELECT camp_id, agent_profile_id, version,
+                SELECT camp_id, agent_id, version,
                        native_binding_generation,
                        native_adapter_installation_id, native_session_id,
                        native_binding_id
@@ -4059,7 +4057,7 @@ mod tests {
                     Some(&camp_id),
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
-                        agent_profile_id: "agent_2".to_string(),
+                        agent_id: "agent_2".to_string(),
                         capability_overrides: json!({}),
                     },
                 ),
@@ -4355,7 +4353,7 @@ mod tests {
                     Some(&camp_id),
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
-                        agent_profile_id: "agent_2".to_string(),
+                        agent_id: "agent_2".to_string(),
                         capability_overrides: json!({}),
                     },
                 ),
@@ -4476,7 +4474,7 @@ mod tests {
                     Some(&camp_id),
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
-                        agent_profile_id: "agent_2".to_string(),
+                        agent_id: "agent_2".to_string(),
                         capability_overrides: json!({}),
                     },
                 ),
@@ -4688,7 +4686,7 @@ mod tests {
                     Some(&camp_id),
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
-                        agent_profile_id: "agent_2".to_string(),
+                        agent_id: "agent_2".to_string(),
                         capability_overrides: json!({}),
                     },
                 ),
@@ -4872,16 +4870,16 @@ mod tests {
             )
             .unwrap();
         let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
-        for agent_profile_id in ["agent_2", "agent_1"] {
+        for agent_id in ["agent_2", "agent_1"] {
             collaboration
                 .add_camp_member(
                     &mut database,
                     &user_envelope(
-                        &format!("fanout-runtime-add-{agent_profile_id}"),
+                        &format!("fanout-runtime-add-{agent_id}"),
                         Some(&camp_id),
                         AddCampMemberCommand {
                             camp_id: camp_id.clone(),
-                            agent_profile_id: agent_profile_id.to_string(),
+                            agent_id: agent_id.to_string(),
                             capability_overrides: json!({}),
                         },
                     ),
@@ -4901,7 +4899,7 @@ mod tests {
                         body: "请独立分析并公开各自结论。".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Explicit {
-                            agent_profile_ids: vec!["agent_2".to_string(), "agent_1".to_string()],
+                            agent_ids: vec!["agent_2".to_string(), "agent_1".to_string()],
                         },
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {
@@ -4932,7 +4930,7 @@ mod tests {
         assert_eq!(
             candidates
                 .iter()
-                .find(|candidate| candidate.agent_profile_id == "agent_2")
+                .find(|candidate| candidate.agent_id == "agent_2")
                 .unwrap()
                 .execution_workspace()
                 .access,
@@ -4941,7 +4939,7 @@ mod tests {
         assert_eq!(
             candidates
                 .iter()
-                .find(|candidate| candidate.agent_profile_id == "agent_1")
+                .find(|candidate| candidate.agent_id == "agent_1")
                 .unwrap()
                 .execution_workspace()
                 .access,

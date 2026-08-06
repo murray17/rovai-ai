@@ -441,7 +441,7 @@ function SkillGroupMenu({ skill, groups, selected, disabled, onToggle }: {
                   <span className="skill-runtime-line">对应 Runtime：{group.adapterKinds.map(adapterLabel).join('、') || '暂无'}</span>
                   <span className="skill-member-line">
                     {group.members.length > 0
-                      ? <><span className="skill-member-stack">{group.members.slice(0, 4).map((member) => <MemberAvatar key={member.agentProfileId} agentProfileId={member.agentProfileId} avatarRef={member.avatarRef} displayName={member.displayName} size="mention" decorative />)}</span><span>{group.members.map((member) => member.displayName).join('、')}</span></>
+                      ? <><span className="skill-member-stack">{group.members.slice(0, 4).map((member) => <MemberAvatar key={member.agentId} agentId={member.agentId} avatarRef={member.avatarRef} displayName={member.displayName} size="mention" decorative />)}</span><span>{group.members.map((member) => member.displayName).join('、')}</span></>
                       : <span className="skill-no-member">当前没有对应队员</span>}
                   </span>
                 </span>

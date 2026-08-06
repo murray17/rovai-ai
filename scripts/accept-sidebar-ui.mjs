@@ -177,10 +177,10 @@ async function createFixtureCamps() {
     await core.request('health.check')
     const preflight = await core.request('camps.creationPreflight')
     const workspace = await core.request('workspaces.inspect', { path: workspaceDir })
-    const memberAgentProfileIds = preflight.presentMembers.map((member) => member.agentProfileId)
+    const memberAgentIds = preflight.presentMembers.map((member) => member.agentId)
     const common = {
-      memberAgentProfileIds,
-      defaultLeadAgentProfileId: preflight.initialLeadAgentProfileId,
+      memberAgentIds,
+      defaultLeadAgentId: preflight.initialLeadAgentId,
       collaborationMode: 'peer'
     }
     const projectCampIds = []

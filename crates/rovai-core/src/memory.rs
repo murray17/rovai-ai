@@ -158,33 +158,33 @@ impl MemoryRevisionActorKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemoryScope {
     pub kind: MemoryScopeKind,
-    pub companion_agent_profile_id: Option<String>,
+    pub companion_agent_id: Option<String>,
     pub relationship_agent_low_id: Option<String>,
     pub relationship_agent_high_id: Option<String>,
     pub relationship_direction: Option<RelationshipDirection>,
-    pub directed_actor_agent_profile_id: Option<String>,
+    pub directed_actor_agent_id: Option<String>,
 }
 
 impl MemoryScope {
     fn hearth() -> Self {
         Self {
             kind: MemoryScopeKind::Hearth,
-            companion_agent_profile_id: None,
+            companion_agent_id: None,
             relationship_agent_low_id: None,
             relationship_agent_high_id: None,
             relationship_direction: None,
-            directed_actor_agent_profile_id: None,
+            directed_actor_agent_id: None,
         }
     }
 
-    fn companion(agent_profile_id: String) -> Self {
+    fn companion(agent_id: String) -> Self {
         Self {
             kind: MemoryScopeKind::Companion,
-            companion_agent_profile_id: Some(agent_profile_id),
+            companion_agent_id: Some(agent_id),
             relationship_agent_low_id: None,
             relationship_agent_high_id: None,
             relationship_direction: None,
-            directed_actor_agent_profile_id: None,
+            directed_actor_agent_id: None,
         }
     }
 
@@ -220,11 +220,11 @@ impl MemoryScope {
         };
         Ok(Self {
             kind: MemoryScopeKind::Relationship,
-            companion_agent_profile_id: None,
+            companion_agent_id: None,
             relationship_agent_low_id: Some(low),
             relationship_agent_high_id: Some(high),
             relationship_direction: Some(direction),
-            directed_actor_agent_profile_id: directed_actor,
+            directed_actor_agent_id: directed_actor,
         })
     }
 
@@ -232,16 +232,16 @@ impl MemoryScope {
         self == other
     }
 
-    fn contains_agent(&self, agent_profile_id: &str) -> bool {
-        self.companion_agent_profile_id.as_deref() == Some(agent_profile_id)
-            || self.relationship_agent_low_id.as_deref() == Some(agent_profile_id)
-            || self.relationship_agent_high_id.as_deref() == Some(agent_profile_id)
+    fn contains_agent(&self, agent_id: &str) -> bool {
+        self.companion_agent_id.as_deref() == Some(agent_id)
+            || self.relationship_agent_low_id.as_deref() == Some(agent_id)
+            || self.relationship_agent_high_id.as_deref() == Some(agent_id)
     }
 
-    fn counterparty(&self, agent_profile_id: &str) -> Option<&str> {
-        if self.relationship_agent_low_id.as_deref() == Some(agent_profile_id) {
+    fn counterparty(&self, agent_id: &str) -> Option<&str> {
+        if self.relationship_agent_low_id.as_deref() == Some(agent_id) {
             self.relationship_agent_high_id.as_deref()
-        } else if self.relationship_agent_high_id.as_deref() == Some(agent_profile_id) {
+        } else if self.relationship_agent_high_id.as_deref() == Some(agent_id) {
             self.relationship_agent_low_id.as_deref()
         } else {
             None
@@ -256,11 +256,11 @@ pub struct CreateMemoryCommand {
     pub kind: MemoryKind,
     pub body: String,
     pub retrieval_keys: Vec<String>,
-    pub companion_agent_profile_id: Option<String>,
+    pub companion_agent_id: Option<String>,
     #[serde(default)]
-    pub relationship_agent_profile_ids: Vec<String>,
+    pub relationship_agent_ids: Vec<String>,
     pub direction: Option<RelationshipDirection>,
-    pub directed_actor_agent_profile_id: Option<String>,
+    pub directed_actor_agent_id: Option<String>,
     pub review_after: Option<String>,
 }
 
@@ -456,10 +456,10 @@ pub struct MemoryView {
     pub scope: Option<MemoryScopeKind>,
     pub kind: Option<MemoryKind>,
     pub creation_origin: Option<MemoryCreationOrigin>,
-    pub companion_agent_profile_id: Option<String>,
-    pub relationship_agent_profile_ids: Vec<String>,
+    pub companion_agent_id: Option<String>,
+    pub relationship_agent_ids: Vec<String>,
     pub direction: Option<RelationshipDirection>,
-    pub directed_actor_agent_profile_id: Option<String>,
+    pub directed_actor_agent_id: Option<String>,
     pub lifecycle: String,
     pub current_revision_id: Option<String>,
     pub current_body: Option<String>,
@@ -506,7 +506,7 @@ pub struct HearthMemoryProposalView {
     pub retrieval_keys: Vec<String>,
     pub target_memory_id: Option<String>,
     pub base_revision_id: Option<String>,
-    pub proposed_by_agent_profile_id: String,
+    pub proposed_by_agent_id: String,
     pub source_camp_id: String,
     pub source_agent_run_id: String,
     pub source_execution_epoch: i64,
@@ -578,7 +578,7 @@ struct HearthProposalRecord {
     retrieval_keys: Vec<String>,
     target_memory_id: Option<String>,
     base_revision_id: Option<String>,
-    proposed_by_agent_profile_id: String,
+    proposed_by_agent_id: String,
     source_camp_id: String,
     source_agent_run_id: String,
     source_execution_epoch: i64,
@@ -917,11 +917,11 @@ impl MemoryService {
                 r#"
                 UPDATE memory
                 SET scope_kind = NULL, kind = NULL, creation_origin = NULL,
-                    companion_agent_profile_id = NULL,
+                    companion_agent_id = NULL,
                     relationship_agent_low_id = NULL,
                     relationship_agent_high_id = NULL,
                     relationship_direction = NULL,
-                    directed_actor_agent_profile_id = NULL,
+                    directed_actor_agent_id = NULL,
                     lifecycle_status = 'forgotten',
                     current_revision_id = NULL, review_after = NULL,
                     retired_at = NULL, forgotten_at = ?2,
@@ -1033,10 +1033,10 @@ mod tests {
             kind: MemoryKind::Agreement,
             body: format!("Durable Hearth agreement number {index}."),
             retrieval_keys: vec![format!("agreement {index}")],
-            companion_agent_profile_id: None,
-            relationship_agent_profile_ids: Vec::new(),
+            companion_agent_id: None,
+            relationship_agent_ids: Vec::new(),
             direction: None,
-            directed_actor_agent_profile_id: None,
+            directed_actor_agent_id: None,
             review_after: None,
         }
     }
@@ -1256,8 +1256,8 @@ fn normalize_create_command(command: &mut CreateMemoryCommand) -> Result<()> {
     command.body = canonicalize_memory_body(&command.body)?;
     command.retrieval_keys = normalize_retrieval_keys(&command.retrieval_keys)?;
     command.review_after = normalize_review_after(command.review_after.as_deref())?;
-    command.relationship_agent_profile_ids.sort();
-    command.relationship_agent_profile_ids.dedup();
+    command.relationship_agent_ids.sort();
+    command.relationship_agent_ids.dedup();
     Ok(())
 }
 
@@ -1281,40 +1281,39 @@ fn candidate_from_create(
 ) -> Result<Candidate> {
     let scope = match command.scope {
         MemoryScopeKind::Hearth => {
-            if command.companion_agent_profile_id.is_some()
-                || !command.relationship_agent_profile_ids.is_empty()
+            if command.companion_agent_id.is_some()
+                || !command.relationship_agent_ids.is_empty()
                 || command.direction.is_some()
-                || command.directed_actor_agent_profile_id.is_some()
+                || command.directed_actor_agent_id.is_some()
             {
                 anyhow::bail!("memory.invalid_input: Hearth Memory has no Agent target fields");
             }
             MemoryScope::hearth()
         }
         MemoryScopeKind::Companion => {
-            if !command.relationship_agent_profile_ids.is_empty()
+            if !command.relationship_agent_ids.is_empty()
                 || command.direction.is_some()
-                || command.directed_actor_agent_profile_id.is_some()
+                || command.directed_actor_agent_id.is_some()
             {
                 anyhow::bail!(
                     "memory.invalid_input: Companion Memory cannot have Relationship fields"
                 );
             }
-            let agent = command.companion_agent_profile_id.clone().context(
-                "memory.invalid_input: Companion Memory requires companionAgentProfileId",
-            )?;
+            let agent = command
+                .companion_agent_id
+                .clone()
+                .context("memory.invalid_input: Companion Memory requires companionAgentId")?;
             require_agent_profile(transaction, &agent)?;
             MemoryScope::companion(agent)
         }
         MemoryScopeKind::Relationship => {
-            if command.companion_agent_profile_id.is_some()
-                || command.relationship_agent_profile_ids.len() != 2
-            {
+            if command.companion_agent_id.is_some() || command.relationship_agent_ids.len() != 2 {
                 anyhow::bail!(
                     "memory.invalid_input: Relationship Memory requires exactly two Agent IDs"
                 );
             }
-            let first = command.relationship_agent_profile_ids[0].clone();
-            let second = command.relationship_agent_profile_ids[1].clone();
+            let first = command.relationship_agent_ids[0].clone();
+            let second = command.relationship_agent_ids[1].clone();
             require_agent_profile(transaction, &first)?;
             require_agent_profile(transaction, &second)?;
             MemoryScope::relationship(
@@ -1323,7 +1322,7 @@ fn candidate_from_create(
                 command
                     .direction
                     .context("memory.invalid_input: Relationship Memory requires direction")?,
-                command.directed_actor_agent_profile_id.clone(),
+                command.directed_actor_agent_id.clone(),
             )?
         }
     };
@@ -1358,10 +1357,10 @@ fn validate_candidate(transaction: &Transaction<'_>, candidate: &Candidate) -> R
     Ok(())
 }
 
-fn require_agent_profile(transaction: &Transaction<'_>, agent_profile_id: &str) -> Result<()> {
+fn require_agent_profile(transaction: &Transaction<'_>, agent_id: &str) -> Result<()> {
     let exists: i64 = transaction.query_row(
         "SELECT COUNT(*) FROM agent_profile WHERE id = ?1",
-        [agent_profile_id],
+        [agent_id],
         |row| row.get(0),
     )?;
     if exists != 1 {
@@ -1416,9 +1415,9 @@ fn insert_memory(
         r#"
         INSERT INTO memory(
             id, scope_kind, kind, creation_origin,
-            companion_agent_profile_id,
+            companion_agent_id,
             relationship_agent_low_id, relationship_agent_high_id,
-            relationship_direction, directed_actor_agent_profile_id,
+            relationship_direction, directed_actor_agent_id,
             lifecycle_status, current_revision_id, review_after,
             version, created_at, updated_at
         ) VALUES (
@@ -1431,14 +1430,14 @@ fn insert_memory(
             candidate.scope.kind.as_str(),
             candidate.kind.as_str(),
             origin.as_str(),
-            candidate.scope.companion_agent_profile_id,
+            candidate.scope.companion_agent_id,
             candidate.scope.relationship_agent_low_id,
             candidate.scope.relationship_agent_high_id,
             candidate
                 .scope
                 .relationship_direction
                 .map(RelationshipDirection::as_str),
-            candidate.scope.directed_actor_agent_profile_id,
+            candidate.scope.directed_actor_agent_id,
             revision_id,
             candidate.review_after,
             now,
@@ -1557,11 +1556,11 @@ fn load_memory_record(connection: &Connection, memory_id: &str) -> Result<Option
         .query_row(
             r#"
             SELECT memory.id, memory.scope_kind, memory.kind, memory.creation_origin,
-                   memory.companion_agent_profile_id,
+                   memory.companion_agent_id,
                    memory.relationship_agent_low_id,
                    memory.relationship_agent_high_id,
                    memory.relationship_direction,
-                   memory.directed_actor_agent_profile_id,
+                   memory.directed_actor_agent_id,
                    memory.lifecycle_status, memory.current_revision_id,
                    revision.body, revision.body_utf8_bytes,
                    memory.review_after, memory.version,
@@ -1593,11 +1592,11 @@ fn memory_record_from_row(row: &Row<'_>) -> rusqlite::Result<MemoryRecord> {
                 .map_err(anyhow_to_sqlite)?;
             Ok::<_, rusqlite::Error>(MemoryScope {
                 kind,
-                companion_agent_profile_id: row.get(4)?,
+                companion_agent_id: row.get(4)?,
                 relationship_agent_low_id: row.get(5)?,
                 relationship_agent_high_id: row.get(6)?,
                 relationship_direction: direction,
-                directed_actor_agent_profile_id: row.get(8)?,
+                directed_actor_agent_id: row.get(8)?,
             })
         })
         .transpose()?;
@@ -1635,11 +1634,11 @@ fn load_active_memory_records(connection: &Connection) -> Result<Vec<MemoryRecor
     let mut statement = connection.prepare(
         r#"
         SELECT memory.id, memory.scope_kind, memory.kind, memory.creation_origin,
-               memory.companion_agent_profile_id,
+               memory.companion_agent_id,
                memory.relationship_agent_low_id,
                memory.relationship_agent_high_id,
                memory.relationship_direction,
-               memory.directed_actor_agent_profile_id,
+               memory.directed_actor_agent_id,
                memory.lifecycle_status, memory.current_revision_id,
                revision.body, revision.body_utf8_bytes,
                memory.review_after, memory.version,
@@ -1730,17 +1729,16 @@ fn ensure_capacity(
             })
             .count() as i64
     };
-    let applicable_count = |agent_profile_id: &str, agent_only: bool| -> i64 {
+    let applicable_count = |agent_id: &str, agent_only: bool| -> i64 {
         records
             .iter()
             .filter(|record| {
                 (!agent_only || record.creation_origin == Some(MemoryCreationOrigin::Agent))
                     && record.scope.as_ref().is_some_and(|scope| {
                         scope.kind == MemoryScopeKind::Relationship
-                            && scope.contains_agent(agent_profile_id)
+                            && scope.contains_agent(agent_id)
                             && (scope.relationship_direction == Some(RelationshipDirection::Mutual)
-                                || scope.directed_actor_agent_profile_id.as_deref()
-                                    == Some(agent_profile_id))
+                                || scope.directed_actor_agent_id.as_deref() == Some(agent_id))
                     })
             })
             .count() as i64
@@ -1764,7 +1762,7 @@ fn ensure_capacity(
         }
         MemoryScopeKind::Companion => {
             let agent = candidate_scope
-                .companion_agent_profile_id
+                .companion_agent_id
                 .as_deref()
                 .context("Companion Scope has no Agent")?;
             let count = records
@@ -1772,7 +1770,7 @@ fn ensure_capacity(
                 .filter(|record| {
                     record.scope.as_ref().is_some_and(|scope| {
                         scope.kind == MemoryScopeKind::Companion
-                            && scope.companion_agent_profile_id.as_deref() == Some(agent)
+                            && scope.companion_agent_id.as_deref() == Some(agent)
                     })
                 })
                 .count() as i64;
@@ -1788,7 +1786,7 @@ fn ensure_capacity(
                         record.creation_origin == Some(MemoryCreationOrigin::Agent)
                             && record.scope.as_ref().is_some_and(|scope| {
                                 scope.kind == MemoryScopeKind::Companion
-                                    && scope.companion_agent_profile_id.as_deref() == Some(agent)
+                                    && scope.companion_agent_id.as_deref() == Some(agent)
                             })
                     })
                     .count() as i64;
@@ -1819,7 +1817,7 @@ fn ensure_capacity(
                 ],
                 Some(RelationshipDirection::Directed) => vec![
                     candidate_scope
-                        .directed_actor_agent_profile_id
+                        .directed_actor_agent_id
                         .as_deref()
                         .context("Directed Relationship has no actor")?,
                 ],
@@ -1859,7 +1857,7 @@ fn validate_agent_mutation<C: DomainCommand>(
     envelope: &CommandEnvelope<C>,
 ) -> Result<RevisionActor> {
     let ActorRef::Agent {
-        agent_profile_id,
+        agent_id,
         source_agent_run_id,
     } = &envelope.actor
     else {
@@ -1875,7 +1873,7 @@ fn validate_agent_mutation<C: DomainCommand>(
     let row: Option<(String, String, i64)> = transaction
         .query_row(
             r#"
-            SELECT camp_turn.camp_id, conversation.agent_profile_id,
+            SELECT camp_turn.camp_id, conversation.agent_id,
                    agent_run.execution_epoch
             FROM agent_run
             JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
@@ -1890,15 +1888,15 @@ fn validate_agent_mutation<C: DomainCommand>(
     let Some((run_camp, run_agent, run_epoch)) = row else {
         anyhow::bail!("memory.run_not_current: AgentRun is no longer current");
     };
-    if run_camp != camp_id || run_agent != *agent_profile_id || run_epoch != execution_epoch {
+    if run_camp != camp_id || run_agent != *agent_id || run_epoch != execution_epoch {
         anyhow::bail!("memory.run_not_current: AgentRun identity or fence does not match");
     }
-    if !is_current_camp_member(transaction, camp_id, agent_profile_id)? {
+    if !is_current_camp_member(transaction, camp_id, agent_id)? {
         anyhow::bail!("memory.run_not_current: Agent is not a present current Camp member");
     }
     Ok(RevisionActor {
         kind: MemoryRevisionActorKind::Agent,
-        actor_id: agent_profile_id.clone(),
+        actor_id: agent_id.clone(),
         source_camp_id: Some(camp_id.to_string()),
         source_agent_run_id: Some(source_agent_run_id.clone()),
         source_execution_epoch: Some(execution_epoch),
@@ -1906,14 +1904,11 @@ fn validate_agent_mutation<C: DomainCommand>(
 }
 
 fn agent_identity<C>(envelope: &CommandEnvelope<C>) -> Result<(&str, &str)> {
-    let ActorRef::Agent {
-        agent_profile_id, ..
-    } = &envelope.actor
-    else {
+    let ActorRef::Agent { agent_id, .. } = &envelope.actor else {
         anyhow::bail!("memory.actor_not_allowed: Agent identity is required");
     };
     Ok((
-        agent_profile_id,
+        agent_id,
         envelope
             .camp_id
             .as_deref()
@@ -1952,7 +1947,7 @@ fn enforce_agent_mutation_quota(
 fn agent_add_scope(
     transaction: &Transaction<'_>,
     input: &AgentMemoryWriteCommand,
-    agent_profile_id: &str,
+    agent_id: &str,
     camp_id: &str,
 ) -> Result<MemoryScope> {
     let scope = input.scope.context("add requires scope")?;
@@ -1966,14 +1961,14 @@ fn agent_add_scope(
             if input.counterparty_agent_id.is_some() || input.direction.is_some() {
                 anyhow::bail!("memory.invalid_input: Companion add has no Relationship fields");
             }
-            Ok(MemoryScope::companion(agent_profile_id.to_string()))
+            Ok(MemoryScope::companion(agent_id.to_string()))
         }
         MemoryScopeKind::Relationship => {
             let counterparty = input
                 .counterparty_agent_id
                 .clone()
                 .context("Relationship add requires counterpartyAgentId")?;
-            if counterparty == agent_profile_id
+            if counterparty == agent_id
                 || !is_current_camp_member(transaction, camp_id, &counterparty)?
             {
                 anyhow::bail!(
@@ -1984,11 +1979,10 @@ fn agent_add_scope(
                 .direction
                 .context("Relationship add requires direction")?;
             MemoryScope::relationship(
-                agent_profile_id.to_string(),
+                agent_id.to_string(),
                 counterparty,
                 direction,
-                (direction == RelationshipDirection::Directed)
-                    .then(|| agent_profile_id.to_string()),
+                (direction == RelationshipDirection::Directed).then(|| agent_id.to_string()),
             )
         }
     }
@@ -1997,7 +1991,7 @@ fn agent_add_scope(
 fn memory_applicable_to_agent(
     transaction: &Transaction<'_>,
     record: &MemoryRecord,
-    agent_profile_id: &str,
+    agent_id: &str,
     camp_id: &str,
 ) -> Result<bool> {
     let Some(scope) = &record.scope else {
@@ -2005,15 +1999,13 @@ fn memory_applicable_to_agent(
     };
     match scope.kind {
         MemoryScopeKind::Hearth => Ok(true),
-        MemoryScopeKind::Companion => {
-            Ok(scope.companion_agent_profile_id.as_deref() == Some(agent_profile_id))
-        }
+        MemoryScopeKind::Companion => Ok(scope.companion_agent_id.as_deref() == Some(agent_id)),
         MemoryScopeKind::Relationship => {
-            if !scope.contains_agent(agent_profile_id) {
+            if !scope.contains_agent(agent_id) {
                 return Ok(false);
             }
             let counterparty = scope
-                .counterparty(agent_profile_id)
+                .counterparty(agent_id)
                 .context("Relationship Memory pair is invalid")?;
             if !is_current_camp_member(transaction, camp_id, counterparty)? {
                 return Ok(false);
@@ -2021,8 +2013,7 @@ fn memory_applicable_to_agent(
             Ok(
                 scope.relationship_direction == Some(RelationshipDirection::Mutual)
                     || (scope.relationship_direction == Some(RelationshipDirection::Directed)
-                        && scope.directed_actor_agent_profile_id.as_deref()
-                            == Some(agent_profile_id)),
+                        && scope.directed_actor_agent_id.as_deref() == Some(agent_id)),
             )
         }
     }
@@ -2031,20 +2022,20 @@ fn memory_applicable_to_agent(
 pub(crate) fn is_current_camp_member(
     transaction: &Transaction<'_>,
     camp_id: &str,
-    agent_profile_id: &str,
+    agent_id: &str,
 ) -> Result<bool> {
     let count: i64 = transaction.query_row(
         r#"
         SELECT COUNT(*)
         FROM camp_member
-        JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
+        JOIN agent_profile ON agent_profile.id = camp_member.agent_id
         WHERE camp_member.camp_id = ?1
-          AND camp_member.agent_profile_id = ?2
+          AND camp_member.agent_id = ?2
           AND camp_member.status = 'active'
           AND camp_member.leave_requested_at IS NULL
           AND agent_profile.profile_status = 'present'
         "#,
-        params![camp_id, agent_profile_id],
+        params![camp_id, agent_id],
         |row| row.get(0),
     )?;
     Ok(count == 1)
@@ -2060,7 +2051,7 @@ fn load_hearth_proposal_record(
             SELECT id, action, status, candidate_kind, candidate_body,
                    candidate_retrieval_keys_json,
                    target_memory_id, base_revision_id,
-                   proposed_by_agent_profile_id, source_camp_id,
+                   proposed_by_agent_id, source_camp_id,
                    source_agent_run_id, source_execution_epoch,
                    accepted_memory_id, accepted_revision_id,
                    resolved_by_user_id, version, proposed_at, resolved_at
@@ -2096,7 +2087,7 @@ fn load_hearth_proposal_record(
                     retrieval_keys,
                     target_memory_id: row.get(6)?,
                     base_revision_id: row.get(7)?,
-                    proposed_by_agent_profile_id: row.get(8)?,
+                    proposed_by_agent_id: row.get(8)?,
                     source_camp_id: row.get(9)?,
                     source_agent_run_id: row.get(10)?,
                     source_execution_epoch: row.get(11)?,
@@ -2141,7 +2132,7 @@ fn memory_view_from_record(
     revisions: Vec<MemoryRevisionView>,
     current_retrieval_keys: Vec<String>,
 ) -> Result<MemoryView> {
-    let relationship_agent_profile_ids = record
+    let relationship_agent_ids = record
         .scope
         .as_ref()
         .map(|scope| {
@@ -2166,19 +2157,19 @@ fn memory_view_from_record(
         scope: record.scope.as_ref().map(|scope| scope.kind),
         kind: record.kind,
         creation_origin: record.creation_origin,
-        companion_agent_profile_id: record
+        companion_agent_id: record
             .scope
             .as_ref()
-            .and_then(|scope| scope.companion_agent_profile_id.clone()),
-        relationship_agent_profile_ids,
+            .and_then(|scope| scope.companion_agent_id.clone()),
+        relationship_agent_ids,
         direction: record
             .scope
             .as_ref()
             .and_then(|scope| scope.relationship_direction),
-        directed_actor_agent_profile_id: record
+        directed_actor_agent_id: record
             .scope
             .as_ref()
-            .and_then(|scope| scope.directed_actor_agent_profile_id.clone()),
+            .and_then(|scope| scope.directed_actor_agent_id.clone()),
         lifecycle: record.lifecycle,
         current_revision_id: record.current_revision_id,
         current_body: record.current_body,
@@ -2232,7 +2223,7 @@ fn hearth_proposal_view(
         retrieval_keys: record.retrieval_keys,
         target_memory_id: record.target_memory_id,
         base_revision_id: record.base_revision_id,
-        proposed_by_agent_profile_id: record.proposed_by_agent_profile_id,
+        proposed_by_agent_id: record.proposed_by_agent_id,
         source_camp_id: record.source_camp_id,
         source_agent_run_id: record.source_agent_run_id,
         source_execution_epoch: record.source_execution_epoch,
@@ -2270,7 +2261,7 @@ fn capacity_views(database: &Database) -> Result<Vec<MemoryCapacityView>> {
             match scope.kind {
                 MemoryScopeKind::Hearth => {}
                 MemoryScopeKind::Companion => {
-                    if let Some(agent) = &scope.companion_agent_profile_id {
+                    if let Some(agent) = &scope.companion_agent_id {
                         companions.insert(agent.clone());
                     }
                 }
@@ -2291,7 +2282,7 @@ fn capacity_views(database: &Database) -> Result<Vec<MemoryCapacityView>> {
         let matching = records.iter().filter(|record| {
             record.scope.as_ref().is_some_and(|scope| {
                 scope.kind == MemoryScopeKind::Companion
-                    && scope.companion_agent_profile_id.as_deref() == Some(agent.as_str())
+                    && scope.companion_agent_id.as_deref() == Some(agent.as_str())
             })
         });
         let matching = matching.collect::<Vec<_>>();
@@ -2338,8 +2329,7 @@ fn capacity_views(database: &Database) -> Result<Vec<MemoryCapacityView>> {
                     scope.kind == MemoryScopeKind::Relationship
                         && scope.contains_agent(&agent)
                         && (scope.relationship_direction == Some(RelationshipDirection::Mutual)
-                            || scope.directed_actor_agent_profile_id.as_deref()
-                                == Some(agent.as_str()))
+                            || scope.directed_actor_agent_id.as_deref() == Some(agent.as_str()))
                 })
             })
             .collect::<Vec<_>>();
@@ -2578,8 +2568,8 @@ impl MemoryService {
         &self,
         database: &Database,
         scope: MemoryScopeKind,
-        agent_profile_id: Option<&str>,
-        counterparty_agent_profile_id: Option<&str>,
+        agent_id: Option<&str>,
+        counterparty_agent_id: Option<&str>,
     ) -> Result<Vec<ProjectedMemoryEntry>> {
         let records = load_active_memory_records(database.connection())?;
         let mut entries = Vec::new();
@@ -2591,13 +2581,13 @@ impl MemoryService {
                 MemoryScopeKind::Hearth => record_scope.kind == MemoryScopeKind::Hearth,
                 MemoryScopeKind::Companion => {
                     record_scope.kind == MemoryScopeKind::Companion
-                        && record_scope.companion_agent_profile_id.as_deref() == agent_profile_id
+                        && record_scope.companion_agent_id.as_deref() == agent_id
                 }
                 MemoryScopeKind::Relationship => {
-                    let Some(agent) = agent_profile_id else {
+                    let Some(agent) = agent_id else {
                         continue;
                     };
-                    let Some(counterparty) = counterparty_agent_profile_id else {
+                    let Some(counterparty) = counterparty_agent_id else {
                         continue;
                     };
                     record_scope.kind == MemoryScopeKind::Relationship
@@ -2605,8 +2595,7 @@ impl MemoryService {
                         && record_scope.counterparty(agent) == Some(counterparty)
                         && (record_scope.relationship_direction
                             == Some(RelationshipDirection::Mutual)
-                            || record_scope.directed_actor_agent_profile_id.as_deref()
-                                == Some(agent))
+                            || record_scope.directed_actor_agent_id.as_deref() == Some(agent))
                 }
             };
             if !matches {
@@ -3238,13 +3227,9 @@ impl MemoryService {
                             "add cannot include memoryId or baseRevisionId",
                         ));
                     }
-                    let (agent_profile_id, camp_id) = agent_identity(&normalized)?;
-                    let scope = agent_add_scope(
-                        transaction,
-                        &normalized.payload,
-                        agent_profile_id,
-                        camp_id,
-                    )?;
+                    let (agent_id, camp_id) = agent_identity(&normalized)?;
+                    let scope =
+                        agent_add_scope(transaction, &normalized.payload, agent_id, camp_id)?;
                     let kind = normalized.payload.kind.context("add requires kind")?;
                     validate_kind_for_scope(kind, &scope)?;
                     let candidate = Candidate {
@@ -3309,7 +3294,7 @@ impl MemoryService {
                             "revise accepts only Memory, Revision, body and Retrieval Keys",
                         ));
                     }
-                    let (agent_profile_id, camp_id) = agent_identity(&normalized)?;
+                    let (agent_id, camp_id) = agent_identity(&normalized)?;
                     let memory_id = normalized
                         .payload
                         .memory_id
@@ -3328,12 +3313,7 @@ impl MemoryService {
                             .scope
                             .as_ref()
                             .is_some_and(|scope| scope.kind == MemoryScopeKind::Hearth)
-                        || !memory_applicable_to_agent(
-                            transaction,
-                            &record,
-                            agent_profile_id,
-                            camp_id,
-                        )?
+                        || !memory_applicable_to_agent(transaction, &record, agent_id, camp_id)?
                     {
                         return Ok(rejected("memory.unavailable", "Memory is unavailable"));
                     }
@@ -3536,7 +3516,7 @@ impl MemoryService {
             }
             let proposal_id = Uuid::new_v4().to_string();
             let now = Utc::now().to_rfc3339();
-            let (agent_profile_id, camp_id) = agent_identity(&normalized)?;
+            let (agent_id, camp_id) = agent_identity(&normalized)?;
             transaction.execute(
                 r#"
                 INSERT INTO hearth_memory_proposal(
@@ -3544,7 +3524,7 @@ impl MemoryService {
                     candidate_body, candidate_body_utf8_bytes,
                     candidate_retrieval_keys_json,
                     target_memory_id, base_revision_id, pending_key_digest,
-                    proposed_by_agent_profile_id, source_camp_id,
+                    proposed_by_agent_id, source_camp_id,
                     source_agent_run_id, source_execution_epoch,
                     version, proposed_at
                 ) VALUES (
@@ -3562,7 +3542,7 @@ impl MemoryService {
                     target_memory_id,
                     base_revision_id,
                     pending_key,
-                    agent_profile_id,
+                    agent_id,
                     camp_id,
                     source_agent_run_id,
                     actor.source_execution_epoch,

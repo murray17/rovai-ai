@@ -376,14 +376,14 @@ export async function verifyDiagnosticTrialConfiguration({
     member
   ]))
   const observedMemberIds = (environmentManifest.team ?? [])
-    .map((member) => legacyDiagnosticAgentId(member.id))
+    .map((member) => legacyDiagnosticAgentId(member.agentId))
   if (observedMemberIds.length !== expectedMembers.size
       || new Set(observedMemberIds).size !== expectedMembers.size
       || observedMemberIds.some((memberId) => !expectedMembers.has(memberId))) {
     throw new Error('Diagnostic Trial team membership drifted')
   }
   for (const observed of environmentManifest.team) {
-    const expected = expectedMembers.get(legacyDiagnosticAgentId(observed.id))
+    const expected = expectedMembers.get(legacyDiagnosticAgentId(observed.agentId))
     const model = observed.runtimePreference?.model
     const permissions = observed.runtimePreference?.permissions
     if (!expected
@@ -974,7 +974,7 @@ function normalizeTeamMembers(members) {
     throw new Error('Diagnostic Portfolio requires exactly four frozen team members')
   }
   const normalized = members.map((member) => ({
-    agentProfileId: legacyDiagnosticAgentId(member.agentProfileId),
+    agentProfileId: legacyDiagnosticAgentId(member.agentId),
     adapterKind: member.adapterKind,
     modelId: member.modelId,
     modelOptionsDigest: asDigest(member.modelOptionsDigest),
@@ -1002,7 +1002,7 @@ function normalizeExecutionFingerprints(value) {
     runner: normalizeBinary(value.runner),
     node: normalizeBinary(value.node),
     runtimes: value.runtimes.map((runtime) => ({
-      agentProfileId: legacyDiagnosticAgentId(runtime.agentProfileId),
+      agentProfileId: legacyDiagnosticAgentId(runtime.agentId),
       adapterKind: runtime.adapterKind,
       declaredModelId: runtime.declaredModelId,
       executableDigest: asDigest(runtime.executableDigest)
@@ -1012,8 +1012,8 @@ function normalizeExecutionFingerprints(value) {
   }
 }
 
-function legacyDiagnosticAgentId(agentProfileId) {
-  return LEGACY_DIAGNOSTIC_AGENT_IDS.get(agentProfileId) ?? agentProfileId
+function legacyDiagnosticAgentId(agentId) {
+  return LEGACY_DIAGNOSTIC_AGENT_IDS.get(agentId) ?? agentId
 }
 
 function validateExecutionBindings(members, fingerprints) {
@@ -1023,7 +1023,7 @@ function validateExecutionBindings(members, fingerprints) {
   const memberById = new Map(members.map((member) => [member.agentProfileId, member]))
   const runtimeAgentIds = fingerprints.runtimes.map((runtime) => runtime.agentProfileId)
   if (new Set(runtimeAgentIds).size !== members.length
-      || runtimeAgentIds.some((agentProfileId) => !memberById.has(agentProfileId))) {
+      || runtimeAgentIds.some((agentId) => !memberById.has(agentId))) {
     throw new Error('Diagnostic Portfolio Runtime fingerprints must bind the exact team member set')
   }
   for (const runtime of fingerprints.runtimes) {

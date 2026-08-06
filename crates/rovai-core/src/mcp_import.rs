@@ -159,18 +159,18 @@ impl McpImportScanner {
     pub fn scan(
         &self,
         store: &McpConfigStore,
-        known_agent_profile_ids: &BTreeSet<String>,
+        known_agent_ids: &BTreeSet<String>,
     ) -> Result<McpImportInspection> {
-        self.scan_specs(store, known_agent_profile_ids, source_specs()?)
+        self.scan_specs(store, known_agent_ids, source_specs()?)
     }
 
     fn scan_specs(
         &self,
         store: &McpConfigStore,
-        known_agent_profile_ids: &BTreeSet<String>,
+        known_agent_ids: &BTreeSet<String>,
         specs: Vec<SourceSpec>,
     ) -> Result<McpImportInspection> {
-        let (config_view, current_config) = store.get_with_raw(known_agent_profile_ids)?;
+        let (config_view, current_config) = store.get_with_raw(known_agent_ids)?;
         let mut sources = Vec::with_capacity(specs.len());
         let mut normalized_candidates = Vec::new();
         for spec in specs {

@@ -11,7 +11,7 @@ const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-recovery-smoke-'))
 const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
 const adapterKind = process.env.ROVAI_RECOVERY_ADAPTER ?? 'opencode-cli'
-const agentProfileId = 'agent_1'
+const agentId = 'agent_1'
 let firstCore = null
 let recoveredCore = null
 
@@ -29,7 +29,7 @@ try {
   const runtimeVersion = await configureRuntime(
     firstCore.request,
     health,
-    agentProfileId,
+    agentId,
     adapterKind
   )
   const workspace = await firstCore.request('workspaces.inspect', { path: projectRoot })
@@ -260,11 +260,11 @@ function startCore(dataDirectory) {
   }
 }
 
-async function configureRuntime(request, _health, targetAgentProfileId, targetAdapterKind) {
+async function configureRuntime(request, _health, targetAgentId, targetAdapterKind) {
   const installation = await configureProductRuntime(
     request,
     targetAdapterKind,
-    [targetAgentProfileId]
+    [targetAgentId]
   )
   return installation.snapshot.reportedVersion
 }

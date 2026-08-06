@@ -14,7 +14,7 @@ use crate::{
     skill_projection::SkillExposureSnapshot,
 };
 
-pub const READ_MODEL_SCHEMA_VERSION: i64 = 19;
+pub const READ_MODEL_SCHEMA_VERSION: i64 = 21;
 pub const EVENT_BATCH_SCHEMA_VERSION: i64 = 9;
 pub const NAVIGATION_SCHEMA_VERSION: i64 = 2;
 pub const EXECUTION_EVIDENCE_PAGE_SCHEMA_VERSION: i64 = 1;
@@ -24,7 +24,7 @@ const EXECUTION_EVIDENCE_SNAPSHOT_LIMIT: i64 = 1_200;
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NavigationLeadSummary {
-    pub agent_profile_id: String,
+    pub agent_id: String,
     pub display_name: String,
 }
 
@@ -95,7 +95,6 @@ pub struct CampListItem {
     pub id: String,
     pub title: String,
     pub project_path: String,
-    pub status: String,
     pub default_lead_agent_id: Option<String>,
     pub active_member_count: i64,
     pub open_task_count: i64,
@@ -110,7 +109,6 @@ pub struct CampView {
     pub project_binding_kind: String,
     pub project_path: String,
     pub default_lead_agent_id: Option<String>,
-    pub status: String,
     pub version: i64,
     pub created_at: String,
     pub updated_at: String,
@@ -119,8 +117,7 @@ pub struct CampView {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CampMemberView {
-    pub agent_profile_id: String,
-    pub handle: String,
+    pub agent_id: String,
     pub display_name: String,
     pub avatar_ref: Option<String>,
     pub team_role: String,
@@ -163,7 +160,7 @@ pub struct CampMessageView {
     pub content: Option<StructuredCampMessageContent>,
     pub attachments: Vec<CampMessageAttachmentView>,
     pub address_mode: String,
-    pub addressed_agent_profile_ids: Value,
+    pub addressed_agent_ids: Value,
     pub reply_to_camp_message_id: Option<String>,
     pub camp_turn_id: Option<String>,
     pub presentation: Option<Value>,
@@ -223,7 +220,7 @@ pub struct AgentRunView {
     pub id: String,
     pub camp_turn_id: String,
     pub conversation_id: String,
-    pub agent_profile_id: String,
+    pub agent_id: String,
     pub task_id: Option<String>,
     pub responsibility_key: String,
     pub responsibility_generation: i64,
@@ -467,7 +464,7 @@ pub struct ApprovalView {
     pub canonical_input: Value,
     pub reason: Option<String>,
     pub agent_run_id: String,
-    pub agent_profile_id: String,
+    pub agent_id: String,
     pub adapter_kind: String,
     pub native_method: Option<String>,
     pub request_digest: Option<String>,
@@ -550,10 +547,10 @@ impl ReadModelService {
     pub fn list_camps(&self, database: &Database) -> Result<Vec<CampListItem>> {
         let mut statement = database.connection().prepare(
             r#"
-            SELECT camp.id, camp.title, camp.project_path, camp.status,
+            SELECT camp.id, camp.title, camp.project_path,
                    camp.default_lead_agent_id,
                    (SELECT COUNT(*) FROM camp_member
-                    JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
+                    JOIN agent_profile ON agent_profile.id = camp_member.agent_id
                     WHERE camp_member.camp_id = camp.id
                       AND camp_member.status = 'active'
                       AND camp_member.leave_requested_at IS NULL
@@ -572,11 +569,10 @@ impl ReadModelService {
                     id: row.get(0)?,
                     title: row.get(1)?,
                     project_path: row.get(2)?,
-                    status: row.get(3)?,
-                    default_lead_agent_id: row.get(4)?,
-                    active_member_count: row.get(5)?,
-                    open_task_count: row.get(6)?,
-                    updated_at: row.get(7)?,
+                    default_lead_agent_id: row.get(3)?,
+                    active_member_count: row.get(4)?,
+                    open_task_count: row.get(5)?,
+                    updated_at: row.get(6)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()
@@ -645,7 +641,7 @@ impl ReadModelService {
             anyhow::bail!("Viewed sequence is ahead of the current event sequence");
         }
         let exists: bool = transaction.query_row(
-            "SELECT EXISTS(SELECT 1 FROM camp WHERE id = ?1 AND status = 'active')",
+            "SELECT EXISTS(SELECT 1 FROM camp WHERE id = ?1)",
             [camp_id],
             |row| row.get(0),
         )?;
@@ -933,7 +929,6 @@ fn load_navigation_camps(transaction: &Transaction<'_>) -> Result<Vec<Navigation
         LEFT JOIN event_log AS activity_event
           ON activity_event.global_sequence = navigation_activity.last_activity_sequence
         LEFT JOIN camp_view_state ON camp_view_state.camp_id = camp.id
-        WHERE camp.status = 'active'
         "#,
     )?;
     let rows = statement.query_map([], |row| {
@@ -954,8 +949,8 @@ fn load_navigation_camps(transaction: &Transaction<'_>) -> Result<Vec<Navigation
             title: row.get(1)?,
             project_binding_kind: row.get(2)?,
             project_path: row.get(3)?,
-            default_lead: default_lead_agent_id.map(|agent_profile_id| NavigationLeadSummary {
-                agent_profile_id,
+            default_lead: default_lead_agent_id.map(|agent_id| NavigationLeadSummary {
+                agent_id,
                 display_name: default_lead_display_name.unwrap_or_default(),
             }),
             marker: marker.to_string(),
@@ -1063,7 +1058,7 @@ fn load_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<Option<Camp
             r#"
             SELECT id, title, project_binding_kind, project_path,
                    default_lead_agent_id,
-                   status, version, created_at, updated_at
+                   version, created_at, updated_at
             FROM camp WHERE id = ?1
             "#,
             [camp_id],
@@ -1074,10 +1069,9 @@ fn load_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<Option<Camp
                     project_binding_kind: row.get(2)?,
                     project_path: row.get(3)?,
                     default_lead_agent_id: row.get(4)?,
-                    status: row.get(5)?,
-                    version: row.get(6)?,
-                    created_at: row.get(7)?,
-                    updated_at: row.get(8)?,
+                    version: row.get(5)?,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
                 })
             },
         )
@@ -1092,32 +1086,31 @@ fn load_members(
 ) -> Result<Vec<CampMemberView>> {
     let mut statement = transaction.prepare(
         r#"
-        SELECT camp_member.agent_profile_id, COALESCE(agent_profile.handle, ''),
-               agent_profile.display_name, agent_profile.avatar_ref, agent_profile.team_role,
+        SELECT camp_member.agent_id, agent_profile.display_name,
+               agent_profile.avatar_ref, agent_profile.team_role,
                agent_profile.accent, camp_member.status,
                agent_profile.profile_status, agent_profile.member_order,
                camp_member.version
         FROM camp_member
-        JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
+        JOIN agent_profile ON agent_profile.id = camp_member.agent_id
         WHERE camp_member.camp_id = ?1
-        ORDER BY agent_profile.member_order, camp_member.agent_profile_id
+        ORDER BY agent_profile.member_order, camp_member.agent_id
         "#,
     )?;
     statement
         .query_map([camp_id], |row| {
-            let agent_profile_id: String = row.get(0)?;
+            let agent_id: String = row.get(0)?;
             Ok(CampMemberView {
-                is_default_lead: default_lead == Some(agent_profile_id.as_str()),
-                agent_profile_id,
-                handle: row.get(1)?,
-                display_name: row.get(2)?,
-                avatar_ref: row.get(3)?,
-                team_role: row.get(4)?,
-                accent: row.get(5)?,
-                membership_status: row.get(6)?,
-                profile_presence: row.get(7)?,
-                member_order: row.get(8)?,
-                version: row.get(9)?,
+                is_default_lead: default_lead == Some(agent_id.as_str()),
+                agent_id,
+                display_name: row.get(1)?,
+                avatar_ref: row.get(2)?,
+                team_role: row.get(3)?,
+                accent: row.get(4)?,
+                membership_status: row.get(5)?,
+                profile_presence: row.get(6)?,
+                member_order: row.get(7)?,
+                version: row.get(8)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()
@@ -1208,7 +1201,7 @@ fn load_messages(
                ),
                author_type, author_id,
                source_agent_run_id, body, structured_content_json, address_mode,
-               addressed_agent_profile_ids_json,
+               addressed_agent_ids_json,
                reply_to_camp_message_id, camp_turn_id,
                presentation_json, created_at
         FROM camp_message
@@ -1298,7 +1291,7 @@ fn load_messages(
                     content,
                     attachments,
                     address_mode,
-                    addressed_agent_profile_ids: serde_json::from_str(&addressed)?,
+                    addressed_agent_ids: serde_json::from_str(&addressed)?,
                     reply_to_camp_message_id,
                     camp_turn_id,
                     presentation: presentation
@@ -1377,7 +1370,7 @@ fn load_agent_runs(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<A
     let mut statement = transaction.prepare(
         r#"
         SELECT agent_run.id, agent_run.camp_turn_id,
-               agent_run.conversation_id, conversation.agent_profile_id,
+               agent_run.conversation_id, conversation.agent_id,
                agent_run.task_id, agent_run.responsibility_key,
                agent_run.responsibility_generation, agent_run.purpose,
                agent_run.expected_output, agent_run.completion_role,
@@ -1480,7 +1473,7 @@ fn load_agent_runs(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<A
                 id,
                 camp_turn_id,
                 conversation_id,
-                agent_profile_id,
+                agent_id,
                 task_id,
                 responsibility_key,
                 responsibility_generation,
@@ -1512,7 +1505,7 @@ fn load_agent_runs(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<A
                     id,
                     camp_turn_id,
                     conversation_id,
-                    agent_profile_id,
+                    agent_id,
                     task_id,
                     responsibility_key,
                     responsibility_generation,
@@ -2206,7 +2199,7 @@ fn load_approvals(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<Ap
                approval.requested_at, approval.resolved_at,
                approval.resolved_by_type, approval.resolved_by_id,
                approval.resolution_code, approval.request_json, approval.reason,
-               agent_run.id, conversation.agent_profile_id,
+               agent_run.id, conversation.agent_id,
                COALESCE(agent_run.runtime_adapter_kind, 'unknown'),
                action_execution.native_request_method,
                action_execution.native_request_digest,
@@ -2249,7 +2242,7 @@ fn load_approvals(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<Ap
                 canonical_input,
                 reason: row.get(13)?,
                 agent_run_id: row.get(14)?,
-                agent_profile_id: row.get(15)?,
+                agent_id: row.get(15)?,
                 adapter_kind: row.get(16)?,
                 native_method: row.get(17)?,
                 request_digest: row.get(18)?,
@@ -2457,7 +2450,7 @@ mod tests {
                 text: "请 ".to_string(),
             },
             Segment::MemberMention {
-                agent_profile_id: "agent_2".to_string(),
+                agent_id: "agent_2".to_string(),
             },
             Segment::Text {
                 text: " 处理".to_string(),
@@ -2519,6 +2512,12 @@ mod tests {
             .camp_snapshot(&mut database, &camp_id)
             .unwrap();
         assert_eq!(snapshot.schema_version, READ_MODEL_SCHEMA_VERSION);
+        assert!(
+            serde_json::to_value(&snapshot.members[0])
+                .unwrap()
+                .get("handle")
+                .is_none()
+        );
         assert_eq!(snapshot.messages[0].body, "请 @木瓦（新名） 处理");
         assert_eq!(snapshot.messages[0].content, Some(content));
         assert_eq!(snapshot.messages[1].body, "旧消息仍是 @muwa");
@@ -2560,7 +2559,7 @@ mod tests {
                     Some(&camp_id),
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
-                        agent_profile_id: "agent_1".to_string(),
+                        agent_id: "agent_1".to_string(),
                         capability_overrides: json!({}),
                     },
                 ),
@@ -2831,7 +2830,7 @@ mod tests {
                     Some(&camp_id),
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
-                        agent_profile_id: "agent_2".to_string(),
+                        agent_id: "agent_2".to_string(),
                         capability_overrides: json!({}),
                     },
                 ),
@@ -3134,7 +3133,7 @@ mod tests {
         let target_agent_id: String = database
             .connection()
             .query_row(
-                "SELECT agent_profile_id FROM conversation WHERE id = ?1",
+                "SELECT agent_id FROM conversation WHERE id = ?1",
                 [&target_conversation_id],
                 |row| row.get(0),
             )
@@ -3143,9 +3142,9 @@ mod tests {
             .connection()
             .query_row(
                 r#"
-                SELECT agent_profile_id, id FROM conversation
-                WHERE camp_id = ?1 AND agent_profile_id <> ?2
-                ORDER BY agent_profile_id LIMIT 1
+                SELECT agent_id, id FROM conversation
+                WHERE camp_id = ?1 AND agent_id <> ?2
+                ORDER BY agent_id LIMIT 1
                 "#,
                 params![camp_id, target_agent_id],
                 |row| Ok((row.get(0)?, row.get(1)?)),

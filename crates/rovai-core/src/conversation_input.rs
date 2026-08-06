@@ -166,7 +166,6 @@ fn load_next_pending_input(
               AND camp_turn.cancel_requested_at IS NULL
               AND camp_turn.execution_budget_exhausted_at IS NULL
               AND camp_turn.execution_budget_deadline_at > ?1
-              AND camp.status = 'active'
               AND NOT EXISTS (
                   SELECT 1
                   FROM agent_run
@@ -212,8 +211,8 @@ fn recipient_is_still_eligible(
         FROM conversation
         JOIN camp_member
           ON camp_member.camp_id = conversation.camp_id
-         AND camp_member.agent_profile_id = conversation.agent_profile_id
-        JOIN agent_profile ON agent_profile.id = conversation.agent_profile_id
+         AND camp_member.agent_id = conversation.agent_id
+        JOIN agent_profile ON agent_profile.id = conversation.agent_id
         WHERE conversation.id = ?1
           AND conversation.camp_id = ?2
           AND camp_member.status = 'active'
@@ -238,10 +237,10 @@ fn current_authorization_covers_basis(
                    camp_member.capability_overrides_json
             FROM conversation
             JOIN agent_profile
-              ON agent_profile.id = conversation.agent_profile_id
+              ON agent_profile.id = conversation.agent_id
             JOIN camp_member
               ON camp_member.camp_id = conversation.camp_id
-             AND camp_member.agent_profile_id = conversation.agent_profile_id
+             AND camp_member.agent_id = conversation.agent_id
             WHERE conversation.id = ?1
             "#,
             [conversation_id],

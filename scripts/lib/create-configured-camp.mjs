@@ -1,21 +1,21 @@
 export async function createConfiguredCampAndSend(request, input) {
   const preflight = await request('camps.creationPreflight')
-  if (!preflight.admissible || !preflight.initialLeadAgentProfileId) {
+  if (!preflight.admissible || !preflight.initialLeadAgentId) {
     throw new Error(`Camp creation preflight failed: ${JSON.stringify(preflight)}`)
   }
 
-  const memberAgentProfileIds = input.memberAgentProfileIds
-    ?? preflight.presentMembers.map((member) => member.agentProfileId)
-  const defaultLeadAgentProfileId = input.defaultLeadAgentProfileId
-    ?? preflight.initialLeadAgentProfileId
+  const memberAgentIds = input.memberAgentIds
+    ?? preflight.presentMembers.map((member) => member.agentId)
+  const defaultLeadAgentId = input.defaultLeadAgentId
+    ?? preflight.initialLeadAgentId
   const createResult = await request('camps.create', {
     commandId: `${input.commandId}:camp`,
     name: input.name ?? null,
     workspace: input.workspace
       ? { projectPath: input.workspace.projectPath }
       : null,
-    memberAgentProfileIds,
-    defaultLeadAgentProfileId,
+    memberAgentIds,
+    defaultLeadAgentId,
     collaborationMode: 'peer'
   })
   const campId = createResult.payload?.campId
@@ -58,8 +58,8 @@ function composerContent(address, body) {
   }
   if (address.mode === 'explicit') {
     return [
-      ...address.agentProfileIds.flatMap((agentProfileId) => [
-        { kind: 'member_mention', agentProfileId },
+      ...address.agentIds.flatMap((agentId) => [
+        { kind: 'member_mention', agentId },
         { kind: 'text', text: ' ' }
       ]),
       { kind: 'text', text: body }

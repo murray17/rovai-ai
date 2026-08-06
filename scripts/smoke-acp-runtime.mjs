@@ -72,7 +72,7 @@ try {
   // Use the starter coding companion so the AgentRun receives a write workspace;
   // an Approval may authorize a concrete action, but it must never widen a
   // read-only AgentRun into a writer.
-  const agentProfileId = 'agent_2'
+  const agentId = 'agent_2'
 
   const specifications = [
     {
@@ -91,13 +91,13 @@ try {
     const installation = await configureProductRuntime(
       request,
       specification.adapterKind,
-      [agentProfileId]
+      [agentId]
     )
     if (installation?.snapshot?.probeStatus !== 'ready' || !installation.snapshot.models.length) {
       throw new Error(`Capability snapshot is not ready: ${JSON.stringify(installation)}`)
     }
 
-    const profile = await request('agents.get', { agentProfileId })
+    const profile = await request('agents.get', { agentId })
     const body = `Do not call tools or inspect files. Reply with exactly ${specification.token} and nothing else.`
     const purpose = `Verify the ${specification.adapterKind} ACP execution path without tools`
     const expectedOutput = `Exactly ${specification.token}`
@@ -106,7 +106,7 @@ try {
           commandId: crypto.randomUUID(),
           campId: camp.id,
           body,
-          address: { mode: 'explicit', agentProfileIds: [profile.id] },
+          address: { mode: 'explicit', agentIds: [profile.agentId] },
           replyToCampMessageId: null,
           execution: {
             taskId: null,
@@ -119,7 +119,7 @@ try {
           commandId: crypto.randomUUID(),
           workspace,
           body,
-          address: { mode: 'explicit', agentProfileIds: [profile.id] },
+          address: { mode: 'explicit', agentIds: [profile.agentId] },
           purpose,
           expectedOutput
         })
@@ -130,7 +130,7 @@ try {
       throw new Error(`AgentRun intake failed: ${JSON.stringify(sent)}`)
     }
     if (!camp) {
-      camp = { id: campId, defaultLeadAgentId: profile.id }
+      camp = { id: campId, defaultLeadAgentId: profile.agentId }
     }
     const deadline = Date.now() + 180_000
     let snapshot
@@ -169,7 +169,7 @@ try {
         commandId: crypto.randomUUID(),
         campId: camp.id,
         body: `Use the file editing tool exactly once to create ${writePath} with exactly ${writeToken} and a trailing newline. Do not call shell, list, read, or any verification tool before or after the edit. Then immediately reply exactly ACP_WRITE_OK.`,
-        address: { mode: 'explicit', agentProfileIds: [profile.id] },
+        address: { mode: 'explicit', agentIds: [profile.agentId] },
         replyToCampMessageId: null,
         execution: {
           taskId: null,
@@ -256,7 +256,7 @@ try {
         commandId: crypto.randomUUID(),
         campId: camp.id,
         body: `Use the file editing tool exactly once to create ${deniedPath} with exactly DENIED_WRITE and a trailing newline. Do not call shell, list, read, or any verification tool before or after the edit. Then immediately reply exactly ACP_DENIED_WRITE_OK.`,
-        address: { mode: 'explicit', agentProfileIds: [profile.id] },
+        address: { mode: 'explicit', agentIds: [profile.agentId] },
         replyToCampMessageId: null,
         execution: {
           taskId: null,

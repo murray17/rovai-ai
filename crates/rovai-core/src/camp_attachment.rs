@@ -963,16 +963,11 @@ fn prepared_paths(database: &Database, camp_id: &str) -> Result<Vec<String>> {
 }
 
 fn ensure_active_camp(database: &Database, camp_id: &str) -> Result<()> {
-    let status = database
+    database
         .connection()
-        .query_row("SELECT status FROM camp WHERE id = ?1", [camp_id], |row| {
-            row.get::<_, String>(0)
-        })
+        .query_row("SELECT 1 FROM camp WHERE id = ?1", [camp_id], |_| Ok(()))
         .optional()?
         .context("Camp does not exist")?;
-    if status != "active" {
-        anyhow::bail!("Archived Camp cannot own a Composer Draft");
-    }
     Ok(())
 }
 
@@ -1162,11 +1157,11 @@ mod tests {
                 r#"
                 INSERT INTO camp(
                     id, title, name_origin, collaboration_mode,
-                    project_binding_kind, project_path, status,
+                    project_binding_kind, project_path,
                     last_message_sequence, version, created_at, updated_at
                 ) VALUES (
                     ?1, 'Draft test', 'user', 'peer',
-                    'quick_chat', '/quick-chat-draft-test', 'active',
+                    'quick_chat', '/quick-chat-draft-test',
                     0, 1, '2026-08-03T00:00:00Z', '2026-08-03T00:00:00Z'
                 )
                 "#,
@@ -1211,7 +1206,7 @@ mod tests {
                 vec![
                     Segment::Text { text: "让".into() },
                     Segment::MemberMention {
-                        agent_profile_id: "agent_2".into(),
+                        agent_id: "agent_2".into(),
                     },
                 ],
             )

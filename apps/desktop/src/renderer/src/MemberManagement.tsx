@@ -140,7 +140,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
   const summarySettingsRef = useRef<SummaryModelSettingsHandle>(null)
   const pendingTransitionRef = useRef<GuardedTransition | null>(null)
   const dirtyRef = useRef(false)
-  const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? null
+  const selectedAgent = agents.find((agent) => agent.agentId === selectedAgentId) ?? null
 
   useEffect(() => {
     dirtyRef.current = runtimeDirty || summaryDirty
@@ -197,7 +197,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
     const method = targetAgent ? 'agents.update' : 'agents.create'
     const result = await runCommand('identity', method, identity)
     if (!targetAgent) {
-      const createdId = result.resultEntity?.entityId ?? stringField(result.payload, 'agentProfileId')
+      const createdId = result.resultEntity?.entityId ?? stringField(result.payload, 'agentId')
       if (createdId) onSelectedAgentChange(createdId, 'identity')
     }
     closeIdentityDialog()
@@ -207,7 +207,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
     if (!selectedAgent) return
     const previousAvatarRef = selectedAgent.avatarRef
     const command: SetAgentProfileAvatarCommand = {
-      agentProfileId: selectedAgent.id,
+      agentId: selectedAgent.agentId,
       expectedVersion: selectedAgent.version,
       avatarRef
     }
@@ -229,7 +229,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
   ): Promise<void> => {
     if (!selectedAgent) return
     await runCommand('runtime', 'agents.runtime.set', {
-      agentProfileId: selectedAgent.id,
+      agentId: selectedAgent.agentId,
       expectedVersion: selectedAgent.version,
       adapterKind,
       ...(draft ? {
@@ -243,7 +243,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
   const clearRuntime = async (): Promise<void> => {
     if (!selectedAgent) return
     await runCommand('runtime-clear', 'agents.runtime.clear', {
-      agentProfileId: selectedAgent.id,
+      agentId: selectedAgent.agentId,
       expectedVersion: selectedAgent.version
     })
     setNotice('Agent 运行时已清除。')
@@ -262,7 +262,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
   const changePresence = async (presence: 'present' | 'away'): Promise<void> => {
     if (!selectedAgent) return
     await runCommand(`presence-${presence}`, 'agents.presence.set', {
-      agentProfileId: selectedAgent.id,
+      agentId: selectedAgent.agentId,
       expectedVersion: selectedAgent.version,
       presence
     })
@@ -276,7 +276,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
     setError(null)
     try {
       const preview = await window.rovai.request<MemberRemovalPreview>('agents.removalPreview', {
-        agentProfileId: selectedAgent.id
+        agentId: selectedAgent.agentId
       })
       setRemoval({ preview, displayName: selectedAgent.displayName, confirmationName: '' })
     } catch (nextError) {
@@ -289,7 +289,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
   const confirmRemoval = async (): Promise<void> => {
     if (!removal) return
     await runCommand('remove', 'agents.remove', {
-      agentProfileId: removal.preview.agentProfileId,
+      agentId: removal.preview.agentId,
       expectedVersion: removal.preview.version,
       confirmationName: removal.displayName
     })
@@ -452,7 +452,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
                   onOpenRuntimeSettings={onOpenRuntimeSettings}
                 />
                 <MemberAdvancedSettings
-                  key={`advanced:${selectedAgent.id}`}
+                  key={`advanced:${selectedAgent.agentId}`}
                   ref={summarySettingsRef}
                   agent={selectedAgent}
                   installations={installations}
@@ -599,7 +599,7 @@ function MemberDetailHeader({
     <header className="member-detail-header">
       <div className="member-detail-heading">
         <MemberAvatar
-          agentProfileId={agent.id}
+          agentId={agent.agentId}
           avatarRef={agent.avatarRef}
           displayName={agent.displayName}
           size="profile"
@@ -737,7 +737,7 @@ function MemberIdentitySummary({ agent, busy, onEditAvatar }: {
             onClick={(event) => onEditAvatar(event.currentTarget)}
           >
             <MemberPortrait
-              agentProfileId={agent.id}
+              agentId={agent.agentId}
               avatarRef={agent.avatarRef}
               displayName={agent.displayName}
               decorative
@@ -907,7 +907,7 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
   )
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [conflict, setConflict] = useState(false)
-  const agentIdRef = useRef(agent.id)
+  const agentIdRef = useRef(agent.agentId)
   const persistedRuntimeKeyRef = useRef(persistedRuntimeKey(agent))
   const currentStateKey = runtimeEditorStateKey({ selectedKind, draft })
   const dirty = currentStateKey !== baselineStateKey
@@ -947,7 +947,7 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
     setBaselineStateKey(runtimeEditorStateKey(next))
     setSubmitError(null)
     setConflict(false)
-    agentIdRef.current = agent.id
+    agentIdRef.current = agent.agentId
     persistedRuntimeKeyRef.current = persistedRuntimeKey(agent)
   }, [agent, installations])
 
@@ -959,7 +959,7 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
 
   useEffect(() => {
     const nextPersistedKey = persistedRuntimeKey(agent)
-    if (agentIdRef.current !== agent.id) {
+    if (agentIdRef.current !== agent.agentId) {
       resetFromAgent()
       return
     }
@@ -1149,7 +1149,7 @@ function MemberIdentityDialog({ open, agent, agents, busy, returnFocusRef, onOpe
     setSubmitError(null)
   // Initialize only when the dialog opens or changes target. Background profile
   // refreshes must not replace a user's unsaved draft after a rejected save.
-  }, [agent?.id, open])
+  }, [agent?.agentId, open])
 
   const addTraits = (value: string): IdentityDraft | null => {
     const pieces = value.split(/[，,]/).map(normalizeIdentityTag).filter(Boolean)
@@ -1184,7 +1184,7 @@ function MemberIdentityDialog({ open, agent, agents, busy, returnFocusRef, onOpe
       if (!withPendingTrait) return
       nextDraft = withPendingTrait
     }
-    const issue = identityDraftIssue(nextDraft, agent?.id ?? null, agents)
+    const issue = identityDraftIssue(nextDraft, agent?.agentId ?? null, agents)
     if (issue) {
       setSubmitError(issue.message)
       if (issue.field === 'advanced') setAdvancedOpen(true)
@@ -1320,7 +1320,7 @@ function MemberAvatarDialog({ open, agent, busy, returnFocusRef, onOpenChange, o
     })
     return () => { if (avatarLoadGeneration.current === generation) avatarLoadGeneration.current += 1 }
   // Preserve the pending image choice across background refreshes of this profile.
-  }, [agent?.id, open])
+  }, [agent?.agentId, open])
 
   const chooseImage = async (): Promise<void> => {
     avatarLoadGeneration.current += 1
@@ -1380,14 +1380,14 @@ function MemberAvatarDialog({ open, agent, busy, returnFocusRef, onOpenChange, o
           <Dialog.Description id="member-avatar-dialog-description">角色图片独立保存，不会修改身份、运行时、权限或伙伴记忆。</Dialog.Description>
           <form onSubmit={(event) => void submit(event)}>
             <section className="member-avatar-editor" aria-label="角色图片">
-              <div className="member-avatar-editor-heading"><div><strong>当前图片</strong><span>可裁剪自定义图片，或选择内置伙伴外观</span></div>{(avatarRef || avatarSource) && <button className="quiet-button" type="button" disabled={isBusy} onClick={() => { setAvatarRef(null); setAvatarSource(null); setAvatarError(null) }}>移除</button>}</div>
+              <div className="member-avatar-editor-heading"><div><strong>当前图片</strong><span>可裁剪自定义图片，或选择内置队员外观</span></div>{(avatarRef || avatarSource) && <button className="quiet-button" type="button" disabled={isBusy} onClick={() => { setAvatarRef(null); setAvatarSource(null); setAvatarError(null) }}>移除</button>}</div>
               {sourceUrl && avatarSource
                 ? <MemberAvatarCropper sourceUrl={sourceUrl} sourceWidth={avatarSource.width} sourceHeight={avatarSource.height} value={avatarSource.crop} disabled={isBusy} onChange={(crop) => setAvatarSource({ ...avatarSource, crop, needsSave: true })} />
-                : <div className="member-avatar-current"><MemberAvatar agentProfileId={agent?.id ?? 'avatar-draft'} avatarRef={avatarRef} displayName={agent?.displayName ?? '伙伴'} size={parsedAvatar?.kind === 'builtin' ? 'bust' : 'picker'} /><div><strong>{avatarBusy === 'loading' ? '正在读取原图…' : parsedAvatar?.kind === 'builtin' ? '内置伙伴外观' : parsedAvatar?.kind === 'managed' ? '受管角色图片' : avatarRef ? '已有图片' : '字符头像'}</strong><span>没有图片时使用名称的首个字符。</span></div></div>}
+                : <div className="member-avatar-current"><MemberAvatar agentId={agent?.agentId ?? 'avatar-draft'} avatarRef={avatarRef} displayName={agent?.displayName ?? '队员'} size={parsedAvatar?.kind === 'builtin' ? 'bust' : 'picker'} /><div><strong>{avatarBusy === 'loading' ? '正在读取原图…' : parsedAvatar?.kind === 'builtin' ? '内置队员外观' : parsedAvatar?.kind === 'managed' ? '受管角色图片' : avatarRef ? '已有图片' : '字符头像'}</strong><span>没有图片时使用名称的首个字符。</span></div></div>}
               <button className="quiet-button member-avatar-browse" type="button" disabled={isBusy} onClick={() => void chooseImage()}>{avatarBusy === 'choosing' ? '正在处理图片…' : avatarSource ? '替换图片…' : '选择一张图片…'}</button>
               <p className="field-help">支持静态 PNG/JPEG，文件不超过 10 MiB；保存时移除原始元数据。</p>
-              <div className="member-preset-heading"><strong>内置伙伴外观</strong><span>只替换角色图片</span></div>
-              <div className="member-preset-list member-avatar-preset-list">{BUILTIN_MEMBER_PRESETS.map((preset) => <button key={preset.role} className={`member-preset-card ${avatarRef === preset.avatarRef ? 'selected' : ''}`} type="button" disabled={isBusy} aria-pressed={avatarRef === preset.avatarRef} onClick={() => selectBuiltin(preset)}><MemberAvatar agentProfileId={`preset-${preset.role}`} avatarRef={preset.avatarRef} displayName={preset.displayName} size="bust" decorative /><span className="member-preset-copy"><strong>{preset.displayName}</strong><small>{preset.teamRole}</small></span></button>)}</div>
+              <div className="member-preset-heading"><strong>内置队员外观</strong><span>只替换角色图片</span></div>
+              <div className="member-preset-list member-avatar-preset-list">{BUILTIN_MEMBER_PRESETS.map((preset) => <button key={preset.role} className={`member-preset-card ${avatarRef === preset.avatarRef ? 'selected' : ''}`} type="button" disabled={isBusy} aria-pressed={avatarRef === preset.avatarRef} onClick={() => selectBuiltin(preset)}><MemberAvatar agentId={`preset-${preset.role}`} avatarRef={preset.avatarRef} displayName={preset.displayName} size="bust" decorative /><span className="member-preset-copy"><strong>{preset.displayName}</strong><small>{preset.teamRole}</small></span></button>)}</div>
             </section>
             {avatarError && <div className="inline-error" role="alert">{avatarError}</div>}
             <div className="dialog-actions"><Dialog.Close className="quiet-button" type="button" disabled={isBusy}>取消</Dialog.Close><button className="primary-button" disabled={isBusy}>{avatarBusy === 'saving' || busy ? '正在保存图片…' : '保存角色图片'}</button></div>
@@ -1676,7 +1676,7 @@ function identityCommand(draft: IdentityDraft, agent: AgentProfile | null): Crea
     workingPrinciples: draft.workingPrinciples.trim(),
     growthTopic: draft.growthTopic.trim()
   }
-  return agent ? { ...identity, agentProfileId: agent.id, expectedVersion: agent.version } : identity
+  return agent ? { ...identity, agentId: agent.agentId, expectedVersion: agent.version } : identity
 }
 
 type IdentityDraftField = keyof IdentityDraft | 'advanced'
@@ -1684,7 +1684,7 @@ type IdentityDraftField = keyof IdentityDraft | 'advanced'
 function identityDraftIssue(
   draft: IdentityDraft,
   currentAgentId: string | null,
-  agents: Pick<AgentProfile, 'id' | 'displayName'>[]
+  agents: Pick<AgentProfile, 'agentId' | 'displayName'>[]
 ): { field: IdentityDraftField; message: string } | null {
   const displayNameLength = unicodeScalarLength(draft.displayName.trim())
   if (displayNameLength < 1 || displayNameLength > 80) {
@@ -1735,11 +1735,11 @@ function advancedIdentityStatus(workingPrinciples: string, growthTopic: string):
 export function hasDuplicateMemberDisplayName(
   displayName: string,
   currentAgentId: string | null,
-  agents: Pick<AgentProfile, 'id' | 'displayName'>[]
+  agents: Pick<AgentProfile, 'agentId' | 'displayName'>[]
 ): boolean {
   const normalized = normalizeMemberDisplayName(displayName)
   return normalized !== '' && agents.some((candidate) =>
-    candidate.id !== currentAgentId
+    candidate.agentId !== currentAgentId
     && normalizeMemberDisplayName(candidate.displayName) === normalized
   )
 }

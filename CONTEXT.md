@@ -45,11 +45,11 @@ A runtime observation of whether one currently valid workspace directory is `not
 _Avoid_: Repository identity, Repository Binding, reconciliation, Camp Git status, automatic `git init`
 
 **Member**:
-The product-facing name for an AgentProfile that a user can configure and invite into one or more Camps. It is not a separate domain object.
-_Avoid_: Teammate, Member entity, member record
+The product-facing English name for an application-global AgentProfile that a user can configure and invite into one or more Camps, displayed in Chinese as `队员`. It is not a separate domain object or a Camp-scoped identity; CampMember represents its relationship with one Camp.
+_Avoid_: Teammate, 成员 or 伙伴 as the formal product name for Member, Member entity, member record
 
 **Member Name**:
-The globally unique, user-configurable `AgentProfile.displayName` shown in member settings, mentions, messages, Camp titles, and other ordinary product surfaces. It is the only user-facing member identity label; duplicate names are rejected on create or edit.
+The globally unique, user-configurable `AgentProfile.displayName` shown as `队员名称` in Chinese member settings, mentions, messages, Camp titles, and other ordinary product surfaces. It is the only user-facing member identity label; duplicate names are rejected on create or edit.
 _Avoid_: Handle, slug, routing key, parenthesized disambiguator
 
 **Member Mention**:
@@ -57,8 +57,8 @@ An explicit structured reference from one user-authored Camp message to one curr
 _Avoid_: parsed `@` text, textual mention, Handle mention
 
 **All Members Mention**:
-The single explicit structured `@所有成员` reference in one user-authored Camp message. At accepted send it expands to and freezes the exact set of present CampMembers addressed by that message, while remaining one atomic token in the Composer and history; later membership or Presence changes never rewrite its historical recipient set.
-_Avoid_: dynamic broadcast, future-member subscription, expanded Member Mention list, unaddressed message
+The single explicit structured `@所有队员` reference in one user-authored Camp message. At accepted send it expands to and freezes the exact set of present CampMembers addressed by that message, while remaining one atomic token in the Composer and history; later membership or Presence changes never rewrite its historical recipient set.
+_Avoid_: `@所有成员`, dynamic broadcast, future-member subscription, expanded Member Mention list, unaddressed message
 
 **Mention Fanout**:
 The one accepted-send boundary that deduplicates all structured Mention targets and atomically creates one queued direct AgentRun for each exact recipient. Every Run in that fanout shares the message and creation boundary; the scheduler performs their independent pre-launch checks concurrently so one recipient never waits for a previous recipient's Runtime to finish, while exact operating-system process start timestamps are not claimed to be identical.
@@ -102,10 +102,10 @@ _Avoid_: Agent ID, Member Name, routing key, model-visible identifier
 
 **Agent ID**:
 The stable model-and-tool routing identity `agent_<positive integer>` allocated monotonically to one AgentProfile. Users never see or edit it, and an allocated value is never reused after Member removal.
-_Avoid_: Agent UUID, Member Name, role label, reusable sequence number, handle
+_Avoid_: Agent UUID, AgentProfile ID, Member Name, role label, reusable sequence number, handle
 
 **Legacy Member Handle**:
-A retained opaque value used only to interpret historical handle-shaped text created before Agent ID routing. It is not emitted as current model/tool identity, is not user-editable, and is not allocated for semantic routing decisions.
+A retained opaque storage value attached only to pre-Agent-ID history. It is absent from current Member and CampMember contracts, is not used to parse or rewrite plain `@文字`, is not user-editable, and is never allocated or accepted for current routing decisions.
 _Avoid_: Agent ID, user handle, current mention identity, display name
 
 **Member Presence**:
@@ -121,7 +121,7 @@ The user-controlled global ordering of manageable AgentProfiles used for present
 _Avoid_: Role priority, capability rank, Camp-specific order, circular succession cursor
 
 **AgentProfile**:
-An Agent's stable UUID-backed identity, Agent ID, Member Presence, role, and optional character presentation, with optional user-selected default Runtime preferences, independent of any particular Camp. A removed AgentProfile remains an internal historical identity but is no longer a manageable Member.
+The application-global persistent domain object behind one Member, containing its Agent UUID, Agent ID, Member Presence, identity configuration, and optional default Runtime preferences independently of any Camp. Its current routing identity is Agent ID rather than a separate AgentProfile ID; a removed AgentProfile remains an internal historical identity but is no longer a manageable Member.
 _Avoid_: Member in domain code, Teammate, AgentInstance
 
 **Memory Library**:
@@ -1069,7 +1069,7 @@ The opaque, monotonically advancing identity of one exact Camp Composer Draft st
 _Avoid_: updated timestamp, Renderer counter, CampMessage version, best-effort autosave marker
 
 **Structured Camp Message Content**:
-The authoritative ordered content of one user-authored Camp Composer Draft and its accepted CampMessage, using only `Text`, `MemberMention(agentProfileId)`, and `AllMembersMention` segments. Plain-text display and recipient projections derive from it; a legacy message remains one Text segment while its existing recipient identities remain separate historical facts.
+The authoritative ordered content of one user-authored Camp Composer Draft and its accepted CampMessage, using only `Text`, `MemberMention(agentId)`, and `AllMembersMention` segments. Plain-text display and recipient projections derive from it; a legacy message remains one Text segment while its existing recipient identities remain separate historical facts.
 _Avoid_: generic rich-text document, HTML, Markdown AST, mention character offsets, parallel body and routing truth
 
 **Message Attachment**:

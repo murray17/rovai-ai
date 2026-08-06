@@ -233,7 +233,7 @@ test('Diagnostic Trial configuration gate binds exact identity, budget, members,
       runner: { componentId: 'qualification-runner', version: '0.36.0', digest: executableDigest },
       node: { componentId: 'node', version: process.version, digest: executableDigest },
       runtimes: memberInputs.map(({ member }) => ({
-        agentProfileId: member.agentProfileId,
+        agentId: member.agentId,
         adapterKind: member.adapterKind,
         declaredModelId: member.modelId,
         executableDigest
@@ -265,7 +265,7 @@ test('Diagnostic Trial configuration gate binds exact identity, budget, members,
       outputDigest: definition.executionFingerprints.node.digest
     }],
     team: memberInputs.map(({ member, model, permissions }) => ({
-      id: member.agentProfileId,
+      agentId: member.agentId,
       runtimeSelection: { adapterKind: member.adapterKind },
       runtimePreference: { model, permissions }
     })),
@@ -372,7 +372,7 @@ function fixtureCaseRecords() {
   }))
 }
 
-function configurationMember(agentProfileId, adapterKind, modelId) {
+function configurationMember(agentId, adapterKind, modelId) {
   const model = {
     modelId,
     options: adapterKind === 'codex-cli' ? { reasoning_effort: 'medium' } : {}
@@ -380,7 +380,7 @@ function configurationMember(agentProfileId, adapterKind, modelId) {
   const permissions = { adapterKind, values: { mode: 'test' } }
   return {
     member: {
-      agentProfileId,
+      agentId,
       adapterKind,
       modelId,
       modelOptionsDigest: digestJson(model.options),
@@ -392,15 +392,15 @@ function configurationMember(agentProfileId, adapterKind, modelId) {
   }
 }
 
-function member(agentProfileId, adapterKind, modelId) {
+function member(agentId, adapterKind, modelId) {
   const model = { mode: 'explicit', modelId, options: {} }
   return {
-    agentProfileId,
+    agentId,
     adapterKind,
     modelId,
-    modelOptionsDigest: digest(`model-options-${agentProfileId}`),
+    modelOptionsDigest: digest(`model-options-${agentId}`),
     modelConfigurationDigest: digestJson(model),
-    permissionProfileDigest: digest(`permissions-${agentProfileId}`)
+    permissionProfileDigest: digest(`permissions-${agentId}`)
   }
 }
 
@@ -408,12 +408,12 @@ function binary(componentId) {
   return { componentId, version: '1.0.0', digest: digest(`binary-${componentId}`) }
 }
 
-function runtime(agentProfileId, adapterKind, declaredModelId) {
+function runtime(agentId, adapterKind, declaredModelId) {
   return {
-    agentProfileId,
+    agentId,
     adapterKind,
     declaredModelId,
-    executableDigest: digest(`runtime-${agentProfileId}`)
+    executableDigest: digest(`runtime-${agentId}`)
   }
 }
 

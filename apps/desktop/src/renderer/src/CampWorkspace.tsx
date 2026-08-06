@@ -12,8 +12,8 @@ import type {
   CampMessageAttachmentView,
   CampMessageView,
   CampSnapshot,
-  CampTaskStatus,
-  CampTaskView,
+  TaskStatus,
+  TaskView,
   InboxMessageView,
   NavigationCampItem,
   StoredCommandResult,
@@ -21,10 +21,6 @@ import type {
   WorkspaceInspection
 } from '@contracts'
 import { EmptyInline } from './ui-elements'
-import {
-  formatMentionDisplayText,
-  type AgentMentionCandidate
-} from './AgentMentionTextarea'
 import { StructuredMentionComposer } from './StructuredMentionComposer'
 import {
   agentRunPresentation,
@@ -57,7 +53,7 @@ export type NotificationFocusTarget = {
   campTurnId: string | null
 }
 export interface CampRuntimeRecoveryTarget {
-  agentProfileId: string
+  agentId: string
   blockerCode: string
 }
 export interface CampRuntimeRecovery {
@@ -67,8 +63,8 @@ export interface CampRuntimeRecovery {
 
 type MentionPopoverRequest = {
   target:
-    | { kind: 'member'; agentProfileId: string }
-    | { kind: 'all_members'; context: 'composer' | 'history'; agentProfileIds: string[] }
+    | { kind: 'member'; agentId: string }
+    | { kind: 'all_members'; context: 'composer' | 'history'; agentIds: string[] }
   trigger: HTMLElement
   focusPanel: boolean
 }
@@ -173,7 +169,7 @@ export type CampConversationTimelineItem =
       id: string
       createdAt: string
       timelineGlobalSequence: number | null
-      task: CampTaskView
+      task: TaskView
     }
   | {
       kind: 'camp_message'
@@ -403,31 +399,15 @@ function skillDeliveryGroupLabel(kind: string): string {
   }
 }
 
-export function readyCampMentionCandidates(
-  members: CampSnapshot['members'],
-  agents: AgentProfile[]
-): AgentMentionCandidate[] {
-  const profileById = new Map(agents.map((agent) => [agent.id, agent]))
-  return members
-    .filter((member) => member.membershipStatus === 'active')
-    .filter((member) => profileById.get(member.agentProfileId)?.presence === 'present')
-    .map((member) => ({
-      agentProfileId: member.agentProfileId,
-      handle: member.handle,
-      displayName: member.displayName,
-      avatarRef: profileById.get(member.agentProfileId)?.avatarRef ?? null
-    }))
-}
-
 export function structuredCampContentPlainText(
   content: StructuredCampMessageContent,
-  members: ReadonlyArray<Pick<CampSnapshot['members'][number], 'agentProfileId' | 'displayName'>>
+  members: ReadonlyArray<Pick<CampSnapshot['members'][number], 'agentId' | 'displayName'>>
 ): string {
-  const names = new Map(members.map((member) => [member.agentProfileId, member.displayName]))
+  const names = new Map(members.map((member) => [member.agentId, member.displayName]))
   return content.map((segment) => {
     if (segment.kind === 'text') return segment.text
-    if (segment.kind === 'all_members_mention') return '@所有成员'
-    return `@${names.get(segment.agentProfileId) ?? '不可用队员'}`
+    if (segment.kind === 'all_members_mention') return '@所有队员'
+    return `@${names.get(segment.agentId) ?? '不可用队员'}`
   }).join('')
 }
 
@@ -440,8 +420,8 @@ export function emptyCampRuntimeSummary(
   )
   if (activeMembers.length === 0) return '暂无在队的队员'
 
-  const profileById = new Map(agents.map((agent) => [agent.id, agent]))
-  const profiles = activeMembers.map((member) => profileById.get(member.agentProfileId))
+  const profileById = new Map(agents.map((agent) => [agent.agentId, agent]))
+  const profiles = activeMembers.map((member) => profileById.get(member.agentId))
   if (profiles.some((profile) => !profile)) return '正在检查 Agent 运行时…'
 
   const readyCount = profiles.filter((profile) => profile?.runtimeReadiness.status === 'ready').length
@@ -472,7 +452,7 @@ export function QuickChatWorkspace({
           </svg>
           <p className="eyebrow quick-chat-eyebrow">Arctic Dawn · Quick Chat</p>
           <h2>在晨光里，开始下一段协作</h2>
-          <p className="quick-chat-subline">创建一个对话，选好伙伴与工作区，再写下这次协作的目标。</p>
+          <p className="quick-chat-subline">创建一个对话，选好队员与工作区，再写下这次协作的目标。</p>
           {recentCamps.length > 0 && (
             <div className="quick-chat-continue" aria-label="继续未完成的事">
               <div className="quick-chat-continue-title">继续未完成的事</div>
@@ -481,7 +461,7 @@ export function QuickChatWorkspace({
                   <span className="camp-marker-slot" aria-hidden="true">
                     {camp.marker === 'unread_completed' && <i className="task-dot camp-marker-unread_completed" />}
                   </span>
-                  <span className="truncate">{formatMentionDisplayText(camp.title, agents)}</span>
+                  <span className="truncate">{camp.title}</span>
                   {camp.marker === 'loading' && <span className="camp-loading-spinner camp-marker-loading" role="img" aria-label="正在运行" />}
                   <small>{relativeTimeLabel(camp.lastActivityAt)}</small>
                 </button>
@@ -532,7 +512,7 @@ export function CampWorkspace({
   liveRuntimeEvents?: LiveRuntimeEvent[]
   busy: boolean
   onSend(draft: CampComposerDraftView): Promise<void>
-  onChangeLead(agentProfileId: string): Promise<void>
+  onChangeLead(agentId: string): Promise<void>
   onTasksChanged(): Promise<void>
   onResolveApproval(approval: ActionApprovalView, optionId: string): void
   cancellingTurnIds?: ReadonlySet<string>
@@ -544,7 +524,7 @@ export function CampWorkspace({
   onOpenInspector?(tab: CampInspectorTab): void
   notificationFocus?: NotificationFocusTarget | null
   runtimeRecovery?: CampRuntimeRecovery | null
-  onConfigureRuntime?(agentProfileId: string): void
+  onConfigureRuntime?(agentId: string): void
   onDismissRuntimeRecovery?(): void
 }): JSX.Element {
   const [messageContent, setMessageContent] = useState<StructuredCampMessageContent>([])
@@ -571,16 +551,16 @@ export function CampWorkspace({
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null)
   const [taskFocusRequest, setTaskFocusRequest] = useState(0)
   const memberById = useMemo(
-    () => new Map(snapshot.members.map((member) => [member.agentProfileId, member])),
+    () => new Map(snapshot.members.map((member) => [member.agentId, member])),
     [snapshot.members]
   )
   const profileById = useMemo(
-    () => new Map(agents.map((agent) => [agent.id, agent])),
+    () => new Map(agents.map((agent) => [agent.agentId, agent])),
     [agents]
   )
   const composerMembers = useMemo(
     () => snapshot.members.map((member) => ({
-      agentProfileId: member.agentProfileId,
+      agentId: member.agentId,
       displayName: member.displayName,
       avatarRef: member.avatarRef,
       mentionable: member.membershipStatus === 'active' && member.profilePresence === 'present'
@@ -595,24 +575,24 @@ export function CampWorkspace({
     }
   }
   const openMemberMentionPopover = (
-    agentProfileId: string,
+    agentId: string,
     trigger: HTMLElement,
     focusPanel: boolean
   ): void => {
-    if (!memberById.has(agentProfileId) || !profileById.has(agentProfileId)) return
+    if (!memberById.has(agentId) || !profileById.has(agentId)) return
     if (mentionPopover?.trigger === trigger) {
       closeMentionPopover(true)
       return
     }
     setMentionPopover({
-      target: { kind: 'member', agentProfileId },
+      target: { kind: 'member', agentId },
       trigger,
       focusPanel
     })
   }
   const openAllMembersMentionPopover = (
     context: 'composer' | 'history',
-    agentProfileIds: string[],
+    agentIds: string[],
     trigger: HTMLElement,
     focusPanel: boolean
   ): void => {
@@ -621,7 +601,7 @@ export function CampWorkspace({
       return
     }
     setMentionPopover({
-      target: { kind: 'all_members', context, agentProfileIds },
+      target: { kind: 'all_members', context, agentIds },
       trigger,
       focusPanel
     })
@@ -636,7 +616,7 @@ export function CampWorkspace({
   const hasUnavailableMention = useMemo(
     () => messageContent.some((segment) => {
       if (segment.kind !== 'member_mention') return false
-      const member = memberById.get(segment.agentProfileId)
+      const member = memberById.get(segment.agentId)
       return !member
         || member.membershipStatus !== 'active'
         || member.profilePresence !== 'present'
@@ -680,7 +660,7 @@ export function CampWorkspace({
   )
   const defaultLead = snapshot.members.find((member) => member.isDefaultLead) ?? null
   const workspaceStatus = workspaceCapabilityStatus(snapshot, workspaceInspection)
-  const defaultLeadProfile = defaultLead ? profileById.get(defaultLead.agentProfileId) ?? null : null
+  const defaultLeadProfile = defaultLead ? profileById.get(defaultLead.agentId) ?? null : null
   const defaultLeadReady = defaultLeadProfile?.runtimeReadiness.status === 'ready'
   const activeRuns = snapshot.agentRuns.filter((run) => NON_TERMINAL_RUNS.has(run.status))
   const executionBlocked = activeRuns.length > 0 || stopping
@@ -1062,7 +1042,7 @@ export function CampWorkspace({
   }
 
   return (
-    <section className="workspace-shell camp-workspace" aria-label={`Camp：${formatMentionDisplayText(snapshot.camp.title, snapshot.members)}`}>
+    <section className="workspace-shell camp-workspace" aria-label={`Camp：${snapshot.camp.title}`}>
       <div className={`workspace-grid ${inspectorVisible ? '' : 'inspector-collapsed'}`.trim()}>
         <section className="timeline-pane">
           <div
@@ -1108,8 +1088,8 @@ export function CampWorkspace({
                         <AgentRunConversationMessage
                           key={run.id}
                           run={run}
-                          member={memberById.get(run.agentProfileId) ?? null}
-                          profile={profileById.get(run.agentProfileId) ?? null}
+                          member={memberById.get(run.agentId) ?? null}
+                          profile={profileById.get(run.agentId) ?? null}
                           progress={executionProgressByRunId.get(run.id)}
                           campId={snapshot.camp.id}
                           truncatedEvidence={truncatedEvidenceByRunId.get(run.id)}
@@ -1133,15 +1113,15 @@ export function CampWorkspace({
                     const recipient = memberById.get(inboxMessage.recipientAgentId)
                     const senderName = sender?.displayName ?? inboxMessage.senderAgentId
                     const recipientName = recipient?.displayName ?? inboxMessage.recipientAgentId
-                    const displayBody = formatMentionDisplayText(inboxMessage.body, snapshot.members)
+                    const displayBody = inboxMessage.body
                     items.push(
                       <article
                         className="timeline-node conversation-bubble agent collaboration-message"
                         key={inboxMessage.id}
-                        style={sender ? { '--agent-accent': identityColorToken(sender.agentProfileId) } as React.CSSProperties : undefined}
+                        style={sender ? { '--agent-accent': identityColorToken(sender.agentId) } as React.CSSProperties : undefined}
                       >
                         <MemberAvatar
-                          agentProfileId={inboxMessage.senderAgentId}
+                          agentId={inboxMessage.senderAgentId}
                           avatarRef={sender?.avatarRef ?? null}
                           displayName={senderName}
                           size="list"
@@ -1175,18 +1155,18 @@ export function CampWorkspace({
                   const sourceRun = campMessage.sourceAgentRunId
                     ? runById.get(campMessage.sourceAgentRunId) ?? null
                     : null
-                  const displayBody = formatMentionDisplayText(campMessage.body, snapshot.members)
+                  const displayBody = campMessage.body
                   items.push(
                     <article
                       className={`timeline-node conversation-bubble ${campMessage.authorType}`}
                       key={campMessage.id}
                       data-camp-turn-id={sourceRun?.campTurnId}
                       tabIndex={sourceRun ? -1 : undefined}
-                      style={member ? { '--agent-accent': identityColorToken(member.agentProfileId) } as React.CSSProperties : undefined}
+                      style={member ? { '--agent-accent': identityColorToken(member.agentId) } as React.CSSProperties : undefined}
                     >
                       {campMessage.authorType === 'agent' && (
                         <MemberAvatar
-                          agentProfileId={campMessage.authorId}
+                          agentId={campMessage.authorId}
                           avatarRef={member?.avatarRef ?? null}
                           displayName={author}
                           size="list"
@@ -1240,7 +1220,7 @@ export function CampWorkspace({
                                                 onActivateAllMembersMention={(trigger, focusPanel) =>
                                                   openAllMembersMentionPopover(
                                                     'history',
-                                                    campMessage.addressedAgentProfileIds,
+                                                    campMessage.addressedAgentIds,
                                                     trigger,
                                                     focusPanel
                                                   )}
@@ -1280,8 +1260,8 @@ export function CampWorkspace({
                 <AgentRunConversationMessage
                   key={run.id}
                   run={run}
-                  member={memberById.get(run.agentProfileId) ?? null}
-                  profile={profileById.get(run.agentProfileId) ?? null}
+                  member={memberById.get(run.agentId) ?? null}
+                  profile={profileById.get(run.agentId) ?? null}
                   progress={executionProgressByRunId.get(run.id)}
                   campId={snapshot.camp.id}
                   truncatedEvidence={truncatedEvidenceByRunId.get(run.id)}
@@ -1322,7 +1302,7 @@ export function CampWorkspace({
                     <time className="activity-time">{messageClockTime(inboxMessage.createdAt)}</time>
                     <div className="activity-body">
                       <div className="activity-row-title"><strong>{sender} → {recipient}</strong><span className={`activity-state tone-${status.tone}`}>{status.label}</span></div>
-                      <p className="activity-detail">{formatMentionDisplayText(inboxMessage.body, snapshot.members)}</p>
+                      <p className="activity-detail">{inboxMessage.body}</p>
                       <dl className="activity-facts">
                         {conversationInput && <div><dt>输入</dt><dd>#{conversationInput.sequence} · Member Call</dd></div>}
                         {targetRun && <div><dt>深度</dt><dd>{targetRun.a2aDepth}</dd></div>}
@@ -1341,11 +1321,11 @@ export function CampWorkspace({
                   <article
                     className="activity-row"
                     key={run.id}
-                    style={{ '--agent-accent': identityColorToken(run.agentProfileId) } as React.CSSProperties}
+                    style={{ '--agent-accent': identityColorToken(run.agentId) } as React.CSSProperties}
                   >
                     <time className="activity-time">{messageClockTime(run.createdAt)}</time>
                     <div className="activity-body">
-                      <div className="activity-row-title"><strong><span className="activity-member">{memberById.get(run.agentProfileId)?.displayName ?? run.agentProfileId}</span>{run.invocationKind === 'a2a' ? ' · A2A' : ''}</strong></div>
+                      <div className="activity-row-title"><strong><span className="activity-member">{memberById.get(run.agentId)?.displayName ?? run.agentId}</span>{run.invocationKind === 'a2a' ? ' · A2A' : ''}</strong></div>
                       <p className="activity-detail">{agentRunWaitDetail(run.waitReason) ?? run.purpose}</p>
                       <span className={`activity-state tone-${state.tone}`} title={agentRunPresentation(run, cancelling).label}>{state.tag}</span>
                       {run.invocationKind === 'a2a' && <dl className="activity-facts"><div><dt>A2A 深度</dt><dd>{run.a2aDepth}</dd></div>{run.sourceInboxMessageId && <div><dt>请求</dt><dd><code title={run.sourceInboxMessageId}>{shortIdentity(run.sourceInboxMessageId)}</code></dd></div>}</dl>}
@@ -1376,14 +1356,14 @@ export function CampWorkspace({
                 <label>
                   <span>Default Lead</span>
                   <select
-                    value={defaultLead?.agentProfileId ?? ''}
+                    value={defaultLead?.agentId ?? ''}
                     disabled={busy}
                     onChange={(event) => void onChangeLead(event.currentTarget.value).catch(() => undefined)}
                   >
                     {snapshot.members.filter((member) =>
                       member.membershipStatus === 'active' && member.profilePresence === 'present'
                     ).map((member) => (
-                      <option value={member.agentProfileId} key={member.agentProfileId}>
+                      <option value={member.agentId} key={member.agentId}>
                         {member.displayName}
                       </option>
                     ))}
@@ -1402,7 +1382,7 @@ export function CampWorkspace({
                 return (
                   <article className="context-card" key={manifest.id}>
                     <div className="context-card-heading">
-                      <div><strong>{run ? memberById.get(run.agentProfileId)?.displayName ?? run.agentProfileId : 'AgentRun'}</strong><code title={manifest.agentRunId}>{shortIdentity(manifest.agentRunId)}</code></div>
+                      <div><strong>{run ? memberById.get(run.agentId)?.displayName ?? run.agentId : 'AgentRun'}</strong><code title={manifest.agentRunId}>{shortIdentity(manifest.agentRunId)}</code></div>
                       <span className={`activity-status tone-${deliveryStatus.tone}`}>{deliveryStatus.label}</span>
                     </div>
                     <dl className="context-facts">
@@ -1517,7 +1497,7 @@ export function CampWorkspace({
                 <article className="approval-card pending" key={approval.id}>
                   <div className="approval-heading"><span className="approval-status status-pending">等待决定</span></div>
                   <h3>{localizeExecutionEngineTerms(approval.actionSummary)}</h3>
-                  <p className="approval-runtime">{profileById.get(approval.agentProfileId)?.displayName ?? approval.agentProfileId} · {approval.adapterKind}</p>
+                  <p className="approval-runtime">{profileById.get(approval.agentId)?.displayName ?? approval.agentId} · {approval.adapterKind}</p>
                   <p className="approval-reason">{localizeExecutionEngineTerms(approval.reason ?? 'Agent 运行时请求你选择一个原生权限选项。')}</p>
                   <pre>{JSON.stringify(approval.canonicalInput, null, 2)}</pre>
                   <div className="approval-actions">
@@ -1646,13 +1626,13 @@ export function CampWorkspace({
               disabled={busy || composerSubmitting}
               editorRef={composerEditorRef}
               onActivateMemberMention={(member, trigger, focusPanel) =>
-                openMemberMentionPopover(member.agentProfileId, trigger, focusPanel)}
+                openMemberMentionPopover(member.agentId, trigger, focusPanel)}
               onActivateAllMembersMention={(trigger, focusPanel) =>
                 openAllMembersMentionPopover(
                   'composer',
                   composerMembers
                     .filter((member) => member.mentionable !== false)
-                    .map((member) => member.agentProfileId),
+                    .map((member) => member.agentId),
                   trigger,
                   focusPanel
                 )}
@@ -1730,11 +1710,11 @@ function MentionProfilePopover({
     placement: 'top' | 'bottom'
   } | null>(null)
   const memberById = useMemo(
-    () => new Map(members.map((member) => [member.agentProfileId, member])),
+    () => new Map(members.map((member) => [member.agentId, member])),
     [members]
   )
   const profileById = useMemo(
-    () => new Map(profiles.map((profile) => [profile.id, profile])),
+    () => new Map(profiles.map((profile) => [profile.agentId, profile])),
     [profiles]
   )
 
@@ -1828,10 +1808,10 @@ function MentionProfilePopover({
   }, [onClose, request.trigger])
 
   const profile = request.target.kind === 'member'
-    ? profileById.get(request.target.agentProfileId) ?? null
+    ? profileById.get(request.target.agentId) ?? null
     : null
   const member = request.target.kind === 'member'
-    ? memberById.get(request.target.agentProfileId) ?? null
+    ? memberById.get(request.target.agentId) ?? null
     : null
   const style = {
     top: position?.top ?? 0,
@@ -1841,7 +1821,7 @@ function MentionProfilePopover({
   } as CSSProperties
   const ariaLabel = profile
     ? `${profile.displayName}的基础信息`
-    : '所有成员范围'
+    : '所有队员范围'
 
   return createPortal(
     <div
@@ -1862,7 +1842,7 @@ function MentionProfilePopover({
               <div className="mention-profile-side-shell">
                 <div className="mention-profile-media">
                   <MemberPortrait
-                    agentProfileId={profile.id}
+                    agentId={profile.agentId}
                     avatarRef={profile.avatarRef}
                     displayName={profile.displayName}
                     decorative
@@ -1934,10 +1914,10 @@ function MentionAllMembersPopover({
   memberById: Map<string, CampSnapshot['members'][number]>
   profileById: Map<string, AgentProfile>
 }): JSX.Element {
-  const rows = request.agentProfileIds.map((agentProfileId) => ({
-    agentProfileId,
-    member: memberById.get(agentProfileId) ?? null,
-    profile: profileById.get(agentProfileId) ?? null
+  const rows = request.agentIds.map((agentId) => ({
+    agentId,
+    member: memberById.get(agentId) ?? null,
+    profile: profileById.get(agentId) ?? null
   }))
   const historical = request.context === 'history'
   return (
@@ -1945,7 +1925,7 @@ function MentionAllMembersPopover({
       <header className="mention-group-header">
         <span aria-hidden="true">@</span>
         <div>
-          <h2>所有成员</h2>
+          <h2>所有队员</h2>
           <p>广播 Mention</p>
         </div>
       </header>
@@ -1957,12 +1937,12 @@ function MentionAllMembersPopover({
           ? '历史消息展示发送接受时冻结的收件人范围，之后的加入或离队不会改写它。'
           : '发送接受时会冻结当前实际寻址的队员集合。'}</p>
         <div className="mention-group-members">
-          {rows.map(({ agentProfileId, member, profile }) => {
+          {rows.map(({ agentId, member, profile }) => {
             const displayName = profile?.displayName ?? member?.displayName ?? '不可用队员'
             return (
-              <div className="mention-group-member" key={agentProfileId}>
+              <div className="mention-group-member" key={agentId}>
                 <MemberAvatar
-                  agentProfileId={agentProfileId}
+                  agentId={agentId}
                   avatarRef={profile?.avatarRef ?? member?.avatarRef ?? null}
                   displayName={displayName}
                   size="mention"
@@ -2001,7 +1981,7 @@ function RuntimeRecoveryDock({
   recovery: CampRuntimeRecovery
   memberById: Map<string, CampSnapshot['members'][number]>
   profileById: Map<string, AgentProfile>
-  onConfigure?(agentProfileId: string): void
+  onConfigure?(agentId: string): void
   onDismiss?(): void
 }): JSX.Element {
   const targetCount = recovery.targets.length
@@ -2025,11 +2005,11 @@ function RuntimeRecoveryDock({
       </header>
       <div className="runtime-recovery-targets">
         {recovery.targets.map((target) => {
-          const displayName = memberById.get(target.agentProfileId)?.displayName
-            ?? profileById.get(target.agentProfileId)?.displayName
+          const displayName = memberById.get(target.agentId)?.displayName
+            ?? profileById.get(target.agentId)?.displayName
             ?? '目标队员'
           return (
-            <div className="runtime-recovery-target" key={target.agentProfileId}>
+            <div className="runtime-recovery-target" key={target.agentId}>
               <span className="runtime-recovery-target-mark" aria-hidden="true" />
               <div>
                 <strong>{displayName}</strong>
@@ -2040,7 +2020,7 @@ function RuntimeRecoveryDock({
                   className="quiet-button compact"
                   type="button"
                   aria-label={`配置${displayName}的 Agent 运行时`}
-                  onClick={() => onConfigure(target.agentProfileId)}
+                  onClick={() => onConfigure(target.agentId)}
                 >
                   去配置
                 </button>
@@ -2070,7 +2050,7 @@ function ApprovalDock({
   const currentIndex = Math.min(activeIndex, approvals.length - 1)
   const approval = approvals[currentIndex]
   const memberNames = [...new Set(approvals.map((item) =>
-    profileById.get(item.agentProfileId)?.displayName ?? item.agentProfileId
+    profileById.get(item.agentId)?.displayName ?? item.agentId
   ))]
 
   useEffect(() => {
@@ -2168,7 +2148,7 @@ function EmptyCampWelcome({
         <span className="empty-camp-lead">
           {lead && (
             <MemberAvatar
-              agentProfileId={lead.agentProfileId}
+              agentId={lead.agentId}
               avatarRef={lead.avatarRef}
               displayName={lead.displayName}
               size="mention"
@@ -2246,14 +2226,14 @@ function StructuredMessageBody({
   content: StructuredCampMessageContent | null
   members: CampSnapshot['members']
   onActivateMemberMention?(
-    agentProfileId: string,
+    agentId: string,
     trigger: HTMLElement,
     focusPanel: boolean
   ): void
   onActivateAllMembersMention?(trigger: HTMLElement, focusPanel: boolean): void
 }): JSX.Element {
   if (content === null) return <p>{body}</p>
-  const memberById = new Map(members.map((member) => [member.agentProfileId, member]))
+  const memberById = new Map(members.map((member) => [member.agentId, member]))
   return (
     <p className="structured-message-body">
       {content.map((segment, index) => {
@@ -2265,7 +2245,7 @@ function StructuredMessageBody({
               className={`message-mention-token all-members${interactive ? ' is-interactive' : ''}`}
               role={interactive ? 'button' : undefined}
               tabIndex={interactive ? 0 : undefined}
-              aria-label={interactive ? '查看所有成员范围' : undefined}
+              aria-label={interactive ? '查看所有队员范围' : undefined}
               aria-haspopup={interactive ? 'dialog' : undefined}
               aria-expanded={interactive ? false : undefined}
               key={`all-${index}`}
@@ -2279,11 +2259,11 @@ function StructuredMessageBody({
                 onActivateAllMembersMention(event.currentTarget, true)
               }}
             >
-              @所有成员
+              @所有队员
             </span>
           )
         }
-        const member = memberById.get(segment.agentProfileId)
+        const member = memberById.get(segment.agentId)
         const available = Boolean(
           member
           && member.membershipStatus === 'active'
@@ -2297,12 +2277,12 @@ function StructuredMessageBody({
         ): void => {
           if (!interactive || !member || !onActivateMemberMention) return
           if (respectTextSelection && window.getSelection()?.toString()) return
-          onActivateMemberMention(member.agentProfileId, trigger, focusPanel)
+          onActivateMemberMention(member.agentId, trigger, focusPanel)
         }
         return (
           <span
             className={`message-mention-token${available ? '' : ' is-unavailable'}${interactive ? ' is-interactive' : ''}`}
-            data-agent-profile-id={segment.agentProfileId}
+            data-agent-profile-id={segment.agentId}
             role={interactive ? 'button' : undefined}
             tabIndex={interactive ? 0 : undefined}
             aria-label={interactive && member ? `查看${member.displayName}的基础信息` : undefined}
@@ -2315,7 +2295,7 @@ function StructuredMessageBody({
               event.preventDefault()
               showMemberProfile(event.currentTarget, false, true)
             }}
-            key={`member-${index}-${segment.agentProfileId}`}
+            key={`member-${index}-${segment.agentId}`}
           >
             @{member?.displayName ?? '不可用队员'}
           </span>
@@ -2483,7 +2463,7 @@ function TaskTimelineCard({
   assigneeName,
   onOpen
 }: {
-  task: CampTaskView
+  task: TaskView
   assigneeName: string
   onOpen(): void
 }): JSX.Element {
@@ -2522,18 +2502,18 @@ function AgentRunConversationMessage({
   loadedEvidenceCount?: number
   cancelling?: boolean
 }): JSX.Element {
-  const memberName = member?.displayName ?? profile?.displayName ?? run.agentProfileId
+  const memberName = member?.displayName ?? profile?.displayName ?? run.agentId
   const presentation = agentRunPresentation(run, cancelling)
   return (
     <article
       className={`timeline-node conversation-bubble agent agent-run-message ${cancelling ? 'is-cancelling' : ''}`}
       data-camp-turn-id={run.campTurnId}
       tabIndex={-1}
-      style={{ '--agent-accent': identityColorToken(run.agentProfileId) } as React.CSSProperties}
+      style={{ '--agent-accent': identityColorToken(run.agentId) } as React.CSSProperties}
       aria-label={`${memberName}的执行过程`}
     >
       <MemberAvatar
-        agentProfileId={run.agentProfileId}
+        agentId={run.agentId}
         avatarRef={member?.avatarRef ?? profile?.avatarRef ?? null}
         displayName={memberName}
         size="list"
@@ -2888,7 +2868,7 @@ export function TaskPanel({
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [assigneeAgentId, setAssigneeAgentId] = useState('')
-  const [status, setStatus] = useState<CampTaskStatus>('pending')
+  const [status, setStatus] = useState<TaskStatus>('pending')
   const [expectedVersion, setExpectedVersion] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
@@ -2915,7 +2895,7 @@ export function TaskPanel({
     setMode('create')
   }
 
-  const beginEdit = (task: CampTaskView): void => {
+  const beginEdit = (task: TaskView): void => {
     setSelectedTaskId(task.id)
     setTitle(task.title)
     setDescription(task.description)
@@ -2971,7 +2951,7 @@ export function TaskPanel({
     const assignee = assigneeAgentId === (selectedTask.assigneeAgentId ?? '')
       ? { operation: 'unchanged' as const }
       : assigneeAgentId
-        ? { operation: 'assign' as const, agentProfileId: assigneeAgentId }
+        ? { operation: 'assign' as const, agentId: assigneeAgentId }
         : { operation: 'clear' as const }
     try {
       const result = await window.rovai.request<StoredCommandResult>('tasks.update', {
@@ -2986,7 +2966,7 @@ export function TaskPanel({
       })
       if (result.status === 'rejected') {
         if (result.code === 'task.version_conflict') {
-          const current = await window.rovai.request<CampTaskView | null>('tasks.get', {
+          const current = await window.rovai.request<TaskView | null>('tasks.get', {
             campId: snapshot.camp.id,
             taskId: selectedTask.id
           })
@@ -3096,40 +3076,40 @@ function TaskFields({
   title: string
   description: string
   assigneeAgentId: string
-  status: CampTaskStatus
+  status: TaskStatus
   members: CampSnapshot['members']
   disabled: boolean
   showStatus: boolean
   onTitle(value: string): void
   onDescription(value: string): void
   onAssignee(value: string): void
-  onStatus(value: CampTaskStatus): void
+  onStatus(value: TaskStatus): void
 }): JSX.Element {
   const unavailableAssignee = assigneeAgentId
-    && !members.some((member) => member.agentProfileId === assigneeAgentId)
+    && !members.some((member) => member.agentId === assigneeAgentId)
 
   return (
     <>
       <label className="task-field"><span>标题</span><input value={title} maxLength={160} required disabled={disabled} onChange={(event) => onTitle(event.currentTarget.value)} /></label>
       <label className="task-field"><span>说明</span><textarea value={description} rows={4} maxLength={20000} disabled={disabled} onChange={(event) => onDescription(event.currentTarget.value)} placeholder="记录需要跨消息持续跟踪的责任与边界…" /></label>
       <div className="task-field-grid">
-        <label className="task-field"><span>负责人</span><select value={assigneeAgentId} disabled={disabled} onChange={(event) => onAssignee(event.currentTarget.value)}><option value="">未分配</option>{unavailableAssignee && <option value={assigneeAgentId}>队员不可用</option>}{members.map((member) => <option value={member.agentProfileId} key={member.agentProfileId}>{member.displayName}</option>)}</select></label>
-        {showStatus && <label className="task-field"><span>状态</span><select value={status} disabled={disabled} onChange={(event) => onStatus(event.currentTarget.value as CampTaskStatus)}><option value="pending">待处理</option><option value="in_progress">进行中</option><option value="completed">已完成</option><option value="cancelled">已取消</option></select></label>}
+        <label className="task-field"><span>负责人</span><select value={assigneeAgentId} disabled={disabled} onChange={(event) => onAssignee(event.currentTarget.value)}><option value="">未分配</option>{unavailableAssignee && <option value={assigneeAgentId}>队员不可用</option>}{members.map((member) => <option value={member.agentId} key={member.agentId}>{member.displayName}</option>)}</select></label>
+        {showStatus && <label className="task-field"><span>状态</span><select value={status} disabled={disabled} onChange={(event) => onStatus(event.currentTarget.value as TaskStatus)}><option value="pending">待处理</option><option value="in_progress">进行中</option><option value="completed">已完成</option><option value="cancelled">已取消</option></select></label>}
       </div>
     </>
   )
 }
 
-function taskStatusLabel(status: CampTaskStatus): string {
+function taskStatusLabel(status: TaskStatus): string {
   if (status === 'in_progress') return '进行中'
   if (status === 'completed') return '已完成'
   if (status === 'cancelled') return '已取消'
   return '待处理'
 }
 
-function taskAssigneeName(task: CampTaskView, snapshot: CampSnapshot): string {
+function taskAssigneeName(task: TaskView, snapshot: CampSnapshot): string {
   if (!task.assigneeAgentId) return '未分配'
-  return snapshot.members.find((member) => member.agentProfileId === task.assigneeAgentId)?.displayName
+  return snapshot.members.find((member) => member.agentId === task.assigneeAgentId)?.displayName
     ?? '队员不可用'
 }
 

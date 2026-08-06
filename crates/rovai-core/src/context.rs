@@ -43,7 +43,7 @@ pub(crate) fn queue_async_camp_summaries(
                 FROM camp
                 JOIN conversation
                   ON conversation.camp_id = camp.id
-                 AND conversation.agent_profile_id = camp.default_lead_agent_id
+                 AND conversation.agent_id = camp.default_lead_agent_id
                 WHERE camp.id = ?1
                 "#,
                 [camp_id],
@@ -51,8 +51,8 @@ pub(crate) fn queue_async_camp_summaries(
             )
             .optional()?;
         match lead {
-            Some((agent_profile_id, conversation_id)) => {
-                resolve_frozen_runtime(transaction, &conversation_id, &agent_profile_id)?.ok()
+            Some((agent_id, conversation_id)) => {
+                resolve_frozen_runtime(transaction, &conversation_id, &agent_id)?.ok()
             }
             None => None,
         }
@@ -1633,7 +1633,7 @@ struct RunSnapshot {
     camp_id: String,
     camp_turn_id: String,
     conversation_id: String,
-    agent_profile_id: String,
+    agent_id: String,
     task_id: Option<String>,
     execution_epoch: i64,
     a2a_depth: i64,
@@ -1668,7 +1668,7 @@ fn load_run_snapshot(
             r#"
             SELECT agent_run.id, camp_turn.camp_id,
                    agent_run.camp_turn_id, agent_run.conversation_id,
-                   conversation.agent_profile_id, agent_run.task_id,
+                   conversation.agent_id, agent_run.task_id,
                    agent_run.execution_epoch, agent_run.purpose,
                    agent_run.expected_output, agent_run.invocation_kind,
                    agent_run.a2a_depth,
@@ -1706,7 +1706,7 @@ fn load_run_snapshot(
                     camp_id: row.get(1)?,
                     camp_turn_id: row.get(2)?,
                     conversation_id: row.get(3)?,
-                    agent_profile_id: row.get(4)?,
+                    agent_id: row.get(4)?,
                     task_id: row.get(5)?,
                     execution_epoch: row.get(6)?,
                     a2a_depth: row.get(10)?,
@@ -1888,7 +1888,7 @@ fn prepare_session_bootstrap_evidence_for_snapshot(
             r#"
             INSERT INTO memory_access_evidence(
                 id, native_binding_id, native_binding_generation,
-                agent_profile_id, camp_id, evidence_kind, query_digest,
+                agent_id, camp_id, evidence_kind, query_digest,
                 memory_id, observed_revision_id, authorization_basis_digest,
                 outcome, created_at
             ) VALUES (
@@ -1900,7 +1900,7 @@ fn prepare_session_bootstrap_evidence_for_snapshot(
                 Uuid::new_v4().to_string(),
                 native_binding_id,
                 native_binding_generation,
-                snapshot.agent_profile_id,
+                snapshot.agent_id,
                 snapshot.camp_id,
                 observation["memoryId"].as_str(),
                 observation["revisionId"].as_str(),
@@ -1926,7 +1926,7 @@ fn format_session_bootstrap_for_snapshot(
     snapshot: &RunSnapshot,
     evidence: PreparedBootstrapEvidence,
 ) -> Result<PreparedSessionBootstrap> {
-    let member_identity = load_latest_member_identity(database, &snapshot.agent_profile_id)?;
+    let member_identity = load_latest_member_identity(database, &snapshot.agent_id)?;
     let payload = render_session_bootstrap(
         &evidence.session_charter,
         &member_identity,
@@ -1944,7 +1944,7 @@ fn format_session_bootstrap_for_snapshot(
 
 fn load_latest_member_identity(
     database: &Database,
-    agent_profile_id: &str,
+    agent_id: &str,
 ) -> Result<MemberIdentityBootstrapProjection> {
     let row = database
         .connection()
@@ -1955,7 +1955,7 @@ fn load_latest_member_identity(
             FROM agent_profile
             WHERE id = ?1 AND profile_status <> 'removed'
             "#,
-            [agent_profile_id],
+            [agent_id],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -2038,24 +2038,23 @@ fn build_memory_entrypoint(
         match memory.scope {
             Some(MemoryScopeKind::Hearth) => hearth.push(base),
             Some(MemoryScopeKind::Companion)
-                if memory.companion_agent_profile_id.as_deref()
-                    == Some(snapshot.agent_profile_id.as_str()) =>
+                if memory.companion_agent_id.as_deref() == Some(snapshot.agent_id.as_str()) =>
             {
                 companion.push(base);
             }
             Some(MemoryScopeKind::Relationship)
                 if memory
-                    .relationship_agent_profile_ids
+                    .relationship_agent_ids
                     .iter()
-                    .any(|id| id == &snapshot.agent_profile_id)
+                    .any(|id| id == &snapshot.agent_id)
                     && (memory.direction == Some(RelationshipDirection::Mutual)
-                        || memory.directed_actor_agent_profile_id.as_deref()
-                            == Some(snapshot.agent_profile_id.as_str())) =>
+                        || memory.directed_actor_agent_id.as_deref()
+                            == Some(snapshot.agent_id.as_str())) =>
             {
                 let Some(counterparty_id) = memory
-                    .relationship_agent_profile_ids
+                    .relationship_agent_ids
                     .iter()
-                    .find(|id| *id != &snapshot.agent_profile_id)
+                    .find(|id| *id != &snapshot.agent_id)
                 else {
                     continue;
                 };
@@ -2157,7 +2156,7 @@ fn build_memory_entrypoint(
         .collect::<Vec<_>>();
     let authorization_basis_digest = canonical_json_digest(&json!({
         "schemaVersion": 1,
-        "agentProfileId": snapshot.agent_profile_id,
+        "agentId": snapshot.agent_id,
         "campId": snapshot.camp_id,
         "presentMembers": member_order.keys().collect::<Vec<_>>(),
     }))?;
@@ -2199,7 +2198,7 @@ fn load_present_member_order(
         r#"
         SELECT agent_profile.id, agent_profile.member_order, agent_profile.display_name
         FROM camp_member
-        JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
+        JOIN agent_profile ON agent_profile.id = camp_member.agent_id
         WHERE camp_member.camp_id = ?1
           AND camp_member.status = 'active'
           AND camp_member.leave_requested_at IS NULL
@@ -2300,10 +2299,10 @@ fn load_memory_counterparty_order(
 
     let mut turn_statement = database.connection().prepare(
         r#"
-        SELECT DISTINCT conversation.agent_profile_id
+        SELECT DISTINCT conversation.agent_id
         FROM agent_run
         JOIN conversation ON conversation.id = agent_run.conversation_id
-        JOIN agent_profile ON agent_profile.id = conversation.agent_profile_id
+        JOIN agent_profile ON agent_profile.id = conversation.agent_id
         WHERE agent_run.camp_turn_id = ?1
         ORDER BY agent_profile.member_order, agent_profile.id
         "#,
@@ -2345,11 +2344,9 @@ fn build_memory_counterparty_order<const N: usize>(
     let mut result = BTreeMap::new();
     let mut next = 0_i64;
     for group in priority_groups {
-        for agent_profile_id in group {
-            if present_members.contains_key(&agent_profile_id)
-                && !result.contains_key(&agent_profile_id)
-            {
-                result.insert(agent_profile_id, next);
+        for agent_id in group {
+            if present_members.contains_key(&agent_id) && !result.contains_key(&agent_id) {
+                result.insert(agent_id, next);
                 next += 1;
             }
         }
@@ -2368,7 +2365,7 @@ fn memory_entrypoint_kind_order(kind: crate::memory::MemoryKind) -> u8 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct MemberState {
-    agent_profile_id: String,
+    agent_id: String,
     display_name: String,
     team_role: String,
     professional_responsibilities: String,
@@ -2390,7 +2387,7 @@ fn build_collaboration_state(
     members: &[MemberState],
     participants: &[Value],
 ) -> Result<Value> {
-    let active_agents = members
+    let collaboration_members = members
         .iter()
         .filter(|member| member.membership_status == "active" && member.profile_status != "removed")
         .map(|member| {
@@ -2401,15 +2398,11 @@ fn build_collaboration_state(
                 JOIN conversation ON conversation.id = agent_run.conversation_id
                 JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
                 WHERE camp_turn.camp_id = ?1
-                  AND conversation.agent_profile_id = ?2
+                  AND conversation.agent_id = ?2
                   AND agent_run.id <> ?3
                   AND agent_run.status IN ('queued', 'running', 'waiting')
                 "#,
-                params![
-                    snapshot.camp_id,
-                    member.agent_profile_id,
-                    snapshot.agent_run_id
-                ],
+                params![snapshot.camp_id, member.agent_id, snapshot.agent_run_id],
                 |row| row.get(0),
             )?;
             let (availability, reason) =
@@ -2421,7 +2414,7 @@ fn build_collaboration_state(
                     ("available", None)
                 };
             Ok::<_, anyhow::Error>(json!({
-                "agentId": member.agent_profile_id,
+                "agentId": member.agent_id,
                 "name": member.display_name,
                 "teamRole": member.team_role,
                 "professionalResponsibilities": member.professional_responsibilities,
@@ -2435,12 +2428,12 @@ fn build_collaboration_state(
         .find(|member| member.is_default_lead)
         .map(|member| {
             json!({
-                "agentId": member.agent_profile_id,
+                "agentId": member.agent_id,
                 "name": member.display_name,
             })
         });
     Ok(json!({
-        "activeAgents": active_agents,
+        "members": collaboration_members,
         "defaultLead": default_lead,
         "changes": snapshot.native_member_state_digest.is_some().then(|| {
             vec!["Team membership or availability changed since the prior accepted input."]
@@ -2515,7 +2508,7 @@ fn load_members(database: &Database, camp_id: &str) -> Result<Vec<MemberState>> 
                camp.default_lead_agent_id = agent_profile.id
         FROM camp_member
         JOIN camp ON camp.id = camp_member.camp_id
-        JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
+        JOIN agent_profile ON agent_profile.id = camp_member.agent_id
         WHERE camp_member.camp_id = ?1
         ORDER BY agent_profile.member_order, agent_profile.id
         "#,
@@ -2523,7 +2516,7 @@ fn load_members(database: &Database, camp_id: &str) -> Result<Vec<MemberState>> 
     Ok(statement
         .query_map([camp_id], |row| {
             Ok(MemberState {
-                agent_profile_id: row.get(0)?,
+                agent_id: row.get(0)?,
                 display_name: row.get(1)?,
                 team_role: row.get(2)?,
                 professional_responsibilities: row.get(3)?,
@@ -2538,10 +2531,10 @@ fn load_members(database: &Database, camp_id: &str) -> Result<Vec<MemberState>> 
 fn load_turn_participants(database: &Database, camp_turn_id: &str) -> Result<Vec<Value>> {
     let mut statement = database.connection().prepare(
         r#"
-        SELECT DISTINCT conversation.agent_profile_id
+        SELECT DISTINCT conversation.agent_id
         FROM agent_run
         JOIN conversation ON conversation.id = agent_run.conversation_id
-        JOIN agent_profile ON agent_profile.id = conversation.agent_profile_id
+        JOIN agent_profile ON agent_profile.id = conversation.agent_id
         WHERE agent_run.camp_turn_id = ?1
         ORDER BY agent_profile.member_order, agent_profile.id
         "#,
@@ -2614,7 +2607,7 @@ fn load_shared_messages(
                 snapshot.camp_id,
                 after_sequence,
                 through_sequence,
-                snapshot.agent_profile_id,
+                snapshot.agent_id,
                 expected_binding_generation,
             ],
             |row| {
@@ -2798,7 +2791,7 @@ fn load_current_input(database: &Database, snapshot: &RunSnapshot) -> Result<Cur
                                 "type": "member_call",
                                 "senderMemberId": sender_member_id,
                                 "senderName": row.get::<_, Option<String>>(5)?
-                                    .unwrap_or_else(|| "Source Agent".to_string()),
+                                    .unwrap_or_else(|| "Source Member".to_string()),
                             },
                             "message": row.get::<_, String>(3)?,
                         }),
@@ -3568,7 +3561,7 @@ fn select_overflow_raw_messages(
                   EXISTS (
                       SELECT 1 FROM camp_message_mention
                       WHERE camp_message_id = message.id
-                        AND agent_profile_id = ?4
+                        AND agent_id = ?4
                   )
                   OR (
                       parent.author_type = 'agent'
@@ -3585,7 +3578,7 @@ fn select_overflow_raw_messages(
                     snapshot.camp_id,
                     marker,
                     snapshot.camp_message_boundary_sequence,
-                    snapshot.agent_profile_id,
+                    snapshot.agent_id,
                     MENTIONED_UNREAD_MESSAGE_COUNT as i64,
                 ],
                 |row| row.get::<_, String>(0),
@@ -3719,17 +3712,12 @@ fn build_context_briefing(
           AND (
               EXISTS (
                   SELECT 1 FROM camp_message_mention
-                  WHERE camp_message_id = message.id AND agent_profile_id = ?4
+                  WHERE camp_message_id = message.id AND agent_id = ?4
               )
               OR (parent.author_type = 'agent' AND parent.author_id = ?4)
           )
         "#,
-        params![
-            snapshot.camp_id,
-            marker,
-            boundary,
-            snapshot.agent_profile_id
-        ],
+        params![snapshot.camp_id, marker, boundary, snapshot.agent_id],
         |row| row.get(0),
     )?;
     let involved = {
@@ -3745,7 +3733,7 @@ fn build_context_briefing(
               AND (
                   EXISTS (
                       SELECT 1 FROM camp_message_mention
-                      WHERE camp_message_id = message.id AND agent_profile_id = ?4
+                      WHERE camp_message_id = message.id AND agent_id = ?4
                   )
                   OR (parent.author_type = 'agent' AND parent.author_id = ?4)
               )
@@ -3755,12 +3743,7 @@ fn build_context_briefing(
         )?;
         statement
             .query_map(
-                params![
-                    snapshot.camp_id,
-                    marker,
-                    boundary,
-                    snapshot.agent_profile_id
-                ],
+                params![snapshot.camp_id, marker, boundary, snapshot.agent_id],
                 |row| {
                     Ok(json!({
                         "messageId": row.get::<_, String>(0)?,
@@ -3800,17 +3783,14 @@ fn build_context_briefing(
             "#,
         )?;
         statement
-            .query_map(
-                params![snapshot.camp_id, snapshot.agent_profile_id],
-                |row| {
-                    Ok(json!({
-                        "taskId": row.get::<_, String>(0)?,
-                        "title": truncate_brief_label(row.get::<_, String>(1)?),
-                        "status": row.get::<_, String>(2)?,
-                        "assigneeAgentId": row.get::<_, Option<String>>(3)?,
-                    }))
-                },
-            )?
+            .query_map(params![snapshot.camp_id, snapshot.agent_id], |row| {
+                Ok(json!({
+                    "taskId": row.get::<_, String>(0)?,
+                    "title": truncate_brief_label(row.get::<_, String>(1)?),
+                    "status": row.get::<_, String>(2)?,
+                    "assigneeAgentId": row.get::<_, Option<String>>(3)?,
+                }))
+            })?
             .collect::<rusqlite::Result<Vec<_>>>()?
     };
     let assigned_open_task_total: i64 = database.connection().query_row(
@@ -3819,7 +3799,7 @@ fn build_context_briefing(
         WHERE camp_id = ?1 AND assignee_agent_id = ?2
           AND status IN ('pending', 'in_progress')
         "#,
-        params![snapshot.camp_id, snapshot.agent_profile_id],
+        params![snapshot.camp_id, snapshot.agent_id],
         |row| row.get(0),
     )?;
     let camp_open_task_total: i64 = database.connection().query_row(
@@ -3836,10 +3816,10 @@ fn build_context_briefing(
         JOIN conversation ON conversation.id = agent_run.conversation_id
         JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
         WHERE camp_turn.camp_id = ?1
-          AND conversation.agent_profile_id = ?2
+          AND conversation.agent_id = ?2
           AND approval.status = 'pending'
         "#,
-        params![snapshot.camp_id, snapshot.agent_profile_id],
+        params![snapshot.camp_id, snapshot.agent_id],
         |row| row.get(0),
     )?;
     let pending_actions = {
@@ -3853,24 +3833,21 @@ fn build_context_briefing(
             JOIN conversation ON conversation.id = agent_run.conversation_id
             JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
             WHERE camp_turn.camp_id = ?1
-              AND conversation.agent_profile_id = ?2
+              AND conversation.agent_id = ?2
               AND approval.status = 'pending'
             ORDER BY approval.requested_at DESC, approval.id
             LIMIT 10
             "#,
         )?;
         statement
-            .query_map(
-                params![snapshot.camp_id, snapshot.agent_profile_id],
-                |row| {
-                    Ok(json!({
-                        "approvalId": row.get::<_, String>(0)?,
-                        "actionId": row.get::<_, String>(1)?,
-                        "actionKind": row.get::<_, String>(2)?,
-                        "summary": truncate_brief_label(row.get::<_, String>(3)?),
-                    }))
-                },
-            )?
+            .query_map(params![snapshot.camp_id, snapshot.agent_id], |row| {
+                Ok(json!({
+                    "approvalId": row.get::<_, String>(0)?,
+                    "actionId": row.get::<_, String>(1)?,
+                    "actionKind": row.get::<_, String>(2)?,
+                    "summary": truncate_brief_label(row.get::<_, String>(3)?),
+                }))
+            })?
             .collect::<rusqlite::Result<Vec<_>>>()?
     };
     let last_public_output = if bootstrap {
@@ -3881,7 +3858,7 @@ fn build_context_briefing(
                   AND author_id = ?2 AND sequence <= ?3
                   AND tombstoned_at IS NULL
                 "#,
-            params![snapshot.camp_id, snapshot.agent_profile_id, boundary],
+            params![snapshot.camp_id, snapshot.agent_id, boundary],
             |row| row.get::<_, Option<i64>>(0),
         )?
     } else {
@@ -4412,7 +4389,7 @@ fn load_existing_manifest(
     let bootstrap_in_runtime_payload =
         delivery_mode == CharterDeliveryMode::FirstPayload && bootstrap_required;
     let runtime_payload = if bootstrap_in_runtime_payload {
-        let member_identity = load_latest_member_identity(database, &snapshot.agent_profile_id)?;
+        let member_identity = load_latest_member_identity(database, &snapshot.agent_id)?;
         let bootstrap = render_session_bootstrap(&charter, &member_identity, &entrypoint)?;
         compose_first_payload(&bootstrap, &payload)
     } else {
@@ -4480,11 +4457,10 @@ fn capture_cross_camp_history_fence(
         FROM camp
         JOIN camp_member
           ON camp_member.camp_id = camp.id
-         AND camp_member.agent_profile_id = ?2
+         AND camp_member.agent_id = ?2
         JOIN agent_profile
-          ON agent_profile.id = camp_member.agent_profile_id
+          ON agent_profile.id = camp_member.agent_id
         WHERE camp.id <> ?3
-          AND camp.status = 'active'
           AND camp_member.status = 'active'
           AND camp_member.leave_requested_at IS NULL
           AND agent_profile.profile_status = 'present'
@@ -4493,7 +4469,7 @@ fn capture_cross_camp_history_fence(
     )?;
     let camps = statement
         .query_map(
-            params![global_boundary, snapshot.agent_profile_id, snapshot.camp_id,],
+            params![global_boundary, snapshot.agent_id, snapshot.camp_id,],
             |row| {
                 Ok(CrossCampHistorySnapshot {
                     camp_id: row.get(0)?,
@@ -4900,7 +4876,7 @@ mod tests {
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: SetAgentProfileRuntimeCommand {
-                        agent_profile_id: "agent_1".to_string(),
+                        agent_id: "agent_1".to_string(),
                         expected_version: profile.version,
                         adapter_kind: AdapterKind::CodexCli,
                         model: Some(ModelSelection::RuntimeDefault),
@@ -5022,7 +4998,7 @@ mod tests {
         };
         AuthenticatedTeamToolRun {
             camp_id: fixture.camp_id.clone(),
-            agent_profile_id: "agent_1".to_string(),
+            agent_id: "agent_1".to_string(),
             agent_run_id: run_id.to_string(),
             execution_epoch,
         }
@@ -5206,14 +5182,11 @@ mod tests {
             .unwrap();
         assert!(summary_search["results"].as_array().unwrap().is_empty());
 
-        fixture
-            .database
-            .connection()
-            .execute(
-                "UPDATE camp SET status = 'archived' WHERE id = ?1",
-                [&fixture.camp_id],
-            )
-            .unwrap();
+        crate::collaboration::delete_camp_aggregate(
+            fixture.database.connection(),
+            &fixture.camp_id,
+        )
+        .unwrap();
         let deleted_read = CampHistoryService
             .read(
                 &mut fixture.database,
@@ -5786,7 +5759,7 @@ mod tests {
         };
         let run = AuthenticatedTeamToolRun {
             camp_id: fixture.camp_id.clone(),
-            agent_profile_id: "agent_1".to_string(),
+            agent_id: "agent_1".to_string(),
             agent_run_id: fixture.run_id.clone(),
             execution_epoch: fixture.execution_epoch,
         };
@@ -6231,7 +6204,7 @@ mod tests {
             .database
             .connection()
             .execute(
-                "UPDATE camp_member SET status = 'left', left_at = ?3 WHERE camp_id = ?1 AND agent_profile_id = ?2",
+                "UPDATE camp_member SET status = 'left', left_at = ?3 WHERE camp_id = ?1 AND agent_id = ?2",
                 params![historical_camp_id, "agent_1", chrono::Utc::now().to_rfc3339()],
             )
             .unwrap();
@@ -6508,10 +6481,10 @@ mod tests {
                         kind: MemoryKind::Agreement,
                         body: body.to_string(),
                         retrieval_keys: vec!["context handoff".to_string()],
-                        companion_agent_profile_id: None,
-                        relationship_agent_profile_ids: Vec::new(),
+                        companion_agent_id: None,
+                        relationship_agent_ids: Vec::new(),
                         direction: None,
-                        directed_actor_agent_profile_id: None,
+                        directed_actor_agent_id: None,
                         review_after: None,
                     },
                 },
@@ -7024,7 +6997,7 @@ mod tests {
                     SetMcpAssignmentParams {
                         expected_config_digest: config.config_digest,
                         server_id,
-                        agent_profile_id: "agent_1".to_string(),
+                        agent_id: "agent_1".to_string(),
                         assigned: true,
                         acknowledge_high_risk: false,
                     },
@@ -7040,7 +7013,7 @@ mod tests {
                 &McpProjectionRequest {
                     agent_run_id: &fixture.run_id,
                     execution_epoch: fixture.execution_epoch,
-                    agent_profile_id: "agent_1",
+                    agent_id: "agent_1",
                     adapter_kind: AdapterKind::CodexCli,
                     reported_runtime_version: None,
                     execution_root: &fixture.directory,
@@ -7291,7 +7264,7 @@ mod tests {
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: UpdateAgentProfileCommand {
-                        agent_profile_id: profile.id,
+                        agent_id: profile.agent_id,
                         expected_version: profile.version,
                         display_name: "之后的狐狸".to_string(),
                         team_role: profile.team_role,
@@ -7453,8 +7426,8 @@ mod tests {
                 r#"
                 PRAGMA foreign_keys = OFF;
                 UPDATE conversation
-                SET agent_profile_id = 'missing-agent-profile'
-                WHERE agent_profile_id = 'agent_1';
+                SET agent_id = 'missing-agent-profile'
+                WHERE agent_id = 'agent_1';
                 PRAGMA foreign_keys = ON;
                 "#,
             )
@@ -7907,7 +7880,7 @@ mod tests {
                     execution_epoch: None,
                     payload: AddCampMemberCommand {
                         camp_id: fixture.camp_id.clone(),
-                        agent_profile_id: "agent_2".to_string(),
+                        agent_id: "agent_2".to_string(),
                         capability_overrides: json!({}),
                     },
                 },
@@ -8775,7 +8748,7 @@ mod tests {
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: SetAgentProfileRuntimeCommand {
-                        agent_profile_id: "agent_2".to_string(),
+                        agent_id: "agent_2".to_string(),
                         expected_version: muwa.version,
                         adapter_kind: AdapterKind::CodexCli,
                         model: Some(ModelSelection::RuntimeDefault),
@@ -8802,7 +8775,7 @@ mod tests {
                     execution_epoch: None,
                     payload: AddCampMemberCommand {
                         camp_id: fixture.camp_id.clone(),
-                        agent_profile_id: "agent_2".to_string(),
+                        agent_id: "agent_2".to_string(),
                         capability_overrides: json!({}),
                     },
                 },
@@ -8850,7 +8823,7 @@ mod tests {
                         body: "ask a second member to consume the same history".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Explicit {
-                            agent_profile_ids: vec!["agent_2".to_string()],
+                            agent_ids: vec!["agent_2".to_string()],
                         },
                         reply_to_camp_message_id: None,
                         execution: Some(ExecutionRequest {

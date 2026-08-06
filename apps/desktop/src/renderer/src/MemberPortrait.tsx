@@ -6,7 +6,7 @@ import { identityColorToken } from './theme'
 import { useManagedAvatarUrl } from './use-managed-avatar'
 
 export interface MemberPortraitProps {
-  agentProfileId: string
+  agentId: string
   avatarRef: string | null
   displayName: string
   decorative?: boolean
@@ -14,7 +14,7 @@ export interface MemberPortraitProps {
 }
 
 export function MemberPortrait({
-  agentProfileId,
+  agentId,
   avatarRef,
   displayName,
   decorative = false,
@@ -44,7 +44,7 @@ export function MemberPortrait({
         className ?? ''
       ].filter(Boolean).join(' ')}
       style={{
-        '--member-avatar-accent': identityColorToken(agentProfileId)
+        '--member-avatar-accent': identityColorToken(agentId)
       } as CSSProperties}
       aria-busy={managed.loading ? true : undefined}
       {...semanticProps}

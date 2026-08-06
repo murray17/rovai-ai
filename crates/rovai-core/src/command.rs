@@ -26,7 +26,7 @@ pub enum ActorRef {
         user_id: String,
     },
     Agent {
-        agent_profile_id: String,
+        agent_id: String,
         source_agent_run_id: String,
     },
     System {
@@ -46,9 +46,7 @@ impl ActorRef {
     fn actor_id(&self) -> &str {
         match self {
             Self::User { user_id } => user_id,
-            Self::Agent {
-                agent_profile_id, ..
-            } => agent_profile_id,
+            Self::Agent { agent_id, .. } => agent_id,
             Self::System { component_id } => component_id,
         }
     }
@@ -562,7 +560,7 @@ mod tests {
         let mut first = CommandEnvelope {
             command_id: "agent-command".to_string(),
             actor: ActorRef::Agent {
-                agent_profile_id: "agent_2".to_string(),
+                agent_id: "agent_2".to_string(),
                 source_agent_run_id: "run-1".to_string(),
             },
             camp_id: Some("camp-1".to_string()),

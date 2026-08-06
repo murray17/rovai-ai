@@ -40,7 +40,7 @@ try {
     throw new Error(`Claude Code capability snapshot is invalid: ${JSON.stringify(snapshot)}`)
   }
 
-  const profile = await core.request('agents.get', { agentProfileId: 'agent_1' })
+  const profile = await core.request('agents.get', { agentId: 'agent_1' })
 
   const workspace = await core.request('workspaces.inspect', { path: projectRoot })
   const first = await createConfiguredCampAndSend(core.request, {

@@ -237,8 +237,8 @@ async function runTrial(options) {
       commandId: crypto.randomUUID(),
       name: `Qualification ${caseRecord.contract.manifest.id}`,
       workspace: { projectPath: workspacePath },
-      memberAgentProfileIds: FROZEN_TEAM.map((member) => member.agentProfileId),
-      defaultLeadAgentProfileId: 'agent_1',
+      memberAgentIds: FROZEN_TEAM.map((member) => member.agentId),
+      defaultLeadAgentId: 'agent_1',
       collaborationMode: 'peer'
     })
     const campId = createResult.payload?.campId
@@ -839,27 +839,27 @@ async function configureFrozenRuntimes(request) {
       : null
   }, 'frozen Runtime installations', 180_000)
   for (const member of FROZEN_TEAM) {
-    const before = await request('agents.get', { agentProfileId: member.agentProfileId })
+    const before = await request('agents.get', { agentId: member.agentId })
     const applied = await request('agents.runtime.set', {
       commandId: crypto.randomUUID(),
       command: {
-        agentProfileId: member.agentProfileId,
+        agentId: member.agentId,
         expectedVersion: before.version,
         adapterKind: member.adapterKind,
         model: member.model,
         permissions: member.permissions
       }
     }, 120_000)
-    if (applied.status !== 'applied') throw new Error(`could not configure ${member.agentProfileId}: ${JSON.stringify(applied)}`)
+    if (applied.status !== 'applied') throw new Error(`could not configure ${member.agentId}: ${JSON.stringify(applied)}`)
   }
   const profiles = await request('agents.list')
   for (const member of FROZEN_TEAM) {
-    const profile = profiles.find((candidate) => candidate.id === member.agentProfileId)
+    const profile = profiles.find((candidate) => candidate.agentId === member.agentId)
     if (!profile || profile.runtimeReadiness?.status !== 'ready'
         || profile.runtimeSelection?.adapterKind !== member.adapterKind
         || canonicalJson(profile.runtimePreference?.model) !== canonicalJson(member.model)
         || canonicalJson(profile.runtimePreference?.permissions) !== canonicalJson(member.permissions)) {
-      throw new Error(`frozen member Runtime drifted: ${member.agentProfileId}`)
+      throw new Error(`frozen member Runtime drifted: ${member.agentId}`)
     }
   }
   return {
@@ -934,8 +934,7 @@ async function collectEnvironmentManifest({
     host: { platform: platform(), type: osType(), release: release(), architecture: arch(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone },
     case: { id: caseRecord.contract.manifest.id, version: caseRecord.contract.manifest.version, seal: caseRecord.seal },
     team: configured.profiles.map((profile) => ({
-      id: profile.id,
-      handle: profile.handle,
+      agentId: profile.agentId,
       displayName: profile.displayName,
       teamRole: profile.teamRole,
       responsibilitiesDigest: sha256(profile.professionalResponsibilities),
@@ -1252,7 +1251,7 @@ function collectFinalResponseEvidence(snapshot, dispatchBoundary) {
   const selected = leadMessages.length > 0 ? leadMessages : candidates
   const privateMessages = selected.map((message, index) => ({
     messageId: message.id,
-    agentProfileId: message.authorId,
+    agentId: message.authorId,
     sourceAgentRunId: message.sourceAgentRunId,
     createdAt: message.createdAt,
     body: message.body,
@@ -1437,25 +1436,25 @@ function usage() {
 
 const FROZEN_TEAM = [
   {
-    agentProfileId: 'agent_1',
+    agentId: 'agent_1',
     adapterKind: 'codex-cli',
     model: { mode: 'explicit', modelId: 'gpt-5.6-sol', options: { reasoning_effort: 'medium' } },
     permissions: { adapterKind: 'codex-cli', schemaVersion: 1, values: { sandbox_mode: 'danger-full-access', approval_policy: 'never' } }
   },
   {
-    agentProfileId: 'agent_2',
+    agentId: 'agent_2',
     adapterKind: 'codex-cli',
     model: { mode: 'explicit', modelId: 'gpt-5.6-sol', options: { reasoning_effort: 'medium' } },
     permissions: { adapterKind: 'codex-cli', schemaVersion: 1, values: { sandbox_mode: 'danger-full-access', approval_policy: 'never' } }
   },
   {
-    agentProfileId: 'agent_3',
+    agentId: 'agent_3',
     adapterKind: 'opencode-cli',
     model: { mode: 'explicit', modelId: 'opencode/big-pickle', options: {} },
     permissions: { adapterKind: 'opencode-cli', schemaVersion: 1, values: { permission: 'allow' } }
   },
   {
-    agentProfileId: 'agent_4',
+    agentId: 'agent_4',
     adapterKind: 'antigravity-app',
     model: { mode: 'explicit', modelId: 'gemini-3.6-flash-high', options: {} },
     permissions: { adapterKind: 'antigravity-app', schemaVersion: 1, values: { mode: 'accept-edits', sandbox: 'on', dangerously_skip_permissions: 'on' } }

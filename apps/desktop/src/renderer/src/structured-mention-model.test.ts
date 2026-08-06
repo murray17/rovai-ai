@@ -12,9 +12,9 @@ import {
   type StructuredMentionEditorState
 } from './structured-mention-model'
 
-const member = (agentProfileId: string) => ({
+const member = (agentId: string) => ({
   kind: 'member_mention' as const,
-  agentProfileId
+  agentId
 })
 
 const allMembers = () => ({ kind: 'all_members_mention' as const })
@@ -161,10 +161,10 @@ describe('structured mention editing model', () => {
     const result = pasteStructuredPlainText({
       content: [member('agent-a')],
       selection: { anchor: 0, focus: 1 }
-    }, '@洛可 和 @所有成员')
+    }, '@洛可 和 @所有队员')
 
     expect(result).toEqual({
-      content: [{ kind: 'text', text: '@洛可 和 @所有成员' }],
+      content: [{ kind: 'text', text: '@洛可 和 @所有队员' }],
       selection: { anchor: 11, focus: 11 }
     })
     expect(result.content.every((segment) => segment.kind === 'text')).toBe(true)

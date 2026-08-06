@@ -107,8 +107,7 @@ function profile(
   runtimeReadiness: AgentProfile['runtimeReadiness']
 ): AgentProfile {
   return {
-    id: 'agent-kiro',
-    handle: 'kiro',
+    agentId: 'agent-kiro',
     displayName: 'Kiro',
     avatarRef: null,
     accent: null,

@@ -22,10 +22,10 @@ try {
       kind: 'agreement',
       body: 'Authorization: Bearer definitely-not-a-memory',
       retrievalKeys: ['secret rejection'],
-      companionAgentProfileId: null,
-      relationshipAgentProfileIds: [],
+      companionAgentId: null,
+      relationshipAgentIds: [],
       direction: null,
-      directedActorAgentProfileId: null,
+      directedActorAgentId: null,
       reviewAfter: null
     })
   } catch (error) {
@@ -39,10 +39,10 @@ try {
     kind: 'preference',
     body: 'Prefer deterministic, audit-friendly changes.',
     retrievalKeys: ['deterministic changes', 'audit friendly'],
-    companionAgentProfileId: null,
-    relationshipAgentProfileIds: [],
+    companionAgentId: null,
+    relationshipAgentIds: [],
     direction: null,
-    directedActorAgentProfileId: null,
+    directedActorAgentId: null,
     reviewAfter: null
   }
   const first = await createMemory(core, firstCandidate, firstCommandId)
@@ -85,10 +85,10 @@ try {
     kind: 'lesson',
     body: 'Companion lessons are effective immediately.',
     retrievalKeys: ['companion lesson'],
-    companionAgentProfileId: 'agent_1',
-    relationshipAgentProfileIds: [],
+    companionAgentId: 'agent_1',
+    relationshipAgentIds: [],
     direction: null,
-    directedActorAgentProfileId: null,
+    directedActorAgentId: null,
     reviewAfter: null
   })
   assert(companion.status === 'applied', `Companion create failed: ${JSON.stringify(companion)}`)

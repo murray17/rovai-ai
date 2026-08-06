@@ -39,7 +39,7 @@ const NEW_SERVER_JSON = `{
 }`
 
 export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.Element {
-  const activeAgents = useMemo(
+  const members = useMemo(
     () => agents
       .filter((agent) => agent.presence === 'present')
       .sort((left, right) => left.memberOrder - right.memberOrder),
@@ -142,14 +142,14 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
     acknowledgeHighRisk = false
   ): Promise<void> => {
     if (!config) return
-    const key = `assignment:${agent.id}:${server.serverId}`
+    const key = `assignment:${agent.agentId}:${server.serverId}`
     setBusy(key)
     setError(null)
     try {
       const result = await window.rovai.request<McpMutationResult>('mcp.assignments.set', {
         expectedConfigDigest: config.configDigest,
         serverId: server.serverId,
-        agentProfileId: agent.id,
+        agentId: agent.agentId,
         assigned,
         acknowledgeHighRisk
       })
@@ -330,15 +330,15 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
       <section className="section-block mcp-assignment-section">
         <div className="section-heading">
           <div><span className="mcp-section-index">01</span><h2>为队员配置 MCP</h2><p>选择一位队员，再勾选其可以使用的 MCP。每次勾选都会立即保存。</p></div>
-          <span className="health-score">{activeAgents.length} 位队员</span>
+          <span className="health-score">{members.length} 位队员</span>
         </div>
         {config === null && <div className="skill-empty" aria-live="polite">正在读取 MCP 配置…</div>}
-        {config && activeAgents.length === 0 && <div className="skill-empty">当前没有可配置的队员。</div>}
-        {config && activeAgents.length > 0 && (
+        {config && members.length === 0 && <div className="skill-empty">当前没有可配置的队员。</div>}
+        {config && members.length > 0 && (
           <div className="mcp-member-grid">
-            {activeAgents.map((agent) => (
+            {members.map((agent) => (
               <MemberMcpCard
-                key={agent.id}
+                key={agent.agentId}
                 agent={agent}
                 servers={config.servers}
                 busy={busy}
@@ -385,7 +385,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
                 <code className="mcp-server-endpoint">{server.endpoint}</code>
                 <div className="mcp-server-meta">
                   <span className={`status-badge ${server.enabled ? 'status-completed' : 'status-neutral'}`}><i />{server.enabled ? '已启用' : '已停用'}</span>
-                  <span>{server.assignedAgentProfileIds.length} 位队员</span>
+                  <span>{server.assignedAgentIds.length} 位队员</span>
                 </div>
                 <div className="mcp-server-card-actions">
                   <button className="quiet-button compact" type="button" onClick={() => setEditor({ serverId: server.serverId, definitionJson: server.definitionJson })} disabled={busy !== null}>编辑 JSON</button>
@@ -440,7 +440,7 @@ export function MemberMcpCard({
   disabled: boolean
   onAssignment(server: McpServerView, assigned: boolean): void
 }): React.JSX.Element {
-  const assigned = servers.filter((server) => server.assignedAgentProfileIds.includes(agent.id))
+  const assigned = servers.filter((server) => server.assignedAgentIds.includes(agent.agentId))
   return (
     <article className="mcp-member-card">
       <div className="mcp-member-identity">
@@ -453,8 +453,8 @@ export function MemberMcpCard({
         <summary>{assigned.length > 0 ? `已选择 ${assigned.length} 个 MCP` : '选择 MCP'}</summary>
         <div className="mcp-member-picker-menu">
           {servers.map((server) => {
-            const checked = server.assignedAgentProfileIds.includes(agent.id)
-            const saving = busy === `assignment:${agent.id}:${server.serverId}`
+            const checked = server.assignedAgentIds.includes(agent.agentId)
+            const saving = busy === `assignment:${agent.agentId}:${server.serverId}`
             return (
               <label key={server.serverId}>
                 <input

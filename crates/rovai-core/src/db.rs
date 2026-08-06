@@ -44,7 +44,7 @@ pub struct Database {
 }
 
 const V043_DATA_CONTRACT_VERSION: &str = "v0.43";
-const V043_PROJECTION_SCHEMA_VERSION: i64 = 20;
+const V043_PROJECTION_SCHEMA_VERSION: i64 = 21;
 const V043_CLASSIFIER_VERSION: &str = "activity-v1";
 
 const V043_RESET_FILES: &[&str] = &[
@@ -157,18 +157,18 @@ fn table_columns(connection: &Connection, table: &str) -> Result<Vec<String>> {
 
 const AGENT_ID_REFERENCE_COLUMNS_V52: &[(&str, &str)] = &[
     ("camp", "default_lead_agent_id"),
-    ("camp_member", "agent_profile_id"),
+    ("camp_member", "agent_id"),
     ("camp_member", "pending_default_lead_successor_agent_id"),
-    ("conversation", "agent_profile_id"),
+    ("conversation", "agent_id"),
     ("inbox_message", "sender_agent_id"),
     ("inbox_message", "recipient_agent_id"),
-    ("memory", "companion_agent_profile_id"),
+    ("memory", "companion_agent_id"),
     ("memory", "relationship_agent_low_id"),
     ("memory", "relationship_agent_high_id"),
-    ("memory", "directed_actor_agent_profile_id"),
-    ("hearth_memory_proposal", "proposed_by_agent_profile_id"),
-    ("memory_access_evidence", "agent_profile_id"),
-    ("camp_message_mention", "agent_profile_id"),
+    ("memory", "directed_actor_agent_id"),
+    ("hearth_memory_proposal", "proposed_by_agent_id"),
+    ("memory_access_evidence", "agent_id"),
+    ("camp_message_mention", "agent_id"),
     ("task", "assignee_agent_id"),
     ("return_obligation", "caller_agent_id"),
     ("return_obligation", "callee_agent_id"),
@@ -305,7 +305,7 @@ fn remap_camp_message_agent_ids_v52(transaction: &Transaction<'_>) -> Result<()>
     let rows = {
         let mut statement = transaction.prepare(
             r#"
-            SELECT id, addressed_agent_profile_ids_json,
+            SELECT id, addressed_agent_ids_json,
                    structured_content_json, presentation_json
             FROM camp_message
             ORDER BY id
@@ -357,7 +357,7 @@ fn remap_camp_message_agent_ids_v52(transaction: &Transaction<'_>) -> Result<()>
             transaction.execute(
                 r#"
                 UPDATE camp_message
-                SET addressed_agent_profile_ids_json = ?2,
+                SET addressed_agent_ids_json = ?2,
                     structured_content_json = ?3,
                     presentation_json = ?4,
                     content_digest = COALESCE(?5, content_digest),
@@ -1034,6 +1034,9 @@ impl Database {
             if !self.schema_migration_applied(56)? {
                 self.migrate_additive_mcp_clean_break_v56()?;
             }
+            if !self.schema_migration_applied(57)? {
+                self.migrate_member_task_camp_contract_v57()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -1251,6 +1254,9 @@ impl Database {
         }
         if !self.schema_migration_applied(56)? {
             self.migrate_additive_mcp_clean_break_v56()?;
+        }
+        if !self.schema_migration_applied(57)? {
+            self.migrate_member_task_camp_contract_v57()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -1545,12 +1551,12 @@ impl Database {
                         CHECK(creation_origin IN (
                             'user', 'agent', 'accepted_hearth_proposal'
                         )),
-                    companion_agent_profile_id TEXT REFERENCES agent_profile(id),
+                    companion_agent_id TEXT REFERENCES agent_profile(id),
                     relationship_agent_low_id TEXT REFERENCES agent_profile(id),
                     relationship_agent_high_id TEXT REFERENCES agent_profile(id),
                     relationship_direction TEXT
                         CHECK(relationship_direction IN ('mutual', 'directed')),
-                    directed_actor_agent_profile_id TEXT REFERENCES agent_profile(id),
+                    directed_actor_agent_id TEXT REFERENCES agent_profile(id),
                     lifecycle_status TEXT NOT NULL
                         CHECK(lifecycle_status IN ('active', 'retired', 'forgotten')),
                     current_revision_id TEXT REFERENCES memory_revision(id)
@@ -1567,11 +1573,11 @@ impl Database {
                             AND scope_kind IS NULL
                             AND kind IS NULL
                             AND creation_origin IS NULL
-                            AND companion_agent_profile_id IS NULL
+                            AND companion_agent_id IS NULL
                             AND relationship_agent_low_id IS NULL
                             AND relationship_agent_high_id IS NULL
                             AND relationship_direction IS NULL
-                            AND directed_actor_agent_profile_id IS NULL
+                            AND directed_actor_agent_id IS NULL
                             AND current_revision_id IS NULL
                             AND review_after IS NULL
                             AND forgotten_at IS NOT NULL
@@ -1587,25 +1593,25 @@ impl Database {
                             AND (
                                 (
                                     scope_kind = 'hearth'
-                                    AND companion_agent_profile_id IS NULL
+                                    AND companion_agent_id IS NULL
                                     AND relationship_agent_low_id IS NULL
                                     AND relationship_agent_high_id IS NULL
                                     AND relationship_direction IS NULL
-                                    AND directed_actor_agent_profile_id IS NULL
+                                    AND directed_actor_agent_id IS NULL
                                 )
                                 OR
                                 (
                                     scope_kind = 'companion'
-                                    AND companion_agent_profile_id IS NOT NULL
+                                    AND companion_agent_id IS NOT NULL
                                     AND relationship_agent_low_id IS NULL
                                     AND relationship_agent_high_id IS NULL
                                     AND relationship_direction IS NULL
-                                    AND directed_actor_agent_profile_id IS NULL
+                                    AND directed_actor_agent_id IS NULL
                                 )
                                 OR
                                 (
                                     scope_kind = 'relationship'
-                                    AND companion_agent_profile_id IS NULL
+                                    AND companion_agent_id IS NULL
                                     AND relationship_agent_low_id IS NOT NULL
                                     AND relationship_agent_high_id IS NOT NULL
                                     AND relationship_agent_low_id <
@@ -1615,12 +1621,12 @@ impl Database {
                                     AND (
                                         (
                                             relationship_direction = 'mutual'
-                                            AND directed_actor_agent_profile_id IS NULL
+                                            AND directed_actor_agent_id IS NULL
                                         )
                                         OR
                                         (
                                             relationship_direction = 'directed'
-                                            AND directed_actor_agent_profile_id IN (
+                                            AND directed_actor_agent_id IN (
                                                 relationship_agent_low_id,
                                                 relationship_agent_high_id
                                             )
@@ -1634,7 +1640,7 @@ impl Database {
 
                 CREATE INDEX memory_scope_lifecycle_idx
                     ON memory(
-                        scope_kind, companion_agent_profile_id,
+                        scope_kind, companion_agent_id,
                         relationship_agent_low_id, relationship_agent_high_id,
                         lifecycle_status, id
                     );
@@ -1739,7 +1745,7 @@ impl Database {
                     target_memory_id TEXT REFERENCES memory(id),
                     base_revision_id TEXT REFERENCES memory_revision(id),
                     pending_key_digest TEXT,
-                    proposed_by_agent_profile_id TEXT NOT NULL,
+                    proposed_by_agent_id TEXT NOT NULL,
                     source_camp_id TEXT NOT NULL,
                     source_agent_run_id TEXT NOT NULL,
                     source_execution_epoch INTEGER NOT NULL
@@ -1855,7 +1861,7 @@ impl Database {
                     native_binding_id TEXT NOT NULL,
                     native_binding_generation INTEGER NOT NULL
                         CHECK(native_binding_generation >= 1),
-                    agent_profile_id TEXT NOT NULL,
+                    agent_id TEXT NOT NULL,
                     camp_id TEXT NOT NULL,
                     evidence_kind TEXT NOT NULL
                         CHECK(evidence_kind IN ('entrypoint', 'search', 'read')),
@@ -2402,13 +2408,10 @@ impl Database {
                         CHECK(project_binding_kind IN ('quick_chat', 'directory')),
                     project_path TEXT NOT NULL,
                     default_lead_agent_id TEXT,
-                    status TEXT NOT NULL DEFAULT 'active'
-                        CHECK(status IN ('active', 'archived')),
                     last_message_sequence INTEGER NOT NULL DEFAULT 0,
                     version INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    archived_at TEXT
+                    updated_at TEXT NOT NULL
                 );
 
                 DROP TABLE camp;
@@ -2708,7 +2711,7 @@ impl Database {
                            agent_profile.instructions
                     FROM agent_run
                     JOIN conversation ON conversation.id = agent_run.conversation_id
-                    JOIN agent_profile ON agent_profile.id = conversation.agent_profile_id
+                    JOIN agent_profile ON agent_profile.id = conversation.agent_id
                     WHERE agent_run.status IN ('queued', 'running', 'waiting')
                     ORDER BY agent_run.id
                     "#,
@@ -3680,9 +3683,9 @@ impl Database {
         let members = {
             let mut statement = transaction.prepare(
                 r#"
-                SELECT camp_id, agent_profile_id, capability_overrides_json
+                SELECT camp_id, agent_id, capability_overrides_json
                 FROM camp_member
-                ORDER BY camp_id, agent_profile_id
+                ORDER BY camp_id, agent_id
                 "#,
             )?;
             statement
@@ -3695,12 +3698,10 @@ impl Database {
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?
         };
-        for (camp_id, agent_profile_id, raw_overrides) in members {
+        for (camp_id, agent_id, raw_overrides) in members {
             let mut overrides = serde_json::from_str::<BTreeMap<String, Value>>(&raw_overrides)
                 .with_context(|| {
-                    format!(
-                        "CampMember {camp_id}/{agent_profile_id} has invalid capability overrides"
-                    )
+                    format!("CampMember {camp_id}/{agent_id} has invalid capability overrides")
                 })?;
             let legacy_effect = overrides.remove("inbox.send");
             if let Some(effect) = legacy_effect {
@@ -3710,13 +3711,9 @@ impl Database {
                     UPDATE camp_member
                     SET capability_overrides_json = ?3,
                         version = version + 1
-                    WHERE camp_id = ?1 AND agent_profile_id = ?2
+                    WHERE camp_id = ?1 AND agent_id = ?2
                     "#,
-                    params![
-                        camp_id,
-                        agent_profile_id,
-                        serde_json::to_string(&overrides)?,
-                    ],
+                    params![camp_id, agent_id, serde_json::to_string(&overrides)?,],
                 )?;
             }
         }
@@ -4144,12 +4141,40 @@ impl Database {
             DROP TABLE IF EXISTS codex_home_cleanup;
 
             UPDATE rovai_data_contract
-            SET contract_version = 'v0.43', projection_schema_version = 20,
+            SET contract_version = 'v0.43', projection_schema_version = 21,
                 classifier_version = 'activity-v1', updated_at = datetime('now')
             WHERE singleton = 1;
 
             INSERT INTO schema_migration(version, applied_at)
             VALUES (56, datetime('now'));
+            "#,
+        )?;
+        Ok(())
+    }
+
+    fn migrate_member_task_camp_contract_v57(&mut self) -> Result<()> {
+        let columns = table_columns(&self.connection, "camp")?;
+        if columns.iter().any(|column| column == "status") {
+            self.connection
+                .execute_batch("ALTER TABLE camp DROP COLUMN status;")?;
+        }
+        if columns.iter().any(|column| column == "archived_at") {
+            self.connection
+                .execute_batch("ALTER TABLE camp DROP COLUMN archived_at;")?;
+        }
+        let task_columns = table_columns(&self.connection, "task")?;
+        if task_columns.iter().any(|column| column == "archived_at") {
+            self.connection
+                .execute_batch("ALTER TABLE task DROP COLUMN archived_at;")?;
+        }
+        self.connection.execute_batch(
+            r#"
+            UPDATE rovai_data_contract
+            SET projection_schema_version = 21, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (57, datetime('now'));
             "#,
         )?;
         Ok(())
@@ -4936,7 +4961,7 @@ impl Database {
                     CHECK(scope_kind IN ('hearth', 'companion', 'relationship')),
                 kind TEXT
                     CHECK(kind IN ('preference', 'agreement', 'lesson')),
-                companion_agent_profile_id TEXT
+                companion_agent_id TEXT
                     REFERENCES agent_profile(id),
                 relationship_agent_low_id TEXT
                     REFERENCES agent_profile(id),
@@ -4944,7 +4969,7 @@ impl Database {
                     REFERENCES agent_profile(id),
                 relationship_direction TEXT
                     CHECK(relationship_direction IN ('mutual', 'directed')),
-                directed_actor_agent_profile_id TEXT
+                directed_actor_agent_id TEXT
                     REFERENCES agent_profile(id),
                 lifecycle_status TEXT NOT NULL
                     CHECK(lifecycle_status IN ('active', 'retired', 'forgotten')),
@@ -4962,11 +4987,11 @@ impl Database {
                         lifecycle_status = 'forgotten'
                         AND scope_kind IS NULL
                         AND kind IS NULL
-                        AND companion_agent_profile_id IS NULL
+                        AND companion_agent_id IS NULL
                         AND relationship_agent_low_id IS NULL
                         AND relationship_agent_high_id IS NULL
                         AND relationship_direction IS NULL
-                        AND directed_actor_agent_profile_id IS NULL
+                        AND directed_actor_agent_id IS NULL
                         AND current_revision_id IS NULL
                         AND review_after IS NULL
                         AND forgotten_at IS NOT NULL
@@ -4981,25 +5006,25 @@ impl Database {
                         AND (
                             (
                                 scope_kind = 'hearth'
-                                AND companion_agent_profile_id IS NULL
+                                AND companion_agent_id IS NULL
                                 AND relationship_agent_low_id IS NULL
                                 AND relationship_agent_high_id IS NULL
                                 AND relationship_direction IS NULL
-                                AND directed_actor_agent_profile_id IS NULL
+                                AND directed_actor_agent_id IS NULL
                             )
                             OR
                             (
                                 scope_kind = 'companion'
-                                AND companion_agent_profile_id IS NOT NULL
+                                AND companion_agent_id IS NOT NULL
                                 AND relationship_agent_low_id IS NULL
                                 AND relationship_agent_high_id IS NULL
                                 AND relationship_direction IS NULL
-                                AND directed_actor_agent_profile_id IS NULL
+                                AND directed_actor_agent_id IS NULL
                             )
                             OR
                             (
                                 scope_kind = 'relationship'
-                                AND companion_agent_profile_id IS NULL
+                                AND companion_agent_id IS NULL
                                 AND relationship_agent_low_id IS NOT NULL
                                 AND relationship_agent_high_id IS NOT NULL
                                 AND relationship_agent_low_id < relationship_agent_high_id
@@ -5008,12 +5033,12 @@ impl Database {
                                 AND (
                                     (
                                         relationship_direction = 'mutual'
-                                        AND directed_actor_agent_profile_id IS NULL
+                                        AND directed_actor_agent_id IS NULL
                                     )
                                     OR
                                     (
                                         relationship_direction = 'directed'
-                                        AND directed_actor_agent_profile_id IN (
+                                        AND directed_actor_agent_id IN (
                                             relationship_agent_low_id,
                                             relationship_agent_high_id
                                         )
@@ -5027,7 +5052,7 @@ impl Database {
 
             CREATE INDEX IF NOT EXISTS memory_scope_lifecycle_idx
                 ON memory(
-                    scope_kind, companion_agent_profile_id,
+                    scope_kind, companion_agent_id,
                     relationship_agent_low_id, relationship_agent_high_id,
                     lifecycle_status, id
                 );
@@ -5078,18 +5103,18 @@ impl Database {
                     CHECK(candidate_scope_kind IN ('hearth', 'companion', 'relationship')),
                 candidate_kind TEXT
                     CHECK(candidate_kind IN ('preference', 'agreement', 'lesson')),
-                candidate_companion_agent_profile_id TEXT,
+                candidate_companion_agent_id TEXT,
                 candidate_relationship_agent_low_id TEXT,
                 candidate_relationship_agent_high_id TEXT,
                 candidate_relationship_direction TEXT
                     CHECK(candidate_relationship_direction IN ('mutual', 'directed')),
-                candidate_directed_actor_agent_profile_id TEXT,
+                candidate_directed_actor_agent_id TEXT,
                 candidate_body TEXT,
                 candidate_body_utf8_bytes INTEGER CHECK(candidate_body_utf8_bytes >= 0),
                 target_memory_id TEXT REFERENCES memory(id),
                 base_revision_id TEXT REFERENCES memory_revision(id),
                 pending_key_digest TEXT,
-                proposed_by_agent_profile_id TEXT NOT NULL REFERENCES agent_profile(id),
+                proposed_by_agent_id TEXT NOT NULL REFERENCES agent_profile(id),
                 source_camp_id TEXT NOT NULL,
                 source_agent_run_id TEXT NOT NULL,
                 source_execution_epoch INTEGER NOT NULL CHECK(source_execution_epoch >= 1),
@@ -5129,11 +5154,11 @@ impl Database {
                         AND candidate_body_utf8_bytes IS NULL
                         AND candidate_scope_kind IS NULL
                         AND candidate_kind IS NULL
-                        AND candidate_companion_agent_profile_id IS NULL
+                        AND candidate_companion_agent_id IS NULL
                         AND candidate_relationship_agent_low_id IS NULL
                         AND candidate_relationship_agent_high_id IS NULL
                         AND candidate_relationship_direction IS NULL
-                        AND candidate_directed_actor_agent_profile_id IS NULL
+                        AND candidate_directed_actor_agent_id IS NULL
                         AND target_memory_id IS NULL
                         AND base_revision_id IS NULL
                         AND candidate_cleared_at IS NOT NULL
@@ -5184,7 +5209,7 @@ impl Database {
                 view_kind TEXT NOT NULL
                     CHECK(view_kind IN ('hearth', 'companion', 'relationship')),
                 camp_id TEXT,
-                perspective_agent_profile_id TEXT,
+                perspective_agent_id TEXT,
                 path TEXT NOT NULL UNIQUE,
                 formatter_version INTEGER NOT NULL CHECK(formatter_version >= 1),
                 source_digest TEXT NOT NULL,
@@ -5498,12 +5523,12 @@ impl Database {
                 CREATE TABLE camp_message_mention (
                     camp_message_id TEXT NOT NULL
                         REFERENCES camp_message(id) ON DELETE CASCADE,
-                    agent_profile_id TEXT NOT NULL REFERENCES agent_profile(id),
-                    PRIMARY KEY(camp_message_id, agent_profile_id)
+                    agent_id TEXT NOT NULL REFERENCES agent_profile(id),
+                    PRIMARY KEY(camp_message_id, agent_id)
                 );
 
                 CREATE INDEX camp_message_mention_agent_idx
-                    ON camp_message_mention(agent_profile_id, camp_message_id);
+                    ON camp_message_mention(agent_id, camp_message_id);
 
                 CREATE TABLE camp_summary (
                     id TEXT PRIMARY KEY,
@@ -5689,11 +5714,11 @@ impl Database {
                 WHERE tombstoned_at IS NULL;
 
                 INSERT OR IGNORE INTO camp_message_mention(
-                    camp_message_id, agent_profile_id
+                    camp_message_id, agent_id
                 )
                 SELECT camp_message.id, json_each.value
                 FROM camp_message, json_each(
-                    camp_message.addressed_agent_profile_ids_json
+                    camp_message.addressed_agent_ids_json
                 )
                 JOIN agent_profile ON agent_profile.id = json_each.value;
 
@@ -6915,7 +6940,7 @@ impl Database {
 
             CREATE TABLE IF NOT EXISTS camp_member (
                 camp_id TEXT NOT NULL REFERENCES camp(id),
-                agent_profile_id TEXT NOT NULL REFERENCES agent_profile(id),
+                agent_id TEXT NOT NULL REFERENCES agent_profile(id),
                 status TEXT NOT NULL CHECK(status IN ('active', 'left')),
                 capability_overrides_json TEXT NOT NULL DEFAULT '{}',
                 leave_requested_at TEXT,
@@ -6924,7 +6949,7 @@ impl Database {
                 version INTEGER NOT NULL DEFAULT 1,
                 joined_at TEXT NOT NULL,
                 left_at TEXT,
-                PRIMARY KEY(camp_id, agent_profile_id),
+                PRIMARY KEY(camp_id, agent_id),
                 CHECK (
                     (leave_requested_at IS NULL AND leave_request_command_id IS NULL)
                     OR
@@ -6935,7 +6960,7 @@ impl Database {
             CREATE TABLE IF NOT EXISTS conversation (
                 id TEXT PRIMARY KEY,
                 camp_id TEXT NOT NULL REFERENCES camp(id),
-                agent_profile_id TEXT NOT NULL REFERENCES agent_profile(id),
+                agent_id TEXT NOT NULL REFERENCES agent_profile(id),
                 provider_override TEXT,
                 model_override TEXT,
                 action_permission_profile_ref TEXT,
@@ -6946,7 +6971,7 @@ impl Database {
                 version INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
-                UNIQUE(camp_id, agent_profile_id)
+                UNIQUE(camp_id, agent_id)
             );
 
             CREATE UNIQUE INDEX IF NOT EXISTS conversation_native_session_unique
@@ -7065,7 +7090,7 @@ impl Database {
                 source_agent_run_id TEXT,
                 body TEXT NOT NULL,
                 address_mode TEXT NOT NULL CHECK(address_mode IN ('default', 'explicit', 'broadcast')),
-                addressed_agent_profile_ids_json TEXT NOT NULL,
+                addressed_agent_ids_json TEXT NOT NULL,
                 reply_to_camp_message_id TEXT REFERENCES camp_message(id),
                 camp_turn_id TEXT REFERENCES camp_turn(id),
                 agent_run_id TEXT REFERENCES agent_run(id),
@@ -7258,7 +7283,7 @@ impl Database {
             FROM project;
 
             INSERT OR IGNORE INTO camp_member(
-                camp_id, agent_profile_id, status, capability_overrides_json,
+                camp_id, agent_id, status, capability_overrides_json,
                 leave_requested_at, leave_request_command_id,
                 pending_default_lead_successor_agent_id,
                 version, joined_at, left_at
@@ -7271,7 +7296,7 @@ impl Database {
             WHERE camp.status = 'active' AND agent_profile.profile_status = 'active';
 
             INSERT OR IGNORE INTO conversation(
-                id, camp_id, agent_profile_id,
+                id, camp_id, agent_id,
                 provider_override, model_override, action_permission_profile_ref,
                 native_session_id, summary,
                 summary_through_message_sequence,
@@ -7279,9 +7304,9 @@ impl Database {
                 version, created_at, updated_at
             )
             SELECT
-                'conversation-' || camp_member.camp_id || '-' || camp_member.agent_profile_id,
+                'conversation-' || camp_member.camp_id || '-' || camp_member.agent_id,
                 camp_member.camp_id,
-                camp_member.agent_profile_id,
+                camp_member.agent_id,
                 NULL, NULL, NULL, NULL, NULL, 0, 0, 1,
                 camp_member.joined_at, camp_member.joined_at
             FROM camp_member;
@@ -7293,7 +7318,7 @@ impl Database {
               AND EXISTS (
                   SELECT 1 FROM camp_member
                   WHERE camp_member.camp_id = camp.id
-                    AND camp_member.agent_profile_id = 'agent-muwa'
+                    AND camp_member.agent_id = 'agent-muwa'
                     AND camp_member.status = 'active'
                     AND camp_member.leave_requested_at IS NULL
               );
@@ -8333,7 +8358,7 @@ impl Database {
                 transaction.execute(
                     r#"
                     INSERT INTO camp_member(
-                        camp_id, agent_profile_id, status, capability_overrides_json,
+                        camp_id, agent_id, status, capability_overrides_json,
                         leave_requested_at, leave_request_command_id,
                         pending_default_lead_successor_agent_id,
                         version, joined_at, left_at
@@ -8344,7 +8369,7 @@ impl Database {
                 transaction.execute(
                     r#"
                     INSERT INTO conversation(
-                        id, camp_id, agent_profile_id,
+                        id, camp_id, agent_id,
                         provider_override, model_override, action_permission_profile_ref,
                         native_session_id, summary,
                         summary_through_message_sequence,
@@ -8989,15 +9014,15 @@ mod tests {
                 INSERT INTO camp(
                     id, title, name_origin, collaboration_mode,
                     project_binding_kind, project_path,
-                    default_lead_agent_id, status, last_message_sequence,
-                    version, created_at, updated_at, archived_at
+                    default_lead_agent_id, last_message_sequence,
+                    version, created_at, updated_at
                 ) VALUES (
                     'legacy-camp', 'legacy', 'default', 'peer',
                     'directory', '/tmp/legacy',
-                    'agent_1', 'active', 0, 1, 'now', 'now', NULL
+                    'agent_1', 0, 1, 'now', 'now'
                 );
                 INSERT INTO camp_member(
-                    camp_id, agent_profile_id, status, capability_overrides_json,
+                    camp_id, agent_id, status, capability_overrides_json,
                     leave_requested_at, leave_request_command_id,
                     pending_default_lead_successor_agent_id,
                     version, joined_at, left_at
@@ -9006,7 +9031,7 @@ mod tests {
                     NULL, NULL, NULL, 1, 'now', NULL
                 );
                 INSERT INTO conversation(
-                    id, camp_id, agent_profile_id,
+                    id, camp_id, agent_id,
                     provider_override, model_override, action_permission_profile_ref,
                     native_session_id, summary, summary_through_message_sequence,
                     last_message_sequence, version, created_at, updated_at
@@ -9225,7 +9250,7 @@ mod tests {
         database
             .connection()
             .execute(
-                "INSERT OR IGNORE INTO camp_message_mention(camp_message_id, agent_profile_id) VALUES (?1, 'agent_1')",
+                "INSERT OR IGNORE INTO camp_message_mention(camp_message_id, agent_id) VALUES (?1, 'agent_1')",
                 [&camp_message_id],
             )
             .unwrap();
@@ -9265,7 +9290,7 @@ mod tests {
                 PRAGMA foreign_keys = OFF;
                 INSERT INTO camp_message_reference(camp_message_id, kind, value)
                 VALUES ('missing-message', 'adr', '72');
-                INSERT INTO camp_message_mention(camp_message_id, agent_profile_id)
+                INSERT INTO camp_message_mention(camp_message_id, agent_id)
                 VALUES ('missing-message', 'agent_1');
                 DELETE FROM schema_migration WHERE version = 36;
                 PRAGMA foreign_keys = ON;
@@ -9316,18 +9341,18 @@ mod tests {
                 INSERT INTO camp(
                     id, title, name_origin, collaboration_mode,
                     project_binding_kind, project_path,
-                    default_lead_agent_id, status, last_message_sequence,
-                    version, created_at, updated_at, archived_at
+                    default_lead_agent_id, last_message_sequence,
+                    version, created_at, updated_at
                 ) VALUES (
                     'v37-camp', 'A2A timeline', 'user', 'peer',
                     'quick_chat', '/quick-chat',
-                    'agent_1', 'active', 1,
-                    1, '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z', NULL
+                    'agent_1', 1,
+                    1, '2026-07-30T00:00:00Z', '2026-07-30T00:00:00Z'
                 );
                 INSERT INTO camp_message(
                     id, camp_id, sequence, author_type, author_id,
                     source_agent_run_id, body, address_mode,
-                    addressed_agent_profile_ids_json,
+                    addressed_agent_ids_json,
                     reply_to_camp_message_id, camp_turn_id, agent_run_id,
                     tombstoned_at, version, created_at, updated_at,
                     presentation_json
@@ -9340,7 +9365,7 @@ mod tests {
                 );
                 INSERT INTO camp_message_reference(camp_message_id, kind, value)
                 VALUES ('v37-a2a-card', 'task', 'legacy');
-                INSERT INTO camp_message_mention(camp_message_id, agent_profile_id)
+                INSERT INTO camp_message_mention(camp_message_id, agent_id)
                 VALUES ('v37-a2a-card', 'agent_2');
                 DROP INDEX event_log_entity_sequence_idx;
                 DELETE FROM schema_migration WHERE version = 37;
@@ -9631,15 +9656,15 @@ mod tests {
                     '2026-07-31T00:00:00Z', '2026-07-31T00:00:00Z'
                 );
                 INSERT INTO camp(
-                    id, title, project_binding_kind, project_path, status,
+                    id, title, project_binding_kind, project_path,
                     last_message_sequence, version, created_at, updated_at
                 ) VALUES (
                     'camp-v42', 'V42 migration fixture', 'directory',
-                    '/tmp/rovai-v42', 'active', 0, 1,
+                    '/tmp/rovai-v42', 0, 1,
                     '2026-07-31T00:00:00Z', '2026-07-31T00:00:00Z'
                 );
                 INSERT INTO conversation(
-                    id, camp_id, agent_profile_id,
+                    id, camp_id, agent_id,
                     summary_through_message_sequence, last_message_sequence,
                     version, created_at, updated_at
                 ) VALUES (
@@ -10443,15 +10468,15 @@ mod tests {
                 DROP TRIGGER IF EXISTS agent_run_permission_semantics_update_guard;
 
                 INSERT INTO camp(
-                    id, title, project_binding_kind, project_path, status,
+                    id, title, project_binding_kind, project_path,
                     last_message_sequence, version, created_at, updated_at
                 ) VALUES (
                     'camp-v27', 'V27 migration fixture', 'directory',
-                    '/tmp/rovai-v27', 'active', 0, 1,
+                    '/tmp/rovai-v27', 0, 1,
                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'
                 );
                 INSERT INTO conversation(
-                    id, camp_id, agent_profile_id,
+                    id, camp_id, agent_id,
                     summary_through_message_sequence, last_message_sequence,
                     version, created_at, updated_at
                 ) VALUES (
@@ -11042,15 +11067,15 @@ mod tests {
 
                 INSERT INTO camp(
                     id, title, name_origin, collaboration_mode,
-                    project_binding_kind, project_path, status,
+                    project_binding_kind, project_path,
                     last_message_sequence, version, created_at, updated_at
                 ) VALUES (
                     'camp-v45-capability', 'Capability migration', 'user', 'peer',
-                    'quick_chat', '/quick-chat-v45', 'active',
+                    'quick_chat', '/quick-chat-v45',
                     0, 1, '2026-08-02T00:00:00Z', '2026-08-02T00:00:00Z'
                 );
                 INSERT INTO camp_member(
-                    camp_id, agent_profile_id, status,
+                    camp_id, agent_id, status,
                     capability_overrides_json, version, joined_at
                 ) VALUES (
                     'camp-v45-capability', 'agent_1', 'active',
@@ -11083,7 +11108,7 @@ mod tests {
                 SELECT capability_overrides_json
                 FROM camp_member
                 WHERE camp_id = 'camp-v45-capability'
-                  AND agent_profile_id = 'agent_1'
+                  AND agent_id = 'agent_1'
                 "#,
                 [],
                 |row| row.get(0),
@@ -11117,17 +11142,17 @@ mod tests {
                 r#"
                 INSERT INTO camp(
                     id, title, name_origin, collaboration_mode,
-                    project_binding_kind, project_path, status,
+                    project_binding_kind, project_path,
                     last_message_sequence, version, created_at, updated_at
                 ) VALUES
                     (
                         'camp-v46-legacy', 'Legacy draft', 'user', 'peer',
-                        'quick_chat', '/quick-chat-v46-legacy', 'active',
+                        'quick_chat', '/quick-chat-v46-legacy',
                         1, 1, '2026-08-03T00:00:00Z', '2026-08-03T00:00:00Z'
                     ),
                     (
                         'camp-v46-empty', 'Empty legacy draft', 'user', 'peer',
-                        'quick_chat', '/quick-chat-v46-empty', 'active',
+                        'quick_chat', '/quick-chat-v46-empty',
                         0, 1, '2026-08-03T00:00:00Z', '2026-08-03T00:00:00Z'
                     );
 
@@ -11147,7 +11172,7 @@ mod tests {
 
                 INSERT INTO camp_message(
                     id, camp_id, sequence, author_type, author_id, body,
-                    content_digest, address_mode, addressed_agent_profile_ids_json,
+                    content_digest, address_mode, addressed_agent_ids_json,
                     version, created_at, updated_at
                 ) VALUES (
                     'camp-message-v46-legacy', 'camp-v46-legacy', 1,
@@ -11252,11 +11277,11 @@ mod tests {
                 r#"
                 INSERT INTO camp(
                     id, title, name_origin, collaboration_mode,
-                    project_binding_kind, project_path, status,
+                    project_binding_kind, project_path,
                     last_message_sequence, version, created_at, updated_at
                 ) VALUES (
                     'camp-v47-legacy', 'Legacy active Turn', 'user', 'peer',
-                    'quick_chat', '/quick-chat-v47', 'active', 0, 1,
+                    'quick_chat', '/quick-chat-v47', 0, 1,
                     '2026-08-03T00:00:00Z', '2026-08-03T00:00:00Z'
                 );
                 INSERT INTO camp_turn(
@@ -11346,11 +11371,11 @@ mod tests {
                 r#"
                 INSERT INTO camp(
                     id, title, name_origin, collaboration_mode,
-                    project_binding_kind, project_path, status,
+                    project_binding_kind, project_path,
                     last_message_sequence, version, created_at, updated_at
                 ) VALUES (
                     'camp-v43-history', 'Historical terminal Turn', 'user', 'peer',
-                    'quick_chat', '/quick-chat', 'active', 0, 1,
+                    'quick_chat', '/quick-chat', 0, 1,
                     '2026-07-31T00:00:00Z', '2026-07-31T00:00:00Z'
                 );
                 INSERT INTO camp_turn(
@@ -11473,7 +11498,54 @@ mod tests {
             .unwrap();
         assert_eq!(migration_count, 1);
         assert_eq!(cleanup_table_count, 0);
-        assert_eq!(contract, ("v0.43".to_string(), 20));
+        assert_eq!(contract, ("v0.43".to_string(), 21));
+
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v57_removes_camp_archive_columns_and_sets_the_current_contract() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v57-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                ALTER TABLE camp ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
+                ALTER TABLE camp ADD COLUMN archived_at TEXT;
+                ALTER TABLE task ADD COLUMN archived_at TEXT;
+                DELETE FROM schema_migration WHERE version = 57;
+                UPDATE rovai_data_contract SET projection_schema_version = 20;
+                "#,
+            )
+            .expect("test should restore the pre-v57 Camp shape");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v57 database should reopen");
+        let columns = table_columns(reopened.connection(), "camp").unwrap();
+        assert!(!columns.iter().any(|column| column == "status"));
+        assert!(!columns.iter().any(|column| column == "archived_at"));
+        let task_columns = table_columns(reopened.connection(), "task").unwrap();
+        assert!(!task_columns.iter().any(|column| column == "archived_at"));
+        let contract: (String, i64) = reopened
+            .connection()
+            .query_row(
+                "SELECT contract_version, projection_schema_version FROM rovai_data_contract WHERE singleton = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(contract, ("v0.43".to_string(), 21));
+        let migration_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 57",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_count, 1);
 
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
@@ -11600,7 +11672,7 @@ mod tests {
                 );
                 CREATE TABLE conversation(
                     id TEXT PRIMARY KEY,
-                    agent_profile_id TEXT NOT NULL REFERENCES agent_profile(id),
+                    agent_id TEXT NOT NULL REFERENCES agent_profile(id),
                     native_adapter_installation_id TEXT,
                     native_session_id TEXT,
                     native_binding_compatibility_digest TEXT,
@@ -11617,7 +11689,7 @@ mod tests {
                 );
                 CREATE TABLE camp_message(
                     id TEXT PRIMARY KEY,
-                    addressed_agent_profile_ids_json TEXT NOT NULL,
+                    addressed_agent_ids_json TEXT NOT NULL,
                     structured_content_json TEXT,
                     presentation_json TEXT,
                     content_digest TEXT NOT NULL,
@@ -11637,7 +11709,7 @@ mod tests {
                 INSERT INTO camp(id, default_lead_agent_id)
                 VALUES ('camp-v52', 'agent-muwa');
                 INSERT INTO conversation(
-                    id, agent_profile_id, native_adapter_installation_id,
+                    id, agent_id, native_adapter_installation_id,
                     native_session_id, native_binding_compatibility_digest,
                     native_binding_id, native_binding_generation,
                     native_binding_secret_digest,
@@ -11653,13 +11725,13 @@ mod tests {
                     3, 'compatibility-key', 1, '2026-02-01'
                 );
                 INSERT INTO camp_message(
-                    id, addressed_agent_profile_ids_json,
+                    id, addressed_agent_ids_json,
                     structured_content_json, presentation_json,
                     content_digest, version, updated_at
                 ) VALUES (
                     'message-v52',
                     '["agent-muwa","agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"]',
-                    '[{"kind":"member_mention","agentProfileId":"agent-muwa"}]',
+                    '[{"kind":"member_mention","agentId":"agent-muwa"}]',
                     '{"assigneeAgentId":"agent-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"}',
                     'sha256:legacy', 1, '2026-02-01'
                 );
@@ -11717,7 +11789,7 @@ mod tests {
         let conversation: (String, Option<String>, i64) = database
             .connection()
             .query_row(
-                "SELECT agent_profile_id, native_session_id, native_binding_generation FROM conversation",
+                "SELECT agent_id, native_session_id, native_binding_generation FROM conversation",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
@@ -11726,7 +11798,7 @@ mod tests {
         let message: (String, String, String) = database
             .connection()
             .query_row(
-                "SELECT addressed_agent_profile_ids_json, structured_content_json, presentation_json FROM camp_message",
+                "SELECT addressed_agent_ids_json, structured_content_json, presentation_json FROM camp_message",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )

@@ -10,11 +10,11 @@ import {
 } from './StructuredMentionComposer'
 
 const members = [{
-  agentProfileId: 'agent_1',
+  agentId: 'agent_1',
   displayName: '新洛可',
   mentionable: true
 }, {
-  agentProfileId: 'agent_2',
+  agentId: 'agent_2',
   displayName: '沐瓦',
   mentionable: true
 }]
@@ -25,9 +25,9 @@ describe('StructuredMentionComposer', () => {
       id: 'structured-composer',
       value: [
         { kind: 'text', text: '请 ' },
-        { kind: 'member_mention', agentProfileId: 'agent_1' },
+        { kind: 'member_mention', agentId: 'agent_1' },
         { kind: 'text', text: ' 和 ' },
-        { kind: 'member_mention', agentProfileId: 'agent_1' },
+        { kind: 'member_mention', agentId: 'agent_1' },
         { kind: 'all_members_mention' }
       ],
       members,
@@ -43,13 +43,13 @@ describe('StructuredMentionComposer', () => {
     expect(markup.match(/data-token-kind="all_members_mention"/g)).toHaveLength(1)
     expect(markup.match(/contentEditable="false"/g)).toHaveLength(3)
     expect(markup.match(/@新洛可/g)).toHaveLength(2)
-    expect(markup).toContain('@所有成员')
+    expect(markup).toContain('@所有队员')
     expect(markup).toContain('structured-mention-token')
     expect(markup.match(/role="button"/g)).toHaveLength(3)
     expect(markup.match(/tabindex="0"/g)).toHaveLength(4)
     expect(markup.match(/aria-haspopup="dialog"/g)).toHaveLength(3)
     expect(markup).toContain('aria-label="查看新洛可的基础信息"')
-    expect(markup).toContain('aria-label="查看所有成员范围"')
+    expect(markup).toContain('aria-label="查看所有队员范围"')
     expect(markup).toContain('padding:0 1px')
     expect(markup).toContain('border:0')
     expect(markup).toContain('font-weight:600')
@@ -58,9 +58,9 @@ describe('StructuredMentionComposer', () => {
   it('projects the current member name without changing the stored identity', () => {
     const markup = renderToStaticMarkup(createElement(StructuredMentionComposer, {
       id: 'renamed-composer',
-      value: [{ kind: 'member_mention', agentProfileId: 'agent_1' }],
+      value: [{ kind: 'member_mention', agentId: 'agent_1' }],
       members: [{
-        agentProfileId: 'agent_1',
+        agentId: 'agent_1',
         displayName: '改名后的洛可',
         mentionable: true
       }],
@@ -79,7 +79,7 @@ describe('StructuredMentionComposer', () => {
     ])
     expect(structuredMentionOptions(members, '所有')).toEqual([{
       kind: 'all_members',
-      label: '所有成员'
+      label: '所有队员'
     }])
     expect(structuredMentionOptions(members, '洛')).toEqual([{
       kind: 'member',

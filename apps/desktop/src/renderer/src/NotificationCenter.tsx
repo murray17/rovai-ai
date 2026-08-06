@@ -57,7 +57,7 @@ export function NotificationCenter({
   const loadGeneration = useRef(0)
 
   const acceptInbox = useCallback((inbox: InAppNotificationInbox): void => {
-    if (inbox.schemaVersion !== 1) throw new Error('通知中心合同不兼容。')
+    if (inbox.schemaVersion !== 2) throw new Error('通知中心合同不兼容。')
     setItems(inbox.items)
     setNextCursor(inbox.nextCursor)
     setUnreadCount(inbox.unreadCount)
@@ -352,7 +352,7 @@ export function NotificationCenter({
         cursor: nextCursor,
         limit: 50
       })
-      if (page.schemaVersion !== 1) throw new Error('通知中心合同不兼容。')
+      if (page.schemaVersion !== 2) throw new Error('通知中心合同不兼容。')
       setItems((current) => {
         const ids = new Set(current.map((item) => item.id))
         return [...current, ...page.items.filter((item) => !ids.has(item.id))]
@@ -496,7 +496,6 @@ function NotificationRow({
           <span>{presentation.message}</span>
           <small>
             <span>{notification.camp.title}</span>
-            {notification.camp.status === 'archived' && <em>已归档</em>}
           </small>
         </span>
         <time dateTime={notification.createdAt} title={absoluteTime} aria-label={absoluteTime}>

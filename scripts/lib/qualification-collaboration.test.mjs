@@ -124,11 +124,11 @@ function passingSnapshot() {
   }
 }
 
-function run(id, agentProfileId, invocationKind, a2aDepth) {
+function run(id, agentId, invocationKind, a2aDepth) {
   return {
     id,
     campTurnId: 'turn-1',
-    agentProfileId,
+    agentId,
     status: 'succeeded',
     invocationKind,
     a2aParentAgentRunId: null,

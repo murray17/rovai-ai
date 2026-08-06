@@ -51,7 +51,7 @@ impl Default for AgentRuntimeFleetConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct RuntimeCompatibilityKey {
     pub camp_id: String,
-    pub agent_profile_id: String,
+    pub agent_id: String,
     pub runtime_compatibility_digest: String,
 }
 
@@ -213,25 +213,20 @@ impl FleetState {
         self.next_sequence
     }
 
-    fn resident_count_for_member(&self, agent_profile_id: &str) -> usize {
+    fn resident_count_for_member(&self, agent_id: &str) -> usize {
         self.resident_processes_by_member
-            .get(agent_profile_id)
+            .get(agent_id)
             .map_or(0, HashSet::len)
     }
 
-    fn has_resident_capacity(
-        &self,
-        config: &AgentRuntimeFleetConfig,
-        agent_profile_id: &str,
-    ) -> bool {
+    fn has_resident_capacity(&self, config: &AgentRuntimeFleetConfig, agent_id: &str) -> bool {
         self.resident_processes.len() < config.max_resident_processes_global
-            && self.resident_count_for_member(agent_profile_id)
-                < config.max_resident_processes_per_member
+            && self.resident_count_for_member(agent_id) < config.max_resident_processes_per_member
     }
 
     fn insert_resident(&mut self, entry: ProcessEntry) {
         let process_id = entry.process_id.clone();
-        let member_id = entry.compatibility.agent_profile_id.clone();
+        let member_id = entry.compatibility.agent_id.clone();
         self.resident_processes.insert(process_id.clone());
         self.resident_processes_by_member
             .entry(member_id)
@@ -249,7 +244,7 @@ impl FleetState {
         }
         if entry.state.is_resident() {
             self.resident_processes.remove(process_id);
-            let member_id = &entry.compatibility.agent_profile_id;
+            let member_id = &entry.compatibility.agent_id;
             if let Some(processes) = self.resident_processes_by_member.get_mut(member_id) {
                 processes.remove(process_id);
                 if processes.is_empty() {
@@ -272,13 +267,13 @@ impl FleetState {
         entry.host.clone()
     }
 
-    fn oldest_idle_for_member(&self, agent_profile_id: &str) -> Option<String> {
+    fn oldest_idle_for_member(&self, agent_id: &str) -> Option<String> {
         self.idle_lru.iter().find_map(|(_, process_id)| {
             self.processes
                 .get(process_id)
                 .filter(|entry| {
                     entry.state == FleetProcessState::IdleWarm
-                        && entry.compatibility.agent_profile_id == agent_profile_id
+                        && entry.compatibility.agent_id == agent_id
                 })
                 .map(|_| process_id.clone())
         })
@@ -479,18 +474,18 @@ impl AgentRuntimeFleetManager {
             self.state
                 .lock()
                 .await
-                .has_resident_capacity(&self.config, &request.compatibility.agent_profile_id)
+                .has_resident_capacity(&self.config, &request.compatibility.agent_id)
         };
         if !has_capacity {
             let eviction = {
                 let state = self.state.lock().await;
-                if state.resident_count_for_member(&request.compatibility.agent_profile_id)
+                if state.resident_count_for_member(&request.compatibility.agent_id)
                     >= self.config.max_resident_processes_per_member
                 {
-                    state.oldest_idle_for_member(&request.compatibility.agent_profile_id)
+                    state.oldest_idle_for_member(&request.compatibility.agent_id)
                 } else {
                     state
-                        .oldest_idle_for_member(&request.compatibility.agent_profile_id)
+                        .oldest_idle_for_member(&request.compatibility.agent_id)
                         .or_else(|| state.oldest_idle_global())
                 }
             };
@@ -504,7 +499,7 @@ impl AgentRuntimeFleetManager {
                     .state
                     .lock()
                     .await
-                    .has_resident_capacity(&self.config, &request.compatibility.agent_profile_id)
+                    .has_resident_capacity(&self.config, &request.compatibility.agent_id)
             {
                 residency = FleetResidency::Burst;
             }
@@ -719,13 +714,13 @@ impl AgentRuntimeFleetManager {
             .await;
     }
 
-    pub(crate) async fn invalidate_member(&self, agent_profile_id: &str) {
-        self.invalidate_matching(|entry| entry.compatibility.agent_profile_id == agent_profile_id)
+    pub(crate) async fn invalidate_member(&self, agent_id: &str) {
+        self.invalidate_matching(|entry| entry.compatibility.agent_id == agent_id)
             .await;
     }
 
-    pub(crate) async fn invalidate_runtime_config(&self, agent_profile_id: &str) {
-        self.invalidate_member(agent_profile_id).await;
+    pub(crate) async fn invalidate_runtime_config(&self, agent_id: &str) {
+        self.invalidate_member(agent_id).await;
     }
 
     pub(crate) async fn invalidate_adapter(&self, adapter_kind: AdapterKind) {

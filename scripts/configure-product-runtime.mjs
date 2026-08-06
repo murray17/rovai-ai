@@ -1,12 +1,12 @@
-export async function configureProductRuntime(request, adapterKind, agentProfileIds) {
-  for (const agentProfileId of agentProfileIds) {
+export async function configureProductRuntime(request, adapterKind, agentIds) {
+  for (const agentId of agentIds) {
     let resolved = null
     for (let attempt = 0; attempt < 240; attempt += 1) {
-      const profile = await request('agents.get', { agentProfileId })
+      const profile = await request('agents.get', { agentId })
       const configured = await request('agents.runtime.set', {
         commandId: crypto.randomUUID(),
         command: {
-          agentProfileId,
+          agentId,
           expectedVersion: profile.version,
           adapterKind
         }
@@ -14,11 +14,11 @@ export async function configureProductRuntime(request, adapterKind, agentProfile
       if (configured.status !== 'applied') {
         throw new Error(`Product Runtime was not selected: ${JSON.stringify({
           adapterKind,
-          agentProfileId,
+          agentId,
           configured
         })}`)
       }
-      resolved = await request('agents.get', { agentProfileId })
+      resolved = await request('agents.get', { agentId })
       if (resolved.runtimeSelection?.adapterKind === adapterKind
           && resolved.runtimeReadiness?.status === 'ready') {
         break

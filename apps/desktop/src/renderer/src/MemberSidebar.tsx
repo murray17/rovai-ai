@@ -63,7 +63,7 @@ export function MemberSidebar({
   onCreate(trigger: HTMLButtonElement): void
   onReload(): Promise<void>
 }): React.JSX.Element {
-  const activeAgents = useMemo(
+  const members = useMemo(
     () => agents.filter((agent) => agent.presence !== 'removed' && agent.removedAt === null),
     [agents]
   )
@@ -76,13 +76,13 @@ export function MemberSidebar({
   const [scrollEdges, setScrollEdges] = useState({ top: false, bottom: false })
   const scrollRef = useRef<HTMLDivElement>(null)
   const visibleAgents = useMemo(
-    () => sorting ? activeAgents : filterMembers(activeAgents, query),
-    [activeAgents, query, sorting]
+    () => sorting ? members : filterMembers(members, query),
+    [members, query, sorting]
   )
   const selectedHidden = Boolean(
     query.trim()
     && selectedAgentId
-    && !visibleAgents.some((agent) => agent.id === selectedAgentId)
+    && !visibleAgents.some((agent) => agent.agentId === selectedAgentId)
   )
 
   const updateScrollEdges = useCallback((): void => {
@@ -103,13 +103,13 @@ export function MemberSidebar({
     return () => observer.disconnect()
   }, [updateScrollEdges, visibleAgents.length])
 
-  const reorder = async (orderedAgentProfileIds: string[], focusAgentId: string): Promise<void> => {
+  const reorder = async (orderedAgentIds: string[], focusAgentId: string): Promise<void> => {
     setBusy(focusAgentId)
     setError(null)
     try {
       const result = await window.rovai.request<StoredCommandResult>('agents.reorder', {
         commandId: crypto.randomUUID(),
-        command: { orderedAgentProfileIds }
+        command: { orderedAgentIds }
       })
       assertApplied(result)
       await onReload()
@@ -124,28 +124,28 @@ export function MemberSidebar({
   }
 
   const moveMember = (agent: AgentProfile, direction: -1 | 1): void => {
-    const group = activeAgents.filter((candidate) => candidate.presence === agent.presence)
-    const index = group.findIndex((candidate) => candidate.id === agent.id)
+    const group = members.filter((candidate) => candidate.presence === agent.presence)
+    const index = group.findIndex((candidate) => candidate.agentId === agent.agentId)
     const target = group[index + direction]
     if (!target) return
-    const ordered = activeAgents.map((candidate) => candidate.id)
-    const from = ordered.indexOf(agent.id)
-    const to = ordered.indexOf(target.id)
+    const ordered = members.map((candidate) => candidate.agentId)
+    const from = ordered.indexOf(agent.agentId)
+    const to = ordered.indexOf(target.agentId)
     ordered.splice(from, 1)
-    ordered.splice(to, 0, agent.id)
-    void reorder(ordered, agent.id)
+    ordered.splice(to, 0, agent.agentId)
+    void reorder(ordered, agent.agentId)
   }
 
   const dropMember = (target: AgentProfile): void => {
     const sourceId = dragAgentId
     setDragAgentId(null)
     setDragOverAgentId(null)
-    if (!sourceId || sourceId === target.id) return
-    const source = activeAgents.find((agent) => agent.id === sourceId)
+    if (!sourceId || sourceId === target.agentId) return
+    const source = members.find((agent) => agent.agentId === sourceId)
     if (!source || source.presence !== target.presence) return
-    const ordered = activeAgents.map((agent) => agent.id)
+    const ordered = members.map((agent) => agent.agentId)
     const from = ordered.indexOf(sourceId)
-    const to = ordered.indexOf(target.id)
+    const to = ordered.indexOf(target.agentId)
     ordered.splice(from, 1)
     ordered.splice(to, 0, sourceId)
     void reorder(ordered, sourceId)
@@ -176,10 +176,10 @@ export function MemberSidebar({
             </svg>
           </button>
           <strong>队员</strong>
-          <span>{activeAgents.length}</span>
+          <span>{members.length}</span>
         </div>
         <div className="member-sidebar-actions">
-          {activeAgents.length > 0 && (
+          {members.length > 0 && (
             <button
               type="button"
               aria-label={sorting ? '完成调整队员顺序' : '调整队员顺序'}
@@ -188,7 +188,7 @@ export function MemberSidebar({
               onClick={toggleSorting}
             >{sorting ? '完成' : '⇅'}</button>
           )}
-          {activeAgents.length > 0 && (
+          {members.length > 0 && (
             <button
               type="button"
               aria-label="新增队员"
@@ -199,7 +199,7 @@ export function MemberSidebar({
         </div>
       </div>
 
-      {activeAgents.length > 20 && !sorting && (
+      {members.length > 20 && !sorting && (
         <div className="member-sidebar-filter">
           <label htmlFor="member-sidebar-filter">筛选队员</label>
           <div>
@@ -226,7 +226,7 @@ export function MemberSidebar({
           {(['present', 'away'] as const).map((presence) => {
             const group = visibleAgents.filter((agent) => agent.presence === presence)
             if (group.length === 0) return null
-            const total = activeAgents.filter((agent) => agent.presence === presence).length
+            const total = members.filter((agent) => agent.presence === presence).length
             return (
               <section className="member-sidebar-group" key={presence} aria-labelledby={`member-group-${presence}`}>
                 <div className="member-sidebar-group-heading" id={`member-group-${presence}`}>
@@ -234,19 +234,19 @@ export function MemberSidebar({
                 </div>
                 {group.map((agent) => (
                   <MemberSidebarRow
-                    key={agent.id}
+                    key={agent.agentId}
                     agent={agent}
-                    selected={selectedAgentId === agent.id}
+                    selected={selectedAgentId === agent.agentId}
                     sorting={sorting}
                     busy={busy !== null}
-                    dragOver={dragOverAgentId === agent.id && dragAgentId !== agent.id}
+                    dragOver={dragOverAgentId === agent.agentId && dragAgentId !== agent.agentId}
                     availability={runtimeAvailability.find((item) => item.runtimeKind === agent.runtimeSelection?.adapterKind) ?? null}
                     runtimeDiscoveryPending={runtimeDiscoveryPending}
                     onSelect={onSelect}
                     onMove={moveMember}
-                    onDragStart={() => setDragAgentId(agent.id)}
-                    onDragOver={() => setDragOverAgentId(agent.id)}
-                    onDragLeave={() => setDragOverAgentId((current) => current === agent.id ? null : current)}
+                    onDragStart={() => setDragAgentId(agent.agentId)}
+                    onDragOver={() => setDragOverAgentId(agent.agentId)}
+                    onDragLeave={() => setDragOverAgentId((current) => current === agent.agentId ? null : current)}
                     onDrop={() => dropMember(agent)}
                     onDragEnd={() => {
                       setDragAgentId(null)
@@ -257,7 +257,7 @@ export function MemberSidebar({
               </section>
             )
           })}
-          {activeAgents.length === 0 && (
+          {members.length === 0 && (
             <div className="member-sidebar-empty">
               <span aria-hidden="true">◎</span>
               <strong>还没有队员</strong>
@@ -265,7 +265,7 @@ export function MemberSidebar({
               <button className="primary-button" type="button" onClick={(event) => onCreate(event.currentTarget)}>新增队员</button>
             </div>
           )}
-          {activeAgents.length > 0 && visibleAgents.length === 0 && (
+          {members.length > 0 && visibleAgents.length === 0 && (
             <div className="member-sidebar-empty compact">
               <strong>没有匹配的队员</strong>
               <button className="quiet-button" type="button" onClick={() => setQuery('')}>清除筛选</button>
@@ -340,18 +340,18 @@ function MemberSidebarRow({
         onDrop()
       }}
       onDragEnd={onDragEnd}
-      style={{ '--agent-accent': identityColorToken(agent.id) } as CSSProperties}
+      style={{ '--agent-accent': identityColorToken(agent.agentId) } as CSSProperties}
     >
       <button
         className="member-sidebar-select"
         type="button"
         aria-current={selected ? 'true' : undefined}
         title={`${agent.displayName} · ${agent.teamRole || '团队角色未设置'}`}
-        onClick={() => onSelect(agent.id, 'identity', false)}
+        onClick={() => onSelect(agent.agentId, 'identity', false)}
       >
         <span className="member-sidebar-accent" aria-hidden="true" />
         <MemberAvatar
-          agentProfileId={agent.id}
+          agentId={agent.agentId}
           avatarRef={agent.avatarRef}
           displayName={agent.displayName}
           size="list"
@@ -367,7 +367,7 @@ function MemberSidebarRow({
             <button
               className="member-order-handle"
               type="button"
-              data-member-order-handle={agent.id}
+              data-member-order-handle={agent.agentId}
               aria-label={`调整 ${agent.displayName} 的顺序；上、下方向键移动`}
               title="拖拽；聚焦后按上、下方向键移动"
               disabled={busy}
@@ -385,7 +385,7 @@ function MemberSidebarRow({
               aria-label={runtimeLabel}
               title={`${product} · ${runtime.label}${runtime.detail ? ` · ${runtime.detail}` : ''}`}
               data-tooltip={`${product} · ${runtime.label}${runtime.detail ? ` · ${runtime.detail}` : ''}`}
-              onClick={() => onSelect(agent.id, 'runtime', true)}
+              onClick={() => onSelect(agent.agentId, 'runtime', true)}
             >
               <span aria-hidden="true">{compact === 'available' ? '✓' : compact === 'unconfigured' ? '○' : compact === 'action' ? '!' : '…'}</span>
             </button>

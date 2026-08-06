@@ -12,7 +12,6 @@ import {
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type {
-  AgentProfile,
   NavigationPin,
   NavigationCampItem,
   NavigationCampPage,
@@ -20,7 +19,6 @@ import type {
   ProjectNavigationGroup
 } from '@contracts'
 import { allNavigationCamps } from './ui-model'
-import { formatMentionDisplayText } from './AgentMentionTextarea'
 
 export interface CampDeleteAttempt {
   deleted: boolean
@@ -59,7 +57,6 @@ export function CampNavigation({
   view,
   state,
   navigation,
-  agents,
   activeCampId,
   pins = [],
   pinnedCampItems = [],
@@ -86,7 +83,6 @@ export function CampNavigation({
   view: 'compose' | 'camp' | 'members' | 'memory' | 'settings'
   state: 'loading' | 'ready' | 'error'
   navigation: NavigationSnapshot | null
-  agents: Pick<AgentProfile, 'handle' | 'displayName'>[]
   activeCampId: string | null
   pins?: NavigationPin[]
   pinnedCampItems?: NavigationCampItem[]
@@ -295,7 +291,7 @@ export function CampNavigation({
   const openAction = (kind: 'rename' | 'delete', camp: NavigationCampItem): void => {
     dialogReturnFocusTargetRef.current = `camp:${camp.id}`
     setAction({ kind, camp })
-    setRenameTitle(formatMentionDisplayText(camp.title, agents))
+    setRenameTitle(camp.title)
     setDeleteBlockers([])
   }
 
@@ -428,7 +424,6 @@ export function CampNavigation({
                 key={camp.id}
                 camp={camp}
                 active={camp.id === activeCampId}
-                agents={agents}
                 pinned
                 onTogglePin={() => void togglePin('camp', camp.id, camp)}
                 onCamp={onCamp}
@@ -448,7 +443,6 @@ export function CampNavigation({
                 projectExpanded={!collapsedProjectGroups.has(`pinned-${project.projectKey}`)}
                 loadingAll={loadingGroup === project.projectKey}
                 activeCampId={activeCampId}
-                agents={agents}
                 pinned
                 onToggleAll={() => undefined}
                 onToggleExpanded={() => toggleProjectGroup(`pinned-${project.projectKey}`)}
@@ -478,7 +472,6 @@ export function CampNavigation({
                 projectExpanded={!collapsedProjectGroups.has(groupKey)}
                 loadingAll={loadingGroup === groupKey}
                 activeCampId={activeCampId}
-                agents={agents}
                 pinned={pins.some((pin) => pin.kind === 'project' && pin.targetKey === project.projectKey)}
                 onToggleAll={() => toggleAll(groupKey, project.projectPath)}
                 onToggleExpanded={() => toggleProjectGroup(groupKey)}
@@ -500,7 +493,6 @@ export function CampNavigation({
             projectExpanded={!collapsedProjectGroups.has('quick-chat')}
             loadingAll={loadingGroup === 'quick-chat'}
             activeCampId={activeCampId}
-            agents={agents}
             onToggleAll={() => toggleAll('quick-chat', null)}
             onToggleExpanded={() => toggleProjectGroup('quick-chat')}
             onToggleCampPin={(camp) => void togglePin('camp', camp.id, camp)}
@@ -528,7 +520,6 @@ export function CampNavigation({
         open={paletteOpen}
         onOpenChange={setPaletteOpen}
         navigation={navigation}
-        agents={agents}
         onCamp={(camp) => {
           setPaletteOpen(false)
           onCamp(camp)
@@ -557,7 +548,7 @@ export function CampNavigation({
               </form>
             ) : action?.kind === 'delete' ? (
               <div>
-                <Dialog.Title>永久删除“{formatMentionDisplayText(action.camp.title, agents)}”？</Dialog.Title>
+                <Dialog.Title>永久删除“{action.camp.title}”？</Dialog.Title>
                 <Dialog.Description>这会删除 Camp 的会话、队员连续性、运行记录和关联数据。此操作不能撤销，也不会删除本地 Repository。</Dialog.Description>
                 {deleteBlockers.length > 0 && (
                   <div className="delete-blockers" role="alert">
@@ -632,13 +623,11 @@ function CommandPalette({
   open,
   onOpenChange,
   navigation,
-  agents,
   onCamp
 }: {
   open: boolean
   onOpenChange(open: boolean): void
   navigation: NavigationSnapshot | null
-  agents: Pick<AgentProfile, 'handle' | 'displayName'>[]
   onCamp(camp: NavigationCampItem): void
 }): JSX.Element {
   const [query, setQuery] = useState('')
@@ -654,7 +643,7 @@ function CommandPalette({
         const projectName = camp.projectBindingKind === 'directory'
           ? projectNameByPath.get(camp.projectPath) ?? ''
           : '快速对话'
-        return formatMentionDisplayText(camp.title, agents).toLowerCase().includes(trimmedQuery)
+        return camp.title.toLowerCase().includes(trimmedQuery)
           || projectName.toLowerCase().includes(trimmedQuery)
       })
     : camps
@@ -706,7 +695,7 @@ function CommandPalette({
                 onClick={() => onCamp(camp)}
                 onMouseEnter={() => setActiveIndex(index)}
               >
-                <span className="truncate">{formatMentionDisplayText(camp.title, agents)}</span>
+                <span className="truncate">{camp.title}</span>
                 <small>{camp.projectBindingKind === 'directory' ? projectNameByPath.get(camp.projectPath) ?? '项目' : '快速对话'}</small>
               </button>
             ))}
@@ -728,7 +717,6 @@ function CampGroup({
   projectExpanded,
   loadingAll,
   activeCampId,
-  agents,
   pinned = false,
   onToggleAll,
   onToggleExpanded,
@@ -746,7 +734,6 @@ function CampGroup({
   projectExpanded: boolean
   loadingAll: boolean
   activeCampId: string | null
-  agents: Pick<AgentProfile, 'handle' | 'displayName'>[]
   pinned?: boolean
   onToggleAll(): void
   onToggleExpanded(): void
@@ -803,7 +790,6 @@ function CampGroup({
             key={camp.id}
             camp={camp}
             active={camp.id === activeCampId}
-            agents={agents}
             pinned={false}
             onTogglePin={() => onToggleCampPin(camp)}
             onCamp={onCamp}
@@ -820,7 +806,6 @@ function CampGroup({
 function CampRow({
   camp,
   active,
-  agents,
   pinned,
   onTogglePin,
   onCamp,
@@ -828,13 +813,12 @@ function CampRow({
 }: {
   camp: NavigationCampItem
   active: boolean
-  agents: Pick<AgentProfile, 'handle' | 'displayName'>[]
   pinned: boolean
   onTogglePin(): void
   onCamp(camp: NavigationCampItem): void
   onAction(kind: 'rename' | 'delete', camp: NavigationCampItem): void
 }): JSX.Element {
-  const title = formatMentionDisplayText(camp.title, agents)
+  const title = camp.title
   const menuLabels = campNavigationMenuLabels(pinned)
   return (
     <div className={`camp-nav-row ${active ? 'selected' : ''}`}>

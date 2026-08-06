@@ -3001,7 +3001,7 @@ fn agent_action_context(
     camp_id: &str,
 ) -> Result<Option<AgentActionContext>> {
     let ActorRef::Agent {
-        agent_profile_id,
+        agent_id,
         source_agent_run_id,
     } = actor
     else {
@@ -3020,21 +3020,16 @@ fn agent_action_context(
             JOIN conversation ON conversation.id = agent_run.conversation_id
             JOIN camp_member
               ON camp_member.camp_id = camp_turn.camp_id
-             AND camp_member.agent_profile_id = conversation.agent_profile_id
-            JOIN agent_profile ON agent_profile.id = conversation.agent_profile_id
+             AND camp_member.agent_id = conversation.agent_id
+            JOIN agent_profile ON agent_profile.id = conversation.agent_id
             WHERE agent_run.id = ?1 AND camp_turn.camp_id = ?2
-              AND conversation.agent_profile_id = ?3
+              AND conversation.agent_id = ?3
               AND agent_run.execution_epoch = ?4
               AND agent_run.status IN ('running', 'waiting')
               AND camp_member.status = 'active'
               AND camp_member.leave_requested_at IS NULL
             "#,
-            params![
-                source_agent_run_id,
-                camp_id,
-                agent_profile_id,
-                execution_epoch
-            ],
+            params![source_agent_run_id, camp_id, agent_id, execution_epoch],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -3429,11 +3424,11 @@ fn append_domain_event(
     let (actor_type, actor_id, source_agent_run_id) = match actor {
         ActorRef::User { user_id } => ("user", user_id.as_str(), None),
         ActorRef::Agent {
-            agent_profile_id,
+            agent_id,
             source_agent_run_id,
         } => (
             "agent",
-            agent_profile_id.as_str(),
+            agent_id.as_str(),
             Some(source_agent_run_id.as_str()),
         ),
         ActorRef::System { component_id } => ("system", component_id.as_str(), None),
@@ -3569,7 +3564,7 @@ mod tests {
                     Some(&camp_id),
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
-                        agent_profile_id: "agent_2".to_string(),
+                        agent_id: "agent_2".to_string(),
                         capability_overrides: json!({}),
                     },
                 ),
@@ -3661,7 +3656,7 @@ mod tests {
         CommandEnvelope {
             command_id: format!("prepare-{action_id}"),
             actor: ActorRef::Agent {
-                agent_profile_id: "agent_2".to_string(),
+                agent_id: "agent_2".to_string(),
                 source_agent_run_id: fixture.agent_run_id.clone(),
             },
             camp_id: Some(fixture.camp_id.clone()),
@@ -3692,7 +3687,7 @@ mod tests {
         CommandEnvelope {
             command_id: format!("prepare-{action_id}"),
             actor: ActorRef::Agent {
-                agent_profile_id: "agent_2".to_string(),
+                agent_id: "agent_2".to_string(),
                 source_agent_run_id: fixture.agent_run_id.clone(),
             },
             camp_id: Some(fixture.camp_id.clone()),
@@ -3749,7 +3744,7 @@ mod tests {
         let envelope = CommandEnvelope {
             command_id: "record-observed-action".to_string(),
             actor: ActorRef::Agent {
-                agent_profile_id: "agent_2".to_string(),
+                agent_id: "agent_2".to_string(),
                 source_agent_run_id: fixture.agent_run_id.clone(),
             },
             camp_id: Some(fixture.camp_id.clone()),

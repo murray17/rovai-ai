@@ -138,10 +138,9 @@ export interface AdapterInstallation {
   updatedAt: string
 }
 
-export interface AgentCampMembership {
+export interface MemberCampMembership {
   campId: string
   projectPath: string
-  campStatus: 'active' | 'archived'
   membershipStatus: 'active' | 'left'
   isDefaultLead: boolean
   joinedAt: string
@@ -184,8 +183,7 @@ export type RuntimeReadinessStatus =
 export type MemberPresence = 'present' | 'away' | 'removed'
 
 export interface AgentProfile {
-  id: string
-  handle: string
+  agentId: string
   displayName: string
   avatarRef: string | null
   accent: string | null
@@ -219,18 +217,18 @@ export interface CreateAgentProfileCommand {
 }
 
 export interface UpdateAgentProfileCommand extends CreateAgentProfileCommand {
-  agentProfileId: string
+  agentId: string
   expectedVersion: number
 }
 
 export interface SetAgentProfileAvatarCommand {
-  agentProfileId: string
+  agentId: string
   expectedVersion: number
   avatarRef: string | null
 }
 
 export interface SetAgentProfileRuntimeCommand {
-  agentProfileId: string
+  agentId: string
   expectedVersion: number
   adapterKind: AdapterKind
   model?: ModelSelection
@@ -238,24 +236,24 @@ export interface SetAgentProfileRuntimeCommand {
 }
 
 export interface ClearAgentProfileRuntimeCommand {
-  agentProfileId: string
+  agentId: string
   expectedVersion: number
 }
 
 export interface SetMemberPresenceCommand {
-  agentProfileId: string
+  agentId: string
   expectedVersion: number
   presence: 'present' | 'away'
 }
 
 export interface RemoveMemberCommand {
-  agentProfileId: string
+  agentId: string
   expectedVersion: number
   confirmationName: string
 }
 
 export interface MemberRemovalPreview {
-  agentProfileId: string
+  agentId: string
   displayName: string
   version: number
   nonTerminalAgentRunCount: number
@@ -263,7 +261,7 @@ export interface MemberRemovalPreview {
 }
 
 export interface ReorderAgentProfilesCommand {
-  orderedAgentProfileIds: string[]
+  orderedAgentIds: string[]
 }
 
 export interface CreateAdapterInstallationCommand {
@@ -377,81 +375,6 @@ export interface HealthStatus {
   }
 }
 
-export interface Project {
-  id: string
-  name: string
-  kind: 'quick_chat' | 'git'
-  rootPath: string
-  gitCommonDir: string
-  createdAt: string
-  lastOpenedAt: string
-}
-
-export type TaskStatus =
-  | 'draft'
-  | 'pending'
-  | 'preparing'
-  | 'in_progress'
-  | 'running'
-  | 'waiting_approval'
-  | 'interrupted'
-  | 'recovering'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-
-export interface Task {
-  id: string
-  projectId: string
-  ownerAgentId: string
-  title: string
-  goal: string
-  status: TaskStatus
-  executionRoot: string
-  startBranch: string
-  baseRevision: string
-  createdAt: string
-  updatedAt: string
-  completedAt: string | null
-}
-
-export interface GitDiff {
-  status: string[]
-  isClean: boolean
-  changedFileCount: number
-  stat: string
-  patch: string
-}
-
-export interface TimelineEvent {
-  id: number
-  taskId: string
-  sequence: number
-  eventType: string
-  nativeMethod: string | null
-  payload: unknown
-  createdAt: string
-}
-
-export interface Approval {
-  id: string
-  taskId: string
-  nativeRequestId: string
-  approvalType: string
-  reason: string | null
-  request: Record<string, unknown>
-  status: 'pending' | 'approved' | 'declined'
-  decision: unknown | null
-  requestedAt: string
-  resolvedAt: string | null
-}
-
-export interface TaskRunResult {
-  task: Task
-  threadId?: string
-  turnId: string
-}
-
 export type StartPreflightBlockerCode =
   | 'runtime_not_configured'
   | 'runtime_configuration_incomplete'
@@ -511,7 +434,7 @@ export interface StartPreflightResult {
   } | null
   gitObservation: GitObservation | null
   targets: Array<{
-    agentProfileId: string
+    agentId: string
     conversationId: string | null
     runtimeKind: string
     executableFingerprint: string | null
@@ -567,7 +490,7 @@ export interface PendingExecutionIntentView {
 
 export type MessageAddressSpec =
   | { mode: 'default' }
-  | { mode: 'explicit'; agentProfileIds: string[] }
+  | { mode: 'explicit'; agentIds: string[] }
   | { mode: 'broadcast' }
 
 export type CampCollaborationMode = 'peer' | 'lead_coordinated'
@@ -576,22 +499,21 @@ export interface CreateCampRequest {
   commandId: string
   name: string | null
   workspace: { projectPath: string } | null
-  memberAgentProfileIds: string[]
-  defaultLeadAgentProfileId: string
+  memberAgentIds: string[]
+  defaultLeadAgentId: string
   collaborationMode: CampCollaborationMode
 }
 
 export interface CampCreationPreflight {
   admissible: boolean
   presentMembers: Array<{
-    agentProfileId: string
-    handle: string
+    agentId: string
     displayName: string
     memberOrder: number
     runtimeConfigured: boolean
     runtimeReadiness: RuntimeReadinessStatus
   }>
-  initialLeadAgentProfileId: string | null
+  initialLeadAgentId: string | null
   blockers: Array<{
     code: 'no_present_members'
     detail: string
@@ -625,17 +547,6 @@ export interface CancelCampTurnCommand {
   expectedVersion: number
 }
 
-export interface CampListItem {
-  id: string
-  title: string
-  projectPath: string
-  status: 'active' | 'archived'
-  defaultLeadAgentId: string | null
-  activeMemberCount: number
-  openTaskCount: number
-  updatedAt: string
-}
-
 export type NavigationCampMarker = 'loading' | 'unread_completed' | 'none'
 
 export interface NavigationCampItem {
@@ -643,7 +554,7 @@ export interface NavigationCampItem {
   title: string
   projectBindingKind: ProjectBindingKind
   projectPath: string
-  defaultLead: { agentProfileId: string; displayName: string } | null
+  defaultLead: { agentId: string; displayName: string } | null
   marker: NavigationCampMarker
   lastActivityAt: string
   lastActivityGlobalSequence: number
@@ -688,8 +599,7 @@ export interface CampViewedAcknowledgement {
 }
 
 export interface CampMemberView {
-  agentProfileId: string
-  handle: string
+  agentId: string
   displayName: string
   avatarRef: string | null
   teamRole: string
@@ -701,7 +611,7 @@ export interface CampMemberView {
   version: number
 }
 
-export interface CampTaskView {
+export interface TaskView {
   id: string
   title: string
   description: string
@@ -718,21 +628,21 @@ export interface CampTaskView {
 }
 
 export interface TaskListPage {
-  tasks: CampTaskView[]
+  tasks: TaskView[]
   nextCursor: string | null
   truncated: boolean
 }
 
-export type CampTaskStatus = CampTaskView['status']
+export type TaskStatus = TaskView['status']
 
 export type TaskAssigneePatch =
   | { operation: 'unchanged' }
-  | { operation: 'assign'; agentProfileId: string }
+  | { operation: 'assign'; agentId: string }
   | { operation: 'clear' }
 
 export type StructuredCampMessageSegment =
   | { kind: 'text'; text: string }
-  | { kind: 'member_mention'; agentProfileId: string }
+  | { kind: 'member_mention'; agentId: string }
   | { kind: 'all_members_mention' }
 
 export type StructuredCampMessageContent = StructuredCampMessageSegment[]
@@ -748,7 +658,7 @@ export interface CampMessageView {
   content: StructuredCampMessageContent | null
   attachments: CampMessageAttachmentView[]
   addressMode: 'default' | 'explicit' | 'broadcast'
-  addressedAgentProfileIds: string[]
+  addressedAgentIds: string[]
   replyToCampMessageId: string | null
   campTurnId: string | null
   presentation: CampTimelinePresentation | null
@@ -789,8 +699,8 @@ export type CampTimelinePresentation =
       kind: 'task_event'
       taskId: string
       titleAtEvent: string
-      fromStatus: CampTaskStatus | null
-      toStatus: CampTaskStatus
+      fromStatus: TaskStatus | null
+      toStatus: TaskStatus
       assigneeNameAtEvent: string | null
       occurredAt: string
     }
@@ -826,7 +736,7 @@ export interface AgentRunView {
   id: string
   campTurnId: string
   conversationId: string
-  agentProfileId: string
+  agentId: string
   taskId: string | null
   responsibilityKey: string
   responsibilityGeneration: number
@@ -1106,7 +1016,7 @@ export interface ActionApprovalView {
   canonicalInput: unknown
   reason: string | null
   agentRunId: string
-  agentProfileId: string
+  agentId: string
   adapterKind: AdapterKind | 'unknown'
   nativeMethod: string | null
   requestDigest: string | null
@@ -1146,7 +1056,7 @@ export interface DomainEventView {
 }
 
 export interface CampSnapshot {
-  schemaVersion: 19
+  schemaVersion: 21
   throughGlobalSequence: number
   camp: {
     id: string
@@ -1154,13 +1064,12 @@ export interface CampSnapshot {
     projectBindingKind: ProjectBindingKind
     projectPath: string
     defaultLeadAgentId: string | null
-    status: 'active' | 'archived'
     version: number
     createdAt: string
     updatedAt: string
   }
   members: CampMemberView[]
-  tasks: CampTaskView[]
+  tasks: TaskView[]
   messages: CampMessageView[]
   turns: CampTurnView[]
   agentRuns: AgentRunView[]
@@ -1198,7 +1107,6 @@ export interface InAppNotificationView {
   camp: {
     id: string
     title: string
-    status: 'active' | 'archived'
   }
   campTurnId: string | null
   sourceAvailable: boolean
@@ -1209,7 +1117,7 @@ export interface InAppNotificationView {
 }
 
 export interface InAppNotificationInbox {
-  schemaVersion: 1
+  schemaVersion: 2
   throughSequence: number
   unreadCount: number
   items: InAppNotificationView[]
@@ -1361,7 +1269,7 @@ export interface SkillGroupAssignmentView {
 }
 
 export interface SkillDeliveryGroupMemberView {
-  agentProfileId: string
+  agentId: string
   displayName: string
   avatarRef: string | null
   accent: string | null
@@ -1475,7 +1383,7 @@ export interface McpServerView {
   transport: 'stdio' | 'streamable_http'
   endpoint: string
   enabled: boolean
-  assignedAgentProfileIds: string[]
+  assignedAgentIds: string[]
   source: 'builtin' | 'user' | 'import'
   presetId: string | null
   riskLevel: 'standard' | 'high'
@@ -1520,7 +1428,7 @@ export interface SetMcpServerEnabledParams {
 export interface SetMcpAssignmentParams {
   expectedConfigDigest: string
   serverId: string
-  agentProfileId: string
+  agentId: string
   assigned: boolean
   acknowledgeHighRisk?: boolean
 }
@@ -1619,10 +1527,10 @@ export interface MemoryRecord {
   scope: MemoryScopeKind | null
   kind: MemoryKind | null
   creationOrigin: MemoryCreationOrigin | null
-  companionAgentProfileId: string | null
-  relationshipAgentProfileIds: string[]
+  companionAgentId: string | null
+  relationshipAgentIds: string[]
   direction: MemoryDirection | null
-  directedActorAgentProfileId: string | null
+  directedActorAgentId: string | null
   lifecycle: MemoryLifecycle
   currentRevisionId: string | null
   currentBody: string | null
@@ -1663,7 +1571,7 @@ export interface HearthMemoryProposal {
   retrievalKeys: string[]
   targetMemoryId: string | null
   baseRevisionId: string | null
-  proposedByAgentProfileId: string
+  proposedByAgentId: string
   sourceCampId: string
   sourceAgentRunId: string
   sourceExecutionEpoch: number
@@ -1682,10 +1590,10 @@ export interface CreateMemoryCommand {
   kind: MemoryKind
   body: string
   retrievalKeys: string[]
-  companionAgentProfileId: string | null
-  relationshipAgentProfileIds: string[]
+  companionAgentId: string | null
+  relationshipAgentIds: string[]
   direction: MemoryDirection | null
-  directedActorAgentProfileId: string | null
+  directedActorAgentId: string | null
   reviewAfter: string | null
 }
 

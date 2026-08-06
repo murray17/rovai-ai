@@ -77,7 +77,7 @@ try {
     commandId: crypto.randomUUID(),
     workspace,
     body: `Run exactly this command with the shell tool: /usr/bin/touch ${approvedMarker}. The target is intentionally outside the project. Request approval, then after it succeeds reply ACTION_APPROVAL_OK.`,
-    address: { mode: 'explicit', agentProfileIds: ['agent_2'] },
+    address: { mode: 'explicit', agentIds: ['agent_2'] },
     purpose: 'Exercise one exact Rovai-ai Action Approval and then report success',
     expectedOutput: 'ACTION_APPROVAL_OK after the approved marker is created'
   })

@@ -118,8 +118,7 @@ describe('member runtime parameters', () => {
   it('prefers saved member values until the user switches Runtime', () => {
     const codex = runtimeInstallation('codex-cli')
     const agent = {
-      id: 'agent-test',
-      handle: 'test',
+      agentId: 'agent-test',
       displayName: '测试队员',
       avatarRef: null,
       accent: null,

@@ -370,7 +370,7 @@ export function buildQualificationEnvironmentArtifact({
   const runtimes = rawEnvironment.team.map((member) => {
     const installation = installations.get(member.runtimeSelection.adapterKind)
     return {
-      memberId: member.id,
+      memberId: member.agentId,
       adapter: member.runtimeSelection.adapterKind,
       reportedVersion: installation?.reportedVersion ?? 'unavailable',
       executableDigest: withSha256Prefix(

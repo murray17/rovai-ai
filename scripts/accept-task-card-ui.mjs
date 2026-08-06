@@ -65,7 +65,7 @@ try {
     status: 'in_progress',
     assignee: {
       operation: 'assign',
-      agentProfileId: fixture.secondaryAssignee.id
+      agentId: fixture.secondaryAssignee.id
     }
   })
   assert(startedTask.status === 'applied',
@@ -181,8 +181,8 @@ async function createFixtureCamp() {
       commandId: crypto.randomUUID(),
       name: 'v0.38 任务卡原地更新验收',
       workspace: null,
-      memberAgentProfileIds: presentMembers.map((member) => member.agentProfileId),
-      defaultLeadAgentProfileId: preflight.initialLeadAgentProfileId,
+      memberAgentIds: presentMembers.map((member) => member.agentId),
+      defaultLeadAgentId: preflight.initialLeadAgentId,
       collaborationMode: 'peer'
     })
     assert(created.status === 'applied' && created.payload?.campId,
@@ -191,8 +191,8 @@ async function createFixtureCamp() {
     const secondary = presentMembers[1] ?? primary
     return {
       campId: created.payload.campId,
-      primaryAssignee: { id: primary.agentProfileId, name: primary.displayName },
-      secondaryAssignee: { id: secondary.agentProfileId, name: secondary.displayName }
+      primaryAssignee: { id: primary.agentId, name: primary.displayName },
+      secondaryAssignee: { id: secondary.agentId, name: secondary.displayName }
     }
   } finally {
     await core.stop()

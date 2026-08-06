@@ -630,15 +630,14 @@ fn load_run_fence(
             JOIN camp ON camp.id = camp_turn.camp_id
             JOIN camp_member
               ON camp_member.camp_id = camp.id
-             AND camp_member.agent_profile_id = ?4
-            JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
+             AND camp_member.agent_id = ?4
+            JOIN agent_profile ON agent_profile.id = camp_member.agent_id
             WHERE manifest.agent_run_id = ?1
               AND agent_run.execution_epoch = ?2
               AND agent_run.status = 'running'
-              AND conversation.agent_profile_id = ?4
+              AND conversation.agent_id = ?4
               AND camp_turn.camp_id = ?3
               AND manifest.history_fence_version = 1
-              AND camp.status = 'active'
               AND camp_member.status = 'active'
               AND camp_member.leave_requested_at IS NULL
               AND agent_profile.profile_status = 'present'
@@ -647,7 +646,7 @@ fn load_run_fence(
                 run.agent_run_id,
                 run.execution_epoch,
                 run.camp_id,
-                run.agent_profile_id,
+                run.agent_id,
             ],
             |row| {
                 Ok(RunFence {
@@ -680,10 +679,9 @@ fn load_authorized_history_camps(
         JOIN camp ON camp.id = snapshot.camp_id
         JOIN camp_member
           ON camp_member.camp_id = camp.id
-         AND camp_member.agent_profile_id = ?2
-        JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
+         AND camp_member.agent_id = ?2
+        JOIN agent_profile ON agent_profile.id = camp_member.agent_id
         WHERE snapshot.context_manifest_id = ?1
-          AND camp.status = 'active'
           AND camp_member.status = 'active'
           AND camp_member.leave_requested_at IS NULL
           AND agent_profile.profile_status = 'present'
@@ -691,7 +689,7 @@ fn load_authorized_history_camps(
         "#,
     )?;
     statement
-        .query_map(params![fence.manifest_id, run.agent_profile_id], |row| {
+        .query_map(params![fence.manifest_id, run.agent_id], |row| {
             Ok(HistoryCamp {
                 camp_id: row.get(0)?,
                 camp_title: row.get(1)?,
@@ -724,16 +722,15 @@ fn load_read_target(
             JOIN camp ON camp.id = snapshot.camp_id
             JOIN camp_member
               ON camp_member.camp_id = camp.id
-             AND camp_member.agent_profile_id = ?3
-            JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
+             AND camp_member.agent_id = ?3
+            JOIN agent_profile ON agent_profile.id = camp_member.agent_id
             WHERE snapshot.context_manifest_id = ?1
               AND snapshot.camp_id = ?2
-              AND camp.status = 'active'
               AND camp_member.status = 'active'
               AND camp_member.leave_requested_at IS NULL
               AND agent_profile.profile_status = 'present'
             "#,
-            params![fence.manifest_id, camp_id, run.agent_profile_id],
+            params![fence.manifest_id, camp_id, run.agent_id],
             |_| Ok(()),
         )
         .optional()?;
@@ -852,15 +849,14 @@ fn load_history_body_candidates(
         JOIN camp ON camp.id = snapshot.camp_id
         JOIN camp_member
           ON camp_member.camp_id = camp.id
-         AND camp_member.agent_profile_id = ?2
-        JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
+         AND camp_member.agent_id = ?2
+        JOIN agent_profile ON agent_profile.id = camp_member.agent_id
         JOIN camp_message AS message ON message.camp_id = snapshot.camp_id
         JOIN event_log AS sent
           ON sent.entity_type = 'camp_message'
          AND sent.entity_id = message.id
          AND sent.event_type = 'camp_message.sent'
         WHERE snapshot.context_manifest_id = ?1
-          AND camp.status = 'active'
           AND camp_member.status = 'active'
           AND camp_member.leave_requested_at IS NULL
           AND agent_profile.profile_status = 'present'
@@ -882,8 +878,8 @@ fn load_history_body_candidates(
         JOIN camp ON camp.id = snapshot.camp_id
         JOIN camp_member
           ON camp_member.camp_id = camp.id
-         AND camp_member.agent_profile_id = ?2
-        JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
+         AND camp_member.agent_id = ?2
+        JOIN agent_profile ON agent_profile.id = camp_member.agent_id
         JOIN camp_message AS message ON message.camp_id = snapshot.camp_id
         JOIN camp_message_fts ON camp_message_fts.rowid = message.rowid
         JOIN event_log AS sent
@@ -891,7 +887,6 @@ fn load_history_body_candidates(
          AND sent.entity_id = message.id
          AND sent.event_type = 'camp_message.sent'
         WHERE snapshot.context_manifest_id = ?1
-          AND camp.status = 'active'
           AND camp_member.status = 'active'
           AND camp_member.leave_requested_at IS NULL
           AND agent_profile.profile_status = 'present'
@@ -914,7 +909,7 @@ fn load_history_body_candidates(
             .query_map(
                 params![
                     scope.fence.manifest_id,
-                    scope.run.agent_profile_id,
+                    scope.run.agent_id,
                     scope.fence.global_boundary,
                     camp_ids,
                     from,
@@ -929,7 +924,7 @@ fn load_history_body_candidates(
             .query_map(
                 params![
                     scope.fence.manifest_id,
-                    scope.run.agent_profile_id,
+                    scope.run.agent_id,
                     scope.fence.global_boundary,
                     camp_ids,
                     from,
@@ -1032,14 +1027,13 @@ fn merge_history_reference_candidates(
             JOIN camp ON camp.id = snapshot.camp_id
             JOIN camp_member
               ON camp_member.camp_id = camp.id
-             AND camp_member.agent_profile_id = ?2
-            JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
+             AND camp_member.agent_id = ?2
+            JOIN agent_profile ON agent_profile.id = camp_member.agent_id
             JOIN event_log AS sent
               ON sent.entity_type = 'camp_message'
              AND sent.entity_id = message.id
              AND sent.event_type = 'camp_message.sent'
             WHERE reference.kind = ?3 AND reference.value = ?4
-              AND camp.status = 'active'
               AND camp_member.status = 'active'
               AND camp_member.leave_requested_at IS NULL
               AND agent_profile.profile_status = 'present'
@@ -1056,7 +1050,7 @@ fn merge_history_reference_candidates(
             .query_map(
                 params![
                     scope.fence.manifest_id,
-                    scope.run.agent_profile_id,
+                    scope.run.agent_id,
                     kind,
                     value,
                     scope.fence.global_boundary,

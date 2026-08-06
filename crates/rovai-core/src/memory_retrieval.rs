@@ -479,28 +479,28 @@ fn memory_accessible(
     match memory.scope {
         Some(MemoryScopeKind::Hearth) => Ok(true),
         Some(MemoryScopeKind::Companion) => {
-            Ok(memory.companion_agent_profile_id.as_deref() == Some(run.agent_profile_id.as_str()))
+            Ok(memory.companion_agent_id.as_deref() == Some(run.agent_id.as_str()))
         }
         Some(MemoryScopeKind::Relationship) => {
             if !memory
-                .relationship_agent_profile_ids
+                .relationship_agent_ids
                 .iter()
-                .any(|id| id == &run.agent_profile_id)
+                .any(|id| id == &run.agent_id)
             {
                 return Ok(false);
             }
             let counterparty = memory
-                .relationship_agent_profile_ids
+                .relationship_agent_ids
                 .iter()
-                .find(|id| *id != &run.agent_profile_id)
+                .find(|id| *id != &run.agent_id)
                 .context("Relationship Memory has no counterparty")?;
             let present: bool = database.connection().query_row(
                 r#"
                 SELECT COUNT(*) = 1
                 FROM camp_member
-                JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
+                JOIN agent_profile ON agent_profile.id = camp_member.agent_id
                 WHERE camp_member.camp_id = ?1
-                  AND camp_member.agent_profile_id = ?2
+                  AND camp_member.agent_id = ?2
                   AND camp_member.status = 'active'
                   AND camp_member.leave_requested_at IS NULL
                   AND agent_profile.profile_status = 'present'
@@ -511,8 +511,8 @@ fn memory_accessible(
             Ok(present
                 && (memory.direction == Some(RelationshipDirection::Mutual)
                     || (memory.direction == Some(RelationshipDirection::Directed)
-                        && memory.directed_actor_agent_profile_id.as_deref()
-                            == Some(run.agent_profile_id.as_str()))))
+                        && memory.directed_actor_agent_id.as_deref()
+                            == Some(run.agent_id.as_str()))))
         }
         None => Ok(false),
     }
@@ -560,7 +560,7 @@ fn record_evidence(
     let authorization_basis_digest = sha256(
         format!(
             "{}\n{}\n{}\n{}",
-            identity.run.agent_profile_id,
+            identity.run.agent_id,
             identity.run.camp_id,
             identity.native_binding_id,
             identity.native_binding_generation
@@ -571,7 +571,7 @@ fn record_evidence(
         r#"
         INSERT INTO memory_access_evidence(
             id, native_binding_id, native_binding_generation,
-            agent_profile_id, camp_id, evidence_kind, query_digest,
+            agent_id, camp_id, evidence_kind, query_digest,
             memory_id, observed_revision_id, authorization_basis_digest,
             outcome, created_at
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
@@ -580,7 +580,7 @@ fn record_evidence(
             Uuid::new_v4().to_string(),
             identity.native_binding_id,
             identity.native_binding_generation,
-            identity.run.agent_profile_id,
+            identity.run.agent_id,
             identity.run.camp_id,
             evidence_kind,
             query_digest,

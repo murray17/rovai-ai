@@ -142,8 +142,8 @@ async function createFixtureCamp() {
       commandId: crypto.randomUUID(),
       name: 'v0.28 通知验收 Camp',
       workspace: { projectPath: workspace.projectPath },
-      memberAgentProfileIds: preflight.presentMembers.map((member) => member.agentProfileId),
-      defaultLeadAgentProfileId: preflight.initialLeadAgentProfileId,
+      memberAgentIds: preflight.presentMembers.map((member) => member.agentId),
+      defaultLeadAgentId: preflight.initialLeadAgentId,
       collaborationMode: 'peer'
     })
     assert(created.status === 'applied' && created.payload?.campId,

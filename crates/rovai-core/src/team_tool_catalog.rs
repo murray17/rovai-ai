@@ -428,7 +428,7 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": TEAM_CREATE_TASK_TOOL_NAME,
-            "title": "Create a durable Camp Task",
+            "title": "Create a durable Task",
             "description": "Create a long-lived responsibility. Assignment records ownership but does not notify or wake the assignee.",
             "inputSchema": TeamToolService::create_task_input_schema(),
             "outputSchema": {
@@ -442,7 +442,7 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": TEAM_UPDATE_TASK_TOOL_NAME,
-            "title": "Update a durable Camp Task",
+            "title": "Update a durable Task",
             "description": "Atomically edit an authorized non-terminal Task using its current version. A successful update does not wake an assignee.",
             "inputSchema": TeamToolService::update_task_input_schema(),
             "outputSchema": {
@@ -458,7 +458,7 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": TEAM_LIST_TASKS_TOOL_NAME,
-            "title": "List visible Camp Tasks",
+            "title": "List visible Tasks",
             "description": "Read a current Task snapshot visible to this Agent. Lead sees all; other members see their own and unassigned Tasks. This is not a waiting primitive: never combine it with sleep or repeated calls to poll for state changes.",
             "inputSchema": TeamToolService::list_tasks_input_schema(),
             "outputSchema": task_list_success_schema()

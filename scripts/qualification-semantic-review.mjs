@@ -159,7 +159,7 @@ async function buildUntrustedEvidence({
   const segments = [{
     segmentId: `final-response:${finalMessages[0].messageId}`,
     kind: 'final_response',
-    authorAgentProfileId: finalMessages[0].agentProfileId,
+    authorAgentId: finalMessages[0].agentId,
     visibility: 'public_to_camp',
     content: finalMessages[0].body,
     evidenceReference: responseReference
@@ -191,7 +191,7 @@ async function buildUntrustedEvidence({
       segments.push({
         segmentId: `code:${mutation.mutationId}:${digestJson(path).slice(0, 16)}`,
         kind: 'code',
-        authorAgentProfileId: null,
+        authorAgentId: null,
         visibility: 'workspace',
         path,
         content,

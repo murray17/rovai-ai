@@ -37,7 +37,7 @@ last_updated: 2026-08-06
 - 原型必须在现有 React、Radix 和 CSS Variables 技术栈中重建，不直接复制单文件
   HTML。
 - 原型出现的用户词汇必须映射到现有领域语言：产品界面使用“队员”“记忆”
-  “Agent 运行时”等已确认术语，不使用“成员”“长期记忆”“执行引擎”；领域代码
+  “Agent 运行时”等已确认术语，不使用“队员”“长期记忆”“执行引擎”；领域代码
   继续使用 Camp、AgentProfile、Product Runtime 等稳定名称。
 - 与领域合同冲突的演示行为不进入产品。例如，用户点击原型中的“发送”不能绕过
   New Conversation Draft 与原子 Camp Creation。
@@ -183,10 +183,10 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
   摘要、Shared Conversation 或无关 Agent 上下文。
 - Activity 检查器按 ConversationInput 展示 `pending/materialized/failed/cancelled`、真实
   consuming Run，不展示 reply/correlation 假关联或回传责任。
-- ConversationInput 物化失败只进入 Activity/Audit；Core 不因此向来源成员创建消息或
-  后续 Run，也不复制成员 final output 或 raw error。
+- ConversationInput 物化失败只进入 Activity/Audit；Core 不因此向来源队员创建消息或
+  后续 Run，也不复制队员 final output 或 raw error。
 - 会话不为成功路径补造“协作请求已送达”“执行中”“协作结果已返回”等系统卡或
-  状态徽标。成员后续确有必要联系其他成员时，以新的独立 Member Call 表达。
+  状态徽标。队员后续确有必要联系其他队员时，以新的独立 Member Call 表达。
 - Delivery、AgentRun、失败与恢复状态属于 Activity/Audit；它们不得冒充发送者发言。
 - 公共 CampMessage 与已投递 InboxMessage 按持久事件顺序合并，禁止按角色或 Renderer
   到达时间重排。
@@ -374,8 +374,8 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 新增第二套身份字段。
 
 信息卡使用 `role="dialog"` 与 `aria-modal="false"`，不做 Focus Trap。点击外部或按 `Esc`
-关闭；由键盘打开后将焦点置入卡片，按 `Esc` 关闭后把焦点返回原 Mention。`@所有成员`
-使用独立范围卡：历史消息展示发送时冻结的 `addressedAgentProfileIds`，Composer 展示当前
+关闭；由键盘打开后将焦点置入卡片，按 `Esc` 关闭后把焦点返回原 Mention。`@所有队员`
+使用独立范围卡：历史消息展示发送时冻结的 `addressedAgentIds`，Composer 展示当前
 可提及队员。信息卡只读，不提供“查看完整队员资料”或任何页面跳转入口。
 
 把人物信息卡改成全局角色 Toast、队员页跳转或其他信息架构，属于产品交互变更，不是重构。
@@ -409,14 +409,14 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   附加应用内部结构化身份；只复制 Mention 的一部分时只保留普通文本。
 - 将带结构化身份的内容 Paste 到另一 Camp 时，Renderer/Core 重新校验精确目标：只有
   仍是目标 Camp 当前可提及队员的 Member Mention 继续保持蓝色结构，其余降级为不唤醒的
-  普通文本。All Members Mention 保留为目标 Camp 的 `@所有成员`，并在该消息发送接受时
+  普通文本。All Members Mention 保留为目标 Camp 的 `@所有队员`，并在该消息发送接受时
   冻结目标 Camp 的收件人。纯文本 Paste 永远不反向解析为 Mention。
 
 ##### 显示身份与失效
 
 - Member Mention 在 Composer 中作为完整蓝色行内元素显示；发送后按上表继续保持同一
   结构化身份，不回退为通过正文重新解析的 `@` 字符串。
-- Member Mention 始终以稳定 `agentProfileId` 解析显示身份。当前队员改名后，历史
+- Member Mention 始终以稳定 `agentId` 解析显示身份。当前队员改名后，历史
   Mention 显示新名称而不改写消息正文或改变历史寻址；队员永久移除后，历史 Mention
   保留移除时的最后名称和蓝色身份外观，但不可点击、不可再寻址，也不能唤醒该身份。
 - 已保存 Draft 中的 Mention 如果在发送前因队员离队、移除或不再属于当前 Camp 而失效，
@@ -427,7 +427,7 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   现有执行准入、消息保留和失败恢复规则。
 - Structured Camp Message Content 只保存稳定身份，不把队员名称变成第二个身份真源。
   Renderer 显示、剪贴板纯文本、按队员的搜索以及之后构建的 AgentRun 上下文都从
-  `agentProfileId` 投影当前名称；已移除身份使用其保留的最后名称。改名不改写历史
+  `agentId` 投影当前名称；已移除身份使用其保留的最后名称。改名不改写历史
   Structured Content；每个 AgentRun 仍在 ContextManifest 中冻结它当时实际收到的纯文本
   投影与 digest。
 
@@ -436,12 +436,12 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 - 用户未插入任何 Member Mention 时，现有 Default Lead 寻址继续适用，但 Renderer 不在
   Composer、乐观消息或历史消息中自动补出蓝色 `@Lead`。默认收件人是路由事实，只有
   用户显式插入的结构化引用才是正文 Member Mention。
-- `@所有成员` 是一个独立的蓝色原子 All Members Mention，Composer 不把它展开为多个
+- `@所有队员` 是一个独立的蓝色原子 All Members Mention，Composer 不把它展开为多个
   Member Mention。发送接受时 Core 冻结当时实际寻址的确切 CampMember ID 集合；历史
-  消息仍显示一个 `@所有成员`，之后的成员加入、离队或移除不改变该历史收件人集合。
+  消息仍显示一个 `@所有队员`，之后的队员加入、离队或移除不改变该历史收件人集合。
 - 用户正文可以多次使用同一 Member Mention，也可以同时使用 All Members Mention 和
   与之重叠的 Member Mention；乐观消息和历史消息保留所有原始出现位置。发送时 Core
-  对它们解析出的 `agentProfileId` 取并集并去重，同一队员只被寻址和唤醒一次，不因
+  对它们解析出的 `agentId` 取并集并去重，同一队员只被寻址和唤醒一次，不因
   正文中的重复或重叠创建多个直接 AgentRun。
 - 同一条消息中的全部唯一 Mention 收件人在一个 Core 事务中创建各自的 queued AgentRun，
   Default Lead 不会吞掉或串行阻塞同消息里的其他 Mention；调度器并发执行各 Run 的启动前
@@ -452,14 +452,14 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   记录并消费 Draft。Renderer 不得通过重新解析普通正文恢复丢失的 Mention。
 - 结构化 Mention 是显式消息寻址的唯一真源。Core 从通过校验的 Draft 内容派生 Default、
   Explicit 或 Broadcast 寻址及去重收件人集合；Renderer 和其他调用者不得再并行提交一份
-  可以增删或覆盖 Mention 目标的 `agentProfileIds`。界面中的蓝色身份与实际唤醒对象必须
+  可以增删或覆盖 Mention 目标的 `agentIds`。界面中的蓝色身份与实际唤醒对象必须
   来自同一份耐久 Draft。
 - 发送前 Renderer 同步保存当前正文、Mention 和附件并取得 Core 返回的精确 Camp
   Composer Draft Revision。发送命令引用该 Revision；Core 只在当前耐久 Draft 仍与它
   一致时执行原子消费。版本不一致以 `draft_changed` 在任何 CampMessage、CampTurn 或
   AgentRun 之前拒绝，界面重新加载新 Draft，不覆盖也不自动发送它。
 - Draft 和已接受的用户消息使用同一份封闭的有序 Structured Camp Message Content：
-  `Text`、`MemberMention(agentProfileId)` 与 `AllMembersMention`。Core 从该内容统一派生
+  `Text`、`MemberMention(agentId)` 与 `AllMembersMention`。Core 从该内容统一派生
   纯文本正文、Renderer 蓝色结构、内容完整性和收件人索引；不保存易错的 Unicode 字符
   偏移，也不引入 HTML、Markdown AST 或通用富文本模型。旧用户消息没有结构化内容时按
   单个 `Text` 片段读取，不反向解析其中的 `@` 文字，也不显示猜测出的蓝色或可点击

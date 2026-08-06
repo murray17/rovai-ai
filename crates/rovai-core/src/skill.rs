@@ -125,7 +125,7 @@ pub struct SkillGroupAssignmentView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillDeliveryGroupMemberView {
-    pub agent_profile_id: String,
+    pub agent_id: String,
     pub display_name: String,
     pub avatar_ref: Option<String>,
     pub accent: Option<String>,
@@ -417,7 +417,7 @@ impl SkillLibraryService {
                         })
                     })
                     .map(|profile| SkillDeliveryGroupMemberView {
-                        agent_profile_id: profile.id.clone(),
+                        agent_id: profile.agent_id.clone(),
                         display_name: profile.display_name.clone(),
                         avatar_ref: profile.avatar_ref.clone(),
                         accent: profile.accent.clone(),
@@ -1696,11 +1696,11 @@ fn append_skill_event(
     let (actor_type, actor_id, source_agent_run_id) = match actor {
         ActorRef::User { user_id } => ("user", user_id.as_str(), None),
         ActorRef::Agent {
-            agent_profile_id,
+            agent_id,
             source_agent_run_id,
         } => (
             "agent",
-            agent_profile_id.as_str(),
+            agent_id.as_str(),
             Some(source_agent_run_id.as_str()),
         ),
         ActorRef::System { component_id } => ("system", component_id.as_str(), None),

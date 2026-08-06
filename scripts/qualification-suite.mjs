@@ -156,7 +156,7 @@ async function auditCalibration(trialId) {
   const expectedMembers = ['agent_1', 'agent_2', 'agent_3', 'agent_4']
   const actualMembers = [...new Set(result.collaborationEvidence?.members ?? [])].sort()
   const rabbitRunIds = new Set((finalObservation?.agentRuns ?? [])
-    .filter((run) => run.agentProfileId === 'agent_4')
+    .filter((run) => run.agentId === 'agent_4')
     .map((run) => run.id))
   const rabbitToolTitles = (finalObservation?.executionEvidence ?? [])
     .filter((evidence) => rabbitRunIds.has(evidence.agentRunId))

@@ -1256,7 +1256,7 @@ impl AcpCliRuntimeAdapter {
         agent_run_id: &str,
         execution_epoch: i64,
         camp_id: &str,
-        agent_profile_id: &str,
+        agent_id: &str,
         workspace: &AgentRunWorkspace,
         permission_semantics: PermissionSemantics,
         frozen_runtime: &FrozenAgentRuntimeConfig,
@@ -1295,7 +1295,7 @@ impl AcpCliRuntimeAdapter {
                     adapter_kind: self.kind,
                     compatibility: RuntimeCompatibilityKey {
                         camp_id: camp_id.to_string(),
-                        agent_profile_id: agent_profile_id.to_string(),
+                        agent_id: agent_id.to_string(),
                         runtime_compatibility_digest: runtime_compatibility_digest.to_string(),
                     },
                 },

@@ -8,10 +8,11 @@ implementation_status: in_progress
 last_updated: 2026-08-06
 ---
 
-# Rovai-ai v0.43 Runtime-Native Additive MCP 与 Codex Native Home
+# Rovai-ai v0.43 Runtime-Native Additive MCP、Codex Native Home 与领域契约收敛
 
 > 状态：设计已确认，实施中。v0.43 把外部 MCP 从 exact/replacement 模型切换为
-> Runtime-native additive projection，并让普通 Codex AgentRun 回到 Codex 原生 Home。
+> Runtime-native additive projection，让普通 Codex AgentRun 回到 Codex 原生 Home，并完成
+> Member、Agent ID、Task、Camp 生命周期与派生 Project 的 clean break。
 >
 > 前置版本：[v0.42 Built-in Tool CLI-only Transport](../v0.42/README.md)
 >
@@ -20,8 +21,8 @@ last_updated: 2026-08-06
 
 ## 版本目标
 
-本版本只改变用户管理的外部 MCP 与 Codex Native Session 存储边界；v0.42 的 bundled `rovai`
-CLI、Core Router、lease、receipt 和十二项 built-in operation 合同保持不变。
+本版本改变用户管理的外部 MCP、Codex Native Session 存储边界和当前领域语言；v0.42 的 bundled
+`rovai` CLI、Core Router、lease、receipt 和十二项 built-in operation 合同保持不变。
 
 - `ExternalMcpProjection` 收敛为 `AdditivePerRun | Unsupported`；
 - Core 先生成 Requested Projection，Adapter 再结合 Runtime 原生配置完成 Finalization；
@@ -34,6 +35,15 @@ CLI、Core Router、lease、receipt 和十二项 built-in operation 合同保持
 - Antigravity 不改写 `.agents/mcp_config.json`，动态外部 MCP 保持 `Unsupported`；
 - MCP 配置页不按 Runtime capability 过滤 Assignment；Unsupported 与最终 Exposure 只在诊断页
   披露。
+
+领域契约 clean break 同时要求：
+
+- `Member / 队员` 是应用全局 AgentProfile 的产品身份；CampMember 只表达 Camp 关系；
+- 当前公开路由只使用 `agentId`，Agent UUID 只留在 Core 内部；
+- 稳定工作对象统一命名为 `Task`，不保留 `CampTask` 或旧执行型 Task；
+- Camp 不提供归档、回收站或恢复，只能存在或被永久删除；
+- Project 没有独立实体或生命周期，只是按 Camp 工作目录读取时派生的导航分组；
+- All Members Mention 显示为 `@所有队员`，结构化内容使用 `MemberMention(agentId)`。
 
 ## 产品合同
 

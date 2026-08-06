@@ -46,16 +46,16 @@ export function NewConversationDialog({
   const [submitError, setSubmitError] = useState<string | null>(null)
   const projectTriggerRef = useRef<HTMLButtonElement>(null)
   const profileById = useMemo(
-    () => new Map(agents.map((agent) => [agent.id, agent])),
+    () => new Map(agents.map((agent) => [agent.agentId, agent])),
     [agents]
   )
   const selectedMembers = preflight.presentMembers.filter((member) =>
-    selectedMemberIds.includes(member.agentProfileId)
+    selectedMemberIds.includes(member.agentId)
   )
   const normalizedName = normalizeDraftName(name)
   const nameLength = Array.from(normalizedName).length
   const nameError = nameLength > 80 ? '对话名称最多 80 个字符。' : null
-  const lead = selectedMembers.find((member) => member.agentProfileId === leadId) ?? null
+  const lead = selectedMembers.find((member) => member.agentId === leadId) ?? null
 
   useEffect(() => {
     if (!open) return
@@ -73,15 +73,15 @@ export function NewConversationDialog({
     requestAnimationFrame(() => projectTriggerRef.current?.focus())
   }, [initialWorkspace, open, preflight.presentMembers])
 
-  const toggleMember = (agentProfileId: string): void => {
+  const toggleMember = (agentId: string): void => {
     if (busy) return
     setMemberError(null)
     setSelectedMemberIds((current) => {
       const next = toggleCampMemberSelection({
         memberIds: current,
         leadId,
-        toggledMemberId: agentProfileId,
-        stableMemberOrder: preflight.presentMembers.map((member) => member.agentProfileId)
+        toggledMemberId: agentId,
+        stableMemberOrder: preflight.presentMembers.map((member) => member.agentId)
       })
       if (next.blocked) {
         setMemberError('至少选择 1 位队员')
@@ -129,8 +129,8 @@ export function NewConversationDialog({
       await onCreate({
         name: normalizedName || null,
         workspace: workspace ? { projectPath: workspace.projectPath } : null,
-        memberAgentProfileIds: selectedMemberIds,
-        defaultLeadAgentProfileId: leadId,
+        memberAgentIds: selectedMemberIds,
+        defaultLeadAgentId: leadId,
         collaborationMode: 'peer'
       })
     } catch (error) {
@@ -255,9 +255,9 @@ export function NewConversationDialog({
                           >
                             <span className="new-camp-member-stack" aria-hidden="true">
                               {selectedMembers.slice(0, 4).map((member) => {
-                                const profile = profileById.get(member.agentProfileId)
+                                const profile = profileById.get(member.agentId)
                                 return profile
-                                  ? <MemberAvatar key={profile.id} agentProfileId={profile.id} avatarRef={profile.avatarRef} displayName={profile.displayName} size="mention" decorative />
+                                  ? <MemberAvatar key={profile.agentId} agentId={profile.agentId} avatarRef={profile.avatarRef} displayName={profile.displayName} size="mention" decorative />
                                   : null
                               })}
                             </span>
@@ -272,18 +272,18 @@ export function NewConversationDialog({
                                   type="button"
                                   disabled={busy || selectedMembers.length === preflight.presentMembers.length}
                                   onClick={() => {
-                                    setSelectedMemberIds(preflight.presentMembers.map((member) => member.agentProfileId))
+                                    setSelectedMemberIds(preflight.presentMembers.map((member) => member.agentId))
                                     setMemberError(null)
                                   }}
                                 >全选</button>
                               </div>
                               {preflight.presentMembers.map((member) => {
-                                const profile = profileById.get(member.agentProfileId)
-                                const selected = selectedMemberIds.includes(member.agentProfileId)
+                                const profile = profileById.get(member.agentId)
+                                const selected = selectedMemberIds.includes(member.agentId)
                                 return (
-                                  <label className={`new-camp-member-option ${selected ? '' : 'unselected'}`} key={member.agentProfileId}>
-                                    <input type="checkbox" checked={selected} disabled={busy} onChange={() => toggleMember(member.agentProfileId)} />
-                                    {profile && <MemberAvatar agentProfileId={profile.id} avatarRef={profile.avatarRef} displayName={profile.displayName} size="list" decorative />}
+                                  <label className={`new-camp-member-option ${selected ? '' : 'unselected'}`} key={member.agentId}>
+                                    <input type="checkbox" checked={selected} disabled={busy} onChange={() => toggleMember(member.agentId)} />
+                                    {profile && <MemberAvatar agentId={profile.agentId} avatarRef={profile.avatarRef} displayName={profile.displayName} size="list" decorative />}
                                     <span className="new-camp-member-copy">
                                       <strong>{member.displayName}<small>{profile?.teamRole || '队员'}</small></strong>
                                       <small>{runtimeDetail(profile)}</small>
@@ -300,7 +300,7 @@ export function NewConversationDialog({
                           <span>Lead</span>
                           <select value={leadId} disabled={busy} onChange={(event) => setLeadId(event.target.value)}>
                             {selectedMembers.map((member) => (
-                              <option key={member.agentProfileId} value={member.agentProfileId}>
+                              <option key={member.agentId} value={member.agentId}>
                                 {member.displayName} · {readinessLabel(member.runtimeReadiness)}
                               </option>
                             ))}
@@ -469,10 +469,10 @@ export function initialCampSelection(preflight: CampCreationPreflight): {
   memberIds: string[]
   leadId: string
 } {
-  const memberIds = preflight.presentMembers.map((member) => member.agentProfileId)
+  const memberIds = preflight.presentMembers.map((member) => member.agentId)
   const leadId = preflight.presentMembers.find(
     (member) => member.runtimeReadiness === 'ready'
-  )?.agentProfileId ?? memberIds[0] ?? ''
+  )?.agentId ?? memberIds[0] ?? ''
   return { memberIds, leadId }
 }
 

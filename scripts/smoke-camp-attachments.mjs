@@ -36,8 +36,8 @@ try {
     commandId: crypto.randomUUID(),
     name: 'Camp Attachment Runtime Smoke',
     workspace: null,
-    memberAgentProfileIds: preflight.presentMembers.map((member) => member.agentProfileId),
-    defaultLeadAgentProfileId: firstAgents[0],
+    memberAgentIds: preflight.presentMembers.map((member) => member.agentId),
+    defaultLeadAgentId: firstAgents[0],
     collaborationMode: 'peer'
   })
   const campId = created.payload?.campId
@@ -66,7 +66,7 @@ try {
       '只回复附件中 TOKEN= 后面的完整值，不要添加其他文字。'
     ].join('\n'),
     preparedAttachmentIds: [attachment.id],
-    address: { mode: 'explicit', agentProfileIds: firstAgents },
+    address: { mode: 'explicit', agentIds: firstAgents },
     replyToCampMessageId: null,
     execution: {
       taskId: null,
@@ -94,12 +94,12 @@ try {
     commandId: crypto.randomUUID(),
     campId,
     body: [
-      '读取上一条用户消息携带的公共附件，不要依赖其他成员的回答。',
+      '读取上一条用户消息携带的公共附件，不要依赖其他队员的回答。',
       '必须使用文件读取工具打开 Shared Conversation 给出的 Camp Attachment Path。',
       '只回复附件中 TOKEN= 后面的完整值，不要添加其他文字。'
     ].join('\n'),
     preparedAttachmentIds: [],
-    address: { mode: 'explicit', agentProfileIds: [laterAgent] },
+    address: { mode: 'explicit', agentIds: [laterAgent] },
     replyToCampMessageId: null,
     execution: {
       taskId: null,

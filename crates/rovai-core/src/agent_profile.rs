@@ -403,10 +403,9 @@ pub struct AdapterRelocationAudit {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AgentCampMembershipView {
+pub struct MemberCampMembershipView {
     pub camp_id: String,
     pub project_path: String,
-    pub camp_status: String,
     pub membership_status: String,
     pub is_default_lead: bool,
     pub joined_at: String,
@@ -440,8 +439,7 @@ pub struct RuntimeReadiness {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentProfileView {
-    pub id: String,
-    pub handle: String,
+    pub agent_id: String,
     pub display_name: String,
     pub avatar_ref: Option<String>,
     pub accent: Option<String>,
@@ -483,7 +481,7 @@ impl DomainCommand for CreateAgentProfileCommand {
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct UpdateAgentProfileCommand {
-    pub agent_profile_id: String,
+    pub agent_id: String,
     pub expected_version: i64,
     pub display_name: String,
     pub team_role: String,
@@ -502,7 +500,7 @@ impl DomainCommand for UpdateAgentProfileCommand {
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct SetAgentProfileAvatarCommand {
-    pub agent_profile_id: String,
+    pub agent_id: String,
     pub expected_version: i64,
     pub avatar_ref: Option<String>,
 }
@@ -515,7 +513,7 @@ impl DomainCommand for SetAgentProfileAvatarCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetAgentProfileRuntimeCommand {
-    pub agent_profile_id: String,
+    pub agent_id: String,
     pub expected_version: i64,
     pub adapter_kind: AdapterKind,
     #[serde(default)]
@@ -532,7 +530,7 @@ impl DomainCommand for SetAgentProfileRuntimeCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClearAgentProfileRuntimeCommand {
-    pub agent_profile_id: String,
+    pub agent_id: String,
     pub expected_version: i64,
 }
 
@@ -544,7 +542,7 @@ impl DomainCommand for ClearAgentProfileRuntimeCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetMemberPresenceCommand {
-    pub agent_profile_id: String,
+    pub agent_id: String,
     pub expected_version: i64,
     pub presence: String,
 }
@@ -557,7 +555,7 @@ impl DomainCommand for SetMemberPresenceCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoveMemberCommand {
-    pub agent_profile_id: String,
+    pub agent_id: String,
     pub expected_version: i64,
     pub confirmation_name: String,
 }
@@ -570,7 +568,7 @@ impl DomainCommand for RemoveMemberCommand {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemberRemovalPreview {
-    pub agent_profile_id: String,
+    pub agent_id: String,
     pub display_name: String,
     pub version: i64,
     pub non_terminal_agent_run_count: i64,
@@ -580,7 +578,7 @@ pub struct MemberRemovalPreview {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReorderAgentProfilesCommand {
-    pub ordered_agent_profile_ids: Vec<String>,
+    pub ordered_agent_ids: Vec<String>,
 }
 
 impl sealed::Sealed for ReorderAgentProfilesCommand {}
@@ -672,7 +670,7 @@ impl AgentProfileService {
     pub fn list_profiles(&self, database: &Database) -> Result<Vec<AgentProfileView>> {
         let mut statement = database.connection().prepare(
             r#"
-            SELECT id, COALESCE(handle, ''), display_name, avatar_ref,
+            SELECT id, display_name, avatar_ref,
                    NULLIF(accent, ''), team_role, professional_responsibilities,
                    personality_traits_json, working_principles, growth_topic,
                    default_capabilities_json, profile_status,
@@ -696,13 +694,13 @@ impl AgentProfileService {
     pub fn get_profile(
         &self,
         database: &Database,
-        agent_profile_id: &str,
+        agent_id: &str,
     ) -> Result<Option<AgentProfileView>> {
         let raw = database
             .connection()
             .query_row(
                 r#"
-                SELECT id, COALESCE(handle, ''), display_name, avatar_ref,
+                SELECT id, display_name, avatar_ref,
                        NULLIF(accent, ''), team_role, professional_responsibilities,
                        personality_traits_json, working_principles, growth_topic,
                        default_capabilities_json, profile_status,
@@ -713,7 +711,7 @@ impl AgentProfileService {
                 FROM agent_profile
                 WHERE id = ?1 AND profile_status <> 'removed'
                 "#,
-                [agent_profile_id],
+                [agent_id],
                 raw_agent_profile_from_row,
             )
             .optional()?;
@@ -742,41 +740,35 @@ impl AgentProfileService {
             };
             let requested = envelope
                 .payload
-                .ordered_agent_profile_ids
+                .ordered_agent_ids
                 .iter()
                 .cloned()
                 .collect::<std::collections::BTreeSet<_>>();
-            if requested.len() != envelope.payload.ordered_agent_profile_ids.len()
-                || requested != existing
+            if requested.len() != envelope.payload.ordered_agent_ids.len() || requested != existing
             {
                 return Ok(CommandHandlerResult::rejected(
                     "agent_profile.invalid_order",
                     json!({
-                        "expectedAgentProfileIds": existing,
-                        "receivedAgentProfileIds": envelope.payload.ordered_agent_profile_ids,
+                        "expectedAgentIds": existing,
+                        "receivedAgentIds": envelope.payload.ordered_agent_ids,
                     }),
                 ));
             }
             let now = chrono::Utc::now().to_rfc3339();
-            for (member_order, agent_profile_id) in envelope
-                .payload
-                .ordered_agent_profile_ids
-                .iter()
-                .enumerate()
-            {
+            for (member_order, agent_id) in envelope.payload.ordered_agent_ids.iter().enumerate() {
                 transaction.execute(
                     r#"
                     UPDATE agent_profile
                     SET member_order = ?2, version = version + 1, updated_at = ?3
                     WHERE id = ?1
                     "#,
-                    params![agent_profile_id, member_order as i64, now],
+                    params![agent_id, member_order as i64, now],
                 )?;
             }
             Ok(CommandHandlerResult::applied(
                 "agent_profile.reordered",
                 json!({
-                    "orderedAgentProfileIds": envelope.payload.ordered_agent_profile_ids,
+                    "orderedAgentIds": envelope.payload.ordered_agent_ids,
                 }),
                 None,
             ))
@@ -786,29 +778,28 @@ impl AgentProfileService {
     pub fn list_camp_memberships(
         &self,
         database: &Database,
-        agent_profile_id: &str,
-    ) -> Result<Vec<AgentCampMembershipView>> {
+        agent_id: &str,
+    ) -> Result<Vec<MemberCampMembershipView>> {
         let mut statement = database.connection().prepare(
             r#"
-            SELECT camp.id, camp.project_path, camp.status, camp_member.status,
-                   COALESCE(camp.default_lead_agent_id = camp_member.agent_profile_id, 0),
+            SELECT camp.id, camp.project_path, camp_member.status,
+                   COALESCE(camp.default_lead_agent_id = camp_member.agent_id, 0),
                    camp_member.joined_at, camp_member.left_at
             FROM camp_member
             JOIN camp ON camp.id = camp_member.camp_id
-            WHERE camp_member.agent_profile_id = ?1
+            WHERE camp_member.agent_id = ?1
             ORDER BY camp_member.status = 'active' DESC, camp.updated_at DESC, camp.id
             "#,
         )?;
         statement
-            .query_map([agent_profile_id], |row| {
-                Ok(AgentCampMembershipView {
+            .query_map([agent_id], |row| {
+                Ok(MemberCampMembershipView {
                     camp_id: row.get(0)?,
                     project_path: row.get(1)?,
-                    camp_status: row.get(2)?,
-                    membership_status: row.get(3)?,
-                    is_default_lead: row.get(4)?,
-                    joined_at: row.get(5)?,
-                    left_at: row.get(6)?,
+                    membership_status: row.get(2)?,
+                    is_default_lead: row.get(3)?,
+                    joined_at: row.get(4)?,
+                    left_at: row.get(5)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()
@@ -1437,7 +1428,7 @@ impl AgentProfileService {
             )?;
             Ok(CommandHandlerResult::applied(
                 "agent_profile.created",
-                json!({ "agentProfileId": id, "version": 1 }),
+                json!({ "agentId": id, "version": 1 }),
                 Some(EntityReference {
                     entity_type: "agent_profile".to_string(),
                     entity_id: id,
@@ -1461,11 +1452,11 @@ impl AgentProfileService {
         )?;
         self.gateway.execute(database, envelope, |transaction| {
             let Some((version, presence)) =
-                profile_version_and_presence(transaction, &envelope.payload.agent_profile_id)?
+                profile_version_and_presence(transaction, &envelope.payload.agent_id)?
             else {
                 return Ok(CommandHandlerResult::rejected(
                     "agent_profile.not_found",
-                    json!({ "agentProfileId": envelope.payload.agent_profile_id }),
+                    json!({ "agentId": envelope.payload.agent_id }),
                 ));
             };
             if version != envelope.payload.expected_version {
@@ -1474,13 +1465,13 @@ impl AgentProfileService {
             if presence == "removed" {
                 return Ok(CommandHandlerResult::rejected(
                     "agent_profile.removed",
-                    json!({ "agentProfileId": envelope.payload.agent_profile_id }),
+                    json!({ "agentId": envelope.payload.agent_id }),
                 ));
             }
             if profile_display_name_exists(
                 transaction,
                 &identity.display_name,
-                Some(&envelope.payload.agent_profile_id),
+                Some(&envelope.payload.agent_id),
             )? {
                 return Ok(CommandHandlerResult::rejected(
                     "agent_profile.display_name_conflict",
@@ -1501,7 +1492,7 @@ impl AgentProfileService {
                 WHERE id = ?1 AND version = ?9
                 "#,
                 params![
-                    envelope.payload.agent_profile_id,
+                    envelope.payload.agent_id,
                     identity.display_name,
                     identity.team_role,
                     identity.professional_responsibilities,
@@ -1513,7 +1504,7 @@ impl AgentProfileService {
                 ],
             )?;
             Ok(profile_updated_result(
-                &envelope.payload.agent_profile_id,
+                &envelope.payload.agent_id,
                 version + 1,
                 "agent_profile.updated",
             ))
@@ -1527,11 +1518,11 @@ impl AgentProfileService {
     ) -> Result<CommandExecution> {
         self.gateway.execute(database, envelope, |transaction| {
             let Some((version, current_avatar_ref, presence)) =
-                profile_version_and_avatar_ref(transaction, &envelope.payload.agent_profile_id)?
+                profile_version_and_avatar_ref(transaction, &envelope.payload.agent_id)?
             else {
                 return Ok(CommandHandlerResult::rejected(
                     "agent_profile.not_found",
-                    json!({ "agentProfileId": envelope.payload.agent_profile_id }),
+                    json!({ "agentId": envelope.payload.agent_id }),
                 ));
             };
             if version != envelope.payload.expected_version {
@@ -1540,7 +1531,7 @@ impl AgentProfileService {
             if presence == "removed" {
                 return Ok(CommandHandlerResult::rejected(
                     "agent_profile.removed",
-                    json!({ "agentProfileId": envelope.payload.agent_profile_id }),
+                    json!({ "agentId": envelope.payload.agent_id }),
                 ));
             }
             validate_member_avatar_update(
@@ -1555,14 +1546,14 @@ impl AgentProfileService {
                 WHERE id = ?1 AND version = ?4
                 "#,
                 params![
-                    envelope.payload.agent_profile_id,
+                    envelope.payload.agent_id,
                     envelope.payload.avatar_ref,
                     now,
                     envelope.payload.expected_version,
                 ],
             )?;
             Ok(profile_updated_result(
-                &envelope.payload.agent_profile_id,
+                &envelope.payload.agent_id,
                 version + 1,
                 "agent_profile.avatar_updated",
             ))
@@ -1576,11 +1567,11 @@ impl AgentProfileService {
     ) -> Result<CommandExecution> {
         self.gateway.execute(database, envelope, |transaction| {
             let Some((version, presence)) =
-                profile_version_and_presence(transaction, &envelope.payload.agent_profile_id)?
+                profile_version_and_presence(transaction, &envelope.payload.agent_id)?
             else {
                 return Ok(CommandHandlerResult::rejected(
                     "agent_profile.not_found",
-                    json!({ "agentProfileId": envelope.payload.agent_profile_id }),
+                    json!({ "agentId": envelope.payload.agent_id }),
                 ));
             };
             if version != envelope.payload.expected_version {
@@ -1589,7 +1580,7 @@ impl AgentProfileService {
             if presence == "removed" {
                 return Ok(CommandHandlerResult::rejected(
                     "agent_profile.removed",
-                    json!({ "agentProfileId": envelope.payload.agent_profile_id }),
+                    json!({ "agentId": envelope.payload.agent_id }),
                 ));
             }
             let ready = ready_managed_runtime_snapshot(transaction, envelope.payload.adapter_kind)?;
@@ -1674,7 +1665,7 @@ impl AgentProfileService {
                 WHERE id = ?1 AND version = ?7
                 "#,
                 params![
-                    envelope.payload.agent_profile_id,
+                    envelope.payload.agent_id,
                     envelope.payload.adapter_kind.as_str(),
                     installation_id,
                     model_json,
@@ -1684,7 +1675,7 @@ impl AgentProfileService {
                 ],
             )?;
             Ok(profile_updated_result(
-                &envelope.payload.agent_profile_id,
+                &envelope.payload.agent_id,
                 version + 1,
                 result_code,
             ))
@@ -1698,11 +1689,11 @@ impl AgentProfileService {
     ) -> Result<CommandExecution> {
         self.gateway.execute(database, envelope, |transaction| {
             let Some((version, presence)) =
-                profile_version_and_presence(transaction, &envelope.payload.agent_profile_id)?
+                profile_version_and_presence(transaction, &envelope.payload.agent_id)?
             else {
                 return Ok(CommandHandlerResult::rejected(
                     "agent_profile.not_found",
-                    json!({ "agentProfileId": envelope.payload.agent_profile_id }),
+                    json!({ "agentId": envelope.payload.agent_id }),
                 ));
             };
             if version != envelope.payload.expected_version {
@@ -1711,7 +1702,7 @@ impl AgentProfileService {
             if presence == "removed" {
                 return Ok(CommandHandlerResult::rejected(
                     "agent_profile.removed",
-                    json!({ "agentProfileId": envelope.payload.agent_profile_id }),
+                    json!({ "agentId": envelope.payload.agent_id }),
                 ));
             }
             let now = chrono::Utc::now().to_rfc3339();
@@ -1726,13 +1717,13 @@ impl AgentProfileService {
                 WHERE id = ?1 AND version = ?3
                 "#,
                 params![
-                    envelope.payload.agent_profile_id,
+                    envelope.payload.agent_id,
                     now,
                     envelope.payload.expected_version,
                 ],
             )?;
             Ok(profile_updated_result(
-                &envelope.payload.agent_profile_id,
+                &envelope.payload.agent_id,
                 version + 1,
                 "agent_profile.runtime_cleared",
             ))
@@ -1755,11 +1746,11 @@ impl AgentProfileService {
                 ));
             }
             let Some((version, current_presence)) =
-                profile_version_and_presence(transaction, &envelope.payload.agent_profile_id)?
+                profile_version_and_presence(transaction, &envelope.payload.agent_id)?
             else {
                 return Ok(CommandHandlerResult::rejected(
                     "agent_profile.not_found",
-                    json!({ "agentProfileId": envelope.payload.agent_profile_id }),
+                    json!({ "agentId": envelope.payload.agent_id }),
                 ));
             };
             if version != envelope.payload.expected_version {
@@ -1768,7 +1759,7 @@ impl AgentProfileService {
             if current_presence == "removed" {
                 return Ok(CommandHandlerResult::rejected(
                     "agent_profile.removed",
-                    json!({ "agentProfileId": envelope.payload.agent_profile_id }),
+                    json!({ "agentId": envelope.payload.agent_id }),
                 ));
             }
             let now = chrono::Utc::now().to_rfc3339();
@@ -1780,14 +1771,14 @@ impl AgentProfileService {
                 WHERE id = ?1 AND version = ?4
                 "#,
                 params![
-                    envelope.payload.agent_profile_id,
+                    envelope.payload.agent_id,
                     envelope.payload.presence,
                     now,
                     envelope.payload.expected_version,
                 ],
             )?;
             Ok(profile_updated_result(
-                &envelope.payload.agent_profile_id,
+                &envelope.payload.agent_id,
                 version + 1,
                 "agent_profile.presence_changed",
             ))
@@ -1797,7 +1788,7 @@ impl AgentProfileService {
     pub fn removal_preview(
         &self,
         database: &Database,
-        agent_profile_id: &str,
+        agent_id: &str,
     ) -> Result<Option<MemberRemovalPreview>> {
         database
             .connection()
@@ -1808,16 +1799,16 @@ impl AgentProfileService {
                         FROM agent_run
                         JOIN conversation
                           ON conversation.id = agent_run.conversation_id
-                        WHERE conversation.agent_profile_id = profile.id
+                        WHERE conversation.agent_id = profile.id
                           AND agent_run.status IN ('queued', 'running', 'waiting'))
                 FROM agent_profile AS profile
                 WHERE profile.id = ?1 AND profile.profile_status <> 'removed'
                 "#,
-                [agent_profile_id],
+                [agent_id],
                 |row| {
                     let non_terminal_agent_run_count = row.get::<_, i64>(3)?;
                     Ok(MemberRemovalPreview {
-                        agent_profile_id: row.get(0)?,
+                        agent_id: row.get(0)?,
                         display_name: row.get(1)?,
                         version: row.get(2)?,
                         non_terminal_agent_run_count,
@@ -1847,7 +1838,7 @@ impl AgentProfileService {
                     SELECT version, display_name, profile_status
                     FROM agent_profile WHERE id = ?1
                     "#,
-                    [&envelope.payload.agent_profile_id],
+                    [&envelope.payload.agent_id],
                     |row| {
                         Ok((
                             row.get::<_, i64>(0)?,
@@ -1860,7 +1851,7 @@ impl AgentProfileService {
             let Some((version, display_name, presence)) = current else {
                 return Ok(CommandHandlerResult::rejected(
                     "agent_profile.not_found",
-                    json!({ "agentProfileId": envelope.payload.agent_profile_id }),
+                    json!({ "agentId": envelope.payload.agent_id }),
                 ));
             };
             if version != envelope.payload.expected_version {
@@ -1869,7 +1860,7 @@ impl AgentProfileService {
             if presence == "removed" {
                 return Ok(CommandHandlerResult::rejected(
                     "agent_profile.removed",
-                    json!({ "agentProfileId": envelope.payload.agent_profile_id }),
+                    json!({ "agentId": envelope.payload.agent_id }),
                 ));
             }
             if envelope.payload.confirmation_name != display_name {
@@ -1884,10 +1875,10 @@ impl AgentProfileService {
                 FROM agent_run
                 JOIN conversation
                   ON conversation.id = agent_run.conversation_id
-                WHERE conversation.agent_profile_id = ?1
+                WHERE conversation.agent_id = ?1
                   AND status IN ('queued', 'running', 'waiting')
                 "#,
-                [&envelope.payload.agent_profile_id],
+                [&envelope.payload.agent_id],
                 |row| row.get::<_, i64>(0),
             )?;
             if non_terminal_agent_run_count > 0 {
@@ -1905,13 +1896,13 @@ impl AgentProfileService {
                 WHERE id = ?1 AND version = ?3
                 "#,
                 params![
-                    envelope.payload.agent_profile_id,
+                    envelope.payload.agent_id,
                     now,
                     envelope.payload.expected_version,
                 ],
             )?;
             Ok(profile_updated_result(
-                &envelope.payload.agent_profile_id,
+                &envelope.payload.agent_id,
                 version + 1,
                 "agent_profile.removed",
             ))
@@ -2335,8 +2326,7 @@ impl AgentProfileService {
             raw.has_partial_runtime_configuration,
         )?;
         Ok(AgentProfileView {
-            id: raw.id,
-            handle: raw.handle,
+            agent_id: raw.id,
             display_name: raw.display_name,
             avatar_ref: raw.avatar_ref,
             accent: raw.accent,
@@ -2362,7 +2352,6 @@ impl AgentProfileService {
 #[derive(Debug)]
 struct RawAgentProfile {
     id: String,
-    handle: String,
     display_name: String,
     avatar_ref: Option<String>,
     accent: Option<String>,
@@ -2386,10 +2375,10 @@ struct RawAgentProfile {
 }
 
 fn raw_agent_profile_from_row(row: &Row<'_>) -> rusqlite::Result<RawAgentProfile> {
-    let selected_runtime_adapter_kind = row.get::<_, Option<String>>(12)?;
-    let installation_id = row.get::<_, Option<String>>(13)?;
-    let model_selection_json = row.get::<_, Option<String>>(14)?;
-    let permission_config_json = row.get::<_, Option<String>>(15)?;
+    let selected_runtime_adapter_kind = row.get::<_, Option<String>>(11)?;
+    let installation_id = row.get::<_, Option<String>>(12)?;
+    let model_selection_json = row.get::<_, Option<String>>(13)?;
+    let permission_config_json = row.get::<_, Option<String>>(14)?;
     let configured_count = [
         installation_id.is_some(),
         model_selection_json.is_some(),
@@ -2400,27 +2389,26 @@ fn raw_agent_profile_from_row(row: &Row<'_>) -> rusqlite::Result<RawAgentProfile
     .count();
     Ok(RawAgentProfile {
         id: row.get(0)?,
-        handle: row.get(1)?,
-        display_name: row.get(2)?,
-        avatar_ref: row.get(3)?,
-        accent: row.get(4)?,
-        team_role: row.get(5)?,
-        professional_responsibilities: row.get(6)?,
-        personality_traits_json: row.get(7)?,
-        working_principles: row.get(8)?,
-        growth_topic: row.get(9)?,
-        default_capabilities_json: row.get(10)?,
-        presence: row.get(11)?,
+        display_name: row.get(1)?,
+        avatar_ref: row.get(2)?,
+        accent: row.get(3)?,
+        team_role: row.get(4)?,
+        professional_responsibilities: row.get(5)?,
+        personality_traits_json: row.get(6)?,
+        working_principles: row.get(7)?,
+        growth_topic: row.get(8)?,
+        default_capabilities_json: row.get(9)?,
+        presence: row.get(10)?,
         selected_runtime_adapter_kind,
         installation_id,
         model_selection_json,
         permission_config_json,
         has_partial_runtime_configuration: configured_count != 0 && configured_count != 3,
-        member_order: row.get(20)?,
-        version: row.get(16)?,
-        created_at: row.get(17)?,
-        updated_at: row.get(18)?,
-        removed_at: row.get(19)?,
+        member_order: row.get(19)?,
+        version: row.get(15)?,
+        created_at: row.get(16)?,
+        updated_at: row.get(17)?,
+        removed_at: row.get(18)?,
     })
 }
 
@@ -2722,7 +2710,7 @@ where
 pub fn resolve_frozen_runtime(
     transaction: &Transaction<'_>,
     conversation_id: &str,
-    agent_profile_id: &str,
+    agent_id: &str,
 ) -> Result<std::result::Result<FrozenAgentRuntimeConfig, RuntimeConfigurationBlocker>> {
     let profile = transaction
         .query_row(
@@ -2734,10 +2722,10 @@ pub fn resolve_frozen_runtime(
                    agent_profile.default_permission_config_json,
                    conversation.provider_override, conversation.model_override
             FROM conversation
-            JOIN agent_profile ON agent_profile.id = conversation.agent_profile_id
-            WHERE conversation.id = ?1 AND conversation.agent_profile_id = ?2
+            JOIN agent_profile ON agent_profile.id = conversation.agent_id
+            WHERE conversation.id = ?1 AND conversation.agent_id = ?2
             "#,
-            params![conversation_id, agent_profile_id],
+            params![conversation_id, agent_id],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -2763,7 +2751,7 @@ pub fn resolve_frozen_runtime(
     else {
         return Ok(Err(runtime_blocker(
             "agent_unavailable",
-            json!({ "agentProfileId": agent_profile_id }),
+            json!({ "agentId": agent_id }),
         )));
     };
     if status != "present" {
@@ -2773,7 +2761,7 @@ pub fn resolve_frozen_runtime(
             } else {
                 "member_removed"
             },
-            json!({ "agentProfileId": agent_profile_id, "presence": status }),
+            json!({ "agentId": agent_id, "presence": status }),
         )));
     }
     if provider_override
@@ -2791,7 +2779,7 @@ pub fn resolve_frozen_runtime(
     let Some(selected_runtime_adapter_kind) = selected_runtime_adapter_kind else {
         return Ok(Err(runtime_blocker(
             "runtime_not_configured",
-            json!({ "agentProfileId": agent_profile_id }),
+            json!({ "agentId": agent_id }),
         )));
     };
     let (Some(installation_id), Some(model_json), Some(permissions_json)) =
@@ -2800,7 +2788,7 @@ pub fn resolve_frozen_runtime(
         return Ok(Err(runtime_blocker(
             "runtime_selection_unresolved",
             json!({
-                "agentProfileId": agent_profile_id,
+                "agentId": agent_id,
                 "adapterKind": selected_runtime_adapter_kind,
             }),
         )));
@@ -2815,7 +2803,7 @@ pub fn resolve_frozen_runtime(
         return Ok(Err(runtime_blocker(
             "runtime_selection_resolution_mismatch",
             json!({
-                "agentProfileId": agent_profile_id,
+                "agentId": agent_id,
                 "adapterKind": selected_runtime_adapter_kind,
             }),
         )));
@@ -3074,7 +3062,7 @@ fn runtime_blocker(code: &str, payload: Value) -> RuntimeConfigurationBlocker {
 }
 
 #[cfg(test)]
-pub(crate) fn configure_test_runtime(database: &Database, agent_profile_ids: &[&str]) {
+pub(crate) fn configure_test_runtime(database: &Database, agent_ids: &[&str]) {
     let now = chrono::Utc::now().to_rfc3339();
     let installation_id = "adapter-test-codex";
     let executable_path = std::env::current_exe()
@@ -3189,7 +3177,7 @@ pub(crate) fn configure_test_runtime(database: &Database, agent_profile_ids: &[&
         }),
     })
     .unwrap();
-    for agent_profile_id in agent_profile_ids {
+    for agent_id in agent_ids {
         database
             .connection()
             .execute(
@@ -3201,7 +3189,7 @@ pub(crate) fn configure_test_runtime(database: &Database, agent_profile_ids: &[&
                     default_permission_config_json = ?4
                 WHERE id = ?1
                 "#,
-                params![agent_profile_id, installation_id, model, permissions],
+                params![agent_id, installation_id, model, permissions],
             )
             .expect("test AgentProfile Runtime should be configured");
     }
@@ -3907,7 +3895,7 @@ fn version_conflict(current_version: i64) -> CommandHandlerResult {
 fn profile_updated_result(profile_id: &str, version: i64, code: &str) -> CommandHandlerResult {
     CommandHandlerResult::applied(
         code,
-        json!({ "agentProfileId": profile_id, "version": version }),
+        json!({ "agentId": profile_id, "version": version }),
         Some(EntityReference {
             entity_type: "agent_profile".to_string(),
             entity_id: profile_id.to_string(),
@@ -3978,7 +3966,7 @@ mod tests {
         display_name: &str,
     ) -> UpdateAgentProfileCommand {
         UpdateAgentProfileCommand {
-            agent_profile_id: profile.id.clone(),
+            agent_id: profile.agent_id.clone(),
             expected_version: profile.version,
             display_name: display_name.to_string(),
             team_role: profile.team_role.clone(),
@@ -4120,10 +4108,10 @@ mod tests {
             .list_profiles(&database)
             .expect("profiles should load");
         assert_eq!(profiles.len(), 4);
-        assert_eq!(profiles[0].handle, "luoke");
         let public_profile = serde_json::to_value(&profiles[0]).unwrap();
         assert!(public_profile.get("uuid").is_none());
-        assert_eq!(public_profile["id"], "agent_1");
+        assert!(public_profile.get("handle").is_none());
+        assert_eq!(public_profile["agentId"], "agent_1");
         assert!(
             profiles
                 .iter()
@@ -4149,7 +4137,7 @@ mod tests {
                 ),
             )
             .unwrap();
-        assert_eq!(first.result.payload["agentProfileId"], "agent_5");
+        assert_eq!(first.result.payload["agentId"], "agent_5");
         let first_profile = service.get_profile(&database, "agent_5").unwrap().unwrap();
         service
             .remove_member(
@@ -4157,7 +4145,7 @@ mod tests {
                 &user_command(
                     "remove-agent-five",
                     RemoveMemberCommand {
-                        agent_profile_id: first_profile.id,
+                        agent_id: first_profile.agent_id,
                         expected_version: first_profile.version,
                         confirmation_name: first_profile.display_name,
                     },
@@ -4174,7 +4162,7 @@ mod tests {
                 ),
             )
             .unwrap();
-        assert_eq!(second.result.payload["agentProfileId"], "agent_6");
+        assert_eq!(second.result.payload["agentId"], "agent_6");
         let (uuid, next_value): (String, i64) = database
             .connection()
             .query_row(
@@ -4203,16 +4191,16 @@ mod tests {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
         let original = service.list_profiles(&database).unwrap();
-        assert_eq!(original[0].id, "agent_1");
+        assert_eq!(original[0].agent_id, "agent_1");
         let reversed = original
             .iter()
             .rev()
-            .map(|profile| profile.id.clone())
+            .map(|profile| profile.agent_id.clone())
             .collect::<Vec<_>>();
         let envelope = user_command(
             "reorder-agent-profiles",
             ReorderAgentProfilesCommand {
-                ordered_agent_profile_ids: reversed.clone(),
+                ordered_agent_ids: reversed.clone(),
             },
         );
         let first = service
@@ -4228,7 +4216,7 @@ mod tests {
                 .list_profiles(&database)
                 .unwrap()
                 .into_iter()
-                .map(|profile| profile.id)
+                .map(|profile| profile.agent_id)
                 .collect::<Vec<_>>(),
             reversed
         );
@@ -4239,7 +4227,7 @@ mod tests {
                 &user_command(
                     "invalid-agent-order",
                     ReorderAgentProfilesCommand {
-                        ordered_agent_profile_ids: vec!["agent_1".to_string()],
+                        ordered_agent_ids: vec!["agent_1".to_string()],
                     },
                 ),
             )
@@ -4282,7 +4270,7 @@ mod tests {
             .expect("profile command should replay");
         assert!(!first.replayed);
         assert!(replay.replayed);
-        let profile_id = first.result.payload["agentProfileId"]
+        let profile_id = first.result.payload["agentId"]
             .as_str()
             .expect("profile id")
             .to_string();
@@ -4310,8 +4298,13 @@ mod tests {
             .get_profile(&database, &profile_id)
             .expect("profile should load")
             .expect("profile should exist");
-        assert_eq!(profile.id, "agent_5");
-        assert!(profile.handle.is_empty());
+        assert_eq!(profile.agent_id, "agent_5");
+        assert!(
+            serde_json::to_value(&profile)
+                .unwrap()
+                .get("handle")
+                .is_none()
+        );
         let mut ready_snapshot = ready_codex_snapshot();
         ready_snapshot.executable_fingerprint = Some(executable_fingerprint.clone());
         service
@@ -4346,7 +4339,7 @@ mod tests {
                 &user_command(
                     "set-runtime",
                     SetAgentProfileRuntimeCommand {
-                        agent_profile_id: profile_id.clone(),
+                        agent_id: profile_id.clone(),
                         expected_version: profile.version,
                         adapter_kind: AdapterKind::CodexCli,
                         model: None,
@@ -4512,7 +4505,7 @@ mod tests {
             &user_command(
                 "set-invalid-avatar",
                 SetAgentProfileAvatarCommand {
-                    agent_profile_id: original.id.clone(),
+                    agent_id: original.agent_id.clone(),
                     expected_version: original.version,
                     avatar_ref: Some("https://example.com/avatar.png".to_string()),
                 },
@@ -4556,7 +4549,7 @@ mod tests {
             &user_command(
                 "change-to-another-legacy-avatar",
                 SetAgentProfileAvatarCommand {
-                    agent_profile_id: updated.id.clone(),
+                    agent_id: updated.agent_id.clone(),
                     expected_version: updated.version,
                     avatar_ref: Some("legacy://different-avatar".to_string()),
                 },
@@ -4575,7 +4568,7 @@ mod tests {
                 &user_command(
                     "replace-legacy-avatar",
                     SetAgentProfileAvatarCommand {
-                        agent_profile_id: updated.id,
+                        agent_id: updated.agent_id,
                         expected_version: updated.version,
                         avatar_ref: Some(
                             "rovai://member-avatar/managed/2b945f3f-4b45-4ae5-92b2-739fce600338"
@@ -4617,7 +4610,7 @@ mod tests {
             "add-membership-test-member",
             AddCampMemberCommand {
                 camp_id: camp_id.clone(),
-                agent_profile_id: "agent_2".to_string(),
+                agent_id: "agent_2".to_string(),
                 capability_overrides: json!({}),
             },
         );
@@ -4631,7 +4624,7 @@ mod tests {
             .expect("profile should exist");
 
         let memberships = service
-            .list_camp_memberships(&database, &profile.id)
+            .list_camp_memberships(&database, &profile.agent_id)
             .expect("Camp memberships should load");
         assert_eq!(memberships.len(), 1);
         assert!(memberships[0].is_default_lead);
@@ -4642,7 +4635,7 @@ mod tests {
             .execute("UPDATE camp SET default_lead_agent_id = NULL", [])
             .expect("test Camp should allow an unassigned Default Lead");
         let memberships = service
-            .list_camp_memberships(&database, &profile.id)
+            .list_camp_memberships(&database, &profile.agent_id)
             .expect("membership read model should tolerate an empty Default Lead");
         assert!(!memberships[0].is_default_lead);
 
@@ -4680,7 +4673,7 @@ mod tests {
                 &user_command(
                     "set-mismatched-runtime",
                     SetAgentProfileRuntimeCommand {
-                        agent_profile_id: profile.id,
+                        agent_id: profile.agent_id,
                         expected_version: profile.version,
                         adapter_kind: AdapterKind::CopilotCli,
                         model: None,
@@ -4734,7 +4727,7 @@ mod tests {
                 &user_command(
                     "explicit-runtime-config",
                     SetAgentProfileRuntimeCommand {
-                        agent_profile_id: profile.id.clone(),
+                        agent_id: profile.agent_id.clone(),
                         expected_version: profile.version,
                         adapter_kind: AdapterKind::CodexCli,
                         model: Some(ModelSelection::Explicit {
@@ -4755,7 +4748,7 @@ mod tests {
             .unwrap();
         assert_eq!(applied.result.code, "agent_profile.runtime_configured");
         let configured = service
-            .get_profile(&database, &profile.id)
+            .get_profile(&database, &profile.agent_id)
             .unwrap()
             .unwrap();
         let preference = configured.runtime_preference.as_ref().unwrap();
@@ -4780,7 +4773,7 @@ mod tests {
                 &user_command(
                     "invalid-runtime-config",
                     SetAgentProfileRuntimeCommand {
-                        agent_profile_id: profile.id.clone(),
+                        agent_id: profile.agent_id.clone(),
                         expected_version: configured.version,
                         adapter_kind: AdapterKind::CodexCli,
                         model: Some(ModelSelection::RuntimeDefault),
@@ -4798,7 +4791,7 @@ mod tests {
             .unwrap();
         assert_eq!(rejected.result.code, "runtime_permission_value_invalid");
         let unchanged = service
-            .get_profile(&database, &profile.id)
+            .get_profile(&database, &profile.agent_id)
             .unwrap()
             .unwrap();
         assert_eq!(unchanged.version, configured.version);
@@ -4819,7 +4812,7 @@ mod tests {
                 &user_command(
                     "select-unresolved-codex",
                     SetAgentProfileRuntimeCommand {
-                        agent_profile_id: profile.id.clone(),
+                        agent_id: profile.agent_id.clone(),
                         expected_version: profile.version,
                         adapter_kind: AdapterKind::CodexCli,
                         model: None,
@@ -4847,7 +4840,7 @@ mod tests {
             )
             .unwrap();
         let still_unresolved = service
-            .get_profile(&database, &profile.id)
+            .get_profile(&database, &profile.agent_id)
             .unwrap()
             .unwrap();
         assert!(still_unresolved.runtime_preference.is_none());
@@ -4976,7 +4969,7 @@ mod tests {
                 &user_command(
                     "select-managed-codex",
                     SetAgentProfileRuntimeCommand {
-                        agent_profile_id: profile.id,
+                        agent_id: profile.agent_id,
                         expected_version: profile.version,
                         adapter_kind: AdapterKind::CodexCli,
                         model: None,
@@ -5085,7 +5078,7 @@ mod tests {
                 &user_command(
                     "away-qilu",
                     SetMemberPresenceCommand {
-                        agent_profile_id: profile.id,
+                        agent_id: profile.agent_id,
                         expected_version: profile.version,
                         presence: "away".to_string(),
                     },
@@ -5116,8 +5109,16 @@ mod tests {
             .get_profile(&database, "agent_4")
             .expect("profile should load")
             .expect("profile should exist");
+        let original_handle = database
+            .connection()
+            .query_row(
+                "SELECT COALESCE(handle, '') FROM agent_profile WHERE id = ?1",
+                [&profile.agent_id],
+                |row| row.get::<_, String>(0),
+            )
+            .expect("legacy handle should remain internally readable");
         let preview = service
-            .removal_preview(&database, &profile.id)
+            .removal_preview(&database, &profile.agent_id)
             .expect("preview should load")
             .expect("member should be removable");
         assert!(preview.removable);
@@ -5129,7 +5130,7 @@ mod tests {
                 &user_command(
                     "remove-qilu-mismatch",
                     RemoveMemberCommand {
-                        agent_profile_id: profile.id.clone(),
+                        agent_id: profile.agent_id.clone(),
                         expected_version: profile.version,
                         confirmation_name: "QILU".to_string(),
                     },
@@ -5147,7 +5148,7 @@ mod tests {
                 &user_command(
                     "remove-qilu",
                     RemoveMemberCommand {
-                        agent_profile_id: profile.id.clone(),
+                        agent_id: profile.agent_id.clone(),
                         expected_version: profile.version,
                         confirmation_name: profile.display_name.clone(),
                     },
@@ -5157,7 +5158,7 @@ mod tests {
         assert_eq!(removed.result.code, "agent_profile.removed");
         assert!(
             service
-                .get_profile(&database, &profile.id)
+                .get_profile(&database, &profile.agent_id)
                 .expect("management read should succeed")
                 .is_none()
         );
@@ -5170,7 +5171,7 @@ mod tests {
                        profile_status, version
                 FROM agent_profile WHERE id = ?1
                 "#,
-                [&profile.id],
+                [&profile.agent_id],
                 |row| {
                     Ok((
                         row.get(0)?,
@@ -5182,7 +5183,7 @@ mod tests {
                 },
             )
             .expect("removed identity should remain");
-        assert_eq!(retained.0, profile.handle);
+        assert_eq!(retained.0, original_handle);
         assert_eq!(retained.1, profile.display_name);
         assert_eq!(retained.2, profile.avatar_ref);
         assert_eq!(retained.3, "removed");
@@ -5218,9 +5219,13 @@ mod tests {
             .into_iter()
             .find(|candidate| candidate.display_name == "新绮露")
             .expect("replacement should be visible");
-        assert_ne!(replacement.handle, profile.handle);
-        assert_eq!(replacement.id, "agent_5");
-        assert!(replacement.handle.is_empty());
+        assert_eq!(replacement.agent_id, "agent_5");
+        assert!(
+            serde_json::to_value(&replacement)
+                .unwrap()
+                .get("handle")
+                .is_none()
+        );
 
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
@@ -5239,14 +5244,21 @@ mod tests {
                 ),
             )
             .expect("profile should be created");
-        let profile_id = created.result.payload["agentProfileId"]
+        let profile_id = created.result.payload["agentId"]
             .as_str()
             .expect("profile id");
         let profile = service
             .get_profile(&database, profile_id)
             .expect("profile should load")
             .expect("profile should exist");
-        let original_handle = profile.handle.clone();
+        let original_handle = database
+            .connection()
+            .query_row(
+                "SELECT COALESCE(handle, '') FROM agent_profile WHERE id = ?1",
+                [&profile.agent_id],
+                |row| row.get::<_, String>(0),
+            )
+            .expect("legacy handle should remain internally readable");
 
         let duplicate = service
             .create_profile(
@@ -5267,10 +5279,18 @@ mod tests {
             .expect("profile should update");
         assert_eq!(updated.result.code, "agent_profile.updated");
         let updated_profile = service
-            .get_profile(&database, &profile.id)
+            .get_profile(&database, &profile.agent_id)
             .expect("profile should load")
             .expect("profile should exist");
-        assert_eq!(updated_profile.handle, original_handle);
+        let updated_handle = database
+            .connection()
+            .query_row(
+                "SELECT COALESCE(handle, '') FROM agent_profile WHERE id = ?1",
+                [&profile.agent_id],
+                |row| row.get::<_, String>(0),
+            )
+            .expect("legacy handle should remain internally readable");
+        assert_eq!(updated_handle, original_handle);
         assert_eq!(updated_profile.display_name, "Builder Prime");
 
         drop(database);
@@ -5341,7 +5361,7 @@ mod tests {
                     execution_epoch: None,
                     payload: AddCampMemberCommand {
                         camp_id: camp_id.clone(),
-                        agent_profile_id: "agent_1".to_string(),
+                        agent_id: "agent_1".to_string(),
                         capability_overrides: json!({}),
                     },
                 },
@@ -5360,7 +5380,7 @@ mod tests {
                     execution_epoch: None,
                     payload: AddCampMemberCommand {
                         camp_id: camp_id.clone(),
-                        agent_profile_id: "agent_2".to_string(),
+                        agent_id: "agent_2".to_string(),
                         capability_overrides: json!({}),
                     },
                 },
@@ -5377,7 +5397,7 @@ mod tests {
                 &user_command(
                     "away-luoke",
                     SetMemberPresenceCommand {
-                        agent_profile_id: profile.id.clone(),
+                        agent_id: profile.agent_id.clone(),
                         expected_version: profile.version,
                         presence: "away".to_string(),
                     },
@@ -5393,7 +5413,7 @@ mod tests {
                 FROM camp, agent_profile
                 WHERE camp.id = ?1 AND agent_profile.id = ?2
                 "#,
-                params![camp_id, profile.id],
+                params![camp_id, profile.agent_id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .expect("lead and profile should remain queryable");

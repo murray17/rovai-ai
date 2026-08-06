@@ -121,9 +121,9 @@ try {
   let presetCopy = (await request(first.cdp, 'agents.list'))
     .find((profile) => profile.displayName === '小狐狸副本')
   assert(
-    /^agent_[1-9]\d*$/.test(presetCopy?.id ?? '')
-      && presetCopy?.id !== 'agent_1'
-      && presetCopy?.handle === ''
+    /^agent_[1-9]\d*$/.test(presetCopy?.agentId ?? '')
+      && presetCopy?.agentId !== 'agent_1'
+      && !Object.hasOwn(presetCopy, 'handle')
       && presetCopy.avatarRef === null,
     `Identity-only create did not use a generated internal ID: ${JSON.stringify(presetCopy)}`
   )
@@ -140,9 +140,9 @@ try {
     `Independent built-in appearance save failed: ${JSON.stringify(presetCopy)}`
   )
   const canonicalLuoke = (await request(first.cdp, 'agents.list'))
-    .find((profile) => profile.id === 'agent_1')
+    .find((profile) => profile.agentId === 'agent_1')
   assert(
-    canonicalLuoke?.handle === 'luoke' && canonicalLuoke.displayName === '小狐狸',
+    canonicalLuoke?.displayName === '小狐狸' && !Object.hasOwn(canonicalLuoke, 'handle'),
     `Preset create mutated the canonical companion: ${JSON.stringify(canonicalLuoke)}`
   )
 
@@ -165,7 +165,7 @@ try {
   await setTheme(second.cdp, 'night')
   await assertCanonicalSeedAvatars(second.cdp, 'Upgraded database')
   const upgradedProfiles = await request(second.cdp, 'agents.list')
-  const upgradedQilu = upgradedProfiles.find((profile) => profile.id === 'agent_4')
+  const upgradedQilu = upgradedProfiles.find((profile) => profile.agentId === 'agent_4')
   const restartedCustom = upgradedProfiles.find(
     (profile) => profile.displayName === customDisplayName
   )
@@ -312,7 +312,7 @@ try {
 async function assertCanonicalSeedAvatars(cdp, context) {
   const profiles = await request(cdp, 'agents.list')
   for (const [profileId, role] of [['agent_1', 'luoke'], ['agent_2', 'muwa'], ['agent_3', 'mianzhi'], ['agent_4', 'qilu']]) {
-    const profile = profiles.find((candidate) => candidate.id === profileId)
+    const profile = profiles.find((candidate) => candidate.agentId === profileId)
     assert(
       profile?.avatarRef === `rovai://member-avatar/builtin/${role}/v1`,
       `${context} has an unexpected ${role} avatarRef: ${JSON.stringify(profile)}`
@@ -381,11 +381,11 @@ async function createManagedProfile(cdp, displayName) {
     }
   })
   assert(result.status === 'applied', `Could not create managed Profile: ${JSON.stringify(result)}`)
-  const agentProfileId = result.resultEntity.entityId
-  const profile = await request(cdp, 'agents.get', { agentProfileId })
+  const agentId = result.resultEntity.entityId
+  const profile = await request(cdp, 'agents.get', { agentId })
   const avatarResult = await request(cdp, 'agents.avatar.set', {
     commandId: crypto.randomUUID(),
-    command: { agentProfileId, expectedVersion: profile.version, avatarRef }
+    command: { agentId, expectedVersion: profile.version, avatarRef }
   })
   assert(avatarResult.status === 'applied', `Could not set managed Profile avatar: ${JSON.stringify(avatarResult)}`)
   return avatarRef

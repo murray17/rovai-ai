@@ -75,7 +75,6 @@ pub enum InAppNotificationAttentionState {
 pub struct InAppNotificationCampView {
     pub id: String,
     pub title: String,
-    pub status: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -244,7 +243,7 @@ impl InAppNotificationService {
             .flatten();
         transaction.commit()?;
         Ok(InAppNotificationInbox {
-            schema_version: 1,
+            schema_version: 2,
             through_sequence,
             unread_count,
             items,
@@ -549,7 +548,7 @@ fn normalized_limit(limit: usize) -> usize {
 fn notification_select() -> &'static str {
     r#"
     SELECT n.id, n.sequence, n.kind,
-           camp.id, camp.title, camp.status,
+           camp.id, camp.title,
            n.camp_turn_id,
            CASE
                WHEN n.kind = 'runtime_permission_attention' THEN 1
@@ -613,7 +612,6 @@ type RawNotification = (
     String,
     String,
     String,
-    String,
     Option<String>,
     bool,
     Option<String>,
@@ -635,14 +633,13 @@ fn notification_from_row(row: &Row<'_>) -> rusqlite::Result<RawNotification> {
         row.get(8)?,
         row.get(9)?,
         row.get(10)?,
-        row.get(11)?,
     ))
 }
 
 fn validate_notification(raw: RawNotification) -> Result<InAppNotificationView> {
     let kind = InAppNotificationKind::parse(&raw.2)?;
     let attention_state = match kind {
-        InAppNotificationKind::RuntimePermissionAttention => Some(if raw.8.is_some() {
+        InAppNotificationKind::RuntimePermissionAttention => Some(if raw.7.is_some() {
             InAppNotificationAttentionState::Resolved
         } else {
             InAppNotificationAttentionState::Pending
@@ -658,14 +655,13 @@ fn validate_notification(raw: RawNotification) -> Result<InAppNotificationView> 
         camp: InAppNotificationCampView {
             id: raw.3,
             title: raw.4,
-            status: raw.5,
         },
-        camp_turn_id: raw.6,
-        source_available: raw.7,
+        camp_turn_id: raw.5,
+        source_available: raw.6,
         attention_state,
-        read_at: raw.9,
-        created_at: raw.10,
-        updated_at: raw.11,
+        read_at: raw.8,
+        created_at: raw.9,
+        updated_at: raw.10,
     })
 }
 
@@ -765,10 +761,10 @@ mod tests {
                 r#"
                 INSERT INTO camp(
                     id, title, name_origin, collaboration_mode,
-                    project_binding_kind, project_path, status,
+                    project_binding_kind, project_path,
                     last_message_sequence, version, created_at, updated_at
                 ) VALUES (
-                    ?1, ?2, 'user', 'peer', 'quick_chat', '/quick-chat', 'active',
+                    ?1, ?2, 'user', 'peer', 'quick_chat', '/quick-chat',
                     0, 1, '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z'
                 )
                 "#,
@@ -783,7 +779,7 @@ mod tests {
             .execute_batch(
                 r#"
                 INSERT INTO conversation(
-                    id, camp_id, agent_profile_id,
+                    id, camp_id, agent_id,
                     summary_through_message_sequence, last_message_sequence,
                     version, created_at, updated_at
                 ) VALUES (

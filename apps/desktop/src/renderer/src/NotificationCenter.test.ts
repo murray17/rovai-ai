@@ -14,7 +14,7 @@ function notification(
     id: 'notification-1',
     sequence: 1,
     kind,
-    camp: { id: 'camp-1', title: 'Current title', status: 'active' },
+    camp: { id: 'camp-1', title: 'Current title' },
     campTurnId: kind === 'runtime_permission_attention' ? null : 'turn-1',
     sourceAvailable: true,
     attentionState,

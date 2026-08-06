@@ -15,8 +15,8 @@ pub enum StructuredCampMessageSegment {
         text: String,
     },
     MemberMention {
-        #[serde(rename = "agentProfileId")]
-        agent_profile_id: String,
+        #[serde(rename = "agentId")]
+        agent_id: String,
     },
     AllMembersMention,
 }
@@ -36,11 +36,8 @@ pub fn validate_content(content: &[StructuredCampMessageSegment]) -> Result<()> 
                     .checked_add(text.len())
                     .context("Structured Camp Message Content size overflow")?;
             }
-            StructuredCampMessageSegment::MemberMention { agent_profile_id } => {
-                if agent_profile_id.is_empty()
-                    || agent_profile_id.trim() != agent_profile_id
-                    || agent_profile_id.len() > 256
-                {
+            StructuredCampMessageSegment::MemberMention { agent_id } => {
+                if agent_id.is_empty() || agent_id.trim() != agent_id || agent_id.len() > 256 {
                     anyhow::bail!("Member Mention requires a canonical Agent Profile ID");
                 }
             }
@@ -78,10 +75,10 @@ pub fn member_mention_ids(content: &[StructuredCampMessageSegment]) -> Vec<Strin
     content
         .iter()
         .filter_map(|segment| match segment {
-            StructuredCampMessageSegment::MemberMention { agent_profile_id }
-                if seen.insert(agent_profile_id.as_str()) =>
+            StructuredCampMessageSegment::MemberMention { agent_id }
+                if seen.insert(agent_id.as_str()) =>
             {
-                Some(agent_profile_id.clone())
+                Some(agent_id.clone())
             }
             _ => None,
         })
@@ -102,13 +99,13 @@ pub fn render_plain_text(
     for segment in content {
         match segment {
             StructuredCampMessageSegment::Text { text } => rendered.push_str(text),
-            StructuredCampMessageSegment::MemberMention { agent_profile_id } => {
-                let name = member_name(agent_profile_id)
+            StructuredCampMessageSegment::MemberMention { agent_id } => {
+                let name = member_name(agent_id)
                     .ok_or_else(|| anyhow!("Member Mention identity does not exist"))?;
                 rendered.push('@');
                 rendered.push_str(&name);
             }
-            StructuredCampMessageSegment::AllMembersMention => rendered.push_str("@所有成员"),
+            StructuredCampMessageSegment::AllMembersMention => rendered.push_str("@所有队员"),
         }
     }
     Ok(rendered)
@@ -119,21 +116,19 @@ pub fn render_current_plain_text(
     content: &[StructuredCampMessageSegment],
 ) -> Result<String> {
     let mut names = BTreeMap::new();
-    for agent_profile_id in member_mention_ids(content) {
+    for agent_id in member_mention_ids(content) {
         let display_name = connection
             .query_row(
                 "SELECT display_name FROM agent_profile WHERE id = ?1",
-                [&agent_profile_id],
+                [&agent_id],
                 |row| row.get::<_, String>(0),
             )
             .optional()?;
         if let Some(display_name) = display_name {
-            names.insert(agent_profile_id, display_name);
+            names.insert(agent_id, display_name);
         }
     }
-    render_plain_text(content, |agent_profile_id| {
-        names.get(agent_profile_id).cloned()
-    })
+    render_plain_text(content, |agent_id| names.get(agent_id).cloned())
 }
 
 pub fn canonical_content_digest(content: &[StructuredCampMessageSegment]) -> Result<String> {
@@ -156,10 +151,10 @@ mod tests {
                 text: "@普通文字 ".into(),
             },
             Segment::MemberMention {
-                agent_profile_id: "agent_2".into(),
+                agent_id: "agent_2".into(),
             },
             Segment::MemberMention {
-                agent_profile_id: "agent_2".into(),
+                agent_id: "agent_2".into(),
             },
             Segment::AllMembersMention,
             Segment::Text {
@@ -189,14 +184,14 @@ mod tests {
     fn serde_and_validation_keep_the_content_model_closed() {
         assert!(
             serde_json::from_str::<Segment>(
-                r#"{"kind":"member_mention","agentProfileId":"agent_2","name":"木瓦"}"#
+                r#"{"kind":"member_mention","agentId":"agent_2","name":"木瓦"}"#
             )
             .is_err()
         );
         assert!(serde_json::from_str::<Segment>(r#"{"kind":"markdown","text":"@木瓦"}"#).is_err());
         assert!(
             validate_content(&[Segment::MemberMention {
-                agent_profile_id: " agent_2".into(),
+                agent_id: " agent_2".into(),
             }])
             .is_err()
         );
@@ -206,7 +201,7 @@ mod tests {
     fn rendering_projects_current_names_without_changing_semantic_digest() {
         let content = normalize_content(vec![
             Segment::MemberMention {
-                agent_profile_id: "agent_2".into(),
+                agent_id: "agent_2".into(),
             },
             Segment::Text {
                 text: " 请检查 ".into(),
@@ -220,7 +215,7 @@ mod tests {
                 (id == "agent_2").then(|| "沐瓦".to_string())
             })
             .unwrap(),
-            "@沐瓦 请检查 @所有成员"
+            "@沐瓦 请检查 @所有队员"
         );
         assert_eq!(digest, canonical_content_digest(&content).unwrap());
     }

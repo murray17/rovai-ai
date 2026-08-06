@@ -6,11 +6,9 @@ import type {
   AdapterInstallation,
   AgentProfile,
   AgentRunExecutionEvidenceView,
-  Approval,
   CampSnapshot,
   CanonicalRuntimeActivityView,
-  HealthStatus,
-  TimelineEvent
+  HealthStatus
 } from '@contracts'
 import {
   AppHeader,
@@ -36,14 +34,6 @@ import {
   type NavigationSettingsSection
 } from './CampNavigation'
 import {
-  AgentMentionTextarea,
-  formatMentionDisplayText,
-  mentionQueryAtCaret,
-  resolveMentionedAgentIds,
-  shouldResetMentionActiveOption,
-  shouldSubmitTextareaOnEnter
-} from './AgentMentionTextarea'
-import {
   CampWorkspace,
   QuickChatWorkspace,
   TaskPanel,
@@ -51,7 +41,6 @@ import {
   emptyCampRuntimeSummary,
   formatStopElapsed,
   loadCompleteAgentRunExecutionEvidence,
-  readyCampMentionCandidates,
   runtimeOptionsForDisplay
 } from './CampWorkspace'
 import {
@@ -75,8 +64,6 @@ import {
   agentRunPresentation,
   agentRunStateTag,
   agentRunWaitDetail,
-  buildActivities,
-  buildConversation,
   buildGitStatusEntries,
   buildLiveExecutionProgress,
   diffLineKind,
@@ -84,10 +71,7 @@ import {
   inboxMessagePresentation,
   liveRuntimeEventFromCore,
   parseGitStatus,
-  selectCompleteExecutionEvidence,
-  stripAnsi,
-  summarizeApproval,
-  taskStateSummary
+  selectCompleteExecutionEvidence
 } from './ui-model'
 
 const TEST_EXECUTION_BUDGET = {
@@ -128,18 +112,6 @@ function canonicalActivity(
   }
 }
 
-function event(id: number, eventType: string, payload: unknown, nativeMethod: string | null = null): TimelineEvent {
-  return {
-    id,
-    taskId: 'task-1',
-    sequence: id,
-    eventType,
-    nativeMethod,
-    payload,
-    createdAt: `2026-07-17T10:00:0${id}Z`
-  }
-}
-
 describe('task event projections', () => {
   it('projects one live Task card at creation and suppresses legacy status cards', () => {
     const task = {
@@ -173,7 +145,7 @@ describe('task event projections', () => {
       content: null,
       attachments: [],
       addressMode: presentation ? 'broadcast' : 'default',
-      addressedAgentProfileIds: [],
+      addressedAgentIds: [],
       replyToCampMessageId: null,
       campTurnId: null,
       presentation,
@@ -330,8 +302,8 @@ describe('task event projections', () => {
         body: '立即显示这条消息',
         content: [
           { kind: 'text', text: '立即显示这条消息 ' },
-          { kind: 'member_mention', agentProfileId: 'agent_2' },
-          { kind: 'member_mention', agentProfileId: 'agent_2' }
+          { kind: 'member_mention', agentId: 'agent_2' },
+          { kind: 'member_mention', agentId: 'agent_2' }
         ],
         revision: 3,
         attachments: [{
@@ -357,7 +329,7 @@ describe('task event projections', () => {
       authorId: 'local-user',
       body: '立即显示这条消息',
       addressMode: 'explicit',
-      addressedAgentProfileIds: ['agent_2'],
+      addressedAgentIds: ['agent_2'],
       attachments: [{
         id: 'attachment-1',
         displayName: '说明.txt'
@@ -373,7 +345,7 @@ describe('task event projections', () => {
     const params = campMessageSendParams('command-1', 'camp-1', {
       campId: 'camp-1',
       body: '请 @沐瓦 检查',
-      content: [{ kind: 'member_mention', agentProfileId: 'agent_2' }],
+      content: [{ kind: 'member_mention', agentId: 'agent_2' }],
       revision: 7,
       attachments: [],
       updatedAt: '2026-08-03T00:00:00Z',
@@ -387,7 +359,7 @@ describe('task event projections', () => {
     })
     expect(params).not.toHaveProperty('body')
     expect(params).not.toHaveProperty('address')
-    expect(params).not.toHaveProperty('agentProfileIds')
+    expect(params).not.toHaveProperty('agentIds')
     expect(params).not.toHaveProperty('preparedAttachmentIds')
   })
 
@@ -444,7 +416,7 @@ describe('task event projections', () => {
       content: null,
       attachments: [],
       addressMode: 'default' as const,
-      addressedAgentProfileIds: ['agent-1'],
+      addressedAgentIds: ['agent-1'],
       replyToCampMessageId: null,
       campTurnId: 'turn-stop',
       presentation: null,
@@ -628,15 +600,15 @@ describe('task event projections', () => {
       admissible: true,
       presentMembers: [
         {
-          agentProfileId: 'agent-unready', handle: 'unready', displayName: '未就绪',
+          agentId: 'agent-unready', displayName: '未就绪',
           memberOrder: 0, runtimeConfigured: true, runtimeReadiness: 'needs_attention'
         },
         {
-          agentProfileId: 'agent-ready', handle: 'ready', displayName: '已就绪',
+          agentId: 'agent-ready', displayName: '已就绪',
           memberOrder: 1, runtimeConfigured: true, runtimeReadiness: 'ready'
         }
       ],
-      initialLeadAgentProfileId: 'agent-ready',
+      initialLeadAgentId: 'agent-ready',
       blockers: []
     })
 
@@ -644,33 +616,6 @@ describe('task event projections', () => {
       memberIds: ['agent-unready', 'agent-ready'],
       leadId: 'agent-ready'
     })
-  })
-
-  it('sends with Enter while preserving mention selection, composition, and Shift+Enter newline', () => {
-    expect(shouldSubmitTextareaOnEnter({
-      key: 'Enter',
-      shiftKey: false,
-      isComposing: false,
-      mentionMenuOpen: false
-    })).toBe(true)
-    expect(shouldSubmitTextareaOnEnter({
-      key: 'Enter',
-      shiftKey: true,
-      isComposing: false,
-      mentionMenuOpen: false
-    })).toBe(false)
-    expect(shouldSubmitTextareaOnEnter({
-      key: 'Enter',
-      shiftKey: false,
-      isComposing: true,
-      mentionMenuOpen: false
-    })).toBe(false)
-    expect(shouldSubmitTextareaOnEnter({
-      key: 'Enter',
-      shiftKey: false,
-      isComposing: false,
-      mentionMenuOpen: true
-    })).toBe(false)
   })
 
   it('normalizes optional Camp names before applying the local scalar boundary', () => {
@@ -712,34 +657,11 @@ describe('task event projections', () => {
     })
   })
 
-  it('hides only the implicit recipient summary while preserving explicit target feedback', () => {
-    const markup = renderToStaticMarkup(createElement(AgentMentionTextarea, {
-      id: 'new-message-with-mention',
-      value: '@luoke 请看看',
-      candidates: [{
-        agentProfileId: 'agent_1',
-        handle: 'luoke',
-        displayName: '洛可',
-        avatarRef: null
-      }],
-      inputLabel: '写下新对话消息',
-      showDefaultTargetSummary: false,
-      placeholder: '说点什么…',
-      rows: 3,
-      disabled: false,
-      onChange: () => undefined
-    }))
-
-    expect(markup).toContain('将同时唤醒 1 位队员')
-    expect(markup).not.toContain('未提及时发送给 Lead')
-  })
-
   it('derives the initial Quick Chat preflight from the already loaded member order', () => {
     const unconfigured = agentProfile()
     const configured: AgentProfile = {
       ...agentProfile(),
-      id: 'agent_1',
-      handle: 'luoke',
+      agentId: 'agent_1',
       displayName: '洛可',
       memberOrder: 1,
       runtimeSelection: {
@@ -763,97 +685,23 @@ describe('task event projections', () => {
       admissible: true,
       presentMembers: [
         {
-          agentProfileId: unconfigured.id,
-          handle: unconfigured.handle,
+          agentId: unconfigured.agentId,
           displayName: unconfigured.displayName,
           memberOrder: 0,
           runtimeConfigured: false,
           runtimeReadiness: 'runtime_not_configured'
         },
         {
-          agentProfileId: configured.id,
-          handle: configured.handle,
+          agentId: configured.agentId,
           displayName: configured.displayName,
           memberOrder: 1,
           runtimeConfigured: true,
           runtimeReadiness: 'needs_attention'
         }
       ],
-      initialLeadAgentProfileId: unconfigured.id,
+      initialLeadAgentId: unconfigured.agentId,
       blockers: []
     })
-  })
-
-  it('resolves member-name mentions and keeps legacy handles compatible without routing email text', () => {
-    const candidates = [
-      { agentProfileId: 'agent_1', handle: 'luoke', displayName: '洛可', avatarRef: null },
-      { agentProfileId: 'agent_2', handle: 'muwa', displayName: '沐瓦', avatarRef: null }
-    ]
-
-    expect(resolveMentionedAgentIds('@沐瓦 请实现，@洛可 请复核；再次 @沐瓦', candidates)).toEqual([
-      'agent_2',
-      'agent_1'
-    ])
-    expect(resolveMentionedAgentIds('@muwa 请处理旧消息', candidates)).toEqual(['agent_2'])
-    expect(resolveMentionedAgentIds('发送到 dev@muwa.example.com', candidates)).toEqual([])
-    expect(mentionQueryAtCaret('请 @沐', 4)).toEqual({ start: 2, end: 4, query: '沐' })
-    expect(shouldResetMentionActiveOption(
-      { start: 2, end: 4, query: '沐' },
-      { start: 2, end: 4, query: '沐' }
-    )).toBe(false)
-    expect(shouldResetMentionActiveOption(
-      { start: 2, end: 4, query: '沐' },
-      { start: 2, end: 5, query: '沐瓦' }
-    )).toBe(true)
-  })
-
-  it('renders legacy mention handles as names without exposing a parenthesized handle', () => {
-    const candidates = [
-      { agentProfileId: 'agent_1', handle: 'luoke', displayName: '洛可', avatarRef: null },
-      { agentProfileId: 'agent_2', handle: 'muwa', displayName: '沐瓦', avatarRef: null },
-      { agentProfileId: 'agent_3', handle: 'mianzhi', displayName: '眠枝', avatarRef: null }
-    ]
-    expect(formatMentionDisplayText('@luoke @muwa @mianzhi 报个到', candidates))
-      .toBe('@洛可 @沐瓦 @眠枝 报个到')
-    expect(formatMentionDisplayText('邮箱 dev@muwa.example.com 和未知队员 @other 不变', candidates))
-      .toBe('邮箱 dev@muwa.example.com 和未知队员 @other 不变')
-
-    const duplicateNames = [
-      ...candidates,
-      { agentProfileId: 'agent_1-2', handle: 'luoke2', displayName: '洛可', avatarRef: null }
-    ]
-    expect(formatMentionDisplayText('@luoke @luoke2 请分别确认', duplicateNames))
-      .toBe('@洛可 @洛可 请分别确认')
-  })
-
-  it('offers every present Camp member independently from Runtime readiness', () => {
-    const ready = {
-      ...agentProfile(),
-      runtimeReadiness: { status: 'ready' as const, blockers: [] }
-    }
-    const unready = {
-      ...agentProfile(),
-      id: 'agent_1',
-      handle: 'luoke',
-      displayName: '洛可'
-    }
-    const members: CampSnapshot['members'] = [
-      {
-        agentProfileId: ready.id, handle: ready.handle, displayName: ready.displayName,
-        avatarRef: null, teamRole: '开发者', accent: '#39777a', membershipStatus: 'active', profilePresence: 'present',
-        memberOrder: 0, isDefaultLead: false, version: 1
-      },
-      {
-        agentProfileId: unready.id, handle: unready.handle, displayName: unready.displayName,
-        avatarRef: null, teamRole: 'Lead', accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'present',
-        memberOrder: 1, isDefaultLead: true, version: 1
-      }
-    ]
-
-    expect(readyCampMentionCandidates(members, [ready, unready])).toEqual([
-      { agentProfileId: 'agent_2', handle: 'muwa', displayName: '沐瓦', avatarRef: null },
-      { agentProfileId: 'agent_1', handle: 'luoke', displayName: '洛可', avatarRef: null }
-    ])
   })
 
   it('orders Camp navigation by the authoritative activity sequence', () => {
@@ -921,7 +769,6 @@ describe('task event projections', () => {
           }]
         }]
       },
-      agents: [],
       activeCampId: 'camp-project',
       pins: [
         { kind: 'camp', targetKey: 'camp-quick-chat', pinnedAt: '2026-07-30T10:00:00Z' },
@@ -1002,7 +849,6 @@ describe('task event projections', () => {
           recentCamps: [makeCamp('plain', 'none'), makeCamp('unread', 'unread_completed'), makeCamp('running', 'loading')]
         }]
       },
-      agents: [],
       activeCampId: 'plain',
       onNewConversation: () => undefined,
       onMembers: () => undefined,
@@ -1044,7 +890,6 @@ describe('task event projections', () => {
       view: 'settings',
       state: 'ready',
       navigation: null,
-      agents: [],
       activeCampId: null,
       settingsSection: 'diagnostics',
       onNewConversation: () => undefined,
@@ -1123,7 +968,6 @@ describe('task event projections', () => {
           recentCamps: []
         }]
       },
-      agents: [],
       activeCampId: null,
       memberSidebar: createElement('section', { 'aria-label': '队员名册' }, '唯一队员名册'),
       onNewConversation: () => undefined,
@@ -1151,21 +995,21 @@ describe('task event projections', () => {
     const profile = agentProfile()
     const unreadyProfile: AgentProfile = {
       ...profile,
-      id: 'agent_1',
+      agentId: 'agent_1',
       displayName: '洛可',
       runtimePreference: null,
       runtimeReadiness: { status: 'runtime_not_configured', blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 19,
+      schemaVersion: 21,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-1', title: 'Lead 调整', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
-        defaultLeadAgentId: 'agent_1', status: 'active',
+        defaultLeadAgentId: 'agent_1',
         version: 2, createdAt: '2026-07-22T00:00:00Z', updatedAt: '2026-07-22T00:00:00Z'
       },
       members: [{
-        agentProfileId: 'agent_1', handle: 'luoke', displayName: '洛可', teamRole: 'Lead',
+        agentId: 'agent_1', displayName: '洛可', teamRole: 'Lead',
         avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'present', memberOrder: 0,
         isDefaultLead: true, version: 1
       }],
@@ -1188,7 +1032,7 @@ describe('task event projections', () => {
       runtimeRecovery: {
         campId: 'camp-1',
         targets: [{
-          agentProfileId: 'agent_1',
+          agentId: 'agent_1',
           blockerCode: 'runtime_not_configured'
         }]
       },
@@ -1226,7 +1070,7 @@ describe('task event projections', () => {
       status: 'rejected' as const,
       code: 'agent_run.runtime_not_ready',
       payload: {
-        agentProfileId: 'agent_2',
+        agentId: 'agent_2',
         conversationId: 'conversation-1',
         blockerCode: 'runtime_authentication_required',
         detail: 'raw runtime detail'
@@ -1238,7 +1082,7 @@ describe('task event projections', () => {
     expect(runtimeRecoveryFromCommandResult('camp-1', result)).toEqual({
       campId: 'camp-1',
       targets: [{
-        agentProfileId: 'agent_2',
+        agentId: 'agent_2',
         blockerCode: 'runtime_authentication_required'
       }]
     })
@@ -1255,24 +1099,24 @@ describe('task event projections', () => {
 
   it('summarizes empty Camp runtime readiness without inventing Ready state', () => {
     const member = {
-      agentProfileId: 'agent_1', handle: 'luoke', displayName: '洛可', teamRole: 'Lead',
+      agentId: 'agent_1', displayName: '洛可', teamRole: 'Lead',
       avatarRef: null, accent: '#D56A4A', membershipStatus: 'active' as const,
       profilePresence: 'present' as const, memberOrder: 0, isDefaultLead: true,
       version: 1
     }
     const ready = {
       ...agentProfile(),
-      id: member.agentProfileId,
+      agentId: member.agentId,
       runtimeReadiness: { status: 'ready' as const, blockers: [] }
     }
     const unready = {
       ...ready,
-      id: 'agent_2',
+      agentId: 'agent_2',
       runtimeReadiness: { status: 'needs_attention' as const, blockers: [] }
     }
     const secondMember = {
       ...member,
-      agentProfileId: unready.id,
+      agentId: unready.agentId,
       displayName: '沐瓦',
       isDefaultLead: false,
       memberOrder: 1
@@ -1287,21 +1131,20 @@ describe('task event projections', () => {
   it('keeps the Camp composer interactive when reconciliation leaves no Default Lead', () => {
     const profile: AgentProfile = {
       ...agentProfile(),
-      id: 'agent_1',
-      handle: 'luoke',
+      agentId: 'agent_1',
       displayName: '洛可',
       presence: 'away'
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 19,
+      schemaVersion: 21,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-empty', title: '暂无可用队员', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
-        defaultLeadAgentId: null, status: 'active',
+        defaultLeadAgentId: null,
         version: 2, createdAt: '2026-07-27T00:00:00Z', updatedAt: '2026-07-27T00:00:00Z'
       },
       members: [{
-        agentProfileId: profile.id, handle: profile.handle, displayName: profile.displayName, teamRole: 'Lead',
+        agentId: profile.agentId, displayName: profile.displayName, teamRole: 'Lead',
         avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'away', memberOrder: 0,
         isDefaultLead: false, version: 1
       }],
@@ -1341,20 +1184,20 @@ describe('task event projections', () => {
   it('renders a copy action for user messages and live Agent execution evidence', () => {
     const profile = {
       ...agentProfile(),
-      id: 'agent_2',
+      agentId: 'agent_2',
       displayName: '沐瓦',
       runtimeReadiness: { status: 'ready' as const, blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 19,
+      schemaVersion: 21,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-live', title: '实现功能', projectBindingKind: 'directory', projectPath: '/repo',
-        defaultLeadAgentId: 'agent_2', status: 'active',
+        defaultLeadAgentId: 'agent_2',
         version: 1, createdAt: '2026-07-28T05:00:00Z', updatedAt: '2026-07-28T05:01:00Z'
       },
       members: [{
-        agentProfileId: 'agent_2', handle: 'muwa', displayName: '沐瓦', teamRole: '开发者',
+        agentId: 'agent_2', displayName: '沐瓦', teamRole: '开发者',
         avatarRef: null, accent: '#39777a', membershipStatus: 'active', profilePresence: 'present',
         memberOrder: 0, isDefaultLead: true, version: 1
       }],
@@ -1365,12 +1208,12 @@ describe('task event projections', () => {
         sourceAgentRunId: null, body: '请 @沐瓦 实现复制。',
         content: [
           { kind: 'text', text: '请 ' },
-          { kind: 'member_mention', agentProfileId: 'agent_2' },
+          { kind: 'member_mention', agentId: 'agent_2' },
           { kind: 'text', text: ' 实现复制。' }
         ],
         addressMode: 'explicit',
         attachments: [],
-        addressedAgentProfileIds: ['agent_2'], replyToCampMessageId: null,
+        addressedAgentIds: ['agent_2'], replyToCampMessageId: null,
         campTurnId: 'turn-1', presentation: null, createdAt: '2026-07-28T05:00:00Z'
       }],
       turns: [{
@@ -1381,7 +1224,7 @@ describe('task event projections', () => {
       }],
       agentRuns: [{
         id: 'run-muwa', campTurnId: 'turn-1', conversationId: 'conversation-muwa',
-        agentProfileId: 'agent_2', taskId: null, responsibilityKey: 'direct:agent_2',
+        agentId: 'agent_2', taskId: null, responsibilityKey: 'direct:agent_2',
         responsibilityGeneration: 0, purpose: '实现复制', expectedOutput: '完成并验证',
         completionRole: 'required', status: 'running', waitReason: null, executionEpoch: 1,
         permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct',
@@ -1580,7 +1423,7 @@ describe('task event projections', () => {
           authorType: 'agent' as const, authorId: 'agent_2',
           sourceAgentRunId: 'run-muwa', body: '复制入口已完成。', content: null, addressMode: 'broadcast' as const,
           attachments: [],
-          addressedAgentProfileIds: [], replyToCampMessageId: 'message-user',
+          addressedAgentIds: [], replyToCampMessageId: 'message-user',
           campTurnId: 'turn-1', presentation: null, createdAt: '2026-07-28T05:02:00Z'
         }],
         turns: snapshot.turns.map((turn) => ({
@@ -1692,11 +1535,11 @@ describe('task event projections', () => {
   it('keeps concurrent Runtime approvals in one dock directly above the composer', () => {
     const profiles = [{
       ...agentProfile(),
-      id: 'agent_1',
+      agentId: 'agent_1',
       displayName: '洛可'
     }, {
       ...agentProfile(),
-      id: 'agent_2',
+      agentId: 'agent_2',
       displayName: '沐瓦'
     }]
     const approvals: ActionApprovalView[] = profiles.map((profile, index) => ({
@@ -1707,7 +1550,7 @@ describe('task event projections', () => {
       canonicalInput: { command: index === 0 ? 'pnpm test' : 'pnpm build' },
       reason: 'Agent 运行时需要用户确认。',
       agentRunId: `run-${index + 1}`,
-      agentProfileId: profile.id,
+      agentId: profile.agentId,
       adapterKind: 'codex-cli',
       nativeMethod: 'item/commandExecution/requestApproval',
       requestDigest: `digest-${index + 1}`,
@@ -1729,16 +1572,15 @@ describe('task event projections', () => {
       resolvedAt: null
     }))
     const snapshot: CampSnapshot = {
-      schemaVersion: 19,
+      schemaVersion: 21,
       throughGlobalSequence: 2,
       camp: {
         id: 'camp-approval', title: '审批停靠区', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
-        defaultLeadAgentId: 'agent_1', status: 'active',
+        defaultLeadAgentId: 'agent_1',
         version: 1, createdAt: '2026-07-30T03:00:00Z', updatedAt: '2026-07-30T03:00:01Z'
       },
       members: profiles.map((profile, index) => ({
-        agentProfileId: profile.id,
-        handle: profile.handle,
+        agentId: profile.agentId,
         displayName: profile.displayName,
         teamRole: index === 0 ? 'Lead' : '开发者',
         avatarRef: null,
@@ -1786,7 +1628,7 @@ describe('task event projections', () => {
       content: null,
       attachments: [],
       addressMode: 'broadcast' as const,
-      addressedAgentProfileIds: [],
+      addressedAgentIds: [],
       replyToCampMessageId: null,
       campTurnId: null,
       presentation: {
@@ -1829,19 +1671,19 @@ describe('task event projections', () => {
     expect(projected.map((item) => item.id)).toEqual(['inbox-delivered'])
 
     const snapshot: CampSnapshot = {
-      schemaVersion: 19,
+      schemaVersion: 21,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-a2a', title: 'Agent 协作', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
-        defaultLeadAgentId: 'agent_1', status: 'active',
+        defaultLeadAgentId: 'agent_1',
         version: 1, createdAt: '2026-07-30T03:00:00Z', updatedAt: '2026-07-30T03:00:01Z'
       },
       members: [{
-        agentProfileId: 'agent_1', handle: 'luoke', displayName: '洛可', teamRole: 'Lead',
+        agentId: 'agent_1', displayName: '洛可', teamRole: 'Lead',
         avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'present',
         memberOrder: 0, isDefaultLead: true, version: 1
       }, {
-        agentProfileId: 'agent_2', handle: 'muwa', displayName: '沐瓦', teamRole: '开发者',
+        agentId: 'agent_2', displayName: '沐瓦', teamRole: '开发者',
         avatarRef: null, accent: '#39777a', membershipStatus: 'active', profilePresence: 'present',
         memberOrder: 1, isDefaultLead: false, version: 1
       }],
@@ -1868,14 +1710,12 @@ describe('task event projections', () => {
       projectName: null,
       agents: [{
         ...agentProfile(),
-        id: 'agent_1',
-        handle: 'luoke',
+        agentId: 'agent_1',
         displayName: '洛可',
         runtimeReadiness: { status: 'ready', blockers: [] }
       }, {
         ...agentProfile(),
-        id: 'agent_2',
-        handle: 'muwa',
+        agentId: 'agent_2',
         displayName: '沐瓦',
         runtimeReadiness: { status: 'ready', blockers: [] }
       }],
@@ -1918,15 +1758,15 @@ describe('task event projections', () => {
 
   it('renders lightweight Task records as editable long-lived responsibilities', () => {
     const snapshot: CampSnapshot = {
-      schemaVersion: 19,
+      schemaVersion: 21,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-task', title: 'Task 管理', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
-        defaultLeadAgentId: 'agent_2', status: 'active',
+        defaultLeadAgentId: 'agent_2',
         version: 1, createdAt: '2026-07-23T00:00:00Z', updatedAt: '2026-07-23T00:00:00Z'
       },
       members: [{
-        agentProfileId: 'agent_2', handle: 'muwa', displayName: '沐瓦', teamRole: '开发者',
+        agentId: 'agent_2', displayName: '沐瓦', teamRole: '开发者',
         avatarRef: null, accent: '#39777a', membershipStatus: 'active', profilePresence: 'present', memberOrder: 0,
         isDefaultLead: true, version: 1
       }],
@@ -1955,17 +1795,6 @@ describe('task event projections', () => {
     expect(markup).not.toContain('acceptanceCriteria')
   })
 
-  it('coalesces streamed agent text by item', () => {
-    const conversation = buildConversation([
-      event(1, 'user.message', { text: '修复设置页' }),
-      event(2, 'agent.text.delta', { turnId: 'turn-1', itemId: 'message-1', delta: '我先' }),
-      event(3, 'agent.text.delta', { turnId: 'turn-1', itemId: 'message-1', delta: '检查。' })
-    ])
-
-    expect(conversation).toHaveLength(2)
-    expect(conversation[1]?.text).toBe('我先检查。')
-  })
-
   it('explains context blockers and A2A delivery without relying on color', () => {
     expect(agentRunPresentation({ status: 'waiting', waitReason: 'context_compaction' })).toEqual({
       label: '压缩上下文',
@@ -1989,18 +1818,6 @@ describe('task event projections', () => {
       tone: 'neutral'
     })
     expect(formatByteSize(4_096)).toBe('4.0 KB')
-  })
-
-  it('coalesces command output without hiding file activity', () => {
-    const activities = buildActivities([
-      event(1, 'command.output.delta', { itemId: 'command-1', delta: 'pass ' }),
-      event(2, 'command.output.delta', { itemId: 'command-1', delta: '12 tests' }),
-      event(3, 'file.change.updated', { itemId: 'patch-1' })
-    ])
-
-    expect(activities).toHaveLength(2)
-    expect(activities[0]?.detail).toBe('pass 12 tests')
-    expect(activities[1]?.kind).toBe('file')
   })
 
   it('omits live reasoning summaries while projecting narration, plans and execution steps', () => {
@@ -2261,75 +2078,6 @@ describe('task event projections', () => {
     ])
   })
 
-  it('projects a command lifecycle as one atomic activity', () => {
-    const activities = buildActivities([
-      event(1, 'activity.started', {
-        item: {
-          id: 'command-1',
-          type: 'commandExecution',
-          command: 'pnpm test',
-          cwd: '/repo',
-          status: 'inProgress'
-        }
-      }),
-      event(2, 'command.output.delta', { itemId: 'command-1', delta: 'running tests…\n' }),
-      event(3, 'activity.completed', {
-        item: {
-          id: 'command-1',
-          type: 'commandExecution',
-          command: 'pnpm test',
-          cwd: '/repo',
-          status: 'completed',
-          durationMs: 1234,
-          exitCode: 0,
-          aggregatedOutput: 'pass 12 tests'
-        }
-      })
-    ])
-
-    expect(activities).toHaveLength(1)
-    expect(activities[0]).toMatchObject({
-      kind: 'command',
-      status: 'completed',
-      command: 'pnpm test',
-      cwd: '/repo',
-      durationMs: 1234,
-      exitCode: 0,
-      detail: 'pass 12 tests'
-    })
-  })
-
-  it('removes terminal color control sequences from visible output', () => {
-    const activities = buildActivities([
-      event(1, 'command.output.delta', {
-        itemId: 'command-1',
-        delta: '\u001b[31mfailed\u001b[0m\n'
-      }),
-      event(2, 'activity.completed', {
-        item: {
-          id: 'command-1',
-          type: 'commandExecution',
-          status: 'completed',
-          exitCode: 1,
-          aggregatedOutput: '\u001b[31mfailed\u001b[0m'
-        }
-      })
-    ])
-
-    expect(stripAnsi('\u001b[32mpass\u001b[0m')).toBe('pass')
-    expect(activities[0]).toMatchObject({ status: 'failed', detail: 'failed', exitCode: 1 })
-  })
-
-  it('surfaces recovery boundaries in the conversation', () => {
-    const conversation = buildConversation([
-      event(1, 'runtime.state', { status: 'recovering' }, 'application/restarted'),
-      event(2, 'runtime.state', { sessionGeneration: 2 }, 'session/generation-changed')
-    ])
-
-    expect(conversation.map((item) => item.kind)).toEqual(['system', 'system'])
-    expect(conversation[1]?.text).toContain('Session Generation')
-  })
-
   it('classifies diff lines without treating file headers as changes', () => {
     expect(diffLineKind('--- a/file.ts')).toBe('metadata')
     expect(diffLineKind('+++ b/file.ts')).toBe('metadata')
@@ -2365,40 +2113,6 @@ describe('task event projections', () => {
       { code: 'Δ', label: '修改', path: 'src/App.tsx', kind: 'change' },
       { code: 'A', label: '新增', path: 'src/new.ts', kind: 'addition' }
     ])
-  })
-
-  it('explains approval scope and each decision consequence', () => {
-    const approval: Approval = {
-      id: 'approval-1',
-      taskId: 'task-1',
-      nativeRequestId: 'native-1',
-      approvalType: 'execCommandApproval',
-      reason: '需要运行现有测试验证变更。',
-      request: { command: 'pnpm test', cwd: '/repo' },
-      status: 'pending',
-      decision: null,
-      requestedAt: '2026-07-17T10:00:00Z',
-      resolvedAt: null
-    }
-
-    const summary = summarizeApproval(approval)
-    expect(summary.capability).toBe('执行终端命令')
-    expect(summary.scope).toContain('pnpm test')
-    expect(summary.scope).toContain('/repo')
-    expect(summary.blockingImpact).toContain('Turn 已暂停')
-    expect(summary.allowOnceEffect).not.toBe(summary.allowSessionEffect)
-    expect(summary.declineEffect).not.toBe(summary.cancelEffect)
-  })
-
-  it('describes Quick Chat state without implying project access', () => {
-    const summary = taskStateSummary('preparing', 0, undefined, 'quick_chat')
-    expect(summary).toContain('快速对话上下文')
-    expect(summary).toContain('不会读取用户项目')
-  })
-
-  it('keeps queued Task state distinct from an already running AgentRun', () => {
-    expect(taskStateSummary('pending', 0)).toContain('等待 Scheduler')
-    expect(taskStateSummary('in_progress', 0)).toContain('已经开始执行')
   })
 
   it('keeps member selection and Runtime binding explicit', () => {
@@ -2546,7 +2260,7 @@ describe('task event projections', () => {
     expect(markup).toContain('共同约定')
     expect(markup).toContain('伙伴经验')
     expect(markup).toContain('协作默契')
-    expect(markup).toContain('伙伴形成')
+    expect(markup).toContain('队员形成')
     expect(markup).toContain('Hearth 待确认')
     expect(markup).toContain('建议复核')
     expect(markup).toContain('已停止沿用')
@@ -2563,7 +2277,7 @@ describe('task event projections', () => {
   it('detects duplicate member names independently from hidden handles', () => {
     const existing = agentProfile()
     expect(hasDuplicateMemberDisplayName('  沐瓦  ', null, [existing])).toBe(true)
-    expect(hasDuplicateMemberDisplayName('沐瓦', existing.id, [existing])).toBe(false)
+    expect(hasDuplicateMemberDisplayName('沐瓦', existing.agentId, [existing])).toBe(false)
     expect(hasDuplicateMemberDisplayName('洛可', null, [existing])).toBe(false)
   })
 
@@ -2755,7 +2469,7 @@ describe('task event projections', () => {
 
 function agentProfile(): AgentProfile {
   return {
-    id: 'agent_2', handle: 'muwa', displayName: '沐瓦', avatarRef: null,
+    agentId: 'agent_2', displayName: '沐瓦', avatarRef: null,
     accent: '#39777a', teamRole: '开发者',
     professionalResponsibilities: '负责实现和验证。', personalityTraits: ['严谨'],
     workingPrinciples: '遵循项目规范。', growthTopic: '',

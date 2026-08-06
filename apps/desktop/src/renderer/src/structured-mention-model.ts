@@ -1,6 +1,6 @@
 export type StructuredMentionSegment =
   | { kind: 'text'; text: string }
-  | { kind: 'member_mention'; agentProfileId: string }
+  | { kind: 'member_mention'; agentId: string }
   | { kind: 'all_members_mention' }
 
 export type StructuredMentionContent = StructuredMentionSegment[]
@@ -37,7 +37,7 @@ export function normalizeStructuredMentionContent(
     if (segment.kind === 'member_mention') {
       normalized.push({
         kind: 'member_mention',
-        agentProfileId: segment.agentProfileId
+        agentId: segment.agentId
       })
       continue
     }
@@ -99,12 +99,12 @@ export function pasteStructuredPlainText(
 
 export function insertMemberMention(
   state: StructuredMentionEditorState,
-  agentProfileId: string
+  agentId: string
 ): StructuredMentionEditorState {
-  if (!agentProfileId.trim()) throw new Error('Member Mention requires an Agent Profile ID')
+  if (!agentId.trim()) throw new Error('Member Mention requires an Agent Profile ID')
   return replaceStructuredSelection(state, [{
     kind: 'member_mention',
-    agentProfileId
+    agentId
   }])
 }
 
@@ -238,7 +238,7 @@ function sliceStructuredMentionContent(
 
     if (start <= segmentStart && end >= segmentEnd) {
       sliced.push(segment.kind === 'member_mention'
-        ? { kind: 'member_mention', agentProfileId: segment.agentProfileId }
+        ? { kind: 'member_mention', agentId: segment.agentId }
         : { kind: 'all_members_mention' })
     }
   }

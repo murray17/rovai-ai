@@ -26,7 +26,7 @@ Renderer 合同；生产实现已重新打包，并通过 `pnpm accept:structure
 外部 HTML 原型、本文 `accepted` 状态或 ADR 状态本身不等于实现完成，实际
 证据记录在对应当前版本实施计划。
 
-v0.27 的成员身份 HTML 原型只提供六字段命名、基础/高级分组与排列参考；颜色、
+v0.27 的队员身份 HTML 原型只提供六字段命名、基础/高级分组与排列参考；颜色、
 组件、间距、响应式行为和整体视觉继续以 Arctic Dawn V3 为准，不能从原型反向覆盖
 现有设计系统。
 
@@ -46,7 +46,7 @@ v0.33 将 Camp 与可置顶 Project 的操作统一进三点菜单，并移除 P
 
 v0.37 以确认的 MCP v4 HTML 原型为定向输入，局部替代本文与 Arctic Dawn V3 中旧 MCP
 列表行、拆分 Stdio/HTTP 表单和自动初次扫描交互。生产页面继续使用现有设置侧栏和 Arctic
-Dawn Token，具体三段结构、成员 tofu、Server tofu 与 JSON Dialog 见
+Dawn Token，具体三段结构、队员 tofu、Server tofu 与 JSON Dialog 见
 [v0.37 MCP 生产设计](../versions/v0.37/production-design.md)。
 
 v0.38 将历史上“每次 Task 状态变化一张不可变边界卡”替换为“创建位置的一张实时 Task
@@ -83,7 +83,7 @@ v0.38 将历史上“每次 Task 状态变化一张不可变边界卡”替换�
 Agent 运行时、专业职责、工作准则和性格底色。它不是队员页链接，也不是全局 Toast。
 拖选形成文本选区时不得误触发弹窗；已移除或不可解析队员保持不可操作。
 
-`@所有成员` 同样可打开范围信息卡：历史消息读取发送时冻结的收件人 ID，Composer 读取
+`@所有队员` 同样可打开范围信息卡：历史消息读取发送时冻结的收件人 ID，Composer 读取
 当前可提及队员。点击外部或 `Esc` 关闭；键盘打开后 `Esc` 关闭必须把焦点返回原 Mention。
 普通手写、粘贴或旧消息中的 `@文字` 仍是普通文本。
 
@@ -152,7 +152,7 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
 7. **安全 Markdown。** Agent 公开正文使用经过清洗的 GFM；用户正文保持精确纯文本；
    Tool 输出使用结构化证据组件。
 8. **产品词汇稳定。** 普通 UI 使用“队员”“记忆”“Agent 运行时”“快速对话”，不使用
-   “成员”“长期记忆”“执行引擎”，也不泄漏 handle、Installation ID、裸 Runtime
+   “队员”“长期记忆”“执行引擎”，也不泄漏 handle、Installation ID、裸 Runtime
    或内部 binding。
 9. **没有假能力。** Runtime 未报告的进展、Approval 选项、MCP 控制或 Skill 加载不能
    由 Renderer 补造。

@@ -230,7 +230,7 @@ async function prepareRovaiConfig(projectedHttpUrl) {
         }
       },
       assignments: [serverId, projectedHttpServerId, projectedStdioServerId]
-        .map((assignedServerId) => ({ serverId: assignedServerId, agentProfileId: 'agent_1' }))
+        .map((assignedServerId) => ({ serverId: assignedServerId, agentId: 'agent_1' }))
     }
   }, null, 2)}\n`, { mode: 0o600 })
   await chmod(mcpConfigPath, 0o600)
@@ -243,11 +243,11 @@ async function configureRuntime(request, adapterKind) {
   if (!runtime.snapshot.models.some((model) => model.id === modelId)) {
     throw new Error(`${adapterKind} smoke model is unavailable: ${modelId}`)
   }
-  const profile = await request('agents.get', { agentProfileId: 'agent_1' })
+  const profile = await request('agents.get', { agentId: 'agent_1' })
   const configured = await request('agents.runtime.set', {
     commandId: crypto.randomUUID(),
     command: {
-      agentProfileId: 'agent_1',
+      agentId: 'agent_1',
       expectedVersion: profile.version,
       adapterKind,
       model: { mode: 'explicit', modelId, options: {} },
@@ -276,7 +276,7 @@ async function runProjectedTool(request, workspace, adapterKind, adapterMarker, 
     commandId: crypto.randomUUID(),
     workspace,
     body: toolInstructions.join('\n'),
-    address: { mode: 'explicit', agentProfileIds: ['agent_1'] },
+    address: { mode: 'explicit', agentIds: ['agent_1'] },
     purpose: `Verify ${adapterKind} preserves Runtime-native MCP and applies its declared same-name policy.`,
     expectedOutput: adapterKind === 'codex-cli'
       ? `All three Runtime-native markers for ${adapterMarker}`

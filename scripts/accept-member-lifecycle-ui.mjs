@@ -103,7 +103,7 @@ try {
   const freshPreflight = await request(running.cdp, 'camps.creationPreflight')
   assert(
     freshPreflight.admissible
-      && freshPreflight.initialLeadAgentProfileId === 'agent_1'
+      && freshPreflight.initialLeadAgentId === 'agent_1'
       && freshPreflight.presentMembers.length === 4
       && freshPreflight.presentMembers.every((member) => !member.runtimeConfigured),
     `Fresh no-Runtime preflight is unexpected: ${JSON.stringify(freshPreflight)}`
@@ -285,7 +285,7 @@ try {
   await waitForSelector(running.cdp, '.new-conversation-workspace', 30_000)
   await openMembers(running.cdp)
   const initialMemberOrder = (await request(running.cdp, 'agents.list'))
-    .map((profile) => profile.id)
+    .map((profile) => profile.agentId)
   await mouseClick(running.cdp, '.member-sidebar-actions button[aria-label="调整队员顺序"]')
   await waitForSelector(running.cdp, '[data-member-order-handle="agent_1"]')
   assert(
@@ -429,7 +429,7 @@ try {
   await waitForExpression(running.cdp,
     `document.activeElement?.textContent?.trim() === '编辑身份'`)
   assert(
-    (await request(running.cdp, 'agents.get', { agentProfileId: 'agent_1' })).displayName === '小狐狸',
+    (await request(running.cdp, 'agents.get', { agentId: 'agent_1' })).displayName === '小狐狸',
     'Escaping the identity dialog persisted an unsaved theme-switch draft'
   )
   await waitForExpression(running.cdp, `!document.querySelector('.app-toast')`, 5_000)
@@ -498,7 +498,7 @@ try {
   const configuredPreflight = await request(running.cdp, 'camps.creationPreflight')
   assert(
     configuredPreflight.admissible
-      && configuredPreflight.initialLeadAgentProfileId === 'agent_1'
+      && configuredPreflight.initialLeadAgentId === 'agent_1'
       && configuredPreflight.presentMembers.length === 4,
     `Configured Runtime did not select the first present Profile for a new Camp: ${JSON.stringify(configuredPreflight)}`
   )
@@ -507,7 +507,7 @@ try {
   await selectMember(running.cdp, '咕咕')
   await openMemberRuntimeTab(running.cdp)
   const runtimeBeforeDraft = await request(running.cdp, 'agents.get', {
-    agentProfileId: 'agent_3'
+    agentId: 'agent_3'
   })
   const runtimeParametersState = await evaluate(running.cdp, `(() => {
     const parameters = document.querySelector('.member-runtime-parameters')
@@ -776,7 +776,7 @@ try {
   await openMembers(running.cdp)
   await selectMember(running.cdp, '小兔')
   const qiluBeforeRemoval = await request(running.cdp, 'agents.get', {
-    agentProfileId: 'agent_4'
+    agentId: 'agent_4'
   })
   assert(
     qiluBeforeRemoval.runtimeSelection?.adapterKind === 'codex-cli'
@@ -810,11 +810,11 @@ try {
         === qiluBeforeRemoval.runtimePreference.installationId
       && qiluAfterRemoval.selectedRuntimeAdapterKind
         === qiluBeforeRemoval.runtimeSelection.adapterKind
-      && !activeAfterRemoval.some((profile) => profile.id === 'agent_4'),
+      && !activeAfterRemoval.some((profile) => profile.agentId === 'agent_4'),
     `Permanent removal did not retain identity/Runtime or hide the active Profile: ${JSON.stringify(qiluAfterRemoval)}`
   )
   snapshot = await request(running.cdp, 'camps.snapshot', { campId })
-  const historicQilu = snapshot.members.find((member) => member.agentProfileId === 'agent_4')
+  const historicQilu = snapshot.members.find((member) => member.agentId === 'agent_4')
   assert(
     historicQilu?.profilePresence === 'removed'
       && historicQilu.displayName === qiluBeforeRemoval.displayName
@@ -822,8 +822,8 @@ try {
     `Historical Camp identity did not retain the removed member: ${JSON.stringify(historicQilu)}`
   )
 
-  for (const agentProfileId of ['agent_1', 'agent_2', 'agent_3']) {
-    await setPresence(running.cdp, agentProfileId, 'away')
+  for (const agentId of ['agent_1', 'agent_2', 'agent_3']) {
+    await setPresence(running.cdp, agentId, 'away')
   }
   await reloadRenderer(running.cdp)
   await openCamp(running.cdp, campTitle)
@@ -858,7 +858,7 @@ try {
     `Camp did not inherit the first present member by Member Order: ${JSON.stringify(snapshot.camp)}`
   )
   assert(
-    snapshot.members.find((member) => member.agentProfileId === 'agent_2')
+    snapshot.members.find((member) => member.agentId === 'agent_2')
       ?.profilePresence === 'present',
     'Inherited Lead is not present in the Camp snapshot'
   )
@@ -878,7 +878,7 @@ try {
   assert(
     snapshot.camp.defaultLeadAgentId === 'agent_2'
       && !((await request(running.cdp, 'agents.list'))
-        .some((profile) => profile.id === 'agent_4'))
+        .some((profile) => profile.agentId === 'agent_4'))
       && (await historicalProfile(
         join(freshDataDir, 'rovai.sqlite'),
         'agent_4'
@@ -895,7 +895,7 @@ try {
 
   running = await launchApp(upgradeDataDir, firstPort + 4, 1440, 920)
   const upgradedProfiles = await request(running.cdp, 'agents.list')
-  const upgradedById = new Map(upgradedProfiles.map((profile) => [profile.id, profile]))
+  const upgradedById = new Map(upgradedProfiles.map((profile) => [profile.agentId, profile]))
   assert(
     upgradedById.get('agent_1')?.presence === 'present'
       && upgradedById.get('agent_2')?.presence === 'away'
@@ -928,10 +928,10 @@ try {
   running = await launchApp(upgradeDataDir, firstPort + 5, 1040, 700)
   const restartedUpgrade = await request(running.cdp, 'agents.list')
   assert(
-    restartedUpgrade.find((profile) => profile.id === 'agent_1')?.presence === 'present'
-      && restartedUpgrade.find((profile) => profile.id === 'agent_2')?.presence === 'away'
-      && restartedUpgrade.find((profile) => profile.id === 'agent_4')?.presence === 'away'
-      && restartedUpgrade.find((profile) => profile.id === 'agent_1')?.displayName === '升级小狐狸',
+    restartedUpgrade.find((profile) => profile.agentId === 'agent_1')?.presence === 'present'
+      && restartedUpgrade.find((profile) => profile.agentId === 'agent_2')?.presence === 'away'
+      && restartedUpgrade.find((profile) => profile.agentId === 'agent_4')?.presence === 'away'
+      && restartedUpgrade.find((profile) => profile.agentId === 'agent_1')?.displayName === '升级小狐狸',
     `v0.14 migration state did not survive restart: ${JSON.stringify(restartedUpgrade)}`
   )
 
@@ -1009,10 +1009,10 @@ async function captureThemeMatrix(cdp, prefix, selectedName, directory) {
   return result
 }
 
-async function installAcceptanceRuntime(databasePath, agentProfileIds) {
+async function installAcceptanceRuntime(databasePath, agentIds) {
   const modelCatalog = sqlLiteral(acceptanceModelCatalog)
   const permissionOptions = sqlLiteral(acceptancePermissionOptions)
-  const ids = agentProfileIds.map(sqlLiteral).join(', ')
+  const ids = agentIds.map(sqlLiteral).join(', ')
   await runSql(databasePath, `
     PRAGMA foreign_keys = ON;
     DELETE FROM adapter_installation
@@ -1062,14 +1062,14 @@ async function createCampFixture(databasePath, id, title, projectPath) {
       'agent_1', 'active', 1, 1, datetime('now'), datetime('now')
     );
     INSERT INTO camp_member(
-      camp_id, agent_profile_id, status, capability_overrides_json,
+      camp_id, agent_id, status, capability_overrides_json,
       version, joined_at
     )
     SELECT ${sqlLiteral(id)}, id, 'active', '{}', 1, datetime('now')
     FROM agent_profile
     WHERE id IN ('agent_1', 'agent_2', 'agent_3', 'agent_4');
     INSERT INTO conversation(
-      id, camp_id, agent_profile_id, version, created_at, updated_at
+      id, camp_id, agent_id, version, created_at, updated_at
     )
     SELECT 'conversation-lifecycle-' || handle, ${sqlLiteral(id)}, id,
            1, datetime('now'), datetime('now')
@@ -1077,7 +1077,7 @@ async function createCampFixture(databasePath, id, title, projectPath) {
     WHERE id IN ('agent_1', 'agent_2', 'agent_3', 'agent_4');
     INSERT INTO camp_message(
       id, camp_id, sequence, author_type, author_id, body, address_mode,
-      addressed_agent_profile_ids_json, version, created_at, updated_at
+      addressed_agent_ids_json, version, created_at, updated_at
     ) VALUES (
       'message-lifecycle-user', ${sqlLiteral(id)}, 1, 'user', 'local-user',
       '@luoke 验证用户消息复制', 'explicit', '["agent_1"]',
@@ -1109,34 +1109,34 @@ async function simulateV14Database(databasePath) {
   `)
 }
 
-async function setPresence(cdp, agentProfileId, presence) {
-  const profile = await request(cdp, 'agents.get', { agentProfileId })
+async function setPresence(cdp, agentId, presence) {
+  const profile = await request(cdp, 'agents.get', { agentId })
   const result = await request(cdp, 'agents.presence.set', {
     commandId: crypto.randomUUID(),
     command: {
-      agentProfileId,
+      agentId,
       expectedVersion: profile.version,
       presence
     }
   })
   assert(result.status === 'applied',
-    `Could not set ${agentProfileId} Presence to ${presence}: ${JSON.stringify(result)}`)
+    `Could not set ${agentId} Presence to ${presence}: ${JSON.stringify(result)}`)
 }
 
-async function waitForProfile(cdp, agentProfileId, predicate, timeoutMs = 30_000) {
+async function waitForProfile(cdp, agentId, predicate, timeoutMs = 30_000) {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
-    const profile = await request(cdp, 'agents.get', { agentProfileId })
+    const profile = await request(cdp, 'agents.get', { agentId })
     if (predicate(profile)) return profile
     await wait(100)
   }
-  throw new Error(`AgentProfile ${agentProfileId} did not reach the expected state`)
+  throw new Error(`AgentProfile ${agentId} did not reach the expected state`)
 }
 
 async function waitForAgentOrder(cdp, expectedIds, timeoutMs = 30_000) {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
-    const ids = (await request(cdp, 'agents.list')).map((profile) => profile.id)
+    const ids = (await request(cdp, 'agents.list')).map((profile) => profile.agentId)
     if (JSON.stringify(ids) === JSON.stringify(expectedIds)) return
     await wait(100)
   }
@@ -1677,7 +1677,7 @@ async function migrationApplied(databasePath, version) {
   return Number(output.trim()) === 1
 }
 
-async function historicalProfile(databasePath, agentProfileId) {
+async function historicalProfile(databasePath, agentId) {
   const output = await runProcess('/usr/bin/sqlite3', [
     '-json',
     databasePath,
@@ -1690,11 +1690,11 @@ async function historicalProfile(databasePath, agentProfileId) {
              selected_runtime_adapter_kind AS selectedRuntimeAdapterKind,
              default_runtime_installation_id AS runtimeInstallationId
       FROM agent_profile
-      WHERE id = ${sqlLiteral(agentProfileId)}
+      WHERE id = ${sqlLiteral(agentId)}
     `
   ])
   const [profile] = JSON.parse(output)
-  assert(profile, `Historical Profile ${agentProfileId} was not retained`)
+  assert(profile, `Historical Profile ${agentId} was not retained`)
   return profile
 }
 

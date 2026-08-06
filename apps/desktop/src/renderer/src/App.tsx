@@ -53,7 +53,6 @@ import { SkillSettings } from './SkillSettings'
 import { McpSettings } from './McpSettings'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { MemoryLibrary } from './MemoryLibrary'
-import { formatMentionDisplayText } from './AgentMentionTextarea'
 import { localizeExecutionEngineTerms } from './product-copy'
 import {
   applyAppearanceSnapshot,
@@ -215,11 +214,11 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     if (view !== 'members') return
     const manageable = agents.filter((agent) => agent.presence !== 'removed' && agent.removedAt === null)
-    if (selectedMemberId && manageable.some((agent) => agent.id === selectedMemberId)) return
+    if (selectedMemberId && manageable.some((agent) => agent.agentId === selectedMemberId)) return
     const next = manageable.find((agent) => agent.presence === 'present')
       ?? manageable.find((agent) => agent.presence === 'away')
       ?? null
-    setSelectedMemberId(next?.id ?? null)
+    setSelectedMemberId(next?.agentId ?? null)
     setMemberTab('identity')
   }, [agents, selectedMemberId, view])
 
@@ -328,10 +327,10 @@ export function App(): React.JSX.Element {
       const notificationBoundary = await window.rovai.request<InAppNotificationInbox>(
         'notifications.inbox',
         { filter: 'all', limit: 1 }
-      ).then((inbox) => inbox.schemaVersion === 1 ? inbox.throughSequence : null)
+      ).then((inbox) => inbox.schemaVersion === 2 ? inbox.throughSequence : null)
         .catch(() => null)
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
-      if (snapshot.schemaVersion !== 19) throw new Error('Camp snapshot schema is incompatible')
+      if (snapshot.schemaVersion !== 21) throw new Error('Camp snapshot schema is incompatible')
       if (selectionGeneration !== campSelectionGeneration.current) return
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
@@ -368,7 +367,7 @@ export function App(): React.JSX.Element {
 
   const refreshActiveCampSnapshot = useCallback(async (campId: string): Promise<void> => {
     const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
-    if (snapshot.schemaVersion !== 19) throw new Error('Camp snapshot schema is incompatible')
+    if (snapshot.schemaVersion !== 21) throw new Error('Camp snapshot schema is incompatible')
     if (activeCampIdRef.current !== campId) return
     if (snapshot.throughGlobalSequence < campEventSequenceMarker.current) return
     campEventSequenceMarker.current = snapshot.throughGlobalSequence
@@ -544,7 +543,7 @@ export function App(): React.JSX.Element {
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', {
         campId
       })
-      if (snapshot.schemaVersion !== 19) throw new Error('Camp snapshot schema is incompatible')
+      if (snapshot.schemaVersion !== 21) throw new Error('Camp snapshot schema is incompatible')
       if (cancelled) return
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
@@ -683,9 +682,9 @@ export function App(): React.JSX.Element {
     else void requestMemberTransition(commit)
   }
 
-  const configureMemberRuntime = (agentProfileId: string): void => {
+  const configureMemberRuntime = (agentId: string): void => {
     setRuntimeRecovery(null)
-    setSelectedMemberId(agentProfileId)
+    setSelectedMemberId(agentId)
     setMemberTab('runtime')
     setMemberRuntimeFocusRequest((request) => request + 1)
     chooseView('members')
@@ -751,7 +750,7 @@ export function App(): React.JSX.Element {
       }
       await activateCamp(notification.camp.id, {
         preserveNotificationFocus: target !== null,
-        reconcileDefaultLead: notification.camp.status === 'active',
+        reconcileDefaultLead: notification.sourceAvailable,
         suppressErrors: true
       })
     })
@@ -872,7 +871,7 @@ export function App(): React.JSX.Element {
     }
   }
 
-  const changeDefaultLead = async (agentProfileId: string): Promise<void> => {
+  const changeDefaultLead = async (agentId: string): Promise<void> => {
     if (!activeCampId || campSnapshot?.camp.id !== activeCampId) return
     setBusy('change-default-lead')
     setError(null)
@@ -881,7 +880,7 @@ export function App(): React.JSX.Element {
         commandId: crypto.randomUUID(),
         command: {
           campId: activeCampId,
-          successorAgentId: agentProfileId,
+          successorAgentId: agentId,
           expectedVersion: campSnapshot.camp.version
         }
       })
@@ -974,7 +973,7 @@ export function App(): React.JSX.Element {
       ))
       void window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
         .then(async (snapshot) => {
-          if (snapshot.schemaVersion !== 19) throw new Error('Camp snapshot schema is incompatible')
+          if (snapshot.schemaVersion !== 21) throw new Error('Camp snapshot schema is incompatible')
           if (selectionGeneration !== campSelectionGeneration.current) return
           campEventSequenceMarker.current = snapshot.throughGlobalSequence
           setCampSnapshot(snapshot)
@@ -1072,7 +1071,7 @@ export function App(): React.JSX.Element {
         <>
           {memoryProposalNotice && (
             <div className="memory-proposal-notice" role="status">
-              <div><strong>伙伴提出了一条记忆建议</strong><span>提案尚未生效，你可以稍后在“记忆”中逐条确认。</span></div>
+              <div><strong>队员提出了一条记忆建议</strong><span>提案尚未生效，你可以稍后在“记忆”中逐条确认。</span></div>
               <div><button className="quiet-button compact" type="button" onClick={openMemoryProposals}>查看提案</button><button className="icon-button" type="button" aria-label="暂时忽略记忆提案提示" onClick={() => setMemoryProposalNotice(false)}>×</button></div>
             </div>
           )}
@@ -1099,7 +1098,6 @@ export function App(): React.JSX.Element {
         view={view}
         state={state}
         navigation={navigation}
-        agents={agents}
         activeCampId={activeCampId}
         pins={navigationPins}
         pinnedCampItems={pinnedCampItems}
@@ -1138,10 +1136,8 @@ export function App(): React.JSX.Element {
         onError={(nextError) => setError(errorMessage(nextError))}
       />
       {view === 'camp' && <AppHeader
-        campTitle={formatMentionDisplayText(
-          activeCamp?.title ?? (campSnapshot?.camp.id === activeCampId ? campSnapshot.camp.title : ''),
-          agents
-        ) || null}
+        campTitle={(activeCamp?.title
+          ?? (campSnapshot?.camp.id === activeCampId ? campSnapshot.camp.title : '')) || null}
         contextLabel={activeCampProject?.name ?? '快速对话'}
         camp={campSnapshot?.camp.id === activeCampId ? campSnapshot : null}
         stopping={activeCampStopping}
@@ -1559,15 +1555,15 @@ export function optimisticCampMessage(
   draft: CampComposerDraftView,
   createdAt = new Date().toISOString()
 ): CampMessageView {
-  const defaultLeadId = snapshot?.members.find((member) => member.isDefaultLead)?.agentProfileId
+  const defaultLeadId = snapshot?.members.find((member) => member.isDefaultLead)?.agentId
   const explicitlyMentionedIds = [...new Set(draft.content.flatMap((segment) =>
-    segment.kind === 'member_mention' ? [segment.agentProfileId] : []
+    segment.kind === 'member_mention' ? [segment.agentId] : []
   ))]
   const broadcast = draft.content.some((segment) => segment.kind === 'all_members_mention')
-  const addressedAgentProfileIds = broadcast
+  const addressedAgentIds = broadcast
     ? snapshot?.members
         .filter((member) => member.membershipStatus === 'active' && member.profilePresence === 'present')
-        .map((member) => member.agentProfileId) ?? []
+        .map((member) => member.agentId) ?? []
     : explicitlyMentionedIds.length > 0
       ? explicitlyMentionedIds
       : defaultLeadId ? [defaultLeadId] : []
@@ -1583,7 +1579,7 @@ export function optimisticCampMessage(
     content: draft.content,
     attachments: draft.attachments,
     addressMode: broadcast ? 'broadcast' : explicitlyMentionedIds.length > 0 ? 'explicit' : 'default',
-    addressedAgentProfileIds,
+    addressedAgentIds,
     replyToCampMessageId: null,
     campTurnId: null,
     presentation: null,
@@ -1626,25 +1622,24 @@ export function campCreationPreflightFromAgents(
 ): CampCreationPreflight {
   const presentMembers = agents
     .filter((agent) => agent.presence === 'present')
-    .sort((left, right) => left.memberOrder - right.memberOrder || left.id.localeCompare(right.id))
+    .sort((left, right) => left.memberOrder - right.memberOrder || left.agentId.localeCompare(right.agentId))
     .map((agent) => ({
-      agentProfileId: agent.id,
-      handle: agent.handle,
+      agentId: agent.agentId,
       displayName: agent.displayName,
       memberOrder: agent.memberOrder,
       runtimeConfigured: agent.runtimeSelection !== null,
       runtimeReadiness: agent.runtimeReadiness.status
     }))
-  const initialLeadAgentProfileId = presentMembers
+  const initialLeadAgentId = presentMembers
     .find((member) => member.runtimeReadiness === 'ready')
-    ?.agentProfileId ?? presentMembers[0]?.agentProfileId ?? null
+    ?.agentId ?? presentMembers[0]?.agentId ?? null
   const blockers: CampCreationPreflight['blockers'] = presentMembers.length === 0
     ? [{ code: 'no_present_members', detail: '当前没有在队的队员。' }]
     : []
   return {
     admissible: blockers.length === 0,
     presentMembers,
-    initialLeadAgentProfileId,
+    initialLeadAgentId,
     blockers
   }
 }
@@ -1703,12 +1698,12 @@ export function runtimeRecoveryFromCommandResult(
   result: StoredCommandResult
 ): CampRuntimeRecovery | null {
   if (result.status !== 'rejected' || result.code !== 'agent_run.runtime_not_ready') return null
-  const agentProfileId = stringField(result.payload, 'agentProfileId')
+  const agentId = stringField(result.payload, 'agentId')
   const blockerCode = stringField(result.payload, 'blockerCode')
-  if (!agentProfileId || !blockerCode) return null
+  if (!agentId || !blockerCode) return null
   return {
     campId,
-    targets: [{ agentProfileId, blockerCode }]
+    targets: [{ agentId, blockerCode }]
   }
 }
 

@@ -68,7 +68,7 @@ pub(crate) fn index_camp_message(
     message_id: &str,
     camp_id: &str,
     body: &str,
-    addressed_agent_profile_ids_json: &str,
+    addressed_agent_ids_json: &str,
 ) -> Result<()> {
     for (kind, value) in extract_context_references(transaction, camp_id, body)? {
         transaction.execute(
@@ -80,19 +80,19 @@ pub(crate) fn index_camp_message(
             params![message_id, kind, value],
         )?;
     }
-    let mentioned_ids: Vec<String> = serde_json::from_str(addressed_agent_profile_ids_json)
+    let mentioned_ids: Vec<String> = serde_json::from_str(addressed_agent_ids_json)
         .context("CampMessage addressed Agent IDs are invalid")?;
-    for agent_profile_id in mentioned_ids {
+    for agent_id in mentioned_ids {
         transaction.execute(
             r#"
             INSERT OR IGNORE INTO camp_message_mention(
-                camp_message_id, agent_profile_id
+                camp_message_id, agent_id
             )
             SELECT ?1, agent_profile.id
             FROM agent_profile
             WHERE agent_profile.id = ?2
             "#,
-            params![message_id, agent_profile_id],
+            params![message_id, agent_id],
         )?;
     }
     Ok(())
@@ -115,7 +115,7 @@ pub fn rebuild_context_index(database: &mut Database) -> Result<ContextIndexRebu
     let messages = {
         let mut statement = transaction.prepare(
             r#"
-            SELECT id, camp_id, body, addressed_agent_profile_ids_json
+            SELECT id, camp_id, body, addressed_agent_ids_json
             FROM camp_message
             ORDER BY camp_id, sequence
             "#,
@@ -214,7 +214,7 @@ mod tests {
                     Some(&camp_id),
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
-                        agent_profile_id: "agent_1".to_string(),
+                        agent_id: "agent_1".to_string(),
                         capability_overrides: json!({}),
                     },
                 ),
@@ -248,7 +248,7 @@ mod tests {
                         body: format!("Review adr-49 PR-7 ISSUE-2 {task_id}; task-9 is not an ID."),
                         prepared_attachment_ids: Vec::new(),
                         address: MessageAddressSpec::Explicit {
-                            agent_profile_ids: vec!["agent_1".to_string()],
+                            agent_ids: vec!["agent_1".to_string()],
                         },
                         reply_to_camp_message_id: None,
                         execution: None,
@@ -297,7 +297,7 @@ mod tests {
                 INSERT INTO camp_message(
                     id, camp_id, sequence, author_type, author_id,
                     source_agent_run_id, body, content_digest,
-                    address_mode, addressed_agent_profile_ids_json,
+                    address_mode, addressed_agent_ids_json,
                     reply_to_camp_message_id, camp_turn_id, agent_run_id,
                     tombstoned_at, version, created_at, updated_at
                 )

@@ -76,10 +76,10 @@ try {
   const result = await createConfiguredCampAndSend(request, {
     commandId: crypto.randomUUID(),
     workspace,
-    body: 'Do not call tools or inspect files. Reply with MULTI_AGENT_OK followed by your own AgentProfile ID.',
-    address: { mode: 'explicit', agentProfileIds: targetIds },
-    purpose: 'Independently return a multi-Agent smoke token and your AgentProfile ID without tools',
-    expectedOutput: 'A public answer containing MULTI_AGENT_OK and the executing AgentProfile ID'
+    body: 'Do not call tools or inspect files. Reply with MULTI_AGENT_OK followed by your own Agent ID.',
+    address: { mode: 'explicit', agentIds: targetIds },
+    purpose: 'Independently return a multi-Agent smoke token and your Agent ID without tools',
+    expectedOutput: 'A public answer containing MULTI_AGENT_OK and the executing Agent ID'
   })
   const campId = result.payload?.campId
   if (result.status !== 'accepted' || !campId || result.payload.agentRunIds?.length !== 2) {
@@ -88,7 +88,7 @@ try {
   const commandResult = result
   const initial = await request('camps.snapshot', { campId })
   for (const targetId of targetIds) {
-    if (!initial.members.some((member) => member.agentProfileId === targetId)) {
+    if (!initial.members.some((member) => member.agentId === targetId)) {
       throw new Error(`Camp is missing ${targetId}`)
     }
   }
@@ -168,7 +168,7 @@ try {
     campTurnStatus: turn.status,
     agentRuns: runs.map((run) => ({
       id: run.id,
-      agentProfileId: run.agentProfileId,
+      agentId: run.agentId,
       conversationId: run.conversationId,
       executionEpoch: run.executionEpoch,
       status: run.status

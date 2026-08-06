@@ -7,7 +7,7 @@ description: 在 Rovai-ai 中维护用户治理的长期记忆。用于当稳定
 
 Rovai-ai 是面向下一片地平线的营地。一次 Camp 对话会留下很多脚印，但长期记忆只应保留未来旅程仍有价值的路标。
 
-Memory 不是聊天记录、任务清单、项目数据库、证据仓库、权限系统，也不是对用户或成员的人格画像。它只保存少量、稳定、能改善未来协作方式的偏好、约定与经验。
+Memory 不是聊天记录、任务清单、项目数据库、证据仓库、权限系统，也不是对用户或队员的人格画像。它只保存少量、稳定、能改善未来协作方式的偏好、约定与经验。
 
 ## 当前工具合同
 
@@ -15,7 +15,7 @@ Memory 不是聊天记录、任务清单、项目数据库、证据仓库、权�
 
 - `memory.search`：搜索当前可访问且仍有效的 Memory。
 - `memory.read`：读取稳定 Memory ID 对应的最新正文与当前状态。
-- `memory.write`：新增或修订当前 Agent 的 Companion Memory，或当前 Camp 中适用的 Relationship Memory。
+- `memory.write`：新增或修订当前队员的 Companion Memory，或当前 Camp 中适用的 Relationship Memory。
 - `memory.propose_hearth`：向用户提交 Hearth Memory 新增或修订建议；提案成功后仍未生效，需用户采纳。
 
 `[MEMORY_ENTRYPOINT]` 只是 Native Session 启动时的有界发现快照。它可能遗漏相关 Memory，也可能引用已经更新的 Revision。依赖、引用或修订某条 Memory 前，必须先调用 `memory.read`。
@@ -36,15 +36,15 @@ Hearth 保存应被所有同行者理解的共享偏好、原则或经验。
 - `agreement`
 - `lesson`
 
-Agent 不能直接写入 Hearth。使用 `memory.propose_hearth` 提交建议；只有用户采纳后，它才成为有效 Memory。
+队员不能直接写入 Hearth。使用 `memory.propose_hearth` 提交建议；只有用户采纳后，它才成为有效 Memory。
 
 典型判断：
 
-> 这件事是否应该让用户的所有伙伴都知道？
+> 这件事是否应该让用户的所有队员都知道？
 
 ### Companion：用户与当前同行者的道路
 
-Companion 保存用户与当前 AgentProfile 之间的稳定协作理解。
+Companion 保存用户与当前队员之间的稳定协作理解；队员身份由应用全局的 AgentProfile 持久化。
 
 允许的 Kind：
 
@@ -52,15 +52,15 @@ Companion 保存用户与当前 AgentProfile 之间的稳定协作理解。
 - `agreement`
 - `lesson`
 
-使用 `memory.write`。当前 Agent 只能写入自己的 Companion 范围。
+使用 `memory.write`。当前队员只能写入自己的 Companion 范围。
 
 典型判断：
 
 > 这件事是否只需要我在以后与用户协作时记住？
 
-### Relationship：两位成员之间的协作小径
+### Relationship：两位队员之间的协作小径
 
-Relationship 保存当前 Agent 与当前 Camp 中另一位在场成员之间的协作约定或经验。
+Relationship 保存当前队员与当前 Camp 中另一位在场队员之间的协作约定或经验。
 
 允许的 Kind：
 
@@ -70,19 +70,19 @@ Relationship 保存当前 Agent 与当前 Camp 中另一位在场成员之间的
 方向：
 
 - `mutual`：双方都应遵循。
-- `directed`：当前 Agent 对对方承担一项未来责任。
+- `directed`：当前队员对对方承担一项未来责任。
 
 `directed` 永远表示：
 
 ```text
-当前 Agent → counterparty
+当前队员 → counterparty
 ```
 
-不能替另一位成员写下其对当前 Agent 的责任。
+不能替另一位队员写下其对当前队员的责任。
 
 典型判断：
 
-> 这件事是否只影响我与某位成员今后的协作方式？
+> 这件事是否只影响我与某位队员今后的协作方式？
 
 多个 Scope 都看似合理时，选择能够完整表达含义的最小 Scope。
 
@@ -249,7 +249,7 @@ revise 不能改变 Scope、Kind、counterparty 或 Relationship direction。
 {
   "action": "add",
   "kind": "agreement",
-  "body": "所有伙伴都应区分当前项目事实与面向未来协作的长期记忆。",
+  "body": "所有队员都应区分当前项目事实与面向未来协作的长期记忆。",
   "retrievalKeys": ["项目事实", "记忆边界"]
 }
 ```

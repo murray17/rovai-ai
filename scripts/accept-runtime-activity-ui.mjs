@@ -225,9 +225,9 @@ async function seedFixture() {
       ${sqlLiteral(now)}, ${sqlLiteral(now)}
     );
     INSERT INTO camp_member(
-      camp_id, agent_profile_id, status, capability_overrides_json, version, joined_at
+      camp_id, agent_id, status, capability_overrides_json, version, joined_at
     ) VALUES ${memberRows};
-    INSERT INTO conversation(id, camp_id, agent_profile_id, version, created_at, updated_at)
+    INSERT INTO conversation(id, camp_id, agent_id, version, created_at, updated_at)
     VALUES ${conversationRows};
     INSERT INTO camp_turn(
       id, camp_id, trigger_type, trigger_id, status,
@@ -248,7 +248,7 @@ async function seedFixture() {
     ) VALUES ${runRows};
     INSERT INTO camp_message(
       id, camp_id, sequence, author_type, author_id, source_agent_run_id,
-      body, address_mode, addressed_agent_profile_ids_json, camp_turn_id,
+      body, address_mode, addressed_agent_ids_json, camp_turn_id,
       agent_run_id, version, created_at, updated_at
     ) VALUES ${messageRows};
     UPDATE agent_run

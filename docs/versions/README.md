@@ -23,7 +23,7 @@ last_updated: 2026-08-06
 |---|---|---|---|
 | v0.01 | `historical` | 本地优先单 Agent 执行基线 | [v0.01/README.md](v0.01/README.md) |
 | v0.02 | `historical` | 多 Agent 协作控制平面架构与验收快照 | [v0.02/README.md](v0.02/README.md) |
-| v0.03 | `historical` | 多 Runtime 成员管理；五个实施检查点完成时的预发布快照 | [v0.03/README.md](v0.03/README.md) |
+| v0.03 | `historical` | 多 Runtime 队员管理；五个实施检查点完成时的预发布快照 | [v0.03/README.md](v0.03/README.md) |
 | v0.04 | `historical` | Camp-first 主界面导航与工作区；五个实施检查点完成时的预发布快照 | [v0.04/README.md](v0.04/README.md) |
 | v0.05 | `historical` | 可重现上下文治理与 Agent 间执行型通信；五个实施检查点完成时的验收快照 | [v0.05/README.md](v0.05/README.md) |
 | v0.06 | `historical` | Team Task 协作工具与动态工作上下文；五个实施检查点完成时的验收快照 | [v0.06/README.md](v0.06/README.md) |
@@ -35,7 +35,7 @@ last_updated: 2026-08-06
 | v0.12 | `historical` | 公共消息层检索、渐进摘要与上下文投递 v2 | [v0.12/README.md](v0.12/README.md) |
 | v0.13 | `historical` | 伙伴经验自动沉淀与分级记忆权威 | [v0.13/README.md](v0.13/README.md) |
 | v0.14 | `historical` | 营地伙伴身份视觉与受管本地头像 | [v0.14/README.md](v0.14/README.md) |
-| v0.15 | `historical` | 成员生命周期、保留式永久移除与 Camp 执行准入 | [v0.15/README.md](v0.15/README.md) |
+| v0.15 | `historical` | 队员生命周期、保留式永久移除与 Camp 执行准入 | [v0.15/README.md](v0.15/README.md) |
 | v0.16 | `historical` | Runtime 权限归属与 Workspace 语义收敛 | [v0.16/README.md](v0.16/README.md) |
 | v0.17 | `historical` | 可中断执行、持久会话证据与最小 A2A 上下文 | [v0.17/README.md](v0.17/README.md) |
 | v0.18 | `historical` | 默认开启的伙伴记忆自动形成与一级长期记忆工作台 | [v0.18/README.md](v0.18/README.md) |
@@ -55,7 +55,7 @@ last_updated: 2026-08-06
 | v0.32 | `historical` | 已完成事件驱动 Member Call；正式 Team Qualification 为严格 4/12、协作协议 12/12 | [v0.32/README.md](v0.32/README.md) |
 | v0.33 | `historical` | 已完成统一侧栏操作；同一提交还合入结构化 Mention，范围歧义见历史勘误 | [v0.33/README.md#历史勘误2026-08-06](v0.33/README.md#历史勘误2026-08-06) |
 | v0.34 | `historical` | 历史回填已实现 normalization、Ledgers、Bundle、五层报告与 Judge 协议；ADR-0094 Formal isolation 实证仍未完成，不发布正式 Pass Rate | [v0.34/README.md](v0.34/README.md) |
-| v0.35 | `historical` | 已完成成员身份迁入 Native Session Bootstrap、Claude/Codex Resume 重注入、非持久完整 Bootstrap 与 clean-break 迁移 | [v0.35/README.md](v0.35/README.md) |
+| v0.35 | `historical` | 已完成队员身份迁入 Native Session Bootstrap、Claude/Codex Resume 重注入、非持久完整 Bootstrap 与 clean-break 迁移 | [v0.35/README.md](v0.35/README.md) |
 | v0.36 | `historical` | 已完成四 Case Collaboration-Value Diagnostic Portfolio、Case v3 challenge admission、八次真实 Trial 与不可变 Completion 证据 | [v0.36/README.md](v0.36/README.md) |
 | v0.37 | `historical` | 已完成标准 MCP JSON、稳定 Assignment、统一设置页、Rovai 优先 Runtime Projection 与 Runtime-group Skill delivery | [v0.37/README.md](v0.37/README.md) |
 | v0.38 | `historical` | Task 创建即出现唯一实时卡片，普通更新不再产生会话消息 | [v0.38/README.md](v0.38/README.md) |

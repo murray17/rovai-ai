@@ -128,10 +128,10 @@ export function deriveCollaborationEvidence(snapshot, dispatchBoundary) {
   ).length
   return {
     status: 'observed',
-    members: [...new Set(runs.map((run) => run.agentProfileId))],
+    members: [...new Set(runs.map((run) => run.agentId))],
     runGraph: runs.map((run) => ({
       id: run.id,
-      agentProfileId: run.agentProfileId,
+      agentProfileId: run.agentId,
       status: run.status,
       invocationKind: run.invocationKind,
       parentRunId: run.a2aParentAgentRunId,

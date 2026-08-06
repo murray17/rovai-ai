@@ -35,18 +35,18 @@ const debugPort = Number(process.env.ROVAI_STRUCTURED_MENTIONS_ACCEPT_DEBUG_PORT
 const databasePath = join(dataDir, 'rovai.sqlite')
 const acceptanceExecutablePath = '/usr/bin/true'
 const targetMembers = [
-  { id: 'agent_1', displayName: '小狐狸', teamRole: '游学者' },
-  { id: 'agent_2', displayName: '小河狸', teamRole: '鉴定士' },
-  { id: 'agent_3', displayName: '咕咕', teamRole: '巡夜人' }
+  { agentId: 'agent_1', displayName: '小狐狸', teamRole: '游学者' },
+  { agentId: 'agent_2', displayName: '小河狸', teamRole: '鉴定士' },
+  { agentId: 'agent_3', displayName: '咕咕', teamRole: '巡夜人' }
 ]
-const targetMemberIds = targetMembers.map((member) => member.id)
+const targetMemberIds = targetMembers.map((member) => member.agentId)
 const expectedContent = [
   { kind: 'text', text: '请同时检查这条消息：' },
-  { kind: 'member_mention', agentProfileId: 'agent_1' },
+  { kind: 'member_mention', agentId: 'agent_1' },
   { kind: 'text', text: ' ' },
-  { kind: 'member_mention', agentProfileId: 'agent_2' },
+  { kind: 'member_mention', agentId: 'agent_2' },
   { kind: 'text', text: ' ' },
-  { kind: 'member_mention', agentProfileId: 'agent_3' },
+  { kind: 'member_mention', agentId: 'agent_3' },
   { kind: 'text', text: '，请给出结论。' }
 ]
 const expectedBody = '请同时检查这条消息：@小狐狸 @小河狸 @咕咕，请给出结论。'
@@ -119,7 +119,7 @@ try {
   const freshAgents = await request(running.cdp, 'agents.list')
   assert(
     targetMemberIds.every((id) => freshAgents.some((agent) =>
-      agent.id === id && agent.presence === 'present')),
+      agent.agentId === id && agent.presence === 'present')),
     `Fresh database is missing a target member: ${JSON.stringify(freshAgents)}`
   )
   await closeApp(running)
@@ -135,7 +135,7 @@ try {
   const configuredAgents = await request(running.cdp, 'agents.list')
   assert(
     targetMemberIds.every((id) => configuredAgents.some((agent) =>
-      agent.id === id
+      agent.agentId === id
       && agent.runtimeReadiness.status === 'ready'
       && agent.runtimeSelection?.adapterKind === 'codex-cli')),
     `Acceptance Runtime is not ready for every target: ${JSON.stringify(configuredAgents)}`
@@ -145,8 +145,8 @@ try {
     commandId: crypto.randomUUID(),
     name: '结构化提及 UI 验收',
     workspace: null,
-    memberAgentProfileIds: targetMemberIds,
-    defaultLeadAgentProfileId: targetMemberIds[0],
+    memberAgentIds: targetMemberIds,
+    defaultLeadAgentId: targetMemberIds[0],
     collaborationMode: 'peer'
   })
   assert(created.status === 'applied', `Three-member Camp creation failed: ${JSON.stringify(created)}`)
@@ -161,7 +161,7 @@ try {
   assert(initialSnapshot.schemaVersion === 19,
     `Camp snapshot schema is not v19: ${initialSnapshot.schemaVersion}`)
   assert(
-    deepEqual(initialSnapshot.members.map((member) => member.agentProfileId), targetMemberIds),
+    deepEqual(initialSnapshot.members.map((member) => member.agentId), targetMemberIds),
     `Camp does not contain exactly the three target members: ${JSON.stringify(initialSnapshot.members)}`
   )
 
@@ -240,7 +240,7 @@ try {
     return {
       role: editor?.getAttribute('role'),
       contentEditable: editor?.getAttribute('contenteditable'),
-      tokenIds: tokens.map((token) => token.dataset.agentProfileId),
+      tokenIds: tokens.map((token) => token.dataset.agentId),
       tokenLabels: tokens.map((token) => token.textContent),
       tokenStyles: tokens.map((token) => {
         const style = getComputedStyle(token)
@@ -330,12 +330,12 @@ try {
     `Persisted message body projection is wrong: ${JSON.stringify(sent.message)}`)
   assert(sent.message.addressMode === 'explicit',
     `Persisted message is not explicitly addressed: ${JSON.stringify(sent.message)}`)
-  assert(deepEqual(sent.message.addressedAgentProfileIds, targetMemberIds),
-    `Persisted message targets are wrong: ${JSON.stringify(sent.message.addressedAgentProfileIds)}`)
+  assert(deepEqual(sent.message.addressedAgentIds, targetMemberIds),
+    `Persisted message targets are wrong: ${JSON.stringify(sent.message.addressedAgentIds)}`)
   assert(deepEqual(sent.message.content, expectedContent),
     `Persisted Structured Content changed: ${JSON.stringify(sent.message.content)}`)
   assert(
-    sameMembers(sent.runs.map((run) => run.agentProfileId), targetMemberIds)
+    sameMembers(sent.runs.map((run) => run.agentId), targetMemberIds)
       && new Set(sent.runs.map((run) => run.createdAt)).size === 1,
     `The three AgentRuns were not created at one CampTurn boundary: ${JSON.stringify(sent.runs)}`
   )
@@ -506,7 +506,7 @@ try {
     campMessageId: sent.message.id,
     campTurnId: sent.message.campTurnId,
     agentRunIds: sent.runs.map((run) => run.id),
-    agentRunTargets: sent.runs.map((run) => run.agentProfileId),
+    agentRunTargets: sent.runs.map((run) => run.agentId),
     agentRunCreatedAt: sent.runs[0].createdAt,
     structuredContent: sent.message.content,
     memberPopoverActivations: ['composer-click', 'history-click', 'history-Enter', 'history-Space'],
@@ -562,8 +562,8 @@ result.clipboardRestored = clipboardRestored
 result.isolatedUserDataRemoved = !suppliedFixtureRoot
 process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
 
-async function installAcceptanceRuntime(path, agentProfileIds) {
-  const ids = agentProfileIds.map(sqlLiteral).join(', ')
+async function installAcceptanceRuntime(path, agentIds) {
+  const ids = agentIds.map(sqlLiteral).join(', ')
   await runSql(path, `
     PRAGMA foreign_keys = ON;
     DELETE FROM adapter_installation

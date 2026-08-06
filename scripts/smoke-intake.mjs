@@ -25,7 +25,7 @@ try {
 
   const structural = await core.request('camps.creationPreflight')
   if (!structural.admissible
-      || !structural.initialLeadAgentProfileId
+      || !structural.initialLeadAgentId
       || structural.presentMembers.length === 0
       || structural.presentMembers.some((member) => member.runtimeConfigured)) {
     throw new Error(`Unconfigured present members could not create a Camp: ${JSON.stringify(structural)}`)
@@ -43,8 +43,8 @@ try {
     commandId: createCommandId,
     name: null,
     workspace: { projectPath: selectedWorkspace.projectPath },
-    memberAgentProfileIds: structural.presentMembers.map((member) => member.agentProfileId),
-    defaultLeadAgentProfileId: structural.initialLeadAgentProfileId,
+    memberAgentIds: structural.presentMembers.map((member) => member.agentId),
+    defaultLeadAgentId: structural.initialLeadAgentId,
     collaborationMode: 'peer'
   }
   const created = await core.request('camps.create', createRequest)
@@ -63,7 +63,7 @@ try {
   if (snapshot.camp.title !== '未命名对话'
       || snapshot.camp.projectBindingKind !== 'directory'
       || snapshot.camp.projectPath !== selectedWorkspace.projectPath
-      || snapshot.camp.defaultLeadAgentId !== structural.initialLeadAgentProfileId
+      || snapshot.camp.defaultLeadAgentId !== structural.initialLeadAgentId
       || snapshot.members.length !== structural.presentMembers.length
       || snapshot.messages.length !== 0
       || snapshot.turns.length !== 0
@@ -89,7 +89,7 @@ try {
   const restoredHealth = await core.request('health.check')
   const codexInstallation = await configureCodexRuntime(core.request, restoredHealth, ['agent_1'])
   const ready = await core.request('camps.creationPreflight')
-  if (!ready.admissible || ready.initialLeadAgentProfileId !== 'agent_1') {
+  if (!ready.admissible || ready.initialLeadAgentId !== 'agent_1') {
     throw new Error(`Ready-first Lead selection did not select Luoke: ${JSON.stringify(ready)}`)
   }
 
@@ -125,7 +125,7 @@ try {
       ? candidate
       : null
   }, 'first Camp AgentRun')
-  if (snapshot.camp.defaultLeadAgentId !== structural.initialLeadAgentProfileId
+  if (snapshot.camp.defaultLeadAgentId !== structural.initialLeadAgentId
       || snapshot.camp.title === '未命名对话'
       || snapshot.members.length !== 4
       || snapshot.turns.length !== 1

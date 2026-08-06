@@ -48,15 +48,15 @@ export function applyAppearanceSnapshot(
 
 const IDENTITY_COLOR_COUNT = 8
 
-export function identityColorIndex(agentProfileId: string): number {
+export function identityColorIndex(agentId: string): number {
   let hash = 0x811c9dc5
-  for (const character of agentProfileId) {
+  for (const character of agentId) {
     hash ^= character.codePointAt(0) ?? 0
     hash = Math.imul(hash, 0x01000193)
   }
   return (hash >>> 0) % IDENTITY_COLOR_COUNT + 1
 }
 
-export function identityColorToken(agentProfileId: string): string {
-  return `var(--identity-${identityColorIndex(agentProfileId)})`
+export function identityColorToken(agentId: string): string {
+  return `var(--identity-${identityColorIndex(agentId)})`
 }

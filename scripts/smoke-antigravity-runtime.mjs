@@ -83,16 +83,16 @@ try {
     throw new Error(`Antigravity capability snapshot is invalid: ${JSON.stringify(snapshot)}`)
   }
 
-  const profile = await request('agents.get', { agentProfileId: 'agent_1' })
+  const profile = await request('agents.get', { agentId: 'agent_1' })
 
   const first = await executeToken(
     request,
     null,
-    profile.id,
+    profile.agentId,
     'ROVAI_ANTIGRAVITY_RUN_ONE',
     project
   )
-  const camp = { id: first.campId, defaultLeadAgentId: profile.id }
+  const camp = { id: first.campId, defaultLeadAgentId: profile.agentId }
   const firstBound = events.find((event) =>
     event.method === 'agent_run.native_session_bound' && event.params?.agentRunId === first.agentRunId
   )
@@ -101,15 +101,15 @@ try {
     throw new Error(`Antigravity did not expose a verified Native Session: ${JSON.stringify(firstBound)}`)
   }
 
-  const second = await executeToken(request, camp, profile.id, 'ROVAI_ANTIGRAVITY_RUN_TWO')
+  const second = await executeToken(request, camp, profile.agentId, 'ROVAI_ANTIGRAVITY_RUN_TWO')
   const secondBound = events.find((event) =>
     event.method === 'agent_run.native_session_bound' && event.params?.agentRunId === second.agentRunId
   )
   if (secondBound?.params?.nativeThreadId !== nativeSessionId) {
     throw new Error(`Antigravity Conversation did not resume its Native Session: ${JSON.stringify({ firstBound, secondBound })}`)
   }
-  await configureCodexRuntime(request, health, [profile.id])
-  const handoff = await executeToken(request, camp, profile.id, 'ROVAI_ANTIGRAVITY_TO_CODEX_HANDOFF')
+  await configureCodexRuntime(request, health, [profile.agentId])
+  const handoff = await executeToken(request, camp, profile.agentId, 'ROVAI_ANTIGRAVITY_TO_CODEX_HANDOFF')
   const handoffStart = events.find((event) =>
     event.method === 'agent_run.started' && event.params?.agentRunId === handoff.agentRunId
   )
@@ -163,7 +163,7 @@ try {
   await rm(fixtureRoot, { recursive: true, force: true })
 }
 
-async function executeToken(request, camp, agentProfileId, token, project = null) {
+async function executeToken(request, camp, agentId, token, project = null) {
   const body = `Do not call tools or inspect files. Reply with exactly ${token} and nothing else.`
   const purpose = 'Verify the Antigravity non-interactive CLI process integration without tools'
   const expectedOutput = `Exactly ${token}`
@@ -172,7 +172,7 @@ async function executeToken(request, camp, agentProfileId, token, project = null
         commandId: crypto.randomUUID(),
         campId: camp.id,
         body,
-        address: { mode: 'explicit', agentProfileIds: [agentProfileId] },
+        address: { mode: 'explicit', agentIds: [agentId] },
         replyToCampMessageId: null,
         execution: {
           taskId: null,
@@ -185,7 +185,7 @@ async function executeToken(request, camp, agentProfileId, token, project = null
         commandId: crypto.randomUUID(),
         workspace,
         body,
-        address: { mode: 'explicit', agentProfileIds: [agentProfileId] },
+        address: { mode: 'explicit', agentIds: [agentId] },
         purpose,
         expectedOutput
       })
