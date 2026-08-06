@@ -1,0 +1,692 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rovai AI · Agent Runtime 未配置交互方案</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #f2f4f1;
+      --surface: #fbfcfa;
+      --surface-raised: #ffffff;
+      --surface-subtle: #f6f7f3;
+      --surface-muted: #ecefe9;
+      --surface-selected: #e9ecf7;
+      --ink: #202438;
+      --muted: #5f6678;
+      --faint: #6e7382;
+      --line: #dde1da;
+      --line-strong: #cbd1c8;
+      --control-line: #8b9389;
+      --brand: #343b72;
+      --brand-hover: #29305f;
+      --brand-soft: #eceef8;
+      --brand-ink: #343b72;
+      --focus: #4d83a2;
+      --attention: #8a6226;
+      --attention-soft: #f8edda;
+      --attention-line: #d9b77d;
+      --success: #3e775c;
+      --success-soft: #e7f1ea;
+      --danger: #a24c46;
+      --info: #416c86;
+      --info-soft: #e5eef3;
+      --identity-1: #a65f4a;
+      --identity-2: #39777a;
+      --shadow-float: 0 18px 56px rgba(38, 45, 58, 0.16);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { min-width: 1040px; min-height: 700px; margin: 0; }
+    body { color: var(--ink); background: #e7eae6; font-size: 13px; }
+    button, select, textarea { font: inherit; }
+    button { cursor: pointer; }
+    button:focus-visible, select:focus-visible, textarea:focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--focus) 42%, transparent);
+      outline-offset: 2px;
+    }
+
+    .prototype-toolbar {
+      position: fixed;
+      z-index: 100;
+      top: 0;
+      right: 0;
+      left: 0;
+      display: grid;
+      grid-template-columns: minmax(240px, 1fr) auto minmax(280px, 1fr);
+      min-height: 64px;
+      align-items: center;
+      gap: 20px;
+      padding: 8px 20px;
+      border-bottom: 1px solid #c9cec7;
+      background: rgba(251, 252, 250, 0.96);
+      backdrop-filter: blur(16px);
+    }
+    .prototype-heading { display: flex; min-width: 0; align-items: center; gap: 10px; }
+    .prototype-heading strong { display: block; font-size: 13px; }
+    .prototype-heading span { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
+    .prototype-mark {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      flex: 0 0 auto;
+      place-items: center;
+      border-radius: 8px;
+      color: white;
+      background: var(--brand);
+      font-weight: 800;
+    }
+    .variant-tabs { display: flex; gap: 4px; padding: 3px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface-muted); }
+    .variant-tab {
+      min-height: 32px;
+      padding: 6px 12px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 12px;
+      font-weight: 680;
+    }
+    .variant-tab[aria-selected="true"] { color: var(--brand-ink); background: var(--surface-raised); box-shadow: 0 1px 2px rgba(38, 45, 58, 0.1); }
+    .prototype-meta { display: flex; min-width: 0; align-items: center; justify-content: flex-end; gap: 12px; }
+    .prototype-summary { min-width: 0; color: var(--muted); font-size: 11px; line-height: 1.4; text-align: right; }
+    .recommended-chip { display: inline-flex; margin-right: 5px; padding: 2px 6px; border-radius: 999px; color: var(--success); background: var(--success-soft); font-weight: 750; }
+
+    .stage { height: 100vh; padding: 82px 22px 18px; }
+    .app-window {
+      position: relative;
+      width: min(1450px, 100%);
+      height: 100%;
+      min-height: 610px;
+      margin: 0 auto;
+      overflow: hidden;
+      border: 1px solid #bcc2bb;
+      border-radius: 13px;
+      background: var(--surface);
+      box-shadow: 0 20px 60px rgba(38, 45, 58, 0.18);
+    }
+    .window-bar {
+      display: grid;
+      height: 38px;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      border-bottom: 1px solid var(--line);
+      background: #f7f8f5;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    .traffic-lights { display: flex; gap: 7px; padding-left: 14px; }
+    .traffic-lights i { width: 11px; height: 11px; border: 1px solid rgba(32, 36, 56, 0.12); border-radius: 50%; background: #d7dbd5; }
+    .traffic-lights i:first-child { background: #e49087; }
+    .traffic-lights i:nth-child(2) { background: #e4bd72; }
+    .traffic-lights i:nth-child(3) { background: #83b591; }
+    .window-title { color: var(--faint); font-size: 11px; font-weight: 650; }
+    .screen { position: absolute; inset: 38px 0 0; display: grid; grid-template-columns: 270px minmax(0, 1fr); }
+
+    .sidebar {
+      display: flex;
+      min-height: 0;
+      flex-direction: column;
+      border-right: 1px solid var(--line-strong);
+      background: var(--surface-subtle);
+    }
+    .brand-row { display: flex; height: 64px; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--line); }
+    .brand-symbol { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 8px; color: white; background: var(--brand); font-weight: 850; }
+    .brand-row strong { font-size: 14px; letter-spacing: -0.1px; }
+    .nav { padding: 12px 10px; }
+    .nav-button, .camp-link, .member-link, .back-link {
+      display: flex;
+      width: 100%;
+      min-height: 36px;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 9px;
+      border: 0;
+      border-radius: 7px;
+      color: var(--ink);
+      background: transparent;
+      text-align: left;
+    }
+    .nav-button:hover, .camp-link:hover, .member-link:hover, .back-link:hover { background: var(--surface-muted); }
+    .nav-button.active, .camp-link.active, .member-link.active { color: var(--brand-ink); background: var(--surface-selected); font-weight: 700; }
+    .nav-glyph { display: grid; width: 18px; place-items: center; color: var(--faint); font-weight: 800; }
+    .nav-section { min-height: 0; padding: 8px 10px; overflow: auto; border-top: 1px solid var(--line); }
+    .nav-section-label { display: flex; align-items: center; justify-content: space-between; padding: 8px 9px 5px; color: var(--faint); font-size: 10px; font-weight: 760; letter-spacing: 0.08em; text-transform: uppercase; }
+    .camp-link { justify-content: space-between; }
+    .camp-link span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .camp-link small { color: var(--faint); font-size: 10px; }
+    .sidebar-footer { margin-top: auto; padding: 10px; border-top: 1px solid var(--line); }
+
+    .workspace { position: relative; display: grid; min-width: 0; min-height: 0; grid-template-rows: 58px minmax(0, 1fr); background: var(--surface-raised); }
+    .camp-header { display: flex; align-items: center; justify-content: space-between; padding: 0 22px; border-bottom: 1px solid var(--line-strong); background: var(--surface); }
+    .camp-heading { min-width: 0; }
+    .camp-heading strong { display: block; overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+    .camp-heading span { display: block; margin-top: 2px; color: var(--faint); font-size: 10.5px; }
+    .header-tools { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+    .status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-raised); font-size: 10.5px; }
+    .status-pill i { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+    .icon-button { display: grid; width: 30px; min-height: 30px; padding: 0; place-items: center; border: 0; border-radius: 7px; color: var(--muted); background: transparent; }
+    .icon-button:hover { background: var(--surface-muted); }
+
+    .conversation { position: relative; display: grid; min-height: 0; grid-template-rows: minmax(0, 1fr) auto; background: #fff; }
+    .timeline { min-height: 0; overflow: auto; padding: 28px max(38px, calc((100% - 820px) / 2)) 150px; }
+    .day-marker { margin-bottom: 26px; color: var(--faint); font-size: 10px; text-align: center; }
+    .message { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 11px; margin-bottom: 26px; }
+    .avatar { display: grid; width: 30px; height: 30px; place-items: center; border: 2px solid var(--identity-1); border-radius: 50%; color: var(--identity-1); background: #fbf1ed; font-weight: 780; }
+    .avatar.user { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
+    .avatar.beaver { border-color: var(--identity-2); color: var(--identity-2); background: #edf5f3; }
+    .message-header { display: flex; align-items: baseline; gap: 8px; }
+    .message-header strong { font-size: 12px; }
+    .message-header span { color: var(--faint); font-size: 10px; }
+    .message-body { max-width: 730px; margin-top: 6px; color: var(--ink); font-size: 13px; line-height: 1.65; }
+    .mention { color: var(--brand-ink); background: var(--brand-soft); font-weight: 680; }
+    .process-row { display: inline-flex; margin-top: 8px; align-items: center; gap: 6px; color: var(--faint); font-size: 10.5px; }
+    .process-row::before { content: "⌄"; }
+
+    .composer-dock {
+      position: relative;
+      z-index: 10;
+      width: min(860px, calc(100% - 64px));
+      margin: 0 auto;
+      padding: 0 0 18px;
+      background: linear-gradient(to bottom, rgba(255,255,255,0), #fff 30px);
+    }
+    .composer {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: end;
+      padding: 13px;
+      border: 1px solid var(--control-line);
+      border-radius: 11px;
+      background: var(--surface-raised);
+      box-shadow: 0 8px 26px rgba(38, 45, 58, 0.09);
+    }
+    .composer textarea { width: 100%; min-height: 56px; max-height: 112px; resize: none; border: 0; outline: 0; color: var(--ink); background: transparent; font-size: 13px; line-height: 1.55; }
+    .composer-meta { display: flex; align-items: center; justify-content: space-between; margin-top: 7px; color: var(--faint); font-size: 10px; }
+    .draft-preserved { display: none; align-items: center; gap: 5px; color: var(--success); }
+    .draft-preserved.visible { display: inline-flex; }
+    .draft-preserved::before { content: "✓"; font-weight: 850; }
+    .primary-button, .quiet-button, .text-button {
+      min-height: 32px;
+      border-radius: 7px;
+      padding: 7px 12px;
+      font-size: 12px;
+      font-weight: 680;
+    }
+    .primary-button { border: 1px solid var(--brand); color: white; background: var(--brand); }
+    .primary-button:hover:not(:disabled) { border-color: var(--brand-hover); background: var(--brand-hover); }
+    .primary-button:disabled { cursor: not-allowed; opacity: 0.42; }
+    .quiet-button { border: 1px solid var(--line-strong); color: var(--ink); background: var(--surface-raised); }
+    .quiet-button:hover { background: var(--surface-muted); }
+    .text-button { border: 0; color: var(--brand-ink); background: transparent; }
+    .text-button:hover { background: var(--brand-soft); }
+
+    .recovery-inline {
+      display: grid;
+      grid-template-columns: 24px minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 8px;
+      padding: 10px 11px;
+      border: 1px solid var(--attention-line);
+      border-left: 3px solid var(--attention);
+      border-radius: 8px;
+      background: var(--attention-soft);
+    }
+    .attention-symbol { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 50%; color: white; background: var(--attention); font-weight: 850; }
+    .recovery-copy strong, .recovery-copy span { display: block; }
+    .recovery-copy strong { color: #654719; font-size: 12px; }
+    .recovery-copy span { margin-top: 2px; color: #765927; font-size: 10.5px; line-height: 1.45; }
+    .recovery-actions { display: flex; align-items: center; gap: 6px; }
+    .recovery-actions .quiet-button { color: #654719; border-color: #c89e5a; background: rgba(255,255,255,0.58); }
+
+    .target-panel { margin-bottom: 8px; overflow: hidden; border: 1px solid var(--attention-line); border-radius: 9px; background: var(--surface-raised); }
+    .target-panel-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid #ead6b2; background: var(--attention-soft); }
+    .target-panel-header strong { color: #654719; font-size: 12px; }
+    .target-panel-header span { color: #765927; font-size: 10.5px; }
+    .target-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 9px; align-items: center; padding: 9px 12px; }
+    .target-row + .target-row { border-top: 1px solid var(--line); }
+    .mini-avatar { display: grid; width: 25px; height: 25px; place-items: center; border: 1.5px solid var(--identity-1); border-radius: 50%; color: var(--identity-1); background: #fbf1ed; font-size: 10px; font-weight: 750; }
+    .mini-avatar.beaver { border-color: var(--identity-2); color: var(--identity-2); background: #edf5f3; }
+    .target-copy strong, .target-copy span { display: block; }
+    .target-copy strong { font-size: 11.5px; }
+    .target-copy span { margin-top: 2px; color: var(--faint); font-size: 10px; }
+    .target-state { display: inline-flex; align-items: center; gap: 5px; color: var(--success); font-size: 10.5px; font-weight: 680; }
+    .target-state.attention { color: var(--attention); }
+    .target-state::before { content: "●"; font-size: 7px; }
+
+    .action-toast {
+      position: absolute;
+      z-index: 30;
+      right: 18px;
+      bottom: 18px;
+      display: grid;
+      width: min(390px, calc(100% - 36px));
+      grid-template-columns: 28px minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: start;
+      padding: 12px;
+      border: 1px solid var(--attention-line);
+      border-radius: 10px;
+      background: var(--surface-raised);
+      box-shadow: var(--shadow-float);
+    }
+    .toast-copy strong, .toast-copy span, .toast-copy small { display: block; }
+    .toast-copy strong { font-size: 12.5px; }
+    .toast-copy span { margin-top: 3px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+    .toast-copy small { margin-top: 5px; color: var(--success); font-size: 10px; }
+    .toast-actions { display: flex; grid-column: 2 / -1; justify-content: flex-end; gap: 6px; margin-top: 2px; }
+    .toast-close { margin: -4px -4px 0 0; }
+
+    .success-toast { border-color: color-mix(in srgb, var(--success) 48%, var(--line)); }
+    .success-toast .attention-symbol { background: var(--success); }
+
+    .member-sidebar .back-area { padding: 10px; border-bottom: 1px solid var(--line); }
+    .back-link { color: var(--brand-ink); font-weight: 700; }
+    .member-sidebar-header { padding: 14px 18px 10px; }
+    .member-sidebar-header strong { display: block; font-size: 14px; }
+    .member-sidebar-header span { display: block; margin-top: 3px; color: var(--muted); font-size: 10.5px; }
+    .member-list { padding: 4px 10px; }
+    .member-link { min-height: 48px; }
+    .member-link .mini-avatar { flex: 0 0 auto; }
+    .member-link-copy { min-width: 0; }
+    .member-link-copy strong, .member-link-copy span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .member-link-copy strong { font-size: 11.5px; }
+    .member-link-copy span { margin-top: 2px; color: var(--faint); font-size: 10px; }
+
+    .member-workspace { min-width: 0; min-height: 0; overflow: auto; background: var(--surface-raised); }
+    .member-hero { display: grid; grid-template-columns: 94px minmax(0, 1fr); gap: 22px; align-items: center; padding: 32px 42px 26px; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .portrait { display: grid; width: 86px; height: 104px; place-items: end center; overflow: hidden; border-radius: 43px 43px 14px 14px; color: var(--identity-1); background: linear-gradient(150deg, #f9e7df, #efece5); font-size: 46px; font-weight: 760; }
+    .member-title h1 { margin: 0; font-size: 22px; font-weight: 720; letter-spacing: -0.3px; }
+    .member-title p { max-width: 680px; margin: 7px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+    .member-runtime-state { display: inline-flex; margin-top: 10px; align-items: center; gap: 6px; color: var(--attention); font-size: 10.5px; font-weight: 700; }
+    .member-runtime-state::before { content: "●"; font-size: 7px; }
+    .member-runtime-state.ready { color: var(--success); }
+    .member-tabs { display: flex; gap: 18px; padding: 0 42px; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .member-tab { min-height: 44px; padding: 0 1px; border: 0; border-bottom: 2px solid transparent; color: var(--muted); background: transparent; font-size: 12px; font-weight: 680; }
+    .member-tab.active { color: var(--brand-ink); border-bottom-color: var(--brand); }
+    .runtime-form { width: min(760px, calc(100% - 84px)); margin: 28px 42px 60px; }
+    .form-heading { margin-bottom: 20px; }
+    .form-heading h2 { margin: 0; font-size: 16px; }
+    .form-heading p { margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+    .field { display: grid; gap: 7px; margin-bottom: 18px; }
+    .field label { font-size: 11.5px; font-weight: 720; }
+    .field select { width: 100%; min-height: 38px; padding: 7px 34px 7px 10px; border: 1px solid var(--control-line); border-radius: 7px; color: var(--ink); background: var(--surface-raised); }
+    .field small { color: var(--faint); font-size: 10px; line-height: 1.45; }
+    .runtime-summary { display: flex; align-items: center; justify-content: space-between; margin: 18px 0; padding: 11px 12px; border: 1px solid var(--line); border-left: 3px solid var(--attention); border-radius: 8px; background: var(--surface-subtle); }
+    .runtime-summary.ready { border-left-color: var(--success); background: var(--success-soft); }
+    .runtime-summary strong, .runtime-summary span { display: block; }
+    .runtime-summary strong { font-size: 11.5px; }
+    .runtime-summary span { margin-top: 2px; color: var(--muted); font-size: 10px; }
+    .runtime-summary code { color: var(--faint); font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .form-actions { display: flex; align-items: center; gap: 8px; padding-top: 4px; }
+    .saved-callout { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 10px; align-items: center; margin-bottom: 18px; padding: 10px 11px; border: 1px solid color-mix(in srgb, var(--success) 44%, var(--line)); border-radius: 8px; background: var(--success-soft); }
+    .saved-callout .attention-symbol { background: var(--success); }
+    .saved-callout strong, .saved-callout span { display: block; }
+    .saved-callout strong { color: #2f644b; font-size: 12px; }
+    .saved-callout span { margin-top: 2px; color: var(--muted); font-size: 10.5px; }
+
+    @media (max-width: 1180px) {
+      .prototype-toolbar { grid-template-columns: 220px auto 1fr; gap: 10px; padding-inline: 12px; }
+      .prototype-summary { max-width: 250px; }
+      .screen { grid-template-columns: 244px minmax(0, 1fr); }
+      .timeline { padding-inline: 34px; }
+      .composer-dock { width: calc(100% - 52px); }
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      .action-toast, .recovery-inline, .target-panel { animation: enter 170ms ease-out; }
+      @keyframes enter { from { opacity: 0; transform: translateY(5px); } }
+    }
+  </style>
+</head>
+<body>
+  <header class="prototype-toolbar">
+    <div class="prototype-heading">
+      <span class="prototype-mark" aria-hidden="true">R</span>
+      <div>
+        <strong>Runtime 未配置 · 恢复交互稿</strong>
+        <span>点击发送触发错误，再体验完整配置路径</span>
+      </div>
+    </div>
+
+    <div class="variant-tabs" role="tablist" aria-label="错误引导方案">
+      <button class="variant-tab" type="button" role="tab" aria-selected="true" data-variant="toast">A · 可操作 Toast</button>
+      <button class="variant-tab" type="button" role="tab" aria-selected="false" data-variant="inline">B · Composer 内联</button>
+      <button class="variant-tab" type="button" role="tab" aria-selected="false" data-variant="targets">C · 目标恢复面板</button>
+    </div>
+
+    <div class="prototype-meta">
+      <div class="prototype-summary" id="variant-summary"><span class="recommended-chip">推荐</span>最轻量，适合单一目标的瞬时恢复。</div>
+      <button class="quiet-button" type="button" id="reset-prototype">重置体验</button>
+    </div>
+  </header>
+
+  <main class="stage">
+    <section class="app-window" aria-label="Rovai AI 交互原型">
+      <div class="window-bar" aria-hidden="true">
+        <span class="traffic-lights"><i></i><i></i><i></i></span>
+        <span class="window-title">Rovai AI</span>
+        <span></span>
+      </div>
+
+      <div class="screen" id="camp-screen">
+        <aside class="sidebar">
+          <div class="brand-row"><span class="brand-symbol">R</span><strong>Rovai AI</strong></div>
+          <nav class="nav" aria-label="主导航">
+            <button class="nav-button" type="button"><span class="nav-glyph">＋</span><span>新对话</span></button>
+            <button class="nav-button" type="button" id="nav-members"><span class="nav-glyph">◎</span><span>队员</span></button>
+            <button class="nav-button" type="button"><span class="nav-glyph">◇</span><span>记忆</span></button>
+            <button class="nav-button" type="button"><span class="nav-glyph">⌕</span><span>跳转到对话…</span></button>
+          </nav>
+          <div class="nav-section">
+            <div class="nav-section-label"><span>项目</span></div>
+            <button class="camp-link active" type="button"><span>Rovai AI 交互优化</span><small>刚刚</small></button>
+            <button class="camp-link" type="button"><span>Runtime Activity 验收</span><small>昨天</small></button>
+            <button class="camp-link" type="button"><span>快速对话</span><small>7 月</small></button>
+          </div>
+          <div class="sidebar-footer"><button class="nav-button" type="button"><span class="nav-glyph">⚙</span><span>设置</span></button></div>
+        </aside>
+
+        <section class="workspace">
+          <header class="camp-header">
+            <div class="camp-heading"><strong>Rovai AI 交互优化</strong><span>opensource / rovai-ai</span></div>
+            <div class="header-tools"><span class="status-pill"><i></i>已同步</span><button class="icon-button" type="button" aria-label="显示检查器">▱</button></div>
+          </header>
+
+          <div class="conversation">
+            <div class="timeline" id="timeline">
+              <div class="day-marker">今天</div>
+              <article class="message">
+                <span class="avatar user">你</span>
+                <div>
+                  <div class="message-header"><strong>你</strong><span>10:54</span></div>
+                  <div class="message-body">当前 Runtime 未配置时，错误提示只显示内部错误码。请把恢复路径设计得更清楚。</div>
+                </div>
+              </article>
+              <article class="message">
+                <span class="avatar">狐</span>
+                <div>
+                  <div class="message-header"><strong>小狐狸</strong><span>10:55</span></div>
+                  <div class="message-body">我会保留 Core 的准入判断，并让 Renderer 明确显示目标队员、失败原因和下一步操作。</div>
+                  <div class="process-row">处理过程 · 18 秒</div>
+                </div>
+              </article>
+            </div>
+
+            <div class="composer-dock">
+              <div class="recovery-inline" id="inline-recovery" role="alert" hidden>
+                <span class="attention-symbol" aria-hidden="true">!</span>
+                <div class="recovery-copy"><strong>消息未发送：小狐狸还不能开始工作</strong><span>尚未配置 Agent 运行时。你的消息已保留，配置完成后可再次发送。</span></div>
+                <div class="recovery-actions"><button class="quiet-button configure-agent" type="button">配置小狐狸</button><button class="icon-button dismiss-error" type="button" aria-label="关闭提示">×</button></div>
+              </div>
+
+              <div class="target-panel" id="target-recovery" role="alert" hidden>
+                <div class="target-panel-header"><strong>2 位目标队员中有 1 位暂时不可执行</strong><span>消息草稿已保留</span></div>
+                <div class="target-row">
+                  <span class="mini-avatar">狐</span>
+                  <div class="target-copy"><strong>小狐狸</strong><span>尚未配置 Agent 运行时</span></div>
+                  <button class="quiet-button configure-agent" type="button">去配置</button>
+                </div>
+                <div class="target-row">
+                  <span class="mini-avatar beaver">狸</span>
+                  <div class="target-copy"><strong>小河狸</strong><span>Codex CLI · gpt-5.6-sol</span></div>
+                  <span class="target-state">可用</span>
+                </div>
+              </div>
+
+              <form class="composer" id="composer-form">
+                <div>
+                  <textarea id="composer-input" aria-label="给小狐狸发消息">@小狐狸 请给这个 Runtime 错误设计三个清晰、克制的恢复方案。</textarea>
+                  <div class="composer-meta"><span>未提及时发送给 Lead</span><span class="draft-preserved" id="draft-preserved">草稿已保留</span></div>
+                </div>
+                <button class="primary-button" type="submit" id="send-button">发送</button>
+              </form>
+            </div>
+
+            <div class="action-toast" id="action-toast" role="alert" aria-live="assertive" hidden>
+              <span class="attention-symbol" aria-hidden="true">!</span>
+              <div class="toast-copy"><strong>小狐狸还不能开始工作</strong><span>尚未配置 Agent 运行时。</span><small>你的消息已保留，配置完成后可再次发送。</small></div>
+              <button class="icon-button toast-close dismiss-error" type="button" aria-label="关闭提示">×</button>
+              <div class="toast-actions"><button class="text-button dismiss-error" type="button">暂不处理</button><button class="primary-button configure-agent" type="button">配置小狐狸</button></div>
+            </div>
+
+            <div class="action-toast success-toast" id="success-toast" role="status" aria-live="polite" hidden>
+              <span class="attention-symbol" aria-hidden="true">✓</span>
+              <div class="toast-copy"><strong>小狐狸已可执行</strong><span>运行配置已保存，可以重新发送刚才的消息。</span></div>
+              <button class="icon-button toast-close" type="button" aria-label="关闭提示" id="close-success">×</button>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="screen" id="member-screen" hidden>
+        <aside class="sidebar member-sidebar">
+          <div class="back-area"><button class="back-link" type="button" id="member-back"><span aria-hidden="true">←</span><span>返回 App</span></button></div>
+          <div class="member-sidebar-header"><strong>队员</strong><span>身份、记忆与默认运行配置</span></div>
+          <div class="member-list">
+            <button class="member-link active" type="button">
+              <span class="mini-avatar">狐</span><span class="member-link-copy"><strong>小狐狸</strong><span id="fox-sidebar-status">未配置 Agent 运行时</span></span>
+            </button>
+            <button class="member-link" type="button">
+              <span class="mini-avatar beaver">狸</span><span class="member-link-copy"><strong>小河狸</strong><span>Codex CLI · 可用</span></span>
+            </button>
+          </div>
+          <div class="sidebar-footer"><button class="nav-button" type="button"><span class="nav-glyph">＋</span><span>创建队员</span></button></div>
+        </aside>
+
+        <section class="member-workspace">
+          <header class="member-hero">
+            <div class="portrait" aria-hidden="true">狐</div>
+            <div class="member-title">
+              <h1>小狐狸</h1>
+              <p>负责把复杂问题拆成可执行步骤，并在每次 AgentRun 中使用这里保存的默认运行配置。</p>
+              <span class="member-runtime-state" id="member-runtime-state">未配置 Agent 运行时</span>
+            </div>
+          </header>
+          <nav class="member-tabs" aria-label="队员设置">
+            <button class="member-tab" type="button">身份与记忆</button>
+            <button class="member-tab active" type="button" aria-current="page">运行配置</button>
+          </nav>
+
+          <form class="runtime-form" id="runtime-form">
+            <div class="form-heading"><h2>Agent 运行时</h2><p>选择产品，并使用当前能力快照配置模型、参数和该 Agent 运行时的原生权限。</p></div>
+
+            <div class="saved-callout" id="saved-callout" role="status" hidden>
+              <span class="attention-symbol" aria-hidden="true">✓</span>
+              <div><strong>小狐狸的 Agent 运行时已保存</strong><span>新配置将用于之后创建的 AgentRun；原 Camp 草稿仍然保留。</span></div>
+              <button class="quiet-button" type="button" id="return-to-camp">回到对话</button>
+            </div>
+
+            <div class="field">
+              <label for="runtime-select">Agent 运行时</label>
+              <select id="runtime-select">
+                <option value="">不选择 Agent 运行时</option>
+                <option value="codex">Codex CLI</option>
+                <option value="claude">Claude Code</option>
+                <option value="opencode">OpenCode</option>
+              </select>
+              <small>当前本机的 Codex CLI、Claude Code 与 OpenCode 均已通过能力检查。</small>
+            </div>
+
+            <div class="runtime-summary" id="runtime-summary">
+              <div><strong id="runtime-summary-title">尚未选择 Agent 运行时</strong><span id="runtime-summary-detail">选择后可以继续配置模型与权限。</span></div>
+              <code id="runtime-version">—</code>
+            </div>
+
+            <div class="field" id="model-field" hidden>
+              <label for="model-select">模型</label>
+              <select id="model-select"><option>gpt-5.6-sol</option><option>gpt-5.6-terra</option></select>
+              <small>模型、运行参数与权限会在保存时作为一个原子配置提交。</small>
+            </div>
+
+            <div class="form-actions"><button class="primary-button" type="submit" id="save-runtime" disabled>保存运行时</button><span id="save-hint" style="color: var(--faint); font-size: 10px;">请先选择 Agent 运行时</span></div>
+          </form>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    (() => {
+      const variants = {
+        toast: '<span class="recommended-chip">推荐</span>最轻量，适合单一目标的瞬时恢复。',
+        inline: '与发送位置强绑定，返回 Camp 后仍容易理解。',
+        targets: '面向多人 Mention 扩展，信息最完整但视觉重量最高。'
+      };
+
+      let activeVariant = 'toast';
+      let runtimeConfigured = false;
+      let errorVisible = false;
+
+      const campScreen = document.querySelector('#camp-screen');
+      const memberScreen = document.querySelector('#member-screen');
+      const composerForm = document.querySelector('#composer-form');
+      const composerInput = document.querySelector('#composer-input');
+      const timeline = document.querySelector('#timeline');
+      const actionToast = document.querySelector('#action-toast');
+      const inlineRecovery = document.querySelector('#inline-recovery');
+      const targetRecovery = document.querySelector('#target-recovery');
+      const successToast = document.querySelector('#success-toast');
+      const draftPreserved = document.querySelector('#draft-preserved');
+      const runtimeForm = document.querySelector('#runtime-form');
+      const runtimeSelect = document.querySelector('#runtime-select');
+      const modelField = document.querySelector('#model-field');
+      const saveRuntime = document.querySelector('#save-runtime');
+      const saveHint = document.querySelector('#save-hint');
+      const savedCallout = document.querySelector('#saved-callout');
+      const memberRuntimeState = document.querySelector('#member-runtime-state');
+      const foxSidebarStatus = document.querySelector('#fox-sidebar-status');
+      const runtimeSummary = document.querySelector('#runtime-summary');
+      const runtimeSummaryTitle = document.querySelector('#runtime-summary-title');
+      const runtimeSummaryDetail = document.querySelector('#runtime-summary-detail');
+      const runtimeVersion = document.querySelector('#runtime-version');
+
+      function renderError() {
+        actionToast.hidden = !(errorVisible && activeVariant === 'toast');
+        inlineRecovery.hidden = !(errorVisible && activeVariant === 'inline');
+        targetRecovery.hidden = !(errorVisible && activeVariant === 'targets');
+        draftPreserved.classList.toggle('visible', errorVisible);
+      }
+
+      function dismissError() {
+        errorVisible = false;
+        renderError();
+        composerInput.focus();
+      }
+
+      function showCamp(showConfiguredNotice = false) {
+        memberScreen.hidden = true;
+        campScreen.hidden = false;
+        successToast.hidden = !showConfiguredNotice;
+        window.requestAnimationFrame(() => composerInput.focus());
+      }
+
+      function showMember() {
+        errorVisible = false;
+        renderError();
+        successToast.hidden = true;
+        campScreen.hidden = true;
+        memberScreen.hidden = false;
+        window.requestAnimationFrame(() => runtimeSelect.focus());
+      }
+
+      function appendSentMessage() {
+        const body = composerInput.value.trim();
+        if (!body) return;
+        const article = document.createElement('article');
+        article.className = 'message';
+        article.innerHTML = '<span class="avatar user">你</span><div><div class="message-header"><strong>你</strong><span>刚刚</span></div><div class="message-body"></div></div>';
+        article.querySelector('.message-body').textContent = body;
+        timeline.append(article);
+        composerInput.value = '';
+        draftPreserved.classList.remove('visible');
+        successToast.hidden = true;
+        timeline.scrollTop = timeline.scrollHeight;
+      }
+
+      document.querySelectorAll('.variant-tab').forEach((button) => {
+        button.addEventListener('click', () => {
+          activeVariant = button.dataset.variant;
+          document.querySelectorAll('.variant-tab').forEach((candidate) => {
+            candidate.setAttribute('aria-selected', String(candidate === button));
+          });
+          document.querySelector('#variant-summary').innerHTML = variants[activeVariant];
+          successToast.hidden = true;
+          renderError();
+        });
+      });
+
+      composerForm.addEventListener('submit', (event) => {
+        event.preventDefault();
+        successToast.hidden = true;
+        if (runtimeConfigured) {
+          errorVisible = false;
+          renderError();
+          appendSentMessage();
+          return;
+        }
+        errorVisible = true;
+        renderError();
+        window.requestAnimationFrame(() => composerInput.focus());
+      });
+
+      document.querySelectorAll('.configure-agent').forEach((button) => button.addEventListener('click', showMember));
+      document.querySelectorAll('.dismiss-error').forEach((button) => button.addEventListener('click', dismissError));
+      document.querySelector('#nav-members').addEventListener('click', showMember);
+      document.querySelector('#member-back').addEventListener('click', () => showCamp(false));
+      document.querySelector('#return-to-camp').addEventListener('click', () => showCamp(true));
+      document.querySelector('#close-success').addEventListener('click', () => { successToast.hidden = true; });
+
+      runtimeSelect.addEventListener('change', () => {
+        const selected = runtimeSelect.value;
+        const hasRuntime = Boolean(selected);
+        modelField.hidden = !hasRuntime;
+        saveRuntime.disabled = !hasRuntime;
+        saveHint.textContent = hasRuntime ? '保存后仅影响之后创建的 AgentRun' : '请先选择 Agent 运行时';
+        savedCallout.hidden = true;
+        runtimeSummary.classList.toggle('ready', hasRuntime);
+        runtimeSummaryTitle.textContent = hasRuntime ? runtimeSelect.options[runtimeSelect.selectedIndex].text + ' · 可用' : '尚未选择 Agent 运行时';
+        runtimeSummaryDetail.textContent = hasRuntime ? '已认证，能力快照有效。' : '选择后可以继续配置模型与权限。';
+        runtimeVersion.textContent = selected === 'codex' ? '0.146.1' : selected === 'claude' ? '2.1.220' : selected === 'opencode' ? '1.18.10' : '—';
+      });
+
+      runtimeForm.addEventListener('submit', (event) => {
+        event.preventDefault();
+        if (!runtimeSelect.value) return;
+        runtimeConfigured = true;
+        savedCallout.hidden = false;
+        memberRuntimeState.textContent = runtimeSelect.options[runtimeSelect.selectedIndex].text + ' · 可用';
+        memberRuntimeState.classList.add('ready');
+        foxSidebarStatus.textContent = runtimeSelect.options[runtimeSelect.selectedIndex].text + ' · 可用';
+        saveHint.textContent = '已保存';
+        savedCallout.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      });
+
+      document.querySelector('#reset-prototype').addEventListener('click', () => {
+        runtimeConfigured = false;
+        errorVisible = false;
+        runtimeSelect.value = '';
+        modelField.hidden = true;
+        saveRuntime.disabled = true;
+        saveHint.textContent = '请先选择 Agent 运行时';
+        savedCallout.hidden = true;
+        runtimeSummary.classList.remove('ready');
+        runtimeSummaryTitle.textContent = '尚未选择 Agent 运行时';
+        runtimeSummaryDetail.textContent = '选择后可以继续配置模型与权限。';
+        runtimeVersion.textContent = '—';
+        memberRuntimeState.textContent = '未配置 Agent 运行时';
+        memberRuntimeState.classList.remove('ready');
+        foxSidebarStatus.textContent = '未配置 Agent 运行时';
+        composerInput.value = '@小狐狸 请给这个 Runtime 错误设计三个清晰、克制的恢复方案。';
+        successToast.hidden = true;
+        renderError();
+        showCamp(false);
+      });
+    })();
+  </script>
+</body>
+</html>

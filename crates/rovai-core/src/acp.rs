@@ -19,6 +19,7 @@ use rovai_core::{
     },
     agent_profile::{AdapterKind, FrozenAgentRuntimeConfig},
     agent_runtime_adapter::write_kiro_exact_agent_config,
+    builtin_tool_transport::{BUILTIN_TOOL_CONTRACT_VERSION, builtin_tool_catalog_digest},
     command::canonical_json_digest,
     mcp::McpServerDefinition,
     runtime::{AgentRunWorkspace, PermissionSemantics},
@@ -33,15 +34,15 @@ use tokio::{
 };
 
 use crate::{
+    builtin_tool_runtime::BuiltinToolProcessConfig,
     health,
     runtime_fleet::{
         AgentRuntimeFleetManager, FleetAcquireRequest, FleetReleaseDisposition,
         RuntimeCompatibilityKey, RuntimeProcessHost,
     },
-    team_runtime::{
-        EphemeralTeamToolConfigFile, TEAM_MCP_SERVER_NAME, TeamToolProcessConfig,
-        remove_stale_team_tool_configs, team_tool_completion_receipt,
-        write_ephemeral_copilot_config, write_ephemeral_strict_acp_config,
+    runtime_mcp::{
+        EphemeralMcpConfigFile, external_acp_server, remove_stale_mcp_configs,
+        write_ephemeral_copilot_config, write_ephemeral_strict_mcp_config,
     },
 };
 
@@ -145,8 +146,9 @@ pub(crate) struct AcpHost {
     alive: AtomicBool,
     startup_diagnostics: Mutex<String>,
     private_config_root: Option<PathBuf>,
-    ephemeral_config: Mutex<Option<EphemeralTeamToolConfigFile>>,
+    ephemeral_config: Mutex<Option<EphemeralMcpConfigFile>>,
     executable_path: PathBuf,
+    builtin_tools: Option<BuiltinToolProcessConfig>,
 }
 
 impl AcpHost {
@@ -157,8 +159,8 @@ impl AcpHost {
         permission_semantics: PermissionSemantics,
         frozen_runtime: &FrozenAgentRuntimeConfig,
         incoming: mpsc::UnboundedSender<AcpIncoming>,
+        builtin_tools: Option<BuiltinToolProcessConfig>,
         allow_client_fs: bool,
-        team_tool: Option<&TeamToolProcessConfig>,
         external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
         private_runtime_dir: &Path,
         attachment_access_root: Option<&Path>,
@@ -183,6 +185,9 @@ impl AcpHost {
         }
         let mut command = Command::new(&frozen_runtime.executable_path);
         configure_active_runtime_command(&mut command);
+        if let Some(config) = &builtin_tools {
+            config.configure_command(&mut command)?;
+        }
         #[cfg(unix)]
         command.as_std_mut().process_group(0);
         let ephemeral_config = configure_runtime_command(
@@ -191,7 +196,6 @@ impl AcpHost {
             permission_semantics,
             frozen_runtime,
             !allow_client_fs,
-            team_tool,
             external_mcp_servers,
             private_runtime_dir,
             private_config_root.as_deref(),
@@ -237,6 +241,7 @@ impl AcpHost {
             private_config_root,
             ephemeral_config: Mutex::new(ephemeral_config),
             executable_path: PathBuf::from(&frozen_runtime.executable_path),
+            builtin_tools,
         });
         Self::spawn_stdout_reader(host.clone(), stdout);
         Self::spawn_stderr_reader(host.clone(), stderr);
@@ -522,6 +527,10 @@ impl AcpHost {
         &self.executable_path
     }
 
+    pub(crate) fn builtin_tool_process_config(&self) -> Option<&BuiltinToolProcessConfig> {
+        self.builtin_tools.as_ref()
+    }
+
     pub(crate) fn is_alive(&self) -> bool {
         self.alive.load(Ordering::Acquire)
     }
@@ -695,8 +704,6 @@ pub struct AcpRuntime {
     owner: AcpRuntimeOwner,
     host: Arc<AcpHost>,
     owns_host: bool,
-    team_binding_id: Option<String>,
-    team_tool_completion_audit_key: Option<String>,
     mcp_projection_digest: String,
     session_id: RwLock<Option<String>>,
     execution_root: PathBuf,
@@ -713,8 +720,6 @@ impl AcpRuntime {
         owner: AcpRuntimeOwner,
         host: Arc<AcpHost>,
         owns_host: bool,
-        team_binding_id: Option<String>,
-        team_tool_completion_audit_key: Option<String>,
         mcp_projection_digest: String,
         execution_root: PathBuf,
         attachment_access_root: Option<PathBuf>,
@@ -724,8 +729,6 @@ impl AcpRuntime {
             owner,
             host,
             owns_host,
-            team_binding_id,
-            team_tool_completion_audit_key,
             mcp_projection_digest,
             session_id: RwLock::new(None),
             execution_root,
@@ -743,7 +746,6 @@ impl AcpRuntime {
         supports_load: bool,
         model: &str,
         model_options: &Value,
-        team_tool: Option<&TeamToolProcessConfig>,
         external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
     ) -> Result<String> {
         let cwd = self.execution_root.to_string_lossy().to_string();
@@ -758,18 +760,10 @@ impl AcpRuntime {
                 | AdapterKind::CodebuddyCli
                 | AdapterKind::QwenCode
         ) {
-            team_tool
-                .map(|team_tool| {
-                    team_tool.acp_servers(self.host.adapter_kind, external_mcp_servers)
-                })
-                .unwrap_or_else(|| {
-                    external_mcp_servers
-                        .iter()
-                        .map(|(name, definition)| {
-                            crate::team_runtime::external_acp_server(name, definition)
-                        })
-                        .collect()
-                })
+            external_mcp_servers
+                .iter()
+                .map(|(name, definition)| external_acp_server(name, definition))
+                .collect()
         } else {
             // Copilot does not start stdio servers from ACP mcpServers. The
             // strict v0.19 adapters receive their exact set from the private
@@ -972,13 +966,6 @@ impl AcpRuntime {
         }
         let observed = observations.remove(native_item_id).unwrap_or_default();
         drop(observations);
-        // Rovai-ai Team MCP mutations have already crossed the authenticated Team
-        // Tool Gateway and produced their own command/event audit. ACP servers
-        // such as Copilot may label an MCP invocation as an `execute` tool; do
-        // not duplicate it as an ActionExecution or require action.request.
-        if is_rovai_team_tool_completion(update, self.team_tool_completion_audit_key.as_deref())? {
-            return Ok(None);
-        }
         let Some(mut completion) = completed_action(params)? else {
             return Ok(None);
         };
@@ -1033,6 +1020,10 @@ impl AcpRuntime {
 
     pub fn host_instance_id(&self) -> &str {
         &self.host.host_instance_id
+    }
+
+    pub(crate) fn builtin_tool_process_config(&self) -> Option<&BuiltinToolProcessConfig> {
+        self.host.builtin_tool_process_config()
     }
 
     pub fn adapter_kind(&self) -> AdapterKind {
@@ -1131,7 +1122,7 @@ impl AcpCliRuntimeAdapter {
                 | AdapterKind::CodebuddyCli
                 | AdapterKind::QwenCode
         ) {
-            remove_stale_team_tool_configs(&private_runtime_dir)?;
+            remove_stale_mcp_configs(&private_runtime_dir)?;
         }
         Ok(Self {
             kind,
@@ -1164,8 +1155,8 @@ impl AcpCliRuntimeAdapter {
             PermissionSemantics::CoreEnforcedV1,
             frozen_runtime,
             incoming,
-            false,
             None,
+            false,
             &external_mcp_servers,
             &private_runtime_dir,
             None,
@@ -1179,8 +1170,6 @@ impl AcpCliRuntimeAdapter {
             owner.clone(),
             host.clone(),
             false,
-            None,
-            None,
             "sha256:isolated-empty-mcp".to_string(),
             cwd.to_path_buf(),
             None,
@@ -1193,7 +1182,6 @@ impl AcpCliRuntimeAdapter {
                     false,
                     frozen_runtime.model.model_id.as_str(),
                     &frozen_runtime.model.options,
-                    None,
                     &external_mcp_servers,
                 )
                 .await
@@ -1292,7 +1280,7 @@ impl AcpCliRuntimeAdapter {
         workspace: &AgentRunWorkspace,
         permission_semantics: PermissionSemantics,
         frozen_runtime: &FrozenAgentRuntimeConfig,
-        team_tool: Option<&TeamToolProcessConfig>,
+        builtin_tools: &BuiltinToolProcessConfig,
         external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
         mcp_projection_digest: &str,
         attachment_access_root: &Path,
@@ -1303,10 +1291,8 @@ impl AcpCliRuntimeAdapter {
         }
         let existing = { self.runtimes.lock().await.get(agent_run_id).cloned() };
         if let Some(existing) = existing {
-            let requested_binding_id = team_tool.map(TeamToolProcessConfig::native_binding_id);
             if existing.execution_epoch() == execution_epoch
                 && existing.host.is_alive()
-                && existing.team_binding_id.as_deref() == requested_binding_id
                 && existing.mcp_projection_digest == mcp_projection_digest
                 && existing.attachment_access_root.as_deref() == Some(attachment_access_root)
             {
@@ -1340,8 +1326,8 @@ impl AcpCliRuntimeAdapter {
                         permission_semantics,
                         frozen_runtime,
                         self.incoming.clone(),
+                        Some(builtin_tools.clone()),
                         true,
-                        team_tool,
                         external_mcp_servers,
                         &self.private_runtime_dir,
                         Some(attachment_access_root),
@@ -1361,10 +1347,6 @@ impl AcpCliRuntimeAdapter {
             },
             host,
             false,
-            team_tool.map(|config| config.native_binding_id().to_string()),
-            team_tool
-                .map(TeamToolProcessConfig::completion_audit_key)
-                .transpose()?,
             mcp_projection_digest.to_string(),
             execution_root,
             Some(attachment_access_root.to_path_buf()),
@@ -1473,7 +1455,6 @@ pub(crate) fn runtime_compatibility_digest(
     frozen_runtime: &FrozenAgentRuntimeConfig,
     workspace: &AgentRunWorkspace,
     permission_semantics: PermissionSemantics,
-    team_tool: Option<&TeamToolProcessConfig>,
     external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
     mcp_projection_digest: &str,
     attachment_access_root: &Path,
@@ -1486,10 +1467,6 @@ pub(crate) fn runtime_compatibility_digest(
                 workspace.execution_root
             )
         })?;
-    let team_binding_id = team_tool.map(TeamToolProcessConfig::native_binding_id);
-    let team_audit_key = team_tool
-        .map(TeamToolProcessConfig::completion_audit_key)
-        .transpose()?;
     canonical_json_digest(&json!({
         "schemaVersion": 1,
         "adapterKind": frozen_runtime.adapter_kind,
@@ -1498,8 +1475,8 @@ pub(crate) fn runtime_compatibility_digest(
         "executionRoot": execution_root,
         "workspace": workspace,
         "permissionSemantics": permission_semantics,
-        "teamBindingId": team_binding_id,
-        "teamCompletionAuditKey": team_audit_key,
+        "builtinToolContractVersion": BUILTIN_TOOL_CONTRACT_VERSION,
+        "builtinToolCatalogDigest": builtin_tool_catalog_digest()?,
         "externalMcpServers": external_mcp_servers,
         "mcpProjectionDigest": mcp_projection_digest,
         "attachmentAccessRoot": attachment_access_root,
@@ -1572,13 +1549,12 @@ fn configure_runtime_command(
     permission_semantics: PermissionSemantics,
     runtime: &FrozenAgentRuntimeConfig,
     isolated: bool,
-    team_tool: Option<&TeamToolProcessConfig>,
     external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
     private_runtime_dir: &Path,
     private_config_root: Option<&Path>,
     disabled_copilot_servers: &[String],
     attachment_access_root: Option<&Path>,
-) -> Result<Option<EphemeralTeamToolConfigFile>> {
+) -> Result<Option<EphemeralMcpConfigFile>> {
     let values = runtime
         .permissions
         .values
@@ -1610,12 +1586,7 @@ fn configure_runtime_command(
             // when the AgentRun workspace denies ordinary tools. Loading a Skill
             // cannot widen the Runtime's Shell, filesystem, or network policy.
             permission_rules.insert("skill".to_string(), json!("allow"));
-            if team_tool.is_some() {
-                // Adapter permission is intentionally narrower than the
-                // user's general Runtime setting. Core still authorizes the
-                // actual sender, target and A2A quotas for every invocation.
-                permission_rules.insert(format!("{TEAM_MCP_SERVER_NAME}_*"), json!("allow"));
-            }
+            permission_rules.insert("bash".to_string(), json!("allow"));
             let permission_rules = Value::Object(permission_rules);
             health::configure_acp_command(command, runtime.adapter_kind, false);
             command.env(
@@ -1656,18 +1627,12 @@ fn configure_runtime_command(
             for name in disabled_copilot_servers {
                 command.arg("--disable-mcp-server").arg(name);
             }
-            if team_tool.is_some() || !external_mcp_servers.is_empty() {
-                let config = write_ephemeral_copilot_config(
-                    private_runtime_dir,
-                    external_mcp_servers,
-                    team_tool,
-                )?;
+            if !external_mcp_servers.is_empty() {
+                let config =
+                    write_ephemeral_copilot_config(private_runtime_dir, external_mcp_servers)?;
                 command
                     .arg("--additional-mcp-config")
                     .arg(format!("@{}", config.path().to_string_lossy()));
-                if team_tool.is_some() {
-                    command.arg(format!("--allow-tool={TEAM_MCP_SERVER_NAME}"));
-                }
                 return Ok(Some(config));
             }
         }
@@ -1706,9 +1671,6 @@ fn configure_runtime_command(
                     } else {
                         configured
                     });
-                    if legacy_read_only {
-                        command.args(["--tools", ""]);
-                    }
                 }
                 AdapterKind::CodebuddyCli => {
                     command.arg("--permission-mode").arg(if legacy_read_only {
@@ -1716,9 +1678,6 @@ fn configure_runtime_command(
                     } else {
                         configured
                     });
-                    if legacy_read_only {
-                        command.args(["--tools", ""]);
-                    }
                 }
                 AdapterKind::QwenCode => {
                     command.arg("--approval-mode").arg(if legacy_read_only {
@@ -1730,13 +1689,10 @@ fn configure_runtime_command(
                 _ => unreachable!(),
             }
             {
-                let config = write_ephemeral_strict_acp_config(
-                    private_runtime_dir,
-                    external_mcp_servers,
-                    team_tool,
-                )?;
+                let config =
+                    write_ephemeral_strict_mcp_config(private_runtime_dir, external_mcp_servers)?;
                 command.arg("--mcp-config").arg(config.path());
-                if (!external_mcp_servers.is_empty() || team_tool.is_some())
+                if !external_mcp_servers.is_empty()
                     && matches!(
                         runtime.adapter_kind,
                         AdapterKind::QoderCli | AdapterKind::QwenCode
@@ -1745,9 +1701,6 @@ fn configure_runtime_command(
                     command.arg("--allowed-mcp-server-names");
                     for name in external_mcp_servers.keys().map(String::as_str) {
                         command.arg(name);
-                    }
-                    if team_tool.is_some() {
-                        command.arg(TEAM_MCP_SERVER_NAME);
                     }
                 }
                 return Ok(Some(config));
@@ -2263,43 +2216,6 @@ fn acp_effect_disposition(succeeded: bool, native_kind: &str) -> &'static str {
     }
 }
 
-fn is_rovai_team_tool_completion(update: &Value, audit_key: Option<&str>) -> Result<bool> {
-    let Some(audit_key) = audit_key else {
-        return Ok(false);
-    };
-    let Some(structured_content) = update
-        .pointer("/rawOutput/structuredContent")
-        .and_then(Value::as_object)
-    else {
-        return Ok(false);
-    };
-    let Some(receipt) = structured_content
-        .get("rovaiTeamReceipt")
-        .and_then(Value::as_str)
-    else {
-        return Ok(false);
-    };
-    let Some(tool_name) = structured_content
-        .get("rovaiTeamTool")
-        .and_then(Value::as_str)
-    else {
-        return Ok(false);
-    };
-    if ![
-        "team.call_member",
-        "team.create_task",
-        "team.update_task",
-        "team.list_tasks",
-    ]
-    .contains(&tool_name)
-    {
-        return Ok(false);
-    }
-    let mut unsigned = structured_content.clone();
-    unsigned.remove("rovaiTeamReceipt");
-    Ok(receipt == team_tool_completion_receipt(audit_key, &Value::Object(unsigned))?)
-}
-
 pub fn is_potential_side_effect(kind: &str) -> bool {
     matches!(kind, "edit" | "move" | "delete" | "execute")
 }
@@ -2377,7 +2293,6 @@ fn canonicalize_allow_missing(path: &Path) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rovai_core::team_tool::TeamToolBindingCredential;
 
     #[test]
     fn qoder_does_not_receive_the_execute_only_camp_attachment_root() {
@@ -2441,399 +2356,6 @@ mod tests {
             host_config_digest: "smoke-host".to_string(),
             config_digest: "smoke-config".to_string(),
         }
-    }
-
-    fn smoke_team_tool() -> TeamToolProcessConfig {
-        TeamToolProcessConfig::new(
-            PathBuf::from("/bin/echo"),
-            PathBuf::from("/tmp/rovai-team-smoke.sock"),
-            &TeamToolBindingCredential {
-                native_binding_id: "00000000-0000-0000-0000-000000000001".to_string(),
-                native_binding_generation: 1,
-                binding_credential: "private.smoke".to_string(),
-                conversation_version: 1,
-                adapter_installation_id: "adapter-smoke".to_string(),
-                native_session_id: None,
-                binding_compatibility_digest: "sha256:smoke".to_string(),
-                binding_replaced: true,
-            },
-        )
-        .unwrap()
-    }
-
-    fn smoke_external_mcp() -> BTreeMap<String, McpServerDefinition> {
-        BTreeMap::from([
-            (
-                "docs".to_string(),
-                McpServerDefinition::Stdio {
-                    command: "/bin/echo".to_string(),
-                    args: vec!["docs".to_string()],
-                    cwd: Some("/tmp".to_string()),
-                    env: BTreeMap::from([("DOCS_ENV".to_string(), "private".to_string())]),
-                },
-            ),
-            (
-                "remote".to_string(),
-                McpServerDefinition::StreamableHttp {
-                    url: "https://example.test/mcp".to_string(),
-                    headers: BTreeMap::from([(
-                        "Authorization".to_string(),
-                        "Bearer private".to_string(),
-                    )]),
-                },
-            ),
-        ])
-    }
-
-    #[test]
-    fn opencode_allows_native_skills_and_rovai_team_tools_over_a_denied_runtime() {
-        let runtime = isolated_smoke_runtime(AdapterKind::OpencodeCli, "default");
-        let workspace = AgentRunWorkspace {
-            execution_root: "/tmp".to_string(),
-            access: "read_only".to_string(),
-            isolation: "shared".to_string(),
-        };
-        let mut command = Command::new("/bin/echo");
-        let team_tool = smoke_team_tool();
-        let external_mcp = smoke_external_mcp();
-        configure_runtime_command(
-            &mut command,
-            &workspace,
-            PermissionSemantics::CoreEnforcedV1,
-            &runtime,
-            false,
-            Some(&team_tool),
-            &external_mcp,
-            Path::new("/tmp/rovai-opencode-test"),
-            Some(Path::new("/tmp/rovai-opencode-test")),
-            &[],
-            None,
-        )
-        .unwrap();
-        let config = command
-            .as_std()
-            .get_envs()
-            .find_map(|(name, value)| {
-                (name == "OPENCODE_CONFIG_CONTENT")
-                    .then(|| value.map(|value| value.to_string_lossy().to_string()))
-                    .flatten()
-            })
-            .expect("OpenCode permission overlay should be present");
-        let config: Value = serde_json::from_str(&config).unwrap();
-        for pointer in [
-            "/permission",
-            "/agent/build/permission",
-            "/agent/plan/permission",
-        ] {
-            assert_eq!(config.pointer(pointer).unwrap()["*"], "deny");
-            assert_eq!(config.pointer(pointer).unwrap()["skill"], "allow");
-            assert_eq!(config.pointer(pointer).unwrap()["rovai_team_*"], "allow");
-        }
-        let mut runtime_managed = runtime.clone();
-        runtime_managed.permissions.values["permission"] = json!("allow");
-        let mut runtime_managed_command = Command::new("/bin/echo");
-        configure_runtime_command(
-            &mut runtime_managed_command,
-            &workspace,
-            PermissionSemantics::RuntimeManagedV2,
-            &runtime_managed,
-            false,
-            Some(&team_tool),
-            &external_mcp,
-            Path::new("/tmp/rovai-opencode-runtime-managed-test"),
-            Some(Path::new("/tmp/rovai-opencode-runtime-managed-test")),
-            &[],
-            None,
-        )
-        .unwrap();
-        let runtime_managed_config = runtime_managed_command
-            .as_std()
-            .get_envs()
-            .find_map(|(name, value)| {
-                (name == "OPENCODE_CONFIG_CONTENT")
-                    .then(|| value.map(|value| value.to_string_lossy().to_string()))
-                    .flatten()
-            })
-            .expect("Runtime-managed OpenCode overlay should be present");
-        let runtime_managed_config: Value = serde_json::from_str(&runtime_managed_config).unwrap();
-        assert_eq!(runtime_managed_config["permission"]["*"], "allow");
-        let servers = team_tool.acp_servers(AdapterKind::OpencodeCli, &external_mcp);
-        assert_eq!(servers.len(), 3);
-        assert_eq!(servers[0]["name"], "docs");
-        assert_eq!(servers[1]["name"], "remote");
-        assert_eq!(servers[1]["type"], "http");
-    }
-
-    #[test]
-    fn strict_acp_adapters_receive_private_exact_mcp_configuration() {
-        let workspace = AgentRunWorkspace {
-            execution_root: "/tmp".to_string(),
-            access: "read_write".to_string(),
-            isolation: "shared".to_string(),
-        };
-        let team_tool = smoke_team_tool();
-        let external_mcp = smoke_external_mcp();
-        for (kind, permission_values, required_flag, forbidden_flag) in [
-            (
-                AdapterKind::QoderCli,
-                json!({"permission_mode": "default"}),
-                "--permission-mode",
-                None,
-            ),
-            (
-                AdapterKind::CodebuddyCli,
-                json!({"permission_mode": "default"}),
-                "--permission-mode",
-                Some("--allowed-mcp-server-names"),
-            ),
-            (
-                AdapterKind::QwenCode,
-                json!({"approval_mode": "default"}),
-                "--approval-mode",
-                None,
-            ),
-        ] {
-            let mut runtime = isolated_smoke_runtime(AdapterKind::OpencodeCli, "default");
-            runtime.adapter_kind = kind;
-            runtime.permissions.adapter_kind = kind;
-            runtime.permissions.values = permission_values;
-            let directory = std::env::temp_dir().join(format!(
-                "rovai-strict-acp-command-test-{}-{}",
-                kind.as_str(),
-                uuid::Uuid::new_v4()
-            ));
-            let mut command = Command::new("/bin/echo");
-            let config = configure_runtime_command(
-                &mut command,
-                &workspace,
-                PermissionSemantics::RuntimeManagedV2,
-                &runtime,
-                false,
-                Some(&team_tool),
-                &external_mcp,
-                &directory,
-                Some(&directory),
-                &[],
-                None,
-            )
-            .unwrap()
-            .expect("strict ACP adapter should receive an ephemeral MCP config");
-            let arguments = command
-                .as_std()
-                .get_args()
-                .map(|argument| argument.to_string_lossy().to_string())
-                .collect::<Vec<_>>();
-            assert!(arguments.iter().any(|value| value == "--acp"));
-            if kind != AdapterKind::QwenCode {
-                assert!(arguments.iter().any(|value| value == "--strict-mcp-config"));
-            }
-            assert!(arguments.iter().any(|value| value == required_flag));
-            assert!(arguments.iter().any(|value| value == "--mcp-config"));
-            if matches!(kind, AdapterKind::QoderCli | AdapterKind::QwenCode) {
-                assert!(
-                    arguments
-                        .iter()
-                        .any(|value| value == "--allowed-mcp-server-names")
-                );
-                for server in ["docs", "remote", TEAM_MCP_SERVER_NAME] {
-                    assert!(arguments.iter().any(|value| value == server));
-                }
-            }
-            if let Some(forbidden_flag) = forbidden_flag {
-                assert!(!arguments.iter().any(|value| value == forbidden_flag));
-            }
-            let path = config.path().to_path_buf();
-            let document =
-                serde_json::from_str::<Value>(&std::fs::read_to_string(&path).unwrap()).unwrap();
-            assert!(document["mcpServers"].get("docs").is_some());
-            assert!(document["mcpServers"].get("remote").is_some());
-            assert!(document["mcpServers"].get(TEAM_MCP_SERVER_NAME).is_some());
-            drop(config);
-            assert!(!path.exists());
-            std::fs::remove_dir_all(directory).unwrap();
-        }
-    }
-
-    #[test]
-    fn kiro_uses_a_private_agent_that_rejects_ambient_mcp_sources() {
-        let workspace = AgentRunWorkspace {
-            execution_root: "/tmp/rovai-kiro-workspace".to_string(),
-            access: "read_write".to_string(),
-            isolation: "shared".to_string(),
-        };
-        let mut runtime = isolated_smoke_runtime(AdapterKind::OpencodeCli, "default");
-        runtime.adapter_kind = AdapterKind::KiroCli;
-        runtime.permissions.adapter_kind = AdapterKind::KiroCli;
-        runtime.permissions.values = json!({});
-        let directory =
-            std::env::temp_dir().join(format!("rovai-kiro-command-test-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&directory).unwrap();
-        let mut command = Command::new("/bin/echo");
-        configure_runtime_command(
-            &mut command,
-            &workspace,
-            PermissionSemantics::RuntimeManagedV2,
-            &runtime,
-            false,
-            None,
-            &smoke_external_mcp(),
-            &directory,
-            Some(&directory),
-            &[],
-            None,
-        )
-        .unwrap();
-        let arguments = command
-            .as_std()
-            .get_args()
-            .map(|argument| argument.to_string_lossy().to_string())
-            .collect::<Vec<_>>();
-        assert_eq!(arguments, ["acp", "--agent", "rovai"]);
-        let document = serde_json::from_str::<Value>(
-            &std::fs::read_to_string(directory.join(".kiro/agents/rovai.json")).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(document["includeMcpJson"], false);
-        assert_eq!(document["mcpServers"], json!({}));
-        assert_eq!(document["allowedTools"], json!([]));
-        std::fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn copilot_adds_a_private_projection_without_replacing_the_authenticated_home() {
-        let runtime = isolated_smoke_runtime(AdapterKind::CopilotCli, "auto");
-        let workspace = AgentRunWorkspace {
-            execution_root: "/tmp".to_string(),
-            access: "read_only".to_string(),
-            isolation: "shared".to_string(),
-        };
-        let directory = std::env::temp_dir().join(format!(
-            "rovai-copilot-config-test-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let mut command = Command::new("/bin/echo");
-        let team_tool = smoke_team_tool();
-        let external_mcp = smoke_external_mcp();
-        let config = configure_runtime_command(
-            &mut command,
-            &workspace,
-            PermissionSemantics::CoreEnforcedV1,
-            &runtime,
-            false,
-            Some(&team_tool),
-            &external_mcp,
-            &directory,
-            Some(&directory),
-            &["project_rogue".to_string()],
-            Some(&directory),
-        )
-        .unwrap()
-        .expect("Copilot should receive an ephemeral MCP config");
-        let arguments = command
-            .as_std()
-            .get_args()
-            .map(|argument| argument.to_string_lossy().to_string())
-            .collect::<Vec<_>>();
-        assert!(
-            arguments
-                .iter()
-                .any(|value| value == "--allow-tool=rovai_team")
-        );
-        assert!(
-            arguments
-                .iter()
-                .any(|value| value == "--disable-builtin-mcps")
-        );
-        let mut runtime_managed = runtime.clone();
-        runtime_managed.permissions.values["allow_all"] = json!("on");
-        let runtime_managed_directory = directory.join("runtime-managed");
-        let mut runtime_managed_command = Command::new("/bin/echo");
-        let runtime_managed_config = configure_runtime_command(
-            &mut runtime_managed_command,
-            &workspace,
-            PermissionSemantics::RuntimeManagedV2,
-            &runtime_managed,
-            false,
-            Some(&team_tool),
-            &external_mcp,
-            &runtime_managed_directory,
-            Some(&runtime_managed_directory),
-            &[],
-            Some(&runtime_managed_directory),
-        )
-        .unwrap();
-        let runtime_managed_arguments = runtime_managed_command
-            .as_std()
-            .get_args()
-            .map(|argument| argument.to_string_lossy().to_string())
-            .collect::<Vec<_>>();
-        assert!(
-            runtime_managed_arguments
-                .iter()
-                .any(|value| value == "--allow-all")
-        );
-        drop(runtime_managed_config);
-        assert!(
-            !command
-                .as_std()
-                .get_envs()
-                .any(|(name, _)| name == "COPILOT_HOME"),
-            "Copilot authentication and provider state live under COPILOT_HOME"
-        );
-        assert!(
-            arguments
-                .windows(2)
-                .any(|values| { values == ["--disable-mcp-server", "project_rogue"] })
-        );
-        assert!(arguments.iter().any(|value| {
-            value
-                .strip_prefix('@')
-                .is_some_and(|path| path == config.path().to_string_lossy())
-        }));
-        let path = config.path().to_path_buf();
-        assert!(path.exists());
-        let body = std::fs::read_to_string(&path).unwrap();
-        assert!(body.contains("\"docs\""));
-        assert!(body.contains("\"remote\""));
-        assert!(body.contains("\"rovai_team\""));
-        drop(config);
-        assert!(!path.exists());
-        std::fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn copilot_writes_external_projection_even_without_team_mcp() {
-        let runtime = isolated_smoke_runtime(AdapterKind::CopilotCli, "auto");
-        let workspace = AgentRunWorkspace {
-            execution_root: "/tmp".to_string(),
-            access: "read_only".to_string(),
-            isolation: "shared".to_string(),
-        };
-        let directory = std::env::temp_dir().join(format!(
-            "rovai-copilot-external-test-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let mut command = Command::new("/bin/echo");
-        let config = configure_runtime_command(
-            &mut command,
-            &workspace,
-            PermissionSemantics::CoreEnforcedV1,
-            &runtime,
-            false,
-            None,
-            &smoke_external_mcp(),
-            &directory,
-            Some(&directory),
-            &["docs".to_string()],
-            None,
-        )
-        .unwrap()
-        .expect("external MCP projection requires a private Copilot config");
-        let document: Value =
-            serde_json::from_str(&std::fs::read_to_string(config.path()).unwrap()).unwrap();
-        assert!(document["mcpServers"].get("docs").is_some());
-        assert!(document["mcpServers"].get(TEAM_MCP_SERVER_NAME).is_none());
-        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[tokio::test]
@@ -3042,49 +2564,6 @@ mod tests {
         assert!(completion.result_data["rawOutputDigest"].is_string());
         assert_eq!(completion.native_kind, "execute");
         assert!(!completion.observation_digest.is_empty());
-    }
-
-    #[test]
-    fn team_tool_updates_are_not_reclassified_as_runtime_actions() {
-        let audit_key = "private-test-audit-key";
-        let mut structured_content = json!({
-            "rovaiTeamTool": "team.create_task",
-            "taskId": "task-1"
-        });
-        let receipt = team_tool_completion_receipt(audit_key, &structured_content).unwrap();
-        structured_content["rovaiTeamReceipt"] = Value::String(receipt);
-        let update = json!({
-            "sessionUpdate": "tool_call_update",
-            "toolCallId": "tool-2",
-            "status": "completed",
-            "rawOutput": {
-                "structuredContent": structured_content
-            }
-        });
-        assert!(is_rovai_team_tool_completion(&update, Some(audit_key)).unwrap());
-        assert!(!is_rovai_team_tool_completion(&update, None).unwrap());
-
-        let mut forged = update.clone();
-        forged["rawOutput"]["structuredContent"]["taskId"] = json!("task-2");
-        assert!(!is_rovai_team_tool_completion(&forged, Some(audit_key)).unwrap());
-        assert!(
-            !is_rovai_team_tool_completion(
-                &json!({
-                    "sessionUpdate": "tool_call_update",
-                    "toolCallId": "tool-3",
-                    "status": "completed",
-                    "kind": "execute",
-                    "rawOutput": {
-                        "structuredContent": {
-                            "rovaiTeamTool": "team.create_task",
-                            "rovaiTeamReceipt": "forged"
-                        }
-                    }
-                }),
-                Some(audit_key)
-            )
-            .unwrap()
-        );
     }
 
     #[test]

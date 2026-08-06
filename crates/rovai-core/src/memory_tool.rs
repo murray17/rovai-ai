@@ -5,9 +5,7 @@ use serde_json::{Value, json};
 use crate::{
     command::{ActorRef, CommandEnvelope, CommandExecution},
     db::Database,
-    memory::{
-        AgentMemoryWriteCommand, MEMORY_WRITE_CAPABILITY, MemoryService, ProposeHearthMemoryCommand,
-    },
+    memory::{AgentMemoryWriteCommand, MemoryService, ProposeHearthMemoryCommand},
     team_tool::{TeamToolInvocationError, TeamToolService},
 };
 
@@ -284,21 +282,20 @@ fn authenticate(
 ) -> Result<(crate::team_tool::AuthenticatedTeamToolRun, String)> {
     let team_tool = TeamToolService::default();
     let identity = if let Some((agent_run_id, execution_epoch)) = attested_run {
-        team_tool.authenticate_attested_binding_with_capability(
+        team_tool.authenticate_attested_binding(
             database,
             native_binding_id,
             binding_credential,
             runtime_tool_call_id,
-            (agent_run_id, execution_epoch),
-            Some(MEMORY_WRITE_CAPABILITY),
+            agent_run_id,
+            execution_epoch,
         )
     } else {
-        team_tool.authenticate_binding(
+        team_tool.authenticate_read_binding(
             database,
             native_binding_id,
             binding_credential,
             runtime_tool_call_id,
-            MEMORY_WRITE_CAPABILITY,
         )
     }
     .map_err(map_memory_tool_error)?;
@@ -311,11 +308,7 @@ fn authenticate(
 fn map_memory_tool_error(error: anyhow::Error) -> anyhow::Error {
     if let Some(invocation) = error.downcast_ref::<TeamToolInvocationError>() {
         return TeamToolInvocationError {
-            code: if invocation.code == "team_tool.capability_denied" {
-                "memory.capability_denied".to_string()
-            } else {
-                invocation.code.clone()
-            },
+            code: invocation.code.clone(),
             message: invocation.message.clone(),
         }
         .into();

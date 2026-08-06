@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type JSX, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type JSX, type RefObject } from 'react'
+import { createPortal } from 'react-dom'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Tabs from '@radix-ui/react-tabs'
 import type {
@@ -41,7 +42,9 @@ import {
   timelineDayLabel
 } from './ui-model'
 import { MemberAvatar } from './MemberAvatar'
+import { MemberPortrait } from './MemberPortrait'
 import { localizeExecutionEngineTerms } from './product-copy'
+import { runtimeReadinessLabel } from './runtime-status'
 import { SafeMarkdown } from './SafeMarkdown'
 import { identityColorToken } from './theme'
 
@@ -52,6 +55,56 @@ export type NotificationFocusTarget = {
   requestId: number
   kind: 'approval' | 'camp_turn'
   campTurnId: string | null
+}
+export interface CampRuntimeRecoveryTarget {
+  agentProfileId: string
+  blockerCode: string
+}
+export interface CampRuntimeRecovery {
+  campId: string
+  targets: CampRuntimeRecoveryTarget[]
+}
+
+type MentionPopoverRequest = {
+  target:
+    | { kind: 'member'; agentProfileId: string }
+    | { kind: 'all_members'; context: 'composer' | 'history'; agentProfileIds: string[] }
+  trigger: HTMLElement
+  focusPanel: boolean
+}
+
+export function runtimeRecoveryReason(blockerCode: string): string {
+  switch (blockerCode) {
+    case 'runtime_not_configured':
+      return '尚未配置 Agent 运行时'
+    case 'runtime_authentication_required':
+      return 'Agent 运行时需要登录'
+    case 'adapter_installation_missing':
+      return '所选 Agent 运行时尚未安装'
+    case 'adapter_installation_disabled':
+      return '所选 Agent 运行时已停用'
+    case 'runtime_probe_required':
+      return 'Agent 运行时需要重新检查'
+    case 'runtime_selection_resolution_mismatch':
+      return '运行配置已变更，请重新选择'
+    case 'conversation_runtime_override_unsupported':
+      return '当前对话的运行配置不受支持'
+    case 'runtime_selection_unresolved':
+    case 'runtime_configuration_incomplete':
+      return '运行配置尚未完成'
+    case 'runtime_model_adapter_mismatch':
+    case 'runtime_model_unavailable':
+    case 'runtime_permission_adapter_mismatch':
+    case 'runtime_permission_schema_mismatch':
+      return '当前运行配置已失效'
+    case 'member_away':
+      return '队员当前已离队'
+    case 'member_removed':
+    case 'agent_unavailable':
+      return '队员当前不可用'
+    default:
+      return 'Agent 运行时暂不可用'
+  }
 }
 
 const EMPTY_CAMP_STARTERS = [
@@ -455,7 +508,6 @@ export function CampWorkspace({
   busy,
   onSend,
   onChangeLead,
-  onSetMemoryWrite,
   onTasksChanged,
   onResolveApproval,
   cancellingTurnIds = new Set<string>(),
@@ -465,8 +517,10 @@ export function CampWorkspace({
   inspectorTab: controlledInspectorTab,
   onInspectorTabChange,
   onOpenInspector,
-  onOpenMember,
-  notificationFocus = null
+  notificationFocus = null,
+  runtimeRecovery = null,
+  onConfigureRuntime,
+  onDismissRuntimeRecovery
 }: {
   snapshot: CampSnapshot
   optimisticMessages?: CampMessageView[]
@@ -477,7 +531,6 @@ export function CampWorkspace({
   busy: boolean
   onSend(draft: CampComposerDraftView): Promise<void>
   onChangeLead(agentProfileId: string): Promise<void>
-  onSetMemoryWrite(agentProfileId: string, expectedVersion: number, enabled: boolean): Promise<void>
   onTasksChanged(): Promise<void>
   onResolveApproval(approval: ActionApprovalView, optionId: string): void
   cancellingTurnIds?: ReadonlySet<string>
@@ -487,8 +540,10 @@ export function CampWorkspace({
   inspectorTab?: CampInspectorTab
   onInspectorTabChange?(tab: CampInspectorTab): void
   onOpenInspector?(tab: CampInspectorTab): void
-  onOpenMember?(agentProfileId: string): void
   notificationFocus?: NotificationFocusTarget | null
+  runtimeRecovery?: CampRuntimeRecovery | null
+  onConfigureRuntime?(agentProfileId: string): void
+  onDismissRuntimeRecovery?(): void
 }): JSX.Element {
   const [messageContent, setMessageContent] = useState<StructuredCampMessageContent>([])
   const [composerDraft, setComposerDraft] = useState<CampComposerDraftView | null>(null)
@@ -497,6 +552,7 @@ export function CampWorkspace({
   const [draggingAttachments, setDraggingAttachments] = useState(false)
   const [composerSubmitting, setComposerSubmitting] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
+  const [mentionPopover, setMentionPopover] = useState<MentionPopoverRequest | null>(null)
   const composerEditorRef = useRef<HTMLDivElement>(null)
   const draftSaveTimer = useRef<number | null>(null)
   const draftContent = useRef<StructuredCampMessageContent>([])
@@ -529,6 +585,48 @@ export function CampWorkspace({
     })),
     [snapshot.members]
   )
+  const closeMentionPopover = (returnFocus: boolean): void => {
+    const trigger = mentionPopover?.trigger
+    setMentionPopover(null)
+    if (returnFocus && trigger) {
+      window.requestAnimationFrame(() => trigger.focus({ preventScroll: true }))
+    }
+  }
+  const openMemberMentionPopover = (
+    agentProfileId: string,
+    trigger: HTMLElement,
+    focusPanel: boolean
+  ): void => {
+    if (!memberById.has(agentProfileId) || !profileById.has(agentProfileId)) return
+    if (mentionPopover?.trigger === trigger) {
+      closeMentionPopover(true)
+      return
+    }
+    setMentionPopover({
+      target: { kind: 'member', agentProfileId },
+      trigger,
+      focusPanel
+    })
+  }
+  const openAllMembersMentionPopover = (
+    context: 'composer' | 'history',
+    agentProfileIds: string[],
+    trigger: HTMLElement,
+    focusPanel: boolean
+  ): void => {
+    if (mentionPopover?.trigger === trigger) {
+      closeMentionPopover(true)
+      return
+    }
+    setMentionPopover({
+      target: { kind: 'all_members', context, agentProfileIds },
+      trigger,
+      focusPanel
+    })
+  }
+
+  useEffect(() => setMentionPopover(null), [snapshot.camp.id])
+
   const message = useMemo(
     () => structuredCampContentPlainText(messageContent, snapshot.members),
     [messageContent, snapshot.members]
@@ -1136,7 +1234,14 @@ export function CampWorkspace({
                                                 body={displayBody}
                                                 content={campMessage.content}
                                                 members={snapshot.members}
-                                                onOpenMember={onOpenMember}
+                                                onActivateMemberMention={openMemberMentionPopover}
+                                                onActivateAllMembersMention={(trigger, focusPanel) =>
+                                                  openAllMembersMentionPopover(
+                                                    'history',
+                                                    campMessage.addressedAgentProfileIds,
+                                                    trigger,
+                                                    focusPanel
+                                                  )}
                                               />
                                             </div>
                                             {campMessage.attachments.length > 0 && (
@@ -1282,24 +1387,6 @@ export function CampWorkspace({
                     ))}
                   </select>
                 </label>
-                <div className="context-memory-controls">
-                  <strong>记忆写入</strong>
-                  {snapshot.members.filter((member) => member.membershipStatus === 'active').map((member) => (
-                    <label key={member.agentProfileId}>
-                      <input
-                        type="checkbox"
-                        checked={member.memoryWriteEnabled}
-                        disabled={busy}
-                        onChange={(event) => void onSetMemoryWrite(
-                          member.agentProfileId,
-                          member.version,
-                          event.currentTarget.checked
-                        ).catch(() => undefined)}
-                      />
-                      <span>{member.displayName}</span>
-                    </label>
-                  ))}
-                </div>
               </section>
               {snapshot.contextManifests.map((manifest) => {
                 const run = runById.get(manifest.agentRunId) ?? null
@@ -1472,6 +1559,16 @@ export function CampWorkspace({
             />
           )}
 
+          {runtimeRecovery && runtimeRecovery.targets.length > 0 && (
+            <RuntimeRecoveryDock
+              recovery={runtimeRecovery}
+              memberById={memberById}
+              profileById={profileById}
+              onConfigure={onConfigureRuntime}
+              onDismiss={onDismissRuntimeRecovery}
+            />
+          )}
+
           <form
         className={draggingAttachments ? 'composer is-dragging-attachments' : 'composer'}
         onSubmit={(event) => void submit(event)}
@@ -1546,6 +1643,17 @@ export function CampWorkspace({
               placeholder="继续提问、补充约束或交付下一项职责…"
               disabled={busy || composerSubmitting}
               editorRef={composerEditorRef}
+              onActivateMemberMention={(member, trigger, focusPanel) =>
+                openMemberMentionPopover(member.agentProfileId, trigger, focusPanel)}
+              onActivateAllMembersMention={(trigger, focusPanel) =>
+                openAllMembersMentionPopover(
+                  'composer',
+                  composerMembers
+                    .filter((member) => member.mentionable !== false)
+                    .map((member) => member.agentProfileId),
+                  trigger,
+                  focusPanel
+                )}
             />
             <span className="mention-target-summary">
               未提及时发送给 Lead
@@ -1587,6 +1695,357 @@ export function CampWorkspace({
         </div>
           </form>
         </div>
+      </div>
+      {mentionPopover && (
+        <MentionProfilePopover
+          request={mentionPopover}
+          members={snapshot.members}
+          profiles={agents}
+          onClose={closeMentionPopover}
+        />
+      )}
+    </section>
+  )
+}
+
+function MentionProfilePopover({
+  request,
+  members,
+  profiles,
+  onClose
+}: {
+  request: MentionPopoverRequest
+  members: CampSnapshot['members']
+  profiles: AgentProfile[]
+  onClose(returnFocus: boolean): void
+}): JSX.Element {
+  const panelRef = useRef<HTMLDivElement>(null)
+  const focusedPanelRef = useRef(false)
+  const [position, setPosition] = useState<{
+    top: number
+    left: number
+    arrowX: number
+    placement: 'top' | 'bottom'
+  } | null>(null)
+  const memberById = useMemo(
+    () => new Map(members.map((member) => [member.agentProfileId, member])),
+    [members]
+  )
+  const profileById = useMemo(
+    () => new Map(profiles.map((profile) => [profile.id, profile])),
+    [profiles]
+  )
+
+  useLayoutEffect(() => {
+    const panel = panelRef.current
+    if (!panel) return undefined
+    let frame = 0
+    const update = (): void => {
+      if (!document.body.contains(request.trigger)) {
+        onClose(false)
+        return
+      }
+      const anchor = request.trigger.getBoundingClientRect()
+      const panelRect = panel.getBoundingClientRect()
+      const gap = 9
+      const margin = 12
+      const availableBelow = window.innerHeight - anchor.bottom
+      const placement = availableBelow >= panelRect.height + gap || anchor.top < panelRect.height + gap
+        ? 'bottom'
+        : 'top'
+      const unclampedTop = placement === 'bottom'
+        ? anchor.bottom + gap
+        : anchor.top - panelRect.height - gap
+      const unclampedLeft = anchor.left + (anchor.width / 2) - (panelRect.width / 2)
+      const left = Math.max(margin, Math.min(
+        unclampedLeft,
+        window.innerWidth - panelRect.width - margin
+      ))
+      const top = Math.max(margin, Math.min(
+        unclampedTop,
+        window.innerHeight - panelRect.height - margin
+      ))
+      setPosition({
+        top: Math.round(top),
+        left: Math.round(left),
+        arrowX: Math.round(anchor.left + (anchor.width / 2) - left),
+        placement
+      })
+    }
+    frame = window.requestAnimationFrame(update)
+    window.addEventListener('resize', update)
+    window.addEventListener('scroll', update, true)
+    const observer = new ResizeObserver(update)
+    observer.observe(panel)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.removeEventListener('resize', update)
+      window.removeEventListener('scroll', update, true)
+      observer.disconnect()
+    }
+  }, [onClose, request.trigger])
+
+  useEffect(() => {
+    focusedPanelRef.current = false
+  }, [request.trigger])
+
+  useEffect(() => {
+    const trigger = request.trigger
+    trigger.setAttribute('aria-expanded', 'true')
+    trigger.dataset.mentionOpen = 'true'
+    return () => {
+      trigger.setAttribute('aria-expanded', 'false')
+      delete trigger.dataset.mentionOpen
+    }
+  }, [request.trigger])
+
+  useEffect(() => {
+    if (!request.focusPanel || !position || focusedPanelRef.current) return
+    focusedPanelRef.current = true
+    panelRef.current?.focus({ preventScroll: true })
+  }, [position, request.focusPanel])
+
+  useEffect(() => {
+    const handlePointerDown = (event: globalThis.PointerEvent): void => {
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (panelRef.current?.contains(target) || request.trigger.contains(target)) return
+      onClose(false)
+    }
+    const handleKeyDown = (event: globalThis.KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      onClose(true)
+    }
+    document.addEventListener('pointerdown', handlePointerDown, true)
+    document.addEventListener('keydown', handleKeyDown, true)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown, true)
+      document.removeEventListener('keydown', handleKeyDown, true)
+    }
+  }, [onClose, request.trigger])
+
+  const profile = request.target.kind === 'member'
+    ? profileById.get(request.target.agentProfileId) ?? null
+    : null
+  const member = request.target.kind === 'member'
+    ? memberById.get(request.target.agentProfileId) ?? null
+    : null
+  const style = {
+    top: position?.top ?? 0,
+    left: position?.left ?? 0,
+    '--mention-popover-arrow-x': `${position?.arrowX ?? 28}px`,
+    '--mention-popover-accent': member?.accent ?? 'var(--brand)'
+  } as CSSProperties
+  const ariaLabel = profile
+    ? `${profile.displayName}的基础信息`
+    : '所有成员范围'
+
+  return createPortal(
+    <div
+      ref={panelRef}
+      className={`mention-profile-popover${position ? ' is-positioned' : ''}`}
+      role="dialog"
+      aria-modal="false"
+      aria-label={ariaLabel}
+      data-content-kind={profile ? 'member' : 'group'}
+      data-placement={position?.placement ?? 'bottom'}
+      tabIndex={-1}
+      style={style}
+    >
+      <div className="mention-profile-popover-arrow" aria-hidden="true" />
+      <div className="mention-profile-popover-inner">
+        {profile && member
+          ? (
+              <div className="mention-profile-side-shell">
+                <div className="mention-profile-media">
+                  <MemberPortrait
+                    agentProfileId={profile.id}
+                    avatarRef={profile.avatarRef}
+                    displayName={profile.displayName}
+                    decorative
+                    className="mention-profile-portrait"
+                  />
+                  <span className="mention-profile-portrait-label">PORTRAIT</span>
+                </div>
+                <div className="mention-profile-copy">
+                  <header className="mention-profile-header">
+                    <h2>{profile.displayName}</h2>
+                    <p>{profile.teamRole.trim() || '未设置角色'}</p>
+                  </header>
+                  <div className="mention-profile-status" aria-label="队员状态">
+                    <span className={`presence-${profile.presence}`}>
+                      <i aria-hidden="true" />
+                      {mentionPresenceLabel(profile.presence)}
+                    </span>
+                    <span className={`runtime-${profile.runtimeReadiness.status}`}>
+                      <i aria-hidden="true" />
+                      {mentionRuntimeLabel(profile)}
+                    </span>
+                  </div>
+                  <dl className="mention-profile-fields">
+                    <div>
+                      <dt>专业职责</dt>
+                      <dd>{profile.professionalResponsibilities.trim() || '未设置'}</dd>
+                    </div>
+                    <div>
+                      <dt>工作准则</dt>
+                      <dd>{profile.workingPrinciples.trim() || '未设置'}</dd>
+                    </div>
+                    <div>
+                      <dt>性格底色</dt>
+                      <dd>
+                        {profile.personalityTraits.length > 0
+                          ? (
+                              <span className="mention-profile-traits">
+                                {profile.personalityTraits.map((trait) => <span key={trait}>{trait}</span>)}
+                              </span>
+                            )
+                          : '未设置'}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+              </div>
+            )
+          : request.target.kind === 'all_members'
+            ? (
+                <MentionAllMembersPopover
+                  request={request.target}
+                  memberById={memberById}
+                  profileById={profileById}
+                />
+              )
+            : null}
+      </div>
+    </div>,
+    document.body
+  )
+}
+
+function MentionAllMembersPopover({
+  request,
+  memberById,
+  profileById
+}: {
+  request: Extract<MentionPopoverRequest['target'], { kind: 'all_members' }>
+  memberById: Map<string, CampSnapshot['members'][number]>
+  profileById: Map<string, AgentProfile>
+}): JSX.Element {
+  const rows = request.agentProfileIds.map((agentProfileId) => ({
+    agentProfileId,
+    member: memberById.get(agentProfileId) ?? null,
+    profile: profileById.get(agentProfileId) ?? null
+  }))
+  const historical = request.context === 'history'
+  return (
+    <div className="mention-group-popover">
+      <header className="mention-group-header">
+        <span aria-hidden="true">@</span>
+        <div>
+          <h2>所有成员</h2>
+          <p>广播 Mention</p>
+        </div>
+      </header>
+      <div className="mention-profile-status">
+        <span><i aria-hidden="true" />{historical ? `发送时已冻结 ${rows.length} 位收件人` : `当前 ${rows.length} 位在队队员`}</span>
+      </div>
+      <div className="mention-group-body">
+        <p>{historical
+          ? '历史消息展示发送接受时冻结的收件人范围，之后的加入或离队不会改写它。'
+          : '发送接受时会冻结当前实际寻址的队员集合。'}</p>
+        <div className="mention-group-members">
+          {rows.map(({ agentProfileId, member, profile }) => {
+            const displayName = profile?.displayName ?? member?.displayName ?? '不可用队员'
+            return (
+              <div className="mention-group-member" key={agentProfileId}>
+                <MemberAvatar
+                  agentProfileId={agentProfileId}
+                  avatarRef={profile?.avatarRef ?? member?.avatarRef ?? null}
+                  displayName={displayName}
+                  size="mention"
+                  decorative
+                />
+                <strong>{displayName}</strong>
+                <span>{mentionPresenceLabel(profile?.presence ?? member?.profilePresence ?? 'removed')}</span>
+              </div>
+            )
+          })}
+          {rows.length === 0 && <p className="mention-group-empty">没有可显示的收件人。</p>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function mentionPresenceLabel(presence: AgentProfile['presence']): string {
+  return ({ present: '在队', away: '暂离', removed: '已移除' })[presence]
+}
+
+function mentionRuntimeLabel(profile: AgentProfile): string {
+  const readiness = runtimeReadinessLabel(profile.runtimeReadiness.status)
+  return profile.runtimeSelection
+    ? `${runtimeAdapterLabel(profile.runtimeSelection.adapterKind)} · ${readiness}`
+    : readiness
+}
+
+function RuntimeRecoveryDock({
+  recovery,
+  memberById,
+  profileById,
+  onConfigure,
+  onDismiss
+}: {
+  recovery: CampRuntimeRecovery
+  memberById: Map<string, CampSnapshot['members'][number]>
+  profileById: Map<string, AgentProfile>
+  onConfigure?(agentProfileId: string): void
+  onDismiss?(): void
+}): JSX.Element {
+  const targetCount = recovery.targets.length
+  return (
+    <section
+      className="runtime-recovery-dock"
+      role="alert"
+      aria-label="消息未发送，目标队员的 Agent 运行时不可用"
+    >
+      <header>
+        <div className="runtime-recovery-heading">
+          <span className="runtime-recovery-symbol" aria-hidden="true">!</span>
+          <div>
+            <strong>消息未发送</strong>
+            <span>{targetCount} 位目标队员暂时不可执行 · 草稿已保留</span>
+          </div>
+        </div>
+        {onDismiss && (
+          <button className="icon-button" type="button" aria-label="关闭运行配置提示" onClick={onDismiss}>×</button>
+        )}
+      </header>
+      <div className="runtime-recovery-targets">
+        {recovery.targets.map((target) => {
+          const displayName = memberById.get(target.agentProfileId)?.displayName
+            ?? profileById.get(target.agentProfileId)?.displayName
+            ?? '目标队员'
+          return (
+            <div className="runtime-recovery-target" key={target.agentProfileId}>
+              <span className="runtime-recovery-target-mark" aria-hidden="true" />
+              <div>
+                <strong>{displayName}</strong>
+                <small>{runtimeRecoveryReason(target.blockerCode)}</small>
+              </div>
+              {onConfigure && (
+                <button
+                  className="quiet-button compact"
+                  type="button"
+                  aria-label={`配置${displayName}的 Agent 运行时`}
+                  onClick={() => onConfigure(target.agentProfileId)}
+                >
+                  去配置
+                </button>
+              )}
+            </div>
+          )
+        })}
       </div>
     </section>
   )
@@ -1778,12 +2237,18 @@ function StructuredMessageBody({
   body,
   content,
   members,
-  onOpenMember
+  onActivateMemberMention,
+  onActivateAllMembersMention
 }: {
   body: string
   content: StructuredCampMessageContent | null
   members: CampSnapshot['members']
-  onOpenMember?(agentProfileId: string): void
+  onActivateMemberMention?(
+    agentProfileId: string,
+    trigger: HTMLElement,
+    focusPanel: boolean
+  ): void
+  onActivateAllMembersMention?(trigger: HTMLElement, focusPanel: boolean): void
 }): JSX.Element {
   if (content === null) return <p>{body}</p>
   const memberById = new Map(members.map((member) => [member.agentProfileId, member]))
@@ -1792,36 +2257,61 @@ function StructuredMessageBody({
       {content.map((segment, index) => {
         if (segment.kind === 'text') return <span key={`text-${index}`}>{segment.text}</span>
         if (segment.kind === 'all_members_mention') {
+          const interactive = Boolean(onActivateAllMembersMention)
           return (
-            <span className="message-mention-token all-members" key={`all-${index}`}>
+            <span
+              className={`message-mention-token all-members${interactive ? ' is-interactive' : ''}`}
+              role={interactive ? 'button' : undefined}
+              tabIndex={interactive ? 0 : undefined}
+              aria-label={interactive ? '查看所有成员范围' : undefined}
+              aria-haspopup={interactive ? 'dialog' : undefined}
+              aria-expanded={interactive ? false : undefined}
+              key={`all-${index}`}
+              onClick={(event) => {
+                if (!onActivateAllMembersMention || window.getSelection()?.toString()) return
+                onActivateAllMembersMention(event.currentTarget, false)
+              }}
+              onKeyDown={(event) => {
+                if (!onActivateAllMembersMention || (event.key !== 'Enter' && event.key !== ' ')) return
+                event.preventDefault()
+                onActivateAllMembersMention(event.currentTarget, true)
+              }}
+            >
               @所有成员
             </span>
           )
         }
         const member = memberById.get(segment.agentProfileId)
-        const canOpen = Boolean(
+        const available = Boolean(
           member
           && member.membershipStatus === 'active'
           && member.profilePresence !== 'removed'
-          && onOpenMember
         )
-        const openMember = (respectTextSelection: boolean): void => {
-          if (!canOpen || !onOpenMember) return
+        const interactive = Boolean(available && onActivateMemberMention)
+        const showMemberProfile = (
+          trigger: HTMLElement,
+          respectTextSelection: boolean,
+          focusPanel: boolean
+        ): void => {
+          if (!interactive || !member || !onActivateMemberMention) return
           if (respectTextSelection && window.getSelection()?.toString()) return
-          onOpenMember(segment.agentProfileId)
+          onActivateMemberMention(member.agentProfileId, trigger, focusPanel)
         }
         return (
           <span
-            className={`message-mention-token${member ? '' : ' is-unavailable'}${canOpen ? ' is-interactive' : ''}`}
+            className={`message-mention-token${available ? '' : ' is-unavailable'}${interactive ? ' is-interactive' : ''}`}
             data-agent-profile-id={segment.agentProfileId}
-            role={canOpen ? 'link' : undefined}
-            tabIndex={canOpen ? 0 : undefined}
-            title={member ? `提及 ${member.displayName}` : '该队员已不可用'}
-            onClick={() => openMember(true)}
+            role={interactive ? 'button' : undefined}
+            tabIndex={interactive ? 0 : undefined}
+            aria-label={interactive && member ? `查看${member.displayName}的基础信息` : undefined}
+            aria-haspopup={interactive ? 'dialog' : undefined}
+            aria-expanded={interactive ? false : undefined}
+            title={available && member ? `查看${member.displayName}的基础信息` : '该队员已不可用'}
+            onClick={(event) => showMemberProfile(event.currentTarget, true, false)}
             onKeyDown={(event) => {
-              if (event.key !== 'Enter' || !canOpen) return
+              if ((event.key !== 'Enter' && event.key !== ' ') || !interactive) return
               event.preventDefault()
-              openMember(false)
+              showMemberProfile(event.currentTarget, false, true)
             }}
             key={`member-${index}-${segment.agentProfileId}`}
           >

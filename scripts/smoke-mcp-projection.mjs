@@ -428,8 +428,7 @@ function startCore() {
     : join(root, 'target', 'debug', 'rovai-core')
   const child = spawn(coreExecutable, [
     '--data-dir', dataDir,
-    '--mcp-config-path', mcpConfigPath,
-    '--antigravity-team-private-dir', join(dataDir, 'runtime-private', 'antigravity-team')
+    '--mcp-config-path', mcpConfigPath
   ], {
     cwd: root,
     env: process.env,

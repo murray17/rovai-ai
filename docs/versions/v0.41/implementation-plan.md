@@ -2,8 +2,8 @@
 document_type: implementation-plan
 version: v0.41
 authority: implementation-plan-and-acceptance
-status: in_progress
-last_updated: 2026-08-05
+status: complete
+last_updated: 2026-08-06
 ---
 
 # v0.41 实施与验收计划

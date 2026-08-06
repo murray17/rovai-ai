@@ -37,6 +37,7 @@ import {
   CampWorkspace,
   QuickChatWorkspace,
   type CampInspectorTab,
+  type CampRuntimeRecovery,
   type NotificationFocusTarget
 } from './CampWorkspace'
 import {
@@ -189,6 +190,7 @@ export function App(): React.JSX.Element {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
+  const [runtimeRecovery, setRuntimeRecovery] = useState<CampRuntimeRecovery | null>(null)
   const [liveRuntimeEvents, setLiveRuntimeEvents] = useState<LiveRuntimeEvent[]>([])
   const campEventSequenceMarker = useRef(0)
   const campSelectionGeneration = useRef(0)
@@ -680,6 +682,14 @@ export function App(): React.JSX.Element {
     else void requestMemberTransition(commit)
   }
 
+  const configureMemberRuntime = (agentProfileId: string): void => {
+    setRuntimeRecovery(null)
+    setSelectedMemberId(agentProfileId)
+    setMemberTab('runtime')
+    setMemberRuntimeFocusRequest((request) => request + 1)
+    chooseView('members')
+  }
+
   const openMemoryProposals = (): void => {
     setMemoryProposalNotice(false)
     setMemoryFocusId(null)
@@ -889,29 +899,6 @@ export function App(): React.JSX.Element {
     }
   }
 
-  const setCampMemberMemoryWrite = async (
-    agentProfileId: string,
-    expectedVersion: number,
-    enabled: boolean
-  ): Promise<void> => {
-    if (!activeCampId) return
-    setBusy(`memory-capability-${agentProfileId}`)
-    setError(null)
-    try {
-      const result = await window.rovai.request<StoredCommandResult>('campMembers.memoryWrite.set', {
-        commandId: crypto.randomUUID(),
-        command: { campId: activeCampId, agentProfileId, expectedVersion, enabled }
-      })
-      if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
-      await activateCamp(activeCampId)
-    } catch (nextError) {
-      setError(errorMessage(nextError))
-      throw nextError
-    } finally {
-      setBusy(null)
-    }
-  }
-
   const createCamp = async (
     draft: Omit<CreateCampRequest, 'commandId'>
   ): Promise<void> => {
@@ -947,6 +934,9 @@ export function App(): React.JSX.Element {
     ])
     setBusy('camp-message')
     setError(null)
+    setToast(null)
+    setRuntimeRecovery((current) => current?.campId === campId ? null : current)
+    let rejectedForRuntime = false
     try {
       const result = await window.rovai.request<SendCampMessageResult>(
         'camp.messages.send',
@@ -955,7 +945,14 @@ export function App(): React.JSX.Element {
       if (!result.commandResult) {
         throw new Error('Core 未返回消息提交结果。')
       }
-      if (result.commandResult.status === 'rejected') throw new Error(commandFailureMessage(result.commandResult))
+      if (result.commandResult.status === 'rejected') {
+        const recovery = runtimeRecoveryFromCommandResult(campId, result.commandResult)
+        if (recovery) {
+          rejectedForRuntime = true
+          setRuntimeRecovery(recovery)
+        }
+        throw new Error(commandFailureMessage(result.commandResult))
+      }
       const campMessageId = stringField(result.commandResult.payload, 'campMessageId')
       const campTurnId = stringField(result.commandResult.payload, 'campTurnId')
       const sequence = typeof result.commandResult.payload.sequence === 'number'
@@ -994,7 +991,7 @@ export function App(): React.JSX.Element {
       setOptimisticCampMessages((current) =>
         current.filter((entry) => entry.commandId !== commandId)
       )
-      setToast(errorMessage(nextError))
+      if (!rejectedForRuntime) setToast(errorMessage(nextError))
       throw nextError
     } finally {
       setBusy(null)
@@ -1175,7 +1172,6 @@ export function App(): React.JSX.Element {
             busy={busy === 'camp-message' || busy === 'change-default-lead' || busy?.startsWith('action-approval-') === true}
             onSend={sendCampMessage}
             onChangeLead={changeDefaultLead}
-            onSetMemoryWrite={setCampMemberMemoryWrite}
             onTasksChanged={() => activateCamp(activeCampId)}
             onResolveApproval={(approval, decision) => {
               void resolveActionApproval(approval, decision)
@@ -1187,12 +1183,10 @@ export function App(): React.JSX.Element {
             inspectorTab={campInspectorTab}
             onInspectorTabChange={setCampInspectorTab}
             onOpenInspector={openCampInspector}
-            onOpenMember={(agentProfileId) => {
-              setSelectedMemberId(agentProfileId)
-              setMemberTab('identity')
-              chooseView('members')
-            }}
             notificationFocus={notificationFocus}
+            runtimeRecovery={runtimeRecovery?.campId === activeCampId ? runtimeRecovery : null}
+            onConfigureRuntime={configureMemberRuntime}
+            onDismissRuntimeRecovery={() => setRuntimeRecovery(null)}
           />
         )}
 
@@ -1677,7 +1671,24 @@ export function commandFailureMessage(result: StoredCommandResult): string {
   ) {
     return '当前无可用队员。'
   }
+  if (result.code === 'agent_run.runtime_not_ready') {
+    return '目标队员的 Agent 运行时暂不可用。'
+  }
   return localizeExecutionEngineTerms(stringField(result.payload, 'message') ?? `Core 拒绝了命令：${result.code}`)
+}
+
+export function runtimeRecoveryFromCommandResult(
+  campId: string,
+  result: StoredCommandResult
+): CampRuntimeRecovery | null {
+  if (result.status !== 'rejected' || result.code !== 'agent_run.runtime_not_ready') return null
+  const agentProfileId = stringField(result.payload, 'agentProfileId')
+  const blockerCode = stringField(result.payload, 'blockerCode')
+  if (!agentProfileId || !blockerCode) return null
+  return {
+    campId,
+    targets: [{ agentProfileId, blockerCode }]
+  }
 }
 
 function campDeleteBlockers(payload: Record<string, unknown>): Array<{ code: string; count: number }> {

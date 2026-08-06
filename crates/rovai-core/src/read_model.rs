@@ -129,7 +129,6 @@ pub struct CampMemberView {
     pub profile_presence: String,
     pub member_order: i64,
     pub is_default_lead: bool,
-    pub memory_write_enabled: bool,
     pub version: i64,
 }
 
@@ -1097,8 +1096,7 @@ fn load_members(
                agent_profile.display_name, agent_profile.avatar_ref, agent_profile.team_role,
                agent_profile.accent, camp_member.status,
                agent_profile.profile_status, agent_profile.member_order,
-               camp_member.capability_overrides_json, camp_member.version,
-               agent_profile.default_capabilities_json
+               camp_member.version
         FROM camp_member
         JOIN agent_profile ON agent_profile.id = camp_member.agent_profile_id
         WHERE camp_member.camp_id = ?1
@@ -1108,17 +1106,6 @@ fn load_members(
     statement
         .query_map([camp_id], |row| {
             let agent_profile_id: String = row.get(0)?;
-            let overrides = serde_json::from_str::<Value>(&row.get::<_, String>(9)?)
-                .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?;
-            let defaults = serde_json::from_str::<Vec<String>>(&row.get::<_, String>(11)?)
-                .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?;
-            let memory_write_enabled = match overrides.get("memory.write").and_then(Value::as_str) {
-                Some("allow") => true,
-                Some("deny") => false,
-                _ => defaults
-                    .iter()
-                    .any(|capability| capability == "memory.write"),
-            };
             Ok(CampMemberView {
                 is_default_lead: default_lead == Some(agent_profile_id.as_str()),
                 agent_profile_id,
@@ -1130,8 +1117,7 @@ fn load_members(
                 membership_status: row.get(6)?,
                 profile_presence: row.get(7)?,
                 member_order: row.get(8)?,
-                memory_write_enabled,
-                version: row.get(10)?,
+                version: row.get(9)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()

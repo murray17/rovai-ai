@@ -16,13 +16,11 @@ use crate::{
         AdapterCapabilitySnapshot, AdapterKind, AdapterPermissionConfig, ModelDescriptor,
         ModelOptionDescriptor, PermissionOptionDescriptor, RuntimeOptionScope, ValueChoice,
     },
+    builtin_tool_transport::{
+        BUILTIN_TOOL_CONTRACT_VERSION, BUILTIN_TOOL_RUNTIME_CAPABILITY, builtin_tool_catalog_digest,
+    },
     command::canonical_json_digest,
     context_contract::native_binding_context_contract,
-    team_tool::TEAM_CALL_MEMBER_CAPABILITY,
-    team_tool_catalog::{
-        ANTIGRAVITY_ALIAS_MAP_VERSION, ATTESTED_TEAM_PROTOCOL_VERSION,
-        antigravity_permission_rules, built_in_team_catalog_digest,
-    },
 };
 
 /// The stable, built-in boundary between Rovai-ai runtime configuration and a
@@ -250,14 +248,6 @@ pub enum ExternalMcpProjection {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TeamGatewayAttachment {
-    InjectedCredential,
-    AttestedNativeBridge,
-    Unsupported,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum AmbientMcpIsolation {
     Exact,
     PreservedUncontrolled,
@@ -271,21 +261,13 @@ pub enum McpApprovalControl {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum BuiltInMcpToolParity {
-    Complete,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpProjectionCapability {
     pub supports_stdio: bool,
     pub supports_streamable_http: bool,
     pub external_mcp_projection: ExternalMcpProjection,
-    pub team_gateway_attachment: TeamGatewayAttachment,
     pub ambient_mcp_isolation: AmbientMcpIsolation,
     pub approval_control: McpApprovalControl,
-    pub built_in_mcp_tool_parity: BuiltInMcpToolParity,
 }
 
 fn exact_native_mcp_projection() -> McpProjectionCapability {
@@ -293,22 +275,18 @@ fn exact_native_mcp_projection() -> McpProjectionCapability {
         supports_stdio: true,
         supports_streamable_http: true,
         external_mcp_projection: ExternalMcpProjection::ExactPerRun,
-        team_gateway_attachment: TeamGatewayAttachment::InjectedCredential,
         ambient_mcp_isolation: AmbientMcpIsolation::Exact,
         approval_control: McpApprovalControl::RuntimeNative,
-        built_in_mcp_tool_parity: BuiltInMcpToolParity::Complete,
     }
 }
 
-fn attested_native_mcp_projection() -> McpProjectionCapability {
+fn unsupported_external_mcp_projection() -> McpProjectionCapability {
     McpProjectionCapability {
         supports_stdio: false,
         supports_streamable_http: false,
         external_mcp_projection: ExternalMcpProjection::Unsupported,
-        team_gateway_attachment: TeamGatewayAttachment::AttestedNativeBridge,
         ambient_mcp_isolation: AmbientMcpIsolation::PreservedUncontrolled,
         approval_control: McpApprovalControl::RuntimeNative,
-        built_in_mcp_tool_parity: BuiltInMcpToolParity::Complete,
     }
 }
 
@@ -356,7 +334,7 @@ pub struct AntigravityProbeObservation {
     pub probe_status: String,
     pub capabilities: Vec<String>,
     pub models: Vec<String>,
-    pub team_gateway_ready: bool,
+    pub builtin_cli_ready: bool,
     pub attempted_at: String,
     pub last_error: Option<String>,
 }
@@ -594,7 +572,7 @@ impl CodexCliAdapterPolicy {
             "model.list",
             "structured_permission_request",
             "context.charter.native_append",
-            TEAM_CALL_MEMBER_CAPABILITY,
+            BUILTIN_TOOL_RUNTIME_CAPABILITY,
         ] {
             if ready && !capabilities.iter().any(|value| value == capability) {
                 capabilities.push(capability.to_string());
@@ -873,7 +851,7 @@ impl ClaudeCodeCliAdapterPolicy {
                 "conversation.resume",
                 "process.interrupt",
                 "context.charter.native_append",
-                TEAM_CALL_MEMBER_CAPABILITY,
+                BUILTIN_TOOL_RUNTIME_CAPABILITY,
             ] {
                 if !capabilities.iter().any(|value| value == capability) {
                     capabilities.push(capability.to_string());
@@ -979,13 +957,10 @@ impl AntigravityAppAdapterPolicy {
                     capabilities.push(capability.to_string());
                 }
             }
-            if observation.team_gateway_ready {
-                capabilities.push(TEAM_CALL_MEMBER_CAPABILITY.to_string());
-                capabilities.push("team_gateway.attachment.attested_native_bridge".to_string());
-                capabilities.push("built_in_mcp_tool_parity.complete".to_string());
+            if observation.builtin_cli_ready {
+                capabilities.push(BUILTIN_TOOL_RUNTIME_CAPABILITY.to_string());
             } else {
-                capabilities.push("team_gateway.attachment.unsupported".to_string());
-                capabilities.push("built_in_mcp_tool_parity.incomplete".to_string());
+                capabilities.push("builtin_cli.transport.unavailable".to_string());
             }
             capabilities.push("mcp.external_projection.unsupported".to_string());
             capabilities.push("mcp.ambient_isolation.preserved_uncontrolled".to_string());
@@ -1044,10 +1019,10 @@ impl AntigravityAppAdapterPolicy {
             stale_at: (!ready).then_some(observation.attempted_at),
             last_error: observation.last_error,
             native_session_compatibility_key: ready.then(|| {
-                if observation.team_gateway_ready {
-                    "antigravity-app:cli-v1:attested-team-v1:post-message-v1".to_string()
+                if observation.builtin_cli_ready {
+                    "antigravity-app:cli-v1:builtin-cli-v1".to_string()
                 } else {
-                    "antigravity-app:cli-v1:no-team".to_string()
+                    "antigravity-app:cli-v1:no-builtin-cli".to_string()
                 }
             }),
         })
@@ -1113,8 +1088,8 @@ fn acp_capability_snapshot(
             == Some(true);
         if supports_load {
             capabilities.push("session.load".to_string());
-            capabilities.push(TEAM_CALL_MEMBER_CAPABILITY.to_string());
         }
+        capabilities.push(BUILTIN_TOOL_RUNTIME_CAPABILITY.to_string());
         append_exact_mcp_axes(&mut capabilities);
     }
     capabilities.sort();
@@ -1154,9 +1129,7 @@ fn acp_capability_snapshot(
 fn append_exact_mcp_axes(capabilities: &mut Vec<String>) {
     capabilities.extend([
         "mcp.external_projection.exact_per_run".to_string(),
-        "team_gateway.attachment.injected_credential".to_string(),
         "mcp.ambient_isolation.exact".to_string(),
-        "built_in_mcp_tool_parity.complete".to_string(),
     ]);
 }
 
@@ -1380,7 +1353,7 @@ fn claude_code_permission_options() -> Vec<PermissionOptionDescriptor> {
     vec![PermissionOptionDescriptor {
         key: "permission_mode".to_string(),
         label: "permission-mode".to_string(),
-        description: "Claude Code's native permission mode for writable non-interactive Runs. A read-only Workspace is narrowed to dontAsk, denies built-in write/Shell tools, and separately pre-authorizes only Rovai-ai's binding-authenticated Team Tool.".to_string(),
+        description: "Claude Code's native permission mode for writable non-interactive Runs. A read-only Workspace is narrowed to dontAsk and denies Runtime-native write/Shell tools; Rovai built-in operations remain available through the binding-authenticated bundled CLI.".to_string(),
         value_type: "enum".to_string(),
         choices: vec![
             choice("manual", "manual"),
@@ -1644,7 +1617,7 @@ impl AgentRuntimeAdapter for AntigravityAppAdapterPolicy {
     }
 
     fn mcp_projection(&self) -> McpProjectionCapability {
-        attested_native_mcp_projection()
+        unsupported_external_mcp_projection()
     }
 
     fn resolve_runtime(
@@ -1685,11 +1658,8 @@ impl AgentRuntimeAdapter for AntigravityAppAdapterPolicy {
             "installationId": input.installation_id,
             "protocolVersion": protocol_version,
             "contextContract": native_binding_context_contract(),
-            "teamGatewayAttachment": "attested_native_bridge",
-            "attestedTeamProtocolVersion": ATTESTED_TEAM_PROTOCOL_VERSION,
-            "teamCatalogDigest": built_in_team_catalog_digest()?,
-            "antigravityAliasMapVersion": ANTIGRAVITY_ALIAS_MAP_VERSION,
-            "antigravityPermissionBundle": antigravity_permission_rules(),
+            "builtinToolContractVersion": BUILTIN_TOOL_CONTRACT_VERSION,
+            "builtinToolCatalogDigest": builtin_tool_catalog_digest()?,
         }))?;
         let host_config_digest = canonical_json_digest(&json!({
             "adapterKind": self.kind(),
@@ -1932,7 +1902,7 @@ mod tests {
         assert!(
             snapshot
                 .capabilities
-                .contains(&TEAM_CALL_MEMBER_CAPABILITY.to_string())
+                .contains(&BUILTIN_TOOL_RUNTIME_CAPABILITY.to_string())
         );
         assert!(
             snapshot
@@ -1981,7 +1951,7 @@ mod tests {
         assert!(
             snapshot
                 .capabilities
-                .contains(&TEAM_CALL_MEMBER_CAPABILITY.to_string())
+                .contains(&BUILTIN_TOOL_RUNTIME_CAPABILITY.to_string())
         );
         assert!(
             snapshot
@@ -2038,7 +2008,7 @@ mod tests {
         assert!(
             snapshot
                 .capabilities
-                .contains(&TEAM_CALL_MEMBER_CAPABILITY.to_string())
+                .contains(&BUILTIN_TOOL_RUNTIME_CAPABILITY.to_string())
         );
         assert!(
             snapshot
@@ -2145,7 +2115,7 @@ mod tests {
                     "gemini-3.6-flash-high".to_string(),
                     "claude-sonnet-4-6".to_string(),
                 ],
-                team_gateway_ready: true,
+                builtin_cli_ready: true,
                 attempted_at: "2026-07-22T00:00:00Z".to_string(),
                 last_error: None,
             })
@@ -2168,16 +2138,11 @@ mod tests {
         assert!(
             snapshot
                 .capabilities
-                .contains(&TEAM_CALL_MEMBER_CAPABILITY.to_string())
-        );
-        assert!(
-            snapshot
-                .capabilities
-                .contains(&"team_gateway.attachment.attested_native_bridge".to_string())
+                .contains(&BUILTIN_TOOL_RUNTIME_CAPABILITY.to_string())
         );
         assert_eq!(
             snapshot.native_session_compatibility_key.as_deref(),
-            Some("antigravity-app:cli-v1:attested-team-v1:post-message-v1")
+            Some("antigravity-app:cli-v1:builtin-cli-v1")
         );
     }
 
@@ -2222,7 +2187,7 @@ mod tests {
     }
 
     #[test]
-    fn claude_code_uses_installed_aliases_and_additive_team_tool_support() {
+    fn claude_code_uses_installed_aliases_and_builtin_cli_support() {
         let registry = AgentRuntimeAdapterRegistry::default();
         let snapshot = registry
             .claude_code_capability_snapshot(ClaudeCodeProbeObservation {
@@ -2243,7 +2208,7 @@ mod tests {
         assert!(
             snapshot
                 .capabilities
-                .contains(&TEAM_CALL_MEMBER_CAPABILITY.to_string())
+                .contains(&BUILTIN_TOOL_RUNTIME_CAPABILITY.to_string())
         );
         assert_eq!(
             snapshot.permission_options[0].recommended_value,
@@ -2331,7 +2296,7 @@ mod tests {
     }
 
     #[test]
-    fn mcp_projection_capability_matches_the_verified_v019_matrix() {
+    fn external_mcp_projection_capability_matches_the_verified_matrix() {
         let registry = AgentRuntimeAdapterRegistry::default();
         for kind in [
             AdapterKind::CodexCli,
@@ -2350,10 +2315,6 @@ mod tests {
                 capability.external_mcp_projection,
                 ExternalMcpProjection::ExactPerRun
             );
-            assert_eq!(
-                capability.team_gateway_attachment,
-                TeamGatewayAttachment::InjectedCredential
-            );
             assert_eq!(capability.ambient_mcp_isolation, AmbientMcpIsolation::Exact);
             assert_eq!(
                 capability.approval_control,
@@ -2366,10 +2327,6 @@ mod tests {
         assert_eq!(
             capability.external_mcp_projection,
             ExternalMcpProjection::Unsupported
-        );
-        assert_eq!(
-            capability.team_gateway_attachment,
-            TeamGatewayAttachment::AttestedNativeBridge
         );
         assert_eq!(
             capability.ambient_mcp_isolation,

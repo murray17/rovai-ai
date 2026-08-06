@@ -352,10 +352,14 @@ export function buildQualificationEnvironmentArtifact({
   producerDigest
 }) {
   const readModelSchema = rawEnvironment.releaseCore?.readModelSchema
-  const attestedTeamProtocol = rawEnvironment.releaseCore?.attestedTeamProtocol
+  const builtinToolContractVersion = rawEnvironment.releaseCore?.builtinToolContractVersion
+  const builtinToolIpcProtocolVersion = rawEnvironment.releaseCore?.builtinToolIpcProtocolVersion
+  const builtinToolCatalogDigest = rawEnvironment.releaseCore?.builtinToolCatalogDigest
   const coreVersion = rawEnvironment.releaseCore?.version
   if (!Number.isInteger(readModelSchema)
-      || !Number.isInteger(attestedTeamProtocol)
+      || !Number.isInteger(builtinToolContractVersion)
+      || !Number.isInteger(builtinToolIpcProtocolVersion)
+      || typeof builtinToolCatalogDigest !== 'string'
       || typeof coreVersion !== 'string') {
     return null
   }
@@ -407,7 +411,9 @@ export function buildQualificationEnvironmentArtifact({
       version: coreVersion,
       executableDigest: withSha256Prefix(rawEnvironment.releaseCore.digest),
       readModelSchema,
-      attestedTeamProtocol
+      builtinToolContractVersion,
+      builtinToolIpcProtocolVersion,
+      builtinToolCatalogDigest: withSha256Prefix(builtinToolCatalogDigest)
     },
     host: {
       operatingSystem: rawEnvironment.host.type ?? rawEnvironment.host.platform,

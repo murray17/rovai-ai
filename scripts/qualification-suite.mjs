@@ -91,7 +91,6 @@ async function runOne(caseEntry, phase, plannedSlotId) {
     '--case', casePath,
     '--expected-seal', caseEntry.seal,
     '--evidence-root', trialEvidenceRoot,
-    '--team-private-dir', options.teamPrivateDirectory,
     '--suite-id', options.suiteId,
     '--isolation-profile', options.isolationProfilePath,
     '--trial-id', trialId,
@@ -169,9 +168,9 @@ async function auditCalibration(trialId) {
     canonicalReceiptCoverage: Number.isInteger(
       result.collaborationEvidence?.metrics?.acceptedMemberCalls
     ),
-    antigravityTeamCall: rabbitToolTitles.some((value) => value.includes('team.call_member')),
-    antigravityContextCall: rabbitToolTitles.some((value) => value.startsWith('context.')),
-    antigravityMemoryCall: rabbitToolTitles.some((value) => value.startsWith('memory.')),
+    antigravityMemberCall: rabbitToolTitles.some((value) => value.includes('team.call_member')),
+    antigravityContextOperation: rabbitToolTitles.some((value) => value.startsWith('context.')),
+    antigravityMemoryOperation: rabbitToolTitles.some((value) => value.startsWith('memory.')),
     verifiedDelivery: result.verifiedDelivery === 'pass',
     converged: result.orchestrationConvergence === 'pass'
   }
@@ -320,7 +319,6 @@ function parseArguments(args) {
       'pack',
       'core',
       'evidence-root',
-      'team-private-dir',
       'suite-id',
       'isolation-profile',
       'prior-calibration-summary'
@@ -330,7 +328,6 @@ function parseArguments(args) {
   if (!values.pack
       || !values.core
       || !values['evidence-root']
-      || !values['team-private-dir']
       || !values['suite-id']
       || !values['isolation-profile']) usage()
   if (Boolean(values['diagnostic-no-calibration']) !== Boolean(values['prior-calibration-summary'])) usage()
@@ -338,7 +335,6 @@ function parseArguments(args) {
     pack: resolve(values.pack),
     core: resolve(values.core),
     evidenceRoot: resolve(values['evidence-root']),
-    teamPrivateDirectory: resolve(values['team-private-dir']),
     suiteId: values['suite-id'],
     isolationProfilePath: resolve(values['isolation-profile']),
     diagnosticNoCalibration: values['diagnostic-no-calibration'] === true,
@@ -349,6 +345,6 @@ function parseArguments(args) {
 }
 
 function usage() {
-  console.error('Usage: node scripts/qualification-suite.mjs --pack <private-pack> --core <packaged-core> --evidence-root <private-root> --team-private-dir <path> --suite-id <id> --isolation-profile <private-json> [--diagnostic-no-calibration --prior-calibration-summary <path>]')
+  console.error('Usage: node scripts/qualification-suite.mjs --pack <private-pack> --core <packaged-core> --evidence-root <private-root> --suite-id <id> --isolation-profile <private-json> [--diagnostic-no-calibration --prior-calibration-summary <path>]')
   process.exit(2)
 }

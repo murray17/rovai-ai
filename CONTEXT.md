@@ -89,8 +89,8 @@ The required private `MEMBER_IDENTITY` section transiently formatted from one Ag
 _Avoid_: Member Identity Snapshot, AgentRun identity context, Session identity revision, avatar, Runtime configuration, Capability bundle, live Runtime update
 
 **Member Identity Update**:
-The versioned atomic user command that saves exactly one AgentProfile's six identity fields. Avatar, Runtime configuration, permissions, Presence, Memory Capability, and other Profile concerns have independent mutation boundaries and cannot partially join or roll back an Identity Update.
-_Avoid_: whole-profile save, avatar update, Runtime update, Memory Capability update, multi-section transaction
+The versioned atomic user command that saves exactly one AgentProfile's six identity fields. Avatar, Runtime configuration, permissions, Presence, Memory state, and other Profile concerns have independent mutation boundaries and cannot partially join or roll back an Identity Update.
+_Avoid_: whole-profile save, avatar update, Runtime update, Memory update, multi-section transaction
 
 **Peer Member Identity Projection**:
 The collaboration-facing subset of another Camp Member's identity containing only stable routing identity, Name, Team Role, Professional Responsibilities, and advisory availability. Personality Traits, Working Principles, and Growth Topic remain private to that Member's own Member Identity Bootstrap Projection.
@@ -229,7 +229,7 @@ The immutable Agent-facing applicability of one Relationship Memory: `mutual` en
 _Avoid_: directional Relationship Scope, user-hidden note, mutable revision field
 
 **Agent Memory Write**:
-A direct, immediately effective `memory.write` add or revise from a current fenced AgentRun into Companion(current Agent) or an applicable Relationship. Core derives the actor and Scope, enforces Capability, current membership, direction, capacity, secret and concurrency rules, and never treats the write as user confirmation.
+A direct, immediately effective `memory.write` add or revise from a current fenced AgentRun into Companion(current Agent) or an applicable Relationship. Every eligible Member may invoke it; Core derives the actor and Scope, enforces current membership, direction, capacity, secret and concurrency rules, and never treats the write as user confirmation.
 _Avoid_: Memory proposal, automatic confirmation, Hearth write, lifecycle request
 
 **Hearth Memory Proposal**:
@@ -247,14 +247,6 @@ _Avoid_: confirmation receipt, inferred authority, transient tool acknowledgemen
 **Hearth Memory Proposal Decision**:
 The per-Proposal user action to accept the displayed final content, edit then accept, or reject one Hearth Memory Proposal. Acceptance creates an ordinary active Memory or Revision with no higher authority tier; stale revise Proposals cannot be accepted or edited into acceptance.
 _Avoid_: Memory confirmation, bulk learning, Agent approval, stale rebase
-
-**Memory Write Capability**:
-The business Capability frozen into an AgentRun that permits bounded direct Companion/Relationship writes and Hearth Memory Proposal submission. It never authorizes a Hearth Proposal decision, Lifecycle operation, cross-Agent Companion write, reverse-direction Relationship write, or access outside the current Run.
-_Avoid_: tool visibility, user permission, Hearth write authority, Memory management role
-
-**Agent Memory Write Policy**:
-The application-global, user-controlled switch that enables future direct Agent Memory Writes and Hearth Memory Proposal submissions. It defaults on, is rechecked transactionally for every Agent mutation, and never changes or removes existing Memory when disabled.
-_Avoid_: Memory Write Capability, per-Memory confirmation, retroactive retirement, Agent preference
 
 **Rovai Skill**:
 A stable Skill identity in the Rovai Skill Library whose Name is globally unique. It is either supplied officially by Rovai-ai or explicitly imported by the user; Runtime-native Skills are outside this identity and may use the same Name.
@@ -405,7 +397,7 @@ The exact four-Member production setup evaluated by one Team Delivery Qualificat
 _Avoid_: arbitrary Agent Team, mandatory four-Agent execution, mutable personal setup
 
 **Collaboration Path Calibration**:
-A non-scoring prerequisite run whose user input prescribes necessary independent Member Calls so that Team Tool discovery, context transfer, and Lead integration can be distinguished from autonomous coordination. Its explicit collaboration contract may determine Calibration success, but never becomes a response protocol or Hard Outcome gate for an Autonomous Qualification Trial.
+A non-scoring prerequisite run whose user input prescribes necessary independent Member Calls so that Built-in CLI discovery, context transfer, and Lead integration can be distinguished from autonomous coordination. Its explicit collaboration contract may determine Calibration success, but never becomes a response protocol or Hard Outcome gate for an Autonomous Qualification Trial.
 _Avoid_: Team Delivery Qualification result, autonomous collaboration score, production task pass
 
 **Autonomous Qualification Trial**:
@@ -417,7 +409,7 @@ An Autonomous Qualification Trial driven through public Core commands against on
 _Avoid_: Smoke Test, demo run, shared-user diagnostic, Debug Core result, desktop UI automation
 
 **Qualification Environment Manifest**:
-The immutable evidence identifying the exact Rovai build, Runner, host, Qualification Team Configuration, Product Runtime executables and capability snapshots, models, permissions, Team Gateway, admitted Intervention Isolation Profile, external-effect policy, case seals, and relevant toolchains shared by a comparable set of Formal Qualification Trials. Material pre-dispatch drift ends that set and requires a new Manifest rather than extending prior results.
+The immutable evidence identifying the exact Rovai build, Runner, host, Qualification Team Configuration, Product Runtime executables and capability snapshots, models, permissions, Built-in CLI contract/catalog digest, admitted Intervention Isolation Profile, external-effect policy, case seals, and relevant toolchains shared by a comparable set of Formal Qualification Trials. Material pre-dispatch drift ends that set and requires a new Manifest rather than extending prior results.
 _Avoid_: permanent compatibility claim, mutable machine description, incomplete version label
 
 **Qualification Case**:
@@ -729,8 +721,8 @@ The immutable Core evidence for one Native Binding generation's stable Session C
 _Avoid_: complete Bootstrap snapshot, Member Identity history, Runtime prompt digest, proof of model adoption
 
 **Session Charter**:
-The stable Core Contract persisted as one Native Session Bootstrap Evidence component. It defines context authority and collaboration rules without containing editable Member identity, current Tasks, members, messages, Runtime state, Memory entries, Skills, tools or permissions.
-_Avoid_: System Prompt replacement, Member Identity Bootstrap Projection, dynamic Run context, security enforcement
+The stable Core Contract persisted as one Native Session Bootstrap Evidence component. It defines context authority, collaboration rules, and the stable Built-in Tool Transport discovery/invocation contract without containing editable Member identity, current Tasks, members, messages, Runtime state, Memory entries, Skills, complete operation schemas, or permissions.
+_Avoid_: System Prompt replacement, Member Identity Bootstrap Projection, dynamic Run context, embedded tool catalog, security enforcement
 
 **AgentRun Dynamic Context**:
 The immutable model-facing payload for exactly one AgentRun, composed from required Current Input plus conditional Collaboration State, Shared Conversation and Run Notices. It contains no Member Identity Bootstrap Projection and no independently synthesized objective, responsibility, deliverable or Task snapshot.
@@ -1006,7 +998,7 @@ the v0.41 contract, it is reset only within the confirmed closed allowlist: `rov
 SQLite sidecars (including incompatible legacy `lumen.sqlite` remnants), `managed-blobs/**`,
 `camp-attachments/**`, the registered Runtime projection roots, `runtime-private/**`,
 `codex-homes/**`, `quick-chat/**`, and reset-manifest-registered app-owned staging/lock/temp paths.
-The Core may clean its exact process-owned Team Tool socket separately, but may not sweep `/tmp`.
+The Core may clean its exact process-owned Built-in CLI IPC socket separately, but may not sweep `/tmp`.
 User workspaces, user files, external Runtime configuration and credentials, Native Runtime Homes, and
 project `.codex`/native Runtime state are outside this reset. Allowlist additions require a new manifest,
 tests, and an explicit architectural decision.
@@ -1021,7 +1013,7 @@ The bounded normalized text or structured payload of one AgentRun Execution Evid
 _Avoid_: silent truncation, local Blob path, raw protocol log, Markdown execution of tool output
 
 **CampTurn Stop**:
-The user-requested, idempotent cancellation of an active CampTurn's complete collaboration execution scope, including AgentRuns and unmaterialized Conversation Input Queue entries. Core atomically fences the Turn, cancels pending inputs, closes new message/evidence/Team Tool/descendant writes, and attempts native Runtime interruption before marking execution cancelled; InboxMessages and Audit facts remain durable, while cancelling a member Run never creates a message to another member.
+The user-requested, idempotent cancellation of an active CampTurn's complete collaboration execution scope, including AgentRuns and unmaterialized Conversation Input Queue entries. Core atomically fences the Turn, cancels pending inputs, closes new message/evidence/built-in-operation/descendant writes, and attempts native Runtime interruption before marking execution cancelled; InboxMessages and Audit facts remain durable, while cancelling a member Run never creates a message to another member.
 _Avoid_: stop current UI row only, external transaction rollback, Task cancellation, process signal without fencing
 
 **Unsettled External Effect**:
@@ -1097,12 +1089,12 @@ The Rovai-ai-managed directory that owns the authoritative Message Attachment fi
 _Avoid_: Run projection root, live attachment feed, Project attachment folder, user-selected workspace, cross-Camp library
 
 **Run Workspace**:
-The immutable absolute, existing startup and recovery working directory of one AgentRun. It carries no filesystem authority and is not a model-controlled Team Tool field. An A2A target Run receives the source Run Workspace path by deterministic Core rule, while the recipient continues to use its own Adapter Permission Configuration. A sender may instead describe another filesystem path in ordinary message or Task content; the recipient interprets that instruction and accesses or switches to the path through its own Runtime without changing the frozen Run Workspace.
+The immutable absolute, existing startup and recovery working directory of one AgentRun. It carries no filesystem authority and is not a model-controlled built-in operation field. An A2A target Run receives the source Run Workspace path by deterministic Core rule, while the recipient continues to use its own Adapter Permission Configuration. A sender may instead describe another filesystem path in ordinary message or Task content; the recipient interprets that instruction and accesses or switches to the path through its own Runtime without changing the frozen Run Workspace.
 _Avoid_: permission boundary, sandbox root, inherited sender permission, project ownership
 
 **A2A Parent Run**:
 The authenticated source AgentRun from which Core accepts an A2A Conversation Input and later creates its consuming AgentRun. Core derives and freezes the parent, root, and depth identities from the current Runtime binding; no LLM input may supply or override them.
-_Avoid_: Team Tool argument, model-generated Run ID, Task ownership, permission inheritance
+_Avoid_: built-in operation argument, model-generated Run ID, Task ownership, permission inheritance
 
 **A2A Context Transfer**:
 The bounded collaboration handoff in which the sending LLM supplies only the necessary `content`, recipient and optional historical Task link. Core deterministically assembles the target AgentRun input from that handoff, the recipient's own Conversation continuity, authorized Camp context, and frozen context boundaries; it never copies the sender's complete prompt, private Conversation, hidden reasoning, or generic model-supplied references.
@@ -1117,12 +1109,12 @@ The scheduler-owned pre-launch boundary for one queued AgentRun. It performs a l
 _Avoid_: message-send preflight, CampMessage admission, Git permission policy, Renderer readiness guess
 
 **Capability**:
-A Core-enforced business authorization atom that allows an Agent to request a class of Rovai-ai domain mutation. It is distinct from an exposed Team Tool, the scope of records visible to that Agent, and Adapter filesystem/Shell/network permissions.
-_Avoid_: Tool, visibility scope, Adapter permission, universal administrator role
+A Core-enforced business authorization atom that allows an Agent to request a class of Rovai-ai domain mutation outside the uniform Built-in Tool Catalog contract. It is distinct from record visibility, operation-specific invariants, and Adapter filesystem/Shell/network permissions; it cannot vary which canonical built-in operations an eligible Member may invoke.
+_Avoid_: Built-in Tool availability, visibility scope, Adapter permission, universal administrator role
 
 **Skill**:
 A reusable directory package of instructions and optional supporting resources that an Agent Runtime can discover and load when relevant.
-_Avoid_: System Prompt, Team Tool, MCP Server, AgentProfile
+_Avoid_: System Prompt, Built-in CLI operation, MCP Server, AgentProfile
 
 **Skill Library**:
 Rovai-ai's application-global collection of managed Skills, independent of their import source and of every Runtime's personal Skill directories.
@@ -1137,8 +1129,8 @@ A reconstructible Rovai-ai-managed filesystem entry that exposes one SkillRevisi
 _Avoid_: Skill source of truth, Runtime personal installation, proof that a model loaded the Skill
 
 **MCP Library**:
-Rovai-ai's application-global collection of user-visible external MCP Server definitions. It is an independent source of truth and does not include Rovai-ai's internal Team MCP gateway.
-_Avoid_: Runtime personal MCP configuration, remote marketplace, Team MCP
+Rovai-ai's application-global collection of user-visible external MCP Server definitions. It is an independent source of truth and never includes Rovai built-in operations.
+_Avoid_: Runtime personal MCP configuration, remote marketplace, Built-in CLI catalog
 
 **MCP Import**:
 A user-confirmed, one-time copy of portable MCP Server definitions from known local Agent configuration sources into the MCP Library. It does not establish ongoing synchronization, mutate the source configuration, or copy credentials and OAuth tokens. Environment references may be copied, but every literal `env` or `headers` source value is omitted from the normalized candidate and represented only as a rebind requirement; it must be re-entered, converted to a reference, or removed before import.
@@ -1161,7 +1153,7 @@ The immutable opaque identity of one MCP Server in the MCP Library. MCP Assignme
 _Avoid_: MCP Server Name, configuration digest, Runtime-native alias
 
 **MCP Server Name**:
-The unique, user-editable object key of one entry in `mcpServers`, used as its ordinary product label and preferred Runtime-facing name. It is a 1-64 character portable ASCII identifier matching `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`, is unique under ASCII case folding, and cannot equal the reserved internal name `rovai_team` under that comparison. It is not duplicated as a `serverName` field, is not the Server's identity, and MCP Assignments never reference it.
+The unique, user-editable object key of one entry in `mcpServers`, used as its ordinary product label and preferred Runtime-facing name. It is a 1-64 character portable ASCII identifier matching `[A-Za-z0-9][A-Za-z0-9_-]{0,63}` and is unique under ASCII case folding. No name, including the retired `rovai_team`, grants or impersonates Rovai built-in behavior; the name is not duplicated as a `serverName` field, is not the Server's identity, and MCP Assignments never reference it.
 _Avoid_: MCP Server ID, immutable identity, Assignment key
 
 **MCP Runtime Name**:
@@ -1209,9 +1201,73 @@ A development-time acceptance run that launches an actual Runtime CLI against ac
 _Avoid_: user-machine startup probe, rendered-config snapshot, mocked protocol success
 
 **MCP Runtime Projection**:
-An ephemeral, Adapter-native configuration generated from one MCP Projection Input and injected when Rovai-ai launches or resumes an Agent CLI. A Rovai-projected Server always takes precedence over a same-named Runtime-native Server, including the fixed Team MCP; if the Adapter cannot implement that precedence, it reports external projection as unsupported and the base Run continues without external MCP. Treatment of non-conflicting native Servers remains governed by the Adapter's declared isolation policy. Projection may read Runtime-native configuration for discovery but never mutates user or project Runtime configuration; process flags, private configuration environments, or Rovai-managed `0600` temporary files carry every override. A successful Runtime Session seals the resulting facts into its MCP Exposure Snapshot.
+An ephemeral, Adapter-native configuration generated from one MCP Projection Input and injected when Rovai-ai launches or resumes an Agent CLI. A Rovai-projected external Server always takes precedence over a same-named Runtime-native Server; if the Adapter cannot implement that precedence, it reports external projection as unsupported and the base Run continues without external MCP. Treatment of non-conflicting native Servers remains governed by the Adapter's declared isolation policy. Projection may read Runtime-native configuration for discovery but never mutates user or project Runtime configuration; process flags, private configuration environments, or Rovai-managed `0600` temporary files carry every override. Rovai built-in operations never enter this projection. A successful Runtime Session seals the resulting facts into its MCP Exposure Snapshot.
 _Avoid_: Runtime personal MCP config, MCP source of truth, central MCP proxy
 
-**Built-in MCP Tool Parity**:
-A Runtime attachment state in which an active AgentRun can discover and invoke the same canonical Team, Context Retrieval, and Memory operations as exact-injection Runtimes, using Adapter-safe visible names while retaining identical schemas, receipts, live authorization, Capability, quota, and fencing semantics. It does not grant equal business authority to every Member or imply equal external and ambient MCP isolation.
-_Avoid_: identical native tool spelling, universal Capability grant, external MCP parity, ambient MCP isolation
+**Built-in Tool Transport**:
+The sole model-facing path from an Agent Runtime through the `rovai` CLI and local Core IPC to Rovai-owned canonical Team, Task, Camp History, and Memory operations. It is a required AgentRun execution facility and remains separate from user-configured external MCP Runtime Projection.
+_Avoid_: external MCP proxy, Runtime-native tool alias, optional degraded capability, duplicated domain handler
+
+**Built-in Tool Catalog**:
+The complete versioned semantic surface of canonical Rovai built-in operations exposed identically to every eligible Agent through CLI list and describe. It is fixed by the currently running App build; installing another App version requires an App restart, and no active process hot-adds or hot-reloads operations. Every eligible Member may invoke every listed operation; Core applies current membership, record visibility, context fences, versions, quotas, and operation-specific invariants, but no per-Member Capability or allowlist changes operation availability.
+_Avoid_: per-Member tool list, Capability snapshot, operation allowlist, Runtime-specific alias catalog, in-process catalog hot reload
+
+**Built-in Tool Discovery**:
+The on-demand use of `rovai tool list` and `rovai tool describe` to obtain the current canonical operation names, hierarchical CLI command spellings, summaries, input modes, direct arguments, result schemas, and versioned envelope contract. Native Session Bootstrap contains only the stable CLI usage contract, while Dynamic Context may point to a canonical operation for omitted data; neither copies complete operation schemas.
+_Avoid_: schema-filled Bootstrap, duplicated tool documentation, Runtime-native tool discovery, dynamic alias instructions
+
+**Built-in Tool CLI Command**:
+The stable, domain-grouped shell spelling that maps one-to-one to a Canonical Operation, such as `rovai member call` for `team.call_member` or `rovai memory propose-hearth` for `memory.propose_hearth`. The command is a discoverable CLI presentation, while the canonical dotted operation remains the identity used by Core, receipts, replay, audit, Dynamic Context, and Canonical Runtime Activity.
+_Avoid_: canonical operation rename, Runtime-specific alias, `rovai tool call`, MCP tool name
+
+**Built-in Tool CLI Input**:
+The canonical JSON input assembled by one invocation from exactly one supported source: schema-derived direct flags, JSON read from stdin (including a shell heredoc), or JSON read from `--input-file`. Every source normalizes to the same canonical input and receives the same Core validation and authority checks; input files are recommended for long bodies, not required as a security boundary.
+_Avoid_: input-source precedence merge, different semantics by input mode, file-only contract, claim of transcript secrecy
+
+**Built-in Tool Runtime Parity**:
+The release-gated state in which Codex CLI, Claude Code, OpenCode, GitHub Copilot CLI, Kiro CLI, Qoder CLI, CodeBuddy, Qwen Code, and Antigravity all pass the same real-model CLI discovery, read, mutation, replay, fencing, and negative-path contract. Shell availability is a prerequisite, not acceptance evidence; no listed Runtime may ship with partial, legacy, or degraded built-in transport.
+_Avoid_: eight-of-nine completion, fixture-only support, Bash presence as proof, per-Runtime legacy fallback
+
+**Legacy Built-in MCP Transport**:
+The retired mechanism that exposed Rovai-owned canonical operations through the injected `rovai_team` MCP Server, Runtime aliases, schema dialects, or attested attachments. It is neither a supported fallback nor a compatibility mode after the CLI-only migration.
+_Avoid_: Built-in Tool Transport, external MCP, `mcp_legacy`, silent fallback
+
+**Built-in Tool Clean-Slate Cutover**:
+The development-only switch to CLI transport after the current local application data has been discarded. Product code removes the Legacy Built-in MCP Transport outright and contains no installed-data migration, compatibility detection, legacy configuration cleanup, or fallback behavior.
+_Avoid_: production upgrade path, automatic legacy cleanup, dual transport, compatibility shim
+
+**Canonical Operation Result**:
+The transport-independent business result of one canonical Rovai built-in operation. It retains the operation's existing flat business fields and excludes invocation status, operation identity, request identity, receipt, and MCP-specific fields.
+_Avoid_: Built-in Tool Invocation Envelope, MCP structured content, CLI response, nested `result.task`
+
+**Built-in Tool Invocation Envelope**:
+The versioned Core-owned response wrapper for one Rovai built-in operation invocation, carrying `ok`, canonical `operation`, `requestId`, `receipt`, and exactly one of `result` or `error`. A transport may render this envelope but cannot create its receipt or reshape its Canonical Operation Result.
+_Avoid_: Canonical Operation Result, MCP structured content, Runtime Adapter response contract
+
+**Built-in Tool Recovery Guidance**:
+The Core-owned, machine-readable handling rule attached to a rejected built-in invocation. A stable error code, concise safe message, recovery class, and optional whitelisted business details tell the Agent whether to correct input, reread and decide, retry the same request, stop, or report an indeterminate outcome; callers never infer retry safety from prose alone.
+_Avoid_: raw exception, stack trace, blind mutation retry, transport-authored advice, `retryable` without a recovery rule
+
+**Built-in Tool Invocation Replay**:
+Core's recognition of a repeated delivery of the same built-in invocation and semantic request. It returns the original committed result and receipt without repeating the operation's effects; reuse of that invocation identity with different content is a conflict, not a new call.
+_Avoid_: new model-requested invocation, duplicate Task, duplicate Member Call, payload-based deduplication
+
+**Built-in Tool Activity**:
+The single user-facing Canonical Runtime Activity for one Core-verified built-in operation invoked through the CLI. A positively correlated Runtime shell execution remains immutable supporting transport Evidence inside its details rather than a second top-level activity; without a verified correlation, Core preserves separate activities instead of merging by command text or timing.
+_Avoid_: duplicate shell row, deleted Runtime Evidence, command-text classification, temporal correlation
+
+**Indeterminate Built-in Tool Outcome**:
+The explicit result when a built-in invocation may have reached Core but bounded replay cannot establish either its committed receipt or authoritative rejection. It is presented as `结果待确认`, never as success, failure, or permission to issue the operation again blindly.
+_Avoid_: ordinary operation error, confirmed rejection, automatic duplicate invocation
+
+**Built-in Tool Process Identity**:
+The stable identity of one Core-managed Agent Runtime process across compatible sequential AgentRuns. It proves process ownership but never grants authority to act for whichever AgentRun happens to use that process now.
+_Avoid_: AgentRun identity, Built-in Tool Lease, reusable execution authority
+
+**Built-in Tool Lease**:
+The short-lived, Core-owned authority that binds one managed Runtime process to exactly one current AgentRun and execution epoch. It is replaced for every Fleet acquire and fenced before process reuse, so a late invocation from an earlier Run cannot act for a later Run; its internal identity and secret are never model input.
+_Avoid_: stable process credential, Native Session identity, model-supplied AgentRun identity
+
+**Built-in Tool Execution Authority Boundary**:
+The accepted Shell-transport boundary in which a valid invocation from the current Runtime process or any subprocess it launches is attributed to the same AgentRun and Member. Core can prove the active lease and enforce domain rules but cannot reliably prove whether the model typed the invocation directly or project code triggered it indirectly; every accepted invocation remains independently audited and the authority ends when the lease is fenced.
+_Avoid_: model-intent attestation, separately trusted project subprocess, parent-process heuristic, post-Run authority

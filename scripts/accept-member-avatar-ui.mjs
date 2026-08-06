@@ -121,8 +121,9 @@ try {
   let presetCopy = (await request(first.cdp, 'agents.list'))
     .find((profile) => profile.displayName === '小狐狸副本')
   assert(
-    presetCopy?.id !== 'agent_1'
-      && presetCopy?.handle.length === 12
+    /^agent_[1-9]\d*$/.test(presetCopy?.id ?? '')
+      && presetCopy?.id !== 'agent_1'
+      && presetCopy?.handle === ''
       && presetCopy.avatarRef === null,
     `Identity-only create did not use a generated internal ID: ${JSON.stringify(presetCopy)}`
   )
@@ -149,7 +150,7 @@ try {
   orphanAvatarRef = await saveManagedAvatar(first.cdp, '#74628f', '#a99ad0')
   await reloadRenderer(first.cdp)
   await openMembers(first.cdp)
-  await waitForText(first.cdp, '.member-list-copy strong', customDisplayName)
+  await waitForText(first.cdp, '.member-sidebar-copy strong', customDisplayName)
   await selectMember(first.cdp, customDisplayName)
   await waitForExpression(first.cdp,
     `Boolean(document.querySelector('.member-portrait img[src^="blob:"]'))`)
@@ -181,7 +182,7 @@ try {
   await restoreAcceptanceRuntimeSnapshot()
   await openMembers(second.cdp)
   await selectMember(second.cdp, customDisplayName)
-  await clickButton(second.cdp, '.member-section-heading button', '编辑身份')
+  await clickButton(second.cdp, '.member-detail-actions button', '编辑身份')
   await waitForSelector(second.cdp, '.member-dialog')
   await waitForExpression(second.cdp,
     `Boolean(document.querySelector('.member-dialog button.primary-button:not(:disabled)'))`,
@@ -235,8 +236,9 @@ try {
   await clickButton(second.cdp, '.member-dialog button', '取消')
   await waitForExpression(second.cdp, `!document.querySelector('.member-dialog')`)
 
-  await clickButton(second.cdp, '.member-status-actions button', '暂离')
-  await waitForText(second.cdp, '.member-status-actions', '归队')
+  await evaluate(second.cdp, `document.querySelector('.member-detail-menu summary')?.click()`)
+  await clickButton(second.cdp, '.member-detail-menu [role="menuitem"]', '暂时离队')
+  await waitForSelector(second.cdp, '.member-detail-statuses .presence-away')
   const awayCustom = (await request(second.cdp, 'agents.list'))
     .find((profile) => profile.displayName === customDisplayName)
   assert(awayCustom?.presence === 'away', 'Custom Profile did not become away')
@@ -254,10 +256,10 @@ try {
 
   third = await launchApp(firstPort + 2, 1040, 700)
   await openMembers(third.cdp)
-  await waitForText(third.cdp, '.member-list-copy strong', customDisplayName)
+  await waitForText(third.cdp, '.member-sidebar-copy strong', customDisplayName)
   await selectMember(third.cdp, customDisplayName)
   await waitForExpression(third.cdp, `(() => {
-    const row = [...document.querySelectorAll('.member-list-item')]
+    const row = [...document.querySelectorAll('.member-sidebar-select')]
       .find((candidate) => candidate.querySelector('strong')?.textContent === ${JSON.stringify(customDisplayName)})
     return row?.querySelector('.member-avatar-fallback')?.textContent?.trim() === '自'
   })()`)
@@ -309,8 +311,8 @@ try {
 
 async function assertCanonicalSeedAvatars(cdp, context) {
   const profiles = await request(cdp, 'agents.list')
-  for (const role of ['luoke', 'muwa', 'mianzhi', 'qilu']) {
-    const profile = profiles.find((candidate) => candidate.id === `agent-${role}`)
+  for (const [profileId, role] of [['agent_1', 'luoke'], ['agent_2', 'muwa'], ['agent_3', 'mianzhi'], ['agent_4', 'qilu']]) {
+    const profile = profiles.find((candidate) => candidate.id === profileId)
     assert(
       profile?.avatarRef === `rovai://member-avatar/builtin/${role}/v1`,
       `${context} has an unexpected ${role} avatarRef: ${JSON.stringify(profile)}`
@@ -320,7 +322,7 @@ async function assertCanonicalSeedAvatars(cdp, context) {
 
 async function assertBuiltinRenditions(cdp, theme) {
   await waitForExpression(cdp,
-    `[...document.querySelectorAll('.member-list-avatar img')]
+    `[...document.querySelectorAll('.member-sidebar .member-avatar img')]
       .every((image) => image.complete && image.naturalWidth > 0)`)
   await waitForExpression(cdp,
     `[...document.querySelectorAll('.member-portrait img')]
@@ -330,7 +332,7 @@ async function assertBuiltinRenditions(cdp, theme) {
     const portraitImage = portrait?.querySelector('img')
     const frame = portrait?.getBoundingClientRect()
     return {
-      listImages: document.querySelectorAll('.member-list-avatar img').length,
+      listImages: document.querySelectorAll('.member-sidebar .member-avatar img').length,
       portraitImages: document.querySelectorAll('.member-portrait img').length,
       identityFields: [...document.querySelectorAll('.member-identity-copy .member-identity-field > strong')]
         .map((node) => node.textContent?.trim()),
@@ -533,7 +535,7 @@ async function openMembers(cdp) {
     return true
   })()`)
   assert(opened, 'Could not open Members from global navigation')
-  await waitForSelector(cdp, '.member-workbench', 30_000)
+  await waitForSelector(cdp, '.members-view', 30_000)
 }
 
 async function reloadRenderer(cdp) {
@@ -547,7 +549,7 @@ async function reloadRenderer(cdp) {
 
 async function selectMember(cdp, displayName) {
   const selected = await evaluate(cdp, `(() => {
-    const button = [...document.querySelectorAll('.member-list-item')]
+    const button = [...document.querySelectorAll('.member-sidebar-select')]
       .find((candidate) => candidate.querySelector('strong')?.textContent === ${JSON.stringify(displayName)})
     if (!button) return false
     button.click()
@@ -555,11 +557,17 @@ async function selectMember(cdp, displayName) {
   })()`)
   assert(selected, `Could not select member ${displayName}`)
   await waitForExpression(cdp,
-    `document.querySelector('.member-profile-heading h3')?.textContent === ${JSON.stringify(displayName)}`)
+    `document.querySelector('.member-detail-heading h2')?.textContent === ${JSON.stringify(displayName)}`)
 }
 
 async function openCreateDialog(cdp) {
-  await clickButton(cdp, '.member-hero button', '＋ 新增队员')
+  const opened = await evaluate(cdp, `(() => {
+    const button = document.querySelector('.member-sidebar button[aria-label="新增队员"]')
+    if (!button || button.disabled) return false
+    button.click()
+    return true
+  })()`)
+  assert(opened, 'Could not open the member create dialog')
   await waitForSelector(cdp, '.member-dialog')
 }
 
@@ -593,9 +601,19 @@ async function clickElementContaining(cdp, selector, text) {
 }
 
 async function clickButton(cdp, selector, label) {
+  await waitForExpression(cdp, `[...document.querySelectorAll(${JSON.stringify(selector)})]
+    .some((candidate) => (
+      candidate.textContent?.includes(${JSON.stringify(label)})
+      || candidate.getAttribute('title') === ${JSON.stringify(label)}
+      || candidate.getAttribute('aria-label')?.includes(${JSON.stringify(label)})
+    ) && !candidate.disabled)`, 30_000)
   const clicked = await evaluate(cdp, `(() => {
     const button = [...document.querySelectorAll(${JSON.stringify(selector)})]
-      .find((candidate) => candidate.textContent?.trim() === ${JSON.stringify(label)})
+      .find((candidate) =>
+        candidate.textContent?.includes(${JSON.stringify(label)})
+        || candidate.getAttribute('title') === ${JSON.stringify(label)}
+        || candidate.getAttribute('aria-label')?.includes(${JSON.stringify(label)})
+      )
     if (!button || button.disabled) return false
     button.click()
     return true
@@ -611,7 +629,7 @@ async function waitForText(cdp, selector, text) {
 async function assertNoHorizontalOverflow(cdp, context) {
   const state = await evaluate(cdp, `({
     documentOverflow: document.documentElement.scrollWidth > window.innerWidth,
-    surfaces: [...document.querySelectorAll('.content, .member-workbench, .member-detail')]
+    surfaces: [...document.querySelectorAll('.content, .members-view, .member-detail-scroll')]
       .filter((node) => node.scrollWidth > node.clientWidth + 1)
       .map((node) => ({ className: node.className, scrollWidth: node.scrollWidth, clientWidth: node.clientWidth }))
   })`)

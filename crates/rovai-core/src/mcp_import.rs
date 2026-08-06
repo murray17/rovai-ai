@@ -9,10 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
-use crate::mcp::{
-    McpConfigFile, McpConfigStore, McpServerDefinition, TEAM_MCP_RESERVED_NAME,
-    valid_environment_name,
-};
+use crate::mcp::{McpConfigFile, McpConfigStore, McpServerDefinition, valid_environment_name};
 
 const MAX_SOURCE_BYTES: u64 = 4 * 1024 * 1024;
 const HIDDEN_SOURCE_VALUE: &str = "<敏感值已隐藏>";
@@ -895,9 +892,6 @@ fn normalized_name(name: &str) -> String {
         normalized.to_string()
     };
     normalized.truncate(64);
-    if normalized.eq_ignore_ascii_case(TEAM_MCP_RESERVED_NAME) {
-        normalized = "rovai-team-imported".to_string();
-    }
     normalized
 }
 

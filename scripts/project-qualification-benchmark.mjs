@@ -362,7 +362,7 @@ ${trialRows}
 
 ## Review
 
-1. Team Tool 是否可用应由协作审计回答，业务实现好坏由 Verifier 回答；不能再把任何总 FAIL 自动归因成 MCP 失败。
+1. Built-in CLI 协作调用是否可用应由协作审计回答，业务实现好坏由 Verifier 回答；不能再把任何总 FAIL 自动归因成运输失败。
 2. ${summary.qualitySignals.collaborationAuditPasses}/${summary.score.validTrials} 协作客观检查通过、${summary.qualitySignals.collaborationAuditIndeterminate} 个 indeterminate，${summary.collaboration.pollingViolationTrials} 次轮询违规；缺少 canonical receipt coverage 时不得把持久 Inbox 效果冒充 accepted-A2A 结论。
 3. \`Cargo.lock\` 类边界失败需要单列：内容变化可能是 Agent 增加依赖，纯 mode 变化也可能来自私有 fixture 的 0600 权限被工具规范化；两者不应使用同一个模糊错误码。
 4. 当前只有硬 Verifier 和协议审计，没有 Judge；因此可以确认完成度与协作纪律，不能量化每个成员贡献的语义价值。
@@ -590,10 +590,6 @@ async function configureDefaultTeamRuntimes(core) {
       permissions: { adapterKind: 'antigravity-app', schemaVersion: 1, values: { mode: 'accept-edits', sandbox: 'on', dangerously_skip_permissions: 'off' } }
     }
   ]
-  const antigravityTeam = await core.request('runtime.antigravityTeam.grantPermission', {}, 120_000)
-  if (antigravityTeam.managedConfig !== 'ready' || antigravityTeam.permission !== 'ready') {
-    throw new Error(`Antigravity Team Tool permission is not ready: ${JSON.stringify(antigravityTeam)}`)
-  }
   for (const adapterKind of [...new Set(team.map((member) => member.adapterKind))]) {
     await core.request('runtime.product.check', { runtimeKind: adapterKind }, 120_000)
   }
@@ -639,7 +635,14 @@ async function configureDefaultTeamRuntimes(core) {
       readiness: after.runtimeReadiness?.status ?? null
     })
   }
-  return { antigravityTeam: 'ready', members: configured }
+  return {
+    builtinCli: {
+      status: 'ready',
+      contractVersion: 1,
+      transport: 'private-local-ipc'
+    },
+    members: configured
+  }
 }
 
 function startCore(executable, dataDirectory) {

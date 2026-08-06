@@ -40,17 +40,6 @@ export class CoreClient {
     const binary = resolveCoreBinary()
     const userDataPath = app.getPath('userData')
     const args = ['--data-dir', userDataPath]
-    if (
-      process.env.ROVAI_ALLOW_ISOLATED_INSTANCE === '1'
-      && app.commandLine.hasSwitch('user-data-dir')
-    ) {
-      args.push(
-        '--antigravity-team-private-dir',
-        join(userDataPath, 'runtime-private', 'antigravity-team'),
-        '--antigravity-team-gemini-root',
-        join(userDataPath, 'runtime-private', 'antigravity-team', 'gemini')
-      )
-    }
     const child = spawn(binary, args, {
       stdio: ['pipe', 'pipe', 'pipe']
     })

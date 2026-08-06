@@ -39,17 +39,12 @@ async function runAdapterSmoke(adapterKind) {
       ? await configureCodexOnly(core.request, health)
       : await configureClaude(core.request, health)
 
-    const settings = await core.request('memory.settings.get')
-    if (settings.agentMemoryWritesEnabled !== true) {
-      throw new Error(`Agent Memory writes were not default-on: ${JSON.stringify(settings)}`)
-    }
-
     const createdResponse = await createConfiguredCampAndSend(core.request, {
       commandId: crypto.randomUUID(),
       workspace: null,
       body: [
         '执行一次 bounded Memory 自动形成验收。',
-        '必须且只能调用一次 memory.write，参数如下：',
+        '必须且只能通过 bash 调用一次 `rovai memory write --input-file request.json`，参数如下：',
         `action=add, scope=companion, kind=lesson, body=${lessonBody}, retrievalKeys=["运行时验收","工具回执"]`,
         '检查结构化回执。只有当 effective=true，且 memoryId/revisionId 均存在时，才只回复 MEMORY_WRITE_OK。'
       ].join('\n'),

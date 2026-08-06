@@ -59,6 +59,12 @@ export interface StructuredMentionComposerProps {
   onChange(content: StructuredCampMessageContent): void
   onSubmit(): void | Promise<void>
   onPasteFiles?(files: File[]): void
+  onActivateMemberMention?(
+    member: StructuredMentionMember,
+    trigger: HTMLElement,
+    focusPanel: boolean
+  ): void
+  onActivateAllMembersMention?(trigger: HTMLElement, focusPanel: boolean): void
 }
 
 export function structuredMentionOptions(
@@ -134,17 +140,14 @@ export function shouldSubmitStructuredComposerOnEnter(input: {
 }
 
 const TOKEN_STYLE: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
+  display: 'inline',
   maxWidth: '100%',
-  margin: '0 1px',
-  padding: '1px 5px',
-  border: '1px solid color-mix(in srgb, var(--brand) 42%, var(--line))',
-  borderRadius: '5px',
-  color: 'var(--brand-ink)',
-  background: 'var(--brand-soft)',
-  fontWeight: 700,
-  lineHeight: 1.35,
+  margin: 0,
+  padding: '0 1px',
+  border: 0,
+  borderRadius: '3px',
+  fontWeight: 600,
+  lineHeight: 'inherit',
   whiteSpace: 'nowrap',
   userSelect: 'all',
   cursor: 'default'
@@ -174,7 +177,9 @@ export function StructuredMentionComposer({
   editorRef: providedEditorRef,
   onChange,
   onSubmit,
-  onPasteFiles
+  onPasteFiles,
+  onActivateMemberMention,
+  onActivateAllMembersMention
 }: StructuredMentionComposerProps): JSX.Element {
   const fallbackEditorRef = useRef<HTMLDivElement>(null)
   const editorRef = providedEditorRef ?? fallbackEditorRef
@@ -481,13 +486,30 @@ export function StructuredMentionComposer({
           if (segment.kind === 'all_members_mention') {
             return (
               <span
-                className="structured-mention-token all-members-mention"
+                className={`structured-mention-token all-members-mention${onActivateAllMembersMention ? ' is-interactive' : ''}`}
                 contentEditable={false}
                 data-editor-segment="token"
                 data-token-kind="all_members_mention"
-                aria-label="提及所有成员"
+                role={onActivateAllMembersMention ? 'button' : undefined}
+                tabIndex={onActivateAllMembersMention ? 0 : undefined}
+                aria-label={onActivateAllMembersMention ? '查看所有成员范围' : '提及所有成员'}
+                aria-haspopup={onActivateAllMembersMention ? 'dialog' : undefined}
+                aria-expanded={onActivateAllMembersMention ? false : undefined}
                 key={`all-${index}`}
-                style={TOKEN_STYLE}
+                style={onActivateAllMembersMention
+                  ? { ...TOKEN_STYLE, cursor: 'pointer' }
+                  : TOKEN_STYLE}
+                onClick={(event) => {
+                  if (!onActivateAllMembersMention) return
+                  event.stopPropagation()
+                  onActivateAllMembersMention(event.currentTarget, false)
+                }}
+                onKeyDown={(event) => {
+                  if (!onActivateAllMembersMention || (event.key !== 'Enter' && event.key !== ' ')) return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  onActivateAllMembersMention(event.currentTarget, true)
+                }}
               >
                 @所有成员
               </span>
@@ -495,20 +517,49 @@ export function StructuredMentionComposer({
           }
           const member = memberById.get(segment.agentProfileId)
           const unavailable = !member || member.mentionable === false
+          const interactive = Boolean(member && !unavailable && onActivateMemberMention)
           return (
             <span
-              className={`structured-mention-token member-mention${unavailable ? ' is-unavailable' : ''}`}
+              className={`structured-mention-token member-mention${unavailable ? ' is-unavailable' : ''}${interactive ? ' is-interactive' : ''}`}
               contentEditable={false}
               data-editor-segment="token"
               data-token-kind="member_mention"
               data-agent-profile-id={segment.agentProfileId}
-              aria-label={`提及${member?.displayName ?? '不可用队员'}${unavailable ? '，当前不可用' : ''}`}
+              role={interactive ? 'button' : undefined}
+              tabIndex={interactive ? 0 : undefined}
+              aria-label={interactive && member
+                ? `查看${member.displayName}的基础信息`
+                : `提及${member?.displayName ?? '不可用队员'}${unavailable ? '，当前不可用' : ''}`}
+              aria-haspopup={interactive ? 'dialog' : undefined}
+              aria-expanded={interactive ? false : undefined}
               aria-invalid={unavailable || undefined}
-              title={unavailable ? '该队员当前不可提及，请删除或重新选择。' : undefined}
+              title={unavailable
+                ? '该队员当前不可提及，请删除或重新选择。'
+                : interactive
+                  ? `查看${member?.displayName ?? '队员'}的基础信息`
+                  : undefined}
               key={`member-${index}-${segment.agentProfileId}`}
               style={unavailable
-                ? { ...TOKEN_STYLE, textDecoration: 'line-through', borderStyle: 'dashed' }
-                : TOKEN_STYLE}
+                ? { ...TOKEN_STYLE, textDecoration: 'line-through', textDecorationColor: 'var(--attention)' }
+                : interactive
+                  ? { ...TOKEN_STYLE, cursor: 'pointer' }
+                  : TOKEN_STYLE}
+              onClick={(event) => {
+                if (!interactive || !member || !onActivateMemberMention) return
+                event.stopPropagation()
+                onActivateMemberMention(member, event.currentTarget, false)
+              }}
+              onKeyDown={(event) => {
+                if (
+                  !interactive
+                  || !member
+                  || !onActivateMemberMention
+                  || (event.key !== 'Enter' && event.key !== ' ')
+                ) return
+                event.preventDefault()
+                event.stopPropagation()
+                onActivateMemberMention(member, event.currentTarget, true)
+              }}
             >
               @{member?.displayName ?? '不可用队员'}
             </span>

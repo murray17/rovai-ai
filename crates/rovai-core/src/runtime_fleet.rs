@@ -15,7 +15,11 @@ use tokio::{
     time::{Instant, MissedTickBehavior, timeout},
 };
 
-use crate::{acp::AcpHost, codex::CodexHost};
+use crate::{
+    acp::AcpHost,
+    builtin_tool_runtime::{BuiltinToolLeaseRegistry, BuiltinToolProcessConfig},
+    codex::CodexHost,
+};
 
 pub(crate) const DEFAULT_MAX_RESIDENT_PROCESSES_PER_MEMBER: usize = 20;
 pub(crate) const DEFAULT_MAX_RESIDENT_PROCESSES_GLOBAL: usize = 200;
@@ -126,6 +130,13 @@ impl RuntimeProcessHost {
         match self {
             Self::Codex(host) => host.executable_path(),
             Self::Acp(host) => host.executable_path(),
+        }
+    }
+
+    fn builtin_tool_process_config(&self) -> Option<BuiltinToolProcessConfig> {
+        match self {
+            Self::Codex(host) => host.builtin_tool_process_config().cloned(),
+            Self::Acp(host) => host.builtin_tool_process_config().cloned(),
         }
     }
 
@@ -289,6 +300,7 @@ pub(crate) struct AgentRuntimeFleetManager {
     operations: Mutex<()>,
     state: Mutex<FleetState>,
     owner_records: Option<RuntimeOwnerRecordStore>,
+    builtin_tool_leases: Arc<BuiltinToolLeaseRegistry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -411,16 +423,25 @@ fn owner_process_matches(pid: u32, executable_path: &str) -> bool {
 impl AgentRuntimeFleetManager {
     #[cfg(test)]
     pub(crate) fn new(config: AgentRuntimeFleetConfig) -> Self {
-        Self::with_owner_records(config, None)
+        Self::with_owner_records(config, None, Arc::new(BuiltinToolLeaseRegistry::default()))
     }
 
-    pub(crate) fn new_with_owner_records(config: AgentRuntimeFleetConfig, data_dir: &Path) -> Self {
-        Self::with_owner_records(config, RuntimeOwnerRecordStore::new(data_dir))
+    pub(crate) fn new_with_builtin_tools(
+        config: AgentRuntimeFleetConfig,
+        data_dir: &Path,
+        builtin_tool_leases: Arc<BuiltinToolLeaseRegistry>,
+    ) -> Self {
+        Self::with_owner_records(
+            config,
+            RuntimeOwnerRecordStore::new(data_dir),
+            builtin_tool_leases,
+        )
     }
 
     fn with_owner_records(
         config: AgentRuntimeFleetConfig,
         owner_records: Option<RuntimeOwnerRecordStore>,
+        builtin_tool_leases: Arc<BuiltinToolLeaseRegistry>,
     ) -> Self {
         assert!(config.max_resident_processes_per_member > 0);
         assert!(config.max_resident_processes_global > 0);
@@ -429,6 +450,7 @@ impl AgentRuntimeFleetManager {
             operations: Mutex::new(()),
             state: Mutex::new(FleetState::default()),
             owner_records,
+            builtin_tool_leases,
         }
     }
 
@@ -663,6 +685,14 @@ impl AgentRuntimeFleetManager {
             };
             (entry.state, entry.retire_after_run, entry.host.clone())
         };
+        if let Some(config) = host
+            .as_ref()
+            .and_then(RuntimeProcessHost::builtin_tool_process_config)
+        {
+            self.builtin_tool_leases
+                .unbind(config.process_id(), agent_run_id, execution_epoch)
+                .await;
+        }
         let reusable = disposition == FleetReleaseDisposition::Reusable
             && state_kind == FleetProcessState::BusyResident
             && !retire_after_run
@@ -772,6 +802,11 @@ impl AgentRuntimeFleetManager {
         let Some(host) = host else {
             return false;
         };
+        if let Some(config) = host.builtin_tool_process_config() {
+            self.builtin_tool_leases
+                .unregister(config.process_id())
+                .await;
+        }
         if timeout(self.config.stop_timeout, host.shutdown_and_reap())
             .await
             .is_err()

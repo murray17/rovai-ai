@@ -67,7 +67,7 @@
       "file": "qualification-environment-manifest.schema.json",
       "schemaUri": "https://schemas.rovai.invalid/v0.34/qualification-environment-manifest.schema.json",
       "schemaVersion": "1.0.0",
-      "digest": "sha256:6ac8dde2d7e6a41af1ced55a5fc26d2c0244fec162a8b1b0d05b23d629041a40"
+      "digest": "sha256:20271d9a81560716e078922a2acc04f3ca6f13ad21dba9a87223646a9c2dc119"
     },
     {
       "file": "qualification-environment-manifest-v1.1.schema.json",

@@ -17,7 +17,6 @@ use url::Url;
 use uuid::Uuid;
 
 pub const MCP_SCHEMA_VERSION: u32 = 2;
-pub const TEAM_MCP_RESERVED_NAME: &str = "rovai_team";
 pub const PRESERVE_STORED_VALUE_MARKER: &str = "__ROVAI_PRESERVE_STORED_VALUE__";
 const READ_ONLY_MASK: &str = "********";
 const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
@@ -1248,13 +1247,6 @@ fn validate_server_name(name: &str) -> Vec<McpConfigIssue> {
         issues.push(McpConfigIssue::new(
             "mcp.invalid_name",
             "MCP Server name must be 1-64 ASCII letters, digits, underscores or hyphens and start with a letter or digit",
-            Some("mcpServers".to_string()),
-        ));
-    }
-    if name.eq_ignore_ascii_case(TEAM_MCP_RESERVED_NAME) {
-        issues.push(McpConfigIssue::new(
-            "mcp.reserved_name",
-            "rovai_team is reserved for Rovai-ai's internal Team MCP",
             Some("mcpServers".to_string()),
         ));
     }

@@ -35,9 +35,9 @@ const debugPort = Number(process.env.ROVAI_STRUCTURED_MENTIONS_ACCEPT_DEBUG_PORT
 const databasePath = join(dataDir, 'rovai.sqlite')
 const acceptanceExecutablePath = '/usr/bin/true'
 const targetMembers = [
-  { id: 'agent_1', displayName: '小狐狸' },
-  { id: 'agent_2', displayName: '小河狸' },
-  { id: 'agent_3', displayName: '咕咕' }
+  { id: 'agent_1', displayName: '小狐狸', teamRole: '游学者' },
+  { id: 'agent_2', displayName: '小河狸', teamRole: '鉴定士' },
+  { id: 'agent_3', displayName: '咕咕', teamRole: '巡夜人' }
 ]
 const targetMemberIds = targetMembers.map((member) => member.id)
 const expectedContent = [
@@ -158,8 +158,8 @@ try {
   await reloadRenderer(running.cdp)
   await openCamp(running.cdp, campId)
   const initialSnapshot = await request(running.cdp, 'camps.snapshot', { campId })
-  assert(initialSnapshot.schemaVersion === 15,
-    `Camp snapshot schema is not v15: ${initialSnapshot.schemaVersion}`)
+  assert(initialSnapshot.schemaVersion === 19,
+    `Camp snapshot schema is not v19: ${initialSnapshot.schemaVersion}`)
   assert(
     deepEqual(initialSnapshot.members.map((member) => member.agentProfileId), targetMemberIds),
     `Camp does not contain exactly the three target members: ${JSON.stringify(initialSnapshot.members)}`
@@ -230,6 +230,10 @@ try {
       `document.querySelector('#camp-message')?.textContent === ${JSON.stringify(expectedEditorText)}`)
   }
 
+  await running.cdp.send('Input.dispatchMouseEvent', {
+    type: 'mouseMoved', x: 2, y: 2, button: 'none', buttons: 0
+  })
+  await wait(150)
   const composerInspection = await evaluate(running.cdp, `(() => {
     const editor = document.querySelector('#camp-message')
     const tokens = [...document.querySelectorAll('.structured-mention-token.member-mention')]
@@ -244,9 +248,15 @@ try {
           contentEditable: token.getAttribute('contenteditable'),
           display: style.display,
           borderTopWidth: style.borderTopWidth,
+          paddingInline: [style.paddingLeft, style.paddingRight],
+          borderRadius: style.borderRadius,
           backgroundColor: style.backgroundColor,
+          color: style.color,
           fontWeight: style.fontWeight,
-          userSelect: style.userSelect
+          userSelect: style.userSelect,
+          role: token.getAttribute('role'),
+          label: token.getAttribute('aria-label'),
+          hasPopup: token.getAttribute('aria-haspopup')
         }
       })
     }
@@ -258,12 +268,18 @@ try {
       && deepEqual(composerInspection.tokenLabels, targetMembers.map(({ displayName }) => `@${displayName}`))
       && composerInspection.tokenStyles.every((style) =>
         style.contentEditable === 'false'
-        && style.display === 'inline-flex'
-        && style.borderTopWidth === '1px'
-        && style.backgroundColor !== 'rgba(0, 0, 0, 0)'
-        && Number(style.fontWeight) >= 700
-        && style.userSelect === 'all'),
-    `Structured mention tokens are not atomic blue chips: ${JSON.stringify(composerInspection)}`
+        && style.display === 'inline'
+        && style.borderTopWidth === '0px'
+        && style.paddingInline.every((value) => Number.parseFloat(value) <= 1.1)
+        && Number.parseFloat(style.borderRadius) === 3
+        && style.backgroundColor === 'rgba(0, 0, 0, 0)'
+        && style.color === 'rgb(47, 97, 200)'
+        && Number(style.fontWeight) >= 600
+        && style.userSelect === 'all'
+        && style.role === 'button'
+        && style.label?.endsWith('的基础信息')
+        && style.hasPopup === 'dialog'),
+    `Structured mentions do not use the selected atomic inline style: ${JSON.stringify(composerInspection)}`
   )
 
   const durableDraft = await waitForValue(async () =>
@@ -274,6 +290,27 @@ try {
 
   const composerCapture = join(outputDir, 'structured-mentions-composer.png')
   await capture(running.cdp, composerCapture)
+
+  await evaluate(running.cdp, `window.getSelection()?.removeAllRanges()`)
+  await mouseClick(running.cdp, '.structured-mention-token.member-mention.is-interactive')
+  await waitForExpression(running.cdp,
+    `document.querySelector('.mention-profile-popover[aria-label="小狐狸的基础信息"]')?.classList.contains('is-positioned')`)
+  await wait(180)
+  const composerPopoverInspection = await inspectMentionPopover(running.cdp)
+  assertSelectedMemberPopover(composerPopoverInspection, 'Composer')
+  assert(!(await evaluate(running.cdp, `Boolean(document.querySelector('.app-toast'))`)),
+    'Composer Mention incorrectly opened a global Toast')
+  assert(await mentionInteractionStayedInCamp(running.cdp),
+    'Clicking a Composer Mention navigated away from the current Camp')
+  const composerPopoverCapture = join(outputDir, 'structured-mentions-composer-popover.png')
+  await capture(running.cdp, composerPopoverCapture)
+  await pressEscape(running.cdp)
+  await waitForExpression(running.cdp, `!document.querySelector('.mention-profile-popover')`)
+  await waitForExpression(running.cdp,
+    `document.activeElement?.classList.contains('structured-mention-token') === true`, 3_000)
+  const draftAfterPopover = await request(running.cdp, 'camp.composerDraft.get', { campId })
+  assert(deepEqual(draftAfterPopover.content, expectedContent),
+    `Opening the Composer popover changed the durable Draft: ${JSON.stringify(draftAfterPopover)}`)
 
   await waitForExpression(running.cdp,
     `document.querySelector('.composer .composer-send')?.disabled === false`)
@@ -309,6 +346,86 @@ try {
     return Boolean(message?.querySelector('.structured-message-body')
       && message.querySelectorAll('.message-mention-token').length === 3)
   })()`, 30_000)
+
+  await running.cdp.send('Input.dispatchMouseEvent', {
+    type: 'mouseMoved', x: 2, y: 2, button: 'none', buttons: 0
+  })
+  await wait(150)
+  const sentMentionInspection = await evaluate(running.cdp, `(() => {
+    const messages = [...document.querySelectorAll('.conversation-bubble.user')]
+    const mention = messages.at(-1)?.querySelector('.message-mention-token.is-interactive')
+    if (!(mention instanceof HTMLElement)) return null
+    const style = getComputedStyle(mention)
+    return {
+      display: style.display,
+      paddingInline: [style.paddingLeft, style.paddingRight],
+      borderTopWidth: style.borderTopWidth,
+      borderRadius: style.borderRadius,
+      backgroundColor: style.backgroundColor,
+      color: style.color,
+      role: mention.getAttribute('role'),
+      label: mention.getAttribute('aria-label'),
+      hasPopup: mention.getAttribute('aria-haspopup')
+    }
+  })()`)
+  assert(
+    sentMentionInspection
+      && sentMentionInspection.display === 'inline'
+      && sentMentionInspection.paddingInline.every((value) => Number.parseFloat(value) <= 1.1)
+      && sentMentionInspection.borderTopWidth === '0px'
+      && Number.parseFloat(sentMentionInspection.borderRadius) === 3
+      && sentMentionInspection.backgroundColor === 'rgba(0, 0, 0, 0)'
+      && sentMentionInspection.color === 'rgb(47, 97, 200)'
+      && sentMentionInspection.role === 'button'
+      && sentMentionInspection.label === '查看小狐狸的基础信息'
+      && sentMentionInspection.hasPopup === 'dialog',
+    `Sent mention does not use the selected Feishu-style inline interaction: ${JSON.stringify(sentMentionInspection)}`
+  )
+
+  await evaluate(running.cdp, `window.getSelection()?.removeAllRanges()`)
+  await mouseClick(running.cdp,
+    '.conversation-bubble.user .message-mention-token.is-interactive')
+  await waitForExpression(running.cdp,
+    `document.querySelector('.mention-profile-popover[aria-label="小狐狸的基础信息"]')?.classList.contains('is-positioned')`)
+  await wait(180)
+  const historyPopoverInspection = await inspectMentionPopover(running.cdp)
+  assertSelectedMemberPopover(historyPopoverInspection, 'History')
+  assert(!(await evaluate(running.cdp, `Boolean(document.querySelector('.app-toast'))`)),
+    'History Mention incorrectly opened a global Toast')
+  assert(await mentionInteractionStayedInCamp(running.cdp),
+    'Clicking a sent Mention navigated away from the current Camp')
+  const memberPopoverCapture = join(outputDir, 'structured-mentions-member-popover.png')
+  await capture(running.cdp, memberPopoverCapture)
+  await pressEscape(running.cdp)
+  await waitForExpression(running.cdp, `!document.querySelector('.mention-profile-popover')`)
+  await waitForExpression(running.cdp,
+    `document.activeElement?.classList.contains('message-mention-token') === true`, 3_000)
+
+  for (const activation of [
+    { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 36 },
+    { key: ' ', code: 'Space', windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 49 }
+  ]) {
+    await activateLastInteractiveMentionWithKey(running.cdp, activation)
+    await waitForExpression(running.cdp,
+      `document.querySelector('.mention-profile-popover[aria-label="小狐狸的基础信息"]')?.classList.contains('is-positioned')`)
+    await wait(180)
+    assertSelectedMemberPopover(await inspectMentionPopover(running.cdp), activation.code)
+    assert(await mentionInteractionStayedInCamp(running.cdp),
+      `${activation.code} on a sent Mention navigated away from the current Camp`)
+    await pressEscape(running.cdp)
+    await waitForExpression(running.cdp, `!document.querySelector('.mention-profile-popover')`)
+    await waitForExpression(running.cdp,
+      `document.activeElement?.classList.contains('message-mention-token') === true`, 3_000)
+  }
+
+  await evaluate(running.cdp, `window.getSelection()?.removeAllRanges()`)
+  const mentionDrag = await mentionSelectionDragPoints(running.cdp)
+  await dispatchMouseDrag(running.cdp, mentionDrag.start, mentionDrag.end)
+  const mentionSelectedText = await evaluate(running.cdp, `window.getSelection()?.toString() ?? ''`)
+  assert(mentionSelectedText === mentionDrag.expected,
+    `Native Mention selection did not select the complete visible token: ${JSON.stringify({ mentionSelectedText, mentionDrag })}`)
+  assert(!(await evaluate(running.cdp, `Boolean(document.querySelector('.mention-profile-popover'))`)),
+    'Dragging across a sent Mention incorrectly opened the member popover')
 
   const sentCapture = join(outputDir, 'structured-mentions-sent.png')
   await capture(running.cdp, sentCapture)
@@ -379,7 +496,9 @@ try {
     outputDir,
     captures: {
       composer: composerCapture,
+      composerPopover: composerPopoverCapture,
       sent: sentCapture,
+      memberPopover: memberPopoverCapture,
       nativeSelection: selectionCapture,
       hoverCopy: copiedCapture
     },
@@ -390,6 +509,9 @@ try {
     agentRunTargets: sent.runs.map((run) => run.agentProfileId),
     agentRunCreatedAt: sent.runs[0].createdAt,
     structuredContent: sent.message.content,
+    memberPopoverActivations: ['composer-click', 'history-click', 'history-Enter', 'history-Space'],
+    memberPopoverStayedInCamp: true,
+    mentionSelectedText,
     selectedText,
     clipboardItemCountBeforeTest: clipboardArchive.length,
     clipboardRestored: false,
@@ -607,6 +729,113 @@ async function mouseClickMentionOption(cdp, displayName) {
   await dispatchMouseClick(cdp, point)
 }
 
+async function inspectMentionPopover(cdp) {
+  return evaluate(cdp, `(() => {
+    const panel = document.querySelector('.mention-profile-popover')
+    const side = panel?.querySelector('.mention-profile-side-shell')
+    const portrait = panel?.querySelector('.mention-profile-portrait')
+    if (!(panel instanceof HTMLElement)
+        || !(side instanceof HTMLElement)
+        || !(portrait instanceof HTMLElement)) return null
+    const panelRect = panel.getBoundingClientRect()
+    const portraitRect = portrait.getBoundingClientRect()
+    const sideStyle = getComputedStyle(side)
+    return {
+      role: panel.getAttribute('role'),
+      ariaModal: panel.getAttribute('aria-modal'),
+      ariaLabel: panel.getAttribute('aria-label'),
+      contentKind: panel.dataset.contentKind,
+      positioned: panel.classList.contains('is-positioned'),
+      position: getComputedStyle(panel).position,
+      width: panelRect.width,
+      sideFirstColumn: Number.parseFloat(sideStyle.gridTemplateColumns),
+      sideMinHeight: Number.parseFloat(sideStyle.minHeight),
+      portraitWidth: portraitRect.width,
+      portraitExists: true,
+      displayName: panel.querySelector('.mention-profile-header h2')?.textContent ?? null,
+      teamRole: panel.querySelector('.mention-profile-header p')?.textContent ?? null,
+      statuses: [...panel.querySelectorAll('.mention-profile-status > span')]
+        .map((status) => status.textContent?.trim() ?? ''),
+      fields: [...panel.querySelectorAll('.mention-profile-fields dt')]
+        .map((field) => field.textContent?.trim() ?? ''),
+      campVisible: Boolean(document.querySelector('.camp-workspace')),
+      membersViewVisible: Boolean(document.querySelector('.members-view')),
+      toastVisible: Boolean(document.querySelector('.app-toast'))
+    }
+  })()`)
+}
+
+function assertSelectedMemberPopover(inspection, context) {
+  assert(
+    inspection
+      && inspection.role === 'dialog'
+      && inspection.ariaModal === 'false'
+      && inspection.ariaLabel === '小狐狸的基础信息'
+      && inspection.contentKind === 'member'
+      && inspection.positioned
+      && inspection.position === 'fixed'
+      && inspection.width >= 390 && inspection.width <= 394
+      && inspection.sideFirstColumn >= 127 && inspection.sideFirstColumn <= 129
+      && inspection.sideMinHeight >= 302
+      && inspection.portraitWidth >= 126 && inspection.portraitWidth <= 129
+      && inspection.portraitExists
+      && inspection.displayName === '小狐狸'
+      && inspection.teamRole === '游学者'
+      && inspection.statuses.length === 2
+      && inspection.statuses[0].includes('在队')
+      && inspection.fields.join('|') === '专业职责|工作准则|性格底色'
+      && inspection.campVisible
+      && !inspection.membersViewVisible
+      && !inspection.toastVisible,
+    `${context} did not open the selected layout-2 member popover: ${JSON.stringify(inspection)}`
+  )
+}
+
+async function pressEscape(cdp) {
+  await cdp.send('Input.dispatchKeyEvent', {
+    type: 'rawKeyDown', key: 'Escape', code: 'Escape',
+    windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 53
+  })
+  await cdp.send('Input.dispatchKeyEvent', {
+    type: 'keyUp', key: 'Escape', code: 'Escape',
+    windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 53
+  })
+}
+
+async function activateLastInteractiveMentionWithKey(cdp, activation) {
+  const focused = await evaluate(cdp, `(() => {
+    const messages = [...document.querySelectorAll('.conversation-bubble.user')]
+    const mention = messages.at(-1)?.querySelector('.message-mention-token.is-interactive')
+    if (!(mention instanceof HTMLElement)) return false
+    window.getSelection()?.removeAllRanges()
+    mention.focus()
+    return document.activeElement === mention
+  })()`)
+  assert(focused, `Could not focus the sent Mention for ${activation.code}`)
+  await cdp.send('Input.dispatchKeyEvent', {
+    type: 'rawKeyDown',
+    key: activation.key,
+    code: activation.code,
+    windowsVirtualKeyCode: activation.windowsVirtualKeyCode,
+    nativeVirtualKeyCode: activation.nativeVirtualKeyCode
+  })
+  await cdp.send('Input.dispatchKeyEvent', {
+    type: 'keyUp',
+    key: activation.key,
+    code: activation.code,
+    windowsVirtualKeyCode: activation.windowsVirtualKeyCode,
+    nativeVirtualKeyCode: activation.nativeVirtualKeyCode
+  })
+}
+
+async function mentionInteractionStayedInCamp(cdp) {
+  return evaluate(cdp, `Boolean(
+    document.querySelector('.camp-workspace')
+    && document.querySelector('.structured-mention-token.is-interactive, .message-mention-token.is-interactive')
+    && !document.querySelector('.members-view')
+  )`)
+}
+
 async function mouseClick(cdp, selector, options = {}) {
   const point = await evaluate(cdp, `(() => {
     const primary = [...document.querySelectorAll(${JSON.stringify(selector)})]
@@ -690,6 +919,32 @@ async function selectionDragPoints(cdp, startOffset, endOffset) {
     }
   })()`)
   assert(points, 'Could not resolve native selection drag coordinates')
+  return points
+}
+
+async function mentionSelectionDragPoints(cdp) {
+  const points = await evaluate(cdp, `(() => {
+    const messages = [...document.querySelectorAll('.conversation-bubble.user')]
+    const mention = messages.at(-1)?.querySelector('.message-mention-token.is-interactive')
+    const previousText = mention?.previousElementSibling?.firstChild
+    const nextText = mention?.nextElementSibling?.firstChild
+    if (!(previousText instanceof Text) || !(nextText instanceof Text)
+        || previousText.data.length === 0 || nextText.data.length === 0) return null
+    mention.scrollIntoView({ block: 'center', inline: 'center' })
+    const characterPoint = (node, offset, rightEdge) => {
+      const range = document.createRange()
+      range.setStart(node, offset)
+      range.setEnd(node, offset + 1)
+      const rect = range.getBoundingClientRect()
+      return { x: rightEdge ? rect.right - 0.5 : rect.left + 0.5, y: rect.top + rect.height / 2 }
+    }
+    return {
+      start: characterPoint(previousText, previousText.data.length - 1, false),
+      end: characterPoint(nextText, 0, true),
+      expected: previousText.data.at(-1) + (mention.textContent ?? '') + nextText.data[0]
+    }
+  })()`)
+  assert(points, 'Could not resolve selection coordinates across the sent Mention')
   return points
 }
 

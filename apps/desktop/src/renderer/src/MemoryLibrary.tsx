@@ -10,7 +10,6 @@ import type {
   MemoryLibraryView,
   MemoryRecord,
   MemoryScopeKind,
-  MemorySettings,
   StoredCommandResult
 } from '@contracts'
 import { MemberAvatar } from './MemberAvatar'
@@ -76,7 +75,6 @@ export function MemoryLibrary({
   onPendingCountChange?(count: number): void
 }): React.JSX.Element {
   const [library, setLibrary] = useState<MemoryLibraryView | null>(null)
-  const [settings, setSettings] = useState<MemorySettings | null>(null)
   const [proposals, setProposals] = useState<HearthMemoryProposal[]>([])
   const [scope, setScope] = useState<MemoryScopeKind>('hearth')
   const [governance, setGovernance] = useState<GovernanceFilter>('all')
@@ -92,14 +90,12 @@ export function MemoryLibrary({
   const [feedback, setFeedback] = useState<string | null>(null)
 
   const load = useCallback(async (): Promise<void> => {
-    const [nextLibrary, nextProposals, nextSettings] = await Promise.all([
+    const [nextLibrary, nextProposals] = await Promise.all([
       window.rovai.request<MemoryLibraryView>('memory.list'),
-      window.rovai.request<HearthMemoryProposal[]>('memory.hearthProposals.list'),
-      window.rovai.request<MemorySettings>('memory.settings.get')
+      window.rovai.request<HearthMemoryProposal[]>('memory.hearthProposals.list')
     ])
     setLibrary(nextLibrary)
     setProposals(nextProposals)
-    setSettings(nextSettings)
     onPendingCountChange?.(nextProposals.filter((proposal) => proposal.status === 'pending').length)
   }, [onPendingCountChange])
 
@@ -330,21 +326,6 @@ export function MemoryLibrary({
     setSelectedProposalIds(new Set())
   })
 
-  const setAgentWrites = (enabled: boolean): Promise<void> => run('memory-settings', async () => {
-    if (!settings) return
-    const result = await window.rovai.request<StoredCommandResult>('memory.settings.set', {
-      commandId: crypto.randomUUID(),
-      command: {
-        expectedVersion: settings.version,
-        agentMemoryWritesEnabled: enabled
-      }
-    })
-    assertApplied(result)
-    setFeedback(enabled
-      ? '已允许伙伴形成 Companion / Relationship Memory，并提交 Hearth 提案。'
-      : '已停止新的伙伴写入；已有记忆和 Hearth 提案不会被改写。')
-  })
-
   const lifecycle = (
     method: 'memory.retire' | 'memory.reactivate',
     memory: MemoryRecord
@@ -409,28 +390,6 @@ export function MemoryLibrary({
         <div><strong>{agentCount}</strong><span>伙伴形成</span></div>
         <div><strong>{reviewCount}</strong><span>建议复核</span></div>
       </div>
-
-      {settings && (
-        <section className="memory-auto-policy" aria-labelledby="memory-settings-title">
-          <div>
-            <strong id="memory-settings-title">允许伙伴写入记忆</strong>
-            <p>Companion 与 Relationship 的合法写入会直接生效；Hearth 只会形成待你确认的提案。</p>
-          </div>
-          <button
-            className={`memory-policy-switch ${settings.agentMemoryWritesEnabled ? 'enabled' : ''}`}
-            type="button"
-            role="switch"
-            aria-checked={settings.agentMemoryWritesEnabled}
-            onClick={() => void setAgentWrites(!settings.agentMemoryWritesEnabled)}
-            disabled={busy !== null}
-          >
-            <i aria-hidden="true" />
-            <span>{busy === 'memory-settings'
-              ? '正在保存…'
-              : settings.agentMemoryWritesEnabled ? '已开启' : '已关闭'}</span>
-          </button>
-        </section>
-      )}
 
       {pending.length > 0 && (
         <button className="memory-pending-banner" type="button" onClick={() => setProposalDrawerOpen(true)}>

@@ -5,7 +5,7 @@ status: accepted
 design_direction: arctic-dawn-v3
 target_version: v0.25
 implementation_status: in_progress
-last_updated: 2026-08-05
+last_updated: 2026-08-06
 ---
 
 # Arctic Dawn V3 设计规范
@@ -14,7 +14,9 @@ last_updated: 2026-08-05
 产品方向、访谈决定及现有领域/安全合同收敛为可实施规范。设计已形成共同理解；
 用户已于 2026-07-30 明确授权生产实现；首轮范围以及随后确认的导航、设置覆盖与
 空 Camp 欢迎状态均已完成。2026-08-03 新增的结构化 Mention 与用户消息原生拖选也已
-完成生产实现，并通过隔离打包 App 的真实输入、拖选和系统剪贴板验收。
+完成生产实现；2026-08-06 用户再次确认原交互稿中的“Mention 视觉方案 A + 信息弹窗
+布局 2”，本节据此冻结 Composer 与历史 Mention 的共同呈现和点击行为；重新打包的 App
+已通过真实输入、点击、Enter/Space、Esc 焦点返回、拖选和截图验收。
 
 ## 权威边界
 
@@ -338,8 +340,55 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 
 #### 结构化队员 Mention
 
-> 本节产品行为已逐项确认；跨版本边界由 accepted [ADR-0096](../adr/0096-core-owned-structured-mentions-and-derived-addressing.md)
-> 记录；生产实现与 `pnpm accept:structured-mentions-ui` 真实 App 验收已经完成。
+> Core-owned 内容、稳定身份与派生寻址由 accepted
+> [ADR-0096](../adr/0096-core-owned-structured-mentions-and-derived-addressing.md)约束；
+> 本节是 Renderer 视觉与交互的权威合同。二者不能互相替代。
+
+##### 不得回退的交互合同
+
+“飞书式”只描述紧凑、可识别、可直接查看身份信息的行内交互语法。颜色使用本设计的
+`--mention-ink` / `--mention-ink-hover` 语义 Token，Focus 继续使用 Arctic Dawn Token。
+以下基线来自用户提供的 `rovai-mention-popover-prototype-v2`，并于 2026-08-06 再次确认、
+纳入 `pnpm accept:structured-mentions-ui`：
+
+| 场景 | 呈现 | 允许的交互 | 明确禁止 |
+|---|---|---|---|
+| Composer 中可用的 Member Mention | 默认无底色、无边框的蓝色原子行内文字 | Pointer Down 保持整体选中；单击、Enter、Space 打开人物信息卡；仍可整体替换或删除 | 打开队员页、全局 Toast、拆开编辑名称或改变寻址 |
+| 历史消息中的可解析 Member Mention | 同一默认无底色、无边框的蓝色行内文字 | 单击、Enter、Space 打开人物信息卡；保留文本拖选和复制 | 切换页面、打开 Inspector、显示全局 Toast、发 Core 命令或改变消息 |
+| Composer 中已失效的 Member Mention | 保留完整原子 Token 和明确不可用态 | 整体选择、替换或删除 | 打开信息卡、发送、静默降级或再次寻址 |
+| 历史消息中的已离队、已移除或不可解析 Member Mention | 保留结构化身份、最后可解析名称和不可用状态 | 选择和复制 | 聚焦为按钮、打开信息卡、恢复寻址/执行能力、导航或发 Core 命令 |
+| All Members Mention | 同一蓝色原子行内文字 | Composer 中整体编辑；Composer 与历史中打开范围信息卡 | 展开成多个正文 Token、角色 Toast 或队员导航 |
+| 手写、粘贴或旧消息中的普通 `@文字` | 普通文本 | 原生编辑、选择和复制 | 猜测为结构化 Mention、增加蓝色样式、弹窗或寻址 |
+
+默认状态严格为 `display: inline`、`padding: 0 1px`、3px 圆角、透明背景和无边框；只有
+Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度描边反馈。不得重新做成
+持续有底色的 Chip、Badge 或按钮外框。历史消息拖选形成非空文本选区时，释放按键不得
+误触发弹窗。
+
+可操作的 Member Mention 必须具有 `role="button"`、键盘焦点、`aria-haspopup="dialog"`
+和 `查看{队员名}的基础信息`可访问名称。单击或键盘激活后，在原 Mention 附近打开非模态、
+视口碰撞感知的人物信息卡，当前 Camp、视图和 Inspector 均保持不变。信息卡固定采用
+“布局 2 · 4:5 角色卡侧栏”：宽 392px、左侧 128px 受控 portrait、最小高度 302px；右侧
+依次展示名称、团队角色、Presence、Agent 运行时状态、专业职责、工作准则和性格底色。
+图片只能从现有受控 `avatarRef` portrait rendition 解析；没有图片时使用低权重占位，不
+新增第二套身份字段。
+
+信息卡使用 `role="dialog"` 与 `aria-modal="false"`，不做 Focus Trap。点击外部或按 `Esc`
+关闭；由键盘打开后将焦点置入卡片，按 `Esc` 关闭后把焦点返回原 Mention。`@所有成员`
+使用独立范围卡：历史消息展示发送时冻结的 `addressedAgentProfileIds`，Composer 展示当前
+可提及队员。信息卡只读，不提供“查看完整队员资料”或任何页面跳转入口。
+
+把人物信息卡改成全局角色 Toast、队员页跳转或其他信息架构，属于产品交互变更，不是重构。
+除非用户明确确认，否则同一变更必须保留上述合同，并同时通过：
+
+1. 更新本节和 [UI 索引](README.md)；
+2. 更新 Renderer 语义测试，继续断言按钮而非链接、精确可访问名称和弹窗语义；
+3. 更新并运行 `pnpm accept:structured-mentions-ui`，验证样式、点击、键盘、拖选不误触、
+   不离开会话、布局 2 结构及真实截图；
+4. 若内容身份或寻址也改变，再单独更新 ADR-0096 与 Core 合同。纯 Renderer 视觉调整
+   不得借机改写 Core 语义。
+
+##### 输入与原子编辑
 
 - 在 Composer 普通文本位置直接键入 `@` 时，无论它前面是空格、中文、英文或标点，
   都打开同一候选菜单；不得再使用只接受 ASCII 边界或“前一字符不是 Unicode 字母/数字”
@@ -349,71 +398,73 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 - 只有用户从 `@` 候选中选中队员，或者在 Rovai-ai 内保留一个已有的结构化
   Member Mention，才会建立稳定队员身份和寻址关系。手工输入或纯文本 Paste 得到的
   `@队员名` 只是普通文字，不显示为 Mention，不寻址也不唤醒队员。
-- Member Mention 在 Composer 中作为完整蓝色行内元素显示，发送后在用户消息历史
-  中保持同一结构化身份，不回退为通过正文重新解析的 `@` 字符串。
 - Member Mention 是原子编辑单元：光标不能进入队员名内部，左右移动时以整个
   Mention 为一个位置跨越，Backspace 或 Delete 一次删除整个 Mention，不允许留下
   视觉仍为蓝色但路由身份已损坏的部分 Token。
-- Composer 中单击 Member Mention 或 All Members Mention 会选中整个 Token，不打开
-  队员详情；此时输入或 Paste 会整体替换它，Backspace 或 Delete 会整体删除它。
-  鼠标拖选经过 Token 时只能完整包含或排除该结构化身份，不产生半个 Mention；只有
-  已发送历史中的当前 Member Mention 才提供队员详情跳转。
+- Composer 中 Pointer Down Member Mention 或 All Members Mention 会选中整个 Token，
+  完成单击后还会打开相应信息卡；此时输入或 Paste 会整体替换它，Backspace 或 Delete
+  会整体删除它。鼠标拖选经过 Token 时只能完整包含或排除该结构化身份，不产生半个 Mention。
+- 复制包含 Mention 的正文时，标准剪贴板 `text/plain` 始终使用当前可见文本，例如
+  `@小河狸`，复制到其他应用时不暴露内部身份字段。Rovai-ai 可以为完整选中的 Mention
+  附加应用内部结构化身份；只复制 Mention 的一部分时只保留普通文本。
+- 将带结构化身份的内容 Paste 到另一 Camp 时，Renderer/Core 重新校验精确目标：只有
+  仍是目标 Camp 当前可提及队员的 Member Mention 继续保持蓝色结构，其余降级为不唤醒的
+  普通文本。All Members Mention 保留为目标 Camp 的 `@所有成员`，并在该消息发送接受时
+  冻结目标 Camp 的收件人。纯文本 Paste 永远不反向解析为 Mention。
+
+##### 显示身份与失效
+
+- Member Mention 在 Composer 中作为完整蓝色行内元素显示；发送后按上表继续保持同一
+  结构化身份，不回退为通过正文重新解析的 `@` 字符串。
 - Member Mention 始终以稳定 `agentProfileId` 解析显示身份。当前队员改名后，历史
   Mention 显示新名称而不改写消息正文或改变历史寻址；队员永久移除后，历史 Mention
   保留移除时的最后名称和蓝色身份外观，但不可点击、不可再寻址，也不能唤醒该身份。
-- 历史消息中仍为当前在队队员的 Member Mention 可聚焦，单击或按 Enter 打开对应
-  队员详情；按住鼠标拖选经过 Mention 时必须继续形成文本选择，不得误触发跳转。
-  已移除队员的 Member Mention 与 All Members Mention 均不提供身份跳转。
-- 用户未插入任何 Member Mention 时，现有 Default Lead 寻址继续适用，但 Renderer 不在
-  Composer、乐观消息或历史消息中自动补出蓝色 `@Lead`。默认收件人是路由事实，
-  只有用户显式插入的结构化引用才是正文 Member Mention。
-- `@所有成员` 是一个独立的蓝色原子 All Members Mention，Composer 不把它展开为
-  多个 Member Mention。发送接受时 Core 冻结当时实际寻址的确切 CampMember ID 集合；
-  历史消息仍显示一个 `@所有成员`，之后的成员加入、离队或移除不改变该历史收件人集合。
-- 用户正文可以多次使用同一 Member Mention，也可以同时使用 All Members Mention 和
-  与之重叠的 Member Mention；乐观消息和历史消息保留所有原始出现位置。发送时
-  Core 对它们解析出的 `agentProfileId` 取并集并去重，同一队员只被寻址和唤醒一次，
-  不因正文中的重复或重叠创建多个直接 AgentRun。
-- 同一条消息中的全部唯一 Mention 收件人在一个 Core 事务中创建各自的 queued AgentRun，
-  Default Lead 不会吞掉或串行阻塞同消息里的其他 Mention；调度器并发执行各 Run 的启动前
-  检查。产品不承诺多个独立 Runtime 进程拥有完全相同的操作系统启动时间戳。
-- 复制包含 Mention 的正文时，标准剪贴板 `text/plain` 始终使用当前可见文本，
-  例如 `@小河狸`，复制到其他应用时不暴露内部身份字段。Rovai-ai 可以为完整选中的
-  Mention 附加应用内部结构化身份；只复制 Mention 的一部分时只保留普通文本。
-- 将带结构化身份的内容 Paste 到另一 Camp 时，Renderer/Core 重新校验精确目标：只有
-  仍是目标 Camp 当前可提及队员的 Member Mention 继续保持蓝色结构，其余降级为
-  不唤醒的普通文本。All Members Mention 保留为目标 Camp 的 `@所有成员`，并在该消息
-  发送接受时冻结目标 Camp 的收件人。纯文本 Paste 永远不反向解析为 Mention。
 - 已保存 Draft 中的 Mention 如果在发送前因队员离队、移除或不再属于当前 Camp 而失效，
   Composer 将整个 Token 显示为明确的无效态并阻止成功发送。Core 重新校验后以
   `mention_target_unavailable` 在创建任何 CampMessage、CampTurn 或 AgentRun 前拒绝，
   完整保留 Draft；不得静默降级为普通文字、删除目标或回退给 Default Lead。用户必须
   删除该 Token 或重新选择队员。Agent 运行时暂时不可用不改变 Mention 身份，继续遵循
   现有执行准入、消息保留和失败恢复规则。
+- Structured Camp Message Content 只保存稳定身份，不把队员名称变成第二个身份真源。
+  Renderer 显示、剪贴板纯文本、按队员的搜索以及之后构建的 AgentRun 上下文都从
+  `agentProfileId` 投影当前名称；已移除身份使用其保留的最后名称。改名不改写历史
+  Structured Content；每个 AgentRun 仍在 ContextManifest 中冻结它当时实际收到的纯文本
+  投影与 digest。
+
+##### 寻址与持久化
+
+- 用户未插入任何 Member Mention 时，现有 Default Lead 寻址继续适用，但 Renderer 不在
+  Composer、乐观消息或历史消息中自动补出蓝色 `@Lead`。默认收件人是路由事实，只有
+  用户显式插入的结构化引用才是正文 Member Mention。
+- `@所有成员` 是一个独立的蓝色原子 All Members Mention，Composer 不把它展开为多个
+  Member Mention。发送接受时 Core 冻结当时实际寻址的确切 CampMember ID 集合；历史
+  消息仍显示一个 `@所有成员`，之后的成员加入、离队或移除不改变该历史收件人集合。
+- 用户正文可以多次使用同一 Member Mention，也可以同时使用 All Members Mention 和
+  与之重叠的 Member Mention；乐观消息和历史消息保留所有原始出现位置。发送时 Core
+  对它们解析出的 `agentProfileId` 取并集并去重，同一队员只被寻址和唤醒一次，不因
+  正文中的重复或重叠创建多个直接 AgentRun。
+- 同一条消息中的全部唯一 Mention 收件人在一个 Core 事务中创建各自的 queued AgentRun，
+  Default Lead 不会吞掉或串行阻塞同消息里的其他 Mention；调度器并发执行各 Run 的启动前
+  检查。产品不承诺多个独立 Runtime 进程拥有完全相同的操作系统启动时间戳。
 - Member Mention 和 All Members Mention 是 Core-owned Camp Composer Draft 内容，不是
-  Renderer-only DOM 装饰。切换 Camp 或重启应用后必须恢复同一身份和原子编辑结构；
-  发送失败保留正文、Mention 和附件，只有发送接受才在同一 Core 事务中生成消息
-  Mention 记录并消费 Draft。Renderer 不得通过重新解析普通正文恢复丢失的 Mention。
-- 结构化 Mention 是显式消息寻址的唯一真源。Core 从通过校验的 Draft 内容派生
-  Default、Explicit 或 Broadcast 寻址及去重收件人集合；Renderer 和其他调用者不得再并行
-  提交一份可以增删或覆盖 Mention 目标的 `agentProfileIds`。界面中的蓝色身份与实际唤醒
-  对象必须来自同一份耐久 Draft。
-- 发送前 Renderer 同步保存当前正文、Mention 和附件并取得 Core 返回的精确
-  Camp Composer Draft Revision。发送命令引用该 Revision；Core 只在当前耐久 Draft
-  仍与它一致时执行原子消费。版本不一致以 `draft_changed` 在任何 CampMessage、CampTurn
-  或 AgentRun 之前拒绝，界面重新加载新 Draft，不覆盖也不自动发送它。
+  Renderer-only DOM 装饰。切换 Camp 或重启应用后必须恢复同一身份和原子编辑结构；发送
+  失败保留正文、Mention 和附件，只有发送接受才在同一 Core 事务中生成消息 Mention
+  记录并消费 Draft。Renderer 不得通过重新解析普通正文恢复丢失的 Mention。
+- 结构化 Mention 是显式消息寻址的唯一真源。Core 从通过校验的 Draft 内容派生 Default、
+  Explicit 或 Broadcast 寻址及去重收件人集合；Renderer 和其他调用者不得再并行提交一份
+  可以增删或覆盖 Mention 目标的 `agentProfileIds`。界面中的蓝色身份与实际唤醒对象必须
+  来自同一份耐久 Draft。
+- 发送前 Renderer 同步保存当前正文、Mention 和附件并取得 Core 返回的精确 Camp
+  Composer Draft Revision。发送命令引用该 Revision；Core 只在当前耐久 Draft 仍与它
+  一致时执行原子消费。版本不一致以 `draft_changed` 在任何 CampMessage、CampTurn 或
+  AgentRun 之前拒绝，界面重新加载新 Draft，不覆盖也不自动发送它。
 - Draft 和已接受的用户消息使用同一份封闭的有序 Structured Camp Message Content：
   `Text`、`MemberMention(agentProfileId)` 与 `AllMembersMention`。Core 从该内容统一派生
-  纯文本正文、Renderer 蓝色结构、内容完整性和收件人索引；不保存易错的 Unicode
-  字符偏移，也不引入 HTML、Markdown AST 或通用富文本模型。旧用户消息没有结构化内容时
-  按单个 `Text` 片段读取，不反向解析其中的 `@` 文字，也不显示猜测出的蓝色或可点击
+  纯文本正文、Renderer 蓝色结构、内容完整性和收件人索引；不保存易错的 Unicode 字符
+  偏移，也不引入 HTML、Markdown AST 或通用富文本模型。旧用户消息没有结构化内容时按
+  单个 `Text` 片段读取，不反向解析其中的 `@` 文字，也不显示猜测出的蓝色或可点击
   Mention。旧记录已有的收件人 ID 继续作为历史寻址、审计和按队员搜索事实，但不用于
   猜测 Mention 的正文位置；只有新版结构化 Composer 创建的消息拥有可见 Mention。
-- Structured Camp Message Content 只保存稳定身份，不把队员名称变成第二个身份
-  真源。Renderer 显示、剪贴板纯文本、按队员的搜索以及之后构建的 AgentRun 上下文
-  都从 `agentProfileId` 投影当前名称；已移除身份使用其保留的最后名称。改名不改写
-  历史 Structured Content；每个 AgentRun 仍在 ContextManifest 中冻结它当时实际收到的
-  纯文本投影与 digest。
 
 - Pending Approval 弹框固定在 Composer 正上方，属于输入停靠区而非会话时间线、
   Dialog 或全屏 Overlay。多个队员同时请求审批时显示聚合计数，例如“2 项待审批”，
@@ -838,8 +889,8 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
   Submitting 与 Recovery；空状态解释原因并提供一个明确下一步。
 - 读取失败保留页面 Header 与可恢复导航；局部写失败保留选择、草稿和焦点，不把
   整页替换为通用错误。
-- Toast 只用于已完成的非阻塞反馈，`aria-live="polite"`；错误或审批不能只用短暂
-  Toast。流式 Run 不逐 token 播报。
+- Toast 只用于已完成的非阻塞反馈，`aria-live="polite"`；错误、审批或人物信息查看
+  不能只用短暂 Toast。流式 Run 不逐 token 播报。
 - `recovering` 和 Unsettled External Effect 使用明确对象、最后已知状态、不确定性
   和下一步；不得声称停止等于外部副作用已回滚。
 
@@ -849,8 +900,9 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 - 主要操作完全可键盘完成，焦点顺序与视觉顺序一致；Icon-only 控件有可访问名称。
 - `focus-visible` 使用 2px `--focus`、`outline-offset: 1px`，不被 sticky、
   overflow 或固定审批区裁切。
-- Radix Dialog/Drawer/Popover 负责 focus trap、`Escape` 和 focus return；提交中
-  可以阻止关闭，但必须说明忙碌状态。
+- 模态 Radix Dialog/Drawer 负责 focus trap、`Escape` 和 focus return；非模态锚定
+  Popover 不设 focus trap，并按局部合同处理 `Escape`、点击外部和 focus return。
+  提交中可以阻止关闭，但必须说明忙碌状态。
 - Tab 使用手动激活模式并实现方向键、Home/End；列表选择、排序、Switch、Menu 和
   Disclosure 使用对应语义，不用点击 `div` 模拟。
 - 可点击目标最低 `28×28px`，主要操作优先 32px。Hover 不能是发现操作的唯一方式。

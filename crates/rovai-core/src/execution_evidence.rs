@@ -72,7 +72,7 @@ impl ExecutionEvidenceService {
         )
     }
 
-    pub fn record_team_tool_result(
+    pub fn record_builtin_tool_result(
         &self,
         database: &mut Database,
         blob_store: &ManagedBlobStore,
@@ -824,23 +824,6 @@ mod tests {
         std::fs::create_dir_all(&workspace).unwrap();
         let mut database = Database::open(&directory).unwrap();
         configure_test_runtime(&database, &["agent_2"]);
-        let capabilities_json: String = database
-            .connection()
-            .query_row(
-                "SELECT capabilities_json FROM adapter_capability_snapshot WHERE installation_id = 'adapter-test-codex'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let mut capabilities: Vec<String> = serde_json::from_str(&capabilities_json).unwrap();
-        capabilities.push("team_tool.call_member".to_string());
-        database
-            .connection()
-            .execute(
-                "UPDATE adapter_capability_snapshot SET capabilities_json = ?1 WHERE installation_id = 'adapter-test-codex'",
-                [serde_json::to_string(&capabilities).unwrap()],
-            )
-            .unwrap();
         let collaboration = CollaborationService::default();
         let camp = collaboration
             .create_camp(
@@ -1051,7 +1034,7 @@ mod tests {
             "receiptId": null,
         });
         let failed = ExecutionEvidenceService
-            .record_team_tool_result(
+            .record_builtin_tool_result(
                 &mut database,
                 &blob_store,
                 &run_id,
@@ -1067,7 +1050,7 @@ mod tests {
         );
 
         let duplicate = ExecutionEvidenceService
-            .record_team_tool_result(
+            .record_builtin_tool_result(
                 &mut database,
                 &blob_store,
                 &run_id,
@@ -1081,7 +1064,7 @@ mod tests {
         let mut replay_tool_result = failed_tool_result.clone();
         replay_tool_result["idempotentReplay"] = json!(true);
         let replay = ExecutionEvidenceService
-            .record_team_tool_result(
+            .record_builtin_tool_result(
                 &mut database,
                 &blob_store,
                 &run_id,
@@ -1094,7 +1077,7 @@ mod tests {
         assert_eq!(replay.payload["idempotentReplay"], true);
 
         let replay_duplicate = ExecutionEvidenceService
-            .record_team_tool_result(
+            .record_builtin_tool_result(
                 &mut database,
                 &blob_store,
                 &run_id,

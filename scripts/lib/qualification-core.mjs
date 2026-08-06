@@ -52,19 +52,11 @@ export async function waitForProcessesToExit(pids, timeoutMs = 30_000) {
 export function startQualificationCore({
   coreExecutable,
   dataDirectory,
-  antigravityTeamPrivateDirectory,
-  antigravityTeamGeminiRoot = null,
   workingDirectory,
   runtimeCacheDirectory
 }) {
   const executable = resolve(coreExecutable)
-  const args = [
-    '--data-dir', resolve(dataDirectory),
-    '--antigravity-team-private-dir', resolve(antigravityTeamPrivateDirectory)
-  ]
-  if (antigravityTeamGeminiRoot) {
-    args.push('--antigravity-team-gemini-root', resolve(antigravityTeamGeminiRoot))
-  }
+  const args = ['--data-dir', resolve(dataDirectory)]
   const environment = { ...process.env }
   for (const key of Object.keys(environment)) {
     if (key.startsWith('ROVAI_QUALIFICATION_')) delete environment[key]

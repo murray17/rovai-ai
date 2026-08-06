@@ -75,12 +75,14 @@
         "core": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["version", "executableDigest", "readModelSchema", "attestedTeamProtocol"],
+          "required": ["version", "executableDigest", "readModelSchema", "builtinToolContractVersion", "builtinToolIpcProtocolVersion", "builtinToolCatalogDigest"],
           "properties": {
             "version": { "type": "string", "minLength": 1, "maxLength": 80 },
             "executableDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" },
             "readModelSchema": { "type": "integer", "minimum": 1 },
-            "attestedTeamProtocol": { "type": "integer", "minimum": 1 }
+            "builtinToolContractVersion": { "type": "integer", "minimum": 1 },
+            "builtinToolIpcProtocolVersion": { "type": "integer", "minimum": 1 },
+            "builtinToolCatalogDigest": { "$ref": "artifact-envelope.schema.json#/$defs/digest" }
           }
         },
         "host": {

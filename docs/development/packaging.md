@@ -11,7 +11,7 @@ last_updated: 2026-07-30
 
 ## 构建
 
-构建 Release Core 和 Electron：
+构建 Release Core、bundled Agent CLI 和 Electron：
 
 ```bash
 pnpm build
@@ -55,6 +55,8 @@ ad-hoc 签名产物。它适合本机开发验收，不代表可以对外发布�
 codesign --verify --deep --strict "dist/mac-arm64/Rovai-ai.app"
 codesign --verify --strict \
   "dist/mac-arm64/Rovai-ai.app/Contents/Resources/bin/rovai-core"
+codesign --verify --strict \
+  "dist/mac-arm64/Rovai-ai.app/Contents/Resources/bin/rovai"
 ```
 
 正式分发需要独立配置 Developer ID、Hardened Runtime entitlement 和 Apple
@@ -80,11 +82,12 @@ Ready。
 
 ## 产物检查
 
-确认架构和内置 Core：
+确认架构和内置 Core/CLI：
 
 ```bash
 file "dist/mac-arm64/Rovai-ai.app/Contents/MacOS/Rovai-ai"
 file "dist/mac-arm64/Rovai-ai.app/Contents/Resources/bin/rovai-core"
+file "dist/mac-arm64/Rovai-ai.app/Contents/Resources/bin/rovai"
 ```
 
 需要确认本次 release Core 已进入 App 时，可比较 Mach-O UUID：
@@ -93,6 +96,9 @@ file "dist/mac-arm64/Rovai-ai.app/Contents/Resources/bin/rovai-core"
 dwarfdump --uuid resources/bin/rovai-core
 dwarfdump --uuid \
   "dist/mac-arm64/Rovai-ai.app/Contents/Resources/bin/rovai-core"
+dwarfdump --uuid resources/bin/rovai
+dwarfdump --uuid \
+  "dist/mac-arm64/Rovai-ai.app/Contents/Resources/bin/rovai"
 ```
 
 codesign 会修改签名相关字节，因此不要把签名后文件的逐字节 `cmp` 当作唯一一致性

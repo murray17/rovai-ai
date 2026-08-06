@@ -1530,7 +1530,6 @@ impl Database {
                 DROP TABLE IF EXISTS memory_revision;
                 DROP TABLE IF EXISTS memory;
                 DROP TABLE IF EXISTS memory_auto_policy;
-                DROP TABLE IF EXISTS memory_settings;
 
                 CREATE TABLE memory (
                     id TEXT PRIMARY KEY,
@@ -1871,16 +1870,6 @@ impl Database {
                         native_binding_id, native_binding_generation, memory_id, created_at
                     );
 
-                CREATE TABLE memory_settings (
-                    singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
-                    agent_memory_writes_enabled INTEGER NOT NULL DEFAULT 1
-                        CHECK(agent_memory_writes_enabled IN (0, 1)),
-                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
-                    updated_at TEXT NOT NULL
-                );
-                INSERT INTO memory_settings(
-                    singleton, agent_memory_writes_enabled, version, updated_at
-                ) VALUES (1, 1, 1, datetime('now'));
                 "#,
             )?;
 
@@ -1897,7 +1886,7 @@ impl Database {
                         format!("AgentProfile {profile_id} has invalid default capabilities")
                     })?;
                 capabilities.retain(|capability| capability != "memory.propose_change");
-                capabilities.push("memory.write".to_string());
+                capabilities.retain(|capability| capability != "memory.write");
                 capabilities.sort();
                 capabilities.dedup();
                 transaction.execute(
@@ -8459,7 +8448,7 @@ impl Database {
                 "负责理解需求、调查项目、编写文档，并将明确的方案实现为可运行、可验证的代码变更。",
                 "[\"好奇\",\"灵活\",\"勤勉\"]",
                 "#4F7F9F",
-                "[\"task.create\",\"task.update\",\"agent_run.create\",\"agent_run.retry\",\"agent_run.cancel\",\"member.call\",\"memory.write\"]",
+                "[\"task.create\",\"task.update\",\"agent_run.create\",\"agent_run.retry\",\"agent_run.cancel\",\"member.call\"]",
                 LUOKE_AVATAR_REF,
             ),
             (
@@ -8470,7 +8459,7 @@ impl Database {
                 "负责文档、方案和代码评审，检查事实、结构、边界、风险与实现是否一致，并给出明确、可执行的评审结论。",
                 "[\"严谨\",\"沉稳\",\"公正\"]",
                 "#B66E3C",
-                "[\"task.create\",\"task.update\",\"agent_run.create\",\"agent_run.retry\",\"agent_run.cancel\",\"member.call\",\"workspace.bind\",\"action.request\",\"memory.write\"]",
+                "[\"task.create\",\"task.update\",\"agent_run.create\",\"agent_run.retry\",\"agent_run.cancel\",\"member.call\",\"workspace.bind\",\"action.request\"]",
                 MUWA_AVATAR_REF,
             ),
             (
@@ -8481,7 +8470,7 @@ impl Database {
                 "负责设计和执行测试、复现问题、检查边界与失败路径，并通过可重复的结果确认功能是否真正可靠。",
                 "[\"警觉\",\"耐心\",\"求真\"]",
                 "#7A6FA8",
-                "[\"task.create\",\"task.update\",\"agent_run.create\",\"member.call\",\"memory.write\"]",
+                "[\"task.create\",\"task.update\",\"agent_run.create\",\"member.call\"]",
                 MIANZHI_AVATAR_REF,
             ),
             (
@@ -8492,7 +8481,7 @@ impl Database {
                 "负责 UI、UX、视觉设计和前端实现，把复杂功能组织成清晰、顺手、有一致性的界面体验。",
                 "[\"敏锐\",\"细腻\",\"灵动\"]",
                 "#4F917C",
-                "[\"task.create\",\"task.update\",\"agent_run.create\",\"member.call\",\"memory.write\"]",
+                "[\"task.create\",\"task.update\",\"agent_run.create\",\"member.call\"]",
                 QILU_AVATAR_REF,
             ),
         ];
@@ -8631,19 +8620,6 @@ mod tests {
                 ("agent_4".to_string(), QILU_AVATAR_REF.to_string()),
             ]
         );
-        let memory_settings: (i64, i64) = database
-            .connection()
-            .query_row(
-                r#"
-                SELECT agent_memory_writes_enabled, version
-                FROM memory_settings
-                WHERE singleton = 1
-                "#,
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .expect("fresh Memory settings");
-        assert_eq!(memory_settings, (1, 1));
         let memory_v2_migration_count: i64 = database
             .connection()
             .query_row(
@@ -8701,7 +8677,7 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("Starter Memory Write capability count");
-        assert_eq!(memory_write_capability_count, 4);
+        assert_eq!(memory_write_capability_count, 0);
         let built_in_identity: (String, String, String, String) = database
             .connection()
             .query_row(
@@ -10253,7 +10229,6 @@ mod tests {
             "memory_supersession",
             "memory_fts",
             "memory_access_evidence",
-            "memory_settings",
         ] {
             let exists: i64 = database
                 .connection()
@@ -10301,20 +10276,8 @@ mod tests {
             )
             .unwrap();
         let capabilities = serde_json::from_str::<Vec<String>>(&capabilities).unwrap();
-        assert!(capabilities.contains(&"memory.write".to_string()));
+        assert!(!capabilities.contains(&"memory.write".to_string()));
         assert!(!capabilities.contains(&"memory.propose_change".to_string()));
-        let settings: (i64, i64) = database
-            .connection()
-            .query_row(
-                r#"
-                SELECT agent_memory_writes_enabled, version
-                FROM memory_settings WHERE singleton = 1
-                "#,
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(settings, (1, 1));
         drop(database);
 
         let reopened = Database::open(&directory).expect("v32 database should reopen");

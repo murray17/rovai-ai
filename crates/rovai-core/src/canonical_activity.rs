@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::{runtime_activity_mapping, team_tool_catalog};
+use crate::{builtin_tool_transport, runtime_activity_mapping};
 
 pub use crate::runtime_activity_mapping::CLASSIFIER_VERSION;
 
@@ -68,8 +68,8 @@ pub fn classify_evidence(
     let validated_core_tool = (source_authority == "core")
         .then(|| payload.get("canonicalTool").and_then(Value::as_str))
         .flatten()
-        .and_then(team_tool_catalog::identity_by_canonical)
-        .map(|identity| identity.canonical_name.to_string());
+        .and_then(builtin_tool_transport::builtin_tool_identity_by_operation)
+        .map(|identity| identity.operation.to_string());
     let runtime_tool_name = string_field(payload, "toolName")
         .or_else(|| string_field(item, "toolName"))
         .or_else(|| {

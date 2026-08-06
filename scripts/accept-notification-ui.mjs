@@ -62,6 +62,8 @@ try {
   compactApp = await launchApp(firstPort + 1, 1040, 700, true)
   await setTheme(compactApp.cdp, 'day')
   await assertNotificationBadge(compactApp.cdp, 4)
+  await evaluate(compactApp.cdp, `document.querySelector('.unified-sidebar button[aria-label="队员"]')?.click()`)
+  await waitForSelector(compactApp.cdp, '.members-view')
   const focused = await evaluate(compactApp.cdp, `(() => {
     const target = document.querySelector('.unified-sidebar button[aria-label="新对话"]')
     target?.focus()

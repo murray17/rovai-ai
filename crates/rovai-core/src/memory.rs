@@ -32,7 +32,6 @@ pub const RELATIONSHIP_APPLICABLE_MAX_COUNT: i64 = 48;
 pub const AGENT_COMPANION_MAX_COUNT: i64 = 8;
 pub const AGENT_RELATIONSHIP_PAIR_MAX_COUNT: i64 = 4;
 pub const AGENT_RELATIONSHIP_APPLICABLE_MAX_COUNT: i64 = 16;
-pub const MEMORY_WRITE_CAPABILITY: &str = "memory.write";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -319,18 +318,6 @@ impl DomainCommand for ScheduleMemoryReviewCommand {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SetMemorySettingsCommand {
-    pub expected_version: i64,
-    pub agent_memory_writes_enabled: bool,
-}
-
-impl sealed::Sealed for SetMemorySettingsCommand {}
-impl DomainCommand for SetMemorySettingsCommand {
-    const TYPE: &'static str = "memory.settings.set";
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(
     tag = "mode",
     rename_all = "snake_case",
@@ -445,20 +432,6 @@ impl DomainCommand for RejectHearthMemoryProposalsCommand {
     const TYPE: &'static str = "memory.hearth_proposal.reject_batch";
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SetCampMemberMemoryWriteCommand {
-    pub camp_id: String,
-    pub agent_profile_id: String,
-    pub expected_version: i64,
-    pub enabled: bool,
-}
-
-impl sealed::Sealed for SetCampMemberMemoryWriteCommand {}
-impl DomainCommand for SetCampMemberMemoryWriteCommand {
-    const TYPE: &'static str = "camp_member.memory_write.set";
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryRevisionView {
@@ -520,14 +493,6 @@ pub struct MemoryCapacityView {
 pub struct MemoryListView {
     pub memories: Vec<MemoryView>,
     pub capacities: Vec<MemoryCapacityView>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MemorySettingsView {
-    pub agent_memory_writes_enabled: bool,
-    pub version: i64,
-    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1037,70 +1002,6 @@ impl MemoryService {
                 Some(EntityReference {
                     entity_type: "memory".to_string(),
                     entity_id: record.id,
-                }),
-            ))
-        })
-    }
-
-    pub fn get_settings(&self, database: &Database) -> Result<MemorySettingsView> {
-        load_memory_settings(database.connection())
-    }
-
-    pub fn set_settings(
-        &self,
-        database: &mut Database,
-        envelope: &CommandEnvelope<SetMemorySettingsCommand>,
-    ) -> Result<CommandExecution> {
-        self.gateway.execute(database, envelope, |transaction| {
-            require_user(&envelope.actor)?;
-            let settings = load_memory_settings(transaction)?;
-            if settings.version != envelope.payload.expected_version {
-                return Ok(CommandHandlerResult::rejected(
-                    "memory.version_conflict",
-                    json!({
-                        "message": "Memory settings version no longer matches",
-                        "currentVersion": settings.version,
-                    }),
-                ));
-            }
-            if settings.agent_memory_writes_enabled == envelope.payload.agent_memory_writes_enabled
-            {
-                return Ok(rejected(
-                    "memory.no_change",
-                    "Memory settings are unchanged",
-                ));
-            }
-            let now = Utc::now().to_rfc3339();
-            transaction.execute(
-                r#"
-                UPDATE memory_settings
-                SET agent_memory_writes_enabled = ?1,
-                    version = version + 1, updated_at = ?2
-                WHERE singleton = 1
-                "#,
-                params![i64::from(envelope.payload.agent_memory_writes_enabled), now],
-            )?;
-            append_memory_event(
-                transaction,
-                "memory.settings_changed",
-                "1",
-                envelope,
-                json!({
-                    "agentMemoryWritesEnabled":
-                        envelope.payload.agent_memory_writes_enabled,
-                    "version": settings.version + 1,
-                }),
-            )?;
-            Ok(CommandHandlerResult::applied(
-                "memory_settings_set",
-                json!({
-                    "agentMemoryWritesEnabled":
-                        envelope.payload.agent_memory_writes_enabled,
-                    "version": settings.version + 1,
-                }),
-                Some(EntityReference {
-                    entity_type: "memory_settings".to_string(),
-                    entity_id: "1".to_string(),
                 }),
             ))
         })
@@ -1953,25 +1854,6 @@ fn ensure_capacity(
     Ok(())
 }
 
-fn load_memory_settings(connection: &Connection) -> Result<MemorySettingsView> {
-    connection
-        .query_row(
-            r#"
-            SELECT agent_memory_writes_enabled, version, updated_at
-            FROM memory_settings WHERE singleton = 1
-            "#,
-            [],
-            |row| {
-                Ok(MemorySettingsView {
-                    agent_memory_writes_enabled: row.get::<_, i64>(0)? != 0,
-                    version: row.get(1)?,
-                    updated_at: row.get(2)?,
-                })
-            },
-        )
-        .map_err(Into::into)
-}
-
 fn validate_agent_mutation<C: DomainCommand>(
     transaction: &Transaction<'_>,
     envelope: &CommandEnvelope<C>,
@@ -1981,7 +1863,7 @@ fn validate_agent_mutation<C: DomainCommand>(
         source_agent_run_id,
     } = &envelope.actor
     else {
-        anyhow::bail!("memory.capability_denied: Agent Memory tool requires an AgentRun");
+        anyhow::bail!("memory.actor_not_allowed: Agent Memory mutation requires an AgentRun");
     };
     let camp_id = envelope
         .camp_id
@@ -1990,14 +1872,11 @@ fn validate_agent_mutation<C: DomainCommand>(
     let execution_epoch = envelope
         .execution_epoch
         .context("memory.run_not_current: Agent Memory mutation has no Epoch")?;
-    if !load_memory_settings(transaction)?.agent_memory_writes_enabled {
-        anyhow::bail!("memory.agent_writes_disabled: Agent Memory writes are disabled");
-    }
-    let row: Option<(String, String, i64, String)> = transaction
+    let row: Option<(String, String, i64)> = transaction
         .query_row(
             r#"
             SELECT camp_turn.camp_id, conversation.agent_profile_id,
-                   agent_run.execution_epoch, agent_run.effective_config_json
+                   agent_run.execution_epoch
             FROM agent_run
             JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
             JOIN conversation ON conversation.id = agent_run.conversation_id
@@ -2005,26 +1884,14 @@ fn validate_agent_mutation<C: DomainCommand>(
               AND agent_run.status IN ('running', 'waiting')
             "#,
             [source_agent_run_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()?;
-    let Some((run_camp, run_agent, run_epoch, effective_config)) = row else {
+    let Some((run_camp, run_agent, run_epoch)) = row else {
         anyhow::bail!("memory.run_not_current: AgentRun is no longer current");
     };
     if run_camp != camp_id || run_agent != *agent_profile_id || run_epoch != execution_epoch {
         anyhow::bail!("memory.run_not_current: AgentRun identity or fence does not match");
-    }
-    let config: Value =
-        serde_json::from_str(&effective_config).context("AgentRun effective config is invalid")?;
-    if !config["capabilities"]
-        .as_array()
-        .is_some_and(|capabilities| {
-            capabilities
-                .iter()
-                .any(|value| value.as_str() == Some(MEMORY_WRITE_CAPABILITY))
-        })
-    {
-        anyhow::bail!("memory.capability_denied: memory.write Capability is not frozen");
     }
     if !is_current_camp_member(transaction, camp_id, agent_profile_id)? {
         anyhow::bail!("memory.run_not_current: Agent is not a present current Camp member");
@@ -2043,7 +1910,7 @@ fn agent_identity<C>(envelope: &CommandEnvelope<C>) -> Result<(&str, &str)> {
         agent_profile_id, ..
     } = &envelope.actor
     else {
-        anyhow::bail!("memory.capability_denied: Agent identity is required");
+        anyhow::bail!("memory.actor_not_allowed: Agent identity is required");
     };
     Ok((
         agent_profile_id,
@@ -2855,7 +2722,6 @@ impl MemoryService {
         Ok(json!({
             "counts": memory_counts,
             "hearthProposalCounts": proposal_counts,
-            "settings": self.get_settings(database)?,
             "search": search_state,
         }))
     }
@@ -3168,95 +3034,6 @@ impl MemoryService {
             ))
         })
     }
-
-    pub fn set_member_memory_write(
-        &self,
-        database: &mut Database,
-        envelope: &CommandEnvelope<SetCampMemberMemoryWriteCommand>,
-    ) -> Result<CommandExecution> {
-        self.gateway.execute(database, envelope, |transaction| {
-            require_user(&envelope.actor)?;
-            let current = transaction
-                .query_row(
-                    r#"
-                    SELECT capability_overrides_json, version
-                    FROM camp_member
-                    WHERE camp_id = ?1 AND agent_profile_id = ?2
-                    "#,
-                    params![envelope.payload.camp_id, envelope.payload.agent_profile_id],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-                )
-                .optional()?;
-            let Some((overrides_json, version)) = current else {
-                return Ok(rejected("memory.not_found", "Camp member does not exist"));
-            };
-            if version != envelope.payload.expected_version {
-                return Ok(CommandHandlerResult::rejected(
-                    "memory.version_conflict",
-                    json!({
-                        "campId": envelope.payload.camp_id,
-                        "agentProfileId": envelope.payload.agent_profile_id,
-                        "currentVersion": version,
-                    }),
-                ));
-            }
-            let mut overrides =
-                serde_json::from_str::<serde_json::Map<String, Value>>(&overrides_json)
-                    .context("Camp member capability overrides are invalid")?;
-            overrides.insert(
-                MEMORY_WRITE_CAPABILITY.to_string(),
-                Value::String(
-                    if envelope.payload.enabled {
-                        "allow"
-                    } else {
-                        "deny"
-                    }
-                    .to_string(),
-                ),
-            );
-            transaction.execute(
-                r#"
-                UPDATE camp_member
-                SET capability_overrides_json = ?3, version = version + 1
-                WHERE camp_id = ?1 AND agent_profile_id = ?2 AND version = ?4
-                "#,
-                params![
-                    envelope.payload.camp_id,
-                    envelope.payload.agent_profile_id,
-                    serde_json::to_string(&overrides)?,
-                    version,
-                ],
-            )?;
-            append_memory_event(
-                transaction,
-                "camp_member.memory_write_capability_changed",
-                &envelope.payload.agent_profile_id,
-                envelope,
-                json!({
-                    "campId": envelope.payload.camp_id,
-                    "agentProfileId": envelope.payload.agent_profile_id,
-                    "enabled": envelope.payload.enabled,
-                    "version": version + 1,
-                }),
-            )?;
-            Ok(CommandHandlerResult::applied(
-                "camp_member_memory_write_capability_set",
-                json!({
-                    "campId": envelope.payload.camp_id,
-                    "agentProfileId": envelope.payload.agent_profile_id,
-                    "enabled": envelope.payload.enabled,
-                    "version": version + 1,
-                }),
-                Some(EntityReference {
-                    entity_type: "camp_member".to_string(),
-                    entity_id: format!(
-                        "{}:{}",
-                        envelope.payload.camp_id, envelope.payload.agent_profile_id
-                    ),
-                }),
-            ))
-        })
-    }
 }
 
 impl MemoryService {
@@ -3510,9 +3287,6 @@ impl MemoryService {
                     Ok(CommandHandlerResult::applied(
                         "memory_write_applied",
                         json!({
-                            "rovaiTeamTool": "memory.write",
-                            "rovaiTeamReceipt":
-                                "Memory is active and effective.",
                             "action": "add",
                             "memoryId": memory_id,
                             "revisionId": revision_id,
@@ -3619,9 +3393,6 @@ impl MemoryService {
                     Ok(CommandHandlerResult::applied(
                         "memory_write_applied",
                         json!({
-                            "rovaiTeamTool": "memory.write",
-                            "rovaiTeamReceipt":
-                                "Memory Revision is active and effective.",
                             "action": "revise",
                             "memoryId": memory_id,
                             "revisionId": revision_id,
@@ -3812,9 +3583,6 @@ impl MemoryService {
             Ok(CommandHandlerResult::accepted(
                 "hearth_memory_proposal_saved",
                 json!({
-                    "rovaiTeamTool": "memory.propose_hearth",
-                    "rovaiTeamReceipt":
-                        "Hearth proposal is pending user review and is not effective.",
                     "proposalId": proposal_id,
                     "status": "pending",
                     "effective": false,

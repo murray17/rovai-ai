@@ -43,8 +43,6 @@ pub struct MemorySearchResult {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemorySearchOutput {
-    pub rovai_team_tool: &'static str,
-    pub rovai_team_receipt: &'static str,
     pub results: Vec<MemorySearchResult>,
 }
 
@@ -96,8 +94,6 @@ pub struct MemoryReadResult {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryReadOutput {
-    pub rovai_team_tool: &'static str,
-    pub rovai_team_receipt: &'static str,
     pub memories: Vec<MemoryReadResult>,
 }
 
@@ -214,8 +210,6 @@ impl MemoryRetrievalService {
         let accessible = accessible_active_memory_ids(database, &identity.run)?;
         if accessible.is_empty() {
             return Ok(MemorySearchOutput {
-                rovai_team_tool: MEMORY_SEARCH_TOOL_NAME,
-                rovai_team_receipt: "No currently accessible Memory matched.",
                 results: Vec::new(),
             });
         }
@@ -291,11 +285,7 @@ impl MemoryRetrievalService {
                 snippet,
             });
         }
-        Ok(MemorySearchOutput {
-            rovai_team_tool: MEMORY_SEARCH_TOOL_NAME,
-            rovai_team_receipt: "Search results are discovery hints; call memory.read before relying on content.",
-            results,
-        })
+        Ok(MemorySearchOutput { results })
     }
 
     pub fn read(
@@ -413,11 +403,7 @@ impl MemoryRetrievalService {
             }
             results.push(result);
         }
-        Ok(MemoryReadOutput {
-            rovai_team_tool: MEMORY_READ_TOOL_NAME,
-            rovai_team_receipt: "Memory states were checked against current lifecycle and access.",
-            memories: results,
-        })
+        Ok(MemoryReadOutput { memories: results })
     }
 }
 

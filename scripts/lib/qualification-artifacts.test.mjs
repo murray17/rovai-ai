@@ -46,7 +46,8 @@ test('accepted Trial normalization produces schema-valid Case, Catalog, Snapshot
   assert.equal(snapshotArtifact.payload.coverage.state, 'complete')
   assert.equal(verifierArtifact.payload.process.state, 'succeeded')
   assert.equal(environmentArtifact.payload.core.readModelSchema, 18)
-  assert.equal(environmentArtifact.payload.core.attestedTeamProtocol, 4)
+  assert.equal(environmentArtifact.payload.core.builtinToolContractVersion, 1)
+  assert.equal(environmentArtifact.payload.core.builtinToolIpcProtocolVersion, 1)
   assert.equal(environmentArtifact.payload.isolationProfileArtifact, null)
   assert.equal(environmentArtifact.payload.gitRemoteMutationPolicy, 'indeterminate')
   assert.equal(trialArtifact.schemaVersion, '1.1.0')
@@ -308,7 +309,9 @@ function environmentFixture(result) {
       packaged: false,
       version: '0.1.0',
       readModelSchema: 18,
-      attestedTeamProtocol: 4
+      builtinToolContractVersion: 1,
+      builtinToolIpcProtocolVersion: 1,
+      builtinToolCatalogDigest: '9'.repeat(64)
     },
     host: {
       type: 'Darwin',

@@ -396,9 +396,7 @@ async function runNativeDiscoveryWithRetry(request, workspace, adapterKind, mark
 function startCore() {
   const child = spawn(join(root, 'target', 'debug', 'rovai-core'), [
     '--data-dir',
-    dataDir,
-    '--antigravity-team-private-dir',
-    join(dataDir, 'runtime-private', 'antigravity-team')
+    dataDir
   ], {
     cwd: root,
     env: {

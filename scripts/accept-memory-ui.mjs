@@ -21,10 +21,8 @@ let second = null
 try {
   first = await launchApp(firstPort, 1440, 920)
   await setTheme(first.cdp, 'day')
-  await assertMemorySettingsDefaultsOn(first.cdp, 'Fresh database')
+  await assertNoMemoryOnboarding(first.cdp, 'Fresh database')
   await openMemory(first.cdp)
-  assert(await hasText(first.cdp, '.memory-auto-policy', '允许伙伴写入记忆'),
-    'Fresh packaged App did not show the Agent Memory write control')
 
   await createHearthMemory(first.cdp, initialBody)
   await chooseMemoryTab(first.cdp, '共同约定')
@@ -74,7 +72,7 @@ try {
   await wait(750)
 
   second = await launchApp(firstPort + 1, 1040, 700)
-  await assertMemorySettingsDefaultsOn(second.cdp, 'Restarted database')
+  await assertNoMemoryOnboarding(second.cdp, 'Restarted database')
   await setTheme(second.cdp, 'night')
   await openMemory(second.cdp)
   const restartedLibrary = await request(second.cdp, 'memory.list')
@@ -127,13 +125,11 @@ async function createHearthMemory(cdp, body) {
   await waitForEditorOutcome(cdp, 'create')
 }
 
-async function assertMemorySettingsDefaultsOn(cdp, context) {
-  const settings = await request(cdp, 'memory.settings.get')
+async function assertNoMemoryOnboarding(cdp, context) {
   const dialogOpen = await evaluate(cdp,
     `Boolean(document.querySelector('.memory-onboarding-dialog'))`)
-  assert(settings.agentMemoryWritesEnabled === true
-      && dialogOpen === false,
-  `${context} did not start with default-on Agent Memory writes: ${JSON.stringify({ settings, dialogOpen })}`)
+  assert(dialogOpen === false,
+    `${context} unexpectedly showed a removed Memory permission onboarding dialog`)
 }
 
 async function openMemory(cdp) {
@@ -148,7 +144,6 @@ async function openMemory(cdp) {
   assert(navigation.height <= 40,
     `Memory navigation label wrapped unexpectedly (${navigation.height}px high)`)
   await waitForSelector(cdp, '.memory-library')
-  await waitForSelector(cdp, '.memory-auto-policy')
   await waitForExpression(cdp, `!document.querySelector('.memory-library .memory-error')`)
 }
 

@@ -33,7 +33,9 @@ describe('StructuredMentionComposer', () => {
       members,
       ariaLabel: '写消息',
       onChange: () => undefined,
-      onSubmit: () => undefined
+      onSubmit: () => undefined,
+      onActivateMemberMention: () => undefined,
+      onActivateAllMembersMention: () => undefined
     }))
 
     expect(markup).toContain('contentEditable="true"')
@@ -43,6 +45,14 @@ describe('StructuredMentionComposer', () => {
     expect(markup.match(/@新洛可/g)).toHaveLength(2)
     expect(markup).toContain('@所有成员')
     expect(markup).toContain('structured-mention-token')
+    expect(markup.match(/role="button"/g)).toHaveLength(3)
+    expect(markup.match(/tabindex="0"/g)).toHaveLength(4)
+    expect(markup.match(/aria-haspopup="dialog"/g)).toHaveLength(3)
+    expect(markup).toContain('aria-label="查看新洛可的基础信息"')
+    expect(markup).toContain('aria-label="查看所有成员范围"')
+    expect(markup).toContain('padding:0 1px')
+    expect(markup).toContain('border:0')
+    expect(markup).toContain('font-weight:600')
   })
 
   it('projects the current member name without changing the stored identity', () => {

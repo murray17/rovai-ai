@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: desktop-ui-acceptance-infrastructure
-last_updated: 2026-07-31
+last_updated: 2026-08-06
 ---
 
 # 桌面 UI 验收与隔离数据
@@ -74,9 +74,43 @@ pnpm accept:runtime-activity-ui
 
 它们分别覆盖长期记忆、成员头像、成员生命周期、应用内通知、统一侧栏、结构化提及和
 Task 单卡原地更新，以及九 Runtime Canonical Activity 工具名称与 run-level 诚实降级的桌面回归。
-结构化提及验收使用无模型的安全 Runtime fixture，覆盖三位队员的同一 CampTurn 创建边界、原生
-鼠标选区、系统剪贴板恢复与悬停复制。具体
-Schema/Migration 编号属于测试 fixture 和版本证据，不是本文的常青要求。
+具体 Schema/Migration 编号属于测试 fixture 和版本证据，不是本文的常青要求。
+
+### 结构化 Mention 门禁
+
+Renderer 的权威行为见
+[Arctic Dawn：不得回退的交互合同](../ui/arctic-dawn.md#不得回退的交互合同)。修改会话
+Mention 的结构、样式、点击、键盘或复制行为后，至少运行：
+
+```bash
+pnpm package:mac
+pnpm accept:structured-mentions-ui
+```
+
+该验收使用三位带角色的队员和无模型安全 Runtime fixture，必须同时证明：
+
+- Composer Mention 是默认无底色的蓝色、不可拆分原子行内文字，耐久 Draft 与发送后的
+  Structured Content 保持同一稳定身份；
+- 一条消息在同一 CampTurn 边界为三位唯一收件人创建各自的 AgentRun；
+- Composer 和已发送 Member Mention 具有同一飞书式紧凑样式：`display: inline`、透明背景、
+  无边框、`0 1px` 内边距和 3px 圆角；仅 Hover、Focus 或打开态显示轻量蓝色反馈；
+- 两处当前队员 Mention 都具有 `role="button"`、`aria-haspopup="dialog"` 和精确可访问名称；
+  单击、Enter、Space 打开锚定的非模态人物信息卡，且不出现全局 `.app-toast`；
+- 人物信息卡具有 `role="dialog"`、`aria-modal="false"`，并采用 392px/128px/302px 的
+  布局 2 侧边照结构；展示名称、角色、Presence、运行时、专业职责、工作准则和性格底色；
+- 激活前后 `.camp-workspace` 保持存在且不出现 `.members-view`；点击外部或 `Esc` 关闭，
+  键盘关闭后焦点返回原 Mention；
+- 跨过 Mention 执行真实鼠标拖选可完整包含其可见文本，且不会误触发人物信息卡；普通消息
+  文本也继续支持原生拖选和系统 `Command+C`；
+- 整条消息复制入口仍只在 Hover/Focus 时出现，复制结果使用当前可见正文；
+- 测试前的系统剪贴板按 flavor 完整恢复，隔离 `userData` 不污染日常 App。
+
+脚本成功时输出 JSON 证据，并生成
+`structured-mentions-composer.png`、`structured-mentions-sent.png`、
+`structured-mentions-composer-popover.png`、`structured-mentions-member-popover.png`、
+`structured-mentions-native-selection.png` 和 `structured-mentions-hover-copy.png`。其中
+Composer 与历史消息的人物信息卡截图是此交互的必留视觉证据；若
+脚本失败，fixture、Runtime 临时目录和截图目录会保留用于排查。
 
 其他直接脚本：
 

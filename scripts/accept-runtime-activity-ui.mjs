@@ -10,7 +10,7 @@ const fixtureRoot = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_FIXTURE_ROOT
   ?? await mkdtemp(join(tmpdir(), 'rovai-runtime-activity-ui-accept-'))
 const dataDir = join(fixtureRoot, 'user-data')
 const runtimeTempDir = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_RUNTIME_TMP
-  ?? await mkdtemp('/tmp/rv-activity-')
+  ?? tmpdir()
 const outputDir = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_OUTPUT_DIR
   ?? await mkdtemp(join(tmpdir(), 'rovai-runtime-activity-ui-captures-'))
 const databasePath = join(dataDir, 'rovai.sqlite')
@@ -40,7 +40,7 @@ const runtimes = [
     evidenceKind: 'runtime.action', eventType: 'runtime.action', sourceAuthority: 'core',
     credibility: 'core_verified', payload: {
       toolCallId: 'op-antigravity', status: 'completed', kind: 'mcp_tool_call',
-      title: 'Team Tool', sourceAuthority: 'core', canonicalTool: 'team.call_member', output: 'delivered'
+      title: 'Built-in CLI', sourceAuthority: 'core', canonicalTool: 'team.call_member', output: 'delivered'
     }
   })
 ]
@@ -193,7 +193,7 @@ async function seedFixture() {
     const body = entry.runLevelOnly
       ? 'Run-level：Runtime 未报告内部工具；Rovai 未生成命令、文件或工具调用卡片。'
       : entry.sourceAuthority === 'core'
-        ? 'Core Team Tool：名称必须通过 Rovai Tool Catalog 验证。'
+        ? 'Core Built-in CLI：名称必须通过 Rovai Tool Catalog 验证。'
         : '结构化 Runtime Activity：标题来自 Runtime 报告的工具名称。'
     return `(
       ${sqlLiteral(`message-${entry.key}`)}, ${sqlLiteral(campId)}, ${index + 1},

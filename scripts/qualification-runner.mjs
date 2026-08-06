@@ -199,11 +199,9 @@ async function runTrial(options) {
     }
     temporaryRoot = await makeTemporaryDirectory(`rovai-qualification-${caseRecord.contract.manifest.id}-`)
     const dataDirectory = join(temporaryRoot, 'data')
-    const antigravityTeamGeminiRoot = join(temporaryRoot, 'antigravity-gemini')
     runtimeCacheDirectory = join(temporaryRoot, 'runtime-cache')
     workspacePath = join(temporaryRoot, 'workspace')
     await mkdir(dataDirectory, { recursive: true, mode: 0o700 })
-    await mkdir(antigravityTeamGeminiRoot, { recursive: true, mode: 0o700 })
     await mkdir(runtimeCacheDirectory, { recursive: true, mode: 0o700 })
     await copyFixture(caseRecord.contract.fixturePath, workspacePath)
     baselineManifest = await treeManifest(workspacePath)
@@ -216,13 +214,11 @@ async function runTrial(options) {
     core = startQualificationCore({
       coreExecutable: options.coreExecutable,
       dataDirectory,
-      antigravityTeamPrivateDirectory: options.antigravityTeamPrivateDirectory,
-      antigravityTeamGeminiRoot: options.mode === 'formal' ? null : antigravityTeamGeminiRoot,
       workingDirectory: root,
       runtimeCacheDirectory
     })
     await core.request('health.check', {}, 120_000)
-    const configured = await configureFrozenTeam(core.request)
+    const configured = await configureFrozenRuntimes(core.request)
     environmentManifest = await collectEnvironmentManifest({
       core,
       options,
@@ -825,11 +821,7 @@ async function runTrial(options) {
   return { resultBundle: finalResultBundle, redactedSummary, evidenceDirectory, ...publication }
 }
 
-async function configureFrozenTeam(request) {
-  const teamStatus = await request('runtime.antigravityTeam.grantPermission', {}, 120_000)
-  if (teamStatus.managedConfig !== 'ready' || teamStatus.permission !== 'ready') {
-    throw new Error(`Antigravity 13-tool bundle is not ready: ${JSON.stringify(teamStatus)}`)
-  }
+async function configureFrozenRuntimes(request) {
   for (const adapterKind of ['codex-cli', 'opencode-cli', 'antigravity-app']) {
     await request('runtime.product.check', { runtimeKind: adapterKind }, 120_000)
   }
@@ -842,7 +834,7 @@ async function configureFrozenTeam(request) {
         && candidate.authScope === 'default')
     ]))
     return Object.values(selected).every((value) => value?.snapshot?.probeStatus === 'ready')
-      && selected['antigravity-app'].snapshot.capabilities.includes('built_in_mcp_tool_parity.complete')
+      && selected['antigravity-app'].snapshot.capabilities.includes('builtin_cli.transport.v1')
       ? selected
       : null
   }, 'frozen Runtime installations', 180_000)
@@ -870,7 +862,15 @@ async function configureFrozenTeam(request) {
       throw new Error(`frozen member Runtime drifted: ${member.agentProfileId}`)
     }
   }
-  return { teamStatus, installations, profiles }
+  return {
+    builtinCli: {
+      status: 'ready',
+      contractVersion: 1,
+      transport: 'private-local-ipc'
+    },
+    installations,
+    profiles
+  }
 }
 
 async function collectEnvironmentManifest({
@@ -927,7 +927,9 @@ async function collectEnvironmentManifest({
       packaged: isPackagedCore(options.coreExecutable),
       version: health.core.version,
       readModelSchema: health.core.readModelSchema,
-      attestedTeamProtocol: health.core.attestedTeamProtocol
+      builtinToolContractVersion: health.core.builtinToolContractVersion,
+      builtinToolIpcProtocolVersion: health.core.builtinToolIpcProtocolVersion,
+      builtinToolCatalogDigest: health.core.builtinToolCatalogDigest
     },
     host: { platform: platform(), type: osType(), release: release(), architecture: arch(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone },
     case: { id: caseRecord.contract.manifest.id, version: caseRecord.contract.manifest.version, seal: caseRecord.seal },
@@ -946,7 +948,7 @@ async function collectEnvironmentManifest({
       readiness: profile.runtimeReadiness
     })),
     runtimeInstallations,
-    antigravityTeam: configured.teamStatus,
+    builtinCli: configured.builtinCli,
     ambientMcpIsolation: isolationProfileAdmission
       ? isolationProfileAdmission.channels.externalMcpMutation.state
       : 'preserved_uncontrolled',
@@ -986,7 +988,7 @@ async function collectEnvironmentManifest({
         : runtimePreference
     })),
     runtimeInstallations: manifest.runtimeInstallations,
-    antigravityTeam: manifest.antigravityTeam,
+    builtinCli: manifest.builtinCli,
     ambientMcpIsolation: manifest.ambientMcpIsolation,
     interventionIsolationProfile: manifest.interventionIsolationProfile
   }))
@@ -1404,7 +1406,6 @@ function parseArguments(args) {
       'case',
       'expected-seal',
       'evidence-root',
-      'team-private-dir',
       'trial-id',
       'planned-slot-id',
       'suite-id',
@@ -1413,14 +1414,13 @@ function parseArguments(args) {
     values[key] = args.shift()
     if (!values[key]) usage()
   }
-  if (!['demo', 'diagnostic', 'formal'].includes(values.mode) || !values.core || !values.case || !values['evidence-root'] || !values['team-private-dir']) usage()
+  if (!['demo', 'diagnostic', 'formal'].includes(values.mode) || !values.core || !values.case || !values['evidence-root']) usage()
   return {
     mode: values.mode,
     coreExecutable: resolve(values.core),
     caseDirectory: resolve(values.case),
     expectedSeal: values['expected-seal'] ?? null,
     evidenceRoot: resolve(values['evidence-root']),
-    antigravityTeamPrivateDirectory: resolve(values['team-private-dir']),
     isolationProfilePath: values['isolation-profile']
       ? resolve(values['isolation-profile'])
       : null,
@@ -1431,7 +1431,7 @@ function parseArguments(args) {
 }
 
 function usage() {
-  console.error('Usage: node scripts/qualification-runner.mjs --mode <demo|diagnostic|formal> --core <path> --case <path> --evidence-root <path> --team-private-dir <path> [--expected-seal <sha256>] [--trial-id <id>] [--planned-slot-id <id>] [--suite-id <id>] [--isolation-profile <private-json>]')
+  console.error('Usage: node scripts/qualification-runner.mjs --mode <demo|diagnostic|formal> --core <path> --case <path> --evidence-root <path> [--expected-seal <sha256>] [--trial-id <id>] [--planned-slot-id <id>] [--suite-id <id>] [--isolation-profile <private-json>]')
   process.exit(2)
 }
 

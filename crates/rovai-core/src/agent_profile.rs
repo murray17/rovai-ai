@@ -514,20 +514,6 @@ impl DomainCommand for SetAgentProfileAvatarCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct SetAgentProfileMemoryWriteCommand {
-    pub agent_profile_id: String,
-    pub expected_version: i64,
-    pub enabled: bool,
-}
-
-impl sealed::Sealed for SetAgentProfileMemoryWriteCommand {}
-impl DomainCommand for SetAgentProfileMemoryWriteCommand {
-    const TYPE: &'static str = "agent_profile.memory_write.set";
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct SetAgentProfileRuntimeCommand {
     pub agent_profile_id: String,
     pub expected_version: i64,
@@ -1431,7 +1417,7 @@ impl AgentProfileService {
                     ?9, ?1, ?1, NULL, ?2, NULL,
                     ?3, ?4, ?5,
                     ?6, ?7,
-                    '["memory.write"]', '',
+                    '[]', '',
                     0, '{}', 'present',
                     (SELECT COALESCE(MAX(member_order), -1) + 1 FROM agent_profile), 1,
                     ?8, ?8, NULL
@@ -1579,73 +1565,6 @@ impl AgentProfileService {
                 &envelope.payload.agent_profile_id,
                 version + 1,
                 "agent_profile.avatar_updated",
-            ))
-        })
-    }
-
-    pub fn set_memory_write(
-        &self,
-        database: &mut Database,
-        envelope: &CommandEnvelope<SetAgentProfileMemoryWriteCommand>,
-    ) -> Result<CommandExecution> {
-        self.gateway.execute(database, envelope, |transaction| {
-            let current = transaction
-                .query_row(
-                    r#"
-                    SELECT version, profile_status, default_capabilities_json
-                    FROM agent_profile WHERE id = ?1
-                    "#,
-                    [&envelope.payload.agent_profile_id],
-                    |row| {
-                        Ok((
-                            row.get::<_, i64>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?,
-                        ))
-                    },
-                )
-                .optional()?;
-            let Some((version, presence, capabilities_json)) = current else {
-                return Ok(CommandHandlerResult::rejected(
-                    "agent_profile.not_found",
-                    json!({ "agentProfileId": envelope.payload.agent_profile_id }),
-                ));
-            };
-            if version != envelope.payload.expected_version {
-                return Ok(version_conflict(version));
-            }
-            if presence == "removed" {
-                return Ok(CommandHandlerResult::rejected(
-                    "agent_profile.removed",
-                    json!({ "agentProfileId": envelope.payload.agent_profile_id }),
-                ));
-            }
-            let mut capabilities = serde_json::from_str::<BTreeSet<String>>(&capabilities_json)
-                .context("invalid AgentProfile default capabilities")?;
-            if envelope.payload.enabled {
-                capabilities.insert("memory.write".to_string());
-            } else {
-                capabilities.remove("memory.write");
-            }
-            let now = chrono::Utc::now().to_rfc3339();
-            transaction.execute(
-                r#"
-                UPDATE agent_profile
-                SET default_capabilities_json = ?2,
-                    version = version + 1, updated_at = ?3
-                WHERE id = ?1 AND version = ?4
-                "#,
-                params![
-                    envelope.payload.agent_profile_id,
-                    serde_json::to_string(&capabilities)?,
-                    now,
-                    envelope.payload.expected_version,
-                ],
-            )?;
-            Ok(profile_updated_result(
-                &envelope.payload.agent_profile_id,
-                version + 1,
-                "agent_profile.memory_write_updated",
             ))
         })
     }
@@ -5378,23 +5297,6 @@ mod tests {
                 ),
             )
             .expect("profile should be updated");
-        let updated = service
-            .get_profile(&database, "agent_4")
-            .expect("profile should load")
-            .expect("profile should exist");
-        service
-            .set_memory_write(
-                &mut database,
-                &user_command(
-                    "disable-qilu-memory-write",
-                    SetAgentProfileMemoryWriteCommand {
-                        agent_profile_id: updated.id.clone(),
-                        expected_version: updated.version,
-                        enabled: false,
-                    },
-                ),
-            )
-            .expect("memory capability should be updated independently");
         drop(database);
 
         let reopened = Database::open(&directory).expect("database should reopen");
@@ -5403,12 +5305,6 @@ mod tests {
             .expect("profile should load")
             .expect("profile should exist");
         assert_eq!(profile.working_principles, "只在未来 Run 生效。");
-        assert!(
-            !profile
-                .default_capabilities
-                .iter()
-                .any(|capability| capability == "memory.write")
-        );
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }

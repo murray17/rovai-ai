@@ -1489,18 +1489,6 @@ impl CollaborationService {
                     "System components cannot create business Tasks",
                 ));
             }
-            if !actor_has_capability(
-                transaction,
-                &envelope.actor,
-                envelope.execution_epoch,
-                &envelope.payload.camp_id,
-                "task.create",
-            )? {
-                return Ok(rejected(
-                    "command.capability_denied",
-                    "Actor lacks task.create",
-                ));
-            }
             if let Some(assignee_agent_id) = &envelope.payload.assignee_agent_id
                 && !is_active_member(transaction, &envelope.payload.camp_id, assignee_agent_id)?
             {
@@ -1624,8 +1612,9 @@ impl CollaborationService {
                 ));
             }
             if current_version != envelope.payload.expected_version {
-                return Ok(rejected(
-                    "task.version_conflict",
+                return Ok(task_version_conflict(
+                    &envelope.payload.task_id,
+                    current_version,
                     "Task version does not match expectedVersion",
                 ));
             }
@@ -1633,18 +1622,6 @@ impl CollaborationService {
                 return Ok(rejected(
                     "task.actor_not_allowed",
                     "System components cannot update business Tasks",
-                ));
-            }
-            if !actor_has_capability(
-                transaction,
-                &envelope.actor,
-                envelope.execution_epoch,
-                &camp_id,
-                "task.update",
-            )? {
-                return Ok(rejected(
-                    "command.capability_denied",
-                    "Actor lacks task.update",
                 ));
             }
             let is_default_lead = actor_is_default_lead(
@@ -1724,8 +1701,9 @@ impl CollaborationService {
                 ],
             )?;
             if updated != 1 {
-                return Ok(rejected(
-                    "task.version_conflict",
+                return Ok(task_version_conflict(
+                    &envelope.payload.task_id,
+                    current_version,
                     "Task version changed while applying the update",
                 ));
             }
@@ -4819,7 +4797,6 @@ fn validate_capability_overrides(value: &Value) -> Result<()> {
         "member.call",
         "workspace.bind",
         "action.request",
-        "memory.write",
     ];
     for (capability, effect) in value.as_object().expect("validated JSON object") {
         if !CAPABILITIES.contains(&capability.as_str())
@@ -4924,6 +4901,21 @@ fn task_status_transition_allowed(current: &str, next: &str) -> bool {
 
 fn rejected(code: &str, message: &str) -> CommandHandlerResult {
     CommandHandlerResult::rejected(code, json!({ "message": message }))
+}
+
+fn task_version_conflict(
+    task_id: &str,
+    current_version: i64,
+    message: &str,
+) -> CommandHandlerResult {
+    CommandHandlerResult::rejected(
+        "task.version_conflict",
+        json!({
+            "message": message,
+            "taskId": task_id,
+            "currentVersion": current_version,
+        }),
+    )
 }
 
 fn actor_parts(actor: &ActorRef) -> (&'static str, &str, Option<&str>) {

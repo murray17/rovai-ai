@@ -5,7 +5,7 @@ lifecycle: historical
 authority: version-scope-and-status
 design_status: frozen
 implementation_status: complete
-last_updated: 2026-08-03
+last_updated: 2026-08-06
 ---
 
 # Rovai-ai v0.33 Unified Sidebar Actions
@@ -19,6 +19,26 @@ last_updated: 2026-08-03
 > 生产设计：[production-design.md](production-design.md)
 >
 > 实施门禁：[implementation-plan.md](implementation-plan.md)
+
+## 历史勘误（2026-08-06）
+
+本文及其实施计划只记录 v0.33 的“统一侧栏操作”交付包。提交 `8af34a1` 同时合入了
+结构化 Mention 的 Core、Contracts、Renderer 与 ADR-0096，但当时没有把这项并行工作
+列入本版本 README。因此，下文“本版本只修改 Renderer”的边界只适用于统一侧栏操作，
+不能被解释为提交 `8af34a1` 的完整变更范围。
+
+同一提交首次实现的历史消息 Member Mention 交互是“点击打开队员详情”；其父提交仍只
+把用户正文渲染为纯文本。后续提交 `69e335e` 只加入了已选中的 Mention Popover HTML
+原型和方案 2 文档，没有修改生产 React 或重新打包应用。因此，用户在安装包里继续看到
+旧样式或旧点击行为，并不是某个版本把已完成的 Popover 改回去了，而是已确认原型此前从未
+进入生产包。2026-08-06 再次确认的当前 Renderer 合同是“默认无底色的飞书式行内文字 +
+点击/键盘打开布局 2 人物信息卡 + 不离开会话”；全局角色 Toast 也不是历史生产合同。
+
+本段只纠正历史归档的范围歧义，不改写 v0.33 当时的侧栏目标。当前权威分别为：
+
+- Mention 内容、稳定身份与派生寻址：[ADR-0096](../../adr/0096-core-owned-structured-mentions-and-derived-addressing.md)；
+- Mention 视觉与点击行为：[Arctic Dawn 的不得回退合同](../../ui/arctic-dawn.md#不得回退的交互合同)；
+- 真实 App 回归门禁：[桌面 UI 验收](../../development/ui-acceptance.md#结构化-mention-门禁)。
 
 ## 版本意图
 

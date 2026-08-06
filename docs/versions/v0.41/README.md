@@ -1,16 +1,16 @@
 ---
 document_type: version-overview
 version: v0.41
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: in_progress
-last_updated: 2026-08-05
+implementation_status: complete
+last_updated: 2026-08-06
 ---
 
 # Rovai-ai v0.41 Runtime Activity 统一观测语义
 
-> 状态：已从历史 Binding Set/identity replay 方案收敛为当前 Projection；Core、Read Side、Renderer 与九 Runtime 受控 fixture 验收均已完成。2026-08-05 的真实联网验收中，Copilot 与 Kiro 的专项问题已修复并分别复跑通过：Copilot 实际调用 Core 投影工具，Kiro Skill/MCP turn 均通过。版本仍等待用户确认最终 UI 展示结果后再标记 complete。
+> 状态：历史版本，已从 Binding Set/identity replay 方案收敛为当前 Projection；Core、Read Side、Renderer 与九 Runtime 受控 fixture 验收均已完成。2026-08-05 的真实联网验收中，Copilot 与 Kiro 的专项问题已修复并分别复跑通过：Copilot 实际调用 Core 投影工具，Kiro Skill/MCP turn 均通过。
 >
 > 前置版本：[v0.40 Camp 历史检索工具收敛](../v0.40/README.md)
 >

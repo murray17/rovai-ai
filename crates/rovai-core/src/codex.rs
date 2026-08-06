@@ -22,6 +22,7 @@ use rovai_core::{
         AdapterRuntimeProjection, AdapterRuntimeResolutionInput, AgentRuntimeAdapter,
         AgentRuntimeAdapterRegistry, McpProjectionCapability, SkillDiscoveryCapability,
     },
+    builtin_tool_transport::{BUILTIN_TOOL_CONTRACT_VERSION, builtin_tool_catalog_digest},
     codex_home::{CodexHomeManager, PreparedCodexHome},
     command::canonical_json_digest,
     mcp::McpServerDefinition,
@@ -36,11 +37,11 @@ use tokio::{
 };
 
 use crate::{
+    builtin_tool_runtime::BuiltinToolProcessConfig,
     runtime_fleet::{
         AgentRuntimeFleetManager, FleetAcquireRequest, FleetReleaseDisposition,
         RuntimeCompatibilityKey, RuntimeProcessHost,
     },
-    team_runtime::TeamToolProcessConfig,
 };
 
 #[derive(Debug)]
@@ -136,6 +137,7 @@ pub(crate) struct CodexHost {
     home_path: PathBuf,
     executable_path: PathBuf,
     prepared_home: Mutex<Option<PreparedCodexHome>>,
+    builtin_tools: Option<BuiltinToolProcessConfig>,
 }
 
 #[derive(Debug, Clone)]
@@ -166,10 +168,14 @@ impl CodexHost {
         prepared_home: PreparedCodexHome,
         expected_external_servers: &BTreeMap<String, McpServerDefinition>,
         incoming: mpsc::UnboundedSender<CodexIncoming>,
+        builtin_tools: Option<BuiltinToolProcessConfig>,
     ) -> Result<Arc<Self>> {
         let codex_home = prepared_home.path.clone();
         let mut command = Command::new(codex_path);
         configure_active_runtime_command(&mut command);
+        if let Some(config) = &builtin_tools {
+            config.configure_command(&mut command)?;
+        }
         #[cfg(unix)]
         command.as_std_mut().process_group(0);
         let mut child = command
@@ -208,6 +214,7 @@ impl CodexHost {
             home_path: codex_home.clone(),
             executable_path: codex_path.to_path_buf(),
             prepared_home: Mutex::new(Some(prepared_home)),
+            builtin_tools,
         });
         Self::spawn_stdout_reader(host.clone(), stdout);
         Self::spawn_stderr_reader(host.clone(), stderr);
@@ -481,6 +488,10 @@ impl CodexHost {
         &self.executable_path
     }
 
+    pub(crate) fn builtin_tool_process_config(&self) -> Option<&BuiltinToolProcessConfig> {
+        self.builtin_tools.as_ref()
+    }
+
     pub(crate) fn is_alive(&self) -> bool {
         self.alive.load(Ordering::Acquire)
     }
@@ -616,7 +627,6 @@ pub struct CodexAgentThreadOptions<'a> {
     pub sandbox_mode: &'a str,
     pub approval_policy: &'a str,
     pub model: Option<&'a str>,
-    pub team_tool: Option<&'a TeamToolProcessConfig>,
     pub attachment_access_root: &'a Path,
 }
 
@@ -656,9 +666,7 @@ impl CodexRuntime {
                 sandbox: options.sandbox_mode,
                 approval_policy: options.approval_policy,
                 model: options.model.filter(|model| *model != "default"),
-                config: options
-                    .team_tool
-                    .map(TeamToolProcessConfig::codex_runtime_config),
+                config: None,
                 runtime_workspace_roots: Some(vec![
                     cwd.to_string_lossy().into_owned(),
                     options
@@ -864,6 +872,10 @@ impl CodexRuntime {
 
     pub fn host_instance_id(&self) -> &str {
         &self.host.host_instance_id
+    }
+
+    pub(crate) fn builtin_tool_process_config(&self) -> Option<&BuiltinToolProcessConfig> {
+        self.host.builtin_tool_process_config()
     }
 
     #[cfg(test)]
@@ -1104,6 +1116,7 @@ pub struct CodexAgentRunRuntimeRequest<'a> {
     pub frozen_runtime: &'a FrozenAgentRuntimeConfig,
     pub external_mcp_servers: &'a BTreeMap<String, McpServerDefinition>,
     pub runtime_compatibility_digest: &'a str,
+    pub builtin_tools: &'a BuiltinToolProcessConfig,
 }
 
 impl AgentRuntimeAdapter for CodexCliRuntimeAdapter {
@@ -1160,6 +1173,7 @@ impl CodexCliRuntimeAdapter {
             prepared_home,
             &BTreeMap::new(),
             incoming,
+            None,
         )
         .await?;
         let runtime = CodexRuntime::from_host(
@@ -1262,6 +1276,7 @@ impl CodexCliRuntimeAdapter {
             frozen_runtime,
             external_mcp_servers,
             runtime_compatibility_digest,
+            builtin_tools,
         } = request;
         if frozen_runtime.adapter_kind != AdapterKind::CodexCli {
             bail!("Codex Runtime received a non-Codex AgentRun");
@@ -1310,6 +1325,7 @@ impl CodexCliRuntimeAdapter {
                         prepared_home,
                         external_mcp_servers,
                         self.incoming.clone(),
+                        Some(builtin_tools.clone()),
                     )
                     .await?;
                     Ok(RuntimeProcessHost::Codex(host))
@@ -1458,7 +1474,6 @@ pub(crate) fn runtime_compatibility_digest(
     frozen_runtime: &FrozenAgentRuntimeConfig,
     cwd: &Path,
     external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
-    team_tool: &TeamToolProcessConfig,
     attachment_access_root: &Path,
 ) -> Result<String> {
     let cwd = cwd
@@ -1471,7 +1486,8 @@ pub(crate) fn runtime_compatibility_digest(
         "hostConfigDigest": frozen_runtime.host_config_digest,
         "executionRoot": cwd,
         "externalMcpServers": external_mcp_servers,
-        "teamBindingId": team_tool.native_binding_id(),
+        "builtinToolContractVersion": BUILTIN_TOOL_CONTRACT_VERSION,
+        "builtinToolCatalogDigest": builtin_tool_catalog_digest()?,
         "attachmentAccessRoot": attachment_access_root,
     }))
 }
@@ -1999,6 +2015,7 @@ pub struct CompletedTurn {
     pub turn_id: String,
     pub status: String,
     pub final_agent_message: Option<String>,
+    pub error: Option<Value>,
 }
 
 pub fn completed_turn(params: &Value) -> Result<CompletedTurn> {
@@ -2025,10 +2042,12 @@ pub fn completed_turn(params: &Value) -> Result<CompletedTurn> {
         .filter_map(|item| item.get("text").and_then(Value::as_str))
         .rfind(|text| !text.trim().is_empty())
         .map(str::to_string);
+    let error = turn.get("error").filter(|value| !value.is_null()).cloned();
     Ok(CompletedTurn {
         turn_id,
         status,
         final_agent_message,
+        error,
     })
 }
 
@@ -2196,6 +2215,7 @@ mod tests {
             prepared,
             &BTreeMap::new(),
             incoming,
+            None,
         )
         .await
         .unwrap();
@@ -2318,6 +2338,12 @@ command = "/usr/bin/false"
                 headers: BTreeMap::new(),
             },
         )]);
+        let first_builtin_tools = BuiltinToolProcessConfig::create(
+            &executable,
+            &directory.join("builtin.sock"),
+            &directory,
+        )
+        .unwrap();
         let first = adapter
             .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
                 agent_run_id: "run-1",
@@ -2328,9 +2354,16 @@ command = "/usr/bin/false"
                 frozen_runtime: &runtime_config,
                 external_mcp_servers: &external_servers,
                 runtime_compatibility_digest: "test-digest-agent-1",
+                builtin_tools: &first_builtin_tools,
             })
             .await
             .unwrap();
+        let second_builtin_tools = BuiltinToolProcessConfig::create(
+            &executable,
+            &directory.join("builtin.sock"),
+            &directory,
+        )
+        .unwrap();
         let second = adapter
             .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
                 agent_run_id: "run-2",
@@ -2341,6 +2374,7 @@ command = "/usr/bin/false"
                 frozen_runtime: &runtime_config,
                 external_mcp_servers: &external_servers,
                 runtime_compatibility_digest: "test-digest-agent-2",
+                builtin_tools: &second_builtin_tools,
             })
             .await
             .unwrap();
@@ -2424,6 +2458,12 @@ command = "/usr/bin/false"
         let first_host = first.host_instance_id().to_string();
         let first_home = first.home_path.clone();
         adapter.complete_agent_run("run-1", 1).await;
+        let successor_builtin_tools = BuiltinToolProcessConfig::create(
+            &executable,
+            &directory.join("builtin.sock"),
+            &directory,
+        )
+        .unwrap();
         let successor = adapter
             .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
                 agent_run_id: "run-3",
@@ -2434,6 +2474,7 @@ command = "/usr/bin/false"
                 frozen_runtime: &runtime_config,
                 external_mcp_servers: &external_servers,
                 runtime_compatibility_digest: "test-digest-agent-1",
+                builtin_tools: &successor_builtin_tools,
             })
             .await
             .unwrap();
@@ -2695,6 +2736,31 @@ command = "/usr/bin/false"
         assert_eq!(completed.turn_id, "turn-1");
         assert_eq!(completed.status, "completed");
         assert_eq!(completed.final_agent_message.as_deref(), Some("final"));
+        assert_eq!(completed.error, None);
+    }
+
+    #[test]
+    fn completed_turn_preserves_runtime_error_details() {
+        let completed = completed_turn(&json!({
+            "threadId": "thread-1",
+            "turn": {
+                "id": "turn-1",
+                "status": "failed",
+                "items": [],
+                "error": {
+                    "message": "model unavailable",
+                    "codexErrorInfo": "serverOverloaded"
+                }
+            }
+        }))
+        .unwrap();
+        assert_eq!(
+            completed.error,
+            Some(json!({
+                "message": "model unavailable",
+                "codexErrorInfo": "serverOverloaded"
+            }))
+        );
     }
 
     #[test]

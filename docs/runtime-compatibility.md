@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-08-04
+last_updated: 2026-08-06
 ---
 
 # Agent Runtime 兼容性清单
@@ -11,27 +11,55 @@ Roadmap 或用户可见能力来源；正式目录以代码中的 `AdapterKind`�
 测试为准。跨版本边界见
 [ADR-0065](adr/0065-verified-runtime-catalog-and-documentation-only-compatibility.md)。
 
-兼容性清单中的自然语言结论本身不会自动创建产品类型。跨版本决策
-[ADR-0088](adr/0088-attested-native-team-gateway-attachment.md) 已进一步要求 Adapter 和
-AgentRun 分别表达外部 MCP 投影、内部 Team Gateway attachment 与 ambient isolation；
-[ADR-0089](adr/0089-attested-built-in-mcp-tool-parity.md) 在该模型内把 Antigravity 的内置
-Gateway 从 v0.30 单一 `post_message` 提升到 v0.31 完整十三工具对等；v0.32 再按
-[ADR-0091](adr/0091-durable-member-calls-and-single-slot-a2a-resume.md) breaking rename 为
-`call_member`，并把 Attested Team Protocol 升至 3、Alias Map 升至 2。
+兼容性清单中的自然语言结论本身不会自动创建产品类型。v0.42 起，Rovai-owned built-in
+operations 的正式准入基线是 [ADR-0124](adr/0124-cli-only-transport-for-rovai-built-in-operations.md)：
+Runtime 必须能执行 bundled `rovai` CLI，经 private local IPC 调用 Core Router。旧 Team、
+Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP config 已完全
+退出当前架构；用户 External MCP 是另一条独立能力，不参与 built-in tool 准入判断。
 
-## 当前正式接入
+## 当前 Built-in CLI 正式接入
 
-| Runtime | 验证版本 | 协议与 MCP 证据 | 认证 / 恢复证据 | 当前结论 |
-|---|---:|---|---|---|
-| Kiro CLI | 2.15.1 | ACP v1；私有 Custom Agent 设置 `includeMcpJson: false`；真实 AgentRun 的同名 MCP marker 来自 Rovai Projection；`.kiro/skills` 私有 Skill marker 通过 | 已登录账号完成真实模型 turn；`session/load`、cancel、set_model 与原生 Skill discovery 已验证 | v0.19 接入；v0.37 完成 External MCP 同名优先与 Skill 复核 |
-| Qoder CLI | 1.1.14 | `--acp --strict-mcp-config`；私有 MCP 文件与 allowlist；同名 MCP marker 来自 Rovai Projection | DeepSeek V4 Flash 完成真实 MCP 与 `.qoder/skills` Skill turn；execute-only Camp attachment root 不传给会递归 `lstat` 的 Qoder 1.1.14 | v0.19 接入；v0.37 完成真实 AgentRun 复核 |
-| CodeBuddy | 2.132.0 | `--acp --strict-mcp-config`；私有 MCP 文件；同名 MCP marker 来自 Rovai Projection | DeepSeek V4 Flash 完成真实 MCP 与 `.codebuddy/skills` Skill turn | v0.19 接入；v0.37 完成真实 AgentRun 复核 |
-| Qwen Code | 0.21.1 | `--acp` + CLI MCP config/server allowlist；同名 MCP marker 来自 Rovai Projection | OpenAI-compatible DeepSeek V4 Flash provider 完成真实 MCP 与 `.qwen/skills` Skill turn；探测保留自定义 modelProviders | v0.19 接入；v0.37 完成真实 AgentRun 复核 |
+2026-08-06 的 `pnpm smoke:builtin-cli` 在同一轮本机联合矩阵中创建九个真实模型 AgentRun。
+每个 Runtime 都完成 catalog discovery/describe、全部十二项真实调用、一次 stale-version 冲突与
+`refresh_then_decide` recovery、完成后的旧 lease fencing，以及后续 Run 的新 lease。每个完整
+Run 都观察到覆盖十二个 canonical operation 的 13 条 Core Evidence；没有使用 mock、fixture
+调用或单纯 Deep Probe 代替执行。
 
-## 现有 Antigravity Runtime 专项复核
+| Runtime | 验证版本 / 模型 | 12 项操作 | 冲突 | 初始/恢复 lease fence | continuation | 当前结论 |
+|---|---|---:|---|---|---|---|
+| Codex CLI | `0.146.1` / `gpt-5.3-codex-spark` | 12/12 | pass | pass / pass | logical + native | pass |
+| OpenCode | `1.18.10` / `opencode/big-pickle` | 12/12 | pass | pass / pass | logical + native | pass |
+| GitHub Copilot | `1.0.78` / `claude-sonnet-5` | 12/12 | pass | pass / pass | logical + native | pass |
+| Claude Code | `2.1.220` / runtime default | 12/12 | pass | pass / pass | logical + native | pass |
+| Antigravity | `1.1.10` / runtime default | 12/12 | pass | pass / pass | logical; one-shot native | pass |
+| Kiro | `2.16.1` / `auto` | 12/12 | pass | pass / pass | logical; one-shot native | pass |
+| Qoder | `1.1.14` / `deepseek/deepseek-v4-flash-pg` | 12/12 | pass | pass / pass | logical + native | pass |
+| CodeBuddy | `2.132.0` / `deepseek-v4-flash` | 12/12 | pass | pass / pass | logical + native | pass |
+| Qwen Code | `0.21.5` / `deepseek-v4-flash(openai)` | 12/12 | pass | pass / pass | logical + native | pass |
 
-Antigravity 已在产品目录中用于普通 AgentRun，也可以作为 A2A 接收目标；下表只复核发送侧
-Team Gateway，不把它误列为“尚未接入的 Runtime”。
+Codex 本机账户的默认模型在验收时触发配额限制；验证仍在完全相同的 Codex Runtime、CLI、
+环境注入和 Core 路径内完成，仅选择了账户中可用的 `gpt-5.3-codex-spark`。因此该事实不降低
+transport 结论，也不把特定模型固定为产品要求。
+
+字段级合同以 [Built-in Tool Transport v1](contracts/builtin-tool-transport-v1.md) 为唯一真源，
+调用结构以 [Built-in Tool Runtime Architecture](architecture/builtin-tool-runtime.md) 为准。
+
+## External MCP 兼容性
+
+External MCP Library、Assignment 与 Runtime-native Projection 保持独立。以下是此前完成过
+External MCP 精确投影复核的 ACP Runtime；它们不再承担 Rovai built-in operations：
+
+| Runtime | 历史验证版本 | External MCP 证据 | 当前边界 |
+|---|---:|---|---|
+| Kiro CLI | 2.15.1 | 私有 Custom Agent、`includeMcpJson: false`、同名投影 marker | 仅 External MCP |
+| Qoder CLI | 1.1.14 | `--acp --strict-mcp-config`、私有 MCP 文件与 allowlist | 仅 External MCP |
+| CodeBuddy | 2.132.0 | `--acp --strict-mcp-config`、私有 MCP 文件 | 仅 External MCP |
+| Qwen Code | 0.21.1 | `--acp`、CLI MCP config/server allowlist | 仅 External MCP |
+
+## 历史：内置 MCP / Antigravity 专项复核
+
+以下记录只解释 v0.30–v0.32 当时的实现和证据，不能作为当前运输合同，也不表示旧 MCP
+实现仍被保留。Antigravity 当前与其他八个 Runtime 一样使用 bundled CLI。
 
 | 复核日期 / 版本 | 已观察证据 | 当前实现结论 | 仍需复核的边界 |
 |---|---|---|---|
@@ -43,9 +71,8 @@ Team Gateway，不把它误列为“尚未接入的 Runtime”。
 复核。编译、单元/集成测试和静态契约仍不能替代这条实测；反过来，一次真实显式 return
 链路也不能替代 Outcome、取消、容量与 crash 分支的确定性测试。
 
-这些证据不证明最终 MCP 集合唯一；实现明确保留用户 ambient MCP，并在状态中披露
-`PreservedUncontrolled`。Plugin、用户级或 workspace 的同名 `rovai_team` 由启动前冲突检测
-失败关闭，不依赖未证明的来源优先级。单工具历史验收见
+这些历史证据不证明当前 CLI 合同；旧 Plugin、Bridge、permission bundle、`rovai_team`
+保留名与 ambient built-in MCP attachment 都已在 v0.42 删除。单工具历史验收见
 [v0.30](versions/v0.30/README.md)，完整十三工具与 Qualification 结果见
 [v0.31](versions/v0.31/README.md)。
 
@@ -62,15 +89,14 @@ Team Gateway，不把它误列为“尚未接入的 Runtime”。
 
 ## 后续准入规则
 
-- 新增 Runtime 的外部 MCP 准入仍以 `ExactPerRun` 为门槛；`AttestedNativeBridge` 只为满足
-  ADR-0088 证据的 Runtime 挂接内部 Team Gateway，不提升外部 MCP 能力。
-- preserved-ambient 路径只允许挂接内部 Team Gateway。版本状态、Run 冻结和
-  审计必须分别说明外部 MCP Unsupported、Team attachment 方式与 ambient isolation；运行中
-  不得静默改用其他策略。
-- 这一新路径不能用于投影外部 MCP Library Assignment；Runtime 有 Assignment 但不能精确
-  投影时必须在发送准入失败关闭。
+- 新增 Runtime 的 built-in tool 准入要求真实模型能执行 bundled `rovai` CLI，并通过完整
+  catalog、十二项调用、冲突 recovery、Evidence、lease fencing 与后续 Run 验证；具有 shell/
+  bash 能力但尚未通过矩阵，只能视为待验证，不能以理论支持替代证据。
+- Runtime 不得通过内置 MCP、native Plugin、stdio Bridge 或 ambient MCP 获得 Rovai built-in
+  operations；也不得在 CLI 失败时静默回退到旧运输。
+- External MCP 继续以独立的精确 per-Run 投影合同验收；不能用于承载或模拟 Rovai built-in
+  operations，也不影响成员调用全部 built-in operations 的资格。
 - 已准入 Runtime 可以担任 Lead；兼容性差异不进入角色系统。
-- 不能注入 Rovai MCP 的 Runtime 暂不考虑接入。
 
 ## 官方入口
 

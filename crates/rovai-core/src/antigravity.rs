@@ -5,13 +5,12 @@ use std::{
     fmt,
     fs::{File, OpenOptions},
     io::{Read, Write},
-    os::fd::AsRawFd,
     path::{Path, PathBuf},
     process::Stdio,
     sync::Arc,
 };
 
-use crate::attested_team::{AttestedRunRegistration, AttestedTeamRegistry};
+use crate::builtin_tool_runtime::BuiltinToolProcessConfig;
 use anyhow::{Context, Result};
 use rovai_core::{
     agent_profile::FrozenAgentRuntimeConfig,
@@ -40,7 +39,7 @@ pub struct AntigravityRunRequest {
     pub prompt: String,
     pub resumable_native_session_id: Option<String>,
     pub attachment_access_root: Option<PathBuf>,
-    pub attested_team: Option<AttestedRunRegistration>,
+    pub builtin_tools: Option<BuiltinToolProcessConfig>,
 }
 
 #[derive(Debug, Clone)]
@@ -77,7 +76,6 @@ struct AntigravityProcessControl {
 pub struct AntigravityAppRuntimeAdapter {
     active: Mutex<HashMap<(String, i64), Arc<AntigravityProcessControl>>>,
     log_dir: PathBuf,
-    attested_team: Arc<AttestedTeamRegistry>,
 }
 
 impl AntigravityAppRuntimeAdapter {
@@ -110,12 +108,7 @@ impl AntigravityAppRuntimeAdapter {
         Ok(Self {
             active: Mutex::new(HashMap::new()),
             log_dir,
-            attested_team: Arc::new(AttestedTeamRegistry::new()?),
         })
-    }
-
-    pub fn attested_team_registry(&self) -> Arc<AttestedTeamRegistry> {
-        self.attested_team.clone()
     }
 
     pub async fn run(&self, request: AntigravityRunRequest) -> Result<AntigravityRunResult> {
@@ -134,9 +127,6 @@ impl AntigravityAppRuntimeAdapter {
             active.insert(key.clone(), control);
         }
         let result = self.run_process(&request, interrupted).await;
-        self.attested_team
-            .revoke(&request.agent_run_id, request.execution_epoch)
-            .await;
         self.active.lock().await.remove(&key);
         result
     }
@@ -266,39 +256,12 @@ impl AntigravityAppRuntimeAdapter {
             runtime_args.push(OsString::from("--conversation"));
             runtime_args.push(OsString::from(session_id));
         }
-        let (mut command, mut launch_release) = if request.attested_team.is_some() {
-            let (parent_socket, child_socket) = std::os::unix::net::UnixStream::pair()
-                .context("failed to create Antigravity launch barrier")?;
-            let inherited_fd = child_socket.as_raw_fd();
-            let mut command = Command::new(std::env::current_exe()?);
-            command
-                .arg("attested-runtime-launcher")
-                .arg("--launch-fd")
-                .arg(inherited_fd.to_string())
-                .arg("--runtime")
-                .arg(executable)
-                .arg("--")
-                .args(&runtime_args);
-            #[cfg(unix)]
-            unsafe {
-                use std::os::unix::process::CommandExt;
-                command.as_std_mut().pre_exec(move || {
-                    let flags = libc::fcntl(inherited_fd, libc::F_GETFD);
-                    if flags < 0
-                        || libc::fcntl(inherited_fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) < 0
-                    {
-                        return Err(std::io::Error::last_os_error());
-                    }
-                    Ok(())
-                });
-            }
-            (command, Some((parent_socket, child_socket)))
-        } else {
-            let mut command = Command::new(executable);
-            command.args(&runtime_args);
-            (command, None)
-        };
+        let mut command = Command::new(executable);
+        command.args(&runtime_args);
         configure_active_runtime_command(&mut command);
+        if let Some(config) = &request.builtin_tools {
+            config.configure_command(&mut command)?;
+        }
         // The native sandbox must not need access to the user's global Git
         // configuration merely to inspect the isolated execution workspace.
         #[cfg(unix)]
@@ -313,23 +276,6 @@ impl AntigravityAppRuntimeAdapter {
             .kill_on_drop(true)
             .spawn()
             .with_context(|| format!("failed to start {} in print mode", executable.display()))?;
-        if let Some((mut release, child_socket)) = launch_release.take() {
-            drop(child_socket);
-            let pid = child
-                .id()
-                .context("Antigravity launch barrier child PID is unavailable")?;
-            let registration = request
-                .attested_team
-                .clone()
-                .context("Antigravity attested registration disappeared")?;
-            if let Err(error) = self.attested_team.register(registration, pid).await {
-                let _ = child.kill().await;
-                return Err(error).context("failed to register Antigravity Run Claim");
-            }
-            release
-                .write_all(b"1")
-                .context("failed to release Antigravity launch barrier")?;
-        }
         let stdout = child
             .stdout
             .take()
@@ -682,7 +628,7 @@ mod tests {
                 prompt: "只输出这六个字：压缩路径可用".to_string(),
                 resumable_native_session_id: None,
                 attachment_access_root: None,
-                attested_team: None,
+                builtin_tools: None,
             })
             .await
             .unwrap();
@@ -812,7 +758,7 @@ echo "Created conversation 0bdd2166-d420-40c6-94be-70b93eb290c5" > "$log_file"
                 prompt: "produce no final output".to_string(),
                 resumable_native_session_id: None,
                 attachment_access_root: None,
-                attested_team: None,
+                builtin_tools: None,
             })
             .await
             .expect_err("a verified Session without final text must not look successful");
@@ -907,7 +853,7 @@ exec sleep 30
             prompt: "wait".to_string(),
             resumable_native_session_id: None,
             attachment_access_root: None,
-            attested_team: None,
+            builtin_tools: None,
         };
         let running_adapter = adapter.clone();
         let task = tokio::spawn(async move { running_adapter.run(request).await });

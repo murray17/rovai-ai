@@ -25,8 +25,7 @@
     "smoke:acp-runtime": "pnpm core:build:debug && node scripts/smoke-acp-runtime.mjs",
     "smoke:claude-runtime": "pnpm core:build:debug && node scripts/smoke-claude-runtime.mjs",
     "smoke:antigravity-runtime": "pnpm core:build:debug && node scripts/smoke-antigravity-runtime.mjs",
-    "smoke:antigravity-team": "pnpm core:build:debug && ROVAI_TEAM_SOURCE_ADAPTER=antigravity-app ROVAI_TEAM_TARGET_ADAPTER=antigravity-app node scripts/smoke-team-context.mjs",
-    "smoke:antigravity-builtins": "pnpm core:build:debug && ROVAI_TEAM_SOURCE_ADAPTER=antigravity-app ROVAI_TEAM_TARGET_ADAPTER=codex-cli ROVAI_TEAM_BUILTIN_CATALOG=1 node scripts/smoke-team-context.mjs",
+    "smoke:builtin-cli": "pnpm core:build:debug && node scripts/smoke-builtin-cli.mjs",
     "qualification:demo:check": "node scripts/qualification-case.mjs check --case qualification/demo/DEMO-001",
     "qualification:case": "node scripts/qualification-case.mjs",
     "qualification:run": "node scripts/qualification-runner.mjs",
@@ -43,8 +42,6 @@
     "accept:v0.16": "cargo test -p rovai-core db::tests::v27_freezes_active_runs_on_legacy_semantics_and_keeps_terminal_history && cargo test -p rovai-core team_tool::tests::call_member_persists_one_input_before_materializing_one_run && cargo test -p rovai-core action::tests::restart_fails_closed_intercepted_approvals_and_authorization_deliveries && pnpm test && pnpm smoke:runtime-permissions && pnpm smoke:acp-runtime",
     "accept:v0.17": "cargo test -p rovai-core db::tests::v28_adds_execution_evidence_and_structured_camp_presentations && cargo test -p rovai-core execution_evidence::tests::provider_packets_are_reduced_to_public_evidence_fields && cargo test -p rovai-core execution_evidence::tests::evidence_is_durable_blob_backed_agent_inaccessible_and_cancel_fenced && cargo test -p rovai-core runtime::tests::camp_turn_cancellation_is_persisted_and_finalized_from_authoritative_state && cargo test -p rovai-core team_tool::tests::recipient_completion_without_another_call_never_contacts_the_source && cargo test -p rovai-core --bin rovai-core tests::acp_tool_events_expose_digests_not_raw_payloads && pnpm typecheck && pnpm test",
     "smoke:multi-agent": "pnpm core:build:debug && node scripts/smoke-multi-agent.mjs",
-    "smoke:team-context": "pnpm core:build:debug && node scripts/smoke-team-context.mjs",
-    "smoke:team-tasks": "pnpm core:build:debug && node scripts/smoke-team-task-tools.mjs",
     "smoke:attachments": "pnpm core:build:debug && node scripts/smoke-camp-attachments.mjs",
     "smoke:skills": "pnpm core:build:debug && node scripts/smoke-skills.mjs",
     "smoke:mcp": "node scripts/smoke-mcp.mjs",
@@ -102,6 +99,10 @@
       {
         "from": "resources/bin/rovai-core",
         "to": "bin/rovai-core"
+      },
+      {
+        "from": "resources/bin/rovai",
+        "to": "bin/rovai"
       }
     ],
     "afterPack": "scripts/after-pack.cjs",

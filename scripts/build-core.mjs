@@ -16,16 +16,16 @@ const result = spawnSync('cargo', args, {
 
 if (result.status !== 0) process.exit(result.status ?? 1)
 
-const source = resolve(root, 'target', profile, 'rovai-core')
 const destinationDir = resolve(root, 'resources', 'bin')
-const destination = resolve(destinationDir, 'rovai-core')
-
-if (!existsSync(source)) {
-  throw new Error(`Rust Core binary not found at ${source}`)
-}
-
 mkdirSync(destinationDir, { recursive: true })
-copyFileSync(source, destination)
-chmodSync(destination, 0o755)
-console.log(`Copied ${profile} Rust Core to ${destination}`)
 
+for (const binary of ['rovai-core', 'rovai']) {
+  const source = resolve(root, 'target', profile, binary)
+  const destination = resolve(destinationDir, binary)
+  if (!existsSync(source)) {
+    throw new Error(`Rust binary not found at ${source}`)
+  }
+  copyFileSync(source, destination)
+  chmodSync(destination, 0o755)
+  console.log(`Copied ${profile} Rust binary to ${destination}`)
+}

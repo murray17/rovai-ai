@@ -19,8 +19,8 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-`pnpm dev` 会构建 Debug 版 `rovai-core`、复制到 `resources/bin/rovai-core`，然后启动
-Electron Vite 开发环境。
+`pnpm dev` 会构建 Debug 版 `rovai-core` 与 bundled `rovai` Agent CLI、复制到
+`resources/bin/`，然后启动 Electron Vite 开发环境。
 
 只重新构建 Debug Core：
 
@@ -89,7 +89,7 @@ pnpm build:desktop
 | --- | --- |
 | `node_modules/` | pnpm 安装依赖 |
 | `target/` | Rust Debug/Release 构建结果 |
-| `resources/bin/` | 复制后供 Electron 使用的 Rust Core |
+| `resources/bin/` | 复制后供 Electron 使用的 Rust Core 与 Agent CLI |
 | `out/` | Electron Vite 构建结果 |
 | `dist/` | macOS App 和 DMG |
 

@@ -1,11 +1,11 @@
 mod acp;
 mod antigravity;
-mod attested_team;
+mod builtin_tool_runtime;
 mod claude;
 mod codex;
 mod health;
 mod runtime_fleet;
-mod team_runtime;
+mod runtime_mcp;
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -19,10 +19,9 @@ use antigravity::{
     AntigravityAppRuntimeAdapter, AntigravityDeliveredFailure, AntigravityRunRequest,
 };
 use anyhow::{Context, Result};
-use attested_team::{
-    AttestedRunRegistration, AttestedTeamError, AttestedTeamRegistry, AttestedTeamRequest,
-    AttestedTeamResponse, bind_attested_listener, run_attested_runtime_launcher,
-    run_attested_team_bridge,
+use builtin_tool_runtime::{
+    BuiltinToolLeaseRegistry, BuiltinToolProcessConfig, builtin_tool_socket_path,
+    bundled_cli_executable, request_digest,
 };
 use claude::{ClaudeCodeCliRuntimeAdapter, ClaudeCodeRunRequest};
 use codex::{
@@ -41,16 +40,22 @@ use rovai_core::{
         AdapterInstallationView, AdapterKind, AgentProfileService, ClearAgentProfileRuntimeCommand,
         CreateAdapterInstallationCommand, CreateAgentProfileCommand, ManagedProbeFailure,
         RecordAdapterCapabilitySnapshotCommand, RemoveMemberCommand, ReorderAgentProfilesCommand,
-        RuntimeReadinessStatus, SetAgentProfileAvatarCommand, SetAgentProfileMemoryWriteCommand,
-        SetAgentProfileRuntimeCommand, SetMemberPresenceCommand, UpdateAdapterInstallationCommand,
-        UpdateAgentProfileCommand, VerifiedManagedInstallation,
+        RuntimeReadinessStatus, SetAgentProfileAvatarCommand, SetAgentProfileRuntimeCommand,
+        SetMemberPresenceCommand, UpdateAdapterInstallationCommand, UpdateAgentProfileCommand,
+        VerifiedManagedInstallation,
     },
     agent_runtime_adapter::{
         AcpProbeObservation, AgentRuntimeAdapterRegistry, AntigravityProbeObservation,
         ClaudeCodeProbeObservation, CodexProbeObservation, ExecutableIntegrityStatus,
         executable_fingerprint as fingerprint_executable, verify_executable_integrity,
     },
-    antigravity_team_config::AntigravityTeamConfigManager,
+    builtin_tool_transport::{
+        BUILTIN_TOOL_CONTRACT_VERSION, BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
+        BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES, BuiltinToolError, BuiltinToolInvocationEnvelope,
+        BuiltinToolIpcRequest, BuiltinToolIpcRequestBody, BuiltinToolIpcResponse,
+        builtin_tool_catalog_digest, builtin_tool_description, builtin_tool_list,
+        recovery_for_error_code,
+    },
     camp_attachment::CampAttachmentStore,
     camp_content::StructuredCampMessageContent,
     camp_history::{
@@ -91,8 +96,7 @@ use rovai_core::{
         AcceptHearthMemoryProposalCommand, CreateMemoryCommand, ForgetMemoryCommand, MemoryService,
         ReactivateMemoryCommand, RejectHearthMemoryProposalCommand,
         RejectHearthMemoryProposalsCommand, RetireMemoryCommand, ReviseMemoryCommand,
-        ScheduleMemoryReviewCommand, SetCampMemberMemoryWriteCommand, SetMemorySettingsCommand,
-        SupersedeMemoriesCommand,
+        ScheduleMemoryReviewCommand, SupersedeMemoriesCommand,
     },
     memory_retrieval::{
         MEMORY_READ_TOOL_NAME, MEMORY_SEARCH_TOOL_NAME, MemoryReadInput, MemoryRetrievalInvocation,
@@ -131,23 +135,16 @@ use rovai_core::{
         PreparedSkillExposure, ReconcileSkillProjectionsCommand, SkillProjectionReconciler,
     },
     team_tool::{
-        TEAM_CALL_MEMBER_TOOL_NAME, TEAM_CREATE_TASK_TOOL_NAME, TEAM_LIST_TASKS_TOOL_NAME,
-        TEAM_UPDATE_TASK_TOOL_NAME, TeamCallMemberInput, TeamCreateTaskInput, TeamListTasksInput,
-        TeamTaskToolInvocation, TeamToolBindingCredential, TeamToolInvocation,
+        BuiltinToolBindingCredential, TEAM_CALL_MEMBER_TOOL_NAME, TEAM_CREATE_TASK_TOOL_NAME,
+        TEAM_LIST_TASKS_TOOL_NAME, TEAM_UPDATE_TASK_TOOL_NAME, TeamCallMemberInput,
+        TeamCreateTaskInput, TeamListTasksInput, TeamTaskToolInvocation, TeamToolInvocation,
         TeamToolInvocationError, TeamToolService, TeamUpdateTaskInput,
     },
-    team_tool_catalog::{
-        ATTESTED_TEAM_PROTOCOL_VERSION, built_in_team_catalog_digest,
-        canonical_team_tool_definitions, identity_by_antigravity_alias, identity_by_canonical,
-        kiro_team_tool_definitions, validate_builtin_team_tool_input,
-    },
+    team_tool_catalog::validate_builtin_tool_input,
 };
 use runtime_fleet::{AgentRuntimeFleetConfig, AgentRuntimeFleetManager};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use team_runtime::{
-    TeamToolProcessConfig, team_tool_completion_audit_key, team_tool_completion_receipt,
-};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter},
     net::{UnixListener, UnixStream},
@@ -196,8 +193,6 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "runtime.discovery.rescan"
             | "runtime.product.ensure"
             | "runtime.product.check"
-            | "runtime.antigravityTeam.status"
-            | "runtime.antigravityTeam.grantPermission"
             | "camp.messages.send"
             | "camp.attachments.prepareFromPath"
             | "campTurns.cancel"
@@ -252,14 +247,24 @@ struct TeamToolIpcResponse {
 struct TeamToolIpcError {
     code: String,
     message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    details: Option<Value>,
 }
 
-struct TeamMcpBridgeConfig {
-    core_socket: PathBuf,
-    native_binding_id: String,
-    binding_credential: String,
-    kiro_bedrock_schema: bool,
+#[derive(Debug)]
+struct BuiltinOperationError {
+    code: String,
+    message: String,
+    details: Option<Value>,
 }
+
+impl std::fmt::Display for BuiltinOperationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}: {}", self.code, self.message)
+    }
+}
+
+impl std::error::Error for BuiltinOperationError {}
 
 #[derive(Debug, Deserialize)]
 struct WorkspaceInspectParams {
@@ -600,9 +605,9 @@ struct Core {
     codebuddy_cli: AcpCliRuntimeAdapter,
     qwen_code: AcpCliRuntimeAdapter,
     runtime_fleet: Arc<AgentRuntimeFleetManager>,
+    builtin_tool_leases: Arc<BuiltinToolLeaseRegistry>,
     claude_code_cli: ClaudeCodeCliRuntimeAdapter,
     antigravity_app: AntigravityAppRuntimeAdapter,
-    antigravity_team_config: AntigravityTeamConfigManager,
     data_dir: PathBuf,
 }
 
@@ -1545,7 +1550,7 @@ impl Core {
                         resumable_native_session_id: None,
                         new_native_session_id: None,
                         session_bootstrap: None,
-                        team_tool: None,
+                        builtin_tools: None,
                         external_mcp_servers: BTreeMap::new(),
                         attachment_access_root: None,
                         persist_session: false,
@@ -1568,7 +1573,7 @@ impl Core {
                         prompt: work.prompt.clone(),
                         resumable_native_session_id: None,
                         attachment_access_root: None,
-                        attested_team: None,
+                        builtin_tools: None,
                     })
                     .await?
                     .final_output
@@ -1651,21 +1656,158 @@ impl Core {
         }
     }
 
-    async fn handle_team_tool_ipc(&self, request: TeamToolIpcRequest) -> TeamToolIpcResponse {
-        self.handle_team_tool_authorized(request, None).await
-    }
-
-    async fn handle_attested_team_tool_ipc(
+    async fn handle_builtin_tool_ipc(
         &self,
-        request: TeamToolIpcRequest,
-        agent_run_id: &str,
-        execution_epoch: i64,
-    ) -> TeamToolIpcResponse {
-        self.handle_team_tool_authorized(request, Some((agent_run_id.to_string(), execution_epoch)))
-            .await
+        request: BuiltinToolIpcRequest,
+    ) -> BuiltinToolIpcResponse {
+        let BuiltinToolIpcRequest {
+            ipc_protocol_version,
+            auth,
+            body,
+        } = request;
+        if ipc_protocol_version != BUILTIN_TOOL_IPC_PROTOCOL_VERSION {
+            return BuiltinToolIpcResponse::ipc_error(
+                "builtin_tool.unsupported_ipc_version",
+                "Built-in Tool IPC protocol version is unsupported",
+            );
+        }
+        let _invocation_guard = self.builtin_tool_leases.invocation_guard().await;
+        let authorized = match self.builtin_tool_leases.authenticate(&auth).await {
+            Ok(authorized) => authorized,
+            Err(error) => return BuiltinToolIpcResponse::ipc_error(error.code, error.message),
+        };
+        match body {
+            BuiltinToolIpcRequestBody::List => match builtin_tool_list() {
+                Ok(catalog) => BuiltinToolIpcResponse::Catalog { catalog },
+                Err(error) => {
+                    eprintln!("failed to materialize Built-in Tool catalog: {error:#}");
+                    BuiltinToolIpcResponse::ipc_error(
+                        "builtin_tool.catalog_unavailable",
+                        "Built-in Tool catalog is unavailable",
+                    )
+                }
+            },
+            BuiltinToolIpcRequestBody::Describe { operation } => {
+                match builtin_tool_description(&operation) {
+                    Ok(description) => BuiltinToolIpcResponse::Description { description },
+                    Err(_) => BuiltinToolIpcResponse::ipc_error(
+                        "builtin_tool.unknown_operation",
+                        "Requested Built-in Tool operation is unavailable",
+                    ),
+                }
+            }
+            BuiltinToolIpcRequestBody::Invoke {
+                request_id,
+                operation,
+                input,
+            } => {
+                if uuid::Uuid::parse_str(&request_id).is_err() {
+                    return BuiltinToolIpcResponse::ipc_error(
+                        "builtin_tool.invalid_request_id",
+                        "requestId must be a UUID",
+                    );
+                }
+                if builtin_tool_description(&operation).is_err() {
+                    return BuiltinToolIpcResponse::ipc_error(
+                        "builtin_tool.unknown_operation",
+                        "Requested Built-in Tool operation is unavailable",
+                    );
+                }
+                if validate_builtin_tool_input(&operation, &input).is_err() {
+                    return builtin_tool_rejection(
+                        &operation,
+                        &request_id,
+                        "builtin_tool.invalid_input",
+                        "Operation input does not match the published inputSchema",
+                    );
+                }
+                let digest = match request_digest(&operation, &input) {
+                    Ok(digest) => digest,
+                    Err(error) => {
+                        eprintln!("failed to digest Built-in Tool request: {error:#}");
+                        return BuiltinToolIpcResponse::ipc_error(
+                            "builtin_tool.invalid_input",
+                            "Operation input could not be normalized",
+                        );
+                    }
+                };
+                match self
+                    .builtin_tool_leases
+                    .replay(&auth, &request_id, &digest)
+                    .await
+                {
+                    Ok(Some(envelope)) => {
+                        return BuiltinToolIpcResponse::Envelope { envelope };
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        return builtin_tool_rejection(
+                            &operation,
+                            &request_id,
+                            error.code,
+                            error.message,
+                        );
+                    }
+                }
+                let domain_response = self
+                    .handle_builtin_operation(
+                        TeamToolIpcRequest {
+                            native_binding_id: authorized.native_binding.native_binding_id.clone(),
+                            binding_credential: authorized
+                                .native_binding
+                                .binding_credential
+                                .clone(),
+                            runtime_tool_call_id: format!("builtin-cli:{request_id}"),
+                            tool_name: operation.clone(),
+                            input,
+                        },
+                        Some((authorized.agent_run_id, authorized.execution_epoch)),
+                    )
+                    .await;
+                let envelope = match (domain_response.result, domain_response.error) {
+                    (Some(result), None) => {
+                        BuiltinToolInvocationEnvelope::success(&operation, &request_id, result)
+                    }
+                    (None, Some(error)) => {
+                        let code = canonical_builtin_error_code(&error.code);
+                        BuiltinToolInvocationEnvelope::rejected(
+                            &operation,
+                            &request_id,
+                            BuiltinToolError {
+                                recovery: recovery_for_error_code(&code),
+                                code,
+                                message: error.message,
+                                details: error.details,
+                            },
+                        )
+                    }
+                    _ => Err(anyhow::anyhow!(
+                        "domain operation returned an invalid internal result"
+                    )),
+                };
+                let envelope = match envelope {
+                    Ok(envelope) => envelope,
+                    Err(error) => {
+                        eprintln!("failed to form Built-in Tool envelope: {error:#}");
+                        return BuiltinToolIpcResponse::ipc_error(
+                            "builtin_tool.internal_error",
+                            "Rovai Core could not form the operation result",
+                        );
+                    }
+                };
+                if let Err(error) = self
+                    .builtin_tool_leases
+                    .record(&auth, &request_id, &digest, &envelope)
+                    .await
+                {
+                    return BuiltinToolIpcResponse::ipc_error(error.code, error.message);
+                }
+                BuiltinToolIpcResponse::Envelope { envelope }
+            }
+        }
     }
 
-    async fn handle_team_tool_authorized(
+    async fn handle_builtin_operation(
         &self,
         mut request: TeamToolIpcRequest,
         attested_run: Option<(String, i64)>,
@@ -1713,9 +1855,8 @@ impl Core {
                 )?
             };
             evidence_run = Some(authenticated_run.clone());
-            // Some credentialed Runtimes restart their stdio MCP process for a later AgentRun
-            // and reset JSON-RPC request IDs. Scope the provider ID to the already-authenticated
-            // Run so retries within one Run still replay while later Runs cannot collide.
+            // Scope the request identity to the authenticated Run so retries in one
+            // Run replay while a later Run cannot collide with the same request ID.
             request.runtime_tool_call_id = scoped_runtime_tool_call_id(
                 &authenticated_run.agent_run_id,
                 &request.runtime_tool_call_id,
@@ -1929,7 +2070,7 @@ impl Core {
                         .map_err(|_| invalid_input_error("camp.read input is invalid"))?;
                     CampHistoryService.read(&mut database, &authenticated_run, &input)
                 }
-                _ => Err(anyhow::anyhow!("private Team Tool name is unsupported")),
+                _ => Err(anyhow::anyhow!("private built-in operation is unsupported")),
             }?;
             Ok(operation_result)
         }
@@ -1937,13 +2078,8 @@ impl Core {
         if let (Some(authenticated_run), Some(tool_call_id)) =
             (evidence_run.as_ref(), evidence_tool_call_digest)
         {
-            let classified_error = result.as_ref().err().map(classify_team_tool_error);
-            let error_code = classified_error.as_ref().map(|(code, _)| code);
-            let authorization_decision = match error_code.map(String::as_str) {
-                None => "allowed",
-                Some("team_tool.capability_denied" | "memory.capability_denied") => "denied",
-                Some(_) => "indeterminate",
-            };
+            let classified_error = result.as_ref().err().map(classify_builtin_operation_error);
+            let error_code = classified_error.as_ref().map(|(code, _, _)| code);
             let raw_output_digest = result
                 .as_ref()
                 .ok()
@@ -1951,11 +2087,11 @@ impl Core {
             let evidence = json!({
                 "toolCallId": tool_call_id,
                 "status": if result.is_ok() { "completed" } else { "failed" },
-                "kind": "mcp_tool_call",
+                "kind": "builtin_tool_invocation",
                 "title": evidence_tool_name,
                 "sourceAuthority": "core",
                 "canonicalTool": evidence_tool_name,
-                "authorizationDecision": authorization_decision,
+                "authorizationDecision": "allowed",
                 "rawInputDigest": evidence_input_digest,
                 "rawOutputDigest": raw_output_digest,
                 "errorCode": error_code,
@@ -1964,7 +2100,7 @@ impl Core {
             });
             let evidence_result = {
                 let mut database = self.database.lock().await;
-                ExecutionEvidenceService.record_team_tool_result(
+                ExecutionEvidenceService.record_builtin_tool_result(
                     &mut database,
                     &ManagedBlobStore::new(&self.data_dir),
                     &authenticated_run.agent_run_id,
@@ -1973,7 +2109,7 @@ impl Core {
                 )
             };
             if let Err(error) = evidence_result {
-                eprintln!("failed to record Team Tool result evidence: {error:#}");
+                eprintln!("failed to record Built-in Tool result evidence: {error:#}");
             }
         }
         if result.is_ok() && evidence_tool_name == TEAM_CALL_MEMBER_TOOL_NAME {
@@ -1985,13 +2121,17 @@ impl Core {
                 error: None,
             },
             Err(error) => {
-                let (code, message) = classify_team_tool_error(&error);
+                let (code, message, details) = classify_builtin_operation_error(&error);
                 if code == "team_tool.internal_error" {
-                    eprintln!("Team Tool invocation failed internally: {error:#}");
+                    eprintln!("Built-in Tool invocation failed internally: {error:#}");
                 }
                 TeamToolIpcResponse {
                     result: None,
-                    error: Some(TeamToolIpcError { code, message }),
+                    error: Some(TeamToolIpcError {
+                        code,
+                        message,
+                        details,
+                    }),
                 }
             }
         }
@@ -2005,27 +2145,6 @@ impl Core {
                 "version": env!("CARGO_PKG_VERSION"),
                 "dataDir": self.data_dir,
             })),
-            "runtime.antigravityTeam.status" => Ok(serde_json::to_value(
-                self.antigravity_team_config.inspect(None)?,
-            )?),
-            "runtime.antigravityTeam.grantPermission" => {
-                let host_executable = std::env::current_exe()
-                    .context("failed to locate the Rovai-ai Agent Host executable")?;
-                let host_fingerprint = fingerprint_executable(&host_executable)?;
-                let plugin_status = self
-                    .antigravity_team_config
-                    .reconcile_plugin(&host_executable, &host_fingerprint)?;
-                if plugin_status.managed_config
-                    != rovai_core::antigravity_team_config::AntigravityManagedConfigState::Ready
-                {
-                    return Ok(serde_json::to_value(plugin_status)?);
-                }
-                let status = self.antigravity_team_config.grant_exact_permission()?;
-                let _ = self
-                    .schedule_runtime_check(AdapterKind::AntigravityApp)
-                    .await;
-                Ok(serde_json::to_value(status)?)
-            }
             "agents.list" => {
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(
@@ -2073,16 +2192,6 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 let execution = AgentProfileService::default().set_avatar(
-                    &mut database,
-                    &user_command_envelope(params.command_id, params.command),
-                )?;
-                Ok(serde_json::to_value(execution.result)?)
-            }
-            "agents.memoryWrite.set" => {
-                let params: UserCommandParams<SetAgentProfileMemoryWriteCommand> =
-                    serde_json::from_value(request.params.clone())?;
-                let mut database = self.database.lock().await;
-                let execution = AgentProfileService::default().set_memory_write(
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
@@ -2195,22 +2304,6 @@ impl Core {
                         .context("Memory does not exist")?,
                 )?)
             }
-            "memory.settings.get" => {
-                let database = self.database.lock().await;
-                Ok(serde_json::to_value(
-                    MemoryService::default().get_settings(&database)?,
-                )?)
-            }
-            "memory.settings.set" => {
-                let params: UserCommandParams<SetMemorySettingsCommand> =
-                    serde_json::from_value(request.params.clone())?;
-                let mut database = self.database.lock().await;
-                let execution = MemoryService::default().set_settings(
-                    &mut database,
-                    &user_command_envelope(params.command_id, params.command),
-                )?;
-                Ok(serde_json::to_value(execution.result)?)
-            }
             "memory.create" => {
                 let params: UserCommandParams<CreateMemoryCommand> =
                     serde_json::from_value(request.params.clone())?;
@@ -2320,16 +2413,6 @@ impl Core {
             "memory.export" => {
                 let database = self.database.lock().await;
                 MemoryService::default().export(&database)
-            }
-            "campMembers.memoryWrite.set" => {
-                let params: UserCommandParams<SetCampMemberMemoryWriteCommand> =
-                    serde_json::from_value(request.params.clone())?;
-                let mut database = self.database.lock().await;
-                let execution = MemoryService::default().set_member_memory_write(
-                    &mut database,
-                    &user_command_envelope(params.command_id, params.command),
-                )?;
-                Ok(serde_json::to_value(execution.result)?)
             }
             "runtime.installations.list" => {
                 let database = self.database.lock().await;
@@ -3198,7 +3281,9 @@ impl Core {
                         "version": env!("CARGO_PKG_VERSION"),
                         "dataDir": self.data_dir,
                         "readModelSchema": READ_MODEL_SCHEMA_VERSION,
-                        "attestedTeamProtocol": ATTESTED_TEAM_PROTOCOL_VERSION,
+                        "builtinToolContractVersion": BUILTIN_TOOL_CONTRACT_VERSION,
+                        "builtinToolIpcProtocolVersion": BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
+                        "builtinToolCatalogDigest": builtin_tool_catalog_digest()?,
                     },
                     "database": {
                         "ok": true,
@@ -3407,11 +3492,7 @@ impl Core {
             }
             rovai_core::agent_profile::AdapterKind::AntigravityApp => {
                 let probe = health::antigravity_capability_probe_at(executable_path).await;
-                let team_gateway_ready = self
-                    .antigravity_team_config
-                    .inspect(None)
-                    .map(|status| status.attachment_ready())
-                    .unwrap_or(false);
+                let builtin_cli_ready = bundled_cli_executable().is_ok_and(|path| path.is_file());
                 registry.antigravity_capability_snapshot(AntigravityProbeObservation {
                     reported_version: probe.result.reported_version,
                     executable_fingerprint: probe.result.executable_fingerprint,
@@ -3420,7 +3501,7 @@ impl Core {
                     probe_status: probe_status_name(probe.result.status).to_string(),
                     capabilities: probe.result.capabilities,
                     models: probe.models,
-                    team_gateway_ready,
+                    builtin_cli_ready,
                     attempted_at,
                     last_error: probe.result.detail,
                 })?
@@ -4541,12 +4622,12 @@ impl Core {
         Ok(())
     }
 
-    async fn prepare_team_tool_runtime(
+    async fn prepare_builtin_tool_binding(
         &self,
         execution: &AgentRunExecution,
         force_new_binding: bool,
-    ) -> Result<(TeamToolBindingCredential, TeamToolProcessConfig)> {
-        let credential = {
+    ) -> Result<BuiltinToolBindingCredential> {
+        Ok({
             let mut database = self.database.lock().await;
             TeamToolService::default().prepare_binding_credential(
                 &mut database,
@@ -4554,20 +4635,38 @@ impl Core {
                 execution.execution_epoch,
                 force_new_binding,
             )?
-        };
-        let process_config = TeamToolProcessConfig::new(
-            std::env::current_exe()
-                .context("failed to locate the Rovai-ai Agent Host executable")?,
-            team_tool_socket_path(&self.data_dir),
-            &credential,
-        )?;
-        Ok((credential, process_config))
+        })
+    }
+
+    fn prepare_builtin_tool_process_config(&self) -> Result<BuiltinToolProcessConfig> {
+        BuiltinToolProcessConfig::create(
+            &bundled_cli_executable()?,
+            &builtin_tool_socket_path(),
+            &self.data_dir.join("runtime"),
+        )
+    }
+
+    async fn bind_builtin_tool_runtime(
+        &self,
+        config: &BuiltinToolProcessConfig,
+        execution: &AgentRunExecution,
+        credential: &BuiltinToolBindingCredential,
+    ) -> Result<()> {
+        self.builtin_tool_leases
+            .bind(
+                config,
+                &execution.agent_run_id,
+                execution.execution_epoch,
+                credential,
+            )
+            .await?;
+        Ok(())
     }
 
     async fn bind_prepared_native_session(
         &self,
         execution: &AgentRunExecution,
-        credential: &TeamToolBindingCredential,
+        credential: &BuiltinToolBindingCredential,
         native_session_id: &str,
     ) -> Result<()> {
         let binding = {
@@ -4769,18 +4868,18 @@ impl Core {
                 execution_root.display()
             );
         }
-        let (initial_binding, initial_team_tool) = self
-            .prepare_team_tool_runtime(
+        let initial_binding = self
+            .prepare_builtin_tool_binding(
                 execution,
                 resume_disposition == NativeSessionResumeDisposition::New
                     && execution.native_session_id.is_some(),
             )
             .await?;
+        let builtin_tools = self.prepare_builtin_tool_process_config()?;
         let mut runtime_compatibility_digest = codex::runtime_compatibility_digest(
             &execution.runtime,
             &execution_root,
             &mcp_projection.servers,
-            &initial_team_tool,
             &attachment_access_root,
         )?;
         self.persist_runtime_compatibility_digest(execution, &runtime_compatibility_digest)
@@ -4796,6 +4895,7 @@ impl Core {
                 frozen_runtime: &execution.runtime,
                 external_mcp_servers: &mcp_projection.servers,
                 runtime_compatibility_digest: &runtime_compatibility_digest,
+                builtin_tools: &builtin_tools,
             })
             .await;
         if runtime_result
@@ -4816,7 +4916,6 @@ impl Core {
                 &execution.runtime,
                 &execution_root,
                 &mcp_projection.servers,
-                &initial_team_tool,
                 &attachment_access_root,
             )?;
             self.persist_runtime_compatibility_digest(execution, &runtime_compatibility_digest)
@@ -4832,6 +4931,7 @@ impl Core {
                     frozen_runtime: &execution.runtime,
                     external_mcp_servers: &mcp_projection.servers,
                     runtime_compatibility_digest: &runtime_compatibility_digest,
+                    builtin_tools: &builtin_tools,
                 })
                 .await;
         }
@@ -4872,23 +4972,27 @@ impl Core {
         };
         let home_requires_session_replacement =
             runtime.home_created_or_rebuilt() && initial_binding.native_session_id.is_some();
-        let (mut binding_credential, active_team_tool, resumable_session_id) =
-            if home_requires_session_replacement {
-                if resume_disposition == NativeSessionResumeDisposition::Controlled {
-                    let mut database = self.database.lock().await;
-                    ExecutionRuntimeService::default().record_native_session_resume_failure(
-                        &mut database,
-                        execution,
-                        NativeSessionResumeFailure::Incompatible,
-                    )?;
-                }
-                let (replacement_binding, replacement_team_tool) =
-                    self.prepare_team_tool_runtime(execution, true).await?;
-                (replacement_binding, replacement_team_tool, None)
-            } else {
-                let resumable_session_id = initial_binding.native_session_id.clone();
-                (initial_binding, initial_team_tool, resumable_session_id)
-            };
+        let (mut binding_credential, resumable_session_id) = if home_requires_session_replacement {
+            if resume_disposition == NativeSessionResumeDisposition::Controlled {
+                let mut database = self.database.lock().await;
+                ExecutionRuntimeService::default().record_native_session_resume_failure(
+                    &mut database,
+                    execution,
+                    NativeSessionResumeFailure::Incompatible,
+                )?;
+            }
+            let replacement_binding = self.prepare_builtin_tool_binding(execution, true).await?;
+            (replacement_binding, None)
+        } else {
+            let resumable_session_id = initial_binding.native_session_id.clone();
+            (initial_binding, resumable_session_id)
+        };
+        let active_builtin_tools = runtime
+            .builtin_tool_process_config()
+            .context("Codex Runtime has no Built-in Tool process context")?
+            .clone();
+        self.bind_builtin_tool_runtime(&active_builtin_tools, execution, &binding_credential)
+            .await?;
         let mut thread = runtime
             .start_or_resume_agent_thread(
                 &execution_root,
@@ -4898,7 +5002,6 @@ impl Core {
                     sandbox_mode,
                     approval_policy,
                     model: Some(model),
-                    team_tool: Some(&active_team_tool),
                     attachment_access_root: &attachment_access_root,
                 },
             )
@@ -4922,7 +5025,6 @@ impl Core {
                 &execution.runtime,
                 &execution_root,
                 &mcp_projection.servers,
-                &active_team_tool,
                 &attachment_access_root,
             )?;
             self.persist_runtime_compatibility_digest(execution, &runtime_compatibility_digest)
@@ -4938,7 +5040,14 @@ impl Core {
                     frozen_runtime: &execution.runtime,
                     external_mcp_servers: &mcp_projection.servers,
                     runtime_compatibility_digest: &runtime_compatibility_digest,
+                    builtin_tools: &builtin_tools,
                 })
+                .await?;
+            let active_builtin_tools = runtime
+                .builtin_tool_process_config()
+                .context("Codex Runtime has no Built-in Tool process context")?
+                .clone();
+            self.bind_builtin_tool_runtime(&active_builtin_tools, execution, &binding_credential)
                 .await?;
             thread = runtime
                 .start_or_resume_agent_thread(
@@ -4949,7 +5058,6 @@ impl Core {
                         sandbox_mode,
                         approval_policy,
                         model: Some(model),
-                        team_tool: Some(&active_team_tool),
                         attachment_access_root: &attachment_access_root,
                     },
                 )
@@ -4966,8 +5074,18 @@ impl Core {
                         classify_native_resume_failure(&error),
                     )?;
                 }
-                let (replacement_binding, replacement_team_tool) =
-                    self.prepare_team_tool_runtime(execution, true).await?;
+                let replacement_binding =
+                    self.prepare_builtin_tool_binding(execution, true).await?;
+                let active_builtin_tools = runtime
+                    .builtin_tool_process_config()
+                    .context("Codex Runtime has no Built-in Tool process context")?
+                    .clone();
+                self.bind_builtin_tool_runtime(
+                    &active_builtin_tools,
+                    execution,
+                    &replacement_binding,
+                )
+                .await?;
                 session_bootstrap = {
                     let mut database = self.database.lock().await;
                     ContextService
@@ -4989,7 +5107,6 @@ impl Core {
                             sandbox_mode,
                             approval_policy,
                             model: Some(model),
-                            team_tool: Some(&replacement_team_tool),
                             attachment_access_root: &attachment_access_root,
                         },
                     )
@@ -5112,8 +5229,8 @@ impl Core {
         }
         // The credential identifies the long-lived Native Binding, not this
         // AgentRun. Core resolves the current active Run at every tool call.
-        let (binding_credential, team_tool) = self
-            .prepare_team_tool_runtime(
+        let binding_credential = self
+            .prepare_builtin_tool_binding(
                 execution,
                 resume_disposition == NativeSessionResumeDisposition::New
                     && execution.native_session_id.is_some(),
@@ -5196,6 +5313,9 @@ impl Core {
             }),
         );
         let prompt = prepared_context.rendered_payload.clone();
+        let builtin_tools = self.prepare_builtin_tool_process_config()?;
+        self.bind_builtin_tool_runtime(&builtin_tools, execution, &binding_credential)
+            .await?;
         let mut result = self
             .claude_code_cli
             .run(ClaudeCodeRunRequest {
@@ -5208,7 +5328,7 @@ impl Core {
                 resumable_native_session_id: (!is_new_session).then_some(native_session_id.clone()),
                 new_native_session_id: is_new_session.then_some(native_session_id.clone()),
                 session_bootstrap: Some(session_bootstrap.clone()),
-                team_tool: Some(team_tool),
+                builtin_tools: Some(builtin_tools.clone()),
                 external_mcp_servers: mcp_projection.servers.clone(),
                 attachment_access_root: Some(attachment_access_root.to_path_buf()),
                 persist_session: true,
@@ -5226,7 +5346,6 @@ impl Core {
                     &mcp_projection,
                 )?;
             }
-            let (_, retry_team_tool) = self.prepare_team_tool_runtime(execution, false).await?;
             result = self
                 .claude_code_cli
                 .run(ClaudeCodeRunRequest {
@@ -5240,13 +5359,20 @@ impl Core {
                         .then_some(native_session_id.clone()),
                     new_native_session_id: is_new_session.then_some(native_session_id.clone()),
                     session_bootstrap: Some(session_bootstrap),
-                    team_tool: Some(retry_team_tool),
+                    builtin_tools: Some(builtin_tools.clone()),
                     external_mcp_servers: mcp_projection.servers.clone(),
                     attachment_access_root: Some(attachment_access_root.to_path_buf()),
                     persist_session: true,
                 })
                 .await;
         }
+        self.builtin_tool_leases
+            .unbind(
+                builtin_tools.process_id(),
+                &execution.agent_run_id,
+                execution.execution_epoch,
+            )
+            .await;
         let result = match result {
             Ok(result) => result,
             Err(error) => {
@@ -5400,7 +5526,7 @@ impl Core {
         }
         let binding_credential = {
             let mut database = self.database.lock().await;
-            TeamToolService::default().prepare_native_binding_credential(
+            TeamToolService::default().prepare_binding_credential(
                 &mut database,
                 &execution.agent_run_id,
                 execution.execution_epoch,
@@ -5476,37 +5602,9 @@ impl Core {
                 "nativeTurnId": native_turn_id,
             }),
         );
-        let team_config_status = self
-            .antigravity_team_config
-            .inspect(Some(&execution_root))?;
-        let frozen_team_ready =
-            execution
-                .runtime
-                .capabilities
-                .iter()
-                .any(|capability| capability == "team_gateway.attachment.attested_native_bridge")
-                && execution
-                    .runtime
-                    .capabilities
-                    .iter()
-                    .any(|capability| capability == "built_in_mcp_tool_parity.complete")
-                && execution.runtime.capabilities.iter().any(|capability| {
-                    capability == rovai_core::team_tool::TEAM_CALL_MEMBER_CAPABILITY
-                });
-        let attested_team =
-            (team_config_status.attachment_ready() && frozen_team_ready).then(|| {
-                AttestedRunRegistration {
-                    agent_run_id: execution.agent_run_id.clone(),
-                    execution_epoch: execution.execution_epoch,
-                    workspace: execution_root.clone(),
-                    runtime_executable: PathBuf::from(&execution.runtime.executable_path),
-                    runtime_executable_fingerprint: execution
-                        .runtime
-                        .executable_fingerprint
-                        .clone(),
-                    binding: binding_credential.clone(),
-                }
-            });
+        let builtin_tools = self.prepare_builtin_tool_process_config()?;
+        self.bind_builtin_tool_runtime(&builtin_tools, execution, &binding_credential)
+            .await?;
         let result = self
             .antigravity_app
             .run(AntigravityRunRequest {
@@ -5518,8 +5616,15 @@ impl Core {
                 prompt,
                 resumable_native_session_id: resumable_session_id,
                 attachment_access_root: Some(attachment_access_root.to_path_buf()),
-                attested_team,
+                builtin_tools: Some(builtin_tools.clone()),
             })
+            .await;
+        self.builtin_tool_leases
+            .unbind(
+                builtin_tools.process_id(),
+                &execution.agent_run_id,
+                execution.execution_epoch,
+            )
             .await;
         let result = match result {
             Ok(result) => result,
@@ -5700,18 +5805,18 @@ impl Core {
         let adapter = self
             .acp_adapter(execution.runtime.adapter_kind)
             .context("AgentRun selected an unsupported ACP Adapter")?;
-        let (initial_binding, initial_team_tool) = self
-            .prepare_team_tool_runtime(
+        let initial_binding = self
+            .prepare_builtin_tool_binding(
                 execution,
                 resume_disposition == NativeSessionResumeDisposition::New
                     && execution.native_session_id.is_some(),
             )
             .await?;
+        let builtin_tools = self.prepare_builtin_tool_process_config()?;
         let mut runtime_compatibility_digest = acp::runtime_compatibility_digest(
             &execution.runtime,
             &execution.workspace,
             execution.permission_semantics,
-            Some(&initial_team_tool),
             &mcp_projection.servers,
             &mcp_projection.projection_digest,
             attachment_access_root,
@@ -5727,7 +5832,7 @@ impl Core {
                 &execution.workspace,
                 execution.permission_semantics,
                 &execution.runtime,
-                Some(&initial_team_tool),
+                &builtin_tools,
                 &mcp_projection.servers,
                 &mcp_projection.projection_digest,
                 attachment_access_root,
@@ -5755,7 +5860,6 @@ impl Core {
                 &execution.runtime,
                 &execution.workspace,
                 execution.permission_semantics,
-                Some(&initial_team_tool),
                 &mcp_projection.servers,
                 &mcp_projection.projection_digest,
                 attachment_access_root,
@@ -5771,7 +5875,7 @@ impl Core {
                     &execution.workspace,
                     execution.permission_semantics,
                     &execution.runtime,
-                    Some(&initial_team_tool),
+                    &builtin_tools,
                     &mcp_projection.servers,
                     &mcp_projection.projection_digest,
                     attachment_access_root,
@@ -5780,6 +5884,12 @@ impl Core {
                 .await;
         }
         let mut runtime = runtime_result?;
+        let active_builtin_tools = runtime
+            .builtin_tool_process_config()
+            .context("ACP Runtime has no Built-in Tool process context")?
+            .clone();
+        self.bind_builtin_tool_runtime(&active_builtin_tools, execution, &initial_binding)
+            .await?;
         let resumable_session_id = initial_binding.native_session_id.clone();
         let supports_load = execution
             .runtime
@@ -5813,7 +5923,6 @@ impl Core {
                 supports_load,
                 model,
                 &execution.runtime.model.options,
-                Some(&initial_team_tool),
                 &mcp_projection.servers,
             )
             .await;
@@ -5835,7 +5944,6 @@ impl Core {
                     supports_load,
                     model,
                     &execution.runtime.model.options,
-                    Some(&initial_team_tool),
                     &mcp_projection.servers,
                 )
                 .await;
@@ -5855,13 +5963,12 @@ impl Core {
                 adapter
                     .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
                     .await;
-                let (replacement_binding, replacement_team_tool) =
-                    self.prepare_team_tool_runtime(execution, true).await?;
+                let replacement_binding =
+                    self.prepare_builtin_tool_binding(execution, true).await?;
                 runtime_compatibility_digest = acp::runtime_compatibility_digest(
                     &execution.runtime,
                     &execution.workspace,
                     execution.permission_semantics,
-                    Some(&replacement_team_tool),
                     &mcp_projection.servers,
                     &mcp_projection.projection_digest,
                     attachment_access_root,
@@ -5877,13 +5984,23 @@ impl Core {
                         &execution.workspace,
                         execution.permission_semantics,
                         &execution.runtime,
-                        Some(&replacement_team_tool),
+                        &builtin_tools,
                         &mcp_projection.servers,
                         &mcp_projection.projection_digest,
                         attachment_access_root,
                         &runtime_compatibility_digest,
                     )
                     .await?;
+                let active_builtin_tools = runtime
+                    .builtin_tool_process_config()
+                    .context("ACP Runtime has no Built-in Tool process context")?
+                    .clone();
+                self.bind_builtin_tool_runtime(
+                    &active_builtin_tools,
+                    execution,
+                    &replacement_binding,
+                )
+                .await?;
                 let Some(context) = self
                     .materialize_agent_run_context(
                         execution,
@@ -5907,7 +6024,6 @@ impl Core {
                         supports_load,
                         model,
                         &execution.runtime.model.options,
-                        Some(&replacement_team_tool),
                         &mcp_projection.servers,
                     )
                     .await
@@ -6436,24 +6552,6 @@ fn probe_authentication_status(status: health::AgentRuntimeProbeStatus) -> &'sta
 }
 
 fn main() -> Result<()> {
-    if std::env::args().nth(1).as_deref() == Some("team-mcp-bridge") {
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .context("failed to create Team MCP bridge Tokio Runtime")?;
-        return runtime.block_on(run_team_mcp_bridge(TeamMcpBridgeConfig::from_environment()?));
-    }
-    if std::env::args().nth(1).as_deref() == Some("attested-runtime-launcher") {
-        return run_attested_runtime_launcher();
-    }
-    if std::env::args().nth(1).as_deref() == Some("attested-team-mcp-bridge") {
-        let rendezvous = parse_attested_rendezvous()?;
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .context("failed to create attested Team MCP bridge Tokio Runtime")?;
-        return runtime.block_on(run_attested_team_bridge(rendezvous));
-    }
     // This snapshot is intentionally captured before Tokio exists. Runtime discovery and every
     // child launch receive it explicitly; Rovai never mutates process-global PATH.
     let runtime_search_environment = Arc::new(RuntimeSearchEnvironment::capture_initial());
@@ -6468,8 +6566,6 @@ fn main() -> Result<()> {
 async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> Result<()> {
     let data_dir = parse_data_dir()?;
     let mcp_config_path = parse_mcp_config_path()?;
-    let antigravity_team_private_dir = parse_antigravity_team_private_dir()?;
-    let antigravity_team_gemini_root = parse_antigravity_team_gemini_root()?;
     let mut database = Database::open(&data_dir)?;
     CampAttachmentStore::new(&data_dir).cleanup_expired(&mut database)?;
     let search_summary = runtime_search_environment.summary();
@@ -6525,38 +6621,12 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
     let output_handle = tokio::spawn(write_output(output_rx));
     let (event_shutdown_tx, event_shutdown_rx) = oneshot::channel();
     let antigravity_app = AntigravityAppRuntimeAdapter::new(&data_dir)?;
-    let antigravity_team_registry = antigravity_app.attested_team_registry();
-    let antigravity_team_config = match (antigravity_team_private_dir, antigravity_team_gemini_root)
-    {
-        (Some(runtime_private_root), Some(gemini_root)) => {
-            AntigravityTeamConfigManager::with_runtime_private_and_gemini_roots(
-                &runtime_private_root,
-                &gemini_root,
-            )?
-        }
-        (Some(runtime_private_root), None) => {
-            AntigravityTeamConfigManager::with_runtime_private_root(&runtime_private_root)?
-        }
-        (None, Some(_)) => {
-            anyhow::bail!("--antigravity-team-gemini-root requires --antigravity-team-private-dir")
-        }
-        (None, None) => AntigravityTeamConfigManager::new(&data_dir)?,
-    };
-    let host_executable =
-        std::env::current_exe().context("failed to locate the Rovai-ai Agent Host executable")?;
-    let host_fingerprint = fingerprint_executable(&host_executable)?;
-    let antigravity_team_config_status =
-        antigravity_team_config.reconcile_owned_plugin(&host_executable, &host_fingerprint)?;
-    if !antigravity_team_config_status.attachment_ready() {
-        eprintln!(
-            "Antigravity Team attachment is not ready: {}",
-            serde_json::to_string(&antigravity_team_config_status)?
-        );
-    }
     let claude_code_cli = ClaudeCodeCliRuntimeAdapter::new(&data_dir)?;
-    let runtime_fleet = Arc::new(AgentRuntimeFleetManager::new_with_owner_records(
+    let builtin_tool_leases = Arc::new(BuiltinToolLeaseRegistry::default());
+    let runtime_fleet = Arc::new(AgentRuntimeFleetManager::new_with_builtin_tools(
         AgentRuntimeFleetConfig::default(),
         &data_dir,
+        builtin_tool_leases.clone(),
     ));
     let core = Arc::new(Core {
         database: Mutex::new(database),
@@ -6628,8 +6698,8 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
         )?,
         claude_code_cli,
         antigravity_app,
-        antigravity_team_config,
         runtime_fleet,
+        builtin_tool_leases,
         data_dir,
     });
     let (fleet_sweeper_shutdown_tx, fleet_sweeper_shutdown_rx) = oneshot::channel();
@@ -6638,24 +6708,14 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
             .clone()
             .run_idle_sweeper(fleet_sweeper_shutdown_rx),
     );
-    let (team_tool_shutdown_tx, team_tool_shutdown_rx) = oneshot::channel();
-    let team_tool_socket = team_tool_socket_path(&core.data_dir);
-    let team_tool_listener = bind_team_tool_listener(&team_tool_socket)?;
-    let team_tool_handle = tokio::spawn(serve_team_tool_ipc(
+    let (builtin_tool_shutdown_tx, builtin_tool_shutdown_rx) = oneshot::channel();
+    let builtin_tool_socket = builtin_tool_socket_path();
+    let builtin_tool_listener = bind_builtin_tool_listener(&builtin_tool_socket)?;
+    let builtin_tool_handle = tokio::spawn(serve_builtin_tool_ipc(
         core.clone(),
-        team_tool_listener,
-        team_tool_socket,
-        team_tool_shutdown_rx,
-    ));
-    let (attested_team_shutdown_tx, attested_team_shutdown_rx) = oneshot::channel();
-    let attested_team_socket = core.antigravity_team_config.rendezvous_path();
-    let attested_team_listener = bind_attested_listener(&attested_team_socket)?;
-    let attested_team_handle = tokio::spawn(serve_attested_team_ipc(
-        core.clone(),
-        antigravity_team_registry,
-        attested_team_listener,
-        attested_team_socket,
-        attested_team_shutdown_rx,
+        builtin_tool_listener,
+        builtin_tool_socket,
+        builtin_tool_shutdown_rx,
     ));
     let event_handle = tokio::spawn(process_codex_events(
         core.clone(),
@@ -6745,10 +6805,8 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
     let _ = scheduler_handle.await;
     let _ = runtime_check_shutdown_tx.send(());
     let _ = runtime_check_handle.await;
-    let _ = team_tool_shutdown_tx.send(());
-    let _ = team_tool_handle.await;
-    let _ = attested_team_shutdown_tx.send(());
-    let _ = attested_team_handle.await;
+    let _ = builtin_tool_shutdown_tx.send(());
+    let _ = builtin_tool_handle.await;
     let _ = event_shutdown_tx.send(());
     let _ = event_handle.await;
     let _ = acp_shutdown_tx.send(());
@@ -8101,10 +8159,16 @@ async fn process_agent_run_codex_message(
                         expected_version: execution.version,
                         execution_epoch,
                         error_code: format!("runtime_turn_{}", completed.status),
-                        error_detail: Some(format!(
-                            "Codex Native Turn {} ended as {}",
-                            completed.turn_id, completed.status
-                        )),
+                        error_detail: Some(match &completed.error {
+                            Some(error) => format!(
+                                "Codex Native Turn {} ended as {}: {}",
+                                completed.turn_id, completed.status, error
+                            ),
+                            None => format!(
+                                "Codex Native Turn {} ended as {}",
+                                completed.turn_id, completed.status
+                            ),
+                        }),
                         manual_retry_allowed: true,
                         ending_git_observation,
                     },
@@ -8659,50 +8723,13 @@ async fn write_output(mut receiver: mpsc::UnboundedReceiver<String>) -> Result<(
     Ok(())
 }
 
-impl TeamMcpBridgeConfig {
-    fn from_environment() -> Result<Self> {
-        let core_socket = std::env::var_os("ROVAI_TEAM_CORE_SOCKET")
-            .or_else(|| std::env::var_os("HORIZONWARD_TEAM_CORE_SOCKET"))
-            .or_else(|| std::env::var_os("LUMEN_TEAM_CORE_SOCKET"))
-            .map(PathBuf::from)
-            .context("ROVAI_TEAM_CORE_SOCKET is required for team-mcp-bridge")?;
-        let native_binding_id = std::env::var("ROVAI_TEAM_NATIVE_BINDING_ID")
-            .or_else(|_| std::env::var("HORIZONWARD_TEAM_NATIVE_BINDING_ID"))
-            .or_else(|_| std::env::var("LUMEN_TEAM_NATIVE_BINDING_ID"))
-            .context("ROVAI_TEAM_NATIVE_BINDING_ID is required for team-mcp-bridge")?;
-        let binding_credential = std::env::var("ROVAI_TEAM_BINDING_CREDENTIAL")
-            .or_else(|_| std::env::var("HORIZONWARD_TEAM_BINDING_CREDENTIAL"))
-            .or_else(|_| std::env::var("LUMEN_TEAM_BINDING_CREDENTIAL"))
-            .context("ROVAI_TEAM_BINDING_CREDENTIAL is required for team-mcp-bridge")?;
-        if native_binding_id.trim().is_empty() || binding_credential.trim().is_empty() {
-            anyhow::bail!("Team MCP Bridge binding environment must not be empty");
-        }
-        Ok(Self {
-            core_socket,
-            native_binding_id,
-            binding_credential,
-            kiro_bedrock_schema: std::env::var("ROVAI_TEAM_SCHEMA_DIALECT")
-                .is_ok_and(|value| value == "kiro-bedrock-v1"),
-        })
-    }
-}
-
-fn team_tool_socket_path(_data_dir: &Path) -> PathBuf {
-    // macOS limits sockaddr_un paths to roughly one hundred bytes. Application
-    // Support paths can exceed that before the socket name is appended, so the
-    // private endpoint uses a short per-process directory instead.
-    PathBuf::from("/tmp")
-        .join(format!("rovai-team-{}", std::process::id()))
-        .join("core.sock")
-}
-
-fn bind_team_tool_listener(socket_path: &Path) -> Result<UnixListener> {
+fn bind_builtin_tool_listener(socket_path: &Path) -> Result<UnixListener> {
     let directory = socket_path
         .parent()
-        .context("Team Tool socket path has no parent directory")?;
+        .context("Built-in Tool socket path has no parent directory")?;
     std::fs::create_dir_all(directory).with_context(|| {
         format!(
-            "failed to create private Team Tool directory {}",
+            "failed to create private Built-in Tool directory {}",
             directory.display()
         )
     })?;
@@ -8710,14 +8737,14 @@ fn bind_team_tool_listener(socket_path: &Path) -> Result<UnixListener> {
     if socket_path.exists() {
         std::fs::remove_file(socket_path).with_context(|| {
             format!(
-                "failed to remove stale Team Tool socket {}",
+                "failed to remove stale Built-in Tool socket {}",
                 socket_path.display()
             )
         })?;
     }
     let listener = UnixListener::bind(socket_path).with_context(|| {
         format!(
-            "failed to bind private Team Tool socket {}",
+            "failed to bind private Built-in Tool socket {}",
             socket_path.display()
         )
     })?;
@@ -8729,7 +8756,7 @@ fn bind_team_tool_listener(socket_path: &Path) -> Result<UnixListener> {
     Ok(listener)
 }
 
-async fn serve_team_tool_ipc(
+async fn serve_builtin_tool_ipc(
     core: Arc<Core>,
     listener: UnixListener,
     socket_path: PathBuf,
@@ -8743,14 +8770,14 @@ async fn serve_team_tool_ipc(
         let (stream, _) = match accepted {
             Ok(stream) => stream,
             Err(error) => {
-                eprintln!("Team Tool IPC accept failed: {error:#}");
+                eprintln!("Built-in Tool IPC accept failed: {error:#}");
                 continue;
             }
         };
         let core = core.clone();
         tokio::spawn(async move {
-            if let Err(error) = handle_team_tool_connection(core, stream).await {
-                eprintln!("Team Tool IPC request failed: {error:#}");
+            if let Err(error) = handle_builtin_tool_connection(core, stream).await {
+                eprintln!("Built-in Tool IPC request failed: {error:#}");
             }
         });
     }
@@ -8758,29 +8785,23 @@ async fn serve_team_tool_ipc(
     let _ = std::fs::remove_file(socket_path);
 }
 
-async fn handle_team_tool_connection(core: Arc<Core>, stream: UnixStream) -> Result<()> {
+async fn handle_builtin_tool_connection(core: Arc<Core>, stream: UnixStream) -> Result<()> {
     let (reader, mut writer) = stream.into_split();
     let mut lines = BufReader::new(reader).lines();
     let response = match lines.next_line().await? {
-        Some(line) if line.len() <= 128 * 1024 => {
-            match serde_json::from_str::<TeamToolIpcRequest>(&line) {
-                Ok(request) => core.handle_team_tool_ipc(request).await,
-                Err(_) => TeamToolIpcResponse {
-                    result: None,
-                    error: Some(TeamToolIpcError {
-                        code: "team_tool.invalid_ipc_request".to_string(),
-                        message: "Private Team Tool request is malformed".to_string(),
-                    }),
-                },
+        Some(line) if line.len() <= BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES => {
+            match serde_json::from_str::<BuiltinToolIpcRequest>(&line) {
+                Ok(request) => core.handle_builtin_tool_ipc(request).await,
+                Err(_) => BuiltinToolIpcResponse::ipc_error(
+                    "builtin_tool.invalid_ipc_request",
+                    "Built-in Tool IPC request is malformed",
+                ),
             }
         }
-        Some(_) => TeamToolIpcResponse {
-            result: None,
-            error: Some(TeamToolIpcError {
-                code: "team_tool.ipc_request_too_large".to_string(),
-                message: "Private Team Tool request exceeds 128 KiB".to_string(),
-            }),
-        },
+        Some(_) => BuiltinToolIpcResponse::ipc_error(
+            "builtin_tool.ipc_request_too_large",
+            "Built-in Tool IPC request exceeds 1 MiB",
+        ),
         None => return Ok(()),
     };
     writer
@@ -8791,469 +8812,11 @@ async fn handle_team_tool_connection(core: Arc<Core>, stream: UnixStream) -> Res
     Ok(())
 }
 
-async fn serve_attested_team_ipc(
-    core: Arc<Core>,
-    registry: Arc<AttestedTeamRegistry>,
-    listener: UnixListener,
-    socket_path: PathBuf,
-    mut shutdown: oneshot::Receiver<()>,
-) {
-    loop {
-        let accepted = tokio::select! {
-            accepted = listener.accept() => accepted,
-            _ = &mut shutdown => break,
-        };
-        let (stream, _) = match accepted {
-            Ok(stream) => stream,
-            Err(error) => {
-                eprintln!("attested Team IPC accept failed: {error:#}");
-                continue;
-            }
-        };
-        let core = core.clone();
-        let registry = registry.clone();
-        tokio::spawn(async move {
-            if let Err(error) = handle_attested_team_connection(core, registry, stream).await {
-                eprintln!("attested Team IPC request failed: {error:#}");
-            }
-        });
-    }
-    drop(listener);
-    let _ = std::fs::remove_file(socket_path);
-}
-
-async fn handle_attested_team_connection(
-    core: Arc<Core>,
-    registry: Arc<AttestedTeamRegistry>,
-    stream: UnixStream,
-) -> Result<()> {
-    let peer_pid = stream
-        .peer_cred()?
-        .pid()
-        .context("attested Team Bridge peer PID is unavailable")?;
-    let peer_pid = u32::try_from(peer_pid)?;
-    let (reader, mut writer) = stream.into_split();
-    let mut lines = BufReader::new(reader).lines();
-    let request = match tokio::time::timeout(std::time::Duration::from_secs(2), lines.next_line())
-        .await
-        .context("attested Team request timed out")??
-    {
-        Some(line) if line.len() <= 128 * 1024 => {
-            serde_json::from_str::<AttestedTeamRequest>(&line).ok()
-        }
-        _ => None,
-    };
-    let Some(request) = request else {
-        writer
-            .write_all(&serde_json::to_vec(&AttestedTeamResponse {
-                bound: false,
-                result: None,
-                error: Some(AttestedTeamError {
-                    code: "invalid_ipc_request".to_string(),
-                    message: "Attested Team request is malformed".to_string(),
-                }),
-            })?)
-            .await?;
-        writer.write_all(b"\n").await?;
-        return Ok(());
-    };
-    let Some(lease) = registry.acquire(peer_pid).await? else {
-        writer
-            .write_all(&serde_json::to_vec(&AttestedTeamResponse::unbound())?)
-            .await?;
-        writer.write_all(b"\n").await?;
-        return Ok(());
-    };
-    let attachment_still_ready = core
-        .antigravity_team_config
-        .inspect(Some(&lease.workspace))
-        .is_ok_and(|status| status.attachment_ready());
-    if !attachment_still_ready {
-        registry.release(&lease).await;
-        writer
-            .write_all(&serde_json::to_vec(&AttestedTeamResponse::unbound())?)
-            .await?;
-        writer.write_all(b"\n").await?;
-        return Ok(());
-    }
-    let expected_catalog_digest = built_in_team_catalog_digest()?;
-    let response = match request {
-        AttestedTeamRequest::List {
-            protocol_version,
-            catalog_digest,
-        } => {
-            if protocol_version != ATTESTED_TEAM_PROTOCOL_VERSION
-                || catalog_digest != expected_catalog_digest
-            {
-                AttestedTeamResponse {
-                    bound: false,
-                    result: None,
-                    error: Some(AttestedTeamError {
-                        code: "catalog_mismatch".to_string(),
-                        message: "Attested Team protocol or catalog identity is incompatible"
-                            .to_string(),
-                    }),
-                }
-            } else {
-                AttestedTeamResponse {
-                    bound: true,
-                    result: None,
-                    error: None,
-                }
-            }
-        }
-        AttestedTeamRequest::Call {
-            protocol_version,
-            catalog_digest,
-            runtime_alias,
-            canonical_tool,
-            runtime_tool_call_id,
-            input,
-        } => {
-            let valid_identity = attested_tool_identity_is_valid(
-                protocol_version,
-                &catalog_digest,
-                &expected_catalog_digest,
-                &runtime_alias,
-                &canonical_tool,
-            );
-            if !valid_identity {
-                registry.release(&lease).await;
-                let response = AttestedTeamResponse {
-                    bound: true,
-                    result: None,
-                    error: Some(AttestedTeamError {
-                        code: "invalid_tool_identity".to_string(),
-                        message: "Attested Team Tool identity is outside the frozen catalog"
-                            .to_string(),
-                    }),
-                };
-                writer.write_all(&serde_json::to_vec(&response)?).await?;
-                writer.write_all(b"\n").await?;
-                writer.shutdown().await?;
-                return Ok(());
-            }
-            let response = core
-                .handle_attested_team_tool_ipc(
-                    TeamToolIpcRequest {
-                        native_binding_id: lease.binding.native_binding_id.clone(),
-                        binding_credential: lease.binding.binding_credential.clone(),
-                        runtime_tool_call_id,
-                        tool_name: canonical_tool.clone(),
-                        input,
-                    },
-                    &lease.agent_run_id,
-                    lease.execution_epoch,
-                )
-                .await;
-            sign_attested_team_response(&lease.binding, &canonical_tool, response)
-        }
-    };
-    registry.release(&lease).await;
-    writer.write_all(&serde_json::to_vec(&response)?).await?;
-    writer.write_all(b"\n").await?;
-    writer.shutdown().await?;
-    Ok(())
-}
-
-fn attested_tool_identity_is_valid(
-    protocol_version: u32,
-    catalog_digest: &str,
-    expected_catalog_digest: &str,
-    runtime_alias: &str,
-    canonical_tool: &str,
-) -> bool {
-    protocol_version == ATTESTED_TEAM_PROTOCOL_VERSION
-        && catalog_digest == expected_catalog_digest
-        && identity_by_antigravity_alias(runtime_alias)
-            .is_some_and(|identity| identity.canonical_name == canonical_tool)
-}
-
-fn sign_attested_team_response(
-    binding: &TeamToolBindingCredential,
-    canonical_tool: &str,
-    response: TeamToolIpcResponse,
-) -> AttestedTeamResponse {
-    let mut structured_content = match (response.result, response.error) {
-        (Some(result), None) => result,
-        (None, Some(error)) => {
-            let mut content = json!({
-                "rovaiTeamTool": canonical_tool,
-                "errorCode": error.code,
-            });
-            if let Ok(audit_key) = team_tool_completion_audit_key(&binding.binding_credential)
-                && let Ok(receipt) = team_tool_completion_receipt(&audit_key, &content)
-            {
-                content["rovaiTeamReceipt"] = Value::String(receipt);
-            }
-            return AttestedTeamResponse {
-                bound: true,
-                result: Some(content),
-                error: Some(AttestedTeamError {
-                    code: error.code,
-                    message: error.message,
-                }),
-            };
-        }
-        _ => {
-            return AttestedTeamResponse {
-                bound: true,
-                result: None,
-                error: Some(AttestedTeamError {
-                    code: "invalid_core_response".to_string(),
-                    message: "Rovai Core returned an ambiguous Team response".to_string(),
-                }),
-            };
-        }
-    };
-    let signed = (|| -> Result<()> {
-        structured_content
-            .as_object_mut()
-            .context("Team response must be an object")?
-            .insert(
-                "rovaiTeamTool".to_string(),
-                Value::String(canonical_tool.to_string()),
-            );
-        let audit_key = team_tool_completion_audit_key(&binding.binding_credential)?;
-        let receipt = team_tool_completion_receipt(&audit_key, &structured_content)?;
-        structured_content["rovaiTeamReceipt"] = Value::String(receipt);
-        Ok(())
-    })();
-    if signed.is_err() {
-        return AttestedTeamResponse {
-            bound: true,
-            result: None,
-            error: Some(AttestedTeamError {
-                code: "receipt_generation_failed".to_string(),
-                message: "Rovai Core could not sign the Team completion".to_string(),
-            }),
-        };
-    }
-    AttestedTeamResponse {
-        bound: true,
-        result: Some(structured_content),
-        error: None,
-    }
-}
-
-async fn run_team_mcp_bridge(config: TeamMcpBridgeConfig) -> Result<()> {
-    let stdin = BufReader::new(tokio::io::stdin());
-    let mut lines = stdin.lines();
-    let mut output = BufWriter::new(tokio::io::stdout());
-    while let Some(line) = lines.next_line().await? {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let request = match serde_json::from_str::<Value>(&line) {
-            Ok(request) => request,
-            Err(_) => {
-                write_mcp_response(
-                    &mut output,
-                    &json!({
-                        "jsonrpc": "2.0",
-                        "id": null,
-                        "error": {"code": -32700, "message": "Parse error"}
-                    }),
-                )
-                .await?;
-                continue;
-            }
-        };
-        if let Some(response) = handle_team_mcp_request(&config, &request).await {
-            write_mcp_response(&mut output, &response).await?;
-        }
-    }
-    output.flush().await?;
-    Ok(())
-}
-
-async fn handle_team_mcp_request(config: &TeamMcpBridgeConfig, request: &Value) -> Option<Value> {
-    let id = request.get("id").cloned()?;
-    let method = request.get("method").and_then(Value::as_str);
-    let result = match method {
-        Some("initialize") => Ok(json!({
-            "protocolVersion": request
-                .pointer("/params/protocolVersion")
-                .and_then(Value::as_str)
-                .unwrap_or("2025-06-18"),
-            "capabilities": { "tools": { "listChanged": false } },
-            "serverInfo": { "name": "rovai-team-tool", "version": env!("CARGO_PKG_VERSION") },
-            "instructions": "Rovai-ai Team tools provide private A2A execution requests and durable Camp Task management. A Task mutation never wakes its assignee."
-        })),
-        Some("ping") => Ok(json!({})),
-        Some("tools/list") => Ok(json!({
-            "tools": if config.kiro_bedrock_schema {
-                kiro_team_tool_definitions()
-            } else {
-                canonical_team_tool_definitions()
-            }
-        })),
-        Some("tools/call") => {
-            let tool_name = request
-                .pointer("/params/name")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            match call_team_tool(config, request).await {
-                Ok(result) => sign_team_tool_structured_content(config, tool_name, result)
-                    .map(|result| json!({
-                        "content": [{
-                            "type": "text",
-                            "text": serde_json::to_string(&result).unwrap_or_else(|_| "Team request queued".to_string())
-                        }],
-                        "structuredContent": result,
-                        "isError": false
-                    }))
-                    .map_err(|_| (-32603, "Team Tool receipt generation failed")),
-                Err(error) => {
-                    let error_text = format!("{}: {}", error.code, error.message);
-                    let structured_content = json!({
-                        "rovaiTeamTool": tool_name,
-                        "errorCode": error.code
-                    });
-                    sign_team_tool_structured_content(config, tool_name, structured_content)
-                        .map(|structured_content| json!({
-                            "content": [{
-                                "type": "text",
-                                "text": error_text
-                            }],
-                            "structuredContent": structured_content,
-                            "isError": true
-                        }))
-                        .map_err(|_| (-32603, "Team Tool receipt generation failed"))
-                }
-            }
-        }
-        Some(_) => Err((-32601, "Method not found")),
-        None => Err((-32600, "Invalid Request")),
-    };
-    Some(match result {
-        Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
-        Err((code, message)) => {
-            json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
-        }
-    })
-}
-
-fn sign_team_tool_structured_content(
-    config: &TeamMcpBridgeConfig,
-    tool_name: &str,
-    mut structured_content: Value,
-) -> Result<Value> {
-    structured_content
-        .as_object_mut()
-        .context("Team Tool structured content must be an object")?
-        .insert(
-            "rovaiTeamTool".to_string(),
-            Value::String(tool_name.to_string()),
-        );
-    let audit_key = team_tool_completion_audit_key(&config.binding_credential)?;
-    let receipt = team_tool_completion_receipt(&audit_key, &structured_content)?;
-    structured_content["rovaiTeamReceipt"] = Value::String(receipt);
-    Ok(structured_content)
-}
-
-async fn call_team_tool(
-    config: &TeamMcpBridgeConfig,
-    request: &Value,
-) -> std::result::Result<Value, TeamToolIpcError> {
-    let name = request
-        .pointer("/params/name")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let input = request
-        .pointer("/params/arguments")
-        .cloned()
-        .unwrap_or_else(|| json!({}));
-    if identity_by_canonical(name).is_none() {
-        return Err(TeamToolIpcError {
-            code: "team_tool.unknown_tool".to_string(),
-            message: "Requested Team Tool is unavailable".to_string(),
-        });
-    }
-    validate_builtin_team_tool_input(name, &input).map_err(|_| TeamToolIpcError {
-        code: "team_tool.invalid_input".to_string(),
-        message: format!("{name} arguments do not match the narrow Tool schema"),
-    })?;
-    let request_id = request.get("id").cloned().unwrap_or(Value::Null);
-    let call_digest = canonical_json_digest(&request_id).map_err(|_| TeamToolIpcError {
-        code: "team_tool.invalid_tool_call_id".to_string(),
-        message: "Runtime Tool Call ID could not be normalized".to_string(),
-    })?;
-    let ipc_request = TeamToolIpcRequest {
-        native_binding_id: config.native_binding_id.clone(),
-        binding_credential: config.binding_credential.clone(),
-        runtime_tool_call_id: format!("mcp-jsonrpc:{call_digest}"),
-        tool_name: name.to_string(),
-        input,
-    };
-    let mut stream = UnixStream::connect(&config.core_socket)
-        .await
-        .map_err(|_| TeamToolIpcError {
-            code: "team_tool.core_unavailable".to_string(),
-            message: "Rovai-ai Core Team Tool endpoint is unavailable".to_string(),
-        })?;
-    let serialized = serde_json::to_string(&ipc_request).map_err(|_| TeamToolIpcError {
-        code: "team_tool.invalid_ipc_request".to_string(),
-        message: "Team Tool request could not be encoded".to_string(),
-    })?;
-    stream
-        .write_all(serialized.as_bytes())
-        .await
-        .map_err(|_| TeamToolIpcError {
-            code: "team_tool.core_unavailable".to_string(),
-            message: "Rovai-ai Core did not accept the Team Tool request".to_string(),
-        })?;
-    stream
-        .write_all(b"\n")
-        .await
-        .map_err(|_| TeamToolIpcError {
-            code: "team_tool.core_unavailable".to_string(),
-            message: "Rovai-ai Core did not accept the Team Tool request".to_string(),
-        })?;
-    let mut lines = BufReader::new(stream).lines();
-    let response = lines
-        .next_line()
-        .await
-        .map_err(|_| TeamToolIpcError {
-            code: "team_tool.core_unavailable".to_string(),
-            message: "Rovai-ai Core Team Tool response was interrupted".to_string(),
-        })?
-        .ok_or_else(|| TeamToolIpcError {
-            code: "team_tool.core_unavailable".to_string(),
-            message: "Rovai-ai Core closed the Team Tool connection without a result".to_string(),
-        })?;
-    let response =
-        serde_json::from_str::<TeamToolIpcResponse>(&response).map_err(|_| TeamToolIpcError {
-            code: "team_tool.invalid_core_response".to_string(),
-            message: "Rovai-ai Core returned a malformed Team Tool response".to_string(),
-        })?;
-    match (response.result, response.error) {
-        (Some(result), None) => Ok(result),
-        (None, Some(error)) => Err(error),
-        _ => Err(TeamToolIpcError {
-            code: "team_tool.invalid_core_response".to_string(),
-            message: "Rovai-ai Core returned an ambiguous Team Tool response".to_string(),
-        }),
-    }
-}
-
-async fn write_mcp_response(
-    output: &mut BufWriter<tokio::io::Stdout>,
-    response: &Value,
-) -> Result<()> {
-    output
-        .write_all(serde_json::to_string(response)?.as_bytes())
-        .await?;
-    output.write_all(b"\n").await?;
-    output.flush().await?;
-    Ok(())
-}
-
 fn command_rejection_message(payload: &Value) -> String {
     payload
         .get("message")
         .and_then(Value::as_str)
-        .unwrap_or("Team Tool request was rejected")
+        .unwrap_or("Built-in Tool request was rejected")
         .to_string()
 }
 
@@ -9265,27 +8828,92 @@ fn command_execution_payload(execution: CommandExecution) -> Result<Value> {
     if execution.result.status != CommandResultStatus::Rejected {
         return Ok(execution.result.payload);
     }
-    Err(TeamToolInvocationError {
-        code: execution.result.code,
+    let code = execution.result.code;
+    Err(BuiltinOperationError {
+        details: command_rejection_details(&code, &execution.result.payload),
+        code,
         message: command_rejection_message(&execution.result.payload),
     }
     .into())
 }
 
-fn classify_team_tool_error(error: &anyhow::Error) -> (String, String) {
+fn command_rejection_details(code: &str, payload: &Value) -> Option<Value> {
+    let allowed_fields: &[&str] = match code {
+        "task.version_conflict" => &["taskId", "currentVersion"],
+        "memory.version_conflict" => &["memoryId", "currentVersion"],
+        _ => return None,
+    };
+    let details = allowed_fields
+        .iter()
+        .filter_map(|field| {
+            payload
+                .get(*field)
+                .cloned()
+                .map(|value| ((*field).to_string(), value))
+        })
+        .collect::<serde_json::Map<_, _>>();
+    (!details.is_empty()).then_some(Value::Object(details))
+}
+
+fn classify_builtin_operation_error(error: &anyhow::Error) -> (String, String, Option<Value>) {
+    if let Some(error) = error.downcast_ref::<BuiltinOperationError>() {
+        return (
+            error.code.clone(),
+            error.message.clone(),
+            error.details.clone(),
+        );
+    }
     if let Some(error) = error.downcast_ref::<TeamToolInvocationError>() {
-        return (error.code.clone(), error.message.clone());
+        return (error.code.clone(), error.message.clone(), None);
     }
     if error.downcast_ref::<CommandGatewayError>().is_some() {
         return (
             "team_tool.idempotency_conflict".to_string(),
             "Runtime Tool Call ID was reused with different input".to_string(),
+            None,
         );
     }
     (
         "team_tool.internal_error".to_string(),
-        "Rovai-ai could not commit the Team Tool request".to_string(),
+        "Rovai-ai could not commit the Built-in Tool request".to_string(),
+        None,
     )
+}
+
+fn canonical_builtin_error_code(code: &str) -> String {
+    match code {
+        "team_tool.idempotency_conflict" => "builtin_tool.idempotency_conflict".to_string(),
+        "team_tool.invalid_input" => "builtin_tool.invalid_input".to_string(),
+        "team_tool.internal_error" => "builtin_tool.internal_error".to_string(),
+        _ => code.to_string(),
+    }
+}
+
+fn builtin_tool_rejection(
+    operation: &str,
+    request_id: &str,
+    code: &str,
+    message: &str,
+) -> BuiltinToolIpcResponse {
+    match BuiltinToolInvocationEnvelope::rejected(
+        operation,
+        request_id,
+        BuiltinToolError {
+            code: code.to_string(),
+            message: message.to_string(),
+            recovery: recovery_for_error_code(code),
+            details: None,
+        },
+    ) {
+        Ok(envelope) => BuiltinToolIpcResponse::Envelope { envelope },
+        Err(error) => {
+            eprintln!("failed to form Built-in Tool rejection envelope: {error:#}");
+            BuiltinToolIpcResponse::ipc_error(
+                "builtin_tool.internal_error",
+                "Rovai Core could not form the operation error",
+            )
+        }
+    }
 }
 
 fn parse_data_dir() -> Result<PathBuf> {
@@ -9322,55 +8950,6 @@ fn parse_mcp_config_path() -> Result<Option<PathBuf>> {
     Ok(None)
 }
 
-fn parse_antigravity_team_private_dir() -> Result<Option<PathBuf>> {
-    let mut args = std::env::args().skip(1);
-    while let Some(arg) = args.next() {
-        if arg == "--antigravity-team-private-dir" {
-            let path = args
-                .next()
-                .map(PathBuf::from)
-                .context("--antigravity-team-private-dir requires a path")?;
-            if !path.is_absolute() {
-                anyhow::bail!("--antigravity-team-private-dir requires an absolute path");
-            }
-            return Ok(Some(path));
-        }
-    }
-    Ok(None)
-}
-
-fn parse_antigravity_team_gemini_root() -> Result<Option<PathBuf>> {
-    let mut args = std::env::args().skip(1);
-    while let Some(arg) = args.next() {
-        if arg == "--antigravity-team-gemini-root" {
-            let path = args
-                .next()
-                .map(PathBuf::from)
-                .context("--antigravity-team-gemini-root requires a path")?;
-            if !path.is_absolute() {
-                anyhow::bail!("--antigravity-team-gemini-root requires an absolute path");
-            }
-            return Ok(Some(path));
-        }
-    }
-    Ok(None)
-}
-
-fn parse_attested_rendezvous() -> Result<PathBuf> {
-    let mut args = std::env::args_os().skip(2);
-    if args.next().as_deref() != Some(std::ffi::OsStr::new("--rendezvous")) {
-        anyhow::bail!("attested-team-mcp-bridge requires --rendezvous");
-    }
-    let path = PathBuf::from(
-        args.next()
-            .context("attested-team-mcp-bridge requires a rendezvous path")?,
-    );
-    if !path.is_absolute() || args.next().is_some() {
-        anyhow::bail!("attested Team rendezvous arguments are invalid");
-    }
-    Ok(path)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -9386,46 +8965,6 @@ mod tests {
             first,
             scoped_runtime_tool_call_id("run-b", "mcp-jsonrpc:same")
         );
-    }
-
-    #[test]
-    fn attested_tool_identity_requires_exact_protocol_catalog_and_alias_mapping() {
-        let digest = built_in_team_catalog_digest().unwrap();
-        assert!(attested_tool_identity_is_valid(
-            ATTESTED_TEAM_PROTOCOL_VERSION,
-            &digest,
-            &digest,
-            "memory_write",
-            MEMORY_WRITE_TOOL_NAME,
-        ));
-        assert!(!attested_tool_identity_is_valid(
-            ATTESTED_TEAM_PROTOCOL_VERSION + 1,
-            &digest,
-            &digest,
-            "memory_write",
-            MEMORY_WRITE_TOOL_NAME,
-        ));
-        assert!(!attested_tool_identity_is_valid(
-            ATTESTED_TEAM_PROTOCOL_VERSION,
-            "sha256:stale",
-            &digest,
-            "memory_write",
-            MEMORY_WRITE_TOOL_NAME,
-        ));
-        assert!(!attested_tool_identity_is_valid(
-            ATTESTED_TEAM_PROTOCOL_VERSION,
-            &digest,
-            &digest,
-            "memory_write",
-            MEMORY_READ_TOOL_NAME,
-        ));
-        assert!(!attested_tool_identity_is_valid(
-            ATTESTED_TEAM_PROTOCOL_VERSION,
-            &digest,
-            &digest,
-            "memory.write",
-            MEMORY_WRITE_TOOL_NAME,
-        ));
     }
 
     fn managed_runtime_fixture(
@@ -9620,229 +9159,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn team_mcp_bridge_lists_v5_tools_with_only_the_camp_read_locator() {
-        let config = TeamMcpBridgeConfig {
-            core_socket: PathBuf::from("/tmp/not-used.sock"),
-            native_binding_id: uuid::Uuid::new_v4().to_string(),
-            binding_credential: "not-used".to_string(),
-            kiro_bedrock_schema: false,
-        };
-        let response = handle_team_mcp_request(
-            &config,
-            &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}),
-        )
-        .await
-        .unwrap();
-        let tools = response["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 12);
-        assert_eq!(
-            tools
-                .iter()
-                .map(|tool| tool["name"].as_str().unwrap())
-                .collect::<Vec<_>>(),
-            [
-                TEAM_CALL_MEMBER_TOOL_NAME,
-                TEAM_CREATE_TASK_TOOL_NAME,
-                TEAM_UPDATE_TASK_TOOL_NAME,
-                TEAM_LIST_TASKS_TOOL_NAME,
-                CAMP_LIST_TOOL_NAME,
-                CAMP_SEARCH_TOOL_NAME,
-                HISTORY_SEARCH_TOOL_NAME,
-                CAMP_READ_TOOL_NAME,
-                MEMORY_SEARCH_TOOL_NAME,
-                MEMORY_READ_TOOL_NAME,
-                MEMORY_WRITE_TOOL_NAME,
-                MEMORY_PROPOSE_HEARTH_TOOL_NAME,
-            ]
-        );
-        for tool in tools {
-            let schemas = tool["inputSchema"]["oneOf"]
-                .as_array()
-                .map(|schemas| schemas.iter().collect::<Vec<_>>())
-                .unwrap_or_else(|| vec![&tool["inputSchema"]]);
-            for schema in schemas {
-                let properties = schema["properties"].as_object().unwrap();
-                for forbidden in [
-                    "senderAgentId",
-                    "senderMemberId",
-                    "sourceAgentRunId",
-                    "executionEpoch",
-                    "commandId",
-                ] {
-                    assert!(!properties.contains_key(forbidden));
-                }
-                assert_eq!(
-                    properties.contains_key("campId"),
-                    tool["name"] == CAMP_READ_TOOL_NAME
-                );
-            }
-        }
-        assert!(
-            tools[0]["inputSchema"]["properties"]
-                .as_object()
-                .unwrap()
-                .contains_key("taskId")
-        );
-    }
-
-    #[tokio::test]
-    async fn team_mcp_bridge_routes_kiro_to_bedrock_compatible_input_schemas() {
-        let config = TeamMcpBridgeConfig {
-            core_socket: PathBuf::from("/tmp/not-used.sock"),
-            native_binding_id: uuid::Uuid::new_v4().to_string(),
-            binding_credential: "not-used".to_string(),
-            kiro_bedrock_schema: true,
-        };
-        let response = handle_team_mcp_request(
-            &config,
-            &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}),
-        )
-        .await
-        .unwrap();
-        let camp_read = response["result"]["tools"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|tool| tool["name"] == CAMP_READ_TOOL_NAME)
-            .unwrap();
-        for keyword in ["oneOf", "allOf", "anyOf"] {
-            assert!(camp_read["inputSchema"].get(keyword).is_none());
-        }
-        assert_eq!(
-            camp_read["inputSchema"]["properties"]["mode"]["enum"],
-            json!(["item", "around", "thread", "timeline"])
-        );
-    }
-
-    #[tokio::test]
-    async fn team_mcp_bridge_forwards_binding_privately_and_returns_structured_result() {
-        let directory =
-            PathBuf::from("/tmp").join(format!("ltt-{}", &uuid::Uuid::new_v4().to_string()[..8]));
-        std::fs::create_dir_all(&directory).unwrap();
-        let socket = directory.join("core.sock");
-        let listener = UnixListener::bind(&socket).unwrap();
-        let binding_id = uuid::Uuid::new_v4().to_string();
-        let credential = "private-bridge-secret".to_string();
-        let expected_binding = binding_id.clone();
-        let expected_credential = credential.clone();
-        let server = tokio::spawn(async move {
-            let (stream, _) = listener.accept().await.unwrap();
-            let (reader, mut writer) = stream.into_split();
-            let mut lines = BufReader::new(reader).lines();
-            let line = lines.next_line().await.unwrap().unwrap();
-            let request: TeamToolIpcRequest = serde_json::from_str(&line).unwrap();
-            assert_eq!(request.native_binding_id, expected_binding);
-            assert_eq!(request.binding_credential, expected_credential);
-            assert!(request.runtime_tool_call_id.starts_with("mcp-jsonrpc:"));
-            assert_eq!(request.tool_name, TEAM_CALL_MEMBER_TOOL_NAME);
-            assert_eq!(request.input["recipient"], "agent_2");
-            assert_eq!(request.input["content"], "Please review this change");
-            assert!(request.input.get("returnPolicy").is_none());
-            writer
-                .write_all(
-                    serde_json::to_string(&TeamToolIpcResponse {
-                        result: Some(json!({
-                            "status": "accepted",
-                            "recipient": "agent_2",
-                            "recipientName": "小河狸",
-                            "taskLinked": false
-                        })),
-                        error: None,
-                    })
-                    .unwrap()
-                    .as_bytes(),
-                )
-                .await
-                .unwrap();
-            writer.write_all(b"\n").await.unwrap();
-        });
-        let config = TeamMcpBridgeConfig {
-            core_socket: socket.clone(),
-            native_binding_id: binding_id,
-            binding_credential: credential,
-            kiro_bedrock_schema: false,
-        };
-        let response = handle_team_mcp_request(
-            &config,
-            &json!({
-                "jsonrpc": "2.0",
-                "id": "tool-call-7",
-                "method": "tools/call",
-                "params": {
-                    "name": "team.call_member",
-                    "arguments": {
-                        "recipient": "agent_2",
-                        "content": "Please review this change"
-                    }
-                }
-            }),
-        )
-        .await
-        .unwrap();
-        server.await.unwrap();
-        assert_eq!(response["result"]["isError"], false);
-        assert_eq!(
-            response["result"]["structuredContent"]["status"],
-            "accepted"
-        );
-        assert!(
-            response["result"]["structuredContent"]
-                .get("targetAgentRunId")
-                .is_none()
-        );
-        assert!(
-            !serde_json::to_string(&response)
-                .unwrap()
-                .contains("private-bridge-secret")
-        );
-        std::fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[tokio::test]
-    async fn team_mcp_bridge_rejects_forged_identity_fields_before_core_ipc() {
-        let config = TeamMcpBridgeConfig {
-            core_socket: PathBuf::from("/tmp/socket-must-not-be-opened"),
-            native_binding_id: uuid::Uuid::new_v4().to_string(),
-            binding_credential: "secret".to_string(),
-            kiro_bedrock_schema: false,
-        };
-        let response = handle_team_mcp_request(
-            &config,
-            &json!({
-                "jsonrpc": "2.0",
-                "id": 9,
-                "method": "tools/call",
-                "params": {
-                    "name": "team.call_member",
-                    "arguments": {
-                        "recipient": "agent_2",
-                        "content": "Try to forge identity",
-                        "senderAgentId": "agent_1",
-                        "executionEpoch": 99
-                    }
-                }
-            }),
-        )
-        .await
-        .unwrap();
-        assert_eq!(response["result"]["isError"], true);
-        assert_eq!(
-            response["result"]["structuredContent"]["rovaiTeamTool"],
-            TEAM_CALL_MEMBER_TOOL_NAME
-        );
-        assert_eq!(
-            response["result"]["structuredContent"]["errorCode"],
-            "team_tool.invalid_input"
-        );
-        assert!(
-            response["result"]["content"][0]["text"]
-                .as_str()
-                .unwrap()
-                .contains("team_tool.invalid_input")
-        );
-    }
-
     #[test]
     fn acp_tool_events_expose_digests_not_raw_payloads() {
         let (_, payload) = normalize_acp_event(
@@ -9869,5 +9185,28 @@ mod tests {
         assert_eq!(payload["toolName"], "execute");
         assert!(payload["rawInputDigest"].is_string());
         assert!(payload["rawOutputDigest"].is_string());
+    }
+
+    #[test]
+    fn builtin_operation_errors_publish_only_allowlisted_conflict_details() {
+        assert_eq!(
+            command_rejection_details(
+                "task.version_conflict",
+                &json!({
+                    "message": "stale",
+                    "taskId": "task-1",
+                    "currentVersion": 4,
+                    "internalSql": "must-not-leak",
+                }),
+            ),
+            Some(json!({"taskId": "task-1", "currentVersion": 4}))
+        );
+        assert_eq!(
+            command_rejection_details(
+                "task.not_found",
+                &json!({"taskId": "task-1", "currentVersion": 4}),
+            ),
+            None
+        );
     }
 }

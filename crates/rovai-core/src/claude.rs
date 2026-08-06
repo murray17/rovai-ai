@@ -22,11 +22,9 @@ use tokio::{
     time::{Duration, Instant},
 };
 
-use rovai_core::team_tool::TEAM_TOOL_NAMES;
-
-use crate::team_runtime::{
-    TEAM_MCP_SERVER_NAME, TeamToolProcessConfig, remove_stale_team_tool_configs,
-    write_ephemeral_strict_acp_config,
+use crate::{
+    builtin_tool_runtime::BuiltinToolProcessConfig,
+    runtime_mcp::{remove_stale_mcp_configs, write_ephemeral_strict_mcp_config},
 };
 
 const MAX_CAPTURE_BYTES: usize = 2 * 1024 * 1024;
@@ -41,7 +39,7 @@ pub struct ClaudeCodeRunRequest {
     pub resumable_native_session_id: Option<String>,
     pub new_native_session_id: Option<String>,
     pub session_bootstrap: Option<String>,
-    pub team_tool: Option<TeamToolProcessConfig>,
+    pub builtin_tools: Option<BuiltinToolProcessConfig>,
     pub external_mcp_servers: BTreeMap<String, McpServerDefinition>,
     pub attachment_access_root: Option<PathBuf>,
     pub persist_session: bool,
@@ -75,7 +73,7 @@ impl ClaudeCodeCliRuntimeAdapter {
             )
         })?;
         restrict_directory_permissions(&private_runtime_dir)?;
-        remove_stale_team_tool_configs(&private_runtime_dir)?;
+        remove_stale_mcp_configs(&private_runtime_dir)?;
         Ok(Self {
             active: Mutex::new(HashMap::new()),
             private_runtime_dir,
@@ -210,6 +208,9 @@ impl ClaudeCodeCliRuntimeAdapter {
             };
         let mut command = Command::new(executable);
         configure_active_runtime_command(&mut command);
+        if let Some(config) = &request.builtin_tools {
+            config.configure_command(&mut command)?;
+        }
         command
             .arg("--print")
             .args(["--output-format", "json"])
@@ -221,7 +222,7 @@ impl ClaudeCodeCliRuntimeAdapter {
             command.arg("--dangerously-skip-permissions");
         }
         if legacy_read_only {
-            command.arg("--disallowedTools=Edit,Write,NotebookEdit,Bash");
+            command.arg("--disallowedTools=Edit,Write,NotebookEdit");
         }
         if request.runtime.model.source == "explicit"
             && request.runtime.model.model_id != CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID
@@ -248,33 +249,15 @@ impl ClaudeCodeCliRuntimeAdapter {
         if !request.persist_session {
             command.arg("--no-session-persistence").arg("--tools=");
         }
-        let _team_config = {
-            let config = match request.team_tool.as_ref() {
-                Some(team_tool) => team_tool.write_ephemeral_claude_config(
-                    &self.private_runtime_dir,
-                    &request.external_mcp_servers,
-                )?,
-                None => write_ephemeral_strict_acp_config(
-                    &self.private_runtime_dir,
-                    &request.external_mcp_servers,
-                    None,
-                )?,
-            };
-            // Claude Code normalizes MCP tool punctuation in permission
-            // identifiers even though the server advertises canonical
-            // `team.*` names on the wire.
-            let tool_names = TEAM_TOOL_NAMES
-                .iter()
-                .map(|tool_name| claude_mcp_tool_name(TEAM_MCP_SERVER_NAME, tool_name))
-                .collect::<Vec<_>>()
-                .join(",");
+        let _external_mcp_config = {
+            let config = write_ephemeral_strict_mcp_config(
+                &self.private_runtime_dir,
+                &request.external_mcp_servers,
+            )?;
             command
                 .arg("--mcp-config")
                 .arg(config.path())
                 .arg("--strict-mcp-config");
-            if request.team_tool.is_some() {
-                command.arg(format!("--allowedTools={tool_names}"));
-            }
             Some(config)
         };
         let mut child = command
@@ -459,10 +442,6 @@ fn validate_session_id(value: &str) -> Result<()> {
     Ok(())
 }
 
-fn claude_mcp_tool_name(server_name: &str, tool_name: &str) -> String {
-    format!("mcp__{server_name}__{}", tool_name.replace('.', "_"))
-}
-
 fn session_arguments(
     resumable_session_id: Option<&str>,
     native_session_id: &str,
@@ -500,14 +479,6 @@ mod tests {
     fn accepts_only_uuid_session_identifiers() {
         assert!(validate_session_id("0bdd2166-d420-40c6-94be-70b93eb290c5").is_ok());
         assert!(validate_session_id("latest").is_err());
-    }
-
-    #[test]
-    fn normalizes_mcp_tool_names_for_claude_permission_flags() {
-        assert_eq!(
-            claude_mcp_tool_name("rovai_team", "team.call_member"),
-            "mcp__rovai_team__team_call_member"
-        );
     }
 
     #[test]

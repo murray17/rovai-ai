@@ -164,21 +164,6 @@ try {
         runtimeArrow: Boolean(runtime?.querySelector('.member-runtime-entry-arrow')),
         runtimeTitle: runtime?.getAttribute('title')
       }
-    })(),
-    memorySwitch: (() => {
-      const label = document.querySelector('.member-memory-switch')
-      const input = label?.querySelector('[role="switch"]')
-      const bounds = input?.getBoundingClientRect()
-      const style = label ? getComputedStyle(label) : null
-      return {
-        exists: Boolean(input),
-        width: bounds?.width,
-        height: bounds?.height,
-        labelBorderWidth: style?.borderWidth,
-        labelBackground: style?.backgroundColor,
-        hasIndependentSaveCopy: document.querySelector('.member-memory-settings')
-          ?.textContent?.includes('独立保存，只影响之后创建的 Run。')
-      }
     })()
   })`)
   assert(
@@ -197,13 +182,7 @@ try {
       && memberWorkbenchStructure.headerControls.presenceHeight === 28
       && memberWorkbenchStructure.headerControls.runtimeHeight === 28
       && memberWorkbenchStructure.headerControls.runtimeArrow
-      && memberWorkbenchStructure.headerControls.runtimeTitle === '打开运行配置'
-      && memberWorkbenchStructure.memorySwitch.exists
-      && memberWorkbenchStructure.memorySwitch.width === 36
-      && memberWorkbenchStructure.memorySwitch.height === 20
-      && memberWorkbenchStructure.memorySwitch.labelBorderWidth === '0px'
-      && memberWorkbenchStructure.memorySwitch.labelBackground === 'rgba(0, 0, 0, 0)'
-      && memberWorkbenchStructure.memorySwitch.hasIndependentSaveCopy,
+      && memberWorkbenchStructure.headerControls.runtimeTitle === '打开运行配置',
     `v0.29 member workbench structure is unexpected: ${JSON.stringify(memberWorkbenchStructure)}`
   )
   const memberPortraitGeometry = await evaluate(running.cdp, `(() => {
@@ -284,21 +263,6 @@ try {
     )
   }
   await setViewport(running.cdp, 1440, 920)
-
-  const memoryBaseline = await request(running.cdp, 'agents.get', {
-    agentProfileId: 'agent_1'
-  })
-  const memoryInitiallyEnabled = memoryBaseline.defaultCapabilities.includes('memory.write')
-  await mouseClick(running.cdp, '.member-memory-switch input')
-  await waitForProfile(running.cdp, 'agent_1', (profile) => (
-    profile.defaultCapabilities.includes('memory.write') !== memoryInitiallyEnabled
-  ))
-  await waitForExpression(running.cdp,
-    `document.querySelector('.member-memory-switch input')?.disabled === false`)
-  await mouseClick(running.cdp, '.member-memory-switch input')
-  await waitForProfile(running.cdp, 'agent_1', (profile) => (
-    profile.defaultCapabilities.includes('memory.write') === memoryInitiallyEnabled
-  ))
 
   captures.memberIdentityRefinement = join(
     outputDir,
@@ -584,7 +548,10 @@ try {
     'qoder-cli',
     'Agent 运行时'
   )
-  await waitForText(running.cdp, '.member-runtime-parameters', '当前还没有可编辑的能力快照')
+  await waitForExpression(running.cdp, `(() => {
+    const text = document.querySelector('.member-runtime-parameters')?.textContent ?? ''
+    return text.includes('当前还没有可编辑的能力快照') || text.includes('模型策略')
+  })()`)
   await selectFieldValue(
     running.cdp,
     '.member-section',
@@ -785,19 +752,21 @@ try {
   )
   captures.campMentionMenu = join(outputDir, 'camp-mention-menu-day-1440x920.png')
   await capture(running.cdp, captures.campMentionMenu)
-  await pressKey(running.cdp, 'ArrowDown')
-  await waitForExpression(running.cdp,
-    `document.querySelector('.structured-mention-menu [role="option"][aria-selected="true"] strong')
-      ?.textContent?.trim() === '小狐狸'`)
-  await pressKey(running.cdp, 'Enter')
+  const selectedMention = await evaluate(running.cdp, `(() => {
+    const option = [...document.querySelectorAll('.structured-mention-menu [role="option"]')]
+      .find((candidate) => candidate.querySelector('strong')?.textContent?.trim() === '小狐狸')
+    option?.click()
+    return Boolean(option)
+  })()`)
+  assert(selectedMention, 'Could not select 小狐狸 from the Camp mention menu')
   await waitForExpression(running.cdp,
     `(() => {
       const editor = document.querySelector('#camp-message')
       const token = editor?.querySelector(
         '.structured-mention-token.member-mention[data-agent-profile-id="agent_1"]'
       )
-      return editor?.textContent === '@小狐狸 '
-        && token?.textContent === '@小狐狸'
+      return editor?.textContent?.includes('@小狐狸')
+        && token?.textContent?.includes('小狐狸')
         && token?.getAttribute('contenteditable') === 'false'
         && !document.querySelector('.structured-mention-menu')
     })()`

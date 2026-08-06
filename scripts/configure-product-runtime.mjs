@@ -1,7 +1,7 @@
 export async function configureProductRuntime(request, adapterKind, agentProfileIds) {
   for (const agentProfileId of agentProfileIds) {
     let resolved = null
-    for (let attempt = 0; attempt < 80; attempt += 1) {
+    for (let attempt = 0; attempt < 240; attempt += 1) {
       const profile = await request('agents.get', { agentProfileId })
       const configured = await request('agents.runtime.set', {
         commandId: crypto.randomUUID(),

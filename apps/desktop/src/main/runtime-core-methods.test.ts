@@ -7,8 +7,6 @@ describe('Runtime Renderer Core method allowlist', () => {
       'runtime.discovery.rescan',
       'runtime.product.ensure',
       'runtime.product.check',
-      'runtime.antigravityTeam.status',
-      'runtime.antigravityTeam.grantPermission',
       'runtime.pendingExecution.cancel'
     ])
   })

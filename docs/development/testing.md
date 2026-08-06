@@ -48,9 +48,7 @@ pnpm build:desktop
 | `pnpm smoke:antigravity-runtime` | Antigravity + Codex | 包含 Antigravity 到 Codex 换绑 |
 | `pnpm smoke:action-approval` | Codex | 验证越界动作的 Approval 与唯一副作用 |
 | `pnpm smoke:multi-agent` | Codex | 同一 CampTurn 的两个真实并发 AgentRun |
-| `pnpm smoke:team-context` | Codex 默认；支持 OpenCode、Copilot、Claude Code、Antigravity | 用 source/target selector 选择；可开启 Task handoff |
-| `pnpm smoke:antigravity-team` | Antigravity → Antigravity | 显式暂装无凭据 Plugin 与窄权限；验证 A→B→A、普通终端负例并按 exact identity 清理 |
-| `pnpm smoke:team-tasks` | Codex 默认；支持 OpenCode、Copilot、Claude Code | 验证三个 Task Team Tool |
+| `pnpm smoke:builtin-cli` | 全部九种正式 Runtime | 每个真实 AgentRun 发现/describe 同一 catalog，调用十二项 CLI operation，验证冲突 recovery、release fence 与后续 Run 新 lease；任一 Runtime 缺失、未认证或漏项即失败 |
 | `pnpm smoke:skills` | Codex 默认；selector 接受全部九种 Product Runtime | `ROVAI_SKILL_SMOKE_ADAPTERS=all` 会逐一尝试九组真实投递与发现；只有本机 Runtime 已安装、已认证、已接入 AgentRun 且全部通过时才成功 |
 | `pnpm smoke:mcp` | Codex、Claude Code、OpenCode、Copilot；可选 CodeBuddy、Qwen Code | 默认前四种；逐 Run 临时 MCP 配置；OpenCode 默认使用 `opencode/mimo-v2.5-free` |
 | `pnpm smoke:mcp-projection` | Codex、Claude Code、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen Code | 通过真实 Core、Assignment、AgentRun Projection 与 ContextManifest 验证 Rovai 覆盖同名 Runtime 原生 MCP；Codex 另验证双向 stdio/HTTP transport replacement；默认八种 |
@@ -86,8 +84,6 @@ Team Case 可在密封 manifest 中声明 `collaboration` 合同。Runner 将它
 | 环境变量 | 使用者 |
 | --- | --- |
 | `ROVAI_ACP_SMOKE_ADAPTER` | `smoke:acp-runtime` |
-| `ROVAI_TEAM_SOURCE_ADAPTER` / `ROVAI_TEAM_TARGET_ADAPTER` | Team context/task Smoke |
-| `ROVAI_TEAM_TASK_HANDOFF=1` | Team context 的完整 Task 交接 |
 | `ROVAI_SKILL_SMOKE_ADAPTERS` | Skill Runtime 列表或 `all` |
 | `ROVAI_SKILL_SMOKE_MODEL` | Skill Smoke 只选一种 Runtime 时要显式验证的模型 ID |
 | `ROVAI_MCP_SMOKE_ADAPTERS` | MCP Runtime 列表 |

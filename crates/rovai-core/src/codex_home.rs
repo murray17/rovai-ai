@@ -655,8 +655,8 @@ fn sanitize_and_project_config(
 }
 
 fn validate_mcp_name(name: &str) -> Result<()> {
-    if name.trim().is_empty() || name == "rovai_team" || name.contains('\0') {
-        bail!("invalid or reserved Codex MCP server name");
+    if name.trim().is_empty() || name.contains('\0') {
+        bail!("invalid Codex MCP server name");
     }
     Ok(())
 }
@@ -892,7 +892,6 @@ args = ["context7"]
             Some("https://example.test/mcp")
         );
         assert!(!context7.contains_key("command"));
-        assert!(config["mcp_servers"].get("rovai_team").is_none());
         assert_eq!(fs::read(user_home.join(CONFIG_NAME)).unwrap(), original);
         assert_eq!(
             fs::read_link(prepared.path.join("auth.json")).unwrap(),

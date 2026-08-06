@@ -24,6 +24,7 @@ import {
   effectiveCancellingTurnIds,
   optimisticCampMessage,
   reconcileCancellingTurnIds,
+  runtimeRecoveryFromCommandResult,
   SettingsView,
   shouldLoadRuntimeHealth
 } from './App'
@@ -65,7 +66,6 @@ import {
   MembersView,
   RuntimeInstallationsPanel,
   hasDuplicateMemberDisplayName,
-  memberMemorySwitchReducer,
   memberIdentityTargetAgent
 } from './MemberManagement'
 
@@ -841,12 +841,12 @@ describe('task event projections', () => {
       {
         agentProfileId: ready.id, handle: ready.handle, displayName: ready.displayName,
         avatarRef: null, teamRole: '开发者', accent: '#39777a', membershipStatus: 'active', profilePresence: 'present',
-        memberOrder: 0, isDefaultLead: false, memoryWriteEnabled: true, version: 1
+        memberOrder: 0, isDefaultLead: false, version: 1
       },
       {
         agentProfileId: unready.id, handle: unready.handle, displayName: unready.displayName,
         avatarRef: null, teamRole: 'Lead', accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'present',
-        memberOrder: 1, isDefaultLead: true, memoryWriteEnabled: true, version: 1
+        memberOrder: 1, isDefaultLead: true, version: 1
       }
     ]
 
@@ -1165,7 +1165,7 @@ describe('task event projections', () => {
       members: [{
         agentProfileId: 'agent_1', handle: 'luoke', displayName: '洛可', teamRole: 'Lead',
         avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'present', memberOrder: 0,
-        isDefaultLead: true, memoryWriteEnabled: true, version: 1
+        isDefaultLead: true, version: 1
       }],
       tasks: [], messages: [], turns: [], agentRuns: [], inboxMessages: [],
       conversationInputs: [],
@@ -1179,11 +1179,19 @@ describe('task event projections', () => {
       busy: false,
       onSend: async () => undefined,
       onChangeLead: async () => undefined,
-      onSetMemoryWrite: async () => undefined,
       onTasksChanged: async () => undefined,
       onResolveApproval: () => undefined,
       stopping: false,
-      onStop: () => undefined
+      onStop: () => undefined,
+      runtimeRecovery: {
+        campId: 'camp-1',
+        targets: [{
+          agentProfileId: 'agent_1',
+          blockerCode: 'runtime_not_configured'
+        }]
+      },
+      onConfigureRuntime: () => undefined,
+      onDismissRuntimeRecovery: () => undefined
     }))
 
     expect(markup).toContain('给 洛可 发消息')
@@ -1196,7 +1204,51 @@ describe('task event projections', () => {
     expect(markup).toContain('先了解项目')
     expect(markup).toContain('整理成任务')
     expect(markup).toContain('检查工作区')
+    expect(markup).toContain('消息未发送')
+    expect(markup).toContain('1 位目标队员暂时不可执行')
+    expect(markup).toContain('草稿已保留')
+    expect(markup).toContain('尚未配置 Agent 运行时')
+    expect(markup).toContain('配置洛可的 Agent 运行时')
+    expect(markup.indexOf('class="runtime-recovery-dock"')).toBeLessThan(markup.indexOf('class="composer"'))
+    expect(markup).not.toContain('agent_run.runtime_not_ready')
+    expect(markup).not.toContain('agent_1')
     expect(markup).not.toContain('Runtime')
+  })
+
+  it('turns runtime admission rejection into a scoped composer recovery', () => {
+    const result = {
+      commandId: 'command-runtime-recovery',
+      commandType: 'camp.message.send',
+      requestDigest: 'digest',
+      requestDigestVersion: 1,
+      status: 'rejected' as const,
+      code: 'agent_run.runtime_not_ready',
+      payload: {
+        agentProfileId: 'agent_2',
+        conversationId: 'conversation-1',
+        blockerCode: 'runtime_authentication_required',
+        detail: 'raw runtime detail'
+      },
+      resultEntity: null,
+      recordedAt: '2026-08-06T00:00:00Z'
+    }
+
+    expect(runtimeRecoveryFromCommandResult('camp-1', result)).toEqual({
+      campId: 'camp-1',
+      targets: [{
+        agentProfileId: 'agent_2',
+        blockerCode: 'runtime_authentication_required'
+      }]
+    })
+    expect(commandFailureMessage(result)).toBe('目标队员的 Agent 运行时暂不可用。')
+    expect(runtimeRecoveryFromCommandResult('camp-1', {
+      ...result,
+      code: 'camp_message.no_addressable_member'
+    })).toBeNull()
+    expect(runtimeRecoveryFromCommandResult('camp-1', {
+      ...result,
+      payload: { blockerCode: 'runtime_not_configured' }
+    })).toBeNull()
   })
 
   it('summarizes empty Camp runtime readiness without inventing Ready state', () => {
@@ -1204,7 +1256,7 @@ describe('task event projections', () => {
       agentProfileId: 'agent_1', handle: 'luoke', displayName: '洛可', teamRole: 'Lead',
       avatarRef: null, accent: '#D56A4A', membershipStatus: 'active' as const,
       profilePresence: 'present' as const, memberOrder: 0, isDefaultLead: true,
-      memoryWriteEnabled: true, version: 1
+      version: 1
     }
     const ready = {
       ...agentProfile(),
@@ -1249,7 +1301,7 @@ describe('task event projections', () => {
       members: [{
         agentProfileId: profile.id, handle: profile.handle, displayName: profile.displayName, teamRole: 'Lead',
         avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'away', memberOrder: 0,
-        isDefaultLead: false, memoryWriteEnabled: true, version: 1
+        isDefaultLead: false, version: 1
       }],
       tasks: [], messages: [], turns: [], agentRuns: [], inboxMessages: [],
       conversationInputs: [],
@@ -1263,7 +1315,6 @@ describe('task event projections', () => {
       busy: false,
       onSend: async () => undefined,
       onChangeLead: async () => undefined,
-      onSetMemoryWrite: async () => undefined,
       onTasksChanged: async () => undefined,
       onResolveApproval: () => undefined,
       stopping: false,
@@ -1303,7 +1354,7 @@ describe('task event projections', () => {
       members: [{
         agentProfileId: 'agent_2', handle: 'muwa', displayName: '沐瓦', teamRole: '开发者',
         avatarRef: null, accent: '#39777a', membershipStatus: 'active', profilePresence: 'present',
-        memberOrder: 0, isDefaultLead: true, memoryWriteEnabled: true, version: 1
+        memberOrder: 0, isDefaultLead: true, version: 1
       }],
       tasks: [],
       messages: [{
@@ -1380,20 +1431,22 @@ describe('task event projections', () => {
       busy: false,
       onSend: async () => undefined,
       onChangeLead: async () => undefined,
-      onSetMemoryWrite: async () => undefined,
       onTasksChanged: async () => undefined,
       onResolveApproval: () => undefined,
       stopping: false,
-      onStop: () => undefined,
-      onOpenMember: () => undefined
+      onStop: () => undefined
     }))
 
     expect(markup).toContain('aria-label="复制这条消息"')
     expect(markup).toContain('class="message-surface"')
     expect(markup).toContain('class="message-mention-token is-interactive"')
     expect(markup).toContain('data-agent-profile-id="agent_2"')
-    expect(markup).toContain('role="link"')
+    expect(markup).toContain('role="button"')
     expect(markup).toContain('tabindex="0"')
+    expect(markup).toContain('aria-label="查看沐瓦的基础信息"')
+    expect(markup).toContain('title="查看沐瓦的基础信息"')
+    expect(markup).toContain('aria-haspopup="dialog"')
+    expect(markup).not.toContain('role="link"')
     expect(markup.indexOf('class="message-bubble"'))
       .toBeLessThan(markup.indexOf('class="message-copy-button"'))
     expect(markup).toContain('沐瓦的执行过程')
@@ -1484,7 +1537,6 @@ describe('task event projections', () => {
       busy: false,
       onSend: async () => undefined,
       onChangeLead: async () => undefined,
-      onSetMemoryWrite: async () => undefined,
       onTasksChanged: async () => undefined,
       onResolveApproval: () => undefined,
       stopping: false,
@@ -1505,7 +1557,6 @@ describe('task event projections', () => {
       busy: false,
       onSend: async () => undefined,
       onChangeLead: async () => undefined,
-      onSetMemoryWrite: async () => undefined,
       onTasksChanged: async () => undefined,
       onResolveApproval: () => undefined,
       cancellingTurnIds: new Set(['turn-1']),
@@ -1546,7 +1597,6 @@ describe('task event projections', () => {
       busy: false,
       onSend: async () => undefined,
       onChangeLead: async () => undefined,
-      onSetMemoryWrite: async () => undefined,
       onTasksChanged: async () => undefined,
       onResolveApproval: () => undefined,
       stopping: false,
@@ -1580,7 +1630,6 @@ describe('task event projections', () => {
       busy: false,
       onSend: async () => undefined,
       onChangeLead: async () => undefined,
-      onSetMemoryWrite: async () => undefined,
       onTasksChanged: async () => undefined,
       onResolveApproval: () => undefined,
       stopping: false,
@@ -1624,7 +1673,6 @@ describe('task event projections', () => {
       busy: false,
       onSend: async () => undefined,
       onChangeLead: async () => undefined,
-      onSetMemoryWrite: async () => undefined,
       onTasksChanged: async () => undefined,
       onResolveApproval: () => undefined,
       stopping: false,
@@ -1697,7 +1745,6 @@ describe('task event projections', () => {
         profilePresence: 'present',
         memberOrder: index,
         isDefaultLead: index === 0,
-        memoryWriteEnabled: true,
         version: 1
       })),
       tasks: [], messages: [], turns: [], agentRuns: [], inboxMessages: [],
@@ -1712,7 +1759,6 @@ describe('task event projections', () => {
       busy: false,
       onSend: async () => undefined,
       onChangeLead: async () => undefined,
-      onSetMemoryWrite: async () => undefined,
       onTasksChanged: async () => undefined,
       onResolveApproval: () => undefined,
       stopping: false,
@@ -1791,11 +1837,11 @@ describe('task event projections', () => {
       members: [{
         agentProfileId: 'agent_1', handle: 'luoke', displayName: '洛可', teamRole: 'Lead',
         avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'present',
-        memberOrder: 0, isDefaultLead: true, memoryWriteEnabled: true, version: 1
+        memberOrder: 0, isDefaultLead: true, version: 1
       }, {
         agentProfileId: 'agent_2', handle: 'muwa', displayName: '沐瓦', teamRole: '开发者',
         avatarRef: null, accent: '#39777a', membershipStatus: 'active', profilePresence: 'present',
-        memberOrder: 1, isDefaultLead: false, memoryWriteEnabled: true, version: 1
+        memberOrder: 1, isDefaultLead: false, version: 1
       }],
       tasks: [],
       messages: [legacyA2aMessage],
@@ -1834,7 +1880,6 @@ describe('task event projections', () => {
       busy: false,
       onSend: async () => undefined,
       onChangeLead: async () => undefined,
-      onSetMemoryWrite: async () => undefined,
       onTasksChanged: async () => undefined,
       onResolveApproval: () => undefined,
       stopping: false,
@@ -1881,7 +1926,7 @@ describe('task event projections', () => {
       members: [{
         agentProfileId: 'agent_2', handle: 'muwa', displayName: '沐瓦', teamRole: '开发者',
         avatarRef: null, accent: '#39777a', membershipStatus: 'active', profilePresence: 'present', memberOrder: 0,
-        isDefaultLead: true, memoryWriteEnabled: true, version: 1
+        isDefaultLead: true, version: 1
       }],
       tasks: [{
         id: 'task-1', title: '实现 Task 工具', description: '跨消息持续跟踪，不自动唤醒负责人。',
@@ -2374,8 +2419,6 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-label="更换沐瓦的角色图片"')
     expect(markup).toContain('title="更换角色图片"')
     expect(markup).toContain('class="member-runtime-entry-arrow"')
-    expect(markup).toContain('role="switch"')
-    expect(markup).toContain('独立保存，只影响之后创建的 Run。')
     expect(markup).not.toContain('member-detail-avatar-button')
     expect(markup).not.toContain('memory-capability-toggle')
     expect(markup).toContain('>身份</button>')
@@ -2409,33 +2452,6 @@ describe('task event projections', () => {
       .toBeLessThan(markup.indexOf('test-page-notice'))
     expect(markup.indexOf('test-page-notice'))
       .toBeLessThan(markup.indexOf('member-empty'))
-  })
-
-  it('keeps partner memory saving local and rolls back a failed switch change', () => {
-    const initial = {
-      enabled: true,
-      previousEnabled: true,
-      saving: false,
-      error: null
-    }
-    const saving = memberMemorySwitchReducer(initial, { type: 'start', enabled: false })
-    expect(saving).toEqual({
-      enabled: false,
-      previousEnabled: true,
-      saving: true,
-      error: null
-    })
-
-    const failed = memberMemorySwitchReducer(saving, {
-      type: 'failure',
-      error: '保存失败'
-    })
-    expect(failed).toEqual({
-      enabled: true,
-      previousEnabled: true,
-      saving: false,
-      error: '保存失败'
-    })
   })
 
   it('keeps summary model settings folded until advanced settings are expanded', () => {

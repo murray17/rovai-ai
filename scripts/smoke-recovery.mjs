@@ -39,7 +39,7 @@ try {
     body: [
       '执行 Rovai-ai 硬崩溃恢复验收。',
       '必须使用你的 Shell/Bash 工具执行命令 `sleep 20`。',
-      '命令结束后只回复 RECOVERY_OK，不要修改文件，也不要调用 Team Tool。'
+      '命令结束后只回复 RECOVERY_OK，不要修改文件，也不要调用 rovai Built-in CLI。'
     ].join('\n'),
     purpose: 'Prove that one durable AgentRun resumes after the Core process is killed.',
     expectedOutput: 'A public reply containing RECOVERY_OK after the delayed command.'

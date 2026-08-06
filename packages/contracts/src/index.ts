@@ -229,12 +229,6 @@ export interface SetAgentProfileAvatarCommand {
   avatarRef: string | null
 }
 
-export interface SetAgentProfileMemoryWriteCommand {
-  agentProfileId: string
-  expectedVersion: number
-  enabled: boolean
-}
-
 export interface SetAgentProfileRuntimeCommand {
   agentProfileId: string
   expectedVersion: number
@@ -353,13 +347,6 @@ export interface ProductRuntimeAvailability {
   discovery: RuntimeDiscoveryObservation
   installationId: string | null
   reportedVersion: string | null
-  diagnosticCode: string | null
-}
-
-export interface AntigravityTeamConfigStatus {
-  managedConfig: 'ready' | 'not_installed' | 'conflict' | 'invalid'
-  permission: 'ready' | 'consent_required' | 'bundle_incomplete' | 'blocked_by_ask_or_deny' | 'invalid'
-  ambientMcpIsolation: 'preserved_uncontrolled'
   diagnosticCode: string | null
 }
 
@@ -711,7 +698,6 @@ export interface CampMemberView {
   profilePresence: MemberPresence
   memberOrder: number
   isDefaultLead: boolean
-  memoryWriteEnabled: boolean
   version: number
 }
 
@@ -1663,12 +1649,6 @@ export interface MemoryLibraryView {
   capacities: MemoryCapacity[]
 }
 
-export interface MemorySettings {
-  agentMemoryWritesEnabled: boolean
-  version: number
-  updatedAt: string
-}
-
 export interface HearthMemoryProposal {
   id: string
   action: 'add' | 'revise'
@@ -1718,11 +1698,6 @@ export interface MemoryVersionCommand {
   expectedVersion: number
 }
 
-export interface SetMemorySettingsCommand {
-  expectedVersion: number
-  agentMemoryWritesEnabled: boolean
-}
-
 export interface ScheduleMemoryReviewCommand extends MemoryVersionCommand {
   reviewAfter: string | null
 }
@@ -1749,8 +1724,6 @@ export type CoreMethod =
   | 'runtime.discovery.rescan'
   | 'runtime.product.ensure'
   | 'runtime.product.check'
-  | 'runtime.antigravityTeam.status'
-  | 'runtime.antigravityTeam.grantPermission'
   | 'runtime.pendingExecution.cancel'
   | 'agents.list'
   | 'agents.get'
@@ -1758,7 +1731,6 @@ export type CoreMethod =
   | 'agents.create'
   | 'agents.update'
   | 'agents.avatar.set'
-  | 'agents.memoryWrite.set'
   | 'agents.runtime.set'
   | 'agents.runtime.clear'
   | 'agents.presence.set'
@@ -1767,8 +1739,6 @@ export type CoreMethod =
   | 'agents.reorder'
   | 'memory.list'
   | 'memory.get'
-  | 'memory.settings.get'
-  | 'memory.settings.set'
   | 'memory.create'
   | 'memory.revise'
   | 'memory.retire'
@@ -1781,7 +1751,6 @@ export type CoreMethod =
   | 'memory.hearthProposals.reject'
   | 'memory.hearthProposals.rejectBatch'
   | 'memory.export'
-  | 'campMembers.memoryWrite.set'
   | 'runtime.installations.list'
   | 'runtime.installations.create'
   | 'runtime.installations.update'

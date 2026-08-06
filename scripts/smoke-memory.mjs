@@ -15,26 +15,6 @@ try {
   assert((await core.request('memory.hearthProposals.list')).length === 0,
     'Fresh Hearth proposal queue is not empty')
 
-  const settings = await core.request('memory.settings.get')
-  assert(settings.agentMemoryWritesEnabled === true,
-    `Agent Memory writes are not default-on: ${JSON.stringify(settings)}`)
-  const disabled = await core.request('memory.settings.set', {
-    commandId: crypto.randomUUID(),
-    command: {
-      expectedVersion: settings.version,
-      agentMemoryWritesEnabled: false
-    }
-  })
-  assert(disabled.status === 'applied', `Disabling Agent Memory writes failed: ${JSON.stringify(disabled)}`)
-  const enabled = await core.request('memory.settings.set', {
-    commandId: crypto.randomUUID(),
-    command: {
-      expectedVersion: disabled.payload.version,
-      agentMemoryWritesEnabled: true
-    }
-  })
-  assert(enabled.status === 'applied', `Re-enabling Agent Memory writes failed: ${JSON.stringify(enabled)}`)
-
   let secretRejected = false
   try {
     await createMemory(core, {

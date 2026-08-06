@@ -51,7 +51,6 @@ pub const TEAM_TOOL_NAMES: [&str; 12] = [
     "memory.write",
     "memory.propose_hearth",
 ];
-pub const TEAM_CALL_MEMBER_CAPABILITY: &str = "team_tool.call_member";
 pub const TEAM_CALL_MEMBER_MAX_CONTENT_BYTES: usize = 32 * 1024;
 pub const MAX_A2A_DEPTH: i64 = 5;
 pub const MAX_A2A_RUNS_PER_TURN: i64 = PRODUCT_MAX_ACCEPTED_A2A;
@@ -68,19 +67,10 @@ pub struct TeamCallMemberInput {
     pub task_id: Option<String>,
 }
 
-fn runtime_team_tool_reference(adapter_kind: AdapterKind, canonical_name: &str) -> String {
-    match adapter_kind {
-        AdapterKind::OpencodeCli => format!(
-            "OpenCode tool `rovai_team_{}` (canonical `{canonical_name}`)",
-            canonical_name.replace('.', "_")
-        ),
-        AdapterKind::AntigravityApp => format!(
-            "`{}` on MCP Server `rovai_team` (canonical `{canonical_name}`)",
-            canonical_name
-                .strip_prefix("team.")
-                .unwrap_or(canonical_name)
-                .replace('.', "_")
-        ),
+fn runtime_team_tool_reference(_adapter_kind: AdapterKind, canonical_name: &str) -> String {
+    match canonical_name {
+        TEAM_CALL_MEMBER_TOOL_NAME => "`rovai member call`".to_string(),
+        TEAM_LIST_TASKS_TOOL_NAME => "`rovai task list`".to_string(),
         _ => format!("`{canonical_name}`"),
     }
 }
@@ -183,7 +173,7 @@ pub struct TeamTaskToolInvocation<T> {
 }
 
 #[derive(Clone)]
-pub struct TeamToolBindingCredential {
+pub struct BuiltinToolBindingCredential {
     pub native_binding_id: String,
     pub native_binding_generation: i64,
     pub binding_credential: String,
@@ -255,14 +245,12 @@ impl TeamToolService {
         native_binding_id: &str,
         binding_credential: &str,
         runtime_tool_call_id: &str,
-        required_capability: &str,
     ) -> Result<AuthenticatedTeamToolRun> {
         validate_invocation_identity(native_binding_id, binding_credential, runtime_tool_call_id)?;
         let identity = resolve_sender_identity(
             database.connection(),
             native_binding_id,
             &credential_digest(binding_credential),
-            Some(required_capability),
             None,
         )?;
         Ok(AuthenticatedTeamToolRun {
@@ -286,7 +274,6 @@ impl TeamToolService {
             native_binding_id,
             &credential_digest(binding_credential),
             None,
-            None,
         )?;
         Ok(AuthenticatedTeamToolRun {
             camp_id: identity.camp_id,
@@ -305,26 +292,6 @@ impl TeamToolService {
         agent_run_id: &str,
         execution_epoch: i64,
     ) -> Result<AuthenticatedTeamToolRun> {
-        self.authenticate_attested_binding_with_capability(
-            database,
-            native_binding_id,
-            binding_credential,
-            runtime_tool_call_id,
-            (agent_run_id, execution_epoch),
-            None,
-        )
-    }
-
-    pub fn authenticate_attested_binding_with_capability(
-        &self,
-        database: &Database,
-        native_binding_id: &str,
-        binding_credential: &str,
-        runtime_tool_call_id: &str,
-        attested_run: (&str, i64),
-        required_capability: Option<&str>,
-    ) -> Result<AuthenticatedTeamToolRun> {
-        let (agent_run_id, execution_epoch) = attested_run;
         if agent_run_id.trim().is_empty() || execution_epoch <= 0 {
             return Err(invocation_error(
                 "team_tool.invalid_attested_run",
@@ -336,7 +303,6 @@ impl TeamToolService {
             database.connection(),
             native_binding_id,
             &credential_digest(binding_credential),
-            required_capability,
             Some((agent_run_id, execution_epoch)),
         )?;
         Ok(AuthenticatedTeamToolRun {
@@ -569,10 +535,9 @@ impl TeamToolService {
         })
     }
 
-    /// Reserves or reuses the Native Binding and derives its Team Tool
+    /// Reserves or reuses the Native Binding and derives its private Core
     /// credential for this Rovai-ai process. The credential is stable for the
-    /// lifetime of a compatible Native Binding so a provider may safely reuse
-    /// its stdio MCP process across AgentRuns. It changes when the Binding is
+    /// lifetime of a compatible Native Binding and changes when that Binding is
     /// replaced or after Rovai-ai restarts. A newly reserved Binding is
     /// deliberately unusable until the Adapter attaches a concrete Native
     /// Session through `BindNativeSessionCommand`.
@@ -582,33 +547,8 @@ impl TeamToolService {
         agent_run_id: &str,
         execution_epoch: i64,
         force_new_binding: bool,
-    ) -> Result<TeamToolBindingCredential> {
-        self.prepare_binding(
-            database,
-            agent_run_id,
-            execution_epoch,
-            force_new_binding,
-            true,
-        )
-    }
-
-    /// Reserves or reuses a Native Binding for an Adapter that does not expose
-    /// Rovai-ai Team Tools. The returned secret remains private to Core and is
-    /// used only to bind Context/Memory evidence to the Native Session.
-    pub fn prepare_native_binding_credential(
-        &self,
-        database: &mut Database,
-        agent_run_id: &str,
-        execution_epoch: i64,
-        force_new_binding: bool,
-    ) -> Result<TeamToolBindingCredential> {
-        self.prepare_binding(
-            database,
-            agent_run_id,
-            execution_epoch,
-            force_new_binding,
-            false,
-        )
+    ) -> Result<BuiltinToolBindingCredential> {
+        self.prepare_binding(database, agent_run_id, execution_epoch, force_new_binding)
     }
 
     fn prepare_binding(
@@ -617,8 +557,7 @@ impl TeamToolService {
         agent_run_id: &str,
         execution_epoch: i64,
         force_new_binding: bool,
-        require_team_tool: bool,
-    ) -> Result<TeamToolBindingCredential> {
+    ) -> Result<BuiltinToolBindingCredential> {
         if agent_run_id.trim().is_empty() || execution_epoch <= 0 {
             return Err(invocation_error(
                 "team_tool.invalid_binding_request",
@@ -702,7 +641,7 @@ impl TeamToolService {
             current_session_compatibility_key,
             conversation_version,
             adapter_kind,
-            capabilities,
+            _capabilities,
             frozen_installation_id,
             frozen_compatibility_digest,
             frozen_installation_generation,
@@ -714,13 +653,7 @@ impl TeamToolService {
                 "AgentRun is not current and active",
             ));
         };
-        if require_team_tool {
-            ensure_runtime_supports_team_tool(adapter_kind.as_deref(), capabilities.as_deref())?;
-        } else {
-            adapter_kind
-                .context("AgentRun has no frozen Runtime Adapter")?
-                .parse::<AdapterKind>()?;
-        }
+        ensure_runtime_is_frozen(adapter_kind.as_deref())?;
         let frozen_installation_id = frozen_installation_id
             .context("Team Tool AgentRun has no frozen Runtime installation")?;
         let frozen_compatibility_digest = frozen_compatibility_digest
@@ -855,14 +788,14 @@ impl TeamToolService {
             append_domain_event(
                 &transaction,
                 if binding_replaced {
-                    "team_tool.binding_credential_issued"
+                    "builtin_tool.binding_credential_issued"
                 } else {
-                    "team_tool.binding_credential_refreshed"
+                    "builtin_tool.binding_credential_refreshed"
                 },
                 Some(&camp_id),
                 Some(("conversation", &conversation_id)),
                 &ActorRef::System {
-                    component_id: "team-tool-credential-issuer".to_string(),
+                    component_id: "builtin-tool-credential-issuer".to_string(),
                 },
                 None,
                 &json!({
@@ -876,7 +809,7 @@ impl TeamToolService {
             )?;
         }
         transaction.commit()?;
-        Ok(TeamToolBindingCredential {
+        Ok(BuiltinToolBindingCredential {
             native_binding_id: binding_id,
             native_binding_generation: generation,
             binding_credential: credential,
@@ -901,7 +834,7 @@ impl TeamToolService {
         database: &mut Database,
         agent_run_id: &str,
         execution_epoch: i64,
-    ) -> Result<TeamToolBindingCredential> {
+    ) -> Result<BuiltinToolBindingCredential> {
         self.prepare_binding_credential(database, agent_run_id, execution_epoch, false)
     }
 
@@ -989,7 +922,6 @@ impl TeamToolService {
             database.connection(),
             &invocation.native_binding_id,
             &supplied_credential_digest,
-            Some("member.call"),
             attested_run,
         )?;
         let envelope = CommandEnvelope {
@@ -1009,7 +941,6 @@ impl TeamToolService {
                 transaction,
                 &envelope.payload.native_binding_id,
                 &envelope.payload.credential_digest,
-                Some("member.call"),
                 attested_run,
             ) {
                 Ok(current) => current,
@@ -1537,7 +1468,6 @@ impl TeamToolService {
             database.connection(),
             &invocation.native_binding_id,
             &supplied_credential_digest,
-            None,
             attested_run,
         )?;
         let envelope = CommandEnvelope {
@@ -1593,7 +1523,6 @@ impl TeamToolService {
             database.connection(),
             &invocation.native_binding_id,
             &supplied_credential_digest,
-            None,
             attested_run,
         )?;
         if invocation.input.clear_assignee
@@ -1670,7 +1599,6 @@ impl TeamToolService {
             database.connection(),
             &invocation.native_binding_id,
             &supplied_credential_digest,
-            None,
             attested_run,
         )?;
         if invocation.input.unassigned_only
@@ -1783,14 +1711,12 @@ fn resolve_sender_identity(
     connection: &Connection,
     native_binding_id: &str,
     credential_digest: &str,
-    required_capability: Option<&str>,
     attested_run: Option<(&str, i64)>,
 ) -> Result<SenderIdentity> {
     resolve_sender_identity_by_digest(
         connection,
         native_binding_id,
         credential_digest,
-        required_capability,
         attested_run,
     )
 }
@@ -1799,7 +1725,6 @@ fn resolve_sender_identity_by_digest(
     connection: &Connection,
     native_binding_id: &str,
     credential_digest: &str,
-    required_capability: Option<&str>,
     attested_run: Option<(&str, i64)>,
 ) -> Result<SenderIdentity> {
     let identity = connection
@@ -1862,16 +1787,13 @@ fn resolve_sender_identity_by_digest(
             },
         )
         .optional()?;
-    let Some((identity, adapter_kind, capabilities, effective_config)) = identity else {
+    let Some((identity, adapter_kind, _capabilities, _effective_config)) = identity else {
         return Err(invocation_error(
             "team_tool.binding_fenced",
             "Native Binding credential does not resolve to one current active AgentRun",
         ));
     };
-    ensure_runtime_supports_team_tool(adapter_kind.as_deref(), capabilities.as_deref())?;
-    if let Some(required_capability) = required_capability {
-        ensure_agent_has_capability(&effective_config, required_capability)?;
-    }
+    ensure_runtime_is_frozen(adapter_kind.as_deref())?;
     Ok(identity)
 }
 
@@ -1942,10 +1864,7 @@ fn ensure_recipient_conversation(
     Ok((conversation_id, true))
 }
 
-fn ensure_runtime_supports_team_tool(
-    adapter_kind: Option<&str>,
-    capabilities_json: Option<&str>,
-) -> Result<()> {
+fn ensure_runtime_is_frozen(adapter_kind: Option<&str>) -> Result<()> {
     let Some(adapter_kind) = adapter_kind else {
         return Err(invocation_error(
             "team_tool.runtime_not_frozen",
@@ -1953,42 +1872,6 @@ fn ensure_runtime_supports_team_tool(
         ));
     };
     let _adapter_kind = adapter_kind.parse::<AdapterKind>()?;
-    let capabilities = capabilities_json
-        .map(serde_json::from_str::<Vec<String>>)
-        .transpose()
-        .context("AgentRun frozen Runtime capabilities are invalid")?
-        .unwrap_or_default();
-    if !capabilities
-        .iter()
-        .any(|capability| capability == TEAM_CALL_MEMBER_CAPABILITY)
-    {
-        return Err(invocation_error(
-            "team_tool.adapter_unsupported",
-            "AgentRun frozen Runtime does not advertise Team Tool support",
-        ));
-    }
-    Ok(())
-}
-
-fn ensure_agent_has_capability(
-    effective_config_json: &str,
-    required_capability: &str,
-) -> Result<()> {
-    let effective_config: Value = serde_json::from_str(effective_config_json)
-        .context("AgentRun effective configuration is invalid")?;
-    if !effective_config["capabilities"]
-        .as_array()
-        .is_some_and(|capabilities| {
-            capabilities
-                .iter()
-                .any(|capability| capability.as_str() == Some(required_capability))
-        })
-    {
-        return Err(invocation_error(
-            "team_tool.capability_denied",
-            &format!("AgentRun does not have the {required_capability} capability"),
-        ));
-    }
     Ok(())
 }
 
@@ -2026,7 +1909,7 @@ fn team_command_id(
         "credentialDigest": credential_digest,
         "runtimeToolCallId": runtime_tool_call_id,
     }))?;
-    Ok(format!("team-tool-{digest}"))
+    Ok(format!("builtin-tool-{digest}"))
 }
 
 fn load_recorded_team_command_identity(
@@ -2125,7 +2008,7 @@ mod tests {
         task_id: String,
         source_run_id: String,
         source_epoch: i64,
-        credential: TeamToolBindingCredential,
+        credential: BuiltinToolBindingCredential,
     }
 
     impl Fixture {
@@ -2136,7 +2019,6 @@ mod tests {
             std::fs::create_dir_all(&workspace).expect("workspace should exist");
             let mut database = Database::open(&directory).expect("database should open");
             configure_test_runtime(&database, &["agent_1", "agent_2"]);
-            add_team_tool_capability(&database);
             let collaboration = CollaborationService::default();
             let camp = collaboration
                 .create_camp(
@@ -2320,7 +2202,7 @@ mod tests {
             &mut self,
             agent_run_id: &str,
             native_session_id: &str,
-        ) -> (i64, TeamToolBindingCredential) {
+        ) -> (i64, BuiltinToolBindingCredential) {
             let runtime = ExecutionRuntimeService::default();
             let candidate = runtime
                 .list_dispatchable_agent_runs(&self.database, 100)
@@ -2498,42 +2380,19 @@ mod tests {
     }
 
     #[test]
-    fn member_call_expected_output_names_runtime_callable_without_weakening_canonical_identity() {
+    fn member_call_expected_output_names_the_cli_command_for_every_runtime() {
         let opencode = member_call_expected_output(AdapterKind::OpencodeCli);
-        assert!(opencode.contains("OpenCode tool `rovai_team_team_call_member`"));
-        assert!(opencode.contains("canonical `team.call_member`"));
+        assert!(opencode.contains("`rovai member call`"));
         assert!(opencode.contains("not the default action"));
         assert!(opencode.contains("continue acting or make a decision"));
         assert!(opencode.contains("acknowledge receipt"));
-        assert!(opencode.contains("`rovai_team_team_list_tasks`"));
+        assert!(opencode.contains("`rovai task list`"));
 
         let antigravity = member_call_expected_output(AdapterKind::AntigravityApp);
-        assert!(antigravity.contains("`call_member` on MCP Server `rovai_team`"));
-        assert!(antigravity.contains("canonical `team.call_member`"));
+        assert!(antigravity.contains("`rovai member call`"));
 
         let codex = member_call_expected_output(AdapterKind::CodexCli);
-        assert!(codex.contains("`team.call_member` is not the default action"));
-        assert!(!codex.contains("rovai_team_team_call_member"));
-    }
-
-    #[test]
-    fn sender_gate_uses_frozen_capability_instead_of_adapter_allowlist() {
-        ensure_runtime_supports_team_tool(
-            Some(AdapterKind::AntigravityApp.as_str()),
-            Some(r#"["team_tool.call_member"]"#),
-        )
-        .expect("a future Antigravity App Host can advertise verified Team MCP support");
-
-        let error = ensure_runtime_supports_team_tool(
-            Some(AdapterKind::AntigravityApp.as_str()),
-            Some("[]"),
-        )
-        .expect_err("the current companion remains blocked without the frozen capability");
-        assert!(
-            error
-                .to_string()
-                .contains("does not advertise Team Tool support")
-        );
+        assert!(codex.contains("`rovai member call`"));
     }
 
     #[test]
@@ -2542,7 +2401,7 @@ mod tests {
             TeamToolService::update_task_input_schema()
                 .get("anyOf")
                 .is_none(),
-            "Claude Code drops an MCP tool whose root input schema uses anyOf"
+            "direct CLI input must remain representable without a root anyOf"
         );
         for schema in [
             TeamToolService::create_task_input_schema(),
@@ -2766,7 +2625,7 @@ mod tests {
     }
 
     #[test]
-    fn task_tool_write_obeys_frozen_capability_and_version_fencing() {
+    fn task_tool_write_is_available_to_every_member_and_keeps_version_fencing() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
         let current_config: String = fixture
@@ -2794,18 +2653,27 @@ mod tests {
                 ],
             )
             .unwrap();
-        let denied_invocation = fixture.task_invocation(
-            "capability-revoked",
+        let allowed_invocation = fixture.task_invocation(
+            "capability-list-does-not-gate-builtin-cli",
             TeamCreateTaskInput {
                 title: "Must not exist".to_string(),
                 description: String::new(),
                 assignee_agent_id: None,
             },
         );
-        let denied = service
-            .create_task(&mut fixture.database, &denied_invocation)
+        let allowed = service
+            .create_task(&mut fixture.database, &allowed_invocation)
             .unwrap();
-        assert_eq!(denied.result.code, "command.capability_denied");
+        assert_eq!(allowed.result.status, CommandResultStatus::Applied);
+        let current_version: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT version FROM task WHERE id = ?1",
+                [&fixture.task_id],
+                |row| row.get(0),
+            )
+            .unwrap();
 
         let stale_invocation = fixture.task_invocation(
             "stale-task-version",
@@ -2823,6 +2691,8 @@ mod tests {
             .update_task(&mut fixture.database, &stale_invocation)
             .unwrap();
         assert_eq!(stale.result.code, "task.version_conflict");
+        assert_eq!(stale.result.payload["taskId"], fixture.task_id);
+        assert_eq!(stale.result.payload["currentVersion"], current_version);
     }
 
     #[test]
@@ -3564,7 +3434,7 @@ mod tests {
     }
 
     #[test]
-    fn compatible_native_binding_reuses_the_bridge_credential() {
+    fn compatible_native_binding_reuses_the_core_credential() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
         let original_binding_id = fixture.credential.native_binding_id.clone();
@@ -3590,7 +3460,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_injection_does_not_grant_the_inbox_send_capability() {
+    fn builtin_cli_is_not_gated_by_the_legacy_member_capability_list() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
         let effective_config_json: String = fixture
@@ -3622,13 +3492,13 @@ mod tests {
                 fixture.source_epoch,
             )
             .expect("supported Runtime should still receive the additive Team Tool");
-        let denied = service
+        let accepted = service
             .call_member(
                 &mut fixture.database,
                 &TeamToolInvocation {
                     native_binding_id: credential.native_binding_id,
                     binding_credential: credential.binding_credential,
-                    runtime_tool_call_id: "capability-denied".to_string(),
+                    runtime_tool_call_id: "member-capabilities-not-consulted".to_string(),
                     input: TeamCallMemberInput {
                         recipient: "agent_2".to_string(),
                         content: "This request has no authority".to_string(),
@@ -3636,14 +3506,8 @@ mod tests {
                     },
                 },
             )
-            .expect_err("tool presence must not grant member.call");
-        assert_eq!(
-            denied
-                .downcast_ref::<TeamToolInvocationError>()
-                .unwrap()
-                .code,
-            "team_tool.capability_denied"
-        );
+            .expect("every active member can invoke the built-in CLI");
+        assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
     }
 
     #[test]
@@ -4968,10 +4832,6 @@ mod tests {
                 )
                 .expect("first Proposal should be saved");
             assert_eq!(first.result.status, CommandResultStatus::Accepted);
-            assert_eq!(
-                first.result.payload["rovaiTeamTool"],
-                MEMORY_PROPOSE_CHANGE_TOOL_NAME
-            );
             assert_eq!(first.result.payload["effective"], false);
             assert_eq!(
                 fixture
@@ -5572,28 +5432,6 @@ mod tests {
             .unwrap();
         assert_eq!(camp_count, 0);
         assert_eq!(foreign_key_violations, 0);
-    }
-
-    fn add_team_tool_capability(database: &Database) {
-        let capabilities_json: String = database
-            .connection()
-            .query_row(
-                "SELECT capabilities_json FROM adapter_capability_snapshot WHERE installation_id = 'adapter-test-codex'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let mut capabilities: Vec<String> = serde_json::from_str(&capabilities_json).unwrap();
-        capabilities.push(TEAM_CALL_MEMBER_CAPABILITY.to_string());
-        capabilities.sort();
-        capabilities.dedup();
-        database
-            .connection()
-            .execute(
-                "UPDATE adapter_capability_snapshot SET capabilities_json = ?1 WHERE installation_id = 'adapter-test-codex'",
-                [serde_json::to_string(&capabilities).unwrap()],
-            )
-            .unwrap();
     }
 
     fn user_envelope<P>(command_id: &str, camp_id: Option<&str>, payload: P) -> CommandEnvelope<P> {
