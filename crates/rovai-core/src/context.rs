@@ -497,6 +497,13 @@ impl ContextService {
         {
             originating_public_user_message = None;
         }
+        apply_public_history_budget(
+            &mut recent_messages,
+            &mut originating_public_user_message,
+            &mut reference_closure,
+            &mut omission_entries,
+            profile.max_public_history_chars,
+        );
         let current_input = load_current_input(database, &snapshot)?;
         let attachment_refs = load_current_attachment_refs(database, &current_input)?;
         let attachment_paths = attachment_refs
@@ -521,49 +528,6 @@ impl ContextService {
         } else {
             None
         };
-
-        loop {
-            let origin_is_recent = originating_public_user_message
-                .as_ref()
-                .is_some_and(|origin| {
-                    recent_messages
-                        .iter()
-                        .any(|message| message.message_id == origin.message_id)
-                });
-            let history_chars = recent_messages
-                .iter()
-                .map(|message| unicode_scalar_count(&message.body))
-                .sum::<usize>()
-                + originating_public_user_message
-                    .as_ref()
-                    .filter(|_| !origin_is_recent)
-                    .map_or(0, |message| unicode_scalar_count(&message.body))
-                + reference_closure
-                    .iter()
-                    .map(|entry| unicode_scalar_count(&entry.message.body))
-                    .sum::<usize>();
-            if history_chars <= profile.max_public_history_chars {
-                break;
-            }
-            if !recent_messages.is_empty() {
-                recent_messages.remove(0);
-            } else if let Some(origin) = originating_public_user_message.take() {
-                omission_entries.push(ContextOmission {
-                    kind: "public_history",
-                    message_ids: vec![origin.message_id],
-                    reason: "history_budget",
-                });
-            } else if reference_closure.len() > 1 {
-                let removed = reference_closure.pop().expect("closure is non-empty");
-                omission_entries.push(ContextOmission {
-                    kind: "reference_closure",
-                    message_ids: vec![removed.message.message_id],
-                    reason: "history_budget",
-                });
-            } else {
-                break;
-            }
-        }
 
         let (shared_conversation, payload, runtime_payload) = loop {
             let origin_is_recent = originating_public_user_message
@@ -959,20 +923,26 @@ impl ContextService {
         {
             originating_public_user_message = None;
         }
+        apply_public_history_budget(
+            &mut recent_messages,
+            &mut originating_public_user_message,
+            &mut reference_closure,
+            &mut omission_entries,
+            profile.max_public_history_chars,
+        );
         let current_input = load_current_input(transaction, &snapshot)?;
         let attachment_refs = load_current_attachment_refs(transaction, &current_input)?;
         let attachment_paths = attachment_refs
             .iter()
             .map(|attachment| attachment.path.clone())
             .collect::<Vec<_>>();
-        let collaboration_state =
-            if requires_new_native_session
-                || snapshot.native_member_state_digest.as_deref() != Some(members_digest.as_str())
-            {
-                Some(build_collaboration_state(&members))
-            } else {
-                None
-            };
+        let collaboration_state = if requires_new_native_session
+            || snapshot.native_member_state_digest.as_deref() != Some(members_digest.as_str())
+        {
+            Some(build_collaboration_state(&members))
+        } else {
+            None
+        };
         let run_notices = build_run_notices(
             transaction,
             &snapshot,
@@ -2526,6 +2496,61 @@ struct SharedConversation {
     omission_entries: Vec<ContextOmission>,
 }
 
+/// Apply the Profile v2 public-history contract before any transport-specific
+/// Runtime byte gate. Both direct/user Runs and pre-Run A2A Delivery use this
+/// seam, so neither path can silently exceed the 24,000 Unicode-scalar
+/// history budget while still fitting its larger serialized payload limit.
+fn apply_public_history_budget(
+    recent_messages: &mut Vec<SharedMessage>,
+    originating_public_user_message: &mut Option<SharedMessage>,
+    reference_closure: &mut Vec<ReferenceClosureMessage>,
+    omission_entries: &mut Vec<ContextOmission>,
+    max_public_history_chars: usize,
+) {
+    loop {
+        let origin_is_recent = originating_public_user_message
+            .as_ref()
+            .is_some_and(|origin| {
+                recent_messages
+                    .iter()
+                    .any(|message| message.message_id == origin.message_id)
+            });
+        let history_chars = recent_messages
+            .iter()
+            .map(|message| unicode_scalar_count(&message.body))
+            .sum::<usize>()
+            + originating_public_user_message
+                .as_ref()
+                .filter(|_| !origin_is_recent)
+                .map_or(0, |message| unicode_scalar_count(&message.body))
+            + reference_closure
+                .iter()
+                .map(|entry| unicode_scalar_count(&entry.message.body))
+                .sum::<usize>();
+        if history_chars <= max_public_history_chars {
+            return;
+        }
+        if !recent_messages.is_empty() {
+            recent_messages.remove(0);
+        } else if let Some(origin) = originating_public_user_message.take() {
+            omission_entries.push(ContextOmission {
+                kind: "public_history",
+                message_ids: vec![origin.message_id],
+                reason: "history_budget",
+            });
+        } else if reference_closure.len() > 1 {
+            let removed = reference_closure.pop().expect("closure is non-empty");
+            omission_entries.push(ContextOmission {
+                kind: "reference_closure",
+                message_ids: vec![removed.message.message_id],
+                reason: "history_budget",
+            });
+        } else {
+            return;
+        }
+    }
+}
+
 fn load_public_reference_closure<R: ContextReadConnection>(
     database: &R,
     snapshot: &RunSnapshot,
@@ -4039,7 +4064,7 @@ mod tests {
             CollaborationService, ExecutionRequest, TestCampMessageAddress, TestCampMessageCommand,
         },
         command::{ActorRef, CommandEnvelope, CommandResultStatus},
-        context_delivery::CONTEXT_DELIVERY_PROFILE_V1,
+        context_delivery::{CONTEXT_DELIVERY_PROFILE_V1, CONTEXT_DELIVERY_PROFILE_V2},
         mcp::{
             CreateMcpServerParams, McpConfigStore, McpMutationResult, SetMcpAssignmentParams,
             SetMcpServerEnabledParams,
@@ -7028,6 +7053,67 @@ mod tests {
         assert_eq!(shared["omittedMessages"]["sequenceStart"], 2);
         assert_eq!(shared["omittedMessages"]["sequenceEnd"], 4);
         std::fs::remove_dir_all(fixture.directory).unwrap();
+    }
+
+    #[test]
+    fn public_history_budget_is_shared_and_profile_v2_bounded() {
+        fn message(id: &str) -> SharedMessage {
+            let body = "界".repeat(CONTEXT_DELIVERY_PROFILE_V2.max_message_body_chars);
+            SharedMessage {
+                message_id: id.to_string(),
+                sequence: 0,
+                sender_type: "user".to_string(),
+                sender_id: "user-1".to_string(),
+                source_conversation_id: None,
+                reply_to_message_id: None,
+                attachments: Vec::new(),
+                body: body.clone(),
+                body_length: body.chars().count(),
+                body_truncated: false,
+                next_body_offset: None,
+            }
+        }
+
+        let mut recent_messages = (0..15)
+            .map(|index| message(&format!("recent-{index}")))
+            .collect::<Vec<_>>();
+        let mut originating_public_user_message = Some(message("origin"));
+        let mut reference_closure = (0..3)
+            .map(|distance| ReferenceClosureMessage {
+                distance: distance + 1,
+                message: message(&format!("closure-{distance}")),
+            })
+            .collect::<Vec<_>>();
+        let mut omission_entries = Vec::new();
+
+        apply_public_history_budget(
+            &mut recent_messages,
+            &mut originating_public_user_message,
+            &mut reference_closure,
+            &mut omission_entries,
+            CONTEXT_DELIVERY_PROFILE_V2.max_public_history_chars,
+        );
+
+        assert_eq!(recent_messages.len(), 8);
+        assert_eq!(reference_closure.len(), 3);
+        assert!(originating_public_user_message.is_some());
+        assert_eq!(
+            recent_messages
+                .iter()
+                .map(|message| unicode_scalar_count(&message.body))
+                .sum::<usize>()
+                + originating_public_user_message
+                    .as_ref()
+                    .map_or(0, |message| unicode_scalar_count(&message.body))
+                + reference_closure
+                    .iter()
+                    .map(|entry| unicode_scalar_count(&entry.message.body))
+                    .sum::<usize>(),
+            CONTEXT_DELIVERY_PROFILE_V2.max_public_history_chars
+        );
+        // Recent-message omissions are represented by the existing sequence
+        // gap; explicit omission entries are reserved for origin/closure.
+        assert!(omission_entries.is_empty());
     }
 
     #[test]

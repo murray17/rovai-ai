@@ -48,7 +48,8 @@ last_updated: 2026-08-07
 ## Checkpoint 4：Context Delivery Profile v2
 
 - [x] 增加 v2 immutable resolver 与 shared fixture；
-- [x] 实现最多 3 条 direct-parent closure、预算优先级、omission 和 stable digest；
+- [x] 通过 ContextService 共享的 history-budget seam 固定 15 / 24,000 Unicode scalars /
+  2,000 / 最多 3 条 direct-parent closure，并记录 omission 与 stable digest；
 - [x] 在 Delivery dispatch attempt 内先冻结唯一权威的完整 Dynamic Context 选择与 Runtime
   payload，再创建 AgentRun；Runtime 只把同一冻结字节封装成正式 ContextManifest，不重新选历史；
 - [x] direct parent/mandatory structure 无法容纳时 terminal `context_payload_too_large`，不创建
