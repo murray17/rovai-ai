@@ -4,19 +4,20 @@ use anyhow::{Context, Result};
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde::Serialize;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
-    agent_profile::resolve_frozen_runtime,
-    camp_content::{StructuredCampMessageSegment, canonical_content_digest},
+    agent_profile::{AdapterKind, resolve_frozen_runtime},
+    camp_content::{StructuredCampMessageSegment, canonical_content_digest, normalize_content},
     collaboration::{append_domain_event, build_effective_config},
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
         DomainCommandGateway, EntityReference, canonical_json_digest, sealed,
     },
-    context::DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
-    context_delivery::{body_prefix, current_context_delivery_profile, unicode_scalar_count},
+    context::{
+        CharterDeliveryMode, ContextService, DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+        DeliveryContextPreview, FrozenDeliveryContext,
+    },
     context_index::index_camp_message,
     conversation_input::capture_run_runtime_basis,
     db::Database,
@@ -355,9 +356,7 @@ struct DispatchDelivery {
     camp_id: String,
     camp_turn_id: String,
     message_id: String,
-    message_body: String,
     message_sequence: i64,
-    reply_to_camp_message_id: Option<String>,
     recipient_agent_id: String,
     task_id: Option<String>,
     source_agent_run_id: String,
@@ -392,8 +391,17 @@ struct AddressingOffender {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct InlineAddressing {
-    valid_order: Vec<String>,
+    occurrences: Vec<InlineAddressingOccurrence>,
     malformed: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InlineAddressingOccurrence {
+    agent_id: String,
+    start_byte: usize,
+    end_byte: usize,
+    ordinal: usize,
 }
 
 pub fn persist_public_a2a_message(
@@ -407,7 +415,12 @@ pub fn persist_public_a2a_message(
             .iter()
             .map(|recipient| recipient.trim().to_string()),
     );
-    let inline_order = stable_unique(inline.valid_order);
+    let inline_order = stable_unique(
+        inline
+            .occurrences
+            .iter()
+            .map(|occurrence| occurrence.agent_id.clone()),
+    );
     let mut offenders = inline
         .malformed
         .into_iter()
@@ -433,21 +446,15 @@ pub fn persist_public_a2a_message(
             let reply = transaction
                 .query_row(
                     r#"
-                    SELECT author_type, author_id, source_operation_id
+                    SELECT author_type, author_id
                     FROM camp_message
                     WHERE id = ?1 AND camp_id = ?2 AND tombstoned_at IS NULL
                     "#,
                     params![message_id, request.camp_id],
-                    |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, Option<String>>(2)?,
-                        ))
-                    },
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
                 )
                 .optional()?;
-            let Some((author_type, author_id, source_operation_id)) = reply else {
+            let Some((author_type, author_id)) = reply else {
                 return Ok(rejected_with_details(
                     "message.reply_invalid",
                     "replyToCampMessageId must identify a visible message in the current Camp",
@@ -457,7 +464,7 @@ pub fn persist_public_a2a_message(
                     }),
                 ));
             };
-            (author_type == "agent" && source_operation_id.is_some()).then_some(author_id)
+            (author_type == "agent").then_some(author_id)
         }
         None => None,
     };
@@ -690,9 +697,7 @@ pub fn persist_public_a2a_message(
     )?;
 
     let message_id = Uuid::new_v4().to_string();
-    let content = vec![StructuredCampMessageSegment::Text {
-        text: request.body.to_string(),
-    }];
+    let content = structured_content_from_inline_addressing(request.body, &inline.occurrences);
     let structured_content_json = serde_json::to_string(&content)?;
     let content_digest = canonical_content_digest(&content)?;
     let recipients_json = serde_json::to_string(&effective_recipients)?;
@@ -707,6 +712,7 @@ pub fn persist_public_a2a_message(
         .collect::<Vec<_>>();
     let recipient_presentation = json!({
         "inlineOrder": inline_order,
+        "inlineOccurrences": inline.occurrences,
         "explicitOrder": explicit_order,
         "footerRecipients": footer_recipients,
         "replyDefaultRecipient": reply_default,
@@ -1477,24 +1483,6 @@ fn process_dispatch_attempt(
         });
     }
 
-    let context_manifest_id =
-        match build_delivery_context_manifest(&transaction, &delivery, &conversation_id, &now)? {
-            Some(manifest_id) => manifest_id,
-            None => {
-                let outcome = terminal_dispatch(
-                    &transaction,
-                    &delivery,
-                    attempt_id,
-                    "failed",
-                    "context_payload_too_large",
-                    &actor,
-                    &now,
-                )?;
-                transaction.commit()?;
-                return Ok(outcome);
-            }
-        };
-
     let effective_config = build_effective_config(
         &transaction,
         &conversation_id,
@@ -1507,12 +1495,93 @@ fn process_dispatch_attempt(
         caller_runtime_basis.workspace.execution_root.clone(),
     );
     workspace.validate()?;
-    let conversation_boundary: i64 = transaction.query_row(
+    let current_conversation_boundary: i64 = transaction.query_row(
         "SELECT last_message_sequence FROM conversation WHERE id = ?1",
         [&conversation_id],
         |row| row.get(0),
     )?;
     let agent_run_id = Uuid::new_v4().to_string();
+    let charter_delivery_mode = match runtime.adapter_kind {
+        AdapterKind::AntigravityApp
+        | AdapterKind::OpencodeCli
+        | AdapterKind::CopilotCli
+        | AdapterKind::KiroCli
+        | AdapterKind::QoderCli
+        | AdapterKind::CodebuddyCli
+        | AdapterKind::QwenCode => CharterDeliveryMode::FirstPayload,
+        AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli => CharterDeliveryMode::NativeAppend,
+    };
+    let frozen_snapshot: String = transaction.query_row(
+        "SELECT frozen_snapshot_json FROM message_delivery WHERE id = ?1",
+        [&delivery.id],
+        |row| row.get(0),
+    )?;
+    let mut frozen_snapshot_value: Value = serde_json::from_str(&frozen_snapshot)
+        .context("Message Delivery frozen snapshot is invalid")?;
+    let frozen_context = if let Some(context) = frozen_snapshot_value.get("frozenContext") {
+        serde_json::from_value::<FrozenDeliveryContext>(context.clone())
+            .context("Message Delivery frozen Context is invalid")?
+    } else {
+        let frozen = match ContextService::preflight_delivery_context(
+            &transaction,
+            &DeliveryContextPreview {
+                agent_run_id: &agent_run_id,
+                camp_id: &delivery.camp_id,
+                camp_turn_id: &delivery.camp_turn_id,
+                conversation_id: &conversation_id,
+                agent_id: &delivery.recipient_agent_id,
+                task_id: delivery.task_id.as_deref(),
+                execution_epoch: 1,
+                a2a_parent_agent_run_id: Some(&delivery.source_agent_run_id),
+                a2a_root_agent_run_id: Some(&delivery.a2a_root_agent_run_id),
+                a2a_depth: delivery.a2a_depth,
+                camp_message_boundary_sequence: delivery.message_sequence,
+                conversation_message_boundary_sequence: current_conversation_boundary,
+                trigger_camp_message_id: Some(&delivery.message_id),
+                effective_config: effective_config.clone(),
+                workspace: serde_json::to_value(&workspace)?,
+                runtime_installation_id: Some(runtime.installation_id.as_str()),
+                runtime_binding_compatibility_digest: Some(
+                    runtime.binding_compatibility_digest.as_str(),
+                ),
+                charter_delivery_mode,
+                max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+            },
+        ) {
+            Ok(context) => context,
+            Err(error)
+                if error
+                    .downcast_ref::<crate::context::ContextPayloadTooLarge>()
+                    .is_some() =>
+            {
+                let outcome = terminal_dispatch(
+                    &transaction,
+                    &delivery,
+                    attempt_id,
+                    "failed",
+                    "context_payload_too_large",
+                    &actor,
+                    &now,
+                )?;
+                transaction.commit()?;
+                return Ok(outcome);
+            }
+            Err(error) => return Err(error).context("Delivery Context preflight failed"),
+        };
+        frozen_snapshot_value["frozenContext"] = serde_json::to_value(&frozen)?;
+        transaction.execute(
+            "UPDATE message_delivery SET frozen_snapshot_json = ?2 WHERE id = ?1",
+            params![delivery.id, serde_json::to_string(&frozen_snapshot_value)?],
+        )?;
+        frozen
+    };
+    if frozen_context.charter_delivery_mode != charter_delivery_mode
+        || frozen_context.camp_message_boundary_sequence != delivery.message_sequence
+        || frozen_context.conversation_message_boundary_sequence > current_conversation_boundary
+    {
+        anyhow::bail!("Message Delivery frozen Context no longer matches its dispatch target");
+    }
+    let conversation_boundary = frozen_context.conversation_message_boundary_sequence;
     let expected_output = "Complete the requested work. Use `rovai send` only when publishing a public fact or when a recipient needs the message to continue acting or decide. Acceptance of a Delivery does not imply another Run completed; do not sleep or poll while waiting.";
     transaction.execute(
         r#"
@@ -1605,35 +1674,23 @@ fn process_dispatch_attempt(
     let attempt_updated = transaction.execute(
         r#"
         UPDATE message_delivery_attempt
-        SET status = 'materialized', context_manifest_id = ?3,
-            target_agent_run_id = ?4, ended_at = ?5
+        SET status = 'materialized', context_manifest_id = NULL,
+            target_agent_run_id = ?3, ended_at = ?4
         WHERE id = ?1 AND delivery_id = ?2 AND status = 'attempting'
         "#,
-        params![
-            attempt_id,
-            delivery.id,
-            context_manifest_id,
-            agent_run_id,
-            now
-        ],
+        params![attempt_id, delivery.id, agent_run_id, now],
     )?;
     let delivery_updated = transaction.execute(
         r#"
         UPDATE message_delivery
         SET status = 'running', dispatch_phase = 'materialized',
-            context_manifest_id = ?3, target_agent_run_id = ?4,
+            context_manifest_id = NULL, target_agent_run_id = ?3,
             active_dispatch_attempt_id = NULL,
-            version = version + 1, updated_at = ?5
+            version = version + 1, updated_at = ?4
         WHERE id = ?1 AND active_dispatch_attempt_id = ?2
           AND status = 'pending' AND dispatch_phase = 'attempting'
         "#,
-        params![
-            delivery.id,
-            attempt_id,
-            context_manifest_id,
-            agent_run_id,
-            now
-        ],
+        params![delivery.id, attempt_id, agent_run_id, now],
     )?;
     if attempt_updated != 1 || delivery_updated != 1 {
         anyhow::bail!("Message Delivery changed before AgentRun materialization");
@@ -1647,7 +1704,7 @@ fn process_dispatch_attempt(
         None,
         &json!({
             "attemptId": attempt_id,
-            "contextManifestId": context_manifest_id,
+            "contextFrozen": true,
             "targetAgentRunId": agent_run_id,
             "recipientAgentId": delivery.recipient_agent_id,
         }),
@@ -1683,8 +1740,7 @@ fn load_dispatch_delivery(
         .query_row(
             r#"
             SELECT delivery.id, delivery.camp_id, delivery.camp_turn_id,
-                   delivery.message_id, message.body, message.sequence,
-                   delivery.reply_to_camp_message_id,
+                   delivery.message_id, message.sequence,
                    delivery.recipient_agent_id, delivery.task_id,
                    delivery.source_agent_run_id, delivery.a2a_root_agent_run_id,
                    delivery.a2a_depth, delivery.retry_generation
@@ -1701,15 +1757,13 @@ fn load_dispatch_delivery(
                     camp_id: row.get(1)?,
                     camp_turn_id: row.get(2)?,
                     message_id: row.get(3)?,
-                    message_body: row.get(4)?,
-                    message_sequence: row.get(5)?,
-                    reply_to_camp_message_id: row.get(6)?,
-                    recipient_agent_id: row.get(7)?,
-                    task_id: row.get(8)?,
-                    source_agent_run_id: row.get(9)?,
-                    a2a_root_agent_run_id: row.get(10)?,
-                    a2a_depth: row.get(11)?,
-                    retry_generation: row.get(12)?,
+                    message_sequence: row.get(4)?,
+                    recipient_agent_id: row.get(5)?,
+                    task_id: row.get(6)?,
+                    source_agent_run_id: row.get(7)?,
+                    a2a_root_agent_run_id: row.get(8)?,
+                    a2a_depth: row.get(9)?,
+                    retry_generation: row.get(10)?,
                 })
             },
         )
@@ -1913,314 +1967,6 @@ fn ensure_delivery_conversation(
     Ok(conversation_id)
 }
 
-fn build_delivery_context_manifest(
-    transaction: &Transaction<'_>,
-    delivery: &DispatchDelivery,
-    conversation_id: &str,
-    now: &str,
-) -> Result<Option<String>> {
-    let existing = transaction
-        .query_row(
-            r#"
-            SELECT id FROM message_delivery_context_manifest
-            WHERE delivery_id = ?1
-            "#,
-            [&delivery.id],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?;
-    if existing.is_some() {
-        return Ok(existing);
-    }
-    let profile = current_context_delivery_profile()?;
-    let previous_boundary: i64 = transaction.query_row(
-        "SELECT last_accepted_public_boundary_sequence FROM conversation WHERE id = ?1",
-        [conversation_id],
-        |row| row.get(0),
-    )?;
-
-    let mut closure = Vec::<Value>::new();
-    let mut closure_ids = HashSet::new();
-    let mut omissions = Vec::<Value>::new();
-    let mut next_parent_id = delivery.reply_to_camp_message_id.clone();
-    let mut visited = HashSet::from([delivery.message_id.clone()]);
-    for distance in 1..=profile.max_public_reference_chain_messages {
-        let Some(parent_id) = next_parent_id.take() else {
-            break;
-        };
-        if !visited.insert(parent_id.clone()) {
-            omissions.push(json!({
-                "kind": "reference_closure",
-                "messageIds": [parent_id],
-                "reason": "cycle",
-            }));
-            break;
-        }
-        let row = transaction
-            .query_row(
-                r#"
-                SELECT camp_id, id, sequence, author_type, author_id,
-                       body, reply_to_camp_message_id, tombstoned_at
-                FROM camp_message WHERE id = ?1
-                "#,
-                [&parent_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, i64>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, String>(5)?,
-                        row.get::<_, Option<String>>(6)?,
-                        row.get::<_, Option<String>>(7)?,
-                    ))
-                },
-            )
-            .optional()?;
-        let Some(row) = row else {
-            omissions.push(json!({
-                "kind": "reference_closure",
-                "messageIds": [parent_id],
-                "reason": "parent_unavailable",
-            }));
-            break;
-        };
-        if row.0 != delivery.camp_id || row.2 > delivery.message_sequence {
-            omissions.push(json!({
-                "kind": "reference_closure",
-                "messageIds": [parent_id],
-                "reason": "parent_unavailable",
-            }));
-            break;
-        }
-        if row.7.is_some() {
-            omissions.push(json!({
-                "kind": "reference_closure",
-                "messageIds": [parent_id],
-                "reason": "tombstone",
-            }));
-            break;
-        }
-        let body = body_prefix(&row.5, profile.max_message_body_chars);
-        closure_ids.insert(row.1.clone());
-        next_parent_id = row.6;
-        closure.push(json!({
-            "messageId": row.1,
-            "sequence": row.2,
-            "distance": distance,
-            "authorType": row.3,
-            "authorId": row.4,
-            "body": body.body,
-            "bodyLength": body.body_length,
-            "bodyTruncated": body.body_truncated,
-            "nextBodyOffset": body.next_body_offset,
-        }));
-    }
-    if let Some(parent_id) = next_parent_id {
-        omissions.push(json!({
-            "kind": "reference_closure",
-            "messageIds": [parent_id],
-            "reason": "max_reference_chain",
-        }));
-    }
-
-    let recent_rows = {
-        let mut statement = transaction.prepare(
-            r#"
-            SELECT id, sequence, author_type, author_id, body,
-                   reply_to_camp_message_id
-            FROM camp_message
-            WHERE camp_id = ?1 AND sequence > ?2 AND sequence <= ?3
-              AND id <> ?4 AND tombstoned_at IS NULL
-            ORDER BY sequence DESC
-            LIMIT ?5
-            "#,
-        )?;
-        statement
-            .query_map(
-                params![
-                    delivery.camp_id,
-                    previous_boundary,
-                    delivery.message_sequence,
-                    delivery.message_id,
-                    profile.max_public_messages as i64,
-                ],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, Option<String>>(5)?,
-                    ))
-                },
-            )?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-    };
-    let mut recent = recent_rows
-        .into_iter()
-        .rev()
-        .filter(|row| !closure_ids.contains(&row.0))
-        .map(|row| {
-            let body = body_prefix(&row.4, profile.max_message_body_chars);
-            json!({
-                "messageId": row.0,
-                "sequence": row.1,
-                "authorType": row.2,
-                "authorId": row.3,
-                "replyToMessageId": row.5,
-                "body": body.body,
-                "bodyLength": body.body_length,
-                "bodyTruncated": body.body_truncated,
-                "nextBodyOffset": body.next_body_offset,
-            })
-        })
-        .collect::<Vec<_>>();
-
-    while public_context_chars(&recent, &closure) > profile.max_public_history_chars {
-        if !recent.is_empty() {
-            let removed = recent.remove(0);
-            omissions.push(json!({
-                "kind": "public_history",
-                "messageIds": [removed["messageId"]],
-                "reason": "history_budget",
-            }));
-        } else if closure.len() > 1 {
-            let removed = closure.pop().expect("closure is non-empty");
-            omissions.push(json!({
-                "kind": "reference_closure",
-                "messageIds": [removed["messageId"]],
-                "reason": "history_budget",
-            }));
-        } else {
-            break;
-        }
-    }
-
-    let profile_value = serde_json::to_value(profile)?;
-    let rendered_payload = loop {
-        let payload = serde_json::to_string_pretty(&json!({
-            "schemaVersion": 2,
-            "contextDeliveryProfile": profile_value,
-            "mandatory": {
-                "campId": delivery.camp_id,
-                "campTurnId": delivery.camp_turn_id,
-                "deliveryId": delivery.id,
-                "recipientAgentId": delivery.recipient_agent_id,
-                "sourceAgentRunId": delivery.source_agent_run_id,
-                "a2aDepth": delivery.a2a_depth,
-            },
-            "currentInput": {
-                "messageId": delivery.message_id,
-                "sequence": delivery.message_sequence,
-                "body": delivery.message_body,
-                "replyToCampMessageId": delivery.reply_to_camp_message_id,
-            },
-            "sharedConversation": {
-                "referenceClosure": closure,
-                "recentMessages": recent,
-                "omissionEntries": omissions,
-            },
-        }))?;
-        if payload.len() <= DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES {
-            break payload;
-        }
-        if !recent.is_empty() {
-            let removed = recent.remove(0);
-            omissions.push(json!({
-                "kind": "public_history",
-                "messageIds": [removed["messageId"]],
-                "reason": "history_budget",
-            }));
-            continue;
-        }
-        if closure.len() > 1 {
-            let removed = closure.pop().expect("closure is non-empty");
-            omissions.push(json!({
-                "kind": "reference_closure",
-                "messageIds": [removed["messageId"]],
-                "reason": "history_budget",
-            }));
-            continue;
-        }
-        return Ok(None);
-    };
-    let manifest_id = Uuid::new_v4().to_string();
-    let rendered_payload_digest =
-        format!("sha256:{:x}", Sha256::digest(rendered_payload.as_bytes()));
-    let current_input_digest = format!(
-        "sha256:{:x}",
-        Sha256::digest(delivery.message_body.as_bytes())
-    );
-    let recent_refs = recent
-        .iter()
-        .map(|message| {
-            json!({
-                "messageId": message["messageId"],
-                "sequence": message["sequence"],
-            })
-        })
-        .collect::<Vec<_>>();
-    let closure_refs = closure
-        .iter()
-        .map(|message| {
-            json!({
-                "messageId": message["messageId"],
-                "sequence": message["sequence"],
-                "distance": message["distance"],
-            })
-        })
-        .collect::<Vec<_>>();
-    transaction.execute(
-        r#"
-        INSERT INTO message_delivery_context_manifest(
-            id, delivery_id, profile_version, profile_json, profile_digest,
-            previous_accepted_public_boundary_sequence,
-            current_public_boundary_sequence,
-            current_input_source_json, current_input_digest,
-            recent_message_refs_json, reference_closure_refs_json,
-            omission_entries_json, rendered_payload, rendered_payload_digest,
-            created_at
-        ) VALUES (
-            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-            ?10, ?11, ?12, ?13, ?14, ?15
-        )
-        "#,
-        params![
-            manifest_id,
-            delivery.id,
-            profile.profile_version,
-            serde_json::to_string(&profile_value)?,
-            format!("sha256:{}", profile.canonical_digest()?),
-            previous_boundary,
-            delivery.message_sequence,
-            serde_json::to_string(&json!({
-                "campMessageId": delivery.message_id,
-                "messageDeliveryId": delivery.id,
-            }))?,
-            current_input_digest,
-            serde_json::to_string(&recent_refs)?,
-            serde_json::to_string(&closure_refs)?,
-            serde_json::to_string(&omissions)?,
-            rendered_payload,
-            rendered_payload_digest,
-            now,
-        ],
-    )?;
-    Ok(Some(manifest_id))
-}
-
-fn public_context_chars(recent: &[Value], closure: &[Value]) -> usize {
-    recent
-        .iter()
-        .chain(closure.iter())
-        .filter_map(|message| message.get("body").and_then(Value::as_str))
-        .map(unicode_scalar_count)
-        .sum()
-}
-
 fn validate_task_link(
     transaction: &Transaction<'_>,
     camp_id: &str,
@@ -2310,7 +2056,7 @@ fn is_canonical_agent_id(value: &str) -> bool {
 
 fn parse_inline_addressing(body: &str) -> InlineAddressing {
     let bytes = body.as_bytes();
-    let mut valid_order = Vec::new();
+    let mut occurrences = Vec::new();
     let mut malformed = Vec::new();
     let mut index = 0_usize;
     let mut fenced = false;
@@ -2353,16 +2099,46 @@ fn parse_inline_addressing(body: &str) -> InlineAddressing {
         }
         let value = body[index + 1..end].to_string();
         if is_canonical_agent_id(&value) {
-            valid_order.push(value);
+            occurrences.push(InlineAddressingOccurrence {
+                agent_id: value,
+                start_byte: index,
+                end_byte: end,
+                ordinal: occurrences.len(),
+            });
         } else {
             malformed.push(format!("@{value}"));
         }
         index = end;
     }
     InlineAddressing {
-        valid_order,
+        occurrences,
         malformed,
     }
+}
+
+fn structured_content_from_inline_addressing(
+    body: &str,
+    occurrences: &[InlineAddressingOccurrence],
+) -> Vec<StructuredCampMessageSegment> {
+    let mut content = Vec::with_capacity(occurrences.len().saturating_mul(2).saturating_add(1));
+    let mut cursor = 0_usize;
+    for occurrence in occurrences {
+        if cursor < occurrence.start_byte {
+            content.push(StructuredCampMessageSegment::Text {
+                text: body[cursor..occurrence.start_byte].to_string(),
+            });
+        }
+        content.push(StructuredCampMessageSegment::MemberMention {
+            agent_id: occurrence.agent_id.clone(),
+        });
+        cursor = occurrence.end_byte;
+    }
+    if cursor < body.len() {
+        content.push(StructuredCampMessageSegment::Text {
+            text: body[cursor..].to_string(),
+        });
+    }
+    normalize_content(content)
 }
 
 fn rejected(code: &str, message: &str) -> CommandHandlerResult {
@@ -2393,7 +2169,11 @@ https://example.test/@agent_7
 ```"#,
         );
         assert_eq!(
-            parsed.valid_order,
+            parsed
+                .occurrences
+                .iter()
+                .map(|occurrence| occurrence.agent_id.as_str())
+                .collect::<Vec<_>>(),
             vec!["agent_104", "agent_27", "agent_104"]
         );
         assert!(parsed.malformed.is_empty());
@@ -2402,7 +2182,14 @@ https://example.test/@agent_7
     #[test]
     fn strict_inline_parser_reports_reserved_but_malformed_tokens() {
         let parsed = parse_inline_addressing("@agent_0 @agent_01 @agent_x @agent_22");
-        assert_eq!(parsed.valid_order, vec!["agent_22"]);
+        assert_eq!(
+            parsed
+                .occurrences
+                .iter()
+                .map(|occurrence| occurrence.agent_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["agent_22"]
+        );
         assert_eq!(parsed.malformed, vec!["@agent_0", "@agent_01", "@agent_x"]);
     }
 

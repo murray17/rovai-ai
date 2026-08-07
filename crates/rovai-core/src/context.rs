@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use anyhow::{Context, Result};
-use rusqlite::{OptionalExtension, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -33,6 +33,23 @@ pub const CONTEXT_FORMATTER_VERSION: i64 = AGENT_RUN_CONTEXT_FORMATTER_VERSION;
 pub const DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES: usize = 96 * 1024;
 const MIN_CONTEXT_PAYLOAD_BYTES: usize = 8 * 1024;
 const MAX_CONTEXT_PAYLOAD_BYTES: usize = 1024 * 1024;
+const DELIVERY_FIRST_PAYLOAD_BOOTSTRAP_RESERVE_BYTES: usize = 32 * 1024;
+
+trait ContextReadConnection {
+    fn context_connection(&self) -> &Connection;
+}
+
+impl ContextReadConnection for Database {
+    fn context_connection(&self) -> &Connection {
+        self.connection()
+    }
+}
+
+impl<'a> ContextReadConnection for Transaction<'a> {
+    fn context_connection(&self) -> &Connection {
+        self
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -54,6 +71,47 @@ impl CharterDeliveryMode {
 pub struct MaterializeContextRequest<'a> {
     pub agent_run_id: &'a str,
     pub execution_epoch: i64,
+    pub charter_delivery_mode: CharterDeliveryMode,
+    pub max_payload_bytes: usize,
+}
+
+/// The one frozen payload selected for a Delivery before its AgentRun exists.
+/// Runtime materialization must consume these bytes verbatim; it may only add
+/// the durable ContextManifest/evidence envelope around them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FrozenDeliveryContext {
+    pub rendered_payload: String,
+    pub rendered_payload_digest: String,
+    pub runtime_payload: String,
+    pub runtime_payload_digest: String,
+    pub charter_delivery_mode: CharterDeliveryMode,
+    pub bootstrap_in_runtime_payload: bool,
+    pub camp_message_boundary_sequence: i64,
+    pub conversation_message_boundary_sequence: i64,
+    pub member_state_digest: String,
+    pub manifest_selection: Value,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct DeliveryContextPreview<'a> {
+    pub agent_run_id: &'a str,
+    pub camp_id: &'a str,
+    pub camp_turn_id: &'a str,
+    pub conversation_id: &'a str,
+    pub agent_id: &'a str,
+    pub task_id: Option<&'a str>,
+    pub execution_epoch: i64,
+    pub a2a_parent_agent_run_id: Option<&'a str>,
+    pub a2a_root_agent_run_id: Option<&'a str>,
+    pub a2a_depth: i64,
+    pub camp_message_boundary_sequence: i64,
+    pub conversation_message_boundary_sequence: i64,
+    pub trigger_camp_message_id: Option<&'a str>,
+    pub effective_config: Value,
+    pub workspace: Value,
+    pub runtime_installation_id: Option<&'a str>,
+    pub runtime_binding_compatibility_digest: Option<&'a str>,
     pub charter_delivery_mode: CharterDeliveryMode,
     pub max_payload_bytes: usize,
 }
@@ -309,6 +367,7 @@ impl ContextService {
             .clamp(MIN_CONTEXT_PAYLOAD_BYTES, MAX_CONTEXT_PAYLOAD_BYTES);
         let snapshot = load_run_snapshot(database, request.agent_run_id, request.execution_epoch)?
             .context("AgentRun is not active for context materialization")?;
+        let frozen_delivery_context = load_frozen_delivery_context(database, &snapshot)?;
         if let Some(existing) = load_existing_manifest(
             database,
             blob_store,
@@ -389,6 +448,24 @@ impl ContextService {
         if previous_accepted_public_boundary_sequence > snapshot.camp_message_boundary_sequence {
             anyhow::bail!("Accepted Public Context Boundary is ahead of the AgentRun boundary");
         }
+        if let Some(frozen) = frozen_delivery_context.as_ref() {
+            return materialize_frozen_delivery_context(
+                database,
+                blob_store,
+                &snapshot,
+                frozen,
+                &bootstrap_evidence,
+                prepared_skill_exposure,
+                mcp_exposure,
+                mcp_exposure_digest,
+                mcp_projection_digest,
+                request,
+                expected_binding_generation,
+                requires_new_native_session,
+                bootstrap_required,
+                max_payload_bytes,
+            );
+        }
 
         let members = load_members(database, &snapshot.camp_id)?;
         let member_state_digest = canonical_json_digest(&serde_json::to_value(&members)?)?;
@@ -413,7 +490,7 @@ impl ContextService {
             .collect::<HashSet<_>>();
         recent_messages.retain(|message| !closure_message_ids.contains(&message.message_id));
         let mut originating_public_user_message =
-            load_originating_public_user_message(database, &snapshot, profile)?;
+            load_originating_public_user_message(database, &snapshot, profile, None)?;
         if originating_public_user_message
             .as_ref()
             .is_some_and(|message| closure_message_ids.contains(&message.message_id))
@@ -563,7 +640,6 @@ impl ContextService {
             }
             return Err(ContextPayloadTooLarge { max_payload_bytes }.into());
         };
-
         let mut raw_message_refs = shared_conversation
             .originating_public_user_message
             .iter()
@@ -803,6 +879,16 @@ impl ContextService {
             )?;
             manifest_id
         };
+        if let Some(delivery_id) = snapshot.trigger_message_delivery_id.as_deref() {
+            transaction.execute(
+                "UPDATE message_delivery SET context_manifest_id = ?2 WHERE id = ?1 AND target_agent_run_id = ?3",
+                params![delivery_id, persisted_manifest_id, snapshot.agent_run_id],
+            )?;
+            transaction.execute(
+                "UPDATE message_delivery_attempt SET context_manifest_id = ?2 WHERE delivery_id = ?1 AND target_agent_run_id = ?3",
+                params![delivery_id, persisted_manifest_id, snapshot.agent_run_id],
+            )?;
+        }
         transaction.commit()?;
 
         Ok(ContextMaterialization::Ready(PreparedContext {
@@ -817,6 +903,263 @@ impl ContextService {
             camp_message_boundary_sequence: snapshot.camp_message_boundary_sequence,
             member_state_digest,
         }))
+    }
+
+    /// Build the complete Dynamic Context selection for a prospective A2A Run
+    /// while the Delivery transaction is still open. This is deliberately the
+    /// same selector used by Runtime materialization; the later phase only
+    /// wraps these frozen bytes in the durable ContextManifest.
+    pub(crate) fn preflight_delivery_context(
+        transaction: &Transaction<'_>,
+        request: &DeliveryContextPreview<'_>,
+    ) -> Result<FrozenDeliveryContext> {
+        let snapshot = prospective_delivery_snapshot(transaction, request)?;
+        let max_payload_bytes = request
+            .max_payload_bytes
+            .clamp(MIN_CONTEXT_PAYLOAD_BYTES, MAX_CONTEXT_PAYLOAD_BYTES);
+        let profile = current_context_delivery_profile()?;
+        let members = load_members(transaction, &snapshot.camp_id)?;
+        let members_digest = canonical_json_digest(&serde_json::to_value(&members)?)?;
+        let binding_identity_compatible = snapshot.native_binding_id.is_some()
+            && snapshot.native_binding_generation >= 1
+            && snapshot.native_adapter_installation_id == snapshot.runtime_installation_id
+            && snapshot.native_binding_compatibility_digest
+                == snapshot.runtime_binding_compatibility_digest;
+        let previous_boundary = if binding_identity_compatible {
+            snapshot.last_accepted_public_boundary_sequence
+        } else {
+            0
+        };
+        let requires_new_native_session =
+            !binding_identity_compatible || snapshot.native_session_id.is_none();
+        let mut recent_messages = load_recent_public_messages(
+            transaction,
+            &snapshot,
+            previous_boundary,
+            snapshot.camp_message_boundary_sequence,
+            profile,
+        )?;
+        let reference_selection = load_public_reference_closure(transaction, &snapshot, profile)?;
+        let mut reference_closure = reference_selection.messages;
+        let mut omission_entries = reference_selection.omissions;
+        let closure_ids = reference_closure
+            .iter()
+            .map(|entry| entry.message.message_id.clone())
+            .collect::<HashSet<_>>();
+        recent_messages.retain(|message| !closure_ids.contains(&message.message_id));
+        let mut originating_public_user_message = load_originating_public_user_message(
+            transaction,
+            &snapshot,
+            profile,
+            snapshot.a2a_parent_agent_run_id.as_deref(),
+        )?;
+        if originating_public_user_message
+            .as_ref()
+            .is_some_and(|message| closure_ids.contains(&message.message_id))
+        {
+            originating_public_user_message = None;
+        }
+        let current_input = load_current_input(transaction, &snapshot)?;
+        let attachment_refs = load_current_attachment_refs(transaction, &current_input)?;
+        let attachment_paths = attachment_refs
+            .iter()
+            .map(|attachment| attachment.path.clone())
+            .collect::<Vec<_>>();
+        let collaboration_state =
+            if requires_new_native_session
+                || snapshot.native_member_state_digest.as_deref() != Some(members_digest.as_str())
+            {
+                Some(build_collaboration_state(&members))
+            } else {
+                None
+            };
+        let run_notices = build_run_notices(
+            transaction,
+            &snapshot,
+            requires_new_native_session,
+            count_a2a_runs(transaction, &snapshot.camp_turn_id)?,
+        )?;
+        let current_input_value = current_input.as_payload(&attachment_paths);
+
+        // Public Delivery Runs are gated against the full Dynamic Context. A
+        // FirstPayload adapter adds its already durable bootstrap in Runtime;
+        // the dynamic bytes themselves remain frozen here and are never
+        // re-selected on retry/recovery.
+        let runtime_budget = if request.charter_delivery_mode == CharterDeliveryMode::FirstPayload {
+            max_payload_bytes.saturating_sub(DELIVERY_FIRST_PAYLOAD_BOOTSTRAP_RESERVE_BYTES)
+        } else {
+            max_payload_bytes
+        };
+        let (shared_conversation, payload) = loop {
+            let origin_is_recent = originating_public_user_message
+                .as_ref()
+                .is_some_and(|origin| {
+                    recent_messages
+                        .iter()
+                        .any(|message| message.message_id == origin.message_id)
+                });
+            let standalone_origin = originating_public_user_message
+                .as_ref()
+                .filter(|_| !origin_is_recent)
+                .cloned();
+            let included_message_ids = recent_messages
+                .iter()
+                .map(|message| message.message_id.clone())
+                .chain(
+                    standalone_origin
+                        .iter()
+                        .map(|message| message.message_id.clone()),
+                )
+                .chain(
+                    reference_closure
+                        .iter()
+                        .map(|entry| entry.message.message_id.clone()),
+                )
+                .collect::<HashSet<_>>();
+            let shared_conversation = SharedConversation {
+                originating_public_user_message: standalone_origin,
+                reference_closure: reference_closure.clone(),
+                recent_messages: recent_messages.clone(),
+                omitted_messages: omitted_public_messages(
+                    transaction,
+                    &snapshot,
+                    previous_boundary,
+                    &included_message_ids,
+                )?,
+                omission_entries: omission_entries.clone(),
+            };
+            let rendered = render_payload(RenderPayloadInput {
+                collaboration_state: collaboration_state.as_ref(),
+                shared_conversation: &shared_conversation,
+                run_notices: &run_notices,
+                current_input: &current_input_value,
+            })?;
+            if rendered.len() <= runtime_budget {
+                break (shared_conversation, rendered);
+            }
+            if !recent_messages.is_empty() {
+                recent_messages.remove(0);
+            } else if let Some(origin) = originating_public_user_message.take() {
+                omission_entries.push(ContextOmission {
+                    kind: "public_history",
+                    message_ids: vec![origin.message_id],
+                    reason: "history_budget",
+                });
+            } else if reference_closure.len() > 1 {
+                let removed = reference_closure.pop().expect("closure is non-empty");
+                omission_entries.push(ContextOmission {
+                    kind: "reference_closure",
+                    message_ids: vec![removed.message.message_id],
+                    reason: "history_budget",
+                });
+            } else {
+                return Err(ContextPayloadTooLarge { max_payload_bytes }.into());
+            }
+        };
+        let mut raw_message_refs = shared_conversation
+            .originating_public_user_message
+            .iter()
+            .chain(
+                shared_conversation
+                    .reference_closure
+                    .iter()
+                    .map(|entry| &entry.message),
+            )
+            .chain(shared_conversation.recent_messages.iter())
+            .map(|message| EntityReference {
+                entity_type: "camp_message".to_string(),
+                entity_id: message.message_id.clone(),
+            })
+            .collect::<Vec<_>>();
+        let current_input_is_raw =
+            current_input
+                .source_camp_message_id
+                .as_deref()
+                .is_some_and(|message_id| {
+                    raw_message_refs
+                        .iter()
+                        .any(|reference| reference.entity_id == message_id)
+                });
+        if !current_input_is_raw {
+            raw_message_refs.push(EntityReference {
+                entity_type: if current_input.source_camp_message_id.is_some() {
+                    "camp_message"
+                } else if current_input.source_conversation_message_id.is_some() {
+                    "conversation_message"
+                } else {
+                    "conversation_input"
+                }
+                .to_string(),
+                entity_id: current_input
+                    .source_camp_message_id
+                    .clone()
+                    .or_else(|| current_input.source_conversation_message_id.clone())
+                    .unwrap_or_else(|| current_input.id.clone()),
+            });
+        }
+        let recent_message_refs = shared_conversation
+            .recent_messages
+            .iter()
+            .map(|message| EntityReference {
+                entity_type: "camp_message".to_string(),
+                entity_id: message.message_id.clone(),
+            })
+            .collect::<Vec<_>>();
+        let reference_closure_refs = shared_conversation
+            .reference_closure
+            .iter()
+            .map(|entry| {
+                json!({
+                    "messageId": entry.message.message_id,
+                    "distance": entry.distance,
+                })
+            })
+            .collect::<Vec<_>>();
+        let run_notice_refs = run_notices
+            .iter()
+            .map(|notice| notice.code.clone())
+            .collect::<Vec<_>>();
+        let manifest_selection = json!({
+            "previousAcceptedPublicBoundarySequence": previous_boundary,
+            "contextDeliveryProfileVersion": profile.profile_version,
+            "contextDeliveryProfileJson": serde_json::to_value(profile)?,
+            "contextDeliveryProfileDigest": profile.canonical_digest()?,
+            "originatingPublicUserMessageRef": shared_conversation.originating_public_user_message.as_ref().map(|message| EntityReference {
+                entity_type: "camp_message".to_string(),
+                entity_id: message.message_id.clone(),
+            }),
+            "recentMessageRefs": recent_message_refs,
+            "referenceClosureRefs": reference_closure_refs,
+            "omissionEntries": shared_conversation.omission_entries,
+            "omittedMessageCount": shared_conversation.omitted_messages.as_ref().map(|omitted| omitted.count as i64),
+            "omittedMessageSequenceStart": shared_conversation.omitted_messages.as_ref().map(|omitted| omitted.sequence_start),
+            "omittedMessageSequenceEnd": shared_conversation.omitted_messages.as_ref().map(|omitted| omitted.sequence_end),
+            "rawMessageRefs": raw_message_refs,
+            "collaborationStateDigest": canonical_json_digest(&serde_json::to_value(&collaboration_state)?)?,
+            "runNoticeRefs": run_notice_refs,
+            "runNoticeDigest": canonical_json_digest(&serde_json::to_value(&run_notices)?)?,
+            "currentInputSource": {
+                "sourceCampMessageId": current_input.source_camp_message_id,
+                "conversationMessageId": current_input.source_conversation_message_id,
+                "sourceInboxMessageId": current_input.source_inbox_message_id,
+                "conversationInputId": current_input.source_conversation_input_id,
+            },
+            "attachmentRefs": attachment_refs,
+            "attachmentDigest": canonical_json_digest(&serde_json::to_value(&attachment_refs)?)?,
+        });
+        let digest = sha256_text(&payload);
+        Ok(FrozenDeliveryContext {
+            rendered_payload_digest: digest.clone(),
+            runtime_payload_digest: digest,
+            runtime_payload: payload.clone(),
+            rendered_payload: payload,
+            bootstrap_in_runtime_payload: false,
+            charter_delivery_mode: request.charter_delivery_mode,
+            camp_message_boundary_sequence: snapshot.camp_message_boundary_sequence,
+            conversation_message_boundary_sequence: snapshot.conversation_message_boundary_sequence,
+            member_state_digest: members_digest,
+            manifest_selection,
+        })
     }
 
     pub fn prepare_input_delivery(
@@ -1171,6 +1514,7 @@ struct RunSnapshot {
     camp_message_boundary_sequence: i64,
     conversation_message_boundary_sequence: i64,
     trigger_camp_message_id: Option<String>,
+    trigger_message_delivery_id: Option<String>,
     trigger_conversation_message_id: Option<String>,
     trigger_conversation_input_id: Option<String>,
     effective_config: Value,
@@ -1188,13 +1532,86 @@ struct RunSnapshot {
     default_lead_agent_id: Option<String>,
 }
 
-fn load_run_snapshot(
-    database: &Database,
+fn prospective_delivery_snapshot(
+    transaction: &Transaction<'_>,
+    request: &DeliveryContextPreview<'_>,
+) -> Result<RunSnapshot> {
+    let conversation = transaction
+        .query_row(
+            r#"
+            SELECT native_adapter_installation_id, native_session_id,
+                   native_binding_compatibility_digest, native_binding_id,
+                   native_binding_generation, last_accepted_public_boundary_sequence,
+                   native_charter_digest, native_member_state_digest
+            FROM conversation WHERE id = ?1 AND camp_id = ?2 AND agent_id = ?3
+            "#,
+            params![request.conversation_id, request.camp_id, request.agent_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                ))
+            },
+        )
+        .optional()?
+        .context("Delivery target conversation disappeared during Context preflight")?;
+    let default_lead_agent_id = transaction
+        .query_row(
+            "SELECT default_lead_agent_id FROM camp WHERE id = ?1",
+            [request.camp_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten();
+    Ok(RunSnapshot {
+        agent_run_id: request.agent_run_id.to_string(),
+        camp_id: request.camp_id.to_string(),
+        camp_turn_id: request.camp_turn_id.to_string(),
+        conversation_id: request.conversation_id.to_string(),
+        agent_id: request.agent_id.to_string(),
+        task_id: request.task_id.map(str::to_string),
+        execution_epoch: request.execution_epoch,
+        invocation_kind: "a2a".to_string(),
+        a2a_parent_agent_run_id: request.a2a_parent_agent_run_id.map(str::to_string),
+        a2a_root_agent_run_id: request.a2a_root_agent_run_id.map(str::to_string),
+        a2a_depth: request.a2a_depth,
+        camp_message_boundary_sequence: request.camp_message_boundary_sequence,
+        conversation_message_boundary_sequence: request.conversation_message_boundary_sequence,
+        trigger_camp_message_id: request.trigger_camp_message_id.map(str::to_string),
+        trigger_message_delivery_id: None,
+        trigger_conversation_message_id: None,
+        trigger_conversation_input_id: None,
+        effective_config: request.effective_config.clone(),
+        workspace: request.workspace.clone(),
+        runtime_installation_id: request.runtime_installation_id.map(str::to_string),
+        runtime_binding_compatibility_digest: request
+            .runtime_binding_compatibility_digest
+            .map(str::to_string),
+        native_adapter_installation_id: conversation.0,
+        native_session_id: conversation.1,
+        native_binding_compatibility_digest: conversation.2,
+        native_binding_id: conversation.3,
+        native_binding_generation: conversation.4,
+        last_accepted_public_boundary_sequence: conversation.5,
+        native_charter_digest: conversation.6,
+        native_member_state_digest: conversation.7,
+        default_lead_agent_id,
+    })
+}
+
+fn load_run_snapshot<R: ContextReadConnection>(
+    database: &R,
     agent_run_id: &str,
     execution_epoch: i64,
 ) -> Result<Option<RunSnapshot>> {
     database
-        .connection()
+        .context_connection()
         .query_row(
             r#"
             SELECT agent_run.id, camp_turn.camp_id,
@@ -1206,6 +1623,7 @@ fn load_run_snapshot(
                    agent_run.initial_camp_context_through_sequence,
                    agent_run.initial_conversation_context_through_sequence,
                    agent_run.trigger_camp_message_id,
+                   agent_run.trigger_message_delivery_id,
                    agent_run.trigger_conversation_message_id,
                    agent_run.trigger_conversation_input_id,
                    agent_run.effective_config_json, agent_run.workspace_json,
@@ -1232,8 +1650,8 @@ fn load_run_snapshot(
             "#,
             params![agent_run_id, execution_epoch],
             |row| {
-                let effective_config: String = row.get(16)?;
-                let workspace: String = row.get(17)?;
+                let effective_config: String = row.get(17)?;
+                let workspace: String = row.get(18)?;
                 Ok(RunSnapshot {
                     agent_run_id: row.get(0)?,
                     camp_id: row.get(1)?,
@@ -1243,14 +1661,15 @@ fn load_run_snapshot(
                     task_id: row.get(5)?,
                     execution_epoch: row.get(6)?,
                     invocation_kind: row.get(9)?,
-                    a2a_parent_agent_run_id: row.get(29)?,
-                    a2a_root_agent_run_id: row.get(30)?,
+                    a2a_parent_agent_run_id: row.get(30)?,
+                    a2a_root_agent_run_id: row.get(31)?,
                     a2a_depth: row.get(10)?,
                     camp_message_boundary_sequence: row.get(11)?,
                     conversation_message_boundary_sequence: row.get(12)?,
                     trigger_camp_message_id: row.get(13)?,
-                    trigger_conversation_message_id: row.get(14)?,
-                    trigger_conversation_input_id: row.get(15)?,
+                    trigger_message_delivery_id: row.get(14)?,
+                    trigger_conversation_message_id: row.get(15)?,
+                    trigger_conversation_input_id: row.get(16)?,
                     effective_config: serde_json::from_str(&effective_config).map_err(|error| {
                         rusqlite::Error::FromSqlConversionFailure(
                             effective_config.len(),
@@ -1265,17 +1684,17 @@ fn load_run_snapshot(
                             Box::new(error),
                         )
                     })?,
-                    runtime_installation_id: row.get(19)?,
-                    runtime_binding_compatibility_digest: row.get(20)?,
-                    native_adapter_installation_id: row.get(21)?,
-                    native_session_id: row.get(22)?,
-                    native_binding_compatibility_digest: row.get(23)?,
-                    native_binding_id: row.get(24)?,
-                    native_binding_generation: row.get(25)?,
-                    last_accepted_public_boundary_sequence: row.get(26)?,
-                    native_charter_digest: row.get(27)?,
-                    native_member_state_digest: row.get(28)?,
-                    default_lead_agent_id: row.get(18)?,
+                    runtime_installation_id: row.get(20)?,
+                    runtime_binding_compatibility_digest: row.get(21)?,
+                    native_adapter_installation_id: row.get(22)?,
+                    native_session_id: row.get(23)?,
+                    native_binding_compatibility_digest: row.get(24)?,
+                    native_binding_id: row.get(25)?,
+                    native_binding_generation: row.get(26)?,
+                    last_accepted_public_boundary_sequence: row.get(27)?,
+                    native_charter_digest: row.get(28)?,
+                    native_member_state_digest: row.get(29)?,
+                    default_lead_agent_id: row.get(19)?,
                 })
             },
         )
@@ -1947,8 +2366,8 @@ fn build_collaboration_state(members: &[MemberState]) -> Value {
     Value::Object(state)
 }
 
-fn build_run_notices(
-    database: &Database,
+fn build_run_notices<R: ContextReadConnection>(
+    database: &R,
     snapshot: &RunSnapshot,
     requires_new_native_session: bool,
     a2a_run_count: i64,
@@ -1965,7 +2384,7 @@ fn build_run_notices(
                     .to_string(),
         });
     }
-    let unsettled_effect: bool = database.connection().query_row(
+    let unsettled_effect: bool = database.context_connection().query_row(
         r#"
         SELECT COUNT(*) > 0
         FROM action_execution
@@ -2004,8 +2423,8 @@ fn a2a_task_context_notice(a2a_depth: i64, task_id: Option<&str>) -> Option<RunN
     })
 }
 
-fn load_members(database: &Database, camp_id: &str) -> Result<Vec<MemberState>> {
-    let mut statement = database.connection().prepare(
+fn load_members<R: ContextReadConnection>(database: &R, camp_id: &str) -> Result<Vec<MemberState>> {
+    let mut statement = database.context_connection().prepare(
         r#"
         SELECT agent_profile.id, agent_profile.display_name, agent_profile.team_role,
                agent_profile.professional_responsibilities,
@@ -2107,8 +2526,8 @@ struct SharedConversation {
     omission_entries: Vec<ContextOmission>,
 }
 
-fn load_public_reference_closure(
-    database: &Database,
+fn load_public_reference_closure<R: ContextReadConnection>(
+    database: &R,
     snapshot: &RunSnapshot,
     profile: ContextDeliveryProfile,
 ) -> Result<ReferenceClosureSelection> {
@@ -2125,7 +2544,7 @@ fn load_public_reference_closure(
         });
     };
     let mut next_parent_id = database
-        .connection()
+        .context_connection()
         .query_row(
             r#"
             SELECT reply_to_camp_message_id
@@ -2153,7 +2572,7 @@ fn load_public_reference_closure(
             break;
         }
         let row = database
-            .connection()
+            .context_connection()
             .query_row(
                 r#"
                 SELECT message.camp_id, message.id, message.sequence,
@@ -2209,7 +2628,7 @@ fn load_public_reference_closure(
             });
             break;
         }
-        let body = projected_camp_message_body(database.connection(), row.6, row.7)?;
+        let body = projected_camp_message_body(database.context_connection(), row.6, row.7)?;
         let message = project_shared_message(
             database,
             row.1,
@@ -2237,14 +2656,14 @@ fn load_public_reference_closure(
     })
 }
 
-fn load_recent_public_messages(
-    database: &Database,
+fn load_recent_public_messages<R: ContextReadConnection>(
+    database: &R,
     snapshot: &RunSnapshot,
     after_sequence: i64,
     through_sequence: i64,
     profile: ContextDeliveryProfile,
 ) -> Result<Vec<SharedMessage>> {
-    let mut statement = database.connection().prepare(
+    let mut statement = database.context_connection().prepare(
         r#"
         SELECT camp_message.id, camp_message.sequence,
                camp_message.author_type, camp_message.author_id,
@@ -2303,7 +2722,7 @@ fn load_recent_public_messages(
     ) in rows
     {
         let body = projected_camp_message_body(
-            database.connection(),
+            database.context_connection(),
             stored_body,
             structured_content_json,
         )?;
@@ -2323,8 +2742,8 @@ fn load_recent_public_messages(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn project_shared_message(
-    database: &Database,
+fn project_shared_message<R: ContextReadConnection>(
+    database: &R,
     message_id: String,
     sequence: i64,
     sender_type: String,
@@ -2334,7 +2753,7 @@ fn project_shared_message(
     body: String,
     profile: ContextDeliveryProfile,
 ) -> Result<SharedMessage> {
-    let mut attachment_statement = database.connection().prepare(
+    let mut attachment_statement = database.context_connection().prepare(
         r#"
         SELECT display_name, media_type, storage_path, content_digest
         FROM message_attachment
@@ -2368,10 +2787,11 @@ fn project_shared_message(
     })
 }
 
-fn load_originating_public_user_message(
-    database: &Database,
+fn load_originating_public_user_message<R: ContextReadConnection>(
+    database: &R,
     snapshot: &RunSnapshot,
     profile: ContextDeliveryProfile,
+    starting_agent_run_id: Option<&str>,
 ) -> Result<Option<SharedMessage>> {
     if snapshot.a2a_depth == 0 {
         return Ok(None);
@@ -2383,15 +2803,21 @@ fn load_originating_public_user_message(
         .a2a_root_agent_run_id
         .as_deref()
         .context("A2A AgentRun is missing its frozen root AgentRun")?;
-    let mut current_id = snapshot.agent_run_id.clone();
-    let mut expected_depth = snapshot.a2a_depth;
+    let mut current_id = starting_agent_run_id
+        .map(str::to_string)
+        .unwrap_or_else(|| snapshot.agent_run_id.clone());
+    let mut expected_depth = if starting_agent_run_id.is_some() {
+        snapshot.a2a_depth - 1
+    } else {
+        snapshot.a2a_depth
+    };
     let mut visited = HashSet::new();
     let originating_message_id = loop {
         if !visited.insert(current_id.clone()) {
             anyhow::bail!("A2A AgentRun lineage contains a cycle");
         }
         let row = database
-            .connection()
+            .context_connection()
             .query_row(
                 r#"
                 SELECT camp_turn_id, invocation_kind,
@@ -2433,7 +2859,7 @@ fn load_originating_public_user_message(
         expected_depth -= 1;
     };
     let row = database
-        .connection()
+        .context_connection()
         .query_row(
             r#"
             SELECT message.id, message.sequence, message.author_type,
@@ -2477,20 +2903,20 @@ fn load_originating_public_user_message(
     if row.2 != "user" {
         anyhow::bail!("Originating public message is not authored by a user");
     }
-    let body = projected_camp_message_body(database.connection(), row.5, row.6)?;
+    let body = projected_camp_message_body(database.context_connection(), row.5, row.6)?;
     project_shared_message(
         database, row.0, row.1, row.2, row.3, row.4, row.7, body, profile,
     )
     .map(Some)
 }
 
-fn omitted_public_messages(
-    database: &Database,
+fn omitted_public_messages<R: ContextReadConnection>(
+    database: &R,
     snapshot: &RunSnapshot,
     after_sequence: i64,
     included_message_ids: &HashSet<String>,
 ) -> Result<Option<OmittedMessages>> {
-    let mut statement = database.connection().prepare(
+    let mut statement = database.context_connection().prepare(
         r#"
         SELECT id, sequence
         FROM camp_message
@@ -2564,7 +2990,10 @@ impl CurrentInput {
     }
 }
 
-fn load_current_input(database: &Database, snapshot: &RunSnapshot) -> Result<CurrentInput> {
+fn load_current_input<R: ContextReadConnection>(
+    database: &R,
+    snapshot: &RunSnapshot,
+) -> Result<CurrentInput> {
     match (
         snapshot.trigger_camp_message_id.as_deref(),
         snapshot.trigger_conversation_message_id.as_deref(),
@@ -2572,7 +3001,7 @@ fn load_current_input(database: &Database, snapshot: &RunSnapshot) -> Result<Cur
     ) {
         (Some(camp_message_id), None, None) => {
             let (id, stored_body, structured_content_json) = database
-                .connection()
+                .context_connection()
                 .query_row(
                     r#"
                 SELECT id, body, structured_content_json
@@ -2597,7 +3026,7 @@ fn load_current_input(database: &Database, snapshot: &RunSnapshot) -> Result<Cur
                 .optional()?
                 .context("AgentRun trigger CampMessage does not exist or is tombstoned")?;
             let body = projected_camp_message_body(
-                database.connection(),
+                database.context_connection(),
                 stored_body,
                 structured_content_json,
             )?;
@@ -2614,7 +3043,7 @@ fn load_current_input(database: &Database, snapshot: &RunSnapshot) -> Result<Cur
             })
         }
         (None, Some(conversation_message_id), None) => database
-            .connection()
+            .context_connection()
             .query_row(
                 r#"
                 SELECT conversation_message.id,
@@ -2661,7 +3090,7 @@ fn load_current_input(database: &Database, snapshot: &RunSnapshot) -> Result<Cur
             .optional()?
             .context("AgentRun trigger ConversationMessage does not exist"),
         (None, None, Some(conversation_input_id)) => database
-            .connection()
+            .context_connection()
             .query_row(
                 r#"
                 SELECT id, model_payload_json, source_inbox_message_id
@@ -2708,11 +3137,11 @@ struct CampAttachmentRef {
     content_digest: String,
 }
 
-fn load_current_attachment_refs(
-    database: &Database,
+fn load_current_attachment_refs<R: ContextReadConnection>(
+    database: &R,
     current_input: &CurrentInput,
 ) -> Result<Vec<CampAttachmentRef>> {
-    let mut statement = database.connection().prepare(
+    let mut statement = database.context_connection().prepare(
         r#"
         SELECT id, storage_path, content_digest
         FROM message_attachment
@@ -2740,9 +3169,9 @@ fn load_current_attachment_refs(
         .map_err(Into::into)
 }
 
-fn count_a2a_runs(database: &Database, camp_turn_id: &str) -> Result<i64> {
+fn count_a2a_runs<R: ContextReadConnection>(database: &R, camp_turn_id: &str) -> Result<i64> {
     database
-        .connection()
+        .context_connection()
         .query_row(
             "SELECT a2a_run_slots_allocated FROM camp_turn WHERE id = ?1",
             [camp_turn_id],
@@ -3020,6 +3449,281 @@ fn load_existing_manifest(
         requires_new_native_session,
         camp_message_boundary_sequence: row.2,
         member_state_digest: row.5,
+    }))
+}
+
+fn load_frozen_delivery_context(
+    database: &Database,
+    snapshot: &RunSnapshot,
+) -> Result<Option<FrozenDeliveryContext>> {
+    let Some(delivery_id) = snapshot.trigger_message_delivery_id.as_deref() else {
+        return Ok(None);
+    };
+    let frozen_snapshot: Option<String> = database
+        .connection()
+        .query_row(
+            "SELECT frozen_snapshot_json FROM message_delivery WHERE id = ?1",
+            [delivery_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(frozen_snapshot) = frozen_snapshot else {
+        return Ok(None);
+    };
+    let snapshot: Value = serde_json::from_str(&frozen_snapshot)
+        .context("Message Delivery frozen snapshot is invalid")?;
+    let Some(context) = snapshot.get("frozenContext") else {
+        return Ok(None);
+    };
+    let frozen: FrozenDeliveryContext = serde_json::from_value(context.clone())
+        .context("Message Delivery frozen Context payload is invalid")?;
+    if sha256_text(&frozen.rendered_payload) != frozen.rendered_payload_digest
+        || sha256_text(&frozen.runtime_payload) != frozen.runtime_payload_digest
+    {
+        anyhow::bail!("Message Delivery frozen Context payload digest is invalid");
+    }
+    Ok(Some(frozen))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn materialize_frozen_delivery_context(
+    database: &mut Database,
+    blob_store: &ManagedBlobStore,
+    snapshot: &RunSnapshot,
+    frozen: &FrozenDeliveryContext,
+    bootstrap_evidence: &PreparedBootstrapEvidence,
+    prepared_skill_exposure: &PreparedSkillExposure,
+    mcp_exposure: &McpExposureSnapshot,
+    mcp_exposure_digest: &str,
+    mcp_projection_digest: &str,
+    request: &MaterializeContextRequest<'_>,
+    expected_binding_generation: i64,
+    requires_new_native_session: bool,
+    bootstrap_required: bool,
+    max_payload_bytes: usize,
+) -> Result<ContextMaterialization> {
+    if frozen.charter_delivery_mode != request.charter_delivery_mode
+        || frozen.camp_message_boundary_sequence != snapshot.camp_message_boundary_sequence
+        || frozen.conversation_message_boundary_sequence
+            != snapshot.conversation_message_boundary_sequence
+    {
+        anyhow::bail!("Frozen Delivery Context no longer matches the AgentRun boundary");
+    }
+    let bootstrap_in_runtime_payload =
+        request.charter_delivery_mode == CharterDeliveryMode::FirstPayload && bootstrap_required;
+    let runtime_payload = if bootstrap_in_runtime_payload {
+        let bootstrap =
+            format_session_bootstrap_for_snapshot(database, snapshot, bootstrap_evidence.clone())?;
+        compose_first_payload(&bootstrap.payload, &frozen.rendered_payload)
+    } else {
+        frozen.runtime_payload.clone()
+    };
+    if frozen.rendered_payload.len() > max_payload_bytes
+        || runtime_payload.len() > max_payload_bytes
+    {
+        return Err(ContextPayloadTooLarge { max_payload_bytes }.into());
+    }
+
+    let payload_digest = sha256_text(&frozen.rendered_payload);
+    if payload_digest != frozen.rendered_payload_digest {
+        anyhow::bail!("Frozen Delivery Context digest changed before materialization");
+    }
+    let blob = blob_store.put_bytes(
+        database,
+        frozen.rendered_payload.as_bytes(),
+        "text/plain; charset=utf-8",
+        "sensitive",
+    )?;
+    if format!("sha256:{}", blob.sha256) != payload_digest {
+        anyhow::bail!("Rendered context Blob digest does not match the frozen payload");
+    }
+
+    let selection = frozen
+        .manifest_selection
+        .as_object()
+        .context("Frozen Delivery Context has no manifest selection")?;
+    let required = |name: &str| {
+        selection
+            .get(name)
+            .with_context(|| format!("Frozen Delivery Context is missing {name}"))
+    };
+    let json_text = |name: &str| -> Result<String> { Ok(serde_json::to_string(required(name)?)?) };
+    let optional_json_text = |name: &str| -> Result<Option<String>> {
+        let value = required(name)?;
+        if value.is_null() {
+            Ok(None)
+        } else {
+            Ok(Some(serde_json::to_string(value)?))
+        }
+    };
+    let optional_i64 = |name: &str| -> Result<Option<i64>> {
+        let value = required(name)?;
+        if value.is_null() {
+            Ok(None)
+        } else {
+            value
+                .as_i64()
+                .map(Some)
+                .with_context(|| format!("Frozen Delivery Context {name} is not an integer"))
+        }
+    };
+    let previous_boundary = required("previousAcceptedPublicBoundarySequence")?
+        .as_i64()
+        .context("Frozen Delivery Context previous boundary is invalid")?;
+    let profile_version = required("contextDeliveryProfileVersion")?
+        .as_i64()
+        .context("Frozen Delivery Context profile version is invalid")?;
+    let profile_digest = required("contextDeliveryProfileDigest")?
+        .as_str()
+        .context("Frozen Delivery Context profile digest is invalid")?;
+    let collaboration_state_digest = required("collaborationStateDigest")?
+        .as_str()
+        .context("Frozen Delivery Context collaboration digest is invalid")?;
+    let run_notice_digest = required("runNoticeDigest")?
+        .as_str()
+        .context("Frozen Delivery Context run notice digest is invalid")?;
+    let attachment_digest = required("attachmentDigest")?
+        .as_str()
+        .context("Frozen Delivery Context attachment digest is invalid")?;
+
+    let manifest_id = Uuid::new_v4().to_string();
+    let created_at = chrono::Utc::now().to_rfc3339();
+    let transaction = database.connection_mut().transaction()?;
+    revalidate_snapshot_for_manifest(&transaction, snapshot, expected_binding_generation)?;
+    let (global_public_message_boundary, history_camps) =
+        capture_cross_camp_history_fence(&transaction, snapshot)?;
+    transaction.execute(
+        r#"
+        INSERT INTO context_manifest(
+            id, agent_run_id, bootstrap_evidence_id,
+            native_binding_generation,
+            camp_message_boundary_sequence,
+            conversation_message_boundary_sequence,
+            history_fence_version, global_public_message_boundary,
+            previous_accepted_public_boundary_sequence,
+            context_delivery_profile_version,
+            context_delivery_profile_json, context_delivery_profile_digest,
+            originating_public_user_message_ref_json,
+            recent_message_refs_json, reference_closure_refs_json,
+            omission_entries_json,
+            omitted_message_count, omitted_message_sequence_start,
+            omitted_message_sequence_end,
+            raw_message_refs_json,
+            collaboration_state_digest,
+            run_notice_refs_json, run_notice_digest,
+            current_input_source_json,
+            attachment_refs_json, attachment_digest,
+            skill_exposure_json, skill_exposure_digest,
+            mcp_exposure_json, mcp_exposure_digest, mcp_projection_digest,
+            formatter_version,
+            rendered_payload_blob_id, rendered_payload_digest, created_at
+        ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+            ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19,
+            ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28,
+            ?29, ?30, ?31, ?32, ?33, ?34, ?35
+        )
+        "#,
+        params![
+            manifest_id,
+            snapshot.agent_run_id,
+            bootstrap_evidence.evidence_id,
+            expected_binding_generation,
+            snapshot.camp_message_boundary_sequence,
+            snapshot.conversation_message_boundary_sequence,
+            1_i64,
+            global_public_message_boundary,
+            previous_boundary,
+            profile_version,
+            json_text("contextDeliveryProfileJson")?,
+            profile_digest,
+            optional_json_text("originatingPublicUserMessageRef")?,
+            json_text("recentMessageRefs")?,
+            json_text("referenceClosureRefs")?,
+            json_text("omissionEntries")?,
+            optional_i64("omittedMessageCount")?,
+            optional_i64("omittedMessageSequenceStart")?,
+            optional_i64("omittedMessageSequenceEnd")?,
+            json_text("rawMessageRefs")?,
+            collaboration_state_digest,
+            json_text("runNoticeRefs")?,
+            run_notice_digest,
+            json_text("currentInputSource")?,
+            json_text("attachmentRefs")?,
+            attachment_digest,
+            serde_json::to_string(&prepared_skill_exposure.snapshot)?,
+            prepared_skill_exposure.digest,
+            serde_json::to_string(mcp_exposure)?,
+            mcp_exposure_digest,
+            mcp_projection_digest,
+            CONTEXT_FORMATTER_VERSION,
+            blob.id,
+            payload_digest,
+            created_at,
+        ],
+    )?;
+    for camp in &history_camps {
+        transaction.execute(
+            r#"
+            INSERT INTO context_manifest_history_camp(
+                context_manifest_id, camp_id, camp_title, last_visible_activity_at
+            ) VALUES (?1, ?2, ?3, ?4)
+            "#,
+            params![
+                manifest_id,
+                camp.camp_id,
+                camp.camp_title,
+                camp.last_visible_activity_at,
+            ],
+        )?;
+    }
+    append_context_event(
+        &transaction,
+        "context.manifest_created",
+        snapshot,
+        &json!({
+            "contextManifestId": manifest_id,
+            "bindingGeneration": expected_binding_generation,
+            "boundarySequence": snapshot.camp_message_boundary_sequence,
+            "historyFenceVersion": 1,
+            "globalPublicMessageBoundary": global_public_message_boundary,
+            "historyCampCount": history_camps.len(),
+            "previousAcceptedPublicBoundarySequence": previous_boundary,
+            "contextDeliveryProfileVersion": profile_version,
+            "contextDeliveryProfileDigest": profile_digest,
+            "bootstrapEvidenceId": bootstrap_evidence.evidence_id,
+            "collaborationStateDigest": collaboration_state_digest,
+            "runNoticeDigest": run_notice_digest,
+            "attachmentDigest": attachment_digest,
+            "skillExposureDigest": prepared_skill_exposure.digest,
+            "mcpExposureDigest": mcp_exposure_digest,
+            "dynamicPayloadDigest": payload_digest,
+            "frozenByMessageDelivery": true,
+        }),
+    )?;
+    if let Some(delivery_id) = snapshot.trigger_message_delivery_id.as_deref() {
+        transaction.execute(
+            "UPDATE message_delivery SET context_manifest_id = ?2 WHERE id = ?1 AND target_agent_run_id = ?3",
+            params![delivery_id, manifest_id, snapshot.agent_run_id],
+        )?;
+        transaction.execute(
+            "UPDATE message_delivery_attempt SET context_manifest_id = ?2 WHERE delivery_id = ?1 AND target_agent_run_id = ?3",
+            params![delivery_id, manifest_id, snapshot.agent_run_id],
+        )?;
+    }
+    transaction.commit()?;
+
+    Ok(ContextMaterialization::Ready(PreparedContext {
+        manifest_id,
+        rendered_payload: frozen.rendered_payload.clone(),
+        rendered_payload_digest: payload_digest,
+        runtime_payload,
+        charter_delivery_mode: request.charter_delivery_mode,
+        bootstrap_in_runtime_payload,
+        expected_binding_generation,
+        requires_new_native_session,
+        camp_message_boundary_sequence: snapshot.camp_message_boundary_sequence,
+        member_state_digest: frozen.member_state_digest.clone(),
     }))
 }
 
@@ -6452,6 +7156,7 @@ mod tests {
             &fixture.database,
             &snapshot,
             CONTEXT_DELIVERY_PROFILE_V1,
+            None,
         )
         .unwrap()
         .unwrap();
@@ -6473,6 +7178,7 @@ mod tests {
                 &fixture.database,
                 &snapshot,
                 CONTEXT_DELIVERY_PROFILE_V1,
+                None,
             )
             .unwrap()
             .is_none()
@@ -6490,6 +7196,7 @@ mod tests {
             &fixture.database,
             &snapshot,
             CONTEXT_DELIVERY_PROFILE_V1,
+            None,
         )
         .unwrap_err();
         assert!(format!("{error:#}").contains("invalid root or invocation metadata"));

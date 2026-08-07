@@ -2394,7 +2394,7 @@ impl ExecutionRuntimeService {
                 .as_deref()
                 .and_then(|value| value.parse::<AdapterKind>().ok())
                 .map(AdapterKind::public_output_mode)
-                .unwrap_or(PublicOutputMode::AssistantFinalVisible);
+                .unwrap_or(PublicOutputMode::ExplicitSendOnly);
             let final_output_digest =
                 canonical_content_digest(&[StructuredCampMessageSegment::Text {
                     text: envelope.payload.final_output.clone(),
@@ -2413,6 +2413,12 @@ impl ExecutionRuntimeService {
                               AND author_type = 'agent'
                               AND tombstoned_at IS NULL
                               AND content_digest = ?2
+                              AND source_operation_id IS NOT NULL
+                              AND json_array_length(effective_recipient_ids_json) = 0
+                              AND NOT EXISTS (
+                                  SELECT 1 FROM message_delivery
+                                  WHERE message_delivery.message_id = camp_message.id
+                              )
                             ORDER BY sequence, id
                             LIMIT 1
                             "#,
@@ -2443,11 +2449,6 @@ impl ExecutionRuntimeService {
                             text: envelope.payload.final_output.clone(),
                         }];
                         let structured_content_json = serde_json::to_string(&structured_content)?;
-                        let reply_to_camp_message_id =
-                            target.trigger_camp_message_id.as_deref().or_else(|| {
-                                (target.trigger_type == "camp_message")
-                                    .then_some(target.trigger_id.as_str())
-                            });
                         transaction.execute(
                             r#"
                     INSERT INTO camp_message(
@@ -2473,7 +2474,7 @@ impl ExecutionRuntimeService {
                                 structured_content_json,
                                 final_output_digest,
                                 addressed_agents_json,
-                                reply_to_camp_message_id,
+                                Option::<String>::None,
                                 target.camp_turn_id,
                                 target.now,
                             ],
@@ -2947,9 +2948,6 @@ struct TerminalTarget {
     camp_turn_id: String,
     agent_id: String,
     runtime_adapter_kind: Option<String>,
-    trigger_type: String,
-    trigger_id: String,
-    trigger_camp_message_id: Option<String>,
     status: String,
     version: i64,
     execution_epoch: i64,
@@ -2969,8 +2967,6 @@ fn load_terminal_target(
             SELECT agent_run.id, camp_turn.camp_id, agent_run.camp_turn_id,
                    conversation.agent_id,
                    agent_run.runtime_adapter_kind,
-                   camp_turn.trigger_type, camp_turn.trigger_id,
-                   agent_run.trigger_camp_message_id,
                    agent_run.status, agent_run.version, agent_run.execution_epoch,
                    agent_run.cancel_requested_at,
                    agent_run.final_conversation_message_id,
@@ -2988,15 +2984,12 @@ fn load_terminal_target(
                     camp_turn_id: row.get(2)?,
                     agent_id: row.get(3)?,
                     runtime_adapter_kind: row.get(4)?,
-                    trigger_type: row.get(5)?,
-                    trigger_id: row.get(6)?,
-                    trigger_camp_message_id: row.get(7)?,
-                    status: row.get(8)?,
-                    version: row.get(9)?,
-                    execution_epoch: row.get(10)?,
-                    cancel_requested_at: row.get(11)?,
-                    final_conversation_message_id: row.get(12)?,
-                    final_camp_message_id: row.get(13)?,
+                    status: row.get(5)?,
+                    version: row.get(6)?,
+                    execution_epoch: row.get(7)?,
+                    cancel_requested_at: row.get(8)?,
+                    final_conversation_message_id: row.get(9)?,
+                    final_camp_message_id: row.get(10)?,
                     now: chrono::Utc::now().to_rfc3339(),
                 })
             },

@@ -1157,7 +1157,10 @@ fn load_messages(
                source_agent_run_id, body, structured_content_json, address_mode,
                addressed_agent_ids_json,
                reply_to_camp_message_id, camp_turn_id,
-               presentation_json, created_at
+               CASE WHEN author_type = 'agent'
+                    THEN recipient_presentation_json
+                    ELSE presentation_json
+               END, created_at
         FROM camp_message
         WHERE camp_id = ?1 AND tombstoned_at IS NULL
         ORDER BY sequence DESC LIMIT ?2

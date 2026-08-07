@@ -1173,7 +1173,7 @@ describe('task event projections', () => {
     })).toBe('当前无可用队员。')
   })
 
-  it('renders a copy action for user messages and live Agent execution evidence', () => {
+  it('renders a copy action and routes Run detail through Run Pulse', () => {
     const profile = {
       ...agentProfile(),
       agentId: 'agent_2',
@@ -1286,22 +1286,22 @@ describe('task event projections', () => {
     expect(markup).not.toContain('role="link"')
     expect(markup.indexOf('class="message-bubble"'))
       .toBeLessThan(markup.indexOf('class="message-copy-button"'))
-    expect(markup).toContain('沐瓦的执行过程')
+    expect(markup).toContain('aria-label="Run Pulse"')
+    expect(markup).toContain('class="run-pulse-chip"')
+    expect(markup).toContain('<span>沐瓦</span><small>RUNNING</small>')
     expect(markup).not.toContain('Thinking')
     expect(markup).not.toContain('先检查消息组件。')
     expect(markup).not.toContain('完整证据')
     expect(markup).not.toContain('正在整理思路')
-    expect(markup).toContain('正在处理')
     expect(markup).not.toContain('Progress')
-    expect(markup).toContain('正在补充复制入口。')
+    expect(markup).not.toContain('正在补充复制入口。')
     expect(markup).not.toContain('Steps')
-    expect(markup).toContain('pnpm test')
-    expect(markup).toContain('conversation-bubble agent agent-run-message')
-    expect(markup).toContain('<div class="message-body"><div class="bubble-meta">')
-    expect(markup).toContain('<div class="execution-disclosure run-live is-running">')
+    expect(markup).not.toContain('pnpm test')
+    expect(markup).not.toContain('conversation-bubble agent agent-run-message')
+    expect(markup).not.toContain('execution-disclosure')
     expect(markup).not.toContain('stream-reasoning')
-    expect(markup).toContain('<div class="process-copy stream-narration"><div class="safe-markdown">')
-    expect(markup).toContain('<details class="process-action tool-call-disclosure status-running"><summary>')
+    expect(markup).not.toContain('process-copy stream-narration')
+    expect(markup).not.toContain('tool-call-disclosure')
     expect(markup).not.toContain('working-row')
     expect(markup).not.toContain('live-execution-progress')
     expect(markup).toContain('aria-label="停止当前执行"')
@@ -1379,10 +1379,10 @@ describe('task event projections', () => {
       stopping: false,
       onStop: () => undefined
     }))
-    expect(groupedEvidenceMarkup.match(/tool-call-disclosure/g)).toHaveLength(3)
-    expect(groupedEvidenceMarkup.match(/complete-evidence-control/g)).toHaveLength(3)
-    expect(groupedEvidenceMarkup.match(/查看完整工具调用/g)).toHaveLength(2)
-    expect(groupedEvidenceMarkup.match(/查看完整文件变更/g)).toHaveLength(1)
+    expect(groupedEvidenceMarkup).not.toContain('tool-call-disclosure')
+    expect(groupedEvidenceMarkup).not.toContain('complete-evidence-control')
+    expect(groupedEvidenceMarkup).not.toContain('查看完整工具调用')
+    expect(groupedEvidenceMarkup).not.toContain('查看完整文件变更')
     expect(groupedEvidenceMarkup).not.toContain('complete-evidence-standalone')
     expect(groupedEvidenceMarkup).not.toContain('完整证据')
 
@@ -1401,8 +1401,8 @@ describe('task event projections', () => {
       onStop: () => undefined
     }))
     expect(cancellingMarkup).toContain('正在停止')
-    expect(cancellingMarkup).toContain('停止请求已发送，正在等待 Agent 运行时退出。')
-    expect(cancellingMarkup).toContain('execution-disclosure run-live is-cancelling')
+    expect(cancellingMarkup).not.toContain('停止请求已发送，正在等待 Agent 运行时退出。')
+    expect(cancellingMarkup).not.toContain('execution-disclosure')
     expect(cancellingMarkup).toContain('aria-label="正在停止当前执行"')
     expect(cancellingMarkup).not.toMatch(/<textarea[^>]*disabled/)
     expect(cancellingMarkup).not.toContain('execution-disclosure is-running')
@@ -1439,12 +1439,11 @@ describe('task event projections', () => {
       stopping: false,
       onStop: () => undefined
     }))
-    expect(terminalMarkup).toContain('<details class="execution-disclosure worked is-terminal"><summary>')
+    expect(terminalMarkup).not.toContain('execution-disclosure')
     expect(terminalMarkup).not.toContain(' open=""')
     expect(terminalMarkup).not.toContain('terminal-run-row')
+    expect(terminalMarkup).toContain('来自 Run · 沐瓦')
     expect(terminalMarkup).toContain('复制入口已完成。')
-    expect(terminalMarkup.indexOf('execution-disclosure worked is-terminal'))
-      .toBeLessThan(terminalMarkup.indexOf('复制入口已完成。'))
 
     const restoredMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
       snapshot: {
@@ -1472,7 +1471,8 @@ describe('task event projections', () => {
       stopping: false,
       onStop: () => undefined
     }))
-    expect(restoredMarkup).toContain('处理过程 · 1分59秒')
+    expect(restoredMarkup).toContain('<small>DONE</small>')
+    expect(restoredMarkup).not.toContain('处理过程 · 1分59秒')
 
     const cancelledMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
       snapshot: {
@@ -1519,9 +1519,9 @@ describe('task event projections', () => {
     expect(cancelledMarkup).toContain('workspace-grid inspector-collapsed')
     expect(cancelledMarkup).not.toContain('aria-label="Camp 检查器"')
     expect(cancelledMarkup).toContain('你已在 5 秒后停止')
-    expect(cancelledMarkup).toContain('结果待确认 · 查看活动')
+    expect(cancelledMarkup).toContain('结果待确认 · 查看 Execution Drawer')
     expect(cancelledMarkup).not.toContain('run-message-state tone-neutral')
-    expect(cancelledMarkup.indexOf('pnpm test')).toBeLessThan(cancelledMarkup.indexOf('你已在 5 秒后停止'))
+    expect(cancelledMarkup).not.toContain('pnpm test')
   })
 
   it('keeps concurrent Runtime approvals in one dock directly above the composer', () => {

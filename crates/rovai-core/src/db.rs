@@ -1035,6 +1035,9 @@ impl Database {
             if !self.schema_migration_applied(61)? {
                 self.migrate_public_a2a_message_delivery_v61()?;
             }
+            if !self.schema_migration_applied(62)? {
+                self.migrate_single_authority_delivery_context_v62()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -1267,6 +1270,9 @@ impl Database {
         }
         if !self.schema_migration_applied(61)? {
             self.migrate_public_a2a_message_delivery_v61()?;
+        }
+        if !self.schema_migration_applied(62)? {
+            self.migrate_single_authority_delivery_context_v62()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -4933,40 +4939,6 @@ impl Database {
             CREATE INDEX message_delivery_attempt_delivery_idx
                 ON message_delivery_attempt(delivery_id, ordinal);
 
-            CREATE TABLE message_delivery_context_manifest (
-                id TEXT PRIMARY KEY,
-                delivery_id TEXT NOT NULL UNIQUE
-                    REFERENCES message_delivery(id) ON DELETE CASCADE,
-                profile_version INTEGER NOT NULL CHECK(profile_version = 2),
-                profile_json TEXT NOT NULL CHECK(json_valid(profile_json)),
-                profile_digest TEXT NOT NULL,
-                previous_accepted_public_boundary_sequence INTEGER NOT NULL
-                    CHECK(previous_accepted_public_boundary_sequence >= 0),
-                current_public_boundary_sequence INTEGER NOT NULL
-                    CHECK(current_public_boundary_sequence >= 1),
-                current_input_source_json TEXT NOT NULL
-                    CHECK(json_valid(current_input_source_json)),
-                current_input_digest TEXT NOT NULL,
-                recent_message_refs_json TEXT NOT NULL DEFAULT '[]'
-                    CHECK(json_valid(recent_message_refs_json)),
-                reference_closure_refs_json TEXT NOT NULL DEFAULT '[]'
-                    CHECK(json_valid(reference_closure_refs_json)),
-                omission_entries_json TEXT NOT NULL DEFAULT '[]'
-                    CHECK(json_valid(omission_entries_json)),
-                rendered_payload TEXT NOT NULL,
-                rendered_payload_digest TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                CHECK(
-                    previous_accepted_public_boundary_sequence
-                        <= current_public_boundary_sequence
-                )
-            );
-
-            CREATE INDEX message_delivery_context_boundary_idx
-                ON message_delivery_context_manifest(
-                    current_public_boundary_sequence, delivery_id
-                );
-
             CREATE TABLE message_delivery_retry (
                 id TEXT PRIMARY KEY,
                 delivery_id TEXT NOT NULL
@@ -4993,6 +4965,22 @@ impl Database {
 
             INSERT INTO schema_migration(version, applied_at)
             VALUES (61, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_single_authority_delivery_context_v62(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            DROP INDEX IF EXISTS message_delivery_context_boundary_idx;
+            DROP TABLE IF EXISTS message_delivery_context_manifest;
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (62, datetime('now'));
             "#,
         )?;
         transaction.commit()?;
@@ -12336,6 +12324,24 @@ mod tests {
             )
             .unwrap();
         assert_eq!(public_a2a_migration_applied, 1);
+        let single_context_authority_migration_applied: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 62",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(single_context_authority_migration_applied, 1);
+        let obsolete_delivery_manifest: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'message_delivery_context_manifest'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(obsolete_delivery_manifest, 0);
         for table in [
             "message_delivery",
             "message_delivery_attempt",

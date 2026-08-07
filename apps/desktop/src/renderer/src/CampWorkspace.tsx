@@ -628,17 +628,6 @@ export function CampWorkspace({
   const executionDrawerRun = executionDrawerRunId
     ? runById.get(executionDrawerRunId) ?? null
     : null
-  const messageRunIds = new Set(snapshot.messages.flatMap((campMessage) =>
-    campMessage.sourceAgentRunId ? [campMessage.sourceAgentRunId] : []
-  ))
-  const runsWithoutMessage = snapshot.agentRuns
-    .filter((run) => !messageRunIds.has(run.id))
-    .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
-  const stopOutcomeTurnIds = new Set(
-    conversationTimeline
-      .filter((item) => item.kind === 'stop_event')
-      .map((item) => item.campTurnId)
-  )
   const pendingApprovals = snapshot.approvals.filter((approval) => approval.status === 'pending')
   const previousPendingApprovalCount = useRef(pendingApprovals.length)
   const executionEvents = useMemo(() => {
@@ -1012,7 +1001,9 @@ export function CampWorkspace({
           <RunPulse
             runs={snapshot.agentRuns}
             deliveries={snapshot.messageDeliveries}
+            memberById={memberById}
             stopping={stopping}
+            selectedRunId={executionDrawerRunId}
             onOpen={(runId) => setExecutionDrawerRunId(runId)}
           />
           <div
@@ -1051,28 +1042,14 @@ export function CampWorkspace({
                     continue
                   }
                   if (timelineItem.kind === 'stop_event') {
-                    for (const run of runsWithoutMessage.filter((candidate) =>
-                      candidate.campTurnId === timelineItem.campTurnId
-                    )) {
-                      items.push(
-                        <AgentRunConversationMessage
-                          key={run.id}
-                          run={run}
-                          member={memberById.get(run.agentId) ?? null}
-                          profile={profileById.get(run.agentId) ?? null}
-                          progress={executionProgressByRunId.get(run.id)}
-                          campId={snapshot.camp.id}
-                          truncatedEvidence={truncatedEvidenceByRunId.get(run.id)}
-                          loadedEvidenceCount={loadedEvidenceCountByRunId.get(run.id) ?? 0}
-                          cancelling={false}
-                        />
-                      )
-                    }
+                    const turnRun = snapshot.agentRuns
+                      .filter((candidate) => candidate.campTurnId === timelineItem.campTurnId)
+                      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]
                     items.push(
                       <StopOutcomeEvent
                         key={timelineItem.id}
                         item={timelineItem}
-                        onOpenActivity={() => openInspector('tasks')}
+                        onOpenDrawer={turnRun ? () => setExecutionDrawerRunId(turnRun.id) : undefined}
                       />
                     )
                     continue
@@ -1125,15 +1102,13 @@ export function CampWorkspace({
                                       ? (
                                           <>
                                             {sourceRun && (
-                                              <RunExecutionDisclosure
-                                                run={sourceRun}
-                                                progress={executionProgressByRunId.get(sourceRun.id)}
-                                                campId={snapshot.camp.id}
-                                                truncatedEvidence={truncatedEvidenceByRunId.get(sourceRun.id)}
-                                                loadedEvidenceCount={loadedEvidenceCountByRunId.get(sourceRun.id) ?? 0}
-                                                finalBody={displayBody}
-                                                cancelling={cancellingTurnIds.has(sourceRun.campTurnId) && NON_TERMINAL_RUNS.has(sourceRun.status)}
-                                              />
+                                              <button
+                                                type="button"
+                                                className="message-run-origin"
+                                                onClick={() => setExecutionDrawerRunId(sourceRun.id)}
+                                              >
+                                                来自 Run · {memberById.get(sourceRun.agentId)?.displayName ?? sourceRun.agentId}
+                                              </button>
                                             )}
                                             <div className="final-copy">
                                               <SafeMarkdown>{displayBody}</SafeMarkdown>
@@ -1176,6 +1151,7 @@ export function CampWorkspace({
                                   delivery.messageId === campMessage.id
                                 )}
                                 memberById={memberById}
+                                onOpenRun={setExecutionDrawerRunId}
                               />
                             </div>
                           )
@@ -1185,7 +1161,7 @@ export function CampWorkspace({
                 }
                 return items
               })()}
-              {conversationTimeline.length === 0 && runsWithoutMessage.length === 0 && (
+              {conversationTimeline.length === 0 && snapshot.agentRuns.length === 0 && (
                 <EmptyCampWelcome
                   snapshot={snapshot}
                   projectName={projectName}
@@ -1193,21 +1169,28 @@ export function CampWorkspace({
                   onChoosePrompt={chooseStarterPrompt}
                 />
               )}
-              {runsWithoutMessage.filter((run) => !stopOutcomeTurnIds.has(run.campTurnId)).map((run) => (
-                <AgentRunConversationMessage
-                  key={run.id}
-                  run={run}
-                  member={memberById.get(run.agentId) ?? null}
-                  profile={profileById.get(run.agentId) ?? null}
-                  progress={executionProgressByRunId.get(run.id)}
-                  campId={snapshot.camp.id}
-                  truncatedEvidence={truncatedEvidenceByRunId.get(run.id)}
-                  loadedEvidenceCount={loadedEvidenceCountByRunId.get(run.id) ?? 0}
-                  cancelling={cancellingTurnIds.has(run.campTurnId) && NON_TERMINAL_RUNS.has(run.status)}
-                />
-              ))}
             </div>
           </div>
+          {executionDrawerRun && (
+            <ExecutionDrawer
+              run={executionDrawerRun}
+              runs={snapshot.agentRuns}
+              member={memberById.get(executionDrawerRun.agentId) ?? null}
+              profile={profileById.get(executionDrawerRun.agentId) ?? null}
+              deliveries={snapshot.messageDeliveries.filter((delivery) =>
+                delivery.targetAgentRunId === executionDrawerRun.id
+                || (delivery.targetAgentRunId === null && delivery.campTurnId === executionDrawerRun.campTurnId)
+              )}
+              progress={executionProgressByRunId.get(executionDrawerRun.id)}
+              campId={snapshot.camp.id}
+              truncatedEvidence={truncatedEvidenceByRunId.get(executionDrawerRun.id)}
+              loadedEvidenceCount={loadedEvidenceCountByRunId.get(executionDrawerRun.id) ?? 0}
+              cancelling={cancellingTurnIds.has(executionDrawerRun.campTurnId) && NON_TERMINAL_RUNS.has(executionDrawerRun.status)}
+              onSelect={setExecutionDrawerRunId}
+              onClose={() => setExecutionDrawerRunId(null)}
+              memberById={memberById}
+            />
+          )}
         </section>
 
         {inspectorVisible && <aside className="activity-pane" aria-label="Camp 检查器">
@@ -1556,26 +1539,6 @@ export function CampWorkspace({
           </form>
         </div>
       </div>
-      {executionDrawerRun && (
-        <ExecutionDrawer
-          run={executionDrawerRun}
-          runs={snapshot.agentRuns}
-          member={memberById.get(executionDrawerRun.agentId) ?? null}
-          profile={profileById.get(executionDrawerRun.agentId) ?? null}
-          deliveries={snapshot.messageDeliveries.filter((delivery) =>
-            delivery.targetAgentRunId === executionDrawerRun.id
-            || (delivery.targetAgentRunId === null && delivery.campTurnId === executionDrawerRun.campTurnId)
-          )}
-          progress={executionProgressByRunId.get(executionDrawerRun.id)}
-          campId={snapshot.camp.id}
-          truncatedEvidence={truncatedEvidenceByRunId.get(executionDrawerRun.id)}
-          loadedEvidenceCount={loadedEvidenceCountByRunId.get(executionDrawerRun.id) ?? 0}
-          cancelling={cancellingTurnIds.has(executionDrawerRun.campTurnId) && NON_TERMINAL_RUNS.has(executionDrawerRun.status)}
-          onSelect={setExecutionDrawerRunId}
-          onClose={() => setExecutionDrawerRunId(null)}
-          memberById={memberById}
-        />
-      )}
       {mentionPopover && (
         <MentionProfilePopover
           request={mentionPopover}
@@ -1591,30 +1554,53 @@ export function CampWorkspace({
 function RunPulse({
   runs,
   deliveries,
+  memberById,
   stopping,
+  selectedRunId,
   onOpen
 }: {
   runs: AgentRunView[]
   deliveries: MessageDeliveryView[]
+  memberById: Map<string, CampSnapshot['members'][number]>
   stopping: boolean
+  selectedRunId: string | null
   onOpen(runId: string): void
 }): JSX.Element {
   const activeRuns = runs.filter((run) => NON_TERMINAL_RUNS.has(run.status))
   const activeDeliveries = deliveries.filter((delivery) =>
     delivery.status === 'pending' || delivery.status === 'running'
   )
-  const primaryRun = activeRuns[0] ?? runs[runs.length - 1] ?? null
-  if (!primaryRun && activeDeliveries.length === 0) return <></>
+  const visibleRuns = runs
+    .slice()
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+  if (visibleRuns.length === 0 && activeDeliveries.length === 0) return <></>
   return (
-    <div className="run-pulse" aria-live="polite">
+    <div className="run-pulse" aria-live="polite" aria-label="Run Pulse">
       <span className="run-pulse-mark" aria-hidden="true"><i /></span>
       <strong>{stopping ? '正在停止当前 CampTurn' : activeRuns.length > 0 ? '执行中' : '最近执行'}</strong>
       <span className="run-pulse-count">{activeRuns.length || runs.length} Run</span>
       {activeDeliveries.length > 0 && <span className="run-pulse-deliveries">{activeDeliveries.length} 条协作投递</span>}
-      {primaryRun && (
-        <button type="button" className="run-pulse-open" onClick={() => onOpen(primaryRun.id)}>
-          打开 Execution Drawer <span aria-hidden="true">↗</span>
-        </button>
+      {visibleRuns.length > 0 && (
+        <div className="run-pulse-list" role="list" aria-label="可查看的 Run">
+          {visibleRuns.map((run) => {
+            const memberName = memberById.get(run.agentId)?.displayName ?? run.agentId
+            const deliveryCount = deliveries.filter((delivery) =>
+              delivery.targetAgentRunId === run.id || delivery.campTurnId === run.campTurnId
+            ).length
+            return (
+              <button
+                type="button"
+                className={`run-pulse-chip${selectedRunId === run.id ? ' is-selected' : ''}`}
+                aria-pressed={selectedRunId === run.id}
+                key={run.id}
+                onClick={() => onOpen(run.id)}
+              >
+                <span>{memberName}</span>
+                <small>{agentRunStateTag(run).tag}{deliveryCount > 0 ? ` · ${deliveryCount} 投递` : ''}</small>
+              </button>
+            )
+          })}
+        </div>
       )}
     </div>
   )
@@ -1650,60 +1636,29 @@ function ExecutionDrawer({
   memberById: Map<string, CampSnapshot['members'][number]>
 }): JSX.Element {
   const drawerRef = useRef<HTMLElement>(null)
-  const closeButtonRef = useRef<HTMLButtonElement>(null)
-  const returnFocusRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
-    returnFocusRef.current = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null
-    closeButtonRef.current?.focus()
     const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && drawerRef.current?.contains(document.activeElement)) {
         event.preventDefault()
         onClose()
-        return
-      }
-      if (event.key !== 'Tab') return
-      const drawer = drawerRef.current
-      if (!drawer) return
-      const focusable = Array.from(drawer.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-      ))
-      if (focusable.length === 0) {
-        event.preventDefault()
-        drawer.focus()
-        return
-      }
-      const first = focusable[0]
-      const last = focusable[focusable.length - 1]
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault()
-        first.focus()
       }
     }
-    document.addEventListener('keydown', handleKeyDown, true)
+    drawerRef.current?.addEventListener('keydown', handleKeyDown)
     return () => {
-      document.removeEventListener('keydown', handleKeyDown, true)
-      returnFocusRef.current?.focus({ preventScroll: true })
+      drawerRef.current?.removeEventListener('keydown', handleKeyDown)
     }
   }, [])
 
   return (
-    <div className="execution-drawer-backdrop" role="presentation" onMouseDown={(event) => {
-      if (event.target === event.currentTarget) onClose()
-    }}>
-      <aside ref={drawerRef} className="execution-drawer" role="dialog" aria-modal="true" aria-label="Execution Drawer" tabIndex={-1}>
+    <section ref={drawerRef} className="execution-drawer" role="region" aria-labelledby="execution-drawer-title" tabIndex={-1}>
         <header className="execution-drawer-header">
           <div>
             <span className="eyebrow">RUN PROCESS</span>
-            <h2>Execution Drawer</h2>
+            <h2 id="execution-drawer-title">Execution Drawer</h2>
             <p>查看 Run 过程、投递和运行时证据；停止权仍由当前 CampTurn 负责。</p>
           </div>
-          <button ref={closeButtonRef} type="button" className="quiet-button" onClick={onClose} aria-label="关闭 Execution Drawer">关闭</button>
+          <button type="button" className="quiet-button" onClick={onClose} aria-label="收起 Execution Drawer">收起</button>
         </header>
         <div className="execution-drawer-body">
           <nav className="execution-run-list" aria-label="Run 列表">
@@ -1763,23 +1718,25 @@ function ExecutionDrawer({
             />
           </section>
         </div>
-      </aside>
-    </div>
+    </section>
   )
 }
 
 function CampMessageDeliveryFooter({
   deliveries,
-  memberById
+  memberById,
+  onOpenRun
 }: {
   deliveries: MessageDeliveryView[]
   memberById: Map<string, CampSnapshot['members'][number]>
+  onOpenRun(runId: string): void
 }): JSX.Element | null {
   if (deliveries.length === 0) return null
   return (
     <DeliveryStatusList
       deliveries={deliveries}
       memberById={memberById}
+      onOpenRun={onOpenRun}
       compact
     />
   )
@@ -1788,11 +1745,13 @@ function CampMessageDeliveryFooter({
 function DeliveryStatusList({
   deliveries,
   memberById,
-  compact = false
+  compact = false,
+  onOpenRun
 }: {
   deliveries: MessageDeliveryView[]
   memberById: Map<string, CampSnapshot['members'][number]>
   compact?: boolean
+  onOpenRun?: (runId: string) => void
 }): JSX.Element | null {
   if (deliveries.length === 0) return null
   const ordered = deliveries.slice().sort((left, right) =>
@@ -1813,9 +1772,20 @@ function DeliveryStatusList({
               <span className="delivery-recipient">
                 {recipient?.displayName ?? delivery.recipientAgentId}
               </span>
-              <span className={`delivery-state tone-${presentation.tone}`} title={delivery.failureCode ?? undefined}>
-                {presentation.label}
-              </span>
+              {delivery.targetAgentRunId && onOpenRun ? (
+                <button
+                  type="button"
+                  className={`delivery-state delivery-state-button tone-${presentation.tone}`}
+                  title={delivery.failureCode ?? undefined}
+                  onClick={() => onOpenRun(delivery.targetAgentRunId as string)}
+                >
+                  {presentation.label}
+                </button>
+              ) : (
+                <span className={`delivery-state tone-${presentation.tone}`} title={delivery.failureCode ?? undefined}>
+                  {presentation.label}
+                </span>
+              )}
             </li>
           )
         })}
@@ -2335,18 +2305,18 @@ function EmptyCampWelcome({
 
 function StopOutcomeEvent({
   item,
-  onOpenActivity
+  onOpenDrawer
 }: {
   item: Extract<CampConversationTimelineItem, { kind: 'stop_event' }>
-  onOpenActivity(): void
+  onOpenDrawer?: () => void
 }): JSX.Element {
   return (
     <div className="timeline-node run-stopped-event" role="status">
       <div>
         <span><i aria-hidden="true" />你已在 {item.elapsedLabel}后停止</span>
-        {item.hasUnsettledExternalEffects && (
-          <button type="button" onClick={onOpenActivity}>
-            结果待确认 · 查看活动
+        {item.hasUnsettledExternalEffects && onOpenDrawer && (
+          <button type="button" onClick={onOpenDrawer}>
+            结果待确认 · 查看 Execution Drawer
           </button>
         )}
       </div>
@@ -2639,64 +2609,6 @@ function TaskTimelineCard({
       <strong>{task.title}</strong>
       <small>负责人 · {assigneeName}</small>
     </button>
-  )
-}
-
-function AgentRunConversationMessage({
-  run,
-  member,
-  profile,
-  progress,
-  campId,
-  truncatedEvidence = [],
-  loadedEvidenceCount = 0,
-  cancelling = false
-}: {
-  run: AgentRunView
-  member: CampSnapshot['members'][number] | null
-  profile: AgentProfile | null
-  progress?: LiveExecutionProgress
-  campId: string
-  truncatedEvidence?: AgentRunExecutionEvidenceView[]
-  loadedEvidenceCount?: number
-  cancelling?: boolean
-}): JSX.Element {
-  const memberName = member?.displayName ?? profile?.displayName ?? run.agentId
-  const presentation = agentRunPresentation(run, cancelling)
-  return (
-    <article
-      className={`timeline-node conversation-bubble agent agent-run-message ${cancelling ? 'is-cancelling' : ''}`}
-      data-camp-turn-id={run.campTurnId}
-      tabIndex={-1}
-      style={{ '--agent-accent': identityColorToken(run.agentId) } as React.CSSProperties}
-      aria-label={`${memberName}的执行过程`}
-    >
-      <MemberAvatar
-        agentId={run.agentId}
-        avatarRef={member?.avatarRef ?? profile?.avatarRef ?? null}
-        displayName={memberName}
-        size="list"
-        decorative
-      />
-      <div className="message-body">
-        <div className="bubble-meta">
-          <strong>{memberName}</strong>
-          {profile?.runtimeConfiguration && <span>{runtimeAdapterLabel(profile.runtimeConfiguration.adapterKind)}</span>}
-          <time title={run.id}>{messageClockTime(run.startedAt ?? run.createdAt)}</time>
-          {(cancelling || run.status !== 'cancelled') && (
-            <span className={`run-message-state tone-${presentation.tone}`}>{presentation.label}</span>
-          )}
-        </div>
-        <RunExecutionDisclosure
-          run={run}
-          progress={progress}
-          campId={campId}
-          truncatedEvidence={truncatedEvidence}
-          loadedEvidenceCount={loadedEvidenceCount}
-          cancelling={cancelling}
-        />
-      </div>
-    </article>
   )
 }
 

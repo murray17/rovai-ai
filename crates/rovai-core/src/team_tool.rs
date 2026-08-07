@@ -2833,6 +2833,65 @@ mod tests {
     }
 
     #[test]
+    fn public_delivery_runtime_consumes_the_pre_run_frozen_context_bytes() {
+        let mut fixture = Fixture::new();
+        let invocation = fixture.public_send_invocation(
+            "frozen-public-context",
+            "Use this exact public input @agent_2",
+            &["agent_2"],
+        );
+        let sent = TeamToolService::default()
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+        let delivery_id = sent.result.payload["deliveryIds"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let (target_run_id, frozen_snapshot): (String, String) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT target_agent_run_id, frozen_snapshot_json FROM message_delivery WHERE id = ?1",
+                [&delivery_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let frozen_snapshot: Value = serde_json::from_str(&frozen_snapshot).unwrap();
+        let frozen_payload = frozen_snapshot["frozenContext"]["renderedPayload"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let (target_epoch, _) =
+            fixture.claim_bind_and_issue(&target_run_id, "native-frozen-public-context");
+        let ContextMaterialization::Ready(context) = ContextService
+            .materialize(
+                &mut fixture.database,
+                &ManagedBlobStore::new(&fixture.directory),
+                &MaterializeContextRequest {
+                    agent_run_id: &target_run_id,
+                    execution_epoch: target_epoch,
+                    charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+            )
+            .unwrap()
+        else {
+            panic!("Public Delivery context should materialize");
+        };
+        assert_eq!(context.rendered_payload, frozen_payload);
+        let manifest_id: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT context_manifest_id FROM message_delivery WHERE id = ?1",
+                [&delivery_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(manifest_id, context.manifest_id);
+    }
+
+    #[test]
     fn exact_public_final_output_is_suppressed_once_per_run() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
@@ -2875,6 +2934,57 @@ mod tests {
         assert_eq!(message_count, 1);
         assert_eq!(final_message_id, explicit_message_id);
         assert!(suppressed);
+    }
+
+    #[test]
+    fn recipient_bound_public_send_never_suppresses_automatic_final() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        let body = "The answer is public for the target, but still needs a final.";
+        let invocation =
+            fixture.public_send_invocation("recipient-bound-final", body, &["agent_2"]);
+        service
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+
+        fixture.succeed_run(&fixture.source_run_id.clone(), fixture.source_epoch, body);
+
+        let (message_count, suppressed): (i64, bool) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT
+                    (SELECT COUNT(*) FROM camp_message WHERE source_agent_run_id = ?1),
+                    EXISTS(
+                        SELECT 1 FROM event_log
+                        WHERE event_type = 'agent_run.succeeded'
+                          AND entity_type = 'agent_run'
+                          AND entity_id = ?1
+                          AND json_extract(payload_json, '$.automaticPublicOutputSuppressed') = 1
+                    )
+                "#,
+                [&fixture.source_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(message_count, 2);
+        assert!(!suppressed);
+        let automatic_reply: Option<String> = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT reply_to_camp_message_id
+                FROM camp_message
+                WHERE source_agent_run_id = ?1 AND source_operation_id IS NULL
+                ORDER BY sequence DESC LIMIT 1
+                "#,
+                [&fixture.source_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(automatic_reply.is_none());
     }
 
     #[test]

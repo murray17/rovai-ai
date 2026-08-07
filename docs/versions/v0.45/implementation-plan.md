@@ -49,7 +49,8 @@ last_updated: 2026-08-07
 
 - [x] 增加 v2 immutable resolver 与 shared fixture；
 - [x] 实现最多 3 条 direct-parent closure、预算优先级、omission 和 stable digest；
-- [x] 在 Delivery dispatch attempt 内先物化 ContextManifest，再创建 AgentRun；
+- [x] 在 Delivery dispatch attempt 内先冻结唯一权威的完整 Dynamic Context 选择与 Runtime
+  payload，再创建 AgentRun；Runtime 只把同一冻结字节封装成正式 ContextManifest，不重新选历史；
 - [x] direct parent/mandatory structure 无法容纳时 terminal `context_payload_too_large`，不创建
   AgentRun、不进入 waitCondition；
 - [x] ACK 只推进既有 Accepted Public Context Boundary，不为 Closure 增加第二游标。
@@ -58,13 +59,17 @@ last_updated: 2026-08-07
 
 - [x] 为每个 Adapter 冻结 `explicit_send_only` 或 `assistant_final_visible`；
 - [x] 在可靠 final boundary 生成 recipient-free Public A2A Message；
-- [x] 只对同一 Run、同一规范化正文执行 exact final suppression；跨 Run、语义相似正文和时间窗
-  去重均不启用（`runtime::succeed_agent_run` + `team_tool::tests::exact_public_final_output_is_suppressed_once_per_run`）。
+- [x] 只对同一 Run 已显式发布的 recipient-free、同一规范化正文执行 exact final suppression；
+  recipient-bound send、跨 Run、语义相似正文和时间窗均不去重（含 recipient-bound regression）；
+- [x] Automatic final 默认 `replyToCampMessageId = null`，未知 Runtime output mode fail-safe 为
+  `explicit_send_only`；
 - [ ] 严禁通过语义相似度、时间窗或跨 Run body 去重。
 
 ## Checkpoint 6：Renderer、Preload、IPC 与原型收敛
 
-- [x] 以现有 Arctic Dawn App Shell 为基线接入 Run Pulse 和按需 Execution Drawer；
+- [x] 以现有 Arctic Dawn App Shell 为基线接入 per-Run Run Pulse 和按需 Execution Drawer；
+- [x] Drawer 是 Timeline 下方、Approval Dock 上方的唯一非模态 Run 过程面，无 backdrop、
+  focus trap、全屏覆盖或 Timeline 内第二套 Run process；
 - [x] 删除 Inspector “活动”页及其独立状态，保留 Tasks/Context/Approvals/Audit；
 - [x] Drawer 不提供 Run stop；Composer 发送位置在活跃 CampTurn 时切换为唯一的 Stop；
 - [x] Approval Dock 始终紧贴 Composer 上方，Drawer 收缩时不遮挡 Approval Dock；
