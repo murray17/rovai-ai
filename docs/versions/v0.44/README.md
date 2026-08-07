@@ -10,8 +10,8 @@ last_updated: 2026-08-07
 
 # Rovai-ai v0.44 AgentRun 确定性原始公共上下文
 
-> 状态：实施与验收已完成。Formatter v9、ContextManifest v7、Read Model schema 22、
-> Data Contract v0.44 / projection schema 23 与 Migration v59 已成为当前实现事实。
+> 状态：实施与验收已完成。Formatter v10、ContextManifest v7、Read Model schema 22、
+> Data Contract v0.44 / projection schema 23 与 Migration v60 已成为当前实现事实。
 >
 > 前置版本：[v0.43 Runtime-Native Additive MCP](../v0.43/README.md)
 >
@@ -35,6 +35,12 @@ last_updated: 2026-08-07
 
 原始 CampMessage 是新的公共消息上下文唯一内容来源。`camp.search`、`history.search` 与
 `camp.read` 继续提供边界封顶的原文回读，不维护逐条已读或未读状态。
+
+`COLLABORATION_STATE` 只投影稳定的团队身份（成员 ID、名称、团队角色、专业职责和可选
+Default Lead）。它不注入 `availability`、`busy`、`reason` 或当前 Turn 参与者数量；一次
+Member Call 是否能执行始终由 Core 在 `team.call_member` 接受时基于最新权威状态判定。
+Migration v60 会使保存过旧 availability 投影的 Native Session 失效，避免新 Run 继续继承
+会话历史中的过期忙碌状态。
 
 ## 冻结的投递合同
 

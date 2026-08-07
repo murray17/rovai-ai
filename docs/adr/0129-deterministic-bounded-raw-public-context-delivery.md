@@ -185,6 +185,32 @@ sequence，即使 tombstone 造成整数间隙也不声称区间内每个整数�
 遗漏提示不是自动读取指令。ACK 后，提示覆盖的消息同样越过当前 Native Session 的自动投递
 边界，后续 AgentRun 不再次自动补投；需要时通过边界封顶的原始历史工具回读。
 
+### Stable collaboration state
+
+`COLLABORATION_STATE` 只描述当前 Camp 的稳定团队投影，不描述模型收到输入时成员正在做什么。
+每名成员只提供 Core 已确认的团队身份字段：
+
+```yaml
+agentId: agent_xxx
+name: A
+teamRole: "..."
+professionalResponsibilities: "..."
+```
+
+顶层可选的 `defaultLead` 只包含 Lead 的 `agentId` 和 `name`。该区段不再包含
+`availability`、`busy`、`reason`、`changes` 或 `currentTurnNeedsCollaboration`；也不因为
+当前 Turn 参与者数量或其他 AgentRun 的排队/运行状态而重新计算或注入提示。成员身份、Camp
+成员关系、Presence 或 Lead 发生持久结构变化时，成员稳定投影 digest 才会使区段在后续 Run
+重新提供。
+
+成员是否能够执行一次具体协作请求由 `team.call_member` 在 Core 接受调用的同一权威状态上
+当场判定，并受当前成员关系、Presence、Runtime、Capability、配额与执行 fence 约束。模型
+不得把 `COLLABORATION_STATE` 当作可用性承诺，也不应因区段未重新出现而假设成员仍然可用。
+
+Formatter v10 与保存过瞬时 availability 的既有 Native Session 不兼容。Migration v60 保留
+Formatter v8/v9 的终态 Manifest 作为不可变审计证据，但 fail closed 旧合同下的非终态 Run，
+并使现有 Native Binding/Session 失效；下一次执行必须建立不含旧瞬时状态的新 Session。
+
 ### Versioned Context Delivery Profile
 
 所有投递数值由应用拥有的不可变 Context Delivery Profile 提供，不写死在 Formatter，不进入

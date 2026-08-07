@@ -20,6 +20,11 @@ last_updated: 2026-08-07
 - [x] 升级 AgentRun Context Formatter、ContextManifest 与 Native Binding context contract；
 - [x] 增加 Rust/TypeScript 共用的 v0.44 Context fixture。
 
+补充稳定协作状态修订：Formatter v10 移除 `COLLABORATION_STATE` 中的瞬时可用性、忙碌原因、
+`changes` 和当前 Turn 参与者提示；Core 只投影稳定团队身份，`team.call_member` 在调用接受
+时重新执行可用性与权限判定。Migration v60 fail closed 旧合同下的非终态 Run 并轮换既有
+Native Session，终态 Formatter v8/v9 Manifest 继续作为不可变审计证据保留。
+
 ## Checkpoint 2：Context Delivery Profile 与 Manifest
 
 - [x] 建立应用内置、不可变的 `ContextDeliveryProfile` 解析边界；Formatter 不含 v1 数字字面量；

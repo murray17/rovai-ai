@@ -932,7 +932,7 @@ export interface ContextManifestView {
   mcpExposure: McpExposureSnapshot
   mcpExposureDigest: string
   mcpProjectionDigest: string
-  formatterVersion: 8 | 9
+  formatterVersion: 8 | 9 | 10
   renderedPayloadDigest: string
   delivery: RuntimeInputDeliveryView | null
   createdAt: string

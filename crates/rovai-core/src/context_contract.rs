@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 
 pub const NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION: &str = "native_session_bootstrap_v2";
 pub const BOOTSTRAP_FORMATTER_VERSION: i64 = 2;
-pub const AGENT_RUN_CONTEXT_FORMATTER_VERSION: i64 = 9;
+pub const AGENT_RUN_CONTEXT_FORMATTER_VERSION: i64 = 10;
 pub const CONTEXT_MANIFEST_VERSION: i64 = 7;
 
 pub(crate) fn native_binding_context_contract() -> Value {
@@ -20,7 +20,7 @@ mod tests {
 
     fn shared_fixture() -> Value {
         serde_json::from_str(include_str!(
-            "../../../packages/contracts/fixtures/agent-run-context-v9.json"
+            "../../../packages/contracts/fixtures/agent-run-context-v10.json"
         ))
         .expect("shared AgentRun context fixture must be valid JSON")
     }
@@ -37,7 +37,7 @@ mod tests {
                 "contextManifestVersion": fixture["contextManifestVersion"],
             })
         );
-        assert_eq!(fixture["contextManifestFormatterVersion"], 9);
+        assert_eq!(fixture["contextManifestFormatterVersion"], 10);
         assert_eq!(fixture["memberCallSenderIdentityField"], "senderAgentId");
     }
 }

@@ -394,7 +394,6 @@ impl ContextService {
         let member_state_digest = canonical_json_digest(&serde_json::to_value(&members)?)?;
         let members_changed = bootstrap_required
             || snapshot.native_member_state_digest.as_deref() != Some(&member_state_digest);
-        let participants = load_turn_participants(database, &snapshot.camp_turn_id)?;
         let profile = current_context_delivery_profile()?;
         let profile_json = serde_json::to_value(profile)?;
         let profile_digest = profile.canonical_digest()?;
@@ -414,9 +413,7 @@ impl ContextService {
             .map(|attachment| attachment.path.clone())
             .collect::<Vec<_>>();
         let a2a_count = count_a2a_runs(database, &snapshot.camp_turn_id)?;
-        let collaboration_state = members_changed
-            .then(|| build_collaboration_state(database, &snapshot, &members, &participants))
-            .transpose()?;
+        let collaboration_state = members_changed.then(|| build_collaboration_state(&members));
         let run_notices =
             build_run_notices(database, &snapshot, requires_new_native_session, a2a_count)?;
         let bootstrap_in_runtime_payload = request.charter_delivery_mode
@@ -1839,48 +1836,19 @@ struct RunNotice {
     message: String,
 }
 
-fn build_collaboration_state(
-    database: &Database,
-    snapshot: &RunSnapshot,
-    members: &[MemberState],
-    participants: &[Value],
-) -> Result<Value> {
+fn build_collaboration_state(members: &[MemberState]) -> Value {
     let collaboration_members = members
         .iter()
         .filter(|member| member.membership_status == "active" && member.profile_status != "removed")
         .map(|member| {
-            let busy: bool = database.connection().query_row(
-                r#"
-                SELECT COUNT(*) > 0
-                FROM agent_run
-                JOIN conversation ON conversation.id = agent_run.conversation_id
-                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-                WHERE camp_turn.camp_id = ?1
-                  AND conversation.agent_id = ?2
-                  AND agent_run.id <> ?3
-                  AND agent_run.status IN ('queued', 'running', 'waiting')
-                "#,
-                params![snapshot.camp_id, member.agent_id, snapshot.agent_run_id],
-                |row| row.get(0),
-            )?;
-            let (availability, reason) =
-                if member.profile_status != "present" || member.membership_status != "active" {
-                    ("unavailable", Some("away"))
-                } else if busy {
-                    ("busy", Some("working_in_camp"))
-                } else {
-                    ("available", None)
-                };
-            Ok::<_, anyhow::Error>(json!({
+            json!({
                 "agentId": member.agent_id,
                 "name": member.display_name,
                 "teamRole": member.team_role,
                 "professionalResponsibilities": member.professional_responsibilities,
-                "availability": availability,
-                "reason": reason,
-            }))
+            })
         })
-        .collect::<Result<Vec<_>>>()?;
+        .collect::<Vec<_>>();
     let default_lead = members
         .iter()
         .find(|member| member.is_default_lead)
@@ -1890,14 +1858,12 @@ fn build_collaboration_state(
                 "name": member.display_name,
             })
         });
-    Ok(json!({
-        "members": collaboration_members,
-        "defaultLead": default_lead,
-        "changes": snapshot.native_member_state_digest.is_some().then(|| {
-            vec!["Team membership or availability changed since the prior accepted input."]
-        }),
-        "currentTurnNeedsCollaboration": participants.len() > 1,
-    }))
+    let mut state = serde_json::Map::new();
+    state.insert("members".to_string(), json!(collaboration_members));
+    if let Some(default_lead) = default_lead {
+        state.insert("defaultLead".to_string(), default_lead);
+    }
+    Value::Object(state)
 }
 
 fn build_run_notices(
@@ -1982,26 +1948,6 @@ fn load_members(database: &Database, camp_id: &str) -> Result<Vec<MemberState>> 
                 profile_status: row.get(5)?,
                 is_default_lead: row.get(6)?,
             })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?)
-}
-
-fn load_turn_participants(database: &Database, camp_turn_id: &str) -> Result<Vec<Value>> {
-    let mut statement = database.connection().prepare(
-        r#"
-        SELECT DISTINCT conversation.agent_id
-        FROM agent_run
-        JOIN conversation ON conversation.id = agent_run.conversation_id
-        JOIN agent_profile ON agent_profile.id = conversation.agent_id
-        WHERE agent_run.camp_turn_id = ?1
-        ORDER BY agent_profile.member_order, agent_profile.id
-        "#,
-    )?;
-    Ok(statement
-        .query_map([camp_turn_id], |row| {
-            Ok(json!({
-                "agentId": row.get::<_, String>(0)?,
-            }))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?)
 }
@@ -3193,6 +3139,61 @@ mod tests {
 \"personalityTraits\": [],\n  \"workingPrinciples\": \"\",\n  \"growthTopic\": \"\"\n}\n\
 [/MEMBER_IDENTITY]\n\n[MEMORY_ENTRYPOINT]\nentrypoint\n[/MEMORY_ENTRYPOINT]"
         );
+    }
+
+    #[test]
+    fn collaboration_state_is_only_a_stable_team_projection() {
+        let members = vec![
+            MemberState {
+                agent_id: "agent-a".to_string(),
+                display_name: "A".to_string(),
+                team_role: "Builder".to_string(),
+                professional_responsibilities: "Builds the requested change.".to_string(),
+                membership_status: "active".to_string(),
+                profile_status: "present".to_string(),
+                is_default_lead: true,
+            },
+            MemberState {
+                agent_id: "agent-b".to_string(),
+                display_name: "B".to_string(),
+                team_role: "Reviewer".to_string(),
+                professional_responsibilities: "Reviews the requested change.".to_string(),
+                membership_status: "active".to_string(),
+                profile_status: "away".to_string(),
+                is_default_lead: false,
+            },
+        ];
+
+        let state = build_collaboration_state(&members);
+
+        assert_eq!(
+            state,
+            json!({
+                "members": [
+                    {
+                        "agentId": "agent-a",
+                        "name": "A",
+                        "teamRole": "Builder",
+                        "professionalResponsibilities": "Builds the requested change.",
+                    },
+                    {
+                        "agentId": "agent-b",
+                        "name": "B",
+                        "teamRole": "Reviewer",
+                        "professionalResponsibilities": "Reviews the requested change.",
+                    },
+                ],
+                "defaultLead": {
+                    "agentId": "agent-a",
+                    "name": "A",
+                },
+            })
+        );
+        let rendered = serde_json::to_string(&state).unwrap();
+        assert!(!rendered.contains("availability"));
+        assert!(!rendered.contains("working_in_camp"));
+        assert!(!rendered.contains("currentTurnNeedsCollaboration"));
+        assert!(!rendered.contains("changes"));
     }
 
     #[test]

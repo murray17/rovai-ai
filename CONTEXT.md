@@ -93,8 +93,8 @@ The versioned atomic user command that saves exactly one AgentProfile's six iden
 _Avoid_: whole-profile save, avatar update, Runtime update, Memory update, multi-section transaction
 
 **Peer Member Identity Projection**:
-The collaboration-facing subset of another Camp Member's identity containing only stable routing identity, Name, Team Role, Professional Responsibilities, and advisory availability. Personality Traits, Working Principles, and Growth Topic remain private to that Member's own Member Identity Bootstrap Projection.
-_Avoid_: complete Member Identity Bootstrap Projection, personality profile, peer instruction, Capability projection
+The collaboration-facing subset of another Camp Member's identity containing only stable routing identity, Name, Team Role, and Professional Responsibilities. Personality Traits, Working Principles, Growth Topic, availability, busy state, and execution reason remain outside this projection.
+_Avoid_: complete Member Identity Bootstrap Projection, personality profile, peer instruction, availability projection, Capability projection
 
 **Agent UUID**:
 The immutable, opaque persistence identity of one AgentProfile, visible only inside Core storage and never exposed to users, Agent Runtimes, model context, or tools.
@@ -729,8 +729,8 @@ The immutable Core evidence that freezes one AgentRun's previous and current pub
 _Avoid_: complete Runtime prompt evidence, Member Identity Snapshot, prompt template, live context query, proof the model understood input
 
 **Collaboration State**:
-A bounded model-facing read state of Peer Member Identity Projections, emitted for a new Native Session or a material structured change. It informs coordination but never replaces live execution admission or exposes another Member's Personality Traits, Working Principles, Growth Topic, tools, permissions or Runtime internals.
-_Avoid_: routing authority, Capability list, raw presence/readiness state, current task
+A bounded model-facing directory of Peer Member Identity Projections plus the optional Default Lead, emitted for a new Native Session or a material stable team-structure change. It contains no availability, busy reason, changes hint, or current-Turn collaboration inference. `team.call_member` and Core-owned admission recheck the latest membership, Presence, Runtime, Capability, quota, and fencing state for every concrete call.
+_Avoid_: routing authority, availability promise, Capability list, raw presence/readiness state, current task, current Turn participant state
 
 **Shared Conversation**:
 The deterministic bounded model-facing representation of public Camp history newly eligible for the current Native Session. It contains the latest ordered raw public messages after per-message prefix truncation, an optional Core-derived Originating Public User Message for a Member Call, and an omission notice only when whole eligible messages were excluded. Current Input and private A2A content are excluded, and the previous/current public boundaries remain internal.

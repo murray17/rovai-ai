@@ -14,7 +14,9 @@ superseded_by: null
 
 > [ADR-0129](0129-deterministic-bounded-raw-public-context-delivery.md) 仅重命名并重定义本文引用的
 > Context Read Marker 为 Accepted Public Context Boundary；Member Identity 与 Bootstrap
-> 生命周期规则继续有效。
+> 生命周期规则继续有效。ADR-0129 同时替代本文对 `COLLABORATION_STATE` 注入瞬时
+> availability、busy、reason 和当前 Turn 参与者提示的条款；该区段现在只投影稳定团队身份，
+> 协作执行可用性由 `team.call_member` 在 Core 接受调用时重新判定。
 
 ## Context
 
@@ -154,8 +156,8 @@ and unfinished Contexts are not executed through a legacy formatter or translati
 
 ### Peer privacy remains unchanged
 
-Another Member in the same Camp receives only stable routing identity, Name, Team Role,
-Professional Responsibilities and advisory availability through Collaboration State. Personality
+Another Member in the same Camp receives only stable routing identity, Name, Team Role and
+Professional Responsibilities through Collaboration State. Personality
 Traits, Working Principles and Growth Topic remain private to the owning Member's
 `MEMBER_IDENTITY` Bootstrap projection and do not enter public Camp messages through this
 projection.

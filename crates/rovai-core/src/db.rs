@@ -1030,6 +1030,9 @@ impl Database {
             if !self.schema_migration_applied(59)? {
                 self.migrate_deterministic_public_context_v59()?;
             }
+            if !self.schema_migration_applied(60)? {
+                self.migrate_stable_collaboration_state_v60()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -1256,6 +1259,9 @@ impl Database {
         }
         if !self.schema_migration_applied(59)? {
             self.migrate_deterministic_public_context_v59()?;
+        }
+        if !self.schema_migration_applied(60)? {
+            self.migrate_stable_collaboration_state_v60()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -4505,6 +4511,263 @@ impl Database {
             .optional()?
         {
             anyhow::bail!("v59 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
+    /// Removes transient collaboration availability from formatter v10. Existing v8/v9
+    /// manifests remain immutable audit evidence, while active Runs and Native Sessions are
+    /// fenced so no model continues from a Session that was told stale busy/availability facts.
+    fn migrate_stable_collaboration_state_v60(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let now = chrono::Utc::now().to_rfc3339();
+            transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'failed', ended_at = ?1,
+                    last_error_code = 'context_formatter_v10_required',
+                    wait_reason = NULL, wait_deadline_at = NULL,
+                    runtime_recovery_required = 0,
+                    execution_lease_owner = NULL,
+                    execution_lease_expires_at = NULL,
+                    manual_retry_allowed = 0,
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('queued', 'running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE camp_turn
+                SET status = 'failed', ended_at = ?1,
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute_batch(
+                r#"
+                CREATE TABLE context_manifest_v60 (
+                    id TEXT PRIMARY KEY,
+                    agent_run_id TEXT NOT NULL UNIQUE REFERENCES agent_run(id),
+                    bootstrap_evidence_id TEXT NOT NULL
+                        REFERENCES native_session_bootstrap_evidence(id),
+                    native_binding_generation INTEGER NOT NULL
+                        CHECK(native_binding_generation >= 1),
+                    camp_message_boundary_sequence INTEGER NOT NULL
+                        CHECK(camp_message_boundary_sequence >= 0),
+                    conversation_message_boundary_sequence INTEGER NOT NULL
+                        CHECK(conversation_message_boundary_sequence >= 0),
+                    raw_message_refs_json TEXT NOT NULL DEFAULT '[]',
+                    collaboration_state_digest TEXT NOT NULL,
+                    run_notice_refs_json TEXT NOT NULL DEFAULT '[]',
+                    run_notice_digest TEXT NOT NULL,
+                    current_input_source_json TEXT NOT NULL,
+                    attachment_refs_json TEXT NOT NULL DEFAULT '[]',
+                    attachment_digest TEXT NOT NULL,
+                    skill_exposure_json TEXT NOT NULL,
+                    skill_exposure_digest TEXT NOT NULL,
+                    mcp_exposure_json TEXT NOT NULL,
+                    mcp_exposure_digest TEXT NOT NULL,
+                    mcp_projection_digest TEXT NOT NULL,
+                    history_fence_version INTEGER NOT NULL DEFAULT 0
+                        CHECK(history_fence_version IN (0, 1)),
+                    global_public_message_boundary INTEGER NOT NULL DEFAULT 0
+                        CHECK(global_public_message_boundary >= 0),
+                    previous_accepted_public_boundary_sequence INTEGER
+                        CHECK(previous_accepted_public_boundary_sequence >= 0),
+                    context_delivery_profile_version INTEGER
+                        CHECK(context_delivery_profile_version >= 1),
+                    context_delivery_profile_json TEXT
+                        CHECK(context_delivery_profile_json IS NULL
+                              OR json_valid(context_delivery_profile_json)),
+                    context_delivery_profile_digest TEXT,
+                    originating_public_user_message_ref_json TEXT
+                        CHECK(originating_public_user_message_ref_json IS NULL
+                              OR json_valid(originating_public_user_message_ref_json)),
+                    recent_message_refs_json TEXT
+                        CHECK(recent_message_refs_json IS NULL
+                              OR json_valid(recent_message_refs_json)),
+                    omitted_message_count INTEGER CHECK(omitted_message_count >= 1),
+                    omitted_message_sequence_start INTEGER
+                        CHECK(omitted_message_sequence_start >= 1),
+                    omitted_message_sequence_end INTEGER
+                        CHECK(omitted_message_sequence_end >= omitted_message_sequence_start),
+                    formatter_version INTEGER NOT NULL
+                        CHECK(formatter_version IN (8, 9, 10)),
+                    rendered_payload_blob_id TEXT NOT NULL REFERENCES managed_blob(id),
+                    rendered_payload_digest TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    CHECK(
+                        formatter_version = 8 OR (
+                            previous_accepted_public_boundary_sequence IS NOT NULL
+                            AND previous_accepted_public_boundary_sequence
+                                <= camp_message_boundary_sequence
+                            AND context_delivery_profile_version IS NOT NULL
+                            AND context_delivery_profile_json IS NOT NULL
+                            AND context_delivery_profile_digest IS NOT NULL
+                            AND recent_message_refs_json IS NOT NULL
+                        )
+                    ),
+                    CHECK(
+                        (omitted_message_count IS NULL
+                         AND omitted_message_sequence_start IS NULL
+                         AND omitted_message_sequence_end IS NULL)
+                        OR
+                        (omitted_message_count IS NOT NULL
+                         AND omitted_message_sequence_start IS NOT NULL
+                         AND omitted_message_sequence_end IS NOT NULL)
+                    )
+                );
+
+                INSERT INTO context_manifest_v60(
+                    id, agent_run_id, bootstrap_evidence_id,
+                    native_binding_generation,
+                    camp_message_boundary_sequence,
+                    conversation_message_boundary_sequence,
+                    raw_message_refs_json, collaboration_state_digest,
+                    run_notice_refs_json, run_notice_digest,
+                    current_input_source_json,
+                    attachment_refs_json, attachment_digest,
+                    skill_exposure_json, skill_exposure_digest,
+                    mcp_exposure_json, mcp_exposure_digest, mcp_projection_digest,
+                    history_fence_version, global_public_message_boundary,
+                    previous_accepted_public_boundary_sequence,
+                    context_delivery_profile_version,
+                    context_delivery_profile_json, context_delivery_profile_digest,
+                    originating_public_user_message_ref_json,
+                    recent_message_refs_json,
+                    omitted_message_count, omitted_message_sequence_start,
+                    omitted_message_sequence_end,
+                    formatter_version, rendered_payload_blob_id,
+                    rendered_payload_digest, created_at
+                )
+                SELECT id, agent_run_id, bootstrap_evidence_id,
+                       native_binding_generation,
+                       camp_message_boundary_sequence,
+                       conversation_message_boundary_sequence,
+                       raw_message_refs_json, collaboration_state_digest,
+                       run_notice_refs_json, run_notice_digest,
+                       current_input_source_json,
+                       attachment_refs_json, attachment_digest,
+                       skill_exposure_json, skill_exposure_digest,
+                       mcp_exposure_json, mcp_exposure_digest, mcp_projection_digest,
+                       history_fence_version, global_public_message_boundary,
+                       previous_accepted_public_boundary_sequence,
+                       context_delivery_profile_version,
+                       context_delivery_profile_json, context_delivery_profile_digest,
+                       originating_public_user_message_ref_json,
+                       recent_message_refs_json,
+                       omitted_message_count, omitted_message_sequence_start,
+                       omitted_message_sequence_end,
+                       formatter_version, rendered_payload_blob_id,
+                       rendered_payload_digest, created_at
+                FROM context_manifest;
+
+                CREATE TABLE context_manifest_history_camp_v60 (
+                    context_manifest_id TEXT NOT NULL
+                        REFERENCES context_manifest_v60(id) ON DELETE CASCADE,
+                    camp_id TEXT NOT NULL,
+                    camp_title TEXT NOT NULL,
+                    last_visible_activity_at TEXT NOT NULL,
+                    PRIMARY KEY(context_manifest_id, camp_id)
+                );
+                INSERT INTO context_manifest_history_camp_v60
+                SELECT * FROM context_manifest_history_camp;
+
+                CREATE TABLE runtime_input_delivery_v60 (
+                    id TEXT PRIMARY KEY,
+                    agent_run_id TEXT NOT NULL REFERENCES agent_run(id),
+                    execution_epoch INTEGER NOT NULL CHECK(execution_epoch >= 1),
+                    context_manifest_id TEXT NOT NULL REFERENCES context_manifest_v60(id),
+                    native_binding_id TEXT NOT NULL,
+                    native_binding_generation INTEGER NOT NULL
+                        CHECK(native_binding_generation >= 1),
+                    boundary_camp_message_sequence INTEGER NOT NULL
+                        CHECK(boundary_camp_message_sequence >= 0),
+                    dynamic_payload_digest TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN (
+                        'prepared', 'accepted', 'delivery_unknown', 'not_accepted'
+                    )),
+                    native_input_id TEXT,
+                    prepared_at TEXT NOT NULL,
+                    accepted_at TEXT,
+                    resolved_at TEXT,
+                    last_error TEXT,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(agent_run_id, execution_epoch),
+                    CHECK(
+                        (status = 'accepted' AND native_input_id IS NOT NULL
+                         AND accepted_at IS NOT NULL)
+                        OR status <> 'accepted'
+                    )
+                );
+                INSERT INTO runtime_input_delivery_v60
+                SELECT * FROM runtime_input_delivery;
+
+                DROP TABLE runtime_input_delivery;
+                DROP TABLE context_manifest_history_camp;
+                DROP TABLE context_manifest;
+                ALTER TABLE context_manifest_v60 RENAME TO context_manifest;
+                ALTER TABLE context_manifest_history_camp_v60
+                    RENAME TO context_manifest_history_camp;
+                ALTER TABLE runtime_input_delivery_v60 RENAME TO runtime_input_delivery;
+
+                CREATE INDEX context_manifest_blob_idx
+                    ON context_manifest(rendered_payload_blob_id);
+                CREATE INDEX context_manifest_bootstrap_idx
+                    ON context_manifest(bootstrap_evidence_id);
+                CREATE INDEX context_manifest_history_camp_lookup_idx
+                    ON context_manifest_history_camp(camp_id, context_manifest_id);
+                CREATE UNIQUE INDEX runtime_input_native_identity_unique
+                    ON runtime_input_delivery(native_binding_id, native_input_id)
+                    WHERE native_input_id IS NOT NULL;
+                CREATE INDEX runtime_input_reconcile_idx
+                    ON runtime_input_delivery(status, updated_at)
+                    WHERE status = 'delivery_unknown';
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (60, datetime('now'));
+                "#,
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE conversation
+                SET native_adapter_installation_id = NULL,
+                    native_session_id = NULL,
+                    native_binding_compatibility_digest = NULL,
+                    native_binding_id = NULL,
+                    native_binding_generation = 0,
+                    native_binding_secret_digest = NULL,
+                    last_accepted_public_boundary_sequence = 0,
+                    native_charter_digest = NULL,
+                    native_member_state_digest = NULL,
+                    native_installation_generation = NULL,
+                    native_session_compatibility_key = NULL,
+                    version = version + 1,
+                    updated_at = ?1
+                "#,
+                [&now],
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v60 migration left a foreign-key violation in {table} row {row_id}");
         }
         Ok(())
     }
@@ -11770,6 +12033,15 @@ mod tests {
             )
             .unwrap();
         assert_eq!(migration_applied, 1);
+        let stable_collaboration_migration_applied: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 60",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stable_collaboration_migration_applied, 1);
         let obsolete_tables: i64 = database
             .connection()
             .query_row(
@@ -11810,6 +12082,15 @@ mod tests {
         }
         assert!(!manifest_columns.contains(&"camp_summary_ids_json".into()));
         assert!(!manifest_columns.contains(&"coverage_baseline_sequence".into()));
+        let manifest_schema: String = database
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(manifest_schema.contains("formatter_version IN (8, 9, 10)"));
         let contract: (String, i64) = database
             .connection()
             .query_row(
