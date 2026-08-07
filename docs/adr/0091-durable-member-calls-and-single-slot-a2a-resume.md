@@ -7,7 +7,7 @@ date: 2026-08-02
 decision_scope: cross-version
 source_version: v0.32
 supersedes: []
-superseded_by: ADR-0099
+superseded_by: ADR-0130
 ---
 
 # ADR-0091: Durable Member Calls and Single-Slot A2A Resume Scheduling

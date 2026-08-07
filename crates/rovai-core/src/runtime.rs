@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
-    agent_profile::FrozenAgentRuntimeConfig,
+    agent_profile::{AdapterKind, FrozenAgentRuntimeConfig, PublicOutputMode},
     camp_content::{StructuredCampMessageSegment, canonical_content_digest},
     collaboration::exhaust_camp_turn_execution_budget,
     command::{
@@ -24,6 +24,10 @@ use crate::{
     db::Database,
     execution_budget::{CampTurnExecutionBudgetExhaustionReason, camp_turn_execution_budget_now},
     git::GitObservation,
+    message_delivery::{
+        DeliveryDispatchTrigger, cancel_pending_turn_deliveries, dispatch_pending_for_recipient,
+        settle_materialized_delivery_for_agent_run,
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1511,6 +1515,14 @@ impl ExecutionRuntimeService {
             )?;
             let input_summary =
                 cancel_turn_inputs(transaction, &envelope.payload.camp_turn_id, &now)?;
+            let message_deliveries_cancelled = cancel_pending_turn_deliveries(
+                transaction,
+                &envelope.payload.camp_turn_id,
+                "camp_turn_cancelled",
+                &envelope.actor,
+                None,
+                &now,
+            )?;
             transaction.execute(
                 r#"
                 UPDATE agent_run
@@ -1533,6 +1545,7 @@ impl ExecutionRuntimeService {
                 &json!({
                     "agentRunCount": runs.len(),
                     "conversationInputsCancelled": input_summary.inputs_cancelled,
+                    "messageDeliveriesCancelled": message_deliveries_cancelled,
                 }),
             )?;
             for (run_id, execution_epoch) in &runs {
@@ -1563,6 +1576,7 @@ impl ExecutionRuntimeService {
                     "campTurnId": envelope.payload.camp_turn_id,
                     "agentRunCount": runs.len(),
                     "conversationInputsCancelled": input_summary.inputs_cancelled,
+                    "messageDeliveriesCancelled": message_deliveries_cancelled,
                     "campTurnStatus": camp_turn_status,
                 }),
                 Some(entity_ref("camp_turn", &envelope.payload.camp_turn_id)),
@@ -1575,7 +1589,7 @@ impl ExecutionRuntimeService {
         database: &mut Database,
         envelope: &CommandEnvelope<AcknowledgeAgentRunCancellationCommand>,
     ) -> Result<CommandExecution> {
-        self.gateway.execute(database, envelope, |transaction| {
+        let execution = self.gateway.execute(database, envelope, |transaction| {
             if !matches!(
                 &envelope.actor,
                 ActorRef::System { component_id }
@@ -1705,6 +1719,15 @@ impl ExecutionRuntimeService {
                     "endingGitObservation": envelope.payload.ending_git_observation,
                 }),
             )?;
+            settle_materialized_delivery_for_agent_run(
+                transaction,
+                &envelope.payload.agent_run_id,
+                "cancelled",
+                Some(&cancel_reason_code),
+                &envelope.actor,
+                Some(envelope.payload.execution_epoch),
+                &now,
+            )?;
             let camp_turn_status = recompute_camp_turn(
                 transaction,
                 &camp_id,
@@ -1723,7 +1746,11 @@ impl ExecutionRuntimeService {
                 }),
                 Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
             ))
-        })
+        })?;
+        if !execution.replayed && execution.result.code == "agent_run.cancelled" {
+            pump_target_after_run_terminal(database, &envelope.payload.agent_run_id)?;
+        }
+        Ok(execution)
     }
 
     pub fn record_cancelled_agent_run_ending_git_observation(
@@ -2342,8 +2369,7 @@ impl ExecutionRuntimeService {
         if envelope.payload.final_output.trim().is_empty() {
             anyhow::bail!("successful AgentRun finalOutput must not be empty");
         }
-        let final_camp_message_id = Uuid::new_v4().to_string();
-        self.gateway.execute(database, envelope, |transaction| {
+        let execution = self.gateway.execute(database, envelope, |transaction| {
             if !is_runtime_adapter(&envelope.actor) {
                 return Ok(rejected(
                     "runtime.adapter_required",
@@ -2363,67 +2389,121 @@ impl ExecutionRuntimeService {
             )? {
                 return Ok(rejection);
             }
-
-            transaction.execute(
-                r#"
-                UPDATE camp
-                SET last_message_sequence = last_message_sequence + 1,
-                    version = version + 1, updated_at = ?2
-                WHERE id = ?1
-                "#,
-                params![target.camp_id, target.now],
-            )?;
-            let camp_sequence: i64 = transaction.query_row(
-                "SELECT last_message_sequence FROM camp WHERE id = ?1",
-                [&target.camp_id],
-                |row| row.get(0),
-            )?;
-            let addressed_agents = active_camp_agent_ids(transaction, &target.camp_id)?;
-            let addressed_agents_json = serde_json::to_string(&addressed_agents)?;
-            let structured_content = vec![StructuredCampMessageSegment::Text {
-                text: envelope.payload.final_output.clone(),
-            }];
-            let structured_content_json = serde_json::to_string(&structured_content)?;
-            let content_digest = canonical_content_digest(&structured_content)?;
-            let reply_to_camp_message_id =
-                (target.trigger_type == "camp_message").then_some(target.trigger_id.as_str());
-            transaction.execute(
-                r#"
-                INSERT INTO camp_message(
-                    id, camp_id, sequence,
-                    author_type, author_id, source_agent_run_id, body,
-                    structured_content_json, content_digest,
-                    address_mode, addressed_agent_ids_json,
-                    reply_to_camp_message_id, camp_turn_id, agent_run_id,
-                    tombstoned_at, version, created_at, updated_at
-                ) VALUES (
-                    ?1, ?2, ?3, 'agent', ?4, ?5, ?6, ?7, ?8,
-                    'broadcast', ?9, ?10, ?11, ?5,
-                    NULL, 1, ?12, ?12
-                )
-                "#,
-                params![
-                    final_camp_message_id,
-                    target.camp_id,
-                    camp_sequence,
-                    target.agent_id,
-                    target.agent_run_id,
-                    envelope.payload.final_output,
-                    structured_content_json,
-                    content_digest,
-                    addressed_agents_json,
-                    reply_to_camp_message_id,
-                    target.camp_turn_id,
-                    target.now,
-                ],
-            )?;
-            index_camp_message(
-                transaction,
-                &final_camp_message_id,
-                &target.camp_id,
-                &envelope.payload.final_output,
-                &addressed_agents_json,
-            )?;
+            let public_output_mode = target
+                .runtime_adapter_kind
+                .as_deref()
+                .and_then(|value| value.parse::<AdapterKind>().ok())
+                .map(AdapterKind::public_output_mode)
+                .unwrap_or(PublicOutputMode::AssistantFinalVisible);
+            let final_output_digest =
+                canonical_content_digest(&[StructuredCampMessageSegment::Text {
+                    text: envelope.payload.final_output.clone(),
+                }])?;
+            let (final_camp_message_id, automatic_public_output_suppressed) =
+                if public_output_mode == PublicOutputMode::AssistantFinalVisible {
+                    // A Runtime may have already made the exact final answer public through
+                    // `camp.message.send`. Suppress only that same Run + canonical body digest;
+                    // never deduplicate across Runs, recipients, time windows, or semantics.
+                    let existing_final_message_id: Option<String> = transaction
+                        .query_row(
+                            r#"
+                            SELECT id
+                            FROM camp_message
+                            WHERE source_agent_run_id = ?1
+                              AND author_type = 'agent'
+                              AND tombstoned_at IS NULL
+                              AND content_digest = ?2
+                            ORDER BY sequence, id
+                            LIMIT 1
+                            "#,
+                            params![target.agent_run_id, final_output_digest],
+                            |row| row.get(0),
+                        )
+                        .optional()?;
+                    if let Some(existing_final_message_id) = existing_final_message_id {
+                        (Some(existing_final_message_id), true)
+                    } else {
+                        let final_camp_message_id = Uuid::new_v4().to_string();
+                        transaction.execute(
+                            r#"
+                    UPDATE camp
+                    SET last_message_sequence = last_message_sequence + 1,
+                        version = version + 1, updated_at = ?2
+                    WHERE id = ?1
+                    "#,
+                            params![target.camp_id, target.now],
+                        )?;
+                        let camp_sequence: i64 = transaction.query_row(
+                            "SELECT last_message_sequence FROM camp WHERE id = ?1",
+                            [&target.camp_id],
+                            |row| row.get(0),
+                        )?;
+                        let addressed_agents_json = "[]";
+                        let structured_content = vec![StructuredCampMessageSegment::Text {
+                            text: envelope.payload.final_output.clone(),
+                        }];
+                        let structured_content_json = serde_json::to_string(&structured_content)?;
+                        let reply_to_camp_message_id =
+                            target.trigger_camp_message_id.as_deref().or_else(|| {
+                                (target.trigger_type == "camp_message")
+                                    .then_some(target.trigger_id.as_str())
+                            });
+                        transaction.execute(
+                            r#"
+                    INSERT INTO camp_message(
+                        id, camp_id, sequence,
+                        author_type, author_id, source_agent_run_id, body,
+                        structured_content_json, content_digest,
+                        address_mode, addressed_agent_ids_json,
+                        reply_to_camp_message_id, camp_turn_id, agent_run_id,
+                        tombstoned_at, version, created_at, updated_at
+                    ) VALUES (
+                        ?1, ?2, ?3, 'agent', ?4, ?5, ?6, ?7, ?8,
+                        'default', ?9, ?10, ?11, ?5,
+                        NULL, 1, ?12, ?12
+                    )
+                    "#,
+                            params![
+                                final_camp_message_id,
+                                target.camp_id,
+                                camp_sequence,
+                                target.agent_id,
+                                target.agent_run_id,
+                                envelope.payload.final_output,
+                                structured_content_json,
+                                final_output_digest,
+                                addressed_agents_json,
+                                reply_to_camp_message_id,
+                                target.camp_turn_id,
+                                target.now,
+                            ],
+                        )?;
+                        index_camp_message(
+                            transaction,
+                            &final_camp_message_id,
+                            &target.camp_id,
+                            &envelope.payload.final_output,
+                            addressed_agents_json,
+                        )?;
+                        append_domain_event(
+                            transaction,
+                            "camp_message.sent",
+                            &target.camp_id,
+                            ("camp_message", &final_camp_message_id),
+                            &envelope.actor,
+                            Some(envelope.payload.execution_epoch),
+                            &json!({
+                                "sequence": camp_sequence,
+                                "sourceAgentRunId": target.agent_run_id,
+                                "publicOutputMode": public_output_mode.as_str(),
+                                "recipientFree": true,
+                            }),
+                        )?;
+                        (Some(final_camp_message_id), false)
+                    }
+                } else {
+                    (None, false)
+                };
             let ending_git_observation = envelope
                 .payload
                 .ending_git_observation
@@ -2457,18 +2537,6 @@ impl ExecutionRuntimeService {
             }
             append_domain_event(
                 transaction,
-                "camp_message.sent",
-                &target.camp_id,
-                ("camp_message", &final_camp_message_id),
-                &envelope.actor,
-                Some(envelope.payload.execution_epoch),
-                &json!({
-                    "sequence": camp_sequence,
-                    "sourceAgentRunId": target.agent_run_id,
-                }),
-            )?;
-            append_domain_event(
-                transaction,
                 "agent_run.succeeded",
                 &target.camp_id,
                 ("agent_run", &target.agent_run_id),
@@ -2477,8 +2545,21 @@ impl ExecutionRuntimeService {
                 &json!({
                     "nativeTurnId": envelope.payload.native_turn_id,
                     "finalCampMessageId": final_camp_message_id,
+                    "finalOutputDigest": final_output_digest,
+                    "publicOutputMode": public_output_mode.as_str(),
+                    "recipientFree": true,
+                    "automaticPublicOutputSuppressed": automatic_public_output_suppressed,
                     "endingGitObservation": envelope.payload.ending_git_observation,
                 }),
+            )?;
+            settle_materialized_delivery_for_agent_run(
+                transaction,
+                &target.agent_run_id,
+                "succeeded",
+                None,
+                &envelope.actor,
+                Some(envelope.payload.execution_epoch),
+                &target.now,
             )?;
             let camp_turn_status = recompute_camp_turn(
                 transaction,
@@ -2495,10 +2576,17 @@ impl ExecutionRuntimeService {
                     "campTurnId": target.camp_turn_id,
                     "campTurnStatus": camp_turn_status,
                     "finalCampMessageId": final_camp_message_id,
+                    "finalOutputDigest": final_output_digest,
+                    "publicOutputMode": public_output_mode.as_str(),
+                    "automaticPublicOutputSuppressed": automatic_public_output_suppressed,
                 }),
                 Some(entity_ref("agent_run", &target.agent_run_id)),
             ))
-        })
+        })?;
+        if !execution.replayed && execution.result.code == "agent_run.succeeded" {
+            pump_target_after_run_terminal(database, &envelope.payload.agent_run_id)?;
+        }
+        Ok(execution)
     }
 
     pub fn reject_agent_run_dispatch(
@@ -2509,7 +2597,7 @@ impl ExecutionRuntimeService {
         if envelope.payload.error_code.trim().is_empty() {
             anyhow::bail!("AgentRun dispatch errorCode must not be empty");
         }
-        self.gateway.execute(database, envelope, |transaction| {
+        let execution = self.gateway.execute(database, envelope, |transaction| {
             if !matches!(
                 &envelope.actor,
                 ActorRef::System { component_id } if component_id == "agent-run-scheduler"
@@ -2597,6 +2685,15 @@ impl ExecutionRuntimeService {
                     "manualRetryAllowed": envelope.payload.manual_retry_allowed,
                 }),
             )?;
+            settle_materialized_delivery_for_agent_run(
+                transaction,
+                &target.agent_run_id,
+                "failed",
+                Some(&envelope.payload.error_code),
+                &envelope.actor,
+                Some(target.execution_epoch),
+                &target.now,
+            )?;
             let camp_turn_status = recompute_camp_turn(
                 transaction,
                 &target.camp_id,
@@ -2614,7 +2711,11 @@ impl ExecutionRuntimeService {
                 }),
                 Some(entity_ref("agent_run", &target.agent_run_id)),
             ))
-        })
+        })?;
+        if !execution.replayed && execution.result.code == "agent_run.dispatch_rejected" {
+            pump_target_after_run_terminal(database, &envelope.payload.agent_run_id)?;
+        }
+        Ok(execution)
     }
 
     pub fn fail_agent_run(
@@ -2625,7 +2726,7 @@ impl ExecutionRuntimeService {
         if envelope.payload.error_code.trim().is_empty() {
             anyhow::bail!("AgentRun errorCode must not be empty");
         }
-        self.gateway.execute(database, envelope, |transaction| {
+        let execution = self.gateway.execute(database, envelope, |transaction| {
             if !is_runtime_adapter(&envelope.actor) {
                 return Ok(rejected(
                     "runtime.adapter_required",
@@ -2697,6 +2798,15 @@ impl ExecutionRuntimeService {
                     "endingGitObservation": envelope.payload.ending_git_observation,
                 }),
             )?;
+            settle_materialized_delivery_for_agent_run(
+                transaction,
+                &target.agent_run_id,
+                "failed",
+                Some(&envelope.payload.error_code),
+                &envelope.actor,
+                Some(envelope.payload.execution_epoch),
+                &target.now,
+            )?;
             let camp_turn_status = recompute_camp_turn(
                 transaction,
                 &target.camp_id,
@@ -2714,7 +2824,11 @@ impl ExecutionRuntimeService {
                 }),
                 Some(entity_ref("agent_run", &target.agent_run_id)),
             ))
-        })
+        })?;
+        if !execution.replayed && execution.result.code == "agent_run.failed" {
+            pump_target_after_run_terminal(database, &envelope.payload.agent_run_id)?;
+        }
+        Ok(execution)
     }
 }
 
@@ -2832,8 +2946,10 @@ struct TerminalTarget {
     camp_id: String,
     camp_turn_id: String,
     agent_id: String,
+    runtime_adapter_kind: Option<String>,
     trigger_type: String,
     trigger_id: String,
+    trigger_camp_message_id: Option<String>,
     status: String,
     version: i64,
     execution_epoch: i64,
@@ -2852,7 +2968,9 @@ fn load_terminal_target(
             r#"
             SELECT agent_run.id, camp_turn.camp_id, agent_run.camp_turn_id,
                    conversation.agent_id,
+                   agent_run.runtime_adapter_kind,
                    camp_turn.trigger_type, camp_turn.trigger_id,
+                   agent_run.trigger_camp_message_id,
                    agent_run.status, agent_run.version, agent_run.execution_epoch,
                    agent_run.cancel_requested_at,
                    agent_run.final_conversation_message_id,
@@ -2869,14 +2987,16 @@ fn load_terminal_target(
                     camp_id: row.get(1)?,
                     camp_turn_id: row.get(2)?,
                     agent_id: row.get(3)?,
-                    trigger_type: row.get(4)?,
-                    trigger_id: row.get(5)?,
-                    status: row.get(6)?,
-                    version: row.get(7)?,
-                    execution_epoch: row.get(8)?,
-                    cancel_requested_at: row.get(9)?,
-                    final_conversation_message_id: row.get(10)?,
-                    final_camp_message_id: row.get(11)?,
+                    runtime_adapter_kind: row.get(4)?,
+                    trigger_type: row.get(5)?,
+                    trigger_id: row.get(6)?,
+                    trigger_camp_message_id: row.get(7)?,
+                    status: row.get(8)?,
+                    version: row.get(9)?,
+                    execution_epoch: row.get(10)?,
+                    cancel_requested_at: row.get(11)?,
+                    final_conversation_message_id: row.get(12)?,
+                    final_camp_message_id: row.get(13)?,
                     now: chrono::Utc::now().to_rfc3339(),
                 })
             },
@@ -2960,20 +3080,6 @@ fn is_runtime_adapter(actor: &ActorRef) -> bool {
     )
 }
 
-fn active_camp_agent_ids(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<String>> {
-    let mut statement = transaction.prepare(
-        r#"
-        SELECT agent_id
-        FROM camp_member
-        WHERE camp_id = ?1 AND status = 'active' AND leave_requested_at IS NULL
-        ORDER BY joined_at, agent_id
-        "#,
-    )?;
-    Ok(statement
-        .query_map([camp_id], |row| row.get(0))?
-        .collect::<rusqlite::Result<Vec<_>>>()?)
-}
-
 pub(crate) fn recompute_camp_turn(
     transaction: &Transaction<'_>,
     camp_id: &str,
@@ -3020,24 +3126,47 @@ pub(crate) fn recompute_camp_turn(
     let has_nonterminal = runs
         .iter()
         .any(|(_, status, _, _)| matches!(status.as_str(), "queued" | "running" | "waiting"));
+    let delivery_statuses = {
+        let mut statement = transaction.prepare(
+            r#"
+            SELECT status
+            FROM message_delivery
+            WHERE camp_turn_id = ?1
+            ORDER BY created_at, id
+            "#,
+        )?;
+        statement
+            .query_map([camp_turn_id], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let has_nonterminal_delivery = delivery_statuses
+        .iter()
+        .any(|status| matches!(status.as_str(), "pending" | "running"));
+    let has_failed_delivery = delivery_statuses
+        .iter()
+        .any(|status| matches!(status.as_str(), "failed" | "interrupted_before_dispatch"));
     let has_pending_input = turn_has_pending_input(transaction, camp_turn_id)?;
     let (has_failed_input, has_cancelled_input) =
         turn_has_failed_or_cancelled_input(transaction, camp_turn_id)?;
     let next_status = if budget_exhausted_at.is_some() {
-        if has_nonterminal { "waiting" } else { "failed" }
+        if has_nonterminal || has_nonterminal_delivery {
+            "waiting"
+        } else {
+            "failed"
+        }
     } else if cancel_requested_at.is_some() {
-        if has_nonterminal {
+        if has_nonterminal || has_nonterminal_delivery {
             "waiting"
         } else {
             "cancelled"
         }
-    } else if has_nonterminal || has_pending_input {
+    } else if has_nonterminal || has_nonterminal_delivery || has_pending_input {
         if runs.iter().any(|(_, status, _, _)| status == "waiting") {
             "waiting"
         } else {
             "running"
         }
-    } else if has_failed_input {
+    } else if has_failed_input || has_failed_delivery {
         "failed"
     } else if has_cancelled_input {
         "cancelled"
@@ -3083,6 +3212,34 @@ pub(crate) fn recompute_camp_turn(
         )?;
     }
     Ok(next_status.to_string())
+}
+
+fn pump_target_after_run_terminal(database: &mut Database, agent_run_id: &str) -> Result<()> {
+    let target = database
+        .connection()
+        .query_row(
+            r#"
+            SELECT camp_turn.camp_id, conversation.agent_id
+            FROM agent_run
+            JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+            JOIN conversation ON conversation.id = agent_run.conversation_id
+            WHERE agent_run.id = ?1
+            "#,
+            [agent_run_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?;
+    let Some((camp_id, recipient_agent_id)) = target else {
+        return Ok(());
+    };
+    let _ = dispatch_pending_for_recipient(
+        database,
+        &camp_id,
+        &recipient_agent_id,
+        DeliveryDispatchTrigger::TargetRunEnded,
+        true,
+    )?;
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -4929,6 +5086,15 @@ mod tests {
                 [],
             )
             .unwrap();
+        // Public output mode is frozen on AgentRun, not re-read from a later
+        // Profile edit while the Runtime is completing the Run.
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET selected_runtime_adapter_kind = 'opencode-cli' WHERE id = 'agent_2'",
+                [],
+            )
+            .unwrap();
         let runtime = ExecutionRuntimeService::default();
         let candidates = runtime.list_dispatchable_agent_runs(&database, 10).unwrap();
         assert_eq!(candidates.len(), 2);
@@ -5045,6 +5211,15 @@ mod tests {
             )
             .unwrap();
         assert_eq!(public_agent_messages, 2);
+        let recipient_free_defaults: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM camp_message WHERE source_agent_run_id IS NOT NULL AND address_mode = 'default' AND addressed_agent_ids_json = '[]'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(recipient_free_defaults, 2);
 
         let replay = runtime
             .succeed_agent_run(

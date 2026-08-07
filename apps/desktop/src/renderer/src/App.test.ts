@@ -9,7 +9,8 @@ import type {
   CampMessageView,
   CampSnapshot,
   CanonicalRuntimeActivityView,
-  HealthStatus
+  HealthStatus,
+  MessageDeliveryView
 } from '@contracts'
 import {
   AppHeader,
@@ -68,7 +69,6 @@ import {
   buildLiveExecutionProgress,
   diffLineKind,
   formatByteSize,
-  inboxMessagePresentation,
   liveRuntimeEventFromCore,
   parseGitStatus,
   selectCompleteExecutionEvidence
@@ -186,7 +186,6 @@ describe('task event projections', () => {
         message('after-task', 5, '2026-08-05T02:11:00Z')
       ],
       [],
-      [],
       [createdEvent],
       [],
       [task]
@@ -209,7 +208,7 @@ describe('task event projections', () => {
       }
     })
 
-    const updated = campConversationTimeline([], [], [], [createdEvent], [], [{
+    const updated = campConversationTimeline([], [], [createdEvent], [], [{
       ...task,
       title: '再次更新标题',
       status: 'cancelled',
@@ -246,7 +245,7 @@ describe('task event projections', () => {
       availableActions: ['update']
     } satisfies CampSnapshot['tasks'][number]
 
-    expect(campConversationTimeline([], [], [], [], [], [task])).toMatchObject([{
+    expect(campConversationTimeline([], [], [], [], [task])).toMatchObject([{
       id: 'task:task-old',
       kind: 'task_card',
       timelineGlobalSequence: null,
@@ -336,7 +335,7 @@ describe('task event projections', () => {
       }],
       timelineGlobalSequence: null
     })
-    expect(campConversationTimeline([optimistic], []).map((item) => item.id)).toEqual([
+    expect(campConversationTimeline([optimistic]).map((item) => item.id)).toEqual([
       'optimistic:command-optimistic'
     ])
   })
@@ -458,7 +457,6 @@ describe('task event projections', () => {
 
     const projected = campConversationTimeline(
       [userMessage],
-      [],
       [turn],
       timeline,
       agentRuns
@@ -473,7 +471,6 @@ describe('task event projections', () => {
 
     expect(campConversationTimeline(
       [userMessage],
-      [],
       [{ ...turn, status: 'waiting' as const, endedAt: null }],
       timeline,
       agentRuns
@@ -998,7 +995,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'runtime_not_configured', blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 22,
+      schemaVersion: 24,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-1', title: 'Lead 调整', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1010,8 +1007,7 @@ describe('task event projections', () => {
         avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'present', memberOrder: 0,
         isDefaultLead: true, version: 1
       }],
-      tasks: [], messages: [], turns: [], agentRuns: [], inboxMessages: [],
-      conversationInputs: [],
+      tasks: [], messages: [], messageDeliveries: [], turns: [], agentRuns: [],
       contextManifests: [], executionEvidence: [],
       approvals: [], actions: [], timeline: []
     }
@@ -1133,7 +1129,7 @@ describe('task event projections', () => {
       presence: 'away'
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 22,
+      schemaVersion: 24,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-empty', title: '暂无可用队员', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1145,8 +1141,7 @@ describe('task event projections', () => {
         avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'away', memberOrder: 0,
         isDefaultLead: false, version: 1
       }],
-      tasks: [], messages: [], turns: [], agentRuns: [], inboxMessages: [],
-      conversationInputs: [],
+      tasks: [], messages: [], messageDeliveries: [], turns: [], agentRuns: [],
       contextManifests: [], executionEvidence: [],
       approvals: [], actions: [], timeline: []
     }
@@ -1186,7 +1181,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'ready' as const, blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 22,
+      schemaVersion: 24,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-live', title: '实现功能', projectBindingKind: 'directory', projectPath: '/repo',
@@ -1199,6 +1194,7 @@ describe('task event projections', () => {
         memberOrder: 0, isDefaultLead: true, version: 1
       }],
       tasks: [],
+      messageDeliveries: [],
       messages: [{
         id: 'message-user', sequence: 1, timelineGlobalSequence: 1,
         authorType: 'user', authorId: 'local-user',
@@ -1226,14 +1222,13 @@ describe('task event projections', () => {
         completionRole: 'required', status: 'running', waitReason: null, executionEpoch: 1,
         permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct',
         a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
-        sourceInboxMessageId: null, executionEvidenceCount: 3,
+        executionEvidenceCount: 3,
         hasUnsettledExternalEffects: false,
         workspace: { path: '/repo' }, startingGitObservation: null, endingGitObservation: null,
         version: 2,
         createdAt: '2026-07-28T05:00:00Z', startedAt: '2026-07-28T05:00:01Z',
         endedAt: null, updatedAt: '2026-07-28T05:01:00Z'
       }],
-      inboxMessages: [], conversationInputs: [],
       contextManifests: [],
       executionEvidence: [{
         id: 'evidence-1', agentRunId: 'run-muwa', executionEpoch: 1, sequence: 1,
@@ -1569,7 +1564,7 @@ describe('task event projections', () => {
       resolvedAt: null
     }))
     const snapshot: CampSnapshot = {
-      schemaVersion: 22,
+      schemaVersion: 24,
       throughGlobalSequence: 2,
       camp: {
         id: 'camp-approval', title: '审批停靠区', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1588,8 +1583,7 @@ describe('task event projections', () => {
         isDefaultLead: index === 0,
         version: 1
       })),
-      tasks: [], messages: [], turns: [], agentRuns: [], inboxMessages: [],
-      conversationInputs: [],
+      tasks: [], messages: [], messageDeliveries: [], turns: [], agentRuns: [],
       contextManifests: [], executionEvidence: [],
       approvals, actions: [], timeline: []
     }
@@ -1613,62 +1607,48 @@ describe('task event projections', () => {
     expect(markup.indexOf('class="approval-dock"')).toBeLessThan(markup.indexOf('class="composer"'))
   })
 
-  it('renders delivered A2A content as a directed sender-authored conversation message', () => {
-    const legacyA2aMessage: CampMessageView = {
-      id: 'legacy-a2a-state',
+  it('renders a public A2A message with independent Delivery status', () => {
+    const publicMessage: CampMessageView = {
+      id: 'public-a2a-message',
       sequence: 1,
       timelineGlobalSequence: 2,
-      authorType: 'system' as const,
-      authorId: 'a2a-state',
-      sourceAgentRunId: null,
-      body: 'legacy delivery status card',
-      content: [{ kind: 'text', text: 'legacy delivery status card' }],
+      authorType: 'agent',
+      authorId: 'agent_1',
+      sourceAgentRunId: 'run-luoke',
+      body: '请检查 Downloads 目录里的页面。',
+      content: [{ kind: 'text', text: '请检查 Downloads 目录里的页面。' }],
       attachments: [],
-      addressMode: 'broadcast' as const,
-      addressedAgentIds: [],
+      addressMode: 'explicit',
+      addressedAgentIds: ['agent_2'],
       replyToCampMessageId: null,
-      campTurnId: null,
-      presentation: {
-        kind: 'a2a_event',
-        event: 'request_accepted',
-        senderNameAtEvent: '洛可',
-        recipientNameAtEvent: '沐瓦',
-        occurredAt: '2026-07-30T03:00:00Z'
-      } as never,
+      campTurnId: 'turn-a2a',
+      presentation: null,
       createdAt: '2026-07-30T03:00:00Z'
     }
-    const deliveredMessage = {
-      id: 'inbox-delivered',
-      timelineGlobalSequence: 3,
-      senderAgentId: 'agent_1',
+    const delivery: MessageDeliveryView = {
+      id: 'delivery-a2a',
+      messageId: publicMessage.id,
+      campTurnId: 'turn-a2a',
       recipientAgentId: 'agent_2',
-      body: '请检查 Downloads 目录里的页面。',
-      sourceAgentRunId: 'run-luoke',
+      recipientCanonicalPosition: 0,
+      status: 'settled',
+      dispatchPhase: 'terminal',
+      waitCondition: null,
+      dispatchAttemptCount: 1,
+      retryGeneration: 0,
+      contextManifestId: 'manifest-a2a',
       targetAgentRunId: 'run-muwa',
-      recipientMessageId: 'conversation-message-1',
-      deliveredAt: '2026-07-30T03:00:01Z',
-      failedAt: null,
-      lastError: null,
-      createdAt: '2026-07-30T03:00:01Z',
-      updatedAt: '2026-07-30T03:00:01Z'
+      manualInterventionRequired: false,
+      failureCode: null,
+      version: 3,
+      createdAt: '2026-07-30T03:00:00Z',
+      updatedAt: '2026-07-30T03:00:02Z',
+      endedAt: '2026-07-30T03:00:02Z'
     }
-    const failedMessage = {
-      ...deliveredMessage,
-      id: 'inbox-failed',
-      timelineGlobalSequence: null,
-      body: '不应进入会话的失败请求',
-      recipientMessageId: null,
-      deliveredAt: null,
-      failedAt: '2026-07-30T03:00:02Z'
-    }
-    const projected = campConversationTimeline(
-      [legacyA2aMessage],
-      [deliveredMessage, failedMessage]
-    )
-    expect(projected.map((item) => item.id)).toEqual(['inbox-delivered'])
+    expect(campConversationTimeline([publicMessage]).map((item) => item.id)).toEqual([publicMessage.id])
 
     const snapshot: CampSnapshot = {
-      schemaVersion: 22,
+      schemaVersion: 24,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-a2a', title: 'Agent 协作', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1685,16 +1665,10 @@ describe('task event projections', () => {
         memberOrder: 1, isDefaultLead: false, version: 1
       }],
       tasks: [],
-      messages: [legacyA2aMessage],
+      messages: [publicMessage],
+      messageDeliveries: [delivery],
       turns: [],
       agentRuns: [],
-      inboxMessages: [deliveredMessage],
-      conversationInputs: [{
-        id: 'input-member-call', conversationId: 'conversation-muwa', campTurnId: 'turn-a2a',
-        sequence: 1, status: 'materialized', sourceInboxMessageId: 'inbox-delivered',
-        consumingAgentRunId: 'run-muwa', terminalReason: null,
-        createdAt: '2026-07-30T03:00:01Z', materializedAt: '2026-07-30T03:00:02Z', terminalAt: null
-      }],
       contextManifests: [],
       executionEvidence: [],
       approvals: [],
@@ -1725,13 +1699,10 @@ describe('task event projections', () => {
     }))
 
     expect(markup).not.toContain('<h2>会话</h2>')
-    expect(markup).toContain('<strong>洛可</strong><span class="collaboration-recipient">→ @沐瓦</span>')
     expect(markup).toContain('请检查 Downloads 目录里的页面。')
-    expect(markup).not.toContain('legacy delivery status card')
-    expect(markup).not.toContain('协作请求已送达')
-    expect(markup).not.toContain('协作结果已返回')
-    expect(markup).not.toContain('执行中')
-    expect(markup).toContain('1 条持久化输入')
+    expect(markup).toContain('投递')
+    expect(markup).toContain('已送达')
+    expect(markup).not.toContain('活动')
     expect(markup).not.toContain('Core Outcome')
     expect(markup).not.toContain('返回责任')
     expect(markup).not.toContain('Correlation')
@@ -1754,7 +1725,7 @@ describe('task event projections', () => {
 
   it('renders lightweight Task records as editable long-lived responsibilities', () => {
     const snapshot: CampSnapshot = {
-      schemaVersion: 22,
+      schemaVersion: 24,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-task', title: 'Task 管理', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1773,8 +1744,7 @@ describe('task event projections', () => {
         createdAt: '2026-07-23T00:00:00Z', updatedAt: '2026-07-23T00:00:00Z',
         closedAt: null, availableActions: ['update']
       }],
-      messages: [], turns: [], agentRuns: [], inboxMessages: [],
-      conversationInputs: [], contextManifests: [],
+      messages: [], messageDeliveries: [], turns: [], agentRuns: [], contextManifests: [],
       executionEvidence: [], approvals: [], actions: [], timeline: []
     }
     const markup = renderToStaticMarkup(createElement(TaskPanel, {
@@ -1802,10 +1772,6 @@ describe('task event projections', () => {
     })
     expect(agentRunStateTag({ status: 'running', waitReason: null }, true)).toEqual({
       tag: '正在停止',
-      tone: 'neutral'
-    })
-    expect(inboxMessagePresentation({ deliveredAt: '2026-07-23T00:00:00Z', failedAt: null }, 'queued')).toEqual({
-      label: '已排队',
       tone: 'neutral'
     })
     expect(formatByteSize(4_096)).toBe('4.0 KB')

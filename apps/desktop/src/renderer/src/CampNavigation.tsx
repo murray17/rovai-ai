@@ -968,7 +968,7 @@ function deleteBlockerLabel(code: string): string {
     nonterminal_camp_turn: '仍有 CampTurn 未结束',
     pending_approval: '仍有待处理审批',
     unsettled_action: '仍有未收敛动作',
-    pending_inbox_delivery: '仍有 Inbox 消息待投递',
+    pending_message_delivery: '仍有公共消息投递未完成',
     pending_runtime_delivery: '仍有 Agent 运行时结果待确认',
     active_worker_lease: '仍有执行器持有租约',
     unfinished_membership_change: '仍有队员变更未完成',

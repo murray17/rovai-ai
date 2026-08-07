@@ -30,6 +30,10 @@ use crate::{
         CampTurnExecutionBudgetExhaustionReason, PRODUCT_MAX_ACCEPTED_A2A,
         camp_turn_execution_budget_now,
     },
+    message_delivery::{
+        CAMP_MESSAGE_SEND_MAX_BODY_BYTES, CAMP_MESSAGE_SEND_TOOL_NAME, SendPublicA2aMessage,
+        dispatch_accepted_deliveries, persist_public_a2a_message,
+    },
     runtime::AgentRunWorkspace,
 };
 
@@ -38,7 +42,7 @@ pub const TEAM_CREATE_TASK_TOOL_NAME: &str = "team.create_task";
 pub const TEAM_UPDATE_TASK_TOOL_NAME: &str = "team.update_task";
 pub const TEAM_LIST_TASKS_TOOL_NAME: &str = "team.list_tasks";
 pub const TEAM_TOOL_NAMES: [&str; 12] = [
-    TEAM_CALL_MEMBER_TOOL_NAME,
+    CAMP_MESSAGE_SEND_TOOL_NAME,
     TEAM_CREATE_TASK_TOOL_NAME,
     TEAM_UPDATE_TASK_TOOL_NAME,
     TEAM_LIST_TASKS_TOOL_NAME,
@@ -61,6 +65,17 @@ static TEAM_TOOL_PROCESS_SECRET: OnceLock<String> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CampMessageSendInput {
+    pub camp_id: String,
+    pub body: String,
+    #[serde(default)]
+    pub to: Vec<String>,
+    pub reply_to_camp_message_id: Option<String>,
+    pub task_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TeamCallMemberInput {
     pub recipient: String,
     pub content: String,
@@ -69,7 +84,7 @@ pub struct TeamCallMemberInput {
 
 fn runtime_team_tool_reference(_adapter_kind: AdapterKind, canonical_name: &str) -> String {
     match canonical_name {
-        TEAM_CALL_MEMBER_TOOL_NAME => "`rovai member call`".to_string(),
+        TEAM_CALL_MEMBER_TOOL_NAME => "`rovai send`".to_string(),
         TEAM_LIST_TASKS_TOOL_NAME => "`rovai task list`".to_string(),
         _ => format!("`{canonical_name}`"),
     }
@@ -151,6 +166,24 @@ pub struct TeamCallMemberCommand {
     task_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CampMessageSendCommand {
+    native_binding_id: String,
+    credential_digest: String,
+    runtime_tool_call_id: String,
+    camp_id: String,
+    body: String,
+    to: Vec<String>,
+    reply_to_camp_message_id: Option<String>,
+    task_id: Option<String>,
+}
+
+impl sealed::Sealed for CampMessageSendCommand {}
+impl DomainCommand for CampMessageSendCommand {
+    const TYPE: &'static str = CAMP_MESSAGE_SEND_TOOL_NAME;
+}
+
 impl sealed::Sealed for TeamCallMemberCommand {}
 impl DomainCommand for TeamCallMemberCommand {
     const TYPE: &'static str = "team.call_member";
@@ -163,6 +196,13 @@ pub struct TeamToolInvocation {
     pub binding_credential: String,
     pub runtime_tool_call_id: String,
     pub input: TeamCallMemberInput,
+}
+
+pub struct CampMessageSendInvocation {
+    pub native_binding_id: String,
+    pub binding_credential: String,
+    pub runtime_tool_call_id: String,
+    pub input: CampMessageSendInput,
 }
 
 pub struct TeamTaskToolInvocation<T> {
@@ -313,7 +353,7 @@ impl TeamToolService {
         })
     }
 
-    pub fn authenticate_call_member_binding_or_recorded_scope(
+    pub fn authenticate_public_message_binding_or_recorded_scope(
         &self,
         database: &Database,
         native_binding_id: &str,
@@ -447,6 +487,44 @@ impl TeamToolService {
                     "type": "string",
                     "minLength": 1,
                     "description": "Optional current Task assigned to the recipient. It is validated when the call is accepted and retained only as historical execution context."
+                }
+            }
+        })
+    }
+
+    pub fn camp_message_send_input_schema() -> Value {
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["campId", "body"],
+            "properties": {
+                "campId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Current Camp ID. It must match the authenticated AgentRun."
+                },
+                "body": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": CAMP_MESSAGE_SEND_MAX_BODY_BYTES,
+                    "description": "Exact public message body. Strict inline @agent_id tokens participate in addressing outside code, URLs, and escaped literal regions."
+                },
+                "to": {
+                    "type": "array",
+                    "maxItems": 16,
+                    "uniqueItems": true,
+                    "items": {"type": "string", "minLength": 1},
+                    "description": "Optional explicit recipients. Input order is presentation metadata, never scheduling priority."
+                },
+                "replyToCampMessageId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Optional direct public parent message. An Agent-authored public A2A parent contributes its author as a default recipient."
+                },
+                "taskId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Optional current Task link; exactly one effective recipient is required."
                 }
             }
         })
@@ -837,6 +915,179 @@ impl TeamToolService {
         self.prepare_binding_credential(database, agent_run_id, execution_epoch, false)
     }
 
+    pub fn send_public_message(
+        &self,
+        database: &mut Database,
+        invocation: &CampMessageSendInvocation,
+    ) -> Result<CommandExecution> {
+        self.send_public_message_authorized(database, invocation, None)
+    }
+
+    pub fn send_public_message_attested(
+        &self,
+        database: &mut Database,
+        invocation: &CampMessageSendInvocation,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> Result<CommandExecution> {
+        if agent_run_id.trim().is_empty() || execution_epoch <= 0 {
+            return Err(invocation_error(
+                "team_tool.invalid_attested_run",
+                "Attested AgentRun identity is incomplete",
+            ));
+        }
+        self.send_public_message_authorized(
+            database,
+            invocation,
+            Some((agent_run_id, execution_epoch)),
+        )
+    }
+
+    fn send_public_message_authorized(
+        &self,
+        database: &mut Database,
+        invocation: &CampMessageSendInvocation,
+        attested_run: Option<(&str, i64)>,
+    ) -> Result<CommandExecution> {
+        validate_public_send_invocation(invocation)?;
+        let supplied_credential_digest = credential_digest(&invocation.binding_credential);
+        let command = CampMessageSendCommand {
+            native_binding_id: invocation.native_binding_id.clone(),
+            credential_digest: supplied_credential_digest.clone(),
+            runtime_tool_call_id: invocation.runtime_tool_call_id.clone(),
+            camp_id: invocation.input.camp_id.clone(),
+            body: invocation.input.body.clone(),
+            to: invocation.input.to.clone(),
+            reply_to_camp_message_id: invocation.input.reply_to_camp_message_id.clone(),
+            task_id: invocation.input.task_id.clone(),
+        };
+        let command_id = team_command_id(
+            &invocation.native_binding_id,
+            &supplied_credential_digest,
+            &invocation.runtime_tool_call_id,
+        )?;
+        if let Some(recorded) =
+            load_recorded_team_command_identity(database.connection(), &command_id)?
+        {
+            if attested_run.is_some_and(|(agent_run_id, execution_epoch)| {
+                recorded.source_agent_run_id != agent_run_id
+                    || recorded.execution_epoch != execution_epoch
+            }) {
+                return Err(invocation_error(
+                    "team_tool.binding_fenced",
+                    "Recorded public send belongs to a different attested AgentRun",
+                ));
+            }
+            let replay_envelope = CommandEnvelope {
+                command_id: command_id.clone(),
+                actor: ActorRef::Agent {
+                    agent_id: recorded.agent_id,
+                    source_agent_run_id: recorded.source_agent_run_id,
+                },
+                camp_id: Some(recorded.camp_id),
+                expected_versions: Vec::new(),
+                execution_epoch: Some(recorded.execution_epoch),
+                payload: command.clone(),
+            };
+            return self
+                .gateway
+                .replay_if_recorded(database, &replay_envelope)?
+                .context("recorded public send disappeared before replay");
+        }
+
+        let sender = resolve_sender_identity(
+            database.connection(),
+            &invocation.native_binding_id,
+            &supplied_credential_digest,
+            attested_run,
+        )?;
+        let envelope = CommandEnvelope {
+            command_id,
+            actor: ActorRef::Agent {
+                agent_id: sender.agent_id.clone(),
+                source_agent_run_id: sender.agent_run_id.clone(),
+            },
+            camp_id: Some(sender.camp_id.clone()),
+            expected_versions: Vec::new(),
+            execution_epoch: Some(sender.execution_epoch),
+            payload: command,
+        };
+
+        let execution = self.gateway.execute(database, &envelope, |transaction| {
+            let current = match resolve_sender_identity_by_digest(
+                transaction,
+                &envelope.payload.native_binding_id,
+                &envelope.payload.credential_digest,
+                attested_run,
+            ) {
+                Ok(current) => current,
+                Err(error) if error.downcast_ref::<TeamToolInvocationError>().is_some() => {
+                    return Ok(rejected(
+                        "team_tool.binding_fenced",
+                        "Native Binding, AgentRun, or execution epoch is no longer current",
+                    ));
+                }
+                Err(error) => return Err(error),
+            };
+            if current.agent_run_id != sender.agent_run_id
+                || current.execution_epoch != sender.execution_epoch
+                || current.agent_id != sender.agent_id
+                || current.camp_id != sender.camp_id
+                || current.credential_digest != sender.credential_digest
+            {
+                return Ok(rejected(
+                    "team_tool.binding_fenced",
+                    "Native Binding changed before the public send transaction",
+                ));
+            }
+            if envelope.camp_id.as_deref() != Some(current.camp_id.as_str())
+                || envelope.payload.camp_id != current.camp_id
+            {
+                return Ok(CommandHandlerResult::rejected(
+                    "message.camp_mismatch",
+                    json!({
+                        "message": "campId must match the authenticated AgentRun Camp",
+                        "details": {"newRequestIdRequired": true},
+                    }),
+                ));
+            }
+            persist_public_a2a_message(
+                transaction,
+                &SendPublicA2aMessage {
+                    command_id: &envelope.command_id,
+                    camp_id: &current.camp_id,
+                    camp_turn_id: &current.camp_turn_id,
+                    source_agent_run_id: &current.agent_run_id,
+                    author_agent_id: &current.agent_id,
+                    execution_epoch: current.execution_epoch,
+                    current_a2a_root_agent_run_id: current.a2a_root_agent_run_id.as_deref(),
+                    current_a2a_depth: current.a2a_depth,
+                    body: &envelope.payload.body,
+                    explicit_recipients: &envelope.payload.to,
+                    reply_to_camp_message_id: envelope.payload.reply_to_camp_message_id.as_deref(),
+                    task_id: envelope.payload.task_id.as_deref(),
+                },
+            )
+        })?;
+        if !execution.replayed
+            && execution.result.status != crate::command::CommandResultStatus::Rejected
+        {
+            let delivery_ids = execution.result.payload["deliveryIds"]
+                .as_array()
+                .context("accepted public send has no deliveryIds")?
+                .iter()
+                .map(|value| {
+                    value
+                        .as_str()
+                        .map(str::to_string)
+                        .context("accepted public send has an invalid deliveryId")
+                })
+                .collect::<Result<Vec<_>>>()?;
+            dispatch_accepted_deliveries(database, &delivery_ids)?;
+        }
+        Ok(execution)
+    }
+
     pub fn call_member(
         &self,
         database: &mut Database,
@@ -972,7 +1223,7 @@ impl TeamToolService {
             if current.agent_id == recipient_agent_id {
                 return Ok(rejected(
                     "team_tool.self_send",
-                    "team.call_member must target another Camp member",
+                    "camp.message.send must target another Camp member",
                 ));
             }
             if current.a2a_depth >= MAX_A2A_DEPTH {
@@ -1669,6 +1920,49 @@ fn validate_invocation(invocation: &TeamToolInvocation) -> Result<()> {
     Ok(())
 }
 
+fn validate_public_send_invocation(invocation: &CampMessageSendInvocation) -> Result<()> {
+    validate_invocation_identity(
+        &invocation.native_binding_id,
+        &invocation.binding_credential,
+        &invocation.runtime_tool_call_id,
+    )?;
+    if invocation.input.camp_id.trim().is_empty() || invocation.input.body.trim().is_empty() {
+        return Err(invocation_error(
+            "message.invalid_input",
+            "campId and a non-empty body are required",
+        ));
+    }
+    if invocation.input.body.len() > CAMP_MESSAGE_SEND_MAX_BODY_BYTES {
+        return Err(invocation_error(
+            "message.body_too_large",
+            "Public message body exceeds the 32 KiB send limit",
+        ));
+    }
+    if invocation.input.to.len() > 16 {
+        return Err(invocation_error(
+            "message.fanout_exceeded",
+            "The explicit recipient input exceeds the absolute fanout limit of 16",
+        ));
+    }
+    if invocation
+        .input
+        .reply_to_camp_message_id
+        .as_deref()
+        .is_some_and(|value| value.trim().is_empty())
+        || invocation
+            .input
+            .task_id
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+    {
+        return Err(invocation_error(
+            "message.invalid_input",
+            "replyToCampMessageId and taskId must not be empty when supplied",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_task_invocation_identity<T>(invocation: &TeamTaskToolInvocation<T>) -> Result<()> {
     validate_invocation_identity(
         &invocation.native_binding_id,
@@ -2185,6 +2479,26 @@ mod tests {
             }
         }
 
+        fn public_send_invocation(
+            &self,
+            call_id: &str,
+            body: &str,
+            to: &[&str],
+        ) -> CampMessageSendInvocation {
+            CampMessageSendInvocation {
+                native_binding_id: self.credential.native_binding_id.clone(),
+                binding_credential: self.credential.binding_credential.clone(),
+                runtime_tool_call_id: call_id.to_string(),
+                input: CampMessageSendInput {
+                    camp_id: self.camp_id.clone(),
+                    body: body.to_string(),
+                    to: to.iter().map(|value| (*value).to_string()).collect(),
+                    reply_to_camp_message_id: None,
+                    task_id: None,
+                },
+            }
+        }
+
         fn task_invocation<T>(&self, call_id: &str, input: T) -> TeamTaskToolInvocation<T> {
             TeamTaskToolInvocation {
                 native_binding_id: self.credential.native_binding_id.clone(),
@@ -2375,19 +2689,262 @@ mod tests {
     }
 
     #[test]
+    fn public_send_atomically_persists_one_message_and_canonical_deliveries() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        let before_slots: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT a2a_run_slots_allocated FROM camp_turn WHERE id = (SELECT camp_turn_id FROM agent_run WHERE id = ?1)",
+                [&fixture.source_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let invocation = fixture.public_send_invocation(
+            "public-send-union",
+            "Please inspect this @agent_2",
+            &["agent_2"],
+        );
+        let sent = service
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
+        assert_eq!(sent.result.code, "camp_message.send_accepted");
+        assert_eq!(sent.result.payload["visibility"], "camp_public");
+        assert_eq!(
+            sent.result.payload["effectiveRecipients"],
+            json!(["agent_2"])
+        );
+        assert_eq!(
+            sent.result.payload["deliveryIds"].as_array().unwrap().len(),
+            1
+        );
+
+        let message_id = sent.result.payload["messageId"].as_str().unwrap();
+        let message: (String, String, String, String) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT body, effective_recipient_ids_json,
+                       recipient_presentation_json, source_operation_id
+                FROM camp_message WHERE id = ?1
+                "#,
+                [message_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(message.0, "Please inspect this @agent_2");
+        assert_eq!(message.1, r#"["agent_2"]"#);
+        assert_eq!(
+            serde_json::from_str::<Value>(&message.2).unwrap()["inlineOrder"],
+            json!(["agent_2"])
+        );
+        assert!(!message.3.is_empty());
+
+        let delivery: (String, String, i64, i64, Option<String>) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT recipient_agent_id, status, dispatch_attempt_count,
+                       a2a_depth, target_agent_run_id
+                FROM message_delivery WHERE message_id = ?1
+                "#,
+                [message_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(delivery.0, "agent_2");
+        assert_eq!(delivery.1, "running");
+        assert_eq!(delivery.2, 1);
+        assert_eq!(delivery.3, 1);
+        assert!(delivery.4.is_some());
+        let after_slots: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT a2a_run_slots_allocated FROM camp_turn WHERE id = (SELECT camp_turn_id FROM agent_run WHERE id = ?1)",
+                [&fixture.source_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(after_slots, before_slots + 1);
+        let old_private_rows: (i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM inbox_message), (SELECT COUNT(*) FROM conversation_input)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(old_private_rows, (0, 0));
+
+        let replay = service
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.result.payload["messageId"], message_id);
+    }
+
+    #[test]
+    fn public_only_send_consumes_no_a2a_slot() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        let before: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT SUM(a2a_run_slots_allocated) FROM camp_turn",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let invocation = fixture.public_send_invocation(
+            "public-only-send",
+            "A public progress fact with no recipient.",
+            &[],
+        );
+        let sent = service
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+        assert_eq!(sent.result.payload["deliveryIds"], json!([]));
+        assert_eq!(sent.result.payload["effectiveRecipients"], json!([]));
+        let after: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT SUM(a2a_run_slots_allocated) FROM camp_turn",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(after, before);
+    }
+
+    #[test]
+    fn exact_public_final_output_is_suppressed_once_per_run() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        let body = "The exact answer is already public.";
+        let invocation = fixture.public_send_invocation("explicit-final", body, &[]);
+        let sent = service
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+        let explicit_message_id = sent.result.payload["messageId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let source_epoch = fixture.source_epoch;
+        fixture.succeed_run(&fixture.source_run_id.clone(), source_epoch, body);
+
+        let (message_count, final_message_id, suppressed): (i64, String, bool) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT
+                    (SELECT COUNT(*) FROM camp_message
+                     WHERE source_agent_run_id = ?1),
+                    agent_run.final_camp_message_id,
+                    EXISTS(
+                        SELECT 1 FROM event_log
+                        WHERE event_type = 'agent_run.succeeded'
+                          AND entity_type = 'agent_run'
+                          AND entity_id = ?1
+                          AND json_extract(payload_json, '$.automaticPublicOutputSuppressed') = 1
+                    )
+                FROM agent_run
+                WHERE agent_run.id = ?1
+                "#,
+                [&fixture.source_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(message_count, 1);
+        assert_eq!(final_message_id, explicit_message_id);
+        assert!(suppressed);
+    }
+
+    #[test]
+    fn invalid_addressing_reports_all_offenders_and_leaves_no_partial_facts() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        let before: (i64, i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM camp_message), (SELECT COUNT(*) FROM message_delivery), (SELECT SUM(a2a_run_slots_allocated) FROM camp_turn)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        let invocation = fixture.public_send_invocation(
+            "invalid-public-send",
+            "Malformed @agent_0 and missing @agent_999",
+            &["agent_1"],
+        );
+        let rejected = service
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+        assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
+        assert_eq!(rejected.result.code, "message.addressing_invalid");
+        let offenders = rejected.result.payload["details"]["offending"]
+            .as_array()
+            .unwrap();
+        assert_eq!(offenders.len(), 3);
+        assert!(offenders.iter().any(|item| item["reason"] == "self_target"));
+        assert!(
+            offenders
+                .iter()
+                .any(|item| item["reason"] == "not_current_camp_member")
+        );
+        assert!(
+            offenders
+                .iter()
+                .any(|item| item["reason"] == "invalid_format")
+        );
+        assert_eq!(
+            rejected.result.payload["details"]["newRequestIdRequired"],
+            true
+        );
+        let after: (i64, i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM camp_message), (SELECT COUNT(*) FROM message_delivery), (SELECT SUM(a2a_run_slots_allocated) FROM camp_turn)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(after, before);
+    }
+
+    #[test]
     fn member_call_expected_output_names_the_cli_command_for_every_runtime() {
         let opencode = member_call_expected_output(AdapterKind::OpencodeCli);
-        assert!(opencode.contains("`rovai member call`"));
+        assert!(opencode.contains("`rovai send`"));
         assert!(opencode.contains("not the default action"));
         assert!(opencode.contains("continue acting or make a decision"));
         assert!(opencode.contains("acknowledge receipt"));
         assert!(opencode.contains("`rovai task list`"));
 
         let antigravity = member_call_expected_output(AdapterKind::AntigravityApp);
-        assert!(antigravity.contains("`rovai member call`"));
+        assert!(antigravity.contains("`rovai send`"));
 
         let codex = member_call_expected_output(AdapterKind::CodexCli);
-        assert!(codex.contains("`rovai member call`"));
+        assert!(codex.contains("`rovai send`"));
     }
 
     #[test]
@@ -2897,29 +3454,6 @@ mod tests {
         let workspace: Value = serde_json::from_str(&workspace_json).unwrap();
         assert_eq!(workspace["access"], "write");
 
-        let snapshot = ReadModelService
-            .camp_snapshot(&mut fixture.database, &fixture.camp_id)
-            .unwrap();
-        let directed = snapshot
-            .inbox_messages
-            .iter()
-            .find(|message| message.id == inbox_id)
-            .expect("Inbox projection should retain the Member Call");
-        assert_eq!(directed.body, "Please handle persist-first");
-        assert_eq!(
-            directed.target_agent_run_id.as_deref(),
-            Some(run_id.as_str())
-        );
-        let projected_input = snapshot
-            .conversation_inputs
-            .iter()
-            .find(|input| input.id == input_id)
-            .expect("ConversationInput projection should retain the durable scheduler state");
-        assert_eq!(projected_input.status, "materialized");
-        assert_eq!(
-            projected_input.consuming_agent_run_id.as_deref(),
-            Some(run_id.as_str())
-        );
         let replay = service
             .call_member(&mut fixture.database, &invocation)
             .expect("same Tool Call should replay");
@@ -3038,8 +3572,12 @@ mod tests {
             .find(|message| message.source_agent_run_id.as_deref() == Some(target_run_id.as_str()))
             .expect("recipient final output should remain visible to the user");
         assert_eq!(final_output.body, "TARGET_RESULT_REMAINS_USER_FACING");
-        assert_eq!(snapshot.inbox_messages.len(), 1);
-        assert_eq!(snapshot.conversation_inputs.len(), 1);
+        assert!(snapshot.timeline.iter().all(|event| {
+            !event.event_type.starts_with("inbox_message.")
+                && !event.event_type.starts_with("conversation_input.")
+                && !event.event_type.starts_with("member_call.")
+                && !event.event_type.starts_with("team_tool.member_call_")
+        }));
     }
 
     #[test]
@@ -4144,7 +4682,7 @@ mod tests {
         assert!(rejected_replay.replayed);
         assert_eq!(rejected_replay.result, rejected.result);
         let recorded_scope = service
-            .authenticate_call_member_binding_or_recorded_scope(
+            .authenticate_public_message_binding_or_recorded_scope(
                 &fixture.database,
                 &fixture.credential.native_binding_id,
                 &fixture.credential.binding_credential,
@@ -4155,7 +4693,7 @@ mod tests {
         assert_eq!(recorded_scope.agent_run_id, fixture.source_run_id);
         assert_eq!(recorded_scope.execution_epoch, fixture.source_epoch);
         let accepted_scope = service
-            .authenticate_call_member_binding_or_recorded_scope(
+            .authenticate_public_message_binding_or_recorded_scope(
                 &fixture.database,
                 &fixture.credential.native_binding_id,
                 &fixture.credential.binding_credential,

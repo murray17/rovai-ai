@@ -29,6 +29,7 @@ use crate::{
         FrozenCampTurnExecutionBudget, camp_turn_execution_budget_now,
         freeze_camp_turn_execution_budget,
     },
+    message_delivery::cancel_pending_turn_deliveries,
     runtime::AgentRunWorkspace,
 };
 
@@ -3796,6 +3797,14 @@ pub(crate) fn exhaust_camp_turn_execution_budget(
         anyhow::bail!("CampTurn changed before its Execution Budget was exhausted");
     }
     let input_summary = cancel_turn_inputs(transaction, camp_turn_id, now)?;
+    let message_deliveries_cancelled = cancel_pending_turn_deliveries(
+        transaction,
+        camp_turn_id,
+        "execution_budget_exhausted",
+        actor,
+        execution_epoch,
+        now,
+    )?;
     let agent_runs_fenced = transaction.execute(
         r#"
         UPDATE agent_run
@@ -3827,6 +3836,7 @@ pub(crate) fn exhaust_camp_turn_execution_budget(
             "acceptedA2a": accepted_a2a,
             "agentRunsFenced": agent_runs_fenced,
             "conversationInputsCancelled": input_summary.inputs_cancelled,
+            "messageDeliveriesCancelled": message_deliveries_cancelled,
         }),
     )?;
     Ok(CampTurnExecutionBudgetExhaustion {
@@ -3907,10 +3917,10 @@ fn camp_delete_blockers(transaction: &Connection, camp_id: &str) -> Result<Vec<V
             "#,
         ),
         (
-            "pending_inbox_delivery",
+            "pending_message_delivery",
             r#"
-            SELECT COUNT(*) FROM inbox_message
-            WHERE camp_id = ?1 AND delivered_at IS NULL AND failed_at IS NULL
+            SELECT COUNT(*) FROM message_delivery
+            WHERE camp_id = ?1 AND status IN ('pending', 'running')
             "#,
         ),
         (
@@ -3950,8 +3960,9 @@ fn camp_delete_blockers(transaction: &Connection, camp_id: &str) -> Result<Vec<V
                  JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
                  WHERE camp_turn.camp_id = ?1
                    AND action_execution.execution_lease_owner IS NOT NULL)
-              + (SELECT COUNT(*) FROM inbox_message
-                 WHERE camp_id = ?1 AND lease_owner IS NOT NULL)
+              + (SELECT COUNT(*) FROM message_delivery_attempt
+                 JOIN message_delivery ON message_delivery.id = message_delivery_attempt.delivery_id
+                 WHERE message_delivery.camp_id = ?1 AND message_delivery_attempt.status = 'attempting')
             "#,
         ),
         (
@@ -4083,6 +4094,7 @@ pub(crate) fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> 
         "#,
         [camp_id],
     )?;
+    transaction.execute("DELETE FROM message_delivery WHERE camp_id = ?1", [camp_id])?;
     transaction.execute(
         r#"
         UPDATE agent_run

@@ -75,6 +75,25 @@ fn run() -> Result<u8> {
                 },
             }
         }
+        [command, rest @ ..] if command == "send" => {
+            let identity = builtin_tool_identity_by_command(command, "")
+                .with_context(|| format!("unknown Rovai command: rovai {command}"))?;
+            let description = builtin_tool_description(identity.operation)?;
+            if rest == ["--help"] {
+                print_operation_help(&description);
+                return Ok(0);
+            }
+            let input = parse_operation_input(&description, rest)?;
+            BuiltinToolIpcRequest {
+                ipc_protocol_version: BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
+                auth,
+                body: BuiltinToolIpcRequestBody::Invoke {
+                    request_id: Uuid::new_v4().to_string(),
+                    operation: identity.operation.to_string(),
+                    input,
+                },
+            }
+        }
         [group, action, rest @ ..] => {
             let identity = builtin_tool_identity_by_command(group, action)
                 .with_context(|| format!("unknown Rovai command: rovai {group} {action}"))?;
@@ -339,14 +358,15 @@ fn send_with_retry(
 
 fn print_root_help() {
     println!(
-        "Rovai Agent CLI\n\nDiscovery:\n  rovai tool list\n  rovai tool describe <canonical-operation>\n\nOperations:\n  rovai member call\n  rovai task create|list|update\n  rovai camp list|search|read\n  rovai history search\n  rovai memory search|read|write|propose-hearth\n\nEach operation supports direct flags, JSON stdin/heredoc, or --input-file <path>."
+        "Rovai Agent CLI\n\nDiscovery:\n  rovai tool list\n  rovai tool describe <canonical-operation>\n\nOperations:\n  rovai send\n  rovai task create|list|update\n  rovai camp list|search|read\n  rovai history search\n  rovai memory search|read|write|propose-hearth\n\nEach operation supports direct flags, JSON stdin/heredoc, or --input-file <path>."
     );
 }
 
 fn print_operation_help(description: &BuiltinToolDescription) {
     println!(
-        "rovai {} {}\n{}\n\nInput: direct flags, JSON stdin/heredoc, or --input-file <path>\n",
-        description.command[0], description.command[1], description.summary
+        "rovai {}\n{}\n\nInput: direct flags, JSON stdin/heredoc, or --input-file <path>\n",
+        description.command.join(" "),
+        description.summary
     );
     for argument in &description.arguments {
         println!(
@@ -386,10 +406,10 @@ mod tests {
     #[test]
     fn cli_commands_map_to_canonical_operations() {
         assert_eq!(
-            builtin_tool_identity_by_command("member", "call")
+            builtin_tool_identity_by_command("send", "")
                 .unwrap()
                 .operation,
-            "team.call_member"
+            "camp.message.send"
         );
         assert_eq!(
             builtin_tool_identity_by_command("memory", "propose-hearth")

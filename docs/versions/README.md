@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.44
+current_version: v0.45
 last_updated: 2026-08-07
 ---
 
@@ -64,4 +64,5 @@ last_updated: 2026-08-07
 | v0.41 | `historical` | 已完成跨 Runtime 统一运行活动语义、生命周期投影与观测诚实性 | [v0.41/README.md](v0.41/README.md) |
 | v0.42 | `historical` | Rovai built-in operations 的九 Runtime CLI-only transport clean break | [v0.42/README.md](v0.42/README.md) |
 | v0.43 | `historical` | Runtime-native additive external MCP 与 Codex Native Home 回退；自动验证完成，真实 Runtime Smoke 未在冻结前全部完成 | [v0.43/README.md](v0.43/README.md) |
-| v0.44 | `current` | 确定性有界原始公共消息上下文与摘要系统移除 | [v0.44/README.md](v0.44/README.md) |
+| v0.44 | `historical` | 确定性有界原始公共消息上下文与摘要系统移除 | [v0.44/README.md](v0.44/README.md) |
+| v0.45 | `current` | 显式 A2A、公共输出、统一 Message Delivery、Profile v2 引用闭合与 Scheme C 会话区 | [v0.45/README.md](v0.45/README.md) |

@@ -6,12 +6,12 @@ use serde_json::{Map, Value, json};
 
 use crate::{command::canonical_json_digest, team_tool_catalog::builtin_tool_definitions};
 
-pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 1;
+pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 2;
 pub const BUILTIN_TOOL_IPC_PROTOCOL_VERSION: u32 = 1;
 pub const BUILTIN_TOOL_ENVELOPE_VERSION: u32 = 1;
 pub const BUILTIN_TOOL_RECEIPT_VERSION: u32 = 1;
-pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 1;
-pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v1";
+pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 2;
+pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v2";
 pub const BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES: usize = 1024 * 1024;
 pub const ROVAI_AGENT_CLI_ENV: &str = "ROVAI_AGENT_CLI";
 pub const ROVAI_CLI_CONTEXT_ENV: &str = "ROVAI_CLI_CONTEXT";
@@ -78,9 +78,9 @@ pub struct BuiltinToolCliIdentity {
 
 pub const BUILTIN_TOOL_CLI_IDENTITIES: [BuiltinToolCliIdentity; 12] = [
     BuiltinToolCliIdentity {
-        operation: "team.call_member",
-        group: "member",
-        action: "call",
+        operation: "camp.message.send",
+        group: "send",
+        action: "",
     },
     BuiltinToolCliIdentity {
         operation: "team.create_task",
@@ -486,7 +486,11 @@ fn catalog_digest_operations() -> Result<Vec<CatalogDigestOperation>> {
         let result_schema = definition["outputSchema"].clone();
         operations.push(CatalogDigestOperation {
             name: identity.operation.to_string(),
-            command: vec![identity.group.to_string(), identity.action.to_string()],
+            command: if identity.action.is_empty() {
+                vec![identity.group.to_string()]
+            } else {
+                vec![identity.group.to_string(), identity.action.to_string()]
+            },
             summary: definition["title"]
                 .as_str()
                 .unwrap_or(identity.operation)
@@ -626,6 +630,23 @@ fn error_contracts(operation: &str) -> Vec<BuiltinToolErrorContract> {
         },
     ];
     match operation {
+        "camp.message.send" => {
+            for code in [
+                "message.addressing_invalid",
+                "message.reply_invalid",
+                "message.fanout_exceeded",
+                "message.a2a_depth_exhausted",
+                "message.task_recipient_ambiguous",
+                "message.invalid_task",
+                "message.execution_budget_exceeded",
+                "message.camp_mismatch",
+            ] {
+                errors.push(BuiltinToolErrorContract {
+                    code: code.to_string(),
+                    recovery: BuiltinToolRecovery::FixInput,
+                });
+            }
+        }
         "team.update_task" => errors.push(BuiltinToolErrorContract {
             code: "task.version_conflict".to_string(),
             recovery: BuiltinToolRecovery::RefreshThenDecide,
@@ -648,7 +669,20 @@ pub fn recovery_for_error_code(code: &str) -> BuiltinToolRecovery {
         || code.ends_with(".proposal_conflict")
     {
         BuiltinToolRecovery::RefreshThenDecide
-    } else if code.ends_with(".invalid_input") || code == "builtin_tool.unknown_operation" {
+    } else if code.ends_with(".invalid_input")
+        || code.starts_with("message.addressing_")
+        || matches!(
+            code,
+            "message.reply_invalid"
+                | "message.fanout_exceeded"
+                | "message.a2a_depth_exhausted"
+                | "message.task_recipient_ambiguous"
+                | "message.invalid_task"
+                | "message.execution_budget_exceeded"
+                | "message.camp_mismatch"
+        )
+        || code == "builtin_tool.unknown_operation"
+    {
         BuiltinToolRecovery::FixInput
     } else if code == "builtin_tool.outcome_indeterminate" {
         BuiltinToolRecovery::ConfirmOutcome
@@ -720,7 +754,12 @@ pub fn validate_builtin_tool_contract() -> Result<()> {
     }
     for identity in BUILTIN_TOOL_CLI_IDENTITIES {
         let description = builtin_tool_description(identity.operation)?;
-        if description.command != [identity.group, identity.action] {
+        let expected_command = if identity.action.is_empty() {
+            vec![identity.group]
+        } else {
+            vec![identity.group, identity.action]
+        };
+        if description.command != expected_command {
             bail!(
                 "Built-in Tool CLI mapping drifted for {}",
                 identity.operation

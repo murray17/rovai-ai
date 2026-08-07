@@ -14,7 +14,7 @@ use crate::{
     skill_projection::SkillExposureSnapshot,
 };
 
-pub const READ_MODEL_SCHEMA_VERSION: i64 = 22;
+pub const READ_MODEL_SCHEMA_VERSION: i64 = 24;
 pub const EVENT_BATCH_SCHEMA_VERSION: i64 = 9;
 pub const NAVIGATION_SCHEMA_VERSION: i64 = 2;
 pub const EXECUTION_EVIDENCE_PAGE_SCHEMA_VERSION: i64 = 1;
@@ -235,7 +235,6 @@ pub struct AgentRunView {
     pub a2a_parent_agent_run_id: Option<String>,
     pub a2a_root_agent_run_id: Option<String>,
     pub a2a_depth: i64,
-    pub source_inbox_message_id: Option<String>,
     pub execution_evidence_count: i64,
     pub has_unsettled_external_effects: bool,
     pub workspace: Option<RunWorkspaceView>,
@@ -276,40 +275,6 @@ pub struct AgentRunExecutionEvidencePage {
     pub through_sequence: i64,
     pub has_more: bool,
     pub evidence: Vec<AgentRunExecutionEvidenceView>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InboxMessageView {
-    pub id: String,
-    pub timeline_global_sequence: Option<i64>,
-    pub sender_agent_id: String,
-    pub recipient_agent_id: String,
-    pub body: String,
-    pub source_agent_run_id: Option<String>,
-    pub target_agent_run_id: Option<String>,
-    pub recipient_message_id: Option<String>,
-    pub delivered_at: Option<String>,
-    pub failed_at: Option<String>,
-    pub last_error: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ConversationInputView {
-    pub id: String,
-    pub conversation_id: String,
-    pub camp_turn_id: String,
-    pub sequence: i64,
-    pub status: String,
-    pub source_inbox_message_id: String,
-    pub consuming_agent_run_id: Option<String>,
-    pub terminal_reason: Option<String>,
-    pub created_at: String,
-    pub materialized_at: Option<String>,
-    pub terminal_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -489,15 +454,37 @@ pub struct CampSnapshot {
     pub members: Vec<CampMemberView>,
     pub tasks: Vec<TaskView>,
     pub messages: Vec<CampMessageView>,
+    pub message_deliveries: Vec<MessageDeliveryView>,
     pub turns: Vec<CampTurnView>,
     pub agent_runs: Vec<AgentRunView>,
     pub execution_evidence: Vec<AgentRunExecutionEvidenceView>,
-    pub inbox_messages: Vec<InboxMessageView>,
-    pub conversation_inputs: Vec<ConversationInputView>,
     pub context_manifests: Vec<ContextManifestView>,
     pub approvals: Vec<ApprovalView>,
     pub actions: Vec<ActionView>,
     pub timeline: Vec<DomainEventView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageDeliveryView {
+    pub id: String,
+    pub message_id: String,
+    pub camp_turn_id: String,
+    pub recipient_agent_id: String,
+    pub recipient_canonical_position: i64,
+    pub status: String,
+    pub dispatch_phase: String,
+    pub wait_condition: Option<String>,
+    pub dispatch_attempt_count: i64,
+    pub retry_generation: i64,
+    pub context_manifest_id: Option<String>,
+    pub target_agent_run_id: Option<String>,
+    pub manual_intervention_required: bool,
+    pub failure_code: Option<String>,
+    pub version: i64,
+    pub created_at: String,
+    pub updated_at: String,
+    pub ended_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -658,11 +645,10 @@ impl ReadModelService {
         let members = load_members(&transaction, camp_id, camp.default_lead_agent_id.as_deref())?;
         let tasks = load_tasks(&transaction, camp_id)?;
         let messages = load_messages(&transaction, camp_id, 1_000)?;
+        let message_deliveries = load_message_deliveries(&transaction, camp_id)?;
         let turns = load_turns(&transaction, camp_id)?;
         let agent_runs = load_agent_runs(&transaction, camp_id)?;
         let execution_evidence = load_execution_evidence(&transaction, camp_id)?;
-        let inbox_messages = load_inbox_messages(&transaction, camp_id)?;
-        let conversation_inputs = load_conversation_inputs(&transaction, camp_id)?;
         let context_manifests = load_context_manifests(&transaction, camp_id)?;
         let approvals = load_approvals(&transaction, camp_id)?;
         let actions = load_actions(&transaction, camp_id)?;
@@ -682,11 +668,10 @@ impl ReadModelService {
             members,
             tasks,
             messages,
+            message_deliveries,
             turns,
             agent_runs,
             execution_evidence,
-            inbox_messages,
-            conversation_inputs,
             context_manifests,
             approvals,
             actions,
@@ -844,8 +829,7 @@ fn load_navigation_camps(transaction: &Transaction<'_>) -> Result<Vec<Navigation
                     WHEN (
                         event_log.event_type = 'camp_message.sent'
                         AND camp_message.author_type IN ('user', 'agent')
-                    ) OR event_log.event_type = 'inbox_message.delivered'
-                      OR event_log.event_type IN (
+                    ) OR event_log.event_type IN (
                         'agent_run.succeeded',
                         'agent_run.failed',
                         'agent_run.cancelled'
@@ -1330,6 +1314,49 @@ fn load_turns(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<CampTu
         .context("failed to load CampTurns")
 }
 
+fn load_message_deliveries(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+) -> Result<Vec<MessageDeliveryView>> {
+    let mut statement = transaction.prepare(
+        r#"
+        SELECT id, message_id, camp_turn_id, recipient_agent_id,
+               recipient_canonical_position, status, dispatch_phase,
+               wait_condition, dispatch_attempt_count, retry_generation,
+               context_manifest_id, target_agent_run_id,
+               manual_intervention_required, failure_code,
+               version, created_at, updated_at, ended_at
+        FROM message_delivery
+        WHERE camp_id = ?1
+        ORDER BY created_at, queue_sequence, id
+        "#,
+    )?;
+    Ok(statement
+        .query_map([camp_id], |row| {
+            Ok(MessageDeliveryView {
+                id: row.get(0)?,
+                message_id: row.get(1)?,
+                camp_turn_id: row.get(2)?,
+                recipient_agent_id: row.get(3)?,
+                recipient_canonical_position: row.get(4)?,
+                status: row.get(5)?,
+                dispatch_phase: row.get(6)?,
+                wait_condition: row.get(7)?,
+                dispatch_attempt_count: row.get(8)?,
+                retry_generation: row.get(9)?,
+                context_manifest_id: row.get(10)?,
+                target_agent_run_id: row.get(11)?,
+                manual_intervention_required: row.get::<_, i64>(12)? != 0,
+                failure_code: row.get(13)?,
+                version: row.get(14)?,
+                created_at: row.get(15)?,
+                updated_at: row.get(16)?,
+                ended_at: row.get(17)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 fn load_agent_runs(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<AgentRunView>> {
     let mut statement = transaction.prepare(
         r#"
@@ -1343,9 +1370,6 @@ fn load_agent_runs(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<A
                agent_run.invocation_kind,
                agent_run.a2a_parent_agent_run_id,
                agent_run.a2a_root_agent_run_id, agent_run.a2a_depth,
-               (SELECT inbox_message.id
-                FROM inbox_message
-                WHERE inbox_message.target_agent_run_id = agent_run.id),
                (SELECT COUNT(*)
                 FROM agent_run_execution_evidence
                 WHERE agent_run_execution_evidence.agent_run_id = agent_run.id),
@@ -1416,18 +1440,17 @@ fn load_agent_runs(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<A
                 row.get::<_, Option<String>>(15)?,
                 row.get::<_, Option<String>>(16)?,
                 row.get::<_, i64>(17)?,
-                row.get::<_, Option<String>>(18)?,
-                row.get::<_, i64>(19)?,
-                row.get::<_, i64>(20)? != 0,
+                row.get::<_, i64>(18)?,
+                row.get::<_, i64>(19)? != 0,
+                row.get::<_, Option<String>>(20)?,
                 row.get::<_, Option<String>>(21)?,
                 row.get::<_, Option<String>>(22)?,
-                row.get::<_, Option<String>>(23)?,
-                row.get::<_, String>(24)?,
-                row.get::<_, i64>(25)?,
-                row.get::<_, String>(26)?,
+                row.get::<_, String>(23)?,
+                row.get::<_, i64>(24)?,
+                row.get::<_, String>(25)?,
+                row.get::<_, Option<String>>(26)?,
                 row.get::<_, Option<String>>(27)?,
-                row.get::<_, Option<String>>(28)?,
-                row.get::<_, String>(29)?,
+                row.get::<_, String>(28)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1452,7 +1475,6 @@ fn load_agent_runs(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<A
                 a2a_parent_agent_run_id,
                 a2a_root_agent_run_id,
                 a2a_depth,
-                source_inbox_message_id,
                 execution_evidence_count,
                 has_unsettled_external_effects,
                 workspace,
@@ -1484,7 +1506,6 @@ fn load_agent_runs(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<A
                     a2a_parent_agent_run_id,
                     a2a_root_agent_run_id,
                     a2a_depth,
-                    source_inbox_message_id,
                     execution_evidence_count,
                     has_unsettled_external_effects,
                     workspace: Some(match workspace {
@@ -1685,94 +1706,6 @@ fn attach_canonical_activity(
             .optional()?;
     }
     Ok(())
-}
-
-fn load_inbox_messages(
-    transaction: &Transaction<'_>,
-    camp_id: &str,
-) -> Result<Vec<InboxMessageView>> {
-    let mut statement = transaction.prepare(
-        r#"
-        SELECT id,
-               (
-                   SELECT MAX(event_log.global_sequence)
-                   FROM event_log
-                   WHERE event_log.entity_type = 'inbox_message'
-                     AND event_log.entity_id = inbox_message.id
-                     AND event_log.event_type = 'inbox_message.delivered'
-               ),
-               sender_agent_id, recipient_agent_id, body,
-               source_agent_run_id, target_agent_run_id,
-               recipient_message_id, delivered_at, failed_at,
-               last_error, created_at, updated_at
-        FROM inbox_message
-        WHERE camp_id = ?1
-        ORDER BY created_at DESC, id
-        "#,
-    )?;
-    statement
-        .query_map([camp_id], |row| {
-            Ok(InboxMessageView {
-                id: row.get(0)?,
-                timeline_global_sequence: row.get(1)?,
-                sender_agent_id: row.get(2)?,
-                recipient_agent_id: row.get(3)?,
-                body: row.get(4)?,
-                source_agent_run_id: row.get(5)?,
-                target_agent_run_id: row.get(6)?,
-                recipient_message_id: row.get(7)?,
-                delivered_at: row.get(8)?,
-                failed_at: row.get(9)?,
-                last_error: row.get(10)?,
-                created_at: row.get(11)?,
-                updated_at: row.get(12)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .context("failed to load InboxMessage read models")
-}
-
-fn load_conversation_inputs(
-    transaction: &Transaction<'_>,
-    camp_id: &str,
-) -> Result<Vec<ConversationInputView>> {
-    let mut statement = transaction.prepare(
-        r#"
-        SELECT conversation_input.id,
-               conversation_input.conversation_id,
-               conversation_input.camp_turn_id,
-               conversation_input.sequence,
-               conversation_input.status,
-               conversation_input.source_inbox_message_id,
-               conversation_input.consuming_agent_run_id,
-               conversation_input.terminal_reason,
-               conversation_input.created_at,
-               conversation_input.materialized_at,
-               conversation_input.terminal_at
-        FROM conversation_input
-        JOIN camp_turn ON camp_turn.id = conversation_input.camp_turn_id
-        WHERE camp_turn.camp_id = ?1
-        ORDER BY conversation_input.created_at, conversation_input.id
-        "#,
-    )?;
-    statement
-        .query_map([camp_id], |row| {
-            Ok(ConversationInputView {
-                id: row.get(0)?,
-                conversation_id: row.get(1)?,
-                camp_turn_id: row.get(2)?,
-                sequence: row.get(3)?,
-                status: row.get(4)?,
-                source_inbox_message_id: row.get(5)?,
-                consuming_agent_run_id: row.get(6)?,
-                terminal_reason: row.get(7)?,
-                created_at: row.get(8)?,
-                materialized_at: row.get(9)?,
-                terminal_at: row.get(10)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .context("failed to load ConversationInput read models")
 }
 
 fn load_context_manifests(
@@ -2158,6 +2091,10 @@ fn load_events(
           AND (?3 IS NULL
                OR event_log.camp_id = ?3
                OR (event_log.camp_id IS NULL AND task.camp_id = ?3))
+          AND event_log.event_type NOT LIKE 'inbox_message.%'
+          AND event_log.event_type NOT LIKE 'conversation_input.%'
+          AND event_log.event_type NOT LIKE 'member_call.%'
+          AND event_log.event_type NOT LIKE 'team_tool.member_call_%'
         ORDER BY event_log.global_sequence {order}
         LIMIT ?4
         "#,
@@ -2344,6 +2281,20 @@ mod tests {
             .camp_snapshot(&mut database, &camp_id)
             .unwrap();
         assert_eq!(snapshot.schema_version, READ_MODEL_SCHEMA_VERSION);
+        let serialized_snapshot = serde_json::to_value(&snapshot).unwrap();
+        for retired_field in ["inboxMessages", "conversationInputs"] {
+            assert!(
+                serialized_snapshot.get(retired_field).is_none(),
+                "public CampSnapshot must not expose retired {retired_field}"
+            );
+        }
+        assert!(serialized_snapshot.get("messageDeliveries").is_some());
+        assert!(snapshot.agent_runs.iter().all(|run| {
+            serde_json::to_value(run)
+                .unwrap()
+                .get("sourceInboxMessageId")
+                .is_none()
+        }));
         assert!(
             serde_json::to_value(&snapshot.members[0])
                 .unwrap()

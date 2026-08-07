@@ -56,8 +56,16 @@ v0.38 将历史上“每次 Task 状态变化一张不可变边界卡”替换�
 
 v0.44 删除公共消息摘要系统后，队员详情同时删除 `MemberAdvancedSettings`、
 `SummaryModelSettings`、“高级设置”展开入口和“对话压缩模型”文案，不保留空壳。
-Member Runtime Parameters 及其模型、推理强度、权限与 sandbox 配置继续保留。该合同已经
-确认，但生产实现尚未开始，进度见[v0.44 实施计划](../versions/v0.44/implementation-plan.md)。
+Member Runtime Parameters 及其模型、推理强度、权限与 sandbox 配置继续保留；实施状态按
+[v0.44 实施计划](../versions/v0.44/implementation-plan.md)与代码证据判断。
+
+v0.45 采用 Scheme C 会话区改版：Run Pulse 常驻提供过程摘要，Execution Drawer 按需成为
+唯一的 Run 过程详情面；Inspector 删除“活动”页，只保留“任务 / 上下文 / 审批 / 审计”。
+Drawer 不提供 Run 级停止，活跃 CampTurn 的唯一 Stop 仍占用 Composer 发送位置并 fence
+整棵执行树。Approval Dock 继续固定在 Composer 正上方，空间不足时 Drawer 收缩而不遮挡
+Approval。该范围只吸收外部 HTML 的会话区关键交互，现有 Arctic Dawn App Shell、Token、
+导航、Composer、Approval、断点和无障碍合同优先；实现状态见[v0.45 实施计划](../versions/v0.45/implementation-plan.md)。
+原型入口：[Scheme C 会话区原型](../prototypes/run-activity/README.md)。
 
 ## 权威边界
 
@@ -121,8 +129,9 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   不显示全局角色 Toast，也不导航到队员页。
 - 空 Camp 使用欢迎图形、真实上下文摘要和三个只填充 Composer 的起步建议，不再显示
   单行空占位。
-- Camp 主阅读流左对齐并按权威顺序阅读。终态执行过程折叠为
-  `处理过程 · {本地化耗时}`，最终回复保持可见。
+- Camp 主阅读流左对齐并按权威顺序阅读。Run Pulse 只显示过程摘要；Execution Drawer
+  按需展示选中 Run 的过程证据、Delivery 状态和 Context 摘要，后台事件不得自动打开、切换
+  或抢焦点。终态 Run 保持选中直到用户关闭或切换。
 - 终态取消以每个 CampTurn 一条“你已在 {耗时} 后停止”进入会话时间线，不再永久
   挂在队员消息标题；未确认外部效果从该事件进入 Inspector。
 - 用户、队员和已交付 A2A 消息的正文支持鼠标拖选和系统复制快捷键；用户自己的
@@ -132,9 +141,11 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   一张读取当前标题、负责人和状态的实时卡片。
 - Approval 不进入消息区。所有 pending 请求进入 Composer 正上方的非模态停靠式审批
   弹框，多项聚合显示“N 项待审批”，并保留各 Runtime 的原生选项、范围和决定身份。
+- Approval Dock 始终位于 Composer 正上方；Drawer 空间不足时退化为摘要/收起态，不能遮挡
+  Dock、Composer 或唯一的 CampTurn Stop。
 - Camp Header 右侧只有 Run/审批状态摘要，没有“停止”或 `•••`。停止只占用 Composer
-  发送位；另有唯一 Inspector 显示/隐藏按钮。状态摘要可恢复 Inspector 并打开对应
-  页签；置顶、重命名和删除只从侧栏 Camp 行进入。
+  发送位；Run Pulse 与 Execution Drawer 只读过程详情，另有唯一 Inspector 显示/隐藏按钮。
+  状态摘要可恢复 Inspector 并打开对应页签；置顶、重命名和删除只从侧栏 Camp 行进入。
 - 队员页采用半身 portrait + 独立圆形 icon 的双 rendition 身份设计；编辑身份支持
   圆形取景拖拽、缩放、键盘微调与实际尺寸预览。
 - 队员页“运行配置”下保留默认收起的“运行参数”；九种 Runtime 使用专用模型与
@@ -217,5 +228,5 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   Runtime Smoke 限制单独记录在版本证据中。
 - [x] v0.28 全局通知入口、持久抽屉、未读徽标、浮层、设置、Focus Return 与
   reduced-motion 已通过 Core、Renderer 和隔离打包 App 验收。
-- [ ] v0.44 删除成员高级设置、摘要模型表单、相关 state/import/CSS/test，并验证所有
-  Member Runtime Parameters 仍可编辑和原子保存。
+- [ ] v0.45 Run Pulse、Execution Drawer、Inspector Activity 页删除、Approval layering 与
+  CampTurn Stop 的生产实现和打包 App 验收。

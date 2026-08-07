@@ -3,7 +3,6 @@ import type {
   AgentRunView,
   CanonicalRuntimeActivityView,
   CoreEvent,
-  InboxMessageView,
   NavigationCampItem,
   NavigationSnapshot
 } from '@contracts'
@@ -179,22 +178,6 @@ export function agentRunWaitDetail(waitReason: string | null): string | null {
     approval: '受限动作正在等待用户处理。',
     user_input: 'Agent 已暂停，等待用户补充信息。'
   } as Record<string, string>)[waitReason ?? ''] ?? null
-}
-
-export function inboxMessagePresentation(
-  message: Pick<InboxMessageView, 'deliveredAt' | 'failedAt'>,
-  targetRunStatus: AgentRunView['status'] | null
-): SemanticStatus {
-  if (message.failedAt) return { label: '投递失败', tone: 'danger' }
-  if (targetRunStatus === 'queued') return { label: '已排队', tone: 'neutral' }
-  if (targetRunStatus === 'running') return { label: '执行中', tone: 'info' }
-  if (targetRunStatus === 'waiting') return { label: '等待处理', tone: 'attention' }
-  if (targetRunStatus === 'succeeded') return { label: '已完成', tone: 'success' }
-  if (targetRunStatus === 'failed') return { label: '执行失败', tone: 'danger' }
-  if (targetRunStatus === 'cancelled') return { label: '已取消', tone: 'neutral' }
-  return message.deliveredAt
-    ? { label: '已投递', tone: 'success' }
-    : { label: '待投递', tone: 'attention' }
 }
 
 export function formatByteSize(bytes: number): string {

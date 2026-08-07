@@ -677,7 +677,7 @@ export type CampTimelinePresentation =
 
 export interface CampTurnView {
   id: string
-  triggerType: 'camp_message' | 'inbox_message' | 'system_event'
+  triggerType: 'camp_message' | 'system_event'
   triggerId: string
   status: 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled'
   cancelRequestedAt: string | null
@@ -721,7 +721,6 @@ export interface AgentRunView {
   a2aParentAgentRunId: string | null
   a2aRootAgentRunId: string | null
   a2aDepth: number
-  sourceInboxMessageId: string | null
   executionEvidenceCount: number
   hasUnsettledExternalEffects: boolean
   workspace: {
@@ -786,36 +785,6 @@ export interface AgentRunExecutionEvidencePage {
   throughSequence: number
   hasMore: boolean
   evidence: AgentRunExecutionEvidenceView[]
-}
-
-export interface InboxMessageView {
-  id: string
-  timelineGlobalSequence: number | null
-  senderAgentId: string
-  recipientAgentId: string
-  body: string
-  sourceAgentRunId: string | null
-  targetAgentRunId: string | null
-  recipientMessageId: string | null
-  deliveredAt: string | null
-  failedAt: string | null
-  lastError: string | null
-  createdAt: string
-  updatedAt: string
-}
-
-export interface ConversationInputView {
-  id: string
-  conversationId: string
-  campTurnId: string
-  sequence: number
-  status: 'pending' | 'materialized' | 'failed' | 'cancelled'
-  sourceInboxMessageId: string
-  consumingAgentRunId: string | null
-  terminalReason: string | null
-  createdAt: string
-  materializedAt: string | null
-  terminalAt: string | null
 }
 
 export interface RuntimeInputDeliveryView {
@@ -1008,7 +977,7 @@ export interface DomainEventView {
 }
 
 export interface CampSnapshot {
-  schemaVersion: 22
+  schemaVersion: 24
   throughGlobalSequence: number
   camp: {
     id: string
@@ -1023,15 +992,35 @@ export interface CampSnapshot {
   members: CampMemberView[]
   tasks: TaskView[]
   messages: CampMessageView[]
+  messageDeliveries: MessageDeliveryView[]
   turns: CampTurnView[]
   agentRuns: AgentRunView[]
   executionEvidence: AgentRunExecutionEvidenceView[]
-  inboxMessages: InboxMessageView[]
-  conversationInputs: ConversationInputView[]
   contextManifests: ContextManifestView[]
   approvals: ActionApprovalView[]
   actions: ActionView[]
   timeline: DomainEventView[]
+}
+
+export interface MessageDeliveryView {
+  id: string
+  messageId: string
+  campTurnId: string
+  recipientAgentId: string
+  recipientCanonicalPosition: number
+  status: 'pending' | 'running' | 'settled' | 'failed' | 'cancelled' | 'interrupted_before_dispatch' | string
+  dispatchPhase: 'never_attempted' | 'attempting' | 'attempted_waiting' | 'materialized' | 'terminal' | string
+  waitCondition: 'target_busy' | 'runtime_unavailable' | 'capacity_unavailable' | null
+  dispatchAttemptCount: number
+  retryGeneration: number
+  contextManifestId: string | null
+  targetAgentRunId: string | null
+  manualInterventionRequired: boolean
+  failureCode: string | null
+  version: number
+  createdAt: string
+  updatedAt: string
+  endedAt: string | null
 }
 
 export interface EventBatch {

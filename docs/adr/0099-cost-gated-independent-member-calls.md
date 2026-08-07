@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0099
 title: Cost-Gated Independent Member Calls Without Return Semantics
-status: accepted
+status: superseded
 date: 2026-08-03
 decision_scope: cross-version
 source_version: v0.34
 supersedes: [ADR-0091]
-superseded_by: null
+superseded_by: ADR-0130
 ---
 
 # ADR-0099: Cost-Gated Independent Member Calls Without Return Semantics

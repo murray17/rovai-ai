@@ -404,8 +404,22 @@ impl ContextService {
             snapshot.camp_message_boundary_sequence,
             profile,
         )?;
-        let originating_public_user_message =
+        let reference_selection = load_public_reference_closure(database, &snapshot, profile)?;
+        let mut reference_closure = reference_selection.messages;
+        let mut omission_entries = reference_selection.omissions;
+        let closure_message_ids = reference_closure
+            .iter()
+            .map(|entry| entry.message.message_id.clone())
+            .collect::<HashSet<_>>();
+        recent_messages.retain(|message| !closure_message_ids.contains(&message.message_id));
+        let mut originating_public_user_message =
             load_originating_public_user_message(database, &snapshot, profile)?;
+        if originating_public_user_message
+            .as_ref()
+            .is_some_and(|message| closure_message_ids.contains(&message.message_id))
+        {
+            originating_public_user_message = None;
+        }
         let current_input = load_current_input(database, &snapshot)?;
         let attachment_refs = load_current_attachment_refs(database, &current_input)?;
         let attachment_paths = attachment_refs
@@ -446,11 +460,32 @@ impl ContextService {
                 + originating_public_user_message
                     .as_ref()
                     .filter(|_| !origin_is_recent)
-                    .map_or(0, |message| unicode_scalar_count(&message.body));
-            if history_chars <= profile.max_public_history_chars || recent_messages.is_empty() {
+                    .map_or(0, |message| unicode_scalar_count(&message.body))
+                + reference_closure
+                    .iter()
+                    .map(|entry| unicode_scalar_count(&entry.message.body))
+                    .sum::<usize>();
+            if history_chars <= profile.max_public_history_chars {
                 break;
             }
-            recent_messages.remove(0);
+            if !recent_messages.is_empty() {
+                recent_messages.remove(0);
+            } else if let Some(origin) = originating_public_user_message.take() {
+                omission_entries.push(ContextOmission {
+                    kind: "public_history",
+                    message_ids: vec![origin.message_id],
+                    reason: "history_budget",
+                });
+            } else if reference_closure.len() > 1 {
+                let removed = reference_closure.pop().expect("closure is non-empty");
+                omission_entries.push(ContextOmission {
+                    kind: "reference_closure",
+                    message_ids: vec![removed.message.message_id],
+                    reason: "history_budget",
+                });
+            } else {
+                break;
+            }
         }
 
         let (shared_conversation, payload, runtime_payload) = loop {
@@ -473,6 +508,11 @@ impl ContextService {
                         .iter()
                         .map(|message| message.message_id.clone()),
                 )
+                .chain(
+                    reference_closure
+                        .iter()
+                        .map(|entry| entry.message.message_id.clone()),
+                )
                 .collect::<HashSet<_>>();
             let omitted_messages = omitted_public_messages(
                 database,
@@ -482,8 +522,10 @@ impl ContextService {
             )?;
             let shared_conversation = SharedConversation {
                 originating_public_user_message: standalone_origin,
+                reference_closure: reference_closure.clone(),
                 recent_messages: recent_messages.clone(),
                 omitted_messages,
+                omission_entries: omission_entries.clone(),
             };
             let payload = render_payload(RenderPayloadInput {
                 collaboration_state: collaboration_state.as_ref(),
@@ -498,15 +540,39 @@ impl ContextService {
             if payload.len() <= max_payload_bytes && runtime_payload.len() <= max_payload_bytes {
                 break (shared_conversation, payload, runtime_payload);
             }
-            if recent_messages.is_empty() {
-                return Err(ContextPayloadTooLarge { max_payload_bytes }.into());
+            if !recent_messages.is_empty() {
+                recent_messages.remove(0);
+                continue;
             }
-            recent_messages.remove(0);
+            if let Some(origin) = originating_public_user_message.take() {
+                omission_entries.push(ContextOmission {
+                    kind: "public_history",
+                    message_ids: vec![origin.message_id],
+                    reason: "history_budget",
+                });
+                continue;
+            }
+            if reference_closure.len() > 1 {
+                let removed = reference_closure.pop().expect("closure is non-empty");
+                omission_entries.push(ContextOmission {
+                    kind: "reference_closure",
+                    message_ids: vec![removed.message.message_id],
+                    reason: "history_budget",
+                });
+                continue;
+            }
+            return Err(ContextPayloadTooLarge { max_payload_bytes }.into());
         };
 
         let mut raw_message_refs = shared_conversation
             .originating_public_user_message
             .iter()
+            .chain(
+                shared_conversation
+                    .reference_closure
+                    .iter()
+                    .map(|entry| &entry.message),
+            )
             .chain(shared_conversation.recent_messages.iter())
             .map(|message| EntityReference {
                 entity_type: "camp_message".to_string(),
@@ -565,19 +631,29 @@ impl ContextService {
             "conversationInputId": current_input.source_conversation_input_id,
         });
         let attachment_digest = canonical_json_digest(&serde_json::to_value(&attachment_refs)?)?;
-        let originating_public_user_message_ref =
-            originating_public_user_message
-                .as_ref()
-                .map(|message| EntityReference {
-                    entity_type: "camp_message".to_string(),
-                    entity_id: message.message_id.clone(),
-                });
+        let originating_public_user_message_ref = shared_conversation
+            .originating_public_user_message
+            .as_ref()
+            .map(|message| EntityReference {
+                entity_type: "camp_message".to_string(),
+                entity_id: message.message_id.clone(),
+            });
         let recent_message_refs = shared_conversation
             .recent_messages
             .iter()
             .map(|message| EntityReference {
                 entity_type: "camp_message".to_string(),
                 entity_id: message.message_id.clone(),
+            })
+            .collect::<Vec<_>>();
+        let reference_closure_refs = shared_conversation
+            .reference_closure
+            .iter()
+            .map(|entry| {
+                json!({
+                    "messageId": entry.message.message_id,
+                    "distance": entry.distance,
+                })
             })
             .collect::<Vec<_>>();
         let omitted_message_count = shared_conversation
@@ -608,7 +684,8 @@ impl ContextService {
                 context_delivery_profile_version,
                 context_delivery_profile_json, context_delivery_profile_digest,
                 originating_public_user_message_ref_json,
-                recent_message_refs_json,
+                recent_message_refs_json, reference_closure_refs_json,
+                omission_entries_json,
                 omitted_message_count, omitted_message_sequence_start,
                 omitted_message_sequence_end,
                 raw_message_refs_json,
@@ -624,7 +701,7 @@ impl ContextService {
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
                 ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19,
                 ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28,
-                ?29, ?30, ?31, ?32, ?33
+                ?29, ?30, ?31, ?32, ?33, ?34, ?35
             )
             "#,
             params![
@@ -645,6 +722,8 @@ impl ContextService {
                     .map(serde_json::to_string)
                     .transpose()?,
                 serde_json::to_string(&recent_message_refs)?,
+                serde_json::to_string(&reference_closure_refs)?,
+                serde_json::to_string(&omission_entries)?,
                 omitted_message_count,
                 omitted_message_sequence_start,
                 omitted_message_sequence_end,
@@ -708,6 +787,8 @@ impl ContextService {
                     "contextDeliveryProfileVersion": profile.profile_version,
                     "contextDeliveryProfileDigest": profile_digest,
                     "recentMessageCount": shared_conversation.recent_messages.len(),
+                    "referenceClosureMessageCount": shared_conversation.reference_closure.len(),
+                    "contextOmissionCount": omission_entries.len(),
                     "omittedMessageCount": omitted_message_count,
                     "omittedMessageSequenceStart": omitted_message_sequence_start,
                     "omittedMessageSequenceEnd": omitted_message_sequence_end,
@@ -1918,7 +1999,7 @@ fn a2a_task_context_notice(a2a_depth: i64, task_id: Option<&str>) -> Option<RunN
     (a2a_depth > 0).then_some(task_id).flatten().map(|task_id| RunNotice {
         code: "a2a_task_context".to_string(),
         message: format!(
-            "This Member Call was accepted with Task {task_id} as historical execution context. Re-read the Task only if the work itself requires a Task decision; later Task changes do not cancel or retarget this Run. Completing the Task or current work does not by itself require contacting another member. Use team.call_member only when a target member needs the message to continue acting or decide, and never poll Task state while waiting."
+            "This A2A Delivery was accepted with Task {task_id} as historical execution context. Re-read the Task only if the work itself requires a Task decision; later Task changes do not cancel or retarget this Run. Completing the Task or current work does not by itself require another public send. Use rovai send only when a target member needs the message to continue acting or decide, and never poll Task state while waiting."
         ),
     })
 }
@@ -1991,13 +2072,169 @@ struct OmittedMessages {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct ReferenceClosureMessage {
+    distance: usize,
+    #[serde(flatten)]
+    message: SharedMessage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ContextOmission {
+    kind: &'static str,
+    message_ids: Vec<String>,
+    reason: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReferenceClosureSelection {
+    messages: Vec<ReferenceClosureMessage>,
+    omissions: Vec<ContextOmission>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct SharedConversation {
     #[serde(skip_serializing_if = "Option::is_none")]
     originating_public_user_message: Option<SharedMessage>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    reference_closure: Vec<ReferenceClosureMessage>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     recent_messages: Vec<SharedMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     omitted_messages: Option<OmittedMessages>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    omission_entries: Vec<ContextOmission>,
+}
+
+fn load_public_reference_closure(
+    database: &Database,
+    snapshot: &RunSnapshot,
+    profile: ContextDeliveryProfile,
+) -> Result<ReferenceClosureSelection> {
+    if profile.max_public_reference_chain_messages == 0 {
+        return Ok(ReferenceClosureSelection {
+            messages: Vec::new(),
+            omissions: Vec::new(),
+        });
+    }
+    let Some(trigger_message_id) = snapshot.trigger_camp_message_id.as_deref() else {
+        return Ok(ReferenceClosureSelection {
+            messages: Vec::new(),
+            omissions: Vec::new(),
+        });
+    };
+    let mut next_parent_id = database
+        .connection()
+        .query_row(
+            r#"
+            SELECT reply_to_camp_message_id
+            FROM camp_message
+            WHERE id = ?1 AND camp_id = ?2 AND tombstoned_at IS NULL
+            "#,
+            params![trigger_message_id, snapshot.camp_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten();
+    let mut messages = Vec::new();
+    let mut omissions = Vec::new();
+    let mut visited = HashSet::from([trigger_message_id.to_string()]);
+    for distance in 1..=profile.max_public_reference_chain_messages {
+        let Some(parent_id) = next_parent_id.take() else {
+            break;
+        };
+        if !visited.insert(parent_id.clone()) {
+            omissions.push(ContextOmission {
+                kind: "reference_closure",
+                message_ids: vec![parent_id],
+                reason: "cycle",
+            });
+            break;
+        }
+        let row = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT message.camp_id, message.id, message.sequence,
+                       message.author_type, message.author_id,
+                       source_conversation.id,
+                       message.body, message.structured_content_json,
+                       message.reply_to_camp_message_id, message.tombstoned_at
+                FROM camp_message AS message
+                LEFT JOIN agent_run AS source_run
+                  ON source_run.id = message.source_agent_run_id
+                LEFT JOIN conversation AS source_conversation
+                  ON source_conversation.id = source_run.conversation_id
+                WHERE message.id = ?1
+                "#,
+                [&parent_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, Option<String>>(7)?,
+                        row.get::<_, Option<String>>(8)?,
+                        row.get::<_, Option<String>>(9)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some(row) = row else {
+            omissions.push(ContextOmission {
+                kind: "reference_closure",
+                message_ids: vec![parent_id],
+                reason: "parent_unavailable",
+            });
+            break;
+        };
+        if row.0 != snapshot.camp_id || row.2 > snapshot.camp_message_boundary_sequence {
+            omissions.push(ContextOmission {
+                kind: "reference_closure",
+                message_ids: vec![parent_id],
+                reason: "parent_unavailable",
+            });
+            break;
+        }
+        if row.9.is_some() {
+            omissions.push(ContextOmission {
+                kind: "reference_closure",
+                message_ids: vec![parent_id],
+                reason: "tombstone",
+            });
+            break;
+        }
+        let body = projected_camp_message_body(database.connection(), row.6, row.7)?;
+        let message = project_shared_message(
+            database,
+            row.1,
+            row.2,
+            row.3,
+            row.4,
+            row.5,
+            row.8.clone(),
+            body,
+            profile,
+        )?;
+        next_parent_id = row.8;
+        messages.push(ReferenceClosureMessage { distance, message });
+    }
+    if let Some(parent_id) = next_parent_id {
+        omissions.push(ContextOmission {
+            kind: "reference_closure",
+            message_ids: vec![parent_id],
+            reason: "max_reference_chain",
+        });
+    }
+    Ok(ReferenceClosureSelection {
+        messages,
+        omissions,
+    })
 }
 
 fn load_recent_public_messages(
@@ -2530,8 +2767,10 @@ fn render_payload(input: RenderPayloadInput<'_>) -> Result<String> {
         .shared_conversation
         .originating_public_user_message
         .is_some()
+        || !input.shared_conversation.reference_closure.is_empty()
         || !input.shared_conversation.recent_messages.is_empty()
         || input.shared_conversation.omitted_messages.is_some()
+        || !input.shared_conversation.omission_entries.is_empty()
     {
         append_json_section(
             &mut output,
@@ -5858,7 +6097,8 @@ mod tests {
         let charter = build_session_charter(&snapshot);
         assert!(charter.contains("Rovai built-in operations are local CLI commands, never MCP"));
         assert!(charter.contains("`rovai tool list`"));
-        assert!(charter.contains("`rovai member call`"));
+        assert!(charter.contains("`rovai send`"));
+        assert!(!charter.contains("`rovai member call`"));
         assert!(charter.contains("`--input-file <path>`"));
         assert!(charter.contains("Every eligible member can invoke every published command"));
         assert!(!charter.contains("rovai_team"));
@@ -5991,7 +6231,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(manifest.0, 0);
-        assert_eq!(manifest.1, 1);
+        assert_eq!(manifest.1, 2);
         assert_eq!(manifest.2.len(), 64);
         assert_eq!((manifest.3, manifest.4, manifest.5), (5, 2, 6));
         std::fs::remove_dir_all(fixture.directory).unwrap();
@@ -6370,7 +6610,7 @@ mod tests {
         assert!(
             notice
                 .message
-                .contains("does not by itself require contacting another member")
+                .contains("does not by itself require another public send")
         );
         assert!(notice.message.contains("never poll Task state"));
     }

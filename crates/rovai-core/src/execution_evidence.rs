@@ -790,9 +790,9 @@ mod tests {
                 "toolCallId": "tool-call-digest",
                 "status": "failed",
                 "kind": "mcp_tool_call",
-                "title": "team.call_member",
+                "title": "camp.message.send",
                 "sourceAuthority": "core",
-                "canonicalTool": "team.call_member",
+                "canonicalTool": "camp.message.send",
                 "authorizationDecision": "indeterminate",
                 "rawInputDigest": "input-digest",
                 "rawOutputDigest": null,
@@ -810,7 +810,7 @@ mod tests {
         assert_eq!(normalized["idempotentReplay"], true);
         assert_eq!(normalized["receiptId"], "receipt-1");
         assert_eq!(normalized["sourceAuthority"], "core");
-        assert_eq!(normalized["canonicalTool"], "team.call_member");
+        assert_eq!(normalized["canonicalTool"], "camp.message.send");
         let encoded = serde_json::to_string(&normalized).unwrap();
         assert!(!encoded.contains("bindingCredential"));
         assert!(!encoded.contains("must-not-persist"));
@@ -1026,7 +1026,7 @@ mod tests {
             "toolCallId": "team-tool-call-1",
             "status": "failed",
             "kind": "mcp_tool_call",
-            "title": "team.call_member",
+            "title": "camp.message.send",
             "rawInputDigest": "input-digest",
             "rawOutputDigest": null,
             "errorCode": "team_tool.execution_budget_exhausted",

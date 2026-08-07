@@ -1,0 +1,1112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RovAI · AgentRun 执行过程布局探索</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #f2f4f1;
+      --surface: #fbfcfa;
+      --surface-raised: #ffffff;
+      --surface-subtle: #f6f7f3;
+      --surface-muted: #ecefe9;
+      --surface-selected: #e9ecf7;
+      --surface-sunken: #e8ebe6;
+      --conversation-surface: #ffffff;
+      --inspector-surface: #ffffff;
+      --ink: #202438;
+      --muted: #5f6678;
+      --faint: #777d8c;
+      --line: #dde1da;
+      --line-strong: #cbd1c8;
+      --brand: #343b72;
+      --brand-hover: #29305f;
+      --brand-soft: #eceef8;
+      --brand-ink: #343b72;
+      --mention: #2f61c8;
+      --mention-soft: rgba(47, 97, 200, 0.08);
+      --success: #3e775c;
+      --success-soft: #e7f1ea;
+      --attention: #8a6226;
+      --attention-soft: #f8edda;
+      --danger: #a24c46;
+      --danger-soft: #f7e6e3;
+      --info: #416c86;
+      --info-soft: #e5eef3;
+      --identity-1: #a65f4a;
+      --identity-2: #39777a;
+      --identity-3: #74628f;
+      --identity-4: #9a6a32;
+      --shadow-float: 0 18px 56px rgba(38, 45, 58, 0.14);
+      --prototype-bar-h: 60px;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; }
+    body {
+      overflow: hidden;
+      color: var(--ink);
+      background: #e8ebe7;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      text-rendering: optimizeLegibility;
+    }
+    button, input, textarea { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, [tabindex]:focus-visible {
+      outline: 2px solid #4d83a2;
+      outline-offset: 2px;
+    }
+
+    .prototype-bar {
+      position: relative;
+      z-index: 50;
+      display: grid;
+      height: var(--prototype-bar-h);
+      grid-template-columns: minmax(220px, 1fr) auto minmax(220px, 1fr);
+      align-items: center;
+      gap: 18px;
+      padding: 0 18px;
+      border-bottom: 1px solid #d5d9d3;
+      background: rgba(250, 251, 249, 0.96);
+      backdrop-filter: blur(18px);
+    }
+    .prototype-title { min-width: 0; }
+    .prototype-title strong { display: block; font-size: 13px; letter-spacing: -0.01em; }
+    .prototype-title span { display: block; margin-top: 2px; color: var(--muted); font-size: 10.5px; }
+    .variant-tabs {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--surface-muted);
+    }
+    .variant-tab {
+      min-height: 30px;
+      padding: 0 11px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 11px;
+      font-weight: 650;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .variant-tab:hover { color: var(--ink); }
+    .variant-tab.active {
+      color: var(--brand-ink);
+      background: var(--surface-raised);
+      box-shadow: 0 1px 2px rgba(38, 45, 58, 0.08), inset 0 0 0 1px rgba(52, 59, 114, 0.08);
+    }
+    .prototype-meta {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+    .recommendation-chip, .risk-chip {
+      display: inline-flex;
+      min-height: 24px;
+      align-items: center;
+      gap: 5px;
+      padding: 0 8px;
+      border-radius: 6px;
+      font-size: 10px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .recommendation-chip { color: var(--success); background: var(--success-soft); }
+    .risk-chip { color: var(--muted); background: var(--surface-muted); }
+    .notes-button {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      border: 0;
+      border-radius: 7px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+    }
+    .notes-button:hover { color: var(--brand-ink); background: var(--brand-soft); }
+
+    .app-frame {
+      position: relative;
+      display: grid;
+      width: 100%;
+      height: calc(100% - var(--prototype-bar-h));
+      grid-template-columns: 270px minmax(0, 1fr);
+      grid-template-rows: 50px minmax(0, 1fr);
+      overflow: hidden;
+      background: var(--canvas);
+    }
+
+    .sidebar {
+      grid-column: 1;
+      grid-row: 1 / -1;
+      display: flex;
+      min-height: 0;
+      flex-direction: column;
+      padding: 0 10px 10px;
+      border-right: 1px solid var(--line);
+      background: #f6f7f3;
+    }
+    .sidebar-drag { flex: 0 0 34px; }
+    .brand-row {
+      display: flex;
+      height: 42px;
+      align-items: center;
+      gap: 10px;
+      padding: 0 8px 12px;
+    }
+    .brand-mark {
+      position: relative;
+      width: 24px;
+      height: 24px;
+      border: 1px solid rgba(52, 59, 114, 0.24);
+      border-radius: 8px;
+      background: var(--surface-raised);
+    }
+    .brand-mark::before, .brand-mark::after {
+      position: absolute;
+      content: "";
+      border-radius: 4px;
+      background: var(--brand);
+    }
+    .brand-mark::before { inset: 5px 10px 5px 5px; opacity: .94; }
+    .brand-mark::after { inset: 9px 5px 5px 10px; opacity: .58; }
+    .brand-copy { display: grid; min-width: 0; }
+    .brand-copy strong { font-size: 14px; letter-spacing: -0.015em; }
+    .brand-copy small { margin-top: 1px; color: var(--faint); font-size: 9px; }
+    .nav-stack { display: grid; gap: 3px; }
+    .nav-button {
+      display: flex;
+      width: 100%;
+      min-height: 34px;
+      align-items: center;
+      gap: 9px;
+      padding: 0 9px;
+      border: 0;
+      border-radius: 7px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 13px;
+      text-align: left;
+      cursor: pointer;
+    }
+    .nav-button:hover { color: var(--ink); background: var(--surface-muted); }
+    .nav-button.active { color: var(--brand-ink); background: var(--surface-selected); }
+    .nav-glyph { display: grid; width: 20px; height: 20px; place-items: center; font-size: 13px; }
+    .sidebar-section-label {
+      margin: 16px 9px 6px;
+      color: var(--faint);
+      font-size: 9px;
+      font-weight: 750;
+      letter-spacing: .11em;
+      text-transform: uppercase;
+    }
+    .camp-list { display: grid; gap: 2px; }
+    .camp-row {
+      display: grid;
+      min-height: 36px;
+      grid-template-columns: 10px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 9px;
+      border-radius: 7px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .camp-row.active { color: var(--ink); background: var(--surface-muted); }
+    .camp-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--identity-2); }
+    .camp-row strong { overflow: hidden; font-size: 11.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+    .camp-row small { color: var(--faint); font: 500 9px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .sidebar-spacer { flex: 1; }
+    .sidebar-footer { display: grid; gap: 3px; padding-top: 8px; border-top: 1px solid var(--line); }
+
+    .topbar {
+      grid-column: 2;
+      grid-row: 1;
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 9px;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfa;
+    }
+    .breadcrumb { display: flex; min-width: 0; align-items: baseline; gap: 7px; }
+    .breadcrumb span { color: var(--faint); font-size: 11px; }
+    .breadcrumb strong { max-width: 500px; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+    .day-badge {
+      padding: 2px 6px;
+      border-radius: 5px;
+      color: var(--faint);
+      background: var(--surface-muted);
+      font: 500 9.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .topbar-actions { display: flex; align-items: center; gap: 7px; margin-left: auto; }
+    .run-badge {
+      display: inline-flex;
+      min-height: 25px;
+      align-items: center;
+      gap: 6px;
+      padding: 0 8px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--brand-ink);
+      background: var(--brand-soft);
+      font: 700 10.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      cursor: pointer;
+    }
+    .run-badge i { width: 6px; height: 6px; border-radius: 50%; background: var(--brand); box-shadow: 0 0 0 3px rgba(52,59,114,.08); }
+    .top-icon {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      border: 0;
+      border-radius: 6px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+    }
+    .top-icon:hover { color: var(--brand-ink); background: var(--surface-muted); }
+
+    .workspace {
+      position: relative;
+      grid-column: 2;
+      grid-row: 2;
+      display: grid;
+      min-width: 0;
+      min-height: 0;
+      grid-template-columns: minmax(0, 1fr);
+      overflow: hidden;
+    }
+    .app-frame[data-layout="right"] .workspace { grid-template-columns: minmax(0, 1fr) 310px; }
+
+    .conversation {
+      position: relative;
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      flex-direction: column;
+      background: var(--conversation-surface);
+    }
+    .timeline-scroll {
+      position: relative;
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: auto;
+      padding: 22px 27px 30px;
+      scroll-behavior: smooth;
+    }
+    .timeline-track { width: min(790px, 100%); min-height: 100%; margin: 0 auto; }
+    .day-divider {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 4px 0 18px;
+      color: var(--faint);
+      font: 600 9px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .day-divider::before, .day-divider::after { content: ""; height: 1px; flex: 1; background: var(--line); }
+    .message {
+      display: grid;
+      max-width: 732px;
+      grid-template-columns: 32px minmax(0, 1fr);
+      gap: 10px;
+      align-items: flex-start;
+      margin: 0 0 20px;
+    }
+    .avatar {
+      display: grid;
+      width: 32px;
+      height: 32px;
+      place-items: center;
+      border: 1px solid color-mix(in srgb, var(--avatar-accent) 42%, var(--line));
+      border-radius: 50%;
+      color: var(--avatar-accent);
+      background: color-mix(in srgb, var(--avatar-accent) 8%, #fff);
+      font-size: 10px;
+      font-weight: 750;
+    }
+    .message.user .avatar { --avatar-accent: var(--brand); }
+    .message.agent-a .avatar { --avatar-accent: var(--identity-1); }
+    .message.agent-b .avatar { --avatar-accent: var(--identity-2); }
+    .message.agent-c .avatar { --avatar-accent: var(--identity-3); }
+    .message-content { min-width: 0; max-width: 690px; }
+    .message-meta { display: flex; min-height: 20px; align-items: baseline; gap: 7px; margin-bottom: 3px; }
+    .message-meta strong { font-size: 11.5px; font-weight: 700; }
+    .message.user .message-meta strong { color: var(--brand-ink); }
+    .message.agent-a .message-meta strong { color: var(--identity-1); }
+    .message.agent-b .message-meta strong { color: var(--identity-2); }
+    .message.agent-c .message-meta strong { color: var(--identity-3); }
+    .message-meta span, .message-meta time { color: var(--faint); font: 500 9.5px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .message-surface {
+      position: relative;
+      width: fit-content;
+      max-width: 100%;
+      padding: 10px 13px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--surface-raised);
+    }
+    .message.user .message-surface { border-color: color-mix(in srgb, var(--brand) 20%, var(--line)); background: color-mix(in srgb, var(--brand-soft) 46%, #fff); }
+    .message p { margin: 0; font-size: 13px; line-height: 1.62; }
+    .message p + p { margin-top: 8px; }
+    .mention {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 4px;
+      color: var(--mention);
+      background: var(--mention-soft);
+      padding: 0 3px;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    .message-footer {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 9px;
+      padding-top: 8px;
+      border-top: 1px solid var(--line);
+      color: var(--faint);
+      font-size: 10px;
+    }
+    .recipient-chip {
+      display: inline-flex;
+      min-height: 20px;
+      align-items: center;
+      padding: 0 6px;
+      border-radius: 5px;
+      color: var(--mention);
+      background: var(--mention-soft);
+      font-size: 9.5px;
+      font-weight: 700;
+    }
+    .run-origin {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin-top: 6px;
+      color: var(--faint);
+      font: 500 9.5px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+      cursor: pointer;
+    }
+    .run-origin:hover { color: var(--brand-ink); }
+    .message-marker {
+      display: inline-flex;
+      min-height: 18px;
+      align-items: center;
+      padding: 0 5px;
+      border-radius: 4px;
+      color: var(--info);
+      background: var(--info-soft);
+      font-size: 8.5px;
+      font-weight: 750;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+
+    .composer-zone {
+      position: relative;
+      z-index: 8;
+      flex: 0 0 auto;
+      border-top: 1px solid var(--line);
+      background: var(--conversation-surface);
+    }
+    .composer {
+      width: min(790px, calc(100% - 54px));
+      margin: 0 auto;
+      padding: 13px 0 15px;
+    }
+    .composer-box {
+      display: grid;
+      min-height: 58px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: end;
+      gap: 10px;
+      padding: 10px 10px 9px 13px;
+      border: 1px solid var(--line-strong);
+      border-radius: 11px;
+      background: var(--surface-raised);
+      box-shadow: 0 4px 16px rgba(38,45,58,.05);
+    }
+    .composer-placeholder { align-self: start; color: var(--faint); font-size: 12.5px; line-height: 1.55; }
+    .composer-sub { display: block; margin-top: 7px; color: var(--faint); font-size: 9.5px; }
+    .send-button {
+      min-width: 64px;
+      min-height: 32px;
+      border: 0;
+      border-radius: 7px;
+      color: #fff;
+      background: var(--brand);
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .send-button:hover { background: var(--brand-hover); }
+
+    .activity-pane {
+      display: none;
+      min-width: 0;
+      min-height: 0;
+      flex-direction: column;
+      border-left: 1px solid var(--line-strong);
+      background: var(--inspector-surface);
+    }
+    .app-frame[data-layout="right"] .activity-pane { display: flex; }
+    .pane-tabs { display: flex; gap: 2px; padding: 8px 8px 0; border-bottom: 1px solid var(--line); }
+    .pane-tab {
+      min-height: 31px;
+      padding: 0 9px;
+      border: 0;
+      border-radius: 6px 6px 0 0;
+      color: var(--muted);
+      background: transparent;
+      font-size: 10.5px;
+      font-weight: 650;
+    }
+    .pane-tab.active { color: var(--brand-ink); background: var(--brand-soft); }
+    .pane-content { min-height: 0; flex: 1; overflow: auto; padding: 12px; }
+    .pane-meta { flex: 0 0 auto; padding: 8px 12px; border-top: 1px solid var(--line); color: var(--faint); font: 500 9.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .top-run-shelf, .hybrid-pulse, .bottom-run-dock, .floating-sheet { display: none; }
+
+    .top-run-shelf {
+      position: relative;
+      z-index: 10;
+      flex: 0 0 auto;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+    }
+    .app-frame[data-layout="top"] .top-run-shelf { display: block; }
+    .shelf-inner { width: min(850px, calc(100% - 42px)); margin: 0 auto; padding: 9px 0 10px; }
+    .run-shelf-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 7px; }
+    .run-shelf-head strong { font-size: 10.5px; }
+    .run-shelf-head span { color: var(--faint); font-size: 9.5px; }
+    .run-card-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+
+    .run-card {
+      display: grid;
+      min-width: 0;
+      grid-template-columns: 28px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      padding: 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface-raised);
+      cursor: pointer;
+      text-align: left;
+    }
+    .run-card:hover { border-color: color-mix(in srgb, var(--brand) 28%, var(--line)); background: #fdfdfc; }
+    .run-card.selected { border-color: color-mix(in srgb, var(--brand) 42%, var(--line)); box-shadow: inset 0 0 0 1px rgba(52,59,114,.06); }
+    .mini-avatar {
+      display: grid;
+      width: 28px;
+      height: 28px;
+      place-items: center;
+      border-radius: 50%;
+      color: var(--run-accent);
+      background: color-mix(in srgb, var(--run-accent) 10%, #fff);
+      font-size: 9px;
+      font-weight: 750;
+    }
+    .run-card-copy { min-width: 0; }
+    .run-card-copy strong { display: block; overflow: hidden; font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .run-card-copy span { display: block; margin-top: 2px; overflow: hidden; color: var(--muted); font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .run-card-state { display: grid; justify-items: end; gap: 3px; color: var(--faint); font: 600 8.5px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .state-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+    .state-dot.waiting { background: var(--attention); }
+    .shelf-detail { margin-top: 8px; }
+
+    .activity-detail {
+      display: grid;
+      gap: 10px;
+      padding: 11px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--surface-subtle);
+    }
+    .activity-detail-head { display: flex; align-items: flex-start; gap: 9px; }
+    .activity-title { min-width: 0; flex: 1; }
+    .activity-title strong { display: block; font-size: 11px; }
+    .activity-title span { display: block; margin-top: 2px; color: var(--muted); font-size: 9.5px; }
+    .activity-actions { display: flex; align-items: center; gap: 6px; }
+    .ghost-button {
+      min-height: 25px;
+      padding: 0 8px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--muted);
+      background: var(--surface-raised);
+      font-size: 9.5px;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    .ghost-button:hover { color: var(--brand-ink); border-color: color-mix(in srgb, var(--brand) 30%, var(--line)); }
+    .event-list { display: grid; gap: 0; }
+    .event-row {
+      display: grid;
+      grid-template-columns: 52px 12px minmax(0, 1fr);
+      gap: 7px;
+      min-height: 28px;
+      align-items: start;
+    }
+    .event-time { padding-top: 2px; color: var(--faint); font: 500 8.5px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .event-rail { position: relative; display: flex; min-height: 28px; justify-content: center; }
+    .event-rail::after { position: absolute; top: 8px; bottom: -2px; width: 1px; content: ""; background: var(--line); }
+    .event-row:last-child .event-rail::after { display: none; }
+    .event-rail i { position: relative; z-index: 1; width: 7px; height: 7px; margin-top: 4px; border: 2px solid var(--surface-subtle); border-radius: 50%; background: var(--info); }
+    .event-rail i.message-event { background: var(--mention); }
+    .event-copy { padding: 0 0 7px; color: var(--muted); font-size: 9.7px; line-height: 1.4; }
+    .event-copy strong { color: var(--ink); font-weight: 650; }
+    .event-copy code { padding: 1px 4px; border-radius: 4px; color: var(--brand-ink); background: var(--brand-soft); font: 500 8.8px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .bottom-run-dock {
+      position: relative;
+      z-index: 12;
+      flex: 0 0 auto;
+      border-top: 1px solid var(--line);
+      background: var(--surface);
+    }
+    .app-frame[data-layout="bottom"] .bottom-run-dock { display: block; }
+    .bottom-dock-inner { width: min(850px, calc(100% - 42px)); margin: 0 auto; padding: 8px 0; }
+    .bottom-dock-bar { display: flex; align-items: center; gap: 8px; }
+    .bottom-dock-label { display: flex; align-items: center; gap: 6px; margin-right: 2px; color: var(--muted); font-size: 9.5px; font-weight: 700; white-space: nowrap; }
+    .bottom-dock-label i { width: 6px; height: 6px; border-radius: 50%; background: var(--brand); }
+    .run-pill {
+      display: inline-flex;
+      min-width: 0;
+      min-height: 30px;
+      align-items: center;
+      gap: 6px;
+      padding: 0 8px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--muted);
+      background: var(--surface-raised);
+      cursor: pointer;
+    }
+    .run-pill:hover, .run-pill.selected { color: var(--brand-ink); border-color: color-mix(in srgb, var(--brand) 34%, var(--line)); }
+    .run-pill span { overflow: hidden; max-width: 120px; font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .dock-spacer { flex: 1; }
+    .dock-expand {
+      min-height: 28px;
+      padding: 0 9px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--brand-ink);
+      background: var(--brand-soft);
+      font-size: 9.5px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .bottom-detail-wrap { display: none; padding-top: 8px; }
+    .bottom-run-dock.expanded .bottom-detail-wrap { display: block; }
+    .bottom-run-dock.expanded .activity-detail { max-height: 235px; overflow: auto; }
+
+    .hybrid-pulse {
+      position: relative;
+      z-index: 10;
+      flex: 0 0 auto;
+      min-height: 40px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+    }
+    .app-frame[data-layout="hybrid"] .hybrid-pulse { display: block; }
+    .pulse-inner { display: flex; width: min(850px, calc(100% - 42px)); min-height: 40px; align-items: center; gap: 7px; margin: 0 auto; }
+    .pulse-label { display: flex; align-items: center; gap: 6px; margin-right: 3px; color: var(--muted); font-size: 9.5px; font-weight: 700; }
+    .pulse-label i { width: 6px; height: 6px; border-radius: 50%; background: var(--brand); }
+    .pulse-agent {
+      display: inline-flex;
+      min-width: 0;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 7px 3px 4px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+    }
+    .pulse-agent:hover, .pulse-agent.selected { color: var(--brand-ink); background: var(--brand-soft); }
+    .pulse-agent span { max-width: 150px; overflow: hidden; font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .pulse-spacer { flex: 1; }
+    .pulse-open { color: var(--brand-ink); font-size: 9.5px; font-weight: 700; }
+
+    .floating-sheet {
+      position: absolute;
+      z-index: 30;
+      right: 18px;
+      bottom: 18px;
+      left: 18px;
+      max-height: min(360px, 46%);
+      border: 1px solid var(--line-strong);
+      border-radius: 12px;
+      background: rgba(251,252,250,.98);
+      box-shadow: var(--shadow-float);
+      overflow: hidden;
+    }
+    .app-frame[data-layout="hybrid"] .floating-sheet.open { display: block; }
+    .floating-sheet-inner { width: min(850px, calc(100% - 28px)); margin: 0 auto; padding: 12px 0; }
+
+    .notes-overlay {
+      position: fixed;
+      z-index: 100;
+      inset: var(--prototype-bar-h) 0 0;
+      display: none;
+      align-items: flex-start;
+      justify-content: flex-end;
+      padding: 16px;
+      background: rgba(32,36,56,.18);
+      backdrop-filter: blur(2px);
+    }
+    .notes-overlay.open { display: flex; }
+    .notes-panel {
+      width: min(390px, calc(100vw - 32px));
+      max-height: calc(100vh - var(--prototype-bar-h) - 32px);
+      overflow: auto;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface-raised);
+      box-shadow: var(--shadow-float);
+    }
+    .notes-panel header { display: flex; align-items: flex-start; gap: 12px; }
+    .notes-panel header div { min-width: 0; flex: 1; }
+    .notes-panel h2 { margin: 0; font-size: 14px; }
+    .notes-panel header p { margin: 4px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+    .close-notes { display: grid; width: 28px; height: 28px; place-items: center; border: 0; border-radius: 6px; color: var(--muted); background: var(--surface-muted); cursor: pointer; }
+    .note-section { margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--line); }
+    .note-section h3 { margin: 0 0 7px; font-size: 11px; }
+    .note-section ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 10.5px; line-height: 1.65; }
+    .score-grid { display: grid; grid-template-columns: 1fr auto; gap: 7px 12px; color: var(--muted); font-size: 10px; }
+    .score-grid strong { color: var(--ink); }
+    .score-dots { display: inline-flex; gap: 3px; }
+    .score-dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--line-strong); }
+    .score-dots i.on { background: var(--brand); }
+
+    @media (max-width: 1120px) {
+      .prototype-bar { grid-template-columns: minmax(170px, 1fr) auto; }
+      .prototype-meta { display: none; }
+      .app-frame { grid-template-columns: 232px minmax(0, 1fr); }
+      .app-frame[data-layout="right"] .workspace { grid-template-columns: minmax(0, 1fr) 268px; }
+      .run-card-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .run-card-row .run-card:last-child { display: none; }
+      .timeline-scroll { padding-right: 18px; padding-left: 18px; }
+      .composer { width: calc(100% - 36px); }
+    }
+    @media (max-width: 860px) {
+      .prototype-bar { grid-template-columns: 1fr; height: 92px; gap: 7px; align-content: center; }
+      :root { --prototype-bar-h: 92px; }
+      .prototype-title { text-align: center; }
+      .variant-tabs { justify-self: center; overflow-x: auto; max-width: 100%; }
+      .app-frame { grid-template-columns: 72px minmax(0, 1fr); }
+      .brand-copy, .nav-button span:not(.nav-glyph), .sidebar-section-label, .camp-list { display: none; }
+      .brand-row { justify-content: center; padding-right: 0; padding-left: 0; }
+      .nav-button { justify-content: center; padding: 0; }
+      .app-frame[data-layout="right"] .workspace { grid-template-columns: minmax(0, 1fr); }
+      .app-frame[data-layout="right"] .activity-pane { display: none; }
+      .run-card-row { grid-template-columns: 1fr; }
+      .run-card-row .run-card:nth-child(n+2) { display: none; }
+      .topbar { padding: 0 12px; }
+      .breadcrumb span, .day-badge { display: none; }
+      .timeline-scroll { padding: 16px 12px 22px; }
+      .composer { width: calc(100% - 24px); }
+      .bottom-dock-inner, .pulse-inner, .shelf-inner { width: calc(100% - 24px); }
+      .run-pill:nth-of-type(n+3), .pulse-agent:nth-of-type(n+4) { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="prototype-bar">
+    <div class="prototype-title">
+      <strong>AgentRun 执行过程 · 布局比较稿</strong>
+      <span>公共消息按真实时间追加；执行过程与消息解耦。</span>
+    </div>
+    <nav class="variant-tabs" aria-label="布局方案">
+      <button class="variant-tab" data-layout="right">基线 · 右侧</button>
+      <button class="variant-tab" data-layout="top">A · 顶部运行带</button>
+      <button class="variant-tab" data-layout="bottom">B · 底部执行台</button>
+      <button class="variant-tab" data-layout="hybrid">C · 双层混合</button>
+    </nav>
+    <div class="prototype-meta">
+      <span class="recommendation-chip" id="recommendationChip">推荐：双层混合</span>
+      <span class="risk-chip" id="riskChip">风险：详情多一步</span>
+      <button class="notes-button" id="notesButton" type="button" aria-label="查看方案说明">ⓘ</button>
+    </div>
+  </header>
+
+  <div class="app-frame" id="appFrame" data-layout="hybrid">
+    <aside class="sidebar">
+      <div class="sidebar-drag"></div>
+      <div class="brand-row">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div class="brand-copy"><strong>RovAI</strong><small>协作工作空间</small></div>
+      </div>
+      <nav class="nav-stack">
+        <button class="nav-button" type="button"><span class="nav-glyph">＋</span><span>新对话</span></button>
+        <button class="nav-button active" type="button"><span class="nav-glyph">⌁</span><span>Camps</span></button>
+        <button class="nav-button" type="button"><span class="nav-glyph">◌</span><span>队员</span></button>
+        <button class="nav-button" type="button"><span class="nav-glyph">◇</span><span>长期记忆</span></button>
+      </nav>
+      <div class="sidebar-section-label">最近工作</div>
+      <div class="camp-list">
+        <div class="camp-row active"><i class="camp-dot"></i><strong>Auth 模块并发修复</strong><small>3</small></div>
+        <div class="camp-row"><i class="camp-dot" style="background:var(--identity-3)"></i><strong>发布流程复盘</strong><small>昨天</small></div>
+        <div class="camp-row"><i class="camp-dot" style="background:var(--identity-4)"></i><strong>Onboarding 文案</strong><small>周一</small></div>
+      </div>
+      <div class="sidebar-spacer"></div>
+      <div class="sidebar-footer">
+        <button class="nav-button" type="button"><span class="nav-glyph">⚙</span><span>设置</span></button>
+      </div>
+    </aside>
+
+    <header class="topbar">
+      <div class="breadcrumb"><span>Project Atlas</span><span>/</span><strong>Auth 模块并发修复</strong></div>
+      <span class="day-badge">DAY 12</span>
+      <div class="topbar-actions">
+        <button class="run-badge" id="topRunBadge" type="button"><i></i><span>3 个运行中</span></button>
+        <button class="top-icon" type="button" aria-label="审批">◇</button>
+        <button class="top-icon" id="inspectorToggle" type="button" aria-label="切换检查器">▥</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="conversation">
+        <section class="top-run-shelf" id="topRunShelf" aria-label="顶部运行带">
+          <div class="shelf-inner">
+            <div class="run-shelf-head"><strong>当前执行</strong><span>公共消息仍按时间单独追加</span></div>
+            <div class="run-card-row" id="topRunCards"></div>
+            <div class="shelf-detail" id="topShelfDetail"></div>
+          </div>
+        </section>
+
+        <section class="hybrid-pulse" id="hybridPulse" aria-label="运行摘要">
+          <div class="pulse-inner">
+            <span class="pulse-label"><i></i>正在执行</span>
+            <div id="pulseAgents" style="display:flex;align-items:center;gap:2px;min-width:0"></div>
+            <span class="pulse-spacer"></span>
+            <button class="pulse-agent pulse-open" id="openHybridDetail" type="button">展开过程 ↑</button>
+          </div>
+        </section>
+
+        <div class="timeline-scroll" id="timelineScroll">
+          <div class="timeline-track">
+            <div class="day-divider"><span>今天</span></div>
+
+            <article class="message user">
+              <span class="avatar">你</span>
+              <div class="message-content">
+                <div class="message-meta"><strong>你</strong><time>10:31</time></div>
+                <div class="message-surface">
+                  <p>请完成 refresh token 并发修复，并让安全和测试队员并行检查。最终给我一份可上线结论。</p>
+                </div>
+              </div>
+            </article>
+
+            <article class="message agent-a">
+              <span class="avatar">岚</span>
+              <div class="message-content">
+                <div class="message-meta"><strong>阿岚</strong><span>Codex</span><time>10:33</time><span class="message-marker">send</span></div>
+                <div class="message-surface">
+                  <p>主实现已经完成，事务与回滚逻辑已更新。请并行检查安全边界和回归结果。</p>
+                  <div class="message-footer"><span>发送给</span><span class="recipient-chip">@明川</span><span class="recipient-chip">@若汐</span></div>
+                </div>
+                <button class="run-origin" type="button" data-run="run-a">↗ 来自 Run A184 · 查看执行过程</button>
+              </div>
+            </article>
+
+            <article class="message agent-a">
+              <span class="avatar">岚</span>
+              <div class="message-content">
+                <div class="message-meta"><strong>阿岚</strong><span>Codex</span><time>10:35</time><span class="message-marker">send</span></div>
+                <div class="message-surface">
+                  <p>本地 auth 测试已通过 18/18；我继续处理 token rotation 的边缘条件。</p>
+                </div>
+                <button class="run-origin" type="button" data-run="run-a">↗ 同一 Run A184 的第 2 条公共消息</button>
+              </div>
+            </article>
+
+            <article class="message agent-b">
+              <span class="avatar">川</span>
+              <div class="message-content">
+                <div class="message-meta"><strong>明川</strong><span>Claude</span><time>10:36</time><span class="message-marker">send</span></div>
+                <div class="message-surface">
+                  <p><span class="mention">@阿岚</span> 发现一个并发消费窗口：旧 token 在事务提交前仍可能被二次使用。我正在补一组竞争条件复现。</p>
+                </div>
+                <button class="run-origin" type="button" data-run="run-b">↗ 来自 Run B071 · 查看执行过程</button>
+              </div>
+            </article>
+
+            <article class="message agent-c">
+              <span class="avatar">汐</span>
+              <div class="message-content">
+                <div class="message-meta"><strong>若汐</strong><span>Gemini</span><time>10:37</time><span class="message-marker">send</span></div>
+                <div class="message-surface">
+                  <p>回归用例已执行 17/24，目前无新增失败；剩余用例等待测试容器恢复。</p>
+                  <div class="message-footer"><span>另发送给</span><span class="recipient-chip">@阿岚</span></div>
+                </div>
+                <button class="run-origin" type="button" data-run="run-c">↗ 来自 Run C029 · 查看执行过程</button>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <section class="bottom-run-dock expanded" id="bottomRunDock" aria-label="底部执行台">
+          <div class="bottom-dock-inner">
+            <div class="bottom-dock-bar">
+              <span class="bottom-dock-label"><i></i>执行台</span>
+              <div id="bottomRunPills" style="display:flex;align-items:center;gap:5px;min-width:0"></div>
+              <span class="dock-spacer"></span>
+              <button class="dock-expand" id="dockExpand" type="button">收起过程 ↓</button>
+            </div>
+            <div class="bottom-detail-wrap" id="bottomDetail"></div>
+          </div>
+        </section>
+
+        <section class="composer-zone">
+          <div class="composer">
+            <div class="composer-box">
+              <div class="composer-placeholder">继续提问、补充约束或交付下一项职责…<span class="composer-sub">未提及时发送给 Lead · Enter 发送</span></div>
+              <button class="send-button" type="button">发送</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="floating-sheet open" id="floatingSheet" aria-label="执行过程抽屉">
+          <div class="floating-sheet-inner" id="floatingDetail"></div>
+        </section>
+      </section>
+
+      <aside class="activity-pane" id="activityPane">
+        <div class="pane-tabs"><button class="pane-tab active" type="button">活动</button><button class="pane-tab" type="button">任务</button><button class="pane-tab" type="button">上下文</button><button class="pane-tab" type="button">审计</button></div>
+        <div class="pane-content" id="rightPaneContent"></div>
+        <div class="pane-meta">run 3 active · seq 1047</div>
+      </aside>
+    </main>
+  </div>
+
+  <div class="notes-overlay" id="notesOverlay" role="dialog" aria-modal="true" aria-labelledby="notesTitle">
+    <section class="notes-panel">
+      <header>
+        <div><h2 id="notesTitle">方案说明</h2><p id="notesThesis"></p></div>
+        <button class="close-notes" id="closeNotes" type="button" aria-label="关闭">×</button>
+      </header>
+      <div class="note-section"><h3>更适合什么</h3><ul id="fitList"></ul></div>
+      <div class="note-section"><h3>主要风险</h3><ul id="riskList"></ul></div>
+      <div class="note-section"><h3>对产品的影响</h3><div class="score-grid" id="scoreGrid"></div></div>
+      <div class="note-section"><h3>不变的原则</h3><ul><li>公共消息只按服务端 timeline sequence 排序。</li><li>执行过程不伪装成消息，也不回写旧消息正文。</li><li>一条 Run 可以关联多条 send / final 消息。</li><li>点击任意消息都可定位到同一 Run 的对应时间点。</li></ul></div>
+    </section>
+  </div>
+
+  <script>
+    const runs = [
+      {
+        id: 'run-a', shortId: 'A184', name: '阿岚', initial: '岚', runtime: 'Codex', accent: 'var(--identity-1)',
+        state: '运行中', stateKind: 'running', elapsed: '4分12秒', task: '修复 refresh token 并发覆盖', current: '正在收敛 token rotation 的事务边界',
+        events: [
+          ['10:31:07', '读取', '<code>src/auth/refresh.ts</code>'],
+          ['10:31:28', '修改', '<code>rotateRefreshToken()</code>'],
+          ['10:32:03', '执行', '<code>pnpm test auth</code>'],
+          ['10:33:12', '公共消息', '已发送给 <strong>@明川 · @若汐</strong>'],
+          ['10:35:04', '公共消息', '发布本地测试进展'],
+          ['10:36:18', '继续处理', '吸收安全审查中的竞争条件']
+        ]
+      },
+      {
+        id: 'run-b', shortId: 'B071', name: '明川', initial: '川', runtime: 'Claude', accent: 'var(--identity-2)',
+        state: '运行中', stateKind: 'running', elapsed: '2分08秒', task: '安全审查', current: '复现旧 token 的二次消费窗口',
+        events: [
+          ['10:34:11', '读取', '<code>refresh.ts</code> 与事务配置'],
+          ['10:34:42', '分析', '检查锁粒度与提交顺序'],
+          ['10:35:21', '执行', '<code>node scripts/race-repro.mjs</code>'],
+          ['10:36:02', '公共消息', '向 <strong>@阿岚</strong> 报告并发窗口'],
+          ['10:36:39', '继续处理', '补充可重复复现证据']
+        ]
+      },
+      {
+        id: 'run-c', shortId: 'C029', name: '若汐', initial: '汐', runtime: 'Gemini', accent: 'var(--identity-3)',
+        state: '等待中', stateKind: 'waiting', elapsed: '1分45秒', task: '回归测试', current: '等待测试容器恢复，已完成 17/24',
+        events: [
+          ['10:35:19', '准备', '加载 auth 回归矩阵'],
+          ['10:35:47', '执行', '<code>pnpm test:regression auth</code>'],
+          ['10:36:54', '状态', '17/24 用例通过'],
+          ['10:37:05', '公共消息', '同步测试进度，另发送给 <strong>@阿岚</strong>'],
+          ['10:37:19', '等待', '测试容器健康检查']
+        ]
+      }
+    ];
+
+    const layouts = {
+      right: {
+        recommendation: '基线：保留现状', risk: '风险：压缩消息宽度',
+        title: '右侧检查器', thesis: '执行过程占用独立横向空间，适合深度查看，但并行 Agent 增多时消息区会被持续压窄。',
+        fits: ['宽屏桌面环境', '用户经常边读消息边核查日志', '执行详情比公共讨论更重要的工作流'],
+        risks: ['窄窗口下信息密度骤增', '活动、任务、上下文争抢同一侧栏', '多个 Agent 的状态在纵向列表中不易横向比较'],
+        scores: { '消息阅读': 3, '运行可见': 5, '并行比较': 3, '干预效率': 4, '空间效率': 2 }
+      },
+      top: {
+        recommendation: '可选：高可见', risk: '风险：吃掉纵向首屏',
+        title: '顶部运行带', thesis: '把“现在谁在做什么”放在消息区上方。运行信息先于讨论被看到，适合强协作感和高并发工作。',
+        fits: ['用户需要持续掌握并行进度', '多数 Run 较短且数量不超过 3–4 个', '消息区需要保持完整宽度'],
+        risks: ['展开详情会把最新消息向下推', '长时间运行会形成永久顶部负担', 'Agent 数量多时横向卡片容易拥挤'],
+        scores: { '消息阅读': 4, '运行可见': 5, '并行比较': 5, '干预效率': 3, '空间效率': 3 }
+      },
+      bottom: {
+        recommendation: '可选：强干预', risk: '风险：挤压输入与最新消息',
+        title: '底部执行台', thesis: '把执行过程放在输入框附近，形成“观察—纠偏—继续输入”的操作台，最适合频繁人工干预。',
+        fits: ['用户经常中途补充约束或停止 Run', 'AgentRun 与输入操作高度相关', '希望公共消息区上方保持安静'],
+        risks: ['与 composer 争夺纵向空间', '详情展开时会遮挡最近消息', '纯阅读场景下操作感过重'],
+        scores: { '消息阅读': 3, '运行可见': 4, '并行比较': 4, '干预效率': 5, '空间效率': 3 }
+      },
+      hybrid: {
+        recommendation: '推荐：双层混合', risk: '风险：详情需要一次点击',
+        title: '顶部摘要 + 底部详情抽屉', thesis: '顶部只保留轻量运行脉冲，详细过程按需从底部浮出。公共消息保持最大阅读面积，同时仍能感知并行执行。',
+        fits: ['RovAI 以公共协作为主、执行审阅为辅', '同时存在多个 AgentRun', '需要在桌面与中等宽度窗口间保持稳定'],
+        risks: ['用户需要点击一次才能看完整过程', '浮层打开时需要处理焦点与遮挡', '摘要文案必须足够短且可靠'],
+        scores: { '消息阅读': 5, '运行可见': 4, '并行比较': 4, '干预效率': 4, '空间效率': 5 }
+      }
+    };
+
+    const appFrame = document.getElementById('appFrame');
+    const tabs = [...document.querySelectorAll('.variant-tab')];
+    const recommendationChip = document.getElementById('recommendationChip');
+    const riskChip = document.getElementById('riskChip');
+    const topRunCards = document.getElementById('topRunCards');
+    const topShelfDetail = document.getElementById('topShelfDetail');
+    const bottomRunPills = document.getElementById('bottomRunPills');
+    const bottomDetail = document.getElementById('bottomDetail');
+    const pulseAgents = document.getElementById('pulseAgents');
+    const floatingDetail = document.getElementById('floatingDetail');
+    const rightPaneContent = document.getElementById('rightPaneContent');
+    const bottomRunDock = document.getElementById('bottomRunDock');
+    const floatingSheet = document.getElementById('floatingSheet');
+    let selectedRunId = 'run-a';
+    let layout = new URLSearchParams(location.search).get('layout') || 'hybrid';
+    if (!layouts[layout]) layout = 'hybrid';
+
+    function runById(id) { return runs.find(run => run.id === id) || runs[0]; }
+
+    function miniAvatar(run, size = 28) {
+      return `<span class="mini-avatar" style="--run-accent:${run.accent};width:${size}px;height:${size}px;flex:0 0 ${size}px">${run.initial}</span>`;
+    }
+
+    function eventList(run) {
+      return `<div class="event-list">${run.events.map((event) => {
+        const isMessage = event[1] === '公共消息';
+        return `<div class="event-row"><time class="event-time">${event[0]}</time><span class="event-rail"><i class="${isMessage ? 'message-event' : ''}"></i></span><div class="event-copy"><strong>${event[1]}</strong> · ${event[2]}</div></div>`;
+      }).join('')}</div>`;
+    }
+
+    function activityDetail(run, closeTarget = '') {
+      return `<div class="activity-detail">
+        <div class="activity-detail-head">
+          ${miniAvatar(run, 30)}
+          <div class="activity-title"><strong>${run.name} · Run ${run.shortId}</strong><span>${run.runtime} · ${run.task} · ${run.elapsed}</span><span style="color:var(--brand-ink);margin-top:4px">${run.current}</span></div>
+          <div class="activity-actions"><button class="ghost-button" type="button">停止</button>${closeTarget ? `<button class="ghost-button" type="button" data-close="${closeTarget}">收起</button>` : ''}</div>
+        </div>
+        ${eventList(run)}
+      </div>`;
+    }
+
+    function renderRunSelectors() {
+      topRunCards.innerHTML = runs.map(run => `<button class="run-card ${run.id === selectedRunId ? 'selected' : ''}" style="--run-accent:${run.accent}" type="button" data-select-run="${run.id}">${miniAvatar(run)}<span class="run-card-copy"><strong>${run.name} · ${run.runtime}</strong><span>${run.current}</span></span><span class="run-card-state"><i class="state-dot ${run.stateKind === 'waiting' ? 'waiting' : ''}"></i>${run.elapsed}</span></button>`).join('');
+      bottomRunPills.innerHTML = runs.map(run => `<button class="run-pill ${run.id === selectedRunId ? 'selected' : ''}" type="button" data-select-run="${run.id}">${miniAvatar(run, 22)}<span>${run.name} · ${run.state}</span></button>`).join('');
+      pulseAgents.innerHTML = runs.map(run => `<button class="pulse-agent ${run.id === selectedRunId ? 'selected' : ''}" type="button" data-select-run="${run.id}">${miniAvatar(run, 22)}<span>${run.name} · ${run.current}</span></button>`).join('');
+    }
+
+    function renderDetails() {
+      const run = runById(selectedRunId);
+      topShelfDetail.innerHTML = activityDetail(run, 'top');
+      bottomDetail.innerHTML = activityDetail(run, 'bottom');
+      floatingDetail.innerHTML = activityDetail(run, 'hybrid');
+      rightPaneContent.innerHTML = `<div style="display:grid;gap:7px;margin-bottom:10px">${runs.map(item => `<button class="run-card ${item.id === selectedRunId ? 'selected' : ''}" style="--run-accent:${item.accent}" type="button" data-select-run="${item.id}">${miniAvatar(item)}<span class="run-card-copy"><strong>${item.name} · ${item.runtime}</strong><span>${item.current}</span></span><span class="run-card-state"><i class="state-dot ${item.stateKind === 'waiting' ? 'waiting' : ''}"></i>${item.elapsed}</span></button>`).join('')}</div>${activityDetail(run)}`;
+    }
+
+    function renderNotes() {
+      const spec = layouts[layout];
+      document.getElementById('notesTitle').textContent = spec.title;
+      document.getElementById('notesThesis').textContent = spec.thesis;
+      document.getElementById('fitList').innerHTML = spec.fits.map(item => `<li>${item}</li>`).join('');
+      document.getElementById('riskList').innerHTML = spec.risks.map(item => `<li>${item}</li>`).join('');
+      document.getElementById('scoreGrid').innerHTML = Object.entries(spec.scores).map(([name, score]) => `<strong>${name}</strong><span class="score-dots">${[1,2,3,4,5].map(n => `<i class="${n <= score ? 'on' : ''}"></i>`).join('')}</span>`).join('');
+    }
+
+    function setLayout(next) {
+      layout = next;
+      appFrame.dataset.layout = next;
+      tabs.forEach(tab => tab.classList.toggle('active', tab.dataset.layout === next));
+      recommendationChip.textContent = layouts[next].recommendation;
+      riskChip.textContent = layouts[next].risk;
+      // Each option opens enough detail to compare the actual execution content.
+      bottomRunDock.classList.toggle('expanded', next === 'bottom');
+      document.getElementById('dockExpand').textContent = next === 'bottom' ? '收起过程 ↓' : '展开过程 ↑';
+      floatingSheet.classList.toggle('open', next === 'hybrid');
+      renderNotes();
+      const url = new URL(location.href);
+      url.searchParams.set('layout', next);
+      history.replaceState(null, '', url);
+    }
+
+    tabs.forEach(tab => tab.addEventListener('click', () => setLayout(tab.dataset.layout)));
+
+    document.addEventListener('click', event => {
+      const select = event.target.closest('[data-select-run]');
+      if (select) {
+        selectedRunId = select.dataset.selectRun;
+        renderRunSelectors();
+        renderDetails();
+        if (layout === 'hybrid') floatingSheet.classList.add('open');
+      }
+      const origin = event.target.closest('[data-run]');
+      if (origin) {
+        selectedRunId = origin.dataset.run;
+        renderRunSelectors();
+        renderDetails();
+        if (layout === 'hybrid') floatingSheet.classList.add('open');
+        if (layout === 'bottom') bottomRunDock.classList.add('expanded');
+        if (layout === 'right') document.getElementById('activityPane').scrollTop = 0;
+      }
+      const close = event.target.closest('[data-close]');
+      if (close?.dataset.close === 'hybrid') floatingSheet.classList.remove('open');
+      if (close?.dataset.close === 'bottom') {
+        bottomRunDock.classList.remove('expanded');
+        document.getElementById('dockExpand').textContent = '展开过程 ↑';
+      }
+      if (close?.dataset.close === 'top') topShelfDetail.hidden = !topShelfDetail.hidden;
+    });
+
+    document.getElementById('dockExpand').addEventListener('click', () => {
+      bottomRunDock.classList.toggle('expanded');
+      document.getElementById('dockExpand').textContent = bottomRunDock.classList.contains('expanded') ? '收起过程 ↓' : '展开过程 ↑';
+    });
+    document.getElementById('openHybridDetail').addEventListener('click', () => floatingSheet.classList.toggle('open'));
+    document.getElementById('topRunBadge').addEventListener('click', () => {
+      if (layout === 'hybrid') floatingSheet.classList.toggle('open');
+      else if (layout === 'bottom') bottomRunDock.classList.toggle('expanded');
+      else if (layout === 'top') topShelfDetail.hidden = !topShelfDetail.hidden;
+    });
+
+    const notesOverlay = document.getElementById('notesOverlay');
+    document.getElementById('notesButton').addEventListener('click', () => notesOverlay.classList.add('open'));
+    document.getElementById('closeNotes').addEventListener('click', () => notesOverlay.classList.remove('open'));
+    notesOverlay.addEventListener('click', event => { if (event.target === notesOverlay) notesOverlay.classList.remove('open'); });
+    document.addEventListener('keydown', event => { if (event.key === 'Escape') notesOverlay.classList.remove('open'); });
+
+    renderRunSelectors();
+    renderDetails();
+    setLayout(layout);
+  </script>
+</body>
+</html>

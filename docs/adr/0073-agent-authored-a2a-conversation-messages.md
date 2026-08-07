@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0073
 title: Agent-Authored A2A Conversation Messages
-status: accepted
+status: superseded
 date: 2026-07-30
 decision_scope: cross-version
 source_version: v0.24
 supersedes: []
-superseded_by: null
+superseded_by: ADR-0130
 ---
 
 # ADR-0073: Agent-Authored A2A Conversation Messages

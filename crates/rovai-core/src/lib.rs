@@ -28,6 +28,7 @@ pub mod memory;
 pub mod memory_retrieval;
 pub mod memory_secret;
 pub mod memory_tool;
+pub mod message_delivery;
 pub mod notification;
 pub mod read_model;
 pub mod runtime;

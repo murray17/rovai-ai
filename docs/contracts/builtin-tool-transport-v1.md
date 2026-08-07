@@ -3,10 +3,14 @@ document_type: protocol-contract
 contract: builtin-tool-transport-v1
 authority: builtin-tool-wire-contract
 status: accepted
-last_updated: 2026-08-06
+last_updated: 2026-08-07
 ---
 
 # Built-in Tool Transport v1 Contract
+
+> 历史基线：v0.45 当前 catalog 已升级到
+> [Built-in Tool Transport v2](builtin-tool-transport-v2.md)。本文保留 v1 的运输字段和历史
+> operation 语义，不构成当前 Agent 可用的 `team.call_member` 或 `rovai member call` 兼容入口。
 
 本文件是 Rovai-owned built-in operations 的唯一字段级协议真源。实现、fixture、CLI `tool
 describe`、Bootstrap 示例和版本验收必须引用或由本合同生成，不能各自维护变体。

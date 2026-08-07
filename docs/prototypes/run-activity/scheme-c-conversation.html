@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RovAI · Scheme C 会话区</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #f2f4f1;
+      --surface: #fbfcfa;
+      --surface-raised: #fff;
+      --surface-muted: #ecefe9;
+      --surface-selected: #e9ecf7;
+      --ink: #202438;
+      --muted: #5f6678;
+      --faint: #777d8c;
+      --line: #dde1da;
+      --brand: #343b72;
+      --brand-soft: #eceef8;
+      --success: #3e775c;
+      --success-soft: #e7f1ea;
+      --attention: #8a6226;
+      --attention-soft: #f8edda;
+      --danger: #a24c46;
+      --danger-soft: #f7e6e3;
+      --shadow: 0 18px 56px rgba(38, 45, 58, .14);
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; }
+    body { color: var(--ink); background: var(--canvas); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif; }
+    button, textarea { font: inherit; }
+    button { color: inherit; cursor: pointer; }
+    button:focus-visible, textarea:focus-visible { outline: 2px solid #4d83a2; outline-offset: 2px; }
+    .shell { display: grid; min-height: 100%; grid-template-rows: 50px minmax(0, 1fr); }
+    .header { display: flex; align-items: center; gap: 10px; padding: 0 22px; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .header small { color: var(--faint); }
+    .header strong { font-size: 15px; }
+    .header .spacer { flex: 1; }
+    .header .inspector-tabs { color: var(--muted); font-size: 12px; }
+    .workspace { display: grid; min-height: 0; grid-template-rows: auto minmax(0, 1fr) auto auto; background: var(--surface-raised); }
+    .pulse { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 22px; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .pulse-label { color: var(--muted); font-size: 12px; font-weight: 650; }
+    .pulse-list { display: flex; min-width: 0; gap: 6px; overflow-x: auto; }
+    .run-chip { display: inline-flex; align-items: center; gap: 7px; min-height: 31px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: transparent; white-space: nowrap; }
+    .run-chip[aria-selected="true"] { border-color: rgba(52,59,114,.25); color: var(--brand); background: var(--surface-selected); }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+    .dot.waiting { background: var(--attention); }
+    .dot.done { background: var(--faint); }
+    .pulse-action { margin-left: auto; border: 0; border-radius: 7px; padding: 7px 9px; color: var(--brand); background: var(--brand-soft); font-size: 12px; font-weight: 650; }
+    .timeline { position: relative; min-height: 0; overflow: auto; padding: 24px max(22px, calc((100% - 760px) / 2)); background: #fff; }
+    .message { max-width: 760px; margin: 0 auto 18px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-raised); }
+    .message.agent { border-left: 3px solid #74628f; }
+    .message-head { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+    .message-head strong { color: var(--ink); }
+    .message p { margin: 9px 0 0; white-space: pre-wrap; }
+    .origin { display: inline-flex; margin-top: 10px; border: 0; border-radius: 6px; padding: 4px 7px; color: var(--brand); background: var(--brand-soft); font-size: 11px; }
+    .approval { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 8px 22px; border-top: 1px solid var(--line); background: var(--attention-soft); }
+    .approval strong { color: var(--attention); font-size: 12px; }
+    .approval span { color: var(--muted); font-size: 12px; }
+    .approval button { margin-left: auto; border: 1px solid rgba(138,98,38,.35); border-radius: 7px; padding: 6px 9px; background: transparent; font-size: 12px; }
+    .composer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 12px 22px 16px; border-top: 1px solid var(--line); background: var(--surface); }
+    textarea { min-height: 44px; max-height: 120px; resize: vertical; border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; color: var(--ink); background: #fff; }
+    .send { align-self: end; min-width: 78px; min-height: 40px; border: 0; border-radius: 8px; color: #fff; background: var(--brand); font-weight: 700; }
+    .send.stop { color: #fff; background: var(--danger); }
+    .drawer { position: absolute; z-index: 4; right: 22px; bottom: 118px; width: min(390px, calc(100% - 44px)); max-height: min(520px, calc(100% - 190px)); overflow: auto; border: 1px solid var(--line); border-radius: 13px; box-shadow: var(--shadow); background: rgba(251,252,250,.98); }
+    .drawer[hidden] { display: none; }
+    .drawer-head { display: flex; align-items: center; gap: 9px; padding: 13px 15px; border-bottom: 1px solid var(--line); }
+    .drawer-head strong { flex: 1; font-size: 13px; }
+    .drawer-head button { border: 0; border-radius: 6px; padding: 5px 7px; color: var(--muted); background: var(--surface-muted); font-size: 11px; }
+    .drawer-body { display: grid; gap: 12px; padding: 15px; }
+    .status-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .status-pill { border-radius: 6px; padding: 4px 7px; color: var(--success); background: var(--success-soft); font-size: 11px; font-weight: 700; }
+    .status-pill.waiting { color: var(--attention); background: var(--attention-soft); }
+    .evidence { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+    .evidence li { display: flex; justify-content: space-between; gap: 8px; padding-bottom: 7px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+    .evidence b { color: var(--ink); font-weight: 600; }
+    .drawer-note { margin: 0; padding: 8px 9px; border-radius: 7px; color: var(--muted); background: var(--surface-muted); font-size: 11px; }
+    @media (max-width: 760px) {
+      .header { padding: 0 14px; }
+      .pulse, .approval, .composer { padding-left: 14px; padding-right: 14px; }
+      .timeline { padding-left: 14px; padding-right: 14px; }
+      .drawer { right: 14px; bottom: 132px; width: calc(100% - 28px); }
+      .composer { grid-template-columns: minmax(0, 1fr); }
+      .send { width: 100%; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
+  </style>
+</head>
+<body>
+  <main class="shell" aria-label="RovAI Scheme C 会话区原型">
+    <header class="header">
+      <small>Quick Chat ›</small><strong>公共协作 · v0.45</strong><span class="spacer"></span>
+      <span class="inspector-tabs">任务 · 上下文 · 审批 · 审计</span>
+    </header>
+    <section class="workspace">
+      <section class="pulse" aria-label="运行摘要">
+        <span class="pulse-label">运行摘要 · 3</span>
+        <div class="pulse-list" role="listbox" aria-label="选择运行过程">
+          <button class="run-chip" role="option" aria-selected="true" data-run="review"><span class="dot"></span><span>代码复核</span><small>进行中</small></button>
+          <button class="run-chip" role="option" aria-selected="false" data-run="test"><span class="dot waiting"></span><span>测试验证</span><small>等待容量</small></button>
+          <button class="run-chip" role="option" aria-selected="false" data-run="done"><span class="dot done"></span><span>文档整理</span><small>已完成</small></button>
+        </div>
+        <button class="pulse-action" id="openDrawer" type="button" aria-expanded="true">展开过程 ↓</button>
+      </section>
+      <section class="timeline" aria-label="公共消息">
+        <article class="message"><div class="message-head"><strong>你</strong><span>刚刚</span></div><p>请把构建结果和风险写回公共区。</p></article>
+        <article class="message agent"><div class="message-head"><strong>审查 Agent</strong><span>刚刚 · Public A2A</span></div><p>我会先复核变更，再把证据发给公共区。@agent_27 负责运行验证。</p><button class="origin" type="button">查看 Run 来源 · delivery_104</button></article>
+      </section>
+      <section class="approval" aria-label="待审批"><strong>1 项待审批</strong><span>测试验证请求需要你的决定</span><button type="button">查看审批</button></section>
+      <form class="composer" id="composer"><textarea aria-label="公共消息正文" placeholder="写一条公共消息…"></textarea><button class="send stop" id="sendButton" type="button">停止</button></form>
+    </section>
+    <aside class="drawer" id="drawer" aria-label="执行过程抽屉">
+      <div class="drawer-head"><strong id="drawerTitle">代码复核 · Execution Drawer</strong><span id="drawerMeta">Run 进行中</span><button id="closeDrawer" type="button">收起</button></div>
+      <div class="drawer-body"><div class="status-row"><span>Delivery · delivery_104</span><span class="status-pill" id="drawerStatus">运行中</span></div><ul class="evidence"><li><span>目标</span><b id="drawerTarget">@agent_27</b></li><li><span>上下文</span><b>Profile v2 · Closure 1/3</b></li><li><span>过程证据</span><b>4 项可查看</b></li></ul><p class="drawer-note">Drawer 只查看和选择 Run。停止当前整棵协作树，请使用 Composer 的 CampTurn 停止。</p></div>
+    </aside>
+  </main>
+  <script>
+    const drawer = document.getElementById('drawer');
+    const openDrawer = document.getElementById('openDrawer');
+    const closeDrawer = document.getElementById('closeDrawer');
+    const title = document.getElementById('drawerTitle');
+    const meta = document.getElementById('drawerMeta');
+    const status = document.getElementById('drawerStatus');
+    const target = document.getElementById('drawerTarget');
+    const runData = {
+      review: { title: '代码复核', meta: 'Run 进行中', status: '运行中', target: '@agent_27', waiting: false },
+      test: { title: '测试验证', meta: 'Delivery 暂时等待', status: '等待容量', target: '@agent_104', waiting: true },
+      done: { title: '文档整理', meta: 'Run 已完成', status: '已完成', target: '@agent_1001', waiting: false }
+    };
+    function selectRun(key) {
+      const data = runData[key];
+      document.querySelectorAll('.run-chip').forEach((chip) => chip.setAttribute('aria-selected', String(chip.dataset.run === key)));
+      title.textContent = `${data.title} · Execution Drawer`;
+      meta.textContent = data.meta;
+      status.textContent = data.status;
+      status.classList.toggle('waiting', data.waiting);
+      target.textContent = data.target;
+      if (!drawer.hidden) drawer.focus({ preventScroll: true });
+    }
+    document.querySelectorAll('.run-chip').forEach((chip) => chip.addEventListener('click', () => selectRun(chip.dataset.run)));
+    openDrawer.addEventListener('click', () => { drawer.hidden = false; openDrawer.setAttribute('aria-expanded', 'true'); openDrawer.textContent = '收起过程 ↑'; closeDrawer.focus(); });
+    closeDrawer.addEventListener('click', () => { drawer.hidden = true; openDrawer.setAttribute('aria-expanded', 'false'); openDrawer.textContent = '展开过程 ↓'; openDrawer.focus(); });
+    document.getElementById('sendButton').addEventListener('click', () => { document.getElementById('sendButton').textContent = '正在停止…'; document.getElementById('sendButton').disabled = true; });
+  </script>
+</body>
+</html>

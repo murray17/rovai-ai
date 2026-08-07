@@ -3,14 +3,16 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-08-06
+last_updated: 2026-08-07
 ---
 
 # Built-in Tool Runtime Architecture
 
-本文件说明 Rovai built-in operations 的长期组件结构。精确字段与版本见
-[Built-in Tool Transport v1 Contract](../contracts/builtin-tool-transport-v1.md)，决策理由见
-[ADR-0124](../adr/0124-cli-only-transport-for-rovai-built-in-operations.md)。
+本文件说明 Rovai built-in operations 的长期组件结构。当前 v0.45 精确字段与版本见
+[Built-in Tool Transport v2 Contract](../contracts/builtin-tool-transport-v2.md) 和
+[Camp Message Send v1](../contracts/camp-message-send-v1.md)；历史 v1 仅用于理解运输继承关系。
+决策理由见 [ADR-0124](../adr/0124-cli-only-transport-for-rovai-built-in-operations.md) 与
+[ADR-0130](../adr/0130-public-a2a-message-and-unified-delivery.md)。
 
 ## 总体路径
 
@@ -23,7 +25,7 @@ bundled `rovai` CLI
     ▼
 Core BuiltinToolRouter
     │ canonical operation + current Run context
-    ├── Team / Member Call service
+    ├── Public Camp Message / Message Delivery service
     ├── Collaboration / Task service
     ├── Camp History service
     └── Memory Retrieval / Mutation service
@@ -39,7 +41,7 @@ Schema，也不把它们转换成 Runtime-native tools。
 | --- | --- | --- |
 | Built-in Tool Catalog | canonical names、Schema、CLI mapping、错误与 digest | Runtime alias 表 |
 | `rovai` CLI | 参数/stdin/file 解析、IPC、输出与有界运输重试 | 领域 handler、授权者、receipt 生成者 |
-| BuiltinToolRouter | current lease 解析、分发、Envelope、receipt、replay、Activity | 第二套 Team/Memory 服务 |
+| BuiltinToolRouter | current lease 解析、分发、Envelope、receipt、replay、Activity | 第二套 Message/Delivery 服务 |
 | Domain Services / Gateway | 可见范围、版本、状态、配额、幂等副作用和业务不变量 | CLI 或 MCP 适配层 |
 | Runtime Fleet | process ownership、exclusive Run lease、reuse、fence、quiescence | 领域成员权限目录 |
 | Runtime Adapter | 启动/恢复 Runtime、注入 CLI 环境、Bootstrap、外部 MCP Projection | built-in Schema/alias/allowlist |
@@ -97,9 +99,11 @@ Session Charter 只说明：
 
 - 使用 bundled `rovai`；
 - `rovai tool list/describe`；
-- 十二个领域分组命令和输入模式；
-- canonical operation、receipt、Task version、Member Call 与 Task assignment 的协作语义；
-- Dynamic Context 可能截断，应遵循 canonical `retrieveWith`。
+- v0.45 catalog 的领域分组命令和输入模式；
+- canonical operation、receipt、Task version、`camp.message.send`、Message Delivery 与 Task
+  assignment 的协作语义；
+- Dynamic Context 可能截断，应遵循 canonical `retrieveWith`；回复公共 A2A 时遵循 Profile v2
+  的 bounded reference closure。
 
 Bootstrap 不含完整 Schema、socket、process token、lease、AgentRun ID、epoch、Camp ID 或
 Native Binding ID。Dynamic Context 使用 `retrieveWith.operation` 指向 canonical operation，

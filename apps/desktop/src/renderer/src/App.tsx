@@ -170,7 +170,7 @@ export function App(): React.JSX.Element {
   const [memoryProposalDrawerSignal, setMemoryProposalDrawerSignal] = useState(0)
   const [campSnapshot, setCampSnapshot] = useState<CampSnapshot | null>(null)
   const [campInspectorVisible, setCampInspectorVisible] = useState(initialCampInspectorVisibility)
-  const [campInspectorTab, setCampInspectorTab] = useState<CampInspectorTab>('activity')
+  const [campInspectorTab, setCampInspectorTab] = useState<CampInspectorTab>('tasks')
   const [optimisticCampMessages, setOptimisticCampMessages] = useState<OptimisticCampMessageEntry[]>([])
   const [cancellingTurnIds, setCancellingTurnIds] = useState<Set<string>>(() => new Set())
   const [state, setState] = useState<LoadState>('loading')
@@ -330,7 +330,7 @@ export function App(): React.JSX.Element {
       ).then((inbox) => inbox.schemaVersion === 2 ? inbox.throughSequence : null)
         .catch(() => null)
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
-      if (snapshot.schemaVersion !== 22) throw new Error('Camp snapshot schema is incompatible')
+      if (snapshot.schemaVersion !== 24) throw new Error('Camp snapshot schema is incompatible')
       if (selectionGeneration !== campSelectionGeneration.current) return
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
@@ -367,7 +367,7 @@ export function App(): React.JSX.Element {
 
   const refreshActiveCampSnapshot = useCallback(async (campId: string): Promise<void> => {
     const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
-    if (snapshot.schemaVersion !== 22) throw new Error('Camp snapshot schema is incompatible')
+    if (snapshot.schemaVersion !== 24) throw new Error('Camp snapshot schema is incompatible')
     if (activeCampIdRef.current !== campId) return
     if (snapshot.throughGlobalSequence < campEventSequenceMarker.current) return
     campEventSequenceMarker.current = snapshot.throughGlobalSequence
@@ -543,7 +543,7 @@ export function App(): React.JSX.Element {
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', {
         campId
       })
-      if (snapshot.schemaVersion !== 22) throw new Error('Camp snapshot schema is incompatible')
+      if (snapshot.schemaVersion !== 24) throw new Error('Camp snapshot schema is incompatible')
       if (cancelled) return
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
@@ -973,7 +973,7 @@ export function App(): React.JSX.Element {
       ))
       void window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
         .then(async (snapshot) => {
-          if (snapshot.schemaVersion !== 22) throw new Error('Camp snapshot schema is incompatible')
+          if (snapshot.schemaVersion !== 24) throw new Error('Camp snapshot schema is incompatible')
           if (selectionGeneration !== campSelectionGeneration.current) return
           campEventSequenceMarker.current = snapshot.throughGlobalSequence
           setCampSnapshot(snapshot)
@@ -1327,8 +1327,8 @@ export function AppHeader({
                   <button
                     className={`run-badge ${stopping ? 'stopping' : ''}`}
                     type="button"
-                    onClick={() => onOpenInspector('activity')}
-                    aria-label={`${stopping ? '正在停止' : '运行中'} ${activeRuns}，打开活动检查器`}
+                    onClick={() => onOpenInspector('tasks')}
+                    aria-label={`${stopping ? '正在停止' : '运行中'} ${activeRuns}，打开执行详情`}
                   >
                     <i aria-hidden="true" />{stopping ? '正在停止' : '运行中'} {activeRuns}
                   </button>

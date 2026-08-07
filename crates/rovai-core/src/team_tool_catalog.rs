@@ -15,17 +15,18 @@ use crate::{
         HearthProposalToolInput, MEMORY_PROPOSE_HEARTH_TOOL_NAME, MEMORY_WRITE_TOOL_NAME,
         MemoryToolService, MemoryWriteToolInput,
     },
+    message_delivery::CAMP_MESSAGE_SEND_TOOL_NAME,
     team_tool::{
-        TEAM_CALL_MEMBER_TOOL_NAME, TEAM_CREATE_TASK_TOOL_NAME, TEAM_LIST_TASKS_TOOL_NAME,
-        TEAM_UPDATE_TASK_TOOL_NAME, TeamCallMemberInput, TeamCreateTaskInput, TeamListTasksInput,
-        TeamToolService, TeamUpdateTaskInput,
+        CampMessageSendInput, TEAM_CREATE_TASK_TOOL_NAME, TEAM_LIST_TASKS_TOOL_NAME,
+        TEAM_UPDATE_TASK_TOOL_NAME, TeamCreateTaskInput, TeamListTasksInput, TeamToolService,
+        TeamUpdateTaskInput,
     },
 };
 
 pub fn validate_builtin_tool_input(canonical_name: &str, input: &Value) -> Result<()> {
     let valid = match canonical_name {
-        TEAM_CALL_MEMBER_TOOL_NAME => {
-            serde_json::from_value::<TeamCallMemberInput>(input.clone()).map(|_| ())
+        CAMP_MESSAGE_SEND_TOOL_NAME => {
+            serde_json::from_value::<CampMessageSendInput>(input.clone()).map(|_| ())
         }
         TEAM_CREATE_TASK_TOOL_NAME => {
             serde_json::from_value::<TeamCreateTaskInput>(input.clone()).map(|_| ())
@@ -401,27 +402,34 @@ fn memory_read_success_schema() -> Value {
 pub fn builtin_tool_definitions() -> Vec<Value> {
     vec![
         json!({
-            "name": TEAM_CALL_MEMBER_TOOL_NAME,
-            "title": "Request work from a Camp member",
-            "description": "team.call_member is not the default action for ending the current task. Call it only when the target member needs this message to continue acting or make a decision. Never use it to acknowledge receipt, reply politely, send non-blocking progress, or repeat information already shared. Before calling, confirm the target will have a clear next step after receiving it or is waiting for this necessary result; otherwise do not call. An accepted call persists one private execution request and later single-slot AgentRun. Do not sleep or poll team.list_tasks.",
-            "inputSchema": TeamToolService::input_schema(),
+            "name": CAMP_MESSAGE_SEND_TOOL_NAME,
+            "title": "Send a public Camp message",
+            "description": "Publish exactly one Agent-authored Camp message. Effective recipients are the union of explicit to values, strict inline @agent_id tokens, and the eligible direct reply author. The canonical recipient set is atomic and creates one Message Delivery per recipient; a recipient-free message remains public-only.",
+            "inputSchema": TeamToolService::camp_message_send_input_schema(),
             "outputSchema": {
                 "type": "object",
                 "additionalProperties": false,
                 "required": [
-                    "status", "acceptanceReceiptId", "campTurnId", "recipient",
-                    "recipientName", "taskLinked", "slot", "depth",
+                    "status", "messageId", "visibility", "campTurnId",
+                    "effectiveRecipients", "recipientPresentation", "recipientSetDigest",
+                    "deliveryIds",
                     "allocatedAgentRunResponsibilities"
                 ],
                 "properties": {
                     "status": {"const": "accepted"},
-                    "acceptanceReceiptId": {"type": "string"},
+                    "messageId": {"type": "string"},
+                    "visibility": {"const": "camp_public"},
                     "campTurnId": {"type": "string"},
-                    "recipient": {"type": "string"},
-                    "recipientName": {"type": "string"},
-                    "taskLinked": {"type": "boolean"},
-                    "slot": {"type": "integer", "minimum": 1},
-                    "depth": {"type": "integer", "minimum": 1},
+                    "effectiveRecipients": {
+                        "type": "array", "maxItems": 16, "uniqueItems": true,
+                        "items": {"type": "string"}
+                    },
+                    "recipientPresentation": {"type": "object"},
+                    "recipientSetDigest": {"type": "string"},
+                    "deliveryIds": {
+                        "type": "array", "maxItems": 16, "uniqueItems": true,
+                        "items": {"type": "string"}
+                    },
                     "allocatedAgentRunResponsibilities": {"type": "integer", "minimum": 1}
                 }
             }
@@ -554,6 +562,8 @@ mod tests {
         let serialized = serde_json::to_string(&definitions).unwrap();
         assert!(!serialized.contains("\"rovaiTeamTool\""));
         assert!(!serialized.contains("\"rovaiTeamReceipt\""));
+        assert!(!serialized.contains("team.call_member"));
+        assert!(!serialized.contains("rovai member call"));
     }
 
     #[test]

@@ -9,6 +9,10 @@ last_updated: 2026-08-06
 
 # Context Delivery Profile v1
 
+> 历史 immutable profile：v0.45 新 AgentRun 使用
+> [Profile v2](context-delivery-profile-v2.md)。已经冻结的 v1 ContextManifest 仍按本文恢复，
+> 不会被 v2 重写。
+
 本文冻结 AgentRun 公共消息上下文的第一版数值配置、字符计量、选择顺序、模型可见字段和
 ContextManifest 证据。架构理由与替代关系见
 [ADR-0129](../adr/0129-deterministic-bounded-raw-public-context-delivery.md)。

@@ -38,6 +38,27 @@ pub enum AdapterKind {
     AntigravityApp,
 }
 
+/// The only two ways a Runtime may publish assistant output into the Camp.
+///
+/// This is deliberately owned by the adapter catalog rather than inferred from
+/// stdout or Renderer state.  A Runtime that does not expose a trustworthy
+/// final boundary must use `ExplicitSendOnly`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicOutputMode {
+    ExplicitSendOnly,
+    AssistantFinalVisible,
+}
+
+impl PublicOutputMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ExplicitSendOnly => "explicit_send_only",
+            Self::AssistantFinalVisible => "assistant_final_visible",
+        }
+    }
+}
+
 impl AdapterKind {
     pub const ALL: [Self; 9] = [
         Self::CodexCli,
@@ -116,6 +137,26 @@ impl AdapterKind {
             Self::CodebuddyCli => "ROVAI_CODEBUDDY_BIN",
             Self::QwenCode => "ROVAI_QWEN_BIN",
             Self::AntigravityApp => "ROVAI_ANTIGRAVITY_BIN",
+        }
+    }
+
+    /// Freeze the public output boundary for each shipped adapter.
+    ///
+    /// Codex, Claude Code and Antigravity expose a Core-owned terminal event
+    /// with the final assistant message.  The ACP-backed adapters currently
+    /// remain explicit-send-only until their provider final-boundary evidence
+    /// is promoted to the same contract.
+    pub const fn public_output_mode(self) -> PublicOutputMode {
+        match self {
+            Self::CodexCli | Self::ClaudeCodeCli | Self::AntigravityApp => {
+                PublicOutputMode::AssistantFinalVisible
+            }
+            Self::OpencodeCli
+            | Self::CopilotCli
+            | Self::KiroCli
+            | Self::QoderCli
+            | Self::CodebuddyCli
+            | Self::QwenCode => PublicOutputMode::ExplicitSendOnly,
         }
     }
 }
@@ -3854,6 +3895,32 @@ mod tests {
                 AdapterKind::QwenCode,
             ]
         );
+    }
+
+    #[test]
+    fn public_output_mode_is_explicit_for_each_adapter_and_conservative_for_acp() {
+        let final_visible = AdapterKind::ALL
+            .into_iter()
+            .filter(|kind| kind.public_output_mode() == PublicOutputMode::AssistantFinalVisible)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            final_visible,
+            vec![
+                AdapterKind::CodexCli,
+                AdapterKind::ClaudeCodeCli,
+                AdapterKind::AntigravityApp
+            ]
+        );
+        for kind in AdapterKind::ALL {
+            assert!(
+                matches!(
+                    kind.public_output_mode(),
+                    PublicOutputMode::ExplicitSendOnly | PublicOutputMode::AssistantFinalVisible
+                ),
+                "{} must have a frozen public output mode",
+                kind.as_str()
+            );
+        }
     }
 
     fn database() -> (Database, std::path::PathBuf) {

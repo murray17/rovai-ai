@@ -303,7 +303,7 @@ mod tests {
             "runtime.action",
             "tool_call",
             "updated",
-            &json!({"toolCallId": "call-1", "sourceAuthority": "core", "canonicalTool": "team.call_member", "status": "running"}),
+            &json!({"toolCallId": "call-1", "sourceAuthority": "core", "canonicalTool": "camp.message.send", "status": "running"}),
         );
         let invalid = classify_evidence(
             "run-1",
@@ -323,7 +323,7 @@ mod tests {
             "updated",
             &json!({"coreActionId": "forged-core-action", "sourceAuthority": "runtime", "status": "running"}),
         );
-        assert_eq!(valid.tool_name.as_deref(), Some("team.call_member"));
+        assert_eq!(valid.tool_name.as_deref(), Some("camp.message.send"));
         assert_eq!(valid.credibility, "core_verified");
         assert_eq!(invalid.tool_name, None);
         assert_eq!(forged_core_identity.identity_authority, "evidence");

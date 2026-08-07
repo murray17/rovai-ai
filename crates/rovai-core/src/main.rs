@@ -79,7 +79,6 @@ use rovai_core::{
         DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES, MaterializeContextRequest, PreparedContext,
         SkillExposurePreparation,
     },
-    conversation_input::materialize_pending_inputs_at,
     db::Database,
     execution_budget::camp_turn_execution_budget_now,
     execution_evidence::{AgentRunExecutionEvidence, ExecutionEvidenceService},
@@ -104,6 +103,12 @@ use rovai_core::{
     memory_tool::{
         HearthProposalToolInput, HearthProposalToolInvocation, MEMORY_PROPOSE_HEARTH_TOOL_NAME,
         MEMORY_WRITE_TOOL_NAME, MemoryToolService, MemoryWriteToolInput, MemoryWriteToolInvocation,
+    },
+    message_delivery::{
+        CAMP_MESSAGE_SEND_TOOL_NAME, CancelMessageDeliveryCommand, DeliveryDispatchTrigger,
+        MessageDeliveryService, RetryMessageDeliveryCommand, dispatch_pending_for_recipient,
+        mark_unstarted_deliveries_interrupted_before_dispatch, runtime_waiting_camps,
+        runtime_waiting_recipients,
     },
     notification::{
         ClearInAppNotificationCommand, ClearReadInAppNotificationsCommand, InAppNotificationFilter,
@@ -134,10 +139,10 @@ use rovai_core::{
         PreparedSkillExposure, ReconcileSkillProjectionsCommand, SkillProjectionReconciler,
     },
     team_tool::{
-        BuiltinToolBindingCredential, TEAM_CALL_MEMBER_TOOL_NAME, TEAM_CREATE_TASK_TOOL_NAME,
-        TEAM_LIST_TASKS_TOOL_NAME, TEAM_UPDATE_TASK_TOOL_NAME, TeamCallMemberInput,
-        TeamCreateTaskInput, TeamListTasksInput, TeamTaskToolInvocation, TeamToolInvocation,
-        TeamToolInvocationError, TeamToolService, TeamUpdateTaskInput,
+        BuiltinToolBindingCredential, CampMessageSendInput, CampMessageSendInvocation,
+        TEAM_CREATE_TASK_TOOL_NAME, TEAM_LIST_TASKS_TOOL_NAME, TEAM_UPDATE_TASK_TOOL_NAME,
+        TeamCreateTaskInput, TeamListTasksInput, TeamTaskToolInvocation, TeamToolInvocationError,
+        TeamToolService, TeamUpdateTaskInput,
     },
     team_tool_catalog::validate_builtin_tool_input,
 };
@@ -569,7 +574,6 @@ struct Core {
     runtime_resolution_notify: Notify,
     skill_reconcile_notify: Notify,
     agent_run_cancellation_notify: Notify,
-    conversation_input_notify: Notify,
     pending_execution_recovery: Mutex<()>,
     skill_library: SkillLibraryService,
     mcp_config: McpConfigStore,
@@ -884,6 +888,42 @@ impl Core {
             "runtimeAvailability": availability,
             "searchEnvironment": self.runtime_search_environment.read().await.summary(),
         }))
+    }
+
+    async fn pump_runtime_ready_recipients(&self, kind: AdapterKind) -> Result<()> {
+        let recipients = {
+            let database = self.database.lock().await;
+            runtime_waiting_recipients(&database, kind.as_str())?
+        };
+        for (camp_id, recipient_agent_id) in recipients {
+            let mut database = self.database.lock().await;
+            let _ = dispatch_pending_for_recipient(
+                &mut database,
+                &camp_id,
+                &recipient_agent_id,
+                DeliveryDispatchTrigger::RuntimeReady,
+                true,
+            )?;
+        }
+        Ok(())
+    }
+
+    async fn pump_runtime_ready_recipient(&self, recipient_agent_id: &str) -> Result<()> {
+        let camps = {
+            let database = self.database.lock().await;
+            runtime_waiting_camps(&database, recipient_agent_id)?
+        };
+        for camp_id in camps {
+            let mut database = self.database.lock().await;
+            let _ = dispatch_pending_for_recipient(
+                &mut database,
+                &camp_id,
+                recipient_agent_id,
+                DeliveryDispatchTrigger::RuntimeReady,
+                true,
+            )?;
+        }
+        Ok(())
     }
 
     async fn resolve_product_runtime(
@@ -1598,8 +1638,8 @@ impl Core {
         let result: Result<Value> = async {
             let mut database = self.database.lock().await;
             let service = TeamToolService::default();
-            let authenticated_run = if request.tool_name == TEAM_CALL_MEMBER_TOOL_NAME {
-                service.authenticate_call_member_binding_or_recorded_scope(
+            let authenticated_run = if request.tool_name == CAMP_MESSAGE_SEND_TOOL_NAME {
+                service.authenticate_public_message_binding_or_recorded_scope(
                     &database,
                     &request.native_binding_id,
                     &request.binding_credential,
@@ -1635,10 +1675,10 @@ impl Core {
                 &request.runtime_tool_call_id,
             );
             let operation_result = match request.tool_name.as_str() {
-                TEAM_CALL_MEMBER_TOOL_NAME => {
-                    let input = serde_json::from_value::<TeamCallMemberInput>(request.input)
-                        .context("private call_member input is invalid")?;
-                    let invocation = TeamToolInvocation {
+                CAMP_MESSAGE_SEND_TOOL_NAME => {
+                    let input = serde_json::from_value::<CampMessageSendInput>(request.input)
+                        .context("camp.message.send input is invalid")?;
+                    let invocation = CampMessageSendInvocation {
                         native_binding_id: request.native_binding_id,
                         binding_credential: request.binding_credential,
                         runtime_tool_call_id: request.runtime_tool_call_id,
@@ -1646,17 +1686,17 @@ impl Core {
                     };
                     let execution =
                         if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
-                            service.call_member_attested(
+                            service.send_public_message_attested(
                                 &mut database,
                                 &invocation,
                                 agent_run_id,
                                 *execution_epoch,
                             )
                         } else {
-                            service.call_member(&mut database, &invocation)
+                            service.send_public_message(&mut database, &invocation)
                         }?;
                     evidence_replayed = execution.replayed;
-                    evidence_receipt_id = execution.result.payload["acceptanceReceiptId"]
+                    evidence_receipt_id = execution.result.payload["messageId"]
                         .as_str()
                         .map(str::to_string);
                     command_execution_payload(execution)
@@ -1885,9 +1925,6 @@ impl Core {
                 eprintln!("failed to record Built-in Tool result evidence: {error:#}");
             }
         }
-        if result.is_ok() && evidence_tool_name == TEAM_CALL_MEMBER_TOOL_NAME {
-            self.conversation_input_notify.notify_one();
-        }
         match result {
             Ok(result) => TeamToolIpcResponse {
                 result: Some(result),
@@ -1993,6 +2030,9 @@ impl Core {
                 if needs_resolution {
                     self.ensure_runtime_check(adapter_kind).await?;
                 }
+                if execution.result.status == CommandResultStatus::Applied && !needs_resolution {
+                    self.pump_runtime_ready_recipient(&agent_id).await?;
+                }
                 if execution.result.status == CommandResultStatus::Applied {
                     self.skill_reconcile_notify.notify_one();
                 }
@@ -2013,6 +2053,26 @@ impl Core {
                         .await;
                     self.skill_reconcile_notify.notify_one();
                 }
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "message.delivery.retry" => {
+                let params: UserCommandParams<RetryMessageDeliveryCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = MessageDeliveryService::default().retry(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "message.delivery.cancel" => {
+                let params: UserCommandParams<CancelMessageDeliveryCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = MessageDeliveryService::default().cancel(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
             "members.presence.set" => {
@@ -3489,9 +3549,7 @@ impl Core {
             )
         };
         match rejection {
-            Ok(execution) if execution.result.status != CommandResultStatus::Rejected => {
-                self.conversation_input_notify.notify_one();
-            }
+            Ok(execution) if execution.result.status != CommandResultStatus::Rejected => {}
             Ok(_) => {}
             Err(rejection_error) => {
                 eprintln!(
@@ -3558,7 +3616,6 @@ impl Core {
             };
             match acknowledgement {
                 Ok(execution) if execution.result.status == CommandResultStatus::Applied => {
-                    self.conversation_input_notify.notify_one();
                     emit(
                         output,
                         "agent_run.cancelled",
@@ -5035,7 +5092,6 @@ impl Core {
                 )
             }?;
             if terminal.result.status != CommandResultStatus::Rejected {
-                self.conversation_input_notify.notify_one();
                 emit(
                     output,
                     "agent_run.terminal",
@@ -5316,7 +5372,6 @@ impl Core {
                 )
             }?;
             if terminal.result.status != CommandResultStatus::Rejected {
-                self.conversation_input_notify.notify_one();
                 emit(
                     output,
                     "agent_run.terminal",
@@ -5664,9 +5719,7 @@ impl Core {
             )
         };
         match failure {
-            Ok(execution) if execution.result.status != CommandResultStatus::Rejected => {
-                self.conversation_input_notify.notify_one();
-            }
+            Ok(execution) if execution.result.status != CommandResultStatus::Rejected => {}
             Ok(_) => {}
             Err(failure_error) => {
                 eprintln!(
@@ -5742,9 +5795,7 @@ impl Core {
             )
         };
         match failure {
-            Ok(execution) if execution.result.status != CommandResultStatus::Rejected => {
-                self.conversation_input_notify.notify_one();
-            }
+            Ok(execution) if execution.result.status != CommandResultStatus::Rejected => {}
             Ok(_) => {}
             Err(failure_error) => {
                 eprintln!(
@@ -6039,6 +6090,13 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
     SkillProjectionReconciler.reconcile_known_roots(&mut database, &skill_library)?;
     mcp_projection.cleanup_terminal_and_orphaned(&database)?;
     let v2_recovery = database.prepare_v2_recovery()?;
+    let interrupted_deliveries =
+        mark_unstarted_deliveries_interrupted_before_dispatch(&mut database)?;
+    if interrupted_deliveries != 0 {
+        eprintln!(
+            "Message Delivery startup recovery marked {interrupted_deliveries} unstarted Delivery rows as interrupted_before_dispatch"
+        );
+    }
     if v2_recovery.runs_waiting_for_recovery != 0
         || v2_recovery.actions_returned_to_prepared != 0
         || v2_recovery.actions_marked_unknown != 0
@@ -6092,7 +6150,6 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
         runtime_resolution_notify: Notify::new(),
         skill_reconcile_notify: Notify::new(),
         agent_run_cancellation_notify: Notify::new(),
-        conversation_input_notify: Notify::new(),
         pending_execution_recovery: Mutex::new(()),
         skill_library,
         mcp_config,
@@ -7206,7 +7263,6 @@ async fn persist_acp_prompt_completion(
         };
         match terminal {
             Ok(terminal) if terminal.result.status != CommandResultStatus::Rejected => {
-                core.conversation_input_notify.notify_one();
                 emit(
                     output,
                     "agent_run.terminal",
@@ -7615,7 +7671,6 @@ async fn process_agent_run_codex_message(
         };
         match terminal {
             Ok(terminal) if terminal.result.status != CommandResultStatus::Rejected => {
-                core.conversation_input_notify.notify_one();
                 emit(
                     output,
                     "agent_run.terminal",
@@ -8021,17 +8076,12 @@ async fn process_agent_run_scheduler(
         tokio::select! {
             _ = interval.tick() => {
                 core.expire_elapsed_execution_budgets(&output).await;
-                materialize_conversation_inputs(&core, &output).await;
                 core.dispatch_runtime_deliveries(&output).await;
                 core.dispatch_agent_run_cancellations(&output).await;
                 core.dispatch_agent_runs(&output).await;
             },
             _ = core.agent_run_cancellation_notify.notified() => {
                 core.dispatch_agent_run_cancellations(&output).await;
-            },
-            _ = core.conversation_input_notify.notified() => {
-                materialize_conversation_inputs(&core, &output).await;
-                core.dispatch_agent_runs(&output).await;
             },
             _ = skill_interval.tick() => {
                 core.reconcile_skills_periodically().await;
@@ -8046,23 +8096,6 @@ async fn process_agent_run_scheduler(
             },
             _ = &mut shutdown => break,
         }
-    }
-}
-
-async fn materialize_conversation_inputs(core: &Core, output: &mpsc::UnboundedSender<String>) {
-    let observed_now = camp_turn_execution_budget_now();
-    let result = {
-        let mut database = core.database.lock().await;
-        materialize_pending_inputs_at(&mut database, 100, observed_now)
-    };
-    match result {
-        Ok(0) => {}
-        Ok(count) => emit(
-            output,
-            "conversation_input.materialized",
-            json!({ "count": count }),
-        ),
-        Err(error) => eprintln!("Conversation Input reconciliation failed: {error:#}"),
     }
 }
 
@@ -8095,6 +8128,14 @@ async fn process_runtime_check_manager(
                             "background Runtime check failed for {}: {error:#}",
                             kind.as_str()
                         );
+                    }
+                    Some(Ok((kind, Ok(true)))) => {
+                        if let Err(error) = core.pump_runtime_ready_recipients(kind).await {
+                            eprintln!(
+                                "failed to pump Message Deliveries after Runtime {} became ready: {error:#}",
+                                kind.as_str()
+                            );
+                        }
                     }
                     Some(Err(error)) => {
                         eprintln!("background Runtime check worker failed: {error}");
@@ -8259,6 +8300,9 @@ fn command_execution_payload(execution: CommandExecution) -> Result<Value> {
 }
 
 fn command_rejection_details(code: &str, payload: &Value) -> Option<Value> {
+    if code.starts_with("message.") {
+        return payload.get("details").cloned();
+    }
     let allowed_fields: &[&str] = match code {
         "task.version_conflict" => &["taskId", "currentVersion"],
         "memory.version_conflict" => &["memoryId", "currentVersion"],
