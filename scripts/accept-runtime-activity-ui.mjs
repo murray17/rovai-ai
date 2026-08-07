@@ -35,12 +35,12 @@ const runtimes = [
   runtime('claude', 'claude-code-cli', 'Claude Code', null, null, {
     protocol: 'claude-stream-json', domain: 'runtime', semantic: 'runtime.run', runLevelOnly: true
   }),
-  runtime('antigravity', 'antigravity-app', 'Antigravity', 'team.call_member', 'Core 已验证', {
+  runtime('antigravity', 'antigravity-app', 'Antigravity', 'camp.message.send', 'Core 已验证', {
     protocol: 'antigravity-log', domain: 'tool', semantic: 'tool.call',
     evidenceKind: 'runtime.action', eventType: 'runtime.action', sourceAuthority: 'core',
     credibility: 'core_verified', payload: {
       toolCallId: 'op-antigravity', status: 'completed', kind: 'mcp_tool_call',
-      title: 'Built-in CLI', sourceAuthority: 'core', canonicalTool: 'team.call_member', output: 'delivered'
+      title: 'Built-in CLI', sourceAuthority: 'core', canonicalTool: 'camp.message.send', output: 'delivered'
     }
   })
 ]
@@ -104,7 +104,7 @@ try {
       canonicalToolRows: totalToolRows,
       codexLifecycleMergedToOneRow: observed.find((row) => row.runtime === 'Codex CLI')?.toolTitles.length === 1,
       claudeRunLevelDoesNotInventTools: observed.find((row) => row.runtime === 'Claude Code')?.toolTitles.length === 0,
-      antigravityCoreToolCatalogName: observed.find((row) => row.runtime === 'Antigravity')?.toolTitles[0] === 'team.call_member'
+      antigravityCoreToolCatalogName: observed.find((row) => row.runtime === 'Antigravity')?.toolTitles[0] === 'camp.message.send'
     },
     runtimes: observed,
     captures: { top: topCapture, bottom: bottomCapture }
@@ -153,12 +153,20 @@ async function initializeDatabase() {
 
 async function seedFixture() {
   const now = '2026-08-05T12:00:00Z'
+  const installationRows = runtimes.map((entry) => `(
+    ${sqlLiteral(`installation-runtime-${entry.key}`)}, ${sqlLiteral(entry.adapterKind)},
+    ${sqlLiteral(`/fixture/${entry.key}`)}, ${sqlLiteral(entry.key)}, 'custom', 'custom',
+    'fixture', 1, 1, 'valid', 1, ${sqlLiteral(now)}, ${sqlLiteral(now)}
+  )`).join(',\n')
   const profileRows = runtimes.map((entry, index) => `(
     ${sqlLiteral(`uuid-runtime-${entry.key}`)}, ${sqlLiteral(entry.agentId)},
     ${sqlLiteral(`runtime-${entry.key}`)}, ${sqlLiteral(`${entry.runtimeName} 验收`)},
     ${sqlLiteral(['#5B6C8F', '#4C7A78', '#6B668E', '#7A6756', '#5E7485', '#76627A', '#5C7960', '#786C59', '#596D7B'][index])},
-    0, '{}', ${sqlLiteral(now)}, ${sqlLiteral(now)}, '[]', 'present', 1,
-    ${sqlLiteral(`runtime_${entry.key}`)}, ${100 + index}, ${sqlLiteral(entry.adapterKind)},
+    1, '{}', ${sqlLiteral(now)}, ${sqlLiteral(now)}, '[]', 'present', 1,
+    ${sqlLiteral(`runtime_${entry.key}`)}, ${100 + index},
+    ${sqlLiteral(entry.adapterKind)}, ${sqlLiteral(`installation-runtime-${entry.key}`)},
+    '{"mode":"runtime_default"}',
+    ${sqlLiteral(JSON.stringify({ adapterKind: entry.adapterKind, schemaVersion: 1, values: {} }))},
     'Runtime Activity 验收', '', '[]', '', ''
   )`).join(',\n')
   const memberRows = runtimes.map((entry) => `(
@@ -209,20 +217,27 @@ async function seedFixture() {
   await runSql(databasePath, `
     PRAGMA foreign_keys = ON;
     BEGIN IMMEDIATE;
+    INSERT INTO adapter_installation(
+      id, adapter_kind, executable_path, command_name, installation_class,
+      source, auth_scope, enabled, generation, path_state, version,
+      created_at, updated_at
+    ) VALUES ${installationRows};
     INSERT INTO agent_profile(
       uuid, id, slug, display_name, accent, runtime_enabled, visual_state_json,
       created_at, updated_at, default_capabilities_json, profile_status, version,
-      handle, member_order, selected_runtime_adapter_kind, team_role,
+      handle, member_order, selected_runtime_adapter_kind,
+      default_runtime_installation_id, default_model_selection_json,
+      default_permission_config_json, team_role,
       professional_responsibilities, personality_traits_json,
       working_principles, growth_topic
     ) VALUES ${profileRows};
     INSERT INTO camp(
       id, title, name_origin, collaboration_mode, project_binding_kind,
-      project_path, default_lead_agent_id, status, last_message_sequence,
+      project_path, default_lead_agent_id, last_message_sequence,
       version, created_at, updated_at
     ) VALUES (
       ${sqlLiteral(campId)}, ${sqlLiteral(campTitle)}, 'user', 'peer', 'quick_chat',
-      '', ${sqlLiteral(runtimes[0].agentId)}, 'active', ${runtimes.length}, 1,
+      '', ${sqlLiteral(runtimes[0].agentId)}, ${runtimes.length}, 1,
       ${sqlLiteral(now)}, ${sqlLiteral(now)}
     );
     INSERT INTO camp_member(
@@ -289,7 +304,7 @@ async function seedActivity(entry, index) {
   const evidenceIds = evidence.map((item) => item.id)
   const toolName = entry.payload.toolName
     ?? (entry.key === 'codex' ? 'filesystem/read_file' : null)
-    ?? (entry.sourceAuthority === 'core' ? 'team.call_member' : null)
+    ?? (entry.sourceAuthority === 'core' ? 'camp.message.send' : null)
   await runSql(databasePath, `
     PRAGMA foreign_keys = ON;
     BEGIN IMMEDIATE;
@@ -318,18 +333,36 @@ async function seedActivity(entry, index) {
 }
 
 async function collectRuntimeRows(cdp) {
-  return evaluate(cdp, `(() => [...document.querySelectorAll(${JSON.stringify(runArticleSelector)})].map((article) => {
-    const meta = article.querySelector('.bubble-meta')
-    const spans = [...(meta?.querySelectorAll(':scope > span') ?? [])].map((span) => span.textContent?.trim() ?? '')
-    return {
-      member: meta?.querySelector('strong')?.textContent?.trim() ?? '',
-      runtime: spans.find((text) => ${JSON.stringify(runtimes.map((entry) => entry.runtimeName))}.includes(text)) ?? '',
-      toolTitles: [...article.querySelectorAll('.tool-call-title')].map((node) => node.textContent?.trim() ?? ''),
-      toolSources: [...article.querySelectorAll('.tool-call-source')].map((node) => node.textContent?.trim() ?? ''),
-      body: article.querySelector('.message-content')?.textContent?.trim()
-        ?? article.querySelector('.safe-markdown')?.textContent?.trim() ?? ''
+  const chipCount = await evaluate(cdp, `document.querySelectorAll('.run-pulse-chip').length`)
+  const rows = []
+  for (let index = 0; index < chipCount; index += 1) {
+    await evaluate(cdp, `document.querySelectorAll('.run-pulse-chip')[${index}]?.click()`)
+    await waitForExpression(cdp, `Boolean(document.querySelector('.execution-drawer'))`)
+    await evaluate(cdp, `document.querySelector('.execution-drawer details.execution-disclosure summary')?.click()`)
+    const selectedMember = await evaluate(cdp, `document.querySelector('.execution-detail-heading strong')?.textContent?.trim() ?? ''`)
+    const expectedTool = runtimes.find((entry) => `${entry.runtimeName} 验收` === selectedMember)?.expectedToolName
+    if (expectedTool !== null && expectedTool !== undefined) {
+      await waitForExpression(cdp, `document.querySelectorAll('.execution-drawer .tool-call-title').length > 0`, 10_000)
+    } else {
+      await wait(150)
     }
-  }))()`)
+    rows.push(await evaluate(cdp, `(() => {
+      const selectedMember = document.querySelector('.execution-detail-heading strong')?.textContent?.trim() ?? ''
+      const article = [...document.querySelectorAll(${JSON.stringify(runArticleSelector)})]
+        .find((candidate) => candidate.querySelector('.bubble-meta strong')?.textContent?.trim() === selectedMember)
+      const meta = article?.querySelector('.bubble-meta')
+      const spans = [...(meta?.querySelectorAll(':scope > span') ?? [])].map((span) => span.textContent?.trim() ?? '')
+      return {
+        member: selectedMember,
+        runtime: spans.find((text) => ${JSON.stringify(runtimes.map((entry) => entry.runtimeName))}.includes(text)) ?? '',
+        toolTitles: [...document.querySelectorAll('.execution-drawer .tool-call-title')].map((node) => node.textContent?.trim() ?? ''),
+        toolSources: [...document.querySelectorAll('.execution-drawer .tool-call-source')].map((node) => node.textContent?.trim() ?? ''),
+        body: article?.querySelector('.message-content')?.textContent?.trim()
+          ?? article?.querySelector('.safe-markdown')?.textContent?.trim() ?? ''
+      }
+    })()`))
+  }
+  return rows
 }
 
 function assertRuntimeRows(observed) {

@@ -18,9 +18,6 @@ use crate::{
         DomainCommandGateway, EntityReference, sealed,
     },
     context_index::index_camp_message,
-    conversation_input::{
-        cancel_turn_inputs, turn_has_failed_or_cancelled_input, turn_has_pending_input,
-    },
     db::Database,
     execution_budget::{CampTurnExecutionBudgetExhaustionReason, camp_turn_execution_budget_now},
     git::GitObservation,
@@ -280,7 +277,6 @@ pub struct CampTurnExecutionBudgetExpiry {
     pub camp_id: String,
     pub deadline_at: String,
     pub agent_runs_fenced: i64,
-    pub conversation_inputs_cancelled: usize,
 }
 
 impl QueuedAgentRunCandidate {
@@ -652,7 +648,6 @@ impl ExecutionRuntimeService {
                     camp_id,
                     deadline_at,
                     agent_runs_fenced: exhaustion.agent_runs_fenced,
-                    conversation_inputs_cancelled: exhaustion.conversation_inputs_cancelled,
                 });
             }
         }
@@ -768,8 +763,7 @@ impl ExecutionRuntimeService {
                              AND earlier_run.id < agent_run.id))
               )
               AND (
-                  agent_run.trigger_conversation_input_id IS NOT NULL
-                  OR agent_run.task_id IS NULL
+                  agent_run.task_id IS NULL
                   OR EXISTS (
                       SELECT 1 FROM task
                       WHERE task.id = agent_run.task_id
@@ -1128,7 +1122,6 @@ impl ExecutionRuntimeService {
                         "campTurnId": run.camp_turn_id,
                         "deadlineAt": run.execution_budget_deadline_at,
                         "agentRunsFenced": exhaustion.agent_runs_fenced,
-                        "conversationInputsCancelled": exhaustion.conversation_inputs_cancelled,
                     }),
                 ));
             }
@@ -1167,8 +1160,7 @@ impl ExecutionRuntimeService {
                     "Current Camp authorization no longer covers the frozen AgentRun",
                 ));
             }
-            if run.trigger_conversation_input_id.is_none()
-                && let Some(task_id) = run.task_id.as_deref()
+            if let Some(task_id) = run.task_id.as_deref()
                 && !task_is_executable(transaction, task_id, &run.camp_id)?
             {
                 return Ok(rejected(
@@ -1513,8 +1505,6 @@ impl ExecutionRuntimeService {
                 "#,
                 params![envelope.payload.camp_turn_id, now, envelope.command_id,],
             )?;
-            let input_summary =
-                cancel_turn_inputs(transaction, &envelope.payload.camp_turn_id, &now)?;
             let message_deliveries_cancelled = cancel_pending_turn_deliveries(
                 transaction,
                 &envelope.payload.camp_turn_id,
@@ -1544,7 +1534,6 @@ impl ExecutionRuntimeService {
                 None,
                 &json!({
                     "agentRunCount": runs.len(),
-                    "conversationInputsCancelled": input_summary.inputs_cancelled,
                     "messageDeliveriesCancelled": message_deliveries_cancelled,
                 }),
             )?;
@@ -1575,7 +1564,6 @@ impl ExecutionRuntimeService {
                 json!({
                     "campTurnId": envelope.payload.camp_turn_id,
                     "agentRunCount": runs.len(),
-                    "conversationInputsCancelled": input_summary.inputs_cancelled,
                     "messageDeliveriesCancelled": message_deliveries_cancelled,
                     "campTurnStatus": camp_turn_status,
                 }),
@@ -3138,9 +3126,6 @@ pub(crate) fn recompute_camp_turn(
     let has_failed_delivery = delivery_statuses
         .iter()
         .any(|status| matches!(status.as_str(), "failed" | "interrupted_before_dispatch"));
-    let has_pending_input = turn_has_pending_input(transaction, camp_turn_id)?;
-    let (has_failed_input, has_cancelled_input) =
-        turn_has_failed_or_cancelled_input(transaction, camp_turn_id)?;
     let next_status = if budget_exhausted_at.is_some() {
         if has_nonterminal || has_nonterminal_delivery {
             "waiting"
@@ -3153,16 +3138,14 @@ pub(crate) fn recompute_camp_turn(
         } else {
             "cancelled"
         }
-    } else if has_nonterminal || has_nonterminal_delivery || has_pending_input {
+    } else if has_nonterminal || has_nonterminal_delivery {
         if runs.iter().any(|(_, status, _, _)| status == "waiting") {
             "waiting"
         } else {
             "running"
         }
-    } else if has_failed_input || has_failed_delivery {
+    } else if has_failed_delivery {
         "failed"
-    } else if has_cancelled_input {
-        "cancelled"
     } else if runs.iter().any(|(role, status, retry, declined)| {
         role == "required" && status == "failed" && *retry && declined.is_none()
     }) {
@@ -3242,7 +3225,6 @@ struct ClaimableRun {
     camp_turn_id: String,
     conversation_id: String,
     task_id: Option<String>,
-    trigger_conversation_input_id: Option<String>,
     input_ready_at: Option<String>,
     effective_config: Value,
     workspace: Option<Value>,
@@ -3267,7 +3249,7 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
             r#"
             SELECT agent_run.id, camp_turn.camp_id, agent_run.camp_turn_id,
                    agent_run.conversation_id,
-                   agent_run.task_id, agent_run.trigger_conversation_input_id,
+                   agent_run.task_id,
                    agent_run.input_ready_at,
                    agent_run.effective_config_json, agent_run.workspace_json,
                    agent_run.status, agent_run.wait_reason,
@@ -3301,22 +3283,21 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                     row.get::<_, String>(3)?,
                     row.get::<_, Option<String>>(4)?,
                     row.get::<_, Option<String>>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, String>(7)?,
-                    row.get::<_, Option<String>>(8)?,
-                    row.get::<_, String>(9)?,
-                    row.get::<_, Option<String>>(10)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, i64>(10)?,
                     row.get::<_, i64>(11)?,
-                    row.get::<_, i64>(12)?,
-                    row.get::<_, Option<String>>(13)?,
-                    row.get::<_, i64>(14)?,
-                    row.get::<_, String>(15)?,
+                    row.get::<_, Option<String>>(12)?,
+                    row.get::<_, i64>(13)?,
+                    row.get::<_, String>(14)?,
+                    row.get::<_, Option<String>>(15)?,
                     row.get::<_, Option<String>>(16)?,
-                    row.get::<_, Option<String>>(17)?,
-                    row.get::<_, String>(18)?,
-                    row.get::<_, i64>(19)?,
+                    row.get::<_, String>(17)?,
+                    row.get::<_, i64>(18)?,
+                    row.get::<_, String>(19)?,
                     row.get::<_, String>(20)?,
-                    row.get::<_, String>(21)?,
                 ))
             },
         )
@@ -3328,7 +3309,6 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                 camp_turn_id,
                 conversation_id,
                 task_id,
-                trigger_conversation_input_id,
                 input_ready_at,
                 effective_config,
                 workspace,
@@ -3352,7 +3332,6 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                     camp_turn_id,
                     conversation_id,
                     task_id,
-                    trigger_conversation_input_id,
                     input_ready_at,
                     effective_config: serde_json::from_str(&effective_config)
                         .context("AgentRun effective config is invalid")?,

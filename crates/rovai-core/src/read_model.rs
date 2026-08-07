@@ -2094,10 +2094,6 @@ fn load_events(
           AND (?3 IS NULL
                OR event_log.camp_id = ?3
                OR (event_log.camp_id IS NULL AND task.camp_id = ?3))
-          AND event_log.event_type NOT LIKE 'inbox_message.%'
-          AND event_log.event_type NOT LIKE 'conversation_input.%'
-          AND event_log.event_type NOT LIKE 'member_call.%'
-          AND event_log.event_type NOT LIKE 'team_tool.member_call_%'
         ORDER BY event_log.global_sequence {order}
         LIMIT ?4
         "#,

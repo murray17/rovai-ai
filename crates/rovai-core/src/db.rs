@@ -1038,6 +1038,9 @@ impl Database {
             if !self.schema_migration_applied(62)? {
                 self.migrate_single_authority_delivery_context_v62()?;
             }
+            if !self.schema_migration_applied(63)? {
+                self.migrate_public_delivery_clean_break_v63()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -1273,6 +1276,9 @@ impl Database {
         }
         if !self.schema_migration_applied(62)? {
             self.migrate_single_authority_delivery_context_v62()?;
+        }
+        if !self.schema_migration_applied(63)? {
+            self.migrate_public_delivery_clean_break_v63()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -4987,6 +4993,143 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_public_delivery_clean_break_v63(&mut self) -> Result<()> {
+        // Rebuild AgentRun without the historical Conversation Input foreign key,
+        // then remove both private-delivery tables. This preserves every current
+        // Run column, explicit index and trigger while deleting only Rovai-owned
+        // compatibility data.
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let create_agent_run: String = transaction.query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_run'",
+                [],
+                |row| row.get(0),
+            )?;
+            let mut create_agent_run_v63 = create_agent_run
+                .replacen("CREATE TABLE agent_run", "CREATE TABLE agent_run_v63", 1)
+                .replacen(
+                    "CREATE TABLE \"agent_run\"",
+                    "CREATE TABLE agent_run_v63",
+                    1,
+                )
+                .replace("REFERENCES agent_run(", "REFERENCES agent_run_v63(")
+                .replace("REFERENCES \"agent_run\"(", "REFERENCES agent_run_v63(")
+                .lines()
+                .filter(|line| !line.contains("trigger_conversation_input_id TEXT"))
+                .collect::<Vec<_>>()
+                .join("\n")
+                .replace("+ (trigger_conversation_input_id IS NOT NULL)", "");
+            if !create_agent_run_v63.contains("runtime_compatibility_digest") {
+                let first_table_constraint = create_agent_run_v63
+                    .find("UNIQUE(camp_turn_id")
+                    .context("AgentRun schema has no table constraints")?;
+                create_agent_run_v63.insert_str(
+                    first_table_constraint,
+                    "runtime_compatibility_digest TEXT,\n trigger_message_delivery_id TEXT REFERENCES message_delivery(id),\n",
+                );
+            }
+            if create_agent_run_v63.contains("trigger_conversation_input_id") {
+                anyhow::bail!("v63 could not remove the historical AgentRun input trigger");
+            }
+
+            let columns = {
+                let mut statement = transaction.prepare("PRAGMA table_info(agent_run)")?;
+                statement
+                    .query_map([], |row| row.get::<_, String>(1))?
+                    .filter_map(|column| match column {
+                        Ok(column) if column != "trigger_conversation_input_id" => Some(Ok(column)),
+                        Ok(_) => None,
+                        Err(error) => Some(Err(error)),
+                    })
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            let quoted_columns = columns
+                .iter()
+                .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let schema_objects = {
+                let mut statement = transaction.prepare(
+                    r#"
+                    SELECT type, name, sql
+                    FROM sqlite_master
+                    WHERE (
+                        (tbl_name = 'agent_run' AND type IN ('index', 'trigger'))
+                        OR (type = 'trigger' AND instr(sql, 'agent_run') > 0)
+                    )
+                      AND sql IS NOT NULL
+                      AND name <> 'agent_run_trigger_conversation_input_unique'
+                    ORDER BY type, name
+                    "#,
+                )?;
+                statement
+                    .query_map([], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+
+            transaction.execute_batch(
+                r#"
+                DELETE FROM conversation_message WHERE source_inbox_message_id IS NOT NULL;
+                UPDATE agent_run SET trigger_conversation_input_id = NULL;
+                "#,
+            )?;
+            transaction.execute_batch(&create_agent_run_v63)?;
+            transaction.execute_batch(&format!(
+                "INSERT INTO agent_run_v63 ({quoted_columns}) SELECT {quoted_columns} FROM agent_run"
+            ))?;
+            for (object_type, name, _) in &schema_objects {
+                if object_type == "trigger" {
+                    transaction.execute_batch(&format!(
+                        "DROP TRIGGER \"{}\"",
+                        name.replace('"', "\"\"")
+                    ))?;
+                }
+            }
+            transaction.execute_batch(
+                r#"
+                DROP TABLE agent_run;
+                ALTER TABLE agent_run_v63 RENAME TO agent_run;
+                "#,
+            )?;
+            for (_, name, sql) in schema_objects {
+                transaction
+                    .execute_batch(&sql)
+                    .with_context(|| format!("failed to restore AgentRun schema object {name}"))?;
+            }
+            transaction.execute_batch(
+                r#"
+                DROP TABLE conversation_input;
+                DROP TABLE inbox_message;
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (63, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        self.connection.execute_batch("PRAGMA foreign_keys = ON;")?;
+        result?;
+        let foreign_key_violations: i64 = self.connection.query_row(
+            "SELECT COUNT(*) FROM pragma_foreign_key_check",
+            [],
+            |row| row.get(0),
+        )?;
+        if foreign_key_violations != 0 {
+            anyhow::bail!("v63 left {foreign_key_violations} foreign-key violations");
+        }
+        Ok(())
+    }
+
     fn migrate_camp_history_retrieval_v51(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -6900,6 +7043,7 @@ impl Database {
                 "camp_summary",
                 "context_summary",
                 "repository_commit_evidence",
+                "inbox_message",
             ] {
                 let exists = transaction.query_row(
                     "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
@@ -6919,7 +7063,6 @@ impl Database {
                 DELETE FROM runtime_input_delivery;
                 DELETE FROM context_manifest;
                 DELETE FROM message_attachment;
-                DELETE FROM inbox_message;
                 DELETE FROM conversation_message;
                 DELETE FROM camp_message;
                 DELETE FROM agent_run;
@@ -11401,8 +11544,8 @@ mod tests {
     }
 
     #[test]
-    fn v44_installs_durable_member_call_queue_without_return_protocol_state() {
-        let directory = std::env::temp_dir().join(format!("rovai-db-v44-test-{}", Uuid::new_v4()));
+    fn v63_removes_historical_private_delivery_tables() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v63-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
 
         let conversation_columns = table_columns(database.connection(), "conversation").unwrap();
@@ -11410,17 +11553,17 @@ mod tests {
         let run_columns = table_columns(database.connection(), "agent_run").unwrap();
         assert!(conversation_columns.contains(&"last_input_sequence".to_string()));
         assert!(turn_columns.contains(&"a2a_run_slots_allocated".to_string()));
-        assert!(run_columns.contains(&"trigger_conversation_input_id".to_string()));
+        assert!(!run_columns.contains(&"trigger_conversation_input_id".to_string()));
 
-        let conversation_input_exists: i64 = database
+        let private_delivery_tables: i64 = database
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'conversation_input'",
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('conversation_input', 'inbox_message')",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(conversation_input_exists, 1);
+        assert_eq!(private_delivery_tables, 0);
         let return_protocol_tables: i64 = database
             .connection()
             .query_row(
@@ -11430,35 +11573,16 @@ mod tests {
             )
             .unwrap();
         assert_eq!(return_protocol_tables, 0);
-        for schema_object in [
-            "agent_run_active_conversation_unique",
-            "agent_run_trigger_conversation_input_unique",
-        ] {
-            let exists: i64 = database
-                .connection()
-                .query_row(
-                    "SELECT COUNT(*) FROM sqlite_master WHERE name = ?1",
-                    [schema_object],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert_eq!(exists, 1, "{schema_object} should be installed");
-        }
-        let removed_input_columns: i64 = database
+        let schema_object = "agent_run_active_conversation_unique";
+        let exists: i64 = database
             .connection()
             .query_row(
-                r#"
-                SELECT COUNT(*) FROM pragma_table_info('conversation_input')
-                WHERE name IN (
-                    'kind', 'return_obligation_id', 'outcome_stage',
-                    'outcome_status', 'outcome_reason'
-                )
-                "#,
-                [],
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = ?1",
+                [schema_object],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(removed_input_columns, 0);
+        assert_eq!(exists, 1, "{schema_object} should be installed");
         let active_index_sql: String = database
             .connection()
             .query_row(
@@ -11487,6 +11611,15 @@ mod tests {
             })
             .unwrap();
         assert_eq!(migration_count, 1);
+        let clean_break_migration_count: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 63",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(clean_break_migration_count, 1);
         assert_eq!(foreign_key_violations, 0);
 
         drop(database);

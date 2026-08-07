@@ -635,7 +635,7 @@ impl ContextService {
                 } else if current_input.source_conversation_message_id.is_some() {
                     "conversation_message"
                 } else {
-                    "conversation_input"
+                    "camp_message"
                 }
                 .to_string(),
                 entity_id: current_input
@@ -667,8 +667,6 @@ impl ContextService {
         let current_input_source = json!({
             "sourceCampMessageId": current_input.source_camp_message_id,
             "conversationMessageId": current_input.source_conversation_message_id,
-            "sourceInboxMessageId": current_input.source_inbox_message_id,
-            "conversationInputId": current_input.source_conversation_input_id,
         });
         let attachment_digest = canonical_json_digest(&serde_json::to_value(&attachment_refs)?)?;
         let originating_public_user_message_ref = shared_conversation
@@ -1057,7 +1055,7 @@ impl ContextService {
                 } else if current_input.source_conversation_message_id.is_some() {
                     "conversation_message"
                 } else {
-                    "conversation_input"
+                    "camp_message"
                 }
                 .to_string(),
                 entity_id: current_input
@@ -1111,8 +1109,6 @@ impl ContextService {
             "currentInputSource": {
                 "sourceCampMessageId": current_input.source_camp_message_id,
                 "conversationMessageId": current_input.source_conversation_message_id,
-                "sourceInboxMessageId": current_input.source_inbox_message_id,
-                "conversationInputId": current_input.source_conversation_input_id,
             },
             "attachmentRefs": attachment_refs,
             "attachmentDigest": canonical_json_digest(&serde_json::to_value(&attachment_refs)?)?,
@@ -1486,7 +1482,6 @@ struct RunSnapshot {
     trigger_camp_message_id: Option<String>,
     trigger_message_delivery_id: Option<String>,
     trigger_conversation_message_id: Option<String>,
-    trigger_conversation_input_id: Option<String>,
     effective_config: Value,
     workspace: Value,
     runtime_installation_id: Option<String>,
@@ -1556,7 +1551,6 @@ fn prospective_delivery_snapshot(
         trigger_camp_message_id: request.trigger_camp_message_id.map(str::to_string),
         trigger_message_delivery_id: None,
         trigger_conversation_message_id: None,
-        trigger_conversation_input_id: None,
         effective_config: request.effective_config.clone(),
         workspace: request.workspace.clone(),
         runtime_installation_id: request.runtime_installation_id.map(str::to_string),
@@ -1595,7 +1589,6 @@ fn load_run_snapshot<R: ContextReadConnection>(
                    agent_run.trigger_camp_message_id,
                    agent_run.trigger_message_delivery_id,
                    agent_run.trigger_conversation_message_id,
-                   agent_run.trigger_conversation_input_id,
                    agent_run.effective_config_json, agent_run.workspace_json,
                    camp.default_lead_agent_id,
                    agent_run.runtime_installation_id,
@@ -1620,8 +1613,8 @@ fn load_run_snapshot<R: ContextReadConnection>(
             "#,
             params![agent_run_id, execution_epoch],
             |row| {
-                let effective_config: String = row.get(17)?;
-                let workspace: String = row.get(18)?;
+                let effective_config: String = row.get(16)?;
+                let workspace: String = row.get(17)?;
                 Ok(RunSnapshot {
                     agent_run_id: row.get(0)?,
                     camp_id: row.get(1)?,
@@ -1631,15 +1624,14 @@ fn load_run_snapshot<R: ContextReadConnection>(
                     task_id: row.get(5)?,
                     execution_epoch: row.get(6)?,
                     invocation_kind: row.get(9)?,
-                    a2a_parent_agent_run_id: row.get(30)?,
-                    a2a_root_agent_run_id: row.get(31)?,
+                    a2a_parent_agent_run_id: row.get(29)?,
+                    a2a_root_agent_run_id: row.get(30)?,
                     a2a_depth: row.get(10)?,
                     camp_message_boundary_sequence: row.get(11)?,
                     conversation_message_boundary_sequence: row.get(12)?,
                     trigger_camp_message_id: row.get(13)?,
                     trigger_message_delivery_id: row.get(14)?,
                     trigger_conversation_message_id: row.get(15)?,
-                    trigger_conversation_input_id: row.get(16)?,
                     effective_config: serde_json::from_str(&effective_config).map_err(|error| {
                         rusqlite::Error::FromSqlConversionFailure(
                             effective_config.len(),
@@ -1654,17 +1646,17 @@ fn load_run_snapshot<R: ContextReadConnection>(
                             Box::new(error),
                         )
                     })?,
-                    runtime_installation_id: row.get(20)?,
-                    runtime_binding_compatibility_digest: row.get(21)?,
-                    native_adapter_installation_id: row.get(22)?,
-                    native_session_id: row.get(23)?,
-                    native_binding_compatibility_digest: row.get(24)?,
-                    native_binding_id: row.get(25)?,
-                    native_binding_generation: row.get(26)?,
-                    last_accepted_public_boundary_sequence: row.get(27)?,
-                    native_charter_digest: row.get(28)?,
-                    native_member_state_digest: row.get(29)?,
-                    default_lead_agent_id: row.get(19)?,
+                    runtime_installation_id: row.get(19)?,
+                    runtime_binding_compatibility_digest: row.get(20)?,
+                    native_adapter_installation_id: row.get(21)?,
+                    native_session_id: row.get(22)?,
+                    native_binding_compatibility_digest: row.get(23)?,
+                    native_binding_id: row.get(24)?,
+                    native_binding_generation: row.get(25)?,
+                    last_accepted_public_boundary_sequence: row.get(26)?,
+                    native_charter_digest: row.get(27)?,
+                    native_member_state_digest: row.get(28)?,
+                    default_lead_agent_id: row.get(18)?,
                 })
             },
         )
@@ -2147,51 +2139,27 @@ fn load_memory_counterparty_order(
     snapshot: &RunSnapshot,
     present_members: &BTreeMap<String, (i64, String)>,
 ) -> Result<BTreeMap<String, i64>> {
-    let a2a_source = if let Some(input_id) = snapshot.trigger_conversation_input_id.as_deref() {
-        database
-            .connection()
-            .query_row(
-                r#"
-                SELECT inbox_message.sender_agent_id
-                FROM conversation_input
-                JOIN inbox_message
-                  ON inbox_message.id = conversation_input.source_inbox_message_id
-                WHERE conversation_input.id = ?1
-                  AND conversation_input.conversation_id = ?2
-                "#,
-                params![input_id, snapshot.conversation_id],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .optional()?
-            .flatten()
-            .into_iter()
-            .collect::<Vec<_>>()
-    } else {
-        snapshot
-            .trigger_conversation_message_id
-            .as_deref()
-            .map(|message_id| {
-                database
-                    .connection()
-                    .query_row(
-                        r#"
-                        SELECT inbox_message.sender_agent_id
-                        FROM conversation_message
-                        JOIN inbox_message
-                          ON inbox_message.id = conversation_message.source_inbox_message_id
-                        WHERE conversation_message.id = ?1
-                          AND conversation_message.conversation_id = ?2
-                        "#,
-                        params![message_id, snapshot.conversation_id],
-                        |row| row.get::<_, String>(0),
-                    )
-                    .optional()
-            })
-            .transpose()?
-            .flatten()
-            .into_iter()
-            .collect::<Vec<_>>()
-    };
+    let a2a_source = snapshot
+        .trigger_conversation_message_id
+        .as_deref()
+        .map(|message_id| {
+            database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT author_id
+                    FROM conversation_message
+                    WHERE id = ?1 AND conversation_id = ?2 AND author_type = 'agent'
+                    "#,
+                    params![message_id, snapshot.conversation_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+        })
+        .transpose()?
+        .flatten()
+        .into_iter()
+        .collect::<Vec<_>>();
 
     let mut task_participants = Vec::new();
     if let Some(task_id) = snapshot.task_id.as_deref()
@@ -2999,8 +2967,6 @@ struct CurrentInput {
     payload: Value,
     source_camp_message_id: Option<String>,
     source_conversation_message_id: Option<String>,
-    source_inbox_message_id: Option<String>,
-    source_conversation_input_id: Option<String>,
 }
 
 impl CurrentInput {
@@ -3022,9 +2988,8 @@ fn load_current_input<R: ContextReadConnection>(
     match (
         snapshot.trigger_camp_message_id.as_deref(),
         snapshot.trigger_conversation_message_id.as_deref(),
-        snapshot.trigger_conversation_input_id.as_deref(),
     ) {
-        (Some(camp_message_id), None, None) => {
+        (Some(camp_message_id), None) => {
             let (id, stored_body, structured_content_json) = database
                 .context_connection()
                 .query_row(
@@ -3063,11 +3028,9 @@ fn load_current_input<R: ContextReadConnection>(
                 }),
                 source_camp_message_id: Some(camp_message_id.to_string()),
                 source_conversation_message_id: None,
-                source_inbox_message_id: None,
-                source_conversation_input_id: None,
             })
         }
-        (None, Some(conversation_message_id), None) => database
+        (None, Some(conversation_message_id)) => database
             .context_connection()
             .query_row(
                 r#"
@@ -3075,11 +3038,8 @@ fn load_current_input<R: ContextReadConnection>(
                        conversation_message.author_type,
                        conversation_message.author_id,
                        conversation_message.body,
-                       conversation_message.source_inbox_message_id,
                        agent_profile.display_name
                 FROM conversation_message
-                LEFT JOIN inbox_message
-                  ON inbox_message.id = conversation_message.source_inbox_message_id
                 LEFT JOIN agent_profile
                   ON agent_profile.id = conversation_message.author_id
                 WHERE conversation_message.id = ?1
@@ -3092,7 +3052,6 @@ fn load_current_input<R: ContextReadConnection>(
                     snapshot.conversation_message_boundary_sequence,
                 ],
                 |row| {
-                    let source_inbox_message_id = row.get::<_, Option<String>>(4)?;
                     let sender_agent_id = row.get::<_, String>(2)?;
                     Ok(CurrentInput {
                         id: row.get(0)?,
@@ -3100,56 +3059,18 @@ fn load_current_input<R: ContextReadConnection>(
                             "source": {
                                 "type": "member_call",
                                 "senderAgentId": sender_agent_id,
-                                "senderName": row.get::<_, Option<String>>(5)?
+                                "senderName": row.get::<_, Option<String>>(4)?
                                     .unwrap_or_else(|| "Source Member".to_string()),
                             },
                             "message": row.get::<_, String>(3)?,
                         }),
                         source_camp_message_id: None,
                         source_conversation_message_id: Some(conversation_message_id.to_string()),
-                        source_inbox_message_id,
-                        source_conversation_input_id: None,
                     })
                 },
             )
             .optional()?
             .context("AgentRun trigger ConversationMessage does not exist"),
-        (None, None, Some(conversation_input_id)) => database
-            .context_connection()
-            .query_row(
-                r#"
-                SELECT id, model_payload_json, source_inbox_message_id
-                FROM conversation_input
-                WHERE id = ?1 AND conversation_id = ?2
-                  AND status = 'materialized'
-                  AND consuming_agent_run_id = ?3
-                "#,
-                params![
-                    conversation_input_id,
-                    snapshot.conversation_id,
-                    snapshot.agent_run_id,
-                ],
-                |row| {
-                    let payload_json = row.get::<_, String>(1)?;
-                    let payload = serde_json::from_str(&payload_json).map_err(|error| {
-                        rusqlite::Error::FromSqlConversionFailure(
-                            payload_json.len(),
-                            rusqlite::types::Type::Text,
-                            Box::new(error),
-                        )
-                    })?;
-                    Ok(CurrentInput {
-                        id: row.get(0)?,
-                        payload,
-                        source_camp_message_id: None,
-                        source_conversation_message_id: None,
-                        source_inbox_message_id: row.get(2)?,
-                        source_conversation_input_id: Some(conversation_input_id.to_string()),
-                    })
-                },
-            )
-            .optional()?
-            .context("AgentRun trigger ConversationInput does not exist or is not materialized"),
         _ => anyhow::bail!("AgentRun must have exactly one ready input trigger"),
     }
 }

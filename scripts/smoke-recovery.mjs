@@ -110,8 +110,7 @@ try {
 
   if (immediatelyRecovered.snapshot.agentRuns.length !== 1
       || immediatelyRecovered.snapshot.turns.length !== 1
-      || immediatelyRecovered.snapshot.tasks.length !== 1
-      || immediatelyRecovered.snapshot.inboxMessages.length !== 0) {
+      || immediatelyRecovered.snapshot.tasks.length !== 1) {
     throw new Error(`Recovery created duplicate collaboration state: ${JSON.stringify(immediatelyRecovered.snapshot)}`)
   }
   if (immediatelyRecovered.run.executionEpoch !== originalEpoch) {
@@ -130,8 +129,7 @@ try {
   if (finalSnapshot.agentRuns.length !== 1
       || finalSnapshot.turns.length !== 1
       || finalSnapshot.tasks.length !== 1
-      || finalSnapshot.tasks[0].id !== taskId
-      || finalSnapshot.inboxMessages.length !== 0) {
+      || finalSnapshot.tasks[0].id !== taskId) {
     throw new Error(`Recovered Camp contains duplicated objects: ${JSON.stringify(finalSnapshot)}`)
   }
   if (finalManifest?.id !== manifestId
@@ -178,7 +176,6 @@ try {
     taskCommandReplayStable: true,
     duplicateAgentRuns: 0,
     duplicateTasks: 0,
-    duplicateInboxMessages: 0,
     cleanSecondRestart: true
   }, null, 2)}\n`)
 } finally {

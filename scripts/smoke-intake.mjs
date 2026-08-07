@@ -94,11 +94,15 @@ try {
   }
 
   const sendCommandId = crypto.randomUUID()
+  const firstDraft = await saveComposerDraft(
+    core.request,
+    campId,
+    'Reply with INTAKE_OK. Do not call tools.'
+  )
   const firstRequest = {
     commandId: sendCommandId,
     campId,
-    body: 'Reply with INTAKE_OK. Do not call tools.',
-    address: { mode: 'default' },
+    draftRevision: firstDraft.revision,
     replyToCampMessageId: null,
     execution: {
       taskId: null,
@@ -136,11 +140,15 @@ try {
   }
 
   const firstConversationId = snapshot.agentRuns[0].conversationId
+  const followUpDraft = await saveComposerDraft(
+    core.request,
+    campId,
+    'Reply with CONTINUE_OK. Do not call tools.'
+  )
   const followUp = await core.request('camp.messages.send', {
     commandId: crypto.randomUUID(),
     campId,
-    body: 'Reply with CONTINUE_OK. Do not call tools.',
-    address: { mode: 'default' },
+    draftRevision: followUpDraft.revision,
     replyToCampMessageId: null,
     execution: {
       taskId: null,
@@ -258,6 +266,15 @@ function startCore(dataDirectory) {
     if (child.exitCode === null) child.kill('SIGTERM')
   }
   return { request, stop }
+}
+
+async function saveComposerDraft(request, campId, body) {
+  const current = await request('camp.composerDraft.get', { campId })
+  return request('camp.composerDraft.save', {
+    campId,
+    expectedRevision: current.revision,
+    content: [{ kind: 'text', text: body }]
+  })
 }
 
 async function waitFor(request, probe, label) {

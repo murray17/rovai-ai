@@ -19,10 +19,10 @@ use crate::{
         DeliveryContextPreview, FrozenDeliveryContext,
     },
     context_index::index_camp_message,
-    conversation_input::capture_run_runtime_basis,
     db::Database,
     execution_budget::{PRODUCT_MAX_ACCEPTED_A2A, camp_turn_execution_budget_now},
     runtime::AgentRunWorkspace,
+    runtime_basis::capture_run_runtime_basis,
 };
 
 pub const CAMP_MESSAGE_SEND_TOOL_NAME: &str = "camp.message.send";

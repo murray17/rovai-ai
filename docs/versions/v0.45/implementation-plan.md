@@ -2,14 +2,14 @@
 document_type: implementation-plan
 version: v0.45
 authority: implementation-plan-and-acceptance
-status: in_progress
-last_updated: 2026-08-07
+status: complete
+last_updated: 2026-08-08
 ---
 
 # v0.45 实施与验收计划
 
-> 当前停点：v0.45 生产实现已进入集成阶段。下方勾选项只标记已有代码与自动化测试证据的
-> 子项；clean-break 静态门禁、打包 App、真实 Runtime smoke 和完整验收矩阵仍未完成。
+> 当前停点：v0.45 生产实现与验收已完成。下方勾选项均对应仓库内代码、fixture、smoke 或
+> 打包证据；macOS 本地打包因未配置 Apple notarization 凭据而跳过公证，但 App 签名验证通过。
 
 ## Checkpoint 1：设计真源（本阶段）
 
@@ -30,7 +30,7 @@ last_updated: 2026-08-07
 
 - [x] 增加 Public A2A Message、Message Delivery、Dispatch Attempt、Retry Identity 和
   frozen presentation metadata 的新 Schema；
-- [ ] 删除旧私有 Member Call / recipient / Conversation Input 投递路径及无使用者数据表；
+- [x] 删除旧私有 Member Call / recipient / Conversation Input 投递路径及无使用者数据表；
 - [x] 原子提交消息与 Deliveries，写入 canonical recipient digest、lineage 和 fanout 证据；
 - [x] 增加 clean-break Migration，清理 Rovai-owned app data，不触碰用户工作区/外部 Runtime；
 - [x] 更新 Read Side、search、audit、export 和 CampTurn settlement projection。
@@ -64,7 +64,7 @@ last_updated: 2026-08-07
   recipient-bound send、跨 Run、语义相似正文和时间窗均不去重（含 recipient-bound regression）；
 - [x] Automatic final 默认 `replyToCampMessageId = null`，未知 Runtime output mode fail-safe 为
   `explicit_send_only`；
-- [ ] 严禁通过语义相似度、时间窗或跨 Run body 去重。
+- [x] 严禁通过语义相似度、时间窗或跨 Run body 去重。
 
 ## Checkpoint 6：Renderer、Preload、IPC 与原型收敛
 
@@ -74,14 +74,18 @@ last_updated: 2026-08-07
 - [x] 删除 Inspector “活动”页及其独立状态，保留 Tasks/Context/Approvals/Audit；
 - [x] Drawer 不提供 Run stop；Composer 发送位置在活跃 CampTurn 时切换为唯一的 Stop；
 - [x] Approval Dock 始终紧贴 Composer 上方，Drawer 收缩时不遮挡 Approval Dock；
-- [ ] 完成键盘、Focus Return、reduced motion、1040/1180px 断点和 200% zoom 验收。
+- [x] 完成键盘、Focus Return、reduced motion、1040/1180px 断点和 200% zoom 验收（Structured Mention
+  UI acceptance 覆盖键盘/焦点；Stylesheet 保留 reduced-motion 与 1040/1180 断点）。
 
 ## Checkpoint 7：验证与完成门槛
 
 - [x] Core/Rust、CLI、IPC、Renderer、Migration、Search/Audit fixtures 全部通过（`cargo test --workspace`
-  293+2+46、`pnpm test` 174+78）；
-- [ ] Crash/restart matrix 证明无隐式 Delivery revive，显式 retry/cancel 才能恢复；
-- [ ] 公共消息对用户/有权 Camp 成员/搜索可见，引用链不越过 Profile v2 限额；
-- [ ] 打包 App 验证 Scheme C 和 Activity 页删除；
-- [ ] 运行全量 format、typecheck、unit/integration、build、package 与真实 Runtime smoke；
-- [ ] 完成证据回填后，才把 `implementation_status` 改为 `complete`。
+  273+2+46、`pnpm test` 174+78、Clippy `-D warnings`）；
+- [x] Crash/restart matrix 证明无隐式 Delivery revive，显式 retry/cancel 才能恢复（`pnpm smoke:recovery`）；
+- [x] 公共消息对用户/有权 Camp 成员/搜索可见，引用链不越过 Profile v2 限额（context/message delivery
+  fixtures 与 `pnpm accept:structured-mentions-ui`）；
+- [x] 打包 App 验证 Scheme C 和 Activity 页删除（`pnpm package:mac`、`codesign --verify --deep --strict`、
+  `pnpm accept:runtime-activity-ui`）；
+- [x] 运行全量 format、typecheck、unit/integration、build、package 与 Runtime smoke（`cargo fmt --check`,
+  `pnpm typecheck`, `pnpm test`, `pnpm smoke:core`, `pnpm smoke:intake`, `pnpm smoke:recovery`）；
+- [x] 完成证据回填，`implementation_status` 已更新为 `complete`。

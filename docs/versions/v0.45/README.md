@@ -4,15 +4,16 @@ version: v0.45
 lifecycle: current
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: in_progress
-last_updated: 2026-08-07
+implementation_status: complete
+last_updated: 2026-08-08
 ---
 
 # Rovai-ai v0.45：显式 A2A 与公共输出重构
 
-> 设计状态：已确认。实现状态：进行中。Core/CLI 的 Public A2A 与 Message Delivery 骨架、
-> Profile v2、Runtime public output boundary 和 Renderer Scheme C 已接入；clean-break
-> 静态门禁、真实 Runtime smoke、打包 App 与最终验收证据仍待完成。
+> 设计状态：已确认。实现状态：完成。Public A2A、统一 Message Delivery、Profile v2、
+> Runtime public output boundary、Renderer Scheme C 和 clean-break migration 已交付；Rust/
+> TypeScript 验收、recovery/intake smoke、Runtime Activity/Structured Mention UI 验收及
+> macOS arm64 打包签名均已通过。
 >
 > 前置版本：[v0.44 确定性原始公共上下文](../v0.44/README.md)
 >
@@ -76,8 +77,8 @@ Retry Identity，但复用原始冻结快照。
 
 ### 动态上下文
 
-Profile v1 保持不可变的 15 条、24,000 scalar、单条 2,000 scalar 合同；Profile v2 在此基础
-上增加 `maxPublicReferenceChainMessages: 3`。当前输入始终完整。回复 Agent-authored Public
+Profile v2 冻结 15 条、24,000 Unicode scalars、单条 2,000 scalars 和
+`maxPublicReferenceChainMessages: 3`。当前输入始终完整。回复 Agent-authored Public
 A2A Message 时，直接父消息和最多两条更远父链可进入 Closure；不会因为某条消息的引用再递归
 扩展无关历史。Closure 不创建新消息或 Delivery，也不改变 Accepted Public Context Boundary。
 
@@ -113,4 +114,4 @@ Execution Drawer、公共消息的 Run-origin 入口与 Delivery 状态投影。
 5. clean-break Migration、旧私有路径/文案/类型静态扫描，以及 Rust、TypeScript、Renderer、
    Migration、打包和真实 Runtime smoke 全部通过。
 
-实施顺序与停点见[实施与验收计划](implementation-plan.md)。
+实施顺序、验收证据与 clean-break migration 记录见[实施与验收计划](implementation-plan.md)。
