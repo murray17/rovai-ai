@@ -13,9 +13,40 @@ last_updated: 2026-08-08
 
 - `current`：唯一的当前版本，可以随范围、实施和验收事实更新。
 - `historical`：已经冻结的历史快照，仅用于解释当时背景，不约束当前实现。
-- 进入下一版本时，先冻结当前版本，再更新本文件 Front Matter 中唯一的 `current_version`。
-- 历史文档只修复错字、失效链接或增加明确勘误，不根据新代码重写原始判断。
+- 本文件 Front Matter 中的 `current_version` 是仓库唯一可维护的当前版本指针。
+- 索引表中的唯一 `current` 行和各版本概览的 `lifecycle` 是该指针的状态投影，必须由
+  `pnpm docs:check` 验证一致。
+- 历史文档只修复错字、失效链接、错误元数据或增加明确勘误，不根据新代码重写原始判断。
 - 需要跨版本长期成立的决定必须提升为 ADR；版本文档只保留版本影响和 ADR 链接。
+
+## 版本切换清单
+
+创建版本或修改 `current_version` 时，必须按以下顺序完成：
+
+1. 将旧版本概览的 `lifecycle` 改为 `historical`，冻结其范围、实施状态和验收事实；
+2. 建立新版本概览与实施计划，并把新版本概览标为唯一 `current`；
+3. 更新本文件的 `current_version`、版本索引行和前后版本链接；
+4. 在新版本概览中完成“跨版本文档影响”记录；
+5. 运行 `pnpm docs:check`。缺少记录、存在多个 `current` 或索引不一致时，版本切换未完成。
+
+每个范围都必须给出“已更新”并附文件路径，或“确认无需更新”并附一句可审阅理由。
+目录自己的索引和维护指南拥有具体更新规则；本清单只拥有版本切换时的完整性要求。
+
+| 范围 | 必须判断的问题 | 规则入口 |
+| --- | --- | --- |
+| `Version lifecycle` | 旧/新版本概览、实施计划、Front Matter、索引和链接是否一致 | 本文件 |
+| `ADR` | 是否产生新的跨版本长期约束，或改变既有决定语义 | [ADR 索引与生命周期](../adr/README.md) |
+| `Contracts` | 字段级接口、Envelope、receipt、幂等、错误或投递语义是否变化 | [合同索引与生命周期](../contracts/README.md) |
+| `Architecture` | 组件职责、权威边界、进程或传输结构是否变化 | [长期架构索引](../architecture/README.md) |
+| `UI` | 是否改变跨版本 Renderer / UX 合同；版本局部设计不得自动提升为稳定规范 | [UI 规范索引](../ui/README.md) |
+| `Runtime Activity` | Runtime 接入或 Canonical Activity 映射、证据、展示是否变化 | [Runtime Activity 维护指南](../runtime-activity/README.md) |
+| `Runtime compatibility` | Runtime 实测版本、能力或兼容性结论是否变化 | [Runtime 兼容性清单](../runtime-compatibility.md) |
+| `Documentation routing` | 任务入口、当前合同或目录职责是否变化 | [文档导航](../README.md) |
+| `Root README` | 项目定位、常青能力或支持范围是否变化；不得写当前版本断言或版本流水账 | [项目 README](../../README.md) |
+
+新版本概览必须包含标题为 `## 跨版本文档影响` 的记录表，并使用上表九个稳定范围名。
+结论列只接受 `已更新` 或 `确认无需更新`；证据或理由不得为空。规则表只在本文件维护，
+`AGENTS.md` 和其他导航文档只链接到这里。
 
 ## 版本索引
 

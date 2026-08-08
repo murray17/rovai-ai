@@ -9,6 +9,14 @@ last_updated: 2026-08-08
 本目录保存跨版本、字段级且可由测试直接验证的接口合同。ADR 解释为什么选择某个边界，
 Architecture 解释组件如何组成，Version 文档记录交付范围；它们都不复制本目录的完整 wire shape。
 
+## 生命周期
+
+- 已接受且带版本号的合同语义冻结，只允许修正错字、链接、元数据和不改变语义的表达。
+- 字段、wire shape、错误、幂等或投递语义改变时，创建下一个 `<name>-vN.md`，不得原地改写
+  已接受版本；旧版本可继续约束既有持久对象或历史恢复。
+- 新增或切换合同版本时必须同步更新下方索引，明确当前入口与 historical 入口。合同的
+  `accepted` 只表示该版本语义成立，不表示它是新执行的当前入口，也不表示代码已经实现。
+
 | 合同 | 权威范围 |
 | --- | --- |
 | [Built-in Tool Transport v3](builtin-tool-transport-v3.md) | v0.46 Agent Result Projection、固定业务命令、Core Envelope/IPC、receipt、错误通道、显式 projection schema 与 catalog 边界 |

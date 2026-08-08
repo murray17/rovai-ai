@@ -45,6 +45,20 @@ v0.46 把 Agent 使用 `rovai` 的边界收敛为“固定业务命令 + 精简�
   ADR-0118 的受管 clean reset allowlist，不触碰用户工作区、外部 Runtime、Native Home、凭据或
   MCP 状态。
 
+## 跨版本文档影响
+
+| 范围 | 结论 | 证据或理由 |
+| --- | --- | --- |
+| Version lifecycle | 已更新 | [版本索引](../README.md)以本版本为唯一 `current_version`；[v0.45](../v0.45/README.md) 已冻结为 historical，并修正 v0.44 遗留的 lifecycle 元数据漂移 |
+| ADR | 已更新 | [ADR-0135](../../adr/0135-compact-agent-output-over-canonical-built-in-tool-envelope.md) 冻结 Agent Result Projection 与 compact output 边界 |
+| Contracts | 已更新 | [Built-in Tool Transport v3](../../contracts/builtin-tool-transport-v3.md)、[Camp Message Send v2](../../contracts/camp-message-send-v2.md)及[合同索引](../../contracts/README.md) |
+| Architecture | 已更新 | [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)与[Public A2A Message Delivery](../../architecture/public-a2a-message-delivery.md)同步当前组件边界 |
+| UI | 确认无需更新 | 本版本没有 Renderer、交互或视觉合同变化 |
+| Runtime Activity | 确认无需更新 | CLI 输出与 Camp 推导变化不改变 Canonical Runtime Activity 映射或 Renderer 分类 |
+| Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md)记录九种 Runtime 的 v3 真实调用矩阵 |
+| Documentation routing | 已更新 | [文档导航](../../README.md)通过版本索引解析当前版本，不再复制版本号 |
+| Root README | 已更新 | [项目 README](../../../README.md)删除版本流水账和当前版本断言，只保留常青项目入口 |
+
 ## 固定版本常量
 
 ```yaml

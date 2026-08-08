@@ -1,11 +1,11 @@
 ---
 document_type: version-overview
 version: v0.44
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
-last_updated: 2026-08-07
+last_updated: 2026-08-08
 ---
 
 # Rovai-ai v0.44 AgentRun 确定性原始公共上下文

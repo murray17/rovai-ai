@@ -19,6 +19,9 @@ pnpm test
 cargo test --workspace
 ```
 
+`pnpm test` 首先执行 `pnpm docs:check`，验证当前版本唯一性、版本索引覆盖和版本切换
+留痕。文档治理改动可以单独运行 `pnpm docs:check`；它不替代其余代码测试。
+
 需要把 warning 作为失败或验证桌面构建时：
 
 ```bash

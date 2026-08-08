@@ -1,7 +1,7 @@
 ---
 document_type: development-index
 authority: development-routing
-last_updated: 2026-07-30
+last_updated: 2026-08-08
 ---
 
 # Rovai-ai 开发者指南
@@ -38,6 +38,9 @@ pnpm test
 cargo test --workspace
 ```
 
+`pnpm test` 会先运行 `pnpm docs:check`，验证唯一当前版本指针、版本目录 Front Matter
+和版本索引一致。只修改版本治理文档时，可以先单独运行 `pnpm docs:check` 获得快速反馈。
+
 涉及 Rust lint、桌面构建或跨边界改动时继续运行：
 
 ```bash
@@ -59,8 +62,8 @@ pnpm build:desktop
 | 处理 Core、Runtime、Git、签名或测试卡住 | [常见问题排查](troubleshooting.md) |
 
 具体版本的页面矩阵、Schema 版本、Migration 路径和验收证据属于
-[`docs/versions/`](../versions/README.md)。当前版本入口由
-[`docs/README.md`](../README.md)声明。
+[`docs/versions/`](../versions/README.md)。唯一当前版本指针由
+[`docs/versions/README.md`](../versions/README.md)声明，[文档导航](../README.md)只负责路由。
 
 ## 真源与维护边界
 
