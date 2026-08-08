@@ -45,6 +45,27 @@ observability metric，不是兼容性或发布门槛。transport-independent re
 字段级合同以 [Built-in Tool Transport v4](contracts/builtin-tool-transport-v4.md) 为唯一真源，
 调用结构以 [Built-in Tool Runtime Architecture](architecture/builtin-tool-runtime.md) 为准。
 
+## Native Session compaction detector
+
+2026-08-08 的 v0.48 qualification 对六个目标 Runtime 执行真实 compaction，并观察 Rovai 选择的
+官方结构化 surface。detector 是 `best_effort` 内部增强能力；此表证明目标版本上 signal 可达，不把
+detector readiness 提升为 Runtime admission 条件。
+
+| Runtime | 实测版本 | 真实操作与观察 | v0.48 admission / transport | 结论与边界 |
+| --- | --- | --- | --- | --- |
+| GitHub Copilot | `1.0.78` | ACP Session 内真实 `/compact` 触发 Plugin `preCompact`，后续 ACP prompt accepted | one-shot `preCompact`；隔离 `--plugin-dir` | pass；目标 Hook payload 不带 event name，relay command 冻结 expected source；Unix Hook 使用 `bash` 字段 |
+| OpenCode | `1.18.10` | server summarize 完成并发出 native `session.compacted` | completed；隔离 native Plugin，prompt 保持 ACP | pass；ACP inbound 本身不转发该 native event |
+| Kiro | `2.16.1` | `_kiro.dev/commands/execute compact` 后观察 status `started`、`completed` | 仅 nested `params.status.type=completed`；现有 ACP inbound | pass；summary 不参与 admission 或 evidence digest |
+| Qoder | `1.1.14` | 真实 `/compact` 触发 `PostCompact(manual)` | completed；隔离 `--settings` Hook | pass |
+| CodeBuddy | `2.133.1` | 强制真实 emergency auto compaction 完成后触发 `SessionStart(source=compact)` | completed；隔离 `--plugin-dir` Plugin Hook | best-effort pass；CLI additional settings 未进入 Hook registry。该版本 pre-message compaction 实测绕过 `PreCompact`、`PostCompact` 和 `SessionStart(compact)`，因此存在已记录的 detector coverage gap，不使用 token heuristic 补猜 |
+| Qwen Code | `0.21.5` | 真实 `/compress` 完成并触发 `PostCompact(manual)` | completed；私有 `QWEN_HOME` user-scope Hook | pass；HookRegistry 不读取 system Hook，trigger matcher 为 exact match，配置 `*` 后由 relay 校验 trigger |
+
+Claude Code 与 Codex CLI 的 Bootstrap 位于普通 compaction 不触及的 instruction layer，不建立
+detector。Antigravity v0.48 policy 为 `disabled`，因为尚无合格 compaction lifecycle event；Rovai 不
+使用 token 数或 context telemetry 猜测 compaction。detector 建立失败、短暂中断或恢复都不改变九个
+Runtime 的 Built-in CLI 兼容性结论。完整时序与持久边界见
+[Native Session Bootstrap Redelivery](architecture/native-session-bootstrap-redelivery.md)。
+
 ## External MCP 兼容性
 
 External MCP Library、Assignment 与 Runtime-native Projection 保持独立。v0.43 已按

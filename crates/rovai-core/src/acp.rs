@@ -2,6 +2,8 @@
 use std::os::unix::process::CommandExt;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
+    fs::OpenOptions,
+    io::Write,
     path::{Component, Path, PathBuf},
     process::Stdio,
     sync::{
@@ -21,6 +23,7 @@ use rovai_core::{
     agent_runtime_adapter::write_kiro_additive_agent_config,
     builtin_tool_transport::{BUILTIN_TOOL_CONTRACT_VERSION, builtin_tool_catalog_digest},
     command::canonical_json_digest,
+    compaction::{CompactionDetectorPolicy, CompactionObserverLease},
     mcp::McpServerDefinition,
     runtime::{AgentRunWorkspace, PermissionSemantics},
     runtime_discovery::configure_active_runtime_command,
@@ -66,6 +69,17 @@ pub enum AcpIncoming {
         agent_run_id: String,
         execution_epoch: i64,
     },
+    CompactionObservation {
+        adapter_kind: AdapterKind,
+        host_instance_id: String,
+        observer_lease_id: String,
+        native_session_id: String,
+        source_observation_id: String,
+        source_signal: String,
+        admission_point: String,
+        source_event_digest: String,
+        observed_at: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -106,6 +120,11 @@ struct AcpSessionRoute {
     active_prompt_id: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct AcpCompactionObserverRoute {
+    lease: CompactionObserverLease,
+}
+
 #[derive(Debug, Default)]
 struct ObservedToolMetadata {
     native_kind: Option<String>,
@@ -140,12 +159,15 @@ pub(crate) struct AcpHost {
     stdin: Mutex<ChildStdin>,
     pending: Mutex<HashMap<u64, PendingRpc>>,
     next_id: AtomicU64,
+    next_compaction_observation_sequence: AtomicU64,
     routes: RwLock<HashMap<String, AcpSessionRoute>>,
+    compaction_observers: RwLock<HashMap<String, AcpCompactionObserverRoute>>,
     known_sessions: RwLock<HashSet<String>>,
     incoming: mpsc::UnboundedSender<AcpIncoming>,
     alive: AtomicBool,
     startup_diagnostics: Mutex<String>,
     private_config_root: Option<PathBuf>,
+    detector_config_root: Option<PathBuf>,
     ephemeral_config: Mutex<Option<EphemeralMcpConfigFile>>,
     executable_path: PathBuf,
     builtin_tools: Option<BuiltinToolProcessConfig>,
@@ -160,6 +182,7 @@ impl AcpHost {
         frozen_runtime: &FrozenAgentRuntimeConfig,
         incoming: mpsc::UnboundedSender<AcpIncoming>,
         builtin_tools: Option<BuiltinToolProcessConfig>,
+        compaction_detector_policy: CompactionDetectorPolicy,
         allow_client_fs: bool,
         external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
         private_runtime_dir: &Path,
@@ -167,6 +190,7 @@ impl AcpHost {
     ) -> Result<Arc<Self>> {
         let private_config_root =
             prepare_private_host_config(private_runtime_dir, frozen_runtime.adapter_kind)?;
+        let host_instance_id = uuid::Uuid::new_v4().to_string();
         let mut command = Command::new(&frozen_runtime.executable_path);
         configure_active_runtime_command(&mut command);
         if let Some(config) = &builtin_tools {
@@ -186,6 +210,32 @@ impl AcpHost {
             attachment_access_root,
         )
         .context("failed to configure ACP Runtime command")?;
+        let detector_config_root = if compaction_detector_policy
+            == CompactionDetectorPolicy::BestEffort
+        {
+            match builtin_tools.as_ref() {
+                Some(builtin_tools) => match configure_compaction_detector_command(
+                    &mut command,
+                    frozen_runtime.adapter_kind,
+                    &host_instance_id,
+                    builtin_tools,
+                    private_runtime_dir,
+                    cwd,
+                ) {
+                    Ok(root) => root,
+                    Err(error) => {
+                        eprintln!(
+                            "{} compaction detector configuration is unavailable; Runtime startup continues: {error:#}",
+                            frozen_runtime.adapter_kind.as_str()
+                        );
+                        None
+                    }
+                },
+                None => None,
+            }
+        } else {
+            None
+        };
         let process_working_directory = if frozen_runtime.adapter_kind == AdapterKind::KiroCli {
             private_config_root
                 .as_deref()
@@ -211,17 +261,20 @@ impl AcpHost {
         let stderr = child.stderr.take().context("ACP stderr was unavailable")?;
         let host = Arc::new(Self {
             adapter_kind: frozen_runtime.adapter_kind,
-            host_instance_id: uuid::Uuid::new_v4().to_string(),
+            host_instance_id,
             child: Mutex::new(child),
             stdin: Mutex::new(stdin),
             pending: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
+            next_compaction_observation_sequence: AtomicU64::new(1),
             routes: RwLock::new(HashMap::new()),
+            compaction_observers: RwLock::new(HashMap::new()),
             known_sessions: RwLock::new(HashSet::new()),
             incoming,
             alive: AtomicBool::new(true),
             startup_diagnostics: Mutex::new(String::new()),
             private_config_root,
+            detector_config_root,
             ephemeral_config: Mutex::new(ephemeral_config),
             executable_path: PathBuf::from(&frozen_runtime.executable_path),
             builtin_tools,
@@ -310,6 +363,10 @@ impl AcpHost {
                         }
                         let session_id =
                             message.pointer("/params/sessionId").and_then(Value::as_str);
+                        if let Some(session_id) = session_id {
+                            host.forward_compaction_observation(session_id, &message)
+                                .await;
+                        }
                         let route = if let Some(session_id) = session_id {
                             host.routes.read().await.get(session_id).cloned()
                         } else {
@@ -465,6 +522,70 @@ impl AcpHost {
             .insert(session_id.to_string());
     }
 
+    async fn install_compaction_observer(&self, lease: CompactionObserverLease) -> Result<()> {
+        if lease.adapter_kind != self.adapter_kind
+            || lease.host_instance_id != self.host_instance_id
+            || lease.native_session_id.trim().is_empty()
+        {
+            bail!("Compaction Observer Lease does not belong to this ACP Host");
+        }
+        self.compaction_observers.write().await.insert(
+            lease.native_session_id.clone(),
+            AcpCompactionObserverRoute { lease },
+        );
+        Ok(())
+    }
+
+    async fn forward_compaction_observation(&self, session_id: &str, message: &Value) {
+        let Some(detected) = detect_acp_compaction_signal(self.adapter_kind, message) else {
+            return;
+        };
+        let route = self
+            .compaction_observers
+            .read()
+            .await
+            .get(session_id)
+            .cloned();
+        let Some(route) = route else {
+            return;
+        };
+        let sequence = self
+            .next_compaction_observation_sequence
+            .fetch_add(1, Ordering::Relaxed);
+        let runtime_occurrence = detected.runtime_occurrence_id.as_deref().map_or_else(
+            || format!("host:{}:{sequence}", self.host_instance_id),
+            |occurrence| format!("runtime:{occurrence}"),
+        );
+        let source_observation_id = format!("{}:{runtime_occurrence}", detected.source_signal);
+        let source_event_digest = match canonical_json_digest(&json!({
+            "schemaVersion": 1,
+            "adapterKind": self.adapter_kind.as_str(),
+            "nativeSessionId": session_id,
+            "sourceSignal": detected.source_signal,
+            "admissionPoint": detected.admission_point,
+            "runtimeOccurrence": runtime_occurrence,
+        })) {
+            Ok(digest) => digest,
+            Err(error) => {
+                self.send_host_diagnostic(format!(
+                    "ACP compaction observation could not be digested: {error:#}"
+                ));
+                return;
+            }
+        };
+        let _ = self.incoming.send(AcpIncoming::CompactionObservation {
+            adapter_kind: self.adapter_kind,
+            host_instance_id: self.host_instance_id.clone(),
+            observer_lease_id: route.lease.id,
+            native_session_id: session_id.to_string(),
+            source_observation_id,
+            source_signal: detected.source_signal.to_string(),
+            admission_point: detected.admission_point.to_string(),
+            source_event_digest,
+            observed_at: chrono::Utc::now().to_rfc3339(),
+        });
+    }
+
     async fn unbind_session(&self, session_id: &str, owner: &AcpRuntimeOwner) {
         let mut routes = self.routes.write().await;
         if routes.get(session_id).map(|route| &route.owner) == Some(owner) {
@@ -551,6 +672,9 @@ impl AcpHost {
             let _ = timeout(Duration::from_secs(1), child.wait()).await;
         }
         if let Some(root) = self.private_config_root.as_ref() {
+            let _ = std::fs::remove_dir_all(root);
+        }
+        if let Some(root) = self.detector_config_root.as_ref() {
             let _ = std::fs::remove_dir_all(root);
         }
     }
@@ -679,6 +803,50 @@ fn diagnostic_is_explicit_mcp_rejection(diagnostic: &str) -> bool {
 
 fn acp_prompt_id(host_instance_id: &str, request_id: u64) -> String {
     format!("acp-prompt-{host_instance_id}-{request_id}")
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DetectedAcpCompactionSignal {
+    source_signal: &'static str,
+    admission_point: &'static str,
+    runtime_occurrence_id: Option<String>,
+}
+
+fn detect_acp_compaction_signal(
+    adapter_kind: AdapterKind,
+    message: &Value,
+) -> Option<DetectedAcpCompactionSignal> {
+    let method = message.get("method").and_then(Value::as_str)?;
+    let runtime_occurrence_id = message
+        .pointer("/params/compactionId")
+        .or_else(|| message.pointer("/params/operationId"))
+        .or_else(|| message.pointer("/params/id"))
+        .and_then(|value| {
+            value
+                .as_str()
+                .map(ToOwned::to_owned)
+                .or_else(|| value.as_i64().map(|value| value.to_string()))
+        });
+    match adapter_kind {
+        AdapterKind::KiroCli if method == "_kiro.dev/compaction/status" => {
+            let status = message
+                .pointer("/params/status/type")
+                .or_else(|| message.pointer("/params/status"))
+                .or_else(|| message.pointer("/params/state"))
+                .or_else(|| message.pointer("/params/phase"))
+                .and_then(Value::as_str)?;
+            matches!(
+                status,
+                "completed" | "complete" | "succeeded" | "success" | "compacted"
+            )
+            .then_some(DetectedAcpCompactionSignal {
+                source_signal: "_kiro.dev/compaction/status",
+                admission_point: "completed",
+                runtime_occurrence_id,
+            })
+        }
+        _ => None,
+    }
 }
 
 pub struct AcpRuntime {
@@ -860,6 +1028,17 @@ impl AcpRuntime {
             .await
             .context("ACP Session is not ready")?;
         self.host.start_prompt(&session_id, &self.owner, text).await
+    }
+
+    pub async fn install_compaction_observer(&self, lease: CompactionObserverLease) -> Result<()> {
+        let session_id = self
+            .session_id()
+            .await
+            .context("ACP Session is not ready for Compaction Observer establishment")?;
+        if lease.native_session_id != session_id {
+            bail!("Compaction Observer Lease targets another ACP Session");
+        }
+        self.host.install_compaction_observer(lease).await
     }
 
     pub async fn cancel(&self) -> Result<()> {
@@ -1070,6 +1249,7 @@ pub struct AcpCliRuntimeAdapter {
     incoming: mpsc::UnboundedSender<AcpIncoming>,
     private_runtime_dir: PathBuf,
     fleet: Arc<AgentRuntimeFleetManager>,
+    compaction_detector_policy: CompactionDetectorPolicy,
 }
 
 impl AcpCliRuntimeAdapter {
@@ -1078,6 +1258,7 @@ impl AcpCliRuntimeAdapter {
         incoming: mpsc::UnboundedSender<AcpIncoming>,
         private_runtime_dir: PathBuf,
         fleet: Arc<AgentRuntimeFleetManager>,
+        compaction_detector_policy: CompactionDetectorPolicy,
     ) -> Result<Self> {
         if !launchable_acp_adapter(kind) {
             bail!("{} is not a launchable ACP Adapter", kind.as_str());
@@ -1098,6 +1279,7 @@ impl AcpCliRuntimeAdapter {
             incoming,
             private_runtime_dir,
             fleet,
+            compaction_detector_policy,
         })
     }
 
@@ -1158,6 +1340,7 @@ impl AcpCliRuntimeAdapter {
                         frozen_runtime,
                         self.incoming.clone(),
                         Some(builtin_tools.clone()),
+                        self.compaction_detector_policy,
                         true,
                         external_mcp_servers,
                         &self.private_runtime_dir,
@@ -1474,6 +1657,353 @@ fn configure_runtime_command(
         }
     }
     Ok(None)
+}
+
+fn configure_compaction_detector_command(
+    command: &mut Command,
+    adapter_kind: AdapterKind,
+    host_instance_id: &str,
+    builtin_tools: &BuiltinToolProcessConfig,
+    private_runtime_dir: &Path,
+    runtime_cwd: &Path,
+) -> Result<Option<PathBuf>> {
+    if adapter_kind == AdapterKind::KiroCli {
+        // Kiro emits its structured compaction lifecycle notification directly
+        // on the ACP transport, so it needs no Runtime-side Hook installation.
+        return Ok(None);
+    }
+    if !matches!(
+        adapter_kind,
+        AdapterKind::OpencodeCli
+            | AdapterKind::CopilotCli
+            | AdapterKind::QoderCli
+            | AdapterKind::CodebuddyCli
+            | AdapterKind::QwenCode
+    ) {
+        return Ok(None);
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = (
+            command,
+            host_instance_id,
+            builtin_tools,
+            private_runtime_dir,
+            runtime_cwd,
+        );
+        bail!("Runtime Hook relay is not implemented on this platform");
+    }
+
+    #[cfg(unix)]
+    {
+        let root = private_runtime_dir
+            .join("compaction-detector")
+            .join(host_instance_id);
+        std::fs::create_dir_all(&root).with_context(|| {
+            format!(
+                "failed to create Compaction Detector directory {}",
+                root.display()
+            )
+        })?;
+        restrict_private_directory(&root)?;
+        let hook_command = format!(
+            "{} __compaction-hook --adapter-kind {} --host-instance-id {} --source-signal {}",
+            quote_posix_shell_word(&builtin_tools.cli_executable().to_string_lossy()),
+            quote_posix_shell_word(adapter_kind.as_str()),
+            quote_posix_shell_word(host_instance_id),
+            quote_posix_shell_word(match adapter_kind {
+                AdapterKind::CopilotCli => "preCompact",
+                AdapterKind::QoderCli | AdapterKind::QwenCode => "PostCompact",
+                AdapterKind::CodebuddyCli => "SessionStart",
+                AdapterKind::OpencodeCli => "session.compacted",
+                _ => unreachable!(),
+            }),
+        );
+        match adapter_kind {
+            AdapterKind::OpencodeCli => {
+                let plugin_path = root.join("opencode-compaction-observer.ts");
+                let cli = serde_json::to_string(
+                    &builtin_tools.cli_executable().to_string_lossy().as_ref(),
+                )?;
+                let host = serde_json::to_string(host_instance_id)?;
+                write_private_text_file(
+                    &plugin_path,
+                    &format!(
+                        r#"export const RovaiCompactionObserver = async () => ({{
+  event: async ({{ event }}) => {{
+    if (event?.type !== "session.compacted") return
+    const sessionId = event?.properties?.sessionID
+    if (typeof sessionId !== "string" || sessionId.length === 0) return
+    const child = Bun.spawn([
+      {cli}, "__compaction-hook", "--adapter-kind", "opencode-cli",
+      "--host-instance-id", {host}, "--source-signal", "session.compacted"
+    ], {{ stdin: "pipe", stdout: "ignore", stderr: "ignore" }})
+    child.stdin.write(JSON.stringify({{
+      session_id: sessionId,
+      hook_event_name: "session.compacted",
+      trigger: "completed",
+      observation_id: crypto.randomUUID(),
+      timestamp: Date.now()
+    }}))
+    child.stdin.end()
+    await child.exited
+  }}
+}})
+"#,
+                    ),
+                )?;
+                let config = command
+                    .as_std()
+                    .get_envs()
+                    .find(|(key, _)| *key == "OPENCODE_CONFIG_CONTENT")
+                    .and_then(|(_, value)| value)
+                    .context("OpenCode Runtime config content is missing")?
+                    .to_str()
+                    .context("OpenCode Runtime config content is not UTF-8")?;
+                let mut config: Value = serde_json::from_str(config)?;
+                append_opencode_compaction_plugin(&mut config, &plugin_path)?;
+                command.env("OPENCODE_CONFIG_CONTENT", serde_json::to_string(&config)?);
+            }
+            AdapterKind::CopilotCli => {
+                let plugin_root = root.join("copilot-plugin");
+                std::fs::create_dir_all(&plugin_root)?;
+                restrict_private_directory(&plugin_root)?;
+                write_private_json_file(
+                    &plugin_root.join("plugin.json"),
+                    &json!({
+                        "name": "rovai-bootstrap-redelivery-observer",
+                        "description": "Rovai Native Session compaction observer",
+                        "version": "0.48.0",
+                        "hooks": "hooks.json"
+                    }),
+                )?;
+                write_private_json_file(
+                    &plugin_root.join("hooks.json"),
+                    &json!({
+                        "version": 1,
+                        "hooks": {
+                            "preCompact": [{
+                                "type": "command",
+                                "bash": hook_command,
+                                "timeoutSec": 3
+                            }]
+                        }
+                    }),
+                )?;
+                command.arg("--plugin-dir").arg(plugin_root);
+            }
+            AdapterKind::QoderCli => {
+                let settings_path = root.join("additional-settings.json");
+                write_private_json_file(
+                    &settings_path,
+                    &qoder_post_compact_hook_settings(&hook_command),
+                )?;
+                command.arg("--settings").arg(settings_path);
+            }
+            AdapterKind::CodebuddyCli => {
+                let plugin_root = root.join("codebuddy-plugin");
+                let manifest_root = plugin_root.join(".codebuddy-plugin");
+                let hooks_root = plugin_root.join("hooks");
+                std::fs::create_dir_all(&manifest_root)?;
+                std::fs::create_dir_all(&hooks_root)?;
+                restrict_private_directory(&plugin_root)?;
+                restrict_private_directory(&manifest_root)?;
+                restrict_private_directory(&hooks_root)?;
+                write_private_json_file(
+                    &manifest_root.join("plugin.json"),
+                    &json!({
+                        "name": "rovai-bootstrap-redelivery-observer",
+                        "description": "Rovai Native Session compaction observer",
+                        "version": "0.48.0",
+                        "hooks": "./hooks/hooks.json"
+                    }),
+                )?;
+                write_private_json_file(
+                    &hooks_root.join("hooks.json"),
+                    &codebuddy_compaction_hook_settings(&hook_command),
+                )?;
+                command.arg("--plugin-dir").arg(plugin_root);
+            }
+            AdapterKind::QwenCode => {
+                let (private_home, source_home, mut settings) =
+                    prepare_qwen_private_home(&root, runtime_cwd)?;
+                append_post_compact_hook(&mut settings, &hook_command)?;
+                write_private_json_file(&private_home.join("settings.json"), &settings)?;
+                command.env("QWEN_HOME", &private_home);
+                if std::env::var_os("QWEN_RUNTIME_DIR").is_none() {
+                    command.env("QWEN_RUNTIME_DIR", source_home);
+                }
+            }
+            _ => unreachable!(),
+        }
+        Ok(Some(root))
+    }
+}
+
+fn qoder_post_compact_hook_settings(hook_command: &str) -> Value {
+    json!({"hooks": {"PostCompact": [{
+        "matcher": "manual|auto",
+        "hooks": [{
+            "type": "command",
+            "command": hook_command
+        }]
+    }]}})
+}
+
+fn codebuddy_compaction_hook_settings(hook_command: &str) -> Value {
+    // CodeBuddy 2.133.1 completes emergency automatic compaction before
+    // emitting SessionStart(source=compact). Its separate pre-message strategy
+    // bypasses PreCompact, PostCompact and this event; the release documents
+    // that target-version coverage gap instead of inferring it from tokens.
+    json!({"hooks": {"SessionStart": [{
+        "matcher": "compact",
+        "hooks": [{
+            "type": "command",
+            "command": hook_command
+        }]
+    }]}})
+}
+
+fn append_post_compact_hook(settings: &mut Value, hook_command: &str) -> Result<()> {
+    let settings = settings
+        .as_object_mut()
+        .context("Qwen user settings must be a JSON object")?;
+    let hooks = settings
+        .entry("hooks")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .context("Qwen user settings hooks must be a JSON object")?;
+    let post_compact = hooks
+        .entry("PostCompact")
+        .or_insert_with(|| json!([]))
+        .as_array_mut()
+        .context("Qwen user settings PostCompact hooks must be an array")?;
+    post_compact.push(json!({
+        // Qwen's trigger matcher is an exact comparison, not a regular
+        // expression. `*` admits both documented trigger values while the
+        // relay still validates that the payload says `manual` or `auto`.
+        "matcher": "*",
+        "hooks": [{
+            "type": "command",
+            "command": hook_command,
+            "name": "rovai-bootstrap-redelivery-observer",
+            "timeout": 3000,
+            "async": false
+        }]
+    }));
+    Ok(())
+}
+
+fn append_opencode_compaction_plugin(config: &mut Value, plugin_path: &Path) -> Result<()> {
+    let config = config
+        .as_object_mut()
+        .context("OpenCode Runtime config content must be an object")?;
+    let plugins = config
+        .entry("plugin")
+        .or_insert_with(|| json!([]))
+        .as_array_mut()
+        .context("OpenCode Runtime config plugins must be an array")?;
+    plugins.push(Value::String(plugin_path.to_string_lossy().into_owned()));
+    Ok(())
+}
+
+#[cfg(unix)]
+fn prepare_qwen_private_home(
+    detector_root: &Path,
+    runtime_cwd: &Path,
+) -> Result<(PathBuf, PathBuf, Value)> {
+    use std::os::unix::fs::symlink;
+
+    let source_home = match std::env::var_os("QWEN_HOME") {
+        Some(configured) => {
+            let configured = PathBuf::from(configured);
+            if configured.is_absolute() {
+                configured
+            } else if configured == Path::new("~") {
+                PathBuf::from(
+                    std::env::var_os("HOME").context("Qwen Runtime has no home directory")?,
+                )
+            } else if let Ok(relative_to_home) = configured.strip_prefix("~/") {
+                PathBuf::from(
+                    std::env::var_os("HOME").context("Qwen Runtime has no home directory")?,
+                )
+                .join(relative_to_home)
+            } else {
+                runtime_cwd.join(configured)
+            }
+        }
+        None => {
+            PathBuf::from(std::env::var_os("HOME").context("Qwen Runtime has no home directory")?)
+                .join(".qwen")
+        }
+    };
+    let private_home = detector_root.join("qwen-home");
+    std::fs::create_dir_all(&private_home)?;
+    restrict_private_directory(&private_home)?;
+    if source_home.is_dir() {
+        for entry in std::fs::read_dir(&source_home)? {
+            let entry = entry?;
+            if entry.file_name() == "settings.json" {
+                continue;
+            }
+            symlink(entry.path(), private_home.join(entry.file_name())).with_context(|| {
+                format!(
+                    "failed to project Qwen user configuration {}",
+                    entry.path().display()
+                )
+            })?;
+        }
+    }
+    let settings_path = source_home.join("settings.json");
+    let settings = if settings_path.exists() {
+        let text = std::fs::read_to_string(&settings_path)
+            .with_context(|| format!("failed to read {}", settings_path.display()))?;
+        json5::from_str(&text)
+            .with_context(|| format!("invalid Qwen user settings {}", settings_path.display()))?
+    } else {
+        json!({})
+    };
+    Ok((private_home, source_home, settings))
+}
+
+fn write_private_json_file(path: &Path, value: &Value) -> Result<()> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(path)
+        .with_context(|| format!("failed to create {}", path.display()))?;
+    serde_json::to_writer(&mut file, value)
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    file.write_all(b"\n")?;
+    file.flush()?;
+    Ok(())
+}
+
+fn write_private_text_file(path: &Path, value: &str) -> Result<()> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(path)
+        .with_context(|| format!("failed to create {}", path.display()))?;
+    file.write_all(value.as_bytes())
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    file.flush()?;
+    Ok(())
+}
+
+fn quote_posix_shell_word(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
 fn launchable_acp_adapter(kind: AdapterKind) -> bool {
@@ -2056,6 +2586,106 @@ fn canonicalize_allow_missing(path: &Path) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn acp_compaction_detectors_admit_only_runtime_completion_signals() {
+        assert!(
+            detect_acp_compaction_signal(
+                AdapterKind::OpencodeCli,
+                &json!({
+                    "method": "session.compacted",
+                    "params": {"sessionId": "session-1"}
+                }),
+            )
+            .is_none(),
+            "OpenCode's ACP server does not expose its native event stream; the isolated Runtime plugin owns this signal"
+        );
+
+        let kiro = detect_acp_compaction_signal(
+            AdapterKind::KiroCli,
+            &json!({
+                "method": "_kiro.dev/compaction/status",
+                "params": {
+                    "sessionId": "session-2",
+                    "status": {"type": "completed"},
+                    "summary": "must not participate in signal admission"
+                }
+            }),
+        )
+        .expect("Kiro completed status should be detected");
+        assert_eq!(kiro.admission_point, "completed");
+        assert!(
+            detect_acp_compaction_signal(
+                AdapterKind::KiroCli,
+                &json!({
+                    "method": "_kiro.dev/compaction/status",
+                    "params": {"sessionId": "session-2", "status": {"type": "started"}}
+                }),
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn qwen_detector_settings_preserve_existing_user_hooks() {
+        let mut settings = json!({
+            "managed": true,
+            "hooks": {
+                "PreToolUse": [{"matcher": "write_file", "hooks": []}],
+                "PostCompact": [{"matcher": "manual", "hooks": []}]
+            }
+        });
+        append_post_compact_hook(&mut settings, "'/private/rovai' __compaction-hook")
+            .expect("Rovai hook should append");
+        assert_eq!(settings["managed"], true);
+        assert_eq!(settings["hooks"]["PreToolUse"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            settings["hooks"]["PostCompact"].as_array().unwrap().len(),
+            2
+        );
+        assert_eq!(
+            settings["hooks"]["PostCompact"][1]["hooks"][0]["async"],
+            false
+        );
+        assert_eq!(settings["hooks"]["PostCompact"][1]["matcher"], "*");
+    }
+
+    #[test]
+    fn hook_matcher_follows_runtime_lifecycle_contract() {
+        let qoder = qoder_post_compact_hook_settings("rovai hook");
+        assert_eq!(qoder["hooks"]["PostCompact"][0]["matcher"], "manual|auto");
+        let codebuddy = codebuddy_compaction_hook_settings("rovai hook");
+        assert_eq!(codebuddy["hooks"]["SessionStart"][0]["matcher"], "compact");
+    }
+
+    #[test]
+    fn opencode_detector_plugin_is_additive_to_runtime_config() {
+        let mut config = json!({
+            "autoupdate": false,
+            "permission": {"*": "ask"},
+            "plugin": ["existing-plugin"]
+        });
+        append_opencode_compaction_plugin(
+            &mut config,
+            Path::new("/private/rovai/opencode-compaction-observer.ts"),
+        )
+        .expect("OpenCode detector plugin should append");
+        assert_eq!(config["autoupdate"], false);
+        assert_eq!(config["permission"]["*"], "ask");
+        assert_eq!(config["plugin"][0], "existing-plugin");
+        assert_eq!(
+            config["plugin"][1],
+            "/private/rovai/opencode-compaction-observer.ts"
+        );
+    }
+
+    #[test]
+    fn hook_relay_command_quotes_shell_metacharacters() {
+        assert_eq!(
+            quote_posix_shell_word("/tmp/Rovai's CLI"),
+            "'/tmp/Rovai'\"'\"'s CLI'"
+        );
+    }
 
     #[test]
     fn qoder_does_not_receive_the_execute_only_camp_attachment_root() {

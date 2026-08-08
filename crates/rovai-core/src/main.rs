@@ -54,6 +54,7 @@ use rovai_core::{
         BUILTIN_TOOL_CONTRACT_VERSION, BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
         BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES, BuiltinToolError, BuiltinToolInvocationEnvelope,
         BuiltinToolIpcRequest, BuiltinToolIpcRequestBody, BuiltinToolIpcResponse,
+        COMPACTION_HOOK_IPC_PROTOCOL_VERSION, CompactionHookIpcRequest, CompactionHookIpcResponse,
         builtin_tool_catalog_digest, builtin_tool_description, recovery_for_error_code,
     },
     camp_attachment::CampAttachmentStore,
@@ -74,10 +75,18 @@ use rovai_core::{
         ActorRef, CommandEnvelope, CommandExecution, CommandGatewayError, CommandResultStatus,
         DomainCommandGateway, canonical_json_digest,
     },
+    compaction::{
+        CompactionDetectorPolicy, CompactionObservationResult, DesiredCompactionDetectorPolicies,
+        EstablishCompactionObserverLease, SubmitCompactionObservation,
+        active_observer_lease_for_relay, admitted_hook_compaction_signal,
+        establish_compaction_observer_lease, fence_active_observers_for_host,
+        fence_active_observers_on_core_start, reconcile_compaction_observation_outbox,
+        reconcile_detector_policies, submit_compaction_observation,
+    },
     context::{
         CharterDeliveryMode, ContextMaterialization, ContextPayloadTooLarge, ContextService,
         DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES, MaterializeContextRequest, PreparedContext,
-        SkillExposurePreparation,
+        RuntimeInputDelivery, SkillExposurePreparation,
     },
     db::Database,
     execution_budget::camp_turn_execution_budget_now,
@@ -578,6 +587,7 @@ struct Core {
     runtime_checking: RwLock<BTreeSet<rovai_core::agent_profile::AdapterKind>>,
     runtime_checks_scheduled: RwLock<BTreeSet<rovai_core::agent_profile::AdapterKind>>,
     runtime_check_requests: mpsc::UnboundedSender<rovai_core::agent_profile::AdapterKind>,
+    compaction_detector_policies: DesiredCompactionDetectorPolicies,
     runtime_resolution_notify: Notify,
     skill_reconcile_notify: Notify,
     agent_run_cancellation_notify: Notify,
@@ -1619,6 +1629,73 @@ impl Core {
                 }
                 BuiltinToolIpcResponse::Envelope { envelope }
             }
+        }
+    }
+
+    async fn handle_compaction_hook_ipc(
+        &self,
+        request: CompactionHookIpcRequest,
+    ) -> CompactionHookIpcResponse {
+        let rejected = || CompactionHookIpcResponse { accepted: false };
+        if request.kind != "compaction_observation"
+            || request.ipc_protocol_version != COMPACTION_HOOK_IPC_PROTOCOL_VERSION
+            || uuid::Uuid::parse_str(&request.request_id).is_err()
+            || !self
+                .builtin_tool_leases
+                .authenticate_process(&request.process_id, &request.process_token)
+                .await
+        {
+            return rejected();
+        }
+        let Ok(adapter_kind) = request.adapter_kind.parse::<AdapterKind>() else {
+            return rejected();
+        };
+        if request.native_session_id.trim().is_empty()
+            || request.source_event_digest.trim().is_empty()
+        {
+            return rejected();
+        }
+        let native_session_id = request.native_session_id.as_str();
+        let hook_event_name = request.hook_event_name.as_str();
+        let compact_trigger = request.trigger.as_str();
+        let Some((source_signal, admission_point)) =
+            admitted_hook_compaction_signal(adapter_kind, hook_event_name, compact_trigger)
+        else {
+            return rejected();
+        };
+        let source_event_digest = request.source_event_digest;
+        let source_observation_id = format!("{source_signal}:{source_event_digest}");
+        let observed_at = chrono::Utc::now().to_rfc3339();
+        let result = {
+            let mut database = self.database.lock().await;
+            let observer_lease_id = match active_observer_lease_for_relay(
+                &database,
+                adapter_kind,
+                &request.host_instance_id,
+                &request.process_id,
+                native_session_id,
+            ) {
+                Ok(Some(lease_id)) => lease_id,
+                Ok(None) | Err(_) => return rejected(),
+            };
+            submit_compaction_observation(
+                &mut database,
+                &SubmitCompactionObservation {
+                    observer_lease_id: &observer_lease_id,
+                    source_observation_id: &source_observation_id,
+                    source_signal,
+                    admission_point,
+                    source_event_digest: &source_event_digest,
+                    observed_at: &observed_at,
+                },
+            )
+        };
+        CompactionHookIpcResponse {
+            accepted: matches!(
+                result,
+                Ok(CompactionObservationResult::Applied { .. })
+                    | Ok(CompactionObservationResult::Duplicate { .. })
+            ),
         }
     }
 
@@ -4340,6 +4417,64 @@ impl Core {
         }
     }
 
+    async fn materialize_and_prepare_agent_run_input(
+        &self,
+        execution: &AgentRunExecution,
+        skill_exposure: &PreparedSkillExposure,
+        mcp_projection: &PreparedMcpProjection,
+        charter_delivery_mode: CharterDeliveryMode,
+        output: &mpsc::UnboundedSender<String>,
+    ) -> Result<Option<(PreparedContext, RuntimeInputDelivery)>> {
+        let preparation = {
+            // The Core database mutex is the logical Runtime Input preparation
+            // boundary. A Compaction Observer cannot commit between selecting
+            // the pending revision and persisting RuntimeInputDelivery.prepared.
+            let mut database = self.database.lock().await;
+            let materialization = ContextService.materialize_with_exposures(
+                &mut database,
+                &ManagedBlobStore::new(&self.data_dir),
+                skill_exposure,
+                mcp_projection,
+                &MaterializeContextRequest {
+                    agent_run_id: &execution.agent_run_id,
+                    execution_epoch: execution.execution_epoch,
+                    charter_delivery_mode,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+            )?;
+            match materialization {
+                ContextMaterialization::Ready(context) => {
+                    let delivery = ContextService.prepare_input_delivery_for_context(
+                        &mut database,
+                        &execution.agent_run_id,
+                        execution.execution_epoch,
+                        &context,
+                    )?;
+                    Some(Ok((context, delivery)))
+                }
+                ContextMaterialization::Waiting(wait) => Some(Err(wait)),
+            }
+        };
+        match preparation {
+            Some(Ok(prepared)) => Ok(Some(prepared)),
+            Some(Err(wait)) => {
+                emit(
+                    output,
+                    "agent_run.context_waiting",
+                    json!({
+                        "campId": execution.camp_id,
+                        "campTurnId": execution.camp_turn_id,
+                        "agentRunId": execution.agent_run_id,
+                        "executionEpoch": execution.execution_epoch,
+                        "reason": wait.reason,
+                    }),
+                );
+                Ok(None)
+            }
+            None => Ok(None),
+        }
+    }
+
     async fn prepare_agent_run_skill_exposure(
         &self,
         execution: &AgentRunExecution,
@@ -4528,6 +4663,64 @@ impl Core {
         Ok(())
     }
 
+    fn establish_acp_compaction_observer_best_effort(
+        self: &Arc<Self>,
+        execution: &AgentRunExecution,
+        runtime: &Arc<AcpRuntime>,
+        native_session_id: &str,
+    ) {
+        if self
+            .compaction_detector_policies
+            .policy_for(execution.runtime.adapter_kind)
+            != Some(CompactionDetectorPolicy::BestEffort)
+        {
+            return;
+        }
+        let core = Arc::clone(self);
+        let runtime = Arc::clone(runtime);
+        let agent_run_id = execution.agent_run_id.clone();
+        let execution_epoch = execution.execution_epoch;
+        let adapter_kind = execution.runtime.adapter_kind;
+        let host_instance_id = runtime.host_instance_id().to_string();
+        let relay_process_id = runtime
+            .builtin_tool_process_config()
+            .map(BuiltinToolProcessConfig::process_id)
+            .unwrap_or_default()
+            .to_string();
+        let native_session_id = native_session_id.to_string();
+        tokio::spawn(async move {
+            let lease = {
+                let mut database = core.database.lock().await;
+                establish_compaction_observer_lease(
+                    &mut database,
+                    &EstablishCompactionObserverLease {
+                        agent_run_id: &agent_run_id,
+                        execution_epoch,
+                        adapter_kind,
+                        host_instance_id: &host_instance_id,
+                        relay_process_id: &relay_process_id,
+                        native_session_id: &native_session_id,
+                    },
+                )
+            };
+            match lease {
+                Ok(Some(lease)) => {
+                    if let Err(error) = runtime.install_compaction_observer(lease).await {
+                        eprintln!(
+                            "{} Compaction Observer route is unavailable; AgentRun continues: {error:#}",
+                            adapter_kind.as_str()
+                        );
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => eprintln!(
+                    "{} Compaction Observer Lease is unavailable; AgentRun continues: {error:#}",
+                    adapter_kind.as_str()
+                ),
+            }
+        });
+    }
+
     async fn verify_runtime_integrity(
         &self,
         adapter_kind: AdapterKind,
@@ -4598,7 +4791,7 @@ impl Core {
     }
 
     async fn launch_agent_run(
-        &self,
+        self: &Arc<Self>,
         execution: &AgentRunExecution,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
@@ -5461,7 +5654,7 @@ impl Core {
     }
 
     async fn launch_acp_agent_run(
-        &self,
+        self: &Arc<Self>,
         execution: &AgentRunExecution,
         resume_disposition: NativeSessionResumeDisposition,
         skill_exposure: &PreparedSkillExposure,
@@ -5527,26 +5720,6 @@ impl Core {
             .iter()
             .any(|capability| capability == "session.load");
         let model = execution.runtime.model.model_id.as_str();
-        let mut prepared_context = None;
-        if resumable_session_id.is_none() {
-            let Some(context) = self
-                .materialize_agent_run_context(
-                    execution,
-                    skill_exposure,
-                    mcp_projection,
-                    CharterDeliveryMode::FirstPayload,
-                    output,
-                )
-                .await
-                .context("failed to materialize ACP AgentRun context")?
-            else {
-                adapter
-                    .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
-                    .await;
-                return Ok(());
-            };
-            prepared_context = Some(context);
-        }
         let session = runtime
             .start_or_resume_session(
                 resumable_session_id.as_deref(),
@@ -5609,23 +5782,6 @@ impl Core {
                     &replacement_binding,
                 )
                 .await?;
-                let Some(context) = self
-                    .materialize_agent_run_context(
-                        execution,
-                        skill_exposure,
-                        mcp_projection,
-                        CharterDeliveryMode::FirstPayload,
-                        output,
-                    )
-                    .await
-                    .context("failed to rematerialize ACP AgentRun context")?
-                else {
-                    adapter
-                        .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
-                        .await;
-                    return Ok(());
-                };
-                prepared_context = Some(context);
                 let session_id = runtime
                     .start_or_resume_session(
                         None,
@@ -5646,38 +5802,23 @@ impl Core {
         self.bind_prepared_native_session(execution, &binding_credential, &session_id)
             .await
             .context("failed to bind ACP Native Session")?;
-        let prepared_context = if let Some(context) = prepared_context {
-            context
-        } else {
-            let Some(context) = self
-                .materialize_agent_run_context(
-                    execution,
-                    skill_exposure,
-                    mcp_projection,
-                    CharterDeliveryMode::FirstPayload,
-                    output,
-                )
-                .await
-                .context("failed to materialize resumed ACP AgentRun context")?
-            else {
-                adapter
-                    .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
-                    .await;
-                return Ok(());
-            };
-            context
+        self.establish_acp_compaction_observer_best_effort(execution, &runtime, &session_id);
+        let Some((prepared_context, delivery)) = self
+            .materialize_and_prepare_agent_run_input(
+                execution,
+                skill_exposure,
+                mcp_projection,
+                CharterDeliveryMode::FirstPayload,
+                output,
+            )
+            .await
+            .context("failed to atomically prepare ACP AgentRun input")?
+        else {
+            adapter
+                .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
+                .await;
+            return Ok(());
         };
-        let delivery = {
-            let mut database = self.database.lock().await;
-            ContextService
-                .prepare_input_delivery(
-                    &mut database,
-                    &execution.agent_run_id,
-                    execution.execution_epoch,
-                    &prepared_context.manifest_id,
-                )
-                .context("failed to prepare Runtime Input Delivery")
-        }?;
         if delivery.status == "accepted" {
             emit(
                 output,
@@ -6127,6 +6268,46 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
     let data_dir = parse_data_dir()?;
     let mcp_config_path = parse_mcp_config_path()?;
     let mut database = Database::open(&data_dir)?;
+    let compaction_detector_policies =
+        DesiredCompactionDetectorPolicies::from_process_environment();
+    for diagnostic in &compaction_detector_policies.diagnostics {
+        eprintln!("Compaction detector policy diagnostic: {diagnostic}");
+    }
+    match reconcile_detector_policies(&mut database, &compaction_detector_policies) {
+        Ok(reconciliation) if !reconciliation.changed_adapters.is_empty() => eprintln!(
+            "Compaction detector policy reconciled for {} Runtime(s); {} stored Native Binding baseline requirement(s) created",
+            reconciliation.changed_adapters.len(),
+            reconciliation.baseline_requirements_created,
+        ),
+        Ok(_) => {}
+        Err(error) => eprintln!(
+            "Compaction detector policy reconciliation is unavailable; AgentRun admission remains enabled: {error:#}"
+        ),
+    }
+    match reconcile_compaction_observation_outbox(&mut database, &data_dir.join("runtime"), None) {
+        Ok(reconciliation)
+            if reconciliation.applied > 0
+                || reconciliation.duplicates > 0
+                || reconciliation.discarded > 0 =>
+        {
+            eprintln!(
+                "Compaction observation outbox reconciled: {} applied, {} duplicate, {} discarded, {} retained",
+                reconciliation.applied,
+                reconciliation.duplicates,
+                reconciliation.discarded,
+                reconciliation.retained,
+            );
+        }
+        Ok(_) => {}
+        Err(error) => eprintln!(
+            "Compaction observation outbox reconciliation is unavailable; AgentRun admission remains enabled: {error:#}"
+        ),
+    }
+    if let Err(error) = fence_active_observers_on_core_start(&mut database) {
+        eprintln!(
+            "Stale Compaction Observer fencing is unavailable; AgentRun admission remains enabled: {error:#}"
+        );
+    }
     CampAttachmentStore::new(&data_dir).cleanup_expired(&mut database)?;
     let search_summary = runtime_search_environment.summary();
     database.record_runtime_search_environment_generation(
@@ -6203,6 +6384,7 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
         runtime_checking: RwLock::new(BTreeSet::new()),
         runtime_checks_scheduled: RwLock::new(BTreeSet::new()),
         runtime_check_requests: runtime_check_tx,
+        compaction_detector_policies: compaction_detector_policies.clone(),
         runtime_resolution_notify: Notify::new(),
         skill_reconcile_notify: Notify::new(),
         agent_run_cancellation_notify: Notify::new(),
@@ -6216,36 +6398,54 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
             acp_tx.clone(),
             data_dir.join("runtime/opencode"),
             runtime_fleet.clone(),
+            compaction_detector_policies
+                .policy_for(AdapterKind::OpencodeCli)
+                .unwrap_or(CompactionDetectorPolicy::Disabled),
         )?,
         copilot_cli: AcpCliRuntimeAdapter::new(
             rovai_core::agent_profile::AdapterKind::CopilotCli,
             acp_tx.clone(),
             data_dir.join("runtime/copilot"),
             runtime_fleet.clone(),
+            compaction_detector_policies
+                .policy_for(AdapterKind::CopilotCli)
+                .unwrap_or(CompactionDetectorPolicy::Disabled),
         )?,
         kiro_cli: AcpCliRuntimeAdapter::new(
             rovai_core::agent_profile::AdapterKind::KiroCli,
             acp_tx.clone(),
             data_dir.join("runtime/kiro"),
             runtime_fleet.clone(),
+            compaction_detector_policies
+                .policy_for(AdapterKind::KiroCli)
+                .unwrap_or(CompactionDetectorPolicy::Disabled),
         )?,
         qoder_cli: AcpCliRuntimeAdapter::new(
             rovai_core::agent_profile::AdapterKind::QoderCli,
             acp_tx.clone(),
             data_dir.join("runtime/qoder"),
             runtime_fleet.clone(),
+            compaction_detector_policies
+                .policy_for(AdapterKind::QoderCli)
+                .unwrap_or(CompactionDetectorPolicy::Disabled),
         )?,
         codebuddy_cli: AcpCliRuntimeAdapter::new(
             rovai_core::agent_profile::AdapterKind::CodebuddyCli,
             acp_tx.clone(),
             data_dir.join("runtime/codebuddy"),
             runtime_fleet.clone(),
+            compaction_detector_policies
+                .policy_for(AdapterKind::CodebuddyCli)
+                .unwrap_or(CompactionDetectorPolicy::Disabled),
         )?,
         qwen_code: AcpCliRuntimeAdapter::new(
             rovai_core::agent_profile::AdapterKind::QwenCode,
             acp_tx,
             data_dir.join("runtime/qwen"),
             runtime_fleet.clone(),
+            compaction_detector_policies
+                .policy_for(AdapterKind::QwenCode)
+                .unwrap_or(CompactionDetectorPolicy::Disabled),
         )?,
         claude_code_cli,
         antigravity_app,
@@ -6513,6 +6713,35 @@ async fn process_acp_events(
                 agent_run_id,
                 execution_epoch,
             } => {
+                if let Err(error) = {
+                    let mut database = core.database.lock().await;
+                    reconcile_compaction_observation_outbox(
+                        &mut database,
+                        &core.data_dir.join("runtime"),
+                        Some((adapter_kind, &host_instance_id)),
+                    )
+                } {
+                    eprintln!(
+                        "{} uncertain Compaction Observer reconciliation failed for {}: {error:#}",
+                        adapter_kind.as_str(),
+                        host_instance_id,
+                    );
+                }
+                if let Err(error) = {
+                    let mut database = core.database.lock().await;
+                    fence_active_observers_for_host(
+                        &mut database,
+                        adapter_kind,
+                        &host_instance_id,
+                        "runtime_host_exited",
+                    )
+                } {
+                    eprintln!(
+                        "{} Compaction Observer Host fencing failed for {}: {error:#}",
+                        adapter_kind.as_str(),
+                        host_instance_id,
+                    );
+                }
                 process_acp_agent_run_exit(
                     &core,
                     &output,
@@ -6522,6 +6751,51 @@ async fn process_acp_events(
                     execution_epoch,
                 )
                 .await;
+            }
+            AcpIncoming::CompactionObservation {
+                adapter_kind,
+                host_instance_id,
+                observer_lease_id,
+                native_session_id,
+                source_observation_id,
+                source_signal,
+                admission_point,
+                source_event_digest,
+                observed_at,
+            } => {
+                let result = {
+                    let mut database = core.database.lock().await;
+                    submit_compaction_observation(
+                        &mut database,
+                        &SubmitCompactionObservation {
+                            observer_lease_id: &observer_lease_id,
+                            source_observation_id: &source_observation_id,
+                            source_signal: &source_signal,
+                            admission_point: &admission_point,
+                            source_event_digest: &source_event_digest,
+                            observed_at: &observed_at,
+                        },
+                    )
+                };
+                match result {
+                    Ok(CompactionObservationResult::Applied { requested_revision }) => {
+                        eprintln!(
+                            "{} Compaction Observer {} accepted {} for Native Session {} on Host {}; Bootstrap redelivery revision {} is pending",
+                            adapter_kind.as_str(),
+                            observer_lease_id,
+                            source_signal,
+                            native_session_id,
+                            host_instance_id,
+                            requested_revision,
+                        );
+                    }
+                    Ok(CompactionObservationResult::Duplicate { .. })
+                    | Ok(CompactionObservationResult::Fenced) => {}
+                    Err(error) => eprintln!(
+                        "{} Compaction Observer submission failed without blocking AgentRun: {error:#}",
+                        adapter_kind.as_str()
+                    ),
+                }
             }
         }
     }
@@ -8308,18 +8582,37 @@ async fn handle_builtin_tool_connection(core: Arc<Core>, stream: UnixStream) -> 
     let mut lines = BufReader::new(reader).lines();
     let response = match lines.next_line().await? {
         Some(line) if line.len() <= BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES => {
-            match serde_json::from_str::<BuiltinToolIpcRequest>(&line) {
-                Ok(request) => core.handle_builtin_tool_ipc(request).await,
-                Err(_) => BuiltinToolIpcResponse::ipc_error(
-                    "builtin_tool.invalid_ipc_request",
-                    "Built-in Tool IPC request is malformed",
-                ),
+            let value = serde_json::from_str::<Value>(&line).ok();
+            if value
+                .as_ref()
+                .and_then(|value| value.get("kind"))
+                .and_then(Value::as_str)
+                == Some("compaction_observation")
+            {
+                let response = match value.and_then(|value| {
+                    serde_json::from_value::<CompactionHookIpcRequest>(value).ok()
+                }) {
+                    Some(request) => core.handle_compaction_hook_ipc(request).await,
+                    None => CompactionHookIpcResponse { accepted: false },
+                };
+                serde_json::to_value(response)?
+            } else {
+                let response = match value
+                    .and_then(|value| serde_json::from_value::<BuiltinToolIpcRequest>(value).ok())
+                {
+                    Some(request) => core.handle_builtin_tool_ipc(request).await,
+                    None => BuiltinToolIpcResponse::ipc_error(
+                        "builtin_tool.invalid_ipc_request",
+                        "Built-in Tool IPC request is malformed",
+                    ),
+                };
+                serde_json::to_value(response)?
             }
         }
-        Some(_) => BuiltinToolIpcResponse::ipc_error(
+        Some(_) => serde_json::to_value(BuiltinToolIpcResponse::ipc_error(
             "builtin_tool.ipc_request_too_large",
             "Built-in Tool IPC request exceeds 1 MiB",
-        ),
+        ))?,
         None => return Ok(()),
     };
     writer

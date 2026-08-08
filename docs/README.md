@@ -20,6 +20,7 @@ last_updated: 2026-08-08
 | 修改 Task 状态、字段、可见性、权限、列表、成员离 Camp 收口或 linked execution 准入 | [Durable Task v2 合同](contracts/durable-task-v2.md)、[ADR-0136](adr/0136-durable-task-v2-responsibility-and-coordination-authority.md)及[ADR-0137](adr/0137-one-time-task-linked-responsibility-admission.md) |
 | 修改 AgentRun 公共消息、正文截断、引用链、遗漏提示或投递 Profile | [ADR-0132](adr/0132-public-reference-context-closure-profile-v2.md)、[Context Delivery Profile v2](contracts/context-delivery-profile-v2.md)及[Message Delivery v1](contracts/message-delivery-v1.md) |
 | 理解内置 CLI、Core Router、Runtime Fleet、Bootstrap 与外部 MCP 的长期结构 | [Built-in Tool Runtime 架构](architecture/builtin-tool-runtime.md) |
+| 修改 Native Session compaction detector、Observer Lease、Runtime 补发 policy、Bootstrap Delivery Gate 或 redelivery payload | [Native Session Bootstrap Redelivery 架构](architecture/native-session-bootstrap-redelivery.md)、[ADR-0138](adr/0138-durable-bootstrap-redelivery-requirement.md)至[ADR-0143](adr/0143-best-effort-non-blocking-compaction-detector-capability.md) |
 | 理解历史设计与演进原因 | [版本索引](versions/README.md)及对应历史版本；历史内容不能作为当前约束 |
 | 修改 Renderer UI/UX | [UI 规范索引](ui/README.md)；修改当前 Arctic Dawn Renderer 时继续读取[Arctic Dawn V3 设计规范](ui/arctic-dawn.md) |
 | 本地运行、测试、Smoke Test 或 macOS 构建 | [开发者指南](development/README.md) |

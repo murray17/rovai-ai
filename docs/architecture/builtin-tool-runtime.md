@@ -16,7 +16,10 @@ historical 语义。决策理由见
 [ADR-0124](../adr/0124-cli-only-transport-for-rovai-built-in-operations.md)、
 [ADR-0135](../adr/0135-compact-agent-output-over-canonical-built-in-tool-envelope.md)、
 [ADR-0136](../adr/0136-durable-task-v2-responsibility-and-coordination-authority.md)与
-[ADR-0137](../adr/0137-one-time-task-linked-responsibility-admission.md)。
+[ADR-0137](../adr/0137-one-time-task-linked-responsibility-admission.md)。Native Session context
+compaction 后的 Bootstrap 补发可靠性见
+[ADR-0138](../adr/0138-durable-bootstrap-redelivery-requirement.md)，版本拥有的 Runtime policy 与
+完整矩阵见 [Native Session Bootstrap Redelivery](native-session-bootstrap-redelivery.md)。
 
 ## 总体路径
 
@@ -164,6 +167,39 @@ Session Charter 只说明：
 Bootstrap 不含完整 Schema、Envelope、receipt、catalog digest、socket、process token、lease、
 AgentRun ID、epoch、Camp ID 或 Native Binding ID。Dynamic Context 使用 `retrieveWith.operation`
 指向 canonical operation，不重复 transport 细节。
+
+### Context compaction redelivery accounting
+
+Runtime Adapter 可以把受支持的 Runtime 原生 compaction signal 规范化为当前 Native Binding 的
+Bootstrap Redelivery Requirement，但 Adapter process memory 不拥有待补发真源。Core 按 Binding
+generation 持久维护 requested/acknowledged revision；Delivery Gate 把所选 requested revision 冻结到
+Runtime Input Delivery，只有该输入的 accepted ACK 才推进 acknowledged revision。
+
+因此发送失败、`delivery_unknown` 与 Core restart 不会清除补发要求；Gate 选择后到达的新 signal
+也不会被旧输入的 ACK 覆盖。旧 Binding、旧 generation、旧 Host route 或 fenced execution 的迟到
+callback 必须 fail closed。Runtime detector 矩阵、signal completion 语义和补发 payload 格式由各自
+长期决策与 Runtime compatibility evidence 维护，不能由 Adapter 自行改变这套 ACK 边界。
+
+Runtime 环境开关与 Requirement 属于不同生命周期：前者由 Rovai 版本维护并在 Core process 启动
+时冻结，只控制新 compaction observation 的准入；后者属于一个 Binding generation，不能被后续
+disable 清除。首次 `disabled -> best_effort` 对既有可复用 Binding 幂等创建一次 Requirement，不轮换
+Native Session。完整语义见 [ADR-0139](../adr/0139-version-owned-bootstrap-redelivery-runtime-policy.md)。
+各 Runtime 只使用一个版本限定的 signal admission point；新 Requirement 能否进入当前输入以
+`RuntimeInputDelivery.prepared` 事务为截止，而非 transport send。具体见
+[ADR-0140](../adr/0140-runtime-specific-compaction-signal-admission-point.md)。
+ContextManifest 与 Runtime Input Delivery 必须在一个 serialized Core preparation critical section
+中冻结 redelivery selection 和 combined budget；实现可以使用 unsendable staging Manifest，但在
+Delivery `prepared` 前不能释放数据库权威或把 payload 交给 transport。完整 identity-bearing overlay
+保持瞬时，不进入 Manifest 或持久 digest。见
+[ADR-0141](../adr/0141-atomic-bootstrap-redelivery-input-overlay.md)。
+Runtime compaction callback 使用独立、窄权限且跨 AgentRun 的 Native Session Observer Lease；它不
+延长 Built-in Tool/Run lease。普通 Host 退出不创建 Requirement，只有具体 observation 的提交结果
+未知才允许一次保守 pending。见
+[ADR-0142](../adr/0142-native-session-scoped-compaction-observer-lease.md)。
+六个目标 Runtime 的 detector 是 `best_effort` enhancement：与 Host 启动并行建立，失败或恢复不
+参与 Runtime Readiness/AgentRun admission，也不触发 one-shot fallback 或 gap 推断。既有 pending
+仍由 Delivery Gate 处理。见
+[ADR-0143](../adr/0143-best-effort-non-blocking-compaction-detector-capability.md)。
 
 ## Built-in CLI 与外部 MCP
 

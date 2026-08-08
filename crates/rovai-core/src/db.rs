@@ -1085,6 +1085,9 @@ impl Database {
             if !self.schema_migration_applied(65)? {
                 self.migrate_durable_task_v2_v65()?;
             }
+            if !self.schema_migration_applied(66)? {
+                self.migrate_native_session_bootstrap_redelivery_v66()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -1329,6 +1332,9 @@ impl Database {
         }
         if !self.schema_migration_applied(65)? {
             self.migrate_durable_task_v2_v65()?;
+        }
+        if !self.schema_migration_applied(66)? {
+            self.migrate_native_session_bootstrap_redelivery_v66()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -5318,6 +5324,205 @@ impl Database {
         if violations != 0 {
             anyhow::bail!("v65 left {violations} foreign-key violations");
         }
+        Ok(())
+    }
+
+    fn migrate_native_session_bootstrap_redelivery_v66(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            CREATE TABLE bootstrap_redelivery_requirement (
+                conversation_id TEXT NOT NULL
+                    REFERENCES conversation(id) ON DELETE CASCADE,
+                native_binding_id TEXT NOT NULL,
+                native_binding_generation INTEGER NOT NULL
+                    CHECK(native_binding_generation >= 1),
+                adapter_kind TEXT NOT NULL CHECK(adapter_kind IN (
+                    'copilot-cli', 'opencode-cli', 'kiro-cli', 'qoder-cli',
+                    'codebuddy-cli', 'qwen-code'
+                )),
+                requested_revision INTEGER NOT NULL DEFAULT 0
+                    CHECK(requested_revision >= 0),
+                acknowledged_revision INTEGER NOT NULL DEFAULT 0
+                    CHECK(acknowledged_revision >= 0),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(native_binding_id, native_binding_generation),
+                UNIQUE(conversation_id, native_binding_generation),
+                CHECK(acknowledged_revision <= requested_revision)
+            );
+            CREATE INDEX bootstrap_redelivery_pending_idx
+                ON bootstrap_redelivery_requirement(
+                    adapter_kind, requested_revision, acknowledged_revision
+                )
+                WHERE requested_revision > acknowledged_revision;
+
+            CREATE TABLE compaction_detector_policy (
+                adapter_kind TEXT PRIMARY KEY CHECK(adapter_kind IN (
+                    'copilot-cli', 'opencode-cli', 'kiro-cli', 'qoder-cli',
+                    'codebuddy-cli', 'qwen-code', 'antigravity-app'
+                )),
+                policy TEXT NOT NULL CHECK(policy IN ('disabled', 'best_effort')),
+                policy_epoch INTEGER NOT NULL CHECK(policy_epoch >= 1),
+                release_version TEXT NOT NULL,
+                applied_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE native_session_compaction_observer_lease (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL
+                    REFERENCES conversation(id) ON DELETE CASCADE,
+                adapter_installation_id TEXT NOT NULL,
+                adapter_kind TEXT NOT NULL CHECK(adapter_kind IN (
+                    'copilot-cli', 'opencode-cli', 'kiro-cli', 'qoder-cli',
+                    'codebuddy-cli', 'qwen-code'
+                )),
+                host_instance_id TEXT NOT NULL CHECK(length(trim(host_instance_id)) > 0),
+                relay_process_id TEXT NOT NULL CHECK(length(trim(relay_process_id)) > 0),
+                native_session_id TEXT NOT NULL CHECK(length(trim(native_session_id)) > 0),
+                native_binding_id TEXT NOT NULL CHECK(length(trim(native_binding_id)) > 0),
+                native_binding_generation INTEGER NOT NULL
+                    CHECK(native_binding_generation >= 1),
+                detector_policy_epoch INTEGER NOT NULL
+                    CHECK(detector_policy_epoch >= 1),
+                status TEXT NOT NULL CHECK(status IN ('active', 'fenced')),
+                created_at TEXT NOT NULL,
+                fenced_at TEXT,
+                fence_reason TEXT,
+                updated_at TEXT NOT NULL,
+                CHECK(
+                    (status = 'active' AND fenced_at IS NULL AND fence_reason IS NULL)
+                    OR
+                    (status = 'fenced' AND fenced_at IS NOT NULL
+                        AND length(trim(fence_reason)) > 0)
+                )
+            );
+            CREATE UNIQUE INDEX native_session_compaction_observer_active_idx
+                ON native_session_compaction_observer_lease(
+                    conversation_id, native_binding_id, native_binding_generation
+                )
+                WHERE status = 'active';
+            CREATE INDEX native_session_compaction_observer_host_idx
+                ON native_session_compaction_observer_lease(
+                    adapter_kind, host_instance_id, relay_process_id, status
+                );
+            CREATE TRIGGER native_session_compaction_observer_binding_fence
+            AFTER UPDATE OF
+                native_adapter_installation_id,
+                native_session_id,
+                native_binding_id,
+                native_binding_generation
+            ON conversation
+            WHEN OLD.native_adapter_installation_id IS NOT NEW.native_adapter_installation_id
+              OR OLD.native_session_id IS NOT NEW.native_session_id
+              OR OLD.native_binding_id IS NOT NEW.native_binding_id
+              OR OLD.native_binding_generation IS NOT NEW.native_binding_generation
+            BEGIN
+                UPDATE native_session_compaction_observer_lease
+                SET status = 'fenced', fenced_at = datetime('now'),
+                    fence_reason = 'native_binding_replaced',
+                    updated_at = datetime('now')
+                WHERE conversation_id = NEW.id AND status = 'active';
+            END;
+
+            CREATE TABLE native_session_compaction_observation (
+                id TEXT PRIMARY KEY,
+                observer_lease_id TEXT NOT NULL
+                    REFERENCES native_session_compaction_observer_lease(id),
+                native_binding_id TEXT NOT NULL,
+                native_binding_generation INTEGER NOT NULL
+                    CHECK(native_binding_generation >= 1),
+                source_observation_id TEXT NOT NULL,
+                source_signal TEXT NOT NULL,
+                admission_point TEXT NOT NULL,
+                source_event_digest TEXT NOT NULL,
+                requested_revision INTEGER NOT NULL CHECK(requested_revision >= 1),
+                observed_at TEXT NOT NULL,
+                committed_at TEXT NOT NULL,
+                UNIQUE(
+                    native_binding_id, native_binding_generation,
+                    source_observation_id
+                )
+            );
+            CREATE INDEX native_session_compaction_observation_revision_idx
+                ON native_session_compaction_observation(
+                    native_binding_id, native_binding_generation,
+                    requested_revision
+                );
+
+            ALTER TABLE runtime_input_delivery ADD COLUMN
+                bootstrap_redelivery_present INTEGER NOT NULL DEFAULT 0
+                    CHECK(bootstrap_redelivery_present IN (0, 1));
+            ALTER TABLE runtime_input_delivery ADD COLUMN
+                bootstrap_redelivery_revision INTEGER
+                    CHECK(bootstrap_redelivery_revision >= 1);
+            ALTER TABLE runtime_input_delivery ADD COLUMN
+                bootstrap_redelivery_evidence_id TEXT
+                    REFERENCES native_session_bootstrap_evidence(id);
+            ALTER TABLE runtime_input_delivery ADD COLUMN
+                bootstrap_redelivery_envelope_version INTEGER
+                    CHECK(bootstrap_redelivery_envelope_version >= 1);
+            ALTER TABLE runtime_input_delivery ADD COLUMN
+                bootstrap_redelivery_formatter_version INTEGER
+                    CHECK(bootstrap_redelivery_formatter_version >= 1);
+
+            CREATE TRIGGER runtime_input_delivery_redelivery_metadata_insert
+            BEFORE INSERT ON runtime_input_delivery
+            WHEN NOT (
+                (NEW.bootstrap_redelivery_present = 0
+                    AND NEW.bootstrap_redelivery_revision IS NULL
+                    AND NEW.bootstrap_redelivery_evidence_id IS NULL
+                    AND NEW.bootstrap_redelivery_envelope_version IS NULL
+                    AND NEW.bootstrap_redelivery_formatter_version IS NULL)
+                OR
+                (NEW.bootstrap_redelivery_present = 1
+                    AND NEW.bootstrap_redelivery_revision IS NOT NULL
+                    AND NEW.bootstrap_redelivery_evidence_id IS NOT NULL
+                    AND NEW.bootstrap_redelivery_envelope_version IS NOT NULL
+                    AND NEW.bootstrap_redelivery_formatter_version IS NOT NULL)
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'invalid Bootstrap Redelivery delivery metadata');
+            END;
+
+            CREATE TRIGGER runtime_input_delivery_redelivery_metadata_update
+            BEFORE UPDATE OF
+                bootstrap_redelivery_present,
+                bootstrap_redelivery_revision,
+                bootstrap_redelivery_evidence_id,
+                bootstrap_redelivery_envelope_version,
+                bootstrap_redelivery_formatter_version
+            ON runtime_input_delivery
+            WHEN NOT (
+                (NEW.bootstrap_redelivery_present = 0
+                    AND NEW.bootstrap_redelivery_revision IS NULL
+                    AND NEW.bootstrap_redelivery_evidence_id IS NULL
+                    AND NEW.bootstrap_redelivery_envelope_version IS NULL
+                    AND NEW.bootstrap_redelivery_formatter_version IS NULL)
+                OR
+                (NEW.bootstrap_redelivery_present = 1
+                    AND NEW.bootstrap_redelivery_revision IS NOT NULL
+                    AND NEW.bootstrap_redelivery_evidence_id IS NOT NULL
+                    AND NEW.bootstrap_redelivery_envelope_version IS NOT NULL
+                    AND NEW.bootstrap_redelivery_formatter_version IS NOT NULL)
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'invalid Bootstrap Redelivery delivery metadata');
+            END;
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v0.48', projection_schema_version = 26,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (66, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -11848,7 +12053,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(agent_cli_contract, ("v0.47".to_string(), 25, 1));
+        assert_eq!(agent_cli_contract, ("v0.48".to_string(), 26, 1));
         assert_eq!(foreign_key_violations, 0);
 
         drop(database);
@@ -12457,7 +12662,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.47".to_string(), 22));
+        assert_eq!(contract, ("v0.48".to_string(), 22));
         let migration_count: i64 = reopened
             .connection()
             .query_row(
@@ -12488,7 +12693,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, (25, 1));
+        assert_eq!(contract, (26, 1));
         let error = database
             .connection()
             .execute(
@@ -12793,7 +12998,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.47".to_string(), 25));
+        assert_eq!(contract, ("v0.48".to_string(), 26));
         let public_a2a_migration_applied: i64 = database
             .connection()
             .query_row(

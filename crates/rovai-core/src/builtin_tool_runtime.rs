@@ -42,6 +42,17 @@ struct BuiltinToolProcessConfigInner {
 
 impl Drop for BuiltinToolProcessConfigInner {
     fn drop(&mut self) {
+        let outbox = self.process_root.join("compaction-observation-outbox");
+        let has_uncertain_observation = fs::read_dir(&outbox)
+            .ok()
+            .and_then(|mut entries| entries.next())
+            .is_some();
+        if has_uncertain_observation {
+            // Core owns durable reconciliation. Retain only process roots that
+            // contain a concrete Hook observation with an unknown submission
+            // outcome; ordinary Runtime/Host exit still cleans up normally.
+            return;
+        }
         let _ = fs::remove_dir_all(&self.process_root);
     }
 }
@@ -93,6 +104,10 @@ impl BuiltinToolProcessConfig {
 
     pub(crate) fn process_id(&self) -> &str {
         &self.inner.process_id
+    }
+
+    pub(crate) fn cli_executable(&self) -> &Path {
+        &self.inner.cli_executable
     }
 
     pub(crate) fn process_token(&self) -> &str {
@@ -302,6 +317,14 @@ impl BuiltinToolLeaseRegistry {
             execution_epoch: active.execution_epoch,
             native_binding: active.native_binding.clone(),
         })
+    }
+
+    pub(crate) async fn authenticate_process(&self, process_id: &str, process_token: &str) -> bool {
+        self.processes
+            .lock()
+            .await
+            .get(process_id)
+            .is_some_and(|process| process.process_token == process_token)
     }
 
     pub(crate) async fn replay(

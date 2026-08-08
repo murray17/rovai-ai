@@ -1,8 +1,9 @@
 use std::{
     collections::BTreeMap,
     env, fs,
+    fs::OpenOptions,
     io::{BufRead, BufReader, IsTerminal, Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
     process::ExitCode,
     time::Duration,
 };
@@ -13,14 +14,19 @@ use rovai_core::builtin_tool_transport::{
     BUILTIN_TOOL_CONTRACT_VERSION, BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
     BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES, BuiltinToolArgument, BuiltinToolCliContext,
     BuiltinToolDescription, BuiltinToolIpcRequest, BuiltinToolIpcRequestBody,
-    BuiltinToolIpcResponse, ROVAI_CLI_CONTEXT_ENV, builtin_tool_description,
-    builtin_tool_identity_by_command,
+    BuiltinToolIpcResponse, COMPACTION_HOOK_IPC_PROTOCOL_VERSION,
+    COMPACTION_OBSERVATION_OUTBOX_SCHEMA_VERSION, CompactionHookIpcRequest,
+    CompactionHookIpcResponse, CompactionObservationOutboxRecord, ROVAI_CLI_CONTEXT_ENV,
+    builtin_tool_description, builtin_tool_identity_by_command,
 };
+use rovai_core::command::canonical_json_digest;
 use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
 const CORE_TIMEOUT: Duration = Duration::from_secs(30);
 const CORE_ATTEMPTS: usize = 3;
+const COMPACTION_HOOK_TIMEOUT: Duration = Duration::from_millis(500);
+const COMPACTION_HOOK_ATTEMPTS: usize = 3;
 
 fn main() -> ExitCode {
     match run() {
@@ -34,6 +40,13 @@ fn main() -> ExitCode {
 
 fn run() -> Result<u8> {
     let args = env::args().skip(1).collect::<Vec<_>>();
+    if args.first().is_some_and(|arg| arg == "__compaction-hook") {
+        // Runtime hooks are enhancement-only. Malformed input, unavailable
+        // Core, and uncertain acknowledgements must never block compaction or
+        // the AgentRun that triggered it.
+        let _ = run_compaction_hook(&args[1..]);
+        return Ok(0);
+    }
     if args.as_slice() == ["--version"] || args.as_slice() == ["version"] {
         println!(
             "rovai {} contract-v{} ipc-v{}",
@@ -133,6 +146,203 @@ fn run() -> Result<u8> {
             Ok(2)
         }
     }
+}
+
+fn run_compaction_hook(args: &[String]) -> Result<()> {
+    let [
+        adapter_flag,
+        adapter_kind,
+        host_flag,
+        host_instance_id,
+        signal_flag,
+        source_signal,
+    ] = args
+    else {
+        bail!("invalid internal compaction hook arguments");
+    };
+    if adapter_flag != "--adapter-kind"
+        || host_flag != "--host-instance-id"
+        || signal_flag != "--source-signal"
+        || adapter_kind.trim().is_empty()
+        || host_instance_id.trim().is_empty()
+        || source_signal.trim().is_empty()
+    {
+        bail!("invalid internal compaction hook identity");
+    }
+    let context_path = env::var_os(ROVAI_CLI_CONTEXT_ENV)
+        .map(PathBuf::from)
+        .context("ROVAI_CLI_CONTEXT is not set")?;
+    let context = load_context()?;
+    let (process_id, process_token) = context.process_auth()?;
+    let mut hook_input = String::new();
+    std::io::stdin()
+        .read_to_string(&mut hook_input)
+        .context("failed to read compaction hook input")?;
+    let hook_input: Value =
+        serde_json::from_str(&hook_input).context("compaction hook input is not valid JSON")?;
+    if !hook_input.is_object() {
+        bail!("compaction hook input must be an object");
+    }
+    let native_session_id = hook_input
+        .get("session_id")
+        .or_else(|| hook_input.get("sessionId"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .context("compaction hook input has no Native Session identity")?
+        .to_string();
+    let reported_hook_event_name = hook_input
+        .get("hook_event_name")
+        .or_else(|| hook_input.get("hookEventName"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty());
+    if reported_hook_event_name.is_some_and(|reported| reported != source_signal) {
+        bail!("compaction hook signal does not match its configured source");
+    }
+    let hook_event_name = source_signal.to_string();
+    let trigger = hook_input
+        .get("trigger")
+        .or_else(|| hook_input.get("source"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    // Never relay or persist a digest of compact_summary, transcript content,
+    // or other context-bearing Hook fields. Runtime occurrence metadata is
+    // sufficient for durable idempotence and carries no Bootstrap content.
+    let runtime_occurrence = hook_input
+        .get("compaction_id")
+        .or_else(|| hook_input.get("compactionId"))
+        .or_else(|| hook_input.get("observation_id"))
+        .or_else(|| hook_input.get("observationId"))
+        .or_else(|| hook_input.get("request_id"))
+        .or_else(|| hook_input.get("requestId"))
+        .or_else(|| hook_input.get("timestamp"))
+        .cloned()
+        .unwrap_or_else(|| Value::String(Uuid::new_v4().to_string()));
+    let source_event_digest = canonical_json_digest(&json!({
+        "schemaVersion": 1,
+        "adapterKind": adapter_kind,
+        "nativeSessionId": native_session_id,
+        "hookEventName": hook_event_name,
+        "trigger": trigger,
+        "runtimeOccurrence": runtime_occurrence,
+    }))?;
+    let request_id = Uuid::new_v4().to_string();
+    let observed_at = chrono::Utc::now().to_rfc3339();
+    let request = CompactionHookIpcRequest {
+        kind: "compaction_observation".to_string(),
+        ipc_protocol_version: COMPACTION_HOOK_IPC_PROTOCOL_VERSION,
+        process_id,
+        process_token,
+        request_id: request_id.clone(),
+        adapter_kind: adapter_kind.clone(),
+        host_instance_id: host_instance_id.clone(),
+        native_session_id,
+        hook_event_name,
+        trigger,
+        source_event_digest,
+    };
+    let outbox_record = CompactionObservationOutboxRecord {
+        schema_version: COMPACTION_OBSERVATION_OUTBOX_SCHEMA_VERSION,
+        request_id,
+        adapter_kind: request.adapter_kind.clone(),
+        host_instance_id: request.host_instance_id.clone(),
+        relay_process_id: request.process_id.clone(),
+        native_session_id: request.native_session_id.clone(),
+        hook_event_name: request.hook_event_name.clone(),
+        trigger: request.trigger.clone(),
+        source_event_digest: request.source_event_digest.clone(),
+        observed_at,
+    };
+    let staged_observation = stage_compaction_observation(&context_path, &outbox_record)?;
+    let mut last_error = None;
+    for attempt in 0..COMPACTION_HOOK_ATTEMPTS {
+        match send_compaction_hook(Path::new(&context.core_socket), &request) {
+            Ok(_response) => {
+                let _ = fs::remove_file(&staged_observation);
+                return Ok(());
+            }
+            Err(error) => last_error = Some(error),
+        }
+        if attempt + 1 < COMPACTION_HOOK_ATTEMPTS {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+    let error = last_error.context("compaction observation submission remained uncertain")?;
+    Err(error)
+}
+
+fn stage_compaction_observation(
+    context_path: &Path,
+    record: &CompactionObservationOutboxRecord,
+) -> Result<PathBuf> {
+    let process_root = context_path
+        .parent()
+        .context("Built-in Tool context has no process root")?;
+    let outbox = process_root.join("compaction-observation-outbox");
+    fs::create_dir_all(&outbox).with_context(|| {
+        format!(
+            "failed to create compaction observation outbox {}",
+            outbox.display()
+        )
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&outbox, fs::Permissions::from_mode(0o700))?;
+    }
+    let final_path = outbox.join(format!("{}.json", record.request_id));
+    let temporary_path = outbox.join(format!(".{}.tmp", record.request_id));
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(&temporary_path)
+        .with_context(|| format!("failed to stage {}", temporary_path.display()))?;
+    serde_json::to_writer(&mut file, record)?;
+    file.write_all(b"\n")?;
+    file.sync_all()?;
+    fs::rename(&temporary_path, &final_path).with_context(|| {
+        format!(
+            "failed to commit compaction observation outbox record {}",
+            final_path.display()
+        )
+    })?;
+    Ok(final_path)
+}
+
+#[cfg(unix)]
+fn send_compaction_hook(
+    socket: &Path,
+    request: &CompactionHookIpcRequest,
+) -> Result<CompactionHookIpcResponse> {
+    use std::os::unix::net::UnixStream;
+
+    let serialized = serde_json::to_vec(request)?;
+    if serialized.len() > BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES {
+        bail!("compaction hook request is too large");
+    }
+    let mut stream = UnixStream::connect(socket)?;
+    stream.set_read_timeout(Some(COMPACTION_HOOK_TIMEOUT))?;
+    stream.set_write_timeout(Some(COMPACTION_HOOK_TIMEOUT))?;
+    stream.write_all(&serialized)?;
+    stream.write_all(b"\n")?;
+    stream.flush()?;
+    let mut reader = BufReader::new(stream);
+    let mut response = String::new();
+    reader.read_line(&mut response)?;
+    Ok(serde_json::from_str(&response)?)
+}
+
+#[cfg(not(unix))]
+fn send_compaction_hook(
+    _socket: &Path,
+    _request: &CompactionHookIpcRequest,
+) -> Result<CompactionHookIpcResponse> {
+    bail!("compaction hook relay is unavailable on this platform")
 }
 
 fn envelope_exit_code(
@@ -617,5 +827,37 @@ mod tests {
         )
         .unwrap();
         assert_eq!(envelope_exit_code(&envelope), 3);
+    }
+
+    #[test]
+    fn compaction_hook_stages_only_lifecycle_metadata_for_uncertain_recovery() {
+        let root = std::env::temp_dir().join(format!("rovai-hook-outbox-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let context_path = root.join("context.json");
+        let request_id = Uuid::new_v4().to_string();
+        let record = CompactionObservationOutboxRecord {
+            schema_version: COMPACTION_OBSERVATION_OUTBOX_SCHEMA_VERSION,
+            request_id: request_id.clone(),
+            adapter_kind: "copilot-cli".to_string(),
+            host_instance_id: "host-1".to_string(),
+            relay_process_id: "process-1".to_string(),
+            native_session_id: "session-1".to_string(),
+            hook_event_name: "preCompact".to_string(),
+            trigger: "manual".to_string(),
+            source_event_digest: "digest-1".to_string(),
+            observed_at: "2026-08-08T00:00:00Z".to_string(),
+        };
+        let staged = stage_compaction_observation(&context_path, &record).unwrap();
+        assert_eq!(
+            staged.file_name().unwrap().to_str().unwrap(),
+            format!("{request_id}.json")
+        );
+        let recovered: CompactionObservationOutboxRecord =
+            serde_json::from_slice(&std::fs::read(&staged).unwrap()).unwrap();
+        assert_eq!(recovered, record);
+        let serialized = std::fs::read_to_string(staged).unwrap();
+        assert!(!serialized.contains("summary"));
+        assert!(!serialized.contains("processToken"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

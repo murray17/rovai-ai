@@ -11,6 +11,7 @@ pub mod camp_history;
 pub mod canonical_activity;
 pub mod collaboration;
 pub mod command;
+pub mod compaction;
 pub mod context;
 pub mod context_contract;
 pub mod context_delivery;

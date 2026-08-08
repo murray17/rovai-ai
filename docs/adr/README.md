@@ -1,7 +1,7 @@
 ---
 document_type: adr-index
 authority: architecture-decisions
-last_updated: 2026-08-07
+last_updated: 2026-08-08
 ---
 
 # Rovai-ai Architecture Decision Records
@@ -147,7 +147,7 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0097](0097-authority-preserving-benchmark-evidence-ledgers.md) | Authority-Preserving Benchmark Evidence Ledgers | `accepted` | [v0.34](../versions/v0.34/README.md) | 统一 Evidence Reference 与 Ledger schema，同时保留 Core、Runner、Runtime、Verifier、derived、Judge 的权威差异 |
 | [ADR-0098](0098-dual-replica-evidence-bound-semantic-judge.md) | Dual-Replica Evidence-Bound Semantic Judge Protocol | `accepted` | [v0.34](../versions/v0.34/README.md) | 以双 Replica、冻结 checklist、allowlist Evidence Pack 和 disagreement/unavailable 状态暴露 Judge 不稳定性 |
 | [ADR-0099](0099-cost-gated-independent-member-calls.md) | Cost-Gated Independent Member Calls Without Return Semantics | `superseded` | [v0.34](../versions/v0.34/README.md) | → ADR-0130；历史独立 Member Call 语义 |
-| [ADR-0100](0100-latest-member-identity-native-session-bootstrap.md) | Latest Member Identity in Native Session Bootstrap | `accepted` | [v0.35](../versions/v0.35/README.md) | ← ADR-0085；局部替代 ADR-0067 的 Bootstrap 结构、身份生命周期与完整字节恢复条款；Context Read Marker 由 ADR-0129 重定义 |
+| [ADR-0100](0100-latest-member-identity-native-session-bootstrap.md) | Latest Member Identity in Native Session Bootstrap | `accepted` | [v0.35](../versions/v0.35/README.md) | ← ADR-0085；局部替代 ADR-0067 的 Bootstrap 结构、身份生命周期与完整字节恢复条款；Context Read Marker 由 ADR-0129 重定义；普通上下文 Runtime 的 redelivery boundary 由 ADR-0141 新增 |
 | [ADR-0101](0101-outcome-only-collaboration-value-qualification-cases.md) | Outcome-Only Collaboration-Value Qualification Cases | `accepted` | [v0.36](../versions/v0.36/README.md) | 细化 ADR-0090/0095 的 Case admission、公开/withheld pairing 与无机械协作门禁 |
 | [ADR-0102](0102-immutable-diagnostic-portfolio-authority.md) | Immutable Diagnostic Portfolio Authority and Two-Repeat Stability | `accepted` | [v0.36](../versions/v0.36/README.md) | 独立于 Formal Suite 冻结四 Case、两次重复、append-only 状态与无聚合评分 |
 | [ADR-0103](0103-canonical-mcp-json-and-stable-assignment-identity.md) | Canonical MCP JSON and Stable Assignment Identity | `accepted` | [v0.37](../versions/v0.37/README.md) | 局部替代 ADR-0018 的 Schema、Assignment 关联键、默认定义和旧格式兼容条款 |
@@ -190,3 +190,9 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0135](0135-compact-agent-output-over-canonical-built-in-tool-envelope.md) | Compact Agent Output over Canonical Built-in Tool Envelope | `accepted` | [v0.46](../versions/v0.46/README.md) | 局部替代 ADR-0124 的 Agent-facing response/Bootstrap 与 discovery 条款；Core Envelope、receipt、IPC 和 replay 继续有效 |
 | [ADR-0136](0136-durable-task-v2-responsibility-and-coordination-authority.md) | Durable Task v2 Responsibility and Coordination Authority | `accepted` | [v0.47](../versions/v0.47/README.md) | 局部替代 ADR-0057/0058 的 Task shape、Lead authority、membership/removal Task 收口与 removed Assignee 条款 |
 | [ADR-0137](0137-one-time-task-linked-responsibility-admission.md) | One-Time Task-Linked Responsibility Admission | `accepted` | [v0.47](../versions/v0.47/README.md) | 局部替代 ADR-0058 与实现中的 dispatch/start 持续 Task fence，冻结 acceptance-boundary admission 与 grandfathering |
+| [ADR-0138](0138-durable-bootstrap-redelivery-requirement.md) | Durable Bootstrap Redelivery Requirement and Accepted-Input Acknowledgement | `accepted` | [v0.48](../versions/v0.48/README.md) | 新增 Binding-generation-scoped 持久补发水位、Delivery Gate capture 与 accepted-ACK 消费边界 |
+| [ADR-0139](0139-version-owned-bootstrap-redelivery-runtime-policy.md) | Version-Owned Bootstrap Redelivery Runtime Policy and Enablement Transition | `accepted` | [v0.48](../versions/v0.48/README.md) | 新增版本维护的内部 Runtime 环境策略、process-start snapshot 与存量 Binding 首次 enablement 补发 |
+| [ADR-0140](0140-runtime-specific-compaction-signal-admission-point.md) | Runtime-Specific Compaction Signal Admission Point and Prepared-Input Cutoff | `accepted` | [v0.48](../versions/v0.48/README.md) | 冻结 Copilot 一次性 edge、五 Runtime completed surface、CodeBuddy coverage gap 与 prepared 截止点 |
+| [ADR-0141](0141-atomic-bootstrap-redelivery-input-overlay.md) | Atomic Bootstrap Redelivery Input Overlay and Transient Identity Boundary | `accepted` | [v0.48](../versions/v0.48/README.md) | 新增原子 input preparation、完整补发 envelope、combined budget 与 ADR-0100 身份不持久化边界 |
+| [ADR-0142](0142-native-session-scoped-compaction-observer-lease.md) | Native-Session-Scoped Compaction Observer Lease and Uncertain-Submission Boundary | `accepted` | [v0.48](../versions/v0.48/README.md) | 新增跨 AgentRun 的窄权限 Session Observer、Host/Binding/policy fencing 与 known-unknown interruption 规则 |
+| [ADR-0143](0143-best-effort-non-blocking-compaction-detector-capability.md) | Best-Effort Non-Blocking Compaction Detector Capability | `accepted` | [v0.48](../versions/v0.48/README.md) | 局部替代 ADR-0139 的 enabled/Readiness 含义；六 Runtime best-effort 且不阻塞 AgentRun，Antigravity disabled |

@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.47
+current_version: v0.48
 last_updated: 2026-08-08
 ---
 
@@ -98,4 +98,5 @@ last_updated: 2026-08-08
 | v0.44 | `historical` | 确定性有界原始公共消息上下文与摘要系统移除 | [v0.44/README.md](v0.44/README.md) |
 | v0.45 | `historical` | 显式 A2A、公共输出、统一 Message Delivery、Profile v2 引用闭合与 Scheme C 会话区 | [v0.45/README.md](v0.45/README.md) |
 | v0.46 | `historical` | 已完成 Agent Result Projection、Agent-facing Discovery 删除与隐式 Camp 作用域的 clean break | [v0.46/README.md](v0.46/README.md) |
-| v0.47 | `current` | 已完成 Durable Task v2、一次性责任准入、原子成员收口与 Built-in Transport v4 | [v0.47/README.md](v0.47/README.md) |
+| v0.47 | `historical` | 已完成 Durable Task v2、一次性责任准入、原子成员收口与 Built-in Transport v4 | [v0.47/README.md](v0.47/README.md) |
+| v0.48 | `current` | 已完成六 Runtime Native Session compaction detector、durable Requirement 与 Bootstrap Redelivery Gate | [v0.48/README.md](v0.48/README.md) |

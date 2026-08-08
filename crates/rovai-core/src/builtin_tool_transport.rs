@@ -17,6 +17,8 @@ pub const BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES: usize = 1024 * 1024;
 pub const ROVAI_AGENT_CLI_ENV: &str = "ROVAI_AGENT_CLI";
 pub const ROVAI_CLI_CONTEXT_ENV: &str = "ROVAI_CLI_CONTEXT";
 pub const ROVAI_RUN_TMP_ENV: &str = "ROVAI_RUN_TMP";
+pub const COMPACTION_HOOK_IPC_PROTOCOL_VERSION: u32 = 1;
+pub const COMPACTION_OBSERVATION_OUTBOX_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -68,6 +70,55 @@ impl BuiltinToolCliContext {
             lease_token: lease.lease_token.clone(),
         })
     }
+
+    pub fn process_auth(&self) -> Result<(String, String)> {
+        if self.contract_version != BUILTIN_TOOL_CONTRACT_VERSION
+            || self.ipc_protocol_version != BUILTIN_TOOL_IPC_PROTOCOL_VERSION
+            || self.core_socket.trim().is_empty()
+            || self.process_id.trim().is_empty()
+            || self.process_token.trim().is_empty()
+        {
+            bail!("Built-in Tool process context is incomplete");
+        }
+        Ok((self.process_id.clone(), self.process_token.clone()))
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CompactionHookIpcRequest {
+    pub kind: String,
+    pub ipc_protocol_version: u32,
+    pub process_id: String,
+    pub process_token: String,
+    pub request_id: String,
+    pub adapter_kind: String,
+    pub host_instance_id: String,
+    pub native_session_id: String,
+    pub hook_event_name: String,
+    pub trigger: String,
+    pub source_event_digest: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CompactionHookIpcResponse {
+    pub accepted: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CompactionObservationOutboxRecord {
+    pub schema_version: u32,
+    pub request_id: String,
+    pub adapter_kind: String,
+    pub host_instance_id: String,
+    pub relay_process_id: String,
+    pub native_session_id: String,
+    pub hook_event_name: String,
+    pub trigger: String,
+    pub source_event_digest: String,
+    pub observed_at: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

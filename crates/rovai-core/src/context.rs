@@ -13,6 +13,10 @@ use crate::{
     agent_profile::{AdapterKind, validate_stored_member_identity},
     camp_content::{StructuredCampMessageContent, normalize_content, render_current_plain_text},
     command::{EntityReference, canonical_json_digest},
+    compaction::{
+        BOOTSTRAP_REDELIVERY_ENVELOPE_VERSION, BOOTSTRAP_REDELIVERY_FORMATTER_VERSION,
+        pending_redelivery_revision,
+    },
     context_contract::{
         AGENT_RUN_CONTEXT_FORMATTER_VERSION, BOOTSTRAP_FORMATTER_VERSION,
         NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION,
@@ -119,6 +123,7 @@ pub(crate) struct DeliveryContextPreview<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreparedContext {
     pub manifest_id: String,
+    pub bootstrap_evidence_id: String,
     /// The immutable AgentRun Dynamic Context persisted by ContextManifest.
     pub rendered_payload: String,
     pub rendered_payload_digest: String,
@@ -127,6 +132,7 @@ pub struct PreparedContext {
     pub runtime_payload: String,
     pub charter_delivery_mode: CharterDeliveryMode,
     pub bootstrap_in_runtime_payload: bool,
+    pub bootstrap_redelivery_revision: Option<i64>,
     pub expected_binding_generation: i64,
     pub requires_new_native_session: bool,
     pub camp_message_boundary_sequence: i64,
@@ -191,6 +197,14 @@ pub struct RuntimeInputDelivery {
     pub status: String,
     pub native_input_id: Option<String>,
     pub boundary_camp_message_sequence: i64,
+    pub bootstrap_redelivery_revision: Option<i64>,
+}
+
+#[derive(Default)]
+struct RuntimeInputDeliveryOptions<'a> {
+    proposed_binding_id: Option<&'a str>,
+    bootstrap_redelivery_revision: Option<i64>,
+    bootstrap_evidence_id: Option<&'a str>,
 }
 
 #[derive(Debug)]
@@ -514,9 +528,15 @@ impl ContextService {
         let collaboration_state = members_changed.then(|| build_collaboration_state(&members));
         let run_notices =
             build_run_notices(database, &snapshot, requires_new_native_session, a2a_count)?;
-        let bootstrap_in_runtime_payload = request.charter_delivery_mode
+        let bootstrap_redelivery_revision = pending_redelivery_revision(
+            database,
+            bootstrap_binding_id,
+            expected_binding_generation,
+        )?;
+        let bootstrap_in_runtime_payload = (request.charter_delivery_mode
             == CharterDeliveryMode::FirstPayload
-            && bootstrap_required;
+            && bootstrap_required)
+            || bootstrap_redelivery_revision.is_some();
         let current_input_value = current_input.as_payload(&attachment_paths);
         let bootstrap_payload = if bootstrap_in_runtime_payload {
             let bootstrap = format_session_bootstrap_for_snapshot(
@@ -524,7 +544,11 @@ impl ContextService {
                 &snapshot,
                 bootstrap_evidence.clone(),
             )?;
-            Some(bootstrap.payload)
+            Some(if bootstrap_redelivery_revision.is_some() {
+                render_bootstrap_redelivery_overlay(&bootstrap.payload)
+            } else {
+                bootstrap.payload
+            })
         } else {
             None
         };
@@ -855,11 +879,13 @@ impl ContextService {
 
         Ok(ContextMaterialization::Ready(PreparedContext {
             manifest_id: persisted_manifest_id,
+            bootstrap_evidence_id: bootstrap_evidence.evidence_id,
             rendered_payload: payload,
             rendered_payload_digest: payload_digest,
             runtime_payload,
             charter_delivery_mode: request.charter_delivery_mode,
             bootstrap_in_runtime_payload,
+            bootstrap_redelivery_revision,
             expected_binding_generation,
             requires_new_native_session,
             camp_message_boundary_sequence: snapshot.camp_message_boundary_sequence,
@@ -1140,7 +1166,27 @@ impl ContextService {
             agent_run_id,
             execution_epoch,
             manifest_id,
-            None,
+            RuntimeInputDeliveryOptions::default(),
+        )
+    }
+
+    pub fn prepare_input_delivery_for_context(
+        &self,
+        database: &mut Database,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        context: &PreparedContext,
+    ) -> Result<RuntimeInputDelivery> {
+        self.prepare_input_delivery_inner(
+            database,
+            agent_run_id,
+            execution_epoch,
+            &context.manifest_id,
+            RuntimeInputDeliveryOptions {
+                bootstrap_redelivery_revision: context.bootstrap_redelivery_revision,
+                bootstrap_evidence_id: Some(&context.bootstrap_evidence_id),
+                ..RuntimeInputDeliveryOptions::default()
+            },
         )
     }
 
@@ -1158,7 +1204,10 @@ impl ContextService {
             agent_run_id,
             execution_epoch,
             manifest_id,
-            Some(proposed_binding_id),
+            RuntimeInputDeliveryOptions {
+                proposed_binding_id: Some(proposed_binding_id),
+                ..RuntimeInputDeliveryOptions::default()
+            },
         )
     }
 
@@ -1168,8 +1217,13 @@ impl ContextService {
         agent_run_id: &str,
         execution_epoch: i64,
         manifest_id: &str,
-        proposed_binding_id: Option<&str>,
+        options: RuntimeInputDeliveryOptions<'_>,
     ) -> Result<RuntimeInputDelivery> {
+        let RuntimeInputDeliveryOptions {
+            proposed_binding_id,
+            bootstrap_redelivery_revision,
+            bootstrap_evidence_id,
+        } = options;
         let transaction = database.connection_mut().transaction()?;
         if let Some(mut existing) = load_delivery(&transaction, agent_run_id, execution_epoch)? {
             let target = load_delivery_target(&transaction, &existing.id)?
@@ -1264,8 +1318,15 @@ impl ContextService {
                 id, agent_run_id, execution_epoch, context_manifest_id,
                 native_binding_id, native_binding_generation,
                 boundary_camp_message_sequence, dynamic_payload_digest,
-                status, prepared_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'prepared', ?9, ?9)
+                status, prepared_at, updated_at,
+                bootstrap_redelivery_present, bootstrap_redelivery_revision,
+                bootstrap_redelivery_evidence_id,
+                bootstrap_redelivery_envelope_version,
+                bootstrap_redelivery_formatter_version
+            ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'prepared', ?9, ?9,
+                ?10, ?11, ?12, ?13, ?14
+            )
             "#,
             params![
                 delivery_id,
@@ -1277,6 +1338,11 @@ impl ContextService {
                 row.2,
                 row.0,
                 now,
+                i64::from(bootstrap_redelivery_revision.is_some()),
+                bootstrap_redelivery_revision,
+                bootstrap_redelivery_revision.and(bootstrap_evidence_id),
+                bootstrap_redelivery_revision.map(|_| BOOTSTRAP_REDELIVERY_ENVELOPE_VERSION),
+                bootstrap_redelivery_revision.map(|_| BOOTSTRAP_REDELIVERY_FORMATTER_VERSION),
             ],
         )?;
         append_raw_event(
@@ -1291,6 +1357,7 @@ impl ContextService {
                 "contextManifestId": manifest_id,
                 "bindingGeneration": binding_generation,
                 "boundarySequence": row.2,
+                "bootstrapRedeliveryRevision": bootstrap_redelivery_revision,
             }),
         )?;
         transaction.commit()?;
@@ -1299,6 +1366,7 @@ impl ContextService {
             status: "prepared".to_string(),
             native_input_id: None,
             boundary_camp_message_sequence: row.2,
+            bootstrap_redelivery_revision,
         })
     }
 
@@ -1364,6 +1432,30 @@ impl ContextService {
         if marker_updated != 1 {
             anyhow::bail!("Native Binding changed before input acknowledgement");
         }
+        if let Some(redelivery_revision) = row.bootstrap_redelivery_revision {
+            let redelivery_updated = transaction.execute(
+                r#"
+                UPDATE bootstrap_redelivery_requirement
+                SET acknowledged_revision = MAX(acknowledged_revision, ?3),
+                    updated_at = ?4
+                WHERE native_binding_id = ?1
+                  AND native_binding_generation = ?2
+                  AND requested_revision >= ?3
+                  AND acknowledged_revision <= ?3
+                "#,
+                params![
+                    row.native_binding_id,
+                    row.native_binding_generation,
+                    redelivery_revision,
+                    now,
+                ],
+            )?;
+            if redelivery_updated != 1 {
+                anyhow::bail!(
+                    "Bootstrap Redelivery Requirement changed before input acknowledgement"
+                );
+            }
+        }
         if row.status == "delivery_unknown" {
             transaction.execute(
                 r#"
@@ -1390,6 +1482,7 @@ impl ContextService {
                 "runtimeInputDeliveryId": delivery_id,
                 "nativeInputId": native_input_id,
                 "boundarySequence": row.boundary_camp_message_sequence,
+                "bootstrapRedeliveryRevision": row.bootstrap_redelivery_revision,
             }),
         )?;
         transaction.commit()?;
@@ -1398,6 +1491,7 @@ impl ContextService {
             status: "accepted".to_string(),
             native_input_id: Some(native_input_id.to_string()),
             boundary_camp_message_sequence: row.boundary_camp_message_sequence,
+            bootstrap_redelivery_revision: row.bootstrap_redelivery_revision,
         })
     }
 
@@ -1916,6 +2010,13 @@ fn render_session_bootstrap(
 
 fn compose_first_payload(bootstrap: &str, dynamic_context: &str) -> String {
     format!("{bootstrap}\n\n{dynamic_context}")
+}
+
+fn render_bootstrap_redelivery_overlay(bootstrap: &str) -> String {
+    format!(
+        "[ROVAI_BOOTSTRAP_REDELIVERY]\n【补发】Native Session Bootstrap\n原因：Runtime 已报告当前 Native Session 已发生或即将发生会话上下文压缩。\n以下内容用于恢复可能因压缩而丢失的会话级长期上下文。\n\n{}\n[/ROVAI_BOOTSTRAP_REDELIVERY]",
+        bootstrap.trim()
+    )
 }
 
 fn bootstrap_evidence_digest(charter_digest: &str, memory_entrypoint_digest: &str) -> String {
@@ -3286,7 +3387,18 @@ fn load_existing_manifest(
                    manifest.formatter_version,
                    manifest.context_delivery_profile_version,
                    manifest.context_delivery_profile_json,
-                   manifest.context_delivery_profile_digest
+                   manifest.context_delivery_profile_digest,
+                   EXISTS(
+                       SELECT 1 FROM runtime_input_delivery AS delivery
+                       WHERE delivery.context_manifest_id = manifest.id
+                   ),
+                   (
+                       SELECT delivery.bootstrap_redelivery_revision
+                       FROM runtime_input_delivery AS delivery
+                       WHERE delivery.context_manifest_id = manifest.id
+                       ORDER BY delivery.prepared_at DESC, delivery.id DESC
+                       LIMIT 1
+                   )
             FROM context_manifest AS manifest
             JOIN native_session_bootstrap_evidence AS bootstrap
               ON bootstrap.id = manifest.bootstrap_evidence_id
@@ -3314,6 +3426,8 @@ fn load_existing_manifest(
                     row.get::<_, Option<i64>>(16)?,
                     row.get::<_, Option<String>>(17)?,
                     row.get::<_, Option<String>>(18)?,
+                    row.get::<_, bool>(19)?,
+                    row.get::<_, Option<i64>>(20)?,
                 ))
             },
         )
@@ -3372,11 +3486,29 @@ fn load_existing_manifest(
     let bootstrap_digest = bootstrap_evidence_digest(&row.11, &row.13);
     let bootstrap_required = requires_new_native_session
         || snapshot.native_charter_digest.as_deref() != Some(bootstrap_digest.as_str());
-    let bootstrap_in_runtime_payload =
-        delivery_mode == CharterDeliveryMode::FirstPayload && bootstrap_required;
+    let bootstrap_redelivery_revision = if row.19 {
+        // Once an input has crossed the prepared cutoff, recovery must
+        // reconstruct exactly that decision. A later observation belongs to
+        // the next controllable prompt and cannot be pulled into this one.
+        row.20
+    } else {
+        let native_binding_id = snapshot
+            .native_binding_id
+            .as_deref()
+            .context("Stored ContextManifest has no Native Binding identity")?;
+        pending_redelivery_revision(database, native_binding_id, row.1)?
+    };
+    let bootstrap_in_runtime_payload = (delivery_mode == CharterDeliveryMode::FirstPayload
+        && bootstrap_required)
+        || bootstrap_redelivery_revision.is_some();
     let runtime_payload = if bootstrap_in_runtime_payload {
         let member_identity = load_latest_member_identity(database, &snapshot.agent_id)?;
         let bootstrap = render_session_bootstrap(&charter, &member_identity, &entrypoint)?;
+        let bootstrap = if bootstrap_redelivery_revision.is_some() {
+            render_bootstrap_redelivery_overlay(&bootstrap)
+        } else {
+            bootstrap
+        };
         compose_first_payload(&bootstrap, &payload)
     } else {
         payload.clone()
@@ -3386,11 +3518,13 @@ fn load_existing_manifest(
     }
     Ok(Some(PreparedContext {
         manifest_id: row.0,
+        bootstrap_evidence_id: row.9,
         rendered_payload: payload,
         rendered_payload_digest: row.4,
         runtime_payload,
         charter_delivery_mode: delivery_mode,
         bootstrap_in_runtime_payload,
+        bootstrap_redelivery_revision,
         expected_binding_generation: row.1,
         requires_new_native_session,
         camp_message_boundary_sequence: row.2,
@@ -3455,12 +3589,23 @@ fn materialize_frozen_delivery_context(
     {
         anyhow::bail!("Frozen Delivery Context no longer matches the AgentRun boundary");
     }
+    let bootstrap_redelivery_revision = pending_redelivery_revision(
+        database,
+        &bootstrap_evidence.native_binding_id,
+        expected_binding_generation,
+    )?;
     let bootstrap_in_runtime_payload =
-        request.charter_delivery_mode == CharterDeliveryMode::FirstPayload && bootstrap_required;
+        (request.charter_delivery_mode == CharterDeliveryMode::FirstPayload && bootstrap_required)
+            || bootstrap_redelivery_revision.is_some();
     let runtime_payload = if bootstrap_in_runtime_payload {
         let bootstrap =
             format_session_bootstrap_for_snapshot(database, snapshot, bootstrap_evidence.clone())?;
-        compose_first_payload(&bootstrap.payload, &frozen.rendered_payload)
+        let bootstrap = if bootstrap_redelivery_revision.is_some() {
+            render_bootstrap_redelivery_overlay(&bootstrap.payload)
+        } else {
+            bootstrap.payload
+        };
+        compose_first_payload(&bootstrap, &frozen.rendered_payload)
     } else {
         frozen.runtime_payload.clone()
     };
@@ -3661,11 +3806,13 @@ fn materialize_frozen_delivery_context(
 
     Ok(ContextMaterialization::Ready(PreparedContext {
         manifest_id,
+        bootstrap_evidence_id: bootstrap_evidence.evidence_id.clone(),
         rendered_payload: frozen.rendered_payload.clone(),
         rendered_payload_digest: payload_digest,
         runtime_payload,
         charter_delivery_mode: request.charter_delivery_mode,
         bootstrap_in_runtime_payload,
+        bootstrap_redelivery_revision,
         expected_binding_generation,
         requires_new_native_session,
         camp_message_boundary_sequence: snapshot.camp_message_boundary_sequence,
@@ -3814,6 +3961,7 @@ struct DeliveryTargetRow {
     camp_id: String,
     status: String,
     native_input_id: Option<String>,
+    bootstrap_redelivery_revision: Option<i64>,
 }
 
 impl DeliveryTargetRow {
@@ -3823,6 +3971,7 @@ impl DeliveryTargetRow {
             status: self.status.clone(),
             native_input_id: self.native_input_id.clone(),
             boundary_camp_message_sequence: self.boundary_camp_message_sequence,
+            bootstrap_redelivery_revision: self.bootstrap_redelivery_revision,
         }
     }
 }
@@ -3846,7 +3995,8 @@ fn load_delivery_target(
                    bootstrap.memory_entrypoint_digest,
                    context_manifest.collaboration_state_digest,
                    camp_turn.camp_id, runtime_input_delivery.status,
-                   runtime_input_delivery.native_input_id
+                   runtime_input_delivery.native_input_id,
+                   runtime_input_delivery.bootstrap_redelivery_revision
             FROM runtime_input_delivery
             JOIN context_manifest
               ON context_manifest.id = runtime_input_delivery.context_manifest_id
@@ -3876,6 +4026,7 @@ fn load_delivery_target(
                     camp_id: row.get(11)?,
                     status: row.get(12)?,
                     native_input_id: row.get(13)?,
+                    bootstrap_redelivery_revision: row.get(14)?,
                 })
             },
         )
@@ -3892,7 +4043,8 @@ fn load_delivery(
         .query_row(
             r#"
             SELECT id, status, native_input_id,
-                   boundary_camp_message_sequence
+                   boundary_camp_message_sequence,
+                   bootstrap_redelivery_revision
             FROM runtime_input_delivery
             WHERE agent_run_id = ?1 AND execution_epoch = ?2
             "#,
@@ -3903,6 +4055,7 @@ fn load_delivery(
                     status: row.get(1)?,
                     native_input_id: row.get(2)?,
                     boundary_camp_message_sequence: row.get(3)?,
+                    bootstrap_redelivery_revision: row.get(4)?,
                 })
             },
         )
@@ -3920,7 +4073,8 @@ fn load_accepted_delivery_for_current_binding(
             SELECT runtime_input_delivery.id,
                    runtime_input_delivery.status,
                    runtime_input_delivery.native_input_id,
-                   runtime_input_delivery.boundary_camp_message_sequence
+                   runtime_input_delivery.boundary_camp_message_sequence,
+                   runtime_input_delivery.bootstrap_redelivery_revision
             FROM runtime_input_delivery
             JOIN agent_run ON agent_run.id = runtime_input_delivery.agent_run_id
             JOIN conversation ON conversation.id = agent_run.conversation_id
@@ -3939,6 +4093,7 @@ fn load_accepted_delivery_for_current_binding(
                     status: row.get(1)?,
                     native_input_id: row.get(2)?,
                     boundary_camp_message_sequence: row.get(3)?,
+                    bootstrap_redelivery_revision: row.get(4)?,
                 })
             },
         )
@@ -3985,6 +4140,14 @@ mod tests {
             CollaborationService, ExecutionRequest, TestCampMessageAddress, TestCampMessageCommand,
         },
         command::{ActorRef, CommandEnvelope, CommandResultStatus},
+        compaction::{
+            CompactionObservationResult, DesiredCompactionDetectorPolicies,
+            EstablishCompactionObserverLease, SubmitCompactionObservation,
+            active_observer_lease_for_relay, establish_compaction_observer_lease,
+            fence_active_observers_for_host, fence_active_observers_on_core_start,
+            pending_redelivery_revision, reconcile_detector_policies,
+            submit_compaction_observation,
+        },
         context_delivery::{CONTEXT_DELIVERY_PROFILE_V1, CONTEXT_DELIVERY_PROFILE_V2},
         mcp::{
             CreateMcpServerParams, McpConfigStore, McpMutationResult, SetMcpAssignmentParams,
@@ -4283,6 +4446,78 @@ mod tests {
             execution_epoch,
             native_binding_id: binding.native_binding_id,
         }
+    }
+
+    fn bind_redelivery_fixture_session(fixture: &mut Fixture, native_session_id: &str) -> String {
+        let runtime = ExecutionRuntimeService::default();
+        let execution = runtime
+            .load_agent_run_execution(&fixture.database, &fixture.run_id, fixture.execution_epoch)
+            .unwrap()
+            .unwrap();
+        let conversation_id = execution.conversation_id.clone();
+        let binding = runtime
+            .bind_native_session(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: ActorRef::System {
+                        component_id: "runtime-adapter:test".to_string(),
+                    },
+                    camp_id: Some(fixture.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: BindNativeSessionCommand {
+                        conversation_id: conversation_id.clone(),
+                        agent_run_id: fixture.run_id.clone(),
+                        expected_conversation_version: execution.conversation_version,
+                        expected_execution_epoch: fixture.execution_epoch,
+                        previous_adapter_installation_id: execution
+                            .native_adapter_installation_id
+                            .clone(),
+                        previous_native_session_id: execution.native_session_id.clone(),
+                        previous_binding_compatibility_digest: execution
+                            .native_binding_compatibility_digest
+                            .clone(),
+                        proposed_binding_id: Some(fixture.native_binding_id.clone()),
+                        adapter_installation_id: execution.runtime.installation_id,
+                        native_session_id: native_session_id.to_string(),
+                        binding_compatibility_digest: execution
+                            .runtime
+                            .binding_compatibility_digest,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(binding.result.status, CommandResultStatus::Applied);
+        conversation_id
+    }
+
+    fn insert_redelivery_requirement(
+        fixture: &mut Fixture,
+        conversation_id: &str,
+        requested_revision: i64,
+    ) {
+        let now = chrono::Utc::now().to_rfc3339();
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO bootstrap_redelivery_requirement(
+                    conversation_id, native_binding_id,
+                    native_binding_generation, adapter_kind,
+                    requested_revision, acknowledged_revision,
+                    created_at, updated_at
+                ) VALUES (?1, ?2, 1, 'opencode-cli', ?3, 0, ?4, ?4)
+                "#,
+                params![
+                    conversation_id,
+                    fixture.native_binding_id,
+                    requested_revision,
+                    now,
+                ],
+            )
+            .unwrap();
     }
 
     fn materialize_history_run(
@@ -6233,6 +6468,176 @@ mod tests {
     }
 
     #[test]
+    fn redelivery_overlay_is_frozen_at_prepare_and_acknowledges_only_its_revision() {
+        let mut fixture = fixture();
+        let conversation_id = bind_redelivery_fixture_session(&mut fixture, "redelivery-session");
+        insert_redelivery_requirement(&mut fixture, &conversation_id, 1);
+        let service = ContextService;
+        let store = ManagedBlobStore::new(&fixture.directory);
+        let ContextMaterialization::Ready(prepared) = service
+            .materialize(
+                &mut fixture.database,
+                &store,
+                &MaterializeContextRequest {
+                    agent_run_id: &fixture.run_id,
+                    execution_epoch: fixture.execution_epoch,
+                    charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+            )
+            .unwrap()
+        else {
+            panic!("redelivery Context should be ready");
+        };
+        assert_eq!(prepared.bootstrap_redelivery_revision, Some(1));
+        assert!(prepared.bootstrap_in_runtime_payload);
+        assert!(
+            prepared
+                .runtime_payload
+                .starts_with("[ROVAI_BOOTSTRAP_REDELIVERY]\n【补发】")
+        );
+        let overlay_end = prepared
+            .runtime_payload
+            .find("[/ROVAI_BOOTSTRAP_REDELIVERY]")
+            .unwrap();
+        let bootstrap_start = prepared.runtime_payload.find("[SESSION_CHARTER]").unwrap();
+        let dynamic_start = prepared
+            .runtime_payload
+            .find(&prepared.rendered_payload)
+            .unwrap();
+        assert!(bootstrap_start < overlay_end && overlay_end < dynamic_start);
+        assert!(!prepared.rendered_payload.contains("【补发】"));
+
+        let delivery = service
+            .prepare_input_delivery_for_context(
+                &mut fixture.database,
+                &fixture.run_id,
+                fixture.execution_epoch,
+                &prepared,
+            )
+            .unwrap();
+        assert_eq!(delivery.bootstrap_redelivery_revision, Some(1));
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE bootstrap_redelivery_requirement
+                SET requested_revision = 2, updated_at = ?3
+                WHERE native_binding_id = ?1 AND native_binding_generation = ?2
+                "#,
+                params![
+                    fixture.native_binding_id,
+                    1,
+                    chrono::Utc::now().to_rfc3339(),
+                ],
+            )
+            .unwrap();
+
+        let ContextMaterialization::Ready(recovered) = service
+            .materialize(
+                &mut fixture.database,
+                &store,
+                &MaterializeContextRequest {
+                    agent_run_id: &fixture.run_id,
+                    execution_epoch: fixture.execution_epoch,
+                    charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+            )
+            .unwrap()
+        else {
+            panic!("prepared delivery Context should recover");
+        };
+        assert_eq!(
+            recovered.bootstrap_redelivery_revision,
+            Some(1),
+            "a revision observed after the prepared cutoff belongs to the next prompt"
+        );
+
+        service
+            .acknowledge_input_delivery(&mut fixture.database, &delivery.id, "native-input-1")
+            .unwrap();
+        assert_eq!(
+            pending_redelivery_revision(&fixture.database, &fixture.native_binding_id, 1).unwrap(),
+            Some(2),
+            "accepted revision one must not consume the later revision"
+        );
+        let revisions: (i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT requested_revision, acknowledged_revision
+                FROM bootstrap_redelivery_requirement
+                WHERE native_binding_id = ?1 AND native_binding_generation = 1
+                "#,
+                [&fixture.native_binding_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(revisions, (2, 1));
+        std::fs::remove_dir_all(fixture.directory).unwrap();
+    }
+
+    #[test]
+    fn delivery_unknown_never_consumes_a_redelivery_requirement() {
+        let mut fixture = fixture();
+        let conversation_id = bind_redelivery_fixture_session(&mut fixture, "unknown-session");
+        insert_redelivery_requirement(&mut fixture, &conversation_id, 1);
+        let service = ContextService;
+        let ContextMaterialization::Ready(prepared) = service
+            .materialize(
+                &mut fixture.database,
+                &ManagedBlobStore::new(&fixture.directory),
+                &MaterializeContextRequest {
+                    agent_run_id: &fixture.run_id,
+                    execution_epoch: fixture.execution_epoch,
+                    charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+            )
+            .unwrap()
+        else {
+            panic!("redelivery Context should be ready");
+        };
+        let delivery = service
+            .prepare_input_delivery_for_context(
+                &mut fixture.database,
+                &fixture.run_id,
+                fixture.execution_epoch,
+                &prepared,
+            )
+            .unwrap();
+        service
+            .mark_input_delivery_unknown(
+                &mut fixture.database,
+                &delivery.id,
+                "transport outcome is uncertain",
+            )
+            .unwrap();
+        assert_eq!(
+            pending_redelivery_revision(&fixture.database, &fixture.native_binding_id, 1).unwrap(),
+            Some(1)
+        );
+        let acknowledged_revision: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT acknowledged_revision
+                FROM bootstrap_redelivery_requirement
+                WHERE native_binding_id = ?1 AND native_binding_generation = 1
+                "#,
+                [&fixture.native_binding_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(acknowledged_revision, 0);
+        std::fs::remove_dir_all(fixture.directory).unwrap();
+    }
+
+    #[test]
     fn context_manifest_persists_only_redacted_frozen_mcp_exposure() {
         let mut fixture = fixture();
         let config_store = McpConfigStore::new(fixture.directory.join("home/.rovai/mcp.json"));
@@ -6388,6 +6793,200 @@ mod tests {
             .unwrap();
         assert_eq!(binding.result.payload["nativeBindingGeneration"], 1);
         execution
+    }
+
+    #[test]
+    fn observer_lease_is_binding_scoped_deduplicated_and_host_fenced() {
+        let mut fixture = fixture();
+        let policies = DesiredCompactionDetectorPolicies {
+            policies: [
+                AdapterKind::CopilotCli,
+                AdapterKind::OpencodeCli,
+                AdapterKind::KiroCli,
+                AdapterKind::QoderCli,
+                AdapterKind::CodebuddyCli,
+                AdapterKind::QwenCode,
+                AdapterKind::AntigravityApp,
+            ]
+            .into_iter()
+            .map(|kind| (kind, crate::compaction::release_default_policy(kind)))
+            .collect(),
+            diagnostics: Vec::new(),
+        };
+        reconcile_detector_policies(&mut fixture.database, &policies).unwrap();
+        let execution = bind_fixture_native_session(&mut fixture, "observer-session");
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE adapter_installation SET adapter_kind = 'copilot-cli' WHERE id = ?1",
+                [&execution.runtime.installation_id],
+            )
+            .unwrap();
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET runtime_adapter_kind = 'copilot-cli' WHERE id = ?1",
+                [&fixture.run_id],
+            )
+            .unwrap();
+
+        let first = establish_compaction_observer_lease(
+            &mut fixture.database,
+            &EstablishCompactionObserverLease {
+                agent_run_id: &fixture.run_id,
+                execution_epoch: fixture.execution_epoch,
+                adapter_kind: AdapterKind::CopilotCli,
+                host_instance_id: "host-1",
+                relay_process_id: "relay-1",
+                native_session_id: "observer-session",
+            },
+        )
+        .unwrap()
+        .expect("best-effort observer should establish");
+        assert_eq!(
+            active_observer_lease_for_relay(
+                &fixture.database,
+                AdapterKind::CopilotCli,
+                "host-1",
+                "relay-1",
+                "observer-session",
+            )
+            .unwrap()
+            .as_deref(),
+            Some(first.id.as_str())
+        );
+        let observed_at = chrono::Utc::now().to_rfc3339();
+        let request = SubmitCompactionObservation {
+            observer_lease_id: &first.id,
+            source_observation_id: "preCompact:compact-1",
+            source_signal: "preCompact",
+            admission_point: "imminent_edge",
+            source_event_digest: "sha256:compact-1",
+            observed_at: &observed_at,
+        };
+        assert_eq!(
+            submit_compaction_observation(&mut fixture.database, &request).unwrap(),
+            CompactionObservationResult::Applied {
+                requested_revision: 1
+            }
+        );
+        assert_eq!(
+            submit_compaction_observation(&mut fixture.database, &request).unwrap(),
+            CompactionObservationResult::Duplicate {
+                requested_revision: 1
+            }
+        );
+
+        let second = establish_compaction_observer_lease(
+            &mut fixture.database,
+            &EstablishCompactionObserverLease {
+                agent_run_id: &fixture.run_id,
+                execution_epoch: fixture.execution_epoch,
+                adapter_kind: AdapterKind::CopilotCli,
+                host_instance_id: "host-2",
+                relay_process_id: "relay-2",
+                native_session_id: "observer-session",
+            },
+        )
+        .unwrap()
+        .expect("replacement Host observer should establish");
+        assert_ne!(second.id, first.id);
+        assert_eq!(
+            submit_compaction_observation(
+                &mut fixture.database,
+                &SubmitCompactionObservation {
+                    observer_lease_id: &second.id,
+                    source_observation_id: "preCompact:compact-1",
+                    source_signal: "preCompact",
+                    admission_point: "imminent_edge",
+                    source_event_digest: "sha256:compact-1-replayed",
+                    observed_at: &observed_at,
+                },
+            )
+            .unwrap(),
+            CompactionObservationResult::Duplicate {
+                requested_revision: 1
+            }
+        );
+        assert_eq!(
+            submit_compaction_observation(
+                &mut fixture.database,
+                &SubmitCompactionObservation {
+                    observer_lease_id: &first.id,
+                    source_observation_id: "preCompact:late-old-host",
+                    source_signal: "preCompact",
+                    admission_point: "imminent_edge",
+                    source_event_digest: "sha256:late-old-host",
+                    observed_at: &observed_at,
+                },
+            )
+            .unwrap(),
+            CompactionObservationResult::Fenced
+        );
+        assert!(
+            active_observer_lease_for_relay(
+                &fixture.database,
+                AdapterKind::CopilotCli,
+                "host-1",
+                "relay-1",
+                "observer-session",
+            )
+            .unwrap()
+            .is_none()
+        );
+        assert_eq!(
+            fence_active_observers_for_host(
+                &mut fixture.database,
+                AdapterKind::CopilotCli,
+                "host-2",
+                "runtime_host_exited",
+            )
+            .unwrap(),
+            1
+        );
+        let third = establish_compaction_observer_lease(
+            &mut fixture.database,
+            &EstablishCompactionObserverLease {
+                agent_run_id: &fixture.run_id,
+                execution_epoch: fixture.execution_epoch,
+                adapter_kind: AdapterKind::CopilotCli,
+                host_instance_id: "host-3",
+                relay_process_id: "relay-3",
+                native_session_id: "observer-session",
+            },
+        )
+        .unwrap()
+        .expect("observer should recover without synthesizing a Requirement");
+        assert_eq!(
+            fence_active_observers_on_core_start(&mut fixture.database).unwrap(),
+            1
+        );
+        let third_status: (String, Option<String>) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT status, fence_reason
+                FROM native_session_compaction_observer_lease WHERE id = ?1
+                "#,
+                [&third.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            third_status,
+            (
+                "fenced".to_string(),
+                Some("core_process_restarted".to_string())
+            )
+        );
+        assert_eq!(
+            pending_redelivery_revision(&fixture.database, &fixture.native_binding_id, 1).unwrap(),
+            Some(1)
+        );
+        std::fs::remove_dir_all(fixture.directory).unwrap();
     }
 
     #[test]

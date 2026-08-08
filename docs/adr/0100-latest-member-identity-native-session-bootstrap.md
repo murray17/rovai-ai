@@ -17,6 +17,11 @@ superseded_by: null
 > 生命周期规则继续有效。ADR-0129 同时替代本文对 `COLLABORATION_STATE` 注入瞬时
 > availability、busy、reason 和当前 Turn 参与者提示的条款；该区段现在只投影稳定团队身份，
 > 协作执行可用性由 `team.call_member` 在 Core 接受调用时重新判定。
+>
+> [ADR-0141](0141-atomic-bootstrap-redelivery-input-overlay.md)为受支持的普通上下文层 Runtime
+> 新增 compaction 后的 eligible Bootstrap redelivery boundary；它复用本文“原稳定组件 + 最新
+> Member Identity + 完整 Bootstrap 不持久化”的规则，局部替代“其他 Runtime 只在新 Session
+> 收到 Bootstrap”的投递矩阵条款。
 
 ## Context
 

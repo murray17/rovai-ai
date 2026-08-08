@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.47
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -15,6 +15,8 @@ last_updated: 2026-08-08
 > packaged App 签名与 Task UI 验收共同构成完成证据。
 >
 > 前置版本：[v0.46 Agent CLI 精简与隐式 Camp 作用域](../v0.46/README.md)
+>
+> 后续版本：[v0.48 Native Session Compaction Bootstrap Redelivery](../v0.48/README.md)
 >
 > 主要决策：
 > [ADR-0136](../../adr/0136-durable-task-v2-responsibility-and-coordination-authority.md)、
