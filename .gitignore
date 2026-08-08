@@ -6,6 +6,7 @@ out/
 dist/
 target/
 resources/bin/
+resources/native/
 coverage/
 *.tsbuildinfo
 

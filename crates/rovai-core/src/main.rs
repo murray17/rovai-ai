@@ -2674,6 +2674,16 @@ impl Core {
                 .await?;
                 Ok(serde_json::to_value(inspection)?)
             }
+            "workspaces.validate" => {
+                let params: WorkspaceInspectParams =
+                    serde_json::from_value(request.params.clone())?;
+                let selection = git::select_workspace(
+                    PathBuf::from(params.path).as_path(),
+                    &self.data_dir,
+                    false,
+                )?;
+                Ok(serde_json::to_value(selection)?)
+            }
             "navigation.snapshot" => {
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(

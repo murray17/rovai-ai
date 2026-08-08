@@ -5,11 +5,14 @@ import type {
   CampCreationPreflight,
   CreateCampRequest,
   ProjectNavigationGroup,
-  WorkspaceInspection
+  WorkspaceInspection,
+  WorkspaceSelection
 } from '@contracts'
 import { MemberAvatar } from './MemberAvatar'
 
 type CreateCampDraft = Omit<CreateCampRequest, 'commandId'>
+type WorkspaceChoice = WorkspaceSelection | WorkspaceInspection
+type GitInspectionStatus = 'idle' | 'loading' | 'ready' | 'failed'
 
 export function NewConversationDialog({
   open,
@@ -24,18 +27,18 @@ export function NewConversationDialog({
   onCreate
 }: {
   open: boolean
-  initialWorkspace: WorkspaceInspection | null
+  initialWorkspace: WorkspaceSelection | null
   projects: ProjectNavigationGroup[]
   preflight: CampCreationPreflight
   agents: AgentProfile[]
   busy: boolean
   returnFocusElement: HTMLElement | null
   onOpenChange(open: boolean): void
-  onChooseWorkspaceDirectory(): Promise<WorkspaceInspection | null>
+  onChooseWorkspaceDirectory(): Promise<WorkspaceSelection | null>
   onCreate(draft: CreateCampDraft): Promise<void>
 }): React.JSX.Element {
-  const [workspace, setWorkspace] = useState<WorkspaceInspection | null>(initialWorkspace)
-  const [inspectingWorkspace, setInspectingWorkspace] = useState(false)
+  const [workspace, setWorkspace] = useState<WorkspaceChoice | null>(initialWorkspace)
+  const [gitInspectionStatus, setGitInspectionStatus] = useState<GitInspectionStatus>('idle')
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
   const [memberMenuOpen, setMemberMenuOpen] = useState(false)
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([])
@@ -61,7 +64,7 @@ export function NewConversationDialog({
     if (!open) return
     const { memberIds, leadId: recommendedLead } = initialCampSelection(preflight)
     setWorkspace(initialWorkspace)
-    setInspectingWorkspace(false)
+    setGitInspectionStatus(hasGitObservation(initialWorkspace) ? 'ready' : 'idle')
     setProjectMenuOpen(false)
     setMemberMenuOpen(false)
     setSelectedMemberIds(memberIds)
@@ -72,6 +75,28 @@ export function NewConversationDialog({
     setSubmitError(null)
     requestAnimationFrame(() => projectTriggerRef.current?.focus())
   }, [initialWorkspace, open, preflight.presentMembers])
+
+  const pendingGitInspectionPath = workspace && !hasGitObservation(workspace)
+    ? workspace.projectPath
+    : null
+
+  useEffect(() => {
+    if (!open || !pendingGitInspectionPath) return
+    let cancelled = false
+    setGitInspectionStatus('loading')
+    void window.rovai.request<WorkspaceInspection>('workspaces.inspect', {
+      path: pendingGitInspectionPath
+    }).then((inspection) => {
+      if (cancelled || inspection.projectPath !== pendingGitInspectionPath) return
+      setWorkspace(inspection)
+      setGitInspectionStatus('ready')
+    }).catch((error: unknown) => {
+      if (cancelled) return
+      setGitInspectionStatus('failed')
+      setSubmitError(`Git 状态检查失败：${errorMessage(error)}`)
+    })
+    return () => { cancelled = true }
+  }, [open, workspace])
 
   const toggleMember = (agentId: string): void => {
     if (busy) return
@@ -98,6 +123,7 @@ export function NewConversationDialog({
       const selected = await onChooseWorkspaceDirectory()
       if (selected) {
         setWorkspace(selected)
+        setGitInspectionStatus('idle')
         setProjectMenuOpen(false)
       }
     } catch (error) {
@@ -105,25 +131,16 @@ export function NewConversationDialog({
     }
   }
 
-  const selectKnownWorkspace = async (project: ProjectNavigationGroup): Promise<void> => {
+  const selectKnownWorkspace = (project: ProjectNavigationGroup): void => {
     setSubmitError(null)
-    setInspectingWorkspace(true)
-    try {
-      const inspection = await window.rovai.request<WorkspaceInspection>('workspaces.inspect', {
-        path: project.projectPath
-      })
-      setWorkspace(inspection)
-      setProjectMenuOpen(false)
-    } catch (error) {
-      setSubmitError(errorMessage(error))
-    } finally {
-      setInspectingWorkspace(false)
-    }
+    setWorkspace({ name: project.name, projectPath: project.projectPath })
+    setGitInspectionStatus('idle')
+    setProjectMenuOpen(false)
   }
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
-    if (busy || inspectingWorkspace || selectedMemberIds.length === 0 || !leadId || nameError) return
+    if (busy || selectedMemberIds.length === 0 || !leadId || nameError) return
     setSubmitError(null)
     try {
       await onCreate({
@@ -140,7 +157,7 @@ export function NewConversationDialog({
 
   const projectLabel = workspace?.name ?? '使用快速对话'
   const projectDetail = workspace?.projectPath ?? 'Rovai-ai 管理的快速对话目录'
-  const capability = workspaceCapability(workspace)
+  const capability = workspaceCapability(workspace, gitInspectionStatus)
 
   return (
     <Dialog.Root
@@ -186,7 +203,7 @@ export function NewConversationDialog({
                     type="button"
                     aria-haspopup="listbox"
                     aria-expanded={projectMenuOpen}
-                    disabled={busy || inspectingWorkspace}
+                    disabled={busy}
                     onClick={() => setProjectMenuOpen((current) => !current)}
                   >
                     <span className="new-camp-picker-icon" aria-hidden="true">⌂</span>
@@ -211,7 +228,7 @@ export function NewConversationDialog({
                             label={candidate.name}
                             detail={candidate.projectPath}
                             selected={workspace?.projectPath === candidate.projectPath}
-                            onSelect={() => void selectKnownWorkspace(candidate)}
+                            onSelect={() => selectKnownWorkspace(candidate)}
                           />
                         )
                       })}
@@ -372,8 +389,8 @@ export function NewConversationDialog({
               </div>
               <div>
                 <Dialog.Close asChild><button className="quiet-button" type="button" disabled={busy}>取消</button></Dialog.Close>
-                <button className="primary-button" type="submit" disabled={busy || inspectingWorkspace || selectedMembers.length === 0 || !leadId || Boolean(nameError)}>
-                  {busy ? '正在创建…' : inspectingWorkspace ? '正在检查…' : '创建'}
+                <button className="primary-button" type="submit" disabled={busy || selectedMembers.length === 0 || !leadId || Boolean(nameError)}>
+                  {busy ? '正在创建…' : '创建'}
                 </button>
               </div>
             </footer>
@@ -431,11 +448,27 @@ function runtimeDetail(profile: AgentProfile | undefined): string {
   return `${profile.runtimeConfiguration.adapterKind} · ${readinessLabel(profile.runtimeReadiness.status)}`
 }
 
-export function workspaceCapability(workspace: WorkspaceInspection | null): {
+export function workspaceCapability(
+  workspace: WorkspaceChoice | null,
+  inspectionStatus: GitInspectionStatus = 'ready'
+): {
   label: string
   detail: string
   tone: 'neutral' | 'clean' | 'attention'
 } {
+  if (workspace && !hasGitObservation(workspace)) {
+    return inspectionStatus === 'failed'
+      ? {
+          label: 'Git 检测失败',
+          detail: '目录仍可用于创建对话；Git 能力会在实际使用前重新检查。',
+          tone: 'attention'
+        }
+      : {
+          label: '正在检测 Git…',
+          detail: '目录已经可用，你可以继续创建；Git 能力会在后台更新。',
+          tone: 'neutral'
+        }
+  }
   if (!workspace || workspace.gitObservation.state === 'not_git') {
     return {
       label: '普通目录',
@@ -461,6 +494,12 @@ export function workspaceCapability(workspace: WorkspaceInspection | null): {
         detail: 'Git 能力可用；当前仓库尚未产生首个提交。',
         tone: 'clean'
       }
+}
+
+function hasGitObservation(
+  workspace: WorkspaceChoice | null
+): workspace is WorkspaceInspection {
+  return workspace !== null && 'gitObservation' in workspace
 }
 
 export function initialCampSelection(preflight: CampCreationPreflight): {

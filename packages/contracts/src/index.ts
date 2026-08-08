@@ -392,9 +392,12 @@ export interface GitObservation {
   diagnostic?: string
 }
 
-export interface WorkspaceInspection {
+export interface WorkspaceSelection {
   name: string
   projectPath: string
+}
+
+export interface WorkspaceInspection extends WorkspaceSelection {
   gitObservation: GitObservation
 }
 
@@ -1668,6 +1671,7 @@ export type CoreMethod =
   | 'conversations.restartNativeSession'
   | 'app.info'
   | 'camps.creationPreflight'
+  | 'workspaces.validate'
   | 'workspaces.inspect'
   | 'navigation.snapshot'
   | 'navigation.groupCamps'
@@ -1713,7 +1717,7 @@ export interface RovaiApi {
     prepare(campId: string, expectedRevision: number, file: File): Promise<CampComposerDraftView>
     preview(attachmentId: string): Promise<AttachmentPreview | null>
   }
-  selectWorkspaceDirectory(): Promise<WorkspaceInspection | null>
+  selectWorkspaceDirectory(): Promise<WorkspaceSelection | null>
   selectRuntimeExecutable(): Promise<string | null>
   selectSkillImportDirectory(): Promise<string | null>
   revealSkill(skillId: string): Promise<void>

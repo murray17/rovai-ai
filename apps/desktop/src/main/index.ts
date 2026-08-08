@@ -31,6 +31,7 @@ import { legacyUserDataPath } from './user-data-path'
 import { deleteRetiredManagedDirectory } from './quick-chat-cutover'
 import { readNavigationPins, writeNavigationPins } from './navigation-pins'
 import { RUNTIME_RENDERER_CORE_METHODS } from './runtime-core-methods'
+import { prewarmMacOpenPanel } from './open-panel-prewarm'
 
 const allowedMethods = new Set<CoreMethod>([
   'health.check',
@@ -243,6 +244,21 @@ if (primaryInstance) void app.whenReady().then(async () => {
   core.onEvent((event) => mainWindow?.webContents.send('rovai:event', event))
   createWindow()
 
+  const openPanelPrewarm = prewarmMacOpenPanel({
+    platform: process.platform,
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appPath: app.getAppPath()
+  })
+  if (openPanelPrewarm.status === 'warmed') {
+    console.info(
+      `[rovai] macOS open panel prewarmed in ${openPanelPrewarm.elapsedMs.toFixed(1)} ms `
+      + `(native ${openPanelPrewarm.nativeElapsedMs.toFixed(1)} ms)`
+    )
+  } else if (openPanelPrewarm.status === 'failed') {
+    console.warn('[rovai] macOS open panel prewarming failed; continuing without it.', openPanelPrewarm.error)
+  }
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -416,7 +432,7 @@ ipcMain.handle('rovai:select-workspace-directory', async () => {
     ? await dialog.showOpenDialog(mainWindow, options)
     : await dialog.showOpenDialog(options)
   if (result.canceled || !result.filePaths[0]) return null
-  return core.request('workspaces.inspect', { path: result.filePaths[0] })
+  return core.request('workspaces.validate', { path: result.filePaths[0] })
 })
 
 ipcMain.handle('rovai:select-runtime-executable', async () => {

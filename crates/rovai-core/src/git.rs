@@ -34,6 +34,13 @@ pub struct GitObservation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkspaceSelection {
+    pub name: String,
+    pub project_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceInspection {
     pub name: String,
     pub project_path: String,
@@ -88,6 +95,20 @@ pub async fn inspect_workspace(
     application_data_dir: &Path,
     allow_managed_quick_chat: bool,
 ) -> Result<WorkspaceInspection> {
+    let selection = select_workspace(path, application_data_dir, allow_managed_quick_chat)?;
+    let git_observation = observe_git(Path::new(&selection.project_path)).await;
+    Ok(WorkspaceInspection {
+        name: selection.name,
+        project_path: selection.project_path,
+        git_observation,
+    })
+}
+
+pub fn select_workspace(
+    path: &Path,
+    application_data_dir: &Path,
+    allow_managed_quick_chat: bool,
+) -> Result<WorkspaceSelection> {
     let canonical =
         validate_workspace_directory(path, application_data_dir, allow_managed_quick_chat)?;
     let name = canonical
@@ -99,16 +120,24 @@ pub async fn inspect_workspace(
         .to_str()
         .context("canonical workspace path is not valid Unicode")?
         .to_string();
-    let git_observation = observe_git(&canonical).await;
-    Ok(WorkspaceInspection {
-        name,
-        project_path,
-        git_observation,
-    })
+    Ok(WorkspaceSelection { name, project_path })
 }
 
 pub async fn observe_git(path: &Path) -> GitObservation {
     let observed_at = chrono::Utc::now().to_rfc3339();
+    if nearest_git_marker(path).is_none() && !is_git_metadata_path(path) {
+        return GitObservation {
+            state: GitCapabilityState::NotGit,
+            repository_root: None,
+            git_common_dir: None,
+            object_format: None,
+            head_commit: None,
+            branch: None,
+            dirty: None,
+            observed_at,
+            diagnostic: None,
+        };
+    }
     let repository_probe = git_output(
         path,
         &["rev-parse", "--is-inside-work-tree", "--is-bare-repository"],
@@ -146,7 +175,15 @@ pub async fn observe_git(path: &Path) -> GitObservation {
         };
     }
 
-    let root = match required_git_text(path, &["rev-parse", "--show-toplevel"]).await {
+    let (root, common, object_format, status, head_commit, branch) = tokio::join!(
+        required_git_text(path, &["rev-parse", "--show-toplevel"]),
+        required_git_text(path, &["rev-parse", "--git-common-dir"]),
+        required_git_text(path, &["rev-parse", "--show-object-format"]),
+        git_output(path, &["status", "--porcelain=v1", "-z"]),
+        optional_git_text(path, &["rev-parse", "--verify", "HEAD^{commit}"]),
+        optional_git_text(path, &["symbolic-ref", "--quiet", "--short", "HEAD"]),
+    );
+    let root = match root {
         Ok(value) => PathBuf::from(value),
         Err(error) => return invalid_observation(observed_at, format!("{error:#}")),
     };
@@ -159,7 +196,7 @@ pub async fn observe_git(path: &Path) -> GitObservation {
             );
         }
     };
-    let common = match required_git_text(path, &["rev-parse", "--git-common-dir"]).await {
+    let common = match common {
         Ok(value) => PathBuf::from(value),
         Err(error) => return invalid_observation(observed_at, format!("{error:#}")),
     };
@@ -177,8 +214,7 @@ pub async fn observe_git(path: &Path) -> GitObservation {
             );
         }
     };
-    let object_format = match required_git_text(path, &["rev-parse", "--show-object-format"]).await
-    {
+    let object_format = match object_format {
         Ok(value) if matches!(value.as_str(), "sha1" | "sha256") => value,
         Ok(value) => {
             return invalid_observation(
@@ -188,16 +224,13 @@ pub async fn observe_git(path: &Path) -> GitObservation {
         }
         Err(error) => return invalid_observation(observed_at, format!("{error:#}")),
     };
-    let status = match git_output(path, &["status", "--porcelain=v1", "-z"]).await {
+    let status = match status {
         Ok(output) if output.status.success() => output,
         Ok(output) => {
             return invalid_observation(observed_at, output_error(&output, "Git status failed"));
         }
         Err(error) => return invalid_observation(observed_at, format!("{error:#}")),
     };
-    let head_commit = optional_git_text(path, &["rev-parse", "--verify", "HEAD^{commit}"]).await;
-    let branch = optional_git_text(path, &["symbolic-ref", "--quiet", "--short", "HEAD"]).await;
-
     GitObservation {
         state: GitCapabilityState::GitValid,
         repository_root: Some(repository_root.to_string_lossy().to_string()),

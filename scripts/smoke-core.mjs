@@ -36,6 +36,12 @@ try {
   }
   assertEmptyNavigation(initialNavigation, 'fresh install')
 
+  const selected = await core.request('workspaces.validate', { path: projectRoot })
+  if (await realpath(selected.projectPath) !== await realpath(projectRoot)
+      || Object.hasOwn(selected, 'gitObservation')) {
+    throw new Error(`Workspace validation did not return only canonical directory identity: ${JSON.stringify(selected)}`)
+  }
+
   const preflight = await core.request('camps.creationPreflight')
   if (!preflight.admissible
       || !preflight.initialLeadAgentId

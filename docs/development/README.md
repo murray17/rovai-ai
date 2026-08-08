@@ -1,7 +1,7 @@
 ---
 document_type: development-index
 authority: development-routing
-last_updated: 2026-08-08
+last_updated: 2026-08-09
 ---
 
 # Rovai-ai 开发者指南
@@ -20,7 +20,8 @@ pnpm dev
 ```
 
 `pnpm dev` 会构建 Debug 版 `rovai-core` 与 bundled `rovai` Agent CLI、复制到
-`resources/bin/`，然后启动 Electron Vite 开发环境。
+`resources/bin/`，再构建 macOS 文件面板原生预热器到 `resources/native/`，然后启动
+Electron Vite 开发环境。
 
 只重新构建 Debug Core：
 
@@ -93,6 +94,7 @@ pnpm build:desktop
 | `node_modules/` | pnpm 安装依赖 |
 | `target/` | Rust Debug/Release 构建结果 |
 | `resources/bin/` | 复制后供 Electron 使用的 Rust Core 与 Agent CLI |
+| `resources/native/` | macOS 文件面板原生预热器 |
 | `out/` | Electron Vite 构建结果 |
 | `dist/` | macOS App 和 DMG |
 

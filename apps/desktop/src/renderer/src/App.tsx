@@ -22,7 +22,8 @@ import type {
   SendCampMessageResult,
   StoredCommandResult,
   ThemePreference,
-  WorkspaceInspection
+  WorkspaceInspection,
+  WorkspaceSelection
 } from '@contracts'
 import {
   MembersView,
@@ -185,7 +186,7 @@ export function App(): React.JSX.Element {
   const [notificationRefreshSignal, setNotificationRefreshSignal] = useState(0)
   const [notificationFocus, setNotificationFocus] = useState<NotificationFocusTarget | null>(null)
   const [newConversationOpen, setNewConversationOpen] = useState(false)
-  const [newConversationInitialWorkspace, setNewConversationInitialWorkspace] = useState<WorkspaceInspection | null>(null)
+  const [newConversationInitialWorkspace, setNewConversationInitialWorkspace] = useState<WorkspaceSelection | null>(null)
   const [activeWorkspaceInspection, setActiveWorkspaceInspection] = useState<WorkspaceInspection | 'unavailable' | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -622,7 +623,7 @@ export function App(): React.JSX.Element {
     }
   }
 
-  const openNewConversation = (workspace: WorkspaceInspection | null): void => {
+  const openNewConversation = (workspace: WorkspaceSelection | null): void => {
     newConversationReturnFocus.current = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null
@@ -630,7 +631,7 @@ export function App(): React.JSX.Element {
     setNewConversationOpen(true)
   }
 
-  const chooseWorkspaceDirectory = async (): Promise<WorkspaceInspection | null> => {
+  const chooseWorkspaceDirectory = async (): Promise<WorkspaceSelection | null> => {
     setBusy('open-project')
     try {
       return await window.rovai.selectWorkspaceDirectory()

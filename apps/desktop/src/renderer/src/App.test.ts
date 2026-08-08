@@ -297,6 +297,10 @@ describe('task event projections', () => {
       '1111111111111111111111111111111111111111'
     )).label).toBe('Git 仓库')
     expect(workspaceCapability(inspection('git_invalid')).label).toBe('Git 状态异常')
+    expect(workspaceCapability({ name: 'workspace', projectPath: '/workspace' }, 'loading'))
+      .toMatchObject({ label: '正在检测 Git…', tone: 'neutral' })
+    expect(workspaceCapability({ name: 'workspace', projectPath: '/workspace' }, 'failed'))
+      .toMatchObject({ label: 'Git 检测失败', tone: 'attention' })
   })
 
   it('loads Runtime health only for member, Runtime, and diagnostics views', () => {
