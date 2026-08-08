@@ -2,15 +2,18 @@
 document_type: adr
 id: ADR-0109
 title: Project-Visible Bundled Skill Sources
-status: accepted
+status: superseded
 date: 2026-08-05
 decision_scope: cross-version
 source_version: v0.40
 supersedes: []
-superseded_by: null
+superseded_by: ADR-0144
 ---
 
 # ADR-0109: Project-Visible Bundled Skill Sources
+
+> Superseded by [ADR-0144](0144-self-contained-duo-grilling-bundled-skills.md), which retains the
+> project-visible packaging rules and expands the official set with two self-contained duo grilling Skills.
 
 ## Context
 

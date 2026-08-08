@@ -4,15 +4,15 @@ version: v0.49
 lifecycle: current
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: not_started
+implementation_status: in_progress
 last_updated: 2026-08-09
 ---
 
-# Rovai-ai v0.49：通用与启动设置
+# Rovai-ai v0.49：通用与启动设置、双人追问 Skill
 
-> 当前状态：产品语义与生产设计已经确认，生产实现尚未开始。v0.49 只增加 Electron
-> Desktop Shell 偏好、macOS 登录项控制、稳定一级位置恢复和窗口几何重置；不改变
-> Camp、Task、AgentRun、Native Session、Memory、Approval 或执行恢复语义。
+> 当前状态：通用与启动设置的产品语义和生产设计已经确认，Desktop Shell 生产实现尚未开始；
+> 两个自包含双人追问官方 Skill 已完成源码、Core bundled manifest 和定向验收。
+> 两个范围都不改变 Camp、Task、AgentRun、Native Session、Memory、Approval 或执行恢复语义。
 >
 > 前置版本：[v0.48 Native Session Compaction Bootstrap Redelivery](../v0.48/README.md)
 
@@ -36,6 +36,24 @@ v0.49 在设置侧栏顶部增加“通用”，形成以下固定顺序：
 
 再次进入设置时继续打开用户最后选择的设置分类；设置本身以及 Dialog、Drawer、命令面板、
 Approval、Toast 等临时表面不成为启动目标。
+
+## 官方双人追问 Skill
+
+v0.49 把以下两个 Skill 加入 Rovai 官方受管集合；它们与既有官方 Skill 一样默认启用、默认不选择
+任何 Skill Delivery Group：
+
+- `rovai-grill-duo`（“双人追问”）：当前队员逐项追问，一位固定的合格 Camp 搭档通过显式公共 A2A
+  往返提供独立解释、利弊、可逆性和推荐答案；
+- `rovai-grill-duo-with-docs`（“双人追问与文档”）：执行同一双人协议，并在结论形成时维护领域词汇和
+  满足门槛的 ADR。
+
+两者都是完整不可变 Revision，不依赖同一 Runtime 另行发现或分配 `grill-me`、`grill-with-docs`、
+`grilling` 或 `domain-modeling`。文档版随包携带 duo protocol、domain-modeling、词汇表和 ADR 参考；
+仓库自己的 `AGENTS.md`、文档导航和格式规则始终优先。
+
+协作只使用当前 `camp.message.send` / `rovai send` 公共 A2A 与 Message Delivery。发送成功不代表搭档
+已经开始或完成，Skill 不轮询、不伪造第二观点，也不建立协议级自动回复义务。没有合格搭档时明确降级
+为单人逐项追问。长期边界见 [ADR-0144](../../adr/0144-self-contained-duo-grilling-bundled-skills.md)。
 
 ## 已确认的启动语义
 
@@ -101,8 +119,9 @@ v0.49 的启动模式、最后设置分类、Restorable Location 和窗口几何
 - Shell 文件缺失、字段未知、版本不支持或 JSON 损坏都必须退化到安全默认值；
 - Core 只继续提供已有的权威只读查询，用于验证 Camp 或 Member 是否仍有效，不接收桌面偏好写入。
 
-该范围不创建 ADR：它没有改变现有 Core、Runtime、合同或跨版本系统结构，属于可在 Desktop Shell
-内部演进的产品偏好与 Renderer 交互。
+桌面设置范围不创建 ADR：它没有改变现有 Core、Runtime、合同或跨版本系统结构，属于可在 Desktop
+Shell 内部演进的产品偏好与 Renderer 交互。官方 Skill 集合和自包含协作边界由 ADR-0144 单独拥有；
+其 Rust 改动只扩展 bundled manifest，不改变 SQLite schema、Skill 投递合同或 Runtime Adapter。
 
 ## 本版本不做
 
@@ -128,6 +147,8 @@ v0.49 的启动模式、最后设置分类、Restorable Location 和窗口几何
 6. `pnpm docs:check`、TypeScript typecheck、相关 Vitest、Desktop build、packaged App
    双窗口会话与登录项实测全部通过；
 7. 对 General 设置进行读写、重置窗口和解析启动位置不会新增 Camp、Task、Run 或 audit 事实。
+8. 新 Core 安装四个官方 Skill，全部默认启用且未分组；两个 Duo Revision 均携带完整运行依赖，
+   Skill 结构校验、Core bundled installation test、Skill smoke 的默认集合断言和文档校验通过。
 
 实施检查点与证据入口见[实施与验收计划](implementation-plan.md)，精确 UI 与 Shell 合同见
 [生产设计](production-design.md)。
@@ -137,12 +158,12 @@ v0.49 的启动模式、最后设置分类、Restorable Location 和窗口几何
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | `docs/versions/README.md` 将 v0.48 冻结为 historical，并把 v0.49 设为唯一 current；本概览与实施计划已建立 |
-| ADR | 确认无需更新 | 本版本不改变 Core、Runtime、持久业务语义或现有 accepted ADR；Desktop Shell 文件与 Renderer 交互可在局部演进，不构成需要跨版本冻结的高逆转成本架构决定 |
-| Contracts | 确认无需更新 | 不改变 Agent/Core CLI、Envelope、receipt、Task、Message Delivery 或其他长期 wire contract；Main/Preload/Renderer 类型属于版本内桌面实现 |
-| Architecture | 确认无需更新 | 现有长期架构目录拥有 Built-in Tool、A2A 与 Bootstrap 结构；v0.49 不改变这些组件职责或传输关系 |
-| UI | 已更新 | `docs/ui/README.md` 与 `docs/ui/arctic-dawn.md` 增加七分类设置、General 页面、启动恢复、登录项和窗口行为；领域词汇同步更新 `CONTEXT.md` |
+| ADR | 已更新 | ADR-0144 替代 ADR-0109，冻结四个官方 Skill、自包含 Duo Revision 与异步公共 A2A 协作边界；Desktop Shell 范围仍确认无需独立 ADR |
+| Contracts | 确认无需更新 | 不改变 Agent/Core CLI、Envelope、receipt、Task、Message Delivery 或其它长期 wire contract；Duo Skill 只使用既有 `camp.message.send` v2，Main/Preload/Renderer 类型属于版本内桌面实现 |
+| Architecture | 确认无需更新 | 现有 Skill Library、immutable Revision、Runtime-group projection、Built-in Tool、A2A 与 Bootstrap 组件职责和传输关系均未改变；只扩展 bundled content manifest |
+| UI | 已更新 | `docs/ui/README.md` 与 `docs/ui/arctic-dawn.md` 增加七分类设置、General 页面、启动恢复、登录项、窗口行为及四个内置 Skill 清单；领域词汇同步更新 `CONTEXT.md` |
 | Runtime Activity | 确认无需更新 | Desktop Shell 偏好、窗口几何和登录项不产生或改变 Canonical Runtime Activity |
-| Runtime compatibility | 确认无需更新 | 不改变任何 Agent Runtime adapter、版本、能力或 smoke 结论 |
+| Runtime compatibility | 确认无需更新 | 不改变任何 Agent Runtime adapter、版本或发现能力；既有 Skill native-discovery smoke 仅扩展官方默认集合断言，不产生新的兼容性结论 |
 | Documentation routing | 确认无需更新 | `docs/README.md` 已通过版本索引的唯一 current 指针路由版本工作，不需要硬编码 v0.49 专门入口 |
 | Root README | 确认无需更新 | 项目定位、常青能力与支持的 Agent Runtime 范围没有变化；版本流水账只属于 `docs/versions/` |
 
@@ -150,5 +171,6 @@ v0.49 的启动模式、最后设置分类、Restorable Location 和窗口几何
 
 - [v0.49 生产设计](production-design.md)
 - [v0.49 实施与验收计划](implementation-plan.md)
+- [ADR-0144：自包含双人追问官方 Skill](../../adr/0144-self-contained-duo-grilling-bundled-skills.md)
 - [Arctic Dawn V3 设置与窗口合同](../../ui/arctic-dawn.md#设置)
 - [Rovai-ai 领域语言](../../../CONTEXT.md)

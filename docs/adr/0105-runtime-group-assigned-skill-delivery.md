@@ -12,9 +12,9 @@ superseded_by: null
 
 # ADR-0105: Runtime-Group Assigned Rovai Skill Delivery
 
-> 后续局部规范：[ADR-0109](0109-project-visible-bundled-skill-sources.md) 将官方 Skill
-> 集合扩展为 `rovai-memory-stewardship` 与 `rovai-worktree`，并规定完整源码目录位于仓库
-> 顶层 `skills/`；本文的 `rovai-` 前缀、默认启用且未分配以及其余投递语义继续有效。
+> 后续局部规范：[ADR-0144](0144-self-contained-duo-grilling-bundled-skills.md) 规定当前四个
+> 官方 Skill、自包含依赖与仓库顶层 `skills/` 源码目录；本文的 `rovai-` 前缀、默认启用且
+> 未分配以及其余投递语义继续有效。
 
 ## Context
 

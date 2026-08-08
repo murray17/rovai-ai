@@ -2,14 +2,15 @@
 document_type: implementation-plan
 version: v0.49
 authority: implementation-plan-and-acceptance
-status: planned
+status: in_progress
 last_updated: 2026-08-09
 ---
 
 # v0.49 实施与验收计划
 
-> 当前状态：设计与文档切换完成后进入生产实现；以下未勾选项不能由设计状态、静态原型或
-> 单元测试替代。v0.49 不修改 Rust Core 或 SQLite schema。
+> 当前状态：官方双人追问 Skill 已完成生产源码与定向验收；通用与启动设置仍处于
+> 生产实现前。以下未勾选项不能由设计状态、静态原型或单元测试替代。Desktop Shell 范围不修改
+> Rust Core；Skill 范围只扩展 bundled manifest，不修改 SQLite schema。
 
 ## Checkpoint 0：设计与版本切换
 
@@ -17,10 +18,28 @@ last_updated: 2026-08-09
 - [x] 确认 Restorable Location 在稳定页面权威加载成功后立即提交，不依赖正常退出；
 - [x] 确认 `requires-approval` 使用 checked Switch + “当前尚未生效” + 系统设置入口；
 - [x] 冻结 General 页面、Shell 文件、Preload bridge、窗口 reset、失败分类与负向领域边界；
-- [x] 确认本范围不改变 Core/Runtime/长期系统结构且无需 ADR，并记录可审阅理由；
+- [x] 确认 Desktop Shell 范围不改变 Core/Runtime/长期系统结构且无需 ADR，并记录可审阅理由；
 - [x] 冻结 v0.48 为 historical，创建 v0.49 概览、生产设计和实施计划，更新 UI 权威文档与
   `CONTEXT.md`；
 - [x] 运行 `pnpm docs:check`，证明唯一 current 指针、lifecycle、索引和九项影响表一致。
+
+## Checkpoint S：官方双人追问 Skill
+
+- [x] 用户确认同时提供 `rovai-grill-duo` 与 `rovai-grill-duo-with-docs`，默认启用且默认不分组；
+- [x] 普通版内置完整逐题 grilling 与固定搭档公共 A2A 往返，发送成功不冒充搭档完成；
+- [x] 文档版随包携带 duo protocol、domain-modeling、词汇表格式与 ADR 判断参考，不依赖其它
+  Skill Assignment；
+- [x] 两个目录均包含规范 `SKILL.md` 与生成的 `agents/openai.yaml`，Core bundled manifest 嵌入
+  完整不可变内容；
+- [x] Core installation test、Skill smoke 与设置页 capture 期望值扩展为四个官方 Skill；
+- [x] ADR-0144、ADR 索引、`CONTEXT.md`、Arctic Dawn 内置清单与本版本影响记录同步；
+- [x] `quick_validate.py` 通过两个 Skill；
+- [x] `cargo test -p rovai-core skill::tests` 6/6，通过 `pnpm docs:check`、两个脚本语法检查、
+  `cargo fmt --all -- --check` 与 `git diff --check`；
+- [x] `pnpm smoke:skills` 通过四个官方默认项断言和 Codex native Skill discovery；
+- [ ] 同一 smoke 的 Core restart 收口被既有 Data Contract 漂移阻塞：启动兼容常量仍要求
+  `v0.47 / schema 25`，Migration 66 已写入 `v0.48 / schema 26`，第二次启动执行 clean reset 后临时
+  Imported Skill 消失。本 Skill 变更不扩大范围修订全局 reset 边界。
 
 ## Checkpoint 1：Shell 偏好模型与原子文件
 

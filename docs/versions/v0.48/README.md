@@ -15,7 +15,7 @@ last_updated: 2026-08-09
 >
 > 前置版本：[v0.47 Durable Task v2 与责任准入边界](../v0.47/README.md)
 >
-> 后续版本：[v0.49 通用与启动设置](../v0.49/README.md)
+> 后续版本：[v0.49 通用与启动设置、双人追问 Skill](../v0.49/README.md)
 
 ## 版本结果
 

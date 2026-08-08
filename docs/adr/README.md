@@ -1,7 +1,7 @@
 ---
 document_type: adr-index
 authority: architecture-decisions
-last_updated: 2026-08-08
+last_updated: 2026-08-09
 ---
 
 # Rovai-ai Architecture Decision Records
@@ -156,7 +156,7 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0106](0106-agent-bounded-cross-camp-public-history-retrieval.md) | Agent-Bounded Cross-Camp Public History Retrieval | `accepted` | [v0.40](../versions/v0.40/README.md) | 局部替代 ADR-0051 的“网关无跨 Camp 查询”条款；Summary 上下文组成由 ADR-0129 删除 |
 | [ADR-0107](0107-camp-member-isolated-codex-home-and-agentrun-app-server.md) | Camp-Member Isolated Codex Home and AgentRun-Scoped App Server | `superseded` | [v0.39](../versions/v0.39/README.md) | → ADR-0126 |
 | [ADR-0108](0108-discovery-only-camp-message-search-and-sequence-paged-reads.md) | Discovery-Only Camp Message Search and Sequence-Paged Reads | `accepted` | [v0.40](../versions/v0.40/README.md) | 局部替代 ADR-0051 的五工具、Summary 读取、相关性分页与 window/thread 续读合同；Summary 生成与上下文组成由 ADR-0129 删除 |
-| [ADR-0109](0109-project-visible-bundled-skill-sources.md) | Project-Visible Bundled Skill Sources | `accepted` | [v0.40](../versions/v0.40/README.md) | 局部替代 ADR-0105 的唯一官方 Skill 条款 |
+| [ADR-0109](0109-project-visible-bundled-skill-sources.md) | Project-Visible Bundled Skill Sources | `superseded` | [v0.40](../versions/v0.40/README.md) | → ADR-0144 |
 | [ADR-0110](0110-internal-agent-uuid-and-monotonic-short-agent-id.md) | Internal Agent UUID and Monotonic Short Agent ID | `accepted` | [v0.40](../versions/v0.40/README.md) | 局部替代 ADR-0056 的固定可读内置 ID 与 ADR-0060 的 Base58 Routing ID 条款 |
 | [ADR-0111](0111-core-owned-canonical-runtime-activity.md) | Core-Owned Canonical Runtime Activity and Observation-Honest Lifecycle Projection | `accepted` | [v0.41](../versions/v0.41/README.md) | 细化 ADR-0059/ADR-0061 的 Runtime 观测、Evidence 与 Renderer 展示边界 |
 | [ADR-0112](0112-immutable-execution-evidence-and-rebuildable-canonical-activity-projection.md) | Immutable Execution Evidence and Rebuildable Versioned Canonical Activity Projection | `accepted` | [v0.41](../versions/v0.41/README.md) | 确认 Evidence 真源、持久可重建 Canonical Projection 与历史分类版本边界 |
@@ -196,3 +196,4 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0141](0141-atomic-bootstrap-redelivery-input-overlay.md) | Atomic Bootstrap Redelivery Input Overlay and Transient Identity Boundary | `accepted` | [v0.48](../versions/v0.48/README.md) | 新增原子 input preparation、完整补发 envelope、combined budget 与 ADR-0100 身份不持久化边界 |
 | [ADR-0142](0142-native-session-scoped-compaction-observer-lease.md) | Native-Session-Scoped Compaction Observer Lease and Uncertain-Submission Boundary | `accepted` | [v0.48](../versions/v0.48/README.md) | 新增跨 AgentRun 的窄权限 Session Observer、Host/Binding/policy fencing 与 known-unknown interruption 规则 |
 | [ADR-0143](0143-best-effort-non-blocking-compaction-detector-capability.md) | Best-Effort Non-Blocking Compaction Detector Capability | `accepted` | [v0.48](../versions/v0.48/README.md) | 局部替代 ADR-0139 的 enabled/Readiness 含义；六 Runtime best-effort 且不阻塞 AgentRun，Antigravity disabled |
+| [ADR-0144](0144-self-contained-duo-grilling-bundled-skills.md) | Self-Contained Duo Grilling Bundled Skills | `accepted` | [v0.49](../versions/v0.49/README.md) | ← ADR-0109；官方集合扩展为四个，并冻结双人追问 Skill 的自包含依赖与异步协作边界 |

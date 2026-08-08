@@ -1,0 +1,4 @@
+interface:
+  display_name: "双人追问与文档"
+  short_description: "由当前队员与固定搭档双人厘清方案并同步维护领域词汇与必要架构决定"
+  default_prompt: "使用 $rovai-grill-duo-with-docs 与固定 Camp 搭档逐项澄清设计，并同步维护领域词汇和必要 ADR。"

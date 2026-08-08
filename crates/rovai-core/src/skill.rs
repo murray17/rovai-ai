@@ -42,6 +42,20 @@ const MEMORY_STEWARDSHIP_OPENAI: &str =
     include_str!("../../../skills/rovai-memory-stewardship/agents/openai.yaml");
 const WORKTREE_RULES: &str = include_str!("../../../skills/rovai-worktree/SKILL.md");
 const WORKTREE_OPENAI: &str = include_str!("../../../skills/rovai-worktree/agents/openai.yaml");
+const GRILL_DUO_RULES: &str = include_str!("../../../skills/rovai-grill-duo/SKILL.md");
+const GRILL_DUO_OPENAI: &str = include_str!("../../../skills/rovai-grill-duo/agents/openai.yaml");
+const GRILL_DUO_WITH_DOCS_RULES: &str =
+    include_str!("../../../skills/rovai-grill-duo-with-docs/SKILL.md");
+const GRILL_DUO_WITH_DOCS_OPENAI: &str =
+    include_str!("../../../skills/rovai-grill-duo-with-docs/agents/openai.yaml");
+const GRILL_DUO_REFERENCE: &str =
+    include_str!("../../../skills/rovai-grill-duo-with-docs/references/grill-duo.md");
+const DOMAIN_MODELING_REFERENCE: &str =
+    include_str!("../../../skills/rovai-grill-duo-with-docs/references/domain-modeling.md");
+const CONTEXT_FORMAT_REFERENCE: &str =
+    include_str!("../../../skills/rovai-grill-duo-with-docs/references/context-format.md");
+const ADR_FORMAT_REFERENCE: &str =
+    include_str!("../../../skills/rovai-grill-duo-with-docs/references/adr-format.md");
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -321,6 +335,28 @@ const WORKTREE_FILES: &[(&str, &str, u32)] = &[
     ("agents/openai.yaml", WORKTREE_OPENAI, 0o644),
 ];
 
+const GRILL_DUO_FILES: &[(&str, &str, u32)] = &[
+    ("SKILL.md", GRILL_DUO_RULES, 0o644),
+    ("agents/openai.yaml", GRILL_DUO_OPENAI, 0o644),
+];
+
+const GRILL_DUO_WITH_DOCS_FILES: &[(&str, &str, u32)] = &[
+    ("SKILL.md", GRILL_DUO_WITH_DOCS_RULES, 0o644),
+    ("agents/openai.yaml", GRILL_DUO_WITH_DOCS_OPENAI, 0o644),
+    ("references/grill-duo.md", GRILL_DUO_REFERENCE, 0o644),
+    (
+        "references/domain-modeling.md",
+        DOMAIN_MODELING_REFERENCE,
+        0o644,
+    ),
+    (
+        "references/context-format.md",
+        CONTEXT_FORMAT_REFERENCE,
+        0o644,
+    ),
+    ("references/adr-format.md", ADR_FORMAT_REFERENCE, 0o644),
+];
+
 const BUNDLED_SKILLS: &[BundledDefinition] = &[
     BundledDefinition {
         name: "rovai-memory-stewardship",
@@ -329,6 +365,14 @@ const BUNDLED_SKILLS: &[BundledDefinition] = &[
     BundledDefinition {
         name: "rovai-worktree",
         files: WORKTREE_FILES,
+    },
+    BundledDefinition {
+        name: "rovai-grill-duo",
+        files: GRILL_DUO_FILES,
+    },
+    BundledDefinition {
+        name: "rovai-grill-duo-with-docs",
+        files: GRILL_DUO_WITH_DOCS_FILES,
     },
 ];
 
@@ -2550,7 +2594,12 @@ mod tests {
                 .iter()
                 .map(|skill| skill.name.as_str())
                 .collect::<Vec<_>>(),
-            ["rovai-memory-stewardship", "rovai-worktree"]
+            [
+                "rovai-grill-duo",
+                "rovai-grill-duo-with-docs",
+                "rovai-memory-stewardship",
+                "rovai-worktree"
+            ]
         );
         assert!(skills.iter().all(|skill| skill.enabled));
         assert!(
@@ -2561,6 +2610,38 @@ mod tests {
         for skill in &skills {
             let content = service.revision_content_path(&skill.id, &skill.current_revision.id);
             assert!(content.join("agents/openai.yaml").is_file());
+        }
+        let grill_duo = skills
+            .iter()
+            .find(|skill| skill.name == "rovai-grill-duo")
+            .unwrap();
+        let grill_duo_content =
+            service.revision_content_path(&grill_duo.id, &grill_duo.current_revision.id);
+        assert!(
+            fs::read_to_string(grill_duo_content.join("SKILL.md"))
+                .unwrap()
+                .contains("rovai send")
+        );
+        let grill_duo_with_docs = skills
+            .iter()
+            .find(|skill| skill.name == "rovai-grill-duo-with-docs")
+            .unwrap();
+        let grill_duo_with_docs_content = service.revision_content_path(
+            &grill_duo_with_docs.id,
+            &grill_duo_with_docs.current_revision.id,
+        );
+        for reference in [
+            "grill-duo.md",
+            "domain-modeling.md",
+            "context-format.md",
+            "adr-format.md",
+        ] {
+            assert!(
+                grill_duo_with_docs_content
+                    .join("references")
+                    .join(reference)
+                    .is_file()
+            );
         }
         let memory_stewardship = skills
             .iter()

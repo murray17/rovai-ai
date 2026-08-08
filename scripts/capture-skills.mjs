@@ -56,15 +56,15 @@ try {
   await waitForExpression(cdp, `Boolean(document.querySelector('.settings-sidebar-menu'))`, 5_000)
   await openSection(cdp, 'Skill')
   await waitForExpression(cdp, `Boolean(document.querySelector('.skill-settings')) && (
-    document.querySelectorAll('.skill-card').length > 0
+    document.querySelectorAll('.skill-card').length === 4
       || Boolean(document.querySelector('.skill-page-error'))
   )`, 30_000)
   const initialSkillState = await evaluate(cdp, `({
     cardCount: document.querySelectorAll('.skill-card').length,
     error: document.querySelector('.skill-page-error')?.textContent?.trim() ?? null
   })`)
-  if (initialSkillState.cardCount !== 1 || initialSkillState.error) {
-    throw new Error(`Skill settings did not load the single bundled Skill: ${JSON.stringify(initialSkillState)}`)
+  if (initialSkillState.cardCount !== 4 || initialSkillState.error) {
+    throw new Error(`Skill settings did not load the four bundled Skills: ${JSON.stringify(initialSkillState)}`)
   }
 
   const runtimeConfiguration = await evaluate(cdp, `(async () => {
@@ -128,9 +128,14 @@ try {
       || result.panelOverflow
       || JSON.stringify(result.subnav) !== JSON.stringify(['Skill', 'MCP', 'Agent 运行时', '外观', '通知', '诊断'])
       || result.activeSection !== 'Skill'
-      || result.bundledCount !== 2
-      || result.enabledBundledCount !== 2
-      || JSON.stringify(result.skillNames) !== JSON.stringify(['rovai-memory-stewardship', 'rovai-worktree'])
+      || result.bundledCount !== 4
+      || result.enabledBundledCount !== 4
+      || JSON.stringify(result.skillNames) !== JSON.stringify([
+        'rovai-grill-duo',
+        'rovai-grill-duo-with-docs',
+        'rovai-memory-stewardship',
+        'rovai-worktree'
+      ])
       || !result.importButton
       || result.projectionStatusVisible
       || result.legacyOfficialVisible
