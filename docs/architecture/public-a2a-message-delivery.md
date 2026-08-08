@@ -3,13 +3,13 @@ document_type: architecture
 architecture: public-a2a-message-delivery
 authority: public-message-and-delivery-boundaries
 status: accepted
-last_updated: 2026-08-07
+last_updated: 2026-08-08
 ---
 
 # Public A2A Message 与 Message Delivery 架构
 
 本文件定义 v0.45 以后 Agent-to-Agent 协作的长期组件边界。字段级输入、错误和状态合同
-分别见 [Camp Message Send v1](../contracts/camp-message-send-v1.md) 与
+分别见 [Camp Message Send v2](../contracts/camp-message-send-v2.md) 与
 [Message Delivery v1](../contracts/message-delivery-v1.md)；决策理由见
 [ADR-0130](../adr/0130-public-a2a-message-and-unified-delivery.md) 和
 [ADR-0131](../adr/0131-recipient-scoped-event-driven-delivery-recovery.md)。
@@ -43,7 +43,7 @@ Migration 中删除，不作为当前约束或回退来源。
 
 Core 在一个提交事务中完成：
 
-1. 验证当前 AgentRun/CampTurn、正文和 `replyToCampMessageId`；
+1. 从 authenticated current AgentRun/Lease/Native Binding 推导唯一当前 Camp，验证 AgentRun/CampTurn、正文和 `replyToCampMessageId`；
 2. 解析 `--to`、正文 Addressing Token 和 reply-to default target；
 3. 对所有目标执行 Camp membership、self、presence/removal、fanout、lineage 和 budget
    检查；

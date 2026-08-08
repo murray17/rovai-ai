@@ -1133,11 +1133,11 @@ The recipient-scoped pre-Run boundary inside a Delivery Dispatch Attempt that as
 _Avoid_: send-transaction preflight, ghost AgentRun, Runtime capacity wait, whole-message rollback
 
 **Camp Message Send**:
-The authenticated current-AgentRun action exposed as `camp.message.send` and `rovai send`, and the sole path for an Agent to publish into its Camp. Core resolves and deduplicates Effective Recipients from explicit targets, valid inline Agent Addressing Tokens, and reply-to defaults; an Addressing Resolution Failure returns a structured correction/retry error with no persistence, no effective recipient means public publication only, while one or more create one Public A2A Message plus one independent Message Delivery per recipient, with no private A2A path.
+The authenticated current-AgentRun action exposed as `camp.message.send` and `rovai send`, and the sole path for an Agent to publish into its Camp. Its Camp scope is derived only from the authenticated current Run, never selected or overridden by Agent input; Core resolves and deduplicates Effective Recipients from explicit targets, valid inline Agent Addressing Tokens, and reply-to defaults, with no private A2A path.
 _Avoid_: Member Call, `team.call_member`, private message, per-recipient public copy, compatibility alias
 
 **Camp Message Send Idempotency**:
-The exact replay rule keyed by `requestId` and the canonical Camp Message Send input. Repeating both returns the original Envelope and effects; reusing the same `requestId` with different input is a conflict, while a corrected addressing error uses a new requestId. Equal body/recipient content without the same requestId remains a new intentional send.
+The exact replay rule keyed by the canonical Camp Message Send input and one invocation identity. The accepted command records its Camp, source AgentRun, and execution epoch; durable Replay reuses those recorded identities rather than the currently active identity, returns the original Envelope and effects, and treats a changed input under the same identity as a conflict. Equal body/recipient content without the same identity remains a new intentional send.
 _Avoid_: time-window dedupe, semantic similarity suppression, retry by body digest, Renderer duplicate filter
 
 **Delivery Retry Identity**:
@@ -1321,11 +1321,15 @@ The complete versioned semantic surface of canonical Rovai built-in operations e
 _Avoid_: per-Member tool list, Capability snapshot, operation allowlist, Runtime-specific alias catalog, in-process catalog hot reload
 
 **Built-in Tool Discovery**:
-The on-demand use of `rovai tool list` and `rovai tool describe` to obtain the current canonical operation names, hierarchical CLI command spellings, summaries, input modes, direct arguments, result schemas, and versioned envelope contract. Native Session Bootstrap contains only the stable CLI usage contract, while Dynamic Context may point to a canonical operation for omitted data; neither copies complete operation schemas.
-_Avoid_: schema-filled Bootstrap, duplicated tool documentation, Runtime-native tool discovery, dynamic alias instructions
+The Core-internal and qualification-only retrieval of the Built-in Tool Catalog, operation schemas, Agent output projections, error contracts, and Envelope contract. It is not an Agent-facing CLI protocol; an Agent learns fixed business commands and their bounded `--help` text instead.
+_Avoid_: Agent-facing `tool list`, Agent-facing `tool describe`, schema-filled Bootstrap, duplicated tool documentation, Runtime-native tool discovery, dynamic alias instructions
+
+**Agent Command Help**:
+The concise, command-specific usage surface for one fixed Built-in Tool CLI Command. It gives the flags, mutually exclusive input sources, essential constraints, and a short example without exposing the complete catalog, business Schema, Agent output contract, Envelope, receipt, or internal error table.
+_Avoid_: Tool Discovery, full JSON Schema, Envelope documentation, generic invoke help, hidden discovery command
 
 **Built-in Tool CLI Command**:
-The stable, domain-grouped shell spelling that maps one-to-one to a Canonical Operation, such as `rovai send` for `camp.message.send` or `rovai memory propose-hearth` for `memory.propose_hearth`. The command is a discoverable CLI presentation, while the canonical dotted operation remains the identity used by Core, receipts, replay, audit, Dynamic Context, and Canonical Runtime Activity.
+The stable, domain-grouped shell spelling that maps one-to-one to a Canonical Operation, such as `rovai send` for `camp.message.send` or `rovai memory propose-hearth` for `memory.propose_hearth`. The command is the fixed Agent-facing presentation with bounded Agent Command Help, while the canonical dotted operation remains the identity used internally by Core, receipts, replay, audit, Dynamic Context, and Canonical Runtime Activity.
 _Avoid_: canonical operation rename, Runtime-specific alias, `rovai tool call`, MCP tool name
 
 **Built-in Tool CLI Input**:
@@ -1348,8 +1352,12 @@ _Avoid_: production upgrade path, automatic legacy cleanup, dual transport, comp
 The transport-independent business result of one canonical Rovai built-in operation. It retains the operation's existing flat business fields and excludes invocation status, operation identity, request identity, receipt, and MCP-specific fields.
 _Avoid_: Built-in Tool Invocation Envelope, MCP structured content, CLI response, nested `result.task`
 
+**Agent Result Projection**:
+The explicit operation-specific JSON view emitted by the `rovai` CLI after Core validates a complete Built-in Tool Invocation Envelope. Successful output is the Canonical Operation Result; business failure is an `error` object containing the business-required `code`, safe `message`, `recovery`, and any contract-approved details. At the Envelope-to-Agent boundary, the projection never passes through Envelope-owned `contractVersion`, `ok`, `operation`, `requestId`, or `receipt`, and never retains the Envelope's `result` wrapper. That boundary rule does not prohibit a future business result from legitimately using one of those names. Each operation has a closed, explicit `agentOutputSchema` and golden fixture that constrains actual output; there is no global recursive forbidden-field scan. Transport and audit identity remains outside the Agent's ordinary output and cannot be re-enabled by a Runtime environment variable or hidden CLI switch. Output reduction is measured and reported as an observation, not a release gate.
+_Avoid_: compact Envelope, reduced Envelope, transport response, debug Envelope, generic recursive field stripping
+
 **Built-in Tool Invocation Envelope**:
-The versioned Core-owned response wrapper for one Rovai built-in operation invocation, carrying `ok`, canonical `operation`, `requestId`, `receipt`, and exactly one of `result` or `error`. A transport may render this envelope but cannot create its receipt or reshape its Canonical Operation Result.
+The versioned Core-owned response wrapper for one Rovai built-in operation invocation, carrying `ok`, canonical `operation`, `requestId`, `receipt`, and exactly one of `result` or `error`. Core IPC, Evidence, Qualification, and host-controlled debug may retain it; the Agent-facing CLI must validate it and emit only the operation's Agent Result Projection. No transport may create its receipt or reshape its Canonical Operation Result before validation.
 _Avoid_: Canonical Operation Result, MCP structured content, Runtime Adapter response contract
 
 **Built-in Tool Recovery Guidance**:
@@ -1365,7 +1373,7 @@ The single user-facing Canonical Runtime Activity for one Core-verified built-in
 _Avoid_: duplicate shell row, deleted Runtime Evidence, command-text classification, temporal correlation
 
 **Indeterminate Built-in Tool Outcome**:
-The explicit result when a built-in invocation may have reached Core but bounded replay cannot establish either its committed receipt or authoritative rejection. It is presented as `结果待确认`, never as success, failure, or permission to issue the operation again blindly.
+The explicit result when a built-in invocation may have reached Core but bounded replay cannot establish either its committed receipt or authoritative rejection. Its Agent Result Projection contains only the stable `builtin_tool.outcome_indeterminate` error, safe message, and `confirm_outcome` recovery; it never exposes the hidden request identity or authorizes blind re-invocation.
 _Avoid_: ordinary operation error, confirmed rejection, automatic duplicate invocation
 
 **Built-in Tool Process Identity**:

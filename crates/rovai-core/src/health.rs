@@ -529,9 +529,7 @@ async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
         Ok(Ok(output)) if output.status.success() => {
             let models = String::from_utf8_lossy(&output.stdout)
                 .lines()
-                .map(str::trim)
-                .filter(|line| is_antigravity_model_identifier(line))
-                .map(str::to_string)
+                .filter_map(antigravity_model_identifier_from_line)
                 .collect::<Vec<_>>();
             if models.is_empty() {
                 return antigravity_probe_failure(
@@ -614,6 +612,16 @@ fn is_antigravity_model_identifier(value: &str) -> bool {
         && value.bytes().all(|byte| {
             byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'/' | b':' | b'+')
         })
+}
+
+fn antigravity_model_identifier_from_line(line: &str) -> Option<String> {
+    let line = line.trim();
+    let candidate = match line.split_once('\t') {
+        Some((identifier, _display_name)) => identifier.trim(),
+        None if !line.chars().any(char::is_whitespace) => line,
+        None => return None,
+    };
+    is_antigravity_model_identifier(candidate).then(|| candidate.to_string())
 }
 
 fn probe_output_digest(stdout: &[u8], stderr: &[u8]) -> String {
@@ -1805,6 +1813,22 @@ mod tests {
         ] {
             assert!(additive_acp_mcp_verified(kind));
         }
+    }
+
+    #[test]
+    fn antigravity_model_discovery_accepts_identifier_and_display_name_rows() {
+        assert_eq!(
+            antigravity_model_identifier_from_line(
+                "gemini-3.6-flash-high\tGemini 3.6 Flash (High)"
+            )
+            .as_deref(),
+            Some("gemini-3.6-flash-high")
+        );
+        assert_eq!(
+            antigravity_model_identifier_from_line("claude-sonnet-4-6").as_deref(),
+            Some("claude-sonnet-4-6")
+        );
+        assert!(antigravity_model_identifier_from_line("Fetching available models...").is_none());
     }
 
     #[tokio::test]

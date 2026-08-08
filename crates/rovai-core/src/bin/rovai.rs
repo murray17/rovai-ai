@@ -8,6 +8,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
+use rovai_core::builtin_tool_cli_output::project_envelope;
 use rovai_core::builtin_tool_transport::{
     BUILTIN_TOOL_CONTRACT_VERSION, BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
     BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES, BuiltinToolArgument, BuiltinToolCliContext,
@@ -24,17 +25,8 @@ const CORE_ATTEMPTS: usize = 3;
 fn main() -> ExitCode {
     match run() {
         Ok(code) => ExitCode::from(code),
-        Err(error) => {
-            let diagnostic = json!({
-                "kind": "cli_error",
-                "code": "builtin_tool.cli_error",
-                "message": format!("{error:#}"),
-            });
-            eprintln!(
-                "{}",
-                serde_json::to_string(&diagnostic)
-                    .unwrap_or_else(|_| "Built-in Tool CLI failed".to_string())
-            );
+        Err(_error) => {
+            print_safe_cli_error();
             ExitCode::from(2)
         }
     }
@@ -55,35 +47,25 @@ fn run() -> Result<u8> {
         print_root_help();
         return Ok(0);
     }
+    if let Some(description) = operation_help(&args)? {
+        print_operation_help(&description);
+        return Ok(0);
+    }
 
     let context = load_context()?;
     let auth = context.auth()?;
     let request = match args.as_slice() {
-        [group, action] if group == "tool" && action == "list" => BuiltinToolIpcRequest {
-            ipc_protocol_version: BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
-            auth,
-            body: BuiltinToolIpcRequestBody::List,
-        },
-        [group, action, operation]
-            if group == "tool" && action == "describe" && operation != "--help" =>
-        {
-            BuiltinToolIpcRequest {
-                ipc_protocol_version: BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
-                auth,
-                body: BuiltinToolIpcRequestBody::Describe {
-                    operation: operation.clone(),
-                },
-            }
-        }
         [command, rest @ ..] if command == "send" => {
             let identity = builtin_tool_identity_by_command(command, "")
                 .with_context(|| format!("unknown Rovai command: rovai {command}"))?;
             let description = builtin_tool_description(identity.operation)?;
-            if rest == ["--help"] {
-                print_operation_help(&description);
-                return Ok(0);
-            }
-            let input = parse_operation_input(&description, rest)?;
+            let input = match parse_operation_input(&description, rest) {
+                Ok(input) => input,
+                Err(_) => {
+                    print_invalid_input();
+                    return Ok(2);
+                }
+            };
             BuiltinToolIpcRequest {
                 ipc_protocol_version: BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
                 auth,
@@ -98,11 +80,13 @@ fn run() -> Result<u8> {
             let identity = builtin_tool_identity_by_command(group, action)
                 .with_context(|| format!("unknown Rovai command: rovai {group} {action}"))?;
             let description = builtin_tool_description(identity.operation)?;
-            if rest == ["--help"] {
-                print_operation_help(&description);
-                return Ok(0);
-            }
-            let input = parse_operation_input(&description, rest)?;
+            let input = match parse_operation_input(&description, rest) {
+                Ok(input) => input,
+                Err(_) => {
+                    print_invalid_input();
+                    return Ok(2);
+                }
+            };
             BuiltinToolIpcRequest {
                 ipc_protocol_version: BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
                 auth,
@@ -118,53 +102,66 @@ fn run() -> Result<u8> {
 
     let response = match send_with_retry(Path::new(&context.core_socket), &request) {
         Ok(response) => response,
-        Err(_error) => {
-            let (operation, request_id) = match &request.body {
-                BuiltinToolIpcRequestBody::Invoke {
-                    operation,
-                    request_id,
-                    ..
-                } => (Some(operation.as_str()), Some(request_id.as_str())),
-                _ => (None, None),
-            };
-            let diagnostic = json!({
-                "kind": "transport_error",
-                "outcome": "indeterminate",
-                "operation": operation,
-                "requestId": request_id,
-                "message": "结果待确认：Rovai Core response could not be established.",
-            });
-            eprintln!("{}", serde_json::to_string(&diagnostic)?);
+        Err(BuiltinToolIpcFailure::OutcomeIndeterminate) => {
+            println!(
+                "{}",
+                serde_json::to_string(&json!({
+                    "error": {
+                        "code": "builtin_tool.outcome_indeterminate",
+                        "message": "Confirm current state before acting again.",
+                        "recovery": "confirm_outcome"
+                    }
+                }))?
+            );
             return Ok(3);
+        }
+        Err(BuiltinToolIpcFailure::Predictable) => {
+            print_safe_cli_error();
+            return Ok(2);
         }
     };
 
     match response {
-        BuiltinToolIpcResponse::Catalog { catalog } => {
-            println!("{}", serde_json::to_string(&catalog)?);
-            Ok(0)
-        }
-        BuiltinToolIpcResponse::Description { description } => {
-            println!("{}", serde_json::to_string(&description)?);
-            Ok(0)
-        }
         BuiltinToolIpcResponse::Envelope { envelope } => {
             envelope.validate()?;
-            println!("{}", serde_json::to_string(&envelope)?);
-            Ok(if envelope.ok { 0 } else { 1 })
+            let projected = project_envelope(&envelope)?;
+            println!("{}", serde_json::to_string(&projected)?);
+            Ok(envelope_exit_code(&envelope))
         }
-        BuiltinToolIpcResponse::Error { error } => {
-            eprintln!(
-                "{}",
-                serde_json::to_string(&json!({
-                    "kind": "ipc_error",
-                    "code": error.code,
-                    "message": error.message,
-                }))?
-            );
+        BuiltinToolIpcResponse::Error { .. } => {
+            print_safe_cli_error();
             Ok(2)
         }
     }
+}
+
+fn envelope_exit_code(
+    envelope: &rovai_core::builtin_tool_transport::BuiltinToolInvocationEnvelope,
+) -> u8 {
+    if envelope.ok {
+        0
+    } else if envelope
+        .error
+        .as_ref()
+        .is_some_and(|error| error.code == "builtin_tool.outcome_indeterminate")
+    {
+        3
+    } else {
+        1
+    }
+}
+
+fn operation_help(args: &[String]) -> Result<Option<BuiltinToolDescription>> {
+    let identity = match args {
+        [command, help] if help == "--help" => builtin_tool_identity_by_command(command, ""),
+        [group, action, help] if help == "--help" => {
+            builtin_tool_identity_by_command(group, action)
+        }
+        _ => None,
+    };
+    identity
+        .map(|identity| builtin_tool_description(identity.operation))
+        .transpose()
 }
 
 fn load_context() -> Result<BuiltinToolCliContext> {
@@ -315,50 +312,98 @@ fn insert_direct_value(
 fn send_with_retry(
     socket: &Path,
     request: &BuiltinToolIpcRequest,
-) -> Result<BuiltinToolIpcResponse> {
+) -> std::result::Result<BuiltinToolIpcResponse, BuiltinToolIpcFailure> {
     use std::os::unix::net::UnixStream;
 
-    let serialized = serde_json::to_vec(request)?;
+    let serialized = serde_json::to_vec(request).map_err(|_| BuiltinToolIpcFailure::Predictable)?;
     if serialized.len() > BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES {
-        bail!("Built-in Tool request exceeds 1 MiB");
+        return Err(BuiltinToolIpcFailure::Predictable);
     }
-    let mut last_error = None;
+    let mut dispatch_became_indeterminate = false;
     for _attempt in 0..CORE_ATTEMPTS {
-        let result = (|| -> Result<BuiltinToolIpcResponse> {
-            let mut stream = UnixStream::connect(socket)
-                .with_context(|| format!("failed to connect to {}", socket.display()))?;
-            stream.set_read_timeout(Some(CORE_TIMEOUT))?;
-            stream.set_write_timeout(Some(CORE_TIMEOUT))?;
-            stream.write_all(&serialized)?;
-            stream.write_all(b"\n")?;
-            stream.flush()?;
-            let mut reader = BufReader::new(stream);
-            let mut response = String::new();
-            let read = reader.read_line(&mut response)?;
-            if read == 0 {
-                bail!("Rovai Core closed the Built-in Tool socket without a response");
+        let Ok(mut stream) = UnixStream::connect(socket) else {
+            continue;
+        };
+        if stream.set_read_timeout(Some(CORE_TIMEOUT)).is_err()
+            || stream.set_write_timeout(Some(CORE_TIMEOUT)).is_err()
+        {
+            continue;
+        }
+        if stream.write_all(&serialized).is_err()
+            || stream.write_all(b"\n").is_err()
+            || stream.flush().is_err()
+        {
+            dispatch_became_indeterminate = true;
+            continue;
+        }
+        let mut reader = BufReader::new(stream);
+        let mut response = String::new();
+        match reader.read_line(&mut response) {
+            Ok(0) | Err(_) => {
+                dispatch_became_indeterminate = true;
             }
-            serde_json::from_str(&response).context("Rovai Core returned an invalid response")
-        })();
-        match result {
-            Ok(response) => return Ok(response),
-            Err(error) => last_error = Some(error),
+            Ok(_) => match serde_json::from_str(&response) {
+                Ok(response) => return Ok(response),
+                Err(_) => return Err(BuiltinToolIpcFailure::Predictable),
+            },
         }
     }
-    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Built-in Tool IPC failed")))
+    Err(if dispatch_became_indeterminate {
+        BuiltinToolIpcFailure::OutcomeIndeterminate
+    } else {
+        BuiltinToolIpcFailure::Predictable
+    })
 }
 
 #[cfg(not(unix))]
 fn send_with_retry(
     _socket: &Path,
     _request: &BuiltinToolIpcRequest,
-) -> Result<BuiltinToolIpcResponse> {
-    bail!("Built-in Tool IPC requires Unix domain sockets")
+) -> std::result::Result<BuiltinToolIpcResponse, BuiltinToolIpcFailure> {
+    Err(BuiltinToolIpcFailure::Predictable)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BuiltinToolIpcFailure {
+    Predictable,
+    OutcomeIndeterminate,
 }
 
 fn print_root_help() {
     println!(
-        "Rovai Agent CLI\n\nDiscovery:\n  rovai tool list\n  rovai tool describe <canonical-operation>\n\nOperations:\n  rovai send\n  rovai task create|list|update\n  rovai camp list|search|read\n  rovai history search\n  rovai memory search|read|write|propose-hearth\n\nEach operation supports direct flags, JSON stdin/heredoc, or --input-file <path>."
+        "Rovai Agent CLI\n\nOperations:\n  rovai send\n  rovai task create|list|update\n  rovai camp list|search|read\n  rovai history search\n  rovai memory search|read|write|propose-hearth\n\nUse '<command> --help' for concise arguments and examples. Each operation supports direct flags, JSON stdin/heredoc, or --input-file <path>."
+    );
+}
+
+fn print_safe_cli_error() {
+    println!(
+        "{}",
+        serde_json::to_string(&json!({
+            "error": {
+                "code": "builtin_tool.cli_error",
+                "message": "Built-in Tool request could not be completed.",
+                "recovery": "stop"
+            }
+        }))
+        .unwrap_or_else(|_| {
+            "{\"error\":{\"code\":\"builtin_tool.cli_error\",\"message\":\"Built-in Tool request could not be completed.\",\"recovery\":\"stop\"}}".to_string()
+        })
+    );
+}
+
+fn print_invalid_input() {
+    println!(
+        "{}",
+        serde_json::to_string(&json!({
+            "error": {
+                "code": "builtin_tool.invalid_input",
+                "message": "Command input does not match the accepted arguments.",
+                "recovery": "fix_input"
+            }
+        }))
+        .unwrap_or_else(|_| {
+            "{\"error\":{\"code\":\"builtin_tool.invalid_input\",\"message\":\"Command input does not match the accepted arguments.\",\"recovery\":\"fix_input\"}}".to_string()
+        })
     );
 }
 
@@ -382,12 +427,54 @@ fn print_operation_help(description: &BuiltinToolDescription) {
             if argument.required { " required" } else { "" },
         );
     }
+    println!(
+        "\nExample:\n  {}",
+        operation_help_example(&description.name)
+    );
+}
+
+fn operation_help_example(operation: &str) -> &'static str {
+    match operation {
+        "camp.message.send" => "rovai send --body 'Status update'",
+        "team.create_task" => "rovai task create --title 'Prepare release notes'",
+        "team.list_tasks" => "rovai task list --limit 10",
+        "team.update_task" => {
+            "rovai task update --task-id task_123 --expected-version 1 --status in_progress"
+        }
+        "camp.list" => "rovai camp list --limit 10",
+        "camp.search" => "rovai camp search --query 'release' --limit 5",
+        "camp.read" => "rovai camp read --camp-id camp_123 --mode item --message-id msg_123",
+        "history.search" => "rovai history search --query 'decision' --limit 5",
+        "memory.search" => "rovai memory search --query 'preferences' --limit 6",
+        "memory.read" => "rovai memory read --memory-ids memory_123",
+        "memory.write" => "rovai memory write --input-file memory-write.json",
+        "memory.propose_hearth" => "rovai memory propose-hearth --input-file proposal.json",
+        _ => "rovai --help",
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rovai_core::builtin_tool_transport::builtin_tool_description;
+    use rovai_core::builtin_tool_transport::{BuiltinToolAuth, builtin_tool_description};
+
+    fn request_for_ipc_test() -> BuiltinToolIpcRequest {
+        BuiltinToolIpcRequest {
+            ipc_protocol_version: BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
+            auth: BuiltinToolAuth {
+                process_id: "process-test".to_string(),
+                process_token: "process-token".to_string(),
+                lease_id: "lease-test".to_string(),
+                lease_generation: 1,
+                lease_token: "lease-token".to_string(),
+            },
+            body: BuiltinToolIpcRequestBody::Invoke {
+                request_id: Uuid::new_v4().to_string(),
+                operation: "camp.list".to_string(),
+                input: json!({}),
+            },
+        }
+    }
 
     #[test]
     fn direct_flags_use_canonical_fields_and_repeated_arrays() {
@@ -404,6 +491,23 @@ mod tests {
     }
 
     #[test]
+    fn direct_flags_and_input_file_are_mutually_exclusive() {
+        let description = builtin_tool_description("team.create_task").unwrap();
+        assert!(
+            parse_operation_input(
+                &description,
+                &[
+                    "--title".to_string(),
+                    "task".to_string(),
+                    "--input-file".to_string(),
+                    "request.json".to_string(),
+                ]
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn cli_commands_map_to_canonical_operations() {
         assert_eq!(
             builtin_tool_identity_by_command("send", "")
@@ -417,5 +521,100 @@ mod tests {
                 .operation,
             "memory.propose_hearth"
         );
+        assert!(builtin_tool_identity_by_command("tool", "list").is_none());
+        assert!(builtin_tool_identity_by_command("tool", "describe").is_none());
+    }
+
+    #[test]
+    fn public_send_help_has_no_agent_supplied_camp_scope() {
+        let description = operation_help(&["send".to_string(), "--help".to_string()])
+            .unwrap()
+            .unwrap();
+        assert!(
+            description
+                .arguments
+                .iter()
+                .all(|argument| argument.field != "campId" && argument.flag != "--camp-id")
+        );
+        assert!(
+            parse_operation_input(
+                &description,
+                &["--camp-id".to_string(), "camp-legacy".to_string()]
+            )
+            .is_err()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn connection_preflight_failure_is_predictable() {
+        let socket = std::path::PathBuf::from("/tmp").join(format!(
+            "rv-missing-{}.sock",
+            &Uuid::new_v4().to_string()[..8]
+        ));
+        assert_eq!(
+            send_with_retry(&socket, &request_for_ipc_test()).unwrap_err(),
+            BuiltinToolIpcFailure::Predictable
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn response_loss_after_dispatch_is_indeterminate() {
+        use std::os::unix::net::UnixListener;
+
+        let socket = std::path::PathBuf::from("/tmp")
+            .join(format!("rv-loss-{}.sock", &Uuid::new_v4().to_string()[..8]));
+        let listener = UnixListener::bind(&socket).unwrap();
+        let server = std::thread::spawn(move || {
+            for _ in 0..CORE_ATTEMPTS {
+                let (stream, _) = listener.accept().unwrap();
+                drop(stream);
+            }
+        });
+        assert_eq!(
+            send_with_retry(&socket, &request_for_ipc_test()).unwrap_err(),
+            BuiltinToolIpcFailure::OutcomeIndeterminate
+        );
+        server.join().unwrap();
+        std::fs::remove_file(socket).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn malformed_core_response_is_a_predictable_protocol_failure() {
+        use std::os::unix::net::UnixListener;
+
+        let socket = std::path::PathBuf::from("/tmp").join(format!(
+            "rv-protocol-{}.sock",
+            &Uuid::new_v4().to_string()[..8]
+        ));
+        let listener = UnixListener::bind(&socket).unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.write_all(b"not-json\n").unwrap();
+        });
+        assert_eq!(
+            send_with_retry(&socket, &request_for_ipc_test()).unwrap_err(),
+            BuiltinToolIpcFailure::Predictable
+        );
+        server.join().unwrap();
+        std::fs::remove_file(socket).unwrap();
+    }
+
+    #[test]
+    fn authoritative_indeterminate_envelope_uses_exit_three() {
+        let envelope = rovai_core::builtin_tool_transport::BuiltinToolInvocationEnvelope::rejected(
+            "camp.message.send",
+            &Uuid::new_v4().to_string(),
+            rovai_core::builtin_tool_transport::BuiltinToolError {
+                code: "builtin_tool.outcome_indeterminate".to_string(),
+                message: "Confirm current state before acting again.".to_string(),
+                recovery: rovai_core::builtin_tool_transport::BuiltinToolRecovery::ConfirmOutcome,
+                details: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(envelope_exit_code(&envelope), 3);
     }
 }

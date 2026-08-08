@@ -54,8 +54,7 @@ use rovai_core::{
         BUILTIN_TOOL_CONTRACT_VERSION, BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
         BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES, BuiltinToolError, BuiltinToolInvocationEnvelope,
         BuiltinToolIpcRequest, BuiltinToolIpcRequestBody, BuiltinToolIpcResponse,
-        builtin_tool_catalog_digest, builtin_tool_description, builtin_tool_list,
-        recovery_for_error_code,
+        builtin_tool_catalog_digest, builtin_tool_description, recovery_for_error_code,
     },
     camp_attachment::CampAttachmentStore,
     camp_content::StructuredCampMessageContent,
@@ -1490,25 +1489,6 @@ impl Core {
             Err(error) => return BuiltinToolIpcResponse::ipc_error(error.code, error.message),
         };
         match body {
-            BuiltinToolIpcRequestBody::List => match builtin_tool_list() {
-                Ok(catalog) => BuiltinToolIpcResponse::Catalog { catalog },
-                Err(error) => {
-                    eprintln!("failed to materialize Built-in Tool catalog: {error:#}");
-                    BuiltinToolIpcResponse::ipc_error(
-                        "builtin_tool.catalog_unavailable",
-                        "Built-in Tool catalog is unavailable",
-                    )
-                }
-            },
-            BuiltinToolIpcRequestBody::Describe { operation } => {
-                match builtin_tool_description(&operation) {
-                    Ok(description) => BuiltinToolIpcResponse::Description { description },
-                    Err(_) => BuiltinToolIpcResponse::ipc_error(
-                        "builtin_tool.unknown_operation",
-                        "Requested Built-in Tool operation is unavailable",
-                    ),
-                }
-            }
             BuiltinToolIpcRequestBody::Invoke {
                 request_id,
                 operation,
@@ -1531,7 +1511,7 @@ impl Core {
                         &operation,
                         &request_id,
                         "builtin_tool.invalid_input",
-                        "Operation input does not match the published inputSchema",
+                        "Command input does not match the accepted arguments.",
                     );
                 }
                 let digest = match request_digest(&operation, &input) {
@@ -1575,8 +1555,22 @@ impl Core {
                             input,
                         },
                         Some((authorized.agent_run_id, authorized.execution_epoch)),
+                        Some(request_id.clone()),
                     )
                     .await;
+                if domain_response.error.as_ref().is_some_and(|error| {
+                    matches!(
+                        error.code.as_str(),
+                        "team_tool.binding_fenced"
+                            | "team_tool.runtime_not_frozen"
+                            | "team_tool.invalid_attested_run"
+                    )
+                }) {
+                    return BuiltinToolIpcResponse::ipc_error(
+                        "builtin_tool.run_not_bound",
+                        "Built-in Tool CLI is not bound to the current AgentRun",
+                    );
+                }
                 let envelope = match (domain_response.result, domain_response.error) {
                     (Some(result), None) => {
                         BuiltinToolInvocationEnvelope::success(&operation, &request_id, result)
@@ -1624,6 +1618,7 @@ impl Core {
         &self,
         mut request: TeamToolIpcRequest,
         attested_run: Option<(String, i64)>,
+        evidence_request_id: Option<String>,
     ) -> TeamToolIpcResponse {
         let evidence_tool_name = request.tool_name.clone();
         let evidence_input_digest = canonical_json_digest(&request.input).ok();
@@ -1897,6 +1892,31 @@ impl Core {
                 .as_ref()
                 .ok()
                 .and_then(|output| canonical_json_digest(output).ok());
+            let core_envelope = evidence_request_id
+                .as_deref()
+                .and_then(|request_id| match result.as_ref() {
+                    Ok(output) => BuiltinToolInvocationEnvelope::success(
+                        &evidence_tool_name,
+                        request_id,
+                        output.clone(),
+                    )
+                    .ok(),
+                    Err(error) => {
+                        let (code, message, details) = classify_builtin_operation_error(error);
+                        let code = canonical_builtin_error_code(&code);
+                        BuiltinToolInvocationEnvelope::rejected(
+                            &evidence_tool_name,
+                            request_id,
+                            BuiltinToolError {
+                                recovery: recovery_for_error_code(&code),
+                                code,
+                                message,
+                                details,
+                            },
+                        )
+                        .ok()
+                    }
+                });
             let evidence = json!({
                 "toolCallId": tool_call_id,
                 "status": if result.is_ok() { "completed" } else { "failed" },
@@ -1910,6 +1930,7 @@ impl Core {
                 "errorCode": error_code,
                 "idempotentReplay": evidence_replayed,
                 "receiptId": evidence_receipt_id,
+                "coreEnvelope": core_envelope,
             });
             let evidence_result = {
                 let mut database = self.database.lock().await;

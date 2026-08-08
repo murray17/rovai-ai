@@ -6,12 +6,19 @@ import { createInterface } from 'node:readline'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
 
 const root = resolve(import.meta.dirname, '..')
+const coreExecutable = resolve(
+  process.env.ROVAI_BUILTIN_CLI_CORE_EXECUTABLE ?? join(root, 'target', 'debug', 'rovai-core')
+)
+const cliExecutable = resolve(
+  process.env.ROVAI_BUILTIN_CLI_EXECUTABLE ?? join(root, 'target', 'debug', 'rovai')
+)
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-builtin-cli-smoke-'))
 const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
 const historyMarker = 'ROVAI_BUILTIN_HISTORY_V1'
 const expectedOperations = [
   'camp.list',
+  'camp.message.send',
   'camp.read',
   'camp.search',
   'history.search',
@@ -19,7 +26,6 @@ const expectedOperations = [
   'memory.read',
   'memory.search',
   'memory.write',
-  'team.call_member',
   'team.create_task',
   'team.list_tasks',
   'team.update_task'
@@ -118,6 +124,7 @@ try {
     specification.resumeMarker = `ROVAI_BUILTIN_CLI_${specification.slug.toUpperCase()}_RESUME_OK`
     specification.contextPathFile = join(projectRoot, `.context-path-${specification.slug}`)
     specification.resumeContextPathFile = join(projectRoot, `.resume-context-path-${specification.slug}`)
+    specification.resumeCompletionFile = join(projectRoot, `.resume-complete-${specification.slug}`)
     specification.diagnosticPath = join(projectRoot, `.diagnostic-${specification.slug}`)
     specification.campId = await createCamp(core.request, {
       name: `${specification.label} Built-in CLI`,
@@ -173,6 +180,17 @@ try {
         evidence
       })}`)
     }
+    const invalidEnvelopeEvidence = evidence.find((entry) => {
+      const envelope = entry.payload?.coreEnvelope
+      return envelope?.contractVersion !== 1
+        || envelope.operation !== entry.payload?.canonicalTool
+        || !/^[0-9a-f-]{36}$/.test(envelope.requestId ?? '')
+        || !/^sha256:[0-9a-f]{64}$/.test(envelope.receipt ?? '')
+        || (envelope.ok ? typeof envelope.result !== 'object' : typeof envelope.error !== 'object')
+    })
+    if (invalidEnvelopeEvidence) {
+      throw new Error(`${specification.adapterKind} Evidence did not retain a valid Core Envelope: ${JSON.stringify(invalidEnvelopeEvidence)}`)
+    }
     const staleConflict = evidence.find((entry) =>
       entry.payload?.canonicalTool === 'team.update_task'
         && entry.payload?.status === 'failed'
@@ -194,6 +212,7 @@ try {
     const resumed = await startVerificationRun(core, specification, true)
     const resumedSnapshot = await waitForRun(core, specification.campId, resumed.agentRunId, {
       marker: specification.resumeMarker,
+      completionFile: specification.resumeCompletionFile,
       timeoutMs: 480_000
     })
     const resumedEvidence = await builtinEvidence(
@@ -240,6 +259,9 @@ try {
       recipientRunStatusAtObservation: recipientRun?.status,
       operations: observedOperations,
       fullRunEvidenceCount: evidence.length,
+      agentOutputReduction: measureAgentOutputReduction(evidence),
+      legacySendFlagRejected: true,
+      legacySendJsonRejected: true,
       staleVersionConflict: true,
       initialLeaseFenced: true,
       resumedLeaseFenced: true,
@@ -253,7 +275,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    contractVersion: 1,
+    contractVersion: 3,
     ipcProtocolVersion: 1,
     runtimeCount: results.length,
     operationCountPerRuntime: expectedOperations.length,
@@ -273,9 +295,9 @@ try {
 function assertBuiltinCliCapability(label, installation) {
   const snapshot = installation?.snapshot
   if (snapshot?.probeStatus !== 'ready'
-      || !snapshot.capabilities.includes('builtin_cli.transport.v1')
+      || !snapshot.capabilities.includes('builtin_cli.transport.v3')
       || !snapshot.models.length) {
-    throw new Error(`${label} is not ready for Built-in CLI v1: ${JSON.stringify(snapshot)}`)
+    throw new Error(`${label} is not ready for Built-in CLI v3: ${JSON.stringify(snapshot)}`)
   }
 }
 
@@ -404,6 +426,10 @@ async function waitForRun(coreClient, campId, agentRunId, options) {
         message.sourceAgentRunId === agentRunId
       )?.body
       if (!output?.trim()) {
+        if (options.completionFile) {
+          const completion = await readFile(options.completionFile, 'utf8').catch(() => '')
+          if (completion.includes(options.marker)) return snapshot
+        }
         throw new Error(`AgentRun ${agentRunId} succeeded without output`)
       }
       return snapshot
@@ -489,18 +515,86 @@ async function builtinEvidence(request, campId, agentRunId) {
   return collected.filter((entry) => entry.payload?.kind === 'builtin_tool_invocation')
 }
 
+function measureAgentOutputReduction(evidence) {
+  const samples = evidence
+    .map((entry) => entry.payload?.coreEnvelope)
+    .filter(Boolean)
+    .map((envelope) => ({
+      envelope,
+      projection: projectEnvelopeForMeasurement(envelope)
+    }))
+  const envelopeBytes = samples.reduce(
+    (total, sample) => total + Buffer.byteLength(JSON.stringify(sample.envelope)),
+    0
+  )
+  const projectionBytes = samples.reduce(
+    (total, sample) => total + Buffer.byteLength(JSON.stringify(sample.projection)),
+    0
+  )
+  return {
+    sampleCount: samples.length,
+    envelopeBytes,
+    projectionBytes,
+    reductionPercent: envelopeBytes === 0
+      ? 0
+      : Number((((envelopeBytes - projectionBytes) / envelopeBytes) * 100).toFixed(1))
+  }
+}
+
+function projectEnvelopeForMeasurement(envelope) {
+  if (!envelope.ok) {
+    if (envelope.error?.code === 'builtin_tool.outcome_indeterminate') {
+      return {
+        error: {
+          code: 'builtin_tool.outcome_indeterminate',
+          message: 'Confirm current state before acting again.',
+          recovery: 'confirm_outcome'
+        }
+      }
+    }
+    return { error: envelope.error }
+  }
+  switch (envelope.operation) {
+    case 'camp.message.send':
+      return {
+        messageId: envelope.result.messageId,
+        effectiveRecipients: envelope.result.effectiveRecipients
+      }
+    case 'memory.write':
+      return {
+        memoryId: envelope.result.memoryId,
+        revisionId: envelope.result.revisionId
+      }
+    case 'camp.list':
+    case 'camp.read':
+    case 'camp.search':
+    case 'history.search':
+    case 'memory.propose_hearth':
+    case 'memory.read':
+    case 'memory.search':
+    case 'team.create_task':
+    case 'team.list_tasks':
+    case 'team.update_task':
+      return envelope.result
+    default:
+      throw new Error(`Missing Agent output measurement projection for ${envelope.operation}`)
+  }
+}
+
 async function assertFencedContext(contextPath, adapterKind, phase) {
   if (!contextPath.startsWith(dataDir)) {
     throw new Error(`${adapterKind} exposed an unexpected CLI context path: ${contextPath}`)
   }
   let lastResult = null
   for (let attempt = 0; attempt < 60; attempt += 1) {
-    const result = await runCapture(join(root, 'target', 'debug', 'rovai'), ['tool', 'list'], {
+    const result = await runCapture(cliExecutable, ['camp', 'list'], {
       env: { ...process.env, ROVAI_CLI_CONTEXT: contextPath },
       expectedCodes: [0, 2]
     })
     lastResult = result
-    if (result.code === 2 && result.stderr.includes('builtin_tool.cli_error')) return
+    if (result.code === 2
+        && result.stderr === ''
+        && result.stdout.includes('"builtin_tool.cli_error"')) return
     await delay(250)
   }
   throw new Error(`${adapterKind} ${phase} context did not fail closed: ${JSON.stringify(lastResult)}`)
@@ -525,7 +619,7 @@ function verificationScript(input) {
     action: 'add',
     scope: 'companion',
     kind: 'preference',
-    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v1 qualification.`,
+    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v3 qualification.`,
     retrievalKeys: [`cli-${input.slug.slice(0, 18)}`]
   })
   const hearth = JSON.stringify({
@@ -534,9 +628,9 @@ function verificationScript(input) {
     body: `The ${input.adapterKind} Runtime can invoke Rovai built-ins only through the local CLI.`,
     retrievalKeys: [`hearth-${input.slug.slice(0, 14)}`]
   })
-  const memberCall = JSON.stringify({
-    recipient: input.recipientProfileId,
-    content: `Acknowledge receipt of this ${input.adapterKind} Built-in CLI transport qualification request in one sentence.`
+  const publicSend = JSON.stringify({
+    body: `Acknowledge the ${input.adapterKind} Built-in CLI qualification in one sentence.`,
+    to: [input.recipientProfileId]
   })
   return `#!/bin/bash
 set -euo pipefail
@@ -559,45 +653,55 @@ assert_success() {
   local document="$1"
   local operation="$2"
   printf '%s\n' "$document" | "$JQ" -e --arg operation "$operation" '
-    .contractVersion == 1
-    and .ok == true
-    and .operation == $operation
-    and (.requestId | test("^[0-9a-f-]{36}$"))
-    and (.receipt | test("^sha256:[0-9a-f]{64}$"))
-    and ((.result | type) == "object")
-    and (.result | has("task") | not)
-    and (.result | has("rovaiTeamTool") | not)
-    and (.result | has("rovaiTeamReceipt") | not)
+    (has("contractVersion") | not)
+    and (has("ok") | not)
+    and (has("operation") | not)
+    and (has("requestId") | not)
+    and (has("receipt") | not)
+    and (has("result") | not)
     and (has("error") | not)
+    and (if $operation == "camp.message.send"
+         then (.messageId | type) == "string" and (.effectiveRecipients | type) == "array"
+         elif $operation == "memory.write"
+         then (.memoryId | type) == "string" and (.revisionId | type) == "string"
+         else type == "object"
+         end)
+  ' >/dev/null
+}
+
+assert_fix_input() {
+  local document="$1"
+  printf '%s\n' "$document" | "$JQ" -e '
+    .error.code == "builtin_tool.invalid_input"
+    and .error.recovery == "fix_input"
+    and (has("contractVersion") | not)
+    and (has("operation") | not)
+    and (has("requestId") | not)
+    and (has("receipt") | not)
+    and (has("result") | not)
   ' >/dev/null
 }
 
 STEP=version
-"$CLI" --version | grep -q 'contract-v1 ipc-v1'
-STEP=catalog
-catalog="$("$CLI" tool list)"
-printf '%s\n' "$catalog" > "$DIAGNOSTIC.catalog"
-catalog_digest="$(printf '%s\n' "$catalog" | "$JQ" -er '.catalogDigest')"
-printf '%s\n' "$catalog" | "$JQ" -e --argjson expected '${JSON.stringify(expectedOperations)}' '
-  .contractVersion == 1
-  and (.catalogDigest | test("^sha256:[0-9a-f]{64}$"))
-  and (([.operations[].name] | sort) == ($expected | sort))
-' >/dev/null
+"$CLI" --version | grep -q 'contract-v3 ipc-v1'
 
-STEP=describe
-for operation in ${expectedOperations.map(shellQuote).join(' ')}; do
-  description="$("$CLI" tool describe "$operation")"
-  printf '%s\n' "$description" | "$JQ" -e --arg operation "$operation" --arg digest "$catalog_digest" '
-    .contractVersion == 1
-    and .catalogDigest == $digest
-    and .name == $operation
-    and ((.inputSchema | type) == "object")
-    and ((.resultSchema | type) == "object")
-    and .envelopeContract.version == 1
-    and .envelopeContract.schema.properties.receipt.type == "string"
-    and ((.errors | type) == "array")
-  ' >/dev/null
-done
+STEP=legacy_send_flag
+set +e
+legacy_flag="$("$CLI" send --camp-id camp-legacy --body rejected 2>"$RUN_TMP/legacy-flag.err")"
+legacy_flag_status=$?
+set -e
+test "$legacy_flag_status" -eq 2
+test ! -s "$RUN_TMP/legacy-flag.err"
+assert_fix_input "$legacy_flag"
+
+STEP=legacy_send_json
+set +e
+legacy_json="$(printf '%s\n' '{"campId":"camp-legacy","body":"rejected"}' | "$CLI" send 2>"$RUN_TMP/legacy-json.err")"
+legacy_json_status=$?
+set -e
+test "$legacy_json_status" -eq 1
+test ! -s "$RUN_TMP/legacy-json.err"
+assert_fix_input "$legacy_json"
 
 cat > "$RUN_TMP/task-create.json" <<'ROVAI_JSON'
 ${taskCreate}
@@ -605,8 +709,8 @@ ROVAI_JSON
 STEP=task_create
 task_create="$("$CLI" task create --input-file "$RUN_TMP/task-create.json")"
 assert_success "$task_create" 'team.create_task'
-task_id="$(printf '%s\n' "$task_create" | "$JQ" -er '.result.taskId')"
-task_version="$(printf '%s\n' "$task_create" | "$JQ" -er '.result.version')"
+task_id="$(printf '%s\n' "$task_create" | "$JQ" -er '.taskId')"
+task_version="$(printf '%s\n' "$task_create" | "$JQ" -er '.version')"
 
 STEP=task_list
 task_list="$("$CLI" task list <<'ROVAI_JSON'
@@ -614,12 +718,12 @@ task_list="$("$CLI" task list <<'ROVAI_JSON'
 ROVAI_JSON
 )"
 assert_success "$task_list" 'team.list_tasks'
-printf '%s\n' "$task_list" | "$JQ" -e --arg taskId "$task_id" '.result.tasks | any(.id == $taskId)' >/dev/null
+printf '%s\n' "$task_list" | "$JQ" -e --arg taskId "$task_id" '.tasks | any(.id == $taskId)' >/dev/null
 
 STEP=task_update
 task_update="$("$CLI" task update --task-id "$task_id" --expected-version "$task_version" --status in_progress)"
 assert_success "$task_update" 'team.update_task'
-current_version="$(printf '%s\n' "$task_update" | "$JQ" -er '.result.version')"
+current_version="$(printf '%s\n' "$task_update" | "$JQ" -er '.version')"
 
 STEP=task_conflict
 set +e
@@ -628,36 +732,42 @@ stale_status=$?
 set -e
 test "$stale_status" -eq 1
 printf '%s\n' "$stale_update" | "$JQ" -e --arg taskId "$task_id" --argjson currentVersion "$current_version" '
-  .contractVersion == 1
-  and .ok == false
-  and .operation == "team.update_task"
-  and (.receipt | test("^sha256:[0-9a-f]{64}$"))
-  and .error.code == "task.version_conflict"
+  .error.code == "task.version_conflict"
   and .error.recovery == "refresh_then_decide"
   and .error.details.taskId == $taskId
   and .error.details.currentVersion == $currentVersion
-  and (has("result") | not)
+  and (has("contractVersion") | not)
+  and (has("requestId") | not)
+  and (has("receipt") | not)
 ' >/dev/null
 
 STEP=camp_list
 camp_list="$(printf '{}\n' | "$CLI" camp list)"
 assert_success "$camp_list" 'camp.list'
-printf '%s\n' "$camp_list" | "$JQ" -e --arg campId ${shellQuote(input.historyCampId)} '.result.camps | any(.campId == $campId)' >/dev/null
+printf '%s\n' "$camp_list" | "$JQ" -e --arg campId ${shellQuote(input.historyCampId)} '.camps | any(.campId == $campId)' >/dev/null
 
 STEP=camp_search
 camp_search="$("$CLI" camp search --query ${shellQuote(input.currentMarker)} --limit 5)"
 assert_success "$camp_search" 'camp.search'
-message_id="$(printf '%s\n' "$camp_search" | "$JQ" -er '.result.results[0].messageId')"
+message_id="$(printf '%s\n' "$camp_search" | "$JQ" -er '.results[0].messageId')"
 STEP=camp_read
 ${campRead('$message_id')} > "$RUN_TMP/camp-read.json"
 camp_read="$("$CLI" camp read --input-file "$RUN_TMP/camp-read.json")"
 assert_success "$camp_read" 'camp.read'
-printf '%s\n' "$camp_read" | "$JQ" -e --arg messageId "$message_id" '.result.items[0].messageId == $messageId' >/dev/null
+printf '%s\n' "$camp_read" | "$JQ" -e --arg messageId "$message_id" '.items[0].messageId == $messageId' >/dev/null
 
 STEP=history_search
 history_search="$("$CLI" history search --query ${shellQuote(input.historyMarker)} --limit 5)"
 assert_success "$history_search" 'history.search'
-printf '%s\n' "$history_search" | "$JQ" -e --arg campId ${shellQuote(input.historyCampId)} '.result.results | any(.campId == $campId)' >/dev/null
+printf '%s\n' "$history_search" | "$JQ" -e --arg campId ${shellQuote(input.historyCampId)} '.results | any(.campId == $campId)' >/dev/null
+
+cat > "$RUN_TMP/public-send.json" <<'ROVAI_JSON'
+${publicSend}
+ROVAI_JSON
+STEP=camp_message_send
+public_send="$("$CLI" send --input-file "$RUN_TMP/public-send.json")"
+assert_success "$public_send" 'camp.message.send'
+printf '%s\n' "$public_send" | "$JQ" -e '.effectiveRecipients | type == "array"' >/dev/null
 
 cat > "$RUN_TMP/memory-write.json" <<'ROVAI_JSON'
 ${memoryWrite}
@@ -665,18 +775,18 @@ ROVAI_JSON
 STEP=memory_write
 memory_write="$("$CLI" memory write --input-file "$RUN_TMP/memory-write.json")"
 assert_success "$memory_write" 'memory.write'
-memory_id="$(printf '%s\n' "$memory_write" | "$JQ" -er '.result.memoryId')"
+memory_id="$(printf '%s\n' "$memory_write" | "$JQ" -er '.memoryId')"
 
 STEP=memory_search
 memory_search="$("$CLI" memory search --query ${shellQuote(`cli-${input.slug.slice(0, 18)}`)} --limit 6)"
 assert_success "$memory_search" 'memory.search'
-printf '%s\n' "$memory_search" | "$JQ" -e --arg memoryId "$memory_id" '.result.results | any(.memoryId == $memoryId)' >/dev/null
+printf '%s\n' "$memory_search" | "$JQ" -e --arg memoryId "$memory_id" '.results | any(.memoryId == $memoryId)' >/dev/null
 
 STEP=memory_read
 memory_read_input="$("$JQ" -nc --arg memoryId "$memory_id" '{memoryIds:[$memoryId]}')"
 memory_read="$(printf '%s\n' "$memory_read_input" | "$CLI" memory read)"
 assert_success "$memory_read" 'memory.read'
-printf '%s\n' "$memory_read" | "$JQ" -e --arg memoryId "$memory_id" '.result.memories | any(.memoryId == $memoryId and .cacheState == "current")' >/dev/null
+printf '%s\n' "$memory_read" | "$JQ" -e --arg memoryId "$memory_id" '.memories | any(.memoryId == $memoryId and .cacheState == "current")' >/dev/null
 
 cat > "$RUN_TMP/hearth.json" <<'ROVAI_JSON'
 ${hearth}
@@ -684,19 +794,7 @@ ROVAI_JSON
 STEP=memory_propose_hearth
 hearth_result="$("$CLI" memory propose-hearth --input-file "$RUN_TMP/hearth.json")"
 assert_success "$hearth_result" 'memory.propose_hearth'
-printf '%s\n' "$hearth_result" | "$JQ" -e '.result.status == "pending" and .result.effective == false' >/dev/null
-
-cat > "$RUN_TMP/member-call.json" <<'ROVAI_JSON'
-${memberCall}
-ROVAI_JSON
-STEP=member_call
-member_call="$("$CLI" member call --input-file "$RUN_TMP/member-call.json")"
-assert_success "$member_call" 'team.call_member'
-printf '%s\n' "$member_call" | "$JQ" -e --arg recipient ${shellQuote(input.recipientProfileId)} '
-  .result.status == "accepted"
-  and .result.recipient == $recipient
-  and (.result.acceptanceReceiptId | type) == "string"
-' >/dev/null
+printf '%s\n' "$hearth_result" | "$JQ" -e '.status == "pending" and .effective == false' >/dev/null
 
 STEP=complete
 trap - EXIT
@@ -715,12 +813,9 @@ set -euo pipefail
 CLI="\${ROVAI_AGENT_CLI:?ROVAI_AGENT_CLI is required}"
 CONTEXT="\${ROVAI_CLI_CONTEXT:?ROVAI_CLI_CONTEXT is required}"
 printf '%s\n' "$CONTEXT" > ${shellQuote(input.resumeContextPathFile)}
-catalog="$("$CLI" tool list)"
-printf '%s\n' "$catalog" | jq -e '.contractVersion == 1 and (.operations | length) == 12' >/dev/null
-description="$("$CLI" tool describe memory.write)"
-printf '%s\n' "$description" | jq -e '.name == "memory.write" and .envelopeContract.version == 1' >/dev/null
 camp_list="$(printf '{}\n' | "$CLI" camp list)"
-printf '%s\n' "$camp_list" | jq -e '.ok == true and .operation == "camp.list"' >/dev/null
+printf '%s\n' "$camp_list" | jq -e '((has("contractVersion") | not) and (.camps | type) == "array")' >/dev/null
+printf '%s\n' ${shellQuote(input.resumeMarker)} > ${shellQuote(input.resumeCompletionFile)}
 printf '%s\n' ${shellQuote(JSON.stringify({ ok: true, marker: input.resumeMarker, newLease: true }))}
 `
 }
@@ -730,7 +825,7 @@ function shellQuote(value) {
 }
 
 function startCore(dataDirectory) {
-  const child = spawn(join(root, 'target', 'debug', 'rovai-core'), ['--data-dir', dataDirectory], {
+  const child = spawn(coreExecutable, ['--data-dir', dataDirectory], {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe']
   })

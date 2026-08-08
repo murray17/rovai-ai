@@ -42,8 +42,8 @@ pub struct Database {
     path: PathBuf,
 }
 
-const V045_DATA_CONTRACT_VERSION: &str = "v0.45";
-const V045_PROJECTION_SCHEMA_VERSION: i64 = 24;
+const V046_DATA_CONTRACT_VERSION: &str = "v0.46";
+const V046_PROJECTION_SCHEMA_VERSION: i64 = 25;
 const V043_CLASSIFIER_VERSION: &str = "activity-v1";
 
 const V043_RESET_FILES: &[&str] = &[
@@ -70,7 +70,7 @@ const V043_RESET_DIRECTORIES: &[&str] = &[
     "runtime/qwen",
 ];
 
-fn has_current_v045_data_contract(path: &Path) -> bool {
+fn has_current_v046_data_contract(path: &Path) -> bool {
     if !path.exists() {
         return true;
     }
@@ -102,8 +102,8 @@ fn has_current_v045_data_contract(path: &Path) -> bool {
     matches!(
         (marker, projection_exists),
         (Ok(Some((contract, schema, classifier))), Ok(true))
-            if contract == V045_DATA_CONTRACT_VERSION
-                && schema == V045_PROJECTION_SCHEMA_VERSION
+            if contract == V046_DATA_CONTRACT_VERSION
+                && schema == V046_PROJECTION_SCHEMA_VERSION
                 && classifier == V043_CLASSIFIER_VERSION
     )
 }
@@ -454,12 +454,12 @@ impl Database {
         };
         let reset_reason = if !cfg!(test)
             && candidate_path.exists()
-            && !has_current_v045_data_contract(&candidate_path)
+            && !has_current_v046_data_contract(&candidate_path)
         {
             let reason = if candidate_path == legacy_path {
-                "legacy_or_missing_v045_data_contract"
+                "legacy_or_missing_v046_data_contract"
             } else {
-                "missing_or_incompatible_v045_data_contract"
+                "missing_or_incompatible_v046_data_contract"
             };
             remove_v043_owned_state(data_dir)?;
             Some(reason)
@@ -485,7 +485,7 @@ impl Database {
                 "UPDATE rovai_data_contract SET reset_reason = ?1, updated_at = datetime('now') WHERE singleton = 1",
                 [reason],
             )?;
-            eprintln!("v0.45 managed local-data reset completed: {reason}");
+            eprintln!("v0.46 managed local-data reset completed: {reason}");
         }
         database.seed_agents()?;
         Ok(database)
@@ -1041,6 +1041,9 @@ impl Database {
             if !self.schema_migration_applied(63)? {
                 self.migrate_public_delivery_clean_break_v63()?;
             }
+            if !self.schema_migration_applied(64)? {
+                self.migrate_agent_cli_clean_break_v64()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -1279,6 +1282,9 @@ impl Database {
         }
         if !self.schema_migration_applied(63)? {
             self.migrate_public_delivery_clean_break_v63()?;
+        }
+        if !self.schema_migration_applied(64)? {
+            self.migrate_agent_cli_clean_break_v64()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -5127,6 +5133,25 @@ impl Database {
         if foreign_key_violations != 0 {
             anyhow::bail!("v63 left {foreign_key_violations} foreign-key violations");
         }
+        Ok(())
+    }
+
+    fn migrate_agent_cli_clean_break_v64(&mut self) -> Result<()> {
+        self.connection.execute_batch(
+            r#"
+            DELETE FROM event_log
+            WHERE event_type = 'command.result'
+              AND command_type = 'camp.message.send';
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v0.46', projection_schema_version = 25,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (64, datetime('now'));
+            "#,
+        )?;
         Ok(())
     }
 
@@ -11620,9 +11645,82 @@ mod tests {
             )
             .unwrap();
         assert_eq!(clean_break_migration_count, 1);
+        let agent_cli_contract: (String, i64, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT contract_version, projection_schema_version,
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 64)
+                FROM rovai_data_contract WHERE singleton = 1
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(agent_cli_contract, ("v0.46".to_string(), 25, 1));
         assert_eq!(foreign_key_violations, 0);
 
         drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v64_removes_old_public_send_replay_records_and_sets_v046_contract() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v64-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO event_log(
+                    event_id, event_type, payload_json,
+                    command_id, command_type, request_digest, request_digest_version,
+                    result_status, result_code, result_payload_json, created_at
+                ) VALUES
+                    ('event-old-send', 'command.result', '{}',
+                     'command-old-send', 'camp.message.send', 'digest-old-send', 1,
+                     'applied', 'message.sent', '{}', datetime('now')),
+                    ('event-current-task', 'command.result', '{}',
+                     'command-current-task', 'team.create_task', 'digest-current-task', 1,
+                     'applied', 'task.created', '{}', datetime('now'));
+                DELETE FROM schema_migration WHERE version = 64;
+                UPDATE rovai_data_contract
+                SET contract_version = 'v0.45', projection_schema_version = 24;
+                "#,
+            )
+            .expect("test should restore a pre-v64 Agent CLI contract");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v64 database should reopen");
+        let counts: (i64, i64) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT
+                    SUM(CASE WHEN command_type = 'camp.message.send' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN command_type = 'team.create_task' THEN 1 ELSE 0 END)
+                FROM event_log WHERE event_type = 'command.result'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(counts, (0, 1));
+        let contract: (String, i64, i64) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT contract_version, projection_schema_version,
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 64)
+                FROM rovai_data_contract WHERE singleton = 1
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(contract, ("v0.46".to_string(), 25, 1));
+
+        drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
@@ -12111,7 +12209,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.45".to_string(), 22));
+        assert_eq!(contract, ("v0.46".to_string(), 22));
         let migration_count: i64 = reopened
             .connection()
             .query_row(
@@ -12142,7 +12240,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, (24, 1));
+        assert_eq!(contract, (25, 1));
         let error = database
             .connection()
             .execute(
@@ -12447,7 +12545,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.45".to_string(), 24));
+        assert_eq!(contract, ("v0.46".to_string(), 25));
         let public_a2a_migration_applied: i64 = database
             .connection()
             .query_row(

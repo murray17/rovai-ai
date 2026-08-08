@@ -55,7 +55,6 @@ static TEAM_TOOL_PROCESS_SECRET: OnceLock<String> = OnceLock::new();
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CampMessageSendInput {
-    pub camp_id: String,
     pub body: String,
     #[serde(default)]
     pub to: Vec<String>,
@@ -405,13 +404,8 @@ impl TeamToolService {
         json!({
             "type": "object",
             "additionalProperties": false,
-            "required": ["campId", "body"],
+            "required": ["body"],
             "properties": {
-                "campId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Current Camp ID. It must match the authenticated AgentRun."
-                },
                 "body": {
                     "type": "string",
                     "minLength": 1,
@@ -860,16 +854,6 @@ impl TeamToolService {
     ) -> Result<CommandExecution> {
         validate_public_send_invocation(invocation)?;
         let supplied_credential_digest = credential_digest(&invocation.binding_credential);
-        let command = CampMessageSendCommand {
-            native_binding_id: invocation.native_binding_id.clone(),
-            credential_digest: supplied_credential_digest.clone(),
-            runtime_tool_call_id: invocation.runtime_tool_call_id.clone(),
-            camp_id: invocation.input.camp_id.clone(),
-            body: invocation.input.body.clone(),
-            to: invocation.input.to.clone(),
-            reply_to_camp_message_id: invocation.input.reply_to_camp_message_id.clone(),
-            task_id: invocation.input.task_id.clone(),
-        };
         let command_id = team_command_id(
             &invocation.native_binding_id,
             &supplied_credential_digest,
@@ -887,6 +871,16 @@ impl TeamToolService {
                     "Recorded public send belongs to a different attested AgentRun",
                 ));
             }
+            let command = CampMessageSendCommand {
+                native_binding_id: invocation.native_binding_id.clone(),
+                credential_digest: supplied_credential_digest.clone(),
+                runtime_tool_call_id: invocation.runtime_tool_call_id.clone(),
+                camp_id: recorded.camp_id.clone(),
+                body: invocation.input.body.clone(),
+                to: invocation.input.to.clone(),
+                reply_to_camp_message_id: invocation.input.reply_to_camp_message_id.clone(),
+                task_id: invocation.input.task_id.clone(),
+            };
             let replay_envelope = CommandEnvelope {
                 command_id: command_id.clone(),
                 actor: ActorRef::Agent {
@@ -910,6 +904,16 @@ impl TeamToolService {
             &supplied_credential_digest,
             attested_run,
         )?;
+        let command = CampMessageSendCommand {
+            native_binding_id: invocation.native_binding_id.clone(),
+            credential_digest: supplied_credential_digest.clone(),
+            runtime_tool_call_id: invocation.runtime_tool_call_id.clone(),
+            camp_id: sender.camp_id.clone(),
+            body: invocation.input.body.clone(),
+            to: invocation.input.to.clone(),
+            reply_to_camp_message_id: invocation.input.reply_to_camp_message_id.clone(),
+            task_id: invocation.input.task_id.clone(),
+        };
         let envelope = CommandEnvelope {
             command_id,
             actor: ActorRef::Agent {
@@ -952,12 +956,8 @@ impl TeamToolService {
             if envelope.camp_id.as_deref() != Some(current.camp_id.as_str())
                 || envelope.payload.camp_id != current.camp_id
             {
-                return Ok(CommandHandlerResult::rejected(
-                    "message.camp_mismatch",
-                    json!({
-                        "message": "campId must match the authenticated AgentRun Camp",
-                        "details": {"newRequestIdRequired": true},
-                    }),
+                return Err(anyhow::anyhow!(
+                    "internal camp identity invariant violated for public message send"
                 ));
             }
             persist_public_a2a_message(
@@ -1203,10 +1203,10 @@ fn validate_public_send_invocation(invocation: &CampMessageSendInvocation) -> Re
         &invocation.binding_credential,
         &invocation.runtime_tool_call_id,
     )?;
-    if invocation.input.camp_id.trim().is_empty() || invocation.input.body.trim().is_empty() {
+    if invocation.input.body.trim().is_empty() {
         return Err(invocation_error(
             "message.invalid_input",
-            "campId and a non-empty body are required",
+            "a non-empty body is required",
         ));
     }
     if invocation.input.body.len() > CAMP_MESSAGE_SEND_MAX_BODY_BYTES {
@@ -1697,7 +1697,6 @@ mod tests {
                 binding_credential: self.credential.binding_credential.clone(),
                 runtime_tool_call_id: call_id.to_string(),
                 input: CampMessageSendInput {
-                    camp_id: self.camp_id.clone(),
                     body: body.to_string(),
                     to: to.iter().map(|value| (*value).to_string()).collect(),
                     reply_to_camp_message_id: None,
@@ -1931,6 +1930,14 @@ mod tests {
             .unwrap();
         assert!(replay.replayed);
         assert_eq!(replay.result.payload["messageId"], message_id);
+
+        let source_run_id = fixture.source_run_id.clone();
+        fixture.succeed_run(&source_run_id, fixture.source_epoch, "source completed");
+        let durable_replay = service
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+        assert!(durable_replay.replayed);
+        assert_eq!(durable_replay.result.payload["messageId"], message_id);
     }
 
     #[test]

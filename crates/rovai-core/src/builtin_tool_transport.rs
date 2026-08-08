@@ -6,12 +6,13 @@ use serde_json::{Map, Value, json};
 
 use crate::{command::canonical_json_digest, team_tool_catalog::builtin_tool_definitions};
 
-pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 2;
+pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 3;
 pub const BUILTIN_TOOL_IPC_PROTOCOL_VERSION: u32 = 1;
 pub const BUILTIN_TOOL_ENVELOPE_VERSION: u32 = 1;
 pub const BUILTIN_TOOL_RECEIPT_VERSION: u32 = 1;
-pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 2;
-pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v2";
+pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 3;
+pub const BUILTIN_TOOL_AGENT_OUTPUT_CONTRACT_VERSION: u32 = 1;
+pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v3";
 pub const BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES: usize = 1024 * 1024;
 pub const ROVAI_AGENT_CLI_ENV: &str = "ROVAI_AGENT_CLI";
 pub const ROVAI_CLI_CONTEXT_ENV: &str = "ROVAI_CLI_CONTEXT";
@@ -152,10 +153,6 @@ pub struct BuiltinToolAuth {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BuiltinToolIpcRequestBody {
-    List,
-    Describe {
-        operation: String,
-    },
     Invoke {
         request_id: String,
         operation: String,
@@ -176,12 +173,6 @@ pub struct BuiltinToolIpcRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BuiltinToolIpcResponse {
-    Catalog {
-        catalog: BuiltinToolList,
-    },
-    Description {
-        description: BuiltinToolDescription,
-    },
     Envelope {
         envelope: BuiltinToolInvocationEnvelope,
     },
@@ -364,6 +355,8 @@ pub struct BuiltinToolDescription {
     pub arguments: Vec<BuiltinToolArgument>,
     pub input_schema: Value,
     pub result_schema: Value,
+    pub agent_output_schema: Value,
+    pub projection_identity: String,
     pub errors: Vec<BuiltinToolErrorContract>,
     pub envelope_contract: BuiltinToolEnvelopeContract,
 }
@@ -376,6 +369,7 @@ struct CatalogDigestDocument {
     envelope_contract_version: u32,
     receipt_version: u32,
     cli_command_version: u32,
+    agent_output_contract_version: u32,
     operations: Vec<CatalogDigestOperation>,
 }
 
@@ -388,6 +382,8 @@ struct CatalogDigestOperation {
     arguments: Vec<BuiltinToolArgument>,
     input_schema: Value,
     result_schema: Value,
+    agent_output_schema: Value,
+    projection_identity: String,
     errors: Vec<BuiltinToolErrorContract>,
 }
 
@@ -441,6 +437,8 @@ pub fn builtin_tool_description(operation: &str) -> Result<BuiltinToolDescriptio
         arguments: definition.arguments,
         input_schema: definition.input_schema,
         result_schema: definition.result_schema,
+        agent_output_schema: definition.agent_output_schema,
+        projection_identity: definition.projection_identity,
         errors: definition.errors,
         envelope_contract: BuiltinToolEnvelopeContract {
             version: BUILTIN_TOOL_ENVELOPE_VERSION,
@@ -461,6 +459,7 @@ fn builtin_tool_catalog_digest_from(definitions: &[CatalogDigestOperation]) -> R
         envelope_contract_version: BUILTIN_TOOL_ENVELOPE_VERSION,
         receipt_version: BUILTIN_TOOL_RECEIPT_VERSION,
         cli_command_version: BUILTIN_TOOL_CLI_COMMAND_VERSION,
+        agent_output_contract_version: BUILTIN_TOOL_AGENT_OUTPUT_CONTRACT_VERSION,
         operations: definitions.to_vec(),
     })?)?;
     Ok(format!("sha256:{digest}"))
@@ -484,6 +483,8 @@ fn catalog_digest_operations() -> Result<Vec<CatalogDigestOperation>> {
             .with_context(|| format!("catalog is missing {}", identity.operation))?;
         let input_schema = definition["inputSchema"].clone();
         let result_schema = definition["outputSchema"].clone();
+        let agent_output_schema =
+            crate::builtin_tool_cli_output::agent_output_schema(identity.operation)?;
         operations.push(CatalogDigestOperation {
             name: identity.operation.to_string(),
             command: if identity.action.is_empty() {
@@ -498,6 +499,8 @@ fn catalog_digest_operations() -> Result<Vec<CatalogDigestOperation>> {
             arguments: direct_arguments(&input_schema),
             input_schema,
             result_schema,
+            agent_output_schema,
+            projection_identity: projection_identity(identity.operation)?.to_string(),
             errors: error_contracts(identity.operation),
         });
     }
@@ -628,6 +631,10 @@ fn error_contracts(operation: &str) -> Vec<BuiltinToolErrorContract> {
             code: "builtin_tool.idempotency_conflict".to_string(),
             recovery: BuiltinToolRecovery::Stop,
         },
+        BuiltinToolErrorContract {
+            code: "builtin_tool.outcome_indeterminate".to_string(),
+            recovery: BuiltinToolRecovery::ConfirmOutcome,
+        },
     ];
     match operation {
         "camp.message.send" => {
@@ -639,7 +646,6 @@ fn error_contracts(operation: &str) -> Vec<BuiltinToolErrorContract> {
                 "message.task_recipient_ambiguous",
                 "message.invalid_task",
                 "message.execution_budget_exceeded",
-                "message.camp_mismatch",
             ] {
                 errors.push(BuiltinToolErrorContract {
                     code: code.to_string(),
@@ -663,6 +669,24 @@ fn error_contracts(operation: &str) -> Vec<BuiltinToolErrorContract> {
     errors
 }
 
+pub fn projection_identity(operation: &str) -> Result<&'static str> {
+    match operation {
+        "camp.message.send" => Ok("camp-message-send-v1"),
+        "memory.write" => Ok("memory-write-v1"),
+        "team.create_task"
+        | "team.list_tasks"
+        | "team.update_task"
+        | "camp.list"
+        | "camp.search"
+        | "camp.read"
+        | "history.search"
+        | "memory.search"
+        | "memory.read"
+        | "memory.propose_hearth" => Ok("canonical-result-v1"),
+        _ => bail!("unknown built-in operation for Agent output projection"),
+    }
+}
+
 pub fn recovery_for_error_code(code: &str) -> BuiltinToolRecovery {
     if code.ends_with(".version_conflict")
         || code.ends_with(".revision_conflict")
@@ -679,7 +703,6 @@ pub fn recovery_for_error_code(code: &str) -> BuiltinToolRecovery {
                 | "message.task_recipient_ambiguous"
                 | "message.invalid_task"
                 | "message.execution_budget_exceeded"
-                | "message.camp_mismatch"
         )
         || code == "builtin_tool.unknown_operation"
     {
@@ -832,6 +855,27 @@ mod tests {
     }
 
     #[test]
+    fn malformed_envelope_fails_receipt_and_operation_validation() {
+        let mut envelope = BuiltinToolInvocationEnvelope::success(
+            "camp.list",
+            "7b5db24c-4a43-4cab-9217-d982b08f7691",
+            json!({"camps": [], "truncated": false}),
+        )
+        .unwrap();
+        envelope.receipt = format!("sha256:{}", "0".repeat(64));
+        assert!(envelope.validate().is_err());
+
+        let mut envelope = BuiltinToolInvocationEnvelope::success(
+            "camp.list",
+            "7b5db24c-4a43-4cab-9217-d982b08f7691",
+            json!({"camps": [], "truncated": false}),
+        )
+        .unwrap();
+        envelope.operation = "unknown.operation".to_string();
+        assert!(envelope.validate().is_err());
+    }
+
+    #[test]
     fn list_and_describe_share_one_digest() {
         let list = builtin_tool_list().unwrap();
         assert!(
@@ -842,6 +886,20 @@ mod tests {
         for operation in &list.operations {
             let description = builtin_tool_description(&operation.name).unwrap();
             assert_eq!(description.catalog_digest, list.catalog_digest);
+            assert!(description.agent_output_schema.is_object());
+            assert!(!description.projection_identity.is_empty());
         }
+        let send = builtin_tool_description("camp.message.send").unwrap();
+        assert!(send.input_schema["properties"].get("campId").is_none());
+        assert!(
+            send.errors
+                .iter()
+                .all(|error| error.code != "message.camp_mismatch")
+        );
+        assert!(
+            send.errors
+                .iter()
+                .any(|error| error.code == "builtin_tool.idempotency_conflict")
+        );
     }
 }

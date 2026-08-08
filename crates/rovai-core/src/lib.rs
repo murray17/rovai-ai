@@ -3,6 +3,7 @@ pub mod agent_identity;
 pub mod agent_profile;
 pub mod agent_runtime_adapter;
 pub mod brand;
+pub mod builtin_tool_cli_output;
 pub mod builtin_tool_transport;
 pub mod camp_attachment;
 pub mod camp_content;

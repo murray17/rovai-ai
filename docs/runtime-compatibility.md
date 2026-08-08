@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-08-06
+last_updated: 2026-08-08
 ---
 
 # Agent Runtime 兼容性清单
@@ -19,29 +19,30 @@ Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP
 
 ## 当前 Built-in CLI 正式接入
 
-2026-08-06 的 `pnpm smoke:builtin-cli` 在同一轮本机联合矩阵中创建九个真实模型 AgentRun。
-每个 Runtime 都完成 catalog discovery/describe、全部十二项真实调用、一次 stale-version 冲突与
-`refresh_then_decide` recovery、完成后的旧 lease fencing，以及后续 Run 的新 lease。每个完整
-Run 都观察到覆盖十二个 canonical operation 的 13 条 Core Evidence；没有使用 mock、fixture
-调用或单纯 Deep Probe 代替执行。
+2026-08-08 的 v0.46 `pnpm smoke:builtin-cli` 在同一轮本机联合矩阵中创建九个真实模型
+AgentRun。每个 Runtime 都只使用固定业务命令，完成全部十二项真实调用、旧 send flag/JSON
+拒绝、一次 stale-version 冲突与 `refresh_then_decide` recovery、完整 Core Envelope Evidence、
+完成后的旧 lease fencing，以及后续 Run 的新 lease。每个完整 Run 都观察到覆盖十二个 canonical
+operation 的 13 条 Core Evidence；没有使用 Agent-facing catalog discovery、mock、fixture 调用
+或单纯 Deep Probe 代替执行。
 
 | Runtime | 验证版本 / 模型 | 12 项操作 | 冲突 | 初始/恢复 lease fence | continuation | 当前结论 |
 |---|---|---:|---|---|---|---|
-| Codex CLI | `0.146.1` / `gpt-5.3-codex-spark` | 12/12 | pass | pass / pass | logical + native | pass |
+| Codex CLI | `0.146.1` / `gpt-5.6-sol` | 12/12 | pass | pass / pass | logical + native | pass |
 | OpenCode | `1.18.10` / `opencode/big-pickle` | 12/12 | pass | pass / pass | logical + native | pass |
 | GitHub Copilot | `1.0.78` / `claude-sonnet-5` | 12/12 | pass | pass / pass | logical + native | pass |
 | Claude Code | `2.1.220` / runtime default | 12/12 | pass | pass / pass | logical + native | pass |
-| Antigravity | `1.1.10` / runtime default | 12/12 | pass | pass / pass | logical; one-shot native | pass |
+| Antigravity | `1.1.11` / runtime default | 12/12 | pass | pass / pass | logical; one-shot native | pass |
 | Kiro | `2.16.1` / `auto` | 12/12 | pass | pass / pass | logical; one-shot native | pass |
 | Qoder | `1.1.14` / `deepseek/deepseek-v4-flash-pg` | 12/12 | pass | pass / pass | logical + native | pass |
 | CodeBuddy | `2.132.0` / `deepseek-v4-flash` | 12/12 | pass | pass / pass | logical + native | pass |
 | Qwen Code | `0.21.5` / `deepseek-v4-flash(openai)` | 12/12 | pass | pass / pass | logical + native | pass |
 
-Codex 本机账户的默认模型在验收时触发配额限制；验证仍在完全相同的 Codex Runtime、CLI、
-环境注入和 Core 路径内完成，仅选择了账户中可用的 `gpt-5.3-codex-spark`。因此该事实不降低
-transport 结论，也不把特定模型固定为产品要求。
+九个 Runtime 的 13 个 Envelope/Projection 样本分别观测到 49.0%–49.4% 字节缩减；这是
+observability metric，不是兼容性或发布门槛。transport-independent response-loss 与
+`outcome_indeterminate` 由确定性 CLI 测试覆盖。
 
-字段级合同以 [Built-in Tool Transport v1](contracts/builtin-tool-transport-v1.md) 为唯一真源，
+字段级合同以 [Built-in Tool Transport v3](contracts/builtin-tool-transport-v3.md) 为唯一真源，
 调用结构以 [Built-in Tool Runtime Architecture](architecture/builtin-tool-runtime.md) 为准。
 
 ## External MCP 兼容性
@@ -96,8 +97,8 @@ External MCP Library、Assignment 与 Runtime-native Projection 保持独立。v
 
 ## 后续准入规则
 
-- 新增 Runtime 的 built-in tool 准入要求真实模型能执行 bundled `rovai` CLI，并通过完整
-  catalog、十二项调用、冲突 recovery、Evidence、lease fencing 与后续 Run 验证；具有 shell/
+- 新增 Runtime 的 built-in tool 准入要求真实模型能执行 bundled `rovai` CLI，并通过固定命令、
+  十二项调用、旧输入负向、冲突 recovery、Envelope Evidence、lease fencing 与后续 Run 验证；具有 shell/
   bash 能力但尚未通过矩阵，只能视为待验证，不能以理论支持替代证据。
 - Runtime 不得通过内置 MCP、native Plugin、stdio Bridge 或 ambient MCP 获得 Rovai built-in
   operations；也不得在 CLI 失败时静默回退到旧运输。

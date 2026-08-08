@@ -2,6 +2,7 @@ use anyhow::{Result, bail};
 use serde_json::{Value, json};
 
 use crate::{
+    builtin_tool_cli_output::validate_schema,
     camp_history::{
         CAMP_LIST_TOOL_NAME, CAMP_READ_TOOL_NAME, CAMP_SEARCH_TOOL_NAME, CampHistoryService,
         CampListInput, CampReadInput, CampSearchInput, HISTORY_SEARCH_TOOL_NAME,
@@ -24,6 +25,12 @@ use crate::{
 };
 
 pub fn validate_builtin_tool_input(canonical_name: &str, input: &Value) -> Result<()> {
+    let definition = builtin_tool_definitions()
+        .into_iter()
+        .find(|definition| definition["name"].as_str() == Some(canonical_name))
+        .ok_or_else(|| anyhow::anyhow!("unknown built-in operation: {canonical_name}"))?;
+    validate_schema(input, &definition["inputSchema"])
+        .map_err(|_| anyhow::anyhow!("{canonical_name} input does not match its schema"))?;
     let valid = match canonical_name {
         CAMP_MESSAGE_SEND_TOOL_NAME => {
             serde_json::from_value::<CampMessageSendInput>(input.clone()).map(|_| ())
@@ -592,5 +599,39 @@ mod tests {
                 .iter()
                 .all(|name| !name.starts_with("context."))
         );
+    }
+
+    #[test]
+    fn public_send_has_no_agent_supplied_camp_scope() {
+        let send = builtin_tool_definitions()
+            .into_iter()
+            .find(|definition| definition["name"] == CAMP_MESSAGE_SEND_TOOL_NAME)
+            .unwrap();
+        assert_eq!(send["inputSchema"]["required"], json!(["body"]));
+        assert!(send["inputSchema"]["properties"].get("campId").is_none());
+        assert!(
+            validate_builtin_tool_input(
+                CAMP_MESSAGE_SEND_TOOL_NAME,
+                &json!({"campId": "camp-legacy", "body": "hello"})
+            )
+            .is_err()
+        );
+        validate_builtin_tool_input(CAMP_MESSAGE_SEND_TOOL_NAME, &json!({"body": "hello"}))
+            .unwrap();
+    }
+
+    #[test]
+    fn ipc_input_validation_enforces_catalog_bounds_before_domain_dispatch() {
+        assert!(
+            validate_builtin_tool_input(TEAM_LIST_TASKS_TOOL_NAME, &json!({"statuses": []}))
+                .is_err()
+        );
+        assert!(
+            validate_builtin_tool_input(TEAM_LIST_TASKS_TOOL_NAME, &json!({"limit": 101})).is_err()
+        );
+        assert!(
+            validate_builtin_tool_input(CAMP_MESSAGE_SEND_TOOL_NAME, &json!({"body": ""})).is_err()
+        );
+        validate_builtin_tool_input(TEAM_LIST_TASKS_TOOL_NAME, &json!({"limit": 100})).unwrap();
     }
 }

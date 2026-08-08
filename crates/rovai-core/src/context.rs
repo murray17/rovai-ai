@@ -6745,9 +6745,17 @@ mod tests {
                 .unwrap()
                 .unwrap();
         let charter = build_session_charter(&snapshot);
-        assert!(charter.contains("Rovai built-in operations are local CLI commands, never MCP"));
-        assert!(charter.contains("`rovai tool list`"));
+        assert!(BUILTIN_CLI_CHARTER.len() <= 2_048);
+        assert!(
+            charter.contains("Rovai built-in operations are fixed local CLI commands, never MCP")
+        );
+        assert!(charter.contains("Agent-facing discovery commands are unavailable"));
+        assert!(!charter.contains("tool list"));
+        assert!(!charter.contains("tool describe"));
         assert!(charter.contains("`rovai send`"));
+        assert!(charter.contains("current authenticated AgentRun Camp"));
+        assert!(!charter.contains("campId"));
+        assert!(!charter.contains("--camp-id"));
         assert!(!charter.contains("`rovai member call`"));
         assert!(charter.contains("`--input-file <path>`"));
         assert!(charter.contains("Every eligible member can invoke every published command"));

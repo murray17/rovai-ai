@@ -357,24 +357,30 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
             "itemId": payload.get("itemId"),
             "patch": payload.get("patch").or_else(|| payload.get("delta")),
         }),
-        "runtime.action" => serde_json::json!({
-            "toolCallId": payload.get("toolCallId"),
-            "status": payload.get("status"),
-            "kind": payload.get("kind"),
-            "toolName": payload.get("toolName"),
-            "title": payload.get("title"),
-            "sourceAuthority": payload.get("sourceAuthority"),
-            "canonicalTool": payload.get("canonicalTool"),
-            "authorizationDecision": payload.get("authorizationDecision"),
-            "locationCount": payload.get("locationCount"),
-            "input": payload.get("input"),
-            "output": payload.get("output"),
-            "rawInputDigest": payload.get("rawInputDigest"),
-            "rawOutputDigest": payload.get("rawOutputDigest"),
-            "errorCode": payload.get("errorCode"),
-            "idempotentReplay": payload.get("idempotentReplay"),
-            "receiptId": payload.get("receiptId"),
-        }),
+        "runtime.action" => {
+            let mut normalized = serde_json::json!({
+                "toolCallId": payload.get("toolCallId"),
+                "status": payload.get("status"),
+                "kind": payload.get("kind"),
+                "toolName": payload.get("toolName"),
+                "title": payload.get("title"),
+                "sourceAuthority": payload.get("sourceAuthority"),
+                "canonicalTool": payload.get("canonicalTool"),
+                "authorizationDecision": payload.get("authorizationDecision"),
+                "locationCount": payload.get("locationCount"),
+                "input": payload.get("input"),
+                "output": payload.get("output"),
+                "rawInputDigest": payload.get("rawInputDigest"),
+                "rawOutputDigest": payload.get("rawOutputDigest"),
+                "errorCode": payload.get("errorCode"),
+                "idempotentReplay": payload.get("idempotentReplay"),
+                "receiptId": payload.get("receiptId"),
+            });
+            if let Some(core_envelope) = payload.get("coreEnvelope") {
+                normalized["coreEnvelope"] = core_envelope.clone();
+            }
+            normalized
+        }
         "activity.started" | "activity.completed" => {
             let item = payload.get("item").unwrap_or(&Value::Null);
             serde_json::json!({
@@ -799,6 +805,18 @@ mod tests {
                 "errorCode": "team_tool.execution_budget_exhausted",
                 "idempotentReplay": true,
                 "receiptId": "receipt-1",
+                "coreEnvelope": {
+                    "contractVersion": 1,
+                    "ok": false,
+                    "operation": "camp.message.send",
+                    "requestId": "7b5db24c-4a43-4cab-9217-d982b08f7691",
+                    "receipt": "sha256:full-envelope-receipt",
+                    "error": {
+                        "code": "message.execution_budget_exceeded",
+                        "message": "budget exhausted",
+                        "recovery": "fix_input"
+                    }
+                },
                 "bindingCredential": "must-not-persist",
                 "rawInput": { "content": "must-not-persist" }
             }),
@@ -811,6 +829,10 @@ mod tests {
         assert_eq!(normalized["receiptId"], "receipt-1");
         assert_eq!(normalized["sourceAuthority"], "core");
         assert_eq!(normalized["canonicalTool"], "camp.message.send");
+        assert_eq!(
+            normalized["coreEnvelope"]["requestId"],
+            "7b5db24c-4a43-4cab-9217-d982b08f7691"
+        );
         let encoded = serde_json::to_string(&normalized).unwrap();
         assert!(!encoded.contains("bindingCredential"));
         assert!(!encoded.contains("must-not-persist"));
