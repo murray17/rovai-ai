@@ -23,6 +23,14 @@ superseded_by: null
 >
 > [ADR-0129](0129-deterministic-bounded-raw-public-context-delivery.md) 局部替代本文的
 > Conversation Summary、Camp Cursor 与公共消息上下文组成条款；其余协作与准入语义继续有效。
+>
+> [ADR-0136](0136-durable-task-v2-responsibility-and-coordination-authority.md) 局部替代本文的
+> Lightweight Task shape、Default Lead Task 只读、Task assignment 所用的 conjoined
+> current-membership 术语、unavailable Assignee 修复与 Task 相关 Presence/removal 条款；
+> Current CampMember 现在只表示当前有效 membership，需要 `present` 的操作必须另行检查。
+> [ADR-0137](0137-one-time-task-linked-responsibility-admission.md) 局部
+> 替代 responsibility acceptance 后按 Task 当前状态/负责人继续阻止 dispatch/start 的条款。
+> 本文其他 Camp、routing、Presence 与独立 execution admission 条款继续有效。
 
 ## Context
 

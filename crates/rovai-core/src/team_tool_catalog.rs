@@ -18,9 +18,9 @@ use crate::{
     },
     message_delivery::CAMP_MESSAGE_SEND_TOOL_NAME,
     team_tool::{
-        CampMessageSendInput, TEAM_CREATE_TASK_TOOL_NAME, TEAM_LIST_TASKS_TOOL_NAME,
-        TEAM_UPDATE_TASK_TOOL_NAME, TeamCreateTaskInput, TeamListTasksInput, TeamToolService,
-        TeamUpdateTaskInput,
+        CampMessageSendInput, TEAM_CREATE_TASK_TOOL_NAME, TEAM_GET_TASK_TOOL_NAME,
+        TEAM_LIST_TASKS_TOOL_NAME, TEAM_UPDATE_TASK_TOOL_NAME, TeamCreateTaskInput,
+        TeamGetTaskInput, TeamListTasksInput, TeamToolService, TeamUpdateTaskInput,
     },
 };
 
@@ -37,6 +37,9 @@ pub fn validate_builtin_tool_input(canonical_name: &str, input: &Value) -> Resul
         }
         TEAM_CREATE_TASK_TOOL_NAME => {
             serde_json::from_value::<TeamCreateTaskInput>(input.clone()).map(|_| ())
+        }
+        TEAM_GET_TASK_TOOL_NAME => {
+            serde_json::from_value::<TeamGetTaskInput>(input.clone()).map(|_| ())
         }
         TEAM_UPDATE_TASK_TOOL_NAME => {
             serde_json::from_value::<TeamUpdateTaskInput>(input.clone()).map(|_| ())
@@ -303,24 +306,27 @@ fn task_list_success_schema() -> Value {
                     "type": "object",
                     "additionalProperties": false,
                     "required": [
-                        "id", "campId", "title", "description", "status",
-                        "assigneeAgentId", "createdByType", "createdById",
-                        "sourceAgentRunId", "version", "createdAt", "updatedAt",
-                        "closedAt", "availableActions"
+                        "taskId", "title", "status", "assigneeAgentId",
+                        "createdByType", "createdById", "descriptionPreview",
+                        "descriptionTruncated", "acceptanceCriteriaCount",
+                        "statusNotePreview", "statusNoteTruncated", "version",
+                        "createdAt", "updatedAt", "availableActions"
                     ],
                     "properties": {
-                        "id": {"type": "string"},
-                        "campId": {"type": "string"},
+                        "taskId": {"type": "string"},
                         "title": {"type": "string"},
-                        "description": {"type": "string"},
                         "status": {
                             "type": "string",
-                            "enum": ["pending", "in_progress", "completed", "cancelled"]
+                            "enum": ["pending", "in_progress", "blocked", "completed", "cancelled"]
                         },
                         "assigneeAgentId": {"type": ["string", "null"]},
                         "createdByType": {"type": "string"},
                         "createdById": {"type": "string"},
-                        "sourceAgentRunId": {"type": ["string", "null"]},
+                        "descriptionPreview": {"type": "string", "maxLength": 240},
+                        "descriptionTruncated": {"type": "boolean"},
+                        "acceptanceCriteriaCount": {"type": "integer", "minimum": 0, "maximum": 12},
+                        "statusNotePreview": {"type": ["string", "null"], "maxLength": 240},
+                        "statusNoteTruncated": {"type": "boolean"},
                         "version": {"type": "integer", "minimum": 1},
                         "createdAt": {"type": "string", "format": "date-time"},
                         "updatedAt": {"type": "string", "format": "date-time"},
@@ -336,6 +342,65 @@ fn task_list_success_schema() -> Value {
             "nextCursor": {"type": ["string", "null"]},
             "truncated": {"type": "boolean"}
         }
+    })
+}
+
+fn task_detail_success_schema(include_changed: bool) -> Value {
+    let mut required = vec![
+        "taskId",
+        "campId",
+        "title",
+        "description",
+        "acceptanceCriteria",
+        "status",
+        "assigneeAgentId",
+        "blockedReason",
+        "completionSummary",
+        "cancelReason",
+        "createdByType",
+        "createdById",
+        "sourceAgentRunId",
+        "closedByType",
+        "closedById",
+        "closedByAgentRunId",
+        "version",
+        "createdAt",
+        "updatedAt",
+        "closedAt",
+        "availableActions",
+    ];
+    if include_changed {
+        required.push("changed");
+    }
+    let mut properties = json!({
+        "taskId": {"type": "string"},
+        "campId": {"type": "string"},
+        "title": {"type": "string"},
+        "description": {"type": "string", "maxLength": 8000},
+        "acceptanceCriteria": {"type": "array", "maxItems": 12, "items": {"type": "string"}},
+        "status": {"type": "string", "enum": ["pending", "in_progress", "blocked", "completed", "cancelled"]},
+        "assigneeAgentId": {"type": ["string", "null"]},
+        "blockedReason": {"type": ["string", "null"]},
+        "completionSummary": {"type": ["string", "null"]},
+        "cancelReason": {"type": ["string", "null"]},
+        "createdByType": {"type": "string", "enum": ["user", "agent"]},
+        "createdById": {"type": "string"},
+        "sourceAgentRunId": {"type": ["string", "null"]},
+        "closedByType": {"type": ["string", "null"]},
+        "closedById": {"type": ["string", "null"]},
+        "closedByAgentRunId": {"type": ["string", "null"]},
+        "version": {"type": "integer", "minimum": 1},
+        "createdAt": {"type": "string", "format": "date-time"},
+        "updatedAt": {"type": "string", "format": "date-time"},
+        "closedAt": {"type": ["string", "null"], "format": "date-time"},
+        "availableActions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "enum": ["update", "claim"]}}
+    });
+    if include_changed {
+        properties["changed"] = json!({"type": "boolean"});
+    }
+    json!({
+        "type": "object", "additionalProperties": false,
+        "required": required, "properties": properties
     })
 }
 
@@ -446,30 +511,21 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
             "title": "Create a durable Task",
             "description": "Create a long-lived responsibility. Assignment records ownership but does not notify or wake the assignee.",
             "inputSchema": TeamToolService::create_task_input_schema(),
-            "outputSchema": {
-                "type": "object", "additionalProperties": false,
-                "required": ["taskId", "status", "version"],
-                "properties": {
-                    "taskId": {"type": "string"}, "status": {"const": "pending"},
-                    "version": {"type": "integer"}
-                }
-            }
+            "outputSchema": task_detail_success_schema(false)
+        }),
+        json!({
+            "name": TEAM_GET_TASK_TOOL_NAME,
+            "title": "Get a durable Task",
+            "description": "Read one full visible Task by stable taskId.",
+            "inputSchema": TeamToolService::get_task_input_schema(),
+            "outputSchema": task_detail_success_schema(false)
         }),
         json!({
             "name": TEAM_UPDATE_TASK_TOOL_NAME,
             "title": "Update a durable Task",
             "description": "Atomically edit an authorized non-terminal Task using its current version. A successful update does not wake an assignee.",
             "inputSchema": TeamToolService::update_task_input_schema(),
-            "outputSchema": {
-                "type": "object", "additionalProperties": false,
-                "required": ["taskId", "status", "assigneeAgentId", "version"],
-                "properties": {
-                    "taskId": {"type": "string"},
-                    "status": {"type": "string", "enum": ["pending", "in_progress", "completed", "cancelled"]},
-                    "assigneeAgentId": {"type": ["string", "null"]},
-                    "version": {"type": "integer"}
-                }
-            }
+            "outputSchema": task_detail_success_schema(true)
         }),
         json!({
             "name": TEAM_LIST_TASKS_TOOL_NAME,

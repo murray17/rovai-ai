@@ -13,8 +13,9 @@ use crate::{
         CAMP_LIST_TOOL_NAME, CAMP_READ_TOOL_NAME, CAMP_SEARCH_TOOL_NAME, HISTORY_SEARCH_TOOL_NAME,
     },
     collaboration::{
-        CollaborationService, CreateTaskCommand, TaskAssigneeFilter, TaskAssigneeUpdate,
-        TaskListPage, TaskListQuery, TaskStatus, UpdateTaskCommand, append_domain_event,
+        CollaborationService, CreateTaskCommand, TaskAcceptanceCriteriaUpdate, TaskAssigneeFilter,
+        TaskAssigneeUpdate, TaskDetail, TaskListPage, TaskListQuery, TaskStatus, UpdateTaskCommand,
+        append_domain_event,
     },
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
@@ -29,11 +30,13 @@ use crate::{
 };
 
 pub const TEAM_CREATE_TASK_TOOL_NAME: &str = "team.create_task";
+pub const TEAM_GET_TASK_TOOL_NAME: &str = "team.get_task";
 pub const TEAM_UPDATE_TASK_TOOL_NAME: &str = "team.update_task";
 pub const TEAM_LIST_TASKS_TOOL_NAME: &str = "team.list_tasks";
-pub const TEAM_TOOL_NAMES: [&str; 12] = [
+pub const TEAM_TOOL_NAMES: [&str; 13] = [
     CAMP_MESSAGE_SEND_TOOL_NAME,
     TEAM_CREATE_TASK_TOOL_NAME,
+    TEAM_GET_TASK_TOOL_NAME,
     TEAM_UPDATE_TASK_TOOL_NAME,
     TEAM_LIST_TASKS_TOOL_NAME,
     CAMP_LIST_TOOL_NAME,
@@ -62,13 +65,21 @@ pub struct CampMessageSendInput {
     pub task_id: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TeamCreateTaskInput {
     pub title: String,
     #[serde(default)]
     pub description: String,
+    #[serde(default)]
+    pub acceptance_criteria: Vec<String>,
     pub assignee_agent_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TeamGetTaskInput {
+    pub task_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -92,18 +103,24 @@ where
     })
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TeamUpdateTaskInput {
     pub task_id: String,
     pub expected_version: i64,
     pub title: Option<String>,
     pub description: Option<String>,
+    pub acceptance_criteria: Option<Vec<String>>,
+    #[serde(default)]
+    pub clear_acceptance_criteria: bool,
     pub status: Option<TaskStatus>,
     #[serde(default, deserialize_with = "deserialize_nullable_input")]
     pub assignee_agent_id: NullableInput<String>,
     #[serde(default)]
     pub clear_assignee: bool,
+    pub blocked_reason: Option<String>,
+    pub completion_summary: Option<String>,
+    pub cancel_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -447,14 +464,29 @@ impl TeamToolService {
                 },
                 "description": {
                     "type": "string",
-                    "maxLength": 20000,
+                    "maxLength": 8000,
                     "description": "Optional durable scope, constraints, or completion notes."
+                },
+                "acceptanceCriteria": {
+                    "type": "array", "maxItems": 12, "uniqueItems": true,
+                    "items": {"type": "string", "minLength": 1, "maxLength": 500}
                 },
                 "assigneeAgentId": {
                     "type": "string",
                     "minLength": 1,
                     "description": "Active Camp member to own the Task. Omit for the shared unassigned pool."
                 }
+            }
+        })
+    }
+
+    pub fn get_task_input_schema() -> Value {
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["taskId"],
+            "properties": {
+                "taskId": {"type": "string", "minLength": 1}
             }
         })
     }
@@ -469,10 +501,15 @@ impl TeamToolService {
                 "taskId": {"type": "string", "minLength": 1},
                 "expectedVersion": {"type": "integer", "minimum": 1},
                 "title": {"type": "string", "minLength": 1, "maxLength": 160},
-                "description": {"type": "string", "maxLength": 20000},
+                "description": {"type": "string", "maxLength": 8000},
+                "acceptanceCriteria": {
+                    "type": "array", "minItems": 1, "maxItems": 12, "uniqueItems": true,
+                    "items": {"type": "string", "minLength": 1, "maxLength": 500}
+                },
+                "clearAcceptanceCriteria": {"type": "boolean"},
                 "status": {
                     "type": "string",
-                    "enum": ["pending", "in_progress", "completed", "cancelled"]
+                    "enum": ["pending", "in_progress", "blocked", "completed", "cancelled"]
                 },
                 "assigneeAgentId": {
                     "type": "string",
@@ -482,7 +519,10 @@ impl TeamToolService {
                 "clearAssignee": {
                     "type": "boolean",
                     "description": "Set true to release the Task into the unassigned pool. Must not be combined with assigneeAgentId."
-                }
+                },
+                "blockedReason": {"type": "string", "minLength": 1, "maxLength": 4000},
+                "completionSummary": {"type": "string", "minLength": 1, "maxLength": 4000},
+                "cancelReason": {"type": "string", "minLength": 1, "maxLength": 4000}
             }
         })
     }
@@ -495,10 +535,11 @@ impl TeamToolService {
                 "statuses": {
                     "type": "array",
                     "minItems": 1,
+                    "maxItems": 5,
                     "uniqueItems": true,
                     "items": {
                         "type": "string",
-                        "enum": ["pending", "in_progress", "completed", "cancelled"]
+                        "enum": ["pending", "in_progress", "blocked", "completed", "cancelled"]
                     }
                 },
                 "assigneeAgentId": {
@@ -1046,10 +1087,63 @@ impl TeamToolService {
                 camp_id: sender.camp_id,
                 title: invocation.input.title.clone(),
                 description: invocation.input.description.clone(),
+                acceptance_criteria: invocation.input.acceptance_criteria.clone(),
                 assignee_agent_id: invocation.input.assignee_agent_id.clone(),
             },
         };
         CollaborationService::default().create_task(database, &envelope)
+    }
+
+    pub fn get_task(
+        &self,
+        database: &Database,
+        invocation: &TeamTaskToolInvocation<TeamGetTaskInput>,
+    ) -> Result<TaskDetail> {
+        self.get_task_authorized(database, invocation, None)
+    }
+
+    pub fn get_task_attested(
+        &self,
+        database: &Database,
+        invocation: &TeamTaskToolInvocation<TeamGetTaskInput>,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> Result<TaskDetail> {
+        self.get_task_authorized(database, invocation, Some((agent_run_id, execution_epoch)))
+    }
+
+    fn get_task_authorized(
+        &self,
+        database: &Database,
+        invocation: &TeamTaskToolInvocation<TeamGetTaskInput>,
+        attested_run: Option<(&str, i64)>,
+    ) -> Result<TaskDetail> {
+        validate_task_invocation_identity(invocation)?;
+        if invocation.input.task_id.trim().is_empty() {
+            return Err(invocation_error(
+                "team_tool.invalid_input",
+                "taskId must not be empty",
+            ));
+        }
+        let supplied_credential_digest = credential_digest(&invocation.binding_credential);
+        let sender = resolve_sender_identity(
+            database.connection(),
+            &invocation.native_binding_id,
+            &supplied_credential_digest,
+            attested_run,
+        )?;
+        CollaborationService::default()
+            .get_visible_task(
+                database,
+                &sender.camp_id,
+                &invocation.input.task_id,
+                &ActorRef::Agent {
+                    agent_id: sender.agent_id,
+                    source_agent_run_id: sender.agent_run_id,
+                },
+                Some(sender.execution_epoch),
+            )?
+            .ok_or_else(|| invocation_error("task.not_found", "Task does not exist"))
     }
 
     pub fn update_task(
@@ -1092,16 +1186,40 @@ impl TeamToolService {
                 "clearAssignee cannot be combined with assigneeAgentId",
             ));
         }
+        if matches!(invocation.input.assignee_agent_id, NullableInput::Null) {
+            return Err(invocation_error(
+                "team_tool.invalid_input",
+                "assigneeAgentId must not be null; use clearAssignee",
+            ));
+        }
+        if invocation.input.clear_acceptance_criteria
+            && invocation.input.acceptance_criteria.is_some()
+        {
+            return Err(invocation_error(
+                "team_tool.invalid_input",
+                "clearAcceptanceCriteria cannot be combined with acceptanceCriteria",
+            ));
+        }
         let assignee = match (
             &invocation.input.assignee_agent_id,
             invocation.input.clear_assignee,
         ) {
             (_, true) => TaskAssigneeUpdate::Clear,
             (NullableInput::Missing, false) => TaskAssigneeUpdate::Unchanged,
-            (NullableInput::Null, false) => TaskAssigneeUpdate::Clear,
+            (NullableInput::Null, false) => unreachable!("null assignee rejected above"),
             (NullableInput::Value(agent_id), false) => TaskAssigneeUpdate::Assign {
                 agent_id: agent_id.clone(),
             },
+        };
+        let acceptance_criteria = match (
+            invocation.input.acceptance_criteria.as_ref(),
+            invocation.input.clear_acceptance_criteria,
+        ) {
+            (_, true) => TaskAcceptanceCriteriaUpdate::Clear,
+            (Some(items), false) => TaskAcceptanceCriteriaUpdate::Replace {
+                items: items.clone(),
+            },
+            (None, false) => TaskAcceptanceCriteriaUpdate::Unchanged,
         };
         let envelope = CommandEnvelope {
             command_id: team_command_id(
@@ -1121,8 +1239,12 @@ impl TeamToolService {
                 expected_version: invocation.input.expected_version,
                 title: invocation.input.title.clone(),
                 description: invocation.input.description.clone(),
+                acceptance_criteria,
                 status: invocation.input.status,
                 assignee,
+                blocked_reason: invocation.input.blocked_reason.clone(),
+                completion_summary: invocation.input.completion_summary.clone(),
+                cancel_reason: invocation.input.cancel_reason.clone(),
             },
         };
         CollaborationService::default().update_task(database, &envelope)
@@ -1572,6 +1694,7 @@ mod tests {
                             title: "Collaborative task".to_string(),
                             description: "Exercise A2A execution".to_string(),
                             assignee_agent_id: Some("agent_1".to_string()),
+                            ..Default::default()
                         },
                     ),
                 )
@@ -2275,6 +2398,7 @@ mod tests {
                 title: "Persistent follow-up".to_string(),
                 description: "Track this across runs".to_string(),
                 assignee_agent_id: None,
+                ..Default::default()
             },
         );
         let created = service
@@ -2297,6 +2421,7 @@ mod tests {
                 title: "Different payload".to_string(),
                 description: String::new(),
                 assignee_agent_id: None,
+                ..Default::default()
             },
         );
         assert!(
@@ -2322,7 +2447,7 @@ mod tests {
                 ),
             )
             .unwrap();
-        assert!(listed.tasks.iter().any(|task| task.task.id == task_id));
+        assert!(listed.tasks.iter().any(|task| task.task_id == task_id));
         let update_invocation = fixture.task_invocation(
             "claim-durable-task",
             TeamUpdateTaskInput {
@@ -2333,6 +2458,7 @@ mod tests {
                 status: Some(TaskStatus::InProgress),
                 assignee_agent_id: NullableInput::Value("agent_1".to_string()),
                 clear_assignee: false,
+                ..Default::default()
             },
         );
         let updated = service
@@ -2371,6 +2497,7 @@ mod tests {
                         title: "Muwa private assignment".to_string(),
                         description: String::new(),
                         assignee_agent_id: Some("agent_2".to_string()),
+                        ..Default::default()
                     },
                 ),
             )
@@ -2396,7 +2523,7 @@ mod tests {
                 ),
             )
             .unwrap();
-        assert!(!listed.tasks.iter().any(|task| task.task.id == hidden_id));
+        assert!(!listed.tasks.iter().any(|task| task.task_id == hidden_id));
         let event_count_after: i64 = fixture
             .database
             .connection()
@@ -2440,6 +2567,7 @@ mod tests {
                 title: "Must not exist".to_string(),
                 description: String::new(),
                 assignee_agent_id: None,
+                ..Default::default()
             },
         );
         let allowed = service
@@ -2466,6 +2594,7 @@ mod tests {
                 status: None,
                 assignee_agent_id: NullableInput::Missing,
                 clear_assignee: false,
+                ..Default::default()
             },
         );
         let stale = service

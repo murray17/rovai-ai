@@ -145,8 +145,8 @@ The user-controlled lifecycle of one AgentProfile: `present`, `away`, or termina
 _Avoid_: Runtime readiness, online status, Camp membership status, active Agent
 
 **Permanent Member Removal**:
-The irreversible transition of one AgentProfile to `removed`, excluding it from the member directory and every future execution, routing, assignment, and projection surface while retaining its Agent UUID, Agent ID, legacy handle, avatar, Runtime configuration, Memory, Camp relationships, Tasks, Runs, and history. Historical identity remains renderable but not navigable, and the retained Agent ID is never reused.
-_Avoid_: data deletion, Memory Forget, profile erasure, reversible archive
+The irreversible transition of one AgentProfile to `removed`, excluding it from the member directory and every future execution, routing, assignment, and active projection surface while retaining historical identity and records. It is rejected while that Profile owns any `queued`, `running`, or `waiting` AgentRun; otherwise one managed transaction ends all of its Current CampMemberships through the ordinary membership-ending domain path, releases every non-terminal Task assignment, reconciles affected Default Leads, and only then marks the Profile removed. Any failure rolls back the entire cascade. Historical identity remains renderable but not navigable, and the retained Agent ID is never reused.
+_Avoid_: data deletion, manual per-Camp removal, partial removal cascade, Memory Forget, profile erasure, reversible archive
 
 **Member Order**:
 The user-controlled global ordering of manageable AgentProfiles used for presentation, new-Camp initial Lead selection, and future repair of an invalid existing Default Lead. Reordering never replaces a currently valid Lead and does not express authority or capability.
@@ -384,6 +384,14 @@ _Avoid_: provisional capacity, authority quota, user Memory capacity, automatic 
 The persistent membership relationship that associates an AgentProfile with one Camp and carries Camp-specific permissions. It does not duplicate Member Presence; away and removed identities remain historically related to their Camps while being ineligible for current participation. Membership may still change through the existing recoverable join, leave, and rejoin lifecycle, but adding or reactivating a CampMember never eagerly creates a Conversation; an existing Conversation remains available for that AgentProfile's continuity, while a missing one is created only at a later admitted execution targeting that member.
 _Avoid_: AgentProfile, Member, Member Presence, eager Conversation allocation
 
+**Current CampMember**:
+A CampMember whose membership in one Camp is currently effective. It is independent of Member Presence: an away AgentProfile may remain a Current CampMember, while ending the membership removes that Camp-scoped participation relationship.
+_Avoid_: active CampMember, present Member, Executable Assignee
+
+**Executable Assignee**:
+A Task Assignee who is both a Current CampMember and has `present` Member Presence. It is an identity eligibility condition for admitting new Task-linked execution, not a claim about Runtime Readiness or immediate process availability.
+_Avoid_: active assignee, Runtime-ready assignee, Current CampMember
+
 **Initial Camp Membership**:
 The non-empty, user-selected set of present AgentProfiles that become CampMembers when a New Conversation Draft's creation is accepted. An unselected Member is outside that Camp rather than merely omitted from its first execution. The creation UI prevents removing the final selected member and explains that at least one Member must remain, preserving a valid Default Lead candidate. v0.22 configures this initial set but does not add a post-creation Camp membership editor or promise one in the creation interface.
 _Avoid_: First-message recipients, all present Members, Project team, post-creation membership UI
@@ -401,8 +409,12 @@ A reserved Camp Collaboration Mode in which only one Default Lead converses dire
 _Avoid_: Peer Collaboration, multiple user-facing Leads, Runtime fallback
 
 **Default Lead**:
-The present CampMember persisted as the destination for unaddressed execution requests and as the Camp-wide coordination reader. Runtime configuration and Readiness do not determine Lead validity; failed execution never silently falls back to another member. An invalid Lead is repaired idempotently when entering the Camp using the latest Member Order.
+The present CampMember persisted as the destination for unaddressed execution requests, the Camp-wide coordination reader, and the holder of Task Coordination Authority. Runtime configuration and Readiness do not determine Lead validity; failed execution never silently falls back to another member, the role grants no general administrative authority outside its explicit Camp responsibilities, and an invalid Lead is repaired idempotently when entering the Camp using the latest Member Order.
 _Avoid_: Task Assignee, universal administrator, Native Session owner, Runtime fallback target
+
+**Task Coordination Authority**:
+The Camp-scoped authority held by the User and Default Lead to update any non-terminal Task, including ending the responsibility through cancellation. It neither grants authority outside the Task domain nor changes the uniform availability of Built-in Task operations to eligible Members.
+_Avoid_: universal administrator, Task ownership, Member Capability, operation allowlist
 
 **Initial Default Lead Selection**:
 The required selection of one Initial Camp Membership member as the Camp's Default Lead. The creation UI initially selects the first Runtime Ready member in stable Member Order, or the first selected member when none is Ready. Every selected member remains eligible regardless of Runtime Readiness; Readiness affects later execution admission rather than Lead identity. A manually selected Lead remains selected while included in Initial Camp Membership; removing that member automatically selects the first remaining member in stable Member Order as the replacement Lead.
@@ -413,8 +425,28 @@ One AgentProfile's long-lived private logical continuity inside one Camp, indepe
 _Avoid_: Camp, Native Session, AgentRun, public chat transcript, external Runtime state container, physical filesystem isolation
 
 **Task**:
-An optional durable responsibility item inside one Camp, used when work must remain visible across messages, AgentRuns, or member coordination. `completed` records an authorized actor's declaration of completion, not verification by Rovai-ai Core. Tasks do not form a dependency DAG or a Core-enforced workflow. An addressed send may explicitly link one non-terminal Task assigned to its recipient at acceptance, but the frozen historical link neither transfers responsibility nor proves completion. Later Task completion, cancellation, or reassignment never cancels, fails, retargets, or wakes that accepted Message Delivery; its Run may observe the latest collaboration state and act accordingly. An A2A target Run never inherits the source Run's Task association. A Task may describe a filesystem path as ordinary semantic content, but it does not own or structurally transfer an AgentRun working directory.
+An optional durable responsibility item inside one Camp, used when work must remain visible across messages, AgentRuns, or member coordination. Its closed lifecycle is `pending | in_progress | blocked | completed | cancelled`; `completed` records an authorized actor's declaration of completion, not verification by Rovai-ai Core. Tasks do not form a dependency DAG or a Core-enforced workflow. An addressed send may explicitly link one `pending` or `in_progress` Task assigned to its Executable Assignee at acceptance, but the frozen historical link neither transfers responsibility nor proves completion. Later Task blocking, completion, cancellation, or reassignment never cancels, fails, retargets, or wakes that accepted Message Delivery; its Run may observe the latest collaboration state and act accordingly. An A2A target Run never inherits the source Run's Task association. A Task may describe a filesystem path as ordinary semantic content, but it does not own or structurally transfer an AgentRun working directory.
 _Avoid_: Camp, Conversation, chat thread, internal plan, one-off A2A request, workflow node
+
+**Task Acceptance Criteria**:
+The ordered textual conditions stored with one Task to make its expected outcome explicit. They have no individual completion state, dependency semantics, or Core verification effect; completing the Task remains an authorized actor's declaration about the responsibility as a whole.
+_Avoid_: checklist progress, test evidence, workflow gate, completion proof
+
+**Task Closure Metadata**:
+The actor-derived identity and Core timestamp frozen when a non-terminal Task enters `completed` or `cancelled`. It is never caller input, is absent from non-terminal snapshots, and records who closed the responsibility rather than who verified its result or stopped related execution.
+_Avoid_: completion evidence, AgentRun outcome, caller-authored audit fields, execution cancellation
+
+**Task-linked Responsibility Admission**:
+The one-time boundary at which Core accepts either a Direct linked queued AgentRun or an A2A linked Message Delivery against a `pending` or `in_progress` Task and its Executable Assignee. It freezes the admitted Task version and Assignee identity as audit facts, while later Task state or content changes neither requalify nor revoke that accepted responsibility.
+_Avoid_: continuous Task execution fence, dispatch-time Task revalidation, Task snapshot
+
+**Task Related Execution Projection**:
+The read-only Renderer summary derived from CampSnapshot relationships between one Task and its current or historical Message Deliveries and AgentRuns. It explains execution facts beside responsibility state without becoming TaskRecord content, changing Task status, or collapsing the two lifecycles.
+_Avoid_: Task execution state, TaskRecord relation cache, automatic Task transition, execution control
+
+**Task Cancellation**:
+The terminal declaration by a User or Default Lead that a durable Task responsibility no longer exists. It does not cancel, redirect, or revoke a previously accepted Message Delivery or AgentRun; execution cancellation uses its own explicit lifecycle boundary.
+_Avoid_: AgentRun cancellation, Message Delivery cancellation, CampTurn cancellation, execution rollback
 
 **Team Delivery Qualification**:
 A bounded evaluation of whether a frozen Camp team, after receiving one software-delivery request through its Default Lead, can reach a terminal AgentRun tree and produce a workspace outcome accepted by an external verifier within a fixed budget and without human intervention after dispatch. It is evidence about end-to-end delivery for the evaluated cases, not a Task completion declaration, a general capability claim, a comparison with a solo Agent, or attribution to a Member Team Role.

@@ -371,7 +371,7 @@ enum BuiltinToolIpcFailure {
 
 fn print_root_help() {
     println!(
-        "Rovai Agent CLI\n\nOperations:\n  rovai send\n  rovai task create|list|update\n  rovai camp list|search|read\n  rovai history search\n  rovai memory search|read|write|propose-hearth\n\nUse '<command> --help' for concise arguments and examples. Each operation supports direct flags, JSON stdin/heredoc, or --input-file <path>."
+        "Rovai Agent CLI\n\nOperations:\n  rovai send\n  rovai task create|get|list|update\n  rovai camp list|search|read\n  rovai history search\n  rovai memory search|read|write|propose-hearth\n\nUse '<command> --help' for concise arguments and examples. Each operation supports direct flags, JSON stdin/heredoc, or --input-file <path>."
     );
 }
 
@@ -437,6 +437,7 @@ fn operation_help_example(operation: &str) -> &'static str {
     match operation {
         "camp.message.send" => "rovai send --body 'Status update'",
         "team.create_task" => "rovai task create --title 'Prepare release notes'",
+        "team.get_task" => "rovai task get --task-id task_123",
         "team.list_tasks" => "rovai task list --limit 10",
         "team.update_task" => {
             "rovai task update --task-id task_123 --expected-version 1 --status in_progress"

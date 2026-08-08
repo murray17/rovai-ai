@@ -27,6 +27,7 @@ const expectedOperations = [
   'memory.search',
   'memory.write',
   'team.create_task',
+  'team.get_task',
   'team.list_tasks',
   'team.update_task'
 ]
@@ -160,7 +161,7 @@ try {
 
   const results = []
   for (const specification of runtimeSpecifications) {
-    process.stderr.write(`\n[builtin-cli] ${specification.adapterKind}: full 12-operation Run\n`)
+    process.stderr.write(`\n[builtin-cli] ${specification.adapterKind}: full 13-operation Run\n`)
     const source = await startVerificationRun(core, specification, false)
     const sourceSnapshot = await waitForRun(core, specification.campId, source.agentRunId, {
       marker: specification.successMarker,
@@ -275,7 +276,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    contractVersion: 3,
+    contractVersion: 4,
     ipcProtocolVersion: 1,
     runtimeCount: results.length,
     operationCountPerRuntime: expectedOperations.length,
@@ -295,9 +296,9 @@ try {
 function assertBuiltinCliCapability(label, installation) {
   const snapshot = installation?.snapshot
   if (snapshot?.probeStatus !== 'ready'
-      || !snapshot.capabilities.includes('builtin_cli.transport.v3')
+      || !snapshot.capabilities.includes('builtin_cli.transport.v4')
       || !snapshot.models.length) {
-    throw new Error(`${label} is not ready for Built-in CLI v3: ${JSON.stringify(snapshot)}`)
+    throw new Error(`${label} is not ready for Built-in CLI v4: ${JSON.stringify(snapshot)}`)
   }
 }
 
@@ -565,6 +566,10 @@ function projectEnvelopeForMeasurement(envelope) {
         memoryId: envelope.result.memoryId,
         revisionId: envelope.result.revisionId
       }
+    case 'team.create_task':
+      return selectFields(envelope.result, ['taskId', 'title', 'status', 'assigneeAgentId', 'version', 'availableActions'])
+    case 'team.update_task':
+      return selectFields(envelope.result, ['taskId', 'title', 'status', 'assigneeAgentId', 'version', 'availableActions', 'changed'])
     case 'camp.list':
     case 'camp.read':
     case 'camp.search':
@@ -572,13 +577,16 @@ function projectEnvelopeForMeasurement(envelope) {
     case 'memory.propose_hearth':
     case 'memory.read':
     case 'memory.search':
-    case 'team.create_task':
+    case 'team.get_task':
     case 'team.list_tasks':
-    case 'team.update_task':
       return envelope.result
     default:
       throw new Error(`Missing Agent output measurement projection for ${envelope.operation}`)
   }
+}
+
+function selectFields(value, keys) {
+  return Object.fromEntries(keys.map((key) => [key, value[key]]))
 }
 
 async function assertFencedContext(contextPath, adapterKind, phase) {
@@ -611,7 +619,8 @@ function exitCodeAccepted(options, code) {
 function verificationScript(input) {
   const taskCreate = JSON.stringify({
     title: `CLI transport task ${input.adapterKind}`,
-    description: 'Created through the canonical operation result contract.'
+    description: 'Created through the canonical operation result contract.',
+    assigneeAgentId: input.agentId
   })
   const campRead = (messageIdExpression) =>
     `jq -n --arg campId ${shellQuote(input.campId)} --arg messageId "${messageIdExpression}" '{mode:"item",campId:$campId,messageId:$messageId}'`
@@ -619,7 +628,7 @@ function verificationScript(input) {
     action: 'add',
     scope: 'companion',
     kind: 'preference',
-    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v3 qualification.`,
+    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v4 qualification.`,
     retrievalKeys: [`cli-${input.slug.slice(0, 18)}`]
   })
   const hearth = JSON.stringify({
@@ -683,7 +692,7 @@ assert_fix_input() {
 }
 
 STEP=version
-"$CLI" --version | grep -q 'contract-v3 ipc-v1'
+"$CLI" --version | grep -q 'contract-v4 ipc-v1'
 
 STEP=legacy_send_flag
 set +e
@@ -712,13 +721,18 @@ assert_success "$task_create" 'team.create_task'
 task_id="$(printf '%s\n' "$task_create" | "$JQ" -er '.taskId')"
 task_version="$(printf '%s\n' "$task_create" | "$JQ" -er '.version')"
 
+STEP=task_get
+task_get="$("$CLI" task get --task-id "$task_id")"
+assert_success "$task_get" 'team.get_task'
+printf '%s\n' "$task_get" | "$JQ" -e --arg taskId "$task_id" '.taskId == $taskId and .description != null' >/dev/null
+
 STEP=task_list
 task_list="$("$CLI" task list <<'ROVAI_JSON'
 {"statuses":["pending"],"limit":10}
 ROVAI_JSON
 )"
 assert_success "$task_list" 'team.list_tasks'
-printf '%s\n' "$task_list" | "$JQ" -e --arg taskId "$task_id" '.tasks | any(.id == $taskId)' >/dev/null
+printf '%s\n' "$task_list" | "$JQ" -e --arg taskId "$task_id" '.tasks | any(.taskId == $taskId)' >/dev/null
 
 STEP=task_update
 task_update="$("$CLI" task update --task-id "$task_id" --expected-version "$task_version" --status in_progress)"
@@ -801,7 +815,7 @@ trap - EXIT
 printf '%s\n' ${shellQuote(JSON.stringify({
     ok: true,
     marker: input.successMarker,
-    operationCount: 12,
+    operationCount: 13,
     versionConflict: 'refresh_then_decide'
   }))}
 `

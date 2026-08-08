@@ -479,12 +479,18 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
           >
             <div className="dialog-heading"><div><Dialog.Title>移除队员</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭" disabled={busy === 'remove'}>×</Dialog.Close></div>
             <Dialog.Description id="remove-member-description">
-              移除后队员不会再出现在管理列表，也不能产生后续消息；历史身份、头像、Agent 运行时、消息、Task 与 Run 仍保留。
+              移除后队员不会再出现在管理列表，也不能产生后续消息；历史身份与记录仍会保留。
             </Dialog.Description>
             {removal && (
               <>
                 {removal.preview.nonTerminalAgentRunCount > 0 && (
-                  <div className="inline-error" role="alert">仍有 {removal.preview.nonTerminalAgentRunCount} 个未结束的 Run，当前不能移除。</div>
+                  <div className="inline-error" role="alert">仍有 {removal.preview.nonTerminalAgentRunCount} 个未结束的执行，当前不能移除。</div>
+                )}
+                {removal.preview.nonTerminalAgentRunCount === 0 && (
+                  <div className="inline-notice">
+                    将从 {removal.preview.currentCampMembershipCount} 个 Camp 移除，并释放 {removal.preview.openAssignedTaskCount} 个未完成 Task。
+                    {removal.preview.defaultLeadCampCount > 0 && ` 其中 ${removal.preview.defaultLeadCampCount} 个 Camp 将重新选择默认负责人。`}
+                  </div>
                 )}
                 <label className="field-label">输入 {removal.displayName} 确认
                   <input

@@ -231,6 +231,7 @@ mod tests {
                         title: "Indexed Task".to_string(),
                         description: String::new(),
                         assignee_agent_id: None,
+                        ..Default::default()
                     },
                 ),
             )

@@ -51,7 +51,7 @@ pnpm build:desktop
 | `pnpm smoke:antigravity-runtime` | Antigravity + Codex | 包含 Antigravity 到 Codex 换绑 |
 | `pnpm smoke:action-approval` | Codex | 验证越界动作的 Approval 与唯一副作用 |
 | `pnpm smoke:multi-agent` | Codex | 同一 CampTurn 的两个真实并发 AgentRun |
-| `pnpm smoke:builtin-cli` | 全部九种正式 Runtime | 每个真实 AgentRun 只使用固定业务命令，调用十二项 CLI operation，验证旧 send 输入拒绝、Projection/schema、冲突 recovery、release fence、Replay 与后续 Run 新 lease；transport-independent indeterminate 由 CLI response-loss test 覆盖；任一 Runtime 缺失、未认证或漏项即失败 |
+| `pnpm smoke:builtin-cli` | 全部九种正式 Runtime | 每个真实 AgentRun 只使用固定业务命令，调用十三项 CLI operation，验证旧 send 输入拒绝、Projection/schema、冲突 recovery、release fence、Replay 与后续 Run 新 lease；transport-independent indeterminate 由 CLI response-loss test 覆盖；任一 Runtime 缺失、未认证或漏项即失败 |
 | `pnpm smoke:skills` | Codex 默认；selector 接受全部九种 Product Runtime | `ROVAI_SKILL_SMOKE_ADAPTERS=all` 会逐一尝试九组真实投递与发现；只有本机 Runtime 已安装、已认证、已接入 AgentRun 且全部通过时才成功 |
 | `pnpm smoke:mcp` | Codex、Claude Code、OpenCode、Copilot；可选 CodeBuddy、Qwen Code | 默认前四种；保留 Runtime 原生配置并逐 Run 追加 MCP；OpenCode 默认使用 `opencode/mimo-v2.5-free` |
 | `pnpm smoke:mcp-projection` | Codex、Claude Code、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen Code | 通过真实 Core、Assignment、AgentRun Projection 与 ContextManifest 验证原生配置保留及 Adapter-specific 同名策略；Codex 同名项应跳过，另外七种应由 Rovai 整项优先；默认八种 |
@@ -61,7 +61,7 @@ pnpm build:desktop
 `pnpm smoke:runtime-permissions` 是 `smoke:action-approval` 与
 `smoke:multi-agent` 的聚合命令。
 
-v0.46 的 `smoke:builtin-cli` 不得通过 Agent-facing `tool list`/`tool describe` 发现合同；Core
+v0.47 的 `smoke:builtin-cli` 不得通过 Agent-facing `tool list`/`tool describe` 发现合同；Core
 catalog 只在 host-controlled Qualification/debug 路径使用。Projection 压缩比例只作为观测
 指标记录，不是本命令或发布的硬门槛。
 

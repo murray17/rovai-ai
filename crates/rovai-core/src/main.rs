@@ -67,7 +67,8 @@ use rovai_core::{
         CampCollaborationMode, ChangeDefaultLeadCommand, CollaborationService, CreateCampCommand,
         CreateTaskCommand, DeleteCampCommand, ExecutionRequest, ProjectBindingKind,
         ReconcileDefaultLeadCommand, RenameCampCommand, SendUserCampDraftCommand,
-        TaskAssigneeFilter, TaskAssigneeUpdate, TaskListQuery, TaskStatus, UpdateTaskCommand,
+        TaskAcceptanceCriteriaUpdate, TaskAssigneeFilter, TaskAssigneeUpdate, TaskListQuery,
+        TaskStatus, UpdateTaskCommand,
     },
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandGatewayError, CommandResultStatus,
@@ -139,9 +140,9 @@ use rovai_core::{
     },
     team_tool::{
         BuiltinToolBindingCredential, CampMessageSendInput, CampMessageSendInvocation,
-        TEAM_CREATE_TASK_TOOL_NAME, TEAM_LIST_TASKS_TOOL_NAME, TEAM_UPDATE_TASK_TOOL_NAME,
-        TeamCreateTaskInput, TeamListTasksInput, TeamTaskToolInvocation, TeamToolInvocationError,
-        TeamToolService, TeamUpdateTaskInput,
+        TEAM_CREATE_TASK_TOOL_NAME, TEAM_GET_TASK_TOOL_NAME, TEAM_LIST_TASKS_TOOL_NAME,
+        TEAM_UPDATE_TASK_TOOL_NAME, TeamCreateTaskInput, TeamGetTaskInput, TeamListTasksInput,
+        TeamTaskToolInvocation, TeamToolInvocationError, TeamToolService, TeamUpdateTaskInput,
     },
     team_tool_catalog::validate_builtin_tool_input,
 };
@@ -359,6 +360,8 @@ struct CreateTaskParams {
     #[serde(default)]
     description: String,
     #[serde(default)]
+    acceptance_criteria: Vec<String>,
+    #[serde(default)]
     assignee_agent_id: Option<String>,
 }
 
@@ -371,9 +374,14 @@ struct UpdateTaskParams {
     expected_version: i64,
     title: Option<String>,
     description: Option<String>,
+    #[serde(default)]
+    acceptance_criteria: TaskAcceptanceCriteriaUpdate,
     status: Option<TaskStatus>,
     #[serde(default)]
     assignee: TaskAssigneeUpdate,
+    blocked_reason: Option<String>,
+    completion_summary: Option<String>,
+    cancel_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1719,6 +1727,28 @@ impl Core {
                     evidence_replayed = execution.replayed;
                     command_execution_payload(execution)
                 }
+                TEAM_GET_TASK_TOOL_NAME => {
+                    let input = serde_json::from_value::<TeamGetTaskInput>(request.input)
+                        .context("private get_task input is invalid")?;
+                    let invocation = TeamTaskToolInvocation {
+                        native_binding_id: request.native_binding_id,
+                        binding_credential: request.binding_credential,
+                        runtime_tool_call_id: request.runtime_tool_call_id,
+                        input,
+                    };
+                    let detail =
+                        if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
+                            service.get_task_attested(
+                                &database,
+                                &invocation,
+                                agent_run_id,
+                                *execution_epoch,
+                            )
+                        } else {
+                            service.get_task(&database, &invocation)
+                        }?;
+                    serde_json::to_value(detail).map_err(Into::into)
+                }
                 TEAM_UPDATE_TASK_TOOL_NAME => {
                     let input = serde_json::from_value::<TeamUpdateTaskInput>(request.input)
                         .context("private update_task input is invalid")?;
@@ -2760,6 +2790,7 @@ impl Core {
                             camp_id: params.camp_id,
                             title: params.title,
                             description: params.description,
+                            acceptance_criteria: params.acceptance_criteria,
                             assignee_agent_id: params.assignee_agent_id,
                         },
                     ),
@@ -2779,8 +2810,12 @@ impl Core {
                             expected_version: params.expected_version,
                             title: params.title,
                             description: params.description,
+                            acceptance_criteria: params.acceptance_criteria,
                             status: params.status,
                             assignee: params.assignee,
+                            blocked_reason: params.blocked_reason,
+                            completion_summary: params.completion_summary,
+                            cancel_reason: params.cancel_reason,
                         },
                     ),
                 )?;

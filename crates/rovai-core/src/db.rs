@@ -42,8 +42,8 @@ pub struct Database {
     path: PathBuf,
 }
 
-const V046_DATA_CONTRACT_VERSION: &str = "v0.46";
-const V046_PROJECTION_SCHEMA_VERSION: i64 = 25;
+const V047_DATA_CONTRACT_VERSION: &str = "v0.47";
+const V047_PROJECTION_SCHEMA_VERSION: i64 = 25;
 const V043_CLASSIFIER_VERSION: &str = "activity-v1";
 
 const V043_RESET_FILES: &[&str] = &[
@@ -70,7 +70,7 @@ const V043_RESET_DIRECTORIES: &[&str] = &[
     "runtime/qwen",
 ];
 
-fn has_current_v046_data_contract(path: &Path) -> bool {
+fn has_current_v047_data_contract(path: &Path) -> bool {
     if !path.exists() {
         return true;
     }
@@ -102,8 +102,8 @@ fn has_current_v046_data_contract(path: &Path) -> bool {
     matches!(
         (marker, projection_exists),
         (Ok(Some((contract, schema, classifier))), Ok(true))
-            if contract == V046_DATA_CONTRACT_VERSION
-                && schema == V046_PROJECTION_SCHEMA_VERSION
+            if contract == V047_DATA_CONTRACT_VERSION
+                && schema == V047_PROJECTION_SCHEMA_VERSION
                 && classifier == V043_CLASSIFIER_VERSION
     )
 }
@@ -132,9 +132,7 @@ fn remove_v043_owned_state(data_dir: &Path) -> Result<()> {
                     .with_context(|| format!("failed to remove reset link {}", path.display()))?;
             }
             Ok(metadata) if metadata.is_dir() => {
-                fs::remove_dir_all(&path).with_context(|| {
-                    format!("failed to remove reset directory {}", path.display())
-                })?;
+                remove_owned_directory_tree(&path)?;
             }
             Ok(_) => anyhow::bail!(
                 "refusing to remove non-directory reset target {}",
@@ -144,6 +142,46 @@ fn remove_v043_owned_state(data_dir: &Path) -> Result<()> {
             Err(error) => return Err(error).with_context(|| path.display().to_string()),
         }
     }
+    Ok(())
+}
+
+fn remove_owned_directory_tree(path: &Path) -> Result<()> {
+    let metadata = fs::symlink_metadata(path)
+        .with_context(|| format!("failed to inspect reset directory {}", path.display()))?;
+    if metadata.file_type().is_symlink() {
+        fs::remove_file(path)
+            .with_context(|| format!("failed to remove reset link {}", path.display()))?;
+        return Ok(());
+    }
+    if !metadata.is_dir() {
+        anyhow::bail!(
+            "refusing to traverse non-directory reset target {}",
+            path.display()
+        );
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+            .with_context(|| format!("failed to unlock reset directory {}", path.display()))?;
+    }
+    for entry in fs::read_dir(path)
+        .with_context(|| format!("failed to read reset directory {}", path.display()))?
+    {
+        let child = entry
+            .with_context(|| format!("failed to enumerate reset directory {}", path.display()))?
+            .path();
+        let child_metadata = fs::symlink_metadata(&child)
+            .with_context(|| format!("failed to inspect reset target {}", child.display()))?;
+        if child_metadata.is_dir() && !child_metadata.file_type().is_symlink() {
+            remove_owned_directory_tree(&child)?;
+        } else {
+            fs::remove_file(&child)
+                .with_context(|| format!("failed to remove reset target {}", child.display()))?;
+        }
+    }
+    fs::remove_dir(path)
+        .with_context(|| format!("failed to remove reset directory {}", path.display()))?;
     Ok(())
 }
 
@@ -454,12 +492,12 @@ impl Database {
         };
         let reset_reason = if !cfg!(test)
             && candidate_path.exists()
-            && !has_current_v046_data_contract(&candidate_path)
+            && !has_current_v047_data_contract(&candidate_path)
         {
             let reason = if candidate_path == legacy_path {
-                "legacy_or_missing_v046_data_contract"
+                "legacy_or_missing_v047_data_contract"
             } else {
-                "missing_or_incompatible_v046_data_contract"
+                "missing_or_incompatible_v047_data_contract"
             };
             remove_v043_owned_state(data_dir)?;
             Some(reason)
@@ -485,7 +523,7 @@ impl Database {
                 "UPDATE rovai_data_contract SET reset_reason = ?1, updated_at = datetime('now') WHERE singleton = 1",
                 [reason],
             )?;
-            eprintln!("v0.46 managed local-data reset completed: {reason}");
+            eprintln!("v0.47 managed local-data reset completed: {reason}");
         }
         database.seed_agents()?;
         Ok(database)
@@ -1044,6 +1082,9 @@ impl Database {
             if !self.schema_migration_applied(64)? {
                 self.migrate_agent_cli_clean_break_v64()?;
             }
+            if !self.schema_migration_applied(65)? {
+                self.migrate_durable_task_v2_v65()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -1285,6 +1326,9 @@ impl Database {
         }
         if !self.schema_migration_applied(64)? {
             self.migrate_agent_cli_clean_break_v64()?;
+        }
+        if !self.schema_migration_applied(65)? {
+            self.migrate_durable_task_v2_v65()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -5152,6 +5196,128 @@ impl Database {
             VALUES (64, datetime('now'));
             "#,
         )?;
+        Ok(())
+    }
+
+    fn migrate_durable_task_v2_v65(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(
+                r#"
+                UPDATE agent_run SET task_id = NULL;
+                UPDATE message_delivery SET task_id = NULL;
+                DELETE FROM task;
+
+                DROP INDEX IF EXISTS task_camp_status_created_idx;
+                DROP INDEX IF EXISTS task_camp_assignee_status_idx;
+                DROP TABLE task;
+
+                CREATE TABLE task (
+                    id TEXT PRIMARY KEY,
+                    camp_id TEXT NOT NULL REFERENCES camp(id),
+                    title TEXT NOT NULL CHECK(length(trim(title)) BETWEEN 1 AND 160),
+                    description TEXT NOT NULL DEFAULT '' CHECK(length(description) <= 8000),
+                    acceptance_criteria_json TEXT NOT NULL DEFAULT '[]'
+                        CHECK(json_valid(acceptance_criteria_json)),
+                    status TEXT NOT NULL CHECK(status IN (
+                        'pending', 'in_progress', 'blocked', 'completed', 'cancelled'
+                    )),
+                    assignee_agent_id TEXT REFERENCES agent_profile(id),
+                    blocked_reason TEXT,
+                    completion_summary TEXT,
+                    cancel_reason TEXT,
+                    created_by_type TEXT NOT NULL CHECK(created_by_type IN ('user', 'agent')),
+                    created_by_id TEXT NOT NULL,
+                    source_agent_run_id TEXT REFERENCES agent_run(id),
+                    closed_by_type TEXT CHECK(closed_by_type IN ('user', 'agent')),
+                    closed_by_id TEXT,
+                    closed_by_agent_run_id TEXT REFERENCES agent_run(id),
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    closed_at TEXT,
+                    CHECK (
+                        (created_by_type = 'agent' AND source_agent_run_id IS NOT NULL)
+                        OR (created_by_type = 'user' AND source_agent_run_id IS NULL)
+                    ),
+                    CHECK (
+                        (status = 'pending' AND blocked_reason IS NULL
+                            AND completion_summary IS NULL AND cancel_reason IS NULL
+                            AND closed_by_type IS NULL AND closed_by_id IS NULL
+                            AND closed_by_agent_run_id IS NULL AND closed_at IS NULL)
+                        OR
+                        (status = 'in_progress' AND assignee_agent_id IS NOT NULL
+                            AND blocked_reason IS NULL AND completion_summary IS NULL
+                            AND cancel_reason IS NULL AND closed_by_type IS NULL
+                            AND closed_by_id IS NULL AND closed_by_agent_run_id IS NULL
+                            AND closed_at IS NULL)
+                        OR
+                        (status = 'blocked' AND assignee_agent_id IS NOT NULL
+                            AND length(trim(blocked_reason)) BETWEEN 1 AND 4000
+                            AND completion_summary IS NULL AND cancel_reason IS NULL
+                            AND closed_by_type IS NULL AND closed_by_id IS NULL
+                            AND closed_by_agent_run_id IS NULL AND closed_at IS NULL)
+                        OR
+                        (status = 'completed' AND length(trim(completion_summary)) BETWEEN 1 AND 4000
+                            AND blocked_reason IS NULL AND cancel_reason IS NULL
+                            AND closed_by_type IS NOT NULL AND closed_by_id IS NOT NULL
+                            AND closed_at IS NOT NULL)
+                        OR
+                        (status = 'cancelled' AND length(trim(cancel_reason)) BETWEEN 1 AND 4000
+                            AND blocked_reason IS NULL AND completion_summary IS NULL
+                            AND closed_by_type IS NOT NULL AND closed_by_id IS NOT NULL
+                            AND closed_at IS NOT NULL)
+                    ),
+                    CHECK (
+                        (closed_by_type = 'agent' AND closed_by_agent_run_id IS NOT NULL)
+                        OR (closed_by_type = 'user' AND closed_by_agent_run_id IS NULL)
+                        OR closed_by_type IS NULL
+                    )
+                );
+
+                CREATE INDEX task_camp_status_created_idx
+                    ON task(camp_id, status, created_at DESC, id DESC);
+                CREATE INDEX task_camp_assignee_status_idx
+                    ON task(camp_id, assignee_agent_id, status, created_at DESC, id DESC);
+
+                ALTER TABLE agent_run ADD COLUMN task_version_at_admission INTEGER;
+                ALTER TABLE agent_run ADD COLUMN assignee_agent_id_at_admission TEXT;
+                ALTER TABLE message_delivery ADD COLUMN task_version_at_admission INTEGER;
+                ALTER TABLE message_delivery ADD COLUMN assignee_agent_id_at_admission TEXT;
+
+                DELETE FROM event_log
+                WHERE event_type = 'command.result'
+                  AND command_type IN (
+                      'team.create_task', 'team.get_task',
+                      'team.update_task', 'team.list_tasks'
+                  );
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v0.47', projection_schema_version = 25,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (65, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        self.connection.execute_batch("PRAGMA foreign_keys = ON;")?;
+        result?;
+        let violations: i64 = self.connection.query_row(
+            "SELECT COUNT(*) FROM pragma_foreign_key_check",
+            [],
+            |row| row.get(0),
+        )?;
+        if violations != 0 {
+            anyhow::bail!("v65 left {violations} foreign-key violations");
+        }
         Ok(())
     }
 
@@ -9540,6 +9706,30 @@ impl Database {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    #[test]
+    fn v047_reset_removes_execute_only_owned_directories_without_following_links() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+
+        let fixture =
+            std::env::temp_dir().join(format!("rovai-v047-reset-test-{}", Uuid::new_v4()));
+        let data_dir = fixture.join("data");
+        let protected = data_dir.join("camp-attachments").join("protected-camp");
+        let outside = fixture.join("outside");
+        fs::create_dir_all(&protected).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(protected.join("attachment.bin"), b"owned").unwrap();
+        fs::write(outside.join("sentinel.txt"), b"preserve").unwrap();
+        symlink(&outside, protected.join("outside-link")).unwrap();
+        fs::set_permissions(&protected, fs::Permissions::from_mode(0o100)).unwrap();
+
+        remove_v043_owned_state(&data_dir).expect("managed reset should unlock its owned tree");
+
+        assert!(!data_dir.join("camp-attachments").exists());
+        assert_eq!(fs::read(outside.join("sentinel.txt")).unwrap(), b"preserve");
+        fs::remove_dir_all(fixture).unwrap();
+    }
+
     #[test]
     fn v28_adds_execution_evidence_and_structured_camp_presentations() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v28-test-{}", Uuid::new_v4()));
@@ -9832,6 +10022,7 @@ mod tests {
                         title: "will be reset".to_string(),
                         description: String::new(),
                         assignee_agent_id: None,
+                        ..Default::default()
                     },
                 },
             )
@@ -11657,7 +11848,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(agent_cli_contract, ("v0.46".to_string(), 25, 1));
+        assert_eq!(agent_cli_contract, ("v0.47".to_string(), 25, 1));
         assert_eq!(foreign_key_violations, 0);
 
         drop(database);
@@ -11665,39 +11856,77 @@ mod tests {
     }
 
     #[test]
-    fn v64_removes_old_public_send_replay_records_and_sets_v046_contract() {
-        let directory = std::env::temp_dir().join(format!("rovai-db-v64-test-{}", Uuid::new_v4()));
+    fn v65_installs_durable_task_v2_and_sets_v047_contract() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v65-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
         database
             .connection()
             .execute_batch(
                 r#"
+                PRAGMA foreign_keys = OFF;
+                ALTER TABLE agent_run DROP COLUMN task_version_at_admission;
+                ALTER TABLE agent_run DROP COLUMN assignee_agent_id_at_admission;
+                ALTER TABLE message_delivery DROP COLUMN task_version_at_admission;
+                ALTER TABLE message_delivery DROP COLUMN assignee_agent_id_at_admission;
+                DROP INDEX task_camp_status_created_idx;
+                DROP INDEX task_camp_assignee_status_idx;
+                DROP TABLE task;
+                CREATE TABLE task (
+                    id TEXT PRIMARY KEY,
+                    camp_id TEXT NOT NULL REFERENCES camp(id),
+                    title TEXT NOT NULL CHECK(length(trim(title)) > 0),
+                    description TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL CHECK(status IN (
+                        'pending', 'in_progress', 'completed', 'cancelled'
+                    )),
+                    assignee_agent_id TEXT REFERENCES agent_profile(id),
+                    created_by_type TEXT NOT NULL CHECK(created_by_type IN ('user', 'agent')),
+                    created_by_id TEXT NOT NULL,
+                    source_agent_run_id TEXT REFERENCES agent_run(id),
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    closed_at TEXT,
+                    CHECK (
+                        (created_by_type = 'agent' AND source_agent_run_id IS NOT NULL)
+                        OR (created_by_type = 'user' AND source_agent_run_id IS NULL)
+                    ),
+                    CHECK (
+                        (status IN ('completed', 'cancelled') AND closed_at IS NOT NULL)
+                        OR (status IN ('pending', 'in_progress') AND closed_at IS NULL)
+                    )
+                );
+                CREATE INDEX task_camp_status_created_idx
+                    ON task(camp_id, status, created_at, id);
+                CREATE INDEX task_camp_assignee_status_idx
+                    ON task(camp_id, assignee_agent_id, status, created_at, id);
                 INSERT INTO event_log(
                     event_id, event_type, payload_json,
                     command_id, command_type, request_digest, request_digest_version,
                     result_status, result_code, result_payload_json, created_at
                 ) VALUES
-                    ('event-old-send', 'command.result', '{}',
-                     'command-old-send', 'camp.message.send', 'digest-old-send', 1,
-                     'applied', 'message.sent', '{}', datetime('now')),
-                    ('event-current-task', 'command.result', '{}',
-                     'command-current-task', 'team.create_task', 'digest-current-task', 1,
+                    ('event-unrelated', 'command.result', '{}',
+                     'command-unrelated', 'camp.rename', 'digest-unrelated', 1,
+                     'applied', 'camp.renamed', '{}', datetime('now')),
+                    ('event-old-task', 'command.result', '{}',
+                     'command-old-task', 'team.create_task', 'digest-old-task', 1,
                      'applied', 'task.created', '{}', datetime('now'));
-                DELETE FROM schema_migration WHERE version = 64;
+                DELETE FROM schema_migration WHERE version = 65;
                 UPDATE rovai_data_contract
-                SET contract_version = 'v0.45', projection_schema_version = 24;
+                SET contract_version = 'v0.46', projection_schema_version = 24;
+                PRAGMA foreign_keys = ON;
                 "#,
             )
-            .expect("test should restore a pre-v64 Agent CLI contract");
+            .expect("test should restore the pre-v65 Task contract");
         drop(database);
 
-        let reopened = Database::open(&directory).expect("v64 database should reopen");
+        let reopened = Database::open(&directory).expect("v65 database should reopen");
         let counts: (i64, i64) = reopened
             .connection()
             .query_row(
                 r#"
                 SELECT
-                    SUM(CASE WHEN command_type = 'camp.message.send' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN command_type = 'camp.rename' THEN 1 ELSE 0 END),
                     SUM(CASE WHEN command_type = 'team.create_task' THEN 1 ELSE 0 END)
                 FROM event_log WHERE event_type = 'command.result'
                 "#,
@@ -11705,20 +11934,39 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(counts, (0, 1));
+        assert_eq!(counts, (1, 0));
         let contract: (String, i64, i64) = reopened
             .connection()
             .query_row(
                 r#"
                 SELECT contract_version, projection_schema_version,
-                       (SELECT COUNT(*) FROM schema_migration WHERE version = 64)
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 65)
                 FROM rovai_data_contract WHERE singleton = 1
                 "#,
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.46".to_string(), 25, 1));
+        assert_eq!(contract, ("v0.47".to_string(), 25, 1));
+        let task_columns = reopened
+            .connection()
+            .prepare("SELECT name FROM pragma_table_info('task') ORDER BY cid")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        for required in [
+            "acceptance_criteria_json",
+            "blocked_reason",
+            "completion_summary",
+            "cancel_reason",
+            "closed_by_type",
+            "closed_by_id",
+            "closed_by_agent_run_id",
+        ] {
+            assert!(task_columns.iter().any(|column| column == required));
+        }
 
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
@@ -12209,7 +12457,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.46".to_string(), 22));
+        assert_eq!(contract, ("v0.47".to_string(), 22));
         let migration_count: i64 = reopened
             .connection()
             .query_row(
@@ -12545,7 +12793,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.46".to_string(), 25));
+        assert_eq!(contract, ("v0.47".to_string(), 25));
         let public_a2a_migration_applied: i64 = database
             .connection()
             .query_row(

@@ -15,6 +15,17 @@ superseded_by: null
 > 后续局部规范：[ADR-0069](0069-single-effective-memory-and-scope-bounded-agent-mutation.md)
 > 仅把本文保留的默认 `memory.propose_change` Capability 条款替换为
 > `memory.write`；本文其余 Presence 与 removal 语义继续有效。
+>
+> [ADR-0136](0136-durable-task-v2-responsibility-and-coordination-authority.md) 局部替代本文
+> “移除后可保留非终态 Task Assignee”与 Default Lead/Task 惰性收口条款：无非终态
+> AgentRun 时，RemoveMember 在一个事务中结束全部 Current CampMembership、释放 Task、
+> 收口 Lead 后才标记 Profile removed。本文其他 Presence、数据保留、Memory 与历史身份条款
+> 继续有效。
+>
+> [ADR-0137](0137-one-time-task-linked-responsibility-admission.md)同时澄清 accepted responsibility
+> 与实际启动资格：`away` 不撤销已接受 responsibility，也不影响已经 running 的 Run，但 queued
+> AgentRun 或尚未物化的 Delivery 必须等待 `present` 才能进入新的实际执行。本文“非终态 Run
+> 继续运行”不再解释为 away 后仍可从 queued 启动。
 
 ## Context
 

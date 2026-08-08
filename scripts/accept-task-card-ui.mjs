@@ -39,6 +39,7 @@ try {
     campId: fixture.campId,
     title: '确认任务卡创建位置',
     description: '这段说明只能出现在任务详情，不能出现在会话卡片。',
+    acceptanceCriteria: ['任务卡保持唯一', '详情完整展示责任与审计'],
     assigneeAgentId: fixture.primaryAssignee.id
   })
   const completedTaskId = createdTask.payload?.taskId
@@ -85,7 +86,8 @@ try {
     campId: fixture.campId,
     taskId: completedTaskId,
     expectedVersion: task.version,
-    status: 'completed'
+    status: 'completed',
+    completionSummary: '任务卡路径已验证完成。'
   })
   assert(completedTask.status === 'applied',
     `Could not complete Task: ${JSON.stringify(completedTask)}`)
@@ -96,8 +98,7 @@ try {
     commandId: crypto.randomUUID(),
     campId: fixture.campId,
     title: '取消路径仍复用原卡',
-    description: '取消后保留在任务详情与审计记录。',
-    assigneeAgentId: null
+    description: '取消后保留在任务详情与审计记录。'
   })
   const cancelledTaskId = createdCancelledTask.payload?.taskId
   assert(createdCancelledTask.status === 'applied' && cancelledTaskId,
@@ -111,7 +112,8 @@ try {
     campId: fixture.campId,
     taskId: cancelledTaskId,
     expectedVersion: task.version,
-    status: 'cancelled'
+    status: 'cancelled',
+    cancelReason: '该责任不再需要继续。'
   })
   assert(cancelledTask.status === 'applied',
     `Could not cancel Task: ${JSON.stringify(cancelledTask)}`)
@@ -125,7 +127,7 @@ try {
     `Task lifecycle created a CampMessage or lost a Task: ${JSON.stringify(terminalSnapshot)}`)
 
   await openTaskDetails(desktopApp.cdp, '任务卡已原地更新')
-  await assertTerminalDetails(desktopApp.cdp, '更新后的说明仍然只能在任务详情里看到。')
+  await assertTerminalDetails(desktopApp.cdp, '更新后的说明仍然只能在任务详情里看到。', 2)
   await assertNoHorizontalOverflow(desktopApp.cdp, '1440×920')
   const desktopCapture = join(outputDir, 'task-card-details-day-1440x920.png')
   await capture(desktopApp.cdp, desktopCapture)
@@ -138,11 +140,16 @@ try {
   await setTheme(compactApp.cdp, 'day')
   await openCamp(compactApp.cdp, fixture.campId)
   await waitForTaskCard(compactApp.cdp, '任务卡已原地更新', '已完成', 2)
-  await openTaskDetails(compactApp.cdp, '取消路径仍复用原卡')
-  await assertTerminalDetails(compactApp.cdp, '取消后保留在任务详情与审计记录。')
+  await openTaskDetailsWithKeyboard(compactApp.cdp, '取消路径仍复用原卡')
+  await assertTerminalDetails(compactApp.cdp, '取消后保留在任务详情与审计记录。', 0)
   await assertNoHorizontalOverflow(compactApp.cdp, '1040×700 reduced-motion')
   const compactCapture = join(outputDir, 'task-card-details-compact-1040x700.png')
   await capture(compactApp.cdp, compactCapture)
+  await evaluate(compactApp.cdp,
+    `document.documentElement.style.zoom = '2'; getComputedStyle(document.documentElement).zoom`)
+  await assertZoomedTaskFunctionality(compactApp.cdp)
+  const zoomCapture = join(outputDir, 'task-card-details-compact-1040x700-zoom-200.png')
+  await capture(compactApp.cdp, zoomCapture)
 
   console.log(JSON.stringify({
     ok: true,
@@ -156,12 +163,16 @@ try {
       descriptionOnlyAppearsInDetails: true,
       taskLifecycleCreatesNoCampMessages: true,
       taskCardOpensCurrentTerminalDetails: true,
+      keyboardOpensTaskDetails: true,
+      orderedCriteriaAndAuditDetailsVisible: true,
       desktopAndCompactReducedMotionLayouts: true,
+      zoom200KeepsTaskFunctionality: true,
       horizontalOverflow: false
     },
     captures: {
       desktop: desktopCapture,
-      compact: compactCapture
+      compact: compactCapture,
+      zoom200: zoomCapture
     }
   }, null, 2))
 } finally {
@@ -201,7 +212,7 @@ async function createFixtureCamp() {
 
 async function getTask(cdp, campId, taskId) {
   const task = await request(cdp, 'tasks.get', { campId, taskId })
-  assert(task?.id === taskId, `Could not read Task ${taskId}: ${JSON.stringify(task)}`)
+  assert(task?.taskId === taskId, `Could not read Task ${taskId}: ${JSON.stringify(task)}`)
   return task
 }
 
@@ -281,20 +292,78 @@ async function openTaskDetails(cdp, title) {
   })()`)
 }
 
-async function assertTerminalDetails(cdp, expectedDescription) {
+async function openTaskDetailsWithKeyboard(cdp, title) {
+  await cdp.send('Page.bringToFront')
+  const focused = await evaluate(cdp, `(() => {
+    const label = ${JSON.stringify(`打开任务：${title}`)}
+    const card = [...document.querySelectorAll('button.task-event-card')]
+      .find((candidate) => candidate.getAttribute('aria-label') === label)
+    card?.focus()
+    return Boolean(card && document.activeElement === card)
+  })()`)
+  assert(focused, `Could not focus Task card ${JSON.stringify(title)}`)
+  await cdp.send('Input.dispatchKeyEvent', {
+    type: 'rawKeyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13,
+    nativeVirtualKeyCode: 36
+  })
+  await cdp.send('Input.dispatchKeyEvent', {
+    type: 'char', key: 'Enter', code: 'Enter', text: '\r', unmodifiedText: '\r',
+    windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 36
+  })
+  await cdp.send('Input.dispatchKeyEvent', {
+    type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13,
+    nativeVirtualKeyCode: 36
+  })
+  await waitForExpression(cdp, `(() => {
+    const heading = document.querySelector('.task-editor-heading')?.textContent ?? ''
+    return heading.includes('Task 详情') && Boolean(document.querySelector('.task-editor'))
+  })()`)
+}
+
+async function assertTerminalDetails(cdp, expectedDescription, expectedCriteriaCount) {
   const state = await evaluate(cdp, `(() => {
     const editor = document.querySelector('.task-editor')
     const description = editor?.querySelector('textarea')
+    const criteria = [...(editor?.querySelectorAll('textarea') ?? [])]
+      .find((field) => field.closest('label')?.textContent?.includes('验收条件'))
     return {
       description: description?.value ?? null,
       disabled: description?.disabled ?? false,
       note: editor?.querySelector('.task-terminal-note')?.textContent ?? '',
+      criteriaCount: (criteria?.value ?? '').split('\\n').filter(Boolean).length,
+      auditVisible: Boolean(editor?.querySelector('[aria-label="Task 审计信息"]')),
+      relatedExecutionVisible: Boolean(editor?.querySelector('[aria-label="关联执行"]')),
       visible: Boolean(editor)
     }
   })()`)
   assert(state.visible && state.disabled && state.description === expectedDescription
+      && state.criteriaCount === expectedCriteriaCount
+      && state.auditVisible && state.relatedExecutionVisible
       && state.note.includes('已结束的 Task 保留为只读记录'),
   `Task details did not show current terminal data: ${JSON.stringify(state)}`)
+}
+
+async function assertZoomedTaskFunctionality(cdp) {
+  const state = await evaluate(cdp, `(() => {
+    const scroll = document.querySelector('.task-panel-scroll')
+    const editor = document.querySelector('.task-editor')
+    const before = scroll?.scrollTop ?? 0
+    if (scroll) scroll.scrollTop = scroll.scrollHeight
+    const after = scroll?.scrollTop ?? 0
+    if (scroll) scroll.scrollTop = before
+    return {
+      scale: Number.parseFloat(getComputedStyle(document.documentElement).zoom),
+      editorVisible: Boolean(editor),
+      returnButtonVisible: [...document.querySelectorAll('button')]
+        .some((button) => button.textContent?.includes('返回列表')),
+      auditVisible: Boolean(editor?.querySelector('[aria-label="Task 审计信息"]')),
+      relatedExecutionVisible: Boolean(editor?.querySelector('[aria-label="关联执行"]')),
+      scrollable: Boolean(scroll && scroll.scrollHeight >= scroll.clientHeight && after >= before)
+    }
+  })()`)
+  assert(state.scale === 2 && state.editorVisible && state.returnButtonVisible
+      && state.auditVisible && state.relatedExecutionVisible && state.scrollable,
+  `200% zoom hid Task functionality: ${JSON.stringify(state)}`)
 }
 
 async function assertNoHorizontalOverflow(cdp, context) {

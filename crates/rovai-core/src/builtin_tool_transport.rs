@@ -6,13 +6,13 @@ use serde_json::{Map, Value, json};
 
 use crate::{command::canonical_json_digest, team_tool_catalog::builtin_tool_definitions};
 
-pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 3;
+pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 4;
 pub const BUILTIN_TOOL_IPC_PROTOCOL_VERSION: u32 = 1;
 pub const BUILTIN_TOOL_ENVELOPE_VERSION: u32 = 1;
 pub const BUILTIN_TOOL_RECEIPT_VERSION: u32 = 1;
-pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 3;
-pub const BUILTIN_TOOL_AGENT_OUTPUT_CONTRACT_VERSION: u32 = 1;
-pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v3";
+pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 4;
+pub const BUILTIN_TOOL_AGENT_OUTPUT_CONTRACT_VERSION: u32 = 2;
+pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v4";
 pub const BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES: usize = 1024 * 1024;
 pub const ROVAI_AGENT_CLI_ENV: &str = "ROVAI_AGENT_CLI";
 pub const ROVAI_CLI_CONTEXT_ENV: &str = "ROVAI_CLI_CONTEXT";
@@ -77,7 +77,7 @@ pub struct BuiltinToolCliIdentity {
     pub action: &'static str,
 }
 
-pub const BUILTIN_TOOL_CLI_IDENTITIES: [BuiltinToolCliIdentity; 12] = [
+pub const BUILTIN_TOOL_CLI_IDENTITIES: [BuiltinToolCliIdentity; 13] = [
     BuiltinToolCliIdentity {
         operation: "camp.message.send",
         group: "send",
@@ -87,6 +87,11 @@ pub const BUILTIN_TOOL_CLI_IDENTITIES: [BuiltinToolCliIdentity; 12] = [
         operation: "team.create_task",
         group: "task",
         action: "create",
+    },
+    BuiltinToolCliIdentity {
+        operation: "team.get_task",
+        group: "task",
+        action: "get",
     },
     BuiltinToolCliIdentity {
         operation: "team.list_tasks",
@@ -674,6 +679,7 @@ pub fn projection_identity(operation: &str) -> Result<&'static str> {
         "camp.message.send" => Ok("camp-message-send-v1"),
         "memory.write" => Ok("memory-write-v1"),
         "team.create_task"
+        | "team.get_task"
         | "team.list_tasks"
         | "team.update_task"
         | "camp.list"
@@ -813,8 +819,8 @@ mod tests {
             .iter()
             .map(|identity| (identity.group, identity.action))
             .collect::<BTreeSet<_>>();
-        assert_eq!(operations.len(), 12);
-        assert_eq!(commands.len(), 12);
+        assert_eq!(operations.len(), 13);
+        assert_eq!(commands.len(), 13);
     }
 
     #[test]

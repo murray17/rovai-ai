@@ -115,14 +115,22 @@ function canonicalActivity(
 describe('task event projections', () => {
   it('projects one live Task card at creation and suppresses legacy status cards', () => {
     const task = {
-      id: 'task-live-card',
+      taskId: 'task-live-card',
+      campId: 'camp-live-card',
       title: '更新后的任务标题',
       description: '只在任务详情显示',
+      acceptanceCriteria: [],
       status: 'completed',
       assigneeAgentId: 'agent_2',
+      blockedReason: null,
+      completionSummary: '已经完成',
+      cancelReason: null,
       createdByType: 'user',
       createdById: 'local-user',
       sourceAgentRunId: null,
+      closedByType: 'user',
+      closedById: 'local-user',
+      closedByAgentRunId: null,
       version: 4,
       createdAt: '2026-08-05T02:00:00Z',
       updatedAt: '2026-08-05T02:10:00Z',
@@ -156,7 +164,7 @@ describe('task event projections', () => {
       toStatus: 'in_progress' | 'completed'
     ): CampSnapshot['messages'][number]['presentation'] => ({
       kind: 'task_event',
-      taskId: task.id,
+      taskId: task.taskId,
       titleAtEvent: task.title,
       fromStatus,
       toStatus,
@@ -169,7 +177,7 @@ describe('task event projections', () => {
       eventType: 'task.created',
       campId: 'camp-live-card',
       entityType: 'task',
-      entityId: task.id,
+      entityId: task.taskId,
       actorType: 'user',
       actorId: 'local-user',
       sourceAgentRunId: null,
@@ -193,14 +201,14 @@ describe('task event projections', () => {
 
     expect(projected.map((item) => item.id)).toEqual([
       'before-task',
-      `task:${task.id}`,
+      `task:${task.taskId}`,
       'after-task'
     ])
     expect(projected[1]).toMatchObject({
       kind: 'task_card',
       timelineGlobalSequence: 2,
       task: {
-        id: task.id,
+        taskId: task.taskId,
         title: '更新后的任务标题',
         status: 'completed',
         assigneeAgentId: 'agent_2',
@@ -212,12 +220,14 @@ describe('task event projections', () => {
       ...task,
       title: '再次更新标题',
       status: 'cancelled',
+      completionSummary: null,
+      cancelReason: '不再需要',
       assigneeAgentId: null,
       version: 5
     }])
     expect(updated).toHaveLength(1)
     expect(updated[0]).toMatchObject({
-      id: `task:${task.id}`,
+      id: `task:${task.taskId}`,
       kind: 'task_card',
       task: {
         title: '再次更新标题',
@@ -230,14 +240,22 @@ describe('task event projections', () => {
 
   it('keeps a Task card when its creation event is outside the audit window', () => {
     const task = {
-      id: 'task-old',
+      taskId: 'task-old',
+      campId: 'camp-old',
       title: '较早的任务',
       description: '',
+      acceptanceCriteria: [],
       status: 'pending',
       assigneeAgentId: null,
+      blockedReason: null,
+      completionSummary: null,
+      cancelReason: null,
       createdByType: 'user',
       createdById: 'local-user',
       sourceAgentRunId: null,
+      closedByType: null,
+      closedById: null,
+      closedByAgentRunId: null,
       version: 1,
       createdAt: '2026-07-01T00:00:00Z',
       updatedAt: '2026-07-01T00:00:00Z',
@@ -995,7 +1013,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'runtime_not_configured', blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 24,
+      schemaVersion: 25,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-1', title: 'Lead 调整', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1004,7 +1022,7 @@ describe('task event projections', () => {
       },
       members: [{
         agentId: 'agent_1', displayName: '洛可', teamRole: 'Lead',
-        avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'present', memberOrder: 0,
+        avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', leaveRequestedAt: null, profilePresence: 'present', memberOrder: 0,
         isDefaultLead: true, version: 1
       }],
       tasks: [], messages: [], messageDeliveries: [], turns: [], agentRuns: [],
@@ -1093,7 +1111,7 @@ describe('task event projections', () => {
   it('summarizes empty Camp runtime readiness without inventing Ready state', () => {
     const member = {
       agentId: 'agent_1', displayName: '洛可', teamRole: 'Lead',
-      avatarRef: null, accent: '#D56A4A', membershipStatus: 'active' as const,
+      avatarRef: null, accent: '#D56A4A', membershipStatus: 'active' as const, leaveRequestedAt: null,
       profilePresence: 'present' as const, memberOrder: 0, isDefaultLead: true,
       version: 1
     }
@@ -1129,7 +1147,7 @@ describe('task event projections', () => {
       presence: 'away'
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 24,
+      schemaVersion: 25,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-empty', title: '暂无可用队员', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1138,7 +1156,7 @@ describe('task event projections', () => {
       },
       members: [{
         agentId: profile.agentId, displayName: profile.displayName, teamRole: 'Lead',
-        avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'away', memberOrder: 0,
+        avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', leaveRequestedAt: null, profilePresence: 'away', memberOrder: 0,
         isDefaultLead: false, version: 1
       }],
       tasks: [], messages: [], messageDeliveries: [], turns: [], agentRuns: [],
@@ -1181,7 +1199,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'ready' as const, blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 24,
+      schemaVersion: 25,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-live', title: '实现功能', projectBindingKind: 'directory', projectPath: '/repo',
@@ -1190,7 +1208,7 @@ describe('task event projections', () => {
       },
       members: [{
         agentId: 'agent_2', displayName: '沐瓦', teamRole: '开发者',
-        avatarRef: null, accent: '#39777a', membershipStatus: 'active', profilePresence: 'present',
+        avatarRef: null, accent: '#39777a', membershipStatus: 'active', leaveRequestedAt: null, profilePresence: 'present',
         memberOrder: 0, isDefaultLead: true, version: 1
       }],
       tasks: [],
@@ -1564,7 +1582,7 @@ describe('task event projections', () => {
       resolvedAt: null
     }))
     const snapshot: CampSnapshot = {
-      schemaVersion: 24,
+      schemaVersion: 25,
       throughGlobalSequence: 2,
       camp: {
         id: 'camp-approval', title: '审批停靠区', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1578,6 +1596,7 @@ describe('task event projections', () => {
         avatarRef: null,
         accent: index === 0 ? '#A65F4A' : '#39777A',
         membershipStatus: 'active',
+        leaveRequestedAt: null,
         profilePresence: 'present',
         memberOrder: index,
         isDefaultLead: index === 0,
@@ -1629,6 +1648,7 @@ describe('task event projections', () => {
       id: 'delivery-a2a',
       messageId: publicMessage.id,
       campTurnId: 'turn-a2a',
+      taskId: null,
       recipientAgentId: 'agent_2',
       recipientCanonicalPosition: 0,
       status: 'settled',
@@ -1648,7 +1668,7 @@ describe('task event projections', () => {
     expect(campConversationTimeline([publicMessage]).map((item) => item.id)).toEqual([publicMessage.id])
 
     const snapshot: CampSnapshot = {
-      schemaVersion: 24,
+      schemaVersion: 25,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-a2a', title: 'Agent 协作', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1657,11 +1677,11 @@ describe('task event projections', () => {
       },
       members: [{
         agentId: 'agent_1', displayName: '洛可', teamRole: 'Lead',
-        avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', profilePresence: 'present',
+        avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', leaveRequestedAt: null, profilePresence: 'present',
         memberOrder: 0, isDefaultLead: true, version: 1
       }, {
         agentId: 'agent_2', displayName: '沐瓦', teamRole: '开发者',
-        avatarRef: null, accent: '#39777a', membershipStatus: 'active', profilePresence: 'present',
+        avatarRef: null, accent: '#39777a', membershipStatus: 'active', leaveRequestedAt: null, profilePresence: 'present',
         memberOrder: 1, isDefaultLead: false, version: 1
       }],
       tasks: [],
@@ -1725,7 +1745,7 @@ describe('task event projections', () => {
 
   it('renders lightweight Task records as editable long-lived responsibilities', () => {
     const snapshot: CampSnapshot = {
-      schemaVersion: 24,
+      schemaVersion: 25,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-task', title: 'Task 管理', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1734,13 +1754,15 @@ describe('task event projections', () => {
       },
       members: [{
         agentId: 'agent_2', displayName: '沐瓦', teamRole: '开发者',
-        avatarRef: null, accent: '#39777a', membershipStatus: 'active', profilePresence: 'present', memberOrder: 0,
+        avatarRef: null, accent: '#39777a', membershipStatus: 'active', leaveRequestedAt: null, profilePresence: 'present', memberOrder: 0,
         isDefaultLead: true, version: 1
       }],
       tasks: [{
-        id: 'task-1', title: '实现 Task 工具', description: '跨消息持续跟踪，不自动唤醒负责人。',
+        taskId: 'task-1', campId: 'camp-task', title: '实现 Task 工具', description: '跨消息持续跟踪，不自动唤醒负责人。',
+        acceptanceCriteria: [], blockedReason: null, completionSummary: null, cancelReason: null,
         status: 'pending', assigneeAgentId: 'agent_2', createdByType: 'user',
-        createdById: 'local-user', sourceAgentRunId: null, version: 1,
+        createdById: 'local-user', sourceAgentRunId: null, closedByType: null,
+        closedById: null, closedByAgentRunId: null, version: 1,
         createdAt: '2026-07-23T00:00:00Z', updatedAt: '2026-07-23T00:00:00Z',
         closedAt: null, availableActions: ['update']
       }],

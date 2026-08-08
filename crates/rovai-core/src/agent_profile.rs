@@ -16,6 +16,7 @@ use crate::{
         AdapterRuntimeResolutionInput, AgentRuntimeAdapterRegistry, ExecutableFileIdentity,
         observe_executable_file_identity,
     },
+    collaboration::end_camp_membership,
     command::{
         CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
         DomainCommandGateway, EntityReference, canonical_json_digest, sealed,
@@ -603,6 +604,9 @@ pub struct MemberRemovalPreview {
     pub display_name: String,
     pub version: i64,
     pub non_terminal_agent_run_count: i64,
+    pub current_camp_membership_count: i64,
+    pub open_assigned_task_count: i64,
+    pub default_lead_camp_count: i64,
     pub removable: bool,
 }
 
@@ -1792,7 +1796,15 @@ impl AgentProfileService {
                         JOIN conversation
                           ON conversation.id = agent_run.conversation_id
                         WHERE conversation.agent_id = profile.id
-                          AND agent_run.status IN ('queued', 'running', 'waiting'))
+                          AND agent_run.status IN ('queued', 'running', 'waiting')),
+                       (SELECT COUNT(*) FROM camp_member
+                        WHERE agent_id = profile.id AND status = 'active'
+                          AND leave_requested_at IS NULL),
+                       (SELECT COUNT(*) FROM task
+                        WHERE assignee_agent_id = profile.id
+                          AND status IN ('pending', 'in_progress', 'blocked')),
+                       (SELECT COUNT(*) FROM camp
+                        WHERE default_lead_agent_id = profile.id)
                 FROM agent_profile AS profile
                 WHERE profile.id = ?1 AND profile.profile_status <> 'removed'
                 "#,
@@ -1804,6 +1816,9 @@ impl AgentProfileService {
                         display_name: row.get(1)?,
                         version: row.get(2)?,
                         non_terminal_agent_run_count,
+                        current_camp_membership_count: row.get(4)?,
+                        open_assigned_task_count: row.get(5)?,
+                        default_lead_camp_count: row.get(6)?,
                         removable: non_terminal_agent_run_count == 0,
                     })
                 },
@@ -1880,6 +1895,28 @@ impl AgentProfileService {
                 ));
             }
             let now = chrono::Utc::now().to_rfc3339();
+            let current_camps = {
+                let mut statement = transaction.prepare(
+                    r#"
+                    SELECT camp_id FROM camp_member
+                    WHERE agent_id = ?1 AND status = 'active'
+                    ORDER BY camp_id
+                    "#,
+                )?;
+                statement
+                    .query_map([&envelope.payload.agent_id], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            for camp_id in current_camps {
+                end_camp_membership(
+                    transaction,
+                    &camp_id,
+                    &envelope.payload.agent_id,
+                    &envelope.actor,
+                    envelope.execution_epoch,
+                    &now,
+                )?;
+            }
             transaction.execute(
                 r#"
                 UPDATE agent_profile

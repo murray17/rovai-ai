@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.46
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -15,6 +15,8 @@ last_updated: 2026-08-08
 > 业务信息不丢失和真实 Runtime 证据为准。
 >
 > 前置版本：[v0.45 显式 A2A 与公共输出重构](../v0.45/README.md)
+>
+> 后续版本：[v0.47 Durable Task v2 与责任准入边界](../v0.47/README.md)
 >
 > 主要决策：[ADR-0135](../../adr/0135-compact-agent-output-over-canonical-built-in-tool-envelope.md)
 >；相关长期边界：[ADR-0124](../../adr/0124-cli-only-transport-for-rovai-built-in-operations.md)、

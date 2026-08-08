@@ -359,6 +359,8 @@ struct DispatchDelivery {
     message_sequence: i64,
     recipient_agent_id: String,
     task_id: Option<String>,
+    task_version_at_admission: Option<i64>,
+    assignee_agent_id_at_admission: Option<String>,
     source_agent_run_id: String,
     a2a_root_agent_run_id: String,
     a2a_depth: i64,
@@ -562,19 +564,28 @@ pub fn persist_public_a2a_message(
             }),
         ));
     }
-    let linked_task_id = validate_task_link(
-        transaction,
-        request.camp_id,
-        effective_recipients.first().map(String::as_str),
-        request.task_id,
-    )?;
-    if request.task_id.is_some() && linked_task_id.is_none() {
+    let task_admission = if let (Some(task_id), Some(recipient_agent_id)) =
+        (request.task_id, effective_recipients.first())
+    {
+        crate::collaboration::task_link_admission(
+            transaction,
+            task_id,
+            request.camp_id,
+            recipient_agent_id,
+        )?
+    } else {
+        None
+    };
+    if request.task_id.is_some() && task_admission.is_none() {
         return Ok(rejected_with_details(
             "message.invalid_task",
             "taskId must identify a non-terminal Task assigned to the sole recipient in this Camp",
             json!({"newRequestIdRequired": true}),
         ));
     }
+    let linked_task_id = task_admission
+        .as_ref()
+        .map(|_| request.task_id.expect("admitted Task"));
 
     let now_instant = camp_turn_execution_budget_now();
     let now = now_instant.to_rfc3339();
@@ -808,6 +819,8 @@ pub fn persist_public_a2a_message(
             "messageBodyDigest": content_digest,
             "replyToCampMessageId": request.reply_to_camp_message_id,
             "taskId": linked_task_id,
+            "taskVersionAtAdmission": task_admission.as_ref().map(|value| value.task_version),
+            "assigneeAgentIdAtAdmission": task_admission.as_ref().map(|value| value.assignee_agent_id.as_str()),
             "sourceAgentRunId": request.source_agent_run_id,
             "a2aRootAgentRunId": root_agent_run_id,
             "a2aDepth": target_depth,
@@ -821,6 +834,7 @@ pub fn persist_public_a2a_message(
                 recipient_agent_id, recipient_canonical_position,
                 recipient_digest, message_body_digest,
                 reply_to_camp_message_id, task_id,
+                task_version_at_admission, assignee_agent_id_at_admission,
                 source_agent_run_id, a2a_root_agent_run_id, a2a_depth,
                 ancestor_agent_ids_json, recipient_presentation_snapshot_json,
                 frozen_snapshot_json, queue_sequence,
@@ -832,7 +846,7 @@ pub fn persist_public_a2a_message(
                 version, created_at, updated_at, ended_at
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
-                ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
+                ?9, ?10, ?19, ?20, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
                 'pending', 'never_attempted', NULL,
                 0, NULL, NULL, NULL, NULL, 0, 0, NULL, NULL,
                 1, ?18, ?18, NULL
@@ -857,6 +871,10 @@ pub fn persist_public_a2a_message(
                 serde_json::to_string(&frozen_snapshot)?,
                 queue_sequence,
                 now,
+                task_admission.as_ref().map(|value| value.task_version),
+                task_admission
+                    .as_ref()
+                    .map(|value| value.assignee_agent_id.as_str()),
             ],
         )?;
         crate::collaboration::append_domain_event(
@@ -1587,6 +1605,7 @@ fn process_dispatch_attempt(
         r#"
         INSERT INTO agent_run(
             id, camp_turn_id, conversation_id, task_id,
+            task_version_at_admission, assignee_agent_id_at_admission,
             trigger_camp_message_id, trigger_message_delivery_id, input_ready_at,
             initial_camp_context_through_sequence,
             initial_conversation_context_through_sequence,
@@ -1616,7 +1635,7 @@ fn process_dispatch_attempt(
             invocation_kind, a2a_parent_agent_run_id,
             a2a_root_agent_run_id, a2a_depth
         ) VALUES (
-            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+            ?1, ?2, ?3, ?4, ?34, ?35, ?5, ?6, ?7, ?8, ?9,
             ?10, 0, NULL, 'initial', ?11, ?12, 'required',
             ?13, ?14, 'runtime_managed_v2',
             ?15, ?16, ?17, ?18, ?19, ?20,
@@ -1669,6 +1688,8 @@ fn process_dispatch_attempt(
             delivery.source_agent_run_id,
             delivery.a2a_root_agent_run_id,
             delivery.a2a_depth,
+            delivery.task_version_at_admission,
+            delivery.assignee_agent_id_at_admission,
         ],
     )?;
     let attempt_updated = transaction.execute(
@@ -1742,6 +1763,8 @@ fn load_dispatch_delivery(
             SELECT delivery.id, delivery.camp_id, delivery.camp_turn_id,
                    delivery.message_id, message.sequence,
                    delivery.recipient_agent_id, delivery.task_id,
+                   delivery.task_version_at_admission,
+                   delivery.assignee_agent_id_at_admission,
                    delivery.source_agent_run_id, delivery.a2a_root_agent_run_id,
                    delivery.a2a_depth, delivery.retry_generation
             FROM message_delivery AS delivery
@@ -1760,10 +1783,12 @@ fn load_dispatch_delivery(
                     message_sequence: row.get(4)?,
                     recipient_agent_id: row.get(5)?,
                     task_id: row.get(6)?,
-                    source_agent_run_id: row.get(7)?,
-                    a2a_root_agent_run_id: row.get(8)?,
-                    a2a_depth: row.get(9)?,
-                    retry_generation: row.get(10)?,
+                    task_version_at_admission: row.get(7)?,
+                    assignee_agent_id_at_admission: row.get(8)?,
+                    source_agent_run_id: row.get(9)?,
+                    a2a_root_agent_run_id: row.get(10)?,
+                    a2a_depth: row.get(11)?,
+                    retry_generation: row.get(12)?,
                 })
             },
         )
@@ -1965,30 +1990,6 @@ fn ensure_delivery_conversation(
         params![conversation_id, camp_id, recipient_agent_id, now],
     )?;
     Ok(conversation_id)
-}
-
-fn validate_task_link(
-    transaction: &Transaction<'_>,
-    camp_id: &str,
-    recipient_agent_id: Option<&str>,
-    task_id: Option<&str>,
-) -> Result<Option<String>> {
-    let Some(task_id) = task_id else {
-        return Ok(None);
-    };
-    let valid = transaction
-        .query_row(
-            r#"
-            SELECT id
-            FROM task
-            WHERE id = ?1 AND camp_id = ?2 AND assignee_agent_id = ?3
-              AND status IN ('pending', 'in_progress')
-            "#,
-            params![task_id, camp_id, recipient_agent_id],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?;
-    Ok(valid)
 }
 
 fn load_active_camp_agent_ids(

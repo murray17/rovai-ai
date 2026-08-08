@@ -9,10 +9,14 @@ last_updated: 2026-08-08
 # Built-in Tool Runtime Architecture
 
 本文件说明 Rovai built-in operations 的长期组件结构。当前字段与版本以
-[Built-in Tool Transport v3](../contracts/builtin-tool-transport-v3.md) 和
-[Camp Message Send v2](../contracts/camp-message-send-v2.md) 为准；v0.45 的 v2/send-v1 文档只
-保留历史语义。决策理由见 [ADR-0124](../adr/0124-cli-only-transport-for-rovai-built-in-operations.md)
-与 [ADR-0135](../adr/0135-compact-agent-output-over-canonical-built-in-tool-envelope.md)。
+[Built-in Tool Transport v4](../contracts/builtin-tool-transport-v4.md)、
+[Durable Task v2](../contracts/durable-task-v2.md) 和
+[Camp Message Send v2](../contracts/camp-message-send-v2.md) 为准；v3 及更早 Transport 只保留
+historical 语义。决策理由见
+[ADR-0124](../adr/0124-cli-only-transport-for-rovai-built-in-operations.md)、
+[ADR-0135](../adr/0135-compact-agent-output-over-canonical-built-in-tool-envelope.md)、
+[ADR-0136](../adr/0136-durable-task-v2-responsibility-and-coordination-authority.md)与
+[ADR-0137](../adr/0137-one-time-task-linked-responsibility-admission.md)。
 
 ## 总体路径
 
@@ -65,11 +69,11 @@ Core 只维护一份 catalog。它服务 IPC 校验、合同测试、Qualificati
 identity 不构成 Agent discovery 协议。
 
 Agent Runtime 没有 `rovai tool list`、`rovai tool describe`、隐藏 discovery、`tool invoke` 或
-`tool call`。Agent 只使用十二个固定业务命令：
+`tool call`。Agent 只使用十三个固定业务命令：
 
 ```text
 rovai send
-rovai task create|list|update
+rovai task create|get|update|list
 rovai camp list|search|read
 rovai history search
 rovai memory search|read|write|propose-hearth
@@ -86,8 +90,17 @@ rovai memory search|read|write|propose-hearth
 | Operation | Projection |
 | --- | --- |
 | `camp.message.send` | `{messageId, effectiveRecipients}` |
+| `team.create_task` | `{taskId, title, status, assigneeAgentId, version, availableActions}` |
+| `team.get_task` | 完整 `TaskDetail` |
+| `team.update_task` | `{taskId, title, status, assigneeAgentId, version, changed, availableActions}` |
+| `team.list_tasks` | 紧凑 `TaskListPage` |
 | `memory.write` | `{memoryId, revisionId}` |
-| 其余十项 | 去除 Envelope wrapper 后的 canonical result |
+| 其余七项 | 去除 Envelope wrapper 后的 canonical result |
+
+Task service 在 mutation 事务中形成完整 exact-version `TaskDetail` canonical result，并由
+Command Gateway 持久化后才交给 Transport projection。CLI 不能在 commit 后重新读取 live Task，
+也不能从 compact stdout 反推、补造或覆盖 Core result。Get/List 的不同结果层次属于 Task
+Read Side 合同，不是 generic projection heuristic。
 
 每项 projection 都有闭合的 `agentOutputSchema` 和 golden fixture；对象外字段被拒绝。边界规则
 只防止透传 Envelope-owned `contractVersion`、`ok`、`operation`、`requestId`、`receipt` 和
@@ -143,7 +156,8 @@ Session Charter 只说明：
 - 使用 bundled `rovai`；
 - 固定业务命令和 `<command> --help`；
 - `camp.message.send` 使用当前 Run Camp，不能传入 Camp ID；
-- Task、Public Message、Message Delivery、Memory 和 read 工具的稳定业务原则；
+- Task mutation 不通知或启动成员，Task get/list 不等待或轮询；Public Message、Message
+  Delivery、Memory 和 read 工具保持各自稳定业务原则；
 - Dynamic Context 可能截断，应遵循 canonical `retrieveWith`；公共 A2A 遵循 Profile v2 的 bounded
   reference closure。
 
@@ -179,5 +193,5 @@ Activity。命令文本、时间、cwd 或输出相似度不能建立关联。Sh
   退出码 `3`，必须先确认当前状态；
 - `camp.message.send` 的内部 Camp 不变量失败：fail closed，不加入稳定 Agent error contract；
 - external MCP 失败：遵循其独立 non-blocking degradation，不回退为 built-in MCP；
-- 任一正式 Runtime 未通过 v3 command、projection、replay、fence 和 negative-path 验收：版本不
+- 任一正式 Runtime 未通过 v4 command、projection、replay、fence 和 negative-path 验收：版本不
   得完成。

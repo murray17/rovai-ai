@@ -67,13 +67,22 @@ Approval。该范围只吸收外部 HTML 的会话区关键交互，现有 Arcti
 导航、Composer、Approval、断点和无障碍合同优先；实现状态见[v0.45 实施计划](../versions/v0.45/implementation-plan.md)。
 原型入口：[Scheme C 会话区原型](../prototypes/run-activity/README.md)。
 
+v0.47 保留 v0.38 的创建位置唯一实时 Task 卡，并把它升级为五态；会话卡继续只显示状态、
+标题和负责人。Inspector list 负责 compact 发现，detail 负责完整责任/审计并只读派生 Related
+execution，现有 Run UI 继续拥有执行事实。编辑器按 projected final state 展示条件字段，
+terminal Task 只读，version conflict 保留草稿且不自动 replay。永久移除队员使用中文 preview，
+在无非终态 AgentRun 时由 Core 原子结束全部 Current CampMembership 并释放未完成 Task。
+完整合同见[v0.47 生产设计](../versions/v0.47/production-design.md)；实现尚未开始，状态见
+[v0.47 实施计划](../versions/v0.47/implementation-plan.md)。
+
 ## 权威边界
 
 1. 有效 ADR、`CONTEXT.md`、Core 合同和安全边界决定领域语义与可执行行为。
 2. [Arctic Dawn V3](arctic-dawn.md)决定 Renderer 信息架构、视觉 Token、组件层级、
    产品文案、交互和适配。
-3. [v0.38](../versions/v0.38/README.md)决定当前 Task 卡片的局部替代合同；全局当前
-   版本由[文档导航](../README.md)指向，实施状态只能从代码、测试和版本验收证据判断。
+3. [v0.47 生产设计](../versions/v0.47/production-design.md)决定当前 Task 卡、Inspector、
+   冲突恢复和删除确认合同；它保留 [v0.38](../versions/v0.38/README.md)的唯一实时卡模型。
+   全局当前版本由[文档导航](../README.md)指向，实施状态只能从代码、测试和版本验收证据判断。
 4. 原型与 HTML 样例只帮助评审视觉层级，不是生产合同、数据真源或可直接复制的代码。
 
 发生冲突时不得用视觉稿覆盖领域或安全合同，也不得用当前旧代码反向覆盖已经冻结的
@@ -138,7 +147,8 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   纯文本消息不得拦截原生文本选择。整条消息的复制入口仍位于正文下方，仅在悬停或
   键盘聚焦正文区域时显示；消息轨道与 Composer 在 Inspector 展开或隐藏时始终同宽、同轴。
 - 命令、文件操作及其失败是处理过程内可展开的 Tool Call；每个 Task 在创建位置只投影
-  一张读取当前标题、负责人和状态的实时卡片。
+  一张读取当前五态文字、标题和负责人的实时卡片。Inspector list/detail 与现有 Run UI
+  分别承担发现、完整责任审计和执行事实，不能合并进卡片。
 - Approval 不进入消息区。所有 pending 请求进入 Composer 正上方的非模态停靠式审批
   弹框，多项聚合显示“N 项待审批”，并保留各 Runtime 的原生选项、范围和决定身份。
 - Approval Dock 始终位于 Composer 正上方；Drawer 空间不足时退化为摘要/收起态，不能遮挡
@@ -152,6 +162,8 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   原生权限字段，Product Runtime、模型和权限通过唯一的“保存运行时”原子保存。
 - 队员详情在运行配置后只保留 Memory Capability 和危险区，不渲染“高级设置”或
   摘要模型配置入口；这不删除或折叠 Member Runtime Parameters。
+- 永久移除队员在存在非终态 AgentRun 时阻塞；否则确认界面以中文展示将离开的 Camp 与
+  将释放的未完成 Task 数量，Core 在一个事务中完成全部 membership/Task/Lead 收口。
 - Runtime 检查与缓存由 Core 后台统一管理；队员页和 Agent 运行时设置只展示可操作结果，
   不显示“已找到”“尚未检查”等内部探测阶段，也不在配置保存时同步完整检查。
 - 记忆、技能、Agent 运行时、外观、诊断和创建新对话 Dialog 以 Arctic Dawn 详规为准；
@@ -230,3 +242,5 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   reduced-motion 已通过 Core、Renderer 和隔离打包 App 验收。
 - [ ] v0.45 Run Pulse、Execution Drawer、Inspector Activity 页删除、Approval layering 与
   CampTurn Stop 的生产实现和打包 App 验收。
+- [ ] v0.47 五态实时 Task 卡、compact list、完整 detail/Related execution、projected-state
+  Editor、冲突草稿恢复、terminal read-only 与中文成员删除确认的生产实现和打包 App 验收。

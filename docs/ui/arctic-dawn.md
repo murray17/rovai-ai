@@ -3,9 +3,9 @@ document_type: ui-design-system
 authority: renderer-ui-detail
 status: accepted
 design_direction: arctic-dawn-v3
-target_version: v0.45
+target_version: v0.47
 implementation_status: in_progress
-last_updated: 2026-08-07
+last_updated: 2026-08-08
 ---
 
 # Arctic Dawn V3 设计规范
@@ -27,6 +27,13 @@ v0.45 进一步冻结 Scheme C 会话区：Run Pulse 只作常驻摘要，Execut
 Drawer 不提供 Run 级 Stop，活跃 CampTurn 的停止入口仍只在 Composer 发送位置，并 fence
 整棵 AgentRun/Message Delivery 执行树。外部 HTML 只提供会话区关键层级参考，不能覆盖本
 Arctic Dawn Shell、Token、导航或无障碍合同。
+
+v0.47 进一步冻结 Durable Task v2 的四层界面：会话卡只作五态责任感知，Inspector list
+负责发现，Inspector detail 负责完整责任与审计，现有 Run UI 负责执行事实。Task 取消不等于
+执行取消，terminal Task 只读，version conflict 保留用户草稿；永久移除队员使用中文影响
+preview，并由 Core 在一个事务中完成 membership/Task/Lead 收口。版本级细节以
+[v0.47 生产设计](../versions/v0.47/production-design.md)为准，生产实现状态以对应实施计划和
+代码证据判断。
 
 ## 权威边界
 
@@ -330,8 +337,9 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
   不进入 Renderer，即使 Runtime 主动提供也不展示。Core 可以继续按 ADR-0061 保存相应权威
   Evidence，但 Renderer 不提供正文或“查看完整思考摘要”入口，也不在 Runtime 没有报告时
   补造步骤。终态后折叠不改变持久证据或 Inspector 状态。
-- Task 卡显示当前标题、负责人和四态，不显示描述、百分比或关联 Run 状态；点击后读取
-  Inspector 中的当前 Task。完成、取消及普通更新都不创建额外 Task 节点。
+- Task 卡只显示当前五态中文文字、标题和负责人，不显示描述、验收条件、关闭说明、审计、
+  百分比或关联 Run 状态；点击后读取 Inspector 中的当前 Task。阻塞、完成、取消、自动释放
+  及普通更新都只原地刷新，不创建额外 Task 节点、移动卡片或重排会话。
 - Approval 保留独立交互语义，但不混入消息区。所有 pending Approval 固定显示在
   Composer 正上方的非模态停靠式审批弹框（Approval Dock）；单项直接展示请求，多项
   聚合为“N 项待审批”并按权威顺序提供逐项展开与处理。弹框高度有上限并内部滚动，
@@ -554,8 +562,14 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   的时间、Actor、动作、目标、结果和证据。
 - Execution Drawer 使用“运行中 / 等待审批 / 已完成 / 失败 / 已停止 / 恢复中”等本地化
   文字，不显示原型的 `DONE`；流式更新合并播报，不能通过 `aria-live` 逐字朗读。
-- “任务”显示当前 Task 列表、负责人、状态与完整详情，并承担从会话实时 Task 卡进入
-  当前状态的目标。
+- “任务”列表使用 compact item 显示标题、状态、负责人、单行 preview 与验收条件数量；详情
+  显示完整 description、ordered Criteria、creator/source Run、version/timestamps、条件说明、
+  closure 与 audit cause。只读 Related execution 从 CampSnapshot 的 Run/Delivery 关系派生并
+  进入现有 Run 详情，不能成为 TaskRecord 或反向改变 Task。
+- Task editor 按表单 projected final state 动态要求 blocker/completion/cancel 字段；terminal
+  Task 完全只读。Version conflict 刷新最新详情、保留未提交草稿，不自动 replay 旧 patch。
+- User/Default Lead 的“取消 Task”仍提交 versioned update，必须填写原因并明确“取消 Task 不会
+  取消已经接受或正在运行的 AgentRun”；普通 Agent 不显示该入口。
 - “任务”“审批”分别投影当前 Task 与 Approval 权威状态；“审批”页与 Composer
   上方固定面板读取同一 pending 队列，不复制或重排决定。计数徽标只在数量大于 0
   时显示。
@@ -680,8 +694,12 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 - 编辑时选择内置外观只替换 appearance；新增时预设可以填入可继续编辑的外观与
   建议身份文字，但不能复用身份、权限、Presence、Capability 或 Runtime 关系。
 - Member Name 全局唯一；错误与并发冲突保留草稿和焦点。
-- 危险区“永久移除队员”要求明确二次确认并说明不可恢复。非终态 AgentRun 是唯一
-  blocker；移除保留头像、Runtime 配置、Memory、Camp 关系、Task、Run 和历史身份。
+- 危险区“永久移除队员”要求明确二次确认并说明不可恢复。`queued/running/waiting` AgentRun
+  是唯一 blocker；存在时用中文提示用户先等待或停止运行。不存在时 preview 至少说明
+  “将从 N 个 Camp 移除，并释放 M 个未完成 Task”，Core 再原子结束全部 Current
+  CampMembership、释放 Task、收口 Default Lead 并标记 removed；UI 不要求逐个 Camp 离开。
+- 移除继续保留头像、Runtime 配置、Memory、历史 Camp 关系、terminal Task、Run 和身份；
+  被释放的非终态 Task 通过 audit 说明 membership ending，不伪装成 Agent 主动修改。
 - 历史消息、Task 和 AgentRun 继续显示 removed 队员原姓名、角色与头像，但身份位
   不可再打开详情，也不进入 `@`、Lead、Task 或新 Camp 候选。
 

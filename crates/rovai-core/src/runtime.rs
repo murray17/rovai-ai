@@ -730,6 +730,7 @@ impl ExecutionRuntimeService {
               AND agent_run.cancel_requested_at IS NULL
               AND camp_member.status = 'active'
               AND camp_member.leave_requested_at IS NULL
+              AND agent_profile.profile_status = 'present'
               AND camp_turn.status IN ('running', 'waiting')
               AND camp_turn.cancel_requested_at IS NULL
               AND camp_turn.execution_budget_exhausted_at IS NULL
@@ -761,15 +762,6 @@ impl ExecutionRuntimeService {
                     AND (earlier_run.created_at < agent_run.created_at
                          OR (earlier_run.created_at = agent_run.created_at
                              AND earlier_run.id < agent_run.id))
-              )
-              AND (
-                  agent_run.task_id IS NULL
-                  OR EXISTS (
-                      SELECT 1 FROM task
-                      WHERE task.id = agent_run.task_id
-                        AND task.camp_id = camp.id
-                        AND task.status IN ('pending', 'in_progress')
-                  )
               )
             ORDER BY agent_run.created_at, agent_run.id
             LIMIT ?2
@@ -1147,7 +1139,7 @@ impl ExecutionRuntimeService {
             if !run.member_active {
                 return Ok(rejected(
                     "agent_run.member_unavailable",
-                    "Agent is no longer an active Camp member",
+                    "Agent is no longer an executable current Camp member",
                 ));
             }
             if !current_authorization_covers_snapshot(
@@ -1158,14 +1150,6 @@ impl ExecutionRuntimeService {
                 return Ok(rejected(
                     "agent_run.authorization_revoked",
                     "Current Camp authorization no longer covers the frozen AgentRun",
-                ));
-            }
-            if let Some(task_id) = run.task_id.as_deref()
-                && !task_is_executable(transaction, task_id, &run.camp_id)?
-            {
-                return Ok(rejected(
-                    "agent_run.task_blocked",
-                    "Task is no longer executable",
                 ));
             }
             if run.status == "waiting" && has_recovery_safety_blocker(transaction, &run.id)? {
@@ -1283,16 +1267,6 @@ impl ExecutionRuntimeService {
                 "#,
                 params![run.conversation_id, now_text],
             )?;
-            if let Some(task_id) = run.task_id.as_deref() {
-                transaction.execute(
-                    r#"
-                    UPDATE task SET status = 'in_progress', version = version + 1,
-                        updated_at = ?2
-                    WHERE id = ?1 AND status = 'pending'
-                    "#,
-                    params![task_id, now_text],
-                )?;
-            }
             append_domain_event(
                 transaction,
                 "agent_run.claimed",
@@ -3224,7 +3198,6 @@ struct ClaimableRun {
     camp_id: String,
     camp_turn_id: String,
     conversation_id: String,
-    task_id: Option<String>,
     input_ready_at: Option<String>,
     effective_config: Value,
     workspace: Option<Value>,
@@ -3261,6 +3234,7 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                    camp_turn.execution_budget_deadline_at,
                    CASE WHEN camp_member.status = 'active'
                              AND camp_member.leave_requested_at IS NULL
+                             AND agent_profile.profile_status = 'present'
                         THEN 1 ELSE 0 END,
                    agent_profile.default_capabilities_json,
                    camp_member.capability_overrides_json
@@ -3308,7 +3282,7 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                 camp_id,
                 camp_turn_id,
                 conversation_id,
-                task_id,
+                _task_id,
                 input_ready_at,
                 effective_config,
                 workspace,
@@ -3331,7 +3305,6 @@ fn load_claimable_run(transaction: &Transaction<'_>, run_id: &str) -> Result<Opt
                     camp_id,
                     camp_turn_id,
                     conversation_id,
-                    task_id,
                     input_ready_at,
                     effective_config: serde_json::from_str(&effective_config)
                         .context("AgentRun effective config is invalid")?,
@@ -3401,21 +3374,6 @@ pub(crate) fn current_authorization_covers_snapshot(
         .iter()
         .filter_map(Value::as_str)
         .all(|capability| current.contains(capability)))
-}
-
-fn task_is_executable(transaction: &Transaction<'_>, task_id: &str, camp_id: &str) -> Result<bool> {
-    let executable: i64 = transaction.query_row(
-        r#"
-        SELECT EXISTS(
-            SELECT 1 FROM task
-            WHERE task.id = ?1 AND task.camp_id = ?2
-              AND task.status IN ('pending', 'in_progress')
-        )
-        "#,
-        params![task_id, camp_id],
-        |row| row.get(0),
-    )?;
-    Ok(executable != 0)
 }
 
 fn has_accepted_runtime_input(transaction: &Transaction<'_>, run_id: &str) -> Result<bool> {
@@ -4982,7 +4940,7 @@ mod tests {
     }
 
     #[test]
-    fn away_members_keep_queued_runs_and_terminal_output_completes_the_turn_once() {
+    fn away_members_keep_responsibility_but_wait_for_presence_before_dispatch() {
         let directory =
             std::env::temp_dir().join(format!("rovai-runtime-fanout-{}", Uuid::new_v4()));
         let workspace = directory.join("workspace");
@@ -5068,6 +5026,29 @@ mod tests {
             )
             .unwrap();
         let runtime = ExecutionRuntimeService::default();
+        assert!(
+            runtime
+                .list_dispatchable_agent_runs(&database, 10)
+                .unwrap()
+                .is_empty(),
+            "accepted responsibility remains queued while Presence is away"
+        );
+        let queued_count: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM agent_run WHERE camp_turn_id = ?1 AND status = 'queued'",
+                [&camp_turn_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(queued_count, 2);
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET profile_status = 'present' WHERE id IN ('agent_2', 'agent_1')",
+                [],
+            )
+            .unwrap();
         let candidates = runtime.list_dispatchable_agent_runs(&database, 10).unwrap();
         assert_eq!(candidates.len(), 2);
         assert_eq!(

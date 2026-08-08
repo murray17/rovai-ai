@@ -19,8 +19,10 @@ Architecture 解释组件如何组成，Version 文档记录交付范围；它�
 
 | 合同 | 权威范围 |
 | --- | --- |
-| [Built-in Tool Transport v3](builtin-tool-transport-v3.md) | v0.46 Agent Result Projection、固定业务命令、Core Envelope/IPC、receipt、错误通道、显式 projection schema 与 catalog 边界 |
-| [Camp Message Send v2](camp-message-send-v2.md) | v0.46 隐式当前 Run Camp、记录身份 Replay、send clean break 与错误合同 |
+| [Built-in Tool Transport v4（当前）](builtin-tool-transport-v4.md) | v0.47 十三项固定业务命令、Core Envelope/IPC、receipt、Agent Output v2、Task projection、错误通道与 clean break |
+| [Durable Task v2（当前）](durable-task-v2.md) | 五态 Task、字段限制、projected final state、可见性/权限、事务、列表、membership 收口、删除级联与 linked admission |
+| [Camp Message Send v2（当前）](camp-message-send-v2.md) | 隐式当前 Run Camp、记录身份 Replay、send clean break 与 A2A 业务错误；v0.47 transport 入口由 v4 合同局部替代 |
+| [Built-in Tool Transport v3 (historical)](builtin-tool-transport-v3.md) | v0.46 十二项命令与 Agent Result Projection v1；不作为 v0.47 Runtime/CLI compatibility 入口 |
 | [Built-in Tool Transport v2 (historical)](builtin-tool-transport-v2.md) | v0.45 Agent CLI、catalog、IPC、Envelope、receipt、幂等、lease 与旧私有 operation clean break |
 | [Camp Message Send v1 (historical)](camp-message-send-v1.md) | v0.45 `camp.message.send` / `rovai send`、Addressing Token、recipient resolution、fanout、lineage 与错误 |
 | [Message Delivery v1](message-delivery-v1.md) | recipient-specific queue、dispatch attempt、waitCondition、interrupted recovery、retry/cancel 与 settlement |

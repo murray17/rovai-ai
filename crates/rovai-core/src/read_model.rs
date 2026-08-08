@@ -14,7 +14,7 @@ use crate::{
     skill_projection::SkillExposureSnapshot,
 };
 
-pub const READ_MODEL_SCHEMA_VERSION: i64 = 24;
+pub const READ_MODEL_SCHEMA_VERSION: i64 = 25;
 pub const EVENT_BATCH_SCHEMA_VERSION: i64 = 9;
 pub const NAVIGATION_SCHEMA_VERSION: i64 = 2;
 pub const EXECUTION_EVIDENCE_PAGE_SCHEMA_VERSION: i64 = 1;
@@ -123,6 +123,7 @@ pub struct CampMemberView {
     pub team_role: String,
     pub accent: String,
     pub membership_status: String,
+    pub leave_requested_at: Option<String>,
     pub profile_presence: String,
     pub member_order: i64,
     pub is_default_lead: bool,
@@ -132,14 +133,22 @@ pub struct CampMemberView {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskView {
-    pub id: String,
+    pub task_id: String,
+    pub camp_id: String,
     pub title: String,
     pub description: String,
+    pub acceptance_criteria: Vec<String>,
     pub status: String,
     pub assignee_agent_id: Option<String>,
+    pub blocked_reason: Option<String>,
+    pub completion_summary: Option<String>,
+    pub cancel_reason: Option<String>,
     pub created_by_type: String,
     pub created_by_id: String,
     pub source_agent_run_id: Option<String>,
+    pub closed_by_type: Option<String>,
+    pub closed_by_id: Option<String>,
+    pub closed_by_agent_run_id: Option<String>,
     pub version: i64,
     pub created_at: String,
     pub updated_at: String,
@@ -470,6 +479,7 @@ pub struct MessageDeliveryView {
     pub id: String,
     pub message_id: String,
     pub camp_turn_id: String,
+    pub task_id: Option<String>,
     pub recipient_agent_id: String,
     pub recipient_canonical_position: i64,
     pub status: String,
@@ -1043,8 +1053,8 @@ fn load_members(
         SELECT camp_member.agent_id, agent_profile.display_name,
                agent_profile.avatar_ref, agent_profile.team_role,
                agent_profile.accent, camp_member.status,
-               agent_profile.profile_status, agent_profile.member_order,
-               camp_member.version
+               camp_member.leave_requested_at, agent_profile.profile_status,
+               agent_profile.member_order, camp_member.version
         FROM camp_member
         JOIN agent_profile ON agent_profile.id = camp_member.agent_id
         WHERE camp_member.camp_id = ?1
@@ -1062,9 +1072,10 @@ fn load_members(
                 team_role: row.get(3)?,
                 accent: row.get(4)?,
                 membership_status: row.get(5)?,
-                profile_presence: row.get(6)?,
-                member_order: row.get(7)?,
-                version: row.get(8)?,
+                leave_requested_at: row.get(6)?,
+                profile_presence: row.get(7)?,
+                member_order: row.get(8)?,
+                version: row.get(9)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()
@@ -1074,8 +1085,10 @@ fn load_members(
 fn load_tasks(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<TaskView>> {
     let mut statement = transaction.prepare(
         r#"
-        SELECT id, title, description, status, assignee_agent_id,
+        SELECT id, camp_id, title, description, acceptance_criteria_json,
+               status, assignee_agent_id, blocked_reason, completion_summary, cancel_reason,
                created_by_type, created_by_id, source_agent_run_id,
+               closed_by_type, closed_by_id, closed_by_agent_run_id,
                version, created_at, updated_at, closed_at
         FROM task
         WHERE camp_id = ?1
@@ -1088,27 +1101,43 @@ fn load_tasks(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<TaskVi
             row.get::<_, String>(1)?,
             row.get::<_, String>(2)?,
             row.get::<_, String>(3)?,
-            row.get::<_, Option<String>>(4)?,
+            row.get::<_, String>(4)?,
             row.get::<_, String>(5)?,
-            row.get::<_, String>(6)?,
+            row.get::<_, Option<String>>(6)?,
             row.get::<_, Option<String>>(7)?,
-            row.get::<_, i64>(8)?,
-            row.get::<_, String>(9)?,
+            row.get::<_, Option<String>>(8)?,
+            row.get::<_, Option<String>>(9)?,
             row.get::<_, String>(10)?,
-            row.get::<_, Option<String>>(11)?,
+            row.get::<_, String>(11)?,
+            row.get::<_, Option<String>>(12)?,
+            row.get::<_, Option<String>>(13)?,
+            row.get::<_, Option<String>>(14)?,
+            row.get::<_, Option<String>>(15)?,
+            row.get::<_, i64>(16)?,
+            row.get::<_, String>(17)?,
+            row.get::<_, String>(18)?,
+            row.get::<_, Option<String>>(19)?,
         ))
     })?;
     let mut result = Vec::new();
     for row in rows {
         let (
             id,
+            task_camp_id,
             title,
             description,
+            acceptance_criteria_json,
             status,
             assignee,
+            blocked_reason,
+            completion_summary,
+            cancel_reason,
             created_by_type,
             created_by_id,
             source_agent_run_id,
+            closed_by_type,
+            closed_by_id,
+            closed_by_agent_run_id,
             version,
             created_at,
             updated_at,
@@ -1120,14 +1149,23 @@ fn load_tasks(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<TaskVi
             vec!["update".to_string()]
         };
         result.push(TaskView {
-            id,
+            task_id: id,
+            camp_id: task_camp_id,
             title,
             description,
+            acceptance_criteria: serde_json::from_str(&acceptance_criteria_json)
+                .context("Task acceptance criteria are invalid")?,
             status,
             assignee_agent_id: assignee,
+            blocked_reason,
+            completion_summary,
+            cancel_reason,
             created_by_type,
             created_by_id,
             source_agent_run_id,
+            closed_by_type,
+            closed_by_id,
+            closed_by_agent_run_id,
             version,
             created_at,
             updated_at,
@@ -1323,7 +1361,7 @@ fn load_message_deliveries(
 ) -> Result<Vec<MessageDeliveryView>> {
     let mut statement = transaction.prepare(
         r#"
-        SELECT id, message_id, camp_turn_id, recipient_agent_id,
+        SELECT id, message_id, camp_turn_id, task_id, recipient_agent_id,
                recipient_canonical_position, status, dispatch_phase,
                wait_condition, dispatch_attempt_count, retry_generation,
                context_manifest_id, target_agent_run_id,
@@ -1340,21 +1378,22 @@ fn load_message_deliveries(
                 id: row.get(0)?,
                 message_id: row.get(1)?,
                 camp_turn_id: row.get(2)?,
-                recipient_agent_id: row.get(3)?,
-                recipient_canonical_position: row.get(4)?,
-                status: row.get(5)?,
-                dispatch_phase: row.get(6)?,
-                wait_condition: row.get(7)?,
-                dispatch_attempt_count: row.get(8)?,
-                retry_generation: row.get(9)?,
-                context_manifest_id: row.get(10)?,
-                target_agent_run_id: row.get(11)?,
-                manual_intervention_required: row.get::<_, i64>(12)? != 0,
-                failure_code: row.get(13)?,
-                version: row.get(14)?,
-                created_at: row.get(15)?,
-                updated_at: row.get(16)?,
-                ended_at: row.get(17)?,
+                task_id: row.get(3)?,
+                recipient_agent_id: row.get(4)?,
+                recipient_canonical_position: row.get(5)?,
+                status: row.get(6)?,
+                dispatch_phase: row.get(7)?,
+                wait_condition: row.get(8)?,
+                dispatch_attempt_count: row.get(9)?,
+                retry_generation: row.get(10)?,
+                context_manifest_id: row.get(11)?,
+                target_agent_run_id: row.get(12)?,
+                manual_intervention_required: row.get::<_, i64>(13)? != 0,
+                failure_code: row.get(14)?,
+                version: row.get(15)?,
+                created_at: row.get(16)?,
+                updated_at: row.get(17)?,
+                ended_at: row.get(18)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?)

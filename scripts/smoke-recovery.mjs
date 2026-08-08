@@ -82,8 +82,7 @@ try {
     commandId: taskCommandId,
     campId,
     title: 'Durable recovery checkpoint',
-    description: 'Must survive a hard Core restart exactly once.',
-    assigneeAgentId: null
+    description: 'Must survive a hard Core restart exactly once.'
   }
   const createdTask = await firstCore.request('tasks.create', taskRequest)
   const taskId = createdTask.payload?.taskId
@@ -129,7 +128,7 @@ try {
   if (finalSnapshot.agentRuns.length !== 1
       || finalSnapshot.turns.length !== 1
       || finalSnapshot.tasks.length !== 1
-      || finalSnapshot.tasks[0].id !== taskId) {
+      || finalSnapshot.tasks[0].taskId !== taskId) {
     throw new Error(`Recovered Camp contains duplicated objects: ${JSON.stringify(finalSnapshot)}`)
   }
   if (finalManifest?.id !== manifestId
@@ -153,7 +152,7 @@ try {
       || afterSecondRestart.messages.length !== finalSnapshot.messages.length
       || afterSecondRestart.contextManifests.length !== 1
       || afterSecondRestart.tasks.length !== 1
-      || afterSecondRestart.tasks[0].id !== taskId
+      || afterSecondRestart.tasks[0].taskId !== taskId
       || afterSecondRestart.agentRuns[0].status !== 'waiting'
       || afterSecondRestart.agentRuns[0].executionEpoch !== originalEpoch) {
     throw new Error(`A clean second restart duplicated durable state: ${JSON.stringify({

@@ -36,9 +36,10 @@ pub fn agent_output_schema(operation: &str) -> Result<Value> {
                 "revisionId": {"type": "string"}
             }
         })),
-        "team.create_task"
+        "team.create_task" => Ok(task_mutation_agent_schema(false)),
+        "team.update_task" => Ok(task_mutation_agent_schema(true)),
+        "team.get_task"
         | "team.list_tasks"
-        | "team.update_task"
         | "camp.list"
         | "camp.search"
         | "camp.read"
@@ -94,9 +95,10 @@ fn project_success(operation: &str, result: &Value) -> Result<Value> {
                 .get("revisionId")
                 .context("memory.write result has no revisionId")?,
         })),
-        "team.create_task"
+        "team.create_task" => project_task_mutation(object, false),
+        "team.update_task" => project_task_mutation(object, true),
+        "team.get_task"
         | "team.list_tasks"
-        | "team.update_task"
         | "camp.list"
         | "camp.search"
         | "camp.read"
@@ -106,6 +108,65 @@ fn project_success(operation: &str, result: &Value) -> Result<Value> {
         | "memory.propose_hearth" => Ok(result.clone()),
         _ => bail!("unknown built-in operation for Agent output projection"),
     }
+}
+
+fn task_mutation_agent_schema(include_changed: bool) -> Value {
+    let mut required = vec![
+        "taskId",
+        "title",
+        "status",
+        "assigneeAgentId",
+        "version",
+        "availableActions",
+    ];
+    if include_changed {
+        required.push("changed");
+    }
+    let mut properties = json!({
+        "taskId": {"type": "string"},
+        "title": {"type": "string"},
+        "status": {"type": "string", "enum": ["pending", "in_progress", "blocked", "completed", "cancelled"]},
+        "assigneeAgentId": {"type": ["string", "null"]},
+        "version": {"type": "integer", "minimum": 1},
+        "availableActions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "enum": ["update", "claim"]}}
+    });
+    if include_changed {
+        properties["changed"] = json!({"type": "boolean"});
+    }
+    json!({
+        "type": "object", "additionalProperties": false,
+        "required": required, "properties": properties
+    })
+}
+
+fn project_task_mutation(object: &Map<String, Value>, include_changed: bool) -> Result<Value> {
+    let mut projected = Map::new();
+    for key in [
+        "taskId",
+        "title",
+        "status",
+        "assigneeAgentId",
+        "version",
+        "availableActions",
+    ] {
+        projected.insert(
+            key.to_string(),
+            object
+                .get(key)
+                .with_context(|| format!("Task mutation result has no {key}"))?
+                .clone(),
+        );
+    }
+    if include_changed {
+        projected.insert(
+            "changed".to_string(),
+            object
+                .get("changed")
+                .context("Task update result has no changed")?
+                .clone(),
+        );
+    }
+    Ok(Value::Object(projected))
 }
 
 fn project_error(error: &BuiltinToolError) -> Result<Value> {
@@ -394,11 +455,11 @@ mod tests {
     #[test]
     fn every_operation_has_a_schema_valid_golden_projection() {
         let golden: Value = serde_json::from_str(include_str!(
-            "../tests/fixtures/builtin-tool-agent-output-v3.json"
+            "../tests/fixtures/builtin-tool-agent-output-v4.json"
         ))
         .unwrap();
         let documents = golden.as_object().unwrap();
-        assert_eq!(documents.len(), 12);
+        assert_eq!(documents.len(), 13);
         for definition in builtin_tool_definitions() {
             let operation = definition["name"].as_str().unwrap();
             let fixture = documents

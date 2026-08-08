@@ -202,9 +202,9 @@ export function campConversationTimeline(
   )
   const taskCards: CampConversationTimelineItem[] = tasks.map((task) => ({
     kind: 'task_card',
-    id: `task:${task.id}`,
+    id: `task:${task.taskId}`,
     createdAt: task.createdAt,
-    timelineGlobalSequence: taskCreatedSequenceById.get(task.id) ?? null,
+    timelineGlobalSequence: taskCreatedSequenceById.get(task.taskId) ?? null,
     task
   }))
   const publicMessages: CampConversationTimelineItem[] = messages
@@ -1033,7 +1033,7 @@ export function CampWorkspace({
                         task={timelineItem.task}
                         assigneeName={taskAssigneeName(timelineItem.task, snapshot)}
                         onOpen={() => {
-                          setFocusedTaskId(timelineItem.task.id)
+                          setFocusedTaskId(timelineItem.task.taskId)
                           setTaskFocusRequest((request) => request + 1)
                           openInspector('tasks')
                         }}
@@ -1213,6 +1213,7 @@ export function CampWorkspace({
                 focusTaskId={focusedTaskId}
                 focusRequest={taskFocusRequest}
                 onTasksChanged={onTasksChanged}
+                onOpenRun={setExecutionDrawerRunId}
               />
             </Tabs.Content>
             <Tabs.Content value="context" className="tab-scroll context-panel">
@@ -2926,37 +2927,46 @@ export function TaskPanel({
   busy,
   focusTaskId = null,
   focusRequest = 0,
-  onTasksChanged
+  onTasksChanged,
+  onOpenRun = () => {}
 }: {
   snapshot: CampSnapshot
   busy: boolean
   focusTaskId?: string | null
   focusRequest?: number
   onTasksChanged(): Promise<void>
+  onOpenRun?(runId: string): void
 }): JSX.Element {
   const [mode, setMode] = useState<'list' | 'create' | 'edit'>('list')
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
+  const [acceptanceCriteriaText, setAcceptanceCriteriaText] = useState('')
   const [assigneeAgentId, setAssigneeAgentId] = useState('')
   const [status, setStatus] = useState<TaskStatus>('pending')
+  const [blockedReason, setBlockedReason] = useState('')
+  const [completionSummary, setCompletionSummary] = useState('')
+  const [cancelReason, setCancelReason] = useState('')
   const [expectedVersion, setExpectedVersion] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const selectedTask = selectedTaskId
-    ? snapshot.tasks.find((task) => task.id === selectedTaskId) ?? null
+    ? snapshot.tasks.find((task) => task.taskId === selectedTaskId) ?? null
     : null
   const activeMembers = snapshot.members.filter((member) =>
-    member.membershipStatus === 'active' && member.profilePresence === 'present'
-  )
+    member.membershipStatus === 'active' && member.leaveRequestedAt === null)
 
   const resetForm = (): void => {
     setMode('list')
     setSelectedTaskId(null)
     setTitle('')
     setDescription('')
+    setAcceptanceCriteriaText('')
     setAssigneeAgentId('')
     setStatus('pending')
+    setBlockedReason('')
+    setCompletionSummary('')
+    setCancelReason('')
     setExpectedVersion(0)
     setFormError(null)
   }
@@ -2967,11 +2977,15 @@ export function TaskPanel({
   }
 
   const beginEdit = (task: TaskView): void => {
-    setSelectedTaskId(task.id)
+    setSelectedTaskId(task.taskId)
     setTitle(task.title)
     setDescription(task.description)
+    setAcceptanceCriteriaText(task.acceptanceCriteria.join('\n'))
     setAssigneeAgentId(task.assigneeAgentId ?? '')
     setStatus(task.status)
+    setBlockedReason(task.blockedReason ?? '')
+    setCompletionSummary(task.completionSummary ?? '')
+    setCancelReason(task.cancelReason ?? '')
     setExpectedVersion(task.version)
     setFormError(null)
     setMode('edit')
@@ -2979,7 +2993,7 @@ export function TaskPanel({
 
   useEffect(() => {
     if (!focusTaskId || focusRequest === 0) return
-    const task = snapshot.tasks.find((candidate) => candidate.id === focusTaskId)
+    const task = snapshot.tasks.find((candidate) => candidate.taskId === focusTaskId)
     if (task) {
       beginEdit(task)
     } else {
@@ -2999,7 +3013,8 @@ export function TaskPanel({
         campId: snapshot.camp.id,
         title: title.trim(),
         description: description.trim(),
-        assigneeAgentId: assigneeAgentId || null
+        acceptanceCriteria: parseAcceptanceCriteria(acceptanceCriteriaText),
+        ...(assigneeAgentId ? { assigneeAgentId } : {})
       })
       if (result.status === 'rejected') {
         setFormError(taskCommandMessage(result))
@@ -3017,6 +3032,18 @@ export function TaskPanel({
   const submitUpdate = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
     if (!selectedTask || !title.trim() || submitting || busy) return
+    if ((status === 'in_progress' || status === 'blocked') && !assigneeAgentId) {
+      setFormError('进行中或已阻塞的 Task 必须有负责人。')
+      return
+    }
+    if (status === 'blocked' && !blockedReason.trim()) {
+      setFormError('请填写阻塞原因。')
+      return
+    }
+    if (status === 'completed' && !completionSummary.trim()) {
+      setFormError('请填写完成摘要。')
+      return
+    }
     setSubmitting(true)
     setFormError(null)
     const assignee = assigneeAgentId === (selectedTask.assigneeAgentId ?? '')
@@ -3024,22 +3051,28 @@ export function TaskPanel({
       : assigneeAgentId
         ? { operation: 'assign' as const, agentId: assigneeAgentId }
         : { operation: 'clear' as const }
+    const criteria = parseAcceptanceCriteria(acceptanceCriteriaText)
     try {
       const result = await window.rovai.request<StoredCommandResult>('tasks.update', {
         commandId: crypto.randomUUID(),
         campId: snapshot.camp.id,
-        taskId: selectedTask.id,
+        taskId: selectedTask.taskId,
         expectedVersion,
         title: title.trim(),
         description: description.trim(),
+        acceptanceCriteria: criteria.length > 0
+          ? { operation: 'replace', items: criteria }
+          : { operation: 'clear' },
         status,
-        assignee
+        assignee,
+        blockedReason: status === 'blocked' ? blockedReason.trim() : undefined,
+        completionSummary: status === 'completed' ? completionSummary.trim() : undefined
       })
       if (result.status === 'rejected') {
         if (result.code === 'task.version_conflict') {
           const current = await window.rovai.request<TaskView | null>('tasks.get', {
             campId: snapshot.camp.id,
-            taskId: selectedTask.id
+            taskId: selectedTask.taskId
           })
           if (current) setExpectedVersion(current.version)
           await onTasksChanged()
@@ -3047,6 +3080,34 @@ export function TaskPanel({
         } else {
           setFormError(taskCommandMessage(result))
         }
+        return
+      }
+      resetForm()
+      await onTasksChanged()
+    } catch (error) {
+      setFormError(localizeExecutionEngineTerms(error instanceof Error ? error.message : String(error)))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const submitCancel = async (): Promise<void> => {
+    if (!selectedTask || !cancelReason.trim() || submitting || busy) return
+    setSubmitting(true)
+    setFormError(null)
+    try {
+      const result = await window.rovai.request<StoredCommandResult>('tasks.update', {
+        commandId: crypto.randomUUID(),
+        campId: snapshot.camp.id,
+        taskId: selectedTask.taskId,
+        expectedVersion,
+        status: 'cancelled',
+        cancelReason: cancelReason.trim(),
+        assignee: { operation: 'unchanged' },
+        acceptanceCriteria: { operation: 'unchanged' }
+      })
+      if (result.status === 'rejected') {
+        setFormError(taskCommandMessage(result))
         return
       }
       resetForm()
@@ -3077,6 +3138,7 @@ export function TaskPanel({
           <TaskFields
             title={title}
             description={description}
+            acceptanceCriteriaText={acceptanceCriteriaText}
             assigneeAgentId={assigneeAgentId}
             status="pending"
             members={activeMembers}
@@ -3084,6 +3146,7 @@ export function TaskPanel({
             showStatus={false}
             onTitle={setTitle}
             onDescription={setDescription}
+            onAcceptanceCriteria={setAcceptanceCriteriaText}
             onAssignee={setAssigneeAgentId}
             onStatus={setStatus}
           />
@@ -3098,30 +3161,47 @@ export function TaskPanel({
           <TaskFields
             title={title}
             description={description}
+            acceptanceCriteriaText={acceptanceCriteriaText}
             assigneeAgentId={assigneeAgentId}
             status={status}
+            blockedReason={blockedReason}
+            completionSummary={completionSummary}
+            cancelReason={cancelReason}
             members={activeMembers}
             disabled={terminal || submitting || busy}
             showStatus
             onTitle={setTitle}
             onDescription={setDescription}
+            onAcceptanceCriteria={setAcceptanceCriteriaText}
             onAssignee={setAssigneeAgentId}
             onStatus={setStatus}
+            onBlockedReason={setBlockedReason}
+            onCompletionSummary={setCompletionSummary}
           />
+          <TaskAuditDetail task={selectedTask} snapshot={snapshot} />
+          <RelatedTaskExecution task={selectedTask} snapshot={snapshot} onOpenRun={onOpenRun} />
           {formError && <p className="task-form-error" role="alert">{formError}</p>}
           {terminal
             ? <p className="task-terminal-note">已结束的 Task 保留为只读记录，不能重新打开或删除。</p>
-            : <button className="primary-button task-submit" type="submit" disabled={!title.trim() || submitting || busy}>{submitting ? '正在保存…' : '保存修改'}</button>}
+            : <>
+                <button className="primary-button task-submit" type="submit" disabled={!title.trim() || submitting || busy}>{submitting ? '正在保存…' : '保存修改'}</button>
+                <div className="task-cancel-zone">
+                  <strong>取消 Task</strong>
+                  <p>取消 Task 不会取消已经接受或正在运行的 AgentRun。</p>
+                  <label className="task-field"><span>取消原因</span><textarea value={cancelReason} rows={2} maxLength={4000} disabled={submitting || busy} onChange={(event) => setCancelReason(event.currentTarget.value)} /></label>
+                  <button className="danger-button" type="button" disabled={!cancelReason.trim() || submitting || busy} onClick={() => void submitCancel()}>确认取消 Task</button>
+                </div>
+              </>}
         </form>
       )}
 
       {mode === 'list' && (
         <div className="task-list">
           {snapshot.tasks.map((task) => (
-            <button className="task-list-row" type="button" key={task.id} onClick={() => beginEdit(task)}>
+            <button className="task-list-row" type="button" key={task.taskId} onClick={() => beginEdit(task)}>
               <span className={`task-state-dot state-${task.status}`} aria-hidden="true" />
-              <span className="task-list-copy"><strong>{task.title}</strong><small>{task.description || '没有补充说明'}</small></span>
-              <span className="task-list-meta"><b>{taskStatusLabel(task.status)}</b><small>{taskAssigneeName(task, snapshot)}</small></span>
+              <span className="task-list-copy"><strong>{task.title}</strong><small>{taskListPreview(task) || '没有补充说明'}</small></span>
+              <span className="task-list-meta"><b>{taskStatusLabel(task.status)}</b><small>{taskAssigneeName(task, snapshot)} · {task.acceptanceCriteria.length} 个验收条件</small></span>
             </button>
           ))}
           {snapshot.tasks.length === 0 && <EmptyInline text="普通对话不需要 Task；需要跨消息持续跟踪时再创建。" />}
@@ -3134,27 +3214,41 @@ export function TaskPanel({
 function TaskFields({
   title,
   description,
+  acceptanceCriteriaText,
   assigneeAgentId,
   status,
+  blockedReason = '',
+  completionSummary = '',
+  cancelReason = '',
   members,
   disabled,
   showStatus,
   onTitle,
   onDescription,
+  onAcceptanceCriteria,
   onAssignee,
-  onStatus
+  onStatus,
+  onBlockedReason = () => {},
+  onCompletionSummary = () => {}
 }: {
   title: string
   description: string
+  acceptanceCriteriaText: string
   assigneeAgentId: string
   status: TaskStatus
+  blockedReason?: string
+  completionSummary?: string
+  cancelReason?: string
   members: CampSnapshot['members']
   disabled: boolean
   showStatus: boolean
   onTitle(value: string): void
   onDescription(value: string): void
+  onAcceptanceCriteria(value: string): void
   onAssignee(value: string): void
   onStatus(value: TaskStatus): void
+  onBlockedReason?(value: string): void
+  onCompletionSummary?(value: string): void
 }): JSX.Element {
   const unavailableAssignee = assigneeAgentId
     && !members.some((member) => member.agentId === assigneeAgentId)
@@ -3162,20 +3256,101 @@ function TaskFields({
   return (
     <>
       <label className="task-field"><span>标题</span><input value={title} maxLength={160} required disabled={disabled} onChange={(event) => onTitle(event.currentTarget.value)} /></label>
-      <label className="task-field"><span>说明</span><textarea value={description} rows={4} maxLength={20000} disabled={disabled} onChange={(event) => onDescription(event.currentTarget.value)} placeholder="记录需要跨消息持续跟踪的责任与边界…" /></label>
+      <label className="task-field"><span>说明</span><textarea value={description} rows={4} maxLength={8000} disabled={disabled} onChange={(event) => onDescription(event.currentTarget.value)} placeholder="记录需要跨消息持续跟踪的责任与边界…" /></label>
+      <label className="task-field"><span>验收条件（每行一项，最多 12 项）</span><textarea value={acceptanceCriteriaText} rows={3} maxLength={6000} disabled={disabled} onChange={(event) => onAcceptanceCriteria(event.currentTarget.value)} /></label>
       <div className="task-field-grid">
-        <label className="task-field"><span>负责人</span><select value={assigneeAgentId} disabled={disabled} onChange={(event) => onAssignee(event.currentTarget.value)}><option value="">未分配</option>{unavailableAssignee && <option value={assigneeAgentId}>队员不可用</option>}{members.map((member) => <option value={member.agentId} key={member.agentId}>{member.displayName}</option>)}</select></label>
-        {showStatus && <label className="task-field"><span>状态</span><select value={status} disabled={disabled} onChange={(event) => onStatus(event.currentTarget.value as TaskStatus)}><option value="pending">待处理</option><option value="in_progress">进行中</option><option value="completed">已完成</option><option value="cancelled">已取消</option></select></label>}
+        <label className="task-field"><span>负责人</span><select value={assigneeAgentId} disabled={disabled} onChange={(event) => onAssignee(event.currentTarget.value)}><option value="">未分配</option>{unavailableAssignee && <option value={assigneeAgentId}>队员不可用</option>}{members.map((member) => <option value={member.agentId} key={member.agentId}>{member.displayName}{member.profilePresence === 'away' ? '（离开）' : ''}</option>)}</select></label>
+        {showStatus && <label className="task-field"><span>状态</span><select value={status} disabled={disabled} onChange={(event) => onStatus(event.currentTarget.value as TaskStatus)}><option value="pending">待处理</option><option value="in_progress">进行中</option><option value="blocked">已阻塞</option><option value="completed">已完成</option>{status === 'cancelled' && <option value="cancelled">已取消</option>}</select></label>}
       </div>
+      {showStatus && status === 'blocked' && <label className="task-field"><span>阻塞原因</span><textarea value={blockedReason} rows={3} maxLength={4000} required disabled={disabled} onChange={(event) => onBlockedReason(event.currentTarget.value)} /></label>}
+      {showStatus && status === 'completed' && <label className="task-field"><span>完成摘要</span><textarea value={completionSummary} rows={3} maxLength={4000} required disabled={disabled} onChange={(event) => onCompletionSummary(event.currentTarget.value)} /></label>}
+      {showStatus && status === 'cancelled' && <label className="task-field"><span>取消原因</span><textarea value={cancelReason} rows={3} disabled readOnly /></label>}
     </>
   )
 }
 
 function taskStatusLabel(status: TaskStatus): string {
   if (status === 'in_progress') return '进行中'
+  if (status === 'blocked') return '已阻塞'
   if (status === 'completed') return '已完成'
   if (status === 'cancelled') return '已取消'
   return '待处理'
+}
+
+function parseAcceptanceCriteria(value: string): string[] {
+  return value
+    .split('\n')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 12)
+}
+
+function formatDateTime(value: string): string {
+  return new Intl.DateTimeFormat('zh-CN', {
+    dateStyle: 'short',
+    timeStyle: 'short'
+  }).format(new Date(value))
+}
+
+function taskListPreview(task: TaskView): string {
+  if (task.status === 'blocked') return task.blockedReason ?? ''
+  if (task.status === 'completed') return task.completionSummary ?? ''
+  if (task.status === 'cancelled') return task.cancelReason ?? ''
+  return task.description
+}
+
+function TaskAuditDetail({ task, snapshot }: { task: TaskView; snapshot: CampSnapshot }): JSX.Element {
+  const releaseEvent = [...snapshot.timeline].reverse().find((event) =>
+    event.entityType === 'task'
+      && event.entityId === task.taskId
+      && typeof event.payload === 'object'
+      && event.payload !== null
+      && 'cause' in event.payload
+  )
+  const cause = releaseEvent && typeof releaseEvent.payload === 'object' && releaseEvent.payload !== null
+    ? String((releaseEvent.payload as { cause?: unknown }).cause ?? '')
+    : ''
+  return (
+    <section className="task-detail-section" aria-label="Task 审计信息">
+      <strong>责任与审计</strong>
+      <dl className="task-detail-grid">
+        <div><dt>创建者</dt><dd>{task.createdByType} · {task.createdById}</dd></div>
+        <div><dt>来源 AgentRun</dt><dd>{task.sourceAgentRunId ?? '无'}</dd></div>
+        <div><dt>创建时间</dt><dd>{formatDateTime(task.createdAt)}</dd></div>
+        <div><dt>更新时间</dt><dd>{formatDateTime(task.updatedAt)}</dd></div>
+        <div><dt>结束者</dt><dd>{task.closedByType ? `${task.closedByType} · ${task.closedById}` : '未结束'}</dd></div>
+        <div><dt>结束时间</dt><dd>{task.closedAt ? formatDateTime(task.closedAt) : '未结束'}</dd></div>
+        {cause && <div><dt>审计原因</dt><dd>{cause}</dd></div>}
+      </dl>
+    </section>
+  )
+}
+
+function RelatedTaskExecution({
+  task,
+  snapshot,
+  onOpenRun
+}: {
+  task: TaskView
+  snapshot: CampSnapshot
+  onOpenRun(runId: string): void
+}): JSX.Element {
+  const runs = snapshot.agentRuns.filter((run) => run.taskId === task.taskId)
+  const deliveries = snapshot.messageDeliveries.filter((delivery) => delivery.taskId === task.taskId)
+  return (
+    <section className="task-detail-section" aria-label="关联执行">
+      <strong>关联执行</strong>
+      <p>{runs.length} 个 AgentRun · {deliveries.length} 个 MessageDelivery</p>
+      <div className="task-related-runs">
+        {runs.map((run) => (
+          <button className="quiet-button compact" type="button" key={run.id} onClick={() => onOpenRun(run.id)}>
+            {run.status} · {shortIdentity(run.id)}
+          </button>
+        ))}
+        {runs.length === 0 && <small>尚无关联执行</small>}
+      </div>
+    </section>
+  )
 }
 
 function taskAssigneeName(task: TaskView, snapshot: CampSnapshot): string {

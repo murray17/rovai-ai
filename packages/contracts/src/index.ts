@@ -244,6 +244,9 @@ export interface MemberRemovalPreview {
   displayName: string
   version: number
   nonTerminalAgentRunCount: number
+  currentCampMembershipCount: number
+  openAssignedTaskCount: number
+  defaultLeadCampCount: number
   removable: boolean
 }
 
@@ -575,6 +578,7 @@ export interface CampMemberView {
   teamRole: string
   accent: string
   membershipStatus: 'active' | 'left'
+  leaveRequestedAt: string | null
   profilePresence: MemberPresence
   memberOrder: number
   isDefaultLead: boolean
@@ -582,23 +586,49 @@ export interface CampMemberView {
 }
 
 export interface TaskView {
-  id: string
+  taskId: string
+  campId: string
   title: string
   description: string
-  status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
+  acceptanceCriteria: string[]
+  status: 'pending' | 'in_progress' | 'blocked' | 'completed' | 'cancelled'
   assigneeAgentId: string | null
+  blockedReason: string | null
+  completionSummary: string | null
+  cancelReason: string | null
   createdByType: 'user' | 'agent'
   createdById: string
   sourceAgentRunId: string | null
+  closedByType: 'user' | 'agent' | null
+  closedById: string | null
+  closedByAgentRunId: string | null
   version: number
   createdAt: string
   updatedAt: string
   closedAt: string | null
-  availableActions: Array<'update'>
+  availableActions: Array<'update' | 'claim'>
+}
+
+export interface TaskListItem {
+  taskId: string
+  title: string
+  status: TaskView['status']
+  assigneeAgentId: string | null
+  createdByType: 'user' | 'agent'
+  createdById: string
+  descriptionPreview: string
+  descriptionTruncated: boolean
+  acceptanceCriteriaCount: number
+  statusNotePreview: string | null
+  statusNoteTruncated: boolean
+  version: number
+  createdAt: string
+  updatedAt: string
+  availableActions: Array<'update' | 'claim'>
 }
 
 export interface TaskListPage {
-  tasks: TaskView[]
+  tasks: TaskListItem[]
   nextCursor: string | null
   truncated: boolean
 }
@@ -608,6 +638,11 @@ export type TaskStatus = TaskView['status']
 export type TaskAssigneePatch =
   | { operation: 'unchanged' }
   | { operation: 'assign'; agentId: string }
+  | { operation: 'clear' }
+
+export type TaskAcceptanceCriteriaPatch =
+  | { operation: 'unchanged' }
+  | { operation: 'replace'; items: string[] }
   | { operation: 'clear' }
 
 export type StructuredCampMessageSegment =
@@ -977,7 +1012,7 @@ export interface DomainEventView {
 }
 
 export interface CampSnapshot {
-  schemaVersion: 24
+  schemaVersion: 25
   throughGlobalSequence: number
   camp: {
     id: string
@@ -1006,6 +1041,7 @@ export interface MessageDeliveryView {
   id: string
   messageId: string
   campTurnId: string
+  taskId: string | null
   recipientAgentId: string
   recipientCanonicalPosition: number
   status: 'pending' | 'running' | 'settled' | 'failed' | 'cancelled' | 'interrupted_before_dispatch' | string
