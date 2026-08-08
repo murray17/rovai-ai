@@ -3,7 +3,7 @@ document_type: production-design
 version: v0.49
 authority: desktop-shell-and-renderer-contract
 status: frozen
-implementation_status: not_started
+implementation_status: in_progress
 last_updated: 2026-08-09
 ---
 

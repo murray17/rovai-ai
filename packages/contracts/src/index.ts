@@ -1140,6 +1140,85 @@ export interface AppearanceApi {
   onChanged(listener: (snapshot: AppearanceSnapshot) => void): () => void
 }
 
+export type StartupLocationMode = 'last_location' | 'quick_chat'
+
+export type SettingsSection =
+  | 'general'
+  | 'skills'
+  | 'mcp'
+  | 'runtime'
+  | 'appearance'
+  | 'notifications'
+  | 'diagnostics'
+
+export type MemberWorkspaceLocationTab = 'identity' | 'runtime'
+
+export type RestorableLocation =
+  | { kind: 'quick_chat' }
+  | { kind: 'camp'; campId: string }
+  | { kind: 'members'; agentId: string | null; tab: MemberWorkspaceLocationTab }
+  | { kind: 'memory' }
+
+export interface GeneralPreferencesSnapshot {
+  schemaVersion: 1
+  startupLocationMode: StartupLocationMode
+  lastSettingsSection: SettingsSection
+}
+
+export interface DesktopStartupSnapshot {
+  schemaVersion: 1
+  sessionId: string
+  startupLocationMode: StartupLocationMode
+  lastSettingsSection: SettingsSection
+  restorableLocation: RestorableLocation | null
+  restorableLocationStatus: 'valid' | 'missing' | 'invalid'
+}
+
+export type LoginItemStatus =
+  | 'development'
+  | 'enabled'
+  | 'not-registered'
+  | 'requires-approval'
+  | 'not-found'
+
+export interface LoginItemSnapshot {
+  status: LoginItemStatus
+  checked: boolean
+  effective: boolean
+}
+
+export interface WindowResetCapability {
+  canReset: boolean
+  reason: 'fullscreen' | null
+}
+
+export interface WindowResetResult {
+  performed: boolean
+  reason: 'fullscreen' | null
+}
+
+export interface DesktopSessionApi {
+  getStartupSnapshot(): Promise<DesktopStartupSnapshot>
+  commitRestorableLocation(location: RestorableLocation): Promise<void>
+}
+
+export interface GeneralPreferencesApi {
+  get(): Promise<GeneralPreferencesSnapshot>
+  setStartupLocationMode(mode: StartupLocationMode): Promise<GeneralPreferencesSnapshot>
+  setLastSettingsSection(section: SettingsSection): Promise<GeneralPreferencesSnapshot>
+}
+
+export interface LoginItemApi {
+  get(): Promise<LoginItemSnapshot>
+  setEnabled(enabled: boolean): Promise<LoginItemSnapshot>
+  openSystemSettings(): Promise<void>
+}
+
+export interface WindowControlsApi {
+  getResetCapability(): Promise<WindowResetCapability>
+  resetBounds(): Promise<WindowResetResult>
+}
+
 export interface NavigationPin {
   kind: 'camp' | 'project'
   targetKey: string
@@ -1711,6 +1790,10 @@ export interface RovaiApi {
   request<T>(method: CoreMethod, params?: unknown): Promise<T>
   onEvent(listener: (event: CoreEvent) => void): () => void
   appearance: AppearanceApi
+  desktopSession: DesktopSessionApi
+  generalPreferences: GeneralPreferencesApi
+  loginItem: LoginItemApi
+  windowControls: WindowControlsApi
   navigationPins: NavigationPinsApi
   memberAvatars: MemberAvatarsApi
   composerAttachments: {

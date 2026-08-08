@@ -3,6 +3,9 @@ import type {
   AppearanceSnapshot,
   CoreEvent,
   CoreMethod,
+  RestorableLocation,
+  SettingsSection,
+  StartupLocationMode,
   NavigationPin,
   NavigationPinsSnapshot,
   RovaiApi,
@@ -32,6 +35,44 @@ const api: RovaiApi = {
       ): void => listener(value)
       ipcRenderer.on('rovai:appearance-changed', handler)
       return () => ipcRenderer.removeListener('rovai:appearance-changed', handler)
+    }
+  },
+  desktopSession: {
+    getStartupSnapshot() {
+      return ipcRenderer.invoke('rovai:desktop-session-get-startup')
+    },
+    commitRestorableLocation(location: RestorableLocation) {
+      return ipcRenderer.invoke('rovai:desktop-session-commit-location', location)
+    }
+  },
+  generalPreferences: {
+    get() {
+      return ipcRenderer.invoke('rovai:general-preferences-get')
+    },
+    setStartupLocationMode(mode: StartupLocationMode) {
+      return ipcRenderer.invoke('rovai:general-preferences-set-startup', mode)
+    },
+    setLastSettingsSection(section: SettingsSection) {
+      return ipcRenderer.invoke('rovai:general-preferences-set-section', section)
+    }
+  },
+  loginItem: {
+    get() {
+      return ipcRenderer.invoke('rovai:login-item-get')
+    },
+    setEnabled(enabled: boolean) {
+      return ipcRenderer.invoke('rovai:login-item-set-enabled', enabled)
+    },
+    openSystemSettings() {
+      return ipcRenderer.invoke('rovai:login-item-open-system-settings')
+    }
+  },
+  windowControls: {
+    getResetCapability() {
+      return ipcRenderer.invoke('rovai:window-reset-capability')
+    },
+    resetBounds() {
+      return ipcRenderer.invoke('rovai:window-reset-bounds')
     }
   },
   navigationPins: {

@@ -64,7 +64,8 @@ export function MemoryLibrary({
   focusMemoryId = null,
   proposalDrawerSignal = 0,
   onProposalDrawerSignalConsumed,
-  onPendingCountChange
+  onPendingCountChange,
+  onReady
 }: {
   agents: AgentProfile[]
   topNotices?: ReactNode
@@ -73,6 +74,7 @@ export function MemoryLibrary({
   proposalDrawerSignal?: number
   onProposalDrawerSignalConsumed?(): void
   onPendingCountChange?(count: number): void
+  onReady?(): void
 }): React.JSX.Element {
   const [library, setLibrary] = useState<MemoryLibraryView | null>(null)
   const [proposals, setProposals] = useState<HearthMemoryProposal[]>([])
@@ -98,6 +100,10 @@ export function MemoryLibrary({
     setProposals(nextProposals)
     onPendingCountChange?.(nextProposals.filter((proposal) => proposal.status === 'pending').length)
   }, [onPendingCountChange])
+
+  useEffect(() => {
+    if (library) onReady?.()
+  }, [library, onReady])
 
   useEffect(() => {
     void load().catch((nextError) => setError(errorMessage(nextError)))

@@ -232,7 +232,7 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
 - [x] Camp 阅读流、Tool Call、Task、固定 Approval 队列、Composer 与 Inspector
   符合详规。
 - [x] Header 没有 Stop/`•••`；Sidebar 行操作和 Composer Stop 可键盘访问。
-- [x] Quick Chat 项目式视觉投影、五个覆盖式设置入口与空 Camp 边界状态完整。
+- [x] Quick Chat 项目式视觉投影、七个覆盖式设置入口与空 Camp 边界状态完整。
 - [x] 品牌色、身份色、状态色、证据 Token 没有混用。
 - [x] 对比度、Focus、Dialog、Tabs、Reduced Motion、200% Zoom 通过。
 - [x] 没有旧 Meridian、Lobby、竖向时间轨、旧 Approval 卡或无使用者 CSS/测试。

@@ -10,6 +10,7 @@ import type {
   CampSnapshot,
   CreateCampRequest,
   CoreEvent,
+  DesktopStartupSnapshot,
   EventBatch,
   HealthStatus,
   InAppNotificationInbox,
@@ -18,6 +19,7 @@ import type {
   NavigationCampPage,
   NavigationPin,
   NavigationSnapshot,
+  RestorableLocation,
   HearthMemoryProposal,
   SendCampMessageResult,
   StoredCommandResult,
@@ -53,6 +55,7 @@ import { NotificationSettings } from './NotificationSettings'
 import { SkillSettings } from './SkillSettings'
 import { McpSettings } from './McpSettings'
 import { SettingsPageHeader } from './SettingsPageHeader'
+import { GeneralSettings } from './GeneralSettings'
 import { MemoryLibrary } from './MemoryLibrary'
 import { localizeExecutionEngineTerms } from './product-copy'
 import {
@@ -66,10 +69,16 @@ import {
   type LiveRuntimeEvent
 } from './ui-model'
 import { runtimeAvailabilityPresentation } from './runtime-status'
+import {
+  campExistsInAuthoritativeNavigation,
+  restoredMemberId,
+  startupTargetFromSnapshot
+} from './startup-location'
 
 export { allNavigationCamps }
 
 type LoadState = 'loading' | 'ready' | 'error'
+type StartupStatus = 'loading' | 'waiting' | 'resolved'
 export type View = 'compose' | 'camp' | 'members' | 'memory' | 'settings'
 export type SettingsSection = NavigationSettingsSection
 
@@ -175,11 +184,16 @@ export function App(): React.JSX.Element {
   const [optimisticCampMessages, setOptimisticCampMessages] = useState<OptimisticCampMessageEntry[]>([])
   const [cancellingTurnIds, setCancellingTurnIds] = useState<Set<string>>(() => new Set())
   const [state, setState] = useState<LoadState>('loading')
+  const [overviewRevision, setOverviewRevision] = useState(0)
+  const [startupSnapshot, setStartupSnapshot] = useState<DesktopStartupSnapshot | null>(null)
+  const [startupStatus, setStartupStatus] = useState<StartupStatus>('loading')
+  const [startupError, setStartupError] = useState<string | null>(null)
+  const [locationSaveError, setLocationSaveError] = useState<string | null>(null)
   const [view, setView] = useState<View>('compose')
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null)
   const [memberTab, setMemberTab] = useState<MemberWorkspaceTab>('identity')
   const [memberRuntimeFocusRequest, setMemberRuntimeFocusRequest] = useState(0)
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>('skills')
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('general')
   const [activeCampId, setActiveCampId] = useState<string | null>(null)
   const [notificationOpen, setNotificationOpen] = useState(false)
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0)
@@ -205,6 +219,9 @@ export function App(): React.JSX.Element {
   const liveRuntimeEventSequence = useRef(0)
   const runtimeHealthRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const membersViewRef = useRef<MembersViewHandle>(null)
+  const startupLastAttemptedOverview = useRef(-1)
+  const startupResolvedSessionId = useRef<string | null>(null)
+  const pendingRestorableLocation = useRef<RestorableLocation | null>(null)
   const campCreationPreflight = useMemo(
     () => campCreationPreflightFromAgents(agents),
     [agents]
@@ -220,7 +237,6 @@ export function App(): React.JSX.Element {
       ?? manageable.find((agent) => agent.presence === 'away')
       ?? null
     setSelectedMemberId(next?.agentId ?? null)
-    setMemberTab('identity')
   }, [agents, selectedMemberId, view])
 
   useEffect(() => {
@@ -262,9 +278,15 @@ export function App(): React.JSX.Element {
       setPinnedCampItems(resolvedPins.camps)
       setPendingMemoryCount(nextMemoryProposals.filter((proposal) => proposal.status === 'pending').length)
       setState('ready')
+      setOverviewRevision((revision) => revision + 1)
     } catch (nextError) {
-      setError(errorMessage(nextError))
+      const message = errorMessage(nextError)
+      setError(message)
       setState('error')
+      if (!startupResolvedSessionId.current) {
+        setStartupStatus('waiting')
+        setStartupError(message)
+      }
     }
   }, [])
 
@@ -298,6 +320,32 @@ export function App(): React.JSX.Element {
     const nextNavigation = await window.rovai.request<NavigationSnapshot>('navigation.snapshot')
     setNavigation(nextNavigation)
     return nextNavigation
+  }, [])
+
+  const loadStartupSnapshot = useCallback(async (): Promise<void> => {
+    try {
+      const snapshot = await window.rovai.desktopSession.getStartupSnapshot()
+      setStartupSnapshot(snapshot)
+      setSettingsSection(snapshot.lastSettingsSection)
+      setStartupError(null)
+    } catch (nextError) {
+      setStartupStatus('waiting')
+      setStartupError(errorMessage(nextError))
+    }
+  }, [])
+
+  const commitRestorableLocation = useCallback(async (
+    location: RestorableLocation
+  ): Promise<void> => {
+    pendingRestorableLocation.current = location
+    try {
+      await window.rovai.desktopSession.commitRestorableLocation(location)
+      if (JSON.stringify(pendingRestorableLocation.current) === JSON.stringify(location)) {
+        setLocationSaveError(null)
+      }
+    } catch (nextError) {
+      setLocationSaveError(errorMessage(nextError))
+    }
   }, [])
 
   const activateCamp = useCallback(async (
@@ -407,6 +455,132 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     void loadOverview(true)
   }, [loadOverview])
+
+  useEffect(() => {
+    void loadStartupSnapshot()
+  }, [loadStartupSnapshot])
+
+  useEffect(() => {
+    if (
+      !startupSnapshot
+      || !navigation
+      || state !== 'ready'
+      || overviewRevision <= startupLastAttemptedOverview.current
+      || startupResolvedSessionId.current === startupSnapshot.sessionId
+    ) return
+    startupLastAttemptedOverview.current = overviewRevision
+    let cancelled = false
+
+    const showQuickChat = (): void => {
+      campSelectionGeneration.current += 1
+      setActiveCampId(null)
+      setCampSnapshot(null)
+      setNotificationFocus(null)
+      lastMainView.current = 'compose'
+      setView('compose')
+    }
+
+    const resolve = async (): Promise<void> => {
+      const target = startupTargetFromSnapshot(startupSnapshot)
+      if (target.kind === 'quick_chat') {
+        showQuickChat()
+      } else if (target.kind === 'memory') {
+        campSelectionGeneration.current += 1
+        setActiveCampId(null)
+        setCampSnapshot(null)
+        setMemoryFocusId(null)
+        lastMainView.current = 'memory'
+        setView('memory')
+      } else if (target.kind === 'members') {
+        campSelectionGeneration.current += 1
+        setActiveCampId(null)
+        setCampSnapshot(null)
+        setSelectedMemberId(restoredMemberId(target.agentId, agents))
+        setMemberTab(target.tab)
+        lastMainView.current = 'members'
+        setView('members')
+      } else {
+        let snapshot: CampSnapshot
+        try {
+          snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', {
+            campId: target.campId
+          })
+          if (snapshot.schemaVersion !== 25) {
+            throw new Error('Camp snapshot schema is incompatible')
+          }
+        } catch (snapshotError) {
+          const exists = await campExistsInAuthoritativeNavigation(
+            target.campId,
+            navigation,
+            (projectPath, offset) => window.rovai.request<NavigationCampPage>(
+              'navigation.groupCamps',
+              { projectPath, offset, limit: 200 }
+            )
+          )
+          if (!exists) {
+            showQuickChat()
+            if (!cancelled) {
+              startupResolvedSessionId.current = startupSnapshot.sessionId
+              setStartupStatus('resolved')
+              setStartupError(null)
+            }
+            return
+          }
+          throw snapshotError
+        }
+        if (cancelled) return
+        campSelectionGeneration.current += 1
+        campEventSequenceMarker.current = snapshot.throughGlobalSequence
+        setActiveCampId(target.campId)
+        setCampSnapshot(snapshot)
+        setNotificationFocus(null)
+        lastMainView.current = 'camp'
+        setView('camp')
+        void window.rovai.request('navigation.campViewed', {
+          campId: target.campId,
+          throughGlobalSequence: snapshot.throughGlobalSequence
+        }).catch(() => undefined)
+      }
+      if (cancelled) return
+      startupResolvedSessionId.current = startupSnapshot.sessionId
+      setStartupStatus('resolved')
+      setStartupError(null)
+    }
+
+    setStartupStatus('loading')
+    void resolve().catch((nextError) => {
+      if (cancelled) return
+      setStartupStatus('waiting')
+      setStartupError(errorMessage(nextError))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [overviewRevision, startupSnapshot, state])
+
+  useEffect(() => {
+    if (startupStatus !== 'resolved' || state !== 'ready' || view !== 'compose') return
+    void commitRestorableLocation({ kind: 'quick_chat' })
+  }, [commitRestorableLocation, startupStatus, state, view])
+
+  useEffect(() => {
+    if (
+      startupStatus !== 'resolved'
+      || view !== 'camp'
+      || !activeCampId
+      || campSnapshot?.camp.id !== activeCampId
+    ) return
+    void commitRestorableLocation({ kind: 'camp', campId: activeCampId })
+  }, [activeCampId, campSnapshot, commitRestorableLocation, startupStatus, view])
+
+  useEffect(() => {
+    if (startupStatus !== 'resolved' || view !== 'members') return
+    void commitRestorableLocation({
+      kind: 'members',
+      agentId: restoredMemberId(selectedMemberId, agents),
+      tab: memberTab
+    })
+  }, [agents, commitRestorableLocation, memberTab, selectedMemberId, startupStatus, view])
 
   useEffect(() => {
     let active = true
@@ -707,6 +881,23 @@ export function App(): React.JSX.Element {
   const closeSettings = (): void => {
     const target = lastMainView.current
     setView(target === 'camp' && !activeCampId ? 'compose' : target)
+  }
+
+  const chooseSettingsSection = (section: SettingsSection): void => {
+    setSettingsSection(section)
+    void window.rovai.generalPreferences.setLastSettingsSection(section)
+      .catch((nextError) => setError(errorMessage(nextError)))
+  }
+
+  const commitMemoryLocation = useCallback((): void => {
+    if (!startupResolvedSessionId.current || viewRef.current !== 'memory') return
+    void commitRestorableLocation({ kind: 'memory' })
+  }, [commitRestorableLocation])
+
+  const retryStartup = (): void => {
+    setStartupStatus('loading')
+    setStartupError(null)
+    void Promise.all([loadStartupSnapshot(), loadOverview(true)])
   }
 
   const closeMembers = (): void => {
@@ -1067,7 +1258,8 @@ export function App(): React.JSX.Element {
     memory: 'memory-content',
     settings: 'settings-content'
   }
-  const inlineNotices = memoryProposalNotice || memoryAutoNotice.count > 0 || error
+  const startupGateVisible = startupStatus !== 'resolved'
+  const inlineNotices = memoryProposalNotice || memoryAutoNotice.count > 0 || error || locationSaveError
     ? (
         <>
           {memoryProposalNotice && (
@@ -1089,6 +1281,19 @@ export function App(): React.JSX.Element {
               <div className="error-actions"><button className="quiet-button" onClick={() => void loadOverview()}>刷新状态</button><button className="icon-button" aria-label="关闭错误" onClick={() => setError(null)}>×</button></div>
             </div>
           )}
+          {locationSaveError && (
+            <div className="error-banner" role="alert">
+              <span className="error-icon" aria-hidden="true">!</span>
+              <div><strong>当前页面已打开，但下次启动位置未保存</strong><span>{locationSaveError}</span></div>
+              <div className="error-actions">
+                <button className="quiet-button" type="button" onClick={() => {
+                  const location = pendingRestorableLocation.current
+                  if (location) void commitRestorableLocation(location)
+                }}>重试保存</button>
+                <button className="icon-button" type="button" aria-label="关闭启动位置保存错误" onClick={() => setLocationSaveError(null)}>×</button>
+              </div>
+            </div>
+          )}
         </>
       )
     : null
@@ -1097,7 +1302,7 @@ export function App(): React.JSX.Element {
     <div className="app-shell">
       <CampNavigation
         view={view}
-        state={state}
+        state={startupGateVisible ? 'loading' : state}
         navigation={navigation}
         activeCampId={activeCampId}
         pins={navigationPins}
@@ -1126,7 +1331,7 @@ export function App(): React.JSX.Element {
           />
         ) : null}
         onSettings={() => chooseView('settings')}
-        onSettingsSectionChange={setSettingsSection}
+        onSettingsSectionChange={chooseSettingsSection}
         onSettingsBack={closeSettings}
         onOpenProject={() => void openProject()}
         onCamp={chooseCamp}
@@ -1136,7 +1341,7 @@ export function App(): React.JSX.Element {
         onStop={stopCampRuns}
         onError={(nextError) => setError(errorMessage(nextError))}
       />
-      {view === 'camp' && <AppHeader
+      {!startupGateVisible && view === 'camp' && <AppHeader
         campTitle={(activeCamp?.title
           ?? (campSnapshot?.camp.id === activeCampId ? campSnapshot.camp.title : '')) || null}
         contextLabel={activeCampProject?.name ?? '快速对话'}
@@ -1149,15 +1354,22 @@ export function App(): React.JSX.Element {
       {windowDragPage && <WindowDragStrip page={windowDragPage} />}
 
       <main className={`content ${pageContentClassName[view]}`}>
-        {view !== 'members' && view !== 'memory' && inlineNotices}
-        {toast && (
+        {startupGateVisible && (
+          <StartupGate
+            waiting={startupStatus === 'waiting'}
+            error={startupError}
+            onRetry={retryStartup}
+          />
+        )}
+        {!startupGateVisible && view !== 'members' && view !== 'memory' && inlineNotices}
+        {!startupGateVisible && toast && (
           <div className="app-toast" role="status" aria-live="polite">
             <span>{toast}</span>
             <button className="icon-button" type="button" aria-label="关闭提示" onClick={() => setToast(null)}>×</button>
           </div>
         )}
 
-        {view === 'camp' && activeCampId && campSnapshot?.camp.id === activeCampId && (
+        {!startupGateVisible && view === 'camp' && activeCampId && campSnapshot?.camp.id === activeCampId && (
           <CampWorkspace
             snapshot={campSnapshot}
             optimisticMessages={optimisticCampMessages
@@ -1188,11 +1400,11 @@ export function App(): React.JSX.Element {
           />
         )}
 
-        {view === 'camp' && (!activeCampId || campSnapshot?.camp.id !== activeCampId) && (
+        {!startupGateVisible && view === 'camp' && (!activeCampId || campSnapshot?.camp.id !== activeCampId) && (
           <EmptyState title="正在打开对话" body="Rovai-ai 正在从 SQLite 权威快照恢复 Camp、队员与运行状态。" />
         )}
 
-        {view === 'compose' && (
+        {!startupGateVisible && view === 'compose' && (
           <QuickChatWorkspace
             agents={agents}
             recentCamps={navigation ? allNavigationCamps(navigation).slice(0, 5) : []}
@@ -1201,7 +1413,7 @@ export function App(): React.JSX.Element {
           />
         )}
 
-        {view === 'memory' && (
+        {!startupGateVisible && view === 'memory' && (
           <MemoryLibrary
             agents={agents}
             topNotices={inlineNotices}
@@ -1210,10 +1422,11 @@ export function App(): React.JSX.Element {
             proposalDrawerSignal={memoryProposalDrawerSignal}
             onProposalDrawerSignalConsumed={() => setMemoryProposalDrawerSignal(0)}
             onPendingCountChange={setPendingMemoryCount}
+            onReady={commitMemoryLocation}
           />
         )}
 
-        {view === 'settings' && (
+        {!startupGateVisible && view === 'settings' && (
           <SettingsView
             appearance={appearance}
             health={health}
@@ -1231,7 +1444,7 @@ export function App(): React.JSX.Element {
           />
         )}
 
-        {view === 'members' && (
+        {!startupGateVisible && view === 'members' && (
           <MembersView
             ref={membersViewRef}
             agents={agents}
@@ -1249,7 +1462,7 @@ export function App(): React.JSX.Element {
             onTabChange={setMemberTab}
             onReload={loadMemberData}
             onOpenRuntimeSettings={() => {
-              setSettingsSection('runtime')
+              chooseSettingsSection('runtime')
               chooseView('settings')
             }}
           />
@@ -1289,6 +1502,29 @@ export function WindowDragStrip({
   page: 'compose' | 'members' | 'memory' | 'settings'
 }): React.JSX.Element {
   return <div className={`window-drag-strip window-drag-strip-${page}`} aria-hidden="true" />
+}
+
+export function StartupGate({
+  waiting,
+  error,
+  onRetry
+}: {
+  waiting: boolean
+  error: string | null
+  onRetry(): void
+}): React.JSX.Element {
+  return (
+    <section className="startup-gate" aria-busy={!waiting} aria-live="polite">
+      <span className="startup-gate-mark" aria-hidden="true">✦</span>
+      <p className="settings-page-eyebrow">MAIN WINDOW SESSION</p>
+      <h1>{waiting ? '暂时无法恢复上次位置' : '正在恢复上次位置'}</h1>
+      <p>{waiting
+        ? 'Rovai-ai 会保留这次窗口冻结的恢复目标。Core 恢复后将继续验证同一位置，不会清除或改走其他启动路线。'
+        : '正在读取 Desktop Shell 偏好，并通过 Core 权威数据验证最近的稳定页面。'}</p>
+      {error && <small role="alert">{error}</small>}
+      {waiting && <button className="quiet-button" type="button" onClick={onRetry}>重试恢复</button>}
+    </section>
+  )
 }
 
 export function AppHeader({
@@ -1405,6 +1641,7 @@ export function SettingsView({
   return (
     <div className="settings-workbench">
       <div className={`settings-panel settings-panel-${section}`}>
+        {section === 'general' && <GeneralSettings />}
         {section === 'skills' && <SkillSettings />}
         {section === 'mcp' && <McpSettings agents={agents} />}
         {section === 'runtime' && (

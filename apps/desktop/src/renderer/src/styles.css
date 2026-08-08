@@ -1926,6 +1926,32 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 .settings-page-heading-copy > p:last-child { max-width: 680px; margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
 .settings-page-eyebrow { margin: 0; color: var(--muted); font-size: 9px; font-weight: 750; letter-spacing: 0.13em; text-transform: uppercase; }
 .settings-page-heading-aside { display: flex; flex: 0 0 auto; gap: 8px; align-items: center; }
+.general-settings-section { padding-bottom: 28px; border-bottom: 1px solid var(--line); }
+.general-settings-section:last-of-type { border-bottom: 0; }
+.general-settings-section .section-heading { margin-bottom: 8px; }
+.general-settings-section .section-heading h2 { margin: 0; font-size: 17px; }
+.general-setting-row { display: grid; gap: 2px; }
+.general-login-switch { padding-right: 2px; padding-left: 2px; }
+.general-login-switch input:disabled { cursor: default; opacity: .64; }
+.general-inline-status { display: flex; min-height: 28px; align-items: center; gap: 8px; margin: 4px 0 0; color: var(--muted); font-size: 10.5px; line-height: 1.5; }
+.general-inline-status.is-error { padding: 8px 10px; border-left: 3px solid var(--danger); color: var(--danger); background: var(--danger-soft); }
+.startup-location-options { display: grid; gap: 0; margin: 24px 0 0; padding: 0; border: 0; }
+.startup-location-options legend { margin-bottom: 8px; color: var(--ink); font-size: 12px; font-weight: 680; }
+.startup-location-option { display: grid; min-height: 58px; grid-template-columns: 18px minmax(0, 1fr); gap: 10px; align-items: start; padding: 10px 2px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.startup-location-option input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--brand); }
+.startup-location-option input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.startup-location-option > span { display: grid; gap: 4px; }
+.startup-location-option strong { color: var(--ink); font-size: 12px; }
+.startup-location-option small { color: var(--muted); font-size: 10.5px; line-height: 1.5; }
+.startup-location-options:disabled .startup-location-option { cursor: default; opacity: .68; }
+.general-recovery-note { max-width: 720px; margin: 18px 0 0; padding-left: 10px; border-left: 2px solid var(--line-strong); color: var(--muted); font-size: 10.5px; line-height: 1.6; }
+.general-window-description { max-width: 720px; margin: 0 0 16px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.startup-gate { display: grid; width: min(620px, calc(100% - 48px)); min-height: 100%; align-content: center; justify-items: center; gap: 10px; margin: auto; padding: 48px 24px; text-align: center; }
+.startup-gate-mark { display: grid; width: 46px; height: 46px; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; color: var(--brand); background: var(--brand-soft); font-size: 18px; }
+.startup-gate h1 { margin: 0; color: var(--ink); font-size: 24px; letter-spacing: -.025em; }
+.startup-gate > p:not(.settings-page-eyebrow) { max-width: 560px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
+.startup-gate > small { max-width: 560px; color: var(--danger); font-size: 10.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.startup-gate > button { margin-top: 6px; }
 .skill-eyebrow { margin: 0; color: var(--muted); font-size: 9px; font-weight: 750; letter-spacing: 0.13em; text-transform: uppercase; }
 .settings-page-note, .skill-section-count { flex: 0 0 auto; padding: 5px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--surface); font: 700 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
 .settings-page-note { border-color: color-mix(in srgb, var(--info) 28%, var(--line)); color: var(--info); background: var(--info-soft); }

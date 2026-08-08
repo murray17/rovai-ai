@@ -10,7 +10,8 @@ last_updated: 2026-08-09
 
 # Rovai-ai v0.49：通用与启动设置、双人追问 Skill
 
-> 当前状态：通用与启动设置的产品语义和生产设计已经确认，Desktop Shell 生产实现尚未开始；
+> 当前状态：通用与启动设置已完成 Desktop Shell、Preload、Renderer 生产实现、自动回归与打包 App
+> 的主窗口会话验收；已安装 App 的真实登录项开关、系统授权态和外接显示器矩阵仍待最终人工验收。
 > 两个自包含双人追问官方 Skill 已完成源码、Core bundled manifest 和定向验收。
 > 两个范围都不改变 Camp、Task、AgentRun、Native Session、Memory、Approval 或执行恢复语义。
 >

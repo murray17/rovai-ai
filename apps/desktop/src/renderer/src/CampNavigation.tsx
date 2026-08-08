@@ -16,7 +16,8 @@ import type {
   NavigationCampItem,
   NavigationCampPage,
   NavigationSnapshot,
-  ProjectNavigationGroup
+  ProjectNavigationGroup,
+  SettingsSection
 } from '@contracts'
 import { allNavigationCamps } from './ui-model'
 
@@ -25,13 +26,7 @@ export interface CampDeleteAttempt {
   blockers: Array<{ code: string; count: number }>
 }
 
-export type NavigationSettingsSection =
-  | 'skills'
-  | 'mcp'
-  | 'runtime'
-  | 'appearance'
-  | 'notifications'
-  | 'diagnostics'
+export type NavigationSettingsSection = SettingsSection
 
 type CampAction = {
   kind: 'rename' | 'delete'
@@ -60,7 +55,7 @@ export function CampNavigation({
   activeCampId,
   pins = [],
   pinnedCampItems = [],
-  settingsSection = 'skills',
+  settingsSection = 'general',
   onNewConversation,
   onMembers,
   onMemory,
@@ -582,6 +577,7 @@ function SettingsSidebarNavigation({
     icon: string
     label: string
   }> = [
+    { key: 'general', icon: '⌂', label: '通用' },
     { key: 'skills', icon: '◇', label: 'Skill' },
     { key: 'mcp', icon: '⌘', label: 'MCP' },
     { key: 'runtime', icon: '◈', label: 'Agent 运行时' },

@@ -7,6 +7,8 @@ import type {
   CoreMethod,
   NavigationPin,
   SaveMemberAvatarAssetInput,
+  SettingsSection,
+  StartupLocationMode,
   ThemePreference
 } from '@contracts'
 import { CoreClient } from './core-client'
@@ -20,7 +22,9 @@ import {
 } from './appearance-preference'
 import {
   readWindowStateFile,
+  resetWindowBounds,
   sanitizeWindowState,
+  windowResetCapability,
   writeWindowStateFile
 } from './window-state'
 import {
@@ -32,6 +36,14 @@ import { deleteRetiredManagedDirectory } from './quick-chat-cutover'
 import { readNavigationPins, writeNavigationPins } from './navigation-pins'
 import { RUNTIME_RENDERER_CORE_METHODS } from './runtime-core-methods'
 import { prewarmMacOpenPanel } from './open-panel-prewarm'
+import {
+  GeneralPreferencesStore,
+  isSettingsSection,
+  isStartupLocationMode
+} from './general-preferences'
+import { RestorableLocationStore, parseRestorableLocation } from './restorable-location'
+import { LoginItemService } from './login-item'
+import { DesktopSessionRegistry } from './desktop-session'
 
 const allowedMethods = new Set<CoreMethod>([
   'health.check',
@@ -137,6 +149,9 @@ let themePreference: ThemePreference = 'system'
 let appearanceFilePath = ''
 let navigationFilePath = ''
 let lastAppearanceSignature = ''
+let generalPreferences: GeneralPreferencesStore | null = null
+let restorableLocations: RestorableLocationStore | null = null
+const desktopSessions = new DesktopSessionRegistry()
 
 const legacyDataPath = legacyUserDataPath(
   app.getPath('appData'),
@@ -145,6 +160,18 @@ const legacyDataPath = legacyUserDataPath(
 )
 if (legacyDataPath) app.setPath('userData', legacyDataPath)
 const memberAvatars = new MemberAvatarAssetService(app.getPath('userData'))
+const loginItems = new LoginItemService({
+  platform: process.platform,
+  isPackaged: () => app.isPackaged,
+  getStatus: () => app.getLoginItemSettings({ type: 'mainAppService' }).status,
+  setEnabled: (enabled) => app.setLoginItemSettings({
+    type: 'mainAppService',
+    openAtLogin: enabled
+  }),
+  openSystemSettings: () => shell.openExternal(
+    'x-apple.systempreferences:com.apple.LoginItems-Settings.extension'
+  )
+})
 
 function appearanceSnapshot(): AppearanceSnapshot {
   return {
@@ -172,19 +199,24 @@ const RAIL_BUTTON_INSET_X = 12
 const RAIL_BUTTON_INSET_Y = 14
 
 function createWindow(): void {
+  if (!generalPreferences || !restorableLocations) {
+    throw new Error('Desktop Shell preferences are not ready')
+  }
   const theme = appearanceSnapshot().resolvedTheme
   const windowStatePath = join(app.getPath('userData'), 'window-state.json')
+  const displayAreas = screen.getAllDisplays().map((display) => display.workArea)
   const savedState = sanitizeWindowState(
     readWindowStateFile(windowStatePath),
-    screen.getAllDisplays().map((display) => display.workArea),
+    displayAreas,
     MIN_WINDOW_WIDTH,
-    MIN_WINDOW_HEIGHT
+    MIN_WINDOW_HEIGHT,
+    screen.getPrimaryDisplay().workArea
   )
-  mainWindow = new BrowserWindow({
-    width: savedState?.width ?? 1440,
-    height: savedState?.height ?? 920,
-    x: savedState?.x,
-    y: savedState?.y,
+  const window = new BrowserWindow({
+    width: savedState.width,
+    height: savedState.height,
+    x: savedState.x,
+    y: savedState.y,
     minWidth: MIN_WINDOW_WIDTH,
     minHeight: MIN_WINDOW_HEIGHT,
     show: false,
@@ -202,32 +234,52 @@ function createWindow(): void {
       sandbox: true
     }
   })
+  const webContentsId = window.webContents.id
+  mainWindow = window
+  desktopSessions.create(
+    webContentsId,
+    generalPreferences.get(),
+    restorableLocations.get()
+  )
 
   let persistBoundsTimer: ReturnType<typeof setTimeout> | null = null
+  const flushBounds = (): void => {
+    if (window.isDestroyed()) return
+    void writeWindowStateFile(windowStatePath, window.getNormalBounds()).catch(() => undefined)
+  }
   const persistBounds = (): void => {
     if (persistBoundsTimer) clearTimeout(persistBoundsTimer)
     persistBoundsTimer = setTimeout(() => {
-      if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isFullScreen()) return
-      void writeWindowStateFile(windowStatePath, mainWindow.getBounds()).catch(() => undefined)
+      persistBoundsTimer = null
+      flushBounds()
     }, 400)
   }
-  mainWindow.on('resize', persistBounds)
-  mainWindow.on('move', persistBounds)
+  window.on('resize', persistBounds)
+  window.on('move', persistBounds)
+  window.on('close', () => {
+    if (persistBoundsTimer) clearTimeout(persistBoundsTimer)
+    persistBoundsTimer = null
+    flushBounds()
+  })
+  window.on('closed', () => {
+    desktopSessions.delete(webContentsId)
+    if (mainWindow === window) mainWindow = null
+  })
 
-  mainWindow.once('ready-to-show', () => mainWindow?.show())
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+  window.once('ready-to-show', () => window.show())
+  window.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) void shell.openExternal(url)
     return { action: 'deny' }
   })
-  mainWindow.webContents.on('will-navigate', (event, url) => {
-    const current = mainWindow?.webContents.getURL()
+  window.webContents.on('will-navigate', (event, url) => {
+    const current = window.webContents.getURL()
     if (current && url !== current) event.preventDefault()
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {
-    void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
+    void window.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
-    void mainWindow.loadFile(join(import.meta.dirname, '../renderer/index.html'))
+    void window.loadFile(join(import.meta.dirname, '../renderer/index.html'))
   }
 }
 
@@ -235,6 +287,12 @@ if (primaryInstance) void app.whenReady().then(async () => {
   await deleteRetiredManagedDirectory(app.getPath('userData'))
   appearanceFilePath = join(app.getPath('userData'), 'appearance.json')
   navigationFilePath = join(app.getPath('userData'), 'navigation.json')
+  const [loadedGeneralPreferences, loadedRestorableLocations] = await Promise.all([
+    GeneralPreferencesStore.load(join(app.getPath('userData'), 'general-preferences.json')),
+    RestorableLocationStore.load(join(app.getPath('userData'), 'restorable-location.json'))
+  ])
+  generalPreferences = loadedGeneralPreferences
+  restorableLocations = loadedRestorableLocations
   themePreference = readThemePreference(appearanceFilePath)
   nativeTheme.themeSource = nativeThemeSource(themePreference)
   nativeTheme.on('updated', publishAppearance)
@@ -260,7 +318,15 @@ if (primaryInstance) void app.whenReady().then(async () => {
   }
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    const windows = BrowserWindow.getAllWindows()
+    if (windows.length === 0) {
+      createWindow()
+      return
+    }
+    const window = mainWindow ?? windows[0]
+    if (window.isMinimized()) window.restore()
+    window.show()
+    window.focus()
   })
 }).catch((error: unknown) => {
   console.error('[rovai] Quick Chat cutover failed; startup aborted.', error)
@@ -286,6 +352,60 @@ ipcMain.handle('rovai:appearance-set', async (_event, preference: unknown) => {
   themePreference = preference
   nativeTheme.themeSource = nativeThemeSource(preference)
   return publishAppearance()
+})
+
+ipcMain.handle('rovai:desktop-session-get-startup', (event) => {
+  const snapshot = desktopSessions.get(event.sender.id)
+  if (!snapshot) throw new Error('Main Window Session is unavailable')
+  return structuredClone(snapshot)
+})
+
+ipcMain.handle('rovai:desktop-session-commit-location', async (_event, location: unknown) => {
+  const validated = parseRestorableLocation(location)
+  if (!validated) throw new Error('Unsupported restorable location')
+  if (!restorableLocations) throw new Error('Restorable Location store is unavailable')
+  await restorableLocations.commit(validated)
+})
+
+ipcMain.handle('rovai:general-preferences-get', () => requireGeneralPreferences().get())
+
+ipcMain.handle('rovai:general-preferences-set-startup', (_event, mode: unknown) => {
+  if (!isStartupLocationMode(mode)) throw new Error('Unsupported startup location mode')
+  return requireGeneralPreferences().setStartupLocationMode(mode as StartupLocationMode)
+})
+
+ipcMain.handle('rovai:general-preferences-set-section', (_event, section: unknown) => {
+  if (!isSettingsSection(section)) throw new Error('Unsupported settings section')
+  return requireGeneralPreferences().setLastSettingsSection(section as SettingsSection)
+})
+
+ipcMain.handle('rovai:login-item-get', () => loginItems.get())
+
+ipcMain.handle('rovai:login-item-set-enabled', (_event, enabled: unknown) => {
+  if (typeof enabled !== 'boolean') throw new Error('Unsupported login item state')
+  return loginItems.setEnabled(enabled)
+})
+
+ipcMain.handle('rovai:login-item-open-system-settings', () => loginItems.openSystemSettings())
+
+ipcMain.handle('rovai:window-reset-capability', (event) => {
+  const window = requireMainWindow(event.sender)
+  return windowResetCapability(window.isFullScreen())
+})
+
+ipcMain.handle('rovai:window-reset-bounds', (event) => {
+  const window = requireMainWindow(event.sender)
+  const display = screen.getDisplayMatching(window.getBounds()).workArea
+  return resetWindowBounds(
+    window,
+    display,
+    MIN_WINDOW_WIDTH,
+    MIN_WINDOW_HEIGHT,
+    (bounds) => writeWindowStateFile(
+      join(app.getPath('userData'), 'window-state.json'),
+      bounds
+    )
+  )
 })
 
 ipcMain.handle('rovai:navigation-pins-get', () => readNavigationPins(navigationFilePath))
@@ -538,3 +658,16 @@ app.on('before-quit', () => {
   nativeTheme.removeListener('updated', publishAppearance)
   core.stop()
 })
+
+function requireGeneralPreferences(): GeneralPreferencesStore {
+  if (!generalPreferences) throw new Error('General Preferences store is unavailable')
+  return generalPreferences
+}
+
+function requireMainWindow(webContents: Electron.WebContents): BrowserWindow {
+  const window = BrowserWindow.fromWebContents(webContents)
+  if (!window || window.isDestroyed() || window !== mainWindow) {
+    throw new Error('Main window is unavailable')
+  }
+  return window
+}
