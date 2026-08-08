@@ -5,7 +5,7 @@ status: accepted
 design_direction: arctic-dawn-v3
 target_version: cross-version
 implementation_status: in_progress
-last_updated: 2026-08-06
+last_updated: 2026-08-09
 ---
 
 # Rovai-ai UI 规范
@@ -72,8 +72,13 @@ v0.47 保留 v0.38 的创建位置唯一实时 Task 卡，并把它升级为五�
 execution，现有 Run UI 继续拥有执行事实。编辑器按 projected final state 展示条件字段，
 terminal Task 只读，version conflict 保留草稿且不自动 replay。永久移除队员使用中文 preview，
 在无非终态 AgentRun 时由 Core 原子结束全部 Current CampMembership 并释放未完成 Task。
-完整合同见[v0.47 生产设计](../versions/v0.47/production-design.md)；实现尚未开始，状态见
+完整合同见[v0.47 生产设计](../versions/v0.47/production-design.md)；生产实现与验收已经完成，状态见
 [v0.47 实施计划](../versions/v0.47/implementation-plan.md)。
+
+v0.49 在设置顶部增加“通用”，并冻结每个 Main Window Session 一次性解析启动位置、稳定一级
+位置即时提交、macOS 登录项四态和窗口几何重置。设置侧栏因此扩展为七分类；设置和临时表面
+仍不能成为启动目标。完整合同见[v0.49 生产设计](../versions/v0.49/production-design.md)，实施状态
+见[v0.49 实施计划](../versions/v0.49/implementation-plan.md)。
 
 ## 权威边界
 
@@ -83,7 +88,9 @@ terminal Task 只读，version conflict 保留草稿且不自动 replay。永久
 3. [v0.47 生产设计](../versions/v0.47/production-design.md)决定当前 Task 卡、Inspector、
    冲突恢复和删除确认合同；它保留 [v0.38](../versions/v0.38/README.md)的唯一实时卡模型。
    全局当前版本由[文档导航](../README.md)指向，实施状态只能从代码、测试和版本验收证据判断。
-4. 原型与 HTML 样例只帮助评审视觉层级，不是生产合同、数据真源或可直接复制的代码。
+4. [v0.49 生产设计](../versions/v0.49/production-design.md)决定 General 页面、Main Window
+   Session 启动恢复、登录项和窗口 reset 的版本级 Shell/Renderer 合同。
+5. 原型与 HTML 样例只帮助评审视觉层级，不是生产合同、数据真源或可直接复制的代码。
 
 发生冲突时不得用视觉稿覆盖领域或安全合同，也不得用当前旧代码反向覆盖已经冻结的
 新设计。必须明确报告文档—实现漂移。
@@ -125,9 +132,10 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   文件夹式投影，底层继续是独立 `quick_chat`。侧栏品牌字标为 `Rovai AI`，无副标题。
 - Camp 与可置顶 Project 只通过三点菜单置顶或取消置顶；Camp 菜单同时承载重命名和
   删除。Project 标题与“查看全部”不显示会话数量，快速对话不显示 Project 菜单。
-- 设置分类覆盖同一 270px 侧栏槽位，返回 App 后恢复原页面；再次进入设置时保留上次
-  分类。六个设置分类统一使用无外框、带底部分隔线的共享页头；普通侧栏底部只保留
-  “设置”，健康事实从“设置 → 诊断”访问。
+- 设置分类覆盖同一 270px 侧栏槽位，固定顺序为“通用 / Skill / MCP / Agent 运行时 / 外观 /
+  通知 / 诊断”。返回 App 后恢复原页面；设置分类跨 Main Window Session 记住最后选择，
+  全新安装默认 General。七个设置分类统一使用无外框、带底部分隔线的共享页头；普通侧栏
+  底部只保留“设置”，健康事实从“设置 → 诊断”访问。
 - 产品中文使用“快速对话”，英文使用 `Quick Chat`；禁止当前 UI 使用“大厅”或
   `Lobby`。
 - Quick Chat 没有 Composer；“新对话”先完成原子 Camp Creation，成功后才进入
@@ -168,7 +176,8 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   不显示“已找到”“尚未检查”等内部探测阶段，也不在配置保存时同步完整检查。
 - 工作目录选择先完成目录安全校验并立即可用于创建；动态 Git 能力随后异步加载，检测中或
   失败只影响 Git 状态提示，不阻塞普通目录 Camp 创建。
-- 记忆、技能、Agent 运行时、外观、诊断和创建新对话 Dialog 以 Arctic Dawn 详规为准；
+- 记忆、通用、技能、Agent 运行时、外观、通知、诊断和创建新对话 Dialog 以 Arctic Dawn
+  详规为准；
   MCP 由 v0.37 生产设计局部替代，但继续复用同一 App Shell、Token 与通用交互规则。
 - v0.28 通知入口常驻品牌行，通知中心使用右侧 Radix Drawer 式 Dialog；通知行保持单一
   列表表面，浮层不抢焦点，完整行为与数据边界以当前版本生产设计为准。
@@ -242,7 +251,9 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   Runtime Smoke 限制单独记录在版本证据中。
 - [x] v0.28 全局通知入口、持久抽屉、未读徽标、浮层、设置、Focus Return 与
   reduced-motion 已通过 Core、Renderer 和隔离打包 App 验收。
-- [ ] v0.45 Run Pulse、Execution Drawer、Inspector Activity 页删除、Approval layering 与
+- [x] v0.45 Run Pulse、Execution Drawer、Inspector Activity 页删除、Approval layering 与
   CampTurn Stop 的生产实现和打包 App 验收。
-- [ ] v0.47 五态实时 Task 卡、compact list、完整 detail/Related execution、projected-state
+- [x] v0.47 五态实时 Task 卡、compact list、完整 detail/Related execution、projected-state
   Editor、冲突草稿恢复、terminal read-only 与中文成员删除确认的生产实现和打包 App 验收。
+- [ ] v0.49 General 页面、每窗口一次启动恢复、macOS 登录项四态、窗口可见性/reset、无领域事件
+  负向证明与 packaged App 验收。

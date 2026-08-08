@@ -1,11 +1,11 @@
 ---
 document_type: version-overview
 version: v0.48
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: complete
 implementation_status: complete
-last_updated: 2026-08-08
+last_updated: 2026-08-09
 ---
 
 # Rovai-ai v0.48：Native Session Compaction Bootstrap Redelivery
@@ -14,6 +14,8 @@ last_updated: 2026-08-08
 > compaction detector smoke。detector 是非阻塞增强能力，运行时短暂不可用不影响 AgentRun admission。
 >
 > 前置版本：[v0.47 Durable Task v2 与责任准入边界](../v0.47/README.md)
+>
+> 后续版本：[v0.49 通用与启动设置](../v0.49/README.md)
 
 ## 版本结果
 

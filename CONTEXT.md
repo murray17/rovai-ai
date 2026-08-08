@@ -28,6 +28,22 @@ _Avoid_: first-message creation, Renderer-only state transition, eager Conversat
 The product-facing and domain name for Rovai-ai's application-managed workspace group for Camps that are not bound to a user-selected directory, displayed in Chinese as `快速对话`. It uses one managed workspace directory but is neither a Camp nor a Project; each contained Camp keeps its own identity and lifecycle.
 _Avoid_: Lobby, 大厅, Project, Quick Chat entity
 
+**Main Window Session**:
+The lifetime of one top-level Rovai-ai window, from its creation during application launch or macOS reopen until that window closes. It is distinct from the longer-lived application process; focusing or restoring the same window, a Core restart, and a Navigation refresh remain within the same Main Window Session.
+_Avoid_: application process lifetime, Native Session, Core session, Navigation refresh
+
+**Restorable Location**:
+The most recently and authoritatively loaded stable first-level product location eligible to become the target of a later Main Window Session. It is Quick Chat, one current Camp, the Member workspace with an optional current Member and tab, or the Memory workspace; Settings and transient surfaces are never Restorable Locations.
+_Avoid_: last rendered surface, Settings route, Dialog stack, unvalidated local navigation snapshot
+
+**Startup Location Preference**:
+The user-selected policy applied once at the beginning of each Main Window Session to display either Quick Chat or the current Restorable Location. It governs only the visible starting destination and does not resume, restart, approve, or discard any Camp, Task, AgentRun, Native Session, Draft, or Approval.
+_Avoid_: execution recovery policy, default Project, last transient surface, process-only launch option
+
+**Login Item Registration**:
+The macOS-owned registration state that determines whether the installed Rovai-ai application is requested or enabled to open after login. Its authoritative states are not registered, enabled, awaiting system approval, and service not found; awaiting approval is a registered request that is not yet effective.
+_Avoid_: application-owned login Boolean, hidden launch, background-only launch, Runtime setting
+
 **Project**:
 A product-facing read-time group of `directory` Camps whose canonical `projectPath` strings are equal. It has no independent identity, repository identity, table, or lifetime apart from those Camps. Its stable read key is `directory:<canonical-project-path>`; Git metadata never affects grouping.
 _Avoid_: Project entity, Project aggregate, standalone project record

@@ -3,9 +3,9 @@ document_type: ui-design-system
 authority: renderer-ui-detail
 status: accepted
 design_direction: arctic-dawn-v3
-target_version: v0.47
+target_version: v0.49
 implementation_status: in_progress
-last_updated: 2026-08-08
+last_updated: 2026-08-09
 ---
 
 # Arctic Dawn V3 设计规范
@@ -34,6 +34,11 @@ v0.47 进一步冻结 Durable Task v2 的四层界面：会话卡只作五态责
 preview，并由 Core 在一个事务中完成 membership/Task/Lead 收口。版本级细节以
 [v0.47 生产设计](../versions/v0.47/production-design.md)为准，生产实现状态以对应实施计划和
 代码证据判断。
+
+v0.49 进一步冻结设置“通用”、每个 Main Window Session 一次性解析启动位置、稳定一级位置
+即时提交、macOS 登录项四态和窗口 reset。它只增加 Desktop Shell 偏好与 Renderer 表面，不把
+设置、窗口状态或登录项写进 Core/SQLite，也不改变执行恢复。版本级细节以
+[v0.49 生产设计](../versions/v0.49/production-design.md)为准。
 
 ## 权威边界
 
@@ -781,11 +786,13 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 
 - 设置继续使用 App Shell 的 270px 侧栏槽位，但设置导航完整覆盖普通 App 导航，
   不在内容区右侧增加 188px 二级导航。覆盖侧栏顺序为 Logo/`Rovai AI`、
-  “返回 App”、设置说明和“Skill / MCP / Agent 运行时 / 外观 / 诊断”。
+  “返回 App”、设置说明和“通用 / Skill / MCP / Agent 运行时 / 外观 / 通知 / 诊断”。
 - “返回 App”恢复进入设置前的一级页面和 Camp，不把用户强制送回 Quick Chat。
-- 再次进入设置时保留上次选择的设置分类，不强制重置到“Skill”。
+- 设置分类由 Electron Main 作为 Desktop Shell 偏好保存，跨 Main Window Session 保留最后选择；
+  全新安装或记录损坏时默认“通用”。明确深链到某一分类同样更新最后选择。设置本身不成为
+  Restorable Location。
 - 设置内容区使用自适应滚动面板，内部宽度
-  `min(980px, 可用宽度 - 42px)`；Skill、MCP、Agent 运行时、外观、通知和诊断统一使用
+  `min(980px, 可用宽度 - 42px)`；通用、Skill、MCP、Agent 运行时、外观、通知和诊断统一使用
   同一个无外框设置页头：eyebrow、一级标题、说明、可选右侧操作区和底部分隔线。各页只允许
   一个该共享页头，不叠加通用 AppHeader，也不得回退为带边框、圆角或背景卡片的 Hero。
   App Shell 右侧第一行叠加一条与页面表面同色的 50px 隐形拖拽栏，设置内容
@@ -793,6 +800,39 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 - 设置侧栏不显示健康 footer；诊断仍是设置分类并读取原有 Health Snapshot。
 - 设置页不增加“上下文”或“记忆”分区；公共消息摘要模型不再有任何配置表面，记忆仍是
   一级页面。
+
+### 通用
+
+- 共享页头固定为 `Settings / General`、标题“通用”、说明
+  “设置 Rovai-ai 的启动方式与窗口行为。”；正文只有“启动 / 窗口”两个顺序固定的 section。
+- “登录时启动 Rovai-ai”使用标准 Switch，说明“登录 macOS 后自动打开 Rovai-ai。”。只有
+  已安装的 packaged App 可操作；Development 显示 unchecked disabled 和
+  “仅在已安装的 Rovai-ai 应用中可配置”。
+- 安装与首次启动不主动注册登录项；全新安装默认 `not-registered`/unchecked。若 macOS 已保留
+  有效注册，则直接显示系统状态，不使用应用首次运行标记强制覆盖。
+- Login Item Registration 直接显示 macOS 系统状态：`enabled` checked；`not-registered`
+  unchecked；`requires-approval` checked，并同时显示“等待系统授权，当前尚未生效”和
+  “打开系统设置”；`not-found` unchecked，并提示重新安装或修复。Switch 不能用应用本地
+  Boolean 冒充系统真源。
+- “启动后打开”使用带 legend 的 Radio group。默认选择“上次使用的位置”，说明
+  “恢复最近打开的对话、队员页或记忆页。”；第二项“快速对话”说明
+  “每次启动都从快速对话首页开始。”。选择只影响下一个 Main Window Session，不立即跳转。
+- Radio group 后固定说明“此设置只决定启动后显示的位置。已有 Camp、草稿、任务、审批和
+  运行记录仍按 Rovai-ai 的既有恢复规则处理。”，不得增加执行恢复开关。
+- Restorable Location 只包含 Quick Chat、当前 Camp、队员页及可选队员/身份或运行配置页签、
+  记忆页。Settings、New Conversation Dialog、Notification Center、Command Palette、Approval、
+  Toast、错误 Dialog 与其他临时表面永不成为启动目标。
+- 恢复目标未通过 Core 权威读取前显示稳定 Startup Gate，不先闪 Quick Chat。Camp 删除后回退
+  Quick Chat；Member 移除后进入队员页并选择首个可管理队员或空状态；Core 暂时不可用时保留
+  原目标并继续等待/重试，不清除或重跑启动路由。
+- “窗口”说明固定为“Rovai-ai 会自动保存窗口大小和位置，并确保下次打开时窗口仍位于可见的
+  显示器区域。”，下方只提供“重置窗口大小与位置”。不增加“记住窗口位置”Switch。
+- Reset 恢复 `1440×920` 默认尺寸（受当前 display work area 约束）并在当前显示器居中；它不
+  改变页面、Camp、Member、Tab、Draft、Approval、Run 或焦点。全屏时按钮 disabled，显示
+  “请先退出全屏，再重置窗口大小与位置”，且退出全屏后不自动执行。
+- General 的 Login Item、Startup Preference 与 Window Reset 使用独立 Loading、Submitting、
+  Error 和 Recovery；`requires-approval`、`not-found` 与写失败必须是持久 inline status，不能
+  只显示 Toast。
 
 ### 技能
 
@@ -946,6 +986,11 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   禁止光晕、脉冲、粒子、视差、大幅弹簧和全局 `transition: all`。
 - 几何基准为 `1440×920`，最小窗口为 `1040×700`。应用范围内不得出现整页横向
   滚动或遮挡主要操作。
+- Electron Main 始终自动保存 normal window bounds。重新创建窗口时把保存尺寸与位置 clamp
+  到仍存在的 display work area；原外接显示器移除或状态损坏时，在 primary display 使用受约束的
+  默认尺寸并居中，不能让窗口留在不可见坐标。
+- General 的“重置窗口大小与位置”以当前窗口所在 display 为目标；全屏时不执行、不排队。
+  Window geometry 变化不得重新加载 Renderer 或改变当前一级页面与业务状态。
 - 270px 统一侧栏永不收缩。Camp Inspector 在 `1040–1179px` 为 260px、其他为
   310px；队员名册在窄区间为 250px；Memory 双栏最低 310/390；设置内容不再为
   第二列导航预留宽度。
@@ -972,6 +1017,9 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   Renderer 猜测。
 - 删除 `rovai.rail-expanded` 等旧纯 UI 偏好，不迁移、不双读。Pin 使用新的
   `navigation.json`；ThemePreference 按已确认合同保留但全部解析为 Day。
+- v0.49 新增 Main-owned `general-preferences.json` 与 `restorable-location.json`，继续复用并增强
+  `window-state.json`。这些文件不进入 Core/SQLite；登录项状态只从 macOS 读取，不在文件中保存
+  第二份 Boolean。Renderer 只能通过窄 Preload bridge 访问，不能读取文件路径或任意 JSON。
 - Quick Chat 全栈切换与旧 `<userData>/lobby/` 精确删除遵守 ADR-0074；不增加
   Lobby 别名、旧序列化值、双目录或 CSS 兼容类。
 - Quick Chat 的项目式 Renderer 投影、设置覆盖侧栏和 `Rovai AI` 字标遵守
@@ -987,6 +1035,8 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 - v0.24 不实现 Arctic Dawn Night，不根据 Day 自动生成暗色。
 - 不新增 Project 领域实体、Quick Chat 实体、账号/资料菜单、Camp archive/trash、
   拖拽调宽、移动端布局或原型页面切换器。
+- v0.49 不增加隐藏/后台登录启动、关闭窗口行为、默认 Project、执行恢复、自动批准、语言、
+  通知规则或自动更新设置。
 - 不改变 Runtime-native 权限、Memory Scope、Task、Camp Creation、A2A 私有正文或
   Execution Evidence 的权威边界。
 - 不把静态原型数据、示例审批选项、示例路径、产品版本号或演示事件处理器复制到生产。

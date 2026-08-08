@@ -1,0 +1,154 @@
+---
+document_type: version-overview
+version: v0.49
+lifecycle: current
+authority: version-scope-and-status
+design_status: accepted
+implementation_status: not_started
+last_updated: 2026-08-09
+---
+
+# Rovai-ai v0.49：通用与启动设置
+
+> 当前状态：产品语义与生产设计已经确认，生产实现尚未开始。v0.49 只增加 Electron
+> Desktop Shell 偏好、macOS 登录项控制、稳定一级位置恢复和窗口几何重置；不改变
+> Camp、Task、AgentRun、Native Session、Memory、Approval 或执行恢复语义。
+>
+> 前置版本：[v0.48 Native Session Compaction Bootstrap Redelivery](../v0.48/README.md)
+
+## 版本目标
+
+v0.49 在设置侧栏顶部增加“通用”，形成以下固定顺序：
+
+1. 通用；
+2. Skill；
+3. MCP；
+4. Agent 运行时；
+5. 外观；
+6. 通知；
+7. 诊断。
+
+“通用”页面管理三类桌面体验：
+
+- 使用 macOS 登录项开启或关闭“登录时启动 Rovai-ai”；
+- 选择每个新的 Main Window Session 打开 Quick Chat 还是最近的 Restorable Location；
+- 说明窗口大小与位置会自动保存，并提供“重置窗口大小与位置”。
+
+再次进入设置时继续打开用户最后选择的设置分类；设置本身以及 Dialog、Drawer、命令面板、
+Approval、Toast 等临时表面不成为启动目标。
+
+## 已确认的启动语义
+
+### 每个主窗口会话只解析一次
+
+`启动后打开` 的边界是新的 Main Window Session，不是 Electron 进程冷启动：
+
+- 冷启动创建主窗口时解析一次；
+- macOS 关闭最后窗口但进程仍存活，之后从 Dock 重新创建主窗口时重新解析一次；
+- 已有窗口时再次启动应用或点击 Dock，只恢复、聚焦该窗口，不改变当前页面；
+- 最小化恢复、Core restart、Navigation refresh 和普通页面切换不重新解析。
+
+默认模式是“上次使用的位置”。全新安装没有恢复记录时进入 Quick Chat；用户选择“快速对话”
+后，每个新 Main Window Session 都从 Quick Chat 首页开始。
+
+### 成功显示即提交稳定位置
+
+Restorable Location 是最近一次经过权威数据验证并成功显示的稳定一级位置，而不是退出时对
+最后一帧 UI 的快照。Quick Chat、Camp、队员页及其可选队员/页签、记忆页成功显示后立即提交；
+设置页和所有临时表面不写入。应用崩溃或被强制退出不需要执行额外的 quit-time 保存。
+
+恢复时必须区分“确定失效”和“暂时不可验证”：
+
+- Camp 已被权威数据确认删除：回退 Quick Chat，并在 Quick Chat 成功显示后提交新目标；
+- 队员已被权威数据确认移除：进入队员页，按 Member Order 选择首个可管理队员并保留所请求
+  的“身份 / 运行配置”页签；没有可管理队员时显示队员空状态；
+- 偏好或恢复记录损坏：使用安全默认值并回退 Quick Chat，不能阻止窗口显示；
+- Core 尚未就绪、正在重启或发生暂时通信失败：保留原目标并继续等待/重试，不清除记录，
+  也不重新执行启动路由。
+
+Camp 和队员的有效性必须读取现有 Core 权威数据，不能只凭 Electron 文件中的 ID、旧 Navigation
+Snapshot 或 Renderer 内存状态判断。
+
+## 登录项与窗口边界
+
+登录项只在已安装的 macOS 应用中可配置。Electron Development 模式显示
+“仅在已安装的 Rovai-ai 应用中可配置”，不尝试注册开发入口。系统状态是唯一真源：
+全新安装不会自动注册登录项，因此默认关闭；若系统已经保留有效注册，则界面直接呈现系统状态，
+不能为了实现“默认值”强制覆盖它。
+
+| macOS 状态 | 开关 | 产品说明 |
+| --- | --- | --- |
+| `enabled` | 开 | 已生效 |
+| `not-registered` | 关 | 未注册 |
+| `requires-approval` | 开 | 已注册但等待系统授权，当前尚未生效；提供“打开系统设置” |
+| `not-found` | 关 | 登录项服务不可用；提示重新安装或修复应用 |
+
+`requires-approval` 时用户仍可关闭开关以取消注册。每次写入后必须从系统重新读取；应用偏好文件
+不保存第二份登录项 Boolean。本版本不设置 `openAsHidden`，登录启动与普通启动使用相同可见窗口。
+
+窗口大小与位置始终自动保存。重新打开时，保存的几何必须限制在当前可见显示器的 work area；
+原外接显示器已经移除时，窗口仍须完整可见。“重置窗口大小与位置”恢复 `1440×920` 默认尺寸
+（受当前显示器 work area 约束）并在当前显示器居中，不改变页面、Camp、草稿或运行状态。
+全屏时禁用重置并说明先退出全屏，不排队延迟执行。
+
+## 数据与架构边界
+
+v0.49 的启动模式、最后设置分类、Restorable Location 和窗口几何只属于 Electron Desktop Shell：
+
+- 不进入 Rust Core 或 SQLite；
+- 不产生 Camp event、Task mutation、AgentRun、Native Session、Approval 或 audit；
+- Renderer 只通过受类型约束的 preload bridge 读取和提交 Shell 状态，不读取任意本地文件；
+- Shell 文件缺失、字段未知、版本不支持或 JSON 损坏都必须退化到安全默认值；
+- Core 只继续提供已有的权威只读查询，用于验证 Camp 或 Member 是否仍有效，不接收桌面偏好写入。
+
+该范围不创建 ADR：它没有改变现有 Core、Runtime、合同或跨版本系统结构，属于可在 Desktop Shell
+内部演进的产品偏好与 Renderer 交互。
+
+## 本版本不做
+
+- 语言切换；
+- 隐藏启动或后台静默启动；
+- 关闭窗口时退出或留在后台的设置；
+- 自动批准或恢复未完成执行的开关；
+- 默认模型、Runtime、权限或 Memory 配置；
+- 默认打开某个 Project；
+- 系统通知规则；
+- 自动更新。
+
+## 验收阈值
+
+1. 全新安装默认进入 Quick Chat，默认启动偏好仍显示“上次使用的位置”；
+2. Camp、队员及页签、记忆页分别可跨 Main Window Session 恢复；从设置或任意临时表面关闭
+   窗口时仍恢复之前的稳定一级位置；
+3. Camp 删除、队员移除、偏好损坏与恢复记录损坏均按上述确定性规则安全降级；Core 暂时失败
+   不清除仍可能有效的目标；
+4. 外接显示器移除后窗口仍可见；重置恢复默认尺寸并在当前显示器居中；全屏时不执行或排队；
+5. 已安装的 macOS App 可开启、关闭登录项，并诚实呈现 `requires-approval` 与 `not-found`；
+   Development 模式不可配置；
+6. `pnpm docs:check`、TypeScript typecheck、相关 Vitest、Desktop build、packaged App
+   双窗口会话与登录项实测全部通过；
+7. 对 General 设置进行读写、重置窗口和解析启动位置不会新增 Camp、Task、Run 或 audit 事实。
+
+实施检查点与证据入口见[实施与验收计划](implementation-plan.md)，精确 UI 与 Shell 合同见
+[生产设计](production-design.md)。
+
+## 跨版本文档影响
+
+| 范围 | 结论 | 证据或理由 |
+| --- | --- | --- |
+| Version lifecycle | 已更新 | `docs/versions/README.md` 将 v0.48 冻结为 historical，并把 v0.49 设为唯一 current；本概览与实施计划已建立 |
+| ADR | 确认无需更新 | 本版本不改变 Core、Runtime、持久业务语义或现有 accepted ADR；Desktop Shell 文件与 Renderer 交互可在局部演进，不构成需要跨版本冻结的高逆转成本架构决定 |
+| Contracts | 确认无需更新 | 不改变 Agent/Core CLI、Envelope、receipt、Task、Message Delivery 或其他长期 wire contract；Main/Preload/Renderer 类型属于版本内桌面实现 |
+| Architecture | 确认无需更新 | 现有长期架构目录拥有 Built-in Tool、A2A 与 Bootstrap 结构；v0.49 不改变这些组件职责或传输关系 |
+| UI | 已更新 | `docs/ui/README.md` 与 `docs/ui/arctic-dawn.md` 增加七分类设置、General 页面、启动恢复、登录项和窗口行为；领域词汇同步更新 `CONTEXT.md` |
+| Runtime Activity | 确认无需更新 | Desktop Shell 偏好、窗口几何和登录项不产生或改变 Canonical Runtime Activity |
+| Runtime compatibility | 确认无需更新 | 不改变任何 Agent Runtime adapter、版本、能力或 smoke 结论 |
+| Documentation routing | 确认无需更新 | `docs/README.md` 已通过版本索引的唯一 current 指针路由版本工作，不需要硬编码 v0.49 专门入口 |
+| Root README | 确认无需更新 | 项目定位、常青能力与支持的 Agent Runtime 范围没有变化；版本流水账只属于 `docs/versions/` |
+
+## References
+
+- [v0.49 生产设计](production-design.md)
+- [v0.49 实施与验收计划](implementation-plan.md)
+- [Arctic Dawn V3 设置与窗口合同](../../ui/arctic-dawn.md#设置)
+- [Rovai-ai 领域语言](../../../CONTEXT.md)
