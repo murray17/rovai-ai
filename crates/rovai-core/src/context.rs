@@ -22,7 +22,7 @@ use crate::{
         NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION,
     },
     context_delivery::{
-        ContextDeliveryProfile, OMITTED_PUBLIC_MESSAGES_RETRIEVAL_HINT, body_prefix,
+        ContextDeliveryProfile, OMITTED_PUBLIC_MESSAGES_NAVIGATION_HINT, body_prefix,
         current_context_delivery_profile, unicode_scalar_count,
     },
     db::Database,
@@ -586,6 +586,7 @@ impl ContextService {
                 &snapshot,
                 previous_accepted_public_boundary_sequence,
                 &included_message_ids,
+                &mut omission_entries,
             )?;
             let shared_conversation = SharedConversation {
                 originating_public_user_message: standalone_origin,
@@ -608,14 +609,19 @@ impl ContextService {
                 break (shared_conversation, payload, runtime_payload);
             }
             if !recent_messages.is_empty() {
-                recent_messages.remove(0);
+                let removed = recent_messages.remove(0);
+                omission_entries.push(ContextOmission {
+                    kind: "public_history",
+                    message_ids: vec![removed.message_id],
+                    reason: "runtime_payload_budget",
+                });
                 continue;
             }
             if let Some(origin) = originating_public_user_message.take() {
                 omission_entries.push(ContextOmission {
                     kind: "public_history",
                     message_ids: vec![origin.message_id],
-                    reason: "history_budget",
+                    reason: "runtime_payload_budget",
                 });
                 continue;
             }
@@ -624,7 +630,7 @@ impl ContextService {
                 omission_entries.push(ContextOmission {
                     kind: "reference_closure",
                     message_ids: vec![removed.message.message_id],
-                    reason: "history_budget",
+                    reason: "runtime_payload_budget",
                 });
                 continue;
             }
@@ -684,14 +690,16 @@ impl ContextService {
         let manifest_id = Uuid::new_v4().to_string();
         let created_at = chrono::Utc::now().to_rfc3339();
         let collaboration_state_included = collaboration_state_section.is_some();
-        let run_notice_refs = run_notices
-            .iter()
-            .map(|notice| notice.code.clone())
-            .collect::<Vec<_>>();
-        let run_notice_digest = canonical_json_digest(&serde_json::to_value(&run_notices)?)?;
+        let shared_message_evidence = shared_conversation.projection_evidence();
+        let shared_message_evidence_digest =
+            canonical_json_digest(&serde_json::to_value(&shared_message_evidence)?)?;
+        let (run_notice_refs, run_notice_payload_json, run_notice_digest) =
+            run_notice_evidence(&run_notices)?;
         let current_input_source = json!({
             "sourceCampMessageId": current_input.source_camp_message_id,
             "conversationMessageId": current_input.source_conversation_message_id,
+            "sourceContentDigest": current_input.source_content_digest,
+            "projectedBodyDigest": current_input.projected_body_digest,
         });
         let attachment_digest = canonical_json_digest(&serde_json::to_value(&attachment_refs)?)?;
         let originating_public_user_message_ref = shared_conversation
@@ -749,11 +757,12 @@ impl ContextService {
                 originating_public_user_message_ref_json,
                 recent_message_refs_json, reference_closure_refs_json,
                 omission_entries_json,
+                shared_message_evidence_json, shared_message_evidence_digest,
                 omitted_message_count, omitted_message_sequence_start,
                 omitted_message_sequence_end,
                 raw_message_refs_json,
                 collaboration_state_digest, collaboration_state_included,
-                run_notice_refs_json, run_notice_digest,
+                run_notice_refs_json, run_notice_payload_json, run_notice_digest,
                 current_input_source_json,
                 attachment_refs_json, attachment_digest,
                 skill_exposure_json, skill_exposure_digest,
@@ -762,9 +771,9 @@ impl ContextService {
                 rendered_payload_blob_id, rendered_payload_digest, created_at
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
-                ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19,
-                ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28,
-                ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36
+                ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
+                ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
+                ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39
             )
             "#,
             params![
@@ -787,6 +796,8 @@ impl ContextService {
                 serde_json::to_string(&recent_message_refs)?,
                 serde_json::to_string(&reference_closure_refs)?,
                 serde_json::to_string(&omission_entries)?,
+                serde_json::to_string(&shared_message_evidence)?,
+                shared_message_evidence_digest,
                 omitted_message_count,
                 omitted_message_sequence_start,
                 omitted_message_sequence_end,
@@ -794,6 +805,7 @@ impl ContextService {
                 collaboration_state_digest,
                 i64::from(collaboration_state_included),
                 serde_json::to_string(&run_notice_refs)?,
+                run_notice_payload_json,
                 run_notice_digest,
                 serde_json::to_string(&current_input_source)?,
                 serde_json::to_string(&attachment_refs)?,
@@ -853,6 +865,7 @@ impl ContextService {
                     "recentMessageCount": shared_conversation.recent_messages.len(),
                     "referenceClosureMessageCount": shared_conversation.reference_closure.len(),
                     "contextOmissionCount": omission_entries.len(),
+                    "sharedMessageEvidenceDigest": shared_message_evidence_digest,
                     "omittedMessageCount": omitted_message_count,
                     "omittedMessageSequenceStart": omitted_message_sequence_start,
                     "omittedMessageSequenceEnd": omitted_message_sequence_end,
@@ -1013,16 +1026,18 @@ impl ContextService {
                         .map(|entry| entry.message.message_id.clone()),
                 )
                 .collect::<HashSet<_>>();
+            let omitted_messages = omitted_public_messages(
+                transaction,
+                &snapshot,
+                previous_boundary,
+                &included_message_ids,
+                &mut omission_entries,
+            )?;
             let shared_conversation = SharedConversation {
                 originating_public_user_message: standalone_origin,
                 reference_closure: reference_closure.clone(),
                 recent_messages: recent_messages.clone(),
-                omitted_messages: omitted_public_messages(
-                    transaction,
-                    &snapshot,
-                    previous_boundary,
-                    &included_message_ids,
-                )?,
+                omitted_messages,
                 omission_entries: omission_entries.clone(),
             };
             let rendered = render_payload(RenderPayloadInput {
@@ -1035,19 +1050,24 @@ impl ContextService {
                 break (shared_conversation, rendered);
             }
             if !recent_messages.is_empty() {
-                recent_messages.remove(0);
+                let removed = recent_messages.remove(0);
+                omission_entries.push(ContextOmission {
+                    kind: "public_history",
+                    message_ids: vec![removed.message_id],
+                    reason: "runtime_payload_budget",
+                });
             } else if let Some(origin) = originating_public_user_message.take() {
                 omission_entries.push(ContextOmission {
                     kind: "public_history",
                     message_ids: vec![origin.message_id],
-                    reason: "history_budget",
+                    reason: "runtime_payload_budget",
                 });
             } else if reference_closure.len() > 1 {
                 let removed = reference_closure.pop().expect("closure is non-empty");
                 omission_entries.push(ContextOmission {
                     kind: "reference_closure",
                     message_ids: vec![removed.message.message_id],
-                    reason: "history_budget",
+                    reason: "runtime_payload_budget",
                 });
             } else {
                 return Err(ContextPayloadTooLarge { max_payload_bytes }.into());
@@ -1112,10 +1132,11 @@ impl ContextService {
                 })
             })
             .collect::<Vec<_>>();
-        let run_notice_refs = run_notices
-            .iter()
-            .map(|notice| notice.code.clone())
-            .collect::<Vec<_>>();
+        let shared_message_evidence = shared_conversation.projection_evidence();
+        let shared_message_evidence_digest =
+            canonical_json_digest(&serde_json::to_value(&shared_message_evidence)?)?;
+        let (run_notice_refs, run_notice_payload_json, run_notice_digest) =
+            run_notice_evidence(&run_notices)?;
         let manifest_selection = json!({
             "previousAcceptedPublicBoundarySequence": previous_boundary,
             "contextDeliveryProfileVersion": profile.profile_version,
@@ -1128,6 +1149,8 @@ impl ContextService {
             "recentMessageRefs": recent_message_refs,
             "referenceClosureRefs": reference_closure_refs,
             "omissionEntries": shared_conversation.omission_entries,
+            "sharedMessageEvidence": shared_message_evidence,
+            "sharedMessageEvidenceDigest": shared_message_evidence_digest,
             "omittedMessageCount": shared_conversation.omitted_messages.as_ref().map(|omitted| omitted.count as i64),
             "omittedMessageSequenceStart": shared_conversation.omitted_messages.as_ref().map(|omitted| omitted.sequence_start),
             "omittedMessageSequenceEnd": shared_conversation.omitted_messages.as_ref().map(|omitted| omitted.sequence_end),
@@ -1135,10 +1158,13 @@ impl ContextService {
             "collaborationStateDigest": collaboration_state_digest.clone(),
             "collaborationStateIncluded": collaboration_state_section.is_some(),
             "runNoticeRefs": run_notice_refs,
-            "runNoticeDigest": canonical_json_digest(&serde_json::to_value(&run_notices)?)?,
+            "runNoticePayload": serde_json::from_str::<Value>(&run_notice_payload_json)?,
+            "runNoticeDigest": run_notice_digest,
             "currentInputSource": {
                 "sourceCampMessageId": current_input.source_camp_message_id,
                 "conversationMessageId": current_input.source_conversation_message_id,
+                "sourceContentDigest": current_input.source_content_digest,
+                "projectedBodyDigest": current_input.projected_body_digest,
             },
             "attachmentRefs": attachment_refs,
             "attachmentDigest": canonical_json_digest(&serde_json::to_value(&attachment_refs)?)?,
@@ -2027,7 +2053,7 @@ fn compose_first_payload(bootstrap: &str, dynamic_context: &str) -> String {
 
 fn render_bootstrap_redelivery_overlay(bootstrap: &str) -> String {
     format!(
-        "[ROVAI_BOOTSTRAP_REDELIVERY]\n【补发】Native Session Bootstrap\n原因：Runtime 已报告当前 Native Session 已发生或即将发生会话上下文压缩。\n以下内容用于恢复可能因压缩而丢失的会话级长期上下文。\n\n{}\n[/ROVAI_BOOTSTRAP_REDELIVERY]",
+        "[ROVAI_BOOTSTRAP_REDELIVERY reason=\"context_compaction\"]\nThis is Core recovery context for the existing Native Session, not a new task or Session.\n\n{}\n[/ROVAI_BOOTSTRAP_REDELIVERY]",
         bootstrap.trim()
     )
 }
@@ -2415,6 +2441,8 @@ struct CollaborationProjectionMember {
 #[serde(rename_all = "camelCase")]
 struct RunNotice {
     code: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    task_id: Option<String>,
     message: String,
 }
 
@@ -2464,6 +2492,7 @@ fn build_run_notices<R: ContextReadConnection>(
     if requires_new_native_session && snapshot.native_session_id.is_some() {
         notices.push(RunNotice {
             code: "native_session_continuity_lost".to_string(),
+            task_id: None,
             message:
                 "The prior native session could not be continued. Recheck assumptions that depended on private session history."
                     .to_string(),
@@ -2483,6 +2512,7 @@ fn build_run_notices<R: ContextReadConnection>(
     if unsettled_effect {
         notices.push(RunNotice {
             code: "unsettled_external_effect".to_string(),
+            task_id: None,
             message:
                 "A prior external action has an unsettled outcome. Reconcile current external state before repeating it."
                     .to_string(),
@@ -2491,6 +2521,7 @@ fn build_run_notices<R: ContextReadConnection>(
     if snapshot.a2a_depth >= 5 || a2a_run_count >= 16 {
         notices.push(RunNotice {
             code: "a2a_delegation_budget_exhausted".to_string(),
+            task_id: None,
             message:
                 "Further A2A delegation is unavailable for this collaboration chain. Complete the current work through this Run's normal final output; do not attempt additional member contact."
                     .to_string(),
@@ -2500,12 +2531,16 @@ fn build_run_notices<R: ContextReadConnection>(
 }
 
 fn a2a_task_context_notice(a2a_depth: i64, task_id: Option<&str>) -> Option<RunNotice> {
-    (a2a_depth > 0).then_some(task_id).flatten().map(|task_id| RunNotice {
-        code: "a2a_task_context".to_string(),
-        message: format!(
-            "This A2A Delivery was accepted with Task {task_id} as historical execution context. Re-read the Task only if the work itself requires a Task decision; later Task changes do not cancel or retarget this Run. Completing the Task or current work does not by itself require another public send. Use rovai send only when a target member needs the message to continue acting or decide, and never poll Task state while waiting."
-        ),
-    })
+    (a2a_depth > 0)
+        .then_some(task_id)
+        .flatten()
+        .map(|task_id| RunNotice {
+            code: "a2a_task_context".to_string(),
+            task_id: Some(task_id.to_string()),
+            message:
+                "This Task is historical context; later Task changes do not retarget this Run."
+                    .to_string(),
+        })
 }
 
 fn load_collaboration_projection_members<R: ContextReadConnection>(
@@ -2540,27 +2575,25 @@ fn load_collaboration_projection_members<R: ContextReadConnection>(
         .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct SharedMessageAttachment {
+    attachment_id: String,
     name: String,
     media_type: String,
     path: String,
     content_digest: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct SharedMessage {
+    camp_id: String,
     message_id: String,
     sequence: i64,
     sender_type: String,
     sender_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     source_conversation_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    content_digest: String,
     reply_to_message_id: Option<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
     attachments: Vec<SharedMessageAttachment>,
     body: String,
     body_length: usize,
@@ -2574,14 +2607,12 @@ struct OmittedMessages {
     count: usize,
     sequence_start: i64,
     sequence_end: i64,
-    retrieval_hint: &'static str,
+    navigation_hint: &'static str,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ReferenceClosureMessage {
     distance: usize,
-    #[serde(flatten)]
     message: SharedMessage,
 }
 
@@ -2599,19 +2630,250 @@ struct ReferenceClosureSelection {
     omissions: Vec<ContextOmission>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SharedConversation {
+    originating_public_user_message: Option<SharedMessage>,
+    reference_closure: Vec<ReferenceClosureMessage>,
+    recent_messages: Vec<SharedMessage>,
+    omitted_messages: Option<OmittedMessages>,
+    omission_entries: Vec<ContextOmission>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelSharedMessageAttachment<'a> {
+    name: &'a str,
+    media_type: &'a str,
+    path: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+struct CampReadContinuation<'a> {
+    operation: &'static str,
+    input: CampReadContinuationInput<'a>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CampReadContinuationInput<'a> {
+    camp_id: &'a str,
+    mode: &'static str,
+    message_id: &'a str,
+    body_offset: usize,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelSharedMessage<'a> {
+    message_id: &'a str,
+    sequence: i64,
+    sender_type: &'a str,
+    sender_id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reply_to_message_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    attachments: Vec<ModelSharedMessageAttachment<'a>>,
+    body: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    body_length: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    body_truncated: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    continuation: Option<CampReadContinuation<'a>>,
+}
+
+impl SharedMessage {
+    fn model_projection(&self) -> ModelSharedMessage<'_> {
+        ModelSharedMessage {
+            message_id: &self.message_id,
+            sequence: self.sequence,
+            sender_type: &self.sender_type,
+            sender_id: &self.sender_id,
+            reply_to_message_id: self.reply_to_message_id.as_deref(),
+            attachments: self
+                .attachments
+                .iter()
+                .map(|attachment| ModelSharedMessageAttachment {
+                    name: &attachment.name,
+                    media_type: &attachment.media_type,
+                    path: &attachment.path,
+                })
+                .collect(),
+            body: &self.body,
+            body_length: self.body_truncated.then_some(self.body_length),
+            body_truncated: self.body_truncated.then_some(true),
+            continuation: self
+                .next_body_offset
+                .map(|body_offset| CampReadContinuation {
+                    operation: "camp.read",
+                    input: CampReadContinuationInput {
+                        camp_id: &self.camp_id,
+                        mode: "item",
+                        message_id: &self.message_id,
+                        body_offset,
+                    },
+                }),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelReferenceClosureMessage<'a> {
+    distance: usize,
+    #[serde(flatten)]
+    message: ModelSharedMessage<'a>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelSharedConversation<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    originating_public_user_message: Option<ModelSharedMessage<'a>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    reference_closure: Vec<ModelReferenceClosureMessage<'a>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    recent_messages: Vec<ModelSharedMessage<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    omitted_messages: Option<&'a OmittedMessages>,
+}
+
+impl SharedConversation {
+    fn model_projection(&self) -> ModelSharedConversation<'_> {
+        ModelSharedConversation {
+            originating_public_user_message: self
+                .originating_public_user_message
+                .as_ref()
+                .map(SharedMessage::model_projection),
+            reference_closure: self
+                .reference_closure
+                .iter()
+                .map(|entry| ModelReferenceClosureMessage {
+                    distance: entry.distance,
+                    message: entry.message.model_projection(),
+                })
+                .collect(),
+            recent_messages: self
+                .recent_messages
+                .iter()
+                .map(SharedMessage::model_projection)
+                .collect(),
+            omitted_messages: self.omitted_messages.as_ref(),
+        }
+    }
+
+    fn projection_evidence(&self) -> Vec<SharedMessageProjectionEvidence> {
+        let mut evidence = Vec::new();
+        if let Some(message) = self.originating_public_user_message.as_ref() {
+            evidence.push(SharedMessageProjectionEvidence::from_message(
+                "originating_public_user_message",
+                None,
+                message,
+            ));
+        }
+        evidence.extend(self.reference_closure.iter().map(|entry| {
+            SharedMessageProjectionEvidence::from_message(
+                "reference_closure",
+                Some(entry.distance),
+                &entry.message,
+            )
+        }));
+        evidence.extend(self.recent_messages.iter().map(|message| {
+            SharedMessageProjectionEvidence::from_message("recent_message", None, message)
+        }));
+        evidence
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SharedConversation {
+struct SharedMessageAttachmentEvidence {
+    attachment_id: String,
+    name: String,
+    media_type: String,
+    path: String,
+    content_digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SharedMessageProjectionEvidence {
+    selection_kind: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    originating_public_user_message: Option<SharedMessage>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    reference_closure: Vec<ReferenceClosureMessage>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    recent_messages: Vec<SharedMessage>,
+    reference_distance: Option<usize>,
+    camp_id: String,
+    message_id: String,
+    sequence: i64,
+    sender_type: String,
+    sender_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    omitted_messages: Option<OmittedMessages>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    omission_entries: Vec<ContextOmission>,
+    source_conversation_id: Option<String>,
+    content_digest: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reply_to_message_id: Option<String>,
+    projected_body_digest: String,
+    body_length: usize,
+    body_truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    continuation_body_offset: Option<usize>,
+    attachments: Vec<SharedMessageAttachmentEvidence>,
+}
+
+impl SharedMessageProjectionEvidence {
+    fn from_message(
+        selection_kind: &'static str,
+        reference_distance: Option<usize>,
+        message: &SharedMessage,
+    ) -> Self {
+        Self {
+            selection_kind,
+            reference_distance,
+            camp_id: message.camp_id.clone(),
+            message_id: message.message_id.clone(),
+            sequence: message.sequence,
+            sender_type: message.sender_type.clone(),
+            sender_id: message.sender_id.clone(),
+            source_conversation_id: message.source_conversation_id.clone(),
+            content_digest: message.content_digest.clone(),
+            reply_to_message_id: message.reply_to_message_id.clone(),
+            projected_body_digest: sha256_text(&message.body),
+            body_length: message.body_length,
+            body_truncated: message.body_truncated,
+            continuation_body_offset: message.next_body_offset,
+            attachments: message
+                .attachments
+                .iter()
+                .map(|attachment| SharedMessageAttachmentEvidence {
+                    attachment_id: attachment.attachment_id.clone(),
+                    name: attachment.name.clone(),
+                    media_type: attachment.media_type.clone(),
+                    path: attachment.path.clone(),
+                    content_digest: attachment.content_digest.clone(),
+                })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RunNoticeRef {
+    code: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    task_id: Option<String>,
+}
+
+fn run_notice_evidence(run_notices: &[RunNotice]) -> Result<(Vec<RunNoticeRef>, String, String)> {
+    let references = run_notices
+        .iter()
+        .map(|notice| RunNoticeRef {
+            code: notice.code.clone(),
+            task_id: notice.task_id.clone(),
+        })
+        .collect();
+    let payload_json = serde_json::to_string(run_notices)?;
+    let digest = sha256_text(&payload_json);
+    Ok((references, payload_json, digest))
 }
 
 /// Apply the Profile v2 public-history contract before any transport-specific
@@ -2649,7 +2911,12 @@ fn apply_public_history_budget(
             return;
         }
         if !recent_messages.is_empty() {
-            recent_messages.remove(0);
+            let removed = recent_messages.remove(0);
+            omission_entries.push(ContextOmission {
+                kind: "public_history",
+                message_ids: vec![removed.message_id],
+                reason: "history_budget",
+            });
         } else if let Some(origin) = originating_public_user_message.take() {
             omission_entries.push(ContextOmission {
                 kind: "public_history",
@@ -2774,6 +3041,7 @@ fn load_public_reference_closure<R: ContextReadConnection>(
         let body = projected_camp_message_body(database.context_connection(), row.6, row.7)?;
         let message = project_shared_message(
             database,
+            snapshot.camp_id.clone(),
             row.1,
             row.2,
             row.3,
@@ -2871,6 +3139,7 @@ fn load_recent_public_messages<R: ContextReadConnection>(
         )?;
         messages.push(project_shared_message(
             database,
+            snapshot.camp_id.clone(),
             id,
             sequence,
             sender_type,
@@ -2887,6 +3156,7 @@ fn load_recent_public_messages<R: ContextReadConnection>(
 #[allow(clippy::too_many_arguments)]
 fn project_shared_message<R: ContextReadConnection>(
     database: &R,
+    camp_id: String,
     message_id: String,
     sequence: i64,
     sender_type: String,
@@ -2896,9 +3166,14 @@ fn project_shared_message<R: ContextReadConnection>(
     body: String,
     profile: ContextDeliveryProfile,
 ) -> Result<SharedMessage> {
+    let content_digest = database.context_connection().query_row(
+        "SELECT content_digest FROM camp_message WHERE id = ?1 AND camp_id = ?2",
+        params![message_id, camp_id],
+        |row| row.get::<_, String>(0),
+    )?;
     let mut attachment_statement = database.context_connection().prepare(
         r#"
-        SELECT display_name, media_type, storage_path, content_digest
+        SELECT id, display_name, media_type, storage_path, content_digest
         FROM message_attachment
         WHERE camp_message_id = ?1
         ORDER BY created_at, id
@@ -2907,20 +3182,23 @@ fn project_shared_message<R: ContextReadConnection>(
     let attachments = attachment_statement
         .query_map([&message_id], |row| {
             Ok(SharedMessageAttachment {
-                name: row.get(0)?,
-                media_type: row.get(1)?,
-                path: row.get(2)?,
-                content_digest: row.get(3)?,
+                attachment_id: row.get(0)?,
+                name: row.get(1)?,
+                media_type: row.get(2)?,
+                path: row.get(3)?,
+                content_digest: row.get(4)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let prefix = body_prefix(&body, profile.max_message_body_chars);
     Ok(SharedMessage {
+        camp_id,
         message_id,
         sequence,
         sender_type,
         sender_id,
         source_conversation_id,
+        content_digest,
         reply_to_message_id,
         attachments,
         body: prefix.body,
@@ -3048,7 +3326,16 @@ fn load_originating_public_user_message<R: ContextReadConnection>(
     }
     let body = projected_camp_message_body(database.context_connection(), row.5, row.6)?;
     project_shared_message(
-        database, row.0, row.1, row.2, row.3, row.4, row.7, body, profile,
+        database,
+        snapshot.camp_id.clone(),
+        row.0,
+        row.1,
+        row.2,
+        row.3,
+        row.4,
+        row.7,
+        body,
+        profile,
     )
     .map(Some)
 }
@@ -3058,6 +3345,7 @@ fn omitted_public_messages<R: ContextReadConnection>(
     snapshot: &RunSnapshot,
     after_sequence: i64,
     included_message_ids: &HashSet<String>,
+    omission_entries: &mut Vec<ContextOmission>,
 ) -> Result<Option<OmittedMessages>> {
     let mut statement = database.context_connection().prepare(
         r#"
@@ -3080,19 +3368,37 @@ fn omitted_public_messages<R: ContextReadConnection>(
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
         )?
         .filter_map(|row| match row {
-            Ok((id, sequence)) if !included_message_ids.contains(&id) => Some(Ok(sequence)),
+            Ok((id, sequence)) if !included_message_ids.contains(&id) => Some(Ok((id, sequence))),
             Ok(_) => None,
             Err(error) => Some(Err(error)),
         })
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let Some(sequence_start) = omitted.first().copied() else {
+    let Some((_, sequence_start)) = omitted.first() else {
         return Ok(None);
     };
+    let already_explained = omission_entries
+        .iter()
+        .flat_map(|entry| entry.message_ids.iter())
+        .collect::<HashSet<_>>();
+    let max_message_omissions = omitted
+        .iter()
+        .filter(|(message_id, _)| !already_explained.contains(message_id))
+        .map(|(message_id, _)| message_id.clone())
+        .collect::<Vec<_>>();
+    if !max_message_omissions.is_empty() {
+        omission_entries.push(ContextOmission {
+            kind: "public_history",
+            message_ids: max_message_omissions,
+            reason: "max_public_messages",
+        });
+    }
     Ok(Some(OmittedMessages {
         count: omitted.len(),
-        sequence_start,
-        sequence_end: omitted.last().copied().unwrap_or(sequence_start),
-        retrieval_hint: OMITTED_PUBLIC_MESSAGES_RETRIEVAL_HINT,
+        sequence_start: *sequence_start,
+        sequence_end: omitted
+            .last()
+            .map_or(*sequence_start, |(_, sequence)| *sequence),
+        navigation_hint: OMITTED_PUBLIC_MESSAGES_NAVIGATION_HINT,
     }))
 }
 
@@ -3117,12 +3423,15 @@ struct CurrentInput {
     payload: Value,
     source_camp_message_id: Option<String>,
     source_conversation_message_id: Option<String>,
+    source_content_digest: String,
+    projected_body_digest: String,
 }
 
 impl CurrentInput {
     fn as_payload(&self, attachment_paths: &[String]) -> Value {
         let mut payload = self.payload.clone();
         if self.source_camp_message_id.is_some()
+            && !attachment_paths.is_empty()
             && let Some(payload) = payload.as_object_mut()
         {
             payload.insert("attachments".to_string(), json!(attachment_paths));
@@ -3140,11 +3449,11 @@ fn load_current_input<R: ContextReadConnection>(
         snapshot.trigger_conversation_message_id.as_deref(),
     ) {
         (Some(camp_message_id), None) => {
-            let (id, stored_body, structured_content_json) = database
+            let (id, stored_body, structured_content_json, source_content_digest) = database
                 .context_connection()
                 .query_row(
                     r#"
-                SELECT id, body, structured_content_json
+                SELECT id, body, structured_content_json, content_digest
                 FROM camp_message
                 WHERE id = ?1 AND camp_id = ?2
                   AND sequence <= ?3
@@ -3160,6 +3469,7 @@ fn load_current_input<R: ContextReadConnection>(
                             row.get::<_, String>(0)?,
                             row.get::<_, String>(1)?,
                             row.get::<_, Option<String>>(2)?,
+                            row.get::<_, String>(3)?,
                         ))
                     },
                 )
@@ -3170,6 +3480,7 @@ fn load_current_input<R: ContextReadConnection>(
                 stored_body,
                 structured_content_json,
             )?;
+            let projected_body_digest = sha256_text(&body);
             Ok(CurrentInput {
                 id,
                 payload: json!({
@@ -3178,6 +3489,8 @@ fn load_current_input<R: ContextReadConnection>(
                 }),
                 source_camp_message_id: Some(camp_message_id.to_string()),
                 source_conversation_message_id: None,
+                source_content_digest,
+                projected_body_digest,
             })
         }
         (None, Some(conversation_message_id)) => database
@@ -3203,6 +3516,8 @@ fn load_current_input<R: ContextReadConnection>(
                 ],
                 |row| {
                     let sender_agent_id = row.get::<_, String>(2)?;
+                    let body = row.get::<_, String>(3)?;
+                    let body_digest = sha256_text(&body);
                     Ok(CurrentInput {
                         id: row.get(0)?,
                         payload: json!({
@@ -3212,10 +3527,12 @@ fn load_current_input<R: ContextReadConnection>(
                                 "senderName": row.get::<_, Option<String>>(4)?
                                     .unwrap_or_else(|| "Source Member".to_string()),
                             },
-                            "message": row.get::<_, String>(3)?,
+                            "message": body,
                         }),
                         source_camp_message_id: None,
                         source_conversation_message_id: Some(conversation_message_id.to_string()),
+                        source_content_digest: body_digest.clone(),
+                        projected_body_digest: body_digest,
                     })
                 },
             )
@@ -3295,12 +3612,11 @@ fn render_payload(input: RenderPayloadInput<'_>) -> Result<String> {
         || !input.shared_conversation.reference_closure.is_empty()
         || !input.shared_conversation.recent_messages.is_empty()
         || input.shared_conversation.omitted_messages.is_some()
-        || !input.shared_conversation.omission_entries.is_empty()
     {
         append_json_section(
             &mut output,
             "SHARED_CONVERSATION",
-            &serde_json::to_value(input.shared_conversation)?,
+            &serde_json::to_value(input.shared_conversation.model_projection())?,
         )?;
     }
     if !input.run_notices.is_empty() {
@@ -3318,7 +3634,7 @@ fn append_json_section(output: &mut String, name: &str, value: &Value) -> Result
     output.push('[');
     output.push_str(name);
     output.push_str("]\n");
-    output.push_str(&serde_json::to_string_pretty(value)?);
+    output.push_str(&serde_json::to_string(value)?);
     output.push_str("\n[/");
     output.push_str(name);
     output.push_str("]\n\n");
@@ -3447,7 +3763,11 @@ fn load_existing_manifest(
                        WHERE delivery.context_manifest_id = manifest.id
                        ORDER BY delivery.prepared_at DESC, delivery.id DESC
                        LIMIT 1
-                   )
+                   ),
+                   manifest.shared_message_evidence_json,
+                   manifest.shared_message_evidence_digest,
+                   manifest.run_notice_payload_json,
+                   manifest.run_notice_digest
             FROM context_manifest AS manifest
             JOIN native_session_bootstrap_evidence AS bootstrap
               ON bootstrap.id = manifest.bootstrap_evidence_id
@@ -3472,11 +3792,15 @@ fn load_existing_manifest(
                     row.get::<_, String>(13)?,
                     row.get::<_, String>(14)?,
                     row.get::<_, i64>(15)?,
-                    row.get::<_, Option<i64>>(16)?,
-                    row.get::<_, Option<String>>(17)?,
-                    row.get::<_, Option<String>>(18)?,
+                    row.get::<_, i64>(16)?,
+                    row.get::<_, String>(17)?,
+                    row.get::<_, String>(18)?,
                     row.get::<_, bool>(19)?,
                     row.get::<_, Option<i64>>(20)?,
+                    row.get::<_, String>(21)?,
+                    row.get::<_, String>(22)?,
+                    row.get::<_, String>(23)?,
+                    row.get::<_, String>(24)?,
                 ))
             },
         )
@@ -3490,16 +3814,20 @@ fn load_existing_manifest(
     if row.15 != CONTEXT_FORMATTER_VERSION {
         anyhow::bail!("Stored ContextManifest uses an obsolete context formatter");
     }
-    let stored_profile: ContextDeliveryProfile = serde_json::from_str(
-        row.17
-            .as_deref()
-            .context("Stored ContextManifest has no delivery profile snapshot")?,
-    )
-    .context("Stored ContextManifest delivery profile is invalid")?;
+    let shared_message_evidence: Value = serde_json::from_str(&row.21)
+        .context("Stored ContextManifest Shared Message evidence is invalid")?;
+    if canonical_json_digest(&shared_message_evidence)? != row.22 {
+        anyhow::bail!("Stored ContextManifest Shared Message evidence digest is invalid");
+    }
+    if sha256_text(&row.23) != row.24 {
+        anyhow::bail!("Stored ContextManifest Run Notice evidence digest is invalid");
+    }
+    let stored_profile: ContextDeliveryProfile = serde_json::from_str(&row.17)
+        .context("Stored ContextManifest delivery profile is invalid")?;
     let current_profile = current_context_delivery_profile()?;
-    if row.16 != Some(current_profile.profile_version)
+    if row.16 != current_profile.profile_version
         || stored_profile != current_profile
-        || row.18.as_deref() != Some(current_profile.canonical_digest()?.as_str())
+        || row.18 != current_profile.canonical_digest()?
     {
         anyhow::bail!("Stored ContextManifest delivery profile evidence is inconsistent");
     }
@@ -3725,9 +4053,20 @@ fn materialize_frozen_delivery_context(
     let collaboration_state_included = required("collaborationStateIncluded")?
         .as_bool()
         .context("Frozen Delivery Context collaboration inclusion evidence is invalid")?;
+    let shared_message_evidence_digest = required("sharedMessageEvidenceDigest")?
+        .as_str()
+        .context("Frozen Delivery Context Shared Message evidence digest is invalid")?;
+    if canonical_json_digest(required("sharedMessageEvidence")?)? != shared_message_evidence_digest
+    {
+        anyhow::bail!("Frozen Delivery Context Shared Message evidence is inconsistent");
+    }
     let run_notice_digest = required("runNoticeDigest")?
         .as_str()
         .context("Frozen Delivery Context run notice digest is invalid")?;
+    let run_notice_payload_json = json_text("runNoticePayload")?;
+    if sha256_text(&run_notice_payload_json) != run_notice_digest {
+        anyhow::bail!("Frozen Delivery Context Run Notice evidence is inconsistent");
+    }
     let attachment_digest = required("attachmentDigest")?
         .as_str()
         .context("Frozen Delivery Context attachment digest is invalid")?;
@@ -3752,11 +4091,12 @@ fn materialize_frozen_delivery_context(
             originating_public_user_message_ref_json,
             recent_message_refs_json, reference_closure_refs_json,
             omission_entries_json,
+            shared_message_evidence_json, shared_message_evidence_digest,
             omitted_message_count, omitted_message_sequence_start,
             omitted_message_sequence_end,
             raw_message_refs_json,
             collaboration_state_digest, collaboration_state_included,
-            run_notice_refs_json, run_notice_digest,
+            run_notice_refs_json, run_notice_payload_json, run_notice_digest,
             current_input_source_json,
             attachment_refs_json, attachment_digest,
             skill_exposure_json, skill_exposure_digest,
@@ -3765,9 +4105,9 @@ fn materialize_frozen_delivery_context(
             rendered_payload_blob_id, rendered_payload_digest, created_at
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
-            ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19,
-            ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28,
-            ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36
+            ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
+            ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
+            ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39
         )
         "#,
         params![
@@ -3787,6 +4127,8 @@ fn materialize_frozen_delivery_context(
             json_text("recentMessageRefs")?,
             json_text("referenceClosureRefs")?,
             json_text("omissionEntries")?,
+            json_text("sharedMessageEvidence")?,
+            shared_message_evidence_digest,
             optional_i64("omittedMessageCount")?,
             optional_i64("omittedMessageSequenceStart")?,
             optional_i64("omittedMessageSequenceEnd")?,
@@ -3794,6 +4136,7 @@ fn materialize_frozen_delivery_context(
             collaboration_state_digest,
             i64::from(collaboration_state_included),
             json_text("runNoticeRefs")?,
+            run_notice_payload_json,
             run_notice_digest,
             json_text("currentInputSource")?,
             json_text("attachmentRefs")?,
@@ -3841,6 +4184,7 @@ fn materialize_frozen_delivery_context(
             "bootstrapEvidenceId": bootstrap_evidence.evidence_id,
             "collaborationStateDigest": collaboration_state_digest,
             "collaborationStateIncluded": collaboration_state_included,
+            "sharedMessageEvidenceDigest": shared_message_evidence_digest,
             "runNoticeDigest": run_notice_digest,
             "attachmentDigest": attachment_digest,
             "skillExposureDigest": prepared_skill_exposure.digest,
@@ -5671,7 +6015,21 @@ mod tests {
             )
             .unwrap();
         assert!(manifest_sql.contains("formatter_version = 11"));
+        assert!(manifest_sql.contains("CHECK(context_delivery_profile_version = 2)"));
         assert!(manifest_sql.contains("collaboration_state_included INTEGER NOT NULL"));
+        assert!(manifest_sql.contains("shared_message_evidence_json TEXT NOT NULL"));
+        assert!(manifest_sql.contains("shared_message_evidence_digest TEXT NOT NULL"));
+        assert!(manifest_sql.contains("run_notice_payload_json TEXT NOT NULL"));
+        let delivery_sql: String = reopened
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'runtime_input_delivery'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(delivery_sql.contains("CHECK(bootstrap_redelivery_envelope_version = 2)"));
+        assert!(delivery_sql.contains("CHECK(bootstrap_redelivery_formatter_version = 2)"));
         let contract: (String, i64, i64, i64) = reopened
             .connection()
             .query_row(
@@ -6495,6 +6853,8 @@ mod tests {
         assert!(!first.rendered_payload.contains("replyToMessageId"));
         assert!(first.rendered_payload.contains("requirements.txt"));
         assert!(first.rendered_payload.contains("camp-attachments"));
+        assert!(!first.rendered_payload.contains("sourceConversationId"));
+        assert!(!first.rendered_payload.contains("contentDigest"));
         assert!(!first.rendered_payload.contains("managed-blob://"));
         assert!(!first.rendered_payload.contains(private_attachment_body));
         let stable_path: String = fixture
@@ -6510,6 +6870,27 @@ mod tests {
             std::fs::read_to_string(&stable_path).unwrap(),
             private_attachment_body
         );
+        let attachment_content_digest: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT content_digest FROM message_attachment WHERE camp_message_id = ?1",
+                [&camp_message_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!first.rendered_payload.contains(&attachment_content_digest));
+        let attachment_refs_json: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT attachment_refs_json FROM context_manifest WHERE id = ?1",
+                [&first.manifest_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(attachment_refs_json.contains(&attachment_content_digest));
+        assert!(!attachment_refs_json.contains(&camp_message_id));
         assert!(
             std::fs::metadata(&stable_path)
                 .unwrap()
@@ -6547,6 +6928,47 @@ mod tests {
             })
             .unwrap();
         assert_eq!(count, 1);
+        let first_run_id = fixture.run_id.clone();
+        let (followup_run_id, followup_epoch) = complete_run_and_start_followup(
+            &mut fixture,
+            &first_run_id,
+            "FOLLOWUP_WITH_HISTORICAL_ATTACHMENT",
+        );
+        let ContextMaterialization::Ready(followup) = service
+            .materialize(
+                &mut fixture.database,
+                &store,
+                &MaterializeContextRequest {
+                    agent_run_id: &followup_run_id,
+                    execution_epoch: followup_epoch,
+                    charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+            )
+            .unwrap()
+        else {
+            panic!("follow-up Context should project the former Current Input as history");
+        };
+        assert!(followup.rendered_payload.contains("requirements.txt"));
+        assert!(followup.rendered_payload.contains(&stable_path));
+        assert!(
+            !followup
+                .rendered_payload
+                .contains(&attachment_content_digest)
+        );
+        let (evidence_json, evidence_digest): (String, String) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT shared_message_evidence_json, shared_message_evidence_digest FROM context_manifest WHERE id = ?1",
+                [&followup.manifest_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let evidence: Value = serde_json::from_str(&evidence_json).unwrap();
+        assert!(evidence.to_string().contains(&attachment_content_digest));
+        assert!(evidence.to_string().contains(&camp_message_id));
+        assert_eq!(canonical_json_digest(&evidence).unwrap(), evidence_digest);
         CampAttachmentStore::new(&fixture.directory)
             .remove_camp(&fixture.camp_id)
             .unwrap();
@@ -7072,7 +7494,7 @@ mod tests {
         assert!(
             prepared
                 .runtime_payload
-                .starts_with("[ROVAI_BOOTSTRAP_REDELIVERY]\n【补发】")
+                .starts_with("[ROVAI_BOOTSTRAP_REDELIVERY reason=\"context_compaction\"]\nThis is Core recovery context for the existing Native Session, not a new task or Session.\n\n")
         );
         let overlay_end = prepared
             .runtime_payload
@@ -7084,7 +7506,11 @@ mod tests {
             .find(&prepared.rendered_payload)
             .unwrap();
         assert!(bootstrap_start < overlay_end && overlay_end < dynamic_start);
-        assert!(!prepared.rendered_payload.contains("【补发】"));
+        assert!(
+            !prepared
+                .rendered_payload
+                .contains("ROVAI_BOOTSTRAP_REDELIVERY")
+        );
 
         let delivery = service
             .prepare_input_delivery_for_context(
@@ -7095,6 +7521,22 @@ mod tests {
             )
             .unwrap();
         assert_eq!(delivery.bootstrap_redelivery_revision, Some(1));
+        let redelivery_evidence: (bool, i64, i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT bootstrap_redelivery_present,
+                       bootstrap_redelivery_revision,
+                       bootstrap_redelivery_envelope_version,
+                       bootstrap_redelivery_formatter_version
+                FROM runtime_input_delivery WHERE id = ?1
+                "#,
+                [&delivery.id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(redelivery_evidence, (true, 1, 2, 2));
         fixture
             .database
             .connection()
@@ -7630,17 +8072,17 @@ mod tests {
                 .contains("COLLABORATION_STATE describes peer routing identity only")
         );
         assert!(prepared.rendered_payload.contains("[COLLABORATION_STATE]"));
-        assert!(prepared.rendered_payload.contains("\"schemaVersion\": 2"));
-        assert!(prepared.rendered_payload.contains("\"peers\": []"));
+        assert!(prepared.rendered_payload.contains("\"schemaVersion\":2"));
+        assert!(prepared.rendered_payload.contains("\"peers\":[]"));
         assert!(
             prepared
                 .rendered_payload
-                .contains("\"defaultLeadAgentId\": \"agent_1\"")
+                .contains("\"defaultLeadAgentId\":\"agent_1\"")
         );
         assert!(
             prepared
                 .rendered_payload
-                .contains("\"selfIsDefaultLead\": true")
+                .contains("\"selfIsDefaultLead\":true")
         );
         assert!(!prepared.rendered_payload.contains("\"name\": \"小狐狸\""));
         assert!(
@@ -7868,7 +8310,7 @@ mod tests {
             panic!("initial Collaboration State should materialize")
         };
         assert!(initial.rendered_payload.contains("[COLLABORATION_STATE]"));
-        assert!(initial.rendered_payload.contains("\"schemaVersion\": 2"));
+        assert!(initial.rendered_payload.contains("\"schemaVersion\":2"));
         assert!(initial.rendered_payload.contains("\"peers\""));
         assert!(initial.rendered_payload.contains("PEER_INITIAL_NAME"));
         assert!(initial.rendered_payload.contains("PEER_INITIAL_ROLE"));
@@ -7880,12 +8322,12 @@ mod tests {
         assert!(
             initial
                 .rendered_payload
-                .contains("\"defaultLeadAgentId\": \"agent_1\"")
+                .contains("\"defaultLeadAgentId\":\"agent_1\"")
         );
         assert!(
             initial
                 .rendered_payload
-                .contains("\"selfIsDefaultLead\": true")
+                .contains("\"selfIsDefaultLead\":true")
         );
         assert!(!initial.rendered_payload.contains("\"name\": \"小狐狸\""));
         assert!(
@@ -8126,12 +8568,12 @@ mod tests {
         assert!(
             third
                 .rendered_payload
-                .contains("\"defaultLeadAgentId\": \"agent_1\"")
+                .contains("\"defaultLeadAgentId\":\"agent_1\"")
         );
         assert!(
             third
                 .rendered_payload
-                .contains("\"selfIsDefaultLead\": true")
+                .contains("\"selfIsDefaultLead\":true")
         );
         assert_ne!(
             third.collaboration_state_digest,
@@ -8329,7 +8771,7 @@ mod tests {
                 .unwrap()
                 .unwrap();
         let charter = build_session_charter(&snapshot);
-        assert!(BUILTIN_CLI_CHARTER.len() <= 2_048);
+        assert!(BUILTIN_CLI_CHARTER.len() <= 2_560);
         assert!(
             charter.contains("Rovai built-in operations are fixed local CLI commands, never MCP")
         );
@@ -8343,6 +8785,13 @@ mod tests {
         assert!(!charter.contains("`rovai member call`"));
         assert!(charter.contains("`--input-file <path>`"));
         assert!(charter.contains("Every eligible member can invoke every published command"));
+        assert!(charter.contains("Rovai Built-in CLI Contract\n"));
+        assert!(!charter.contains("Rovai Built-in CLI Contract (v"));
+        assert!(charter.contains("Later Task changes do not cancel or retarget a Run already accepted with the Task as historical context."));
+        assert!(charter.contains("Completing a Task or the current work does not by itself require an additional peer-coordination send."));
+        assert!(charter.contains(
+            "This rule does not replace Runtime-specific public-output delivery requirements."
+        ));
         assert!(!charter.contains("rovai_team"));
         std::fs::remove_dir_all(fixture.directory).unwrap();
     }
@@ -8433,18 +8882,52 @@ mod tests {
         assert_eq!(recent.first().unwrap()["sequence"], 7);
         assert_eq!(recent.last().unwrap()["sequence"], 21);
         let longest = recent.last().unwrap();
+        let untruncated = recent.first().unwrap();
+        assert!(untruncated.get("bodyLength").is_none());
+        assert!(untruncated.get("bodyTruncated").is_none());
+        assert!(untruncated.get("continuation").is_none());
         assert_eq!(longest["body"].as_str().unwrap().chars().count(), 2_000);
         assert_eq!(longest["bodyLength"], 2_001);
         assert_eq!(longest["bodyTruncated"], true);
-        assert_eq!(longest["nextBodyOffset"], 2_000);
+        assert!(longest.get("nextBodyOffset").is_none());
+        assert_eq!(
+            longest["continuation"],
+            json!({
+                "operation": "camp.read",
+                "input": {
+                    "campId": fixture.camp_id,
+                    "mode": "item",
+                    "messageId": longest["messageId"],
+                    "bodyOffset": 2_000,
+                }
+            })
+        );
         assert_eq!(shared["omittedMessages"]["count"], 5);
         assert_eq!(shared["omittedMessages"]["sequenceStart"], 2);
         assert_eq!(shared["omittedMessages"]["sequenceEnd"], 6);
         assert!(
-            shared["omittedMessages"]["retrievalHint"]
+            shared["omittedMessages"]["navigationHint"]
                 .as_str()
                 .unwrap()
-                .contains("不要仅因存在省略就主动读取")
+                .contains("is not an executable range")
+        );
+        assert!(shared.get("omissionEntries").is_none());
+        assert!(!shared.to_string().contains("sourceConversationId"));
+        assert!(!shared.to_string().contains("contentDigest"));
+        let omission_entries: Value = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT omission_entries_json FROM context_manifest WHERE agent_run_id = ?1",
+                [&fixture.run_id],
+                |row| row.get::<_, String>(0),
+            )
+            .map(|json| serde_json::from_str(&json).unwrap())
+            .unwrap();
+        assert_eq!(omission_entries[0]["reason"], "max_public_messages");
+        assert_eq!(
+            omission_entries[0]["messageIds"].as_array().unwrap().len(),
+            5
         );
         let manifest: (i64, i64, String, i64, i64, i64) = fixture
             .database
@@ -8573,11 +9056,13 @@ mod tests {
         fn message(id: &str) -> SharedMessage {
             let body = "界".repeat(CONTEXT_DELIVERY_PROFILE_V2.max_message_body_chars);
             SharedMessage {
+                camp_id: "camp-1".to_string(),
                 message_id: id.to_string(),
                 sequence: 0,
                 sender_type: "user".to_string(),
                 sender_id: "user-1".to_string(),
                 source_conversation_id: None,
+                content_digest: sha256_text(&body),
                 reply_to_message_id: None,
                 attachments: Vec::new(),
                 body: body.clone(),
@@ -8624,9 +9109,14 @@ mod tests {
                     .sum::<usize>(),
             CONTEXT_DELIVERY_PROFILE_V2.max_public_history_chars
         );
-        // Recent-message omissions are represented by the existing sequence
-        // gap; explicit omission entries are reserved for origin/closure.
-        assert!(omission_entries.is_empty());
+        assert_eq!(omission_entries.len(), 7);
+        assert!(omission_entries.iter().all(|entry| {
+            entry.kind == "public_history"
+                && entry.reason == "history_budget"
+                && entry.message_ids.len() == 1
+        }));
+        assert_eq!(omission_entries[0].message_ids, vec!["recent-0"]);
+        assert_eq!(omission_entries[6].message_ids, vec!["recent-6"]);
     }
 
     #[test]
@@ -8845,6 +9335,26 @@ mod tests {
             .unwrap();
         let current: Value = serde_json::from_str(current_json).unwrap();
         assert_eq!(current["message"].as_str(), Some(body.as_str()));
+        assert!(current.get("attachments").is_none());
+        let current_input_evidence: Value = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT current_input_source_json FROM context_manifest WHERE id = ?1",
+                [&context.manifest_id],
+                |row| row.get::<_, String>(0),
+            )
+            .map(|value| serde_json::from_str(&value).unwrap())
+            .unwrap();
+        assert_eq!(
+            current_input_evidence["projectedBodyDigest"],
+            sha256_text(body.as_str())
+        );
+        assert!(
+            current_input_evidence["sourceContentDigest"]
+                .as_str()
+                .is_some_and(|digest| digest.starts_with("sha256:"))
+        );
         assert!(body.chars().count() > CONTEXT_DELIVERY_PROFILE_V1.max_message_body_chars);
         assert!(!context.rendered_payload.contains("[SHARED_CONVERSATION]"));
         std::fs::remove_dir_all(fixture.directory).unwrap();
@@ -8911,14 +9421,26 @@ mod tests {
         assert!(a2a_task_context_notice(1, None).is_none());
         let notice = a2a_task_context_notice(1, Some("task-1")).unwrap();
         assert_eq!(notice.code, "a2a_task_context");
-        assert!(notice.message.contains("Task task-1"));
-        assert!(notice.message.contains("historical execution context"));
-        assert!(
-            notice
-                .message
-                .contains("does not by itself require another public send")
+        assert_eq!(notice.task_id.as_deref(), Some("task-1"));
+        assert_eq!(
+            serde_json::to_value(&notice).unwrap(),
+            json!({
+                "code": "a2a_task_context",
+                "taskId": "task-1",
+                "message": "This Task is historical context; later Task changes do not retarget this Run.",
+            })
         );
-        assert!(notice.message.contains("never poll Task state"));
+        let (references, payload, digest) =
+            run_notice_evidence(std::slice::from_ref(&notice)).unwrap();
+        assert_eq!(
+            serde_json::to_value(references).unwrap(),
+            json!([{"code":"a2a_task_context","taskId":"task-1"}])
+        );
+        assert_eq!(
+            payload,
+            "[{\"code\":\"a2a_task_context\",\"taskId\":\"task-1\",\"message\":\"This Task is historical context; later Task changes do not retarget this Run.\"}]"
+        );
+        assert_eq!(digest, sha256_text(&payload));
     }
 
     #[test]

@@ -4,15 +4,15 @@ version: v0.50
 lifecycle: current
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: in_progress
+implementation_status: complete
 last_updated: 2026-08-09
 ---
 
 # Rovai-ai v0.50：Self Identity、Collaboration 与 Model Context Projection 边界
 
-> 当前状态：Self/Peer Collaboration baseline 已完成实现与验收；随后确认的 Model Context
-> Projection、Task Notice/Charter 与 Bootstrap Redelivery v2 边界尚未实施，也尚未形成获批的实施规格。
-> 因此 v0.50 整体保持 `implementation_status: in_progress`，既有验证结果只证明 baseline。
+> 当前状态：Self/Peer Collaboration baseline 已完成实现与验收；Model Context Projection、分层
+> Evidence、Task Notice/Charter 与 Bootstrap Redelivery v2 已在同一 v0.50 clean break 中完成代码、
+> 合同与版本级全量验证；`implementation_status: complete`。
 >
 > 前置版本：[v0.49 通用与启动设置、双人追问 Skill](../v0.49/README.md)
 
@@ -43,8 +43,8 @@ v3/3/11/8 是同一个尚未发布的 v0.50 草案最终版本轴，不因讨论
 继续拥有不变的选择算法和预算。Redelivery v1 已是 v0.48 持久合同，因此 marker/wording 改变形成
 v2/2。逐项审查与明确否决项见
 [Model Context Projection 设计审查](model-context-projection-review.md)，长期权威见
-[ADR-0147](../../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)。该评审不是
-实施规格。
+[ADR-0147](../../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)；字段级实施与
+验收由本版本实施计划、共享 fixture、Migration 68 和代码共同冻结。
 
 长期理由见 [ADR-0146](../../adr/0146-sole-native-session-self-identity-and-peer-routing-projection.md)，
 字段级 shape 与 ACK 规则见
@@ -143,13 +143,14 @@ Bootstrap v3/Formatter 3、Context Formatter 11 和非空 inclusion；没有旧 
 - 不修改既有 eligible Bootstrap delivery matrix；
 - 不把 peer 的三个私有身份字段、Presence 或 Runtime 资格投影给模型。
 
-## 已确认、尚未实施的 Model Context Projection 边界
+## 已实现的 Model Context Projection 与 Evidence 边界
 
-后续实现只允许精简模型可见字段、使用 compact JSON 和省略无意义默认值。内部可以建立独立 model
+模型可见 Dynamic Context 使用独立 model
 DTO，但 `messageId`、`sequence`、`senderType`、`senderId`、`replyToMessageId` 等 canonical 名称不改；
-`sourceConversationId` 和 attachment digest 移至 ContextManifest Evidence。单条正文截断提供可直接执行
-的 canonical `camp.read` item continuation；整条历史省略只提供 count、可能不连续的 sequence envelope
-与 navigation hint，不伪造 range locator。
+`sourceConversationId` 和 attachment digest 只进入 ContextManifest Evidence。compact JSON 省略空附件和
+未截断的 `bodyLength`/`bodyTruncated`/continuation 默认状态；截断正文使用 `continuation` 承载可直接执行
+的 canonical `camp.read` item 输入。整条历史省略只投影 count、可能不连续的 sequence envelope 与
+`navigationHint`，不伪造 range locator；精确 omission IDs/reasons 只留在 Manifest。
 
 Context Source State、Model Context Projection、ContextManifest Evidence 与 Runtime Input Delivery Evidence
 保持四层分离。Current Input、完整 Collaboration State v2、Memory Entrypoint、Profile v2 选择/预算，
@@ -160,8 +161,8 @@ Memory reprioritization、字段缩写或第 13 项建议格式。
 Session Charter 将稳定 Task/polling 规则和“额外 peer-coordination send”不变量与 per-Run Task Notice
 分开；该不变量不限制 Runtime-specific 用户可见结果交付。Charter 同时移除标题中的 `(v0.47)`；
 Redelivery 使用带 `reason="context_compaction"` 的 v2 envelope 和一条不可省略的 Core
-recovery authority 语句。实现字段、fixture、clean-break 和验收矩阵必须另行形成并获批，当前未授权
-据此写代码。
+recovery authority 语句。Runtime Input Delivery 只冻结 revision、Bootstrap Evidence 引用、presence 与
+Envelope/Formatter v2，不保存完整 overlay、Identity bytes 或 combined digest。
 
 ## 验收范围
 
@@ -171,8 +172,9 @@ Collaboration State 更新；peer public routing identity 更新触发新投影�
 digest，accepted ACK 才推进；下一 eligible Bootstrap 继续读取最新完整身份；v68 保留业务历史、
 终结旧非终态执行与未完成 Delivery，并删除旧技术上下文表行和可达引用。
 
-精确检查点和命令证据见[实施与验收计划](implementation-plan.md)。这些结果不覆盖尚未实施的
-Model Context Projection/Redelivery v2 范围；最终范围完成前不得据此把 v0.50 标为 complete。
+扩展验收同时覆盖 compact DTO、canonical continuation、Manifest source/attachment/omission/Run Notice
+Evidence、Task/Public Output Charter 边界和 Redelivery v2 accepted/unknown 语义。精确检查点和命令证据
+见[实施与验收计划](implementation-plan.md)，v0.50 已满足 complete 门槛。
 
 ## 跨版本文档影响
 
@@ -180,9 +182,9 @@ Model Context Projection/Redelivery v2 范围；最终范围完成前不得据�
 | --- | --- | --- |
 | Version lifecycle | 已更新 | `docs/versions/README.md` 将 v0.49 按原实施事实冻结为 historical，并把 v0.50 设为唯一 current；本概览和实施计划已建立 |
 | ADR | 已更新 | ADR-0146 冻结 Self/Peer baseline；ADR-0147 冻结四层投影/Evidence、Profile/Formatter/Manifest 权责和 Redelivery v2，accepted 不代表已实现 |
-| Contracts | 已更新 | Collaboration State v2 已完成；Context Delivery Profile v2 的权威已收窄为选择与预算，最终 Formatter/Manifest 字段合同仍待实施规格 |
-| Architecture | 已更新 | Built-in Tool Runtime 与 Bootstrap Redelivery 架构记录四层 Evidence、Self/Peer ACK 和已确认但尚未实施的 Redelivery v2 目标 |
-| UI | 确认无需更新 | 不改变 Renderer 交互、布局或视觉语义；`collaborationStateIncluded` 只是 ContextManifest 机器可读证据 |
+| Contracts | 已更新 | Collaboration State v2 已完成；Context Delivery Profile v2 继续只拥有选择与预算，Formatter 11/Manifest 8 fixture 已冻结最终 projection/evidence shape |
+| Architecture | 已更新 | Built-in Tool Runtime 与 Bootstrap Redelivery 架构记录已实现的四层 Evidence、Task/Public Output 边界和 Redelivery v2 |
+| UI | 已更新 | Inspector 只读展示 typed Run Notice ref 与 Runtime Input Delivery Redelivery v2 evidence，不改变交互或布局语义 |
 | Runtime Activity | 确认无需更新 | 不新增或重分类 Canonical Runtime Activity；事件 payload 变化只扩展 Context evidence |
 | Runtime compatibility | 确认无需更新 | 不改变 Runtime adapter、上游版本、发现能力或 compaction detector 资格 |
 | Documentation routing | 已更新 | `docs/README.md`、Contracts/Architecture/ADR 索引和 `CONTEXT.md` 增加 Self/Peer 与 Model Context Projection/Evidence 当前入口 |

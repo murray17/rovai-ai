@@ -9,8 +9,8 @@ last_updated: 2026-08-09
 
 # Context Delivery Profile v2
 
-Profile v2 是 v0.45 的公共消息选择与预算合同。Profile v1 保持不可变，仍可用于已经冻结的
-历史 ContextManifest；新 v0.45 AgentRun 使用 v2。模型字段/序列化、ContextManifest Evidence 和
+Profile v2 是 v0.45 建立并由当前 v0.50 clean break 延续的公共消息选择与预算合同。Profile v1 只作为
+历史合同文档保持不可变，不进入当前 ContextManifest 读取路径；当前 AgentRun 只使用 v2。模型字段/序列化、ContextManifest Evidence 和
 Runtime Input Delivery accepted evidence 是独立的合同/权威边界，不由 Profile version 命名。模型
 shape 由 Formatter version 所有，Evidence shape 由 Manifest version 所有；Runtime Input Delivery 是
 投递/ACK authority，并继续携带既有投递 metadata，而不是新的内容版本轴。公共消息、Delivery 和 Context gate 的
@@ -117,44 +117,61 @@ waitCondition = null
 ## 4. Omission 合同
 
 本节同时展示 Profile selection 事实、当前 Formatter 模型 projection 和 ContextManifest Evidence
-如何集成；示例中的模型字段或 Evidence 字段不构成 Profile v2 的版本身份。ADR-0147 已确认的最终
-Formatter/Manifest 投影尚未实施，实施时应在各自合同与 fixture 中更新，不能据此改变本节的 omission
+如何集成；示例中的模型字段或 Evidence 字段不构成 Profile v2 的版本身份，也不改变 omission
 集合、count 或 sequence envelope 算法。
 
 模型可见的 `SHARED_CONVERSATION` 可以包含：
 
 ```yaml
 referenceClosure:
-  - messageId: msg_…
+  - distance: 1
+    messageId: msg_…
     sequence: 101
-    distance: 1
-    body: "父消息的精确前缀"
-    bodyLength: 640
-    bodyTruncated: false
-    nextBodyOffset: null
+    senderType: user
+    senderId: user-…
+    body: "未截断的精确正文"
+
+recentMessages:
+  - messageId: msg_…
+    sequence: 102
+    senderType: agent
+    senderId: agent_…
+    body: "被截断的精确前缀"
+    bodyLength: 2400
+    bodyTruncated: true
+    continuation:
+      operation: camp.read
+      input:
+        campId: camp_…
+        mode: item
+        messageId: msg_…
+        bodyOffset: 2000
 
 omittedMessages:
   count: 4
   sequenceStart: 97
   sequenceEnd: 100
-  retrievalHint: "本次有部分公开消息因上下文上限未展示。需要时使用 camp.search/camp.read。"
+  navigationHint: "The sequence envelope may contain gaps and is not an executable range; use camp.search/camp.read only when required."
 ```
 
 Manifest 还记录 machine-readable omission entries：
 
 ```yaml
-omissions:
+omissionEntries:
   - kind: public_history
     messageIds: [msg_…]
-    reason: history_budget
+    reason: max_public_messages | history_budget | runtime_payload_budget
   - kind: reference_closure
     messageIds: [msg_…]
     reason: max_reference_chain | history_budget | parent_unavailable | cycle | tombstone
 ```
 
 `omittedMessages` 只统计最终未以 origin、closure 或 recent 输出的可见公共消息；单条正文截断
-不增加 count。父消息不存在或无权读取时，omission reason 不能泄漏 Camp 外部 roster 或
-被 tombstone 内容。没有 omission 时不输出 `count: 0` 空壳。
+不增加 count。父消息不存在或无权读取时 fail closed，精确 ID/reason 只留在 Manifest，不把
+machine omission entry 投影给模型，也不能泄漏 Camp 外部 roster 或被 tombstone 内容。没有
+omission 时不输出 `count: 0` 空壳。模型历史消息不包含 source Conversation ID 或附件 digest；这些
+字段与 attachment ID/path/digest、正文 projection digest、截断 offset 和 closure distance 一起进入
+Manifest Evidence。
 
 ## 5. ContextManifest 与 ACK
 
@@ -170,6 +187,8 @@ originReference, when present
 orderedRecentReferences
 orderedReferenceClosureReferences + distance, when present
 omission entries, when present
+ordered shared-message source/content/attachment/truncation evidence + digest
+typed Run Notice references + exact compact notice JSON bytes/digest
 exact rendered dynamic-context bytes + digest
 target Runtime/Formatter versions
 ```

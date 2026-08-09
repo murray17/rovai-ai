@@ -1284,20 +1284,25 @@ export function CampWorkspace({
                     </div>
                     <dl className="context-facts">
                       <div><dt>Bootstrap</dt><dd>{manifest.bootstrap.deliveryMode === 'native_append' ? 'Native append' : 'First payload'}</dd></div>
-                      <div><dt>已接受边界</dt><dd>seq {manifest.previousAcceptedPublicBoundarySequence ?? '—'}</dd></div>
+                      <div><dt>已接受边界</dt><dd>seq {manifest.previousAcceptedPublicBoundarySequence}</dd></div>
                       <div><dt>本次 AgentRun 公共边界</dt><dd>seq {manifest.campMessageBoundarySequence}</dd></div>
                       <div><dt>最近原文</dt><dd>{manifest.recentMessageCount} 条</dd></div>
                       <div><dt>原始用户消息</dt><dd>{manifest.originatingPublicUserMessageRef ? '已追溯' : '不适用'}</dd></div>
-                      <div><dt>上下文投递</dt><dd>{manifest.contextDeliveryProfileVersion ? `Profile v${manifest.contextDeliveryProfileVersion}` : '历史格式'}</dd></div>
+                      <div><dt>上下文投递</dt><dd>Profile v{manifest.contextDeliveryProfileVersion}</dd></div>
                       <div><dt>整条省略</dt><dd>{manifest.omittedMessageCount ? `${manifest.omittedMessageCount} 条 · seq ${manifest.omittedMessageSequenceStart}–${manifest.omittedMessageSequenceEnd}` : '无'}</dd></div>
                       <div><dt>Binding</dt><dd>Generation {manifest.nativeBindingGeneration}</dd></div>
                       <div><dt>Formatter</dt><dd>v{manifest.formatterVersion}</dd></div>
+                      <div><dt>Bootstrap 补投</dt><dd>{manifest.delivery?.bootstrapRedeliveryPresent ? `Envelope v${manifest.delivery.bootstrapRedeliveryEnvelopeVersion} · Formatter v${manifest.delivery.bootstrapRedeliveryFormatterVersion}` : '无'}</dd></div>
                     </dl>
 
                     {manifest.runNoticeRefs.length > 0 && (
                       <div className="context-subsection">
                         <div className="context-subsection-title"><strong>AgentRun Notices</strong><small>冻结时已知的异常行动事实</small></div>
-                        {manifest.runNoticeRefs.map((notice) => <code key={notice}>{notice}</code>)}
+                        {manifest.runNoticeRefs.map((notice) => (
+                          <code key={`${notice.code}:${notice.taskId ?? ''}`}>
+                            {notice.taskId ? `${notice.code} · Task ${notice.taskId}` : notice.code}
+                          </code>
+                        ))}
                       </div>
                     )}
 

@@ -6,6 +6,7 @@ status: accepted
 date: 2026-08-09
 decision_scope: cross-version
 source_version: v0.50
+implementation_status: complete
 supersedes: []
 superseded_by: null
 ---
@@ -61,7 +62,7 @@ For historical public messages, model projection keeps the fields needed to unde
 `sourceConversationId` and attachment `contentDigest` are evidence rather than model fields. Historical attachment
 projection keeps the authorized `name`, `mediaType` and `path`. Empty attachments and absent reply/source fields are
 omitted. An untruncated body omits `bodyLength`, `bodyTruncated: false` and null continuation state. A truncated body
-retains an explicit truncation fact and a continuation whose operation input maps without translation to the current
+retains an explicit truncation fact in the `continuation` field, whose operation input maps without translation to the current
 canonical `camp.read` item schema:
 
 ```json

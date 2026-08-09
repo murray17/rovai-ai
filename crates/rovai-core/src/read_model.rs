@@ -312,6 +312,11 @@ pub struct RuntimeInputDeliveryView {
     pub resolved_at: Option<String>,
     pub last_error: Option<String>,
     pub updated_at: String,
+    pub bootstrap_redelivery_present: bool,
+    pub bootstrap_redelivery_revision: Option<i64>,
+    pub bootstrap_redelivery_evidence_id: Option<String>,
+    pub bootstrap_redelivery_envelope_version: Option<i64>,
+    pub bootstrap_redelivery_formatter_version: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -327,18 +332,22 @@ pub struct ContextManifestView {
     pub global_public_message_boundary: i64,
     pub history_camps: Vec<ContextManifestHistoryCampView>,
     pub raw_message_count: usize,
-    pub previous_accepted_public_boundary_sequence: Option<i64>,
-    pub context_delivery_profile_version: Option<i64>,
-    pub context_delivery_profile: Option<Value>,
-    pub context_delivery_profile_digest: Option<String>,
+    pub previous_accepted_public_boundary_sequence: i64,
+    pub context_delivery_profile_version: i64,
+    pub context_delivery_profile: Value,
+    pub context_delivery_profile_digest: String,
     pub originating_public_user_message_ref: Option<Value>,
     pub recent_message_count: usize,
     pub omitted_message_count: Option<i64>,
     pub omitted_message_sequence_start: Option<i64>,
     pub omitted_message_sequence_end: Option<i64>,
+    pub omission_entries: Vec<Value>,
     pub collaboration_state_digest: String,
     pub collaboration_state_included: bool,
-    pub run_notice_refs: Vec<String>,
+    pub shared_message_evidence: Vec<Value>,
+    pub shared_message_evidence_digest: String,
+    pub run_notice_refs: Vec<RunNoticeRefView>,
+    pub run_notice_payload: Value,
     pub run_notice_digest: String,
     pub current_input_source: Value,
     pub attachment_refs: Vec<CampAttachmentRefView>,
@@ -352,6 +361,14 @@ pub struct ContextManifestView {
     pub rendered_payload_digest: String,
     pub delivery: Option<RuntimeInputDeliveryView>,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunNoticeRefView {
+    pub code: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -383,6 +400,7 @@ pub struct NativeSessionBootstrapEvidenceView {
 #[serde(rename_all = "camelCase")]
 pub struct CampAttachmentRefView {
     pub attachment_id: String,
+    pub path: String,
     pub content_digest: String,
 }
 
@@ -1819,7 +1837,16 @@ fn load_context_manifests(
                delivery.native_input_id, delivery.boundary_camp_message_sequence,
                delivery.prepared_at, delivery.accepted_at, delivery.resolved_at,
                delivery.last_error, delivery.updated_at,
-               manifest.collaboration_state_included
+               manifest.collaboration_state_included,
+               manifest.shared_message_evidence_json,
+               manifest.shared_message_evidence_digest,
+               manifest.run_notice_payload_json,
+               delivery.bootstrap_redelivery_present,
+               delivery.bootstrap_redelivery_revision,
+               delivery.bootstrap_redelivery_evidence_id,
+               delivery.bootstrap_redelivery_envelope_version,
+               delivery.bootstrap_redelivery_formatter_version,
+               manifest.omission_entries_json
         FROM context_manifest AS manifest
         JOIN native_session_bootstrap_evidence AS bootstrap
           ON bootstrap.id = manifest.bootstrap_evidence_id
@@ -1863,12 +1890,12 @@ fn load_context_manifests(
                 row.get::<_, String>(19)?,
                 row.get::<_, i64>(20)?,
                 row.get::<_, i64>(21)?,
-                row.get::<_, Option<i64>>(22)?,
-                row.get::<_, Option<i64>>(23)?,
-                row.get::<_, Option<String>>(24)?,
-                row.get::<_, Option<String>>(25)?,
+                row.get::<_, i64>(22)?,
+                row.get::<_, i64>(23)?,
+                row.get::<_, String>(24)?,
+                row.get::<_, String>(25)?,
                 row.get::<_, Option<String>>(26)?,
-                row.get::<_, Option<String>>(27)?,
+                row.get::<_, String>(27)?,
                 row.get::<_, Option<i64>>(28)?,
                 row.get::<_, Option<i64>>(29)?,
                 row.get::<_, Option<i64>>(30)?,
@@ -1884,6 +1911,15 @@ fn load_context_manifests(
                 row.get::<_, Option<String>>(40)?,
                 row.get::<_, Option<String>>(41)?,
                 row.get::<_, bool>(42)?,
+                row.get::<_, String>(43)?,
+                row.get::<_, String>(44)?,
+                row.get::<_, String>(45)?,
+                row.get::<_, Option<bool>>(46)?,
+                row.get::<_, Option<i64>>(47)?,
+                row.get::<_, Option<String>>(48)?,
+                row.get::<_, Option<i64>>(49)?,
+                row.get::<_, Option<i64>>(50)?,
+                row.get::<_, String>(51)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1891,8 +1927,14 @@ fn load_context_manifests(
         .map(|row| {
             let raw_message_refs = serde_json::from_str::<Vec<Value>>(&row.5)
                 .context("ContextManifest raw message references are invalid")?;
-            let run_notice_refs = serde_json::from_str::<Vec<String>>(&row.7)
+            let run_notice_refs = serde_json::from_str::<Vec<RunNoticeRefView>>(&row.7)
                 .context("ContextManifest Run Notice references are invalid")?;
+            let shared_message_evidence = serde_json::from_str::<Vec<Value>>(&row.43)
+                .context("ContextManifest Shared Message evidence is invalid")?;
+            let run_notice_payload = serde_json::from_str::<Value>(&row.45)
+                .context("ContextManifest Run Notice payload is invalid")?;
+            let omission_entries = serde_json::from_str::<Vec<Value>>(&row.51)
+                .context("ContextManifest omission evidence is invalid")?;
             let current_input_source = serde_json::from_str::<Value>(&row.9)
                 .context("ContextManifest Current Input source is invalid")?;
             let attachment_refs = serde_json::from_str::<Vec<CampAttachmentRefView>>(&row.10)
@@ -1901,11 +1943,7 @@ fn load_context_manifests(
                 .context("ContextManifest Skill exposure is invalid")?;
             let mcp_exposure = serde_json::from_str::<McpExposureSnapshot>(&row.14)
                 .context("ContextManifest MCP exposure is invalid")?;
-            let context_delivery_profile = row
-                .24
-                .as_deref()
-                .map(serde_json::from_str)
-                .transpose()
+            let context_delivery_profile = serde_json::from_str(&row.24)
                 .context("ContextManifest delivery profile is invalid")?;
             let originating_public_user_message_ref = row
                 .26
@@ -1913,13 +1951,9 @@ fn load_context_manifests(
                 .map(serde_json::from_str)
                 .transpose()
                 .context("ContextManifest originating message reference is invalid")?;
-            let recent_message_count = row
-                .27
-                .as_deref()
-                .map(serde_json::from_str::<Vec<Value>>)
-                .transpose()
+            let recent_message_count = serde_json::from_str::<Vec<Value>>(&row.27)
                 .context("ContextManifest recent message references are invalid")?
-                .map_or(0, |references| references.len());
+                .len();
             let bootstrap = serde_json::from_str::<NativeSessionBootstrapEvidenceView>(&row.31)
                 .context("ContextManifest Native Session Bootstrap is invalid")?;
             let delivery = row
@@ -1947,6 +1981,11 @@ fn load_context_manifests(
                             .41
                             .clone()
                             .context("Context delivery has no updated time")?,
+                        bootstrap_redelivery_present: row.46.unwrap_or(false),
+                        bootstrap_redelivery_revision: row.47,
+                        bootstrap_redelivery_evidence_id: row.48.clone(),
+                        bootstrap_redelivery_envelope_version: row.49,
+                        bootstrap_redelivery_formatter_version: row.50,
                     })
                 })
                 .transpose()?;
@@ -1970,9 +2009,13 @@ fn load_context_manifests(
                 omitted_message_count: row.28,
                 omitted_message_sequence_start: row.29,
                 omitted_message_sequence_end: row.30,
+                omission_entries,
                 collaboration_state_digest: row.6,
                 collaboration_state_included: row.42,
+                shared_message_evidence,
+                shared_message_evidence_digest: row.44,
                 run_notice_refs,
+                run_notice_payload,
                 run_notice_digest: row.8,
                 current_input_source,
                 attachment_refs,

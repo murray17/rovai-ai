@@ -160,8 +160,7 @@ process 被新 Run acquire 后轮换 lease，再绑定新的 Session/Run route�
 
 ## Bootstrap 与 Dynamic Context
 
-> 本节的 compact projection、Charter 补充规则和 canonical continuation 是 ADR-0147 已接受的 v0.50
-> 目标，当前代码仍是已验证的 Self/Peer baseline；实施状态见
+> 本节的 compact projection、Charter 补充规则和 canonical continuation 已由 v0.50 实现；实施状态见
 > [v0.50 概览](../versions/v0.50/README.md)。
 
 Session Charter 只说明：

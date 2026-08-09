@@ -101,4 +101,4 @@ last_updated: 2026-08-09
 | v0.47 | `historical` | 已完成 Durable Task v2、一次性责任准入、原子成员收口与 Built-in Transport v4 | [v0.47/README.md](v0.47/README.md) |
 | v0.48 | `historical` | 已完成六 Runtime Native Session compaction detector、durable Requirement 与 Bootstrap Redelivery Gate | [v0.48/README.md](v0.48/README.md) |
 | v0.49 | `historical` | Electron Desktop Shell 通用设置、启动恢复，以及自包含双人追问官方 Skill | [v0.49/README.md](v0.49/README.md) |
-| v0.50 | `current` | Self/Peer Collaboration baseline 已实现；Model Context Projection/Evidence 与 Redelivery v2 边界已确认、待实施 | [v0.50/README.md](v0.50/README.md) |
+| v0.50 | `current` | Self/Peer、Model Context Projection/Evidence 与 Redelivery v2 已实现并完成版本级全量验证 | [v0.50/README.md](v0.50/README.md) |

@@ -2,8 +2,9 @@
 document_type: design-review
 version: v0.50
 authority: reviewed-context-projection-decisions
-status: accepted-not-implementation-spec
-implementation_authorized: false
+status: accepted
+implementation_authorized: true
+implementation_status: complete
 last_updated: 2026-08-09
 ---
 
@@ -13,10 +14,10 @@ last_updated: 2026-08-09
 
 本文记录对“第 4–13 项分析”的逐项挑战结果及用户已确认的决定。它是形成
 [ADR-0147](../../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)的版本内
-评审证据，**不是已批准的实施规格，也不授权据此直接修改代码**。
+评审证据，不单独充当字段级实施规格。用户在本评审完成后另行明确授权一次性实施；最终字段、
+Migration 68 shape 和验收矩阵由同版本实施计划、当前合同 fixture 与代码共同冻结。
 
-实施前仍需要单独审查最终 DTO 字段、Formatter/Manifest fixture、clean-break 影响和验收矩阵。
-不得从本文的示例反推未明确冻结的 Rust 类型名、数据库列、事件 payload 或迁移步骤。
+不得从本文的设计示例反推未被当前合同 fixture、Migration 与测试冻结的兼容分支或新增版本轴。
 
 ## 先决边界
 
@@ -85,8 +86,8 @@ replyToMessageId
 ```
 
 `bodyLimit` 可以按需出现，但不是必填。只有完整无损映射到当前 operation schema 的对象才称为
-Executable Retrieval Locator。最终承载该对象的 DTO 字段名必须在后续实施规格中单独冻结；本文不以
-`more`、`retrieveWith.locator` 或扁平自定义参数替它做决定。
+Executable Retrieval Locator。随后获批的实施规格将承载字段冻结为 `continuation`；它不使用
+`more`、`retrieveWith.locator` 或扁平自定义参数。
 
 整条历史省略没有 sequence-range `camp.read` 模式，因此模型只能看到：
 
@@ -221,5 +222,5 @@ v3/3/11/8 对应一个真实 release contract，不按讨论次数或中间提�
 则已在 v0.48 正式存在并持久化到 Runtime Input Delivery，所以 marker/wording 改变必须形成 v2/2。
 
 当前 Self/Peer Collaboration baseline 已实现并通过既有验收；本评审新增的投影、Charter、Task Notice
-和 Redelivery v2 尚未实施。最终 v0.50 在这些差异完成、按单独获批的实施规格验收前，不得恢复
-`implementation_status: complete`。
+和 Redelivery v2 已获得明确实施授权并进入同一 v0.50 clean break。最终完成状态只由实施计划记录的
+代码、Migration、fixture 与全量验证证明，不能由本评审的 accepted 状态推导。

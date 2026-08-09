@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::command::canonical_json_digest;
 
-pub const OMITTED_PUBLIC_MESSAGES_RETRIEVAL_HINT: &str = "本次有部分公开消息因上下文上限未展示。\n不要假设这些消息的内容，也不要仅因存在省略就主动读取。\n\n如果当前任务确实依赖缺失内容：\n- 已知消息 ID、sequence、邻域或回复链时，使用 camp.read；\n- 只知道主题、不知道消息位置时，先使用 camp.search 定位，\n  再使用 camp.read 获取原始正文。";
+pub const OMITTED_PUBLIC_MESSAGES_NAVIGATION_HINT: &str = "Some public messages are omitted. The sequence envelope may contain gaps and is not an executable range. Do not infer omitted content or retrieve it unless the current work requires it; use camp.search to locate relevant messages and camp.read with its canonical input to read them.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

@@ -4,6 +4,17 @@
   "agentRunContextFormatterVersion": 11,
   "contextManifestVersion": 8,
   "contextManifestFormatterVersion": 11,
-  "contextDeliveryProfileVersion": 1,
-  "memberCallSenderIdentityField": "senderAgentId"
+  "contextDeliveryProfileVersion": 2,
+  "memberCallSenderIdentityField": "senderAgentId",
+  "historicalMessageIdentityFields": ["messageId", "sequence", "senderType", "senderId", "replyToMessageId"],
+  "historicalAttachmentFields": ["name", "mediaType", "path"],
+  "truncatedBodyContinuation": {
+    "operation": "camp.read",
+    "inputFields": ["campId", "mode", "messageId", "bodyOffset", "bodyLimit?"]
+  },
+  "omissionRecoveryField": "navigationHint",
+  "contextManifestSharedMessageEvidence": ["sourceIds", "contentDigest", "attachmentIdPathDigest", "selection", "truncation", "omissionIdsReasons", "exactDynamicContextBytesDigest"],
+  "contextManifestRunNoticeEvidence": ["typedTaskReference", "code", "exactCompactJsonBytes", "digest"],
+  "bootstrapRedeliveryEnvelopeVersion": 2,
+  "bootstrapRedeliveryFormatterVersion": 2
 }

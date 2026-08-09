@@ -38,6 +38,22 @@ mod tests {
             })
         );
         assert_eq!(fixture["contextManifestFormatterVersion"], 11);
+        assert_eq!(fixture["contextDeliveryProfileVersion"], 2);
         assert_eq!(fixture["memberCallSenderIdentityField"], "senderAgentId");
+        assert_eq!(
+            fixture["truncatedBodyContinuation"]["operation"],
+            "camp.read"
+        );
+        assert_eq!(fixture["omissionRecoveryField"], "navigationHint");
+        assert_eq!(
+            fixture["contextManifestSharedMessageEvidence"][2],
+            "attachmentIdPathDigest"
+        );
+        assert_eq!(
+            fixture["contextManifestRunNoticeEvidence"][0],
+            "typedTaskReference"
+        );
+        assert_eq!(fixture["bootstrapRedeliveryEnvelopeVersion"], 2);
+        assert_eq!(fixture["bootstrapRedeliveryFormatterVersion"], 2);
     }
 }

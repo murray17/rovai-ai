@@ -107,8 +107,8 @@ Bootstrap；Core ACK 后删除。若 submission result unknown，Core restart �
 `pending_redelivery` 是
 `requestedRevision > acknowledgedRevision` 的派生状态。输入路径为：
 
-> 下列 Envelope v2 / Formatter v2 是 ADR-0147 已接受、尚未实施的 v0.50 目标；当前代码仍使用 v1。
-> 实施状态见 [v0.50 概览](../versions/v0.50/README.md)。
+> 下列 Envelope v2 / Formatter v2 已由 v0.50 实现；实施与验收状态见
+> [v0.50 概览](../versions/v0.50/README.md)。
 
 ```text
 [ROVAI_BOOTSTRAP_REDELIVERY reason="context_compaction"]

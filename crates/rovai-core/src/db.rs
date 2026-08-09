@@ -5697,14 +5697,18 @@ impl Database {
                         CHECK(camp_message_boundary_sequence >= 0),
                     conversation_message_boundary_sequence INTEGER NOT NULL
                         CHECK(conversation_message_boundary_sequence >= 0),
-                    raw_message_refs_json TEXT NOT NULL DEFAULT '[]',
+                    raw_message_refs_json TEXT NOT NULL DEFAULT '[]'
+                        CHECK(json_valid(raw_message_refs_json)),
                     collaboration_state_digest TEXT NOT NULL,
                     collaboration_state_included INTEGER NOT NULL
                         CHECK(collaboration_state_included IN (0, 1)),
-                    run_notice_refs_json TEXT NOT NULL DEFAULT '[]',
+                    run_notice_refs_json TEXT NOT NULL DEFAULT '[]'
+                        CHECK(json_valid(run_notice_refs_json)),
                     run_notice_digest TEXT NOT NULL,
-                    current_input_source_json TEXT NOT NULL,
-                    attachment_refs_json TEXT NOT NULL DEFAULT '[]',
+                    current_input_source_json TEXT NOT NULL
+                        CHECK(json_valid(current_input_source_json)),
+                    attachment_refs_json TEXT NOT NULL DEFAULT '[]'
+                        CHECK(json_valid(attachment_refs_json)),
                     attachment_digest TEXT NOT NULL,
                     skill_exposure_json TEXT NOT NULL,
                     skill_exposure_digest TEXT NOT NULL,
@@ -5715,20 +5719,18 @@ impl Database {
                         CHECK(history_fence_version IN (0, 1)),
                     global_public_message_boundary INTEGER NOT NULL DEFAULT 0
                         CHECK(global_public_message_boundary >= 0),
-                    previous_accepted_public_boundary_sequence INTEGER
+                    previous_accepted_public_boundary_sequence INTEGER NOT NULL
                         CHECK(previous_accepted_public_boundary_sequence >= 0),
-                    context_delivery_profile_version INTEGER
-                        CHECK(context_delivery_profile_version >= 1),
-                    context_delivery_profile_json TEXT
-                        CHECK(context_delivery_profile_json IS NULL
-                              OR json_valid(context_delivery_profile_json)),
-                    context_delivery_profile_digest TEXT,
+                    context_delivery_profile_version INTEGER NOT NULL
+                        CHECK(context_delivery_profile_version = 2),
+                    context_delivery_profile_json TEXT NOT NULL
+                        CHECK(json_valid(context_delivery_profile_json)),
+                    context_delivery_profile_digest TEXT NOT NULL,
                     originating_public_user_message_ref_json TEXT
                         CHECK(originating_public_user_message_ref_json IS NULL
                               OR json_valid(originating_public_user_message_ref_json)),
-                    recent_message_refs_json TEXT
-                        CHECK(recent_message_refs_json IS NULL
-                              OR json_valid(recent_message_refs_json)),
+                    recent_message_refs_json TEXT NOT NULL DEFAULT '[]'
+                        CHECK(json_valid(recent_message_refs_json)),
                     omitted_message_count INTEGER CHECK(omitted_message_count >= 1),
                     omitted_message_sequence_start INTEGER
                         CHECK(omitted_message_sequence_start >= 1),
@@ -5743,14 +5745,14 @@ impl Database {
                         CHECK(json_valid(reference_closure_refs_json)),
                     omission_entries_json TEXT NOT NULL DEFAULT '[]'
                         CHECK(json_valid(omission_entries_json)),
+                    shared_message_evidence_json TEXT NOT NULL DEFAULT '[]'
+                        CHECK(json_valid(shared_message_evidence_json)),
+                    shared_message_evidence_digest TEXT NOT NULL,
+                    run_notice_payload_json TEXT NOT NULL DEFAULT '[]'
+                        CHECK(json_valid(run_notice_payload_json)),
                     CHECK(
-                        previous_accepted_public_boundary_sequence IS NOT NULL
-                        AND previous_accepted_public_boundary_sequence
+                        previous_accepted_public_boundary_sequence
                             <= camp_message_boundary_sequence
-                        AND context_delivery_profile_version IS NOT NULL
-                        AND context_delivery_profile_json IS NOT NULL
-                        AND context_delivery_profile_digest IS NOT NULL
-                        AND recent_message_refs_json IS NOT NULL
                     ),
                     CHECK(
                         (omitted_message_count IS NULL
@@ -5799,9 +5801,9 @@ impl Database {
                     bootstrap_redelivery_evidence_id TEXT
                         REFERENCES native_session_bootstrap_evidence_v68(id),
                     bootstrap_redelivery_envelope_version INTEGER
-                        CHECK(bootstrap_redelivery_envelope_version >= 1),
+                        CHECK(bootstrap_redelivery_envelope_version = 2),
                     bootstrap_redelivery_formatter_version INTEGER
-                        CHECK(bootstrap_redelivery_formatter_version >= 1),
+                        CHECK(bootstrap_redelivery_formatter_version = 2),
                     UNIQUE(agent_run_id, execution_epoch),
                     CHECK(
                         (status = 'accepted' AND native_input_id IS NOT NULL
@@ -13482,6 +13484,9 @@ mod tests {
             "omitted_message_count",
             "omitted_message_sequence_start",
             "omitted_message_sequence_end",
+            "shared_message_evidence_json",
+            "shared_message_evidence_digest",
+            "run_notice_payload_json",
         ] {
             assert!(
                 manifest_columns.contains(&required.to_string()),
@@ -13499,7 +13504,18 @@ mod tests {
             )
             .unwrap();
         assert!(manifest_schema.contains("formatter_version = 11"));
+        assert!(manifest_schema.contains("CHECK(context_delivery_profile_version = 2)"));
         assert!(manifest_schema.contains("collaboration_state_included INTEGER NOT NULL"));
+        let delivery_schema: String = database
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'runtime_input_delivery'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(delivery_schema.contains("CHECK(bootstrap_redelivery_envelope_version = 2)"));
+        assert!(delivery_schema.contains("CHECK(bootstrap_redelivery_formatter_version = 2)"));
         let contract: (String, i64) = database
             .connection()
             .query_row(

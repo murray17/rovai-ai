@@ -8,6 +8,26 @@ describe('AgentRun context contract', () => {
 
     expect(fixture.agentRunContextFormatterVersion).toBe(formatterVersion)
     expect(fixture.contextManifestFormatterVersion).toBe(formatterVersion)
+    expect(fixture.contextDeliveryProfileVersion).toBe(2)
     expect(fixture.memberCallSenderIdentityField).toBe('senderAgentId')
+    expect(fixture.historicalMessageIdentityFields).toEqual([
+      'messageId',
+      'sequence',
+      'senderType',
+      'senderId',
+      'replyToMessageId',
+    ])
+    expect(fixture.historicalAttachmentFields).toEqual(['name', 'mediaType', 'path'])
+    expect(fixture.truncatedBodyContinuation.operation).toBe('camp.read')
+    expect(fixture.omissionRecoveryField).toBe('navigationHint')
+    expect(fixture.contextManifestSharedMessageEvidence).toContain('attachmentIdPathDigest')
+    expect(fixture.contextManifestRunNoticeEvidence).toEqual([
+      'typedTaskReference',
+      'code',
+      'exactCompactJsonBytes',
+      'digest',
+    ])
+    expect(fixture.bootstrapRedeliveryEnvelopeVersion).toBe(2)
+    expect(fixture.bootstrapRedeliveryFormatterVersion).toBe(2)
   })
 })

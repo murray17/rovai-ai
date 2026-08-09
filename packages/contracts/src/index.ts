@@ -843,6 +843,11 @@ export interface RuntimeInputDeliveryView {
   resolvedAt: string | null
   lastError: string | null
   updatedAt: string
+  bootstrapRedeliveryPresent: boolean
+  bootstrapRedeliveryRevision: number | null
+  bootstrapRedeliveryEvidenceId: string | null
+  bootstrapRedeliveryEnvelopeVersion: 2 | null
+  bootstrapRedeliveryFormatterVersion: 2 | null
 }
 
 export interface SkillExposureEntry {
@@ -907,7 +912,13 @@ export interface NativeSessionBootstrapEvidenceView {
 
 export interface CampAttachmentRefView {
   attachmentId: string
+  path: string
   contentDigest: string
+}
+
+export interface RunNoticeRefView {
+  code: string
+  taskId?: string
 }
 
 export interface ContextManifestView {
@@ -921,23 +932,27 @@ export interface ContextManifestView {
   globalPublicMessageBoundary: number
   historyCamps: ContextManifestHistoryCampView[]
   rawMessageCount: number
-  previousAcceptedPublicBoundarySequence: number | null
-  contextDeliveryProfileVersion: number | null
+  previousAcceptedPublicBoundarySequence: number
+  contextDeliveryProfileVersion: 2
   contextDeliveryProfile: {
-    profileVersion: 1
+    profileVersion: 2
     maxPublicMessages: number
     maxPublicHistoryChars: number
     maxMessageBodyChars: number
-  } | null
-  contextDeliveryProfileDigest: string | null
+  }
+  contextDeliveryProfileDigest: string
   originatingPublicUserMessageRef: unknown | null
   recentMessageCount: number
   omittedMessageCount: number | null
   omittedMessageSequenceStart: number | null
   omittedMessageSequenceEnd: number | null
+  omissionEntries: unknown[]
   collaborationStateDigest: string
   collaborationStateIncluded: boolean
-  runNoticeRefs: string[]
+  sharedMessageEvidence: unknown[]
+  sharedMessageEvidenceDigest: string
+  runNoticeRefs: RunNoticeRefView[]
+  runNoticePayload: unknown
   runNoticeDigest: string
   currentInputSource: unknown
   attachmentRefs: CampAttachmentRefView[]
