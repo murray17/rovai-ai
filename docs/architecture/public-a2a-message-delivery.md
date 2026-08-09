@@ -103,6 +103,13 @@ Delivery attempt
 CampTurn 事实保持不变。该失败不是 waitCondition，也不会被自动重试；需要新的公共发送
 请求或针对失败 Delivery 的用户明确决定。
 
+Current Input 保留触发来源的权威差异。普通用户触发精确投影为
+`{"source":{"type":"user"},"message":...}`；Public A2A target Run 精确投影为
+`{"source":{"type":"member_call","senderAgentId":...,"senderName":...},"message":...}`。
+Core 在 preflight 和 frozen Context materialization 时验证 CampMessage 作者、source AgentRun、
+MessageDelivery、recipient 与 A2A lineage 一致；不把 CampMessage ID、MessageDelivery ID 或 source
+AgentRun ID 暴露给模型。
+
 ContextManifest 只证明冻结的 Model Context Projection 及其 source/selection Evidence。随后独立的
 Runtime Input Delivery 才把 Manifest 绑定到 AgentRun execution epoch 与 Native Binding generation；
 只有该 Delivery 的 accepted ACK 可以把 Conversation/Native-Session 水位推进到 Manifest 冻结的值。

@@ -112,6 +112,7 @@ pub(crate) struct DeliveryContextPreview<'a> {
     pub camp_message_boundary_sequence: i64,
     pub conversation_message_boundary_sequence: i64,
     pub trigger_camp_message_id: Option<&'a str>,
+    pub trigger_message_delivery_id: &'a str,
     pub effective_config: Value,
     pub workspace: Value,
     pub runtime_installation_id: Option<&'a str>,
@@ -1182,6 +1183,15 @@ impl ContextService {
         })
     }
 
+    pub(crate) fn validate_frozen_delivery_context(
+        transaction: &Transaction<'_>,
+        request: &DeliveryContextPreview<'_>,
+        frozen: &FrozenDeliveryContext,
+    ) -> Result<()> {
+        let snapshot = prospective_delivery_snapshot(transaction, request)?;
+        validate_frozen_current_input_source(transaction, &snapshot, frozen)
+    }
+
     pub fn prepare_input_delivery(
         &self,
         database: &mut Database,
@@ -1679,7 +1689,7 @@ fn prospective_delivery_snapshot(
         camp_message_boundary_sequence: request.camp_message_boundary_sequence,
         conversation_message_boundary_sequence: request.conversation_message_boundary_sequence,
         trigger_camp_message_id: request.trigger_camp_message_id.map(str::to_string),
-        trigger_message_delivery_id: None,
+        trigger_message_delivery_id: Some(request.trigger_message_delivery_id.to_string()),
         trigger_conversation_message_id: None,
         effective_config: request.effective_config.clone(),
         workspace: request.workspace.clone(),
@@ -3514,6 +3524,189 @@ impl CurrentInput {
     }
 }
 
+#[derive(Debug)]
+struct TriggerCampMessage {
+    id: String,
+    sequence: i64,
+    author_type: String,
+    author_id: String,
+    source_agent_run_id: Option<String>,
+    stored_body: String,
+    structured_content_json: Option<String>,
+    content_digest: String,
+    author_display_name: Option<String>,
+}
+
+fn load_trigger_camp_message<R: ContextReadConnection>(
+    database: &R,
+    snapshot: &RunSnapshot,
+    camp_message_id: &str,
+) -> Result<TriggerCampMessage> {
+    database
+        .context_connection()
+        .query_row(
+            r#"
+            SELECT message.id, message.sequence,
+                   message.author_type, message.author_id,
+                   message.source_agent_run_id,
+                   message.body, message.structured_content_json,
+                   message.content_digest, profile.display_name
+            FROM camp_message AS message
+            LEFT JOIN agent_profile AS profile ON profile.id = message.author_id
+            WHERE message.id = ?1 AND message.camp_id = ?2
+              AND message.sequence <= ?3
+              AND message.tombstoned_at IS NULL
+            "#,
+            params![
+                camp_message_id,
+                snapshot.camp_id,
+                snapshot.camp_message_boundary_sequence,
+            ],
+            |row| {
+                Ok(TriggerCampMessage {
+                    id: row.get(0)?,
+                    sequence: row.get(1)?,
+                    author_type: row.get(2)?,
+                    author_id: row.get(3)?,
+                    source_agent_run_id: row.get(4)?,
+                    stored_body: row.get(5)?,
+                    structured_content_json: row.get(6)?,
+                    content_digest: row.get(7)?,
+                    author_display_name: row.get(8)?,
+                })
+            },
+        )
+        .optional()?
+        .context("AgentRun trigger CampMessage does not exist or is tombstoned")
+}
+
+fn load_source_run_agent_id<R: ContextReadConnection>(
+    database: &R,
+    snapshot: &RunSnapshot,
+    source_agent_run_id: &str,
+) -> Result<String> {
+    database
+        .context_connection()
+        .query_row(
+            r#"
+            SELECT conversation.agent_id
+            FROM agent_run
+            JOIN conversation ON conversation.id = agent_run.conversation_id
+            JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+            WHERE agent_run.id = ?1
+              AND agent_run.camp_turn_id = ?2
+              AND camp_turn.camp_id = ?3
+            "#,
+            params![source_agent_run_id, snapshot.camp_turn_id, snapshot.camp_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .context("A2A Current Input source AgentRun does not belong to the target CampTurn")
+}
+
+fn validate_a2a_delivery_binding<R: ContextReadConnection>(
+    database: &R,
+    snapshot: &RunSnapshot,
+    camp_message: &TriggerCampMessage,
+    source_agent_run_id: &str,
+) -> Result<()> {
+    let delivery_id = snapshot
+        .trigger_message_delivery_id
+        .as_deref()
+        .context("A2A AgentRun requires a trigger Message Delivery")?;
+    let root_agent_run_id = snapshot
+        .a2a_root_agent_run_id
+        .as_deref()
+        .context("A2A AgentRun requires a root AgentRun")?;
+    let matches: bool = database.context_connection().query_row(
+        r#"
+        SELECT EXISTS(
+            SELECT 1
+            FROM message_delivery
+            WHERE id = ?1 AND camp_id = ?2 AND camp_turn_id = ?3
+              AND message_id = ?4 AND recipient_agent_id = ?5
+              AND source_agent_run_id = ?6 AND a2a_root_agent_run_id = ?7
+              AND a2a_depth = ?8
+              AND (
+                    (target_agent_run_id IS NULL
+                     AND status = 'pending'
+                     AND dispatch_phase = 'attempting'
+                     AND active_dispatch_attempt_id IS NOT NULL)
+                 OR (target_agent_run_id = ?9
+                     AND status = 'running'
+                     AND dispatch_phase = 'materialized')
+              )
+        )
+        "#,
+        params![
+            delivery_id,
+            snapshot.camp_id,
+            snapshot.camp_turn_id,
+            camp_message.id,
+            snapshot.agent_id,
+            source_agent_run_id,
+            root_agent_run_id,
+            snapshot.a2a_depth,
+            snapshot.agent_run_id,
+        ],
+        |row| row.get(0),
+    )?;
+    if !matches || camp_message.sequence != snapshot.camp_message_boundary_sequence {
+        anyhow::bail!("A2A Current Input Message Delivery lineage is inconsistent");
+    }
+    Ok(())
+}
+
+fn project_camp_current_input_source<R: ContextReadConnection>(
+    database: &R,
+    snapshot: &RunSnapshot,
+    camp_message: &TriggerCampMessage,
+) -> Result<Value> {
+    match snapshot.invocation_kind.as_str() {
+        "direct" => {
+            if camp_message.author_type != "user"
+                || camp_message.source_agent_run_id.is_some()
+                || snapshot.trigger_message_delivery_id.is_some()
+                || snapshot.a2a_parent_agent_run_id.is_some()
+                || snapshot.a2a_root_agent_run_id.is_some()
+                || snapshot.a2a_depth != 0
+            {
+                anyhow::bail!("Direct Current Input trigger identity is inconsistent");
+            }
+            Ok(json!({ "type": "user" }))
+        }
+        "a2a" => {
+            let source_agent_run_id = snapshot
+                .a2a_parent_agent_run_id
+                .as_deref()
+                .context("A2A AgentRun requires a parent AgentRun")?;
+            if camp_message.author_type != "agent"
+                || camp_message.source_agent_run_id.as_deref() != Some(source_agent_run_id)
+                || !(1..=5).contains(&snapshot.a2a_depth)
+            {
+                anyhow::bail!("A2A Current Input CampMessage author lineage is inconsistent");
+            }
+            let source_agent_id =
+                load_source_run_agent_id(database, snapshot, source_agent_run_id)?;
+            if camp_message.author_id != source_agent_id {
+                anyhow::bail!("A2A Current Input author does not own the source AgentRun");
+            }
+            validate_a2a_delivery_binding(database, snapshot, camp_message, source_agent_run_id)?;
+            let sender_name = camp_message
+                .author_display_name
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+                .context("A2A Current Input author profile is unavailable")?;
+            Ok(json!({
+                "type": "member_call",
+                "senderAgentId": source_agent_id,
+                "senderName": sender_name,
+            }))
+        }
+        _ => anyhow::bail!("AgentRun invocation kind is unsupported for Current Input"),
+    }
+}
+
 fn load_current_input<R: ContextReadConnection>(
     database: &R,
     snapshot: &RunSnapshot,
@@ -3523,57 +3716,35 @@ fn load_current_input<R: ContextReadConnection>(
         snapshot.trigger_conversation_message_id.as_deref(),
     ) {
         (Some(camp_message_id), None) => {
-            let (id, stored_body, structured_content_json, source_content_digest) = database
-                .context_connection()
-                .query_row(
-                    r#"
-                SELECT id, body, structured_content_json, content_digest
-                FROM camp_message
-                WHERE id = ?1 AND camp_id = ?2
-                  AND sequence <= ?3
-                  AND tombstoned_at IS NULL
-                "#,
-                    params![
-                        camp_message_id,
-                        snapshot.camp_id,
-                        snapshot.camp_message_boundary_sequence,
-                    ],
-                    |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, Option<String>>(2)?,
-                            row.get::<_, String>(3)?,
-                        ))
-                    },
-                )
-                .optional()?
-                .context("AgentRun trigger CampMessage does not exist or is tombstoned")?;
+            let camp_message = load_trigger_camp_message(database, snapshot, camp_message_id)?;
+            let source = project_camp_current_input_source(database, snapshot, &camp_message)?;
             let body = projected_current_camp_message_body(
                 database.context_connection(),
-                stored_body,
-                structured_content_json,
+                camp_message.stored_body,
+                camp_message.structured_content_json,
             )?;
             let projected_body_digest = sha256_text(&body);
             Ok(CurrentInput {
-                id,
+                id: camp_message.id,
                 payload: json!({
-                    "source": { "type": "user" },
+                    "source": source,
                     "message": body,
                 }),
                 source_camp_message_id: Some(camp_message_id.to_string()),
                 source_conversation_message_id: None,
-                source_content_digest,
+                source_content_digest: camp_message.content_digest,
                 projected_body_digest,
             })
         }
-        (None, Some(conversation_message_id)) => database
-            .context_connection()
-            .query_row(
-                r#"
+        (None, Some(conversation_message_id)) => {
+            let (id, author_type, author_id, source_agent_run_id, body, sender_name) = database
+                .context_connection()
+                .query_row(
+                    r#"
                 SELECT conversation_message.id,
                        conversation_message.author_type,
                        conversation_message.author_id,
+                       conversation_message.source_agent_run_id,
                        conversation_message.body,
                        agent_profile.display_name
                 FROM conversation_message
@@ -3583,35 +3754,61 @@ fn load_current_input<R: ContextReadConnection>(
                   AND conversation_message.conversation_id = ?2
                   AND conversation_message.sequence <= ?3
                 "#,
-                params![
-                    conversation_message_id,
-                    snapshot.conversation_id,
-                    snapshot.conversation_message_boundary_sequence,
-                ],
-                |row| {
-                    let sender_agent_id = row.get::<_, String>(2)?;
-                    let body = row.get::<_, String>(3)?;
-                    let body_digest = sha256_text(&body);
-                    Ok(CurrentInput {
-                        id: row.get(0)?,
-                        payload: json!({
-                            "source": {
-                                "type": "member_call",
-                                "senderAgentId": sender_agent_id,
-                                "senderName": row.get::<_, Option<String>>(4)?
-                                    .unwrap_or_else(|| "Source Member".to_string()),
-                            },
-                            "message": body,
-                        }),
-                        source_camp_message_id: None,
-                        source_conversation_message_id: Some(conversation_message_id.to_string()),
-                        source_content_digest: body_digest.clone(),
-                        projected_body_digest: body_digest,
-                    })
-                },
-            )
-            .optional()?
-            .context("AgentRun trigger ConversationMessage does not exist"),
+                    params![
+                        conversation_message_id,
+                        snapshot.conversation_id,
+                        snapshot.conversation_message_boundary_sequence,
+                    ],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, Option<String>>(5)?,
+                        ))
+                    },
+                )
+                .optional()?
+                .context("AgentRun trigger ConversationMessage does not exist")?;
+            let parent_agent_run_id = snapshot
+                .a2a_parent_agent_run_id
+                .as_deref()
+                .context("Member Call Current Input requires a parent AgentRun")?;
+            if snapshot.invocation_kind != "a2a"
+                || snapshot.trigger_message_delivery_id.is_some()
+                || author_type != "agent"
+                || source_agent_run_id.as_deref() != Some(parent_agent_run_id)
+                || !(1..=5).contains(&snapshot.a2a_depth)
+            {
+                anyhow::bail!("Member Call Current Input lineage is inconsistent");
+            }
+            let source_agent_id =
+                load_source_run_agent_id(database, snapshot, parent_agent_run_id)?;
+            if author_id != source_agent_id {
+                anyhow::bail!("Member Call Current Input author does not own the source AgentRun");
+            }
+            let sender_name = sender_name
+                .filter(|value| !value.trim().is_empty())
+                .context("Member Call Current Input author profile is unavailable")?;
+            let body_digest = sha256_text(&body);
+            Ok(CurrentInput {
+                id,
+                payload: json!({
+                    "source": {
+                        "type": "member_call",
+                        "senderAgentId": source_agent_id,
+                        "senderName": sender_name,
+                    },
+                    "message": body,
+                }),
+                source_camp_message_id: None,
+                source_conversation_message_id: Some(conversation_message_id.to_string()),
+                source_content_digest: body_digest.clone(),
+                projected_body_digest: body_digest,
+            })
+        }
         _ => anyhow::bail!("AgentRun must have exactly one ready input trigger"),
     }
 }
@@ -3996,22 +4193,20 @@ fn load_frozen_delivery_context(
     let Some(delivery_id) = snapshot.trigger_message_delivery_id.as_deref() else {
         return Ok(None);
     };
-    let frozen_snapshot: Option<String> = database
+    let frozen_snapshot: String = database
         .connection()
         .query_row(
             "SELECT frozen_snapshot_json FROM message_delivery WHERE id = ?1",
             [delivery_id],
             |row| row.get(0),
         )
-        .optional()?;
-    let Some(frozen_snapshot) = frozen_snapshot else {
-        return Ok(None);
-    };
-    let snapshot: Value = serde_json::from_str(&frozen_snapshot)
+        .optional()?
+        .context("AgentRun trigger Message Delivery does not exist")?;
+    let frozen_snapshot_value: Value = serde_json::from_str(&frozen_snapshot)
         .context("Message Delivery frozen snapshot is invalid")?;
-    let Some(context) = snapshot.get("frozenContext") else {
-        return Ok(None);
-    };
+    let context = frozen_snapshot_value
+        .get("frozenContext")
+        .context("Materialized Message Delivery has no frozen Context")?;
     let frozen: FrozenDeliveryContext = serde_json::from_value(context.clone())
         .context("Message Delivery frozen Context payload is invalid")?;
     if sha256_text(&frozen.rendered_payload) != frozen.rendered_payload_digest
@@ -4019,7 +4214,49 @@ fn load_frozen_delivery_context(
     {
         anyhow::bail!("Message Delivery frozen Context payload digest is invalid");
     }
+    validate_frozen_current_input_source(database, snapshot, &frozen)?;
     Ok(Some(frozen))
+}
+
+fn validate_frozen_current_input_source<R: ContextReadConnection>(
+    database: &R,
+    snapshot: &RunSnapshot,
+    frozen: &FrozenDeliveryContext,
+) -> Result<()> {
+    let camp_message_id = snapshot
+        .trigger_camp_message_id
+        .as_deref()
+        .context("Message Delivery AgentRun requires a trigger CampMessage")?;
+    let camp_message = load_trigger_camp_message(database, snapshot, camp_message_id)?;
+    let expected_source = project_camp_current_input_source(database, snapshot, &camp_message)?;
+    let current_input_json = frozen
+        .rendered_payload
+        .rsplit_once("[CURRENT_INPUT]\n")
+        .map(|(_, suffix)| suffix)
+        .and_then(|suffix| {
+            suffix
+                .split_once("\n[/CURRENT_INPUT]")
+                .map(|(value, _)| value)
+        })
+        .context("Message Delivery frozen Context has no Current Input section")?;
+    let current_input: Value = serde_json::from_str(current_input_json)
+        .context("Message Delivery frozen Current Input is invalid")?;
+    let frozen_source = current_input
+        .get("source")
+        .and_then(Value::as_object)
+        .context("Message Delivery frozen Current Input has no source object")?;
+    let sender_name_is_valid = frozen_source
+        .get("senderName")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty());
+    if frozen_source.len() != 3
+        || frozen_source.get("type") != expected_source.get("type")
+        || frozen_source.get("senderAgentId") != expected_source.get("senderAgentId")
+        || !sender_name_is_valid
+    {
+        anyhow::bail!("Message Delivery frozen Current Input source is inconsistent");
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -9253,6 +9490,55 @@ mod tests {
                 .unwrap();
         let prospective_run_id = Uuid::new_v4().to_string();
         let trigger_message_id = format!("bulk-omission-{last_bulk_sequence}");
+        let prospective_delivery_id = Uuid::new_v4().to_string();
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE camp_message
+                SET author_type = 'agent', author_id = 'agent_1',
+                    source_agent_run_id = ?2
+                WHERE id = ?1
+                "#,
+                params![&trigger_message_id, &snapshot.agent_run_id],
+            )
+            .unwrap();
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO message_delivery(
+                    id, camp_id, camp_turn_id, message_id,
+                    recipient_agent_id, recipient_canonical_position,
+                    recipient_digest, message_body_digest,
+                    source_agent_run_id, a2a_root_agent_run_id, a2a_depth,
+                    ancestor_agent_ids_json, recipient_presentation_snapshot_json,
+                    frozen_snapshot_json, queue_sequence,
+                    status, dispatch_phase, dispatch_attempt_count,
+                    active_dispatch_attempt_id, retry_generation,
+                    manual_intervention_required, version,
+                    created_at, updated_at
+                ) VALUES (
+                    ?1, ?2, ?3, ?4, ?5, 0,
+                    'sha256:test-recipient', 'sha256:test-body',
+                    ?6, ?6, 1, '[]', '{}', '{}', 1,
+                    'pending', 'attempting', 1, ?7, 0, 0, 1, ?8, ?8
+                )
+                "#,
+                params![
+                    &prospective_delivery_id,
+                    &snapshot.camp_id,
+                    &snapshot.camp_turn_id,
+                    &trigger_message_id,
+                    &snapshot.agent_id,
+                    &snapshot.agent_run_id,
+                    format!("attempt-{prospective_delivery_id}"),
+                    &now,
+                ],
+            )
+            .unwrap();
         let frozen = {
             let transaction = fixture.database.connection_mut().transaction().unwrap();
             ContextService::preflight_delivery_context(
@@ -9272,6 +9558,7 @@ mod tests {
                     conversation_message_boundary_sequence: snapshot
                         .conversation_message_boundary_sequence,
                     trigger_camp_message_id: Some(&trigger_message_id),
+                    trigger_message_delivery_id: &prospective_delivery_id,
                     effective_config: snapshot.effective_config.clone(),
                     workspace: snapshot.workspace.clone(),
                     runtime_installation_id: snapshot.runtime_installation_id.as_deref(),
@@ -9706,6 +9993,7 @@ mod tests {
             .next()
             .unwrap();
         let current: Value = serde_json::from_str(current_json).unwrap();
+        assert_eq!(current["source"], json!({"type": "user"}));
         assert_eq!(current["message"].as_str(), Some(body.as_str()));
         assert!(current.get("attachments").is_none());
         let current_input_evidence: Value = fixture

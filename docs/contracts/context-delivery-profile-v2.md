@@ -9,14 +9,16 @@ last_updated: 2026-08-09
 
 # Context Delivery Profile v2
 
-Profile v2 是 v0.45 建立并由当前 v0.50 clean break 延续的公共消息选择与预算合同。Profile v1 只作为
+Profile v2 是 v0.45 建立并由当前 v0.52 clean break 延续的公共消息选择与预算合同。Profile v1 只作为
 历史合同文档保持不可变，不进入当前 ContextManifest 读取路径；当前 AgentRun 只使用 v2。模型字段/序列化、ContextManifest Evidence 和
 Runtime Input Delivery accepted evidence 是独立的合同/权威边界，不由 Profile version 命名。模型
 shape 由 Formatter version 所有，Evidence shape 由 Manifest version 所有；Runtime Input Delivery 是
 投递/ACK authority，并继续携带既有投递 metadata，而不是新的内容版本轴。公共消息、Delivery 和 Context gate 的
 长期边界见 [Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)，
 决策见 [ADR-0132](../adr/0132-public-reference-context-closure-profile-v2.md)；权责分层见
-[ADR-0147](../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)。
+[ADR-0147](../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)，当前 omission Evidence
+shape 见 [ADR-0149](../adr/0149-bounded-whole-history-omission-evidence.md) 与
+[ContextManifest Evidence v9](context-manifest-evidence-v9.md)。
 
 ## 1. 不可变配置
 
@@ -118,7 +120,8 @@ waitCondition = null
 
 本节同时展示 Profile selection 事实、当前 Formatter 模型 projection 和 ContextManifest Evidence
 如何集成；示例中的模型字段或 Evidence 字段不构成 Profile v2 的版本身份，也不改变 omission
-集合、count 或 sequence envelope 算法。
+集合、count 或 sequence envelope 算法。下面的 Manifest 示例按当前 v9 Evidence 合同维护；修正该
+跨轴集成示例不创建只承载 Evidence shape 的 Profile v3。
 
 模型可见的 `SHARED_CONVERSATION` 可以包含：
 
@@ -159,16 +162,22 @@ Manifest 还记录 machine-readable omission entries：
 ```yaml
 omissionEntries:
   - kind: public_history
+    reason: max_public_messages
+    count: 985
+    sequenceStart: 16
+    sequenceEnd: 1000
+  - kind: public_history
     messageIds: [msg_…]
-    reason: max_public_messages | history_budget | runtime_payload_budget
+    reason: history_budget | runtime_payload_budget
   - kind: reference_closure
     messageIds: [msg_…]
-    reason: max_reference_chain | history_budget | parent_unavailable | cycle | tombstone
+    reason: max_reference_chain | history_budget | runtime_payload_budget | parent_unavailable | cycle | tombstone
 ```
 
 `omittedMessages` 只统计最终未以 origin、closure 或 recent 输出的可见公共消息；单条正文截断
-不增加 count。父消息不存在或无权读取时 fail closed，精确 ID/reason 只留在 Manifest，不把
-machine omission entry 投影给模型，也不能泄漏 Camp 外部 roster 或被 tombstone 内容。没有
+不增加 count。`max_public_messages` machine evidence 只保存有界 count/sequence envelope 并省略
+`messageIds`；只有有界 budget/reference candidate omission 才把精确 ID/reason 留在 Manifest。两类
+machine omission entry 都不投影给模型，也不能泄漏 Camp 外部 roster 或被 tombstone 内容。没有
 omission 时不输出 `count: 0` 空壳。模型历史消息不包含 source Conversation ID 或附件 digest；这些
 字段与 attachment ID/path/digest、正文 projection digest、截断 offset 和 closure distance 一起进入
 Manifest Evidence。

@@ -2101,14 +2101,56 @@ mod tests {
     #[test]
     fn public_delivery_runtime_consumes_the_pre_run_frozen_context_bytes() {
         let mut fixture = Fixture::new();
-        let invocation = fixture.public_send_invocation(
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE camp SET default_lead_agent_id = 'agent_2' WHERE id = ?1",
+                [&fixture.camp_id],
+            )
+            .unwrap();
+        let target_task = CollaborationService::default()
+            .create_task(
+                &mut fixture.database,
+                &user_envelope(
+                    "create-member-call-source-task",
+                    Some(&fixture.camp_id),
+                    CreateTaskCommand {
+                        camp_id: fixture.camp_id.clone(),
+                        title: "Target-owned source identity task".to_string(),
+                        description: "Freeze the Public A2A sender identity".to_string(),
+                        assignee_agent_id: Some("agent_2".to_string()),
+                        ..Default::default()
+                    },
+                ),
+            )
+            .unwrap();
+        let target_task_id = target_task.result.payload["taskId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let source_name: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT display_name FROM agent_profile WHERE id = 'agent_1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut invocation = fixture.public_send_invocation(
             "frozen-public-context",
             "Use this exact public input @agent_2",
             &["agent_2"],
         );
+        invocation.input.task_id = Some(target_task_id);
         let sent = TeamToolService::default()
             .send_public_message(&mut fixture.database, &invocation)
             .unwrap();
+        let source_message_id = sent.result.payload["messageId"]
+            .as_str()
+            .unwrap()
+            .to_string();
         let delivery_id = sent.result.payload["deliveryIds"][0]
             .as_str()
             .unwrap()
@@ -2127,6 +2169,36 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
+        let current_input = |payload: &str| -> Value {
+            serde_json::from_str(
+                payload
+                    .split("[CURRENT_INPUT]\n")
+                    .nth(1)
+                    .unwrap()
+                    .split("\n[/CURRENT_INPUT]")
+                    .next()
+                    .unwrap(),
+            )
+            .unwrap()
+        };
+        let frozen_current_input = current_input(&frozen_payload);
+        assert_eq!(
+            frozen_current_input["source"],
+            json!({
+                "type": "member_call",
+                "senderAgentId": "agent_1",
+                "senderName": source_name,
+            })
+        );
+        assert_ne!(frozen_current_input["source"]["senderAgentId"], "agent_2");
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET display_name = 'RENAMED_AFTER_PREFLIGHT' WHERE id = 'agent_1'",
+                [],
+            )
+            .unwrap();
         let (target_epoch, _) =
             fixture.claim_bind_and_issue(&target_run_id, "native-frozen-public-context");
         let ContextMaterialization::Ready(context) = ContextService
@@ -2145,6 +2217,10 @@ mod tests {
             panic!("Public Delivery context should materialize");
         };
         assert_eq!(context.rendered_payload, frozen_payload);
+        assert_eq!(
+            current_input(&context.rendered_payload),
+            frozen_current_input
+        );
         let manifest_id: String = fixture
             .database
             .connection()
@@ -2155,6 +2231,73 @@ mod tests {
             )
             .unwrap();
         assert_eq!(manifest_id, context.manifest_id);
+        let current_input_evidence: Value = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT current_input_source_json FROM context_manifest WHERE id = ?1",
+                [&context.manifest_id],
+                |row| row.get::<_, String>(0),
+            )
+            .map(|value| serde_json::from_str(&value).unwrap())
+            .unwrap();
+        assert_eq!(
+            current_input_evidence["sourceCampMessageId"],
+            source_message_id
+        );
+    }
+
+    #[test]
+    fn public_delivery_source_lineage_mismatch_fails_closed_after_preflight() {
+        let mut fixture = Fixture::new();
+        let invocation = fixture.public_send_invocation(
+            "frozen-public-source-mismatch",
+            "Preserve this sender lineage @agent_2",
+            &["agent_2"],
+        );
+        let sent = TeamToolService::default()
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+        let delivery_id = sent.result.payload["deliveryIds"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let (target_run_id, message_id): (String, String) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT target_agent_run_id, message_id FROM message_delivery WHERE id = ?1",
+                [&delivery_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let (target_epoch, _) =
+            fixture.claim_bind_and_issue(&target_run_id, "native-source-mismatch");
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE camp_message SET source_agent_run_id = NULL WHERE id = ?1",
+                [&message_id],
+            )
+            .unwrap();
+
+        let error = ContextService
+            .materialize(
+                &mut fixture.database,
+                &ManagedBlobStore::new(&fixture.directory),
+                &MaterializeContextRequest {
+                    agent_run_id: &target_run_id,
+                    execution_epoch: target_epoch,
+                    charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+            )
+            .unwrap_err();
+        assert!(
+            format!("{error:#}")
+                .contains("A2A Current Input CampMessage author lineage is inconsistent")
+        );
     }
 
     #[test]

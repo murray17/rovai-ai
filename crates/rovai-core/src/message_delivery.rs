@@ -1536,35 +1536,35 @@ fn process_dispatch_attempt(
     )?;
     let mut frozen_snapshot_value: Value = serde_json::from_str(&frozen_snapshot)
         .context("Message Delivery frozen snapshot is invalid")?;
+    let delivery_context_preview = DeliveryContextPreview {
+        agent_run_id: &agent_run_id,
+        camp_id: &delivery.camp_id,
+        camp_turn_id: &delivery.camp_turn_id,
+        conversation_id: &conversation_id,
+        agent_id: &delivery.recipient_agent_id,
+        task_id: delivery.task_id.as_deref(),
+        execution_epoch: 1,
+        a2a_parent_agent_run_id: Some(&delivery.source_agent_run_id),
+        a2a_root_agent_run_id: Some(&delivery.a2a_root_agent_run_id),
+        a2a_depth: delivery.a2a_depth,
+        camp_message_boundary_sequence: delivery.message_sequence,
+        conversation_message_boundary_sequence: current_conversation_boundary,
+        trigger_camp_message_id: Some(&delivery.message_id),
+        trigger_message_delivery_id: &delivery.id,
+        effective_config: effective_config.clone(),
+        workspace: serde_json::to_value(&workspace)?,
+        runtime_installation_id: Some(runtime.installation_id.as_str()),
+        runtime_binding_compatibility_digest: Some(runtime.binding_compatibility_digest.as_str()),
+        charter_delivery_mode,
+        max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+    };
     let frozen_context = if let Some(context) = frozen_snapshot_value.get("frozenContext") {
         serde_json::from_value::<FrozenDeliveryContext>(context.clone())
             .context("Message Delivery frozen Context is invalid")?
     } else {
         let frozen = match ContextService::preflight_delivery_context(
             &transaction,
-            &DeliveryContextPreview {
-                agent_run_id: &agent_run_id,
-                camp_id: &delivery.camp_id,
-                camp_turn_id: &delivery.camp_turn_id,
-                conversation_id: &conversation_id,
-                agent_id: &delivery.recipient_agent_id,
-                task_id: delivery.task_id.as_deref(),
-                execution_epoch: 1,
-                a2a_parent_agent_run_id: Some(&delivery.source_agent_run_id),
-                a2a_root_agent_run_id: Some(&delivery.a2a_root_agent_run_id),
-                a2a_depth: delivery.a2a_depth,
-                camp_message_boundary_sequence: delivery.message_sequence,
-                conversation_message_boundary_sequence: current_conversation_boundary,
-                trigger_camp_message_id: Some(&delivery.message_id),
-                effective_config: effective_config.clone(),
-                workspace: serde_json::to_value(&workspace)?,
-                runtime_installation_id: Some(runtime.installation_id.as_str()),
-                runtime_binding_compatibility_digest: Some(
-                    runtime.binding_compatibility_digest.as_str(),
-                ),
-                charter_delivery_mode,
-                max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
-            },
+            &delivery_context_preview,
         ) {
             Ok(context) => context,
             Err(error)
@@ -1593,6 +1593,11 @@ fn process_dispatch_attempt(
         )?;
         frozen
     };
+    ContextService::validate_frozen_delivery_context(
+        &transaction,
+        &delivery_context_preview,
+        &frozen_context,
+    )?;
     if frozen_context.charter_delivery_mode != charter_delivery_mode
         || frozen_context.camp_message_boundary_sequence != delivery.message_sequence
         || frozen_context.conversation_message_boundary_sequence > current_conversation_boundary

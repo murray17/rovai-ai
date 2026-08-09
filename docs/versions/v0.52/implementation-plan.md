@@ -17,6 +17,10 @@ last_updated: 2026-08-09
 
 ## Checkpoint 1：精确模型字节与恢复
 
+- [x] Public A2A Current Input 从 CampMessage/MessageDelivery/source Run 权威关系投影
+  `member_call` sender，普通用户仍精确为 `type:user`；
+- [x] preflight、重复 frozen Delivery 与最终 materialization 均 fail closed 校验作者和 lineage，
+  Frozen payload 与 Manifest payload 复用同一 source bytes；
 - [x] Run Notice 建立单一 rendered result，Frozen Delivery、模型 section、Manifest 共用 exact bytes/digest；
 - [x] 增加带 Task 的 A2A preflight → materialize → Manifest 端到端回归；
 - [x] structured history 使用持久 `camp_message.body`，与 canonical `camp.read item` continuation 同一文本空间；

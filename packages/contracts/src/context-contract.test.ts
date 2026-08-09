@@ -9,7 +9,14 @@ describe('AgentRun context contract', () => {
     expect(fixture.agentRunContextFormatterVersion).toBe(formatterVersion)
     expect(fixture.contextManifestFormatterVersion).toBe(formatterVersion)
     expect(fixture.contextDeliveryProfileVersion).toBe(2)
-    expect(fixture.memberCallSenderIdentityField).toBe('senderAgentId')
+    expect(fixture.currentInputSourceShapes).toEqual({
+      user: { type: 'user' },
+      memberCall: {
+        type: 'member_call',
+        senderAgentId: 'source-agent',
+        senderName: 'Source Agent',
+      },
+    })
     expect(fixture.historicalMessageIdentityFields).toEqual([
       'messageId',
       'sequence',
@@ -21,6 +28,12 @@ describe('AgentRun context contract', () => {
     expect(fixture.truncatedBodyContinuation.operation).toBe('camp.read')
     expect(fixture.omissionRecoveryField).toBe('navigationHint')
     expect(fixture.contextManifestSharedMessageEvidence).toContain('attachmentIdPathDigest')
+    expect(fixture.contextManifestOmissionEvidence.wholeHistory).not.toHaveProperty('messageIds')
+    expect(fixture.contextManifestOmissionEvidence.boundedCandidate).toEqual({
+      kind: 'public_history',
+      messageIds: ['message-123'],
+      reason: 'history_budget',
+    })
     expect(fixture.contextManifestRunNoticeEvidence).toEqual([
       'typedTaskReference',
       'code',

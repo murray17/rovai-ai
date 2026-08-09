@@ -39,7 +39,17 @@ mod tests {
         );
         assert_eq!(fixture["contextManifestFormatterVersion"], 11);
         assert_eq!(fixture["contextDeliveryProfileVersion"], 2);
-        assert_eq!(fixture["memberCallSenderIdentityField"], "senderAgentId");
+        assert_eq!(
+            fixture["currentInputSourceShapes"],
+            json!({
+                "user": {"type": "user"},
+                "memberCall": {
+                    "type": "member_call",
+                    "senderAgentId": "source-agent",
+                    "senderName": "Source Agent",
+                },
+            })
+        );
         assert_eq!(
             fixture["truncatedBodyContinuation"]["operation"],
             "camp.read"
@@ -48,6 +58,15 @@ mod tests {
         assert_eq!(
             fixture["contextManifestSharedMessageEvidence"][2],
             "attachmentIdPathDigest"
+        );
+        assert!(
+            fixture["contextManifestOmissionEvidence"]["wholeHistory"]
+                .get("messageIds")
+                .is_none()
+        );
+        assert_eq!(
+            fixture["contextManifestOmissionEvidence"]["boundedCandidate"]["messageIds"],
+            json!(["message-123"])
         );
         assert_eq!(
             fixture["contextManifestRunNoticeEvidence"][0],

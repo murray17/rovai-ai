@@ -10,15 +10,16 @@ last_updated: 2026-08-09
 
 # Rovai-ai v0.52：Dynamic Context 精确恢复与有界 Evidence
 
-> 当前状态：设计与实施完成。该版本修复 Run Notice exact bytes、structured history
-> continuation、whole-history omission Evidence 和公开 CampSnapshot schema 的发布阻塞问题。
+> 当前状态：设计与实施完成。该版本修复 Public A2A Current Input 来源、Run Notice exact bytes、
+> structured history continuation、whole-history omission Evidence 和公开 CampSnapshot schema 的发布阻塞问题。
 >
 > 前置版本：[v0.51 可操作诊断中心与 v5 导出](../v0.51/README.md)
 
 ## 版本目标
 
-v0.52 保持 Context Delivery Profile v2 的选择算法、预算数值和 accepted-ACK 语义不变，同时修复四个
-合同实现缺陷：Run Notice 只能渲染一次并在 Frozen Delivery、模型 section 与 Manifest 复用相同字节；
+v0.52 保持 Context Delivery Profile v2 的选择算法、预算数值和 accepted-ACK 语义不变，同时修复五个
+合同实现缺陷：Public A2A target Run 的 Current Input 必须保留可信 sender Agent 身份，不能伪装为用户；
+Run Notice 只能渲染一次并在 Frozen Delivery、模型 section 与 Manifest 复用相同字节；
 structured CampMessage 的截断前缀与 `camp.read` continuation 必须使用同一持久正文文本空间；
 `max_public_messages` 不得把任意长历史 ID 列表复制到 Frozen/Manifest JSON；公开 CampSnapshot
 schemaVersion 必须随已经改变的 Read Model shape 升到 27。
@@ -36,6 +37,8 @@ schemaVersion 必须随已经改变的 Read Model shape 升到 27。
 Migration 69 终止非终态 Run/Turn 与未完成 Delivery，清除旧 ContextManifest、Runtime Input Delivery、
 Bootstrap Evidence、Binding/Session 技术状态和水位；已经完成的 Camp、Message、Task、终态 Run/Turn
 业务历史不清空。该切换由 Manifest 合同变化触发，不是 Identity 编辑触发 Session rotation。
+Public A2A source 修复是既有 Context Formatter v11 的 conformance fix，不创建 Formatter v12；任何
+pre-release 数据库中已经冻结的错误 source bytes 都会 fail closed，不能在恢复时静默重算或投递。
 
 ## 本版本不做
 
