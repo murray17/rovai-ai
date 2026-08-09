@@ -21,7 +21,7 @@ compaction 后的 Bootstrap 补发可靠性见
 [ADR-0138](../adr/0138-durable-bootstrap-redelivery-requirement.md)，版本拥有的 Runtime policy 与
 完整矩阵见 [Native Session Bootstrap Redelivery](native-session-bootstrap-redelivery.md)。Self/peer
 identity、Collaboration Projection 与输入水位见
-[ADR-0145](../adr/0145-sole-native-session-self-identity-and-peer-routing-projection.md)和
+[ADR-0146](../adr/0146-sole-native-session-self-identity-and-peer-routing-projection.md)和
 [Collaboration State v2](../contracts/collaboration-state-v2.md)。
 
 ## 总体路径

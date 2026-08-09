@@ -14,9 +14,9 @@ use crate::{
     skill_projection::SkillExposureSnapshot,
 };
 
-pub const READ_MODEL_SCHEMA_VERSION: i64 = 25;
+pub const READ_MODEL_SCHEMA_VERSION: i64 = 26;
 pub const EVENT_BATCH_SCHEMA_VERSION: i64 = 9;
-pub const NAVIGATION_SCHEMA_VERSION: i64 = 2;
+pub const NAVIGATION_SCHEMA_VERSION: i64 = 3;
 pub const EXECUTION_EVIDENCE_PAGE_SCHEMA_VERSION: i64 = 1;
 pub const NAVIGATION_RECENT_CAMP_LIMIT: usize = 5;
 const EXECUTION_EVIDENCE_SNAPSHOT_LIMIT: i64 = 1_200;
@@ -33,6 +33,7 @@ pub struct NavigationLeadSummary {
 pub struct NavigationCampItem {
     pub id: String,
     pub title: String,
+    pub activation_state: String,
     pub project_binding_kind: String,
     pub project_path: String,
     pub default_lead: Option<NavigationLeadSummary>,
@@ -106,6 +107,7 @@ pub struct CampListItem {
 pub struct CampView {
     pub id: String,
     pub title: String,
+    pub activation_state: String,
     pub project_binding_kind: String,
     pub project_path: String,
     pub default_lead_agent_id: Option<String>,
@@ -530,6 +532,7 @@ impl ReadModelService {
                       AND task.status NOT IN ('completed', 'cancelled')),
                    camp.updated_at
             FROM camp
+            WHERE camp.activation_state = 'active'
             ORDER BY camp.updated_at DESC, camp.id
             "#,
         )?;
@@ -877,7 +880,11 @@ fn load_navigation_camps(transaction: &Transaction<'_>) -> Result<Vec<Navigation
             lead.id,
             lead.display_name,
             COALESCE(navigation_activity.last_activity_sequence, 0),
-            COALESCE(activity_event.created_at, camp.created_at),
+            CASE
+                WHEN camp.activation_state = 'pending'
+                THEN COALESCE(camp_composer_draft.updated_at, camp.updated_at)
+                ELSE COALESCE(activity_event.created_at, camp.created_at)
+            END,
             COALESCE(navigation_activity.latest_completion_sequence, 0),
             COALESCE(camp_view_state.last_seen_global_sequence, 0),
             EXISTS(
@@ -887,13 +894,18 @@ fn load_navigation_camps(transaction: &Transaction<'_>) -> Result<Vec<Navigation
                 WHERE camp_turn.camp_id = camp.id
                   AND agent_run.status IN ('queued', 'running', 'waiting')
             ),
-            camp.version
+            camp.version,
+            camp.activation_state
         FROM camp
         LEFT JOIN agent_profile AS lead ON lead.id = camp.default_lead_agent_id
         LEFT JOIN navigation_activity ON navigation_activity.camp_id = camp.id
         LEFT JOIN event_log AS activity_event
           ON activity_event.global_sequence = navigation_activity.last_activity_sequence
         LEFT JOIN camp_view_state ON camp_view_state.camp_id = camp.id
+        LEFT JOIN camp_composer_draft ON camp_composer_draft.camp_id = camp.id
+        WHERE camp.activation_state = 'active'
+           OR length(trim(COALESCE(camp_composer_draft.body, ''))) > 0
+           OR EXISTS(SELECT 1 FROM prepared_attachment WHERE camp_id = camp.id)
         "#,
     )?;
     let rows = statement.query_map([], |row| {
@@ -912,6 +924,7 @@ fn load_navigation_camps(transaction: &Transaction<'_>) -> Result<Vec<Navigation
         Ok(NavigationCampItem {
             id: row.get(0)?,
             title: row.get(1)?,
+            activation_state: row.get(12)?,
             project_binding_kind: row.get(2)?,
             project_path: row.get(3)?,
             default_lead: default_lead_agent_id.map(|agent_id| NavigationLeadSummary {
@@ -1021,7 +1034,7 @@ fn load_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<Option<Camp
     transaction
         .query_row(
             r#"
-            SELECT id, title, project_binding_kind, project_path,
+            SELECT id, title, activation_state, project_binding_kind, project_path,
                    default_lead_agent_id,
                    version, created_at, updated_at
             FROM camp WHERE id = ?1
@@ -1031,12 +1044,13 @@ fn load_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<Option<Camp
                 Ok(CampView {
                     id: row.get(0)?,
                     title: row.get(1)?,
-                    project_binding_kind: row.get(2)?,
-                    project_path: row.get(3)?,
-                    default_lead_agent_id: row.get(4)?,
-                    version: row.get(5)?,
-                    created_at: row.get(6)?,
-                    updated_at: row.get(7)?,
+                    activation_state: row.get(2)?,
+                    project_binding_kind: row.get(3)?,
+                    project_path: row.get(4)?,
+                    default_lead_agent_id: row.get(5)?,
+                    version: row.get(6)?,
+                    created_at: row.get(7)?,
+                    updated_at: row.get(8)?,
                 })
             },
         )

@@ -11,7 +11,7 @@ import type {
 } from '@contracts'
 import { MemberAvatar } from './MemberAvatar'
 
-type CreateCampDraft = Omit<CreateCampRequest, 'commandId'>
+type CreateCampDraft = Omit<CreateCampRequest, 'commandId' | 'activationState'>
 type WorkspaceChoice = WorkspaceSelection | WorkspaceInspection
 type GitInspectionStatus = 'idle' | 'loading' | 'ready' | 'failed'
 

@@ -10,9 +10,10 @@ last_updated: 2026-08-09
 
 > 当前状态：官方双人追问 Skill 已完成生产源码与定向验收；通用与启动设置已完成生产实现、
 > 自动回归、macOS 打包以及主窗口会话实机验收。已安装 App 的真实登录项开关、系统授权态、
-> 外接显示器和完整负向人工矩阵仍待验收，因此本计划保持 `in_progress`。Desktop Shell 范围不修改
-> Rust Core；Skill 范围只扩展 bundled manifest，不修改 SQLite schema。本版本另行修复既有
-> Data Contract 启动兼容标记漂移，但不新增 Migration 或改变 reset 边界。
+> 外接显示器和完整负向人工矩阵仍待验收，因此本计划保持 `in_progress`。原 Desktop Shell 偏好
+> 范围不修改 Rust Core；后续一键新对话 Pending Draft 按 ADR-0145 新增 Migration 67 与 Core
+> activation lifecycle。Skill 范围仍只扩展 bundled manifest。本版本另行修复既有 Data Contract
+> 启动兼容标记漂移，该兼容修复本身不改变 reset 边界。
 
 ## Checkpoint 0：设计与版本切换
 
@@ -126,6 +127,21 @@ last_updated: 2026-08-09
 - [x] Main store、Preload、Renderer helper 与静态 UI 测试覆盖 v1 migration、原子约束、失效锁存、
   Runtime 负向边界、当前项目解析、名称边界及新侧栏语义；旧 UI acceptance 断言同步移除模式文案。
 
+## Checkpoint 4P：一键新对话 Pending Draft
+
+- [x] ADR-0145 冻结 Pending/Active、非空 Draft 可见性、首消息原子激活、发送拒绝保留与窄清理；
+- [x] Migration 67 为 Camp 增加 `activation_state`，存量及省略字段创建默认 Active；Camp Snapshot
+  v26 与 Navigation v3 暴露 activation state；
+- [x] 一键入口创建 Pending，普通 Dialog 创建 Active；空 Pending 不进导航和恢复位置，非空 Pending
+  显示“草稿”，禁用激活前的 Inspector、重命名、置顶与 Lead mutation；新目录的一键空 Pending
+  不暴露 Camp，但 Renderer 保留经过校验、不可置顶的零 Camp 当前项目行；
+- [x] Core 只允许空 Pending discard，启动清理同样复核正文、附件、版本与领域事实；第一条成功消息
+  在原消息事务内写入 `camp.activated`，拒绝路径保持 Pending 与 Draft；
+- [x] Core 定向测试覆盖 Migration 默认、空/非空 Navigation、mutation guard、拒绝保留、原子激活、
+  显式离开清理和启动清理；Renderer 测试覆盖 schema、分页与“草稿”标签；
+- [x] 完整 `cargo test -p rovai-core`、`pnpm test`、typecheck、Desktop build、docs check、macOS package
+  与打包态一键草稿人工验收全部通过后回填证据。
+
 ## Checkpoint 5：macOS Login Item Registration
 
 - [x] Main 只在 `process.platform === "darwin" && app.isPackaged` 时读取/修改
@@ -191,7 +207,9 @@ last_updated: 2026-08-09
 
 ### 自动回归与打包
 
-- `pnpm test`：通过；Vitest 36 个文件、209 个测试，以及 Node acceptance 78 个测试全部成功；
+- `cargo test -p rovai-core`：通过；Core lib 295 个、CLI 9 个、Main 52 个测试成功，3 个手工
+  Runtime 测试保持 ignored，Doc tests 通过；
+- `pnpm test`：通过；Vitest 38 个文件、235 个测试，以及 Node acceptance 78 个测试全部成功；
 - `pnpm typecheck`：通过；
 - `pnpm build:desktop`：通过；
 - `pnpm package:mac`：通过，产物为
@@ -217,6 +235,23 @@ last_updated: 2026-08-09
 - 直接从 `dist/` 运行以及临时复制到 `/Applications` 的 ad-hoc bundle 均被 macOS 返回为 `not-found`，
   General 页正确禁用开关并显示重新安装或修复提示；它不能替代 Developer ID 签名、notarized 安装包
   的开启、关闭和 `requires-approval` 最终登录项验收。
+
+### macOS 一键新对话 Pending Draft 验收
+
+使用 `dist/mac-arm64/Rovai-ai.app` 的临时 bundle 副本与独立 userData 完成全新安装、配置、重启和
+SQLite 负向核对，已验证：
+
+- 一键创建直接进入 Pending Camp；未输入时侧栏继续显示“还没有对话”，不形成可恢复位置；
+- 输入 `draft persists` 后，侧栏立即出现灰色“草稿”标签；退出并重启同一 userData 后，侧栏、
+  Composer 正文和 Pending Camp 页面均恢复；
+- 重启后保存的默认队员、Lead、`oneClickNewConversationEnabled: true` 与
+  `newConversationDefaultsRequireConfirmation: false` 保持有效，再次点击“新对话”仍跳过 Dialog；
+- 第二个空 Pending 在离开到记忆页后被清理；SQLite 最终只保留一个非空 Pending Camp 和一条
+  Composer Draft，不存在空 Camp 残留；
+- Agent 运行时不可用时发送被拒绝，界面显示“消息未发送 · 草稿已保留”；SQLite 中 Camp 仍为
+  `pending`、`version = 1`、`last_message_sequence = 0`，消息表为 0，Draft 正文未变；
+- 打包验收额外发现并修复两个启动竞态：StrictMode 首轮 effect cleanup 导致异步恢复永久停留在
+  Startup Gate，以及队员 Overview 未完成时空数组误锁存默认配置失效。修复后重复重启验收通过。
 
 仍未完成的 Checkpoint 8 项保持未勾选；在真实安装 App、登录项系统状态、外接显示器及完整负向矩阵
 均留存证据前，不把本版本标记为 complete。

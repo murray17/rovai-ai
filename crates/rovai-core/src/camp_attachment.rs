@@ -82,7 +82,7 @@ impl CampAttachmentStore {
 
     pub fn load_draft(&self, database: &Database, camp_id: &str) -> Result<CampComposerDraftView> {
         validate_component(camp_id, "Camp")?;
-        ensure_active_camp(database, camp_id)?;
+        ensure_camp_exists(database, camp_id)?;
         let draft = database
             .connection()
             .query_row(
@@ -153,7 +153,7 @@ impl CampAttachmentStore {
         content: StructuredCampMessageContent,
     ) -> Result<CampComposerDraftView> {
         validate_component(camp_id, "Camp")?;
-        ensure_active_camp(database, camp_id)?;
+        ensure_camp_exists(database, camp_id)?;
         let content = normalize_content(content);
         validate_content(&content)?;
         let content_json = serde_json::to_string(&content)?;
@@ -235,7 +235,7 @@ impl CampAttachmentStore {
         requested_display_name: &str,
     ) -> Result<CampComposerDraftView> {
         validate_component(camp_id, "Camp")?;
-        ensure_active_camp(database, camp_id)?;
+        ensure_camp_exists(database, camp_id)?;
         ensure_draft_revision(database.connection(), camp_id, expected_revision)?;
         validate_draft_capacity(database, camp_id, 0)?;
         let display_name = normalize_display_name(requested_display_name)?;
@@ -401,7 +401,7 @@ impl CampAttachmentStore {
         camp_id: &str,
         prepared_attachment_ids: &[String],
     ) -> Result<()> {
-        ensure_active_camp(database, camp_id)?;
+        ensure_camp_exists(database, camp_id)?;
         let stored = load_prepared_rows(database, camp_id)?;
         let stored_ids = stored.iter().map(|row| row.id.as_str()).collect::<Vec<_>>();
         let requested_ids = prepared_attachment_ids
@@ -962,7 +962,7 @@ fn prepared_paths(database: &Database, camp_id: &str) -> Result<Vec<String>> {
         .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
-fn ensure_active_camp(database: &Database, camp_id: &str) -> Result<()> {
+fn ensure_camp_exists(database: &Database, camp_id: &str) -> Result<()> {
     database
         .connection()
         .query_row("SELECT 1 FROM camp WHERE id = ?1", [camp_id], |_| Ok(()))

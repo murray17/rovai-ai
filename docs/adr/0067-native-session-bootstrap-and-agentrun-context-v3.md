@@ -25,7 +25,7 @@ superseded_by: null
 > SHARED_CONVERSATION 摘要、Coverage、Context Read Marker、ContextManifest 摘要引用和
 > Context Compaction 条款；Session Charter、Memory Entrypoint 及其他动态上下文区段继续有效。
 >
-> [ADR-0145](0145-sole-native-session-self-identity-and-peer-routing-projection.md) 局部替代本文的
+> [ADR-0146](0146-sole-native-session-self-identity-and-peer-routing-projection.md) 局部替代本文的
 > `COLLABORATION_STATE` 条款：当前投影是排除 self、且不含 availability 的 peer routing identity
 > v2；本文该区段的旧字段说明不再是当前约束。
 

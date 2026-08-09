@@ -41,6 +41,8 @@ pub struct CreateCampCommand {
     pub member_agent_ids: Vec<String>,
     pub default_lead_agent_id: String,
     pub collaboration_mode: CampCollaborationMode,
+    #[serde(default)]
+    pub activation_state: CampActivationState,
 }
 
 #[cfg(test)]
@@ -61,6 +63,7 @@ impl CreateCampCommand {
             member_agent_ids: members.iter().map(|member| (*member).to_string()).collect(),
             default_lead_agent_id: default_lead.to_string(),
             collaboration_mode: CampCollaborationMode::Peer,
+            activation_state: CampActivationState::Active,
         }
     }
 }
@@ -98,6 +101,23 @@ impl CampCollaborationMode {
         match self {
             Self::Peer => "peer",
             Self::LeadCoordinated => "lead_coordinated",
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CampActivationState {
+    Pending,
+    #[default]
+    Active,
+}
+
+impl CampActivationState {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Active => "active",
         }
     }
 }
@@ -167,6 +187,17 @@ pub struct DeleteCampCommand {
 impl sealed::Sealed for DeleteCampCommand {}
 impl DomainCommand for DeleteCampCommand {
     const TYPE: &'static str = "camp.delete";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscardPendingCampCommand {
+    pub camp_id: String,
+}
+
+impl sealed::Sealed for DiscardPendingCampCommand {}
+impl DomainCommand for DiscardPendingCampCommand {
+    const TYPE: &'static str = "camp.pending.discard";
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -539,6 +570,7 @@ impl CollaborationService {
                     member_agent_ids,
                     default_lead_agent_id,
                     collaboration_mode: CampCollaborationMode::Peer,
+                    activation_state: CampActivationState::Active,
                 },
             },
         )?;
@@ -655,11 +687,11 @@ impl CollaborationService {
                 INSERT INTO camp(
                     id, title, name_origin, collaboration_mode,
                     project_binding_kind, project_path,
-                    default_lead_agent_id, last_message_sequence,
+                    default_lead_agent_id, activation_state, last_message_sequence,
                     version, created_at, updated_at
                 ) VALUES (
                     ?1, ?2, ?3, ?4, ?5, ?6,
-                    ?7, 0, 1, ?8, ?8
+                    ?7, ?8, 0, 1, ?9, ?9
                 )
                 "#,
                 params![
@@ -670,6 +702,7 @@ impl CollaborationService {
                     envelope.payload.project_binding_kind.as_str(),
                     envelope.payload.project_path,
                     envelope.payload.default_lead_agent_id,
+                    envelope.payload.activation_state.as_str(),
                     now,
                 ],
             )?;
@@ -686,28 +719,36 @@ impl CollaborationService {
                     params![camp_id, member_id, now],
                 )?;
             }
-            append_domain_event(
-                transaction,
-                "camp.created",
-                Some(&camp_id),
-                Some(("camp", camp_id.as_str())),
-                &envelope.actor,
-                envelope.execution_epoch,
-                &json!({
-                    "title": title,
-                    "nameOrigin": name_origin,
-                    "projectBindingKind": envelope.payload.project_binding_kind,
-                    "projectPath": envelope.payload.project_path,
-                    "collaborationMode": envelope.payload.collaboration_mode,
-                    "defaultLeadAgentId": envelope.payload.default_lead_agent_id,
-                    "memberCount": envelope.payload.member_agent_ids.len(),
-                }),
-            )?;
+            if envelope.payload.activation_state == CampActivationState::Active {
+                append_domain_event(
+                    transaction,
+                    "camp.created",
+                    Some(&camp_id),
+                    Some(("camp", camp_id.as_str())),
+                    &envelope.actor,
+                    envelope.execution_epoch,
+                    &json!({
+                        "title": title,
+                        "nameOrigin": name_origin,
+                        "projectBindingKind": envelope.payload.project_binding_kind,
+                        "projectPath": envelope.payload.project_path,
+                        "collaborationMode": envelope.payload.collaboration_mode,
+                        "defaultLeadAgentId": envelope.payload.default_lead_agent_id,
+                        "memberCount": envelope.payload.member_agent_ids.len(),
+                    }),
+                )?;
+            }
+            let result_code = if envelope.payload.activation_state == CampActivationState::Pending {
+                "camp.pending_created"
+            } else {
+                "camp.created"
+            };
             Ok(CommandHandlerResult::applied(
-                "camp.created",
+                result_code,
                 json!({
                     "campId": camp_id,
                     "title": title,
+                    "activationState": envelope.payload.activation_state,
                     "defaultLeadAgentId": envelope.payload.default_lead_agent_id,
                     "collaborationMode": envelope.payload.collaboration_mode,
                     "memberCount": envelope.payload.member_agent_ids.len(),
@@ -754,6 +795,12 @@ impl CollaborationService {
             let Some(version) = version else {
                 return Ok(rejected("camp.not_found", "Camp does not exist"));
             };
+            if camp_is_pending(transaction, &envelope.payload.camp_id)? {
+                return Ok(rejected(
+                    "camp.pending_activation_required",
+                    "A pending Camp must be activated by its first message",
+                ));
+            }
             if version != envelope.payload.expected_version {
                 return Ok(CommandHandlerResult::rejected(
                     "command.version_conflict",
@@ -815,6 +862,12 @@ impl CollaborationService {
             let Some(version) = version else {
                 return Ok(rejected("camp.not_found", "Camp does not exist"));
             };
+            if camp_is_pending(transaction, &envelope.payload.camp_id)? {
+                return Ok(rejected(
+                    "camp.pending_activation_required",
+                    "A pending Camp must be activated by its first message",
+                ));
+            }
             if version != envelope.payload.expected_version {
                 return Ok(CommandHandlerResult::rejected(
                     "command.version_conflict",
@@ -906,6 +959,12 @@ impl CollaborationService {
             let Some((current_lead, version)) = camp else {
                 return Ok(rejected("camp.not_found", "Camp does not exist"));
             };
+            if camp_is_pending(transaction, &envelope.payload.camp_id)? {
+                return Ok(rejected(
+                    "camp.pending_activation_required",
+                    "A pending Camp must be activated by its first message",
+                ));
+            }
 
             if let Some(current_lead_id) = current_lead.as_deref()
                 && is_active_member(transaction, &envelope.payload.camp_id, current_lead_id)?
@@ -1039,6 +1098,135 @@ impl CollaborationService {
         })
     }
 
+    pub fn discard_pending_camp(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<DiscardPendingCampCommand>,
+    ) -> Result<CommandExecution> {
+        self.gateway.execute(database, envelope, |transaction| {
+            if !matches!(envelope.actor, ActorRef::User { .. }) {
+                return Ok(rejected(
+                    "camp.pending_discard_user_required",
+                    "Only a User can discard a pending Camp",
+                ));
+            }
+            let state = transaction
+                .query_row(
+                    r#"
+                    SELECT activation_state, version, last_message_sequence
+                    FROM camp WHERE id = ?1
+                    "#,
+                    [&envelope.payload.camp_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, i64>(2)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let Some((activation_state, version, last_message_sequence)) = state else {
+                return Ok(CommandHandlerResult::applied(
+                    "camp.pending_absent",
+                    json!({
+                        "campId": envelope.payload.camp_id,
+                        "discarded": false,
+                    }),
+                    None,
+                ));
+            };
+            if activation_state != "pending" {
+                return Ok(rejected(
+                    "camp.pending_discard_active",
+                    "An active Camp cannot be discarded as a draft",
+                ));
+            }
+            let meaningful_draft: bool = transaction.query_row(
+                r#"
+                SELECT
+                    EXISTS(
+                        SELECT 1 FROM camp_composer_draft
+                        WHERE camp_id = ?1 AND length(trim(body)) > 0
+                    )
+                    OR EXISTS(
+                        SELECT 1 FROM prepared_attachment WHERE camp_id = ?1
+                    )
+                "#,
+                [&envelope.payload.camp_id],
+                |row| row.get(0),
+            )?;
+            let has_domain_facts: bool = transaction.query_row(
+                r#"
+                SELECT
+                    ?2 <> 1 OR ?3 <> 0
+                    OR EXISTS(
+                        SELECT 1 FROM event_log
+                        WHERE camp_id = ?1 AND event_type <> 'command.result'
+                    )
+                    OR EXISTS(SELECT 1 FROM camp_message WHERE camp_id = ?1)
+                    OR EXISTS(SELECT 1 FROM camp_turn WHERE camp_id = ?1)
+                    OR EXISTS(SELECT 1 FROM task WHERE camp_id = ?1)
+                    OR EXISTS(SELECT 1 FROM conversation WHERE camp_id = ?1)
+                "#,
+                params![envelope.payload.camp_id, version, last_message_sequence],
+                |row| row.get(0),
+            )?;
+            if meaningful_draft || has_domain_facts {
+                return Ok(CommandHandlerResult::rejected(
+                    "camp.pending_not_empty",
+                    json!({ "campId": envelope.payload.camp_id }),
+                ));
+            }
+            delete_camp_aggregate(transaction, &envelope.payload.camp_id)?;
+            Ok(CommandHandlerResult::applied(
+                "camp.pending_discarded",
+                json!({
+                    "campId": envelope.payload.camp_id,
+                    "discarded": true,
+                }),
+                None,
+            ))
+        })
+    }
+
+    pub fn discard_empty_pending_camps_on_startup(
+        &self,
+        database: &mut Database,
+    ) -> Result<Vec<String>> {
+        let transaction = database.connection_mut().transaction()?;
+        let camp_ids = {
+            let mut statement = transaction.prepare(
+                r#"
+                SELECT camp.id
+                FROM camp
+                WHERE camp.activation_state = 'pending'
+                  AND camp.version = 1
+                  AND camp.last_message_sequence = 0
+                  AND NOT EXISTS(
+                      SELECT 1 FROM event_log
+                      WHERE camp_id = camp.id AND event_type <> 'command.result'
+                  )
+                  AND NOT EXISTS(
+                      SELECT 1 FROM camp_composer_draft
+                      WHERE camp_id = camp.id AND length(trim(body)) > 0
+                  )
+                  AND NOT EXISTS(
+                      SELECT 1 FROM prepared_attachment WHERE camp_id = camp.id
+                  )
+                "#,
+            )?;
+            statement
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for camp_id in &camp_ids {
+            delete_camp_aggregate(&transaction, camp_id)?;
+        }
+        transaction.commit()?;
+        Ok(camp_ids)
+    }
+
     pub fn add_camp_member(
         &self,
         database: &mut Database,
@@ -1056,6 +1244,12 @@ impl CollaborationService {
             let Some(default_lead) = camp_state else {
                 return Ok(rejected("camp.not_found", "Camp does not exist"));
             };
+            if camp_is_pending(transaction, &envelope.payload.camp_id)? {
+                return Ok(rejected(
+                    "camp.pending_activation_required",
+                    "A pending Camp must be activated by its first message",
+                ));
+            }
             if !actor_has_capability(
                 transaction,
                 &envelope.actor,
@@ -1187,6 +1381,12 @@ impl CollaborationService {
                 .optional()?;
             if camp_exists.is_none() {
                 return Ok(rejected("camp.not_found", "Camp does not exist"));
+            }
+            if camp_is_pending(transaction, &envelope.payload.camp_id)? {
+                return Ok(rejected(
+                    "camp.pending_activation_required",
+                    "A pending Camp must be activated by its first message",
+                ));
             }
             if matches!(envelope.actor, ActorRef::System { .. }) {
                 return Ok(rejected(
@@ -1325,6 +1525,12 @@ impl CollaborationService {
             };
             if envelope.camp_id.as_deref() != Some(projected.camp_id.as_str()) {
                 return Ok(rejected("task.not_found", "Task does not exist"));
+            }
+            if camp_is_pending(transaction, &projected.camp_id)? {
+                return Ok(rejected(
+                    "camp.pending_activation_required",
+                    "A pending Camp must be activated by its first message",
+                ));
             }
             let scope = match task_read_scope(
                 transaction,
@@ -2118,10 +2324,16 @@ fn queue_camp_message_and_runs(
     if input.execution.is_some() != input.frozen_execution_budget.is_some() {
         anyhow::bail!("CampTurn execution has no frozen Execution Budget");
     }
+    let activation_state: String = transaction.query_row(
+        "SELECT activation_state FROM camp WHERE id = ?1",
+        [input.camp_id],
+        |row| row.get(0),
+    )?;
     transaction.execute(
         r#"
         UPDATE camp
         SET last_message_sequence = last_message_sequence + 1,
+            activation_state = 'active',
             title = CASE
                 WHEN name_origin = 'default' AND ?3 IS NOT NULL THEN ?3
                 ELSE title
@@ -2140,6 +2352,17 @@ fn queue_camp_message_and_runs(
             input.generated_camp_name.as_deref()
         ],
     )?;
+    if activation_state == "pending" {
+        append_domain_event(
+            transaction,
+            "camp.activated",
+            Some(input.camp_id),
+            Some(("camp", input.camp_id)),
+            input.actor,
+            input.execution_epoch,
+            &json!({ "activationState": "active" }),
+        )?;
+    }
     let camp_sequence: i64 = transaction.query_row(
         "SELECT last_message_sequence FROM camp WHERE id = ?1",
         [input.camp_id],
@@ -4059,6 +4282,17 @@ pub(crate) fn is_current_camp_member(
     Ok(count == 1)
 }
 
+fn camp_is_pending(transaction: &Connection, camp_id: &str) -> Result<bool> {
+    Ok(transaction
+        .query_row(
+            "SELECT activation_state = 'pending' FROM camp WHERE id = ?1",
+            [camp_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .unwrap_or(false))
+}
+
 pub(crate) fn entity_belongs_to_camp(
     transaction: &Transaction<'_>,
     entity_type: &str,
@@ -4279,6 +4513,223 @@ mod tests {
         camp_id
     }
 
+    fn create_pending_camp(
+        service: &CollaborationService,
+        database: &mut Database,
+        directory: &Path,
+        command_id: &str,
+    ) -> String {
+        let mut command =
+            CreateCampCommand::for_test(directory.join("workspace").to_string_lossy().to_string());
+        command.activation_state = CampActivationState::Pending;
+        service
+            .create_camp(database, &user_envelope(command_id, None, command))
+            .expect("pending Camp should be created")
+            .result
+            .payload["campId"]
+            .as_str()
+            .expect("pending Camp should return its ID")
+            .to_string()
+    }
+
+    #[test]
+    fn pending_camp_is_hidden_until_its_draft_is_meaningful_and_first_send_activates_it() {
+        let (mut database, directory) = test_database();
+        let service = CollaborationService::default();
+        let camp_id =
+            create_pending_camp(&service, &mut database, &directory, "pending-camp-create");
+        let state: String = database
+            .connection()
+            .query_row(
+                "SELECT activation_state FROM camp WHERE id = ?1",
+                [&camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(state, "pending");
+        let created_events: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM event_log WHERE camp_id = ?1",
+                [&camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(created_events, 0);
+        let rename = service
+            .rename_camp(
+                &mut database,
+                &user_envelope(
+                    "pending-camp-rename",
+                    Some(&camp_id),
+                    RenameCampCommand {
+                        camp_id: camp_id.clone(),
+                        title: "不应提前生效".to_string(),
+                        expected_version: 1,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(rename.result.code, "camp.pending_activation_required");
+        assert_eq!(
+            ReadModelService
+                .navigation_snapshot(&mut database)
+                .unwrap()
+                .projects
+                .len(),
+            0
+        );
+
+        let draft = CampAttachmentStore::new(&directory)
+            .save_body(&mut database, &camp_id, "先保留为草稿")
+            .unwrap();
+        let draft_navigation = ReadModelService.navigation_snapshot(&mut database).unwrap();
+        assert_eq!(draft_navigation.projects.len(), 1);
+        assert_eq!(
+            draft_navigation.projects[0].recent_camps[0].activation_state,
+            "pending"
+        );
+
+        let rejected = service
+            .send_test_camp_message(
+                &mut database,
+                &user_envelope(
+                    "pending-camp-rejected-send",
+                    Some(&camp_id),
+                    TestCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: Some(draft.revision + 1),
+                        body: String::new(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: TestCampMessageAddress::Default,
+                        reply_to_camp_message_id: None,
+                        execution: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
+        let state_after_rejection: String = database
+            .connection()
+            .query_row(
+                "SELECT activation_state FROM camp WHERE id = ?1",
+                [&camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(state_after_rejection, "pending");
+
+        let sent = service
+            .send_test_camp_message(
+                &mut database,
+                &user_envelope(
+                    "pending-camp-first-send",
+                    Some(&camp_id),
+                    TestCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: Some(draft.revision),
+                        body: String::new(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: TestCampMessageAddress::Default,
+                        reply_to_camp_message_id: None,
+                        execution: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(sent.result.status, CommandResultStatus::Applied);
+        let state: String = database
+            .connection()
+            .query_row(
+                "SELECT activation_state FROM camp WHERE id = ?1",
+                [&camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(state, "active");
+        let event_types = database
+            .connection()
+            .prepare(
+                "SELECT event_type FROM event_log WHERE camp_id = ?1 AND event_type <> 'command.result' ORDER BY global_sequence",
+            )
+            .unwrap()
+            .query_map([&camp_id], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(event_types, vec!["camp.activated", "camp_message.sent"]);
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn pending_discard_and_startup_cleanup_only_remove_empty_private_drafts() {
+        let (mut database, directory) = test_database();
+        let service = CollaborationService::default();
+        let empty_id =
+            create_pending_camp(&service, &mut database, &directory, "pending-empty-create");
+        let discarded = service
+            .discard_pending_camp(
+                &mut database,
+                &user_envelope(
+                    "pending-empty-discard",
+                    Some(&empty_id),
+                    DiscardPendingCampCommand {
+                        camp_id: empty_id.clone(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(discarded.result.code, "camp.pending_discarded");
+        assert_eq!(row_count(&database, "camp"), 0);
+
+        let retained_id = create_pending_camp(
+            &service,
+            &mut database,
+            &directory,
+            "pending-retained-create",
+        );
+        CampAttachmentStore::new(&directory)
+            .save_body(&mut database, &retained_id, "需要跨重启保留")
+            .unwrap();
+        let rejected = service
+            .discard_pending_camp(
+                &mut database,
+                &user_envelope(
+                    "pending-retained-discard",
+                    Some(&retained_id),
+                    DiscardPendingCampCommand {
+                        camp_id: retained_id.clone(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(rejected.result.code, "camp.pending_not_empty");
+        let abandoned_id = create_pending_camp(
+            &service,
+            &mut database,
+            &directory,
+            "pending-abandoned-create",
+        );
+        let cleaned = service
+            .discard_empty_pending_camps_on_startup(&mut database)
+            .unwrap();
+        assert_eq!(cleaned, vec![abandoned_id]);
+        let remaining: Vec<String> = database
+            .connection()
+            .prepare("SELECT id FROM camp ORDER BY id")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(remaining, vec![retained_id]);
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
     #[test]
     fn configured_camp_creation_persists_only_the_selected_structure() {
         let (mut database, directory) = test_database();
@@ -4290,6 +4741,7 @@ mod tests {
             member_agent_ids: vec!["agent_2".to_string(), "agent_1".to_string()],
             default_lead_agent_id: "agent_1".to_string(),
             collaboration_mode: CampCollaborationMode::Peer,
+            activation_state: CampActivationState::Active,
         };
         let created = service
             .create_camp(
@@ -4364,6 +4816,7 @@ mod tests {
                     member_agent_ids: members.into_iter().map(str::to_string).collect(),
                     default_lead_agent_id: lead.to_string(),
                     collaboration_mode: mode,
+                    activation_state: CampActivationState::Active,
                 },
             )
         };

@@ -54,7 +54,7 @@ export async function campExistsInAuthoritativeNavigation(
     let offset = 0
     for (;;) {
       const page = await loadPage(projectPath, offset)
-      if (page.schemaVersion !== 2) throw new Error('Navigation group schema is incompatible')
+      if (page.schemaVersion !== 3) throw new Error('Navigation group schema is incompatible')
       if (page.camps.some((camp) => camp.id === campId)) return true
       if (page.nextOffset === null) return false
       offset = page.nextOffset

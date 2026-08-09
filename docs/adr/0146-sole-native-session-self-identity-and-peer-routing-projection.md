@@ -1,6 +1,6 @@
 ---
 document_type: adr
-id: ADR-0145
+id: ADR-0146
 title: Sole Native-Session Self Identity and Peer Routing Projection
 status: accepted
 date: 2026-08-09
@@ -10,7 +10,7 @@ supersedes: []
 superseded_by: null
 ---
 
-# ADR-0145: Sole Native-Session Self Identity and Peer Routing Projection
+# ADR-0146: Sole Native-Session Self Identity and Peer Routing Projection
 
 ## Context
 
@@ -106,7 +106,7 @@ projection.
 ### Current-only contract break
 
 The current contract axes are Bootstrap v3, Bootstrap Formatter v3, AgentRun Context Formatter v11 and
-ContextManifest v8. Migration 67 admits only the exact v0.48/schema-26/migration-66 source, invalidates current old
+ContextManifest v8. Migration 68 admits only the exact v0.48/schema-26 source with Migrations 66 and 67 applied, invalidates current old
 Bindings and Native Sessions, fails non-terminal old Runs/Turns, and deletes old Bootstrap/Manifest/Runtime Input and
 Session-bound technical table rows and reachable references. Unreferenced content-addressed Managed Blob bytes remain
 eligible for the existing generic garbage collector. Completed Camp, message, Task, Conversation and terminal Run/Turn

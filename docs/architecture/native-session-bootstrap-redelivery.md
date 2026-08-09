@@ -10,7 +10,7 @@ last_updated: 2026-08-09
 detector transport 与输入时序。实施状态和目标版本 smoke 以
 [v0.48](../versions/v0.48/README.md)及[Runtime 兼容性清单](../runtime-compatibility.md)为准；
 Bootstrap v3 的 Self/Peer identity 边界和当前 Dynamic Context ACK 见
-[ADR-0145](../adr/0145-sole-native-session-self-identity-and-peer-routing-projection.md)与
+[ADR-0146](../adr/0146-sole-native-session-self-identity-and-peer-routing-projection.md)与
 [Collaboration State v2](../contracts/collaboration-state-v2.md)。
 
 ## 两个独立生命周期

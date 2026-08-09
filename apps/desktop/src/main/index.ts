@@ -107,6 +107,7 @@ const allowedMethods = new Set<CoreMethod>([
   'navigation.groupCamps',
   'navigation.campViewed',
   'camps.create',
+  'camps.discardPending',
   'camps.rename',
   'camps.changeDefaultLead',
   'camps.reconcileDefaultLead',

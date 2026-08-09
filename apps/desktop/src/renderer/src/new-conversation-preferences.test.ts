@@ -1,10 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import type { AgentProfile, GeneralPreferencesSnapshot, NavigationCampItem } from '@contracts'
+import type {
+  AgentProfile,
+  GeneralPreferencesSnapshot,
+  NavigationCampItem,
+  NavigationSnapshot
+} from '@contracts'
 import {
   currentProjectForCamp,
+  currentProjectWorkspace,
   defaultsNeedInvalidation,
+  navigationIncludingCurrentWorkspace,
   parseCurrentProject,
-  resolveNewConversationDefaults
+  resolveNewConversationDefaults,
+  shouldInvalidateNewConversationDefaults
 } from './new-conversation-preferences'
 
 describe('new conversation preferences', () => {
@@ -24,6 +32,39 @@ describe('new conversation preferences', () => {
       .toEqual({ kind: 'quick_chat' })
   })
 
+  it('keeps a validated current workspace visible when it has no navigable Camps', () => {
+    const navigation: NavigationSnapshot = {
+      schemaVersion: 3,
+      throughGlobalSequence: 7,
+      quickChat: { totalCount: 0, recentCamps: [] },
+      projects: []
+    }
+    const currentProject = { kind: 'directory', projectPath: '/repo/empty-project' } as const
+    const displayed = navigationIncludingCurrentWorkspace(navigation, currentProject, {
+      name: 'empty-project',
+      projectPath: '/repo/empty-project'
+    })
+
+    expect(displayed).not.toBe(navigation)
+    expect(displayed?.projects).toEqual([{
+      projectKey: 'directory:/repo/empty-project',
+      name: 'empty-project',
+      projectPath: '/repo/empty-project',
+      lastActivityAt: '',
+      lastActivityGlobalSequence: 0,
+      totalCount: 0,
+      recentCamps: []
+    }])
+    expect(currentProjectWorkspace(displayed, currentProject)).toEqual({
+      name: 'empty-project',
+      projectPath: '/repo/empty-project'
+    })
+    expect(navigationIncludingCurrentWorkspace(navigation, currentProject, {
+      name: 'other',
+      projectPath: '/repo/other'
+    })).toBe(navigation)
+  })
+
   it('ignores runtime readiness but latches missing, away, removed, and invalid Lead configurations', () => {
     const preferences = configuredPreferences()
     const present = profile('agent-a', 'present')
@@ -38,6 +79,12 @@ describe('new conversation preferences', () => {
       ...preferences,
       newConversationDefaultsRequireConfirmation: true
     }, [present, unready])).toBe(false)
+  })
+
+  it('waits for the authoritative Member overview before invalidating saved defaults', () => {
+    const preferences = configuredPreferences()
+    expect(shouldInvalidateNewConversationDefaults(preferences, [], false)).toBe(false)
+    expect(shouldInvalidateNewConversationDefaults(preferences, [], true)).toBe(true)
   })
 })
 

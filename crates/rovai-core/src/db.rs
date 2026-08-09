@@ -101,24 +101,29 @@ fn has_current_data_contract(path: &Path) -> bool {
         [],
         |row| row.get(0),
     );
-    let migration_state: rusqlite::Result<(bool, bool)> = connection.query_row(
+    let migration_state: rusqlite::Result<(bool, bool, bool)> = connection.query_row(
         r#"
         SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 66),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 67)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 67),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 68)
         "#,
         [],
-        |row| Ok((row.get(0)?, row.get(1)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     );
     matches!(
         (marker, projection_exists, migration_state),
-        (Ok(Some((contract, schema, classifier))), Ok(true), Ok((v66, v67)))
+        (Ok(Some((contract, schema, classifier))), Ok(true), Ok((v66, v67, v68)))
             if classifier == V043_CLASSIFIER_VERSION
                 && ((contract == CURRENT_DATA_CONTRACT_VERSION
-                    && schema == CURRENT_PROJECTION_SCHEMA_VERSION)
+                    && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+                    && v66
+                    && v67
+                    && v68)
                     || (contract == V050_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
                         && schema == V050_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
                         && v66
-                        && !v67))
+                        && v67
+                        && !v68))
     )
 }
 
@@ -1103,7 +1108,10 @@ impl Database {
                 self.migrate_native_session_bootstrap_redelivery_v66()?;
             }
             if !self.schema_migration_applied(67)? {
-                self.migrate_collaboration_projection_v2_v67()?;
+                self.migrate_pending_camp_activation_v67()?;
+            }
+            if !self.schema_migration_applied(68)? {
+                self.migrate_collaboration_projection_v2_v68()?;
             }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -1354,7 +1362,10 @@ impl Database {
             self.migrate_native_session_bootstrap_redelivery_v66()?;
         }
         if !self.schema_migration_applied(67)? {
-            self.migrate_collaboration_projection_v2_v67()?;
+            self.migrate_pending_camp_activation_v67()?;
+        }
+        if !self.schema_migration_applied(68)? {
+            self.migrate_collaboration_projection_v2_v68()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -5546,7 +5557,7 @@ impl Database {
         Ok(())
     }
 
-    fn migrate_collaboration_projection_v2_v67(&mut self) -> Result<()> {
+    fn migrate_collaboration_projection_v2_v68(&mut self) -> Result<()> {
         self.connection
             .execute_batch("PRAGMA foreign_keys = OFF;")?;
         let migration_result = (|| -> Result<()> {
@@ -5653,7 +5664,7 @@ impl Database {
 
             transaction.execute_batch(
                 r#"
-                CREATE TABLE native_session_bootstrap_evidence_v67 (
+                CREATE TABLE native_session_bootstrap_evidence_v68 (
                     id TEXT PRIMARY KEY,
                     conversation_id TEXT NOT NULL REFERENCES conversation(id),
                     native_binding_id TEXT NOT NULL,
@@ -5675,11 +5686,11 @@ impl Database {
                     UNIQUE(native_binding_id, native_binding_generation)
                 );
 
-                CREATE TABLE context_manifest_v67 (
+                CREATE TABLE context_manifest_v68 (
                     id TEXT PRIMARY KEY,
                     agent_run_id TEXT NOT NULL UNIQUE REFERENCES agent_run(id),
                     bootstrap_evidence_id TEXT NOT NULL
-                        REFERENCES native_session_bootstrap_evidence_v67(id),
+                        REFERENCES native_session_bootstrap_evidence_v68(id),
                     native_binding_generation INTEGER NOT NULL
                         CHECK(native_binding_generation >= 1),
                     camp_message_boundary_sequence INTEGER NOT NULL
@@ -5752,20 +5763,20 @@ impl Database {
                     )
                 );
 
-                CREATE TABLE context_manifest_history_camp_v67 (
+                CREATE TABLE context_manifest_history_camp_v68 (
                     context_manifest_id TEXT NOT NULL
-                        REFERENCES context_manifest_v67(id) ON DELETE CASCADE,
+                        REFERENCES context_manifest_v68(id) ON DELETE CASCADE,
                     camp_id TEXT NOT NULL,
                     camp_title TEXT NOT NULL,
                     last_visible_activity_at TEXT NOT NULL,
                     PRIMARY KEY(context_manifest_id, camp_id)
                 );
 
-                CREATE TABLE runtime_input_delivery_v67 (
+                CREATE TABLE runtime_input_delivery_v68 (
                     id TEXT PRIMARY KEY,
                     agent_run_id TEXT NOT NULL REFERENCES agent_run(id),
                     execution_epoch INTEGER NOT NULL CHECK(execution_epoch >= 1),
-                    context_manifest_id TEXT NOT NULL REFERENCES context_manifest_v67(id),
+                    context_manifest_id TEXT NOT NULL REFERENCES context_manifest_v68(id),
                     native_binding_id TEXT NOT NULL,
                     native_binding_generation INTEGER NOT NULL
                         CHECK(native_binding_generation >= 1),
@@ -5786,7 +5797,7 @@ impl Database {
                     bootstrap_redelivery_revision INTEGER
                         CHECK(bootstrap_redelivery_revision >= 1),
                     bootstrap_redelivery_evidence_id TEXT
-                        REFERENCES native_session_bootstrap_evidence_v67(id),
+                        REFERENCES native_session_bootstrap_evidence_v68(id),
                     bootstrap_redelivery_envelope_version INTEGER
                         CHECK(bootstrap_redelivery_envelope_version >= 1),
                     bootstrap_redelivery_formatter_version INTEGER
@@ -5805,12 +5816,12 @@ impl Database {
                 DROP TABLE context_manifest_history_camp;
                 DROP TABLE context_manifest;
                 DROP TABLE native_session_bootstrap_evidence;
-                ALTER TABLE native_session_bootstrap_evidence_v67
+                ALTER TABLE native_session_bootstrap_evidence_v68
                     RENAME TO native_session_bootstrap_evidence;
-                ALTER TABLE context_manifest_v67 RENAME TO context_manifest;
-                ALTER TABLE context_manifest_history_camp_v67
+                ALTER TABLE context_manifest_v68 RENAME TO context_manifest;
+                ALTER TABLE context_manifest_history_camp_v68
                     RENAME TO context_manifest_history_camp;
-                ALTER TABLE runtime_input_delivery_v67 RENAME TO runtime_input_delivery;
+                ALTER TABLE runtime_input_delivery_v68 RENAME TO runtime_input_delivery;
 
                 CREATE INDEX native_session_bootstrap_conversation_idx
                     ON native_session_bootstrap_evidence(
@@ -5883,7 +5894,7 @@ impl Database {
                 WHERE singleton = 1;
 
                 INSERT INTO schema_migration(version, applied_at)
-                VALUES (67, datetime('now'));
+                VALUES (68, datetime('now'));
                 "#,
             )?;
             transaction.execute(
@@ -5918,8 +5929,27 @@ impl Database {
             })
             .optional()?
         {
-            anyhow::bail!("v67 migration left a foreign-key violation in {table} row {row_id}");
+            anyhow::bail!("v68 migration left a foreign-key violation in {table} row {row_id}");
         }
+        Ok(())
+    }
+
+    fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE camp ADD COLUMN activation_state TEXT NOT NULL DEFAULT 'active'
+                CHECK(activation_state IN ('pending', 'active'));
+            CREATE INDEX camp_activation_state_idx
+                ON camp(activation_state, updated_at, id);
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (67, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -10309,7 +10339,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn current_data_contract_accepts_v048_schema_26_after_migrations() {
+    fn current_data_contract_accepts_only_current_or_exact_v048_schema_26_source() {
         let directory =
             std::env::temp_dir().join(format!("rovai-current-contract-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -10324,18 +10354,37 @@ mod tests {
                 UPDATE rovai_data_contract
                 SET contract_version = 'v0.48', projection_schema_version = 26
                 WHERE singleton = 1;
-                DELETE FROM schema_migration WHERE version = 67;
                 "#,
             )
             .unwrap();
         assert!(
-            has_current_data_contract(&path),
-            "the exact v0.48/schema-26/migration-66 source must reach migration 67"
+            !has_current_data_contract(&path),
+            "a source marker with migration 68 already applied is not an upgrade source"
         );
 
         database
             .connection()
-            .execute("DELETE FROM schema_migration WHERE version = 66", [])
+            .execute("DELETE FROM schema_migration WHERE version = 68", [])
+            .unwrap();
+        assert!(
+            has_current_data_contract(&path),
+            "the exact v0.48/schema-26/migrations-66-and-67 source must reach migration 68"
+        );
+
+        database
+            .connection()
+            .execute("DELETE FROM schema_migration WHERE version = 67", [])
+            .unwrap();
+        assert!(!has_current_data_contract(&path));
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (67, datetime('now'));
+                DELETE FROM schema_migration WHERE version = 66;
+                "#,
+            )
             .unwrap();
         assert!(!has_current_data_contract(&path));
         database
@@ -10351,6 +10400,21 @@ mod tests {
             )
             .unwrap();
         assert!(!has_current_data_contract(&path));
+
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                UPDATE rovai_data_contract
+                SET contract_version = 'v0.50', projection_schema_version = 27
+                WHERE singleton = 1;
+                "#,
+            )
+            .unwrap();
+        assert!(
+            !has_current_data_contract(&path),
+            "the current marker is incomplete without migration 68"
+        );
 
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
@@ -13499,6 +13563,55 @@ mod tests {
                 "missing {required}"
             );
         }
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v67_adds_pending_camp_activation_without_reclassifying_existing_creation() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v67-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        let migration_applied: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 67",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_applied, 1);
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO camp(
+                    id, title, project_binding_kind, project_path, created_at, updated_at
+                ) VALUES (
+                    'v67-default-active', 'Existing creation', 'quick_chat', '/quick-chat',
+                    '2026-08-09T00:00:00Z', '2026-08-09T00:00:00Z'
+                )
+                "#,
+                [],
+            )
+            .unwrap();
+        let activation_state: String = database
+            .connection()
+            .query_row(
+                "SELECT activation_state FROM camp WHERE id = 'v67-default-active'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(activation_state, "active");
+        assert!(
+            database
+                .connection()
+                .execute(
+                    "UPDATE camp SET activation_state = 'unknown' WHERE id = 'v67-default-active'",
+                    [],
+                )
+                .is_err()
+        );
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }

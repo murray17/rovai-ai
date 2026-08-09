@@ -457,6 +457,8 @@ export function CampWorkspace({
   liveRuntimeEvents = [],
   busy,
   onSend,
+  onPendingDraftPersisted,
+  onPendingCampLeave,
   onChangeLead,
   onTasksChanged,
   onResolveApproval,
@@ -480,6 +482,8 @@ export function CampWorkspace({
   liveRuntimeEvents?: LiveRuntimeEvent[]
   busy: boolean
   onSend(draft: CampComposerDraftView): Promise<void>
+  onPendingDraftPersisted?(): void
+  onPendingCampLeave?(draft: CampComposerDraftView): Promise<void>
   onChangeLead(agentId: string): Promise<void>
   onTasksChanged(): Promise<void>
   onResolveApproval(approval: ActionApprovalView, optionId: string): void
@@ -505,6 +509,7 @@ export function CampWorkspace({
   const [mentionPopover, setMentionPopover] = useState<MentionPopoverRequest | null>(null)
   const composerEditorRef = useRef<HTMLDivElement>(null)
   const draftSaveTimer = useRef<number | null>(null)
+  const campLeaveTimer = useRef<{ campId: string; timer: number } | null>(null)
   const draftContent = useRef<StructuredCampMessageContent>([])
   const draftCampId = useRef<string | null>(null)
   const composerDraftRef = useRef<CampComposerDraftView | null>(null)
@@ -702,6 +707,7 @@ export function CampWorkspace({
         draftMutationQueues.current.delete(campId)
       }
       applyComposerDraft(campId, draft)
+      if (snapshot.camp.activationState === 'pending') onPendingDraftPersisted?.()
     }, () => {
       if (draftMutationQueues.current.get(campId) === next) {
         draftMutationQueues.current.delete(campId)
@@ -725,6 +731,10 @@ export function CampWorkspace({
   useEffect(() => {
     const campId = snapshot.camp.id
     let cancelled = false
+    if (campLeaveTimer.current?.campId === campId) {
+      window.clearTimeout(campLeaveTimer.current.timer)
+      campLeaveTimer.current = null
+    }
     if (draftSaveTimer.current !== null) {
       window.clearTimeout(draftSaveTimer.current)
       draftSaveTimer.current = null
@@ -766,7 +776,17 @@ export function CampWorkspace({
       cancelled = true
       if (draftSaveTimer.current !== null) window.clearTimeout(draftSaveTimer.current)
       if (draftCampId.current === campId) {
-        void saveStructuredDraft(campId, draftContent.current).catch(() => undefined)
+        const content = draftContent.current
+        const timer = window.setTimeout(() => {
+          if (campLeaveTimer.current?.timer === timer) campLeaveTimer.current = null
+          const persistedDraft = saveStructuredDraft(campId, content)
+          if (snapshot.camp.activationState === 'pending' && onPendingCampLeave) {
+            void persistedDraft.then(onPendingCampLeave).catch(() => undefined)
+          } else {
+            void persistedDraft.catch(() => undefined)
+          }
+        }, 0)
+        campLeaveTimer.current = { campId, timer }
       }
     }
   }, [snapshot.camp.id])
@@ -2272,10 +2292,12 @@ function EmptyCampWelcome({
         <path d="M14 54h60" fill="none" stroke="var(--line-strong)" strokeLinecap="round" />
         <circle cx="69" cy="25" r="3" fill="var(--ember)" />
       </svg>
-      <p className="empty-camp-eyebrow">Arctic Dawn · New Camp</p>
-      <h2 id="empty-camp-title">开始这段协作</h2>
+      <p className="empty-camp-eyebrow">{snapshot.camp.activationState === 'pending' ? '新对话草稿' : 'Arctic Dawn · New Camp'}</p>
+      <h2 id="empty-camp-title">{snapshot.camp.activationState === 'pending' ? '开始一段新对话' : '开始这段协作'}</h2>
       <p className="empty-camp-description">
-        这里已经保留当前工作区、队员和 Default Lead。发送第一条消息后，公共讨论、执行过程和最终结论会依次展开。
+        {snapshot.camp.activationState === 'pending'
+          ? '当前只是一份草稿。输入内容后会自动保留；发送第一条消息时才会正式创建对话。'
+          : '这里已经保留当前工作区、队员和 Default Lead。发送第一条消息后，公共讨论、执行过程和最终结论会依次展开。'}
       </p>
 
       <div className="empty-camp-context" aria-label="当前协作配置">

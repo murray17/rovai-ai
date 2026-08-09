@@ -1,7 +1,7 @@
 ---
 document_type: production-design
 version: v0.49
-authority: desktop-shell-and-renderer-contract
+authority: desktop-shell-renderer-and-pending-camp-contract
 status: frozen
 implementation_status: in_progress
 last_updated: 2026-08-09
@@ -11,8 +11,9 @@ last_updated: 2026-08-09
 
 本文冻结 v0.49 的 Electron Desktop Shell、Preload bridge 与 Renderer 交互合同。全局视觉、
 布局、Token、状态和无障碍继续以 [Arctic Dawn V3](../../ui/arctic-dawn.md)为准；Camp、Member、
-Memory 与 Navigation 的存在性继续以 Core 当前 Read Side 为准。本文不授权修改 Rust Core、
-SQLite、Runtime、审批、执行或恢复协议。
+Memory 与 Navigation 的存在性继续以 Core 当前 Read Side 为准。本文只授权 ADR-0145 所需的
+Pending Camp activation、Migration 67、Navigation/Snapshot 投影、首消息原子激活与窄清理；不授权
+其它 Runtime、审批、执行或恢复协议变化。
 
 ## 1. 设置导航与 General 页面
 
@@ -159,6 +160,11 @@ Renderer 使用版本化 localStorage 记录 `{ kind: "quick_chat" } | { kind: "
   Hover 或键盘 `focus-visible` 时同时显示；鼠标点击目录后移出不能因残留焦点继续显示，触摸环境
   保持可见。`＋` 只发起对应项目的新建，取消 Dialog 不改变当前项目，成功进入 Camp 后才由
   Camp binding 更新当前项目；
+- “项目”标题 `＋` 一键创建成功后，即使新 Camp 仍为空 Pending、因而不进入 Core Navigation，
+  Renderer 也必须把已经校验且已成为当前项目的工作目录补成零 Camp 的 Shell 投影。该行显示
+  “还没有对话”并保留项目级 `＋`，但在 Core 尚无 canonical Project group 前不提供置顶；它不让
+  空 Pending 出现在侧栏，也不创建 Project 领域实体。空 Pending 离开后可被清理，当前项目目录行
+  仍保留；新窗口重新通过 `workspaces.inspect` 校验，目录失效才回退快速对话；
 - 普通 Project、置顶 Project 与 Quick Chat 的 Camp 列表统一以最近 5 条开始；“查看更多”每次按
   `offset = 已读取服务端条目数 / limit = 10` 增量读取并按 Camp ID 去重。“收起”只恢复 5 条可见，
   缓存、目录展开状态和 canonical group key 均保留；置顶位置变化不触发预取或状态迁移；
@@ -166,7 +172,8 @@ Renderer 使用版本化 localStorage 记录 `{ kind: "quick_chat" } | { kind: "
 
 一键创建关闭时，四个入口打开同一 Dialog：左上入口预选当前项目，两个文件夹入口预选各自项目，
 “项目”标题 `＋` 先选择工作目录并将其作为预选值。
-开启且配置有效时直接调用现有原子 `camps.create`，名称为 `null`、协作模式固定 `peer`。Core 拒绝、
+开启且配置有效时调用 `camps.create` 创建 `activationState = pending` 的 Core-owned 草稿，名称为
+`null`、协作模式固定 `peer`。Core 拒绝、
 配置失效或默认 Lead 无效时打开 Dialog，保留入口目标项目。失效说明必须列出被过滤的成员姓名与
 状态、原 Lead 状态及本次临时 Lead；若锁存仍在但保存值已恢复可用，则说明仍按保存值预选并要求
 确认。提示固定声明本次 Dialog 调整不会修改“设置 → 通用”的保存配置。该范围只删除
@@ -174,6 +181,14 @@ Renderer 的协作方式选择与文案，不删除 Core/IPC/SQLite 的 `collabo
 
 Dialog Header 说明改为“确定这段对话的工作环境与队员。”；Footer 删除模式摘要。可选名称默认
 收起，展开自动聚焦，提供规范化名称摘要、Unicode scalar `0 / 80` 计数、清空按钮和 80 上限。
+
+一键入口创建的 Pending 只在 Core Composer Draft 出现非空白正文或已准备附件后进入 Navigation，
+并显示灰色“草稿”标签；空 Pending 不进入侧栏或 Camp history，不提交 Restorable Location。离开
+空 Pending 时调用只允许删除无正文、无附件、无消息/Task/Conversation/执行事实 Pending 的窄命令；
+进程中断遗漏的空 Pending 由 Core 启动清理。非空 Pending 可跨窗口/应用重启恢复，清空后再次退出
+仍可安全丢弃。第一条消息成功写入时在同一事务中把 Pending 激活为 Active；任何发送拒绝保留原状态
+与精确 Draft Revision。Pending 激活前不开放重命名、置顶、Lead 修改或 Inspector 业务 mutation。
+普通创建 Dialog 固定提交 `activationState = active`，继续保留显式创建的零消息 Camp。
 
 ## 4. Main Window Session 与一次性解析
 
@@ -229,7 +244,8 @@ type RestorableLocation =
 Renderer 只在目标页面满足“权威读取成功并已经成为可见一级页面”后调用 Shell 提交：
 
 - Quick Chat：Navigation 初始读取已经进入可显示状态；
-- Camp：`camps.snapshot` 返回当前 Camp 且该 Camp 已激活；
+- Camp：`camps.snapshot` 返回当前 Active Camp，或返回已经有权威非空 Composer Draft、因而进入
+  Navigation 的 Pending Camp；空 Pending 不提交；
 - 队员页：`members.list/get` 已确认可管理集合，最终选中队员与 `identity/runtime` 页签已显示；
 - 记忆页：页面初始权威读取完成并显示主页面或合法空状态。
 
@@ -240,7 +256,8 @@ Renderer 只在目标页面满足“权威读取成功并已经成为可见一�
 
 | 恢复输入 | 权威结果 | 行为 | 是否清除旧目标 |
 | --- | --- | --- | --- |
-| Camp ID | Camp 存在 | 显示 Camp，随后提交该 Camp | 否 |
+| Camp ID | Active Camp 存在，或 Pending Camp 仍有权威非空 Draft | 显示 Camp，随后提交该 Camp | 否 |
+| Camp ID | Pending Camp 已为空并被启动清理 | 显示 Quick Chat，成功后提交 Quick Chat | 是，以新提交替代 |
 | Camp ID | 明确 `not_found/deleted` | 显示 Quick Chat，成功后提交 Quick Chat | 是，以新提交替代 |
 | Member ID | 当前且未 removed | 显示该队员与所存页签 | 否 |
 | Member ID | 明确 removed/not found | 进入队员页；按 Member Order 先 present 后 away 选择首个可管理队员，保留所存页签；没有则空状态 | 是，提交最终队员目标 |

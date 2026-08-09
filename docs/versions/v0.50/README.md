@@ -10,7 +10,7 @@ last_updated: 2026-08-09
 
 # Rovai-ai v0.50：Self Identity 与 Collaboration Projection 边界
 
-> 当前状态：设计与实施完成。Core、Migration 67、字段级合同、定向验收及工作区级 Rust、
+> 当前状态：设计与实施完成。Core、Migration 68、字段级合同、定向验收及工作区级 Rust、
 > TypeScript、文档与静态检查均已通过。
 >
 > 前置版本：[v0.49 通用与启动设置、双人追问 Skill](../v0.49/README.md)
@@ -28,10 +28,10 @@ Native Session Bootstrap v3
 Bootstrap Formatter v3
 AgentRun Context Formatter v11
 ContextManifest v8
-Data Contract v0.50 / projection schema 27 / Migration 67
+Data Contract v0.50 / projection schema 27 / Migration 68
 ```
 
-长期理由见 [ADR-0145](../../adr/0145-sole-native-session-self-identity-and-peer-routing-projection.md)，
+长期理由见 [ADR-0146](../../adr/0146-sole-native-session-self-identity-and-peer-routing-projection.md)，
 字段级 shape 与 ACK 规则见
 [Collaboration State v2](../../contracts/collaboration-state-v2.md)。
 
@@ -106,7 +106,8 @@ build complete Collaboration State v2
 
 ## 一次性 clean break
 
-Migration 67 只接受精确的 v0.48/schema 26/migration 66 作为升级源。旧合同下当前 Binding、
+Migration 68 只接受精确的 v0.48/schema 26、且 Migrations 66 和 67 均已应用的状态作为
+升级源。旧合同下当前 Binding、
 Native Session、accepted public/collaboration 水位、Bootstrap redelivery Requirement、Resume
 Attempt、compaction observer 状态、ContextManifest、Bootstrap Evidence 和 Runtime Input
 Delivery 技术投影表行与可达引用全部清理；旧非终态 Run/Turn fail closed，旧 frozen delivery context
@@ -132,7 +133,7 @@ Bootstrap v3/Formatter 3、Context Formatter 11 和非空 inclusion；没有旧 
 自动验收覆盖：新 Session 的完整六字段 Bootstrap；self 不进入 peers；self 编辑不产生
 Collaboration State 更新；peer public routing identity 更新触发新投影；peer 私有字段不泄露；self
 为 Lead 时只输出 ID/Boolean；away 与 leave-requested 不改变 peer 投影；`delivery_unknown` 不推进
-digest，accepted ACK 才推进；下一 eligible Bootstrap 继续读取最新完整身份；v67 保留业务历史、
+digest，accepted ACK 才推进；下一 eligible Bootstrap 继续读取最新完整身份；v68 保留业务历史、
 终结旧非终态执行与未完成 Delivery，并删除旧技术上下文表行和可达引用。
 
 精确检查点和最终命令证据见[实施与验收计划](implementation-plan.md)。
@@ -142,7 +143,7 @@ digest，accepted ACK 才推进；下一 eligible Bootstrap 继续读取最新�
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | `docs/versions/README.md` 将 v0.49 按原实施事实冻结为 historical，并把 v0.50 设为唯一 current；本概览和实施计划已建立 |
-| ADR | 已更新 | ADR-0145 冻结 Native Session 唯一 Self Identity、peer-only Collaboration State、完整投影 digest 与 accepted-ACK 边界 |
+| ADR | 已更新 | ADR-0146 冻结 Native Session 唯一 Self Identity、peer-only Collaboration State、完整投影 digest 与 accepted-ACK 边界 |
 | Contracts | 已更新 | `docs/contracts/collaboration-state-v2.md` 冻结字段、成员选择、Lead 引用、隐私、digest/inclusion/ACK 和 clean break |
 | Architecture | 已更新 | Built-in Tool Runtime 与 Bootstrap Redelivery 架构同步 Self/Peer 生命周期、完整投影 digest 和输入 ACK 水位 |
 | UI | 确认无需更新 | 不改变 Renderer 交互、布局或视觉语义；`collaborationStateIncluded` 只是 ContextManifest 机器可读证据 |
@@ -154,7 +155,7 @@ digest，accepted ACK 才推进；下一 eligible Bootstrap 继续读取最新�
 ## References
 
 - [v0.50 实施与验收计划](implementation-plan.md)
-- [ADR-0145：唯一 Self Identity 与 Peer Routing Projection](../../adr/0145-sole-native-session-self-identity-and-peer-routing-projection.md)
+- [ADR-0146：唯一 Self Identity 与 Peer Routing Projection](../../adr/0146-sole-native-session-self-identity-and-peer-routing-projection.md)
 - [Collaboration State v2](../../contracts/collaboration-state-v2.md)
 - [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)
 - [Native Session Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)

@@ -5236,7 +5236,7 @@ mod tests {
     }
 
     #[test]
-    fn v67_clean_break_preserves_business_history_and_removes_old_context_state() {
+    fn v68_clean_break_preserves_business_history_and_removes_old_context_state() {
         let mut fixture = fixture();
         let directory = fixture.directory.clone();
         let camp_id = fixture.camp_id.clone();
@@ -5519,7 +5519,7 @@ mod tests {
                     TO native_member_state_digest;
                 UPDATE rovai_data_contract
                 SET contract_version = 'v0.48', projection_schema_version = 26;
-                DELETE FROM schema_migration WHERE version = 67;
+                DELETE FROM schema_migration WHERE version = 68;
                 PRAGMA foreign_keys = ON;
                 "#,
             )
@@ -5617,7 +5617,7 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 count, 0,
-                "{table} should be empty after the v67 clean break"
+                "{table} should be empty after the v68 clean break"
             );
         }
         let binding_state: (
@@ -5672,19 +5672,20 @@ mod tests {
             .unwrap();
         assert!(manifest_sql.contains("formatter_version = 11"));
         assert!(manifest_sql.contains("collaboration_state_included INTEGER NOT NULL"));
-        let contract: (String, i64, i64) = reopened
+        let contract: (String, i64, i64, i64) = reopened
             .connection()
             .query_row(
                 r#"
                 SELECT contract_version, projection_schema_version,
-                       (SELECT COUNT(*) FROM schema_migration WHERE version = 67)
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 67),
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 68)
                 FROM rovai_data_contract WHERE singleton = 1
                 "#,
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.50".to_string(), 27, 1));
+        assert_eq!(contract, ("v0.50".to_string(), 27, 1, 1));
         let foreign_key_violations: i64 = reopened
             .connection()
             .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {

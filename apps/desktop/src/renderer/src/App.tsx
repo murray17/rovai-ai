@@ -4,6 +4,7 @@ import type {
   AgentProfile,
   ActionApprovalView,
   AppearanceSnapshot,
+  CampActivationState,
   CampCreationPreflight,
   CampComposerDraftView,
   CampMessageView,
@@ -76,14 +77,14 @@ import {
   startupTargetFromSnapshot
 } from './startup-location'
 import {
-  currentProjectExists,
   currentProjectForCamp,
   currentProjectGroup,
   currentProjectWorkspace,
-  defaultsNeedInvalidation,
+  navigationIncludingCurrentWorkspace,
   persistCurrentProject,
   readCurrentProject,
   resolveNewConversationDefaults,
+  shouldInvalidateNewConversationDefaults,
   type CurrentProject
 } from './new-conversation-preferences'
 
@@ -108,6 +109,12 @@ const CAMP_INSPECTOR_VISIBILITY_KEY = 'rovai.camp.inspector.visibility'
 
 export function campInspectorVisibleFromStoredValue(value: string | null): boolean {
   return value !== 'hidden'
+}
+
+export function campActivationStateForCreation(
+  source: 'one_click' | 'dialog'
+): CampActivationState {
+  return source === 'one_click' ? 'pending' : 'active'
 }
 
 function initialCampInspectorVisibility(): boolean {
@@ -208,6 +215,7 @@ export function App(): React.JSX.Element {
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general')
   const [generalPreferences, setGeneralPreferences] = useState<GeneralPreferencesSnapshot | null>(null)
   const [currentProject, setCurrentProject] = useState<CurrentProject>(() => readCurrentProject())
+  const [currentWorkspaceHint, setCurrentWorkspaceHint] = useState<WorkspaceSelection | null>(null)
   const [activeCampId, setActiveCampId] = useState<string | null>(null)
   const [notificationOpen, setNotificationOpen] = useState(false)
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0)
@@ -236,7 +244,6 @@ export function App(): React.JSX.Element {
   const liveRuntimeEventSequence = useRef(0)
   const runtimeHealthRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const membersViewRef = useRef<MembersViewHandle>(null)
-  const startupLastAttemptedOverview = useRef(-1)
   const startupResolvedSessionId = useRef<string | null>(null)
   const pendingRestorableLocation = useRef<RestorableLocation | null>(null)
   const invalidatingNewConversationDefaults = useRef(false)
@@ -401,7 +408,7 @@ export function App(): React.JSX.Element {
       ).then((inbox) => inbox.schemaVersion === 2 ? inbox.throughSequence : null)
         .catch(() => null)
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
-      if (snapshot.schemaVersion !== 25) throw new Error('Camp snapshot schema is incompatible')
+      if (snapshot.schemaVersion !== 26) throw new Error('Camp snapshot schema is incompatible')
       if (selectionGeneration !== campSelectionGeneration.current) return
       const snapshotProject = currentProjectForCamp(snapshot.camp)
       setCurrentProject(snapshotProject)
@@ -441,7 +448,7 @@ export function App(): React.JSX.Element {
 
   const refreshActiveCampSnapshot = useCallback(async (campId: string): Promise<void> => {
     const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
-    if (snapshot.schemaVersion !== 25) throw new Error('Camp snapshot schema is incompatible')
+    if (snapshot.schemaVersion !== 26) throw new Error('Camp snapshot schema is incompatible')
     if (activeCampIdRef.current !== campId) return
     if (snapshot.throughGlobalSequence < campEventSequenceMarker.current) return
     campEventSequenceMarker.current = snapshot.throughGlobalSequence
@@ -491,7 +498,7 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     if (
-      !defaultsNeedInvalidation(generalPreferences, agents)
+      !shouldInvalidateNewConversationDefaults(generalPreferences, agents, state === 'ready')
       || invalidatingNewConversationDefaults.current
     ) return
     invalidatingNewConversationDefaults.current = true
@@ -499,24 +506,52 @@ export function App(): React.JSX.Element {
       .then(setGeneralPreferences)
       .catch((nextError) => setError(errorMessage(nextError)))
       .finally(() => { invalidatingNewConversationDefaults.current = false })
-  }, [agents, generalPreferences])
+  }, [agents, generalPreferences, state])
+
+  const currentProjectPath = currentProject.kind === 'directory'
+    ? currentProject.projectPath
+    : null
+  const authoritativeCurrentProjectPath = currentProjectGroup(navigation, currentProject)?.projectPath ?? null
 
   useEffect(() => {
-    if (!navigation || currentProjectExists(navigation, currentProject)) return
-    const fallback: CurrentProject = { kind: 'quick_chat' }
-    setCurrentProject(fallback)
-    persistCurrentProject(fallback)
-  }, [currentProject, navigation])
+    if (!navigation) return undefined
+    if (currentProject.kind === 'quick_chat' || authoritativeCurrentProjectPath) {
+      setCurrentWorkspaceHint(null)
+      return undefined
+    }
+    if (currentWorkspaceHint?.projectPath === currentProject.projectPath) return undefined
+
+    let cancelled = false
+    void window.rovai.request<WorkspaceInspection>('workspaces.inspect', {
+      path: currentProject.projectPath
+    }).then((workspace) => {
+      if (!cancelled) setCurrentWorkspaceHint(workspace)
+    }).catch(() => {
+      if (cancelled) return
+      const fallback: CurrentProject = { kind: 'quick_chat' }
+      setCurrentProject(fallback)
+      setCurrentWorkspaceHint(null)
+      persistCurrentProject(fallback)
+    })
+    return () => { cancelled = true }
+  }, [
+    authoritativeCurrentProjectPath,
+    currentProject.kind,
+    currentProjectPath,
+    currentWorkspaceHint?.projectPath,
+    navigation !== null
+  ])
 
   useEffect(() => {
+    // Keep this effect replayable for the same overview revision. React StrictMode
+    // cancels the first async pass during its development replay, so a one-shot
+    // "attempted revision" guard can strand the window on the startup gate.
     if (
       !startupSnapshot
       || !navigation
       || state !== 'ready'
-      || overviewRevision <= startupLastAttemptedOverview.current
       || startupResolvedSessionId.current === startupSnapshot.sessionId
     ) return
-    startupLastAttemptedOverview.current = overviewRevision
     let cancelled = false
 
     const showQuickChat = (): void => {
@@ -553,7 +588,7 @@ export function App(): React.JSX.Element {
           snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', {
             campId: target.campId
           })
-          if (snapshot.schemaVersion !== 25) {
+          if (snapshot.schemaVersion !== 26) {
             throw new Error('Camp snapshot schema is incompatible')
           }
         } catch (snapshotError) {
@@ -621,8 +656,14 @@ export function App(): React.JSX.Element {
       || !activeCampId
       || campSnapshot?.camp.id !== activeCampId
     ) return
+    const activationState = campSnapshot.camp.activationState
+    const pendingDraftIsNavigable = activationState === 'pending' && navigation !== null
+      && allNavigationCamps(navigation).some((camp) =>
+        camp.id === activeCampId && camp.activationState === 'pending'
+      )
+    if (activationState === 'pending' && !pendingDraftIsNavigable) return
     void commitRestorableLocation({ kind: 'camp', campId: activeCampId })
-  }, [activeCampId, campSnapshot, commitRestorableLocation, startupStatus, view])
+  }, [activeCampId, campSnapshot, commitRestorableLocation, navigation, startupStatus, view])
 
   useEffect(() => {
     if (startupStatus !== 'resolved' || view !== 'members') return
@@ -715,10 +756,19 @@ export function App(): React.JSX.Element {
     })
   }, [loadHealth, loadMemberData, loadOverview, refreshActiveCampSnapshot])
 
+  const displayNavigation = navigationIncludingCurrentWorkspace(
+    navigation,
+    currentProject,
+    currentWorkspaceHint
+  )
   const activeCamp = navigation
     ? allNavigationCamps(navigation).find((camp) => camp.id === activeCampId) ?? null
     : null
-  const selectedCurrentProject = currentProjectGroup(navigation, currentProject)
+  const selectedCurrentProject = currentProjectGroup(displayNavigation, currentProject)
+  const shellOnlyCurrentProjectPath = selectedCurrentProject
+    && !currentProjectGroup(navigation, currentProject)
+    ? selectedCurrentProject.projectPath
+    : null
   const currentProjectKey = selectedCurrentProject?.projectKey ?? 'quick-chat'
   const currentProjectLabel = selectedCurrentProject?.name ?? '快速对话'
   const activeProjectPath = activeCamp?.projectBindingKind === 'directory'
@@ -727,8 +777,8 @@ export function App(): React.JSX.Element {
       && campSnapshot.camp.projectBindingKind === 'directory'
       ? campSnapshot.camp.projectPath
       : null
-  const activeCampProject = activeProjectPath && navigation
-    ? navigation.projects.find((project) => project.projectPath === activeProjectPath) ?? null
+  const activeCampProject = activeProjectPath && displayNavigation
+    ? displayNavigation.projects.find((project) => project.projectPath === activeProjectPath) ?? null
     : null
   const activeCancellingTurnIds = useMemo(
     () => campSnapshot?.camp.id === activeCampId
@@ -772,7 +822,7 @@ export function App(): React.JSX.Element {
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', {
         campId
       })
-      if (snapshot.schemaVersion !== 25) throw new Error('Camp snapshot schema is incompatible')
+      if (snapshot.schemaVersion !== 26) throw new Error('Camp snapshot schema is incompatible')
       if (cancelled) return
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
@@ -851,8 +901,12 @@ export function App(): React.JSX.Element {
     }
   }
 
-  const chooseCurrentProject = (nextProject: CurrentProject): void => {
+  const chooseCurrentProject = (
+    nextProject: CurrentProject,
+    workspaceHint: WorkspaceSelection | null = null
+  ): void => {
     setCurrentProject(nextProject)
+    setCurrentWorkspaceHint(nextProject.kind === 'directory' ? workspaceHint : null)
     persistCurrentProject(nextProject)
   }
 
@@ -871,8 +925,10 @@ export function App(): React.JSX.Element {
     setNewConversationOpen(true)
   }
 
-  const requestNewConversation = async (workspace: WorkspaceSelection | null): Promise<void> => {
-    if (busy === 'create-camp') return
+  const requestNewConversation = async (
+    workspace: WorkspaceSelection | null
+  ): Promise<'created' | 'dialog' | 'ignored'> => {
+    if (busy === 'create-camp') return 'ignored'
     const defaults = resolveNewConversationDefaults(generalPreferences, agents)
     if (generalPreferences?.oneClickNewConversationEnabled && defaults) {
       try {
@@ -881,21 +937,23 @@ export function App(): React.JSX.Element {
           workspace: workspace ? { projectPath: workspace.projectPath } : null,
           memberAgentIds: defaults.defaults.memberAgentIds,
           defaultLeadAgentId: defaults.defaults.defaultLeadAgentId,
-          collaborationMode: 'peer'
+          collaborationMode: 'peer',
+          activationState: campActivationStateForCreation('one_click')
         })
-        return
+        return 'created'
       } catch (nextError) {
         openNewConversation(
           workspace,
           `一键创建未完成：${errorMessage(nextError)} 请重新确认项目、队员与 Lead。`
         )
-        return
+        return 'dialog'
       }
     }
     const explainInitialSelectionAdjustments = Boolean(
       generalPreferences?.newConversationDefaults && !defaults
     )
     openNewConversation(workspace, null, explainInitialSelectionAdjustments)
+    return 'dialog'
   }
 
   const chooseWorkspaceDirectory = async (): Promise<WorkspaceSelection | null> => {
@@ -911,7 +969,12 @@ export function App(): React.JSX.Element {
     setError(null)
     try {
       const workspace = await chooseWorkspaceDirectory()
-      if (workspace) await requestNewConversation(workspace)
+      if (workspace) {
+        const outcome = await requestNewConversation(workspace)
+        if (outcome === 'created') {
+          chooseCurrentProject({ kind: 'directory', projectPath: workspace.projectPath }, workspace)
+        }
+      }
     } catch (nextError) {
       setError(errorMessage(nextError))
     }
@@ -998,9 +1061,9 @@ export function App(): React.JSX.Element {
   }
 
   const beginNewConversation = (): void => {
-    void requestMemberTransition(() => requestNewConversation(
-      currentProjectWorkspace(navigation, currentProject)
-    ))
+    void requestMemberTransition(async () => {
+      await requestNewConversation(currentProjectWorkspace(displayNavigation, currentProject))
+    })
   }
 
   const chooseCamp = (camp: NavigationCampItem): void => {
@@ -1008,7 +1071,9 @@ export function App(): React.JSX.Element {
       chooseCurrentProject(currentProjectForCamp(camp))
       lastMainView.current = 'camp'
       setNotificationFocus(null)
-      return activateCamp(camp.id)
+      return activateCamp(camp.id, {
+        reconcileDefaultLead: camp.activationState !== 'pending'
+      })
     })
   }
 
@@ -1206,6 +1271,31 @@ export function App(): React.JSX.Element {
     }
   }
 
+  const refreshPendingCampNavigation = (): void => {
+    void loadNavigation().catch(() => undefined)
+  }
+
+  const settlePendingCampOnLeave = async (draft: CampComposerDraftView): Promise<void> => {
+    if (draft.body.trim() || draft.attachments.length > 0) {
+      await loadNavigation()
+      return
+    }
+    const result = await window.rovai.request<StoredCommandResult>('camps.discardPending', {
+      commandId: crypto.randomUUID(),
+      command: { campId: draft.campId }
+    })
+    if (result.status === 'rejected' && result.code !== 'camp.pending_not_empty') {
+      throw new Error(commandFailureMessage(result))
+    }
+    if (result.status !== 'rejected' && activeCampIdRef.current === draft.campId) {
+      campSelectionGeneration.current += 1
+      setActiveCampId(null)
+      setCampSnapshot(null)
+      if (lastMainView.current === 'camp') lastMainView.current = 'compose'
+    }
+    await loadNavigation()
+  }
+
   const sendCampMessage = async (draft: CampComposerDraftView): Promise<void> => {
     if (!activeCampId || draft.campId !== activeCampId || !draft.body.trim() || draft.revision < 1) return
     const campId = activeCampId
@@ -1261,7 +1351,7 @@ export function App(): React.JSX.Element {
       ))
       void window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
         .then(async (snapshot) => {
-          if (snapshot.schemaVersion !== 25) throw new Error('Camp snapshot schema is incompatible')
+          if (snapshot.schemaVersion !== 26) throw new Error('Camp snapshot schema is incompatible')
           if (selectionGeneration !== campSelectionGeneration.current) return
           campEventSequenceMarker.current = snapshot.throughGlobalSequence
           setCampSnapshot(snapshot)
@@ -1399,9 +1489,10 @@ export function App(): React.JSX.Element {
       <CampNavigation
         view={view}
         state={startupGateVisible ? 'loading' : state}
-        navigation={navigation}
+        navigation={displayNavigation}
         activeCampId={activeCampId}
         currentProjectKey={currentProjectKey}
+        shellOnlyProjectPath={shellOnlyCurrentProjectPath}
         creatingConversation={busy === 'create-camp'}
         pins={navigationPins}
         pinnedCampItems={pinnedCampItems}
@@ -1432,13 +1523,18 @@ export function App(): React.JSX.Element {
         onSettingsSectionChange={chooseSettingsSection}
         onSettingsBack={closeSettings}
         onOpenProject={() => void openProject()}
-        onSelectProject={(project) => chooseCurrentProject(project
-          ? { kind: 'directory', projectPath: project.projectPath }
-          : { kind: 'quick_chat' })}
+        onSelectProject={(project) => chooseCurrentProject(
+          project
+            ? { kind: 'directory', projectPath: project.projectPath }
+            : { kind: 'quick_chat' },
+          project ? { name: project.name, projectPath: project.projectPath } : null
+        )}
         onCreateInProject={(project) => {
-          void requestMemberTransition(() => requestNewConversation(project
-            ? { name: project.name, projectPath: project.projectPath }
-            : null))
+          void requestMemberTransition(async () => {
+            await requestNewConversation(project
+              ? { name: project.name, projectPath: project.projectPath }
+              : null)
+          })
         }}
         onCamp={chooseCamp}
         onTogglePin={toggleNavigationPin}
@@ -1453,7 +1549,7 @@ export function App(): React.JSX.Element {
         contextLabel={activeCampProject?.name ?? '快速对话'}
         camp={campSnapshot?.camp.id === activeCampId ? campSnapshot : null}
         stopping={activeCampStopping}
-        inspectorVisible={campInspectorVisible}
+        inspectorVisible={campSnapshot?.camp.activationState === 'active' && campInspectorVisible}
         onToggleInspector={() => setCampInspectorVisible((visible) => !visible)}
         onOpenInspector={openCampInspector}
       />}
@@ -1487,6 +1583,8 @@ export function App(): React.JSX.Element {
             liveRuntimeEvents={liveRuntimeEvents}
             busy={busy === 'camp-message' || busy === 'change-default-lead' || busy?.startsWith('action-approval-') === true}
             onSend={sendCampMessage}
+            onPendingDraftPersisted={refreshPendingCampNavigation}
+            onPendingCampLeave={settlePendingCampOnLeave}
             onChangeLead={changeDefaultLead}
             onTasksChanged={() => activateCamp(activeCampId)}
             onResolveApproval={(approval, decision) => {
@@ -1495,7 +1593,7 @@ export function App(): React.JSX.Element {
             cancellingTurnIds={activeCancellingTurnIds}
             stopping={activeCampStopping}
             onStop={() => void stopCampRuns()}
-            inspectorVisible={campInspectorVisible}
+            inspectorVisible={campSnapshot.camp.activationState === 'active' && campInspectorVisible}
             inspectorTab={campInspectorTab}
             onInspectorTabChange={setCampInspectorTab}
             onOpenInspector={openCampInspector}
@@ -1591,7 +1689,10 @@ export function App(): React.JSX.Element {
         returnFocusElement={newConversationReturnFocus.current}
         onOpenChange={setNewConversationOpen}
         onChooseWorkspaceDirectory={chooseWorkspaceDirectory}
-        onCreate={createCamp}
+        onCreate={(draft) => createCamp({
+          ...draft,
+          activationState: campActivationStateForCreation('dialog')
+        })}
       />
       <NotificationCenter
         open={notificationOpen}
@@ -1668,7 +1769,7 @@ export function AppHeader({
         <h1>{title}</h1>
       </div>
       {dayNumber !== null && <span className="context-day-badge">第 {dayNumber} 天</span>}
-      {camp && (
+      {camp && camp.camp.activationState === 'active' && (
         <div className="topbar-context-actions">
           <div className="topbar-context-status" aria-live="polite">
             {activeRuns > 0
@@ -1888,7 +1989,7 @@ async function resolveNavigationPins(
           offset,
           limit: 200
         })
-        if (page.schemaVersion !== 2) throw new Error('Navigation group schema is incompatible')
+        if (page.schemaVersion !== 3) throw new Error('Navigation group schema is incompatible')
         for (const camp of page.camps) {
           if (pinnedCampIds.has(camp.id)) campById.set(camp.id, camp)
         }

@@ -77,7 +77,10 @@ terminal Task 只读，version conflict 保留草稿且不自动 replay。永久
 
 v0.49 在设置顶部增加“通用”，并冻结每个 Main Window Session 一次性解析启动位置、稳定一级
 位置即时提交、macOS 登录项四态和窗口几何重置；后续同版本范围增加显式保存的默认队员/Lead、
-确认式一键创建、失效锁存、持久当前项目与项目级 `＋`。设置侧栏因此扩展为七分类；设置和临时
+确认式一键创建、失效锁存、持久当前项目与项目级 `＋`。一键入口使用 ADR-0145 的 Core-owned
+Pending Draft：空草稿不进入导航/恢复，输入后标记“草稿”，首消息成功才激活；普通创建 Dialog
+仍直接创建 Active Camp。选择新工作目录并成功一键创建时，Renderer 仍以非 Core、不可置顶的
+零 Camp 当前项目行显示该空目录，不暴露空 Pending。设置侧栏因此扩展为七分类；设置和临时
 表面仍不能成为启动目标。完整合同见[v0.49 生产设计](../versions/v0.49/production-design.md)，实施
 状态见[v0.49 实施计划](../versions/v0.49/implementation-plan.md)。
 
@@ -139,8 +142,8 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   底部只保留“设置”，健康事实从“设置 → 诊断”访问。
 - 产品中文使用“快速对话”，英文使用 `Quick Chat`；禁止当前 UI 使用“大厅”或
   `Lobby`。
-- Quick Chat 没有 Composer；“新对话”先完成原子 Camp Creation，成功后才进入
-  Camp Composer。
+- Quick Chat 没有 Composer；普通 Dialog 先完成原子 Active Camp Creation；一键入口先获得
+  Core Pending Camp 身份并进入同一 Composer，第一条消息成功时再原子激活。
 - Camp Composer 中通过 `@` 候选选中的队员以整体蓝色 Member Mention 显示，
   在编辑时是不可拆分的原子单元；Composer 与发送后的会话历史均使用默认无底色的
   飞书式蓝色行内文字。点击或键盘激活当前队员的 Mention 在原位置打开布局 2 人物信息卡，

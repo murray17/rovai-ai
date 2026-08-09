@@ -11,7 +11,7 @@ last_updated: 2026-08-09
 
 Collaboration State v2 是 AgentRun Dynamic Context 中唯一的 peer routing identity 合同。它不拥有
 self identity、寻址准入或 Runtime 资格。Self/peer 生命周期的决策理由见
-[ADR-0145](../adr/0145-sole-native-session-self-identity-and-peer-routing-projection.md)。
+[ADR-0146](../adr/0146-sole-native-session-self-identity-and-peer-routing-projection.md)。
 
 ## 1. Model-visible shape
 
@@ -147,10 +147,10 @@ Native Session Bootstrap v3
 Bootstrap Formatter v3
 AgentRun Context Formatter v11
 ContextManifest v8
-Data Contract v0.50 / projection schema 27 / Migration 67
+Data Contract v0.50 / projection schema 27 / Migration 68
 ```
 
-Migration 67 删除旧 Bootstrap Evidence、ContextManifest 和 Runtime Input Delivery 技术投影，重置
+Migration 68 删除旧 Bootstrap Evidence、ContextManifest 和 Runtime Input Delivery 技术投影，重置
 旧 Binding/Session/watermark，并终结旧合同非终态 Run/Turn；Camp、消息、Task、Conversation 和终态
 Run/Turn 业务历史保留。新表只接受当前 axes 和非空 inclusion。
 
@@ -170,5 +170,5 @@ Run/Turn 业务历史保留。新表只接受当前 axes 和非空 inclusion。
 - peer Name/Role/Responsibilities 编辑改变 digest并在下一 accepted input 刷新；
 - peer Personality/Principles/Growth 编辑不进入 projection；
 - `delivery_unknown` 不推进 watermark，随后 accepted ACK 推进冻结完整 digest；
-- v67 保留完成业务历史、删除旧技术 projection、失败旧非终态执行，并可重复启动；
+- v68 保留完成业务历史、删除旧技术 projection、失败旧非终态执行，并可重复启动；
 - 数据库拒绝旧 Bootstrap/formatter 和 nullable inclusion。
