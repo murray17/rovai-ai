@@ -1088,6 +1088,9 @@ impl Database {
             if !self.schema_migration_applied(66)? {
                 self.migrate_native_session_bootstrap_redelivery_v66()?;
             }
+            if !self.schema_migration_applied(67)? {
+                self.migrate_pending_camp_activation_v67()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -1335,6 +1338,9 @@ impl Database {
         }
         if !self.schema_migration_applied(66)? {
             self.migrate_native_session_bootstrap_redelivery_v66()?;
+        }
+        if !self.schema_migration_applied(67)? {
+            self.migrate_pending_camp_activation_v67()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -5520,6 +5526,25 @@ impl Database {
 
             INSERT INTO schema_migration(version, applied_at)
             VALUES (66, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE camp ADD COLUMN activation_state TEXT NOT NULL DEFAULT 'active'
+                CHECK(activation_state IN ('pending', 'active'));
+            CREATE INDEX camp_activation_state_idx
+                ON camp(activation_state, updated_at, id);
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (67, datetime('now'));
             "#,
         )?;
         transaction.commit()?;
@@ -13079,6 +13104,55 @@ mod tests {
                 "missing {required}"
             );
         }
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v67_adds_pending_camp_activation_without_reclassifying_existing_creation() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v67-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        let migration_applied: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 67",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_applied, 1);
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO camp(
+                    id, title, project_binding_kind, project_path, created_at, updated_at
+                ) VALUES (
+                    'v67-default-active', 'Existing creation', 'quick_chat', '/quick-chat',
+                    '2026-08-09T00:00:00Z', '2026-08-09T00:00:00Z'
+                )
+                "#,
+                [],
+            )
+            .unwrap();
+        let activation_state: String = database
+            .connection()
+            .query_row(
+                "SELECT activation_state FROM camp WHERE id = 'v67-default-active'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(activation_state, "active");
+        assert!(
+            database
+                .connection()
+                .execute(
+                    "UPDATE camp SET activation_state = 'unknown' WHERE id = 'v67-default-active'",
+                    [],
+                )
+                .is_err()
+        );
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }

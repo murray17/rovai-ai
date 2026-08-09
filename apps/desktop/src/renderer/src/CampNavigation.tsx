@@ -146,7 +146,7 @@ export async function revealMoreNavigationCamps(
   }
 
   const page = await loadPage(state.serverOffset, NAVIGATION_MORE_CAMPS_STEP)
-  if (page.schemaVersion !== 2) throw new Error('Navigation group schema is incompatible')
+  if (page.schemaVersion !== 3) throw new Error('Navigation group schema is incompatible')
   const camps = appendUniqueNavigationCamps(state.camps, page.camps)
   const pageTotalCount = Math.max(0, page.totalCount)
   return {
@@ -162,6 +162,7 @@ export function CampNavigation({
   navigation,
   activeCampId,
   currentProjectKey = 'quick-chat',
+  shellOnlyProjectPath = null,
   creatingConversation = false,
   pins = [],
   pinnedCampItems = [],
@@ -192,6 +193,7 @@ export function CampNavigation({
   navigation: NavigationSnapshot | null
   activeCampId: string | null
   currentProjectKey?: string
+  shellOnlyProjectPath?: string | null
   creatingConversation?: boolean
   pins?: NavigationPin[]
   pinnedCampItems?: NavigationCampItem[]
@@ -570,7 +572,9 @@ export function CampNavigation({
                 onToggleExpanded={() => toggleProjectGroup(groupKey)}
                 onSelectProject={() => onSelectProject(project)}
                 onCreate={() => onCreateInProject(project)}
-                onTogglePin={() => void togglePin('project', project.projectKey)}
+                onTogglePin={project.projectPath === shellOnlyProjectPath
+                  ? undefined
+                  : () => void togglePin('project', project.projectKey)}
                 onToggleCampPin={(camp) => void togglePin('camp', camp.id, camp)}
                 onCamp={onCamp}
                 onAction={openAction}
@@ -609,7 +613,9 @@ export function CampNavigation({
                 onToggleExpanded={() => toggleProjectGroup(groupKey)}
                 onSelectProject={() => onSelectProject(project)}
                 onCreate={() => onCreateInProject(project)}
-                onTogglePin={() => void togglePin('project', project.projectKey)}
+                onTogglePin={project.projectPath === shellOnlyProjectPath
+                  ? undefined
+                  : () => void togglePin('project', project.projectKey)}
                 onToggleCampPin={(camp) => void togglePin('camp', camp.id, camp)}
                 onCamp={onCamp}
                 onAction={openAction}
@@ -977,6 +983,29 @@ function CampRow({
 }): JSX.Element {
   const title = camp.title
   const menuLabels = campNavigationMenuLabels(pinned)
+  const menuItems: SidebarActionMenuItem[] = camp.activationState === 'pending'
+    ? []
+    : [{
+        key: 'toggle-pin',
+        label: menuLabels[0],
+        icon: 'pin',
+        filled: pinned,
+        deferCloseAutoFocus: true,
+        onSelect: onTogglePin
+      }, {
+        key: 'rename',
+        label: menuLabels[1],
+        icon: 'edit',
+        onSelect: () => onAction('rename', camp)
+      }]
+  menuItems.push({
+    key: 'delete',
+    label: menuLabels[2],
+    icon: 'trash',
+    danger: true,
+    separatorBefore: camp.activationState !== 'pending',
+    onSelect: () => onAction('delete', camp)
+  })
   return (
     <div className={`camp-nav-row ${active ? 'selected' : ''}`}>
       <button
@@ -990,32 +1019,14 @@ function CampRow({
           {camp.marker === 'unread_completed' && <i className="task-dot camp-marker-unread_completed" />}
         </span>
         <span className="truncate">{title}</span>
+        {camp.activationState === 'pending' && <span className="camp-draft-badge">草稿</span>}
         {camp.marker === 'loading' && <span className="camp-loading-spinner camp-marker-loading" role="img" aria-label="正在运行" />}
       </button>
       <SidebarActionMenu
         target={`camp:${camp.id}`}
         label={`管理“${title}”`}
         triggerClassName="camp-menu-trigger"
-        items={[{
-          key: 'toggle-pin',
-          label: menuLabels[0],
-          icon: 'pin',
-          filled: pinned,
-          deferCloseAutoFocus: true,
-          onSelect: onTogglePin
-        }, {
-          key: 'rename',
-          label: menuLabels[1],
-          icon: 'edit',
-          onSelect: () => onAction('rename', camp)
-        }, {
-          key: 'delete',
-          label: menuLabels[2],
-          icon: 'trash',
-          danger: true,
-          separatorBefore: true,
-          onSelect: () => onAction('delete', camp)
-        }]}
+        items={menuItems}
       />
     </div>
   )

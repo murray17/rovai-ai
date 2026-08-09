@@ -470,6 +470,7 @@ export interface PendingExecutionIntentView {
 }
 
 export type CampCollaborationMode = 'peer' | 'lead_coordinated'
+export type CampActivationState = 'pending' | 'active'
 
 export interface CreateCampRequest {
   commandId: string
@@ -478,6 +479,7 @@ export interface CreateCampRequest {
   memberAgentIds: string[]
   defaultLeadAgentId: string
   collaborationMode: CampCollaborationMode
+  activationState: CampActivationState
 }
 
 export interface CampCreationPreflight {
@@ -517,6 +519,10 @@ export interface DeleteCampCommand {
   expectedVersion: number
 }
 
+export interface DiscardPendingCampCommand {
+  campId: string
+}
+
 export interface CancelCampTurnCommand {
   campId: string
   campTurnId: string
@@ -528,6 +534,7 @@ export type NavigationCampMarker = 'loading' | 'unread_completed' | 'none'
 export interface NavigationCampItem {
   id: string
   title: string
+  activationState: CampActivationState
   projectBindingKind: ProjectBindingKind
   projectPath: string
   defaultLead: { agentId: string; displayName: string } | null
@@ -554,14 +561,14 @@ export interface ProjectNavigationGroup {
 }
 
 export interface NavigationSnapshot {
-  schemaVersion: 2
+  schemaVersion: 3
   throughGlobalSequence: number
   quickChat: NavigationCampGroup
   projects: ProjectNavigationGroup[]
 }
 
 export interface NavigationCampPage {
-  schemaVersion: 2
+  schemaVersion: 3
   throughGlobalSequence: number
   projectPath: string | null
   totalCount: number
@@ -1015,11 +1022,12 @@ export interface DomainEventView {
 }
 
 export interface CampSnapshot {
-  schemaVersion: 25
+  schemaVersion: 26
   throughGlobalSequence: number
   camp: {
     id: string
     title: string
+    activationState: CampActivationState
     projectBindingKind: ProjectBindingKind
     projectPath: string
     defaultLeadAgentId: string | null
@@ -1767,6 +1775,7 @@ export type CoreMethod =
   | 'navigation.groupCamps'
   | 'navigation.campViewed'
   | 'camps.create'
+  | 'camps.discardPending'
   | 'camps.rename'
   | 'camps.changeDefaultLead'
   | 'camps.reconcileDefaultLead'

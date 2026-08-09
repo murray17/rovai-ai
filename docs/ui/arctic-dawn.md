@@ -109,7 +109,7 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 | `--surface-raised` | `#FFFFFF` | Dialog、Popover、输入和浮层 |
 | `--surface-subtle` | `#F6F7F3` | 侧栏与次级面板 |
 | `--surface-muted` | `#ECEFE9` | Hover、Disabled、弱分组 |
-| `--surface-selected` | `#E9ECF7` | 当前 Camp、Tab 和列表选择 |
+| `--surface-selected` | `#E9ECF7` | Tab 和需要品牌强调的列表选择；当前 Camp 使用灰色 `--surface-muted` |
 | `--conversation-surface` | `#FFFFFF` | Camp 会话阅读区与输入停靠区背景 |
 | `--inspector-surface` | `#FFFFFF` | Camp Inspector 背景 |
 | `--conversation-inspector-line` | `#CBD1C8` | 会话区与 Inspector 的强结构分隔 |
@@ -275,6 +275,10 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
   左侧品牌标记和字重表达更强选中态，不使用蓝色底。点击 Project/快速
   对话后的 `＋` 只把对应项目作为本次创建目标；取消 Dialog 不改变当前项目，创建成功并进入
   Camp 后才由该 Camp 更新当前项目。
+- 从“项目”标题 `＋` 成功一键创建到新目录时，空 Pending Camp 仍不进入 Navigation；Renderer
+  单独把已校验的当前工作目录显示为零 Camp 项目行，并显示“还没有对话”。该 Shell-only 行保留
+  项目级 `＋`，但在 Core 尚未投影 canonical Project group 前不显示项目置顶菜单；离开并清理空
+  Pending 不删除当前项目行，新窗口则重新校验目录，失效时回退快速对话。
 - Project 标题和分页操作不显示会话数量。只显示初始 5 条且仍有剩余内容时仅显示“查看更多”；
   可见数量大于 5 且仍有剩余内容时同时显示“查看更多 / 收起”；全部可见时只显示“收起”；总数不
   超过 5 时两者都不显示。Project 目录的三点菜单与 `＋` 默认同时隐藏，在整行 Hover 或键盘
@@ -293,12 +297,15 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
   打开同一 Dialog 并预选该入口对应项目；“项目”标题后的 `＋` 选择工作目录后打开同一 Dialog，
   并预选新目录。
 - 一键创建开启且默认配置有效时，上述四类入口跳过 Dialog，使用入口目标项目、已保存默认队员与默认 Lead
-  直接原子创建空 Camp。创建拒绝或配置失效时必须打开 Dialog、保留入口对应项目并提示重新确认。
+  创建 Core-owned Pending Draft。空 Pending 立即显示 Composer，但不进入导航或 Restorable Location；
+  正文或附件非空后进入导航并显示灰色“草稿”，第一条消息成功时才原子激活。创建拒绝或配置失效时
+  必须打开 Dialog、保留入口对应项目并提示重新确认。
 - Quick Chat 只显示品牌落地内容和“继续未完成的事”，不显示可直接发送的 Composer。
 - Quick Chat 首页右侧主内容区使用白色 `--home-surface`；统一左侧菜单继续使用
   `--surface-subtle`，不随首页表面改变。
-- 创建 Dialog 接受 New Conversation Draft 并调用原子 Camp Creation；成功后才
-  进入已持久化 Camp 并聚焦正常 Composer。
+- 创建 Dialog 接受 New Conversation Draft 并调用原子 Active Camp Creation；成功后才
+  进入已持久化正式 Camp 并聚焦正常 Composer。一键 Pending 与 Dialog Active 是同一 Composer 的
+  两种创建边界，不建立 Renderer-only Draft。
 - 原型中落地页输入后直接“发送”、双击导航才打开 Dialog 等演示事件不进入产品。
 - Quick Chat 页面不再叠加通用 AppHeader；App Shell 右侧第一行叠加一条
   不改变内容起始位置的 50px 隐形窗口拖拽栏。页面继续使用居中的品牌舞台：
@@ -541,10 +548,13 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 
 - 当 Camp 尚无公共/A2A 消息、AgentRun 或其他时间线内容时，用完整欢迎状态替换
   “这段 Camp 还没有消息。”单行占位；出现第一项权威内容后欢迎状态立即退出。
-- 欢迎状态保持 Camp Header、消息滚动区、Composer、Approval Dock 与 Inspector
-  原结构，不新增页面、领域状态、Draft 或第二套发送入口。
-- 内容包含轻量 Arctic Dawn 星与地平线图形、`ARCTIC DAWN · NEW CAMP`、标题
-  “开始这段协作”和简短说明。图形只使用现有 Token/SVG，不加载外部图片。
+- Active 空 Camp 欢迎状态保持 Camp Header、消息滚动区、Composer、Approval Dock 与 Inspector
+  原结构，不新增页面或第二套发送入口。Pending 空草稿复用同一消息区与 Composer，但激活前隐藏
+  Inspector 与配置 mutation，文案为“当前只是一份草稿”；它是 ADR-0145 的 Core 领域状态，不是
+  Renderer 第二真源。
+- Active 内容包含轻量 Arctic Dawn 星与地平线图形、`ARCTIC DAWN · NEW CAMP`、标题
+  “开始这段协作”和简短说明。Pending 使用“新对话草稿 / 开始一段新对话”，并明确输入后自动
+  保留、发送第一条消息才正式创建。图形只使用现有 Token/SVG，不加载外部图片。
 - 当前协作配置摘要从当前事实计算：Quick Chat/Project 展示名、Default Lead、在队的队员数和
   Agent 运行时就绪摘要。缺失、部分就绪或未就绪必须使用真实文案，不能补造 Ready。
 - 提供三个起步建议：“先了解项目 / 整理成任务 / 检查工作区”。点击只把对应示例
@@ -989,7 +999,7 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 - Footer 摘要只显示 Quick Chat/目录展示名、队员数与 Lead，右侧
   “取消 / 创建”。提交期间锁定会改变 Draft 的控件并防止重复创建。
 - Core 原子接受后才关闭 Dialog、刷新 Navigation、进入耐久 Camp 并聚焦 Composer；
-  此时没有消息、AgentRun 或预建 Conversation 也合法。
+  Dialog 固定创建 Active，此时没有消息、AgentRun 或预建 Conversation 也合法。
 - 失败保持 Dialog、目录、队员、Lead、名称、滚动和焦点。Core 刷新候选后不得静默
   删除队员、替换 Lead 或回退 Quick Chat。
 - Renderer 不再展示“协作方式”“并肩协作”“领队统筹”或“暂未开放”；创建请求继续固定提交
@@ -1063,6 +1073,8 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 - v0.49 新增 Main-owned `general-preferences.json` 与 `restorable-location.json`，继续复用并增强
   `window-state.json`。这些文件不进入 Core/SQLite；登录项状态只从 macOS 读取，不在文件中保存
   第二份 Boolean。Renderer 只能通过窄 Preload bridge 访问，不能读取文件路径或任意 JSON。
+- v0.49 的一键 Pending Draft 由 Core/SQLite Migration 67 持有，不写入上述 Shell 文件；它按
+  ADR-0145 复用现有 Composer Draft 与首消息发送事务，不增加旧 Active Camp 双读或兼容 UI。
 - Quick Chat 全栈切换与旧 `<userData>/lobby/` 精确删除遵守 ADR-0074；不增加
   Lobby 别名、旧序列化值、双目录或 CSS 兼容类。
 - Quick Chat 的项目式 Renderer 投影、设置覆盖侧栏和 `Rovai AI` 字标遵守

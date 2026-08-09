@@ -91,6 +91,33 @@ export function currentProjectWorkspace(
   return project ? { name: project.name, projectPath: project.projectPath } : null
 }
 
+export function navigationIncludingCurrentWorkspace(
+  navigation: NavigationSnapshot | null,
+  currentProject: CurrentProject,
+  currentWorkspace: WorkspaceSelection | null
+): NavigationSnapshot | null {
+  if (
+    !navigation
+    || currentProject.kind !== 'directory'
+    || currentProjectGroup(navigation, currentProject)
+    || currentWorkspace?.projectPath !== currentProject.projectPath
+  ) return navigation
+
+  const emptyProject: ProjectNavigationGroup = {
+    projectKey: `directory:${currentWorkspace.projectPath}`,
+    name: currentWorkspace.name,
+    projectPath: currentWorkspace.projectPath,
+    lastActivityAt: '',
+    lastActivityGlobalSequence: 0,
+    totalCount: 0,
+    recentCamps: []
+  }
+  return {
+    ...navigation,
+    projects: [emptyProject, ...navigation.projects]
+  }
+}
+
 export function resolveNewConversationDefaults(
   preferences: GeneralPreferencesSnapshot | null,
   agents: AgentProfile[]
@@ -125,4 +152,12 @@ export function defaultsNeedInvalidation(
     && !preferences.newConversationDefaultsRequireConfirmation
     && !resolveNewConversationDefaults(preferences, agents)
   )
+}
+
+export function shouldInvalidateNewConversationDefaults(
+  preferences: GeneralPreferencesSnapshot | null,
+  agents: AgentProfile[],
+  overviewReady: boolean
+): boolean {
+  return overviewReady && defaultsNeedInvalidation(preferences, agents)
 }

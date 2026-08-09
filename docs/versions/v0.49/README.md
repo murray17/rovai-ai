@@ -13,7 +13,8 @@ last_updated: 2026-08-09
 > 当前状态：通用与启动设置已完成 Desktop Shell、Preload、Renderer 生产实现、自动回归与打包 App
 > 的主窗口会话验收；已安装 App 的真实登录项开关、系统授权态和外接显示器矩阵仍待最终人工验收。
 > 两个自包含双人追问官方 Skill 已完成源码、Core bundled manifest 和定向验收。
-> 两个范围都不改变 Camp、Task、AgentRun、Native Session、Memory、Approval 或执行恢复语义。
+> 后续新增的一键新对话 Pending Draft 改变 Camp 激活、Navigation 与恢复语义，但不改变
+> AgentRun、Native Session、Memory、Approval 或既有 Active Camp 的耐久边界。
 >
 > 前置版本：[v0.48 Native Session Compaction Bootstrap Redelivery](../v0.48/README.md)
 
@@ -49,9 +50,14 @@ Approval、Toast 等临时表面不成为启动目标。
 Renderer 持久维护当前项目。项目名称主行同时选择当前项目并切换展开，不显示独立折叠按钮；`＋` 只按对应项目创建；
 普通、置顶和快速对话分组统一按 5 条起步、每次 10 条“查看更多”。取消 Dialog 不改变当前项目。
 关闭一键创建时左上入口、两个文件夹 `＋` 与“项目”标题 `＋` 都打开同一个创建 Dialog；开启且配置有效时直接
-使用目标项目、默认队员、默认 Lead 和固定 `peer` 语义创建空 Camp，失败或失效则保留项目回退
+使用目标项目、默认队员、默认 Lead 和固定 `peer` 语义打开 Core-owned Pending Camp Draft，失败或失效则保留项目回退
 Dialog，并明确列出本次过滤的队员、Lead 临时调整及不回写保存配置。创建 Dialog 删除全部协作方式 UI，并把可选名称升级为可聚焦折叠面板、Unicode 80 字计数
 与清空操作；Core/SQLite 的既有 collaboration mode 合同不变。
+
+空 Pending 不进入 Navigation，也不替换 Restorable Location；离开或下一次启动时由 Core 的窄校验清理。
+输入正文或准备附件后，它以“草稿”进入 Navigation 并可跨重启恢复。第一条消息只有在完整发送事务成功时
+才将 Pending 原子激活为正式 Camp；发送拒绝保留 Pending 与原 Draft。普通创建 Dialog 仍立即创建 Active
+Camp，因此用户显式确认的零消息 Camp 继续耐久存在。长期边界见 [ADR-0145](../../adr/0145-core-owned-pending-camp-draft-activation.md)。
 
 ## 官方双人追问 Skill
 
@@ -127,17 +133,18 @@ Snapshot 或 Renderer 内存状态判断。
 
 ## 数据与架构边界
 
-v0.49 的启动模式、最后设置分类、新对话默认配置、Restorable Location 和窗口几何只属于
+v0.49 的启动模式、最后设置分类、新对话默认配置、Restorable Location 文件和窗口几何只属于
 Electron Desktop Shell；当前项目属于 Renderer 本地偏好：
 
-- 不进入 Rust Core 或 SQLite；
-- 不产生 Camp event、Task mutation、AgentRun、Native Session、Approval 或 audit；
+- 这些桌面偏好本身不进入 Rust Core 或 SQLite；
+- 这些桌面偏好写入本身不产生 Camp event、Task mutation、AgentRun、Native Session、Approval 或 audit；
 - Renderer 只通过受类型约束的 preload bridge 读取和提交 Shell 状态，不读取任意本地文件；
 - Shell 文件缺失、字段未知、版本不支持或 JSON 损坏都必须退化到安全默认值；
-- Core 只继续提供已有的权威只读查询，用于验证 Camp 或 Member 是否仍有效，不接收桌面偏好写入。
+- Core 不接收桌面偏好写入；但一键入口使用新增的 Pending Camp 激活状态、Migration 67、Navigation
+  投影、窄 discard 命令与启动清理实现 ADR-0145。
 
-桌面设置范围不创建 ADR：它没有改变现有 Core、Runtime、合同或跨版本系统结构，属于可在 Desktop
-Shell 内部演进的产品偏好与 Renderer 交互。官方 Skill 集合和自包含协作边界由 ADR-0144 单独拥有；
+桌面偏好范围本身不创建 ADR：它没有改变现有 Core、Runtime、合同或跨版本系统结构，属于可在 Desktop
+Shell 内部演进的产品偏好与 Renderer 交互。Pending Camp 激活由 ADR-0145 单独拥有；官方 Skill 集合和自包含协作边界由 ADR-0144 单独拥有；
 其 Rust 改动扩展 bundled manifest，不改变 SQLite schema、Skill 投递合同或 Runtime Adapter。
 本版本另行修复既有启动兼容标记漂移：启动检查现在与 Migration 66 写入的 Data Contract
 `v0.48 / schema 26` 一致，避免当前数据库在 Core restart 时被误判为旧合同并执行 clean reset；
@@ -175,6 +182,8 @@ Shell 内部演进的产品偏好与 Renderer 交互。官方 Skill 集合和自
 11. 创建 Dialog 不再出现任何协作方式文案，Footer 无模式摘要，名称面板具备聚焦、计数和清空。
 12. 当前 Data Contract 在 Core restart 后保持原数据库，Imported Skill 与正在沿用的记忆均不会因
     `v0.47 / schema 25` 的过期启动常量而被 clean reset。
+13. 一键入口打开空 Pending 时不出现在侧栏、不覆盖稳定恢复位置；输入后显示“草稿”并跨重启保留；
+    发送拒绝不激活，第一条成功消息原子激活；离开与启动清理只能删除无正文、无附件、无领域事实的 Pending。
 
 实施检查点与证据入口见[实施与验收计划](implementation-plan.md)，精确 UI 与 Shell 合同见
 [生产设计](production-design.md)。
@@ -184,10 +193,10 @@ Shell 内部演进的产品偏好与 Renderer 交互。官方 Skill 集合和自
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | `docs/versions/README.md` 将 v0.48 冻结为 historical，并把 v0.49 设为唯一 current；本概览与实施计划已建立 |
-| ADR | 已更新 | ADR-0144 替代 ADR-0109，冻结四个官方 Skill、自包含 Duo Revision 与异步公共 A2A 协作边界；Desktop Shell 范围仍确认无需独立 ADR |
-| Contracts | 确认无需更新 | 不改变 Agent/Core CLI、Envelope、receipt、Task、Message Delivery 或其它长期 wire contract；Duo Skill 只使用既有 `camp.message.send` v2，Main/Preload/Renderer 类型属于版本内桌面实现 |
-| Architecture | 确认无需更新 | 现有 Skill Library、immutable Revision、Runtime-group projection、Built-in Tool、A2A 与 Bootstrap 组件职责和传输关系均未改变；除扩展 bundled content manifest 外，只同步启动兼容标记与既有 Migration 66 Data Contract，不改变 reset 架构 |
-| UI | 已更新 | `docs/ui/README.md` 与 `docs/ui/arctic-dawn.md` 增加七分类设置、General 页面、启动恢复、登录项、窗口行为及四个内置 Skill 清单；领域词汇同步更新 `CONTEXT.md` |
+| ADR | 已更新 | ADR-0144 替代 ADR-0109；ADR-0145 冻结 Core-owned Pending Draft、原子首消息激活与窄清理边界 |
+| Contracts | 已更新 | Camp create、Camp Snapshot 与 Navigation 增加 activation state，新增 Pending discard 命令；既有消息 Draft Revision 与 Message Delivery 合同保持不变 |
+| Architecture | 已更新 | `docs/architecture/camp-activation-lifecycle.md` 明确 Core/SQLite、Composer Draft、Navigation、Renderer restore 与启动清理权威；Runtime Adapter 结构不变 |
+| UI | 已更新 | `docs/ui/README.md` 与 `docs/ui/arctic-dawn.md` 补充 Pending 草稿可见性、恢复、灰色“草稿”标签和首消息激活；既有七分类设置与 Skill 清单继续有效 |
 | Runtime Activity | 确认无需更新 | Desktop Shell 偏好、窗口几何和登录项不产生或改变 Canonical Runtime Activity |
 | Runtime compatibility | 确认无需更新 | 不改变任何 Agent Runtime adapter、版本或发现能力；既有 Skill native-discovery smoke 仅扩展官方默认集合断言，不产生新的兼容性结论 |
 | Documentation routing | 确认无需更新 | `docs/README.md` 已通过版本索引的唯一 current 指针路由版本工作，不需要硬编码 v0.49 专门入口 |
@@ -198,5 +207,6 @@ Shell 内部演进的产品偏好与 Renderer 交互。官方 Skill 集合和自
 - [v0.49 生产设计](production-design.md)
 - [v0.49 实施与验收计划](implementation-plan.md)
 - [ADR-0144：自包含双人追问官方 Skill](../../adr/0144-self-contained-duo-grilling-bundled-skills.md)
+- [ADR-0145：Core-owned Pending Camp Draft](../../adr/0145-core-owned-pending-camp-draft-activation.md)
 - [Arctic Dawn V3 设置与窗口合同](../../ui/arctic-dawn.md#设置)
 - [Rovai-ai 领域词汇表](../../../CONTEXT.md)

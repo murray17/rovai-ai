@@ -15,6 +15,7 @@ function camp(index: number): NavigationCampItem {
   return {
     id: `camp-${index}`,
     title: `对话 ${index}`,
+    activationState: 'active',
     projectBindingKind: 'directory',
     projectPath: '/repo',
     defaultLead: null,
@@ -28,7 +29,7 @@ function camp(index: number): NavigationCampItem {
 
 function page(camps: NavigationCampItem[], totalCount: number, nextOffset: number | null): NavigationCampPage {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     throughGlobalSequence: 1,
     projectPath: '/repo',
     totalCount,

@@ -16,6 +16,7 @@ import {
   AppHeader,
   WindowDragStrip,
   allNavigationCamps,
+  campActivationStateForCreation,
   campInspectorVisibleFromStoredValue,
   cancellableTurnIds,
   campCreationPreflightFromAgents,
@@ -116,6 +117,11 @@ function canonicalActivity(
 }
 
 describe('task event projections', () => {
+  it('uses Pending only for one-click creation and Active for the explicit Dialog', () => {
+    expect(campActivationStateForCreation('one_click')).toBe('pending')
+    expect(campActivationStateForCreation('dialog')).toBe('active')
+  })
+
   it('projects one live Task card at creation and suppresses legacy status cards', () => {
     const task = {
       taskId: 'task-live-card',
@@ -549,7 +555,7 @@ describe('task event projections', () => {
 
   it('renders the visible Camp header and structural page drag strips', () => {
     const camp = {
-      camp: { createdAt: '2026-07-31T00:00:00Z' },
+      camp: { activationState: 'active', createdAt: '2026-07-31T00:00:00Z' },
       agentRuns: [{ status: 'running' }],
       approvals: [{ status: 'pending' }]
     } as unknown as CampSnapshot
@@ -831,12 +837,13 @@ describe('task event projections', () => {
 
   it('orders Camp navigation by the authoritative activity sequence', () => {
     const baseCamp = {
-      title: '对话', projectBindingKind: 'directory' as const, projectPath: '/repo',
+      title: '对话', activationState: 'active' as const,
+      projectBindingKind: 'directory' as const, projectPath: '/repo',
       defaultLead: null, marker: 'none' as const, lastActivityAt: '2026-07-22T00:00:00Z',
       latestCompletionGlobalSequence: 0, version: 1
     }
     const camps = allNavigationCamps({
-      schemaVersion: 2,
+      schemaVersion: 3,
       throughGlobalSequence: 20,
       quickChat: {
         totalCount: 1,
@@ -871,12 +878,12 @@ describe('task event projections', () => {
       view: 'camp',
       state: 'ready',
       navigation: {
-        schemaVersion: 2,
+        schemaVersion: 3,
         throughGlobalSequence: 12,
         quickChat: {
           totalCount: 12,
           recentCamps: [{
-            id: 'camp-quick-chat', title: '快速对话讨论', projectPath: '/quick-chat',
+            id: 'camp-quick-chat', title: '快速对话讨论', activationState: 'active', projectPath: '/quick-chat',
             projectBindingKind: 'quick_chat', defaultLead: null, marker: 'none',
             lastActivityAt: '2026-07-22T00:00:00Z', lastActivityGlobalSequence: 10,
             latestCompletionGlobalSequence: 0, version: 1
@@ -887,7 +894,7 @@ describe('task event projections', () => {
           lastActivityAt: '2026-07-22T00:00:01Z', lastActivityGlobalSequence: 12,
           totalCount: 1,
           recentCamps: [{
-            id: 'camp-project', title: longTitle, projectPath: '/repo',
+            id: 'camp-project', title: longTitle, activationState: 'active', projectPath: '/repo',
             projectBindingKind: 'directory', defaultLead: null, marker: 'unread_completed',
             lastActivityAt: '2026-07-22T00:00:01Z', lastActivityGlobalSequence: 12,
             latestCompletionGlobalSequence: 12, version: 2
@@ -951,10 +958,52 @@ describe('task event projections', () => {
     expect(markup).not.toContain('Horizonward')
   })
 
+  it('renders the current empty workspace without inventing a pinnable Core project', () => {
+    const markup = renderToStaticMarkup(createElement(CampNavigation, {
+      view: 'camp',
+      state: 'ready',
+      navigation: {
+        schemaVersion: 3,
+        throughGlobalSequence: 1,
+        quickChat: { totalCount: 0, recentCamps: [] },
+        projects: [{
+          projectKey: 'directory:/repo/empty-project',
+          name: 'empty-project',
+          projectPath: '/repo/empty-project',
+          lastActivityAt: '',
+          lastActivityGlobalSequence: 0,
+          totalCount: 0,
+          recentCamps: []
+        }]
+      },
+      activeCampId: null,
+      currentProjectKey: 'directory:/repo/empty-project',
+      shellOnlyProjectPath: '/repo/empty-project',
+      onNewConversation: () => undefined,
+      onMembers: () => undefined,
+      onMemory: () => undefined,
+      pendingMemoryCount: 0,
+      onSettings: () => undefined,
+      onOpenProject: () => undefined,
+      onCamp: () => undefined,
+      onRename: async () => undefined,
+      onDelete: async () => ({ deleted: true, blockers: [] }),
+      onStop: async () => undefined,
+      onError: () => undefined
+    }))
+
+    expect(markup).toContain('data-group="directory:/repo/empty-project"')
+    expect(markup).toContain('aria-current="true"')
+    expect(markup).toContain('empty-project')
+    expect(markup).toContain('还没有对话')
+    expect(markup).not.toContain('管理项目“empty-project”')
+  })
+
   it('keeps navigation marker slots stable and lets the project row control selection and disclosure', () => {
     const makeCamp = (id: string, marker: 'none' | 'unread_completed' | 'loading') => ({
       id,
       title: `${id} 对话`,
+      activationState: 'pending' as const,
       projectPath: '/repo',
       projectBindingKind: 'directory' as const,
       defaultLead: null,
@@ -968,7 +1017,7 @@ describe('task event projections', () => {
       view: 'camp',
       state: 'ready',
       navigation: {
-        schemaVersion: 2,
+        schemaVersion: 3,
         throughGlobalSequence: 1,
         quickChat: { totalCount: 0, recentCamps: [] },
         projects: [{
@@ -1000,6 +1049,7 @@ describe('task event projections', () => {
     expect(markup).toContain('camp-marker-unread_completed')
     expect(markup).toContain('camp-marker-loading')
     expect(markup).toContain('role="img" aria-label="正在运行"')
+    expect(markup.match(/class="camp-draft-badge">草稿/g)).toHaveLength(3)
     expect(markup).toContain('aria-expanded="true" aria-controls="camp-group-content-directory--repo"')
     expect(markup).toContain('project-folder-open')
     expect(markup).toContain('project-folder-closed')
@@ -1100,7 +1150,7 @@ describe('task event projections', () => {
       view: 'members',
       state: 'ready',
       navigation: {
-        schemaVersion: 2,
+        schemaVersion: 3,
         throughGlobalSequence: 1,
         quickChat: { totalCount: 0, recentCamps: [] },
         projects: [{
@@ -1146,10 +1196,10 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'runtime_not_configured', blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 25,
+      schemaVersion: 26,
       throughGlobalSequence: 1,
       camp: {
-        id: 'camp-1', title: 'Lead 调整', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
+        id: 'camp-1', title: 'Lead 调整', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
         defaultLeadAgentId: 'agent_1',
         version: 2, createdAt: '2026-07-22T00:00:00Z', updatedAt: '2026-07-22T00:00:00Z'
       },
@@ -1283,10 +1333,10 @@ describe('task event projections', () => {
       presence: 'away'
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 25,
+      schemaVersion: 26,
       throughGlobalSequence: 1,
       camp: {
-        id: 'camp-empty', title: '暂无可用队员', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
+        id: 'camp-empty', title: '暂无可用队员', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
         defaultLeadAgentId: null,
         version: 2, createdAt: '2026-07-27T00:00:00Z', updatedAt: '2026-07-27T00:00:00Z'
       },
@@ -1335,10 +1385,10 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'ready' as const, blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 25,
+      schemaVersion: 26,
       throughGlobalSequence: 3,
       camp: {
-        id: 'camp-live', title: '实现功能', projectBindingKind: 'directory', projectPath: '/repo',
+        id: 'camp-live', title: '实现功能', activationState: 'active', projectBindingKind: 'directory', projectPath: '/repo',
         defaultLeadAgentId: 'agent_2',
         version: 1, createdAt: '2026-07-28T05:00:00Z', updatedAt: '2026-07-28T05:01:00Z'
       },
@@ -1718,10 +1768,10 @@ describe('task event projections', () => {
       resolvedAt: null
     }))
     const snapshot: CampSnapshot = {
-      schemaVersion: 25,
+      schemaVersion: 26,
       throughGlobalSequence: 2,
       camp: {
-        id: 'camp-approval', title: '审批停靠区', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
+        id: 'camp-approval', title: '审批停靠区', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
         defaultLeadAgentId: 'agent_1',
         version: 1, createdAt: '2026-07-30T03:00:00Z', updatedAt: '2026-07-30T03:00:01Z'
       },
@@ -1804,10 +1854,10 @@ describe('task event projections', () => {
     expect(campConversationTimeline([publicMessage]).map((item) => item.id)).toEqual([publicMessage.id])
 
     const snapshot: CampSnapshot = {
-      schemaVersion: 25,
+      schemaVersion: 26,
       throughGlobalSequence: 3,
       camp: {
-        id: 'camp-a2a', title: 'Agent 协作', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
+        id: 'camp-a2a', title: 'Agent 协作', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
         defaultLeadAgentId: 'agent_1',
         version: 1, createdAt: '2026-07-30T03:00:00Z', updatedAt: '2026-07-30T03:00:01Z'
       },
@@ -1881,10 +1931,10 @@ describe('task event projections', () => {
 
   it('renders lightweight Task records as editable long-lived responsibilities', () => {
     const snapshot: CampSnapshot = {
-      schemaVersion: 25,
+      schemaVersion: 26,
       throughGlobalSequence: 1,
       camp: {
-        id: 'camp-task', title: 'Task 管理', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
+        id: 'camp-task', title: 'Task 管理', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
         defaultLeadAgentId: 'agent_2',
         version: 1, createdAt: '2026-07-23T00:00:00Z', updatedAt: '2026-07-23T00:00:00Z'
       },

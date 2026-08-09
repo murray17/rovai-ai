@@ -64,7 +64,7 @@ describe('startup location resolution', () => {
     const exists = await campExistsInAuthoritativeNavigation('camp-target', navigation, async (path, offset) => {
       calls.push(offset)
       return {
-        schemaVersion: 2,
+        schemaVersion: 3,
         throughGlobalSequence: 1,
         projectPath: path,
         totalCount: path === '/repo' ? 2 : 0,
@@ -75,7 +75,7 @@ describe('startup location resolution', () => {
     expect(exists).toBe(true)
     expect(calls).toContain(1)
     await expect(campExistsInAuthoritativeNavigation('deleted', navigation, async (path) => ({
-      schemaVersion: 2,
+      schemaVersion: 3,
       throughGlobalSequence: 1,
       projectPath: path,
       totalCount: 0,
@@ -87,7 +87,7 @@ describe('startup location resolution', () => {
 
 function emptyNavigation(): NavigationSnapshot {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     throughGlobalSequence: 1,
     quickChat: { totalCount: 0, recentCamps: [] },
     projects: []
@@ -98,6 +98,7 @@ function camp(id: string): NavigationCampItem {
   return {
     id,
     title: id,
+    activationState: 'active',
     projectBindingKind: 'quick_chat',
     projectPath: '',
     defaultLead: null,

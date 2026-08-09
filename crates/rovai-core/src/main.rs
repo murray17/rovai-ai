@@ -65,11 +65,11 @@ use rovai_core::{
         HistorySearchInput, invalid_input_error,
     },
     collaboration::{
-        CampCollaborationMode, ChangeDefaultLeadCommand, CollaborationService, CreateCampCommand,
-        CreateTaskCommand, DeleteCampCommand, ExecutionRequest, ProjectBindingKind,
-        ReconcileDefaultLeadCommand, RenameCampCommand, SendUserCampDraftCommand,
-        TaskAcceptanceCriteriaUpdate, TaskAssigneeFilter, TaskAssigneeUpdate, TaskListQuery,
-        TaskStatus, UpdateTaskCommand,
+        CampActivationState, CampCollaborationMode, ChangeDefaultLeadCommand, CollaborationService,
+        CreateCampCommand, CreateTaskCommand, DeleteCampCommand, DiscardPendingCampCommand,
+        ExecutionRequest, ProjectBindingKind, ReconcileDefaultLeadCommand, RenameCampCommand,
+        SendUserCampDraftCommand, TaskAcceptanceCriteriaUpdate, TaskAssigneeFilter,
+        TaskAssigneeUpdate, TaskListQuery, TaskStatus, UpdateTaskCommand,
     },
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandGatewayError, CommandResultStatus,
@@ -299,6 +299,8 @@ struct CreateCampParams {
     member_agent_ids: Vec<String>,
     default_lead_agent_id: String,
     collaboration_mode: CampCollaborationMode,
+    #[serde(default)]
+    activation_state: CampActivationState,
 }
 
 #[derive(Debug, Serialize)]
@@ -2750,6 +2752,7 @@ impl Core {
                     member_agent_ids: params.member_agent_ids,
                     default_lead_agent_id: params.default_lead_agent_id,
                     collaboration_mode: params.collaboration_mode,
+                    activation_state: params.activation_state,
                 };
                 let mut database = self.database.lock().await;
                 let execution = CollaborationService::default().create_camp(
@@ -2812,6 +2815,34 @@ impl Core {
                 drop(database);
                 if should_remove_attachments && let Some(camp_id) = deleted_camp_id {
                     self.forget_deleted_camp_runtimes(&camp_id).await;
+                    CampAttachmentStore::new(&self.data_dir).remove_camp(&camp_id)?;
+                }
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "camps.discardPending" => {
+                let params: UserCommandParams<DiscardPendingCampCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = CollaborationService::default().discard_pending_camp(
+                    &mut database,
+                    &user_camp_command_envelope(params.command_id, camp_id, params.command),
+                )?;
+                let discarded = execution.result.status == CommandResultStatus::Applied
+                    && execution
+                        .result
+                        .payload
+                        .get("discarded")
+                        .and_then(Value::as_bool)
+                        == Some(true);
+                let discarded_camp_id = execution
+                    .result
+                    .payload
+                    .get("campId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                drop(database);
+                if discarded && let Some(camp_id) = discarded_camp_id {
                     CampAttachmentStore::new(&self.data_dir).remove_camp(&camp_id)?;
                 }
                 Ok(serde_json::to_value(execution.result)?)
@@ -6318,7 +6349,19 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
             "Stale Compaction Observer fencing is unavailable; AgentRun admission remains enabled: {error:#}"
         );
     }
-    CampAttachmentStore::new(&data_dir).cleanup_expired(&mut database)?;
+    let attachment_store = CampAttachmentStore::new(&data_dir);
+    attachment_store.cleanup_expired(&mut database)?;
+    let discarded_pending_camps =
+        CollaborationService::default().discard_empty_pending_camps_on_startup(&mut database)?;
+    for camp_id in &discarded_pending_camps {
+        attachment_store.remove_camp(camp_id)?;
+    }
+    if !discarded_pending_camps.is_empty() {
+        eprintln!(
+            "Pending Camp startup cleanup discarded {} empty draft(s)",
+            discarded_pending_camps.len()
+        );
+    }
     let search_summary = runtime_search_environment.summary();
     database.record_runtime_search_environment_generation(
         search_summary.generation,
