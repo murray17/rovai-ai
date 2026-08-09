@@ -312,13 +312,13 @@ describe('task event projections', () => {
       .toMatchObject({ label: 'Git 检测失败', tone: 'attention' })
   })
 
-  it('loads Runtime health only for member, Runtime, and diagnostics views', () => {
+  it('loads Runtime health only for member and Runtime settings views', () => {
     expect(shouldLoadRuntimeHealth('compose', 'skills', false, false)).toBe(false)
     expect(shouldLoadRuntimeHealth('camp', 'skills', false, false)).toBe(false)
     expect(shouldLoadRuntimeHealth('settings', 'skills', false, false)).toBe(false)
     expect(shouldLoadRuntimeHealth('members', 'skills', false, false)).toBe(true)
     expect(shouldLoadRuntimeHealth('settings', 'runtime', false, false)).toBe(true)
-    expect(shouldLoadRuntimeHealth('settings', 'diagnostics', false, false)).toBe(true)
+    expect(shouldLoadRuntimeHealth('settings', 'diagnostics', false, false)).toBe(false)
     expect(shouldLoadRuntimeHealth('members', 'skills', true, false)).toBe(false)
     expect(shouldLoadRuntimeHealth('members', 'skills', false, true)).toBe(false)
   })
@@ -1121,10 +1121,8 @@ describe('task event projections', () => {
       health: null,
       agents: [],
       installations: [],
-      readyCount: 0,
       busy: null,
-      onRefresh: () => undefined,
-      onExport: () => undefined,
+      onDiagnosticsNavigate: () => undefined,
       onReload: async () => undefined,
       onThemeChange: () => undefined
     }
@@ -1135,7 +1133,7 @@ describe('task event projections', () => {
       runtime: 'Agent 运行时',
       appearance: '外观',
       notifications: '通知',
-      diagnostics: '诊断'
+      diagnostics: '诊断与修复'
     }
     for (const [section, heading] of Object.entries(contentBySection) as Array<[NavigationSettingsSection, string]>) {
       const markup = renderToStaticMarkup(createElement(SettingsView, { ...baseProps, section }))
@@ -2340,11 +2338,9 @@ describe('task event projections', () => {
       health: null,
       agents: [],
       installations: [],
-      readyCount: 0,
       busy: null,
       section: 'appearance',
-      onRefresh: () => undefined,
-      onExport: () => undefined,
+      onDiagnosticsNavigate: () => undefined,
       onReload: async () => undefined,
       onThemeChange: () => undefined
     }))
@@ -2353,43 +2349,25 @@ describe('task event projections', () => {
     expect(markup).not.toContain('<strong>记忆</strong>')
   })
 
-  it('shows Antigravity external MCP support only in diagnostics', () => {
-    const health: HealthStatus = {
-      core: { ok: true, version: '0.0.1', dataDir: '/tmp/rovai' },
-      database: { ok: true, path: '/tmp/rovai/rovai.db' },
-      git: { installed: true, version: 'git version 2.0' },
-      runtimeCatalog: [],
-      runtimeAvailability: [productAvailability('antigravity-app', 'ready')],
-      searchEnvironment: {
-        generation: 1,
-        createdAt: '2026-08-06T00:00:00Z',
-        pathEntryCount: 1,
-        shell: {
-          status: 'captured',
-          interactive: false,
-          shellName: 'zsh',
-          entryCount: 1,
-          elapsedMillis: 1
-        }
-      }
-    }
-    const renderSettings = (section: 'diagnostics' | 'runtime' | 'mcp') => renderToStaticMarkup(createElement(SettingsView, {
+  it('renders the formal diagnostics center without prototype-only controls', () => {
+    const markup = renderToStaticMarkup(createElement(SettingsView, {
       appearance: { preference: 'system', resolvedTheme: 'day' },
-      health,
+      health: null,
       agents: [],
       installations: [],
-      readyCount: 1,
       busy: null,
-      section,
-      onRefresh: () => undefined,
-      onExport: () => undefined,
+      section: 'diagnostics',
+      onDiagnosticsNavigate: () => undefined,
       onReload: async () => undefined,
       onThemeChange: () => undefined
     }))
 
-    expect(renderSettings('diagnostics')).toContain('MCP Unsupported（保留原生配置）')
-    expect(renderSettings('runtime')).not.toContain('MCP Unsupported')
-    expect(renderSettings('mcp')).not.toContain('MCP Unsupported')
+    expect(markup).toContain('<h1>诊断与修复</h1>')
+    expect(markup).toContain('运行完整自检')
+    expect(markup).toContain('导出诊断 JSON')
+    expect(markup).toContain('正在读取诊断事实')
+    expect(markup).not.toContain('交互稿状态切换器')
+    expect(markup).not.toContain('修复全部')
   })
 
   it('renders long-term memory as a first-class scope and governance workbench', () => {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   AdapterInstallation,
+  AdapterKind,
   AgentProfile,
   ActionApprovalView,
   AppearanceSnapshot,
@@ -59,6 +60,7 @@ import { McpSettings } from './McpSettings'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { GeneralSettings } from './GeneralSettings'
 import { MemoryLibrary } from './MemoryLibrary'
+import { DiagnosticsCenter } from './DiagnosticsCenter'
 import { localizeExecutionEngineTerms } from './product-copy'
 import {
   applyAppearanceSnapshot,
@@ -70,7 +72,6 @@ import {
   liveRuntimeEventFromCore,
   type LiveRuntimeEvent
 } from './ui-model'
-import { runtimeAvailabilityPresentation } from './runtime-status'
 import {
   campExistsInAuthoritativeNavigation,
   restoredMemberId,
@@ -171,7 +172,7 @@ export function shouldLoadRuntimeHealth(
     && !healthAttempted
     && (
       view === 'members'
-      || (view === 'settings' && (settingsSection === 'runtime' || settingsSection === 'diagnostics'))
+      || (view === 'settings' && settingsSection === 'runtime')
     )
 }
 
@@ -807,11 +808,6 @@ export function App(): React.JSX.Element {
       cancelled = true
     }
   }, [activeCampId, campSnapshot?.camp.id, campSnapshot?.camp.projectBindingKind, campSnapshot?.camp.projectPath])
-  const readyCount = useMemo(
-    () => [health?.core.ok, health?.database.ok, health?.git.installed, runtimeReady(health)].filter(Boolean).length,
-    [health]
-  )
-
   useEffect(() => {
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | null = null
@@ -888,18 +884,6 @@ export function App(): React.JSX.Element {
       if (timer) clearTimeout(timer)
     }
   }, [activeCampId, campSnapshot?.camp.id, loadNavigation])
-
-  const refreshDiagnostics = async (): Promise<void> => {
-    setError(null)
-    try {
-      await window.rovai.request('runtime.discovery.rescan', {
-        interactiveShell: true
-      })
-      await Promise.all([loadOverview(), loadHealth()])
-    } catch (nextError) {
-      setError(errorMessage(nextError))
-    }
-  }
 
   const chooseCurrentProject = (
     nextProject: CurrentProject,
@@ -1405,18 +1389,6 @@ export function App(): React.JSX.Element {
     }
   }
 
-  const exportDiagnostics = async (): Promise<void> => {
-    setBusy('export')
-    setError(null)
-    try {
-      await window.rovai.exportDiagnostics()
-    } catch (nextError) {
-      setError(errorMessage(nextError))
-    } finally {
-      setBusy(null)
-    }
-  }
-
   const changeThemePreference = async (preference: ThemePreference): Promise<void> => {
     setBusy('appearance')
     setError(null)
@@ -1639,11 +1611,9 @@ export function App(): React.JSX.Element {
             currentProjectLabel={currentProjectLabel}
             onGeneralPreferencesChange={setGeneralPreferences}
             installations={installations}
-            readyCount={readyCount}
             busy={busy}
             section={settingsSection}
-            onRefresh={() => void refreshDiagnostics()}
-            onExport={() => void exportDiagnostics()}
+            onDiagnosticsNavigate={(section) => chooseSettingsSection(section)}
             onReload={async () => {
               await Promise.all([loadOverview(), loadHealth()])
             }}
@@ -1834,11 +1804,9 @@ export function SettingsView({
   currentProjectLabel,
   onGeneralPreferencesChange,
   installations,
-  readyCount,
   busy,
   section,
-  onRefresh,
-  onExport,
+  onDiagnosticsNavigate,
   onReload,
   onThemeChange
 }: {
@@ -1849,11 +1817,9 @@ export function SettingsView({
   currentProjectLabel?: string
   onGeneralPreferencesChange?(preferences: GeneralPreferencesSnapshot): void
   installations: AdapterInstallation[]
-  readyCount: number
   busy: string | null
   section: SettingsSection
-  onRefresh(): void
-  onExport(): void
+  onDiagnosticsNavigate(section: 'mcp' | 'runtime', runtimeKind?: AdapterKind): void
   onReload(): Promise<void>
   onThemeChange(preference: ThemePreference): void
 }): React.JSX.Element {
@@ -1896,62 +1862,15 @@ export function SettingsView({
         )}
         {section === 'notifications' && <NotificationSettings />}
         {section === 'diagnostics' && (
-          <>
-            <SettingsPageHeader
-              eyebrow="Settings / Diagnostics"
-              title="诊断"
-              description="这里不会展示任何 Agent 运行时的 Token、登录信息或其他原始凭据。"
-              aside={(
-                <>
-                  <button className="quiet-button" type="button" onClick={onRefresh}>重新检测</button>
-                  <button className="primary-button" type="button" onClick={onExport} disabled={busy === 'export'}>{busy === 'export' ? '正在导出…' : '导出诊断 JSON'}</button>
-                </>
-              )}
-            />
-            <section className="section-block"><div className="section-heading"><div><h2>本地依赖</h2></div><span className="health-score">{readyCount}/4 就绪</span></div><RuntimeHealth health={health} /></section>
-            <section className="section-block diagnostics-card">
-              <Diagnostic label="应用数据目录" value={health?.core.dataDir} />
-              <Diagnostic label="SQLite 数据库" value={health?.database.path} />
-              <Diagnostic label="Git" value={health?.git.version} />
-              {(health?.runtimeAvailability ?? []).map((candidate) => (
-                <Diagnostic key={candidate.runtimeKind} label={runtimeAdapterLabel(candidate.runtimeKind)} value={`${candidate.reportedVersion ?? '版本未知'} · ${runtimeAvailabilityPresentation(candidate).label} · MCP ${runtimeMcpProjectionSummary(candidate.runtimeKind)}`} />
-              ))}
-              <Diagnostic label="Agent 运行时能力" value={health ? runtimeCapabilitySummary(health) : null} />
-            </section>
-          </>
+          <DiagnosticsCenter onNavigate={onDiagnosticsNavigate} />
         )}
       </div>
     </div>
   )
 }
 
-function RuntimeHealth({ health }: { health: HealthStatus | null }): React.JSX.Element {
-  return (
-    <div className="runtime-card health-grid">
-      <HealthItem label="Rust Core" ok={health?.core.ok} detail={health?.core.version} />
-      <HealthItem label="SQLite" ok={health?.database.ok} detail="WAL · bundled" />
-      <HealthItem label="Git" ok={health?.git.installed} detail={health?.git.version} />
-      <HealthItem label="Agent 运行时" ok={runtimeReady(health)} detail={health ? runtimeHealthSummary(health) : null} />
-    </div>
-  )
-}
-
-function HealthItem({ label, ok, detail }: { label: string; ok?: boolean; detail?: string | null }): React.JSX.Element {
-  return <div className="health-item"><span className={`health-indicator ${ok ? 'ok' : ''}`}>{ok ? '✓' : '·'}</span><div><strong>{label}</strong><span>{detail ?? '等待检测'}</span></div></div>
-}
-
-function Diagnostic({ label, value }: { label: string; value?: string | null }): React.JSX.Element {
-  return <div className="diagnostic-row"><strong>{label}</strong><code>{value ?? '—'}</code></div>
-}
-
 function EmptyState({ title, body, action, onAction }: { title: string; body: string; action?: string; onAction?(): void }): React.JSX.Element {
   return <section className="empty-state"><span>⌁</span><h2>{title}</h2><p>{body}</p>{action && onAction && <button className="primary-button" onClick={onAction}>{action}</button>}</section>
-}
-
-function runtimeReady(health: HealthStatus | null): boolean {
-  return health?.runtimeAvailability.some((candidate) =>
-    runtimeAvailabilityPresentation(candidate).status === 'available'
-  ) ?? false
 }
 
 async function resolveNavigationPins(
@@ -2106,41 +2025,6 @@ export function campCreationPreflightFromAgents(
     initialLeadAgentId,
     blockers
   }
-}
-
-function runtimeHealthSummary(health: HealthStatus): string {
-  const ready = health.runtimeAvailability.filter((candidate) =>
-    runtimeAvailabilityPresentation(candidate).status === 'available'
-  )
-  return ready.length
-    ? ready.map((candidate) => `${runtimeAdapterLabel(candidate.runtimeKind)} ${candidate.reportedVersion ?? ''}`.trim()).join(' · ')
-    : '尚无可用 Agent 运行时'
-}
-
-function runtimeCapabilitySummary(health: HealthStatus): string {
-  return health.runtimeAvailability
-    .map((candidate) => `${runtimeAdapterLabel(candidate.runtimeKind)} ${runtimeAvailabilityPresentation(candidate).label}`)
-    .join(' · ')
-}
-
-function runtimeMcpProjectionSummary(kind: string): string {
-  if (kind === 'antigravity-app') return 'Unsupported（保留原生配置）'
-  if (kind === 'codex-cli') return 'AdditivePerRun · NativeWinsSkip'
-  return 'AdditivePerRun · RovaiWins'
-}
-
-function runtimeAdapterLabel(kind: string): string {
-  return ({
-    'codex-cli': 'Codex CLI',
-    'opencode-cli': 'OpenCode',
-    'copilot-cli': 'GitHub Copilot',
-    'claude-code-cli': 'Claude Code',
-    'kiro-cli': 'Kiro',
-    'qoder-cli': 'Qoder',
-    'codebuddy-cli': 'CodeBuddy',
-    'qwen-code': 'Qwen Code',
-    'antigravity-app': 'Antigravity'
-  } as Record<string, string>)[kind] ?? kind
 }
 
 export function commandFailureMessage(result: StoredCommandResult): string {

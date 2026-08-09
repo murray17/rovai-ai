@@ -965,17 +965,24 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 
 ### 诊断
 
-- Hero 操作为“重新检测 / 导出诊断 JSON”，并明确不会展示或导出 Token、登录信息、
-  Cookie、MCP 明文凭据、用户消息、Memory 正文、附件正文或 Tool 输出。
-- “本地依赖”使用一个四列摘要表面显示 Rust Core、SQLite、Git 和 Agent 运行时；
-  `1040px` 可换为两列。每项包含图标、文字状态和版本/说明。
-- “诊断信息”按行显示 App/Core 版本、应用数据目录、SQLite、Git、每个 Product
-  Runtime 的动态状态和能力摘要。屏幕可以显示应用自有路径；导出用 `~` 或占位符
-  脱敏用户 Home，且不包含任意工作目录清单。
-- 部分失败必须逐项显示，不把“3/4 就绪”伪装成全局成功。重新检测失败保留最近
-  成功证据与失败说明。
-- 导出使用显式 Save Dialog；取消零写入，成功后提供 Finder 入口。JSON 结构化、
-  版本化且经过集中 redaction 测试。
+- Hero 操作为“运行完整自检 / 导出诊断 JSON”。完整自检严格只读，不同步 Skill、
+  不初始化或修复 MCP、不 rescan/probe Runtime、不修改 SQLite、不登录或替换 Runtime。
+- 页头后显示固定隐私边界：屏幕和 v5 导出不包含 Token、Cookie、登录信息、用户消息、
+  Memory 正文、附件正文、Tool 输出或绝对 Home、SQLite、Runtime、Skill entry、工作区/项目路径。
+- “诊断摘要”在同一表面显示“正常 / 需要处理 / 暂时无法确认”数量；三项之和等于完整检查数。
+  Partial 与 Recovery 必须诚实标注，不把 unknown 或失败刷新伪装为全局成功。
+- “需要处理的问题”只显示 attention。每项有问题名、原因与影响、默认收起的诊断详情和一个
+  明确下一步。Skill 可重新同步，MCP 只修复安全权限，malformed 只前往设置，Runtime 只单项重检或
+  前往设置，SQLite/数据问题只导出诊断。没有“修复全部”。
+- 修复请求完成后必须复检同一 check ID；只有 `ok` 更新为 Success。复检仍为 attention/unknown 或失败时，
+  保留最近成功报告、摘要和问题，并显示明确 Recovery/未修复说明。
+- “完整检查结果”按“全部 / 需要处理 / 正常 / 暂时无法确认”筛选，且始终包含 Product
+  Runtime Catalog 的全部九项。未使用且未安装的 Runtime 为正常非问题；只有被未移除队员选择且不可用才
+  是 attention；超时和瞬时失败为 unknown。
+- 页面覆盖 Loading、Running、Partial、Error、Success、Disabled 和 Recovery，原型状态切换器不进生产。
+  `1440×920` 与 `1040×700` 均不出现整页水平滚动；长次级文字不小于 10.5px，操作与 disclosure 至少 28px。
+- 导出使用显式 Save Dialog；取消零写入，成功后原子写入 `0600` 且提供当前 session 精确文件的
+  Finder 入口。唯一格式为 `rovai-diagnostics-v5`，由 typed report 和 allowlisted 计数组成并经 Core 集中 redaction。
 
 ## 创建新对话 Dialog
 

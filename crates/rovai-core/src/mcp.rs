@@ -416,6 +416,13 @@ impl McpConfigStore {
         self.view(&loaded, known_agent_ids)
     }
 
+    /// Inspect the MCP configuration without creating defaults or changing bytes or modes.
+    /// Diagnostics must use this path so a read-only self-check remains genuinely read-only.
+    pub fn inspect(&self, known_agent_ids: &BTreeSet<String>) -> Result<McpConfigView> {
+        let loaded = self.load()?;
+        self.view(&loaded, known_agent_ids)
+    }
+
     pub fn repair_permissions(&self) -> Result<()> {
         if let Some(parent) = self.path.parent()
             && parent.exists()
@@ -1896,6 +1903,20 @@ mod tests {
             Some("mcp.config_parse_failed")
         );
         assert_eq!(fs::read(store.path()).unwrap(), b"{broken");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn inspect_missing_config_is_strictly_read_only() {
+        let (root, store) = temporary_store("inspect-missing");
+        assert!(!store.path().exists());
+        let view = store.inspect(&agents()).unwrap();
+        assert!(!view.exists);
+        assert_eq!(
+            view.file_issue.as_ref().map(|issue| issue.code.as_str()),
+            Some("mcp.config_missing")
+        );
+        assert!(!store.path().exists());
         let _ = fs::remove_dir_all(root);
     }
 }

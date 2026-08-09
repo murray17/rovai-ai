@@ -702,6 +702,30 @@ impl AgentProfileService {
             .collect::<rusqlite::Result<BTreeSet<_>>>()?)
     }
 
+    pub fn selected_runtime_counts(
+        &self,
+        database: &Database,
+    ) -> Result<BTreeMap<AdapterKind, usize>> {
+        let mut statement = database.connection().prepare(
+            r#"
+            SELECT selected_runtime_adapter_kind, COUNT(*)
+            FROM agent_profile
+            WHERE profile_status <> 'removed'
+              AND selected_runtime_adapter_kind IS NOT NULL
+            GROUP BY selected_runtime_adapter_kind
+            "#,
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        let mut counts = BTreeMap::new();
+        for row in rows {
+            let (runtime_kind, count) = row?;
+            counts.insert(AdapterKind::from_str(&runtime_kind)?, count.max(0) as usize);
+        }
+        Ok(counts)
+    }
+
     pub fn list_profiles(&self, database: &Database) -> Result<Vec<AgentProfileView>> {
         let mut statement = database.connection().prepare(
             r#"
@@ -3965,6 +3989,62 @@ mod tests {
             std::env::temp_dir().join(format!("rovai-agent-profile-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
         (database, directory)
+    }
+
+    #[test]
+    fn selected_runtime_counts_include_unresolved_selections_and_exclude_removed_profiles() {
+        let (database, directory) = database();
+        let profiles = AgentProfileService::default()
+            .list_profiles(&database)
+            .unwrap();
+        assert!(profiles.len() >= 2);
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET selected_runtime_adapter_kind = NULL, default_runtime_installation_id = NULL, default_model_selection_json = NULL, default_permission_config_json = NULL",
+                [],
+            )
+            .unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO adapter_installation(
+                    id, adapter_kind, executable_path, command_name,
+                    installation_class, source, auth_scope, enabled,
+                    generation, path_state, version, created_at, updated_at
+                ) VALUES (
+                    'diagnostic-count-installation', 'codex-cli', '/missing/codex', 'codex',
+                    'custom', 'custom', 'default', 1,
+                    1, 'path_missing', 1, ?1, ?1
+                )
+                "#,
+                [&now],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET selected_runtime_adapter_kind = 'codex-cli', default_runtime_installation_id = 'diagnostic-count-installation', default_model_selection_json = '{}', default_permission_config_json = '{}' WHERE id = ?1",
+                [&profiles[0].agent_id],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET selected_runtime_adapter_kind = 'codex-cli', default_runtime_installation_id = 'diagnostic-count-installation', default_model_selection_json = '{}', default_permission_config_json = '{}', profile_status = 'removed', removed_at = ?2 WHERE id = ?1",
+                rusqlite::params![profiles[1].agent_id, now],
+            )
+            .unwrap();
+
+        assert_eq!(
+            AgentProfileService::default()
+                .selected_runtime_counts(&database)
+                .unwrap(),
+            BTreeMap::from([(AdapterKind::CodexCli, 1)])
+        );
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     fn user_command<P>(command_id: &str, payload: P) -> CommandEnvelope<P> {

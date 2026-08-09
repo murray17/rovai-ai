@@ -84,6 +84,12 @@ Pending Draft：空草稿不进入导航/恢复，输入后标记“草稿”，
 表面仍不能成为启动目标。完整合同见[v0.49 生产设计](../versions/v0.49/production-design.md)，实施
 状态见[v0.49 实施计划](../versions/v0.49/implementation-plan.md)。
 
+v0.51 用可操作诊断中心替代旧四项健康摘要：顶部只保留“运行完整自检 / 导出诊断
+JSON”，下方固定为三态摘要、attention-only 问题列表和四筛选全量结果。完整自检严格只读，
+修复必须由用户显式点击单项操作并经复检确认；不存在修复全部。完整生产交互见
+[v0.51 生产设计](../versions/v0.51/production-design.md)，安全与导出合同见
+[ADR-0148](../adr/0148-read-only-diagnostics-and-data-minimized-export.md)。
+
 ## 权威边界
 
 1. 有效 ADR、`CONTEXT.md`、Core 合同和安全边界决定领域语义与可执行行为。
@@ -94,7 +100,8 @@ Pending Draft：空草稿不进入导航/恢复，输入后标记“草稿”，
    全局当前版本由[文档导航](../README.md)指向，实施状态只能从代码、测试和版本验收证据判断。
 4. [v0.49 生产设计](../versions/v0.49/production-design.md)决定 General 页面、Main Window
    Session 启动恢复、登录项和窗口 reset 的版本级 Shell/Renderer 合同。
-5. 原型与 HTML 样例只帮助评审视觉层级，不是生产合同、数据真源或可直接复制的代码。
+5. [v0.51 生产设计](../versions/v0.51/production-design.md)决定诊断中心的摘要、问题、全量结果、单项操作与七态恢复合同。
+6. 原型与 HTML 样例只帮助评审视觉层级，不是生产合同、数据真源或可直接复制的代码。
 
 发生冲突时不得用视觉稿覆盖领域或安全合同，也不得用当前旧代码反向覆盖已经冻结的
 新设计。必须明确报告文档—实现漂移。

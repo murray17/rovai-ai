@@ -149,6 +149,9 @@ const api: RovaiApi = {
   exportDiagnostics() {
     return ipcRenderer.invoke('rovai:export-diagnostics')
   },
+  revealDiagnosticsExport(path: string) {
+    return ipcRenderer.invoke('rovai:reveal-diagnostics-export', path)
+  },
   platform: process.platform
 }
 

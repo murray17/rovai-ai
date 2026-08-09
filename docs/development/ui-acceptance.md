@@ -70,10 +70,12 @@ pnpm accept:sidebar-ui
 pnpm accept:structured-mentions-ui
 pnpm accept:task-card-ui
 pnpm accept:runtime-activity-ui
+pnpm accept:diagnostics-ui
 ```
 
 它们分别覆盖长期记忆、成员头像、成员生命周期、应用内通知、统一侧栏、结构化提及和
-Task 单卡原地更新，以及九 Runtime Canonical Activity 工具名称与 run-level 诚实降级的桌面回归。
+Task 单卡原地更新、九 Runtime Canonical Activity 工具名称与 run-level 诚实降级，以及诊断中心
+双尺寸、只读自检、MCP 权限修复复检与 v5 脱敏的桌面回归。
 具体 Schema/Migration 编号属于测试 fixture 和版本证据，不是本文的常青要求。
 
 ### 结构化 Mention 门禁
@@ -122,13 +124,14 @@ Composer 与历史消息的人物信息卡截图是此交互的必留视觉证�
 | `scripts/capture-camp-inspectors.mjs` | 已有 Camp 的 Inspector 截图 | 必须设置 `ROVAI_CAPTURE_USER_DATA_DIR` |
 | `scripts/capture-desktop.mjs` | 通用页面、Runtime 和 Camp 流程 | 写入场景必须设置隔离 `userData` |
 
-## 从真实数据创建只读来源的隔离副本
+## 从明确来源创建只读隔离副本
 
-需要复现已有 Camp 时，先彻底退出 Rovai-ai，并从应用诊断页确认 SQLite 路径。使用
-SQLite Backup API 创建副本：
+需要复现已有 Camp 时，先彻底退出 Rovai-ai。v0.51 起诊断中心和 v5 导出故意不显示绝对
+SQLite 路径；只使用用户明确提供、Electron 开发日志记录或隔离启动参数已证明的来源路径。然后使用 SQLite
+Backup API 创建副本：
 
 ```bash
-SOURCE_DB="<诊断页显示的 rovai.sqlite 路径>"
+SOURCE_DB="<已明确确认的 rovai.sqlite 路径>"
 FIXTURE_ROOT="$(mktemp -d)"
 mkdir -p "$FIXTURE_ROOT/user-data"
 sqlite3 "$SOURCE_DB" ".backup '$FIXTURE_ROOT/user-data/rovai.sqlite'"

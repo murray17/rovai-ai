@@ -130,8 +130,10 @@ try {
   'Authoritative Memory changed across Core restart')
   const diagnostics = await core.request('diagnostics.export')
   const diagnosticText = JSON.stringify(diagnostics)
-  assert(diagnostics.format === 'rovai-diagnostics-v4' && diagnostics.memory.counts.active >= 2,
-    'Diagnostics omitted body-free Memory health')
+  assert(diagnostics.format === 'rovai-diagnostics-v5'
+    && diagnostics.diagnostics?.schemaVersion === 1
+    && Array.isArray(diagnostics.diagnostics?.checks),
+  'Diagnostics export v5 omitted the typed read-only report')
   assert(!diagnosticText.includes(firstCandidate.body) && !diagnosticText.includes(forgetBody),
     'Diagnostics leaked Memory body text')
 

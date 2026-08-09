@@ -19,6 +19,7 @@ Architecture 解释组件如何组成，Version 文档记录交付范围；它�
 
 | 合同 | 权威范围 |
 | --- | --- |
+| [Diagnostics Center v1（当前）](diagnostics-center-v1.md) | `diagnostics.check` typed read model、三态分类、显式单项修复映射、Recovery 与集中脱敏的 `rovai-diagnostics-v5` |
 | [Collaboration State v2（当前）](collaboration-state-v2.md) | peer-only routing identity、稳定 CampMember 选择、Lead ID/Boolean、完整 projection digest、独立 inclusion、accepted ACK 与 v0.50 clean break |
 | [Built-in Tool Transport v4（当前）](builtin-tool-transport-v4.md) | v0.47 十三项固定业务命令、Core Envelope/IPC、receipt、Agent Output v2、Task projection、错误通道与 clean break |
 | [Durable Task v2（当前）](durable-task-v2.md) | 五态 Task、字段限制、projected final state、可见性/权限、事务、列表、membership 收口、删除级联与 linked admission |

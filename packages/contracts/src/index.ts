@@ -325,6 +325,8 @@ export interface ProductRuntimeAvailability {
   installationId: string | null
   reportedVersion: string | null
   diagnosticCode: string | null
+  lastAttemptedAt?: string | null
+  lastSuccessfulProbeAt?: string | null
 }
 
 export interface HealthStatus {
@@ -352,6 +354,41 @@ export interface HealthStatus {
       elapsedMillis: number
     }
   }
+}
+
+export type DiagnosticStatus = 'ok' | 'attention' | 'unknown'
+export type DiagnosticGroup = 'local_dependencies' | 'managed_content' | 'agent_runtimes'
+
+export interface DiagnosticFact {
+  key: string
+  value: string
+}
+
+export interface DiagnosticCheck {
+  id: string
+  group: DiagnosticGroup
+  subjectKind: string
+  subjectId: string | null
+  label: string
+  status: DiagnosticStatus
+  code: string
+  detail: string
+  observedAt: string
+  stale: boolean
+  facts: DiagnosticFact[]
+}
+
+export interface DiagnosticSummary {
+  ok: number
+  attention: number
+  unknown: number
+}
+
+export interface DiagnosticsReport {
+  schemaVersion: 1
+  checkedAt: string
+  summary: DiagnosticSummary
+  checks: DiagnosticCheck[]
 }
 
 export type StartPreflightBlockerCode =
@@ -1727,6 +1764,7 @@ export interface RejectHearthMemoryProposalsCommand {
 
 export type CoreMethod =
   | 'health.check'
+  | 'diagnostics.check'
   | 'runtime.discovery.rescan'
   | 'runtime.product.ensure'
   | 'runtime.product.check'
@@ -1843,5 +1881,6 @@ export interface RovaiApi {
   revealMcpConfig(): Promise<void>
   exportMemory(): Promise<string | null>
   exportDiagnostics(): Promise<string | null>
+  revealDiagnosticsExport(path: string): Promise<void>
   platform: NodeJS.Platform
 }

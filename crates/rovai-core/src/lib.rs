@@ -17,6 +17,7 @@ pub mod context_contract;
 pub mod context_delivery;
 pub mod context_index;
 pub mod db;
+pub mod diagnostics;
 pub mod execution_budget;
 pub mod execution_evidence;
 pub mod git;

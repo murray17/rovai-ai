@@ -89,6 +89,10 @@ use rovai_core::{
         RuntimeInputDelivery, SkillExposurePreparation,
     },
     db::Database,
+    diagnostics::{
+        DiagnosticCheck, DiagnosticGroup, DiagnosticStatus, DiagnosticsReport, aggregate_counts,
+        database_integrity_check, diagnostics_export_v5,
+    },
     execution_budget::camp_turn_execution_budget_now,
     execution_evidence::{AgentRunExecutionEvidence, ExecutionEvidenceService},
     git,
@@ -202,6 +206,8 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
     matches!(
         method,
         "health.check"
+            | "diagnostics.check"
+            | "diagnostics.export"
             | "runtime.installations.refresh"
             | "runtime.discovery.rescan"
             | "runtime.product.ensure"
@@ -616,6 +622,247 @@ enum AgentRunRuntime {
     Acp(Arc<AcpRuntime>),
 }
 
+fn data_directory_check(data_dir: &Path, observed_at: &str) -> DiagnosticCheck {
+    match std::fs::metadata(data_dir) {
+        Ok(metadata) if metadata.is_dir() && !metadata.permissions().readonly() => {
+            DiagnosticCheck::new(
+                "data-directory",
+                DiagnosticGroup::LocalDependencies,
+                "data_directory",
+                "应用数据目录",
+                DiagnosticStatus::Ok,
+                "data_directory_ready",
+                "Application data directory is available to the running Core",
+            )
+            .with_observed_at(observed_at)
+        }
+        Ok(_) => DiagnosticCheck::new(
+            "data-directory",
+            DiagnosticGroup::LocalDependencies,
+            "data_directory",
+            "应用数据目录",
+            DiagnosticStatus::Attention,
+            "data_directory_not_writable",
+            "Application data directory is not a writable directory",
+        )
+        .with_observed_at(observed_at),
+        Err(_) => DiagnosticCheck::new(
+            "data-directory",
+            DiagnosticGroup::LocalDependencies,
+            "data_directory",
+            "应用数据目录",
+            DiagnosticStatus::Unknown,
+            "data_directory_inspection_failed",
+            "Application data directory could not be confirmed",
+        )
+        .with_observed_at(observed_at),
+    }
+}
+
+fn git_diagnostic_check(git: &Value, observed_at: &str) -> DiagnosticCheck {
+    let installed = git
+        .get("installed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let version = git
+        .get("version")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    if installed {
+        DiagnosticCheck::new(
+            "git",
+            DiagnosticGroup::LocalDependencies,
+            "git",
+            "Git",
+            DiagnosticStatus::Ok,
+            "git_available",
+            "Git is available from the current Runtime search environment",
+        )
+        .with_observed_at(observed_at)
+        .with_fact("version", version)
+    } else {
+        DiagnosticCheck::new(
+            "git",
+            DiagnosticGroup::LocalDependencies,
+            "git",
+            "Git",
+            DiagnosticStatus::Attention,
+            "git_not_available",
+            "Git is not available from the current Runtime search environment",
+        )
+        .with_observed_at(observed_at)
+    }
+}
+
+fn runtime_diagnostic_checks(
+    runtime_health: &Value,
+    used_runtime_counts: &BTreeMap<AdapterKind, usize>,
+    runtime_usage_known: bool,
+    checked_at: &str,
+) -> Vec<DiagnosticCheck> {
+    let catalog = runtime_health
+        .get("runtimeCatalog")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            Some((
+                entry.get("runtimeKind")?.as_str()?.to_string(),
+                entry.get("displayName")?.as_str()?.to_string(),
+            ))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let availability = runtime_health
+        .get("runtimeAvailability")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    AdapterKind::ALL
+        .into_iter()
+        .map(|kind| {
+            let current = availability.iter().find(|candidate| {
+                candidate.get("runtimeKind").and_then(Value::as_str) == Some(kind.as_str())
+            });
+            let runtime_status = current
+                .and_then(|candidate| candidate.get("status"))
+                .and_then(Value::as_str)
+                .unwrap_or("detecting");
+            let used_by = used_runtime_counts.get(&kind).copied().unwrap_or_default();
+            let label = catalog
+                .get(kind.as_str())
+                .cloned()
+                .unwrap_or_else(|| runtime_display_name(kind).to_string());
+            let observed_at = current
+                .and_then(|candidate| candidate.get("discovery"))
+                .and_then(|discovery| discovery.get("observedAt"))
+                .and_then(Value::as_str)
+                .unwrap_or(checked_at);
+
+            let (status, code, detail, stale) = if !runtime_usage_known {
+                (
+                    DiagnosticStatus::Unknown,
+                    "runtime_usage_unavailable",
+                    "Current member Runtime selections could not be read",
+                    false,
+                )
+            } else if used_by == 0 {
+                (
+                    DiagnosticStatus::Ok,
+                    "runtime_not_in_use",
+                    "Runtime is not selected by any current member",
+                    false,
+                )
+            } else {
+                match runtime_status {
+                    "ready" => (
+                        DiagnosticStatus::Ok,
+                        "runtime_ready",
+                        "Runtime is available for current members",
+                        false,
+                    ),
+                    "refresh_failed_using_last_success" => (
+                        DiagnosticStatus::Unknown,
+                        "runtime_refresh_failed_using_last_success",
+                        "Latest check failed; the previous successful evidence is retained",
+                        true,
+                    ),
+                    "detecting" | "found_uninspected" | "checking" => (
+                        DiagnosticStatus::Unknown,
+                        "runtime_check_incomplete",
+                        "Current Runtime evidence is incomplete",
+                        false,
+                    ),
+                    "authentication_required" => (
+                        DiagnosticStatus::Attention,
+                        "runtime_authentication_required",
+                        "Runtime requires user authentication",
+                        false,
+                    ),
+                    "missing" => (
+                        DiagnosticStatus::Attention,
+                        "runtime_missing",
+                        "Runtime is selected by a current member but is not installed",
+                        false,
+                    ),
+                    "incompatible" => (
+                        DiagnosticStatus::Attention,
+                        "runtime_incompatible",
+                        "Installed Runtime version is not supported",
+                        false,
+                    ),
+                    "path_missing" => (
+                        DiagnosticStatus::Attention,
+                        "runtime_path_missing",
+                        "Configured Runtime executable is no longer available",
+                        false,
+                    ),
+                    "disabled" => (
+                        DiagnosticStatus::Attention,
+                        "runtime_disabled",
+                        "Runtime is disabled while current members still select it",
+                        false,
+                    ),
+                    _ => (
+                        DiagnosticStatus::Unknown,
+                        "runtime_status_unknown",
+                        "Runtime availability could not be confirmed",
+                        false,
+                    ),
+                }
+            };
+
+            let mut check = DiagnosticCheck::new(
+                format!("runtime:{}", kind.as_str()),
+                DiagnosticGroup::AgentRuntimes,
+                "runtime",
+                label,
+                status,
+                code,
+                detail,
+            )
+            .with_subject_id(kind.as_str())
+            .with_observed_at(observed_at)
+            .with_stale(stale)
+            .with_fact("usedByMemberCount", used_by.to_string())
+            .with_fact("availabilityStatus", runtime_status);
+            if let Some(version) = current
+                .and_then(|candidate| candidate.get("reportedVersion"))
+                .and_then(Value::as_str)
+            {
+                check = check.with_fact("reportedVersion", version);
+            }
+            if let Some(code) = current
+                .and_then(|candidate| candidate.get("diagnosticCode"))
+                .and_then(Value::as_str)
+            {
+                check = check.with_fact("diagnosticCode", code);
+            }
+            if let Some(last_success) = current
+                .and_then(|candidate| candidate.get("lastSuccessfulProbeAt"))
+                .and_then(Value::as_str)
+            {
+                check = check.with_fact("lastSuccessfulProbeAt", last_success);
+            }
+            check
+        })
+        .collect()
+}
+
+fn runtime_display_name(kind: AdapterKind) -> &'static str {
+    match kind {
+        AdapterKind::CodexCli => "Codex CLI",
+        AdapterKind::OpencodeCli => "OpenCode",
+        AdapterKind::CopilotCli => "GitHub Copilot CLI",
+        AdapterKind::ClaudeCodeCli => "Claude Code",
+        AdapterKind::KiroCli => "Kiro CLI",
+        AdapterKind::QoderCli => "Qoder CLI",
+        AdapterKind::CodebuddyCli => "CodeBuddy CLI",
+        AdapterKind::QwenCode => "Qwen Code",
+        AdapterKind::AntigravityApp => "Antigravity",
+    }
+}
+
 impl AgentRunRuntime {
     fn adapter_kind(&self) -> rovai_core::agent_profile::AdapterKind {
         match self {
@@ -899,6 +1146,15 @@ impl Core {
                             .and_then(|attempt| attempt.diagnostic_code.as_deref())
                             .or_else(|| product_diagnostic.map(|diagnostic| diagnostic.diagnostic_code.as_str()))
                             .or(discovery.diagnostic_code.as_deref()),
+                        "lastAttemptedAt": installation
+                            .and_then(|installation| installation.snapshot.as_ref())
+                            .map(|snapshot| snapshot.last_attempted_at.as_str())
+                            .or_else(|| installation
+                                .and_then(|installation| installation.last_probe_attempt.as_ref())
+                                .map(|attempt| attempt.attempted_at.as_str())),
+                        "lastSuccessfulProbeAt": installation
+                            .and_then(|installation| installation.snapshot.as_ref())
+                            .and_then(|snapshot| snapshot.last_successful_probe_at.as_deref()),
                     })
                 })
                 .collect::<Vec<_>>();
@@ -907,6 +1163,192 @@ impl Core {
             "runtimeAvailability": availability,
             "searchEnvironment": self.runtime_search_environment.read().await.summary(),
         }))
+    }
+
+    async fn diagnostics_report(&self) -> DiagnosticsReport {
+        let checked_at = chrono::Utc::now().to_rfc3339();
+        let git_health = serde_json::to_value(health::git_health().await).unwrap_or_else(|_| {
+            json!({
+                "installed": false,
+                "version": null,
+                "detail": "git health serialization failed"
+            })
+        });
+        let runtime_health = self.runtime_health_payload().await;
+
+        let mut checks = vec![
+            DiagnosticCheck::new(
+                "core",
+                DiagnosticGroup::LocalDependencies,
+                "core",
+                "Rust Core",
+                DiagnosticStatus::Ok,
+                "core_ready",
+                "Core request channel is available",
+            )
+            .with_observed_at(&checked_at)
+            .with_fact("version", env!("CARGO_PKG_VERSION")),
+            data_directory_check(&self.data_dir, &checked_at),
+            git_diagnostic_check(&git_health, &checked_at),
+        ];
+
+        let mut used_runtime_counts = BTreeMap::<AdapterKind, usize>::new();
+        let runtime_usage_known;
+        {
+            let database = self.database.lock().await;
+            checks.push(database_integrity_check(&database));
+
+            match SkillProjectionReconciler.audit_known_roots(&database, &self.skill_library) {
+                Ok(issues) if issues.is_empty() => checks.push(
+                    DiagnosticCheck::new(
+                        "skill-projections",
+                        DiagnosticGroup::ManagedContent,
+                        "skill_projections",
+                        "Skill 投影",
+                        DiagnosticStatus::Ok,
+                        "skill_projections_ready",
+                        "Managed Skill projections match current Library revisions",
+                    )
+                    .with_observed_at(&checked_at)
+                    .with_fact("issueCount", "0"),
+                ),
+                Ok(issues) => {
+                    let codes = issues
+                        .iter()
+                        .filter_map(|issue| issue.error_code.as_deref())
+                        .collect::<BTreeSet<_>>()
+                        .into_iter()
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    checks.push(
+                        DiagnosticCheck::new(
+                            "skill-projections",
+                            DiagnosticGroup::ManagedContent,
+                            "skill_projections",
+                            "Skill 投影",
+                            DiagnosticStatus::Attention,
+                            "skill_projections_need_reconcile",
+                            "Managed Skill projections do not match current read-only audit",
+                        )
+                        .with_observed_at(&checked_at)
+                        .with_fact("issueCount", issues.len().to_string())
+                        .with_fact("issueCodes", codes),
+                    );
+                }
+                Err(_) => checks.push(
+                    DiagnosticCheck::new(
+                        "skill-projections",
+                        DiagnosticGroup::ManagedContent,
+                        "skill_projections",
+                        "Skill 投影",
+                        DiagnosticStatus::Unknown,
+                        "skill_projection_audit_failed",
+                        "Managed Skill projections could not be confirmed",
+                    )
+                    .with_observed_at(&checked_at),
+                ),
+            }
+
+            let known_agents = Self::known_agent_ids(&database).unwrap_or_default();
+            checks.push(match self.mcp_config.inspect(&known_agents) {
+                Ok(config) if !config.exists => DiagnosticCheck::new(
+                    "mcp-config",
+                    DiagnosticGroup::ManagedContent,
+                    "mcp_config",
+                    "MCP 配置",
+                    DiagnosticStatus::Ok,
+                    "mcp_config_not_initialized",
+                    "No MCP configuration exists and no external MCP is in use",
+                )
+                .with_observed_at(&checked_at)
+                .with_fact("serverCount", "0"),
+                Ok(config) if config.file_issue.is_some() => {
+                    let issue = config.file_issue.expect("checked above");
+                    DiagnosticCheck::new(
+                        "mcp-config",
+                        DiagnosticGroup::ManagedContent,
+                        "mcp_config",
+                        "MCP 配置",
+                        DiagnosticStatus::Attention,
+                        issue.code,
+                        "MCP configuration is preserved but cannot be used",
+                    )
+                    .with_observed_at(&checked_at)
+                }
+                Ok(config) if config.permission_issue => DiagnosticCheck::new(
+                    "mcp-config",
+                    DiagnosticGroup::ManagedContent,
+                    "mcp_config",
+                    "MCP 配置",
+                    DiagnosticStatus::Attention,
+                    "mcp_config_permissions_too_broad",
+                    "MCP configuration permissions are broader than the safe 0600 mode",
+                )
+                .with_observed_at(&checked_at)
+                .with_fact("expectedMode", "0600"),
+                Ok(config) => DiagnosticCheck::new(
+                    "mcp-config",
+                    DiagnosticGroup::ManagedContent,
+                    "mcp_config",
+                    "MCP 配置",
+                    DiagnosticStatus::Ok,
+                    "mcp_config_ready",
+                    "MCP configuration is valid and uses safe file permissions",
+                )
+                .with_observed_at(&checked_at)
+                .with_fact("serverCount", config.servers.len().to_string()),
+                Err(_) => DiagnosticCheck::new(
+                    "mcp-config",
+                    DiagnosticGroup::ManagedContent,
+                    "mcp_config",
+                    "MCP 配置",
+                    DiagnosticStatus::Unknown,
+                    "mcp_config_inspection_failed",
+                    "MCP configuration could not be confirmed",
+                )
+                .with_observed_at(&checked_at),
+            });
+
+            match AgentProfileService::default().selected_runtime_counts(&database) {
+                Ok(counts) => {
+                    used_runtime_counts = counts;
+                    runtime_usage_known = true;
+                }
+                Err(_) => runtime_usage_known = false,
+            }
+        }
+
+        match runtime_health {
+            Ok(runtime_health) => checks.extend(runtime_diagnostic_checks(
+                &runtime_health,
+                &used_runtime_counts,
+                runtime_usage_known,
+                &checked_at,
+            )),
+            Err(_) => checks.extend(AdapterKind::ALL.into_iter().map(|kind| {
+                DiagnosticCheck::new(
+                    format!("runtime:{}", kind.as_str()),
+                    DiagnosticGroup::AgentRuntimes,
+                    "runtime",
+                    runtime_display_name(kind),
+                    DiagnosticStatus::Unknown,
+                    "runtime_snapshot_unavailable",
+                    "Current Runtime evidence could not be read",
+                )
+                .with_subject_id(kind.as_str())
+                .with_observed_at(&checked_at)
+                .with_fact(
+                    "usedByMemberCount",
+                    used_runtime_counts
+                        .get(&kind)
+                        .copied()
+                        .unwrap_or_default()
+                        .to_string(),
+                )
+            })),
+        }
+
+        DiagnosticsReport::new(checks)
     }
 
     async fn pump_runtime_ready_recipients(&self, kind: AdapterKind) -> Result<()> {
@@ -3214,25 +3656,37 @@ impl Core {
                     params.limit.unwrap_or(500),
                 )?)?)
             }
+            "diagnostics.check" => Ok(serde_json::to_value(self.diagnostics_report().await)?),
             "diagnostics.export" => {
-                let mut database = self.database.lock().await;
+                let report = self.diagnostics_report().await;
+                let database = self.database.lock().await;
                 let profile_service = AgentProfileService::default();
                 let agents = profile_service.list_profiles(&database)?;
-                let adapter_installations = profile_service.list_installations(&database)?;
+                let selected_runtime_counts = profile_service.selected_runtime_counts(&database)?;
                 let camps = ReadModelService.list_camps(&database)?;
-                let navigation = ReadModelService.navigation_snapshot(&mut database)?;
-                let memory_diagnostics = MemoryService::default().diagnostics(&database)?;
-                Ok(json!({
-                    "format": "rovai-diagnostics-v4",
-                    "exportedAt": chrono::Utc::now().to_rfc3339(),
-                    "appVersion": env!("CARGO_PKG_VERSION"),
-                    "databasePath": database.path(),
-                    "agents": agents,
-                    "adapterInstallations": adapter_installations,
-                    "camps": camps,
-                    "navigation": navigation,
-                    "memory": memory_diagnostics,
-                }))
+                let aggregate = aggregate_counts([
+                    ("agentCount", agents.len()),
+                    (
+                        "currentAgentCount",
+                        agents
+                            .iter()
+                            .filter(|agent| {
+                                agent.removed_at.is_none() && agent.presence != "removed"
+                            })
+                            .count(),
+                    ),
+                    (
+                        "configuredRuntimeMemberCount",
+                        selected_runtime_counts.values().sum(),
+                    ),
+                    ("campCount", camps.len()),
+                    ("runtimeCatalogCount", AdapterKind::ALL.len()),
+                ]);
+                Ok(diagnostics_export_v5(
+                    env!("CARGO_PKG_VERSION"),
+                    &report,
+                    aggregate,
+                ))
             }
             "runtime.discovery.rescan" => {
                 let params: RuntimeDiscoveryRescanParams =
@@ -8964,6 +9418,78 @@ mod tests {
     }
 
     #[test]
+    fn diagnostics_only_escalate_unavailable_runtimes_selected_by_current_members() {
+        let runtime_health = json!({
+            "runtimeCatalog": [{
+                "runtimeKind": "codex-cli",
+                "displayName": "Codex CLI"
+            }],
+            "runtimeAvailability": [{
+                "runtimeKind": "codex-cli",
+                "status": "missing",
+                "discovery": { "observedAt": "2026-08-09T08:00:00Z" }
+            }]
+        });
+        let unused = runtime_diagnostic_checks(
+            &runtime_health,
+            &BTreeMap::new(),
+            true,
+            "2026-08-09T08:00:00Z",
+        );
+        let unused_codex = unused
+            .iter()
+            .find(|check| check.subject_id.as_deref() == Some("codex-cli"))
+            .unwrap();
+        assert_eq!(unused_codex.status, DiagnosticStatus::Ok);
+        assert_eq!(unused_codex.code, "runtime_not_in_use");
+
+        let used = runtime_diagnostic_checks(
+            &runtime_health,
+            &BTreeMap::from([(AdapterKind::CodexCli, 2)]),
+            true,
+            "2026-08-09T08:00:00Z",
+        );
+        let used_codex = used
+            .iter()
+            .find(|check| check.subject_id.as_deref() == Some("codex-cli"))
+            .unwrap();
+        assert_eq!(used_codex.status, DiagnosticStatus::Attention);
+        assert_eq!(used_codex.code, "runtime_missing");
+        assert_eq!(
+            used_codex
+                .facts
+                .iter()
+                .find(|fact| fact.key == "usedByMemberCount")
+                .map(|fact| fact.value.as_str()),
+            Some("2")
+        );
+    }
+
+    #[test]
+    fn diagnostics_keep_incomplete_runtime_evidence_out_of_the_issue_state() {
+        let runtime_health = json!({
+            "runtimeCatalog": [],
+            "runtimeAvailability": [{
+                "runtimeKind": "codex-cli",
+                "status": "checking",
+                "discovery": { "observedAt": "2026-08-09T08:00:00Z" }
+            }]
+        });
+        let checks = runtime_diagnostic_checks(
+            &runtime_health,
+            &BTreeMap::from([(AdapterKind::CodexCli, 1)]),
+            true,
+            "2026-08-09T08:00:00Z",
+        );
+        let codex = checks
+            .iter()
+            .find(|check| check.subject_id.as_deref() == Some("codex-cli"))
+            .unwrap();
+        assert_eq!(codex.status, DiagnosticStatus::Unknown);
+        assert_eq!(codex.code, "runtime_check_incomplete");
+    }
+
+    #[test]
     fn controlled_native_resume_classifies_only_explicit_rejection_as_incompatible() {
         assert_eq!(
             classify_native_resume_failure(&anyhow::anyhow!("session not found")),
@@ -8982,6 +9508,8 @@ mod tests {
     #[test]
     fn runtime_probes_do_not_occupy_the_interactive_request_queue() {
         assert!(request_runs_outside_main_queue("health.check"));
+        assert!(request_runs_outside_main_queue("diagnostics.check"));
+        assert!(request_runs_outside_main_queue("diagnostics.export"));
         assert!(request_runs_outside_main_queue(
             "runtime.installations.refresh"
         ));

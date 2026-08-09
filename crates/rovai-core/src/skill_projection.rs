@@ -599,6 +599,199 @@ impl SkillProjectionReconciler {
             .collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// Re-evaluate every known managed projection from filesystem and Library facts without
+    /// reconciling links, updating observations, resuming Runs, or completing deletions.
+    pub fn audit_known_roots(
+        &self,
+        database: &Database,
+        library: &SkillLibraryService,
+    ) -> Result<Vec<SkillProjectionIssue>> {
+        const AUDIT_ORDER: [SkillDeliveryGroupKey; 9] = [
+            SkillDeliveryGroupKey::ClaudeCompatible,
+            SkillDeliveryGroupKey::Codex,
+            SkillDeliveryGroupKey::Opencode,
+            SkillDeliveryGroupKey::Copilot,
+            SkillDeliveryGroupKey::Antigravity,
+            SkillDeliveryGroupKey::Kiro,
+            SkillDeliveryGroupKey::Qoder,
+            SkillDeliveryGroupKey::Codebuddy,
+            SkillDeliveryGroupKey::Qwen,
+        ];
+
+        let requirements = self.known_execution_roots(database)?;
+        let skills = library.list(database)?;
+        let now = Utc::now().to_rfc3339();
+        let mut issues = Vec::new();
+        let mut normalized_requirements =
+            BTreeMap::<String, BTreeSet<SkillDeliveryGroupKey>>::new();
+
+        for requirement in requirements {
+            let canonical_root = match Path::new(&requirement.execution_root).canonicalize() {
+                Ok(root) if root.is_dir() => root,
+                _ => {
+                    issues.push(SkillProjectionIssue {
+                        execution_root: requirement.execution_root.clone(),
+                        group_key: SkillDeliveryGroupKey::Codex,
+                        skill_id: "execution-root".to_string(),
+                        skill_name: "Skill execution root".to_string(),
+                        revision_id: String::new(),
+                        entry_path: requirement.execution_root,
+                        state: "error".to_string(),
+                        error_code: Some("execution_root_unavailable".to_string()),
+                        observed_at: now.clone(),
+                    });
+                    continue;
+                }
+            };
+            normalized_requirements
+                .entry(canonical_root.to_string_lossy().to_string())
+                .or_default()
+                .extend(requirement.delivery_groups);
+        }
+
+        for (execution_root, required_groups) in normalized_requirements {
+            let canonical_root = Path::new(&execution_root);
+            let observations = list_observations_for_root(database, &execution_root)?;
+            let observation_by_key = observations
+                .iter()
+                .map(|observation| {
+                    (
+                        (observation.group_key, observation.skill_id.as_str()),
+                        observation,
+                    )
+                })
+                .collect::<BTreeMap<_, _>>();
+
+            for group_key in AUDIT_ORDER {
+                for skill in &skills {
+                    let desired = required_groups.contains(&group_key)
+                        && skill.enabled
+                        && skill.lifecycle_status == "active"
+                        && skill
+                            .group_assignments
+                            .iter()
+                            .any(|assignment| assignment.group_key == group_key);
+                    let observation = observation_by_key
+                        .get(&(group_key, skill.id.as_str()))
+                        .copied();
+                    if !desired {
+                        if let Some(observation) = observation {
+                            issues.push(issue_from_observation(
+                                skill,
+                                observation,
+                                "pending_removal",
+                                "projection_no_longer_desired",
+                                &now,
+                            ));
+                        }
+                        continue;
+                    }
+
+                    let Some(observation) = observation else {
+                        issues.push(SkillProjectionIssue {
+                            execution_root: execution_root.clone(),
+                            group_key,
+                            skill_id: skill.id.clone(),
+                            skill_name: skill.name.clone(),
+                            revision_id: skill.current_revision.id.clone(),
+                            entry_path: canonical_root
+                                .join(group_key.relative_path())
+                                .join(&skill.name)
+                                .to_string_lossy()
+                                .to_string(),
+                            state: "stale".to_string(),
+                            error_code: Some("projection_observation_missing".to_string()),
+                            observed_at: now.clone(),
+                        });
+                        continue;
+                    };
+
+                    if library
+                        .verify_revision_content(&skill.current_revision)
+                        .is_err()
+                    {
+                        issues.push(issue_from_observation(
+                            skill,
+                            observation,
+                            "error",
+                            "revision_corrupted",
+                            &now,
+                        ));
+                        continue;
+                    }
+                    if observation.state != "ready" {
+                        issues.push(issue_from_observation(
+                            skill,
+                            observation,
+                            &observation.state,
+                            observation
+                                .last_error_code
+                                .as_deref()
+                                .unwrap_or("projection_not_ready"),
+                            &now,
+                        ));
+                        continue;
+                    }
+                    if observation.duplicate_visible {
+                        issues.push(issue_from_observation(
+                            skill,
+                            observation,
+                            "shadowed",
+                            "duplicate_visible",
+                            &now,
+                        ));
+                        continue;
+                    }
+                    if observation.revision_id != skill.current_revision.id {
+                        issues.push(issue_from_observation(
+                            skill,
+                            observation,
+                            "stale",
+                            "projection_revision_stale",
+                            &now,
+                        ));
+                        continue;
+                    }
+
+                    match inspect_entry(database, library, Path::new(&observation.entry_path))? {
+                        EntryState::Managed(actual)
+                            if actual.skill_id == skill.id
+                                && actual.revision_id == skill.current_revision.id => {}
+                        EntryState::Missing => issues.push(issue_from_observation(
+                            skill,
+                            observation,
+                            "stale",
+                            "projection_entry_missing",
+                            &now,
+                        )),
+                        EntryState::Managed(_) => issues.push(issue_from_observation(
+                            skill,
+                            observation,
+                            "shadowed",
+                            "entry_owned_by_another_rovai_skill",
+                            &now,
+                        )),
+                        EntryState::ProjectOwned(reason) => issues.push(issue_from_observation(
+                            skill,
+                            observation,
+                            "shadowed",
+                            reason,
+                            &now,
+                        )),
+                    }
+                }
+            }
+        }
+
+        issues.sort_by(|left, right| {
+            left.execution_root
+                .cmp(&right.execution_root)
+                .then_with(|| left.skill_name.cmp(&right.skill_name))
+                .then_with(|| left.group_key.cmp(&right.group_key))
+        });
+        Ok(issues)
+    }
+
     fn finalize_deleting_skills(
         &self,
         database: &mut Database,
@@ -760,6 +953,26 @@ impl SkillProjectionReconciler {
             transaction.commit()?;
         }
         Ok(())
+    }
+}
+
+fn issue_from_observation(
+    skill: &SkillView,
+    observation: &SkillProjectionObservationView,
+    state: &str,
+    error_code: &str,
+    observed_at: &str,
+) -> SkillProjectionIssue {
+    SkillProjectionIssue {
+        execution_root: observation.execution_root.clone(),
+        group_key: observation.group_key,
+        skill_id: skill.id.clone(),
+        skill_name: skill.name.clone(),
+        revision_id: observation.revision_id.clone(),
+        entry_path: observation.entry_path.clone(),
+        state: state.to_string(),
+        error_code: Some(error_code.to_string()),
+        observed_at: observed_at.to_string(),
     }
 }
 
@@ -2061,6 +2274,44 @@ mod tests {
             .unwrap();
         assert!(status.status.success());
         assert_eq!(String::from_utf8(status.stdout).unwrap(), "");
+    }
+
+    #[test]
+    fn audit_detects_missing_managed_link_without_repairing_it() {
+        let root = temporary_directory("rovai-projection-audit-root");
+        let data = temporary_directory("rovai-projection-audit-db");
+        let library_root = temporary_directory("rovai-projection-audit-library");
+        let mut database = Database::open(&data).unwrap();
+        let library = SkillLibraryService::new(library_root).unwrap();
+        let skill =
+            install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
+        SkillProjectionReconciler
+            .reconcile_root(
+                &mut database,
+                &library,
+                &root,
+                &[SkillDeliveryGroupKey::Codex],
+            )
+            .unwrap();
+        insert_active_run(&database, &root);
+        let initial_issues = SkillProjectionReconciler
+            .audit_known_roots(&database, &library)
+            .unwrap();
+        assert!(initial_issues.is_empty(), "{initial_issues:#?}");
+
+        let entry = root.join(".codex/skills").join(&skill.name);
+        fs::remove_file(&entry).unwrap();
+        let issues = SkillProjectionReconciler
+            .audit_known_roots(&database, &library)
+            .unwrap();
+        assert!(issues.iter().any(|issue| {
+            issue.skill_id == skill.id
+                && issue.error_code.as_deref() == Some("projection_entry_missing")
+        }));
+        assert!(fs::symlink_metadata(entry).is_err());
+
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(data).unwrap();
     }
 
     #[test]

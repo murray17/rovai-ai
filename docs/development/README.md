@@ -98,4 +98,6 @@ pnpm build:desktop
 | `out/` | Electron Vite 构建结果 |
 | `dist/` | macOS App 和 DMG |
 
-Camp、运行、事件和审批数据位于 Electron `userData`。准确位置以应用诊断页显示为准。
+Camp、运行、事件和审批数据位于 Electron `userData`。诊断中心和 v5 导出不再显示或输出绝对
+`userData` / SQLite 路径；需要制作数据库副本时，应从已退出的隔离验收环境或 Electron 开发日志取得精确位置，
+不根据文档推测。

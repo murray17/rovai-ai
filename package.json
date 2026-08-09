@@ -59,6 +59,7 @@
     "accept:structured-mentions-ui": "node scripts/accept-structured-mentions-ui.mjs",
     "accept:task-card-ui": "node scripts/accept-task-card-ui.mjs",
     "accept:runtime-activity-ui": "node scripts/accept-runtime-activity-ui.mjs",
+    "accept:diagnostics-ui": "node scripts/accept-diagnostics-ui.mjs",
     "smoke:recovery": "pnpm core:build:debug && node scripts/smoke-recovery.mjs",
     "package:mac": "pnpm build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --arm64",
     "dist:mac": "pnpm build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg --arm64"
