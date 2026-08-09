@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-command-routing
-last_updated: 2026-08-08
+last_updated: 2026-08-09
 ---
 
 # 测试与 Smoke Test
@@ -11,12 +11,12 @@ last_updated: 2026-08-08
 
 ## 测试层级
 
-### 快速静态与单元验证
+### 日常 commit 验证
 
 ```bash
 pnpm typecheck
 pnpm test
-cargo test --workspace
+pnpm test:rust:staged
 ```
 
 `pnpm test` 首先显式执行 `pnpm docs:test` 和 `pnpm docs:check`。前者覆盖 YAML/Markdown 解析、
@@ -33,10 +33,41 @@ pnpm docs:adr:generate -- --check
 `docs:check:ci` 缺少 base SHA 或无法读取 base object 时必须失败，不能退回本地 `origin/main`。
 这些命令不替代其余代码测试。
 
-需要把 warning 作为失败或验证桌面构建时：
+#### Staged Rust 路由
+
+`pnpm test:rust:staged` 读取 `git diff --cached`，只根据 staged 快照选择 Rust 验证范围：
+
+| staged 改动 | 执行命令 |
+| --- | --- |
+| 无 Rust/Cargo 文件 | 跳过 Rust 验证并明确输出 skip 消息 |
+| 仅 `crates/rovai-core/src/bin/rovai.rs` | `pnpm check:rust`、`pnpm test:rust:cli` |
+| 仅普通 Library 模块 | `pnpm check:rust`、`pnpm test:rust:lib` |
+| 仅 `rovai-core` Main 或其专属模块 | `pnpm check:rust`、`pnpm test:rust:core` |
+| Cargo/Rust 配置、`src/lib.rs`、多 target、删除/重命名、未知 Rust 路径或分类失败 | `pnpm test:rust:full` |
+
+Main 专属模块由 staged `src/main.rs` 声明、但未由 staged `src/lib.rs` 导出的模块动态确定。
+脚本使用 NUL 分隔读取路径以支持空格等合法文件名；Git 读取、模块解析或分类失败都会 fail closed
+到全量测试，不会静默跳过。
+
+### 完整 push / PR 验证
 
 ```bash
+pnpm test:rust:full
 cargo clippy --workspace --all-targets -- -D warnings
+```
+
+`.github/workflows/rust.yml` 在 pull request 以及 push 到 `main` 时，对 Rust 源码、Cargo 文件和
+Rust 构建/lint 配置改动执行：
+
+```bash
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+```
+
+CI 使用 Cargo 缓存缩短重复构建，但测试是否通过不依赖缓存命中。需要验证桌面构建时另行运行：
+
+```bash
 pnpm build:desktop
 ```
 

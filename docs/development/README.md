@@ -31,13 +31,18 @@ pnpm core:build:debug
 
 ## 日常验证
 
-当前仓库没有聚合的 `pnpm check` 命令。提交前至少分别运行：
+当前仓库没有聚合的 `pnpm check` 命令。日常提交前分别运行：
 
 ```bash
 pnpm typecheck
 pnpm test
-cargo test --workspace
+pnpm test:rust:staged
 ```
+
+`test:rust:staged` 只读取 Git index 中的 staged 文件。没有 Rust/Cargo 改动时跳过；单一
+Library、`rovai` CLI 或 `rovai-core` Main target 改动时先运行 `cargo check`，再运行对应
+target 测试；Cargo 配置、`src/lib.rs`、多 target、删除/重命名或无法可靠分类的改动自动回退到
+`cargo test --workspace`。详细路由见[测试与 Smoke Test](testing.md#staged-rust-路由)。
 
 `pnpm test` 会先运行 `pnpm docs:check`，验证唯一当前版本指针、版本目录 Front Matter
 和版本索引一致，并验证 ADR schema/生命周期/直接替代图、CURRENT/HISTORY、Architecture 索引及
@@ -54,15 +59,22 @@ pnpm docs:adr:generate -- --check
 `pnpm docs:adr:generate`。PR CI 必须提供真实 base SHA，本地缺少该参数时 `docs:check:adr`
 只运行 snapshot check 并明确报告 diff freeze skipped。
 
-涉及 Rust lint、桌面构建或跨边界改动时继续运行：
+push / PR 前运行完整 Rust 验证：
 
 ```bash
+pnpm test:rust:full
 cargo clippy --workspace --all-targets -- -D warnings
+```
+
+Rust CI 还会执行 `cargo fmt --all --check`，并在 pull request 及 push 到 `main` 时保留完整
+测试和 Clippy 覆盖。涉及桌面构建或跨边界改动时继续运行：
+
+```bash
 pnpm build:desktop
 ```
 
 真实 Runtime Smoke、完整 macOS 打包和 UI 截图验收耗时更长，且部分命令会调用上游
-模型。运行前先阅读对应文档。
+模型。它们保持独立，不进入普通 commit 门禁；运行前先阅读对应文档。
 
 ## 按任务阅读
 
