@@ -12,6 +12,8 @@ superseded_by: null
 
 # ADR-0113: Core-Scoped Operation Identity and Evidence Deduplication Boundary
 
+## Context
+
 Runtime Evidence 的来源事件身份与用户看到的一项跨阶段操作不是同一个概念。现有
 `source_event_key` 可能包含 phase，适合防止同一来源事件重复写入，却不能安全地把
 started、progress、terminal 合并；反过来，依赖标题或命令文本做模糊匹配会把相邻操作错误
@@ -57,7 +59,7 @@ Core 生成或解析的 `operationId` 必须持久保存，或能从同一 Evide
 - Adapter mapping registry 必须声明身份路径、命名空间和冲突 fixture；
 - 未来如果要引入跨 Run 的关联，必须另立 ADR，不能放宽本决策的默认边界。
 
-## Rejected alternatives
+## Rejected Alternatives
 
 - 直接把 `source_event_key` 当作 `operationId`；
 - 按 title/command/cwd/时间窗口做启发式合并；

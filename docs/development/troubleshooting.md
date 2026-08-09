@@ -80,7 +80,7 @@ codesign -dv --verbose=4 "dist/mac-arm64/Rovai-ai.app"
 
 立即停止相关 App/Core 进程，不要在运行中的数据库上直接复制文件或执行修复 SQL。
 从诊断页确认真实路径，使用 SQLite Backup API 创建副本，并在隔离目录复现。具体步骤
-见[桌面 UI 验收](ui-acceptance.md#从真实数据创建只读来源的隔离副本)。
+见[桌面 UI 验收](ui-acceptance.md#从明确来源创建只读隔离副本)。
 
 ## 文档与命令不一致
 

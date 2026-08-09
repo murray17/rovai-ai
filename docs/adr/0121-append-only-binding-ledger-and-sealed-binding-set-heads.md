@@ -12,6 +12,8 @@ superseded_by: ADR-0122
 
 # ADR-0121: Append-Only Binding Ledger and Immutable Sealed Binding-Set Heads
 
+## Context
+
 Activity Evidence arrives while an AgentRun is live, but ADR-0120 defines each readable Binding Set at
 a frozen Evidence watermark. A mutable set would therefore make one `operationBindingSetId` mean
 different content over time, while delaying all sets until Run termination would give live and recovery
@@ -56,7 +58,7 @@ historical sets, and live head semantics above and require separate confirmation
 - publication and crash-recovery tests must prove that no partial set becomes readable and that head
   advancement never mutates the previously selected set.
 
-## Rejected alternatives
+## Rejected Alternatives
 
 - appending members to an already readable Binding Set;
 - overwriting or deleting the previous set when the default head advances;

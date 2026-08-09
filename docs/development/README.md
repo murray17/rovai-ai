@@ -40,7 +40,19 @@ cargo test --workspace
 ```
 
 `pnpm test` 会先运行 `pnpm docs:check`，验证唯一当前版本指针、版本目录 Front Matter
-和版本索引一致。只修改版本治理文档时，可以先单独运行 `pnpm docs:check` 获得快速反馈。
+和版本索引一致，并验证 ADR schema/生命周期/直接替代图、CURRENT/HISTORY、Architecture 索引及
+全仓 Markdown 本地链接；它还显式运行文档治理单测。只修改文档时，可以先运行：
+
+```bash
+pnpm docs:test
+pnpm docs:check
+DOCS_BASE_REF=<目标分支 base SHA> pnpm docs:check:ci
+pnpm docs:adr:generate -- --check
+```
+
+最后一条只验证生成式 HISTORY 未漂移；更新 HISTORY 时运行不带 `--check` 的
+`pnpm docs:adr:generate`。PR CI 必须提供真实 base SHA，本地缺少该参数时 `docs:check:adr`
+只运行 snapshot check 并明确报告 diff freeze skipped。
 
 涉及 Rust lint、桌面构建或跨边界改动时继续运行：
 

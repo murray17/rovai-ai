@@ -18,6 +18,7 @@ date: YYYY-MM-DD
 decision_scope: cross-version
 source_version: v0.XX
 supersedes: []
+intended_supersedes: []
 superseded_by: null
 ---
 
@@ -52,4 +53,9 @@ superseded_by: null
 - 是否能在不读取历史讨论的情况下理解最终约束？
 - 是否明确记录后果和被拒绝方案？
 - 是否没有混入任务列表、完成百分比、测试流水账或动态实施状态？
-- 如果替代旧决策，是否同步维护新旧 ADR 的替代元数据和索引？
+- 如果计划完整替代旧决策，proposed 阶段是否只填写 `intended_supersedes`，并确保旧 ADR 继续有效？
+- 接受完整替代时，是否在同一最终快照把候选关系移入 `supersedes`、更新旧 ADR 的 status 与
+  `superseded_by`，并同步 CURRENT/HISTORY？
+- 如果只是局部覆盖，是否保持完整替代元数据为空，并把当前组合写入 Architecture/Contract？
+- 是否已为 CURRENT 人工选择且只选择一个 primary 主题？主题选择不得由 Skill 名称、关键词或脚本猜测。
+- 是否运行 `pnpm docs:test`、`pnpm docs:check` 和带真实 base SHA 的 `pnpm docs:check:ci`？

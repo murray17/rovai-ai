@@ -12,6 +12,8 @@ superseded_by: null
 
 # ADR-0114: Stable Activity Domain and Evidence-Bounded Semantic Kind
 
+## Context
+
 跨 Runtime 的分类需要一个不会随 UI 标题或 Runtime 产品不断膨胀的稳定顶层词汇，同时还要
 允许 Core Tool Catalog 和结构化 Runtime 事件提供更具体的用户意图。`capabilityKind` 这个
 字段名容易让人误以为它总是资源能力或已执行效果，因此本 ADR 明确其合同语义。
@@ -58,7 +60,7 @@ superseded_by: null
 - permission/runtime/plan 等非资源活动可以被诚实呈现，而不被强行塞进文件或命令类别；
 - 若未来改名为 `activityDomain`，必须在新的明确版本中处理字段变化；本版本不为旧本地数据提供兼容迁移。
 
-## Rejected alternatives
+## Rejected Alternatives
 
 - 让 `capabilityKind` 直接等同于资源效果或成功结果；
 - 把所有文件/命令意图和产品标题都永久加入一个扁平枚举；

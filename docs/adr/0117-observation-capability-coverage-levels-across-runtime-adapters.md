@@ -12,6 +12,8 @@ superseded_by: null
 
 # ADR-0117: Observation-Capability Coverage Levels Across Runtime Adapters
 
+## Context
+
 九个已接入 Runtime 的协议暴露程度不同。若把“是否支持某 Runtime”和“Core 能观察到多少
 活动”混成一个等级，Renderer 会被迫用推断填补协议缺口，最终制造虚假的细粒度 Evidence。
 
@@ -54,7 +56,7 @@ operation identity 证明、正例/未知/冲突/恢复 fixture、replay 结果�
 - 新 Runtime 可以先安全接入 Run-level，再以证据驱动逐步细化；
 - Read Side 和 Renderer 必须展示 coverage/credibility 边界，而不是隐藏缺口。
 
-## Rejected alternatives
+## Rejected Alternatives
 
 - 为每个 Runtime 维护一套互不兼容的 Canonical Activity schema；
 - 把 coverage level 当作产品支持评级或质量分数；
@@ -66,4 +68,3 @@ operation identity 证明、正例/未知/冲突/恢复 fixture、replay 结果�
 - [ADR-0111: Core-Owned Canonical Runtime Activity and Observation-Honest Lifecycle Projection](0111-core-owned-canonical-runtime-activity.md)
 - [ADR-0114: Stable Activity Domain and Evidence-Bounded Semantic Kind](0114-stable-activity-domain-and-evidence-bounded-semantic-kind.md)
 - [ADR-0116: Projection-Pinned Classifier Version and Explicit Historical Reprojection](0116-projection-pinned-classifier-version-and-explicit-historical-reprojection.md)
-

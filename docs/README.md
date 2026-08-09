@@ -12,7 +12,8 @@ last_updated: 2026-08-09
 
 | 任务 | 必读资料 |
 |---|---|
-| 判断长期架构约束或修改领域、持久化、安全、Runtime 边界 | [ADR 索引](adr/README.md)及相关有效 ADR |
+| 判断长期架构约束或修改领域、持久化、安全、Runtime 边界 | 先读[当前 Architecture 索引](architecture/README.md)；覆盖不完整时从[CURRENT 主题导航](adr/CURRENT.md)读取相关有效 ADR |
+| 新增或修改 ADR、Architecture、Contract、版本文档或文档路由 | [ADR 治理与准入](adr/README.md)、[CURRENT](adr/CURRENT.md)、对应目录 README，并运行通用文档门禁 |
 | 判断当前版本目标、范围、进度或验收口径 | 从[版本索引中的唯一 `current` 条目](versions/README.md)进入对应版本概览与实施计划 |
 | 查询已接入与候选 Agent Runtime 的实测兼容性 | [Runtime 兼容性清单](runtime-compatibility.md) |
 | 新增或修改 Runtime Activity 映射规则 | [Runtime Activity Mapping 维护指南](runtime-activity/README.md)及[Registry](runtime-activity/registry.md) |
@@ -40,6 +41,8 @@ last_updated: 2026-08-09
 - `accepted` 表示决策已确认，不表示代码已经实现。
 - 已接受决策发生语义变化时，以新 ADR 替代旧 ADR，不直接改写历史理由。
 - 实施进度、任务清单、测试流水账和版本缺口不属于 ADR。
+- `CURRENT.md` 是当前有效 ADR 的人工主题导航，`HISTORY.md` 是由 Front Matter 确定性生成的完整历史；
+  两者都不创造新约束。
 
 完整规则见 [ADR README](adr/README.md)。
 
@@ -71,16 +74,21 @@ accepted ADRs, current-version contracts, or implementation evidence.
 
 不存在一个覆盖所有问题的单一优先级，必须先判断问题类型：
 
-- “系统应当遵守什么架构约束”：读取状态有效的 ADR。
+- “为什么选择某个长期边界”：读取状态有效的 ADR。
+- “当前接受设计如何组合”：读取 Architecture，并确认每项稳定不变量引用有效 ADR 或当前 Contract。
+- “精确字段、wire shape、错误和幂等语义”：读取当前 Contract。
 - “当前版本要交付什么、进展如何”：读取当前版本文档。
 - “仓库现在实际实现了什么”：检查代码、Migration、测试和可复现验收证据。
 
-如果三者不一致，必须明确报告“文档—实现漂移”，指出冲突位置和缺失证据；禁止静默选择一种说法，也禁止用 `Accepted` 推断“已实现”。
+如果这些来源不一致，必须明确报告“文档—实现漂移”，指出冲突位置和缺失证据；禁止静默
+选择一种说法，也禁止用 `Accepted` 推断“已实现”。Architecture 不得创造无 ADR/Contract 来源
+的稳定约束，Contract 也不得静默推翻 ADR 的长期边界。
 
 ## AI 使用规则
 
 1. 先读取本文，再按任务选择最小必要文档集。
-2. 只把有效 ADR 当作跨版本规范；先检查 `status` 与 `superseded_by`。
+2. 从 CURRENT 选择相关 ADR，并确认 `decision_scope`、`status` 与 `superseded_by`；不要默认加载全部历史。
 3. 只把版本索引标记的当前版本用于当前范围和状态判断。
 4. 历史版本可用于解释背景，不得覆盖有效 ADR 或当前代码事实。
 5. 引用决策时使用 ADR ID；引用实施状态时同时给出代码、Migration、测试或验收依据。
+6. 新版本、新 ADR 或任何主题文档都使用同一动态门禁；不得为某个 Skill、功能名或版本新增通配例外。

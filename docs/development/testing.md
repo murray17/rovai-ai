@@ -19,8 +19,19 @@ pnpm test
 cargo test --workspace
 ```
 
-`pnpm test` 首先执行 `pnpm docs:check`，验证当前版本唯一性、版本索引覆盖和版本切换
-留痕。文档治理改动可以单独运行 `pnpm docs:check`；它不替代其余代码测试。
+`pnpm test` 首先显式执行 `pnpm docs:test` 和 `pnpm docs:check`。前者覆盖 YAML/Markdown 解析、
+直接替代图、CURRENT/HISTORY、链接、legacy exception、amendment 和 diff freeze fixture；后者验证
+当前版本唯一性以及真实仓库的 ADR/Architecture/链接快照。文档治理改动至少单独运行：
+
+```bash
+pnpm docs:test
+pnpm docs:check
+DOCS_BASE_REF=<目标分支 base SHA> pnpm docs:check:ci
+pnpm docs:adr:generate -- --check
+```
+
+`docs:check:ci` 缺少 base SHA 或无法读取 base object 时必须失败，不能退回本地 `origin/main`。
+这些命令不替代其余代码测试。
 
 需要把 warning 作为失败或验证桌面构建时：
 

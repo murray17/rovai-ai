@@ -65,7 +65,7 @@ ADR-0067 中 Run Attachment Projection 的条款；两份 ADR 的其余约束保
 
 ## References
 
-- [ADR-0013: Evidence & Read Side](0013-evidence-read-side.md)
+- [ADR-0013: Managed Content and Read Side v2](0013-managed-content-and-read-side-v2.md)
 - [ADR-0051: Boundary-Capped Context Retrieval](0051-boundary-capped-context-retrieval.md)
 - [ADR-0067: Native Session Bootstrap and AgentRun Context v3](0067-native-session-bootstrap-and-agentrun-context-v3.md)
 - [v0.25 Attachment Composer](../versions/v0.25/README.md)

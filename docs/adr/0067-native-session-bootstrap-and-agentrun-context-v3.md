@@ -24,16 +24,6 @@ superseded_by: null
 > [ADR-0129](0129-deterministic-bounded-raw-public-context-delivery.md) 局部替代本文的
 > SHARED_CONVERSATION 摘要、Coverage、Context Read Marker、ContextManifest 摘要引用和
 > Context Compaction 条款；Session Charter、Memory Entrypoint 及其他动态上下文区段继续有效。
->
-> [ADR-0146](0146-sole-native-session-self-identity-and-peer-routing-projection.md) 局部替代本文的
-> `COLLABORATION_STATE` 条款：当前投影是排除 self、且不含 availability 的 peer routing identity
-> v2；本文该区段的旧字段说明不再是当前约束。
->
-> [ADR-0147](0147-lossless-model-context-projection-and-layered-delivery-evidence.md) 细化本文的模型字段、
-> ContextManifest Evidence 与 Runtime Input Delivery Evidence ownership：当前权威是 Context Source
-> State、Model Context Projection、ContextManifest Evidence 与 Runtime Input Delivery Evidence 四层分离。
-> 本文的 Bootstrap/Dynamic Context 生命周期、完整 Current Input、Recovery byte reuse 和 accepted-marker
-> 语义继续有效。
 
 ## Context
 

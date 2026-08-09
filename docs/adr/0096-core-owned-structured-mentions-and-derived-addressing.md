@@ -2,7 +2,7 @@
 document_type: adr
 id: ADR-0096
 title: Core-Owned Structured Mentions and Mention-Derived Camp Addressing
-status: accepted
+status: superseded
 date: 2026-08-03
 decision_scope: cross-version
 source_version: v0.33
@@ -173,5 +173,5 @@ AllMembersMention 解释为目标 Camp 的所有成员并在该消息发送时�
 - [ADR-0076: Message-First AgentRun Dispatch Boundary](0076-message-first-agent-run-dispatch-boundary.md)
 - [ADR-0080: Durable Camp Composer Draft](0080-durable-camp-composer-draft-and-atomic-attachment-consumption.md)
 - [Arctic Dawn Camp Composer](../ui/arctic-dawn.md#camp-composer)
-- [`AgentMentionTextarea.tsx`](../../apps/desktop/src/renderer/src/AgentMentionTextarea.tsx)
+- [`AgentMentionTextarea.tsx` at the ADR creation commit](https://github.com/murray17/rovai-ai/blob/8af34a17e7634a8cdb35afe4e4b84625c5162e89/apps/desktop/src/renderer/src/AgentMentionTextarea.tsx)
 - [`collaboration.rs`](../../crates/rovai-core/src/collaboration.rs)

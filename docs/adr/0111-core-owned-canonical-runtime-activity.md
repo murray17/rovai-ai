@@ -12,6 +12,8 @@ superseded_by: null
 
 # ADR-0111: Core-Owned Canonical Runtime Activity and Observation-Honest Lifecycle Projection
 
+## Context
+
 Rovai-ai must present comparable execution activity across different Agent Runtimes without
 claiming facts that a Runtime did not report. The product therefore separates provider evidence,
 Core-owned semantic activity, lifecycle projection, and Renderer presentation; this gives v0.41 a
@@ -67,7 +69,7 @@ or other hidden Runtime step.
   lifecycle replay tests, and a policy for revising classifications without rewriting historical
   observations.
 
-## Rejected alternatives
+## Rejected Alternatives
 
 - Letting Renderer infer activity from command strings, provider titles, or Runtime names.
 - Treating `CanonicalActionInput` as the universal cross-Runtime activity taxonomy.

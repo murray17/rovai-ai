@@ -12,6 +12,8 @@ superseded_by: null
 
 # ADR-0118: v0.41 Local Data Clean Break and Managed Reset Boundary
 
+## Context
+
 v0.41 的 Canonical Activity Projection、版本化分类和生命周期合同会改变本地持久化结构。
 为旧版本数据库设计兼容迁移会扩大状态空间、保留不再可信的旧语义，并降低新合同的验证阈值。
 
@@ -64,7 +66,7 @@ classifier replay 和显式历史重投影。它只拒绝跨版本本地数据�
 - 实现必须有可测试的 contract marker、受管 reset 路径、备份/诊断策略和不触碰外部状态的断言；
 - 任何希望保留旧数据的需求都必须另立决策，不能在实现中偷偷加入兼容分支。
 
-## Rejected alternatives
+## Rejected Alternatives
 
 - 为 v0.40 或更早的 Canonical/Execution 数据提供隐式 migration/backfill；
 - 同时读取 legacy 和 v0.41 表并按字段猜测优先级；

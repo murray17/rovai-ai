@@ -130,7 +130,7 @@ does not modify Server identity, transport, secret material, or enablement.
   contract.
 - Any future desire to recycle IDs, encode role in IDs, or expose UUIDs requires a new decision.
 
-## Rejected alternatives
+## Rejected Alternatives
 
 - Expose UUIDs to models and tools: too long, noisy, semantically empty, and error-prone to copy.
 - Keep semantic built-in IDs: couples immutable identity to mutable names and role concepts.

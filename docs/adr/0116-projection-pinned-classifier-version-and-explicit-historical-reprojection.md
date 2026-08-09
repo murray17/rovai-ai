@@ -12,6 +12,8 @@ superseded_by: null
 
 # ADR-0116: Projection-Pinned Classifier Version and Explicit Historical Reprojection
 
+## Context
+
 v0.41 需要允许分类规则持续修正，同时保证一个操作的身份和历史展示不会因新规则而漂移。
 `operationId` 标识观测操作；`classifierVersion` 描述如何解释该操作的 Evidence。这两个
 概念必须分开。
@@ -50,7 +52,7 @@ v0.41 需要允许分类规则持续修正，同时保证一个操作的身份�
 - Read Side 必须定义默认版本与显式版本查询的接口边界；
 - 分类修复不会自动改变用户已审阅的历史，但可能暂时保留多个并行解释。
 
-## Rejected alternatives
+## Rejected Alternatives
 
 - 把 classifierVersion 拼进 operationId；
 - 新分类器上线后静默重写所有历史卡片；

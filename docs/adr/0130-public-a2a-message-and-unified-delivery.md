@@ -8,7 +8,6 @@ decision_scope: cross-version
 source_version: v0.45
 supersedes:
   - ADR-0073
-  - ADR-0091
   - ADR-0099
 superseded_by: null
 ---

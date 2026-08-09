@@ -1,0 +1,163 @@
+---
+document_type: adr-history
+authority: generated-adr-history
+generated_from: docs/adr-front-matter
+---
+
+# ADR 完整历史
+
+本文件由 `pnpm docs:adr:generate` 根据全部 ADR Front Matter 确定性生成。请勿手工编辑表格；
+当前有效决策请从 [CURRENT.md](CURRENT.md) 进入。
+
+<!-- adr-history:begin -->
+| ADR | Decision | Status | Scope | Source version | Direct successor |
+| --- | --- | --- | --- | --- | --- |
+| [ADR-0001](0001-core-transaction.md) | Core Transaction | `accepted` | `cross-version` | [v0.02](../versions/v0.02/README.md) | — |
+| [ADR-0002](0002-collaboration.md) | Collaboration | `superseded` | `cross-version` | [v0.02](../versions/v0.02/README.md) | [ADR-0008](0008-collaboration-v2.md) |
+| [ADR-0003](0003-execution-runtime.md) | Execution Runtime | `superseded` | `cross-version` | [v0.02](../versions/v0.02/README.md) | [ADR-0016](0016-multi-runtime-execution-v2.md) |
+| [ADR-0004](0004-action-safety.md) | Action & Safety | `superseded` | `cross-version` | [v0.02](../versions/v0.02/README.md) | [ADR-0015](0015-action-safety-v2.md) |
+| [ADR-0005](0005-evidence-read-side.md) | Evidence & Read Side | `superseded` | `cross-version` | [v0.02](../versions/v0.02/README.md) | [ADR-0013](0013-managed-content-and-read-side-v2.md) |
+| [ADR-0006](0006-multi-runtime-adapter-boundary.md) | Multi-Runtime Adapter Boundary | `superseded` | `cross-version` | [v0.03](../versions/v0.03/README.md) | [ADR-0016](0016-multi-runtime-execution-v2.md) |
+| [ADR-0007](0007-portable-conversation-handoff.md) | Portable Conversation Handoff | `accepted` | `cross-version` | [v0.03](../versions/v0.03/README.md) | — |
+| [ADR-0008](0008-collaboration-v2.md) | Collaboration v2: Camp-Centered Navigation and Lifecycle | `superseded` | `cross-version` | [v0.04](../versions/v0.04/README.md) | [ADR-0012](0012-collaboration-v3-lightweight-task.md) |
+| [ADR-0009](0009-reproducible-context-delivery.md) | Reproducible Context Materialization and Delivery | `superseded` | `cross-version` | [v0.05](../versions/v0.05/README.md) | [ADR-0049](0049-reproducible-context-delivery-v2.md) |
+| [ADR-0010](0010-team-tool-a2a-execution.md) | Team Tool and Agent-to-Agent Execution | `superseded` | `cross-version` | [v0.05](../versions/v0.05/README.md) | [ADR-0011](0011-stable-team-tool-gateway.md) |
+| [ADR-0011](0011-stable-team-tool-gateway.md) | Stable Team Tool Gateway and Native Binding Identity | `superseded` | `cross-version` | [v0.05](../versions/v0.05/README.md) | [ADR-0014](0014-stable-team-tool-gateway-v2.md) |
+| [ADR-0012](0012-collaboration-v3-lightweight-task.md) | Collaboration v3: Camp and Lightweight Task | `superseded` | `cross-version` | [v0.06](../versions/v0.06/README.md) | [ADR-0058](0058-collaboration-v4-presence-aware-admission.md) |
+| [ADR-0013](0013-managed-content-and-read-side-v2.md) | Managed Content and Read Side v2 | `accepted` | `cross-version` | [v0.06](../versions/v0.06/README.md) | — |
+| [ADR-0014](0014-stable-team-tool-gateway-v2.md) | Stable Team Tool Gateway v2 | `accepted` | `cross-version` | [v0.06](../versions/v0.06/README.md) | — |
+| [ADR-0015](0015-action-safety-v2.md) | Action and Safety v2 | `superseded` | `cross-version` | [v0.06](../versions/v0.06/README.md) | [ADR-0059](0059-runtime-owned-resource-permissions.md) |
+| [ADR-0016](0016-multi-runtime-execution-v2.md) | Multi-Runtime Execution Boundary v2 | `superseded` | `cross-version` | [v0.06](../versions/v0.06/README.md) | [ADR-0065](0065-verified-runtime-catalog-and-documentation-only-compatibility.md) |
+| [ADR-0017](0017-managed-skill-library-runtime-projection.md) | Managed Skill Library and Runtime-Native Projection | `superseded` | `cross-version` | [v0.08](../versions/v0.08/README.md) | [ADR-0105](0105-runtime-group-assigned-skill-delivery.md) |
+| [ADR-0018](0018-file-backed-mcp-library-runtime-projection.md) | File-Backed MCP Library and Per-Run Runtime Projection | `accepted` | `cross-version` | [v0.09](../versions/v0.09/README.md) | — |
+| [ADR-0019](0019-application-global-memory-ownership.md) | Application-Global Memory Ownership | `accepted` | `cross-version` | [v0.10](../versions/v0.10/README.md) | — |
+| [ADR-0020](0020-user-authorized-memory-mutation.md) | User-Authorized Memory Mutation | `superseded` | `cross-version` | [v0.10](../versions/v0.10/README.md) | [ADR-0032](0032-user-authorized-live-memory-projection.md) |
+| [ADR-0021](0021-atomic-memory-and-immutable-revisions.md) | Atomic Memory and Immutable Revisions | `superseded` | `cross-version` | [v0.10](../versions/v0.10/README.md) | [ADR-0052](0052-explicit-memory-revision-authority.md) |
+| [ADR-0022](0022-immutable-memory-scope.md) | Immutable Memory Scope | `accepted` | `cross-version` | [v0.10](../versions/v0.10/README.md) | — |
+| [ADR-0023](0023-transparent-relationship-direction.md) | Transparent Relationship Direction | `superseded` | `cross-version` | [v0.10](../versions/v0.10/README.md) | [ADR-0035](0035-user-transparent-agent-applicable-relationship-memory.md) |
+| [ADR-0024](0024-closed-memory-kinds.md) | Closed Memory Kinds | `superseded` | `cross-version` | [v0.10](../versions/v0.10/README.md) | [ADR-0069](0069-single-effective-memory-and-scope-bounded-agent-mutation.md) |
+| [ADR-0025](0025-proposal-scoped-memory-provenance.md) | Proposal-Scoped Memory Provenance | `superseded` | `cross-version` | [v0.10](../versions/v0.10/README.md) | [ADR-0069](0069-single-effective-memory-and-scope-bounded-agent-mutation.md) |
+| [ADR-0026](0026-explicit-memory-supersession.md) | Explicit Memory Supersession | `accepted` | `cross-version` | [v0.10](../versions/v0.10/README.md) | — |
+| [ADR-0027](0027-memory-domain-forgetting.md) | Memory-Domain Forgetting | `accepted` | `cross-version` | [v0.10](../versions/v0.10/README.md) | — |
+| [ADR-0028](0028-advisory-memory-review.md) | Advisory Memory Review | `superseded` | `cross-version` | [v0.10](../versions/v0.10/README.md) | [ADR-0033](0033-advisory-memory-review-v2.md) |
+| [ADR-0029](0029-bounded-memory-reactivation.md) | Bounded Memory Reactivation | `accepted` | `cross-version` | [v0.10](../versions/v0.10/README.md) | — |
+| [ADR-0030](0030-sqlite-memory-authority.md) | SQLite Memory Authority and Read-Only Projection | `superseded` | `cross-version` | [v0.10](../versions/v0.10/README.md) | [ADR-0032](0032-user-authorized-live-memory-projection.md) |
+| [ADR-0031](0031-frozen-low-priority-memory-context.md) | Frozen Low-Priority Memory Context | `superseded` | `cross-version` | [v0.10](../versions/v0.10/README.md) | [ADR-0032](0032-user-authorized-live-memory-projection.md) |
+| [ADR-0032](0032-user-authorized-live-memory-projection.md) | User-Authorized Live Memory Projection | `superseded` | `cross-version` | [v0.10](../versions/v0.10/README.md) | [ADR-0053](0053-user-preauthorized-provisional-companion-lessons.md) |
+| [ADR-0033](0033-advisory-memory-review-v2.md) | Advisory Memory Review v2 | `superseded` | `cross-version` | [v0.10](../versions/v0.10/README.md) | [ADR-0052](0052-explicit-memory-revision-authority.md) |
+| [ADR-0034](0034-agent-applicable-relationship-projection.md) | Agent-Applicable Relationship Projection | `superseded` | `cross-version` | [v0.10](../versions/v0.10/README.md) | [ADR-0035](0035-user-transparent-agent-applicable-relationship-memory.md) |
+| [ADR-0035](0035-user-transparent-agent-applicable-relationship-memory.md) | User-Transparent, Agent-Applicable Relationship Memory | `superseded` | `cross-version` | [v0.10](../versions/v0.10/README.md) | [ADR-0068](0068-brokered-memory-retrieval-and-session-entrypoint.md) |
+| [ADR-0036](0036-agent-bounded-memory-proposal-scope.md) | Agent-Bounded Memory Proposal Scope | `superseded` | `cross-version` | [v0.10](../versions/v0.10/README.md) | [ADR-0069](0069-single-effective-memory-and-scope-bounded-agent-mutation.md) |
+| [ADR-0037](0037-actor-bounded-relationship-proposal-direction.md) | Actor-Bounded Relationship Proposal Direction | `superseded` | `cross-version` | [v0.10](../versions/v0.10/README.md) | [ADR-0069](0069-single-effective-memory-and-scope-bounded-agent-mutation.md) |
+| [ADR-0038](0038-memory-proposal-staleness.md) | Memory Proposal Staleness | `superseded` | `cross-version` | [v0.10](../versions/v0.10/README.md) | [ADR-0069](0069-single-effective-memory-and-scope-bounded-agent-mutation.md) |
+| [ADR-0039](0039-memory-proposal-capability.md) | Memory Proposal Capability | `superseded` | `cross-version` | [v0.10](../versions/v0.10/README.md) | [ADR-0069](0069-single-effective-memory-and-scope-bounded-agent-mutation.md) |
+| [ADR-0040](0040-terminal-memory-proposal-retention.md) | Terminal Memory Proposal Retention | `superseded` | `cross-version` | [v0.10](../versions/v0.10/README.md) | [ADR-0069](0069-single-effective-memory-and-scope-bounded-agent-mutation.md) |
+| [ADR-0041](0041-agent-profile-status-memory-independence.md) | AgentProfile Status and Memory Independence | `superseded` | `cross-version` | [v0.10](../versions/v0.10/README.md) | [ADR-0057](0057-member-presence-and-retained-removal.md) |
+| [ADR-0042](0042-fail-closed-memory-projection.md) | Fail-Closed Memory Projection | `superseded` | `cross-version` | [v0.10](../versions/v0.10/README.md) | [ADR-0068](0068-brokered-memory-retrieval-and-session-entrypoint.md) |
+| [ADR-0043](0043-memory-secret-filter.md) | Memory Secret Filter | `superseded` | `cross-version` | [v0.10](../versions/v0.10/README.md) | [ADR-0054](0054-provisional-memory-safety-and-stewardship.md) |
+| [ADR-0044](0044-per-proposal-user-confirmation.md) | Per-Proposal User Memory Confirmation | `superseded` | `cross-version` | [v0.10](../versions/v0.10/README.md) | [ADR-0053](0053-user-preauthorized-provisional-companion-lessons.md) |
+| [ADR-0045](0045-normalized-sqlite-memory-store.md) | Normalized SQLite Memory Store | `superseded` | `cross-version` | [v0.10](../versions/v0.10/README.md) | [ADR-0070](0070-normalized-sqlite-memory-store-v2.md) |
+| [ADR-0046](0046-memory-stewardship-bundled-skill.md) | Memory Stewardship Bundled Skill | `superseded` | `cross-version` | [v0.10](../versions/v0.10/README.md) | [ADR-0054](0054-provisional-memory-safety-and-stewardship.md) |
+| [ADR-0047](0047-user-initiated-memory-export-boundary.md) | User-Initiated Memory Export Boundary | `accepted` | `cross-version` | [v0.10](../versions/v0.10/README.md) | — |
+| [ADR-0048](0048-rovai-product-identity-and-legacy-namespace.md) | Rovai-ai Product Identity and Controlled Legacy Namespace Migration | `accepted` | `cross-version` | [v0.11](../versions/v0.11/README.md) | — |
+| [ADR-0049](0049-reproducible-context-delivery-v2.md) | Reproducible Context Delivery v2 | `superseded` | `cross-version` | [v0.12](../versions/v0.12/README.md) | [ADR-0067](0067-native-session-bootstrap-and-agentrun-context-v3.md) |
+| [ADR-0050](0050-camp-shared-progressive-summaries.md) | Camp-Shared Progressive Summaries | `superseded` | `cross-version` | [v0.12](../versions/v0.12/README.md) | [ADR-0129](0129-deterministic-bounded-raw-public-context-delivery.md) |
+| [ADR-0051](0051-boundary-capped-context-retrieval.md) | Boundary-Capped Context Retrieval | `accepted` | `cross-version` | [v0.12](../versions/v0.12/README.md) | — |
+| [ADR-0052](0052-explicit-memory-revision-authority.md) | Explicit Memory Revision Authority | `superseded` | `cross-version` | [v0.13](../versions/v0.13/README.md) | [ADR-0069](0069-single-effective-memory-and-scope-bounded-agent-mutation.md) |
+| [ADR-0053](0053-user-preauthorized-provisional-companion-lessons.md) | User-Preauthorized Provisional Companion Lessons | `superseded` | `cross-version` | [v0.13](../versions/v0.13/README.md) | [ADR-0055](0055-explicit-opt-in-provisional-companion-lessons.md) |
+| [ADR-0054](0054-provisional-memory-safety-and-stewardship.md) | Provisional Memory Safety and Stewardship | `superseded` | `cross-version` | [v0.13](../versions/v0.13/README.md) | [ADR-0055](0055-explicit-opt-in-provisional-companion-lessons.md) |
+| [ADR-0055](0055-explicit-opt-in-provisional-companion-lessons.md) | Explicit Opt-In Provisional Companion Lessons | `superseded` | `cross-version` | [v0.13](../versions/v0.13/README.md) | [ADR-0064](0064-default-on-bounded-automatic-partner-memory.md) |
+| [ADR-0056](0056-controlled-member-avatar-assets.md) | Controlled Member Avatar References and Application-Managed Local Assets | `accepted` | `cross-version` | [v0.14](../versions/v0.14/README.md) | — |
+| [ADR-0057](0057-member-presence-and-retained-removal.md) | Member Presence and Retained Permanent Removal | `accepted` | `cross-version` | [v0.15](../versions/v0.15/README.md) | — |
+| [ADR-0058](0058-collaboration-v4-presence-aware-admission.md) | Collaboration v4: Presence-Aware Routing and Execution Admission | `accepted` | `cross-version` | [v0.15](../versions/v0.15/README.md) | — |
+| [ADR-0059](0059-runtime-owned-resource-permissions.md) | Runtime-Owned Resource Permissions and Path-Only Run Workspace | `accepted` | `cross-version` | [v0.16](../versions/v0.16/README.md) | — |
+| [ADR-0060](0060-opaque-member-routing-identity.md) | Opaque Member Routing Identity and Globally Unique Names | `accepted` | `cross-version` | [v0.16](../versions/v0.16/README.md) | — |
+| [ADR-0061](0061-durable-agent-inaccessible-execution-evidence.md) | Durable User-Visible and Agent-Inaccessible Execution Evidence | `accepted` | `cross-version` | [v0.17](../versions/v0.17/README.md) | — |
+| [ADR-0062](0062-interruptible-runs-and-unsettled-external-effects.md) | Interruptible Run Trees and Unsettled External Effects | `accepted` | `cross-version` | [v0.17](../versions/v0.17/README.md) | — |
+| [ADR-0063](0063-minimal-a2a-turn-envelope-and-reply-correlation.md) | Minimal A2A Turn Envelope and Trusted Reply Correlation | `superseded` | `cross-version` | [v0.17](../versions/v0.17/README.md) | [ADR-0067](0067-native-session-bootstrap-and-agentrun-context-v3.md) |
+| [ADR-0064](0064-default-on-bounded-automatic-partner-memory.md) | Default-On Bounded Automatic Partner Memory Formation | `superseded` | `cross-version` | [v0.18](../versions/v0.18/README.md) | [ADR-0069](0069-single-effective-memory-and-scope-bounded-agent-mutation.md) |
+| [ADR-0065](0065-verified-runtime-catalog-and-documentation-only-compatibility.md) | Verified Runtime Catalog and Documentation-Only Compatibility Evaluation | `accepted` | `cross-version` | [v0.19](../versions/v0.19/README.md) | — |
+| [ADR-0066](0066-managed-product-runtime-resolution.md) | Managed Product Runtime Discovery, Resolution, and Relocation | `accepted` | `cross-version` | [v0.20](../versions/v0.20/README.md) | — |
+| [ADR-0067](0067-native-session-bootstrap-and-agentrun-context-v3.md) | Native Session Bootstrap and AgentRun Context v3 | `accepted` | `cross-version` | [v0.21](../versions/v0.21/README.md) | — |
+| [ADR-0068](0068-brokered-memory-retrieval-and-session-entrypoint.md) | Brokered Memory Retrieval and Session Entrypoint | `accepted` | `cross-version` | [v0.21](../versions/v0.21/README.md) | — |
+| [ADR-0069](0069-single-effective-memory-and-scope-bounded-agent-mutation.md) | Single Effective Memory and Scope-Bounded Agent Mutation | `accepted` | `cross-version` | [v0.21](../versions/v0.21/README.md) | — |
+| [ADR-0070](0070-normalized-sqlite-memory-store-v2.md) | Normalized SQLite Memory Store v2 | `accepted` | `cross-version` | [v0.21](../versions/v0.21/README.md) | — |
+| [ADR-0071](0071-configured-camp-creation-and-lazy-conversations.md) | Configured Camp Creation and Lazy Conversations | `accepted` | `cross-version` | [v0.22](../versions/v0.22/README.md) | — |
+| [ADR-0072](0072-directory-workspace-and-dynamic-git-capability.md) | Directory Workspace Identity and Dynamic Git Capability | `accepted` | `cross-version` | [v0.23](../versions/v0.23/README.md) | — |
+| [ADR-0073](0073-agent-authored-a2a-conversation-messages.md) | Agent-Authored A2A Conversation Messages | `superseded` | `cross-version` | [v0.24](../versions/v0.24/README.md) | [ADR-0130](0130-public-a2a-message-and-unified-delivery.md) |
+| [ADR-0074](0074-quick-chat-ubiquitous-language-and-binding-identity.md) | Quick Chat Ubiquitous Language and Binding Identity | `accepted` | `cross-version` | [v0.24](../versions/v0.24/README.md) | — |
+| [ADR-0075](0075-runtime-integrity-at-change-and-execution-boundaries.md) | Runtime Integrity at Change and Execution Boundaries | `accepted` | `cross-version` | [v0.24](../versions/v0.24/README.md) | — |
+| [ADR-0076](0076-message-first-agent-run-dispatch-boundary.md) | Message-First AgentRun Dispatch Boundary | `accepted` | `cross-version` | [v0.24](../versions/v0.24/README.md) | — |
+| [ADR-0077](0077-responsive-camp-turn-cancellation-boundary.md) | Responsive CampTurn Cancellation Boundary | `accepted` | `cross-version` | [v0.24](../versions/v0.24/README.md) | — |
+| [ADR-0078](0078-navigation-projection-and-sidebar-wordmark-boundary.md) | Navigation Projection and Sidebar Wordmark Boundary | `accepted` | `cross-version` | [v0.24](../versions/v0.24/README.md) | — |
+| [ADR-0079](0079-two-phase-cancellation-projection-and-bounded-runtime-interrupt.md) | Two-Phase Cancellation Projection and Bounded Runtime Interrupt | `accepted` | `cross-version` | [v0.24](../versions/v0.24/README.md) | — |
+| [ADR-0080](0080-durable-camp-composer-draft-and-atomic-attachment-consumption.md) | Durable Camp Composer Draft and Atomic Attachment Consumption | `accepted` | `cross-version` | [v0.25](../versions/v0.25/README.md) | — |
+| [ADR-0081](0081-camp-public-attachment-paths-and-frozen-discovery.md) | Camp-Public Attachment Paths and Frozen Discovery | `accepted` | `cross-version` | [v0.25](../versions/v0.25/README.md) | — |
+| [ADR-0082](0082-member-owned-runtime-parameters.md) | Member-Owned Runtime Parameters and Explicit Configuration | `superseded` | `cross-version` | [v0.26](../versions/v0.26/README.md) | [ADR-0127](0127-atomic-member-runtime-configuration.md) |
+| [ADR-0083](0083-background-runtime-checks-and-actionable-status.md) | Background Runtime Checks and Actionable User Status | `accepted` | `cross-version` | [v0.26](../versions/v0.26/README.md) | — |
+| [ADR-0084](0084-conversation-surface-controls-and-stop-outcome-projection.md) | Conversation Surface Controls and Stop Outcome Projection | `accepted` | `cross-version` | [v0.26](../versions/v0.26/README.md) | — |
+| [ADR-0085](0085-run-frozen-six-field-member-identity-context.md) | Run-Frozen Six-Field Member Identity Context | `superseded` | `cross-version` | [v0.27](../versions/v0.27/README.md) | [ADR-0100](0100-latest-member-identity-native-session-bootstrap.md) |
+| [ADR-0086](0086-single-current-built-in-member-appearance-set.md) | Single Current Built-In Member Appearance Set | `accepted` | `cross-version` | [v0.27](../versions/v0.27/README.md) | — |
+| [ADR-0087](0087-core-owned-durable-in-app-notification-inbox.md) | Core-Owned Durable In-App Notification Inbox | `accepted` | `cross-version` | [v0.28](../versions/v0.28/README.md) | — |
+| [ADR-0088](0088-attested-native-team-gateway-attachment.md) | Attested Native Team Gateway Attachment | `accepted` | `cross-version` | [v0.30](../versions/v0.30/README.md) | — |
+| [ADR-0089](0089-attested-built-in-mcp-tool-parity.md) | Attested Built-in MCP Tool Parity | `accepted` | `cross-version` | [v0.31](../versions/v0.31/README.md) | — |
+| [ADR-0090](0090-team-delivery-qualification-evidence-boundary.md) | Team Delivery Qualification Evidence Boundary | `accepted` | `cross-version` | [v0.31](../versions/v0.31/README.md) | — |
+| [ADR-0091](0091-durable-member-calls-and-single-slot-a2a-resume.md) | Durable Member Calls and Single-Slot A2A Resume Scheduling | `superseded` | `cross-version` | [v0.32](../versions/v0.32/README.md) | [ADR-0099](0099-cost-gated-independent-member-calls.md) |
+| [ADR-0092](0092-recoverable-qualification-evaluation-integrity.md) | Recoverable Qualification Evaluation Integrity | `accepted` | `cross-version` | [v0.34](../versions/v0.34/README.md) | — |
+| [ADR-0093](0093-core-owned-atomic-campturn-execution-budgets.md) | Core-Owned Atomic CampTurn Execution Budgets | `accepted` | `cross-version` | [v0.34](../versions/v0.34/README.md) | — |
+| [ADR-0094](0094-formal-qualification-isolation-and-effect-coverage.md) | Formal Qualification Isolation and External Effect Coverage | `accepted` | `cross-version` | [v0.34](../versions/v0.34/README.md) | — |
+| [ADR-0095](0095-layered-qualification-authority-and-semantic-review.md) | Layered Qualification Authority and Advisory Semantic Review | `accepted` | `cross-version` | [v0.34](../versions/v0.34/README.md) | — |
+| [ADR-0096](0096-core-owned-structured-mentions-and-derived-addressing.md) | Core-Owned Structured Mentions and Mention-Derived Camp Addressing | `superseded` | `cross-version` | [v0.33](../versions/v0.33/README.md) | [ADR-0128](0128-structured-draft-only-user-message-submission.md) |
+| [ADR-0097](0097-authority-preserving-benchmark-evidence-ledgers.md) | Authority-Preserving Benchmark Evidence Ledgers | `accepted` | `cross-version` | [v0.34](../versions/v0.34/README.md) | — |
+| [ADR-0098](0098-dual-replica-evidence-bound-semantic-judge.md) | Dual-Replica Evidence-Bound Semantic Judge Protocol | `accepted` | `cross-version` | [v0.34](../versions/v0.34/README.md) | — |
+| [ADR-0099](0099-cost-gated-independent-member-calls.md) | Cost-Gated Independent Member Calls Without Return Semantics | `superseded` | `cross-version` | [v0.34](../versions/v0.34/README.md) | [ADR-0130](0130-public-a2a-message-and-unified-delivery.md) |
+| [ADR-0100](0100-latest-member-identity-native-session-bootstrap.md) | Latest Member Identity in Native Session Bootstrap | `accepted` | `cross-version` | [v0.35](../versions/v0.35/README.md) | — |
+| [ADR-0101](0101-outcome-only-collaboration-value-qualification-cases.md) | Outcome-Only Collaboration-Value Qualification Cases | `accepted` | `cross-version` | [v0.36](../versions/v0.36/README.md) | — |
+| [ADR-0102](0102-immutable-diagnostic-portfolio-authority.md) | Immutable Diagnostic Portfolio Authority and Two-Repeat Stability | `accepted` | `cross-version` | [v0.36](../versions/v0.36/README.md) | — |
+| [ADR-0103](0103-canonical-mcp-json-and-stable-assignment-identity.md) | Canonical MCP JSON and Stable Assignment Identity | `accepted` | `cross-version` | [v0.37](../versions/v0.37/README.md) | — |
+| [ADR-0104](0104-rovai-preferred-mcp-projection-and-external-degradation.md) | Rovai-Preferred MCP Projection and Non-Blocking External Degradation | `superseded` | `cross-version` | [v0.37](../versions/v0.37/README.md) | [ADR-0125](0125-runtime-native-additive-external-mcp-projection.md) |
+| [ADR-0105](0105-runtime-group-assigned-skill-delivery.md) | Runtime-Group Assigned Rovai Skill Delivery | `accepted` | `cross-version` | [v0.37](../versions/v0.37/README.md) | — |
+| [ADR-0106](0106-agent-bounded-cross-camp-public-history-retrieval.md) | Agent-Bounded Cross-Camp Public History Retrieval | `accepted` | `cross-version` | [v0.40](../versions/v0.40/README.md) | — |
+| [ADR-0107](0107-camp-member-isolated-codex-home-and-agentrun-app-server.md) | Camp-Member Isolated Codex Home and AgentRun-Scoped App Server | `superseded` | `cross-version` | [v0.39](../versions/v0.39/README.md) | [ADR-0126](0126-codex-native-home-and-external-session-ownership.md) |
+| [ADR-0108](0108-discovery-only-camp-message-search-and-sequence-paged-reads.md) | Discovery-Only Camp Message Search and Sequence-Paged Reads | `accepted` | `cross-version` | [v0.40](../versions/v0.40/README.md) | — |
+| [ADR-0109](0109-project-visible-bundled-skill-sources.md) | Project-Visible Bundled Skill Sources | `superseded` | `cross-version` | [v0.40](../versions/v0.40/README.md) | [ADR-0144](0144-self-contained-duo-grilling-bundled-skills.md) |
+| [ADR-0110](0110-internal-agent-uuid-and-monotonic-short-agent-id.md) | Internal Agent UUID and Monotonic Short Agent ID | `accepted` | `cross-version` | [v0.40](../versions/v0.40/README.md) | — |
+| [ADR-0111](0111-core-owned-canonical-runtime-activity.md) | Core-Owned Canonical Runtime Activity and Observation-Honest Lifecycle Projection | `accepted` | `cross-version` | [v0.41](../versions/v0.41/README.md) | — |
+| [ADR-0112](0112-immutable-execution-evidence-and-rebuildable-canonical-activity-projection.md) | Immutable Execution Evidence and Rebuildable Versioned Canonical Activity Projection | `accepted` | `cross-version` | [v0.41](../versions/v0.41/README.md) | — |
+| [ADR-0113](0113-core-scoped-operation-identity-and-evidence-deduplication-boundary.md) | Core-Scoped Operation Identity and Evidence Deduplication Boundary | `accepted` | `cross-version` | [v0.41](../versions/v0.41/README.md) | — |
+| [ADR-0114](0114-stable-activity-domain-and-evidence-bounded-semantic-kind.md) | Stable Activity Domain and Evidence-Bounded Semantic Kind | `accepted` | `cross-version` | [v0.41](../versions/v0.41/README.md) | — |
+| [ADR-0115](0115-evidence-bounded-activity-phase-and-outcome-resolution.md) | Evidence-Bounded Activity Phase and Outcome Resolution | `accepted` | `cross-version` | [v0.41](../versions/v0.41/README.md) | — |
+| [ADR-0116](0116-projection-pinned-classifier-version-and-explicit-historical-reprojection.md) | Projection-Pinned Classifier Version and Explicit Historical Reprojection | `accepted` | `cross-version` | [v0.41](../versions/v0.41/README.md) | — |
+| [ADR-0117](0117-observation-capability-coverage-levels-across-runtime-adapters.md) | Observation-Capability Coverage Levels Across Runtime Adapters | `accepted` | `cross-version` | [v0.41](../versions/v0.41/README.md) | — |
+| [ADR-0118](0118-v041-local-data-clean-break-and-managed-reset-boundary.md) | v0.41 Local Data Clean Break and Managed Reset Boundary | `accepted` | `version-scope` | [v0.41](../versions/v0.41/README.md) | — |
+| [ADR-0119](0119-versioned-evidence-to-operation-identity-bindings.md) | Append-Only Versioned Evidence-to-Operation Identity Bindings | `superseded` | `cross-version` | [v0.41](../versions/v0.41/README.md) | [ADR-0122](0122-current-canonical-activity-projection-and-deferred-identity-replay.md) |
+| [ADR-0120](0120-run-epoch-pinned-identity-rules-and-frozen-binding-sets.md) | Run-Epoch-Pinned Identity Rules and Frozen Evidence Binding Sets | `superseded` | `cross-version` | [v0.41](../versions/v0.41/README.md) | [ADR-0122](0122-current-canonical-activity-projection-and-deferred-identity-replay.md) |
+| [ADR-0121](0121-append-only-binding-ledger-and-sealed-binding-set-heads.md) | Append-Only Binding Ledger and Immutable Sealed Binding-Set Heads | `superseded` | `cross-version` | [v0.41](../versions/v0.41/README.md) | [ADR-0122](0122-current-canonical-activity-projection-and-deferred-identity-replay.md) |
+| [ADR-0122](0122-current-canonical-activity-projection-and-deferred-identity-replay.md) | Current Canonical Activity Projection and Deferred Identity Replay | `accepted` | `cross-version` | [v0.41](../versions/v0.41/README.md) | — |
+| [ADR-0123](0123-exclusive-agentrun-runtime-fleet.md) | Exclusive AgentRun Runtime Processes and Resident Fleet Reuse | `accepted` | `cross-version` | [v0.41](../versions/v0.41/README.md) | — |
+| [ADR-0124](0124-cli-only-transport-for-rovai-built-in-operations.md) | CLI-Only Transport for Rovai Built-in Operations | `accepted` | `cross-version` | [v0.42](../versions/v0.42/README.md) | — |
+| [ADR-0125](0125-runtime-native-additive-external-mcp-projection.md) | Runtime-Native Additive External MCP Projection | `accepted` | `cross-version` | [v0.43](../versions/v0.43/README.md) | — |
+| [ADR-0126](0126-codex-native-home-and-external-session-ownership.md) | Codex Native Home and External Session Ownership | `accepted` | `cross-version` | [v0.43](../versions/v0.43/README.md) | — |
+| [ADR-0127](0127-atomic-member-runtime-configuration.md) | Atomic Member Runtime Configuration and Internal Resolved Binding | `accepted` | `cross-version` | [v0.43](../versions/v0.43/README.md) | — |
+| [ADR-0128](0128-structured-draft-only-user-message-submission.md) | Structured Draft-Only User Camp Message Submission | `accepted` | `cross-version` | [v0.43](../versions/v0.43/README.md) | — |
+| [ADR-0129](0129-deterministic-bounded-raw-public-context-delivery.md) | Deterministic Bounded Raw Public Context Delivery | `accepted` | `cross-version` | [v0.44](../versions/v0.44/README.md) | — |
+| [ADR-0130](0130-public-a2a-message-and-unified-delivery.md) | Public A2A Messages and Unified Message Delivery | `accepted` | `cross-version` | [v0.45](../versions/v0.45/README.md) | — |
+| [ADR-0131](0131-recipient-scoped-event-driven-delivery-recovery.md) | Recipient-Scoped Event-Driven Delivery Dispatch and Interrupted Recovery | `accepted` | `cross-version` | [v0.45](../versions/v0.45/README.md) | — |
+| [ADR-0132](0132-public-reference-context-closure-profile-v2.md) | Bounded Public Reference Context Closure and Profile v2 | `accepted` | `cross-version` | [v0.45](../versions/v0.45/README.md) | — |
+| [ADR-0133](0133-scheme-c-run-process-detail-surface.md) | Scheme C Run Process Detail Surface | `accepted` | `cross-version` | [v0.45](../versions/v0.45/README.md) | — |
+| [ADR-0134](0134-runtime-public-output-boundary.md) | Explicit Runtime Public Output Boundary | `accepted` | `cross-version` | [v0.45](../versions/v0.45/README.md) | — |
+| [ADR-0135](0135-compact-agent-output-over-canonical-built-in-tool-envelope.md) | Compact Agent Output over Canonical Built-in Tool Envelope | `accepted` | `cross-version` | [v0.46](../versions/v0.46/README.md) | — |
+| [ADR-0136](0136-durable-task-v2-responsibility-and-coordination-authority.md) | Durable Task v2 Responsibility and Coordination Authority | `accepted` | `cross-version` | [v0.47](../versions/v0.47/README.md) | — |
+| [ADR-0137](0137-one-time-task-linked-responsibility-admission.md) | One-Time Task-Linked Responsibility Admission | `accepted` | `cross-version` | [v0.47](../versions/v0.47/README.md) | — |
+| [ADR-0138](0138-durable-bootstrap-redelivery-requirement.md) | Durable Bootstrap Redelivery Requirement and Accepted-Input Acknowledgement | `accepted` | `cross-version` | [v0.48](../versions/v0.48/README.md) | — |
+| [ADR-0139](0139-version-owned-bootstrap-redelivery-runtime-policy.md) | Version-Owned Bootstrap Redelivery Runtime Policy and Enablement Transition | `accepted` | `cross-version` | [v0.48](../versions/v0.48/README.md) | — |
+| [ADR-0140](0140-runtime-specific-compaction-signal-admission-point.md) | Runtime-Specific Compaction Signal Admission Point and Prepared-Input Cutoff | `accepted` | `cross-version` | [v0.48](../versions/v0.48/README.md) | — |
+| [ADR-0141](0141-atomic-bootstrap-redelivery-input-overlay.md) | Atomic Bootstrap Redelivery Input Overlay and Transient Identity Boundary | `accepted` | `cross-version` | [v0.48](../versions/v0.48/README.md) | — |
+| [ADR-0142](0142-native-session-scoped-compaction-observer-lease.md) | Native-Session-Scoped Compaction Observer Lease and Uncertain-Submission Boundary | `accepted` | `cross-version` | [v0.48](../versions/v0.48/README.md) | — |
+| [ADR-0143](0143-best-effort-non-blocking-compaction-detector-capability.md) | Best-Effort Non-Blocking Compaction Detector Capability | `accepted` | `cross-version` | [v0.48](../versions/v0.48/README.md) | — |
+| [ADR-0144](0144-self-contained-duo-grilling-bundled-skills.md) | Self-Contained Duo Grilling Bundled Skills | `accepted` | `cross-version` | [v0.49](../versions/v0.49/README.md) | — |
+| [ADR-0145](0145-core-owned-pending-camp-draft-activation.md) | Core-Owned Pending Camp Draft Activation | `accepted` | `cross-version` | [v0.49](../versions/v0.49/README.md) | — |
+| [ADR-0146](0146-sole-native-session-self-identity-and-peer-routing-projection.md) | Sole Native-Session Self Identity and Peer Routing Projection | `accepted` | `cross-version` | [v0.50](../versions/v0.50/README.md) | — |
+| [ADR-0147](0147-lossless-model-context-projection-and-layered-delivery-evidence.md) | Lossless Model Context Projection and Layered Delivery Evidence | `accepted` | `cross-version` | [v0.50](../versions/v0.50/README.md) | — |
+| [ADR-0148](0148-read-only-diagnostics-and-data-minimized-export.md) | Read-Only Diagnostics and Data-Minimized Export | `accepted` | `cross-version` | [v0.51](../versions/v0.51/README.md) | — |
+<!-- adr-history:end -->

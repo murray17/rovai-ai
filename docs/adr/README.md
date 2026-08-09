@@ -8,7 +8,10 @@ last_updated: 2026-08-09
 
 本目录保存已经提升为跨版本约束、直接影响实现且改变成本较高的 Architecture Decision Record（ADR）。有效 ADR 是“系统应当遵守什么架构边界”的规范真源；代码、Migration 和测试才是“已经实现了什么”的事实依据。
 
-开始阅读前先查看 [文档导航](../README.md)。创建新 ADR 使用 [TEMPLATE.md](TEMPLATE.md)。
+开始阅读前先查看 [文档导航](../README.md)。当前约束按主题从
+[CURRENT.md](CURRENT.md) 进入，完整时间序历史由 [HISTORY.md](HISTORY.md) 生成；创建新 ADR
+使用 [TEMPLATE.md](TEMPLATE.md)。本文件拥有准入、生命周期和替代关系规则，后面的时间序表
+只作为旧链接兼容入口。
 
 ## 收录标准
 
@@ -33,18 +36,51 @@ last_updated: 2026-08-09
 | `rejected` | 已明确否决，不构成规范约束 |
 
 - `accepted` 只表示决策成立，不表示实现完成。
-- 已接受 ADR 只允许修正错字、链接、元数据或不改变语义的表达。
-- 改变边界、约束或后果时必须创建新 ADR，并在新旧文件中维护 `supersedes` / `superseded_by`。
-- 当前有效 ADR 必须同时满足 `status: accepted` 且 `superseded_by: null`。
+- 已接受 ADR 的 Decision、Consequences 与 Rejected Alternatives 语义冻结；除 References 链接外，
+  任何非语义正文修订都需要一次性、精确 from/to hash amendment 和人工审批。
+- 当前有效 ADR 必须同时满足 `decision_scope: cross-version`、`status: accepted` 与
+  `superseded_by: null`。ADR-0118 是唯一历史 `version-scope` 例外，只进入 HISTORY。
+- `supersedes` 只列当前 ADR **直接且完整替代** 的 predecessor；`superseded_by` 只指向唯一直接
+  successor。最终有效替代者沿链推导，不把旧指针压缩到链尾，也不冗余列传递祖先。
+- 局部覆盖、细化或组合使用不进入完整替代图，不改变旧 ADR 状态；它们在新 ADR 正文、CURRENT
+  related navigation、Architecture 和 Contract 中解释。
+- proposed ADR 可以用可选 `intended_supersedes` 记录候选完整替代目标，但 `supersedes` 保持为空。
+  接受时必须在同一最终快照原子更新新旧 status、直接关系、CURRENT 和 HISTORY。
 - 实施状态和遗留缺口只能记录在当前版本文档中。
 
 ## 必需结构
 
-每份 ADR 使用稳定 YAML Front Matter，并包含 `Context`、`Decision`、`Consequences`、`Rejected Alternatives` 和 `References`。字段名与状态值使用模板中的英文枚举，正文语言可以按主题选择中文或英文。
+每份 ADR 使用稳定 YAML Front Matter，并按顺序包含 `Context`、`Decision`、`Consequences`、
+`Rejected Alternatives` 和 `References`，其中 `References` 必须是最后一个二级章节。字段名与
+状态值使用模板中的英文枚举，正文语言可以按主题选择中文或英文。新增 ADR 只能使用
+`decision_scope: cross-version`；版本局部范围留在唯一 current Version 文档。
 
 ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、代码或测试，但不能把理解规范所需的关键语义外包给历史文档。
 
+## 自动治理
+
+所有规则按目录和 Front Matter 动态计算，不硬编码 ADR 数量、当前版本或任何具体 Skill：
+
+```bash
+pnpm docs:test
+pnpm docs:check
+DOCS_BASE_REF=<PR base SHA> pnpm docs:check:ci
+pnpm docs:adr:generate -- --check
+```
+
+- `docs:check:adr` 校验文件名、YAML schema、章节、直接替代图、CURRENT/HISTORY、Architecture
+  索引以及全仓 Markdown 本地链接和 fragment；
+- `docs:check:ci` 额外比较真实 PR base，阻止删除/移动/重编号、非法状态转换和 accepted ADR
+  历史正文改写；缺少 base SHA 时直接失败；
+- HISTORY 只能通过生成器更新；CURRENT 的主题归属必须人工选择，新增 ADR 未归类时检查失败；
+- `legacy-exceptions.json` 只允许已审计的 ADR-0118 scope 例外，新版本、新 ADR 和新文档不得扩充
+  legacy 基线；
+- `amendments/` 只授权精确文件 hash 对，不提供通配符或可复用豁免。
+
 ## 决策索引
+
+> 兼容入口：完整且无重复的机器历史见 [HISTORY.md](HISTORY.md)，当前主题导航见
+> [CURRENT.md](CURRENT.md)。本表暂时保留旧的局部关系说明，不作为生成或生命周期真源。
 
 | ADR | 决策 | 状态 | 来源版本 | 替代关系 |
 |---|---|---|---|---|
@@ -138,7 +174,7 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0088](0088-attested-native-team-gateway-attachment.md) | Attested Native Team Gateway Attachment | `accepted` | [v0.30](../versions/v0.30/README.md) | 局部替代 ADR-0014 的 Connector credential/Antigravity 条款、ADR-0018 的内部 Team MCP 同路投影条款，并落实 ADR-0065 的 preserved-ambient 准入路径；完整内置工具对等见 ADR-0089 |
 | [ADR-0089](0089-attested-built-in-mcp-tool-parity.md) | Attested Built-in MCP Tool Parity | `accepted` | [v0.31](../versions/v0.31/README.md) | 扩展 ADR-0088 的首阶段单工具 attachment；不改变 preserved ambient 与 external projection 边界 |
 | [ADR-0090](0090-team-delivery-qualification-evidence-boundary.md) | Team Delivery Qualification Evidence Boundary | `accepted` | [v0.31](../versions/v0.31/README.md) | 首次冻结默认团队交付资格、外部验证、零人工和证据边界 |
-| [ADR-0091](0091-durable-member-calls-and-single-slot-a2a-resume.md) | Durable Member Calls and Single-Slot A2A Resume Scheduling | `superseded` | [v0.32](../versions/v0.32/README.md) | → ADR-0130；历史 Member Call/Resume 调度模型 |
+| [ADR-0091](0091-durable-member-calls-and-single-slot-a2a-resume.md) | Durable Member Calls and Single-Slot A2A Resume Scheduling | `superseded` | [v0.32](../versions/v0.32/README.md) | → ADR-0099；历史 Member Call/Resume 调度模型 |
 | [ADR-0092](0092-recoverable-qualification-evaluation-integrity.md) | Recoverable Qualification Evaluation Integrity | `accepted` | [v0.34](../versions/v0.34/README.md) | 局部替代 ADR-0090 的投递后评测器故障与无效边界 |
 | [ADR-0093](0093-core-owned-atomic-campturn-execution-budgets.md) | Core-Owned Atomic CampTurn Execution Budgets | `accepted` | [v0.34](../versions/v0.34/README.md) | 用通用 Core 准入合同原子实施 Trial 的时间、Run 与 A2A 预算 |
 | [ADR-0094](0094-formal-qualification-isolation-and-effect-coverage.md) | Formal Qualification Isolation and External Effect Coverage | `accepted` | [v0.34](../versions/v0.34/README.md) | 以专用执行环境证明零人工与外部副作用收口；共享用户和 uncontrolled ambient MCP 仅诊断 |
@@ -177,16 +213,11 @@ ADR 必须能独立解释最终决定。`References` 可以链接版本讨论、
 | [ADR-0127](0127-atomic-member-runtime-configuration.md) | Atomic Member Runtime Configuration and Internal Resolved Binding | `accepted` | [v0.43](../versions/v0.43/README.md) | ← ADR-0082；局部替代 ADR-0066 的 AdapterKind-only 普通队员配置 |
 | [ADR-0128](0128-structured-draft-only-user-message-submission.md) | Structured Draft-Only User Camp Message Submission | `accepted` | [v0.43](../versions/v0.43/README.md) | ← ADR-0096；删除旧用户发送与 first-message Camp creation 边界 |
 | [ADR-0129](0129-deterministic-bounded-raw-public-context-delivery.md) | Deterministic Bounded Raw Public Context Delivery | `accepted` | [v0.44](../versions/v0.44/README.md) | ← ADR-0050；局部替代 ADR-0051、ADR-0058、ADR-0060、ADR-0061、ADR-0067、ADR-0075、ADR-0100、ADR-0106、ADR-0108、ADR-0123、ADR-0126 的 Summary/Compaction/公共上下文条款 |
-| [ADR-0130](0130-public-a2a-message-and-unified-delivery.md) | Public A2A Messages and Unified Message Delivery | `accepted` | [v0.45](../versions/v0.45/README.md) | ← ADR-0073、ADR-0091、ADR-0099；统一公共 Message、Message Delivery、寻址、fanout 与 lineage |
+| [ADR-0130](0130-public-a2a-message-and-unified-delivery.md) | Public A2A Messages and Unified Message Delivery | `accepted` | [v0.45](../versions/v0.45/README.md) | ← ADR-0073、ADR-0099；统一公共 Message、Message Delivery、寻址、fanout 与 lineage |
 | [ADR-0131](0131-recipient-scoped-event-driven-delivery-recovery.md) | Recipient-Scoped Event-Driven Delivery Dispatch and Interrupted Recovery | `accepted` | [v0.45](../versions/v0.45/README.md) | 细化 ADR-0130 的 recipient-scoped pump、waitCondition、interrupted 与显式恢复 |
 | [ADR-0132](0132-public-reference-context-closure-profile-v2.md) | Bounded Public Reference Context Closure and Profile v2 | `accepted` | [v0.45](../versions/v0.45/README.md) | Profile v1 保持 immutable；局部替代 ADR-0129 的 reply/closure 选择条款 |
 | [ADR-0133](0133-scheme-c-run-process-detail-surface.md) | Scheme C Run Process Detail Surface | `accepted` | [v0.45](../versions/v0.45/README.md) | 局部替代 ADR-0084 的 Activity surface 条款；Run 详情迁入 Execution Drawer |
 | [ADR-0134](0134-runtime-public-output-boundary.md) | Explicit Runtime Public Output Boundary | `accepted` | [v0.45](../versions/v0.45/README.md) | 新增 Adapter final boundary、两种 public output mode 与 exact suppression |
-| [ADR-0130](0130-public-a2a-message-and-unified-delivery.md) | Public A2A Messages and Unified Message Delivery | `accepted` | [v0.45](../versions/v0.45/README.md) | ← ADR-0073、ADR-0091、ADR-0099；公共消息、统一 Delivery、strict addressing 与 canonical recipients |
-| [ADR-0131](0131-recipient-scoped-event-driven-delivery-recovery.md) | Recipient-Scoped Event-Driven Delivery Dispatch and Interrupted Recovery | `accepted` | [v0.45](../versions/v0.45/README.md) | ← ADR-0091、ADR-0099；局部替代其调度/恢复条款 |
-| [ADR-0132](0132-public-reference-context-closure-profile-v2.md) | Bounded Public Reference Context Closure and Profile v2 | `accepted` | [v0.45](../versions/v0.45/README.md) | 保留 Profile v1 immutable；局部新增/替代 ADR-0129 的 reply closure 与 Context gate 条款 |
-| [ADR-0133](0133-scheme-c-run-process-detail-surface.md) | Scheme C Run Process Detail Surface | `accepted` | [v0.45](../versions/v0.45/README.md) | 局部替代 ADR-0084 的 Inspector Activity/Run detail 呈现条款 |
-| [ADR-0134](0134-runtime-public-output-boundary.md) | Explicit Runtime Public Output Boundary | `accepted` | [v0.45](../versions/v0.45/README.md) | Runtime Adapter final boundary、explicit send 与 exact suppression |
 | [ADR-0135](0135-compact-agent-output-over-canonical-built-in-tool-envelope.md) | Compact Agent Output over Canonical Built-in Tool Envelope | `accepted` | [v0.46](../versions/v0.46/README.md) | 局部替代 ADR-0124 的 Agent-facing response/Bootstrap 与 discovery 条款；Core Envelope、receipt、IPC 和 replay 继续有效 |
 | [ADR-0136](0136-durable-task-v2-responsibility-and-coordination-authority.md) | Durable Task v2 Responsibility and Coordination Authority | `accepted` | [v0.47](../versions/v0.47/README.md) | 局部替代 ADR-0057/0058 的 Task shape、Lead authority、membership/removal Task 收口与 removed Assignee 条款 |
 | [ADR-0137](0137-one-time-task-linked-responsibility-admission.md) | One-Time Task-Linked Responsibility Admission | `accepted` | [v0.47](../versions/v0.47/README.md) | 局部替代 ADR-0058 与实现中的 dispatch/start 持续 Task fence，冻结 acceptance-boundary admission 与 grandfathering |

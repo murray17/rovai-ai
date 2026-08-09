@@ -12,6 +12,8 @@ superseded_by: ADR-0122
 
 # ADR-0119: Append-Only Versioned Evidence-to-Operation Identity Bindings
 
+## Context
+
 ADR-0113 separates Evidence deduplication from operation identity, while ADR-0116 separates operation
 identity from semantic classification. v0.41 also needs a durable rule for binding individual Evidence
 to operations without mutating immutable Evidence, silently regrouping history, or letting a classifier
@@ -74,7 +76,7 @@ the Evidence and an honest isolated/unknown result; it does not authorize a best
 - Runtimes without stable activity identity may show more isolated unknown operations, preserving
   observational honesty at the cost of compactness.
 
-## Rejected alternatives
+## Rejected Alternatives
 
 - storing `operationId` only as mutable derived data on an Evidence row;
 - allowing a classifier replay to regroup Evidence;

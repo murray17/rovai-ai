@@ -12,6 +12,8 @@ superseded_by: ADR-0122
 
 # ADR-0120: Run-Epoch-Pinned Identity Rules and Frozen Evidence Binding Sets
 
+## Context
+
 ADR-0119 requires versioned parallel Evidence-to-operation bindings, but a rule version and one
 materialized binding result are not the same identity. Reusing one field for both would make two
 replays of the same rule at different Evidence watermarks indistinguishable and could let an in-flight
@@ -68,7 +70,7 @@ input; it cannot append bindings, change the Evidence watermark, or reinterpret 
 - historical identity improvements require explicit replay provenance and may coexist with the default
   historical grouping without replacing it.
 
-## Rejected alternatives
+## Rejected Alternatives
 
 - using `operationIdentityVersion` as both rule version and binding-set primary key;
 - changing the default identity rule of an active or historical AgentRun epoch;

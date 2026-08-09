@@ -12,6 +12,8 @@ superseded_by: null
 
 # ADR-0112: Immutable Execution Evidence and Rebuildable Versioned Canonical Activity Projection
 
+## Context
+
 v0.41 需要在不伪造 Runtime 内部行为的前提下持续改进跨 Runtime 分类。若把当前分类结果当作唯一事实，任何规则修正都会污染历史；若每次读取都临时猜测，实时与恢复又会漂移。因此事实权威和语义 Projection 必须分层，并且 Projection 必须可重建。
 
 ## Decision
@@ -39,7 +41,7 @@ Lifecycle Projection 对同一 `operationId` 的 started/progress/terminal 事�
 - Read Side 需要明确默认历史版本和显式重投影入口；
 - Fixture、replay、mapping registry 和 classifier 版本成为每次语义变更的必需交付物。
 
-## Rejected alternatives
+## Rejected Alternatives
 
 - 把 Canonical Activity 当成不可追溯的唯一事实表，直接覆盖旧分类；
 - 每次 Renderer 读取时从标题、命令或 Runtime 名称即时猜测分类；

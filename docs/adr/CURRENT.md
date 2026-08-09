@@ -1,0 +1,248 @@
+---
+document_type: adr-current
+authority: current-cross-version-adr-navigation
+last_updated: 2026-08-09
+---
+
+# 当前跨版本架构决策
+
+本文件是人工审阅的主题导航，不是新的规范真源，也不代表代码已经实现。机器 primary 区精确覆盖
+全部 `accepted + cross-version + superseded_by:null` ADR；完整历史见
+[HISTORY.md](HISTORY.md)，生命周期和准入规则见 [README.md](README.md)。
+
+每个 ADR 只有一个 primary 主题；跨领域关系写在机器区之外，不参与唯一性计数。主题归属服务阅读，
+不改变 ADR、Contract、Architecture、Version 或实现证据的权威边界。
+
+## Core data 与 read side
+
+- **何时阅读：** 修改领域真源、Managed Content、Blob 或 read side 时阅读。
+- **当前架构：** ADR-only；architecture summary pending
+- **当前合同：** 无
+
+<!-- adr-current-primary:begin topic=core-data -->
+| ADR | Decision |
+| --- | --- |
+| [ADR-0001](0001-core-transaction.md) | Core Transaction |
+| [ADR-0013](0013-managed-content-and-read-side-v2.md) | Managed Content and Read Side v2 |
+| [ADR-0087](0087-core-owned-durable-in-app-notification-inbox.md) | Core-Owned Durable In-App Notification Inbox |
+<!-- adr-current-primary:end -->
+
+Related: Camp content、Evidence 与 Renderer 可分别回到其 primary 主题。
+
+## Camp 与 workspace
+
+- **何时阅读：** 修改 Camp 生命周期、Workspace、附件、Draft 或激活事务时阅读。
+- **当前架构：** [Camp Activation Lifecycle](../architecture/camp-activation-lifecycle.md)
+- **当前合同：** [Pending Camp Activation v1](../contracts/pending-camp-activation-v1.md)
+
+<!-- adr-current-primary:begin topic=camp-workspace -->
+| ADR | Decision |
+| --- | --- |
+| [ADR-0071](0071-configured-camp-creation-and-lazy-conversations.md) | Configured Camp Creation and Lazy Conversations |
+| [ADR-0072](0072-directory-workspace-and-dynamic-git-capability.md) | Directory Workspace Identity and Dynamic Git Capability |
+| [ADR-0074](0074-quick-chat-ubiquitous-language-and-binding-identity.md) | Quick Chat Ubiquitous Language and Binding Identity |
+| [ADR-0080](0080-durable-camp-composer-draft-and-atomic-attachment-consumption.md) | Durable Camp Composer Draft and Atomic Attachment Consumption |
+| [ADR-0081](0081-camp-public-attachment-paths-and-frozen-discovery.md) | Camp-Public Attachment Paths and Frozen Discovery |
+| [ADR-0128](0128-structured-draft-only-user-message-submission.md) | Structured Draft-Only User Camp Message Submission |
+| [ADR-0145](0145-core-owned-pending-camp-draft-activation.md) | Core-Owned Pending Camp Draft Activation |
+<!-- adr-current-primary:end -->
+
+Related: Session bootstrap、public delivery 与 product surface 仍从各自 primary 主题进入。
+
+## Member identity
+
+- **何时阅读：** 修改队员身份、Presence、移除、头像、routing identity 或 Self/Peer 投影时阅读。
+- **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
+- **当前合同：** [Collaboration State v2](../contracts/collaboration-state-v2.md)
+
+<!-- adr-current-primary:begin topic=member-identity -->
+| ADR | Decision |
+| --- | --- |
+| [ADR-0056](0056-controlled-member-avatar-assets.md) | Controlled Member Avatar References and Application-Managed Local Assets |
+| [ADR-0057](0057-member-presence-and-retained-removal.md) | Member Presence and Retained Permanent Removal |
+| [ADR-0060](0060-opaque-member-routing-identity.md) | Opaque Member Routing Identity and Globally Unique Names |
+| [ADR-0086](0086-single-current-built-in-member-appearance-set.md) | Single Current Built-In Member Appearance Set |
+| [ADR-0110](0110-internal-agent-uuid-and-monotonic-short-agent-id.md) | Internal Agent UUID and Monotonic Short Agent ID |
+| [ADR-0146](0146-sole-native-session-self-identity-and-peer-routing-projection.md) | Sole Native-Session Self Identity and Peer Routing Projection |
+<!-- adr-current-primary:end -->
+
+Related: ADR-0100 的 Session identity delivery 位于 session-context-bootstrap。
+
+## Collaboration、Task 与 Message
+
+- **何时阅读：** 修改 A2A、Task、Message、Delivery、协作责任或公共输出时阅读。
+- **当前架构：** [Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
+- **当前合同：** [Durable Task v2](../contracts/durable-task-v2.md)、[Camp Message Send v2](../contracts/camp-message-send-v2.md)、[Message Delivery v1](../contracts/message-delivery-v1.md)
+
+<!-- adr-current-primary:begin topic=collaboration-task-message -->
+| ADR | Decision |
+| --- | --- |
+| [ADR-0058](0058-collaboration-v4-presence-aware-admission.md) | Collaboration v4: Presence-Aware Routing and Execution Admission |
+| [ADR-0076](0076-message-first-agent-run-dispatch-boundary.md) | Message-First AgentRun Dispatch Boundary |
+| [ADR-0077](0077-responsive-camp-turn-cancellation-boundary.md) | Responsive CampTurn Cancellation Boundary |
+| [ADR-0093](0093-core-owned-atomic-campturn-execution-budgets.md) | Core-Owned Atomic CampTurn Execution Budgets |
+| [ADR-0106](0106-agent-bounded-cross-camp-public-history-retrieval.md) | Agent-Bounded Cross-Camp Public History Retrieval |
+| [ADR-0108](0108-discovery-only-camp-message-search-and-sequence-paged-reads.md) | Discovery-Only Camp Message Search and Sequence-Paged Reads |
+| [ADR-0130](0130-public-a2a-message-and-unified-delivery.md) | Public A2A Messages and Unified Message Delivery |
+| [ADR-0131](0131-recipient-scoped-event-driven-delivery-recovery.md) | Recipient-Scoped Event-Driven Delivery Dispatch and Interrupted Recovery |
+| [ADR-0134](0134-runtime-public-output-boundary.md) | Explicit Runtime Public Output Boundary |
+| [ADR-0136](0136-durable-task-v2-responsibility-and-coordination-authority.md) | Durable Task v2 Responsibility and Coordination Authority |
+| [ADR-0137](0137-one-time-task-linked-responsibility-admission.md) | One-Time Task-Linked Responsibility Admission |
+<!-- adr-current-primary:end -->
+
+Related: Context selection、Self/Peer identity 与 Runtime admission 从相应 primary 主题进入。
+
+## Runtime execution 与 security
+
+- **何时阅读：** 修改 Runtime ownership、权限、安全、Fleet、执行恢复或诊断读写边界时阅读。
+- **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Diagnostics Center](../architecture/diagnostics-center.md)
+- **当前合同：** [Diagnostics Center v1](../contracts/diagnostics-center-v1.md)
+
+<!-- adr-current-primary:begin topic=runtime-execution-security -->
+| ADR | Decision |
+| --- | --- |
+| [ADR-0059](0059-runtime-owned-resource-permissions.md) | Runtime-Owned Resource Permissions and Path-Only Run Workspace |
+| [ADR-0062](0062-interruptible-runs-and-unsettled-external-effects.md) | Interruptible Run Trees and Unsettled External Effects |
+| [ADR-0065](0065-verified-runtime-catalog-and-documentation-only-compatibility.md) | Verified Runtime Catalog and Documentation-Only Compatibility Evaluation |
+| [ADR-0066](0066-managed-product-runtime-resolution.md) | Managed Product Runtime Discovery, Resolution, and Relocation |
+| [ADR-0075](0075-runtime-integrity-at-change-and-execution-boundaries.md) | Runtime Integrity at Change and Execution Boundaries |
+| [ADR-0079](0079-two-phase-cancellation-projection-and-bounded-runtime-interrupt.md) | Two-Phase Cancellation Projection and Bounded Runtime Interrupt |
+| [ADR-0083](0083-background-runtime-checks-and-actionable-status.md) | Background Runtime Checks and Actionable User Status |
+| [ADR-0123](0123-exclusive-agentrun-runtime-fleet.md) | Exclusive AgentRun Runtime Processes and Resident Fleet Reuse |
+| [ADR-0126](0126-codex-native-home-and-external-session-ownership.md) | Codex Native Home and External Session Ownership |
+| [ADR-0127](0127-atomic-member-runtime-configuration.md) | Atomic Member Runtime Configuration and Internal Resolved Binding |
+| [ADR-0148](0148-read-only-diagnostics-and-data-minimized-export.md) | Read-Only Diagnostics and Data-Minimized Export |
+<!-- adr-current-primary:end -->
+
+Related: Session redelivery、Skill/MCP projection 与 Qualification 分别保留独立 primary。
+
+## Session、Context 与 Bootstrap
+
+- **何时阅读：** 修改 Native Session、Bootstrap、Dynamic Context、Profile、redelivery 或 accepted-input ACK 时阅读。
+- **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Native Session Bootstrap Redelivery](../architecture/native-session-bootstrap-redelivery.md)、[Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)
+- **当前合同：** [Context Delivery Profile v2](../contracts/context-delivery-profile-v2.md)、[Collaboration State v2](../contracts/collaboration-state-v2.md)
+
+<!-- adr-current-primary:begin topic=session-context-bootstrap -->
+| ADR | Decision |
+| --- | --- |
+| [ADR-0007](0007-portable-conversation-handoff.md) | Portable Conversation Handoff |
+| [ADR-0051](0051-boundary-capped-context-retrieval.md) | Boundary-Capped Context Retrieval |
+| [ADR-0067](0067-native-session-bootstrap-and-agentrun-context-v3.md) | Native Session Bootstrap and AgentRun Context v3 |
+| [ADR-0100](0100-latest-member-identity-native-session-bootstrap.md) | Latest Member Identity in Native Session Bootstrap |
+| [ADR-0129](0129-deterministic-bounded-raw-public-context-delivery.md) | Deterministic Bounded Raw Public Context Delivery |
+| [ADR-0132](0132-public-reference-context-closure-profile-v2.md) | Bounded Public Reference Context Closure and Profile v2 |
+| [ADR-0138](0138-durable-bootstrap-redelivery-requirement.md) | Durable Bootstrap Redelivery Requirement and Accepted-Input Acknowledgement |
+| [ADR-0139](0139-version-owned-bootstrap-redelivery-runtime-policy.md) | Version-Owned Bootstrap Redelivery Runtime Policy and Enablement Transition |
+| [ADR-0140](0140-runtime-specific-compaction-signal-admission-point.md) | Runtime-Specific Compaction Signal Admission Point and Prepared-Input Cutoff |
+| [ADR-0141](0141-atomic-bootstrap-redelivery-input-overlay.md) | Atomic Bootstrap Redelivery Input Overlay and Transient Identity Boundary |
+| [ADR-0142](0142-native-session-scoped-compaction-observer-lease.md) | Native-Session-Scoped Compaction Observer Lease and Uncertain-Submission Boundary |
+| [ADR-0143](0143-best-effort-non-blocking-compaction-detector-capability.md) | Best-Effort Non-Blocking Compaction Detector Capability |
+| [ADR-0147](0147-lossless-model-context-projection-and-layered-delivery-evidence.md) | Lossless Model Context Projection and Layered Delivery Evidence |
+<!-- adr-current-primary:end -->
+
+Related: Member identity、Message delivery、Memory entrypoint 与 Evidence 仍从各自 primary 主题进入。
+
+## Memory
+
+- **何时阅读：** 修改 Memory authority、scope、revision、forgetting、retrieval、mutation 或 storage 时阅读。
+- **当前架构：** ADR-only；architecture summary pending
+- **当前合同：** 无
+
+<!-- adr-current-primary:begin topic=memory -->
+| ADR | Decision |
+| --- | --- |
+| [ADR-0019](0019-application-global-memory-ownership.md) | Application-Global Memory Ownership |
+| [ADR-0022](0022-immutable-memory-scope.md) | Immutable Memory Scope |
+| [ADR-0026](0026-explicit-memory-supersession.md) | Explicit Memory Supersession |
+| [ADR-0027](0027-memory-domain-forgetting.md) | Memory-Domain Forgetting |
+| [ADR-0029](0029-bounded-memory-reactivation.md) | Bounded Memory Reactivation |
+| [ADR-0047](0047-user-initiated-memory-export-boundary.md) | User-Initiated Memory Export Boundary |
+| [ADR-0068](0068-brokered-memory-retrieval-and-session-entrypoint.md) | Brokered Memory Retrieval and Session Entrypoint |
+| [ADR-0069](0069-single-effective-memory-and-scope-bounded-agent-mutation.md) | Single Effective Memory and Scope-Bounded Agent Mutation |
+| [ADR-0070](0070-normalized-sqlite-memory-store-v2.md) | Normalized SQLite Memory Store v2 |
+<!-- adr-current-primary:end -->
+
+Related: Session entrypoint 与 Built-in operation 只作为交叉导航，不改变 Memory authority。
+
+## Skills、MCP 与 built-ins
+
+- **何时阅读：** 修改 Skill/MCP projection、Built-in transport、CLI、catalog 或 Agent output 时阅读。
+- **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
+- **当前合同：** [Built-in Tool Transport v4](../contracts/builtin-tool-transport-v4.md)
+
+<!-- adr-current-primary:begin topic=skills-mcp-builtins -->
+| ADR | Decision |
+| --- | --- |
+| [ADR-0014](0014-stable-team-tool-gateway-v2.md) | Stable Team Tool Gateway v2 |
+| [ADR-0018](0018-file-backed-mcp-library-runtime-projection.md) | File-Backed MCP Library and Per-Run Runtime Projection |
+| [ADR-0088](0088-attested-native-team-gateway-attachment.md) | Attested Native Team Gateway Attachment |
+| [ADR-0089](0089-attested-built-in-mcp-tool-parity.md) | Attested Built-in MCP Tool Parity |
+| [ADR-0103](0103-canonical-mcp-json-and-stable-assignment-identity.md) | Canonical MCP JSON and Stable Assignment Identity |
+| [ADR-0105](0105-runtime-group-assigned-skill-delivery.md) | Runtime-Group Assigned Rovai Skill Delivery |
+| [ADR-0124](0124-cli-only-transport-for-rovai-built-in-operations.md) | CLI-Only Transport for Rovai Built-in Operations |
+| [ADR-0125](0125-runtime-native-additive-external-mcp-projection.md) | Runtime-Native Additive External MCP Projection |
+| [ADR-0135](0135-compact-agent-output-over-canonical-built-in-tool-envelope.md) | Compact Agent Output over Canonical Built-in Tool Envelope |
+| [ADR-0144](0144-self-contained-duo-grilling-bundled-skills.md) | Self-Contained Duo Grilling Bundled Skills |
+<!-- adr-current-primary:end -->
+
+Related: 具体 Skill 名称或版本不是治理例外；长期边界仍按本主题的一般 ADR 准入规则判断。
+
+## Evidence 与 Runtime Activity
+
+- **何时阅读：** 修改 Execution Evidence、Canonical Activity、classifier、projection 或 observation coverage 时阅读。
+- **当前架构：** ADR-only；architecture summary pending
+- **当前合同：** 无
+
+<!-- adr-current-primary:begin topic=evidence-activity -->
+| ADR | Decision |
+| --- | --- |
+| [ADR-0061](0061-durable-agent-inaccessible-execution-evidence.md) | Durable User-Visible and Agent-Inaccessible Execution Evidence |
+| [ADR-0111](0111-core-owned-canonical-runtime-activity.md) | Core-Owned Canonical Runtime Activity and Observation-Honest Lifecycle Projection |
+| [ADR-0112](0112-immutable-execution-evidence-and-rebuildable-canonical-activity-projection.md) | Immutable Execution Evidence and Rebuildable Versioned Canonical Activity Projection |
+| [ADR-0113](0113-core-scoped-operation-identity-and-evidence-deduplication-boundary.md) | Core-Scoped Operation Identity and Evidence Deduplication Boundary |
+| [ADR-0114](0114-stable-activity-domain-and-evidence-bounded-semantic-kind.md) | Stable Activity Domain and Evidence-Bounded Semantic Kind |
+| [ADR-0115](0115-evidence-bounded-activity-phase-and-outcome-resolution.md) | Evidence-Bounded Activity Phase and Outcome Resolution |
+| [ADR-0116](0116-projection-pinned-classifier-version-and-explicit-historical-reprojection.md) | Projection-Pinned Classifier Version and Explicit Historical Reprojection |
+| [ADR-0117](0117-observation-capability-coverage-levels-across-runtime-adapters.md) | Observation-Capability Coverage Levels Across Runtime Adapters |
+| [ADR-0122](0122-current-canonical-activity-projection-and-deferred-identity-replay.md) | Current Canonical Activity Projection and Deferred Identity Replay |
+<!-- adr-current-primary:end -->
+
+Related: Diagnostics、Qualification 与 ContextManifest Evidence 不因此合并为同一 authority。
+
+## Qualification
+
+- **何时阅读：** 修改评测准入、试验隔离、判定、报告或可复现证据时阅读。
+- **当前架构：** ADR-only；architecture summary pending
+- **当前合同：** 无
+
+<!-- adr-current-primary:begin topic=qualification -->
+| ADR | Decision |
+| --- | --- |
+| [ADR-0090](0090-team-delivery-qualification-evidence-boundary.md) | Team Delivery Qualification Evidence Boundary |
+| [ADR-0092](0092-recoverable-qualification-evaluation-integrity.md) | Recoverable Qualification Evaluation Integrity |
+| [ADR-0094](0094-formal-qualification-isolation-and-effect-coverage.md) | Formal Qualification Isolation and External Effect Coverage |
+| [ADR-0095](0095-layered-qualification-authority-and-semantic-review.md) | Layered Qualification Authority and Advisory Semantic Review |
+| [ADR-0097](0097-authority-preserving-benchmark-evidence-ledgers.md) | Authority-Preserving Benchmark Evidence Ledgers |
+| [ADR-0098](0098-dual-replica-evidence-bound-semantic-judge.md) | Dual-Replica Evidence-Bound Semantic Judge Protocol |
+| [ADR-0101](0101-outcome-only-collaboration-value-qualification-cases.md) | Outcome-Only Collaboration-Value Qualification Cases |
+| [ADR-0102](0102-immutable-diagnostic-portfolio-authority.md) | Immutable Diagnostic Portfolio Authority and Two-Repeat Stability |
+<!-- adr-current-primary:end -->
+
+Related: Runtime Activity 与 Execution Evidence 作为输入，不替代 Qualification 的判定边界。
+
+## Product 与 Renderer
+
+- **何时阅读：** 修改产品身份、Renderer surface、Run detail 或稳定 UI/UX 合同时阅读。
+- **当前架构：** [Diagnostics Center](../architecture/diagnostics-center.md)；其他主题 architecture summary pending
+- **当前合同：** [Run Process Detail Surface v1](../contracts/run-process-detail-surface-v1.md)
+
+<!-- adr-current-primary:begin topic=product-renderer -->
+| ADR | Decision |
+| --- | --- |
+| [ADR-0048](0048-rovai-product-identity-and-legacy-namespace.md) | Rovai-ai Product Identity and Controlled Legacy Namespace Migration |
+| [ADR-0078](0078-navigation-projection-and-sidebar-wordmark-boundary.md) | Navigation Projection and Sidebar Wordmark Boundary |
+| [ADR-0084](0084-conversation-surface-controls-and-stop-outcome-projection.md) | Conversation Surface Controls and Stop Outcome Projection |
+| [ADR-0133](0133-scheme-c-run-process-detail-surface.md) | Scheme C Run Process Detail Surface |
+<!-- adr-current-primary:end -->
+
+Related: 具体 UI 交互继续以 docs/ui/ 为权威；ADR 只记录长期高成本边界。

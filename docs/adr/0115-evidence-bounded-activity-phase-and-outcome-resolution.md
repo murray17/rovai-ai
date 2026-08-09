@@ -12,6 +12,8 @@ superseded_by: null
 
 # ADR-0115: Evidence-Bounded Activity Phase and Outcome Resolution
 
+## Context
+
 Runtime 事件的生命周期位置和操作结果经常以不同事件、不同字段甚至不同可靠性到达。若把
 `completed` 当作结果，或让 Run 终态覆盖子操作，就会把取消、失败和效果未知混成同一个状态。
 
@@ -52,7 +54,7 @@ unknown。
 - Adapter 必须提供足够的 dispatch/terminal 证据，否则会产生更多 unsettled/unknown；
 - 需要 fixture 覆盖冲突终端、缺失 start、Run 取消和恢复重放。
 
-## Rejected alternatives
+## Rejected Alternatives
 
 - 只按事件名把 `activity.completed` 显示为成功；
 - Run 失败/取消时为所有子操作批量补造失败/完成；

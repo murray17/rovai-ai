@@ -22,11 +22,6 @@ superseded_by: null
 > 新增 compaction 后的 eligible Bootstrap redelivery boundary；它复用本文“原稳定组件 + 最新
 > Member Identity + 完整 Bootstrap 不持久化”的规则，局部替代“其他 Runtime 只在新 Session
 > 收到 Bootstrap”的投递矩阵条款。
->
-> [ADR-0146](0146-sole-native-session-self-identity-and-peer-routing-projection.md)进一步冻结
-> `MEMBER_IDENTITY` 为 Native Session 唯一 Self Identity，并局部替代本文/ADR-0129 中
-> Collaboration State 可以重复投影当前 Agent 的边界；六字段结构、非持久化和 eligible Bootstrap
-> eventual consistency 继续有效。
 
 ## Context
 

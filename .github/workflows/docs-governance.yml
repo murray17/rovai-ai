@@ -1,0 +1,51 @@
+name: Documentation governance
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-governance-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docs-governance:
+    name: docs-governance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository and PR base history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.20.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install locked dependencies without lifecycle scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Run repository tests including documentation snapshot checks
+        run: pnpm test
+
+      - name: Run diff-aware documentation freeze
+        if: github.event_name == 'pull_request'
+        env:
+          DOCS_BASE_REF: ${{ github.event.pull_request.base.sha }}
+        run: pnpm docs:check:ci
+
+      - name: Verify generated ADR history is current
+        run: pnpm docs:adr:generate -- --check

@@ -2,7 +2,7 @@
 document_type: adr
 id: ADR-0082
 title: "Member-Owned Runtime Parameters and Explicit Configuration"
-status: accepted
+status: superseded
 date: 2026-07-31
 decision_scope: cross-version
 source_version: v0.26

@@ -4,13 +4,15 @@ id: ADR-0122
 title: Current Canonical Activity Projection and Deferred Identity Replay
 status: accepted
 date: 2026-08-05
-decision_scope: version-scope
+decision_scope: cross-version
 source_version: v0.41
 supersedes: [ADR-0119, ADR-0120, ADR-0121]
 superseded_by: null
 ---
 
 # ADR-0122: Current Canonical Activity Projection and Deferred Identity Replay
+
+## Context
 
 v0.41 要解决的是九个 Runtime 的结构化活动不再统一显示成“运行命令”。ADR-0119～ADR-0121
 把未来可能需要的历史身份 replay、并行 Binding Set、sealed Manifest 和 live head 发布协议提前纳入
@@ -61,7 +63,7 @@ Projection 不自动重算。若未来确实需要用新身份规则重组历史
 - 当前 Projection 是可更新的派生状态，不是不可变事实真源；
 - 若未来引入并行历史解释，需要新的 schema、选择协议和迁移决策，不能偷偷扩张当前表语义。
 
-## Rejected alternatives
+## Rejected Alternatives
 
 - v0.41 为每个 Evidence 水位发布一个不可变 Binding Set；
 - 当前就实现 Binding Ledger、sealed Manifest 和 default head；

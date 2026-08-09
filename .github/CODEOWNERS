@@ -1,0 +1,10 @@
+# Documentation governance and every future version/topic use the same owner boundary.
+/docs/ @murray17
+/AGENTS.md @murray17
+/scripts/check-doc-*.mjs @murray17
+/scripts/generate-doc-adr.mjs @murray17
+/scripts/lib/doc-adr* @murray17
+/package.json @murray17
+/pnpm-lock.yaml @murray17
+/.github/workflows/docs-governance.yml @murray17
+/.github/CODEOWNERS @murray17

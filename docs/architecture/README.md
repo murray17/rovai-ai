@@ -9,6 +9,7 @@ last_updated: 2026-08-09
 本目录保存跨版本长期存在的组件结构、职责和权威边界。字段级 wire shape 归
 [`docs/contracts/`](../contracts/README.md)，决策理由归 ADR，实施状态归当前 Version 文档。
 
+<!-- architecture-index:begin -->
 | 架构 | 内容 |
 | --- | --- |
 | [Diagnostics Center](diagnostics-center.md) | Core 严格只读诊断组装、Skill/MCP 审计、Runtime 缓存事实、Renderer 单项修复复检、Electron v5 导出与 Startup Recovery 边界 |
@@ -16,3 +17,4 @@ last_updated: 2026-08-09
 | [Native Session Bootstrap Redelivery](native-session-bootstrap-redelivery.md) | compaction detector、Session Observer、Bootstrap/Member Identity 重投递、Redelivery v2、Dynamic Context 与 accepted-input 水位 |
 | [Public A2A Message 与 Message Delivery](public-a2a-message-delivery.md) | 公共消息事实、统一收件人 Delivery、Context gate、Runtime 输出与 UI projection 的权威边界 |
 | [Camp Activation Lifecycle](camp-activation-lifecycle.md) | 一键 Pending、Composer Draft、Navigation、Restorable Location、首消息原子激活与启动清理的组件权威 |
+<!-- architecture-index:end -->

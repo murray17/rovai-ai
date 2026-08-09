@@ -14,7 +14,7 @@ last_updated: 2026-07-28
 > [ADR-0064](../../adr/0064-default-on-bounded-automatic-partner-memory.md)
 >
 > 当时长期记忆 UI 规范已删除，原文见 Git 历史；当前规范见
-> [Arctic Dawn 长期记忆](../../ui/arctic-dawn.md#长期记忆)
+> [Arctic Dawn 记忆](../../ui/arctic-dawn.md#记忆)
 
 ## 1. 权威边界
 

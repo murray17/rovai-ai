@@ -6,7 +6,6 @@ status: accepted
 date: 2026-08-09
 decision_scope: cross-version
 source_version: v0.50
-implementation_status: complete
 supersedes: []
 superseded_by: null
 ---

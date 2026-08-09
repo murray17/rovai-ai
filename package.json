@@ -7,12 +7,18 @@
   "description": "A local-first workspace for durable agent teams.",
   "author": "murray17",
   "license": "UNLICENSED",
+  "packageManager": "pnpm@11.20.0",
   "main": "out/main/index.js",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
-    "docs:check": "node scripts/check-doc-version.mjs",
+    "docs:check:version": "node scripts/check-doc-version.mjs",
+    "docs:check:adr": "node scripts/check-doc-adr.mjs",
+    "docs:check:ci": "node scripts/check-doc-version.mjs && node scripts/check-doc-adr.mjs --require-base",
+    "docs:test": "node --test scripts/lib/doc-adr.test.mjs",
+    "docs:adr:generate": "node scripts/generate-doc-adr.mjs",
+    "docs:check": "pnpm docs:check:version && pnpm docs:check:adr",
     "core:build": "node scripts/build-core.mjs --release",
     "core:build:debug": "node scripts/build-core.mjs",
     "native:build:macos": "node scripts/build-open-panel-prewarm.mjs",
@@ -20,7 +26,7 @@
     "build:desktop": "pnpm native:build:macos && electron-vite build",
     "build": "pnpm core:build && pnpm build:desktop",
     "typecheck": "tsc --noEmit",
-    "test": "pnpm docs:check && vitest run && node --test scripts/lib/qualification-acceptance-v034.test.mjs scripts/lib/qualification-acceptance-v036.test.mjs scripts/lib/qualification-artifacts.test.mjs scripts/lib/qualification-bundle.test.mjs scripts/lib/qualification-case-v3.test.mjs scripts/lib/qualification-collaboration.test.mjs scripts/lib/qualification-collaboration-ledger.test.mjs scripts/lib/qualification-diagnostic-portfolio.test.mjs scripts/lib/qualification-evaluation.test.mjs scripts/lib/qualification-evidence-index.test.mjs scripts/lib/qualification-isolation.test.mjs scripts/lib/qualification-public-report.test.mjs scripts/lib/qualification-recovery.test.mjs scripts/lib/qualification-schema-validation.test.mjs scripts/lib/qualification-semantic-judge.test.mjs scripts/lib/qualification-tool-evidence.test.mjs scripts/lib/qualification-tool-ledger.test.mjs scripts/lib/qualification-workspace-mutation-ledger.test.mjs",
+    "test": "pnpm docs:test && pnpm docs:check && vitest run && node --test scripts/lib/qualification-acceptance-v034.test.mjs scripts/lib/qualification-acceptance-v036.test.mjs scripts/lib/qualification-artifacts.test.mjs scripts/lib/qualification-bundle.test.mjs scripts/lib/qualification-case-v3.test.mjs scripts/lib/qualification-collaboration.test.mjs scripts/lib/qualification-collaboration-ledger.test.mjs scripts/lib/qualification-diagnostic-portfolio.test.mjs scripts/lib/qualification-evaluation.test.mjs scripts/lib/qualification-evidence-index.test.mjs scripts/lib/qualification-isolation.test.mjs scripts/lib/qualification-public-report.test.mjs scripts/lib/qualification-recovery.test.mjs scripts/lib/qualification-schema-validation.test.mjs scripts/lib/qualification-semantic-judge.test.mjs scripts/lib/qualification-tool-evidence.test.mjs scripts/lib/qualification-tool-ledger.test.mjs scripts/lib/qualification-workspace-mutation-ledger.test.mjs",
     "smoke:core": "pnpm core:build:debug && node scripts/smoke-core.mjs",
     "smoke:member-config": "pnpm core:build:debug && node scripts/smoke-member-config.mjs",
     "smoke:intake": "pnpm core:build:debug && node scripts/smoke-intake.mjs",
@@ -82,9 +88,12 @@
     "electron": "43.1.1",
     "electron-builder": "26.15.3",
     "electron-vite": "5.0.0",
+    "remark-parse": "11.0.0",
     "typescript": "6.0.3",
+    "unified": "11.0.5",
     "vite": "7.3.6",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "yaml": "2.9.0"
   },
   "build": {
     "appId": "ai.rovai.desktop",
