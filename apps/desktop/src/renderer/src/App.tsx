@@ -217,6 +217,7 @@ export function App(): React.JSX.Element {
   const [newConversationInitialWorkspace, setNewConversationInitialWorkspace] = useState<WorkspaceSelection | null>(null)
   const [newConversationInitialSelection, setNewConversationInitialSelection] = useState<GeneralPreferencesSnapshot['newConversationDefaults']>(null)
   const [newConversationAttention, setNewConversationAttention] = useState<string | null>(null)
+  const [explainNewConversationSelectionAdjustments, setExplainNewConversationSelectionAdjustments] = useState(false)
   const [activeWorkspaceInspection, setActiveWorkspaceInspection] = useState<WorkspaceInspection | 'unavailable' | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -857,7 +858,8 @@ export function App(): React.JSX.Element {
 
   const openNewConversation = (
     workspace: WorkspaceSelection | null,
-    attentionMessage: string | null = null
+    attentionMessage: string | null = null,
+    explainInitialSelectionAdjustments = false
   ): void => {
     newConversationReturnFocus.current = document.activeElement instanceof HTMLElement
       ? document.activeElement
@@ -865,6 +867,7 @@ export function App(): React.JSX.Element {
     setNewConversationInitialWorkspace(workspace)
     setNewConversationInitialSelection(generalPreferences?.newConversationDefaults ?? null)
     setNewConversationAttention(attentionMessage)
+    setExplainNewConversationSelectionAdjustments(explainInitialSelectionAdjustments)
     setNewConversationOpen(true)
   }
 
@@ -889,11 +892,10 @@ export function App(): React.JSX.Element {
         return
       }
     }
-    const attentionMessage = generalPreferences?.newConversationDefaults
-      && !defaults
-      ? '默认队员或 Lead 需要重新确认，请检查后再创建。'
-      : null
-    openNewConversation(workspace, attentionMessage)
+    const explainInitialSelectionAdjustments = Boolean(
+      generalPreferences?.newConversationDefaults && !defaults
+    )
+    openNewConversation(workspace, null, explainInitialSelectionAdjustments)
   }
 
   const chooseWorkspaceDirectory = async (): Promise<WorkspaceSelection | null> => {
@@ -1581,6 +1583,7 @@ export function App(): React.JSX.Element {
         initialWorkspace={newConversationInitialWorkspace}
         initialSelection={newConversationInitialSelection}
         attentionMessage={newConversationAttention}
+        explainInitialSelectionAdjustments={explainNewConversationSelectionAdjustments}
         projects={navigation?.projects ?? []}
         preflight={campCreationPreflight}
         agents={agents}

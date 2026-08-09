@@ -20,6 +20,7 @@ export function NewConversationDialog({
   initialWorkspace,
   initialSelection,
   attentionMessage,
+  explainInitialSelectionAdjustments = false,
   projects,
   preflight,
   agents,
@@ -33,6 +34,7 @@ export function NewConversationDialog({
   initialWorkspace: WorkspaceSelection | null
   initialSelection?: NewConversationDefaults | null
   attentionMessage?: string | null
+  explainInitialSelectionAdjustments?: boolean
   projects: ProjectNavigationGroup[]
   preflight: CampCreationPreflight
   agents: AgentProfile[]
@@ -58,6 +60,17 @@ export function NewConversationDialog({
     () => new Map(agents.map((agent) => [agent.agentId, agent])),
     [agents]
   )
+  const preferredInitialSelection = initialSelection ?? null
+  const initialSelectionPlan = useMemo(
+    () => planInitialCampSelection(preflight, preferredInitialSelection),
+    [preferredInitialSelection, preflight.presentMembers]
+  )
+  const initialSelectionAttention = useMemo(
+    () => explainInitialSelectionAdjustments
+      ? describeInitialCampSelectionAdjustments(initialSelectionPlan, preferredInitialSelection, agents)
+      : null,
+    [agents, explainInitialSelectionAdjustments, initialSelectionPlan, preferredInitialSelection]
+  )
   const selectedMembers = preflight.presentMembers.filter((member) =>
     selectedMemberIds.includes(member.agentId)
   )
@@ -68,7 +81,7 @@ export function NewConversationDialog({
 
   useEffect(() => {
     if (!open) return
-    const { memberIds, leadId: recommendedLead } = initialCampSelection(preflight, initialSelection)
+    const { memberIds, leadId: recommendedLead } = initialSelectionPlan
     setWorkspace(initialWorkspace)
     setGitInspectionStatus(hasGitObservation(initialWorkspace) ? 'ready' : 'idle')
     setProjectMenuOpen(false)
@@ -80,7 +93,7 @@ export function NewConversationDialog({
     setMemberError(null)
     setSubmitError(null)
     requestAnimationFrame(() => projectTriggerRef.current?.focus())
-  }, [initialSelection, initialWorkspace, open, preflight.presentMembers])
+  }, [initialSelectionPlan, initialWorkspace, open])
 
   const pendingGitInspectionPath = workspace && !hasGitObservation(workspace)
     ? workspace.projectPath
@@ -201,6 +214,15 @@ export function NewConversationDialog({
 
             <div className="new-camp-dialog-body">
               {attentionMessage && <p className="new-camp-attention" role="status">{attentionMessage}</p>}
+              {initialSelectionAttention && (
+                <div className="new-camp-attention new-camp-defaults-attention" role="status">
+                  <strong>默认配置已失效</strong>
+                  <ul>
+                    {initialSelectionAttention.items.map((item, index) => <li key={`${index}:${item}`}>{item}</li>)}
+                  </ul>
+                  <p>{initialSelectionAttention.note}</p>
+                </div>
+              )}
               <section className="new-camp-section">
                 <SectionHeading step="01" title="工作目录" optional detail="选择任意安全、可读目录；不选择则创建在快速对话。" />
                 <div className="new-camp-picker">
@@ -520,6 +542,22 @@ export function initialCampSelection(
   memberIds: string[]
   leadId: string
 } {
+  const { memberIds, leadId } = planInitialCampSelection(preflight, preferred)
+  return { memberIds, leadId }
+}
+
+export interface InitialCampSelectionPlan {
+  memberIds: string[]
+  leadId: string
+  excludedMemberIds: string[]
+  usedPresentMembersFallback: boolean
+  leadChanged: boolean
+}
+
+export function planInitialCampSelection(
+  preflight: CampCreationPreflight,
+  preferred: NewConversationDefaults | null = null
+): InitialCampSelectionPlan {
   const presentMemberIds = preflight.presentMembers.map((member) => member.agentId)
   const preferredMemberIds = preferred?.memberAgentIds.filter((agentId) =>
     presentMemberIds.includes(agentId)
@@ -530,7 +568,79 @@ export function initialCampSelection(
     : preflight.presentMembers.find(
       (member) => memberIds.includes(member.agentId) && member.runtimeReadiness === 'ready'
     )?.agentId ?? memberIds[0] ?? ''
-  return { memberIds, leadId }
+  return {
+    memberIds,
+    leadId,
+    excludedMemberIds: preferred?.memberAgentIds.filter((agentId) =>
+      !presentMemberIds.includes(agentId)
+    ) ?? [],
+    usedPresentMembersFallback: preferred !== null && preferredMemberIds.length === 0,
+    leadChanged: preferred !== null && preferred.defaultLeadAgentId !== leadId
+  }
+}
+
+export interface InitialCampSelectionAttention {
+  items: string[]
+  note: string
+}
+
+export function describeInitialCampSelectionAdjustments(
+  plan: InitialCampSelectionPlan,
+  preferred: NewConversationDefaults | null,
+  agents: AgentProfile[]
+): InitialCampSelectionAttention | null {
+  if (!preferred) return null
+  const profileById = new Map(agents.map((agent) => [agent.agentId, agent]))
+  const displayName = (agentId: string): string => profileById.get(agentId)?.displayName ?? agentId
+  const items = plan.excludedMemberIds.map((agentId) => {
+    const agent = profileById.get(agentId)
+    if (!agent) return `默认队员“${agentId}”当前不存在，本次未加入`
+    if (agent.presence === 'removed' || agent.removedAt !== null) {
+      return `${agent.displayName}已永久移除，本次未加入`
+    }
+    if (agent.presence === 'away') return `${agent.displayName}已暂时离队，本次未加入`
+    return `${agent.displayName}当前不在可选队员中，本次未加入`
+  })
+
+  if (plan.usedPresentMembersFallback) {
+    const selectedNames = plan.memberIds.map(displayName).join('、')
+    if (preferred.memberAgentIds.length === 0) {
+      items.push(selectedNames
+        ? `未保存有效的默认队员，本次暂时选择全部当前在队队员：${selectedNames}`
+        : '未保存有效的默认队员，当前也没有可选队员')
+    } else {
+      items.push(selectedNames
+        ? `默认队员均不可用，本次暂时选择全部当前在队队员：${selectedNames}`
+        : '默认队员均不可用，当前也没有可选队员')
+    }
+  }
+
+  if (plan.leadChanged) {
+    const originalLead = profileById.get(preferred.defaultLeadAgentId)
+    if (!originalLead) {
+      items.push(preferred.defaultLeadAgentId
+        ? `原默认 Lead“${preferred.defaultLeadAgentId}”当前不存在`
+        : '未保存有效的默认 Lead')
+    } else if (originalLead.presence === 'removed' || originalLead.removedAt !== null) {
+      items.push(`原默认 Lead ${originalLead.displayName}已永久移除`)
+    } else if (originalLead.presence === 'away') {
+      items.push(`原默认 Lead ${originalLead.displayName}已暂时离队`)
+    } else {
+      items.push(`原默认 Lead ${originalLead.displayName}当前不可用`)
+    }
+    items.push(plan.leadId
+      ? `本次暂时选择${displayName(plan.leadId)}作为 Lead`
+      : '当前没有可用队员可作为 Lead')
+  }
+
+  if (items.length === 0) {
+    items.push('已保存配置曾失效，本次仍按当前可用的保存值预选，请确认后创建')
+  }
+
+  return {
+    items,
+    note: '以上调整只用于本次创建，不会修改“设置 → 通用”中保存的默认配置。'
+  }
 }
 
 export function normalizeDraftName(value: string): string {

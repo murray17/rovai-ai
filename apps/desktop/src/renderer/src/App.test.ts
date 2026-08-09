@@ -46,9 +46,11 @@ import {
   runtimeOptionsForDisplay
 } from './CampWorkspace'
 import {
+  describeInitialCampSelectionAdjustments,
   initialCampSelection,
   limitDraftNameInput,
   normalizeDraftName,
+  planInitialCampSelection,
   toggleCampMemberSelection,
   workspaceCapability
 } from './NewConversationDialog'
@@ -661,6 +663,94 @@ describe('task event projections', () => {
     })).toEqual({ memberIds: ['agent-b'], leadId: 'agent-b' })
   })
 
+  it('explains invalid saved members and a temporary Lead without changing the saved defaults', () => {
+    const preflight = {
+      admissible: true,
+      presentMembers: [
+        { agentId: 'agent-a', displayName: '洛可', memberOrder: 0, runtimeConfigured: true, runtimeReadiness: 'ready' as const }
+      ],
+      initialLeadAgentId: 'agent-a',
+      blockers: []
+    }
+    const preferred = {
+      memberAgentIds: ['agent-a', 'agent-b'],
+      defaultLeadAgentId: 'agent-b'
+    }
+    const agents = [
+      { ...agentProfile(), agentId: 'agent-a', displayName: '洛可' },
+      { ...agentProfile(), agentId: 'agent-b', displayName: '沐瓦', presence: 'away' as const }
+    ]
+    const plan = planInitialCampSelection(preflight, preferred)
+
+    expect(plan).toMatchObject({
+      memberIds: ['agent-a'],
+      leadId: 'agent-a',
+      excludedMemberIds: ['agent-b'],
+      usedPresentMembersFallback: false,
+      leadChanged: true
+    })
+    expect(describeInitialCampSelectionAdjustments(plan, preferred, agents)).toEqual({
+      items: [
+        '沐瓦已暂时离队，本次未加入',
+        '原默认 Lead 沐瓦已暂时离队',
+        '本次暂时选择洛可作为 Lead'
+      ],
+      note: '以上调整只用于本次创建，不会修改“设置 → 通用”中保存的默认配置。'
+    })
+    expect(preferred).toEqual({
+      memberAgentIds: ['agent-a', 'agent-b'],
+      defaultLeadAgentId: 'agent-b'
+    })
+  })
+
+  it('explains a latched invalid configuration that is currently selectable', () => {
+    const preflight = {
+      admissible: true,
+      presentMembers: [
+        { agentId: 'agent-a', displayName: '洛可', memberOrder: 0, runtimeConfigured: true, runtimeReadiness: 'ready' as const }
+      ],
+      initialLeadAgentId: 'agent-a',
+      blockers: []
+    }
+    const preferred = { memberAgentIds: ['agent-a'], defaultLeadAgentId: 'agent-a' }
+    const explanation = describeInitialCampSelectionAdjustments(
+      planInitialCampSelection(preflight, preferred),
+      preferred,
+      [{ ...agentProfile(), agentId: 'agent-a', displayName: '洛可' }]
+    )
+    expect(explanation?.items).toEqual([
+      '已保存配置曾失效，本次仍按当前可用的保存值预选，请确认后创建'
+    ])
+  })
+
+  it('explains when every saved member is replaced in the dialog draft', () => {
+    const preflight = {
+      admissible: true,
+      presentMembers: [
+        { agentId: 'agent-a', displayName: '洛可', memberOrder: 0, runtimeConfigured: true, runtimeReadiness: 'ready' as const }
+      ],
+      initialLeadAgentId: 'agent-a',
+      blockers: []
+    }
+    const preferred = { memberAgentIds: ['agent-b'], defaultLeadAgentId: 'agent-b' }
+    const agents = [
+      { ...agentProfile(), agentId: 'agent-a', displayName: '洛可' },
+      { ...agentProfile(), agentId: 'agent-b', displayName: '沐瓦', presence: 'removed' as const, removedAt: '2026-08-09T00:00:00Z' }
+    ]
+    const explanation = describeInitialCampSelectionAdjustments(
+      planInitialCampSelection(preflight, preferred),
+      preferred,
+      agents
+    )
+
+    expect(explanation?.items).toEqual([
+      '沐瓦已永久移除，本次未加入',
+      '默认队员均不可用，本次暂时选择全部当前在队队员：洛可',
+      '原默认 Lead 沐瓦已永久移除',
+      '本次暂时选择洛可作为 Lead'
+    ])
+  })
+
   it('protects the last member, switches a removed Lead, and preserves a manual Lead', () => {
     const removedLead = toggleCampMemberSelection({
       memberIds: ['agent-a', 'agent-b'],
@@ -837,8 +927,8 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-label="在“rovai-ai”中新建对话"')
     expect(markup).toContain('aria-label="在“快速对话”中新建对话"')
     expect(markup).toContain('class="project-heading-row current-project"')
-    expect(markup).toContain('class="project-toggle-row"')
-    expect(markup).not.toContain('project-disclosure-button')
+    expect(markup).toContain('class="project-select-row"')
+    expect(markup).not.toContain('class="project-disclosure-button"')
     expect(markup).toContain('data-sidebar-menu-target="project:directory:/repo"')
     expect(markup).toContain('data-sidebar-menu-target="camp:camp-quick-chat"')
     expect(markup).not.toContain('data-sidebar-menu-target="project:quick-chat"')
@@ -861,7 +951,7 @@ describe('task event projections', () => {
     expect(markup).not.toContain('Horizonward')
   })
 
-  it('keeps navigation marker slots stable and exposes whole-row project disclosure semantics', () => {
+  it('keeps navigation marker slots stable and lets the project row control selection and disclosure', () => {
     const makeCamp = (id: string, marker: 'none' | 'unread_completed' | 'loading') => ({
       id,
       title: `${id} 对话`,
@@ -914,11 +1004,11 @@ describe('task event projections', () => {
     expect(markup).toContain('project-folder-open')
     expect(markup).toContain('project-folder-closed')
     expect(markup).not.toContain('project-disclosure-button')
-    const toggleStart = markup.indexOf('class="project-toggle-row"')
-    const toggleEnd = markup.indexOf('</button>', toggleStart)
+    const selectStart = markup.indexOf('class="project-select-row"')
+    const selectEnd = markup.indexOf('</button>', selectStart)
     const menuStart = markup.indexOf('group-menu-trigger')
     const createStart = markup.indexOf('group-create-button')
-    expect(menuStart).toBeGreaterThan(toggleEnd)
+    expect(menuStart).toBeGreaterThan(selectEnd)
     expect(createStart).toBeGreaterThan(menuStart)
   })
 

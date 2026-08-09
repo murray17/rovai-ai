@@ -102,6 +102,7 @@ try {
       && !document.querySelector('.camp-action-dialog')
   })()`, 15_000)
   await assertHoverAndFocusVisibility(desktopApp.cdp, campTarget)
+  await assertQuestionMarkHelpHoverOnly(desktopApp.cdp)
 
   await closeApp(desktopApp)
   desktopApp = null
@@ -152,10 +153,11 @@ try {
       campAndProjectMenus: true,
       quickChatProjectMenuAbsent: true,
       projectAndPaginationCountsHidden: true,
-      wholeRowProjectSelectionAndDisclosure: true,
+      projectRowSelectsAndTogglesDisclosure: true,
       fiveThenTenCampPagination: true,
       paginationCacheSurvivesCollapseAndPinMigration: true,
       hoverFocusOpenAndCoarsePointerVisibility: true,
+      questionMarkHelpIsHoverOnly: true,
       arrowHomeEndEscapeAndOutsideClick: true,
       projectAndCampPinMigrationWithFocus: true,
       renameAndDeleteDialogs: true,
@@ -252,23 +254,24 @@ async function assertSidebarContract(cdp, context) {
     const quickChat = document.querySelector('.camp-nav-group[data-group="quick-chat"]')
     return {
       projectGroups: projectGroups.length,
+      campGroups: document.querySelectorAll('.camp-nav-group').length,
       projectMenus: projectGroups.reduce((count, group) => count + group.querySelectorAll('.group-menu-trigger').length, 0),
       quickChatProjectMenus: quickChat?.querySelectorAll('.group-menu-trigger').length ?? -1,
       quickChatFolder: Boolean(quickChat?.querySelector('.project-folder-glyph')),
       legacyDirectPins: document.querySelectorAll('.group-pin-button, .row-pin-button').length,
       legacyMenus: document.querySelectorAll('.camp-row-menu').length,
-      legacyDisclosures: document.querySelectorAll('.project-disclosure-button').length,
+      projectDisclosures: document.querySelectorAll('.project-disclosure-button').length,
       projectCounts: document.querySelectorAll('.camp-group-count').length,
       paginationLabels: [...document.querySelectorAll('.show-more-camps, .collapse-camps')]
         .map((button) => button.textContent?.trim()),
       projectRowSemantics: projectGroups.every((group) => {
-        const row = group.querySelector('.project-toggle-row')
+        const select = group.querySelector('.project-select-row')
         const content = group.querySelector('.camp-group-children')
-        return row?.getAttribute('aria-controls') === content?.id
-          && row?.getAttribute('aria-expanded') === String(!content?.hidden)
+        return select?.getAttribute('aria-controls') === content?.id
+          && select?.getAttribute('aria-expanded') === String(!content?.hidden)
       }),
       projectRowFont: projectGroups[0]
-        ? getComputedStyle(projectGroups[0].querySelector('.project-toggle-row')).fontSize
+        ? getComputedStyle(projectGroups[0].querySelector('.project-select-row')).fontSize
         : null,
       projectMenuOpacity: projectGroups[0]
         ? Number(getComputedStyle(projectGroups[0].querySelector('.group-menu-trigger')).opacity)
@@ -303,7 +306,7 @@ async function assertSidebarContract(cdp, context) {
     `${context} Quick Chat Project semantics were incorrect: ${JSON.stringify(state)}`)
   assert(state.legacyDirectPins === 0
       && state.legacyMenus === 0
-      && state.legacyDisclosures === 0
+      && state.projectDisclosures === 0
       && state.projectCounts === 0,
     `${context} retained a legacy sidebar action/count control: ${JSON.stringify(state)}`)
   assert(state.paginationLabels.includes('查看更多')
@@ -325,18 +328,13 @@ async function assertSidebarContract(cdp, context) {
 
 async function assertProjectActionsReveal(cdp) {
   await evaluate(cdp, `document.activeElement instanceof HTMLElement && document.activeElement.blur()`)
-  await cdp.send('DOM.enable')
-  await cdp.send('CSS.enable')
-  const documentNode = await cdp.send('DOM.getDocument', { depth: -1, pierce: true })
-  const rowNode = await cdp.send('DOM.querySelector', {
-    nodeId: documentNode.result.root.nodeId,
-    selector: '.navigation-projects .camp-nav-group:not([data-group="quick-chat"]) .project-heading-row'
-  })
-  assert(rowNode.result.nodeId, 'Could not resolve the Project row for hover visibility')
-  await cdp.send('CSS.forcePseudoState', {
-    nodeId: rowNode.result.nodeId,
-    forcedPseudoClasses: ['hover']
-  })
+  const hoverPointer = await evaluate(cdp, `(() => {
+    const row = document.querySelector('.navigation-projects .camp-nav-group:not([data-group="quick-chat"]) .project-heading-row')
+    const rect = row?.getBoundingClientRect()
+    return rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : null
+  })()`)
+  assert(hoverPointer, 'Could not resolve the Project row for hover visibility')
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: hoverPointer.x, y: hoverPointer.y })
   await wait(180)
   const hovered = await evaluate(cdp, `(() => {
     const row = document.querySelector('.navigation-projects .camp-nav-group:not([data-group="quick-chat"]) .project-heading-row')
@@ -347,15 +345,11 @@ async function assertProjectActionsReveal(cdp) {
       create: create ? Number(getComputedStyle(create).opacity) : -1
     }
   })()`)
-  await cdp.send('CSS.forcePseudoState', {
-    nodeId: rowNode.result.nodeId,
-    forcedPseudoClasses: []
-  }).catch(() => undefined)
   assert(hovered.menu > 0.95 && hovered.create > 0.95,
     `Project actions were hidden while the directory row was hovered: ${JSON.stringify(hovered)}`)
 
   const pointer = await evaluate(cdp, `(() => {
-    const row = document.querySelector('.navigation-projects .camp-nav-group:not([data-group="quick-chat"]) .project-toggle-row')
+    const row = document.querySelector('.navigation-projects .camp-nav-group:not([data-group="quick-chat"]) .project-select-row')
     const rect = row?.getBoundingClientRect()
     return rect ? {
       x: rect.left + Math.min(80, rect.width / 2),
@@ -387,10 +381,17 @@ async function assertProjectActionsReveal(cdp) {
     x: pointer.awayX,
     y: pointer.awayY
   })
-  await wait(180)
+  await waitForExpression(cdp, `(() => {
+    const row = document.querySelector('.navigation-projects .camp-nav-group:not([data-group="quick-chat"]) .project-heading-row')
+    const menu = row?.querySelector('.group-menu-trigger')
+    const create = row?.querySelector('.group-create-button')
+    return menu && create
+      && Number(getComputedStyle(menu).opacity) < 0.05
+      && Number(getComputedStyle(create).opacity) < 0.05
+  })()`, 3_000)
   const afterPointerLeave = await evaluate(cdp, `(() => {
     const group = document.querySelector('.navigation-projects .camp-nav-group:not([data-group="quick-chat"])')
-    const row = group?.querySelector('.project-toggle-row')
+    const row = group?.querySelector('.project-select-row')
     const menu = group?.querySelector('.group-menu-trigger')
     const create = group?.querySelector('.group-create-button')
     return {
@@ -404,10 +405,87 @@ async function assertProjectActionsReveal(cdp) {
   assert(afterPointerLeave.rowRetainedPointerFocus
       && !afterPointerLeave.focusVisible
       && afterPointerLeave.menu < 0.05
-      && afterPointerLeave.create < 0.05,
+      && afterPointerLeave.create < 0.05
+      && afterPointerLeave.expanded === 'false',
   `Project actions lingered after pointer activation and leave: ${JSON.stringify(afterPointerLeave)}`)
-  await evaluate(cdp, `document.querySelector('.navigation-projects .camp-nav-group:not([data-group="quick-chat"]) .project-toggle-row')?.click()`)
-  await waitForExpression(cdp, `document.querySelector('.navigation-projects .camp-nav-group:not([data-group="quick-chat"]) .project-toggle-row')?.getAttribute('aria-expanded') === 'true'`)
+  await evaluate(cdp, `document.querySelector('.navigation-projects .camp-nav-group:not([data-group="quick-chat"]) .project-select-row')?.click()`)
+  await waitForExpression(cdp, `document.querySelector('.navigation-projects .camp-nav-group:not([data-group="quick-chat"]) .project-select-row')?.getAttribute('aria-expanded') === 'true'`)
+}
+
+async function assertQuestionMarkHelpHoverOnly(cdp) {
+  const openedSettings = await evaluate(cdp, `(() => {
+    const button = document.querySelector('button[aria-label="设置"]')
+    button?.click()
+    return Boolean(button)
+  })()`)
+  assert(openedSettings, 'Could not open Settings to verify question-mark help')
+  await waitForSelector(cdp, '.general-help-mark')
+  await assertHoverOnlyTooltip(cdp, '.general-help-mark', '.general-help-popover', 'General one-click help')
+
+  const openedSkills = await evaluate(cdp, `(() => {
+    const button = [...document.querySelectorAll('.settings-sidebar-menu button')]
+      .find((candidate) => candidate.querySelector('strong')?.textContent?.trim() === 'Skill')
+    button?.click()
+    return Boolean(button)
+  })()`)
+  assert(openedSkills, 'Could not open Skill Settings to verify question-mark help')
+  await waitForSelector(cdp, '.skill-import-help')
+  await assertHoverOnlyTooltip(cdp, '.skill-import-help', '.skill-import-help > [role="tooltip"]', 'Skill import help')
+}
+
+async function assertHoverOnlyTooltip(cdp, markSelector, tooltipSelector, context) {
+  await evaluate(cdp, `document.querySelector(${JSON.stringify(markSelector)})?.scrollIntoView({ block: 'center' })`)
+  await wait(100)
+  const initial = await evaluate(cdp, `(() => {
+    const mark = document.querySelector(${JSON.stringify(markSelector)})
+    const tooltip = document.querySelector(${JSON.stringify(tooltipSelector)})
+    const rect = mark?.getBoundingClientRect()
+    const style = tooltip ? getComputedStyle(tooltip) : null
+    return {
+      tagName: mark?.tagName,
+      hasTabIndex: mark?.hasAttribute('tabindex') ?? true,
+      role: tooltip?.getAttribute('role'),
+      visibility: style?.visibility,
+      opacity: style ? Number(style.opacity) : -1,
+      point: rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : null
+    }
+  })()`)
+  assert(initial.tagName === 'SPAN' && !initial.hasTabIndex && initial.role === 'tooltip'
+      && initial.visibility === 'hidden' && initial.opacity < 0.05 && initial.point,
+  `${context} was not a non-clickable hidden tooltip mark: ${JSON.stringify(initial)}`)
+
+  await cdp.send('Input.dispatchMouseEvent', {
+    type: 'mouseMoved',
+    x: initial.point.x,
+    y: initial.point.y
+  })
+  await wait(180)
+  const hovered = await evaluate(cdp, `(() => {
+    const mark = document.querySelector(${JSON.stringify(markSelector)})
+    const tooltip = document.querySelector(${JSON.stringify(tooltipSelector)})
+    const style = tooltip ? getComputedStyle(tooltip) : null
+    const point = ${JSON.stringify(initial.point)}
+    const hit = document.elementFromPoint(point.x, point.y)
+    return {
+      visibility: style?.visibility,
+      opacity: style ? Number(style.opacity) : -1,
+      markHovered: mark?.matches(':hover') ?? false,
+      hitTag: hit?.tagName,
+      hitClass: hit?.className
+    }
+  })()`)
+  assert(hovered.visibility === 'visible' && hovered.opacity > 0.95,
+    `${context} did not appear on hover: ${JSON.stringify(hovered)}`)
+
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 20, y: 80 })
+  await wait(180)
+  const left = await evaluate(cdp, `(() => {
+    const tooltip = document.querySelector(${JSON.stringify(tooltipSelector)})
+    const style = tooltip ? getComputedStyle(tooltip) : null
+    return { visibility: style?.visibility, opacity: style ? Number(style.opacity) : -1 }
+  })()`)
+  assert(left.visibility === 'hidden' && left.opacity < 0.05,
+    `${context} remained visible after pointer leave: ${JSON.stringify(left)}`)
 }
 
 async function assertProjectRowAndPagination(cdp) {
@@ -417,7 +495,7 @@ async function assertProjectRowAndPagination(cdp) {
       && JSON.stringify(initial.labels) === JSON.stringify(['查看更多'])
       && initial.rowIsSiblingOfActions
       && initial.expanded,
-  `Project group did not start from the five-Camp whole-row contract: ${JSON.stringify(initial)}`)
+  `Project group did not start from the five-Camp independent-control contract: ${JSON.stringify(initial)}`)
 
   await clickProjectControl(cdp, selector, '.show-more-camps')
   await waitForExpression(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelectorAll('.camp-nav-row').length === 15`)
@@ -435,12 +513,11 @@ async function assertProjectRowAndPagination(cdp) {
   await clickProjectControl(cdp, selector, '.show-more-camps')
   await waitForExpression(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelectorAll('.camp-nav-row').length === 15`)
 
-  await clickProjectControl(cdp, selector, '.project-toggle-row')
-  await waitForExpression(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelector('.project-toggle-row')?.getAttribute('aria-expanded') === 'false'`)
-  const folded = await projectPaginationState(cdp, selector)
-  assert(folded.current && !folded.expanded,
-    `Whole-row activation did not select then fold the Project: ${JSON.stringify(folded)}`)
-  await clickProjectControl(cdp, selector, '.project-toggle-row')
+  await clickProjectControl(cdp, selector, '.project-select-row')
+  const selected = await projectPaginationState(cdp, selector)
+  assert(selected.current && !selected.expanded,
+    `Project row did not select and collapse together: ${JSON.stringify(selected)}`)
+  await clickProjectControl(cdp, selector, '.project-select-row')
   await waitForExpression(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelectorAll('.camp-nav-row').length === 15`)
 
   const menuTarget = await evaluate(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelector('.group-menu-trigger')?.dataset.sidebarMenuTarget ?? null`)
@@ -448,7 +525,7 @@ async function assertProjectRowAndPagination(cdp) {
   await openMenuByKeyboard(cdp, menuTarget)
   const expandedWithMenu = await projectPaginationState(cdp, selector)
   assert(expandedWithMenu.expanded === expandedBeforeActions.expanded,
-    `Project menu toggled the whole-row disclosure: ${JSON.stringify(expandedWithMenu)}`)
+    `Project menu unexpectedly toggled the directory row: ${JSON.stringify(expandedWithMenu)}`)
   await pressKey(cdp, 'Escape')
   await assertMenuClosedWithFocus(cdp, menuTarget)
 
@@ -456,19 +533,21 @@ async function assertProjectRowAndPagination(cdp) {
   await waitForSelector(cdp, '.new-camp-dialog')
   const expandedWithDialog = await projectPaginationState(cdp, selector)
   assert(expandedWithDialog.expanded === expandedBeforeActions.expanded,
-    `Project create action toggled the whole-row disclosure: ${JSON.stringify(expandedWithDialog)}`)
+    `Project create action unexpectedly toggled the directory row: ${JSON.stringify(expandedWithDialog)}`)
   await pressKey(cdp, 'Escape')
   await waitForExpression(cdp, `!document.querySelector('.new-camp-dialog')`)
 
   const keyboardFocused = await evaluate(cdp, `(() => {
-    const row = document.querySelector(${JSON.stringify(selector)})?.querySelector('.project-toggle-row')
+    const row = document.querySelector(${JSON.stringify(selector)})?.querySelector('.project-select-row')
     row?.focus()
     return document.activeElement === row && getComputedStyle(row).outlineStyle !== 'none'
   })()`)
-  assert(keyboardFocused, 'Project whole-row control did not expose a visible keyboard focus target')
+  assert(keyboardFocused, 'Project select control did not expose a visible keyboard focus target')
   await pressKey(cdp, 'Enter')
-  await waitForExpression(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelector('.project-toggle-row')?.getAttribute('aria-expanded') === 'false'`)
-  await evaluate(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelector('.project-toggle-row')?.focus()`)
+  const keyboardSelected = await projectPaginationState(cdp, selector)
+  assert(keyboardSelected.current && !keyboardSelected.expanded,
+    `Keyboard Project row did not select and collapse together: ${JSON.stringify(keyboardSelected)}`)
+  await evaluate(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelector('.project-select-row')?.focus()`)
   await pressKey(cdp, 'Enter')
   await waitForExpression(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelectorAll('.camp-nav-row').length === 15`)
 }
@@ -495,7 +574,7 @@ async function assertQuickChatPagination(cdp) {
 async function projectPaginationState(cdp, selector) {
   return evaluate(cdp, `(() => {
     const group = document.querySelector(${JSON.stringify(selector)})
-    const row = group?.querySelector('.project-toggle-row')
+    const row = group?.querySelector('.project-select-row')
     const menu = group?.querySelector('.group-menu-trigger')
     const create = group?.querySelector('.group-create-button')
     return {
@@ -528,7 +607,7 @@ async function assertProjectPaginationCount(cdp, containerSelector, expectedCoun
     const group = document.querySelector(${JSON.stringify(containerSelector)})
       ?.querySelector('.camp-nav-group:not([data-group="quick-chat"])')
     return group?.querySelectorAll('.camp-nav-row').length === ${expectedCount}
-      && group.querySelector('.project-toggle-row')?.getAttribute('aria-expanded') === 'true'
+      && group.querySelector('.project-select-row')?.getAttribute('aria-expanded') === 'true'
   })()`)
 }
 

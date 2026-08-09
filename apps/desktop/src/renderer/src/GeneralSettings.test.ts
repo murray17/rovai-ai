@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest'
 import type { AgentProfile, GeneralPreferencesSnapshot } from '@contracts'
 import {
   GeneralSettings,
+  ONE_CLICK_ENTRY_DESCRIPTIONS,
+  ONE_CLICK_PROJECT_HELP,
   loginItemCanToggle,
   loginItemStatusMessage,
   newConversationDefaultsDraftError
@@ -24,11 +26,27 @@ describe('General settings', () => {
     expect(markup).toContain('<h2 id="general-new-conversation-heading">新对话</h2>')
     expect(markup).toContain('保存默认配置')
     expect(markup).toContain('一键创建新对话')
-    expect(markup).toContain('aria-label="了解一键创建如何工作"')
+    expect(markup).toContain('class="general-help-mark"')
+    expect(markup).toContain('role="tooltip"')
+    expect(markup).not.toContain('general-help-button')
+    expect(markup).toContain('使用入口对应的项目')
     expect(markup).toContain('请先保存默认队员与 Lead')
     expect(markup).toContain('重置窗口大小与位置')
     expect(markup).not.toContain('记住窗口位置')
     expect(markup).not.toContain('隐藏启动')
+  })
+
+  it('describes every one-click entry and its project selection rule', () => {
+    expect(ONE_CLICK_ENTRY_DESCRIPTIONS).toEqual([
+      '左上角“新对话”',
+      '已有项目文件夹后的 ＋',
+      '快速对话文件夹后的 ＋',
+      '“项目”标题后的 ＋，选择工作目录后直接创建'
+    ])
+    expect(ONE_CLICK_PROJECT_HELP).toContain('左上角“新对话”使用当前选中的项目')
+    expect(ONE_CLICK_PROJECT_HELP).toContain('已有项目文件夹后的 ＋ 使用对应项目')
+    expect(ONE_CLICK_PROJECT_HELP).toContain('快速对话文件夹后的 ＋ 使用快速对话')
+    expect(ONE_CLICK_PROJECT_HELP).toContain('“项目”标题后的 ＋ 使用新选择的工作目录')
   })
 
   it('shows the active one-click configuration without treating runtime readiness as invalid', () => {

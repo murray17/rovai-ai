@@ -135,6 +135,18 @@ describe('Arctic Dawn theme tokens', () => {
     expect(css).not.toMatch(/\.final-copy\s*\{[^}]*background:/)
   })
 
+  it('uses a gray background only for the active Camp row, not the current Project', () => {
+    expect(css).toMatch(/\.camp-nav-row\.selected\s*\{[^}]*background: var\(--surface-muted\)/)
+    expect(css).not.toMatch(/\.project-heading-row\.current-project\s*\{[^}]*background:/)
+  })
+
+  it('shows question-mark help only while the mark is hovered', () => {
+    expect(css).toContain('.general-help-mark:hover + .general-help-popover')
+    expect(css).toContain('.skill-import-help:hover > span')
+    expect(css).not.toContain('.general-help-mark:focus')
+    expect(css).not.toContain('.skill-import-help:focus')
+  })
+
   it('keeps raw color literals inside the canonical token block', () => {
     const componentCss = css.replace(/:root\s*\{[\s\S]*?\n\}/, '')
 

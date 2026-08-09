@@ -456,7 +456,7 @@ function SkillGroupMenu({ skill, groups, selected, disabled, onToggle }: {
 }
 
 function ImportHelp({ children }: { children: React.ReactNode }): React.JSX.Element {
-  return <span className="skill-import-help" tabIndex={0}><b aria-hidden="true">?</b><span role="tooltip">{children}</span></span>
+  return <span className="skill-import-help"><b aria-hidden="true">?</b><span role="tooltip">{children}</span></span>
 }
 
 function SkillRisk({ summary }: { summary: SkillRiskSummary }): React.JSX.Element {

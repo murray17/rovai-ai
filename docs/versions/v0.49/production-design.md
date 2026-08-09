@@ -133,38 +133,43 @@ Runtime 是否配置、readiness 与当前 availability 不参与结构有效性
 ### 一键创建 Switch、确认与帮助
 
 Switch 默认关闭。每次 `false -> true` 必须先打开非 danger Dialog“开启一键创建新对话？”，列出
-左上角“新对话”、Project `＋` 和快速对话 `＋`，并展示当前项目、已保存默认队员与 Lead。主按钮
+左上角“新对话”、已有 Project `＋`、快速对话 `＋` 和“项目”标题 `＋`（选择目录后直接创建），
+并说明项目由使用的新建入口决定、展示已保存默认队员与 Lead。主按钮
 固定写“开启一键创建”；取消不写偏好。未保存草稿、未配置或锁存失效时不能开启。
 
-标题旁 `?` 是可点击、可聚焦 button。点击或键盘聚焦打开非模态 Popover“一键创建如何工作？”，
-说明项目来自当前项目、队员/Lead 来自本页保存值、关闭 Switch 恢复 Dialog；外部点击或 `Escape`
-关闭，不能只依赖 Hover。
+标题旁 `?` 是非点击帮助标记。鼠标悬浮时显示“一键创建如何工作？”Tooltip，移开 `?` 立即隐藏，
+分别说明左上入口取当前项目、已有 Project `＋` 取对应项目、快速对话 `＋` 取快速对话、“项目”标题
+`＋` 取新选择目录，队员/Lead 始终来自本页保存值，关闭 Switch 恢复 Dialog。该标记不响应点击或
+键盘聚焦，并与 App 内其他视觉 `?` 统一使用纯 Hover 规则。
 
 Switch 开启时始终显示一行摘要。配置有效时为“当前生效：{当前项目} · {N} 位默认队员 · Lead
 {名称}”；锁存或实时校验失效时使用 attention 文案“默认队员配置需要重新确认。一键创建时将改为
 打开创建弹窗。”。
 
-### 当前项目与三个创建入口
+### 当前项目与四个创建入口
 
 Renderer 使用版本化 localStorage 记录 `{ kind: "quick_chat" } | { kind: "directory", projectPath }`：
 
 - 点击 Project/快速对话文件夹或其中任意 Camp 更新当前项目；
 - 新 Main Window Session 读取最后成功保存值；directory Project 不存在时回退并写回快速对话；
 - 当前项目不是 Restorable Location、Core Project 实体或 Camp binding mutation；
-- 点击 Project/快速对话目录整行依次选择当前项目并切换展开状态；整行通过
-  `aria-expanded / aria-controls` 和打开/关闭文件夹图标表达状态，不再显示独立 disclosure。
-  三点菜单与 `＋` 保持为右侧独立兄弟按钮且不触发整行交互；两者默认同时隐藏，在目录整行
+- 文件夹/名称主行同时选择当前项目并切换展开状态，主行自身通过
+  `aria-expanded / aria-controls` 表达状态，不显示独立 disclosure。三点菜单与 `＋` 保持为右侧独立兄弟按钮，
+  不触发选择或展开；两者默认同时隐藏，在目录整行
   Hover 或键盘 `focus-visible` 时同时显示；鼠标点击目录后移出不能因残留焦点继续显示，触摸环境
   保持可见。`＋` 只发起对应项目的新建，取消 Dialog 不改变当前项目，成功进入 Camp 后才由
   Camp binding 更新当前项目；
 - 普通 Project、置顶 Project 与 Quick Chat 的 Camp 列表统一以最近 5 条开始；“查看更多”每次按
   `offset = 已读取服务端条目数 / limit = 10` 增量读取并按 Camp ID 去重。“收起”只恢复 5 条可见，
   缓存、目录展开状态和 canonical group key 均保留；置顶位置变化不触发预取或状态迁移；
-- 当前项目使用稳定浅灰底，当前 Camp 使用更强品牌选中态。
+- 当前项目不使用稳定底色；当前 Camp 使用稳定灰底、左侧品牌标记与字重，不使用蓝色底。
 
-一键创建关闭时，三个入口打开同一 Dialog：左上入口预选当前项目，两个文件夹入口预选各自项目。
+一键创建关闭时，四个入口打开同一 Dialog：左上入口预选当前项目，两个文件夹入口预选各自项目，
+“项目”标题 `＋` 先选择工作目录并将其作为预选值。
 开启且配置有效时直接调用现有原子 `camps.create`，名称为 `null`、协作模式固定 `peer`。Core 拒绝、
-配置失效或默认 Lead 无效时打开 Dialog，保留入口目标项目并显示重新确认说明。该范围只删除
+配置失效或默认 Lead 无效时打开 Dialog，保留入口目标项目。失效说明必须列出被过滤的成员姓名与
+状态、原 Lead 状态及本次临时 Lead；若锁存仍在但保存值已恢复可用，则说明仍按保存值预选并要求
+确认。提示固定声明本次 Dialog 调整不会修改“设置 → 通用”的保存配置。该范围只删除
 Renderer 的协作方式选择与文案，不删除 Core/IPC/SQLite 的 `collaborationMode`。
 
 Dialog Header 说明改为“确定这段对话的工作环境与队员。”；Footer 删除模式摘要。可选名称默认

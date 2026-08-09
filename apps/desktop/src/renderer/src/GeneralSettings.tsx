@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type {
   AgentProfile,
@@ -27,6 +27,15 @@ export function loginItemCanToggle(snapshot: LoginItemSnapshot | null): boolean 
     && snapshot.status !== 'not-found'
 }
 
+export const ONE_CLICK_ENTRY_DESCRIPTIONS = [
+  '左上角“新对话”',
+  '已有项目文件夹后的 ＋',
+  '快速对话文件夹后的 ＋',
+  '“项目”标题后的 ＋，选择工作目录后直接创建'
+] as const
+
+export const ONE_CLICK_PROJECT_HELP = '左上角“新对话”使用当前选中的项目；已有项目文件夹后的 ＋ 使用对应项目；快速对话文件夹后的 ＋ 使用快速对话；“项目”标题后的 ＋ 使用新选择的工作目录。'
+
 export function GeneralSettings({
   agents = [],
   initialPreferences = null,
@@ -52,7 +61,6 @@ export function GeneralSettings({
   const [defaultsError, setDefaultsError] = useState<string | null>(null)
   const [oneClickBusy, setOneClickBusy] = useState(false)
   const [oneClickConfirmOpen, setOneClickConfirmOpen] = useState(false)
-  const [helpOpen, setHelpOpen] = useState(false)
   const [loginItem, setLoginItem] = useState<LoginItemSnapshot | null>(null)
   const [loginBusy, setLoginBusy] = useState(false)
   const [loginError, setLoginError] = useState<string | null>(null)
@@ -60,7 +68,6 @@ export function GeneralSettings({
   const [resetBusy, setResetBusy] = useState(false)
   const [resetError, setResetError] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<string | null>(null)
-  const helpButtonRef = useRef<HTMLButtonElement>(null)
 
   const acceptPreferences = useCallback((snapshot: GeneralPreferencesSnapshot): void => {
     setPreferences(snapshot)
@@ -108,25 +115,6 @@ export function GeneralSettings({
     setDefaultMemberIds(preferences.newConversationDefaults?.memberAgentIds ?? [])
     setDefaultLeadId(preferences.newConversationDefaults?.defaultLeadAgentId ?? '')
   }, [defaultsDirty, preferences])
-
-  useEffect(() => {
-    if (!helpOpen) return undefined
-    const closeOnPointerDown = (event: PointerEvent): void => {
-      if (event.target instanceof Node && helpButtonRef.current?.contains(event.target)) return
-      setHelpOpen(false)
-    }
-    const closeOnEscape = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape') return
-      event.preventDefault()
-      setHelpOpen(false)
-    }
-    document.addEventListener('pointerdown', closeOnPointerDown)
-    document.addEventListener('keydown', closeOnEscape)
-    return () => {
-      document.removeEventListener('pointerdown', closeOnPointerDown)
-      document.removeEventListener('keydown', closeOnEscape)
-    }
-  }, [helpOpen])
 
   useEffect(() => {
     const refreshShellState = (): void => {
@@ -454,18 +442,18 @@ export function GeneralSettings({
             <span>
               <span className="general-one-click-title">
                 <strong>一键创建新对话</strong>
-                <button
-                  ref={helpButtonRef}
-                  className="general-help-button"
-                  type="button"
-                  aria-label="了解一键创建如何工作"
-                  aria-expanded={helpOpen}
-                  aria-controls="general-one-click-help"
-                  onFocus={() => setHelpOpen(true)}
-                  onClick={() => setHelpOpen(true)}
-                >?</button>
+                <span className="general-help-anchor">
+                  <span className="general-help-mark" aria-hidden="true">?</span>
+                  <span className="general-help-popover" id="general-one-click-help" role="tooltip">
+                    <strong>一键创建如何工作？</strong>
+                    <span>开启后，新对话入口会立即创建空对话，不再询问项目、队员、Lead 或名称。</span>
+                    <span>{ONE_CLICK_PROJECT_HELP}</span>
+                    <span>队员和 Lead 始终使用本页保存的默认配置。</span>
+                    <span>关闭此开关即可恢复创建弹窗。</span>
+                  </span>
+                </span>
               </span>
-              <small>开启后，新对话入口将使用当前项目和已保存的默认配置直接创建。</small>
+              <small>开启后，新对话入口将使用入口对应的项目和已保存的默认配置直接创建。</small>
             </span>
             <input
               type="checkbox"
@@ -475,14 +463,6 @@ export function GeneralSettings({
               disabled={!preferences || oneClickBusy || (!oneClickEnabled && !oneClickCanEnable)}
               onChange={(event) => void setOneClickEnabled(event.target.checked)}
             />
-            {helpOpen && (
-              <div className="general-help-popover" id="general-one-click-help" role="dialog" aria-label="一键创建如何工作">
-                <strong>一键创建如何工作？</strong>
-                <p>开启后，新对话入口会立即创建空对话，不再询问项目、队员、Lead 或名称。</p>
-                <p>项目取当前选中的项目；<br />队员和 Lead 使用本页保存的默认配置。</p>
-                <p>关闭此开关即可恢复创建弹窗。</p>
-              </div>
-            )}
           </div>
           {oneClickEnabled && (
             savedDefaults
@@ -527,13 +507,11 @@ export function GeneralSettings({
             开启后，以下入口将不再打开创建弹窗，而是直接创建并进入新对话：
           </Dialog.Description>
           <ul>
-            <li>左上角“新对话”</li>
-            <li>项目文件夹后的 ＋</li>
-            <li>快速对话文件夹后的 ＋</li>
+            {ONE_CLICK_ENTRY_DESCRIPTIONS.map((description) => <li key={description}>{description}</li>)}
           </ul>
           <div className="one-click-confirm-summary">
             <strong>新对话将使用：</strong>
-            <span>项目：{currentProjectLabel}</span>
+            <span>项目：由使用的新建入口决定</span>
             <span>队员：{savedMemberNames.join('、') || '—'}</span>
             <span>Lead：{savedLeadName ?? '—'}</span>
           </div>

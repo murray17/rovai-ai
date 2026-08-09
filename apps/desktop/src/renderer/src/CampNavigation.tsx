@@ -48,6 +48,14 @@ export function toggleNavigationGroup(groups: ReadonlySet<string>, groupKey: str
   return next
 }
 
+export function activateProjectNavigationRow(
+  onSelectProject: () => void,
+  onToggleExpanded: () => void
+): void {
+  onSelectProject()
+  onToggleExpanded()
+}
+
 export const NAVIGATION_INITIAL_VISIBLE_CAMPS = 5
 export const NAVIGATION_MORE_CAMPS_STEP = 10
 
@@ -146,11 +154,6 @@ export async function revealMoreNavigationCamps(
     visibleCount: Math.min(targetVisibleCount, pageTotalCount, camps.length),
     serverOffset: Math.min(pageTotalCount, page.nextOffset ?? pageTotalCount)
   }
-}
-
-export function activateProjectNavigationRow(onSelectProject: () => void, onToggleExpanded: () => void): void {
-  onSelectProject()
-  onToggleExpanded()
 }
 
 export function CampNavigation({
@@ -896,7 +899,7 @@ function CampGroup({
     <section className="camp-nav-group" data-group={groupKey}>
       <div className={`project-heading-row ${currentProject ? 'current-project' : ''}`} data-expanded={projectExpanded ? 'true' : 'false'}>
         <button
-          className="project-toggle-row"
+          className="project-select-row"
           type="button"
           title={label}
           aria-current={currentProject ? 'true' : undefined}

@@ -110,14 +110,17 @@ last_updated: 2026-08-09
   后由“保存默认配置”原子提交，未保存草稿不被创建入口读取；
 - [x] Member 永久移除、away、缺失或 Lead 失效只锁存 `newConversationDefaultsRequireConfirmation`，
   不删 ID、不换 Lead、不关闭已开启 Switch；重新归队仍须显式保存，Runtime readiness 不参与；
-- [x] 一键创建默认关闭，每次开启都使用非 danger 明确确认 Dialog；`?` 支持 click/focus/Escape，
-  开启后持续显示有效摘要或 attention 回退说明；
-- [x] Renderer 持久当前项目；Project/Quick Chat/Camp 点击更新，缺失路径回退 Quick Chat；项目目录
-  整行依次选择并切换展开，三点菜单和 `＋` 为独立兄弟控件，取消创建不改当前项目；
+- [x] 一键创建默认关闭，每次开启都使用非 danger 明确确认 Dialog并列出四类入口；`?` 与全 App
+  其他问号统一只在鼠标 Hover 时显示、移开隐藏且不响应点击/聚焦，开启后持续显示有效摘要或
+  attention 回退说明；
+- [x] Renderer 持久当前项目；Project/Quick Chat/Camp 点击更新，缺失路径回退 Quick Chat；项目主行
+  同时选择并切换展开且不显示独立 disclosure，三点菜单和 `＋` 仍为独立控件，取消创建不改当前项目；项目无稳定底色，当前 Camp
+  使用灰色选中底而非蓝色底；
 - [x] 普通 Project、置顶 Project 与 Quick Chat 统一按 canonical group key 保存分页；初始 5 条、
   每次“查看更多”读取 10 条，“收起”、目录折叠和置顶位置变化均保留已读缓存；
-- [x] 左上入口与两个文件夹 `＋` 按开关统一执行 Dialog 或直接 `camps.create`，失败/失效保留目标项目
-  回退 Dialog；创建请求继续固定 `collaborationMode: peer`；
+- [x] 左上入口、两个文件夹 `＋` 与“项目”标题 `＋` 按开关统一执行 Dialog 或直接 `camps.create`，
+  失败/失效保留目标项目回退 Dialog；失效提示逐项说明成员、Lead 与仅用于本次的临时调整；创建
+  请求继续固定 `collaborationMode: peer`；
 - [x] 创建 Dialog 删除协作方式区、禁用项与 Footer 摘要，说明改为“确定这段对话的工作环境与队员。”；
   可选名称增加展开聚焦、规范化摘要、Unicode scalar 计数、80 字硬边界和清空按钮；
 - [x] Main store、Preload、Renderer helper 与静态 UI 测试覆盖 v1 migration、原子约束、失效锁存、
