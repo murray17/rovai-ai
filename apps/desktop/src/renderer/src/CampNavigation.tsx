@@ -733,7 +733,7 @@ function SettingsSidebarNavigation({
     { key: 'runtime', icon: '◈', label: 'Agent 运行时' },
     { key: 'appearance', icon: '◐', label: '外观' },
     { key: 'notifications', icon: '♢', label: '通知' },
-    { key: 'diagnostics', icon: '⌁', label: '诊断' }
+    { key: 'diagnostics', icon: '⌁', label: '诊断与修复' }
   ]
   return (
     <div className="settings-sidebar-navigation">

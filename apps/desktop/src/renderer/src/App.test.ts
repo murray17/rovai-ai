@@ -1109,7 +1109,7 @@ describe('task event projections', () => {
     expect(markup.indexOf('<strong>MCP</strong>')).toBeLessThan(markup.indexOf('<strong>Agent 运行时</strong>'))
     expect(markup.indexOf('<strong>Agent 运行时</strong>')).toBeLessThan(markup.indexOf('<strong>外观</strong>'))
     expect(markup.indexOf('<strong>外观</strong>')).toBeLessThan(markup.indexOf('<strong>通知</strong>'))
-    expect(markup.indexOf('<strong>通知</strong>')).toBeLessThan(markup.indexOf('<strong>诊断</strong>'))
+    expect(markup.indexOf('<strong>通知</strong>')).toBeLessThan(markup.indexOf('<strong>诊断与修复</strong>'))
     expect(markup).not.toContain('新对话')
     expect(markup).not.toContain('快速对话')
     expect(markup).not.toContain('Core')

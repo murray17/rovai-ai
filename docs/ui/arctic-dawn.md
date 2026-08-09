@@ -71,7 +71,7 @@ v0.24 必须在一个版本内收敛下列生产界面：
 
 - Quick Chat 与 Camp 对话工作区；
 - 队员与记忆；
-- 设置中的技能、MCP、Agent 运行时、外观和诊断；
+- 设置中的技能、MCP、Agent 运行时、外观和诊断与修复；
 - 创建新对话 Dialog；
 - 上述页面共用的 App Shell、导航、状态、浮层和响应式行为。
 
@@ -286,7 +286,7 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
   Camp 菜单触发器沿用相同的可达性要求。
 - Sidebar 菜单操作失败保留当前行和焦点。不存在 archive、trash 或顶栏重复入口。
 - 删除侧栏 Core 健康摘要；Health Snapshot、探测、诊断页和导出能力继续保留，
-  用户通过“设置 → 诊断”访问。
+  用户通过“设置 → 诊断与修复”访问。
 
 ### Quick Chat 与新对话
 
@@ -818,19 +818,19 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 
 - 设置继续使用 App Shell 的 270px 侧栏槽位，但设置导航完整覆盖普通 App 导航，
   不在内容区右侧增加 188px 二级导航。覆盖侧栏顺序为 Logo/`Rovai AI`、
-  “返回 App”、设置说明和“通用 / Skill / MCP / Agent 运行时 / 外观 / 通知 / 诊断”。
+  “返回 App”、设置说明和“通用 / Skill / MCP / Agent 运行时 / 外观 / 通知 / 诊断与修复”。
 - “返回 App”恢复进入设置前的一级页面和 Camp，不把用户强制送回 Quick Chat。
 - 设置分类由 Electron Main 作为 Desktop Shell 偏好保存，跨 Main Window Session 保留最后选择；
   全新安装或记录损坏时默认“通用”。明确深链到某一分类同样更新最后选择。设置本身不成为
   Restorable Location。
 - 设置内容区使用自适应滚动面板，内部宽度
-  `min(980px, 可用宽度 - 42px)`；通用、Skill、MCP、Agent 运行时、外观、通知和诊断统一使用
+  `min(980px, 可用宽度 - 42px)`；通用、Skill、MCP、Agent 运行时、外观、通知和诊断与修复统一使用
   同一个无外框设置页头：eyebrow、一级标题、说明、可选右侧操作区和底部分隔线。各页只允许
   一个该共享页头，不叠加通用 AppHeader，也不得回退为带边框、圆角或背景卡片的 Hero。
   全部设置分类的内容滚动面板统一使用实白页面底色。
   App Shell 右侧第一行叠加一条与页面表面同色的 50px 隐形拖拽栏，设置内容
   继续跨越两行，不因该拖拽栏下移。
-- 设置侧栏不显示健康 footer；诊断仍是设置分类并读取原有 Health Snapshot。
+- 设置侧栏不显示健康 footer；“诊断与修复”仍是设置分类并读取 Core 诊断 Read Model。
 - 设置页不增加“上下文投递”或“记忆”分区；公共消息摘要模型不再有任何配置表面，记忆仍是
   一级页面。
 
@@ -963,7 +963,7 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   Camp、Tab、草稿、滚动、列表选择或 Dialog。首次绘制前解析，不能先闪 Meridian
   Night 或其他旧主题。
 
-### 诊断
+### 诊断与修复
 
 - Hero 操作为“运行完整自检 / 导出诊断 JSON”。完整自检严格只读，不同步 Skill、
   不初始化或修复 MCP、不 rescan/probe Runtime、不修改 SQLite、不登录或替换 Runtime。
