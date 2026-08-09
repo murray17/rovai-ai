@@ -24,7 +24,10 @@ identity、Collaboration Projection 与输入水位见
 [ADR-0146](../adr/0146-sole-native-session-self-identity-and-peer-routing-projection.md)和
 [Collaboration State v2](../contracts/collaboration-state-v2.md)。模型投影、ContextManifest Evidence、
 Runtime Input Delivery Evidence 与 Profile/Formatter/Manifest 权责见
-[ADR-0147](../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)。
+[ADR-0147](../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)；whole-history
+omission 的 bounded aggregate 边界见
+[ADR-0149](../adr/0149-bounded-whole-history-omission-evidence.md)和
+[ContextManifest Evidence v9](../contracts/context-manifest-evidence-v9.md)。
 
 ## 总体路径
 
@@ -222,7 +225,7 @@ CampMembers 中排除 `snapshot.agent_id`；away 和 leave-requested 关系保�
 `defaultLeadAgentId` 和派生的 `selfIsDefaultLead` 表达。调用资格仍在 BuiltinToolRouter/Domain
 Service admission 时按当前 membership、Presence、Runtime、Capability、quota 与 fence 重判。
 
-Core 先构建完整 v2 projection，再计算 `collaboration_state_digest`。ContextManifest v8 无论本轮是否
+Core 先构建完整 v2 projection，再计算 `collaboration_state_digest`。ContextManifest v9 无论本轮是否
 渲染 section 都冻结该完整 digest，并以 `collaborationStateIncluded` 单独记录 inclusion。只有 Runtime
 Input accepted ACK 才把 `conversation.native_collaboration_state_digest` 推进到 Delivery 冻结的完整
 digest；failure、`delivery_unknown` 和未 accepted 输入不推进。因此 self identity 编辑和其他不改变

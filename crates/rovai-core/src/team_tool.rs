@@ -2158,6 +2158,101 @@ mod tests {
     }
 
     #[test]
+    fn task_linked_public_delivery_reuses_exact_run_notice_bytes() {
+        let mut fixture = Fixture::new();
+        let created = CollaborationService::default()
+            .create_task(
+                &mut fixture.database,
+                &user_envelope(
+                    "create-target-task-for-frozen-context",
+                    Some(&fixture.camp_id),
+                    CreateTaskCommand {
+                        camp_id: fixture.camp_id.clone(),
+                        title: "Frozen notice task".to_string(),
+                        description: "Exercise exact Run Notice bytes".to_string(),
+                        assignee_agent_id: Some("agent_2".to_string()),
+                        ..Default::default()
+                    },
+                ),
+            )
+            .unwrap();
+        let task_id = created.result.payload["taskId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let mut invocation = fixture.public_send_invocation(
+            "frozen-task-run-notice",
+            "Use the linked Task context @agent_2",
+            &["agent_2"],
+        );
+        invocation.input.task_id = Some(task_id);
+        let sent = TeamToolService::default()
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+        let delivery_id = sent.result.payload["deliveryIds"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let (target_run_id, frozen_snapshot): (String, String) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT target_agent_run_id, frozen_snapshot_json FROM message_delivery WHERE id = ?1",
+                [&delivery_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let frozen_snapshot: Value = serde_json::from_str(&frozen_snapshot).unwrap();
+        let frozen_notice_payload =
+            frozen_snapshot["frozenContext"]["manifestSelection"]["runNoticePayload"]
+                .as_str()
+                .unwrap()
+                .to_string();
+        assert!(frozen_notice_payload.contains("\"taskId\""));
+
+        let (target_epoch, _) =
+            fixture.claim_bind_and_issue(&target_run_id, "native-frozen-task-run-notice");
+        let ContextMaterialization::Ready(context) = ContextService
+            .materialize(
+                &mut fixture.database,
+                &ManagedBlobStore::new(&fixture.directory),
+                &MaterializeContextRequest {
+                    agent_run_id: &target_run_id,
+                    execution_epoch: target_epoch,
+                    charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+            )
+            .unwrap()
+        else {
+            panic!("Task-linked Public Delivery context should materialize");
+        };
+        let run_notice_section = context
+            .rendered_payload
+            .split("[RUN_NOTICES]\n")
+            .nth(1)
+            .unwrap()
+            .split("\n[/RUN_NOTICES]")
+            .next()
+            .unwrap();
+        let (manifest_payload, manifest_digest): (String, String) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT run_notice_payload_json, run_notice_digest FROM context_manifest WHERE id = ?1",
+                [&context.manifest_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(run_notice_section, frozen_notice_payload);
+        assert_eq!(manifest_payload, frozen_notice_payload);
+        assert_eq!(
+            manifest_digest,
+            format!("sha256:{:x}", Sha256::digest(manifest_payload.as_bytes()))
+        );
+    }
+
+    #[test]
     fn exact_public_final_output_is_suppressed_once_per_run() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();

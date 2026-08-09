@@ -2,7 +2,7 @@
   "nativeSessionBootstrap": "native_session_bootstrap_v3",
   "bootstrapFormatterVersion": 3,
   "agentRunContextFormatterVersion": 11,
-  "contextManifestVersion": 8,
+  "contextManifestVersion": 9,
   "contextManifestFormatterVersion": 11,
   "contextDeliveryProfileVersion": 2,
   "memberCallSenderIdentityField": "senderAgentId",

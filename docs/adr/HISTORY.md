@@ -160,4 +160,5 @@ generated_from: docs/adr-front-matter
 | [ADR-0146](0146-sole-native-session-self-identity-and-peer-routing-projection.md) | Sole Native-Session Self Identity and Peer Routing Projection | `accepted` | `cross-version` | [v0.50](../versions/v0.50/README.md) | — |
 | [ADR-0147](0147-lossless-model-context-projection-and-layered-delivery-evidence.md) | Lossless Model Context Projection and Layered Delivery Evidence | `accepted` | `cross-version` | [v0.50](../versions/v0.50/README.md) | — |
 | [ADR-0148](0148-read-only-diagnostics-and-data-minimized-export.md) | Read-Only Diagnostics and Data-Minimized Export | `accepted` | `cross-version` | [v0.51](../versions/v0.51/README.md) | — |
+| [ADR-0149](0149-bounded-whole-history-omission-evidence.md) | Bounded Whole-History Omission Evidence | `accepted` | `cross-version` | [v0.52](../versions/v0.52/README.md) | — |
 <!-- adr-history:end -->

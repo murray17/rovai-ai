@@ -1075,7 +1075,7 @@ export interface DomainEventView {
 }
 
 export interface CampSnapshot {
-  schemaVersion: 26
+  schemaVersion: 27
   throughGlobalSequence: number
   camp: {
     id: string
