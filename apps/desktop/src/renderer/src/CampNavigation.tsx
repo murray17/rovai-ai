@@ -48,6 +48,111 @@ export function toggleNavigationGroup(groups: ReadonlySet<string>, groupKey: str
   return next
 }
 
+export const NAVIGATION_INITIAL_VISIBLE_CAMPS = 5
+export const NAVIGATION_MORE_CAMPS_STEP = 10
+
+export interface NavigationGroupPaginationState {
+  camps: NavigationCampItem[]
+  visibleCount: number
+  serverOffset: number
+}
+
+export function appendUniqueNavigationCamps(
+  current: readonly NavigationCampItem[],
+  incoming: readonly NavigationCampItem[]
+): NavigationCampItem[] {
+  const seen = new Set<string>()
+  return [...current, ...incoming].filter((camp) => {
+    if (seen.has(camp.id)) return false
+    seen.add(camp.id)
+    return true
+  })
+}
+
+export function navigationGroupPagination(
+  recentCamps: readonly NavigationCampItem[],
+  totalCount: number,
+  current?: NavigationGroupPaginationState
+): NavigationGroupPaginationState {
+  const normalizedTotal = Math.max(0, totalCount)
+  const camps = current
+    ? appendUniqueNavigationCamps(recentCamps, current.camps)
+    : appendUniqueNavigationCamps([], recentCamps)
+  return {
+    camps,
+    visibleCount: Math.min(
+      normalizedTotal,
+      current?.visibleCount ?? Math.min(NAVIGATION_INITIAL_VISIBLE_CAMPS, camps.length)
+    ),
+    serverOffset: Math.min(
+      normalizedTotal,
+      current?.serverOffset ?? Math.min(NAVIGATION_INITIAL_VISIBLE_CAMPS, normalizedTotal)
+    )
+  }
+}
+
+export function navigationPaginationControls(
+  visibleCount: number,
+  totalCount: number
+): { showMore: boolean; showCollapse: boolean } {
+  return {
+    showMore: visibleCount < totalCount,
+    showCollapse: visibleCount > NAVIGATION_INITIAL_VISIBLE_CAMPS
+  }
+}
+
+export function collapseNavigationGroupPagination(
+  state: NavigationGroupPaginationState,
+  totalCount: number
+): NavigationGroupPaginationState {
+  return {
+    ...state,
+    visibleCount: Math.min(NAVIGATION_INITIAL_VISIBLE_CAMPS, Math.max(0, totalCount))
+  }
+}
+
+export function removeNavigationCampFromPagination(
+  state: NavigationGroupPaginationState,
+  campId: string
+): NavigationGroupPaginationState {
+  if (!state.camps.some((camp) => camp.id === campId)) return state
+  const camps = state.camps.filter((camp) => camp.id !== campId)
+  return {
+    camps,
+    visibleCount: Math.min(state.visibleCount, camps.length),
+    serverOffset: Math.max(0, state.serverOffset - 1)
+  }
+}
+
+export async function revealMoreNavigationCamps(
+  state: NavigationGroupPaginationState,
+  totalCount: number,
+  loadPage: (offset: number, limit: number) => Promise<NavigationCampPage>
+): Promise<NavigationGroupPaginationState> {
+  const targetVisibleCount = Math.min(
+    Math.max(0, totalCount),
+    state.visibleCount + NAVIGATION_MORE_CAMPS_STEP
+  )
+  if (state.camps.length >= targetVisibleCount) {
+    return { ...state, visibleCount: targetVisibleCount }
+  }
+
+  const page = await loadPage(state.serverOffset, NAVIGATION_MORE_CAMPS_STEP)
+  if (page.schemaVersion !== 2) throw new Error('Navigation group schema is incompatible')
+  const camps = appendUniqueNavigationCamps(state.camps, page.camps)
+  const pageTotalCount = Math.max(0, page.totalCount)
+  return {
+    camps,
+    visibleCount: Math.min(targetVisibleCount, pageTotalCount, camps.length),
+    serverOffset: Math.min(pageTotalCount, page.nextOffset ?? pageTotalCount)
+  }
+}
+
+export function activateProjectNavigationRow(onSelectProject: () => void, onToggleExpanded: () => void): void {
+  onSelectProject()
+  onToggleExpanded()
+}
+
 export function CampNavigation({
   view,
   state,
@@ -109,19 +214,17 @@ export function CampNavigation({
   onStop(camp: NavigationCampItem): Promise<void>
   onError(error: unknown): void
 }): JSX.Element {
-  const [expandedAllGroups, setExpandedAllGroups] = useState<Set<string>>(() => new Set())
-  // Project visibility is independent from the "show all" pagination state below.
-  // An empty collapsed set keeps the existing default of showing recent Camps.
   const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Set<string>>(() => new Set())
-  const [allCampsByGroup, setAllCampsByGroup] = useState<Record<string, NavigationCampItem[]>>({})
-  const [loadingGroup, setLoadingGroup] = useState<string | null>(null)
+  const [paginationByGroup, setPaginationByGroup] = useState<Record<string, NavigationGroupPaginationState>>({})
+  const [loadingGroups, setLoadingGroups] = useState<Set<string>>(() => new Set())
   const [action, setAction] = useState<CampAction>(null)
   const [renameTitle, setRenameTitle] = useState('')
   const [deleteBlockers, setDeleteBlockers] = useState<Array<{ code: string; count: number }>>([])
   const [actionBusy, setActionBusy] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [sidebarFocusRequest, setSidebarFocusRequest] = useState<{ id: number; target: string } | null>(null)
-  const expandedAllGroupsRef = useRef(expandedAllGroups)
+  const paginationByGroupRef = useRef(paginationByGroup)
+  const loadingGroupsRef = useRef<Set<string>>(new Set())
   const sidebarRef = useRef<HTMLElement>(null)
   const settingsButtonRef = useRef<HTMLButtonElement>(null)
   const previousViewRef = useRef(view)
@@ -148,10 +251,17 @@ export function CampNavigation({
   const pinnedProjects = pins
     .filter((pin) => pin.kind === 'project')
     .flatMap((pin) => projectByKey.get(pin.targetKey) ?? [])
+  const quickChatRecentCamps = navigation?.quickChat.recentCamps ?? []
+  const quickChatTotalCount = navigation?.quickChat.totalCount ?? 0
+  const quickChatPagination = navigationGroupPagination(
+    quickChatRecentCamps,
+    quickChatTotalCount,
+    paginationByGroup['quick-chat']
+  )
 
   useEffect(() => {
-    expandedAllGroupsRef.current = expandedAllGroups
-  }, [expandedAllGroups])
+    paginationByGroupRef.current = paginationByGroup
+  }, [paginationByGroup])
 
   useLayoutEffect(() => {
     if (previousViewRef.current === 'settings' && view !== 'settings') {
@@ -173,68 +283,57 @@ export function CampNavigation({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
-  const loadAllGroup = async (groupKey: string, projectPath: string | null): Promise<void> => {
-    setLoadingGroup(groupKey)
+  const commitPagination = (groupKey: string, pagination: NavigationGroupPaginationState): void => {
+    const next = { ...paginationByGroupRef.current, [groupKey]: pagination }
+    paginationByGroupRef.current = next
+    setPaginationByGroup(next)
+  }
+
+  const showMore = async (
+    groupKey: string,
+    projectPath: string | null,
+    recentCamps: readonly NavigationCampItem[],
+    totalCount: number
+  ): Promise<void> => {
+    if (loadingGroupsRef.current.has(groupKey)) return
+    const pagination = navigationGroupPagination(
+      recentCamps,
+      totalCount,
+      paginationByGroupRef.current[groupKey]
+    )
+    if (pagination.camps.length >= Math.min(totalCount, pagination.visibleCount + NAVIGATION_MORE_CAMPS_STEP)) {
+      commitPagination(groupKey, await revealMoreNavigationCamps(pagination, totalCount, async () => {
+        throw new Error('Cached navigation pagination unexpectedly requested a page')
+      }))
+      return
+    }
+
+    loadingGroupsRef.current = new Set(loadingGroupsRef.current).add(groupKey)
+    setLoadingGroups(new Set(loadingGroupsRef.current))
     try {
-      const camps: NavigationCampItem[] = []
-      let offset = 0
-      for (;;) {
-        const page = await window.rovai.request<NavigationCampPage>('navigation.groupCamps', {
-          projectPath,
-          offset,
-          limit: 200
-        })
-        if (page.schemaVersion !== 2) throw new Error('Navigation group schema is incompatible')
-        camps.push(...page.camps)
-        if (page.nextOffset === null) break
-        offset = page.nextOffset
-      }
-      if (expandedAllGroupsRef.current.has(groupKey)) {
-        setAllCampsByGroup((current) => ({ ...current, [groupKey]: camps }))
-      }
+      const next = await revealMoreNavigationCamps(pagination, totalCount, (offset, limit) => (
+        window.rovai.request<NavigationCampPage>('navigation.groupCamps', { projectPath, offset, limit })
+      ))
+      commitPagination(groupKey, next)
     } catch (error) {
       onError(error)
     } finally {
-      setLoadingGroup((current) => current === groupKey ? null : current)
+      const nextLoading = new Set(loadingGroupsRef.current)
+      nextLoading.delete(groupKey)
+      loadingGroupsRef.current = nextLoading
+      setLoadingGroups(new Set(nextLoading))
     }
   }
 
-  useEffect(() => {
-    if (!navigation) return
-    for (const groupKey of expandedAllGroups) {
-      const projectPath = groupKey === 'quick-chat'
-        ? null
-        : navigation.projects.find((project) => projectKey(project) === groupKey)?.projectPath
-      if (groupKey !== 'quick-chat' && !projectPath) continue
-      void loadAllGroup(groupKey, projectPath ?? null)
-    }
-    // Refresh expanded groups when the authoritative navigation sequence changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [navigation?.throughGlobalSequence])
-
-  useEffect(() => {
-    for (const project of pinnedProjects) {
-      const groupKey = projectKey(project)
-      if (allCampsByGroup[groupKey] || loadingGroup === groupKey) continue
-      expandedAllGroupsRef.current = new Set(expandedAllGroupsRef.current).add(groupKey)
-      void loadAllGroup(groupKey, project.projectPath)
-    }
-    // Pinned Projects always resolve their complete Camp group.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pins, navigation?.throughGlobalSequence])
-
-  const toggleAll = (groupKey: string, projectPath: string | null): void => {
-    if (expandedAllGroups.has(groupKey)) {
-      setExpandedAllGroups((current) => {
-        const next = new Set(current)
-        next.delete(groupKey)
-        return next
-      })
-      return
-    }
-    setExpandedAllGroups((current) => new Set(current).add(groupKey))
-    expandedAllGroupsRef.current = new Set(expandedAllGroupsRef.current).add(groupKey)
-    void loadAllGroup(groupKey, projectPath)
+  const collapseGroupCamps = (
+    groupKey: string,
+    recentCamps: readonly NavigationCampItem[],
+    totalCount: number
+  ): void => {
+    commitPagination(groupKey, collapseNavigationGroupPagination(
+      navigationGroupPagination(recentCamps, totalCount, paginationByGroupRef.current[groupKey]),
+      totalCount
+    ))
   }
 
   const toggleProjectGroup = (groupKey: string): void => {
@@ -324,6 +423,14 @@ export function CampNavigation({
     try {
       const result = await onDelete(action.camp)
       if (result.deleted) {
+        const nextPagination = Object.fromEntries(
+          Object.entries(paginationByGroupRef.current).map(([groupKey, pagination]) => [
+            groupKey,
+            removeNavigationCampFromPagination(pagination, action.camp.id)
+          ])
+        )
+        paginationByGroupRef.current = nextPagination
+        setPaginationByGroup(nextPagination)
         setAction(null)
         setDeleteBlockers([])
       } else {
@@ -433,24 +540,31 @@ export function CampNavigation({
                 onAction={openAction}
               />
             ))}
-            {pinnedProjects.map((project) => (
-              <CampGroup
+            {pinnedProjects.map((project) => {
+              const groupKey = projectKey(project)
+              const pagination = navigationGroupPagination(
+                project.recentCamps,
+                project.totalCount,
+                paginationByGroup[groupKey]
+              )
+              return <CampGroup
                 key={`pinned-${project.projectKey}`}
-                groupKey={`pinned-${project.projectKey}`}
+                groupKey={groupKey}
                 pinTargetKey={project.projectKey}
                 label={project.name}
                 totalCount={project.totalCount}
-                camps={(allCampsByGroup[project.projectKey] ?? project.recentCamps)
+                visibleCount={pagination.visibleCount}
+                camps={pagination.camps.slice(0, pagination.visibleCount)
                   .filter((camp) => !pinnedCampIds.has(camp.id))}
-                expandedAll
-                projectExpanded={!collapsedProjectGroups.has(`pinned-${project.projectKey}`)}
-                loadingAll={loadingGroup === project.projectKey}
+                projectExpanded={!collapsedProjectGroups.has(groupKey)}
+                loadingMore={loadingGroups.has(groupKey)}
                 activeCampId={activeCampId}
                 currentProject={currentProjectKey === project.projectKey}
                 createDisabled={creatingConversation}
                 pinned
-                onToggleAll={() => undefined}
-                onToggleExpanded={() => toggleProjectGroup(`pinned-${project.projectKey}`)}
+                onShowMore={() => void showMore(groupKey, project.projectPath, project.recentCamps, project.totalCount)}
+                onCollapseCamps={() => collapseGroupCamps(groupKey, project.recentCamps, project.totalCount)}
+                onToggleExpanded={() => toggleProjectGroup(groupKey)}
                 onSelectProject={() => onSelectProject(project)}
                 onCreate={() => onCreateInProject(project)}
                 onTogglePin={() => void togglePin('project', project.projectKey)}
@@ -458,14 +572,19 @@ export function CampNavigation({
                 onCamp={onCamp}
                 onAction={openAction}
               />
-            ))}
+            })}
           </section>
         )}
         <section className="navigation-projects" aria-labelledby="projects-heading">
-          <div className="sidebar-group-title navigation-section-title"><span id="projects-heading">项目</span><button aria-label="选择工作目录" title="选择工作目录" onClick={onOpenProject}>＋</button></div>
+          <div className="sidebar-group-title navigation-section-title"><span id="projects-heading">项目</span><button className="section-create-button" aria-label="选择工作目录" title="选择工作目录" onClick={onOpenProject}>＋</button></div>
           {navigation?.projects.map((project) => {
             const groupKey = projectKey(project)
             if (pins.some((pin) => pin.kind === 'project' && pin.targetKey === project.projectKey)) return null
+            const pagination = navigationGroupPagination(
+              project.recentCamps,
+              project.totalCount,
+              paginationByGroup[groupKey]
+            )
             return (
               <CampGroup
                 key={project.projectKey}
@@ -473,16 +592,17 @@ export function CampNavigation({
                 pinTargetKey={project.projectKey}
                 label={project.name}
                 totalCount={project.totalCount}
-                camps={(expandedAllGroups.has(groupKey) ? allCampsByGroup[groupKey] ?? project.recentCamps : project.recentCamps)
+                visibleCount={pagination.visibleCount}
+                camps={pagination.camps.slice(0, pagination.visibleCount)
                   .filter((camp) => !pinnedCampIds.has(camp.id))}
-                expandedAll={expandedAllGroups.has(groupKey)}
                 projectExpanded={!collapsedProjectGroups.has(groupKey)}
-                loadingAll={loadingGroup === groupKey}
+                loadingMore={loadingGroups.has(groupKey)}
                 activeCampId={activeCampId}
                 currentProject={currentProjectKey === project.projectKey}
                 createDisabled={creatingConversation}
                 pinned={pins.some((pin) => pin.kind === 'project' && pin.targetKey === project.projectKey)}
-                onToggleAll={() => toggleAll(groupKey, project.projectPath)}
+                onShowMore={() => void showMore(groupKey, project.projectPath, project.recentCamps, project.totalCount)}
+                onCollapseCamps={() => collapseGroupCamps(groupKey, project.recentCamps, project.totalCount)}
                 onToggleExpanded={() => toggleProjectGroup(groupKey)}
                 onSelectProject={() => onSelectProject(project)}
                 onCreate={() => onCreateInProject(project)}
@@ -497,16 +617,17 @@ export function CampNavigation({
           <CampGroup
             groupKey="quick-chat"
             label="快速对话"
-            totalCount={navigation?.quickChat.totalCount ?? 0}
-            camps={(expandedAllGroups.has('quick-chat') ? allCampsByGroup['quick-chat'] ?? navigation?.quickChat.recentCamps ?? [] : navigation?.quickChat.recentCamps ?? [])
+            totalCount={quickChatTotalCount}
+            visibleCount={quickChatPagination.visibleCount}
+            camps={quickChatPagination.camps.slice(0, quickChatPagination.visibleCount)
               .filter((camp) => !pinnedCampIds.has(camp.id))}
-            expandedAll={expandedAllGroups.has('quick-chat')}
             projectExpanded={!collapsedProjectGroups.has('quick-chat')}
-            loadingAll={loadingGroup === 'quick-chat'}
+            loadingMore={loadingGroups.has('quick-chat')}
             activeCampId={activeCampId}
             currentProject={currentProjectKey === 'quick-chat'}
             createDisabled={creatingConversation}
-            onToggleAll={() => toggleAll('quick-chat', null)}
+            onShowMore={() => void showMore('quick-chat', null, quickChatRecentCamps, quickChatTotalCount)}
+            onCollapseCamps={() => collapseGroupCamps('quick-chat', quickChatRecentCamps, quickChatTotalCount)}
             onToggleExpanded={() => toggleProjectGroup('quick-chat')}
             onSelectProject={() => onSelectProject(null)}
             onCreate={() => onCreateInProject(null)}
@@ -729,14 +850,15 @@ function CampGroup({
   label,
   totalCount,
   camps,
-  expandedAll,
+  visibleCount,
   projectExpanded,
-  loadingAll,
+  loadingMore,
   activeCampId,
   currentProject,
   createDisabled,
   pinned = false,
-  onToggleAll,
+  onShowMore,
+  onCollapseCamps,
   onToggleExpanded,
   onSelectProject,
   onCreate,
@@ -750,14 +872,15 @@ function CampGroup({
   label: string
   totalCount: number
   camps: NavigationCampItem[]
-  expandedAll: boolean
+  visibleCount: number
   projectExpanded: boolean
-  loadingAll: boolean
+  loadingMore: boolean
   activeCampId: string | null
   currentProject: boolean
   createDisabled: boolean
   pinned?: boolean
-  onToggleAll(): void
+  onShowMore(): void
+  onCollapseCamps(): void
   onToggleExpanded(): void
   onSelectProject(): void
   onCreate(): void
@@ -768,15 +891,18 @@ function CampGroup({
 }): JSX.Element {
   const projectMenuLabels = projectNavigationMenuLabels(pinned)
   const contentId = `camp-group-content-${groupKey.replace(/[^a-zA-Z0-9_-]/g, '-')}`
+  const paginationControls = navigationPaginationControls(visibleCount, totalCount)
   return (
     <section className="camp-nav-group" data-group={groupKey}>
-      <div className={`camp-group-heading-row ${currentProject ? 'current-project' : ''}`} data-expanded={projectExpanded ? 'true' : 'false'}>
+      <div className={`project-heading-row ${currentProject ? 'current-project' : ''}`} data-expanded={projectExpanded ? 'true' : 'false'}>
         <button
-          className="camp-group-select"
+          className="project-toggle-row"
           type="button"
           title={label}
           aria-current={currentProject ? 'true' : undefined}
-          onClick={onSelectProject}
+          aria-expanded={projectExpanded}
+          aria-controls={contentId}
+          onClick={() => activateProjectNavigationRow(onSelectProject, onToggleExpanded)}
         >
           <svg className="project-folder-glyph" viewBox="0 0 24 24" aria-hidden="true">
             <g className="project-folder-closed">
@@ -790,17 +916,6 @@ function CampGroup({
           </svg>
           <span className="truncate">{label}</span>
         </button>
-        <button
-          className="project-disclosure-button"
-          type="button"
-          aria-label={`${projectExpanded ? '收起' : '展开'}“${label}”`}
-          aria-expanded={projectExpanded}
-          aria-controls={contentId}
-          onClick={onToggleExpanded}
-        >
-          <svg className="project-disclosure-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m5.5 6.2 2.5 2.5 2.5-2.5" /></svg>
-        </button>
-        <button className="group-create-button" type="button" aria-label={`在“${label}”中新建对话`} title="新建对话" disabled={createDisabled} onClick={onCreate}>＋</button>
         {onTogglePin && pinTargetKey && (
           <SidebarActionMenu
             target={`project:${pinTargetKey}`}
@@ -816,6 +931,7 @@ function CampGroup({
             }]}
           />
         )}
+        <button className="group-create-button" type="button" aria-label={`在“${label}”中新建对话`} title="新建对话" disabled={createDisabled} onClick={onCreate}>＋</button>
       </div>
       <div id={contentId} className="camp-group-children" hidden={!projectExpanded}>
         {projectExpanded && camps.map((camp) => (
@@ -830,7 +946,12 @@ function CampGroup({
           />
         ))}
         {projectExpanded && camps.length === 0 && totalCount === 0 && <p className="sidebar-empty">还没有对话</p>}
-        {projectExpanded && totalCount > 5 && <button className="show-all-camps" type="button" onClick={onToggleAll} disabled={loadingAll}>{loadingAll ? '正在读取…' : expandedAll ? '收起' : '查看全部'}</button>}
+        {projectExpanded && (paginationControls.showMore || paginationControls.showCollapse) && (
+          <div className="camp-pagination-actions">
+            {paginationControls.showMore && <button className="show-more-camps" type="button" onClick={onShowMore} disabled={loadingMore}>{loadingMore ? '正在读取…' : '查看更多'}</button>}
+            {paginationControls.showCollapse && <button className="collapse-camps" type="button" onClick={onCollapseCamps} disabled={loadingMore}>收起</button>}
+          </div>
+        )}
       </div>
     </section>
   )

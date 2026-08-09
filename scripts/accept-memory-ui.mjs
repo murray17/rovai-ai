@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -25,7 +25,7 @@ try {
   await openMemory(first.cdp)
 
   await createHearthMemory(first.cdp, initialBody)
-  await chooseMemoryTab(first.cdp, '共同约定')
+  await chooseMemoryTab(first.cdp, '共同记忆')
   await waitForText(first.cdp, '.memory-catalog-item > strong', initialBody)
   await assertNoHorizontalOverflow(first.cdp, 'day Memory Library')
 
@@ -48,7 +48,7 @@ try {
   await clickMemoryAction(first.cdp, revisedBody, '重新沿用')
   await waitForTextToDisappear(first.cdp, '.memory-catalog-item > strong', revisedBody)
   await chooseMemoryTab(first.cdp, '全部')
-  await chooseMemoryTab(first.cdp, '共同约定')
+  await chooseMemoryTab(first.cdp, '共同记忆')
   await waitForText(first.cdp, '.memory-catalog-item > strong', revisedBody)
 
   await createHearthMemory(first.cdp, forgottenBody)
@@ -79,7 +79,7 @@ try {
   assert(restartedLibrary.memories.some((memory) => memory.currentBody === revisedBody),
     'Packaged Core did not return the active Memory after App restart')
   await chooseMemoryTab(second.cdp, '全部')
-  await chooseMemoryTab(second.cdp, '共同约定')
+  await chooseMemoryTab(second.cdp, '共同记忆')
   await waitForText(second.cdp, '.memory-catalog-item > strong', revisedBody)
   assert(!(await hasText(second.cdp, 'body', forgottenBody)),
     'Forgotten Memory body returned after packaged App restart')
@@ -272,33 +272,44 @@ async function assertNoHorizontalOverflow(cdp, context) {
 }
 
 async function launchApp(port, width, height) {
+  const executable = join(appPath, 'Contents', 'MacOS', 'Rovai-ai')
   const stderr = []
-  const launcher = spawn('/usr/bin/open', [
-    '-na',
-    appPath,
-    '--args',
+  const child = spawn(executable, [
     `--remote-debugging-port=${port}`,
     `--user-data-dir=${dataDir}`
   ], {
     cwd: root,
+    env: { ...process.env, ROVAI_ALLOW_ISOLATED_INSTANCE: '1' },
     stdio: ['ignore', 'ignore', 'pipe']
   })
-  launcher.stderr.on('data', (chunk) => stderr.push(String(chunk)))
-  const target = await waitForTarget(port, stderr)
-  const cdp = await connectCdp(target.webSocketDebuggerUrl)
-  await cdp.send('Page.enable')
-  await cdp.send('Page.bringToFront')
-  await cdp.send('Emulation.setDeviceMetricsOverride', {
-    width,
-    height,
-    deviceScaleFactor: 1,
-    mobile: false
-  })
-  await waitForExpression(cdp, `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
-  await waitForExpression(cdp, `Boolean(
-    document.querySelector('.unified-sidebar button[aria-label="新对话"]:not(:disabled)')
-  )`, 45_000)
-  return { cdp, port, stderr }
+  child.stderr.on('data', (chunk) => stderr.push(String(chunk)))
+  let cdp = null
+  try {
+    const target = await waitForTarget(port, stderr)
+    cdp = await connectCdp(target.webSocketDebuggerUrl)
+    await cdp.send('Page.enable')
+    await cdp.send('Page.bringToFront')
+    await cdp.send('Emulation.setDeviceMetricsOverride', {
+      width,
+      height,
+      deviceScaleFactor: 1,
+      mobile: false
+    })
+    await waitForExpression(cdp, `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
+    await waitForExpression(cdp, `Boolean(
+      document.querySelector('.unified-sidebar button[aria-label="新对话"]:not(:disabled)')
+    )`, 45_000)
+    const health = await request(cdp, 'health.check')
+    const expectedDatabasePath = await realpath(join(dataDir, 'rovai.sqlite'))
+    const actualDatabasePath = await realpath(health.database.path)
+    assert(actualDatabasePath === expectedDatabasePath,
+      `Isolated App opened the wrong database: ${JSON.stringify({ expectedDatabasePath, actualDatabasePath })}`)
+    return { cdp, child, port, stderr }
+  } catch (error) {
+    cdp?.close()
+    await terminateChild(child)
+    throw error
+  }
 }
 
 async function closeApp(running) {
@@ -316,11 +327,23 @@ async function closeApp(running) {
     try {
       await fetch(`http://127.0.0.1:${running.port}/json`)
     } catch {
+      await terminateChild(running.child)
       return
     }
     await wait(100)
   }
+  await terminateChild(running.child)
   throw new Error(`Isolated packaged App did not close on debug port ${running.port}`)
+}
+
+async function terminateChild(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return
+  child.kill('SIGTERM')
+  await Promise.race([
+    new Promise((resolveExit) => child.once('exit', resolveExit)),
+    wait(3_000)
+  ])
+  if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
 }
 
 async function capture(cdp, path) {

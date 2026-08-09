@@ -45,9 +45,9 @@ const initialDraft: Draft = {
 }
 
 const scopeTabs: Array<[MemoryScopeKind, string]> = [
-  ['hearth', '共同约定'],
-  ['companion', '伙伴经验'],
-  ['relationship', '协作默契']
+  ['hearth', '共同记忆'],
+  ['companion', '队员记忆'],
+  ['relationship', '队员间记忆']
 ]
 
 const governanceTabs: Array<[GovernanceFilter, string]> = [
@@ -377,7 +377,7 @@ export function MemoryLibrary({
       <header className="memory-library-header">
         <div>
           <h2 id="memory-library-title">记忆</h2>
-          <p>所有 Active Memory 都立即生效；形成来源仅用于说明和审计。</p>
+          <p>所有正在沿用的记忆都立即生效；形成来源仅用于说明和审计。</p>
         </div>
         <div className="memory-header-actions">
           <button className="quiet-button" type="button" onClick={() => void exportMemory()}>导出…</button>
@@ -392,14 +392,14 @@ export function MemoryLibrary({
 
       <div className="memory-summary-strip" aria-label="记忆概览">
         <div><strong>{activeCount}</strong><span>正在沿用</span></div>
-        <div className={pending.length > 0 ? 'attention' : ''}><strong>{pending.length}</strong><span>Hearth 待确认</span></div>
+        <div className={pending.length > 0 ? 'attention' : ''}><strong>{pending.length}</strong><span>共同记忆提案</span></div>
         <div><strong>{agentCount}</strong><span>队员形成</span></div>
         <div><strong>{reviewCount}</strong><span>建议复核</span></div>
       </div>
 
       {pending.length > 0 && (
         <button className="memory-pending-banner" type="button" onClick={() => setProposalDrawerOpen(true)}>
-          <span><strong>{pending.length} 条 Hearth Memory 提案等待确认</strong><small>只有接受后才会生效。</small></span>
+          <span><strong>{pending.length} 条共同记忆提案等待确认</strong><small>只有接受后才会生效。</small></span>
           <b>查看提案 →</b>
         </button>
       )}
@@ -616,12 +616,12 @@ function ProposalDrawer({
         <Dialog.Overlay className="dialog-overlay memory-drawer-overlay" />
         <Dialog.Content className="memory-proposal-drawer">
           <header>
-            <div><Dialog.Title>Hearth Memory 提案</Dialog.Title><Dialog.Description>这些内容尚未生效；接受或编辑后接受才会进入共同约定。</Dialog.Description></div>
+            <div><Dialog.Title>共同记忆提案</Dialog.Title><Dialog.Description>这些内容尚未生效；接受或编辑后接受才会进入共同记忆。</Dialog.Description></div>
             <Dialog.Close asChild><button className="icon-button" type="button" aria-label="关闭提案抽屉">×</button></Dialog.Close>
           </header>
           {proposals.length > 0 && <div className="memory-drawer-batch"><label><input type="checkbox" checked={selected.size === proposals.length} onChange={(event) => onSelection(event.target.checked ? new Set(proposals.map((proposal) => proposal.id)) : new Set())} /> 全选</label><button className="quiet-button compact" type="button" disabled={selected.size === 0 || busy !== null} onClick={() => void onRejectSelected()}>拒绝所选</button></div>}
           <div className="memory-proposal-drawer-list">
-            {proposals.length === 0 && <EmptyMemory text="没有等待确认的 Hearth Memory 提案。" />}
+            {proposals.length === 0 && <EmptyMemory text="没有等待确认的共同记忆提案。" />}
             {proposals.map((proposal) => (
               <article key={proposal.id} className="memory-proposal-item">
                 <label className="memory-select"><input type="checkbox" checked={selected.has(proposal.id)} onChange={(event) => { const next = new Set(selected); if (event.target.checked) next.add(proposal.id); else next.delete(proposal.id); onSelection(next) }} /><span className="sr-only">选择提案</span></label>
@@ -675,10 +675,10 @@ function MemoryEditorDialog({
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content memory-editor-dialog">
           <form onSubmit={onSubmit}>
-            <Dialog.Title>{editor?.kind === 'create' ? '新增记忆' : editor?.kind === 'proposal' ? '编辑后接受 Hearth 提案' : '修订记忆'}</Dialog.Title>
+            <Dialog.Title>{editor?.kind === 'create' ? '新增记忆' : editor?.kind === 'proposal' ? '编辑后接受共同记忆提案' : '修订记忆'}</Dialog.Title>
             <Dialog.Description>正文写成面向未来、可独立理解且不含秘密的信息。Retrieval Keys 用于搜索，不代替正文。</Dialog.Description>
             <div className="memory-editor-grid">
-              <label className="field-label">范围<select value={draft.scope} disabled={identityLocked || busy} onChange={(event) => onDraft({ ...draft, scope: event.target.value as MemoryScopeKind })}><option value="hearth">共同约定</option><option value="companion">伙伴经验</option><option value="relationship">协作默契</option></select></label>
+              <label className="field-label">范围<select value={draft.scope} disabled={identityLocked || busy} onChange={(event) => onDraft({ ...draft, scope: event.target.value as MemoryScopeKind })}><option value="hearth">共同记忆</option><option value="companion">队员记忆</option><option value="relationship">队员间记忆</option></select></label>
               <label className="field-label">类型<select value={draft.kind} disabled={(identityLocked && editor?.kind !== 'proposal') || busy} onChange={(event) => onDraft({ ...draft, kind: event.target.value as MemoryKind })}><option value="preference" disabled={draft.scope === 'relationship'}>偏好</option><option value="agreement">约定</option><option value="lesson">经验</option></select></label>
               {draft.scope === 'companion' && <AgentSelect label="队员" value={draft.firstAgentId} agents={agents} disabled={identityLocked || busy} onChange={(firstAgentId) => onDraft({ ...draft, firstAgentId })} />}
               {draft.scope === 'relationship' && <>
@@ -724,7 +724,7 @@ function assertApplied(result: StoredCommandResult): void {
 }
 
 function scopeLabel(scope: MemoryScopeKind | null): string {
-  return scope === 'hearth' ? '共同约定' : scope === 'companion' ? '伙伴经验' : scope === 'relationship' ? '协作默契' : '已遗忘'
+  return scope === 'hearth' ? '共同记忆' : scope === 'companion' ? '队员记忆' : scope === 'relationship' ? '队员间记忆' : '已遗忘'
 }
 
 function kindLabel(kind: MemoryKind | null): string {

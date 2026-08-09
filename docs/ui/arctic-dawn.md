@@ -18,18 +18,18 @@ last_updated: 2026-08-09
 布局 2”，本节据此冻结 Composer 与历史 Mention 的共同呈现和点击行为；重新打包的 App
 已通过真实输入、点击、Enter/Space、Esc 焦点返回、拖选和截图验收。
 
-v0.44 进一步确认删除成员详情中的公共消息摘要模型配置和整个“高级设置”入口，同时完整
+v0.44 进一步确认删除队员详情中的公共消息摘要模型配置和整个“高级设置”入口，同时完整
 保留 Member Runtime Parameters；实施状态以 v0.44 实施计划与代码证据为准，不能从本文
 `accepted` 推断代码已完成。
 
-v0.45 进一步冻结 Scheme C 会话区：Run Pulse 只作常驻摘要，Execution Drawer 按需成为
-唯一的 Run 过程详情面；Inspector 删除“活动”页，保留“任务 / 上下文 / 审批 / 审计”。
-Drawer 不提供 Run 级 Stop，活跃 CampTurn 的停止入口仍只在 Composer 发送位置，并 fence
+v0.45 进一步冻结 Scheme C 会话区：执行动态只作常驻摘要，执行详情按需成为
+唯一的 AgentRun 过程详情面；Inspector 删除“活动”页，保留“任务 / 上下文投递 / 审批 / 审计”。
+执行详情不提供 AgentRun 级 Stop，活跃 CampTurn 的停止入口仍只在 Composer 发送位置，并 fence
 整棵 AgentRun/Message Delivery 执行树。外部 HTML 只提供会话区关键层级参考，不能覆盖本
 Arctic Dawn Shell、Token、导航或无障碍合同。
 
 v0.47 进一步冻结 Durable Task v2 的四层界面：会话卡只作五态责任感知，Inspector list
-负责发现，Inspector detail 负责完整责任与审计，现有 Run UI 负责执行事实。Task 取消不等于
+负责发现，Inspector detail 负责完整责任与审计，现有 AgentRun UI 负责执行事实。Task 取消不等于
 执行取消，terminal Task 只读，version conflict 保留用户草稿；永久移除队员使用中文影响
 preview，并由 Core 在一个事务中完成 membership/Task/Lead 收口。版本级细节以
 [v0.47 生产设计](../versions/v0.47/production-design.md)为准，生产实现状态以对应实施计划和
@@ -59,7 +59,8 @@ v0.49 进一步冻结设置“通用”、每个 Main Window Session 一次性�
 - 原型必须在现有 React、Radix 和 CSS Variables 技术栈中重建，不直接复制单文件
   HTML。
 - 原型出现的用户词汇必须映射到现有领域语言：产品界面使用“队员”“记忆”
-  “Agent 运行时”等已确认术语，不使用“队员”“长期记忆”“执行引擎”；领域代码
+  “Agent 运行时”等已确认术语；Member 的正式中文名只使用“队员”，不以“成员”或
+  “伙伴”代称，也不使用“长期记忆”“执行引擎”作为对应正式名称；领域代码
   继续使用 Camp、AgentProfile、Product Runtime 等稳定名称。
 - 与领域合同冲突的演示行为不进入产品。例如，用户点击原型中的“发送”不能绕过
   New Conversation Draft 与原子 Camp Creation。
@@ -202,12 +203,12 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 - Agent 使用 `camp.message.send`（CLI `rovai send`）提交的 A2A 正文是真正的公共
   CampMessage，按作者显示并进入公共时间线、公共 FTS、Shared Conversation 和有权历史。
 - 一条公共消息可以关联 `0..N` 个 Message Delivery。公共消息事实只创建一次；Delivery
-  负责收件人、队列、等待、目标 Run 和终态，不能被 Renderer 拆成第二条消息或第二套发送。
+  负责收件人、队列、等待、目标 AgentRun 和终态，不能被 Renderer 拆成第二条消息或第二套发送。
 - 消息 footer 可以显示“发送给 @队员名…”和 Delivery 状态；footer 只读取冻结的 recipient
   snapshot，不把展示顺序当作调度优先级。
 - Reply-to 只建立公共关系；回复 Agent-authored Public A2A Message 时 Core 可加入作者作为
   一个默认目标，回复用户或系统事件不新增 Delivery，也不扩展原消息其他收件人。
-- Execution Drawer 展示 Delivery/Run 的过程状态和证据摘要；公共正文仍在消息区直接可读，
+- 执行详情展示 Delivery/AgentRun 的过程状态和证据摘要；公共正文仍在消息区直接可读，
   Drawer、Delivery 或 AgentRun 不得冒充另一个发送者发言，也不创建 result route。
 - 公共正文按持久 sequence 排列；后台 Runtime 到达时间、Scheduler 顺序、canonical recipient
   顺序和 Renderer 选择都不能重排公共时间线。
@@ -223,7 +224,8 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
   identity、table 或 lifecycle。
 - 置顶后，目标从普通 Project/Camp 分组移到“置顶”，不在两个位置重复显示；取消
   置顶后按最新 Navigation Read Side 返回原分组。
-- 置顶 Project 显示完整 Project 分组及其 Camp 列表。
+- 置顶 Project 显示与普通 Project 相同的完整分组结构；其 Camp 列表同样先显示最近 5 条，
+  不因置顶而预取或直接展开全部记录。
 - 置顶区先排列 Camp、后排列 Project；每种类型内部按置顶时间正序排列。
 - 不增加置顶拖拽排序。取消后重新置顶等同于一次新置顶，排到该类型末尾。
 - 每次读取 Navigation 时清理无法解析的置顶记录：永久删除的 Camp 不再置顶；一个
@@ -258,19 +260,25 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 6. 底部只保留“设置”。
 
 - Camp 快速跳转只导航到按标题匹配的 Camp，不冒充消息全文检索。
-- 普通项目式分组（含 Quick Chat 投影）默认直接展示最近 5 个 Camp；“查看全部”按
-  现有 Navigation 排序加载剩余记录。每个分组的展开状态只控制 Camp children，不能
-  代替或推导当前项目。
+- 普通 Project、置顶 Project 与 Quick Chat 投影统一先展示 Navigation Snapshot 中最近 5 个
+  Camp。“查看更多”从 offset 5 开始按每次 10 条读取并追加，按 Camp ID 去重；读取失败保留当前
+  列表。已经读取的缓存跨项目折叠与置顶位置变化保留，“收起”只把可见数量恢复为 5，之后再次
+  “查看更多”优先恢复缓存，不重复请求。
 - Camp 行显示标题、运行/未读完成等权威 Navigation marker 和唯一三点菜单。菜单固定
   包含“置顶/取消置顶、重命名、删除”，删除前有分隔线；普通区与置顶区使用同一结构。
 - 可置顶 Project 显示文件夹、展示名、`＋` 和唯一三点菜单，菜单只包含“置顶项目/取消置顶
-  项目”。Renderer 维护一个纯本地持久“当前项目”：点击文件夹或名称只选择项目，点击独立
-  disclosure 只展开/收起，二者不得联动。快速对话同样可成为当前项目但不显示 Project 菜单。
+  项目”。Renderer 维护一个纯本地持久“当前项目”：点击项目目录整行先选择该项目，再切换 Camp
+  children 的展开状态；整行使用 `aria-expanded / aria-controls` 与打开/关闭文件夹图标，不再显示
+  独立 disclosure。三点菜单和 `＋` 是覆盖在右侧动作槽的兄弟按钮，不触发整行交互。快速对话同样
+  可成为当前项目但不显示 Project 菜单。
 - 当前项目文件夹使用稳定浅灰底；当前打开 Camp 继续使用更强的品牌选中态。点击 Project/快速
   对话后的 `＋` 只把对应项目作为本次创建目标；取消 Dialog 不改变当前项目，创建成功并进入
   Camp 后才由该 Camp 更新当前项目。
-- Project 标题不显示会话数量；全量读取入口使用不带数字的“查看全部”。Camp/Project
-  菜单触发器在 Hover、Focus-within、打开和触摸替代路径下可达。
+- Project 标题和分页操作不显示会话数量。只显示初始 5 条且仍有剩余内容时仅显示“查看更多”；
+  可见数量大于 5 且仍有剩余内容时同时显示“查看更多 / 收起”；全部可见时只显示“收起”；总数不
+  超过 5 时两者都不显示。Project 目录的三点菜单与 `＋` 默认同时隐藏，在整行 Hover 或键盘
+  `focus-visible` 时同时显示；鼠标点击目录后移出不能因残留焦点继续显示，触摸替代路径下保持可见。
+  Camp 菜单触发器沿用相同的可达性要求。
 - Sidebar 菜单操作失败保留当前行和焦点。不存在 archive、trash 或顶栏重复入口。
 - 删除侧栏 Core 健康摘要；Health Snapshot、探测、诊断页和导出能力继续保留，
   用户通过“设置 → 诊断”访问。
@@ -330,7 +338,7 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 - 每条用户和 Agent 正文支持浏览器原生文本选择；鼠标在正文上按下并拖动可选中
   任意片段，系统复制快捷键只复制当前选区。每条消息另提供键盘可达的整条复制
   操作，入口仅在消息表面悬停或聚焦时显示；复制使用当前显示名称，不暴露内部
-  handle、Inbox ID、Run ID 或路由标识。
+  handle、Inbox ID、AgentRun ID 或路由标识。
 - 日期边界使用横向分隔线。删除 Meridian 的点状竖向时间轨、附着节点及 EXEC
   菱形节点，不提供旧节点体系兼容样式。
 - Task 在创建时间位置投影唯一实时卡片；后续标题、负责人和状态变化只更新原卡，
@@ -346,14 +354,14 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 - Tool Call 的参数、精确范围、`cwd`、退出码、时长、输出和失败原因在数据存在时
   仍须结构化保留并可按需展开。轻量摘要不能以丢失证据为代价。
 - Tool Call 自身的失败属于该 Tool Call；Runtime 崩溃、执行准入拒绝、恢复不确定
-  等没有对应 Tool Call 的系统失败仍按其真实 Run/Pending Intent 状态进入活动、
+  等没有对应 Tool Call 的系统失败仍按其真实 AgentRun/Pending Intent 状态进入活动、
   审计或就地错误提示，不得为了视觉统一伪造成 Tool Call。
 - AgentRun 运行中只显示 Runtime 报告的公开叙述与动作；`reasoning`、`thought` 和思考摘要
   不进入 Renderer，即使 Runtime 主动提供也不展示。Core 可以继续按 ADR-0061 保存相应权威
   Evidence，但 Renderer 不提供正文或“查看完整思考摘要”入口，也不在 Runtime 没有报告时
   补造步骤。终态后折叠不改变持久证据或 Inspector 状态。
 - Task 卡只显示当前五态中文文字、标题和负责人，不显示描述、验收条件、关闭说明、审计、
-  百分比或关联 Run 状态；点击后读取 Inspector 中的当前 Task。阻塞、完成、取消、自动释放
+  百分比或关联 AgentRun 状态；点击后读取 Inspector 中的当前 Task。阻塞、完成、取消、自动释放
   及普通更新都只原地刷新，不创建额外 Task 节点、移动卡片或重排会话。
 - Approval 保留独立交互语义，但不混入消息区。所有 pending Approval 固定显示在
   Composer 正上方的非模态停靠式审批弹框（Approval Dock）；单项直接展示请求，多项
@@ -362,13 +370,13 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 - Renderer 只能呈现发起请求的 Agent Runtime 实际返回的选项、scope、lifetime、
   后果与阻塞影响，不建立假想的跨 Runtime 通用审批档位，也不得因视觉统一改写原生
   option identity。
-- Run Pulse 常驻显示活跃/等待/最近终态 Run 的轻量摘要和数量；点击 chip 只选择
-  Execution Drawer 的 selected Run，不自动滚动会话或抢焦点。
-- Execution Drawer 按需显示选中 Run 的 Delivery、ContextManifest、等待条件、终态和
+- 执行动态常驻显示活跃/等待/最近终态 AgentRun 的轻量摘要和数量；点击 chip 只选择
+  执行详情中的 AgentRun，不自动滚动会话或抢焦点。
+- 执行详情按需显示所选 AgentRun 的 Delivery、ContextManifest、等待条件、终态和
   Canonical Runtime Activity/Evidence 摘要。后台事件不得自动打开、切换或聚焦 Drawer；
-  用户已打开的终态 Run 保持 selected，直到主动关闭或切换。
+  用户已打开的终态 AgentRun 保持 selected，直到主动关闭或切换。
 - 终态过程仍可收进默认折叠入口，摘要格式为 `处理过程 · {本地化耗时}`；该入口和
-  Execution Drawer 只提供查看，不产生 Run 级取消协议。
+  执行详情只提供查看，不产生 AgentRun 级取消协议。
 - 不使用英文 `Worked for …`；Agent 最终回复位于折叠入口之外并保持直接可见。
 - [会话事件交互样例](examples/arctic-dawn-conversation-events.html)用于评审上述
   层级与展开行为；示例数据和某个 Runtime 的审批按钮不构成跨 Runtime 合同。
@@ -481,7 +489,7 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   对它们解析出的 `agentId` 取并集并去重，同一队员只被寻址和唤醒一次，不因
   正文中的重复或重叠创建多个直接 AgentRun。
 - 同一条消息中的全部唯一 Mention 收件人在一个 Core 事务中创建各自的 queued AgentRun，
-  Default Lead 不会吞掉或串行阻塞同消息里的其他 Mention；调度器并发执行各 Run 的启动前
+  Default Lead 不会吞掉或串行阻塞同消息里的其他 Mention；调度器并发执行各 AgentRun 的启动前
   检查。产品不承诺多个独立 Runtime 进程拥有完全相同的操作系统启动时间戳。
 - Member Mention 和 All Members Mention 是 Core-owned Camp Composer Draft 内容，不是
   Renderer-only DOM 装饰。切换 Camp 或重启应用后必须恢复同一身份和原子编辑结构；发送
@@ -535,10 +543,10 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   原结构，不新增页面、领域状态、Draft 或第二套发送入口。
 - 内容包含轻量 Arctic Dawn 星与地平线图形、`ARCTIC DAWN · NEW CAMP`、标题
   “开始这段协作”和简短说明。图形只使用现有 Token/SVG，不加载外部图片。
-- 上下文摘要从当前事实计算：Quick Chat/Project 展示名、Default Lead、在队的队员数和
+- 当前协作配置摘要从当前事实计算：Quick Chat/Project 展示名、Default Lead、在队的队员数和
   Agent 运行时就绪摘要。缺失、部分就绪或未就绪必须使用真实文案，不能补造 Ready。
 - 提供三个起步建议：“先了解项目 / 整理成任务 / 检查工作区”。点击只把对应示例
-  需求写入现有 Camp Composer 并聚焦，不自动发送、不改变寻址、不创建 Task 或 Run。
+  需求写入现有 Camp Composer 并聚焦，不自动发送、不改变寻址、不创建 Task 或 AgentRun。
 - 起步建议使用紧凑边界和单一表面；在窄窗口或 200% Zoom 下从三列变为单列，不能
   把 Composer 或 Inspector 推出视口。
 - Inspector 的空状态按各 Tab 说明尚无数据。Approval 文案必须说明请求会固定出现
@@ -551,18 +559,18 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 - 点击停止后 Renderer 立即以本地 Turn ID 进入“正在停止…”，只禁用重复停止，不
   全局锁定导航或其他 UI；收到 Core `agent_run.cancelled` 后立即刷新一次当前 Camp
   Snapshot，并以权威终态退出该本地状态。
-- 本地停止状态必须覆盖该 Turn 的全部非终态 AgentRun：消息区运行卡和 Execution Drawer
+- 本地停止状态必须覆盖该 Turn 的全部非终态 AgentRun：消息区运行卡和执行详情
   立即显示“正在停止…”，停止运行中动画和强调。草稿继续可编辑，但权威终态返回前
   不显示或触发下一轮发送。
 - Core 确认 CampTurn 终态取消后，消息区只投影一条独立的
   “你已在 {本地化耗时} 后停止”。耗时从 Turn 创建到取消请求，位置优先使用
   `camp_turn.cancel_requested` 的全局序列；它不是 CampMessage，也不进入 Agent 输入。
   多队员和 A2A 执行树仍只显示一条。队员消息标题不再长期附着“已停止”。
-- 取消 Turn 仍有未确认外部效果时，停止事件增加“结果待确认”及打开 Execution Drawer
-  的入口。Drawer 继续逐 Run 展示权威终态；UI 不声称外部效果已回滚。
+- 取消 Turn 仍有未确认外部效果时，停止事件增加“结果待确认”及打开执行详情
+  的入口。执行详情继续逐 AgentRun 展示权威终态；UI 不声称外部效果已回滚。
 - 发送不等待 Runtime Discovery 或深度检查。Renderer 先显示乐观用户消息，Core 原子
   保存消息和 queued AgentRun；调度前轻量确认失败时保留用户消息，并把 Agent 运行时修复
-  原因显示为 Run 失败或恢复入口。
+  原因显示为 AgentRun 失败或恢复入口。
 - Composer 随内容自动增高到有界最大值，超过后内部滚动；发送、停止、正在停止、
   解析中和不可提交状态保持相同布局，避免按钮跳动。
 - 不保留两套提交快捷键。可见快捷键提示只显示 `Enter`。
@@ -572,15 +580,15 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 - Inspector 使用白色 `--inspector-surface`，与会话区之间使用
   `--conversation-inspector-line` 强结构分隔；内部组件继续沿用既有表面与状态色。
 - Camp 右侧详情栏删除“活动”页，只保留四个手动激活的页签：
-  “任务 / 上下文 / 审批 / 审计”。
-- Run 动态、等待与终态只由 Execution Drawer 展示；“审计”显示不可混入聊天或普通活动
+  “任务 / 上下文投递 / 审批 / 审计”。
+- AgentRun 动态、等待与终态只由执行详情展示；“审计”显示不可混入聊天或普通活动
   的时间、Actor、动作、目标、结果和证据。
-- Execution Drawer 使用“运行中 / 等待审批 / 已完成 / 失败 / 已停止 / 恢复中”等本地化
+- 执行详情使用“运行中 / 等待审批 / 已完成 / 失败 / 已停止 / 恢复中”等本地化
   文字，不显示原型的 `DONE`；流式更新合并播报，不能通过 `aria-live` 逐字朗读。
 - “任务”列表使用 compact item 显示标题、状态、负责人、单行 preview 与验收条件数量；详情
-  显示完整 description、ordered Criteria、creator/source Run、version/timestamps、条件说明、
-  closure 与 audit cause。只读 Related execution 从 CampSnapshot 的 Run/Delivery 关系派生并
-  进入现有 Run 详情，不能成为 TaskRecord 或反向改变 Task。
+  显示完整 description、ordered Criteria、creator/source AgentRun、version/timestamps、条件说明、
+  closure 与 audit cause。只读 Related execution 从 CampSnapshot 的 AgentRun/Delivery 关系派生并
+  进入现有执行详情，不能成为 TaskRecord 或反向改变 Task。
 - Task editor 按表单 projected final state 动态要求 blocker/completion/cancel 字段；terminal
   Task 完全只读。Version conflict 刷新最新详情、保留未提交草稿，不自动 replay 旧 patch。
 - User/Default Lead 的“取消 Task”仍提交 versioned update，必须填写原因并明确“取消 Task 不会
@@ -588,8 +596,9 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 - “任务”“审批”分别投影当前 Task 与 Approval 权威状态；“审批”页与 Composer
   上方固定面板读取同一 pending 队列，不复制或重排决定。计数徽标只在数量大于 0
   时显示。
-- “上下文”必须来自当前 Camp 的生产 Read Side；原型中的 Project 名、Design
-  route 与约束文字只是演示数据，不得硬编码或当作用户内容。
+- “上下文投递”页同时展示当前协作配置和 AgentRun 的 ContextManifest 投递证据，且必须来自
+  当前 Camp 的生产 Read Side；原型中的 Project 名、Design route 与约束文字只是演示数据，
+  不得硬编码或当作用户内容。ContextManifest 不代表当前 Camp 的全部事实都已进入 Prompt。
 - “审计”按时间显示 Actor、动作、目标、结果和证据引用；普通叙述、A2A 正文和
   Tool 输出不能复制成审计聊天。
 - 切换页签不得改变 Camp、草稿、时间线滚动或运行状态；页签必须具备完整
@@ -598,8 +607,8 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   `1040–1179px` 时固定为 260px。用户可从 Camp 顶栏完整隐藏或恢复；隐藏后详情栏
   退出布局和无障碍树，不保留窄栏，也不变成 Drawer 或 Overlay。
 - Inspector 首次使用默认展开，后续在本机记住显示偏好；该偏好不写入 Core，不产生
-  Camp 事件或审计。Header 的 Run/审批状态摘要在隐藏时仍可用；Run 摘要打开或聚焦
-  Execution Drawer，Approval 摘要打开 Inspector 的“审批”页。
+  Camp 事件或审计。Header 的执行/审批状态摘要在隐藏时仍可用；执行摘要打开或聚焦
+  执行详情，Approval 摘要打开 Inspector 的“审批”页。
 - 详情栏不提供拖拽、双击或键盘调宽。统一侧栏仍固定 270px；响应式变化只作用于
   详情栏与中央内容的内部排版。
 
@@ -607,10 +616,10 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 
 - Header 左侧显示“Quick Chat/Project 展示名 › Camp 标题”，标题截断但完整值可访问；
   旁边使用“第 N 天”并由 Camp 创建时间纯函数派生。
-- Camp 顶栏右侧只承载 Run、待审批等状态摘要和 Inspector 显示/隐藏按钮，不渲染
+- Camp 顶栏右侧只承载执行、待审批等状态摘要和 Inspector 显示/隐藏按钮，不渲染
   “停止”按钮或 `•••` 操作菜单。
-- 没有 Active Run 或 pending Approval 时不渲染空徽标。Run 状态摘要打开或聚焦
-  Execution Drawer，Approval 摘要打开 Inspector 的“审批”页；两者都不能在 Header
+- 没有 Active AgentRun 或 pending Approval 时不渲染空徽标。执行状态摘要打开或聚焦
+  执行详情，Approval 摘要打开 Inspector 的“审批”页；两者都不能在 Header
   直接执行停止、审批、置顶、重命名或删除。
 - 停止入口只占用 Composer 的发送位置，调用当前 CampTurn 整棵 AgentRun/A2A
   执行树的停止命令。进入停止流程后立即显示“正在停止…”并防止重复请求；停止 ACK
@@ -713,7 +722,7 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   是唯一 blocker；存在时用中文提示用户先等待或停止运行。不存在时 preview 至少说明
   “将从 N 个 Camp 移除，并释放 M 个未完成 Task”，Core 再原子结束全部 Current
   CampMembership、释放 Task、收口 Default Lead 并标记 removed；UI 不要求逐个 Camp 离开。
-- 移除继续保留头像、Runtime 配置、Memory、历史 Camp 关系、terminal Task、Run 和身份；
+- 移除继续保留头像、Runtime 配置、Memory、历史 Camp 关系、terminal Task、AgentRun 和身份；
   被释放的非终态 Task 通过 audit 说明 membership ending，不伪装成 Agent 主动修改。
 - 历史消息、Task 和 AgentRun 继续显示 removed 队员原姓名、角色与头像，但身份位
   不可再打开详情，也不进入 `@`、Lead、Task 或新 Camp 候选。
@@ -724,36 +733,37 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 
 - 记忆是统一侧栏一级页面，右侧第一行保留纯空白的 50px 拖拽区，页面内容
   从第二行开始。Header 显示“记忆”和现有说明
-  “所有 Active Memory 都立即生效；形成来源仅用于说明和审计。”，右侧
+  “所有正在沿用的记忆都立即生效；形成来源仅用于说明和审计。”，右侧
   “导出…”与“＋ 新增记忆”；不再显示“可回看 · 可修订 · 可遗忘”副标题。
-- 页面依次为：四项紧凑摘要条、伙伴写入策略、pending Hearth Proposal 提示、
+- 页面依次为：四项紧凑摘要条、队员写入策略、待确认的共同记忆提案提示、
   Scope Tabs、治理过滤与搜索、列表/详情 Workbench。
-- Scope 固定为“共同约定 / 伙伴经验 / 协作默契”，分别映射
-  `hearth / companion / relationship`；首次进入默认共同约定。
-- 治理过滤固定为“全部 / 伙伴来源 / 建议复核 / 已停止沿用”，与 Scope 正交：
-  “伙伴来源”和“建议复核”可以同时成立。
-- Active Memory、Pending Hearth Memory Proposal 与 Review Due 是三个不同对象：
-  Active 已生效；Proposal 接受前未生效；Review Due 只是提醒。UI 禁止出现
+- Scope 固定为“共同记忆 / 队员记忆 / 队员间记忆”，分别映射
+  `hearth / companion / relationship`；首次进入默认共同记忆。Scope 表示所有权和适用范围，
+  与 Kind“偏好 / 约定 / 经验”正交。
+- 治理过滤固定为“全部 / 队员形成 / 建议复核 / 已停止沿用”，与 Scope 正交：
+  “队员形成”和“建议复核”可以同时成立。
+- 正在沿用的记忆、待确认的共同记忆提案与 Review Due 是三个不同对象：
+  正在沿用的记忆已生效；提案接受前未生效；Review Due 只是提醒。UI 禁止出现
   `provisional`、Authority、“标记为已确认”或非 Hearth 的“等待确认”。
 
 ### 摘要、策略与 Proposal
 
 - 四项摘要共享一个表面和内部竖分隔，不做统计卡墙：
-  “正在沿用 / 待确认共同约定提议 / 伙伴来源 / 建议复核”。
-- 应用级策略标题固定为“允许伙伴写入记忆”，正文固定为：
+  “正在沿用 / 共同记忆提案 / 队员形成 / 建议复核”。
+- 应用级策略标题固定为“允许队员写入记忆”，正文固定为：
 
-  > 开启后，伙伴可以直接新增或修订自己的伙伴经验与当前协作默契，并提交等待你
-  > 确认的共同约定提议。关闭只阻止之后的伙伴写入，不改变已有记忆和提议。
+  > 开启后，队员可以直接新增或修订与你之间的记忆和队员间记忆，并提交等待你
+  > 确认的共同记忆提案。关闭只阻止之后的队员写入，不改变已有记忆和提案。
 
 - 策略 Switch 提交期间禁用；失败恢复服务端值。关闭不能 Retire、Forget 或拒绝
   任何已有对象。
-- 只有存在 pending Hearth Proposal 时显示 attention 提示“N 条共同约定提议等待
-  确认”。“查看提议”打开右侧 Radix Drawer；Drawer 常规 440px，显示完整候选、
+- 只有存在待确认的共同记忆提案时显示 attention 提示“N 条共同记忆提案等待
+  确认”。“查看提案”打开右侧 Radix Drawer；Drawer 常规 440px，显示完整候选、
   Kind、Retrieval Keys、提议队员、来源和 stale 原因。
 - 每条 Proposal 的操作顺序为“拒绝 / 编辑后接受 / 接受”。stale 禁用两个接受
   操作但允许拒绝；批量只允许拒绝，禁止批量接受。处理后聚焦下一条，最后一条显示
   完成空状态。
-- Companion/Relationship 的直接伙伴写入已经生效，不进入 Proposal Drawer；它们
+- Companion/Relationship 的直接队员写入已经生效，不进入 Proposal Drawer；它们
   使用非阻塞通知和“查看”深链，通知不回显完整正文。
 
 ### Scope、搜索与 Workbench
@@ -769,8 +779,8 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   时间、创建来源和条件状态。状态不能只依赖颜色。
 - Companion 显示队员头像、姓名与角色；Relationship 显示双方及
   `A ↔ B · 双方适用` 或 `A → B · 仅对该方向适用`，箭头必须有文字解释。
-- 来源固定为“用户创建 / 伙伴形成 / 伙伴提议 · 你已采纳”，并另行显示最近
-  Revision Actor。来源不改变 Active Memory 的效力、优先级或权限。
+- 来源固定为“用户创建 / 队员形成 / 队员提议 · 你已采纳”，并另行显示最近
+  Revision Actor。来源不改变正在沿用的记忆的效力、优先级或权限。
 - 详情首屏显示 Scope、Kind、完整正文、归属/方向、Lifecycle、复核计划、当前
   Revision、版本、创建/更新时间、形成来源、最近 Revision Actor、可用来源与
   Projection 问题。
@@ -809,7 +819,7 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   App Shell 右侧第一行叠加一条与页面表面同色的 50px 隐形拖拽栏，设置内容
   继续跨越两行，不因该拖拽栏下移。
 - 设置侧栏不显示健康 footer；诊断仍是设置分类并读取原有 Health Snapshot。
-- 设置页不增加“上下文”或“记忆”分区；公共消息摘要模型不再有任何配置表面，记忆仍是
+- 设置页不增加“上下文投递”或“记忆”分区；公共消息摘要模型不再有任何配置表面，记忆仍是
   一级页面。
 
 ### 通用
@@ -852,7 +862,7 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 - “窗口”说明固定为“Rovai-ai 会自动保存窗口大小和位置，并确保下次打开时窗口仍位于可见的
   显示器区域。”，下方只提供“重置窗口大小与位置”。不增加“记住窗口位置”Switch。
 - Reset 恢复 `1440×920` 默认尺寸（受当前 display work area 约束）并在当前显示器居中；它不
-  改变页面、Camp、Member、Tab、Draft、Approval、Run 或焦点。全屏时按钮 disabled，显示
+  改变页面、Camp、Member、Tab、Draft、Approval、AgentRun 或焦点。全屏时按钮 disabled，显示
   “请先退出全屏，再重置窗口大小与位置”，且退出全屏后不自动执行。
 - General 的 Login Item、Startup Preference 与 Window Reset 使用独立 Loading、Submitting、
   Error 和 Recovery；`requires-approval`、`not-found` 与写失败必须是持久 inline status，不能
@@ -880,7 +890,7 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   同名 Imported 更新创建不可变 Revision，内置同名导入拒绝。导入不执行内容，启用、
   内置来源和 `allowed-tools` 都不能授予额外权限。
 - Settings 不展示 Shadowed、Duplicate visible、Stale 或项目级投递清单。这些实际
-  AgentRun 事实只在 Camp Context Inspector 的“Skill 投递”中显示，并明确不声称
+  AgentRun 事实只在 Camp Inspector 的“上下文投递”页中显示，并明确不声称
   Runtime 或模型已经读取正文。
 
 ### MCP
@@ -902,7 +912,7 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   密钥值默认遮罩，不进入普通错误、日志或诊断。
 - malformed 外部文件必须保留原文并阻止覆盖，提供“重新读取 / 打开文件”；权限
   不安全时提供显式修复。不能用空配置静默覆盖。
-- 启停、编辑、删除只影响后续 AgentRun；正在执行与恢复中的 Run 保持冻结 Exposure
+- 启停、编辑、删除只影响后续 AgentRun；正在执行与恢复中的 AgentRun 保持冻结 Exposure
   Snapshot。普通 UI 不声称 Rovai-ai 审批了 Runtime 原生 MCP 副作用。
 
 ### Agent 运行时
@@ -972,7 +982,7 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 - Footer 摘要只显示 Quick Chat/目录展示名、队员数与 Lead，右侧
   “取消 / 创建”。提交期间锁定会改变 Draft 的控件并防止重复创建。
 - Core 原子接受后才关闭 Dialog、刷新 Navigation、进入耐久 Camp 并聚焦 Composer；
-  此时没有消息、Run 或预建 Conversation 也合法。
+  此时没有消息、AgentRun 或预建 Conversation 也合法。
 - 失败保持 Dialog、目录、队员、Lead、名称、滚动和焦点。Core 刷新候选后不得静默
   删除队员、替换 Lead 或回退 Quick Chat。
 - Renderer 不再展示“协作方式”“并肩协作”“领队统筹”或“暂未开放”；创建请求继续固定提交
@@ -989,7 +999,7 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 - 读取失败保留页面 Header 与可恢复导航；局部写失败保留选择、草稿和焦点，不把
   整页替换为通用错误。
 - Toast 只用于已完成的非阻塞反馈，`aria-live="polite"`；错误、审批或人物信息查看
-  不能只用短暂 Toast。流式 Run 不逐 token 播报。
+  不能只用短暂 Toast。流式 AgentRun 不逐 token 播报。
 - `recovering` 和 Unsettled External Effect 使用明确对象、最后已知状态、不确定性
   和下一步；不得声称停止等于外部副作用已回滚。
 
@@ -1035,8 +1045,8 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   CSS/class/test fixture。
 - v0.44 删除 `MemberAdvancedSettings`、`SummaryModelSettings`、“高级设置”展开入口、
   “对话压缩模型”文案及对应 state/import/CSS/test；不得删除 Member Runtime Parameters。
-- v0.45 删除 Inspector “活动”页及其专属 route/state/IPC/test，把 Run 过程详情迁入
-  Execution Drawer；Run Pulse 只保留摘要和选择，不新增 Run 级 Stop。CampTurn Stop 只
+- v0.45 删除 Inspector “活动”页及其专属 route/state/IPC/test，把 AgentRun 过程详情迁入
+  执行详情；执行动态只保留摘要和选择，不新增 AgentRun 级 Stop。CampTurn Stop 只
   保留 Composer 发送位置，Approval Dock 继续位于 Composer 正上方。具体边界见
   [Run Process Detail Surface v1](../contracts/run-process-detail-surface-v1.md)。Message
   Delivery、Public A2A 和 Context Profile 的领域语义由对应 ADR/Contract 约束，不能在

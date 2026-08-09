@@ -9,8 +9,8 @@ last_updated: 2026-08-08
 
 # Durable Task v2 Contract
 
-本合同冻结 v0.47 起 Task 的字段、状态、授权、可见性、事务、列表投影、成员离 Camp
-收口和 Task-linked responsibility admission。设计理由见
+本合同冻结 v0.47 起 Task 的字段、状态、授权、可见性、事务、列表投影、CampMember 关系结束与收口，
+以及 Task-linked responsibility admission。设计理由见
 [ADR-0136](../adr/0136-durable-task-v2-responsibility-and-coordination-authority.md)与
 [ADR-0137](../adr/0137-one-time-task-linked-responsibility-admission.md)；Agent CLI 的 wire、
 stdout 和版本矩阵由 [Built-in Tool Transport v4](builtin-tool-transport-v4.md)负责。
@@ -108,7 +108,7 @@ Create 不接受 `status`，也不接受 `assigneeAgentId: null`。初始状态�
 `version = 1`，所有条件说明与 Closure Metadata 为 `null`。
 
 User 与当前 Camp 中的 eligible Agent 可以创建 Task。System actor 不得创建业务 Task。固定
-Built-in operation 的发布不受成员级 Task Capability gate 控制；Core 仍必须校验认证 Run、
+Built-in operation 的发布不受 per-Member Task Capability gate 控制；Core 仍必须校验认证 AgentRun、
 当前 Camp、Current CampMembership 和其他独立调用资格。
 
 Create 事务同时实施两个容量边界：
@@ -314,7 +314,7 @@ state：即使调用者没有直接传 terminal `status`，任何字段组合都
 | 只有 creator visibility | `[]` |
 | 任意 terminal Task | `[]` |
 
-Claim 仍通过 `team.update_task` 完成；不存在 `claim:<agentId>` 动态 action，也不恢复成员级 Task
+Claim 仍通过 `team.update_task` 完成；不存在 `claim:<agentId>` 动态 action，也不恢复 per-Member Task
 Capability gate。
 
 ## 10. Update 授权与校验顺序
@@ -450,7 +450,7 @@ filter，只读取 preview 所需字符，以 `limit + 1` 判断下一页，并�
 Member Presence `present → away` 不结束 CampMembership，也不释放 Task；负责人仍承担责任，
 只是当前不是 Executable Assignee。
 
-当一个 CampMembership `active → left` 时，同一 membership mutation 事务必须释放该成员在
+当一个 CampMembership `active → left` 时，同一 membership mutation 事务必须释放该队员在
 该 Camp 负责的全部非终态 Task：
 
 | 原状态 | 新状态 |

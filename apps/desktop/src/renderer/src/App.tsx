@@ -1364,7 +1364,7 @@ export function App(): React.JSX.Element {
           )}
           {memoryAutoNotice.count > 0 && (
             <div className="memory-proposal-notice memory-auto-applied-notice" role="status" aria-live="polite">
-              <div><strong>已自动形成 {memoryAutoNotice.count} 条{memoryAutoNotice.count === 1 ? memoryAutoNotice.scope === 'relationship' ? '协作默契' : memoryAutoNotice.scope === 'companion' ? '伙伴经验' : '记忆' : '记忆'}</strong><span>已立即用于后续协作，你可以随时查看、修订、停止沿用或遗忘。</span></div>
+              <div><strong>已自动形成 {memoryAutoNotice.count} 条{memoryAutoNotice.count === 1 ? memoryAutoNotice.scope === 'relationship' ? '队员间记忆' : memoryAutoNotice.scope === 'companion' ? '队员记忆' : '共同记忆' : '记忆'}</strong><span>已立即用于后续协作，你可以随时查看、修订、停止沿用或遗忘。</span></div>
               <div><button className="quiet-button compact" type="button" onClick={openAutomaticMemory}>查看</button><button className="icon-button" type="button" aria-label="关闭自动形成提示" onClick={() => setMemoryAutoNotice({ count: 0, memoryId: null, scope: null })}>×</button></div>
             </div>
           )}

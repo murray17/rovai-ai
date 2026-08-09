@@ -11,7 +11,8 @@ last_updated: 2026-08-09
 > 当前状态：官方双人追问 Skill 已完成生产源码与定向验收；通用与启动设置已完成生产实现、
 > 自动回归、macOS 打包以及主窗口会话实机验收。已安装 App 的真实登录项开关、系统授权态、
 > 外接显示器和完整负向人工矩阵仍待验收，因此本计划保持 `in_progress`。Desktop Shell 范围不修改
-> Rust Core；Skill 范围只扩展 bundled manifest，不修改 SQLite schema。
+> Rust Core；Skill 范围只扩展 bundled manifest，不修改 SQLite schema。本版本另行修复既有
+> Data Contract 启动兼容标记漂移，但不新增 Migration 或改变 reset 边界。
 
 ## Checkpoint 0：设计与版本切换
 
@@ -38,9 +39,11 @@ last_updated: 2026-08-09
 - [x] `cargo test -p rovai-core skill::tests` 6/6，通过 `pnpm docs:check`、两个脚本语法检查、
   `cargo fmt --all -- --check` 与 `git diff --check`；
 - [x] `pnpm smoke:skills` 通过四个官方默认项断言和 Codex native Skill discovery；
-- [ ] 同一 smoke 的 Core restart 收口被既有 Data Contract 漂移阻塞：启动兼容常量仍要求
-  `v0.47 / schema 25`，Migration 66 已写入 `v0.48 / schema 26`，第二次启动执行 clean reset 后临时
-  Imported Skill 消失。本 Skill 变更不扩大范围修订全局 reset 边界。
+- [x] 修复既有 Data Contract 启动兼容标记漂移：当前常量与 Migration 66 的
+  `v0.48 / schema 26` 对齐，仍拒绝旧 `v0.47 / schema 25`；定向 Core test、无 Runtime 的
+  Skill import/restart smoke 与 packaged Memory restart persistence 验收均通过。
+- [x] Skill Projection 测试夹具在四个官方 Skill 下按稳定名称选择
+  `rovai-memory-stewardship`，不再依赖列表首项；完整 `rovai-core` 测试通过。
 
 ## Checkpoint 1：Shell 偏好模型与原子文件
 
@@ -109,8 +112,10 @@ last_updated: 2026-08-09
   不删 ID、不换 Lead、不关闭已开启 Switch；重新归队仍须显式保存，Runtime readiness 不参与；
 - [x] 一键创建默认关闭，每次开启都使用非 danger 明确确认 Dialog；`?` 支持 click/focus/Escape，
   开启后持续显示有效摘要或 attention 回退说明；
-- [x] Renderer 持久当前项目；Project/Quick Chat/Camp 点击更新，缺失路径回退 Quick Chat；文件夹选择、
-  disclosure 和 `＋` 为独立控件，取消创建不改当前项目；
+- [x] Renderer 持久当前项目；Project/Quick Chat/Camp 点击更新，缺失路径回退 Quick Chat；项目目录
+  整行依次选择并切换展开，三点菜单和 `＋` 为独立兄弟控件，取消创建不改当前项目；
+- [x] 普通 Project、置顶 Project 与 Quick Chat 统一按 canonical group key 保存分页；初始 5 条、
+  每次“查看更多”读取 10 条，“收起”、目录折叠和置顶位置变化均保留已读缓存；
 - [x] 左上入口与两个文件夹 `＋` 按开关统一执行 Dialog 或直接 `camps.create`，失败/失效保留目标项目
   回退 Dialog；创建请求继续固定 `collaborationMode: peer`；
 - [x] 创建 Dialog 删除协作方式区、禁用项与 Footer 摘要，说明改为“确定这段对话的工作环境与队员。”；
@@ -147,7 +152,7 @@ last_updated: 2026-08-09
 - [x] fullscreen 时 Renderer 禁用并解释，Main 在竞态调用中仍返回 `performed=false/fullscreen`，
   不登记退出全屏后的延迟 reset；
 - [x] reset 不触发 Router/React reload，不改变当前页面、Camp、Member、Tab、Settings、Draft、
-  Approval、Run、滚动或焦点；
+  Approval、AgentRun、滚动或焦点；
 - [x] 几何测试覆盖负坐标显示器、左右/上下多屏、外接屏移除、超大/损坏 bounds、display work area、
   当前屏居中和 fullscreen no-op。
 
@@ -175,7 +180,7 @@ last_updated: 2026-08-09
 - [ ] 连接外接显示器保存窗口后断开，证明下一窗口完整可见；验证 reset 默认尺寸、当前屏居中和
   fullscreen no-op；
 - [ ] 对登录项、启动偏好、最后设置分类与窗口 reset 前后采集 Core 业务表/event/audit 负向证据，
-  证明没有新增 Camp、Task、Run、Native Session、Approval 或 audit 事实；
+  证明没有新增 Camp、Task、AgentRun、Native Session、Approval 或 audit 事实；
 - [ ] 将真实命令、通过状态、macOS 版本、App 路径、登录项系统状态和截图路径回填本计划后，才能将
   `implementation_status` 与本计划 `status` 标记为 complete。
 

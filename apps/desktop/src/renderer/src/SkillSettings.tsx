@@ -346,7 +346,7 @@ function SkillCard({
           <SkillMoreMenu skill={skill} disabled={busy !== null || deleting} onDelete={onDelete} />
         </div>
       </header>
-      {deleting && <span className="skill-deleting-note">等待现有 AgentRun 释放后删除</span>}
+      {deleting && <span className="skill-deleting-note">等待现有执行释放后删除</span>}
       <div className="skill-groups">
         <div className="skill-groups-summary">
           <span>当前生效组</span>
@@ -528,7 +528,7 @@ function ConfirmationDialog({ confirmation, busy, onClose, onConfirm }: {
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content camp-action-dialog">
           <Dialog.Title>{deleting ? '删除导入的 Skill？' : '更新现有 Skill？'}</Dialog.Title>
-          <Dialog.Description>{deleting ? `“${confirmation?.kind === 'delete' ? confirmation.skill.name : ''}”会停止新投递，并在现有 AgentRun 释放后删除受管内容；不会删除 Runtime 原生的同名 Skill。` : `“${confirmation?.kind === 'update' ? confirmation.candidate.name : ''}”将创建新的不可变 Revision；已有生效组会保留，活跃 AgentRun 不会切换版本。`}</Dialog.Description>
+          <Dialog.Description>{deleting ? `“${confirmation?.kind === 'delete' ? confirmation.skill.name : ''}”会停止新投递，并在现有执行释放后删除受管内容；不会删除 Runtime 原生的同名 Skill。` : `“${confirmation?.kind === 'update' ? confirmation.candidate.name : ''}”将创建新的不可变 Revision；已有生效组会保留，正在进行的执行不会切换版本。`}</Dialog.Description>
           <div className="dialog-actions">
             <Dialog.Close className="quiet-button" disabled={busy !== null}>取消</Dialog.Close>
             <button className={deleting ? 'danger-button' : 'primary-button'} type="button" onClick={onConfirm} disabled={busy !== null}>{busy?.startsWith(deleting ? 'delete-' : 'import-') ? deleting ? '正在删除…' : '正在更新…' : deleting ? '确认删除' : '确认更新'}</button>

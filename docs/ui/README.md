@@ -59,9 +59,9 @@ v0.44 删除公共消息摘要系统后，队员详情同时删除 `MemberAdvanc
 Member Runtime Parameters 及其模型、推理强度、权限与 sandbox 配置继续保留；实施状态按
 [v0.44 实施计划](../versions/v0.44/implementation-plan.md)与代码证据判断。
 
-v0.45 采用 Scheme C 会话区改版：Run Pulse 常驻提供过程摘要，Execution Drawer 按需成为
-唯一的 Run 过程详情面；Inspector 删除“活动”页，只保留“任务 / 上下文 / 审批 / 审计”。
-Drawer 不提供 Run 级停止，活跃 CampTurn 的唯一 Stop 仍占用 Composer 发送位置并 fence
+v0.45 采用 Scheme C 会话区改版：执行动态常驻提供过程摘要，执行详情按需成为
+唯一的 AgentRun 过程详情面；Inspector 删除“活动”页，只保留“任务 / 上下文投递 / 审批 / 审计”。
+执行详情不提供 AgentRun 级停止，活跃 CampTurn 的唯一 Stop 仍占用 Composer 发送位置并 fence
 整棵执行树。Approval Dock 继续固定在 Composer 正上方，空间不足时 Drawer 收缩而不遮挡
 Approval。该范围只吸收外部 HTML 的会话区关键交互，现有 Arctic Dawn App Shell、Token、
 导航、Composer、Approval、断点和无障碍合同优先；实现状态见[v0.45 实施计划](../versions/v0.45/implementation-plan.md)。
@@ -69,7 +69,7 @@ Approval。该范围只吸收外部 HTML 的会话区关键交互，现有 Arcti
 
 v0.47 保留 v0.38 的创建位置唯一实时 Task 卡，并把它升级为五态；会话卡继续只显示状态、
 标题和负责人。Inspector list 负责 compact 发现，detail 负责完整责任/审计并只读派生 Related
-execution，现有 Run UI 继续拥有执行事实。编辑器按 projected final state 展示条件字段，
+execution，现有 AgentRun UI 继续拥有执行事实。编辑器按 projected final state 展示条件字段，
 terminal Task 只读，version conflict 保留草稿且不自动 replay。永久移除队员使用中文 preview，
 在无非终态 AgentRun 时由 Core 原子结束全部 Current CampMembership 并释放未完成 Task。
 完整合同见[v0.47 生产设计](../versions/v0.47/production-design.md)；生产实现与验收已经完成，状态见
@@ -132,7 +132,7 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
 - 普通侧栏显示“置顶 / 项目”；Quick Chat 只在 Renderer 中作为项目列表末尾的
   文件夹式投影，底层继续是独立 `quick_chat`。侧栏品牌字标为 `Rovai AI`，无副标题。
 - Camp 与可置顶 Project 只通过三点菜单置顶或取消置顶；Camp 菜单同时承载重命名和
-  删除。Project 标题与“查看全部”不显示会话数量，快速对话不显示 Project 菜单。
+  删除。Project 标题与“查看更多 / 收起”不显示会话数量，快速对话不显示 Project 菜单。
 - 设置分类覆盖同一 270px 侧栏槽位，固定顺序为“通用 / Skill / MCP / Agent 运行时 / 外观 /
   通知 / 诊断”。返回 App 后恢复原页面；设置分类跨 Main Window Session 记住最后选择，
   全新安装默认 General。七个设置分类统一使用无外框、带底部分隔线的共享页头；普通侧栏
@@ -145,25 +145,25 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   在编辑时是不可拆分的原子单元；Composer 与发送后的会话历史均使用默认无底色的
   飞书式蓝色行内文字。点击或键盘激活当前队员的 Mention 在原位置打开布局 2 人物信息卡，
   不显示全局角色 Toast，也不导航到队员页。
-- 空 Camp 使用欢迎图形、真实上下文摘要和三个只填充 Composer 的起步建议，不再显示
+- 空 Camp 使用欢迎图形、真实协作配置摘要和三个只填充 Composer 的起步建议，不再显示
   单行空占位。
-- Camp 主阅读流左对齐并按权威顺序阅读。Run Pulse 只显示过程摘要；Execution Drawer
-  按需展示选中 Run 的过程证据、Delivery 状态和 Context 摘要，后台事件不得自动打开、切换
-  或抢焦点。终态 Run 保持选中直到用户关闭或切换。
+- Camp 主阅读流左对齐并按权威顺序阅读。执行动态只显示过程摘要；执行详情
+  按需展示所选 AgentRun 的过程证据、Delivery 状态和 Context 摘要，后台事件不得自动打开、切换
+  或抢焦点。终态 AgentRun 保持选中直到用户关闭或切换。
 - 终态取消以每个 CampTurn 一条“你已在 {耗时} 后停止”进入会话时间线，不再永久
   挂在队员消息标题；未确认外部效果从该事件进入 Inspector。
 - 用户、队员和已交付 A2A 消息的正文支持鼠标拖选和系统复制快捷键；用户自己的
   纯文本消息不得拦截原生文本选择。整条消息的复制入口仍位于正文下方，仅在悬停或
   键盘聚焦正文区域时显示；消息轨道与 Composer 在 Inspector 展开或隐藏时始终同宽、同轴。
 - 命令、文件操作及其失败是处理过程内可展开的 Tool Call；每个 Task 在创建位置只投影
-  一张读取当前五态文字、标题和负责人的实时卡片。Inspector list/detail 与现有 Run UI
+  一张读取当前五态文字、标题和负责人的实时卡片。Inspector list/detail 与现有 AgentRun UI
   分别承担发现、完整责任审计和执行事实，不能合并进卡片。
 - Approval 不进入消息区。所有 pending 请求进入 Composer 正上方的非模态停靠式审批
   弹框，多项聚合显示“N 项待审批”，并保留各 Runtime 的原生选项、范围和决定身份。
 - Approval Dock 始终位于 Composer 正上方；Drawer 空间不足时退化为摘要/收起态，不能遮挡
   Dock、Composer 或唯一的 CampTurn Stop。
-- Camp Header 右侧只有 Run/审批状态摘要，没有“停止”或 `•••`。停止只占用 Composer
-  发送位；Run Pulse 与 Execution Drawer 只读过程详情，另有唯一 Inspector 显示/隐藏按钮。
+- Camp Header 右侧只有执行/审批状态摘要，没有“停止”或 `•••`。停止只占用 Composer
+  发送位；执行动态与执行详情只读过程详情，另有唯一 Inspector 显示/隐藏按钮。
   状态摘要可恢复 Inspector 并打开对应页签；置顶、重命名和删除只从侧栏 Camp 行进入。
 - 队员页采用半身 portrait + 独立圆形 icon 的双 rendition 身份设计；编辑身份支持
   圆形取景拖拽、缩放、键盘微调与实际尺寸预览。
@@ -189,12 +189,13 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
 2. **语义分离。** 品牌色、队员身份色和系统状态色不能互相替代。
 3. **状态不只靠颜色。** 必须结合文字、图标、形状或稳定位置。
 4. **不做卡片墙。** 核心工作区优先使用单一表面、分隔、列表行和选择态。
-5. **主题不进领域。** Theme 切换不得产生 Camp 事件、消息、Run 或审计。
+5. **主题不进领域。** Theme 切换不得产生 Camp 事件、消息、AgentRun 或审计。
 6. **身份图像是窄例外。** 头像只进入身份表面，不进入证据、审批、审计、错误或背景。
 7. **安全 Markdown。** Agent 公开正文使用经过清洗的 GFM；用户正文保持精确纯文本；
    Tool 输出使用结构化证据组件。
-8. **产品词汇稳定。** 普通 UI 使用“队员”“记忆”“Agent 运行时”“快速对话”，不使用
-   “队员”“长期记忆”“执行引擎”，也不泄漏 handle、Installation ID、裸 Runtime
+8. **产品词汇稳定。** 普通 UI 使用“队员”“记忆”“Agent 运行时”“快速对话”等已确认术语；
+   Member 的正式中文名只使用“队员”，不以“成员”或“伙伴”代称，也不使用“长期记忆”“执行引擎”
+   作为对应正式名称。界面不泄漏 handle、Installation ID、裸 Runtime
    或内部 binding。
 9. **没有假能力。** Runtime 未报告的进展、Approval 选项、MCP 控制或 Skill 加载不能
    由 Renderer 补造。
@@ -252,9 +253,9 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   Runtime Smoke 限制单独记录在版本证据中。
 - [x] v0.28 全局通知入口、持久抽屉、未读徽标、浮层、设置、Focus Return 与
   reduced-motion 已通过 Core、Renderer 和隔离打包 App 验收。
-- [x] v0.45 Run Pulse、Execution Drawer、Inspector Activity 页删除、Approval layering 与
+- [x] v0.45 执行动态、执行详情、Inspector Activity 页删除、Approval layering 与
   CampTurn Stop 的生产实现和打包 App 验收。
 - [x] v0.47 五态实时 Task 卡、compact list、完整 detail/Related execution、projected-state
-  Editor、冲突草稿恢复、terminal read-only 与中文成员删除确认的生产实现和打包 App 验收。
+  Editor、冲突草稿恢复、terminal read-only 与中文队员删除确认的生产实现和打包 App 验收。
 - [ ] v0.49 General 页面、每窗口一次启动恢复、macOS 登录项四态、窗口可见性/reset、无领域事件
   负向证明与 packaged App 验收。

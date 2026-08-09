@@ -428,7 +428,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
                 />
               </div>
               <div id="member-runtime-panel" role="tabpanel" aria-labelledby="member-runtime-tab" hidden={activeTab !== 'runtime'}>
-                <p className="member-runtime-intro">为这位队员设置后续 Run 使用的 Agent 运行时、模型和该运行时提供的权限选项。保存后仅影响之后创建的 Run。</p>
+                <p className="member-runtime-intro">为这位队员设置后续执行使用的 Agent 运行时、模型和该运行时提供的权限选项。保存后仅影响之后开始的新执行。</p>
                 <MemberRuntimeForm
                   ref={runtimeFormRef}
                   agent={selectedAgent}
@@ -743,7 +743,7 @@ function MemberIdentitySummary({ agent, busy, onEditAvatar }: {
           </button>
         </div>
       </div>
-      {agent.presence === 'away' && <div className="member-status-note" role="status">队员仍属于已有 Camp；已有 Run 不会中断，但不会再启动新的 Run。</div>}
+      {agent.presence === 'away' && <div className="member-status-note" role="status">队员仍属于已有 Camp；已有执行不会中断，但不会再启动新的执行。</div>}
     </section>
   )
 }
@@ -1310,7 +1310,7 @@ function MemberAvatarDialog({ open, agent, busy, returnFocusRef, onOpenChange, o
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content member-avatar-dialog" aria-describedby="member-avatar-dialog-description" onCloseAutoFocus={(event) => { event.preventDefault(); returnFocusRef.current?.focus() }}>
           <div className="dialog-heading"><div><Dialog.Title>更换角色图片</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭角色图片编辑" disabled={isBusy}>×</Dialog.Close></div>
-          <Dialog.Description id="member-avatar-dialog-description">角色图片独立保存，不会修改身份、运行时、权限或伙伴记忆。</Dialog.Description>
+          <Dialog.Description id="member-avatar-dialog-description">角色图片独立保存，不会修改身份、运行时、权限或队员记忆。</Dialog.Description>
           <form onSubmit={(event) => void submit(event)}>
             <section className="member-avatar-editor" aria-label="角色图片">
               <div className="member-avatar-editor-heading"><div><strong>当前图片</strong><span>可裁剪自定义图片，或选择内置队员外观</span></div>{(avatarRef || avatarSource) && <button className="quiet-button" type="button" disabled={isBusy} onClick={() => { setAvatarRef(null); setAvatarSource(null); setAvatarError(null) }}>移除</button>}</div>

@@ -343,7 +343,7 @@ function renderReport(summary) {
 - 协作客观检查通过：**${summary.qualitySignals.collaborationAuditPasses}/${summary.score.validTrials}**，indeterminate：**${summary.qualitySignals.collaborationAuditIndeterminate}**；同队员单槽：**${summary.qualitySignals.singleSlotPasses}/${summary.score.validTrials}**；功能 Verifier：**${summary.qualitySignals.functionalVerificationPasses}/${summary.score.validTrials}**；变更边界：**${summary.qualitySignals.boundaryPasses}/${summary.score.validTrials}**。
 - ${summary.qualitySignals.pendingWhileBusyObservedTrials} 个 Trial 的权威快照直接捕获到“接收 Conversation 忙时 Input 保持 pending”，随后才物化为 recipient Run；其他 Trial 未形成可观察等待窗口。
 - 边界失败中有 ${summary.qualitySignals.modeOnlyBoundaryFailureTrials} 次仅改变文件 mode、内容摘要未变；这类结果仍按密封规则计 FAIL，但应作为下一版 fixture/harness 修正项。
-- 共观察到 ${summary.collaboration.observedAgentRuns} 个 Agent Run、${summary.collaboration.observedMemberCalls} 条 Member Call 和 ${summary.collaboration.completedTasks} 个 completed Task。
+- 共观察到 ${summary.collaboration.observedAgentRuns} 个 AgentRun、${summary.collaboration.observedMemberCalls} 条 Member Call 和 ${summary.collaboration.completedTasks} 个 completed Task。
 - 队员 Run 累计时长：${renderDurations(summary.collaboration.memberRunDurations)}。
 - 轮询违规 Trial：${summary.collaboration.pollingViolationTrials}；失败 Verifier 分类：${failedCategories || '无'}；边界违规：${boundaryViolations || '无'}。
 - ${summary.collaboration.conclusion}
@@ -372,7 +372,7 @@ ${trialRows}
 
 1. 报表固定拆成三轴：功能交付、协作协议、变更边界；总分仍严格，但诊断不能丢失失败来源。
 2. 物化 fixture 时规范化工作区文件 mode，或让边界比较把“内容未变、仅 0600→0644”记为独立 hygiene 信号，避免私有存储权限污染任务成绩。
-3. 增加专门的忙时 FIFO Case：B、C 的独立必要结果先后到达时，验证 A 的两个后续 Run 串行且无批处理；另加“callee 完成后不再联系任何队员”与 Core restart Case，证明不会合成额外 Input 或消息。
+3. 增加专门的忙时 FIFO Case：B、C 的独立必要结果先后到达时，验证 A 的两个后续 AgentRun 串行且无批处理；另加“callee 完成后不再联系任何队员”与 Core restart Case，证明不会合成额外 Input 或消息。
 4. 为隐藏 Verifier 输出稳定、安全的失败码，并保留脱敏 patch/命令摘要，才能区分需求漏项、测试误判和队员整合覆盖。
 5. 使用同题 Lead-only 对照组计算 collaboration lift；否则只能说明 Team 能协作，不能说明协作比单 Agent 更好。
 6. Judge 暂不纳入本版本；未来若启用，应作为独立盲评维度，不能替代可执行 Verifier。
@@ -397,7 +397,7 @@ function renderDiagnosticReport(summary, caseRows, trialRows) {
 
 - 诊断结果：**${summary.score.passes}/${summary.score.validTrials}（${formatPercent(summary.score.outcomeRate)}）**。
 - 正式 Qualification Pass Rate 不存在：前置校准失败。
-- 这批样本共 ${summary.collaboration.observedAgentRuns} 个 Agent Run、${summary.collaboration.observedMemberCalls} 条 Member Call；不能把诊断率包装成正式 Team Qualification 成绩。
+- 这批样本共 ${summary.collaboration.observedAgentRuns} 个 AgentRun、${summary.collaboration.observedMemberCalls} 条 Member Call；不能把诊断率包装成正式 Team Qualification 成绩。
 
 ## 按 Case 的重复结果
 
@@ -530,7 +530,7 @@ function trialCampBody(summary, trial) {
     `- 忙时 pending Input：${trial.schedulingEvidence.pendingWhileBusy ? `观察到（峰值 ${trial.schedulingEvidence.maxPendingWhileBusyInputs}）` : '未形成可观察窗口'}\n` +
     `- 编排收敛：${trial.orchestrationConvergence === 'pass' ? '是' : '否'}\n` +
     `- 耗时：${trial.durationSeconds.toFixed(1)} 秒\n` +
-    `- Agent Runs：${trial.observedAgentRuns}\n` +
+    `- AgentRuns：${trial.observedAgentRuns}\n` +
     `- Member Calls：${trial.observedMemberCalls}\n` +
     `- 完成 Task：${trial.collaborationMetrics.completedTasks ?? 0}\n` +
     `- 执行队员：${trial.members.join(', ') || '无'}\n` +

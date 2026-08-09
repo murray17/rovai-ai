@@ -22,7 +22,7 @@ Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP
 2026-08-08 的 v0.47 `pnpm smoke:builtin-cli` 在同一轮本机联合矩阵中创建九个真实模型
 AgentRun。每个 Runtime 都只使用固定业务命令，完成全部十三项真实调用、旧 send flag/JSON
 拒绝、一次 stale-version 冲突与 `refresh_then_decide` recovery、完整 Core Envelope Evidence、
-完成后的旧 lease fencing，以及后续 Run 的新 lease。每个完整 Run 都观察到覆盖十三个 canonical
+完成后的旧 lease fencing，以及后续 AgentRun 的新 lease。每个完整 AgentRun 都观察到覆盖十三个 canonical
 operation 的 14 条 Core Evidence；没有使用 Agent-facing catalog discovery、mock、fixture 调用
 或单纯 Deep Probe 代替执行。
 
@@ -119,7 +119,7 @@ External MCP Library、Assignment 与 Runtime-native Projection 保持独立。v
 ## 后续准入规则
 
 - 新增 Runtime 的 built-in tool 准入要求真实模型能执行 bundled `rovai` CLI，并通过固定命令、
-  十三项调用、旧输入负向、冲突 recovery、Envelope Evidence、lease fencing 与后续 Run 验证；具有 shell/
+  十三项调用、旧输入负向、冲突 recovery、Envelope Evidence、lease fencing 与后续 AgentRun 验证；具有 shell/
   bash 能力但尚未通过矩阵，只能视为待验证，不能以理论支持替代证据。
 - Runtime 不得通过内置 MCP、native Plugin、stdio Bridge 或 ambient MCP 获得 Rovai built-in
   operations；也不得在 CLI 失败时静默回退到旧运输。

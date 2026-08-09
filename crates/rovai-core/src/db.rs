@@ -42,8 +42,8 @@ pub struct Database {
     path: PathBuf,
 }
 
-const V047_DATA_CONTRACT_VERSION: &str = "v0.47";
-const V047_PROJECTION_SCHEMA_VERSION: i64 = 25;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.48";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 26;
 const V043_CLASSIFIER_VERSION: &str = "activity-v1";
 
 const V043_RESET_FILES: &[&str] = &[
@@ -70,7 +70,7 @@ const V043_RESET_DIRECTORIES: &[&str] = &[
     "runtime/qwen",
 ];
 
-fn has_current_v047_data_contract(path: &Path) -> bool {
+fn has_current_data_contract(path: &Path) -> bool {
     if !path.exists() {
         return true;
     }
@@ -102,8 +102,8 @@ fn has_current_v047_data_contract(path: &Path) -> bool {
     matches!(
         (marker, projection_exists),
         (Ok(Some((contract, schema, classifier))), Ok(true))
-            if contract == V047_DATA_CONTRACT_VERSION
-                && schema == V047_PROJECTION_SCHEMA_VERSION
+            if contract == CURRENT_DATA_CONTRACT_VERSION
+                && schema == CURRENT_PROJECTION_SCHEMA_VERSION
                 && classifier == V043_CLASSIFIER_VERSION
     )
 }
@@ -492,12 +492,12 @@ impl Database {
         };
         let reset_reason = if !cfg!(test)
             && candidate_path.exists()
-            && !has_current_v047_data_contract(&candidate_path)
+            && !has_current_data_contract(&candidate_path)
         {
             let reason = if candidate_path == legacy_path {
-                "legacy_or_missing_v047_data_contract"
+                "legacy_or_missing_current_data_contract"
             } else {
-                "missing_or_incompatible_v047_data_contract"
+                "missing_or_incompatible_current_data_contract"
             };
             remove_v043_owned_state(data_dir)?;
             Some(reason)
@@ -523,7 +523,7 @@ impl Database {
                 "UPDATE rovai_data_contract SET reset_reason = ?1, updated_at = datetime('now') WHERE singleton = 1",
                 [reason],
             )?;
-            eprintln!("v0.47 managed local-data reset completed: {reason}");
+            eprintln!("managed local-data reset completed: {reason}");
         }
         database.seed_agents()?;
         Ok(database)
@@ -9910,6 +9910,32 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn current_data_contract_accepts_v048_schema_26_after_migrations() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai-current-contract-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        let path = directory.join("rovai.sqlite");
+
+        assert!(has_current_data_contract(&path));
+
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE rovai_data_contract
+                SET contract_version = 'v0.47', projection_schema_version = 25
+                WHERE singleton = 1
+                "#,
+                [],
+            )
+            .unwrap();
+        assert!(!has_current_data_contract(&path));
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
 
     #[cfg(unix)]
     #[test]

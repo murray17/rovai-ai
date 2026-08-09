@@ -268,7 +268,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
       <SettingsPageHeader
         eyebrow="Settings / MCP"
         title="MCP 配置"
-        description="统一管理外部 MCP Server，并决定每位队员在下一个 AgentRun 中可以使用哪些 MCP。"
+        description="统一管理外部 MCP Server，并决定每位队员在后续执行中可以使用哪些 MCP。"
         aside={(
           <>
             <button className="quiet-button" type="button" onClick={() => void scan()} disabled={busy !== null || Boolean(config?.fileIssue)}>
@@ -308,7 +308,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
         <div className="mcp-file-banner" role="alert">
           <div>
             <strong>无法使用 MCP 配置</strong>
-            <span>{issueText(config.fileIssue)} 原文件内容未被修改；新的 AgentRun 将不投影外部 MCP。</span>
+            <span>{issueText(config.fileIssue)} 原文件内容未被修改；后续新执行将不投影外部 MCP。</span>
             <code>{config.path}</code>
           </div>
           <div className="mcp-file-actions">
@@ -395,7 +395,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
             ))}
           </div>
         )}
-        <p className="mcp-footnote">配置和分配从下一个 AgentRun 开始生效；正在运行的 AgentRun 继续使用其冻结投影。</p>
+        <p className="mcp-footnote">配置和分配从后续新执行开始生效；已经开始的执行继续使用其冻结投影。</p>
       </section>
 
       <JsonEditorDialog
@@ -611,7 +611,7 @@ function ConfirmDialogs({
       <Dialog.Root open={deleting !== null} onOpenChange={(open) => { if (!open) onDeleteClose() }}>
         <Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="dialog-content compact-dialog">
           <Dialog.Title>删除 MCP Server？</Dialog.Title>
-          <Dialog.Description>将删除 <strong>{deleting?.name}</strong> 的定义和全部队员分配。正在执行的 AgentRun 不受影响。</Dialog.Description>
+          <Dialog.Description>将删除 <strong>{deleting?.name}</strong> 的定义和全部队员分配。已经开始的执行不受影响。</Dialog.Description>
           <div className="dialog-actions"><button className="quiet-button" type="button" onClick={onDeleteClose} disabled={busy}>取消</button><button className="danger-button" type="button" onClick={onDelete} disabled={busy}>删除</button></div>
         </Dialog.Content></Dialog.Portal>
       </Dialog.Root>

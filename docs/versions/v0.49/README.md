@@ -46,8 +46,9 @@ Approval、Toast 等临时表面不成为启动目标。
 离队、缺失或 Lead 失效时，保存配置锁存为需要重新确认；不删除队员、不替换 Lead、不自动关闭
 开关，Runtime readiness 不参与结构有效性判断。
 
-Renderer 持久维护当前项目。文件夹/名称只选择，disclosure 只展开，`＋` 只按对应项目创建；取消
-Dialog 不改变当前项目。关闭一键创建时所有入口打开同一个创建 Dialog；开启且配置有效时直接
+Renderer 持久维护当前项目。点击项目目录整行会先选择项目再切换展开状态，`＋` 只按对应项目创建；
+普通、置顶和快速对话分组统一按 5 条起步、每次 10 条“查看更多”。取消 Dialog 不改变当前项目。
+关闭一键创建时所有入口打开同一个创建 Dialog；开启且配置有效时直接
 使用目标项目、默认队员、默认 Lead 和固定 `peer` 语义创建空 Camp，失败或失效则保留项目回退
 Dialog。创建 Dialog 删除全部协作方式 UI，并把可选名称升级为可聚焦折叠面板、Unicode 80 字计数
 与清空操作；Core/SQLite 的既有 collaboration mode 合同不变。
@@ -137,7 +138,10 @@ Electron Desktop Shell；当前项目属于 Renderer 本地偏好：
 
 桌面设置范围不创建 ADR：它没有改变现有 Core、Runtime、合同或跨版本系统结构，属于可在 Desktop
 Shell 内部演进的产品偏好与 Renderer 交互。官方 Skill 集合和自包含协作边界由 ADR-0144 单独拥有；
-其 Rust 改动只扩展 bundled manifest，不改变 SQLite schema、Skill 投递合同或 Runtime Adapter。
+其 Rust 改动扩展 bundled manifest，不改变 SQLite schema、Skill 投递合同或 Runtime Adapter。
+本版本另行修复既有启动兼容标记漂移：启动检查现在与 Migration 66 写入的 Data Contract
+`v0.48 / schema 26` 一致，避免当前数据库在 Core restart 时被误判为旧合同并执行 clean reset；
+该修复不新增 Migration，也不放宽对真正旧合同的拒绝。
 
 ## 本版本不做
 
@@ -162,12 +166,15 @@ Shell 内部演进的产品偏好与 Renderer 交互。官方 Skill 集合和自
    Development 模式不可配置；
 6. `pnpm docs:check`、TypeScript typecheck、相关 Vitest、Desktop build、packaged App
    双窗口会话与登录项实测全部通过；
-7. 对 General 设置进行读写、重置窗口和解析启动位置不会新增 Camp、Task、Run 或 audit 事实。
+7. 对 General 设置进行读写、重置窗口和解析启动位置不会新增 Camp、Task、AgentRun 或 audit 事实。
 8. 新 Core 安装四个官方 Skill，全部默认启用且未分组；两个 Duo Revision 均携带完整运行依赖，
    Skill 结构校验、Core bundled installation test、Skill smoke 的默认集合断言和文档校验通过。
 9. 默认配置必须显式原子保存；Member lifecycle 失效锁存且不自动修补，Runtime readiness 不误伤；
-10. 当前项目跨新主窗口恢复，选择/展开/`＋` 独立；三类入口按开关直接创建或回退同一 Dialog；
+10. 当前项目跨新主窗口恢复；目录整行按顺序选择并切换展开，`...` / `＋` 独立；三类分组按
+    5/10 规则增量展开，三类创建入口按开关直接创建或回退同一 Dialog；
 11. 创建 Dialog 不再出现任何协作方式文案，Footer 无模式摘要，名称面板具备聚焦、计数和清空。
+12. 当前 Data Contract 在 Core restart 后保持原数据库，Imported Skill 与正在沿用的记忆均不会因
+    `v0.47 / schema 25` 的过期启动常量而被 clean reset。
 
 实施检查点与证据入口见[实施与验收计划](implementation-plan.md)，精确 UI 与 Shell 合同见
 [生产设计](production-design.md)。
@@ -179,7 +186,7 @@ Shell 内部演进的产品偏好与 Renderer 交互。官方 Skill 集合和自
 | Version lifecycle | 已更新 | `docs/versions/README.md` 将 v0.48 冻结为 historical，并把 v0.49 设为唯一 current；本概览与实施计划已建立 |
 | ADR | 已更新 | ADR-0144 替代 ADR-0109，冻结四个官方 Skill、自包含 Duo Revision 与异步公共 A2A 协作边界；Desktop Shell 范围仍确认无需独立 ADR |
 | Contracts | 确认无需更新 | 不改变 Agent/Core CLI、Envelope、receipt、Task、Message Delivery 或其它长期 wire contract；Duo Skill 只使用既有 `camp.message.send` v2，Main/Preload/Renderer 类型属于版本内桌面实现 |
-| Architecture | 确认无需更新 | 现有 Skill Library、immutable Revision、Runtime-group projection、Built-in Tool、A2A 与 Bootstrap 组件职责和传输关系均未改变；只扩展 bundled content manifest |
+| Architecture | 确认无需更新 | 现有 Skill Library、immutable Revision、Runtime-group projection、Built-in Tool、A2A 与 Bootstrap 组件职责和传输关系均未改变；除扩展 bundled content manifest 外，只同步启动兼容标记与既有 Migration 66 Data Contract，不改变 reset 架构 |
 | UI | 已更新 | `docs/ui/README.md` 与 `docs/ui/arctic-dawn.md` 增加七分类设置、General 页面、启动恢复、登录项、窗口行为及四个内置 Skill 清单；领域词汇同步更新 `CONTEXT.md` |
 | Runtime Activity | 确认无需更新 | Desktop Shell 偏好、窗口几何和登录项不产生或改变 Canonical Runtime Activity |
 | Runtime compatibility | 确认无需更新 | 不改变任何 Agent Runtime adapter、版本或发现能力；既有 Skill native-discovery smoke 仅扩展官方默认集合断言，不产生新的兼容性结论 |
@@ -192,4 +199,4 @@ Shell 内部演进的产品偏好与 Renderer 交互。官方 Skill 集合和自
 - [v0.49 实施与验收计划](implementation-plan.md)
 - [ADR-0144：自包含双人追问官方 Skill](../../adr/0144-self-contained-duo-grilling-bundled-skills.md)
 - [Arctic Dawn V3 设置与窗口合同](../../ui/arctic-dawn.md#设置)
-- [Rovai-ai 领域语言](../../../CONTEXT.md)
+- [Rovai-ai 领域词汇表](../../../CONTEXT.md)

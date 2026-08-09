@@ -17,7 +17,7 @@ last_updated: 2026-08-08
 | 查询已接入与候选 Agent Runtime 的实测兼容性 | [Runtime 兼容性清单](runtime-compatibility.md) |
 | 新增或修改 Runtime Activity 映射规则 | [Runtime Activity Mapping 维护指南](runtime-activity/README.md)及[Registry](runtime-activity/registry.md) |
 | 修改内置 Agent CLI、IPC、Envelope、receipt、Projection 或幂等合同 | [Built-in Tool Transport v4 合同](contracts/builtin-tool-transport-v4.md)及[Camp Message Send v2](contracts/camp-message-send-v2.md) |
-| 修改 Task 状态、字段、可见性、权限、列表、成员离 Camp 收口或 linked execution 准入 | [Durable Task v2 合同](contracts/durable-task-v2.md)、[ADR-0136](adr/0136-durable-task-v2-responsibility-and-coordination-authority.md)及[ADR-0137](adr/0137-one-time-task-linked-responsibility-admission.md) |
+| 修改 Task 状态、字段、可见性、权限、列表、CampMember 关系结束与收口或 linked execution 准入 | [Durable Task v2 合同](contracts/durable-task-v2.md)、[ADR-0136](adr/0136-durable-task-v2-responsibility-and-coordination-authority.md)及[ADR-0137](adr/0137-one-time-task-linked-responsibility-admission.md) |
 | 修改 AgentRun 公共消息、正文截断、引用链、遗漏提示或投递 Profile | [ADR-0132](adr/0132-public-reference-context-closure-profile-v2.md)、[Context Delivery Profile v2](contracts/context-delivery-profile-v2.md)及[Message Delivery v1](contracts/message-delivery-v1.md) |
 | 理解内置 CLI、Core Router、Runtime Fleet、Bootstrap 与外部 MCP 的长期结构 | [Built-in Tool Runtime 架构](architecture/builtin-tool-runtime.md) |
 | 修改 Native Session compaction detector、Observer Lease、Runtime 补发 policy、Bootstrap Delivery Gate 或 redelivery payload | [Native Session Bootstrap Redelivery 架构](architecture/native-session-bootstrap-redelivery.md)、[ADR-0138](adr/0138-durable-bootstrap-redelivery-requirement.md)至[ADR-0143](adr/0143-best-effort-non-blocking-compaction-detector-capability.md) |

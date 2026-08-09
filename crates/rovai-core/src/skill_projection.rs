@@ -1848,7 +1848,12 @@ mod tests {
         group_keys: &[SkillDeliveryGroupKey],
     ) -> SkillView {
         library.install_bundled_skills(database).unwrap();
-        let skill = library.list(database).unwrap().remove(0);
+        let skill = library
+            .list(database)
+            .unwrap()
+            .into_iter()
+            .find(|skill| skill.name == "rovai-memory-stewardship")
+            .unwrap();
         assign_skill_to_groups(
             database,
             library,

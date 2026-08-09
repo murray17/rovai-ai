@@ -836,30 +836,32 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-label="管理“快速对话讨论”"')
     expect(markup).toContain('aria-label="在“rovai-ai”中新建对话"')
     expect(markup).toContain('aria-label="在“快速对话”中新建对话"')
-    expect(markup).toContain('class="camp-group-heading-row current-project"')
-    expect(markup).toContain('class="camp-group-select"')
-    expect(markup).toContain('class="project-disclosure-button"')
+    expect(markup).toContain('class="project-heading-row current-project"')
+    expect(markup).toContain('class="project-toggle-row"')
+    expect(markup).not.toContain('project-disclosure-button')
     expect(markup).toContain('data-sidebar-menu-target="project:directory:/repo"')
     expect(markup).toContain('data-sidebar-menu-target="camp:camp-quick-chat"')
     expect(markup).not.toContain('data-sidebar-menu-target="project:quick-chat"')
     expect(markup).not.toContain('row-pin-button')
     expect(markup).not.toContain('group-pin-button')
     expect(markup).not.toContain('camp-group-count')
-    expect(markup).toContain('查看全部')
-    expect(markup).not.toContain('查看全部 12 个')
+    expect(markup).toContain('查看更多')
+    expect(markup).not.toContain('查看全部')
+    expect(markup).not.toContain('5 / 12')
     expect(markup).toContain('设置')
     expect(markup).toContain('viewBox="0 0 24 24"')
     expect(markup.indexOf('id="projects-heading"')).toBeLessThan(markup.indexOf('data-group="quick-chat"'))
     expect(markup).not.toContain('北极晨光 · Workspace')
     expect(markup).not.toContain('Core 尚未检测')
     expect(markup).not.toContain('⌄')
-    expect(markup).not.toContain('data-group="directory:/repo"')
+    expect(markup).toContain('data-group="directory:/repo"')
+    expect(markup).not.toContain('data-group="pinned-directory:/repo"')
     expect(markup).not.toContain('最近任务')
     expect(markup).not.toContain('Lumen AI')
     expect(markup).not.toContain('Horizonward')
   })
 
-  it('keeps navigation marker slots stable and exposes project disclosure semantics', () => {
+  it('keeps navigation marker slots stable and exposes whole-row project disclosure semantics', () => {
     const makeCamp = (id: string, marker: 'none' | 'unread_completed' | 'loading') => ({
       id,
       title: `${id} 对话`,
@@ -911,13 +913,16 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-expanded="true" aria-controls="camp-group-content-directory--repo"')
     expect(markup).toContain('project-folder-open')
     expect(markup).toContain('project-folder-closed')
-    const selectEnd = markup.indexOf('</button>', markup.indexOf('class="camp-group-select"'))
-    const disclosureStart = markup.indexOf('class="project-disclosure-button"')
-    expect(disclosureStart).toBeGreaterThan(selectEnd)
-    expect(markup.indexOf('group-menu-trigger')).toBeGreaterThan(disclosureStart)
+    expect(markup).not.toContain('project-disclosure-button')
+    const toggleStart = markup.indexOf('class="project-toggle-row"')
+    const toggleEnd = markup.indexOf('</button>', toggleStart)
+    const menuStart = markup.indexOf('group-menu-trigger')
+    const createStart = markup.indexOf('group-create-button')
+    expect(menuStart).toBeGreaterThan(toggleEnd)
+    expect(createStart).toBeGreaterThan(menuStart)
   })
 
-  it('toggles project disclosure independently from the show-all group state', () => {
+  it('keeps project disclosure state stable without coupling it to Camp pagination', () => {
     const collapsed = toggleNavigationGroup(new Set<string>(), 'directory:/repo')
     expect(collapsed.has('directory:/repo')).toBe(true)
     const reopened = toggleNavigationGroup(collapsed, 'directory:/repo')
@@ -1099,6 +1104,9 @@ describe('task event projections', () => {
     expect(markup).toContain('先了解项目')
     expect(markup).toContain('整理成任务')
     expect(markup).toContain('检查工作区')
+    expect(markup).toContain('上下文投递')
+    expect(markup).toContain('当前协作配置')
+    expect(markup).not.toContain('当前 Camp 上下文')
     expect(markup).toContain('消息未发送')
     expect(markup).toContain('1 位目标队员暂时不可执行')
     expect(markup).toContain('草稿已保留')
@@ -1229,7 +1237,7 @@ describe('task event projections', () => {
     })).toBe('当前无可用队员。')
   })
 
-  it('renders a copy action and routes Run detail through Run Pulse', () => {
+  it('renders a copy action and routes execution detail through the execution pulse', () => {
     const profile = {
       ...agentProfile(),
       agentId: 'agent_2',
@@ -1342,7 +1350,7 @@ describe('task event projections', () => {
     expect(markup).not.toContain('role="link"')
     expect(markup.indexOf('class="message-bubble"'))
       .toBeLessThan(markup.indexOf('class="message-copy-button"'))
-    expect(markup).toContain('aria-label="Run Pulse"')
+    expect(markup).toContain('aria-label="执行动态"')
     expect(markup).toContain('class="run-pulse-chip"')
     expect(markup).toContain('<span>沐瓦</span><small>RUNNING</small>')
     expect(markup).not.toContain('Thinking')
@@ -1498,7 +1506,7 @@ describe('task event projections', () => {
     expect(terminalMarkup).not.toContain('execution-disclosure')
     expect(terminalMarkup).not.toContain(' open=""')
     expect(terminalMarkup).not.toContain('terminal-run-row')
-    expect(terminalMarkup).toContain('来自 Run · 沐瓦')
+    expect(terminalMarkup).toContain('来自执行 · 沐瓦')
     expect(terminalMarkup).toContain('复制入口已完成。')
 
     const restoredMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
@@ -1575,7 +1583,7 @@ describe('task event projections', () => {
     expect(cancelledMarkup).toContain('workspace-grid inspector-collapsed')
     expect(cancelledMarkup).not.toContain('aria-label="Camp 检查器"')
     expect(cancelledMarkup).toContain('你已在 5 秒后停止')
-    expect(cancelledMarkup).toContain('结果待确认 · 查看 Execution Drawer')
+    expect(cancelledMarkup).toContain('结果待确认 · 查看执行详情')
     expect(cancelledMarkup).not.toContain('run-message-state tone-neutral')
     expect(cancelledMarkup).not.toContain('pnpm test')
   })
@@ -2050,7 +2058,7 @@ describe('task event projections', () => {
     expect(selected.unassigned.map((item) => item.id)).toEqual(['narration'])
   })
 
-  it('loads complete historical execution evidence through stable per-Run pages', async () => {
+  it('loads complete historical execution evidence through stable per-AgentRun pages', async () => {
     const requestedAfter: number[] = []
     const evidence = (sequence: number) => ({
       id: `evidence-${sequence}`,
@@ -2251,11 +2259,11 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('记忆')
-    expect(markup).toContain('共同约定')
-    expect(markup).toContain('伙伴经验')
-    expect(markup).toContain('协作默契')
+    expect(markup).toContain('共同记忆')
+    expect(markup).toContain('队员记忆')
+    expect(markup).toContain('队员间记忆')
     expect(markup).toContain('队员形成')
-    expect(markup).toContain('Hearth 待确认')
+    expect(markup).toContain('共同记忆提案')
     expect(markup).toContain('建议复核')
     expect(markup).toContain('已停止沿用')
     expect(markup).not.toContain('可回看 · 可修订 · 可遗忘')

@@ -2,7 +2,7 @@
 
 Rovai-ai is a local multi-Agent workbench in which long-lived Agent identities collaborate inside Camps while retaining independent conversational continuity.
 
-## Language
+## Domain Glossary
 
 **Camp**:
 A long-lived shared collaboration context containing participants, public discussion, private Agent continuities, resources, and outcomes. A Camp becomes durable when its configured creation is accepted and may validly contain no public messages until the user submits one. A Camp created without a user-configured name starts as `未命名对话`; its first accepted user message generates the name only while the user has never explicitly named or renamed that Camp. The product may present a Camp as a conversation, but domain code must not call it a Conversation. User deletion permanently removes the Camp aggregate; Rovai-ai does not model Camp archive or trash.
@@ -296,13 +296,25 @@ _Avoid_: confirmation receipt, inferred authority, transient tool acknowledgemen
 The per-Proposal user action to accept the displayed final content, edit then accept, or reject one Hearth Memory Proposal. Acceptance creates an ordinary active Memory or Revision with no higher authority tier; stale revise Proposals cannot be accepted or edited into acceptance.
 _Avoid_: Memory confirmation, bulk learning, Agent approval, stale rebase
 
+**Skill**:
+A reusable directory package of instructions and optional supporting resources that an Agent Runtime can discover and load when relevant.
+_Avoid_: System Prompt, Built-in CLI operation, MCP Server, AgentProfile
+
+**Skill Library**:
+Rovai-ai's application-global collection of managed Skills, independent of their import source and of every Runtime's personal Skill directories.
+_Avoid_: Runtime personal Skill store, Project Skill directory, source folder
+
 **Rovai Skill**:
 A stable Skill identity in the Rovai Skill Library whose Name is globally unique. It is either supplied officially by Rovai-ai or explicitly imported by the user; Runtime-native Skills are outside this identity and may use the same Name.
 _Avoid_: Runtime-native Skill, Agent-wide Skill toggle, imported source directory
 
-**Skill Revision**:
-An immutable complete content snapshot of one Rovai Skill, published by an official application release or a user-confirmed import or update. Importing the same Name from another source updates the existing non-official Rovai Skill by creating a new Revision rather than creating a second Skill.
-_Avoid_: mutable Skill directory, source checkout, parallel same-name Rovai Skill
+**SkillRevision**:
+An immutable complete content snapshot of one Rovai Skill, published by an official application release or a user-confirmed import or update. A Rovai Skill selects one current SkillRevision while older revisions remain distinct for as long as that Skill is retained. Importing the same Name from another source updates the existing non-official Rovai Skill by creating a new SkillRevision rather than creating a second Skill.
+_Avoid_: mutable Skill directory, in-place update, source checkout, parallel same-name Rovai Skill, Runtime cache
+
+**SkillProjection**:
+A reconstructible Rovai-ai-managed filesystem entry that exposes one SkillRevision through a Runtime's native project-level discovery path for an execution root.
+_Avoid_: Skill source of truth, Runtime personal installation, proof that a model loaded the Skill
 
 **Skill Enablement**:
 The application-global delivery pause state of one Rovai Skill. A new official or imported Skill starts enabled; disabling it suspends all Rovai-managed delivery without deleting or changing its Skill Group Assignments, those Assignments remain editable while disabled, and re-enabling restores delivery from the saved Assignments.
@@ -325,11 +337,11 @@ An application-defined Skill delivery channel associated with a Runtime-native p
 _Avoid_: mutually exclusive Runtime partition, Member Skill scope, Project Skill scope, user-defined Runtime group
 
 **Skill Group Assignment**:
-The application-global relationship that selects one current Skill Revision for one Skill Delivery Group across all applicable Run Workspaces. Its existence is the complete assignment state, multiple explicit Assignments are retained when Delivery Groups overlap, and publishing a newly confirmed Revision advances every existing Assignment to that Revision. An Assignment records user intent rather than requiring a distinct physical projection when another selected Delivery Group already makes the same Revision visible.
+The application-global relationship that selects one current SkillRevision for one Skill Delivery Group across all applicable Run Workspaces. Its existence is the complete assignment state, multiple explicit Assignments are retained when Delivery Groups overlap, and publishing a newly confirmed Revision advances every existing Assignment to that Revision. An Assignment records user intent rather than requiring a distinct physical projection when another selected Delivery Group already makes the same Revision visible.
 _Avoid_: physical link identity, global all-Runtime toggle, Member Assignment, Project Assignment, disabled Assignment
 
 **Effective Skill Delivery**:
-The minimal derived set of Rovai-managed projections that satisfies the explicit Skill Group Assignments for one Run Workspace without making the same Rovai Skill Revision redundantly visible to an Agent Runtime. An overlapping Assignment may be satisfied through another selected Delivery Group and becomes directly projected again if that shared coverage is later removed. A blocked Delivery Group may use another explicitly assigned Group where that still satisfies the saved intent, but delivery never invents an unselected Assignment as a fallback.
+The minimal derived set of Rovai-managed projections that satisfies the explicit Skill Group Assignments for one Run Workspace without making the same Rovai SkillRevision redundantly visible to an Agent Runtime. An overlapping Assignment may be satisfied through another selected Delivery Group and becomes directly projected again if that shared coverage is later removed. A blocked Delivery Group may use another explicitly assigned Group where that still satisfies the saved intent, but delivery never invents an unselected Assignment as a fallback.
 _Avoid_: Skill Group Assignment, persisted user intent, implicit fallback Assignment, duplicate physical projection, Runtime-native Skill
 
 **Skill Delivery Group Member View**:
@@ -1288,22 +1300,6 @@ _Avoid_: message-send preflight, CampMessage admission, Git permission policy, R
 A Core-enforced business authorization atom that allows an Agent to request a class of Rovai-ai domain mutation outside the uniform Built-in Tool Catalog contract. It is distinct from record visibility, operation-specific invariants, and Adapter filesystem/Shell/network permissions; it cannot vary which canonical built-in operations an eligible Member may invoke.
 _Avoid_: Built-in Tool availability, visibility scope, Adapter permission, universal administrator role
 
-**Skill**:
-A reusable directory package of instructions and optional supporting resources that an Agent Runtime can discover and load when relevant.
-_Avoid_: System Prompt, Built-in CLI operation, MCP Server, AgentProfile
-
-**Skill Library**:
-Rovai-ai's application-global collection of managed Skills, independent of their import source and of every Runtime's personal Skill directories.
-_Avoid_: Runtime personal Skill store, Project Skill directory, source folder
-
-**SkillRevision**:
-An immutable snapshot of one Skill's complete managed content. A Skill selects one current revision while older revisions remain distinct for as long as that Skill is retained.
-_Avoid_: Mutable Skill folder, in-place update, Runtime cache
-
-**SkillProjection**:
-A reconstructible Rovai-ai-managed filesystem entry that exposes one SkillRevision through a Runtime's native project-level discovery path for an execution root.
-_Avoid_: Skill source of truth, Runtime personal installation, proof that a model loaded the Skill
-
 **MCP Library**:
 Rovai-ai's application-global collection of user-visible external MCP Server definitions. It is an independent source of truth and never includes Rovai built-in operations.
 _Avoid_: Runtime personal MCP configuration, remote marketplace, Built-in CLI catalog
@@ -1388,13 +1384,17 @@ _Avoid_: user-machine startup probe, rendered-config snapshot, mocked protocol s
 The Adapter-native realization of one Additive MCP Projection when Rovai launches or resumes an Agent Runtime. It preserves Runtime-native configuration, applies the Adapter's Same-Name Policy without field merging, and never mutates user or project Runtime files; process arguments, Session configuration or Rovai-owned `0600` temporary files carry only the requested additions. An Unsupported Adapter performs no dynamic injection while the base Run continues. Rovai built-in operations never enter this projection, and a successful Runtime Session seals the final facts into its MCP Exposure Snapshot.
 _Avoid_: replacement config, Runtime personal MCP source of truth, central MCP proxy, empty-set retry
 
+**Canonical Operation**:
+The Core-owned dotted identity of one Rovai built-in business operation, such as `camp.message.send`. It is used by Core contracts, routing, receipts, replay, audit, Dynamic Context, and Canonical Runtime Activity, and maps one-to-one to a fixed Agent-facing Built-in Tool CLI Command.
+_Avoid_: Tool name, Agent-facing command spelling, MCP tool, generic invoke target, Runtime-native alias
+
 **Built-in Tool Transport**:
 The sole model-facing path from an Agent Runtime through the `rovai` CLI and local Core IPC to Rovai-owned canonical Team, Task, Camp History, and Memory operations. It is a required AgentRun execution facility and remains separate from user-configured external MCP Runtime Projection.
 _Avoid_: external MCP proxy, Runtime-native tool alias, optional degraded capability, duplicated domain handler
 
 **Built-in Tool Catalog**:
-The complete versioned semantic surface of canonical Rovai built-in operations exposed identically to every eligible Agent through CLI list and describe. It is fixed by the currently running App build; installing another App version requires an App restart, and no active process hot-adds or hot-reloads operations. Every eligible Member may invoke every listed operation; Core applies current membership, record visibility, context fences, versions, quotas, and operation-specific invariants, but no per-Member Capability or allowlist changes operation availability.
-_Avoid_: per-Member tool list, Capability snapshot, operation allowlist, Runtime-specific alias catalog, in-process catalog hot reload
+The Core-owned complete versioned semantic catalog of Canonical Operations, including operation identities, input and result schemas, Agent output projections, error contracts, CLI mappings, and its digest. It is not directly enumerable by Agents. Each Canonical Operation maps one-to-one to a fixed Built-in Tool CLI Command whose bounded usage is exposed through command-specific `--help`. The catalog is fixed by the currently running App build; installing another App version requires an App restart, and no active process hot-adds or hot-reloads operations. Every eligible Member may invoke every cataloged operation; Core applies current membership, record visibility, context fences, versions, quotas, and operation-specific invariants, but no per-Member Capability or allowlist changes operation availability.
+_Avoid_: Agent-facing tool list, Agent-facing tool describe, dynamically browsable tool catalog, per-Member tool list, Capability snapshot, operation allowlist, Runtime-specific alias catalog, in-process catalog hot reload
 
 **Built-in Tool Discovery**:
 The Core-internal and qualification-only retrieval of the Built-in Tool Catalog, operation schemas, Agent output projections, error contracts, and Envelope contract. It is not an Agent-facing CLI protocol; an Agent learns fixed business commands and their bounded `--help` text instead.

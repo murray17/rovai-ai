@@ -2,7 +2,6 @@ import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
-import { createInterface } from 'node:readline'
 
 const root = resolve(import.meta.dirname, '..')
 const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai-ai.app'))
@@ -24,16 +23,20 @@ await mkdir(workspaceDir, { recursive: true })
 await mkdir(outputDir, { recursive: true })
 await writeFile(join(workspaceDir, 'README.md'), '# Sidebar UI acceptance\n')
 
-const fixture = await createFixtureCamps()
+let fixture = null
 let desktopApp = null
 let compactApp = null
 
 try {
   desktopApp = await launchApp(firstPort, 1440, 920, false)
+  fixture = await createFixtureCamps(desktopApp.cdp)
   await setTheme(desktopApp.cdp, 'day')
   await assertSidebarContract(desktopApp.cdp, '1440×920')
+  await assertProjectActionsReveal(desktopApp.cdp)
   await wait(2_500)
   await assertLongTitleIsTruncated(desktopApp.cdp, fixture.longTitleCampId)
+  await assertProjectRowAndPagination(desktopApp.cdp)
+  await assertQuickChatPagination(desktopApp.cdp)
 
   const desktopCapture = join(outputDir, 'sidebar-day-1440x920.png')
   await capture(desktopApp.cdp, desktopCapture)
@@ -49,10 +52,12 @@ try {
   await openMenuByKeyboard(desktopApp.cdp, projectTarget)
   await pressKey(desktopApp.cdp, 'Enter')
   await assertTargetMoved(desktopApp.cdp, projectTarget, '.pinned-navigation')
+  await assertProjectPaginationCount(desktopApp.cdp, '.pinned-navigation', 15)
   await openMenuByKeyboard(desktopApp.cdp, projectTarget)
   await assertOpenMenu(desktopApp.cdp, projectTarget, ['取消置顶项目'], 0, '取消置顶项目')
   await pressKey(desktopApp.cdp, 'Enter')
   await assertTargetMoved(desktopApp.cdp, projectTarget, '.navigation-projects')
+  await assertProjectPaginationCount(desktopApp.cdp, '.navigation-projects', 15)
 
   const campTarget = `camp:${fixture.actionCampId}`
   await openMenuByKeyboard(desktopApp.cdp, campTarget)
@@ -103,7 +108,7 @@ try {
   await wait(500)
 
   compactApp = await launchApp(firstPort + 1, 1040, 700, true)
-  await setTheme(compactApp.cdp, 'day')
+  await setTheme(compactApp.cdp, 'night')
   await compactApp.cdp.send('Emulation.setTouchEmulationEnabled', {
     enabled: true,
     maxTouchPoints: 1
@@ -146,7 +151,10 @@ try {
       packagedRendererToCoreIpc: true,
       campAndProjectMenus: true,
       quickChatProjectMenuAbsent: true,
-      projectAndShowAllCountsHidden: true,
+      projectAndPaginationCountsHidden: true,
+      wholeRowProjectSelectionAndDisclosure: true,
+      fiveThenTenCampPagination: true,
+      paginationCacheSurvivesCollapseAndPinMigration: true,
       hoverFocusOpenAndCoarsePointerVisibility: true,
       arrowHomeEndEscapeAndOutsideClick: true,
       projectAndCampPinMigrationWithFocus: true,
@@ -156,6 +164,7 @@ try {
       menuViewportCollision: true,
       longTitleTruncation: true,
       reducedMotion: true,
+      dayAndNightPreferencesResolveWithoutLayoutDrift: true,
       desktopAndCompactHorizontalOverflow: false
     },
     captures: {
@@ -171,49 +180,52 @@ try {
   if (compactApp) await closeApp(compactApp)
 }
 
-async function createFixtureCamps() {
-  const core = startCore(dataDir)
-  try {
-    await core.request('health.check')
-    const preflight = await core.request('camps.creationPreflight')
-    const workspace = await core.request('workspaces.inspect', { path: workspaceDir })
-    const memberAgentIds = preflight.presentMembers.map((member) => member.agentId)
-    const common = {
-      memberAgentIds,
-      defaultLeadAgentId: preflight.initialLeadAgentId,
-      collaborationMode: 'peer'
-    }
-    const projectCampIds = []
-    for (let index = 1; index <= 6; index += 1) {
-      projectCampIds.push(await createCamp(core, {
-        ...common,
-        name: `侧栏验收项目对话 ${index}`,
-        workspace: { projectPath: workspace.projectPath }
-      }))
-    }
-    const longTitleCampId = await createCamp(core, {
+async function createFixtureCamps(cdp) {
+  const core = { request: (method, params = {}) => request(cdp, method, params) }
+  await core.request('health.check')
+  const preflight = await core.request('camps.creationPreflight')
+  const workspace = await core.request('workspaces.inspect', { path: workspaceDir })
+  const memberAgentIds = preflight.presentMembers.map((member) => member.agentId)
+  const common = {
+    memberAgentIds,
+    defaultLeadAgentId: preflight.initialLeadAgentId,
+    collaborationMode: 'peer'
+  }
+  const projectCampIds = []
+  for (let index = 1; index <= 18; index += 1) {
+    projectCampIds.push(await createCamp(core, {
       ...common,
-      name: '这是一个用于验证紧凑侧栏省略号与菜单可达性的超长对话标题',
+      name: `侧栏验收项目对话 ${index}`,
       workspace: { projectPath: workspace.projectPath }
-    })
-    const compactCampId = await createCamp(core, {
+    }))
+  }
+  const longTitleCampId = await createCamp(core, {
+    ...common,
+    name: '这是一个用于验证紧凑侧栏省略号与菜单可达性的超长对话标题',
+    workspace: { projectPath: workspace.projectPath }
+  })
+  for (let index = 1; index <= 16; index += 1) {
+    await createCamp(core, {
       ...common,
-      name: '保留的快速对话验收目标',
+      name: `快速对话分页验收 ${index}`,
       workspace: null
     })
-    const deleteCampId = await createCamp(core, {
-      ...common,
-      name: '待删除的快速对话验收目标',
-      workspace: null
-    })
-    return {
-      actionCampId: projectCampIds.at(-1),
-      longTitleCampId,
-      compactCampId,
-      deleteCampId
-    }
-  } finally {
-    await core.stop()
+  }
+  const compactCampId = await createCamp(core, {
+    ...common,
+    name: '保留的快速对话验收目标',
+    workspace: null
+  })
+  const deleteCampId = await createCamp(core, {
+    ...common,
+    name: '待删除的快速对话验收目标',
+    workspace: null
+  })
+  return {
+    actionCampId: projectCampIds.at(-1),
+    longTitleCampId,
+    compactCampId,
+    deleteCampId
   }
 }
 
@@ -245,8 +257,38 @@ async function assertSidebarContract(cdp, context) {
       quickChatFolder: Boolean(quickChat?.querySelector('.project-folder-glyph')),
       legacyDirectPins: document.querySelectorAll('.group-pin-button, .row-pin-button').length,
       legacyMenus: document.querySelectorAll('.camp-row-menu').length,
+      legacyDisclosures: document.querySelectorAll('.project-disclosure-button').length,
       projectCounts: document.querySelectorAll('.camp-group-count').length,
-      showAllLabels: [...document.querySelectorAll('.show-all-camps')].map((button) => button.textContent?.trim()),
+      paginationLabels: [...document.querySelectorAll('.show-more-camps, .collapse-camps')]
+        .map((button) => button.textContent?.trim()),
+      projectRowSemantics: projectGroups.every((group) => {
+        const row = group.querySelector('.project-toggle-row')
+        const content = group.querySelector('.camp-group-children')
+        return row?.getAttribute('aria-controls') === content?.id
+          && row?.getAttribute('aria-expanded') === String(!content?.hidden)
+      }),
+      projectRowFont: projectGroups[0]
+        ? getComputedStyle(projectGroups[0].querySelector('.project-toggle-row')).fontSize
+        : null,
+      projectMenuOpacity: projectGroups[0]
+        ? Number(getComputedStyle(projectGroups[0].querySelector('.group-menu-trigger')).opacity)
+        : -1,
+      projectCreateOpacity: projectGroups[0]
+        ? Number(getComputedStyle(projectGroups[0].querySelector('.group-create-button')).opacity)
+        : -1,
+      coarsePointer: matchMedia('(pointer: coarse)').matches || matchMedia('(hover: none)').matches,
+      campRowFont: projectGroups[0]
+        ? getComputedStyle(projectGroups[0].querySelector('.camp-nav-open')).fontSize
+        : null,
+      sectionFont: getComputedStyle(document.querySelector('#projects-heading')).fontSize,
+      plusCenterDelta: (() => {
+        const sectionPlus = document.querySelector('.navigation-section-title .section-create-button')
+        const projectPlus = projectGroups[0]?.querySelector('.group-create-button')
+        if (!sectionPlus || !projectPlus) return null
+        const sectionRect = sectionPlus.getBoundingClientRect()
+        const projectRect = projectPlus.getBoundingClientRect()
+        return Math.abs((sectionRect.left + sectionRect.width / 2) - (projectRect.left + projectRect.width / 2))
+      })(),
       sidebarOverflow: (() => {
         const sidebar = document.querySelector('.unified-sidebar')
         return sidebar ? sidebar.scrollWidth > sidebar.clientWidth + 1 : true
@@ -259,13 +301,235 @@ async function assertSidebarContract(cdp, context) {
     `${context} did not expose exactly one pinnable Project menu: ${JSON.stringify(state)}`)
   assert(state.quickChatProjectMenus === 0 && state.quickChatFolder,
     `${context} Quick Chat Project semantics were incorrect: ${JSON.stringify(state)}`)
-  assert(state.legacyDirectPins === 0 && state.legacyMenus === 0 && state.projectCounts === 0,
+  assert(state.legacyDirectPins === 0
+      && state.legacyMenus === 0
+      && state.legacyDisclosures === 0
+      && state.projectCounts === 0,
     `${context} retained a legacy sidebar action/count control: ${JSON.stringify(state)}`)
-  assert(state.showAllLabels.includes('查看全部')
-      && state.showAllLabels.every((label) => label === '查看全部' || label === '收起'),
-  `${context} show-all labels exposed counts: ${JSON.stringify(state.showAllLabels)}`)
+  assert(state.paginationLabels.includes('查看更多')
+      && state.paginationLabels.every((label) => label === '查看更多' || label === '收起'),
+  `${context} pagination labels exposed counts or legacy copy: ${JSON.stringify(state.paginationLabels)}`)
+  assert(state.projectRowSemantics,
+    `${context} project row disclosure semantics were incomplete: ${JSON.stringify(state)}`)
+  assert(state.sectionFont === '14px' && state.projectRowFont === '13px' && state.campRowFont === '13px',
+    `${context} sidebar type hierarchy drifted: ${JSON.stringify(state)}`)
+  assert(state.coarsePointer
+      ? state.projectMenuOpacity > 0.95 && state.projectCreateOpacity > 0.95
+      : state.projectMenuOpacity < 0.05 && state.projectCreateOpacity < 0.05,
+  `${context} Project actions did not follow hover/touch visibility: ${JSON.stringify(state)}`)
+  assert(state.plusCenterDelta !== null && state.plusCenterDelta < 0.6,
+    `${context} Project create action columns were misaligned: ${JSON.stringify(state)}`)
   assert(!state.sidebarOverflow && !state.documentOverflow,
     `${context} sidebar overflowed horizontally: ${JSON.stringify(state)}`)
+}
+
+async function assertProjectActionsReveal(cdp) {
+  await evaluate(cdp, `document.activeElement instanceof HTMLElement && document.activeElement.blur()`)
+  await cdp.send('DOM.enable')
+  await cdp.send('CSS.enable')
+  const documentNode = await cdp.send('DOM.getDocument', { depth: -1, pierce: true })
+  const rowNode = await cdp.send('DOM.querySelector', {
+    nodeId: documentNode.result.root.nodeId,
+    selector: '.navigation-projects .camp-nav-group:not([data-group="quick-chat"]) .project-heading-row'
+  })
+  assert(rowNode.result.nodeId, 'Could not resolve the Project row for hover visibility')
+  await cdp.send('CSS.forcePseudoState', {
+    nodeId: rowNode.result.nodeId,
+    forcedPseudoClasses: ['hover']
+  })
+  await wait(180)
+  const hovered = await evaluate(cdp, `(() => {
+    const row = document.querySelector('.navigation-projects .camp-nav-group:not([data-group="quick-chat"]) .project-heading-row')
+    const menu = row?.querySelector('.group-menu-trigger')
+    const create = row?.querySelector('.group-create-button')
+    return {
+      menu: menu ? Number(getComputedStyle(menu).opacity) : -1,
+      create: create ? Number(getComputedStyle(create).opacity) : -1
+    }
+  })()`)
+  await cdp.send('CSS.forcePseudoState', {
+    nodeId: rowNode.result.nodeId,
+    forcedPseudoClasses: []
+  }).catch(() => undefined)
+  assert(hovered.menu > 0.95 && hovered.create > 0.95,
+    `Project actions were hidden while the directory row was hovered: ${JSON.stringify(hovered)}`)
+
+  const pointer = await evaluate(cdp, `(() => {
+    const row = document.querySelector('.navigation-projects .camp-nav-group:not([data-group="quick-chat"]) .project-toggle-row')
+    const rect = row?.getBoundingClientRect()
+    return rect ? {
+      x: rect.left + Math.min(80, rect.width / 2),
+      y: rect.top + rect.height / 2,
+      awayX: window.innerWidth - 20,
+      awayY: 80
+    } : null
+  })()`)
+  assert(pointer, 'Could not resolve the Project row pointer target')
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: pointer.x, y: pointer.y })
+  await cdp.send('Input.dispatchMouseEvent', {
+    type: 'mousePressed',
+    x: pointer.x,
+    y: pointer.y,
+    button: 'left',
+    buttons: 1,
+    clickCount: 1
+  })
+  await cdp.send('Input.dispatchMouseEvent', {
+    type: 'mouseReleased',
+    x: pointer.x,
+    y: pointer.y,
+    button: 'left',
+    buttons: 0,
+    clickCount: 1
+  })
+  await cdp.send('Input.dispatchMouseEvent', {
+    type: 'mouseMoved',
+    x: pointer.awayX,
+    y: pointer.awayY
+  })
+  await wait(180)
+  const afterPointerLeave = await evaluate(cdp, `(() => {
+    const group = document.querySelector('.navigation-projects .camp-nav-group:not([data-group="quick-chat"])')
+    const row = group?.querySelector('.project-toggle-row')
+    const menu = group?.querySelector('.group-menu-trigger')
+    const create = group?.querySelector('.group-create-button')
+    return {
+      rowRetainedPointerFocus: document.activeElement === row,
+      focusVisible: row?.matches(':focus-visible') ?? false,
+      expanded: row?.getAttribute('aria-expanded'),
+      menu: menu ? Number(getComputedStyle(menu).opacity) : -1,
+      create: create ? Number(getComputedStyle(create).opacity) : -1
+    }
+  })()`)
+  assert(afterPointerLeave.rowRetainedPointerFocus
+      && !afterPointerLeave.focusVisible
+      && afterPointerLeave.menu < 0.05
+      && afterPointerLeave.create < 0.05,
+  `Project actions lingered after pointer activation and leave: ${JSON.stringify(afterPointerLeave)}`)
+  await evaluate(cdp, `document.querySelector('.navigation-projects .camp-nav-group:not([data-group="quick-chat"]) .project-toggle-row')?.click()`)
+  await waitForExpression(cdp, `document.querySelector('.navigation-projects .camp-nav-group:not([data-group="quick-chat"]) .project-toggle-row')?.getAttribute('aria-expanded') === 'true'`)
+}
+
+async function assertProjectRowAndPagination(cdp) {
+  const selector = '.navigation-projects .camp-nav-group:not([data-group="quick-chat"])'
+  const initial = await projectPaginationState(cdp, selector)
+  assert(initial.campCount === 5
+      && JSON.stringify(initial.labels) === JSON.stringify(['查看更多'])
+      && initial.rowIsSiblingOfActions
+      && initial.expanded,
+  `Project group did not start from the five-Camp whole-row contract: ${JSON.stringify(initial)}`)
+
+  await clickProjectControl(cdp, selector, '.show-more-camps')
+  await waitForExpression(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelectorAll('.camp-nav-row').length === 15`)
+  const expanded = await projectPaginationState(cdp, selector)
+  assert(expanded.campCount === 15
+      && JSON.stringify(expanded.labels) === JSON.stringify(['查看更多', '收起']),
+  `First ten-Camp expansion was incorrect: ${JSON.stringify(expanded)}`)
+
+  await clickProjectControl(cdp, selector, '.collapse-camps')
+  await waitForExpression(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelectorAll('.camp-nav-row').length === 5`)
+  const collapsedList = await projectPaginationState(cdp, selector)
+  assert(JSON.stringify(collapsedList.labels) === JSON.stringify(['查看更多']),
+    `Camp pagination collapse did not restore the initial state: ${JSON.stringify(collapsedList)}`)
+
+  await clickProjectControl(cdp, selector, '.show-more-camps')
+  await waitForExpression(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelectorAll('.camp-nav-row').length === 15`)
+
+  await clickProjectControl(cdp, selector, '.project-toggle-row')
+  await waitForExpression(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelector('.project-toggle-row')?.getAttribute('aria-expanded') === 'false'`)
+  const folded = await projectPaginationState(cdp, selector)
+  assert(folded.current && !folded.expanded,
+    `Whole-row activation did not select then fold the Project: ${JSON.stringify(folded)}`)
+  await clickProjectControl(cdp, selector, '.project-toggle-row')
+  await waitForExpression(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelectorAll('.camp-nav-row').length === 15`)
+
+  const menuTarget = await evaluate(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelector('.group-menu-trigger')?.dataset.sidebarMenuTarget ?? null`)
+  const expandedBeforeActions = await projectPaginationState(cdp, selector)
+  await openMenuByKeyboard(cdp, menuTarget)
+  const expandedWithMenu = await projectPaginationState(cdp, selector)
+  assert(expandedWithMenu.expanded === expandedBeforeActions.expanded,
+    `Project menu toggled the whole-row disclosure: ${JSON.stringify(expandedWithMenu)}`)
+  await pressKey(cdp, 'Escape')
+  await assertMenuClosedWithFocus(cdp, menuTarget)
+
+  await clickProjectControl(cdp, selector, '.group-create-button')
+  await waitForSelector(cdp, '.new-camp-dialog')
+  const expandedWithDialog = await projectPaginationState(cdp, selector)
+  assert(expandedWithDialog.expanded === expandedBeforeActions.expanded,
+    `Project create action toggled the whole-row disclosure: ${JSON.stringify(expandedWithDialog)}`)
+  await pressKey(cdp, 'Escape')
+  await waitForExpression(cdp, `!document.querySelector('.new-camp-dialog')`)
+
+  const keyboardFocused = await evaluate(cdp, `(() => {
+    const row = document.querySelector(${JSON.stringify(selector)})?.querySelector('.project-toggle-row')
+    row?.focus()
+    return document.activeElement === row && getComputedStyle(row).outlineStyle !== 'none'
+  })()`)
+  assert(keyboardFocused, 'Project whole-row control did not expose a visible keyboard focus target')
+  await pressKey(cdp, 'Enter')
+  await waitForExpression(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelector('.project-toggle-row')?.getAttribute('aria-expanded') === 'false'`)
+  await evaluate(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelector('.project-toggle-row')?.focus()`)
+  await pressKey(cdp, 'Enter')
+  await waitForExpression(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelectorAll('.camp-nav-row').length === 15`)
+}
+
+async function assertQuickChatPagination(cdp) {
+  const selector = '.navigation-projects .camp-nav-group[data-group="quick-chat"]'
+  const initial = await projectPaginationState(cdp, selector)
+  assert(initial.campCount === 5
+      && JSON.stringify(initial.labels) === JSON.stringify(['查看更多']),
+  `Quick Chat did not start from the shared five-Camp pagination contract: ${JSON.stringify(initial)}`)
+
+  await clickProjectControl(cdp, selector, '.show-more-camps')
+  await waitForExpression(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelectorAll('.camp-nav-row').length === 15`)
+  const expanded = await projectPaginationState(cdp, selector)
+  assert(JSON.stringify(expanded.labels) === JSON.stringify(['查看更多', '收起']),
+    `Quick Chat did not share the ten-Camp expansion controls: ${JSON.stringify(expanded)}`)
+
+  await clickProjectControl(cdp, selector, '.collapse-camps')
+  await waitForExpression(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelectorAll('.camp-nav-row').length === 5`)
+  await clickProjectControl(cdp, selector, '.show-more-camps')
+  await waitForExpression(cdp, `document.querySelector(${JSON.stringify(selector)})?.querySelectorAll('.camp-nav-row').length === 15`)
+}
+
+async function projectPaginationState(cdp, selector) {
+  return evaluate(cdp, `(() => {
+    const group = document.querySelector(${JSON.stringify(selector)})
+    const row = group?.querySelector('.project-toggle-row')
+    const menu = group?.querySelector('.group-menu-trigger')
+    const create = group?.querySelector('.group-create-button')
+    return {
+      campCount: group?.querySelectorAll('.camp-nav-row').length ?? -1,
+      labels: [...(group?.querySelectorAll('.show-more-camps, .collapse-camps') ?? [])]
+        .map((button) => button.textContent?.trim()),
+      expanded: row?.getAttribute('aria-expanded') === 'true',
+      current: row?.getAttribute('aria-current') === 'true',
+      rowIsSiblingOfActions: Boolean(row && menu && create
+        && row.parentElement === menu.parentElement
+        && row.parentElement === create.parentElement
+        && !row.contains(menu)
+        && !row.contains(create))
+    }
+  })()`)
+}
+
+async function clickProjectControl(cdp, groupSelector, controlSelector) {
+  const clicked = await evaluate(cdp, `(() => {
+    const control = document.querySelector(${JSON.stringify(groupSelector)})?.querySelector(${JSON.stringify(controlSelector)})
+    if (!(control instanceof HTMLButtonElement) || control.disabled) return false
+    control.click()
+    return true
+  })()`)
+  assert(clicked, `Could not click Project control ${controlSelector}`)
+}
+
+async function assertProjectPaginationCount(cdp, containerSelector, expectedCount) {
+  await waitForExpression(cdp, `(() => {
+    const group = document.querySelector(${JSON.stringify(containerSelector)})
+      ?.querySelector('.camp-nav-group:not([data-group="quick-chat"])')
+    return group?.querySelectorAll('.camp-nav-row').length === ${expectedCount}
+      && group.querySelector('.project-toggle-row')?.getAttribute('aria-expanded') === 'true'
+  })()`)
 }
 
 async function assertLongTitleIsTruncated(cdp, campId) {
@@ -760,46 +1024,6 @@ async function connectCdp(url) {
       socket.close()
     }
   }
-}
-
-function startCore(dataDirectory) {
-  const child = spawn(join(root, 'resources', 'bin', 'rovai-core'), ['--data-dir', dataDirectory], {
-    cwd: root,
-    stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env, TMPDIR: runtimeTempDir }
-  })
-  child.stderr.pipe(process.stderr)
-  const pending = new Map()
-  let nextId = 1
-  createInterface({ input: child.stdout }).on('line', (line) => {
-    const message = JSON.parse(line)
-    if (message.method) return
-    const request = pending.get(message.id)
-    if (!request) return
-    clearTimeout(request.timer)
-    pending.delete(message.id)
-    if (message.error) request.reject(new Error(message.error.message))
-    else request.resolve(message.result)
-  })
-  const request = (method, params = {}) => new Promise((resolveRequest, rejectRequest) => {
-    const id = nextId++
-    const timer = setTimeout(() => {
-      pending.delete(id)
-      rejectRequest(new Error(`Timed out waiting for ${method}`))
-    }, 30_000)
-    pending.set(id, { resolve: resolveRequest, reject: rejectRequest, timer })
-    child.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
-  })
-  const stop = async () => {
-    if (child.killed || child.exitCode !== null) return
-    child.stdin.end()
-    await Promise.race([
-      new Promise((resolveClose) => child.once('close', resolveClose)),
-      wait(3_000)
-    ])
-    if (child.exitCode === null) child.kill('SIGTERM')
-  }
-  return { request, stop }
 }
 
 function assert(condition, message) {

@@ -159,7 +159,7 @@ Session Charter 只说明：
 - 使用 bundled `rovai`；
 - 固定业务命令和 `<command> --help`；
 - `camp.message.send` 使用当前 Run Camp，不能传入 Camp ID；
-- Task mutation 不通知或启动成员，Task get/list 不等待或轮询；Public Message、Message
+- Task mutation 不通知或启动队员，Task get/list 不等待或轮询；Public Message、Message
   Delivery、Memory 和 read 工具保持各自稳定业务原则；
 - Dynamic Context 可能截断，应遵循 canonical `retrieveWith`；公共 A2A 遵循 Profile v2 的 bounded
   reference closure。

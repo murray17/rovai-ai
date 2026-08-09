@@ -294,7 +294,7 @@ function workspaceCapabilityStatus(
     return { label: '快速对话', detail: 'Rovai-ai 管理的快速对话工作区', tone: 'neutral' }
   }
   if (inspection === 'unavailable') {
-    return { label: '工作区不可用', detail: '目录当前无法读取；本次 Agent Run 不会启动。', tone: 'attention' }
+    return { label: '工作区不可用', detail: '目录当前无法读取；本次执行不会启动。', tone: 'attention' }
   }
   if (!inspection) {
     return { label: '正在检查', detail: '正在探测当前目录能力。', tone: 'neutral' }
@@ -1107,7 +1107,7 @@ export function CampWorkspace({
                                                 className="message-run-origin"
                                                 onClick={() => setExecutionDrawerRunId(sourceRun.id)}
                                               >
-                                                来自 Run · {memberById.get(sourceRun.agentId)?.displayName ?? sourceRun.agentId}
+                                                来自执行 · {memberById.get(sourceRun.agentId)?.displayName ?? sourceRun.agentId}
                                               </button>
                                             )}
                                             <div className="final-copy">
@@ -1202,7 +1202,7 @@ export function CampWorkspace({
           >
             <Tabs.List className="tabs-list sticky-tabs" aria-label="Camp 详情">
               <Tabs.Trigger value="tasks">任务 <small>{snapshot.tasks.length}</small></Tabs.Trigger>
-              <Tabs.Trigger value="context">上下文 <small>{snapshot.contextManifests.length}</small></Tabs.Trigger>
+              <Tabs.Trigger value="context">上下文投递 <small>{snapshot.contextManifests.length}</small></Tabs.Trigger>
               <Tabs.Trigger value="approvals">审批 {pendingApprovals.length > 0 && <b>{pendingApprovals.length}</b>}</Tabs.Trigger>
               <Tabs.Trigger value="audit">审计 <small>{snapshot.timeline.length}</small></Tabs.Trigger>
             </Tabs.List>
@@ -1217,7 +1217,8 @@ export function CampWorkspace({
               />
             </Tabs.Content>
             <Tabs.Content value="context" className="tab-scroll context-panel">
-              <section className="camp-context-controls" aria-label="Camp 协作设置">
+              <section className="camp-context-controls" aria-label="当前协作配置">
+                <h3>当前协作配置</h3>
                 <div className="context-control-heading">
                   <div>
                     <strong>{projectName ?? '快速对话'}</strong>
@@ -1242,6 +1243,10 @@ export function CampWorkspace({
                   </select>
                 </label>
               </section>
+              <div className="context-manifest-heading">
+                <strong>AgentRun 上下文投递清单</strong>
+                <small>冻结内容与投递状态</small>
+              </div>
               {snapshot.contextManifests.map((manifest) => {
                 const run = runById.get(manifest.agentRunId) ?? null
                 const deliveryStatus = manifest.delivery?.status === 'accepted'
@@ -1260,7 +1265,7 @@ export function CampWorkspace({
                     <dl className="context-facts">
                       <div><dt>Bootstrap</dt><dd>{manifest.bootstrap.deliveryMode === 'native_append' ? 'Native append' : 'First payload'}</dd></div>
                       <div><dt>已接受边界</dt><dd>seq {manifest.previousAcceptedPublicBoundarySequence ?? '—'}</dd></div>
-                      <div><dt>本次公共边界</dt><dd>seq {manifest.campMessageBoundarySequence}</dd></div>
+                      <div><dt>本次 AgentRun 公共边界</dt><dd>seq {manifest.campMessageBoundarySequence}</dd></div>
                       <div><dt>最近原文</dt><dd>{manifest.recentMessageCount} 条</dd></div>
                       <div><dt>原始用户消息</dt><dd>{manifest.originatingPublicUserMessageRef ? '已追溯' : '不适用'}</dd></div>
                       <div><dt>上下文投递</dt><dd>{manifest.contextDeliveryProfileVersion ? `Profile v${manifest.contextDeliveryProfileVersion}` : '历史格式'}</dd></div>
@@ -1271,7 +1276,7 @@ export function CampWorkspace({
 
                     {manifest.runNoticeRefs.length > 0 && (
                       <div className="context-subsection">
-                        <div className="context-subsection-title"><strong>Run Notices</strong><small>冻结时已知的异常行动事实</small></div>
+                        <div className="context-subsection-title"><strong>AgentRun Notices</strong><small>冻结时已知的异常行动事实</small></div>
                         {manifest.runNoticeRefs.map((notice) => <code key={notice}>{notice}</code>)}
                       </div>
                     )}
@@ -1286,7 +1291,7 @@ export function CampWorkspace({
                     <div className="context-subsection">
                       <div className="context-subsection-title">
                         <strong>Skill 投递</strong>
-                        <small>冻结本次 Run 的配置组、Revision 与实际投递路径</small>
+                        <small>冻结本次 AgentRun 的配置组、Revision 与实际投递路径</small>
                       </div>
                       {manifest.skillExposure.skills.map((skill) => {
                         const presentation = skillExposurePresentation(skill.status)
@@ -1345,14 +1350,14 @@ export function CampWorkspace({
 
                     <details className="context-digests">
                       <summary>完整性与版本</summary>
-                      <dl><div><dt>Dynamic Payload</dt><dd><code>{manifest.renderedPayloadDigest}</code></dd></div>{manifest.contextDeliveryProfileDigest && <div><dt>Delivery Profile</dt><dd><code>{manifest.contextDeliveryProfileDigest}</code></dd></div>}<div><dt>Session Charter</dt><dd><code>{manifest.bootstrap.sessionCharterDigest}</code></dd></div><div><dt>Memory Entrypoint</dt><dd><code>{manifest.bootstrap.memoryEntrypointDigest}</code></dd></div><div><dt>Collaboration</dt><dd><code>{manifest.collaborationStateDigest}</code></dd></div><div><dt>Run Notices</dt><dd><code>{manifest.runNoticeDigest}</code></dd></div><div><dt>Attachments</dt><dd><code>{manifest.attachmentDigest}</code></dd></div><div><dt>Skill</dt><dd><code>{manifest.skillExposureDigest}</code></dd></div><div><dt>MCP</dt><dd><code>{manifest.mcpExposureDigest}</code></dd></div></dl>
+                      <dl><div><dt>Dynamic Payload</dt><dd><code>{manifest.renderedPayloadDigest}</code></dd></div>{manifest.contextDeliveryProfileDigest && <div><dt>Delivery Profile</dt><dd><code>{manifest.contextDeliveryProfileDigest}</code></dd></div>}<div><dt>Session Charter</dt><dd><code>{manifest.bootstrap.sessionCharterDigest}</code></dd></div><div><dt>Memory Entrypoint</dt><dd><code>{manifest.bootstrap.memoryEntrypointDigest}</code></dd></div><div><dt>Collaboration</dt><dd><code>{manifest.collaborationStateDigest}</code></dd></div><div><dt>AgentRun Notices</dt><dd><code>{manifest.runNoticeDigest}</code></dd></div><div><dt>Attachments</dt><dd><code>{manifest.attachmentDigest}</code></dd></div><div><dt>Skill</dt><dd><code>{manifest.skillExposureDigest}</code></dd></div><div><dt>MCP</dt><dd><code>{manifest.mcpExposureDigest}</code></dd></div></dl>
                     </details>
                     {manifest.delivery?.lastError && <p className="context-alert">{manifest.delivery.lastError}</p>}
                   </article>
                 )
               })}
 
-              {snapshot.contextManifests.length === 0 && <EmptyInline text="AgentRun 首次调度后，冻结的上下文清单会出现在这里。" />}
+              {snapshot.contextManifests.length === 0 && <EmptyInline text="AgentRun 首次调度后，冻结的上下文投递清单会出现在这里。" />}
             </Tabs.Content>
             <Tabs.Content value="approvals" className="tab-scroll approvals-panel">
               {pendingApprovals.map((approval) => (
@@ -1576,13 +1581,13 @@ function RunPulse({
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
   if (visibleRuns.length === 0 && activeDeliveries.length === 0) return <></>
   return (
-    <div className="run-pulse" aria-live="polite" aria-label="Run Pulse">
+    <div className="run-pulse" aria-live="polite" aria-label="执行动态">
       <span className="run-pulse-mark" aria-hidden="true"><i /></span>
       <strong>{stopping ? '正在停止当前 CampTurn' : activeRuns.length > 0 ? '执行中' : '最近执行'}</strong>
-      <span className="run-pulse-count">{activeRuns.length || runs.length} Run</span>
+      <span className="run-pulse-count">{activeRuns.length || runs.length} 个执行</span>
       {activeDeliveries.length > 0 && <span className="run-pulse-deliveries">{activeDeliveries.length} 条协作投递</span>}
       {visibleRuns.length > 0 && (
-        <div className="run-pulse-list" role="list" aria-label="可查看的 Run">
+        <div className="run-pulse-list" role="list" aria-label="可查看的执行">
           {visibleRuns.map((run) => {
             const memberName = memberById.get(run.agentId)?.displayName ?? run.agentId
             const deliveryCount = deliveries.filter((delivery) =>
@@ -1655,14 +1660,14 @@ function ExecutionDrawer({
     <section ref={drawerRef} className="execution-drawer" role="region" aria-labelledby="execution-drawer-title" tabIndex={-1}>
         <header className="execution-drawer-header">
           <div>
-            <span className="eyebrow">RUN PROCESS</span>
-            <h2 id="execution-drawer-title">Execution Drawer</h2>
-            <p>查看 Run 过程、投递和运行时证据；停止权仍由当前 CampTurn 负责。</p>
+            <span className="eyebrow">AGENTRUN PROCESS</span>
+            <h2 id="execution-drawer-title">执行详情</h2>
+            <p>查看执行过程、投递和运行时证据；停止权仍由当前 CampTurn 负责。</p>
           </div>
-          <button type="button" className="quiet-button" onClick={onClose} aria-label="收起 Execution Drawer">收起</button>
+          <button type="button" className="quiet-button" onClick={onClose} aria-label="收起执行详情">收起</button>
         </header>
         <div className="execution-drawer-body">
-          <nav className="execution-run-list" aria-label="Run 列表">
+          <nav className="execution-run-list" aria-label="执行列表">
             {runs.slice().sort((left, right) => right.createdAt.localeCompare(left.createdAt)).map((candidate) => {
               const state = agentRunStateTag(candidate)
               return (
@@ -1688,7 +1693,7 @@ function ExecutionDrawer({
               )
             })}
           </nav>
-          <section className="execution-drawer-detail" aria-label="选中 Run 详情">
+          <section className="execution-drawer-detail" aria-label="所选执行详情">
             <div className="execution-detail-heading">
               <MemberAvatar
                 agentId={run.agentId}
@@ -2273,7 +2278,7 @@ function EmptyCampWelcome({
         这里已经保留当前工作区、队员和 Default Lead。发送第一条消息后，公共讨论、执行过程和最终结论会依次展开。
       </p>
 
-      <div className="empty-camp-context" aria-label="当前 Camp 上下文">
+      <div className="empty-camp-context" aria-label="当前协作配置">
         <span><i aria-hidden="true">⌂</i><strong>{projectLabel}</strong></span>
         <span className="empty-camp-lead">
           {lead && (
@@ -2317,7 +2322,7 @@ function StopOutcomeEvent({
         <span><i aria-hidden="true" />你已在 {item.elapsedLabel}后停止</span>
         {item.hasUnsettledExternalEffects && onOpenDrawer && (
           <button type="button" onClick={onOpenDrawer}>
-            结果待确认 · 查看 Execution Drawer
+            结果待确认 · 查看执行详情
           </button>
         )}
       </div>

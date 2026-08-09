@@ -57,7 +57,7 @@ Lazy Conversation allocation continues under ADR-0071 when an admitted execution
 
 Mention and Member Call fields carry Agent IDs and are named `agentId`, `senderAgentId` and
 `recipientAgentId`; there is no Member ID or public AgentProfile ID. Renderer tokens use
-`data-agent-id`. Model-visible formatting changes are frozen as Agent Run Context formatter version
+`data-agent-id`. Model-visible formatting changes are frozen as AgentRun Context formatter version
 8, with one shared Rust/TypeScript fixture.
 
 ### Clean break

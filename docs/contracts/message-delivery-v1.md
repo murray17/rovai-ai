@@ -32,7 +32,7 @@ lineageSnapshot: {rootDepth: 0, ancestorAgentIds: []}
 recipientPresentationSnapshot: {}
 ```
 
-这些值不因成员改名、离队、Runtime 恢复、正文重解析或重试而改变。`recipientCanonicalPosition`
+这些值不因队员改名、离队、Runtime 恢复、正文重解析或重试而改变。`recipientCanonicalPosition`
 只表示 canonical identity 集合中的位置，不是 Scheduler priority。
 
 ## 2. 状态与 dispatch phase

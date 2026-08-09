@@ -151,8 +151,15 @@ Renderer 使用版本化 localStorage 记录 `{ kind: "quick_chat" } | { kind: "
 - 点击 Project/快速对话文件夹或其中任意 Camp 更新当前项目；
 - 新 Main Window Session 读取最后成功保存值；directory Project 不存在时回退并写回快速对话；
 - 当前项目不是 Restorable Location、Core Project 实体或 Camp binding mutation；
-- 文件夹/名称只选择，独立 disclosure 只展开/收起，`＋` 只发起对应项目的新建；取消 Dialog 不
-  改变当前项目，成功进入 Camp 后才由 Camp binding 更新当前项目；
+- 点击 Project/快速对话目录整行依次选择当前项目并切换展开状态；整行通过
+  `aria-expanded / aria-controls` 和打开/关闭文件夹图标表达状态，不再显示独立 disclosure。
+  三点菜单与 `＋` 保持为右侧独立兄弟按钮且不触发整行交互；两者默认同时隐藏，在目录整行
+  Hover 或键盘 `focus-visible` 时同时显示；鼠标点击目录后移出不能因残留焦点继续显示，触摸环境
+  保持可见。`＋` 只发起对应项目的新建，取消 Dialog 不改变当前项目，成功进入 Camp 后才由
+  Camp binding 更新当前项目；
+- 普通 Project、置顶 Project 与 Quick Chat 的 Camp 列表统一以最近 5 条开始；“查看更多”每次按
+  `offset = 已读取服务端条目数 / limit = 10` 增量读取并按 Camp ID 去重。“收起”只恢复 5 条可见，
+  缓存、目录展开状态和 canonical group key 均保留；置顶位置变化不触发预取或状态迁移；
 - 当前项目使用稳定浅灰底，当前 Camp 使用更强品牌选中态。
 
 一键创建关闭时，三个入口打开同一 Dialog：左上入口预选当前项目，两个文件夹入口预选各自项目。
@@ -320,7 +327,7 @@ debounce，关闭窗口前再进行一次 best-effort flush；全屏 bounds 不�
 Reset 以当前窗口 bounds 匹配的显示器作为“当前显示器”，使用 `1440×920` 默认尺寸（受其 work
 area 限制）计算精确居中 bounds，并立即写回 `window-state.json`。它只调用 BrowserWindow 几何
 能力，不刷新 Renderer，因此不得改变当前 View、Camp、Member、Tab、Memory、Settings、Draft、
-Approval、Run、滚动或焦点链。
+Approval、AgentRun、滚动或焦点链。
 
 若 `mainWindow.isFullScreen()` 为 true：
 
