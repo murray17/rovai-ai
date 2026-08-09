@@ -29,6 +29,7 @@ import {
   type StructuredMentionEditorState,
   type StructuredMentionSelection
 } from './structured-mention-model'
+import { MemberAvatar } from './MemberAvatar'
 
 export interface StructuredMentionMember {
   agentId: string
@@ -82,6 +83,26 @@ export function structuredMentionOptions(
     options.push({ kind: 'member', member })
   }
   return options
+}
+
+export function StructuredMentionOptionAvatar({
+  option
+}: {
+  option: StructuredMentionOption
+}): JSX.Element {
+  if (option.kind === 'all_members') {
+    return <span className="mention-avatar" aria-hidden="true">@</span>
+  }
+  return (
+    <MemberAvatar
+      agentId={option.member.agentId}
+      avatarRef={option.member.avatarRef ?? null}
+      displayName={option.member.displayName}
+      size="mention"
+      decorative
+      className="mention-avatar"
+    />
+  )
 }
 
 export function mentionQueryAfterTypedText(
@@ -623,9 +644,7 @@ export function StructuredMentionComposer({
               onMouseEnter={() => setActiveOption(index)}
               onClick={() => chooseOption(option)}
             >
-              <span className="mention-avatar" aria-hidden="true">
-                {option.kind === 'all_members' ? '@' : option.member.displayName.slice(0, 1)}
-              </span>
+              <StructuredMentionOptionAvatar option={option} />
               <span>
                 <strong>{option.kind === 'all_members' ? '所有队员' : option.member.displayName}</strong>
                 <small>{option.kind === 'all_members' ? '@所有队员' : `@${option.member.displayName}`}</small>

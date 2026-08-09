@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import {
   StructuredMentionComposer,
+  StructuredMentionOptionAvatar,
   mentionQueryAfterNativeTextInput,
   mentionQueryAfterTypedText,
   shouldSubmitStructuredComposerOnEnter,
@@ -12,6 +13,7 @@ import {
 const members = [{
   agentId: 'agent_1',
   displayName: '新洛可',
+  avatarRef: 'rovai://member-avatar/builtin/luoke/v1',
   mentionable: true
 }, {
   agentId: 'agent_2',
@@ -85,6 +87,22 @@ describe('StructuredMentionComposer', () => {
       kind: 'member',
       member: members[0]
     }])
+  })
+
+  it('renders the controlled member icon in the candidate menu instead of a name initial', () => {
+    const memberMarkup = renderToStaticMarkup(createElement(StructuredMentionOptionAvatar, {
+      option: { kind: 'member', member: members[0] }
+    }))
+    const allMembersMarkup = renderToStaticMarkup(createElement(StructuredMentionOptionAvatar, {
+      option: { kind: 'all_members', label: '所有队员' }
+    }))
+
+    expect(memberMarkup).toContain('class="member-avatar mention-avatar"')
+    expect(memberMarkup).toContain('class="member-avatar-image"')
+    expect(memberMarkup).not.toContain('member-avatar-fallback')
+    expect(allMembersMarkup).toContain('class="mention-avatar"')
+    expect(allMembersMarkup).toContain('>@</span>')
+    expect(allMembersMarkup).not.toContain('member-avatar')
   })
 
   it('opens a query only from the actual typed @ input and advances at the same caret', () => {

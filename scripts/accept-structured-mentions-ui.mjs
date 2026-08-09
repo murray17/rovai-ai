@@ -158,8 +158,8 @@ try {
   await reloadRenderer(running.cdp)
   await openCamp(running.cdp, campId)
   const initialSnapshot = await request(running.cdp, 'camps.snapshot', { campId })
-  assert(initialSnapshot.schemaVersion === 24,
-    `Camp snapshot schema is not v24: ${initialSnapshot.schemaVersion}`)
+  assert(initialSnapshot.schemaVersion === 27,
+    `Camp snapshot schema is not v27: ${initialSnapshot.schemaVersion}`)
   assert(
     deepEqual(initialSnapshot.members.map((member) => member.agentId), targetMemberIds),
     `Camp does not contain exactly the three target members: ${JSON.stringify(initialSnapshot.members)}`
@@ -171,6 +171,8 @@ try {
   await focusEditorAtEnd(running.cdp)
   await running.cdp.send('Input.insertText', { text: expectedContent[0].text })
   let expectedEditorText = expectedContent[0].text
+  const candidateMenuCapture = join(outputDir, 'structured-mentions-candidate-menu.png')
+  let candidateMenuCaptured = false
   await waitForValue(async () => evaluate(running.cdp, `(() => {
     const editor = document.querySelector('#camp-message')
     return { text: editor?.textContent ?? null, html: editor?.innerHTML ?? null }
@@ -211,12 +213,24 @@ try {
         ariaExpanded: editor?.getAttribute('aria-expanded') ?? null,
         menu: Boolean(menu),
         options: [...(menu?.querySelectorAll('button[role="option"]') ?? [])]
-          .map((button) => button.querySelector('strong')?.textContent ?? null),
+          .map((button) => ({
+            name: button.querySelector('strong')?.textContent ?? null,
+            hasMemberAvatar: Boolean(button.querySelector('.member-avatar.mention-avatar')),
+            hasImage: Boolean(button.querySelector('.member-avatar.mention-avatar .member-avatar-image'))
+          })),
         events: window.__structuredMentionAcceptanceEvents ?? []
       }
-    })()`), (projection) => projection.text === `${expectedEditorText}@`
-      && projection.menu
-      && projection.options.includes(member.displayName), 10_000)
+    })()`), (projection) => {
+      const option = projection.options.find((candidate) => candidate.name === member.displayName)
+      return projection.text === `${expectedEditorText}@`
+        && projection.menu
+        && option?.hasMemberAvatar
+        && option.hasImage
+    }, 10_000)
+    if (!candidateMenuCaptured) {
+      await capture(running.cdp, candidateMenuCapture)
+      candidateMenuCaptured = true
+    }
     await mouseClickMentionOption(running.cdp, member.displayName)
     expectedEditorText += `@${member.displayName}`
     await waitForExpression(running.cdp,
@@ -495,6 +509,7 @@ try {
     appPath,
     outputDir,
     captures: {
+      candidateMenu: candidateMenuCapture,
       composer: composerCapture,
       composerPopover: composerPopoverCapture,
       sent: sentCapture,
