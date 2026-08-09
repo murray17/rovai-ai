@@ -43,7 +43,7 @@ ContextManifest 或 Runtime Input Delivery。
 | 4 | 有条件接受 | 只精简模型字段并分离 Evidence；保留 canonical 名称，不接受缩写 DTO、`more` 或第二套 locator 词汇 |
 | 5 | 接受 | Dynamic Context 使用 compact JSON并省略无意义默认值；不得改变值、顺序、选择或 Evidence |
 | 6 | 原分析有误，按修正版接受 | 单条截断提供 canonical `camp.read` continuation；整条省略只有非连续 sequence envelope 与 navigation hint，不伪造 range locator，不合并模型 aggregate 与 Manifest omissions |
-| 7 | 按事实/规则分层接受 | Run Notice 只含冻结 Task 关联事实；稳定 Task、polling 与额外 send 规则进入 Charter |
+| 7 | 按事实/规则分层接受 | Run Notice 只含冻结 Task 关联事实；稳定 Task/polling 规则与“额外 peer-coordination send”不变量进入 Charter，不限制 Runtime-specific 用户结果交付 |
 | 8 | 否决 | 不引入 Collaboration Delta、generation、routingSummary 或 capabilityTags；保留完整 Collaboration State v2 与 accepted digest |
 | 9 | 本次否决 | 不引入 estimated-token estimator、六类 token budget、优先级或选择变化；Profile v2 数值和算法不变 |
 | 10 | 否决 | Memory Entrypoint 内容、数量、选择和排序不变；不引入 pinned/high-priority 或无 query 的伪 `memory.search` locator |
@@ -126,8 +126,24 @@ Charter 承载以下稳定规则：
 - Task create/update 不通知或唤醒 assignee；需要立即行动时使用明确 send；
 - Task get/list 是快照，不是等待或轮询原语；
 - later Task changes 不 retarget 已 accepted Run；
-- 完成工作或 Task 本身不要求再次 send；
-- 只有其他队员还需要进一步行动或决策时，才做 additional peer-coordination send。
+- 完成 Task 或当前工作本身不要求额外的 peer-coordination send；
+- 只有目标 Member 需要该消息才能继续行动或作出决策时，才做额外的 peer-coordination send；
+- 这条规则不替代 Runtime-specific public-output delivery requirement，也不限制正常用户可见结果交付。
+
+最终实施规格必须把下面的 Charter 文案作为强制不变量，而不是把所有 `rovai send` 都解释为成员协作：
+
+```text
+Completing a Task or the current work does not by itself require an additional
+peer-coordination send. Use an additional `rovai send` for peer coordination
+only when a target Member needs the message to continue acting or decide.
+This rule does not replace Runtime-specific public-output delivery requirements.
+```
+
+因此必须保持：
+
+```text
+user-visible result delivery != additional peer-coordination send
+```
 
 ## 第 8–10 项：明确不进入本次切换
 

@@ -92,9 +92,18 @@ Dynamic Context position, and is never silently truncated or evicted as history.
 ### Stable rules and per-Run facts are not duplicated
 
 The Session Charter owns stable Task and coordination rules: Task create/update does not notify or wake an assignee;
-Task get/list is not a waiting or polling primitive; later Task changes do not retarget an already accepted Run;
-finishing work or a Task does not by itself require another send; and an additional peer-coordination send is used
-only when another member needs further action or a decision.
+Task get/list is not a waiting or polling primitive; and later Task changes do not retarget an already accepted Run.
+It also publishes this mandatory invariant verbatim:
+
+```text
+Completing a Task or the current work does not by itself require an additional
+peer-coordination send. Use an additional `rovai send` for peer coordination
+only when a target Member needs the message to continue acting or decide.
+This rule does not replace Runtime-specific public-output delivery requirements.
+```
+
+This gate applies only to an additional peer-coordination send. It does not restrict `rovai send` when a Runtime's
+public-output contract requires that command to deliver an ordinary user-visible result.
 
 An A2A Task Run Notice carries only the frozen per-Run fact:
 

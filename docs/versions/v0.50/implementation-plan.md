@@ -81,6 +81,8 @@ last_updated: 2026-08-09
 
 - [x] 第 4–13 项逐项挑战完成，确认与否决项已归档；
 - [x] ADR-0147 冻结四层权威、无损投影和 Redelivery v2 的长期边界；
+- [ ] 最终实施规格逐字冻结 additional peer-coordination send Charter 不变量，并明确它不替代
+  Runtime-specific public-output delivery requirement；
 - [ ] 最终 DTO、Formatter/Manifest Evidence、clean-break 影响和验收矩阵形成独立实施规格并获批；
 - [ ] 获得明确代码实施授权；
 - [ ] 最终 v0.50 实现与全量验证完成。

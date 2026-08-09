@@ -157,8 +157,9 @@ Context Source State、Model Context Projection、ContextManifest Evidence 与 R
 Collaboration Delta、estimated-token budget、
 Memory reprioritization、字段缩写或第 13 项建议格式。
 
-Session Charter 将稳定 Task/polling/additional-send 规则与 per-Run Task Notice 分开，并移除标题中的
-`(v0.47)`；Redelivery 使用带 `reason="context_compaction"` 的 v2 envelope 和一条不可省略的 Core
+Session Charter 将稳定 Task/polling 规则和“额外 peer-coordination send”不变量与 per-Run Task Notice
+分开；该不变量不限制 Runtime-specific 用户可见结果交付。Charter 同时移除标题中的 `(v0.47)`；
+Redelivery 使用带 `reason="context_compaction"` 的 v2 envelope 和一条不可省略的 Core
 recovery authority 语句。实现字段、fixture、clean-break 和验收矩阵必须另行形成并获批，当前未授权
 据此写代码。
 

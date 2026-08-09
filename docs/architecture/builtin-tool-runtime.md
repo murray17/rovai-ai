@@ -171,11 +171,23 @@ Session Charter 只说明：
 - 固定业务命令和 `<command> --help`；
 - `camp.message.send` 使用当前 Run Camp，不能传入 Camp ID；
 - Task mutation 不通知或启动队员，Task get/list 不等待或轮询；later Task changes 不 retarget 已
-  accepted Run；完成工作或 Task 不自动要求 send，只有队员需要进一步行动或决策时才 additional send；
+  accepted Run；
 - Public Message、Message Delivery、Memory 和 read 工具保持各自稳定业务原则；
 - Dynamic Context 可能截断或省略：单条正文只使用可直接提交给 canonical operation schema 的
   executable continuation；整条历史的 sequence envelope 只是 navigation hint；公共 A2A 遵循
   Profile v2 的 bounded reference closure。
+
+Charter 对额外成员协作发送使用固定强制文案：
+
+```text
+Completing a Task or the current work does not by itself require an additional
+peer-coordination send. Use an additional `rovai send` for peer coordination
+only when a target Member needs the message to continue acting or decide.
+This rule does not replace Runtime-specific public-output delivery requirements.
+```
+
+该规则只约束 additional peer-coordination send，不把 `rovai send` 的全部用途收窄为成员协作。Runtime
+需要通过 `rovai send` 交付普通用户可见结果时，仍遵守其 public-output delivery contract。
 
 Bootstrap 不含完整 Schema、Envelope、receipt、catalog digest、socket、process token、lease、
 AgentRun ID、epoch、Camp ID 或 Native Binding ID。只有无损映射到当前 schema 的完整 operation/input
