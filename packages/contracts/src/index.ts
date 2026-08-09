@@ -1159,10 +1159,18 @@ export type RestorableLocation =
   | { kind: 'members'; agentId: string | null; tab: MemberWorkspaceLocationTab }
   | { kind: 'memory' }
 
+export interface NewConversationDefaults {
+  memberAgentIds: string[]
+  defaultLeadAgentId: string
+}
+
 export interface GeneralPreferencesSnapshot {
-  schemaVersion: 1
+  schemaVersion: 2
   startupLocationMode: StartupLocationMode
   lastSettingsSection: SettingsSection
+  newConversationDefaults: NewConversationDefaults | null
+  newConversationDefaultsRequireConfirmation: boolean
+  oneClickNewConversationEnabled: boolean
 }
 
 export interface DesktopStartupSnapshot {
@@ -1206,6 +1214,9 @@ export interface GeneralPreferencesApi {
   get(): Promise<GeneralPreferencesSnapshot>
   setStartupLocationMode(mode: StartupLocationMode): Promise<GeneralPreferencesSnapshot>
   setLastSettingsSection(section: SettingsSection): Promise<GeneralPreferencesSnapshot>
+  setNewConversationDefaults(defaults: NewConversationDefaults): Promise<GeneralPreferencesSnapshot>
+  setOneClickNewConversationEnabled(enabled: boolean): Promise<GeneralPreferencesSnapshot>
+  invalidateNewConversationDefaults(): Promise<GeneralPreferencesSnapshot>
 }
 
 export interface LoginItemApi {

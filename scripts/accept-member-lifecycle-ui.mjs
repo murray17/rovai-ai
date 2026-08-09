@@ -112,13 +112,13 @@ try {
     createEnabled: document.querySelector('.new-camp-dialog .primary-button')?.disabled === false,
     memberSummary: document.querySelector('.new-camp-picker-trigger.member-trigger strong')?.textContent,
     lead: document.querySelector('.new-camp-lead-field select')?.value,
-    mode: document.querySelector('.new-camp-mode-card.selected strong')?.textContent
+    collaborationRemoved: !document.querySelector('.new-camp-dialog')?.textContent?.includes('协作方式')
   })`)
   assert(
     freshDialog.createEnabled
       && freshDialog.memberSummary === '已选择 4 位队员'
       && freshDialog.lead === 'agent_1'
-      && freshDialog.mode === '并肩协作',
+      && freshDialog.collaborationRemoved,
     `Fresh configured-Camp Dialog defaults are unexpected: ${JSON.stringify(freshDialog)}`
   )
   await setTheme(running.cdp, 'night')

@@ -12,6 +12,7 @@ import type {
   CoreEvent,
   DesktopStartupSnapshot,
   EventBatch,
+  GeneralPreferencesSnapshot,
   HealthStatus,
   InAppNotificationInbox,
   InAppNotificationView,
@@ -74,6 +75,17 @@ import {
   restoredMemberId,
   startupTargetFromSnapshot
 } from './startup-location'
+import {
+  currentProjectExists,
+  currentProjectForCamp,
+  currentProjectGroup,
+  currentProjectWorkspace,
+  defaultsNeedInvalidation,
+  persistCurrentProject,
+  readCurrentProject,
+  resolveNewConversationDefaults,
+  type CurrentProject
+} from './new-conversation-preferences'
 
 export { allNavigationCamps }
 
@@ -194,6 +206,8 @@ export function App(): React.JSX.Element {
   const [memberTab, setMemberTab] = useState<MemberWorkspaceTab>('identity')
   const [memberRuntimeFocusRequest, setMemberRuntimeFocusRequest] = useState(0)
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general')
+  const [generalPreferences, setGeneralPreferences] = useState<GeneralPreferencesSnapshot | null>(null)
+  const [currentProject, setCurrentProject] = useState<CurrentProject>(() => readCurrentProject())
   const [activeCampId, setActiveCampId] = useState<string | null>(null)
   const [notificationOpen, setNotificationOpen] = useState(false)
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0)
@@ -201,6 +215,8 @@ export function App(): React.JSX.Element {
   const [notificationFocus, setNotificationFocus] = useState<NotificationFocusTarget | null>(null)
   const [newConversationOpen, setNewConversationOpen] = useState(false)
   const [newConversationInitialWorkspace, setNewConversationInitialWorkspace] = useState<WorkspaceSelection | null>(null)
+  const [newConversationInitialSelection, setNewConversationInitialSelection] = useState<GeneralPreferencesSnapshot['newConversationDefaults']>(null)
+  const [newConversationAttention, setNewConversationAttention] = useState<string | null>(null)
   const [activeWorkspaceInspection, setActiveWorkspaceInspection] = useState<WorkspaceInspection | 'unavailable' | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -222,6 +238,7 @@ export function App(): React.JSX.Element {
   const startupLastAttemptedOverview = useRef(-1)
   const startupResolvedSessionId = useRef<string | null>(null)
   const pendingRestorableLocation = useRef<RestorableLocation | null>(null)
+  const invalidatingNewConversationDefaults = useRef(false)
   const campCreationPreflight = useMemo(
     () => campCreationPreflightFromAgents(agents),
     [agents]
@@ -316,6 +333,10 @@ export function App(): React.JSX.Element {
     setInstallations(nextInstallations)
   }, [])
 
+  const loadGeneralPreferences = useCallback(async (): Promise<void> => {
+    setGeneralPreferences(await window.rovai.generalPreferences.get())
+  }, [])
+
   const loadNavigation = useCallback(async (): Promise<NavigationSnapshot> => {
     const nextNavigation = await window.rovai.request<NavigationSnapshot>('navigation.snapshot')
     setNavigation(nextNavigation)
@@ -381,6 +402,9 @@ export function App(): React.JSX.Element {
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
       if (snapshot.schemaVersion !== 25) throw new Error('Camp snapshot schema is incompatible')
       if (selectionGeneration !== campSelectionGeneration.current) return
+      const snapshotProject = currentProjectForCamp(snapshot.camp)
+      setCurrentProject(snapshotProject)
+      persistCurrentProject(snapshotProject)
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
       await afterNextPaint()
@@ -461,6 +485,29 @@ export function App(): React.JSX.Element {
   }, [loadStartupSnapshot])
 
   useEffect(() => {
+    void loadGeneralPreferences().catch((nextError) => setError(errorMessage(nextError)))
+  }, [loadGeneralPreferences])
+
+  useEffect(() => {
+    if (
+      !defaultsNeedInvalidation(generalPreferences, agents)
+      || invalidatingNewConversationDefaults.current
+    ) return
+    invalidatingNewConversationDefaults.current = true
+    void window.rovai.generalPreferences.invalidateNewConversationDefaults()
+      .then(setGeneralPreferences)
+      .catch((nextError) => setError(errorMessage(nextError)))
+      .finally(() => { invalidatingNewConversationDefaults.current = false })
+  }, [agents, generalPreferences])
+
+  useEffect(() => {
+    if (!navigation || currentProjectExists(navigation, currentProject)) return
+    const fallback: CurrentProject = { kind: 'quick_chat' }
+    setCurrentProject(fallback)
+    persistCurrentProject(fallback)
+  }, [currentProject, navigation])
+
+  useEffect(() => {
     if (
       !startupSnapshot
       || !navigation
@@ -531,6 +578,9 @@ export function App(): React.JSX.Element {
         if (cancelled) return
         campSelectionGeneration.current += 1
         campEventSequenceMarker.current = snapshot.throughGlobalSequence
+        const snapshotProject = currentProjectForCamp(snapshot.camp)
+        setCurrentProject(snapshotProject)
+        persistCurrentProject(snapshotProject)
         setActiveCampId(target.campId)
         setCampSnapshot(snapshot)
         setNotificationFocus(null)
@@ -667,6 +717,9 @@ export function App(): React.JSX.Element {
   const activeCamp = navigation
     ? allNavigationCamps(navigation).find((camp) => camp.id === activeCampId) ?? null
     : null
+  const selectedCurrentProject = currentProjectGroup(navigation, currentProject)
+  const currentProjectKey = selectedCurrentProject?.projectKey ?? 'quick-chat'
+  const currentProjectLabel = selectedCurrentProject?.name ?? '快速对话'
   const activeProjectPath = activeCamp?.projectBindingKind === 'directory'
     ? activeCamp.projectPath
     : campSnapshot?.camp.id === activeCampId
@@ -797,12 +850,50 @@ export function App(): React.JSX.Element {
     }
   }
 
-  const openNewConversation = (workspace: WorkspaceSelection | null): void => {
+  const chooseCurrentProject = (nextProject: CurrentProject): void => {
+    setCurrentProject(nextProject)
+    persistCurrentProject(nextProject)
+  }
+
+  const openNewConversation = (
+    workspace: WorkspaceSelection | null,
+    attentionMessage: string | null = null
+  ): void => {
     newConversationReturnFocus.current = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null
     setNewConversationInitialWorkspace(workspace)
+    setNewConversationInitialSelection(generalPreferences?.newConversationDefaults ?? null)
+    setNewConversationAttention(attentionMessage)
     setNewConversationOpen(true)
+  }
+
+  const requestNewConversation = async (workspace: WorkspaceSelection | null): Promise<void> => {
+    if (busy === 'create-camp') return
+    const defaults = resolveNewConversationDefaults(generalPreferences, agents)
+    if (generalPreferences?.oneClickNewConversationEnabled && defaults) {
+      try {
+        await createCamp({
+          name: null,
+          workspace: workspace ? { projectPath: workspace.projectPath } : null,
+          memberAgentIds: defaults.defaults.memberAgentIds,
+          defaultLeadAgentId: defaults.defaults.defaultLeadAgentId,
+          collaborationMode: 'peer'
+        })
+        return
+      } catch (nextError) {
+        openNewConversation(
+          workspace,
+          `一键创建未完成：${errorMessage(nextError)} 请重新确认项目、队员与 Lead。`
+        )
+        return
+      }
+    }
+    const attentionMessage = generalPreferences?.newConversationDefaults
+      && !defaults
+      ? '默认队员或 Lead 需要重新确认，请检查后再创建。'
+      : null
+    openNewConversation(workspace, attentionMessage)
   }
 
   const chooseWorkspaceDirectory = async (): Promise<WorkspaceSelection | null> => {
@@ -818,7 +909,7 @@ export function App(): React.JSX.Element {
     setError(null)
     try {
       const workspace = await chooseWorkspaceDirectory()
-      if (workspace) openNewConversation(workspace)
+      if (workspace) await requestNewConversation(workspace)
     } catch (nextError) {
       setError(errorMessage(nextError))
     }
@@ -905,11 +996,14 @@ export function App(): React.JSX.Element {
   }
 
   const beginNewConversation = (): void => {
-    void requestMemberTransition(() => openNewConversation(null))
+    void requestMemberTransition(() => requestNewConversation(
+      currentProjectWorkspace(navigation, currentProject)
+    ))
   }
 
   const chooseCamp = (camp: NavigationCampItem): void => {
     void requestMemberTransition(() => {
+      chooseCurrentProject(currentProjectForCamp(camp))
       lastMainView.current = 'camp'
       setNotificationFocus(null)
       return activateCamp(camp.id)
@@ -1091,9 +1185,9 @@ export function App(): React.JSX.Element {
     }
   }
 
-  const createCamp = async (
+  async function createCamp(
     draft: Omit<CreateCampRequest, 'commandId'>
-  ): Promise<void> => {
+  ): Promise<void> {
     setBusy('create-camp')
     try {
       const result = await window.rovai.request<StoredCommandResult>('camps.create', {
@@ -1305,6 +1399,8 @@ export function App(): React.JSX.Element {
         state={startupGateVisible ? 'loading' : state}
         navigation={navigation}
         activeCampId={activeCampId}
+        currentProjectKey={currentProjectKey}
+        creatingConversation={busy === 'create-camp'}
         pins={navigationPins}
         pinnedCampItems={pinnedCampItems}
         settingsSection={settingsSection}
@@ -1334,6 +1430,14 @@ export function App(): React.JSX.Element {
         onSettingsSectionChange={chooseSettingsSection}
         onSettingsBack={closeSettings}
         onOpenProject={() => void openProject()}
+        onSelectProject={(project) => chooseCurrentProject(project
+          ? { kind: 'directory', projectPath: project.projectPath }
+          : { kind: 'quick_chat' })}
+        onCreateInProject={(project) => {
+          void requestMemberTransition(() => requestNewConversation(project
+            ? { name: project.name, projectPath: project.projectPath }
+            : null))
+        }}
         onCamp={chooseCamp}
         onTogglePin={toggleNavigationPin}
         onRename={renameCamp}
@@ -1431,6 +1535,9 @@ export function App(): React.JSX.Element {
             appearance={appearance}
             health={health}
             agents={agents}
+            generalPreferences={generalPreferences}
+            currentProjectLabel={currentProjectLabel}
+            onGeneralPreferencesChange={setGeneralPreferences}
             installations={installations}
             readyCount={readyCount}
             busy={busy}
@@ -1472,6 +1579,8 @@ export function App(): React.JSX.Element {
       <NewConversationDialog
         open={newConversationOpen}
         initialWorkspace={newConversationInitialWorkspace}
+        initialSelection={newConversationInitialSelection}
+        attentionMessage={newConversationAttention}
         projects={navigation?.projects ?? []}
         preflight={campCreationPreflight}
         agents={agents}
@@ -1617,6 +1726,9 @@ export function SettingsView({
   appearance,
   health,
   agents,
+  generalPreferences,
+  currentProjectLabel,
+  onGeneralPreferencesChange,
   installations,
   readyCount,
   busy,
@@ -1629,6 +1741,9 @@ export function SettingsView({
   appearance: AppearanceSnapshot
   health: HealthStatus | null
   agents: AgentProfile[]
+  generalPreferences?: GeneralPreferencesSnapshot | null
+  currentProjectLabel?: string
+  onGeneralPreferencesChange?(preferences: GeneralPreferencesSnapshot): void
   installations: AdapterInstallation[]
   readyCount: number
   busy: string | null
@@ -1641,7 +1756,14 @@ export function SettingsView({
   return (
     <div className="settings-workbench">
       <div className={`settings-panel settings-panel-${section}`}>
-        {section === 'general' && <GeneralSettings />}
+        {section === 'general' && (
+          <GeneralSettings
+            agents={agents}
+            initialPreferences={generalPreferences}
+            currentProjectLabel={currentProjectLabel}
+            onPreferencesChange={onGeneralPreferencesChange}
+          />
+        )}
         {section === 'skills' && <SkillSettings />}
         {section === 'mcp' && <McpSettings agents={agents} />}
         {section === 'runtime' && (

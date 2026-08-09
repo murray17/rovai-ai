@@ -199,8 +199,8 @@ try {
   await waitForExpression(second.cdp, `(() => {
     const dialog = document.querySelector('.new-camp-dialog')
     return dialog?.querySelector('h2')?.textContent === '创建新对话'
-      && dialog.textContent.includes('并肩协作')
-      && dialog.textContent.includes('暂未开放')
+      && !dialog.textContent.includes('协作方式')
+      && !dialog.textContent.includes('暂未开放')
       && dialog.querySelector('.primary-button')?.textContent?.trim() === '创建'
   })()`)
   const newConversationCapture = join(outputDir, 'new-conversation-no-default-recipient.png')

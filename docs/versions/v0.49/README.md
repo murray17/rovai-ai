@@ -8,7 +8,7 @@ implementation_status: in_progress
 last_updated: 2026-08-09
 ---
 
-# Rovai-ai v0.49：通用与启动设置、双人追问 Skill
+# Rovai-ai v0.49：通用、启动与新对话设置、双人追问 Skill
 
 > 当前状态：通用与启动设置已完成 Desktop Shell、Preload、Renderer 生产实现、自动回归与打包 App
 > 的主窗口会话验收；已安装 App 的真实登录项开关、系统授权态和外接显示器矩阵仍待最终人工验收。
@@ -29,14 +29,28 @@ v0.49 在设置侧栏顶部增加“通用”，形成以下固定顺序：
 6. 通知；
 7. 诊断。
 
-“通用”页面管理三类桌面体验：
+“通用”页面管理四类桌面体验：
 
 - 使用 macOS 登录项开启或关闭“登录时启动 Rovai-ai”；
 - 选择每个新的 Main Window Session 打开 Quick Chat 还是最近的 Restorable Location；
+- 显式保存新对话默认队员与 Lead，并可在确认后开启一键创建；
 - 说明窗口大小与位置会自动保存，并提供“重置窗口大小与位置”。
 
 再次进入设置时继续打开用户最后选择的设置分类；设置本身以及 Dialog、Drawer、命令面板、
 Approval、Toast 等临时表面不成为启动目标。
+
+## 新对话与当前项目
+
+默认队员/Lead 在全新安装时保持未配置，只有满足约束并点击“保存默认配置”后才原子生效。一键
+创建默认关闭，每次开启都显示包含当前项目、队员与 Lead 的明确确认 Dialog。队员永久移除、暂时
+离队、缺失或 Lead 失效时，保存配置锁存为需要重新确认；不删除队员、不替换 Lead、不自动关闭
+开关，Runtime readiness 不参与结构有效性判断。
+
+Renderer 持久维护当前项目。文件夹/名称只选择，disclosure 只展开，`＋` 只按对应项目创建；取消
+Dialog 不改变当前项目。关闭一键创建时所有入口打开同一个创建 Dialog；开启且配置有效时直接
+使用目标项目、默认队员、默认 Lead 和固定 `peer` 语义创建空 Camp，失败或失效则保留项目回退
+Dialog。创建 Dialog 删除全部协作方式 UI，并把可选名称升级为可聚焦折叠面板、Unicode 80 字计数
+与清空操作；Core/SQLite 的既有 collaboration mode 合同不变。
 
 ## 官方双人追问 Skill
 
@@ -112,7 +126,8 @@ Snapshot 或 Renderer 内存状态判断。
 
 ## 数据与架构边界
 
-v0.49 的启动模式、最后设置分类、Restorable Location 和窗口几何只属于 Electron Desktop Shell：
+v0.49 的启动模式、最后设置分类、新对话默认配置、Restorable Location 和窗口几何只属于
+Electron Desktop Shell；当前项目属于 Renderer 本地偏好：
 
 - 不进入 Rust Core 或 SQLite；
 - 不产生 Camp event、Task mutation、AgentRun、Native Session、Approval 或 audit；
@@ -131,7 +146,7 @@ Shell 内部演进的产品偏好与 Renderer 交互。官方 Skill 集合和自
 - 关闭窗口时退出或留在后台的设置；
 - 自动批准或恢复未完成执行的开关；
 - 默认模型、Runtime、权限或 Memory 配置；
-- 默认打开某个 Project；
+- 把某个固定 Project 配置为启动后一级页面；当前项目只服务新建目标，不改变启动路由；
 - 系统通知规则；
 - 自动更新。
 
@@ -150,6 +165,9 @@ Shell 内部演进的产品偏好与 Renderer 交互。官方 Skill 集合和自
 7. 对 General 设置进行读写、重置窗口和解析启动位置不会新增 Camp、Task、Run 或 audit 事实。
 8. 新 Core 安装四个官方 Skill，全部默认启用且未分组；两个 Duo Revision 均携带完整运行依赖，
    Skill 结构校验、Core bundled installation test、Skill smoke 的默认集合断言和文档校验通过。
+9. 默认配置必须显式原子保存；Member lifecycle 失效锁存且不自动修补，Runtime readiness 不误伤；
+10. 当前项目跨新主窗口恢复，选择/展开/`＋` 独立；三类入口按开关直接创建或回退同一 Dialog；
+11. 创建 Dialog 不再出现任何协作方式文案，Footer 无模式摘要，名称面板具备聚焦、计数和清空。
 
 实施检查点与证据入口见[实施与验收计划](implementation-plan.md)，精确 UI 与 Shell 合同见
 [生产设计](production-design.md)。

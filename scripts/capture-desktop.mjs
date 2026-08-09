@@ -433,8 +433,8 @@ try {
         createLabel: document.querySelector('.new-camp-dialog .primary-button')?.textContent?.trim(),
         createEnabled: document.querySelector('.new-camp-dialog .primary-button')?.disabled === false,
         focusedProject: document.activeElement?.classList.contains('new-camp-picker-trigger'),
-        peer: document.querySelector('.new-camp-dialog')?.textContent?.includes('并肩协作'),
-        unavailable: document.querySelector('.new-camp-dialog')?.textContent?.includes('暂未开放'),
+        collaborationRemoved: !document.querySelector('.new-camp-dialog')?.textContent?.includes('协作方式')
+          && !document.querySelector('.new-camp-dialog')?.textContent?.includes('暂未开放'),
         horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth
       })`,
       returnByValue: true
@@ -444,8 +444,7 @@ try {
         || quickChatEntryState?.createLabel !== '创建'
         || !quickChatEntryState?.createEnabled
         || !quickChatEntryState?.focusedProject
-        || !quickChatEntryState?.peer
-        || !quickChatEntryState?.unavailable
+        || !quickChatEntryState?.collaborationRemoved
         || quickChatEntryState?.horizontalOverflow) {
       throw new Error(`New conversation did not open the configured Camp Dialog: ${JSON.stringify(quickChatEntryState)}`)
     }

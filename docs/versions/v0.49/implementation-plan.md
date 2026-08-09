@@ -46,8 +46,8 @@ last_updated: 2026-08-09
 
 - [x] 在 `apps/desktop/src/main/` 增加纯函数化 `general-preferences` 与
   `restorable-location` 模块；
-- [x] `general-preferences.json` schema v1 只保存 `startupLocationMode` 与
-  `lastSettingsSection`，默认 `last_location/general`；
+- [x] `general-preferences.json` 从 schema v1 无损迁移至 v2；保留 `startupLocationMode` 与
+  `lastSettingsSection`，新增原子默认队员/Lead、失效锁存和一键创建开关；
 - [x] `restorable-location.json` schema v1 只接受 Quick Chat、Camp ID、Member ID/Tab 或
   Memory，拒绝 Settings 和所有临时 surface；
 - [x] 缺文件使用安全默认，malformed JSON、未知 schema、非法 enum/ID/shape 均不抛到 App
@@ -93,13 +93,30 @@ last_updated: 2026-08-09
   “通用 / Skill / MCP / Agent 运行时 / 外观 / 通知 / 诊断”；
 - [x] 全新安装设置默认 General；普通设置入口读取 `lastSettingsSection`，选择分类立即原子保存；
 - [x] 明确深链到 Agent 运行时等分类时同步保存；非法/损坏分类回退 General；
-- [x] SettingsView 增加单一 `Settings / General` 页头、启动区与窗口区，不增加嵌套导航或 Hero 卡；
+- [x] SettingsView 增加单一 `Settings / General` 页头、启动/新对话/窗口区，不增加嵌套导航或 Hero 卡；
 - [x] Radio 使用原生 `fieldset/legend` 语义，默认“上次使用的位置”，保存中防重入，失败恢复系统值；
 - [x] 固定显示“只决定启动后显示的位置”的恢复语义说明；
 - [x] “返回 App”继续恢复当前会话进入设置前的页面、Camp、Member 与 Tab，设置本身不提交
   Restorable Location；
 - [x] Renderer tests 断言七项顺序、General 默认、最后分类恢复、页面文案、Radio 语义、错误保留
   与设置前页面返回。
+
+## Checkpoint 4N：新对话默认配置、当前项目与创建入口
+
+- [x] 全新安装默认配置保持 null；队员/Lead 只形成草稿，满足至少一位在队队员和 Lead membership
+  后由“保存默认配置”原子提交，未保存草稿不被创建入口读取；
+- [x] Member 永久移除、away、缺失或 Lead 失效只锁存 `newConversationDefaultsRequireConfirmation`，
+  不删 ID、不换 Lead、不关闭已开启 Switch；重新归队仍须显式保存，Runtime readiness 不参与；
+- [x] 一键创建默认关闭，每次开启都使用非 danger 明确确认 Dialog；`?` 支持 click/focus/Escape，
+  开启后持续显示有效摘要或 attention 回退说明；
+- [x] Renderer 持久当前项目；Project/Quick Chat/Camp 点击更新，缺失路径回退 Quick Chat；文件夹选择、
+  disclosure 和 `＋` 为独立控件，取消创建不改当前项目；
+- [x] 左上入口与两个文件夹 `＋` 按开关统一执行 Dialog 或直接 `camps.create`，失败/失效保留目标项目
+  回退 Dialog；创建请求继续固定 `collaborationMode: peer`；
+- [x] 创建 Dialog 删除协作方式区、禁用项与 Footer 摘要，说明改为“确定这段对话的工作环境与队员。”；
+  可选名称增加展开聚焦、规范化摘要、Unicode scalar 计数、80 字硬边界和清空按钮；
+- [x] Main store、Preload、Renderer helper 与静态 UI 测试覆盖 v1 migration、原子约束、失效锁存、
+  Runtime 负向边界、当前项目解析、名称边界及新侧栏语义；旧 UI acceptance 断言同步移除模式文案。
 
 ## Checkpoint 5：macOS Login Item Registration
 

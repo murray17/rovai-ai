@@ -38,6 +38,7 @@ import { RUNTIME_RENDERER_CORE_METHODS } from './runtime-core-methods'
 import { prewarmMacOpenPanel } from './open-panel-prewarm'
 import {
   GeneralPreferencesStore,
+  isNewConversationDefaults,
   isSettingsSection,
   isStartupLocationMode
 } from './general-preferences'
@@ -377,6 +378,20 @@ ipcMain.handle('rovai:general-preferences-set-startup', (_event, mode: unknown) 
 ipcMain.handle('rovai:general-preferences-set-section', (_event, section: unknown) => {
   if (!isSettingsSection(section)) throw new Error('Unsupported settings section')
   return requireGeneralPreferences().setLastSettingsSection(section as SettingsSection)
+})
+
+ipcMain.handle('rovai:general-preferences-set-new-conversation-defaults', (_event, defaults: unknown) => {
+  if (!isNewConversationDefaults(defaults)) throw new Error('Invalid default new conversation configuration')
+  return requireGeneralPreferences().setNewConversationDefaults(defaults)
+})
+
+ipcMain.handle('rovai:general-preferences-set-one-click-new-conversation', (_event, enabled: unknown) => {
+  if (typeof enabled !== 'boolean') throw new Error('Invalid one-click new conversation preference')
+  return requireGeneralPreferences().setOneClickNewConversationEnabled(enabled)
+})
+
+ipcMain.handle('rovai:general-preferences-invalidate-new-conversation-defaults', () => {
+  return requireGeneralPreferences().invalidateNewConversationDefaults()
 })
 
 ipcMain.handle('rovai:login-item-get', () => loginItems.get())

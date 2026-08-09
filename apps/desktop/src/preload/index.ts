@@ -54,6 +54,15 @@ const api: RovaiApi = {
     },
     setLastSettingsSection(section: SettingsSection) {
       return ipcRenderer.invoke('rovai:general-preferences-set-section', section)
+    },
+    setNewConversationDefaults(defaults) {
+      return ipcRenderer.invoke('rovai:general-preferences-set-new-conversation-defaults', defaults)
+    },
+    setOneClickNewConversationEnabled(enabled: boolean) {
+      return ipcRenderer.invoke('rovai:general-preferences-set-one-click-new-conversation', enabled)
+    },
+    invalidateNewConversationDefaults() {
+      return ipcRenderer.invoke('rovai:general-preferences-invalidate-new-conversation-defaults')
     }
   },
   loginItem: {

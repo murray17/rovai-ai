@@ -80,18 +80,19 @@ try {
       const text = dialog?.textContent ?? ''
       const buttons = [...(dialog?.querySelectorAll('button') ?? [])]
       const primary = buttons.find((button) => button.classList.contains('primary-button'))
-      const modes = [...(dialog?.querySelectorAll('.new-camp-mode-card') ?? [])]
       const memberChecks = [...(dialog?.querySelectorAll('.new-camp-member-option input[type="checkbox"]') ?? [])]
       const rect = dialog?.getBoundingClientRect()
       return {
         title: dialog?.querySelector('h2')?.textContent,
         primary: primary?.textContent?.trim(),
         primaryEnabled: primary?.disabled === false,
-        hasPeer: text.includes('并肩协作') && text.includes('未显式寻址时发送给 Lead'),
-        leadCoordinatedUnavailable: text.includes('领队统筹') && text.includes('暂未开放'),
+        description: dialog?.querySelector('[data-radix-dialog-description]')?.textContent?.trim(),
+        collaborationRemoved: !text.includes('并肩协作')
+          && !text.includes('领队统筹')
+          && !text.includes('暂未开放')
+          && !text.includes('协作方式'),
         saysRecommended: text.includes('推荐'),
-        modeCount: modes.length,
-        disabledMode: modes[1]?.getAttribute('aria-disabled'),
+        optionalShell: Boolean(dialog?.querySelector('.new-camp-optional-shell')),
         selectedMembers: memberChecks.filter((input) => input.checked).length,
         memberCount: memberChecks.length,
         focusedProject: document.activeElement?.classList.contains('new-camp-picker-trigger'),
@@ -117,11 +118,10 @@ try {
     value?.title !== '创建新对话'
     || value?.primary !== '创建'
     || value?.primaryEnabled !== true
-    || value?.hasPeer !== true
-    || value?.leadCoordinatedUnavailable !== true
+    || value?.description !== '确定这段对话的工作环境与队员。'
+    || value?.collaborationRemoved !== true
     || value?.saysRecommended !== false
-    || value?.modeCount !== 2
-    || value?.disabledMode !== 'true'
+    || value?.optionalShell !== true
     || value?.memberCount < 1
     || value?.selectedMembers !== value?.memberCount
     || value?.focusedProject !== true

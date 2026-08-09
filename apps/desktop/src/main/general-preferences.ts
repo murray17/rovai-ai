@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type {
   GeneralPreferencesSnapshot,
+  NewConversationDefaults,
   SettingsSection,
   StartupLocationMode
 } from '@contracts'
@@ -19,9 +20,12 @@ const SETTINGS_SECTIONS = new Set<SettingsSection>([
 ])
 
 export const DEFAULT_GENERAL_PREFERENCES: GeneralPreferencesSnapshot = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   startupLocationMode: 'last_location',
-  lastSettingsSection: 'general'
+  lastSettingsSection: 'general',
+  newConversationDefaults: null,
+  newConversationDefaultsRequireConfirmation: false,
+  oneClickNewConversationEnabled: false
 }
 
 export function isStartupLocationMode(value: unknown): value is StartupLocationMode {
@@ -32,15 +36,54 @@ export function isSettingsSection(value: unknown): value is SettingsSection {
   return typeof value === 'string' && SETTINGS_SECTIONS.has(value as SettingsSection)
 }
 
+export function isNewConversationDefaults(value: unknown): value is NewConversationDefaults {
+  if (!hasExactKeys(value, ['memberAgentIds', 'defaultLeadAgentId'])) return false
+  if (!Array.isArray(value.memberAgentIds) || value.memberAgentIds.length === 0) return false
+  if (value.memberAgentIds.length > 100) return false
+  if (!value.memberAgentIds.every(isStableId)) return false
+  if (new Set(value.memberAgentIds).size !== value.memberAgentIds.length) return false
+  return isStableId(value.defaultLeadAgentId)
+    && value.memberAgentIds.includes(value.defaultLeadAgentId)
+}
+
 export function parseGeneralPreferences(value: unknown): GeneralPreferencesSnapshot | null {
-  if (!hasExactKeys(value, ['schemaVersion', 'startupLocationMode', 'lastSettingsSection'])) return null
-  if (value.schemaVersion !== 1) return null
+  if (hasExactKeys(value, ['schemaVersion', 'startupLocationMode', 'lastSettingsSection'])) {
+    if (value.schemaVersion !== 1) return null
+    if (!isStartupLocationMode(value.startupLocationMode)) return null
+    if (!isSettingsSection(value.lastSettingsSection)) return null
+    return {
+      ...DEFAULT_GENERAL_PREFERENCES,
+      startupLocationMode: value.startupLocationMode,
+      lastSettingsSection: value.lastSettingsSection
+    }
+  }
+  if (!hasExactKeys(value, [
+    'schemaVersion',
+    'startupLocationMode',
+    'lastSettingsSection',
+    'newConversationDefaults',
+    'newConversationDefaultsRequireConfirmation',
+    'oneClickNewConversationEnabled'
+  ])) return null
+  if (value.schemaVersion !== 2) return null
   if (!isStartupLocationMode(value.startupLocationMode)) return null
   if (!isSettingsSection(value.lastSettingsSection)) return null
+  if (value.newConversationDefaults !== null && !isNewConversationDefaults(value.newConversationDefaults)) return null
+  if (typeof value.newConversationDefaultsRequireConfirmation !== 'boolean') return null
+  if (typeof value.oneClickNewConversationEnabled !== 'boolean') return null
+  if (value.newConversationDefaults === null && (
+    value.newConversationDefaultsRequireConfirmation
+    || value.oneClickNewConversationEnabled
+  )) return null
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     startupLocationMode: value.startupLocationMode,
-    lastSettingsSection: value.lastSettingsSection
+    lastSettingsSection: value.lastSettingsSection,
+    newConversationDefaults: value.newConversationDefaults
+      ? structuredClone(value.newConversationDefaults)
+      : null,
+    newConversationDefaultsRequireConfirmation: value.newConversationDefaultsRequireConfirmation,
+    oneClickNewConversationEnabled: value.oneClickNewConversationEnabled
   }
 }
 
@@ -83,7 +126,7 @@ export class GeneralPreferencesStore {
   }
 
   get(): GeneralPreferencesSnapshot {
-    return { ...this.#snapshot }
+    return structuredClone(this.#snapshot)
   }
 
   setStartupLocationMode(mode: StartupLocationMode): Promise<GeneralPreferencesSnapshot> {
@@ -104,11 +147,59 @@ export class GeneralPreferencesStore {
     })
   }
 
+  setNewConversationDefaults(defaults: NewConversationDefaults): Promise<GeneralPreferencesSnapshot> {
+    if (!isNewConversationDefaults(defaults)) {
+      return Promise.reject(new Error('Default new conversation members and Lead are invalid'))
+    }
+    return this.#enqueue(async () => {
+      const next = {
+        ...this.#snapshot,
+        newConversationDefaults: structuredClone(defaults),
+        newConversationDefaultsRequireConfirmation: false
+      }
+      await writePrivateJson(this.#filePath, next)
+      this.#snapshot = next
+      return this.get()
+    })
+  }
+
+  setOneClickNewConversationEnabled(enabled: boolean): Promise<GeneralPreferencesSnapshot> {
+    return this.#enqueue(async () => {
+      if (enabled && (
+        !this.#snapshot.newConversationDefaults
+        || this.#snapshot.newConversationDefaultsRequireConfirmation
+      )) {
+        throw new Error('Default new conversation configuration requires confirmation')
+      }
+      const next = { ...this.#snapshot, oneClickNewConversationEnabled: enabled }
+      await writePrivateJson(this.#filePath, next)
+      this.#snapshot = next
+      return this.get()
+    })
+  }
+
+  invalidateNewConversationDefaults(): Promise<GeneralPreferencesSnapshot> {
+    return this.#enqueue(async () => {
+      if (
+        !this.#snapshot.newConversationDefaults
+        || this.#snapshot.newConversationDefaultsRequireConfirmation
+      ) return this.get()
+      const next = { ...this.#snapshot, newConversationDefaultsRequireConfirmation: true }
+      await writePrivateJson(this.#filePath, next)
+      this.#snapshot = next
+      return this.get()
+    })
+  }
+
   #enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.#writeTail.then(operation, operation)
     this.#writeTail = result.then(() => undefined, () => undefined)
     return result
   }
+}
+
+function isStableId(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 200
 }
 
 function hasExactKeys(

@@ -258,13 +258,17 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 6. 底部只保留“设置”。
 
 - Camp 快速跳转只导航到按标题匹配的 Camp，不冒充消息全文检索。
-- 普通项目式分组（含 Quick Chat 投影）默认直接展示最近 5 个 Camp；“显示更多”按
-  现有 Navigation 排序加载剩余记录。分组不使用旧下拉箭头或折叠状态。
+- 普通项目式分组（含 Quick Chat 投影）默认直接展示最近 5 个 Camp；“查看全部”按
+  现有 Navigation 排序加载剩余记录。每个分组的展开状态只控制 Camp children，不能
+  代替或推导当前项目。
 - Camp 行显示标题、运行/未读完成等权威 Navigation marker 和唯一三点菜单。菜单固定
   包含“置顶/取消置顶、重命名、删除”，删除前有分隔线；普通区与置顶区使用同一结构。
-- 可置顶 Project 显示文件夹、展示名和唯一三点菜单，菜单只包含“置顶项目/取消置顶
-  项目”。Project 不是可选择的领域对象，点击不创建独立 Project workspace；快速对话
-  不显示 Project 菜单。
+- 可置顶 Project 显示文件夹、展示名、`＋` 和唯一三点菜单，菜单只包含“置顶项目/取消置顶
+  项目”。Renderer 维护一个纯本地持久“当前项目”：点击文件夹或名称只选择项目，点击独立
+  disclosure 只展开/收起，二者不得联动。快速对话同样可成为当前项目但不显示 Project 菜单。
+- 当前项目文件夹使用稳定浅灰底；当前打开 Camp 继续使用更强的品牌选中态。点击 Project/快速
+  对话后的 `＋` 只把对应项目作为本次创建目标；取消 Dialog 不改变当前项目，创建成功并进入
+  Camp 后才由该 Camp 更新当前项目。
 - Project 标题不显示会话数量；全量读取入口使用不带数字的“查看全部”。Camp/Project
   菜单触发器在 Hover、Focus-within、打开和触摸替代路径下可达。
 - Sidebar 菜单操作失败保留当前行和焦点。不存在 archive、trash 或顶栏重复入口。
@@ -273,7 +277,13 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 
 ### Quick Chat 与新对话
 
-- 统一侧栏“新对话”是单击操作，直接在当前页面上打开创建新对话 Dialog。
+- Renderer 跨 Main Window Session 持久保存当前项目；点击 Project、Quick Chat 或其中任意 Camp
+  都更新该选择。已保存 directory Project 不再存在时精确回退快速对话。新窗口恢复当前项目，
+  但不把它冒充 Restorable Location 或 Core Project 实体。
+- 一键创建关闭时，左上角“新对话”打开创建 Dialog 并预选当前项目；Project/快速对话后的 `＋`
+  打开同一 Dialog 并预选该入口对应项目。
+- 一键创建开启且默认配置有效时，上述入口跳过 Dialog，使用目标项目、已保存默认队员与默认 Lead
+  直接原子创建空 Camp。创建拒绝或配置失效时必须打开 Dialog、保留入口对应项目并提示重新确认。
 - Quick Chat 只显示品牌落地内容和“继续未完成的事”，不显示可直接发送的 Composer。
 - Quick Chat 首页右侧主内容区使用白色 `--home-surface`；统一左侧菜单继续使用
   `--surface-subtle`，不随首页表面改变。
@@ -795,6 +805,7 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   `min(980px, 可用宽度 - 42px)`；通用、Skill、MCP、Agent 运行时、外观、通知和诊断统一使用
   同一个无外框设置页头：eyebrow、一级标题、说明、可选右侧操作区和底部分隔线。各页只允许
   一个该共享页头，不叠加通用 AppHeader，也不得回退为带边框、圆角或背景卡片的 Hero。
+  全部设置分类的内容滚动面板统一使用实白页面底色。
   App Shell 右侧第一行叠加一条与页面表面同色的 50px 隐形拖拽栏，设置内容
   继续跨越两行，不因该拖拽栏下移。
 - 设置侧栏不显示健康 footer；诊断仍是设置分类并读取原有 Health Snapshot。
@@ -804,7 +815,7 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 ### 通用
 
 - 共享页头固定为 `Settings / General`、标题“通用”、说明
-  “设置 Rovai-ai 的启动方式与窗口行为。”；正文只有“启动 / 窗口”两个顺序固定的 section。
+  “设置 Rovai-ai 的启动方式、新对话与窗口行为。”；正文按“启动 / 新对话 / 窗口”排列。
 - “登录时启动 Rovai-ai”使用标准 Switch，说明“登录 macOS 后自动打开 Rovai-ai。”。只有
   已安装的 packaged App 可操作；Development 显示 unchecked disabled 和
   “仅在已安装的 Rovai-ai 应用中可配置”。
@@ -819,6 +830,19 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   “每次启动都从快速对话首页开始。”。选择只影响下一个 Main Window Session，不立即跳转。
 - Radio group 后固定说明“此设置只决定启动后显示的位置。已有 Camp、草稿、任务、审批和
   运行记录仍按 Rovai-ai 的既有恢复规则处理。”，不得增加执行恢复开关。
+- “新对话”先提供默认队员与默认 Lead。全新安装保持未配置，不自动采用全部队员；选择只形成
+  本地草稿，至少一位在队队员且 Lead 属于所选队员后，由“保存默认配置”原子生效。未保存草稿
+  不能被一键创建读取。
+- 队员永久移除、暂时离队、缺失或 Lead 不再有效时，Renderer 只把已保存配置锁存为“需要重新
+  确认”；不得删除 ID、替换 Lead 或自动关闭一键创建。即使队员重新归队也必须显式重新保存才
+  解锁。Runtime 配置与 readiness 不参与结构有效性判断。
+- “一键创建新对话”默认关闭。每次从关闭切换为开启都显示非 danger 确认 Dialog，列出三个受
+  影响入口以及当前项目、默认队员、Lead；主按钮必须为“开启一键创建”，不能写“确定”。关闭
+  立即恢复 Dialog 路径。
+- Switch 标题旁的 `?` 是真实 button；点击或键盘聚焦打开“一键创建如何工作？”Popover，
+  `Escape` 与外部点击关闭。不能只使用 Hover tooltip。
+- 一键创建开启时始终显示当前生效摘要；失效时显示 attention 文案“默认队员配置需要重新确认。
+  一键创建时将改为打开创建弹窗。”，开关保持 checked，所有创建入口安全回退 Dialog。
 - Restorable Location 只包含 Quick Chat、当前 Camp、队员页及可选队员/身份或运行配置页签、
   记忆页。Settings、New Conversation Dialog、Notification Center、Command Palette、Approval、
   Toast、错误 Dialog 与其他临时表面永不成为启动目标。
@@ -932,25 +956,27 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   `min(760px, 视口宽度 - 72px)`，最大高度 `min(790px, 视口高度 - 72px)`；
   Header/Footer 固定，Body 独立滚动。
 - Header 为 `NEW CAMP`、标题“创建新对话”和说明
-  “确定这段对话的工作环境、队员与协作方式”；关闭按钮有可访问名称。
-- 四个步骤始终按下列顺序显示：
+  “确定这段对话的工作环境与队员”；关闭按钮有可访问名称。
+- Dialog 始终按下列顺序显示：
 
 1. **工作目录 · 可选**：默认“快速对话”，也可选择已知 canonical Project 路径或
    “选择工作目录…”。普通安全目录和 Git worktree 都允许；Git 只显示动态能力提示，
    不执行 `git init`。Picker 取消不改变 Draft、不报错、不持久化。
 2. **队员与 Lead**：默认选择全部在队的队员，顺序来自 Member Order；Agent 运行时状态只
-   显示提示，不影响结构选择。队员集非空，Lead 必须在已选队员中。
-3. **协作方式**：`peer` 显示为“并肩协作”并可选；`lead_coordinated` 显示为
-   “领队统筹 · 暂未开放”且不可选，Core 仍必须拒绝绕过 UI 的请求。
-4. **对话名称 · 可选**：留空为“未命名对话”；显示 80 Unicode scalar 上限与就地
-   错误，不把名称生成委托给 Runtime/LLM。
+   显示提示，不影响结构选择。存在有效已保存默认配置时预选该配置；否则默认全部在队队员。
+   队员集非空，Lead 必须在已选队员中。
+3. **可选配置 / 对话名称**：默认收起；展开后聚焦输入框，折叠摘要显示规范化名称或“未设置”，
+   同时提供规范化 Unicode scalar `0 / 80` 计数与清空按钮。超过 80 时阻止继续输入；留空为
+   “未命名对话”，不把名称生成委托给 Runtime/LLM。
 
-- Footer 摘要显示 Quick Chat/目录展示名、队员数、并肩协作与 Lead，右侧
+- Footer 摘要只显示 Quick Chat/目录展示名、队员数与 Lead，右侧
   “取消 / 创建”。提交期间锁定会改变 Draft 的控件并防止重复创建。
 - Core 原子接受后才关闭 Dialog、刷新 Navigation、进入耐久 Camp 并聚焦 Composer；
   此时没有消息、Run 或预建 Conversation 也合法。
 - 失败保持 Dialog、目录、队员、Lead、名称、滚动和焦点。Core 刷新候选后不得静默
-  删除队员、替换 Lead、改变模式或回退 Quick Chat。
+  删除队员、替换 Lead 或回退 Quick Chat。
+- Renderer 不再展示“协作方式”“并肩协作”“领队统筹”或“暂未开放”；创建请求继续固定提交
+  现有 `peer` 语义。本次 UI 删除不修改 Core union、SQLite 字段或历史 Camp。
 - `Escape`、关闭与取消在非提交态关闭并把焦点返回原入口；页面切换、主题偏好和
   Quick Chat 落地页都不能产生第二套 Draft 真源。
 

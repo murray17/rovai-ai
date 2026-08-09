@@ -76,9 +76,10 @@ terminal Task 只读，version conflict 保留草稿且不自动 replay。永久
 [v0.47 实施计划](../versions/v0.47/implementation-plan.md)。
 
 v0.49 在设置顶部增加“通用”，并冻结每个 Main Window Session 一次性解析启动位置、稳定一级
-位置即时提交、macOS 登录项四态和窗口几何重置。设置侧栏因此扩展为七分类；设置和临时表面
-仍不能成为启动目标。完整合同见[v0.49 生产设计](../versions/v0.49/production-design.md)，实施状态
-见[v0.49 实施计划](../versions/v0.49/implementation-plan.md)。
+位置即时提交、macOS 登录项四态和窗口几何重置；后续同版本范围增加显式保存的默认队员/Lead、
+确认式一键创建、失效锁存、持久当前项目与项目级 `＋`。设置侧栏因此扩展为七分类；设置和临时
+表面仍不能成为启动目标。完整合同见[v0.49 生产设计](../versions/v0.49/production-design.md)，实施
+状态见[v0.49 实施计划](../versions/v0.49/implementation-plan.md)。
 
 ## 权威边界
 

@@ -53,6 +53,8 @@ export function CampNavigation({
   state,
   navigation,
   activeCampId,
+  currentProjectKey = 'quick-chat',
+  creatingConversation = false,
   pins = [],
   pinnedCampItems = [],
   settingsSection = 'general',
@@ -68,6 +70,8 @@ export function CampNavigation({
   onSettingsSectionChange = () => undefined,
   onSettingsBack = () => undefined,
   onOpenProject,
+  onSelectProject = () => undefined,
+  onCreateInProject = () => undefined,
   onCamp,
   onTogglePin = () => undefined,
   onRename,
@@ -79,6 +83,8 @@ export function CampNavigation({
   state: 'loading' | 'ready' | 'error'
   navigation: NavigationSnapshot | null
   activeCampId: string | null
+  currentProjectKey?: string
+  creatingConversation?: boolean
   pins?: NavigationPin[]
   pinnedCampItems?: NavigationCampItem[]
   settingsSection?: NavigationSettingsSection
@@ -94,6 +100,8 @@ export function CampNavigation({
   onSettingsSectionChange?(section: NavigationSettingsSection): void
   onSettingsBack?(): void
   onOpenProject(): void
+  onSelectProject?(project: ProjectNavigationGroup | null): void
+  onCreateInProject?(project: ProjectNavigationGroup | null): void
   onCamp(camp: NavigationCampItem): void
   onTogglePin?(kind: NavigationPin['kind'], targetKey: string, camp?: NavigationCampItem): void | Promise<void>
   onRename(camp: NavigationCampItem, title: string): Promise<void>
@@ -384,7 +392,7 @@ export function CampNavigation({
           : (
               <>
                 <nav className="unified-primary-nav" aria-label="主要页面">
-                  <button className={`rail-button ${view === 'compose' ? 'active' : ''}`} type="button" aria-label="新对话" title="新对话" onClick={onNewConversation} disabled={state !== 'ready'}>
+                  <button className={`rail-button ${view === 'compose' ? 'active' : ''}`} type="button" aria-label="新对话" title="新对话" onClick={onNewConversation} disabled={state !== 'ready' || creatingConversation}>
                     <span className="rail-glyph" aria-hidden="true">＋</span><span className="rail-label">新对话</span>
                   </button>
                   <button className={`rail-button ${view === 'members' ? 'active' : ''}`} type="button" aria-current={view === 'members' ? 'page' : undefined} aria-label="队员" title="队员" onClick={onMembers}>
@@ -438,9 +446,13 @@ export function CampNavigation({
                 projectExpanded={!collapsedProjectGroups.has(`pinned-${project.projectKey}`)}
                 loadingAll={loadingGroup === project.projectKey}
                 activeCampId={activeCampId}
+                currentProject={currentProjectKey === project.projectKey}
+                createDisabled={creatingConversation}
                 pinned
                 onToggleAll={() => undefined}
                 onToggleExpanded={() => toggleProjectGroup(`pinned-${project.projectKey}`)}
+                onSelectProject={() => onSelectProject(project)}
+                onCreate={() => onCreateInProject(project)}
                 onTogglePin={() => void togglePin('project', project.projectKey)}
                 onToggleCampPin={(camp) => void togglePin('camp', camp.id, camp)}
                 onCamp={onCamp}
@@ -467,9 +479,13 @@ export function CampNavigation({
                 projectExpanded={!collapsedProjectGroups.has(groupKey)}
                 loadingAll={loadingGroup === groupKey}
                 activeCampId={activeCampId}
+                currentProject={currentProjectKey === project.projectKey}
+                createDisabled={creatingConversation}
                 pinned={pins.some((pin) => pin.kind === 'project' && pin.targetKey === project.projectKey)}
                 onToggleAll={() => toggleAll(groupKey, project.projectPath)}
                 onToggleExpanded={() => toggleProjectGroup(groupKey)}
+                onSelectProject={() => onSelectProject(project)}
+                onCreate={() => onCreateInProject(project)}
                 onTogglePin={() => void togglePin('project', project.projectKey)}
                 onToggleCampPin={(camp) => void togglePin('camp', camp.id, camp)}
                 onCamp={onCamp}
@@ -488,8 +504,12 @@ export function CampNavigation({
             projectExpanded={!collapsedProjectGroups.has('quick-chat')}
             loadingAll={loadingGroup === 'quick-chat'}
             activeCampId={activeCampId}
+            currentProject={currentProjectKey === 'quick-chat'}
+            createDisabled={creatingConversation}
             onToggleAll={() => toggleAll('quick-chat', null)}
             onToggleExpanded={() => toggleProjectGroup('quick-chat')}
+            onSelectProject={() => onSelectProject(null)}
+            onCreate={() => onCreateInProject(null)}
             onToggleCampPin={(camp) => void togglePin('camp', camp.id, camp)}
             onCamp={onCamp}
             onAction={openAction}
@@ -713,9 +733,13 @@ function CampGroup({
   projectExpanded,
   loadingAll,
   activeCampId,
+  currentProject,
+  createDisabled,
   pinned = false,
   onToggleAll,
   onToggleExpanded,
+  onSelectProject,
+  onCreate,
   onTogglePin,
   onToggleCampPin,
   onCamp,
@@ -730,9 +754,13 @@ function CampGroup({
   projectExpanded: boolean
   loadingAll: boolean
   activeCampId: string | null
+  currentProject: boolean
+  createDisabled: boolean
   pinned?: boolean
   onToggleAll(): void
   onToggleExpanded(): void
+  onSelectProject(): void
+  onCreate(): void
   onTogglePin?(): void
   onToggleCampPin(camp: NavigationCampItem): void
   onCamp(camp: NavigationCampItem): void
@@ -742,14 +770,13 @@ function CampGroup({
   const contentId = `camp-group-content-${groupKey.replace(/[^a-zA-Z0-9_-]/g, '-')}`
   return (
     <section className="camp-nav-group" data-group={groupKey}>
-      <div className="camp-group-heading-row">
+      <div className={`camp-group-heading-row ${currentProject ? 'current-project' : ''}`} data-expanded={projectExpanded ? 'true' : 'false'}>
         <button
-          className="camp-group-heading"
+          className="camp-group-select"
           type="button"
           title={label}
-          aria-expanded={projectExpanded}
-          aria-controls={contentId}
-          onClick={onToggleExpanded}
+          aria-current={currentProject ? 'true' : undefined}
+          onClick={onSelectProject}
         >
           <svg className="project-folder-glyph" viewBox="0 0 24 24" aria-hidden="true">
             <g className="project-folder-closed">
@@ -762,8 +789,18 @@ function CampGroup({
             </g>
           </svg>
           <span className="truncate">{label}</span>
+        </button>
+        <button
+          className="project-disclosure-button"
+          type="button"
+          aria-label={`${projectExpanded ? '收起' : '展开'}“${label}”`}
+          aria-expanded={projectExpanded}
+          aria-controls={contentId}
+          onClick={onToggleExpanded}
+        >
           <svg className="project-disclosure-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m5.5 6.2 2.5 2.5 2.5-2.5" /></svg>
         </button>
+        <button className="group-create-button" type="button" aria-label={`在“${label}”中新建对话`} title="新建对话" disabled={createDisabled} onClick={onCreate}>＋</button>
         {onTogglePin && pinTargetKey && (
           <SidebarActionMenu
             target={`project:${pinTargetKey}`}

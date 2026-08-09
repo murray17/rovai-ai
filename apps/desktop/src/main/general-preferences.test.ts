@@ -36,25 +36,58 @@ describe('general preferences', () => {
       startupLocationMode: 'quick_chat',
       lastSettingsSection: 'diagnostics'
     })).toEqual({
-      schemaVersion: 1,
+      schemaVersion: 2,
       startupLocationMode: 'quick_chat',
-      lastSettingsSection: 'diagnostics'
+      lastSettingsSection: 'diagnostics',
+      newConversationDefaults: null,
+      newConversationDefaultsRequireConfirmation: false,
+      oneClickNewConversationEnabled: false
     })
     expect(parseGeneralPreferences({
       schemaVersion: 2,
       startupLocationMode: 'quick_chat',
-      lastSettingsSection: 'diagnostics'
-    })).toBeNull()
+      lastSettingsSection: 'diagnostics',
+      newConversationDefaults: {
+        memberAgentIds: ['agent-a', 'agent-b'],
+        defaultLeadAgentId: 'agent-a'
+      },
+      newConversationDefaultsRequireConfirmation: true,
+      oneClickNewConversationEnabled: true
+    })).toEqual({
+      schemaVersion: 2,
+      startupLocationMode: 'quick_chat',
+      lastSettingsSection: 'diagnostics',
+      newConversationDefaults: {
+        memberAgentIds: ['agent-a', 'agent-b'],
+        defaultLeadAgentId: 'agent-a'
+      },
+      newConversationDefaultsRequireConfirmation: true,
+      oneClickNewConversationEnabled: true
+    })
     expect(parseGeneralPreferences({
       schemaVersion: 1,
       startupLocationMode: 'restore_everything',
       lastSettingsSection: 'diagnostics'
     })).toBeNull()
     expect(parseGeneralPreferences({
-      schemaVersion: 1,
+      schemaVersion: 2,
       startupLocationMode: 'last_location',
       lastSettingsSection: 'general',
+      newConversationDefaults: null,
+      newConversationDefaultsRequireConfirmation: false,
+      oneClickNewConversationEnabled: false,
       loginItemEnabled: true
+    })).toBeNull()
+    expect(parseGeneralPreferences({
+      schemaVersion: 2,
+      startupLocationMode: 'last_location',
+      lastSettingsSection: 'general',
+      newConversationDefaults: {
+        memberAgentIds: ['agent-a'],
+        defaultLeadAgentId: 'agent-b'
+      },
+      newConversationDefaultsRequireConfirmation: false,
+      oneClickNewConversationEnabled: false
     })).toBeNull()
   })
 
@@ -70,12 +103,51 @@ describe('general preferences', () => {
     ])
 
     expect(store.get()).toEqual({
-      schemaVersion: 1,
+      schemaVersion: 2,
       startupLocationMode: 'last_location',
-      lastSettingsSection: 'runtime'
+      lastSettingsSection: 'runtime',
+      newConversationDefaults: null,
+      newConversationDefaultsRequireConfirmation: false,
+      oneClickNewConversationEnabled: false
     })
     expect(JSON.parse(await readFile(filePath, 'utf8'))).toEqual(store.get())
     expect((await stat(filePath)).mode & 0o777).toBe(0o600)
+  })
+
+  it('atomically saves defaults, latches invalidation, and never silently disables one-click creation', async () => {
+    const directory = await temporaryDirectory()
+    const filePath = join(directory, 'general-preferences.json')
+    const store = await GeneralPreferencesStore.load(filePath)
+
+    await expect(store.setOneClickNewConversationEnabled(true)).rejects.toThrow()
+    await store.setNewConversationDefaults({
+      memberAgentIds: ['agent-a', 'agent-b'],
+      defaultLeadAgentId: 'agent-a'
+    })
+    await store.setOneClickNewConversationEnabled(true)
+    await store.invalidateNewConversationDefaults()
+
+    expect(store.get()).toMatchObject({
+      oneClickNewConversationEnabled: true,
+      newConversationDefaultsRequireConfirmation: true,
+      newConversationDefaults: {
+        memberAgentIds: ['agent-a', 'agent-b'],
+        defaultLeadAgentId: 'agent-a'
+      }
+    })
+    await expect(store.setOneClickNewConversationEnabled(true)).rejects.toThrow()
+    await store.setNewConversationDefaults({
+      memberAgentIds: ['agent-b'],
+      defaultLeadAgentId: 'agent-b'
+    })
+    expect(store.get()).toMatchObject({
+      oneClickNewConversationEnabled: true,
+      newConversationDefaultsRequireConfirmation: false,
+      newConversationDefaults: {
+        memberAgentIds: ['agent-b'],
+        defaultLeadAgentId: 'agent-b'
+      }
+    })
   })
 
   it('keeps the last successful value and cleans the temporary file when rename fails', async () => {

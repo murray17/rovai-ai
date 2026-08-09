@@ -47,6 +47,7 @@ import {
 } from './CampWorkspace'
 import {
   initialCampSelection,
+  limitDraftNameInput,
   normalizeDraftName,
   toggleCampMemberSelection,
   workspaceCapability
@@ -640,6 +641,24 @@ describe('task event projections', () => {
   it('normalizes optional Camp names before applying the local scalar boundary', () => {
     expect(normalizeDraftName('  重构\n\tMCP  设置页  ')).toBe('重构 MCP 设置页')
     expect(Array.from(normalizeDraftName('😀'.repeat(80))).length).toBe(80)
+    expect(Array.from(normalizeDraftName(limitDraftNameInput('😀'.repeat(81)))).length).toBe(80)
+    expect(limitDraftNameInput('  重构   MCP  ')).toBe('  重构   MCP  ')
+  })
+
+  it('prefers saved default members and keeps invalid stored defaults outside the dialog draft', () => {
+    const preflight = {
+      admissible: true,
+      presentMembers: [
+        { agentId: 'agent-a', displayName: '洛可', memberOrder: 0, runtimeConfigured: true, runtimeReadiness: 'ready' as const },
+        { agentId: 'agent-b', displayName: '沐瓦', memberOrder: 1, runtimeConfigured: true, runtimeReadiness: 'ready' as const }
+      ],
+      initialLeadAgentId: 'agent-a',
+      blockers: []
+    }
+    expect(initialCampSelection(preflight, {
+      memberAgentIds: ['agent-b', 'removed-agent'],
+      defaultLeadAgentId: 'removed-agent'
+    })).toEqual({ memberIds: ['agent-b'], leadId: 'agent-b' })
   })
 
   it('protects the last member, switches a removed Lead, and preserves a manual Lead', () => {
@@ -815,6 +834,11 @@ describe('task event projections', () => {
     expect(markup).toContain('管理')
     expect(markup).toContain('aria-label="管理项目“rovai-ai”"')
     expect(markup).toContain('aria-label="管理“快速对话讨论”"')
+    expect(markup).toContain('aria-label="在“rovai-ai”中新建对话"')
+    expect(markup).toContain('aria-label="在“快速对话”中新建对话"')
+    expect(markup).toContain('class="camp-group-heading-row current-project"')
+    expect(markup).toContain('class="camp-group-select"')
+    expect(markup).toContain('class="project-disclosure-button"')
     expect(markup).toContain('data-sidebar-menu-target="project:directory:/repo"')
     expect(markup).toContain('data-sidebar-menu-target="camp:camp-quick-chat"')
     expect(markup).not.toContain('data-sidebar-menu-target="project:quick-chat"')
@@ -887,8 +911,10 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-expanded="true" aria-controls="camp-group-content-directory--repo"')
     expect(markup).toContain('project-folder-open')
     expect(markup).toContain('project-folder-closed')
-    const headingEnd = markup.indexOf('</button>', markup.indexOf('class="camp-group-heading"'))
-    expect(markup.indexOf('group-menu-trigger')).toBeGreaterThan(headingEnd)
+    const selectEnd = markup.indexOf('</button>', markup.indexOf('class="camp-group-select"'))
+    const disclosureStart = markup.indexOf('class="project-disclosure-button"')
+    expect(disclosureStart).toBeGreaterThan(selectEnd)
+    expect(markup.indexOf('group-menu-trigger')).toBeGreaterThan(disclosureStart)
   })
 
   it('toggles project disclosure independently from the show-all group state', () => {

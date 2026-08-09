@@ -4,6 +4,7 @@ import type {
   AgentProfile,
   CampCreationPreflight,
   CreateCampRequest,
+  NewConversationDefaults,
   ProjectNavigationGroup,
   WorkspaceInspection,
   WorkspaceSelection
@@ -17,6 +18,8 @@ type GitInspectionStatus = 'idle' | 'loading' | 'ready' | 'failed'
 export function NewConversationDialog({
   open,
   initialWorkspace,
+  initialSelection,
+  attentionMessage,
   projects,
   preflight,
   agents,
@@ -28,6 +31,8 @@ export function NewConversationDialog({
 }: {
   open: boolean
   initialWorkspace: WorkspaceSelection | null
+  initialSelection?: NewConversationDefaults | null
+  attentionMessage?: string | null
   projects: ProjectNavigationGroup[]
   preflight: CampCreationPreflight
   agents: AgentProfile[]
@@ -48,6 +53,7 @@ export function NewConversationDialog({
   const [memberError, setMemberError] = useState<string | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const projectTriggerRef = useRef<HTMLButtonElement>(null)
+  const nameInputRef = useRef<HTMLInputElement>(null)
   const profileById = useMemo(
     () => new Map(agents.map((agent) => [agent.agentId, agent])),
     [agents]
@@ -62,7 +68,7 @@ export function NewConversationDialog({
 
   useEffect(() => {
     if (!open) return
-    const { memberIds, leadId: recommendedLead } = initialCampSelection(preflight)
+    const { memberIds, leadId: recommendedLead } = initialCampSelection(preflight, initialSelection)
     setWorkspace(initialWorkspace)
     setGitInspectionStatus(hasGitObservation(initialWorkspace) ? 'ready' : 'idle')
     setProjectMenuOpen(false)
@@ -74,7 +80,7 @@ export function NewConversationDialog({
     setMemberError(null)
     setSubmitError(null)
     requestAnimationFrame(() => projectTriggerRef.current?.focus())
-  }, [initialWorkspace, open, preflight.presentMembers])
+  }, [initialSelection, initialWorkspace, open, preflight.presentMembers])
 
   const pendingGitInspectionPath = workspace && !hasGitObservation(workspace)
     ? workspace.projectPath
@@ -185,7 +191,7 @@ export function NewConversationDialog({
                 <span className="new-camp-eyebrow"><i />NEW CAMP</span>
                 <Dialog.Title>创建新对话</Dialog.Title>
                 <Dialog.Description id="new-camp-dialog-description">
-                  确定这段对话的工作环境、队员与协作方式。
+                  确定这段对话的工作环境与队员。
                 </Dialog.Description>
               </div>
               <Dialog.Close asChild>
@@ -194,6 +200,7 @@ export function NewConversationDialog({
             </header>
 
             <div className="new-camp-dialog-body">
+              {attentionMessage && <p className="new-camp-attention" role="status">{attentionMessage}</p>}
               <section className="new-camp-section">
                 <SectionHeading step="01" title="工作目录" optional detail="选择任意安全、可读目录；不选择则创建在快速对话。" />
                 <div className="new-camp-picker">
@@ -327,63 +334,67 @@ export function NewConversationDialog({
                     )}
               </section>
 
-              <section className="new-camp-section">
-                <SectionHeading step="03" title="协作方式" detail="决定默认消息交给谁处理，以及队员如何参与。" />
-                <div className="new-camp-mode-grid" role="radiogroup" aria-label="协作方式">
-                  <label className="new-camp-mode-card selected">
-                    <input type="radio" name="collaboration-mode" checked readOnly />
-                    <span className="new-camp-mode-top"><i aria-hidden="true">↔</i><b aria-hidden="true" /></span>
-                    <strong>并肩协作</strong>
-                    <span>选中的队员围绕同一目标共同参与、交流和执行。</span>
-                    <small>未显式寻址时发送给 Lead</small>
-                  </label>
-                  <div className="new-camp-mode-card disabled" aria-disabled="true">
-                    <span className="new-camp-mode-top"><i aria-hidden="true">⌘</i><em>暂未开放</em></span>
-                    <strong>领队统筹</strong>
-                    <span>只有 Lead 与用户直接对话，并负责统筹其他队员。</span>
-                    <small>当前版本不可选择</small>
-                  </div>
-                </div>
-              </section>
-
               <section className="new-camp-section optional-section">
-                <button
-                  className="new-camp-optional-trigger"
-                  type="button"
-                  aria-expanded={optionalOpen}
-                  aria-controls="new-camp-optional-panel"
-                  disabled={busy}
-                  onClick={() => setOptionalOpen((current) => !current)}
-                >
-                  <span aria-hidden="true">☷</span>
-                  <span><strong>可选配置</strong><small>补充对话名称，不影响上面的结构配置。</small></span>
-                  <em>{normalizedName || '未设置'}</em>
-                  <span className="new-camp-chevron" aria-hidden="true">⌄</span>
-                </button>
-                {optionalOpen && (
-                  <div className="new-camp-optional-panel" id="new-camp-optional-panel">
-                    <label htmlFor="new-camp-name">对话名称 <span>· 非必填</span></label>
-                    <input
-                      id="new-camp-name"
-                      value={name}
-                      disabled={busy}
-                      aria-invalid={Boolean(nameError)}
-                      aria-describedby={nameError ? 'new-camp-name-error' : 'new-camp-name-hint'}
-                      onChange={(event) => setName(event.target.value)}
-                      placeholder="例如：重构 MCP 设置页"
-                      autoComplete="off"
-                    />
-                    {nameError
-                      ? <small className="new-camp-field-error" id="new-camp-name-error" role="alert">{nameError}</small>
-                      : <small id="new-camp-name-hint">留空将创建为「未命名对话」。</small>}
-                  </div>
-                )}
+                <div className="new-camp-optional-shell">
+                  <button
+                    className="new-camp-optional-trigger"
+                    type="button"
+                    aria-expanded={optionalOpen}
+                    aria-controls="new-camp-optional-panel"
+                    disabled={busy}
+                    onClick={() => {
+                      const opening = !optionalOpen
+                      setOptionalOpen(opening)
+                      if (opening) requestAnimationFrame(() => nameInputRef.current?.focus())
+                    }}
+                  >
+                    <span aria-hidden="true">☷</span>
+                    <span><strong>可选配置</strong><small>补充对话名称，不影响上面的结构配置。</small></span>
+                    <em>{normalizedName || '未设置'}</em>
+                    <span className="new-camp-chevron" aria-hidden="true">⌄</span>
+                  </button>
+                  {optionalOpen && (
+                    <div className="new-camp-optional-panel" id="new-camp-optional-panel">
+                      <div className="new-camp-name-heading">
+                        <label htmlFor="new-camp-name">对话名称 <span>· 非必填</span></label>
+                        <span>{nameLength} / 80</span>
+                      </div>
+                      <div className="new-camp-name-input-shell">
+                        <input
+                          ref={nameInputRef}
+                          id="new-camp-name"
+                          value={name}
+                          disabled={busy}
+                          aria-invalid={Boolean(nameError)}
+                          aria-describedby={nameError ? 'new-camp-name-error' : 'new-camp-name-hint'}
+                          onChange={(event) => setName(limitDraftNameInput(event.target.value))}
+                          placeholder="输入名称…"
+                          autoComplete="off"
+                        />
+                        {name.length > 0 && (
+                          <button
+                            type="button"
+                            aria-label="清空对话名称"
+                            disabled={busy}
+                            onClick={() => {
+                              setName('')
+                              nameInputRef.current?.focus()
+                            }}
+                          >×</button>
+                        )}
+                      </div>
+                      {nameError
+                        ? <small className="new-camp-field-error" id="new-camp-name-error" role="alert">{nameError}</small>
+                        : <small id="new-camp-name-hint">留空将创建为「未命名对话」。</small>}
+                    </div>
+                  )}
+                </div>
               </section>
             </div>
 
             <footer className="new-camp-dialog-footer">
               <div>
-                <span>{workspace?.name ?? '快速对话'} · <strong>{selectedMembers.length} 位队员</strong> · 并肩协作</span>
+                <span>{workspace?.name ?? '快速对话'} · <strong>{selectedMembers.length} 位队员</strong></span>
                 {lead && <span> · Lead：{lead.displayName}</span>}
                 {submitError && <p role="alert">{submitError}</p>}
               </div>
@@ -502,19 +513,34 @@ function hasGitObservation(
   return workspace !== null && 'gitObservation' in workspace
 }
 
-export function initialCampSelection(preflight: CampCreationPreflight): {
+export function initialCampSelection(
+  preflight: CampCreationPreflight,
+  preferred: NewConversationDefaults | null = null
+): {
   memberIds: string[]
   leadId: string
 } {
-  const memberIds = preflight.presentMembers.map((member) => member.agentId)
-  const leadId = preflight.presentMembers.find(
-    (member) => member.runtimeReadiness === 'ready'
-  )?.agentId ?? memberIds[0] ?? ''
+  const presentMemberIds = preflight.presentMembers.map((member) => member.agentId)
+  const preferredMemberIds = preferred?.memberAgentIds.filter((agentId) =>
+    presentMemberIds.includes(agentId)
+  ) ?? []
+  const memberIds = preferredMemberIds.length > 0 ? preferredMemberIds : presentMemberIds
+  const leadId = preferred && memberIds.includes(preferred.defaultLeadAgentId)
+    ? preferred.defaultLeadAgentId
+    : preflight.presentMembers.find(
+      (member) => memberIds.includes(member.agentId) && member.runtimeReadiness === 'ready'
+    )?.agentId ?? memberIds[0] ?? ''
   return { memberIds, leadId }
 }
 
 export function normalizeDraftName(value: string): string {
   return value.trim().replace(/\s+/gu, ' ')
+}
+
+export function limitDraftNameInput(value: string): string {
+  const normalized = normalizeDraftName(value)
+  if (Array.from(normalized).length <= 80) return value
+  return Array.from(normalized).slice(0, 80).join('')
 }
 
 export function toggleCampMemberSelection({

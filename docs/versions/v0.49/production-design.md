@@ -7,7 +7,7 @@ implementation_status: in_progress
 last_updated: 2026-08-09
 ---
 
-# v0.49 通用与启动设置生产设计
+# v0.49 通用、启动与新对话设置生产设计
 
 本文冻结 v0.49 的 Electron Desktop Shell、Preload bridge 与 Renderer 交互合同。全局视觉、
 布局、Token、状态和无障碍继续以 [Arctic Dawn V3](../../ui/arctic-dawn.md)为准；Camp、Member、
@@ -44,10 +44,10 @@ General 页面只使用一个共享页头：
 Settings / General
 
 通用
-设置 Rovai-ai 的启动方式与窗口行为。
+设置 Rovai-ai 的启动方式、新对话与窗口行为。
 ```
 
-页头下方按“启动 / 窗口”排列两个无外框 section，使用现有 `section-block`、分隔线、Switch、
+页头下方按“启动 / 新对话 / 窗口”排列三个无外框 section，使用现有 `section-block`、分隔线、Switch、
 Radio 和 Button 语法，不增加卡片墙或第二层设置导航。
 
 ## 2. 启动区
@@ -112,7 +112,58 @@ Preference，不立即导航当前窗口，也不改变当前 Restorable Locatio
 > 此设置只决定启动后显示的位置。已有 Camp、草稿、任务、审批和运行记录仍按 Rovai-ai 的
 > 既有恢复规则处理。
 
-## 3. Main Window Session 与一次性解析
+## 3. 新对话默认配置、一键创建与当前项目
+
+### 默认队员与 Lead
+
+全新安装保持“尚未配置”，不得静默选择全部在队队员。用户选择只修改 Renderer 草稿；满足
+“至少一位在队队员、默认 Lead 属于所选队员”后，点击“保存默认配置”才通过窄 Preload bridge
+原子替换已保存配置。未保存草稿显示明确提示，不能被创建入口或开启确认读取。
+
+保存时只校验 Member lifecycle：队员必须为 `present` 且未 removed，Lead 必须属于该集合。
+Runtime 是否配置、readiness 与当前 availability 不参与结构有效性判断。
+
+已保存队员永久移除、暂时离队、缺失，或默认 Lead 不再有效时：
+
+- 原成员 ID 与 Lead ID 原样保留，不删除、不替换、不重排；
+- 持久 `newConversationDefaultsRequireConfirmation = true`，即使队员重新归队也不自动解锁；
+- 用户必须重新选择并点击“保存默认配置”，才用显式新快照清除锁存状态；
+- 已开启的一键创建保持开启，但所有入口改走创建 Dialog。
+
+### 一键创建 Switch、确认与帮助
+
+Switch 默认关闭。每次 `false -> true` 必须先打开非 danger Dialog“开启一键创建新对话？”，列出
+左上角“新对话”、Project `＋` 和快速对话 `＋`，并展示当前项目、已保存默认队员与 Lead。主按钮
+固定写“开启一键创建”；取消不写偏好。未保存草稿、未配置或锁存失效时不能开启。
+
+标题旁 `?` 是可点击、可聚焦 button。点击或键盘聚焦打开非模态 Popover“一键创建如何工作？”，
+说明项目来自当前项目、队员/Lead 来自本页保存值、关闭 Switch 恢复 Dialog；外部点击或 `Escape`
+关闭，不能只依赖 Hover。
+
+Switch 开启时始终显示一行摘要。配置有效时为“当前生效：{当前项目} · {N} 位默认队员 · Lead
+{名称}”；锁存或实时校验失效时使用 attention 文案“默认队员配置需要重新确认。一键创建时将改为
+打开创建弹窗。”。
+
+### 当前项目与三个创建入口
+
+Renderer 使用版本化 localStorage 记录 `{ kind: "quick_chat" } | { kind: "directory", projectPath }`：
+
+- 点击 Project/快速对话文件夹或其中任意 Camp 更新当前项目；
+- 新 Main Window Session 读取最后成功保存值；directory Project 不存在时回退并写回快速对话；
+- 当前项目不是 Restorable Location、Core Project 实体或 Camp binding mutation；
+- 文件夹/名称只选择，独立 disclosure 只展开/收起，`＋` 只发起对应项目的新建；取消 Dialog 不
+  改变当前项目，成功进入 Camp 后才由 Camp binding 更新当前项目；
+- 当前项目使用稳定浅灰底，当前 Camp 使用更强品牌选中态。
+
+一键创建关闭时，三个入口打开同一 Dialog：左上入口预选当前项目，两个文件夹入口预选各自项目。
+开启且配置有效时直接调用现有原子 `camps.create`，名称为 `null`、协作模式固定 `peer`。Core 拒绝、
+配置失效或默认 Lead 无效时打开 Dialog，保留入口目标项目并显示重新确认说明。该范围只删除
+Renderer 的协作方式选择与文案，不删除 Core/IPC/SQLite 的 `collaborationMode`。
+
+Dialog Header 说明改为“确定这段对话的工作环境与队员。”；Footer 删除模式摘要。可选名称默认
+收起，展开自动聚焦，提供规范化名称摘要、Unicode scalar `0 / 80` 计数、清空按钮和 80 上限。
+
+## 4. Main Window Session 与一次性解析
 
 Electron Main 每次调用 `createWindow()` 建立新的 Main Window Session，并为该窗口冻结一份
 `DesktopStartupSnapshot`。启动解析在该会话中只能从 `unresolved` 前进一次，不能因 React
@@ -145,7 +196,7 @@ Renderer 初始显示稳定的“正在恢复上次位置”启动门，不得�
 仍依“成功显示即提交”成为新的 Restorable Location；之后改回 `last_location` 时，下一窗口恢复
 的是此后最近成功显示的稳定位置，而不是被跳过的旧目标。
 
-## 4. Restorable Location 提交与验证
+## 5. Restorable Location 提交与验证
 
 Restorable Location 只有四种稳定形态：
 
@@ -188,14 +239,14 @@ Renderer 只在目标页面满足“权威读取成功并已经成为可见一�
 字符串、一次 Health failure 或空的旧 Navigation Snapshot 推断删除。Core 暂时失败后成功时继续
 验证最初冻结目标，不重新读取偏好并选择另一条启动路线。
 
-## 5. Desktop Shell 持久化与 bridge
+## 6. Desktop Shell 持久化与 bridge
 
 v0.49 延续 `appearance.json`、`navigation.json`、`window-state.json` 的 Main-owned 本地偏好模式，
 新增两个相互隔离的 Shell 文件：
 
 | 文件 | 内容 | 缺失/损坏默认值 |
 | --- | --- | --- |
-| `<userData>/general-preferences.json` | `schemaVersion: 1`、`startupLocationMode`、`lastSettingsSection` | `last_location`、`general` |
+| `<userData>/general-preferences.json` | `schemaVersion: 2`、启动/分类偏好、默认队员/Lead、失效锁存与一键创建开关 | `last_location`、`general`、未配置、关闭 |
 | `<userData>/restorable-location.json` | `schemaVersion: 1`、一个 `RestorableLocation` | 没有有效目标；本次进入 Quick Chat |
 | `<userData>/window-state.json` | 现有 `schemaVersion: 1`、normal bounds | 默认尺寸并在选定显示器居中 |
 
@@ -220,6 +271,9 @@ interface GeneralPreferencesApi {
   get(): Promise<GeneralPreferencesSnapshot>
   setStartupLocationMode(mode: StartupLocationMode): Promise<GeneralPreferencesSnapshot>
   setLastSettingsSection(section: SettingsSection): Promise<GeneralPreferencesSnapshot>
+  setNewConversationDefaults(defaults: NewConversationDefaults): Promise<GeneralPreferencesSnapshot>
+  setOneClickNewConversationEnabled(enabled: boolean): Promise<GeneralPreferencesSnapshot>
+  invalidateNewConversationDefaults(): Promise<GeneralPreferencesSnapshot>
 }
 
 interface LoginItemApi {
@@ -237,7 +291,7 @@ interface WindowControlsApi {
 Main 对所有 Renderer 输入做穷尽 enum/shape/length 校验。Renderer 不获得文件路径、任意 JSON 写入、
 任意 Shell URL 或通用 BrowserWindow 控制能力。上述接口不是 CoreMethod，不进入 Core allowlist。
 
-## 6. 窗口区与几何规则
+## 7. 窗口区与几何规则
 
 页面固定显示：
 
@@ -276,7 +330,7 @@ Approval、Run、滚动或焦点链。
 
 窗口进入或退出全屏、目标 display 变化以及 General 页面重新获得焦点时刷新 reset capability。
 
-## 7. 状态、焦点与错误恢复
+## 8. 状态、焦点与错误恢复
 
 - General 页面即使某一 Shell 读取失败，页头、另一个 section 和设置导航仍可用；
 - 登录项、启动偏好与窗口重置各有独立 loading/submitting/error 状态，不能使用一个全页 busy；
@@ -286,7 +340,7 @@ Approval、Run、滚动或焦点链。
 - 成功保存启动偏好或完成窗口重置可以使用 `aria-live="polite"` 的短反馈；
 - Startup Gate 的重试不改变冻结目标，打开诊断也不提交 Settings 为 Restorable Location。
 
-## 8. 负向边界
+## 9. 负向边界
 
 General 的全部写操作只进入 Electron Main 或 macOS 系统：
 
@@ -298,7 +352,7 @@ General 的全部写操作只进入 Electron Main 或 macOS 系统：
 
 登录启动创建普通可见主窗口，不使用隐藏窗口、Tray-only、后台 silent mode 或自动运行任务。
 
-## 9. 非目标
+## 10. 非目标
 
 - 语言、自动更新、系统通知规则；
 - 关闭窗口行为和后台驻留策略；
