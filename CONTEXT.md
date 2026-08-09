@@ -133,15 +133,15 @@ The optional `成长课题` statement naming a direction a Member currently inte
 _Avoid_: performance score, current Task, AgentRun Dynamic Context, Memory body, automatic Memory trigger, permanent trait
 
 **Member Identity Bootstrap Projection**:
-The required private `MEMBER_IDENTITY` section transiently formatted from one AgentProfile's latest committed six identity fields at an eligible Native Session Bootstrap delivery. It is neither persisted as a Snapshot nor frozen into an AgentRun; Claude Code and Codex receive it at new Session and Resume, while other Runtimes receive it only at new Session under their existing delivery modes.
-_Avoid_: Member Identity Snapshot, AgentRun identity context, Session identity revision, avatar, Runtime configuration, Capability bundle, live Runtime update
+The required private `MEMBER_IDENTITY` section transiently formatted from one AgentProfile's latest committed six identity fields at an eligible Native Session Bootstrap delivery. It is the sole self-identity projection for that Native Session and is neither persisted as a Snapshot nor frozen into an AgentRun. New Session, existing Resume Bootstrap paths and qualified compaction redelivery retain their existing delivery matrix; an identity edit alone does not patch Dynamic Context or rotate the Session.
+_Avoid_: Member Identity Snapshot, AgentRun identity context, Session identity revision, Collaboration State self entry, avatar, Runtime configuration, Capability bundle, live Runtime update
 
 **Member Identity Update**:
 The versioned atomic user command that saves exactly one AgentProfile's six identity fields. Avatar, Runtime configuration, permissions, Presence, Memory state, and other Profile concerns have independent mutation boundaries and cannot partially join or roll back an Identity Update.
 _Avoid_: whole-profile save, avatar update, Runtime update, Memory update, multi-section transaction
 
 **Peer Member Identity Projection**:
-The collaboration-facing subset of another Camp Member's identity containing only stable routing identity, Name, Team Role, and Professional Responsibilities. Personality Traits, Working Principles, Growth Topic, availability, busy state, and execution reason remain outside this projection.
+The Collaboration State v2 subset of another current Camp Member's identity containing exactly Agent ID, Name, Team Role, and Professional Responsibilities. The current Agent is never a peer; away and leave-requested relationships remain current until formally left. Personality Traits, Working Principles, Growth Topic, availability, busy state, Runtime eligibility and execution reason remain outside this projection.
 _Avoid_: complete Member Identity Bootstrap Projection, personality profile, peer instruction, availability projection, Capability projection
 
 **Agent UUID**:
@@ -845,16 +845,16 @@ The stable Core Contract persisted as one Native Session Bootstrap Evidence comp
 _Avoid_: System Prompt replacement, Member Identity Bootstrap Projection, dynamic Run context, embedded tool catalog, security enforcement
 
 **AgentRun Dynamic Context**:
-The immutable model-facing payload for exactly one AgentRun, composed from complete Current Input plus conditional Collaboration State, Shared Conversation and Run Notices. It contains no Member Identity Bootstrap Projection and no independently synthesized objective, responsibility, deliverable or Task snapshot.
+The immutable model-facing payload for exactly one AgentRun, composed from complete Current Input plus conditional peer-only Collaboration State v2, Shared Conversation and Run Notices. It contains no Member Identity Bootstrap Projection, self identity patch, or independently synthesized objective, responsibility, deliverable or Task snapshot.
 _Avoid_: Native Session Bootstrap, Member Identity Context, mutable live prompt, Work Brief, Task Context
 
 **ContextManifest**:
-The immutable Core evidence that freezes one AgentRun's previous and current public-message boundaries, Cross-Camp History Fence, selected raw source references, context-delivery profile version and resolved profile evidence, stable Bootstrap Evidence reference, formatter version, exact rendered AgentRun Dynamic Context and delivery target. Public boundaries are internal evidence and are not rendered to the model. Recovery reuses the dynamic payload byte-for-byte; the Manifest neither stores nor proves the transient Member Identity Bootstrap Projection, complete Bootstrap, or combined first payload.
+The immutable Core evidence that freezes one AgentRun's previous and current public-message boundaries, Cross-Camp History Fence, selected raw source references, context-delivery profile evidence, stable Bootstrap Evidence reference, formatter version, complete Collaboration State v2 projection digest, independent Collaboration State inclusion Boolean, exact rendered AgentRun Dynamic Context and delivery target. Public boundaries and projection evidence are internal; Recovery reuses the dynamic payload byte-for-byte. The Manifest neither stores nor proves the transient Member Identity Bootstrap Projection, complete Bootstrap, or combined first payload.
 _Avoid_: complete Runtime prompt evidence, Member Identity Snapshot, prompt template, live context query, proof the model understood input
 
 **Collaboration State**:
-A bounded model-facing directory of Peer Member Identity Projections plus the optional Default Lead, emitted for a new Native Session or a material stable team-structure change. It contains no availability, busy reason, changes hint, or current-Turn collaboration inference. `camp.message.send` and Core-owned admission recheck the latest membership, Presence, Runtime, Capability, quota, and fencing state for every addressed send.
-_Avoid_: routing authority, availability promise, Capability list, raw presence/readiness state, current task, current Turn participant state
+A bounded schema-v2 model-facing directory of Peer Member Identity Projections, a nullable Default Lead Agent ID reference, and a derived `selfIsDefaultLead` Boolean. It excludes the current Agent's identity text and is emitted for Bootstrap-required input or a changed complete peer-routing projection. Its digest always identifies the complete final v2 object, while ContextManifest separately records whether the section was rendered. It contains no availability, leave-request state, busy reason, changes hint, or current-Turn inference; Core rechecks live eligibility for every addressed send.
+_Avoid_: self identity patch, `members`, `defaultLead` identity object, routing authority, availability promise, Capability list, raw presence/readiness state, current task, current Turn participant state
 
 **Shared Conversation**:
 The deterministic bounded model-facing representation of public Camp history newly eligible for the current Native Session. It contains the latest ordered raw public messages after per-message prefix truncation, any required Public Reference Context Closure for the current trigger, an optional Core-derived Originating Public User Message for an A2A delivery lineage, and an omission notice only when whole eligible messages were excluded. Current Input is excluded, while Public A2A Messages participate as ordinary public history; the previous/current public boundaries remain internal.
@@ -871,6 +871,10 @@ _Avoid_: Shared Conversation duplicate, Work Brief, model-generated source metad
 **Accepted Public Context Boundary**:
 The one monotonic public CampMessage sequence boundary maintained for each Native Session. It records the current public boundary frozen by the most recent AgentRun whose input the Runtime accepted and ACKed; a new Native Session starts at zero. A new Run considers untombstoned public messages in `(previousAcceptedBoundary, currentManifestBoundary]`, and successful acceptance advances directly to the full current boundary even when whole messages were omitted from automatic context. Failure before ACK does not advance it. It is neither per-message read state nor a lower bound for `camp.read` or `camp.search`.
 _Avoid_: proof of reading, unread-message set, retrieval cursor, model-visible boundary
+
+**Accepted Collaboration Projection Digest**:
+The complete canonical Collaboration State v2 projection digest last advanced by an accepted Runtime Input ACK for one current Native Binding generation. Every ContextManifest records the complete current digest and independently records whether the section was included; send failure, `delivery_unknown`, process loss and unaccepted input do not advance the Conversation watermark. It is not a digest of internal Member State, a delta, a rendered fragment, Member Identity, or proof that the model understood the directory.
+_Avoid_: member state digest, inclusion flag, self identity version, presence watermark, model-read proof
 
 **Bounded Raw Public Messages**:
 The latest fixed-count base subset of eligible public CampMessages, rendered in ascending sequence order after each body is reduced to an exact Unicode-scalar prefix. If the resulting bodies exceed the public-history character budget, whole base messages are removed oldest-first; a separately required Public Reference Context Closure may add only the current trigger's direct ancestors under the closure budget and de-duplicates by message ID. No Mention, attachment relation, keyword, importance, or unrelated reply graph changes the base selection.

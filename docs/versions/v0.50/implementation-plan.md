@@ -1,0 +1,74 @@
+---
+document_type: implementation-plan
+version: v0.50
+authority: implementation-plan-and-acceptance
+status: complete
+last_updated: 2026-08-09
+---
+
+# v0.50 实施与验收计划
+
+## Checkpoint 0：版本、决策与合同
+
+- [x] v0.49 按原实施事实冻结为 historical，v0.50 成为唯一 current；
+- [x] ADR-0145 冻结唯一 Self Identity、peer routing projection 与 ACK 边界；
+- [x] Collaboration State v2 冻结模型字段、选择规则、隐私、digest 和 inclusion；
+- [x] Bootstrap v3 / Bootstrap Formatter v3 / Context Formatter v11 / ContextManifest v8；
+- [x] 长期 Architecture、领域词汇和文档路由同步。
+
+## Checkpoint 1：Projection 与 formatter
+
+- [x] `MEMBER_IDENTITY` 保持六字段 schema v1、固定顺序和 eligible-Bootstrap eventual consistency；
+- [x] `peers = current CampMembers - self`，away/leave-requested 保留至正式 left；
+- [x] peer 只投影 Agent ID、Name、Team Role、Professional Responsibilities；
+- [x] Lead 改为 `defaultLeadAgentId + selfIsDefaultLead`，不复制 self 文本；
+- [x] Session Charter 声明 sole self identity 与 peer-only routing identity。
+
+## Checkpoint 2：Digest、Evidence 与 ACK
+
+- [x] 对完整最终 Collaboration State v2 canonical projection 计算 digest；
+- [x] `collaborationStateIncluded` 独立记录本轮是否渲染；
+- [x] Prepared/Frozen Context、Runtime Input Delivery、ContextManifest、事件和 Read Model 全链路改名；
+- [x] accepted ACK 只推进冻结的完整 projection digest；failure/unknown/not accepted 不推进；
+- [x] self 编辑、Presence 和 leave request 等非模型可见变化不触发重复投递。
+
+## Checkpoint 3：Migration 67 clean break
+
+- [x] 唯一升级源为 v0.48/schema 26/migration 66；
+- [x] 清理旧 Binding、Session、watermark、redelivery、resume、observer 和上下文技术投影；
+- [x] 旧非终态 Run/Turn 与未完成 Message Delivery/attempt fail closed，旧 frozen delivery context link 清除；
+- [x] 保留 Camp、消息、Task、Conversation 和终态 Run/Turn 业务历史；
+- [x] 新表只接受 v3/3/11 与非空 inclusion，无旧 formatter/read compatibility 分支。
+
+## Checkpoint 4：自动验收
+
+- [x] Self/peer/Lead/privacy/presence/leave-requested/digest/inclusion/ACK 端到端测试；
+- [x] v67 精确 source、业务历史保留、技术投影表行/可达引用清理、FK 与重复启动幂等测试；
+- [x] 完整 `context::tests`；
+- [x] 完整 `db::tests`；
+- [x] Rust workspace format/check/clippy/test；
+- [x] TypeScript typecheck 与 Vitest；
+- [x] `pnpm docs:check` 与 `git diff --check`。
+
+## Checkpoint 5：完成条件
+
+- [x] 所有工作区级命令通过；
+- [x] 当前合同搜索不存在 live `member_state_digest`、旧 formatter 或 nullable inclusion 分支；
+- [x] v0.50 概览和本计划更新为 complete，并记录实际验证结果。
+
+## 实际验证结果（2026-08-09）
+
+- `cargo fmt --all -- --check`：通过；
+- `cargo check --workspace --all-targets`：通过；
+- `cargo clippy --workspace --all-targets -- -D warnings`：通过；
+- `cargo test --workspace`：库测试 293 项、CLI 测试 9 项、主程序测试 52 项全部通过；3 项手工
+  Runtime smoke 按合同标记为 ignored；
+- `cargo test -p rovai-core context::tests`：30 项通过；
+- `cargo test -p rovai-core db::tests`：33 项通过；
+- `pnpm typecheck`：通过；
+- `pnpm test`：38 个 Vitest 文件共 231 项、78 项 Node qualification tests 全部通过，且前置
+  documentation version check 通过；
+- `pnpm docs:check`：通过；
+- `git diff --check`：通过；
+- 当前合同搜索只在历史 migration 输入、v0.48 source fixture 与历史版本文档中命中旧名称；
+  current DTO、运行时 SQL、formatter 与 read path 均为 v3/3/11/v8 current-only 合同。

@@ -335,6 +335,7 @@ pub struct ContextManifestView {
     pub omitted_message_sequence_start: Option<i64>,
     pub omitted_message_sequence_end: Option<i64>,
     pub collaboration_state_digest: String,
+    pub collaboration_state_included: bool,
     pub run_notice_refs: Vec<String>,
     pub run_notice_digest: String,
     pub current_input_source: Value,
@@ -1803,7 +1804,8 @@ fn load_context_manifests(
                delivery.id, delivery.execution_epoch, delivery.status,
                delivery.native_input_id, delivery.boundary_camp_message_sequence,
                delivery.prepared_at, delivery.accepted_at, delivery.resolved_at,
-               delivery.last_error, delivery.updated_at
+               delivery.last_error, delivery.updated_at,
+               manifest.collaboration_state_included
         FROM context_manifest AS manifest
         JOIN native_session_bootstrap_evidence AS bootstrap
           ON bootstrap.id = manifest.bootstrap_evidence_id
@@ -1867,6 +1869,7 @@ fn load_context_manifests(
                 row.get::<_, Option<String>>(39)?,
                 row.get::<_, Option<String>>(40)?,
                 row.get::<_, Option<String>>(41)?,
+                row.get::<_, bool>(42)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1954,6 +1957,7 @@ fn load_context_manifests(
                 omitted_message_sequence_start: row.29,
                 omitted_message_sequence_end: row.30,
                 collaboration_state_digest: row.6,
+                collaboration_state_included: row.42,
                 run_notice_refs,
                 run_notice_digest: row.8,
                 current_input_source,

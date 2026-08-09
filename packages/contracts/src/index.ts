@@ -888,8 +888,8 @@ export interface NativeSessionBootstrapEvidenceView {
   conversationId: string
   nativeBindingId: string
   nativeBindingGeneration: number
-  contractVersion: 'native_session_bootstrap_v2'
-  bootstrapFormatterVersion: 2
+  contractVersion: 'native_session_bootstrap_v3'
+  bootstrapFormatterVersion: 3
   sessionCharterDigest: string
   memoryEntrypointDigest: string
   observedMemoryRevisions: unknown[]
@@ -929,6 +929,7 @@ export interface ContextManifestView {
   omittedMessageSequenceStart: number | null
   omittedMessageSequenceEnd: number | null
   collaborationStateDigest: string
+  collaborationStateIncluded: boolean
   runNoticeRefs: string[]
   runNoticeDigest: string
   currentInputSource: unknown
@@ -939,7 +940,7 @@ export interface ContextManifestView {
   mcpExposure: McpExposureSnapshot
   mcpExposureDigest: string
   mcpProjectionDigest: string
-  formatterVersion: 8 | 9 | 10
+  formatterVersion: 11
   renderedPayloadDigest: string
   delivery: RuntimeInputDeliveryView | null
   createdAt: string

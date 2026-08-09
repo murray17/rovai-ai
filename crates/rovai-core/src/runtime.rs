@@ -2055,7 +2055,7 @@ impl ExecutionRuntimeService {
                             native_binding_secret_digest = NULL,
                             last_accepted_public_boundary_sequence = 0,
                             native_charter_digest = NULL,
-                            native_member_state_digest = NULL,
+                            native_collaboration_state_digest = NULL,
                             version = version + 1, updated_at = ?7
                         WHERE id = ?1 AND version = ?8
                           AND native_adapter_installation_id IS ?9
@@ -2273,7 +2273,7 @@ impl ExecutionRuntimeService {
                     native_binding_secret_digest = NULL,
                     last_accepted_public_boundary_sequence = 0,
                     native_charter_digest = NULL,
-                    native_member_state_digest = NULL,
+                            native_collaboration_state_digest = NULL,
                     version = version + 1,
                     updated_at = ?3
                 WHERE id = ?1 AND version = ?2
@@ -3994,7 +3994,7 @@ mod tests {
                     native_binding_compatibility_digest, native_binding_id,
                     native_binding_generation, native_binding_secret_digest,
                     last_accepted_public_boundary_sequence,
-                    native_charter_digest, native_member_state_digest,
+                    native_charter_digest, native_collaboration_state_digest,
                     version, created_at, updated_at
                 ) VALUES (
                     'restart-conversation', 'restart-camp', 'agent_1',

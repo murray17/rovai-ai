@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.49
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: in_progress
@@ -16,6 +16,8 @@ last_updated: 2026-08-09
 > 两个范围都不改变 Camp、Task、AgentRun、Native Session、Memory、Approval 或执行恢复语义。
 >
 > 前置版本：[v0.48 Native Session Compaction Bootstrap Redelivery](../v0.48/README.md)
+>
+> 后续版本：[v0.50 Self Identity 与 Collaboration Projection 边界](../v0.50/README.md)
 
 ## 版本目标
 

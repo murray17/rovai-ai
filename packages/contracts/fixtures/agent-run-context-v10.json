@@ -1,9 +1,0 @@
-{
-  "nativeSessionBootstrap": "native_session_bootstrap_v2",
-  "bootstrapFormatterVersion": 2,
-  "agentRunContextFormatterVersion": 10,
-  "contextManifestVersion": 7,
-  "contextManifestFormatterVersion": 10,
-  "contextDeliveryProfileVersion": 1,
-  "memberCallSenderIdentityField": "senderAgentId"
-}

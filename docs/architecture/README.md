@@ -1,7 +1,7 @@
 ---
 document_type: architecture-index
 authority: long-lived-architecture-routing
-last_updated: 2026-08-07
+last_updated: 2026-08-09
 ---
 
 # 长期系统架构
@@ -11,5 +11,6 @@ last_updated: 2026-08-07
 
 | 架构 | 内容 |
 | --- | --- |
-| [Built-in Tool Runtime](builtin-tool-runtime.md) | Agent CLI、Core Router、Runtime Fleet、Bootstrap、ContextManifest 与外部 MCP 的关系 |
+| [Built-in Tool Runtime](builtin-tool-runtime.md) | Agent CLI、Core Router、Runtime Fleet、唯一 Self Identity、peer routing Dynamic Context、ContextManifest/ACK 与外部 MCP 的关系 |
+| [Native Session Bootstrap Redelivery](native-session-bootstrap-redelivery.md) | compaction detector、Session Observer、Bootstrap/Member Identity 重投递、Dynamic Context 与 accepted-input 水位 |
 | [Public A2A Message 与 Message Delivery](public-a2a-message-delivery.md) | 公共消息事实、统一收件人 Delivery、Context gate、Runtime 输出与 UI projection 的权威边界 |

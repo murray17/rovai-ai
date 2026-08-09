@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import fixture from '../fixtures/agent-run-context-v10.json'
+import fixture from '../fixtures/agent-run-context-v11.json'
 import type { ContextManifestView } from './index'
 
 describe('AgentRun context contract', () => {
-  it('uses the shared frozen v10 fixture', () => {
-    const formatterVersion: ContextManifestView['formatterVersion'] = 10
+  it('uses the shared frozen v11 fixture', () => {
+    const formatterVersion: ContextManifestView['formatterVersion'] = 11
 
     expect(fixture.agentRunContextFormatterVersion).toBe(formatterVersion)
     expect(fixture.contextManifestFormatterVersion).toBe(formatterVersion)

@@ -1,14 +1,17 @@
 ---
 document_type: architecture
 authority: native-session-bootstrap-redelivery
-last_updated: 2026-08-08
+last_updated: 2026-08-09
 ---
 
 # Native Session Bootstrap Redelivery
 
 本文维护 Native Session context compaction 后 Bootstrap 补发的长期组件边界、Runtime policy、
 detector transport 与输入时序。实施状态和目标版本 smoke 以
-[v0.48](../versions/v0.48/README.md)及[Runtime 兼容性清单](../runtime-compatibility.md)为准。
+[v0.48](../versions/v0.48/README.md)及[Runtime 兼容性清单](../runtime-compatibility.md)为准；
+Bootstrap v3 的 Self/Peer identity 边界和当前 Dynamic Context ACK 见
+[ADR-0145](../adr/0145-sole-native-session-self-identity-and-peer-routing-projection.md)与
+[Collaboration State v2](../contracts/collaboration-state-v2.md)。
 
 ## 两个独立生命周期
 
@@ -125,6 +128,17 @@ Core 使用同一个数据库 mutex 串行化：
 unsendable staging state；Observer 无法在其间提交，crash recovery 会复用 Manifest 并重新读取当前
 pending 后才能创建 Delivery。因而逻辑 cutoff 是 Delivery `prepared`，并不存在可送出而未经过
 redelivery selection 的 payload。prepared 后提交的 observation 留给下一输入，不能修改冻结 bytes。
+
+补发组装在每次 eligible redelivery 时读取最新完整六字段 `MEMBER_IDENTITY`，但不把这些字段写入
+ContextManifest、Delivery digest 或 Collaboration State。`MEMBER_IDENTITY` 始终是 Session 唯一
+self identity；Dynamic Context 的 Collaboration State v2 只含 peers。身份编辑本身不创建
+Requirement、Input、Run 或新 Session，也不改变这里的 eligible delivery matrix。
+
+同一 Runtime Input Delivery 可以同时冻结 Bootstrap redelivery revision 和完整
+`collaboration_state_digest`，但两条水位相互独立：前者消费该 Delivery 选择的 Requirement revision，
+后者推进到 ContextManifest 的完整 Collaboration State v2 projection digest；
+`collaborationStateIncluded` 只说明本轮是否渲染 peer section。只有同一个 accepted ACK 才能分别推进
+这两条冻结水位，send failure、`delivery_unknown`、process loss 和未 accepted 输入对两者都不推进。
 
 完整 Bootstrap 与 Current Input 不可截断。combined payload 超限时只按现有 Context Delivery Profile
 确定性削减 optional Dynamic Context；仍超限则在 prepared 前 fail closed。ContextManifest 仅存实际

@@ -13,6 +13,12 @@ superseded_by: null
 
 # ADR-0129: Deterministic Bounded Raw Public Context Delivery
 
+> [ADR-0145](0145-sole-native-session-self-identity-and-peer-routing-projection.md)局部替代本文
+> “Stable collaboration state”中的 self/member、`defaultLead`、Presence 触发和内部 Member State
+> digest 条款。当前合同是 peer-only Collaboration State v2、Lead ID/Boolean、完整最终 projection
+> digest 与独立 inclusion；本文的公共消息、Context Profile 和 Accepted Public Context Boundary
+> 继续有效。
+
 ## Context
 
 Rovai 现有 AgentRun 公共消息上下文依赖 Camp 级 Segment/Epoch Summary、覆盖区间、

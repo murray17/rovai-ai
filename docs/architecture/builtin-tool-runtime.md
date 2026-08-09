@@ -3,7 +3,7 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-08-08
+last_updated: 2026-08-09
 ---
 
 # Built-in Tool Runtime Architecture
@@ -19,7 +19,10 @@ historical 语义。决策理由见
 [ADR-0137](../adr/0137-one-time-task-linked-responsibility-admission.md)。Native Session context
 compaction 后的 Bootstrap 补发可靠性见
 [ADR-0138](../adr/0138-durable-bootstrap-redelivery-requirement.md)，版本拥有的 Runtime policy 与
-完整矩阵见 [Native Session Bootstrap Redelivery](native-session-bootstrap-redelivery.md)。
+完整矩阵见 [Native Session Bootstrap Redelivery](native-session-bootstrap-redelivery.md)。Self/peer
+identity、Collaboration Projection 与输入水位见
+[ADR-0145](../adr/0145-sole-native-session-self-identity-and-peer-routing-projection.md)和
+[Collaboration State v2](../contracts/collaboration-state-v2.md)。
 
 ## 总体路径
 
@@ -167,6 +170,25 @@ Session Charter 只说明：
 Bootstrap 不含完整 Schema、Envelope、receipt、catalog digest、socket、process token、lease、
 AgentRun ID、epoch、Camp ID 或 Native Binding ID。Dynamic Context 使用 `retrieveWith.operation`
 指向 canonical operation，不重复 transport 细节。
+
+### Self Identity 与 Peer Routing Identity
+
+Bootstrap v3 按固定顺序组装 Session Charter、`MEMBER_IDENTITY` 和 Memory Entrypoint。
+`MEMBER_IDENTITY` 是该 Native Session 唯一的 self identity，包含最新已提交的完整六字段；它只在
+既有 eligible Bootstrap boundary 原子读取，不进入 AgentRun Dynamic Context，不持久化 Identity
+Blob、snapshot、digest 或 history。身份编辑不轮换 Session，也不构造下一 Run 的 patch。
+
+Context Formatter v11 的 `COLLABORATION_STATE` schema v2 只描述 peers。Core 从 stable current
+CampMembers 中排除 `snapshot.agent_id`；away 和 leave-requested 关系保留到正式 `left`。每个 peer
+只含 Agent ID、Name、Team Role 和 Professional Responsibilities；Default Lead 只以
+`defaultLeadAgentId` 和派生的 `selfIsDefaultLead` 表达。调用资格仍在 BuiltinToolRouter/Domain
+Service admission 时按当前 membership、Presence、Runtime、Capability、quota 与 fence 重判。
+
+Core 先构建完整 v2 projection，再计算 `collaboration_state_digest`。ContextManifest v8 无论本轮是否
+渲染 section 都冻结该完整 digest，并以 `collaborationStateIncluded` 单独记录 inclusion。只有 Runtime
+Input accepted ACK 才把 `conversation.native_collaboration_state_digest` 推进到 Delivery 冻结的完整
+digest；failure、`delivery_unknown` 和未 accepted 输入不推进。因此 self identity 编辑和其他不改变
+模型投影的内部变化不会形成重复 Collaboration State 或部分 self update。
 
 ### Context compaction redelivery accounting
 

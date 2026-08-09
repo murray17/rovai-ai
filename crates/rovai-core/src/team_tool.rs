@@ -738,7 +738,7 @@ impl TeamToolService {
                     native_binding_secret_digest = ?6,
                     last_accepted_public_boundary_sequence = 0,
                     native_charter_digest = NULL,
-                    native_member_state_digest = NULL,
+                    native_collaboration_state_digest = NULL,
                     version = version + 1,
                     updated_at = ?7
                 WHERE id = ?1 AND version = ?8
