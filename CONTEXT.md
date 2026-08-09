@@ -848,13 +848,37 @@ _Avoid_: AgentRun lease extension, session ID alone, ambient Hook trust, ordinar
 The stable Core Contract persisted as one Native Session Bootstrap Evidence component. It defines context authority, collaboration rules, and the stable Built-in Tool Transport discovery/invocation contract without containing editable Member identity, current Tasks, members, messages, Runtime state, Memory entries, Skills, complete operation schemas, or permissions.
 _Avoid_: System Prompt replacement, Member Identity Bootstrap Projection, dynamic Run context, embedded tool catalog, security enforcement
 
+**Context Source State**:
+The current authoritative Core domain records from which a model context projection is derived, including CampMessage, Attachment, CampMember, Task and Memory state. It is not copied wholesale into ContextManifest, and its IDs or references neither grant access nor prove Runtime delivery.
+_Avoid_: audit projection, prompt snapshot, frozen model context, delivery receipt
+
+**Model Context Projection**:
+The versioned, privacy-filtered field set serialized into Native Session Bootstrap or AgentRun Dynamic Context for model consumption. It is derived from Context Source State but neither replaces that authority nor serves as accepted-delivery evidence.
+_Avoid_: audit projection, internal domain state, ContextManifest, Runtime Input Delivery
+
+**Context Projection Evidence**:
+The privacy-minimized immutable ContextManifest facts sufficient to verify how Context Source State produced one exact Model Context Projection: stable source references and content digests, selection/truncation/omission parameters, and rendered bytes plus digest. It is neither a complete source-value snapshot nor evidence that the Runtime accepted or the model understood the projection.
+_Avoid_: audit projection, copied business history, full SharedMessage snapshot, Runtime Input Delivery
+
+**Executable Retrieval Locator**:
+A model-visible canonical operation plus a complete input object that maps without translation to that operation's current schema; Core still reauthorizes every referenced ID at invocation. A truncated public-message continuation uses `camp.read` item input with Camp ID, Message ID and body offset, while an optional body limit remains an ordinary operation field.
+_Avoid_: approximate locator, transport command, missing required input, authorization token, sequence envelope
+
+**Retrieval Navigation Hint**:
+Model-visible non-executable guidance identifying unknown omitted content, a non-contiguous sequence envelope and the canonical operations that may help locate it. It never masquerades as operation input; exact omitted IDs and reasons remain Context Projection Evidence.
+_Avoid_: retrieveWith, executable locator, continuous sequence range, automatic retrieval request, omission evidence
+
 **AgentRun Dynamic Context**:
 The immutable model-facing payload for exactly one AgentRun, composed from complete Current Input plus conditional peer-only Collaboration State v2, Shared Conversation and Run Notices. It contains no Member Identity Bootstrap Projection, self identity patch, or independently synthesized objective, responsibility, deliverable or Task snapshot.
 _Avoid_: Native Session Bootstrap, Member Identity Context, mutable live prompt, Work Brief, Task Context
 
 **ContextManifest**:
 The immutable Core evidence that freezes one AgentRun's previous and current public-message boundaries, Cross-Camp History Fence, selected raw source references, context-delivery profile evidence, stable Bootstrap Evidence reference, formatter version, complete Collaboration State v2 projection digest, independent Collaboration State inclusion Boolean, exact rendered AgentRun Dynamic Context and delivery target. Public boundaries and projection evidence are internal; Recovery reuses the dynamic payload byte-for-byte. The Manifest neither stores nor proves the transient Member Identity Bootstrap Projection, complete Bootstrap, or combined first payload.
-_Avoid_: complete Runtime prompt evidence, Member Identity Snapshot, prompt template, live context query, proof the model understood input
+_Avoid_: audit projection, Runtime Input Delivery, complete Runtime prompt evidence, Member Identity Snapshot, prompt template, live context query, proof the model understood input
+
+**Runtime Input Delivery**:
+The durable delivery-attempt evidence binding one ContextManifest to one AgentRun execution epoch and Native Binding generation. Its accepted acknowledgement may advance the ContextManifest's watermarks, while failure or unknown delivery does not; it neither selects model fields nor stores a complete identity-bearing Runtime payload.
+_Avoid_: ContextManifest, Model Context Projection, transport log, proof the model read or understood input
 
 **Collaboration State**:
 A bounded schema-v2 model-facing directory of Peer Member Identity Projections, a nullable Default Lead Agent ID reference, and a derived `selfIsDefaultLead` Boolean. It excludes the current Agent's identity text and is emitted for Bootstrap-required input or a changed complete peer-routing projection. Its digest always identifies the complete final v2 object, while ContextManifest separately records whether the section was rendered. It contains no availability, leave-request state, busy reason, changes hint, or current-Turn inference; Core rechecks live eligibility for every addressed send.
