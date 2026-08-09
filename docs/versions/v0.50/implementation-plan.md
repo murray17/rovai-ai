@@ -2,11 +2,15 @@
 document_type: implementation-plan
 version: v0.50
 authority: implementation-plan-and-acceptance
-status: complete
+status: in_progress
 last_updated: 2026-08-09
 ---
 
 # v0.50 实施与验收计划
+
+> 本文 Checkpoint 0–5 和验证结果只记录已经合入的 Self/Peer Collaboration baseline，不证明随后
+> 接受的 Model Context Projection、Task Notice/Charter 或 Bootstrap Redelivery v2 已实现。逐项结论见
+> [设计审查](model-context-projection-review.md)；该审查不是实施规格，当前也未授权据此写代码。
 
 ## Checkpoint 0：版本、决策与合同
 
@@ -50,13 +54,13 @@ last_updated: 2026-08-09
 - [x] TypeScript typecheck 与 Vitest；
 - [x] `pnpm docs:check` 与 `git diff --check`。
 
-## Checkpoint 5：完成条件
+## Checkpoint 5：Self/Peer baseline 完成条件
 
 - [x] 所有工作区级命令通过；
 - [x] 当前合同搜索不存在 live `member_state_digest`、旧 formatter 或 nullable inclusion 分支；
-- [x] v0.50 概览和本计划更新为 complete，并记录实际验证结果。
+- [x] Self/Peer baseline 记录实际验证结果；该完成事实不再代表扩展后的整个 v0.50。
 
-## 实际验证结果（2026-08-09）
+## Self/Peer baseline 实际验证结果（2026-08-09）
 
 - `cargo fmt --all -- --check`：通过；
 - `cargo check --workspace --all-targets`：通过；
@@ -72,3 +76,14 @@ last_updated: 2026-08-09
 - `git diff --check`：通过；
 - 当前合同搜索只在历史 migration 输入、v0.48 source fixture 与历史版本文档中命中旧名称；
   current DTO、运行时 SQL、formatter 与 read path 均为 v3/3/11/v8 current-only 合同。
+
+## 扩展范围状态门槛
+
+- [x] 第 4–13 项逐项挑战完成，确认与否决项已归档；
+- [x] ADR-0147 冻结四层权威、无损投影和 Redelivery v2 的长期边界；
+- [ ] 最终 DTO、Formatter/Manifest Evidence、clean-break 影响和验收矩阵形成独立实施规格并获批；
+- [ ] 获得明确代码实施授权；
+- [ ] 最终 v0.50 实现与全量验证完成。
+
+上述门槛全部完成前，本计划和 v0.50 概览不得恢复 `complete`。既有 `[x]` 是仍然有效的历史验收
+事实，不是对未实施范围的隐式授权。

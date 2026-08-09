@@ -3,15 +3,16 @@ document_type: version-overview
 version: v0.50
 lifecycle: current
 authority: version-scope-and-status
-design_status: complete
-implementation_status: complete
+design_status: accepted
+implementation_status: in_progress
 last_updated: 2026-08-09
 ---
 
-# Rovai-ai v0.50：Self Identity 与 Collaboration Projection 边界
+# Rovai-ai v0.50：Self Identity、Collaboration 与 Model Context Projection 边界
 
-> 当前状态：设计与实施完成。Core、Migration 68、字段级合同、定向验收及工作区级 Rust、
-> TypeScript、文档与静态检查均已通过。
+> 当前状态：Self/Peer Collaboration baseline 已完成实现与验收；随后确认的 Model Context
+> Projection、Task Notice/Charter 与 Bootstrap Redelivery v2 边界尚未实施，也尚未形成获批的实施规格。
+> 因此 v0.50 整体保持 `implementation_status: in_progress`，既有验证结果只证明 baseline。
 >
 > 前置版本：[v0.49 通用与启动设置、双人追问 Skill](../v0.49/README.md)
 
@@ -21,6 +22,10 @@ v0.50 消除同一模型输入中“旧的完整 Self Identity”和“新的三
 语义冲突。一个 Native Session 只允许 `MEMBER_IDENTITY` 表达当前 Agent 自身身份；
 `COLLABORATION_STATE` 只服务 peer routing，不得补丁、更新或覆盖 self。
 
+同一未发布版本还冻结语义无损的模型投影精简：把模型可见 DTO、ContextManifest Evidence、Runtime
+Input Delivery Evidence 与内部领域状态分开，只移除模型不需要的证据字段和默认值，不改变选择、预算、
+恢复、accepted-ACK、隐私或授权。
+
 本版本冻结以下合同断代：
 
 ```text
@@ -28,8 +33,18 @@ Native Session Bootstrap v3
 Bootstrap Formatter v3
 AgentRun Context Formatter v11
 ContextManifest v8
+Context Delivery Profile v2
 Data Contract v0.50 / projection schema 27 / Migration 68
+Bootstrap Redelivery Envelope v2
+Bootstrap Redelivery Formatter v2
 ```
+
+v3/3/11/8 是同一个尚未发布的 v0.50 草案最终版本轴，不因讨论步骤或中间提交再次升版；Profile v2
+继续拥有不变的选择算法和预算。Redelivery v1 已是 v0.48 持久合同，因此 marker/wording 改变形成
+v2/2。逐项审查与明确否决项见
+[Model Context Projection 设计审查](model-context-projection-review.md)，长期权威见
+[ADR-0147](../../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)。该评审不是
+实施规格。
 
 长期理由见 [ADR-0146](../../adr/0146-sole-native-session-self-identity-and-peer-routing-projection.md)，
 字段级 shape 与 ACK 规则见
@@ -128,34 +143,56 @@ Bootstrap v3/Formatter 3、Context Formatter 11 和非空 inclusion；没有旧 
 - 不修改既有 eligible Bootstrap delivery matrix；
 - 不把 peer 的三个私有身份字段、Presence 或 Runtime 资格投影给模型。
 
+## 已确认、尚未实施的 Model Context Projection 边界
+
+后续实现只允许精简模型可见字段、使用 compact JSON 和省略无意义默认值。内部可以建立独立 model
+DTO，但 `messageId`、`sequence`、`senderType`、`senderId`、`replyToMessageId` 等 canonical 名称不改；
+`sourceConversationId` 和 attachment digest 移至 ContextManifest Evidence。单条正文截断提供可直接执行
+的 canonical `camp.read` item continuation；整条历史省略只提供 count、可能不连续的 sequence envelope
+与 navigation hint，不伪造 range locator。
+
+Context Source State、Model Context Projection、ContextManifest Evidence 与 Runtime Input Delivery Evidence
+保持四层分离。Current Input、完整 Collaboration State v2、Memory Entrypoint、Profile v2 选择/预算，
+以及与 Profile 分离的现有 96 KiB Runtime gate、accepted-ACK、隐私和实时授权都不改变。不引入
+Collaboration Delta、estimated-token budget、
+Memory reprioritization、字段缩写或第 13 项建议格式。
+
+Session Charter 将稳定 Task/polling/additional-send 规则与 per-Run Task Notice 分开，并移除标题中的
+`(v0.47)`；Redelivery 使用带 `reason="context_compaction"` 的 v2 envelope 和一条不可省略的 Core
+recovery authority 语句。实现字段、fixture、clean-break 和验收矩阵必须另行形成并获批，当前未授权
+据此写代码。
+
 ## 验收范围
 
-自动验收覆盖：新 Session 的完整六字段 Bootstrap；self 不进入 peers；self 编辑不产生
+已完成的 Self/Peer baseline 自动验收覆盖：新 Session 的完整六字段 Bootstrap；self 不进入 peers；self 编辑不产生
 Collaboration State 更新；peer public routing identity 更新触发新投影；peer 私有字段不泄露；self
 为 Lead 时只输出 ID/Boolean；away 与 leave-requested 不改变 peer 投影；`delivery_unknown` 不推进
 digest，accepted ACK 才推进；下一 eligible Bootstrap 继续读取最新完整身份；v68 保留业务历史、
 终结旧非终态执行与未完成 Delivery，并删除旧技术上下文表行和可达引用。
 
-精确检查点和最终命令证据见[实施与验收计划](implementation-plan.md)。
+精确检查点和命令证据见[实施与验收计划](implementation-plan.md)。这些结果不覆盖尚未实施的
+Model Context Projection/Redelivery v2 范围；最终范围完成前不得据此把 v0.50 标为 complete。
 
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | `docs/versions/README.md` 将 v0.49 按原实施事实冻结为 historical，并把 v0.50 设为唯一 current；本概览和实施计划已建立 |
-| ADR | 已更新 | ADR-0146 冻结 Native Session 唯一 Self Identity、peer-only Collaboration State、完整投影 digest 与 accepted-ACK 边界 |
-| Contracts | 已更新 | `docs/contracts/collaboration-state-v2.md` 冻结字段、成员选择、Lead 引用、隐私、digest/inclusion/ACK 和 clean break |
-| Architecture | 已更新 | Built-in Tool Runtime 与 Bootstrap Redelivery 架构同步 Self/Peer 生命周期、完整投影 digest 和输入 ACK 水位 |
+| ADR | 已更新 | ADR-0146 冻结 Self/Peer baseline；ADR-0147 冻结四层投影/Evidence、Profile/Formatter/Manifest 权责和 Redelivery v2，accepted 不代表已实现 |
+| Contracts | 已更新 | Collaboration State v2 已完成；Context Delivery Profile v2 的权威已收窄为选择与预算，最终 Formatter/Manifest 字段合同仍待实施规格 |
+| Architecture | 已更新 | Built-in Tool Runtime 与 Bootstrap Redelivery 架构记录四层 Evidence、Self/Peer ACK 和已确认但尚未实施的 Redelivery v2 目标 |
 | UI | 确认无需更新 | 不改变 Renderer 交互、布局或视觉语义；`collaborationStateIncluded` 只是 ContextManifest 机器可读证据 |
 | Runtime Activity | 确认无需更新 | 不新增或重分类 Canonical Runtime Activity；事件 payload 变化只扩展 Context evidence |
 | Runtime compatibility | 确认无需更新 | 不改变 Runtime adapter、上游版本、发现能力或 compaction detector 资格 |
-| Documentation routing | 已更新 | `docs/README.md`、Contracts/Architecture/ADR 索引和 `CONTEXT.md` 增加身份投影与 Collaboration State 当前入口 |
+| Documentation routing | 已更新 | `docs/README.md`、Contracts/Architecture/ADR 索引和 `CONTEXT.md` 增加 Self/Peer 与 Model Context Projection/Evidence 当前入口 |
 | Root README | 确认无需更新 | 项目定位、常青能力和支持的 Agent Runtime 范围没有变化 |
 
 ## References
 
 - [v0.50 实施与验收计划](implementation-plan.md)
+- [v0.50 Model Context Projection 设计审查](model-context-projection-review.md)
 - [ADR-0146：唯一 Self Identity 与 Peer Routing Projection](../../adr/0146-sole-native-session-self-identity-and-peer-routing-projection.md)
+- [ADR-0147：语义无损 Model Context Projection 与分层 Delivery Evidence](../../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)
 - [Collaboration State v2](../../contracts/collaboration-state-v2.md)
 - [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)
 - [Native Session Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)

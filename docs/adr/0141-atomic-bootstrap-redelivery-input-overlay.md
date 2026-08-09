@@ -12,6 +12,11 @@ superseded_by: null
 
 # ADR-0141: Atomic Bootstrap Redelivery Input Overlay and Transient Identity Boundary
 
+> [ADR-0147](0147-lossless-model-context-projection-and-layered-delivery-evidence.md) 局部替代本文的
+> exact model-facing Redelivery marker、wording 与 v1 formatter identity，当前目标为 Redelivery Envelope
+> v2 / Formatter v2。本文的 serialized preparation、transient Identity、Dynamic-only ContextManifest、
+> Runtime Input Delivery Evidence、combined budget 和 accepted-ACK 边界继续有效。
+
 ## Context
 
 Current context delivery materializes and persists one ContextManifest before separately preparing a

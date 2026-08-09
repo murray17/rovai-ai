@@ -2,17 +2,21 @@
 document_type: interface-contract
 contract: context-delivery-profile
 version: 2
-authority: agentrun-public-context-delivery
+authority: agentrun-public-context-selection-and-budget
 status: accepted
-last_updated: 2026-08-07
+last_updated: 2026-08-09
 ---
 
 # Context Delivery Profile v2
 
-Profile v2 是 v0.45 的公共消息动态上下文合同。Profile v1 保持不可变，仍可用于已经冻结的
-历史 ContextManifest；新 v0.45 AgentRun 使用 v2。公共消息、Delivery 和 Context gate 的
+Profile v2 是 v0.45 的公共消息选择与预算合同。Profile v1 保持不可变，仍可用于已经冻结的
+历史 ContextManifest；新 v0.45 AgentRun 使用 v2。模型字段/序列化、ContextManifest Evidence 和
+Runtime Input Delivery accepted evidence 是独立的合同/权威边界，不由 Profile version 命名。模型
+shape 由 Formatter version 所有，Evidence shape 由 Manifest version 所有；Runtime Input Delivery 是
+投递/ACK authority，并继续携带既有投递 metadata，而不是新的内容版本轴。公共消息、Delivery 和 Context gate 的
 长期边界见 [Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)，
-决策见 [ADR-0132](../adr/0132-public-reference-context-closure-profile-v2.md)。
+决策见 [ADR-0132](../adr/0132-public-reference-context-closure-profile-v2.md)；权责分层见
+[ADR-0147](../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)。
 
 ## 1. 不可变配置
 
@@ -26,8 +30,10 @@ maxPublicReferenceChainMessages: 3
 
 前 3 个数值与 Profile v1 完全相同；新增字段是公共引用链的绝对上限，不是“尽量闭合”的
 无限预算。Profile 由应用随版本内置，没有 Member UI、IPC 或用户设置入口。数值、字符计量、
-选择算法、omission 或 Manifest 字段改变必须创建新的 major profile version；不能修改已冻结
-的 v1/v2 Manifest。
+候选选择、去重、排序、截断、淘汰或预算优先级改变必须创建新的 major profile version；不能让
+同一个 Profile version 对相同 authoritative selection basis/input snapshot 产生不同选择结果。模型 DTO 字段、compact/pretty JSON 和提示文案归
+Context Formatter，Evidence 字段归 ContextManifest schema/version；只改变这些投影层时不创建
+Profile v3，也不能改写已经冻结的 Manifest。
 
 字符单位是 Unicode scalar，不是 UTF-8 byte、UTF-16 code unit 或模型 token。Agent ID 的
 canonical UTF-8/ASCII byte order 只用于 recipient identity，不用于上下文消息的 sequence
@@ -53,7 +59,8 @@ Conversation；它不会因为是 Agent 作者而进入私有区。
 
 普通历史 base 的选择保持 v1：取 sequence 最大的 15 条，逐条保留最多 2,000 scalar，按
 sequence 升序输出；超出 24,000 scalar 时从最旧 base message 开始整条移除。正文前缀截断
-不计为 omission，仍提供 `bodyLength`/`bodyTruncated`/`nextBodyOffset`。
+不计为整条 omission。模型如何表达截断事实与 continuation 由当前 Context Formatter 决定，
+Profile 只冻结正文前缀和 Unicode-scalar offset 结果。
 
 ## 3. Public Reference Context Closure
 
@@ -109,6 +116,11 @@ waitCondition = null
 
 ## 4. Omission 合同
 
+本节同时展示 Profile selection 事实、当前 Formatter 模型 projection 和 ContextManifest Evidence
+如何集成；示例中的模型字段或 Evidence 字段不构成 Profile v2 的版本身份。ADR-0147 已确认的最终
+Formatter/Manifest 投影尚未实施，实施时应在各自合同与 fixture 中更新，不能据此改变本节的 omission
+集合、count 或 sequence envelope 算法。
+
 模型可见的 `SHARED_CONVERSATION` 可以包含：
 
 ```yaml
@@ -146,7 +158,7 @@ omissions:
 
 ## 5. ContextManifest 与 ACK
 
-每个 v2 ContextManifest 至少冻结：
+每个使用 Profile v2 的 ContextManifest 至少冻结：
 
 ```text
 contextDeliveryProfileVersion = 2
@@ -162,9 +174,12 @@ exact rendered dynamic-context bytes + digest
 target Runtime/Formatter versions
 ```
 
+其中 Profile v2 只贡献 version、resolved snapshot/digest 和 selection evidence；Context Formatter
+贡献模型字段与 exact rendered bytes，ContextManifest version 定义其 Evidence shape。
+
 Manifest 是 Delivery dispatch attempt 的不可变输出。Recovery 只能复用冻结 bytes；不能使用
 当前 Profile、后来新增的公共消息、Runtime 新上限或新的 reply chain 重算。Runtime 接受并
-ACK 后，Core 在同一 generation fence 内把 Accepted Public Context Boundary 直接推进到
+由独立 Runtime Input Delivery 记录 accepted ACK 后，Core 才在同一 generation fence 内把 Accepted Public Context Boundary 直接推进到
 Manifest 的 current boundary，即使部分消息只通过 omission 呈现。Closure 不拥有单独的已读
 游标，也不改变 `camp.search`/`camp.read` 的既有 Fence。
 

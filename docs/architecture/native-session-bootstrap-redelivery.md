@@ -7,11 +7,14 @@ last_updated: 2026-08-09
 # Native Session Bootstrap Redelivery
 
 本文维护 Native Session context compaction 后 Bootstrap 补发的长期组件边界、Runtime policy、
-detector transport 与输入时序。实施状态和目标版本 smoke 以
-[v0.48](../versions/v0.48/README.md)及[Runtime 兼容性清单](../runtime-compatibility.md)为准；
+detector transport 与输入时序。detector 基线实施和目标 Runtime smoke 以
+[v0.48](../versions/v0.48/README.md)及[Runtime 兼容性清单](../runtime-compatibility.md)为准；当前
+Redelivery v2 实施状态以 [v0.50](../versions/v0.50/README.md)为准。
 Bootstrap v3 的 Self/Peer identity 边界和当前 Dynamic Context ACK 见
 [ADR-0146](../adr/0146-sole-native-session-self-identity-and-peer-routing-projection.md)与
-[Collaboration State v2](../contracts/collaboration-state-v2.md)。
+[Collaboration State v2](../contracts/collaboration-state-v2.md)。Redelivery Envelope/Formatter v2 和
+模型投影/Evidence 分层见
+[ADR-0147](../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)。
 
 ## 两个独立生命周期
 
@@ -104,17 +107,22 @@ Bootstrap；Core ACK 后删除。若 submission result unknown，Core restart �
 `pending_redelivery` 是
 `requestedRevision > acknowledgedRevision` 的派生状态。输入路径为：
 
-```text
-[ROVAI_BOOTSTRAP_REDELIVERY]
-【补发】Native Session Bootstrap
-原因：Runtime 已报告当前 Native Session 已发生或即将发生会话上下文压缩。
-以下内容用于恢复可能因压缩而丢失的会话级长期上下文。
+> 下列 Envelope v2 / Formatter v2 是 ADR-0147 已接受、尚未实施的 v0.50 目标；当前代码仍使用 v1。
+> 实施状态见 [v0.50 概览](../versions/v0.50/README.md)。
 
-<existing complete Native Session Bootstrap>
+```text
+[ROVAI_BOOTSTRAP_REDELIVERY reason="context_compaction"]
+This is Core recovery context for the existing Native Session, not a new task or Session.
+
+<complete Native Session Bootstrap>
 [/ROVAI_BOOTSTRAP_REDELIVERY]
 
 <immutable AgentRun Dynamic Context>
 ```
+
+该目标模型可见格式是 Redelivery Envelope v2 / Formatter v2。v1 的三句 Runtime 生命周期说明不再进入
+模型文本；上面这一句 recovery authority 不可省略。v1 已经是持久化到 Runtime Input Delivery 的
+v0.48 合同，因此 marker schema 与 wording 改变必须形成新版本，而不能原地复用 v1 identity。
 
 Core 使用同一个数据库 mutex 串行化：
 
@@ -158,3 +166,5 @@ Gate 后到达的更高 requested revision。
 - [ADR-0141](../adr/0141-atomic-bootstrap-redelivery-input-overlay.md)：transient overlay、budget 与 privacy；
 - [ADR-0142](../adr/0142-native-session-scoped-compaction-observer-lease.md)：Observer authority 与中断；
 - [ADR-0143](../adr/0143-best-effort-non-blocking-compaction-detector-capability.md)：non-blocking detector。
+- [ADR-0147](../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)：Redelivery
+  v2 marker/wording 与模型投影、Manifest、Delivery Evidence 分层。

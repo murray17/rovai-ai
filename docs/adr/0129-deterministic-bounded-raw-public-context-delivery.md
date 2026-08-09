@@ -18,6 +18,11 @@ superseded_by: null
 > digest 条款。当前合同是 peer-only Collaboration State v2、Lead ID/Boolean、完整最终 projection
 > digest 与独立 inclusion；本文的公共消息、Context Profile 和 Accepted Public Context Boundary
 > 继续有效。
+>
+> [ADR-0147](0147-lossless-model-context-projection-and-layered-delivery-evidence.md) 局部替代本文的
+> Shared Message 默认字段、`nextBodyOffset` continuation、omission navigation 文案以及 Profile/
+> Formatter/Manifest 权责表述。Profile v2 的候选集合、选择/排序、Unicode-scalar 截断与预算数值，
+> 完整 Current Input、Accepted Public Context Boundary、Recovery 和 accepted-ACK 继续有效。
 
 ## Context
 

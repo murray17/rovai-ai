@@ -4,7 +4,7 @@ contract: message-delivery-v1
 authority: message-delivery-lifecycle
 status: accepted
 version: 1
-last_updated: 2026-08-07
+last_updated: 2026-08-09
 ---
 
 # Message Delivery v1 Contract
@@ -67,7 +67,8 @@ Camp 打开、新消息、CampTurn 结束、Runtime 恢复或容量变化隐式�
    correlation；
 2. 重新验证当前 recipient identity 与 Delivery frozen snapshot；
 3. 若是暂时条件，原子记录 `attempted_waiting` + waitCondition；
-4. 若可运行，先执行 Profile v2 Context gate 并冻结 ContextManifest；
+4. 若可运行，先执行 Profile v2 selection/budget gate，由当前 Formatter 形成模型投影并冻结
+   ContextManifest Evidence；
 5. 只有 gate 成功后才物化一个目标 AgentRun 并绑定 `targetAgentRunId`；
 6. 任何终态都保留 attempt evidence，禁止同一 attempt 产生第二个 AgentRun。
 
@@ -91,7 +92,8 @@ recipient order 作为优先级。
 
 ## 5. Context gate 与终态失败
 
-Dispatch attempt 在 AgentRun materialization 前使用 Profile v2 形成 ContextManifest。完整
+Dispatch attempt 在 AgentRun materialization 前使用 Profile v2 完成选择与预算，由当前 Formatter
+形成模型投影，并由 ContextManifest version 冻结 Evidence。完整
 Current Input、已解析的直接父消息和 mandatory structure 无法容纳时：
 
 ```text

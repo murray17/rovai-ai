@@ -3,7 +3,7 @@ document_type: architecture
 architecture: public-a2a-message-delivery
 authority: public-message-and-delivery-boundaries
 status: accepted
-last_updated: 2026-08-08
+last_updated: 2026-08-09
 ---
 
 # Public A2A Message 与 Message Delivery 架构
@@ -82,14 +82,17 @@ recipient/Camp 的直接相关事件调用 `dispatchPending(agentId)`；没有�
 
 ## 4. Context gate 与 AgentRun 物化顺序
 
-Delivery 被选中尝试后，Core 先用 [Context Delivery Profile v2](../contracts/context-delivery-profile-v2.md)
-冻结该目标的 ContextManifest，再决定是否创建 AgentRun：
+Delivery 被选中尝试后，Core 先按
+[Context Delivery Profile v2](../contracts/context-delivery-profile-v2.md)完成选择与预算 gate，再由
+当前 Context Formatter 形成 Model Context Projection，并由 ContextManifest 冻结 Evidence，最后决定
+是否创建 AgentRun：
 
 ```text
 Delivery attempt
   → read authoritative public boundary
   → resolve Profile v2 + reference closure
-  → freeze Manifest + exact payload/digest
+  → format Model Context Projection
+  → freeze ContextManifest Evidence + exact payload/digest
   → if fit: materialize AgentRun and bind Delivery
   → if not fit: terminal Delivery failure, no AgentRun
 ```
@@ -99,6 +102,12 @@ Delivery attempt
 `context_payload_too_large` 终态失败；Public Message、其他 recipient Deliveries 和
 CampTurn 事实保持不变。该失败不是 waitCondition，也不会被自动重试；需要新的公共发送
 请求或针对失败 Delivery 的用户明确决定。
+
+ContextManifest 只证明冻结的 Model Context Projection 及其 source/selection Evidence。随后独立的
+Runtime Input Delivery 才把 Manifest 绑定到 AgentRun execution epoch 与 Native Binding generation；
+只有该 Delivery 的 accepted ACK 可以把 Conversation/Native-Session 水位推进到 Manifest 冻结的值。
+Message Delivery/AgentRun 创建、transport
+send、send failure 或 `delivery_unknown` 都不是 accepted evidence。
 
 ## 5. Runtime 公共输出边界
 

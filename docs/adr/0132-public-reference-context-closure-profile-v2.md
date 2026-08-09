@@ -12,6 +12,11 @@ superseded_by: null
 
 # ADR-0132: Bounded Public Reference Context Closure and Profile v2
 
+> [ADR-0147](0147-lossless-model-context-projection-and-layered-delivery-evidence.md) 明确 Profile v2
+> 只拥有候选选择、排序、Unicode-scalar 截断和预算；模型字段/序列化归 Context Formatter，Evidence
+> shape 归 ContextManifest。本文的三层 closure、优先级、Context gate 与 ACK 边界不变，也不因此
+> 创建 Profile v3。
+
 ## Context
 
 v0.44 的 Profile v1 有确定的 recent count、公共字符和单条正文上限，但明确不补回复祖先。

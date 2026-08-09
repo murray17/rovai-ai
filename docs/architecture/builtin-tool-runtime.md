@@ -22,7 +22,9 @@ compaction 后的 Bootstrap 补发可靠性见
 完整矩阵见 [Native Session Bootstrap Redelivery](native-session-bootstrap-redelivery.md)。Self/peer
 identity、Collaboration Projection 与输入水位见
 [ADR-0146](../adr/0146-sole-native-session-self-identity-and-peer-routing-projection.md)和
-[Collaboration State v2](../contracts/collaboration-state-v2.md)。
+[Collaboration State v2](../contracts/collaboration-state-v2.md)。模型投影、ContextManifest Evidence、
+Runtime Input Delivery Evidence 与 Profile/Formatter/Manifest 权责见
+[ADR-0147](../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)。
 
 ## 总体路径
 
@@ -146,8 +148,9 @@ Lease → AgentRun + executionEpoch + NativeBinding
 1. Adapter/Fleet 启动或取得独占 Runtime process；
 2. Core 绑定新 active lease，并写 process-private context；
 3. Adapter 建立 Native Session 并投递固定命令 Bootstrap；
-4. Core materialize ContextManifest，随后投递 Current Input；
-5. Agent 使用固定命令和 command-local `--help`；Router 从 lease 解析当前 Run 与 Camp。
+4. Core 按 Profile 选择并由 Formatter 形成 Model Context Projection，再冻结 ContextManifest；
+5. Core 建立 Runtime Input Delivery，将 Manifest 绑定到 execution epoch/Binding generation 后投递；
+6. Agent 使用固定命令和 command-local `--help`；Router 从 lease 解析当前 Run 与 Camp。
 
 ### Resume / Resident process reuse
 
@@ -157,19 +160,43 @@ process 被新 Run acquire 后轮换 lease，再绑定新的 Session/Run route�
 
 ## Bootstrap 与 Dynamic Context
 
+> 本节的 compact projection、Charter 补充规则和 canonical continuation 是 ADR-0147 已接受的 v0.50
+> 目标，当前代码仍是已验证的 Self/Peer baseline；实施状态见
+> [v0.50 概览](../versions/v0.50/README.md)。
+
 Session Charter 只说明：
 
+- CLI contract 标题固定为 `Rovai Built-in CLI Contract`，不显示应用 release/version；
 - 使用 bundled `rovai`；
 - 固定业务命令和 `<command> --help`；
 - `camp.message.send` 使用当前 Run Camp，不能传入 Camp ID；
-- Task mutation 不通知或启动队员，Task get/list 不等待或轮询；Public Message、Message
-  Delivery、Memory 和 read 工具保持各自稳定业务原则；
-- Dynamic Context 可能截断，应遵循 canonical `retrieveWith`；公共 A2A 遵循 Profile v2 的 bounded
-  reference closure。
+- Task mutation 不通知或启动队员，Task get/list 不等待或轮询；later Task changes 不 retarget 已
+  accepted Run；完成工作或 Task 不自动要求 send，只有队员需要进一步行动或决策时才 additional send；
+- Public Message、Message Delivery、Memory 和 read 工具保持各自稳定业务原则；
+- Dynamic Context 可能截断或省略：单条正文只使用可直接提交给 canonical operation schema 的
+  executable continuation；整条历史的 sequence envelope 只是 navigation hint；公共 A2A 遵循
+  Profile v2 的 bounded reference closure。
 
 Bootstrap 不含完整 Schema、Envelope、receipt、catalog digest、socket、process token、lease、
-AgentRun ID、epoch、Camp ID 或 Native Binding ID。Dynamic Context 使用 `retrieveWith.operation`
-指向 canonical operation，不重复 transport 细节。
+AgentRun ID、epoch、Camp ID 或 Native Binding ID。只有无损映射到当前 schema 的完整 operation/input
+对象才是 Executable Retrieval Locator；非可执行 navigation hint 不伪装成 tool input，也不重复
+transport 细节。
+
+### 四层 Context 权威
+
+```text
+Context Source State
+  → Profile selection/budget
+  → Formatter-owned Model Context Projection
+  → ContextManifest-owned Projection Evidence
+  → Runtime Input Delivery binding + accepted ACK
+```
+
+Context Source State 是 CampMessage、Attachment、CampMember、Task 和 Memory 等领域真源。模型 DTO
+只含隐私过滤后对当前行动有用的字段；ContextManifest 冻结 source refs/digests、选择、顺序、截断、
+遗漏和 exact Dynamic Context bytes/digest；Runtime Input Delivery 单独绑定 Manifest、Run epoch、Binding
+generation 与投递版本。只有 accepted ACK 推进水位，Message Delivery/AgentRun 创建、transport send、
+failure 或 `delivery_unknown` 都不能替代它。各层不得通过复制完整对象或复用同名 digest 合并权威。
 
 ### Self Identity 与 Peer Routing Identity
 
@@ -213,7 +240,10 @@ ContextManifest 与 Runtime Input Delivery 必须在一个 serialized Core prepa
 中冻结 redelivery selection 和 combined budget；实现可以使用 unsendable staging Manifest，但在
 Delivery `prepared` 前不能释放数据库权威或把 payload 交给 transport。完整 identity-bearing overlay
 保持瞬时，不进入 Manifest 或持久 digest。见
-[ADR-0141](../adr/0141-atomic-bootstrap-redelivery-input-overlay.md)。
+[ADR-0141](../adr/0141-atomic-bootstrap-redelivery-input-overlay.md)。Redelivery v2 的 reason marker、单句
+Core recovery authority 与 Envelope/Formatter version 见
+[ADR-0147](../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)；它不改变这里的
+transient overlay、Delivery Evidence 或 accepted-ACK 边界。
 Runtime compaction callback 使用独立、窄权限且跨 AgentRun 的 Native Session Observer Lease；它不
 延长 Built-in Tool/Run lease。普通 Host 退出不创建 Requirement，只有具体 observation 的提交结果
 未知才允许一次保守 pending。见
