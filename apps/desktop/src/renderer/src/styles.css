@@ -333,7 +333,25 @@ button:disabled { opacity: 0.52; cursor: default; }
 .settings-sidebar-title { display: grid; gap: 3px; padding: 0 9px 3px; }
 .settings-sidebar-title strong { font-size: 17px; letter-spacing: -0.02em; }
 .settings-sidebar-title span { color: var(--faint); font-size: 10px; }
-.settings-sidebar-menu { display: grid; gap: 3px; padding: 10px 0; }
+.settings-sidebar-menu {
+  display: grid;
+  min-height: 0;
+  flex: 1 1 auto;
+  align-content: start;
+  gap: 16px;
+  overflow-y: auto;
+  padding: 10px 0;
+}
+.settings-sidebar-group { display: grid; gap: 3px; }
+.settings-sidebar-group-title {
+  margin: 0;
+  padding: 0 9px 4px;
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  line-height: 16px;
+}
 .settings-sidebar-menu button {
   position: relative;
   display: grid;

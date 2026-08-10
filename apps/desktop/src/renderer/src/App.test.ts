@@ -1088,7 +1088,7 @@ describe('task event projections', () => {
     )
   })
 
-  it('replaces ordinary navigation with the remembered settings category list', () => {
+  it('replaces ordinary navigation with the grouped settings category list', () => {
     const markup = renderToStaticMarkup(createElement(CampNavigation, {
       view: 'settings',
       state: 'ready',
@@ -1114,18 +1114,32 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-label="Rovai AI"')
     expect(markup).toContain('返回 App')
     expect(markup).toContain('应用级偏好与本机能力')
-    expect(markup).toContain('<strong>通用</strong>')
-    expect(markup).toContain('<strong>Skill</strong>')
-    expect(markup).toContain('<strong>MCP</strong>')
-    expect(markup).toContain('<strong>Agent 运行时</strong>')
-    expect(markup).toContain('<strong>外观</strong>')
+    expect(markup.match(/class="settings-sidebar-group"/g)).toHaveLength(3)
+    const applicationHeading = '<h2 id="settings-sidebar-group-application" class="settings-sidebar-group-title">应用</h2>'
+    const capabilitiesHeading = '<h2 id="settings-sidebar-group-capabilities" class="settings-sidebar-group-title">能力</h2>'
+    const supportHeading = '<h2 id="settings-sidebar-group-support" class="settings-sidebar-group-title">支持</h2>'
+    const applicationStart = markup.indexOf(applicationHeading)
+    const capabilitiesStart = markup.indexOf(capabilitiesHeading)
+    const supportStart = markup.indexOf(supportHeading)
+    expect(applicationStart).toBeGreaterThanOrEqual(0)
+    expect(applicationStart).toBeLessThan(capabilitiesStart)
+    expect(capabilitiesStart).toBeLessThan(supportStart)
+    const applicationGroup = markup.slice(applicationStart, capabilitiesStart)
+    const capabilitiesGroup = markup.slice(capabilitiesStart, supportStart)
+    const supportGroup = markup.slice(supportStart)
+    expect(applicationGroup).toContain('<strong>通用</strong>')
+    expect(applicationGroup).toContain('<strong>外观</strong>')
+    expect(applicationGroup).toContain('<strong>通知</strong>')
+    expect(applicationGroup.indexOf('<strong>通用</strong>')).toBeLessThan(applicationGroup.indexOf('<strong>外观</strong>'))
+    expect(applicationGroup.indexOf('<strong>外观</strong>')).toBeLessThan(applicationGroup.indexOf('<strong>通知</strong>'))
+    expect(capabilitiesGroup).toContain('<strong>Skill</strong>')
+    expect(capabilitiesGroup).toContain('<strong>MCP</strong>')
+    expect(capabilitiesGroup).toContain('<strong>Agent 运行时</strong>')
+    expect(capabilitiesGroup.indexOf('<strong>Skill</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>MCP</strong>'))
+    expect(capabilitiesGroup.indexOf('<strong>MCP</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>Agent 运行时</strong>'))
+    expect(supportGroup).toContain('<strong>诊断与修复</strong>')
     expect(markup).toContain('class="active" type="button" aria-current="page"')
-    expect(markup.indexOf('<strong>通用</strong>')).toBeLessThan(markup.indexOf('<strong>Skill</strong>'))
-    expect(markup.indexOf('<strong>Skill</strong>')).toBeLessThan(markup.indexOf('<strong>MCP</strong>'))
-    expect(markup.indexOf('<strong>MCP</strong>')).toBeLessThan(markup.indexOf('<strong>Agent 运行时</strong>'))
-    expect(markup.indexOf('<strong>Agent 运行时</strong>')).toBeLessThan(markup.indexOf('<strong>外观</strong>'))
-    expect(markup.indexOf('<strong>外观</strong>')).toBeLessThan(markup.indexOf('<strong>通知</strong>'))
-    expect(markup.indexOf('<strong>通知</strong>')).toBeLessThan(markup.indexOf('<strong>诊断与修复</strong>'))
+    expect(markup).not.toContain('关于与更新')
     expect(markup).not.toContain('新对话')
     expect(markup).not.toContain('快速对话')
     expect(markup).not.toContain('Core')

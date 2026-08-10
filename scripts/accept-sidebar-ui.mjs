@@ -423,6 +423,33 @@ async function assertQuestionMarkHelpHoverOnly(cdp) {
     return Boolean(button)
   })()`)
   assert(openedSettings, 'Could not open Settings to verify question-mark help')
+  await waitForSelector(cdp, '.settings-sidebar-group')
+  const settingsNavigation = await evaluate(cdp, `(() => {
+    const groups = [...document.querySelectorAll('.settings-sidebar-group')]
+    return {
+      groups: groups.map((group) => ({
+        label: group.querySelector('.settings-sidebar-group-title')?.textContent?.trim(),
+        items: [...group.querySelectorAll('button strong')].map((item) => item.textContent?.trim())
+      })),
+      labelled: groups.every((group) => {
+        const heading = group.querySelector('.settings-sidebar-group-title')
+        return Boolean(heading?.id && group.getAttribute('aria-labelledby') === heading.id)
+      }),
+      horizontalOverflow: (() => {
+        const menu = document.querySelector('.settings-sidebar-menu')
+        return menu ? menu.scrollWidth > menu.clientWidth + 1 : true
+      })()
+    }
+  })()`)
+  const expectedSettingsGroups = [
+    { label: '应用', items: ['通用', '外观', '通知'] },
+    { label: '能力', items: ['Skill', 'MCP', 'Agent 运行时'] },
+    { label: '支持', items: ['诊断与修复'] }
+  ]
+  assert(JSON.stringify(settingsNavigation.groups) === JSON.stringify(expectedSettingsGroups)
+      && settingsNavigation.labelled
+      && !settingsNavigation.horizontalOverflow,
+  `Settings navigation groups do not match the seven-item contract: ${JSON.stringify(settingsNavigation)}`)
   await waitForSelector(cdp, '.general-help-mark')
   await assertHoverOnlyTooltip(cdp, '.general-help-mark', '.general-help-popover', 'General one-click help')
 

@@ -742,6 +742,46 @@ export function CampNavigation({
   )
 }
 
+type SettingsSidebarItem = {
+  key: NavigationSettingsSection
+  icon: string
+  label: string
+}
+
+type SettingsSidebarGroup = {
+  key: string
+  label: string
+  items: SettingsSidebarItem[]
+}
+
+const SETTINGS_SIDEBAR_GROUPS: SettingsSidebarGroup[] = [
+  {
+    key: 'application',
+    label: '应用',
+    items: [
+      { key: 'general', icon: '⌂', label: '通用' },
+      { key: 'appearance', icon: '◐', label: '外观' },
+      { key: 'notifications', icon: '♢', label: '通知' }
+    ]
+  },
+  {
+    key: 'capabilities',
+    label: '能力',
+    items: [
+      { key: 'skills', icon: '◇', label: 'Skill' },
+      { key: 'mcp', icon: '⌘', label: 'MCP' },
+      { key: 'runtime', icon: '◈', label: 'Agent 运行时' }
+    ]
+  },
+  {
+    key: 'support',
+    label: '支持',
+    items: [
+      { key: 'diagnostics', icon: '⌁', label: '诊断与修复' }
+    ]
+  }
+]
+
 function SettingsSidebarNavigation({
   section,
   onSectionChange,
@@ -751,19 +791,6 @@ function SettingsSidebarNavigation({
   onSectionChange(section: NavigationSettingsSection): void
   onBack(): void
 }): JSX.Element {
-  const items: Array<{
-    key: NavigationSettingsSection
-    icon: string
-    label: string
-  }> = [
-    { key: 'general', icon: '⌂', label: '通用' },
-    { key: 'skills', icon: '◇', label: 'Skill' },
-    { key: 'mcp', icon: '⌘', label: 'MCP' },
-    { key: 'runtime', icon: '◈', label: 'Agent 运行时' },
-    { key: 'appearance', icon: '◐', label: '外观' },
-    { key: 'notifications', icon: '♢', label: '通知' },
-    { key: 'diagnostics', icon: '⌁', label: '诊断与修复' }
-  ]
   return (
     <div className="settings-sidebar-navigation">
       <div className="settings-sidebar-heading">
@@ -777,18 +804,26 @@ function SettingsSidebarNavigation({
         </div>
       </div>
       <nav className="settings-sidebar-menu" aria-label="设置页面">
-        {items.map((item) => (
-          <button
-            className={section === item.key ? 'active' : ''}
-            type="button"
-            aria-current={section === item.key ? 'page' : undefined}
-            key={item.key}
-            onClick={() => onSectionChange(item.key)}
-          >
-            <span aria-hidden="true">{item.icon}</span>
-            <strong>{item.label}</strong>
-          </button>
-        ))}
+        {SETTINGS_SIDEBAR_GROUPS.map((group) => {
+          const headingId = `settings-sidebar-group-${group.key}`
+          return (
+            <section className="settings-sidebar-group" aria-labelledby={headingId} key={group.key}>
+              <h2 id={headingId} className="settings-sidebar-group-title">{group.label}</h2>
+              {group.items.map((item) => (
+                <button
+                  className={section === item.key ? 'active' : ''}
+                  type="button"
+                  aria-current={section === item.key ? 'page' : undefined}
+                  key={item.key}
+                  onClick={() => onSectionChange(item.key)}
+                >
+                  <span aria-hidden="true">{item.icon}</span>
+                  <strong>{item.label}</strong>
+                </button>
+              ))}
+            </section>
+          )
+        })}
       </nav>
     </div>
   )
