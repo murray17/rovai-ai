@@ -4,7 +4,7 @@ authority: renderer-ui
 status: accepted
 design_direction: neutral-porcelain-steel
 target_version: cross-version
-implementation_status: in_progress
+implementation_status: complete
 last_updated: 2026-08-11
 ---
 

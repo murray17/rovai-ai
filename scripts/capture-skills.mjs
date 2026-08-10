@@ -7,6 +7,12 @@ const outputPath = process.argv[3] ?? '/tmp/rovai-skills.png'
 const cleanOutputPath = outputPath.endsWith('.png')
   ? `${outputPath.slice(0, -'.png'.length)}-clean.png`
   : `${outputPath}-clean.png`
+const outputStem = outputPath.endsWith('.png') ? outputPath.slice(0, -'.png'.length) : outputPath
+const settingsOverviewPaths = {
+  general: `${outputStem}-general.png`,
+  appearance: `${outputStem}-appearance.png`,
+  runtime: `${outputStem}-runtime.png`
+}
 const userDataDir = process.env.ROVAI_CAPTURE_USER_DATA_DIR
 const port = Number(process.env.ROVAI_DEBUG_PORT ?? 9443)
 const width = Number(process.env.ROVAI_CAPTURE_WIDTH ?? 1440)
@@ -194,9 +200,17 @@ try {
   await waitForExpression(cdp, `!document.querySelector('.skill-group-options')`, 5_000)
   await capture(cdp, cleanOutputPath)
 
+  await openSection(cdp, '通用')
+  await waitForExpression(cdp, `Boolean(document.querySelector('.general-settings'))`, 5_000)
+  await capture(cdp, settingsOverviewPaths.general)
   await openSection(cdp, '外观')
   await waitForExpression(cdp, `Boolean(document.querySelector('.appearance-settings'))`, 5_000)
   const appearanceReady = await evaluate(cdp, `Boolean(document.querySelector('.appearance-settings'))`)
+  await capture(cdp, settingsOverviewPaths.appearance)
+  await openSection(cdp, 'Agent 运行时')
+  await waitForExpression(cdp, `Boolean(document.querySelector('.runtime-installations'))`, 10_000)
+  await wait(6_000)
+  await capture(cdp, settingsOverviewPaths.runtime)
   await openSection(cdp, '诊断与修复')
   await waitForExpression(cdp, `Boolean(document.querySelector('.diagnostics-center'))`, 5_000)
   const diagnosticsReady = await evaluate(cdp, `Boolean(document.querySelector('.diagnostics-center'))`)
@@ -220,7 +234,7 @@ try {
   }
 
   cdp.close()
-  console.log(JSON.stringify({ ok: true, ...result, moreMenu, groupMenu, navigation, outputPath, cleanOutputPath }, null, 2))
+  console.log(JSON.stringify({ ok: true, ...result, moreMenu, groupMenu, navigation, outputPath, cleanOutputPath, settingsOverviewPaths }, null, 2))
 } finally {
   app.kill('SIGTERM')
   await Promise.race([

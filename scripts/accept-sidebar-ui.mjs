@@ -459,9 +459,14 @@ async function assertQuestionMarkHelpHoverOnly(cdp) {
     button?.click()
     return Boolean(button)
   })()`)
-  assert(openedSkills, 'Could not open Skill Settings to verify question-mark help')
-  await waitForSelector(cdp, '.skill-import-help')
-  await assertHoverOnlyTooltip(cdp, '.skill-import-help', '.skill-import-help > [role="tooltip"]', 'Skill import help')
+  assert(openedSkills, 'Could not open Skill Settings to verify the inline import explanation')
+  await waitForSelector(cdp, '.skill-import-copy')
+  const skillImportHelp = await evaluate(cdp, `({
+    inlineCopy: document.querySelector('.skill-import-copy')?.textContent?.trim() ?? '',
+    legacyQuestionMark: Boolean(document.querySelector('.skill-import-help'))
+  })`)
+  assert(skillImportHelp.inlineCopy.includes('导入前会先生成安全预览') && !skillImportHelp.legacyQuestionMark,
+    `Skill import help did not use the P2 inline explanation: ${JSON.stringify(skillImportHelp)}`)
 }
 
 async function assertHoverOnlyTooltip(cdp, markSelector, tooltipSelector, context) {

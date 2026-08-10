@@ -4,13 +4,13 @@ version: v0.56
 lifecycle: current
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: in_progress
+implementation_status: complete
 last_updated: 2026-08-11
 ---
 
 # Rovai-ai v0.56：Neutral Porcelain + Steel Renderer
 
-> 当前状态：视觉方向与生产边界已经确认，Renderer 实现已进入最终验证。本版本在不改变
+> 当前状态：生产实现、自动化门禁、macOS arm64 本地包和多尺寸真实 App 验收已经完成。本版本在不改变
 > Core、Runtime、持久化或既有产品功能的前提下，把生产 App 的日间表面统一为 Neutral
 > Porcelain + Steel，并收敛导航、会话、设置、队员、记忆与浮层的视觉层级。
 >

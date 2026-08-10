@@ -2,14 +2,14 @@
 document_type: implementation-plan
 version: v0.56
 authority: implementation-plan-and-acceptance
-status: in_progress
+status: complete
 last_updated: 2026-08-11
 ---
 
 # v0.56 实施与验收计划
 
-> 当前结论：设计真源和生产功能边界已经收敛，Renderer 视觉实现已完成主体迁移；完成状态必须
-> 等待 TypeScript、Renderer、文档、打包 App 和多尺寸真实 UI 验收全部通过后回填。
+> 当前结论：设计真源、生产功能边界、Renderer 实现、自动化门禁、macOS arm64 本地包和
+> 多尺寸真实 UI 验收均已完成。
 
 ## Checkpoint 0：版本与设计真源
 
@@ -46,30 +46,29 @@ last_updated: 2026-08-11
 
 ## Checkpoint 3：验证与完成门槛
 
-- [ ] 运行 TypeScript、Renderer 与相关 Node 测试，并确认新 Token、A2A Mention、Composer 几何和
+- [x] 运行 TypeScript、Renderer 与相关 Node 测试，并确认新 Token、A2A Mention、Composer 几何和
   既有功能断言全部通过；
-- [ ] 运行通用文档门禁和 `git diff --check`；
-- [ ] 生成 macOS arm64 本地包并验证主 App、Core、CLI、原生模块架构、签名与可启动性；
-- [ ] 在隔离 `userData` 中完成 `2560×1440`、`1440×920`、`1040×700`、200% zoom 与
+- [x] 运行通用文档门禁和 `git diff --check`；
+- [x] 生成 macOS arm64 本地包并验证主 App、Core、CLI、原生模块架构、签名与可启动性；
+- [x] 在隔离 `userData` 中完成 `2560×1440`、`1440×920`、`1040×700`、200% zoom 与
   reduced-motion 验收；
-- [ ] 覆盖普通导航、New Conversation、完整会话、七个设置分类、队员半身照与可点击 Runtime
+- [x] 覆盖普通导航、New Conversation、完整会话、七个设置分类、队员半身照与可点击 Runtime
   角标、记忆 Workbench、通知/提案 Drawer、确认/错误/风险 Dialog；
-- [ ] 保留迁移前与迁移后两个可独立启动的本地 App，并记录可复核的 `app.asar` SHA-256。
+- [x] 保留迁移前与迁移后两个可独立启动的本地 App，并记录可复核的 `app.asar` SHA-256。
 
 ## 完成条件
 
-- [ ] 生产 Renderer 与本版本、UI 详规及真实 App 截图一致；
-- [ ] P2 视觉已覆盖用户要求的页面和浮层，没有丢失生产功能或引入原型假字段；
-- [ ] 旧 Arctic Dawn 色彩层、角色专属消息底色、A2A 冒号文案、窄 2K Composer 与当前项目无底色
+- [x] 生产 Renderer 与本版本、UI 详规及真实 App 截图一致；
+- [x] P2 视觉已覆盖用户要求的页面和浮层，没有丢失生产功能或引入原型假字段；
+- [x] 旧 Arctic Dawn 色彩层、角色专属消息底色、A2A 冒号文案、窄 2K Composer 与当前项目无底色
   等旧断言已经删除或更新；
-- [ ] 所有自动化与打包 App 验收通过，版本 `implementation_status` 与本计划状态同步为 complete。
+- [x] 所有自动化与打包 App 验收通过，版本 `implementation_status` 与本计划状态同步为 complete。
 
-## 计划验证命令
+## 实际验证结果
 
 ```bash
 pnpm typecheck
 pnpm test
-pnpm build:desktop
 pnpm package:mac
 pnpm accept:sidebar-ui
 pnpm accept:runtime-activity-ui
@@ -79,12 +78,41 @@ pnpm accept:member-avatar-ui
 pnpm accept:member-lifecycle-ui
 pnpm accept:notification-ui
 pnpm accept:diagnostics-ui
+pnpm accept:task-card-ui
 node scripts/accept-new-conversation-ui.mjs
+node scripts/capture-skills.mjs <app> <output>
+node scripts/capture-mcp.mjs <app> <output-prefix>
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+pnpm test:rust:full
 pnpm docs:test
 pnpm docs:check
 pnpm docs:adr:generate -- --check
+DOCS_BASE_REF=origin/main pnpm docs:check:ci
 git diff --check
 ```
 
-完成后在本节替换计划命令为实际通过的命令、测试数量、截图/fixture 位置与新旧包 SHA-256；
-不得在执行前把计划写成验收事实。
+2026-08-11 在基于 `origin/main` 的工作树完成：`pnpm typecheck` 通过；`pnpm test` 包含
+39 个 Vitest 文件、248 条 Renderer 测试、147 条 Qualification/Benchmark Node 测试和
+21 条文档测试，全部通过。Rust format、Clippy（零告警）与 workspace 测试通过，合计
+374 passed、0 failed、3 个既有手工 Runtime smoke ignored。
+
+`pnpm package:mac` 生成 arm64 `Rovai-ai.app`；主 App、Core、CLI 与
+`open-panel-prewarm.node` 均通过 `codesign --verify --deep --strict` 或对应单体严格校验，
+且 `file` 均报告 arm64。打包 App 的 `app.asar` SHA-256 为
+`4595f94bfa125d171849f6d6d452cc7b1027c893a1bbb15bb13501ab0da99657`。
+
+全部 packaged-app 验收通过，证据根目录为
+`/Users/murray.xue/Downloads/Rovai-ai-comparison-2026-08-11/acceptance/`：其中 `final/`
+覆盖 Sidebar、Runtime Activity、Structured Mentions、Memory、Member Avatar、Member Lifecycle、
+Notification、Diagnostics、Task Card 与 New Conversation；`final-settings/` 补充通用、外观、
+Skill、MCP 与 Agent 运行时 clean 截图，并分别保留 Skill/MCP 浮层打开状态。七个设置分类由
+这两组证据共同覆盖。Runtime Activity 在 2560×1440 验证 1040px
+Composer，在 1040×700 验证无横向溢出；Task 与 New Conversation 另通过 200% zoom 与
+reduced-motion。
+
+可独立启动的对比包保存在
+`/Users/murray.xue/Downloads/Rovai-ai-comparison-2026-08-11/`：迁移前包
+`Rovai-ai-old-pre-P2-8479cd810715.app` 的 `app.asar` SHA-256 为
+`8479cd81071553bcfaf60679c96dcb19965bcabedc4da8ddb1196fb134f4a1e1`；最终包为
+`Rovai-ai-final-P2-e5087fb-4595f94bfa12.app`，哈希如上。两者均通过严格签名校验。

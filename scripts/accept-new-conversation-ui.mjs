@@ -73,6 +73,14 @@ try {
     `document.querySelectorAll('.new-camp-member-option input[type="checkbox"]').length > 0`,
     5_000
   )
+  const memberSelection = await cdp.send('Runtime.evaluate', {
+    expression: `(() => {
+      const checks = [...document.querySelectorAll('.new-camp-member-option input[type="checkbox"]')]
+      return { count: checks.length, selected: checks.filter((input) => input.checked).length }
+    })()`,
+    returnByValue: true
+  })
+  const memberSelectionValue = memberSelection.result?.result?.value ?? { count: 0, selected: 0 }
 
   const inspection = await cdp.send('Runtime.evaluate', {
     expression: `(() => {
@@ -80,7 +88,6 @@ try {
       const text = dialog?.textContent ?? ''
       const buttons = [...(dialog?.querySelectorAll('button') ?? [])]
       const primary = buttons.find((button) => button.classList.contains('primary-button'))
-      const memberChecks = [...(dialog?.querySelectorAll('.new-camp-member-option input[type="checkbox"]') ?? [])]
       const rect = dialog?.getBoundingClientRect()
       return {
         title: dialog?.querySelector('h2')?.textContent,
@@ -93,8 +100,8 @@ try {
           && !text.includes('协作方式'),
         saysRecommended: text.includes('推荐'),
         optionalShell: Boolean(dialog?.querySelector('.new-camp-optional-shell')),
-        selectedMembers: memberChecks.filter((input) => input.checked).length,
-        memberCount: memberChecks.length,
+        selectedMembers: ${JSON.stringify(memberSelectionValue.selected)},
+        memberCount: ${JSON.stringify(memberSelectionValue.count)},
         focusedProject: document.activeElement?.classList.contains('new-camp-picker-trigger'),
         viewportOverflow: document.documentElement.scrollWidth > window.innerWidth,
         overflowNodes: [...document.querySelectorAll('body *')]
@@ -131,7 +138,9 @@ try {
     throw new Error(`New Conversation Dialog acceptance failed: ${JSON.stringify(value)}`)
   }
   await cdp.send('Runtime.evaluate', {
-    expression: `document.querySelector('.new-camp-picker-trigger.member-trigger')?.click()`
+    expression: `document.querySelector('.new-camp-picker-menu.member-menu')
+      ? document.querySelector('.new-camp-picker-trigger.member-trigger')?.click()
+      : undefined`
   })
   await waitForExpression(
     cdp,

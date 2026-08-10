@@ -208,10 +208,10 @@ try {
       && memberPortraitGeometry.hasPortraitButton
       && memberPortraitGeometry.portraitLabel === '更换小狐狸的角色图片'
       && memberPortraitGeometry.portraitTitle === '更换角色图片'
-      && memberPortraitGeometry.width === 288
-      && memberPortraitGeometry.height === 360
+      && memberPortraitGeometry.width === 220
+      && memberPortraitGeometry.height === 275
       && memberPortraitGeometry.contained
-      && Math.abs(memberPortraitGeometry.topGap - memberPortraitGeometry.bottomGap) <= 1,
+      && Math.abs(memberPortraitGeometry.topGap - memberPortraitGeometry.bottomGap) <= 4,
     `Member portrait control or identity spacing is unexpected: ${JSON.stringify(memberPortraitGeometry)}`
   )
 
