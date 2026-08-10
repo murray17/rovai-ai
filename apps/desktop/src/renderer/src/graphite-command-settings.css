@@ -1,0 +1,261 @@
+/* Settings ----------------------------------------------------------------- */
+
+.content.settings-content {
+  position: relative;
+  padding: 56px 0 0;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.content.settings-content::before {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 0;
+  left: 0;
+  display: flex;
+  height: 56px;
+  align-items: center;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--graphite-topbar-line);
+  color: var(--faint);
+  background: var(--topbar);
+  content: "设置";
+  font-size: 11px;
+  -webkit-app-region: drag;
+}
+
+.settings-workbench {
+  height: 100%;
+  overflow: auto;
+  padding: 36px clamp(30px, 4.5vw, 72px) 72px;
+  background: var(--surface);
+  scrollbar-width: thin;
+}
+
+.settings-panel {
+  width: min(1040px, 100%);
+  max-width: none;
+  margin: 0 auto;
+}
+
+.settings-page-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 28px;
+  padding: 0 0 25px;
+  border-bottom: 2px solid var(--ink);
+}
+
+.settings-page-heading-copy {
+  min-width: 0;
+}
+
+.settings-page-eyebrow {
+  margin: 0 0 8px;
+}
+
+.settings-page-heading h1 {
+  margin: 0;
+  color: var(--ink);
+  font-size: clamp(27px, 3vw, 34px);
+  font-weight: 760;
+  line-height: 1.1;
+  letter-spacing: -0.045em;
+}
+
+.settings-page-heading-copy > p:last-child {
+  max-width: 700px;
+  margin: 9px 0 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.65;
+}
+
+.settings-page-heading-aside {
+  flex: 0 0 auto;
+}
+
+.settings-panel .section-block {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: clamp(30px, 4vw, 52px);
+  margin: 0;
+  padding: 30px 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
+.settings-panel .section-block:last-child {
+  border-bottom: 0;
+}
+
+.settings-panel .section-block > .section-heading {
+  display: grid;
+  grid-column: 1;
+  align-content: start;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.settings-panel .section-block > .section-heading > div {
+  display: grid;
+  gap: 5px;
+}
+
+.settings-panel .section-block > .section-heading h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.settings-panel .section-block > .section-heading p,
+.settings-panel .section-block > .section-heading small {
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.55;
+}
+
+.settings-panel .section-block > :not(.section-heading) {
+  grid-column: 2;
+  min-width: 0;
+}
+
+.general-settings-section,
+.appearance-settings,
+.notification-settings .section-block,
+.skill-settings .section-block,
+.mcp-settings .section-block,
+.diagnostics-center .section-block {
+  box-shadow: none;
+}
+
+.general-setting-row,
+.notification-switch,
+.general-subsection-heading,
+.settings-row {
+  min-height: 50px;
+}
+
+.general-setting-row + .general-setting-row,
+.notification-switch + .notification-switch {
+  border-top-color: var(--line);
+}
+
+.startup-location-options,
+.appearance-options,
+.general-default-member-list {
+  gap: 8px;
+}
+
+.startup-location-option,
+.appearance-option,
+.general-default-member-row,
+.skill-source-option,
+.mcp-import-option {
+  border-color: transparent;
+  border-left: 2px solid var(--line-strong);
+  border-radius: 0 var(--graphite-radius-sm) var(--graphite-radius-sm) 0;
+  background: var(--surface-subtle);
+}
+
+.startup-location-option:hover,
+.appearance-option:hover,
+.general-default-member-row:hover,
+.skill-source-option:hover,
+.mcp-import-option:hover {
+  border-left-color: color-mix(in srgb, var(--brand) 48%, var(--line-strong));
+  background: var(--surface-muted);
+}
+
+.startup-location-option:has(input:checked),
+.appearance-option:has(input:checked),
+.general-default-member-row:has(input:checked),
+.skill-source-option:has(input:checked),
+.mcp-import-option:has(input:checked) {
+  border-color: transparent;
+  border-left-color: var(--brand);
+  background: var(--brand-soft);
+}
+
+.general-default-member-list,
+.skill-list,
+.mcp-server-list,
+.runtime-installation-list,
+.diagnostics-result-list {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--graphite-radius-md);
+  background: var(--surface-raised);
+}
+
+.general-default-member-row,
+.skill-row,
+.mcp-server-row,
+.runtime-installation-row,
+.diagnostics-result-row {
+  border-radius: 0;
+}
+
+.general-inline-status,
+.general-recovery-note,
+.skill-import-help,
+.mcp-file-banner,
+.mcp-permission-banner,
+.notification-inline-note,
+.diagnostics-privacy-note {
+  border-radius: var(--graphite-radius-sm);
+}
+
+.skill-card,
+.skill-source-card,
+.mcp-member-card,
+.mcp-server-card,
+.diagnostics-summary,
+.appearance-option {
+  box-shadow: none;
+}
+
+.skill-card,
+.mcp-member-card,
+.mcp-server-card {
+  border-radius: var(--graphite-radius-sm);
+}
+
+.skill-card:hover,
+.mcp-member-card:hover,
+.mcp-server-card:hover {
+  border-color: color-mix(in srgb, var(--brand) 28%, var(--line));
+}
+
+.mcp-json-editor textarea,
+.mcp-import-json textarea,
+pre,
+code {
+  font-variant-ligatures: none;
+}
+
+.mcp-json-editor textarea,
+.mcp-import-json textarea {
+  border-radius: 4px 4px 0 0;
+  background: var(--evidence-canvas);
+}
+
+.diagnostics-summary,
+.diagnostic-summary {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--graphite-radius-md);
+  background: var(--surface-raised);
+}
+
+.diagnostic-stat + .diagnostic-stat {
+  border-left-color: var(--line);
+}
