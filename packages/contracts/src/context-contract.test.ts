@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import fixture from '../fixtures/agent-run-context-v12.json'
+import fixture from '../fixtures/agent-run-context-v13.json'
 import type { ContextManifestView } from './index'
 
 describe('AgentRun context contract', () => {
-  it('uses the shared frozen v12 fixture', () => {
-    const formatterVersion: ContextManifestView['formatterVersion'] = 12
+  it('uses the shared frozen v13 fixture', () => {
+    const formatterVersion: ContextManifestView['formatterVersion'] = 13
 
     expect(fixture.agentRunContextFormatterVersion).toBe(formatterVersion)
     expect(fixture.contextManifestFormatterVersion).toBe(formatterVersion)
@@ -12,6 +12,8 @@ describe('AgentRun context contract', () => {
     expect(fixture.selfActiveTaskProjection).toMatchObject({
       section: 'SELF_ACTIVE_TASKS',
       maxTasks: 8,
+      emptyCandidateProjection: { tasks: [] },
+      allCandidatesBudgetOmitted: 'section_omitted',
     })
     expect(fixture.currentInputSourceShapes).toEqual({
       user: { type: 'user' },

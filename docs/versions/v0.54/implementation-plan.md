@@ -10,8 +10,8 @@ last_updated: 2026-08-10
 
 ## Checkpoint 0：合同与 clean break
 
-- [x] ADR-0152、Durable Task v3、Built-in Tool Transport v5、Profile v3 与 Manifest v10；
-- [x] Formatter v12/shared fixture 与 current-only migration 70；
+- [x] ADR-0152/0153、Durable Task v3、Built-in Tool Transport v5、Profile v3 与 Manifest v11；
+- [x] Formatter v13/shared fixture、ContextManifest v11 与 current-only migration 71；
 - [x] 删除旧版本双读、claim 和 actor-specific compatibility 分支。
 
 ## Checkpoint 1：Task authority 与 CLI
@@ -24,21 +24,21 @@ last_updated: 2026-08-10
 ## Checkpoint 2：Self Active Task Context
 
 - [x] direct/A2A 共用 self active Task selector；
-- [x] compact JSON 最小字段、上限 8、稳定排序、预算淘汰与 omission；
-- [x] Manifest v10 selection evidence/digest、恢复复用与无 watermark/ACK；
+- [x] compact JSON 最小字段、上限 8、稳定排序、explicit empty snapshot、预算淘汰与 omission；
+- [x] Manifest v11 selection evidence/digest、恢复复用与无 watermark/ACK；
 - [x] Session Charter 唯一 Task authority 句与工具级操作指导。
 
 ## Checkpoint 3：验证与文档治理
 
 - [x] Task authority/read/list/update/unassigned 与 CLI schema/output 测试；
-- [x] direct/A2A/empty/truncated/budget/recovery Context 测试；
+- [x] direct/A2A/explicit-empty/truncated/budget/recovery Context 测试；
 - [x] migration/data-contract、formatter/manifest/profile/transport fixture 测试；
 - [x] Rust format/check/clippy/tests、前端相关检查、docs gates 与 diff check。
 
 ## 完成条件
 
 - [x] 所有 v0.54 contracts 与实现一致；
-- [x] 无 v2/v3、v4/v5、v11/v12 或 v9/v10 兼容 reader/shim；
+- [x] 无 v2/v3、v4/v5、v12/v13 或 v10/v11 兼容 reader/shim；
 - [x] 既有用户工作区改动保持不变；
 - [x] 验证结果记录在本计划并将版本实施状态更新为 complete。
 

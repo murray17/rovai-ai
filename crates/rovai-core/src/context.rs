@@ -3948,7 +3948,7 @@ fn self_active_task_projection(
     selected: &[SelectedSelfActiveTask],
     omitted_count: usize,
 ) -> Option<SelfActiveTaskProjection> {
-    if selected.is_empty() {
+    if selected.is_empty() && omitted_count > 0 {
         return None;
     }
     Some(SelfActiveTaskProjection {
@@ -6106,7 +6106,7 @@ mod tests {
     }
 
     #[test]
-    fn v68_through_v70_clean_break_preserves_business_history_and_removes_old_context_state() {
+    fn v68_through_v71_clean_break_preserves_business_history_and_removes_old_context_state() {
         let mut fixture = fixture();
         let directory = fixture.directory.clone();
         let camp_id = fixture.camp_id.clone();
@@ -6392,6 +6392,7 @@ mod tests {
                 DELETE FROM schema_migration WHERE version = 68;
                 DELETE FROM schema_migration WHERE version = 69;
                 DELETE FROM schema_migration WHERE version = 70;
+                DELETE FROM schema_migration WHERE version = 71;
                 PRAGMA foreign_keys = ON;
                 "#,
             )
@@ -6489,7 +6490,7 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 count, 0,
-                "{table} should be empty after the v70 clean break"
+                "{table} should be empty after the v71 clean break"
             );
         }
         let binding_state: (
@@ -6542,7 +6543,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(manifest_sql.contains("formatter_version = 12"));
+        assert!(manifest_sql.contains("formatter_version = 13"));
         assert!(manifest_sql.contains("CHECK(context_delivery_profile_version = 3)"));
         assert!(manifest_sql.contains("collaboration_state_included INTEGER NOT NULL"));
         assert!(manifest_sql.contains("shared_message_evidence_json TEXT NOT NULL"));
@@ -6560,7 +6561,7 @@ mod tests {
             .unwrap();
         assert!(delivery_sql.contains("CHECK(bootstrap_redelivery_envelope_version = 2)"));
         assert!(delivery_sql.contains("CHECK(bootstrap_redelivery_formatter_version = 2)"));
-        let contract: (String, i64, i64, i64, i64, i64) = reopened
+        let contract: (String, i64, i64, i64, i64, i64, i64) = reopened
             .connection()
             .query_row(
                 r#"
@@ -6568,7 +6569,8 @@ mod tests {
                        (SELECT COUNT(*) FROM schema_migration WHERE version = 67),
                        (SELECT COUNT(*) FROM schema_migration WHERE version = 68),
                        (SELECT COUNT(*) FROM schema_migration WHERE version = 69),
-                       (SELECT COUNT(*) FROM schema_migration WHERE version = 70)
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 70),
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 71)
                 FROM rovai_data_contract WHERE singleton = 1
                 "#,
                 [],
@@ -6580,11 +6582,12 @@ mod tests {
                         row.get(3)?,
                         row.get(4)?,
                         row.get(5)?,
+                        row.get(6)?,
                     ))
                 },
             )
             .unwrap();
-        assert_eq!(contract, ("v0.54".to_string(), 29, 1, 1, 1, 1));
+        assert_eq!(contract, ("v0.54".to_string(), 30, 1, 1, 1, 1, 1));
         let foreign_key_violations: i64 = reopened
             .connection()
             .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
@@ -7606,7 +7609,7 @@ mod tests {
     }
 
     #[test]
-    fn self_active_tasks_omit_empty_projection_and_yield_to_runtime_budget() {
+    fn self_active_tasks_emit_empty_snapshot_and_yield_to_runtime_budget() {
         let mut empty_fixture = fixture();
         let ContextMaterialization::Ready(empty_context) = ContextService
             .materialize(
@@ -7623,11 +7626,15 @@ mod tests {
         else {
             panic!("empty self-active Task fixture should materialize immediately");
         };
-        assert!(
-            !empty_context
-                .rendered_payload
-                .contains("[SELF_ACTIVE_TASKS]")
-        );
+        let empty_task_json = empty_context
+            .rendered_payload
+            .split_once("[SELF_ACTIVE_TASKS]\n")
+            .unwrap()
+            .1
+            .split_once("\n[/SELF_ACTIVE_TASKS]")
+            .unwrap()
+            .0;
+        assert_eq!(empty_task_json, r#"{"tasks":[]}"#);
         let empty_evidence: Value = empty_fixture
             .database
             .connection()
@@ -7640,7 +7647,11 @@ mod tests {
             .unwrap();
         assert_eq!(
             empty_evidence,
-            json!({"included": false, "selectedTaskRefs": []})
+            json!({
+                "included": true,
+                "selectedTaskRefs": [],
+                "projectionDigest": sha256_text(empty_task_json),
+            })
         );
         std::fs::remove_dir_all(empty_fixture.directory).unwrap();
 
@@ -7668,7 +7679,7 @@ mod tests {
                 )
                 .unwrap();
         }
-        let body = "B".repeat(7_300);
+        let body = "B".repeat(7_850);
         budget_fixture
             .database
             .connection()
@@ -7711,21 +7722,14 @@ mod tests {
             )
             .map(|value| serde_json::from_str(&value).unwrap())
             .unwrap();
+        assert_eq!(budget_evidence["included"], false);
+        assert_eq!(budget_evidence["selectedTaskRefs"], json!([]));
+        assert_eq!(budget_evidence["omittedCount"], 8);
+        assert!(budget_evidence.get("projectionDigest").is_none());
         assert!(
-            budget_evidence["omittedCount"]
-                .as_u64()
-                .is_some_and(|count| count > 0)
-        );
-        assert!(
-            budget_evidence["selectedTaskRefs"]
-                .as_array()
-                .is_some_and(|tasks| tasks.len() < 8)
-        );
-        assert_eq!(
-            budget_context
+            !budget_context
                 .rendered_payload
-                .contains("[SELF_ACTIVE_TASKS]"),
-            budget_evidence["included"] == true
+                .contains("[SELF_ACTIVE_TASKS]")
         );
         std::fs::remove_dir_all(budget_fixture.directory).unwrap();
     }

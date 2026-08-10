@@ -43,7 +43,8 @@ pub struct Database {
 }
 
 const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.54";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 29;
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 30;
+const V054_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 29;
 const V052_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.52";
 const V052_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 28;
 const V043_CLASSIFIER_VERSION: &str = "activity-v1";
@@ -101,28 +102,31 @@ fn has_current_data_contract(path: &Path) -> bool {
         [],
         |row| row.get(0),
     );
-    let migration_state: rusqlite::Result<(bool, bool, bool, bool, bool)> = connection.query_row(
-        r#"
+    let migration_state: rusqlite::Result<(bool, bool, bool, bool, bool, bool)> = connection
+        .query_row(
+            r#"
         SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 66),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 67),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 68),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 69),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 70)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 70),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 71)
         "#,
-        [],
-        |row| {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-            ))
-        },
-    );
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
+        );
     matches!(
         (marker, projection_exists, migration_state),
-        (Ok(Some((contract, schema, classifier))), Ok(true), Ok((v66, v67, v68, v69, v70)))
+        (Ok(Some((contract, schema, classifier))), Ok(true), Ok((v66, v67, v68, v69, v70, v71)))
             if classifier == V043_CLASSIFIER_VERSION
                 && ((contract == CURRENT_DATA_CONTRACT_VERSION
                     && schema == CURRENT_PROJECTION_SCHEMA_VERSION
@@ -130,14 +134,24 @@ fn has_current_data_contract(path: &Path) -> bool {
                     && v67
                     && v68
                     && v69
-                    && v70)
+                    && v70
+                    && v71)
+                    || (contract == CURRENT_DATA_CONTRACT_VERSION
+                        && schema == V054_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+                        && v66
+                        && v67
+                        && v68
+                        && v69
+                        && v70
+                        && !v71)
                     || (contract == V052_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
                         && schema == V052_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
                         && v66
                         && v67
                         && v68
                         && v69
-                        && !v70))
+                        && !v70
+                        && !v71))
     )
 }
 
@@ -1133,6 +1147,9 @@ impl Database {
             if !self.schema_migration_applied(70)? {
                 self.migrate_self_active_task_context_v70()?;
             }
+            if !self.schema_migration_applied(71)? {
+                self.migrate_explicit_empty_self_active_task_snapshot_v71()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -1392,6 +1409,9 @@ impl Database {
         }
         if !self.schema_migration_applied(70)? {
             self.migrate_self_active_task_context_v70()?;
+        }
+        if !self.schema_migration_applied(71)? {
+            self.migrate_explicit_empty_self_active_task_snapshot_v71()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -6129,8 +6149,8 @@ impl Database {
                 r#"
                 UPDATE message_delivery_attempt
                 SET status = 'failed', wait_condition = NULL,
-                    failure_code = 'context_manifest_v10_required',
-                    failure_detail_json = '{"reason":"self_active_task_context_clean_break"}',
+                    failure_code = 'context_manifest_v11_required',
+                    failure_detail_json = '{"reason":"explicit_empty_self_active_task_snapshot_clean_break"}',
                     ended_at = ?1
                 WHERE status = 'attempting'
                 "#,
@@ -6142,8 +6162,8 @@ impl Database {
                 SET status = 'failed', dispatch_phase = 'terminal',
                     wait_condition = NULL, active_dispatch_attempt_id = NULL,
                     manual_intervention_required = 0,
-                    failure_code = 'context_manifest_v10_required',
-                    failure_detail_json = '{"reason":"self_active_task_context_clean_break"}',
+                    failure_code = 'context_manifest_v11_required',
+                    failure_detail_json = '{"reason":"explicit_empty_self_active_task_snapshot_clean_break"}',
                     version = version + 1, ended_at = ?1, updated_at = ?1
                 WHERE status = 'running'
                    OR (status = 'pending' AND dispatch_attempt_count > 0)
@@ -6157,8 +6177,8 @@ impl Database {
                     dispatch_phase = 'terminal', wait_condition = NULL,
                     active_dispatch_attempt_id = NULL,
                     manual_intervention_required = 1,
-                    failure_code = 'context_manifest_v10_required',
-                    failure_detail_json = '{"reason":"self_active_task_context_clean_break"}',
+                    failure_code = 'context_manifest_v11_required',
+                    failure_detail_json = '{"reason":"explicit_empty_self_active_task_snapshot_clean_break"}',
                     version = version + 1, ended_at = ?1, updated_at = ?1
                 WHERE status = 'pending' AND dispatch_attempt_count = 0
                 "#,
@@ -6187,7 +6207,7 @@ impl Database {
                 r#"
                 UPDATE agent_run
                 SET status = 'failed', ended_at = ?1,
-                    last_error_code = 'context_manifest_v10_required',
+                    last_error_code = 'context_manifest_v11_required',
                     wait_reason = NULL, wait_deadline_at = NULL,
                     runtime_recovery_required = 0,
                     execution_lease_owner = NULL,
@@ -6305,7 +6325,7 @@ impl Database {
                     omitted_message_sequence_end INTEGER
                         CHECK(omitted_message_sequence_end >= omitted_message_sequence_start),
                     formatter_version INTEGER NOT NULL
-                        CHECK(formatter_version = 12),
+                        CHECK(formatter_version = 13),
                     rendered_payload_blob_id TEXT NOT NULL REFERENCES managed_blob(id),
                     rendered_payload_digest TEXT NOT NULL,
                     created_at TEXT NOT NULL,
@@ -6447,7 +6467,7 @@ impl Database {
                     reset_reason = NULL, updated_at = datetime('now')
                 WHERE singleton = 1;
 
-                INSERT INTO schema_migration(version, applied_at)
+                INSERT OR IGNORE INTO schema_migration(version, applied_at)
                 VALUES (70, datetime('now'));
                 "#,
             )?;
@@ -6466,6 +6486,37 @@ impl Database {
         {
             anyhow::bail!("v70 migration left a foreign-key violation in {table} row {row_id}");
         }
+        Ok(())
+    }
+
+    fn migrate_explicit_empty_self_active_task_snapshot_v71(&mut self) -> Result<()> {
+        let formatter_is_current = self
+            .connection
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .is_some_and(|schema| schema.contains("formatter_version = 13"));
+        if !formatter_is_current {
+            self.migrate_self_active_task_context_v70()?;
+        }
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            UPDATE rovai_data_contract
+            SET contract_version = 'v0.54', projection_schema_version = 30,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT OR IGNORE INTO schema_migration(version, applied_at)
+            VALUES (71, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -10874,7 +10925,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn current_data_contract_accepts_only_current_or_exact_v052_schema_28_source() {
+    fn current_data_contract_accepts_current_and_exact_v054_or_v052_sources() {
         let directory =
             std::env::temp_dir().join(format!("rovai-current-contract-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -10887,16 +10938,37 @@ mod tests {
             .execute_batch(
                 r#"
                 UPDATE rovai_data_contract
-                SET contract_version = 'v0.52', projection_schema_version = 28
+                SET contract_version = 'v0.54', projection_schema_version = 29
                 WHERE singleton = 1;
-                DELETE FROM schema_migration WHERE version = 70;
+                DELETE FROM schema_migration WHERE version = 71;
                 "#,
             )
             .unwrap();
         assert!(
             has_current_data_contract(&path),
-            "a source marker without the v70 migration is the only upgrade source"
+            "the exact v0.54/schema-29 marker without migration 71 is an upgrade source"
         );
+
+        database
+            .connection()
+            .execute("DELETE FROM schema_migration WHERE version = 70", [])
+            .unwrap();
+        assert!(
+            !has_current_data_contract(&path),
+            "the v0.54/schema-29 source requires migration 70"
+        );
+
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                UPDATE rovai_data_contract
+                SET contract_version = 'v0.52', projection_schema_version = 28
+                WHERE singleton = 1;
+                "#,
+            )
+            .unwrap();
+        assert!(has_current_data_contract(&path));
 
         database
             .connection()
@@ -10907,69 +10979,13 @@ mod tests {
             "the exact v0.52/schema-28 source requires migrations 66 through 69"
         );
 
-        database
-            .connection()
-            .execute("DELETE FROM schema_migration WHERE version = 68", [])
-            .unwrap();
-        assert!(!has_current_data_contract(&path));
-        database
-            .connection()
-            .execute_batch(
-                r#"
-                INSERT INTO schema_migration(version, applied_at)
-                VALUES (68, datetime('now'));
-                DELETE FROM schema_migration WHERE version = 67;
-                "#,
-            )
-            .unwrap();
-        assert!(!has_current_data_contract(&path));
-        database
-            .connection()
-            .execute_batch(
-                r#"
-                INSERT INTO schema_migration(version, applied_at)
-                VALUES (67, datetime('now'));
-                DELETE FROM schema_migration WHERE version = 66;
-                "#,
-            )
-            .unwrap();
-        assert!(!has_current_data_contract(&path));
-        database
-            .connection()
-            .execute_batch(
-                r#"
-                INSERT INTO schema_migration(version, applied_at)
-                VALUES (66, datetime('now'));
-                UPDATE rovai_data_contract
-                SET contract_version = 'v0.47', projection_schema_version = 25
-                WHERE singleton = 1;
-                "#,
-            )
-            .unwrap();
-        assert!(!has_current_data_contract(&path));
-
-        database
-            .connection()
-            .execute_batch(
-                r#"
-                UPDATE rovai_data_contract
-                SET contract_version = 'v0.54', projection_schema_version = 29
-                WHERE singleton = 1;
-                "#,
-            )
-            .unwrap();
-        assert!(
-            !has_current_data_contract(&path),
-            "the current marker is incomplete without migration 70"
-        );
-
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
     #[test]
-    fn v70_upgrades_the_exact_v052_source_without_compatibility_rows() {
-        let directory = std::env::temp_dir().join(format!("rovai-db-v70-test-{}", Uuid::new_v4()));
+    fn v71_upgrades_the_exact_v052_source_without_compatibility_rows() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v71-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
         database
             .connection()
@@ -10979,25 +10995,27 @@ mod tests {
                 SET contract_version = 'v0.52', projection_schema_version = 28
                 WHERE singleton = 1;
                 DELETE FROM schema_migration WHERE version = 70;
+                DELETE FROM schema_migration WHERE version = 71;
                 "#,
             )
             .unwrap();
         drop(database);
 
         let reopened = Database::open(&directory).expect("v69 source should reopen");
-        let contract: (String, i64, i64) = reopened
+        let contract: (String, i64, i64, i64) = reopened
             .connection()
             .query_row(
                 r#"
                 SELECT contract_version, projection_schema_version,
-                       (SELECT COUNT(*) FROM schema_migration WHERE version = 70)
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 70),
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 71)
                 FROM rovai_data_contract WHERE singleton = 1
                 "#,
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.54".to_string(), 29, 1));
+        assert_eq!(contract, ("v0.54".to_string(), 30, 1, 1));
         let foreign_key_violations: i64 = reopened
             .connection()
             .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
@@ -13151,7 +13169,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(agent_cli_contract, ("v0.54".to_string(), 29, 1));
+        assert_eq!(agent_cli_contract, ("v0.54".to_string(), 30, 1));
         assert_eq!(foreign_key_violations, 0);
 
         drop(database);
@@ -13791,7 +13809,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, (29, 1));
+        assert_eq!(contract, (30, 1));
         let error = database
             .connection()
             .execute(
@@ -14090,7 +14108,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(manifest_schema.contains("formatter_version = 12"));
+        assert!(manifest_schema.contains("formatter_version = 13"));
         assert!(manifest_schema.contains("CHECK(context_delivery_profile_version = 3)"));
         assert!(manifest_schema.contains("collaboration_state_included INTEGER NOT NULL"));
         let delivery_schema: String = database
@@ -14111,7 +14129,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.54".to_string(), 29));
+        assert_eq!(contract, ("v0.54".to_string(), 30));
         let public_a2a_migration_applied: i64 = database
             .connection()
             .query_row(

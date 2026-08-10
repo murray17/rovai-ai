@@ -120,7 +120,7 @@ Related: Session redelivery、Skill/MCP projection 与 Qualification 分别保�
 
 - **何时阅读：** 修改 Native Session、Bootstrap、Dynamic Context、Profile、redelivery 或 accepted-input ACK 时阅读。
 - **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Native Session Bootstrap Redelivery](../architecture/native-session-bootstrap-redelivery.md)、[Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)
-- **当前合同：** [Context Delivery Profile v3](../contracts/context-delivery-profile-v3.md)、[ContextManifest Evidence v10](../contracts/context-manifest-evidence-v10.md)、[Collaboration State v2](../contracts/collaboration-state-v2.md)
+- **当前合同：** [Context Delivery Profile v3](../contracts/context-delivery-profile-v3.md)、[ContextManifest Evidence v11](../contracts/context-manifest-evidence-v11.md)、[Collaboration State v2](../contracts/collaboration-state-v2.md)
 
 <!-- adr-current-primary:begin topic=session-context-bootstrap -->
 | ADR | Decision |
@@ -140,6 +140,7 @@ Related: Session redelivery、Skill/MCP projection 与 Qualification 分别保�
 | [ADR-0147](0147-lossless-model-context-projection-and-layered-delivery-evidence.md) | Lossless Model Context Projection and Layered Delivery Evidence |
 | [ADR-0149](0149-bounded-whole-history-omission-evidence.md) | Bounded Whole-History Omission Evidence |
 | [ADR-0152](0152-lead-owned-task-responsibility-and-self-active-task-awareness.md) | Lead-Owned Task Responsibility and Self-Active Task Awareness |
+| [ADR-0153](0153-explicit-empty-self-active-task-snapshot.md) | Explicit Empty Self-Active Task Snapshot |
 <!-- adr-current-primary:end -->
 
 Related: Member identity、Message delivery、Memory entrypoint 与 Evidence 仍从各自 primary 主题进入。

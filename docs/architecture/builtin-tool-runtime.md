@@ -3,7 +3,7 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-08-09
+last_updated: 2026-08-10
 ---
 
 # Built-in Tool Runtime Architecture
@@ -27,9 +27,11 @@ Runtime Input Delivery Evidence 与 Profile/Formatter/Manifest 权责见
 [ADR-0147](../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)；whole-history
 omission 的 bounded aggregate 边界见
 [ADR-0149](../adr/0149-bounded-whole-history-omission-evidence.md)和
-[ContextManifest Evidence v10](../contracts/context-manifest-evidence-v10.md)。Task authority 与
+[ContextManifest Evidence v11](../contracts/context-manifest-evidence-v11.md)。Task authority 与
 self-active awareness 见
-[ADR-0152](../adr/0152-lead-owned-task-responsibility-and-self-active-task-awareness.md)。
+[ADR-0152](../adr/0152-lead-owned-task-responsibility-and-self-active-task-awareness.md)；真实空集合
+的显式 clearing snapshot 见
+[ADR-0153](../adr/0153-explicit-empty-self-active-task-snapshot.md)。
 
 ## 总体路径
 
@@ -213,13 +215,13 @@ Bootstrap v3 按固定顺序组装 Session Charter、`MEMBER_IDENTITY` 和 Memor
 既有 eligible Bootstrap boundary 原子读取，不进入 AgentRun Dynamic Context，不持久化 Identity
 Blob、snapshot、digest 或 history。身份编辑不轮换 Session，也不构造下一 Run 的 patch。
 
-Context Formatter v12 的 `COLLABORATION_STATE` schema v2 只描述 peers。Core 从 stable current
+Context Formatter v13 的 `COLLABORATION_STATE` schema v2 只描述 peers。Core 从 stable current
 CampMembers 中排除 `snapshot.agent_id`；away 和 leave-requested 关系保留到正式 `left`。每个 peer
 只含 Agent ID、Name、Team Role 和 Professional Responsibilities；Default Lead 只以
 `defaultLeadAgentId` 和派生的 `selfIsDefaultLead` 表达。调用资格仍在 BuiltinToolRouter/Domain
 Service admission 时按当前 membership、Presence、Runtime、Capability、quota 与 fence 重判。
 
-Core 先构建完整 v2 projection，再计算 `collaboration_state_digest`。ContextManifest v10 无论本轮是否
+Core 先构建完整 v2 projection，再计算 `collaboration_state_digest`。ContextManifest v11 无论本轮是否
 渲染 section 都冻结该完整 digest，并以 `collaborationStateIncluded` 单独记录 inclusion。只有 Runtime
 Input accepted ACK 才把 `conversation.native_collaboration_state_digest` 推进到 Delivery 冻结的完整
 digest；failure、`delivery_unknown` 和未 accepted 输入不推进。因此 self identity 编辑和其他不改变
@@ -228,15 +230,19 @@ digest；failure、`delivery_unknown` 和未 accepted 输入不推进。因此 s
 ### Self Active Task Projection
 
 Profile v3 对目标 Agent 当前 Camp 中自己负责的 active Task 按 `updatedAt DESC, taskId DESC` 选择最多
-八项。Formatter v12 在 `COLLABORATION_STATE` 后、`SHARED_CONVERSATION` 前独立输出 compact
-`SELF_ACTIVE_TASKS`，每项只有 `taskId/title/status`；空 selection 不输出。Default Lead 不获得其他
-成员 Task 的隐式 projection。公共历史先为 Runtime budget 让位，随后从 Task tail 移除，并以 aggregate
-`omittedCount` 说明 selection/budget omission。
+八项。Formatter v13 在 `COLLABORATION_STATE` 后、`SHARED_CONVERSATION` 前独立输出 compact
+`SELF_ACTIVE_TASKS`，每项只有 `taskId/title/status`。真实 candidate 空集合必须输出
+`{"tasks":[]}`，以覆盖同一 Native Session 的旧责任认知；只有候选存在但 Runtime payload budget
+将所有 Task entry 淘汰时才省略整个 section。Default Lead 不获得其他成员 Task 的隐式 projection。
+公共历史先为 Runtime budget 让位，随后从 Task tail 移除，并以 aggregate `omittedCount` 说明
+selection/budget omission。
 
-ContextManifest v10 冻结 inclusion、有序 `taskId/version/updatedAt` references、optional omission count
-与 exact projection digest；A2A preflight 和 direct materialization 使用同一 selector。该 Evidence 不
-创建 freshness watermark、delta 或 ACK，恢复只复用冻结 bytes。完整共享面板通过 Camp-wide
-`task list/get` 按需读取，所有 mutation 继续读取 live Task 并由 Core 重授权。
+ContextManifest v11 冻结 inclusion、有序 `taskId/version/updatedAt` references、optional omission count
+与 exact projection digest；真实空集合为 `included:true`、空 refs 与 empty projection digest，预算
+全量淘汰为 `included:false`、空 refs 与 positive omission count。A2A preflight 和 direct
+materialization 使用同一 selector。该 Evidence 不创建 freshness watermark、delta 或 ACK，恢复只
+复用冻结 bytes。完整共享面板通过 Camp-wide `task list/get` 按需读取，所有 mutation 继续读取 live
+Task 并由 Core 重授权。
 
 ### Context compaction redelivery accounting
 

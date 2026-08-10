@@ -28,7 +28,7 @@ Camp 协作态势感知。User/Default Lead 统一定义责任，Assignee 只更
 - unassigned holding/recovery state 与普通 Agent claim 删除；
 - Camp-wide `task list/get` 和最小 Task list projection；
 - Lead-facing Task creation restraint contract/help 与最小 Session Charter authority fact；
-- `[SELF_ACTIVE_TASKS]` compact JSON、Profile v3、Formatter v12 与 ContextManifest v10 Evidence；
+- `[SELF_ACTIVE_TASKS]` compact JSON、explicit empty clearing snapshot、Profile v3、Formatter v13 与 ContextManifest v11 Evidence；
 - Built-in Tool Transport v5、current-only schema migration 和兼容代码删除。
 
 ## 冻结边界
@@ -46,8 +46,8 @@ Camp 协作态势感知。User/Default Lead 统一定义责任，Assignee 只更
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.53 冻结为 historical，v0.54 成为唯一 current |
-| ADR | 已更新 | ADR-0152 冻结 Lead-owned responsibility、Assignee execution state、Camp-wide read 与 self active awareness |
-| Contracts | 已更新 | Durable Task v3、Built-in Tool Transport v5、Context Delivery Profile v3 与 ContextManifest Evidence v10 |
+| ADR | 已更新 | ADR-0152 冻结 Lead-owned responsibility、Assignee execution state、Camp-wide read 与 self active awareness；ADR-0153 区分 explicit empty snapshot 与 budget omission |
+| Contracts | 已更新 | Durable Task v3、Built-in Tool Transport v5、Context Delivery Profile v3 与 ContextManifest Evidence v11 |
 | Architecture | 已更新 | Built-in Tool Runtime 收敛 Task authority、CLI read 与 Dynamic Context/Manifest 分层 |
 | UI | 确认无需更新 | 本版本不改变稳定 Renderer UX 合同；Task list wire shape 由 Built-in CLI/Contract 使用 |
 | Runtime Activity | 确认无需更新 | 不新增或重分类 Canonical Runtime Activity |
@@ -59,7 +59,8 @@ Camp 协作态势感知。User/Default Lead 统一定义责任，Assignee 只更
 
 - [v0.54 实施与验收计划](implementation-plan.md)
 - [ADR-0152](../../adr/0152-lead-owned-task-responsibility-and-self-active-task-awareness.md)
+- [ADR-0153](../../adr/0153-explicit-empty-self-active-task-snapshot.md)
 - [Durable Task v3](../../contracts/durable-task-v3.md)
 - [Built-in Tool Transport v5](../../contracts/builtin-tool-transport-v5.md)
 - [Context Delivery Profile v3](../../contracts/context-delivery-profile-v3.md)
-- [ContextManifest Evidence v10](../../contracts/context-manifest-evidence-v10.md)
+- [ContextManifest Evidence v11](../../contracts/context-manifest-evidence-v11.md)

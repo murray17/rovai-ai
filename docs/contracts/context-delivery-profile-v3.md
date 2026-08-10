@@ -32,5 +32,7 @@ Runtime payload 超预算时，先按既有顺序移除 optional public history�
 `omittedCount`，不暴露其 ID。若没有 Task 项能保留，则整个 section 省略而不是单独导致 Run 失败；
 Current Input 等必要内容仍可独立触发 payload-too-large。
 
-Profile 不拥有 section 名、模型 JSON 字段或 Manifest evidence shape；它们分别由 Formatter v12 与
-ContextManifest v10 拥有。Profile 也不建立 Task watermark、delta 或 ACK。
+Profile 不拥有 section 名、模型 JSON 字段或 Manifest evidence shape；它们分别由 Formatter v13 与
+ContextManifest v11 拥有。Profile 也不建立 Task watermark、delta 或 ACK。真实 candidate 空集合的
+显式 snapshot 与候选被预算全部排除后的 whole-section omission 区分见 ADR-0153；该区分不改变本
+Profile 的 candidate selection 或 budget priority。

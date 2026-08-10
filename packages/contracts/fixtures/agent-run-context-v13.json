@@ -1,15 +1,17 @@
 {
   "nativeSessionBootstrap": "native_session_bootstrap_v3",
   "bootstrapFormatterVersion": 3,
-  "agentRunContextFormatterVersion": 12,
-  "contextManifestVersion": 10,
-  "contextManifestFormatterVersion": 12,
+  "agentRunContextFormatterVersion": 13,
+  "contextManifestVersion": 11,
+  "contextManifestFormatterVersion": 13,
   "contextDeliveryProfileVersion": 3,
   "selfActiveTaskProjection": {
     "section": "SELF_ACTIVE_TASKS",
     "fields": ["taskId", "title", "status"],
     "maxTasks": 8,
-    "ordering": "updatedAt DESC, taskId DESC"
+    "ordering": "updatedAt DESC, taskId DESC",
+    "emptyCandidateProjection": {"tasks": []},
+    "allCandidatesBudgetOmitted": "section_omitted"
   },
   "selfActiveTaskEvidence": {
     "fields": ["included", "selectedTaskRefs", "omittedCount?", "projectionDigest?"]
