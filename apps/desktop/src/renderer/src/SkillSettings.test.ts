@@ -14,8 +14,11 @@ describe('Skill settings', () => {
     expect(markup).toContain('管理 Rovai 内置与用户导入的 Skill')
     expect(markup).toContain('class="settings-page-heading"')
     expect(markup).toContain('<h1>Skill 管理</h1>')
-    expect(markup).toContain('<span class="skill-import-help"><b aria-hidden="true">?</b><span role="tooltip">')
-    expect(markup).not.toContain('class="skill-import-help" tabindex=')
+    expect(markup).toContain('id="skill-import-local-tab"')
+    expect(markup).toContain('aria-controls="skill-import-local-panel"')
+    expect(markup).toContain('aria-labelledby="skill-import-local-tab"')
+    expect(markup).toContain('导入前会先生成安全预览')
+    expect(markup).not.toContain('class="skill-import-help"')
     expect(markup).not.toContain('允许执行')
   })
 

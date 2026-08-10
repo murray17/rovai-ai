@@ -383,14 +383,16 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
                   ><span aria-hidden="true" /></button>
                 </div>
                 <code className="mcp-server-endpoint">{server.endpoint}</code>
-                <div className="mcp-server-meta">
-                  <span className={`status-badge ${server.enabled ? 'status-completed' : 'status-neutral'}`}><i />{server.enabled ? '已启用' : '已停用'}</span>
-                  <span>{server.assignedAgentIds.length} 位队员</span>
-                </div>
-                <div className="mcp-server-card-actions">
-                  <button className="quiet-button compact" type="button" onClick={() => setEditor({ serverId: server.serverId, definitionJson: server.definitionJson })} disabled={busy !== null}>编辑 JSON</button>
-                  <button className="danger-button compact" type="button" onClick={() => setDeleting(server)} disabled={busy !== null}>删除</button>
-                </div>
+                <footer className="mcp-server-card-footer">
+                  <div className="mcp-server-meta">
+                    <span className={`status-badge ${server.enabled ? 'status-completed' : 'status-neutral'}`}><i />{server.enabled ? '已启用' : '已停用'}</span>
+                    <span>{server.assignedAgentIds.length} 位队员</span>
+                  </div>
+                  <div className="mcp-server-card-actions">
+                    <button className="quiet-button compact" type="button" onClick={() => setEditor({ serverId: server.serverId, definitionJson: server.definitionJson })} disabled={busy !== null}>编辑 JSON</button>
+                    <button className="quiet-button compact danger-text" type="button" onClick={() => setDeleting(server)} disabled={busy !== null}>删除</button>
+                  </div>
+                </footer>
               </article>
             ))}
           </div>
@@ -443,14 +445,14 @@ export function MemberMcpCard({
   const assigned = servers.filter((server) => server.assignedAgentIds.includes(agent.agentId))
   return (
     <article className="mcp-member-card">
+      <span className="mcp-member-avatar" aria-hidden="true">{agent.displayName.slice(0, 1)}</span>
       <div className="mcp-member-identity">
-        <span className="mcp-member-avatar" aria-hidden="true">{agent.displayName.slice(0, 1)}</span>
-        <div><strong>{agent.displayName}</strong><span>{agent.teamRole || '队员'}</span></div>
-        <span className="mcp-member-count">{assigned.length}</span>
+        <strong>{agent.displayName}</strong>
+        <span>{agent.teamRole || '队员'}</span>
+        <small>{assigned.length > 0 ? assigned.map((server) => server.name).join('、') : '尚未配置 MCP'}</small>
       </div>
-      <p>{assigned.length > 0 ? assigned.map((server) => server.name).join('、') : '尚未配置 MCP'}</p>
       <details className="mcp-member-picker">
-        <summary>{assigned.length > 0 ? `已选择 ${assigned.length} 个 MCP` : '选择 MCP'}</summary>
+        <summary aria-label={`为${agent.displayName}选择 MCP`}>{assigned.length > 0 ? `${assigned.length} 个 MCP` : '选择 MCP'}</summary>
         <div className="mcp-member-picker-menu">
           {servers.map((server) => {
             const checked = server.assignedAgentIds.includes(agent.agentId)

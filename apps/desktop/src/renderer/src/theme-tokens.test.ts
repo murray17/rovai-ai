@@ -23,6 +23,13 @@ const requiredTokens = [
   '--brand-hover',
   '--brand-contrast',
   '--brand-soft',
+  '--brand-ink',
+  '--mention-ink',
+  '--mention-ink-hover',
+  '--rail',
+  '--rail-ink',
+  '--rail-line',
+  '--rail-logo',
   '--success',
   '--success-soft',
   '--attention',
@@ -102,7 +109,7 @@ function expectTextContrast(tokens: Record<string, string>): void {
   }
 }
 
-describe('Arctic Dawn theme tokens', () => {
+describe('Neutral Porcelain + Steel theme tokens', () => {
   const day = tokenBlock(':root')
 
   it('defines the complete canonical Day token contract', () => {
@@ -118,14 +125,23 @@ describe('Arctic Dawn theme tokens', () => {
     expectTextContrast(day)
   })
 
-  it('scopes the approved white Camp surfaces and strong Inspector divider', () => {
+  it('scopes the approved porcelain surfaces and Steel emphasis', () => {
+    expect(day['--canvas']).toBe('#eceeef')
     expect(day['--conversation-surface']).toBe('#ffffff')
     expect(day['--inspector-surface']).toBe('#ffffff')
-    expect(day['--conversation-inspector-line']).toBe('#cbd1c8')
+    expect(day['--conversation-inspector-line']).toBe('#c7cfd6')
     expect(day['--home-surface']).toBe('#ffffff')
-    expect(day['--surface']).toBe('#fbfcfa')
-    expect(day['--surface-subtle']).toBe('#f6f7f3')
-    expect(day['--line']).toBe('#dde1da')
+    expect(day['--surface']).toBe('#fbfbfa')
+    expect(day['--surface-subtle']).toBe('#f0f2f4')
+    expect(day['--line']).toBe('#dfe4e8')
+    expect(day['--brand']).toBe('#526f88')
+    expect(day['--brand-soft']).toBe('#e9eef3')
+    expect(day['--brand-ink']).toBe('#405f7e')
+    expect(day['--rail']).toBe('#f3f4f4')
+    expect(day['--rail-line']).toBe('#dadde0')
+    expect(day['--rail-logo']).toBe('#526f88')
+    expect(day['--mention-ink']).toBe('#2f61c8')
+    expect(contrast(day['--mention-ink'], day['--surface'])).toBeGreaterThanOrEqual(4.5)
     expect(css).toContain('.camp-workspace { background: var(--conversation-surface); }')
     expect(css).toContain('border-left: 1px solid var(--conversation-inspector-line)')
     expect(css).toContain('background: var(--inspector-surface)')
@@ -135,16 +151,43 @@ describe('Arctic Dawn theme tokens', () => {
     expect(css).not.toMatch(/\.final-copy\s*\{[^}]*background:/)
   })
 
-  it('uses a gray background only for the active Camp row, not the current Project', () => {
+  it('uses quiet selected backgrounds for the active Camp and current Project', () => {
     expect(css).toMatch(/\.camp-nav-row\.selected\s*\{[^}]*background: var\(--surface-muted\)/)
-    expect(css).not.toMatch(/\.project-heading-row\.current-project\s*\{[^}]*background:/)
+    expect(css).toMatch(/\.project-heading-row\.current-project\s*\{[^}]*background: var\(--surface-selected\)/)
   })
 
-  it('shows question-mark help only while the mark is hovered', () => {
+  it('keeps Agent message copy on one shared surface instead of identity-tinted bubbles', () => {
+    expect(css).toMatch(/\.conversation-bubble\.agent\s*\{[^}]*--agent-accent: var\(--identity-1\)/)
+    expect(css).not.toMatch(/\.conversation-bubble\.agent\s*\{[^}]*background:/)
+    expect(css).not.toMatch(/\.conversation-bubble\.agent\s+\.final-copy\s*\{[^}]*background:/)
+    expect(css).toMatch(/\.final-copy\s*\{[^}]*color: var\(--ink\)[^}]*\}/)
+  })
+
+  it('widens the 2K composer and keeps the Enter keycap beside Send', () => {
+    expect(css).toMatch(
+      /@media\s*\(min-width:\s*1800px\)\s*\{\s*\.composer-box\s*\{[^}]*width:\s*min\(1040px,\s*100%\)/
+    )
+    expect(css).toMatch(/\.composer-actions\s*\{[^}]*gap:\s*5px[^}]*align-items:\s*center/)
+    expect(css).toMatch(/\.composer-hint\s*\{[^}]*border:\s*1px solid var\(--line\)[^}]*white-space:\s*nowrap/)
+    expect(css).toMatch(/\.composer-send\s*\{[^}]*min-height:\s*28px/)
+  })
+
+  it('renders A2A recipients as blue interactive mentions', () => {
+    expect(css).toMatch(/\.message-delivery-recipient-name\s*\{[^}]*color: var\(--mention-ink\)/)
+    expect(css).toMatch(/\.message-mention-token\.is-interactive\s*\{[^}]*cursor:\s*pointer/)
+  })
+
+  it('shows General question-mark help only while the mark is hovered', () => {
     expect(css).toContain('.general-help-mark:hover + .general-help-popover')
-    expect(css).toContain('.skill-import-help:hover > span')
     expect(css).not.toContain('.general-help-mark:focus')
-    expect(css).not.toContain('.skill-import-help:focus')
+    expect(css).not.toContain('.skill-import-help')
+  })
+
+  it('uses open Skill rows and the compact MCP grids from the P2 interaction draft', () => {
+    expect(css).toMatch(/\.skill-card-grid\s*\{[^}]*max-width:\s*900px[^}]*border-top:/)
+    expect(css).toMatch(/\.skill-card\s*\{[^}]*grid-template-columns:\s*34px minmax\(0, 1fr\) auto[^}]*border-bottom:/)
+    expect(css).toMatch(/\.mcp-member-card\s*\{[^}]*grid-template-columns:\s*28px minmax\(0, 1fr\) auto/)
+    expect(css).toMatch(/\.mcp-server-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/)
   })
 
   it('keeps raw color literals inside the canonical token block', () => {

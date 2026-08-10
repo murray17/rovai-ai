@@ -238,6 +238,7 @@ export function App(): React.JSX.Element {
   const activeCampIdRef = useRef<string | null>(null)
   const viewRef = useRef<View>('compose')
   const notificationButtonRef = useRef<HTMLButtonElement>(null)
+  const notificationReturnFocusRef = useRef<HTMLButtonElement>(null)
   const notificationFocusSequence = useRef(0)
   const healthRequest = useRef<Promise<HealthStatus> | null>(null)
   const lastMainView = useRef<View>('compose')
@@ -1478,7 +1479,10 @@ export function App(): React.JSX.Element {
         pendingMemoryCount={pendingMemoryCount}
         notificationUnreadCount={notificationUnreadCount}
         notificationButtonRef={notificationButtonRef}
-        onNotifications={() => setNotificationOpen(true)}
+        onNotifications={() => {
+          notificationReturnFocusRef.current = notificationButtonRef.current
+          setNotificationOpen(true)
+        }}
         memberSidebar={view === 'members' ? (
           <MemberSidebar
             agents={agents}
@@ -1616,6 +1620,10 @@ export function App(): React.JSX.Element {
             installations={installations}
             busy={busy}
             section={settingsSection}
+            onOpenNotifications={(trigger) => {
+              notificationReturnFocusRef.current = trigger
+              setNotificationOpen(true)
+            }}
             onDiagnosticsNavigate={(section) => chooseSettingsSection(section)}
             onReload={async () => {
               await Promise.all([loadOverview(), loadHealth()])
@@ -1673,7 +1681,7 @@ export function App(): React.JSX.Element {
         activeCampId={activeCampId}
         activeCampVisible={view === 'camp' && campSnapshot?.camp.id === activeCampId}
         refreshSignal={notificationRefreshSignal}
-        triggerRef={notificationButtonRef}
+        triggerRef={notificationReturnFocusRef}
         onUnreadCountChange={setNotificationUnreadCount}
         onNavigate={navigateFromNotification}
         onRefreshVisibleCamp={refreshVisibleNotificationCamp}
@@ -1794,6 +1802,7 @@ export function SettingsView({
   installations,
   busy,
   section,
+  onOpenNotifications,
   onDiagnosticsNavigate,
   onReload,
   onThemeChange
@@ -1807,6 +1816,7 @@ export function SettingsView({
   installations: AdapterInstallation[]
   busy: string | null
   section: SettingsSection
+  onOpenNotifications(trigger: HTMLButtonElement): void
   onDiagnosticsNavigate(section: 'mcp' | 'runtime', runtimeKind?: AdapterKind): void
   onReload(): Promise<void>
   onThemeChange(preference: ThemePreference): void
@@ -1825,21 +1835,19 @@ export function SettingsView({
         {section === 'skills' && <SkillSettings />}
         {section === 'mcp' && <McpSettings agents={agents} />}
         {section === 'runtime' && (
-          <>
-            <SettingsPageHeader
-              eyebrow="Settings / Runtime"
-              title="Agent 运行时"
-              description="选择产品、检查可用性并管理 Rovai 自动发现的本机入口。"
-            />
-            <RuntimeInstallationsPanel health={health} installations={installations} onReload={onReload} />
-          </>
+          <RuntimeInstallationsPanel health={health} installations={installations} onReload={onReload} />
         )}
         {section === 'appearance' && (
           <>
             <SettingsPageHeader
               eyebrow="Settings / Appearance"
               title="外观"
-              description="北极晨光 Day 已覆盖全部页面；Night 偏好暂时同样解析为 Day。"
+              description="瓷灰日间主题已覆盖全部页面；Night 偏好暂时同样解析为日间。"
+              aside={(
+                <span className="settings-page-note">
+                  当前 · {appearance.resolvedTheme === 'day' ? '瓷灰日间' : '夜间'} · 偏好：{appearancePreferenceLabel(appearance.preference)}
+                </span>
+              )}
             />
             <AppearanceSettings
               appearance={appearance}
@@ -1848,13 +1856,21 @@ export function SettingsView({
             />
           </>
         )}
-        {section === 'notifications' && <NotificationSettings />}
+        {section === 'notifications' && (
+          <NotificationSettings onOpenNotificationCenter={onOpenNotifications} />
+        )}
         {section === 'diagnostics' && (
           <DiagnosticsCenter onNavigate={onDiagnosticsNavigate} />
         )}
       </div>
     </div>
   )
+}
+
+function appearancePreferenceLabel(preference: ThemePreference): string {
+  if (preference === 'system') return '跟随系统'
+  if (preference === 'day') return '日间'
+  return '夜间'
 }
 
 function EmptyState({ title, body, action, onAction }: { title: string; body: string; action?: string; onAction?(): void }): React.JSX.Element {

@@ -2,21 +2,27 @@
 document_type: ui-design-system
 authority: renderer-ui-detail
 status: accepted
-design_direction: arctic-dawn-v3
-target_version: v0.49
+design_direction: neutral-porcelain-steel
+target_version: v0.56
 implementation_status: in_progress
-last_updated: 2026-08-10
+last_updated: 2026-08-11
 ---
 
-# Arctic Dawn V3 设计规范
+# Neutral Porcelain + Steel 设计规范
 
-本文是 Arctic Dawn Renderer 的唯一视觉与交互详规。它把 V3 原型中有效的
-产品方向、访谈决定及现有领域/安全合同收敛为可实施规范。设计已形成共同理解；
-用户已于 2026-07-30 明确授权生产实现；首轮范围以及随后确认的导航、设置覆盖与
-空 Camp 欢迎状态均已完成。2026-08-03 新增的结构化 Mention 与用户消息原生拖选也已
-完成生产实现；2026-08-06 用户再次确认原交互稿中的“Mention 视觉方案 A + 信息弹窗
-布局 2”，本节据此冻结 Composer 与历史 Mention 的共同呈现和点击行为；重新打包的 App
-已通过真实输入、点击、Enter/Space、Esc 焦点返回、拖选和截图验收。
+本文是 Renderer 当前唯一的视觉与交互详规。文件路径 `arctic-dawn.md` 为历史稳定链接，
+当前视觉层已在 v0.56 切换为 Neutral Porcelain + Steel；Arctic Dawn V3 留下的有效信息架构、
+交互决定与领域/安全边界继续保留，不再用其旧靛蓝、极光绿与晨曦色定义当前生产表面。
+
+v0.56 以一次性 P2 HTML 为视觉选型输入，把冷瓷灰 Canvas、近白 Surface、Steel 强调和克制
+结构线迁移进现有 React Renderer。原型 DOM、假数据、阶段文案和演示交互不进入生产；Project、
+Camp、Agent 级执行过程、New Conversation、七个设置分类、队员、Memory 与各类浮层继续读取
+现有生产 Read Side 并保留原功能边界。实现状态以
+[v0.56 实施计划](../versions/v0.56/implementation-plan.md)和代码证据为准。
+
+2026-08-03 新增的结构化 Mention 与用户消息原生拖选已经完成生产实现；2026-08-06 用户再次
+确认“Mention 视觉方案 A + 信息弹窗布局 2”，本节继续冻结 Composer、历史 Mention 和 v0.56
+A2A footer 收件人的共同呈现与点击行为。
 
 v0.44 进一步确认删除队员详情中的公共消息摘要模型配置和整个“高级设置”入口，同时完整
 保留 Member Runtime Parameters；实施状态以 v0.44 实施计划与代码证据为准，不能从本文
@@ -49,7 +55,7 @@ v0.49 进一步冻结设置“通用”、每个 Main Window Session 一次性�
 
 1. 有效 ADR、`CONTEXT.md`、Core 合同和安全边界决定产品语义与可执行行为。
 2. 本文决定 Renderer 的视觉、信息架构、产品文案映射和交互呈现。
-3. `rovai-arctic-dawn-v3-package` 是全局设计输入；
+3. `rovai-arctic-dawn-v3-package` 是历史信息架构输入；v0.56 P2 HTML 是当前视觉选型输入；
    `rovai-arctic-dawn-members-v4.html` 是队员页与 Member Identity Dialog 的后续
    定向输入；`rovai-navigation-settings-empty-v7-package` 后续覆盖统一侧栏导航、
    设置导航投影和空 Camp 欢迎状态。HTML、静态假数据、旧词汇、原型切换器和演示
@@ -60,7 +66,8 @@ v0.49 进一步冻结设置“通用”、每个 Main Window Session 一次性�
 
 ### 设计方向切换
 
-- Arctic Dawn V3 取代 Meridian 中与其冲突的视觉和信息架构。
+- Neutral Porcelain + Steel 取代 Arctic Dawn V3 中与其冲突的色彩与表面层；Arctic Dawn 已确认的
+  信息架构和交互合同继续有效。
 - 原型必须在现有 React、Radix 和 CSS Variables 技术栈中重建，不直接复制单文件
   HTML。
 - 原型出现的用户词汇必须映射到现有领域语言：产品界面使用“队员”“记忆”
@@ -92,53 +99,60 @@ type ThemePreference = "system" | "day" | "night"
 type ResolvedTheme = "day" | "night"
 ```
 
-- Arctic Dawn V3 原型是 Day 的设计基准，先覆盖本版本全部页面。
+- Neutral Porcelain + Steel 是当前 Day 的设计基准，覆盖生产全部页面。
 - Night 保留为正式主题能力，但最终视觉等待用户后续提供独立设计稿。
 - 实现者不得把 Day Token 机械反色或自行补全为最终 Night，也不得把 Meridian Night
-  重新命名后视作已经完成的 Arctic Dawn Night。
+  或旧 Arctic Dawn 色表重新命名后视作已经完成的当前 Night。
 - v0.24 中 `system`、`day`、`night` 三种偏好全部解析为 `ResolvedTheme = "day"`。
-  选择 `night` 或深色系统下的 `system` 都渲染 Arctic Dawn Day，不加载 Meridian
+  选择 `night` 或深色系统下的 `system` 都渲染 Neutral Porcelain + Steel Day，不加载 Meridian
   Night Token。
 - 偏好值可以继续持久化，但本版本不承诺旧 Night 视觉兼容。全界面 Day 完成即可
   满足 v0.24 主题范围；后续 Night 设计与实现另开版本。
 
-### Arctic Dawn Day Token
+### Neutral Porcelain + Steel Day Token
 
-Arctic Dawn 使用冷纸白、北极星靛蓝、低饱和极光绿与极少量晨曦暖色。下列 Day
-Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已经校正：
+当前 Day 使用冷瓷灰、近白纸面与低饱和 Steel。下列 Token 是生产基准；Steel 只用于品牌、
+结构和稳定选择，不能替代状态色、队员身份色或证据色：
 
 | Token | 值 | 用途 |
 |---|---:|---|
-| `--canvas` | `#F2F4F1` | App 背景 |
-| `--surface` | `#FBFCFA` | 主阅读与工作表面 |
+| `--canvas` | `#ECEEEF` | App 背景 |
+| `--surface` | `#FBFBFA` | 主阅读与工作表面 |
 | `--surface-raised` | `#FFFFFF` | Dialog、Popover、输入和浮层 |
-| `--surface-subtle` | `#F6F7F3` | 侧栏与次级面板 |
-| `--surface-muted` | `#ECEFE9` | Hover、Disabled、弱分组 |
-| `--surface-selected` | `#E9ECF7` | Tab 和需要品牌强调的列表选择；当前 Camp 使用灰色 `--surface-muted` |
+| `--surface-subtle` | `#F0F2F4` | 次级面板 |
+| `--surface-muted` | `#E7EAED` | Hover、Disabled、弱分组与当前 Camp |
+| `--surface-selected` | `#E9ECEE` | 当前 Project、Tab 与稳定列表选择 |
+| `--surface-hover` | `#E8EAEA` | Hover 表面 |
+| `--surface-sunken` | `#E4E8EB` | 收入式或遗忘态表面 |
 | `--conversation-surface` | `#FFFFFF` | Camp 会话阅读区与输入停靠区背景 |
 | `--inspector-surface` | `#FFFFFF` | Camp Inspector 背景 |
-| `--conversation-inspector-line` | `#CBD1C8` | 会话区与 Inspector 的强结构分隔 |
+| `--conversation-inspector-line` | `#C7CFD6` | 会话区与 Inspector 的强结构分隔 |
 | `--home-surface` | `#FFFFFF` | Quick Chat 首页右侧主内容区背景 |
-| `--ink` | `#202438` | 主文字 |
-| `--muted` | `#5F6678` | 次级正文 |
+| `--topbar` | `#FBFBFA` | 顶栏与窗口拖拽表面 |
+| `--ink` | `#171B20` | 主文字 |
+| `--muted` | `#616A73` | 次级正文 |
 | `--faint` | `#6E7382` | 小字号元数据；替代原型中不达 AA 的 `#83899A` |
-| `--line` | `#DDE1DA` | 装饰分隔与非交互边界 |
-| `--line-strong` | `#CBD1C8` | 强结构边界 |
+| `--line` | `#DFE4E8` | 装饰分隔与非交互边界 |
+| `--line-strong` | `#C7CFD6` | 强结构边界 |
 | `--control-line` | `#8B9389` | 必须可辨认的输入与交互控件边界 |
-| `--brand` | `#343B72` | 品牌、主要操作、稳定选择 |
-| `--brand-hover` | `#29305F` | 主要操作 Hover |
+| `--brand` | `#526F88` | Steel 品牌、主要操作、稳定选择与结构轨 |
+| `--brand-hover` | `#3D5874` | 主要操作 Hover |
 | `--brand-contrast` | `#FFFFFF` | Brand 表面上的文字 |
-| `--brand-soft` | `#ECEEF8` | 品牌弱背景 |
-| `--brand-ink` | `#343B72` | Brand-soft 上的文字和图标 |
+| `--brand-soft` | `#E9EEF3` | Steel 弱背景 |
+| `--brand-ink` | `#405F7E` | Brand-soft 上的文字和图标 |
+| `--rail` | `#F3F4F4` | 统一侧栏背景 |
+| `--rail-ink` | `#626B72` | 侧栏文字 |
+| `--rail-line` | `#DADDE0` | 侧栏结构线 |
 | `--aurora` | `#719D94` | 低频品牌图形与运行中的非语义装饰 |
 | `--aurora-soft` | `#E7F0EC` | 极光弱背景 |
 | `--violet` | `#9082B4` | 低频品牌图形 |
 | `--violet-soft` | `#EFEBF6` | 紫色弱背景 |
 | `--ember` | `#D3A45F` | Quick Chat 品牌温度，不表示警告 |
 | `--ember-soft` | `#F8EDDA` | 晨曦弱背景 |
-| `--focus` | `#4D83A2` | Focus ring |
+| `--focus` | `#526F88` | Focus ring |
+| `--focus-soft` | `rgba(82, 111, 136, 0.16)` | 输入 Focus 的弱外环 |
 | `--overlay` | `rgba(28, 32, 43, 0.42)` | Modal 遮罩 |
-| `--shadow-float` | `0 18px 56px rgba(38, 45, 58, 0.12)` | 真正浮层 |
+| `--shadow-float` | `0 18px 56px rgba(38, 45, 58, 0.14)` | 真正浮层 |
 
 状态色与品牌色、队员身份色严格分离：
 
@@ -160,7 +174,7 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 
 | Token | 值 |
 |---|---:|
-| `--evidence-canvas` | `#F5F6F4` |
+| `--evidence-canvas` | `#F4F6F3` |
 | `--evidence-surface` | `#FFFFFF` |
 | `--evidence-ink` | `#252A36` |
 | `--evidence-muted` | `#5F6678` |
@@ -212,15 +226,19 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 - Agent 公共正文前不显示“来自执行 · 队员名”或其他执行来源条；AgentRun 的过程入口继续由
   执行动态和执行详情承担，不能在正文内重复一条来源导航。
 - A2A 消息固定采用 Scheme C 轻量转交 footer：正文后使用一段无背景、无圆角、无包围边界的
-  短折线与身份点，并在同一阅读宽度内显示“发送给：队员名…”。消息下方不再渲染“投递 / N 个
-  收件人”的 compact 卡片，也不以 Chip、Badge 或第二层列表替代它。转交折线直接附着正文边界，
-  起点只保留 2px 间距，不能在正文与“发送给”之间形成一行空白。
+  短折线与身份点，并在同一阅读宽度内显示“发送给@队员…”。消息下方不再渲染“投递 / N 个
+  收件人”的 compact 卡片，也不以 Chip、Badge 或第二层列表替代它。转交折线直接附着最后一行
+  正文的内容边界，起点只保留 2px 间距；透明的复制入口不得占据文档流，不能在正文与“发送给”
+  之间形成一行空白。
 - footer 只读取冻结的 recipient snapshot，并按 `recipientCanonicalPosition` 显示；该顺序是稳定
-  展示顺序，不表示调度优先级。footer 只承担“发送给：队员名”，不显示 `settled`、`pending`、
+  展示顺序，不表示调度优先级。footer 只承担“发送给@队员”，不显示 `settled`、`pending`、
   `running`、`failed`、`cancelled` 或 `interrupted_before_dispatch`，也不以 `!` 或颜色在正文后
   投影异常。Run stage 同样只显示收件人而不重复这些状态标签；完整 Delivery 状态、失败码和恢复
   事实仍由原有 Core Read Side 负责。
   多收件人使用顿号分隔并允许窄窗自然换行。
+- 每个可见收件人必须带 `@` 并使用与结构化 Member Mention 相同的无底色蓝色行内样式。身份仍是
+  当前可操作队员时，单击、Enter 或 Space 在原位置打开既有布局 2 人物信息卡；拖选形成非空文本
+  选区时不得误触发。已离队、已移除或不可解析身份继续显示冻结名称但不可操作，不恢复寻址能力。
 - Reply-to 只建立公共关系；回复 Agent-authored Public A2A Message 时 Core 可加入作者作为
   一个默认目标，回复用户或系统事件不新增 Delivery，也不扩展原消息其他收件人。
 - Agent 过程的 Run stage 展示 AgentRun 状态、Delivery 收件人与证据摘要；公共正文仍在消息区直接
@@ -289,8 +307,8 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
   children 的展开状态，主行自身通过 `aria-expanded / aria-controls` 表达状态，不显示独立折叠按钮。
   三点菜单和 `＋` 是右侧独立兄弟按钮，不触发选择或展开。快速对话同样可成为当前项目但不显示
   Project 菜单。
-- 当前项目文件夹不使用稳定底色，只保留语义与轻量文字状态；当前打开 Camp 使用稳定灰色底、
-  左侧品牌标记和字重表达更强选中态，不使用蓝色底。点击 Project/快速
+- 当前项目文件夹使用稳定 `--surface-selected` 瓷灰底和现有文字语义；当前打开 Camp 使用
+  `--surface-muted` 灰色底、左侧 Steel 标记和字重表达更强选中态，不使用高饱和蓝色底。点击 Project/快速
   对话后的 `＋` 只把对应项目作为本次创建目标；取消 Dialog 不改变当前项目，创建成功并进入
   Camp 后才由该 Camp 更新当前项目。
 - 从“项目”标题 `＋` 成功一键创建到新目录时，空 Pending Camp 仍不进入 Navigation；Renderer
@@ -327,7 +345,7 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 - 原型中落地页输入后直接“发送”、双击导航才打开 Dialog 等演示事件不进入产品。
 - Quick Chat 页面不再叠加通用 AppHeader；App Shell 右侧第一行叠加一条
   不改变内容起始位置的 50px 隐形窗口拖拽栏。页面继续使用居中的品牌舞台：
-  `ARCTIC DAWN · QUICK CHAT`、标题“在晨光里，开始下一段协作”及简短说明。
+  `QUICK CHAT`、标题“开始下一段协作”及简短说明；不在产品文案中继续显示设计系统代号。
 - “继续未完成的事”最多显示 Navigation Read Side 全局最近 5 个 Camp，并保留
   `loading / unread_completed / none` 等已有 marker 与相对时间。这个标题是恢复工作
   的产品文案，不新增 `unfinished` 领域状态，也不从 Task 或消息正文猜测是否完成。
@@ -353,21 +371,23 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 
 - Camp 主区使用 `50px Header + minmax(0, 1fr) 阅读区 + 审批停靠区 + Composer`。
   阅读列宽为 `min(790px, 可用宽度 - 54px)`，消息正文最大 690px；窄窗口只减少
-  两侧留白，不改变信息顺序。
-- 会话阅读区与输入停靠区使用白色 `--conversation-surface`。用户消息继续使用
-  `--brand-soft` 淡靛蓝表面，Agent 最终正文继续直接显示在白色阅读背景上。
+  两侧留白，不改变信息顺序；`min-width: 1800px` 时 Composer 单独扩展至
+  `min(1040px, 100%)`，不再受窄阅读列限制。
+- 会话阅读区与输入停靠区使用白色 `--conversation-surface`。用户消息使用
+  `--brand-soft` 淡 Steel 表面，所有 Agent 最终正文直接显示在同一白色开放阅读背景上。
 - 主阅读流使用同向左对齐布局。用户消息、Agent 消息和 A2A 消息按持久顺序连续
   排列，以头像、显示名称、时间及消息表面共同表达身份与类型。
-- 用户消息使用弱 `brand-soft` 表面；Agent 最终正文保持开放阅读表面。队员身份色
-  只点缀头像和名称，不给整段消息铺身份底色。
+- 用户消息使用弱 `brand-soft` 表面；所有 Agent 最终正文保持同一开放阅读表面。队员身份色
+  只点缀头像和名称，不按角色给整段消息铺不同底色。
 - 用户消息为精确纯文本；Agent 最终回复和 Runtime 公开叙述使用安全 GFM，禁止
   raw HTML、脚本、危险 URL 和远程嵌入。Tool/文件/命令输出只走结构化证据组件。
 - 每条用户和 Agent 正文支持浏览器原生文本选择；鼠标在正文上按下并拖动可选中
   任意片段，系统复制快捷键只复制当前选区。每条消息另提供键盘可达的整条复制
   操作，入口仅在消息表面悬停或聚焦时显示；复制使用当前显示名称，不暴露内部
   handle、Inbox ID、AgentRun ID 或路由标识。
-- 日期边界使用横向分隔线。删除 Meridian 的点状竖向时间轨、附着节点及 EXEC
-  菱形节点，不提供旧节点体系兼容样式。
+- 日期边界使用权威消息时间戳本地化出的横向分隔线；Header 的“第 N 天”只由 Camp 创建时间
+  纯函数派生。不得补造“今天 · 发布准备”等无法从生产 Read Side 获得的阶段字段。删除 Meridian
+  的点状竖向时间轨、附着节点及 EXEC 菱形节点，不提供旧节点体系兼容样式。
 - Task 在创建时间位置投影唯一实时卡片；后续标题、负责人和状态变化只更新原卡，
   不追加 Task 消息。其他非审批结构化边界内容继续出现在真实发生位置。Approval
   不进入消息区或执行过程。
@@ -423,7 +443,7 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 ##### 不得回退的交互合同
 
 “飞书式”只描述紧凑、可识别、可直接查看身份信息的行内交互语法。颜色使用本设计的
-`--mention-ink` / `--mention-ink-hover` 语义 Token，Focus 继续使用 Arctic Dawn Token。
+`--mention-ink` / `--mention-ink-hover` 语义 Token，Focus 继续使用当前 Steel Token。
 以下基线来自用户提供的 `rovai-mention-popover-prototype-v2`，并于 2026-08-06 再次确认、
 纳入 `pnpm accept:structured-mentions-ui`：
 
@@ -574,8 +594,8 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   原结构，不新增页面或第二套发送入口。Pending 空草稿复用同一消息区与 Composer，但激活前隐藏
   Inspector 与配置 mutation，文案为“当前只是一份草稿”；它是 ADR-0145 的 Core 领域状态，不是
   Renderer 第二真源。
-- Active 内容包含轻量 Arctic Dawn 星与地平线图形、`ARCTIC DAWN · NEW CAMP`、标题
-  “开始这段协作”和简短说明。Pending 使用“新对话草稿 / 开始一段新对话”，并明确输入后自动
+- Active 内容包含轻量星与地平线图形、`新对话`、标题“开始这段协作”和简短说明，不显示旧
+  Arctic Dawn 设计代号。Pending 使用“新对话草稿 / 开始一段新对话”，并明确输入后自动
   保留、发送第一条消息才正式创建。图形只使用现有 Token/SVG，不加载外部图片。
 - 当前协作配置摘要从当前事实计算：Quick Chat/Project 展示名、Default Lead、在队的队员数和
   Agent 运行时就绪摘要。缺失、部分就绪或未就绪必须使用真实文案，不能补造 Ready。
@@ -607,7 +627,8 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   原因显示为 AgentRun 失败或恢复入口。
 - Composer 随内容自动增高到有界最大值，超过后内部滚动；发送、停止、正在停止、
   解析中和不可提交状态保持相同布局，避免按钮跳动。
-- 不保留两套提交快捷键。可见快捷键提示只显示 `Enter`。
+- 不保留两套提交快捷键。可见快捷键提示只显示 `Enter`，并作为紧凑 keycap 紧邻发送按钮；
+  不得悬在输入框左侧、单独占行或制造第二个提交入口。
 
 ### Camp 右侧详情栏（Inspector）
 
@@ -676,6 +697,10 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 - 选中队员时的详情 Header 显示 50px 圆形 icon、Member Name、Team Role、
   Presence 与 Runtime 状态，右侧保留“编辑身份”和真实操作菜单；未选中时
   的 Header 骨架不补造操作。
+- Header 中 Presence 与 Runtime 是两个独立角标：“在队”是静态 Presence 状态；
+  “{Product Runtime} 可用 →”是按钮，必须通过箭头、Pointer、Hover、Focus 和精确可访问名称
+  表达可点击性，并切换到该队员现有运行配置后聚焦 Agent 运行时选择。其他 Runtime 状态沿用
+  相同入口但显示真实状态文字；不得把 Runtime 角标做成死文案或跳转设置页。
 - 主体是填满剩余高度的双栏 Workbench，常规为 272px 名册 + 自适应详情；
   `1040–1179px` 时名册 250px。两栏独立滚动，不变成队员卡片墙，也不为普通
   Workbench 添加浮层阴影。
@@ -854,6 +879,10 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   全部设置分类的内容滚动面板统一使用实白页面底色。
   App Shell 右侧第一行叠加一条与页面表面同色的 50px 隐形拖拽栏，设置内容
   继续跨越两行，不因该拖拽栏下移。
+- 七个分类的右侧内容统一使用 Neutral Porcelain + Steel：页面顶部 3px Steel 结构边、前 220px
+  低强度 Steel wash、共享页头 2px Steel 混合下划线、标题左侧 2px Steel 轨，section heading
+  使用低频 Steel 标记。选中的启动位置、默认队员和同类稳定选项使用淡 Steel 背景与左侧 inset
+  轨；其余内容继续以分隔线和单一表面组织，不能退化为灰色卡片墙或把全部控件铺满 Steel。
 - 设置侧栏不显示健康 footer；“诊断与修复”仍是设置分类并读取 Core 诊断 Read Model。
 - 设置页不增加“上下文投递”或“记忆”分区；公共消息摘要模型不再有任何配置表面，记忆仍是
   一级页面。
@@ -917,9 +946,10 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 - 页面只有上下两区。上区“添加 Skill”使用“本地文件夹 / GitHub”两个 Tab；本地选择
   包含 `SKILL.md` 的完整目录，GitHub 接受仓库或带 ref/子目录的链接。两者都先检查
   候选，再确认写入受管 Library；不显示项目投递状态或 Camp 关联状态。
-- 下区“已安装 Skills”提供名称/简介搜索和自适应豆腐块网格。每张卡显示名称、说明、
-  `Rovai 内置 / 用户导入`、启停 Switch、当前生效组 Chip、分组多选入口，以及承载
-  Revision、安装/更新时间、文件数、大小、来源和删除操作的更多菜单。
+- 下区“已安装 Skills”提供名称/简介搜索和开放列表行。每行以 Steel 标记、名称、说明、
+  `Rovai 内置 / 用户导入`、真实 Revision 与生效组摘要建立阅读层级，右侧保留状态、
+  启停 Switch、分组多选入口，以及承载安装/更新时间、文件数、大小、来源和删除操作的更多菜单；
+  列表只使用行间分隔，不恢复卡片墙。
 - 关闭 Skill 只弱化说明区并暂停全部 Rovai 投递，不能禁用生效组入口。关闭时仍可
   增删分组，已有选择必须保留；重新启用后按保存的分组恢复。删除中的 Imported Skill
   显示等待现有 AgentRun 释放，内置 Skill 不显示删除。
@@ -979,9 +1009,9 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 
 - 页面使用三个可选择卡：“跟随系统 / 日间 / 夜间”，不再显示
   “晨线 / 夜航 / Meridian Day / Meridian Night”。
-- 顶部同时显示“当前显示 · 日间”和真实保存的偏好，避免用户选择 Night 后误以为
+- 顶部同时显示“当前 · 瓷灰日间”和真实保存的偏好，避免用户选择 Night 后误以为
   Night 已实现。
-- `日间`展示 Arctic Dawn Day miniature；`跟随系统`说明 v0.24 暂时显示 Day；
+- `日间`显示 `Porcelain Day` 与冷瓷灰/Steel 说明；`跟随系统`说明当前统一使用瓷灰日间；
   `夜间`显示“视觉待设计”而不是伪造暗色 miniature，并说明当前仍路由到 Day。
 - 切换原子保存 `ThemePreference`，不做全应用颜色渐变，不移动焦点，也不改变
   Camp、Tab、草稿、滚动、列表选择或 Dialog。首次绘制前解析，不能先闪 Meridian
@@ -1015,6 +1045,9 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   Header/Footer 固定，Body 独立滚动。
 - Header 为 `NEW CAMP`、标题“创建新对话”和说明
   “确定这段对话的工作环境与队员”；关闭按钮有可访问名称。
+- Dialog 采用 Porcelain raised surface 与 3px Steel 顶边；字段、Git 状态和错误继续使用各自
+  语义边界。工作目录选择必须保留已知目录、Picker、安全校验和动态 Git 能力，不得缩成一个
+  无状态路径输入框。
 - Dialog 始终按下列顺序显示：
 
 1. **工作目录 · 可选**：默认“快速对话”，也可选择已知 canonical Project 路径或
@@ -1029,6 +1062,8 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 
 - Footer 摘要只显示 Quick Chat/目录展示名、队员数与 Lead，右侧
   “取消 / 创建”。提交期间锁定会改变 Draft 的控件并防止重复创建。
+- 不在 Body 追加原型式“创建摘要”区，也不在 Footer 上方显示黄色静态说明；现有 Footer 的
+  单行创建上下文不是第二份 Draft 真源，不能复制名称、工作目录详情或免责声明。
 - Core 原子接受后才关闭 Dialog、刷新 Navigation、进入耐久 Camp 并聚焦 Composer；
   Dialog 固定创建 Active，此时没有消息、AgentRun 或预建 Conversation 也合法。
 - 失败保持 Dialog、目录、队员、Lead、名称、滚动和焦点。Core 刷新候选后不得静默
@@ -1051,6 +1086,16 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 - `recovering` 和 Unsettled External Effect 使用明确对象、最后已知状态、不确定性
   和下一步；不得声称停止等于外部副作用已回滚。
 
+### Porcelain / Steel 页面与浮层
+
+- 设置、队员、记忆使用同一 Porcelain 主表面；队员与设置页面可在顶部使用低强度 Steel wash，
+  记忆保持证据友好的近白内容区，并以 Steel 顶边、标题左轨和 Tab/选中态建立层级。
+- 通用 Dialog、New Conversation、Notification Drawer、Memory Proposal Drawer 使用 3px Steel
+  顶边和 `--line-strong` 外框。安全风险浮层可以用 `attention` 覆盖顶边；确认删除、错误和恢复
+  的正文/按钮继续使用 danger/attention 语义色，不能因统一品牌而失真。
+- Steel 是结构和可操作性的低频强调，不是页面底色。普通正文、证据、Tool 输出、Diff、Memory
+  正文和大面积列表保持中性；状态色和身份色不得被 Steel 重映射。
+
 ### 键盘与焦点
 
 - 最低目标 WCAG 2.2 AA：普通文字 `4.5:1`，控件边界、焦点和非文字状态 `3:1`。
@@ -1068,7 +1113,7 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 
 - 动效限于 120–180ms opacity 或 2–4px 位移；遵循 `prefers-reduced-motion`。
   禁止光晕、脉冲、粒子、视差、大幅弹簧和全局 `transition: all`。
-- 几何基准为 `1440×920`，最小窗口为 `1040×700`。应用范围内不得出现整页横向
+- 几何基准为 `1440×920`，2K 基准为 `2560×1440`，最小窗口为 `1040×700`。应用范围内不得出现整页横向
   滚动或遮挡主要操作。
 - Electron Main 始终自动保存 normal window bounds。重新创建窗口时把保存尺寸与位置 clamp
   到仍存在的 display work area；原外接显示器移除或状态损坏时，在 primary display 使用受约束的
@@ -1079,11 +1124,12 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   310px；队员名册在窄区间为 250px；Memory 双栏最低 310/390；设置内容不再为
   第二列导航预留宽度。
 - `1040×700` 下队员详情内部、外观卡片和健康摘要允许从多列变单列/两列；区域顺序
-  不变。200% Zoom 与 reduced motion 仍须验证 Dialog、审批停靠区、菜单和焦点可达。
+  不变。`2560×1440` 下 Composer 目标宽度为 1040px；200% Zoom 与 reduced motion 仍须验证
+  Dialog、审批停靠区、菜单和焦点可达。
 
 ## 实施迁移边界
 
-- Arctic Dawn 在现有 React 19、Radix、CSS Variables 和 Renderer 测试结构中重建；
+- Neutral Porcelain + Steel 在现有 React 19、Radix、CSS Variables 和 Renderer 测试结构中重建；
   不新增 CSS 框架、CSS-in-JS、字体、图标库、动画库或状态管理库。
 - 共享色值只在 Token 层定义；组件不得新增散落的主题专属十六进制或按
   `theme === ...` 分支硬编码颜色。
@@ -1098,6 +1144,8 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   CampTurn Stop 只保留 Composer 发送位置，Approval Dock 继续位于 Composer 正上方。具体边界见
   [Run Process Detail Surface v2](../contracts/run-process-detail-surface-v2.md)。Message Delivery、
   Public A2A 和 Context Profile 的领域语义由对应 ADR/Contract 约束，不能在 Renderer 猜测。
+- v0.56 只替换 Day Token、结构强调和少量现有文案/布局；不得重建生产页面、复制 P2 演示 DOM、
+  新增角色消息底色、伪造日期阶段、简化 New Conversation 功能或改变 v0.55 会话边界。
 - 删除 `rovai.rail-expanded` 等旧纯 UI 偏好，不迁移、不双读。Pin 使用新的
   `navigation.json`；ThemePreference 按已确认合同保留但全部解析为 Day。
 - v0.49 新增 Main-owned `general-preferences.json` 与 `restorable-location.json`，继续复用并增强

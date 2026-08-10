@@ -468,8 +468,8 @@ export function QuickChatWorkspace({
             <path d="M8 52 Q36 35 64 52" stroke="var(--brand)" strokeWidth="2" fill="none" strokeLinecap="round" />
             <circle cx="36" cy="46.5" r="3" fill="var(--ember)" />
           </svg>
-          <p className="eyebrow quick-chat-eyebrow">Arctic Dawn · Quick Chat</p>
-          <h2>在晨光里，开始下一段协作</h2>
+          <p className="eyebrow quick-chat-eyebrow">Quick Chat</p>
+          <h2>开始下一段协作</h2>
           <p className="quick-chat-subline">创建一个对话，选好队员与工作区，再写下这次协作的目标。</p>
           {recentCamps.length > 0 && (
             <div className="quick-chat-continue" aria-label="继续未完成的事">
@@ -1161,6 +1161,9 @@ export function CampWorkspace({
                     ? runById.get(campMessage.sourceAgentRunId) ?? null
                     : null
                   const displayBody = campMessage.body
+                  const campMessageDeliveries = snapshot.messageDeliveries.filter((delivery) =>
+                    delivery.messageId === campMessage.id
+                  )
                   items.push(
                     <article
                       className={`timeline-node conversation-bubble ${campMessage.authorType}`}
@@ -1193,6 +1196,7 @@ export function CampWorkspace({
                               </div>
                               <MessageSurface
                                 copied={copiedMessageId === campMessage.id}
+                                hasDelivery={campMessageDeliveries.length > 0}
                                 onCopy={() => copyMessage(campMessage.id, displayBody)}
                               >
                                 {campMessage.authorType === 'agent'
@@ -1233,10 +1237,9 @@ export function CampWorkspace({
                                         )}
                               </MessageSurface>
                               <CampMessageDeliveryFooter
-                                deliveries={snapshot.messageDeliveries.filter((delivery) =>
-                                  delivery.messageId === campMessage.id
-                                )}
+                                deliveries={campMessageDeliveries}
                                 memberById={memberById}
+                                onActivateMemberMention={openMemberMentionPopover}
                               />
                             </div>
                           )
@@ -1897,10 +1900,16 @@ function AgentRunDeliveryRecipients({
 
 function CampMessageDeliveryFooter({
   deliveries,
-  memberById
+  memberById,
+  onActivateMemberMention
 }: {
   deliveries: MessageDeliveryView[]
   memberById: Map<string, CampSnapshot['members'][number]>
+  onActivateMemberMention(
+    agentId: string,
+    trigger: HTMLElement,
+    focusPanel: boolean
+  ): void
 }): JSX.Element | null {
   if (deliveries.length === 0) return null
   const ordered = deliveries.slice().sort((left, right) =>
@@ -1916,15 +1925,45 @@ function CampMessageDeliveryFooter({
       style={{ '--delivery-accent': deliveryAccent } as CSSProperties}
     >
       <span className="message-delivery-handoff-rail" aria-hidden="true" />
-      <span className="message-delivery-label">发送给：</span>
+      <span className="message-delivery-label">发送给</span>
       <span className="message-delivery-recipients">
         {ordered.map((delivery, index) => {
           const recipient = memberById.get(delivery.recipientAgentId)
+          const available = Boolean(
+            recipient
+            && recipient.membershipStatus === 'active'
+            && recipient.profilePresence !== 'removed'
+          )
+          const displayName = recipient?.displayName ?? delivery.recipientAgentId
+          const showMemberProfile = (
+            trigger: HTMLElement,
+            respectTextSelection: boolean,
+            focusPanel: boolean
+          ): void => {
+            if (!available) return
+            if (respectTextSelection && window.getSelection()?.toString()) return
+            onActivateMemberMention(delivery.recipientAgentId, trigger, focusPanel)
+          }
           return (
             <span className="message-delivery-recipient-group" key={delivery.id}>
               {index > 0 && <span className="message-delivery-recipient-separator" aria-hidden="true">、</span>}
-              <span className="message-delivery-recipient-name">
-                {recipient?.displayName ?? delivery.recipientAgentId}
+              <span
+                className={`message-delivery-recipient-name message-mention-token${available ? ' is-interactive' : ' is-unavailable'}`}
+                data-agent-id={delivery.recipientAgentId}
+                role={available ? 'button' : undefined}
+                tabIndex={available ? 0 : undefined}
+                aria-label={available ? `查看${displayName}的基础信息` : undefined}
+                aria-haspopup={available ? 'dialog' : undefined}
+                aria-expanded={available ? false : undefined}
+                title={available ? `查看${displayName}的基础信息` : '该队员已不可用'}
+                onClick={(event) => showMemberProfile(event.currentTarget, true, false)}
+                onKeyDown={(event) => {
+                  if ((event.key !== 'Enter' && event.key !== ' ') || !available) return
+                  event.preventDefault()
+                  showMemberProfile(event.currentTarget, false, true)
+                }}
+              >
+                @{displayName}
               </span>
             </span>
           )
@@ -2381,7 +2420,7 @@ function EmptyCampWelcome({
         <path d="M14 54h60" fill="none" stroke="var(--line-strong)" strokeLinecap="round" />
         <circle cx="69" cy="25" r="3" fill="var(--ember)" />
       </svg>
-      <p className="empty-camp-eyebrow">{snapshot.camp.activationState === 'pending' ? '新对话草稿' : 'Arctic Dawn · New Camp'}</p>
+      <p className="empty-camp-eyebrow">{snapshot.camp.activationState === 'pending' ? '新对话草稿' : '新对话'}</p>
       <h2 id="empty-camp-title">{snapshot.camp.activationState === 'pending' ? '开始一段新对话' : '开始这段协作'}</h2>
       <p className="empty-camp-description">
         {snapshot.camp.activationState === 'pending'
@@ -2443,15 +2482,17 @@ function StopOutcomeEvent({
 
 function MessageSurface({
   copied,
+  hasDelivery,
   onCopy,
   children
 }: {
   copied: boolean
+  hasDelivery: boolean
   onCopy(): void
   children: React.ReactNode
 }): JSX.Element {
   return (
-    <div className={`message-surface ${copied ? 'copied' : ''}`.trim()}>
+    <div className={`message-surface${hasDelivery ? ' has-delivery' : ''}${copied ? ' copied' : ''}`}>
       {children}
       <MessageCopyButton copied={copied} onCopy={onCopy} />
       <span className="copy-feedback" role="status" aria-live="polite">

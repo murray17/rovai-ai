@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.55
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -14,6 +14,8 @@ last_updated: 2026-08-11
 > Agent 的多个 `AgentRun`，在不合并或隐藏单次执行证据的前提下，提供连续的只读执行过程。
 >
 > 前置版本：[v0.54 Lead-Owned Task 与 Self Active Task Context](../v0.54/README.md)
+>
+> 后续版本：[v0.56 Neutral Porcelain + Steel Renderer](../v0.56/README.md)
 
 ## 版本目标
 

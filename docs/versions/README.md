@@ -1,8 +1,8 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.55
-last_updated: 2026-08-10
+current_version: v0.56
+last_updated: 2026-08-11
 ---
 
 # Rovai-ai 版本记录
@@ -106,4 +106,5 @@ last_updated: 2026-08-10
 | v0.52 | `historical` | Dynamic Context 精确恢复、有界 omission Evidence 与代码证据优先的 Agent 仓库分析 Skill | [v0.52/README.md](v0.52/README.md) |
 | v0.53 | `historical` | Versioned Benchmark Protocol v3、逐轴比较资格与 v0.52 当前合同离线回归 | [v0.53/README.md](v0.53/README.md) |
 | v0.54 | `historical` | Lead-owned durable Task、Assignee 执行态与 self active Task context | [v0.54/README.md](v0.54/README.md) |
-| v0.55 | `current` | Agent 级连续执行过程、按需详情与 Inspector 收敛 | [v0.55/README.md](v0.55/README.md) |
+| v0.55 | `historical` | Agent 级连续执行过程、按需详情与 Inspector 收敛 | [v0.55/README.md](v0.55/README.md) |
+| v0.56 | `current` | Neutral Porcelain + Steel Renderer 与生产功能保真迁移 | [v0.56/README.md](v0.56/README.md) |

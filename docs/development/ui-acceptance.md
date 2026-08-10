@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: desktop-ui-acceptance-infrastructure
-last_updated: 2026-08-06
+last_updated: 2026-08-11
 ---
 
 # 桌面 UI 验收与隔离数据
@@ -73,15 +73,17 @@ pnpm accept:runtime-activity-ui
 pnpm accept:diagnostics-ui
 ```
 
-它们分别覆盖长期记忆、成员头像、成员生命周期、应用内通知、统一侧栏、结构化提及和
+它们分别覆盖长期记忆、队员头像、队员生命周期、应用内通知、统一侧栏、结构化提及和
 Task 单卡原地更新、九 Runtime Canonical Activity 工具名称与 Agent 级连续执行过程、A2A 消息
 Scheme C 转交 footer，以及诊断中心双尺寸、只读自检、MCP 权限修复复检与 v5 脱敏的桌面回归。
+当前 Neutral Porcelain + Steel 视觉迁移还必须按当前版本实施计划覆盖 2K Composer、七个设置页、
+队员半身照与 Runtime 入口、记忆 Workbench、New Conversation 和各类 Dialog/Drawer。
 具体 Schema/Migration 编号属于测试 fixture 和版本证据，不是本文的常青要求。
 
 ### Agent 执行过程门禁
 
 Renderer 的权威行为见 [Run Process Detail Surface v2](../contracts/run-process-detail-surface-v2.md) 与
-[Arctic Dawn：Camp 执行过程](../ui/arctic-dawn.md#camp-执行过程)。修改 AgentRun 分组、执行台、Drawer、
+[当前 UI 详规：Camp 执行过程](../ui/arctic-dawn.md#camp-执行过程)。修改 AgentRun 分组、执行台、Drawer、
 Task Related execution、停止结果或 Inspector 页签后，至少运行：
 
 ```bash
@@ -100,13 +102,15 @@ pnpm accept:runtime-activity-ui
 - Inspector 仅有“任务 / 上下文投递 / 审批”，不存在 Activity/Audit Tab、旧 route/state 或另一条过程
   时间线；Task/停止结果入口按 Agent 打开过程，顶栏不存在执行入口；
 - Drawer 不提供 Agent 或 Run 级 Stop/Cancel/Retry；唯一 CampTurn Stop、Approval Dock 与 Composer 在
-  `1440×920`、`1040×700`、200% zoom 和 reduced motion 下均可见、可键盘到达且不互相遮挡；
+  `2560×1440`、`1440×920`、`1040×700`、200% zoom 和 reduced motion 下均可见、可键盘到达且不互相遮挡；
+- `2560×1440` 下 `.composer-box` 接近 1040px，`Enter` keycap 位于发送按钮紧邻左侧；所有 Agent
+  最终正文使用同一开放阅读表面，身份色只进入头像、名称或身份点；
 - Canonical Activity 未报告工具时仍不补造 Tool 行；同一 Runtime 真实报告的 Tool 名称和 source 继续
   与 Runtime evidence 一致。
 
 ### A2A 消息 footer 门禁
 
-Renderer 的权威行为见 [Arctic Dawn：A2A 会话消息](../ui/arctic-dawn.md#a2a-会话消息)。修改
+Renderer 的权威行为见[当前 UI 详规：A2A 会话消息](../ui/arctic-dawn.md#a2a-会话消息)。修改
 Agent 公共正文头部、消息 Delivery footer 或相关 CSS 后，至少运行：
 
 ```bash
@@ -116,16 +120,21 @@ pnpm accept:runtime-activity-ui
 
 受控夹具必须证明：消息正文内不存在 `.message-run-origin`；消息下方不存在
 `.delivery-status-list.is-compact`；双收件人按冻结顺序进入唯一 `.message-delivery-footer`；footer
-不显示“已送达”“处理中”“排队中”“投递失败”、`!` 或任何 Delivery 状态。footer 保持透明、零圆角，
-短转交折线使用 1px Arctic Dawn 结构线，且 footer 边界与正文边界的垂直间距不超过 4px，不能形成
-空白行。验收还必须切换到 1040×700，证明 document、timeline 和 footer 无横向溢出且 footer 留在
-时间线可视区内。Run stage 也不得重新显示这些 Delivery 状态标签；底层 Delivery、失败码与恢复事实
-继续保留在原有 Core Read Side。
+可见文案为“发送给@队员”，不保留冒号，也不显示“已送达”“处理中”“排队中”“投递失败”、`!`
+或任何 Delivery 状态。每个收件人都带 `@` 并使用飞书式蓝色 Mention；仍可用身份具有
+`role="button"`、`aria-haspopup="dialog"`、Click/Enter/Space 人物信息卡与拖选不误触边界。
+footer 保持透明、零圆角，短转交折线使用 1px Porcelain/Steel 结构线，且 footer 边界与最后一个
+正文内容元素的垂直间距不超过 4px；验收必须同时证明透明复制入口不占据文档流，且键盘聚焦后
+可见、不覆盖收件人，不能只测
+包含隐藏控件的外层 surface。验收还必须切换到 1040×700，证明 document、timeline
+和 footer 无横向溢出且 footer 留在时间线可视区内；2K 场景还须证明 Composer 扩展不改变 footer
+阅读宽度或复制按钮定位。Run stage 也不得重新显示这些 Delivery 状态标签；
+底层 Delivery、失败码与恢复事实继续保留在原有 Core Read Side。
 
 ### 结构化 Mention 门禁
 
 Renderer 的权威行为见
-[Arctic Dawn：不得回退的交互合同](../ui/arctic-dawn.md#不得回退的交互合同)。修改会话
+[当前 UI 详规：不得回退的交互合同](../ui/arctic-dawn.md#不得回退的交互合同)。修改会话
 Mention 的结构、样式、点击、键盘或复制行为后，至少运行：
 
 ```bash

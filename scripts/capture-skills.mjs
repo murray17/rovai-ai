@@ -4,6 +4,9 @@ import { spawn } from 'node:child_process'
 
 const appPath = process.argv[2]
 const outputPath = process.argv[3] ?? '/tmp/rovai-skills.png'
+const cleanOutputPath = outputPath.endsWith('.png')
+  ? `${outputPath.slice(0, -'.png'.length)}-clean.png`
+  : `${outputPath}-clean.png`
 const userDataDir = process.env.ROVAI_CAPTURE_USER_DATA_DIR
 const port = Number(process.env.ROVAI_DEBUG_PORT ?? 9443)
 const width = Number(process.env.ROVAI_CAPTURE_WIDTH ?? 1440)
@@ -37,6 +40,7 @@ try {
     mobile: false
   })
   await waitForExpression(cdp, `Boolean(document.querySelector('.unified-sidebar-footer button[aria-label="设置"]'))`, 45_000)
+  await waitForExpression(cdp, `document.querySelector('.startup-gate') === null`, 45_000)
   await cdp.send('Runtime.evaluate', {
     expression: `window.rovai.appearance.setPreference(${JSON.stringify(theme)})`,
     awaitPromise: true,
@@ -67,6 +71,9 @@ try {
     throw new Error(`Skill settings did not load the five bundled Skills: ${JSON.stringify(initialSkillState)}`)
   }
 
+  await waitForEvaluation(cdp, `(async () => (
+    await window.rovai.request('runtime.installations.list')
+  ).some((candidate) => candidate.adapterKind === 'codex-cli' && candidate.memberRuntimeDefaults))()`, 45_000)
   const runtimeConfiguration = await evaluate(cdp, `(async () => {
     const profile = await window.rovai.request('members.get', { agentId: 'agent_1' })
     const installation = (await window.rovai.request('runtime.installations.list'))
@@ -126,7 +133,7 @@ try {
       || result.viewport.height !== height
       || result.horizontalOverflow
       || result.panelOverflow
-      || JSON.stringify(result.subnav) !== JSON.stringify(['Skill', 'MCP', 'Agent 运行时', '外观', '通知', '诊断'])
+      || JSON.stringify(result.subnav) !== JSON.stringify(['通用', '外观', '通知', 'Skill', 'MCP', 'Agent 运行时', '诊断与修复'])
       || result.activeSection !== 'Skill'
       || result.bundledCount !== 5
       || result.enabledBundledCount !== 5
@@ -169,28 +176,30 @@ try {
       codexMemberName: codex?.querySelector('.skill-member-line')?.textContent?.trim(),
       realAvatarRendered: Boolean(avatar?.querySelector('.member-avatar-image')),
       legacyLetterAvatarVisible: Boolean(codex?.querySelector('.skill-member')),
-      verifiedCount: options.filter((option) => option.textContent?.includes('已验证')).length,
-      unverifiedCount: options.filter((option) => option.textContent?.includes('暂未验证')).length
+      verifiedCount: options.filter((option) => option.querySelector('.skill-group-name-line > i.verified')?.textContent === '已验证').length,
+      unverifiedCount: options.filter((option) => option.querySelector('.skill-group-name-line > i.unverified')?.textContent === '暂未验证').length
     }
   })()`)
   if (groupMenu.groupCount !== 9
       || !groupMenu.codexMemberName?.includes('小狐狸')
       || !groupMenu.realAvatarRendered
       || groupMenu.legacyLetterAvatarVisible
-      || groupMenu.verifiedCount === 0
-      || groupMenu.unverifiedCount === 0) {
+      || groupMenu.verifiedCount !== 9
+      || groupMenu.unverifiedCount !== 0) {
     throw new Error(`Skill group menu acceptance failed: ${JSON.stringify(groupMenu)}`)
   }
 
   await capture(cdp, outputPath)
   await pressEscape(cdp)
+  await waitForExpression(cdp, `!document.querySelector('.skill-group-options')`, 5_000)
+  await capture(cdp, cleanOutputPath)
 
   await openSection(cdp, '外观')
   await waitForExpression(cdp, `Boolean(document.querySelector('.appearance-settings'))`, 5_000)
   const appearanceReady = await evaluate(cdp, `Boolean(document.querySelector('.appearance-settings'))`)
-  await openSection(cdp, '诊断')
-  await waitForExpression(cdp, `Boolean(document.querySelector('.diagnostics-card'))`, 5_000)
-  const diagnosticsReady = await evaluate(cdp, `Boolean(document.querySelector('.diagnostics-card'))`)
+  await openSection(cdp, '诊断与修复')
+  await waitForExpression(cdp, `Boolean(document.querySelector('.diagnostics-center'))`, 5_000)
+  const diagnosticsReady = await evaluate(cdp, `Boolean(document.querySelector('.diagnostics-center'))`)
   await openSection(cdp, 'Skill')
   await waitForExpression(cdp, `Boolean(document.querySelector('.skill-settings'))`, 5_000)
   const navigation = await evaluate(cdp, `(() => {
@@ -211,7 +220,7 @@ try {
   }
 
   cdp.close()
-  console.log(JSON.stringify({ ok: true, ...result, moreMenu, groupMenu, navigation, outputPath }, null, 2))
+  console.log(JSON.stringify({ ok: true, ...result, moreMenu, groupMenu, navigation, outputPath, cleanOutputPath }, null, 2))
 } finally {
   app.kill('SIGTERM')
   await Promise.race([
@@ -227,6 +236,10 @@ async function evaluate(cdp, expression) {
     awaitPromise: true,
     returnByValue: true
   })
+  if (response.result?.exceptionDetails) {
+    throw new Error(response.result.exceptionDetails.exception?.description
+      ?? response.result.exceptionDetails.text)
+  }
   return response.result?.result?.value
 }
 
@@ -287,6 +300,19 @@ async function waitForExpression(cdp, expression, timeoutMs) {
     await wait(100)
   }
   throw new Error(`Expression did not become true within ${timeoutMs}ms: ${expression}`)
+}
+
+async function waitForEvaluation(cdp, expression, timeoutMs) {
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      if (await evaluate(cdp, expression)) return
+    } catch {
+      // The packaged Core may still be publishing its first Runtime snapshot.
+    }
+    await wait(100)
+  }
+  throw new Error(`Evaluation did not become true within ${timeoutMs}ms: ${expression}`)
 }
 
 async function waitForTarget(debugPort) {

@@ -2,18 +2,23 @@
 document_type: ui-style-index
 authority: renderer-ui
 status: accepted
-design_direction: arctic-dawn-v3
+design_direction: neutral-porcelain-steel
 target_version: cross-version
 implementation_status: in_progress
-last_updated: 2026-08-10
+last_updated: 2026-08-11
 ---
 
 # Rovai-ai UI 规范
 
-本文是 Renderer UI/UX 工作的跨版本稳定入口。当前全局视觉与交互详规是
-[Arctic Dawn V3](arctic-dawn.md)；当前交付版本与实施状态始终从
-[文档导航](../README.md)进入。历史版本只解释当时范围，不能覆盖本文或 Arctic Dawn
-中的当前合同。
+本文是 Renderer UI/UX 工作的跨版本稳定入口。当前全局视觉方向是 Neutral Porcelain +
+Steel；完整信息架构与交互详规继续由历史稳定路径
+[当前 UI 详规](arctic-dawn.md)承载。当前交付版本与实施状态始终从
+[文档导航](../README.md)进入。历史版本只解释当时范围，不能覆盖本文或当前详规中的合同。
+
+v0.56 把一次性 P2 HTML 中确认的瓷灰表面与 Steel 强调迁移进生产 Renderer，同时保留
+现有功能、数据、交互和安全边界。P2 不是新的产品模型：Project、Camp、Agent 级执行过程、
+New Conversation、七个设置分类、队员、记忆与各类浮层继续使用原生产组件和 Read Side。
+实现与验收状态见[v0.56 实施计划](../versions/v0.56/implementation-plan.md)。
 
 Arctic Dawn 设计文档已经冻结；用户已于 2026-07-30 明确授权生产实现。首轮范围及
 随后确认的导航、设置覆盖与空 Camp 欢迎状态均已通过本地自动化与打包 App 验收；
@@ -27,7 +32,7 @@ Renderer 合同；生产实现已重新打包，并通过 `pnpm accept:structure
 证据记录在对应当前版本实施计划。
 
 v0.27 的队员身份 HTML 原型只提供六字段命名、基础/高级分组与排列参考；颜色、
-组件、间距、响应式行为和整体视觉继续以 Arctic Dawn V3 为准，不能从原型反向覆盖
+组件、间距、响应式行为和整体视觉继续以当前 Neutral Porcelain + Steel 详规为准，不能从原型反向覆盖
 现有设计系统。
 
 v0.28 在同一 Arctic Dawn App Shell 中增加持久应用内通知入口、右侧通知抽屉、未读
@@ -37,16 +42,16 @@ v0.28 在同一 Arctic Dawn App Shell 中增加持久应用内通知入口、右
 
 v0.29 队员工作台信息架构已经形成共同理解、冻结并完成生产实施。版本级变更以
 [v0.29 生产设计](../versions/v0.29/production-design.md)为准；本文未被替代的部分继续遵守
-Arctic Dawn V3。实施与验收状态见[v0.29 实施计划](../versions/v0.29/implementation-plan.md)。
+当前 UI 详规。实施与验收状态见[v0.29 实施计划](../versions/v0.29/implementation-plan.md)。
 
 v0.33 将 Camp 与可置顶 Project 的操作统一进三点菜单，并移除 Project 标题和“查看全部”
 中的会话数量。版本级合同见[v0.33 生产设计](../versions/v0.33/production-design.md)；它不
 改变 Pin 持久化、Navigation Read Side、Core 或 IPC。该范围的生产实施、打包 App
 与双尺寸桌面验收已完成，精确证据见版本实施计划。
 
-v0.37 以确认的 MCP v4 HTML 原型为定向输入，局部替代本文与 Arctic Dawn V3 中旧 MCP
-列表行、拆分 Stdio/HTTP 表单和自动初次扫描交互。生产页面继续使用现有设置侧栏和 Arctic
-Dawn Token，具体三段结构、队员 tofu、Server tofu 与 JSON Dialog 见
+v0.37 以确认的 MCP v4 HTML 原型为定向输入，局部替代本文与当时详规中的旧 MCP
+列表行、拆分 Stdio/HTTP 表单和自动初次扫描交互。生产页面继续使用现有设置侧栏和当前
+Porcelain/Steel Token，具体三段结构、队员 tofu、Server tofu 与 JSON Dialog 见
 [v0.37 MCP 生产设计](../versions/v0.37/production-design.md)。
 
 v0.38 将历史上“每次 Task 状态变化一张不可变边界卡”替换为“创建位置的一张实时 Task
@@ -96,14 +101,14 @@ JSON”，下方固定为三态摘要、attention-only 问题列表和四筛选�
 [ADR-0148](../adr/0148-read-only-diagnostics-and-data-minimized-export.md)。
 
 2026-08-10 用户确认 A2A 消息 Scheme C：Agent 公共正文删除“来自执行”来源条和 compact
-投递卡片，正文后只保留短折线/身份点与“发送给：队员名”轻量 footer；成功与非成功 Delivery
-状态都不在 footer 或 Run stage 重复显示。Delivery 底层事实继续属于原有 Core Read Side。该选择
-已冻结进 Arctic Dawn 的 A2A 会话消息合同，HTML 原型只保留为选型输入。
+投递卡片，正文后只保留短折线/身份点与“发送给@队员”轻量 footer；`@队员` 使用飞书式蓝色
+Mention，在身份仍可用时复用既有锚定人物信息卡。成功与非成功 Delivery 状态都不在 footer
+或 Run stage 重复显示。Delivery 底层事实继续属于原有 Core Read Side；HTML 原型只保留为选型输入。
 
 ## 权威边界
 
 1. 有效 ADR、`CONTEXT.md`、Core 合同和安全边界决定领域语义与可执行行为。
-2. [Arctic Dawn V3](arctic-dawn.md)决定 Renderer 信息架构、视觉 Token、组件层级、
+2. [当前 UI 详规](arctic-dawn.md)决定 Renderer 信息架构、Neutral Porcelain + Steel Token、组件层级、
    产品文案、交互和适配。
 3. [v0.47 生产设计](../versions/v0.47/production-design.md)决定当前 Task 卡、Inspector、
    冲突恢复和删除确认合同；它保留 [v0.38](../versions/v0.38/README.md)的唯一实时卡模型。
@@ -147,13 +152,15 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
 
 ## 当前设计摘要
 
-- v0.24 全界面使用 Arctic Dawn Day。`system | day | night` 偏好继续保存，但当前
+- v0.56 全界面使用 Neutral Porcelain + Steel Day。`system | day | night` 偏好继续保存，但当前
   三种都解析为 Day；Night 等待后续独立设计。
 - 所有一级页面常驻 270px 统一侧栏；Camp Inspector 展开时为 310px，在
   `1040–1179px` 收窄为 260px，并可从 Camp 顶栏完整隐藏或恢复。
 - 普通侧栏显示“置顶 / 项目”；Quick Chat 只在 Renderer 中作为项目列表末尾的
   文件夹式投影，底层继续是独立 `quick_chat`。侧栏品牌字标为 `Rovai AI`，无副标题。
-- Camp 与可置顶 Project 只通过三点菜单置顶或取消置顶；Camp 菜单同时承载重命名、
+- Camp 与可置顶 Project 只通过三点菜单置顶或取消置顶；Project 继续显示文件夹、项目级
+  `＋` 和唯一三点菜单，主行本身承担展开/折叠且不显示独立折叠图标。当前项目使用稳定
+  `--surface-selected` 瓷灰底色。Camp 菜单同时承载重命名、
   “复制会话 ID”和删除。复制只写入稳定会话 ID 原文；Project 标题与“查看更多 / 收起”
   不显示会话数量，快速对话不显示 Project 菜单。
 - 设置分类覆盖同一 270px 侧栏槽位，固定分为“应用 / 能力 / 支持”三组：“应用”包含
@@ -176,13 +183,16 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   不得自动打开、切换或抢焦点。打开优先定位最新 running、否则最新 non-terminal、最后最新 terminal
   Run；已打开过程保持选中直到用户关闭、切换队员或切换 Camp。
 - Agent 公共正文不显示“来自执行”来源条；A2A 消息不显示 compact 投递卡片，只在正文后使用
-  Scheme C 短转交轨迹显示“发送给：队员名”。footer 与 Run stage 都不重复投影 Delivery 状态标签；
+  Scheme C 短转交轨迹显示“发送给@队员”。所有 Agent 使用同一开放阅读表面，不按角色铺不同消息
+  底色；`@队员` 是飞书式蓝色 Mention，可用身份可打开既有人物信息卡。footer 与 Run stage 都不重复投影 Delivery 状态标签；
   Delivery 底层状态、失败码与恢复事实仍由原有 Core Read Side 负责。
 - 终态取消以每个 CampTurn 一条“你已在 {耗时} 后停止”进入会话时间线，不再永久
   挂在队员消息标题；未确认外部效果从该事件进入 Inspector。
 - 用户、队员和已交付 A2A 消息的正文支持鼠标拖选和系统复制快捷键；用户自己的
   纯文本消息不得拦截原生文本选择。整条消息的复制入口位于正文右侧，仅在悬停或
   键盘聚焦正文区域时显示；消息轨道与 Composer 在 Inspector 展开或隐藏时始终同宽、同轴。
+  `2560×1440` 等 2K 宽窗口下 Composer 扩展到 1040px；可见 `Enter` 提示紧邻发送按钮，
+  不能悬在输入框的孤立位置。
 - 命令、文件操作及其失败是处理过程内可展开的 Tool Call；每个 Task 在创建位置只投影
   一张读取当前五态文字、标题和负责人的实时卡片。Inspector list/detail 与现有 AgentRun UI
   分别承担发现、完整责任审计和执行事实，不能合并进卡片。
@@ -196,6 +206,9 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   Camp 行进入。
 - 队员页采用半身 portrait + 独立圆形 icon 的双 rendition 身份设计；编辑身份支持
   圆形取景拖拽、缩放、键盘微调与实际尺寸预览。
+- 队员 Header 的 Presence 与 Runtime 是两个角标：“在队”是静态状态，“{Runtime} 可用 →”
+  使用 Hover、Focus、箭头和可访问名称体现可点击性，并进入现有运行配置；不得把二者合并为
+  一个状态或让 Runtime 角标变成死文案。
 - 队员页“运行配置”下保留默认收起的“运行参数”；九种 Runtime 使用专用模型与
   原生权限字段，Product Runtime、模型和权限通过唯一的“保存运行时”原子保存。
 - 队员详情在运行配置后只保留 Memory Capability 和危险区，不渲染“高级设置”或
@@ -206,9 +219,13 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   不显示“已找到”“尚未检查”等内部探测阶段，也不在配置保存时同步完整检查。
 - 工作目录选择先完成目录安全校验并立即可用于创建；动态 Git 能力随后异步加载，检测中或
   失败只影响 Git 状态提示，不阻塞普通目录 Camp 创建。
-- 记忆、通用、技能、Agent 运行时、外观、通知、诊断与修复和创建新对话 Dialog 以 Arctic Dawn
-  详规为准；
-  MCP 由 v0.37 生产设计局部替代，但继续复用同一 App Shell、Token 与通用交互规则。
+- 记忆、通用、技能、Agent 运行时、外观、通知、诊断与修复和创建新对话 Dialog 以当前 UI
+  详规为准。七个设置分类、队员、记忆和浮层统一使用 Porcelain 表面与低频 Steel 顶边、标题轨和
+  选中态；attention、danger、success 与 evidence 继续使用各自语义色。MCP 由 v0.37 生产设计
+  局部替代，但继续复用同一 App Shell、Token 与通用交互规则。
+- 创建新对话继续提供工作目录、安全校验、动态 Git 能力、队员、Lead 和可选名称；不增加
+  原型式“创建摘要”区或黄色静态提示。会话日期只从真实时间戳和 Camp 创建时间派生，不补造
+  “今天 · 发布准备”等不可取得阶段字段。
 - v0.28 通知入口常驻品牌行，通知中心使用右侧 Radix Drawer 式 Dialog；通知行保持单一
   列表表面，浮层不抢焦点，完整行为与数据边界以当前版本生产设计为准。
 
@@ -240,11 +257,12 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   Popover 不设 Focus Trap，并按各自合同处理 `Escape`、点击外部与 Focus Return。
 - 重要状态使用适当 `aria-live`，但流式日志和 Agent 输出不能逐字播报。
 - 支持 `prefers-reduced-motion`；减少动画不能丢失状态反馈。
-- 几何基准 `1440×920`，最小窗口 `1040×700`；不得出现整页横向滚动或遮挡核心操作。
+- 几何基准 `1440×920`，2K 基准 `2560×1440`，最小窗口 `1040×700`；不得出现整页横向滚动
+  或遮挡核心操作。
 
 ## Coding Agent 工作规则
 
-1. 先阅读目标组件、`styles.css`、相关测试和 [Arctic Dawn V3](arctic-dawn.md)。
+1. 先阅读目标组件、`styles.css`、相关测试和[当前 UI 详规](arctic-dawn.md)。
 2. 涉及领域、持久化、安全、Runtime、Memory、A2A 或 Camp Creation 时继续读取相关
    有效 ADR，不能从 UI 文档推导业务语义。
 3. 共享色值只扩展语义 Token；组件内不得新增散落的十六进制、RGB 或主题分支色。
@@ -258,7 +276,7 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
 
 ## 完成检查
 
-- [x] 全部主题偏好都渲染同一套 Arctic Dawn Day，且没有加载旧 Night。
+- [x] 全部主题偏好都渲染同一套 Neutral Porcelain + Steel Day，且没有加载旧 Night。
 - [x] v7 导航投影、覆盖式设置侧栏和空 Camp 欢迎状态在两个目标尺寸无溢出。
 - [x] Camp 阅读流、Tool Call、Task、固定 Approval 队列、Composer 与 Inspector
   符合详规。

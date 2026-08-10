@@ -148,6 +148,7 @@ try {
       }
     })(),
     detailBackground: getComputedStyle(document.querySelector('.members-view')).backgroundColor,
+    detailBackgroundImage: getComputedStyle(document.querySelector('.members-view')).backgroundImage,
     hasProjectNavigation: Boolean(document.querySelector('.navigation-projects')),
     duplicateRoster: Boolean(document.querySelector('.member-list, .member-workbench')),
     tabs: [...document.querySelectorAll('.member-tabs [role="tab"]')]
@@ -174,7 +175,7 @@ try {
       && memberWorkbenchStructure.homeButton.ariaLabel === '返回首页'
       && memberWorkbenchStructure.homeButton.title === '返回首页'
       && memberWorkbenchStructure.homeButton.precedesTitle
-      && memberWorkbenchStructure.detailBackground === 'rgb(255, 255, 255)'
+      && memberWorkbenchStructure.detailBackgroundImage.includes('linear-gradient')
       && !memberWorkbenchStructure.hasProjectNavigation
       && !memberWorkbenchStructure.duplicateRoster
       && JSON.stringify(memberWorkbenchStructure.tabs) === JSON.stringify(['身份', '运行配置'])
@@ -668,9 +669,9 @@ try {
     campColorState.conversation === 'rgb(255, 255, 255)'
       && campColorState.controls === 'rgb(255, 255, 255)'
       && campColorState.inspector === 'rgb(255, 255, 255)'
-      && campColorState.divider === 'rgb(203, 209, 200)'
-      && campColorState.rail === 'rgb(246, 247, 243)'
-      && campColorState.userMessage === 'rgb(236, 238, 248)',
+      && campColorState.divider === 'rgb(199, 207, 214)'
+      && campColorState.rail === 'rgb(243, 244, 244)'
+      && campColorState.userMessage === 'rgb(233, 238, 243)',
     `Camp color scope drifted: ${JSON.stringify(campColorState)}`
   )
   const userMessageCopyState = await evaluate(running.cdp, `({

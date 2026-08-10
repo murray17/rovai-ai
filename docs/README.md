@@ -27,7 +27,7 @@ last_updated: 2026-08-11
 | 理解内置 CLI、Core Router、Runtime Fleet、Bootstrap 与外部 MCP 的长期结构 | [Built-in Tool Runtime 架构](architecture/builtin-tool-runtime.md) |
 | 修改 Native Session compaction detector、Observer Lease、Runtime 补发 policy、Bootstrap Delivery Gate 或 redelivery payload | [Native Session Bootstrap Redelivery 架构](architecture/native-session-bootstrap-redelivery.md)、[ADR-0138](adr/0138-durable-bootstrap-redelivery-requirement.md)至[ADR-0143](adr/0143-best-effort-non-blocking-compaction-detector-capability.md)及[ADR-0147](adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md) |
 | 理解历史设计与演进原因 | [版本索引](versions/README.md)及对应历史版本；历史内容不能作为当前约束 |
-| 修改 Renderer UI/UX | [UI 规范索引](ui/README.md)；修改当前 Arctic Dawn Renderer 时继续读取[Arctic Dawn V3 设计规范](ui/arctic-dawn.md) |
+| 修改 Renderer UI/UX | [UI 规范索引](ui/README.md)；修改当前 Neutral Porcelain + Steel Renderer 时继续读取[当前 UI 详规](ui/arctic-dawn.md) |
 | 本地运行、测试、Smoke Test 或 macOS 构建 | [开发者指南](development/README.md) |
 
 读取相关文档后，仍必须检查目标代码、Migration 和测试；文档不能替代实施事实。

@@ -86,7 +86,7 @@ try {
         title: dialog?.querySelector('h2')?.textContent,
         primary: primary?.textContent?.trim(),
         primaryEnabled: primary?.disabled === false,
-        description: dialog?.querySelector('[data-radix-dialog-description]')?.textContent?.trim(),
+        description: document.getElementById(dialog?.getAttribute('aria-describedby') ?? '')?.textContent?.trim(),
         collaborationRemoved: !text.includes('并肩协作')
           && !text.includes('领队统筹')
           && !text.includes('暂未开放')

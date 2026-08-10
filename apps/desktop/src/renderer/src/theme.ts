@@ -10,19 +10,19 @@ export const THEME_OPTIONS: ReadonlyArray<{
     value: 'system',
     label: '跟随系统',
     englishLabel: 'System',
-    description: '本版本统一使用北极晨光 Day。'
+    description: '当前统一使用瓷灰日间主题。'
   },
   {
     value: 'day',
-    label: '北极晨光',
-    englishLabel: 'Arctic Dawn Day',
-    description: '冷纸白与极光色，适合日常规划与长期协作。'
+    label: '日间',
+    englishLabel: 'Porcelain Day',
+    description: '冷瓷灰与克制的 Steel 强调，适合长期协作。'
   },
   {
     value: 'night',
     label: '夜间',
     englishLabel: 'Night · Reserved',
-    description: '偏好会保留；当前仍显示北极晨光 Day。'
+    description: '偏好会保留；当前仍显示瓷灰日间主题。'
   }
 ]
 

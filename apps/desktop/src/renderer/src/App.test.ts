@@ -619,8 +619,10 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('aria-label="快速对话"')
-    expect(markup).toContain('Arctic Dawn · Quick Chat')
-    expect(markup).toContain('在晨光里，开始下一段协作')
+    expect(markup).toContain('>Quick Chat<')
+    expect(markup).toContain('开始下一段协作')
+    expect(markup).not.toContain('Arctic Dawn')
+    expect(markup).not.toContain('在晨光里')
     expect(markup).toContain('这里还没有可继续的对话。')
     expect(markup).toContain('>新对话</button>')
     expect(markup).not.toContain('<textarea')
@@ -1155,6 +1157,7 @@ describe('task event projections', () => {
       agents: [],
       installations: [],
       busy: null,
+      onOpenNotifications: () => undefined,
       onDiagnosticsNavigate: () => undefined,
       onReload: async () => undefined,
       onThemeChange: () => undefined
@@ -1174,6 +1177,69 @@ describe('task event projections', () => {
       expect(markup.match(/class="settings-page-heading"/g)).toHaveLength(1)
       expect(markup).not.toContain('project-hero')
     }
+  })
+
+  it('uses the Porcelain and Steel notification hierarchy without hiding the real notification center', () => {
+    const markup = renderToStaticMarkup(createElement(SettingsView, {
+      appearance: { preference: 'system', resolvedTheme: 'day' },
+      health: null,
+      agents: [],
+      installations: [],
+      busy: null,
+      section: 'notifications',
+      onOpenNotifications: () => undefined,
+      onDiagnosticsNavigate: () => undefined,
+      onReload: async () => undefined,
+      onThemeChange: () => undefined
+    }))
+
+    expect(markup).toContain('<button class="primary-button" type="button">打开通知中心</button>')
+    expect(markup).toContain('id="notification-heads-up-heading"')
+    expect(markup).toContain('id="notification-boundary-heading"')
+    expect(markup).toContain('关闭浮层不会丢失事项')
+    expect(markup).toContain('Approval Dock')
+  })
+
+  it('keeps the resolved theme and saved preference in the Appearance page header', () => {
+    const markup = renderToStaticMarkup(createElement(SettingsView, {
+      appearance: { preference: 'night', resolvedTheme: 'day' },
+      health: null,
+      agents: [],
+      installations: [],
+      busy: null,
+      section: 'appearance',
+      onOpenNotifications: () => undefined,
+      onDiagnosticsNavigate: () => undefined,
+      onReload: async () => undefined,
+      onThemeChange: () => undefined
+    }))
+
+    expect(markup).toContain('当前 · 瓷灰日间 · 偏好：夜间')
+    expect(markup).not.toContain('当前视觉语言')
+  })
+
+  it('places the real Runtime rescan action in the shared page header', () => {
+    const markup = renderToStaticMarkup(createElement(SettingsView, {
+      appearance: { preference: 'system', resolvedTheme: 'day' },
+      health: null,
+      agents: [],
+      installations: [],
+      busy: null,
+      section: 'runtime',
+      onOpenNotifications: () => undefined,
+      onDiagnosticsNavigate: () => undefined,
+      onReload: async () => undefined,
+      onThemeChange: () => undefined
+    }))
+    const headerEnd = markup.indexOf('</header>')
+    const rescan = markup.indexOf('重新检测全部')
+    const directory = markup.indexOf('Agent 运行时目录')
+
+    expect(markup.match(/class="settings-page-heading"/g)).toHaveLength(1)
+    expect(rescan).toBeGreaterThan(0)
+    expect(rescan).toBeLessThan(headerEnd)
+    expect(headerEnd).toBeLessThan(directory)
+    expect(markup).toContain('高级诊断与自定义启动入口')
   })
 
   it('replaces project navigation with the member roster on the members page', () => {
@@ -1284,6 +1350,9 @@ describe('task event projections', () => {
     expect(markup).toContain('尚未配置 Agent 运行时')
     expect(markup).toContain('配置洛可的 Agent 运行时')
     expect(markup.indexOf('class="runtime-recovery-dock"')).toBeLessThan(markup.indexOf('class="composer"'))
+    expect(markup).toMatch(
+      /<div class="composer-actions"><span class="composer-hint">Enter<\/span><button class="primary-button composer-send"/
+    )
     expect(markup).not.toContain('agent_run.runtime_not_ready')
     expect(markup).not.toContain('agent_1')
     expect(markup).not.toContain('Runtime')
@@ -1989,10 +2058,22 @@ describe('task event projections', () => {
 
     expect(markup).not.toContain('<h2>会话</h2>')
     expect(markup).toContain('请检查 Downloads 目录里的页面。')
+    expect(markup).toContain('class="message-surface has-delivery"')
     expect(markup).toContain('class="message-delivery-footer"')
     expect(markup).toContain('class="message-delivery-handoff-rail"')
-    expect(markup).toContain('发送给：')
-    expect(markup.indexOf('沐瓦')).toBeLessThan(markup.indexOf('小狐狸'))
+    const handoffText = markup.replace(/<[^>]+>/g, '')
+    expect(handoffText).toContain('发送给@沐瓦、@小狐狸')
+    expect(markup).not.toContain('发送给：')
+    expect(markup.indexOf('@沐瓦')).toBeLessThan(markup.indexOf('@小狐狸'))
+    expect((markup.match(/class="message-delivery-recipient-name message-mention-token is-interactive"/g) ?? []))
+      .toHaveLength(2)
+    expect(markup).toContain('aria-label="查看沐瓦的基础信息"')
+    expect(markup).toContain('aria-label="查看小狐狸的基础信息"')
+    expect(markup).toContain('role="button"')
+    expect(markup).toContain('tabindex="0"')
+    expect(markup).toMatch(/<div class="timeline-node timeline-day">\d{1,2}月\d{1,2}日 周[一二三四五六日] · DAY \d+<\/div>/)
+    expect(markup).not.toContain('今天 ·')
+    expect(markup).not.toContain('发布准备')
     expect(markup).not.toContain('投递失败')
     expect(markup).not.toContain('message-delivery-state')
     expect(markup).not.toContain('已送达')
@@ -2392,6 +2473,8 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-label="更换沐瓦的角色图片"')
     expect(markup).toContain('title="更换角色图片"')
     expect(markup).toContain('class="member-runtime-entry-arrow"')
+    expect(markup).toContain('class="member-detail-page"')
+    expect(markup).toContain('Member / Long-lived identity')
     expect(markup).not.toContain('member-detail-avatar-button')
     expect(markup).not.toContain('memory-capability-toggle')
     expect(markup).toContain('>身份</button>')
@@ -2434,6 +2517,7 @@ describe('task event projections', () => {
       installations: [],
       busy: null,
       section: 'appearance',
+      onOpenNotifications: () => undefined,
       onDiagnosticsNavigate: () => undefined,
       onReload: async () => undefined,
       onThemeChange: () => undefined
@@ -2451,6 +2535,7 @@ describe('task event projections', () => {
       installations: [],
       busy: null,
       section: 'diagnostics',
+      onOpenNotifications: () => undefined,
       onDiagnosticsNavigate: () => undefined,
       onReload: async () => undefined,
       onThemeChange: () => undefined

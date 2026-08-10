@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v0.53
 authority: implementation-plan-and-acceptance
 status: complete
-last_updated: 2026-08-10
+last_updated: 2026-08-11
 ---
 
 # v0.53 实施与验收计划
@@ -77,9 +77,16 @@ last_updated: 2026-08-10
 
 Checkpoint 4 在同一日期追加完成生产 App 验收：`pnpm package:mac` 生成 arm64
 `Rovai-ai.app`，`pnpm accept:runtime-activity-ui` 在 1480×1120 与 1040×700 两种窗口尺寸均通过。
-受控 A2A fixture 实测正文边界到 Scheme C footer 边界为 2px，footer 保持透明、零圆角、1px 短折线；
-正文内“来自执行”数量为 0，compact Delivery 卡片数量为 0，紧凑尺寸下 document、timeline 与 footer
-横向溢出均为 0。
+
+### 2026-08-11 历史验收勘误
+
+以下勘误只收紧当时已经完成的 Renderer 验收测量，不改变 v0.53 的范围、实现状态或产品合同：
+
+受控 A2A fixture 最初只测量外层 message surface，未发现透明复制入口仍在文档流中保留一行高度；
+用户截图复核后将门禁收紧为直接测量最后一个正文内容元素，并要求复制入口绝对定位、surface 额外
+占位为 0。修正后正文内容边界到 Scheme C footer 边界实测为 2px；footer 保持透明、零圆角、1px
+短折线，正文内“来自执行”数量为 0，compact Delivery 卡片数量为 0，紧凑尺寸下 document、timeline
+与 footer 横向溢出均为 0。
 
 CLI 测试中两个 Unix socket fixture 在受限沙箱内会得到 `Operation not permitted`；在允许本地 IPC 的同一
 worktree 重跑原始 workspace 命令后全部通过。默认门禁仍未执行付费模型、真实用户 Runtime 账户或私有 Sealed

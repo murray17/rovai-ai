@@ -12,9 +12,10 @@ describe('appearance settings', () => {
     }))
 
     expect(markup).toContain('跟随系统')
-    expect(markup).toContain('北极晨光')
+    expect(markup).toContain('Porcelain Day')
     expect(markup).toContain('Night · Reserved')
-    expect(markup).toContain('当前 · 北极晨光 Day')
+    expect(markup).not.toContain('当前视觉语言')
+    expect(markup).not.toContain('Steel Strong')
     expect(markup).not.toContain('Camp 主题')
   })
 })

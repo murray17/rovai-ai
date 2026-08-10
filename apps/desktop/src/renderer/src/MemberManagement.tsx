@@ -27,6 +27,7 @@ import { MemberAvatar } from './MemberAvatar'
 import { MemberAvatarCropper } from './MemberAvatarCropper'
 import { MemberPortrait } from './MemberPortrait'
 import { localizeExecutionEngineTerms } from './product-copy'
+import { SettingsPageHeader } from './SettingsPageHeader'
 import {
   deriveMemberAvatarIcon,
   normalizeMemberAvatarSource
@@ -380,72 +381,74 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
           </div>
         )}
         <div className="member-detail-scroll">
-          {!selectedAgent && (
-            <>
-              <MemberEmptyHeader />
-              {pageNotices}
-              <div className="member-empty">
-                <span aria-hidden="true">◎</span>
-                <h3>建立第一位队员</h3>
-                <p>队员保存长期身份与默认 Agent 运行时；创建后仍需由你明确选择和保存运行配置。</p>
-              </div>
-            </>
-          )}
-          {selectedAgent && (
-            <>
-              <MemberDetailHeader
-                agent={selectedAgent}
-                runtimeAvailability={runtimeAvailability}
-                runtimeDiscoveryPending={runtimeDiscoveryPending}
-                busy={busy}
-                onEdit={(trigger) => {
-                  identityReturnFocusRef.current = trigger
-                  setIdentityDialog('edit')
-                }}
-                onEditAvatar={(trigger) => {
-                  avatarReturnFocusRef.current = trigger
-                  setAvatarDialogOpen(true)
-                }}
-                onPresence={changePresence}
-                onRuntime={openRuntimeTab}
-                onRemove={(trigger) => {
-                  void requestTransition(() => previewRemoval(trigger), trigger)
-                }}
-              />
-              {pageNotices}
-              <MemberTabs
-                value={activeTab}
-                onChange={onTabChange}
-              />
-              <div id="member-identity-panel" role="tabpanel" aria-labelledby="member-identity-tab" hidden={activeTab !== 'identity'}>
-                <MemberIdentitySummary
+          <div className="member-detail-page">
+            {!selectedAgent && (
+              <>
+                <MemberEmptyHeader />
+                {pageNotices}
+                <div className="member-empty">
+                  <span aria-hidden="true">◎</span>
+                  <h3>建立第一位队员</h3>
+                  <p>队员保存长期身份与默认 Agent 运行时；创建后仍需由你明确选择和保存运行配置。</p>
+                </div>
+              </>
+            )}
+            {selectedAgent && (
+              <>
+                <MemberDetailHeader
                   agent={selectedAgent}
+                  runtimeAvailability={runtimeAvailability}
+                  runtimeDiscoveryPending={runtimeDiscoveryPending}
                   busy={busy}
+                  onEdit={(trigger) => {
+                    identityReturnFocusRef.current = trigger
+                    setIdentityDialog('edit')
+                  }}
                   onEditAvatar={(trigger) => {
                     avatarReturnFocusRef.current = trigger
                     setAvatarDialogOpen(true)
                   }}
+                  onPresence={changePresence}
+                  onRuntime={openRuntimeTab}
+                  onRemove={(trigger) => {
+                    void requestTransition(() => previewRemoval(trigger), trigger)
+                  }}
                 />
-              </div>
-              <div id="member-runtime-panel" role="tabpanel" aria-labelledby="member-runtime-tab" hidden={activeTab !== 'runtime'}>
-                <p className="member-runtime-intro">为这位队员设置后续执行使用的 Agent 运行时、模型和该运行时提供的权限选项。保存后仅影响之后开始的新执行。</p>
-                <MemberRuntimeForm
-                  ref={runtimeFormRef}
-                  agent={selectedAgent}
-                  installations={installations}
-                  runtimeAvailability={runtimeAvailability}
-                  runtimeDiscoveryPending={runtimeDiscoveryPending}
-                  busy={busy}
-                  onDirtyChange={setRuntimeDirty}
-                  onSave={saveRuntime}
-                  onClear={clearRuntime}
-                  onRuntimeEnsure={ensureRuntime}
-                  onRuntimeSelected={checkRuntime}
-                  onOpenRuntimeSettings={onOpenRuntimeSettings}
+                {pageNotices}
+                <MemberTabs
+                  value={activeTab}
+                  onChange={onTabChange}
                 />
-              </div>
-            </>
-          )}
+                <div id="member-identity-panel" role="tabpanel" aria-labelledby="member-identity-tab" hidden={activeTab !== 'identity'}>
+                  <MemberIdentitySummary
+                    agent={selectedAgent}
+                    busy={busy}
+                    onEditAvatar={(trigger) => {
+                      avatarReturnFocusRef.current = trigger
+                      setAvatarDialogOpen(true)
+                    }}
+                  />
+                </div>
+                <div id="member-runtime-panel" role="tabpanel" aria-labelledby="member-runtime-tab" hidden={activeTab !== 'runtime'}>
+                  <p className="member-runtime-intro">为这位队员设置后续执行使用的 Agent 运行时、模型和该运行时提供的权限选项。保存后仅影响之后开始的新执行。</p>
+                  <MemberRuntimeForm
+                    ref={runtimeFormRef}
+                    agent={selectedAgent}
+                    installations={installations}
+                    runtimeAvailability={runtimeAvailability}
+                    runtimeDiscoveryPending={runtimeDiscoveryPending}
+                    busy={busy}
+                    onDirtyChange={setRuntimeDirty}
+                    onSave={saveRuntime}
+                    onClear={clearRuntime}
+                    onRuntimeEnsure={ensureRuntime}
+                    onRuntimeSelected={checkRuntime}
+                    onOpenRuntimeSettings={onOpenRuntimeSettings}
+                  />
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </section>
 
@@ -598,6 +601,7 @@ function MemberDetailHeader({
           className="member-detail-avatar"
         />
         <div>
+          <span className="member-page-kicker">Member / Long-lived identity</span>
           <h2>{agent.displayName}</h2>
           <p>{agent.teamRole || '团队角色未设置'}</p>
           <div className="member-detail-statuses">
@@ -1432,76 +1436,85 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
   }
 
   return (
-    <section className="section-block runtime-installations">
-      <div className="section-heading">
-        <div><h2>Agent 运行时目录</h2></div>
-        <button className="quiet-button" disabled={busy !== null} onClick={() => void rescan()}>
-          {busy === 'rescan' ? '正在重新检查…' : '重新检查全部'}
-        </button>
-      </div>
-      <p className="section-intro">九种已支持产品始终显示。页面优先使用最近一次结果，缺失或过期时由 Core 在后台刷新；重新检查会执行你的交互式登录 Shell 初始化，但只读取 PATH。</p>
-
-      <div className="runtime-installation-list">
-        {PRODUCT_RUNTIMES.map((runtimeKind) => {
-          const item = availability.find((candidate) => candidate.runtimeKind === runtimeKind)
-          const presentation = runtimeAvailabilityPresentation(item ?? null, health === null)
-          const help = productRuntimeHelp(runtimeKind)
-          return (
-            <article key={runtimeKind} className="runtime-installation-row">
-              <div className="runtime-installation-main">
-                <div>
-                  <strong>{adapterLabel(runtimeKind)}</strong>
-                  <span className={`runtime-snapshot-badge status-${presentation.status}`}>
-                    {presentation.label}
-                  </span>
-                </div>
-                <span>{item?.reportedVersion ?? adapterMaturityLabel(runtimeKind)}</span>
-                {presentation.detail && <small>{presentation.detail}</small>}
-                <small className="runtime-self-check">自查命令：<code>{help.selfCheckCommand}</code></small>
-              </div>
-              <div className="runtime-row-actions">
-                <button className="quiet-button" disabled={busy !== null} onClick={() => void checkProduct(runtimeKind)}>
-                  {busy === `check-${runtimeKind}` ? '正在检查…' : '检查可用性'}
-                </button>
-                <a className="quiet-button" href={help.installationUrl} target="_blank" rel="noreferrer">安装说明</a>
-              </div>
-            </article>
-          )
-        })}
-      </div>
-      {error && <div className="inline-error" role="alert">{error}</div>}
-
-      <details className="member-advanced-settings runtime-advanced-diagnostics">
-        <summary>高级诊断与自定义启动入口</summary>
-        <p>以下路径和 fingerprint 仅用于诊断、审计与恢复；普通队员配置不会选择它们。</p>
-        <button className="quiet-button" onClick={() => setCustomOpen(true)}>添加自定义启动入口</button>
-        <div className="runtime-installation-list">
-          {installations.map((installation) => (
-            <article key={installation.id} className={`runtime-installation-row ${installation.enabled ? '' : 'disabled'}`}>
-              <div className="runtime-installation-main">
-                <div><strong>{adapterLabel(installation.adapterKind)}</strong><RuntimeSnapshotBadge installation={installation} /></div>
-                <code>{installation.executablePath}</code>
-                <span>{installation.installationClass === 'managed_default' ? '受管默认入口' : '自定义入口'} · {installationSourceLabel(installation.source)} · generation {installation.generation}</span>
-                <small>fingerprint：{installation.snapshot?.executableFingerprint ?? '—'}</small>
-                {installation.relocationHistory[0] && <small>最近自动迁移：{formatTimestamp(installation.relocationHistory[0].createdAt)} · {installation.relocationHistory[0].result}</small>}
-              </div>
-              <dl>
-                <div><dt>模型</dt><dd>{reportedModelCount(installation)}</dd></div>
-                <div><dt>引用队员</dt><dd>{installation.referencedProfileCount}</dd></div>
-                <div><dt>最近探测</dt><dd>{formatTimestamp(installation.lastProbeAttempt?.attemptedAt ?? installation.snapshot?.lastSuccessfulProbeAt)}</dd></div>
-              </dl>
-              <div className="runtime-row-actions">
-                <button className="quiet-button" disabled={busy !== null || !installation.enabled} onClick={() => void refresh(installation.id)}>{busy === `refresh-${installation.id}` ? '探测中…' : '刷新能力'}</button>
-                <button className={installation.enabled ? 'danger-button' : 'quiet-button'} disabled={busy !== null} onClick={() => void toggle(installation)}>{installation.enabled ? '停用' : '启用'}</button>
-              </div>
-            </article>
-          ))}
-          {installations.length === 0 && <div className="runtime-empty">尚无内部 Installation；选择产品或检查可用性后会自动创建。</div>}
+    <>
+      <SettingsPageHeader
+        eyebrow="Settings / Runtime"
+        title="Agent 运行时"
+        description="选择产品、检查可用性并管理 Rovai 自动发现的本机入口。"
+        aside={(
+          <button className="quiet-button" disabled={busy !== null} onClick={() => void rescan()}>
+            {busy === 'rescan' ? '正在重新检测…' : '重新检测全部'}
+          </button>
+        )}
+      />
+      <section className="section-block runtime-installations">
+        <div className="section-heading">
+          <div><h2>Agent 运行时目录</h2></div>
         </div>
-      </details>
+        <p className="section-intro">九种已支持产品始终显示。页面优先使用最近一次结果，缺失或过期时由 Core 在后台刷新；重新检查会执行你的交互式登录 Shell 初始化，但只读取 PATH。</p>
 
-      <CustomRuntimeDialog open={customOpen} busy={busy === 'create-installation'} onOpenChange={setCustomOpen} onSubmit={create} />
-    </section>
+        <div className="runtime-installation-list">
+          {PRODUCT_RUNTIMES.map((runtimeKind) => {
+            const item = availability.find((candidate) => candidate.runtimeKind === runtimeKind)
+            const presentation = runtimeAvailabilityPresentation(item ?? null, health === null)
+            const help = productRuntimeHelp(runtimeKind)
+            return (
+              <article key={runtimeKind} className="runtime-installation-row">
+                <div className="runtime-installation-main">
+                  <div>
+                    <strong>{adapterLabel(runtimeKind)}</strong>
+                    <span className={`runtime-snapshot-badge status-${presentation.status}`}>
+                      {presentation.label}
+                    </span>
+                  </div>
+                  <span>{item?.reportedVersion ?? adapterMaturityLabel(runtimeKind)}</span>
+                  {presentation.detail && <small>{presentation.detail}</small>}
+                  <small className="runtime-self-check">自查命令：<code>{help.selfCheckCommand}</code></small>
+                </div>
+                <div className="runtime-row-actions">
+                  <button className="quiet-button" disabled={busy !== null} onClick={() => void checkProduct(runtimeKind)}>
+                    {busy === `check-${runtimeKind}` ? '正在检查…' : '检查可用性'}
+                  </button>
+                  <a className="quiet-button" href={help.installationUrl} target="_blank" rel="noreferrer">安装说明</a>
+                </div>
+              </article>
+            )
+          })}
+        </div>
+        {error && <div className="inline-error" role="alert">{error}</div>}
+
+        <details className="member-advanced-settings runtime-advanced-diagnostics">
+          <summary>高级诊断与自定义启动入口</summary>
+          <p>以下路径和 fingerprint 仅用于诊断、审计与恢复；普通队员配置不会选择它们。</p>
+          <button className="quiet-button" onClick={() => setCustomOpen(true)}>添加自定义启动入口</button>
+          <div className="runtime-installation-list">
+            {installations.map((installation) => (
+              <article key={installation.id} className={`runtime-installation-row ${installation.enabled ? '' : 'disabled'}`}>
+                <div className="runtime-installation-main">
+                  <div><strong>{adapterLabel(installation.adapterKind)}</strong><RuntimeSnapshotBadge installation={installation} /></div>
+                  <code>{installation.executablePath}</code>
+                  <span>{installation.installationClass === 'managed_default' ? '受管默认入口' : '自定义入口'} · {installationSourceLabel(installation.source)} · generation {installation.generation}</span>
+                  <small>fingerprint：{installation.snapshot?.executableFingerprint ?? '—'}</small>
+                  {installation.relocationHistory[0] && <small>最近自动迁移：{formatTimestamp(installation.relocationHistory[0].createdAt)} · {installation.relocationHistory[0].result}</small>}
+                </div>
+                <dl>
+                  <div><dt>模型</dt><dd>{reportedModelCount(installation)}</dd></div>
+                  <div><dt>引用队员</dt><dd>{installation.referencedProfileCount}</dd></div>
+                  <div><dt>最近探测</dt><dd>{formatTimestamp(installation.lastProbeAttempt?.attemptedAt ?? installation.snapshot?.lastSuccessfulProbeAt)}</dd></div>
+                </dl>
+                <div className="runtime-row-actions">
+                  <button className="quiet-button" disabled={busy !== null || !installation.enabled} onClick={() => void refresh(installation.id)}>{busy === `refresh-${installation.id}` ? '探测中…' : '刷新能力'}</button>
+                  <button className="quiet-button" disabled={busy !== null} onClick={() => void toggle(installation)}>{installation.enabled ? '停用' : '启用'}</button>
+                </div>
+              </article>
+            ))}
+            {installations.length === 0 && <div className="runtime-empty">尚无内部 Installation；选择产品或检查可用性后会自动创建。</div>}
+          </div>
+        </details>
+
+        <CustomRuntimeDialog open={customOpen} busy={busy === 'create-installation'} onOpenChange={setCustomOpen} onSubmit={create} />
+      </section>
+    </>
   )
 }
 

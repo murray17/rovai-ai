@@ -84,7 +84,7 @@ try {
   assert(
     homeSurfaceState.workspace === 'rgb(255, 255, 255)'
       && homeSurfaceState.main === 'rgb(255, 255, 255)'
-      && homeSurfaceState.sidebar === 'rgb(246, 247, 243)',
+      && homeSurfaceState.sidebar === 'rgb(243, 244, 244)',
     `Home surface colors drifted: ${JSON.stringify(homeSurfaceState)}`
   )
   const homeDayCapture = join(outputDir, 'home-day.png')

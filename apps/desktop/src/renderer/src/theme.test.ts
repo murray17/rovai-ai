@@ -20,7 +20,7 @@ describe('renderer theme model', () => {
     expect(THEME_OPTIONS.map((option) => option.value)).toEqual(['system', 'day', 'night'])
   })
 
-  it('resolves every first-paint preference to Arctic Dawn Day', () => {
+  it('resolves every first-paint preference to Porcelain Day', () => {
     expect(resolvedThemeFromDocument(rootWithTheme('night'))).toBe('day')
     expect(initialAppearanceSnapshot(rootWithTheme('night'))).toEqual({
       preference: 'system',

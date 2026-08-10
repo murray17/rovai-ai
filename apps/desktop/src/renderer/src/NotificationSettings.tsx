@@ -7,7 +7,11 @@ type PreferenceKey =
   | 'approvalHeadsUpEnabled'
   | 'executionHeadsUpEnabled'
 
-export function NotificationSettings(): React.JSX.Element {
+export function NotificationSettings({
+  onOpenNotificationCenter
+}: {
+  onOpenNotificationCenter(trigger: HTMLButtonElement): void
+}): React.JSX.Element {
   const [preference, setPreference] = useState<InAppNotificationPreference | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -73,11 +77,16 @@ export function NotificationSettings(): React.JSX.Element {
         eyebrow="Settings / Notifications"
         title="通知"
         description="待审批和执行结果始终保存在通知中心；这里只控制新通知的临时浮层。"
+        aside={(
+          <button className="primary-button" type="button" onClick={(event) => onOpenNotificationCenter(event.currentTarget)}>
+            打开通知中心
+          </button>
+        )}
       />
-      <section className="section-block notification-settings">
+      <section className="section-block notification-settings" aria-labelledby="notification-heads-up-heading">
         <div className="section-heading">
           <div>
-            <h2>浮层提醒</h2>
+            <h2 id="notification-heads-up-heading">浮层提醒</h2>
             <p>重新开启后仅提醒新通知，不补弹关闭期间的旧事项。</p>
           </div>
           {saving && <span className="status-badge status-running"><i />保存中</span>}
@@ -119,6 +128,18 @@ export function NotificationSettings(): React.JSX.Element {
           </fieldset>
         )}
         {error && preference && <p className="settings-inline-error" role="alert">{error}</p>}
+      </section>
+      <section className="section-block notification-boundary" aria-labelledby="notification-boundary-heading">
+        <div className="section-heading">
+          <h2 id="notification-boundary-heading">持久边界</h2>
+        </div>
+        <div className="notification-boundary-band">
+          <span aria-hidden="true">◇</span>
+          <div>
+            <strong>关闭浮层不会丢失事项</strong>
+            <p>待审批与执行结果仍进入通知中心；当前对话的 Approval Dock 和执行状态也保持原有位置。</p>
+          </div>
+        </div>
       </section>
     </>
   )

@@ -82,6 +82,7 @@ describe('MCP settings', () => {
 
     expect(markup).toContain('<b>docs</b>')
     expect(markup).toContain('type="checkbox"')
+    expect(markup).toContain('aria-label="为沐瓦选择 MCP"')
     expect(markup).not.toContain('disabled=""')
     expect(markup).not.toContain('Unsupported')
   })

@@ -78,7 +78,7 @@ try {
     heading: document.querySelector('.settings-page-heading h1')?.textContent
   }))()`)
   assert(
-    JSON.stringify(initial.subnav) === JSON.stringify(['Skill', 'MCP', 'Agent 运行时', '外观', '通知', '诊断']),
+    JSON.stringify(initial.subnav) === JSON.stringify(['通用', '外观', '通知', 'Skill', 'MCP', 'Agent 运行时', '诊断与修复']),
     `Settings navigation is incorrect: ${JSON.stringify(initial)}`
   )
   assert(JSON.stringify(initial.serverNames) === JSON.stringify(['context7', 'playwright']), `Fresh reviewed defaults are incorrect: ${JSON.stringify(initial)}`)
@@ -182,6 +182,12 @@ try {
   const day = await layoutState(cdp)
   assertLayout(day, 1440, 920, 'day')
 
+  await evaluate(cdp, `document.querySelectorAll('.mcp-member-picker[open]').forEach((node) => { node.open = false })`)
+  await waitForExpression(cdp, `!document.querySelector('.mcp-member-picker[open]')`, 5_000)
+  await capture(cdp, `${outputPrefix}-day-clean.png`)
+  const cleanDay = await layoutState(cdp)
+  assertLayout(cleanDay, 1440, 920, 'day')
+
   await evaluate(cdp, `window.rovai.appearance.setPreference('night')`)
   await waitForExpression(cdp, `document.documentElement.dataset.theme === 'day'`, 5_000)
   await resize(cdp, 1040, 700)
@@ -209,12 +215,13 @@ try {
 
   const sharedSettingsHeadings = []
   for (const [navigationLabel, expectedHeading] of [
+    ['通用', '通用'],
+    ['外观', '外观'],
+    ['通知', '通知'],
     ['Skill', 'Skill 管理'],
     ['MCP', 'MCP 配置'],
     ['Agent 运行时', 'Agent 运行时'],
-    ['外观', '外观'],
-    ['通知', '通知'],
-    ['诊断', '诊断']
+    ['诊断与修复', '诊断与修复']
   ]) {
     await clickButtonByText(cdp, '.settings-sidebar-menu button', navigationLabel)
     await waitForExpression(cdp, `document.querySelector('.settings-page-heading h1')?.textContent === ${JSON.stringify(expectedHeading)}`, 10_000)
@@ -240,12 +247,17 @@ try {
     enableTogglePersisted: true,
     permissionsRepaired: true,
     day,
+    cleanDay,
     nightPreferenceDay,
     zoom200,
     reducedMotion,
     finalNames,
     sharedSettingsHeadings,
-    screenshots: [`${outputPrefix}-day.png`, `${outputPrefix}-night-preference-day-compact.png`]
+    screenshots: [
+      `${outputPrefix}-day.png`,
+      `${outputPrefix}-day-clean.png`,
+      `${outputPrefix}-night-preference-day-compact.png`
+    ]
   }, null, 2))
 } finally {
   app.kill('SIGTERM')

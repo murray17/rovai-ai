@@ -98,7 +98,8 @@ try {
     commandId: crypto.randomUUID(),
     campId: fixture.campId,
     title: '取消路径仍复用原卡',
-    description: '取消后保留在任务详情与审计记录。'
+    description: '取消后保留在任务详情与审计记录。',
+    assigneeAgentId: fixture.primaryAssignee.id
   })
   const cancelledTaskId = createdCancelledTask.payload?.taskId
   assert(createdCancelledTask.status === 'applied' && cancelledTaskId,
@@ -145,8 +146,7 @@ try {
   await assertNoHorizontalOverflow(compactApp.cdp, '1040×700 reduced-motion')
   const compactCapture = join(outputDir, 'task-card-details-compact-1040x700.png')
   await capture(compactApp.cdp, compactCapture)
-  await evaluate(compactApp.cdp,
-    `document.documentElement.style.zoom = '2'; getComputedStyle(document.documentElement).zoom`)
+  await emulateDesktopZoom(compactApp.cdp, 1040, 700, 2)
   await assertZoomedTaskFunctionality(compactApp.cdp)
   const zoomCapture = join(outputDir, 'task-card-details-compact-1040x700-zoom-200.png')
   await capture(compactApp.cdp, zoomCapture)
@@ -347,23 +347,69 @@ async function assertZoomedTaskFunctionality(cdp) {
   const state = await evaluate(cdp, `(() => {
     const scroll = document.querySelector('.task-panel-scroll')
     const editor = document.querySelector('.task-editor')
+    const returnButton = [...document.querySelectorAll('button')]
+      .find((button) => button.textContent?.includes('返回列表'))
+    const returnButtonRect = returnButton?.getBoundingClientRect()
     const before = scroll?.scrollTop ?? 0
     if (scroll) scroll.scrollTop = scroll.scrollHeight
     const after = scroll?.scrollTop ?? 0
     if (scroll) scroll.scrollTop = before
     return {
-      scale: Number.parseFloat(getComputedStyle(document.documentElement).zoom),
+      cssViewport: [window.innerWidth, window.innerHeight],
+      devicePixelRatio: window.devicePixelRatio,
+      physicalViewport: [
+        Math.round(window.innerWidth * window.devicePixelRatio),
+        Math.round(window.innerHeight * window.devicePixelRatio)
+      ],
       editorVisible: Boolean(editor),
-      returnButtonVisible: [...document.querySelectorAll('button')]
-        .some((button) => button.textContent?.includes('返回列表')),
+      returnButtonVisible: Boolean(returnButtonRect
+        && returnButtonRect.width > 0
+        && returnButtonRect.height > 0
+        && returnButtonRect.bottom > 0
+        && returnButtonRect.top < window.innerHeight),
       auditVisible: Boolean(editor?.querySelector('[aria-label="Task 审计信息"]')),
       relatedExecutionVisible: Boolean(editor?.querySelector('[aria-label="关联执行"]')),
-      scrollable: Boolean(scroll && scroll.scrollHeight >= scroll.clientHeight && after >= before)
+      scrollable: Boolean(scroll && scroll.scrollHeight > scroll.clientHeight && after > before)
     }
   })()`)
-  assert(state.scale === 2 && state.editorVisible && state.returnButtonVisible
+  assert(state.cssViewport[0] === 520 && state.cssViewport[1] === 350
+      && Math.abs(state.devicePixelRatio - 2) < 0.01
+      && state.physicalViewport[0] === 1040 && state.physicalViewport[1] === 700
+      && state.editorVisible && state.returnButtonVisible
       && state.auditVisible && state.relatedExecutionVisible && state.scrollable,
   `200% zoom hid Task functionality: ${JSON.stringify(state)}`)
+
+  const returned = await evaluate(cdp, `(() => {
+    const button = [...document.querySelectorAll('button')]
+      .find((candidate) => candidate.textContent?.includes('返回列表'))
+    button?.click()
+    return Boolean(button)
+  })()`)
+  assert(returned, '200% zoom made the Task return control unavailable')
+  await waitForExpression(cdp, `(() => {
+    return !document.querySelector('.task-editor')
+      && document.querySelectorAll('button.task-event-card').length === 2
+  })()`)
+  await openTaskDetails(cdp, '取消路径仍复用原卡')
+  await assertTerminalDetails(cdp, '取消后保留在任务详情与审计记录。', 0)
+}
+
+async function emulateDesktopZoom(cdp, physicalWidth, physicalHeight, zoomFactor) {
+  const cssWidth = Math.round(physicalWidth / zoomFactor)
+  const cssHeight = Math.round(physicalHeight / zoomFactor)
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: cssWidth,
+    height: cssHeight,
+    deviceScaleFactor: zoomFactor,
+    mobile: false,
+    screenWidth: physicalWidth,
+    screenHeight: physicalHeight
+  })
+  await waitForExpression(cdp, `(() => {
+    return window.innerWidth === ${cssWidth}
+      && window.innerHeight === ${cssHeight}
+      && Math.abs(window.devicePixelRatio - ${zoomFactor}) < 0.01
+  })()`)
 }
 
 async function assertNoHorizontalOverflow(cdp, context) {

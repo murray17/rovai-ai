@@ -219,32 +219,50 @@ export function SkillSettings(): React.JSX.Element {
 
       <section className="skill-section">
         <div className="skill-section-heading">
-          <div><p className="skill-eyebrow">Add Skill</p><h2>添加 Skill</h2></div>
+          <div><h2>添加 Skill</h2></div>
         </div>
         <div className="skill-import-panel">
-          <div className="skill-import-tabs" role="tablist" aria-label="Skill 添加方式">
-            <button className={importTab === 'local' ? 'active' : ''} type="button" role="tab" aria-selected={importTab === 'local'} onClick={() => setImportTab('local')}>本地文件夹</button>
-            <button className={importTab === 'github' ? 'active' : ''} type="button" role="tab" aria-selected={importTab === 'github'} onClick={() => setImportTab('github')}>GitHub</button>
+          <div
+            className="skill-import-tabs"
+            role="tablist"
+            aria-label="Skill 添加方式"
+            onKeyDown={(event) => {
+              const next = event.key === 'ArrowRight' || event.key === 'ArrowDown' || event.key === 'End'
+                ? 'github'
+                : event.key === 'ArrowLeft' || event.key === 'ArrowUp' || event.key === 'Home'
+                  ? 'local'
+                  : null
+              if (!next) return
+              event.preventDefault()
+              setImportTab(next)
+              requestAnimationFrame(() => document.getElementById(`skill-import-${next}-tab`)?.focus())
+            }}
+          >
+            <button id="skill-import-local-tab" className={importTab === 'local' ? 'active' : ''} type="button" role="tab" aria-selected={importTab === 'local'} aria-controls="skill-import-local-panel" tabIndex={importTab === 'local' ? 0 : -1} onClick={() => setImportTab('local')}>本地文件夹</button>
+            <button id="skill-import-github-tab" className={importTab === 'github' ? 'active' : ''} type="button" role="tab" aria-selected={importTab === 'github'} aria-controls="skill-import-github-panel" tabIndex={importTab === 'github' ? 0 : -1} onClick={() => setImportTab('github')}>GitHub</button>
           </div>
           {importTab === 'local'
             ? (
-              <div className="skill-import-body" role="tabpanel">
-                <span className="skill-import-description">选择包含 <code>SKILL.md</code> 的完整目录，导入后复制到 Rovai 本机受管仓库。</span>
-                <div className="skill-import-placeholder">导入后不再依赖原始文件夹</div>
+              <div id="skill-import-local-panel" className="skill-import-body" role="tabpanel" aria-labelledby="skill-import-local-tab">
+                <div className="skill-import-copy">
+                  <strong>选择包含 <code>SKILL.md</code> 的完整目录</strong>
+                  <small>导入前会先生成安全预览；确认后复制到 Rovai 本机受管仓库，不再依赖原始文件夹。</small>
+                </div>
                 <button className="primary-button" type="button" disabled={busy !== null} onClick={() => void inspectLocalImport()}>
                   {busy === 'inspect-local' ? '正在检查…' : '选择文件夹'}
                 </button>
-                <ImportHelp>导入时，Rovai 会保存一份完整副本。以后移动或删除原文件夹，也不影响这个 Skill。</ImportHelp>
               </div>
               )
             : (
-              <div className="skill-import-body" role="tabpanel">
-                <span className="skill-import-description">粘贴 GitHub 仓库或 Skill 子目录链接，可包含 branch、tag 或 commit 信息。</span>
-                <input className="skill-text-input" value={githubInput} onChange={(event) => setGithubInput(event.target.value)} placeholder="https://github.com/org/repo/tree/main/path/to/skill" aria-label="GitHub Skill 链接" />
+              <div id="skill-import-github-panel" className="skill-import-body" role="tabpanel" aria-labelledby="skill-import-github-tab">
+                <label className="skill-import-github-field">
+                  <span>GitHub Skill 链接</span>
+                  <input className="skill-text-input" value={githubInput} onChange={(event) => setGithubInput(event.target.value)} placeholder="粘贴仓库或带 ref / 子目录的链接" />
+                  <small>检查时固定仓库、路径和 Revision；确认后保存完整副本。</small>
+                </label>
                 <button className="primary-button" type="button" disabled={busy !== null || githubInput.trim().length === 0} onClick={() => void inspectGithubImport()}>
                   {busy === 'inspect-github' ? '正在检查…' : '检查并导入'}
                 </button>
-                <ImportHelp>Rovai 会保存完整副本，不依赖远端仓库或临时 checkout 持续可用。</ImportHelp>
               </div>
               )}
         </div>
@@ -252,7 +270,7 @@ export function SkillSettings(): React.JSX.Element {
 
       <section className="skill-section">
         <div className="skill-section-heading">
-          <div><p className="skill-eyebrow">Library</p><h2>已安装 Skills</h2></div>
+          <div><h2>已安装 Skills</h2></div>
           <span className="skill-section-count">{skills?.length ?? '—'} 个</span>
         </div>
         <label className="skill-search-row">
@@ -321,41 +339,26 @@ function SkillCard({
   const deleting = skill.lifecycleStatus === 'deleting'
   return (
     <article className={`skill-card ${!skill.enabled ? 'is-disabled' : ''} ${deleting ? 'is-deleting' : ''}`}>
-      <header className="skill-card-header">
-        <div className="skill-card-heading">
-          <div className="skill-card-title">
-            <strong title={skill.name}>{skill.name}</strong>
-            <span className={`skill-source ${skill.origin === 'official' ? 'source-official' : ''}`}>
-              {skill.origin === 'official' ? 'Rovai 内置' : '用户导入'}
-            </span>
-          </div>
-          <p>{skill.currentRevision.description || '未提供说明。'}</p>
+      <span className="skill-card-mark" aria-hidden="true">{skillMark(skill.name)}</span>
+      <div className="skill-card-heading">
+        <div className="skill-card-title">
+          <strong title={skill.name}>{skill.name}</strong>
+          <span className={`skill-source ${skill.origin === 'official' ? 'source-official' : ''}`}>
+            {skill.origin === 'official' ? 'Rovai 内置' : '用户导入'}
+          </span>
         </div>
-        <div className="skill-card-controls">
-          <button
-            className="skill-toggle"
-            type="button"
-            role="switch"
-            aria-checked={skill.enabled}
-            aria-label={`${skill.enabled ? '停用' : '启用'} ${skill.name}`}
-            disabled={busy !== null || deleting}
-            onClick={onToggleEnabled}
-          >
-            <span aria-hidden="true" /><b>{busy === `toggle-${skill.id}` ? '保存中' : skill.enabled ? '启用' : '停用'}</b>
-          </button>
-          <SkillMoreMenu skill={skill} disabled={busy !== null || deleting} onDelete={onDelete} />
-        </div>
-      </header>
-      {deleting && <span className="skill-deleting-note">等待现有执行释放后删除</span>}
-      <div className="skill-groups">
-        <div className="skill-groups-summary">
-          <span>当前生效组</span>
-          <strong>{selectedGroups.length === 0 ? '未选择' : `已选择 ${selectedGroups.length} 个`}</strong>
-        </div>
-        <div className="skill-group-chips">
-          {selectedGroups.map((group) => <span className="skill-group-chip" key={group.key}>{group.label}</span>)}
-          {selectedGroups.length === 0 && <span className="skill-group-empty">尚未选择任何 Runtime 生效组</span>}
-        </div>
+        <p>{skill.currentRevision.description || '未提供说明。'}</p>
+        <small className="skill-card-meta">
+          Revision {skill.currentRevision.revision} · {selectedGroups.length === 0
+            ? '未分配生效组'
+            : selectedGroups.map((group) => group.label).join('、')}
+        </small>
+        {deleting && <span className="skill-deleting-note">等待现有执行释放后删除</span>}
+      </div>
+      <div className="skill-card-controls">
+        <span className={`status-badge ${skill.enabled ? 'status-completed' : 'status-neutral'}`}>
+          <i />{skill.enabled ? '已启用' : '已停用'}
+        </span>
         <SkillGroupMenu
           skill={skill}
           groups={groups}
@@ -363,9 +366,27 @@ function SkillCard({
           disabled={busy !== null || deleting}
           onToggle={onToggleGroup}
         />
+        <button
+          className="skill-toggle"
+          type="button"
+          role="switch"
+          aria-checked={skill.enabled}
+          aria-label={`${skill.enabled ? '停用' : '启用'} ${skill.name}`}
+          disabled={busy !== null || deleting}
+          onClick={onToggleEnabled}
+        >
+          <span aria-hidden="true" /><b>{busy === `toggle-${skill.id}` ? '保存中' : skill.enabled ? '启用' : '停用'}</b>
+        </button>
+        <SkillMoreMenu skill={skill} disabled={busy !== null || deleting} onDelete={onDelete} />
       </div>
     </article>
   )
+}
+
+function skillMark(name: string): string {
+  const parts = name.split(/[-_\s]+/u).filter(Boolean)
+  const mark = parts.slice(0, 2).map((part) => Array.from(part)[0] ?? '').join('')
+  return mark.toLocaleUpperCase('en-US').slice(0, 2) || 'SK'
 }
 
 function SkillMoreMenu({ skill, disabled, onDelete }: {
@@ -453,10 +474,6 @@ function SkillGroupMenu({ skill, groups, selected, disabled, onToggle }: {
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
   )
-}
-
-function ImportHelp({ children }: { children: React.ReactNode }): React.JSX.Element {
-  return <span className="skill-import-help"><b aria-hidden="true">?</b><span role="tooltip">{children}</span></span>
 }
 
 function SkillRisk({ summary }: { summary: SkillRiskSummary }): React.JSX.Element {

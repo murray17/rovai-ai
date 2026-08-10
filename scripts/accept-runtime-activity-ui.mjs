@@ -17,6 +17,8 @@ const databasePath = join(dataDir, 'rovai.sqlite')
 const debugPort = Number(process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DEBUG_PORT ?? 9581)
 const campId = 'camp-runtime-activity-v055'
 const campTitle = 'v0.55 Agent 执行过程验收'
+const composerLayoutCampId = 'camp-composer-layout-v056'
+const composerLayoutCampTitle = 'v0.56 Composer 布局验收'
 const runArticleSelector = 'article.timeline-node.conversation-bubble.agent'
 const activeAgentId = 'agent_101'
 const activeRunId = 'run-codex'
@@ -66,13 +68,38 @@ try {
   assert(renderedMessageCount === runtimes.length,
     `Expected ${runtimes.length} rendered Agent messages, found ${renderedMessageCount}: ${await evaluate(app.cdp, 'document.body.innerText.slice(0, 5000)')}`)
 
+  const conversationPresentation = await collectConversationPresentation(app.cdp)
+  assert(conversationPresentation.articleCount === runtimes.length
+    && conversationPresentation.articleBackgrounds.length === 1
+    && conversationPresentation.copyBackgrounds.length === 1
+    && conversationPresentation.surfaceBackgrounds.length === 1
+    && conversationPresentation.articleBackgrounds[0] === 'rgba(0, 0, 0, 0)'
+    && conversationPresentation.copyBackgrounds[0] === 'rgba(0, 0, 0, 0)'
+    && conversationPresentation.surfaceBackgrounds[0] === 'rgba(0, 0, 0, 0)',
+    `Agent messages did not share one conversation surface: ${JSON.stringify(conversationPresentation)}`)
+  assert(conversationPresentation.dayLabels.length > 0
+    && conversationPresentation.dayLabels.every((label) => /^\d{1,2}月\d{1,2}日 周[一二三四五六日] · DAY \d+$/.test(label))
+    && conversationPresentation.dayLabels.every((label) => !label.includes('今天') && !label.includes('发布准备')),
+    `Timeline did not use durable message dates: ${JSON.stringify(conversationPresentation)}`)
+
+  await evaluate(app.cdp, `(() => {
+    const copyButton = document.querySelector('.message-surface.has-delivery .message-copy-button')
+    copyButton?.focus({ preventScroll: true })
+    return document.activeElement === copyButton
+  })()`)
+  await wait(250)
   const handoffFooter = await collectHandoffFooter(app.cdp)
   assert(handoffFooter.count === 1,
     `Expected one recipient-only message footer: ${JSON.stringify(handoffFooter)}`)
-  assert(handoffFooter.text.includes('发送给：')
-    && handoffFooter.text.includes('Codex CLI 验收')
-    && handoffFooter.text.includes('OpenCode 验收'),
+  assert(handoffFooter.text.includes('发送给@Codex CLI 验收、@OpenCode 验收')
+    && !handoffFooter.text.includes('发送给：'),
     `Recipient-only footer content mismatch: ${JSON.stringify(handoffFooter)}`)
+  assert(handoffFooter.recipientMentions.length === 2
+    && handoffFooter.recipientMentions.every((mention) => mention.text.startsWith('@'))
+    && handoffFooter.recipientMentions.every((mention) => mention.role === 'button' && mention.tabIndex === 0)
+    && handoffFooter.recipientMentions.every((mention) => mention.cursor === 'pointer')
+    && handoffFooter.recipientMentions.every((mention) => mention.color === 'rgb(47, 97, 200)'),
+    `A2A recipients were not blue interactive mentions: ${JSON.stringify(handoffFooter)}`)
   assert(!['已送达', '投递失败', '等待审批', '已取消'].some((label) => handoffFooter.text.includes(label))
     && handoffFooter.stateLabelCount === 0,
     `Message footer exposed Delivery state: ${JSON.stringify(handoffFooter)}`)
@@ -83,8 +110,32 @@ try {
     && handoffFooter.railBorderLeftWidth === '1px'
     && handoffFooter.railBorderBottomWidth === '1px',
     `Recipient-only footer geometry mismatch: ${JSON.stringify(handoffFooter)}`)
-  assert(handoffFooter.messageGap >= 0 && handoffFooter.messageGap <= 4,
+  assert(handoffFooter.contentGap >= 0 && handoffFooter.contentGap <= 4,
     `Recipient-only footer must stay visually attached to the message: ${JSON.stringify(handoffFooter)}`)
+  assert(handoffFooter.surfaceReserve >= 0 && handoffFooter.surfaceReserve <= 0.5
+    && handoffFooter.copyButtonPosition === 'absolute',
+    `Hidden copy affordance must not reserve a blank line: ${JSON.stringify(handoffFooter)}`)
+  assert(handoffFooter.copyButtonFocused && handoffFooter.copyButtonOpacity === '1'
+    && handoffFooter.copyButtonHorizontalGap >= 0,
+    `Focused copy affordance must stay visible without covering recipients: ${JSON.stringify(handoffFooter)}`)
+  await evaluate(app.cdp, `document.activeElement?.blur()`)
+
+  const activatedMention = await evaluate(app.cdp, `(() => {
+    const mention = document.querySelector('.message-delivery-recipient-name.message-mention-token.is-interactive')
+    mention?.click()
+    return mention?.textContent?.trim() ?? null
+  })()`)
+  assert(activatedMention === '@Codex CLI 验收',
+    `Could not activate the first A2A mention: ${JSON.stringify(activatedMention)}`)
+  await waitForExpression(app.cdp,
+    `Boolean(document.querySelector('.mention-profile-popover[role="dialog"][aria-label="Codex CLI 验收的基础信息"]'))`)
+  await app.cdp.send('Input.dispatchKeyEvent', {
+    type: 'rawKeyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 53
+  })
+  await app.cdp.send('Input.dispatchKeyEvent', {
+    type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 53
+  })
+  await waitForExpression(app.cdp, `!document.querySelector('.mention-profile-popover')`)
 
   const agentDock = await collectAgentDock(app.cdp)
   assert(agentDock.chipCount === runtimes.length
@@ -142,6 +193,34 @@ try {
   await waitForExpression(app.cdp,
     `document.activeElement?.dataset.agentId === ${JSON.stringify(activeAgentId)}`)
   await app.cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 2560, height: 1440, deviceScaleFactor: 1, mobile: false
+  })
+  await openCamp(app.cdp, composerLayoutCampId)
+  await waitForExpression(app.cdp,
+    `document.querySelector('.camp-workspace')?.getAttribute('aria-label') === ${JSON.stringify(`Camp：${composerLayoutCampTitle}`)}`)
+  await wait(200)
+  const wideComposerLayout = await collectWideComposerLayout(app.cdp)
+  assert(wideComposerLayout.viewportWidth === 2560 && wideComposerLayout.viewportHeight === 1440,
+    `2K viewport did not apply: ${JSON.stringify(wideComposerLayout)}`)
+  assert(wideComposerLayout.documentScrollWidth <= wideComposerLayout.viewportWidth + 1
+    && wideComposerLayout.composerBoxWidth >= 1038
+    && wideComposerLayout.composerBoxWidth <= 1042,
+    `2K composer did not expand to about 1040px: ${JSON.stringify(wideComposerLayout)}`)
+  assert(Math.abs(wideComposerLayout.leftInset - wideComposerLayout.rightInset) <= 12
+    && wideComposerLayout.actionGap === 5
+    && wideComposerLayout.enterHint === 'Enter'
+    && wideComposerLayout.sendLabel === '发送'
+    && wideComposerLayout.hintImmediatelyPrecedesSend
+    && wideComposerLayout.hintToSendGap >= 4
+    && wideComposerLayout.hintToSendGap <= 6,
+    `2K composer alignment or Enter/Send adjacency regressed: ${JSON.stringify(wideComposerLayout)}`)
+  const wideCapture = join(outputDir, 'runtime-activity-wide.png')
+  await capture(app.cdp, wideCapture)
+
+  await openCamp(app.cdp, campId)
+  await waitForExpression(app.cdp,
+    `document.querySelector('.camp-workspace')?.getAttribute('aria-label') === ${JSON.stringify(`Camp：${campTitle}`)}`)
+  await app.cdp.send('Emulation.setDeviceMetricsOverride', {
     width: 1040, height: 700, deviceScaleFactor: 1, mobile: false
   })
   await evaluate(app.cdp, `(() => {
@@ -185,12 +264,14 @@ try {
       runningRunFocusedWithEvidence: observed.find((row) => row.agentId === activeAgentId)?.focusedEvidenceOpen === true,
       claudeRunLevelDoesNotInventTools: observed.find((row) => row.runtime === 'Claude Code')?.toolTitles.length === 0,
       antigravityCoreToolCatalogName: observed.find((row) => row.runtime === 'Antigravity')?.toolTitles[0] === 'camp.message.send',
+      conversationPresentation,
       agentLevelProcessDock: agentDock,
       recipientOnlyHandoffFooter: handoffFooter,
+      wideComposerLayout,
       recipientOnlyCompactLayout: compactLayout
     },
     runtimes: observed,
-    captures: { top: topCapture, bottom: bottomCapture, compact: compactCapture }
+    captures: { top: topCapture, bottom: bottomCapture, wide: wideCapture, compact: compactCapture }
   }
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`)
   console.log(JSON.stringify({ ...report, reportPath }, null, 2))
@@ -383,12 +464,21 @@ async function seedFixture() {
       ${sqlLiteral(campId)}, ${sqlLiteral(campTitle)}, 'user', 'peer', 'quick_chat',
       '', ${sqlLiteral(runtimes[0].agentId)}, ${runtimes.length}, 1,
       ${sqlLiteral(now)}, ${sqlLiteral(now)}
+    ), (
+      ${sqlLiteral(composerLayoutCampId)}, ${sqlLiteral(composerLayoutCampTitle)}, 'user', 'peer', 'quick_chat',
+      '', ${sqlLiteral(runtimes[0].agentId)}, 0, 1,
+      ${sqlLiteral(now)}, ${sqlLiteral(now)}
     );
     INSERT INTO camp_member(
       camp_id, agent_id, status, capability_overrides_json, version, joined_at
-    ) VALUES ${memberRows};
+    ) VALUES ${memberRows}, (
+      ${sqlLiteral(composerLayoutCampId)}, ${sqlLiteral(runtimes[0].agentId)}, 'active', '{}', 1, ${sqlLiteral(now)}
+    );
     INSERT INTO conversation(id, camp_id, agent_id, version, created_at, updated_at)
-    VALUES ${conversationRows};
+    VALUES ${conversationRows}, (
+      'conversation-composer-layout', ${sqlLiteral(composerLayoutCampId)}, ${sqlLiteral(runtimes[0].agentId)},
+      1, ${sqlLiteral(now)}, ${sqlLiteral(now)}
+    );
     INSERT INTO camp_turn(
       id, camp_id, trigger_type, trigger_id, status,
       execution_budget_schema_version, execution_budget_accepted_at,
@@ -439,10 +529,25 @@ async function collectHandoffFooter(cdp) {
     const footer = document.querySelector('.message-delivery-footer')
     const rail = footer?.querySelector('.message-delivery-handoff-rail')
     const messageSurface = footer?.previousElementSibling
+    const messageContent = messageSurface?.querySelector(':scope > .final-copy, :scope > .message-bubble')
+    const copyButton = messageSurface?.querySelector('.message-copy-button')
+    const recipients = footer?.querySelector('.message-delivery-recipients')
     const footerStyle = footer ? getComputedStyle(footer) : null
     const railStyle = rail ? getComputedStyle(rail) : null
+    const copyButtonStyle = copyButton ? getComputedStyle(copyButton) : null
     const footerRect = footer?.getBoundingClientRect()
-    const messageRect = messageSurface?.getBoundingClientRect()
+    const surfaceRect = messageSurface?.getBoundingClientRect()
+    const contentRect = messageContent?.getBoundingClientRect()
+    const copyButtonRect = copyButton?.getBoundingClientRect()
+    const recipientsRect = recipients?.getBoundingClientRect()
+    const recipientMentions = [...(footer?.querySelectorAll('.message-delivery-recipient-name') ?? [])]
+      .map((mention) => ({
+        text: mention.textContent?.trim() ?? '',
+        role: mention.getAttribute('role'),
+        tabIndex: mention.tabIndex,
+        color: getComputedStyle(mention).color,
+        cursor: getComputedStyle(mention).cursor
+      }))
     return {
       count: document.querySelectorAll('.message-delivery-footer').length,
       text: footer?.textContent?.replace(/\\s+/g, ' ').trim() ?? '',
@@ -450,10 +555,40 @@ async function collectHandoffFooter(cdp) {
       borderRadius: footerStyle?.borderRadius ?? null,
       railBorderLeftWidth: railStyle?.borderLeftWidth ?? null,
       railBorderBottomWidth: railStyle?.borderBottomWidth ?? null,
-      messageGap: footerRect && messageRect ? footerRect.top - messageRect.bottom : null,
+      contentGap: footerRect && contentRect ? footerRect.top - contentRect.bottom : null,
+      surfaceReserve: surfaceRect && contentRect ? surfaceRect.bottom - contentRect.bottom : null,
+      copyButtonPosition: copyButtonStyle?.position ?? null,
+      copyButtonOpacity: copyButtonStyle?.opacity ?? null,
+      copyButtonFocused: document.activeElement === copyButton,
+      surfaceFocusWithin: messageSurface?.matches(':focus-within') ?? false,
+      documentHasFocus: document.hasFocus(),
+      copyButtonHorizontalGap: copyButtonRect && recipientsRect ? copyButtonRect.left - recipientsRect.right : null,
+      recipientMentions,
       stateLabelCount: footer?.querySelectorAll('.message-delivery-state').length ?? 0,
       legacyOriginCount: document.querySelectorAll('.message-run-origin').length,
       compactDeliveryCount: document.querySelectorAll('.delivery-status-list.is-compact').length
+    }
+  })()`)
+}
+
+async function collectConversationPresentation(cdp) {
+  return evaluate(cdp, `(() => {
+    const articles = [...document.querySelectorAll(${JSON.stringify(runArticleSelector)})]
+    const unique = (values) => [...new Set(values)]
+    return {
+      articleCount: articles.length,
+      articleBackgrounds: unique(articles.map((article) => getComputedStyle(article).backgroundColor)),
+      surfaceBackgrounds: unique(articles.map((article) => {
+        const surface = article.querySelector('.message-surface')
+        return surface ? getComputedStyle(surface).backgroundColor : null
+      })),
+      copyBackgrounds: unique(articles.map((article) => {
+        const copy = article.querySelector('.final-copy')
+        return copy ? getComputedStyle(copy).backgroundColor : null
+      })),
+      dayLabels: [...document.querySelectorAll('.timeline-day')]
+        .map((node) => node.textContent?.replace(/\\s+/g, ' ').trim() ?? '')
+        .filter(Boolean)
     }
   })()`)
 }
@@ -509,6 +644,34 @@ async function collectCompactHandoffLayout(cdp) {
       dockLeft: dockRect?.left ?? 0,
       dockRight: dockRect?.right ?? 0,
       dockTop: dockRect?.top ?? 0
+    }
+  })()`)
+}
+
+async function collectWideComposerLayout(cdp) {
+  return evaluate(cdp, `(() => {
+    const composer = document.querySelector('.composer')
+    const composerBox = composer?.querySelector('.composer-box')
+    const actions = composerBox?.querySelector('.composer-actions')
+    const hint = actions?.querySelector('.composer-hint')
+    const send = actions?.querySelector('.composer-send')
+    const composerRect = composer?.getBoundingClientRect()
+    const composerBoxRect = composerBox?.getBoundingClientRect()
+    const hintRect = hint?.getBoundingClientRect()
+    const sendRect = send?.getBoundingClientRect()
+    const actionStyle = actions ? getComputedStyle(actions) : null
+    return {
+      viewportWidth: innerWidth,
+      viewportHeight: innerHeight,
+      documentScrollWidth: document.documentElement.scrollWidth,
+      composerBoxWidth: composerBoxRect?.width ?? 0,
+      leftInset: composerRect && composerBoxRect ? composerBoxRect.left - composerRect.left : 0,
+      rightInset: composerRect && composerBoxRect ? composerRect.right - composerBoxRect.right : 0,
+      actionGap: Number.parseFloat(actionStyle?.columnGap ?? actionStyle?.gap ?? '0'),
+      enterHint: hint?.textContent?.trim() ?? null,
+      sendLabel: send?.textContent?.trim() ?? null,
+      hintImmediatelyPrecedesSend: hint?.nextElementSibling === send,
+      hintToSendGap: hintRect && sendRect ? sendRect.left - hintRect.right : null
     }
   })()`)
 }
