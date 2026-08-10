@@ -1,0 +1,4 @@
+interface:
+  display_name: "共同记忆维护"
+  short_description: "留下值得跨越下一段旅程的偏好、约定与经验"
+  default_prompt: "使用 $memory-stewardship 判断这条信息是否值得进入长期记忆，核对现有 Memory，并执行最小且正确的写入或 Hearth 提案。"

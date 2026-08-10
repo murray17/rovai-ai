@@ -2,7 +2,7 @@
 document_type: versions-index
 authority: version-lifecycle
 current_version: v0.52
-last_updated: 2026-08-09
+last_updated: 2026-08-10
 ---
 
 # Rovai-ai 版本记录
@@ -103,4 +103,4 @@ last_updated: 2026-08-09
 | v0.49 | `historical` | Electron Desktop Shell 通用设置、启动恢复，以及自包含双人追问官方 Skill | [v0.49/README.md](v0.49/README.md) |
 | v0.50 | `historical` | Self/Peer、Model Context Projection/Evidence 与 Redelivery v2 已实现并完成版本级全量验证 | [v0.50/README.md](v0.50/README.md) |
 | v0.51 | `historical` | 严格只读、显式单项修复的可操作诊断中心与集中脱敏 v5 导出 | [v0.51/README.md](v0.51/README.md) |
-| v0.52 | `current` | Dynamic Context 精确恢复、有界 omission Evidence 与 CampSnapshot schema 27 | [v0.52/README.md](v0.52/README.md) |
+| v0.52 | `current` | Dynamic Context 精确恢复、有界 omission Evidence 与代码证据优先的 Agent 仓库分析 Skill | [v0.52/README.md](v0.52/README.md) |

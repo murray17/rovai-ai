@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v0.52
 authority: implementation-plan-and-acceptance
 status: complete
-last_updated: 2026-08-09
+last_updated: 2026-08-10
 ---
 
 # v0.52 实施与验收计划
@@ -40,12 +40,27 @@ last_updated: 2026-08-09
 - [x] Rust/TypeScript/Renderer CampSnapshot schemaVersion 统一升到 27；
 - [x] 完成定向、workspace、TypeScript、docs 与 diff 验证。
 
+## Checkpoint 4：代码证据优先的 Agent 仓库分析 Skill
+
+- [x] 使用 `skill-creator` 初始化 `analyze-agent-codebase`，并提供匹配的 `agents/openai.yaml`；
+- [x] `SKILL.md` 冻结只读默认、代码/测试证据层级、纵向调用链、已确认/推断/未知、文档漂移、
+  可选 Camp 证据收集与单一主分析者合并规则；
+- [x] 自包含 `references/dossier-structure.md`，规定分析轴、ReAct/Plan-and-Execute、子 Agent、Memory、
+  Tool/Skill/权限判据和单一索引的专题文档合同；
+- [x] Core bundled manifest、installation test、Skill smoke 与设置页 capture 期望扩展为五个官方 Skill；
+- [x] 五个官方目录、frontmatter、默认调用提示、Core manifest 和投影夹具统一移除 `rovai-` 前缀；
+- [x] Core 启动时只对精确的旧官方名称做本机原位去前缀，保留 Skill ID 与 Assignment；不提供 alias、
+  双份发布、fallback lookup 或 Imported 冲突迁移；
+- [x] ADR-0150、`CONTEXT.md`、Arctic Dawn 内置清单与版本影响记录同步；
+- [x] 完成 Skill validator、Rust 定向测试、Skill smoke、文档治理、格式和 diff 验证。
+
 ## 完成条件
 
 - [x] Rust workspace format/check/clippy/test 全部通过；
 - [x] TypeScript typecheck 与 Renderer/Node tests 全部通过；
 - [x] `pnpm docs:check` 与 `git diff --check` 通过；
-- [x] 概览和本计划根据真实验证结果更新为 complete。
+- [x] 第五个官方 Skill 的结构、bundled installation、Runtime discovery 与文档治理验证通过；
+- [x] 概览和本计划根据新增范围的真实验证结果恢复为 complete。
 
 ## 实际验证结果（2026-08-09）
 
@@ -56,3 +71,18 @@ last_updated: 2026-08-09
   在同机允许临时 socket 的隔离权限下复跑通过；
 - `pnpm typecheck`、39 个 Vitest 文件/239 项测试、Node Qualification 78 项测试全部通过；
 - `pnpm docs:check`、以 `origin/main` 为真实 base 的 `pnpm docs:check:ci` 与 `git diff --check` 通过。
+
+## 新增 Skill 验证结果（2026-08-10）
+
+- `quick_validate.py` 对 `analyze-agent-codebase`、`memory-stewardship`、`worktree`、`grill-duo` 和
+  `grill-duo-with-docs` 五个目录全部通过；分析 Skill 正文 124 行，按需参考 138 行；
+- `cargo test -p rovai-core skill::tests` 7/7、`cargo test -p rovai-core skill_projection::tests` 14/14
+  通过；新增按字母排序更靠前的官方 Skill 暴露了冲突测试的
+  列表首项依赖，已改为按稳定名称选择并复跑通过；
+- `cargo check --workspace --all-targets` 与 `cargo fmt --all -- --check` 通过；
+- `pnpm smoke:skills` 在受限沙箱中因私有 Unix socket 被系统拒绝，在允许临时 socket 的同机隔离权限下
+  复跑通过：全新 Library 精确安装 `analyze-agent-codebase`、`grill-duo`、`grill-duo-with-docs`、
+  `memory-stewardship`、`worktree` 五个默认启用、未分组的官方 Skill，并通过 Codex CLI 0.146.1 的
+  native Skill delivery 回合；
+- `pnpm docs:test` 21/21、`pnpm docs:check`、`DOCS_BASE_REF=origin/main pnpm docs:check:ci`、
+  `pnpm docs:adr:generate -- --check`、两个修改脚本的 `node --check` 与 `git diff --check` 全部通过。

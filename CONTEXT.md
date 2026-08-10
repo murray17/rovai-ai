@@ -353,20 +353,24 @@ The transient list of current Agent Profiles whose currently selected Agent Runt
 _Avoid_: Skill Assignment, persisted Group membership, Camp membership, historical Member snapshot
 
 **Memory Stewardship Skill**:
-The official Rovai Skill `rovai-memory-stewardship` (“共同记忆维护”) that teaches durable-memory judgment, authorized search/read, atomic wording, Retrieval Keys, duplicate and secret checks, direct non-Hearth writes, and the Hearth Proposal boundary. It is present in the Skill Library by default but has no default Skill Group Assignment, and it grants no Capability or fallback prompt injection.
+The official Rovai Skill `memory-stewardship` (“共同记忆维护”) that teaches durable-memory judgment, authorized search/read, atomic wording, Retrieval Keys, duplicate and secret checks, direct non-Hearth writes, and the Hearth Proposal boundary. It is present in the Skill Library by default but has no default Skill Group Assignment, and it grants no Capability or fallback prompt injection.
 _Avoid_: default Group Assignment, per-Scope Skill, Memory authority, mandatory System Prompt, unsupported-Runtime emulation
 
 **Worktree Skill**:
-The official Rovai Skill `rovai-worktree` (“隔离 Worktree”) that makes one isolated Git worktree durable to a Task, reuses it across AgentRuns, and keeps implementation changes out of the primary checkout. It is present in the Skill Library by default but has no default Skill Group Assignment, does not create a worktree until invoked in an authorized implementation task, and never grants filesystem or Git authority.
+The official Rovai Skill `worktree` (“隔离 Worktree”) that makes one isolated Git worktree durable to a Task, reuses it across AgentRuns, and keeps implementation changes out of the primary checkout. It is present in the Skill Library by default but has no default Skill Group Assignment, does not create a worktree until invoked in an authorized implementation task, and never grants filesystem or Git authority.
 _Avoid_: per-AgentRun worktree, Camp-wide worktree, implicit implementation permission, automatic cleanup, primary-checkout mutation
 
+**Agent Codebase Analysis Skill**:
+The self-contained official Rovai Skill `analyze-agent-codebase` (“Agent 代码库分析”) that reconstructs Coding Agent and multi-Agent repository behavior from entrypoints, call chains, state transitions, persistence, and tests; separates confirmed facts, inferences, unknowns, and documentation drift; and optionally produces one indexed topic dossier when the user requests files. It is read-only by default, has no default Skill Group Assignment, and grants no filesystem, documentation, collaboration, Tool, or permission authority.
+_Avoid_: README paraphrase, keyword-only architecture label, automatic document mutation, implementation authority, required multi-member Camp
+
 **Grill Duo Skill**:
-The self-contained official Rovai Skill `rovai-grill-duo` (“双人追问”) in which the current member resolves one decision point at a time while one fixed eligible Camp partner independently explains trade-offs and recommends an answer through explicit Public A2A Messages. It is present in the Skill Library by default but has no default Skill Group Assignment, and send acceptance never implies that the partner started or completed.
+The self-contained official Rovai Skill `grill-duo` (“双人追问”) in which the current member resolves one decision point at a time while one fixed eligible Camp partner independently explains trade-offs and recommends an answer through explicit Public A2A Messages. It is present in the Skill Library by default but has no default Skill Group Assignment, and send acceptance never implies that the partner started or completed.
 _Avoid_: synchronous member call, hidden second opinion, automatic reply obligation, bundled `grilling` dependency
 
 **Grill Duo with Docs Skill**:
-The self-contained official Rovai Skill `rovai-grill-duo-with-docs` (“双人追问与文档”) that applies Grill Duo while maintaining resolved domain language and only qualifying architectural decisions. Its immutable Revision carries its own duo, domain-modeling, glossary, and ADR references rather than requiring another Skill Assignment.
-_Avoid_: dependent `rovai-grill-duo` assignment, generic `domain-modeling` bundled Skill, implementation-before-agreement, documentation batch after the session
+The self-contained official Rovai Skill `grill-duo-with-docs` (“双人追问与文档”) that applies Grill Duo while maintaining resolved domain language and only qualifying architectural decisions. Its immutable Revision carries its own duo, domain-modeling, glossary, and ADR references rather than requiring another Skill Assignment.
+_Avoid_: dependent `grill-duo` assignment, generic `domain-modeling` bundled Skill, implementation-before-agreement, documentation batch after the session
 
 **Agent Memory Mutation Run Quota**:
 The hard limit of four successfully persisted direct writes and Hearth Memory Proposals per source AgentRun. Idempotent replays and failed calls do not consume another slot, while a later Hearth Proposal decision does not restore one.

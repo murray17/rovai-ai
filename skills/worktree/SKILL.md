@@ -1,5 +1,5 @@
 ---
-name: rovai-worktree
+name: worktree
 description: 为 ROVAI Camp 中的非 trivial 实现工作创建或复用隔离 Git worktree。开始代码、schema、migration、script、API、UI、runtime 或跨文件修改前使用；一个 durable Task 对应一个 worktree，并跨 AgentRun 复用。
 ---
 

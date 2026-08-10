@@ -7476,7 +7476,7 @@ mod tests {
             .list(&fixture.database)
             .unwrap()
             .into_iter()
-            .find(|skill| skill.name == "rovai-memory-stewardship")
+            .find(|skill| skill.name == "memory-stewardship")
             .unwrap();
         library
             .set_enabled(

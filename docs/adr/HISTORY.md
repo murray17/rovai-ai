@@ -155,10 +155,11 @@ generated_from: docs/adr-front-matter
 | [ADR-0141](0141-atomic-bootstrap-redelivery-input-overlay.md) | Atomic Bootstrap Redelivery Input Overlay and Transient Identity Boundary | `accepted` | `cross-version` | [v0.48](../versions/v0.48/README.md) | — |
 | [ADR-0142](0142-native-session-scoped-compaction-observer-lease.md) | Native-Session-Scoped Compaction Observer Lease and Uncertain-Submission Boundary | `accepted` | `cross-version` | [v0.48](../versions/v0.48/README.md) | — |
 | [ADR-0143](0143-best-effort-non-blocking-compaction-detector-capability.md) | Best-Effort Non-Blocking Compaction Detector Capability | `accepted` | `cross-version` | [v0.48](../versions/v0.48/README.md) | — |
-| [ADR-0144](0144-self-contained-duo-grilling-bundled-skills.md) | Self-Contained Duo Grilling Bundled Skills | `accepted` | `cross-version` | [v0.49](../versions/v0.49/README.md) | — |
+| [ADR-0144](0144-self-contained-duo-grilling-bundled-skills.md) | Self-Contained Duo Grilling Bundled Skills | `superseded` | `cross-version` | [v0.49](../versions/v0.49/README.md) | [ADR-0150](0150-evidence-first-agent-codebase-analysis-bundled-skill.md) |
 | [ADR-0145](0145-core-owned-pending-camp-draft-activation.md) | Core-Owned Pending Camp Draft Activation | `accepted` | `cross-version` | [v0.49](../versions/v0.49/README.md) | — |
 | [ADR-0146](0146-sole-native-session-self-identity-and-peer-routing-projection.md) | Sole Native-Session Self Identity and Peer Routing Projection | `accepted` | `cross-version` | [v0.50](../versions/v0.50/README.md) | — |
 | [ADR-0147](0147-lossless-model-context-projection-and-layered-delivery-evidence.md) | Lossless Model Context Projection and Layered Delivery Evidence | `accepted` | `cross-version` | [v0.50](../versions/v0.50/README.md) | — |
 | [ADR-0148](0148-read-only-diagnostics-and-data-minimized-export.md) | Read-Only Diagnostics and Data-Minimized Export | `accepted` | `cross-version` | [v0.51](../versions/v0.51/README.md) | — |
 | [ADR-0149](0149-bounded-whole-history-omission-evidence.md) | Bounded Whole-History Omission Evidence | `accepted` | `cross-version` | [v0.52](../versions/v0.52/README.md) | — |
+| [ADR-0150](0150-evidence-first-agent-codebase-analysis-bundled-skill.md) | Evidence-First Agent Codebase Analysis Bundled Skill | `accepted` | `cross-version` | [v0.52](../versions/v0.52/README.md) | — |
 <!-- adr-history:end -->

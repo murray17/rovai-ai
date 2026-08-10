@@ -36,26 +36,31 @@ pub const MAX_SKILL_FILE_BYTES: u64 = 10 * 1024 * 1024;
 pub const MAX_SKILL_TOTAL_BYTES: u64 = 50 * 1024 * 1024;
 const STAGING_TTL: Duration = Duration::from_secs(30 * 60);
 
-const MEMORY_STEWARDSHIP_RULES: &str =
-    include_str!("../../../skills/rovai-memory-stewardship/SKILL.md");
+const ANALYZE_AGENT_CODEBASE_RULES: &str =
+    include_str!("../../../skills/analyze-agent-codebase/SKILL.md");
+const ANALYZE_AGENT_CODEBASE_OPENAI: &str =
+    include_str!("../../../skills/analyze-agent-codebase/agents/openai.yaml");
+const ANALYZE_AGENT_CODEBASE_DOSSIER_REFERENCE: &str =
+    include_str!("../../../skills/analyze-agent-codebase/references/dossier-structure.md");
+const MEMORY_STEWARDSHIP_RULES: &str = include_str!("../../../skills/memory-stewardship/SKILL.md");
 const MEMORY_STEWARDSHIP_OPENAI: &str =
-    include_str!("../../../skills/rovai-memory-stewardship/agents/openai.yaml");
-const WORKTREE_RULES: &str = include_str!("../../../skills/rovai-worktree/SKILL.md");
-const WORKTREE_OPENAI: &str = include_str!("../../../skills/rovai-worktree/agents/openai.yaml");
-const GRILL_DUO_RULES: &str = include_str!("../../../skills/rovai-grill-duo/SKILL.md");
-const GRILL_DUO_OPENAI: &str = include_str!("../../../skills/rovai-grill-duo/agents/openai.yaml");
+    include_str!("../../../skills/memory-stewardship/agents/openai.yaml");
+const WORKTREE_RULES: &str = include_str!("../../../skills/worktree/SKILL.md");
+const WORKTREE_OPENAI: &str = include_str!("../../../skills/worktree/agents/openai.yaml");
+const GRILL_DUO_RULES: &str = include_str!("../../../skills/grill-duo/SKILL.md");
+const GRILL_DUO_OPENAI: &str = include_str!("../../../skills/grill-duo/agents/openai.yaml");
 const GRILL_DUO_WITH_DOCS_RULES: &str =
-    include_str!("../../../skills/rovai-grill-duo-with-docs/SKILL.md");
+    include_str!("../../../skills/grill-duo-with-docs/SKILL.md");
 const GRILL_DUO_WITH_DOCS_OPENAI: &str =
-    include_str!("../../../skills/rovai-grill-duo-with-docs/agents/openai.yaml");
+    include_str!("../../../skills/grill-duo-with-docs/agents/openai.yaml");
 const GRILL_DUO_REFERENCE: &str =
-    include_str!("../../../skills/rovai-grill-duo-with-docs/references/grill-duo.md");
+    include_str!("../../../skills/grill-duo-with-docs/references/grill-duo.md");
 const DOMAIN_MODELING_REFERENCE: &str =
-    include_str!("../../../skills/rovai-grill-duo-with-docs/references/domain-modeling.md");
+    include_str!("../../../skills/grill-duo-with-docs/references/domain-modeling.md");
 const CONTEXT_FORMAT_REFERENCE: &str =
-    include_str!("../../../skills/rovai-grill-duo-with-docs/references/context-format.md");
+    include_str!("../../../skills/grill-duo-with-docs/references/context-format.md");
 const ADR_FORMAT_REFERENCE: &str =
-    include_str!("../../../skills/rovai-grill-duo-with-docs/references/adr-format.md");
+    include_str!("../../../skills/grill-duo-with-docs/references/adr-format.md");
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -325,6 +330,16 @@ struct BundledDefinition {
     files: &'static [(&'static str, &'static str, u32)],
 }
 
+const ANALYZE_AGENT_CODEBASE_FILES: &[(&str, &str, u32)] = &[
+    ("SKILL.md", ANALYZE_AGENT_CODEBASE_RULES, 0o644),
+    ("agents/openai.yaml", ANALYZE_AGENT_CODEBASE_OPENAI, 0o644),
+    (
+        "references/dossier-structure.md",
+        ANALYZE_AGENT_CODEBASE_DOSSIER_REFERENCE,
+        0o644,
+    ),
+];
+
 const MEMORY_STEWARDSHIP_FILES: &[(&str, &str, u32)] = &[
     ("SKILL.md", MEMORY_STEWARDSHIP_RULES, 0o644),
     ("agents/openai.yaml", MEMORY_STEWARDSHIP_OPENAI, 0o644),
@@ -359,19 +374,23 @@ const GRILL_DUO_WITH_DOCS_FILES: &[(&str, &str, u32)] = &[
 
 const BUNDLED_SKILLS: &[BundledDefinition] = &[
     BundledDefinition {
-        name: "rovai-memory-stewardship",
+        name: "analyze-agent-codebase",
+        files: ANALYZE_AGENT_CODEBASE_FILES,
+    },
+    BundledDefinition {
+        name: "memory-stewardship",
         files: MEMORY_STEWARDSHIP_FILES,
     },
     BundledDefinition {
-        name: "rovai-worktree",
+        name: "worktree",
         files: WORKTREE_FILES,
     },
     BundledDefinition {
-        name: "rovai-grill-duo",
+        name: "grill-duo",
         files: GRILL_DUO_FILES,
     },
     BundledDefinition {
-        name: "rovai-grill-duo-with-docs",
+        name: "grill-duo-with-docs",
         files: GRILL_DUO_WITH_DOCS_FILES,
     },
 ];
@@ -1219,9 +1238,10 @@ impl SkillLibraryService {
     }
 
     pub fn install_bundled_skills(&self, database: &mut Database) -> Result<()> {
+        strip_official_skill_name_prefixes(database)?;
         for definition in BUNDLED_SKILLS {
-            if !definition.name.starts_with("rovai-") {
-                anyhow::bail!("official Skill names must use the rovai- prefix");
+            if definition.name.starts_with("rovai-") {
+                anyhow::bail!("official Skill names must not use the rovai- prefix");
             }
             let token = format!("bundled-{}-{}", definition.name, Uuid::new_v4());
             let staging_root = self.root.join(".staging").join(token);
@@ -2343,6 +2363,62 @@ fn publish_directory(source: &Path, final_content: &Path) -> Result<()> {
     Ok(())
 }
 
+fn strip_official_skill_name_prefixes(database: &mut Database) -> Result<()> {
+    let now = Utc::now().to_rfc3339();
+    let transaction = database.connection_mut().transaction()?;
+    let actor = ActorRef::System {
+        component_id: "skill-library-bootstrap".to_string(),
+    };
+    for definition in BUNDLED_SKILLS {
+        let prefixed_name = format!("rovai-{}", definition.name);
+        let existing_id = transaction
+            .query_row(
+                "SELECT id FROM skill WHERE name = ?1 AND origin = 'official'",
+                [&prefixed_name],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        let Some(existing_id) = existing_id else {
+            continue;
+        };
+        let target_exists = transaction
+            .query_row(
+                "SELECT 1 FROM skill WHERE name = ?1",
+                [definition.name],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?
+            .is_some();
+        if target_exists {
+            anyhow::bail!(
+                "cannot remove the official Skill prefix because {} already exists",
+                definition.name
+            );
+        }
+        transaction.execute(
+            r#"
+            UPDATE skill
+            SET name = ?1, version = version + 1, updated_at = ?2
+            WHERE id = ?3 AND name = ?4 AND origin = 'official'
+            "#,
+            params![definition.name, now, existing_id, prefixed_name],
+        )?;
+        append_skill_event(
+            &transaction,
+            "skill.official_name_changed",
+            &existing_id,
+            &actor,
+            json!({
+                "skillId": existing_id.clone(),
+                "previousName": prefixed_name.clone(),
+                "name": definition.name,
+            }),
+        )?;
+    }
+    transaction.commit()?;
+    Ok(())
+}
+
 fn materialize_bundled_definition(
     destination: &Path,
     definition: &BundledDefinition,
@@ -2595,10 +2671,11 @@ mod tests {
                 .map(|skill| skill.name.as_str())
                 .collect::<Vec<_>>(),
             [
-                "rovai-grill-duo",
-                "rovai-grill-duo-with-docs",
-                "rovai-memory-stewardship",
-                "rovai-worktree"
+                "analyze-agent-codebase",
+                "grill-duo",
+                "grill-duo-with-docs",
+                "memory-stewardship",
+                "worktree"
             ]
         );
         assert!(skills.iter().all(|skill| skill.enabled));
@@ -2611,9 +2688,27 @@ mod tests {
             let content = service.revision_content_path(&skill.id, &skill.current_revision.id);
             assert!(content.join("agents/openai.yaml").is_file());
         }
+        let analyze_agent_codebase = skills
+            .iter()
+            .find(|skill| skill.name == "analyze-agent-codebase")
+            .unwrap();
+        let analyze_agent_codebase_content = service.revision_content_path(
+            &analyze_agent_codebase.id,
+            &analyze_agent_codebase.current_revision.id,
+        );
+        assert!(
+            analyze_agent_codebase_content
+                .join("references/dossier-structure.md")
+                .is_file()
+        );
+        assert!(
+            fs::read_to_string(analyze_agent_codebase_content.join("SKILL.md"))
+                .unwrap()
+                .contains("证据账本")
+        );
         let grill_duo = skills
             .iter()
-            .find(|skill| skill.name == "rovai-grill-duo")
+            .find(|skill| skill.name == "grill-duo")
             .unwrap();
         let grill_duo_content =
             service.revision_content_path(&grill_duo.id, &grill_duo.current_revision.id);
@@ -2624,7 +2719,7 @@ mod tests {
         );
         let grill_duo_with_docs = skills
             .iter()
-            .find(|skill| skill.name == "rovai-grill-duo-with-docs")
+            .find(|skill| skill.name == "grill-duo-with-docs")
             .unwrap();
         let grill_duo_with_docs_content = service.revision_content_path(
             &grill_duo_with_docs.id,
@@ -2645,7 +2740,7 @@ mod tests {
         }
         let memory_stewardship = skills
             .iter()
-            .find(|skill| skill.name == "rovai-memory-stewardship")
+            .find(|skill| skill.name == "memory-stewardship")
             .unwrap();
         let content = service.revision_content_path(
             &memory_stewardship.id,
@@ -2656,7 +2751,7 @@ mod tests {
         assert!(
             fs::read_to_string(content.join("SKILL.md"))
                 .unwrap()
-                .contains("name: rovai-memory-stewardship")
+                .contains("name: memory-stewardship")
         );
         let repair_count: i64 = database
             .connection()
@@ -2682,6 +2777,51 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(!refreshed.enabled);
+        remove_directory_if_present(&root).unwrap();
+        remove_directory_if_present(&data).unwrap();
+    }
+
+    #[test]
+    fn prefixed_official_skill_names_are_stripped_in_place() {
+        let root = temporary_directory("rovai-skill-library");
+        let data = temporary_directory("rovai-skill-db");
+        let mut database = Database::open(&data).unwrap();
+        let service = SkillLibraryService::new(root.clone()).unwrap();
+        service.install_bundled_skills(&mut database).unwrap();
+        let original = service
+            .list(&database)
+            .unwrap()
+            .into_iter()
+            .find(|skill| skill.name == "memory-stewardship")
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE skill SET name = 'rovai-memory-stewardship' WHERE id = ?1",
+                [&original.id],
+            )
+            .unwrap();
+
+        service.install_bundled_skills(&mut database).unwrap();
+
+        let skills = service.list(&database).unwrap();
+        assert_eq!(skills.len(), 5);
+        assert!(skills.iter().all(|skill| !skill.name.starts_with("rovai-")));
+        let restored = skills
+            .iter()
+            .find(|skill| skill.name == "memory-stewardship")
+            .unwrap();
+        assert_eq!(restored.id, original.id);
+        assert_eq!(restored.current_revision.id, original.current_revision.id);
+        let rename_count: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM event_log WHERE event_type = 'skill.official_name_changed'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(rename_count, 1);
         remove_directory_if_present(&root).unwrap();
         remove_directory_if_present(&data).unwrap();
     }
@@ -2713,14 +2853,18 @@ mod tests {
         let mut database = Database::open(&data).unwrap();
         let service = SkillLibraryService::new(root.clone()).unwrap();
         service.install_bundled_skills(&mut database).unwrap();
+        let memory_stewardship_definition = BUNDLED_SKILLS
+            .iter()
+            .find(|definition| definition.name == "memory-stewardship")
+            .unwrap();
         materialize_bundled_definition(
-            &source.join("rovai-memory-stewardship"),
-            &BUNDLED_SKILLS[0],
+            &source.join("memory-stewardship"),
+            memory_stewardship_definition,
         )
         .unwrap();
 
         let inspection = service
-            .inspect_import(&database, &source.join("rovai-memory-stewardship"))
+            .inspect_import(&database, &source.join("memory-stewardship"))
             .unwrap();
         let candidate = &inspection.candidates[0];
         assert_eq!(candidate.import_action, "official_conflict");

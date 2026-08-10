@@ -1,5 +1,5 @@
 ---
-name: rovai-grill-duo-with-docs
+name: grill-duo-with-docs
 description: 在 Rovai Camp 中用固定搭档双人追问，并随着决定形成维护项目领域词汇和必要 ADR。用户要结合代码、文档、术语与既有决定澄清计划或设计时使用。
 ---
 

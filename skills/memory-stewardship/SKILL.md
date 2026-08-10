@@ -1,5 +1,5 @@
 ---
-name: rovai-memory-stewardship
+name: memory-stewardship
 description: 在 Rovai-ai 中维护用户治理的长期记忆。用于当稳定偏好、未来协作约定或可复用经验值得跨越后续 AgentRun 保留；用户明确要求记住或更正某件事；或现有 Memory 需要修订时。先用 memory.search 与 memory.read 核对当前内容，再用 memory.write 写入当前 Companion 或可访问的 Relationship，或用 memory.propose_hearth 提交 Hearth 建议。
 ---
 

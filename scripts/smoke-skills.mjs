@@ -73,10 +73,11 @@ try {
   const bundledSkillNames = initialSkills.map((skill) => skill.name).sort()
   assert(
     JSON.stringify(bundledSkillNames) === JSON.stringify([
-      'rovai-grill-duo',
-      'rovai-grill-duo-with-docs',
-      'rovai-memory-stewardship',
-      'rovai-worktree'
+      'analyze-agent-codebase',
+      'grill-duo',
+      'grill-duo-with-docs',
+      'memory-stewardship',
+      'worktree'
     ])
       && initialSkills.every((skill) => skill.origin === 'official' && skill.enabled && skill.groupAssignments.length === 0),
     `Fresh Core did not install the expected unassigned official Skill: ${JSON.stringify(initialSkills)}`

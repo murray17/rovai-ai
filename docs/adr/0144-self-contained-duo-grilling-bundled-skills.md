@@ -2,13 +2,13 @@
 document_type: adr
 id: ADR-0144
 title: Self-Contained Duo Grilling Bundled Skills
-status: accepted
+status: superseded
 date: 2026-08-09
 decision_scope: cross-version
 source_version: v0.49
 supersedes:
   - ADR-0109
-superseded_by: null
+superseded_by: ADR-0150
 ---
 
 # ADR-0144: Self-Contained Duo Grilling Bundled Skills

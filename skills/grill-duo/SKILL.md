@@ -1,5 +1,5 @@
 ---
-name: rovai-grill-duo
+name: grill-duo
 description: 在 Rovai Camp 中由当前队员与一位固定搭档共同逐项澄清计划、需求、设计或决定。用户要求 grill、追问、压力测试、消除方案歧义，或希望在实施前走完决策树时使用。
 ---
 
