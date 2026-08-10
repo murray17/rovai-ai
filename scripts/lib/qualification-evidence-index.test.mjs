@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { digestJson } from './qualification-common.mjs'
+import { digestJson, sha256 } from './qualification-common.mjs'
 import {
   buildEvidenceIndex,
   validateEvidenceIndex
@@ -80,6 +80,102 @@ test('Evidence Index validation prevents a derived record from elevating partial
   assert.equal(derived.coverage.state, 'complete')
   tampered.payloadDigest = `sha256:${digestJson(tampered.payload)}`
   assert.throws(() => validateEvidenceIndex(tampered), /elevated source coverage/)
+})
+
+test('Evidence Index exposes only bounded Public A2A content and mechanical delivery facts to the Judge', () => {
+  const input = fixture()
+  delete input.snapshot.inboxMessages
+  delete input.snapshot.conversationInputs
+  input.snapshot.schemaVersion = 27
+  input.snapshot.agentRuns.push({
+    id: 'run-reviewer',
+    campTurnId: 'turn-1',
+    agentId: 'agent-reviewer',
+    status: 'succeeded',
+    endedAt: '2026-08-04T00:00:07.000Z'
+  })
+  input.snapshot.messages.push({
+    id: 'a2a-message',
+    authorType: 'agent',
+    authorId: 'agent-lead',
+    sourceAgentRunId: 'run-1',
+    sequence: 3,
+    createdAt: '2026-08-04T00:00:05.000Z',
+    body: 'Review the state transition and report concrete defects.'
+  }, {
+    id: 'intermediate-lead-message',
+    authorType: 'agent',
+    authorId: 'agent-lead',
+    sourceAgentRunId: 'run-1',
+    sequence: 4,
+    createdAt: '2026-08-04T00:00:06.000Z',
+    body: 'Intermediate progress update that is not the final response.'
+  })
+  input.finalResponses.push({ messageId: 'intermediate-lead-message', isFinal: false })
+  input.snapshot.messageDeliveries = [{
+    id: 'delivery-reviewer',
+    messageId: 'a2a-message',
+    campTurnId: 'turn-1',
+    recipientAgentId: 'agent-reviewer',
+    status: 'settled',
+    contextManifestId: 'manifest-reviewer',
+    targetAgentRunId: 'run-reviewer',
+    createdAt: '2026-08-04T00:00:05.000Z',
+    endedAt: '2026-08-04T00:00:07.000Z'
+  }]
+  input.snapshot.contextManifests = [{
+    id: 'manifest-reviewer',
+    agentRunId: 'run-reviewer',
+    currentInputSource: { type: 'member_call', senderAgentId: 'agent-lead' },
+    delivery: { status: 'accepted' },
+    createdAt: '2026-08-04T00:00:05.000Z'
+  }]
+
+  const { artifact, references } = buildEvidenceIndex(input)
+  const byId = new Map(artifact.payload.records.map((record) => [record.evidenceId, record]))
+  const content = byId.get('core.message-content:a2a-message')
+
+  assert.equal(content.safeForJudge, true)
+  assert.equal(content.contentDigest, `sha256:${sha256('Review the state transition and report concrete defects.')}`)
+  assert.equal(byId.get('core.message-delivery:delivery-reviewer').safeForJudge, true)
+  assert.equal(byId.get('core.context-manifest:manifest-reviewer').safeForJudge, false)
+  assert.equal(byId.get('core.message-content:root-message').safeForJudge, false)
+  assert.equal(byId.get('core.message-content:intermediate-lead-message').safeForJudge, false)
+  assert.deepEqual(references.messageContents['a2a-message'], {
+    artifactId: artifact.artifactId,
+    evidenceId: 'core.message-content:a2a-message'
+  })
+  assert.deepEqual(references.messageDeliveries['delivery-reviewer'], {
+    artifactId: artifact.artifactId,
+    evidenceId: 'core.message-delivery:delivery-reviewer'
+  })
+})
+
+test('Evidence Index separates Judge-safe workspace change facts from exact content identity', () => {
+  const input = fixture()
+  const body = 'export const value = 42\n'
+  input.workspaceDiff = {
+    changed: [{
+      path: 'src/value.mjs',
+      before: null,
+      after: {
+        path: 'src/value.mjs',
+        type: 'file',
+        mode: 0o644,
+        bytes: Buffer.byteLength(body),
+        digest: sha256(body)
+      }
+    }]
+  }
+  const { artifact, references } = buildEvidenceIndex(input)
+  const byId = new Map(artifact.payload.records.map((record) => [record.evidenceId, record]))
+  const changeReference = references.workspaceChanges['src/value.mjs']
+  const contentReference = references.workspaceContents['src/value.mjs']
+
+  assert.equal(byId.get(changeReference.evidenceId).safeForJudge, true)
+  assert.equal(byId.get(contentReference.evidenceId).safeForJudge, true)
+  assert.equal(byId.get(contentReference.evidenceId).contentDigest, `sha256:${sha256(body)}`)
+  assert.notEqual(changeReference.evidenceId, contentReference.evidenceId)
 })
 
 function fixture() {
@@ -202,6 +298,6 @@ function fixture() {
     termination: { converged: true, lingeringChildPids: [] },
     isolationProfile: { status: 'admitted', formalAdmissible: true },
     isolationContinuity: { state: 'complete', reason: null },
-    finalResponses: [{ messageId: 'final-message' }]
+    finalResponses: [{ messageId: 'final-message', isFinal: true }]
   }
 }

@@ -1,7 +1,7 @@
 ---
 document_type: contracts-index
 authority: protocol-contract-routing
-last_updated: 2026-08-10
+last_updated: 2026-08-11
 ---
 
 # 长期接口合同
@@ -20,9 +20,13 @@ Architecture 解释组件如何组成，Version 文档记录交付范围；它�
 | 合同 | 权威范围 |
 | --- | --- |
 | [Benchmark Protocol v3（当前）](benchmark-protocol-v3.md) | 版本化 Run 信封、Product/Environment fingerprint、五层 Evidence、Adapter/derived projection、逐轴比较资格与 disclosure |
+| [Semantic Judge Views v1（当前）](semantic-judge-views-v1.md) | Process/Blinded Outcome 双视图、模型可见 evidence allowlist、本地 Evidence ID、双 Replica、逐项 reconciliation 与 Hard Outcome non-interference |
 | [Diagnostics Center v1（当前）](diagnostics-center-v1.md) | `diagnostics.check` typed read model、三态分类、显式单项修复映射、Recovery 与集中脱敏的 `rovai-diagnostics-v5` |
 | [Collaboration State v2（当前）](collaboration-state-v2.md) | peer-only routing identity、稳定 CampMember 选择、Lead ID/Boolean、完整 projection digest、独立 inclusion、accepted ACK 与 v0.50 clean break |
 | [Built-in Tool Transport v5（当前）](builtin-tool-transport-v5.md) | 十三项固定业务命令、Core Envelope/IPC、Agent Output v2，以及 Lead-owned Task v3 schema/help/current-only clean break |
+
+跨版本合同拥有的 JSON Schema 位于 [`schemas/`](schemas/) 并由独立 catalog 固定 raw-byte digest；不得为了新合同
+修改已冻结的历史 Version schema catalog。
 | [Durable Task v3（当前）](durable-task-v3.md) | User/Lead 责任定义、Assignee execution-state update、Camp-wide read、explicit owner、unassigned holding 与 advisory actions |
 | [Camp Message Send v2（当前）](camp-message-send-v2.md) | 隐式当前 Run Camp、记录身份 Replay、send clean break 与 A2A 业务错误；v0.47 transport 入口由 v4 合同局部替代 |
 | [Pending Camp Activation v1（当前）](pending-camp-activation-v1.md) | 一键 Pending 创建、Snapshot/Navigation activation state、首消息原子激活、mutation guard 与窄 discard/启动清理 |

@@ -88,6 +88,73 @@ test('pending Input remains an unsettled independent Member Call fact', () => {
   assert.equal(audit.passed, false)
 })
 
+test('current Public A2A evidence binds one Message Delivery to its message, accepted event, input ACK, and target Run', () => {
+  const evidence = deriveCollaborationEvidence(currentPublicA2aSnapshot(), {
+    campTurnId: 'turn-current'
+  })
+
+  assert.equal(evidence.status, 'observed')
+  assert.deepEqual(evidence.members.sort(), ['agent-lead', 'agent-reviewer'])
+  assert.deepEqual(evidence.metrics, {
+    acceptedMemberCalls: 1,
+    observedDurableMemberCalls: 1,
+    settledMemberCalls: 1,
+    observedSettledMemberCalls: 1,
+    maximumDepth: 1,
+    completedTasks: 1,
+    coverage: 'complete_with_message_delivery_receipts'
+  })
+  assert.deepEqual(evidence.a2a.map((call) => ({
+    callId: call.callId,
+    messageId: call.messageId,
+    deliveryId: call.deliveryId,
+    senderAgentId: call.senderAgentId,
+    recipientAgentId: call.recipientAgentId,
+    recipientRunId: call.recipientRunId,
+    recipientInputEvidenceId: call.recipientInputEvidenceId,
+    recipientInputStatus: call.recipientInputStatus,
+    settlement: call.mechanicalSettlement.state
+  })), [{
+    callId: 'delivery-1',
+    messageId: 'message-a2a-1',
+    deliveryId: 'delivery-1',
+    senderAgentId: 'agent-lead',
+    recipientAgentId: 'agent-reviewer',
+    recipientRunId: 'run-reviewer',
+    recipientInputEvidenceId: 'manifest-reviewer',
+    recipientInputStatus: 'accepted',
+    settlement: 'settled'
+  }])
+})
+
+test('current Public A2A evidence fails closed when the accepted counter is not covered by Message Deliveries', () => {
+  const snapshot = currentPublicA2aSnapshot()
+  snapshot.messageDeliveries = []
+  const evidence = deriveCollaborationEvidence(snapshot, { campTurnId: 'turn-current' })
+
+  assert.equal(evidence.metrics.acceptedMemberCalls, 1)
+  assert.equal(evidence.metrics.observedDurableMemberCalls, 0)
+  assert.equal(evidence.metrics.settledMemberCalls, null)
+  assert.equal(evidence.metrics.coverage, 'partial_message_delivery_receipt_coverage')
+})
+
+test('a settled Message Delivery without its target Run is not counted as mechanically settled', () => {
+  const snapshot = currentPublicA2aSnapshot()
+  snapshot.messageDeliveries[0].targetAgentRunId = null
+  const evidence = deriveCollaborationEvidence(snapshot, {
+    campTurnId: 'turn-current',
+    rootAgentRunId: 'run-lead'
+  })
+
+  assert.equal(evidence.metrics.coverage, 'complete_with_message_delivery_receipts')
+  assert.equal(evidence.a2a[0].mechanicalSettlement.state, 'indeterminate')
+  assert.equal(
+    evidence.a2a[0].mechanicalSettlement.reason,
+    'settled_delivery_target_run_unavailable'
+  )
+  assert.equal(evidence.metrics.settledMemberCalls, 0)
+})
+
 function passingSnapshot() {
   return {
     agentRuns: [
@@ -120,6 +187,110 @@ function passingSnapshot() {
       { id: 'task-1', status: 'completed', assigneeAgentId: 'agent_2', sourceAgentRunId: 'run-lead' },
       { id: 'task-2', status: 'completed', assigneeAgentId: 'agent_3', sourceAgentRunId: 'run-lead' }
     ],
+    executionEvidence: []
+  }
+}
+
+function currentPublicA2aSnapshot() {
+  return {
+    schemaVersion: 27,
+    agentRuns: [{
+      id: 'run-lead',
+      campTurnId: 'turn-current',
+      agentId: 'agent-lead',
+      taskId: null,
+      status: 'succeeded',
+      invocationKind: 'direct',
+      a2aParentAgentRunId: null,
+      a2aDepth: 0,
+      createdAt: '2026-08-10T00:00:00.000Z',
+      startedAt: '2026-08-10T00:00:01.000Z',
+      endedAt: '2026-08-10T00:00:10.000Z'
+    }, {
+      id: 'run-reviewer',
+      campTurnId: 'turn-current',
+      agentId: 'agent-reviewer',
+      taskId: 'task-review',
+      status: 'succeeded',
+      invocationKind: 'a2a',
+      a2aParentAgentRunId: 'run-lead',
+      a2aDepth: 1,
+      createdAt: '2026-08-10T00:00:03.000Z',
+      startedAt: '2026-08-10T00:00:04.000Z',
+      endedAt: '2026-08-10T00:00:08.000Z'
+    }],
+    messages: [{
+      id: 'message-a2a-1',
+      sequence: 2,
+      timelineGlobalSequence: 12,
+      authorType: 'agent',
+      authorId: 'agent-lead',
+      sourceAgentRunId: 'run-lead',
+      body: 'Review the concurrency invariant and report concrete defects.',
+      addressedAgentIds: ['agent-reviewer'],
+      campTurnId: 'turn-current',
+      createdAt: '2026-08-10T00:00:02.000Z'
+    }],
+    messageDeliveries: [{
+      id: 'delivery-1',
+      messageId: 'message-a2a-1',
+      campTurnId: 'turn-current',
+      taskId: 'task-review',
+      recipientAgentId: 'agent-reviewer',
+      recipientCanonicalPosition: 0,
+      status: 'settled',
+      dispatchPhase: 'terminal',
+      waitCondition: null,
+      dispatchAttemptCount: 1,
+      retryGeneration: 0,
+      contextManifestId: 'manifest-reviewer',
+      targetAgentRunId: 'run-reviewer',
+      failureCode: null,
+      createdAt: '2026-08-10T00:00:02.000Z',
+      updatedAt: '2026-08-10T00:00:08.000Z',
+      endedAt: '2026-08-10T00:00:08.000Z'
+    }],
+    contextManifests: [{
+      id: 'manifest-reviewer',
+      agentRunId: 'run-reviewer',
+      currentInputSource: {
+        type: 'member_call',
+        senderAgentId: 'agent-lead',
+        senderName: 'Lead'
+      },
+      delivery: {
+        id: 'runtime-input-reviewer',
+        status: 'accepted',
+        preparedAt: '2026-08-10T00:00:03.000Z',
+        acceptedAt: '2026-08-10T00:00:04.000Z',
+        resolvedAt: '2026-08-10T00:00:04.000Z'
+      },
+      createdAt: '2026-08-10T00:00:03.000Z'
+    }],
+    turns: [{
+      id: 'turn-current',
+      executionBudget: { acceptedA2a: 1 }
+    }],
+    timeline: [{
+      eventId: 'event-delivery-accepted',
+      eventType: 'message_delivery.accepted',
+      sourceAgentRunId: 'run-lead',
+      createdAt: '2026-08-10T00:00:02.000Z',
+      payload: {
+        deliveryId: 'delivery-1',
+        messageId: 'message-a2a-1',
+        campTurnId: 'turn-current',
+        recipientAgentId: 'agent-reviewer',
+        recipientCanonicalPosition: 0,
+        a2aDepth: 1
+      }
+    }],
+    tasks: [{
+      id: 'task-review',
+      status: 'completed',
+      assigneeAgentId: 'agent-reviewer',
+      sourceAgentRunId: 'run-lead'
+    }],
     executionEvidence: []
   }
 }

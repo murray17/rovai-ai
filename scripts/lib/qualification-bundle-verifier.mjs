@@ -3,6 +3,21 @@ import { join, resolve, sep } from 'node:path'
 import { canonicalJson, digestJson, sha256 } from './qualification-common.mjs'
 import { validateEvidenceBundleManifest } from './qualification-bundle.mjs'
 import { validateCatalogedQualificationArtifact } from './qualification-schema-validation.mjs'
+import {
+  JUDGE_VIEW_SUITE_SCHEMA_ID,
+  validateJudgeViewConfiguration,
+  validateJudgeViewPack,
+  validateJudgeViewReplicaResult,
+  validateJudgeViewReview,
+  validateSemanticJudgeViewSuite
+} from './qualification-judge-views.mjs'
+import {
+  validateJudgeEvidencePack,
+  validateSemanticJudgeConfiguration
+} from './qualification-semantic-judge.mjs'
+import {
+  validateCollaborationMessageEvidence
+} from './qualification-semantic-evidence.mjs'
 
 const ROLE_LOCATORS = Object.freeze({
   qualification_case: (id) => join('normalized-artifacts', 'qualification_case', `${id}.json`),
@@ -68,6 +83,7 @@ export async function verifyQualificationEvidenceBundle(evidenceDirectory, {
   const indexRecords = new Map(
     (evidenceIndex?.payload?.records ?? []).map((record) => [record.evidenceId, record])
   )
+  const collaborationLedger = artifacts.get('collaboration_ledger')
   for (const [role, artifact] of artifacts) {
     for (const reference of collectEvidenceReferences(artifact.payload)) {
       const record = assertEvidenceReference(reference, evidenceIndex, indexRecords, role)
@@ -87,6 +103,40 @@ export async function verifyQualificationEvidenceBundle(evidenceDirectory, {
       }
     }
     if (!deferSafeProjectionChecks) assertSafeProjection(pack, forbiddenCanaries, 'Judge Pack')
+  }
+
+  const collaborationMessageEvidence = await readOptionalJson(
+    join(root, 'collaboration-message-evidence.json')
+  )
+  if (collaborationMessageEvidence) {
+    validateCollaborationMessageEvidence(collaborationMessageEvidence, {
+      evidenceIndex,
+      collaborationLedger
+    })
+    const immutablePath = await containedPath(root, join(
+      'collaboration-message-evidence',
+      `${collaborationMessageEvidence.artifactId}.json`
+    ))
+    const immutable = await readJson(immutablePath)
+    if (canonicalJson(immutable) !== canonicalJson(collaborationMessageEvidence)) {
+      throw new Error('Collaboration Message Evidence current projection differs from immutable artifact')
+    }
+    if (((await stat(immutablePath)).mode & 0o077) !== 0) {
+      throw new Error('Collaboration Message Evidence artifact is not current-user-only')
+    }
+  }
+
+  const semanticReviewArtifact = artifacts.get('semantic_engineering_review')
+  let verifiedJudgeViewPackDigests = null
+  if (semanticReviewArtifact?.schemaId === JUDGE_VIEW_SUITE_SCHEMA_ID) {
+    if (!pack) throw new Error('Semantic Judge View Suite requires its source Judge Pack')
+    verifiedJudgeViewPackDigests = await verifySemanticJudgeViewArtifacts(
+      root,
+      semanticReviewArtifact,
+      pack,
+      evidenceIndex,
+      indexRecords
+    )
   }
 
   const result = await readJson(join(root, 'result.json'))
@@ -119,7 +169,30 @@ export async function verifyQualificationEvidenceBundle(evidenceDirectory, {
   }
 
   const semanticMarker = await readOptionalJson(join(root, 'SEMANTIC_REVIEW_COMPLETE'))
+  if (semanticReviewArtifact?.schemaId === JUDGE_VIEW_SUITE_SCHEMA_ID && !semanticMarker) {
+    throw new Error('Semantic Judge View Suite is missing its completion marker')
+  }
   if (semanticMarker) {
+    if (semanticReviewArtifact?.schemaId === JUDGE_VIEW_SUITE_SCHEMA_ID) {
+      if (semanticMarker.schemaVersion !== 2
+          || semanticMarker.trialId !== result.trialId
+          || semanticMarker.resultRevisionId !== result.resultRevision?.revisionId
+          || semanticMarker.semanticReview?.artifactId !== semanticReviewArtifact.artifactId
+          || semanticMarker.semanticReview?.payloadDigest !== semanticReviewArtifact.payloadDigest
+          || semanticMarker.semanticReview?.state !== semanticReviewArtifact.payload.state
+          || canonicalJson(semanticMarker.modelVisiblePackDigests)
+            !== canonicalJson(verifiedJudgeViewPackDigests)) {
+        throw new Error('Semantic Review completion marker binding is invalid')
+      }
+      const expectedViews = semanticReviewArtifact.payload.views.map((view) => ({
+        view: view.view,
+        state: view.state,
+        reviewArtifact: view.reviewArtifact
+      }))
+      if (canonicalJson(semanticMarker.semanticReview.views) !== canonicalJson(expectedViews)) {
+        throw new Error('Semantic Review completion marker View binding is invalid')
+      }
+    }
     const hardDigest = digestJson({
       validity: result.validity,
       evaluationState: result.evaluationState,
@@ -144,6 +217,112 @@ export async function verifyQualificationEvidenceBundle(evidenceDirectory, {
     evidenceRecords: indexRecords.size,
     manifestDigest: marker.manifestDigest
   }
+}
+
+async function verifySemanticJudgeViewArtifacts(
+  root,
+  suite,
+  sourcePack,
+  evidenceIndex,
+  indexRecords
+) {
+  validateSemanticJudgeViewSuite(suite)
+  const immutableSourcePack = await readPrivateArtifact(
+    root,
+    'judge-evidence-packs',
+    artifactReference(sourcePack)
+  )
+  if (canonicalJson(immutableSourcePack) !== canonicalJson(sourcePack)) {
+    throw new Error('Semantic source Judge Pack differs from retained immutable artifact')
+  }
+  const sourceConfiguration = await readPrivateArtifact(
+    root,
+    'semantic-judge-configurations',
+    sourcePack.payload.configurationArtifact
+  )
+  validateSemanticJudgeConfiguration(sourceConfiguration)
+  validateJudgeEvidencePack(sourcePack, {
+    configuration: sourceConfiguration,
+    evidenceIndex
+  })
+  const currentSuite = await readJson(join(root, 'semantic-judge-view-suite.json'))
+  if (canonicalJson(currentSuite) !== canonicalJson(suite)) {
+    throw new Error('Semantic Judge View current Suite differs from retained artifact')
+  }
+  const modelVisiblePackDigests = {}
+  for (const view of suite.payload.views) {
+    const configuration = await readPrivateArtifact(
+      root,
+      'semantic-judge-view-configurations',
+      view.configurationArtifact
+    )
+    const pack = await readPrivateArtifact(
+      root,
+      'semantic-judge-view-packs',
+      view.packArtifact
+    )
+    const replicas = []
+    for (const reference of view.replicaArtifacts) {
+      replicas.push(await readPrivateArtifact(
+        root,
+        'semantic-judge-view-replica-results',
+        reference
+      ))
+    }
+    const review = await readPrivateArtifact(
+      root,
+      'semantic-judge-view-reviews',
+      view.reviewArtifact
+    )
+    validateJudgeViewConfiguration(configuration)
+    validateJudgeViewPack(pack, { configuration, sourcePack })
+    modelVisiblePackDigests[view.view] = pack.payload.modelInputDigest
+    for (const replica of replicas) {
+      validateJudgeViewReplicaResult(replica, { configuration, pack })
+    }
+    validateJudgeViewReview(review, { configuration, pack, replicas })
+    if (view.state !== review.payload.state
+        || canonicalJson(view.items) !== canonicalJson(review.payload.items)) {
+      throw new Error(`Semantic ${view.view} Judge Suite projection differs from retained Review`)
+    }
+    const currentPack = await readJson(join(root, `semantic-${view.view}-judge-pack.json`))
+    if (canonicalJson(currentPack) !== canonicalJson(pack)) {
+      throw new Error(`Semantic ${view.view} Judge current Pack differs from retained artifact`)
+    }
+    for (const reference of collectEvidenceReferences(pack.payload)) {
+      const record = assertEvidenceReference(
+        reference,
+        evidenceIndex,
+        indexRecords,
+        `semantic_${view.view}_judge_pack`
+      )
+      if (record.safeForJudge !== true) {
+        throw new Error(
+          `Semantic ${view.view} Judge Pack cites evidence not marked safeForJudge: ${reference.evidenceId}`
+        )
+      }
+    }
+  }
+  return modelVisiblePackDigests
+}
+
+function artifactReference(artifact) {
+  return {
+    artifactId: artifact.artifactId,
+    schemaId: artifact.schemaId,
+    schemaVersion: artifact.schemaVersion,
+    payloadDigest: artifact.payloadDigest
+  }
+}
+
+async function readPrivateArtifact(root, directory, reference) {
+  const path = await containedPath(root, join(directory, `${reference.artifactId}.json`))
+  const artifact = await readJson(path)
+  assertArtifactReference(reference, artifact, directory)
+  if (((await stat(path)).mode & 0o077) !== 0) {
+    throw new Error(`Semantic Judge View artifact is not current-user-only: ${directory}`)
+  }
+  return artifact
 }
 
 function assertArtifactReference(reference, artifact, role) {

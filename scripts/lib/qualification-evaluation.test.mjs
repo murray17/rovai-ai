@@ -517,6 +517,47 @@ test('Convergence uses settlement facts and does not fail merely because a Run f
   }).status, 'unavailable')
 })
 
+test('current Message Delivery coverage, not a missing retired Conversation Input array, determines collaboration settlement', () => {
+  const snapshot = hardEvidenceSnapshot()
+  snapshot.schemaVersion = 27
+  delete snapshot.conversationInputs
+  delete snapshot.inboxMessages
+  snapshot.turns[0].executionBudget = { acceptedA2a: 1 }
+
+  const missingDelivery = deriveConvergenceEvidence({
+    snapshot,
+    dispatchBoundary: { campTurnId: 'turn-1', rootAgentRunId: 'run-root' },
+    budgetEvent: null,
+    termination: { converged: true }
+  })
+  assert.equal(missingDelivery.facts.conversationInputs, 'indeterminate')
+  assert.equal(missingDelivery.status, 'unavailable')
+
+  snapshot.messageDeliveries = [{
+    id: 'delivery-1',
+    campTurnId: 'turn-1',
+    status: 'settled'
+  }]
+  const settled = deriveConvergenceEvidence({
+    snapshot,
+    dispatchBoundary: { campTurnId: 'turn-1', rootAgentRunId: 'run-root' },
+    budgetEvent: null,
+    termination: { converged: true }
+  })
+  assert.equal(settled.facts.conversationInputs, 'settled')
+  assert.equal(settled.status, 'pass')
+
+  snapshot.messageDeliveries[0].status = 'running'
+  const running = deriveConvergenceEvidence({
+    snapshot,
+    dispatchBoundary: { campTurnId: 'turn-1', rootAgentRunId: 'run-root' },
+    budgetEvent: null,
+    termination: { converged: true }
+  })
+  assert.equal(running.facts.conversationInputs, 'unsettled')
+  assert.equal(running.status, 'fail')
+})
+
 test('Human intervention and durable Member Call effect coverage stay explicit', () => {
   const snapshot = hardEvidenceSnapshot()
   const boundary = {

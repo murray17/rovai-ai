@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v0.55
 authority: implementation-plan-and-acceptance
 status: complete
-last_updated: 2026-08-10
+last_updated: 2026-08-11
 ---
 
 # v0.55 实施与验收计划
@@ -45,6 +45,16 @@ last_updated: 2026-08-10
   不遮挡、无横向溢出且键盘可达；200% zoom 沿用未改动的 Arctic Dawn 通用合同；
 - [x] 运行 TypeScript/Renderer、文档治理、diff、Desktop build/package 与相关 UI 验收门禁。
 
+## Checkpoint 4：Qualification semantic measurement follow-up
+
+- [x] Process Judge 与 Blinded Outcome Judge 使用互斥 Model-Visible Pack、独立 checklist 和双 Replica；
+- [x] Public A2A content 去重并以 immutable Message/Delivery/Ledger attribution 提供给 Process Judge；
+- [x] delivered code 使用 exact workspace-content digest，缺失 interaction evidence 不降级为 not applicable；
+- [x] Source Pack→View Pack→Replica→Review→Suite→completion marker 的 deterministic replay closure；
+- [x] Outcome structured blinding、预注册 treatment-canary gate、无 aggregate score 与 Hard Outcome non-interference；
+- [x] `current-contract-conformance@1.2.0` 与 Product Contract Fingerprint 对齐 schema 30、Manifest 11、
+  Formatter 13 和 migration 71。
+
 ## 完成条件
 
 - [x] 当前 Agent 级过程合同、Renderer、测试和打包 App 行为一致；
@@ -56,7 +66,7 @@ last_updated: 2026-08-10
 ## 验证证据
 
 - `pnpm typecheck`；
-- `pnpm test`：39 个 Vitest 文件 / 241 个测试与 115 个 Node qualification 测试通过；
+- Agent 过程交付时的 `pnpm test`：39 个 Vitest 文件 / 241 个测试与 115 个 Node qualification 测试通过；
 - `pnpm build:desktop`、`pnpm package:mac`；
 - `pnpm accept:runtime-activity-ui`：9 个 Agent / 10 个 AgentRun 聚合为 9 个唯一入口，同 Agent
   双 Run 连续展示，running Run 聚焦且证据展开，终态历史可重开，无顶部 Run 入口、无 Audit Tab，
@@ -64,3 +74,5 @@ last_updated: 2026-08-10
 - `pnpm accept:structured-mentions-ui`：用户消息保持左侧，右侧 hover copy 可见且完整复制，结构化 Mention
   与原生选择未回退；
 - `pnpm docs:test`、`pnpm docs:check`、`pnpm docs:adr:generate -- --check`、`git diff --check`。
+- Qualification semantic measurement follow-up 合并后 `pnpm test`：docs `21 passed`、Vitest
+  `39 files / 241 tests passed`、Node/benchmark `147/147 passed`；语法与 diff 门禁通过。

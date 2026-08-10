@@ -12,6 +12,11 @@ import {
   qualificationSchemaReference,
   validateQualificationArtifactSchema
 } from './qualification-schema-validation.mjs'
+import {
+  SEMANTIC_JUDGE_CONTENT_ALLOWLIST,
+  SEMANTIC_JUDGE_CONTENT_POLICY_ID,
+  semanticJudgeContentKindAllowed
+} from './qualification-semantic-evidence.mjs'
 
 export const SEMANTIC_JUDGE_CONFIGURATION_SCHEMA_ID = 'rovai.qualification.semantic-judge-configuration'
 export const JUDGE_EVIDENCE_PACK_SCHEMA_ID = 'rovai.qualification.judge-evidence-pack'
@@ -108,6 +113,24 @@ const FORBIDDEN_PACK_KEYS = new Set([
   'conversationInputKind'
 ])
 
+const LEGACY_REDACTION_POLICY = Object.freeze({
+  policy: 'v0.34-judge-pack-allowlist-1',
+  forbiddenKeys: [...FORBIDDEN_PACK_KEYS].sort(),
+  untrustedBoundary: true,
+  privateLocatorRedaction: true,
+  credentialRedaction: true,
+  canaryRejection: true
+})
+
+const CURRENT_REDACTION_POLICY = Object.freeze({
+  ...LEGACY_REDACTION_POLICY,
+  policy: 'collaboration-quality-judge-pack-allowlist-1',
+  contentPolicyId: SEMANTIC_JUDGE_CONTENT_POLICY_ID,
+  contentAllowlist: SEMANTIC_JUDGE_CONTENT_ALLOWLIST,
+  itemSpecificEvidenceClosure: true,
+  unavailableRequiresAbstention: true
+})
+
 export function buildSemanticJudgeConfiguration({
   provider,
   snapshotId,
@@ -152,14 +175,7 @@ export function buildSemanticJudgeConfiguration({
     packSchema: qualificationSchemaReference('judge-evidence-pack.schema.json'),
     replicaOutputSchema: qualificationSchemaReference('judge-replica-result.schema.json'),
     reviewSchema: qualificationSchemaReference('semantic-engineering-review.schema.json'),
-    redactionPolicyDigest: digest({
-      policy: 'v0.34-judge-pack-allowlist-1',
-      forbiddenKeys: [...FORBIDDEN_PACK_KEYS].sort(),
-      untrustedBoundary: true,
-      privateLocatorRedaction: true,
-      credentialRedaction: true,
-      canaryRejection: true
-    }),
+    redactionPolicyDigest: digest(CURRENT_REDACTION_POLICY),
     retrySchedule: structuredClone(retrySchedule),
     evidenceReferenceValidation: {
       mode: 'exact_pack_closure',
@@ -211,6 +227,10 @@ export function validateSemanticJudgeConfiguration(artifact) {
       || artifact.payload.rubricDigest !== digest(SEMANTIC_JUDGE_RUBRIC)) {
     throw new Error('Semantic Judge Configuration prompt or rubric digest is not frozen')
   }
+  if (![digest(LEGACY_REDACTION_POLICY), digest(CURRENT_REDACTION_POLICY)]
+    .includes(artifact.payload.redactionPolicyDigest)) {
+    throw new Error('Semantic Judge Configuration content policy digest is unsupported')
+  }
   return artifact
 }
 
@@ -240,10 +260,18 @@ export function buildJudgeEvidencePack({
     id,
     `member-${String(index + 1).padStart(3, '0')}`
   ]))
+  const inferredRoles = inferOrchestrationRoles(result, memberIds)
   const members = memberIds.map((id) => ({
     pseudonym: pseudonyms.get(id),
-    declaredRole: boundedNullableString(declaredRoles[id], 160)
+    declaredRole: boundedNullableString(declaredRoles[id] ?? inferredRoles.get(id), 160)
   }))
+  if (configuration.payload.redactionPolicyDigest === digest(CURRENT_REDACTION_POLICY)) {
+    for (const segment of untrustedEvidence ?? []) {
+      if (!semanticJudgeContentKindAllowed(segment.kind)) {
+        throw new Error(`Judge current content policy excludes ${segment.kind}`)
+      }
+    }
+  }
   const segments = (untrustedEvidence ?? []).map((segment) => normalizeSegment({
     segment,
     pseudonyms,
@@ -339,7 +367,8 @@ export function buildJudgeEvidencePack({
     mutationFacts,
     segments,
     finalResponse,
-    collaborationCoverage: collaborationLedger?.payload?.metrics?.coverage ?? null
+    collaborationCoverage: collaborationLedger?.payload?.metrics?.coverage ?? null,
+    collaborationAcceptedCalls: collaborationLedger?.payload?.metrics?.acceptedCalls ?? null
   })
   const identitySeed = {
     trialId: result.trialId,
@@ -421,6 +450,13 @@ export function validateJudgeEvidencePack(artifact, {
   }
   if (artifact.payload.untrustedEvidence.filter((segment) => segment.kind === 'final_response').length !== 1) {
     throw new Error('Judge Evidence Pack final response segment is not exact')
+  }
+  if (configuration.payload.redactionPolicyDigest === digest(CURRENT_REDACTION_POLICY)) {
+    for (const segment of artifact.payload.untrustedEvidence) {
+      if (!semanticJudgeContentKindAllowed(segment.kind)) {
+        throw new Error(`Judge current content policy excludes ${segment.kind}`)
+      }
+    }
   }
   return artifact
 }
@@ -654,9 +690,12 @@ function buildCollaborationFacts({
   sourceSegments
 }) {
   const facts = []
-  const segmentByCall = new Map(sourceSegments
-    .filter((segment) => typeof segment.callId === 'string')
-    .map((segment) => [segment.callId, segment.segmentId]))
+  const segmentByCall = new Map(sourceSegments.flatMap((segment) => {
+    const callIds = Array.isArray(segment.callIds)
+      ? segment.callIds
+      : typeof segment.callId === 'string' ? [segment.callId] : []
+    return callIds.map((callId) => [callId, segment])
+  }))
   for (const call of collaborationLedger?.payload?.calls ?? []) {
     const evidenceReferences = safeReferences(
       call.evidenceReferences,
@@ -665,12 +704,13 @@ function buildCollaborationFacts({
       { requireJudgeSafe: true }
     )
     if (evidenceReferences.length === 0) continue
+    const sourceSegment = segmentByCall.get(call.callId) ?? null
     const common = {
       callId: call.callId,
       senderPseudonym: pseudonyms.get(call.senderMemberId) ?? null,
       recipientPseudonym: pseudonyms.get(call.recipientMemberId) ?? null,
-      visibility: 'private_to_recipient',
-      contentSegmentId: segmentByCall.get(call.callId) ?? null,
+      visibility: sourceSegment?.visibility ?? 'private_to_recipient',
+      contentSegmentId: sourceSegment?.segmentId ?? null,
       evidenceReferences
     }
     facts.push(
@@ -698,7 +738,7 @@ function buildCollaborationFacts({
       evidenceReferences: references
     })
   }
-  return facts.sort((left, right) => left.factId.localeCompare(right.factId))
+  return facts
 }
 
 function buildChecklistCoverage({
@@ -709,11 +749,11 @@ function buildChecklistCoverage({
   mutationFacts,
   segments,
   finalResponse,
-  collaborationCoverage
+  collaborationCoverage,
+  collaborationAcceptedCalls
 }) {
   const verificationReferences = uniqueReferences(verificationFacts.flatMap((fact) => fact.evidenceReferences))
   const workspaceReferences = uniqueReferences(workspaceChanges.flatMap((change) => change.evidenceReferences))
-  const collaborationReferences = uniqueReferences(collaborationFacts.flatMap((fact) => fact.evidenceReferences))
   const codeReferences = uniqueReferences(segments
     .filter((segment) => ['code', 'comment'].includes(segment.kind))
     .map((segment) => segment.evidenceReference))
@@ -721,31 +761,103 @@ function buildChecklistCoverage({
     .filter((segment) => segment.kind === 'test_output')
     .map((segment) => segment.evidenceReference))
   const responseReferences = [finalResponse.evidenceReference]
+  const participantReferences = uniqueReferences(segments
+    .filter((segment) => segment.kind === 'participant_message')
+    .map((segment) => segment.evidenceReference))
+  const acceptedCallFacts = collaborationFacts.filter((fact) => fact.factType === 'accepted_call')
+  const delegationReferences = uniqueReferences([
+    ...acceptedCallFacts.flatMap((fact) => fact.evidenceReferences),
+    ...collaborationFacts
+      .filter((fact) => fact.factType === 'route_fact')
+      .flatMap((fact) => fact.evidenceReferences),
+    ...participantReferences
+  ])
+  const handoffReferences = uniqueReferences([
+    ...collaborationFacts
+      .filter((fact) => ['accepted_call', 'recipient_input', 'recipient_run'].includes(fact.factType))
+      .flatMap((fact) => fact.evidenceReferences),
+    ...participantReferences
+  ])
+  const feedbackCandidateReferences = uniqueReferences([
+    ...participantReferences,
+    ...codeReferences,
+    ...testReferences,
+    ...verificationReferences
+  ])
+  const integrationCandidateReferences = uniqueReferences([
+    ...participantReferences,
+    ...codeReferences,
+    ...verificationReferences,
+    ...responseReferences
+  ])
   const referencesByItem = {
     'SER.requirements.understanding': verificationReferences,
     'SER.design.solution_fit': uniqueReferences([...workspaceReferences, ...codeReferences]),
     'SER.implementation.quality': uniqueReferences([...workspaceReferences, ...codeReferences]),
     'SER.testing.strategy': uniqueReferences([...verificationReferences, ...testReferences, ...toolFacts]),
     'SER.scope.discipline': uniqueReferences([...workspaceReferences, ...mutationFacts]),
-    'SER.collaboration.delegation': collaborationReferences,
-    'SER.collaboration.handoff_clarity': collaborationReferences,
-    'SER.collaboration.feedback_absorption': collaborationReferences,
-    'SER.collaboration.lead_integration': collaborationReferences,
+    'SER.collaboration.delegation': delegationReferences,
+    'SER.collaboration.handoff_clarity': handoffReferences,
+    'SER.collaboration.feedback_absorption': feedbackCandidateReferences,
+    'SER.collaboration.lead_integration': integrationCandidateReferences,
     'SER.response.claim_accuracy': uniqueReferences([...responseReferences, ...verificationReferences]),
     'SER.response.limitations': responseReferences
   }
   return SEMANTIC_CHECKLIST.map((checklistItem) => {
     const references = referencesByItem[checklistItem]
     const collaborationItem = DIMENSIONS[checklistItem] === 'collaboration'
-    if (collaborationItem && references.length === 0
-        && collaborationCoverage?.state === 'complete') {
+    if (collaborationItem) {
+      const noCallsObserved = collaborationAcceptedCalls === 0
+        && collaborationCoverage?.state === 'complete'
+      if (noCallsObserved) {
+        return {
+          checklistItem,
+          coverage: {
+            state: 'not_applicable',
+            reason: { code: 'judge_pack.no_member_calls_observed' }
+          },
+          evidenceReferences: []
+        }
+      }
+      if (references.length === 0) {
+        return {
+          checklistItem,
+          coverage: {
+            state: 'unavailable',
+            reason: { code: 'judge_pack.item_evidence_unavailable' }
+          },
+          evidenceReferences: []
+        }
+      }
+      if (checklistItem === 'SER.collaboration.feedback_absorption'
+          || checklistItem === 'SER.collaboration.lead_integration') {
+        const hasParticipantContent = participantReferences.length > 0
+        const hasDeliveredWorkContent = codeReferences.length > 0 || testReferences.length > 0
+        return {
+          checklistItem,
+          coverage: hasParticipantContent && hasDeliveredWorkContent
+            ? {
+                state: 'partial',
+                reason: { code: 'judge_pack.semantic_relation_not_deterministically_bound' }
+              }
+            : {
+                state: 'unavailable',
+                reason: { code: 'judge_pack.semantic_relation_candidate_unavailable' }
+              },
+          evidenceReferences: hasParticipantContent && hasDeliveredWorkContent ? references : []
+        }
+      }
+      const allAcceptedCallsHaveContent = acceptedCallFacts.length > 0
+        && acceptedCallFacts.every((fact) => fact.contentSegmentId !== null)
       return {
         checklistItem,
-        coverage: {
-          state: 'not_applicable',
-          reason: { code: 'judge_pack.no_member_calls_observed' }
-        },
-        evidenceReferences: []
+        coverage: collaborationCoverage?.state === 'complete' && allAcceptedCallsHaveContent
+          ? { state: 'complete', reason: null }
+          : {
+              state: 'partial',
+              reason: { code: 'judge_pack.collaboration_content_or_source_partial' }
+            },
+        evidenceReferences: references
       }
     }
     return {
@@ -874,9 +986,29 @@ function validateReplicaItems(items) {
 
 function validateReplicaReferences(items, pack) {
   const closure = new Set(collectEvidenceReferences(pack.payload).map(referenceKey))
-  for (const reference of collectEvidenceReferences(items)) {
-    if (!closure.has(referenceKey(reference))) {
-      throw invalidOutput('semantic_judge.reference_out_of_pack')
+  const coverageByItem = new Map(pack.payload.checklistCoverage.map((item) => [
+    item.checklistItem,
+    item
+  ]))
+  for (const item of items) {
+    const coverage = coverageByItem.get(item.checklistItem)
+    const itemClosure = new Set((coverage?.evidenceReferences ?? []).map(referenceKey))
+    for (const reference of item.evidenceReferences) {
+      if (!closure.has(referenceKey(reference))) {
+        throw invalidOutput('semantic_judge.reference_out_of_pack')
+      }
+      if (!itemClosure.has(referenceKey(reference))) {
+        throw invalidOutput('semantic_judge.reference_out_of_item_coverage')
+      }
+    }
+    if (coverage?.coverage?.state === 'unavailable' && item.verdict !== 'indeterminate') {
+      throw invalidOutput('semantic_judge.unavailable_item_requires_abstention')
+    }
+    if (coverage?.coverage?.state === 'not_applicable' && item.verdict !== 'not_applicable') {
+      throw invalidOutput('semantic_judge.not_applicable_item_requires_abstention')
+    }
+    if (!ABSTAIN_VERDICTS.has(item.verdict) && item.evidenceReferences.length === 0) {
+      throw invalidOutput('semantic_judge.verdict_requires_item_evidence')
     }
   }
 }
@@ -895,6 +1027,14 @@ function normalizeSegment({
   const record = indexRecords.get(reference.evidenceId)
   if (record.safeForJudge !== true) {
     throw new Error(`Judge untrusted evidence is not marked safeForJudge: ${reference.evidenceId}`)
+  }
+  if (reference.evidenceId.startsWith('core.message-content:')
+      && record.contentDigest !== `sha256:${sha256(segment.content)}`) {
+    throw new Error('Judge message content does not match its Evidence Index digest')
+  }
+  if (reference.evidenceId.startsWith('runner.workspace-content:')
+      && record.contentDigest !== `sha256:${sha256(segment.content)}`) {
+    throw new Error('Judge workspace content does not match its Evidence Index digest')
   }
   const content = redactUntrustedContent(
     requireBoundedString(segment.content, 'Judge untrusted evidence', 50_000)
@@ -967,6 +1107,19 @@ function collectMemberIds(result, collaborationLedger, untrustedEvidence) {
     if (segment.authorAgentProfileId) ids.add(segment.authorAgentProfileId)
   }
   return [...ids].sort()
+}
+
+function inferOrchestrationRoles(result, memberIds) {
+  const roles = new Map()
+  const roots = [...new Set((result.collaborationEvidence?.runGraph ?? [])
+    .filter((run) => run.depth === 0 && run.agentProfileId)
+    .map((run) => run.agentProfileId))]
+  if (roots.length !== 1) return roles
+  roles.set(roots[0], 'Lead')
+  for (const memberId of memberIds) {
+    if (memberId !== roots[0]) roles.set(memberId, 'Member')
+  }
+  return roles
 }
 
 function safeReferences(references, evidenceIndex, indexRecords, { requireJudgeSafe }) {

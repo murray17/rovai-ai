@@ -5,7 +5,7 @@ lifecycle: current
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
-last_updated: 2026-08-10
+last_updated: 2026-08-11
 ---
 
 # Rovai-ai v0.55：Agent 级连续执行过程
@@ -32,6 +32,8 @@ AgentRun 仍是 Core、Evidence、取消与投递的唯一领域身份，不被 
 - Inspector 收敛为“任务 / 上下文投递 / 审批”；Task 的 Related execution 与停止结果均进入对应
   Agent 过程，而不保留 Run 级详情路由或“审计”Tab；Camp Header 不再显示执行入口；
 - 当前 Arctic Dawn/UI 与桌面验收更新为 Agent 级过程、焦点返回、窄窗/缩放和真实证据展示口径。
+- Qualification Layer 5 分离 Process Judge 与 Blinded Outcome Judge，并建立模型可见 Evidence、
+  不可变协作消息归因和 deterministic replay closure。
 
 ## 冻结边界
 
@@ -50,13 +52,13 @@ AgentRun 仍是 Core、Evidence、取消与投递的唯一领域身份，不被 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.54 已冻结为 historical，v0.55 成为唯一 current，并新增本版本概览与实施计划 |
-| ADR | 已更新 | ADR-0154 完整替代 ADR-0133 的逐 Run Scheme C 过程 surface |
-| Contracts | 已更新 | Run Process Detail Surface v2 成为当前 Agent 级过程合同；v1 保留为 historical |
-| Architecture | 确认无需更新 | 不改变 Core 组件职责、领域真源、进程或传输结构；仅替换 Renderer read-model surface |
+| ADR | 已更新 | ADR-0154 完整替代 ADR-0133 的逐 Run Scheme C 过程 surface；ADR-0155 分离 Process/Blinded Outcome Judge View |
+| Contracts | 已更新 | Run Process Detail Surface v2 成为当前 Agent 级过程合同；Semantic Judge Views v1 冻结双 View 接口 |
+| Architecture | 已更新 | Renderer 仍只替换 read model；Benchmark Protocol 增加双 Judge View 与 evidence boundary |
 | UI | 已更新 | Arctic Dawn V3 与 UI 索引收敛 Agent 级入口、连续 Run 阶段、三 Tab Inspector 与无障碍边界 |
 | Runtime Activity | 确认无需更新 | Canonical Runtime Activity、Evidence 分类和 Runtime coverage 均不变 |
 | Runtime compatibility | 确认无需更新 | 不改变 Runtime 支持范围或实测兼容性结论 |
-| Documentation routing | 已更新 | ADR CURRENT 与 Contracts 索引已指向 ADR-0154 / Run Process Detail Surface v2 |
+| Documentation routing | 已更新 | ADR CURRENT、Contracts 与 Benchmark 路由覆盖 ADR-0154/0155 及两个当前合同 |
 | Root README | 确认无需更新 | 项目定位与常青能力范围不变 |
 
 ## References
@@ -64,4 +66,6 @@ AgentRun 仍是 Core、Evidence、取消与投递的唯一领域身份，不被 
 - [v0.55 实施与验收计划](implementation-plan.md)
 - [ADR-0154](../../adr/0154-agent-level-execution-process-surface.md)
 - [Run Process Detail Surface v2](../../contracts/run-process-detail-surface-v2.md)
+- [ADR-0155](../../adr/0155-treatment-blind-outcome-and-process-judge-views.md)
+- [Semantic Judge Views v1](../../contracts/semantic-judge-views-v1.md)
 - [Arctic Dawn V3](../../ui/arctic-dawn.md)

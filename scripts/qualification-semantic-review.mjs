@@ -1,10 +1,10 @@
+import { randomUUID } from 'node:crypto'
 import { readFile, realpath } from 'node:fs/promises'
-import { join, resolve, sep } from 'node:path'
+import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
   atomicWriteJson,
   digestJson,
-  validateRelativeLocator,
   verifyStoredCaseSeal
 } from './lib/qualification-common.mjs'
 import {
@@ -14,12 +14,18 @@ import {
 } from './lib/qualification-recovery.mjs'
 import { publishQualificationEvidenceBundle } from './lib/qualification-bundle.mjs'
 import {
-  attachSemanticEngineeringReview,
   buildJudgeEvidencePack,
-  buildSemanticJudgeConfiguration,
-  executeSemanticEngineeringReview,
-  retainSemanticEngineeringReviewArtifacts
+  buildSemanticJudgeConfiguration
 } from './lib/qualification-semantic-judge.mjs'
+import { buildSemanticJudgeUntrustedEvidence } from './lib/qualification-semantic-evidence.mjs'
+import {
+  attachSemanticJudgeViewSuite,
+  buildJudgeViewConfiguration,
+  buildJudgeViewPack,
+  buildSemanticJudgeViewSuite,
+  executeJudgeView,
+  retainSemanticJudgeViewArtifacts
+} from './lib/qualification-judge-views.mjs'
 
 const options = parseArguments(process.argv.slice(2))
 const evidenceDirectory = await realpath(options.evidenceDirectory)
@@ -32,7 +38,7 @@ const caseRecord = await verifyStoredCaseSeal(options.caseDirectory, result.case
 const configurationInput = JSON.parse(await readFile(options.configurationPath, 'utf8'))
 const adapter = await loadAdapter(options.adapterPath, result.mode)
 const producerDigest = await computeQualificationEvaluatorDigest()
-const configuration = buildSemanticJudgeConfiguration({
+const sourceConfiguration = buildSemanticJudgeConfiguration({
   provider: configurationInput.provider,
   snapshotId: configurationInput.snapshotId,
   snapshotDigest: configurationInput.snapshotDigest,
@@ -42,35 +48,94 @@ const configuration = buildSemanticJudgeConfiguration({
   retrySchedule: configurationInput.retrySchedule
 })
 const artifacts = await loadRetainedArtifacts(evidenceDirectory)
-const untrustedEvidence = await buildUntrustedEvidence({
+const untrustedEvidence = await buildSemanticJudgeUntrustedEvidence({
   evidenceDirectory,
   result,
   evidenceIndex: artifacts.evidenceIndex,
-  workspaceMutationLedger: artifacts.workspaceMutationLedger
+  workspaceMutationLedger: artifacts.workspaceMutationLedger,
+  collaborationLedger: artifacts.collaborationLedger
 })
-const pack = buildJudgeEvidencePack({
+const sourcePack = buildJudgeEvidencePack({
   result,
   caseTitle: caseRecord.contract.manifest.title ?? caseRecord.contract.manifest.id,
-  configuration,
+  configuration: sourceConfiguration,
   producerDigest,
   ...artifacts,
   untrustedEvidence,
   forbiddenCanaries: configurationInput.forbiddenCanaries ?? []
 })
-const execution = await executeSemanticEngineeringReview({
-  configuration,
-  pack,
-  evidenceIndex: artifacts.evidenceIndex,
+const viewCommon = {
+  provider: configurationInput.provider,
+  snapshotId: configurationInput.snapshotId,
+  snapshotDigest: configurationInput.snapshotDigest,
   producerDigest,
-  invokeReplica: adapter.invokeReplica,
-  timeoutMilliseconds: configurationInput.timeoutMilliseconds
+  decodingParameters: configurationInput.decodingParameters,
+  retrySchedule: configurationInput.retrySchedule
+}
+const judgeExecutionId = `judge-execution:${randomUUID()}`
+const processConfiguration = buildJudgeViewConfiguration({
+  view: 'process',
+  ...viewCommon,
+  configurationId: configurationInput.processConfigurationId
+    ?? `${configurationInput.configurationId ?? 'semantic-judge-v1'}-process`
 })
-const reviewReference = await retainSemanticEngineeringReviewArtifacts(
-  evidenceDirectory,
-  { configuration, pack, ...execution },
-  artifacts.evidenceIndex
-)
-const nextResult = attachSemanticEngineeringReview(result, reviewReference)
+const outcomeConfiguration = buildJudgeViewConfiguration({
+  view: 'outcome',
+  ...viewCommon,
+  outcomeTreatmentCanaries: configurationInput.outcomeTreatmentCanaries ?? [],
+  configurationId: configurationInput.outcomeConfigurationId
+    ?? `${configurationInput.configurationId ?? 'semantic-judge-v1'}-outcome`
+})
+const processPack = buildJudgeViewPack({
+  view: 'process',
+  sourcePack,
+  configuration: processConfiguration,
+  producerDigest
+})
+const outcomePack = buildJudgeViewPack({
+  view: 'outcome',
+  sourcePack,
+  configuration: outcomeConfiguration,
+  producerDigest
+})
+const [processExecution, outcomeExecution] = await Promise.all([
+  executeJudgeView({
+    configuration: processConfiguration,
+    pack: processPack,
+    producerDigest,
+    judgeExecutionId,
+    invokeReplica: adapter.invokeReplica,
+    timeoutMilliseconds: configurationInput.timeoutMilliseconds
+  }),
+  executeJudgeView({
+    configuration: outcomeConfiguration,
+    pack: outcomePack,
+    producerDigest,
+    judgeExecutionId,
+    invokeReplica: adapter.invokeReplica,
+    timeoutMilliseconds: configurationInput.timeoutMilliseconds
+  })
+])
+const process = {
+  configuration: processConfiguration,
+  pack: processPack,
+  ...processExecution
+}
+const outcome = {
+  configuration: outcomeConfiguration,
+  pack: outcomePack,
+  ...outcomeExecution
+}
+const suite = buildSemanticJudgeViewSuite({ process, outcome, producerDigest })
+const retained = await retainSemanticJudgeViewArtifacts(evidenceDirectory, {
+  sourceConfiguration,
+  sourcePack,
+  process,
+  outcome,
+  suite
+})
+const reviewReference = retained.resultReference
+const nextResult = attachSemanticJudgeViewSuite(result, reviewReference)
 const revision = await appendResultRevision(evidenceDirectory, nextResult)
 await publishQualificationEvidenceBundle({
   evidenceDirectory,
@@ -81,7 +146,7 @@ await publishQualificationEvidenceBundle({
   ...artifacts
 })
 await atomicWriteJson(join(evidenceDirectory, 'SEMANTIC_REVIEW_COMPLETE'), {
-  schemaVersion: 1,
+  schemaVersion: 2,
   trialId: result.trialId,
   resultRevisionId: revision.resultBundle.resultRevision.revisionId,
   hardOutcomeDigest: digestJson({
@@ -95,7 +160,16 @@ await atomicWriteJson(join(evidenceDirectory, 'SEMANTIC_REVIEW_COMPLETE'), {
   semanticReview: {
     artifactId: reviewReference.artifactId,
     payloadDigest: reviewReference.payloadDigest,
-    state: reviewReference.status
+    state: reviewReference.status,
+    views: reviewReference.views.map((view) => ({
+      view: view.view,
+      state: view.state,
+      reviewArtifact: view.reviewArtifact
+    }))
+  },
+  modelVisiblePackDigests: {
+    process: processPack.payload.modelInputDigest,
+    outcome: outcomePack.payload.modelInputDigest
   }
 })
 
@@ -105,7 +179,11 @@ console.log(JSON.stringify({
   resultRevisionId: revision.resultBundle.resultRevision.revisionId,
   hardOutcome: revision.resultBundle.overall,
   semanticReviewState: reviewReference.status,
-  reviewArtifactId: reviewReference.artifactId
+  reviewArtifactId: reviewReference.artifactId,
+  judgeViews: Object.fromEntries(reviewReference.views.map((view) => [
+    view.view,
+    view.state
+  ]))
 }, null, 2))
 
 async function loadAdapter(path, mode) {
@@ -138,83 +216,6 @@ async function loadRetainedArtifacts(evidenceDirectory) {
     toolCallLedger: await read('tool-call-ledger.json'),
     workspaceMutationLedger: await read('workspace-mutation-ledger.json')
   }
-}
-
-async function buildUntrustedEvidence({
-  evidenceDirectory,
-  result,
-  evidenceIndex,
-  workspaceMutationLedger
-}) {
-  const responseEvidence = JSON.parse(await readFile(
-    join(evidenceDirectory, 'final-response-evidence.json'),
-    'utf8'
-  ))
-  const finalMessages = responseEvidence.messages.filter((message) => message.isFinal === true)
-  if (finalMessages.length !== 1) throw new Error('Semantic Review requires exactly one final response')
-  const responseReference = result.deliveryLayer?.finalResponseEvidence?.find((message) => (
-    message.messageId === finalMessages[0].messageId
-  ))?.evidenceReference
-  if (!responseReference) throw new Error('Final response has no Evidence Reference')
-  const segments = [{
-    segmentId: `final-response:${finalMessages[0].messageId}`,
-    kind: 'final_response',
-    authorAgentId: finalMessages[0].agentId,
-    visibility: 'public_to_camp',
-    content: finalMessages[0].body,
-    evidenceReference: responseReference
-  }]
-  const indexRecords = new Map(
-    evidenceIndex.payload.records.map((record) => [record.evidenceId, record])
-  )
-  const snapshotRoot = await containedRealpath(
-    evidenceDirectory,
-    validateRelativeLocator(
-      result.deliveredWorkspaceSnapshot?.directory,
-      'Delivered Workspace Snapshot directory'
-    )
-  )
-  const seenPaths = new Set()
-  for (const mutation of workspaceMutationLedger.payload.records) {
-    const reference = mutation.evidenceReferences?.[0]
-    if (!reference) continue
-    const sourceRecord = indexRecords.get(reference.evidenceId)
-    if (sourceRecord?.safeForJudge !== true) continue
-    for (const path of mutation.paths) {
-      if (seenPaths.has(path)) continue
-      seenPaths.add(path)
-      const changed = result.workspaceDiff?.changed?.find((entry) => entry.path === path)
-      if (changed?.after?.type !== 'file') continue
-      const absolute = await containedRealpath(snapshotRoot, validateRelativeLocator(path, 'Changed path'))
-      const content = await readFile(absolute, 'utf8')
-      if (content.length > 50_000) continue
-      segments.push({
-        segmentId: `code:${mutation.mutationId}:${digestJson(path).slice(0, 16)}`,
-        kind: 'code',
-        authorAgentId: null,
-        visibility: 'workspace',
-        path,
-        content,
-        evidenceReference: reference
-      })
-    }
-  }
-  for (const segment of segments) {
-    if (segment.evidenceReference.artifactId !== evidenceIndex.artifactId
-        || !indexRecords.has(segment.evidenceReference.evidenceId)) {
-      throw new Error('Semantic Review source segment has an unresolved Evidence Reference')
-    }
-  }
-  return segments
-}
-
-async function containedRealpath(root, relativePath) {
-  const absoluteRoot = await realpath(root)
-  const absolute = await realpath(join(absoluteRoot, relativePath))
-  if (absolute !== absoluteRoot && !absolute.startsWith(`${absoluteRoot}${sep}`)) {
-    throw new Error('Semantic Review source locator escapes the Evidence Bundle')
-  }
-  return absolute
 }
 
 function parseArguments(args) {

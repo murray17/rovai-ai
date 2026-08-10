@@ -14,6 +14,7 @@ const DIMENSIONS = {
   'SER.scope.discipline': 'scope',
   'SER.collaboration.delegation': 'collaboration',
   'SER.collaboration.handoff_clarity': 'collaboration',
+  'SER.collaboration.contribution_value': 'collaboration',
   'SER.collaboration.feedback_absorption': 'collaboration',
   'SER.collaboration.lead_integration': 'collaboration',
   'SER.response.claim_accuracy': 'response',
@@ -24,7 +25,9 @@ export async function invokeReplica(request) {
   if (JSON.stringify(request.capabilities) !== JSON.stringify(capabilities)) {
     throw new Error('fixture adapter received non-disabled capabilities')
   }
-  const coverage = new Map(request.evidencePack.payload.checklistCoverage.map((item) => [
+  const dualView = request.judgeView === 'process' || request.judgeView === 'outcome'
+  const modelInput = dualView ? request.evidencePack : request.evidencePack.payload
+  const coverage = new Map(modelInput.checklistCoverage.map((item) => [
     item.checklistItem,
     item
   ]))
@@ -41,7 +44,9 @@ export async function invokeReplica(request) {
             : 'indeterminate'
           : 'satisfied',
         confidence: abstain ? 'low' : 'high',
-        evidenceReferences: itemCoverage.evidenceReferences,
+        ...(dualView
+          ? { evidenceIds: itemCoverage.evidenceIds }
+          : { evidenceReferences: itemCoverage.evidenceReferences }),
         reason: abstain
           ? 'The allowlisted fixture evidence does not support a categorical semantic judgment.'
           : 'The deterministic protocol fixture marks this evidence-covered item as satisfied.',

@@ -8,8 +8,13 @@ const SCHEMA_DIRECTORY = resolve(
   import.meta.dirname,
   '../../docs/versions/v0.34/schemas'
 )
+const CONTRACT_SCHEMA_DIRECTORY = resolve(
+  import.meta.dirname,
+  '../../docs/contracts/schemas'
+)
 
 let registry = null
+let contractRegistry = null
 
 export function validateQualificationSchemaCatalog() {
   return loadRegistry().catalog
@@ -29,17 +34,44 @@ export function validateQualificationArtifactSchema(schemaFile, artifact) {
   return artifact
 }
 
+export function validateQualificationContractSchemaCatalog() {
+  return loadContractRegistry().catalog
+}
+
+export function validateQualificationContractArtifactSchema(schemaFile, artifact) {
+  const loaded = loadContractRegistry()
+  const schema = loaded.schemas.get(schemaFile)
+  if (!schema) throw new Error(`Qualification contract schema is not cataloged: ${schemaFile}`)
+  const validate = loaded.ajv.getSchema(schema.$id)
+  if (!validate) throw new Error(`Qualification contract schema did not compile: ${schemaFile}`)
+  if (!validate(artifact)) {
+    throw new Error(
+      `Qualification artifact violates ${schemaFile}: ${loaded.ajv.errorsText(validate.errors, { separator: '; ' })}`
+    )
+  }
+  return artifact
+}
+
 export function validateCatalogedQualificationArtifact(artifact) {
   const loaded = loadRegistry()
-  const matches = [...loaded.schemas].filter(([, schema]) => (
+  const contract = loadContractRegistry()
+  const legacyMatches = [...loaded.schemas].filter(([, schema]) => (
     schema.properties?.schemaId?.const === artifact?.schemaId
       && schema.properties?.schemaVersion?.const === artifact?.schemaVersion
   ))
-  if (matches.length !== 1) {
-    if (matches.length === 0) return validateCatalogedV036Artifact(artifact)
+  const contractMatches = [...contract.schemas].filter(([, schema]) => (
+    schema.properties?.schemaId?.const === artifact?.schemaId
+      && schema.properties?.schemaVersion?.const === artifact?.schemaVersion
+  ))
+  if (legacyMatches.length + contractMatches.length !== 1) {
+    if (legacyMatches.length + contractMatches.length === 0) {
+      return validateCatalogedV036Artifact(artifact)
+    }
     throw new Error(`Qualification artifact schema identity is duplicated: ${artifact?.schemaId ?? 'missing'}@${artifact?.schemaVersion ?? 'missing'}`)
   }
-  return validateQualificationArtifactSchema(matches[0][0], artifact)
+  return legacyMatches.length === 1
+    ? validateQualificationArtifactSchema(legacyMatches[0][0], artifact)
+    : validateQualificationContractArtifactSchema(contractMatches[0][0], artifact)
 }
 
 export function qualificationSchemaReference(schemaFile) {
@@ -99,4 +131,37 @@ function loadRegistry() {
   }
   registry = { ajv, catalog, schemas }
   return registry
+}
+
+function loadContractRegistry() {
+  if (contractRegistry) return contractRegistry
+  const base = loadRegistry()
+  const catalogPath = join(CONTRACT_SCHEMA_DIRECTORY, 'schema-catalog.json')
+  const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'))
+  const schemas = new Map()
+  const catalogFiles = new Set()
+  for (const entry of catalog.schemas) {
+    if (catalogFiles.has(entry.file)) {
+      throw new Error(`Qualification contract schema catalog repeats ${entry.file}`)
+    }
+    catalogFiles.add(entry.file)
+    const bytes = readFileSync(join(CONTRACT_SCHEMA_DIRECTORY, entry.file))
+    const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`
+    if (digest !== entry.digest) {
+      throw new Error(`Qualification contract schema digest mismatch: ${entry.file}`)
+    }
+    const schema = JSON.parse(bytes.toString('utf8'))
+    if (schema.$id !== entry.schemaUri) {
+      throw new Error(`Qualification contract schema URI mismatch: ${entry.file}`)
+    }
+    schemas.set(entry.file, schema)
+  }
+  for (const schema of schemas.values()) base.ajv.addSchema(schema)
+  for (const [file, schema] of schemas) {
+    if (!base.ajv.getSchema(schema.$id)) {
+      throw new Error(`Qualification contract schema failed to compile: ${file}`)
+    }
+  }
+  contractRegistry = { ajv: base.ajv, catalog, schemas }
+  return contractRegistry
 }

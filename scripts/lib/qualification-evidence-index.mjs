@@ -71,11 +71,15 @@ export function buildEvidenceIndex({
   const references = {
     executionEvidence: {},
     messages: {},
+    messageContents: {},
+    messageDeliveries: {},
+    contextManifests: {},
     inboxMessages: {},
     conversationInputs: {},
     agentRuns: {},
     events: {},
     workspaceChanges: {},
+    workspaceContents: {},
     verifierChecks: {},
     deliveryChecks: {},
     requirements: {},
@@ -83,7 +87,9 @@ export function buildEvidenceIndex({
     failureFacts: {},
     humanIntervention: null
   }
-  const finalResponseIds = new Set(finalResponses.map((message) => message.messageId))
+  const finalResponseIds = new Set(finalResponses
+    .filter((message) => message.isFinal === true)
+    .map((message) => message.messageId))
 
   const addSourceRecord = ({
     evidenceId,
@@ -96,7 +102,8 @@ export function buildEvidenceIndex({
     content,
     coverage = sourceCoverage.get(sourceId),
     safeForJudge = false,
-    safeForPublic = false
+    safeForPublic = false,
+    contentDigestOverride = null
   }) => addRecord(records, {
     evidenceId,
     evidenceType,
@@ -106,7 +113,9 @@ export function buildEvidenceIndex({
     observedAt: timestampOrNull(observedAt),
     clockDomain,
     coverage: normalizeCoverage(coverage, 'evidence_index.source_coverage_unavailable'),
-    contentDigest: digest(content),
+    contentDigest: contentDigestOverride
+      ? withSha256Prefix(contentDigestOverride)
+      : digest(content),
     derivedFrom: [],
     derivationRule: null,
     safeForJudge,
@@ -149,6 +158,62 @@ export function buildEvidenceIndex({
     const trialRunIds = new Set((snapshot.agentRuns ?? [])
       .filter((run) => run.campTurnId === dispatchBoundary?.campTurnId)
       .map((run) => run.id))
+    // Public A2A content is eligible for the Judge only when a current
+    // Message Delivery binds it to a recipient in this Trial turn.  The
+    // message record itself is metadata; the separate content record is the
+    // only source reference that may carry message text to the Judge.
+    const trialDeliveries = Array.isArray(snapshot.messageDeliveries)
+      ? snapshot.messageDeliveries.filter((delivery) => (
+        delivery.campTurnId === dispatchBoundary?.campTurnId
+      ))
+      : null
+    const deliveriesByMessageId = new Map()
+    for (const delivery of trialDeliveries ?? []) {
+      const values = deliveriesByMessageId.get(delivery.messageId) ?? []
+      values.push(delivery)
+      deliveriesByMessageId.set(delivery.messageId, values)
+      const deliveryEvidenceId = stableEvidenceId('core.message-delivery', delivery.id)
+      addSourceRecord({
+        evidenceId: deliveryEvidenceId,
+        evidenceType: 'core_domain',
+        authorityClass: 'core',
+        sourceId: 'core.camp-snapshot',
+        observedAt: delivery.endedAt ?? delivery.updatedAt ?? delivery.createdAt,
+        content: delivery,
+        // Delivery state, recipient and target-run identifiers are bounded
+        // mechanical facts.  They do not expose the context manifest.
+        safeForJudge: true,
+        safeForPublic: false
+      })
+      references.messageDeliveries[delivery.id] = evidenceReference(
+        artifactId,
+        deliveryEvidenceId
+      )
+    }
+    for (const manifest of Array.isArray(snapshot.contextManifests)
+      ? snapshot.contextManifests.filter((candidate) => (
+        candidate.agentRunId && trialRunIds.has(candidate.agentRunId)
+      ))
+      : []) {
+      const manifestEvidenceId = stableEvidenceId('core.context-manifest', manifest.id)
+      // Keep the manifest as a deterministic, non-Judge-safe source.  A
+      // manifest can contain history, skills, MCP and runtime-private fields;
+      // semantic review receives only the explicit message content allowlist.
+      addSourceRecord({
+        evidenceId: manifestEvidenceId,
+        evidenceType: 'core_domain',
+        authorityClass: 'core',
+        sourceId: 'core.camp-snapshot',
+        observedAt: manifest.createdAt ?? manifest.updatedAt,
+        content: boundedContextManifestSummary(manifest),
+        safeForJudge: false,
+        safeForPublic: false
+      })
+      references.contextManifests[manifest.id] = evidenceReference(
+        artifactId,
+        manifestEvidenceId
+      )
+    }
     for (const run of snapshot.agentRuns ?? []) {
       if (!trialRunIds.has(run.id)) continue
       addSourceRecord({
@@ -193,6 +258,7 @@ export function buildEvidenceIndex({
     for (const message of snapshot.messages ?? []) {
       const evidenceId = stableEvidenceId('core.message', message.id)
       const isFinalResponse = finalResponseIds.has(message.id)
+      const isDeliveredA2aMessage = deliveriesByMessageId.has(message.id)
       addSourceRecord({
         evidenceId,
         evidenceType: isFinalResponse ? 'final_response' : 'core_domain',
@@ -205,6 +271,40 @@ export function buildEvidenceIndex({
         safeForPublic: false
       })
       references.messages[message.id] = evidenceReference(artifactId, evidenceId)
+      const bodyDigest = message.bodyDigest
+        ?? (typeof message.body === 'string' ? sha256(message.body) : null)
+      if (bodyDigest) {
+        const contentEvidenceId = stableEvidenceId('core.message-content', message.id)
+        const content = {
+          messageId: message.id,
+          authorType: message.authorType ?? null,
+          authorId: message.authorId ?? null,
+          sourceAgentRunId: message.sourceAgentRunId ?? null,
+          createdAt: message.createdAt ?? null,
+          bodyDigest: withSha256Prefix(bodyDigest),
+          bodyBytes: Number.isSafeInteger(message.bodyBytes)
+            ? message.bodyBytes
+            : (typeof message.body === 'string' ? Buffer.byteLength(message.body) : null)
+        }
+        addSourceRecord({
+          evidenceId: contentEvidenceId,
+          evidenceType: isFinalResponse ? 'final_response' : 'core_domain',
+          authorityClass: 'core',
+          sourceId: 'core.camp-snapshot',
+          sourceSequence: message.sequence,
+          observedAt: message.createdAt,
+          content,
+          contentDigestOverride: bodyDigest,
+          safeForJudge: isFinalResponse || isDeliveredA2aMessage,
+          safeForPublic: false
+        })
+        if (isFinalResponse || isDeliveredA2aMessage) {
+          references.messageContents[message.id] = evidenceReference(
+            artifactId,
+            contentEvidenceId
+          )
+        }
+      }
     }
     for (const message of snapshot.inboxMessages ?? []) {
       if (!trialRunIds.has(message.sourceAgentRunId)
@@ -334,9 +434,36 @@ export function buildEvidenceIndex({
         evidenceType: 'workspace_fact',
         authorityClass: 'runner',
         sourceId: 'runner.workspace',
-        content: change
+        content: change,
+        safeForJudge: true,
+        safeForPublic: false
       })
       references.workspaceChanges[change.path] = evidenceReference(artifactId, evidenceId)
+      const afterDigest = change.after?.digest
+      if (change.after?.type === 'file'
+          && typeof afterDigest === 'string'
+          && /^(?:sha256:)?[a-f0-9]{64}$/.test(afterDigest)) {
+        const contentEvidenceId = stableEvidenceId('runner.workspace-content', change.path)
+        addSourceRecord({
+          evidenceId: contentEvidenceId,
+          evidenceType: 'workspace_fact',
+          authorityClass: 'runner',
+          sourceId: 'runner.workspace',
+          content: {
+            path: change.path,
+            type: change.after.type,
+            bytes: change.after.bytes ?? null,
+            digest: withSha256Prefix(afterDigest)
+          },
+          contentDigestOverride: afterDigest,
+          safeForJudge: true,
+          safeForPublic: false
+        })
+        references.workspaceContents[change.path] = evidenceReference(
+          artifactId,
+          contentEvidenceId
+        )
+      }
     }
   }
 
@@ -703,6 +830,8 @@ function snapshotCounts(snapshot) {
     'agentRuns',
     'tasks',
     'messages',
+    'messageDeliveries',
+    'contextManifests',
     'inboxMessages',
     'conversationInputs',
     'approvals',
@@ -710,6 +839,29 @@ function snapshotCounts(snapshot) {
     'executionEvidence',
     'timeline'
   ].map((field) => [field, Array.isArray(snapshot[field]) ? snapshot[field].length : 0]))
+}
+
+function boundedContextManifestSummary(manifest) {
+  return {
+    id: manifest?.id ?? null,
+    agentRunId: manifest?.agentRunId ?? null,
+    currentInputSource: manifest?.currentInputSource
+      ? {
+          type: manifest.currentInputSource.type ?? null,
+          senderAgentId: manifest.currentInputSource.senderAgentId ?? null,
+          deliveryId: manifest.currentInputSource.deliveryId ?? null
+        }
+      : null,
+    delivery: manifest?.delivery
+      ? {
+          status: manifest.delivery.status ?? null,
+          messageId: manifest.delivery.messageId ?? null,
+          deliveryId: manifest.delivery.deliveryId ?? null
+        }
+      : null,
+    createdAt: manifest?.createdAt ?? null,
+    updatedAt: manifest?.updatedAt ?? null
+  }
 }
 
 function stableEvidenceId(prefix, nativeId) {

@@ -120,6 +120,7 @@ export async function computeQualificationEvaluatorDigest() {
   const files = [
     join(repositoryRoot, 'docs', 'versions', 'v0.34', 'schemas', 'schema-catalog.json'),
     join(repositoryRoot, 'docs', 'versions', 'v0.36', 'schemas', 'schema-catalog.json'),
+    join(repositoryRoot, 'docs', 'contracts', 'schemas', 'schema-catalog.json'),
     join(repositoryRoot, 'scripts', 'qualification-runner.mjs'),
     join(repositoryRoot, 'scripts', 'qualification-evaluate.mjs'),
     join(repositoryRoot, 'scripts', 'qualification-semantic-review.mjs'),
@@ -131,6 +132,7 @@ export async function computeQualificationEvaluatorDigest() {
     join(repositoryRoot, 'scripts', 'lib', 'qualification-diagnostic-portfolio.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-collaboration-ledger.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-bundle.mjs'),
+    join(repositoryRoot, 'scripts', 'lib', 'qualification-bundle-verifier.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-artifacts.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-core.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-evidence-index.mjs'),
@@ -139,6 +141,8 @@ export async function computeQualificationEvaluatorDigest() {
     join(repositoryRoot, 'scripts', 'lib', 'qualification-schema-validation.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-v036-schema-validation.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-semantic-judge.mjs'),
+    join(repositoryRoot, 'scripts', 'lib', 'qualification-semantic-evidence.mjs'),
+    join(repositoryRoot, 'scripts', 'lib', 'qualification-judge-views.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-tool-evidence.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-tool-ledger.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-workspace-mutation-ledger.mjs')

@@ -39,24 +39,40 @@ export function buildCollaborationLedger({
   const calls = []
   let incompleteCalls = 0
   for (const call of collaborationEvidence?.a2a ?? []) {
-    const inputReference = evidenceReferences.conversationInputs[call.conversationInputId]
+    const currentSurface = typeof call.messageId === 'string'
+      && typeof call.deliveryId === 'string'
+    const inputReference = currentSurface
+      ? evidenceReferences.messageDeliveries?.[call.deliveryId]
+      : evidenceReferences.conversationInputs?.[call.conversationInputId]
+    const contextManifestReference = currentSurface && call.recipientInputEvidenceId
+      ? evidenceReferences.contextManifests?.[call.recipientInputEvidenceId] ?? null
+      : null
     const runReference = call.recipientRunId
       ? evidenceReferences.agentRuns[call.recipientRunId]
       : null
     const eventReference = call.acceptanceEventId
       ? evidenceReferences.events[call.acceptanceEventId]
       : null
-    const contentReference = evidenceReferences.inboxMessages[call.inboxMessageId]
-    if (!isCanonicalCall(call) || !contentReference || !inputReference || !eventReference) {
+    const contentReference = currentSurface
+      ? evidenceReferences.messageContents?.[call.messageId]
+      : evidenceReferences.inboxMessages?.[call.inboxMessageId]
+    const adaptedCall = currentSurface
+      ? {
+          ...call,
+          conversationInputId: call.recipientInputEvidenceId ?? call.deliveryId,
+          inputStatus: currentInputState(call.recipientInputStatus ?? call.deliveryStatus)
+        }
+      : call
+    if (!isCanonicalCall(adaptedCall) || !contentReference || !inputReference || !eventReference) {
       incompleteCalls += 1
       continue
     }
     const input = {
-      inputId: call.conversationInputId,
-      state: call.inputStatus,
-      persistedAt: call.inputPersistedAt,
-      terminalAt: timestampOrNull(call.inputTerminalAt),
-      reason: typedReason(call.inputTerminalReason, 'collaboration.input_terminal')
+      inputId: adaptedCall.conversationInputId,
+      state: adaptedCall.inputStatus,
+      persistedAt: adaptedCall.inputPersistedAt,
+      terminalAt: timestampOrNull(adaptedCall.inputTerminalAt),
+      reason: typedReason(adaptedCall.inputTerminalReason, 'collaboration.input_terminal')
     }
     const recipientRun = {
       runId: call.recipientRunId,
@@ -69,6 +85,7 @@ export function buildCollaborationLedger({
     const evidenceReferencesForCall = uniqueReferences([
       contentReference,
       inputReference,
+      contextManifestReference,
       eventReference,
       runReference
     ].filter(Boolean))
@@ -81,24 +98,24 @@ export function buildCollaborationLedger({
     // The v0.34 ledger schema is sealed with these historical property names.
     // Current Core input is Agent-ID based; this is an explicit version adapter only.
     calls.push({
-      callId: call.callId,
-      acceptanceReceiptId: call.acceptanceReceiptId,
-      senderMemberId: call.senderAgentId,
-      recipientMemberId: call.recipientAgentId,
+      callId: adaptedCall.callId,
+      acceptanceReceiptId: adaptedCall.acceptanceReceiptId,
+      senderMemberId: adaptedCall.senderAgentId,
+      recipientMemberId: adaptedCall.recipientAgentId,
       contentEvidenceReference: contentReference,
-      taskId: call.taskId ?? null,
-      slot: call.slot,
-      depth: call.depth,
-      acceptedAt: call.acceptedAt,
+      taskId: adaptedCall.taskId ?? null,
+      slot: adaptedCall.slot,
+      depth: adaptedCall.depth,
+      acceptedAt: adaptedCall.acceptedAt,
       input,
       recipientRun,
       mechanicalSettlement: {
-        state: call.mechanicalSettlement.state,
-        reason: typedReason(call.mechanicalSettlement.reason, 'collaboration.mechanical_settlement')
+        state: adaptedCall.mechanicalSettlement.state,
+        reason: typedReason(adaptedCall.mechanicalSettlement.reason, 'collaboration.mechanical_settlement')
       },
-      latencySegments: buildLatencySegments(call),
+      latencySegments: buildLatencySegments(adaptedCall),
       evidenceReferences: evidenceReferencesForCall,
-      contentDigest: call.contentDigest
+      contentDigest: adaptedCall.contentDigest
     })
   }
   calls.sort((left, right) => (
@@ -107,7 +124,10 @@ export function buildCollaborationLedger({
     || left.callId.localeCompare(right.callId)
   ))
   const authoritativeAccepted = collaborationEvidence?.metrics?.acceptedMemberCalls
-  const complete = collaborationEvidence?.metrics?.coverage === 'complete_with_canonical_acceptance_receipts'
+  const complete = [
+    'complete_with_canonical_acceptance_receipts',
+    'complete_with_message_delivery_receipts'
+  ].includes(collaborationEvidence?.metrics?.coverage)
     && incompleteCalls === 0
     && Number.isInteger(authoritativeAccepted)
     && authoritativeAccepted === calls.length
@@ -313,11 +333,18 @@ function latency(segment, start, end, notApplicable = false) {
 }
 
 function isCanonicalCall(call) {
+  const sourceIdentityComplete = (
+    typeof call.inboxMessageId === 'string'
+      && typeof call.conversationInputId === 'string'
+  ) || (
+    typeof call.messageId === 'string'
+      && typeof call.deliveryId === 'string'
+      && typeof call.conversationInputId === 'string'
+  )
   return typeof call.callId === 'string'
     && typeof call.acceptanceReceiptId === 'string'
     && typeof call.acceptanceEventId === 'string'
-    && typeof call.inboxMessageId === 'string'
-    && typeof call.conversationInputId === 'string'
+    && sourceIdentityComplete
     && typeof call.senderAgentId === 'string'
     && typeof call.recipientAgentId === 'string'
     && Number.isSafeInteger(call.slot)
@@ -328,6 +355,14 @@ function isCanonicalCall(call) {
     && Number.isFinite(Date.parse(call.inputPersistedAt))
     && ['pending', 'materialized', 'failed', 'cancelled'].includes(call.inputStatus)
     && ['settled', 'unsettled', 'indeterminate'].includes(call.mechanicalSettlement?.state)
+}
+
+function currentInputState(state) {
+  if (['accepted', 'materialized', 'running', 'settled'].includes(state)) return 'materialized'
+  if (['prepared', 'pending'].includes(state)) return 'pending'
+  if (state === 'failed') return 'failed'
+  if (['cancelled', 'interrupted_before_dispatch'].includes(state)) return 'cancelled'
+  return null
 }
 
 function recipientRunState(state) {

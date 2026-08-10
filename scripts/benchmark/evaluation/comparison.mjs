@@ -110,7 +110,9 @@ function compareAxis(axis, baseline, candidate, rules) {
       fingerprint(candidate)
     ]))),
     suppressedMetrics: eligible ? [] : AXIS_METRICS[axis],
-    displayOnlyMetrics: eligible ? [] : AXIS_METRICS[axis]
+    // Collaboration activity counts are always descriptive.  A larger number
+    // of Calls, Runs or completed Tasks has no monotonic quality direction.
+    displayOnlyMetrics: eligible && axis !== 'collaboration' ? [] : AXIS_METRICS[axis]
   }
 }
 
@@ -131,6 +133,14 @@ function deriveDelta(axis, baseline, candidate) {
   }
   const baselineMetrics = baseline.outcome.metrics?.[axis] ?? null
   const candidateMetrics = candidate.outcome.metrics?.[axis] ?? null
+  if (axis === 'collaboration') {
+    return {
+      baseline: baselineMetrics,
+      candidate: candidateMetrics,
+      numericDelta: null,
+      interpretation: 'descriptive_activity_only_no_quality_direction'
+    }
+  }
   return { baseline: baselineMetrics, candidate: candidateMetrics, numericDelta: numericDelta(baselineMetrics, candidateMetrics) }
 }
 

@@ -109,6 +109,90 @@ test('Collaboration Ledger rejects unresolved Evidence References and metric inf
   )
 })
 
+test('Collaboration Ledger adapts current Public Message Delivery evidence without inventing response semantics', () => {
+  const evidenceIndex = indexFixture()
+  evidenceIndex.payload.records.push(
+    record('core.message-content:message-1', 'core.camp-snapshot'),
+    record('core.message-delivery:delivery-1', 'core.camp-snapshot'),
+    record('core.context-manifest:manifest-1', 'core.camp-snapshot'),
+    record('core.run:run-current', 'core.camp-snapshot'),
+    record('core.event:delivery-event-1', 'core.event-stream')
+  )
+  const evidenceReferences = referenceFixture(evidenceIndex.artifactId)
+  evidenceReferences.messageContents = {
+    'message-1': ref(evidenceIndex.artifactId, 'core.message-content:message-1')
+  }
+  evidenceReferences.messageDeliveries = {
+    'delivery-1': ref(evidenceIndex.artifactId, 'core.message-delivery:delivery-1')
+  }
+  evidenceReferences.contextManifests = {
+    'manifest-1': ref(evidenceIndex.artifactId, 'core.context-manifest:manifest-1')
+  }
+  evidenceReferences.agentRuns['run-current'] = ref(
+    evidenceIndex.artifactId,
+    'core.run:run-current'
+  )
+  evidenceReferences.events['delivery-event-1'] = ref(
+    evidenceIndex.artifactId,
+    'core.event:delivery-event-1'
+  )
+  const collaborationEvidence = {
+    a2a: [{
+      callId: 'delivery-1',
+      deliveryId: 'delivery-1',
+      deliveryStatus: 'settled',
+      messageId: 'message-1',
+      acceptanceReceiptId: 'delivery-event-1',
+      acceptanceEventId: 'delivery-event-1',
+      acceptedAt: '2026-08-04T00:00:01.000Z',
+      inboxMessageId: null,
+      slot: 1,
+      depth: 1,
+      senderAgentId: 'agent-lead',
+      recipientAgentId: 'agent-reviewer',
+      contentDigest: 'message-content-digest',
+      sourceAgentRunId: 'run-lead',
+      recipientRunId: 'run-current',
+      taskId: null,
+      conversationInputId: 'manifest-1',
+      recipientInputEvidenceId: 'manifest-1',
+      recipientInputStatus: 'accepted',
+      inputPersistedAt: '2026-08-04T00:00:01.100Z',
+      inputTerminalAt: '2026-08-04T00:00:02.000Z',
+      inputTerminalReason: null,
+      recipientRunStatus: 'succeeded',
+      recipientRunMaterializedAt: '2026-08-04T00:00:01.200Z',
+      recipientRunStartedAt: '2026-08-04T00:00:01.300Z',
+      recipientRunTerminalAt: '2026-08-04T00:00:02.000Z',
+      recipientRunReason: null,
+      mechanicalSettlement: { state: 'settled', reason: 'delivery_settled' }
+    }],
+    metrics: {
+      acceptedMemberCalls: 1,
+      maximumDepth: 1,
+      coverage: 'complete_with_message_delivery_receipts'
+    }
+  }
+
+  const artifact = buildCollaborationLedger({
+    trialId: 'trial-current',
+    plannedSlotId: 'slot-current',
+    caseId: 'CASE-CURRENT',
+    caseSeal: 'b'.repeat(64),
+    producerDigest: 'a'.repeat(64),
+    collaborationEvidence,
+    evidenceIndex,
+    evidenceReferences
+  })
+
+  assert.equal(artifact.payload.calls.length, 1)
+  assert.equal(artifact.payload.calls[0].contentEvidenceReference.evidenceId, 'core.message-content:message-1')
+  assert.equal(artifact.payload.calls[0].input.inputId, 'manifest-1')
+  assert.equal(artifact.payload.calls[0].input.state, 'materialized')
+  assert.equal(artifact.payload.metrics.coverage.state, 'complete')
+  assert.equal(JSON.stringify(artifact).includes('responseProduced'), false)
+})
+
 function collaborationFixture() {
   return {
     a2a: [

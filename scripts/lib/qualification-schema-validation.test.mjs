@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   qualificationSchemaReference,
+  validateQualificationContractSchemaCatalog,
   validateQualificationSchemaCatalog
 } from './qualification-schema-validation.mjs'
 
@@ -18,4 +19,12 @@ test('v0.34 schema catalog digests, references, and draft 2020-12 metaschemas co
       payloadDigest: 'sha256:a075c2b44e97abef21574ad347391de9b586d2d6b377a6d89d557fe2e0f650ab'
     }
   )
+})
+
+test('cross-version Qualification contract schema catalog is independent of frozen history', () => {
+  const catalog = validateQualificationContractSchemaCatalog()
+  assert.equal(catalog.catalogVersion, '1.0.0')
+  assert.deepEqual(catalog.schemas.map((entry) => entry.file), [
+    'semantic-judge-view-suite-v1.schema.json'
+  ])
 })

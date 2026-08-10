@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/contracts/semantic-judge-view-suite-v1.schema.json",
+  "title": "Rovai Semantic Dual-View Judge Suite",
+  "$defs": {
+    "view": {
+      "enum": ["process", "outcome"]
+    },
+    "state": {
+      "enum": ["complete", "disagreement", "unavailable"]
+    },
+    "verdict": {
+      "enum": [
+        "satisfied",
+        "partially_satisfied",
+        "not_satisfied",
+        "indeterminate",
+        "not_applicable"
+      ]
+    },
+    "checklistItem": {
+      "enum": [
+        "SER.requirements.understanding",
+        "SER.design.solution_fit",
+        "SER.implementation.quality",
+        "SER.testing.strategy",
+        "SER.scope.discipline",
+        "SER.collaboration.delegation",
+        "SER.collaboration.handoff_clarity",
+        "SER.collaboration.contribution_value",
+        "SER.collaboration.feedback_absorption",
+        "SER.collaboration.lead_integration",
+        "SER.response.claim_accuracy",
+        "SER.response.limitations"
+      ]
+    },
+    "replicaObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verdict", "confidence", "evidenceIds", "reason"],
+      "properties": {
+        "verdict": { "$ref": "#/$defs/verdict" },
+        "confidence": { "enum": ["low", "medium", "high"] },
+        "evidenceIds": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^EV-[0-9]{4}$" }
+        },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 1200 }
+      }
+    },
+    "reviewItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checklistItem",
+        "state",
+        "verdict",
+        "replicaA",
+        "replicaB",
+        "evidenceIds",
+        "evidenceReferences",
+        "reason"
+      ],
+      "properties": {
+        "checklistItem": { "$ref": "#/$defs/checklistItem" },
+        "state": { "enum": ["agreed", "disagreed"] },
+        "verdict": {
+          "anyOf": [
+            { "$ref": "#/$defs/verdict" },
+            { "type": "null" }
+          ]
+        },
+        "replicaA": { "$ref": "#/$defs/replicaObservation" },
+        "replicaB": { "$ref": "#/$defs/replicaObservation" },
+        "evidenceIds": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^EV-[0-9]{4}$" }
+        },
+        "evidenceReferences": {
+          "type": "array",
+          "items": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/evidenceRef" }
+        },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 1200 }
+      }
+    },
+    "viewResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "view",
+        "configurationArtifact",
+        "packArtifact",
+        "replicaArtifacts",
+        "reviewArtifact",
+        "state",
+        "items"
+      ],
+      "properties": {
+        "view": { "$ref": "#/$defs/view" },
+        "configurationArtifact": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/artifactRef" },
+        "packArtifact": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/artifactRef" },
+        "replicaArtifacts": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/artifactRef" }
+        },
+        "reviewArtifact": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/artifactRef" },
+        "state": { "$ref": "#/$defs/state" },
+        "items": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/reviewItem" }
+        }
+      }
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifactId",
+    "schemaId",
+    "schemaVersion",
+    "producer",
+    "binding",
+    "sourceBoundaries",
+    "payloadDigest",
+    "payload"
+  ],
+  "properties": {
+    "artifactId": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/stableId" },
+    "schemaId": { "const": "rovai.qualification.semantic-judge-view-suite" },
+    "schemaVersion": { "const": "1.0.0" },
+    "producer": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/producer" },
+    "binding": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/binding" },
+    "sourceBoundaries": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/sourceBoundary" }
+    },
+    "payloadDigest": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/digest" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "suiteId",
+        "protocolId",
+        "state",
+        "views",
+        "compatibilityItems",
+        "unavailableReason"
+      ],
+      "properties": {
+        "suiteId": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/stableId" },
+        "protocolId": { "const": "semantic-dual-view-judge-1" },
+        "state": { "$ref": "#/$defs/state" },
+        "views": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "$ref": "#/$defs/viewResult" },
+          "allOf": [
+            {
+              "contains": {
+                "properties": { "view": { "const": "process" } },
+                "required": ["view"]
+              }
+            },
+            {
+              "contains": {
+                "properties": { "view": { "const": "outcome" } },
+                "required": ["view"]
+              }
+            }
+          ]
+        },
+        "compatibilityItems": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/reviewItem" }
+        },
+        "unavailableReason": {
+          "anyOf": [
+            { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/typedReason" },
+            { "type": "null" }
+          ]
+        }
+      }
+    }
+  }
+}

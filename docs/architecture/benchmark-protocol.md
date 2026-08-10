@@ -2,7 +2,7 @@
 document_type: architecture
 authority: benchmark-protocol-components-and-boundaries
 status: accepted
-last_updated: 2026-08-10
+last_updated: 2026-08-11
 ---
 
 # Benchmark Protocol 架构
@@ -19,6 +19,8 @@ Pass Rate 或排行榜的业务真源。
 4. `execution/` 从 Profile 生成 planned slots、调用 runner、聚合 raw repeat outcomes；
 5. `evaluation/` 独立计算五轴比较资格和失败 taxonomy；
 6. `reporting/` 从文件权威源生成 JSON/Markdown/Project 投影，并可选创建 Rovai Review Camp。
+7. Qualification Layer 5 的 Judge View Module 从一个 allowlist source Pack 投影 Process 与 Blinded Outcome 两个
+   Model-Visible Pack，并在 adapter 之外保留 local-to-authoritative Evidence Map。
 
 旧 `qualification:suite` 和 `qualification:project` CLI 只保留薄 wrapper。v0.34 的严格 3×4 规则位于
 legacy adapter/profile，通用 Suite 不知道历史 Case ID 或固定矩阵。
@@ -31,6 +33,25 @@ legacy adapter/profile，通用 Suite 不知道历史 Case ID 或固定矩阵。
 
 Lane 之间不共用排行榜，不产生 correctness/collaboration/performance 混合总分，也不以 Pass@k 隐藏原始重复。
 
+## Semantic Judge views
+
+Process Judge 是 Team-only View。它可见伪名化角色、Public A2A message content、确定性 interaction lifecycle，
+以及判断 contribution/feedback/integration 所需的有界 delivery evidence；调用量和 Member 数只是事实，不是质量。
+Public A2A content 按 Message identity 去重，fanout 只增加 interaction observation；消息 artifact 精确绑定 Message、
+Delivery、Evidence Index 与 Collaboration Ledger。只有 complete source coverage 证明零 interaction 时 Process View 才
+为 not applicable；证据缺失为 unavailable，两种情况都不调用模型。
+
+Blinded Outcome Judge 对 Team/Solo 使用同一个 Interface，只可见 disclosed requirements、bounded delivered code、
+workspace/verification facts 与 final response。Pack construction 在 adapter 前删除 treatment、Member、role、Call、
+message、Run、Trial 和真实 Evidence identity；不能依靠 prompt 要求模型“忽略”这些字段。
+预注册 treatment canary 若出现在 exact delivery content 中，Pack 在调用前 fail closed；结构盲化不冒充对任意自然语言
+self-disclosure 的完美检测。
+
+每个 View 的 Adapter 只收到 Model-Visible Pack，真实 Evidence Reference Map 留在 audit artifact。两个 Replica 使用
+同一冻结 snapshot、A/B 反向 checklist order、exact item closure；disagreement 原样保留。Process 与 Outcome 不形成
+综合分，也不影响 Hard Outcome。该结构隔离过程构念和结果构念，但 Team/Solo 因果价值仍须由独立 paired
+counterfactual protocol 证明。
+
 ## Authority flow
 
 ```text
@@ -38,6 +59,8 @@ Profile + source artifacts
   -> Adapter Registry / strict Normalizer
   -> Profile-driven planned slots and execution
   -> Benchmark Protocol v3 Run + artifact index
+  -> Process / Blinded Outcome Model-Visible Packs
+  -> dual-replica per-view reconciliation
   -> per-axis comparison eligibility
   -> JSON / Markdown / Project Review projection
 ```
@@ -55,6 +78,8 @@ Bundle/文件始终是投影的唯一权威源。默认 Rovai 投影只创建一
 ## References
 
 - [Benchmark Protocol v3](../contracts/benchmark-protocol-v3.md)
+- [Semantic Judge Views v1](../contracts/semantic-judge-views-v1.md)
+- [ADR-0155](../adr/0155-treatment-blind-outcome-and-process-judge-views.md)
 - [ADR-0151](../adr/0151-versioned-benchmark-protocol-and-axis-comparability.md)
 - [ADR-0095](../adr/0095-layered-qualification-authority-and-semantic-review.md)
 - [ADR-0097](../adr/0097-authority-preserving-benchmark-evidence-ledgers.md)

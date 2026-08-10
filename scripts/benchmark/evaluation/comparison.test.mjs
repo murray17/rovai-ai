@@ -28,3 +28,36 @@ test('case seal and team configuration drift suppress affected deltas with stabl
   assert.equal(comparison.deltas.collaboration, null)
   assert.equal(comparison.axes.hardOutcome.displayOnlyMetrics.includes('hardOutcome'), true)
 })
+
+test('larger collaboration activity counts are descriptive and never emitted as quality deltas', () => {
+  const baseline = benchmarkRunFixture({
+    runId: 'baseline',
+    outcome: {
+      metrics: {
+        collaboration: { memberCalls: 1, agentRuns: 2, completedTasks: 1 }
+      }
+    }
+  })
+  const candidate = benchmarkRunFixture({
+    runId: 'candidate',
+    outcome: {
+      metrics: {
+        collaboration: { memberCalls: 8, agentRuns: 9, completedTasks: 5 }
+      }
+    }
+  })
+  const comparison = compareBenchmarkRuns(baseline, candidate)
+
+  assert.equal(comparison.axes.collaboration.eligible, true)
+  assert.equal(comparison.deltas.collaboration.numericDelta, null)
+  assert.equal(
+    comparison.deltas.collaboration.interpretation,
+    'descriptive_activity_only_no_quality_direction'
+  )
+  assert.deepEqual(comparison.axes.collaboration.displayOnlyMetrics, [
+    'memberCalls',
+    'agentRuns',
+    'completedTasks',
+    'collaborationChecks'
+  ])
+})

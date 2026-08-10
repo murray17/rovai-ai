@@ -1,0 +1,13 @@
+{
+  "catalogVersion": "1.0.0",
+  "hashAlgorithm": "sha256",
+  "digestInput": "raw_file_bytes",
+  "schemas": [
+    {
+      "file": "semantic-judge-view-suite-v1.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/contracts/semantic-judge-view-suite-v1.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:4d577791caeebd6dbeb4657e987ab11def1cb945ef1af44472190b62d2eb86a7"
+    }
+  ]
+}

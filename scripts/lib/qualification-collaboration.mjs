@@ -45,12 +45,160 @@ export function deriveCollaborationEvidence(snapshot, dispatchBoundary) {
   if (!snapshot || !dispatchBoundary) {
     return { status: 'indeterminate', reason: 'authoritative snapshot unavailable' }
   }
+  if (isCurrentPublicA2aSnapshot(snapshot)) {
+    return deriveCurrentPublicA2aEvidence(snapshot, dispatchBoundary)
+  }
+  return deriveLegacyCollaborationEvidence(snapshot, dispatchBoundary)
+}
+
+function deriveCurrentPublicA2aEvidence(snapshot, dispatchBoundary) {
+  const runs = Array.isArray(snapshot.agentRuns)
+    ? snapshot.agentRuns.filter((run) => run.campTurnId === dispatchBoundary.campTurnId)
+    : []
+  const runIds = new Set(runs.map((run) => run.id))
+  const runById = new Map(runs.map((run) => [run.id, run]))
+  const messages = Array.isArray(snapshot.messages) ? snapshot.messages : []
+  const messageById = new Map(messages.map((message) => [message.id, message]))
+  const manifests = new Map((Array.isArray(snapshot.contextManifests)
+    ? snapshot.contextManifests
+    : []).filter((manifest) => runIds.has(manifest.agentRunId)).map((manifest) => [manifest.id, manifest]))
+  const deliveriesAvailable = Array.isArray(snapshot.messageDeliveries)
+  const deliveries = deliveriesAvailable
+    ? snapshot.messageDeliveries.filter((delivery) => delivery.campTurnId === dispatchBoundary.campTurnId)
+    : []
+  const receiptEvents = (Array.isArray(snapshot.timeline) ? snapshot.timeline : []).filter((event) => (
+    event.eventType === 'message_delivery.accepted'
+      && event.payload?.campTurnId === dispatchBoundary.campTurnId
+  ))
+  const receiptByDeliveryId = new Map(receiptEvents.flatMap((event) => (
+    event.payload?.deliveryId ? [[event.payload.deliveryId, event]] : []
+  )))
+  const taskFacts = (Array.isArray(snapshot.tasks) ? snapshot.tasks : []).map((task) => ({
+    id: task.id,
+    status: task.status,
+    assigneeAgentId: task.assigneeAgentId,
+    sourceAgentRunId: task.sourceAgentRunId
+  }))
+  const calls = deliveries.map((delivery, index) => {
+    const message = messageById.get(delivery.messageId) ?? null
+    const receipt = receiptByDeliveryId.get(delivery.id) ?? null
+    const recipientRunId = delivery.targetAgentRunId ?? null
+    const recipientRun = recipientRunId ? runById.get(recipientRunId) ?? null : null
+    const manifest = delivery.contextManifestId ? manifests.get(delivery.contextManifestId) ?? null : null
+    const runtimeInputDelivery = manifest?.delivery ?? null
+    const depth = receipt?.payload?.a2aDepth ?? recipientRun?.a2aDepth ?? null
+    return {
+      callId: delivery.id,
+      deliveryId: delivery.id,
+      deliveryStatus: delivery.status ?? null,
+      messageId: delivery.messageId ?? null,
+      acceptanceReceiptId: receipt?.eventId ?? null,
+      acceptanceEventId: receipt?.eventId ?? null,
+      acceptanceReceiptCoverage: message && receipt ? 'complete' : 'unavailable',
+      acceptedAt: receipt?.createdAt ?? delivery.createdAt ?? null,
+      inboxMessageId: null,
+      slot: Number.isSafeInteger(receipt?.payload?.recipientCanonicalPosition)
+        ? receipt.payload.recipientCanonicalPosition + 1
+        : Number.isSafeInteger(delivery.recipientCanonicalPosition)
+          ? delivery.recipientCanonicalPosition + 1
+          : null,
+      observedOrder: index + 1,
+      senderAgentId: message?.authorId ?? message?.senderAgentId ?? null,
+      recipientAgentId: delivery.recipientAgentId ?? null,
+      contentDigest: typeof message?.body === 'string' ? sha256(message.body) : null,
+      sourceAgentRunId: message?.sourceAgentRunId ?? delivery.sourceAgentRunId ?? null,
+      recipientRunId,
+      taskId: delivery.taskId ?? recipientRun?.taskId ?? null,
+      depth,
+      conversationInputId: manifest?.id ?? null,
+      recipientInputEvidenceId: manifest?.id ?? null,
+      inputSequence: message?.sequence ?? null,
+      inputStatus: runtimeInputDelivery?.status ?? null,
+      recipientInputStatus: runtimeInputDelivery?.status ?? null,
+      inputPersistedAt: delivery.createdAt ?? null,
+      inputMaterializedAt: manifest?.createdAt ?? recipientRun?.createdAt ?? null,
+      inputTerminalAt: runtimeInputDelivery?.resolvedAt ?? delivery.endedAt ?? null,
+      inputTerminalReason: runtimeInputDelivery?.lastError ?? delivery.failureCode ?? null,
+      recipientRunStatus: recipientRun?.status ?? 'not_materialized',
+      recipientRunMaterializedAt: recipientRun?.createdAt ?? null,
+      recipientRunStartedAt: recipientRun?.startedAt ?? null,
+      recipientRunTerminalAt: recipientRun?.endedAt ?? null,
+      recipientRunReason: recipientRun?.waitReason ?? null,
+      delivered: ['running', 'settled', 'failed', 'cancelled'].includes(delivery.status),
+      failed: ['failed', 'cancelled', 'interrupted_before_dispatch'].includes(delivery.status),
+      messageVisibility: 'public_to_camp',
+      mechanicalSettlement: deriveCurrentMechanicalSettlement(delivery, recipientRun)
+    }
+  })
+  const turn = (Array.isArray(snapshot.turns) ? snapshot.turns : [])
+    .find((candidate) => candidate.id === dispatchBoundary.campTurnId)
+  const authoritativeAcceptedA2a = turn?.executionBudget?.acceptedA2a
+  const acceptanceCoverageComplete = deliveriesAvailable
+    && Number.isInteger(authoritativeAcceptedA2a)
+    && authoritativeAcceptedA2a === deliveries.length
+    && receiptEvents.length === deliveries.length
+    && calls.every((call) => (
+      call.acceptanceReceiptId !== null
+      && call.messageId !== null
+      && call.senderAgentId !== null
+      && call.recipientAgentId !== null
+      && Number.isSafeInteger(call.slot)
+      && call.slot >= 1
+      && Number.isSafeInteger(call.depth)
+      && call.depth >= 1
+    ))
+  const observedSettledMemberCalls = calls.filter(
+    (call) => call.mechanicalSettlement.state === 'settled'
+  ).length
+  const pollingViolations = derivePollingViolations(
+    (Array.isArray(snapshot.executionEvidence) ? snapshot.executionEvidence : [])
+      .filter((evidence) => runIds.has(evidence.agentRunId))
+  )
+  return {
+    status: 'observed',
+    sourceSurface: 'public_message_delivery_v1',
+    members: [...new Set(runs.map((run) => run.agentId).filter(Boolean))],
+    runGraph: runs.map((run) => ({
+      id: run.id,
+      agentProfileId: run.agentId,
+      status: run.status,
+      invocationKind: run.invocationKind,
+      parentRunId: run.a2aParentAgentRunId,
+      depth: run.a2aDepth,
+      startedAt: run.startedAt,
+      endedAt: run.endedAt
+    })),
+    a2a: calls,
+    repeatedRouting: findRepeatedRoutingCalls(calls),
+    taskFacts,
+    metrics: {
+      acceptedMemberCalls: Number.isInteger(authoritativeAcceptedA2a)
+        ? authoritativeAcceptedA2a
+        : null,
+      observedDurableMemberCalls: deliveries.length,
+      settledMemberCalls: acceptanceCoverageComplete ? observedSettledMemberCalls : null,
+      observedSettledMemberCalls,
+      maximumDepth: Math.max(0, ...runs.map((run) => run.a2aDepth ?? 0)),
+      completedTasks: taskFacts.filter((task) => task.status === 'completed').length,
+      coverage: acceptanceCoverageComplete
+        ? 'complete_with_message_delivery_receipts'
+        : 'partial_message_delivery_receipt_coverage'
+    },
+    pollingViolations,
+    semanticAttribution: {
+      status: 'indeterminate',
+      reason: 'Semantic necessity, feedback absorption, and integration quality require the independent Judge layer.'
+    }
+  }
+}
+
+function deriveLegacyCollaborationEvidence(snapshot, dispatchBoundary) {
   const runs = snapshot.agentRuns.filter((run) => run.campTurnId === dispatchBoundary.campTurnId)
   const runIds = new Set(runs.map((run) => run.id))
-  const inbox = snapshot.inboxMessages.filter((message) => (
+  const inbox = (Array.isArray(snapshot.inboxMessages) ? snapshot.inboxMessages : []).filter((message) => (
     runs.some((run) => run.id === message.sourceAgentRunId || run.id === message.targetAgentRunId)
   ))
-  const inputs = snapshot.conversationInputs.filter((input) => (
+  const inputs = (Array.isArray(snapshot.conversationInputs) ? snapshot.conversationInputs : []).filter((input) => (
     input.campTurnId === dispatchBoundary.campTurnId
   ))
   const inputByInboxId = new Map(inputs.flatMap((input) => (
@@ -128,6 +276,7 @@ export function deriveCollaborationEvidence(snapshot, dispatchBoundary) {
   ).length
   return {
     status: 'observed',
+    sourceSurface: 'legacy_inbox_conversation_input',
     members: [...new Set(runs.map((run) => run.agentId))],
     runGraph: runs.map((run) => ({
       id: run.id,
@@ -161,6 +310,31 @@ export function deriveCollaborationEvidence(snapshot, dispatchBoundary) {
       reason: 'Semantic necessity, feedback absorption, and integration quality require the independent Judge layer.'
     }
   }
+}
+
+function isCurrentPublicA2aSnapshot(snapshot) {
+  return Number.isInteger(snapshot?.schemaVersion) && snapshot.schemaVersion >= 27
+}
+
+function deriveCurrentMechanicalSettlement(delivery, recipientRun) {
+  if (!delivery || typeof delivery.status !== 'string') {
+    return { state: 'indeterminate', reason: 'message_delivery_status_unavailable' }
+  }
+  if (['pending', 'running'].includes(delivery.status)) {
+    return { state: 'unsettled', reason: `message_delivery_${delivery.status}` }
+  }
+  if (['settled', 'failed', 'cancelled', 'interrupted_before_dispatch'].includes(delivery.status)) {
+    if (delivery.status === 'settled') {
+      if (!recipientRun) {
+        return { state: 'indeterminate', reason: 'settled_delivery_target_run_unavailable' }
+      }
+      if (!['succeeded', 'failed', 'cancelled'].includes(recipientRun.status)) {
+        return { state: 'indeterminate', reason: 'settled_delivery_target_run_nonterminal' }
+      }
+    }
+    return { state: 'settled', reason: `message_delivery_${delivery.status}` }
+  }
+  return { state: 'indeterminate', reason: `message_delivery_${delivery.status}` }
 }
 
 export function evaluateCollaborationContract(contract, evidence) {
@@ -243,6 +417,22 @@ function findRepeatedRouting(messages) {
       repeated.push({
         senderAgentId: message.senderAgentId,
         recipientAgentId: message.recipientAgentId
+      })
+    }
+    seen.add(key)
+  }
+  return repeated
+}
+
+function findRepeatedRoutingCalls(calls) {
+  const seen = new Set()
+  const repeated = []
+  for (const call of calls) {
+    const key = `${call.senderAgentId}:${call.recipientAgentId}`
+    if (seen.has(key)) {
+      repeated.push({
+        senderAgentId: call.senderAgentId,
+        recipientAgentId: call.recipientAgentId
       })
     }
     seen.add(key)

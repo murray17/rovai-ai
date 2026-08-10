@@ -788,8 +788,24 @@ _Avoid_: final tree diff, Tool Call Ledger entry, inferred Agent ownership, Git 
 The content-identified, allowlist-built and redacted projection of public Case obligations, Delivered Workspace facts, collaboration, Tool, mutation, and Final Response Evidence supplied to a Semantic Judge. It treats participant text as untrusted data, hides participant model identity and the computed Hard Outcome, and excludes hidden reasoning, credentials, Runtime-private logs, complete Withheld Verifier details, reference implementations, and every Sealed Pack locator by construction.
 _Avoid_: Qualification Evidence Bundle, raw transcript, verifier archive, prompt with private locators, Hard Outcome label
 
+**Model-Visible Judge Pack**:
+The view-specific projection actually supplied to one Judge Replica, containing only local Evidence IDs and the content or facts authorized for that Judge View. Its audit binding and local-to-authoritative Evidence Reference map remain outside model input, so provenance can be verified without exposing Trial or treatment identity.
+_Avoid_: complete Judge artifact, Qualification Evidence Bundle, source Evidence IDs, model-visible Trial binding
+
+**Process Judge View**:
+The Team-only semantic review of delegation necessity, handoff clarity, contribution value, feedback absorption, and Lead integration from pseudonymized roles, exact Public A2A content, deterministic interaction facts, and bounded delivered-result evidence. Agent, Call, Message, or Run volume is never positive evidence by itself; only complete source coverage proving zero interaction makes the View not applicable, while missing interaction evidence makes it unavailable, and neither state invokes an LLM.
+_Avoid_: collaboration activity score, Member-count reward, Message Delivery Settlement, Solo review
+
+**Blinded Outcome Judge View**:
+The structurally treatment-blind semantic review of requirement fulfillment, solution fit, implementation quality, verification adequacy, scope discipline, final-response accuracy, and limitation disclosure. Its Model-Visible Judge Pack includes only disclosed requirements, bounded delivered code, deterministic verification facts, workspace-change facts, and the final response, and excludes structured Team/Solo labels, Members, roles, Calls, collaboration messages, Runs, Trial identity, and authoritative Evidence IDs. Pre-registered arm canaries fail closed when exact delivery text discloses treatment; absent such a rule, structural blinding does not prove that arbitrary natural language contains no treatment hint.
+_Avoid_: Team-aware outcome review, collaboration review, Hard Outcome verifier, treatment classifier
+
+**Semantic Judge View Suite**:
+The paired Process Judge View and Blinded Outcome Judge View retained for one Qualification Trial under independently frozen checklists and a shared model snapshot policy. It preserves every per-item replica verdict and disagreement, creates no cross-view or aggregate score, and never changes Hard Outcome; the Outcome View remains independently usable when Process is not applicable.
+_Avoid_: composite Semantic Engineering Review score, Judge vote, Team superiority claim, Hard Outcome input
+
 **Semantic Engineering Review**:
-The advisory, checklist-based LLM review of engineering and collaboration quality using only one Judge Evidence Pack. Every item carries a categorical verdict, evidence references, confidence, and an explicit applicability or abstention state; the Review has no aggregate score, may be unavailable or disputed, and never creates, removes, or changes a Hard Outcome.
+The advisory, checklist-based LLM review of engineering result and collaboration process through separate Model-Visible Judge Packs derived from one allowlisted source Pack. Every item carries a categorical verdict, evidence references, confidence, and an explicit applicability or abstention state; the Review has no aggregate score, may be unavailable or disputed, and never creates, removes, or changes a Hard Outcome.
 _Avoid_: qualification verdict, composite score, hidden-test review, Agent self-assessment
 
 **Judge Replica**:

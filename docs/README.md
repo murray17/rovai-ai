@@ -1,7 +1,7 @@
 ---
 document_type: documentation-index
 authority: documentation-routing
-last_updated: 2026-08-10
+last_updated: 2026-08-11
 ---
 
 # Rovai-ai 文档导航
@@ -23,7 +23,7 @@ last_updated: 2026-08-10
 | 修改模型可见上下文字段/JSON、截断 continuation、遗漏 navigation hint、ContextManifest Evidence、Runtime Input Delivery Evidence 或 Formatter/Manifest/Profile 版本边界 | [ADR-0147](adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)、[ADR-0149](adr/0149-bounded-whole-history-omission-evidence.md)、[ADR-0152](adr/0152-lead-owned-task-responsibility-and-self-active-task-awareness.md)、[ADR-0153](adr/0153-explicit-empty-self-active-task-snapshot.md)、[ContextManifest Evidence v11](contracts/context-manifest-evidence-v11.md)及当前版本实施计划 |
 | 修改 `MEMBER_IDENTITY`、`COLLABORATION_STATE`、peer 选择、Lead 引用、projection digest/inclusion 或 accepted ACK 水位 | [ADR-0146](adr/0146-sole-native-session-self-identity-and-peer-routing-projection.md)、[Collaboration State v2](contracts/collaboration-state-v2.md)及[Built-in Tool Runtime 架构](architecture/builtin-tool-runtime.md) |
 | 修改诊断自检、单项修复、三态分类、Recovery 或 v5 导出/脱敏 | [ADR-0148](adr/0148-read-only-diagnostics-and-data-minimized-export.md)、[Diagnostics Center v1](contracts/diagnostics-center-v1.md)及[诊断中心架构](architecture/diagnostics-center.md) |
-| 修改 Benchmark 协议、Profile、Adapter、比较资格、失败分类或 Project Review 投影 | [ADR-0151](adr/0151-versioned-benchmark-protocol-and-axis-comparability.md)、[Benchmark Protocol v3](contracts/benchmark-protocol-v3.md)及[Benchmark Protocol 架构](architecture/benchmark-protocol.md) |
+| 修改 Benchmark 协议、Judge View、模型可见 Evidence、Profile、Adapter、比较资格、失败分类或 Project Review 投影 | [ADR-0151](adr/0151-versioned-benchmark-protocol-and-axis-comparability.md)、[ADR-0155](adr/0155-treatment-blind-outcome-and-process-judge-views.md)、[Benchmark Protocol v3](contracts/benchmark-protocol-v3.md)、[Semantic Judge Views v1](contracts/semantic-judge-views-v1.md)及[Benchmark Protocol 架构](architecture/benchmark-protocol.md) |
 | 理解内置 CLI、Core Router、Runtime Fleet、Bootstrap 与外部 MCP 的长期结构 | [Built-in Tool Runtime 架构](architecture/builtin-tool-runtime.md) |
 | 修改 Native Session compaction detector、Observer Lease、Runtime 补发 policy、Bootstrap Delivery Gate 或 redelivery payload | [Native Session Bootstrap Redelivery 架构](architecture/native-session-bootstrap-redelivery.md)、[ADR-0138](adr/0138-durable-bootstrap-redelivery-requirement.md)至[ADR-0143](adr/0143-best-effort-non-blocking-compaction-detector-capability.md)及[ADR-0147](adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md) |
 | 理解历史设计与演进原因 | [版本索引](versions/README.md)及对应历史版本；历史内容不能作为当前约束 |

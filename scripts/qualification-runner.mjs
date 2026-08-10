@@ -90,6 +90,10 @@ import {
   buildWorkspaceMutationLedger,
   retainWorkspaceMutationLedgerArtifact
 } from './lib/qualification-workspace-mutation-ledger.mjs'
+import {
+  buildCollaborationMessageEvidence,
+  retainCollaborationMessageEvidence
+} from './lib/qualification-semantic-evidence.mjs'
 import { publishQualificationEvidenceBundle } from './lib/qualification-bundle.mjs'
 
 const root = resolve(import.meta.dirname, '..')
@@ -643,6 +647,19 @@ async function runTrial(options) {
     evidenceDirectory,
     evidenceIndexBuild.artifact
   )
+  const collaborationMessageEvidence = buildCollaborationMessageEvidence({
+    trialId,
+    snapshot: finalSnapshot,
+    dispatchBoundary,
+    collaborationEvidence: collaboration,
+    evidenceReferences: evidenceIndexBuild.references,
+    evidenceIndex: evidenceIndexBuild.artifact,
+    producerDigest: environmentManifest?.runnerDigest ?? await computeQualificationEvaluatorDigest()
+  })
+  await retainCollaborationMessageEvidence(
+    evidenceDirectory,
+    collaborationMessageEvidence
+  )
   const collaborationLedgerArtifact = buildCollaborationLedger({
     trialId,
     evaluationAttemptId: evaluationAttempt?.attemptId ?? null,
@@ -702,7 +719,9 @@ async function runTrial(options) {
   )
   const finalResponseReferences = finalResponses.references.map((message) => ({
     ...message,
-    evidenceReference: evidenceIndexBuild.references.messages[message.messageId] ?? null
+    evidenceReference: evidenceIndexBuild.references.messageContents[message.messageId]
+      ?? evidenceIndexBuild.references.messages[message.messageId]
+      ?? null
   }))
   const deliveryLayer = buildDeliveryLayer({
     deliveryEvidence,
@@ -1042,16 +1061,15 @@ async function observeTrial({
   while (true) {
     const snapshot = await core.request('camps.snapshot', { campId }, 60_000)
     // Current Core v0.52+ snapshots intentionally omit the retired v0.34
-    // inbox/conversation fields. Keep the runner's legacy evaluators total
-    // while making the absence explicit as empty compatibility projections.
+    // inbox/conversation fields. Keep those fields absent: an observation gap
+    // must remain distinguishable from an observed empty collection. Current
+    // collaboration evidence is derived from Public Message + Message Delivery.
     for (const field of [
-      'tasks', 'messages', 'messageDeliveries', 'turns', 'agentRuns',
-      'executionEvidence', 'contextManifests', 'approvals', 'actions', 'timeline'
+      'tasks', 'messages', 'turns', 'agentRuns',
+      'executionEvidence', 'approvals', 'actions', 'timeline'
     ]) {
       if (!Array.isArray(snapshot[field])) snapshot[field] = []
     }
-    if (!Array.isArray(snapshot.inboxMessages)) snapshot.inboxMessages = []
-    if (!Array.isArray(snapshot.conversationInputs)) snapshot.conversationInputs = []
     const eventCoverage = await collectCampEventPages(core.request, campId, eventState)
     if (!eventCoverage.complete) {
       addIntegrityIssue(eventCoverage.reason, 'Core event pagination could not establish complete coverage')
@@ -1233,10 +1251,16 @@ async function observeTrial({
 function normalizeSnapshot(snapshot) {
   const tasks = Array.isArray(snapshot.tasks) ? snapshot.tasks : []
   const messages = Array.isArray(snapshot.messages) ? snapshot.messages : []
-  const inboxMessages = Array.isArray(snapshot.inboxMessages) ? snapshot.inboxMessages : []
+  const inboxMessages = Array.isArray(snapshot.inboxMessages) ? snapshot.inboxMessages : null
   const conversationInputs = Array.isArray(snapshot.conversationInputs)
     ? snapshot.conversationInputs
-    : []
+    : null
+  const messageDeliveries = Array.isArray(snapshot.messageDeliveries)
+    ? snapshot.messageDeliveries
+    : null
+  const contextManifests = Array.isArray(snapshot.contextManifests)
+    ? snapshot.contextManifests
+    : null
   const approvals = Array.isArray(snapshot.approvals) ? snapshot.approvals : []
   const executionEvidence = Array.isArray(snapshot.executionEvidence)
     ? snapshot.executionEvidence
@@ -1251,8 +1275,12 @@ function normalizeSnapshot(snapshot) {
     agentRuns: snapshot.agentRuns,
     tasks: tasks.map(({ title, description, ...task }) => ({ ...task, titleDigest: sha256(title), descriptionDigest: sha256(description) })),
     messages: messages.map(({ body, ...message }) => ({ ...message, bodyDigest: sha256(body), bodyBytes: Buffer.byteLength(body) })),
-    inboxMessages: inboxMessages.map(({ body, ...message }) => ({ ...message, bodyDigest: sha256(body), bodyBytes: Buffer.byteLength(body) })),
-    conversationInputs,
+    ...(messageDeliveries ? { messageDeliveries } : {}),
+    ...(contextManifests ? { contextManifests } : {}),
+    ...(inboxMessages
+      ? { inboxMessages: inboxMessages.map(({ body, ...message }) => ({ ...message, bodyDigest: sha256(body), bodyBytes: Buffer.byteLength(body) })) }
+      : {}),
+    ...(conversationInputs ? { conversationInputs } : {}),
     approvals: approvals.map(({ canonicalInput, ...approval }) => ({ ...approval, canonicalInputDigest: digestJson(canonicalInput) })),
     actions: snapshot.actions,
     executionEvidence: executionEvidence.map((evidence) => ({

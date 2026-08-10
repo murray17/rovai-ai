@@ -784,6 +784,18 @@ export function redactQualificationResult(result) {
       replicaVerdicts: item.replicaVerdicts,
       evidenceReferences: item.evidenceReferences ?? [],
       reason: item.reason
+    })),
+    views: (semanticReviewSource.views ?? []).map((view) => ({
+      view: view.view,
+      state: view.state,
+      items: (view.items ?? []).map((item) => ({
+        checklistItem: item.checklistItem,
+        state: item.state,
+        verdict: item.verdict ?? null,
+        replicaVerdicts: item.replicaVerdicts,
+        evidenceReferences: item.evidenceReferences ?? [],
+        reason: item.reason
+      }))
     }))
   } : {
     status: 'unavailable',
@@ -791,7 +803,8 @@ export function redactQualificationResult(result) {
     schemaVersion: null,
     payloadDigest: null,
     reason: { code: 'semantic_judge.not_invoked' },
-    items: []
+    items: [],
+    views: []
   }
   const isolationProfile = result.isolationProfile ? {
     status: result.isolationProfile.status,
@@ -1079,7 +1092,22 @@ export function deriveConvergenceEvidence({
   }
   const turn = snapshot.turns.find((candidate) => candidate.id === dispatchBoundary.campTurnId)
   const runs = snapshot.agentRuns.filter((run) => run.campTurnId === dispatchBoundary.campTurnId)
-  const inputs = snapshot.conversationInputs.filter((input) => input.campTurnId === dispatchBoundary.campTurnId)
+  const currentPublicA2a = isCurrentPublicA2aSnapshot(snapshot)
+  const inputs = Array.isArray(snapshot.conversationInputs)
+    ? snapshot.conversationInputs.filter((input) => input.campTurnId === dispatchBoundary.campTurnId)
+    : []
+  const deliveries = Array.isArray(snapshot.messageDeliveries)
+    ? snapshot.messageDeliveries.filter((delivery) => delivery.campTurnId === dispatchBoundary.campTurnId)
+    : []
+  const conversationInputFact = currentPublicA2a
+    ? deriveCurrentMessageDeliverySettlement(snapshot, turn, deliveries)
+    : !Array.isArray(snapshot.conversationInputs)
+      ? 'indeterminate'
+      : inputs.every((input) => ['materialized', 'failed', 'cancelled'].includes(input.status))
+        ? 'settled'
+        : inputs.some((input) => input.status === 'pending')
+          ? 'unsettled'
+          : 'indeterminate'
   const facts = {
     runTree: turn
       && isTurnTerminal(turn.status)
@@ -1087,11 +1115,7 @@ export function deriveConvergenceEvidence({
       && runs.every((run) => isRunTerminal(run.status))
       ? 'settled'
       : 'unsettled',
-    conversationInputs: inputs.every((input) => ['materialized', 'failed', 'cancelled'].includes(input.status))
-      ? 'settled'
-      : inputs.some((input) => input.status === 'pending')
-        ? 'unsettled'
-        : 'indeterminate',
+    conversationInputs: conversationInputFact,
     approvals: snapshot.approvals.some((approval) => approval.status === 'pending')
       ? 'unsettled'
       : 'settled',
@@ -1143,12 +1167,41 @@ export function observedDurableMemberCallEffects(snapshot, campTurnId) {
   const runIds = new Set(snapshot.agentRuns
     .filter((run) => run.campTurnId === campTurnId)
     .map((run) => run.id))
+  if (isCurrentPublicA2aSnapshot(snapshot)) {
+    const seen = new Set()
+    return (Array.isArray(snapshot.messageDeliveries) ? snapshot.messageDeliveries : []).filter((delivery) => {
+      if (delivery.campTurnId !== campTurnId || seen.has(delivery.id)) return false
+      seen.add(delivery.id)
+      return true
+    })
+  }
   const seen = new Set()
-  return snapshot.inboxMessages.filter((message) => {
+  return (Array.isArray(snapshot.inboxMessages) ? snapshot.inboxMessages : []).filter((message) => {
     if (!runIds.has(message.sourceAgentRunId) || seen.has(message.id)) return false
     seen.add(message.id)
     return true
   })
+}
+
+function isCurrentPublicA2aSnapshot(snapshot) {
+  return Number.isInteger(snapshot?.schemaVersion) && snapshot.schemaVersion >= 27
+}
+
+function deriveCurrentMessageDeliverySettlement(snapshot, turn, deliveries) {
+  if (!Array.isArray(snapshot.messageDeliveries)) return 'indeterminate'
+  const expected = turn?.executionBudget?.acceptedA2a
+  if (!Number.isInteger(expected) || expected < 0 || expected !== deliveries.length) {
+    return 'indeterminate'
+  }
+  if (deliveries.some((delivery) => ['pending', 'running'].includes(delivery.status))) {
+    return 'unsettled'
+  }
+  if (deliveries.every((delivery) => (
+    ['settled', 'failed', 'cancelled', 'interrupted_before_dispatch'].includes(delivery.status)
+  ))) {
+    return 'settled'
+  }
+  return 'indeterminate'
 }
 
 export async function collectCampEventPages(request, campId, state) {

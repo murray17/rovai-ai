@@ -3,6 +3,7 @@ import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { sha256 } from './qualification-common.mjs'
 import { redactQualificationResult } from './qualification-evaluation.mjs'
 import {
   SEMANTIC_CHECKLIST,
@@ -15,6 +16,10 @@ import {
   retainSemanticEngineeringReviewArtifacts,
   semanticReviewResultReference
 } from './qualification-semantic-judge.mjs'
+import {
+  buildJudgeViewConfiguration,
+  buildJudgeViewPack
+} from './qualification-judge-views.mjs'
 
 test('Judge Configuration and allowlist Pack are schema-valid, pseudonymized, and injection-isolated', () => {
   const fixture = judgeFixture()
@@ -36,6 +41,101 @@ test('Judge Configuration and allowlist Pack are schema-valid, pseudonymized, an
   assert.equal(fixture.pack.payload.checklistCoverage.length, 11)
   assert.equal(fixture.pack.payload.workspaceChanges[0].boundedContextSegmentId, 'segment-code')
   assert.equal(fixture.pack.payload.collaborationFacts.length, 3)
+  const coverage = new Map(fixture.pack.payload.checklistCoverage.map((item) => [
+    item.checklistItem,
+    item.coverage
+  ]))
+  assert.equal(coverage.get('SER.collaboration.delegation').state, 'complete')
+  assert.equal(coverage.get('SER.collaboration.handoff_clarity').state, 'complete')
+  assert.deepEqual(coverage.get('SER.collaboration.feedback_absorption'), {
+    state: 'partial',
+    reason: { code: 'judge_pack.semantic_relation_not_deterministically_bound' }
+  })
+  assert.equal(coverage.get('SER.collaboration.lead_integration').state, 'partial')
+})
+
+test('validated legacy source Pack projects into disjoint Process and blinded Outcome model inputs', () => {
+  const fixture = judgeFixture()
+  const common = {
+    provider: 'fixture-provider',
+    snapshotId: 'fixture-model-2026-08-04',
+    snapshotDigest: 'b'.repeat(64),
+    producerDigest: 'a'.repeat(64)
+  }
+  const processConfiguration = buildJudgeViewConfiguration({ view: 'process', ...common })
+  const outcomeConfiguration = buildJudgeViewConfiguration({ view: 'outcome', ...common })
+  const process = buildJudgeViewPack({
+    view: 'process',
+    sourcePack: fixture.pack,
+    configuration: processConfiguration,
+    producerDigest: 'a'.repeat(64)
+  })
+  const outcome = buildJudgeViewPack({
+    view: 'outcome',
+    sourcePack: fixture.pack,
+    configuration: outcomeConfiguration,
+    producerDigest: 'a'.repeat(64)
+  })
+
+  assert.equal(process.payload.modelInput.interactions.length, 1)
+  assert.equal(process.payload.modelInput.evidenceSegments.some((segment) => (
+    segment.kind === 'participant_message'
+  )), true)
+  assert.equal(JSON.stringify(outcome.payload.modelInput).includes('participant_message'), false)
+  assert.equal(JSON.stringify(outcome.payload.modelInput).includes('member-001'), false)
+  assert.equal(JSON.stringify(outcome.payload.modelInput).includes(fixture.result.trialId), false)
+})
+
+test('Public participant content stays bound to its Call and tampering fails before Judge invocation', () => {
+  const fixture = judgeFixture({ buildPack: false })
+  const participant = fixture.untrustedEvidence.find((segment) => (
+    segment.kind === 'participant_message'
+  ))
+  const body = participant.content
+  participant.visibility = 'public_to_camp'
+  participant.evidenceReference = {
+    artifactId: fixture.evidenceIndex.artifactId,
+    evidenceId: 'core.message-content:call-1'
+  }
+  fixture.evidenceIndex.payload.records.push({
+    evidenceId: 'core.message-content:call-1',
+    safeForJudge: true,
+    contentDigest: `sha256:${sha256(body)}`
+  })
+  fixture.collaborationLedger.payload.calls[0].evidenceReferences.push(
+    participant.evidenceReference
+  )
+
+  const pack = buildJudgeEvidencePack(fixture)
+  assert.equal(pack.payload.collaborationFacts.every((fact) => (
+    fact.visibility === 'public_to_camp'
+  )), true)
+  assert.equal(pack.payload.collaborationFacts.every((fact) => (
+    fact.contentSegmentId === 'segment-call'
+  )), true)
+
+  participant.content += ' tampered'
+  assert.throws(
+    () => buildJudgeEvidencePack(fixture),
+    /does not match its Evidence Index digest/
+  )
+})
+
+test('Judge Pack derives Lead and Member roles only from the observed root Run topology', () => {
+  const fixture = judgeFixture({ buildPack: false })
+  delete fixture.declaredRoles
+  fixture.result.collaborationEvidence.runGraph = [
+    { agentProfileId: 'agent-lead', depth: 0 },
+    { agentProfileId: 'agent-reviewer', depth: 1 }
+  ]
+  const pack = buildJudgeEvidencePack(fixture)
+  assert.deepEqual(pack.payload.members, [{
+    pseudonym: 'member-001',
+    declaredRole: 'Lead'
+  }, {
+    pseudonym: 'member-002',
+    declaredRole: 'Member'
+  }])
 })
 
 test('two tool-disabled counterbalanced Replicas reconcile a complete Review without an aggregate score', async () => {
@@ -145,6 +245,53 @@ test('invalid out-of-Pack reference makes Review unavailable without changing Ha
   assert.equal(canonicalHardOutcome(attached).digest, hardBefore.digest)
 })
 
+test('Judge output cannot cite another checklist item or decide an unavailable semantic relation', async () => {
+  const fixture = judgeFixture({ maximumTransportAttempts: 1 })
+  const finalReference = fixture.pack.payload.finalResponse.evidenceReference
+  const outOfItem = await executeSemanticEngineeringReview({
+    ...fixture,
+    producerDigest: 'a'.repeat(64),
+    invokeReplica: async ({ replica }) => {
+      const items = replicaItems(fixture.pack)
+      if (replica === 'A') {
+        items.find((item) => (
+          item.checklistItem === 'SER.collaboration.delegation'
+        )).evidenceReferences = [finalReference]
+      }
+      return { items }
+    }
+  })
+  assert.equal(outOfItem.review.payload.state, 'unavailable')
+  assert.equal(
+    outOfItem.replicas[0].payload.attempts[0].reason.code,
+    'semantic_judge.reference_out_of_item_coverage'
+  )
+
+  const unavailableFixture = judgeFixture({
+    buildPack: false,
+    maximumTransportAttempts: 1
+  })
+  unavailableFixture.untrustedEvidence = unavailableFixture.untrustedEvidence.filter((segment) => (
+    segment.kind !== 'participant_message'
+  ))
+  const unavailablePack = buildJudgeEvidencePack(unavailableFixture)
+  const feedbackCoverage = unavailablePack.payload.checklistCoverage.find((item) => (
+    item.checklistItem === 'SER.collaboration.feedback_absorption'
+  ))
+  assert.equal(feedbackCoverage.coverage.state, 'unavailable')
+  const decidedUnavailable = await executeSemanticEngineeringReview({
+    ...unavailableFixture,
+    pack: unavailablePack,
+    producerDigest: 'a'.repeat(64),
+    invokeReplica: async () => ({ items: replicaItems(unavailablePack) })
+  })
+  assert.equal(decidedUnavailable.review.payload.state, 'unavailable')
+  assert.equal(
+    decidedUnavailable.replicas[0].payload.attempts[0].reason.code,
+    'semantic_judge.unavailable_item_requires_abstention'
+  )
+})
+
 test('redacted Trial summary allowlists Review fields and never exports its private locator', async () => {
   const fixture = judgeFixture()
   const execution = await executeSemanticEngineeringReview({
@@ -211,6 +358,25 @@ test('secret canary is rejected from the Judge Pack instead of being sent to a m
     untrustedEvidence: evidence,
     forbiddenCanaries: ['CANARY-DO-NOT-EXPORT']
   }), /forbidden secret canary/)
+})
+
+test('current Judge content policy rejects raw test output even when its reference is Judge-safe', () => {
+  const fixture = judgeFixture({ buildPack: false })
+  fixture.untrustedEvidence.push({
+    segmentId: 'segment-raw-test-output',
+    kind: 'test_output',
+    authorAgentProfileId: 'agent-lead',
+    visibility: 'visible_to_member',
+    content: 'Raw provider test output that is outside the current allowlist.',
+    evidenceReference: {
+      artifactId: fixture.evidenceIndex.artifactId,
+      evidenceId: 'runtime.evidence:test'
+    }
+  })
+  assert.throws(
+    () => buildJudgeEvidencePack(fixture),
+    /current content policy excludes test_output/
+  )
 })
 
 test('Semantic Judge artifacts are retained immutably with current-user-only permissions', async () => {
@@ -450,14 +616,6 @@ function untrustedEvidenceFixture(evidenceIndex) {
       path: 'src/group-events.mjs',
       content: 'export function groupEvents(events) { return events.map((event) => ({ ...event })) }',
       evidenceReference: ref('runner.workspace-change:source')
-    },
-    {
-      segmentId: 'segment-test',
-      kind: 'test_output',
-      authorAgentProfileId: 'agent-lead',
-      visibility: 'visible_to_member',
-      content: '3 tests passed.',
-      evidenceReference: ref('runtime.evidence:test')
     },
     {
       segmentId: 'segment-call',

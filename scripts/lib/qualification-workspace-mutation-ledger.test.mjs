@@ -110,6 +110,40 @@ test('Workspace Mutation Ledger rejects unresolved evidence, invented writers, o
   )
 })
 
+test('Workspace Mutation Ledger retains separate exact-content Evidence References when available', () => {
+  const evidenceIndex = indexFixture(['created.txt'])
+  evidenceIndex.payload.records.push({
+    evidenceId: 'runner.workspace-content:created',
+    sourceId: 'runner.workspace'
+  })
+  const references = referenceFixture(evidenceIndex)
+  references.workspaceChanges['created.txt'] = ref(
+    evidenceIndex.artifactId,
+    'runner.workspace-change:created'
+  )
+  references.workspaceContents = {
+    'created.txt': ref(evidenceIndex.artifactId, 'runner.workspace-content:created')
+  }
+  const artifact = buildWorkspaceMutationLedger({
+    ...identityFixture(),
+    workspaceDiff: {
+      schemaVersion: 1,
+      digest: 'x',
+      changed: [workspaceDiffFixture().changed[0]]
+    },
+    observedAt: '2026-08-04T01:00:00.000Z',
+    evidenceIndex,
+    evidenceReferences: references
+  })
+
+  assert.deepEqual(artifact.payload.records[0].evidenceReferences.map((reference) => (
+    reference.evidenceId
+  )).sort(), [
+    'runner.workspace-change:created',
+    'runner.workspace-content:created'
+  ])
+})
+
 function identityFixture() {
   return {
     trialId: 'trial-1',

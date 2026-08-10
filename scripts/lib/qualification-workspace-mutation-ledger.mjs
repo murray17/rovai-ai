@@ -34,6 +34,7 @@ export function buildWorkspaceMutationLedger({
   const records = []
   for (const change of workspaceDiff?.changed ?? []) {
     const reference = evidenceReferences?.workspaceChanges?.[change.path] ?? null
+    const contentReference = evidenceReferences?.workspaceContents?.[change.path] ?? null
     if (!reference
         || reference.artifactId !== evidenceIndex.artifactId
         || !evidenceIds.has(reference.evidenceId)) {
@@ -60,7 +61,7 @@ export function buildWorkspaceMutationLedger({
         state: 'verified',
         evidenceReference: reference
       }],
-      evidenceReferences: [reference]
+      evidenceReferences: [reference, contentReference].filter(Boolean)
     })
   }
   records.sort((left, right) => (
