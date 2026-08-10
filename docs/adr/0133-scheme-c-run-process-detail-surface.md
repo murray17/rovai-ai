@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0133
 title: Scheme C Run Process Detail Surface
-status: accepted
+status: superseded
 date: 2026-08-07
 decision_scope: cross-version
 source_version: v0.45
 supersedes: []
-superseded_by: null
+superseded_by: ADR-0154
 ---
 
 # ADR-0133: Scheme C Run Process Detail Surface

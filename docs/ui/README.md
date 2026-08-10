@@ -59,13 +59,18 @@ v0.44 删除公共消息摘要系统后，队员详情同时删除 `MemberAdvanc
 Member Runtime Parameters 及其模型、推理强度、权限与 sandbox 配置继续保留；实施状态按
 [v0.44 实施计划](../versions/v0.44/implementation-plan.md)与代码证据判断。
 
-v0.45 采用 Scheme C 会话区改版：执行动态常驻提供过程摘要，执行详情按需成为
-唯一的 AgentRun 过程详情面；Inspector 删除“活动”页，只保留“任务 / 上下文投递 / 审批 / 审计”。
-执行详情不提供 AgentRun 级停止，活跃 CampTurn 的唯一 Stop 仍占用 Composer 发送位置并 fence
-整棵执行树。Approval Dock 继续固定在 Composer 正上方，空间不足时 Drawer 收缩而不遮挡
-Approval。该范围只吸收外部 HTML 的会话区关键交互，现有 Arctic Dawn App Shell、Token、
-导航、Composer、Approval、断点和无障碍合同优先；实现状态见[v0.45 实施计划](../versions/v0.45/implementation-plan.md)。
-原型入口：[Scheme C 会话区原型](../prototypes/run-activity/README.md)。
+v0.45 曾采用 Scheme C 会话区改版：执行动态常驻提供过程摘要，执行详情按需成为唯一的
+AgentRun 过程详情面；Inspector 删除“活动”页。该逐 Run surface 已被 v0.55 取代，仅保留为
+历史背景。原型入口：[Scheme C 会话区原型](../prototypes/run-activity/README.md)。
+
+v0.55 以 Agent 级连续执行过程取代逐 Run 选择：同一 Camp 中每位有 AgentRun 的队员只保留
+一个底部执行过程入口，按需 Drawer 以时间顺序保留该 Agent 的每个 Run stage、收件人与执行证据。
+过程只是一层 Renderer read model，不创建领域 Process 或合并运行事实。Inspector 收敛为“任务 /
+上下文投递 / 审批”，Task Related execution 与停止结果均打开对应 Agent 过程；Header 不再显示执行
+入口。详情不提供 Agent/AgentRun 级停止，唯一 CampTurn Stop 仍位于 Composer；Approval Dock 继续
+固定在 Composer 上方，空间不足时过程 surface 收缩或滚动而不遮挡 Approval。完整合同见
+[Run Process Detail Surface v2](../contracts/run-process-detail-surface-v2.md)，实现状态见
+[v0.55 实施计划](../versions/v0.55/implementation-plan.md)。
 
 v0.47 保留 v0.38 的创建位置唯一实时 Task 卡，并把它升级为五态；会话卡继续只显示状态、
 标题和负责人。Inspector list 负责 compact 发现，detail 负责完整责任/审计并只读派生 Related
@@ -91,9 +96,9 @@ JSON”，下方固定为三态摘要、attention-only 问题列表和四筛选�
 [ADR-0148](../adr/0148-read-only-diagnostics-and-data-minimized-export.md)。
 
 2026-08-10 用户确认 A2A 消息 Scheme C：Agent 公共正文删除“来自执行”来源条和 compact
-投递卡片，正文后只保留短折线/身份点与“发送给：队员名”轻量 footer。成功态静默，非成功态
-按收件人原地显示；完整 Delivery 证据继续属于执行详情。该选择已冻结进 Arctic Dawn 的
-A2A 会话消息合同，HTML 原型只保留为选型输入。
+投递卡片，正文后只保留短折线/身份点与“发送给：队员名”轻量 footer；成功与非成功 Delivery
+状态都不在 footer 或 Run stage 重复显示。Delivery 底层事实继续属于原有 Core Read Side。该选择
+已冻结进 Arctic Dawn 的 A2A 会话消息合同，HTML 原型只保留为选型输入。
 
 ## 权威边界
 
@@ -107,6 +112,8 @@ A2A 会话消息合同，HTML 原型只保留为选型输入。
    Session 启动恢复、登录项和窗口 reset 的版本级 Shell/Renderer 合同。
 5. [v0.51 生产设计](../versions/v0.51/production-design.md)决定诊断中心的摘要、问题、全量结果、单项操作与七态恢复合同。
 6. 原型与 HTML 样例只帮助评审视觉层级，不是生产合同、数据真源或可直接复制的代码。
+7. [Run Process Detail Surface v2](../contracts/run-process-detail-surface-v2.md)决定当前 Camp
+   Agent 执行过程入口、连续 Run stage、Inspector 收敛和与 Approval/Stop 的 layering。
 
 发生冲突时不得用视觉稿覆盖领域或安全合同，也不得用当前旧代码反向覆盖已经冻结的
 新设计。必须明确报告文档—实现漂移。
@@ -164,15 +171,17 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   不显示全局角色 Toast，也不导航到队员页。
 - 空 Camp 使用欢迎图形、真实协作配置摘要和三个只填充 Composer 的起步建议，不再显示
   单行空占位。
-- Camp 主阅读流左对齐并按权威顺序阅读。执行动态只显示过程摘要；执行详情
-  按需展示所选 AgentRun 的过程证据、Delivery 状态和 Context 摘要，后台事件不得自动打开、切换
-  或抢焦点。终态 AgentRun 保持选中直到用户关闭或切换。
+- Camp 主阅读流左对齐并按权威顺序阅读。Agent 执行台按队员提供一个过程入口；执行详情
+  按需展示所选 Agent 的连续 AgentRun stage、Run 状态、收件人与过程证据，后台事件
+  不得自动打开、切换或抢焦点。打开优先定位最新 running、否则最新 non-terminal、最后最新 terminal
+  Run；已打开过程保持选中直到用户关闭、切换队员或切换 Camp。
 - Agent 公共正文不显示“来自执行”来源条；A2A 消息不显示 compact 投递卡片，只在正文后使用
-  Scheme C 短转交轨迹显示“发送给：队员名”。`settled` 静默，其他 Delivery 状态按收件人原地显示。
+  Scheme C 短转交轨迹显示“发送给：队员名”。footer 与 Run stage 都不重复投影 Delivery 状态标签；
+  Delivery 底层状态、失败码与恢复事实仍由原有 Core Read Side 负责。
 - 终态取消以每个 CampTurn 一条“你已在 {耗时} 后停止”进入会话时间线，不再永久
   挂在队员消息标题；未确认外部效果从该事件进入 Inspector。
 - 用户、队员和已交付 A2A 消息的正文支持鼠标拖选和系统复制快捷键；用户自己的
-  纯文本消息不得拦截原生文本选择。整条消息的复制入口仍位于正文下方，仅在悬停或
+  纯文本消息不得拦截原生文本选择。整条消息的复制入口位于正文右侧，仅在悬停或
   键盘聚焦正文区域时显示；消息轨道与 Composer 在 Inspector 展开或隐藏时始终同宽、同轴。
 - 命令、文件操作及其失败是处理过程内可展开的 Tool Call；每个 Task 在创建位置只投影
   一张读取当前五态文字、标题和负责人的实时卡片。Inspector list/detail 与现有 AgentRun UI
@@ -181,9 +190,9 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   弹框，多项聚合显示“N 项待审批”，并保留各 Runtime 的原生选项、范围和决定身份。
 - Approval Dock 始终位于 Composer 正上方；Drawer 空间不足时退化为摘要/收起态，不能遮挡
   Dock、Composer 或唯一的 CampTurn Stop。
-- Camp Header 右侧只有执行/审批状态摘要，没有“停止”或 `•••`。停止只占用 Composer
-  发送位；执行动态与执行详情只读过程详情，另有唯一 Inspector 显示/隐藏按钮。
-  状态摘要可恢复 Inspector 并打开对应页签；置顶、重命名、复制会话 ID 和删除只从侧栏
+- Camp Header 右侧只有待审批摘要和 Inspector 显示/隐藏按钮，没有执行入口、“停止”或 `•••`。
+  停止只占用 Composer 发送位；待审批摘要可恢复 Inspector 并打开“审批”页；置顶、重命名、复制
+  会话 ID 和删除只从侧栏
   Camp 行进入。
 - 队员页采用半身 portrait + 独立圆形 icon 的双 rendition 身份设计；编辑身份支持
   圆形取景拖拽、缩放、键盘微调与实际尺寸预览。

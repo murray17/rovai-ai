@@ -74,9 +74,35 @@ pnpm accept:diagnostics-ui
 ```
 
 它们分别覆盖长期记忆、成员头像、成员生命周期、应用内通知、统一侧栏、结构化提及和
-Task 单卡原地更新、九 Runtime Canonical Activity 工具名称与 run-level 诚实降级、A2A 消息
+Task 单卡原地更新、九 Runtime Canonical Activity 工具名称与 Agent 级连续执行过程、A2A 消息
 Scheme C 转交 footer，以及诊断中心双尺寸、只读自检、MCP 权限修复复检与 v5 脱敏的桌面回归。
 具体 Schema/Migration 编号属于测试 fixture 和版本证据，不是本文的常青要求。
+
+### Agent 执行过程门禁
+
+Renderer 的权威行为见 [Run Process Detail Surface v2](../contracts/run-process-detail-surface-v2.md) 与
+[Arctic Dawn：Camp 执行过程](../ui/arctic-dawn.md#camp-执行过程)。修改 AgentRun 分组、执行台、Drawer、
+Task Related execution、停止结果或 Inspector 页签后，至少运行：
+
+```bash
+pnpm package:mac
+pnpm accept:runtime-activity-ui
+```
+
+受控夹具必须至少包含同一队员的多个历史/当前 AgentRun，并证明：
+
+- `.run-pulse-chip` 按队员而不是 Run 创建；同一 `data-agent-id` 只出现一个入口，入口数等于有
+  AgentRun 的队员数；
+- 点击入口后 `.execution-drawer` 只显示该 Agent 的所有 Run stage，按创建时间升序保留，并显示
+  独立的 AgentRun/CampTurn 边界、调用来源、A2A 深度（适用时）、Delivery 与证据 disclosure；
+- 打开时定位最新 `running`，否则最新 non-terminal，最后最新 terminal Run；后台 Runtime 事件不打开
+  Drawer、不改选队员/stage、不滚动时间线或抢焦点；关闭和 Drawer 内 Escape 将焦点返回原入口；
+- Inspector 仅有“任务 / 上下文投递 / 审批”，不存在 Activity/Audit Tab、旧 route/state 或另一条过程
+  时间线；Task/停止结果入口按 Agent 打开过程，顶栏不存在执行入口；
+- Drawer 不提供 Agent 或 Run 级 Stop/Cancel/Retry；唯一 CampTurn Stop、Approval Dock 与 Composer 在
+  `1440×920`、`1040×700`、200% zoom 和 reduced motion 下均可见、可键盘到达且不互相遮挡；
+- Canonical Activity 未报告工具时仍不补造 Tool 行；同一 Runtime 真实报告的 Tool 名称和 source 继续
+  与 Runtime evidence 一致。
 
 ### A2A 消息 footer 门禁
 
@@ -89,11 +115,12 @@ pnpm accept:runtime-activity-ui
 ```
 
 受控夹具必须证明：消息正文内不存在 `.message-run-origin`；消息下方不存在
-`.delivery-status-list.is-compact`；双收件人按冻结顺序进入唯一 `.message-delivery-footer`；
-`settled` 不显示“已送达”，失败收件人同时显示 `!` 与“投递失败”；footer 保持透明、零圆角，
+`.delivery-status-list.is-compact`；双收件人按冻结顺序进入唯一 `.message-delivery-footer`；footer
+不显示“已送达”“处理中”“排队中”“投递失败”、`!` 或任何 Delivery 状态。footer 保持透明、零圆角，
 短转交折线使用 1px Arctic Dawn 结构线，且 footer 边界与正文边界的垂直间距不超过 4px，不能形成
-空白行。验收还必须切换到 1040×700，证明 document、timeline
-和 footer 无横向溢出且 footer 留在时间线可视区内。完整 Delivery 列表继续只在执行详情中显示。
+空白行。验收还必须切换到 1040×700，证明 document、timeline 和 footer 无横向溢出且 footer 留在
+时间线可视区内。Run stage 也不得重新显示这些 Delivery 状态标签；底层 Delivery、失败码与恢复事实
+继续保留在原有 Core Read Side。
 
 ### 结构化 Mention 门禁
 

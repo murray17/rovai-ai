@@ -144,7 +144,7 @@ generated_from: docs/adr-front-matter
 | [ADR-0130](0130-public-a2a-message-and-unified-delivery.md) | Public A2A Messages and Unified Message Delivery | `accepted` | `cross-version` | [v0.45](../versions/v0.45/README.md) | — |
 | [ADR-0131](0131-recipient-scoped-event-driven-delivery-recovery.md) | Recipient-Scoped Event-Driven Delivery Dispatch and Interrupted Recovery | `accepted` | `cross-version` | [v0.45](../versions/v0.45/README.md) | — |
 | [ADR-0132](0132-public-reference-context-closure-profile-v2.md) | Bounded Public Reference Context Closure and Profile v2 | `accepted` | `cross-version` | [v0.45](../versions/v0.45/README.md) | — |
-| [ADR-0133](0133-scheme-c-run-process-detail-surface.md) | Scheme C Run Process Detail Surface | `accepted` | `cross-version` | [v0.45](../versions/v0.45/README.md) | — |
+| [ADR-0133](0133-scheme-c-run-process-detail-surface.md) | Scheme C Run Process Detail Surface | `superseded` | `cross-version` | [v0.45](../versions/v0.45/README.md) | [ADR-0154](0154-agent-level-execution-process-surface.md) |
 | [ADR-0134](0134-runtime-public-output-boundary.md) | Explicit Runtime Public Output Boundary | `accepted` | `cross-version` | [v0.45](../versions/v0.45/README.md) | — |
 | [ADR-0135](0135-compact-agent-output-over-canonical-built-in-tool-envelope.md) | Compact Agent Output over Canonical Built-in Tool Envelope | `accepted` | `cross-version` | [v0.46](../versions/v0.46/README.md) | — |
 | [ADR-0136](0136-durable-task-v2-responsibility-and-coordination-authority.md) | Durable Task v2 Responsibility and Coordination Authority | `accepted` | `cross-version` | [v0.47](../versions/v0.47/README.md) | — |
@@ -165,4 +165,5 @@ generated_from: docs/adr-front-matter
 | [ADR-0151](0151-versioned-benchmark-protocol-and-axis-comparability.md) | Versioned Benchmark Protocol and Axis-Scoped Comparability | `accepted` | `cross-version` | [v0.53](../versions/v0.53/README.md) | — |
 | [ADR-0152](0152-lead-owned-task-responsibility-and-self-active-task-awareness.md) | Lead-Owned Task Responsibility and Self-Active Task Awareness | `accepted` | `cross-version` | [v0.54](../versions/v0.54/README.md) | — |
 | [ADR-0153](0153-explicit-empty-self-active-task-snapshot.md) | Explicit Empty Self-Active Task Snapshot | `accepted` | `cross-version` | [v0.54](../versions/v0.54/README.md) | — |
+| [ADR-0154](0154-agent-level-execution-process-surface.md) | Agent-Level Continuous Execution Process Surface | `accepted` | `cross-version` | [v0.55](../versions/v0.55/README.md) | — |
 <!-- adr-history:end -->

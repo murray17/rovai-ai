@@ -892,7 +892,7 @@ async function moveMouseToLastUserMessage(cdp) {
     const messages = [...document.querySelectorAll('.conversation-bubble.user')]
     const bubble = messages.at(-1)?.querySelector('.message-bubble')
     if (!bubble) return null
-    bubble.scrollIntoView({ block: 'center', inline: 'center' })
+    bubble.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' })
     const rect = bubble.getBoundingClientRect()
     return { x: rect.left + Math.min(18, rect.width / 2), y: rect.top + rect.height / 2 }
   })()`)

@@ -22,11 +22,16 @@ v0.44 进一步确认删除队员详情中的公共消息摘要模型配置和�
 保留 Member Runtime Parameters；实施状态以 v0.44 实施计划与代码证据为准，不能从本文
 `accepted` 推断代码已完成。
 
-v0.45 进一步冻结 Scheme C 会话区：执行动态只作常驻摘要，执行详情按需成为
-唯一的 AgentRun 过程详情面；Inspector 删除“活动”页，保留“任务 / 上下文投递 / 审批 / 审计”。
-执行详情不提供 AgentRun 级 Stop，活跃 CampTurn 的停止入口仍只在 Composer 发送位置，并 fence
-整棵 AgentRun/Message Delivery 执行树。外部 HTML 只提供会话区关键层级参考，不能覆盖本
-Arctic Dawn Shell、Token、导航或无障碍合同。
+v0.45 曾冻结 Scheme C 会话区：执行动态只作常驻摘要，执行详情按需成为唯一的 AgentRun
+过程详情面；Inspector 删除“活动”页。该逐 Run surface 已由 v0.55 替代，不能作为当前
+Renderer 入口。外部 HTML 只提供会话区关键层级参考，不能覆盖本 Arctic Dawn Shell、Token、
+导航或无障碍合同。
+
+v0.55 进一步冻结 Agent 级连续执行过程：同一 Camp 中每位有 AgentRun 的队员只保留一个底部
+执行过程入口，Drawer 在其中按时间保留该 Agent 的独立 Run stage、Run 状态、收件人与证据。
+这只是 Renderer read-model grouping，不创建 Process 领域对象，也不合并 AgentRun。Inspector
+收敛为“任务 / 上下文投递 / 审批”。唯一 Stop 继续位于 Composer 发送位置，fence 整棵
+CampTurn AgentRun/Message Delivery 执行树；详情不提供 Agent 或 AgentRun 级 Stop。
 
 v0.47 进一步冻结 Durable Task v2 的四层界面：会话卡只作五态责任感知，Inspector list
 负责发现，Inspector detail 负责完整责任与审计，现有 AgentRun UI 负责执行事实。Task 取消不等于
@@ -211,14 +216,16 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
   收件人”的 compact 卡片，也不以 Chip、Badge 或第二层列表替代它。转交折线直接附着正文边界，
   起点只保留 2px 间距，不能在正文与“发送给”之间形成一行空白。
 - footer 只读取冻结的 recipient snapshot，并按 `recipientCanonicalPosition` 显示；该顺序是稳定
-  展示顺序，不表示调度优先级。`settled` 不重复显示“已送达”；`pending`、`running`、`failed`、
-  `cancelled` 与 `interrupted_before_dispatch` 在对应收件人名后原地追加文字状态，失败同时使用
-  `!` 符号和 danger 色。多收件人使用顿号分隔并允许窄窗自然换行。
+  展示顺序，不表示调度优先级。footer 只承担“发送给：队员名”，不显示 `settled`、`pending`、
+  `running`、`failed`、`cancelled` 或 `interrupted_before_dispatch`，也不以 `!` 或颜色在正文后
+  投影异常。Run stage 同样只显示收件人而不重复这些状态标签；完整 Delivery 状态、失败码和恢复
+  事实仍由原有 Core Read Side 负责。
+  多收件人使用顿号分隔并允许窄窗自然换行。
 - Reply-to 只建立公共关系；回复 Agent-authored Public A2A Message 时 Core 可加入作者作为
   一个默认目标，回复用户或系统事件不新增 Delivery，也不扩展原消息其他收件人。
-- 执行详情展示 Delivery/AgentRun 的过程状态和证据摘要；公共正文仍在消息区直接可读，
-  完整 Delivery 状态、失败码和运行证据继续留在 Drawer；消息 footer 只承担轻量收件人/异常
-  概览。Drawer、Delivery 或 AgentRun 不得冒充另一个发送者发言，也不创建 result route。
+- Agent 过程的 Run stage 展示 AgentRun 状态、Delivery 收件人与证据摘要；公共正文仍在消息区直接
+  可读。消息 footer 只承担轻量收件人方向；Drawer、Delivery 或 AgentRun 不得冒充另一个发送者
+  发言，也不创建 result route。
 - 公共正文按持久 sequence 排列；后台 Runtime 到达时间、Scheduler 顺序、canonical recipient
   顺序和 Renderer 选择都不能重排公共时间线。
 
@@ -390,13 +397,17 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
 - Renderer 只能呈现发起请求的 Agent Runtime 实际返回的选项、scope、lifetime、
   后果与阻塞影响，不建立假想的跨 Runtime 通用审批档位，也不得因视觉统一改写原生
   option identity。
-- 执行动态常驻显示活跃/等待/最近终态 AgentRun 的轻量摘要和数量；点击 chip 只选择
-  执行详情中的 AgentRun，不自动滚动会话或抢焦点。
-- 执行详情按需显示所选 AgentRun 的 Delivery、ContextManifest、等待条件、终态和
-  Canonical Runtime Activity/Evidence 摘要。后台事件不得自动打开、切换或聚焦 Drawer；
-  用户已打开的终态 AgentRun 保持 selected，直到主动关闭或切换。
-- 终态过程仍可收进默认折叠入口，摘要格式为 `处理过程 · {本地化耗时}`；该入口和
-  执行详情只提供查看，不产生 AgentRun 级取消协议。
+- Agent 执行台常驻于会话阅读流之后。当前 Camp 中每位有 AgentRun 的队员只有一个入口，按
+  CampMember 顺序展示身份、“执行过程”和来自优先 Run 的本地化状态；不得显示逐 Run chip、
+  “N 个执行”或“ N 条投递”。
+- 点击队员入口只选择该 Agent 的执行过程，不自动滚动会话或抢焦点。打开时定位最新 running Run；
+  若没有则定位最新 non-terminal Run，最后才定位最新 terminal Run。后台事件不得自动打开、
+  切换 Agent/stage 或聚焦 Drawer；已打开过程保持 selected，直到主动关闭、选择另一队员或切换 Camp。
+- 执行详情按需显示所选 Agent 的连续 AgentRun stage；stage 按时间排序，分别保留 Run/CampTurn、
+  调用来源、A2A 深度、Run 状态、Delivery 收件人与 Runtime Activity/Evidence 摘要。ContextManifest
+  继续在“上下文投递”Inspector 中查看；过程 grouping 不能合并或遮蔽单次 Run。
+- 终态过程仍可收进默认折叠入口，摘要格式为 `处理过程 · {本地化耗时}`；该入口和执行详情只
+  提供查看，不产生 Agent 或 AgentRun 级取消协议。关闭或在详情内按 Escape 后焦点返回原入口。
 - 不使用英文 `Worked for …`；Agent 最终回复位于折叠入口之外并保持直接可见。
 - [会话事件交互样例](examples/arctic-dawn-conversation-events.html)用于评审上述
   层级与展开行为；示例数据和某个 Runtime 的审批按钮不构成跨 Runtime 合同。
@@ -602,10 +613,10 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 
 - Inspector 使用白色 `--inspector-surface`，与会话区之间使用
   `--conversation-inspector-line` 强结构分隔；内部组件继续沿用既有表面与状态色。
-- Camp 右侧详情栏删除“活动”页，只保留四个手动激活的页签：
-  “任务 / 上下文投递 / 审批 / 审计”。
-- AgentRun 动态、等待与终态只由执行详情展示；“审计”显示不可混入聊天或普通活动
-  的时间、Actor、动作、目标、结果和证据。
+- Camp 右侧详情栏删除“活动”和“审计”页，只保留三个手动激活的页签：
+  “任务 / 上下文投递 / 审批”。
+- AgentRun 动态、等待、终态及其证据只由 Agent 执行过程展示；不得在 Inspector 复制第二条
+  过程或审计时间线。
 - 执行详情使用“运行中 / 等待审批 / 已完成 / 失败 / 已停止 / 恢复中”等本地化
   文字，不显示原型的 `DONE`；流式更新合并播报，不能通过 `aria-live` 逐字朗读。
 - “任务”列表使用 compact item 显示标题、状态、负责人、单行 preview 与验收条件数量；详情
@@ -622,16 +633,14 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 - “上下文投递”页同时展示当前协作配置和 AgentRun 的 ContextManifest 投递证据，且必须来自
   当前 Camp 的生产 Read Side；原型中的 Project 名、Design route 与约束文字只是演示数据，
   不得硬编码或当作用户内容。ContextManifest 不代表当前 Camp 的全部事实都已进入 Prompt。
-- “审计”按时间显示 Actor、动作、目标、结果和证据引用；普通叙述、A2A 正文和
-  Tool 输出不能复制成审计聊天。
 - 切换页签不得改变 Camp、草稿、时间线滚动或运行状态；页签必须具备完整
   `tablist / tab / tabpanel` 语义和键盘操作。
 - 窗口宽度不低于 1180px 时详情栏固定为 310px；在
   `1040–1179px` 时固定为 260px。用户可从 Camp 顶栏完整隐藏或恢复；隐藏后详情栏
   退出布局和无障碍树，不保留窄栏，也不变成 Drawer 或 Overlay。
 - Inspector 首次使用默认展开，后续在本机记住显示偏好；该偏好不写入 Core，不产生
-  Camp 事件或审计。Header 的执行/审批状态摘要在隐藏时仍可用；执行摘要打开或聚焦
-  执行详情，Approval 摘要打开 Inspector 的“审批”页。
+  Camp 事件或审计。Header 的 Approval 摘要在隐藏时仍可用，并打开 Inspector 的“审批”页；
+  Header 不提供执行过程入口。
 - 详情栏不提供拖拽、双击或键盘调宽。统一侧栏仍固定 270px；响应式变化只作用于
   详情栏与中央内容的内部排版。
 
@@ -639,11 +648,10 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 
 - Header 左侧显示“Quick Chat/Project 展示名 › Camp 标题”，标题截断但完整值可访问；
   旁边使用“第 N 天”并由 Camp 创建时间纯函数派生。
-- Camp 顶栏右侧只承载执行、待审批等状态摘要和 Inspector 显示/隐藏按钮，不渲染
-  “停止”按钮或 `•••` 操作菜单。
-- 没有 Active AgentRun 或 pending Approval 时不渲染空徽标。执行状态摘要打开或聚焦
-  执行详情，Approval 摘要打开 Inspector 的“审批”页；两者都不能在 Header
-  直接执行停止、审批、置顶、重命名、复制会话 ID 或删除。
+- Camp 顶栏右侧只承载待审批摘要和 Inspector 显示/隐藏按钮，不渲染执行入口、“停止”按钮或
+  `•••` 操作菜单。
+- 没有 pending Approval 时不渲染空徽标。Approval 摘要打开 Inspector 的“审批”页，但不能在
+  Header 直接执行停止、审批、置顶、重命名、复制会话 ID 或删除。
 - 停止入口只占用 Composer 的发送位置，调用当前 CampTurn 整棵 AgentRun/A2A
   执行树的停止命令。进入停止流程后立即显示“正在停止…”并防止重复请求；停止 ACK
   不等待 Navigation 重载、Camp 重新激活或 Git observation。多个 Runtime interrupt
@@ -1085,12 +1093,11 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   CSS/class/test fixture。
 - v0.44 删除 `MemberAdvancedSettings`、`SummaryModelSettings`、“高级设置”展开入口、
   “对话压缩模型”文案及对应 state/import/CSS/test；不得删除 Member Runtime Parameters。
-- v0.45 删除 Inspector “活动”页及其专属 route/state/IPC/test，把 AgentRun 过程详情迁入
-  执行详情；执行动态只保留摘要和选择，不新增 AgentRun 级 Stop。CampTurn Stop 只
-  保留 Composer 发送位置，Approval Dock 继续位于 Composer 正上方。具体边界见
-  [Run Process Detail Surface v1](../contracts/run-process-detail-surface-v1.md)。Message
-  Delivery、Public A2A 和 Context Profile 的领域语义由对应 ADR/Contract 约束，不能在
-  Renderer 猜测。
+- v0.55 删除逐 AgentRun chip/selection、Inspector “活动 / 审计”页及其专属 route/state/IPC/test，
+  以每位队员一个 Agent 过程入口和按时间保留的 Run stage 替代；不新增 Agent 或 AgentRun 级 Stop。
+  CampTurn Stop 只保留 Composer 发送位置，Approval Dock 继续位于 Composer 正上方。具体边界见
+  [Run Process Detail Surface v2](../contracts/run-process-detail-surface-v2.md)。Message Delivery、
+  Public A2A 和 Context Profile 的领域语义由对应 ADR/Contract 约束，不能在 Renderer 猜测。
 - 删除 `rovai.rail-expanded` 等旧纯 UI 偏好，不迁移、不双读。Pin 使用新的
   `navigation.json`；ThemePreference 按已确认合同保留但全部解析为 Day。
 - v0.49 新增 Main-owned `general-preferences.json` 与 `restorable-location.json`，继续复用并增强

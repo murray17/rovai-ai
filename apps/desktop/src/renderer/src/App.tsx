@@ -1524,7 +1524,6 @@ export function App(): React.JSX.Element {
           ?? (campSnapshot?.camp.id === activeCampId ? campSnapshot.camp.title : '')) || null}
         contextLabel={activeCampProject?.name ?? '快速对话'}
         camp={campSnapshot?.camp.id === activeCampId ? campSnapshot : null}
-        stopping={activeCampStopping}
         inspectorVisible={campSnapshot?.camp.activationState === 'active' && campInspectorVisible}
         onToggleInspector={() => setCampInspectorVisible((visible) => !visible)}
         onOpenInspector={openCampInspector}
@@ -1718,7 +1717,6 @@ export function AppHeader({
   campTitle,
   contextLabel,
   camp,
-  stopping,
   inspectorVisible,
   onToggleInspector,
   onOpenInspector
@@ -1726,13 +1724,11 @@ export function AppHeader({
   campTitle: string | null
   contextLabel: string | null
   camp: CampSnapshot | null
-  stopping: boolean
   inspectorVisible: boolean
   onToggleInspector(): void
   onOpenInspector(tab: CampInspectorTab): void
 }): React.JSX.Element {
   const title = campTitle ?? '正在打开对话'
-  const activeRuns = camp?.agentRuns.filter((run) => ['queued', 'running', 'waiting'].includes(run.status)).length ?? 0
   const pendingApprovals = camp?.approvals.filter((approval) => approval.status === 'pending').length ?? 0
   const dayNumber = camp ? campDayNumber(camp.camp.createdAt) : null
   return (
@@ -1746,18 +1742,6 @@ export function AppHeader({
       {camp && camp.camp.activationState === 'active' && (
         <div className="topbar-context-actions">
           <div className="topbar-context-status" aria-live="polite">
-            {activeRuns > 0
-              ? (
-                  <button
-                    className={`run-badge ${stopping ? 'stopping' : ''}`}
-                    type="button"
-                    onClick={() => onOpenInspector('tasks')}
-                    aria-label={`${stopping ? '正在停止' : '运行中'} ${activeRuns}，打开执行详情`}
-                  >
-                    <i aria-hidden="true" />{stopping ? '正在停止' : '运行中'} {activeRuns}
-                  </button>
-                )
-              : <span className="sr-only">当前没有运行</span>}
             {pendingApprovals > 0 && (
               <button
                 className="approval-badge"

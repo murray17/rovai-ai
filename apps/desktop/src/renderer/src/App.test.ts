@@ -41,11 +41,14 @@ import {
   CampWorkspace,
   QuickChatWorkspace,
   TaskPanel,
+  agentExecutionProcesses,
   campConversationTimeline,
   emptyCampRuntimeSummary,
+  executionDisclosureOpenAfterActivity,
+  executionDisclosureIsLiveOpen,
   formatStopElapsed,
   loadCompleteAgentRunExecutionEvidence,
-  messageDeliveryFooterPresentation,
+  preferredAgentProcessRun,
   runtimeOptionsForDisplay
 } from './CampWorkspace'
 import {
@@ -565,13 +568,12 @@ describe('task event projections', () => {
       campTitle: '会话界面',
       contextLabel: 'Quick Chat',
       camp,
-      stopping: false,
       inspectorVisible: false,
       onToggleInspector: () => undefined,
       onOpenInspector: () => undefined
     }))
     expect(campMarkup).toContain('Quick Chat')
-    expect(campMarkup).toContain('运行中 1')
+    expect(campMarkup).not.toContain('运行中 1')
     expect(campMarkup).toContain('待审批 1')
     expect(campMarkup).toContain('aria-label="显示右侧检查器"')
     expect(campMarkup).toContain('aria-pressed="false"')
@@ -1406,7 +1408,7 @@ describe('task event projections', () => {
     })).toBe('当前无可用队员。')
   })
 
-  it('renders a copy action and routes execution detail through the execution pulse', () => {
+  it('renders a copy action and routes one long-lived execution entry per Agent', () => {
     const profile = {
       ...agentProfile(),
       agentId: 'agent_2',
@@ -1489,8 +1491,34 @@ describe('task event projections', () => {
       }],
       approvals: [], actions: [], timeline: []
     }
+    const historicalRun = {
+      ...snapshot.agentRuns[0],
+      id: 'run-muwa-history',
+      status: 'succeeded' as const,
+      executionEvidenceCount: 0,
+      createdAt: '2026-07-28T04:30:00Z',
+      startedAt: '2026-07-28T04:30:01Z',
+      endedAt: '2026-07-28T04:31:00Z',
+      updatedAt: '2026-07-28T04:31:00Z'
+    }
+    const groupedSnapshot = {
+      ...snapshot,
+      agentRuns: [historicalRun, ...snapshot.agentRuns]
+    }
+    const processes = agentExecutionProcesses(groupedSnapshot.agentRuns)
+    expect(processes).toHaveLength(1)
+    expect(processes[0].agentId).toBe('agent_2')
+    expect(processes[0].runs.map((run) => run.id)).toEqual(['run-muwa-history', 'run-muwa'])
+    expect(preferredAgentProcessRun(processes[0].runs)?.id).toBe('run-muwa')
+    expect(executionDisclosureOpenAfterActivity(true, false)).toBe(true)
+    expect(executionDisclosureOpenAfterActivity(false, true)).toBe(true)
+    expect(executionDisclosureOpenAfterActivity(false, false)).toBe(false)
+    expect(executionDisclosureIsLiveOpen('running', true, false)).toBe(true)
+    expect(executionDisclosureIsLiveOpen('running', false, false)).toBe(false)
+    expect(executionDisclosureIsLiveOpen('queued', true, true)).toBe(false)
+
     const markup = renderToStaticMarkup(createElement(CampWorkspace, {
-      snapshot,
+      snapshot: groupedSnapshot,
       projectName: 'Rovai',
       agents: [profile],
       liveRuntimeEvents: [{
@@ -1519,9 +1547,14 @@ describe('task event projections', () => {
     expect(markup).not.toContain('role="link"')
     expect(markup.indexOf('class="message-bubble"'))
       .toBeLessThan(markup.indexOf('class="message-copy-button"'))
-    expect(markup).toContain('aria-label="执行动态"')
+    expect(markup).toContain('aria-label="Agent 执行台"')
     expect(markup).toContain('class="run-pulse-chip"')
-    expect(markup).toContain('<span>沐瓦</span><small>RUNNING</small>')
+    expect((markup.match(/class="run-pulse-chip(?: is-selected)?"/g) ?? [])).toHaveLength(1)
+    expect(markup).toContain('data-agent-id="agent_2"')
+    expect(markup).toContain('执行中')
+    expect(markup.indexOf('class="local-message-avatar"'))
+      .toBeLessThan(markup.indexOf('class="message-body"'))
+    expect(markup).not.toContain('>审计 <small>')
     expect(markup).not.toContain('Thinking')
     expect(markup).not.toContain('先检查消息组件。')
     expect(markup).not.toContain('完整证据')
@@ -1705,7 +1738,7 @@ describe('task event projections', () => {
       stopping: false,
       onStop: () => undefined
     }))
-    expect(restoredMarkup).toContain('<small>DONE</small>')
+    expect(restoredMarkup).toContain('已完成')
     expect(restoredMarkup).not.toContain('处理过程 · 1分59秒')
 
     const cancelledMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
@@ -1960,8 +1993,8 @@ describe('task event projections', () => {
     expect(markup).toContain('class="message-delivery-handoff-rail"')
     expect(markup).toContain('发送给：')
     expect(markup.indexOf('沐瓦')).toBeLessThan(markup.indexOf('小狐狸'))
-    expect(markup).toContain('投递失败')
-    expect(markup).toContain('aria-hidden="true">!</span>')
+    expect(markup).not.toContain('投递失败')
+    expect(markup).not.toContain('message-delivery-state')
     expect(markup).not.toContain('已送达')
     expect(markup).not.toContain('来自执行')
     expect(markup).not.toContain('message-run-origin')
@@ -1971,28 +2004,6 @@ describe('task event projections', () => {
     expect(markup).not.toContain('Core Outcome')
     expect(markup).not.toContain('返回责任')
     expect(markup).not.toContain('Correlation')
-  })
-
-  it('keeps settled footer deliveries quiet and maps every non-success state explicitly', () => {
-    expect(messageDeliveryFooterPresentation('settled', null)).toBeNull()
-    expect(messageDeliveryFooterPresentation('running', null)).toEqual({
-      label: '处理中', tone: 'attention', symbol: '…'
-    })
-    expect(messageDeliveryFooterPresentation('pending', null)).toEqual({
-      label: '排队中', tone: 'attention', symbol: '…'
-    })
-    expect(messageDeliveryFooterPresentation('pending', 'target_busy')).toEqual({
-      label: '等待收件人空闲', tone: 'attention', symbol: '…'
-    })
-    expect(messageDeliveryFooterPresentation('failed', null)).toEqual({
-      label: '投递失败', tone: 'danger', symbol: '!'
-    })
-    expect(messageDeliveryFooterPresentation('cancelled', null)).toEqual({
-      label: '已取消', tone: 'neutral', symbol: '–'
-    })
-    expect(messageDeliveryFooterPresentation('interrupted_before_dispatch', null)).toEqual({
-      label: '停止前未派发', tone: 'neutral', symbol: '–'
-    })
   })
 
   it('renders GFM while removing raw HTML and remote images', () => {

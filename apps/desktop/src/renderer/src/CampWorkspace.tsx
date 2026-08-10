@@ -24,7 +24,6 @@ import { EmptyInline } from './ui-elements'
 import { StructuredMentionComposer } from './StructuredMentionComposer'
 import {
   agentRunPresentation,
-  agentRunStateTag,
   agentRunWaitDetail,
   buildLiveExecutionProgress,
   formatByteSize,
@@ -46,7 +45,57 @@ import { identityColorToken } from './theme'
 
 const NON_TERMINAL_RUNS = new Set(['queued', 'running', 'waiting'])
 const EXECUTION_EVIDENCE_PAGE_LIMIT = 1_000
-export type CampInspectorTab = 'tasks' | 'context' | 'approvals' | 'audit'
+export type CampInspectorTab = 'tasks' | 'context' | 'approvals'
+
+export type AgentExecutionProcess = {
+  agentId: string
+  runs: AgentRunView[]
+}
+
+export function preferredAgentProcessRun(runs: AgentRunView[]): AgentRunView | null {
+  const newestFirst = runs.slice().sort((left, right) =>
+    right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id)
+  )
+  return newestFirst.find((run) => run.status === 'running')
+    ?? newestFirst.find((run) => NON_TERMINAL_RUNS.has(run.status))
+    ?? newestFirst[0]
+    ?? null
+}
+
+export function agentExecutionProcesses(runs: AgentRunView[]): AgentExecutionProcess[] {
+  const grouped = new Map<string, AgentRunView[]>()
+  for (const run of runs) {
+    grouped.set(run.agentId, [...(grouped.get(run.agentId) ?? []), run])
+  }
+  return [...grouped.entries()]
+    .map(([agentId, agentRuns]) => ({
+      agentId,
+      runs: agentRuns.slice().sort((left, right) =>
+        left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)
+      )
+    }))
+    .sort((left, right) => {
+      const leftLatest = left.runs.at(-1)
+      const rightLatest = right.runs.at(-1)
+      return (rightLatest?.createdAt ?? '').localeCompare(leftLatest?.createdAt ?? '')
+        || left.agentId.localeCompare(right.agentId)
+    })
+}
+
+export function executionDisclosureOpenAfterActivity(
+  currentOpen: boolean,
+  active: boolean
+): boolean {
+  return currentOpen || active
+}
+
+export function executionDisclosureIsLiveOpen(
+  status: AgentRunView['status'],
+  focused: boolean,
+  cancelling: boolean
+): boolean {
+  return NON_TERMINAL_RUNS.has(status) && focused && !cancelling
+}
 export type NotificationFocusTarget = {
   requestId: number
   kind: 'approval' | 'camp_turn'
@@ -521,7 +570,9 @@ export function CampWorkspace({
   const approvalDockRef = useRef<HTMLElement>(null)
   const lastTimelineItemId = useRef<string | null>(null)
   const [localInspectorTab, setLocalInspectorTab] = useState<CampInspectorTab>('tasks')
-  const [executionDrawerRunId, setExecutionDrawerRunId] = useState<string | null>(null)
+  const [executionDrawerAgentId, setExecutionDrawerAgentId] = useState<string | null>(null)
+  const [executionDrawerFocusRequest, setExecutionDrawerFocusRequest] = useState(0)
+  const executionDrawerTriggerRef = useRef<HTMLButtonElement | null>(null)
   const inspectorTab = controlledInspectorTab ?? localInspectorTab
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null)
   const [taskFocusRequest, setTaskFocusRequest] = useState(0)
@@ -583,6 +634,10 @@ export function CampWorkspace({
   }
 
   useEffect(() => setMentionPopover(null), [snapshot.camp.id])
+  useEffect(() => {
+    setExecutionDrawerAgentId(null)
+    executionDrawerTriggerRef.current = null
+  }, [snapshot.camp.id])
 
   const message = useMemo(
     () => structuredCampContentPlainText(messageContent, snapshot.members),
@@ -601,6 +656,14 @@ export function CampWorkspace({
   const runById = useMemo(
     () => new Map(snapshot.agentRuns.map((run) => [run.id, run])),
     [snapshot.agentRuns]
+  )
+  const executionProcesses = useMemo(
+    () => agentExecutionProcesses(snapshot.agentRuns),
+    [snapshot.agentRuns]
+  )
+  const executionProcessByAgentId = useMemo(
+    () => new Map(executionProcesses.map((process) => [process.agentId, process])),
+    [executionProcesses]
   )
   const visibleCampMessages = useMemo(() => {
     const persistedIds = new Set(snapshot.messages.map((message) => message.id))
@@ -631,8 +694,8 @@ export function CampWorkspace({
   const defaultLeadReady = defaultLeadProfile?.runtimeReadiness.status === 'ready'
   const activeRuns = snapshot.agentRuns.filter((run) => NON_TERMINAL_RUNS.has(run.status))
   const executionBlocked = activeRuns.length > 0 || stopping
-  const executionDrawerRun = executionDrawerRunId
-    ? runById.get(executionDrawerRunId) ?? null
+  const executionDrawerProcess = executionDrawerAgentId
+    ? executionProcessByAgentId.get(executionDrawerAgentId) ?? null
     : null
   const pendingApprovals = snapshot.approvals.filter((approval) => approval.status === 'pending')
   const previousPendingApprovalCount = useRef(pendingApprovals.length)
@@ -1015,18 +1078,29 @@ export function CampWorkspace({
     onOpenInspector?.(tab)
   }
 
+  const openExecutionProcess = (
+    agentId: string,
+    trigger: HTMLButtonElement | null = null
+  ): void => {
+    if (!executionProcessByAgentId.has(agentId)) return
+    if (trigger) executionDrawerTriggerRef.current = trigger
+    setExecutionDrawerAgentId(agentId)
+    setExecutionDrawerFocusRequest((request) => request + 1)
+  }
+
+  const closeExecutionProcess = (): void => {
+    const trigger = executionDrawerTriggerRef.current
+    setExecutionDrawerAgentId(null)
+    executionDrawerTriggerRef.current = null
+    if (trigger?.isConnected) {
+      window.requestAnimationFrame(() => trigger.focus({ preventScroll: true }))
+    }
+  }
+
   return (
     <section className="workspace-shell camp-workspace" aria-label={`Camp：${snapshot.camp.title}`}>
       <div className={`workspace-grid ${inspectorVisible ? '' : 'inspector-collapsed'}`.trim()}>
         <section className="timeline-pane">
-          <RunPulse
-            runs={snapshot.agentRuns}
-            deliveries={snapshot.messageDeliveries}
-            memberById={memberById}
-            stopping={stopping}
-            selectedRunId={executionDrawerRunId}
-            onOpen={(runId) => setExecutionDrawerRunId(runId)}
-          />
           <div
             className="timeline-scroll camp-timeline"
             ref={timelineScrollRef}
@@ -1070,7 +1144,9 @@ export function CampWorkspace({
                       <StopOutcomeEvent
                         key={timelineItem.id}
                         item={timelineItem}
-                        onOpenDrawer={turnRun ? () => setExecutionDrawerRunId(turnRun.id) : undefined}
+                        onOpenDrawer={turnRun
+                          ? (trigger) => openExecutionProcess(turnRun.agentId, trigger)
+                          : undefined}
                       />
                     )
                     continue
@@ -1180,23 +1256,27 @@ export function CampWorkspace({
               )}
             </div>
           </div>
-          {executionDrawerRun && (
+          <RunPulse
+            processes={executionProcesses}
+            memberById={memberById}
+            stopping={stopping}
+            selectedAgentId={executionDrawerAgentId}
+            onOpen={openExecutionProcess}
+          />
+          {executionDrawerProcess && (
             <ExecutionDrawer
-              run={executionDrawerRun}
-              runs={snapshot.agentRuns}
-              member={memberById.get(executionDrawerRun.agentId) ?? null}
-              profile={profileById.get(executionDrawerRun.agentId) ?? null}
-              deliveries={snapshot.messageDeliveries.filter((delivery) =>
-                delivery.targetAgentRunId === executionDrawerRun.id
-                || (delivery.targetAgentRunId === null && delivery.campTurnId === executionDrawerRun.campTurnId)
-              )}
-              progress={executionProgressByRunId.get(executionDrawerRun.id)}
+              key={executionDrawerProcess.agentId}
+              process={executionDrawerProcess}
+              member={memberById.get(executionDrawerProcess.agentId) ?? null}
+              profile={profileById.get(executionDrawerProcess.agentId) ?? null}
+              deliveries={snapshot.messageDeliveries}
+              progressByRunId={executionProgressByRunId}
               campId={snapshot.camp.id}
-              truncatedEvidence={truncatedEvidenceByRunId.get(executionDrawerRun.id)}
-              loadedEvidenceCount={loadedEvidenceCountByRunId.get(executionDrawerRun.id) ?? 0}
-              cancelling={cancellingTurnIds.has(executionDrawerRun.campTurnId) && NON_TERMINAL_RUNS.has(executionDrawerRun.status)}
-              onSelect={setExecutionDrawerRunId}
-              onClose={() => setExecutionDrawerRunId(null)}
+              truncatedEvidenceByRunId={truncatedEvidenceByRunId}
+              loadedEvidenceCountByRunId={loadedEvidenceCountByRunId}
+              cancellingTurnIds={cancellingTurnIds}
+              focusRequest={executionDrawerFocusRequest}
+              onClose={closeExecutionProcess}
               memberById={memberById}
             />
           )}
@@ -1213,7 +1293,6 @@ export function CampWorkspace({
               <Tabs.Trigger value="tasks">任务 <small>{snapshot.tasks.length}</small></Tabs.Trigger>
               <Tabs.Trigger value="context">上下文投递 <small>{snapshot.contextManifests.length}</small></Tabs.Trigger>
               <Tabs.Trigger value="approvals">审批 {pendingApprovals.length > 0 && <b>{pendingApprovals.length}</b>}</Tabs.Trigger>
-              <Tabs.Trigger value="audit">审计 <small>{snapshot.timeline.length}</small></Tabs.Trigger>
             </Tabs.List>
             <Tabs.Content value="tasks" className="tab-scroll task-panel-scroll">
               <TaskPanel
@@ -1222,7 +1301,7 @@ export function CampWorkspace({
                 focusTaskId={focusedTaskId}
                 focusRequest={taskFocusRequest}
                 onTasksChanged={onTasksChanged}
-                onOpenRun={setExecutionDrawerRunId}
+                onOpenAgent={openExecutionProcess}
               />
             </Tabs.Content>
             <Tabs.Content value="context" className="tab-scroll context-panel">
@@ -1402,10 +1481,6 @@ export function CampWorkspace({
                 <EmptyInline text="当前没有待处理审批；请求会固定显示在输入框正上方，并可在这里查看详情。" />
               )}
             </Tabs.Content>
-            <Tabs.Content value="audit" className="tab-scroll audit-list">
-              {snapshot.timeline.slice().reverse().map((event) => <article className="audit-row" key={event.globalSequence}><div><strong>{event.eventType}</strong><time>#{event.globalSequence}</time></div></article>)}
-              {snapshot.timeline.length === 0 && <EmptyInline text="领域事件会出现在这里。" />}
-            </Tabs.Content>
           </Tabs.Root>
           <div className="inspector-meta">
             {snapshot.agentRuns.length > 0 && `run ${shortIdentity(snapshot.agentRuns[snapshot.agentRuns.length - 1].id)} · `}seq {snapshot.throughGlobalSequence}
@@ -1572,90 +1647,110 @@ export function CampWorkspace({
 }
 
 function RunPulse({
-  runs,
-  deliveries,
+  processes,
   memberById,
   stopping,
-  selectedRunId,
+  selectedAgentId,
   onOpen
 }: {
-  runs: AgentRunView[]
-  deliveries: MessageDeliveryView[]
+  processes: AgentExecutionProcess[]
   memberById: Map<string, CampSnapshot['members'][number]>
   stopping: boolean
-  selectedRunId: string | null
-  onOpen(runId: string): void
+  selectedAgentId: string | null
+  onOpen(agentId: string, trigger: HTMLButtonElement): void
 }): JSX.Element {
-  const activeRuns = runs.filter((run) => NON_TERMINAL_RUNS.has(run.status))
-  const activeDeliveries = deliveries.filter((delivery) =>
-    delivery.status === 'pending' || delivery.status === 'running'
-  )
-  const visibleRuns = runs
-    .slice()
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-  if (visibleRuns.length === 0 && activeDeliveries.length === 0) return <></>
+  const visibleProcesses = processes.slice().sort((left, right) => {
+    const leftPosition = memberById.get(left.agentId)?.memberOrder ?? Number.MAX_SAFE_INTEGER
+    const rightPosition = memberById.get(right.agentId)?.memberOrder ?? Number.MAX_SAFE_INTEGER
+    return leftPosition - rightPosition || left.agentId.localeCompare(right.agentId)
+  })
+  const activeProcessCount = visibleProcesses.filter((process) =>
+    process.runs.some((run) => NON_TERMINAL_RUNS.has(run.status))
+  ).length
+  if (visibleProcesses.length === 0) return <></>
   return (
-    <div className="run-pulse" aria-live="polite" aria-label="执行动态">
-      <span className="run-pulse-mark" aria-hidden="true"><i /></span>
-      <strong>{stopping ? '正在停止当前 CampTurn' : activeRuns.length > 0 ? '执行中' : '最近执行'}</strong>
-      <span className="run-pulse-count">{activeRuns.length || runs.length} 个执行</span>
-      {activeDeliveries.length > 0 && <span className="run-pulse-deliveries">{activeDeliveries.length} 条协作投递</span>}
-      {visibleRuns.length > 0 && (
-        <div className="run-pulse-list" role="list" aria-label="可查看的执行">
-          {visibleRuns.map((run) => {
-            const memberName = memberById.get(run.agentId)?.displayName ?? run.agentId
-            const deliveryCount = deliveries.filter((delivery) =>
-              delivery.targetAgentRunId === run.id || delivery.campTurnId === run.campTurnId
-            ).length
-            return (
+    <div className="run-pulse" aria-label="Agent 执行台">
+      <div className="run-pulse-heading">
+        <span className="run-pulse-mark" aria-hidden="true"><i /></span>
+        <strong>执行台</strong>
+        <span className="run-pulse-count" aria-live="polite">
+          {stopping ? '正在停止当前 CampTurn · ' : activeProcessCount > 0 ? `${activeProcessCount} 位执行中 · ` : ''}
+          {visibleProcesses.length} 位队员
+        </span>
+      </div>
+      <ul className="run-pulse-list" aria-label="队员执行过程入口">
+        {visibleProcesses.map((process) => {
+          const run = preferredAgentProcessRun(process.runs)
+          if (!run) return null
+          const member = memberById.get(process.agentId)
+          const memberName = member?.displayName ?? process.agentId
+          const presentation = agentRunPresentation(
+            run,
+            stopping && NON_TERMINAL_RUNS.has(run.status)
+          )
+          return (
+            <li key={process.agentId}>
               <button
                 type="button"
-                className={`run-pulse-chip${selectedRunId === run.id ? ' is-selected' : ''}`}
-                aria-pressed={selectedRunId === run.id}
-                key={run.id}
-                onClick={() => onOpen(run.id)}
+                className={`run-pulse-chip${selectedAgentId === process.agentId ? ' is-selected' : ''}`}
+                aria-label={`打开${memberName}的执行过程，${presentation.label}`}
+                aria-pressed={selectedAgentId === process.agentId}
+                aria-expanded={selectedAgentId === process.agentId}
+                aria-controls="agent-execution-drawer"
+                data-agent-id={process.agentId}
+                onClick={(event) => onOpen(process.agentId, event.currentTarget)}
               >
-                <span>{memberName}</span>
-                <small>{agentRunStateTag(run).tag}{deliveryCount > 0 ? ` · ${deliveryCount} 投递` : ''}</small>
+                <MemberAvatar
+                  agentId={process.agentId}
+                  avatarRef={member?.avatarRef ?? null}
+                  displayName={memberName}
+                  size="list"
+                  decorative
+                />
+                <span className="run-pulse-chip-copy"><strong>{memberName}</strong><small>执行过程</small></span>
+                <span className={`run-pulse-chip-state tone-${presentation.tone}`}>{presentation.label}</span>
               </button>
-            )
-          })}
-        </div>
-      )}
+            </li>
+          )
+        })}
+      </ul>
     </div>
   )
 }
 
 function ExecutionDrawer({
-  run,
-  runs,
+  process,
   member,
   profile,
   deliveries,
-  progress,
+  progressByRunId,
   campId,
-  truncatedEvidence = [],
-  loadedEvidenceCount = 0,
-  cancelling,
-  onSelect,
+  truncatedEvidenceByRunId,
+  loadedEvidenceCountByRunId,
+  cancellingTurnIds,
+  focusRequest,
   onClose,
   memberById
 }: {
-  run: AgentRunView
-  runs: AgentRunView[]
+  process: AgentExecutionProcess
   member: CampSnapshot['members'][number] | null
   profile: AgentProfile | null
   deliveries: MessageDeliveryView[]
-  progress?: LiveExecutionProgress
+  progressByRunId: Map<string, LiveExecutionProgress>
   campId: string
-  truncatedEvidence?: AgentRunExecutionEvidenceView[]
-  loadedEvidenceCount?: number
-  cancelling: boolean
-  onSelect(runId: string): void
+  truncatedEvidenceByRunId: Map<string, AgentRunExecutionEvidenceView[]>
+  loadedEvidenceCountByRunId: Map<string, number>
+  cancellingTurnIds: ReadonlySet<string>
+  focusRequest: number
   onClose(): void
   memberById: Map<string, CampSnapshot['members'][number]>
 }): JSX.Element {
   const drawerRef = useRef<HTMLElement>(null)
+  const processRef = useRef(process)
+  processRef.current = process
+  const [focusedRunId, setFocusedRunId] = useState(
+    () => preferredAgentProcessRun(process.runs)?.id ?? null
+  )
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
@@ -1668,77 +1763,135 @@ function ExecutionDrawer({
     return () => {
       drawerRef.current?.removeEventListener('keydown', handleKeyDown)
     }
-  }, [])
+  }, [onClose])
+
+  useLayoutEffect(() => {
+    const runId = preferredAgentProcessRun(processRef.current.runs)?.id ?? null
+    setFocusedRunId(runId)
+    if (!runId) return undefined
+    const frame = window.requestAnimationFrame(() => {
+      const target = drawerRef.current?.querySelector<HTMLElement>(
+        `[data-agent-run-id="${CSS.escape(runId)}"]`
+      )
+      target?.scrollIntoView({ block: 'nearest' })
+      target?.focus({ preventScroll: true })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [focusRequest, process.agentId])
+
+  const displayName = member?.displayName ?? profile?.displayName ?? process.agentId
 
   return (
-    <section ref={drawerRef} className="execution-drawer" role="region" aria-labelledby="execution-drawer-title" tabIndex={-1}>
+    <section id="agent-execution-drawer" ref={drawerRef} className="execution-drawer" role="region" aria-labelledby="execution-drawer-title" tabIndex={-1}>
         <header className="execution-drawer-header">
-          <div>
-            <span className="eyebrow">AGENTRUN PROCESS</span>
-            <h2 id="execution-drawer-title">执行详情</h2>
-            <p>查看执行过程、投递和运行时证据；停止权仍由当前 CampTurn 负责。</p>
+          <div className="execution-drawer-agent">
+            <MemberAvatar
+              agentId={process.agentId}
+              avatarRef={member?.avatarRef ?? profile?.avatarRef ?? null}
+              displayName={displayName}
+              size="list"
+              decorative
+            />
+            <div>
+              <h2 id="execution-drawer-title">{displayName} · 执行过程</h2>
+              <p>
+                共 {process.runs.length} 次执行
+                {process.runs.some((run) => NON_TERMINAL_RUNS.has(run.status)) && ' · 当前有进行中 AgentRun'}
+              </p>
+            </div>
           </div>
           <button type="button" className="quiet-button" onClick={onClose} aria-label="收起执行详情">收起</button>
         </header>
-        <div className="execution-drawer-body">
-          <nav className="execution-run-list" aria-label="执行列表">
-            {runs.slice().sort((left, right) => right.createdAt.localeCompare(left.createdAt)).map((candidate) => {
-              const state = agentRunStateTag(candidate)
+        <div className="execution-drawer-body" aria-label={`${displayName}的连续执行历史`}>
+          <ol className="execution-process-timeline">
+            {process.runs.map((run) => {
+              const cancelling = cancellingTurnIds.has(run.campTurnId)
+                && NON_TERMINAL_RUNS.has(run.status)
+              const focused = run.id === focusedRunId
+              const state = agentRunPresentation(run, cancelling)
+              const runDeliveries = deliveries.filter((delivery) =>
+                delivery.targetAgentRunId === run.id
+                || (delivery.targetAgentRunId === null && delivery.campTurnId === run.campTurnId)
+              )
               return (
-                <button
-                  type="button"
-                  className={`execution-run-item ${candidate.id === run.id ? 'is-selected' : ''}`}
-                  key={candidate.id}
-                  onClick={() => onSelect(candidate.id)}
+                <li
+                  className={`execution-process-stage status-${run.status}${focused ? ' is-focused' : ''}`}
+                  data-agent-run-id={run.id}
+                  key={run.id}
+                  tabIndex={-1}
+                  aria-current={focused ? 'step' : undefined}
+                  aria-label={`${runIntervalLabel(run)}，${state.label}`}
                 >
-                  <MemberAvatar
-                    agentId={candidate.agentId}
-                    avatarRef={memberById.get(candidate.agentId)?.avatarRef ?? null}
-                    displayName={memberById.get(candidate.agentId)?.displayName ?? candidate.agentId}
-                    size="list"
-                    decorative
-                  />
-                  <span className="execution-run-item-copy">
-                    <strong>{memberById.get(candidate.agentId)?.displayName ?? candidate.agentId}</strong>
-                    <small>{candidate.invocationKind === 'a2a' ? 'A2A' : '直接执行'} · {shortIdentity(candidate.id)}</small>
-                  </span>
-                  <span className={`activity-state tone-${state.tone}`}>{state.tag}</span>
-                </button>
+                  <span className="execution-process-node" aria-hidden="true" />
+                  <article className="execution-process-card">
+                    <header className="execution-run-boundary">
+                      <div className="execution-run-boundary-main">
+                        <div className="execution-run-time-row">
+                          <time>{runIntervalLabel(run)}</time>
+                          <span className={`execution-run-boundary-state tone-${state.tone}`}>{state.label}</span>
+                          {focused && NON_TERMINAL_RUNS.has(run.status) && (
+                            <span className="current-run-badge">当前 AgentRun</span>
+                          )}
+                        </div>
+                        <div className="execution-run-meta">
+                          <span>AgentRun <code>{shortIdentity(run.id)}</code></span>
+                          <span>{run.invocationKind === 'a2a' ? 'A2A' : '直接执行'}</span>
+                          {run.invocationKind === 'a2a' && <span>深度 {run.a2aDepth}</span>}
+                          <span>CampTurn <code>{shortIdentity(run.campTurnId)}</code></span>
+                        </div>
+                      </div>
+                    </header>
+                    <AgentRunDeliveryRecipients deliveries={runDeliveries} memberById={memberById} />
+                    <RunExecutionDisclosure
+                      run={run}
+                      progress={progressByRunId.get(run.id)}
+                      campId={campId}
+                      truncatedEvidence={truncatedEvidenceByRunId.get(run.id)}
+                      loadedEvidenceCount={loadedEvidenceCountByRunId.get(run.id) ?? 0}
+                      cancelling={cancelling}
+                      focused={focused}
+                    />
+                  </article>
+                </li>
               )
             })}
-          </nav>
-          <section className="execution-drawer-detail" aria-label="所选执行详情">
-            <div className="execution-detail-heading">
-              <MemberAvatar
-                agentId={run.agentId}
-                avatarRef={member?.avatarRef ?? profile?.avatarRef ?? null}
-                displayName={member?.displayName ?? profile?.displayName ?? run.agentId}
-                size="list"
-                decorative
-              />
-              <div>
-                <strong>{member?.displayName ?? profile?.displayName ?? run.agentId}</strong>
-                <small>{agentRunPresentation(run, cancelling).label} · {shortIdentity(run.id)}</small>
-              </div>
-            </div>
-            <dl className="execution-detail-facts">
-              <div><dt>责任</dt><dd>{run.purpose}</dd></div>
-              <div><dt>状态</dt><dd>{run.status}</dd></div>
-              {run.invocationKind === 'a2a' && <div><dt>A2A 深度</dt><dd>{run.a2aDepth}</dd></div>}
-              <div><dt>CampTurn</dt><dd><code>{shortIdentity(run.campTurnId)}</code></dd></div>
-            </dl>
-            <DeliveryStatusList deliveries={deliveries} memberById={memberById} />
-            <RunExecutionDisclosure
-              run={run}
-              progress={progress}
-              campId={campId}
-              truncatedEvidence={truncatedEvidence}
-              loadedEvidenceCount={loadedEvidenceCount}
-              cancelling={cancelling}
-            />
-          </section>
+          </ol>
         </div>
     </section>
+  )
+}
+
+function AgentRunDeliveryRecipients({
+  deliveries,
+  memberById
+}: {
+  deliveries: MessageDeliveryView[]
+  memberById: Map<string, CampSnapshot['members'][number]>
+}): JSX.Element | null {
+  if (deliveries.length === 0) return null
+  const ordered = deliveries.slice().sort((left, right) =>
+    left.recipientCanonicalPosition - right.recipientCanonicalPosition
+  )
+  return (
+    <div className="execution-run-recipients" aria-label="协作投递对象">
+      <small>协作投递</small>
+      {ordered.map((delivery) => {
+        const recipient = memberById.get(delivery.recipientAgentId)
+        const displayName = recipient?.displayName ?? delivery.recipientAgentId
+        return (
+          <span className="execution-run-recipient" key={delivery.id}>
+            <MemberAvatar
+              agentId={delivery.recipientAgentId}
+              avatarRef={recipient?.avatarRef ?? null}
+              displayName={displayName}
+              size="list"
+              decorative
+            />
+            <span>{displayName}</span>
+          </span>
+        )
+      })}
+    </div>
   )
 }
 
@@ -1767,104 +1920,18 @@ function CampMessageDeliveryFooter({
       <span className="message-delivery-recipients">
         {ordered.map((delivery, index) => {
           const recipient = memberById.get(delivery.recipientAgentId)
-          const presentation = messageDeliveryFooterPresentation(delivery.status, delivery.waitCondition)
           return (
             <span className="message-delivery-recipient-group" key={delivery.id}>
               {index > 0 && <span className="message-delivery-recipient-separator" aria-hidden="true">、</span>}
               <span className="message-delivery-recipient-name">
                 {recipient?.displayName ?? delivery.recipientAgentId}
               </span>
-              {presentation && (
-                <span
-                  className={`message-delivery-state tone-${presentation.tone}`}
-                  title={delivery.failureCode ?? undefined}
-                >
-                  <span className="message-delivery-state-separator" aria-hidden="true">·</span>
-                  <span className="message-delivery-state-symbol" aria-hidden="true">{presentation.symbol}</span>
-                  {presentation.label}
-                </span>
-              )}
             </span>
           )
         })}
       </span>
     </footer>
   )
-}
-
-function DeliveryStatusList({
-  deliveries,
-  memberById
-}: {
-  deliveries: MessageDeliveryView[]
-  memberById: Map<string, CampSnapshot['members'][number]>
-}): JSX.Element | null {
-  if (deliveries.length === 0) return null
-  const ordered = deliveries.slice().sort((left, right) =>
-    left.recipientCanonicalPosition - right.recipientCanonicalPosition
-  )
-  return (
-    <section className="delivery-status-list" aria-label="消息投递状态">
-      <div className="delivery-status-heading">
-        <span>相关消息投递</span>
-        <small>{ordered.length} 个收件人</small>
-      </div>
-      <ul>
-        {ordered.map((delivery) => {
-          const recipient = memberById.get(delivery.recipientAgentId)
-          const presentation = deliveryStatusPresentation(delivery.status, delivery.waitCondition)
-          return (
-            <li key={delivery.id}>
-              <span className="delivery-recipient">
-                {recipient?.displayName ?? delivery.recipientAgentId}
-              </span>
-              <span className={`delivery-state tone-${presentation.tone}`} title={delivery.failureCode ?? undefined}>
-                {presentation.label}
-              </span>
-            </li>
-          )
-        })}
-      </ul>
-    </section>
-  )
-}
-
-export function messageDeliveryFooterPresentation(
-  status: MessageDeliveryView['status'],
-  waitCondition: MessageDeliveryView['waitCondition']
-): { label: string; tone: 'attention' | 'danger' | 'neutral'; symbol: '…' | '!' | '–' } | null {
-  if (status === 'settled') return null
-  const presentation = deliveryStatusPresentation(status, waitCondition)
-  return {
-    label: presentation.label,
-    tone: presentation.tone === 'success' ? 'neutral' : presentation.tone,
-    symbol: presentation.tone === 'danger' ? '!' : presentation.tone === 'attention' ? '…' : '–'
-  }
-}
-
-function deliveryStatusPresentation(
-  status: string,
-  waitCondition: MessageDeliveryView['waitCondition']
-): { label: string; tone: 'success' | 'attention' | 'danger' | 'neutral' } {
-  switch (status) {
-    case 'settled':
-      return { label: '已送达', tone: 'success' }
-    case 'running':
-      return { label: '处理中', tone: 'attention' }
-    case 'pending':
-      return {
-        label: waitCondition === 'target_busy' ? '等待收件人空闲' : '排队中',
-        tone: 'attention'
-      }
-    case 'failed':
-      return { label: '投递失败', tone: 'danger' }
-    case 'cancelled':
-      return { label: '已取消', tone: 'neutral' }
-    case 'interrupted_before_dispatch':
-      return { label: '停止前未派发', tone: 'neutral' }
-    default:
-      return { label: status, tone: 'neutral' }
-  }
 }
 
 function MentionProfilePopover({
@@ -2358,14 +2425,14 @@ function StopOutcomeEvent({
   onOpenDrawer
 }: {
   item: Extract<CampConversationTimelineItem, { kind: 'stop_event' }>
-  onOpenDrawer?: () => void
+  onOpenDrawer?: (trigger: HTMLButtonElement) => void
 }): JSX.Element {
   return (
     <div className="timeline-node run-stopped-event" role="status">
       <div>
         <span><i aria-hidden="true" />你已在 {item.elapsedLabel}后停止</span>
         {item.hasUnsettledExternalEffects && onOpenDrawer && (
-          <button type="button" onClick={onOpenDrawer}>
+          <button type="button" onClick={(event) => onOpenDrawer(event.currentTarget)}>
             结果待确认 · 查看执行详情
           </button>
         )}
@@ -2669,7 +2736,8 @@ function RunExecutionDisclosure({
   truncatedEvidence = [],
   loadedEvidenceCount = 0,
   finalBody = null,
-  cancelling = false
+  cancelling = false,
+  focused = false
 }: {
   run: AgentRunView
   progress?: LiveExecutionProgress
@@ -2678,15 +2746,19 @@ function RunExecutionDisclosure({
   loadedEvidenceCount?: number
   finalBody?: string | null
   cancelling?: boolean
+  focused?: boolean
 }): JSX.Element | null {
   const nonTerminal = NON_TERMINAL_RUNS.has(run.status)
-  const active = nonTerminal && !cancelling
+  const active = executionDisclosureIsLiveOpen(run.status, focused, cancelling)
+  const cancellingActive = nonTerminal && cancelling && focused
   const [open, setOpen] = useState(active)
   const [expandedPayloads, setExpandedPayloads] = useState<Record<string, unknown>>({})
   const [loadingEvidenceId, setLoadingEvidenceId] = useState<string | null>(null)
   const [historicalEvidence, setHistoricalEvidence] = useState<AgentRunExecutionEvidenceView[] | null>(null)
   const [historyStatus, setHistoryStatus] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle')
-  useEffect(() => setOpen(active), [active])
+  useEffect(() => {
+    setOpen((currentOpen) => executionDisclosureOpenAfterActivity(currentOpen, active || cancellingActive))
+  }, [active, cancellingActive])
 
   const durableEvidenceCount = Math.max(0, run.executionEvidenceCount)
   const historyNeeded = !nonTerminal && loadedEvidenceCount < durableEvidenceCount
@@ -2842,7 +2914,7 @@ function RunExecutionDisclosure({
           {renderCompleteEvidenceControl(evidence)}
         </div>
       ))}
-      {active && (
+      {nonTerminal && !cancelling && (
         <div className="process-action current" role="status">
           <span className="process-spinner" aria-hidden="true" />
           <span>{run.status === 'waiting'
@@ -2860,7 +2932,7 @@ function RunExecutionDisclosure({
     </div>
   )
 
-  if (cancelling && nonTerminal) {
+  if (cancellingActive) {
     return <div className="execution-disclosure run-live is-cancelling">{content}</div>
   }
   if (active) {
@@ -2868,7 +2940,7 @@ function RunExecutionDisclosure({
   }
   return (
     <details
-      className="execution-disclosure worked is-terminal"
+      className={`execution-disclosure worked ${nonTerminal ? 'is-live-collapsed' : 'is-terminal'}`}
       open={open}
       onToggle={(event) => {
         const nextOpen = event.currentTarget.open
@@ -2949,6 +3021,14 @@ function runDurationLabel(run: AgentRunView): string {
   return `处理过程 · ${minutes}分${remainder ? `${remainder}秒` : ''}`
 }
 
+function runIntervalLabel(run: AgentRunView): string {
+  const startedAt = run.startedAt ?? run.createdAt
+  const endedAt = NON_TERMINAL_RUNS.has(run.status)
+    ? null
+    : run.endedAt ?? run.updatedAt
+  return `${messageClockTime(startedAt)}–${endedAt ? messageClockTime(endedAt) : '现在'}`
+}
+
 type PresentableExecutionEvidence = AgentRunExecutionEvidenceView & {
   kind: Exclude<AgentRunExecutionEvidenceView['kind'], 'reasoning_summary'>
 }
@@ -2977,14 +3057,14 @@ export function TaskPanel({
   focusTaskId = null,
   focusRequest = 0,
   onTasksChanged,
-  onOpenRun = () => {}
+  onOpenAgent = () => {}
 }: {
   snapshot: CampSnapshot
   busy: boolean
   focusTaskId?: string | null
   focusRequest?: number
   onTasksChanged(): Promise<void>
-  onOpenRun?(runId: string): void
+  onOpenAgent?(agentId: string, trigger?: HTMLButtonElement): void
 }): JSX.Element {
   const [mode, setMode] = useState<'list' | 'create' | 'edit'>('list')
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
@@ -3233,7 +3313,7 @@ export function TaskPanel({
             onCompletionSummary={setCompletionSummary}
           />
           <TaskAuditDetail task={selectedTask} snapshot={snapshot} />
-          <RelatedTaskExecution task={selectedTask} snapshot={snapshot} onOpenRun={onOpenRun} />
+          <RelatedTaskExecution task={selectedTask} snapshot={snapshot} onOpenAgent={onOpenAgent} />
           {formError && <p className="task-form-error" role="alert">{formError}</p>}
           {terminal
             ? <p className="task-terminal-note">已结束的 Task 保留为只读记录，不能重新打开或删除。</p>
@@ -3385,24 +3465,35 @@ function TaskAuditDetail({ task, snapshot }: { task: TaskView; snapshot: CampSna
 function RelatedTaskExecution({
   task,
   snapshot,
-  onOpenRun
+  onOpenAgent
 }: {
   task: TaskView
   snapshot: CampSnapshot
-  onOpenRun(runId: string): void
+  onOpenAgent(agentId: string, trigger?: HTMLButtonElement): void
 }): JSX.Element {
   const runs = snapshot.agentRuns.filter((run) => run.taskId === task.taskId)
+  const processes = agentExecutionProcesses(runs)
   const deliveries = snapshot.messageDeliveries.filter((delivery) => delivery.taskId === task.taskId)
   return (
     <section className="task-detail-section" aria-label="关联执行">
       <strong>关联执行</strong>
       <p>{runs.length} 个 AgentRun · {deliveries.length} 个 MessageDelivery</p>
       <div className="task-related-runs">
-        {runs.map((run) => (
-          <button className="quiet-button compact" type="button" key={run.id} onClick={() => onOpenRun(run.id)}>
-            {run.status} · {shortIdentity(run.id)}
-          </button>
-        ))}
+        {processes.map((process) => {
+          const run = preferredAgentProcessRun(process.runs)
+          const memberName = snapshot.members.find((member) => member.agentId === process.agentId)?.displayName
+            ?? process.agentId
+          return (
+            <button
+              className="quiet-button compact"
+              type="button"
+              key={process.agentId}
+              onClick={(event) => onOpenAgent(process.agentId, event.currentTarget)}
+            >
+              {memberName} · {run ? agentRunPresentation(run).label : '执行过程'}
+            </button>
+          )
+        })}
         {runs.length === 0 && <small>尚无关联执行</small>}
       </div>
     </section>

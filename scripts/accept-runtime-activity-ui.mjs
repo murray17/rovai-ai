@@ -15,9 +15,12 @@ const outputDir = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_OUTPUT_DIR
   ?? await mkdtemp(join(tmpdir(), 'rovai-runtime-activity-ui-captures-'))
 const databasePath = join(dataDir, 'rovai.sqlite')
 const debugPort = Number(process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DEBUG_PORT ?? 9581)
-const campId = 'camp-runtime-activity-v041'
-const campTitle = 'v0.41 九 Runtime Activity 验收'
+const campId = 'camp-runtime-activity-v055'
+const campTitle = 'v0.55 Agent 执行过程验收'
 const runArticleSelector = 'article.timeline-node.conversation-bubble.agent'
+const activeAgentId = 'agent_101'
+const activeRunId = 'run-codex'
+const historicalRunId = 'run-codex-history'
 
 const runtimes = [
   runtime('codex', 'codex-cli', 'Codex CLI', 'filesystem/read_file', 'Runtime 报告', {
@@ -52,46 +55,64 @@ await seedFixture()
 
 let app = null
 try {
-  app = await launchApp(debugPort, 1480, 1120)
+  app = await launchApp(debugPort, 1440, 920)
   await setTheme(app.cdp, 'day')
+  await activateControlledRun()
   await openCamp(app.cdp, campId)
   await waitForExpression(app.cdp,
     `document.querySelectorAll(${JSON.stringify(runArticleSelector)}).length > 0`, 30_000)
-  const renderedRunCount = await evaluate(app.cdp,
+  const renderedMessageCount = await evaluate(app.cdp,
     `document.querySelectorAll(${JSON.stringify(runArticleSelector)}).length`)
-  assert(renderedRunCount === runtimes.length,
-    `Expected ${runtimes.length} rendered AgentRuns, found ${renderedRunCount}: ${await evaluate(app.cdp, 'document.body.innerText.slice(0, 5000)')}`)
-  await evaluate(app.cdp, `(() => {
-    document.querySelectorAll('details.execution-disclosure').forEach((details) => { details.open = true })
-    return true
-  })()`)
-  await wait(250)
+  assert(renderedMessageCount === runtimes.length,
+    `Expected ${runtimes.length} rendered Agent messages, found ${renderedMessageCount}: ${await evaluate(app.cdp, 'document.body.innerText.slice(0, 5000)')}`)
 
   const handoffFooter = await collectHandoffFooter(app.cdp)
   assert(handoffFooter.count === 1,
-    `Expected one Scheme C message footer: ${JSON.stringify(handoffFooter)}`)
+    `Expected one recipient-only message footer: ${JSON.stringify(handoffFooter)}`)
   assert(handoffFooter.text.includes('发送给：')
     && handoffFooter.text.includes('Codex CLI 验收')
-    && handoffFooter.text.includes('OpenCode 验收')
-    && handoffFooter.text.includes('投递失败'),
-    `Scheme C footer content mismatch: ${JSON.stringify(handoffFooter)}`)
-  assert(!handoffFooter.text.includes('已送达'),
-    `Settled Delivery must stay quiet: ${JSON.stringify(handoffFooter)}`)
+    && handoffFooter.text.includes('OpenCode 验收'),
+    `Recipient-only footer content mismatch: ${JSON.stringify(handoffFooter)}`)
+  assert(!['已送达', '投递失败', '等待审批', '已取消'].some((label) => handoffFooter.text.includes(label))
+    && handoffFooter.stateLabelCount === 0,
+    `Message footer exposed Delivery state: ${JSON.stringify(handoffFooter)}`)
   assert(handoffFooter.legacyOriginCount === 0 && handoffFooter.compactDeliveryCount === 0,
     `Legacy message Delivery chrome returned: ${JSON.stringify(handoffFooter)}`)
   assert(handoffFooter.background === 'rgba(0, 0, 0, 0)'
     && handoffFooter.borderRadius === '0px'
     && handoffFooter.railBorderLeftWidth === '1px'
     && handoffFooter.railBorderBottomWidth === '1px',
-    `Scheme C footer geometry mismatch: ${JSON.stringify(handoffFooter)}`)
+    `Recipient-only footer geometry mismatch: ${JSON.stringify(handoffFooter)}`)
   assert(handoffFooter.messageGap >= 0 && handoffFooter.messageGap <= 4,
-    `Scheme C footer must stay visually attached to the message: ${JSON.stringify(handoffFooter)}`)
+    `Recipient-only footer must stay visually attached to the message: ${JSON.stringify(handoffFooter)}`)
+
+  const agentDock = await collectAgentDock(app.cdp)
+  assert(agentDock.chipCount === runtimes.length
+    && agentDock.uniqueAgentIds.length === runtimes.length
+    && agentDock.agentIds.filter((agentId) => agentId === activeAgentId).length === 1,
+    `Agent dock did not aggregate one entry per Agent: ${JSON.stringify(agentDock)}`)
+  assert(agentDock.followsTimeline && agentDock.dockTop >= agentDock.timelineBottom - 1,
+    `Agent dock is not attached below the conversation timeline: ${JSON.stringify(agentDock)}`)
+  assert(agentDock.topRunBadgeCount === 0 && agentDock.auditTabCount === 0,
+    `Removed top Run/Audit entries returned: ${JSON.stringify(agentDock)}`)
 
   const observed = await collectRuntimeRows(app.cdp)
   assertRuntimeRows(observed)
   const totalToolRows = observed.reduce((total, row) => total + row.toolTitles.length, 0)
   assert(totalToolRows === 8,
     `Expected exactly eight observed tool rows and one honest run-level row: ${JSON.stringify(observed)}`)
+
+  await evaluate(app.cdp, `(() => {
+    const activeChip = [...document.querySelectorAll('.run-pulse-chip[data-agent-id]')]
+      .find((chip) => chip.dataset.agentId === ${JSON.stringify(activeAgentId)})
+    activeChip?.click()
+    return Boolean(activeChip)
+  })()`)
+  await waitForExpression(app.cdp, `(() => {
+    const focused = document.querySelector('.execution-process-stage.is-focused')
+    return focused?.dataset.agentRunId === ${JSON.stringify(activeRunId)}
+      && Boolean(focused.querySelector('.execution-disclosure.run-live.is-running'))
+  })()`)
 
   await evaluate(app.cdp, `(() => {
     const timeline = document.querySelector('.camp-timeline')
@@ -111,11 +132,15 @@ try {
   const bottomCapture = join(outputDir, 'runtime-activity-bottom.png')
   await capture(app.cdp, bottomCapture)
 
-  await evaluate(app.cdp, `(() => {
-    document.querySelector('.execution-drawer [aria-label="收起执行详情"]')?.click()
-    return !document.querySelector('.execution-drawer')
-  })()`)
+  await app.cdp.send('Input.dispatchKeyEvent', {
+    type: 'rawKeyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 53
+  })
+  await app.cdp.send('Input.dispatchKeyEvent', {
+    type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 53
+  })
   await waitForExpression(app.cdp, `!document.querySelector('.execution-drawer')`)
+  await waitForExpression(app.cdp,
+    `document.activeElement?.dataset.agentId === ${JSON.stringify(activeAgentId)}`)
   await app.cdp.send('Emulation.setDeviceMetricsOverride', {
     width: 1040, height: 700, deviceScaleFactor: 1, mobile: false
   })
@@ -131,12 +156,16 @@ try {
   assert(compactLayout.documentScrollWidth <= compactLayout.viewportWidth + 1
     && compactLayout.timelineScrollWidth <= compactLayout.timelineClientWidth + 1
     && compactLayout.footerScrollWidth <= compactLayout.footerClientWidth + 1,
-    `Scheme C footer overflowed at 1040x700: ${JSON.stringify(compactLayout)}`)
+    `Recipient-only footer overflowed at 1040x700: ${JSON.stringify(compactLayout)}`)
   assert(compactLayout.footerLeft >= compactLayout.timelineLeft - 1
     && compactLayout.footerRight <= compactLayout.timelineRight + 1
     && compactLayout.footerTop >= compactLayout.timelineTop - 1
     && compactLayout.footerBottom <= compactLayout.timelineBottom + 1,
-    `Scheme C footer escaped the compact timeline viewport: ${JSON.stringify(compactLayout)}`)
+    `Recipient-only footer escaped the compact timeline viewport: ${JSON.stringify(compactLayout)}`)
+  assert(compactLayout.dockLeft >= compactLayout.timelineLeft - 1
+    && compactLayout.dockRight <= compactLayout.timelineRight + 1
+    && compactLayout.dockTop >= compactLayout.timelineBottom - 1,
+    `Agent dock escaped the compact conversation column: ${JSON.stringify(compactLayout)}`)
   const compactCapture = join(outputDir, 'runtime-activity-compact.png')
   await capture(app.cdp, compactCapture)
 
@@ -152,10 +181,13 @@ try {
       runtimeCount: observed.length,
       canonicalToolRows: totalToolRows,
       codexLifecycleMergedToOneRow: observed.find((row) => row.runtime === 'Codex CLI')?.toolTitles.length === 1,
+      sameAgentRunsShareOneProcess: observed.find((row) => row.agentId === activeAgentId)?.runCount === 2,
+      runningRunFocusedWithEvidence: observed.find((row) => row.agentId === activeAgentId)?.focusedEvidenceOpen === true,
       claudeRunLevelDoesNotInventTools: observed.find((row) => row.runtime === 'Claude Code')?.toolTitles.length === 0,
       antigravityCoreToolCatalogName: observed.find((row) => row.runtime === 'Antigravity')?.toolTitles[0] === 'camp.message.send',
-      schemeCHandoffFooter: handoffFooter,
-      schemeCCompactLayout: compactLayout
+      agentLevelProcessDock: agentDock,
+      recipientOnlyHandoffFooter: handoffFooter,
+      recipientOnlyCompactLayout: compactLayout
     },
     runtimes: observed,
     captures: { top: topCapture, bottom: bottomCapture, compact: compactCapture }
@@ -202,6 +234,22 @@ async function initializeDatabase() {
   }
 }
 
+async function activateControlledRun() {
+  const status = await runSql(databasePath, `
+    PRAGMA busy_timeout = 5000;
+    UPDATE agent_run
+    SET status = 'running',
+        started_at = '2026-08-05T12:00:01Z',
+        ended_at = NULL,
+        updated_at = '2026-08-05T12:00:01Z',
+        version = version + 1
+    WHERE id = ${sqlLiteral(activeRunId)} AND status = 'queued';
+    SELECT status FROM agent_run WHERE id = ${sqlLiteral(activeRunId)};
+  `)
+  assert(status.trim().split(/\s+/).at(-1) === 'running',
+    `Controlled AgentRun did not enter running state: ${status}`)
+}
+
 async function seedFixture() {
   const now = '2026-08-05T12:00:00Z'
   const installationRows = runtimes.map((entry) => `(
@@ -227,27 +275,54 @@ async function seedFixture() {
     ${sqlLiteral(`conversation-${entry.key}`)}, ${sqlLiteral(campId)}, ${sqlLiteral(entry.agentId)},
     1, ${sqlLiteral(now)}, ${sqlLiteral(now)}
   )`).join(',\n')
-  const turnRows = runtimes.map((entry, index) => `(
-    ${sqlLiteral(`turn-${entry.key}`)}, ${sqlLiteral(campId)}, 'system_event',
-    ${sqlLiteral(`runtime-activity-${entry.key}`)}, 'completed',
-    1, ${sqlLiteral(now)}, '2026-08-06T12:00:00Z', 86400, 32, 16, 1,
-    1,
-    ${sqlLiteral(`2026-08-05T12:${String(index).padStart(2, '0')}:00Z`)},
-    ${sqlLiteral(`2026-08-05T12:${String(index).padStart(2, '0')}:02Z`)},
-    ${sqlLiteral(`2026-08-05T12:${String(index).padStart(2, '0')}:02Z`)}
-  )`).join(',\n')
-  const runRows = runtimes.map((entry, index) => `(
-    ${sqlLiteral(`run-${entry.key}`)}, ${sqlLiteral(`turn-${entry.key}`)},
-    ${sqlLiteral(`conversation-${entry.key}`)}, 0, 0,
-    ${sqlLiteral(`direct:${entry.agentId}`)}, 'initial',
-    ${sqlLiteral(`验证 ${entry.runtimeName} Runtime Activity`)}, '展示观测诚实的工具名称',
-    'required', '{}', 'succeeded', ${sqlLiteral(`runtime-activity-${entry.key}`)},
-    1, ${sqlLiteral(`2026-08-05T12:${String(index).padStart(2, '0')}:00Z`)},
-    ${sqlLiteral(`2026-08-05T12:${String(index).padStart(2, '0')}:01Z`)},
-    ${sqlLiteral(`2026-08-05T12:${String(index).padStart(2, '0')}:02Z`)},
-    ${sqlLiteral(`2026-08-05T12:${String(index).padStart(2, '0')}:02Z`)},
-    ${sqlLiteral(entry.adapterKind)}, ${sqlLiteral(entry.protocol)}
-  )`).join(',\n')
+  const turnRows = [
+    ...runtimes.map((entry, index) => {
+      const active = entry.key === 'codex'
+      const updatedAt = `2026-08-05T12:${String(index).padStart(2, '0')}:${active ? '01' : '02'}Z`
+      return `(
+        ${sqlLiteral(`turn-${entry.key}`)}, ${sqlLiteral(campId)}, 'system_event',
+        ${sqlLiteral(`runtime-activity-${entry.key}`)}, ${sqlLiteral(active ? 'running' : 'completed')},
+        1, ${sqlLiteral(now)}, ${sqlLiteral(active ? '2036-08-06T12:00:00Z' : '2026-08-06T12:00:00Z')}, ${active ? 0 : 86400}, 32, 16, 1,
+        1,
+        ${sqlLiteral(`2026-08-05T12:${String(index).padStart(2, '0')}:00Z`)},
+        ${sqlLiteral(updatedAt)},
+        ${sqlNullable(active ? null : updatedAt)}
+      )`
+    }),
+    `(
+      'turn-codex-history', ${sqlLiteral(campId)}, 'system_event',
+      'runtime-activity-codex-history', 'completed',
+      1, ${sqlLiteral(now)}, '2026-08-06T12:00:00Z', 86400, 32, 16, 1,
+      1, '2026-08-05T11:58:00Z', '2026-08-05T11:58:02Z', '2026-08-05T11:58:02Z'
+    )`
+  ].join(',\n')
+  const runRows = [
+    ...runtimes.map((entry, index) => {
+      const active = entry.key === 'codex'
+      const updatedAt = `2026-08-05T12:${String(index).padStart(2, '0')}:${active ? '01' : '02'}Z`
+      return `(
+        ${sqlLiteral(`run-${entry.key}`)}, ${sqlLiteral(`turn-${entry.key}`)},
+        ${sqlLiteral(`conversation-${entry.key}`)}, 0, 0,
+        ${sqlLiteral(`direct:${entry.agentId}`)}, 'initial',
+        ${sqlLiteral(`验证 ${entry.runtimeName} Runtime Activity`)}, '展示观测诚实的工具名称',
+        'required', '{}', ${sqlLiteral(active ? 'queued' : 'succeeded')}, ${sqlLiteral(`runtime-activity-${entry.key}`)},
+        1, ${sqlLiteral(`2026-08-05T12:${String(index).padStart(2, '0')}:00Z`)},
+        ${sqlNullable(active ? null : `2026-08-05T12:${String(index).padStart(2, '0')}:01Z`)},
+        ${sqlNullable(active ? null : updatedAt)},
+        ${sqlLiteral(updatedAt)},
+        ${sqlLiteral(entry.adapterKind)}, ${sqlLiteral(entry.protocol)}
+      )`
+    }),
+    `(
+      ${sqlLiteral(historicalRunId)}, 'turn-codex-history', 'conversation-codex', 0, 0,
+      ${sqlLiteral(`direct:${activeAgentId}:history`)}, 'initial',
+      'Codex 历史 Runtime Activity', '保留历史 AgentRun 边界',
+      'required', '{}', 'succeeded', 'runtime-activity-codex-history',
+      1, '2026-08-05T11:58:00Z', '2026-08-05T11:58:01Z',
+      '2026-08-05T11:58:02Z', '2026-08-05T11:58:02Z',
+      'codex-cli', 'codex-app-server'
+    )`
+  ].join(',\n')
   const messageRows = runtimes.map((entry, index) => {
     const body = entry.runLevelOnly
       ? 'Run-level：Runtime 未报告内部工具；Rovai 未生成命令、文件或工具调用卡片。'
@@ -348,7 +423,8 @@ async function seedFixture() {
     ) VALUES ${deliveryRows};
     UPDATE agent_run
     SET final_camp_message_id = 'message-' || substr(id, length('run-') + 1)
-    WHERE camp_turn_id LIKE 'turn-%';
+    WHERE status IN ('succeeded', 'failed', 'cancelled')
+      AND id <> ${sqlLiteral(historicalRunId)};
     COMMIT;
   `)
 
@@ -375,8 +451,33 @@ async function collectHandoffFooter(cdp) {
       railBorderLeftWidth: railStyle?.borderLeftWidth ?? null,
       railBorderBottomWidth: railStyle?.borderBottomWidth ?? null,
       messageGap: footerRect && messageRect ? footerRect.top - messageRect.bottom : null,
+      stateLabelCount: footer?.querySelectorAll('.message-delivery-state').length ?? 0,
       legacyOriginCount: document.querySelectorAll('.message-run-origin').length,
       compactDeliveryCount: document.querySelectorAll('.delivery-status-list.is-compact').length
+    }
+  })()`)
+}
+
+async function collectAgentDock(cdp) {
+  return evaluate(cdp, `(() => {
+    const timeline = document.querySelector('.camp-timeline')
+    const dock = document.querySelector('.run-pulse[aria-label="Agent 执行台"]')
+    const timelineRect = timeline?.getBoundingClientRect()
+    const dockRect = dock?.getBoundingClientRect()
+    const agentIds = [...document.querySelectorAll('.run-pulse-chip[data-agent-id]')]
+      .map((chip) => chip.dataset.agentId ?? '')
+      .filter(Boolean)
+    const auditTabCount = [...document.querySelectorAll('.activity-tabs > .tabs-list [role="tab"]')]
+      .filter((tab) => tab.textContent?.includes('审计')).length
+    return {
+      chipCount: agentIds.length,
+      agentIds,
+      uniqueAgentIds: [...new Set(agentIds)],
+      followsTimeline: timeline?.nextElementSibling === dock,
+      timelineBottom: timelineRect?.bottom ?? 0,
+      dockTop: dockRect?.top ?? 0,
+      topRunBadgeCount: document.querySelectorAll('.topbar .run-badge').length,
+      auditTabCount
     }
   })()`)
 }
@@ -385,8 +486,10 @@ async function collectCompactHandoffLayout(cdp) {
   return evaluate(cdp, `(() => {
     const footer = document.querySelector('.message-delivery-footer')
     const timeline = document.querySelector('.camp-timeline')
+    const dock = document.querySelector('.run-pulse[aria-label="Agent 执行台"]')
     const footerRect = footer?.getBoundingClientRect()
     const timelineRect = timeline?.getBoundingClientRect()
+    const dockRect = dock?.getBoundingClientRect()
     return {
       viewportWidth: innerWidth,
       viewportHeight: innerHeight,
@@ -402,7 +505,10 @@ async function collectCompactHandoffLayout(cdp) {
       footerLeft: footerRect?.left ?? 0,
       footerRight: footerRect?.right ?? 0,
       footerTop: footerRect?.top ?? 0,
-      footerBottom: footerRect?.bottom ?? 0
+      footerBottom: footerRect?.bottom ?? 0,
+      dockLeft: dockRect?.left ?? 0,
+      dockRight: dockRect?.right ?? 0,
+      dockTop: dockRect?.top ?? 0
     }
   })()`)
 }
@@ -461,28 +567,64 @@ async function seedActivity(entry, index) {
 }
 
 async function collectRuntimeRows(cdp) {
-  const chipCount = await evaluate(cdp, `document.querySelectorAll('.run-pulse-chip').length`)
   const rows = []
-  for (let index = 0; index < chipCount; index += 1) {
-    await evaluate(cdp, `document.querySelectorAll('.run-pulse-chip')[${index}]?.click()`)
-    await waitForExpression(cdp, `Boolean(document.querySelector('.execution-drawer'))`)
-    await evaluate(cdp, `document.querySelector('.execution-drawer details.execution-disclosure summary')?.click()`)
-    const selectedMember = await evaluate(cdp, `document.querySelector('.execution-detail-heading strong')?.textContent?.trim() ?? ''`)
-    const expectedTool = runtimes.find((entry) => `${entry.runtimeName} 验收` === selectedMember)?.expectedToolName
-    if (expectedTool !== null && expectedTool !== undefined) {
+  for (const expected of runtimes) {
+    const memberName = `${expected.runtimeName} 验收`
+    const opened = await evaluate(cdp, `(() => {
+      const agentId = ${JSON.stringify(expected.agentId)}
+      const chip = [...document.querySelectorAll('.run-pulse-chip[data-agent-id]')]
+        .find((candidate) => candidate.dataset.agentId === agentId)
+      chip?.click()
+      return Boolean(chip)
+    })()`)
+    assert(opened, `Missing Agent process entry for ${memberName}`)
+    await waitForExpression(cdp, `(() => {
+      const selected = document.querySelector('.run-pulse-chip.is-selected')
+      const title = document.querySelector('#execution-drawer-title')?.textContent?.trim() ?? ''
+      return selected?.dataset.agentId === ${JSON.stringify(expected.agentId)}
+        && title === ${JSON.stringify(`${memberName} · 执行过程`)}
+    })()`)
+    if (expected.agentId === activeAgentId) {
+      await waitForExpression(cdp, `(() => {
+        const stage = document.querySelector('.execution-process-stage.is-focused')
+        return stage?.dataset.agentRunId === ${JSON.stringify(activeRunId)}
+          && stage.classList.contains('status-running')
+          && Boolean(stage.querySelector('.execution-disclosure.run-live.is-running'))
+      })()`)
+    }
+    await evaluate(cdp, `(() => {
+      document.querySelectorAll('.execution-drawer details.execution-disclosure:not([open]) > summary')
+        .forEach((summary) => summary.click())
+      return true
+    })()`)
+    if (expected.expectedToolName !== null && expected.expectedToolName !== undefined) {
       await waitForExpression(cdp, `document.querySelectorAll('.execution-drawer .tool-call-title').length > 0`, 10_000)
     } else {
       await wait(150)
     }
     rows.push(await evaluate(cdp, `(() => {
-      const selectedMember = document.querySelector('.execution-detail-heading strong')?.textContent?.trim() ?? ''
+      const selectedMember = ${JSON.stringify(memberName)}
       const article = [...document.querySelectorAll(${JSON.stringify(runArticleSelector)})]
         .find((candidate) => candidate.querySelector('.bubble-meta strong')?.textContent?.trim() === selectedMember)
       const meta = article?.querySelector('.bubble-meta')
       const spans = [...(meta?.querySelectorAll(':scope > span') ?? [])].map((span) => span.textContent?.trim() ?? '')
+      const stages = [...document.querySelectorAll('.execution-drawer .execution-process-stage[data-agent-run-id]')]
+      const focused = stages.find((stage) => stage.classList.contains('is-focused'))
       return {
         member: selectedMember,
+        agentId: ${JSON.stringify(expected.agentId)},
         runtime: spans.find((text) => ${JSON.stringify(runtimes.map((entry) => entry.runtimeName))}.includes(text)) ?? '',
+        runCount: stages.length,
+        runIds: stages.map((stage) => stage.dataset.agentRunId ?? ''),
+        focusedRunId: focused?.dataset.agentRunId ?? null,
+        focusedStatus: [...(focused?.classList ?? [])].find((name) => name.startsWith('status-'))?.slice(7) ?? null,
+        focusedEvidenceOpen: Boolean(
+          focused?.querySelector('.execution-disclosure.run-live')
+          || focused?.querySelector('details.execution-disclosure[open]')
+        ),
+        runSelectorCount: document.querySelectorAll(
+          '.execution-run-list, .execution-run-item, [aria-label="选择 AgentRun"]'
+        ).length,
         toolTitles: [...document.querySelectorAll('.execution-drawer .tool-call-title')].map((node) => node.textContent?.trim() ?? ''),
         toolSources: [...document.querySelectorAll('.execution-drawer .tool-call-source')].map((node) => node.textContent?.trim() ?? ''),
         body: article?.querySelector('.message-content')?.textContent?.trim()
@@ -496,9 +638,28 @@ async function collectRuntimeRows(cdp) {
 function assertRuntimeRows(observed) {
   assert(observed.length === runtimes.length,
     `Expected ${runtimes.length} Runtime rows: ${JSON.stringify(observed)}`)
+  const active = observed.find((row) => row.agentId === activeAgentId)
+  assert(active?.runCount === 2
+    && active.runIds.includes(historicalRunId)
+    && active.runIds.includes(activeRunId),
+    `Same-Agent AgentRuns were not aggregated in one Drawer: ${JSON.stringify(active)}`)
+  assert(active.focusedRunId === activeRunId
+    && active.focusedStatus === 'running'
+    && active.focusedEvidenceOpen,
+    `Explicit Agent click did not focus and reveal the running AgentRun: ${JSON.stringify(active)}`)
   for (const expected of runtimes) {
     const row = observed.find((candidate) => candidate.runtime === expected.runtimeName)
     assert(row, `Missing ${expected.runtimeName} row: ${JSON.stringify(observed)}`)
+    assert(row.runSelectorCount === 0,
+      `${expected.runtimeName} Drawer exposed an AgentRun selector: ${JSON.stringify(row)}`)
+    if (expected.agentId !== activeAgentId) {
+      assert(row.runCount === 1 && row.focusedRunId === row.runIds[0],
+        `${expected.runtimeName} historical execution could not be reopened: ${JSON.stringify(row)}`)
+      if (expected.expectedToolName !== null) {
+        assert(row.focusedEvidenceOpen,
+          `${expected.runtimeName} historical evidence could not be expanded: ${JSON.stringify(row)}`)
+      }
+    }
     if (expected.expectedToolName === null) {
       assert(row.toolTitles.length === 0,
         `${expected.runtimeName} invented an unreported tool: ${JSON.stringify(row)}`)
