@@ -1,0 +1,3 @@
+实现 `src/normalize-events.mjs` 导出的 `normalizeEvents(events)`。
+
+函数要把两种输入事件统一成 `{ id, actor, kind, value }`：v1 使用 `id`、`actor`、`type`、`value`，v2 使用 `eventId`、`actorId`、`kind`、`payload.value`。字符串字段需要 trim；空 actor 使用 `system`，空 kind 使用 `unknown`。空 id 的记录忽略；同一个 id 只保留第一次出现的记录，输出顺序保持第一次出现的顺序。函数不得修改输入，也不得改变 value 的类型。保留现有导出和公开测试，只修改允许的源码、测试或 README 文件，并在完成前运行测试。

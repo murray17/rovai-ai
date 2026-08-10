@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 2,
+  "caseId": "DEMO-003",
+  "caseVersion": "1.0.0",
+  "caseSeal": "51a0327be7b1cb5c0d05a9d696d43e40bbaaa6c28f6600d0cb80349bb69833bf",
+  "referenceEvidenceDigest": "31f707fcec58426c6802b5a1fa92115083daa283103b631f6422ec9e67212024",
+  "referenceEvidence": {
+    "schemaVersion": 2,
+    "publicChecks": [
+      {
+        "checkId": "CHK-REGRESSION",
+        "passed": true,
+        "code": 0,
+        "timedOut": false
+      }
+    ],
+    "initialVerifierObservationDigest": "91bfa1749c25789769371a3481d99293c75b037170d3886ca8e05f0054e1e053",
+    "initialDeliveryEvidenceDigest": "39efda03d3badfa42be6f00c4d2f98d79cd0f5ae41646e2e66934215ff486ada",
+    "referenceVerifierObservationDigest": "8e1be0a99689a40d476c04de1f8e722e93f12388dc8306fd7eb6b647fdb70b24",
+    "referenceDeliveryEvidenceDigest": "c246934132f6ec34fc9701e026571feb5cd623ba9a7aa1c40b991eea03e3bb62",
+    "twoMaterializationDeterministic": true,
+    "initialExpectedFailure": true,
+    "referenceVerifiedDelivery": "pass"
+  },
+  "admissionDigest": "95003383c139ad1ca13b26f2d0a4a87c6e750acc7e336b2811832db7b18546d6"
+}

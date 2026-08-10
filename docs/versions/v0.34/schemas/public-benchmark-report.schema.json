@@ -140,16 +140,25 @@
           "allOf": [
             {
               "if": {
-                "anyOf": [
-                  { "properties": { "validity": { "const": "invalid" } }, "required": ["validity"] },
-                  { "properties": { "evaluationState": { "const": "pending" } }, "required": ["evaluationState"] }
-                ]
+                "properties": { "validity": { "const": "invalid" } },
+                "required": ["validity"]
               },
               "then": {
                 "properties": {
                   "verifiedDelivery": { "const": "unavailable" },
                   "orchestrationConvergence": { "const": "unavailable" },
                   "postDispatchHumanIntervention": { "const": "indeterminate" },
+                  "overall": { "const": "unavailable" }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": { "evaluationState": { "const": "pending" } },
+                "required": ["evaluationState"]
+              },
+              "then": {
+                "properties": {
                   "overall": { "const": "unavailable" }
                 }
               }

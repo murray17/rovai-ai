@@ -55,7 +55,7 @@
       "file": "public-benchmark-report.schema.json",
       "schemaUri": "https://schemas.rovai.invalid/v0.34/public-benchmark-report.schema.json",
       "schemaVersion": "1.0.0",
-      "digest": "sha256:7692513ed967423e5aaec713642808a61abcc492540c2f5807b21e697bff9342"
+      "digest": "sha256:fd6943e9b2745032ad4f61bdfee2f4d1e973426eec866a8707d96c2f61eadcea"
     },
     {
       "file": "qualification-case.schema.json",

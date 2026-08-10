@@ -345,10 +345,19 @@ function hardOutcomeLayer(result) {
 }
 
 function assertHardOutcome(hard) {
-  if (hard.validity === 'invalid' || hard.evaluationState === 'pending') {
+  if (hard.validity === 'invalid') {
     if (hard.verifiedDelivery !== 'unavailable'
         || hard.orchestrationConvergence !== 'unavailable'
         || hard.postDispatchHumanIntervention !== 'indeterminate'
+        || hard.overall !== 'unavailable') {
+      throw new Error('Public Benchmark Report invalid or pending Hard Outcome is inconsistent')
+    }
+    return
+  }
+  if (hard.evaluationState === 'pending') {
+    if (!['pass', 'fail', 'unavailable'].includes(hard.verifiedDelivery)
+        || !['pass', 'fail', 'unavailable'].includes(hard.orchestrationConvergence)
+        || !['absent', 'present', 'indeterminate'].includes(hard.postDispatchHumanIntervention)
         || hard.overall !== 'unavailable') {
       throw new Error('Public Benchmark Report invalid or pending Hard Outcome is inconsistent')
     }

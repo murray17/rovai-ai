@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 2,
+  "id": "DEMO-005",
+  "version": "1.0.0",
+  "visibility": "demo",
+  "tags": ["javascript", "workspace", "atomic-update", "diagnostic-demo"],
+  "fixtureDirectory": "fixture",
+  "promptFile": "prompt.txt",
+  "verifierFile": "verifier.mjs",
+  "referenceDirectory": "reference",
+  "requirements": [
+    {
+      "requirementId": "REQ-PATCH",
+      "criticality": "critical",
+      "categoryId": "functional",
+      "statement": "applyPatchPlan must apply a valid set/delete plan atomically and return the original tree unchanged when any path or operation is invalid."
+    },
+    {
+      "requirementId": "REQ-REGRESSION",
+      "criticality": "critical",
+      "categoryId": "regression",
+      "statement": "The disclosed public smoke test must continue to pass."
+    },
+    {
+      "requirementId": "REQ-BOUNDARY",
+      "criticality": "non_critical",
+      "categoryId": "change_boundary",
+      "statement": "The delivered workspace must stay inside the disclosed source, test, and README paths."
+    }
+  ],
+  "verificationCatalog": [
+    {
+      "checkId": "CHK-PATCH",
+      "kind": "hard",
+      "observationAuthority": "verifier",
+      "runnerCheck": null,
+      "categoryId": "functional",
+      "requirementIds": ["REQ-PATCH"],
+      "disclosure": "withheld",
+      "prerequisiteCheckIds": []
+    },
+    {
+      "checkId": "CHK-REGRESSION",
+      "kind": "hard",
+      "observationAuthority": "verifier",
+      "runnerCheck": null,
+      "categoryId": "regression",
+      "requirementIds": ["REQ-REGRESSION"],
+      "disclosure": "public",
+      "prerequisiteCheckIds": []
+    },
+    {
+      "checkId": "CHK-BOUNDARY",
+      "kind": "hard",
+      "observationAuthority": "runner",
+      "runnerCheck": "change_boundary",
+      "categoryId": "change_boundary",
+      "requirementIds": ["REQ-BOUNDARY"],
+      "disclosure": "public",
+      "prerequisiteCheckIds": []
+    },
+    {
+      "checkId": "CHK-DIAGNOSTIC",
+      "kind": "diagnostic",
+      "observationAuthority": "verifier",
+      "runnerCheck": null,
+      "categoryId": "verification_diagnostic",
+      "requirementIds": [],
+      "disclosure": "withheld",
+      "prerequisiteCheckIds": ["CHK-PATCH", "CHK-REGRESSION"]
+    }
+  ],
+  "expectedInitialFailureCheckIds": ["CHK-PATCH"],
+  "publicChecks": [{"checkId": "CHK-REGRESSION", "command": ["node", "--test", "tests/public.test.mjs"]}],
+  "allowedPaths": ["src/**", "tests/**", "README.md"],
+  "forbiddenPaths": ["package.json", ".git/**"],
+  "toolchain": [{"name": "node", "command": ["node", "--version"]}],
+  "budget": {"elapsedSeconds": 300, "maxAgentRuns": 3, "maxAcceptedA2a": 2}
+}

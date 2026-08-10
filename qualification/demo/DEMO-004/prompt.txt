@@ -1,0 +1,3 @@
+实现 `src/migrate-state.mjs` 导出的 `migrateState(state)`。
+
+输入支持三个版本。v1 是 `{ version: 1, name, items: [{ id, value }] }`；v2 是 `{ version: 2, profile: { name }, records: [{ key, value }] }`；v3 已经使用目标结构。输出必须是 `{ version: 3, profile: { name }, records: [{ key, value }], metadata: { migratedFrom } }`。name 和 key 是字符串时 trim，空 name 使用 `unnamed`，空 key 的记录忽略；重复 key 只保留第一次出现的记录，顺序保持不变；value 原样保留。`migratedFrom` 为输入版本号，v3 输入为 3。未知版本或非对象输入应抛出错误。函数不得修改输入。保留现有导出和公开测试，只修改允许的源码、测试或 README 文件，并在完成前运行测试。

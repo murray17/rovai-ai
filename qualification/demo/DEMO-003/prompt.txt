@@ -1,0 +1,3 @@
+实现 `src/retry-plan.mjs` 导出的 `buildRetryPlan(attempts, maxAttempts)`。
+
+`attempts` 是按时间顺序排列的记录数组，每条记录包含 `operationId` 和 `status`。请 trim operationId 并忽略空 ID；同一 operationId 的记录合并，`attempt` 是该 ID 的记录数量。只要某个 operationId 曾经出现过 `succeeded`，就不应再次重试；否则当记录数量小于 `maxAttempts` 时输出一次 `{ operationId, nextAttempt }`，其中 `nextAttempt` 为记录数量加一。输出按 operationId 首次出现的顺序排列，maxAttempts 小于 1 时按 1 处理。函数不得修改输入。保留现有导出和公开测试，只修改允许的源码、测试或 README 文件，并在完成前运行测试。

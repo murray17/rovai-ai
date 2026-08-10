@@ -31,6 +31,7 @@ test('Evidence Bundle Manifest publishes one explicit state for every frozen art
   assert.equal(role(artifact, 'tool_call_ledger').artifact.schemaVersion, '1.1.0')
   assert.equal(artifact.payload.evaluationAttempts.length, 1)
   assert.equal(JSON.stringify(artifact).includes('private/tool.json'), false)
+  assert.equal(JSON.stringify(artifact).includes('runtime-private-log.ndjson'), false)
 })
 
 test('Evidence Bundle completion marker binds immutable manifest bytes with private permissions', async () => {

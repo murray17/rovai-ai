@@ -51,9 +51,14 @@ import {
   descendantsOf,
   findCompetingRovaiProcesses,
   processTable,
+  qualificationRuntimePrivateDiagnostic,
   startQualificationCore,
   waitForProcessesToExit
 } from './lib/qualification-core.mjs'
+import {
+  QUALIFICATION_UNATTENDED_RETRY_GRACE_MS,
+  deriveUnattendedRetryBoundary
+} from './lib/qualification-observation.mjs'
 import {
   deriveCollaborationEvidence,
   evaluateCollaborationContract,
@@ -125,6 +130,8 @@ async function runTrial(options) {
   let observationIntegrityIssues = []
   let budgetWatchdogEvent = null
   let executionEvidenceCoverage = null
+  const runtimePrivateDiagnostics = []
+  let droppedRuntimePrivateDiagnostics = 0
   let isolationProfileAdmission = null
   let isolationProfileExpectedBinding = null
   let isolationContinuity = {
@@ -215,7 +222,13 @@ async function runTrial(options) {
       coreExecutable: options.coreExecutable,
       dataDirectory,
       workingDirectory: root,
-      runtimeCacheDirectory
+      runtimeCacheDirectory,
+      onNotification(message) {
+        const diagnostic = qualificationRuntimePrivateDiagnostic(message)
+        if (!diagnostic) return
+        if (runtimePrivateDiagnostics.length < 512) runtimePrivateDiagnostics.push(diagnostic)
+        else droppedRuntimePrivateDiagnostics += 1
+      }
     })
     await core.request('health.check', {}, 120_000)
     const configured = await configureFrozenRuntimes(core.request)
@@ -365,6 +378,11 @@ async function runTrial(options) {
         await waitForProcessesToExit(childPids, QUALIFICATION_RUNTIME_EXIT_GRACE_MS)
           .catch(() => childPids)
       }
+      await writeRuntimePrivateDiagnostics(
+        evidenceDirectory,
+        runtimePrivateDiagnostics,
+        droppedRuntimePrivateDiagnostics
+      )
       await lock?.release()
       if (temporaryRoot) await removeTemporaryDirectory(temporaryRoot)
       return invalid
@@ -391,6 +409,11 @@ async function runTrial(options) {
         converged: lingering.length === 0 && !coreStop?.error
       }
     }
+    await writeRuntimePrivateDiagnostics(
+      evidenceDirectory,
+      runtimePrivateDiagnostics,
+      droppedRuntimePrivateDiagnostics
+    )
     await appendLifecycle('runtimes_terminated', { converged: termination?.converged ?? false })
     if (termination?.converged) {
       deliveredSnapshot = await captureDeliveredWorkspaceSnapshot(workspacePath, evidenceDirectory)
@@ -1002,6 +1025,7 @@ async function observeTrial({
   let watchdogEvent = null
   let cancellationSent = false
   let terminalSince = null
+  let unattendedRetrySince = null
   let lastDigest = null
   let observationHashInput = ''
   const integrityIssues = []
@@ -1017,6 +1041,17 @@ async function observeTrial({
   const eventState = { afterGlobalSequence: 0, events: [], eventIds: new Set() }
   while (true) {
     const snapshot = await core.request('camps.snapshot', { campId }, 60_000)
+    // Current Core v0.52+ snapshots intentionally omit the retired v0.34
+    // inbox/conversation fields. Keep the runner's legacy evaluators total
+    // while making the absence explicit as empty compatibility projections.
+    for (const field of [
+      'tasks', 'messages', 'messageDeliveries', 'turns', 'agentRuns',
+      'executionEvidence', 'contextManifests', 'approvals', 'actions', 'timeline'
+    ]) {
+      if (!Array.isArray(snapshot[field])) snapshot[field] = []
+    }
+    if (!Array.isArray(snapshot.inboxMessages)) snapshot.inboxMessages = []
+    if (!Array.isArray(snapshot.conversationInputs)) snapshot.conversationInputs = []
     const eventCoverage = await collectCampEventPages(core.request, campId, eventState)
     if (!eventCoverage.complete) {
       addIntegrityIssue(eventCoverage.reason, 'Core event pagination could not establish complete coverage')
@@ -1113,7 +1148,27 @@ async function observeTrial({
         authority: 'runner_independent_watchdog'
       }
     }
-    if (watchdogEvent && !cancellationSent && turn && !isTurnTerminal(turn.status)) {
+    const allRunsTerminal = runs.length > 0 && runs.every((run) => isRunTerminal(run.status))
+    const unattendedRetryBoundary = !budgetEvent && !watchdogEvent
+      ? deriveUnattendedRetryBoundary(snapshot, campTurnId)
+      : null
+    if (unattendedRetryBoundary) {
+      unattendedRetrySince ??= observedMonotonic
+      if (observedMonotonic - unattendedRetrySince >= QUALIFICATION_UNATTENDED_RETRY_GRACE_MS) {
+        watchdogEvent = {
+          ...unattendedRetryBoundary,
+          elapsedSeconds,
+          observedA2aEffects
+        }
+      }
+    } else {
+      unattendedRetrySince = null
+    }
+    if (watchdogEvent
+        && watchdogEvent.reason !== 'unattended_manual_retry'
+        && !cancellationSent
+        && turn
+        && !isTurnTerminal(turn.status)) {
       const cancelled = await core.request('campTurns.cancel', {
         commandId: crypto.randomUUID(),
         command: { campId, campTurnId, expectedVersion: turn.version }
@@ -1121,82 +1176,72 @@ async function observeTrial({
       cancellationSent = true
       watchdogEvent.cancellationResultDigest = digestJson(cancelled)
     }
-    const allRunsTerminal = runs.length > 0 && runs.every((run) => isRunTerminal(run.status))
     if (turn && isTurnTerminal(turn.status) && allRunsTerminal) {
-      const executionEvidenceCoverage = await collectAgentRunExecutionEvidencePages(
-        core.request,
-        campId,
-        runs
-      )
-      snapshot.executionEvidence = executionEvidenceCoverage.evidence
-      const finalObservation = normalizeSnapshot(snapshot)
-      const finalObservationDigest = digestJson(finalObservation)
-      if (finalObservationDigest !== lastDigest) {
-        const record = {
-          schemaVersion: 1,
-          observedAt: new Date().toISOString(),
-          digest: finalObservationDigest,
-          snapshot: finalObservation
-        }
-        const line = `${JSON.stringify(record)}\n`
-        await appendFile(observationPath, line, { mode: 0o600 })
-        observationHashInput += line
-        lastDigest = finalObservationDigest
-      }
-      return {
-        snapshot,
-        budgetEvent,
-        watchdogEvent,
-        integrityIssues,
-        executionEvidenceCoverage,
-        observationDigest: sha256(observationHashInput)
-      }
+      return finishObservation(snapshot, runs)
+    }
+    if (watchdogEvent?.reason === 'unattended_manual_retry') {
+      return finishObservation(snapshot, runs)
     }
     if (budgetEvent || watchdogEvent) {
       terminalSince ??= performance.now()
       if (performance.now() - terminalSince > 60_000) {
         const terminationEvent = watchdogEvent ?? budgetEvent
         terminationEvent.cancellationConvergenceTimeout = true
-        const executionEvidenceCoverage = await collectAgentRunExecutionEvidencePages(
-          core.request,
-          campId,
-          runs
-        )
-        snapshot.executionEvidence = executionEvidenceCoverage.evidence
-        executionEvidenceCoverage.coverage = {
+        return finishObservation(snapshot, runs, {
           state: 'partial',
           reason: { code: 'tool_evidence.runtime_exit_incomplete' }
-        }
-        const finalObservation = normalizeSnapshot(snapshot)
-        const finalObservationDigest = digestJson(finalObservation)
-        if (finalObservationDigest !== lastDigest) {
-          const record = {
-            schemaVersion: 1,
-            observedAt: new Date().toISOString(),
-            digest: finalObservationDigest,
-            snapshot: finalObservation
-          }
-          const line = `${JSON.stringify(record)}\n`
-          await appendFile(observationPath, line, { mode: 0o600 })
-          observationHashInput += line
-          lastDigest = finalObservationDigest
-        }
-        return {
-          snapshot,
-          budgetEvent,
-          watchdogEvent,
-          integrityIssues,
-          executionEvidenceCoverage,
-          observationDigest: sha256(observationHashInput)
-        }
+        })
       }
     }
     if (!rootAgentRunId) throw new Error('dispatch returned no root AgentRun identity')
     await new Promise((resolveWait) => setTimeout(resolveWait, 750))
   }
+
+  async function finishObservation(snapshot, runs, coverageOverride = null) {
+    const executionEvidenceCoverage = await collectAgentRunExecutionEvidencePages(
+      core.request,
+      campId,
+      runs
+    )
+    snapshot.executionEvidence = executionEvidenceCoverage.evidence
+    if (coverageOverride) executionEvidenceCoverage.coverage = coverageOverride
+    const finalObservation = normalizeSnapshot(snapshot)
+    const finalObservationDigest = digestJson(finalObservation)
+    if (finalObservationDigest !== lastDigest) {
+      const record = {
+        schemaVersion: 1,
+        observedAt: new Date().toISOString(),
+        digest: finalObservationDigest,
+        snapshot: finalObservation
+      }
+      const line = `${JSON.stringify(record)}\n`
+      await appendFile(observationPath, line, { mode: 0o600 })
+      observationHashInput += line
+      lastDigest = finalObservationDigest
+    }
+    return {
+      snapshot,
+      budgetEvent,
+      watchdogEvent,
+      integrityIssues,
+      executionEvidenceCoverage,
+      observationDigest: sha256(observationHashInput)
+    }
+  }
 }
 
 function normalizeSnapshot(snapshot) {
+  const tasks = Array.isArray(snapshot.tasks) ? snapshot.tasks : []
+  const messages = Array.isArray(snapshot.messages) ? snapshot.messages : []
+  const inboxMessages = Array.isArray(snapshot.inboxMessages) ? snapshot.inboxMessages : []
+  const conversationInputs = Array.isArray(snapshot.conversationInputs)
+    ? snapshot.conversationInputs
+    : []
+  const approvals = Array.isArray(snapshot.approvals) ? snapshot.approvals : []
+  const executionEvidence = Array.isArray(snapshot.executionEvidence)
+    ? snapshot.executionEvidence
+    : []
+  const timeline = Array.isArray(snapshot.timeline) ? snapshot.timeline : []
   return {
     schemaVersion: snapshot.schemaVersion,
     throughGlobalSequence: snapshot.throughGlobalSequence,
@@ -1204,13 +1249,13 @@ function normalizeSnapshot(snapshot) {
     members: snapshot.members,
     turns: snapshot.turns,
     agentRuns: snapshot.agentRuns,
-    tasks: snapshot.tasks.map(({ title, description, ...task }) => ({ ...task, titleDigest: sha256(title), descriptionDigest: sha256(description) })),
-    messages: snapshot.messages.map(({ body, ...message }) => ({ ...message, bodyDigest: sha256(body), bodyBytes: Buffer.byteLength(body) })),
-    inboxMessages: snapshot.inboxMessages.map(({ body, ...message }) => ({ ...message, bodyDigest: sha256(body), bodyBytes: Buffer.byteLength(body) })),
-    conversationInputs: snapshot.conversationInputs,
-    approvals: snapshot.approvals.map(({ canonicalInput, ...approval }) => ({ ...approval, canonicalInputDigest: digestJson(canonicalInput) })),
+    tasks: tasks.map(({ title, description, ...task }) => ({ ...task, titleDigest: sha256(title), descriptionDigest: sha256(description) })),
+    messages: messages.map(({ body, ...message }) => ({ ...message, bodyDigest: sha256(body), bodyBytes: Buffer.byteLength(body) })),
+    inboxMessages: inboxMessages.map(({ body, ...message }) => ({ ...message, bodyDigest: sha256(body), bodyBytes: Buffer.byteLength(body) })),
+    conversationInputs,
+    approvals: approvals.map(({ canonicalInput, ...approval }) => ({ ...approval, canonicalInputDigest: digestJson(canonicalInput) })),
     actions: snapshot.actions,
-    executionEvidence: snapshot.executionEvidence.map((evidence) => ({
+    executionEvidence: executionEvidence.map((evidence) => ({
       id: evidence.id,
       agentRunId: evidence.agentRunId,
       executionEpoch: evidence.executionEpoch,
@@ -1224,7 +1269,7 @@ function normalizeSnapshot(snapshot) {
       isTruncated: evidence.isTruncated,
       occurredAt: evidence.occurredAt
     })),
-    timeline: snapshot.timeline.map(({ payload, ...event }) => ({ ...event, payloadDigest: digestJson(payload) }))
+    timeline: timeline.map(({ payload, ...event }) => ({ ...event, payloadDigest: digestJson(payload) }))
   }
 }
 
@@ -1377,6 +1422,24 @@ function sanitizeCoreStop(value) {
     stderrBytes: value.stderrBytes ?? null,
     error: value.error ?? null
   }
+}
+
+async function writeRuntimePrivateDiagnostics(evidenceDirectory, records, dropped) {
+  if (records.length === 0 && dropped === 0) return
+  const lines = records.map((record) => JSON.stringify(record))
+  if (dropped > 0) {
+    lines.push(JSON.stringify({
+      schemaVersion: 1,
+      observedAt: new Date().toISOString(),
+      method: 'runtime_private_log.truncated',
+      droppedRecords: dropped
+    }))
+  }
+  await writeFile(
+    join(evidenceDirectory, 'runtime-private-log.ndjson'),
+    `${lines.join('\n')}\n`,
+    { mode: 0o600 }
+  )
 }
 
 function serializeError(error) {

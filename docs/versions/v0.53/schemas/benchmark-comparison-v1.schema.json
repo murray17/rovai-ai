@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.53/benchmark-comparison-v1.schema.json",
+  "title": "Rovai Benchmark Comparison Eligibility v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "baseline", "candidate", "axes", "deltas", "integrityDigest"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "baseline": { "$ref": "#/$defs/runReference" },
+    "candidate": { "$ref": "#/$defs/runReference" },
+    "axes": { "$ref": "#/$defs/axes" },
+    "deltas": {
+      "type": "object",
+      "required": ["hardOutcome", "collaboration", "performance", "evidenceIntegrity", "contractConformance"],
+      "additionalProperties": true
+    },
+    "integrityDigest": { "$ref": "#/$defs/digest" }
+  },
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "runReference": {
+      "type": "object",
+      "required": ["runId", "contentIdentityDigest", "profile", "productContractFingerprint"],
+      "properties": {
+        "runId": { "type": "string", "minLength": 1 },
+        "contentIdentityDigest": { "$ref": "#/$defs/digest" },
+        "profile": { "type": "string", "minLength": 1 },
+        "productContractFingerprint": { "$ref": "#/$defs/digest" }
+      },
+      "additionalProperties": false
+    },
+    "axis": {
+      "type": "object",
+      "required": ["eligible", "reasonCodes", "baselineFingerprint", "candidateFingerprint", "suppressedMetrics", "displayOnlyMetrics"],
+      "properties": {
+        "eligible": { "type": "boolean" },
+        "reasonCodes": { "type": "array", "items": { "type": "string" } },
+        "baselineFingerprint": { "$ref": "#/$defs/digest" },
+        "candidateFingerprint": { "$ref": "#/$defs/digest" },
+        "suppressedMetrics": { "type": "array", "items": { "type": "string" } },
+        "displayOnlyMetrics": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "axes": {
+      "type": "object",
+      "required": ["hardOutcome", "collaboration", "performance", "evidenceIntegrity", "contractConformance"],
+      "properties": {
+        "hardOutcome": { "$ref": "#/$defs/axis" },
+        "collaboration": { "$ref": "#/$defs/axis" },
+        "performance": { "$ref": "#/$defs/axis" },
+        "evidenceIntegrity": { "$ref": "#/$defs/axis" },
+        "contractConformance": { "$ref": "#/$defs/axis" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

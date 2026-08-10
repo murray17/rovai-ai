@@ -53,7 +53,8 @@ export function startQualificationCore({
   coreExecutable,
   dataDirectory,
   workingDirectory,
-  runtimeCacheDirectory
+  runtimeCacheDirectory,
+  onNotification = null
 }) {
   const executable = resolve(coreExecutable)
   const args = ['--data-dir', resolve(dataDirectory)]
@@ -97,7 +98,17 @@ export function startQualificationCore({
       rejectPending(new Error(`rovai-core emitted invalid JSON: ${error.message}`))
       return
     }
-    if (message.method) return
+    if (message.method) {
+      if (onNotification) {
+        try {
+          onNotification(message)
+        } catch {
+          // Runtime diagnostics are supplemental private evidence. A diagnostic
+          // sink must never interfere with the authoritative Core request path.
+        }
+      }
+      return
+    }
     const request = pending.get(message.id)
     if (!request) return
     clearTimeout(request.timer)
@@ -154,6 +165,50 @@ export function startQualificationCore({
   }
 }
 
+export function qualificationRuntimePrivateDiagnostic(message, observedAt = new Date().toISOString()) {
+  if (!message || typeof message.method !== 'string' || !isPlainObject(message.params)) return null
+  const { method, params } = message
+  const base = {
+    schemaVersion: 1,
+    observedAt,
+    method,
+    agentRunId: stringOrNull(params.agentRunId),
+    executionEpoch: Number.isSafeInteger(params.executionEpoch) ? params.executionEpoch : null
+  }
+  if (method === 'agent_run.log') {
+    const text = typeof params.text === 'string' ? params.text : ''
+    const retainedText = text.slice(-16_384)
+    return {
+      ...base,
+      stream: stringOrNull(params.stream),
+      text: retainedText,
+      textBytes: Buffer.byteLength(text),
+      truncated: retainedText.length !== text.length
+    }
+  }
+  if (method === 'error') {
+    return { ...base, detail: cloneJson(params.payload ?? params) }
+  }
+  if (method === 'turn.state') {
+    const nativeTurn = params.payload?.native?.turn
+    if (!isPlainObject(nativeTurn)
+        || ['completed', 'inProgress', 'running', 'started'].includes(nativeTurn.status)) return null
+    return {
+      ...base,
+      nativeTurnId: stringOrNull(nativeTurn.id),
+      nativeTurnStatus: stringOrNull(nativeTurn.status),
+      error: cloneJson(nativeTurn.error ?? null)
+    }
+  }
+  if (method === 'agent_run.recovering' || method === 'agent_run.terminal_deferred') {
+    return { ...base, detail: cloneJson(params) }
+  }
+  if (method === 'agent_run.terminal' && params.result?.code === 'agent_run.failed') {
+    return { ...base, detail: cloneJson(params.result) }
+  }
+  return null
+}
+
 function unrefTimeout(milliseconds) {
   return new Promise((resolveTimeout) => {
     const timer = setTimeout(resolveTimeout, milliseconds)
@@ -166,6 +221,18 @@ function parseProcessTable(output) {
     const match = line.match(/^\s*(\d+)\s+(\d+)\s+(.+)$/)
     return match ? [{ pid: Number(match[1]), ppid: Number(match[2]), command: match[3] }] : []
   })
+}
+
+function stringOrNull(value) {
+  return typeof value === 'string' ? value : null
+}
+
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function cloneJson(value) {
+  return value === undefined ? null : JSON.parse(JSON.stringify(value))
 }
 
 export async function assertExecutable(path) {

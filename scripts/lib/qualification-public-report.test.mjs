@@ -82,6 +82,27 @@ test('Public Benchmark Report rejects Hard Outcome drift, unresolved references,
   assert.throws(() => validatePublicBenchmarkReport(forbidden, evidenceIndex), /forbidden field command/)
 })
 
+test('Public Benchmark Report preserves a valid pending outcome with one failed and one unavailable axis', () => {
+  const evidenceIndex = indexFixture()
+  const result = passingResult(evidenceIndex)
+  result.evaluationState = 'pending'
+  result.verifiedDelivery = 'fail'
+  result.orchestrationConvergence = 'unavailable'
+  result.postDispatchHumanIntervention = 'indeterminate'
+  result.overall = 'unavailable'
+  const artifact = buildPublicBenchmarkReport({
+    result,
+    producerDigest: 'a'.repeat(64),
+    evidenceIndex,
+    collaborationLedger: collaborationLedgerFixture(evidenceIndex),
+    toolCallLedger: toolLedgerFixture(evidenceIndex),
+    workspaceMutationLedger: mutationLedgerFixture(evidenceIndex)
+  })
+  assert.equal(artifact.payload.layer1HardOutcome.evaluationState, 'pending')
+  assert.equal(artifact.payload.layer1HardOutcome.verifiedDelivery, 'fail')
+  assert.equal(artifact.payload.layer1HardOutcome.overall, 'unavailable')
+})
+
 test('Invalid preflight produces diagnostic unavailable layers without fabricating evidence', () => {
   const result = {
     schemaVersion: 2,

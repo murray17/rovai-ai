@@ -1,0 +1,262 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/v0.53/benchmark-run-v3.schema.json",
+  "title": "Rovai Benchmark Protocol v3 Run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaId",
+    "schemaVersion",
+    "benchmarkProtocolVersion",
+    "runId",
+    "recordedAt",
+    "profile",
+    "suite",
+    "verification",
+    "productContract",
+    "executionEnvironment",
+    "outcome",
+    "evidence",
+    "comparisonEligibility",
+    "artifactIndex",
+    "disclosure",
+    "integrity"
+  ],
+  "properties": {
+    "schemaId": { "const": "rovai.benchmark.run" },
+    "schemaVersion": { "const": 3 },
+    "benchmarkProtocolVersion": { "const": "3.0.0" },
+    "runId": { "$ref": "#/$defs/nonEmpty" },
+    "recordedAt": { "type": "string", "format": "date-time" },
+    "profile": {
+      "type": "object",
+      "required": ["id", "version", "lane", "definitionDigest", "hardOutcomeDefinitionDigest", "publicationPolicyDigest"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmpty" },
+        "version": { "$ref": "#/$defs/nonEmpty" },
+        "lane": { "enum": ["contract-conformance", "team-qualification", "diagnostic"] },
+        "definitionDigest": { "$ref": "#/$defs/digest" },
+        "hardOutcomeDefinitionDigest": { "$ref": "#/$defs/digest" },
+        "publicationPolicyDigest": { "$ref": "#/$defs/digest" }
+      },
+      "additionalProperties": false
+    },
+    "suite": {
+      "type": "object",
+      "required": ["id", "version", "definitionDigest", "caseSetDigest", "roundCount", "caseCount", "plannedSlotCount"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmpty" },
+        "version": { "$ref": "#/$defs/nonEmpty" },
+        "definitionDigest": { "$ref": "#/$defs/digest" },
+        "caseSetDigest": { "$ref": "#/$defs/digest" },
+        "roundCount": { "type": "integer", "minimum": 0 },
+        "caseCount": { "type": "integer", "minimum": 0 },
+        "plannedSlotCount": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "verification": {
+      "type": "object",
+      "required": ["caseSealDigest", "verificationCatalogDigest", "changeBoundaryDigest", "budgetContractDigest"],
+      "properties": {
+        "caseSealDigest": { "$ref": "#/$defs/digest" },
+        "verificationCatalogDigest": { "$ref": "#/$defs/digest" },
+        "changeBoundaryDigest": { "$ref": "#/$defs/digest" },
+        "budgetContractDigest": { "$ref": "#/$defs/digest" }
+      },
+      "additionalProperties": false
+    },
+    "productContract": {
+      "type": "object",
+      "required": [
+        "fingerprintDigest", "releaseBuildIdentity", "gitCommit", "coreExecutableDigest",
+        "dataContractVersion", "dataContractSchemaVersion", "campSnapshotSchemaVersion",
+        "contextManifestVersion", "contextFormatterVersion", "contextDeliveryProfileVersion",
+        "durableTaskContract", "builtInTransportVersion", "builtInCatalogDigest", "acceptedInputAckContract"
+      ],
+      "properties": {
+        "fingerprintDigest": { "$ref": "#/$defs/digest" },
+        "releaseBuildIdentity": { "$ref": "#/$defs/availability" },
+        "gitCommit": { "$ref": "#/$defs/availability" },
+        "coreExecutableDigest": { "$ref": "#/$defs/availability" },
+        "dataContractVersion": { "$ref": "#/$defs/availability" },
+        "dataContractSchemaVersion": { "$ref": "#/$defs/availability" },
+        "campSnapshotSchemaVersion": { "$ref": "#/$defs/availability" },
+        "contextManifestVersion": { "$ref": "#/$defs/availability" },
+        "contextFormatterVersion": { "$ref": "#/$defs/availability" },
+        "contextDeliveryProfileVersion": { "$ref": "#/$defs/availability" },
+        "durableTaskContract": { "$ref": "#/$defs/availability" },
+        "builtInTransportVersion": { "$ref": "#/$defs/availability" },
+        "builtInCatalogDigest": { "$ref": "#/$defs/availability" },
+        "acceptedInputAckContract": { "$ref": "#/$defs/availability" }
+      },
+      "additionalProperties": false
+    },
+    "executionEnvironment": {
+      "type": "object",
+      "required": [
+        "benchmarkRunnerVersion", "nodeVersion", "platformClass", "teamRuntimeCompatibilityDigest",
+        "teamConfigurationDigest", "runtimeModelPermissionsDigest", "isolationProfileDigest",
+        "caseHermeticVerificationProfileDigest", "compatibilityEnvelopeDigest"
+      ],
+      "properties": {
+        "benchmarkRunnerVersion": { "$ref": "#/$defs/nonEmpty" },
+        "nodeVersion": { "$ref": "#/$defs/nonEmpty" },
+        "platformClass": { "$ref": "#/$defs/nonEmpty" },
+        "platformReleaseClass": { "$ref": "#/$defs/nonEmpty" },
+        "teamRuntimeCompatibilityDigest": { "$ref": "#/$defs/digest" },
+        "teamConfigurationDigest": { "$ref": "#/$defs/digest" },
+        "runtimeModelPermissionsDigest": { "$ref": "#/$defs/digest" },
+        "isolationProfileDigest": { "$ref": "#/$defs/digest" },
+        "caseHermeticVerificationProfileDigest": { "$ref": "#/$defs/digest" },
+        "compatibilityEnvelopeDigest": { "$ref": "#/$defs/digest" },
+        "summaries": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "outcome": {
+      "type": "object",
+      "required": [
+        "validity", "evaluationState", "verifiedDelivery", "orchestrationConvergence",
+        "postDispatchHumanIntervention", "hardOutcome", "overall", "failureTaxonomy"
+      ],
+      "properties": {
+        "validity": { "enum": ["valid", "invalid"] },
+        "evaluationState": { "enum": ["complete", "pending"] },
+        "verifiedDelivery": { "enum": ["pass", "fail", "unavailable"] },
+        "orchestrationConvergence": { "enum": ["pass", "fail", "unavailable"] },
+        "postDispatchHumanIntervention": { "enum": ["absent", "present", "unavailable"] },
+        "hardOutcome": { "enum": ["pass", "fail", "unavailable"] },
+        "overall": { "enum": ["pass", "fail", "unavailable"] },
+        "failureTaxonomy": { "type": "array", "items": { "$ref": "#/$defs/failureClass" }, "uniqueItems": true },
+        "metrics": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["layer1HardOutcome", "layer2Delivery", "layer3Collaboration", "layer4ToolAndMutation", "layer5SemanticReview"],
+      "properties": {
+        "layer1HardOutcome": { "$ref": "#/$defs/evidenceLayer" },
+        "layer2Delivery": { "$ref": "#/$defs/evidenceLayer" },
+        "layer3Collaboration": { "$ref": "#/$defs/evidenceLayer" },
+        "layer4ToolAndMutation": { "$ref": "#/$defs/evidenceLayer" },
+        "layer5SemanticReview": { "$ref": "#/$defs/evidenceLayer" }
+      },
+      "additionalProperties": false
+    },
+    "comparisonEligibility": {
+      "type": "object",
+      "required": ["hardOutcome", "collaboration", "performance", "evidenceIntegrity", "contractConformance"],
+      "properties": {
+        "hardOutcome": { "$ref": "#/$defs/axis" },
+        "collaboration": { "$ref": "#/$defs/axis" },
+        "performance": { "$ref": "#/$defs/axis" },
+        "evidenceIntegrity": { "$ref": "#/$defs/axis" },
+        "contractConformance": { "$ref": "#/$defs/axis" }
+      },
+      "additionalProperties": false
+    },
+    "artifactIndex": { "type": "array", "items": { "$ref": "#/$defs/artifactReference" } },
+    "disclosure": {
+      "type": "object",
+      "required": ["classification", "containsPrivateCaseMaterial", "containsUserData"],
+      "properties": {
+        "classification": { "enum": ["public", "private"] },
+        "containsPrivateCaseMaterial": { "type": "boolean" },
+        "containsUserData": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "derivedFrom": {
+      "type": ["object", "null"],
+      "properties": {
+        "sourceArtifactDigest": { "$ref": "#/$defs/digest" },
+        "sourceSchemaVersion": { "type": "number" },
+        "adapterId": { "$ref": "#/$defs/nonEmpty" }
+      },
+      "required": ["sourceArtifactDigest", "sourceSchemaVersion", "adapterId"],
+      "additionalProperties": false
+    },
+    "integrity": {
+      "type": "object",
+      "required": ["canonicalization", "contentIdentityDigest", "payloadDigest"],
+      "properties": {
+        "canonicalization": { "const": "rovai-canonical-json-v1" },
+        "contentIdentityDigest": { "$ref": "#/$defs/digest" },
+        "payloadDigest": { "$ref": "#/$defs/digest" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "nonEmpty": { "type": "string", "minLength": 1 },
+    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "reason": {
+      "type": "object",
+      "required": ["code"],
+      "properties": { "code": { "$ref": "#/$defs/nonEmpty" } },
+      "additionalProperties": true
+    },
+    "availability": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["status", "value", "authority"],
+          "properties": { "status": { "const": "available" }, "value": true, "authority": { "type": "object" } },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["status", "reason"],
+          "properties": { "status": { "const": "unavailable" }, "reason": { "$ref": "#/$defs/reason" }, "attempted": { "type": "object" } },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "artifactReference": {
+      "type": "object",
+      "required": ["artifactRole", "schemaId", "schemaVersion", "payloadDigest", "disclosure"],
+      "properties": {
+        "artifactRole": { "$ref": "#/$defs/nonEmpty" },
+        "schemaId": { "$ref": "#/$defs/nonEmpty" },
+        "schemaVersion": { "$ref": "#/$defs/nonEmpty" },
+        "payloadDigest": { "$ref": "#/$defs/digest" },
+        "disclosure": { "enum": ["public", "private", "withheld"] },
+        "locator": { "type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$" }
+      },
+      "additionalProperties": false
+    },
+    "evidenceLayer": {
+      "type": "object",
+      "required": ["status", "references"],
+      "properties": {
+        "status": { "enum": ["available", "unavailable", "not_applicable"] },
+        "references": { "type": "array", "items": { "$ref": "#/$defs/artifactReference" } },
+        "reason": { "$ref": "#/$defs/reason" }
+      },
+      "additionalProperties": false
+    },
+    "axis": {
+      "type": "object",
+      "required": ["eligible", "reasonCodes", "baselineFingerprint", "candidateFingerprint", "suppressedMetrics", "displayOnlyMetrics"],
+      "properties": {
+        "eligible": { "type": "boolean" },
+        "reasonCodes": { "type": "array", "items": { "$ref": "#/$defs/nonEmpty" } },
+        "baselineFingerprint": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+        "candidateFingerprint": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+        "suppressedMetrics": { "type": "array", "items": { "$ref": "#/$defs/nonEmpty" } },
+        "displayOnlyMetrics": { "type": "array", "items": { "$ref": "#/$defs/nonEmpty" } }
+      },
+      "additionalProperties": false
+    },
+    "failureClass": {
+      "enum": [
+        "benchmark_contract_invalid", "product_contract_mismatch", "invalid_environment",
+        "runtime_configuration_drift", "evaluation_pending", "verified_delivery_failed",
+        "orchestration_nonconvergence", "human_intervention", "change_boundary_failed",
+        "evidence_integrity_failed", "verifier_or_fixture_failure", "infrastructure_failure"
+      ]
+    }
+  }
+}

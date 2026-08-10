@@ -1,0 +1,3 @@
+实现 `src/apply-patch-plan.mjs` 导出的 `applyPatchPlan(tree, operations)`。
+
+`tree` 是“相对 POSIX 路径到字符串内容”的对象；operation 只有 `{ type: "set", path, content }` 和 `{ type: "delete", path }`。合法路径必须是非空相对路径，不能以 `/` 开头、不能包含 `..` 路径段；set 的 content 必须是字符串。一个计划中不能重复操作同一路径。合法计划返回 `{ committed: true, tree: <更新后的树>, error: null }`，set 写入内容、delete 移除文件，返回树的 key 按字典序排列。任何非法操作都必须原子失败，返回 `{ committed: false, tree: <原树副本>, error: <非空字符串> }`，不得留下部分修改。函数不得修改 tree 或 operations。保留现有导出和公开测试，只修改允许的源码、测试或 README 文件，并在完成前运行测试。
