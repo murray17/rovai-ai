@@ -1360,35 +1360,7 @@ impl CollaborationService {
         database: &mut Database,
         envelope: &CommandEnvelope<CreateTaskCommand>,
     ) -> Result<CommandExecution> {
-        validate_task_input(&envelope.payload)?;
-        let title = envelope.payload.title.trim().to_string();
-        let description = envelope.payload.description.trim().to_string();
-        let acceptance_criteria =
-            normalize_acceptance_criteria(&envelope.payload.acceptance_criteria, true)?;
-        let task_id = Uuid::new_v4().to_string();
         self.gateway.execute(database, envelope, |transaction| {
-            if envelope.camp_id.as_deref() != Some(envelope.payload.camp_id.as_str()) {
-                return Ok(rejected(
-                    "task.camp_mismatch",
-                    "Task is outside the command Camp",
-                ));
-            }
-            let camp_exists = transaction
-                .query_row(
-                    "SELECT 1 FROM camp WHERE id = ?1",
-                    [&envelope.payload.camp_id],
-                    |row| row.get::<_, i64>(0),
-                )
-                .optional()?;
-            if camp_exists.is_none() {
-                return Ok(rejected("camp.not_found", "Camp does not exist"));
-            }
-            if camp_is_pending(transaction, &envelope.payload.camp_id)? {
-                return Ok(rejected(
-                    "camp.pending_activation_required",
-                    "A pending Camp must be activated by its first message",
-                ));
-            }
             if matches!(envelope.actor, ActorRef::System { .. }) {
                 return Ok(rejected(
                     "task.actor_not_allowed",
@@ -1410,6 +1382,34 @@ impl CollaborationService {
                 return Ok(rejected(
                     "task.create_forbidden",
                     "Only the current Camp Default Lead can create a Task",
+                ));
+            }
+            validate_task_input(&envelope.payload)?;
+            let title = envelope.payload.title.trim().to_string();
+            let description = envelope.payload.description.trim().to_string();
+            let acceptance_criteria =
+                normalize_acceptance_criteria(&envelope.payload.acceptance_criteria, true)?;
+            let task_id = Uuid::new_v4().to_string();
+            if envelope.camp_id.as_deref() != Some(envelope.payload.camp_id.as_str()) {
+                return Ok(rejected(
+                    "task.camp_mismatch",
+                    "Task is outside the command Camp",
+                ));
+            }
+            let camp_exists = transaction
+                .query_row(
+                    "SELECT 1 FROM camp WHERE id = ?1",
+                    [&envelope.payload.camp_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()?;
+            if camp_exists.is_none() {
+                return Ok(rejected("camp.not_found", "Camp does not exist"));
+            }
+            if camp_is_pending(transaction, &envelope.payload.camp_id)? {
+                return Ok(rejected(
+                    "camp.pending_activation_required",
+                    "A pending Camp must be activated by its first message",
                 ));
             }
             if !is_current_camp_member(
@@ -3978,10 +3978,11 @@ fn validate_projected_task(task: &TaskRecord) -> std::result::Result<(), String>
             Ok(())
         }
         TaskStatus::Completed
-            if task
-                .completion_summary
-                .as_deref()
-                .is_some_and(|value| !value.is_empty()) =>
+            if task.assignee_agent_id.is_some()
+                && task
+                    .completion_summary
+                    .as_deref()
+                    .is_some_and(|value| !value.is_empty()) =>
         {
             Ok(())
         }
@@ -3995,7 +3996,9 @@ fn validate_projected_task(task: &TaskRecord) -> std::result::Result<(), String>
         }
         TaskStatus::InProgress => Err("in_progress requires an assignee".to_string()),
         TaskStatus::Blocked => Err("blocked requires an assignee and blockedReason".to_string()),
-        TaskStatus::Completed => Err("completed requires completionSummary".to_string()),
+        TaskStatus::Completed => {
+            Err("completed requires an assignee and completionSummary".to_string())
+        }
         TaskStatus::Cancelled => Err("cancelled requires cancelReason".to_string()),
     }
 }
@@ -6297,6 +6300,7 @@ mod tests {
         let third = service
             .create_task(&mut database, &create("query-luoke", "agent_1"))
             .unwrap();
+        let first_id = first.result.payload["taskId"].as_str().unwrap().to_string();
         service
             .update_task(
                 &mut database,
@@ -6304,7 +6308,7 @@ mod tests {
                     "release-query-task",
                     Some(&camp_id),
                     UpdateTaskCommand {
-                        task_id: first.result.payload["taskId"].as_str().unwrap().to_string(),
+                        task_id: first_id.clone(),
                         expected_version: 1,
                         assignee: TaskAssigneeUpdate::Clear,
                         ..Default::default()
@@ -6313,6 +6317,35 @@ mod tests {
             )
             .unwrap();
         let second_id = second.result.payload["taskId"].as_str().unwrap();
+        let unassigned_completed = service
+            .update_task(
+                &mut database,
+                &user_envelope(
+                    "cannot-complete-unassigned-task",
+                    Some(&camp_id),
+                    UpdateTaskCommand {
+                        task_id: first_id.clone(),
+                        expected_version: 2,
+                        status: Some(TaskStatus::Completed),
+                        completion_summary: Some("无人负责不可直接完成".to_string()),
+                        ..Default::default()
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            unassigned_completed.result.code,
+            "task.invalid_projected_state"
+        );
+        let unassigned_state: (String, Option<String>, i64) = database
+            .connection()
+            .query_row(
+                "SELECT status, assignee_agent_id, version FROM task WHERE id = ?1",
+                [&first_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(unassigned_state, ("pending".to_string(), None, 2));
         service
             .update_task(
                 &mut database,
@@ -6614,6 +6647,28 @@ mod tests {
             )
             .unwrap();
         assert_eq!(agent_created.result.code, "task.create_forbidden");
+        let agent_created_with_invalid_input = service
+            .create_task(
+                &mut database,
+                &agent_envelope(
+                    "luoke-cannot-probe-create-state",
+                    &camp_id,
+                    "agent_1",
+                    &source_agent_run_id,
+                    1,
+                    CreateTaskCommand {
+                        camp_id: "camp-does-not-exist".to_string(),
+                        title: String::new(),
+                        assignee_agent_id: String::new(),
+                        ..Default::default()
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            agent_created_with_invalid_input.result.code,
+            "task.create_forbidden"
+        );
 
         database
             .connection()

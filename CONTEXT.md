@@ -481,7 +481,7 @@ The durable boundary of one Task's title, description, Acceptance Criteria, expl
 _Avoid_: execution progress, status note, AgentRun instruction, local plan
 
 **Task Execution State**:
-The current Assignee's bounded declaration that one owned Task is pending, in progress, blocked, or completed, together with the matching blocker or completion note. An Assignee may move `pending` to `in_progress`, `blocked`, or `completed`; `in_progress` to `blocked` or `completed`; and `blocked` to `in_progress` or `completed`, but may not return a Task to `pending`, cancel it, or alter its responsibility definition. An unassigned Task must remain `pending`. This state describes responsibility progress but does not verify the Acceptance Criteria or grant permission to redefine or cancel the Task.
+The current Assignee's bounded declaration that one owned Task is pending, in progress, blocked, or completed, together with the matching blocker or completion note. An Assignee may move `pending` to `in_progress`, `blocked`, or `completed`; `in_progress` to `blocked` or `completed`; and `blocked` to `in_progress` or `completed`, but may not return a Task to `pending`, cancel it, or alter its responsibility definition. An unassigned Task must remain `pending`, and a `completed` Task must retain an Assignee as well as a non-empty completion summary. This state describes responsibility progress but does not verify the Acceptance Criteria or grant permission to redefine or cancel the Task.
 _Avoid_: workflow engine state, Runtime status, completion proof, responsibility definition
 
 **Unassigned Task**:

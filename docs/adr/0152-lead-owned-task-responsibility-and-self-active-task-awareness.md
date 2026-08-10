@@ -42,8 +42,8 @@ in_progress -> blocked | completed
 blocked     -> in_progress | completed
 ```
 
-`blocked` requires `blockedReason`; `completed` requires `completionSummary`; leaving `blocked`
-clears the blocker. Ordinary Agents cannot cancel, return a Task to `pending`, change definition
+`blocked` requires `blockedReason`; `completed` requires a non-null `assigneeAgentId` and
+`completionSummary`; leaving `blocked` clears the blocker. Ordinary Agents cannot cancel, return a Task to `pending`, change definition
 fields, assign, release, reassign, or mutate another member's Task. Terminal Tasks remain immutable.
 Any unauthorized field in an otherwise readable update rejects the whole patch.
 

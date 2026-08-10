@@ -40,7 +40,8 @@ Task 是跨 AgentRun 持续存在、具有明确 owner、可独立完成、阻�
 | `blocked` | `in_progress`、`completed` |
 
 同一 `blocked` 状态可更新 `blockedReason`。进入 `blocked` 必须有非空 `blockedReason`；进入
-`completed` 必须有非空 `completionSummary`；离开对应状态清除其说明。Assignee 不得修改 title、
+`completed` 必须仍有明确 `assigneeAgentId` 且有非空 `completionSummary`；离开对应状态清除其说明。
+unassigned recovery Task 必须先重新分配，不能由 User/Lead 直接宣告 completed。Assignee 不得修改 title、
 description、Acceptance Criteria、assignment、release、reassignment、cancelReason，不得返回
 `pending`、取消、认领 unassigned Task 或修改他人 Task。包含任一越权字段的 patch 整体返回
 `task.update_forbidden`，不会部分应用。所有更新继续使用 `expectedVersion`；terminal Task 不可变。
