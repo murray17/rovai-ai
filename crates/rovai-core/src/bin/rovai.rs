@@ -646,7 +646,9 @@ fn print_operation_help(description: &BuiltinToolDescription) {
 fn operation_help_example(operation: &str) -> &'static str {
     match operation {
         "camp.message.send" => "rovai send --body 'Status update'",
-        "team.create_task" => "rovai task create --title 'Prepare release notes'",
+        "team.create_task" => {
+            "rovai task create --title 'Prepare release notes' --assignee-agent-id agent_27"
+        }
         "team.get_task" => "rovai task get --task-id task_123",
         "team.list_tasks" => "rovai task list --limit 10",
         "team.update_task" => {
@@ -754,6 +756,31 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn task_create_help_is_lead_facing_and_requires_an_explicit_owner() {
+        let description = operation_help(&[
+            "task".to_string(),
+            "create".to_string(),
+            "--help".to_string(),
+        ])
+        .unwrap()
+        .unwrap();
+        assert!(description.summary.contains("current Default Lead"));
+        assert!(
+            description
+                .summary
+                .contains("Prefer advancing an existing Task")
+        );
+        assert!(description.summary.contains("one-off review"));
+        let assignee = description
+            .arguments
+            .iter()
+            .find(|argument| argument.field == "assigneeAgentId")
+            .unwrap();
+        assert!(assignee.required);
+        assert_eq!(assignee.flag, "--assignee-agent-id");
     }
 
     #[cfg(unix)]

@@ -230,7 +230,7 @@ mod tests {
                         camp_id: camp_id.clone(),
                         title: "Indexed Task".to_string(),
                         description: String::new(),
-                        assignee_agent_id: None,
+                        assignee_agent_id: "agent_1".to_string(),
                         ..Default::default()
                     },
                 ),

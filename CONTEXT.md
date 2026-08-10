@@ -457,7 +457,7 @@ The present CampMember persisted as the destination for unaddressed execution re
 _Avoid_: Task Assignee, universal administrator, Native Session owner, Runtime fallback target
 
 **Task Coordination Authority**:
-The Camp-scoped authority held by the User and Default Lead to update any non-terminal Task, including ending the responsibility through cancellation. It neither grants authority outside the Task domain nor changes the uniform availability of Built-in Task operations to eligible Members.
+The Camp-scoped authority held by the User and Default Lead to create durable Tasks and define or change their responsibility boundary, including title, description, Acceptance Criteria, Assignee, reassignment, release, and cancellation. It neither grants authority outside the Task domain nor changes the separate execution-state authority of a current Assignee or the uniform availability of Built-in Task operations to eligible Members.
 _Avoid_: universal administrator, Task ownership, Member Capability, operation allowlist
 
 **Initial Default Lead Selection**:
@@ -471,6 +471,38 @@ _Avoid_: Camp, Native Session, AgentRun, public chat transcript, external Runtim
 **Task**:
 An optional durable responsibility item inside one Camp, used when work must remain visible across messages, AgentRuns, or member coordination. Its closed lifecycle is `pending | in_progress | blocked | completed | cancelled`; `completed` records an authorized actor's declaration of completion, not verification by Rovai-ai Core. Tasks do not form a dependency DAG or a Core-enforced workflow. An addressed send may explicitly link one `pending` or `in_progress` Task assigned to its Executable Assignee at acceptance, but the frozen historical link neither transfers responsibility nor proves completion. Later Task blocking, completion, cancellation, or reassignment never cancels, fails, retargets, or wakes that accepted Message Delivery; its Run may observe the latest collaboration state and act accordingly. An A2A target Run never inherits the source Run's Task association. A Task may describe a filesystem path as ordinary semantic content, but it does not own or structurally transfer an AgentRun working directory.
 _Avoid_: Camp, Conversation, chat thread, internal plan, one-off A2A request, workflow node
+
+**Task Creation Restraint**:
+The default domain rule that a Task is created only for a durable responsibility that must survive across AgentRuns or handoffs, has one explicit owner, and can independently be completed, blocked, or transferred. Planning steps, analysis, consultation, one-off review, tool operations, and internal Task steps stay in local plans or A2A; the Lead should prefer advancing an existing Task over creating another one. Core enforces only deterministic authority, shape, and capacity limits; it does not perform semantic deduplication or infer whether two responsibilities are “the same.”
+_Avoid_: Task-per-step, execution checklist, tool-call Task, ephemeral subtask, automatic Task fan-out
+
+**Task Responsibility Definition**:
+The durable boundary of one Task's title, description, Acceptance Criteria, explicit Assignee, and terminal cancellation decision. It is owned by the User and Default Lead and is distinct from the current Assignee's execution-state updates; an unassigned recovery state is an exception awaiting Lead disposition, not a second ownership model.
+_Avoid_: execution progress, status note, AgentRun instruction, local plan
+
+**Task Execution State**:
+The current Assignee's bounded declaration that one owned Task is pending, in progress, blocked, or completed, together with the matching blocker or completion note. An Assignee may move `pending` to `in_progress`, `blocked`, or `completed`; `in_progress` to `blocked` or `completed`; and `blocked` to `in_progress` or `completed`, but may not return a Task to `pending`, cancel it, or alter its responsibility definition. An unassigned Task must remain `pending`. This state describes responsibility progress but does not verify the Acceptance Criteria or grant permission to redefine or cancel the Task.
+_Avoid_: workflow engine state, Runtime status, completion proof, responsibility definition
+
+**Unassigned Task**:
+A `pending` Task with no Assignee, retained only as a holding state after an explicit User/Default Lead release or a Current CampMembership ending until the User or Default Lead assigns a new owner. It is not a shared work queue, cannot be claimed by an ordinary Agent, and cannot progress, block, or complete while unassigned.
+_Avoid_: claimable Task, public backlog item, automatic Lead assignment, ownerless execution
+
+**Camp-wide Task Read**:
+The read-only ability of every currently fenced Camp Agent to list compact summaries and fetch complete current details for every Task in that Camp, including Tasks assigned to other members. It supports coordination awareness but never grants creation, responsibility-definition, assignment, cancellation, or execution-state write authority; Task reads outside the authenticated current Camp remain unavailable.
+_Avoid_: Task write permission, cross-Camp Task access, ID-based capability, shared mutation authority
+
+**Advisory Action Metadata**:
+The `availableActions` value returned in Task reads is advisory capability metadata for presentation and dispatch hints only. Core authorization and field-level mutation rules are authoritative; an Agent Assignee's `update` hint permits only the confirmed execution-state patch on its own Task and never implies title, description, Acceptance Criteria, assignment, release, reassignment, or cancellation authority.
+_Avoid_: capability grant, field allowlist, claim permission, client-authoritative authorization
+
+**Self Active Task Projection**:
+The independent `[SELF_ACTIVE_TASKS]` Dynamic Context section containing a compact, bounded AgentRun awareness snapshot of at most eight of the current Agent's assigned `pending`, `in_progress`, and `blocked` Tasks, selected deterministically by `updatedAt DESC, taskId DESC` and emitted on each direct or A2A Run when non-empty. Its v1 model projection contains only canonical `taskId`, `title`, and `status` fields per selected Task, plus `omittedCount` for all candidates excluded by the selection or Runtime payload budget; selection-only timestamps never enter the payload. Optional public history yields first when the payload budget is tight, then Tasks are removed from the selection tail, and the whole section may be omitted rather than fail Run materialization when no Task entry fits. The common AgentRun materialization path freezes it separately from Session Charter, Collaboration State, Run Notices, Shared Conversation, and Current Input. It never includes Camp-wide, unassigned, terminal, or creator-only Tasks, gives the Default Lead no wider projection, and is not the authoritative source for a later update.
+_Avoid_: Camp Task Board, Task instruction, live Task state, Task delta, Lead-wide Task Context
+
+**Self Active Task Evidence**:
+The ContextManifest machine evidence for a Self Active Task Projection: an inclusion fact, ordered selected Task references carrying canonical `taskId`, `version`, and selection-only `updatedAt`, an optional truncation count, and the exact projection digest. It explains and verifies the frozen selection without duplicating model-facing title/status fields or exposing omitted Task identities, and it never creates a Task freshness watermark.
+_Avoid_: model payload, live Task query, Task history, delta cursor, ACK state
 
 **Task Acceptance Criteria**:
 The ordered textual conditions stored with one Task to make its expected outcome explicit. They have no individual completion state, dependency semantics, or Core verification effect; completing the Task remains an authorized actor's declaration about the responsibility as a whole.
@@ -873,11 +905,11 @@ Model-visible non-executable guidance identifying unknown omitted content, a non
 _Avoid_: retrieveWith, executable locator, continuous sequence range, automatic retrieval request, omission evidence
 
 **AgentRun Dynamic Context**:
-The immutable model-facing payload for exactly one AgentRun, composed from complete Current Input plus conditional peer-only Collaboration State v2, Shared Conversation and Run Notices. It contains no Member Identity Bootstrap Projection, self identity patch, or independently synthesized objective, responsibility, deliverable or Task snapshot.
+The immutable model-facing payload for exactly one AgentRun, composed from complete Current Input plus conditional peer-only Collaboration State v2, Self Active Task Projection, Shared Conversation and Run Notices. It contains no Member Identity Bootstrap Projection, self identity patch, full Task snapshot, or independently synthesized objective, responsibility, or deliverable.
 _Avoid_: Native Session Bootstrap, Member Identity Context, mutable live prompt, Work Brief, Task Context
 
 **ContextManifest**:
-The immutable Core evidence that freezes one AgentRun's previous and current public-message boundaries, Cross-Camp History Fence, selected raw source references, context-delivery profile evidence, stable Bootstrap Evidence reference, target Runtime/formatter versions, complete Collaboration State v2 projection digest, independent Collaboration State inclusion Boolean, and exact rendered AgentRun Dynamic Context. Public boundaries and projection evidence are internal; Recovery reuses the dynamic payload byte-for-byte. The Manifest neither stores nor proves the transient Member Identity Bootstrap Projection, complete Bootstrap, combined first payload, transport acceptance, or model understanding.
+The immutable Core evidence that freezes one AgentRun's previous and current public-message boundaries, Cross-Camp History Fence, selected raw source references, context-delivery profile evidence, stable Bootstrap Evidence reference, target Runtime/formatter versions, complete Collaboration State v2 projection digest, Self Active Task Evidence, and exact rendered AgentRun Dynamic Context. Public boundaries and projection evidence are internal; Recovery reuses the dynamic payload byte-for-byte. The Manifest neither stores nor proves the transient Member Identity Bootstrap Projection, complete Bootstrap, combined first payload, transport acceptance, or model understanding.
 _Avoid_: audit projection, Runtime Input Delivery, complete Runtime prompt evidence, Member Identity Snapshot, prompt template, live context query, proof the model understood input
 
 **Runtime Input Delivery**:
@@ -917,7 +949,7 @@ The Core-derived first public user CampMessage in the current A2A delivery linea
 _Avoid_: Agent-authored origin, A2A body, reply alias, duplicated history item
 
 **Public Reference Context Closure**:
-The Core-derived, bounded ancestor chain for the current AgentRun trigger: starting from its canonical `replyToCampMessageId`, Core follows direct public-parent edges toward the root and selects at most three ancestor messages under Context Delivery Profile v2, prioritizing the direct parent and then nearer ancestors. It stops at a missing/tombstoned/inaccessible parent, lineage boundary, cycle, or the three-message limit, de-duplicates every message by stable ID, consumes the ordinary public-history character/body budgets, and displaces the oldest base recent messages first. Closure members are public-context inputs rather than new Current Inputs, Deliveries, or routing targets; recent-history selection never recursively expands the references of unrelated messages.
+The Core-derived, bounded ancestor chain for the current AgentRun trigger: starting from its canonical `replyToCampMessageId`, Core follows direct public-parent edges toward the root and selects at most three ancestor messages under Context Delivery Profile v3, prioritizing the direct parent and then nearer ancestors. It stops at a missing/tombstoned/inaccessible parent, lineage boundary, cycle, or the three-message limit, de-duplicates every message by stable ID, consumes the ordinary public-history character/body budgets, and displaces the oldest base recent messages first. Closure members are public-context inputs rather than new Current Inputs, Deliveries, or routing targets; recent-history selection never recursively expands the references of unrelated messages.
 _Avoid_: Renderer quote parsing, full Camp reply graph, sibling expansion, Delivery copy, implicit private context
 
 **Omitted Public Messages Notice**:
@@ -925,7 +957,7 @@ A model-visible navigation hint emitted only when one or more whole eligible pub
 _Avoid_: executable sequence range, omission evidence, truncation-only warning, inferred missing content, automatic retrieval request
 
 **Context Delivery Profile**:
-An immutable application-owned versioned configuration that defines deterministic public-context candidate selection, ordering, Unicode-scalar truncation, eviction priority and numeric budgets independently from model field shape and formatter wording. Profile v1 fixes `maxPublicMessages = 15`, `maxPublicHistoryChars = 24000`, and `maxMessageBodyChars = 2000` and performs no reply-ancestor completion; Profile v2 retains those limits and adds `maxPublicReferenceChainMessages = 3` plus Public Reference Context Closure selection. It has no Member UI, IPC, or user-persisted setting, and each ContextManifest records the exact version plus resolved snapshot or digest used by the Run; v2 never rewrites a frozen v1 Manifest. Model serialization belongs to the Context Formatter, while Evidence shape belongs to the ContextManifest version.
+An immutable application-owned versioned configuration that defines deterministic public-context and Self Active Task candidate selection, ordering, Unicode-scalar truncation, eviction priority and numeric budgets independently from model field shape and formatter wording. Current Profile v3 retains `maxPublicMessages = 15`, `maxPublicHistoryChars = 24000`, `maxMessageBodyChars = 2000`, and `maxPublicReferenceChainMessages = 3`, and adds `maxSelfActiveTasks = 8` with public history evicted before the Task selection tail under Runtime payload pressure. It has no Member UI, IPC, or user-persisted setting, and each ContextManifest records the exact version plus resolved snapshot or digest used by the Run. Historical Profile versions are not current readers. Model serialization belongs to the Context Formatter, while Evidence shape belongs to the ContextManifest version.
 _Avoid_: formatter constants, model DTO schema, Evidence schema, Member Runtime Parameters, mutable user preference, summary model configuration
 
 **Cross-Camp History Search**:
@@ -1184,6 +1216,10 @@ _Avoid_: workspace deletion, Runtime reinstall, silent partial migration, histor
 A durable, append-only, user-visible record of provider-reported reasoning summaries, Agent progress narration, plans, steps, and structured tool/command/file lifecycle for exactly one AgentRun. It is authoritative SQLite state readable through the Camp Read Side until Camp deletion, while remaining absent by construction from CampMessage, ConversationMessage, FTS, public-message context composition, ContextManifest payloads, later AgentRun input, A2A context, and Memory sources. It contains only normalized Runtime-public information, never hidden raw reasoning or invented progress.
 _Avoid_: chain of thought, Camp message, Renderer-only live cache, searchable Agent context, raw provider packet, Task completion evidence
 
+**Agent Execution Process**:
+The long-lived, user-visible execution activity for one `(Camp, Agent ID)` pair, materialized by the first admitted AgentRun and spanning one or more separate AgentRun facts while that Camp exists. It is a presentation-level continuity over those Runs and their evidence, remains available when no Run is active or the latest Run is terminal, and retains the same identity across an ended and later rejoined CampMember relationship; an absent Agent is omitted from the current Run Pulse until it rejoins.
+_Avoid_: Conversation, AgentRun, per-Run execution entry, Runtime process, execution controller
+
 **Execution Evidence Content**:
 The bounded normalized text or structured payload of one AgentRun Execution Evidence record. SQLite stores an explicit preview, byte count, content digest and truncation flag; larger content uses an authorized Managed Blob reference whose lifetime is rooted by the Evidence record.
 _Avoid_: silent truncation, local Blob path, raw protocol log, Markdown execution of tool output
@@ -1253,7 +1289,7 @@ A recipient-scoped, one-shot attempt to materialize the FIFO head of a Message D
 _Avoid_: periodic sweep, startup replay, global pending scan, timer polling, in-memory queue authority
 
 **Delivery Context Materialization Gate**:
-The recipient-scoped pre-Run boundary inside a Delivery Dispatch Attempt that assembles and freezes the Context Delivery Profile v2 payload against the Delivery's frozen execution basis and target Runtime limit. Success permits exactly one AgentRun to be materialized; if complete Current Input, the direct reference parent, and mandatory structure still cannot fit after optional recent history is removed, the Delivery becomes terminal `failed/context_payload_too_large` with no AgentRun or Runtime start. The Public Message and sibling Deliveries remain committed, and this deterministic failure is neither a wait condition nor an automatic-retry trigger.
+The recipient-scoped pre-Run boundary inside a Delivery Dispatch Attempt that assembles and freezes the Context Delivery Profile v3 payload against the Delivery's frozen execution basis and target Runtime limit. Success permits exactly one AgentRun to be materialized; if complete Current Input, the direct reference parent, and mandatory structure still cannot fit after optional public history and Self Active Tasks are removed in profile order, the Delivery becomes terminal `failed/context_payload_too_large` with no AgentRun or Runtime start. The Public Message and sibling Deliveries remain committed, and this deterministic failure is neither a wait condition nor an automatic-retry trigger.
 _Avoid_: send-transaction preflight, ghost AgentRun, Runtime capacity wait, whole-message rollback
 
 **Camp Message Send**:

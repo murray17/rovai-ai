@@ -1,10 +1,19 @@
 {
   "nativeSessionBootstrap": "native_session_bootstrap_v3",
   "bootstrapFormatterVersion": 3,
-  "agentRunContextFormatterVersion": 11,
-  "contextManifestVersion": 9,
-  "contextManifestFormatterVersion": 11,
-  "contextDeliveryProfileVersion": 2,
+  "agentRunContextFormatterVersion": 12,
+  "contextManifestVersion": 10,
+  "contextManifestFormatterVersion": 12,
+  "contextDeliveryProfileVersion": 3,
+  "selfActiveTaskProjection": {
+    "section": "SELF_ACTIVE_TASKS",
+    "fields": ["taskId", "title", "status"],
+    "maxTasks": 8,
+    "ordering": "updatedAt DESC, taskId DESC"
+  },
+  "selfActiveTaskEvidence": {
+    "fields": ["included", "selectedTaskRefs", "omittedCount?", "projectionDigest?"]
+  },
   "currentInputSourceShapes": {
     "user": {"type": "user"},
     "memberCall": {"type": "member_call", "senderAgentId": "source-agent", "senderName": "Source Agent"}

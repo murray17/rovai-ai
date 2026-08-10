@@ -42,10 +42,10 @@ pub struct Database {
     path: PathBuf,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.52";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 28;
-const V052_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.50";
-const V052_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 27;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.54";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 29;
+const V052_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.52";
+const V052_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 28;
 const V043_CLASSIFIER_VERSION: &str = "activity-v1";
 
 const V043_RESET_FILES: &[&str] = &[
@@ -101,32 +101,43 @@ fn has_current_data_contract(path: &Path) -> bool {
         [],
         |row| row.get(0),
     );
-    let migration_state: rusqlite::Result<(bool, bool, bool, bool)> = connection.query_row(
+    let migration_state: rusqlite::Result<(bool, bool, bool, bool, bool)> = connection.query_row(
         r#"
         SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 66),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 67),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 68),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 69)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 69),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 70)
         "#,
         [],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            ))
+        },
     );
     matches!(
         (marker, projection_exists, migration_state),
-        (Ok(Some((contract, schema, classifier))), Ok(true), Ok((v66, v67, v68, v69)))
+        (Ok(Some((contract, schema, classifier))), Ok(true), Ok((v66, v67, v68, v69, v70)))
             if classifier == V043_CLASSIFIER_VERSION
                 && ((contract == CURRENT_DATA_CONTRACT_VERSION
                     && schema == CURRENT_PROJECTION_SCHEMA_VERSION
                     && v66
                     && v67
                     && v68
-                    && v69)
+                    && v69
+                    && v70)
                     || (contract == V052_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
                         && schema == V052_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
                         && v66
                         && v67
                         && v68
-                        && !v69))
+                        && v69
+                        && !v70))
     )
 }
 
@@ -1119,6 +1130,9 @@ impl Database {
             if !self.schema_migration_applied(69)? {
                 self.migrate_bounded_omission_evidence_v69()?;
             }
+            if !self.schema_migration_applied(70)? {
+                self.migrate_self_active_task_context_v70()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -1375,6 +1389,9 @@ impl Database {
         }
         if !self.schema_migration_applied(69)? {
             self.migrate_bounded_omission_evidence_v69()?;
+        }
+        if !self.schema_migration_applied(70)? {
+            self.migrate_self_active_task_context_v70()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -6100,6 +6117,358 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_self_active_task_context_v70(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let now = chrono::Utc::now().to_rfc3339();
+            transaction.execute(
+                r#"
+                UPDATE message_delivery_attempt
+                SET status = 'failed', wait_condition = NULL,
+                    failure_code = 'context_manifest_v10_required',
+                    failure_detail_json = '{"reason":"self_active_task_context_clean_break"}',
+                    ended_at = ?1
+                WHERE status = 'attempting'
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE message_delivery
+                SET status = 'failed', dispatch_phase = 'terminal',
+                    wait_condition = NULL, active_dispatch_attempt_id = NULL,
+                    manual_intervention_required = 0,
+                    failure_code = 'context_manifest_v10_required',
+                    failure_detail_json = '{"reason":"self_active_task_context_clean_break"}',
+                    version = version + 1, ended_at = ?1, updated_at = ?1
+                WHERE status = 'running'
+                   OR (status = 'pending' AND dispatch_attempt_count > 0)
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE message_delivery
+                SET status = 'interrupted_before_dispatch',
+                    dispatch_phase = 'terminal', wait_condition = NULL,
+                    active_dispatch_attempt_id = NULL,
+                    manual_intervention_required = 1,
+                    failure_code = 'context_manifest_v10_required',
+                    failure_detail_json = '{"reason":"self_active_task_context_clean_break"}',
+                    version = version + 1, ended_at = ?1, updated_at = ?1
+                WHERE status = 'pending' AND dispatch_attempt_count = 0
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE message_delivery
+                SET frozen_snapshot_json = CASE
+                        WHEN json_type(frozen_snapshot_json, '$.frozenContext') IS NOT NULL
+                        THEN json_remove(frozen_snapshot_json, '$.frozenContext')
+                        ELSE frozen_snapshot_json
+                    END,
+                    context_manifest_id = NULL,
+                    version = version + 1, updated_at = ?1
+                WHERE context_manifest_id IS NOT NULL
+                   OR json_type(frozen_snapshot_json, '$.frozenContext') IS NOT NULL
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                "UPDATE message_delivery_attempt SET context_manifest_id = NULL WHERE context_manifest_id IS NOT NULL",
+                [],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'failed', ended_at = ?1,
+                    last_error_code = 'context_manifest_v10_required',
+                    wait_reason = NULL, wait_deadline_at = NULL,
+                    runtime_recovery_required = 0,
+                    execution_lease_owner = NULL,
+                    execution_lease_expires_at = NULL,
+                    manual_retry_allowed = 0,
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('queued', 'running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE camp_turn
+                SET status = 'failed', ended_at = ?1,
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute_batch(
+                r#"
+                DELETE FROM bootstrap_redelivery_requirement;
+                DELETE FROM native_session_compaction_observation;
+                DELETE FROM native_session_compaction_observer_lease;
+                DELETE FROM native_session_resume_attempt;
+                DELETE FROM runtime_input_delivery;
+                DELETE FROM context_manifest_history_camp;
+                DELETE FROM context_manifest;
+                DELETE FROM native_session_bootstrap_evidence;
+                "#,
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE conversation
+                SET native_adapter_installation_id = NULL,
+                    native_session_id = NULL,
+                    native_binding_compatibility_digest = NULL,
+                    native_binding_id = NULL,
+                    native_binding_generation = 0,
+                    native_binding_secret_digest = NULL,
+                    last_accepted_public_boundary_sequence = 0,
+                    native_charter_digest = NULL,
+                    native_collaboration_state_digest = NULL,
+                    native_installation_generation = NULL,
+                    native_session_compatibility_key = NULL,
+                    version = version + 1,
+                    updated_at = ?1
+                "#,
+                [&now],
+            )?;
+            transaction.execute_batch(
+                r#"
+                DROP TRIGGER IF EXISTS runtime_input_delivery_redelivery_metadata_insert;
+                DROP TRIGGER IF EXISTS runtime_input_delivery_redelivery_metadata_update;
+                DROP INDEX IF EXISTS context_manifest_blob_idx;
+                DROP INDEX IF EXISTS context_manifest_bootstrap_idx;
+                DROP INDEX IF EXISTS context_manifest_history_camp_lookup_idx;
+                DROP INDEX IF EXISTS runtime_input_native_identity_unique;
+                DROP INDEX IF EXISTS runtime_input_reconcile_idx;
+                DROP TABLE runtime_input_delivery;
+                DROP TABLE context_manifest_history_camp;
+                DROP TABLE context_manifest;
+
+                CREATE TABLE context_manifest_v70 (
+                    id TEXT PRIMARY KEY,
+                    agent_run_id TEXT NOT NULL UNIQUE REFERENCES agent_run(id),
+                    bootstrap_evidence_id TEXT NOT NULL
+                        REFERENCES native_session_bootstrap_evidence(id),
+                    native_binding_generation INTEGER NOT NULL
+                        CHECK(native_binding_generation >= 1),
+                    camp_message_boundary_sequence INTEGER NOT NULL
+                        CHECK(camp_message_boundary_sequence >= 0),
+                    conversation_message_boundary_sequence INTEGER NOT NULL
+                        CHECK(conversation_message_boundary_sequence >= 0),
+                    raw_message_refs_json TEXT NOT NULL DEFAULT '[]'
+                        CHECK(json_valid(raw_message_refs_json)),
+                    collaboration_state_digest TEXT NOT NULL,
+                    collaboration_state_included INTEGER NOT NULL
+                        CHECK(collaboration_state_included IN (0, 1)),
+                    run_notice_refs_json TEXT NOT NULL DEFAULT '[]'
+                        CHECK(json_valid(run_notice_refs_json)),
+                    run_notice_digest TEXT NOT NULL,
+                    current_input_source_json TEXT NOT NULL
+                        CHECK(json_valid(current_input_source_json)),
+                    attachment_refs_json TEXT NOT NULL DEFAULT '[]'
+                        CHECK(json_valid(attachment_refs_json)),
+                    attachment_digest TEXT NOT NULL,
+                    skill_exposure_json TEXT NOT NULL,
+                    skill_exposure_digest TEXT NOT NULL,
+                    mcp_exposure_json TEXT NOT NULL,
+                    mcp_exposure_digest TEXT NOT NULL,
+                    mcp_projection_digest TEXT NOT NULL,
+                    self_active_task_evidence_json TEXT NOT NULL
+                        CHECK(json_valid(self_active_task_evidence_json)),
+                    self_active_task_evidence_digest TEXT NOT NULL,
+                    history_fence_version INTEGER NOT NULL DEFAULT 0
+                        CHECK(history_fence_version IN (0, 1)),
+                    global_public_message_boundary INTEGER NOT NULL DEFAULT 0
+                        CHECK(global_public_message_boundary >= 0),
+                    previous_accepted_public_boundary_sequence INTEGER NOT NULL
+                        CHECK(previous_accepted_public_boundary_sequence >= 0),
+                    context_delivery_profile_version INTEGER NOT NULL
+                        CHECK(context_delivery_profile_version = 3),
+                    context_delivery_profile_json TEXT NOT NULL
+                        CHECK(json_valid(context_delivery_profile_json)),
+                    context_delivery_profile_digest TEXT NOT NULL,
+                    originating_public_user_message_ref_json TEXT
+                        CHECK(originating_public_user_message_ref_json IS NULL
+                              OR json_valid(originating_public_user_message_ref_json)),
+                    recent_message_refs_json TEXT NOT NULL DEFAULT '[]'
+                        CHECK(json_valid(recent_message_refs_json)),
+                    omitted_message_count INTEGER CHECK(omitted_message_count >= 1),
+                    omitted_message_sequence_start INTEGER
+                        CHECK(omitted_message_sequence_start >= 1),
+                    omitted_message_sequence_end INTEGER
+                        CHECK(omitted_message_sequence_end >= omitted_message_sequence_start),
+                    formatter_version INTEGER NOT NULL
+                        CHECK(formatter_version = 12),
+                    rendered_payload_blob_id TEXT NOT NULL REFERENCES managed_blob(id),
+                    rendered_payload_digest TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    reference_closure_refs_json TEXT NOT NULL DEFAULT '[]'
+                        CHECK(json_valid(reference_closure_refs_json)),
+                    omission_entries_json TEXT NOT NULL DEFAULT '[]'
+                        CHECK(json_valid(omission_entries_json)),
+                    shared_message_evidence_json TEXT NOT NULL DEFAULT '[]'
+                        CHECK(json_valid(shared_message_evidence_json)),
+                    shared_message_evidence_digest TEXT NOT NULL,
+                    run_notice_payload_json TEXT NOT NULL DEFAULT '[]'
+                        CHECK(json_valid(run_notice_payload_json)),
+                    CHECK(
+                        previous_accepted_public_boundary_sequence
+                            <= camp_message_boundary_sequence
+                    ),
+                    CHECK(
+                        (omitted_message_count IS NULL
+                         AND omitted_message_sequence_start IS NULL
+                         AND omitted_message_sequence_end IS NULL)
+                        OR
+                        (omitted_message_count IS NOT NULL
+                         AND omitted_message_sequence_start IS NOT NULL
+                         AND omitted_message_sequence_end IS NOT NULL)
+                    )
+                );
+
+                CREATE TABLE context_manifest_history_camp_v70 (
+                    context_manifest_id TEXT NOT NULL
+                        REFERENCES context_manifest_v70(id) ON DELETE CASCADE,
+                    camp_id TEXT NOT NULL,
+                    camp_title TEXT NOT NULL,
+                    last_visible_activity_at TEXT NOT NULL,
+                    PRIMARY KEY(context_manifest_id, camp_id)
+                );
+
+                CREATE TABLE runtime_input_delivery_v70 (
+                    id TEXT PRIMARY KEY,
+                    agent_run_id TEXT NOT NULL REFERENCES agent_run(id),
+                    execution_epoch INTEGER NOT NULL CHECK(execution_epoch >= 1),
+                    context_manifest_id TEXT NOT NULL REFERENCES context_manifest_v70(id),
+                    native_binding_id TEXT NOT NULL,
+                    native_binding_generation INTEGER NOT NULL
+                        CHECK(native_binding_generation >= 1),
+                    boundary_camp_message_sequence INTEGER NOT NULL
+                        CHECK(boundary_camp_message_sequence >= 0),
+                    dynamic_payload_digest TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN (
+                        'prepared', 'accepted', 'delivery_unknown', 'not_accepted'
+                    )),
+                    native_input_id TEXT,
+                    prepared_at TEXT NOT NULL,
+                    accepted_at TEXT,
+                    resolved_at TEXT,
+                    last_error TEXT,
+                    updated_at TEXT NOT NULL,
+                    bootstrap_redelivery_present INTEGER NOT NULL DEFAULT 0
+                        CHECK(bootstrap_redelivery_present IN (0, 1)),
+                    bootstrap_redelivery_revision INTEGER
+                        CHECK(bootstrap_redelivery_revision >= 1),
+                    bootstrap_redelivery_evidence_id TEXT
+                        REFERENCES native_session_bootstrap_evidence(id),
+                    bootstrap_redelivery_envelope_version INTEGER
+                        CHECK(bootstrap_redelivery_envelope_version = 2),
+                    bootstrap_redelivery_formatter_version INTEGER
+                        CHECK(bootstrap_redelivery_formatter_version = 2),
+                    UNIQUE(agent_run_id, execution_epoch),
+                    CHECK(
+                        (status = 'accepted' AND native_input_id IS NOT NULL
+                         AND accepted_at IS NOT NULL)
+                        OR status <> 'accepted'
+                    )
+                );
+
+                ALTER TABLE context_manifest_v70 RENAME TO context_manifest;
+                ALTER TABLE context_manifest_history_camp_v70
+                    RENAME TO context_manifest_history_camp;
+                ALTER TABLE runtime_input_delivery_v70 RENAME TO runtime_input_delivery;
+
+                CREATE INDEX context_manifest_blob_idx
+                    ON context_manifest(rendered_payload_blob_id);
+                CREATE INDEX context_manifest_bootstrap_idx
+                    ON context_manifest(bootstrap_evidence_id);
+                CREATE INDEX context_manifest_history_camp_lookup_idx
+                    ON context_manifest_history_camp(camp_id, context_manifest_id);
+                CREATE UNIQUE INDEX runtime_input_native_identity_unique
+                    ON runtime_input_delivery(native_binding_id, native_input_id)
+                    WHERE native_input_id IS NOT NULL;
+                CREATE INDEX runtime_input_reconcile_idx
+                    ON runtime_input_delivery(status, updated_at)
+                    WHERE status = 'delivery_unknown';
+
+                CREATE TRIGGER runtime_input_delivery_redelivery_metadata_insert
+                BEFORE INSERT ON runtime_input_delivery
+                WHEN NOT (
+                    (NEW.bootstrap_redelivery_present = 0
+                        AND NEW.bootstrap_redelivery_revision IS NULL
+                        AND NEW.bootstrap_redelivery_evidence_id IS NULL
+                        AND NEW.bootstrap_redelivery_envelope_version IS NULL
+                        AND NEW.bootstrap_redelivery_formatter_version IS NULL)
+                    OR
+                    (NEW.bootstrap_redelivery_present = 1
+                        AND NEW.bootstrap_redelivery_revision IS NOT NULL
+                        AND NEW.bootstrap_redelivery_evidence_id IS NOT NULL
+                        AND NEW.bootstrap_redelivery_envelope_version IS NOT NULL
+                        AND NEW.bootstrap_redelivery_formatter_version IS NOT NULL)
+                )
+                BEGIN
+                    SELECT RAISE(ABORT, 'invalid Bootstrap Redelivery delivery metadata');
+                END;
+
+                CREATE TRIGGER runtime_input_delivery_redelivery_metadata_update
+                BEFORE UPDATE OF
+                    bootstrap_redelivery_present,
+                    bootstrap_redelivery_revision,
+                    bootstrap_redelivery_evidence_id,
+                    bootstrap_redelivery_envelope_version,
+                    bootstrap_redelivery_formatter_version
+                ON runtime_input_delivery
+                WHEN NOT (
+                    (NEW.bootstrap_redelivery_present = 0
+                        AND NEW.bootstrap_redelivery_revision IS NULL
+                        AND NEW.bootstrap_redelivery_evidence_id IS NULL
+                        AND NEW.bootstrap_redelivery_envelope_version IS NULL
+                        AND NEW.bootstrap_redelivery_formatter_version IS NULL)
+                    OR
+                    (NEW.bootstrap_redelivery_present = 1
+                        AND NEW.bootstrap_redelivery_revision IS NOT NULL
+                        AND NEW.bootstrap_redelivery_evidence_id IS NOT NULL
+                        AND NEW.bootstrap_redelivery_envelope_version IS NOT NULL
+                        AND NEW.bootstrap_redelivery_formatter_version IS NOT NULL)
+                )
+                BEGIN
+                    SELECT RAISE(ABORT, 'invalid Bootstrap Redelivery delivery metadata');
+                END;
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v0.54', projection_schema_version = 29,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (70, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v70 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -10505,7 +10874,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn current_data_contract_accepts_only_current_or_exact_v050_schema_27_source() {
+    fn current_data_contract_accepts_only_current_or_exact_v052_schema_28_source() {
         let directory =
             std::env::temp_dir().join(format!("rovai-current-contract-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -10518,14 +10887,15 @@ mod tests {
             .execute_batch(
                 r#"
                 UPDATE rovai_data_contract
-                SET contract_version = 'v0.50', projection_schema_version = 27
+                SET contract_version = 'v0.52', projection_schema_version = 28
                 WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 70;
                 "#,
             )
             .unwrap();
         assert!(
-            !has_current_data_contract(&path),
-            "a source marker with migration 69 already applied is not an upgrade source"
+            has_current_data_contract(&path),
+            "a source marker without the v70 migration is the only upgrade source"
         );
 
         database
@@ -10533,8 +10903,8 @@ mod tests {
             .execute("DELETE FROM schema_migration WHERE version = 69", [])
             .unwrap();
         assert!(
-            has_current_data_contract(&path),
-            "the exact v0.50/schema-27/migrations-66-through-68 source must reach migration 69"
+            !has_current_data_contract(&path),
+            "the exact v0.52/schema-28 source requires migrations 66 through 69"
         );
 
         database
@@ -10583,14 +10953,14 @@ mod tests {
             .execute_batch(
                 r#"
                 UPDATE rovai_data_contract
-                SET contract_version = 'v0.52', projection_schema_version = 28
+                SET contract_version = 'v0.54', projection_schema_version = 29
                 WHERE singleton = 1;
                 "#,
             )
             .unwrap();
         assert!(
             !has_current_data_contract(&path),
-            "the current marker is incomplete without migration 69"
+            "the current marker is incomplete without migration 70"
         );
 
         drop(database);
@@ -10598,17 +10968,17 @@ mod tests {
     }
 
     #[test]
-    fn v69_upgrades_the_exact_v050_source_without_compatibility_rows() {
-        let directory = std::env::temp_dir().join(format!("rovai-db-v69-test-{}", Uuid::new_v4()));
+    fn v70_upgrades_the_exact_v052_source_without_compatibility_rows() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v70-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
         database
             .connection()
             .execute_batch(
                 r#"
                 UPDATE rovai_data_contract
-                SET contract_version = 'v0.50', projection_schema_version = 27
+                SET contract_version = 'v0.52', projection_schema_version = 28
                 WHERE singleton = 1;
-                DELETE FROM schema_migration WHERE version = 69;
+                DELETE FROM schema_migration WHERE version = 70;
                 "#,
             )
             .unwrap();
@@ -10620,14 +10990,14 @@ mod tests {
             .query_row(
                 r#"
                 SELECT contract_version, projection_schema_version,
-                       (SELECT COUNT(*) FROM schema_migration WHERE version = 69)
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 70)
                 FROM rovai_data_contract WHERE singleton = 1
                 "#,
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.52".to_string(), 28, 1));
+        assert_eq!(contract, ("v0.54".to_string(), 29, 1));
         let foreign_key_violations: i64 = reopened
             .connection()
             .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
@@ -10954,7 +11324,7 @@ mod tests {
                         camp_id,
                         title: "will be reset".to_string(),
                         description: String::new(),
-                        assignee_agent_id: None,
+                        assignee_agent_id: "agent_1".to_string(),
                         ..Default::default()
                     },
                 },
@@ -12781,7 +13151,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(agent_cli_contract, ("v0.52".to_string(), 28, 1));
+        assert_eq!(agent_cli_contract, ("v0.54".to_string(), 29, 1));
         assert_eq!(foreign_key_violations, 0);
 
         drop(database);
@@ -13390,7 +13760,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.52".to_string(), 22));
+        assert_eq!(contract, ("v0.54".to_string(), 22));
         let migration_count: i64 = reopened
             .connection()
             .query_row(
@@ -13421,7 +13791,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, (28, 1));
+        assert_eq!(contract, (29, 1));
         let error = database
             .connection()
             .execute(
@@ -13720,8 +14090,8 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(manifest_schema.contains("formatter_version = 11"));
-        assert!(manifest_schema.contains("CHECK(context_delivery_profile_version = 2)"));
+        assert!(manifest_schema.contains("formatter_version = 12"));
+        assert!(manifest_schema.contains("CHECK(context_delivery_profile_version = 3)"));
         assert!(manifest_schema.contains("collaboration_state_included INTEGER NOT NULL"));
         let delivery_schema: String = database
             .connection()
@@ -13741,7 +14111,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.52".to_string(), 28));
+        assert_eq!(contract, ("v0.54".to_string(), 29));
         let public_a2a_migration_applied: i64 = database
             .connection()
             .query_row(

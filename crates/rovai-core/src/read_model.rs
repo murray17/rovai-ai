@@ -357,6 +357,8 @@ pub struct ContextManifestView {
     pub mcp_exposure: McpExposureSnapshot,
     pub mcp_exposure_digest: String,
     pub mcp_projection_digest: String,
+    pub self_active_task_evidence: Value,
+    pub self_active_task_evidence_digest: String,
     pub formatter_version: i64,
     pub rendered_payload_digest: String,
     pub delivery: Option<RuntimeInputDeliveryView>,
@@ -1846,7 +1848,9 @@ fn load_context_manifests(
                delivery.bootstrap_redelivery_evidence_id,
                delivery.bootstrap_redelivery_envelope_version,
                delivery.bootstrap_redelivery_formatter_version,
-               manifest.omission_entries_json
+               manifest.omission_entries_json,
+               manifest.self_active_task_evidence_json,
+               manifest.self_active_task_evidence_digest
         FROM context_manifest AS manifest
         JOIN native_session_bootstrap_evidence AS bootstrap
           ON bootstrap.id = manifest.bootstrap_evidence_id
@@ -1920,6 +1924,8 @@ fn load_context_manifests(
                 row.get::<_, Option<i64>>(49)?,
                 row.get::<_, Option<i64>>(50)?,
                 row.get::<_, String>(51)?,
+                row.get::<_, String>(52)?,
+                row.get::<_, String>(53)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1935,6 +1941,8 @@ fn load_context_manifests(
                 .context("ContextManifest Run Notice payload is invalid")?;
             let omission_entries = serde_json::from_str::<Vec<Value>>(&row.51)
                 .context("ContextManifest omission evidence is invalid")?;
+            let self_active_task_evidence = serde_json::from_str::<Value>(&row.52)
+                .context("ContextManifest Self Active Task evidence is invalid")?;
             let current_input_source = serde_json::from_str::<Value>(&row.9)
                 .context("ContextManifest Current Input source is invalid")?;
             let attachment_refs = serde_json::from_str::<Vec<CampAttachmentRefView>>(&row.10)
@@ -2025,6 +2033,8 @@ fn load_context_manifests(
                 mcp_exposure,
                 mcp_exposure_digest: row.15,
                 mcp_projection_digest: row.16,
+                self_active_task_evidence,
+                self_active_task_evidence_digest: row.53,
                 formatter_version: row.17,
                 rendered_payload_digest: row.18,
                 delivery,

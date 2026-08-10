@@ -12,13 +12,13 @@ pub struct ContextDeliveryProfile {
     pub max_public_messages: usize,
     pub max_public_history_chars: usize,
     pub max_message_body_chars: usize,
-    #[serde(default)]
     pub max_public_reference_chain_messages: usize,
+    pub max_self_active_tasks: usize,
 }
 
 impl ContextDeliveryProfile {
     pub fn validate(self) -> Result<Self> {
-        if !matches!(self.profile_version, 1 | 2) {
+        if self.profile_version != 3 {
             anyhow::bail!("unsupported Context Delivery Profile version");
         }
         if self.max_public_messages == 0
@@ -30,10 +30,11 @@ impl ContextDeliveryProfile {
         if self.max_message_body_chars > self.max_public_history_chars {
             anyhow::bail!("Context Delivery Profile message body limit exceeds its history budget");
         }
-        if (self.profile_version == 1 && self.max_public_reference_chain_messages != 0)
-            || (self.profile_version == 2 && self.max_public_reference_chain_messages != 3)
-        {
+        if self.max_public_reference_chain_messages != 3 {
             anyhow::bail!("Context Delivery Profile reference-chain limit is invalid");
+        }
+        if self.max_self_active_tasks != 8 {
+            anyhow::bail!("Context Delivery Profile self-active Task limit is invalid");
         }
         Ok(self)
     }
@@ -43,24 +44,17 @@ impl ContextDeliveryProfile {
     }
 }
 
-pub const CONTEXT_DELIVERY_PROFILE_V1: ContextDeliveryProfile = ContextDeliveryProfile {
-    profile_version: 1,
-    max_public_messages: 15,
-    max_public_history_chars: 24_000,
-    max_message_body_chars: 2_000,
-    max_public_reference_chain_messages: 0,
-};
-
-pub const CONTEXT_DELIVERY_PROFILE_V2: ContextDeliveryProfile = ContextDeliveryProfile {
-    profile_version: 2,
+pub const CONTEXT_DELIVERY_PROFILE_V3: ContextDeliveryProfile = ContextDeliveryProfile {
+    profile_version: 3,
     max_public_messages: 15,
     max_public_history_chars: 24_000,
     max_message_body_chars: 2_000,
     max_public_reference_chain_messages: 3,
+    max_self_active_tasks: 8,
 };
 
 pub fn current_context_delivery_profile() -> Result<ContextDeliveryProfile> {
-    CONTEXT_DELIVERY_PROFILE_V2.validate()
+    CONTEXT_DELIVERY_PROFILE_V3.validate()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,13 +90,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn profile_v2_is_current_and_has_a_stable_digest() {
+    fn profile_v3_is_current_and_has_a_stable_digest() {
         let profile = current_context_delivery_profile().unwrap();
-        assert_eq!(profile.profile_version, 2);
+        assert_eq!(profile.profile_version, 3);
         assert_eq!(profile.max_public_messages, 15);
         assert_eq!(profile.max_public_history_chars, 24_000);
         assert_eq!(profile.max_message_body_chars, 2_000);
         assert_eq!(profile.max_public_reference_chain_messages, 3);
+        assert_eq!(profile.max_self_active_tasks, 8);
         assert_eq!(profile.canonical_digest().unwrap().len(), 64);
     }
 
@@ -110,20 +105,24 @@ mod tests {
     fn profile_validation_rejects_unknown_versions_and_invalid_limits() {
         for invalid in [
             ContextDeliveryProfile {
-                profile_version: 3,
-                ..CONTEXT_DELIVERY_PROFILE_V1
+                profile_version: 2,
+                ..CONTEXT_DELIVERY_PROFILE_V3
             },
             ContextDeliveryProfile {
                 max_public_messages: 0,
-                ..CONTEXT_DELIVERY_PROFILE_V1
+                ..CONTEXT_DELIVERY_PROFILE_V3
             },
             ContextDeliveryProfile {
                 max_message_body_chars: 24_001,
-                ..CONTEXT_DELIVERY_PROFILE_V1
+                ..CONTEXT_DELIVERY_PROFILE_V3
             },
             ContextDeliveryProfile {
                 max_public_reference_chain_messages: 4,
-                ..CONTEXT_DELIVERY_PROFILE_V2
+                ..CONTEXT_DELIVERY_PROFILE_V3
+            },
+            ContextDeliveryProfile {
+                max_self_active_tasks: 9,
+                ..CONTEXT_DELIVERY_PROFILE_V3
             },
         ] {
             assert!(invalid.validate().is_err());

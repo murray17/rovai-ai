@@ -9,7 +9,7 @@ import {
 
 test('current contract profile is deterministic, offline, and covers every requested criterion', async () => {
   assert.equal(CURRENT_CONTRACT_PROFILE.id, 'current-contract-conformance')
-  assert.equal(CURRENT_CONTRACT_PROFILE.version, '1.0.0')
+  assert.equal(CURRENT_CONTRACT_PROFILE.version, '1.1.0')
   assert.equal(CURRENT_CONTRACT_CRITERIA.length, 15)
   assert.equal(CURRENT_CONTRACT_PROFILE.suite.cases.length, CURRENT_CONTRACT_CRITERIA.length)
   assert.equal(CURRENT_CONTRACT_PROFILE.publicationPolicy.publishOutcomeRate, false)

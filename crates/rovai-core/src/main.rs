@@ -378,8 +378,7 @@ struct CreateTaskParams {
     description: String,
     #[serde(default)]
     acceptance_criteria: Vec<String>,
-    #[serde(default)]
-    assignee_agent_id: Option<String>,
+    assignee_agent_id: String,
 }
 
 #[derive(Debug, Deserialize)]

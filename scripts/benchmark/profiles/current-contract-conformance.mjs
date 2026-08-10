@@ -25,39 +25,39 @@ const criteria = [
     test('crates/rovai-core/src/context.rs', 'public_context_uses_latest_raw_window_prefixes_and_explicit_omission')
   ]),
   criterion('CCC-008', 'History budget, runtime budget, and reference closure retain bounded exact IDs', [
-    test('crates/rovai-core/src/context.rs', 'public_history_budget_is_shared_and_profile_v2_bounded')
+    test('crates/rovai-core/src/context.rs', 'public_history_budget_is_shared_and_profile_v3_bounded')
   ]),
   criterion('CCC-009', 'Large-history omission JSON remains bounded rather than growing with all message IDs', [
     test('crates/rovai-core/src/context.rs', 'whole_history_omission_evidence_stays_bounded_for_large_intervals')
   ]),
-  criterion('CCC-010', 'ContextManifest version is 9', [
+  criterion('CCC-010', 'ContextManifest version is 10', [
     test('crates/rovai-core/src/context_contract.rs', 'binding_contract_freezes_each_context_axis_version')
   ]),
-  criterion('CCC-011', 'Data Contract is v0.52 with projection schema 28', [
-    test('crates/rovai-core/src/db.rs', 'current_data_contract_accepts_only_current_or_exact_v050_schema_27_source'),
-    test('crates/rovai-core/src/db.rs', 'v69_upgrades_the_exact_v050_source_without_compatibility_rows')
+  criterion('CCC-011', 'Data Contract is v0.54 with projection schema 29', [
+    test('crates/rovai-core/src/db.rs', 'current_data_contract_accepts_only_current_or_exact_v052_schema_28_source'),
+    test('crates/rovai-core/src/db.rs', 'v70_upgrades_the_exact_v052_source_without_compatibility_rows')
   ]),
   criterion('CCC-012', 'CampSnapshot schema is 27', [
     test('crates/rovai-core/src/read_model.rs', 'snapshot_projects_current_names_from_structured_mentions')
   ]),
-  criterion('CCC-013', 'Migration 69 admits only the exact defined upgrade source', [
-    test('crates/rovai-core/src/db.rs', 'current_data_contract_accepts_only_current_or_exact_v050_schema_27_source')
+  criterion('CCC-013', 'Migration 70 admits only the exact defined upgrade source', [
+    test('crates/rovai-core/src/db.rs', 'current_data_contract_accepts_only_current_or_exact_v052_schema_28_source')
   ]),
   criterion('CCC-014', 'Migration preserves completed Camp, Message, Task, and terminal Run/Turn history', [
-    test('crates/rovai-core/src/context.rs', 'v68_then_v69_clean_break_preserves_business_history_and_removes_old_context_state')
+    test('crates/rovai-core/src/context.rs', 'v68_through_v70_clean_break_preserves_business_history_and_removes_old_context_state')
   ]),
   criterion('CCC-015', 'Migration fails old non-terminal Run/Turn and unfinished Delivery closed', [
-    test('crates/rovai-core/src/context.rs', 'v68_then_v69_clean_break_preserves_business_history_and_removes_old_context_state')
+    test('crates/rovai-core/src/context.rs', 'v68_through_v70_clean_break_preserves_business_history_and_removes_old_context_state')
   ])
 ]
 
 export const CURRENT_CONTRACT_PREREQUISITES = Object.freeze([
   {
-    id: 'durable-task-v2',
-    evidence: test('crates/rovai-core/src/db.rs', 'v65_installs_durable_task_v2_and_sets_v047_contract')
+    id: 'durable-task-v3',
+    evidence: test('crates/rovai-core/src/collaboration.rs', 'agent_task_updates_respect_lead_and_assignee_authority')
   },
   {
-    id: 'built-in-transport-v4',
+    id: 'built-in-transport-v5',
     evidence: test('crates/rovai-core/src/builtin_tool_transport.rs', 'list_and_describe_share_one_digest')
   },
   {
@@ -70,7 +70,7 @@ export const CURRENT_CONTRACT_CRITERIA = Object.freeze(criteria)
 
 export const CURRENT_CONTRACT_PROFILE = defineBenchmarkProfile({
   id: 'current-contract-conformance',
-  version: '1.0.0',
+  version: '1.1.0',
   lane: 'contract-conformance',
   hardOutcomeDefinition: {
     validity: 'deterministic_source_and_harness_valid',
@@ -88,8 +88,8 @@ export const CURRENT_CONTRACT_PROFILE = defineBenchmarkProfile({
     compositeScore: false
   },
   suite: {
-    id: 'rovai-v0.52-current-contract',
-    version: '1.0.0',
+    id: 'rovai-v0.54-current-contract',
+    version: '1.1.0',
     shuffle: false,
     rounds: [{ id: 'deterministic', ordinal: 1 }],
     cases: criteria.map((entry) => ({

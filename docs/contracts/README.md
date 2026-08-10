@@ -22,15 +22,19 @@ Architecture 解释组件如何组成，Version 文档记录交付范围；它�
 | [Benchmark Protocol v3（当前）](benchmark-protocol-v3.md) | 版本化 Run 信封、Product/Environment fingerprint、五层 Evidence、Adapter/derived projection、逐轴比较资格与 disclosure |
 | [Diagnostics Center v1（当前）](diagnostics-center-v1.md) | `diagnostics.check` typed read model、三态分类、显式单项修复映射、Recovery 与集中脱敏的 `rovai-diagnostics-v5` |
 | [Collaboration State v2（当前）](collaboration-state-v2.md) | peer-only routing identity、稳定 CampMember 选择、Lead ID/Boolean、完整 projection digest、独立 inclusion、accepted ACK 与 v0.50 clean break |
-| [Built-in Tool Transport v4（当前）](builtin-tool-transport-v4.md) | v0.47 十三项固定业务命令、Core Envelope/IPC、receipt、Agent Output v2、Task projection、错误通道与 clean break |
-| [Durable Task v2（当前）](durable-task-v2.md) | 五态 Task、字段限制、projected final state、可见性/权限、事务、列表、membership 收口、删除级联与 linked admission |
+| [Built-in Tool Transport v5（当前）](builtin-tool-transport-v5.md) | 十三项固定业务命令、Core Envelope/IPC、Agent Output v2，以及 Lead-owned Task v3 schema/help/current-only clean break |
+| [Durable Task v3（当前）](durable-task-v3.md) | User/Lead 责任定义、Assignee execution-state update、Camp-wide read、explicit owner、unassigned holding 与 advisory actions |
 | [Camp Message Send v2（当前）](camp-message-send-v2.md) | 隐式当前 Run Camp、记录身份 Replay、send clean break 与 A2A 业务错误；v0.47 transport 入口由 v4 合同局部替代 |
 | [Pending Camp Activation v1（当前）](pending-camp-activation-v1.md) | 一键 Pending 创建、Snapshot/Navigation activation state、首消息原子激活、mutation guard 与窄 discard/启动清理 |
+| [Built-in Tool Transport v4 (historical)](builtin-tool-transport-v4.md) | v0.47 Task v2 transport；不作为 v0.54 Runtime/CLI compatibility 入口 |
+| [Durable Task v2 (historical)](durable-task-v2.md) | ordinary-Agent create/claim 与受限读取的旧 Task 合同；不作为当前 authority |
 | [Built-in Tool Transport v3 (historical)](builtin-tool-transport-v3.md) | v0.46 十二项命令与 Agent Result Projection v1；不作为 v0.47 Runtime/CLI compatibility 入口 |
 | [Built-in Tool Transport v2 (historical)](builtin-tool-transport-v2.md) | v0.45 Agent CLI、catalog、IPC、Envelope、receipt、幂等、lease 与旧私有 operation clean break |
 | [Camp Message Send v1 (historical)](camp-message-send-v1.md) | v0.45 `camp.message.send` / `rovai send`、Addressing Token、recipient resolution、fanout、lineage 与错误 |
 | [Message Delivery v1](message-delivery-v1.md) | recipient-specific queue、dispatch attempt、waitCondition、interrupted recovery、retry/cancel 与 settlement |
-| [ContextManifest Evidence v9（当前）](context-manifest-evidence-v9.md) | Dynamic Context exact bytes/evidence、bounded whole-history aggregate、exact bounded omission 与 accepted-ACK 分层 |
-| [Context Delivery Profile v1](context-delivery-profile-v1.md) | AgentRun 公共消息窗口、Unicode scalar 正文截断、历史字符预算、遗漏提示与 Manifest 证据 |
-| [Context Delivery Profile v2](context-delivery-profile-v2.md) | Profile v2 公共引用链最多 3 条、候选选择/排序、Unicode-scalar 截断、预算优先级与 Context gate；模型字段和 Evidence 分属 Formatter/Manifest |
+| [ContextManifest Evidence v10（当前）](context-manifest-evidence-v10.md) | v9 evidence 加 self-active Task inclusion/ordered refs/omission/exact digest；无 Task watermark/ACK |
+| [Context Delivery Profile v3（当前）](context-delivery-profile-v3.md) | v2 public context 加 self-active Task selection/order/max 8 与 public-history-first budget priority |
+| [ContextManifest Evidence v9 (historical)](context-manifest-evidence-v9.md) | bounded public omission evidence；不作为 Formatter v12 恢复入口 |
+| [Context Delivery Profile v2 (historical)](context-delivery-profile-v2.md) | 公共引用链与历史 budget 的旧当前合同；不选择 self-active Task |
+| [Context Delivery Profile v1 (historical)](context-delivery-profile-v1.md) | AgentRun 公共消息窗口、Unicode scalar 正文截断、历史字符预算与遗漏提示 |
 | [Run Process Detail Surface v1](run-process-detail-surface-v1.md) | Scheme C Run Pulse、Execution Drawer、Inspector Activity 删除、Approval Dock 与 Stop 权威 |

@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.53
+current_version: v0.54
 last_updated: 2026-08-10
 ---
 
@@ -104,4 +104,5 @@ last_updated: 2026-08-10
 | v0.50 | `historical` | Self/Peer、Model Context Projection/Evidence 与 Redelivery v2 已实现并完成版本级全量验证 | [v0.50/README.md](v0.50/README.md) |
 | v0.51 | `historical` | 严格只读、显式单项修复的可操作诊断中心与集中脱敏 v5 导出 | [v0.51/README.md](v0.51/README.md) |
 | v0.52 | `historical` | Dynamic Context 精确恢复、有界 omission Evidence 与代码证据优先的 Agent 仓库分析 Skill | [v0.52/README.md](v0.52/README.md) |
-| v0.53 | `current` | Versioned Benchmark Protocol v3、逐轴比较资格与 v0.52 当前合同离线回归 | [v0.53/README.md](v0.53/README.md) |
+| v0.53 | `historical` | Versioned Benchmark Protocol v3、逐轴比较资格与 v0.52 当前合同离线回归 | [v0.53/README.md](v0.53/README.md) |
+| v0.54 | `current` | Lead-owned durable Task、Assignee 执行态与 self active Task context | [v0.54/README.md](v0.54/README.md) |

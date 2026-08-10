@@ -653,7 +653,7 @@ export interface TaskView {
   createdAt: string
   updatedAt: string
   closedAt: string | null
-  availableActions: Array<'update' | 'claim'>
+  availableActions: Array<'update'>
 }
 
 export interface TaskListItem {
@@ -661,17 +661,7 @@ export interface TaskListItem {
   title: string
   status: TaskView['status']
   assigneeAgentId: string | null
-  createdByType: 'user' | 'agent'
-  createdById: string
-  descriptionPreview: string
-  descriptionTruncated: boolean
-  acceptanceCriteriaCount: number
-  statusNotePreview: string | null
-  statusNoteTruncated: boolean
-  version: number
-  createdAt: string
-  updatedAt: string
-  availableActions: Array<'update' | 'claim'>
+  availableActions: Array<'update'>
 }
 
 export interface TaskListPage {
@@ -970,12 +960,14 @@ export interface ContextManifestView {
   historyCamps: ContextManifestHistoryCampView[]
   rawMessageCount: number
   previousAcceptedPublicBoundarySequence: number
-  contextDeliveryProfileVersion: 2
+  contextDeliveryProfileVersion: 3
   contextDeliveryProfile: {
-    profileVersion: 2
+    profileVersion: 3
     maxPublicMessages: number
     maxPublicHistoryChars: number
     maxMessageBodyChars: number
+    maxPublicReferenceChainMessages: number
+    maxSelfActiveTasks: number
   }
   contextDeliveryProfileDigest: string
   originatingPublicUserMessageRef: unknown | null
@@ -999,7 +991,9 @@ export interface ContextManifestView {
   mcpExposure: McpExposureSnapshot
   mcpExposureDigest: string
   mcpProjectionDigest: string
-  formatterVersion: 11
+  selfActiveTaskEvidence: unknown
+  selfActiveTaskEvidenceDigest: string
+  formatterVersion: 12
   renderedPayloadDigest: string
   delivery: RuntimeInputDeliveryView | null
   createdAt: string

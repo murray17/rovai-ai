@@ -6,13 +6,13 @@ use serde_json::{Map, Value, json};
 
 use crate::{command::canonical_json_digest, team_tool_catalog::builtin_tool_definitions};
 
-pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 4;
+pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 5;
 pub const BUILTIN_TOOL_IPC_PROTOCOL_VERSION: u32 = 1;
 pub const BUILTIN_TOOL_ENVELOPE_VERSION: u32 = 1;
 pub const BUILTIN_TOOL_RECEIPT_VERSION: u32 = 1;
-pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 4;
+pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 5;
 pub const BUILTIN_TOOL_AGENT_OUTPUT_CONTRACT_VERSION: u32 = 2;
-pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v4";
+pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v5";
 pub const BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES: usize = 1024 * 1024;
 pub const ROVAI_AGENT_CLI_ENV: &str = "ROVAI_AGENT_CLI";
 pub const ROVAI_CLI_CONTEXT_ENV: &str = "ROVAI_CLI_CONTEXT";
@@ -548,8 +548,9 @@ fn catalog_digest_operations() -> Result<Vec<CatalogDigestOperation>> {
             } else {
                 vec![identity.group.to_string(), identity.action.to_string()]
             },
-            summary: definition["title"]
+            summary: definition["description"]
                 .as_str()
+                .or_else(|| definition["title"].as_str())
                 .unwrap_or(identity.operation)
                 .to_string(),
             arguments: direct_arguments(&input_schema),

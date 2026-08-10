@@ -62,13 +62,13 @@ export async function collectProductContractFingerprint({
       constantAuthority(source.contextContract, 'AGENT_RUN_CONTEXT_FORMATTER_VERSION')
     ),
     contextDeliveryProfileVersion: available(
-      Number.parseInt(capture(source.contextDelivery.contents, /CONTEXT_DELIVERY_PROFILE_V2:[\s\S]*?profile_version:\s*(\d+)/u, 'Context Delivery Profile version'), 10),
-      constantAuthority(source.contextDelivery, 'CONTEXT_DELIVERY_PROFILE_V2')
+      Number.parseInt(capture(source.contextDelivery.contents, /CONTEXT_DELIVERY_PROFILE_V3:[\s\S]*?profile_version:\s*(\d+)/u, 'Context Delivery Profile version'), 10),
+      constantAuthority(source.contextDelivery, 'CONTEXT_DELIVERY_PROFILE_V3')
     ),
     durableTaskContract: available({
-      version: Number.parseInt(capture(source.dataContract.contents, /migrate_durable_task_v(\d+)_v\d+/u, 'Durable Task contract version'), 10),
+      version: Number.parseInt(capture(source.taskContract.contents, /DURABLE_TASK_CONTRACT_VERSION:\s*u32\s*=\s*(\d+)/u, 'Durable Task contract version'), 10),
       sourceDigest: digestSources([source.taskContract, source.dataContract])
-    }, { kind: 'verified_source_contract', locators: [source.taskContract.locator, source.dataContract.locator] }),
+    }, constantAuthority(source.taskContract, 'DURABLE_TASK_CONTRACT_VERSION')),
     builtInTransportVersion: available(
       Number.parseInt(capture(source.builtinTransport.contents, /BUILTIN_TOOL_CONTRACT_VERSION:\s*u32\s*=\s*(\d+)/u, 'Built-in Transport version'), 10),
       constantAuthority(source.builtinTransport, 'BUILTIN_TOOL_CONTRACT_VERSION')

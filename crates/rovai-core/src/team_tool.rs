@@ -73,7 +73,7 @@ pub struct TeamCreateTaskInput {
     pub description: String,
     #[serde(default)]
     pub acceptance_criteria: Vec<String>,
-    pub assignee_agent_id: Option<String>,
+    pub assignee_agent_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -82,25 +82,13 @@ pub struct TeamGetTaskInput {
     pub task_id: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum NullableInput<T> {
-    #[default]
-    Missing,
-    Null,
-    Value(T),
-}
-
-fn deserialize_nullable_input<'de, D, T>(
+fn deserialize_non_null_optional_string<'de, D>(
     deserializer: D,
-) -> std::result::Result<NullableInput<T>, D::Error>
+) -> std::result::Result<Option<String>, D::Error>
 where
     D: serde::Deserializer<'de>,
-    T: Deserialize<'de>,
 {
-    Ok(match Option::<T>::deserialize(deserializer)? {
-        Some(value) => NullableInput::Value(value),
-        None => NullableInput::Null,
-    })
+    String::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
@@ -114,8 +102,8 @@ pub struct TeamUpdateTaskInput {
     #[serde(default)]
     pub clear_acceptance_criteria: bool,
     pub status: Option<TaskStatus>,
-    #[serde(default, deserialize_with = "deserialize_nullable_input")]
-    pub assignee_agent_id: NullableInput<String>,
+    #[serde(default, deserialize_with = "deserialize_non_null_optional_string")]
+    pub assignee_agent_id: Option<String>,
     #[serde(default)]
     pub clear_assignee: bool,
     pub blocked_reason: Option<String>,
@@ -127,8 +115,8 @@ pub struct TeamUpdateTaskInput {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TeamListTasksInput {
     pub statuses: Option<Vec<TaskStatus>>,
-    #[serde(default, deserialize_with = "deserialize_nullable_input")]
-    pub assignee_agent_id: NullableInput<String>,
+    #[serde(default, deserialize_with = "deserialize_non_null_optional_string")]
+    pub assignee_agent_id: Option<String>,
     #[serde(default)]
     pub unassigned_only: bool,
     #[serde(default)]
@@ -454,18 +442,19 @@ impl TeamToolService {
         json!({
             "type": "object",
             "additionalProperties": false,
-            "required": ["title"],
+            "description": "Create only a durable responsibility that must survive AgentRuns or handoffs, has one explicit owner, and can independently complete, block, or transfer. Prefer advancing an existing Task. Do not create Tasks for analysis, consultation, one-off review, tool operations, local plans, A2A requests, or steps inside another Task. Only the User or current Camp Default Lead may create a Task.",
+            "required": ["title", "assigneeAgentId"],
             "properties": {
                 "title": {
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 160,
-                    "description": "Short title for a responsibility that must persist across messages or AgentRuns."
+                    "description": "Short title for one independently owned durable responsibility."
                 },
                 "description": {
                     "type": "string",
                     "maxLength": 8000,
-                    "description": "Optional durable scope, constraints, or completion notes."
+                    "description": "Optional durable scope and constraints. Do not copy a local execution plan into Task steps."
                 },
                 "acceptanceCriteria": {
                     "type": "array", "maxItems": 12, "uniqueItems": true,
@@ -474,7 +463,7 @@ impl TeamToolService {
                 "assigneeAgentId": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Active Camp member to own the Task. Omit for the shared unassigned pool."
+                    "description": "Required Current CampMember who owns the responsibility. Creation does not notify, wake, or start this Assignee."
                 }
             }
         })
@@ -495,7 +484,7 @@ impl TeamToolService {
         json!({
             "type": "object",
             "additionalProperties": false,
-            "description": "Update at least one of title, description, status, or assigneeAgentId. Core rejects an empty update.",
+            "description": "Atomically update at least one field. User/current Default Lead own responsibility definition. An ordinary current Assignee may patch only status and its matching blockedReason or completionSummary on its own Task. Core authorization and field-level mutation rules are authoritative.",
             "required": ["taskId", "expectedVersion"],
             "properties": {
                 "taskId": {"type": "string", "minLength": 1},
@@ -518,7 +507,7 @@ impl TeamToolService {
                 },
                 "clearAssignee": {
                     "type": "boolean",
-                    "description": "Set true to release the Task into the unassigned pool. Must not be combined with assigneeAgentId."
+                    "description": "User/Default Lead only. Set true with final status pending to place the Task in the unassigned holding/recovery state. Must not be combined with assigneeAgentId."
                 },
                 "blockedReason": {"type": "string", "minLength": 1, "maxLength": 4000},
                 "completionSummary": {"type": "string", "minLength": 1, "maxLength": 4000},
@@ -549,7 +538,7 @@ impl TeamToolService {
                 },
                 "unassignedOnly": {
                     "type": "boolean",
-                    "description": "Set true to return only Tasks in the shared unassigned pool. Must not be combined with assigneeAgentId."
+                    "description": "Set true to return only Tasks in the unassigned holding/recovery state. Must not be combined with assigneeAgentId."
                 },
                 "limit": {"type": "integer", "minimum": 1, "maximum": 100},
                 "cursor": {"type": "string", "minLength": 1}
@@ -1178,18 +1167,10 @@ impl TeamToolService {
             &supplied_credential_digest,
             attested_run,
         )?;
-        if invocation.input.clear_assignee
-            && matches!(invocation.input.assignee_agent_id, NullableInput::Value(_))
-        {
+        if invocation.input.clear_assignee && invocation.input.assignee_agent_id.is_some() {
             return Err(invocation_error(
                 "team_tool.invalid_input",
                 "clearAssignee cannot be combined with assigneeAgentId",
-            ));
-        }
-        if matches!(invocation.input.assignee_agent_id, NullableInput::Null) {
-            return Err(invocation_error(
-                "team_tool.invalid_input",
-                "assigneeAgentId must not be null; use clearAssignee",
             ));
         }
         if invocation.input.clear_acceptance_criteria
@@ -1205,9 +1186,8 @@ impl TeamToolService {
             invocation.input.clear_assignee,
         ) {
             (_, true) => TaskAssigneeUpdate::Clear,
-            (NullableInput::Missing, false) => TaskAssigneeUpdate::Unchanged,
-            (NullableInput::Null, false) => unreachable!("null assignee rejected above"),
-            (NullableInput::Value(agent_id), false) => TaskAssigneeUpdate::Assign {
+            (None, false) => TaskAssigneeUpdate::Unchanged,
+            (Some(agent_id), false) => TaskAssigneeUpdate::Assign {
                 agent_id: agent_id.clone(),
             },
         };
@@ -1282,9 +1262,7 @@ impl TeamToolService {
             &supplied_credential_digest,
             attested_run,
         )?;
-        if invocation.input.unassigned_only
-            && matches!(invocation.input.assignee_agent_id, NullableInput::Value(_))
-        {
+        if invocation.input.unassigned_only && invocation.input.assignee_agent_id.is_some() {
             return Err(invocation_error(
                 "team_tool.invalid_input",
                 "unassignedOnly cannot be combined with assigneeAgentId",
@@ -1295,9 +1273,8 @@ impl TeamToolService {
             invocation.input.unassigned_only,
         ) {
             (_, true) => TaskAssigneeFilter::Unassigned,
-            (NullableInput::Missing, false) => TaskAssigneeFilter::Any,
-            (NullableInput::Null, false) => TaskAssigneeFilter::Unassigned,
-            (NullableInput::Value(agent_id), false) => TaskAssigneeFilter::Agent {
+            (None, false) => TaskAssigneeFilter::Any,
+            (Some(agent_id), false) => TaskAssigneeFilter::Agent {
                 agent_id: agent_id.clone(),
             },
         };
@@ -1693,7 +1670,7 @@ mod tests {
                             camp_id: camp_id.clone(),
                             title: "Collaborative task".to_string(),
                             description: "Exercise A2A execution".to_string(),
-                            assignee_agent_id: Some("agent_1".to_string()),
+                            assignee_agent_id: "agent_1".to_string(),
                             ..Default::default()
                         },
                     ),
@@ -2119,7 +2096,7 @@ mod tests {
                         camp_id: fixture.camp_id.clone(),
                         title: "Target-owned source identity task".to_string(),
                         description: "Freeze the Public A2A sender identity".to_string(),
-                        assignee_agent_id: Some("agent_2".to_string()),
+                        assignee_agent_id: "agent_2".to_string(),
                         ..Default::default()
                     },
                 ),
@@ -2313,7 +2290,7 @@ mod tests {
                         camp_id: fixture.camp_id.clone(),
                         title: "Frozen notice task".to_string(),
                         description: "Exercise exact Run Notice bytes".to_string(),
-                        assignee_agent_id: Some("agent_2".to_string()),
+                        assignee_agent_id: "agent_2".to_string(),
                         ..Default::default()
                     },
                 ),
@@ -2609,7 +2586,7 @@ mod tests {
             "status": "in_progress"
         }))
         .unwrap();
-        assert_eq!(missing.assignee_agent_id, NullableInput::Missing);
+        assert_eq!(missing.assignee_agent_id, None);
         assert!(!missing.clear_assignee);
         let clear = serde_json::from_value::<TeamUpdateTaskInput>(json!({
             "taskId": "task-1",
@@ -2617,7 +2594,7 @@ mod tests {
             "clearAssignee": true
         }))
         .unwrap();
-        assert_eq!(clear.assignee_agent_id, NullableInput::Missing);
+        assert_eq!(clear.assignee_agent_id, None);
         assert!(clear.clear_assignee);
         let assign = serde_json::from_value::<TeamUpdateTaskInput>(json!({
             "taskId": "task-1",
@@ -2625,24 +2602,21 @@ mod tests {
             "assigneeAgentId": "agent_1"
         }))
         .unwrap();
-        assert_eq!(
-            assign.assignee_agent_id,
-            NullableInput::Value("agent_1".to_string())
-        );
+        assert_eq!(assign.assignee_agent_id, Some("agent_1".to_string()));
         assert!(!assign.clear_assignee);
-        let legacy_clear = serde_json::from_value::<TeamUpdateTaskInput>(json!({
-            "taskId": "task-1",
-            "expectedVersion": 1,
-            "assigneeAgentId": null
-        }))
-        .unwrap();
-        assert_eq!(legacy_clear.assignee_agent_id, NullableInput::Null);
-        assert!(!legacy_clear.clear_assignee);
+        assert!(
+            serde_json::from_value::<TeamUpdateTaskInput>(json!({
+                "taskId": "task-1",
+                "expectedVersion": 1,
+                "assigneeAgentId": null
+            }))
+            .is_err()
+        );
         let unassigned = serde_json::from_value::<TeamListTasksInput>(json!({
             "unassignedOnly": true
         }))
         .unwrap();
-        assert_eq!(unassigned.assignee_agent_id, NullableInput::Missing);
+        assert_eq!(unassigned.assignee_agent_id, None);
         assert!(unassigned.unassigned_only);
     }
 
@@ -2660,7 +2634,7 @@ mod tests {
             TeamCreateTaskInput {
                 title: "Persistent follow-up".to_string(),
                 description: "Track this across runs".to_string(),
-                assignee_agent_id: None,
+                assignee_agent_id: "agent_1".to_string(),
                 ..Default::default()
             },
         );
@@ -2683,7 +2657,7 @@ mod tests {
             TeamCreateTaskInput {
                 title: "Different payload".to_string(),
                 description: String::new(),
-                assignee_agent_id: None,
+                assignee_agent_id: "agent_1".to_string(),
                 ..Default::default()
             },
         );
@@ -2702,7 +2676,7 @@ mod tests {
                     "list-durable-tasks",
                     TeamListTasksInput {
                         statuses: None,
-                        assignee_agent_id: NullableInput::Missing,
+                        assignee_agent_id: None,
                         unassigned_only: false,
                         limit: 50,
                         cursor: None,
@@ -2719,7 +2693,7 @@ mod tests {
                 title: None,
                 description: None,
                 status: Some(TaskStatus::InProgress),
-                assignee_agent_id: NullableInput::Value("agent_1".to_string()),
+                assignee_agent_id: Some("agent_1".to_string()),
                 clear_assignee: false,
                 ..Default::default()
             },
@@ -2738,7 +2712,7 @@ mod tests {
     }
 
     #[test]
-    fn task_tool_reads_apply_current_lead_scope_without_audit_writes() {
+    fn task_tool_reads_are_camp_wide_without_audit_writes() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
         fixture
@@ -2759,7 +2733,7 @@ mod tests {
                         camp_id: fixture.camp_id.clone(),
                         title: "Muwa private assignment".to_string(),
                         description: String::new(),
-                        assignee_agent_id: Some("agent_2".to_string()),
+                        assignee_agent_id: "agent_2".to_string(),
                         ..Default::default()
                     },
                 ),
@@ -2778,7 +2752,7 @@ mod tests {
                     "ordinary-member-list",
                     TeamListTasksInput {
                         statuses: None,
-                        assignee_agent_id: NullableInput::Missing,
+                        assignee_agent_id: None,
                         unassigned_only: false,
                         limit: 100,
                         cursor: None,
@@ -2786,17 +2760,35 @@ mod tests {
                 ),
             )
             .unwrap();
-        assert!(!listed.tasks.iter().any(|task| task.task_id == hidden_id));
+        let visible = listed
+            .tasks
+            .iter()
+            .find(|task| task.task_id == hidden_id)
+            .expect("ordinary current Camp Agent should see every Camp Task");
+        assert!(visible.available_actions.is_empty());
         let event_count_after: i64 = fixture
             .database
             .connection()
             .query_row("SELECT COUNT(*) FROM event_log", [], |row| row.get(0))
             .unwrap();
         assert_eq!(event_count_after, event_count_before);
+
+        let forbidden_invocation = fixture.task_invocation(
+            "ordinary-member-create-forbidden",
+            TeamCreateTaskInput {
+                title: "Ordinary member cannot define responsibility".to_string(),
+                assignee_agent_id: "agent_1".to_string(),
+                ..Default::default()
+            },
+        );
+        let forbidden = service
+            .create_task(&mut fixture.database, &forbidden_invocation)
+            .unwrap();
+        assert_eq!(forbidden.result.code, "task.create_forbidden");
     }
 
     #[test]
-    fn task_tool_write_is_available_to_every_member_and_keeps_version_fencing() {
+    fn task_tool_lead_creation_ignores_capability_catalog_and_keeps_version_fencing() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
         let current_config: String = fixture
@@ -2829,7 +2821,7 @@ mod tests {
             TeamCreateTaskInput {
                 title: "Must not exist".to_string(),
                 description: String::new(),
-                assignee_agent_id: None,
+                assignee_agent_id: "agent_1".to_string(),
                 ..Default::default()
             },
         );
@@ -2855,7 +2847,7 @@ mod tests {
                 title: Some("Must not overwrite".to_string()),
                 description: None,
                 status: None,
-                assignee_agent_id: NullableInput::Missing,
+                assignee_agent_id: None,
                 clear_assignee: false,
                 ..Default::default()
             },

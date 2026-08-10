@@ -72,7 +72,7 @@ Related: ADR-0100 的 Session identity delivery 位于 session-context-bootstrap
 
 - **何时阅读：** 修改 A2A、Task、Message、Delivery、协作责任或公共输出时阅读。
 - **当前架构：** [Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
-- **当前合同：** [Durable Task v2](../contracts/durable-task-v2.md)、[Camp Message Send v2](../contracts/camp-message-send-v2.md)、[Message Delivery v1](../contracts/message-delivery-v1.md)
+- **当前合同：** [Durable Task v3](../contracts/durable-task-v3.md)、[Camp Message Send v2](../contracts/camp-message-send-v2.md)、[Message Delivery v1](../contracts/message-delivery-v1.md)
 
 <!-- adr-current-primary:begin topic=collaboration-task-message -->
 | ADR | Decision |
@@ -120,7 +120,7 @@ Related: Session redelivery、Skill/MCP projection 与 Qualification 分别保�
 
 - **何时阅读：** 修改 Native Session、Bootstrap、Dynamic Context、Profile、redelivery 或 accepted-input ACK 时阅读。
 - **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Native Session Bootstrap Redelivery](../architecture/native-session-bootstrap-redelivery.md)、[Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)
-- **当前合同：** [Context Delivery Profile v2](../contracts/context-delivery-profile-v2.md)、[Collaboration State v2](../contracts/collaboration-state-v2.md)
+- **当前合同：** [Context Delivery Profile v3](../contracts/context-delivery-profile-v3.md)、[ContextManifest Evidence v10](../contracts/context-manifest-evidence-v10.md)、[Collaboration State v2](../contracts/collaboration-state-v2.md)
 
 <!-- adr-current-primary:begin topic=session-context-bootstrap -->
 | ADR | Decision |
@@ -139,6 +139,7 @@ Related: Session redelivery、Skill/MCP projection 与 Qualification 分别保�
 | [ADR-0143](0143-best-effort-non-blocking-compaction-detector-capability.md) | Best-Effort Non-Blocking Compaction Detector Capability |
 | [ADR-0147](0147-lossless-model-context-projection-and-layered-delivery-evidence.md) | Lossless Model Context Projection and Layered Delivery Evidence |
 | [ADR-0149](0149-bounded-whole-history-omission-evidence.md) | Bounded Whole-History Omission Evidence |
+| [ADR-0152](0152-lead-owned-task-responsibility-and-self-active-task-awareness.md) | Lead-Owned Task Responsibility and Self-Active Task Awareness |
 <!-- adr-current-primary:end -->
 
 Related: Member identity、Message delivery、Memory entrypoint 与 Evidence 仍从各自 primary 主题进入。
@@ -169,7 +170,7 @@ Related: Session entrypoint 与 Built-in operation 只作为交叉导航，不�
 
 - **何时阅读：** 修改 Skill/MCP projection、Built-in transport、CLI、catalog 或 Agent output 时阅读。
 - **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
-- **当前合同：** [Built-in Tool Transport v4](../contracts/builtin-tool-transport-v4.md)
+- **当前合同：** [Built-in Tool Transport v5](../contracts/builtin-tool-transport-v5.md)
 
 <!-- adr-current-primary:begin topic=skills-mcp-builtins -->
 | ADR | Decision |

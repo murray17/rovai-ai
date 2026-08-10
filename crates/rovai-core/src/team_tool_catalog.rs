@@ -306,11 +306,7 @@ fn task_list_success_schema() -> Value {
                     "type": "object",
                     "additionalProperties": false,
                     "required": [
-                        "taskId", "title", "status", "assigneeAgentId",
-                        "createdByType", "createdById", "descriptionPreview",
-                        "descriptionTruncated", "acceptanceCriteriaCount",
-                        "statusNotePreview", "statusNoteTruncated", "version",
-                        "createdAt", "updatedAt", "availableActions"
+                        "taskId", "title", "status", "assigneeAgentId", "availableActions"
                     ],
                     "properties": {
                         "taskId": {"type": "string"},
@@ -320,20 +316,9 @@ fn task_list_success_schema() -> Value {
                             "enum": ["pending", "in_progress", "blocked", "completed", "cancelled"]
                         },
                         "assigneeAgentId": {"type": ["string", "null"]},
-                        "createdByType": {"type": "string"},
-                        "createdById": {"type": "string"},
-                        "descriptionPreview": {"type": "string", "maxLength": 240},
-                        "descriptionTruncated": {"type": "boolean"},
-                        "acceptanceCriteriaCount": {"type": "integer", "minimum": 0, "maximum": 12},
-                        "statusNotePreview": {"type": ["string", "null"], "maxLength": 240},
-                        "statusNoteTruncated": {"type": "boolean"},
-                        "version": {"type": "integer", "minimum": 1},
-                        "createdAt": {"type": "string", "format": "date-time"},
-                        "updatedAt": {"type": "string", "format": "date-time"},
-                        "closedAt": {"type": ["string", "null"], "format": "date-time"},
                         "availableActions": {
                             "type": "array",
-                            "items": {"type": "string"},
+                            "items": {"type": "string", "enum": ["update"]},
                             "uniqueItems": true
                         }
                     }
@@ -393,7 +378,7 @@ fn task_detail_success_schema(include_changed: bool) -> Value {
         "createdAt": {"type": "string", "format": "date-time"},
         "updatedAt": {"type": "string", "format": "date-time"},
         "closedAt": {"type": ["string", "null"], "format": "date-time"},
-        "availableActions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "enum": ["update", "claim"]}}
+        "availableActions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "enum": ["update"]}}
     });
     if include_changed {
         properties["changed"] = json!({"type": "boolean"});
@@ -509,28 +494,28 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
         json!({
             "name": TEAM_CREATE_TASK_TOOL_NAME,
             "title": "Create a durable Task",
-            "description": "Create a long-lived responsibility. Assignment records ownership but does not notify or wake the assignee.",
+            "description": "Create a durable Camp responsibility only when work must persist across AgentRuns or handoffs, has one explicit current Camp owner, and can independently complete, block, or transfer. Prefer advancing an existing Task. Do not create Tasks for analysis, consultation, one-off review, tool operations, local plans, A2A requests, or steps inside another Task. Only the User or current Default Lead may create. Creation does not notify, wake, or start the Assignee; use rovai send --task-id when execution must begin now.",
             "inputSchema": TeamToolService::create_task_input_schema(),
             "outputSchema": task_detail_success_schema(false)
         }),
         json!({
             "name": TEAM_GET_TASK_TOOL_NAME,
             "title": "Get a durable Task",
-            "description": "Read one full visible Task by stable taskId.",
+            "description": "Read one complete current Camp Task by stable taskId. Every current fenced Camp Agent has the same read scope; this read grants no write authority. Use it to obtain full content and current version before updating. availableActions is advisory capability metadata. Core authorization and field-level mutation rules are authoritative.",
             "inputSchema": TeamToolService::get_task_input_schema(),
             "outputSchema": task_detail_success_schema(false)
         }),
         json!({
             "name": TEAM_UPDATE_TASK_TOOL_NAME,
             "title": "Update a durable Task",
-            "description": "Atomically edit an authorized non-terminal Task using its current version. A successful update does not wake an assignee.",
+            "description": "Atomically update an authorized non-terminal Task using its current version. User/current Default Lead own responsibility definition; an ordinary current Assignee may update only status and its matching blockedReason or completionSummary on its own Task. availableActions is advisory capability metadata; Core authorization and field-level mutation rules are authoritative. A successful update does not wake an Assignee.",
             "inputSchema": TeamToolService::update_task_input_schema(),
             "outputSchema": task_detail_success_schema(true)
         }),
         json!({
             "name": TEAM_LIST_TASKS_TOOL_NAME,
-            "title": "List visible Tasks",
-            "description": "Read a current Task snapshot visible to this Agent. Lead sees all; other members see their own and unassigned Tasks. This is not a waiting primitive: never combine it with sleep or repeated calls to poll for state changes.",
+            "title": "List Camp Tasks",
+            "description": "Read a bounded page of minimal Task summaries for the current Camp. Every current fenced Camp Agent has the same read scope; this read grants no write authority. availableActions is advisory capability metadata. Core authorization and field-level mutation rules are authoritative. Use rovai task get for full content and current version. This is not a waiting primitive and must not be polled.",
             "inputSchema": TeamToolService::list_tasks_input_schema(),
             "outputSchema": task_list_success_schema()
         }),

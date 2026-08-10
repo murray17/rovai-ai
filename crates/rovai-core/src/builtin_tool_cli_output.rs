@@ -128,7 +128,7 @@ fn task_mutation_agent_schema(include_changed: bool) -> Value {
         "status": {"type": "string", "enum": ["pending", "in_progress", "blocked", "completed", "cancelled"]},
         "assigneeAgentId": {"type": ["string", "null"]},
         "version": {"type": "integer", "minimum": 1},
-        "availableActions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "enum": ["update", "claim"]}}
+        "availableActions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "enum": ["update"]}}
     });
     if include_changed {
         properties["changed"] = json!({"type": "boolean"});
@@ -455,7 +455,7 @@ mod tests {
     #[test]
     fn every_operation_has_a_schema_valid_golden_projection() {
         let golden: Value = serde_json::from_str(include_str!(
-            "../tests/fixtures/builtin-tool-agent-output-v4.json"
+            "../tests/fixtures/builtin-tool-agent-output-v5.json"
         ))
         .unwrap();
         let documents = golden.as_object().unwrap();

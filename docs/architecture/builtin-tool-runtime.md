@@ -9,8 +9,8 @@ last_updated: 2026-08-09
 # Built-in Tool Runtime Architecture
 
 本文件说明 Rovai built-in operations 的长期组件结构。当前字段与版本以
-[Built-in Tool Transport v4](../contracts/builtin-tool-transport-v4.md)、
-[Durable Task v2](../contracts/durable-task-v2.md) 和
+[Built-in Tool Transport v5](../contracts/builtin-tool-transport-v5.md)、
+[Durable Task v3](../contracts/durable-task-v3.md) 和
 [Camp Message Send v2](../contracts/camp-message-send-v2.md) 为准；v3 及更早 Transport 只保留
 historical 语义。决策理由见
 [ADR-0124](../adr/0124-cli-only-transport-for-rovai-built-in-operations.md)、
@@ -27,7 +27,9 @@ Runtime Input Delivery Evidence 与 Profile/Formatter/Manifest 权责见
 [ADR-0147](../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)；whole-history
 omission 的 bounded aggregate 边界见
 [ADR-0149](../adr/0149-bounded-whole-history-omission-evidence.md)和
-[ContextManifest Evidence v9](../contracts/context-manifest-evidence-v9.md)。
+[ContextManifest Evidence v10](../contracts/context-manifest-evidence-v10.md)。Task authority 与
+self-active awareness 见
+[ADR-0152](../adr/0152-lead-owned-task-responsibility-and-self-active-task-awareness.md)。
 
 ## 总体路径
 
@@ -172,24 +174,16 @@ Session Charter 只说明：
 - 使用 bundled `rovai`；
 - 固定业务命令和 `<command> --help`；
 - `camp.message.send` 使用当前 Run Camp，不能传入 Camp ID；
-- Task mutation 不通知或启动队员，Task get/list 不等待或轮询；later Task changes 不 retarget 已
-  accepted Run；
+- Task responsibility definition belongs to the User or current Camp Default Lead；
 - Public Message、Message Delivery、Memory 和 read 工具保持各自稳定业务原则；
 - Dynamic Context 可能截断或省略：单条正文只使用可直接提交给 canonical operation schema 的
   executable continuation；整条历史的 sequence envelope 只是 navigation hint；公共 A2A 遵循
-  Profile v2 的 bounded reference closure。
+  Profile v3 的 bounded reference closure 与 self-active Task selection。
 
-Charter 对额外成员协作发送使用固定强制文案：
-
-```text
-Completing a Task or the current work does not by itself require an additional
-peer-coordination send. Use an additional `rovai send` for peer coordination
-only when a target Member needs the message to continue acting or decide.
-This rule does not replace Runtime-specific public-output delivery requirements.
-```
-
-该规则只约束 additional peer-coordination send，不把 `rovai send` 的全部用途收窄为成员协作。Runtime
-需要通过 `rovai send` 交付普通用户可见结果时，仍遵守其 public-output delivery contract。
+Charter 不承载 Task 创建克制、字段权限、Camp-wide read、local planning/A2A、wake/send 或 polling
+操作指导。它们分别属于 `task create/get/update/list --help` 与当前 Task contract。特别是
+`task create --help` 面向 User/Default Lead 说明只持久化跨 Run/交接的独立责任，并优先推进已有
+Task；Core 不做语义去重。
 
 Bootstrap 不含完整 Schema、Envelope、receipt、catalog digest、socket、process token、lease、
 AgentRun ID、epoch、Camp ID 或 Native Binding ID。只有无损映射到当前 schema 的完整 operation/input
@@ -219,17 +213,30 @@ Bootstrap v3 按固定顺序组装 Session Charter、`MEMBER_IDENTITY` 和 Memor
 既有 eligible Bootstrap boundary 原子读取，不进入 AgentRun Dynamic Context，不持久化 Identity
 Blob、snapshot、digest 或 history。身份编辑不轮换 Session，也不构造下一 Run 的 patch。
 
-Context Formatter v11 的 `COLLABORATION_STATE` schema v2 只描述 peers。Core 从 stable current
+Context Formatter v12 的 `COLLABORATION_STATE` schema v2 只描述 peers。Core 从 stable current
 CampMembers 中排除 `snapshot.agent_id`；away 和 leave-requested 关系保留到正式 `left`。每个 peer
 只含 Agent ID、Name、Team Role 和 Professional Responsibilities；Default Lead 只以
 `defaultLeadAgentId` 和派生的 `selfIsDefaultLead` 表达。调用资格仍在 BuiltinToolRouter/Domain
 Service admission 时按当前 membership、Presence、Runtime、Capability、quota 与 fence 重判。
 
-Core 先构建完整 v2 projection，再计算 `collaboration_state_digest`。ContextManifest v9 无论本轮是否
+Core 先构建完整 v2 projection，再计算 `collaboration_state_digest`。ContextManifest v10 无论本轮是否
 渲染 section 都冻结该完整 digest，并以 `collaborationStateIncluded` 单独记录 inclusion。只有 Runtime
 Input accepted ACK 才把 `conversation.native_collaboration_state_digest` 推进到 Delivery 冻结的完整
 digest；failure、`delivery_unknown` 和未 accepted 输入不推进。因此 self identity 编辑和其他不改变
 模型投影的内部变化不会形成重复 Collaboration State 或部分 self update。
+
+### Self Active Task Projection
+
+Profile v3 对目标 Agent 当前 Camp 中自己负责的 active Task 按 `updatedAt DESC, taskId DESC` 选择最多
+八项。Formatter v12 在 `COLLABORATION_STATE` 后、`SHARED_CONVERSATION` 前独立输出 compact
+`SELF_ACTIVE_TASKS`，每项只有 `taskId/title/status`；空 selection 不输出。Default Lead 不获得其他
+成员 Task 的隐式 projection。公共历史先为 Runtime budget 让位，随后从 Task tail 移除，并以 aggregate
+`omittedCount` 说明 selection/budget omission。
+
+ContextManifest v10 冻结 inclusion、有序 `taskId/version/updatedAt` references、optional omission count
+与 exact projection digest；A2A preflight 和 direct materialization 使用同一 selector。该 Evidence 不
+创建 freshness watermark、delta 或 ACK，恢复只复用冻结 bytes。完整共享面板通过 Camp-wide
+`task list/get` 按需读取，所有 mutation 继续读取 live Task 并由 Core 重授权。
 
 ### Context compaction redelivery accounting
 
@@ -295,5 +302,5 @@ Activity。命令文本、时间、cwd 或输出相似度不能建立关联。Sh
   退出码 `3`，必须先确认当前状态；
 - `camp.message.send` 的内部 Camp 不变量失败：fail closed，不加入稳定 Agent error contract；
 - external MCP 失败：遵循其独立 non-blocking degradation，不回退为 built-in MCP；
-- 任一正式 Runtime 未通过 v4 command、projection、replay、fence 和 negative-path 验收：版本不
+- 任一正式 Runtime 未通过 v5 command、projection、replay、fence 和 negative-path 验收：版本不
   得完成。

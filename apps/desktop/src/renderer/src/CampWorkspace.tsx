@@ -3054,6 +3054,10 @@ export function TaskPanel({
   const submitCreate = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
     if (!title.trim() || submitting || busy) return
+    if (!assigneeAgentId) {
+      setFormError('请选择负责人。')
+      return
+    }
     setSubmitting(true)
     setFormError(null)
     try {
@@ -3063,7 +3067,7 @@ export function TaskPanel({
         title: title.trim(),
         description: description.trim(),
         acceptanceCriteria: parseAcceptanceCriteria(acceptanceCriteriaText),
-        ...(assigneeAgentId ? { assigneeAgentId } : {})
+        assigneeAgentId
       })
       if (result.status === 'rejected') {
         setFormError(taskCommandMessage(result))
@@ -3193,6 +3197,7 @@ export function TaskPanel({
             members={activeMembers}
             disabled={submitting || busy}
             showStatus={false}
+            requireAssignee
             onTitle={setTitle}
             onDescription={setDescription}
             onAcceptanceCriteria={setAcceptanceCriteriaText}
@@ -3272,6 +3277,7 @@ function TaskFields({
   members,
   disabled,
   showStatus,
+  requireAssignee = false,
   onTitle,
   onDescription,
   onAcceptanceCriteria,
@@ -3291,6 +3297,7 @@ function TaskFields({
   members: CampSnapshot['members']
   disabled: boolean
   showStatus: boolean
+  requireAssignee?: boolean
   onTitle(value: string): void
   onDescription(value: string): void
   onAcceptanceCriteria(value: string): void
@@ -3308,7 +3315,7 @@ function TaskFields({
       <label className="task-field"><span>说明</span><textarea value={description} rows={4} maxLength={8000} disabled={disabled} onChange={(event) => onDescription(event.currentTarget.value)} placeholder="记录需要跨消息持续跟踪的责任与边界…" /></label>
       <label className="task-field"><span>验收条件（每行一项，最多 12 项）</span><textarea value={acceptanceCriteriaText} rows={3} maxLength={6000} disabled={disabled} onChange={(event) => onAcceptanceCriteria(event.currentTarget.value)} /></label>
       <div className="task-field-grid">
-        <label className="task-field"><span>负责人</span><select value={assigneeAgentId} disabled={disabled} onChange={(event) => onAssignee(event.currentTarget.value)}><option value="">未分配</option>{unavailableAssignee && <option value={assigneeAgentId}>队员不可用</option>}{members.map((member) => <option value={member.agentId} key={member.agentId}>{member.displayName}{member.profilePresence === 'away' ? '（离开）' : ''}</option>)}</select></label>
+        <label className="task-field"><span>负责人</span><select value={assigneeAgentId} required={requireAssignee} disabled={disabled} onChange={(event) => onAssignee(event.currentTarget.value)}><option value="">{requireAssignee ? '请选择负责人' : '未分配'}</option>{unavailableAssignee && <option value={assigneeAgentId}>队员不可用</option>}{members.map((member) => <option value={member.agentId} key={member.agentId}>{member.displayName}{member.profilePresence === 'away' ? '（离开）' : ''}</option>)}</select></label>
         {showStatus && <label className="task-field"><span>状态</span><select value={status} disabled={disabled} onChange={(event) => onStatus(event.currentTarget.value as TaskStatus)}><option value="pending">待处理</option><option value="in_progress">进行中</option><option value="blocked">已阻塞</option><option value="completed">已完成</option>{status === 'cancelled' && <option value="cancelled">已取消</option>}</select></label>}
       </div>
       {showStatus && status === 'blocked' && <label className="task-field"><span>阻塞原因</span><textarea value={blockedReason} rows={3} maxLength={4000} required disabled={disabled} onChange={(event) => onBlockedReason(event.currentTarget.value)} /></label>}

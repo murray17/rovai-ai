@@ -163,4 +163,5 @@ generated_from: docs/adr-front-matter
 | [ADR-0149](0149-bounded-whole-history-omission-evidence.md) | Bounded Whole-History Omission Evidence | `accepted` | `cross-version` | [v0.52](../versions/v0.52/README.md) | — |
 | [ADR-0150](0150-evidence-first-agent-codebase-analysis-bundled-skill.md) | Evidence-First Agent Codebase Analysis Bundled Skill | `accepted` | `cross-version` | [v0.52](../versions/v0.52/README.md) | — |
 | [ADR-0151](0151-versioned-benchmark-protocol-and-axis-comparability.md) | Versioned Benchmark Protocol and Axis-Scoped Comparability | `accepted` | `cross-version` | [v0.53](../versions/v0.53/README.md) | — |
+| [ADR-0152](0152-lead-owned-task-responsibility-and-self-active-task-awareness.md) | Lead-Owned Task Responsibility and Self-Active Task Awareness | `accepted` | `cross-version` | [v0.54](../versions/v0.54/README.md) | — |
 <!-- adr-history:end -->
