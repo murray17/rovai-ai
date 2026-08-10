@@ -1510,6 +1510,10 @@ export function App(): React.JSX.Element {
         }}
         onCamp={chooseCamp}
         onTogglePin={toggleNavigationPin}
+        onCampIdCopied={() => {
+          setError(null)
+          setToast('已复制会话 ID')
+        }}
         onRename={renameCamp}
         onDelete={deleteCamp}
         onStop={stopCampRuns}

@@ -61,7 +61,7 @@ try {
 
   const campTarget = `camp:${fixture.actionCampId}`
   await openMenuByKeyboard(desktopApp.cdp, campTarget)
-  await assertOpenMenu(desktopApp.cdp, campTarget, ['置顶', '重命名', '删除'], 1, '置顶')
+  await assertOpenMenu(desktopApp.cdp, campTarget, ['置顶', '重命名', '复制会话 ID', '删除'], 1, '置顶')
   await pressKey(desktopApp.cdp, 'End')
   await assertHighlightedItem(desktopApp.cdp, '删除')
   await pressKey(desktopApp.cdp, 'Home')
@@ -69,15 +69,18 @@ try {
   await pressKey(desktopApp.cdp, 'ArrowDown')
   await assertHighlightedItem(desktopApp.cdp, '重命名')
   await pressKey(desktopApp.cdp, 'ArrowDown')
+  await assertHighlightedItem(desktopApp.cdp, '复制会话 ID')
+  await pressKey(desktopApp.cdp, 'ArrowDown')
   await assertHighlightedItem(desktopApp.cdp, '删除')
   await pressKey(desktopApp.cdp, 'Escape')
   await assertMenuClosedWithFocus(desktopApp.cdp, campTarget)
+  await assertCampIdCopy(desktopApp.cdp, campTarget, fixture.actionCampId)
 
   await openMenuByKeyboard(desktopApp.cdp, campTarget)
   await pressKey(desktopApp.cdp, 'Enter')
   await assertTargetMoved(desktopApp.cdp, campTarget, '.pinned-navigation')
   await openMenuByKeyboard(desktopApp.cdp, campTarget)
-  await assertOpenMenu(desktopApp.cdp, campTarget, ['取消置顶', '重命名', '删除'], 1, '取消置顶')
+  await assertOpenMenu(desktopApp.cdp, campTarget, ['取消置顶', '重命名', '复制会话 ID', '删除'], 1, '取消置顶')
   const pinnedCampMenuCapture = join(outputDir, 'camp-menu-pinned-day-1440x920.png')
   await capture(desktopApp.cdp, pinnedCampMenuCapture)
   await pressKey(desktopApp.cdp, 'Enter')
@@ -129,7 +132,7 @@ try {
     return Boolean(trigger)
   })()`)
   await openMenuByKeyboard(compactApp.cdp, compactTarget)
-  await assertOpenMenu(compactApp.cdp, compactTarget, ['置顶', '重命名', '删除'], 1, '置顶')
+  await assertOpenMenu(compactApp.cdp, compactTarget, ['置顶', '重命名', '复制会话 ID', '删除'], 1, '置顶')
   const compactMenuCapture = join(outputDir, 'camp-menu-compact-1040x700-reduced-motion.png')
   await capture(compactApp.cdp, compactMenuCapture)
   await pressKey(compactApp.cdp, 'Escape')
@@ -159,6 +162,7 @@ try {
       hoverFocusOpenAndCoarsePointerVisibility: true,
       questionMarkHelpIsHoverOnly: true,
       arrowHomeEndEscapeAndOutsideClick: true,
+      copiesExactCampId: true,
       projectAndCampPinMigrationWithFocus: true,
       renameAndDeleteDialogs: true,
       permanentDelete: true,
@@ -745,6 +749,59 @@ async function assertMenuClosedWithFocus(cdp, target) {
     throw new Error(`Escape did not close the sidebar menu: ${JSON.stringify(state)}`)
   }
   await waitForTargetFocus(cdp, target)
+}
+
+async function assertCampIdCopy(cdp, target, expectedCampId) {
+  const installed = await evaluate(cdp, `(() => {
+    const clipboard = navigator.clipboard
+    if (!clipboard || typeof clipboard.writeText !== 'function') return false
+    window.__rovaiSidebarClipboardHadOwnWriteText = Object.prototype.hasOwnProperty.call(clipboard, 'writeText')
+    window.__rovaiSidebarClipboardWriteTextDescriptor = Object.getOwnPropertyDescriptor(clipboard, 'writeText')
+    window.__rovaiSidebarCopiedText = null
+    try {
+      Object.defineProperty(clipboard, 'writeText', {
+        configurable: true,
+        value: async (text) => { window.__rovaiSidebarCopiedText = text }
+      })
+      return true
+    } catch {
+      return false
+    }
+  })()`)
+  assert(installed, 'Could not install the isolated clipboard spy')
+
+  try {
+    await openMenuByKeyboard(cdp, target)
+    await assertHighlightedItem(cdp, '置顶')
+    await pressKey(cdp, 'ArrowDown')
+    await assertHighlightedItem(cdp, '重命名')
+    await pressKey(cdp, 'ArrowDown')
+    await assertHighlightedItem(cdp, '复制会话 ID')
+    await pressKey(cdp, 'Enter')
+    await waitForExpression(cdp, `window.__rovaiSidebarCopiedText === ${JSON.stringify(expectedCampId)}`)
+    await waitForExpression(cdp, `document.querySelector('.app-toast')?.textContent?.includes('已复制会话 ID') === true`)
+    await waitForTargetFocus(cdp, target)
+    const state = await evaluate(cdp, `({
+      copiedText: window.__rovaiSidebarCopiedText,
+      menuOpen: Boolean(document.querySelector('.sidebar-action-menu[data-state="open"]')),
+      toast: document.querySelector('.app-toast')?.textContent?.trim() ?? null
+    })`)
+    assert(state.copiedText === expectedCampId && !state.menuOpen && state.toast?.includes('已复制会话 ID'),
+      `Camp ID copy semantics were incorrect: ${JSON.stringify(state)}`)
+  } finally {
+    await evaluate(cdp, `(() => {
+      const clipboard = navigator.clipboard
+      const hadOwn = window.__rovaiSidebarClipboardHadOwnWriteText
+      const descriptor = window.__rovaiSidebarClipboardWriteTextDescriptor
+      if (clipboard) {
+        if (hadOwn && descriptor) Object.defineProperty(clipboard, 'writeText', descriptor)
+        else delete clipboard.writeText
+      }
+      delete window.__rovaiSidebarClipboardHadOwnWriteText
+      delete window.__rovaiSidebarClipboardWriteTextDescriptor
+      delete window.__rovaiSidebarCopiedText
+    })()`)
+  }
 }
 
 async function assertTargetMoved(cdp, target, containerSelector) {

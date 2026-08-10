@@ -39,6 +39,7 @@ import {
 import { MemberAvatar } from './MemberAvatar'
 import { MemberPortrait } from './MemberPortrait'
 import { localizeExecutionEngineTerms } from './product-copy'
+import { writeClipboardText } from './clipboard'
 import { runtimeReadinessLabel } from './runtime-status'
 import { SafeMarkdown } from './SafeMarkdown'
 import { identityColorToken } from './theme'
@@ -3399,26 +3400,6 @@ function taskCommandMessage(result: StoredCommandResult): string {
     'task.version_conflict': 'Task 已被其他操作更新，请刷新后重试。'
   }
   return messages[result.code] ?? `Core 拒绝了这次修改：${result.code}`
-}
-
-async function writeClipboardText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text)
-    return true
-  } catch {
-    const textarea = document.createElement('textarea')
-    textarea.value = text
-    textarea.setAttribute('readonly', '')
-    textarea.style.position = 'fixed'
-    textarea.style.opacity = '0'
-    document.body.appendChild(textarea)
-    textarea.select()
-    try {
-      return document.execCommand('copy')
-    } finally {
-      textarea.remove()
-    }
-  }
 }
 
 function shortIdentity(value: string): string {

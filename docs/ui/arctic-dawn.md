@@ -5,7 +5,7 @@ status: accepted
 design_direction: arctic-dawn-v3
 target_version: v0.49
 implementation_status: in_progress
-last_updated: 2026-08-09
+last_updated: 2026-08-10
 ---
 
 # Arctic Dawn V3 设计规范
@@ -265,7 +265,9 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
   列表。已经读取的缓存跨项目折叠与置顶位置变化保留，“收起”只把可见数量恢复为 5，之后再次
   “查看更多”优先恢复缓存，不重复请求。
 - Camp 行显示标题、运行/未读完成等权威 Navigation marker 和唯一三点菜单。菜单固定
-  包含“置顶/取消置顶、重命名、删除”，删除前有分隔线；普通区与置顶区使用同一结构。
+  包含“置顶/取消置顶、重命名、复制会话 ID、删除”，删除前有分隔线；普通区、置顶区与
+  Pending 草稿使用同一复制动作。复制只把 `NavigationCampItem.id` 原文写入系统剪贴板，
+  成功使用非阻塞 Toast，失败显示可恢复错误，不附加标题、标签或其他内部身份。
 - 可置顶 Project 显示文件夹、展示名、`＋` 和唯一三点菜单，菜单只包含“置顶项目/取消置顶
   项目”。Renderer 维护一个纯本地持久“当前项目”：文件夹/名称主行同时选择该项目并切换 Camp
   children 的展开状态，主行自身通过 `aria-expanded / aria-controls` 表达状态，不显示独立折叠按钮。
@@ -632,12 +634,13 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   “停止”按钮或 `•••` 操作菜单。
 - 没有 Active AgentRun 或 pending Approval 时不渲染空徽标。执行状态摘要打开或聚焦
   执行详情，Approval 摘要打开 Inspector 的“审批”页；两者都不能在 Header
-  直接执行停止、审批、置顶、重命名或删除。
+  直接执行停止、审批、置顶、重命名、复制会话 ID 或删除。
 - 停止入口只占用 Composer 的发送位置，调用当前 CampTurn 整棵 AgentRun/A2A
   执行树的停止命令。进入停止流程后立即显示“正在停止…”并防止重复请求；停止 ACK
   不等待 Navigation 重载、Camp 重新激活或 Git observation。多个 Runtime interrupt
   并行执行并使用独立短 deadline；超时后必须强制终止或完成可靠 fencing。
-- 置顶/取消置顶、重命名和删除统一使用侧栏 Camp 行的三点菜单；顶栏不重复这些操作。
+- 置顶/取消置顶、重命名、复制会话 ID 和删除统一使用侧栏 Camp 行的三点菜单；顶栏不重复
+  这些操作。
 - App Shell 顶部明确分为三种结构：Camp 继续使用显性 50px `AppHeader`；
   Quick Chat 与设置叠加独立、纯结构的 50px 隐形拖拽栏，内容仍跨越 App Shell
   两行；队员与记忆同样使用纯结构的 50px 隐形拖拽栏，但该栏独占第一行，
