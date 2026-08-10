@@ -74,9 +74,26 @@ pnpm accept:diagnostics-ui
 ```
 
 它们分别覆盖长期记忆、成员头像、成员生命周期、应用内通知、统一侧栏、结构化提及和
-Task 单卡原地更新、九 Runtime Canonical Activity 工具名称与 run-level 诚实降级，以及诊断中心
-双尺寸、只读自检、MCP 权限修复复检与 v5 脱敏的桌面回归。
+Task 单卡原地更新、九 Runtime Canonical Activity 工具名称与 run-level 诚实降级、A2A 消息
+Scheme C 转交 footer，以及诊断中心双尺寸、只读自检、MCP 权限修复复检与 v5 脱敏的桌面回归。
 具体 Schema/Migration 编号属于测试 fixture 和版本证据，不是本文的常青要求。
+
+### A2A 消息 footer 门禁
+
+Renderer 的权威行为见 [Arctic Dawn：A2A 会话消息](../ui/arctic-dawn.md#a2a-会话消息)。修改
+Agent 公共正文头部、消息 Delivery footer 或相关 CSS 后，至少运行：
+
+```bash
+pnpm package:mac
+pnpm accept:runtime-activity-ui
+```
+
+受控夹具必须证明：消息正文内不存在 `.message-run-origin`；消息下方不存在
+`.delivery-status-list.is-compact`；双收件人按冻结顺序进入唯一 `.message-delivery-footer`；
+`settled` 不显示“已送达”，失败收件人同时显示 `!` 与“投递失败”；footer 保持透明、零圆角，
+短转交折线使用 1px Arctic Dawn 结构线，且 footer 边界与正文边界的垂直间距不超过 4px，不能形成
+空白行。验收还必须切换到 1040×700，证明 document、timeline
+和 footer 无横向溢出且 footer 留在时间线可视区内。完整 Delivery 列表继续只在执行详情中显示。
 
 ### 结构化 Mention 门禁
 

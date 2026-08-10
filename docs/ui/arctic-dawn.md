@@ -204,12 +204,21 @@ Token 是生产基准；原型中对比度不足的 `--faint` 和控件边界已
   CampMessage，按作者显示并进入公共时间线、公共 FTS、Shared Conversation 和有权历史。
 - 一条公共消息可以关联 `0..N` 个 Message Delivery。公共消息事实只创建一次；Delivery
   负责收件人、队列、等待、目标 AgentRun 和终态，不能被 Renderer 拆成第二条消息或第二套发送。
-- 消息 footer 可以显示“发送给 @队员名…”和 Delivery 状态；footer 只读取冻结的 recipient
-  snapshot，不把展示顺序当作调度优先级。
+- Agent 公共正文前不显示“来自执行 · 队员名”或其他执行来源条；AgentRun 的过程入口继续由
+  执行动态和执行详情承担，不能在正文内重复一条来源导航。
+- A2A 消息固定采用 Scheme C 轻量转交 footer：正文后使用一段无背景、无圆角、无包围边界的
+  短折线与身份点，并在同一阅读宽度内显示“发送给：队员名…”。消息下方不再渲染“投递 / N 个
+  收件人”的 compact 卡片，也不以 Chip、Badge 或第二层列表替代它。转交折线直接附着正文边界，
+  起点只保留 2px 间距，不能在正文与“发送给”之间形成一行空白。
+- footer 只读取冻结的 recipient snapshot，并按 `recipientCanonicalPosition` 显示；该顺序是稳定
+  展示顺序，不表示调度优先级。`settled` 不重复显示“已送达”；`pending`、`running`、`failed`、
+  `cancelled` 与 `interrupted_before_dispatch` 在对应收件人名后原地追加文字状态，失败同时使用
+  `!` 符号和 danger 色。多收件人使用顿号分隔并允许窄窗自然换行。
 - Reply-to 只建立公共关系；回复 Agent-authored Public A2A Message 时 Core 可加入作者作为
   一个默认目标，回复用户或系统事件不新增 Delivery，也不扩展原消息其他收件人。
 - 执行详情展示 Delivery/AgentRun 的过程状态和证据摘要；公共正文仍在消息区直接可读，
-  Drawer、Delivery 或 AgentRun 不得冒充另一个发送者发言，也不创建 result route。
+  完整 Delivery 状态、失败码和运行证据继续留在 Drawer；消息 footer 只承担轻量收件人/异常
+  概览。Drawer、Delivery 或 AgentRun 不得冒充另一个发送者发言，也不创建 result route。
 - 公共正文按持久 sequence 排列；后台 Runtime 到达时间、Scheduler 顺序、canonical recipient
   顺序和 Renderer 选择都不能重排公共时间线。
 

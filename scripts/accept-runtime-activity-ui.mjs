@@ -67,6 +67,26 @@ try {
   })()`)
   await wait(250)
 
+  const handoffFooter = await collectHandoffFooter(app.cdp)
+  assert(handoffFooter.count === 1,
+    `Expected one Scheme C message footer: ${JSON.stringify(handoffFooter)}`)
+  assert(handoffFooter.text.includes('发送给：')
+    && handoffFooter.text.includes('Codex CLI 验收')
+    && handoffFooter.text.includes('OpenCode 验收')
+    && handoffFooter.text.includes('投递失败'),
+    `Scheme C footer content mismatch: ${JSON.stringify(handoffFooter)}`)
+  assert(!handoffFooter.text.includes('已送达'),
+    `Settled Delivery must stay quiet: ${JSON.stringify(handoffFooter)}`)
+  assert(handoffFooter.legacyOriginCount === 0 && handoffFooter.compactDeliveryCount === 0,
+    `Legacy message Delivery chrome returned: ${JSON.stringify(handoffFooter)}`)
+  assert(handoffFooter.background === 'rgba(0, 0, 0, 0)'
+    && handoffFooter.borderRadius === '0px'
+    && handoffFooter.railBorderLeftWidth === '1px'
+    && handoffFooter.railBorderBottomWidth === '1px',
+    `Scheme C footer geometry mismatch: ${JSON.stringify(handoffFooter)}`)
+  assert(handoffFooter.messageGap >= 0 && handoffFooter.messageGap <= 4,
+    `Scheme C footer must stay visually attached to the message: ${JSON.stringify(handoffFooter)}`)
+
   const observed = await collectRuntimeRows(app.cdp)
   assertRuntimeRows(observed)
   const totalToolRows = observed.reduce((total, row) => total + row.toolTitles.length, 0)
@@ -91,6 +111,35 @@ try {
   const bottomCapture = join(outputDir, 'runtime-activity-bottom.png')
   await capture(app.cdp, bottomCapture)
 
+  await evaluate(app.cdp, `(() => {
+    document.querySelector('.execution-drawer [aria-label="收起执行详情"]')?.click()
+    return !document.querySelector('.execution-drawer')
+  })()`)
+  await waitForExpression(app.cdp, `!document.querySelector('.execution-drawer')`)
+  await app.cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 1040, height: 700, deviceScaleFactor: 1, mobile: false
+  })
+  await evaluate(app.cdp, `(() => {
+    const timeline = document.querySelector('.camp-timeline')
+    if (timeline) timeline.scrollTop = timeline.scrollHeight
+    return timeline?.scrollTop ?? 0
+  })()`)
+  await wait(200)
+  const compactLayout = await collectCompactHandoffLayout(app.cdp)
+  assert(compactLayout.viewportWidth === 1040 && compactLayout.viewportHeight === 700,
+    `Compact viewport did not apply: ${JSON.stringify(compactLayout)}`)
+  assert(compactLayout.documentScrollWidth <= compactLayout.viewportWidth + 1
+    && compactLayout.timelineScrollWidth <= compactLayout.timelineClientWidth + 1
+    && compactLayout.footerScrollWidth <= compactLayout.footerClientWidth + 1,
+    `Scheme C footer overflowed at 1040x700: ${JSON.stringify(compactLayout)}`)
+  assert(compactLayout.footerLeft >= compactLayout.timelineLeft - 1
+    && compactLayout.footerRight <= compactLayout.timelineRight + 1
+    && compactLayout.footerTop >= compactLayout.timelineTop - 1
+    && compactLayout.footerBottom <= compactLayout.timelineBottom + 1,
+    `Scheme C footer escaped the compact timeline viewport: ${JSON.stringify(compactLayout)}`)
+  const compactCapture = join(outputDir, 'runtime-activity-compact.png')
+  await capture(app.cdp, compactCapture)
+
   const reportPath = join(outputDir, 'runtime-activity-acceptance.json')
   const report = {
     ok: true,
@@ -104,10 +153,12 @@ try {
       canonicalToolRows: totalToolRows,
       codexLifecycleMergedToOneRow: observed.find((row) => row.runtime === 'Codex CLI')?.toolTitles.length === 1,
       claudeRunLevelDoesNotInventTools: observed.find((row) => row.runtime === 'Claude Code')?.toolTitles.length === 0,
-      antigravityCoreToolCatalogName: observed.find((row) => row.runtime === 'Antigravity')?.toolTitles[0] === 'camp.message.send'
+      antigravityCoreToolCatalogName: observed.find((row) => row.runtime === 'Antigravity')?.toolTitles[0] === 'camp.message.send',
+      schemeCHandoffFooter: handoffFooter,
+      schemeCCompactLayout: compactLayout
     },
     runtimes: observed,
-    captures: { top: topCapture, bottom: bottomCapture }
+    captures: { top: topCapture, bottom: bottomCapture, compact: compactCapture }
   }
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`)
   console.log(JSON.stringify({ ...report, reportPath }, null, 2))
@@ -203,16 +254,34 @@ async function seedFixture() {
       : entry.sourceAuthority === 'core'
         ? 'Core Built-in CLI：名称必须通过 Rovai Tool Catalog 验证。'
         : '结构化 Runtime Activity：标题来自 Runtime 报告的工具名称。'
+    const addressedAgentIds = entry.key === 'antigravity'
+      ? [runtimes[0].agentId, runtimes[1].agentId]
+      : []
     return `(
       ${sqlLiteral(`message-${entry.key}`)}, ${sqlLiteral(campId)}, ${index + 1},
       'agent', ${sqlLiteral(entry.agentId)}, ${sqlLiteral(`run-${entry.key}`)},
       ${sqlLiteral(body)}, ${sqlLiteral(JSON.stringify([{ kind: 'text', text: body }]))},
-      'default', '[]', ${sqlLiteral(`turn-${entry.key}`)},
+      ${sqlLiteral(addressedAgentIds.length > 0 ? 'explicit' : 'default')},
+      ${sqlLiteral(JSON.stringify(addressedAgentIds))}, ${sqlLiteral(`turn-${entry.key}`)},
       ${sqlLiteral(`run-${entry.key}`)}, 1,
       ${sqlLiteral(`2026-08-05T12:${String(index).padStart(2, '0')}:02Z`)},
       ${sqlLiteral(`2026-08-05T12:${String(index).padStart(2, '0')}:02Z`)}
     )`
   }).join(',\n')
+  const deliveryRows = [{
+    id: 'delivery-antigravity-codex', recipientAgentId: runtimes[0].agentId,
+    recipientCanonicalPosition: 0, status: 'settled', failureCode: null
+  }, {
+    id: 'delivery-antigravity-opencode', recipientAgentId: runtimes[1].agentId,
+    recipientCanonicalPosition: 1, status: 'failed', failureCode: 'runtime_unavailable'
+  }].map((delivery) => `(
+    ${sqlLiteral(delivery.id)}, ${sqlLiteral(campId)}, 'turn-antigravity',
+    'message-antigravity', ${sqlLiteral(delivery.recipientAgentId)},
+    ${delivery.recipientCanonicalPosition}, ${sqlLiteral(`digest-${delivery.id}`)},
+    ${sqlLiteral('digest-message-antigravity')}, 'run-antigravity', 'run-antigravity', 1,
+    '[]', '{}', '{}', 1, ${sqlLiteral(delivery.status)}, 'terminal', 1, 0, 0,
+    ${sqlNullable(delivery.failureCode)}, 1, ${sqlLiteral(now)}, ${sqlLiteral(now)}, ${sqlLiteral(now)}
+  )`).join(',\n')
 
   await runSql(databasePath, `
     PRAGMA foreign_keys = ON;
@@ -267,6 +336,16 @@ async function seedFixture() {
       body, structured_content_json, address_mode, addressed_agent_ids_json, camp_turn_id,
       agent_run_id, version, created_at, updated_at
     ) VALUES ${messageRows};
+    INSERT INTO message_delivery(
+      id, camp_id, camp_turn_id, message_id,
+      recipient_agent_id, recipient_canonical_position,
+      recipient_digest, message_body_digest,
+      source_agent_run_id, a2a_root_agent_run_id, a2a_depth,
+      ancestor_agent_ids_json, recipient_presentation_snapshot_json,
+      frozen_snapshot_json, queue_sequence, status, dispatch_phase,
+      dispatch_attempt_count, retry_generation, manual_intervention_required,
+      failure_code, version, created_at, updated_at, ended_at
+    ) VALUES ${deliveryRows};
     UPDATE agent_run
     SET final_camp_message_id = 'message-' || substr(id, length('run-') + 1)
     WHERE camp_turn_id LIKE 'turn-%';
@@ -277,6 +356,55 @@ async function seedFixture() {
     if (entry.runLevelOnly) continue
     await seedActivity(entry, index)
   }
+}
+
+async function collectHandoffFooter(cdp) {
+  return evaluate(cdp, `(() => {
+    const footer = document.querySelector('.message-delivery-footer')
+    const rail = footer?.querySelector('.message-delivery-handoff-rail')
+    const messageSurface = footer?.previousElementSibling
+    const footerStyle = footer ? getComputedStyle(footer) : null
+    const railStyle = rail ? getComputedStyle(rail) : null
+    const footerRect = footer?.getBoundingClientRect()
+    const messageRect = messageSurface?.getBoundingClientRect()
+    return {
+      count: document.querySelectorAll('.message-delivery-footer').length,
+      text: footer?.textContent?.replace(/\\s+/g, ' ').trim() ?? '',
+      background: footerStyle?.backgroundColor ?? null,
+      borderRadius: footerStyle?.borderRadius ?? null,
+      railBorderLeftWidth: railStyle?.borderLeftWidth ?? null,
+      railBorderBottomWidth: railStyle?.borderBottomWidth ?? null,
+      messageGap: footerRect && messageRect ? footerRect.top - messageRect.bottom : null,
+      legacyOriginCount: document.querySelectorAll('.message-run-origin').length,
+      compactDeliveryCount: document.querySelectorAll('.delivery-status-list.is-compact').length
+    }
+  })()`)
+}
+
+async function collectCompactHandoffLayout(cdp) {
+  return evaluate(cdp, `(() => {
+    const footer = document.querySelector('.message-delivery-footer')
+    const timeline = document.querySelector('.camp-timeline')
+    const footerRect = footer?.getBoundingClientRect()
+    const timelineRect = timeline?.getBoundingClientRect()
+    return {
+      viewportWidth: innerWidth,
+      viewportHeight: innerHeight,
+      documentScrollWidth: document.documentElement.scrollWidth,
+      timelineClientWidth: timeline?.clientWidth ?? 0,
+      timelineScrollWidth: timeline?.scrollWidth ?? 0,
+      timelineLeft: timelineRect?.left ?? 0,
+      timelineRight: timelineRect?.right ?? 0,
+      timelineTop: timelineRect?.top ?? 0,
+      timelineBottom: timelineRect?.bottom ?? 0,
+      footerClientWidth: footer?.clientWidth ?? 0,
+      footerScrollWidth: footer?.scrollWidth ?? 0,
+      footerLeft: footerRect?.left ?? 0,
+      footerRight: footerRect?.right ?? 0,
+      footerTop: footerRect?.top ?? 0,
+      footerBottom: footerRect?.bottom ?? 0
+    }
+  })()`)
 }
 
 async function seedActivity(entry, index) {

@@ -1121,20 +1121,9 @@ export function CampWorkspace({
                               >
                                 {campMessage.authorType === 'agent'
                                       ? (
-                                          <>
-                                            {sourceRun && (
-                                              <button
-                                                type="button"
-                                                className="message-run-origin"
-                                                onClick={() => setExecutionDrawerRunId(sourceRun.id)}
-                                              >
-                                                来自执行 · {memberById.get(sourceRun.agentId)?.displayName ?? sourceRun.agentId}
-                                              </button>
-                                            )}
-                                            <div className="final-copy">
-                                              <SafeMarkdown>{displayBody}</SafeMarkdown>
-                                            </div>
-                                          </>
+                                          <div className="final-copy">
+                                            <SafeMarkdown>{displayBody}</SafeMarkdown>
+                                          </div>
                                         )
                                       : (
                                           <>
@@ -1172,7 +1161,6 @@ export function CampWorkspace({
                                   delivery.messageId === campMessage.id
                                 )}
                                 memberById={memberById}
-                                onOpenRun={setExecutionDrawerRunId}
                               />
                             </div>
                           )
@@ -1756,43 +1744,69 @@ function ExecutionDrawer({
 
 function CampMessageDeliveryFooter({
   deliveries,
-  memberById,
-  onOpenRun
+  memberById
 }: {
   deliveries: MessageDeliveryView[]
   memberById: Map<string, CampSnapshot['members'][number]>
-  onOpenRun(runId: string): void
 }): JSX.Element | null {
   if (deliveries.length === 0) return null
+  const ordered = deliveries.slice().sort((left, right) =>
+    left.recipientCanonicalPosition - right.recipientCanonicalPosition
+  )
+  const deliveryAccent = ordered.length === 1
+    ? identityColorToken(ordered[0].recipientAgentId)
+    : 'var(--brand)'
   return (
-    <DeliveryStatusList
-      deliveries={deliveries}
-      memberById={memberById}
-      onOpenRun={onOpenRun}
-      compact
-    />
+    <footer
+      className="message-delivery-footer"
+      aria-label="消息发送对象"
+      style={{ '--delivery-accent': deliveryAccent } as CSSProperties}
+    >
+      <span className="message-delivery-handoff-rail" aria-hidden="true" />
+      <span className="message-delivery-label">发送给：</span>
+      <span className="message-delivery-recipients">
+        {ordered.map((delivery, index) => {
+          const recipient = memberById.get(delivery.recipientAgentId)
+          const presentation = messageDeliveryFooterPresentation(delivery.status, delivery.waitCondition)
+          return (
+            <span className="message-delivery-recipient-group" key={delivery.id}>
+              {index > 0 && <span className="message-delivery-recipient-separator" aria-hidden="true">、</span>}
+              <span className="message-delivery-recipient-name">
+                {recipient?.displayName ?? delivery.recipientAgentId}
+              </span>
+              {presentation && (
+                <span
+                  className={`message-delivery-state tone-${presentation.tone}`}
+                  title={delivery.failureCode ?? undefined}
+                >
+                  <span className="message-delivery-state-separator" aria-hidden="true">·</span>
+                  <span className="message-delivery-state-symbol" aria-hidden="true">{presentation.symbol}</span>
+                  {presentation.label}
+                </span>
+              )}
+            </span>
+          )
+        })}
+      </span>
+    </footer>
   )
 }
 
 function DeliveryStatusList({
   deliveries,
-  memberById,
-  compact = false,
-  onOpenRun
+  memberById
 }: {
   deliveries: MessageDeliveryView[]
   memberById: Map<string, CampSnapshot['members'][number]>
-  compact?: boolean
-  onOpenRun?: (runId: string) => void
 }): JSX.Element | null {
   if (deliveries.length === 0) return null
   const ordered = deliveries.slice().sort((left, right) =>
     left.recipientCanonicalPosition - right.recipientCanonicalPosition
   )
   return (
-    <section className={`delivery-status-list${compact ? ' is-compact' : ''}`} aria-label="消息投递状态">
+    <section className="delivery-status-list" aria-label="消息投递状态">
       <div className="delivery-status-heading">
-        <span>{compact ? '投递' : '相关消息投递'}</span>
+        <span>相关消息投递</span>
         <small>{ordered.length} 个收件人</small>
       </div>
       <ul>
@@ -1804,26 +1818,28 @@ function DeliveryStatusList({
               <span className="delivery-recipient">
                 {recipient?.displayName ?? delivery.recipientAgentId}
               </span>
-              {delivery.targetAgentRunId && onOpenRun ? (
-                <button
-                  type="button"
-                  className={`delivery-state delivery-state-button tone-${presentation.tone}`}
-                  title={delivery.failureCode ?? undefined}
-                  onClick={() => onOpenRun(delivery.targetAgentRunId as string)}
-                >
-                  {presentation.label}
-                </button>
-              ) : (
-                <span className={`delivery-state tone-${presentation.tone}`} title={delivery.failureCode ?? undefined}>
-                  {presentation.label}
-                </span>
-              )}
+              <span className={`delivery-state tone-${presentation.tone}`} title={delivery.failureCode ?? undefined}>
+                {presentation.label}
+              </span>
             </li>
           )
         })}
       </ul>
     </section>
   )
+}
+
+export function messageDeliveryFooterPresentation(
+  status: MessageDeliveryView['status'],
+  waitCondition: MessageDeliveryView['waitCondition']
+): { label: string; tone: 'attention' | 'danger' | 'neutral'; symbol: '…' | '!' | '–' } | null {
+  if (status === 'settled') return null
+  const presentation = deliveryStatusPresentation(status, waitCondition)
+  return {
+    label: presentation.label,
+    tone: presentation.tone === 'success' ? 'neutral' : presentation.tone,
+    symbol: presentation.tone === 'danger' ? '!' : presentation.tone === 'attention' ? '…' : '–'
+  }
 }
 
 function deliveryStatusPresentation(

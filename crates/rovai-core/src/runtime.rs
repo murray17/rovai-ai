@@ -5137,7 +5137,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(turn_status, "completed");
-        let final_outputs: i64 = database
+        let automatic_final_outputs: i64 = database
             .connection()
             .query_row(
                 "SELECT COUNT(*) FROM agent_run WHERE final_camp_message_id IS NOT NULL AND final_conversation_message_id IS NULL",
@@ -5145,7 +5145,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(final_outputs, 2);
+        assert_eq!(automatic_final_outputs, 0);
         let ending_observations: i64 = database
             .connection()
             .query_row(
@@ -5163,7 +5163,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(public_agent_messages, 2);
+        assert_eq!(public_agent_messages, 0);
         let recipient_free_defaults: i64 = database
             .connection()
             .query_row(
@@ -5172,7 +5172,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(recipient_free_defaults, 2);
+        assert_eq!(recipient_free_defaults, 0);
 
         let replay = runtime
             .succeed_agent_run(
@@ -5201,7 +5201,7 @@ mod tests {
                 .query_row("SELECT COUNT(*) FROM camp_message", [], |row| row
                     .get::<_, i64>(0))
                 .unwrap(),
-            3
+            1
         );
 
         drop(database);

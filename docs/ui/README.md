@@ -90,6 +90,11 @@ JSON”，下方固定为三态摘要、attention-only 问题列表和四筛选�
 [v0.51 生产设计](../versions/v0.51/production-design.md)，安全与导出合同见
 [ADR-0148](../adr/0148-read-only-diagnostics-and-data-minimized-export.md)。
 
+2026-08-10 用户确认 A2A 消息 Scheme C：Agent 公共正文删除“来自执行”来源条和 compact
+投递卡片，正文后只保留短折线/身份点与“发送给：队员名”轻量 footer。成功态静默，非成功态
+按收件人原地显示；完整 Delivery 证据继续属于执行详情。该选择已冻结进 Arctic Dawn 的
+A2A 会话消息合同，HTML 原型只保留为选型输入。
+
 ## 权威边界
 
 1. 有效 ADR、`CONTEXT.md`、Core 合同和安全边界决定领域语义与可执行行为。
@@ -162,6 +167,8 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
 - Camp 主阅读流左对齐并按权威顺序阅读。执行动态只显示过程摘要；执行详情
   按需展示所选 AgentRun 的过程证据、Delivery 状态和 Context 摘要，后台事件不得自动打开、切换
   或抢焦点。终态 AgentRun 保持选中直到用户关闭或切换。
+- Agent 公共正文不显示“来自执行”来源条；A2A 消息不显示 compact 投递卡片，只在正文后使用
+  Scheme C 短转交轨迹显示“发送给：队员名”。`settled` 静默，其他 Delivery 状态按收件人原地显示。
 - 终态取消以每个 CampTurn 一条“你已在 {耗时} 后停止”进入会话时间线，不再永久
   挂在队员消息标题；未确认外部效果从该事件进入 Inspector。
 - 用户、队员和已交付 A2A 消息的正文支持鼠标拖选和系统复制快捷键；用户自己的

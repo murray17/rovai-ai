@@ -1150,7 +1150,7 @@ The rule that only a Runtime-reported or Core-proven operation may enter Runtime
 _Avoid_: sandbox boundary, permission boundary, workspace-diff inference
 
 **Runtime Public Output Mode**:
-The immutable Adapter capability that determines whether an AgentRun's ordinary final assistant output can become a Public Message. `explicit_send_only` publishes only accepted `camp.message.send` calls; `assistant_final_visible` may publish one reliable Adapter-delimited final as a recipient-free Public Message at Run completion. The mode is not a user or model setting and never changes the addressing or Delivery contract.
+The immutable Adapter capability that determines whether an AgentRun's ordinary final assistant output can become a Public Message. `explicit_send_only` publishes only accepted `camp.message.send` calls; `assistant_final_visible` may publish one reliable Adapter-delimited final as a recipient-free Public Message at Run completion. Every currently shipped Adapter is frozen to `explicit_send_only`; `assistant_final_visible` remains a reserved protocol capability with no current Adapter assignment. The mode is not a user or model setting and never changes the addressing or Delivery contract.
 _Avoid_: Renderer heuristic, per-message toggle, inferred final, private A2A mode
 
 **Adapter Final Boundary**:

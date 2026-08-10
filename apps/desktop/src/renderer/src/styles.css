@@ -1040,15 +1040,12 @@ button:disabled { opacity: 0.52; cursor: default; }
 .execution-detail-facts dt { color: var(--faint); font-size: 10px; }
 .execution-detail-facts dd { min-width: 0; margin: 0; color: var(--ink); font-size: 11px; overflow-wrap: anywhere; }
 .delivery-status-list { display: grid; gap: 8px; margin: 16px 0 18px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-subtle); }
-.delivery-status-list.is-compact { margin: 9px 0 0; padding: 6px 8px; border: 0; border-radius: 5px; background: color-mix(in srgb, var(--surface-muted) 72%, transparent); }
 .delivery-status-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 9px; font-weight: 750; }
 .delivery-status-heading small { color: var(--faint); font: 500 8px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .delivery-status-list ul { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
 .delivery-status-list li { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 10px; }
 .delivery-recipient { min-width: 0; overflow: hidden; color: var(--ink); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .delivery-state { flex: 0 0 auto; padding: 2px 5px; border-radius: 999px; font-size: 8px; font-weight: 750; white-space: nowrap; }
-.delivery-state-button { border: 0; font: inherit; cursor: pointer; }
-.delivery-state-button:hover { filter: brightness(.94); }
 .delivery-state.tone-success { color: var(--success); background: var(--success-soft); }
 .delivery-state.tone-attention { color: var(--attention); background: var(--attention-soft); }
 .delivery-state.tone-danger { color: var(--danger); background: var(--danger-soft); }
@@ -1481,8 +1478,20 @@ button:disabled { opacity: 0.52; cursor: default; }
 .message-surface { position: relative; width: fit-content; max-width: 100%; }
 .final-copy { max-width: 690px; color: var(--ink); font-size: 12.7px; line-height: 1.68; }
 .final-copy p { line-height: 1.68; }
-.message-run-origin { display: inline-flex; align-items: center; gap: 4px; margin: 0 0 5px; padding: 0; border: 0; color: var(--faint); background: transparent; font: 500 9.5px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; cursor: pointer; }
-.message-run-origin:hover { color: var(--brand-ink); text-decoration: underline; }
+.message-delivery-footer { --delivery-accent: var(--brand); position: relative; display: flex; width: 100%; min-width: 0; min-height: 22px; align-items: baseline; flex-wrap: wrap; column-gap: 3px; row-gap: 2px; margin-top: 2px; padding: 3px 0 0 21px; color: var(--faint); font-size: 10.5px; line-height: 1.5; }
+.message-delivery-handoff-rail { position: absolute; top: 0; left: 2px; display: block; width: 13px; height: 13px; border-bottom: 1px solid var(--line-strong); border-left: 1px solid var(--line-strong); border-radius: 0 0 0 5px; }
+.message-delivery-handoff-rail::after { position: absolute; right: -3px; bottom: -3px; width: 5px; height: 5px; border-radius: 50%; background: var(--delivery-accent); content: ""; }
+.message-delivery-label { white-space: nowrap; }
+.message-delivery-recipients { display: inline-flex; min-width: 0; align-items: baseline; flex-wrap: wrap; }
+.message-delivery-recipient-group { display: inline-flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: 3px; }
+.message-delivery-recipient-separator { margin-right: 1px; color: var(--faint); }
+.message-delivery-recipient-name { color: var(--brand-ink); font-weight: 650; }
+.message-delivery-state { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; white-space: nowrap; }
+.message-delivery-state-separator { color: var(--faint); font-weight: 400; }
+.message-delivery-state-symbol { display: inline-grid; width: 12px; height: 12px; place-items: center; border: 1px solid currentColor; border-radius: 50%; font: 750 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.message-delivery-state.tone-attention { color: var(--attention); }
+.message-delivery-state.tone-danger { color: var(--danger); }
+.message-delivery-state.tone-neutral { color: var(--muted); }
 .run-message-state { color: var(--muted); font-size: 9.5px; font-weight: 650; }
 .run-message-state.tone-info { color: var(--brand-ink); }
 .run-message-state.tone-attention { color: var(--attention); }

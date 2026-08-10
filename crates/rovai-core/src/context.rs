@@ -4884,7 +4884,10 @@ mod tests {
             ExecutionRuntimeService, SucceedAgentRunCommand,
         },
         skill::{SetSkillEnabledCommand, SetSkillGroupAssignmentsCommand, SkillLibraryService},
-        team_tool::{AuthenticatedTeamToolRun, TeamToolInvocationError, TeamToolService},
+        team_tool::{
+            AuthenticatedTeamToolRun, CampMessageSendInput, CampMessageSendInvocation,
+            TeamToolInvocationError, TeamToolService,
+        },
     };
 
     struct Fixture {
@@ -4894,6 +4897,7 @@ mod tests {
         run_id: String,
         execution_epoch: i64,
         native_binding_id: String,
+        binding_credential: String,
     }
 
     #[test]
@@ -5223,7 +5227,32 @@ mod tests {
             run_id,
             execution_epoch,
             native_binding_id: binding.native_binding_id,
+            binding_credential: binding.binding_credential,
         }
+    }
+
+    fn send_explicit_public_output(fixture: &mut Fixture, call_id: &str, body: &str) {
+        let run_id = fixture.run_id.clone();
+        let execution_epoch = fixture.execution_epoch;
+        let sent = TeamToolService::default()
+            .send_public_message_attested(
+                &mut fixture.database,
+                &CampMessageSendInvocation {
+                    native_binding_id: fixture.native_binding_id.clone(),
+                    binding_credential: fixture.binding_credential.clone(),
+                    runtime_tool_call_id: call_id.to_string(),
+                    input: CampMessageSendInput {
+                        body: body.to_string(),
+                        to: Vec::new(),
+                        reply_to_camp_message_id: None,
+                        task_id: None,
+                    },
+                },
+                &run_id,
+                execution_epoch,
+            )
+            .unwrap();
+        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
     }
 
     fn bind_redelivery_fixture_session(fixture: &mut Fixture, native_session_id: &str) -> String {
@@ -10142,6 +10171,11 @@ mod tests {
             )
             .unwrap();
         let current_generation_output = "SELF_OUTPUT_FROM_CURRENT_GENERATION";
+        send_explicit_public_output(
+            &mut fixture,
+            "current-generation-public-output",
+            current_generation_output,
+        );
         ExecutionRuntimeService::default()
             .succeed_agent_run(
                 &mut fixture.database,
@@ -10185,7 +10219,7 @@ mod tests {
             shared
                 .iter()
                 .any(|message| message.body == current_generation_output),
-            "same-binding agent output remains an ordinary public CampMessage"
+            "same-binding explicitly sent output remains an ordinary public CampMessage"
         );
         std::fs::remove_dir_all(fixture.directory).unwrap();
     }
@@ -10260,6 +10294,12 @@ mod tests {
         context
             .acknowledge_input_delivery(&mut fixture.database, &delivery.id, "generation-one-input")
             .unwrap();
+        let old_generation_output = "SELF_OUTPUT_FROM_GENERATION_ONE";
+        send_explicit_public_output(
+            &mut fixture,
+            "generation-one-public-output",
+            old_generation_output,
+        );
         let conversation_version: i64 = fixture
             .database
             .connection()
@@ -10313,7 +10353,6 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let old_generation_output = "SELF_OUTPUT_FROM_GENERATION_ONE";
         runtime
             .succeed_agent_run(
                 &mut fixture.database,

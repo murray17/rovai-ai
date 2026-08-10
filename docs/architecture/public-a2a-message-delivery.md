@@ -3,7 +3,7 @@ document_type: architecture
 architecture: public-a2a-message-delivery
 authority: public-message-and-delivery-boundaries
 status: accepted
-last_updated: 2026-08-09
+last_updated: 2026-08-10
 ---
 
 # Public A2A Message 与 Message Delivery 架构
@@ -123,6 +123,10 @@ send、send failure 或 `delivery_unknown` 都不是 accepted evidence。
 - `explicit_send_only`：只有 Agent 明确调用 `camp.message.send` 才产生公共 A2A Message；
 - `assistant_final_visible`：Adapter 能可靠识别同一 Run 的 final boundary 时，可以将无收件人
   的最终正文提交为 Public A2A Message。
+
+当前已交付的所有 Runtime Adapter 均冻结为 `explicit_send_only`。`assistant_final_visible` 只保留为
+协议能力，当前没有 Adapter 选择该模式；普通 final 只保留在 Run/Evidence 边界，不隐式产生
+CampMessage。
 
 自动 final 输出不能猜测收件人、不能创建 Delivery、不能把普通中间流写入公共区。精确重复
 抑制只适用于同一 Run、recipient-free、canonical normalized body 完全相同的 final boundary；

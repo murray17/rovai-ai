@@ -2396,7 +2396,7 @@ mod tests {
     }
 
     #[test]
-    fn exact_public_final_output_is_suppressed_once_per_run() {
+    fn explicit_send_only_keeps_the_explicit_recipient_free_message() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
         let body = "The exact answer is already public.";
@@ -2412,7 +2412,12 @@ mod tests {
         let source_epoch = fixture.source_epoch;
         fixture.succeed_run(&fixture.source_run_id.clone(), source_epoch, body);
 
-        let (message_count, final_message_id, suppressed): (i64, String, bool) = fixture
+        let (message_count, final_message_id, output_mode, suppressed): (
+            i64,
+            Option<String>,
+            String,
+            bool,
+        ) = fixture
             .database
             .connection()
             .query_row(
@@ -2421,6 +2426,11 @@ mod tests {
                     (SELECT COUNT(*) FROM camp_message
                      WHERE source_agent_run_id = ?1),
                     agent_run.final_camp_message_id,
+                    (SELECT json_extract(payload_json, '$.publicOutputMode')
+                     FROM event_log
+                     WHERE event_type = 'agent_run.succeeded'
+                       AND entity_type = 'agent_run'
+                       AND entity_id = ?1),
                     EXISTS(
                         SELECT 1 FROM event_log
                         WHERE event_type = 'agent_run.succeeded'
@@ -2432,16 +2442,29 @@ mod tests {
                 WHERE agent_run.id = ?1
                 "#,
                 [&fixture.source_run_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .unwrap();
         assert_eq!(message_count, 1);
-        assert_eq!(final_message_id, explicit_message_id);
-        assert!(suppressed);
+        assert!(final_message_id.is_none());
+        assert_eq!(output_mode, "explicit_send_only");
+        assert!(!suppressed);
+        assert_eq!(
+            fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT id FROM camp_message WHERE source_agent_run_id = ?1",
+                    [&fixture.source_run_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            explicit_message_id
+        );
     }
 
     #[test]
-    fn recipient_bound_public_send_never_suppresses_automatic_final() {
+    fn recipient_bound_explicit_send_is_the_only_public_message() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
         let body = "The answer is public for the target, but still needs a final.";
@@ -2472,7 +2495,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(message_count, 2);
+        assert_eq!(message_count, 1);
         assert!(!suppressed);
         let automatic_reply: Option<String> = fixture
             .database
@@ -2487,7 +2510,9 @@ mod tests {
                 [&fixture.source_run_id],
                 |row| row.get(0),
             )
-            .unwrap();
+            .optional()
+            .unwrap()
+            .flatten();
         assert!(automatic_reply.is_none());
     }
 

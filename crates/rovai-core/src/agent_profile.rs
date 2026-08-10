@@ -143,21 +143,20 @@ impl AdapterKind {
 
     /// Freeze the public output boundary for each shipped adapter.
     ///
-    /// Codex, Claude Code and Antigravity expose a Core-owned terminal event
-    /// with the final assistant message.  The ACP-backed adapters currently
-    /// remain explicit-send-only until their provider final-boundary evidence
-    /// is promoted to the same contract.
+    /// Every shipped adapter requires an explicit `camp.message.send` call.
+    /// Runtime final boundaries remain execution evidence and never publish a
+    /// Camp message implicitly.
     pub const fn public_output_mode(self) -> PublicOutputMode {
         match self {
-            Self::CodexCli | Self::ClaudeCodeCli | Self::AntigravityApp => {
-                PublicOutputMode::AssistantFinalVisible
-            }
-            Self::OpencodeCli
+            Self::CodexCli
+            | Self::OpencodeCli
             | Self::CopilotCli
+            | Self::ClaudeCodeCli
             | Self::KiroCli
             | Self::QoderCli
             | Self::CodebuddyCli
-            | Self::QwenCode => PublicOutputMode::ExplicitSendOnly,
+            | Self::QwenCode
+            | Self::AntigravityApp => PublicOutputMode::ExplicitSendOnly,
         }
     }
 }
@@ -3959,27 +3958,13 @@ mod tests {
     }
 
     #[test]
-    fn public_output_mode_is_explicit_for_each_adapter_and_conservative_for_acp() {
-        let final_visible = AdapterKind::ALL
-            .into_iter()
-            .filter(|kind| kind.public_output_mode() == PublicOutputMode::AssistantFinalVisible)
-            .collect::<Vec<_>>();
-        assert_eq!(
-            final_visible,
-            vec![
-                AdapterKind::CodexCli,
-                AdapterKind::ClaudeCodeCli,
-                AdapterKind::AntigravityApp
-            ]
-        );
+    fn public_output_mode_requires_explicit_send_for_every_adapter() {
         for kind in AdapterKind::ALL {
-            assert!(
-                matches!(
-                    kind.public_output_mode(),
-                    PublicOutputMode::ExplicitSendOnly | PublicOutputMode::AssistantFinalVisible
-                ),
-                "{} must have a frozen public output mode",
-                kind.as_str()
+            assert_eq!(
+                kind.public_output_mode(),
+                PublicOutputMode::ExplicitSendOnly,
+                "{} must require an explicit public send",
+                kind.as_str(),
             );
         }
     }

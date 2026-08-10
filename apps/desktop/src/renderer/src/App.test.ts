@@ -45,6 +45,7 @@ import {
   emptyCampRuntimeSummary,
   formatStopElapsed,
   loadCompleteAgentRunExecutionEvidence,
+  messageDeliveryFooterPresentation,
   runtimeOptionsForDisplay
 } from './CampWorkspace'
 import {
@@ -1674,7 +1675,8 @@ describe('task event projections', () => {
     expect(terminalMarkup).not.toContain('execution-disclosure')
     expect(terminalMarkup).not.toContain(' open=""')
     expect(terminalMarkup).not.toContain('terminal-run-row')
-    expect(terminalMarkup).toContain('来自执行 · 沐瓦')
+    expect(terminalMarkup).not.toContain('来自执行')
+    expect(terminalMarkup).not.toContain('message-run-origin')
     expect(terminalMarkup).toContain('复制入口已完成。')
 
     const restoredMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
@@ -1840,7 +1842,7 @@ describe('task event projections', () => {
     expect(markup.indexOf('class="approval-dock"')).toBeLessThan(markup.indexOf('class="composer"'))
   })
 
-  it('renders a public A2A message with independent Delivery status', () => {
+  it('renders a public A2A message with the Scheme C handoff footer', () => {
     const publicMessage: CampMessageView = {
       id: 'public-a2a-message',
       sequence: 1,
@@ -1852,7 +1854,7 @@ describe('task event projections', () => {
       content: [{ kind: 'text', text: '请检查 Downloads 目录里的页面。' }],
       attachments: [],
       addressMode: 'explicit',
-      addressedAgentIds: ['agent_2'],
+      addressedAgentIds: ['agent_2', 'agent_3'],
       replyToCampMessageId: null,
       campTurnId: 'turn-a2a',
       presentation: null,
@@ -1879,6 +1881,17 @@ describe('task event projections', () => {
       updatedAt: '2026-07-30T03:00:02Z',
       endedAt: '2026-07-30T03:00:02Z'
     }
+    const failedDelivery: MessageDeliveryView = {
+      ...delivery,
+      id: 'delivery-a2a-failed',
+      recipientAgentId: 'agent_3',
+      recipientCanonicalPosition: 1,
+      status: 'failed',
+      dispatchAttemptCount: 2,
+      contextManifestId: null,
+      targetAgentRunId: null,
+      failureCode: 'runtime_unavailable'
+    }
     expect(campConversationTimeline([publicMessage]).map((item) => item.id)).toEqual([publicMessage.id])
 
     const snapshot: CampSnapshot = {
@@ -1897,10 +1910,14 @@ describe('task event projections', () => {
         agentId: 'agent_2', displayName: '沐瓦', teamRole: '开发者',
         avatarRef: null, accent: '#39777a', membershipStatus: 'active', leaveRequestedAt: null, profilePresence: 'present',
         memberOrder: 1, isDefaultLead: false, version: 1
+      }, {
+        agentId: 'agent_3', displayName: '小狐狸', teamRole: '评审',
+        avatarRef: null, accent: '#8a5c75', membershipStatus: 'active', leaveRequestedAt: null, profilePresence: 'present',
+        memberOrder: 2, isDefaultLead: false, version: 1
       }],
       tasks: [],
       messages: [publicMessage],
-      messageDeliveries: [delivery],
+      messageDeliveries: [failedDelivery, delivery],
       turns: [],
       agentRuns: [],
       contextManifests: [],
@@ -1922,6 +1939,11 @@ describe('task event projections', () => {
         agentId: 'agent_2',
         displayName: '沐瓦',
         runtimeReadiness: { status: 'ready', blockers: [] }
+      }, {
+        ...agentProfile(),
+        agentId: 'agent_3',
+        displayName: '小狐狸',
+        runtimeReadiness: { status: 'ready', blockers: [] }
       }],
       busy: false,
       onSend: async () => undefined,
@@ -1934,12 +1956,43 @@ describe('task event projections', () => {
 
     expect(markup).not.toContain('<h2>会话</h2>')
     expect(markup).toContain('请检查 Downloads 目录里的页面。')
-    expect(markup).toContain('投递')
-    expect(markup).toContain('已送达')
+    expect(markup).toContain('class="message-delivery-footer"')
+    expect(markup).toContain('class="message-delivery-handoff-rail"')
+    expect(markup).toContain('发送给：')
+    expect(markup.indexOf('沐瓦')).toBeLessThan(markup.indexOf('小狐狸'))
+    expect(markup).toContain('投递失败')
+    expect(markup).toContain('aria-hidden="true">!</span>')
+    expect(markup).not.toContain('已送达')
+    expect(markup).not.toContain('来自执行')
+    expect(markup).not.toContain('message-run-origin')
+    expect(markup).not.toContain('delivery-status-list is-compact')
+    expect(markup).not.toContain('个收件人')
     expect(markup).not.toContain('活动')
     expect(markup).not.toContain('Core Outcome')
     expect(markup).not.toContain('返回责任')
     expect(markup).not.toContain('Correlation')
+  })
+
+  it('keeps settled footer deliveries quiet and maps every non-success state explicitly', () => {
+    expect(messageDeliveryFooterPresentation('settled', null)).toBeNull()
+    expect(messageDeliveryFooterPresentation('running', null)).toEqual({
+      label: '处理中', tone: 'attention', symbol: '…'
+    })
+    expect(messageDeliveryFooterPresentation('pending', null)).toEqual({
+      label: '排队中', tone: 'attention', symbol: '…'
+    })
+    expect(messageDeliveryFooterPresentation('pending', 'target_busy')).toEqual({
+      label: '等待收件人空闲', tone: 'attention', symbol: '…'
+    })
+    expect(messageDeliveryFooterPresentation('failed', null)).toEqual({
+      label: '投递失败', tone: 'danger', symbol: '!'
+    })
+    expect(messageDeliveryFooterPresentation('cancelled', null)).toEqual({
+      label: '已取消', tone: 'neutral', symbol: '–'
+    })
+    expect(messageDeliveryFooterPresentation('interrupted_before_dispatch', null)).toEqual({
+      label: '停止前未派发', tone: 'neutral', symbol: '–'
+    })
   })
 
   it('renders GFM while removing raw HTML and remote images', () => {

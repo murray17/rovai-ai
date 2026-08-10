@@ -22,6 +22,11 @@ Execution Environment、五层 Evidence、逐轴 comparison eligibility、failur
 v0.31/v0.32/v0.34/v0.36 结果继续是不可变历史，不迁移、不重算、不覆盖；v3 只允许生成引用 source bytes
 digest 的派生投影。
 
+同一当前版本还收口 Agent 公共输出与 A2A Renderer 投影：所有已交付 Runtime Adapter 统一冻结为
+`explicit_send_only`，普通 assistant final 只保留为 Run/Evidence，不再隐式产生 CampMessage；公共 A2A
+消息删除正文前重复的“来自执行”来源条和正文后的 compact 投递卡片，采用 Scheme C 短转交轨迹与
+“发送给：队员名”footer。成功 Delivery 静默，异常状态在对应收件人名后原地显示。
+
 ## 交付范围
 
 - Benchmark Protocol v3 Writer/Validator、canonical content identity 和公开 disclosure gate；
@@ -31,7 +36,10 @@ digest 的派生投影。
 - `current-contract-conformance@1.0.0`，组织既有 Rust 测试覆盖 v0.52 的 15 项发布合同；
 - 五个公开、可执行的 Demo Case（`DEMO-001` 至 `DEMO-005`），覆盖事件、归一化、幂等、迁移和受限 patch；
 - JSON/Markdown/baseline diff/failure taxonomy/Project Review projection；
-- 旧 `qualification:*` 命令继续可用，新 `benchmark:*` 命令提供 v3 工作流。
+- 旧 `qualification:*` 命令继续可用，新 `benchmark:*` 命令提供 v3 工作流；
+- 九个已交付 Runtime Adapter 全部使用 `explicit_send_only`，保留 `assistant_final_visible` 作为未分配的
+  协议能力；
+- A2A 公共消息使用 Scheme C 单层 footer，完整 Message Delivery 与 AgentRun 证据继续留在执行详情。
 
 ## 冻结边界
 
@@ -41,7 +49,8 @@ digest 的派生投影。
 - 不生成 correctness/collaboration/performance 混合总分、Pass@k 或跨不可比配置排行榜；
 - Trial、Case、Verifier、Judge 和 rate 不进入 Rust Core；
 - 默认 CI 不调用付费模型、真实 Runtime 账户、私有 Sealed Pack 或用户数据目录；
-- 正式模型 Trial 仍需要人工、私有、专用隔离触发。
+- 正式模型 Trial 仍需要人工、私有、专用隔离触发；
+- 不因公共输出模式或 footer 收口改变 Message Delivery 状态机、寻址、队列、重试与证据合同。
 
 ## Product Contract Fingerprint
 
@@ -61,11 +70,11 @@ CampTurn/AgentRun；详细 JSON/Markdown 位于 `reports/<run-id>/`。旧的一 
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
-| Version lifecycle | 已更新 | v0.52 冻结为 historical，v0.53 成为唯一 current；新增本概览、architecture 与实施计划 |
+| Version lifecycle | 已更新 | v0.52 冻结为 historical，v0.53 成为唯一 current；本概览与实施计划同时记录公共输出和 A2A footer 收口 |
 | ADR | 已更新 | ADR-0151 冻结版本化协议、历史不可变和按轴可比性 |
 | Contracts | 已更新 | 新增长期 Benchmark Protocol v3 字段合同和 v0.53 JSON Schema |
-| Architecture | 已更新 | 新增 Adapter/Profile/Execution/Evaluation/Reporting 长期组件边界 |
-| UI | 确认无需更新 | 本版本不改变 Renderer 交互、视觉或公开 Core UI 合同 |
+| Architecture | 已更新 | 新增 Adapter/Profile/Execution/Evaluation/Reporting 长期组件边界；Public A2A 架构同步所有已交付 Adapter 的 `explicit_send_only` 分配 |
+| UI | 已更新 | Arctic Dawn 冻结 A2A Scheme C footer、成功静默与异常按收件人原地显示 |
 | Runtime Activity | 确认无需更新 | 不新增或重分类 Canonical Runtime Activity |
 | Runtime compatibility | 确认无需更新 | Fingerprint 记录既有 Runtime 配置，但不改变 Runtime 支持或能力结论 |
 | Documentation routing | 已更新 | 文档导航、Contract/Architecture/ADR/Version 索引加入 Benchmark Protocol 入口 |
@@ -79,3 +88,6 @@ CampTurn/AgentRun；详细 JSON/Markdown 位于 `reports/<run-id>/`。旧的一 
 - [Benchmark Protocol v3](../../contracts/benchmark-protocol-v3.md)
 - [Benchmark Protocol architecture](../../architecture/benchmark-protocol.md)
 - [公开 Demo Case 目录](../../../qualification/demo/README.md)
+- [Public A2A Message 与 Message Delivery 架构](../../architecture/public-a2a-message-delivery.md)
+- [Arctic Dawn：A2A 会话消息](../../ui/arctic-dawn.md#a2a-会话消息)
+- [桌面 UI 验收：A2A 消息 footer 门禁](../../development/ui-acceptance.md#a2a-消息-footer-门禁)

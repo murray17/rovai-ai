@@ -34,12 +34,23 @@ last_updated: 2026-08-10
 - [x] Task v2、Built-in Transport v4、accepted-only ACK prerequisite evidence；
 - [x] 完成一次离线 `benchmark:run:contract` 并记录真实结果。
 
+## Checkpoint 4：Explicit public output 与 A2A Scheme C footer
+
+- [x] 所有已交付 Runtime Adapter 统一为 `explicit_send_only`，Run 普通 final 不再隐式发布；
+- [x] 显式 `camp.message.send` 仍是唯一公共输出路径，现有 final boundary 只保留为执行证据；
+- [x] Agent 公共正文删除“来自执行”来源条，消息下方删除 compact Delivery 卡片；
+- [x] Scheme C footer 紧贴正文且不形成空白行，按 `recipientCanonicalPosition` 显示收件人；
+  `settled` 静默，其他状态原地显示；
+- [x] 完整 Delivery 状态、失败码和执行证据继续留在执行详情，不改变 Core 寻址、队列或重试语义；
+- [x] Renderer 单测、类型检查、真实打包 App 双尺寸布局与截图验收通过。
+
 ## 完成条件
 
 - [x] 新增 Benchmark Node tests 通过；
 - [x] 现有 Qualification/Node/Vitest/TypeScript tests 全部通过；
 - [x] Rust format/check/clippy/workspace tests 全部通过；
 - [x] docs check/CI 与 `git diff --check` 通过；
+- [x] Explicit public output 与 A2A Scheme C footer 的 Core、Renderer 和真实 App 验收通过；
 - [x] 复核历史公开 artifact source digest 没有变化；
 - [x] 将本计划和版本实现状态更新为 complete。
 
@@ -63,6 +74,12 @@ last_updated: 2026-08-10
 | `cargo clippy --workspace --all-targets -- -D warnings` | 通过 |
 | `cargo test --workspace --no-fail-fast` | 通过；308 library、9 CLI、54 Core binary 测试，3 个既有手工 Runtime smoke ignored |
 | `git diff --check` | 通过 |
+
+Checkpoint 4 在同一日期追加完成生产 App 验收：`pnpm package:mac` 生成 arm64
+`Rovai-ai.app`，`pnpm accept:runtime-activity-ui` 在 1480×1120 与 1040×700 两种窗口尺寸均通过。
+受控 A2A fixture 实测正文边界到 Scheme C footer 边界为 2px，footer 保持透明、零圆角、1px 短折线；
+正文内“来自执行”数量为 0，compact Delivery 卡片数量为 0，紧凑尺寸下 document、timeline 与 footer
+横向溢出均为 0。
 
 CLI 测试中两个 Unix socket fixture 在受限沙箱内会得到 `Operation not permitted`；在允许本地 IPC 的同一
 worktree 重跑原始 workspace 命令后全部通过。默认门禁仍未执行付费模型、真实用户 Runtime 账户或私有 Sealed
