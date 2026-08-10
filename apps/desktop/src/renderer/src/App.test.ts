@@ -32,6 +32,7 @@ import {
 import {
   CampNavigation,
   campNavigationMenuLabels,
+  copyCampIdToClipboard,
   projectNavigationMenuLabels,
   toggleNavigationGroup,
   type NavigationSettingsSection
@@ -866,10 +867,25 @@ describe('task event projections', () => {
   })
 
   it('defines the final unified Camp and Project menu labels', () => {
-    expect(campNavigationMenuLabels(false)).toEqual(['置顶', '重命名', '删除'])
-    expect(campNavigationMenuLabels(true)).toEqual(['取消置顶', '重命名', '删除'])
+    expect(campNavigationMenuLabels(false)).toEqual(['置顶', '重命名', '复制会话 ID', '删除'])
+    expect(campNavigationMenuLabels(true)).toEqual(['取消置顶', '重命名', '复制会话 ID', '删除'])
     expect(projectNavigationMenuLabels(false)).toEqual(['置顶项目'])
     expect(projectNavigationMenuLabels(true)).toEqual(['取消置顶项目'])
+  })
+
+  it('copies only the exact Camp ID and reports clipboard failures', async () => {
+    const copied: string[] = []
+    await copyCampIdToClipboard('camp-copy-target', async (text) => {
+      copied.push(text)
+      return true
+    })
+    expect(copied).toEqual(['camp-copy-target'])
+
+    await expect(copyCampIdToClipboard('camp-copy-target', async () => false))
+      .rejects.toThrow('无法复制会话 ID，请重试。')
+    await expect(copyCampIdToClipboard('camp-copy-target', async () => {
+      throw new Error('clipboard unavailable')
+    })).rejects.toThrow('无法复制会话 ID，请重试。')
   })
 
   it('renders Camp-first navigation with unified menus and Quick Chat as the last visual project', () => {

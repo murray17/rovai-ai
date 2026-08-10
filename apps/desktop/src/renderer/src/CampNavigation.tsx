@@ -19,6 +19,7 @@ import type {
   ProjectNavigationGroup,
   SettingsSection
 } from '@contracts'
+import { writeClipboardText } from './clipboard'
 import { allNavigationCamps } from './ui-model'
 
 export interface CampDeleteAttempt {
@@ -34,7 +35,20 @@ type CampAction = {
 } | null
 
 export function campNavigationMenuLabels(pinned: boolean): string[] {
-  return [pinned ? '取消置顶' : '置顶', '重命名', '删除']
+  return [pinned ? '取消置顶' : '置顶', '重命名', '复制会话 ID', '删除']
+}
+
+export async function copyCampIdToClipboard(
+  campId: string,
+  writeText: (text: string) => Promise<boolean> = writeClipboardText
+): Promise<void> {
+  let copied = false
+  try {
+    copied = await writeText(campId)
+  } catch {
+    copied = false
+  }
+  if (!copied) throw new Error('无法复制会话 ID，请重试。')
 }
 
 export function projectNavigationMenuLabels(pinned: boolean): string[] {
@@ -183,6 +197,7 @@ export function CampNavigation({
   onCreateInProject = () => undefined,
   onCamp,
   onTogglePin = () => undefined,
+  onCampIdCopied = () => undefined,
   onRename,
   onDelete,
   onStop,
@@ -214,6 +229,7 @@ export function CampNavigation({
   onCreateInProject?(project: ProjectNavigationGroup | null): void
   onCamp(camp: NavigationCampItem): void
   onTogglePin?(kind: NavigationPin['kind'], targetKey: string, camp?: NavigationCampItem): void | Promise<void>
+  onCampIdCopied?(): void
   onRename(camp: NavigationCampItem, title: string): Promise<void>
   onDelete(camp: NavigationCampItem): Promise<CampDeleteAttempt>
   onStop(camp: NavigationCampItem): Promise<void>
@@ -395,6 +411,15 @@ export function CampNavigation({
     requestSidebarFocus(focusTarget)
   }
 
+  const copyCampId = async (camp: NavigationCampItem): Promise<void> => {
+    try {
+      await copyCampIdToClipboard(camp.id)
+      onCampIdCopied()
+    } catch (error) {
+      onError(error)
+    }
+  }
+
   const openAction = (kind: 'rename' | 'delete', camp: NavigationCampItem): void => {
     dialogReturnFocusTargetRef.current = `camp:${camp.id}`
     setAction({ kind, camp })
@@ -541,6 +566,7 @@ export function CampNavigation({
                 active={camp.id === activeCampId}
                 pinned
                 onTogglePin={() => void togglePin('camp', camp.id, camp)}
+                onCopyCampId={() => void copyCampId(camp)}
                 onCamp={onCamp}
                 onAction={openAction}
               />
@@ -576,6 +602,7 @@ export function CampNavigation({
                   ? undefined
                   : () => void togglePin('project', project.projectKey)}
                 onToggleCampPin={(camp) => void togglePin('camp', camp.id, camp)}
+                onCopyCampId={(camp) => void copyCampId(camp)}
                 onCamp={onCamp}
                 onAction={openAction}
               />
@@ -617,6 +644,7 @@ export function CampNavigation({
                   ? undefined
                   : () => void togglePin('project', project.projectKey)}
                 onToggleCampPin={(camp) => void togglePin('camp', camp.id, camp)}
+                onCopyCampId={(camp) => void copyCampId(camp)}
                 onCamp={onCamp}
                 onAction={openAction}
               />
@@ -641,6 +669,7 @@ export function CampNavigation({
             onSelectProject={() => onSelectProject(null)}
             onCreate={() => onCreateInProject(null)}
             onToggleCampPin={(camp) => void togglePin('camp', camp.id, camp)}
+            onCopyCampId={(camp) => void copyCampId(camp)}
             onCamp={onCamp}
             onAction={openAction}
           />
@@ -873,6 +902,7 @@ function CampGroup({
   onCreate,
   onTogglePin,
   onToggleCampPin,
+  onCopyCampId,
   onCamp,
   onAction
 }: {
@@ -895,6 +925,7 @@ function CampGroup({
   onCreate(): void
   onTogglePin?(): void
   onToggleCampPin(camp: NavigationCampItem): void
+  onCopyCampId(camp: NavigationCampItem): void
   onCamp(camp: NavigationCampItem): void
   onAction(kind: 'rename' | 'delete', camp: NavigationCampItem): void
 }): JSX.Element {
@@ -950,6 +981,7 @@ function CampGroup({
             active={camp.id === activeCampId}
             pinned={false}
             onTogglePin={() => onToggleCampPin(camp)}
+            onCopyCampId={() => onCopyCampId(camp)}
             onCamp={onCamp}
             onAction={onAction}
           />
@@ -971,6 +1003,7 @@ function CampRow({
   active,
   pinned,
   onTogglePin,
+  onCopyCampId,
   onCamp,
   onAction
 }: {
@@ -978,6 +1011,7 @@ function CampRow({
   active: boolean
   pinned: boolean
   onTogglePin(): void
+  onCopyCampId(): void
   onCamp(camp: NavigationCampItem): void
   onAction(kind: 'rename' | 'delete', camp: NavigationCampItem): void
 }): JSX.Element {
@@ -999,11 +1033,17 @@ function CampRow({
         onSelect: () => onAction('rename', camp)
       }]
   menuItems.push({
-    key: 'delete',
+    key: 'copy-id',
     label: menuLabels[2],
+    icon: 'copy',
+    onSelect: onCopyCampId
+  })
+  menuItems.push({
+    key: 'delete',
+    label: menuLabels[3],
     icon: 'trash',
     danger: true,
-    separatorBefore: camp.activationState !== 'pending',
+    separatorBefore: true,
     onSelect: () => onAction('delete', camp)
   })
   return (
@@ -1035,7 +1075,7 @@ function CampRow({
 type SidebarActionMenuItem = {
   key: string
   label: string
-  icon: 'pin' | 'edit' | 'trash'
+  icon: 'pin' | 'edit' | 'copy' | 'trash'
   filled?: boolean
   danger?: boolean
   separatorBefore?: boolean
@@ -1117,6 +1157,9 @@ function SidebarMenuIcon({ kind, filled = false }: {
   }
   if (kind === 'trash') {
     return <svg className="sidebar-action-menu-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M9 7V4h6v3m2 0-1 13H8L7 7m3 4v5m4-5v5" /></svg>
+  }
+  if (kind === 'copy') {
+    return <svg className="sidebar-action-menu-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2" /><path d="M16 6V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h1" /></svg>
   }
   return (
     <svg className={`sidebar-action-menu-icon ${filled ? 'filled' : ''}`} viewBox="0 0 24 24" aria-hidden="true">

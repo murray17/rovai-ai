@@ -5,7 +5,7 @@ status: accepted
 design_direction: arctic-dawn-v3
 target_version: cross-version
 implementation_status: in_progress
-last_updated: 2026-08-09
+last_updated: 2026-08-10
 ---
 
 # Rovai-ai UI 规范
@@ -141,8 +141,9 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   `1040–1179px` 收窄为 260px，并可从 Camp 顶栏完整隐藏或恢复。
 - 普通侧栏显示“置顶 / 项目”；Quick Chat 只在 Renderer 中作为项目列表末尾的
   文件夹式投影，底层继续是独立 `quick_chat`。侧栏品牌字标为 `Rovai AI`，无副标题。
-- Camp 与可置顶 Project 只通过三点菜单置顶或取消置顶；Camp 菜单同时承载重命名和
-  删除。Project 标题与“查看更多 / 收起”不显示会话数量，快速对话不显示 Project 菜单。
+- Camp 与可置顶 Project 只通过三点菜单置顶或取消置顶；Camp 菜单同时承载重命名、
+  “复制会话 ID”和删除。复制只写入稳定会话 ID 原文；Project 标题与“查看更多 / 收起”
+  不显示会话数量，快速对话不显示 Project 菜单。
 - 设置分类覆盖同一 270px 侧栏槽位，固定顺序为“通用 / Skill / MCP / Agent 运行时 / 外观 /
   通知 / 诊断与修复”。返回 App 后恢复原页面；设置分类跨 Main Window Session 记住最后选择，
   全新安装默认 General。七个设置分类统一使用无外框、带底部分隔线的共享页头；普通侧栏
@@ -174,7 +175,8 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   Dock、Composer 或唯一的 CampTurn Stop。
 - Camp Header 右侧只有执行/审批状态摘要，没有“停止”或 `•••`。停止只占用 Composer
   发送位；执行动态与执行详情只读过程详情，另有唯一 Inspector 显示/隐藏按钮。
-  状态摘要可恢复 Inspector 并打开对应页签；置顶、重命名和删除只从侧栏 Camp 行进入。
+  状态摘要可恢复 Inspector 并打开对应页签；置顶、重命名、复制会话 ID 和删除只从侧栏
+  Camp 行进入。
 - 队员页采用半身 portrait + 独立圆形 icon 的双 rendition 身份设计；编辑身份支持
   圆形取景拖拽、缩放、键盘微调与实际尺寸预览。
 - 队员页“运行配置”下保留默认收起的“运行参数”；九种 Runtime 使用专用模型与
