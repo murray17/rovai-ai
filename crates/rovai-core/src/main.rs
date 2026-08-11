@@ -135,8 +135,9 @@ use rovai_core::{
     runtime::{
         AcknowledgeAgentRunCancellationCommand, AgentRunCancellationCandidate, AgentRunExecution,
         BindNativeSessionCommand, CancelCampTurnCommand, ClaimAgentRunCommand,
-        ExecutionRuntimeService, FailAgentRunCommand, NativeSessionResumeDisposition,
-        NativeSessionResumeFailure, PermissionSemantics, RebindAgentRunRuntimeCommand,
+        ExecutionRuntimeService, FailAgentRunCommand, MissingSendRecoveryBoundary,
+        MissingSendRecoveryCandidate, NativeSessionResumeDisposition, NativeSessionResumeFailure,
+        PermissionSemantics, RebindAgentRunRuntimeCommand,
         RecordCancelledAgentRunEndingGitObservationCommand, RejectAgentRunDispatchCommand,
         RestartNativeSessionCommand, SucceedAgentRunCommand,
     },
@@ -6239,6 +6240,10 @@ impl Core {
             execution,
             &result.native_turn_id,
             &result.final_output,
+            &MissingSendRecoveryCandidate::new(
+                MissingSendRecoveryBoundary::ClaudeSuccessResult,
+                result.final_output.clone(),
+            ),
             output,
         )
         .await
@@ -6249,6 +6254,7 @@ impl Core {
         execution: &AgentRunExecution,
         native_turn_id: &str,
         final_output: &str,
+        missing_send_recovery_candidate: &MissingSendRecoveryCandidate,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
         for attempt in 0..80 {
@@ -6287,6 +6293,9 @@ impl Core {
                             execution_epoch: current.execution_epoch,
                             native_turn_id: native_turn_id.to_string(),
                             final_output: final_output.to_string(),
+                            missing_send_recovery_candidate: Some(
+                                missing_send_recovery_candidate.clone(),
+                            ),
                             ending_git_observation,
                         },
                     },
@@ -6634,6 +6643,12 @@ impl Core {
                             execution_epoch: current.execution_epoch,
                             native_turn_id: result.native_turn_id.clone(),
                             final_output: result.final_output.clone(),
+                            missing_send_recovery_candidate: Some(
+                                MissingSendRecoveryCandidate::new(
+                                    MissingSendRecoveryBoundary::AntigravityPrintStdout,
+                                    result.final_output.clone(),
+                                ),
+                            ),
                             ending_git_observation,
                         },
                     },
@@ -8168,13 +8183,32 @@ fn normalize_acp_event(method: &str, params: &Value) -> (&'static str, Value) {
     }
     let update = params.get("update").cloned().unwrap_or(Value::Null);
     match update.get("sessionUpdate").and_then(Value::as_str) {
-        Some("agent_message_chunk") => (
-            "agent.text.delta",
-            json!({
+        Some("agent_message_chunk") => {
+            let update_message_id = update
+                .get("messageId")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty());
+            let content_message_id = update
+                .pointer("/content/messageId")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty());
+            let (message_id, message_id_source) = if let Some(message_id) = update_message_id {
+                (Some(message_id), Some("update"))
+            } else if let Some(message_id) = content_message_id {
+                (Some(message_id), Some("content"))
+            } else {
+                (None, None)
+            };
+            (
+                "agent.text.delta",
+                json!({
                 "delta": update.pointer("/content/text").and_then(Value::as_str).unwrap_or(""),
                 "sessionId": params.get("sessionId"),
-            }),
-        ),
+                "messageId": message_id,
+                "messageIdSource": message_id_source,
+                }),
+            )
+        }
         Some("agent_thought_chunk") => ("agent.thought.delta", update),
         Some("tool_call") | Some("tool_call_update") => (
             "runtime.action",
@@ -8675,6 +8709,16 @@ async fn persist_acp_prompt_completion(
             "unknown"
         });
     let final_agent_message = runtime.final_agent_message().await;
+    let missing_send_recovery_candidate = if stop_reason == "end_turn" {
+        runtime.missing_send_recovery_candidate().await.map(|body| {
+            MissingSendRecoveryCandidate::new(
+                MissingSendRecoveryBoundary::AcpEndTurnAssistantSuffix,
+                body,
+            )
+        })
+    } else {
+        None
+    };
     for attempt in 0..80 {
         let execution = {
             let database = core.database.lock().await;
@@ -8709,6 +8753,8 @@ async fn persist_acp_prompt_completion(
                             execution_epoch,
                             native_turn_id: prompt_id.to_string(),
                             final_output,
+                            missing_send_recovery_candidate: missing_send_recovery_candidate
+                                .clone(),
                             ending_git_observation: ending_git_observation.clone(),
                         },
                     },
@@ -9072,6 +9118,9 @@ async fn process_agent_run_codex_message(
         eprintln!("ignored fenced native Turn completion for AgentRun {agent_run_id}");
         return;
     }
+    let missing_send_recovery_candidate = completed.final_agent_message.clone().map(|body| {
+        MissingSendRecoveryCandidate::new(MissingSendRecoveryBoundary::CodexCompletedTurn, body)
+    });
     let final_agent_message = match completed.final_agent_message.clone() {
         Some(message) => Some(message),
         None => runtime.final_agent_message().await,
@@ -9117,6 +9166,8 @@ async fn process_agent_run_codex_message(
                             execution_epoch,
                             native_turn_id: completed.turn_id.clone(),
                             final_output,
+                            missing_send_recovery_candidate: missing_send_recovery_candidate
+                                .clone(),
                             ending_git_observation: ending_git_observation.clone(),
                         },
                     },
@@ -10359,6 +10410,63 @@ mod tests {
         assert_eq!(payload["toolName"], "execute");
         assert!(payload["rawInputDigest"].is_string());
         assert!(payload["rawOutputDigest"].is_string());
+    }
+
+    #[test]
+    fn acp_agent_message_events_preserve_only_safe_message_identity_metadata() {
+        let (_, update_identity) = normalize_acp_event(
+            "session/update",
+            &json!({
+                "sessionId": "session-1",
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "messageId": "message-1",
+                    "content": {"type": "text", "text": "final"}
+                }
+            }),
+        );
+        assert_eq!(update_identity["messageId"], "message-1");
+        assert_eq!(update_identity["messageIdSource"], "update");
+
+        let (_, content_identity) = normalize_acp_event(
+            "session/update",
+            &json!({
+                "sessionId": "session-1",
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"type": "text", "text": "final", "messageId": "message-2"}
+                }
+            }),
+        );
+        assert_eq!(content_identity["messageId"], "message-2");
+        assert_eq!(content_identity["messageIdSource"], "content");
+
+        let (_, anonymous) = normalize_acp_event(
+            "session/update",
+            &json!({
+                "sessionId": "session-1",
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"type": "text", "text": "final"}
+                }
+            }),
+        );
+        assert!(anonymous["messageId"].is_null());
+        assert!(anonymous["messageIdSource"].is_null());
+
+        let (_, invalid_identity) = normalize_acp_event(
+            "session/update",
+            &json!({
+                "sessionId": "session-1",
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "messageId": {"unexpected": "raw metadata"},
+                    "content": {"type": "text", "text": "final", "messageId": "   "}
+                }
+            }),
+        );
+        assert!(invalid_identity["messageId"].is_null());
+        assert!(invalid_identity["messageIdSource"].is_null());
     }
 
     #[test]

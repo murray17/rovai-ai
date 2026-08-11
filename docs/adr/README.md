@@ -1,7 +1,7 @@
 ---
 document_type: adr-index
 authority: architecture-decisions
-last_updated: 2026-08-11
+last_updated: 2026-08-12
 ---
 
 # Rovai-ai Architecture Decision Records
@@ -240,3 +240,4 @@ pnpm docs:adr:generate -- --check
 | [ADR-0154](0154-agent-level-execution-process-surface.md) | Agent-Level Continuous Execution Process Surface | `accepted` | [v0.55](../versions/v0.55/README.md) | ← ADR-0133；以 Agent 级连续过程替代逐 Run Scheme C surface，并收敛 Inspector 为三 Tab |
 | [ADR-0158](0158-default-all-runtime-delivery-for-managed-skills.md) | Default-All Runtime Delivery for Managed Skills | `accepted` | [v0.58](../versions/v0.58/README.md) | 局部替代 ADR-0105/ADR-0150 的 Skill 默认不分组条款；内置与用户导入 Skill 均默认投递至全部生效组 |
 | [ADR-0159](0159-pinned-third-party-tasteful-ui-bundled-skill.md) | Pinned Third-Party Tasteful UI Bundled Skill | `accepted` | [v0.58](../versions/v0.58/README.md) | ← ADR-0150；官方集合扩展为六个，并以精确上游 Revision、完整来源、许可和不可变 Revision 内置 `tasteful-ui` |
+| [ADR-0162](0162-missing-send-recovery-publication.md) | Missing-Send Recovery Publication at Successful AgentRun Termination | `accepted` | [v0.59](../versions/v0.59/README.md) | 独立于 ordinary public output mode，按同 Run 任意 accepted send 抑制，并以四类 Adapter final boundary 原子恢复 zero-send 公共输出 |

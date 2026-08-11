@@ -1,11 +1,11 @@
 ---
 document_type: version-overview
 version: v0.58
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: in_progress
-last_updated: 2026-08-11
+last_updated: 2026-08-12
 ---
 
 # Rovai-ai v0.58：可恢复 Runtime 漂移与受控重绑定
@@ -13,6 +13,8 @@ last_updated: 2026-08-11
 > 当前状态：Core 实现、自动化测试与通用仓库门禁已完成，真实 Copilot CLI 漂移验收待完成。
 >
 > 前置版本：[v0.57 可恢复的项目侧栏移除](../v0.57/README.md)
+>
+> 后续版本：[v0.59 九 Runtime 的零 send 公共输出恢复发布](../v0.59/README.md)
 
 ## 版本目标
 

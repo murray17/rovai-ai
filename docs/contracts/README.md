@@ -1,7 +1,7 @@
 ---
 document_type: contracts-index
 authority: protocol-contract-routing
-last_updated: 2026-08-11
+last_updated: 2026-08-12
 ---
 
 # 长期接口合同
@@ -29,6 +29,7 @@ Architecture 解释组件如何组成，Version 文档记录交付范围；它�
 修改已冻结的历史 Version schema catalog。
 | [Durable Task v3（当前）](durable-task-v3.md) | User/Lead 责任定义、Assignee execution-state update、Camp-wide read、explicit owner、unassigned holding 与 advisory actions |
 | [Camp Message Send v2（当前）](camp-message-send-v2.md) | 隐式当前 Run Camp、记录身份 Replay、send clean break 与 A2A 业务错误；v0.47 transport 入口由 v4 合同局部替代 |
+| [Missing-Send Recovery Publication v1（当前）](missing-send-recovery-publication-v1.md) | 成功 AgentRun 的 typed final candidate、同 Run accepted-send 抑制、recipient-free 原子恢复消息与 terminal replay/竞态语义 |
 | [Pending Camp Activation v1（当前）](pending-camp-activation-v1.md) | 一键 Pending 创建、Snapshot/Navigation activation state、首消息原子激活、mutation guard 与窄 discard/启动清理 |
 | [Built-in Tool Transport v4 (historical)](builtin-tool-transport-v4.md) | v0.47 Task v2 transport；不作为 v0.54 Runtime/CLI compatibility 入口 |
 | [Durable Task v2 (historical)](durable-task-v2.md) | ordinary-Agent create/claim 与受限读取的旧 Task 合同；不作为当前 authority |

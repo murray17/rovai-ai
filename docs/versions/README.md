@@ -1,8 +1,8 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.58
-last_updated: 2026-08-11
+current_version: v0.59
+last_updated: 2026-08-12
 ---
 
 # Rovai-ai 版本记录
@@ -109,4 +109,5 @@ last_updated: 2026-08-11
 | v0.55 | `historical` | Agent 级连续执行过程、按需详情与 Inspector 收敛 | [v0.55/README.md](v0.55/README.md) |
 | v0.56 | `historical` | Neutral Porcelain + Steel Renderer 与生产功能保真迁移 | [v0.56/README.md](v0.56/README.md) |
 | v0.57 | `historical` | 可恢复的项目侧栏移除与本机导航偏好迁移 | [v0.57/README.md](v0.57/README.md) |
-| v0.58 | `current` | 可恢复 Runtime 漂移与受控重绑定 | [v0.58/README.md](v0.58/README.md) |
+| v0.58 | `historical` | 可恢复 Runtime 漂移与受控重绑定；冻结时真实 Copilot 原地漂移 smoke 未完成 | [v0.58/README.md](v0.58/README.md) |
+| v0.59 | `current` | 九 Runtime 的零 send 公共输出恢复发布 | [v0.59/README.md](v0.59/README.md) |

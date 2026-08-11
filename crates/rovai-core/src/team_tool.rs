@@ -1593,7 +1593,7 @@ mod tests {
         },
         runtime::{
             BindNativeSessionCommand, ClaimAgentRunCommand, ExecutionRuntimeService,
-            SucceedAgentRunCommand,
+            MissingSendRecoveryBoundary, MissingSendRecoveryCandidate, SucceedAgentRunCommand,
         },
     };
 
@@ -1891,6 +1891,16 @@ mod tests {
         }
 
         fn succeed_run(&mut self, agent_run_id: &str, execution_epoch: i64, output: &str) {
+            self.succeed_run_with_candidate(agent_run_id, execution_epoch, output, None);
+        }
+
+        fn succeed_run_with_candidate(
+            &mut self,
+            agent_run_id: &str,
+            execution_epoch: i64,
+            output: &str,
+            missing_send_recovery_candidate: Option<MissingSendRecoveryCandidate>,
+        ) -> CommandExecution {
             let runtime = ExecutionRuntimeService::default();
             let execution = runtime
                 .load_agent_run_execution(&self.database, agent_run_id, execution_epoch)
@@ -1913,12 +1923,14 @@ mod tests {
                             execution_epoch,
                             native_turn_id: format!("native-turn-{agent_run_id}"),
                             final_output: output.to_string(),
+                            missing_send_recovery_candidate,
                             ending_git_observation: None,
                         },
                     },
                 )
                 .expect("AgentRun should complete");
             assert_eq!(completed.result.status, CommandResultStatus::Applied);
+            completed
         }
     }
 
@@ -2372,7 +2384,89 @@ mod tests {
     }
 
     #[test]
-    fn explicit_send_only_keeps_the_explicit_recipient_free_message() {
+    fn missing_send_recovery_publishes_one_literal_recipient_free_message() {
+        let mut fixture = Fixture::new();
+        let body = "Recovered final with literal @agent_2";
+        let run_id = fixture.source_run_id.clone();
+        let completed = fixture.succeed_run_with_candidate(
+            &run_id,
+            fixture.source_epoch,
+            body,
+            Some(MissingSendRecoveryCandidate::new(
+                MissingSendRecoveryBoundary::CodexCompletedTurn,
+                body,
+            )),
+        );
+        assert_eq!(
+            completed.result.payload["missingSendRecovery"]["decision"],
+            "published"
+        );
+        assert_eq!(
+            completed.result.payload["missingSendRecovery"]["acceptedSendDetected"],
+            false
+        );
+
+        let message_id = completed.result.payload["finalCampMessageId"]
+            .as_str()
+            .expect("recovery must link the public message");
+        let message: (
+            String,
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+        ) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                    SELECT body, structured_content_json, address_mode,
+                           addressed_agent_ids_json, effective_recipient_ids_json,
+                           source_operation_id, reply_to_camp_message_id
+                    FROM camp_message WHERE id = ?1
+                    "#,
+                [message_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(message.0, body);
+        assert_eq!(
+            message.1,
+            serde_json::to_string(&json!([{"kind":"text","text":body}])).unwrap()
+        );
+        assert_eq!(message.2, "default");
+        assert_eq!(message.3, "[]");
+        assert_eq!(message.4, "[]");
+        assert!(message.5.is_none());
+        assert!(message.6.is_none());
+        assert_eq!(
+            fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM message_delivery WHERE message_id = ?1",
+                    [message_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn accepted_recipient_free_send_suppresses_missing_send_recovery() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
         let body = "The exact answer is already public.";
@@ -2386,7 +2480,15 @@ mod tests {
             .to_string();
 
         let source_epoch = fixture.source_epoch;
-        fixture.succeed_run(&fixture.source_run_id.clone(), source_epoch, body);
+        fixture.succeed_run_with_candidate(
+            &fixture.source_run_id.clone(),
+            source_epoch,
+            body,
+            Some(MissingSendRecoveryCandidate::new(
+                MissingSendRecoveryBoundary::CodexCompletedTurn,
+                "A different final that must not be recovered",
+            )),
+        );
 
         let (message_count, final_message_id, output_mode, suppressed): (
             i64,
@@ -2425,6 +2527,21 @@ mod tests {
         assert!(final_message_id.is_none());
         assert_eq!(output_mode, "explicit_send_only");
         assert!(!suppressed);
+        let recovery_decision: String = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT json_extract(payload_json, '$.missingSendRecovery.decision')
+                FROM event_log
+                WHERE event_type = 'agent_run.succeeded'
+                  AND entity_type = 'agent_run' AND entity_id = ?1
+                "#,
+                [&fixture.source_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(recovery_decision, "suppressed_accepted_send");
         assert_eq!(
             fixture
                 .database
@@ -2440,7 +2557,7 @@ mod tests {
     }
 
     #[test]
-    fn recipient_bound_explicit_send_is_the_only_public_message() {
+    fn accepted_addressed_send_also_suppresses_missing_send_recovery() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
         let body = "The answer is public for the target, but still needs a final.";
@@ -2450,7 +2567,15 @@ mod tests {
             .send_public_message(&mut fixture.database, &invocation)
             .unwrap();
 
-        fixture.succeed_run(&fixture.source_run_id.clone(), fixture.source_epoch, body);
+        fixture.succeed_run_with_candidate(
+            &fixture.source_run_id.clone(),
+            fixture.source_epoch,
+            body,
+            Some(MissingSendRecoveryCandidate::new(
+                MissingSendRecoveryBoundary::CodexCompletedTurn,
+                "A final after the addressed progress update",
+            )),
+        );
 
         let (message_count, suppressed): (i64, bool) = fixture
             .database
@@ -2473,6 +2598,22 @@ mod tests {
             .unwrap();
         assert_eq!(message_count, 1);
         assert!(!suppressed);
+        let recovery: (String, bool) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT json_extract(payload_json, '$.missingSendRecovery.decision'),
+                       json_extract(payload_json, '$.missingSendRecovery.acceptedSendDetected')
+                FROM event_log
+                WHERE event_type = 'agent_run.succeeded'
+                  AND entity_type = 'agent_run' AND entity_id = ?1
+                "#,
+                [&fixture.source_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(recovery, ("suppressed_accepted_send".to_string(), true));
         let automatic_reply: Option<String> = fixture
             .database
             .connection()
@@ -2490,6 +2631,278 @@ mod tests {
             .unwrap()
             .flatten();
         assert!(automatic_reply.is_none());
+    }
+
+    #[test]
+    fn a2a_target_run_recovers_independently_from_the_source_send() {
+        let mut fixture = Fixture::new();
+        let invocation = fixture.public_send_invocation(
+            "create-a2a-target-recovery",
+            "Please handle this @agent_2",
+            &["agent_2"],
+        );
+        let sent = TeamToolService::default()
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+        let delivery_id = sent.result.payload["deliveryIds"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let target_run_id: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT target_agent_run_id FROM message_delivery WHERE id = ?1",
+                [&delivery_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let (target_epoch, _) = fixture.claim_bind_and_issue(&target_run_id, "native-a2a-recovery");
+        let recovered = fixture.succeed_run_with_candidate(
+            &target_run_id,
+            target_epoch,
+            "A2A target final",
+            Some(MissingSendRecoveryCandidate::new(
+                MissingSendRecoveryBoundary::CodexCompletedTurn,
+                "A2A target final",
+            )),
+        );
+        assert_eq!(
+            recovered.result.payload["missingSendRecovery"]["decision"],
+            "published"
+        );
+        let recovery_message_id = recovered.result.payload["finalCampMessageId"]
+            .as_str()
+            .unwrap();
+        let recovery_fact: (String, String, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT source_agent_run_id, effective_recipient_ids_json,
+                       (SELECT COUNT(*) FROM message_delivery WHERE message_id = camp_message.id)
+                FROM camp_message WHERE id = ?1
+                "#,
+                [recovery_message_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(recovery_fact, (target_run_id, "[]".to_string(), 0));
+    }
+
+    #[test]
+    fn missing_send_recovery_failures_do_not_change_run_success() {
+        let cases = vec![
+            (None, "skipped_no_candidate"),
+            (
+                Some(MissingSendRecoveryCandidate::new(
+                    MissingSendRecoveryBoundary::ClaudeSuccessResult,
+                    "wrong Adapter boundary",
+                )),
+                "skipped_boundary_mismatch",
+            ),
+            (
+                Some(MissingSendRecoveryCandidate::new(
+                    MissingSendRecoveryBoundary::CodexCompletedTurn,
+                    "   ",
+                )),
+                "skipped_empty_candidate",
+            ),
+            (
+                Some(MissingSendRecoveryCandidate::new(
+                    MissingSendRecoveryBoundary::CodexCompletedTurn,
+                    "x".repeat(CAMP_MESSAGE_SEND_MAX_BODY_BYTES + 1),
+                )),
+                "skipped_candidate_too_large",
+            ),
+        ];
+        for (candidate, expected_decision) in cases {
+            let mut fixture = Fixture::new();
+            let run_id = fixture.source_run_id.clone();
+            let completed = fixture.succeed_run_with_candidate(
+                &run_id,
+                fixture.source_epoch,
+                "Run success remains authoritative",
+                candidate,
+            );
+            assert_eq!(
+                completed.result.payload["missingSendRecovery"]["decision"],
+                expected_decision
+            );
+            assert_eq!(
+                fixture
+                    .database
+                    .connection()
+                    .query_row(
+                        "SELECT status FROM agent_run WHERE id = ?1",
+                        [&run_id],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .unwrap(),
+                "succeeded"
+            );
+            assert_eq!(
+                fixture
+                    .database
+                    .connection()
+                    .query_row(
+                        "SELECT COUNT(*) FROM camp_message WHERE source_agent_run_id = ?1",
+                        [&run_id],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .unwrap(),
+                0
+            );
+        }
+    }
+
+    #[test]
+    fn rejected_send_does_not_suppress_recovery_but_tombstoned_accepted_send_does() {
+        let service = TeamToolService::default();
+
+        let mut rejected_fixture = Fixture::new();
+        let rejected_invocation = rejected_fixture.public_send_invocation(
+            "rejected-before-recovery",
+            "invalid recipient",
+            &["agent_999"],
+        );
+        let rejected = service
+            .send_public_message(&mut rejected_fixture.database, &rejected_invocation)
+            .unwrap();
+        assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
+        let rejected_run_id = rejected_fixture.source_run_id.clone();
+        let recovered = rejected_fixture.succeed_run_with_candidate(
+            &rejected_run_id,
+            rejected_fixture.source_epoch,
+            "successful final",
+            Some(MissingSendRecoveryCandidate::new(
+                MissingSendRecoveryBoundary::CodexCompletedTurn,
+                "successful final",
+            )),
+        );
+        assert_eq!(
+            recovered.result.payload["missingSendRecovery"]["decision"],
+            "published"
+        );
+
+        let mut tombstoned_fixture = Fixture::new();
+        let tombstoned_invocation = tombstoned_fixture.public_send_invocation(
+            "accepted-then-tombstoned",
+            "accepted fact",
+            &[],
+        );
+        let sent = service
+            .send_public_message(&mut tombstoned_fixture.database, &tombstoned_invocation)
+            .unwrap();
+        let message_id = sent.result.payload["messageId"].as_str().unwrap();
+        tombstoned_fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE camp_message SET tombstoned_at = '2026-08-12T00:00:00Z' WHERE id = ?1",
+                [message_id],
+            )
+            .unwrap();
+        let tombstoned_run_id = tombstoned_fixture.source_run_id.clone();
+        let suppressed = tombstoned_fixture.succeed_run_with_candidate(
+            &tombstoned_run_id,
+            tombstoned_fixture.source_epoch,
+            "later final",
+            Some(MissingSendRecoveryCandidate::new(
+                MissingSendRecoveryBoundary::CodexCompletedTurn,
+                "later final",
+            )),
+        );
+        assert_eq!(
+            suppressed.result.payload["missingSendRecovery"]["decision"],
+            "suppressed_accepted_send"
+        );
+        assert_eq!(
+            tombstoned_fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM camp_message WHERE source_agent_run_id = ?1",
+                    [&tombstoned_run_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn recovery_terminal_replay_is_exactly_once_and_late_send_is_fenced() {
+        let mut fixture = Fixture::new();
+        let runtime = ExecutionRuntimeService::default();
+        let execution = runtime
+            .load_agent_run_execution(
+                &fixture.database,
+                &fixture.source_run_id,
+                fixture.source_epoch,
+            )
+            .unwrap()
+            .unwrap();
+        let envelope = CommandEnvelope {
+            command_id: "stable-recovery-terminal".to_string(),
+            actor: ActorRef::System {
+                component_id: "runtime-adapter:codex-cli".to_string(),
+            },
+            camp_id: Some(fixture.camp_id.clone()),
+            expected_versions: Vec::new(),
+            execution_epoch: None,
+            payload: SucceedAgentRunCommand {
+                agent_run_id: fixture.source_run_id.clone(),
+                expected_version: execution.version,
+                execution_epoch: fixture.source_epoch,
+                native_turn_id: "recovery-turn".to_string(),
+                final_output: "replay final".to_string(),
+                missing_send_recovery_candidate: Some(MissingSendRecoveryCandidate::new(
+                    MissingSendRecoveryBoundary::CodexCompletedTurn,
+                    "replay final",
+                )),
+                ending_git_observation: None,
+            },
+        };
+        let first = runtime
+            .succeed_agent_run(&mut fixture.database, &envelope)
+            .unwrap();
+        let replay = runtime
+            .succeed_agent_run(&mut fixture.database, &envelope)
+            .unwrap();
+        assert!(!first.replayed);
+        assert!(replay.replayed);
+        assert_eq!(first.result.payload, replay.result.payload);
+        assert_eq!(
+            fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM camp_message WHERE source_agent_run_id = ?1",
+                    [&fixture.source_run_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
+
+        let late_invocation =
+            fixture.public_send_invocation("late-after-recovery", "too late", &[]);
+        let late_send =
+            TeamToolService::default().send_public_message(&mut fixture.database, &late_invocation);
+        assert!(late_send.is_err());
+        assert_eq!(
+            fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM camp_message WHERE source_agent_run_id = ?1",
+                    [&fixture.source_run_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
     }
 
     #[test]

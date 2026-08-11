@@ -60,6 +60,28 @@ impl PublicOutputMode {
     }
 }
 
+/// The Core-owned terminal safety policy for a successful Run that never
+/// accepted a Camp Message Send.
+///
+/// This is deliberately separate from [`PublicOutputMode`]: every shipped
+/// Adapter remains `explicit_send_only`, while a reliable Adapter final may be
+/// offered to Core as a narrowly scoped zero-send recovery candidate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MissingSendRecoveryMode {
+    Disabled,
+    IfNoAcceptedSend,
+}
+
+impl MissingSendRecoveryMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Disabled => "disabled",
+            Self::IfNoAcceptedSend => "if_no_accepted_send",
+        }
+    }
+}
+
 impl AdapterKind {
     pub const ALL: [Self; 9] = [
         Self::CodexCli,
@@ -157,6 +179,23 @@ impl AdapterKind {
             | Self::CodebuddyCli
             | Self::QwenCode
             | Self::AntigravityApp => PublicOutputMode::ExplicitSendOnly,
+        }
+    }
+
+    /// Freeze the missing-send safety net independently from ordinary Runtime
+    /// public output.  Every shipped Adapter has a dedicated, tested final
+    /// boundary and therefore participates in zero-send recovery.
+    pub const fn missing_send_recovery_mode(self) -> MissingSendRecoveryMode {
+        match self {
+            Self::CodexCli
+            | Self::OpencodeCli
+            | Self::CopilotCli
+            | Self::ClaudeCodeCli
+            | Self::KiroCli
+            | Self::QoderCli
+            | Self::CodebuddyCli
+            | Self::QwenCode
+            | Self::AntigravityApp => MissingSendRecoveryMode::IfNoAcceptedSend,
         }
     }
 }
@@ -3996,6 +4035,22 @@ mod tests {
                 PublicOutputMode::ExplicitSendOnly,
                 "{} must require an explicit public send",
                 kind.as_str(),
+            );
+        }
+    }
+
+    #[test]
+    fn missing_send_recovery_is_enabled_independently_for_every_adapter() {
+        for kind in AdapterKind::ALL {
+            assert_eq!(
+                kind.missing_send_recovery_mode(),
+                MissingSendRecoveryMode::IfNoAcceptedSend,
+                "{} must recover a reliable final only when no send was accepted",
+                kind.as_str(),
+            );
+            assert_eq!(
+                kind.public_output_mode(),
+                PublicOutputMode::ExplicitSendOnly
             );
         }
     }

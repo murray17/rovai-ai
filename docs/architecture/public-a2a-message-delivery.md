@@ -3,26 +3,28 @@ document_type: architecture
 architecture: public-a2a-message-delivery
 authority: public-message-and-delivery-boundaries
 status: accepted
-last_updated: 2026-08-10
+last_updated: 2026-08-12
 ---
 
 # Public A2A Message 与 Message Delivery 架构
 
 本文件定义 v0.45 以后 Agent-to-Agent 协作的长期组件边界。字段级输入、错误和状态合同
-分别见 [Camp Message Send v2](../contracts/camp-message-send-v2.md) 与
-[Message Delivery v1](../contracts/message-delivery-v1.md)；决策理由见
+分别见 [Camp Message Send v2](../contracts/camp-message-send-v2.md)、
+[Message Delivery v1](../contracts/message-delivery-v1.md) 与
+[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)；决策理由见
 [ADR-0130](../adr/0130-public-a2a-message-and-unified-delivery.md) 和
-[ADR-0131](../adr/0131-recipient-scoped-event-driven-delivery-recovery.md)。
+[ADR-0131](../adr/0131-recipient-scoped-event-driven-delivery-recovery.md)，成功 Run 的 zero-send safety net 见
+[ADR-0162](../adr/0162-missing-send-recovery-publication.md)。
 
 ## 1. 一条公共事实，多个收件人责任
 
 ```text
 AgentRun / user-visible Agent
-          │ camp.message.send
-          ▼
-Core Message Send Transaction
-  ├─ Public A2A Message (one public Camp fact)
-  └─ Message Delivery × effective recipient (zero or more)
+          ├─ camp.message.send ──► Core Message Send Transaction
+          │                          ├─ Public A2A Message (one public Camp fact)
+          │                          └─ Message Delivery × effective recipient (zero or more)
+          └─ successful zero-send ─► Core Terminal Recovery Transaction
+                                     └─ recipient-free Public A2A Message (zero Delivery)
                                   │ dispatch attempt
                                   ▼
                          target AgentRun (zero or one)
@@ -126,11 +128,23 @@ send、send failure 或 `delivery_unknown` 都不是 accepted evidence。
 
 当前已交付的所有 Runtime Adapter 均冻结为 `explicit_send_only`。`assistant_final_visible` 只保留为
 协议能力，当前没有 Adapter 选择该模式；普通 final 只保留在 Run/Evidence 边界，不隐式产生
-CampMessage。
+CampMessage。该 ordinary output mode 与 Missing-Send Recovery Publication 是两个独立 catalog
+capability；启用后者不把 Adapter 改为 `assistant_final_visible`。
 
 自动 final 输出不能猜测收件人、不能创建 Delivery、不能把普通中间流写入公共区。精确重复
 抑制只适用于同一 Run、recipient-free、canonical normalized body 完全相同的 final boundary；
 不做语义相似度、时间窗或跨 Run 去重。
+
+Missing-Send Recovery 则只在 successful Run 的终态事务执行。Core 先检查同一 Run 是否存在任何
+non-null `sourceOperationId` 的 accepted Camp Message Send；只要存在，不论 public-only、addressed、
+progress、final 或后来 tombstoned，都抑制 recovery。没有 accepted send 时，Core 才验证 Adapter
+提供的 typed candidate 与冻结 Adapter 匹配、正文非空且不超过 32 KiB，并创建至多一条
+recipient-free CampMessage。
+
+四类 candidate source 是 Codex completed-turn item、Claude success result、Antigravity validated print
+stdout 与 ACP `end_turn` 时 last-tool 后 assistant suffix。Core 不回退到通用 stream/stdout，不截断
+超限正文，也不解析候选中的 Addressing Token。候选缺失或不合格不改变既有 AgentRun success；每个
+独立 user/A2A Run 分别决策，因此多个静默 Run 可以各自产生一条消息。该机制不保证最终结论完整公开。
 
 ## 6. 读取侧与 UI 投影
 
@@ -149,6 +163,8 @@ Execution Drawer 只能读取并选择 Run 详情；它不拥有取消命令。C
 
 - `requestId` 幂等只覆盖同一执行身份与相同 canonical input；运输重试复用 requestId，修正
   寻址使用新 requestId；
+- successful terminal command 的 durable replay 不重复运行 recovery；send 先提交则抑制，succeed 先
+  提交则 recovery 与 terminal fence 原子成立，迟到 send 被拒绝；
 - Delivery Retry Identity 是独立审计身份，但重试不得重解析、扩大 recipient、改写正文或
   生成第二条 Public Message；
 - canonical recipient order 永远不推导 Scheduler order；Scheduler 可使用自己的公平性、

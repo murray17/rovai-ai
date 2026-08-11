@@ -1214,12 +1214,16 @@ The rule that only a Runtime-reported or Core-proven operation may enter Runtime
 _Avoid_: sandbox boundary, permission boundary, workspace-diff inference
 
 **Runtime Public Output Mode**:
-The immutable Adapter capability that determines whether an AgentRun's ordinary final assistant output can become a Public Message. `explicit_send_only` publishes only accepted `camp.message.send` calls; `assistant_final_visible` may publish one reliable Adapter-delimited final as a recipient-free Public Message at Run completion. Every currently shipped Adapter is frozen to `explicit_send_only`; `assistant_final_visible` remains a reserved protocol capability with no current Adapter assignment. The mode is not a user or model setting and never changes the addressing or Delivery contract.
-_Avoid_: Renderer heuristic, per-message toggle, inferred final, private A2A mode
+The immutable Adapter capability that determines whether an AgentRun's ordinary final assistant output can become a Public Message. `explicit_send_only` publishes only accepted `camp.message.send` calls through ordinary Runtime output handling; `assistant_final_visible` may publish one reliable Adapter-delimited final as a recipient-free Public Message at Run completion. Every currently shipped Adapter is frozen to `explicit_send_only`; `assistant_final_visible` remains a reserved protocol capability with no current Adapter assignment. The mode is independent from Missing-Send Recovery Publication, is not a user or model setting, and never changes the addressing or Delivery contract.
+_Avoid_: Missing-Send Recovery Publication, Renderer heuristic, per-message toggle, inferred final, private A2A mode
 
 **Adapter Final Boundary**:
-The Runtime-native evidence boundary that authorizes Core to treat one assistant output as the completed final for `assistant_final_visible`. Without a reliable boundary Core does not guess from prose, logs, or process exit; a final is never routed to recipients merely because the Run sent an addressed message.
-_Avoid_: last stdout chunk, process exit alone, semantic classifier, Delivery completion
+The Runtime-native evidence boundary that authorizes Core to treat one assistant output as a completed final candidate for `assistant_final_visible` or Missing-Send Recovery Publication. The boundary carries closed Adapter provenance: Codex completed-turn item, Claude successful result, validated Antigravity print stdout, or ACP `end_turn` assistant suffix after the last tool activity. Without a reliable boundary Core does not guess from prose, generic streamed text, logs, or process exit; a final is never routed to recipients merely because the Run sent an addressed message.
+_Avoid_: last stdout chunk, generic streamed fallback, process exit alone, semantic classifier, Delivery completion
+
+**Missing-Send Recovery Publication**:
+The Core-owned terminal safety net that may create one recipient-free Public A2A Message from an Adapter Final Boundary-qualified candidate when an eligible successful AgentRun has no accepted Camp Message Send. It applies equally to user-triggered and Message-Delivery-triggered Runs; any accepted send from that Run suppresses recovery regardless of recipients, intent, or body, so the mechanism recovers zero-send silence but does not guarantee that a final conclusion was published.
+_Avoid_: implicit Camp Message Send, final-answer guarantee, progress/final intent inference, recipient recovery, assistant_final_visible
 
 **Exact Final Suppression**:
 The narrow duplicate rule for `assistant_final_visible`: Core suppresses only a recipient-free final whose normalized body exactly equals an earlier recipient-free Public Message from the same AgentRun. It performs no semantic similarity comparison and never suppresses an addressed send or a distinct conclusion.
@@ -1325,8 +1329,8 @@ The recipient-scoped pre-Run boundary inside a Delivery Dispatch Attempt that as
 _Avoid_: send-transaction preflight, ghost AgentRun, Runtime capacity wait, whole-message rollback
 
 **Camp Message Send**:
-The authenticated current-AgentRun action exposed as `camp.message.send` and `rovai send`, and the sole path for an Agent to publish into its Camp. Its Camp scope is derived only from the authenticated current Run, never selected or overridden by Agent input; Core resolves and deduplicates Effective Recipients from explicit targets, valid inline Agent Addressing Tokens, and reply-to defaults, with no private A2A path.
-_Avoid_: Member Call, `team.call_member`, private message, per-recipient public copy, compatibility alias
+The authenticated current-AgentRun action exposed as `camp.message.send` and `rovai send`, and the sole Agent-intent path for an Agent to publish into its Camp. Its Camp scope is derived only from the authenticated current Run, never selected or overridden by Agent input; Core resolves and deduplicates Effective Recipients from explicit targets, valid inline Agent Addressing Tokens, and reply-to defaults, with no private A2A path. Missing-Send Recovery Publication is a Core terminal safety action rather than an Agent send and cannot carry recipients or send intent.
+_Avoid_: Missing-Send Recovery Publication, Member Call, `team.call_member`, private message, per-recipient public copy, compatibility alias
 
 **Camp Message Send Idempotency**:
 The exact replay rule keyed by the canonical Camp Message Send input and one invocation identity. The accepted command records its Camp, source AgentRun, and execution epoch; durable Replay reuses those recorded identities rather than the currently active identity, returns the original Envelope and effects, and treats a changed input under the same identity as a conflict. Equal body/recipient content without the same identity remains a new intentional send.

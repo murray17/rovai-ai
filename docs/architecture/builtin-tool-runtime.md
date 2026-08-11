@@ -3,7 +3,7 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-08-11
+last_updated: 2026-08-12
 ---
 
 # Built-in Tool Runtime Architecture
@@ -11,7 +11,8 @@ last_updated: 2026-08-11
 本文件说明 Rovai built-in operations 的长期组件结构。当前字段与版本以
 [Built-in Tool Transport v5](../contracts/builtin-tool-transport-v5.md)、
 [Durable Task v3](../contracts/durable-task-v3.md) 和
-[Camp Message Send v2](../contracts/camp-message-send-v2.md) 为准；v3 及更早 Transport 只保留
+[Camp Message Send v2](../contracts/camp-message-send-v2.md) 与
+[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md) 为准；v3 及更早 Transport 只保留
 historical 语义。决策理由见
 [ADR-0124](../adr/0124-cli-only-transport-for-rovai-built-in-operations.md)、
 [ADR-0135](../adr/0135-compact-agent-output-over-canonical-built-in-tool-envelope.md)、
@@ -210,6 +211,20 @@ JSON-RPC error response 在尚无 accepted evidence 时把 Delivery 结算为 `n
 accepted 已持久化，迟到 error/退出不得降级它。Host 在任何关联运行时证据前丢失时继续进入既有
 runtime-loss / `delivery_unknown` 对账，不能以 pipe flush 抑制重试或恢复。
 
+### Successful Run 的 Missing-Send Recovery
+
+Runtime final 继续首先服务 AgentRun 成功/失败结算；Adapter 另外形成 optional typed recovery candidate。
+Codex 只使用 completed-turn items，Claude 只使用 matched success result，Antigravity 只使用验证且未截断
+的 print stdout。ACP 保留全量 assistant aggregate 作为 Run success final，同时独立收集最后一次 tool
+activity 后的 assistant suffix；只有匹配 prompt 的 `end_turn` 暴露 candidate，optional `messageId`
+身份混乱时 fail closed。
+
+Core 在 successful terminal transaction 检查该 Run 的任意 accepted `camp.message.send`。有 send 则不
+发布；无 send 且 candidate 合格时写一条 recipient-free CampMessage，并且不创建 Delivery 或预算责任。
+候选缺失、超出 32 KiB 或 provenance 不匹配只改变 recovery decision，不改变 AgentRun success。
+该 safety net 不判断进度/最终意图，也不解除 Agent 在需要公开 answer/result/status/summary 时显式
+`rovai send` 的 Charter 义务。
+
 ### Dispatch 前 Runtime drift 与 rebind
 
 AgentRun 冻结 Adapter、Installation、auth scope、模型选择语义和权限配置；Installation 的路径、版本、
@@ -237,6 +252,8 @@ Session Charter 只说明：
 - `camp.message.send` 使用当前 Run Camp，不能传入 Camp ID；
 - 对 `explicit_send_only` Runtime，narration/final response 只是私有执行证据；当前责任需要在 Camp
   公开 answer/result/status/summary 时必须在结束前调用 `rovai send`，只有成功 send 才发布该回复；
+- Core 可能在 successful zero-send 且 Adapter final boundary 可靠时执行 Missing-Send Recovery，但它不
+  保证完整最终结论公开，也不应被 Agent 当作省略 `rovai send` 的正常路径；
 - Task responsibility definition belongs to the User or current Camp Default Lead；
 - Public Message、Message Delivery、Memory 和 read 工具保持各自稳定业务原则；
 - Dynamic Context 可能截断或省略：单条正文只使用可直接提交给 canonical operation schema 的

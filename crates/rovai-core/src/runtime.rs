@@ -10,7 +10,10 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
-    agent_profile::{AdapterKind, AgentProfileService, FrozenAgentRuntimeConfig, PublicOutputMode},
+    agent_profile::{
+        AdapterKind, AgentProfileService, FrozenAgentRuntimeConfig, MissingSendRecoveryMode,
+        PublicOutputMode,
+    },
     camp_content::{StructuredCampMessageSegment, canonical_content_digest},
     collaboration::exhaust_camp_turn_execution_budget,
     command::{
@@ -22,8 +25,8 @@ use crate::{
     execution_budget::{CampTurnExecutionBudgetExhaustionReason, camp_turn_execution_budget_now},
     git::GitObservation,
     message_delivery::{
-        DeliveryDispatchTrigger, cancel_pending_turn_deliveries, dispatch_pending_for_recipient,
-        settle_materialized_delivery_for_agent_run,
+        CAMP_MESSAGE_SEND_MAX_BODY_BYTES, DeliveryDispatchTrigger, cancel_pending_turn_deliveries,
+        dispatch_pending_for_recipient, settle_materialized_delivery_for_agent_run,
     },
 };
 
@@ -198,7 +201,54 @@ pub struct SucceedAgentRunCommand {
     pub execution_epoch: i64,
     pub native_turn_id: String,
     pub final_output: String,
+    #[serde(default)]
+    pub missing_send_recovery_candidate: Option<MissingSendRecoveryCandidate>,
     pub ending_git_observation: Option<GitObservation>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MissingSendRecoveryBoundary {
+    CodexCompletedTurn,
+    ClaudeSuccessResult,
+    AntigravityPrintStdout,
+    AcpEndTurnAssistantSuffix,
+}
+
+impl MissingSendRecoveryBoundary {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::CodexCompletedTurn => "codex_completed_turn",
+            Self::ClaudeSuccessResult => "claude_success_result",
+            Self::AntigravityPrintStdout => "antigravity_print_stdout",
+            Self::AcpEndTurnAssistantSuffix => "acp_end_turn_assistant_suffix",
+        }
+    }
+
+    fn is_compatible_with(self, adapter_kind: AdapterKind) -> bool {
+        match self {
+            Self::CodexCompletedTurn => matches!(adapter_kind, AdapterKind::CodexCli),
+            Self::ClaudeSuccessResult => matches!(adapter_kind, AdapterKind::ClaudeCodeCli),
+            Self::AntigravityPrintStdout => matches!(adapter_kind, AdapterKind::AntigravityApp),
+            Self::AcpEndTurnAssistantSuffix => adapter_kind.uses_acp(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MissingSendRecoveryCandidate {
+    pub boundary: MissingSendRecoveryBoundary,
+    pub body: String,
+}
+
+impl MissingSendRecoveryCandidate {
+    pub fn new(boundary: MissingSendRecoveryBoundary, body: impl Into<String>) -> Self {
+        Self {
+            boundary,
+            body: body.into(),
+        }
+    }
 }
 
 impl sealed::Sealed for SucceedAgentRunCommand {}
@@ -2367,17 +2417,18 @@ impl ExecutionRuntimeService {
             )? {
                 return Ok(rejection);
             }
-            let public_output_mode = target
+            let adapter_kind = target
                 .runtime_adapter_kind
                 .as_deref()
-                .and_then(|value| value.parse::<AdapterKind>().ok())
+                .and_then(|value| value.parse::<AdapterKind>().ok());
+            let public_output_mode = adapter_kind
                 .map(AdapterKind::public_output_mode)
                 .unwrap_or(PublicOutputMode::ExplicitSendOnly);
             let final_output_digest =
                 canonical_content_digest(&[StructuredCampMessageSegment::Text {
                     text: envelope.payload.final_output.clone(),
                 }])?;
-            let (final_camp_message_id, automatic_public_output_suppressed) =
+            let (ordinary_final_camp_message_id, automatic_public_output_suppressed) =
                 if public_output_mode == PublicOutputMode::AssistantFinalVisible {
                     // A Runtime may have already made the exact final answer public through
                     // `camp.message.send`. Suppress only that same Run + canonical body digest;
@@ -2407,82 +2458,33 @@ impl ExecutionRuntimeService {
                     if let Some(existing_final_message_id) = existing_final_message_id {
                         (Some(existing_final_message_id), true)
                     } else {
-                        let final_camp_message_id = Uuid::new_v4().to_string();
-                        transaction.execute(
-                            r#"
-                    UPDATE camp
-                    SET last_message_sequence = last_message_sequence + 1,
-                        version = version + 1, updated_at = ?2
-                    WHERE id = ?1
-                    "#,
-                            params![target.camp_id, target.now],
-                        )?;
-                        let camp_sequence: i64 = transaction.query_row(
-                            "SELECT last_message_sequence FROM camp WHERE id = ?1",
-                            [&target.camp_id],
-                            |row| row.get(0),
-                        )?;
-                        let addressed_agents_json = "[]";
-                        let structured_content = vec![StructuredCampMessageSegment::Text {
-                            text: envelope.payload.final_output.clone(),
-                        }];
-                        let structured_content_json = serde_json::to_string(&structured_content)?;
-                        transaction.execute(
-                            r#"
-                    INSERT INTO camp_message(
-                        id, camp_id, sequence,
-                        author_type, author_id, source_agent_run_id, body,
-                        structured_content_json, content_digest,
-                        address_mode, addressed_agent_ids_json,
-                        reply_to_camp_message_id, camp_turn_id, agent_run_id,
-                        tombstoned_at, version, created_at, updated_at
-                    ) VALUES (
-                        ?1, ?2, ?3, 'agent', ?4, ?5, ?6, ?7, ?8,
-                        'default', ?9, ?10, ?11, ?5,
-                        NULL, 1, ?12, ?12
-                    )
-                    "#,
-                            params![
-                                final_camp_message_id,
-                                target.camp_id,
-                                camp_sequence,
-                                target.agent_id,
-                                target.agent_run_id,
-                                envelope.payload.final_output,
-                                structured_content_json,
-                                final_output_digest,
-                                addressed_agents_json,
-                                Option::<String>::None,
-                                target.camp_turn_id,
-                                target.now,
-                            ],
-                        )?;
-                        index_camp_message(
+                        let final_camp_message_id = persist_recipient_free_agent_publication(
                             transaction,
-                            &final_camp_message_id,
-                            &target.camp_id,
+                            &target,
                             &envelope.payload.final_output,
-                            addressed_agents_json,
-                        )?;
-                        append_domain_event(
-                            transaction,
-                            "camp_message.sent",
-                            &target.camp_id,
-                            ("camp_message", &final_camp_message_id),
+                            &final_output_digest,
                             &envelope.actor,
-                            Some(envelope.payload.execution_epoch),
-                            &json!({
-                                "sequence": camp_sequence,
-                                "sourceAgentRunId": target.agent_run_id,
-                                "publicOutputMode": public_output_mode.as_str(),
-                                "recipientFree": true,
-                            }),
+                            envelope.payload.execution_epoch,
+                            "assistant_final_visible",
+                            Some(public_output_mode.as_str()),
+                            None,
                         )?;
                         (Some(final_camp_message_id), false)
                     }
                 } else {
                     (None, false)
                 };
+            let missing_send_recovery = decide_missing_send_recovery(
+                transaction,
+                &target,
+                &envelope.actor,
+                envelope.payload.execution_epoch,
+                adapter_kind,
+                ordinary_final_camp_message_id.as_deref(),
+                envelope.payload.missing_send_recovery_candidate.as_ref(),
+            )?;
+            let final_camp_message_id =
+                ordinary_final_camp_message_id.or_else(|| missing_send_recovery.message_id.clone());
             let ending_git_observation = envelope
                 .payload
                 .ending_git_observation
@@ -2528,6 +2530,7 @@ impl ExecutionRuntimeService {
                     "publicOutputMode": public_output_mode.as_str(),
                     "recipientFree": true,
                     "automaticPublicOutputSuppressed": automatic_public_output_suppressed,
+                    "missingSendRecovery": missing_send_recovery,
                     "endingGitObservation": envelope.payload.ending_git_observation,
                 }),
             )?;
@@ -2558,6 +2561,7 @@ impl ExecutionRuntimeService {
                     "finalOutputDigest": final_output_digest,
                     "publicOutputMode": public_output_mode.as_str(),
                     "automaticPublicOutputSuppressed": automatic_public_output_suppressed,
+                    "missingSendRecovery": missing_send_recovery,
                 }),
                 Some(entity_ref("agent_run", &target.agent_run_id)),
             ))
@@ -3133,6 +3137,190 @@ struct TerminalTarget {
     final_conversation_message_id: Option<String>,
     final_camp_message_id: Option<String>,
     now: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MissingSendRecoveryOutcome {
+    mode: &'static str,
+    decision: &'static str,
+    accepted_send_detected: bool,
+    candidate_boundary: Option<&'static str>,
+    candidate_digest: Option<String>,
+    message_id: Option<String>,
+}
+
+fn decide_missing_send_recovery(
+    transaction: &Transaction<'_>,
+    target: &TerminalTarget,
+    actor: &ActorRef,
+    execution_epoch: i64,
+    adapter_kind: Option<AdapterKind>,
+    ordinary_publication_id: Option<&str>,
+    candidate: Option<&MissingSendRecoveryCandidate>,
+) -> Result<MissingSendRecoveryOutcome> {
+    let mode = adapter_kind
+        .map(AdapterKind::missing_send_recovery_mode)
+        .unwrap_or(MissingSendRecoveryMode::Disabled);
+    // TODO(public-output-kind): Introduce explicit send intent so progress or
+    // coordination messages need not satisfy the final-public-output
+    // requirement. For this release, every accepted send suppresses recovery.
+    let accepted_send_detected: bool = transaction.query_row(
+        r#"
+        SELECT EXISTS(
+            SELECT 1
+            FROM camp_message
+            WHERE source_agent_run_id = ?1
+              AND author_type = 'agent'
+              AND author_id = ?2
+              AND source_operation_id IS NOT NULL
+        )
+        "#,
+        params![target.agent_run_id, target.agent_id],
+        |row| row.get(0),
+    )?;
+    let candidate_boundary = candidate.map(|candidate| candidate.boundary.as_str());
+    let outcome = |decision, candidate_digest, message_id| MissingSendRecoveryOutcome {
+        mode: mode.as_str(),
+        decision,
+        accepted_send_detected,
+        candidate_boundary,
+        candidate_digest,
+        message_id,
+    };
+
+    if mode == MissingSendRecoveryMode::Disabled {
+        return Ok(outcome("skipped_policy_disabled", None, None));
+    }
+    if accepted_send_detected {
+        return Ok(outcome("suppressed_accepted_send", None, None));
+    }
+    if ordinary_publication_id.is_some() {
+        return Ok(outcome("skipped_ordinary_publication", None, None));
+    }
+    let Some(candidate) = candidate else {
+        return Ok(outcome("skipped_no_candidate", None, None));
+    };
+    let Some(adapter_kind) = adapter_kind else {
+        return Ok(outcome("skipped_boundary_mismatch", None, None));
+    };
+    if !candidate.boundary.is_compatible_with(adapter_kind) {
+        return Ok(outcome("skipped_boundary_mismatch", None, None));
+    }
+    if candidate.body.trim().is_empty() {
+        return Ok(outcome("skipped_empty_candidate", None, None));
+    }
+    if candidate.body.len() > CAMP_MESSAGE_SEND_MAX_BODY_BYTES {
+        return Ok(outcome("skipped_candidate_too_large", None, None));
+    }
+    let candidate_digest = canonical_content_digest(&[StructuredCampMessageSegment::Text {
+        text: candidate.body.clone(),
+    }])?;
+    let message_id = persist_recipient_free_agent_publication(
+        transaction,
+        target,
+        &candidate.body,
+        &candidate_digest,
+        actor,
+        execution_epoch,
+        "missing_send_recovery",
+        None,
+        Some(candidate.boundary.as_str()),
+    )?;
+    Ok(outcome(
+        "published",
+        Some(candidate_digest),
+        Some(message_id),
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn persist_recipient_free_agent_publication(
+    transaction: &Transaction<'_>,
+    target: &TerminalTarget,
+    body: &str,
+    content_digest: &str,
+    actor: &ActorRef,
+    execution_epoch: i64,
+    publication_kind: &str,
+    public_output_mode: Option<&str>,
+    candidate_boundary: Option<&str>,
+) -> Result<String> {
+    transaction.execute(
+        r#"
+        UPDATE camp
+        SET last_message_sequence = last_message_sequence + 1,
+            version = version + 1, updated_at = ?2
+        WHERE id = ?1
+        "#,
+        params![target.camp_id, target.now],
+    )?;
+    let camp_sequence: i64 = transaction.query_row(
+        "SELECT last_message_sequence FROM camp WHERE id = ?1",
+        [&target.camp_id],
+        |row| row.get(0),
+    )?;
+    let message_id = Uuid::new_v4().to_string();
+    let addressed_agents_json = "[]";
+    let structured_content = vec![StructuredCampMessageSegment::Text {
+        text: body.to_string(),
+    }];
+    let structured_content_json = serde_json::to_string(&structured_content)?;
+    transaction.execute(
+        r#"
+        INSERT INTO camp_message(
+            id, camp_id, sequence,
+            author_type, author_id, source_agent_run_id, body,
+            structured_content_json, content_digest,
+            address_mode, addressed_agent_ids_json,
+            reply_to_camp_message_id, camp_turn_id, agent_run_id,
+            tombstoned_at, version, created_at, updated_at,
+            effective_recipient_ids_json, recipient_set_digest,
+            recipient_presentation_json, source_operation_id
+        ) VALUES (
+            ?1, ?2, ?3, 'agent', ?4, ?5, ?6, ?7, ?8,
+            'default', ?9, NULL, ?10, ?5,
+            NULL, 1, ?11, ?11, '[]', NULL, '{}', NULL
+        )
+        "#,
+        params![
+            message_id,
+            target.camp_id,
+            camp_sequence,
+            target.agent_id,
+            target.agent_run_id,
+            body,
+            structured_content_json,
+            content_digest,
+            addressed_agents_json,
+            target.camp_turn_id,
+            target.now,
+        ],
+    )?;
+    index_camp_message(
+        transaction,
+        &message_id,
+        &target.camp_id,
+        body,
+        addressed_agents_json,
+    )?;
+    append_domain_event(
+        transaction,
+        "camp_message.sent",
+        &target.camp_id,
+        ("camp_message", &message_id),
+        actor,
+        Some(execution_epoch),
+        &json!({
+            "sequence": camp_sequence,
+            "sourceAgentRunId": target.agent_run_id,
+            "publicationKind": publication_kind,
+            "publicOutputMode": public_output_mode,
+            "candidateBoundary": candidate_boundary,
+            "recipientFree": true,
+        }),
+    )?;
+    Ok(message_id)
 }
 
 fn load_terminal_target(
@@ -3954,6 +4142,37 @@ mod tests {
         command::CommandResultStatus,
         execution_budget::CampTurnExecutionBudgetRequest,
     };
+
+    #[test]
+    fn recovery_boundaries_are_closed_over_the_nine_adapter_catalog() {
+        for adapter_kind in AdapterKind::ALL {
+            let expected = if adapter_kind.uses_acp() {
+                MissingSendRecoveryBoundary::AcpEndTurnAssistantSuffix
+            } else {
+                match adapter_kind {
+                    AdapterKind::CodexCli => MissingSendRecoveryBoundary::CodexCompletedTurn,
+                    AdapterKind::ClaudeCodeCli => MissingSendRecoveryBoundary::ClaudeSuccessResult,
+                    AdapterKind::AntigravityApp => {
+                        MissingSendRecoveryBoundary::AntigravityPrintStdout
+                    }
+                    _ => unreachable!("non-ACP Adapter must have a dedicated boundary"),
+                }
+            };
+            for boundary in [
+                MissingSendRecoveryBoundary::CodexCompletedTurn,
+                MissingSendRecoveryBoundary::ClaudeSuccessResult,
+                MissingSendRecoveryBoundary::AntigravityPrintStdout,
+                MissingSendRecoveryBoundary::AcpEndTurnAssistantSuffix,
+            ] {
+                assert_eq!(
+                    boundary.is_compatible_with(adapter_kind),
+                    boundary == expected,
+                    "{} must accept only its frozen recovery boundary",
+                    adapter_kind.as_str(),
+                );
+            }
+        }
+    }
 
     fn host_key(scope: &str) -> RuntimeHostKey {
         RuntimeHostKey {
@@ -5603,6 +5822,7 @@ mod tests {
                             execution_epoch: execution.execution_epoch,
                             native_turn_id: format!("native-turn-{index}"),
                             final_output: format!("Agent {index} 的公开结论"),
+                            missing_send_recovery_candidate: None,
                             ending_git_observation: Some(test_git_observation(
                                 crate::git::GitCapabilityState::NotGit,
                                 None,
@@ -5676,6 +5896,7 @@ mod tests {
                         execution_epoch: executions[1].execution_epoch,
                         native_turn_id: "native-turn-1".to_string(),
                         final_output: "Agent 1 的公开结论".to_string(),
+                        missing_send_recovery_candidate: None,
                         ending_git_observation: Some(test_git_observation(
                             crate::git::GitCapabilityState::NotGit,
                             None,

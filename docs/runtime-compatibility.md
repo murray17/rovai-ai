@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-08-11
+last_updated: 2026-08-12
 ---
 
 # Agent Runtime 兼容性清单
@@ -44,6 +44,35 @@ observability metric，不是兼容性或发布门槛。transport-independent re
 
 字段级合同以 [Built-in Tool Transport v4](contracts/builtin-tool-transport-v4.md) 为唯一真源，
 调用结构以 [Built-in Tool Runtime Architecture](architecture/builtin-tool-runtime.md) 为准。
+
+## Missing-Send Recovery Publication
+
+2026-08-12 的 v0.59 验收使用 `pnpm smoke:missing-send-recovery`，为每种 Runtime 分别创建临时
+Core `data-dir` 和临时 Git workspace。每个真实 Runtime 都完成：零次 `rovai send` 时由 Core 发布
+一条 recipient-free recovery，以及一次 accepted `rovai send` 后抑制不同 Runtime final。六个 ACP
+Runtime 还必须用原生文件工具读取请求中未披露的随机 token，再以 `end_turn` 返回该 token；验收同时
+要求数据库中存在真实 tool activity，并把实际 ACP 事件交给独立 Node 协议重建器。断言直接读取
+SQLite 中的 source Run、author、literal Text、source operation、recipient arrays、Delivery count、
+terminal decision 和 `finalCampMessageId`，不以 Renderer 或 stdout 文本代替。
+
+| Runtime | 实测版本 / 模型 | zero-send | accepted-send suppression | ACP tool→final / protocol | 结论 |
+| --- | --- | --- | --- | --- | --- |
+| Codex CLI | `codex-cli 0.147.0` / `gpt-5.6-sol` | pass | pass | 不适用；completed-turn parser fixture pass | pass |
+| OpenCode | `1.18.10` / `opencode/big-pickle` | pass | pass | pass / pass（6 tool events） | pass |
+| GitHub Copilot | `GitHub Copilot CLI 1.0.79` / `gpt-5.6-sol` | pass | pass | pass / pass（2 tool events） | pass |
+| Claude Code | `2.1.220` / runtime default | pass | pass | 不适用；success-result parser fixture pass | pass |
+| Antigravity | `1.1.12` / runtime default | pass | pass | 不适用；exact print-stdout marker pass | pass |
+| Kiro | `2.16.1` / `auto` | pass | pass | pass / pass（2 tool events） | pass |
+| Qoder | `1.1.17` / `deepseek/deepseek-v4-flash-pg` | pass | pass | pass / pass（2 tool events） | pass |
+| CodeBuddy | `2.133.1` / `deepseek-v4-flash` | pass | pass | pass / pass（87 tool events） | pass |
+| Qwen Code | `0.21.5` / `deepseek-v4-flash(openai)` | pass | pass | pass / pass（3 tool events） | pass |
+
+最终统一报告与六份 ACP 协议 fixture 位于
+`/Users/murray.xue/Downloads/Rovai-ai-comparison-2026-08-12/acceptance/missing-send-recovery-v059/final-all-nine/`。
+Copilot 默认 `claude-sonnet-5` 的 zero-send 路径通过，但该模型三次拒绝从 Camp 输入执行 shell，因此
+不把其模型拒绝冒充 suppression pass；最终统一矩阵为 Copilot Adapter 显式选择同一真实 Runtime
+model catalog 中的 `gpt-5.6-sol`，报告记录了实际选择。该模型行为观察不改变 Core 的全 send 抑制
+规则，也不以模拟 send 替代 Runtime 调用。
 
 ## Claude Code 与 ACP 输入确认
 
