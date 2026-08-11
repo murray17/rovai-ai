@@ -22,8 +22,8 @@ use sha2::{Digest, Sha256};
 use tokio::{
     io::{AsyncRead, AsyncReadExt},
     process::Command,
-    sync::{Mutex, oneshot},
-    time::{Duration, Instant},
+    sync::{Mutex, mpsc, oneshot},
+    time::{Duration, Instant, MissedTickBehavior},
 };
 
 const MAX_CAPTURE_BYTES: usize = 2 * 1024 * 1024;
@@ -40,6 +40,13 @@ pub struct AntigravityRunRequest {
     pub resumable_native_session_id: Option<String>,
     pub attachment_access_root: Option<PathBuf>,
     pub builtin_tools: Option<BuiltinToolProcessConfig>,
+    pub input_accepted: Option<mpsc::UnboundedSender<AntigravityInputAccepted>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AntigravityInputAccepted {
+    pub native_session_id: String,
+    pub native_turn_id: String,
 }
 
 #[derive(Debug, Clone)]
@@ -288,14 +295,29 @@ impl AntigravityAppRuntimeAdapter {
         let stderr_task = tokio::spawn(capture_bounded(stderr));
         tokio::pin!(interrupted);
         let mut was_interrupted = false;
-        let status = tokio::select! {
-            status = child.wait() => status.context("failed to wait for Antigravity companion process")?,
-            _ = &mut interrupted => {
-                was_interrupted = true;
-                let _ = child.kill().await;
-                child.wait().await.context("failed to reap interrupted Antigravity companion process")?
+        let mut acceptance_emitted = false;
+        let mut acceptance_poll = tokio::time::interval(Duration::from_millis(50));
+        acceptance_poll.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        let status = loop {
+            tokio::select! {
+                status = child.wait() => {
+                    break status.context("failed to wait for Antigravity companion process")?;
+                }
+                _ = &mut interrupted => {
+                    was_interrupted = true;
+                    let _ = child.kill().await;
+                    break child.wait().await.context("failed to reap interrupted Antigravity companion process")?;
+                }
+                _ = acceptance_poll.tick(), if !acceptance_emitted && request.input_accepted.is_some() => {
+                    acceptance_emitted = emit_input_accepted_if_observed(request, &log_path);
+                }
             }
         };
+        if !acceptance_emitted {
+            // A short-lived process can exit between polling ticks. Inspect the
+            // now-closed log once more before classifying any terminal result.
+            emit_input_accepted_if_observed(request, &log_path);
+        }
         let stdout = stdout_task
             .await
             .context("Antigravity companion stdout collector failed")??;
@@ -448,11 +470,18 @@ fn required_enum<'a>(
 }
 
 fn read_native_session_id(path: &Path) -> Result<Option<String>> {
-    let mut body = String::new();
+    let mut bytes = Vec::new();
     File::open(path)?
         .take(MAX_LOG_INSPECTION_BYTES)
-        .read_to_string(&mut body)?;
-    for marker in ["Created conversation ", "Print mode: conversation="] {
+        .read_to_end(&mut bytes)?;
+    let body = String::from_utf8_lossy(&bytes);
+    Ok(native_session_id_from_log(&body))
+}
+
+fn native_session_id_from_log(body: &str) -> Option<String> {
+    // Print mode identifies the conversation that owns this one-shot input;
+    // prefer it over any unrelated conversation creation emitted at startup.
+    for marker in ["Print mode: conversation=", "Created conversation "] {
         for suffix in body
             .match_indices(marker)
             .map(|(index, _)| &body[index + marker.len()..])
@@ -465,11 +494,58 @@ fn read_native_session_id(path: &Path) -> Result<Option<String>> {
                 .unwrap_or("")
                 .trim_matches(|character: char| character == '"' || character == '\'');
             if validate_session_id(candidate).is_ok() {
-                return Ok(Some(candidate.to_string()));
+                return Some(candidate.to_string());
             }
         }
     }
-    Ok(None)
+    None
+}
+
+fn read_accepted_native_session_id(path: &Path) -> Result<Option<String>> {
+    let mut bytes = Vec::new();
+    File::open(path)?
+        .take(MAX_LOG_INSPECTION_BYTES)
+        .read_to_end(&mut bytes)?;
+    Ok(accepted_native_session_id_from_log(
+        &String::from_utf8_lossy(&bytes),
+    ))
+}
+
+fn accepted_native_session_id_from_log(body: &str) -> Option<String> {
+    let native_session_id = native_session_id_from_log(body)?;
+    let forwarding_markers = [
+        format!("Forwarding user message to conversation {native_session_id}"),
+        format!("Sending user message to conversation {native_session_id}"),
+    ];
+    let forwarding_offset = forwarding_markers
+        .iter()
+        .filter_map(|marker| body.find(marker).map(|offset| offset + marker.len()))
+        .min()?;
+    let response_observed = body[forwarding_offset..]
+        .lines()
+        .any(|line| line.contains("streamGenerateContent") && line.contains("ResponseID:"));
+    response_observed.then_some(native_session_id)
+}
+
+fn emit_input_accepted_if_observed(request: &AntigravityRunRequest, log_path: &Path) -> bool {
+    let Some(sender) = request.input_accepted.as_ref() else {
+        return false;
+    };
+    let Ok(Some(native_session_id)) = read_accepted_native_session_id(log_path) else {
+        return false;
+    };
+    if request
+        .resumable_native_session_id
+        .as_deref()
+        .is_some_and(|expected| native_session_id != expected)
+    {
+        return false;
+    }
+    let _ = sender.send(AntigravityInputAccepted {
+        native_session_id,
+        native_turn_id: format!("agy:{}:{}", request.agent_run_id, request.execution_epoch),
+    });
+    true
 }
 
 fn validate_session_id(value: &str) -> Result<()> {
@@ -629,6 +705,7 @@ mod tests {
                 resumable_native_session_id: None,
                 attachment_access_root: None,
                 builtin_tools: None,
+                input_accepted: None,
             })
             .await
             .unwrap();
@@ -669,7 +746,57 @@ mod tests {
                 .as_deref(),
             Some(created)
         );
+
+        let unrelated = "2b3f7448-3b73-49db-bcb7-cfa6b347f693";
+        let mixed_log = root.join("mixed.log");
+        std::fs::write(
+            &mixed_log,
+            format!(
+                "Created conversation {unrelated}\nPrint mode: conversation={created}, sending message\n"
+            ),
+        )
+        .expect("mixed log should be written");
+        assert_eq!(
+            read_native_session_id(&mixed_log)
+                .expect("mixed log should parse")
+                .as_deref(),
+            Some(created),
+            "the print-mode conversation owns the one-shot input"
+        );
         std::fs::remove_dir_all(root).expect("test directory should be removed");
+    }
+
+    #[test]
+    fn accepts_only_a_session_bound_response_after_the_current_input_was_forwarded() {
+        let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+        let response =
+            "I0811 streamGenerateContent?alt=sse request completed ResponseID: response-1";
+        assert_eq!(
+            accepted_native_session_id_from_log(&format!(
+                "Created conversation {session_id}\n{response}\nForwarding user message to conversation {session_id}\n"
+            )),
+            None,
+            "an unrelated response before forwarding cannot acknowledge this input"
+        );
+        assert_eq!(
+            accepted_native_session_id_from_log(&format!(
+                "Created conversation {session_id}\nForwarding user message to conversation {session_id}\n"
+            )),
+            None,
+            "local forwarding alone is not accepted evidence"
+        );
+        assert_eq!(
+            accepted_native_session_id_from_log(&format!(
+                "Created conversation {session_id}\nForwarding user message to conversation {session_id}\n{response}\n"
+            )),
+            Some(session_id.to_string())
+        );
+        assert_eq!(
+            accepted_native_session_id_from_log(&format!(
+                "Print mode: conversation={session_id}, timeout=5m0s\nSending user message to conversation {session_id}\n{response}\n"
+            )),
+            Some(session_id.to_string())
+        );
     }
 
     #[test]
@@ -678,6 +805,185 @@ mod tests {
             bytes_digest(b"diagnostic"),
             "sha256:5a695eea5b00a31f8aef7dbb89c8f798fab371246ac1549afe84b16420707b99"
         );
+    }
+
+    #[cfg(unix)]
+    fn fake_antigravity_request(
+        workspace: &Path,
+        executable: &Path,
+        agent_run_id: String,
+    ) -> AntigravityRunRequest {
+        use rovai_core::agent_profile::{
+            AdapterKind, AdapterPermissionConfig, ResolvedModelSelection,
+        };
+        use serde_json::json;
+
+        AntigravityRunRequest {
+            agent_run_id,
+            execution_epoch: 1,
+            workspace: AgentRunWorkspace {
+                execution_root: workspace.to_string_lossy().to_string(),
+                access: "read_write".to_string(),
+                isolation: "shared".to_string(),
+            },
+            permission_semantics: PermissionSemantics::RuntimeManagedV2,
+            runtime: FrozenAgentRuntimeConfig {
+                adapter_kind: AdapterKind::AntigravityApp,
+                installation_id: "agy-test".to_string(),
+                installation_generation: 1,
+                search_environment_generation: 1,
+                executable_path: executable.to_string_lossy().to_string(),
+                auth_scope: "test".to_string(),
+                reported_version: "test".to_string(),
+                executable_fingerprint: "sha256:test".to_string(),
+                capabilities: vec!["cli.print".to_string()],
+                protocol_version: "antigravity-app-cli-v1".to_string(),
+                model: ResolvedModelSelection {
+                    source: "runtime_default".to_string(),
+                    model_id: ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID.to_string(),
+                    options: json!({}),
+                },
+                permissions: AdapterPermissionConfig {
+                    adapter_kind: AdapterKind::AntigravityApp,
+                    schema_version: 1,
+                    values: json!({
+                        "mode": "accept-edits",
+                        "sandbox": "on",
+                        "dangerously_skip_permissions": "off",
+                    }),
+                },
+                native_session_compatibility_key: Some("antigravity-app:cli-v1".to_string()),
+                binding_compatibility_digest: "binding".to_string(),
+                host_config_digest: "host".to_string(),
+                config_digest: "config".to_string(),
+            },
+            prompt: "test input".to_string(),
+            resumable_native_session_id: None,
+            attachment_access_root: None,
+            builtin_tools: None,
+            input_accepted: None,
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn response_evidence_emits_acceptance_before_process_completion() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "rovai-antigravity-early-acceptance-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let workspace = root.join("workspace");
+        std::fs::create_dir_all(&workspace).expect("workspace should be created");
+        let executable = root.join("fake-agy");
+        std::fs::write(
+            &executable,
+            r#"#!/bin/sh
+log_file=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--log-file" ]; then
+    shift
+    log_file="$1"
+  fi
+  shift
+done
+session_id="0bdd2166-d420-40c6-94be-70b93eb290c5"
+echo "Created conversation $session_id" >> "$log_file"
+echo "Forwarding user message to conversation $session_id" >> "$log_file"
+echo "I0811 streamGenerateContent?alt=sse request completed ResponseID: response-1" >> "$log_file"
+while [ ! -f .release ]; do
+  sleep 0.05
+done
+echo "finished"
+"#,
+        )
+        .expect("fake Antigravity companion should be written");
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
+            .expect("fake Antigravity companion should be executable");
+        let adapter =
+            Arc::new(AntigravityAppRuntimeAdapter::new(&root).expect("Adapter should initialize"));
+        let run_id = uuid::Uuid::new_v4().to_string();
+        let mut request = fake_antigravity_request(&workspace, &executable, run_id.clone());
+        let (accepted_sender, mut accepted_receiver) = mpsc::unbounded_channel();
+        request.input_accepted = Some(accepted_sender);
+        let running_adapter = Arc::clone(&adapter);
+        let task = tokio::spawn(async move { running_adapter.run(request).await });
+
+        let accepted = tokio::time::timeout(Duration::from_secs(5), accepted_receiver.recv())
+            .await
+            .expect("accepted evidence should arrive before the process exits")
+            .expect("accepted evidence channel should stay open");
+        assert_eq!(
+            accepted.native_session_id,
+            "0bdd2166-d420-40c6-94be-70b93eb290c5"
+        );
+        assert_eq!(accepted.native_turn_id, format!("agy:{run_id}:1"));
+        assert!(!task.is_finished(), "acceptance must precede final output");
+        std::fs::write(workspace.join(".release"), b"")
+            .expect("fake process should be released after acceptance");
+
+        let result = tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("fake process should finish")
+            .expect("run task should join")
+            .expect("final output should remain successful");
+        assert_eq!(result.final_output, "finished");
+        std::fs::remove_dir_all(root).expect("temporary root should be removed");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn terminal_process_failure_still_emits_observed_acceptance() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "rovai-antigravity-accepted-terminal-failure-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let workspace = root.join("workspace");
+        std::fs::create_dir_all(&workspace).expect("workspace should be created");
+        let executable = root.join("fake-agy");
+        std::fs::write(
+            &executable,
+            r#"#!/bin/sh
+log_file=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--log-file" ]; then
+    shift
+    log_file="$1"
+  fi
+  shift
+done
+session_id="0bdd2166-d420-40c6-94be-70b93eb290c5"
+echo "Created conversation $session_id" >> "$log_file"
+echo "Forwarding user message to conversation $session_id" >> "$log_file"
+echo "I0811 streamGenerateContent?alt=sse request completed ResponseID: response-1" >> "$log_file"
+exit 7
+"#,
+        )
+        .expect("fake Antigravity companion should be written");
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
+            .expect("fake Antigravity companion should be executable");
+        let adapter = AntigravityAppRuntimeAdapter::new(&root).expect("Adapter should initialize");
+        let mut request =
+            fake_antigravity_request(&workspace, &executable, uuid::Uuid::new_v4().to_string());
+        let (accepted_sender, mut accepted_receiver) = mpsc::unbounded_channel();
+        request.input_accepted = Some(accepted_sender);
+
+        let error = adapter
+            .run(request)
+            .await
+            .expect_err("non-zero process exit should remain a failure");
+        assert!(format!("{error:#}").contains("process exited with"));
+        assert_eq!(
+            accepted_receiver
+                .try_recv()
+                .expect("the final log scan should preserve accepted evidence")
+                .native_session_id,
+            "0bdd2166-d420-40c6-94be-70b93eb290c5"
+        );
+        std::fs::remove_dir_all(root).expect("temporary root should be removed");
     }
 
     #[cfg(unix)]
@@ -759,6 +1065,7 @@ echo "Created conversation 0bdd2166-d420-40c6-94be-70b93eb290c5" > "$log_file"
                 resumable_native_session_id: None,
                 attachment_access_root: None,
                 builtin_tools: None,
+                input_accepted: None,
             })
             .await
             .expect_err("a verified Session without final text must not look successful");
@@ -775,7 +1082,7 @@ echo "Created conversation 0bdd2166-d420-40c6-94be-70b93eb290c5" > "$log_file"
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn interrupt_terminates_the_owned_process_and_removes_private_logs() {
+    async fn interrupt_after_acceptance_terminates_process_and_removes_private_logs() {
         use std::os::unix::fs::PermissionsExt;
 
         use rovai_core::agent_profile::{
@@ -801,7 +1108,10 @@ while [ "$#" -gt 0 ]; do
   fi
   shift
 done
-echo "Created conversation 0bdd2166-d420-40c6-94be-70b93eb290c5" > "$log_file"
+session_id="0bdd2166-d420-40c6-94be-70b93eb290c5"
+echo "Created conversation $session_id" > "$log_file"
+echo "Forwarding user message to conversation $session_id" >> "$log_file"
+echo "I0811 streamGenerateContent?alt=sse request completed ResponseID: response-1" >> "$log_file"
 exec sleep 30
 "#,
         )
@@ -811,6 +1121,7 @@ exec sleep 30
         let adapter =
             Arc::new(AntigravityAppRuntimeAdapter::new(&root).expect("Adapter should initialize"));
         let run_id = uuid::Uuid::new_v4().to_string();
+        let (accepted_sender, mut accepted_receiver) = mpsc::unbounded_channel();
         let request = AntigravityRunRequest {
             agent_run_id: run_id.clone(),
             execution_epoch: 1,
@@ -854,6 +1165,7 @@ exec sleep 30
             resumable_native_session_id: None,
             attachment_access_root: None,
             builtin_tools: None,
+            input_accepted: Some(accepted_sender),
         };
         let running_adapter = adapter.clone();
         let task = tokio::spawn(async move { running_adapter.run(request).await });
@@ -861,6 +1173,14 @@ exec sleep 30
         while adapter.active.lock().await.is_empty() && Instant::now() < deadline {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
+        let accepted = tokio::time::timeout(Duration::from_secs(5), accepted_receiver.recv())
+            .await
+            .expect("accepted evidence should be observed before interruption")
+            .expect("accepted evidence channel should stay open");
+        assert_eq!(
+            accepted.native_session_id,
+            "0bdd2166-d420-40c6-94be-70b93eb290c5"
+        );
         assert!(adapter.interrupt(&run_id, 1).await);
         let error = task
             .await

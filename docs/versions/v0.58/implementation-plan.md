@@ -83,10 +83,29 @@ last_updated: 2026-08-11
 - [x] 完成 packaged App 的 1440×920、1040×700、200% zoom 双页签、Lead 菜单与 Header-to-Dock
   焦点验收。
 
+## Checkpoint 8：Runtime-produced 输入确认
+
+- [x] 只有匹配 Native Conversation 的 forward/send 之后出现 `streamGenerateContent ResponseID`，才在
+  `agy --print` 仍运行时报告 accepted evidence；child start、Session 创建和本地 forwarding 不单独 ACK；
+- [x] Core 在早期 evidence 上先绑定 Prepared Native Session，再持久化 Runtime Input Delivery ACK，
+  同时保留成功退出和可验证 final-output failure 的 terminal fallback；
+- [x] accepted 后的非零退出、取消或输出失败确定性结算当前 Run，不降级为 `delivery_unknown`；早期与
+  terminal Session/Turn identity 不一致时 fail closed；
+- [x] fixture 覆盖乱序/缺失 marker、new/resumed Session、ACK 先于 final、非零退出和 ACK 后取消；
+- [x] 本机 `agy 1.1.12` 只读 smoke 观察到匹配 marker、最终 stdout 与成功退出，兼容性清单同步 focused
+  evidence，且不替代 `1.1.11` 十三工具 qualification。
+- [x] Claude Code 改用 `stream-json + include-partial-messages`；只有匹配 Session 的模型 stream/assistant
+  event 提前确认，system/Hook/status 不确认，success result 保留 terminal fallback；accepted 后失败不降级；
+- [x] ACP Host 把 Delivery identity 绑定到唯一 active prompt；六个 ACP Runtime 不再在 stdin flush 后 ACK，
+  只接受 prompt-bound agent/thought/plan/tool/permission event 或成功 response，明确 error 结算 `not_accepted`；
+- [x] fixture 覆盖 Claude ACK 先于 result、Session mismatch、ACP allowlist/metadata 负例，以及
+  `not_accepted -> prepared` 重试和 accepted 不可降级；本机 Claude Code `2.1.220` focused smoke 观察到
+  `system init -> stream_event/message_start -> success result` 的顺序。
+
 已完成自动化验证：
 
-- `cargo test --workspace`：Library 320、CLI 10、Core binary 54 通过，3 个既有手工 Runtime smoke ignored；
-- `pnpm test`：文档治理 21、Vitest 253、Node qualification/benchmark 147 通过；
+- `cargo test --workspace`：Library 325、CLI 10、Core binary 61 通过，3 个既有手工 Runtime smoke ignored；
+- `pnpm test`：文档治理 21、Vitest 268、Node qualification/benchmark 151 通过；
 - `cargo test -p rovai-core codex_ -- --nocapture`：Codex structured presentation、Adapter 与 MCP fixture 通过；
 - `cargo test -p rovai-core rebind -- --nocapture`：2 个新增 rebind 测试通过；
 - `cargo test -p rovai-core db::tests::v72_backfills_initial_runtime_evidence_without_overwriting_existing_values -- --nocapture`：Migration 72 回填测试通过；
@@ -98,6 +117,14 @@ last_updated: 2026-08-11
 - `cargo test -p rovai-core official_skills_default_to_all_groups_and_preserve_user_changes -- --nocapture`：内置 Skill 初始九组与后续用户修改保持通过；
 - `cargo test -p rovai-core imports_default_to_all_groups_and_updates_preserve_user_changes -- --nocapture`：Imported Skill 初始九组与 Revision 更新保持通过；
 - `cargo test -p rovai-core v74_assigns_every_active_skill_to_all_runtime_groups_once -- --nocapture`：Migration 74 对内置与 Imported Skill 的一次性回填通过；
+- `cargo test -p rovai-core antigravity::tests -- --nocapture`：Antigravity 8 项通过、1 项真实 Runtime smoke ignored；覆盖 early accepted、terminal failure、取消与日志清理；
+- 本机 `agy 1.1.12 --print --mode plan --sandbox` focused smoke：匹配 Conversation 的 forward/send 后观察到 `streamGenerateContent ResponseID`，stdout `ACK-SMOKE` 且 exit 0；
+- `cargo test -p rovai-core claude::tests -- --nocapture`：Claude 4 项通过；覆盖 init 负例、Session fencing、early ACK 与 terminal result；
+- `cargo test -p rovai-core only_active_prompt_response_events_prove_acp_input_acceptance -- --nocapture` 与
+  `explicit_runtime_rejection_does_not_advance_or_downgrade_input_acceptance -- --nocapture`：ACP accepted allowlist、
+  metadata 负例、明确拒绝、可重试和 accepted 不可降级通过；
+- 本机 Claude Code `2.1.220 --output-format stream-json --include-partial-messages` focused smoke：匹配 Session
+  的 `system init` 后出现 `stream_event/message_start`，随后 success result 与 `CLAUDE-STREAM-ACK-SMOKE`；
 - `cargo clippy --workspace --all-targets -- -D warnings` 与 `cargo fmt --all -- --check` 通过；
 - `pnpm docs:test`：21 个测试通过；`pnpm docs:check` 通过，覆盖 58 个版本目录与 160 个 ADR。
 

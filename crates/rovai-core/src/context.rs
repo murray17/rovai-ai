@@ -1639,6 +1639,51 @@ impl ContextService {
         transaction.commit()?;
         Ok(())
     }
+
+    pub fn mark_input_delivery_not_accepted(
+        &self,
+        database: &mut Database,
+        delivery_id: &str,
+        error: &str,
+    ) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let transaction = database.connection_mut().transaction()?;
+        let row = load_delivery_target(&transaction, delivery_id)?
+            .context("Runtime Input Delivery does not exist")?;
+        if matches!(row.status.as_str(), "accepted" | "not_accepted") {
+            transaction.commit()?;
+            return Ok(());
+        }
+        if row.status != "prepared" {
+            anyhow::bail!("Runtime Input Delivery is not in prepared state");
+        }
+        let updated = transaction.execute(
+            r#"
+            UPDATE runtime_input_delivery
+            SET status = 'not_accepted', resolved_at = ?2,
+                last_error = ?3, updated_at = ?2
+            WHERE id = ?1 AND status = 'prepared'
+            "#,
+            params![delivery_id, now, error],
+        )?;
+        if updated != 1 {
+            anyhow::bail!("Runtime Input Delivery changed before rejection");
+        }
+        append_raw_event(
+            &transaction,
+            "runtime.input_not_accepted",
+            &row.camp_id,
+            "agent_run",
+            &row.agent_run_id,
+            row.execution_epoch,
+            &json!({
+                "runtimeInputDeliveryId": delivery_id,
+                "error": error,
+            }),
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -8587,6 +8632,103 @@ mod tests {
             .unwrap();
         assert_eq!(binding.result.payload["nativeBindingGeneration"], 1);
         execution
+    }
+
+    #[test]
+    fn explicit_runtime_rejection_does_not_advance_or_downgrade_input_acceptance() {
+        let mut fixture = fixture();
+        let execution = bind_fixture_native_session(&mut fixture, "acp-session-1");
+        let store = ManagedBlobStore::new(&fixture.directory);
+        let ContextMaterialization::Ready(prepared) = ContextService
+            .materialize(
+                &mut fixture.database,
+                &store,
+                &MaterializeContextRequest {
+                    agent_run_id: &fixture.run_id,
+                    execution_epoch: fixture.execution_epoch,
+                    charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+            )
+            .unwrap()
+        else {
+            panic!("small context should materialize")
+        };
+        let delivery = ContextService
+            .prepare_input_delivery(
+                &mut fixture.database,
+                &fixture.run_id,
+                fixture.execution_epoch,
+                &prepared.manifest_id,
+            )
+            .unwrap();
+
+        ContextService
+            .mark_input_delivery_not_accepted(
+                &mut fixture.database,
+                &delivery.id,
+                "ACP prompt was rejected",
+            )
+            .unwrap();
+        let rejected_state: (String, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT runtime_input_delivery.status,
+                       conversation.last_accepted_public_boundary_sequence
+                FROM runtime_input_delivery
+                JOIN agent_run ON agent_run.id = runtime_input_delivery.agent_run_id
+                JOIN conversation ON conversation.id = agent_run.conversation_id
+                WHERE runtime_input_delivery.id = ?1
+                "#,
+                [&delivery.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(rejected_state, ("not_accepted".to_string(), 0));
+
+        let retry = ContextService
+            .prepare_input_delivery(
+                &mut fixture.database,
+                &fixture.run_id,
+                fixture.execution_epoch,
+                &prepared.manifest_id,
+            )
+            .unwrap();
+        assert_eq!(retry.id, delivery.id);
+        assert_eq!(retry.status, "prepared");
+        ContextService
+            .acknowledge_input_delivery(&mut fixture.database, &retry.id, "acp-prompt-1")
+            .unwrap();
+        ContextService
+            .mark_input_delivery_not_accepted(
+                &mut fixture.database,
+                &retry.id,
+                "late rejection must not downgrade accepted evidence",
+            )
+            .unwrap();
+        let accepted_state: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT status FROM runtime_input_delivery WHERE id = ?1",
+                [&retry.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(accepted_state, "accepted");
+        let marker: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT last_accepted_public_boundary_sequence FROM conversation WHERE id = ?1",
+                [&execution.conversation_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(marker, prepared.camp_message_boundary_sequence);
+        std::fs::remove_dir_all(fixture.directory).unwrap();
     }
 
     #[test]

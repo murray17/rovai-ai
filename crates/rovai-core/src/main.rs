@@ -16,14 +16,15 @@ use std::{
 
 use acp::{AcpCliRuntimeAdapter, AcpIncoming, AcpRuntime};
 use antigravity::{
-    AntigravityAppRuntimeAdapter, AntigravityDeliveredFailure, AntigravityRunRequest,
+    AntigravityAppRuntimeAdapter, AntigravityDeliveredFailure, AntigravityInputAccepted,
+    AntigravityRunRequest,
 };
 use anyhow::{Context, Result};
 use builtin_tool_runtime::{
     BuiltinToolLeaseRegistry, BuiltinToolProcessConfig, builtin_tool_socket_path,
     bundled_cli_executable, request_digest,
 };
-use claude::{ClaudeCodeCliRuntimeAdapter, ClaudeCodeRunRequest};
+use claude::{ClaudeCodeCliRuntimeAdapter, ClaudeCodeInputAccepted, ClaudeCodeRunRequest};
 use codex::{
     CodexAgentRunRuntimeRequest, CodexAgentThreadOptions, CodexCliRuntimeAdapter, CodexIncoming,
     CodexRuntime,
@@ -603,6 +604,13 @@ struct ProductRuntimeDiagnostic {
     diagnostic_code: String,
     priority: u8,
     observed_at: chrono::DateTime<chrono::Utc>,
+}
+
+struct ClaudeInputAcceptanceTarget<'a> {
+    delivery_id: &'a str,
+    expected_native_session_id: &'a str,
+    expected_native_turn_id: &'a str,
+    is_new_session: bool,
 }
 
 struct Core {
@@ -5163,6 +5171,88 @@ impl Core {
         Ok(())
     }
 
+    async fn settle_antigravity_input_acceptance(
+        &self,
+        execution: &AgentRunExecution,
+        credential: &BuiltinToolBindingCredential,
+        delivery_id: &str,
+        accepted: &AntigravityInputAccepted,
+        output: &mpsc::UnboundedSender<String>,
+    ) -> Result<()> {
+        if let Err(error) = self
+            .bind_prepared_native_session(execution, credential, &accepted.native_session_id)
+            .await
+        {
+            let mut database = self.database.lock().await;
+            ContextService.mark_input_delivery_unknown(
+                &mut database,
+                delivery_id,
+                &format!(
+                    "Native Session binding failed after accepted Antigravity input evidence: {error:#}"
+                ),
+            )?;
+            return Err(error);
+        }
+        self.acknowledge_runtime_input(delivery_id, &accepted.native_turn_id)
+            .await?;
+        emit(
+            output,
+            "agent_run.native_session_bound",
+            json!({
+                "agentRunId": execution.agent_run_id,
+                "executionEpoch": execution.execution_epoch,
+                "adapterKind": execution.runtime.adapter_kind,
+                "nativeThreadId": accepted.native_session_id,
+                "nativeTurnId": accepted.native_turn_id,
+            }),
+        );
+        Ok(())
+    }
+
+    async fn settle_claude_input_acceptance(
+        &self,
+        execution: &AgentRunExecution,
+        credential: &BuiltinToolBindingCredential,
+        target: &ClaudeInputAcceptanceTarget<'_>,
+        accepted: &ClaudeCodeInputAccepted,
+        output: &mpsc::UnboundedSender<String>,
+    ) -> Result<()> {
+        if accepted.native_session_id != target.expected_native_session_id
+            || accepted.native_turn_id != target.expected_native_turn_id
+        {
+            anyhow::bail!("Claude Code accepted-input evidence identity did not match its Run");
+        }
+        if !target.is_new_session
+            && let Err(error) = self
+                .bind_prepared_native_session(execution, credential, &accepted.native_session_id)
+                .await
+        {
+            let mut database = self.database.lock().await;
+            ContextService.mark_input_delivery_unknown(
+                &mut database,
+                target.delivery_id,
+                &format!(
+                    "Native Session binding failed after accepted Claude Code input evidence: {error:#}"
+                ),
+            )?;
+            return Err(error);
+        }
+        self.acknowledge_runtime_input(target.delivery_id, &accepted.native_turn_id)
+            .await?;
+        emit(
+            output,
+            "agent_run.native_session_bound",
+            json!({
+                "agentRunId": execution.agent_run_id,
+                "executionEpoch": execution.execution_epoch,
+                "adapterKind": execution.runtime.adapter_kind,
+                "nativeThreadId": accepted.native_session_id,
+                "nativeTurnId": accepted.native_turn_id,
+            }),
+        );
+        Ok(())
+    }
+
     fn establish_acp_compaction_observer_best_effort(
         self: &Arc<Self>,
         execution: &AgentRunExecution,
@@ -5925,6 +6015,12 @@ impl Core {
             "claude-code:{}:{}",
             execution.agent_run_id, execution.execution_epoch
         );
+        let acceptance_target = ClaudeInputAcceptanceTarget {
+            delivery_id: &delivery.id,
+            expected_native_session_id: &native_session_id,
+            expected_native_turn_id: &native_turn_id,
+            is_new_session,
+        };
         emit(
             output,
             "agent_run.started",
@@ -5951,24 +6047,77 @@ impl Core {
         let builtin_tools = self.prepare_builtin_tool_process_config()?;
         self.bind_builtin_tool_runtime(&builtin_tools, execution, &binding_credential)
             .await?;
-        let result = self
-            .claude_code_cli
-            .run(ClaudeCodeRunRequest {
-                agent_run_id: execution.agent_run_id.clone(),
-                execution_epoch: execution.execution_epoch,
-                workspace: execution.workspace.clone(),
-                permission_semantics: execution.permission_semantics,
-                runtime: execution.runtime.clone(),
-                prompt: prompt.clone(),
-                resumable_native_session_id: (!is_new_session).then_some(native_session_id.clone()),
-                new_native_session_id: is_new_session.then_some(native_session_id.clone()),
-                session_bootstrap: Some(session_bootstrap.clone()),
-                builtin_tools: Some(builtin_tools.clone()),
-                external_mcp_servers: mcp_projection.servers.clone(),
-                attachment_access_root: Some(attachment_access_root.to_path_buf()),
-                persist_session: true,
-            })
-            .await;
+        let (input_accepted_sender, mut input_accepted_receiver) = mpsc::unbounded_channel();
+        let run = self.claude_code_cli.run(ClaudeCodeRunRequest {
+            agent_run_id: execution.agent_run_id.clone(),
+            execution_epoch: execution.execution_epoch,
+            workspace: execution.workspace.clone(),
+            permission_semantics: execution.permission_semantics,
+            runtime: execution.runtime.clone(),
+            prompt: prompt.clone(),
+            resumable_native_session_id: (!is_new_session).then_some(native_session_id.clone()),
+            new_native_session_id: is_new_session.then_some(native_session_id.clone()),
+            session_bootstrap: Some(session_bootstrap.clone()),
+            builtin_tools: Some(builtin_tools.clone()),
+            external_mcp_servers: mcp_projection.servers.clone(),
+            attachment_access_root: Some(attachment_access_root.to_path_buf()),
+            persist_session: true,
+            input_accepted: Some(input_accepted_sender),
+        });
+        tokio::pin!(run);
+        let result_and_acceptance: Result<_> = async {
+            let mut accepted_input = None;
+            let mut acceptance_channel_open = true;
+            let result = loop {
+                let (observed_acceptance, completed) = tokio::select! {
+                    biased;
+                    observed = input_accepted_receiver.recv(), if acceptance_channel_open => {
+                        (Some(observed), None)
+                    }
+                    result = &mut run => (None, Some(result)),
+                };
+                if let Some(result) = completed {
+                    break result;
+                }
+                acceptance_channel_open = false;
+                let Some(Some(observed_acceptance)) = observed_acceptance else {
+                    continue;
+                };
+                if let Err(error) = self
+                    .settle_claude_input_acceptance(
+                        execution,
+                        &binding_credential,
+                        &acceptance_target,
+                        &observed_acceptance,
+                        output,
+                    )
+                    .await
+                {
+                    let _ = self
+                        .claude_code_cli
+                        .interrupt(&execution.agent_run_id, execution.execution_epoch)
+                        .await;
+                    let _ = run.as_mut().await;
+                    return Err(error);
+                }
+                accepted_input = Some(observed_acceptance);
+            };
+            if accepted_input.is_none()
+                && let Ok(observed_acceptance) = input_accepted_receiver.try_recv()
+            {
+                self.settle_claude_input_acceptance(
+                    execution,
+                    &binding_credential,
+                    &acceptance_target,
+                    &observed_acceptance,
+                    output,
+                )
+                .await?;
+                accepted_input = Some(observed_acceptance);
+            }
+            Ok((result, accepted_input))
+        }
+        .await;
         self.builtin_tool_leases
             .unbind(
                 builtin_tools.process_id(),
@@ -5976,9 +6125,23 @@ impl Core {
                 execution.execution_epoch,
             )
             .await;
+        let (result, accepted_input) = result_and_acceptance?;
         let result = match result {
-            Ok(result) => result,
+            Ok(result) => {
+                if let Some(accepted) = accepted_input.as_ref()
+                    && (accepted.native_session_id != result.native_session_id
+                        || accepted.native_turn_id != result.native_turn_id)
+                {
+                    anyhow::bail!(
+                        "Claude Code terminal identity did not match its accepted input evidence"
+                    );
+                }
+                result
+            }
             Err(error) => {
+                if accepted_input.is_some() {
+                    return Err(error).context("Claude Code failed after accepting its input");
+                }
                 let mut database = self.database.lock().await;
                 if resume_disposition == NativeSessionResumeDisposition::Controlled {
                     ExecutionRuntimeService::default().record_native_session_resume_failure(
@@ -5995,27 +6158,19 @@ impl Core {
                 return Err(error).context("Claude Code non-interactive input outcome is unknown");
             }
         };
-        if !is_new_session {
-            self.bind_prepared_native_session(
+        if accepted_input.is_none() {
+            self.settle_claude_input_acceptance(
                 execution,
                 &binding_credential,
-                &result.native_session_id,
+                &acceptance_target,
+                &ClaudeCodeInputAccepted {
+                    native_session_id: result.native_session_id.clone(),
+                    native_turn_id: result.native_turn_id.clone(),
+                },
+                output,
             )
             .await?;
         }
-        self.acknowledge_runtime_input(&delivery.id, &result.native_turn_id)
-            .await?;
-        emit(
-            output,
-            "agent_run.native_session_bound",
-            json!({
-                "agentRunId": execution.agent_run_id,
-                "executionEpoch": execution.execution_epoch,
-                "adapterKind": execution.runtime.adapter_kind,
-                "nativeThreadId": result.native_session_id,
-                "nativeTurnId": result.native_turn_id,
-            }),
-        );
         self.complete_one_shot_agent_run(
             execution,
             &result.native_turn_id,
@@ -6207,20 +6362,76 @@ impl Core {
         let builtin_tools = self.prepare_builtin_tool_process_config()?;
         self.bind_builtin_tool_runtime(&builtin_tools, execution, &binding_credential)
             .await?;
-        let result = self
-            .antigravity_app
-            .run(AntigravityRunRequest {
-                agent_run_id: execution.agent_run_id.clone(),
-                execution_epoch: execution.execution_epoch,
-                workspace: execution.workspace.clone(),
-                permission_semantics: execution.permission_semantics,
-                runtime: execution.runtime.clone(),
-                prompt,
-                resumable_native_session_id: resumable_session_id,
-                attachment_access_root: Some(attachment_access_root.to_path_buf()),
-                builtin_tools: Some(builtin_tools.clone()),
-            })
-            .await;
+        let (input_accepted_sender, mut input_accepted_receiver) = mpsc::unbounded_channel();
+        let run = self.antigravity_app.run(AntigravityRunRequest {
+            agent_run_id: execution.agent_run_id.clone(),
+            execution_epoch: execution.execution_epoch,
+            workspace: execution.workspace.clone(),
+            permission_semantics: execution.permission_semantics,
+            runtime: execution.runtime.clone(),
+            prompt,
+            resumable_native_session_id: resumable_session_id,
+            attachment_access_root: Some(attachment_access_root.to_path_buf()),
+            builtin_tools: Some(builtin_tools.clone()),
+            input_accepted: Some(input_accepted_sender),
+        });
+        tokio::pin!(run);
+        let result_and_acceptance: Result<_> = async {
+            let mut accepted_input = None;
+            let mut acceptance_channel_open = true;
+            let result = loop {
+                let (observed_acceptance, completed) = tokio::select! {
+                    biased;
+                    observed = input_accepted_receiver.recv(), if acceptance_channel_open => {
+                        (Some(observed), None)
+                    }
+                    result = &mut run => (None, Some(result)),
+                };
+                if let Some(result) = completed {
+                    break result;
+                }
+                acceptance_channel_open = false;
+                let Some(Some(observed_acceptance)) = observed_acceptance else {
+                    continue;
+                };
+                if let Err(error) = self
+                    .settle_antigravity_input_acceptance(
+                        execution,
+                        &binding_credential,
+                        &input_delivery.id,
+                        &observed_acceptance,
+                        output,
+                    )
+                    .await
+                {
+                    let _ = self
+                        .antigravity_app
+                        .interrupt(&execution.agent_run_id, execution.execution_epoch)
+                        .await;
+                    let _ = run.as_mut().await;
+                    return Err(error);
+                }
+                accepted_input = Some(observed_acceptance);
+            };
+            // The adapter performs a final log scan before returning. Consume
+            // evidence queued in the same scheduling turn even if completion
+            // won the select race.
+            if accepted_input.is_none()
+                && let Ok(observed_acceptance) = input_accepted_receiver.try_recv()
+            {
+                self.settle_antigravity_input_acceptance(
+                    execution,
+                    &binding_credential,
+                    &input_delivery.id,
+                    &observed_acceptance,
+                    output,
+                )
+                .await?;
+                accepted_input = Some(observed_acceptance);
+            }
+            Ok((result, accepted_input))
+        }
+        .await;
         self.builtin_tool_leases
             .unbind(
                 builtin_tools.process_id(),
@@ -6228,43 +6439,62 @@ impl Core {
                 execution.execution_epoch,
             )
             .await;
+        let (result, accepted_input) = result_and_acceptance?;
         let result = match result {
-            Ok(result) => result,
+            Ok(result) => {
+                if let Some(accepted) = accepted_input.as_ref()
+                    && (accepted.native_session_id != result.native_session_id
+                        || accepted.native_turn_id != result.native_turn_id)
+                {
+                    return Err(anyhow::anyhow!(
+                        "Antigravity terminal identity did not match its accepted input evidence"
+                    ))
+                    .context(AntigravityDeliveredFailure {
+                        native_session_id: accepted.native_session_id.clone(),
+                        native_turn_id: accepted.native_turn_id.clone(),
+                        error_code: "runtime_native_session_mismatch",
+                    });
+                }
+                result
+            }
             Err(error) => {
+                if let Some(accepted) = accepted_input.as_ref() {
+                    if let Some(delivered) = error.downcast_ref::<AntigravityDeliveredFailure>()
+                        && (delivered.native_session_id != accepted.native_session_id
+                            || delivered.native_turn_id != accepted.native_turn_id)
+                    {
+                        return Err(error).context(AntigravityDeliveredFailure {
+                            native_session_id: accepted.native_session_id.clone(),
+                            native_turn_id: accepted.native_turn_id.clone(),
+                            error_code: "runtime_native_session_mismatch",
+                        });
+                    }
+                    if let Some(error_code) = error
+                        .downcast_ref::<AntigravityDeliveredFailure>()
+                        .map(|delivered| delivered.error_code)
+                    {
+                        return Err(error).context(error_code);
+                    }
+                    return Err(error).context(AntigravityDeliveredFailure {
+                        native_session_id: accepted.native_session_id.clone(),
+                        native_turn_id: accepted.native_turn_id.clone(),
+                        error_code: "runtime_failed_after_input_accepted",
+                    });
+                }
                 if let Some(delivered) =
                     error.downcast_ref::<AntigravityDeliveredFailure>().cloned()
                 {
-                    if let Err(settlement_error) = self
-                        .bind_prepared_native_session(
-                            execution,
-                            &binding_credential,
-                            &delivered.native_session_id,
-                        )
-                        .await
-                    {
-                        let mut database = self.database.lock().await;
-                        ContextService.mark_input_delivery_unknown(
-                            &mut database,
-                            &input_delivery.id,
-                            &format!(
-                                "Native Session binding failed after delivered Antigravity input: {settlement_error:#}"
-                            ),
-                        )?;
-                        return Err(settlement_error);
-                    }
-                    self.acknowledge_runtime_input(&input_delivery.id, &delivered.native_turn_id)
-                        .await?;
-                    emit(
+                    self.settle_antigravity_input_acceptance(
+                        execution,
+                        &binding_credential,
+                        &input_delivery.id,
+                        &AntigravityInputAccepted {
+                            native_session_id: delivered.native_session_id.clone(),
+                            native_turn_id: delivered.native_turn_id.clone(),
+                        },
                         output,
-                        "agent_run.native_session_bound",
-                        json!({
-                            "agentRunId": execution.agent_run_id,
-                            "executionEpoch": execution.execution_epoch,
-                            "adapterKind": execution.runtime.adapter_kind,
-                            "nativeThreadId": delivered.native_session_id,
-                            "nativeTurnId": delivered.native_turn_id,
-                        }),
-                    );
+                    )
+                    .await?;
                     // The verified Native Session proves that the one-shot
                     // input was accepted. Return a deterministic Run failure
                     // to the scheduler; replaying it as delivery_unknown could
@@ -6289,31 +6519,19 @@ impl Core {
             }
         };
 
-        if let Err(error) = self
-            .bind_prepared_native_session(execution, &binding_credential, &result.native_session_id)
-            .await
-        {
-            let mut database = self.database.lock().await;
-            ContextService.mark_input_delivery_unknown(
-                &mut database,
+        if accepted_input.is_none() {
+            self.settle_antigravity_input_acceptance(
+                execution,
+                &binding_credential,
                 &input_delivery.id,
-                &format!("Native Session binding failed after Antigravity execution: {error:#}"),
-            )?;
-            return Err(error);
-        }
-        self.acknowledge_runtime_input(&input_delivery.id, &result.native_turn_id)
+                &AntigravityInputAccepted {
+                    native_session_id: result.native_session_id.clone(),
+                    native_turn_id: result.native_turn_id.clone(),
+                },
+                output,
+            )
             .await?;
-        emit(
-            output,
-            "agent_run.native_session_bound",
-            json!({
-                "agentRunId": execution.agent_run_id,
-                "executionEpoch": execution.execution_epoch,
-                "adapterKind": execution.runtime.adapter_kind,
-                "nativeThreadId": result.native_session_id,
-                "nativeTurnId": result.native_turn_id,
-            }),
-        );
+        }
 
         for attempt in 0..80 {
             let current = {
@@ -6574,7 +6792,7 @@ impl Core {
             anyhow::bail!("Runtime Input Delivery is not ready to send");
         }
         let native_prompt_id = match runtime
-            .start_prompt(&prepared_context.runtime_payload)
+            .start_prompt(&delivery.id, &prepared_context.runtime_payload)
             .await
         {
             Ok(native_prompt_id) => native_prompt_id,
@@ -6588,8 +6806,6 @@ impl Core {
                 return Err(error).context("ACP input delivery outcome is unknown");
             }
         };
-        self.acknowledge_runtime_input(&delivery.id, &native_prompt_id)
-            .await?;
         emit(
             output,
             "agent_run.started",
@@ -7419,6 +7635,48 @@ async fn process_acp_events(
             _ = &mut shutdown => break,
         };
         match incoming {
+            AcpIncoming::InputAccepted {
+                adapter_kind,
+                host_instance_id,
+                agent_run_id,
+                execution_epoch,
+                native_session_id,
+                native_prompt_id,
+                delivery_id,
+            } => {
+                process_acp_input_accepted(
+                    &core,
+                    adapter_kind,
+                    &host_instance_id,
+                    &agent_run_id,
+                    execution_epoch,
+                    &native_session_id,
+                    &native_prompt_id,
+                    &delivery_id,
+                )
+                .await;
+            }
+            AcpIncoming::InputNotAccepted {
+                adapter_kind,
+                host_instance_id,
+                agent_run_id,
+                execution_epoch,
+                native_prompt_id,
+                delivery_id,
+                error,
+            } => {
+                process_acp_input_not_accepted(
+                    &core,
+                    adapter_kind,
+                    &host_instance_id,
+                    &agent_run_id,
+                    execution_epoch,
+                    &native_prompt_id,
+                    &delivery_id,
+                    &error,
+                )
+                .await;
+            }
             AcpIncoming::Message {
                 adapter_kind,
                 host_instance_id,
@@ -7557,6 +7815,89 @@ async fn acp_runtime_on_host(
     core.acp_adapter(adapter_kind)?
         .get_agent_run_on_host(host_instance_id, agent_run_id, execution_epoch)
         .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn process_acp_input_accepted(
+    core: &Arc<Core>,
+    adapter_kind: rovai_core::agent_profile::AdapterKind,
+    host_instance_id: &str,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    native_session_id: &str,
+    native_prompt_id: &str,
+    delivery_id: &str,
+) {
+    let Some(runtime) = acp_runtime_on_host(
+        core,
+        adapter_kind,
+        host_instance_id,
+        agent_run_id,
+        execution_epoch,
+    )
+    .await
+    else {
+        return;
+    };
+    if runtime.session_id().await.as_deref() != Some(native_session_id) {
+        let error = "ACP accepted-input evidence targeted another Native Session";
+        let mark_result = {
+            let mut database = core.database.lock().await;
+            ContextService.mark_input_delivery_unknown(&mut database, delivery_id, error)
+        };
+        if let Err(mark_error) = mark_result {
+            eprintln!(
+                "failed to mark mismatched ACP input evidence unknown for AgentRun {agent_run_id}: {mark_error:#}"
+            );
+        }
+        let _ = runtime.cancel().await;
+        return;
+    }
+    if let Err(error) = core
+        .acknowledge_runtime_input(delivery_id, native_prompt_id)
+        .await
+    {
+        eprintln!("failed to persist ACP input acceptance for AgentRun {agent_run_id}: {error:#}");
+        let _ = runtime.cancel().await;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn process_acp_input_not_accepted(
+    core: &Arc<Core>,
+    adapter_kind: rovai_core::agent_profile::AdapterKind,
+    host_instance_id: &str,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    native_prompt_id: &str,
+    delivery_id: &str,
+    error: &str,
+) {
+    if acp_runtime_on_host(
+        core,
+        adapter_kind,
+        host_instance_id,
+        agent_run_id,
+        execution_epoch,
+    )
+    .await
+    .is_none()
+    {
+        return;
+    }
+    let result = {
+        let mut database = core.database.lock().await;
+        ContextService.mark_input_delivery_not_accepted(
+            &mut database,
+            delivery_id,
+            &format!("ACP prompt {native_prompt_id} was rejected: {error}"),
+        )
+    };
+    if let Err(mark_error) = result {
+        eprintln!(
+            "failed to persist ACP input rejection for AgentRun {agent_run_id}: {mark_error:#}"
+        );
+    }
 }
 
 async fn process_agent_run_acp_message(

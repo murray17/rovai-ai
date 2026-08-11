@@ -165,6 +165,51 @@ Resume 重新投递稳定 Bootstrap，但不改变 catalog 真源；新 Run 必�
 process 被新 Run acquire 后轮换 lease，再绑定新的 Session/Run route。任何旧 lease、迟到 callback
 或旧 request 都 fail closed。Core restart 不接管旧 process context。
 
+### Antigravity one-shot 输入确认
+
+Antigravity companion 的 `--print` 进程同时承担输入投递与完整生成，进程退出不是唯一可用的 accepted
+边界。Adapter 只在同一份 process-private log 中依次确认可验证的 Native Conversation ID、本次输入已
+forward/send 到该 Conversation，以及其后 `streamGenerateContent` 返回 `ResponseID`，才向 Core 报告
+早期 accepted evidence。child process 启动、Conversation 创建或本地 forwarding 单独出现都不构成
+ACK；resume 时观察到的 Conversation ID 还必须等于请求冻结的 ID。
+
+Core 收到该 evidence 后先绑定 Prepared Native Session，再持久化 Runtime Input Delivery accepted
+ACK，Antigravity 进程继续生成。成功退出以及带可验证 Session identity 的 final-output failure 保留
+原有 terminal fallback，以兼容未出现早期 marker 的受支持输出路径；非零退出、取消或日志格式无法
+验证且尚无 ACK 时仍进入 `delivery_unknown`。一旦 accepted ACK 已持久化，后续进程失败或取消只能
+结算当前 AgentRun，不能把输入降级为 unknown 或触发 replay；terminal identity 与早期 evidence 不同
+时 fail closed。
+
+日志只在单个进程生命周期内以私有权限读取，检查上限为 2 MiB，并在进程结算后删除；日志正文不进入
+Domain Event、Execution Evidence 或错误文本。具体版本 marker 与实机证据由
+[Runtime compatibility register](../runtime-compatibility.md) 维护，不把上游日志文案提升为跨版本合同。
+
+### Claude Code one-shot 输入确认
+
+Claude Code 使用 `--output-format stream-json --include-partial-messages`，但输出流中的进程初始化、Hook、
+status 和 stdin 写入都不是 accepted evidence。Adapter 只接受带预期 UUID Session identity 的首个模型
+响应事件：Claude `stream_event` 的 message/content 生命周期或完整 `assistant` event。Core 在该事件到达时
+持久化 Runtime Input Delivery ACK，Claude 进程继续运行到最终 `result`；匹配 Session 的 success result
+保留为未观察到早期事件时的 terminal fallback。
+
+早期事件和 terminal result 的 Session/Turn identity 必须一致。accepted 后的进程失败、取消、输出解析
+失败或 final-output 缺失只能结算当前 AgentRun，不能降级为 `delivery_unknown` 或重放输入；在任何合格
+模型事件和 success result 之前失败时，结果仍按未知投递处理。单行 stream event 保持 2 MiB 安全上限，
+不会把完整流、Hook 正文或模型增量复制进 Runtime Input Delivery Evidence。
+
+### ACP Prompt 输入确认
+
+OpenCode、Copilot、Kiro、Qoder、CodeBuddy 与 Qwen 共用 ACP Host 输入确认。Core 创建 prepared Delivery
+并发送 `session/prompt` 后，stdin write/flush 只表示 transport send，不立即 ACK。Host 把 Delivery identity
+绑定到当前 Session 的唯一 active prompt，并只在该 prompt 上观察到运行时产生的 agent message/thought、
+plan、tool update 或 permission request 时报告早期 accepted evidence；usage、mode、command catalog 等
+Session metadata update 不构成 ACK。
+
+若没有早期事件，匹配 JSON-RPC request ID 的成功 prompt response 是 terminal accepted fallback。明确的
+JSON-RPC error response 在尚无 accepted evidence 时把 Delivery 结算为 `not_accepted`，不推进水位；若早期
+accepted 已持久化，迟到 error/退出不得降级它。Host 在任何关联运行时证据前丢失时继续进入既有
+runtime-loss / `delivery_unknown` 对账，不能以 pipe flush 抑制重试或恢复。
+
 ### Dispatch 前 Runtime drift 与 rebind
 
 AgentRun 冻结 Adapter、Installation、auth scope、模型选择语义和权限配置；Installation 的路径、版本、

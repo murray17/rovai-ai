@@ -55,6 +55,18 @@ Input Delivery Evidence 继续留在 Core/Snapshot，但不再进入普通 Inspe
 普通审批决定 surface，Header 与通知摘要只定位该 Dock。“队员”页读取真实 CampMember/AgentProfile
 并复用 versioned `camps.changeDefaultLead`，不复制队员管理或 Runtime 配置 mutation。
 
+Antigravity one-shot Adapter 同时把 Runtime Input accepted ACK 从完整 `agy --print` 退出提前到可验证
+的上游接收点：只有匹配 Native Conversation 的 forward/send 之后出现 `streamGenerateContent`
+`ResponseID` 才提前绑定 Session 并确认输入。AgentRun 仍持续到完整生成结束；ACK 后发生的进程失败、
+取消或 final-output 错误不再把已接收输入降级为 `delivery_unknown` 或触发重复投递。无法识别的新日志
+格式继续使用原有 terminal fallback，不猜测 accepted。
+
+同一 accepted-ACK 收口覆盖 Claude Code 与六个 ACP Runtime。Claude Code 从单一 final JSON 切换到
+session-bound `stream-json`：system/Hook/status 不确认，首个模型 stream/assistant event 提前确认，success
+result 兜底。OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen 不再把 ACP stdin flush 当作 ACK，只接受
+当前 prompt 的 agent/thought/plan/tool/permission 事件或匹配成功 response；明确 error response 在尚未
+accepted 时结算为 `not_accepted`。三类 Adapter 在 accepted 后发生的 terminal failure 都不得降级水位。
+
 真实 Copilot 请求复盘同时收敛三项直接影响 v0.58 验收可读性与恢复体验的缺陷：
 
 - Session Charter 明确 `explicit_send_only` 的公共输出义务，但 Charter 文案变化不触发 Native
@@ -75,7 +87,9 @@ Input Delivery Evidence 继续留在 Core/Snapshot，但不再进入普通 Inspe
 - 不从 Member 当前 live Runtime 配置重建旧 Run，不改变显式模型、权限或 Installation identity；
 - 不无限重试，不为 refresh 启动未通过 deep probe 的 Runtime；
 - 不声称实现代码签名、包管理器 receipt 或 artifact signature 验证；
-- 不改变公开消息、CampTurn、ContextManifest、Runtime Input Delivery 或 Native Session ACK 权威。
+- 不改变公开消息、CampTurn、ContextManifest、Runtime Input Delivery 或 Native Session ACK 权威；
+  Runtime 修复只从运行时产生的、与当前 Session/Prompt 绑定的 evidence 获得 ACK，不把 child start、
+  stdin/pipe write、Hook/init 或本地 send 当作 accepted。
 - 不把 Skill 正文注入 Dynamic Context，不把默认分组解释为 Runtime/模型已读取或获得额外权限；
 - 不持续覆盖用户对内置或 Imported Skill 分组的后续修改，导入内容仍不授予额外执行权限。
 
@@ -86,10 +100,10 @@ Input Delivery Evidence 继续留在 Core/Snapshot，但不再进入普通 Inspe
 | Version lifecycle | 已更新 | v0.57 冻结为 historical，v0.58 成为唯一 current，并新增本版本概览与实施计划 |
 | ADR | 已更新 | ADR-0156 局部替代永久 fingerprint 条款；ADR-0157 局部替代 ADR-0137 的旧 instruction ownership 条款；ADR-0158 局部替代 Skill 默认不分组条款；ADR-0159 完整替代 ADR-0150 并把固定上游 Revision 的 `tasteful-ui` 加入官方集合；ADR-0160 局部替代 ADR-0154 的三 Tab Inspector 与重复 Approval surface |
 | Contracts | 已更新 | ADR-0157 与 Durable Task v3 删除 execution request、AgentRun persistence/read model 的 `expectedOutput` clean break；Run Process Detail Surface v3 冻结任务/队员 Inspector 与唯一 Approval Dock；不增加 Charter 版本轴；Skill wire shape 不变 |
-| Architecture | 已更新 | Built-in Tool Runtime 增加 bounded rebind 与显式公共输出义务，Charter 文案变化不触发 Session 轮换；Skill projection 结构不变，默认策略由 ADR-0158 约束 |
+| Architecture | 已更新 | Built-in Tool Runtime 增加 bounded rebind、显式公共输出义务，以及 Antigravity、Claude Code、ACP 的 runtime-produced accepted evidence；Charter 文案变化不触发 Session 轮换；Skill projection 结构不变，默认策略由 ADR-0158 约束 |
 | UI | 已更新 | Stop 命令目标与按钮可见性统一按非终态 AgentRun 所属 Turn 计算；Skill 设置明确全九组默认并使用行级反馈；会话普通正文统一为开放平面，2K 下分离叙述与工件宽度；Camp Inspector 收敛为任务/队员且 Approval 只在 Composer 上方决定 |
 | Runtime Activity | 已更新 | Registry 明确稀疏 terminal lifecycle update 不得降级已报告的结构化分类和标题，并补齐 Codex `commandActions` / `changes` presentation mapping |
-| Runtime compatibility | 确认无需更新 | 不改变支持的 Runtime、最低版本或已验证能力结论 |
+| Runtime compatibility | 已更新 | 增加 `agy 1.1.12` marker 与 Claude Code `2.1.220` stream focused smoke，并记录六个 ACP Runtime 的共享确认边界；不改变支持范围或十三工具 qualification 结论 |
 | Documentation routing | 已更新 | CURRENT 的 Skills/MCP 主题新增 ADR-0158 与 ADR-0159，领域术语同步默认分组和 `tasteful-ui` 来源边界 |
 | Root README | 确认无需更新 | 项目定位和常青能力不变，根 README 不记录版本局部恢复机制 |
 
@@ -102,3 +116,4 @@ Input Delivery Evidence 继续留在 Core/Snapshot，但不再进入普通 Inspe
 - [ADR-0160](../../adr/0160-focused-camp-inspector-and-single-approval-surface.md)
 - [Run Process Detail Surface v3](../../contracts/run-process-detail-surface-v3.md)
 - [Built-in Tool Runtime architecture](../../architecture/builtin-tool-runtime.md)
+- [Runtime compatibility register](../../runtime-compatibility.md)

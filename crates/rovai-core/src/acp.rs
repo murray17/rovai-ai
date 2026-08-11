@@ -51,6 +51,24 @@ use crate::{
 
 #[derive(Debug)]
 pub enum AcpIncoming {
+    InputAccepted {
+        adapter_kind: AdapterKind,
+        host_instance_id: String,
+        agent_run_id: String,
+        execution_epoch: i64,
+        native_session_id: String,
+        native_prompt_id: String,
+        delivery_id: String,
+    },
+    InputNotAccepted {
+        adapter_kind: AdapterKind,
+        host_instance_id: String,
+        agent_run_id: String,
+        execution_epoch: i64,
+        native_prompt_id: String,
+        delivery_id: String,
+        error: String,
+    },
     Message {
         adapter_kind: AdapterKind,
         host_instance_id: String,
@@ -89,6 +107,42 @@ struct AcpRuntimeOwner {
 }
 
 impl AcpRuntimeOwner {
+    fn input_accepted(
+        &self,
+        adapter_kind: AdapterKind,
+        host_instance_id: &str,
+        native_session_id: &str,
+        active_prompt: &AcpActivePrompt,
+    ) -> AcpIncoming {
+        AcpIncoming::InputAccepted {
+            adapter_kind,
+            host_instance_id: host_instance_id.to_string(),
+            agent_run_id: self.agent_run_id.clone(),
+            execution_epoch: self.execution_epoch,
+            native_session_id: native_session_id.to_string(),
+            native_prompt_id: active_prompt.prompt_id.clone(),
+            delivery_id: active_prompt.delivery_id.clone(),
+        }
+    }
+
+    fn input_not_accepted(
+        &self,
+        adapter_kind: AdapterKind,
+        host_instance_id: &str,
+        active_prompt: &AcpActivePrompt,
+        error: String,
+    ) -> AcpIncoming {
+        AcpIncoming::InputNotAccepted {
+            adapter_kind,
+            host_instance_id: host_instance_id.to_string(),
+            agent_run_id: self.agent_run_id.clone(),
+            execution_epoch: self.execution_epoch,
+            native_prompt_id: active_prompt.prompt_id.clone(),
+            delivery_id: active_prompt.delivery_id.clone(),
+            error,
+        }
+    }
+
     fn message(
         &self,
         adapter_kind: AdapterKind,
@@ -117,7 +171,14 @@ impl AcpRuntimeOwner {
 #[derive(Debug, Clone)]
 struct AcpSessionRoute {
     owner: AcpRuntimeOwner,
-    active_prompt_id: Option<String>,
+    active_prompt: Option<AcpActivePrompt>,
+}
+
+#[derive(Debug, Clone)]
+struct AcpActivePrompt {
+    prompt_id: String,
+    delivery_id: String,
+    acceptance_emitted: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -373,6 +434,12 @@ impl AcpHost {
                             None
                         };
                         if let Some(route) = route {
+                            if acp_message_proves_input_accepted(&message)
+                                && let Some(session_id) = session_id
+                            {
+                                host.emit_input_accepted_if_active(session_id, &route.owner)
+                                    .await;
+                            }
                             let _ = host.incoming.send(route.owner.message(
                                 host.adapter_kind,
                                 &host.host_instance_id,
@@ -433,20 +500,43 @@ impl AcpHost {
                 session_id,
                 prompt_id,
             } => {
-                let still_active = {
+                let active_prompt = {
                     let mut routes = self.routes.write().await;
                     let Some(route) = routes.get_mut(&session_id) else {
                         return;
                     };
-                    if route.owner != owner || route.active_prompt_id.as_deref() != Some(&prompt_id)
+                    if route.owner != owner
+                        || route
+                            .active_prompt
+                            .as_ref()
+                            .map(|active| active.prompt_id.as_str())
+                            != Some(prompt_id.as_str())
                     {
-                        false
+                        None
                     } else {
-                        route.active_prompt_id = None;
-                        true
+                        route.active_prompt.take()
                     }
                 };
-                if still_active {
+                if let Some(active_prompt) = active_prompt {
+                    match &response {
+                        Ok(_) if !active_prompt.acceptance_emitted => {
+                            let _ = self.incoming.send(owner.input_accepted(
+                                self.adapter_kind,
+                                &self.host_instance_id,
+                                &session_id,
+                                &active_prompt,
+                            ));
+                        }
+                        Err(error) if !active_prompt.acceptance_emitted => {
+                            let _ = self.incoming.send(owner.input_not_accepted(
+                                self.adapter_kind,
+                                &self.host_instance_id,
+                                &active_prompt,
+                                error.clone(),
+                            ));
+                        }
+                        _ => {}
+                    }
                     let params = match response {
                         Ok(result) => json!({
                             "sessionId": session_id,
@@ -505,7 +595,7 @@ impl AcpHost {
             session_id.to_string(),
             AcpSessionRoute {
                 owner: owner.clone(),
-                active_prompt_id: None,
+                active_prompt: None,
             },
         );
         Ok(())
@@ -599,7 +689,38 @@ impl AcpHost {
             .await
             .get(session_id)
             .filter(|route| &route.owner == owner)
-            .and_then(|route| route.active_prompt_id.clone())
+            .and_then(|route| {
+                route
+                    .active_prompt
+                    .as_ref()
+                    .map(|active| active.prompt_id.clone())
+            })
+    }
+
+    async fn emit_input_accepted_if_active(&self, session_id: &str, owner: &AcpRuntimeOwner) {
+        let accepted = {
+            let mut routes = self.routes.write().await;
+            let Some(route) = routes.get_mut(session_id) else {
+                return;
+            };
+            if &route.owner != owner {
+                return;
+            }
+            let Some(active_prompt) = route.active_prompt.as_mut() else {
+                return;
+            };
+            if active_prompt.acceptance_emitted {
+                return;
+            }
+            active_prompt.acceptance_emitted = true;
+            active_prompt.clone()
+        };
+        let _ = self.incoming.send(owner.input_accepted(
+            self.adapter_kind,
+            &self.host_instance_id,
+            session_id,
+            &accepted,
+        ));
     }
 
     async fn owners(&self) -> HashSet<AcpRuntimeOwner> {
@@ -712,6 +833,7 @@ impl AcpHost {
         &self,
         session_id: &str,
         owner: &AcpRuntimeOwner,
+        delivery_id: &str,
         text: &str,
     ) -> Result<String> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
@@ -729,10 +851,14 @@ impl AcpHost {
             if &route.owner != owner {
                 bail!("ACP Session failed Host/Run fencing");
             }
-            if route.active_prompt_id.is_some() {
+            if route.active_prompt.is_some() {
                 bail!("ACP Session already has an active prompt");
             }
-            route.active_prompt_id = Some(prompt_id.clone());
+            route.active_prompt = Some(AcpActivePrompt {
+                prompt_id: prompt_id.clone(),
+                delivery_id: delivery_id.to_string(),
+                acceptance_emitted: false,
+            });
         }
         self.pending.lock().await.insert(
             id,
@@ -756,7 +882,7 @@ impl AcpHost {
         {
             self.pending.lock().await.remove(&id);
             if let Some(route) = self.routes.write().await.get_mut(session_id) {
-                route.active_prompt_id = None;
+                route.active_prompt = None;
             }
             return Err(error);
         }
@@ -803,6 +929,25 @@ fn diagnostic_is_explicit_mcp_rejection(diagnostic: &str) -> bool {
 
 fn acp_prompt_id(host_instance_id: &str, request_id: u64) -> String {
     format!("acp-prompt-{host_instance_id}-{request_id}")
+}
+
+fn acp_message_proves_input_accepted(message: &Value) -> bool {
+    match message.get("method").and_then(Value::as_str) {
+        Some("session/request_permission") => true,
+        Some("session/update") => matches!(
+            message
+                .pointer("/params/update/sessionUpdate")
+                .and_then(Value::as_str),
+            Some(
+                "agent_message_chunk"
+                    | "agent_thought_chunk"
+                    | "tool_call"
+                    | "tool_call_update"
+                    | "plan"
+            )
+        ),
+        _ => false,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1021,13 +1166,15 @@ impl AcpRuntime {
         Ok(())
     }
 
-    pub async fn start_prompt(&self, text: &str) -> Result<String> {
+    pub async fn start_prompt(&self, delivery_id: &str, text: &str) -> Result<String> {
         self.streamed_agent_text.lock().await.clear();
         let session_id = self
             .session_id()
             .await
             .context("ACP Session is not ready")?;
-        self.host.start_prompt(&session_id, &self.owner, text).await
+        self.host
+            .start_prompt(&session_id, &self.owner, delivery_id, text)
+            .await
     }
 
     pub async fn install_compaction_observer(&self, lease: CompactionObserverLease) -> Result<()> {
@@ -2705,6 +2852,47 @@ mod tests {
             "ACP request counters restart for each Host"
         );
         assert_eq!(acp_prompt_id("host-a", 1), "acp-prompt-host-a-1");
+    }
+
+    #[test]
+    fn only_active_prompt_response_events_prove_acp_input_acceptance() {
+        for update in [
+            "agent_message_chunk",
+            "agent_thought_chunk",
+            "tool_call",
+            "tool_call_update",
+            "plan",
+        ] {
+            assert!(acp_message_proves_input_accepted(&json!({
+                "method": "session/update",
+                "params": {
+                    "sessionId": "session-1",
+                    "update": {"sessionUpdate": update}
+                }
+            })));
+        }
+        assert!(acp_message_proves_input_accepted(&json!({
+            "id": 7,
+            "method": "session/request_permission",
+            "params": {"sessionId": "session-1"}
+        })));
+        for update in [
+            "usage_update",
+            "available_commands_update",
+            "current_mode_update",
+        ] {
+            assert!(!acp_message_proves_input_accepted(&json!({
+                "method": "session/update",
+                "params": {
+                    "sessionId": "session-1",
+                    "update": {"sessionUpdate": update}
+                }
+            })));
+        }
+        assert!(!acp_message_proves_input_accepted(&json!({
+            "method": "session/update",
+            "params": {"sessionId": "session-1"}
+        })));
     }
 
     #[test]

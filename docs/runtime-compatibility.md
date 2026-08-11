@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-08-08
+last_updated: 2026-08-11
 ---
 
 # Agent Runtime 兼容性清单
@@ -44,6 +44,38 @@ observability metric，不是兼容性或发布门槛。transport-independent re
 
 字段级合同以 [Built-in Tool Transport v4](contracts/builtin-tool-transport-v4.md) 为唯一真源，
 调用结构以 [Built-in Tool Runtime Architecture](architecture/builtin-tool-runtime.md) 为准。
+
+## Claude Code 与 ACP 输入确认
+
+2026-08-11 使用本机 Claude Code `2.1.220` 按 Adapter 的完整参数执行无工具、无 Session 持久化的
+`stream-json + include-partial-messages` focused smoke：约 1.4 秒出现匹配请求 UUID 的 `system init`，
+约 4.9 秒出现同一 Session 的 `stream_event/message_start`，约 5.1 秒出现 success `result`，最终正文为
+`CLAUDE-STREAM-ACK-SMOKE`。当前 Adapter 明确排除 system/Hook/status，只允许匹配 Session 的模型 stream
+或 assistant event 提前确认，并保留 success result fallback。该 smoke 只验证输入确认 surface，不替代
+上表十三项 Built-in CLI qualification。
+
+OpenCode、Copilot、Kiro、Qoder、CodeBuddy 与 Qwen 的输入确认由同一 ACP Host 实现。确定性回归确认
+`session/prompt` stdin write/flush 不再直接 ACK；当前 active prompt 的 agent message/thought、plan、tool、
+permission request 可提前确认，匹配 request ID 的成功 response 为 fallback，usage/mode/catalog update 不
+确认，明确 error response 在尚无 accepted evidence 时结算为 `not_accepted`。这项共享实现不改写上表
+各 Runtime 的实测版本；上游若改变 ACP `session/update` 或 prompt response shape，须重新执行对应真实
+Runtime smoke。
+
+## Antigravity one-shot 输入确认
+
+2026-08-11 使用本机 `agy 1.1.12` 执行只读 `--print --mode plan --sandbox` smoke：同一份私有日志先后
+观察到 `Created conversation`、`Print mode: conversation=...`、匹配 Conversation 的
+`Forwarding user message` / `Sending user message`，随后出现
+`v1internal:streamGenerateContent?alt=sse` 的 `ResponseID`，最终 stdout 正常返回且进程成功退出。
+该 focused smoke 只验证 one-shot accepted marker，不替代上表 `1.1.11` 的十三项 Built-in CLI
+qualification，也不据此改写完整兼容性版本。
+
+当前 Adapter 以“匹配 Session 的 forward/send 之后出现 stream response ID”作为进程仍运行时的
+早期 accepted evidence；Conversation 创建和本地 forwarding 本身不确认投递。marker 缺失或格式变化
+时 fail closed 到原有 terminal settlement；若进程失败且两条路径都无法验证，则保持
+`delivery_unknown`。已持久化 accepted ACK 后的生成失败不会降级或重放输入。确定性 fixture 覆盖
+response-before-forward、forward-without-response、new/resumed Session、早期 ACK 先于 final、非零退出
+和 ACK 后取消；上游升级若改变任一 marker，必须重新执行本节 smoke 与相关 Adapter 回归。
 
 ## Native Session compaction detector
 

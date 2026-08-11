@@ -14,11 +14,12 @@ use rovai_core::{
     runtime_discovery::configure_active_runtime_command,
 };
 use serde::Deserialize;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
     process::Command,
-    sync::{Mutex, oneshot},
+    sync::{Mutex, mpsc, oneshot},
     time::{Duration, Instant},
 };
 
@@ -43,6 +44,13 @@ pub struct ClaudeCodeRunRequest {
     pub external_mcp_servers: BTreeMap<String, McpServerDefinition>,
     pub attachment_access_root: Option<PathBuf>,
     pub persist_session: bool,
+    pub input_accepted: Option<mpsc::UnboundedSender<ClaudeCodeInputAccepted>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaudeCodeInputAccepted {
+    pub native_session_id: String,
+    pub native_turn_id: String,
 }
 
 #[derive(Debug, Clone)]
@@ -213,7 +221,9 @@ impl ClaudeCodeCliRuntimeAdapter {
         }
         command
             .arg("--print")
-            .args(["--output-format", "json"])
+            .args(["--output-format", "stream-json"])
+            .arg("--verbose")
+            .arg("--include-partial-messages")
             .args(["--permission-mode", permission_mode]);
         if let Some(root) = request.attachment_access_root.as_deref() {
             command.arg("--add-dir").arg(root);
@@ -295,7 +305,16 @@ impl ClaudeCodeCliRuntimeAdapter {
             .stderr
             .take()
             .context("Claude Code stderr was unavailable")?;
-        let stdout_task = tokio::spawn(capture_bounded(stdout));
+        let native_turn_id = format!(
+            "claude-code:{}:{}",
+            request.agent_run_id, request.execution_epoch
+        );
+        let stdout_task = tokio::spawn(capture_claude_stream(
+            stdout,
+            native_session_id.clone(),
+            native_turn_id.clone(),
+            request.input_accepted.clone(),
+        ));
         let stderr_task = tokio::spawn(capture_bounded(stderr));
         tokio::pin!(interrupted);
         let mut was_interrupted = false;
@@ -329,14 +348,9 @@ impl ClaudeCodeCliRuntimeAdapter {
                 stderr.digest
             );
         }
-        if stdout.truncated {
-            anyhow::bail!(
-                "Claude Code result exceeded the {} byte safety limit",
-                MAX_CAPTURE_BYTES
-            );
-        }
-        let output: ClaudeCodeJsonResult = serde_json::from_slice(&stdout.bytes)
-            .context("Claude Code final output was not valid result JSON")?;
+        let output = stdout
+            .final_result
+            .context("Claude Code stream omitted its final result event")?;
         if output.is_error || output.subtype.as_deref() != Some("success") {
             anyhow::bail!(
                 "Claude Code returned a non-success result (subtype={})",
@@ -358,10 +372,7 @@ impl ClaudeCodeCliRuntimeAdapter {
         }
         Ok(ClaudeCodeRunResult {
             native_session_id,
-            native_turn_id: format!(
-                "claude-code:{}:{}",
-                request.agent_run_id, request.execution_epoch
-            ),
+            native_turn_id,
             final_output,
         })
     }
@@ -396,10 +407,131 @@ struct ClaudeCodeJsonResult {
 }
 
 #[derive(Debug)]
+struct ClaudeCodeStreamCapture {
+    final_result: Option<ClaudeCodeJsonResult>,
+}
+
+async fn capture_claude_stream<R>(
+    mut reader: R,
+    expected_session_id: String,
+    native_turn_id: String,
+    input_accepted: Option<mpsc::UnboundedSender<ClaudeCodeInputAccepted>>,
+) -> Result<ClaudeCodeStreamCapture>
+where
+    R: AsyncRead + Unpin,
+{
+    let mut line = Vec::new();
+    let mut buffer = [0_u8; 16 * 1024];
+    let mut final_result = None;
+    let mut acceptance_emitted = false;
+    loop {
+        let read = reader.read(&mut buffer).await?;
+        if read == 0 {
+            break;
+        }
+        for byte in &buffer[..read] {
+            if *byte == b'\n' {
+                if !line.is_empty() {
+                    process_claude_stream_line(
+                        &line,
+                        &expected_session_id,
+                        &native_turn_id,
+                        input_accepted.as_ref(),
+                        &mut acceptance_emitted,
+                        &mut final_result,
+                    )?;
+                    line.clear();
+                }
+                continue;
+            }
+            if line.len() >= MAX_CAPTURE_BYTES {
+                anyhow::bail!(
+                    "Claude Code stream event exceeded the {} byte safety limit",
+                    MAX_CAPTURE_BYTES
+                );
+            }
+            line.push(*byte);
+        }
+    }
+    if !line.is_empty() {
+        process_claude_stream_line(
+            &line,
+            &expected_session_id,
+            &native_turn_id,
+            input_accepted.as_ref(),
+            &mut acceptance_emitted,
+            &mut final_result,
+        )?;
+    }
+    Ok(ClaudeCodeStreamCapture { final_result })
+}
+
+fn process_claude_stream_line(
+    line: &[u8],
+    expected_session_id: &str,
+    native_turn_id: &str,
+    input_accepted: Option<&mpsc::UnboundedSender<ClaudeCodeInputAccepted>>,
+    acceptance_emitted: &mut bool,
+    final_result: &mut Option<ClaudeCodeJsonResult>,
+) -> Result<()> {
+    let event: Value =
+        serde_json::from_slice(line).context("Claude Code emitted invalid stream JSON")?;
+    if !*acceptance_emitted && claude_event_proves_input_accepted(&event, expected_session_id)? {
+        if let Some(sender) = input_accepted {
+            let _ = sender.send(ClaudeCodeInputAccepted {
+                native_session_id: expected_session_id.to_string(),
+                native_turn_id: native_turn_id.to_string(),
+            });
+        }
+        *acceptance_emitted = true;
+    }
+    if event.get("type").and_then(Value::as_str) == Some("result") {
+        if final_result.is_some() {
+            anyhow::bail!("Claude Code stream emitted more than one final result event");
+        }
+        *final_result = Some(
+            serde_json::from_value(event).context("Claude Code final stream event was invalid")?,
+        );
+    }
+    Ok(())
+}
+
+fn claude_event_proves_input_accepted(event: &Value, expected_session_id: &str) -> Result<bool> {
+    let event_type = event.get("type").and_then(Value::as_str);
+    let proves_acceptance = match event_type {
+        Some("assistant") => true,
+        Some("stream_event") => matches!(
+            event.pointer("/event/type").and_then(Value::as_str),
+            Some(
+                "message_start"
+                    | "content_block_start"
+                    | "content_block_delta"
+                    | "message_delta"
+                    | "message_stop"
+            )
+        ),
+        _ => false,
+    };
+    if !proves_acceptance {
+        return Ok(false);
+    }
+    let observed_session_id = event
+        .get("session_id")
+        .and_then(Value::as_str)
+        .context("Claude Code accepted-input event omitted session_id")?;
+    validate_session_id(observed_session_id)?;
+    if observed_session_id != expected_session_id {
+        anyhow::bail!(
+            "Claude Code accepted-input event targeted another session (expected {expected_session_id}, observed {observed_session_id})"
+        );
+    }
+    Ok(true)
+}
+
+#[derive(Debug)]
 struct CapturedBytes {
     bytes: Vec<u8>,
     total_bytes: usize,
-    truncated: bool,
     digest: String,
 }
 
@@ -424,7 +556,6 @@ where
         }
     }
     Ok(CapturedBytes {
-        truncated: total_bytes > bytes.len(),
         bytes,
         total_bytes,
         digest: format!("sha256:{:x}", digest.finalize()),
@@ -468,6 +599,8 @@ fn restrict_directory_permissions(_path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+    use tokio::io::AsyncWriteExt;
 
     #[test]
     fn accepts_only_uuid_session_identifiers() {
@@ -495,5 +628,110 @@ mod tests {
                 "bootstrap-latest",
             ]
         );
+    }
+
+    #[test]
+    fn only_session_bound_model_events_prove_input_acceptance() {
+        let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+        assert!(
+            !claude_event_proves_input_accepted(
+                &json!({
+                    "type": "system",
+                    "subtype": "init",
+                    "session_id": session_id
+                }),
+                session_id,
+            )
+            .unwrap(),
+            "process initialization is not model input acceptance"
+        );
+        assert!(
+            claude_event_proves_input_accepted(
+                &json!({
+                    "type": "stream_event",
+                    "session_id": session_id,
+                    "event": {"type": "message_start"}
+                }),
+                session_id,
+            )
+            .unwrap()
+        );
+        assert!(
+            claude_event_proves_input_accepted(
+                &json!({"type": "assistant", "session_id": session_id}),
+                session_id,
+            )
+            .unwrap()
+        );
+        assert!(
+            claude_event_proves_input_accepted(
+                &json!({
+                    "type": "assistant",
+                    "session_id": "5ade59ac-f87e-4827-8cf2-0e1f3ba720ea"
+                }),
+                session_id,
+            )
+            .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn stream_reports_acceptance_before_the_terminal_result() {
+        let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+        let native_turn_id = "claude-code:run-1:1";
+        let (mut writer, reader) = tokio::io::duplex(16 * 1024);
+        let (accepted_sender, mut accepted_receiver) = mpsc::unbounded_channel();
+        let (finish_sender, finish_receiver) = oneshot::channel();
+        let session_id_for_writer = session_id.to_string();
+        let writer_task = tokio::spawn(async move {
+            for event in [
+                json!({
+                    "type": "system",
+                    "subtype": "init",
+                    "session_id": session_id_for_writer
+                }),
+                json!({
+                    "type": "stream_event",
+                    "session_id": session_id_for_writer,
+                    "event": {"type": "message_start"}
+                }),
+            ] {
+                writer
+                    .write_all(format!("{event}\n").as_bytes())
+                    .await
+                    .unwrap();
+            }
+            finish_receiver.await.unwrap();
+            let result = json!({
+                "type": "result",
+                "subtype": "success",
+                "is_error": false,
+                "result": "done",
+                "session_id": session_id_for_writer
+            });
+            writer
+                .write_all(format!("{result}\n").as_bytes())
+                .await
+                .unwrap();
+        });
+        let capture_task = tokio::spawn(capture_claude_stream(
+            reader,
+            session_id.to_string(),
+            native_turn_id.to_string(),
+            Some(accepted_sender),
+        ));
+
+        let accepted = tokio::time::timeout(Duration::from_secs(1), accepted_receiver.recv())
+            .await
+            .expect("accepted evidence should precede the terminal result")
+            .expect("acceptance channel should remain open");
+        assert_eq!(accepted.native_session_id, session_id);
+        assert_eq!(accepted.native_turn_id, native_turn_id);
+        finish_sender.send(()).unwrap();
+
+        let captured = capture_task.await.unwrap().unwrap();
+        assert_eq!(captured.final_result.unwrap().result, "done");
+        writer_task.await.unwrap();
+        assert!(accepted_receiver.try_recv().is_err());
     }
 }
