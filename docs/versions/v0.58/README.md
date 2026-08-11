@@ -41,6 +41,9 @@ Skill 一次性补齐缺失分组，同时保留当前 Revision 与显式启停�
 官方集合新增完整 `tasteful-ui` Skill：源码固定到上游
 `159ccd47a320f3a7bd0289d07366d422211895a1`，保留 MIT 许可、来源 Notice、全部渐进披露参考与 Rovai
 展示元数据；Core 构建时确定性枚举并嵌入 84 个文件，应用启动不访问网络。
+Skill 设置页从该真实上游元数据显示“GitHub 三方”、仓库链接与八位 Revision，其他 official 与
+Imported Skill 分别显示“Rovai 内置”和“用户导入”；右侧操作收敛为带列名的投递范围、状态与详情，
+版本元数据和 Imported 删除进入详情，不再使用意义不明的三点菜单。
 
 本版本的 Renderer 同时把用户与 Agent 普通消息统一到同一开放阅读平面，并在 2K 宽屏下使用
 “叙述约 76ch、代码与表格最多 930px”的双宽度体系。身份继续由头像、名称、Runtime、时间和 A2A

@@ -59,6 +59,8 @@ last_updated: 2026-08-11
 - [x] Core 构建时递归生成完整 84 文件 bundled manifest，拒绝符号链接和非普通文件；
 - [x] 新安装 `tasteful-ui` 复用内置 Skill 的默认启用、全九组分配、不可变 Revision 和用户修改保持语义；
 - [x] Core、Skill smoke、Renderer acceptance、领域词汇与 ADR 官方集合清单同步为六个。
+- [x] Skill 设置从真实上游元数据派生“GitHub 三方”仓库与八位 Revision，保留“Rovai 内置 /
+  用户导入”边界，并用带列名的投递范围、状态与详情替代三点元数据菜单。
 
 ## Checkpoint 6：会话叙述与工件双宽度
 

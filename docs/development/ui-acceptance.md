@@ -195,6 +195,12 @@ Composer 与历史消息的人物信息卡截图是此交互的必留视觉证�
 | `scripts/capture-camp-inspectors.mjs` | 已有 Camp 的 Inspector 截图 | 必须设置 `ROVAI_CAPTURE_USER_DATA_DIR` |
 | `scripts/capture-desktop.mjs` | 通用页面、Runtime 和 Camp 流程 | 必须设置隔离 `userData`；省略或指向日常目录即拒绝启动 |
 
+Skill 页面验收必须证明六个 official Skill 中五个显示“Rovai 内置”，固定上游的
+`tasteful-ui` 显示“GitHub 三方”、`DonkeyKing01/tasteful-ui-skill` 可点击仓库与
+`159ccd47` Revision；列表列名固定为“投递范围 / 状态 / 查看”，不存在旧三点菜单。
+“详情”展开后必须包含真实 Revision、安装或更新时间、文件信息、内容摘要与固定副本说明，
+且 official/固定上游 Skill 不出现删除；九个 Runtime 生效组及真实队员投影继续按原门禁操作。
+
 ## 从明确来源创建只读隔离副本
 
 需要复现已有 Camp 时，先彻底退出 Rovai-ai。v0.51 起诊断中心和 v5 导出故意不显示绝对

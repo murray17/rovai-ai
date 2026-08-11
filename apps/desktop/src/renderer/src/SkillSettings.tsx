@@ -70,7 +70,7 @@ export function SkillSettings(): React.JSX.Element {
   const visibleSkills = useMemo(() => {
     const query = search.trim().toLocaleLowerCase('zh-CN')
     if (!skills || query.length === 0) return skills
-    return skills.filter((skill) => `${skill.name}\n${skill.currentRevision.description}`
+    return skills.filter((skill) => skillSearchText(skill)
       .toLocaleLowerCase('zh-CN')
       .includes(query))
   }, [search, skills])
@@ -212,7 +212,7 @@ export function SkillSettings(): React.JSX.Element {
       <SettingsPageHeader
         eyebrow="Settings / Skills"
         title="Skill 管理"
-        description="管理 Rovai 内置与用户导入的 Skill，并为每个 Skill 独立选择 Runtime 生效组。"
+        description="管理 Rovai 内置、固定上游的第三方与用户导入 Skill；来源可追溯，投递范围与启停状态各自独立。"
         aside={<span className="settings-page-note">应用全局配置</span>}
       />
 
@@ -282,13 +282,18 @@ export function SkillSettings(): React.JSX.Element {
         </div>
         <label className="skill-search-row">
           <SearchIcon />
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索 Skill 名称或简介" aria-label="搜索 Skill" />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索 Skill 名称、简介或来源" aria-label="搜索 Skill" />
         </label>
         {skills === null && <div className="skill-empty" aria-live="polite">正在读取 Skill Library…</div>}
         {skills?.length === 0 && <div className="skill-empty">还没有可用的 Skill。可以导入包含 <code>SKILL.md</code> 的目录。</div>}
         {skills && skills.length > 0 && visibleSkills?.length === 0 && <div className="skill-empty">没有匹配“{search.trim()}”的 Skill。</div>}
         {visibleSkills && visibleSkills.length > 0 && (
           <div className="skill-card-grid">
+            <div className="skill-library-columns" aria-hidden="true">
+              <span />
+              <span>Skill / 来源</span>
+              <div><span>投递范围</span><span>状态</span><span>查看</span></div>
+            </div>
             {visibleSkills.map((skill) => (
               <SkillCard
                 key={skill.id}
@@ -344,51 +349,76 @@ export function SkillCard({
   onToggleGroup(groupKey: SkillDeliveryGroupKey): void
   onDelete(): void
 }): React.JSX.Element {
+  const [detailsOpen, setDetailsOpen] = useState(false)
   const selected = new Set(skill.groupAssignments.map((assignment) => assignment.groupKey))
-  const selectedGroups = groups.filter((group) => selected.has(group.key))
   const deleting = skill.lifecycleStatus === 'deleting'
   const rowBusy = operation !== null || busy !== null
+  const source = skillSourcePresentation(skill)
+  const detailsId = `skill-details-${skill.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`
   return (
     <article
-      className={`skill-card ${!skill.enabled ? 'is-disabled' : ''} ${deleting ? 'is-deleting' : ''}`}
+      className={`skill-card ${!skill.enabled ? 'is-disabled' : ''} ${deleting ? 'is-deleting' : ''} ${detailsOpen ? 'is-expanded' : ''}`}
+      data-skill-name={skill.name}
       aria-busy={rowBusy}
     >
-      <span className="skill-card-mark" aria-hidden="true">{skillMark(skill.name)}</span>
-      <div className="skill-card-heading">
-        <div className="skill-card-title">
-          <strong title={skill.name}>{skill.name}</strong>
-          <span className={`skill-source ${skill.origin === 'official' ? 'source-official' : ''}`}>
-            {skill.origin === 'official' ? 'Rovai 内置' : '用户导入'}
-          </span>
+      <div className="skill-card-primary">
+        <span className={`skill-card-mark source-${source.kind}`} aria-hidden="true">{skillMark(skill.name)}</span>
+        <div className="skill-card-heading">
+          <div className="skill-card-title">
+            <strong title={skill.name}>{skill.name}</strong>
+            <span className={`skill-source source-${source.kind}`}>
+              {source.kind === 'third-party' && <SourceBranchIcon />}
+              {source.badgeLabel}
+            </span>
+          </div>
+          <p>{skill.currentRevision.description || '未提供说明。'}</p>
+          <SkillProvenance source={source} />
+          {deleting && <span className="skill-deleting-note">等待现有执行释放后删除</span>}
         </div>
-        <p>{skill.currentRevision.description || '未提供说明。'}</p>
-        <small className="skill-card-meta">
-          Revision {skill.currentRevision.revision} · {selectedGroups.length === 0
-            ? '未分配生效组'
-            : selectedGroups.map((group) => group.label).join('、')}
-        </small>
-        {deleting && <span className="skill-deleting-note">等待现有执行释放后删除</span>}
+        <div className="skill-card-controls">
+          <SkillGroupMenu
+            skill={skill}
+            groups={groups}
+            selected={selected}
+            disabled={rowBusy || deleting}
+            onToggle={onToggleGroup}
+          />
+          <button
+            className="skill-toggle"
+            type="button"
+            role="switch"
+            aria-checked={skill.enabled}
+            aria-label={`${skill.enabled ? '停用' : '启用'} ${skill.name}`}
+            disabled={rowBusy || deleting}
+            onClick={onToggleEnabled}
+          >
+            <span aria-hidden="true" /><b>{operation === 'toggle' ? '保存中…' : skill.enabled ? '已启用' : '已停用'}</b>
+          </button>
+          <button
+            className="skill-detail-button"
+            type="button"
+            aria-expanded={detailsOpen}
+            aria-controls={detailsId}
+            onClick={() => setDetailsOpen((open) => !open)}
+          >
+            <span>详情</span><ChevronIcon />
+          </button>
+        </div>
       </div>
-      <div className="skill-card-controls">
-        <SkillGroupMenu
-          skill={skill}
-          groups={groups}
-          selected={selected}
-          disabled={rowBusy || deleting}
-          onToggle={onToggleGroup}
+      <div className="skill-card-details" id={detailsId} hidden={!detailsOpen}>
+        <DetailFact label="Revision" value={`r${skill.currentRevision.revision}`} mono />
+        <DetailFact
+          label={skill.currentRevision.sourceType === 'bundled' ? '安装时间' : '更新时间'}
+          value={formatTimestamp(skill.currentRevision.installedAt)}
         />
-        <button
-          className="skill-toggle"
-          type="button"
-          role="switch"
-          aria-checked={skill.enabled}
-          aria-label={`${skill.enabled ? '停用' : '启用'} ${skill.name}`}
-          disabled={rowBusy || deleting}
-          onClick={onToggleEnabled}
-        >
-          <span aria-hidden="true" /><b>{operation === 'toggle' ? '保存中…' : skill.enabled ? '已启用' : '已停用'}</b>
-        </button>
-        <SkillMoreMenu skill={skill} disabled={rowBusy || deleting} onDelete={onDelete} />
+        <DetailFact label="内容" value={`${skill.currentRevision.fileCount} 个文件 · ${formatBytes(skill.currentRevision.totalBytes)}`} />
+        <DetailFact label="内容摘要" value={shortDigest(skill.currentRevision.contentDigest)} mono title={skill.currentRevision.contentDigest} />
+        <p className="skill-detail-note">{source.detailNote}</p>
+        {skill.origin === 'imported' && (
+          <div className="skill-detail-footer">
+            <button className="skill-delete-button" type="button" disabled={rowBusy || deleting} onClick={onDelete}>删除 Skill…</button>
+          </div>
+        )}
       </div>
     </article>
   )
@@ -429,37 +459,144 @@ function skillMark(name: string): string {
   return mark.toLocaleUpperCase('en-US').slice(0, 2) || 'SK'
 }
 
-function SkillMoreMenu({ skill, disabled, onDelete }: {
-  skill: SkillView
-  disabled: boolean
-  onDelete(): void
-}): React.JSX.Element {
+export type SkillSourcePresentation = {
+  kind: 'bundled' | 'third-party' | 'imported'
+  badgeLabel: 'Rovai 内置' | 'GitHub 三方' | '用户导入'
+  sourceLabel: string
+  repositoryUrl: string | null
+  repositoryLabel: string | null
+  revisionLabel: string
+  detailNote: string
+}
+
+export function skillSourcePresentation(skill: SkillView): SkillSourcePresentation {
+  const metadata = metadataRecord(skill.currentRevision.sourceMetadata)
+  const internalRevision = `Revision r${skill.currentRevision.revision}`
+
+  if (skill.origin === 'official') {
+    const upstream = metadataRecord(metadata?.upstream)
+    const repository = githubRepository(metadataString(upstream, 'repository'))
+    const revision = metadataString(upstream, 'revision')
+    if (repository && revision) {
+      return {
+        kind: 'third-party',
+        badgeLabel: 'GitHub 三方',
+        sourceLabel: '固定上游副本',
+        repositoryUrl: repository.url,
+        repositoryLabel: repository.label,
+        revisionLabel: shortGitRevision(revision),
+        detailNote: '随 Rovai 安装的固定上游副本；启动和使用时不访问 GitHub，也不会随上游自动更新。'
+      }
+    }
+    return {
+      kind: 'bundled',
+      badgeLabel: 'Rovai 内置',
+      sourceLabel: '随 Rovai 安装',
+      repositoryUrl: null,
+      repositoryLabel: null,
+      revisionLabel: internalRevision,
+      detailNote: '随 Rovai 发布并由应用更新；启用不代表获得额外工具或权限。'
+    }
+  }
+
+  const importedSource = metadataRecord(metadata?.source)
+  const repository = skill.currentRevision.sourceType === 'github'
+    ? githubRepository(metadataString(importedSource, 'repositoryUrl'))
+    : null
+  const revision = metadataString(importedSource, 'resolvedCommit')
+    ?? metadataString(importedSource, 'gitRef')
+
+  return {
+    kind: 'imported',
+    badgeLabel: '用户导入',
+    sourceLabel: sourceTypeLabel(skill.currentRevision.sourceType),
+    repositoryUrl: repository?.url ?? null,
+    repositoryLabel: repository?.label ?? null,
+    revisionLabel: revision ? shortGitRevision(revision) : internalRevision,
+    detailNote: 'Rovai 已保存独立副本，不依赖原始来源；后续不会自动同步，启停和投递范围仍由你管理。'
+  }
+}
+
+function skillSearchText(skill: SkillView): string {
+  const source = skillSourcePresentation(skill)
+  return [
+    skill.name,
+    skill.currentRevision.description,
+    source.badgeLabel,
+    source.sourceLabel,
+    source.repositoryLabel,
+    source.revisionLabel
+  ].filter(Boolean).join('\n')
+}
+
+function SkillProvenance({ source }: { source: SkillSourcePresentation }): React.JSX.Element {
   return (
-    <DropdownMenu.Root>
-      <DropdownMenu.Trigger asChild>
-        <button className="skill-more-button" type="button" aria-label={`${skill.name} 更多操作`} disabled={disabled}>•••</button>
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content className="skill-more-menu" align="end" sideOffset={5} collisionPadding={10}>
-          <div className="skill-version-block">
-            <VersionRow label="Revision" value={`r${skill.currentRevision.revision}`} mono />
-            <VersionRow label={skill.currentRevision.sourceType === 'bundled' ? '安装时间' : '更新时间'} value={formatTimestamp(skill.currentRevision.installedAt)} />
-            <VersionRow label="内容" value={`${skill.currentRevision.fileCount} 个文件 · ${formatBytes(skill.currentRevision.totalBytes)}`} />
-            <VersionRow label="来源" value={sourceTypeLabel(skill.currentRevision.sourceType)} />
-          </div>
-          {skill.origin === 'imported' && (
-            <div className="skill-menu-actions">
-              <DropdownMenu.Item className="skill-menu-action danger" onSelect={onDelete}>删除 Skill</DropdownMenu.Item>
-            </div>
-          )}
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
+    <div className="skill-card-provenance">
+      <span className="skill-provenance-label">来源</span>
+      {source.repositoryUrl && source.repositoryLabel
+        ? (
+          <a
+            className="skill-source-link"
+            href={source.repositoryUrl}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={`${source.repositoryLabel}，在浏览器打开`}
+          >
+            <span>{source.repositoryLabel}</span><ExternalLinkIcon />
+          </a>
+          )
+        : <span>{source.sourceLabel}</span>}
+      <span aria-hidden="true">·</span>
+      <code className="skill-provenance-revision">{source.revisionLabel}</code>
+    </div>
   )
 }
 
-function VersionRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }): React.JSX.Element {
-  return <div className="skill-version-row"><span>{label}</span><strong className={mono ? 'mono' : ''}>{value}</strong></div>
+function DetailFact({ label, value, mono = false, title }: {
+  label: string
+  value: string
+  mono?: boolean
+  title?: string
+}): React.JSX.Element {
+  return <div className="skill-detail-fact"><span>{label}</span><strong className={mono ? 'mono' : ''} title={title}>{value}</strong></div>
+}
+
+function metadataRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function metadataString(record: Record<string, unknown> | null, key: string): string | null {
+  const value = record?.[key]
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
+}
+
+function githubRepository(value: string | null): { url: string; label: string } | null {
+  if (!value) return null
+  try {
+    const url = new URL(value)
+    if (url.protocol !== 'https:' || url.hostname !== 'github.com') return null
+    const segments = url.pathname.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean)
+    if (segments.length < 2) return null
+    const repository = segments[1].endsWith('.git') ? segments[1].slice(0, -4) : segments[1]
+    return {
+      url: `https://github.com/${segments[0]}/${repository}`,
+      label: `${segments[0]}/${repository}`
+    }
+  } catch {
+    return null
+  }
+}
+
+function shortGitRevision(value: string): string {
+  return Array.from(value).slice(0, 8).join('')
+}
+
+export function groupAssignmentSummary(selected: number, total: number): string {
+  if (total > 0 && selected === total) return `全部 ${total} 组`
+  if (selected === 0) return '未选择'
+  return `${selected} / ${total} 组`
 }
 
 function SkillGroupMenu({ skill, groups, selected, disabled, onToggle }: {
@@ -469,11 +606,12 @@ function SkillGroupMenu({ skill, groups, selected, disabled, onToggle }: {
   disabled: boolean
   onToggle(groupKey: SkillDeliveryGroupKey): void
 }): React.JSX.Element {
+  const summary = groupAssignmentSummary(selected.size, groups.length)
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
-        <button className="skill-group-select" type="button" disabled={disabled}>
-          <span>{selected.size === 0 ? '选择生效组' : '调整生效组'}</span><ChevronIcon />
+        <button className="skill-group-select" type="button" disabled={disabled} aria-label={`${skill.name} 投递范围，${summary}`}>
+          <span>{summary}</span><ChevronIcon />
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
@@ -541,7 +679,7 @@ function ImportInspectionDialog({ inspection, busy, onClose, onCommit }: {
             <Dialog.Title>检查 Skill 导入</Dialog.Title>
             <Dialog.Close className="dialog-close" aria-label="关闭" disabled={busy !== null}>×</Dialog.Close>
           </div>
-          <Dialog.Description>确认后写入 Rovai Skill Library。新 Skill 默认启用，但不会默认选择任何 Runtime 生效组。</Dialog.Description>
+          <Dialog.Description>确认后写入 Rovai Skill Library。新 Skill 默认启用并选择全部 Runtime 生效组；之后仍可逐项调整。</Dialog.Description>
           {inspection && <>
             <code className="inspection-path">{inspection.sourcePath}</code>
             <div className="import-candidate-list">
@@ -598,6 +736,14 @@ function ConfirmationDialog({ confirmation, busy, onClose, onConfirm }: {
 
 function SearchIcon(): React.JSX.Element {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" /></svg>
+}
+
+function SourceBranchIcon(): React.JSX.Element {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M7 7h7a3 3 0 0 1 3 3v7M7 7l3-3M7 7l3 3M17 17l-3-3M17 17l-3 3" /></svg>
+}
+
+function ExternalLinkIcon(): React.JSX.Element {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M14 5h5v5M10 14l9-9M19 13v6H5V5h6" /></svg>
 }
 
 function ChevronIcon(): React.JSX.Element {

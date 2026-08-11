@@ -108,10 +108,13 @@ try {
     const subnavButtons = [...document.querySelectorAll('.settings-sidebar-menu button')]
     const active = document.querySelector('.settings-sidebar-menu button.active')
     const skillCards = [...document.querySelectorAll('.skill-card')]
-    const bundled = skillCards.filter((card) => card.textContent?.includes('Rovai 内置'))
+    const bundled = skillCards.filter((card) => card.querySelector('.skill-source.source-bundled'))
+    const thirdParty = skillCards.filter((card) => card.querySelector('.skill-source.source-third-party'))
+    const official = [...bundled, ...thirdParty]
     const enabled = skillCards.filter((card) =>
       card.querySelector('[role="switch"]')?.getAttribute('aria-checked') === 'true'
     )
+    const tastefulUi = skillCards.find((card) => card.dataset.skillName === 'tasteful-ui')
     const panel = document.querySelector('.settings-panel')
     return {
       theme: document.documentElement.dataset.theme,
@@ -122,10 +125,20 @@ try {
       activeSection: active?.querySelector('strong')?.textContent?.trim(),
       skillNames: skillCards.map((card) => card.querySelector('.skill-card-title > strong')?.textContent?.trim()),
       bundledCount: bundled.length,
-      enabledBundledCount: bundled.filter((card) =>
+      thirdPartyCount: thirdParty.length,
+      enabledOfficialCount: official.filter((card) =>
         card.querySelector('[role="switch"]')?.getAttribute('aria-checked') === 'true'
       ).length,
       enabledCount: enabled.length,
+      operationColumns: [...document.querySelectorAll('.skill-library-columns > div > span')]
+        .map((column) => column.textContent?.trim()),
+      legacyMoreButtonCount: document.querySelectorAll('.skill-more-button').length,
+      tastefulUiSource: {
+        badge: tastefulUi?.querySelector('.skill-source')?.textContent?.trim(),
+        repository: tastefulUi?.querySelector('.skill-source-link')?.textContent?.trim(),
+        href: tastefulUi?.querySelector('.skill-source-link')?.getAttribute('href'),
+        revision: tastefulUi?.querySelector('.skill-provenance-revision')?.textContent?.trim()
+      },
       importButton: [...document.querySelectorAll('.skill-settings button')]
         .some((button) => button.textContent?.trim() === '选择文件夹'),
       projectionStatusVisible: document.querySelector('.skill-settings')?.textContent?.includes('项目投影状态'),
@@ -141,8 +154,9 @@ try {
       || result.panelOverflow
       || JSON.stringify(result.subnav) !== JSON.stringify(['通用', '外观', '通知', 'Skill', 'MCP', 'Agent 运行时', '诊断与修复'])
       || result.activeSection !== 'Skill'
-      || result.bundledCount !== 6
-      || result.enabledBundledCount !== 6
+      || result.bundledCount !== 5
+      || result.thirdPartyCount !== 1
+      || result.enabledOfficialCount !== 6
       || JSON.stringify(result.skillNames) !== JSON.stringify([
         'analyze-agent-codebase',
         'grill-duo',
@@ -151,6 +165,12 @@ try {
         'tasteful-ui',
         'worktree'
       ])
+      || JSON.stringify(result.operationColumns) !== JSON.stringify(['投递范围', '状态', '查看'])
+      || result.legacyMoreButtonCount !== 0
+      || result.tastefulUiSource.badge !== 'GitHub 三方'
+      || result.tastefulUiSource.repository !== 'DonkeyKing01/tasteful-ui-skill'
+      || result.tastefulUiSource.href !== 'https://github.com/DonkeyKing01/tasteful-ui-skill'
+      || result.tastefulUiSource.revision !== '159ccd47'
       || !result.importButton
       || result.projectionStatusVisible
       || result.legacyOfficialVisible
@@ -158,19 +178,28 @@ try {
     throw new Error(`Skill settings acceptance failed: ${JSON.stringify(result)}`)
   }
 
-  await clickElement(cdp, '.skill-more-button')
-  await waitForExpression(cdp, `Boolean(document.querySelector('.skill-more-menu'))`, 5_000)
-  const moreMenu = await evaluate(cdp, `(() => {
-    const menu = document.querySelector('.skill-more-menu')
+  await clickElement(cdp, '.skill-card[data-skill-name="tasteful-ui"] .skill-detail-button')
+  await waitForExpression(cdp, `!document.querySelector('.skill-card[data-skill-name="tasteful-ui"] .skill-card-details')?.hidden`, 5_000)
+  const detailsPanel = await evaluate(cdp, `(() => {
+    const card = document.querySelector('.skill-card[data-skill-name="tasteful-ui"]')
+    const details = card?.querySelector('.skill-card-details')
     return {
-      hasRevision: menu?.textContent?.includes('Revision'),
-      finderVisible: menu?.textContent?.includes('Finder')
+      expanded: card?.querySelector('.skill-detail-button')?.getAttribute('aria-expanded'),
+      hasRevision: details?.textContent?.includes('Revision'),
+      hasContentDigest: details?.textContent?.includes('内容摘要'),
+      explainsPinnedCopy: details?.textContent?.includes('不会随上游自动更新'),
+      deleteVisible: details?.textContent?.includes('删除 Skill')
     }
   })()`)
-  if (!moreMenu.hasRevision || moreMenu.finderVisible) {
-    throw new Error(`Skill card more menu acceptance failed: ${JSON.stringify(moreMenu)}`)
+  if (detailsPanel.expanded !== 'true'
+      || !detailsPanel.hasRevision
+      || !detailsPanel.hasContentDigest
+      || !detailsPanel.explainsPinnedCopy
+      || detailsPanel.deleteVisible) {
+    throw new Error(`Skill card details acceptance failed: ${JSON.stringify(detailsPanel)}`)
   }
-  await pressEscape(cdp)
+  await clickElement(cdp, '.skill-card[data-skill-name="tasteful-ui"] .skill-detail-button')
+  await waitForExpression(cdp, `document.querySelector('.skill-card[data-skill-name="tasteful-ui"] .skill-card-details')?.hidden === true`, 5_000)
 
   await clickElement(cdp, '.skill-group-select')
   await waitForExpression(cdp, `document.querySelectorAll('.skill-group-option').length === 9`, 5_000)
@@ -235,7 +264,7 @@ try {
   }
 
   cdp.close()
-  console.log(JSON.stringify({ ok: true, ...result, moreMenu, groupMenu, navigation, outputPath, cleanOutputPath, settingsOverviewPaths }, null, 2))
+  console.log(JSON.stringify({ ok: true, ...result, detailsPanel, groupMenu, navigation, outputPath, cleanOutputPath, settingsOverviewPaths }, null, 2))
 } finally {
   app.kill('SIGTERM')
   await Promise.race([

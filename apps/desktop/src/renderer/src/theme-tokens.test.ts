@@ -209,9 +209,12 @@ describe('Neutral Porcelain + Steel theme tokens', () => {
     expect(css).not.toContain('.skill-import-help')
   })
 
-  it('uses open Skill rows and the compact MCP grids from the P2 interaction draft', () => {
-    expect(css).toMatch(/\.skill-card-grid\s*\{[^}]*max-width:\s*900px[^}]*border-top:/)
-    expect(css).toMatch(/\.skill-card\s*\{[^}]*grid-template-columns:\s*34px minmax\(0, 1fr\) auto[^}]*border-bottom:/)
+  it('uses open Skill rows with named operation columns and compact MCP grids', () => {
+    expect(css).toMatch(/\.skill-card-grid\s*\{[^}]*max-width:\s*940px[^}]*border-top:/)
+    expect(css).toMatch(/\.skill-library-columns, \.skill-card-primary\s*\{[^}]*grid-template-columns:\s*34px minmax\(0, 1fr\) var\(--skill-actions-width\)/)
+    expect(css).toMatch(/\.skill-library-columns > div, \.skill-card-controls\s*\{[^}]*grid-template-columns:\s*126px 104px 58px/)
+    expect(css).toMatch(/\.skill-source\.source-third-party\s*\{[^}]*background:\s*var\(--surface-muted\)/)
+    expect(css).toMatch(/\.skill-card-details\s*\{[^}]*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\)/)
     expect(css).toMatch(/\.mcp-member-card\s*\{[^}]*grid-template-columns:\s*28px minmax\(0, 1fr\) auto/)
     expect(css).toMatch(/\.mcp-server-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/)
   })

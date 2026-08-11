@@ -982,21 +982,30 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 ### 技能
 
 - 保留现有 Settings App Shell、侧栏结构和侧栏交互；HTML 交互稿只约束 Skill 内容区，
-  不替换设置导航。内容区 Hero 标题“Skill 管理”，说明按 Skill 独立选择 Runtime
-  生效组，右侧只显示“应用全局配置”。
+  不替换设置导航。内容区 Hero 标题“Skill 管理”，说明同时覆盖 Rovai 内置、固定上游的
+  第三方与用户导入 Skill，并明确来源、Runtime 投递范围和启停状态彼此独立；右侧只显示
+  “应用全局配置”。
 - 页面只有上下两区。上区“添加 Skill”使用“本地文件夹 / GitHub”两个 Tab；本地选择
   包含 `SKILL.md` 的完整目录，GitHub 接受仓库或带 ref/子目录的链接。两者都先检查
   候选，再确认写入受管 Library；不显示项目投递状态或 Camp 关联状态。
-- 下区“已安装 Skills”提供名称/简介搜索和开放列表行。每行以 Steel 标记、名称、说明、
-  `Rovai 内置 / 用户导入`、真实 Revision 与生效组摘要建立阅读层级，右侧保留启停
-  Switch、分组多选入口，以及承载安装/更新时间、文件数、大小、来源和删除操作的更多菜单；
-  列表只使用行间分隔，不恢复卡片墙。
+- 下区“已安装 Skills”提供名称、简介与来源搜索和开放列表行。每行以 Steel 标记、名称、说明、
+  `Rovai 内置 / GitHub 三方 / 用户导入`来源标签与行内来源说明建立阅读层级；固定上游或
+  GitHub 导入显示可点击仓库与八位 Revision，其他来源显示真实来源类型与 Library Revision。
+  三类标签只表达管理与来源边界，不改变 Skill 权限、启停或投递优先级。
+- 列表右侧固定为带列名的“投递范围 / 状态 / 查看”：投递范围直接显示“全部 N 组 / X / N 组 /
+  未选择”并打开原分组多选，状态继续使用唯一启停 Switch，“详情”展开安装或更新时间、文件数、
+  大小、内容摘要与来源边界；Imported Skill 的删除入口只在详情内显示并继续进入原确认 Dialog。
+  不再显示只承载元数据的三点菜单，列表仍只使用行间分隔，不恢复卡片墙。
+- 来源分类由现有读侧确定：`origin = official` 且存在有效 `sourceMetadata.upstream` 的固定上游
+  bundled Skill 显示“GitHub 三方”；其他 official 显示“Rovai 内置”；所有 `origin = imported`
+  显示“用户导入”，即使其传输来源是 GitHub 也不冒充随 Rovai 分发的固定第三方。仓库链接只接受
+  Core 已保存的 `https://github.com/<owner>/<repo>`，元数据缺失或无效时降级为来源类型文字。
 - 启停 Switch 是启用状态的唯一标签，文案固定为“已启用 / 已停用”，不再并列显示重复的
   状态 Badge。提交期间仅当前 Skill 行显示“保存中…”并禁用本行操作；Core 提交成功后原位
   更新该行，不能重新读取、重排或闪烁整个 Skill 列表。投递文件对账由后台 Reconciler 继续完成。
 - 关闭 Skill 只弱化说明区并暂停全部 Rovai 投递，不能禁用生效组入口。关闭时仍可
   增删分组，已有选择必须保留；重新启用后按保存的分组恢复。删除中的 Imported Skill
-  显示等待现有 AgentRun 释放，内置 Skill 不显示删除。
+  显示等待现有 AgentRun 释放，内置与固定上游第三方 Skill 不显示删除。
 - 生效组菜单始终显示全部九组，可多选；每项显示组名、原生相对路径、`已验证 /
   暂未验证`、对应 Runtime 和按当前 AgentProfile Runtime 实时派生的队员。没有队员的
   分组仍显示，队员只用于查看，不进入 Assignment。新安装的 Rovai 内置 Skill 与新导入
