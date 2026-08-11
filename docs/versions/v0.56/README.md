@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.56
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -15,6 +15,8 @@ last_updated: 2026-08-11
 > Porcelain + Steel，并收敛导航、会话、设置、队员、记忆与浮层的视觉层级。
 >
 > 前置版本：[v0.55 Agent 级连续执行过程](../v0.55/README.md)
+>
+> 后续版本：[v0.57 可恢复的项目侧栏移除](../v0.57/README.md)
 
 ## 版本目标
 

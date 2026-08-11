@@ -3,7 +3,7 @@ document_type: ui-design-system
 authority: renderer-ui-detail
 status: accepted
 design_direction: neutral-porcelain-steel
-target_version: v0.56
+target_version: v0.57
 implementation_status: complete
 last_updated: 2026-08-11
 ---
@@ -18,7 +18,9 @@ v0.56 以一次性 P2 HTML 为视觉选型输入，把冷瓷灰 Canvas、近白 
 结构线迁移进现有 React Renderer。原型 DOM、假数据、阶段文案和演示交互不进入生产；Project、
 Camp、Agent 级执行过程、New Conversation、七个设置分类、队员、Memory 与各类浮层继续读取
 现有生产 Read Side 并保留原功能边界。实现状态以
-[v0.56 实施计划](../versions/v0.56/implementation-plan.md)和代码证据为准。
+[v0.56 实施计划](../versions/v0.56/implementation-plan.md)和代码证据为准。v0.57 在同一视觉与
+信息架构上增加可恢复的 Project 侧栏移除；该局部功能的实现状态以
+[v0.57 实施计划](../versions/v0.57/implementation-plan.md)和代码证据为准。
 
 2026-08-03 新增的结构化 Mention 与用户消息原生拖选已经完成生产实现；2026-08-06 用户再次
 确认“Mention 视觉方案 A + 信息弹窗布局 2”，本节继续冻结 Composer、历史 Mention 和 v0.56
@@ -247,12 +249,12 @@ type ResolvedTheme = "day" | "night"
 - 公共正文按持久 sequence 排列；后台 Runtime 到达时间、Scheduler 顺序、canonical recipient
   顺序和 Renderer 选择都不能重排公共时间线。
 
-### 统一侧栏置顶
+### 统一侧栏导航偏好
 
 - “置顶”是生产功能。
 - Project 与 Camp 都提供独立的置顶/取消置顶操作。
 - 置顶目标在统一侧栏顶部的“置顶”分区中提供快捷入口。
-- 置顶状态由 Electron Main 作为应用级 UI 偏好原子保存到
+- 置顶与已移除 Project 状态由 Electron Main 作为应用级 UI 偏好原子保存到
   `userData/navigation.json`，跨 App 重启恢复。
 - 置顶不写入 Core SQLite，不产生 Camp 领域事件或审计，也不为 Project 建立独立
   identity、table 或 lifecycle。
@@ -268,8 +270,9 @@ type ResolvedTheme = "day" | "night"
 - Camp 重命名和 Project 展示名变化从最新 Read Side 投影，不改变稳定置顶键。
 - Camp 置顶键使用 Camp ID；Project 置顶键使用权威
   `directory:<canonical-project-path>`。记录至少保存 `kind / targetKey / pinnedAt`。
-- `navigation.json` 只保存该应用级 UI 偏好并使用当前用户权限与原子替换；不得把
-  Camp 标题、Project 展示名或整份 Navigation 快照复制进去。
+- `navigation.json` schema 2 只保存 pins 与已移除 directory Project 的稳定 target key/时间，并
+  使用当前用户权限与原子替换；schema 1 pins 自动迁移。不得把 Camp 标题、Project 展示名、
+  工作目录内容或整份 Navigation 快照复制进去。
 
 ### 统一侧栏结构
 
@@ -302,25 +305,37 @@ type ResolvedTheme = "day" | "night"
   包含“置顶/取消置顶、重命名、复制会话 ID、删除”，删除前有分隔线；普通区、置顶区与
   Pending 草稿使用同一复制动作。复制只把 `NavigationCampItem.id` 原文写入系统剪贴板，
   成功使用非阻塞 Toast，失败显示可恢复错误，不附加标题、标签或其他内部身份。
-- 可置顶 Project 显示文件夹、展示名、`＋` 和唯一三点菜单，菜单只包含“置顶项目/取消置顶
-  项目”。Renderer 维护一个纯本地持久“当前项目”：文件夹/名称主行同时选择该项目并切换 Camp
+- directory Project 显示文件夹、展示名、`＋` 和唯一三点菜单。菜单先显示“置顶项目/取消置顶
+  项目”，经分隔线后显示“移除项目”。Renderer 维护一个纯本地持久“当前项目”：文件夹/名称主行同时选择该项目并切换 Camp
   children 的展开状态，主行自身通过 `aria-expanded / aria-controls` 表达状态，不显示独立折叠按钮。
   三点菜单和 `＋` 是右侧独立兄弟按钮，不触发选择或展开。快速对话同样可成为当前项目但不显示
   Project 菜单。
+- “移除项目”只从这台 Mac 的侧栏隐藏该 directory Project，并同时取消该 Project 与其中 Camp 的
+  置顶。确认 Dialog 必须明确不会删除本地目录、Camp、消息、运行记录或审计，也不会停止正在
+  运行的执行。该动作可恢复，使用 Steel 主操作而不是 danger 红色；Quick Chat 不提供移除。
+- 移除当前 Project 或其中已打开 Camp 时，Renderer 关闭该 Camp 表面、选择 Quick Chat、提交
+  Quick Chat Restorable Location，并把焦点移动到仍存在的 Quick Chat 项目行。取消 Dialog 则返回
+  原三点菜单触发器；失败保留原 Project、Dialog 与可恢复错误。
+- 重新选择同一 canonical 工作目录、以其创建新对话，或从通知/启动恢复等受信入口重新打开其中
+  Camp 时取消隐藏并重新显示 Project；恢复不自动恢复移除前的 Project/Camp pin。
+- 恢复偏好写入失败时 Project 至少在当前 Main Window Session 重新显示，并呈现可恢复错误；本机
+  导航偏好不得阻断 Core-owned Camp 的打开、创建或正在运行的执行。
 - 当前项目文件夹使用稳定 `--surface-selected` 瓷灰底和现有文字语义；当前打开 Camp 使用
   `--surface-muted` 灰色底、左侧 Steel 标记和字重表达更强选中态，不使用高饱和蓝色底。点击 Project/快速
   对话后的 `＋` 只把对应项目作为本次创建目标；取消 Dialog 不改变当前项目，创建成功并进入
   Camp 后才由该 Camp 更新当前项目。
 - 从“项目”标题 `＋` 成功一键创建到新目录时，空 Pending Camp 仍不进入 Navigation；Renderer
   单独把已校验的当前工作目录显示为零 Camp 项目行，并显示“还没有对话”。该 Shell-only 行保留
-  项目级 `＋`，但在 Core 尚未投影 canonical Project group 前不显示项目置顶菜单；离开并清理空
+  项目级 `＋`，但在 Core 尚未投影 canonical Project group 前不显示“置顶项目”；仍可通过同一菜单
+  使用“移除项目”。离开并清理空
   Pending 不删除当前项目行，新窗口则重新校验目录，失效时回退快速对话。
 - Project 标题和分页操作不显示会话数量。只显示初始 5 条且仍有剩余内容时仅显示“查看更多”；
   可见数量大于 5 且仍有剩余内容时同时显示“查看更多 / 收起”；全部可见时只显示“收起”；总数不
   超过 5 时两者都不显示。Project 目录的三点菜单与 `＋` 默认同时隐藏，在整行 Hover 或键盘
   `focus-visible` 时同时显示；鼠标点击目录后移出不能因残留焦点继续显示，触摸替代路径下保持可见。
   Camp 菜单触发器沿用相同的可达性要求。
-- Sidebar 菜单操作失败保留当前行和焦点。不存在 archive、trash 或顶栏重复入口。
+- Sidebar 菜单操作失败保留当前行、Dialog 与焦点。不存在 archive、trash、“已移除项目”列表或
+  顶栏重复入口。
 - 删除侧栏 Core 健康摘要；Health Snapshot、探测、诊断页和导出能力继续保留，
   用户通过“设置 → 诊断与修复”访问。
 

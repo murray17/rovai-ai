@@ -874,8 +874,8 @@ describe('task event projections', () => {
   it('defines the final unified Camp and Project menu labels', () => {
     expect(campNavigationMenuLabels(false)).toEqual(['置顶', '重命名', '复制会话 ID', '删除'])
     expect(campNavigationMenuLabels(true)).toEqual(['取消置顶', '重命名', '复制会话 ID', '删除'])
-    expect(projectNavigationMenuLabels(false)).toEqual(['置顶项目'])
-    expect(projectNavigationMenuLabels(true)).toEqual(['取消置顶项目'])
+    expect(projectNavigationMenuLabels(false)).toEqual(['置顶项目', '移除项目'])
+    expect(projectNavigationMenuLabels(true)).toEqual(['取消置顶项目', '移除项目'])
   })
 
   it('copies only the exact Camp ID and reports clipboard failures', async () => {
@@ -934,6 +934,7 @@ describe('task event projections', () => {
       onSettings: () => undefined,
       onOpenProject: () => undefined,
       onCamp: () => undefined,
+      onRemoveProject: async () => undefined,
       onRename: async () => undefined,
       onDelete: async () => ({ deleted: true, blockers: [] }),
       onStop: async () => undefined,
@@ -1007,6 +1008,7 @@ describe('task event projections', () => {
       onSettings: () => undefined,
       onOpenProject: () => undefined,
       onCamp: () => undefined,
+      onRemoveProject: async () => undefined,
       onRename: async () => undefined,
       onDelete: async () => ({ deleted: true, blockers: [] }),
       onStop: async () => undefined,
@@ -1017,7 +1019,7 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-current="true"')
     expect(markup).toContain('empty-project')
     expect(markup).toContain('还没有对话')
-    expect(markup).not.toContain('管理项目“empty-project”')
+    expect(markup).toContain('管理项目“empty-project”')
   })
 
   it('keeps navigation marker slots stable and lets the project row control selection and disclosure', () => {
@@ -1059,6 +1061,7 @@ describe('task event projections', () => {
       onSettings: () => undefined,
       onOpenProject: () => undefined,
       onCamp: () => undefined,
+      onRemoveProject: async () => undefined,
       onRename: async () => undefined,
       onDelete: async () => ({ deleted: true, blockers: [] }),
       onStop: async () => undefined,
@@ -1109,6 +1112,7 @@ describe('task event projections', () => {
       onSettingsBack: () => undefined,
       onOpenProject: () => undefined,
       onCamp: () => undefined,
+      onRemoveProject: async () => undefined,
       onRename: async () => undefined,
       onDelete: async () => ({ deleted: true, blockers: [] }),
       onStop: async () => undefined,
@@ -1269,6 +1273,7 @@ describe('task event projections', () => {
       onSettings: () => undefined,
       onOpenProject: () => undefined,
       onCamp: () => undefined,
+      onRemoveProject: async () => undefined,
       onRename: async () => undefined,
       onDelete: async () => ({ deleted: true, blockers: [] }),
       onStop: async () => undefined,

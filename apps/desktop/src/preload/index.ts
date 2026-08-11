@@ -7,7 +7,7 @@ import type {
   SettingsSection,
   StartupLocationMode,
   NavigationPin,
-  NavigationPinsSnapshot,
+  NavigationPreferencesSnapshot,
   RovaiApi,
   ThemePreference
 } from '@contracts'
@@ -84,12 +84,25 @@ const api: RovaiApi = {
       return ipcRenderer.invoke('rovai:window-reset-bounds')
     }
   },
-  navigationPins: {
+  navigationPreferences: {
     get() {
-      return ipcRenderer.invoke('rovai:navigation-pins-get') as Promise<NavigationPinsSnapshot>
+      return ipcRenderer.invoke('rovai:navigation-preferences-get') as Promise<NavigationPreferencesSnapshot>
     },
-    replace(pins: NavigationPin[]) {
-      return ipcRenderer.invoke('rovai:navigation-pins-replace', pins) as Promise<NavigationPinsSnapshot>
+    replacePins(pins: NavigationPin[]) {
+      return ipcRenderer.invoke('rovai:navigation-preferences-replace-pins', pins) as Promise<NavigationPreferencesSnapshot>
+    },
+    removeProject(targetKey: string, relatedCampIds: string[]) {
+      return ipcRenderer.invoke(
+        'rovai:navigation-preferences-remove-project',
+        targetKey,
+        relatedCampIds
+      ) as Promise<NavigationPreferencesSnapshot>
+    },
+    restoreProject(targetKey: string) {
+      return ipcRenderer.invoke(
+        'rovai:navigation-preferences-restore-project',
+        targetKey
+      ) as Promise<NavigationPreferencesSnapshot>
     }
   },
   memberAvatars: {

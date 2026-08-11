@@ -10,12 +10,12 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
-    agent_profile::{AdapterKind, FrozenAgentRuntimeConfig, PublicOutputMode},
+    agent_profile::{AdapterKind, AgentProfileService, FrozenAgentRuntimeConfig, PublicOutputMode},
     camp_content::{StructuredCampMessageSegment, canonical_content_digest},
     collaboration::exhaust_camp_turn_execution_budget,
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
-        DomainCommandGateway, EntityReference, sealed,
+        DomainCommandGateway, EntityReference, canonical_json_digest, sealed,
     },
     context_index::index_camp_message,
     db::Database,
@@ -236,6 +236,20 @@ pub struct RejectAgentRunDispatchCommand {
 impl sealed::Sealed for RejectAgentRunDispatchCommand {}
 impl DomainCommand for RejectAgentRunDispatchCommand {
     const TYPE: &'static str = "agent_run.rejectDispatch";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RebindAgentRunRuntimeCommand {
+    pub agent_run_id: String,
+    pub expected_version: i64,
+    pub drift_reason: String,
+    pub effective_runtime: FrozenAgentRuntimeConfig,
+}
+
+impl sealed::Sealed for RebindAgentRunRuntimeCommand {}
+impl DomainCommand for RebindAgentRunRuntimeCommand {
+    const TYPE: &'static str = "agent_run.runtime.rebind";
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2552,6 +2566,206 @@ impl ExecutionRuntimeService {
         Ok(execution)
     }
 
+    pub fn rebind_agent_run_runtime(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<RebindAgentRunRuntimeCommand>,
+    ) -> Result<CommandExecution> {
+        if envelope.payload.drift_reason.trim().is_empty() {
+            anyhow::bail!("Runtime drift reason must not be empty");
+        }
+        let execution = self.gateway.execute(database, envelope, |transaction| {
+            if !matches!(
+                &envelope.actor,
+                ActorRef::System { component_id } if component_id == "agent-run-scheduler"
+            ) {
+                return Ok(rejected(
+                    "agent_run.scheduler_required",
+                    "AgentRun Runtime rebind requires the scheduler",
+                ));
+            }
+            let target = load_terminal_target(transaction, &envelope.payload.agent_run_id)?;
+            let Some(target) = target else {
+                return Ok(rejected("agent_run.not_found", "AgentRun does not exist"));
+            };
+            if envelope.camp_id.as_deref() != Some(target.camp_id.as_str()) {
+                return Ok(rejected(
+                    "agent_run.camp_mismatch",
+                    "AgentRun is outside the Camp",
+                ));
+            }
+            if target.version != envelope.payload.expected_version {
+                return Ok(rejected(
+                    "agent_run.version_conflict",
+                    "AgentRun version is stale",
+                ));
+            }
+            if !matches!(target.status.as_str(), "queued" | "waiting")
+                || target.cancel_requested_at.is_some()
+            {
+                return Ok(rejected(
+                    "agent_run.runtime_rebind_fenced",
+                    "AgentRun is no longer awaiting dispatch",
+                ));
+            }
+            let (effective_config_json, runtime_rebind_count) = transaction.query_row(
+                "SELECT effective_config_json, runtime_rebind_count FROM agent_run WHERE id = ?1",
+                [&target.agent_run_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )?;
+            if runtime_rebind_count >= 1 {
+                return Ok(rejected(
+                    "agent_run.runtime_rebind_limit_reached",
+                    "AgentRun Runtime was already rebound once",
+                ));
+            }
+            let mut effective_config: Value = serde_json::from_str(&effective_config_json)
+                .context("AgentRun effective config is invalid")?;
+            let frozen_runtime: FrozenAgentRuntimeConfig = serde_json::from_value(
+                effective_config
+                    .get("runtime")
+                    .cloned()
+                    .context("AgentRun has no frozen Runtime configuration")?,
+            )
+            .context("AgentRun frozen Runtime configuration is invalid")?;
+            if !runtime_logical_identity_matches(
+                &frozen_runtime,
+                &envelope.payload.effective_runtime,
+            ) {
+                return Ok(rejected(
+                    "agent_run.runtime_identity_changed",
+                    "Refreshed Runtime does not match the Run's frozen logical identity",
+                ));
+            }
+            if !runtime_config_digest_is_valid(&envelope.payload.effective_runtime)? {
+                return Ok(rejected(
+                    "agent_run.runtime_rebind_invalid",
+                    "Refreshed Runtime configuration digest is invalid",
+                ));
+            }
+            if let Some(blocker) = AgentProfileService::default()
+                .runtime_dispatch_blocker_for_connection(
+                    transaction,
+                    &envelope.payload.effective_runtime,
+                )?
+            {
+                return Ok(CommandHandlerResult::rejected(
+                    blocker.code,
+                    blocker.payload,
+                ));
+            }
+
+            replace_effective_runtime(&mut effective_config, &envelope.payload.effective_runtime)?;
+            let effective_config_json = serde_json::to_string(&effective_config)?;
+            let runtime = &envelope.payload.effective_runtime;
+            let updated = transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET effective_config_json = ?2,
+                    runtime_adapter_kind = ?3,
+                    runtime_installation_id = ?4,
+                    runtime_executable_path = ?5,
+                    runtime_auth_scope = ?6,
+                    runtime_reported_version = ?7,
+                    runtime_executable_fingerprint = ?8,
+                    runtime_capabilities_json = ?9,
+                    runtime_model_selection_json = ?10,
+                    runtime_permission_config_json = ?11,
+                    runtime_binding_compatibility_digest = ?12,
+                    runtime_host_config_digest = ?13,
+                    runtime_protocol_version = ?14,
+                    runtime_installation_generation = ?15,
+                    runtime_search_environment_generation = ?16,
+                    runtime_native_session_compatibility_key = ?17,
+                    runtime_initial_reported_version =
+                        COALESCE(runtime_initial_reported_version, ?18),
+                    runtime_initial_executable_fingerprint =
+                        COALESCE(runtime_initial_executable_fingerprint, ?19),
+                    runtime_rebind_count = runtime_rebind_count + 1,
+                    version = version + 1, updated_at = ?20
+                WHERE id = ?1 AND version = ?21
+                  AND cancel_requested_at IS NULL
+                  AND runtime_rebind_count = 0
+                  AND (
+                    status = 'queued'
+                    OR (
+                      status = 'waiting'
+                      AND wait_reason = 'runtime_recovery'
+                      AND runtime_recovery_required = 1
+                    )
+                  )
+                "#,
+                params![
+                    target.agent_run_id,
+                    effective_config_json,
+                    runtime.adapter_kind.as_str(),
+                    runtime.installation_id,
+                    runtime.executable_path,
+                    runtime.auth_scope,
+                    runtime.reported_version,
+                    runtime.executable_fingerprint,
+                    serde_json::to_string(&runtime.capabilities)?,
+                    serde_json::to_string(&runtime.model)?,
+                    serde_json::to_string(&runtime.permissions)?,
+                    runtime.binding_compatibility_digest,
+                    runtime.host_config_digest,
+                    runtime.protocol_version,
+                    runtime.installation_generation,
+                    runtime.search_environment_generation,
+                    runtime.native_session_compatibility_key,
+                    frozen_runtime.reported_version,
+                    frozen_runtime.executable_fingerprint,
+                    target.now,
+                    envelope.payload.expected_version,
+                ],
+            )?;
+            if updated != 1 {
+                return Ok(rejected(
+                    "agent_run.runtime_rebind_fenced",
+                    "AgentRun changed before Runtime rebind was persisted",
+                ));
+            }
+            append_domain_event(
+                transaction,
+                "agent_run.runtime_drift_detected",
+                &target.camp_id,
+                ("agent_run", &target.agent_run_id),
+                &envelope.actor,
+                Some(target.execution_epoch),
+                &json!({
+                    "reason": envelope.payload.drift_reason,
+                    "initialReportedVersion": frozen_runtime.reported_version,
+                    "initialExecutableFingerprint": frozen_runtime.executable_fingerprint,
+                }),
+            )?;
+            append_domain_event(
+                transaction,
+                "agent_run.runtime_rebound",
+                &target.camp_id,
+                ("agent_run", &target.agent_run_id),
+                &envelope.actor,
+                Some(target.execution_epoch),
+                &json!({
+                    "installationId": runtime.installation_id,
+                    "reportedVersion": runtime.reported_version,
+                    "executableFingerprint": runtime.executable_fingerprint,
+                    "installationGeneration": runtime.installation_generation,
+                    "runtimeRebindCount": runtime_rebind_count + 1,
+                }),
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "agent_run.runtime_rebound",
+                json!({
+                    "agentRunId": target.agent_run_id,
+                    "version": target.version + 1,
+                    "runtimeRebindCount": runtime_rebind_count + 1,
+                }),
+                Some(entity_ref("agent_run", &target.agent_run_id)),
+            ))
+        })?;
+        Ok(execution)
+    }
+
     pub fn reject_agent_run_dispatch(
         &self,
         database: &mut Database,
@@ -3659,6 +3873,59 @@ fn append_domain_event(
     Ok(())
 }
 
+fn runtime_logical_identity_matches(
+    frozen: &FrozenAgentRuntimeConfig,
+    effective: &FrozenAgentRuntimeConfig,
+) -> bool {
+    if frozen.adapter_kind != effective.adapter_kind
+        || frozen.installation_id != effective.installation_id
+        || frozen.auth_scope != effective.auth_scope
+        || frozen.permissions != effective.permissions
+        || frozen.model.source != effective.model.source
+    {
+        return false;
+    }
+    frozen.model.source == "runtime_default"
+        || (frozen.model.model_id == effective.model.model_id
+            && frozen.model.options == effective.model.options)
+}
+
+fn runtime_config_digest_is_valid(runtime: &FrozenAgentRuntimeConfig) -> Result<bool> {
+    let mut unsigned = runtime.clone();
+    let expected = unsigned.config_digest.clone();
+    unsigned.config_digest.clear();
+    Ok(canonical_json_digest(&serde_json::to_value(unsigned)?)? == expected)
+}
+
+fn replace_effective_runtime(
+    effective_config: &mut Value,
+    runtime: &FrozenAgentRuntimeConfig,
+) -> Result<()> {
+    let config = effective_config
+        .as_object_mut()
+        .context("AgentRun effective config must be an object")?;
+    config.insert("runtime".to_string(), serde_json::to_value(runtime)?);
+    config.insert(
+        "runtimeAdapter".to_string(),
+        serde_json::to_value(runtime.adapter_kind)?,
+    );
+    config.insert(
+        "provider".to_string(),
+        serde_json::to_value(runtime.adapter_kind)?,
+    );
+    config.insert(
+        "model".to_string(),
+        Value::String(runtime.model.model_id.clone()),
+    );
+    config.remove("configDigest");
+    let digest = canonical_json_digest(effective_config)?;
+    effective_config
+        .as_object_mut()
+        .expect("effective config was validated as an object")
+        .insert("configDigest".to_string(), Value::String(digest));
+    Ok(())
+}
+
 fn rejected(code: &str, message: &str) -> CommandHandlerResult {
     CommandHandlerResult::rejected(code, json!({ "message": message }))
 }
@@ -3780,6 +4047,31 @@ mod tests {
             resume_execution(None, None, 1, 2).native_session_resume_disposition(),
             NativeSessionResumeDisposition::Controlled
         );
+    }
+
+    #[test]
+    fn runtime_rebind_allows_default_version_drift_but_not_logical_identity_changes() {
+        let frozen = resume_execution(None, None, 1, 1).runtime;
+        let mut upgraded = frozen.clone();
+        upgraded.installation_generation = 2;
+        upgraded.reported_version = "2.0.0".to_string();
+        upgraded.executable_fingerprint = "sha256:runtime-v2".to_string();
+        upgraded.model.model_id = "gpt-next-default".to_string();
+        assert!(runtime_logical_identity_matches(&frozen, &upgraded));
+
+        let mut different_installation = upgraded.clone();
+        different_installation.installation_id = "adapter-other".to_string();
+        assert!(!runtime_logical_identity_matches(
+            &frozen,
+            &different_installation
+        ));
+
+        let mut different_policy = upgraded;
+        different_policy.permissions.values = json!({"approvalPolicy": "different"});
+        assert!(!runtime_logical_identity_matches(
+            &frozen,
+            &different_policy
+        ));
     }
 
     #[test]
@@ -4531,6 +4823,208 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM camp_message", [], |row| row.get(0))
             .unwrap();
         assert_eq!(message_count, 1);
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn scheduler_rebinds_one_compatible_runtime_drift_and_preserves_initial_audit() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai-runtime-rebind-{}", Uuid::new_v4()));
+        let workspace = directory.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let mut database = Database::open(&directory).unwrap();
+        let collaboration = CollaborationService::default();
+        let camp = collaboration
+            .create_camp(
+                &mut database,
+                &user_envelope(
+                    "runtime-rebind-create",
+                    None,
+                    CreateCampCommand::for_test_with_members(
+                        workspace.to_string_lossy().to_string(),
+                        &["agent_2"],
+                        "agent_2",
+                    ),
+                ),
+            )
+            .unwrap();
+        let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
+        collaboration
+            .add_camp_member(
+                &mut database,
+                &user_envelope(
+                    "runtime-rebind-member",
+                    Some(&camp_id),
+                    AddCampMemberCommand {
+                        camp_id: camp_id.clone(),
+                        agent_id: "agent_2".to_string(),
+                        capability_overrides: json!({}),
+                    },
+                ),
+            )
+            .unwrap();
+        configure_test_runtime(&database, &["agent_2"]);
+        let sent = collaboration
+            .send_test_camp_message(
+                &mut database,
+                &user_envelope(
+                    "runtime-rebind-send",
+                    Some(&camp_id),
+                    TestCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: None,
+                        body: "允许可信 Runtime 原地升级".to_string(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: TestCampMessageAddress::Default,
+                        reply_to_camp_message_id: None,
+                        execution: Some(ExecutionRequest {
+                            task_id: None,
+                            purpose: "验证 Runtime rebind".to_string(),
+                            expected_output: "继续调度".to_string(),
+                            completion_role: "required".to_string(),
+                            budget: None,
+                        }),
+                    },
+                ),
+            )
+            .unwrap();
+        let run_id = sent.result.payload["agentRunIds"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let candidate = ExecutionRuntimeService::default()
+            .list_dispatchable_agent_runs(&database, 16)
+            .unwrap()
+            .into_iter()
+            .find(|candidate| candidate.agent_run_id == run_id)
+            .unwrap();
+        let frozen = candidate.frozen_runtime().unwrap();
+        let mut effective = frozen.clone();
+        effective.installation_generation += 1;
+        effective.reported_version = "2.0.0".to_string();
+        effective.executable_fingerprint = "sha256:runtime-v2".to_string();
+        effective.host_config_digest = "sha256:host-v2".to_string();
+        effective.config_digest.clear();
+        effective.config_digest =
+            canonical_json_digest(&serde_json::to_value(&effective).unwrap()).unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE adapter_installation SET generation = ?2 WHERE id = ?1",
+                params![effective.installation_id, effective.installation_generation],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE adapter_capability_snapshot
+                SET reported_version = ?2, executable_fingerprint = ?3,
+                    probe_status = 'ready', authentication_status = 'authenticated',
+                    stale_at = NULL, last_error = NULL
+                WHERE installation_id = ?1
+                "#,
+                params![
+                    effective.installation_id,
+                    effective.reported_version,
+                    effective.executable_fingerprint,
+                ],
+            )
+            .unwrap();
+
+        let service = ExecutionRuntimeService::default();
+        let rebound = service
+            .rebind_agent_run_runtime(
+                &mut database,
+                &scheduler_envelope(
+                    "runtime-rebind-once",
+                    &camp_id,
+                    RebindAgentRunRuntimeCommand {
+                        agent_run_id: run_id.clone(),
+                        expected_version: 1,
+                        drift_reason: "runtime_executable_fingerprint_changed".to_string(),
+                        effective_runtime: effective.clone(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(rebound.result.status, CommandResultStatus::Applied);
+        assert_eq!(rebound.result.code, "agent_run.runtime_rebound");
+        assert_eq!(rebound.result.payload["version"], 2);
+
+        let state: (String, i64, String, String, String, String, i64, String) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT status, version,
+                       runtime_initial_reported_version,
+                       runtime_initial_executable_fingerprint,
+                       runtime_reported_version, runtime_executable_fingerprint,
+                       runtime_rebind_count, effective_config_json
+                FROM agent_run WHERE id = ?1
+                "#,
+                [&run_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(state.0, "queued");
+        assert_eq!(state.1, 2);
+        assert_eq!(state.2, frozen.reported_version);
+        assert_eq!(state.3, frozen.executable_fingerprint);
+        assert_eq!(state.4, effective.reported_version);
+        assert_eq!(state.5, effective.executable_fingerprint);
+        assert_eq!(state.6, 1);
+        let effective_config: Value = serde_json::from_str(&state.7).unwrap();
+        assert_eq!(
+            effective_config["runtime"]["executableFingerprint"],
+            effective.executable_fingerprint
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT COUNT(*) FROM event_log
+                    WHERE entity_id = ?1 AND event_type IN (
+                        'agent_run.runtime_drift_detected', 'agent_run.runtime_rebound'
+                    )
+                    "#,
+                    [&run_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            2
+        );
+
+        let second = service
+            .rebind_agent_run_runtime(
+                &mut database,
+                &scheduler_envelope(
+                    "runtime-rebind-twice",
+                    &camp_id,
+                    RebindAgentRunRuntimeCommand {
+                        agent_run_id: run_id,
+                        expected_version: 2,
+                        drift_reason: "second_drift".to_string(),
+                        effective_runtime: effective,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(second.result.status, CommandResultStatus::Rejected);
+        assert_eq!(second.result.code, "agent_run.runtime_rebind_limit_reached");
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }

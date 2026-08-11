@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use rusqlite::{OptionalExtension, Row, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -997,8 +997,15 @@ impl AgentProfileService {
         database: &Database,
         runtime: &FrozenAgentRuntimeConfig,
     ) -> Result<Option<RuntimeConfigurationBlocker>> {
-        let current = database
-            .connection()
+        self.runtime_dispatch_blocker_for_connection(database.connection(), runtime)
+    }
+
+    pub(crate) fn runtime_dispatch_blocker_for_connection(
+        &self,
+        connection: &Connection,
+        runtime: &FrozenAgentRuntimeConfig,
+    ) -> Result<Option<RuntimeConfigurationBlocker>> {
+        let current = connection
             .query_row(
                 r#"
                 SELECT installation.adapter_kind, installation.executable_path,
@@ -1095,6 +1102,30 @@ impl AgentProfileService {
             )));
         }
         Ok(None)
+    }
+
+    pub fn resolve_rebound_runtime(
+        &self,
+        database: &Database,
+        frozen: &FrozenAgentRuntimeConfig,
+    ) -> Result<std::result::Result<FrozenAgentRuntimeConfig, RuntimeConfigurationBlocker>> {
+        let model = match frozen.model.source.as_str() {
+            "runtime_default" => ModelSelection::RuntimeDefault,
+            "explicit" => ModelSelection::Explicit {
+                model_id: frozen.model.model_id.clone(),
+                options: frozen.model.options.clone(),
+            },
+            _ => anyhow::bail!("frozen Runtime model source is invalid"),
+        };
+        resolve_frozen_runtime_binding(
+            database.connection(),
+            &ResolvedRuntimeBinding {
+                adapter_kind: frozen.adapter_kind,
+                installation_id: frozen.installation_id.clone(),
+                model,
+                permissions: frozen.permissions.clone(),
+            },
+        )
     }
 
     pub fn record_verified_executable_identity(
@@ -2858,7 +2889,7 @@ pub fn resolve_frozen_runtime(
 }
 
 pub(crate) fn resolve_frozen_runtime_binding(
-    transaction: &Transaction<'_>,
+    transaction: &Connection,
     binding: &ResolvedRuntimeBinding,
 ) -> Result<std::result::Result<FrozenAgentRuntimeConfig, RuntimeConfigurationBlocker>> {
     let installation_id = binding.installation_id.clone();

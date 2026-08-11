@@ -67,6 +67,23 @@ export function currentProjectForCamp(camp: Pick<NavigationCampItem, 'projectBin
     : { kind: 'quick_chat' }
 }
 
+export function projectTargetKey(projectPath: string): string {
+  return `directory:${projectPath}`
+}
+
+export function navigationWithoutRemovedProjects(
+  navigation: NavigationSnapshot | null,
+  removedProjectKeys: ReadonlySet<string>
+): NavigationSnapshot | null {
+  if (!navigation || removedProjectKeys.size === 0) return navigation
+  const projects = navigation.projects.filter(
+    (project) => !removedProjectKeys.has(project.projectKey)
+  )
+  return projects.length === navigation.projects.length
+    ? navigation
+    : { ...navigation, projects }
+}
+
 export function currentProjectGroup(
   navigation: NavigationSnapshot | null,
   currentProject: CurrentProject
@@ -104,7 +121,7 @@ export function navigationIncludingCurrentWorkspace(
   ) return navigation
 
   const emptyProject: ProjectNavigationGroup = {
-    projectKey: `directory:${currentWorkspace.projectPath}`,
+    projectKey: projectTargetKey(currentWorkspace.projectPath),
     name: currentWorkspace.name,
     projectPath: currentWorkspace.projectPath,
     lastActivityAt: '',

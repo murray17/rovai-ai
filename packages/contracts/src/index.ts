@@ -1291,14 +1291,22 @@ export interface NavigationPin {
   pinnedAt: string
 }
 
-export interface NavigationPinsSnapshot {
-  schemaVersion: 1
-  pins: NavigationPin[]
+export interface RemovedNavigationProject {
+  targetKey: string
+  removedAt: string
 }
 
-export interface NavigationPinsApi {
-  get(): Promise<NavigationPinsSnapshot>
-  replace(pins: NavigationPin[]): Promise<NavigationPinsSnapshot>
+export interface NavigationPreferencesSnapshot {
+  schemaVersion: 2
+  pins: NavigationPin[]
+  removedProjects: RemovedNavigationProject[]
+}
+
+export interface NavigationPreferencesApi {
+  get(): Promise<NavigationPreferencesSnapshot>
+  replacePins(pins: NavigationPin[]): Promise<NavigationPreferencesSnapshot>
+  removeProject(targetKey: string, relatedCampIds: string[]): Promise<NavigationPreferencesSnapshot>
+  restoreProject(targetKey: string): Promise<NavigationPreferencesSnapshot>
 }
 
 export interface MemberAvatarCrop {
@@ -1862,7 +1870,7 @@ export interface RovaiApi {
   generalPreferences: GeneralPreferencesApi
   loginItem: LoginItemApi
   windowControls: WindowControlsApi
-  navigationPins: NavigationPinsApi
+  navigationPreferences: NavigationPreferencesApi
   memberAvatars: MemberAvatarsApi
   composerAttachments: {
     prepare(campId: string, expectedRevision: number, file: File): Promise<CampComposerDraftView>

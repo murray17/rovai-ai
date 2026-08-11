@@ -43,7 +43,7 @@ try {
 
   const projectTarget = await firstProjectTarget(desktopApp.cdp)
   await openMenuByKeyboard(desktopApp.cdp, projectTarget)
-  await assertOpenMenu(desktopApp.cdp, projectTarget, ['置顶项目'], 0, '置顶项目')
+  await assertOpenMenu(desktopApp.cdp, projectTarget, ['置顶项目', '移除项目'], 1, '置顶项目')
   const projectMenuCapture = join(outputDir, 'project-menu-day-1440x920.png')
   await capture(desktopApp.cdp, projectMenuCapture)
   await pressKey(desktopApp.cdp, 'Escape')
@@ -54,7 +54,7 @@ try {
   await assertTargetMoved(desktopApp.cdp, projectTarget, '.pinned-navigation')
   await assertProjectPaginationCount(desktopApp.cdp, '.pinned-navigation', 15)
   await openMenuByKeyboard(desktopApp.cdp, projectTarget)
-  await assertOpenMenu(desktopApp.cdp, projectTarget, ['取消置顶项目'], 0, '取消置顶项目')
+  await assertOpenMenu(desktopApp.cdp, projectTarget, ['取消置顶项目', '移除项目'], 1, '取消置顶项目')
   await pressKey(desktopApp.cdp, 'Enter')
   await assertTargetMoved(desktopApp.cdp, projectTarget, '.navigation-projects')
   await assertProjectPaginationCount(desktopApp.cdp, '.navigation-projects', 15)
@@ -107,6 +107,18 @@ try {
   await assertHoverAndFocusVisibility(desktopApp.cdp, campTarget)
   await assertQuestionMarkHelpHoverOnly(desktopApp.cdp)
 
+  // Exercise removal only after all ordinary project/camp actions have run. Pin
+  // both the Project and a Camp first so the acceptance also proves removal
+  // clears local pins without touching Core-owned navigation data.
+  await openMenuByKeyboard(desktopApp.cdp, projectTarget)
+  await assertOpenMenu(desktopApp.cdp, projectTarget, ['置顶项目', '移除项目'], 1, '置顶项目')
+  await pressKey(desktopApp.cdp, 'Enter')
+  await assertTargetMoved(desktopApp.cdp, projectTarget, '.pinned-navigation')
+  await openMenuByKeyboard(desktopApp.cdp, campTarget)
+  await pressKey(desktopApp.cdp, 'Enter')
+  await assertTargetMoved(desktopApp.cdp, campTarget, '.pinned-navigation')
+  const projectRemoval = await removeAndRestoreProject(desktopApp.cdp, projectTarget, campTarget)
+
   await closeApp(desktopApp)
   desktopApp = null
   await wait(500)
@@ -118,6 +130,10 @@ try {
     maxTouchPoints: 1
   })
   await wait(100)
+  await assertRemovedProjectPersists(compactApp.cdp, projectRemoval.projectTarget)
+  await restoreRemovedProject(compactApp.cdp, projectRemoval.projectTarget)
+  await waitForExpression(compactApp.cdp, `(() => [...document.querySelectorAll('[data-sidebar-menu-target]')]
+    .some((element) => element.dataset.sidebarMenuTarget === ${JSON.stringify(projectRemoval.projectTarget)}))()`, 15_000)
   await assertSidebarContract(compactApp.cdp, '1040×700')
   await wait(2_500)
   await assertCompactPointerAndMotion(compactApp.cdp)
@@ -140,7 +156,7 @@ try {
 
   const persistedPins = await evaluate(
     compactApp.cdp,
-    'window.rovai.navigationPins.get()',
+    'window.rovai.navigationPreferences.get()',
     true
   )
   assert(persistedPins.pins.length === 0,
@@ -164,6 +180,9 @@ try {
       arrowHomeEndEscapeAndOutsideClick: true,
       copiesExactCampId: true,
       projectAndCampPinMigrationWithFocus: true,
+      projectRemoveConfirmationAndRestore: true,
+      projectRemovalPreservesCoreData: projectRemoval.coreDataPreserved,
+      projectRemovalPersistsAcrossRestart: true,
       renameAndDeleteDialogs: true,
       permanentDelete: true,
       restartPersistence: true,
@@ -178,6 +197,7 @@ try {
       projectMenu: projectMenuCapture,
       pinnedCampMenu: pinnedCampMenuCapture,
       deleteDialog: deleteDialogCapture,
+      projectRemovalDialog: projectRemoval.dialogCapture,
       compactMenu: compactMenuCapture
     }
   }, null, 2))
@@ -339,6 +359,11 @@ async function assertProjectActionsReveal(cdp) {
   })()`)
   assert(hoverPointer, 'Could not resolve the Project row for hover visibility')
   await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: hoverPointer.x, y: hoverPointer.y })
+  await forcePseudoState(
+    cdp,
+    '.navigation-projects .camp-nav-group:not([data-group="quick-chat"]) .project-heading-row',
+    ['hover']
+  )
   await wait(180)
   const hovered = await evaluate(cdp, `(() => {
     const row = document.querySelector('.navigation-projects .camp-nav-group:not([data-group="quick-chat"]) .project-heading-row')
@@ -351,6 +376,11 @@ async function assertProjectActionsReveal(cdp) {
   })()`)
   assert(hovered.menu > 0.95 && hovered.create > 0.95,
     `Project actions were hidden while the directory row was hovered: ${JSON.stringify(hovered)}`)
+  await forcePseudoState(
+    cdp,
+    '.navigation-projects .camp-nav-group:not([data-group="quick-chat"]) .project-heading-row',
+    []
+  )
 
   const pointer = await evaluate(cdp, `(() => {
     const row = document.querySelector('.navigation-projects .camp-nav-group:not([data-group="quick-chat"]) .project-select-row')
@@ -467,6 +497,14 @@ async function assertQuestionMarkHelpHoverOnly(cdp) {
   })`)
   assert(skillImportHelp.inlineCopy.includes('导入前会先生成安全预览') && !skillImportHelp.legacyQuestionMark,
     `Skill import help did not use the P2 inline explanation: ${JSON.stringify(skillImportHelp)}`)
+
+  const returnedToApp = await evaluate(cdp, `(() => {
+    const button = document.querySelector('.settings-sidebar-back')
+    button?.click()
+    return Boolean(button)
+  })()`)
+  assert(returnedToApp, 'Could not return from Settings after verifying question-mark help')
+  await waitForSelector(cdp, '.navigation-projects')
 }
 
 async function assertHoverOnlyTooltip(cdp, markSelector, tooltipSelector, context) {
@@ -495,6 +533,7 @@ async function assertHoverOnlyTooltip(cdp, markSelector, tooltipSelector, contex
     x: initial.point.x,
     y: initial.point.y
   })
+  await forcePseudoState(cdp, markSelector, ['hover'])
   await wait(180)
   const hovered = await evaluate(cdp, `(() => {
     const mark = document.querySelector(${JSON.stringify(markSelector)})
@@ -502,10 +541,16 @@ async function assertHoverOnlyTooltip(cdp, markSelector, tooltipSelector, contex
     const style = tooltip ? getComputedStyle(tooltip) : null
     const point = ${JSON.stringify(initial.point)}
     const hit = document.elementFromPoint(point.x, point.y)
+    const anchor = mark?.closest('.general-help-anchor')
     return {
       visibility: style?.visibility,
       opacity: style ? Number(style.opacity) : -1,
       markHovered: mark?.matches(':hover') ?? false,
+      anchorHovered: anchor?.matches(':hover') ?? false,
+      sameAnchor: Boolean(anchor && tooltip && anchor.contains(tooltip)),
+      adjacent: mark?.nextElementSibling === tooltip,
+      markCount: document.querySelectorAll(${JSON.stringify(markSelector)}).length,
+      tooltipCount: document.querySelectorAll(${JSON.stringify(tooltipSelector)}).length,
       hitTag: hit?.tagName,
       hitClass: hit?.className
     }
@@ -513,6 +558,7 @@ async function assertHoverOnlyTooltip(cdp, markSelector, tooltipSelector, contex
   assert(hovered.visibility === 'visible' && hovered.opacity > 0.95,
     `${context} did not appear on hover: ${JSON.stringify(hovered)}`)
 
+  await forcePseudoState(cdp, markSelector, [])
   await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 20, y: 80 })
   await wait(180)
   const left = await evaluate(cdp, `(() => {
@@ -929,6 +975,117 @@ async function openDeleteDialog(cdp, target) {
   `Delete confirmation semantics were incomplete: ${JSON.stringify(state)}`)
 }
 
+async function removeAndRestoreProject(cdp, projectTarget, campTarget) {
+  const targetKey = projectTarget.slice('project:'.length)
+  const campId = campTarget.slice('camp:'.length)
+  const beforeNavigation = await request(cdp, 'navigation.snapshot')
+  const beforeProject = beforeNavigation.projects.find((project) => project.projectKey === targetKey)
+  assert(beforeProject, `Could not resolve the Core Project before removal: ${JSON.stringify({ projectTarget, beforeNavigation })}`)
+  const beforeCamp = await request(cdp, 'camps.snapshot', { campId })
+  assert(beforeCamp?.camp?.id === campId,
+    `Could not resolve the Core Camp before Project removal: ${JSON.stringify(beforeCamp)}`)
+
+  await openMenuByKeyboard(cdp, projectTarget)
+  await assertOpenMenu(cdp, projectTarget, ['取消置顶项目', '移除项目'], 1, '取消置顶项目')
+  await pressKey(cdp, 'ArrowDown')
+  await assertHighlightedItem(cdp, '移除项目')
+  await pressKey(cdp, 'Enter')
+  await waitForSelector(cdp, '.camp-action-dialog')
+  const dialogState = await evaluate(cdp, `(() => {
+    const dialog = document.querySelector('.camp-action-dialog')
+    const primary = [...(dialog?.querySelectorAll('button') ?? [])]
+      .find((button) => button.textContent?.trim() === '移除项目')
+    return {
+      title: dialog?.querySelector('h2')?.textContent?.trim() ?? '',
+      description: dialog?.textContent?.trim() ?? '',
+      primary: Boolean(primary),
+      primaryClass: primary?.className ?? null,
+      dangerButtons: dialog?.querySelectorAll('.danger-button').length ?? 0
+    }
+  })()`)
+  assert(dialogState.title.includes('从侧栏移除')
+      && dialogState.description.includes('不会删除本地目录')
+      && dialogState.description.includes('Camp')
+      && dialogState.description.includes('运行记录')
+      && dialogState.description.includes('重新选择同一工作目录即可恢复')
+      && dialogState.primary
+      && dialogState.dangerButtons === 0,
+  `Project removal confirmation semantics were incomplete: ${JSON.stringify(dialogState)}`)
+  const dialogCapture = join(outputDir, 'project-removal-dialog-day-1440x920.png')
+  await capture(cdp, dialogCapture)
+
+  // Cancel once to prove the destructive-looking menu item is still reversible
+  // before the confirmed path is exercised.
+  await pressKey(cdp, 'Escape')
+  await waitForExpression(cdp, `!document.querySelector('.camp-action-dialog')`)
+  await waitForTargetFocus(cdp, projectTarget)
+
+  await openMenuByKeyboard(cdp, projectTarget)
+  await pressKey(cdp, 'ArrowDown')
+  await assertHighlightedItem(cdp, '移除项目')
+  await pressKey(cdp, 'Enter')
+  await waitForSelector(cdp, '.camp-action-dialog')
+  await clickButton(cdp, '.camp-action-dialog .primary-button', '移除项目')
+  await waitForExpression(cdp, `(() => {
+    const target = ${JSON.stringify(projectTarget)}
+    return ![...document.querySelectorAll('[data-sidebar-menu-target]')]
+      .some((element) => element.dataset.sidebarMenuTarget === target)
+      && !document.querySelector('.camp-action-dialog')
+  })()`, 15_000)
+  await waitForExpression(cdp, `document.activeElement?.dataset.sidebarFocusTarget === 'project-row:quick-chat'`, 15_000)
+
+  const afterPreferences = await evaluate(cdp, 'window.rovai.navigationPreferences.get()', true)
+  assert(afterPreferences.removedProjects.some((project) => project.targetKey === targetKey),
+    `Project removal was not persisted: ${JSON.stringify(afterPreferences)}`)
+  assert(!afterPreferences.pins.some((pin) => (
+    pin.targetKey === targetKey || pin.targetKey === campId
+  )), `Project removal left a Project/Camp pin behind: ${JSON.stringify(afterPreferences)}`)
+
+  const afterNavigation = await request(cdp, 'navigation.snapshot')
+  const afterProject = afterNavigation.projects.find((project) => project.projectKey === targetKey)
+  const afterCamp = await request(cdp, 'camps.snapshot', { campId })
+  assert(afterProject
+      && afterProject.totalCount === beforeProject.totalCount
+      && afterCamp?.camp?.id === campId,
+  `Project removal changed Core navigation data: ${JSON.stringify({ beforeProject, afterProject, beforeCamp, afterCamp })}`)
+
+  return {
+    projectTarget,
+    targetKey,
+    dialogCapture,
+    coreDataPreserved: true
+  }
+}
+
+async function assertRemovedProjectPersists(cdp, projectTarget) {
+  const targetKey = projectTarget.slice('project:'.length)
+  const state = await evaluate(cdp, `(async () => ({
+    preferences: await window.rovai.navigationPreferences.get(),
+    startup: await window.rovai.desktopSession.getStartupSnapshot(),
+    visible: [...document.querySelectorAll('[data-sidebar-menu-target]')]
+      .some((element) => element.dataset.sidebarMenuTarget === ${JSON.stringify(projectTarget)}),
+    quickChatCurrent: document.querySelector('[data-sidebar-focus-target="project-row:quick-chat"]')
+      ?.getAttribute('aria-current') === 'true'
+  }))()`, true)
+  assert(state.preferences.removedProjects.some((project) => project.targetKey === targetKey)
+      && !state.visible
+      && state.startup.restorableLocation?.kind === 'quick_chat'
+      && state.quickChatCurrent,
+  `Removed Project did not survive App restart: ${JSON.stringify({ projectTarget, state })}`)
+}
+
+async function restoreRemovedProject(cdp, projectTarget) {
+  const targetKey = projectTarget.slice('project:'.length)
+  const restored = await evaluate(cdp,
+    `window.rovai.navigationPreferences.restoreProject(${JSON.stringify(targetKey)})`,
+    true)
+  assert(!restored.removedProjects.some((project) => project.targetKey === targetKey),
+    `Project restore left a hidden-project record: ${JSON.stringify(restored)}`)
+  await cdp.send('Page.reload', { ignoreCache: true })
+  await waitForExpression(cdp,
+    `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
+}
+
 async function assertCompactPointerAndMotion(cdp) {
   const state = await evaluate(cdp, `(() => {
     const trigger = document.querySelector('.sidebar-menu-trigger')
@@ -1019,6 +1176,21 @@ async function pressKey(cdp, key) {
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...params })
 }
 
+async function forcePseudoState(cdp, selector, forcedPseudoClasses) {
+  await cdp.send('DOM.enable')
+  await cdp.send('CSS.enable')
+  const document = await cdp.send('DOM.getDocument')
+  const match = await cdp.send('DOM.querySelector', {
+    nodeId: document.result.root.nodeId,
+    selector
+  })
+  assert(match.result.nodeId, `Could not force pseudo state for ${selector}`)
+  await cdp.send('CSS.forcePseudoState', {
+    nodeId: match.result.nodeId,
+    forcedPseudoClasses
+  })
+}
+
 async function request(cdp, method, params = {}) {
   return evaluate(cdp,
     `window.rovai.request(${JSON.stringify(method)}, ${JSON.stringify(params)})`, true)
@@ -1065,6 +1237,16 @@ async function launchApp(port, width, height, reducedMotion) {
     })
     await waitForExpression(cdp,
       `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
+    await evaluate(cdp, `(() => {
+      const style = document.createElement('style')
+      style.dataset.sidebarAcceptance = 'deterministic-hover'
+      style.textContent = [
+        '.group-menu-trigger, .group-create-button, .general-help-popover {',
+        '  transition: none !important;',
+        '}'
+      ].join('\\n')
+      document.head.append(style)
+    })()`)
     const health = await request(cdp, 'health.check')
     assert(await realpath(health.database.path) === await realpath(databasePath),
       `Isolated App opened the wrong database: ${JSON.stringify(health.database.path)}`)

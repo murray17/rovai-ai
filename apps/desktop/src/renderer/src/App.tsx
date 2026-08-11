@@ -21,7 +21,9 @@ import type {
   NavigationCampItem,
   NavigationCampPage,
   NavigationPin,
+  NavigationPreferencesSnapshot,
   NavigationSnapshot,
+  ProjectNavigationGroup,
   RestorableLocation,
   HearthMemoryProposal,
   SendCampMessageResult,
@@ -82,7 +84,9 @@ import {
   currentProjectGroup,
   currentProjectWorkspace,
   navigationIncludingCurrentWorkspace,
+  navigationWithoutRemovedProjects,
   persistCurrentProject,
+  projectTargetKey,
   readCurrentProject,
   resolveNewConversationDefaults,
   shouldInvalidateNewConversationDefaults,
@@ -187,6 +191,7 @@ export function App(): React.JSX.Element {
   const [installations, setInstallations] = useState<AdapterInstallation[]>([])
   const [navigation, setNavigation] = useState<NavigationSnapshot | null>(null)
   const [navigationPins, setNavigationPins] = useState<NavigationPin[]>([])
+  const [removedProjectKeys, setRemovedProjectKeys] = useState<Set<string>>(() => new Set())
   const [pinnedCampItems, setPinnedCampItems] = useState<NavigationCampItem[]>([])
   const [pendingMemoryCount, setPendingMemoryCount] = useState(0)
   const [memoryProposalNotice, setMemoryProposalNotice] = useState(false)
@@ -286,22 +291,28 @@ export function App(): React.JSX.Element {
         nextInstallations,
         nextNavigation,
         nextMemoryProposals,
-        nextNavigationPins
+        nextNavigationPreferences
       ] = await Promise.all([
         window.rovai.request<AgentProfile[]>('members.list'),
         window.rovai.request<AdapterInstallation[]>('runtime.installations.list'),
         window.rovai.request<NavigationSnapshot>('navigation.snapshot'),
         window.rovai.request<HearthMemoryProposal[]>('memory.hearthProposals.list'),
-        window.rovai.navigationPins.get()
+        window.rovai.navigationPreferences.get()
       ])
-      const resolvedPins = await resolveNavigationPins(nextNavigation, nextNavigationPins.pins)
-      if (resolvedPins.pins.length !== nextNavigationPins.pins.length) {
-        await window.rovai.navigationPins.replace(resolvedPins.pins)
+      const resolvedPins = await resolveNavigationPins(nextNavigation, nextNavigationPreferences.pins)
+      let resolvedNavigationPreferences = nextNavigationPreferences
+      if (resolvedPins.pins.length !== nextNavigationPreferences.pins.length) {
+        resolvedNavigationPreferences = await window.rovai.navigationPreferences.replacePins(
+          resolvedPins.pins
+        )
       }
       setAgents(nextAgents)
       setInstallations(nextInstallations)
       setNavigation(nextNavigation)
       setNavigationPins(resolvedPins.pins)
+      setRemovedProjectKeys(new Set(
+        resolvedNavigationPreferences.removedProjects.map((project) => project.targetKey)
+      ))
       setPinnedCampItems(resolvedPins.camps)
       setPendingMemoryCount(nextMemoryProposals.filter((proposal) => proposal.status === 'pending').length)
       setState('ready')
@@ -352,6 +363,34 @@ export function App(): React.JSX.Element {
     setNavigation(nextNavigation)
     return nextNavigation
   }, [])
+
+  const applyNavigationPreferences = useCallback((
+    snapshot: NavigationPreferencesSnapshot
+  ): void => {
+    setNavigationPins(snapshot.pins)
+    setRemovedProjectKeys(new Set(
+      snapshot.removedProjects.map((project) => project.targetKey)
+    ))
+  }, [])
+
+  const restoreNavigationProject = useCallback(async (projectPath: string): Promise<void> => {
+    const targetKey = projectTargetKey(projectPath)
+    setRemovedProjectKeys((current) => {
+      if (!current.has(targetKey)) return current
+      const next = new Set(current)
+      next.delete(targetKey)
+      return next
+    })
+    try {
+      const snapshot = await window.rovai.navigationPreferences.restoreProject(targetKey)
+      applyNavigationPreferences(snapshot)
+    } catch (nextError) {
+      // A local navigation preference must never block opening or creating the
+      // Core-owned Camp. Keep the Project visible for this session and surface
+      // that only its cross-restart restoration could not be saved.
+      setError(`项目已重新显示，但侧栏恢复状态未能保存：${errorMessage(nextError)}`)
+    }
+  }, [applyNavigationPreferences])
 
   const loadStartupSnapshot = useCallback(async (): Promise<void> => {
     try {
@@ -412,6 +451,10 @@ export function App(): React.JSX.Element {
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
       if (snapshot.schemaVersion !== 27) throw new Error('Camp snapshot schema is incompatible')
       if (selectionGeneration !== campSelectionGeneration.current) return
+      if (snapshot.camp.projectBindingKind === 'directory') {
+        await restoreNavigationProject(snapshot.camp.projectPath)
+        if (selectionGeneration !== campSelectionGeneration.current) return
+      }
       const snapshotProject = currentProjectForCamp(snapshot.camp)
       setCurrentProject(snapshotProject)
       persistCurrentProject(snapshotProject)
@@ -446,7 +489,7 @@ export function App(): React.JSX.Element {
         }
       }
     }
-  }, [activeCampId, loadNavigation])
+  }, [activeCampId, loadNavigation, restoreNavigationProject])
 
   const refreshActiveCampSnapshot = useCallback(async (campId: string): Promise<void> => {
     const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
@@ -513,10 +556,27 @@ export function App(): React.JSX.Element {
   const currentProjectPath = currentProject.kind === 'directory'
     ? currentProject.projectPath
     : null
-  const authoritativeCurrentProjectPath = currentProjectGroup(navigation, currentProject)?.projectPath ?? null
+  const visibleNavigation = useMemo(
+    () => navigationWithoutRemovedProjects(navigation, removedProjectKeys),
+    [navigation, removedProjectKeys]
+  )
+  const authoritativeCurrentProjectPath = currentProjectGroup(
+    visibleNavigation,
+    currentProject
+  )?.projectPath ?? null
 
   useEffect(() => {
-    if (!navigation) return undefined
+    if (!visibleNavigation) return undefined
+    if (
+      currentProject.kind === 'directory'
+      && removedProjectKeys.has(projectTargetKey(currentProject.projectPath))
+    ) {
+      const fallback: CurrentProject = { kind: 'quick_chat' }
+      setCurrentProject(fallback)
+      setCurrentWorkspaceHint(null)
+      persistCurrentProject(fallback)
+      return undefined
+    }
     if (currentProject.kind === 'quick_chat' || authoritativeCurrentProjectPath) {
       setCurrentWorkspaceHint(null)
       return undefined
@@ -541,7 +601,8 @@ export function App(): React.JSX.Element {
     currentProject.kind,
     currentProjectPath,
     currentWorkspaceHint?.projectPath,
-    navigation !== null
+    removedProjectKeys,
+    visibleNavigation !== null
   ])
 
   useEffect(() => {
@@ -616,6 +677,10 @@ export function App(): React.JSX.Element {
         if (cancelled) return
         campSelectionGeneration.current += 1
         campEventSequenceMarker.current = snapshot.throughGlobalSequence
+        if (snapshot.camp.projectBindingKind === 'directory') {
+          await restoreNavigationProject(snapshot.camp.projectPath)
+          if (cancelled) return
+        }
         const snapshotProject = currentProjectForCamp(snapshot.camp)
         setCurrentProject(snapshotProject)
         persistCurrentProject(snapshotProject)
@@ -644,7 +709,7 @@ export function App(): React.JSX.Element {
     return () => {
       cancelled = true
     }
-  }, [overviewRevision, startupSnapshot, state])
+  }, [overviewRevision, restoreNavigationProject, startupSnapshot, state])
 
   useEffect(() => {
     if (startupStatus !== 'resolved' || state !== 'ready' || view !== 'compose') return
@@ -759,7 +824,7 @@ export function App(): React.JSX.Element {
   }, [loadHealth, loadMemberData, loadOverview, refreshActiveCampSnapshot])
 
   const displayNavigation = navigationIncludingCurrentWorkspace(
-    navigation,
+    visibleNavigation,
     currentProject,
     currentWorkspaceHint
   )
@@ -955,6 +1020,7 @@ export function App(): React.JSX.Element {
     try {
       const workspace = await chooseWorkspaceDirectory()
       if (workspace) {
+        await restoreNavigationProject(workspace.projectPath)
         const outcome = await requestNewConversation(workspace)
         if (outcome === 'created') {
           chooseCurrentProject({ kind: 'directory', projectPath: workspace.projectPath }, workspace)
@@ -1106,8 +1172,8 @@ export function App(): React.JSX.Element {
       ? navigationPins.filter((pin) => pin !== existing)
       : [...navigationPins, { kind, targetKey, pinnedAt: new Date().toISOString() }]
     try {
-      const snapshot = await window.rovai.navigationPins.replace(nextPins)
-      setNavigationPins(snapshot.pins)
+      const snapshot = await window.rovai.navigationPreferences.replacePins(nextPins)
+      applyNavigationPreferences(snapshot)
       if (kind === 'camp') {
         setPinnedCampItems((current) => existing
           ? current.filter((item) => item.id !== targetKey)
@@ -1118,6 +1184,56 @@ export function App(): React.JSX.Element {
       }
     } catch (nextError) {
       setError(errorMessage(nextError))
+    }
+  }
+
+  const removeNavigationProject = async (
+    project: ProjectNavigationGroup
+  ): Promise<void> => {
+    setBusy(`remove-project-${project.projectKey}`)
+    setError(null)
+    try {
+      const relatedPinnedCampIds = pinnedCampItems
+        .filter((camp) => (
+          camp.projectBindingKind === 'directory'
+          && camp.projectPath === project.projectPath
+        ))
+        .map((camp) => camp.id)
+      const snapshot = await window.rovai.navigationPreferences.removeProject(
+        project.projectKey,
+        relatedPinnedCampIds
+      )
+      applyNavigationPreferences(snapshot)
+      setPinnedCampItems((current) => current.filter((camp) => !(
+        camp.projectBindingKind === 'directory'
+        && camp.projectPath === project.projectPath
+      )))
+
+      const removingCurrent = currentProject.kind === 'directory'
+        && currentProject.projectPath === project.projectPath
+      const removingActiveCamp = campSnapshot?.camp.id === activeCampId
+        && campSnapshot.camp.projectBindingKind === 'directory'
+        && campSnapshot.camp.projectPath === project.projectPath
+      if (removingCurrent) {
+        const fallback: CurrentProject = { kind: 'quick_chat' }
+        setCurrentProject(fallback)
+        setCurrentWorkspaceHint(null)
+        persistCurrentProject(fallback)
+      }
+      if (removingActiveCamp) {
+        campSelectionGeneration.current += 1
+        setActiveCampId(null)
+        setCampSnapshot(null)
+        setNotificationFocus(null)
+        lastMainView.current = 'compose'
+        setView('compose')
+      }
+      if (removingCurrent || removingActiveCamp) {
+        await commitRestorableLocation({ kind: 'quick_chat' })
+      }
+      setToast(`已从侧栏移除“${project.name}”`)
+    } finally {
+      setBusy(null)
     }
   }
 
@@ -1242,6 +1358,9 @@ export function App(): React.JSX.Element {
   ): Promise<void> {
     setBusy('create-camp')
     try {
+      if (draft.workspace) {
+        await restoreNavigationProject(draft.workspace.projectPath)
+      }
       const result = await window.rovai.request<StoredCommandResult>('camps.create', {
         commandId: crypto.randomUUID(),
         ...draft
@@ -1514,6 +1633,7 @@ export function App(): React.JSX.Element {
         }}
         onCamp={chooseCamp}
         onTogglePin={toggleNavigationPin}
+        onRemoveProject={removeNavigationProject}
         onCampIdCopied={() => {
           setError(null)
           setToast('已复制会话 ID')
@@ -1590,7 +1710,7 @@ export function App(): React.JSX.Element {
         {!startupGateVisible && view === 'compose' && (
           <QuickChatWorkspace
             agents={agents}
-            recentCamps={navigation ? allNavigationCamps(navigation).slice(0, 5) : []}
+            recentCamps={visibleNavigation ? allNavigationCamps(visibleNavigation).slice(0, 5) : []}
             onOpenCamp={chooseCamp}
             onNewConversation={beginNewConversation}
           />
@@ -1663,13 +1783,14 @@ export function App(): React.JSX.Element {
         initialSelection={newConversationInitialSelection}
         attentionMessage={newConversationAttention}
         explainInitialSelectionAdjustments={explainNewConversationSelectionAdjustments}
-        projects={navigation?.projects ?? []}
+        projects={visibleNavigation?.projects ?? []}
         preflight={campCreationPreflight}
         agents={agents}
         busy={busy === 'create-camp' || busy === 'open-project'}
         returnFocusElement={newConversationReturnFocus.current}
         onOpenChange={setNewConversationOpen}
         onChooseWorkspaceDirectory={chooseWorkspaceDirectory}
+        onWorkspaceSelected={(workspace) => restoreNavigationProject(workspace.projectPath)}
         onCreate={(draft) => createCamp({
           ...draft,
           activationState: campActivationStateForCreation('dialog')

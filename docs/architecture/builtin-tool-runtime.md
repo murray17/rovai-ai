@@ -165,6 +165,20 @@ Resume 重新投递稳定 Bootstrap，但不改变 catalog 真源；新 Run 必�
 process 被新 Run acquire 后轮换 lease，再绑定新的 Session/Run route。任何旧 lease、迟到 callback
 或旧 request 都 fail closed。Core restart 不接管旧 process context。
 
+### Dispatch 前 Runtime drift 与 rebind
+
+AgentRun 冻结 Adapter、Installation、auth scope、模型选择语义和权限配置；Installation 的路径、版本、
+fingerprint、capability snapshot 与 generation 是可变的外部观察。初始 reported version/fingerprint
+作为不可变审计证据保留，实际 launch 使用的 effective Runtime 只能由 Core 在 dispatch 前更新。
+
+轻量文件身份或完整 SHA-256 发现漂移，以及 snapshot changed/stale、path invalid、probe required 时，
+Core 先使旧 snapshot 失效并停止复用该 Adapter 的 resident process，再同步 re-discover/deep-probe。
+只有相同 logical identity 能解析为 enabled、authenticated、ready 且协议/模型/权限兼容的 Runtime 时，
+Core 才原子更新 Run effective config 与冗余 Runtime 列，记录 drift/rebound 事件，并重复 blocker 与
+executable integrity 校验。每个 Run 最多自动 rebind 一次；第二次漂移、身份变化、歧义或无法确认
+兼容性时 terminal fail。完整长期边界见
+[ADR-0156](../adr/0156-logical-runtime-identity-and-bounded-installation-rebind.md)。
+
 ## Bootstrap 与 Dynamic Context
 
 > 本节的 compact projection、Charter 补充规则和 canonical continuation 已由 v0.50 实现；实施状态见

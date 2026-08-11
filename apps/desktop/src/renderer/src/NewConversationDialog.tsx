@@ -28,6 +28,7 @@ export function NewConversationDialog({
   returnFocusElement,
   onOpenChange,
   onChooseWorkspaceDirectory,
+  onWorkspaceSelected,
   onCreate
 }: {
   open: boolean
@@ -42,6 +43,7 @@ export function NewConversationDialog({
   returnFocusElement: HTMLElement | null
   onOpenChange(open: boolean): void
   onChooseWorkspaceDirectory(): Promise<WorkspaceSelection | null>
+  onWorkspaceSelected(workspace: WorkspaceSelection): Promise<void>
   onCreate(draft: CreateCampDraft): Promise<void>
 }): React.JSX.Element {
   const [workspace, setWorkspace] = useState<WorkspaceChoice | null>(initialWorkspace)
@@ -141,6 +143,7 @@ export function NewConversationDialog({
     try {
       const selected = await onChooseWorkspaceDirectory()
       if (selected) {
+        await onWorkspaceSelected(selected)
         setWorkspace(selected)
         setGitInspectionStatus('idle')
         setProjectMenuOpen(false)

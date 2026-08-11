@@ -33,7 +33,7 @@ import {
 } from './member-avatar-assets'
 import { legacyUserDataPath } from './user-data-path'
 import { deleteRetiredManagedDirectory } from './quick-chat-cutover'
-import { readNavigationPins, writeNavigationPins } from './navigation-pins'
+import { NavigationPreferencesStore } from './navigation-preferences'
 import { RUNTIME_RENDERER_CORE_METHODS } from './runtime-core-methods'
 import { prewarmMacOpenPanel } from './open-panel-prewarm'
 import {
@@ -150,11 +150,11 @@ const core = new CoreClient()
 let mainWindow: BrowserWindow | null = null
 let themePreference: ThemePreference = 'system'
 let appearanceFilePath = ''
-let navigationFilePath = ''
 let lastDiagnosticsExportPath: string | null = null
 let lastAppearanceSignature = ''
 let generalPreferences: GeneralPreferencesStore | null = null
 let restorableLocations: RestorableLocationStore | null = null
+let navigationPreferences: NavigationPreferencesStore | null = null
 const desktopSessions = new DesktopSessionRegistry()
 
 const legacyDataPath = legacyUserDataPath(
@@ -290,13 +290,18 @@ function createWindow(): void {
 if (primaryInstance) void app.whenReady().then(async () => {
   await deleteRetiredManagedDirectory(app.getPath('userData'))
   appearanceFilePath = join(app.getPath('userData'), 'appearance.json')
-  navigationFilePath = join(app.getPath('userData'), 'navigation.json')
-  const [loadedGeneralPreferences, loadedRestorableLocations] = await Promise.all([
+  const [
+    loadedGeneralPreferences,
+    loadedRestorableLocations,
+    loadedNavigationPreferences
+  ] = await Promise.all([
     GeneralPreferencesStore.load(join(app.getPath('userData'), 'general-preferences.json')),
-    RestorableLocationStore.load(join(app.getPath('userData'), 'restorable-location.json'))
+    RestorableLocationStore.load(join(app.getPath('userData'), 'restorable-location.json')),
+    NavigationPreferencesStore.load(join(app.getPath('userData'), 'navigation.json'))
   ])
   generalPreferences = loadedGeneralPreferences
   restorableLocations = loadedRestorableLocations
+  navigationPreferences = loadedNavigationPreferences
   themePreference = readThemePreference(appearanceFilePath)
   nativeTheme.themeSource = nativeThemeSource(themePreference)
   nativeTheme.on('updated', publishAppearance)
@@ -426,11 +431,26 @@ ipcMain.handle('rovai:window-reset-bounds', (event) => {
   )
 })
 
-ipcMain.handle('rovai:navigation-pins-get', () => readNavigationPins(navigationFilePath))
+ipcMain.handle('rovai:navigation-preferences-get', () => requireNavigationPreferences().get())
 
-ipcMain.handle('rovai:navigation-pins-replace', (_event, pins: NavigationPin[]) =>
-  writeNavigationPins(navigationFilePath, pins)
+ipcMain.handle('rovai:navigation-preferences-replace-pins', (_event, pins: NavigationPin[]) =>
+  requireNavigationPreferences().replacePins(pins)
 )
+
+ipcMain.handle(
+  'rovai:navigation-preferences-remove-project',
+  (_event, targetKey: unknown, relatedCampIds: unknown) => {
+    if (typeof targetKey !== 'string' || !Array.isArray(relatedCampIds)) {
+      throw new Error('Invalid Project removal request')
+    }
+    return requireNavigationPreferences().removeProject(targetKey, relatedCampIds)
+  }
+)
+
+ipcMain.handle('rovai:navigation-preferences-restore-project', (_event, targetKey: unknown) => {
+  if (typeof targetKey !== 'string') throw new Error('Invalid Project restore request')
+  return requireNavigationPreferences().restoreProject(targetKey)
+})
 
 ipcMain.handle('rovai:member-avatar-select-source', async () => {
   const options = {
@@ -700,6 +720,11 @@ app.on('before-quit', () => {
 function requireGeneralPreferences(): GeneralPreferencesStore {
   if (!generalPreferences) throw new Error('General Preferences store is unavailable')
   return generalPreferences
+}
+
+function requireNavigationPreferences(): NavigationPreferencesStore {
+  if (!navigationPreferences) throw new Error('Navigation Preferences store is unavailable')
+  return navigationPreferences
 }
 
 function requireMainWindow(webContents: Electron.WebContents): BrowserWindow {

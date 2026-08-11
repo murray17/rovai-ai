@@ -39,11 +39,11 @@ use rovai_core::{
     agent_profile::{
         AdapterInstallationView, AdapterKind, AgentProfileService,
         ClearMemberRuntimeConfigurationCommand, CreateAdapterInstallationCommand,
-        CreateAgentProfileCommand, ManagedProbeFailure, RecordAdapterCapabilitySnapshotCommand,
-        RemoveMemberCommand, ReorderAgentProfilesCommand, RuntimeReadinessStatus,
-        SetAgentProfileAvatarCommand, SetMemberPresenceCommand,
-        SetMemberRuntimeConfigurationCommand, UpdateAdapterInstallationCommand,
-        UpdateAgentProfileCommand, VerifiedManagedInstallation,
+        CreateAgentProfileCommand, FrozenAgentRuntimeConfig, InstallationClass,
+        ManagedProbeFailure, RecordAdapterCapabilitySnapshotCommand, RemoveMemberCommand,
+        ReorderAgentProfilesCommand, RuntimeReadinessStatus, SetAgentProfileAvatarCommand,
+        SetMemberPresenceCommand, SetMemberRuntimeConfigurationCommand,
+        UpdateAdapterInstallationCommand, UpdateAgentProfileCommand, VerifiedManagedInstallation,
     },
     agent_runtime_adapter::{
         AcpProbeObservation, AgentRuntimeAdapterRegistry, AntigravityProbeObservation,
@@ -134,7 +134,7 @@ use rovai_core::{
         AcknowledgeAgentRunCancellationCommand, AgentRunCancellationCandidate, AgentRunExecution,
         BindNativeSessionCommand, CancelCampTurnCommand, ClaimAgentRunCommand,
         ExecutionRuntimeService, FailAgentRunCommand, NativeSessionResumeDisposition,
-        NativeSessionResumeFailure, PermissionSemantics,
+        NativeSessionResumeFailure, PermissionSemantics, RebindAgentRunRuntimeCommand,
         RecordCancelledAgentRunEndingGitObservationCommand, RejectAgentRunDispatchCommand,
         RestartNativeSessionCommand, SucceedAgentRunCommand,
     },
@@ -171,6 +171,27 @@ use tokio::{
 
 const RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT: Duration = Duration::from_secs(2);
 const RUNTIME_CANCELLATION_FENCE_TIMEOUT: Duration = Duration::from_secs(1);
+
+enum RuntimeIntegrityPreflight {
+    Verified,
+    DriftDetected(String),
+}
+
+struct RuntimeDispatchFailure {
+    code: String,
+    error: anyhow::Error,
+    effective_version: Option<i64>,
+}
+
+fn runtime_blocker_is_refreshable(code: &str) -> bool {
+    matches!(
+        code,
+        "runtime_snapshot_changed"
+            | "runtime_snapshot_stale"
+            | "runtime_path_invalid"
+            | "runtime_probe_required"
+    )
+}
 
 async fn run_with_cancellation_deadline<T>(
     deadline: Duration,
@@ -3981,7 +4002,7 @@ impl Core {
 
     async fn dispatch_agent_run_candidate(
         self: &Arc<Self>,
-        candidate: rovai_core::runtime::QueuedAgentRunCandidate,
+        mut candidate: rovai_core::runtime::QueuedAgentRunCandidate,
         output: mpsc::UnboundedSender<String>,
     ) {
         let workspace = candidate.execution_workspace();
@@ -4001,36 +4022,16 @@ impl Core {
                 return;
             }
         };
-        let runtime_blocker = {
-            let database = self.database.lock().await;
-            AgentProfileService::default().runtime_dispatch_blocker(&database, &runtime)
-        };
-        match runtime_blocker {
-            Ok(Some(blocker)) => {
-                let error = anyhow::anyhow!("{}", blocker.payload);
-                self.reject_agent_run_dispatch(&candidate, &blocker.code, &error)
+        match self.prepare_runtime_for_dispatch(&candidate, runtime).await {
+            Ok((_runtime, effective_version)) => candidate.version = effective_version,
+            Err(failure) => {
+                if let Some(effective_version) = failure.effective_version {
+                    candidate.version = effective_version;
+                }
+                self.reject_agent_run_dispatch(&candidate, &failure.code, &failure.error)
                     .await;
                 return;
             }
-            Ok(None) => {}
-            Err(error) => {
-                self.reject_agent_run_dispatch(&candidate, "runtime_configuration_invalid", &error)
-                    .await;
-                return;
-            }
-        }
-        if let Err(error) = self
-            .verify_runtime_integrity(
-                runtime.adapter_kind,
-                &runtime.installation_id,
-                &runtime.executable_path,
-                &runtime.executable_fingerprint,
-            )
-            .await
-        {
-            self.reject_agent_run_dispatch(&candidate, "runtime_integrity_failed", &error)
-                .await;
-            return;
         }
         let starting_git_observation = Some(git::observe_git(&workspace_path).await);
         let claim = {
@@ -5215,24 +5216,259 @@ impl Core {
         });
     }
 
-    async fn verify_runtime_integrity(
+    async fn prepare_runtime_for_dispatch(
         &self,
-        adapter_kind: AdapterKind,
-        installation_id: &str,
-        executable_path: &str,
-        executable_fingerprint: &str,
-    ) -> Result<()> {
+        candidate: &rovai_core::runtime::QueuedAgentRunCandidate,
+        runtime: FrozenAgentRuntimeConfig,
+    ) -> std::result::Result<(FrozenAgentRuntimeConfig, i64), RuntimeDispatchFailure> {
+        let blocker = {
+            let database = self.database.lock().await;
+            AgentProfileService::default().runtime_dispatch_blocker(&database, &runtime)
+        }
+        .map_err(|error| RuntimeDispatchFailure {
+            code: "runtime_configuration_invalid".to_string(),
+            error,
+            effective_version: None,
+        })?;
+        if let Some(blocker) = blocker {
+            if runtime_blocker_is_refreshable(&blocker.code) {
+                return self
+                    .refresh_rebind_and_revalidate_runtime(candidate, runtime, &blocker.code)
+                    .await;
+            }
+            return Err(RuntimeDispatchFailure {
+                code: blocker.code,
+                error: anyhow::anyhow!("{}", blocker.payload),
+                effective_version: None,
+            });
+        }
+        match self
+            .inspect_runtime_integrity(&runtime)
+            .await
+            .map_err(|error| RuntimeDispatchFailure {
+                code: "runtime_integrity_failed".to_string(),
+                error,
+                effective_version: None,
+            })? {
+            RuntimeIntegrityPreflight::Verified => Ok((runtime, candidate.version)),
+            RuntimeIntegrityPreflight::DriftDetected(detail) => {
+                self.refresh_rebind_and_revalidate_runtime(candidate, runtime, &detail)
+                    .await
+            }
+        }
+    }
+
+    async fn refresh_rebind_and_revalidate_runtime(
+        &self,
+        candidate: &rovai_core::runtime::QueuedAgentRunCandidate,
+        frozen_runtime: FrozenAgentRuntimeConfig,
+        drift_reason: &str,
+    ) -> std::result::Result<(FrozenAgentRuntimeConfig, i64), RuntimeDispatchFailure> {
+        let installation = {
+            let database = self.database.lock().await;
+            AgentProfileService::default()
+                .list_installations(&database)
+                .and_then(|installations| {
+                    installations
+                        .into_iter()
+                        .find(|installation| installation.id == frozen_runtime.installation_id)
+                        .context("Runtime installation does not exist")
+                })
+        }
+        .map_err(|error| RuntimeDispatchFailure {
+            code: "runtime_integrity_failed".to_string(),
+            error,
+            effective_version: None,
+        })?;
+        if installation.adapter_kind != frozen_runtime.adapter_kind {
+            return Err(RuntimeDispatchFailure {
+                code: "runtime_integrity_failed".to_string(),
+                error: anyhow::anyhow!(
+                    "Runtime installation identity changed from {} to {}",
+                    frozen_runtime.adapter_kind.as_str(),
+                    installation.adapter_kind.as_str()
+                ),
+                effective_version: None,
+            });
+        }
+
+        self.runtime_fleet
+            .invalidate_adapter(frozen_runtime.adapter_kind)
+            .await;
+        let refresh = match installation.installation_class {
+            InstallationClass::ManagedDefault => self
+                .resolve_product_runtime(frozen_runtime.adapter_kind)
+                .await
+                .map(|_| ()),
+            InstallationClass::Custom => {
+                let search = self.runtime_search_environment.read().await.clone();
+                let snapshot = with_runtime_search_environment(
+                    &search,
+                    self.deep_probe_candidate(
+                        frozen_runtime.adapter_kind,
+                        Path::new(&installation.executable_path),
+                    ),
+                )
+                .await;
+                match snapshot {
+                    Ok(snapshot) => {
+                        let mut database = self.database.lock().await;
+                        AgentProfileService::default()
+                            .record_snapshot(
+                                &mut database,
+                                &CommandEnvelope {
+                                    command_id: uuid::Uuid::new_v4().to_string(),
+                                    actor: ActorRef::System {
+                                        component_id: "agent-run-scheduler".to_string(),
+                                    },
+                                    camp_id: Some(candidate.camp_id.clone()),
+                                    expected_versions: Vec::new(),
+                                    execution_epoch: None,
+                                    payload: RecordAdapterCapabilitySnapshotCommand {
+                                        installation_id: installation.id.clone(),
+                                        expected_installation_version: installation.version,
+                                        snapshot,
+                                    },
+                                },
+                            )
+                            .and_then(|execution| {
+                                (execution.result.status == CommandResultStatus::Applied)
+                                    .then_some(())
+                                    .with_context(|| {
+                                        format!(
+                                            "Runtime refresh was rejected: {} {}",
+                                            execution.result.code, execution.result.payload
+                                        )
+                                    })
+                            })
+                    }
+                    Err(error) => Err(error),
+                }
+            }
+        };
+        if let Err(error) = refresh {
+            self.schedule_runtime_check(frozen_runtime.adapter_kind)
+                .await;
+            return Err(RuntimeDispatchFailure {
+                code: "runtime_refresh_failed".to_string(),
+                error: error.context("Runtime drift refresh failed"),
+                effective_version: None,
+            });
+        }
+
+        let effective_runtime = {
+            let database = self.database.lock().await;
+            AgentProfileService::default().resolve_rebound_runtime(&database, &frozen_runtime)
+        }
+        .map_err(|error| RuntimeDispatchFailure {
+            code: "runtime_configuration_invalid".to_string(),
+            error,
+            effective_version: None,
+        })?
+        .map_err(|blocker| RuntimeDispatchFailure {
+            code: blocker.code,
+            error: anyhow::anyhow!("{}", blocker.payload),
+            effective_version: None,
+        })?;
+
+        let rebound = {
+            let mut database = self.database.lock().await;
+            ExecutionRuntimeService::default().rebind_agent_run_runtime(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: uuid::Uuid::new_v4().to_string(),
+                    actor: ActorRef::System {
+                        component_id: "agent-run-scheduler".to_string(),
+                    },
+                    camp_id: Some(candidate.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: RebindAgentRunRuntimeCommand {
+                        agent_run_id: candidate.agent_run_id.clone(),
+                        expected_version: candidate.version,
+                        drift_reason: drift_reason.to_string(),
+                        effective_runtime: effective_runtime.clone(),
+                    },
+                },
+            )
+        }
+        .map_err(|error| RuntimeDispatchFailure {
+            code: "runtime_rebind_failed".to_string(),
+            error,
+            effective_version: None,
+        })?;
+        if rebound.result.status != CommandResultStatus::Applied {
+            let code = match rebound.result.code.as_str() {
+                "agent_run.runtime_identity_changed" | "agent_run.runtime_rebind_invalid" => {
+                    "runtime_integrity_failed".to_string()
+                }
+                _ => rebound.result.code,
+            };
+            return Err(RuntimeDispatchFailure {
+                code,
+                error: anyhow::anyhow!("{}", rebound.result.payload),
+                effective_version: None,
+            });
+        }
+        let effective_version =
+            rebound.result.payload["version"]
+                .as_i64()
+                .ok_or_else(|| RuntimeDispatchFailure {
+                    code: "runtime_rebind_failed".to_string(),
+                    error: anyhow::anyhow!("Runtime rebind did not return the AgentRun version"),
+                    effective_version: None,
+                })?;
+
+        let blocker = {
+            let database = self.database.lock().await;
+            AgentProfileService::default().runtime_dispatch_blocker(&database, &effective_runtime)
+        }
+        .map_err(|error| RuntimeDispatchFailure {
+            code: "runtime_configuration_invalid".to_string(),
+            error,
+            effective_version: Some(effective_version),
+        })?;
+        if let Some(blocker) = blocker {
+            return Err(RuntimeDispatchFailure {
+                code: blocker.code,
+                error: anyhow::anyhow!("{}", blocker.payload),
+                effective_version: Some(effective_version),
+            });
+        }
+        match self
+            .inspect_runtime_integrity(&effective_runtime)
+            .await
+            .map_err(|error| RuntimeDispatchFailure {
+                code: "runtime_integrity_failed".to_string(),
+                error,
+                effective_version: Some(effective_version),
+            })? {
+            RuntimeIntegrityPreflight::Verified => Ok((effective_runtime, effective_version)),
+            RuntimeIntegrityPreflight::DriftDetected(detail) => Err(RuntimeDispatchFailure {
+                code: "runtime_integrity_failed".to_string(),
+                error: anyhow::anyhow!(
+                    "Runtime changed again during its bounded refresh: {detail}"
+                ),
+                effective_version: Some(effective_version),
+            }),
+        }
+    }
+
+    async fn inspect_runtime_integrity(
+        &self,
+        runtime: &FrozenAgentRuntimeConfig,
+    ) -> Result<RuntimeIntegrityPreflight> {
         let verified = {
             let database = self.database.lock().await;
             AgentProfileService::default().verified_executable_identity(
                 &database,
-                installation_id,
-                executable_path,
-                executable_fingerprint,
+                &runtime.installation_id,
+                &runtime.executable_path,
+                &runtime.executable_fingerprint,
             )?
         };
-        let executable_path_buf = PathBuf::from(executable_path);
-        let expected_fingerprint = executable_fingerprint.to_string();
+        let executable_path_buf = PathBuf::from(&runtime.executable_path);
+        let expected_fingerprint = runtime.executable_fingerprint.clone();
         let integrity = tokio::task::spawn_blocking(move || {
             verify_executable_integrity(
                 &executable_path_buf,
@@ -5243,43 +5479,41 @@ impl Core {
         .await
         .context("Runtime integrity worker failed")?;
         match integrity {
-            Ok(ExecutableIntegrityStatus::Unchanged) => Ok(()),
+            Ok(ExecutableIntegrityStatus::Unchanged) => Ok(RuntimeIntegrityPreflight::Verified),
             Ok(ExecutableIntegrityStatus::Reverified(identity)) => {
                 let mut database = self.database.lock().await;
                 AgentProfileService::default().record_verified_executable_identity(
                     &mut database,
-                    installation_id,
-                    executable_path,
-                    executable_fingerprint,
+                    &runtime.installation_id,
+                    &runtime.executable_path,
+                    &runtime.executable_fingerprint,
                     &identity,
                 )?;
-                Ok(())
+                Ok(RuntimeIntegrityPreflight::Verified)
             }
             Ok(ExecutableIntegrityStatus::Changed) => {
                 let mut database = self.database.lock().await;
                 AgentProfileService::default().mark_runtime_integrity_changed(
                     &mut database,
-                    installation_id,
-                    executable_path,
-                    executable_fingerprint,
+                    &runtime.installation_id,
+                    &runtime.executable_path,
+                    &runtime.executable_fingerprint,
                 )?;
-                drop(database);
-                self.schedule_runtime_check(adapter_kind).await;
-                anyhow::bail!(
-                    "Runtime executable changed after AgentRun creation; refresh the installation and retry"
-                )
+                Ok(RuntimeIntegrityPreflight::DriftDetected(
+                    "runtime_executable_fingerprint_changed".to_string(),
+                ))
             }
-            Err(error) => {
+            Err(_) => {
                 let mut database = self.database.lock().await;
                 AgentProfileService::default().mark_runtime_integrity_changed(
                     &mut database,
-                    installation_id,
-                    executable_path,
-                    executable_fingerprint,
+                    &runtime.installation_id,
+                    &runtime.executable_path,
+                    &runtime.executable_fingerprint,
                 )?;
-                drop(database);
-                self.schedule_runtime_check(adapter_kind).await;
-                Err(error).context("Runtime executable is unavailable at launch")
+                Ok(RuntimeIntegrityPreflight::DriftDetected(
+                    "runtime_executable_unavailable".to_string(),
+                ))
             }
         }
     }

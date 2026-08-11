@@ -2270,6 +2270,7 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 .general-help-mark { display: grid; width: 20px; height: 20px; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; color: var(--muted); background: var(--surface); cursor: help; font: 750 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .general-help-mark:hover { border-color: color-mix(in srgb, var(--brand) 45%, var(--line)); color: var(--brand); background: var(--brand-soft); }
 .general-help-popover { position: absolute; z-index: 20; top: 28px; left: 0; display: grid; visibility: hidden; width: min(360px, calc(100vw - 360px)); gap: 9px; padding: 13px 14px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow-menu); opacity: 0; pointer-events: none; transform: translateY(-3px); transition: opacity 120ms ease, transform 120ms ease, visibility 120ms; }
+.general-help-anchor:hover .general-help-popover,
 .general-help-mark:hover + .general-help-popover { visibility: visible; opacity: 1; transform: translateY(0); }
 .general-help-popover strong { font-size: 12px; }
 .general-help-popover > span { color: var(--muted); font-size: 10.5px; line-height: 1.55; }

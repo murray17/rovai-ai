@@ -29,9 +29,12 @@ export interface CampDeleteAttempt {
 
 export type NavigationSettingsSection = SettingsSection
 
-type CampAction = {
+type NavigationAction = {
   kind: 'rename' | 'delete'
   camp: NavigationCampItem
+} | {
+  kind: 'remove_project'
+  project: ProjectNavigationGroup
 } | null
 
 export function campNavigationMenuLabels(pinned: boolean): string[] {
@@ -52,7 +55,7 @@ export async function copyCampIdToClipboard(
 }
 
 export function projectNavigationMenuLabels(pinned: boolean): string[] {
-  return [pinned ? '取消置顶项目' : '置顶项目']
+  return [pinned ? '取消置顶项目' : '置顶项目', '移除项目']
 }
 
 export function toggleNavigationGroup(groups: ReadonlySet<string>, groupKey: string): Set<string> {
@@ -197,6 +200,7 @@ export function CampNavigation({
   onCreateInProject = () => undefined,
   onCamp,
   onTogglePin = () => undefined,
+  onRemoveProject,
   onCampIdCopied = () => undefined,
   onRename,
   onDelete,
@@ -229,6 +233,7 @@ export function CampNavigation({
   onCreateInProject?(project: ProjectNavigationGroup | null): void
   onCamp(camp: NavigationCampItem): void
   onTogglePin?(kind: NavigationPin['kind'], targetKey: string, camp?: NavigationCampItem): void | Promise<void>
+  onRemoveProject(project: ProjectNavigationGroup): Promise<void>
   onCampIdCopied?(): void
   onRename(camp: NavigationCampItem, title: string): Promise<void>
   onDelete(camp: NavigationCampItem): Promise<CampDeleteAttempt>
@@ -238,7 +243,7 @@ export function CampNavigation({
   const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Set<string>>(() => new Set())
   const [paginationByGroup, setPaginationByGroup] = useState<Record<string, NavigationGroupPaginationState>>({})
   const [loadingGroups, setLoadingGroups] = useState<Set<string>>(() => new Set())
-  const [action, setAction] = useState<CampAction>(null)
+  const [action, setAction] = useState<NavigationAction>(null)
   const [renameTitle, setRenameTitle] = useState('')
   const [deleteBlockers, setDeleteBlockers] = useState<Array<{ code: string; count: number }>>([])
   const [actionBusy, setActionBusy] = useState(false)
@@ -381,8 +386,13 @@ export function CampNavigation({
     const restore = (): void => {
       if (cancelled) return
       const targetElement = Array.from(
-        sidebarRef.current?.querySelectorAll<HTMLButtonElement>('[data-sidebar-menu-target]') ?? []
-      ).find((element) => element.dataset.sidebarMenuTarget === sidebarFocusRequest.target)
+        sidebarRef.current?.querySelectorAll<HTMLButtonElement>(
+          '[data-sidebar-menu-target], [data-sidebar-focus-target]'
+        ) ?? []
+      ).find((element) => (
+        element.dataset.sidebarMenuTarget === sidebarFocusRequest.target
+        || element.dataset.sidebarFocusTarget === sidebarFocusRequest.target
+      ))
       targetElement?.focus()
       frameCount += 1
       if (frameCount < 16) {
@@ -427,6 +437,12 @@ export function CampNavigation({
     setDeleteBlockers([])
   }
 
+  const openProjectRemoval = (project: ProjectNavigationGroup): void => {
+    dialogReturnFocusTargetRef.current = `project:${project.projectKey}`
+    setAction({ kind: 'remove_project', project })
+    setDeleteBlockers([])
+  }
+
   const closeAction = (): void => {
     if (actionBusy) return
     setAction(null)
@@ -466,6 +482,21 @@ export function CampNavigation({
       } else {
         setDeleteBlockers(result.blockers)
       }
+    } catch (error) {
+      onError(error)
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
+  const confirmProjectRemoval = async (): Promise<void> => {
+    if (!action || action.kind !== 'remove_project' || actionBusy) return
+    setActionBusy(true)
+    try {
+      await onRemoveProject(action.project)
+      dialogReturnFocusTargetRef.current = 'project-row:quick-chat'
+      setAction(null)
+      requestSidebarFocus('project-row:quick-chat')
     } catch (error) {
       onError(error)
     } finally {
@@ -601,6 +632,7 @@ export function CampNavigation({
                 onTogglePin={project.projectPath === shellOnlyProjectPath
                   ? undefined
                   : () => void togglePin('project', project.projectKey)}
+                onRemoveProject={() => openProjectRemoval(project)}
                 onToggleCampPin={(camp) => void togglePin('camp', camp.id, camp)}
                 onCopyCampId={(camp) => void copyCampId(camp)}
                 onCamp={onCamp}
@@ -643,6 +675,7 @@ export function CampNavigation({
                 onTogglePin={project.projectPath === shellOnlyProjectPath
                   ? undefined
                   : () => void togglePin('project', project.projectKey)}
+                onRemoveProject={() => openProjectRemoval(project)}
                 onToggleCampPin={(camp) => void togglePin('camp', camp.id, camp)}
                 onCopyCampId={(camp) => void copyCampId(camp)}
                 onCamp={onCamp}
@@ -732,6 +765,17 @@ export function CampNavigation({
                   </div>
                 )}
                 <div className="dialog-actions"><Dialog.Close asChild><button className="quiet-button" type="button" disabled={actionBusy}>取消</button></Dialog.Close>{deleteBlockers.some((blocker) => blocker.code === 'nonterminal_agent_run' || blocker.code === 'nonterminal_camp_turn') && <button className="quiet-button" type="button" onClick={() => void stopBlockingRuns()} disabled={actionBusy}>{actionBusy ? '正在请求停止…' : '停止运行'}</button>}{deleteBlockers.length > 0 && <button className="quiet-button" type="button" onClick={() => { onCamp(action.camp); setAction(null) }}>打开对话</button>}<button className="danger-button" type="button" onClick={() => void confirmDelete()} disabled={actionBusy}>{actionBusy ? '检查中…' : deleteBlockers.length > 0 ? '重新检查并删除' : '永久删除'}</button></div>
+              </div>
+            ) : action?.kind === 'remove_project' ? (
+              <div>
+                <Dialog.Title>从侧栏移除“{action.project.name}”？</Dialog.Title>
+                <Dialog.Description>
+                  项目会从这台 Mac 的侧栏隐藏，并取消项目及其中对话的置顶。不会删除本地目录、Camp、消息、运行记录或审计；正在运行的执行也不会停止。之后重新选择同一工作目录即可恢复。
+                </Dialog.Description>
+                <div className="dialog-actions">
+                  <Dialog.Close asChild><button className="quiet-button" type="button" disabled={actionBusy}>取消</button></Dialog.Close>
+                  <button className="primary-button" type="button" onClick={() => void confirmProjectRemoval()} disabled={actionBusy}>{actionBusy ? '正在移除…' : '移除项目'}</button>
+                </div>
               </div>
             ) : null}
             <Dialog.Close asChild><button className="dialog-close" aria-label="关闭" disabled={actionBusy}>×</button></Dialog.Close>
@@ -936,6 +980,7 @@ function CampGroup({
   onSelectProject,
   onCreate,
   onTogglePin,
+  onRemoveProject,
   onToggleCampPin,
   onCopyCampId,
   onCamp,
@@ -959,12 +1004,33 @@ function CampGroup({
   onSelectProject(): void
   onCreate(): void
   onTogglePin?(): void
+  onRemoveProject?(): void
   onToggleCampPin(camp: NavigationCampItem): void
   onCopyCampId(camp: NavigationCampItem): void
   onCamp(camp: NavigationCampItem): void
   onAction(kind: 'rename' | 'delete', camp: NavigationCampItem): void
 }): JSX.Element {
   const projectMenuLabels = projectNavigationMenuLabels(pinned)
+  const projectMenuItems: SidebarActionMenuItem[] = []
+  if (onTogglePin) {
+    projectMenuItems.push({
+      key: 'toggle-pin',
+      label: projectMenuLabels[0],
+      icon: 'pin',
+      filled: pinned,
+      deferCloseAutoFocus: true,
+      onSelect: onTogglePin
+    })
+  }
+  if (onRemoveProject) {
+    projectMenuItems.push({
+      key: 'remove-project',
+      label: projectMenuLabels[1],
+      icon: 'remove',
+      separatorBefore: projectMenuItems.length > 0,
+      onSelect: onRemoveProject
+    })
+  }
   const contentId = `camp-group-content-${groupKey.replace(/[^a-zA-Z0-9_-]/g, '-')}`
   const paginationControls = navigationPaginationControls(visibleCount, totalCount)
   return (
@@ -977,6 +1043,7 @@ function CampGroup({
           aria-current={currentProject ? 'true' : undefined}
           aria-expanded={projectExpanded}
           aria-controls={contentId}
+          data-sidebar-focus-target={`project-row:${groupKey}`}
           onClick={() => activateProjectNavigationRow(onSelectProject, onToggleExpanded)}
         >
           <svg className="project-folder-glyph" viewBox="0 0 24 24" aria-hidden="true">
@@ -991,19 +1058,12 @@ function CampGroup({
           </svg>
           <span className="truncate">{label}</span>
         </button>
-        {onTogglePin && pinTargetKey && (
+        {pinTargetKey && projectMenuItems.length > 0 && (
           <SidebarActionMenu
             target={`project:${pinTargetKey}`}
             label={`管理项目“${label}”`}
             triggerClassName="group-menu-trigger"
-            items={[{
-              key: 'toggle-pin',
-              label: projectMenuLabels[0],
-              icon: 'pin',
-              filled: pinned,
-              deferCloseAutoFocus: true,
-              onSelect: onTogglePin
-            }]}
+            items={projectMenuItems}
           />
         )}
         <button className="group-create-button" type="button" aria-label={`在“${label}”中新建对话`} title="新建对话" disabled={createDisabled} onClick={onCreate}>＋</button>
@@ -1110,7 +1170,7 @@ function CampRow({
 type SidebarActionMenuItem = {
   key: string
   label: string
-  icon: 'pin' | 'edit' | 'copy' | 'trash'
+  icon: 'pin' | 'edit' | 'copy' | 'trash' | 'remove'
   filled?: boolean
   danger?: boolean
   separatorBefore?: boolean
@@ -1195,6 +1255,9 @@ function SidebarMenuIcon({ kind, filled = false }: {
   }
   if (kind === 'copy') {
     return <svg className="sidebar-action-menu-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2" /><path d="M16 6V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h1" /></svg>
+  }
+  if (kind === 'remove') {
+    return <svg className="sidebar-action-menu-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6.5h14v11H5z" /><path d="M9 12h6" /></svg>
   }
   return (
     <svg className={`sidebar-action-menu-icon ${filled ? 'filled' : ''}`} viewBox="0 0 24 24" aria-hidden="true">

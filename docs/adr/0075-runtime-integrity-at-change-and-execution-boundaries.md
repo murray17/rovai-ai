@@ -120,5 +120,6 @@ Installation 的已验证轻量身份比较。
 
 - [ADR-0066：Managed Product Runtime Discovery, Resolution, and Relocation](0066-managed-product-runtime-resolution.md)
 - [ADR-0076：Message-First AgentRun Dispatch Boundary](0076-message-first-agent-run-dispatch-boundary.md)
+- [ADR-0156：Frozen Logical Runtime Identity and Bounded Installation Rebind](0156-logical-runtime-identity-and-bounded-installation-rebind.md)
 - [v0.24 版本范围](../versions/v0.24/README.md)
 - [v0.24 实施与验收](../versions/v0.24/implementation-plan.md)

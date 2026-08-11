@@ -73,7 +73,8 @@ pnpm accept:runtime-activity-ui
 pnpm accept:diagnostics-ui
 ```
 
-它们分别覆盖长期记忆、队员头像、队员生命周期、应用内通知、统一侧栏、结构化提及和
+它们分别覆盖长期记忆、队员头像、队员生命周期、应用内通知、统一侧栏（含 Project/Camp 置顶、
+可恢复 Project 移除、跨重启隐藏、Quick Chat 焦点回退与 Core 数据保留）、结构化提及和
 Task 单卡原地更新、九 Runtime Canonical Activity 工具名称与 Agent 级连续执行过程、A2A 消息
 Scheme C 转交 footer，以及诊断中心双尺寸、只读自检、MCP 权限修复复检与 v5 脱敏的桌面回归。
 当前 Neutral Porcelain + Steel 视觉迁移还必须按当前版本实施计划覆盖 2K Composer、七个设置页、

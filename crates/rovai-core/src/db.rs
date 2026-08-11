@@ -1150,6 +1150,9 @@ impl Database {
             if !self.schema_migration_applied(71)? {
                 self.migrate_explicit_empty_self_active_task_snapshot_v71()?;
             }
+            if !self.schema_migration_applied(72)? {
+                self.migrate_runtime_drift_rebind_v72()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -1412,6 +1415,9 @@ impl Database {
         }
         if !self.schema_migration_applied(71)? {
             self.migrate_explicit_empty_self_active_task_snapshot_v71()?;
+        }
+        if !self.schema_migration_applied(72)? {
+            self.migrate_runtime_drift_rebind_v72()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -6520,6 +6526,46 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_runtime_drift_rebind_v72(&mut self) -> Result<()> {
+        self.add_column_if_missing(
+            "agent_run",
+            "runtime_initial_reported_version",
+            "runtime_initial_reported_version TEXT",
+        )?;
+        self.add_column_if_missing(
+            "agent_run",
+            "runtime_initial_executable_fingerprint",
+            "runtime_initial_executable_fingerprint TEXT",
+        )?;
+        self.add_column_if_missing(
+            "agent_run",
+            "runtime_rebind_count",
+            "runtime_rebind_count INTEGER NOT NULL DEFAULT 0 CHECK(runtime_rebind_count >= 0)",
+        )?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            UPDATE agent_run
+            SET runtime_initial_reported_version =
+                    COALESCE(runtime_initial_reported_version, runtime_reported_version),
+                runtime_initial_executable_fingerprint =
+                    COALESCE(
+                        runtime_initial_executable_fingerprint,
+                        runtime_executable_fingerprint
+                    )
+            WHERE runtime_initial_reported_version IS NULL
+               OR runtime_initial_executable_fingerprint IS NULL;
+
+            INSERT OR IGNORE INTO schema_migration(version, applied_at)
+            VALUES (72, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -11023,6 +11069,70 @@ mod tests {
             })
             .unwrap();
         assert_eq!(foreign_key_violations, 0);
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v72_backfills_initial_runtime_evidence_without_overwriting_existing_values() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v72-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                PRAGMA foreign_keys = OFF;
+                INSERT INTO agent_run(
+                    id, conversation_id, camp_turn_id,
+                    initial_camp_context_through_sequence,
+                    initial_conversation_context_through_sequence,
+                    responsibility_key, start_reason, purpose, expected_output,
+                    completion_role, effective_config_json,
+                    status, idempotency_key, automatic_retry_count,
+                    last_error_code, last_error_details_ref,
+                    manual_retry_allowed, execution_epoch,
+                    runtime_recovery_required, version, created_at, ended_at, updated_at,
+                    runtime_reported_version, runtime_executable_fingerprint,
+                    runtime_initial_reported_version,
+                    runtime_initial_executable_fingerprint
+                ) VALUES (
+                    'v72-run', 'missing-conversation', 'missing-turn',
+                    0, 0,
+                    'v72-run', 'initial', 'test', 'test',
+                    'required', '{}',
+                    'failed', 'v72-run', 0,
+                    NULL, NULL,
+                    0, 0,
+                    0, 1, datetime('now'), datetime('now'), datetime('now'),
+                    '2.0.0', 'sha256:effective',
+                    '1.0.0', NULL
+                );
+                PRAGMA foreign_keys = ON;
+                DELETE FROM schema_migration WHERE version = 72;
+                "#,
+            )
+            .expect("test should restore the pre-v72 migration marker");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v71 source should reopen");
+        let evidence: (String, String, i64, i64) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT runtime_initial_reported_version,
+                       runtime_initial_executable_fingerprint,
+                       runtime_rebind_count,
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 72)
+                FROM agent_run WHERE id = 'v72-run'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            evidence,
+            ("1.0.0".to_string(), "sha256:effective".to_string(), 0, 1,)
+        );
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }

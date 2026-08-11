@@ -10,7 +10,9 @@ import {
   currentProjectWorkspace,
   defaultsNeedInvalidation,
   navigationIncludingCurrentWorkspace,
+  navigationWithoutRemovedProjects,
   parseCurrentProject,
+  projectTargetKey,
   resolveNewConversationDefaults,
   shouldInvalidateNewConversationDefaults
 } from './new-conversation-preferences'
@@ -63,6 +65,27 @@ describe('new conversation preferences', () => {
       name: 'other',
       projectPath: '/repo/other'
     })).toBe(navigation)
+  })
+
+  it('removes only explicitly hidden directory Projects from the Renderer navigation', () => {
+    const navigation: NavigationSnapshot = {
+      schemaVersion: 3,
+      throughGlobalSequence: 7,
+      quickChat: { totalCount: 1, recentCamps: [] },
+      projects: [
+        project('/repo/a'),
+        project('/repo/b')
+      ]
+    }
+
+    const displayed = navigationWithoutRemovedProjects(
+      navigation,
+      new Set([projectTargetKey('/repo/a')])
+    )
+
+    expect(displayed?.quickChat).toBe(navigation.quickChat)
+    expect(displayed?.projects.map((candidate) => candidate.projectPath)).toEqual(['/repo/b'])
+    expect(navigation.projects).toHaveLength(2)
   })
 
   it('ignores runtime readiness but latches missing, away, removed, and invalid Lead configurations', () => {
@@ -130,4 +153,16 @@ function camp(
   projectPath: string
 ): Pick<NavigationCampItem, 'projectBindingKind' | 'projectPath'> {
   return { projectBindingKind, projectPath }
+}
+
+function project(projectPath: string): NavigationSnapshot['projects'][number] {
+  return {
+    projectKey: projectTargetKey(projectPath),
+    name: projectPath.split('/').at(-1) ?? projectPath,
+    projectPath,
+    lastActivityAt: '2026-08-09T00:00:00Z',
+    lastActivityGlobalSequence: 1,
+    totalCount: 0,
+    recentCamps: []
+  }
 }

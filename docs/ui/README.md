@@ -20,6 +20,10 @@ v0.56 把一次性 P2 HTML 中确认的瓷灰表面与 Steel 强调迁移进生�
 New Conversation、七个设置分类、队员、记忆与各类浮层继续使用原生产组件和 Read Side。
 实现与验收状态见[v0.56 实施计划](../versions/v0.56/implementation-plan.md)。
 
+v0.57 在该视觉基线上为 directory Project 增加可恢复的“移除项目”：只从这台 Mac 的侧栏
+隐藏并取消相关置顶，不删除工作目录、Camp 或执行历史；重新选择同一目录即可恢复。当前实施与
+验收状态见[v0.57 实施计划](../versions/v0.57/implementation-plan.md)。
+
 Arctic Dawn 设计文档已经冻结；用户已于 2026-07-30 明确授权生产实现。首轮范围及
 随后确认的导航、设置覆盖与空 Camp 欢迎状态均已通过本地自动化与打包 App 验收；
 v0.26 队员运行参数和会话表面 v3 交互也已通过 Core、Renderer 与打包 App 验收，
