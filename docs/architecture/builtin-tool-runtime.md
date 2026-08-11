@@ -226,10 +226,9 @@ failure 或 `delivery_unknown` 都不能替代它。各层不得通过复制完�
 
 ### Self Identity 与 Peer Routing Identity
 
-Bootstrap v3 按固定顺序组装 Session Charter、`MEMBER_IDENTITY` 和 Memory Entrypoint。Session
-Charter contract v2 将显式公共输出义务纳入稳定 Charter；Native Binding compatibility digest 包含
-该合同轴，因此新 Run 不得 Resume 仍冻结旧 Charter 的 Session，而是创建新 Binding generation。
-既有 Run 与 Bootstrap Evidence 不回写。
+Bootstrap v3 按固定顺序组装 Session Charter、`MEMBER_IDENTITY` 和 Memory Entrypoint。Charter
+文案变化不参与 Native Binding compatibility digest，也不主动轮换已存在的 Native Session；既有
+Run 与 Bootstrap Evidence 不回写，新建 Native Session 使用当前内置 Charter。
 `MEMBER_IDENTITY` 是该 Native Session 唯一的 self identity，包含最新已提交的完整六字段；它只在
 既有 eligible Bootstrap boundary 原子读取，不进入 AgentRun Dynamic Context，不持久化 Identity
 Blob、snapshot、digest 或 history。身份编辑不轮换 Session，也不构造下一 Run 的 patch。

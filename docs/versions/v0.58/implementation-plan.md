@@ -34,10 +34,10 @@ last_updated: 2026-08-11
 ## Checkpoint 3：真实请求复盘修正
 
 - [x] Session Charter 明确 Runtime final 不进入公屏、公开回复必须成功调用 `rovai send`；
-- [x] Session Charter contract 推进到 v2，使新 Run 轮换仍冻结旧 Charter 的 Session；
+- [x] Charter 文案变化不进入 Native Binding compatibility digest，不主动轮换既有 Session；
 - [x] Canonical Activity lifecycle merge 保留 ACP started kind/title，稀疏 terminal 只更新状态；
 - [x] Stop 只选择拥有 queued/running/waiting AgentRun 的 running/waiting Turn；
-- [x] 增加 Charter、Bootstrap contract、Canonical lifecycle 和 Renderer cancellation 回归测试。
+- [x] 增加 Charter、Canonical lifecycle 和 Renderer cancellation 回归测试。
 
 已完成自动化验证：
 
