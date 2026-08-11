@@ -178,6 +178,10 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   `Lobby`。
 - Quick Chat 没有 Composer；普通 Dialog 先完成原子 Active Camp Creation；一键入口先获得
   Core Pending Camp 身份并进入同一 Composer，第一条消息成功时再原子激活。
+- Camp Composer 为空或正文被完整选中时，键入 `/` 打开当前 Lead 可用 Skill 的原生下拉；
+  候选来自真实 Skill/生效组读侧，方向键移动，Enter 或 Tab 选择，Esc 关闭。选中后只写入
+  普通 `/<skill-name> ` 文本并保留草稿、Mention、附件和发送边界，不新增 Slash Command
+  协议，也不声称 Runtime 已读取该 Skill。
 - Camp Composer 中通过 `@` 候选选中的队员以整体蓝色 Member Mention 显示，
   选中后自动补一个普通空格并把光标放到空格之后；在编辑时是不可拆分的原子单元；
   Composer 与发送后的会话历史均使用默认无底色的

@@ -4,11 +4,16 @@ import { describe, expect, it } from 'vitest'
 import {
   StructuredMentionComposer,
   StructuredMentionOptionAvatar,
+  insertSkillCommandWithTrailingSpace,
   mentionQueryAfterNativeTextInput,
   mentionQueryAfterTypedText,
+  skillQueryAfterNativeTextInput,
+  skillQueryAfterTypedText,
   shouldSubmitStructuredComposerOnEnter,
-  structuredMentionOptions
+  structuredMentionOptions,
+  structuredSkillOptions
 } from './StructuredMentionComposer'
+import type { ComposerSkillOption } from './composer-skill-picker'
 
 const members = [{
   agentId: 'agent_1',
@@ -19,6 +24,18 @@ const members = [{
   agentId: 'agent_2',
   displayName: '沐瓦',
   mentionable: true
+}]
+
+const skills: ComposerSkillOption[] = [{
+  id: 'skill-analyze',
+  name: 'analyze-agent-codebase',
+  description: '分析 Agent 代码结构与边界',
+  origin: 'official'
+}, {
+  id: 'skill-worktree',
+  name: 'worktree',
+  description: '管理并行工作树',
+  origin: 'official'
 }]
 
 describe('StructuredMentionComposer', () => {
@@ -135,24 +152,64 @@ describe('StructuredMentionComposer', () => {
     expect(mentionQueryAfterNativeTextInput(null, { anchor: 5, focus: 5 }, '普通@')).toBeNull()
   })
 
+  it('opens the Skill query only when slash input replaces the whole Composer body', () => {
+    const opened = skillQueryAfterTypedText(null, { anchor: 0, focus: 0 }, '/', 0)
+    expect(opened).toEqual({ start: 0, end: 1, query: '' })
+    expect(skillQueryAfterTypedText(opened, { anchor: 1, focus: 1 }, 'work', 1)).toEqual({
+      start: 0,
+      end: 5,
+      query: 'work'
+    })
+    expect(skillQueryAfterTypedText(null, { anchor: 2, focus: 2 }, '/', 2)).toBeNull()
+    expect(skillQueryAfterTypedText(null, { anchor: 0, focus: 4 }, '/', 4)).toEqual({
+      start: 0,
+      end: 1,
+      query: ''
+    })
+    expect(skillQueryAfterTypedText(opened, { anchor: 1, focus: 1 }, ' ', 1)).toBeNull()
+  })
+
+  it('restores an already advanced Skill query from native input and filters real metadata', () => {
+    const opened = skillQueryAfterNativeTextInput(null, { anchor: 1, focus: 1 }, '/', 1)
+    expect(opened).toEqual({ start: 0, end: 1, query: '' })
+    expect(skillQueryAfterNativeTextInput(opened, { anchor: 5, focus: 5 }, 'work', 5)).toEqual({
+      start: 0,
+      end: 5,
+      query: 'work'
+    })
+    expect(structuredSkillOptions(skills, 'agent')).toEqual([skills[0]])
+    expect(structuredSkillOptions(skills, '并行')).toEqual([skills[1]])
+    expect(structuredSkillOptions(skills, '')).toEqual(skills)
+  })
+
+  it('selects a Skill as plain slash text with a writable trailing space', () => {
+    expect(insertSkillCommandWithTrailingSpace({
+      content: [{ kind: 'text', text: '/ana' }],
+      selection: { anchor: 0, focus: 4 }
+    }, 'analyze-agent-codebase')).toEqual({
+      content: [{ kind: 'text', text: '/analyze-agent-codebase ' }],
+      selection: { anchor: 24, focus: 24 }
+    })
+  })
+
   it('does not submit or choose a candidate while IME composition is active', () => {
     expect(shouldSubmitStructuredComposerOnEnter({
       key: 'Enter',
       shiftKey: false,
       isComposing: true,
-      mentionMenuOpen: false
+      suggestionMenuOpen: false
     })).toBe(false)
     expect(shouldSubmitStructuredComposerOnEnter({
       key: 'Enter',
       shiftKey: false,
       isComposing: false,
-      mentionMenuOpen: true
+      suggestionMenuOpen: true
     })).toBe(false)
     expect(shouldSubmitStructuredComposerOnEnter({
       key: 'Enter',
       shiftKey: false,
       isComposing: false,
-      mentionMenuOpen: false
+      suggestionMenuOpen: false
     })).toBe(true)
   })
 
@@ -161,7 +218,7 @@ describe('StructuredMentionComposer', () => {
       key: 'Enter',
       shiftKey: false,
       isComposing: false,
-      mentionMenuOpen: false
+      suggestionMenuOpen: false
     })).toBe(true)
   })
 })

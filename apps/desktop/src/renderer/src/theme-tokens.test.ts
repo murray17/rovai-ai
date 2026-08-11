@@ -172,6 +172,13 @@ describe('Neutral Porcelain + Steel theme tokens', () => {
     expect(css).toMatch(/\.composer-send\s*\{[^}]*min-height:\s*28px/)
   })
 
+  it('keeps the Composer Skill picker in the accepted native Steel dropdown', () => {
+    expect(css).toMatch(/\.skill-picker-menu\s*\{[^}]*max-height:\s*310px/)
+    expect(css).toMatch(/\.skill-picker-menu button\s*\{[^}]*min-height:\s*46px[^}]*grid-template-columns:\s*28px minmax\(0, 1fr\) auto/)
+    expect(css).toMatch(/\.skill-picker-glyph\s*\{[^}]*width:\s*28px[^}]*height:\s*28px[^}]*color:\s*var\(--brand-hover\)/)
+    expect(css).toMatch(/\.skill-picker-enter\s*\{[^}]*color:\s*var\(--faint\)/)
+  })
+
   it('renders A2A recipients as blue interactive mentions', () => {
     expect(css).toMatch(/\.message-delivery-recipient-name\s*\{[^}]*color: var\(--mention-ink\)/)
     expect(css).toMatch(/\.message-mention-token\.is-interactive\s*\{[^}]*cursor:\s*pointer/)

@@ -30,6 +30,7 @@ import {
   type StructuredMentionSelection
 } from './structured-mention-model'
 import { MemberAvatar } from './MemberAvatar'
+import type { ComposerSkillOption } from './composer-skill-picker'
 
 export interface StructuredMentionMember {
   agentId: string
@@ -44,6 +45,8 @@ export interface StructuredMentionQuery {
   query: string
 }
 
+export type StructuredSkillQuery = StructuredMentionQuery
+
 export type StructuredMentionOption =
   | { kind: 'all_members'; label: '所有队员' }
   | { kind: 'member'; member: StructuredMentionMember }
@@ -52,6 +55,8 @@ export interface StructuredMentionComposerProps {
   id: string
   value: StructuredCampMessageContent
   members: readonly StructuredMentionMember[]
+  skills?: readonly ComposerSkillOption[] | null
+  skillCatalogStatus?: 'loading' | 'ready' | 'error'
   ariaLabel: string
   placeholder?: string
   disabled?: boolean
@@ -83,6 +88,17 @@ export function structuredMentionOptions(
     options.push({ kind: 'member', member })
   }
   return options
+}
+
+export function structuredSkillOptions(
+  skills: readonly ComposerSkillOption[],
+  query: string
+): ComposerSkillOption[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase('zh-CN')
+  if (!normalizedQuery) return [...skills]
+  return skills.filter((skill) => `${skill.name}\n${skill.description}`
+    .toLocaleLowerCase('zh-CN')
+    .includes(normalizedQuery))
 }
 
 export function StructuredMentionOptionAvatar({
@@ -148,16 +164,79 @@ export function mentionQueryAfterNativeTextInput(
   )
 }
 
+export function skillQueryAfterTypedText(
+  current: StructuredSkillQuery | null,
+  selection: StructuredMentionSelection,
+  text: string,
+  contentLength: number
+): StructuredSkillQuery | null {
+  const insertionStart = Math.min(selection.anchor, selection.focus)
+  const insertionEnd = Math.max(selection.anchor, selection.focus)
+  if (!current) {
+    const query = text.startsWith('/') ? text.slice(1) : null
+    if (
+      query === null
+      || insertionStart !== 0
+      || insertionEnd !== contentLength
+      || /[\s/@]/u.test(query)
+    ) return null
+    return { start: 0, end: text.length, query }
+  }
+  if (
+    selection.anchor !== selection.focus
+    || selection.anchor !== current.end
+    || /[\s/@]/u.test(text)
+  ) return null
+  return {
+    ...current,
+    end: current.end + text.length,
+    query: `${current.query}${text}`
+  }
+}
+
+export function skillQueryAfterNativeTextInput(
+  current: StructuredSkillQuery | null,
+  selectionAfterInput: StructuredMentionSelection,
+  text: string,
+  contentLengthAfterInput: number
+): StructuredSkillQuery | null {
+  if (selectionAfterInput.anchor !== selectionAfterInput.focus) return null
+  const insertionEnd = selectionAfterInput.anchor
+  if (
+    !text.startsWith('/')
+    && current
+    && current.end === insertionEnd
+    && current.query.endsWith(text)
+  ) return current
+  const insertionStart = Math.max(0, insertionEnd - text.length)
+  return skillQueryAfterTypedText(
+    current,
+    { anchor: insertionStart, focus: insertionStart },
+    text,
+    Math.max(0, contentLengthAfterInput - text.length)
+  )
+}
+
+export function insertSkillCommandWithTrailingSpace(
+  state: StructuredMentionEditorState,
+  skillName: string
+): StructuredMentionEditorState {
+  if (!skillName || /[\s/]/u.test(skillName)) {
+    throw new Error('Skill name must be a non-empty slash-command segment')
+  }
+  return insertStructuredText(state, `/${skillName} `)
+}
+
 export function shouldSubmitStructuredComposerOnEnter(input: {
   key: string
   shiftKey: boolean
   isComposing: boolean
-  mentionMenuOpen: boolean
+  suggestionMenuOpen: boolean
 }): boolean {
   return input.key === 'Enter'
     && !input.shiftKey
     && !input.isComposing
-    && !input.mentionMenuOpen
+    && !input.suggestionMenuOpen
 }
 
 const TOKEN_STYLE: CSSProperties = {
@@ -187,10 +266,16 @@ const EDITOR_STYLE: CSSProperties = {
   cursor: 'text'
 }
 
+type StructuredComposerQuery =
+  | { kind: 'mention'; value: StructuredMentionQuery }
+  | { kind: 'skill'; value: StructuredSkillQuery }
+
 export function StructuredMentionComposer({
   id,
   value,
   members,
+  skills = [],
+  skillCatalogStatus = 'ready',
   ariaLabel,
   placeholder = '',
   disabled = false,
@@ -208,24 +293,35 @@ export function StructuredMentionComposer({
   const lastSelectionRef = useRef<StructuredMentionSelection>({ anchor: 0, focus: 0 })
   const isComposingRef = useRef(false)
   const compositionFrameRef = useRef<number | null>(null)
-  const [mentionQuery, setMentionQuery] = useState<StructuredMentionQuery | null>(null)
+  const [query, setQuery] = useState<StructuredComposerQuery | null>(null)
   const [activeOption, setActiveOption] = useState(0)
   const generatedId = useId()
-  const menuId = `${id || generatedId}-mention-options`
+  const mentionMenuId = `${id || generatedId}-mention-options`
+  const skillMenuId = `${id || generatedId}-skill-options`
   const content = useMemo(() => normalizeStructuredMentionContent(value), [value])
   const memberById = useMemo(
     () => new Map(members.map((member) => [member.agentId, member])),
     [members]
   )
-  const options = useMemo(
-    () => mentionQuery ? structuredMentionOptions(members, mentionQuery.query) : [],
-    [members, mentionQuery]
+  const mentionOptions = useMemo(
+    () => query?.kind === 'mention'
+      ? structuredMentionOptions(members, query.value.query)
+      : [],
+    [members, query]
   )
-  const menuOpen = mentionQuery !== null
+  const skillOptions = useMemo(
+    () => query?.kind === 'skill' && skills
+      ? structuredSkillOptions(skills, query.value.query)
+      : [],
+    [query, skills]
+  )
+  const menuOpen = query !== null
+  const menuId = query?.kind === 'skill' ? skillMenuId : mentionMenuId
+  const optionCount = query?.kind === 'skill' ? skillOptions.length : mentionOptions.length
 
   useEffect(() => {
     setActiveOption(0)
-  }, [mentionQuery?.query, mentionQuery?.start])
+  }, [query?.kind, query?.value.query, query?.value.start])
 
   useEffect(() => () => {
     if (compositionFrameRef.current !== null) {
@@ -262,13 +358,14 @@ export function StructuredMentionComposer({
   })
 
   const closeQueryIfSelectionMoved = (): void => {
-    if (!mentionQuery) return
+    if (!query) return
     const selection = currentSelection()
+    const activeQuery = query.value
     if (
       selection.anchor !== selection.focus
-      || selection.anchor < mentionQuery.start + 1
-      || selection.anchor > mentionQuery.end
-    ) setMentionQuery(null)
+      || selection.anchor < activeQuery.start + 1
+      || selection.anchor > activeQuery.end
+    ) setQuery(null)
   }
 
   const syncNativeDom = (nativeEvent?: InputEvent): void => {
@@ -287,26 +384,48 @@ export function StructuredMentionComposer({
         anchor: clamp(nextSelection.anchor, 0, contentLength),
         focus: clamp(nextSelection.focus, 0, contentLength)
       }
-      setMentionQuery((current) => mentionQueryAfterNativeTextInput(
-        current,
-        selectionAfterInput,
-        nativeEvent.data ?? ''
-      ))
+      setQuery((current) => {
+        const nextMentionQuery = mentionQueryAfterNativeTextInput(
+          current?.kind === 'mention' ? current.value : null,
+          selectionAfterInput,
+          nativeEvent.data ?? ''
+        )
+        if (nextMentionQuery) return { kind: 'mention', value: nextMentionQuery }
+        const nextSkillQuery = skillQueryAfterNativeTextInput(
+          current?.kind === 'skill' ? current.value : null,
+          selectionAfterInput,
+          nativeEvent.data ?? '',
+          contentLength
+        )
+        return nextSkillQuery ? { kind: 'skill', value: nextSkillQuery } : null
+      })
     } else if (nativeEvent) {
-      setMentionQuery(null)
+      setQuery(null)
     }
   }
 
-  const chooseOption = (option: StructuredMentionOption | undefined): void => {
-    if (!option || !mentionQuery || disabled) return
+  const chooseMentionOption = (option: StructuredMentionOption | undefined): void => {
+    if (!option || query?.kind !== 'mention' || disabled) return
     const state: StructuredMentionEditorState = {
       content,
-      selection: { anchor: mentionQuery.start, focus: mentionQuery.end }
+      selection: { anchor: query.value.start, focus: query.value.end }
     }
     const next = option.kind === 'all_members'
       ? insertAllMembersMentionWithTrailingSpace(state)
       : insertMemberMentionWithTrailingSpace(state, option.member.agentId)
-    setMentionQuery(null)
+    setQuery(null)
+    emitState(next)
+    window.requestAnimationFrame(() => editorRef.current?.focus())
+  }
+
+  const chooseSkillOption = (option: ComposerSkillOption | undefined): void => {
+    if (!option || query?.kind !== 'skill' || disabled) return
+    const state: StructuredMentionEditorState = {
+      content,
+      selection: { anchor: query.value.start, focus: query.value.end }
+    }
+    const next = insertSkillCommandWithTrailingSpace(state, option.name)
+    setQuery(null)
     emitState(next)
     window.requestAnimationFrame(() => editorRef.current?.focus())
   }
@@ -316,7 +435,11 @@ export function StructuredMentionComposer({
     const next = direction === 'backward'
       ? deleteStructuredBackward(editorState(selection))
       : deleteStructuredForward(editorState(selection))
-    setMentionQuery(queryAfterDeletion(mentionQuery, selection, direction))
+    setQuery((current) => {
+      if (!current) return null
+      const nextQuery = queryAfterDeletion(current.value, selection, direction)
+      return nextQuery ? { ...current, value: nextQuery } : null
+    })
     emitState(next)
   }
 
@@ -329,13 +452,28 @@ export function StructuredMentionComposer({
     if (nativeEvent.inputType === 'insertText' && nativeEvent.data !== null) {
       event.preventDefault()
       const next = insertStructuredText(editorState(selection), nativeEvent.data)
-      setMentionQuery(mentionQueryAfterTypedText(mentionQuery, selection, nativeEvent.data))
+      const contentLength = structuredMentionContentLength(content)
+      setQuery((current) => {
+        const nextMentionQuery = mentionQueryAfterTypedText(
+          current?.kind === 'mention' ? current.value : null,
+          selection,
+          nativeEvent.data ?? ''
+        )
+        if (nextMentionQuery) return { kind: 'mention', value: nextMentionQuery }
+        const nextSkillQuery = skillQueryAfterTypedText(
+          current?.kind === 'skill' ? current.value : null,
+          selection,
+          nativeEvent.data ?? '',
+          contentLength
+        )
+        return nextSkillQuery ? { kind: 'skill', value: nextSkillQuery } : null
+      })
       emitState(next)
       return
     }
     if (nativeEvent.inputType === 'insertParagraph' || nativeEvent.inputType === 'insertLineBreak') {
       event.preventDefault()
-      setMentionQuery(null)
+      setQuery(null)
       emitState(insertStructuredText(editorState(selection), '\n'))
       return
     }
@@ -351,7 +489,7 @@ export function StructuredMentionComposer({
     }
     if (nativeEvent.inputType === 'deleteByCut') {
       event.preventDefault()
-      setMentionQuery(null)
+      setQuery(null)
       emitState(replaceStructuredSelection(editorState(selection), []))
     }
   }
@@ -364,24 +502,26 @@ export function StructuredMentionComposer({
 
     if (menuOpen && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
       event.preventDefault()
-      if (options.length > 0) {
+      if (optionCount > 0) {
         const direction = event.key === 'ArrowDown' ? 1 : -1
-        setActiveOption((current) => (current + direction + options.length) % options.length)
+        setActiveOption((current) => (current + direction + optionCount) % optionCount)
       }
       return
     }
     if (menuOpen && event.key === 'Escape') {
       event.preventDefault()
-      setMentionQuery(null)
+      setQuery(null)
       return
     }
     if (menuOpen && (event.key === 'Enter' || event.key === 'Tab')) {
-      if (options.length > 0) {
+      if (optionCount > 0) {
         event.preventDefault()
-        chooseOption(options[Math.min(activeOption, options.length - 1)])
+        const optionIndex = Math.min(activeOption, optionCount - 1)
+        if (query?.kind === 'skill') chooseSkillOption(skillOptions[optionIndex])
+        else chooseMentionOption(mentionOptions[optionIndex])
         return
       }
-      setMentionQuery(null)
+      setQuery(null)
       if (event.key === 'Tab') return
     }
     if (event.key === 'Backspace') {
@@ -396,7 +536,7 @@ export function StructuredMentionComposer({
     }
     if (event.key === 'Enter' && event.shiftKey) {
       event.preventDefault()
-      setMentionQuery(null)
+      setQuery(null)
       emitState(insertStructuredText(editorState(), '\n'))
       return
     }
@@ -404,7 +544,7 @@ export function StructuredMentionComposer({
       key: event.key,
       shiftKey: event.shiftKey,
       isComposing,
-      mentionMenuOpen: menuOpen && options.length > 0
+      suggestionMenuOpen: menuOpen && optionCount > 0
     })) {
       event.preventDefault()
       void onSubmit()
@@ -424,13 +564,13 @@ export function StructuredMentionComposer({
       return
     }
     event.preventDefault()
-    setMentionQuery(null)
+    setQuery(null)
     emitState(pasteStructuredPlainText(editorState(), event.clipboardData.getData('text/plain')))
   }
 
   const handleCompositionStart = (_event: CompositionEvent<HTMLDivElement>): void => {
     isComposingRef.current = true
-    setMentionQuery(null)
+    setQuery(null)
   }
 
   const handleCompositionEnd = (_event: CompositionEvent<HTMLDivElement>): void => {
@@ -453,7 +593,7 @@ export function StructuredMentionComposer({
     const selection = { anchor: start, focus: start + 1 }
     lastSelectionRef.current = selection
     restoreDomSelection(editor, selection)
-    setMentionQuery(null)
+    setQuery(null)
   }
 
   const rootClassName = ['structured-mention-composer', className].filter(Boolean).join(' ')
@@ -470,8 +610,8 @@ export function StructuredMentionComposer({
         aria-autocomplete="list"
         aria-expanded={menuOpen}
         aria-controls={menuOpen ? menuId : undefined}
-        aria-activedescendant={menuOpen && options.length > 0
-          ? `${menuId}-${Math.min(activeOption, options.length - 1)}`
+        aria-activedescendant={menuOpen && optionCount > 0
+          ? `${menuId}-${Math.min(activeOption, optionCount - 1)}`
           : undefined}
         aria-disabled={disabled || undefined}
         contentEditable={!disabled}
@@ -494,7 +634,7 @@ export function StructuredMentionComposer({
         onCompositionEnd={handleCompositionEnd}
         onPointerDown={handlePointerDown}
         onMouseUp={(_event: MouseEvent<HTMLDivElement>) => closeQueryIfSelectionMoved()}
-        onBlur={() => setMentionQuery(null)}
+        onBlur={() => setQuery(null)}
       >
         {content.map((segment, index) => {
           if (segment.kind === 'text') {
@@ -606,54 +746,79 @@ export function StructuredMentionComposer({
         </span>
       )}
 
-      {menuOpen && (
+      {query && (
         <div
-          className="structured-mention-menu mention-menu"
+          className={`structured-mention-menu mention-menu${query.kind === 'skill' ? ' skill-picker-menu' : ''}`}
           id={menuId}
           role="listbox"
-          aria-label="选择在队的队员"
-          style={{
-            position: 'absolute',
-            zIndex: 30,
-            right: 0,
-            bottom: 'calc(100% + 7px)',
-            left: 0,
-            maxHeight: '280px',
-            overflow: 'auto',
-            padding: '5px',
-            border: '1px solid var(--line-strong)',
-            borderRadius: '9px',
-            background: 'var(--surface-raised)',
-            boxShadow: 'var(--shadow-menu)'
-          }}
+          aria-label={query.kind === 'skill' ? '选择当前 Lead 可用的 Skill' : '选择在队的队员'}
         >
           <div className="mention-menu-heading" role="presentation">
-            <strong>@ 提及队员</strong>
-            <span>可重复选择</span>
+            <strong>{query.kind === 'skill' ? 'Skills' : '@ 提及队员'}</strong>
+            <span>{query.kind === 'skill'
+              ? skillCatalogStatus === 'loading'
+                ? '正在读取…'
+                : `${skillOptions.length} / ${skills?.length ?? 0} 可用`
+              : '可重复选择'}</span>
           </div>
-          {options.map((option, index) => (
-            <button
-              id={`${menuId}-${index}`}
-              className={index === activeOption ? 'active' : ''}
-              type="button"
-              role="option"
-              aria-selected={index === activeOption}
-              key={option.kind === 'all_members' ? 'all-members' : option.member.agentId}
-              disabled={disabled}
-              onPointerDown={(event) => event.preventDefault()}
-              onMouseEnter={() => setActiveOption(index)}
-              onClick={() => chooseOption(option)}
-            >
-              <StructuredMentionOptionAvatar option={option} />
-              <span>
-                <strong>{option.kind === 'all_members' ? '所有队员' : option.member.displayName}</strong>
-                <small>{option.kind === 'all_members' ? '@所有队员' : `@${option.member.displayName}`}</small>
-              </span>
-              <i aria-hidden="true" />
-            </button>
-          ))}
-          {options.length === 0 && (
-            <p className="structured-mention-empty" role="status">没有匹配的在队队员</p>
+          {query.kind === 'mention'
+            ? mentionOptions.map((option, index) => (
+                <button
+                  id={`${menuId}-${index}`}
+                  className={index === activeOption ? 'active' : ''}
+                  type="button"
+                  role="option"
+                  aria-selected={index === activeOption}
+                  key={option.kind === 'all_members' ? 'all-members' : option.member.agentId}
+                  disabled={disabled}
+                  onPointerDown={(event) => event.preventDefault()}
+                  onMouseEnter={() => setActiveOption(index)}
+                  onClick={() => chooseMentionOption(option)}
+                >
+                  <StructuredMentionOptionAvatar option={option} />
+                  <span>
+                    <strong>{option.kind === 'all_members' ? '所有队员' : option.member.displayName}</strong>
+                    <small>{option.kind === 'all_members' ? '@所有队员' : `@${option.member.displayName}`}</small>
+                  </span>
+                  <i aria-hidden="true" />
+                </button>
+              ))
+            : skillOptions.map((option, index) => (
+                <button
+                  id={`${menuId}-${index}`}
+                  className={index === activeOption ? 'active' : ''}
+                  type="button"
+                  role="option"
+                  aria-selected={index === activeOption}
+                  data-skill-name={option.name}
+                  key={option.id}
+                  disabled={disabled}
+                  onPointerDown={(event) => event.preventDefault()}
+                  onMouseEnter={() => setActiveOption(index)}
+                  onClick={() => chooseSkillOption(option)}
+                >
+                  <span className="skill-picker-glyph" aria-hidden="true">/</span>
+                  <span className="skill-picker-copy">
+                    <strong>/{option.name}</strong>
+                    <small>{option.description || (option.origin === 'official' ? 'Rovai 内置 Skill' : '用户导入 Skill')}</small>
+                  </span>
+                  <span className="skill-picker-enter" aria-hidden="true">
+                    {index === activeOption ? '↵' : ''}
+                  </span>
+                </button>
+              ))}
+          {optionCount === 0 && (
+            <p className="structured-mention-empty" role="status">
+              {query.kind === 'mention'
+                ? '没有匹配的在队队员'
+                : skillCatalogStatus === 'loading'
+                  ? '正在读取当前 Lead 可用的 Skill…'
+                  : skillCatalogStatus === 'error'
+                    ? '暂时无法读取 Skill；输入内容仍可正常发送。'
+                    : (skills?.length ?? 0) === 0
+                      ? '当前 Lead 没有已配置的可用 Skill'
+                      : '没有匹配的 Skill'}
+            </p>
           )}
         </div>
       )}

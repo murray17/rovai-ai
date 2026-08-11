@@ -2061,9 +2061,20 @@ mod tests {
         group_keys: &[SkillDeliveryGroupKey],
     ) -> SkillView {
         library.install_bundled_skills(database).unwrap();
-        let skill = library
-            .list(database)
-            .unwrap()
+        let installed = library.list(database).unwrap();
+        for skill in installed
+            .iter()
+            .filter(|skill| skill.name != "memory-stewardship")
+        {
+            assign_skill_to_groups(
+                database,
+                library,
+                skill,
+                &[],
+                &format!("clear-unrelated-official-projection-skill-{}", skill.id),
+            );
+        }
+        let skill = installed
             .into_iter()
             .find(|skill| skill.name == "memory-stewardship")
             .unwrap();

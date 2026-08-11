@@ -516,7 +516,7 @@ impl SkillLibraryService {
             JOIN skill_revision AS revision
               ON revision.id = skill.current_revision_id
             ORDER BY CASE skill.origin WHEN 'official' THEN 0 ELSE 1 END,
-                     CASE skill.enabled WHEN 1 THEN 0 ELSE 1 END, skill.name
+                     skill.name
             "#,
         )?;
         let mut skills = statement
@@ -913,6 +913,12 @@ impl SkillLibraryService {
                     "UPDATE skill SET current_revision_id = ?1 WHERE id = ?2",
                     params![revision_id_for_handler, skill_id_for_handler],
                 )?;
+                insert_default_group_assignments(
+                    transaction,
+                    &skill_id_for_handler,
+                    &revision_id_for_handler,
+                    &now,
+                )?;
             }
             append_skill_event(
                 transaction,
@@ -1018,6 +1024,11 @@ impl SkillLibraryService {
                 json!({
                     "skillId": envelope.payload.skill_id,
                     "enabled": envelope.payload.enabled,
+                    "version": if current_enabled == envelope.payload.enabled {
+                        version
+                    } else {
+                        version + 1
+                    },
                     "unchanged": current_enabled == envelope.payload.enabled,
                 }),
                 Some(EntityReference {
@@ -1406,6 +1417,12 @@ impl SkillLibraryService {
                         "UPDATE skill SET current_revision_id = ?1 WHERE id = ?2",
                         params![revision_id_for_handler, skill_id_for_handler],
                     )?;
+                    insert_default_group_assignments(
+                        transaction,
+                        &skill_id_for_handler,
+                        &revision_id_for_handler,
+                        &now,
+                    )?;
                 }
                 append_skill_event(
                     transaction,
@@ -1682,6 +1699,25 @@ fn load_group_assignments(
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn insert_default_group_assignments(
+    transaction: &Transaction<'_>,
+    skill_id: &str,
+    revision_id: &str,
+    now: &str,
+) -> Result<()> {
+    for group_key in SkillDeliveryGroupKey::ALL {
+        transaction.execute(
+            r#"
+            INSERT INTO skill_group_assignment(
+                group_key, skill_id, revision_id, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?4)
+            "#,
+            params![group_key.as_str(), skill_id, revision_id, now],
+        )?;
+    }
+    Ok(())
 }
 
 fn load_existing_skill_by_name(database: &Database, name: &str) -> Result<Option<ExistingSkill>> {
@@ -2544,7 +2580,7 @@ mod tests {
     }
 
     #[test]
-    fn imports_start_enabled_unassigned_and_updates_preserve_assignments() {
+    fn imports_default_to_all_groups_and_updates_preserve_user_changes() {
         let root = temporary_directory("rovai-skill-library");
         let source = temporary_directory("rovai-skill-source");
         let data = temporary_directory("rovai-skill-db");
@@ -2571,7 +2607,16 @@ mod tests {
         assert_eq!(result.result.code, "skill_imported");
         let first = service.list(&database).unwrap().pop().unwrap();
         assert!(first.enabled);
-        assert!(first.group_assignments.is_empty());
+        assert_eq!(
+            first.group_assignments.len(),
+            SkillDeliveryGroupKey::ALL.len()
+        );
+        assert!(SkillDeliveryGroupKey::ALL.into_iter().all(|group_key| {
+            first
+                .group_assignments
+                .iter()
+                .any(|assignment| assignment.group_key == group_key)
+        }));
         let assignment_result = service
             .set_group_assignments(
                 &mut database,
@@ -2658,18 +2703,19 @@ mod tests {
     }
 
     #[test]
-    fn official_skills_are_self_contained_unassigned_and_preserve_user_disable() {
+    fn official_skills_default_to_all_groups_and_preserve_user_changes() {
         let root = temporary_directory("rovai-skill-library");
         let data = temporary_directory("rovai-skill-db");
         let mut database = Database::open(&data).unwrap();
         let service = SkillLibraryService::new(root.clone()).unwrap();
         service.install_bundled_skills(&mut database).unwrap();
         let skills = service.list(&database).unwrap();
+        let initial_order = skills
+            .iter()
+            .map(|skill| skill.name.clone())
+            .collect::<Vec<_>>();
         assert_eq!(
-            skills
-                .iter()
-                .map(|skill| skill.name.as_str())
-                .collect::<Vec<_>>(),
+            initial_order.iter().map(String::as_str).collect::<Vec<_>>(),
             [
                 "analyze-agent-codebase",
                 "grill-duo",
@@ -2679,11 +2725,17 @@ mod tests {
             ]
         );
         assert!(skills.iter().all(|skill| skill.enabled));
-        assert!(
-            skills
+        let all_groups = SkillDeliveryGroupKey::ALL
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        assert!(skills.iter().all(|skill| {
+            skill
+                .group_assignments
                 .iter()
-                .all(|skill| skill.group_assignments.is_empty())
-        );
+                .map(|assignment| assignment.group_key)
+                .collect::<BTreeSet<_>>()
+                == all_groups
+        }));
         for skill in &skills {
             let content = service.revision_content_path(&skill.id, &skill.current_revision.id);
             assert!(content.join("agents/openai.yaml").is_file());
@@ -2770,13 +2822,53 @@ mod tests {
                 enabled: false,
             },
         );
-        service.set_enabled(&mut database, &disable).unwrap();
+        let disable_result = service.set_enabled(&mut database, &disable).unwrap();
+        assert_eq!(
+            disable_result.result.payload["version"],
+            memory_stewardship.version + 1
+        );
+        let disabled = service
+            .get(&database, &memory_stewardship.id)
+            .unwrap()
+            .unwrap();
+        service
+            .set_group_assignments(
+                &mut database,
+                &user_envelope(
+                    "remove-one-bundled-group",
+                    SetSkillGroupAssignmentsCommand {
+                        skill_id: memory_stewardship.id.clone(),
+                        expected_version: disabled.version,
+                        group_keys: SkillDeliveryGroupKey::ALL
+                            .into_iter()
+                            .filter(|group| *group != SkillDeliveryGroupKey::Qwen)
+                            .collect(),
+                    },
+                ),
+            )
+            .unwrap();
         service.install_bundled_skills(&mut database).unwrap();
         let refreshed = service
             .get(&database, &memory_stewardship.id)
             .unwrap()
             .unwrap();
         assert!(!refreshed.enabled);
+        assert_eq!(refreshed.group_assignments.len(), 8);
+        assert!(
+            refreshed
+                .group_assignments
+                .iter()
+                .all(|assignment| assignment.group_key != SkillDeliveryGroupKey::Qwen)
+        );
+        assert_eq!(
+            service
+                .list(&database)
+                .unwrap()
+                .into_iter()
+                .map(|skill| skill.name)
+                .collect::<Vec<_>>(),
+            initial_order
+        );
         remove_directory_if_present(&root).unwrap();
         remove_directory_if_present(&data).unwrap();
     }

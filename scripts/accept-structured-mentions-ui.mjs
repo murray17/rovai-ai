@@ -13,8 +13,10 @@ import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 
 const root = resolve(import.meta.dirname, '..')
+const cliArguments = process.argv.slice(2)
+const suppliedAppPath = cliArguments.find((argument) => !argument.startsWith('--'))
 const appPath = resolve(
-  process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai-ai.app')
+  suppliedAppPath ?? join(root, 'dist', 'mac-arm64', 'Rovai-ai.app')
 )
 const suppliedFixtureRoot = process.env.ROVAI_STRUCTURED_MENTIONS_ACCEPT_DATA_DIR
 const fixtureRoot = suppliedFixtureRoot
@@ -31,7 +33,9 @@ const suppliedOutputDir = process.env.ROVAI_STRUCTURED_MENTIONS_ACCEPT_OUTPUT_DI
 const outputDir = suppliedOutputDir
   ? resolve(suppliedOutputDir)
   : await mkdtemp(join(tmpdir(), 'rovai-structured-mentions-ui-captures-'))
+const acceptanceHome = join(fixtureRoot, 'home')
 const debugPort = Number(process.env.ROVAI_STRUCTURED_MENTIONS_ACCEPT_DEBUG_PORT ?? 9491)
+const skillPickerOnly = cliArguments.includes('--skill-picker-only')
 const databasePath = join(dataDir, 'rovai.sqlite')
 const acceptanceExecutablePath = '/usr/bin/true'
 const targetMembers = [
@@ -98,6 +102,7 @@ const acceptancePermissionOptions = JSON.stringify([
 
 await access(join(appPath, 'Contents', 'MacOS', 'Rovai-ai'))
 await mkdir(dataDir, { recursive: true })
+await mkdir(acceptanceHome, { recursive: true })
 await mkdir(runtimeTempDir, { recursive: true })
 await mkdir(outputDir, { recursive: true })
 
@@ -140,6 +145,31 @@ try {
       && agent.runtimeConfiguration?.adapterKind === 'codex-cli')),
     `Acceptance Runtime is not ready for every target: ${JSON.stringify(configuredAgents)}`
   )
+  const installedSkills = await request(running.cdp, 'skills.list')
+  let selectableSkill = installedSkills.find((skill) =>
+    skill.name === 'analyze-agent-codebase'
+    && skill.enabled
+    && skill.lifecycleStatus === 'active')
+    ?? installedSkills.find((skill) => skill.enabled && skill.lifecycleStatus === 'active')
+  assert(selectableSkill, `No active enabled Skill is available: ${JSON.stringify(installedSkills)}`)
+  if (!selectableSkill.groupAssignments.some((assignment) =>
+    assignment.groupKey === 'codex'
+    && assignment.revisionId === selectableSkill.currentRevision.id)) {
+    const assignment = await request(running.cdp, 'skills.setGroupAssignments', {
+      commandId: crypto.randomUUID(),
+      command: {
+        skillId: selectableSkill.id,
+        expectedVersion: selectableSkill.version,
+        groupKeys: [...new Set([
+          ...selectableSkill.groupAssignments.map((value) => value.groupKey),
+          'codex'
+        ])]
+      }
+    })
+    assert(assignment.status === 'applied',
+      `Could not assign the acceptance Skill to Codex: ${JSON.stringify(assignment)}`)
+    selectableSkill = await request(running.cdp, 'skills.get', { skillId: selectableSkill.id })
+  }
 
   const created = await request(running.cdp, 'camps.create', {
     commandId: crypto.randomUUID(),
@@ -168,6 +198,107 @@ try {
   await waitForSelector(running.cdp, '#camp-message.structured-mention-editor')
   await waitForExpression(running.cdp,
     `document.querySelector('#camp-message')?.getAttribute('contenteditable') === 'true'`)
+  await focusEditorAtEnd(running.cdp)
+  await running.cdp.send('Input.insertText', { text: '/' })
+  await waitForExpression(running.cdp, `(() => {
+    const menu = document.querySelector('.structured-skill-menu, .skill-picker-menu')
+    const option = menu?.querySelector('[data-skill-name=${JSON.stringify(selectableSkill.name)}]')
+    return document.querySelector('#camp-message')?.textContent === '/'
+      && document.querySelector('#camp-message')?.getAttribute('aria-expanded') === 'true'
+      && menu?.getAttribute('role') === 'listbox'
+      && Boolean(option)
+  })()`, 10_000)
+  const skillPickerInspection = await evaluate(running.cdp, `(() => {
+    const editor = document.querySelector('#camp-message')
+    const menu = document.querySelector('.skill-picker-menu')
+    const option = menu?.querySelector('[data-skill-name=${JSON.stringify(selectableSkill.name)}]')
+    const glyph = option?.querySelector('.skill-picker-glyph')
+    if (!(editor instanceof HTMLElement)
+        || !(menu instanceof HTMLElement)
+        || !(option instanceof HTMLElement)
+        || !(glyph instanceof HTMLElement)) return null
+    const menuRect = menu.getBoundingClientRect()
+    const editorRect = editor.getBoundingClientRect()
+    const menuStyle = getComputedStyle(menu)
+    const optionStyle = getComputedStyle(option)
+    const glyphStyle = getComputedStyle(glyph)
+    return {
+      menuLabel: menu.getAttribute('aria-label'),
+      menuRole: menu.getAttribute('role'),
+      optionRole: option.getAttribute('role'),
+      optionName: option.dataset.skillName,
+      command: option.querySelector('strong')?.textContent ?? null,
+      description: option.querySelector('small')?.textContent ?? null,
+      menuAboveEditor: menuRect.bottom <= editorRect.top - 5,
+      maxHeight: menuStyle.maxHeight,
+      optionMinHeight: optionStyle.minHeight,
+      glyphSize: [glyphStyle.width, glyphStyle.height],
+      glyphColor: glyphStyle.color,
+      viewportFits: menuRect.left >= 0 && menuRect.right <= innerWidth
+    }
+  })()`)
+  assert(
+    skillPickerInspection
+      && skillPickerInspection.menuLabel === '选择当前 Lead 可用的 Skill'
+      && skillPickerInspection.menuRole === 'listbox'
+      && skillPickerInspection.optionRole === 'option'
+      && skillPickerInspection.optionName === selectableSkill.name
+      && skillPickerInspection.command === `/${selectableSkill.name}`
+      && skillPickerInspection.description === selectableSkill.currentRevision.description
+      && skillPickerInspection.menuAboveEditor
+      && Number.parseFloat(skillPickerInspection.maxHeight) === 310
+      && Number.parseFloat(skillPickerInspection.optionMinHeight) >= 46
+      && skillPickerInspection.glyphSize.every((value) => Number.parseFloat(value) === 28)
+      && skillPickerInspection.viewportFits,
+    `Skill picker does not match the accepted native dropdown: ${JSON.stringify(skillPickerInspection)}`
+  )
+  const skillPickerCapture = join(outputDir, 'composer-skill-picker.png')
+  await capture(running.cdp, skillPickerCapture)
+  await moveMouseToElement(running.cdp,
+    `.skill-picker-menu [data-skill-name=${JSON.stringify(selectableSkill.name)}]`)
+  await waitForExpression(running.cdp,
+    `document.querySelector('.skill-picker-menu [data-skill-name=${JSON.stringify(selectableSkill.name)}]')?.getAttribute('aria-selected') === 'true'`)
+  await pressKey(running.cdp, {
+    key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 36
+  })
+  const selectedSkillText = `/${selectableSkill.name} `
+  await waitForExpression(running.cdp, `(() => {
+    const editor = document.querySelector('#camp-message')
+    return editor?.textContent === ${JSON.stringify(`/${selectableSkill.name} `)}
+      && editor.getAttribute('aria-expanded') === 'false'
+      && document.activeElement === editor
+      && !editor.querySelector('[data-token-kind]')
+  })()`)
+  const selectedSkillDraft = await waitForValue(async () =>
+    request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
+    deepEqual(draft.content, [{ kind: 'text', text: selectedSkillText }]), 10_000)
+  assert(selectedSkillDraft.body === selectedSkillText,
+    `Selected Skill was not persisted as plain text: ${JSON.stringify(selectedSkillDraft)}`)
+
+  if (skillPickerOnly) {
+    result = {
+      acceptance: 'composer-skill-picker-ui',
+      appPath,
+      outputDir,
+      captures: { skillPicker: skillPickerCapture },
+      campId,
+      selectedSkillName: selectableSkill.name,
+      selectedSkillText,
+      skillPickerInspection,
+      structuredContent: selectedSkillDraft.content,
+      clipboardItemCountBeforeTest: clipboardArchive.length,
+      clipboardRestored: false,
+      isolatedUserDataRemoved: false
+    }
+  } else {
+  await selectWholeEditor(running.cdp)
+  await pressKey(running.cdp, {
+    key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
+  })
+  await waitForExpression(running.cdp,
+    `document.querySelector('#camp-message')?.textContent === ''`)
+  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+    (draft) => deepEqual(draft.content, []), 10_000)
   await focusEditorAtEnd(running.cdp)
   await running.cdp.send('Input.insertText', { text: expectedContent[0].text })
   let expectedEditorText = expectedContent[0].text
@@ -542,6 +673,7 @@ try {
     appPath,
     outputDir,
     captures: {
+      skillPicker: skillPickerCapture,
       candidateMenu: candidateMenuCapture,
       composer: composerCapture,
       composerPopover: composerPopoverCapture,
@@ -551,6 +683,9 @@ try {
       hoverCopy: copiedCapture
     },
     campId,
+    selectedSkillName: selectableSkill.name,
+    selectedSkillText,
+    skillPickerInspection,
     campMessageId: sent.message.id,
     campTurnId: sent.message.campTurnId,
     agentRunIds: sent.runs.map((run) => run.id),
@@ -565,6 +700,7 @@ try {
     clipboardItemCountBeforeTest: clipboardArchive.length,
     clipboardRestored: false,
     isolatedUserDataRemoved: false
+  }
   }
 } catch (error) {
   testFailure = error
@@ -602,10 +738,10 @@ if (testFailure || cleanupFailure) {
 }
 
 if (!suppliedFixtureRoot) {
-  await rm(fixtureRoot, { recursive: true, force: true })
+  await removeDirectoryWithRetry(fixtureRoot)
 }
 if (!suppliedRuntimeTempDir) {
-  await rm(runtimeTempDir, { recursive: true, force: true })
+  await removeDirectoryWithRetry(runtimeTempDir)
 }
 result.clipboardRestored = clipboardRestored
 result.isolatedUserDataRemoved = !suppliedFixtureRoot
@@ -654,6 +790,21 @@ async function installAcceptanceRuntime(path, agentIds) {
   `)
 }
 
+async function removeDirectoryWithRetry(path) {
+  let lastError = null
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      await rm(path, { recursive: true, force: true })
+      return
+    } catch (error) {
+      if (!['ENOTEMPTY', 'EBUSY', 'EPERM'].includes(error?.code)) throw error
+      lastError = error
+      await wait(100)
+    }
+  }
+  throw lastError ?? new Error(`Could not remove ${path}`)
+}
+
 async function launchApp(userDataDir, port, width, height) {
   const stderr = []
   const child = spawn(join(appPath, 'Contents', 'MacOS', 'Rovai-ai'), [
@@ -663,6 +814,7 @@ async function launchApp(userDataDir, port, width, height) {
     cwd: root,
     env: {
       ...process.env,
+      HOME: acceptanceHome,
       TMPDIR: runtimeTempDir,
       ROVAI_ALLOW_ISOLATED_INSTANCE: '1'
     },
@@ -851,6 +1003,38 @@ async function pressEscape(cdp) {
   })
 }
 
+async function pressKey(cdp, activation) {
+  await cdp.send('Input.dispatchKeyEvent', {
+    type: 'rawKeyDown',
+    key: activation.key,
+    code: activation.code,
+    windowsVirtualKeyCode: activation.windowsVirtualKeyCode,
+    nativeVirtualKeyCode: activation.nativeVirtualKeyCode
+  })
+  await cdp.send('Input.dispatchKeyEvent', {
+    type: 'keyUp',
+    key: activation.key,
+    code: activation.code,
+    windowsVirtualKeyCode: activation.windowsVirtualKeyCode,
+    nativeVirtualKeyCode: activation.nativeVirtualKeyCode
+  })
+}
+
+async function selectWholeEditor(cdp) {
+  const selected = await evaluate(cdp, `(() => {
+    const editor = document.querySelector('#camp-message')
+    if (!(editor instanceof HTMLElement)) return false
+    editor.focus()
+    const range = document.createRange()
+    range.selectNodeContents(editor)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    return selection?.toString() === editor.textContent
+  })()`)
+  assert(selected, 'Could not select the whole Composer body')
+}
+
 async function activateLastInteractiveMentionWithKey(cdp, activation) {
   const focused = await evaluate(cdp, `(() => {
     const messages = [...document.querySelectorAll('.conversation-bubble.user')]
@@ -900,6 +1084,20 @@ async function mouseClick(cdp, selector, options = {}) {
   })()`)
   assert(point, `Could not click ${selector}`)
   await dispatchMouseClick(cdp, point)
+}
+
+async function moveMouseToElement(cdp, selector) {
+  const point = await evaluate(cdp, `(() => {
+    const element = document.querySelector(${JSON.stringify(selector)})
+    if (!element) return null
+    element.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    const rect = element.getBoundingClientRect()
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+  })()`)
+  assert(point, `Could not move the pointer to ${selector}`)
+  await cdp.send('Input.dispatchMouseEvent', {
+    type: 'mouseMoved', x: point.x, y: point.y, button: 'none', buttons: 0
+  })
 }
 
 async function dispatchMouseClick(cdp, point) {

@@ -454,6 +454,20 @@ type ResolvedTheme = "day" | "night"
 
 ### Camp Composer
 
+#### Skill 快速选择
+
+- Composer 为空，或正文被完整选中准备替换时，键入 `/` 打开输入框上方的原生 Skill
+  下拉；继续键入只筛选名称与当前 Revision 的真实说明。普通正文中间的 `/` 保持普通
+  文本，不抢占编辑。
+- 候选只读取 `skills.list` 与 `skills.deliveryGroups.list`：必须是已启用、生命周期为
+  Active、当前 Revision 已分配到当前 Default Lead 所属 Runtime 生效组的 Skill。列表
+  不复制演示数据，也不把“已配置可投递”表述成 Runtime 已经读取或执行。
+- 方向键循环移动高亮，Enter 或 Tab 选择，Esc 关闭。选择后用普通 Text 替换 `/查询`，
+  写入精确的 `/<skill-name> ` 并把光标放在尾随空格之后；不自动发送、不改变当前
+  Member Mention 寻址、不创建 Task 或 AgentRun。
+- Skill 选择不新增 Draft Content 类型、Core 命令或 Slash Command 路由协议。读取失败时
+  只在下拉内说明，原 Composer、普通 `/文字`、附件、草稿持久化和发送仍可继续使用。
+
 #### 结构化队员 Mention
 
 > Core-owned 内容、稳定身份与派生寻址由 accepted
@@ -969,15 +983,19 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   包含 `SKILL.md` 的完整目录，GitHub 接受仓库或带 ref/子目录的链接。两者都先检查
   候选，再确认写入受管 Library；不显示项目投递状态或 Camp 关联状态。
 - 下区“已安装 Skills”提供名称/简介搜索和开放列表行。每行以 Steel 标记、名称、说明、
-  `Rovai 内置 / 用户导入`、真实 Revision 与生效组摘要建立阅读层级，右侧保留状态、
-  启停 Switch、分组多选入口，以及承载安装/更新时间、文件数、大小、来源和删除操作的更多菜单；
+  `Rovai 内置 / 用户导入`、真实 Revision 与生效组摘要建立阅读层级，右侧保留启停
+  Switch、分组多选入口，以及承载安装/更新时间、文件数、大小、来源和删除操作的更多菜单；
   列表只使用行间分隔，不恢复卡片墙。
+- 启停 Switch 是启用状态的唯一标签，文案固定为“已启用 / 已停用”，不再并列显示重复的
+  状态 Badge。提交期间仅当前 Skill 行显示“保存中…”并禁用本行操作；Core 提交成功后原位
+  更新该行，不能重新读取、重排或闪烁整个 Skill 列表。投递文件对账由后台 Reconciler 继续完成。
 - 关闭 Skill 只弱化说明区并暂停全部 Rovai 投递，不能禁用生效组入口。关闭时仍可
   增删分组，已有选择必须保留；重新启用后按保存的分组恢复。删除中的 Imported Skill
   显示等待现有 AgentRun 释放，内置 Skill 不显示删除。
 - 生效组菜单始终显示全部九组，可多选；每项显示组名、原生相对路径、`已验证 /
   暂未验证`、对应 Runtime 和按当前 AgentProfile Runtime 实时派生的队员。没有队员的
-  分组仍显示，队员只用于查看，不进入 Assignment。新 Skill 默认不选择任何组。
+  分组仍显示，队员只用于查看，不进入 Assignment。新安装的 Rovai 内置 Skill 与新导入
+  Skill 都默认选择全部九组，用户后续增删分组保持不变。
 - 新内置和 Imported Skill 默认启用。Rovai 内置为 `analyze-agent-codebase`、
   `memory-stewardship`、`worktree`、`grill-duo` 与 `grill-duo-with-docs`；
   同名 Imported 更新创建不可变 Revision，内置同名导入拒绝。导入不执行内容，启用、

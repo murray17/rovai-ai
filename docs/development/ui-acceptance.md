@@ -67,6 +67,7 @@ pnpm accept:member-avatar-ui
 pnpm accept:member-lifecycle-ui
 pnpm accept:notification-ui
 pnpm accept:sidebar-ui
+pnpm accept:composer-skill-picker-ui
 pnpm accept:structured-mentions-ui
 pnpm accept:task-card-ui
 pnpm accept:runtime-activity-ui
@@ -145,11 +146,19 @@ Mention 的结构、样式、点击、键盘或复制行为后，至少运行：
 
 ```bash
 pnpm package:mac
+pnpm accept:composer-skill-picker-ui
 pnpm accept:structured-mentions-ui
 ```
 
-该验收使用三位带角色的队员和无模型安全 Runtime fixture，必须同时证明：
+`accept:composer-skill-picker-ui` 是会话框 Skill 选择的专项成品门禁，在验证 Skill 菜单、
+明确选择与纯 Text 草稿持久化后即结束；`accept:structured-mentions-ui` 继续追加原有 Mention、
+发送、人物信息卡、原生选区与复制回归。两者都使用三位带角色的队员和无模型安全 Runtime
+fixture，并共同证明：
 
+- `/` 只在空 Composer（或完整正文替换）中打开真实 Skill 下拉；候选按当前 Lead 的
+  Runtime 生效组过滤，菜单位于输入框上方且使用 Porcelain/Steel 层级；Enter 选择后写入
+  普通 `/<skill-name> `、恢复 Composer 焦点并持久化为单个 Text，既不自动发送也不创建
+  结构化 Skill Token；
 - Composer Mention 是默认无底色的蓝色、不可拆分原子行内文字，耐久 Draft 与发送后的
   Structured Content 保持同一稳定身份；
 - 从队员或所有队员候选中选中 Mention 后自动补一个普通空格，光标位于该空格之后；
@@ -168,7 +177,7 @@ pnpm accept:structured-mentions-ui
 - 整条消息复制入口仍只在 Hover/Focus 时出现，复制结果使用当前可见正文；
 - 测试前的系统剪贴板按 flavor 完整恢复，隔离 `userData` 不污染日常 App。
 
-脚本成功时输出 JSON 证据，并生成
+专项脚本成功时输出 JSON 证据并生成 `composer-skill-picker.png`；完整脚本还会生成
 `structured-mentions-composer.png`、`structured-mentions-sent.png`、
 `structured-mentions-composer-popover.png`、`structured-mentions-member-popover.png`、
 `structured-mentions-native-selection.png` 和 `structured-mentions-hover-copy.png`。其中

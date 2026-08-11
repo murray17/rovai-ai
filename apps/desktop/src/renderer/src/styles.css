@@ -1976,6 +1976,11 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .mention-menu button small { color: var(--muted); font: 10px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .mention-menu button > i { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
 .mention-avatar { display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid color-mix(in srgb, var(--brand) 45%, transparent); border-radius: 7px; color: var(--brand); background: var(--surface); font-size: 11px; font-weight: 750; }
+.skill-picker-menu { max-height: 310px; }
+.skill-picker-menu button { min-height: 46px; grid-template-columns: 28px minmax(0, 1fr) auto; }
+.skill-picker-glyph { display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid color-mix(in srgb, var(--brand) 42%, var(--line)); border-radius: 7px; color: var(--brand-hover); background: var(--surface); font: 750 13px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.skill-picker-copy small { font-family: inherit; }
+.skill-picker-enter { min-width: 12px; color: var(--faint); font-size: 10px; text-align: right; }
 .mention-target-summary { overflow: hidden; color: var(--faint); font-size: 10px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
 .composer textarea { width: 100%; min-height: 42px; resize: none; border: 0; outline: 0; color: var(--ink); background: transparent; padding: 5px 0 4px; font-size: 13px; line-height: 1.5; }
 .composer textarea:focus { border: 0; box-shadow: none; }

@@ -16,6 +16,8 @@ import type {
   TaskStatus,
   TaskView,
   NavigationCampItem,
+  SkillDeliveryGroupView,
+  SkillView,
   StoredCommandResult,
   StructuredCampMessageContent,
   WorkspaceInspection
@@ -42,6 +44,7 @@ import { writeClipboardText } from './clipboard'
 import { runtimeReadinessLabel } from './runtime-status'
 import { SafeMarkdown } from './SafeMarkdown'
 import { identityColorToken } from './theme'
+import { availableComposerSkillsForLead } from './composer-skill-picker'
 
 const NON_TERMINAL_RUNS = new Set(['queued', 'running', 'waiting'])
 const EXECUTION_EVIDENCE_PAGE_LIMIT = 1_000
@@ -615,6 +618,11 @@ export function CampWorkspace({
   const [composerSubmitting, setComposerSubmitting] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const [mentionPopover, setMentionPopover] = useState<MentionPopoverRequest | null>(null)
+  const [composerSkillCatalog, setComposerSkillCatalog] = useState<{
+    skills: SkillView[]
+    groups: SkillDeliveryGroupView[]
+    status: 'loading' | 'ready' | 'error'
+  }>({ skills: [], groups: [], status: 'loading' })
   const composerEditorRef = useRef<HTMLDivElement>(null)
   const draftSaveTimer = useRef<number | null>(null)
   const campLeaveTimer = useRef<{ campId: string; timer: number } | null>(null)
@@ -656,6 +664,36 @@ export function CampWorkspace({
     })),
     [snapshot.members]
   )
+  useEffect(() => {
+    let cancelled = false
+    const loadSkillCatalog = async (): Promise<void> => {
+      try {
+        const [skills, groups] = await Promise.all([
+          window.rovai.request<SkillView[]>('skills.list'),
+          window.rovai.request<SkillDeliveryGroupView[]>('skills.deliveryGroups.list')
+        ])
+        if (!cancelled) setComposerSkillCatalog({ skills, groups, status: 'ready' })
+      } catch {
+        if (!cancelled) {
+          setComposerSkillCatalog((current) => current.status === 'ready'
+            ? current
+            : { ...current, status: 'error' })
+        }
+      }
+    }
+    void loadSkillCatalog()
+    const unsubscribe = window.rovai.onEvent((event) => {
+      if (event.method !== 'runtime.state') return
+      const params = event.params !== null && typeof event.params === 'object'
+        ? event.params as Record<string, unknown>
+        : {}
+      if (params.status === 'ready') void loadSkillCatalog()
+    })
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [])
   const closeMentionPopover = useCallback((returnFocus: boolean): void => {
     const trigger = mentionPopover?.trigger
     setMentionPopover(null)
@@ -754,6 +792,14 @@ export function CampWorkspace({
     ]
   )
   const defaultLead = snapshot.members.find((member) => member.isDefaultLead) ?? null
+  const composerSkills = useMemo(
+    () => availableComposerSkillsForLead(
+      composerSkillCatalog.skills,
+      composerSkillCatalog.groups,
+      defaultLead?.agentId ?? null
+    ),
+    [composerSkillCatalog.groups, composerSkillCatalog.skills, defaultLead?.agentId]
+  )
   const workspaceStatus = workspaceCapabilityStatus(snapshot, workspaceInspection)
   const defaultLeadProfile = defaultLead ? profileById.get(defaultLead.agentId) ?? null : null
   const defaultLeadReady = defaultLeadProfile?.runtimeReadiness.status === 'ready'
@@ -1682,6 +1728,8 @@ export function CampWorkspace({
               onPasteFiles={(files) => void prepareFiles(files)}
               onSubmit={submitMessage}
               members={composerMembers}
+              skills={composerSkills}
+              skillCatalogStatus={composerSkillCatalog.status}
               ariaLabel={`给 ${defaultLead?.displayName ?? 'Default Lead'} 发消息`}
               placeholder="继续提问、补充约束或交付下一项职责…"
               disabled={busy || composerSubmitting}

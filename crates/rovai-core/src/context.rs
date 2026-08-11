@@ -7821,6 +7821,27 @@ mod tests {
         library
             .install_bundled_skills(&mut fixture.database)
             .unwrap();
+        for skill in library.list(&fixture.database).unwrap() {
+            library
+                .set_group_assignments(
+                    &mut fixture.database,
+                    &CommandEnvelope {
+                        command_id: format!("clear-before-manifest-{}", skill.id),
+                        actor: ActorRef::User {
+                            user_id: "test-user".to_string(),
+                        },
+                        camp_id: None,
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: SetSkillGroupAssignmentsCommand {
+                            skill_id: skill.id,
+                            expected_version: skill.version,
+                            group_keys: Vec::new(),
+                        },
+                    },
+                )
+                .unwrap();
+        }
         let official = library.list(&fixture.database).unwrap().remove(0);
         library
             .set_group_assignments(

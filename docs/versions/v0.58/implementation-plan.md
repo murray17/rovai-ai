@@ -41,15 +41,28 @@ last_updated: 2026-08-11
 - [x] Stop 只选择拥有 queued/running/waiting AgentRun 的 running/waiting Turn；
 - [x] 增加 Charter、Canonical lifecycle 和 Renderer cancellation 回归测试。
 
+## Checkpoint 4：受管 Skill 默认全 Runtime 投递
+
+- [x] 新安装的 Rovai 内置 Skill 默认启用并创建全部九个 Skill Group Assignment；
+- [x] 新导入 Skill 同样默认启用并创建全部九个 Skill Group Assignment；
+- [x] Migration 74 为既有 active Skill 一次性补齐缺失分组，并保留当前 Revision 与显式启停状态；
+- [x] 迁移后用户删除的分组与禁用状态在后续启动中保持，不由 bundled install 强制恢复；
+- [x] Core 回归、Skill smoke 断言、ADR、领域术语和设置 UI 合同同步默认差异。
+- [x] Skill 启停事务提交后立即返回，后台触发 projection reconcile；Renderer 只更新当前行且
+  Switch 独立显示“已启用 / 已停用”，不再渲染重复状态 Badge。
+
 已完成自动化验证：
 
-- `cargo test --workspace`：Library 316、CLI 10、Core binary 54 通过，3 个既有手工 Runtime smoke ignored；
-- `pnpm test`：文档治理 21、Vitest 251、Node qualification/benchmark 147 通过；
+- `cargo test --workspace`：Library 317、CLI 10、Core binary 54 通过，3 个既有手工 Runtime smoke ignored；
+- `pnpm test`：文档治理 21、Vitest 260、Node qualification/benchmark 150 通过；
 - `cargo test -p rovai-core rebind -- --nocapture`：2 个新增 rebind 测试通过；
 - `cargo test -p rovai-core db::tests::v72_backfills_initial_runtime_evidence_without_overwriting_existing_values -- --nocapture`：Migration 72 回填测试通过；
 - `cargo test -p rovai-core db::tests::v73_removes_expected_output_without_losing_agent_runs -- --nocapture`：Migration 73 删列与历史 Run 保留测试通过；
+- `cargo test -p rovai-core official_skills_default_to_all_groups_and_preserve_user_changes -- --nocapture`：内置 Skill 初始九组与后续用户修改保持通过；
+- `cargo test -p rovai-core imports_default_to_all_groups_and_updates_preserve_user_changes -- --nocapture`：Imported Skill 初始九组与 Revision 更新保持通过；
+- `cargo test -p rovai-core v74_assigns_every_active_skill_to_all_runtime_groups_once -- --nocapture`：Migration 74 对内置与 Imported Skill 的一次性回填通过；
 - `cargo clippy --workspace --all-targets -- -D warnings` 与 `cargo fmt --all -- --check` 通过；
-- `pnpm docs:test`：21 个测试通过；`pnpm docs:check` 通过，覆盖 58 个版本目录与 156 个 ADR。
+- `pnpm docs:test`：21 个测试通过；`pnpm docs:check` 通过，覆盖 58 个版本目录与 158 个 ADR。
 
 当前限制：自动 rebind 按 AgentRun 持久化限制为一次；尚未用真实 Copilot CLI 原地升级验证
 `dispatch -> refresh -> rebind -> launch` 的完整进程链路，因此本版本仍为 `in_progress`。

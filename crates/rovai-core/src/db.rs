@@ -1156,6 +1156,9 @@ impl Database {
             if !self.schema_migration_applied(73)? {
                 self.migrate_remove_agent_run_expected_output_v73()?;
             }
+            if !self.schema_migration_applied(74)? {
+                self.migrate_skill_default_assignments_v74()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -1424,6 +1427,9 @@ impl Database {
         }
         if !self.schema_migration_applied(73)? {
             self.migrate_remove_agent_run_expected_output_v73()?;
+        }
+        if !self.schema_migration_applied(74)? {
+            self.migrate_skill_default_assignments_v74()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -6590,6 +6596,52 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_skill_default_assignments_v74(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            UPDATE skill
+            SET version = version + 1, updated_at = datetime('now')
+            WHERE current_revision_id IS NOT NULL
+              AND lifecycle_status = 'active'
+              AND (
+                    SELECT COUNT(*)
+                    FROM skill_group_assignment AS assignment
+                    WHERE assignment.skill_id = skill.id
+                  ) < 9;
+
+            WITH delivery_groups(group_key) AS (
+                VALUES
+                    ('codex'),
+                    ('opencode'),
+                    ('copilot'),
+                    ('claude_compatible'),
+                    ('antigravity'),
+                    ('kiro'),
+                    ('qoder'),
+                    ('codebuddy'),
+                    ('qwen')
+            )
+            INSERT OR IGNORE INTO skill_group_assignment(
+                group_key, skill_id, revision_id, created_at, updated_at
+            )
+            SELECT delivery_groups.group_key, skill.id, skill.current_revision_id,
+                   datetime('now'), datetime('now')
+            FROM skill
+            CROSS JOIN delivery_groups
+            WHERE skill.current_revision_id IS NOT NULL
+              AND skill.lifecycle_status = 'active';
+
+            INSERT OR IGNORE INTO schema_migration(version, applied_at)
+            VALUES (74, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -11216,6 +11268,120 @@ mod tests {
                 .iter()
                 .any(|column| column == "expected_output")
         );
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v74_assigns_every_active_skill_to_all_runtime_groups_once() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v74-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO skill(
+                    id, name, origin, enabled, lifecycle_status,
+                    current_revision_id, version, created_at, updated_at
+                ) VALUES
+                    ('v74-official', 'v74-official', 'official', 0, 'active', NULL, 1,
+                     datetime('now'), datetime('now')),
+                    ('v74-imported', 'v74-imported', 'imported', 1, 'active', NULL, 1,
+                     datetime('now'), datetime('now'));
+
+                INSERT INTO skill_revision(
+                    id, skill_id, revision, name, description, source_type,
+                    source_metadata_json, content_digest, risk_summary_json,
+                    file_count, total_bytes, installed_at
+                ) VALUES
+                    ('v74-official-revision', 'v74-official', 1, 'v74-official', 'official',
+                     'bundled', '{}', 'sha256:v74-official',
+                     '{"executableFileCount":0,"scriptFileCount":0,"binaryCandidateCount":0,"declaredTools":[]}',
+                     1, 1, datetime('now')),
+                    ('v74-imported-revision', 'v74-imported', 1, 'v74-imported', 'imported',
+                     'local_folder', '{}', 'sha256:v74-imported',
+                     '{"executableFileCount":0,"scriptFileCount":0,"binaryCandidateCount":0,"declaredTools":[]}',
+                     1, 1, datetime('now'));
+
+                UPDATE skill
+                SET current_revision_id = CASE id
+                    WHEN 'v74-official' THEN 'v74-official-revision'
+                    ELSE 'v74-imported-revision'
+                END
+                WHERE id IN ('v74-official', 'v74-imported');
+
+                INSERT INTO skill_group_assignment(
+                    group_key, skill_id, revision_id, created_at, updated_at
+                ) VALUES (
+                    'codex', 'v74-official', 'v74-official-revision',
+                    datetime('now'), datetime('now')
+                );
+
+                DELETE FROM schema_migration WHERE version = 74;
+                "#,
+            )
+            .expect("test should restore the pre-v74 assignment state");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v73 source should reopen");
+        let official: (i64, i64, i64, i64) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT enabled, version,
+                       (SELECT COUNT(*) FROM skill_group_assignment
+                        WHERE skill_id = 'v74-official'),
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 74)
+                FROM skill WHERE id = 'v74-official'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(official, (0, 2, 9, 1));
+        let imported: (i64, i64, i64) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT enabled, version,
+                       (SELECT COUNT(*) FROM skill_group_assignment
+                        WHERE skill_id = 'v74-imported')
+                FROM skill WHERE id = 'v74-imported'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(imported, (1, 2, 9));
+        reopened
+            .connection()
+            .execute_batch(
+                r#"
+                DELETE FROM skill_group_assignment
+                WHERE skill_id = 'v74-official' AND group_key = 'qwen';
+                DELETE FROM skill_group_assignment
+                WHERE skill_id = 'v74-imported' AND group_key = 'qwen';
+                "#,
+            )
+            .unwrap();
+        drop(reopened);
+
+        let reopened = Database::open(&directory).expect("v74 database should reopen idempotently");
+        let assignments: (i64, i64) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT
+                    (SELECT COUNT(*) FROM skill_group_assignment
+                     WHERE skill_id = 'v74-official'),
+                    (SELECT COUNT(*) FROM skill_group_assignment
+                     WHERE skill_id = 'v74-imported')
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(assignments, (8, 8));
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }

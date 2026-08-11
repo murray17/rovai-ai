@@ -33,6 +33,11 @@ installation refresh、logical identity revalidation 与 effective Runtime rebin
 - refresh/rebind 后再次执行 snapshot blocker 与 executable integrity 检查，二次漂移或身份/兼容性
   失败才 terminal fail。
 
+本版本同时把全部 Rovai 受管 Skill 的首次投递默认值改为九个 Runtime 生效组：新安装的五个内置
+Skill 与新导入 Skill 都保持默认启用并立即获得全部 Group Assignment；Migration 74 为既有 active
+Skill 一次性补齐缺失分组，同时保留当前 Revision 与显式启停状态。迁移完成后，用户对任一 Skill
+的禁用或分组增删不会在后续启动或 Revision 更新时被恢复为默认值。
+
 真实 Copilot 请求复盘同时收敛三项直接影响 v0.58 验收可读性与恢复体验的缺陷：
 
 - Session Charter 明确 `explicit_send_only` 的公共输出义务，但 Charter 文案变化不触发 Native
@@ -42,6 +47,8 @@ installation refresh、logical identity revalidation 与 effective Runtime rebin
 - Canonical Runtime Activity 合并保留 started 事件中已报告的 ACP kind/title，稀疏 terminal update
   只推进 phase/outcome；
 - “停止当前执行”只取消拥有非终态 AgentRun 的 Turn，不再顺带取消仅等待人工重试的历史 Turn。
+- Skill 启停提交与可能较慢的投递文件对账解耦，设置页只原位更新当前行；开关自身显示
+  “已启用 / 已停用”，不再与独立状态标签重复。
 
 ## 冻结边界
 
@@ -50,23 +57,26 @@ installation refresh、logical identity revalidation 与 effective Runtime rebin
 - 不无限重试，不为 refresh 启动未通过 deep probe 的 Runtime；
 - 不声称实现代码签名、包管理器 receipt 或 artifact signature 验证；
 - 不改变公开消息、CampTurn、ContextManifest、Runtime Input Delivery 或 Native Session ACK 权威。
+- 不把 Skill 正文注入 Dynamic Context，不把默认分组解释为 Runtime/模型已读取或获得额外权限；
+- 不持续覆盖用户对内置或 Imported Skill 分组的后续修改，导入内容仍不授予额外执行权限。
 
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.57 冻结为 historical，v0.58 成为唯一 current，并新增本版本概览与实施计划 |
-| ADR | 已更新 | ADR-0156 局部替代永久 fingerprint 条款；ADR-0157 局部替代 ADR-0137 的旧 instruction ownership 条款 |
-| Contracts | 已更新 | ADR-0157 与 Durable Task v3 删除 execution request、AgentRun persistence/read model 的 `expectedOutput` clean break；不增加 Charter 版本轴 |
-| Architecture | 已更新 | Built-in Tool Runtime 增加 bounded rebind 与显式公共输出义务，Charter 文案变化不触发 Session 轮换 |
-| UI | 已更新 | Stop 命令目标与按钮可见性统一按非终态 AgentRun 所属 Turn 计算 |
+| ADR | 已更新 | ADR-0156 局部替代永久 fingerprint 条款；ADR-0157 局部替代 ADR-0137 的旧 instruction ownership 条款；ADR-0158 局部替代 Skill 默认不分组条款 |
+| Contracts | 已更新 | ADR-0157 与 Durable Task v3 删除 execution request、AgentRun persistence/read model 的 `expectedOutput` clean break；不增加 Charter 版本轴；Skill wire shape 不变 |
+| Architecture | 已更新 | Built-in Tool Runtime 增加 bounded rebind 与显式公共输出义务，Charter 文案变化不触发 Session 轮换；Skill projection 结构不变，默认策略由 ADR-0158 约束 |
+| UI | 已更新 | Stop 命令目标与按钮可见性统一按非终态 AgentRun 所属 Turn 计算；Skill 设置明确全九组默认，并以单一状态化 Switch 和行级提交反馈替代重复标签与整表刷新 |
 | Runtime Activity | 已更新 | Registry 明确稀疏 terminal lifecycle update 不得降级已报告的结构化分类和标题 |
 | Runtime compatibility | 确认无需更新 | 不改变支持的 Runtime、最低版本或已验证能力结论 |
-| Documentation routing | 确认无需更新 | 既有 Runtime architecture 与 CURRENT 主题入口足以路由本决策 |
+| Documentation routing | 已更新 | CURRENT 的 Skills/MCP 主题新增 ADR-0158，领域术语同步默认分组语义 |
 | Root README | 确认无需更新 | 项目定位和常青能力不变，根 README 不记录版本局部恢复机制 |
 
 ## References
 
 - [v0.58 实施与验收计划](implementation-plan.md)
 - [ADR-0156](../../adr/0156-logical-runtime-identity-and-bounded-installation-rebind.md)
+- [ADR-0158](../../adr/0158-default-all-runtime-delivery-for-managed-skills.md)
 - [Built-in Tool Runtime architecture](../../architecture/builtin-tool-runtime.md)

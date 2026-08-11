@@ -16,6 +16,7 @@ import { SettingsPageHeader } from './SettingsPageHeader'
 import { localizeExecutionEngineTerms } from './product-copy'
 
 type ImportTab = 'local' | 'github'
+type SkillRowOperation = 'toggle' | 'groups'
 type Confirmation =
   | { kind: 'delete'; skill: SkillView }
   | { kind: 'update'; candidate: SkillImportCandidate }
@@ -30,6 +31,7 @@ export function SkillSettings(): React.JSX.Element {
   const [githubInput, setGithubInput] = useState('')
   const [search, setSearch] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
+  const [skillRowOperations, setSkillRowOperations] = useState<Record<string, SkillRowOperation>>({})
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async (): Promise<void> => {
@@ -135,10 +137,10 @@ export function SkillSettings(): React.JSX.Element {
   }
 
   const setEnabled = async (skill: SkillView): Promise<void> => {
-    setBusy(`toggle-${skill.id}`)
+    const current = skills?.find((value) => value.id === skill.id) ?? skill
+    setSkillRowOperations((operations) => ({ ...operations, [current.id]: 'toggle' }))
     setError(null)
     try {
-      const current = skills?.find((value) => value.id === skill.id) ?? skill
       const result = await window.rovai.request<StoredCommandResult>('skills.setEnabled', {
         commandId: crypto.randomUUID(),
         command: {
@@ -148,19 +150,21 @@ export function SkillSettings(): React.JSX.Element {
         }
       })
       assertCommandApplied(result)
-      await load()
+      setSkills((currentSkills) => currentSkills
+        ? patchSkillEnabledResult(currentSkills, current.id, result)
+        : currentSkills)
     } catch (nextError) {
       setError(errorMessage(nextError))
     } finally {
-      setBusy(null)
+      setSkillRowOperations((operations) => withoutSkillRowOperation(operations, current.id))
     }
   }
 
   const toggleGroup = async (skill: SkillView, groupKey: SkillDeliveryGroupKey): Promise<void> => {
-    setBusy(`groups-${skill.id}`)
+    const current = skills?.find((value) => value.id === skill.id) ?? skill
+    setSkillRowOperations((operations) => ({ ...operations, [current.id]: 'groups' }))
     setError(null)
     try {
-      const current = skills?.find((value) => value.id === skill.id) ?? skill
       const selected = new Set(current.groupAssignments.map((assignment) => assignment.groupKey))
       if (selected.has(groupKey)) selected.delete(groupKey)
       else selected.add(groupKey)
@@ -173,11 +177,14 @@ export function SkillSettings(): React.JSX.Element {
         }
       })
       assertCommandApplied(result)
-      await load()
+      const updated = await window.rovai.request<SkillView>('skills.get', { skillId: current.id })
+      setSkills((currentSkills) => currentSkills
+        ? replaceSkillRow(currentSkills, updated)
+        : currentSkills)
     } catch (nextError) {
       setError(errorMessage(nextError))
     } finally {
-      setBusy(null)
+      setSkillRowOperations((operations) => withoutSkillRowOperation(operations, current.id))
     }
   }
 
@@ -287,7 +294,8 @@ export function SkillSettings(): React.JSX.Element {
                 key={skill.id}
                 skill={skill}
                 groups={groups}
-                busy={busy}
+                operation={skillRowOperations[skill.id] ?? null}
+                busy={busy === `delete-${skill.id}` ? busy : null}
                 onToggleEnabled={() => void setEnabled(skill)}
                 onToggleGroup={(groupKey) => void toggleGroup(skill, groupKey)}
                 onDelete={() => setConfirmation({ kind: 'delete', skill })}
@@ -319,9 +327,10 @@ export function SkillSettings(): React.JSX.Element {
   )
 }
 
-function SkillCard({
+export function SkillCard({
   skill,
   groups,
+  operation,
   busy,
   onToggleEnabled,
   onToggleGroup,
@@ -329,6 +338,7 @@ function SkillCard({
 }: {
   skill: SkillView
   groups: SkillDeliveryGroupView[]
+  operation: SkillRowOperation | null
   busy: string | null
   onToggleEnabled(): void
   onToggleGroup(groupKey: SkillDeliveryGroupKey): void
@@ -337,8 +347,12 @@ function SkillCard({
   const selected = new Set(skill.groupAssignments.map((assignment) => assignment.groupKey))
   const selectedGroups = groups.filter((group) => selected.has(group.key))
   const deleting = skill.lifecycleStatus === 'deleting'
+  const rowBusy = operation !== null || busy !== null
   return (
-    <article className={`skill-card ${!skill.enabled ? 'is-disabled' : ''} ${deleting ? 'is-deleting' : ''}`}>
+    <article
+      className={`skill-card ${!skill.enabled ? 'is-disabled' : ''} ${deleting ? 'is-deleting' : ''}`}
+      aria-busy={rowBusy}
+    >
       <span className="skill-card-mark" aria-hidden="true">{skillMark(skill.name)}</span>
       <div className="skill-card-heading">
         <div className="skill-card-title">
@@ -356,14 +370,11 @@ function SkillCard({
         {deleting && <span className="skill-deleting-note">等待现有执行释放后删除</span>}
       </div>
       <div className="skill-card-controls">
-        <span className={`status-badge ${skill.enabled ? 'status-completed' : 'status-neutral'}`}>
-          <i />{skill.enabled ? '已启用' : '已停用'}
-        </span>
         <SkillGroupMenu
           skill={skill}
           groups={groups}
           selected={selected}
-          disabled={busy !== null || deleting}
+          disabled={rowBusy || deleting}
           onToggle={onToggleGroup}
         />
         <button
@@ -372,15 +383,44 @@ function SkillCard({
           role="switch"
           aria-checked={skill.enabled}
           aria-label={`${skill.enabled ? '停用' : '启用'} ${skill.name}`}
-          disabled={busy !== null || deleting}
+          disabled={rowBusy || deleting}
           onClick={onToggleEnabled}
         >
-          <span aria-hidden="true" /><b>{busy === `toggle-${skill.id}` ? '保存中' : skill.enabled ? '启用' : '停用'}</b>
+          <span aria-hidden="true" /><b>{operation === 'toggle' ? '保存中…' : skill.enabled ? '已启用' : '已停用'}</b>
         </button>
-        <SkillMoreMenu skill={skill} disabled={busy !== null || deleting} onDelete={onDelete} />
+        <SkillMoreMenu skill={skill} disabled={rowBusy || deleting} onDelete={onDelete} />
       </div>
     </article>
   )
+}
+
+export function patchSkillEnabledResult(
+  skills: SkillView[],
+  skillId: string,
+  result: StoredCommandResult
+): SkillView[] {
+  const enabled = result.payload.enabled
+  const version = result.payload.version
+  if (typeof enabled !== 'boolean' || typeof version !== 'number') {
+    throw new Error('Core 返回了无效的 Skill 启停结果。')
+  }
+  return skills.map((skill) => skill.id === skillId
+    ? { ...skill, enabled, version }
+    : skill)
+}
+
+function replaceSkillRow(skills: SkillView[], updated: SkillView): SkillView[] {
+  return skills.map((skill) => skill.id === updated.id ? updated : skill)
+}
+
+function withoutSkillRowOperation(
+  operations: Record<string, SkillRowOperation>,
+  skillId: string
+): Record<string, SkillRowOperation> {
+  if (!(skillId in operations)) return operations
+  const next = { ...operations }
+  delete next[skillId]
+  return next
 }
 
 function skillMark(name: string): string {

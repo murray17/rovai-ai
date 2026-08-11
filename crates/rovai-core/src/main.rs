@@ -3021,7 +3021,11 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
-                self.reconcile_skills_best_effort(&mut database);
+                let should_reconcile = execution.result.status == CommandResultStatus::Applied;
+                drop(database);
+                if should_reconcile {
+                    self.skill_reconcile_notify.notify_one();
+                }
                 Ok(serde_json::to_value(execution.result)?)
             }
             "skills.setGroupAssignments" => {

@@ -48,6 +48,17 @@ const supportedAdapters = new Set([
   'codebuddy-cli',
   'qwen-code'
 ])
+const allDeliveryGroups = [
+  'antigravity',
+  'claude_compatible',
+  'codebuddy',
+  'codex',
+  'copilot',
+  'kiro',
+  'opencode',
+  'qoder',
+  'qwen'
+]
 let core = null
 
 try {
@@ -79,8 +90,11 @@ try {
       'memory-stewardship',
       'worktree'
     ])
-      && initialSkills.every((skill) => skill.origin === 'official' && skill.enabled && skill.groupAssignments.length === 0),
-    `Fresh Core did not install the expected unassigned official Skill: ${JSON.stringify(initialSkills)}`
+      && initialSkills.every((skill) => skill.origin === 'official'
+        && skill.enabled
+        && JSON.stringify(skill.groupAssignments.map((assignment) => assignment.groupKey).sort())
+          === JSON.stringify(allDeliveryGroups)),
+    `Fresh Core did not install official Skills enabled for every Runtime group: ${JSON.stringify(initialSkills)}`
   )
 
   let marker = markerFor(requestedAdapters[0] ?? 'library')
@@ -91,7 +105,12 @@ try {
   const imported = await commitCandidate(firstInspection, firstCandidate, false)
   assert(imported.status === 'applied' && imported.code === 'skill_imported', `Import failed: ${JSON.stringify(imported)}`)
   let importedSkill = (await core.request('skills.list')).find((skill) => skill.name === 'rovai-skill-smoke')
-  assert(importedSkill?.enabled && importedSkill.groupAssignments.length === 0, 'Imported Skill was not created enabled and unassigned')
+  assert(
+    importedSkill?.enabled
+      && JSON.stringify(importedSkill.groupAssignments.map((assignment) => assignment.groupKey).sort())
+        === JSON.stringify(allDeliveryGroups),
+    'Imported Skill was not created enabled for every Runtime group'
+  )
 
   const duplicateInspection = await core.request('skills.import.inspect', { path: sourceSkill })
   const duplicate = await commitCandidate(duplicateInspection, onlyCandidate(duplicateInspection), false)
@@ -230,7 +249,7 @@ try {
     ok: true,
     bundledSkills: initialSkills.map((skill) => skill.name),
     importedDefaultEnabled: true,
-    importedDefaultUnassigned: true,
+    importedDefaultAllGroups: true,
     duplicateImportIdempotent: true,
     immutableUpdateCount: Math.max(0, requestedAdapters.length - 1),
     sourceIndependent: true,

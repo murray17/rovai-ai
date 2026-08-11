@@ -1,7 +1,7 @@
 ---
 document_type: adr-index
 authority: architecture-decisions
-last_updated: 2026-08-09
+last_updated: 2026-08-11
 ---
 
 # Rovai-ai Architecture Decision Records
@@ -238,3 +238,4 @@ pnpm docs:adr:generate -- --check
 | [ADR-0152](0152-lead-owned-task-responsibility-and-self-active-task-awareness.md) | Lead-Owned Task Responsibility and Self-Active Task Awareness | `accepted` | [v0.54](../versions/v0.54/README.md) | 冻结 Lead/User Task 责任定义、Assignee 执行态、Camp-wide read 与 self active awareness |
 | [ADR-0153](0153-explicit-empty-self-active-task-snapshot.md) | Explicit Empty Self-Active Task Snapshot | `accepted` | [v0.54](../versions/v0.54/README.md) | 区分显式空 Task snapshot 与预算排除后的 whole-section omission，不改变 Task authority |
 | [ADR-0154](0154-agent-level-execution-process-surface.md) | Agent-Level Continuous Execution Process Surface | `accepted` | [v0.55](../versions/v0.55/README.md) | ← ADR-0133；以 Agent 级连续过程替代逐 Run Scheme C surface，并收敛 Inspector 为三 Tab |
+| [ADR-0158](0158-default-all-runtime-delivery-for-managed-skills.md) | Default-All Runtime Delivery for Managed Skills | `accepted` | [v0.58](../versions/v0.58/README.md) | 局部替代 ADR-0105/ADR-0150 的 Skill 默认不分组条款；内置与用户导入 Skill 均默认投递至全部生效组 |
