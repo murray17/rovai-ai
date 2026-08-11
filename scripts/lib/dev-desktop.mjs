@@ -1,7 +1,14 @@
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  unlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { dirname, join, resolve, sep } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 
 export function defaultDevelopmentUserDataDirectory({
   repositoryRoot,
@@ -35,15 +42,41 @@ export function assertDevelopmentUserDataIsIsolated(
   candidate,
   { dailyDirectories = knownDailyUserDataDirectories() } = {}
 ) {
+  return assertUserDataIsIsolated(candidate, { dailyDirectories })
+}
+
+export function assertUserDataIsIsolated(
+  candidate,
+  { dailyDirectories = knownDailyUserDataDirectories() } = {}
+) {
+  if (typeof candidate !== 'string' || candidate.trim() === '') {
+    throw new Error('An explicit isolated userData directory is required')
+  }
   const resolvedCandidate = resolve(candidate)
-  for (const dailyDirectory of dailyDirectories.map((path) => resolve(path))) {
-    if (resolvedCandidate === dailyDirectory || resolvedCandidate.startsWith(`${dailyDirectory}${sep}`)) {
+  const candidateIdentity = canonicalPathIdentity(resolvedCandidate)
+  for (const dailyDirectory of dailyDirectories.map((path) => canonicalPathIdentity(path))) {
+    if (candidateIdentity === dailyDirectory || candidateIdentity.startsWith(`${dailyDirectory}${sep}`)) {
       throw new Error(
-        `Development userData must not use the daily Rovai directory: ${resolvedCandidate}`
+        `Isolated userData must not use the daily Rovai directory: ${resolvedCandidate}`
       )
     }
   }
   return resolvedCandidate
+}
+
+function canonicalPathIdentity(path) {
+  let existingAncestor = resolve(path)
+  const missingSegments = []
+  while (!existsSync(existingAncestor)) {
+    const parent = dirname(existingAncestor)
+    if (parent === existingAncestor) break
+    missingSegments.unshift(basename(existingAncestor))
+    existingAncestor = parent
+  }
+  const canonicalAncestor = existsSync(existingAncestor)
+    ? realpathSync(existingAncestor)
+    : existingAncestor
+  return resolve(canonicalAncestor, ...missingSegments)
 }
 
 export function acquireDevelopmentLaunchLock(userDataDirectory, processId = process.pid) {

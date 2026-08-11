@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import {
   acquireDevelopmentLaunchLock,
   assertDevelopmentUserDataIsIsolated,
+  assertUserDataIsIsolated,
   defaultDevelopmentUserDataDirectory
 } from './dev-desktop.mjs'
 
@@ -35,6 +36,21 @@ test('development userData rejects daily directories and their descendants', () 
   assert.equal(
     assertDevelopmentUserDataIsIsolated('/temporary/rovai-dev', { dailyDirectories: [dailyDirectory] }),
     '/temporary/rovai-dev'
+  )
+})
+
+test('every isolated channel requires an explicit path and rejects aliases of daily data', (context) => {
+  const root = mkdtempSync(join(tmpdir(), 'rovai-user-data-alias-'))
+  context.after(() => rmSync(root, { recursive: true, force: true }))
+  const dailyDirectory = join(root, 'daily')
+  const alias = join(root, 'daily-alias')
+  mkdirSync(dailyDirectory)
+  symlinkSync(dailyDirectory, alias)
+
+  assert.throws(() => assertUserDataIsIsolated(), /explicit isolated userData/)
+  assert.throws(
+    () => assertUserDataIsIsolated(join(alias, 'child'), { dailyDirectories: [dailyDirectory] }),
+    /must not use the daily Rovai directory/
   )
 })
 

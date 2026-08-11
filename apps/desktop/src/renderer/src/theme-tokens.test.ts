@@ -156,11 +156,30 @@ describe('Neutral Porcelain + Steel theme tokens', () => {
     expect(css).toMatch(/\.project-heading-row\.current-project\s*\{[^}]*background: var\(--surface-selected\)/)
   })
 
-  it('keeps Agent message copy on one shared surface instead of identity-tinted bubbles', () => {
+  it('keeps user and Agent narrative on one open surface and widens only work artifacts at 2K', () => {
     expect(css).toMatch(/\.conversation-bubble\.agent\s*\{[^}]*--agent-accent: var\(--identity-1\)/)
     expect(css).not.toMatch(/\.conversation-bubble\.agent\s*\{[^}]*background:/)
     expect(css).not.toMatch(/\.conversation-bubble\.agent\s+\.final-copy\s*\{[^}]*background:/)
     expect(css).toMatch(/\.final-copy\s*\{[^}]*color: var\(--ink\)[^}]*\}/)
+    expect(css).toMatch(/\.message-bubble\s*\{[^}]*max-width: min\(var\(--conversation-prose-width\), 100%\)[^}]*background: transparent/)
+    expect(css).not.toMatch(/\.message-bubble\s*\{[^}]*background: var\(--brand-soft\)/)
+    expect(css).toContain('.conversation-bubble:is(.user, .agent):hover::before')
+    expect(css).toMatch(/\.message-body\s*\{[^}]*position: relative[^}]*padding-right: 30px/)
+    expect(css).toMatch(/\.message-surface\s*\{[^}]*position: static/)
+    expect(css).toContain('.conversation-bubble:hover .message-copy-button')
+    expect(css).not.toContain('.message-surface.has-delivery .message-copy-button')
+    expect(css).toMatch(
+      /@media\s*\(min-width:\s*1800px\)[\s\S]*?\.timeline-track\s*\{[^}]*width:\s*min\(var\(--conversation-wide-width\), 100%\)/
+    )
+    expect(css).toMatch(
+      /\.conversation-bubble\.agent \.safe-markdown > :where\(pre, table\)\s*\{[^}]*width:\s*min\(var\(--conversation-artifact-width\), 100%\)/
+    )
+    expect(css).toMatch(
+      /@media\s*\(min-width:\s*1800px\)[\s\S]*?\.timeline-event-card\s*\{[^}]*width:\s*min\(var\(--conversation-artifact-width\), 100%\)/
+    )
+    expect(css).toMatch(
+      /@media\s*\(min-width:\s*1800px\)[\s\S]*?\.approval-dock, \.runtime-recovery-dock\s*\{[^}]*width:\s*min\(var\(--conversation-wide-width\), calc\(100% - 54px\)\)/
+    )
   })
 
   it('widens the 2K composer and keeps the Enter keycap beside Send', () => {

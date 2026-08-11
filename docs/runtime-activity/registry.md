@@ -11,7 +11,7 @@ last_updated: 2026-08-11
 
 | Adapter kind | 产品显示名 | 协议族 | 基线 coverage | 细粒度工具名边界 | Fixture | 真实 smoke |
 |---|---|---|---|---|---|---|
-| `codex-cli` | Codex CLI | Codex app-server | `fine_grained` | MCP 使用结构化 `server/tool`；command/file 没有工具标识时显示 Core domain hint | 受控 fixture 通过 | manual completion/config/process + Skill turn 通过；MCP projection 通过 |
+| `codex-cli` | Codex CLI | Codex app-server | `fine_grained` | MCP 使用结构化 `server/tool`；command/file 无工具名时用 `commandActions` / `changes` 生成有界 presentation hint，未知命令回退 Core domain hint | 受控 fixture 通过 | manual completion/config/process + Skill turn 通过；MCP projection 通过；新版标题 post-fix smoke 待运行 |
 | `opencode-cli` | OpenCode | ACP v1 | `fine_grained` | 使用 ACP 结构化 `kind`；有 `toolName` 才作为精确名，否则显示 Runtime `title` hint | 受控 fixture 通过 | manual completion + Skill turn 通过；MCP projection 通过 |
 | `copilot-cli` | GitHub Copilot | ACP v1 | `fine_grained` | 同 ACP 合同；逻辑 MCP 名称通过 Context 的 `logicalName → runtimeName` 映射提示解析 | 受控 fixture 通过 | manual completion + Skill turn + MCP projection 通过 |
 | `kiro-cli` | Kiro | ACP v1 | `fine_grained` | 同 ACP 合同；Team bridge 使用 Kiro/Bedrock 兼容 input schema，不改变 Core canonical 校验 | 受控 fixture 通过 | ACP session + Skill turn + MCP projection 通过 |
@@ -38,16 +38,19 @@ Coverage 只描述 Core 实际能看到的粒度，不是产品支持等级。�
 
 ### Codex app-server
 
-| Runtime item type | activityDomain | semanticKind | toolName |
-|---|---|---|---|
-| `commandExecution` | `shell` | `shell.execute` | 无结构化名称时为空 |
-| `fileChange` | `file` | `file.write` | 空 |
-| `webSearch` | `tool` | `tool.web.search` | 有结构化名称时保留 |
-| `imageGeneration` | `tool` | `tool.image.generate` | 有结构化名称时保留 |
-| `mcpToolCall` | `tool` | `tool.mcp.call` | `server/tool` |
-| `dynamicToolCall` / collab tool | `tool` | `tool.call` | Runtime `tool` 字段 |
+| Runtime item type | activityDomain | semanticKind | toolName | presentationHint |
+|---|---|---|---|---|
+| `commandExecution` | `shell` | `shell.execute` | 无结构化名称时为空 | 优先 `item.title`；否则仅用结构化 `commandActions` 的 read/list/search 类型和安全路径 basename 生成“读取文件 / 检索项目文件”等有界标题；unknown 回退“执行 Shell 命令” |
+| `fileChange` | `file` | `file.write` | 空 | 优先 `item.title`；否则用 `changes` 的数量、单文件 basename 和 add/delete/update 类型生成标题 |
+| `webSearch` | `tool` | `tool.web.search` | 有结构化名称时保留 | Runtime title 或 Core domain hint |
+| `imageGeneration` | `tool` | `tool.image.generate` | 有结构化名称时保留 | Runtime title 或 Core domain hint |
+| `mcpToolCall` | `tool` | `tool.mcp.call` | `server/tool` | Runtime title 或 Core domain hint |
+| `dynamicToolCall` / collab tool | `tool` | `tool.call` | Runtime `tool` 字段 | Runtime title 或 Core domain hint |
 
-`item.id` 是 lifecycle identity。`item.title` 只进入 `presentationHint`。
+`item.id` 是 lifecycle identity。`item.title` 与上述结构化 presentation 字段只进入
+`presentationHint`；原始 command string 不参与标题生成、分类或 identity。Codex `0.147.0` 的
+本地 app-server schema 与实际 AgentRun 均证明 `commandExecution.title` 可以为空，而
+`commandActions` 是协议必填字段；修复 fixture 使用该真实 wire shape，post-fix live smoke 仍需单独运行。
 
 ### ACP v1
 

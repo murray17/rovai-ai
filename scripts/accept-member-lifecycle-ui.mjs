@@ -671,20 +671,31 @@ try {
       && campColorState.inspector === 'rgb(255, 255, 255)'
       && campColorState.divider === 'rgb(199, 207, 214)'
       && campColorState.rail === 'rgb(243, 244, 244)'
-      && campColorState.userMessage === 'rgb(233, 238, 243)',
+      && campColorState.userMessage === 'rgba(0, 0, 0, 0)',
     `Camp color scope drifted: ${JSON.stringify(campColorState)}`
   )
-  const userMessageCopyState = await evaluate(running.cdp, `({
-    selectable: getComputedStyle(document.querySelector('.conversation-bubble.user')).userSelect === 'text',
-    label: document.querySelector('.conversation-bubble.user .message-copy-button')?.getAttribute('aria-label'),
-    insideContent: Boolean(document.querySelector('.conversation-bubble.user .message-surface > .message-copy-button')),
-    absentFromMetadata: !document.querySelector('.conversation-bubble.user .bubble-meta .message-copy-button')
-  })`)
+  const userMessageCopyState = await evaluate(running.cdp, `(() => {
+    const article = document.querySelector('.conversation-bubble.user')
+    const body = article?.querySelector('.message-body')
+    const button = article?.querySelector('.message-copy-button')
+    const bodyRect = body?.getBoundingClientRect()
+    const buttonRect = button?.getBoundingClientRect()
+    return {
+      selectable: article ? getComputedStyle(article).userSelect === 'text' : false,
+      label: button?.getAttribute('aria-label'),
+      insideContent: Boolean(article?.querySelector('.message-surface > .message-copy-button')),
+      absentFromMetadata: !article?.querySelector('.bubble-meta .message-copy-button'),
+      topOffset: bodyRect && buttonRect ? buttonRect.top - bodyRect.top : null,
+      rightOffset: bodyRect && buttonRect ? bodyRect.right - buttonRect.right : null
+    }
+  })()`)
   assert(
     userMessageCopyState.selectable
       && userMessageCopyState.label === '复制这条消息'
       && userMessageCopyState.insideContent
-      && userMessageCopyState.absentFromMetadata,
+      && userMessageCopyState.absentFromMetadata
+      && Math.abs(userMessageCopyState.topOffset + 2) <= 0.75
+      && Math.abs(userMessageCopyState.rightOffset) <= 0.75,
     `User message is not selectable/copyable: ${JSON.stringify(userMessageCopyState)}`
   )
   await mouseClick(running.cdp, '.conversation-bubble.user .message-copy-button')

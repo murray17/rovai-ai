@@ -1,0 +1,1094 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rovai AI · Agent 级执行过程 · B 底部执行台</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #f2f4f1;
+      --surface: #fbfcfa;
+      --surface-raised: #fff;
+      --surface-subtle: #f6f7f3;
+      --surface-muted: #ecefe9;
+      --surface-selected: #e9ecf7;
+      --conversation: #fff;
+      --inspector: #fff;
+      --ink: #202438;
+      --muted: #5f6678;
+      --faint: #6e7382;
+      --line: #dde1da;
+      --line-strong: #cbd1c8;
+      --control-line: #8b9389;
+      --brand: #343b72;
+      --brand-hover: #29305f;
+      --brand-contrast: #fff;
+      --brand-soft: #eceef8;
+      --brand-ink: #343b72;
+      --aurora: #719d94;
+      --aurora-soft: #e7f0ec;
+      --ember: #d3a45f;
+      --success: #3e775c;
+      --success-soft: #e7f1ea;
+      --attention: #8a6226;
+      --attention-soft: #f8edda;
+      --danger: #a24c46;
+      --danger-soft: #f7e6e3;
+      --info: #416c86;
+      --info-soft: #e5eef3;
+      --evidence-canvas: #f5f6f4;
+      --evidence-surface: #fff;
+      --evidence-ink: #252a36;
+      --evidence-muted: #5f6678;
+      --evidence-line: #d5dad3;
+      --focus: #4d83a2;
+      --shadow-float: 0 18px 56px rgba(38, 45, 58, .12);
+      --sidebar-width: 270px;
+      --inspector-width: 310px;
+      --prototype-bar: 58px;
+      --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: 100%; min-height: 100%; margin: 0; }
+    body {
+      overflow: auto;
+      color: var(--ink);
+      background: #e8ebe7;
+      font-family: var(--sans);
+      font-size: 13px;
+      text-rendering: optimizeLegibility;
+    }
+    button, textarea, input { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    .eyebrow {
+      color: var(--faint);
+      font-size: 10px;
+      font-weight: 750;
+      letter-spacing: .09em;
+      line-height: 1.25;
+      text-transform: uppercase;
+    }
+    .mono { font-family: var(--mono); }
+
+    /* Prototype chrome is deliberately outside the product surface. */
+    .prototype-bar {
+      position: relative;
+      z-index: 20;
+      display: grid;
+      width: 100%;
+      height: var(--prototype-bar);
+      min-height: var(--prototype-bar);
+      grid-template-columns: minmax(230px, 1fr) auto minmax(230px, 1fr);
+      align-items: center;
+      gap: 18px;
+      padding: 8px 18px;
+      border-bottom: 1px solid #d5d9d3;
+      background: rgba(250, 251, 249, .97);
+      backdrop-filter: blur(16px);
+    }
+    .prototype-title { display: grid; min-width: 0; gap: 2px; }
+    .prototype-title strong { overflow: hidden; font-size: 13px; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
+    .prototype-title span { overflow: hidden; color: var(--muted); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .prototype-center { display: inline-flex; align-items: center; gap: 8px; }
+    .variant-pill, .scope-pill {
+      display: inline-flex;
+      min-height: 26px;
+      align-items: center;
+      gap: 6px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      white-space: nowrap;
+    }
+    .variant-pill { color: var(--brand-ink); border-color: rgba(52, 59, 114, .2); background: var(--brand-soft); font-size: 10.5px; font-weight: 750; }
+    .scope-pill { color: var(--success); border-color: rgba(62, 119, 92, .2); background: var(--success-soft); font-size: 10px; font-weight: 700; }
+    .prototype-actions { display: flex; min-width: 0; justify-content: flex-end; align-items: center; gap: 9px; }
+    .prototype-actions > small { overflow: hidden; color: var(--faint); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .icon-button {
+      display: inline-grid;
+      width: 30px;
+      height: 30px;
+      flex: 0 0 30px;
+      place-items: center;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+    }
+    .icon-button:hover { color: var(--brand-ink); background: var(--brand-soft); }
+    .icon-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+    .notes-panel {
+      position: fixed;
+      z-index: 60;
+      top: calc(var(--prototype-bar) + 10px);
+      right: 18px;
+      display: grid;
+      width: min(390px, calc(100vw - 36px));
+      gap: 10px;
+      padding: 16px;
+      border: 1px solid var(--line-strong);
+      border-radius: 11px;
+      background: var(--surface-raised);
+      box-shadow: var(--shadow-float);
+    }
+    .notes-panel[hidden] { display: none; }
+    .notes-panel header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .notes-panel h2 { margin: 0; font-size: 14px; letter-spacing: -.01em; }
+    .notes-panel p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+    .notes-panel ul { display: grid; gap: 7px; margin: 0; padding: 0 0 0 17px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+    .notes-panel li::marker { color: var(--brand); }
+    .decision-note { display: grid; gap: 5px; padding: 10px; border: 1px solid rgba(52, 59, 114, .18); border-radius: 8px; background: var(--brand-soft); }
+    .decision-note strong { color: var(--brand-ink); font-size: 10.5px; }
+    .decision-note span { color: var(--muted); font-size: 10px; line-height: 1.45; }
+
+    .app-frame {
+      display: grid;
+      min-height: 0;
+      height: calc(100vh - var(--prototype-bar));
+      grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+      grid-template-rows: 52px minmax(0, 1fr);
+      overflow: hidden;
+      background: var(--canvas);
+    }
+    .sidebar {
+      grid-column: 1;
+      grid-row: 1 / -1;
+      display: flex;
+      min-height: 0;
+      flex-direction: column;
+      padding: 18px 10px 10px;
+      border-right: 1px solid var(--line);
+      background: var(--surface-subtle);
+    }
+    .brand-row { display: flex; min-height: 39px; align-items: center; gap: 10px; padding: 0 9px 11px; }
+    .brand-mark {
+      position: relative;
+      display: grid;
+      width: 25px;
+      height: 25px;
+      place-items: center;
+      border: 1px solid rgba(52, 59, 114, .24);
+      border-radius: 8px;
+      color: var(--brand);
+      background: var(--surface-raised);
+    }
+    .brand-mark::before { width: 10px; height: 10px; border: 2px solid currentColor; border-radius: 3px; content: ""; }
+    .brand-mark::after { position: absolute; width: 4px; height: 4px; border-radius: 50%; background: var(--ember); content: ""; transform: translate(6px, 6px); }
+    .brand-row strong { font-size: 14px; letter-spacing: -.02em; }
+    .brand-row small { display: block; margin-top: 1px; color: var(--faint); font-size: 10px; }
+    .sidebar-scroll { min-height: 0; flex: 1 1 auto; overflow: auto; padding: 6px 0; }
+    .sidebar-section { display: grid; gap: 4px; margin: 16px 0 0; }
+    .sidebar-section:first-child { margin-top: 7px; }
+    .sidebar-section-label { padding: 0 10px 5px; color: var(--faint); font-size: 10px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+    .side-row {
+      display: grid;
+      min-height: 34px;
+      grid-template-columns: 20px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      padding: 0 9px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      color: var(--muted);
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+    }
+    .side-row:hover { color: var(--ink); background: var(--surface-muted); }
+    .side-row.is-selected { border-color: rgba(52, 59, 114, .12); color: var(--brand-ink); background: var(--surface-selected); font-weight: 700; }
+    .side-row.is-camp { min-height: 42px; align-items: start; padding-top: 7px; padding-bottom: 7px; }
+    .side-row svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.6; }
+    .side-row > span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .side-row small { color: var(--faint); font-size: 10px; font-weight: 500; }
+    .side-row.is-selected small { color: var(--brand-ink); }
+    .camp-dot { width: 8px; height: 8px; margin-left: 4px; border: 1px solid var(--aurora); border-radius: 50%; background: var(--aurora-soft); }
+    .camp-dot.is-live { border-color: var(--success); background: var(--success); box-shadow: 0 0 0 3px var(--success-soft); }
+    .roster-row { display: grid; min-height: 36px; grid-template-columns: 25px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 0 9px; border-radius: 7px; }
+    .roster-row:hover { background: var(--surface-muted); }
+    .roster-row > span:nth-child(2) { display: grid; min-width: 0; gap: 1px; }
+    .roster-row strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .roster-row small { overflow: hidden; color: var(--faint); font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .presence { width: 7px; height: 7px; border: 1px solid var(--control-line); border-radius: 50%; background: var(--surface); }
+    .presence.is-online { border-color: var(--success); background: var(--success); }
+    .presence.is-away { border-color: var(--attention); background: var(--attention-soft); }
+    .avatar {
+      display: inline-grid;
+      width: 25px;
+      height: 25px;
+      flex: 0 0 25px;
+      place-items: center;
+      border: 2px solid color-mix(in srgb, var(--avatar-color) 48%, white);
+      border-radius: 50%;
+      color: white;
+      background: var(--avatar-color);
+      font-size: 11px;
+      font-weight: 750;
+      line-height: 1;
+    }
+    .avatar.avatar-lg { width: 34px; height: 34px; flex-basis: 34px; font-size: 13px; }
+    .avatar.avatar-sm { width: 20px; height: 20px; flex-basis: 20px; font-size: 9px; }
+    .sidebar-footer { display: grid; gap: 4px; padding-top: 10px; border-top: 1px solid var(--line); }
+    .local-user { display: grid; min-height: 37px; grid-template-columns: 26px minmax(0, 1fr) 20px; align-items: center; gap: 8px; padding: 0 9px; color: var(--muted); }
+    .local-user strong { display: block; color: var(--ink); font-size: 11px; }
+    .local-user small { display: block; margin-top: 1px; color: var(--faint); font-size: 9.5px; }
+    .local-user svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.6; }
+
+    .topbar {
+      grid-column: 2;
+      grid-row: 1;
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 0 20px 0 22px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface-raised);
+    }
+    .breadcrumb { display: flex; min-width: 0; align-items: center; gap: 7px; }
+    .breadcrumb span { color: var(--faint); font-size: 11px; }
+    .breadcrumb strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+    .breadcrumb .chevron { color: var(--line-strong); font-size: 14px; }
+    .topbar-actions { display: flex; align-items: center; gap: 8px; }
+    .topbar-summary { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; color: var(--muted); font-size: 10.5px; }
+    .topbar-summary b { color: var(--attention); font-family: var(--mono); font-size: 10px; }
+    .quiet-button, .primary-button, .danger-button {
+      display: inline-flex;
+      min-height: 30px;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 0 10px;
+      border: 1px solid var(--control-line);
+      border-radius: 7px;
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .quiet-button { color: var(--muted); background: var(--surface-raised); }
+    .quiet-button:hover { color: var(--ink); background: var(--surface-muted); }
+    .quiet-button.compact { min-height: 27px; padding: 0 8px; font-size: 10px; }
+    .primary-button { border-color: var(--brand); color: var(--brand-contrast); background: var(--brand); }
+    .primary-button:hover { border-color: var(--brand-hover); background: var(--brand-hover); }
+    .danger-button { border-color: rgba(162, 76, 70, .45); color: var(--danger); background: var(--danger-soft); }
+    .danger-button:hover { border-color: var(--danger); }
+    .quiet-button svg, .primary-button svg, .danger-button svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+
+    .workspace-grid {
+      grid-column: 2;
+      grid-row: 2;
+      display: grid;
+      min-width: 0;
+      min-height: 0;
+      grid-template-columns: minmax(0, 1fr) var(--inspector-width);
+    }
+    .timeline-pane { display: flex; min-width: 0; min-height: 0; flex-direction: column; background: var(--conversation); }
+    .activity-pane { display: flex; min-width: 0; min-height: 0; flex-direction: column; border-left: 1px solid var(--line-strong); background: var(--inspector); }
+
+    /* True B: the only execution entry lives in the bottom dock. */
+    .dock-agent-list { display: flex; min-width: 0; flex: 1 1 auto; gap: 5px; overflow-x: auto; scrollbar-width: thin; }
+    .agent-chip {
+      display: grid;
+      min-width: 128px;
+      flex: 0 0 128px;
+      grid-template-columns: 20px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 7px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--ink);
+      background: var(--surface-raised);
+      text-align: left;
+      cursor: pointer;
+    }
+    .agent-chip:hover { border-color: var(--control-line); background: var(--surface-raised); }
+    .agent-chip.is-selected { border-color: var(--brand); background: var(--brand-soft); box-shadow: inset 0 0 0 1px rgba(52, 59, 114, .08); }
+    .agent-chip-copy { display: grid; min-width: 0; gap: 1px; }
+    .agent-chip-copy strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .agent-chip-copy small { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+    .chip-state { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 9.5px; font-weight: 750; white-space: nowrap; }
+    .chip-state::before { width: 6px; height: 6px; border: 1px solid currentColor; border-radius: 50%; content: ""; }
+    .chip-state.running { color: var(--info); }
+    .chip-state.running::before { background: currentColor; box-shadow: 0 0 0 3px rgba(65, 108, 134, .12); }
+    .chip-state.waiting { color: var(--attention); }
+    .chip-state.waiting::before { background: var(--attention-soft); }
+    .chip-state.succeeded { color: var(--success); }
+    .chip-state.succeeded::before { background: currentColor; }
+    .chip-state.cancelled { color: var(--muted); }
+    .chip-state.cancelled::before { background: var(--surface-muted); }
+
+    .timeline-scroll { min-height: 0; flex: 1 1 auto; overflow: auto; padding: 20px 22px 18px; }
+    .timeline-track { width: min(760px, 100%); margin: 0 auto; }
+    .day-divider { display: flex; align-items: center; gap: 10px; margin: 2px 0 18px; color: var(--faint); font-size: 10px; }
+    .day-divider::before, .day-divider::after { height: 1px; flex: 1 1 auto; background: var(--line); content: ""; }
+    .message-row { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; margin: 0 0 18px; }
+    .message-card { min-width: 0; }
+    .message-meta { display: flex; align-items: baseline; gap: 7px; margin-bottom: 5px; }
+    .message-meta strong { color: var(--ink); font-size: 11px; }
+    .message-meta span { color: var(--faint); font-size: 10px; }
+    .message-meta time { margin-left: auto; color: var(--faint); font: 10px/1.2 var(--mono); }
+    .message-body { padding: 11px 13px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: var(--surface-raised); font-size: 12.5px; line-height: 1.62; }
+    .message-row.user .message-body { border-color: rgba(65, 108, 134, .18); background: var(--info-soft); }
+    .message-body p { margin: 0; }
+    .message-body p + p { margin-top: 8px; }
+    .message-body ul { margin: 7px 0 0; padding-left: 18px; }
+    .message-body li + li { margin-top: 3px; }
+    .message-surface { position: relative; width: fit-content; max-width: 100%; }
+    .message-surface.has-delivery { width: 100%; }
+    .message-copy-button {
+      display: grid;
+      width: 26px;
+      height: 25px;
+      margin-top: 4px;
+      margin-left: auto;
+      padding: 0;
+      place-items: center;
+      border: 0;
+      border-radius: 5px;
+      opacity: 0;
+      color: var(--faint);
+      background: transparent;
+      cursor: pointer;
+      transform: translateY(-2px);
+      transition: opacity 120ms ease, transform 120ms ease, background-color 120ms ease;
+      user-select: none;
+    }
+    .message-copy-button svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+    .message-surface.has-delivery .message-copy-button { position: absolute; z-index: 1; top: calc(100% + 2px); right: 0; margin: 0; }
+    .message-surface:hover .message-copy-button,
+    .message-surface:focus-within .message-copy-button { opacity: 1; transform: translateY(0); }
+    .message-copy-button:hover { color: var(--brand-ink); background: var(--surface-muted); }
+    .message-copy-button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+    .handoff-footer { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 2px; padding: 3px 32px 0 0; color: var(--muted); font-size: 10px; }
+    .handoff-footer::before { width: 14px; height: 10px; border-left: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); border-bottom-left-radius: 4px; content: ""; }
+    .handoff-footer b { color: var(--ink); font-weight: 700; }
+    .delivery-state { display: inline-flex; align-items: center; min-height: 19px; padding: 0 6px; border-radius: 999px; font-size: 9px; font-weight: 750; }
+    .delivery-state.success { color: var(--success); background: var(--success-soft); }
+    .delivery-state.attention { color: var(--attention); background: var(--attention-soft); }
+    .delivery-state.danger { color: var(--danger); background: var(--danger-soft); }
+    .task-entry {
+      width: min(620px, calc(100% - 40px));
+      display: grid;
+      min-height: 47px;
+      min-width: 0;
+      grid-template-columns: auto minmax(0, 1fr);
+      align-items: center;
+      gap: 9px;
+      margin-top: 6px;
+      margin-right: 0;
+      margin-bottom: 16px;
+      margin-left: 40px;
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--ink);
+      background: var(--surface);
+      text-align: left;
+      cursor: pointer;
+      transition: border-color 120ms ease, background-color 120ms ease, transform 120ms ease;
+    }
+    .task-entry:hover { border-color: var(--brand); background: var(--brand-soft); }
+    .task-entry strong, .task-entry small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .task-entry strong { min-width: 0; font-size: 11.5px; }
+    .task-entry small { color: var(--muted); font-size: 9.5px; }
+    .task-entry-content { display: grid; min-width: 0; grid-column: 2; grid-row: 1; gap: 2px; }
+    .task-entry-status { display: inline-flex; min-height: 20px; grid-column: 1; grid-row: 1; align-items: center; gap: 5px; padding: 0 7px; border-radius: 999px; color: var(--info); background: var(--info-soft); font-size: 9px; font-weight: 750; white-space: nowrap; }
+    .status-pill { display: inline-flex; min-height: 20px; align-items: center; padding: 0 7px; border-radius: 999px; font-size: 9px; font-weight: 750; white-space: nowrap; }
+    .status-pill.running { color: var(--info); background: var(--info-soft); }
+    .status-pill.succeeded { color: var(--success); background: var(--success-soft); }
+    .status-pill.waiting { color: var(--attention); background: var(--attention-soft); }
+    .status-pill.cancelled { color: var(--muted); background: var(--surface-muted); }
+    .status-pill.failed { color: var(--danger); background: var(--danger-soft); }
+    .timeline-note { display: flex; align-items: center; gap: 7px; margin: 4px 0 20px 40px; color: var(--faint); font-size: 10px; }
+    .timeline-note::before { width: 7px; height: 7px; border: 1px solid var(--line-strong); border-radius: 50%; background: var(--surface); content: ""; }
+
+    /* B: an in-flow bottom dock, not an overlay and not a Run selector. */
+    .execution-dock { flex: 0 0 auto; border-top: 2px solid var(--line-strong); background: var(--surface); }
+    .dock-summary { display: flex; min-height: 54px; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 20px; }
+    .dock-summary-main { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; gap: 9px; }
+    .dock-label { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; color: var(--brand-ink); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
+    .dock-label i { width: 6px; height: 6px; border-radius: 50%; background: var(--brand); box-shadow: 0 0 0 3px rgba(52, 59, 114, .1); }
+    .dock-summary-actions { display: flex; align-items: center; gap: 8px; }
+    .dock-summary-actions small { color: var(--faint); font-size: 10px; }
+    .dock-toggle { min-width: 63px; }
+    .dock-body { display: grid; min-height: 0; max-height: min(320px, 38vh); grid-template-rows: auto minmax(0, 1fr); border-top: 1px solid var(--line); overflow: hidden; }
+    .dock-summary-only { display: none; }
+    .execution-dock.is-collapsed .dock-body { display: none; }
+    .execution-dock.is-collapsed .dock-summary { background: color-mix(in srgb, var(--surface) 94%, var(--brand-soft)); }
+    .execution-dock.is-collapsed .dock-summary-actions small { display: inline; }
+    .process-toolbar { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 20px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 96%, var(--brand-soft)); }
+    .process-agent { display: flex; min-width: 0; align-items: center; gap: 8px; }
+    .process-agent-copy { display: grid; min-width: 0; gap: 1px; }
+    .process-agent-copy strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+    .process-agent-copy small { color: var(--faint); font-size: 9.5px; }
+    .focus-indicator { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; color: var(--muted); font-size: 9.5px; }
+    .focus-indicator i { width: 6px; height: 6px; border-radius: 50%; background: var(--line-strong); }
+    .focus-indicator.is-live { color: var(--info); font-weight: 700; }
+    .focus-indicator.is-live i { background: var(--info); box-shadow: 0 0 0 3px rgba(65, 108, 134, .1); }
+    .process-history { min-width: 0; min-height: 0; overflow: auto; padding: 12px 20px 18px; scroll-behavior: smooth; }
+    .history-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+    .history-heading strong { font-size: 11.5px; }
+    .history-heading small { color: var(--faint); font-size: 9.5px; }
+    .process-timeline { position: relative; display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+    .process-timeline::before { position: absolute; top: 13px; bottom: 17px; left: 6px; width: 1px; background: var(--line-strong); content: ""; }
+    .process-stage { position: relative; display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 9px; padding: 0 0 13px; scroll-margin: 22px; }
+    .stage-node { position: relative; z-index: 1; display: inline-grid; width: 13px; height: 13px; margin-top: 4px; place-items: center; border: 2px solid var(--line-strong); border-radius: 50%; background: var(--surface); }
+    .stage-node::after { width: 4px; height: 4px; border-radius: 50%; background: var(--line-strong); content: ""; }
+    .process-stage.is-active .stage-node { border-color: var(--info); background: var(--info-soft); }
+    .process-stage.is-active .stage-node::after { background: var(--info); box-shadow: 0 0 0 3px rgba(65, 108, 134, .1); }
+    .process-stage.is-terminal .stage-node { border-color: var(--success); background: var(--success-soft); }
+    .process-stage.is-terminal .stage-node::after { background: var(--success); }
+    .process-stage.is-cancelled .stage-node { border-color: var(--control-line); background: var(--surface-muted); }
+    .process-stage.is-cancelled .stage-node::after { background: var(--muted); }
+    .process-stage.is-failed .stage-node { border-color: var(--danger); background: var(--danger-soft); }
+    .process-stage.is-failed .stage-node::after { background: var(--danger); }
+    .stage-card { min-width: 0; padding: 10px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-raised); }
+    .process-stage.is-active .stage-card { border-color: rgba(65, 108, 134, .5); background: color-mix(in srgb, var(--surface-raised) 88%, var(--info-soft)); box-shadow: 0 0 0 2px rgba(65, 108, 134, .06); }
+    .run-boundary { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 10px; }
+    .run-boundary-main { display: grid; min-width: 0; gap: 4px; }
+    .run-time-row { display: flex; min-width: 0; align-items: center; gap: 7px; }
+    .run-time-row time { color: var(--ink); font: 10px/1.35 var(--mono); font-weight: 700; }
+    .current-run-badge { display: inline-flex; min-height: 18px; align-items: center; padding: 0 6px; border-radius: 999px; color: var(--info); background: var(--info-soft); font-size: 8.5px; font-weight: 800; letter-spacing: .03em; }
+    .stage-meta { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 4px 7px; color: var(--faint); font-size: 9px; }
+    .stage-meta span { white-space: nowrap; }
+    .stage-meta code { color: var(--evidence-muted); font: 9px/1.3 var(--mono); }
+    .run-deliveries { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+    .run-deliveries > small { color: var(--faint); font-size: 9px; font-weight: 700; }
+    .run-delivery { display: inline-flex; min-width: 0; align-items: center; gap: 5px; color: var(--muted); font-size: 9px; }
+    .run-delivery .avatar { width: 17px; height: 17px; font-size: 7px; }
+    .evidence-toggle { display: inline-flex; min-height: 24px; flex: 0 0 auto; align-items: center; gap: 5px; padding: 0 6px; border: 0; border-radius: 5px; color: var(--brand-ink); background: var(--brand-soft); font-size: 9.5px; font-weight: 700; cursor: pointer; }
+    .evidence-toggle:hover { background: #e2e5f3; }
+    .evidence-toggle svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; transition: transform 140ms ease; }
+    .evidence-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+    .evidence-panel { display: grid; gap: 7px; margin-top: 8px; padding: 8px; border: 1px solid var(--evidence-line); border-radius: 6px; background: var(--evidence-canvas); }
+    .evidence-panel[hidden] { display: none; }
+    .evidence-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: start; gap: 7px; }
+    .evidence-icon { display: inline-grid; width: 19px; height: 19px; place-items: center; border-radius: 5px; color: var(--evidence-muted); background: var(--evidence-surface); }
+    .evidence-icon svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
+    .evidence-copy { display: grid; min-width: 0; gap: 1px; }
+    .evidence-copy strong { overflow: hidden; color: var(--evidence-ink); font: 10px/1.35 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+    .evidence-copy small { color: var(--evidence-muted); font-size: 9px; line-height: 1.35; }
+    .evidence-result { color: var(--success); font-size: 9px; font-weight: 750; white-space: nowrap; }
+    .approval-dock { flex: 0 0 auto; border-top: 1px solid rgba(138, 98, 38, .22); background: var(--attention-soft); }
+    .approval-dock header { display: flex; min-height: 43px; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 20px; }
+    .approval-copy { display: flex; min-width: 0; align-items: center; gap: 8px; }
+    .approval-copy strong { color: var(--attention); font-size: 11px; }
+    .approval-copy span { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .approval-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
+    .approval-actions button { min-height: 26px; padding: 0 8px; border: 1px solid rgba(138, 98, 38, .36); border-radius: 6px; color: var(--attention); background: rgba(255, 255, 255, .45); font-size: 10px; font-weight: 750; cursor: pointer; }
+    .approval-actions button:hover { background: rgba(255, 255, 255, .85); }
+    .approval-actions button.primary { border-color: var(--attention); color: #fff; background: var(--attention); }
+    .approval-actions button.primary:hover { background: #76501e; }
+    .approval-dock.is-settled { border-top-color: var(--line); background: var(--surface-muted); }
+    .approval-dock.is-settled .approval-copy strong { color: var(--success); }
+    .approval-dock.is-settled .approval-copy span { color: var(--muted); }
+
+    .composer { flex: 0 0 auto; padding: 10px 20px 13px; border-top: 1px solid var(--line); background: var(--conversation); }
+    .composer-box { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 8px 8px 7px 11px; border: 1px solid var(--control-line); border-radius: 9px; background: var(--surface-raised); }
+    .composer-box textarea { width: 100%; min-height: 38px; max-height: 90px; resize: vertical; border: 0; outline: 0; color: var(--ink); background: transparent; font-size: 12px; line-height: 1.5; }
+    .composer-box textarea::placeholder { color: var(--faint); }
+    .composer-side { display: flex; align-items: flex-end; gap: 6px; }
+    .composer-icon { display: inline-grid; width: 28px; height: 28px; place-items: center; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; }
+    .composer-icon:hover { color: var(--brand-ink); background: var(--brand-soft); }
+    .composer-icon svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.6; }
+    .composer-send { min-height: 29px; padding: 0 10px; border: 1px solid var(--brand); border-radius: 6px; color: #fff; background: var(--brand); font-size: 10px; font-weight: 750; cursor: pointer; }
+    .composer-send:hover { background: var(--brand-hover); }
+    .composer-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 5px; color: var(--faint); font-size: 9.5px; }
+    .composer-meta span { display: inline-flex; align-items: center; gap: 5px; }
+    .stop-button { display: inline-flex; min-height: 25px; align-items: center; gap: 5px; padding: 0 7px; border: 1px solid rgba(162, 76, 70, .4); border-radius: 6px; color: var(--danger); background: var(--danger-soft); font-size: 9.5px; font-weight: 750; cursor: pointer; }
+    .stop-button:hover { border-color: var(--danger); }
+    .stop-button svg { width: 12px; height: 12px; fill: currentColor; stroke: currentColor; }
+    .mention-menu { position: absolute; z-index: 6; right: 8px; bottom: calc(100% + 8px); display: grid; width: 210px; gap: 4px; padding: 7px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface-raised); box-shadow: var(--shadow-float); }
+    .mention-menu[hidden] { display: none; }
+    .mention-menu strong { padding: 4px 6px 5px; color: var(--faint); font-size: 9.5px; }
+    .mention-option { display: flex; min-height: 31px; align-items: center; gap: 7px; padding: 0 6px; border: 0; border-radius: 6px; color: var(--ink); background: transparent; text-align: left; cursor: pointer; }
+    .mention-option:hover { background: var(--surface-muted); }
+    .mention-option small { margin-left: auto; color: var(--faint); font-size: 9px; }
+
+    /* Inspector: only tasks, context and approvals. There is intentionally no audit tab. */
+    .inspector-tabs { display: flex; min-height: 51px; align-items: end; gap: 0; padding: 0 9px; border-bottom: 1px solid var(--line); background: var(--surface-raised); }
+    .inspector-tab { position: relative; display: inline-flex; min-height: 39px; align-items: center; gap: 4px; padding: 0 8px; border: 0; color: var(--muted); background: transparent; font-size: 10.5px; font-weight: 650; cursor: pointer; }
+    .inspector-tab:hover { color: var(--ink); }
+    .inspector-tab[aria-selected="true"] { color: var(--ink); font-weight: 750; }
+    .inspector-tab[aria-selected="true"]::after { position: absolute; right: 7px; bottom: -1px; left: 7px; height: 2px; background: var(--brand); content: ""; }
+    .inspector-tab small { color: var(--faint); font: 9px/1 var(--mono); }
+    .inspector-tab b { display: inline-grid; min-width: 15px; height: 15px; place-items: center; border-radius: 99px; color: var(--attention); background: var(--attention-soft); font: 700 9px/1 var(--mono); }
+    .inspector-scroll { min-height: 0; flex: 1 1 auto; overflow: auto; padding: 0 13px 20px; }
+    .inspector-panel[hidden] { display: none; }
+    .inspector-panel { display: grid; gap: 12px; }
+    .inspector-heading { position: sticky; z-index: 2; top: 0; display: flex; min-height: 54px; align-items: center; justify-content: space-between; gap: 10px; margin: 0 -13px; padding: 9px 13px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface-raised) 94%, transparent); }
+    .inspector-heading > div { display: grid; min-width: 0; gap: 2px; }
+    .inspector-heading strong { font-size: 12px; }
+    .inspector-heading small { color: var(--faint); font-size: 9.5px; }
+    .inspector-heading .quiet-button { min-height: 26px; font-size: 9.5px; }
+    .task-list { display: grid; gap: 0; }
+    .task-row { display: grid; min-width: 0; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 61px; padding: 9px 1px; border-bottom: 1px solid var(--line); background: transparent; text-align: left; cursor: pointer; }
+    .task-row:hover, .task-row.is-selected { background: var(--surface-muted); }
+    .task-row.is-selected { margin: 0 -4px; padding-right: 5px; padding-left: 5px; border-left: 2px solid var(--brand); }
+    .task-dot { width: 7px; height: 7px; border: 1px solid var(--info); border-radius: 50%; background: var(--info-soft); }
+    .task-dot.done { border-color: var(--success); background: var(--success); }
+    .task-row-copy { display: grid; min-width: 0; gap: 3px; }
+    .task-row-copy strong, .task-row-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .task-row-copy strong { font-size: 10.5px; }
+    .task-row-copy small { color: var(--muted); font-size: 9.5px; }
+    .task-row-meta { display: grid; justify-items: end; gap: 4px; }
+    .task-row-meta b { color: var(--info); font-size: 9px; }
+    .task-row-meta small { color: var(--faint); font-size: 8.5px; }
+    .agent-process-link { display: flex; min-width: 0; align-items: center; gap: 8px; margin-top: 10px; padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-subtle); }
+    .agent-process-link > span { display: grid; min-width: 0; flex: 1 1 auto; gap: 2px; }
+    .agent-process-link strong { font-size: 10.5px; }
+    .agent-process-link small { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+    .agent-process-link button { flex: 0 0 auto; min-height: 26px; }
+    .inspector-card { display: grid; gap: 8px; padding: 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-subtle); }
+    .inspector-card strong { font-size: 11px; }
+    .inspector-card p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+    .inspector-card dl { display: grid; gap: 7px; margin: 0; }
+    .inspector-card dl div { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 8px; }
+    .inspector-card dt { color: var(--faint); font-size: 9px; }
+    .inspector-card dd { min-width: 0; margin: 0; color: var(--ink); font-size: 9.5px; overflow-wrap: anywhere; }
+    .context-list { display: grid; gap: 0; }
+    .context-row { display: grid; gap: 3px; padding: 10px 1px; border-bottom: 1px solid var(--line); }
+    .context-row strong { font-size: 10.5px; }
+    .context-row small { color: var(--muted); font-size: 9.5px; line-height: 1.4; }
+    .approval-card { display: grid; gap: 9px; padding: 11px; border: 1px solid rgba(138, 98, 38, .25); border-radius: 8px; background: var(--attention-soft); }
+    .approval-card header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+    .approval-card header strong { color: var(--attention); font-size: 11px; }
+    .approval-card header small { color: var(--faint); font: 9px/1.3 var(--mono); }
+    .approval-card p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+    .approval-card pre { max-height: 87px; margin: 0; overflow: auto; padding: 8px; border: 1px solid rgba(138, 98, 38, .18); border-radius: 6px; color: var(--evidence-ink); background: rgba(255, 255, 255, .58); font: 9px/1.45 var(--mono); white-space: pre-wrap; }
+    .approval-card footer { display: flex; justify-content: flex-end; gap: 6px; }
+    .empty-state { display: grid; justify-items: start; gap: 5px; padding: 34px 5px; color: var(--muted); }
+    .empty-state strong { color: var(--ink); font-size: 11px; }
+    .empty-state p { margin: 0; font-size: 10px; line-height: 1.5; }
+    .inspector-footnote { margin-top: auto; padding: 10px 1px 0; color: var(--faint); font-size: 9px; line-height: 1.45; }
+
+    .toast { position: fixed; z-index: 80; right: 20px; bottom: 20px; display: flex; max-width: min(350px, calc(100vw - 40px)); align-items: center; gap: 8px; padding: 9px 11px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow-float); font-size: 11px; }
+    .toast[hidden] { display: none; }
+    .toast::before { width: 7px; height: 7px; border-radius: 50%; background: var(--brand); content: ""; }
+
+    @media (max-width: 1180px) {
+      :root { --inspector-width: 260px; }
+      .prototype-actions > small { display: none; }
+      .prototype-center .scope-pill { display: none; }
+      .timeline-scroll { padding-right: 15px; padding-left: 15px; }
+      .composer { padding-right: 15px; padding-left: 15px; }
+    }
+    @media (max-width: 1040px) {
+      .prototype-bar { grid-template-columns: minmax(180px, 1fr) auto; }
+      .prototype-center { justify-self: end; }
+      .prototype-actions { display: none; }
+      .app-frame { grid-template-columns: 230px minmax(0, 1fr); }
+      :root { --sidebar-width: 230px; }
+      .dock-body { max-height: 270px; }
+      .agent-chip { min-width: 122px; flex-basis: 122px; }
+      .sidebar { padding-right: 7px; padding-left: 7px; }
+      .topbar { padding-right: 12px; padding-left: 14px; }
+    }
+    @media (max-width: 1040px) and (max-height: 760px) {
+      .dock-body { max-height: 210px; }
+      .process-toolbar { padding-top: 8px; padding-bottom: 8px; }
+      .process-history { padding-top: 10px; padding-bottom: 12px; }
+    }
+    @media (max-width: 760px) {
+      body { min-width: 700px; }
+      .prototype-bar { grid-template-columns: 1fr auto; }
+      .prototype-center .scope-pill { display: none; }
+      .app-frame { grid-template-columns: 210px minmax(0, 1fr); }
+      :root { --sidebar-width: 210px; }
+      .workspace-grid { grid-template-columns: minmax(0, 1fr); }
+      .activity-pane { display: none; }
+      .dock-summary { padding-right: 14px; padding-left: 14px; }
+      .dock-summary-actions small { display: none; }
+      .composer { padding-right: 12px; padding-left: 12px; }
+    }
+    @media (hover: none) {
+      .message-copy-button { opacity: 1; transform: translateY(0); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <header class="prototype-bar" aria-label="设计稿说明">
+    <div class="prototype-title">
+      <span class="eyebrow">RENDERER DESIGN STUDY</span>
+      <strong>Agent 级执行过程 · 长期入口</strong>
+      <span>基于 main CampWorkspace 功能语义的静态交互稿</span>
+    </div>
+    <div class="prototype-center">
+      <span class="variant-pill">B · 底部执行台</span>
+      <span class="scope-pill">审计 Tab 已移除</span>
+    </div>
+    <div class="prototype-actions">
+      <small>fixture shaped like CampSnapshot · no Core writes</small>
+      <button class="icon-button" id="notesToggle" type="button" aria-expanded="false" aria-controls="notesPanel" aria-label="查看设计映射说明" title="设计映射说明">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 10v6M12 7.5h.01"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <aside class="notes-panel" id="notesPanel" hidden>
+    <header>
+      <div>
+        <span class="eyebrow">DESIGN MAPPING</span>
+        <h2>这张稿如何复刻 main 功能</h2>
+      </div>
+      <button class="icon-button" id="notesClose" type="button" aria-label="关闭说明">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"/></svg>
+      </button>
+    </header>
+    <p>外层只是评审标记；应用表面沿用 Arctic Dawn Day。B 版不在会话顶部渲染任何执行入口。</p>
+    <div class="decision-note">
+      <strong>Task 会话卡 · 紧凑双行卡</strong>
+      <span>47px 左右，完全对齐 main：状态、标题、负责人；整项打开任务检查器。</span>
+    </div>
+    <ul>
+      <li>唯一入口是 Composer 上方的底部执行台，并按 <code>(Camp, Agent)</code> 聚合。</li>
+      <li>消息下不再渲染执行入口；复制复刻 main 的右侧悬浮图标。</li>
+      <li>Task 会话卡只使用 <code>status / title / assignee</code>，不展示 description、Criteria 或 AgentRun。</li>
+      <li>面板不展示 Agent 级“当前责任 / 状态”，也不把 <code>purpose</code> 或 <code>expectedOutput</code> 包装成业务标题。</li>
+      <li>Run 边界只使用时间、Run ID、调用方式、CampTurn 和 A2A 深度；Runtime narration、plan、tool 只在对应 Execution Evidence 存在时显示。</li>
+      <li>点击 Agent 后优先定位最新的 running Run；没有 running 时定位最新非终态 Run，并默认展开它已有的证据。</li>
+      <li>终态 Agent 仍可从底部执行台、Task 关联入口重新打开；离开 Camp 后历史不会被面板生命周期删除。</li>
+      <li>Inspector 仅保留“任务 / 上下文投递 / 审批”；本次稿中不渲染审计 Tab。</li>
+    </ul>
+  </aside>
+
+  <div class="app-frame">
+    <aside class="sidebar" aria-label="主导航">
+      <div class="brand-row">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div><strong>Rovai AI</strong><small>本地协作空间</small></div>
+      </div>
+      <div class="sidebar-scroll">
+        <section class="sidebar-section" aria-label="工作区">
+          <div class="sidebar-section-label">工作区</div>
+          <button class="side-row" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 5l8 6.5v7a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><path d="M9 19.5v-5h6v5"/></svg><span>Quick Chat</span></button>
+          <button class="side-row is-selected is-camp" type="button"><span class="camp-dot is-live" aria-hidden="true"></span><span><strong>发布计划 · 周报与回滚</strong><small>第 12 天 · 刚刚更新</small></span><small>⌄</small></button>
+          <button class="side-row" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5h16M4 12h16M4 17.5h10"/></svg><span>全部 Camps</span></button>
+        </section>
+        <section class="sidebar-section" aria-label="协作">
+          <div class="sidebar-section-label">协作</div>
+          <button class="side-row" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="10" r="2.5"/><path d="M3.8 18c.6-3 2.4-4.5 5.2-4.5s4.6 1.5 5.2 4.5M14 17.7c.3-1.8 1.4-2.8 3.2-2.8 1.7 0 2.8.9 3.1 2.8"/></svg><span>队员</span><small>3</small></button>
+          <button class="side-row" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v14H5z"/><path d="M8 9h8M8 12h8M8 15h5"/></svg><span>长期事项</span><small>2</small></button>
+        </section>
+        <section class="sidebar-section" aria-label="当前队员">
+          <div class="sidebar-section-label">当前 Camp · 3 位队员</div>
+          <div class="roster-row"><span class="avatar" style="--avatar-color:#a65f4a">沐</span><span><strong>沐瓦</strong><small>发布风险分析 · 进行中</small></span><span class="presence is-online" aria-label="在线"></span></div>
+          <div class="roster-row"><span class="avatar" style="--avatar-color:#39777a">洛</span><span><strong>洛可</strong><small>回滚验证 · 已完成</small></span><span class="presence is-online" aria-label="在线"></span></div>
+          <div class="roster-row"><span class="avatar" style="--avatar-color:#74628f">若</span><span><strong>若汐</strong><small>变更审阅 · 已取消</small></span><span class="presence is-away" aria-label="暂离"></span></div>
+        </section>
+      </div>
+      <footer class="sidebar-footer">
+        <button class="side-row" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M4 12h16"/></svg><span>新建对话</span></button>
+        <div class="local-user"><span class="avatar avatar-sm" style="--avatar-color:#526f88">你</span><span><strong>本地工作区</strong><small>已连接 · 仅本机</small></span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.1l1.6-1.2-1.7-2.9-1.9.7a7.2 7.2 0 0 0-1.9-1.1L14.8 4h-3.4l-.3 2.4a7.2 7.2 0 0 0-1.9 1.1l-1.9-.7-1.7 2.9 1.6 1.2A7 7 0 0 0 7.1 12c0 .4 0 .8.1 1.1l-1.6 1.2 1.7 2.9 1.9-.7a7.2 7.2 0 0 0 1.9 1.1l.3 2.4h3.4l.3-2.4a7.2 7.2 0 0 0 1.9-1.1l1.9.7 1.7-2.9-1.6-1.2c.1-.4.1-.8.1-1.1Z"/></svg></div>
+      </footer>
+    </aside>
+
+    <header class="topbar">
+      <div class="breadcrumb" aria-label="当前位置"><span>Camps</span><span class="chevron">/</span><span>发布计划</span><span class="chevron">/</span><strong>周报与回滚</strong><span class="status-pill running">进行中</span></div>
+      <div class="topbar-actions">
+        <span class="topbar-summary"><b>1</b> 待审批</span>
+        <button class="quiet-button compact" type="button">成员</button>
+        <button class="icon-button" type="button" aria-label="隐藏检查器" title="隐藏检查器"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"/><path d="M15 5v14"/></svg></button>
+      </div>
+    </header>
+
+    <main class="workspace-grid">
+      <section class="timeline-pane" aria-label="Camp 会话区">
+        <div class="timeline-scroll" aria-label="公共消息时间线">
+          <div class="timeline-track">
+            <div class="day-divider"><span>今天 · 10:00</span></div>
+            <article class="message-row user">
+              <span class="avatar avatar-lg" style="--avatar-color:#526f88" aria-hidden="true">你</span>
+              <div class="message-card">
+                <div class="message-meta"><strong>你</strong><span>需求</span><time>10:02</time></div>
+                <div class="message-surface">
+                  <div class="message-body"><p>整理本周发布风险，并给出可执行的回滚清单。先确认高风险变更，再把验证步骤交给合适的队员。</p></div>
+                  <button class="message-copy-button" type="button" aria-label="复制这条消息" title="复制这条消息" data-toast="消息已复制（静态稿）"><svg viewBox="0 0 24 24" aria-hidden="true"><rect height="10" rx="2" width="10" x="8" y="8"/><path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"/></svg><span class="sr-only">复制</span></button>
+                </div>
+              </div>
+            </article>
+
+            <article class="message-row">
+              <span class="avatar avatar-lg" style="--avatar-color:#a65f4a" aria-hidden="true">沐</span>
+              <div class="message-card">
+                <div class="message-meta"><strong>沐瓦</strong><span>Agent Runtime</span><time>10:04</time></div>
+                <div class="message-surface has-delivery">
+                  <div class="message-body"><p>我会先扫描本周变更与发布配置，整理风险等级；随后把回滚验证交给洛可，并请若汐做一次变更审阅。</p><p>目前高风险点是 <strong>支付回调配置</strong>，建议先准备旧版本快照，再执行灰度回滚。</p></div>
+                  <button class="message-copy-button" type="button" aria-label="复制这条消息" title="复制这条消息" data-toast="消息已复制（静态稿）"><svg viewBox="0 0 24 24" aria-hidden="true"><rect height="10" rx="2" width="10" x="8" y="8"/><path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"/></svg><span class="sr-only">复制</span></button>
+                </div>
+                <div class="handoff-footer"><b>发送给：洛可、若汐</b></div>
+              </div>
+            </article>
+
+            <button class="task-entry" type="button" data-tab="tasks" aria-label="打开任务：准备发布回滚清单">
+              <span class="task-entry-status">进行中</span>
+              <span class="task-entry-content"><strong>准备发布回滚清单</strong><small>负责人 · 沐瓦</small></span>
+            </button>
+
+            <article class="message-row">
+              <span class="avatar avatar-lg" style="--avatar-color:#39777a" aria-hidden="true">洛</span>
+              <div class="message-card">
+                <div class="message-meta"><strong>洛可</strong><span>Agent Runtime</span><time>10:11</time></div>
+                <div class="message-surface has-delivery">
+                  <div class="message-body"><p>回滚路径已在隔离工作区验证：先恢复快照，再重新推送回调配置；两条关键检查均通过。</p></div>
+                  <button class="message-copy-button" type="button" aria-label="复制这条消息" title="复制这条消息" data-toast="消息已复制（静态稿）"><svg viewBox="0 0 24 24" aria-hidden="true"><rect height="10" rx="2" width="10" x="8" y="8"/><path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"/></svg><span class="sr-only">复制</span></button>
+                </div>
+                <div class="handoff-footer"><b>发送给：沐瓦</b></div>
+              </div>
+            </article>
+
+            <div class="timeline-note"><span>若汐的变更审阅在 09:43 被取消；历史执行过程仍可从入口重新打开。</span></div>
+          </div>
+        </div>
+
+        <section class="execution-dock" id="executionDock" aria-label="Agent 级执行过程">
+          <div class="dock-summary">
+            <div class="dock-summary-main">
+              <span class="dock-label"><i></i>执行台</span>
+              <div class="dock-agent-list" id="agentDockList" role="list" aria-label="队员执行过程入口">
+                <button class="agent-chip is-selected" type="button" role="listitem" data-agent="muwa" aria-pressed="true">
+                  <span class="avatar avatar-sm" style="--avatar-color:#a65f4a">沐</span>
+                  <span class="agent-chip-copy"><strong>沐瓦</strong><small>执行过程</small></span>
+                  <span class="chip-state running">进行中</span>
+                </button>
+                <button class="agent-chip" type="button" role="listitem" data-agent="luoke" aria-pressed="false">
+                  <span class="avatar avatar-sm" style="--avatar-color:#39777a">洛</span>
+                  <span class="agent-chip-copy"><strong>洛可</strong><small>执行过程</small></span>
+                  <span class="chip-state succeeded">已完成</span>
+                </button>
+                <button class="agent-chip" type="button" role="listitem" data-agent="ruoxi" aria-pressed="false">
+                  <span class="avatar avatar-sm" style="--avatar-color:#74628f">若</span>
+                  <span class="agent-chip-copy"><strong>若汐</strong><small>执行过程</small></span>
+                  <span class="chip-state cancelled">已取消</span>
+                </button>
+              </div>
+            </div>
+            <div class="dock-summary-actions"><small id="dockHint">唯一执行入口 · 3 位队员</small><button class="quiet-button compact dock-toggle" id="dockToggle" type="button" aria-expanded="true">收起过程</button></div>
+          </div>
+          <div class="dock-body" id="dockBody">
+            <header class="process-toolbar">
+              <div class="process-agent" id="processAgent"></div>
+              <span class="focus-indicator" id="focusIndicator"><i></i><span>历史证据可查看</span></span>
+            </header>
+            <section class="process-history" id="processHistory" aria-label="连续执行证据">
+              <div class="history-heading"><strong>执行证据</strong><small id="historyNote">按 Run 边界连续保留，不提供 Run 切换</small></div>
+              <ol class="process-timeline" id="processTimeline"></ol>
+            </section>
+          </div>
+        </section>
+
+        <section class="approval-dock" id="approvalDock" aria-label="待处理审批">
+          <header>
+            <div class="approval-copy"><span aria-hidden="true">▣</span><strong id="approvalTitle">待处理审批 · 1</strong><span id="approvalText">若汐需要确认支付回调配置的回滚范围</span></div>
+            <div class="approval-actions"><button type="button" data-toast="已打开审批详情（静态稿）">查看</button><button class="primary" id="approveButton" type="button">批准</button><button type="button" id="rejectButton">拒绝</button></div>
+          </header>
+        </section>
+
+        <form class="composer" id="composerForm">
+          <div class="composer-box">
+            <label class="sr-only" for="composerInput">写下消息</label>
+            <textarea id="composerInput" rows="2" placeholder="写下下一步目标，使用 @ 提及队员…"></textarea>
+            <div class="composer-side">
+              <button class="composer-icon" id="mentionButton" type="button" aria-expanded="false" aria-controls="mentionMenu" aria-label="提及队员" title="提及队员"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.5a3.5 3.5 0 1 0 7 0v-1.1a2 2 0 1 0-4 0v1.1a2 2 0 1 0 4 0v-1.1"/></svg></button>
+              <button class="composer-icon" type="button" aria-label="添加附件" title="添加附件" data-toast="附件队列会在这里展开（静态稿）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 6.5-6.8 6.8a3.2 3.2 0 0 0 4.5 4.5l7-7a4.6 4.6 0 0 0-6.5-6.5l-7 7a6 6 0 0 0 8.5 8.5l5.4-5.4"/></svg></button>
+              <button class="composer-send" type="submit">发送</button>
+            </div>
+            <div class="mention-menu" id="mentionMenu" hidden>
+              <strong>选择要提及的队员</strong>
+              <button class="mention-option" type="button" data-mention="沐瓦"><span class="avatar avatar-sm" style="--avatar-color:#a65f4a">沐</span><span>沐瓦</span><small>风险分析</small></button>
+              <button class="mention-option" type="button" data-mention="洛可"><span class="avatar avatar-sm" style="--avatar-color:#39777a">洛</span><span>洛可</span><small>回滚验证</small></button>
+              <button class="mention-option" type="button" data-mention="若汐"><span class="avatar avatar-sm" style="--avatar-color:#74628f">若</span><span>若汐</span><small>变更审阅</small></button>
+            </div>
+          </div>
+          <div class="composer-meta"><span>Enter 发送 · Shift + Enter 换行 · 拖入附件</span><button class="stop-button" id="stopButton" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg><span id="stopLabel">停止当前 CampTurn</span></button></div>
+        </form>
+      </section>
+
+      <aside class="activity-pane" aria-label="Camp 检查器">
+        <div class="inspector-tabs" role="tablist" aria-label="Camp 详情">
+          <button class="inspector-tab" type="button" role="tab" id="tabTasks" aria-selected="true" aria-controls="panelTasks" data-panel="panelTasks">任务 <small>2</small></button>
+          <button class="inspector-tab" type="button" role="tab" id="tabContext" aria-selected="false" aria-controls="panelContext" data-panel="panelContext">上下文投递 <small>3</small></button>
+          <button class="inspector-tab" type="button" role="tab" id="tabApprovals" aria-selected="false" aria-controls="panelApprovals" data-panel="panelApprovals">审批 <b>1</b></button>
+        </div>
+        <div class="inspector-scroll">
+          <section class="inspector-panel" id="panelTasks" role="tabpanel" aria-labelledby="tabTasks">
+            <div class="inspector-heading"><div><strong>长期事项</strong><small>创建或指派不会唤醒队员</small></div><button class="quiet-button compact" type="button" data-toast="新建 Task 表单（静态稿）">＋ 新建</button></div>
+            <div class="task-list">
+              <button class="task-row is-selected" type="button"><span class="task-dot" aria-hidden="true"></span><span class="task-row-copy"><strong>准备发布回滚清单</strong><small>记录高风险变更、回滚顺序与验证责任</small></span><span class="task-row-meta"><b>进行中</b><small>沐瓦</small></span></button>
+              <button class="task-row" type="button"><span class="task-dot done" aria-hidden="true"></span><span class="task-row-copy"><strong>验证旧版本快照</strong><small>隔离工作区中的回滚路径</small></span><span class="task-row-meta"><b style="color:var(--success)">已完成</b><small>洛可</small></span></button>
+            </div>
+            <div class="inspector-card"><strong>责任与边界</strong><p>这个 Task 只跟踪长期责任；取消 Task 不会取消已经接受或正在运行的 AgentRun。</p><dl><div><dt>负责人</dt><dd>沐瓦</dd></div><div><dt>验收条件</dt><dd>3 项 · 1 项已满足</dd></div><div><dt>更新</dt><dd>今天 10:04</dd></div></dl></div>
+            <div class="agent-process-link"><span class="avatar avatar-sm" style="--avatar-color:#a65f4a">沐</span><span><strong>沐瓦 · Agent 级执行过程</strong><small>多个执行阶段归入同一个入口</small></span><button class="quiet-button compact" type="button" data-agent-open="muwa">打开</button></div>
+            <p class="inspector-footnote">已结束的 Task 保留为只读记录；过程历史不因面板关闭而删除。</p>
+          </section>
+
+          <section class="inspector-panel" id="panelContext" role="tabpanel" aria-labelledby="tabContext" hidden>
+            <div class="inspector-heading"><div><strong>上下文投递</strong><small>只读的公共消息与收件关系</small></div><span class="status-pill succeeded">已同步</span></div>
+            <div class="context-list">
+              <div class="context-row"><strong>发布风险扫描</strong><small>沐瓦 → 洛可、若汐 · 公共消息一次创建，投递状态分别记录</small><span class="delivery-state success">2 条已记录</span></div>
+              <div class="context-row"><strong>回滚路径验证</strong><small>洛可 → 沐瓦 · 验证结果回到同一 Camp 时间线</small><span class="delivery-state success">已送达</span></div>
+              <div class="context-row"><strong>变更审阅</strong><small>若汐 · 过程被取消，历史证据仍由 Agent 入口保留</small><span class="delivery-state danger">已取消</span></div>
+            </div>
+            <div class="inspector-card"><strong>呈现边界</strong><p>上下文投递展示关系和状态；不会复制成第二条消息，也不会创建 Run 级导航。</p></div>
+          </section>
+
+          <section class="inspector-panel" id="panelApprovals" role="tabpanel" aria-labelledby="tabApprovals" hidden>
+            <div class="inspector-heading"><div><strong>审批</strong><small>影响工作区的动作需要用户确认</small></div><span class="status-pill waiting">待处理</span></div>
+            <article class="approval-card"><header><strong>修改支付回调配置</strong><small>approval_9c2…</small></header><p>沐瓦准备在隔离工作区写入旧版本配置，以便验证回滚顺序。</p><pre>config/payment-callback.yml
+~ timeout: 3s → 5s
+~ retry: 2 → 1</pre><footer><button class="quiet-button compact" type="button" data-toast="已拒绝（静态稿）">拒绝</button><button class="primary-button" type="button" data-approve-local>批准</button></footer></article>
+            <div class="inspector-card"><strong>审批与执行</strong><p>审批只决定这次动作是否允许；AgentRun 的执行、证据和审计边界保持不变。</p></div>
+          </section>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      const agents = {
+        muwa: {
+          name: '沐瓦', initials: '沐', color: '#a65f4a',
+          stages: [
+            { time: '09:42–09:46', run: 'A184…4b2', campTurn: 'turn_6d2f…30aa', invocation: '直接执行', depth: null, state: 'succeeded', deliveries: [], evidence: [{ icon: 'terminal', title: '执行 Shell 命令', note: 'git diff --stat', result: '已完成' }] },
+            { time: '10:04–现在', run: 'A19c…e71', campTurn: 'turn_7e9d…31ac', invocation: '直接执行', depth: null, state: 'running', deliveries: [{ name: '洛可', initials: '洛', color: '#39777a', state: '已送达', tone: 'success' }, { name: '若汐', initials: '若', color: '#74628f', state: '等待审批', tone: 'attention' }], evidence: [{ icon: 'terminal', title: '执行 Shell 命令', note: 'git status --short', result: '执行中' }, { icon: 'send', title: 'camp.message.send', note: 'Runtime 工具调用', result: '已完成' }] }
+          ]
+        },
+        luoke: {
+          name: '洛可', initials: '洛', color: '#39777a',
+          stages: [
+            { time: '09:56–09:58', run: 'A17d…9a0', campTurn: 'turn_7e9d…31ac', invocation: 'A2A', depth: '1', state: 'succeeded', deliveries: [], evidence: [] },
+            { time: '10:01–10:11', run: 'A182…c44', campTurn: 'turn_7e9d…31ac', invocation: 'A2A', depth: '1', state: 'succeeded', deliveries: [{ name: '沐瓦', initials: '沐', color: '#a65f4a', state: '已送达', tone: 'success' }], evidence: [{ icon: 'terminal', title: '执行 Shell 命令', note: 'rollback --verify', result: '已完成' }, { icon: 'terminal', title: '执行 Shell 命令', note: 'health-check', result: '已完成' }] }
+          ]
+        },
+        ruoxi: {
+          name: '若汐', initials: '若', color: '#74628f',
+          stages: [
+            { time: '09:39–09:43', run: 'A16b…1d9', campTurn: 'turn_7e9d…31ac', invocation: 'A2A', depth: '1', state: 'cancelled', deliveries: [], evidence: [] }
+          ]
+        }
+      };
+
+      let selectedAgent = 'muwa';
+      let dockExpanded = true;
+      let toastTimer = 0;
+      const NON_TERMINAL_RUN_STATES = new Set(['queued', 'running', 'waiting']);
+
+      const $ = (selector, root = document) => root.querySelector(selector);
+      const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
+
+      function escapeHtml(value) {
+        return String(value).replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
+      }
+
+      function avatar(agent, size) {
+        return `<span class="avatar ${size || ''}" style="--avatar-color:${agent.color}" aria-hidden="true">${agent.initials}</span>`;
+      }
+
+      function defaultFocusIndex(stages) {
+        for (let index = stages.length - 1; index >= 0; index -= 1) {
+          if (stages[index].state === 'running') return index;
+        }
+        for (let index = stages.length - 1; index >= 0; index -= 1) {
+          if (NON_TERMINAL_RUN_STATES.has(stages[index].state)) return index;
+        }
+        return -1;
+      }
+
+      function deliveriesMarkup(deliveries) {
+        if (deliveries.length === 0) return '';
+        return `<div class="run-deliveries"><small>协作投递</small>${deliveries.map((delivery) => `<span class="run-delivery">${avatar(delivery, 'avatar-sm')}<span>${escapeHtml(delivery.name)}</span></span>`).join('')}</div>`;
+      }
+
+      function focusDefaultRun() {
+        const scroller = $('#processHistory');
+        const target = $('[data-default-focus="true"]', scroller);
+        if (!target) {
+          scroller.scrollTop = 0;
+          return;
+        }
+        const top = Math.max(0, target.offsetTop - Math.max(12, (scroller.clientHeight - target.offsetHeight) / 2));
+        const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        scroller.scrollTo({ top, behavior: reducedMotion ? 'auto' : 'smooth' });
+      }
+
+      function renderDock(agentId, focusCurrent) {
+        const agent = agents[agentId];
+        if (!agent) return;
+        const focusIndex = defaultFocusIndex(agent.stages);
+        $('#processAgent').innerHTML = `${avatar(agent, 'avatar-sm')}<span class="process-agent-copy"><strong>${escapeHtml(agent.name)} · 执行过程</strong><small>同一 Agent 的证据按 Run 边界连续保留</small></span>`;
+        const focusIndicator = $('#focusIndicator');
+        focusIndicator.classList.toggle('is-live', focusIndex >= 0);
+        focusIndicator.querySelector('span').textContent = focusIndex >= 0 ? '当前 AgentRun 已定位' : '历史证据可重新查看';
+        $('#historyNote').textContent = focusIndex >= 0 ? '当前证据默认展开 · 不提供 Run 切换' : '按 Run 边界连续保留 · 不提供 Run 切换';
+        $('#processTimeline').innerHTML = agent.stages.map((stage, index) => {
+          const isDefaultFocus = index === focusIndex;
+          const stateClass = stage.state === 'failed' ? 'is-failed' : stage.state === 'cancelled' ? 'is-cancelled' : stage.state === 'succeeded' ? 'is-terminal' : '';
+          const stageClass = `${isDefaultFocus ? 'is-active' : ''} ${stateClass}`.trim();
+          const evidenceId = `evidence-${agentId}-${index}`;
+          const evidenceOpen = isDefaultFocus && stage.evidence.length > 0;
+          const a2aDepth = stage.depth === null ? '' : `<span>A2A 深度 ${escapeHtml(stage.depth)}</span>`;
+          const evidenceControl = stage.evidence.length > 0 ? `<button class="evidence-toggle" type="button" data-evidence="${evidenceId}" aria-expanded="${evidenceOpen ? 'true' : 'false'}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg><span class="evidence-toggle-label">${evidenceOpen ? '收起证据' : '查看证据'}</span><span class="sr-only">：AgentRun ${escapeHtml(stage.run)}</span></button>` : '';
+          const evidencePanel = stage.evidence.length > 0 ? `<div class="evidence-panel" id="${evidenceId}" ${evidenceOpen ? '' : 'hidden'}>${stage.evidence.map((item) => `<div class="evidence-row"><span class="evidence-icon">${item.icon === 'terminal' ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 7 4 5-4 5M11 17h7"/></svg>' : item.icon === 'send' ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 12 16-7-5 14-3.5-5.5z"/><path d="m11.5 13.5 8.5-8.5"/></svg>' : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>'}</span><span class="evidence-copy"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.note)}</small></span><span class="evidence-result">${escapeHtml(item.result)}</span></div>`).join('')}</div>` : '';
+          return `<li class="process-stage ${stageClass}" data-default-focus="${isDefaultFocus ? 'true' : 'false'}">
+            <span class="stage-node" aria-hidden="true"></span>
+            <article class="stage-card" aria-label="AgentRun ${escapeHtml(stage.run)}">
+              <div class="run-boundary">
+                <div class="run-boundary-main">
+                  <div class="run-time-row"><time>${escapeHtml(stage.time)}</time>${isDefaultFocus ? '<span class="current-run-badge">当前 AgentRun</span>' : ''}</div>
+                  <div class="stage-meta"><code>AgentRun ${escapeHtml(stage.run)}</code><span>${escapeHtml(stage.invocation)}</span><span>CampTurn <code>${escapeHtml(stage.campTurn)}</code></span>${a2aDepth}</div>
+                </div>
+                ${evidenceControl}
+              </div>
+              ${deliveriesMarkup(stage.deliveries)}
+              ${evidencePanel}
+            </article>
+          </li>`;
+        }).join('');
+        $$('.evidence-toggle', $('#processTimeline')).forEach((button) => button.addEventListener('click', () => {
+          const panel = document.getElementById(button.dataset.evidence);
+          if (!panel) return;
+          const expanded = button.getAttribute('aria-expanded') === 'true';
+          button.setAttribute('aria-expanded', String(!expanded));
+          panel.hidden = expanded;
+          button.querySelector('.evidence-toggle-label').textContent = expanded ? '查看证据' : '收起证据';
+        }));
+        if (focusCurrent) window.requestAnimationFrame(focusDefaultRun);
+      }
+
+      function selectAgent(agentId, announce) {
+        if (!agents[agentId]) return;
+        selectedAgent = agentId;
+        $$('.agent-chip').forEach((chip) => {
+          const active = chip.dataset.agent === agentId;
+          chip.classList.toggle('is-selected', active);
+          chip.setAttribute('aria-pressed', String(active));
+        });
+        if (!dockExpanded) setDockExpanded(true);
+        renderDock(agentId, true);
+        if (announce) showToast(`${agents[agentId].name} 的执行过程已打开（静态稿）`);
+      }
+
+      function setDockExpanded(expanded) {
+        dockExpanded = expanded;
+        const dock = $('#executionDock');
+        const toggle = $('#dockToggle');
+        dock.classList.toggle('is-collapsed', !expanded);
+        toggle.setAttribute('aria-expanded', String(expanded));
+        toggle.textContent = expanded ? '收起过程' : '展开过程';
+        $('#dockHint').textContent = expanded ? '唯一执行入口 · 3 位队员' : '历史过程仍保留，可随时重新打开';
+      }
+
+      function showToast(message) {
+        const toast = $('#toast');
+        toast.textContent = message;
+        toast.hidden = false;
+        window.clearTimeout(toastTimer);
+        toastTimer = window.setTimeout(() => { toast.hidden = true; }, 2600);
+      }
+
+      // Agent-level entry points live in the bottom dock and explicit Task relation; messages do not repeat them.
+      $$('.agent-chip').forEach((chip) => chip.addEventListener('click', () => selectAgent(chip.dataset.agent, true)));
+      $$('[data-agent-open]').forEach((button) => button.addEventListener('click', () => selectAgent(button.dataset.agentOpen, true)));
+      $$('[data-tab]').forEach((button) => button.addEventListener('click', () => {
+        const tab = button.dataset.tab;
+        const target = document.querySelector(`.inspector-tab[data-panel="panel${tab[0].toUpperCase()}${tab.slice(1)}"]`);
+        target?.click();
+        showToast('已定位到任务面板（静态稿）');
+      }));
+      $('#dockToggle').addEventListener('click', () => setDockExpanded(!dockExpanded));
+
+      $$('.inspector-tab').forEach((tab) => tab.addEventListener('click', () => {
+        $$('.inspector-tab').forEach((candidate) => candidate.setAttribute('aria-selected', String(candidate === tab)));
+        $$('.inspector-panel').forEach((panel) => { panel.hidden = panel.id !== tab.dataset.panel; });
+      }));
+
+      $$('[data-toast]').forEach((button) => button.addEventListener('click', () => showToast(button.dataset.toast)));
+      $$('[data-approve-local]').forEach((button) => button.addEventListener('click', () => {
+        $('#approvalDock').classList.add('is-settled');
+        $('#approvalTitle').textContent = '审批已批准';
+        $('#approvalText').textContent = '静态稿：下一次证据更新会继续归入沐瓦的执行过程';
+        $('#approveButton').disabled = true;
+        $('#rejectButton').disabled = true;
+        showToast('审批结果已更新（静态稿，未写入 Core）');
+      }));
+      $('#approveButton').addEventListener('click', () => $('[data-approve-local]')?.click());
+      $('#rejectButton').addEventListener('click', () => {
+        $('#approvalDock').classList.add('is-settled');
+        $('#approvalTitle').textContent = '审批已拒绝';
+        $('#approvalText').textContent = '静态稿：动作未执行，过程入口保持可查看';
+        $('#approveButton').disabled = true;
+        $('#rejectButton').disabled = true;
+        showToast('审批结果已更新（静态稿，未写入 Core）');
+      });
+
+      const mentionMenu = $('#mentionMenu');
+      $('#mentionButton').addEventListener('click', () => {
+        const expanded = $('#mentionButton').getAttribute('aria-expanded') === 'true';
+        $('#mentionButton').setAttribute('aria-expanded', String(!expanded));
+        mentionMenu.hidden = expanded;
+      });
+      $$('.mention-option').forEach((option) => option.addEventListener('click', () => {
+        const input = $('#composerInput');
+        input.value += `${input.value ? ' ' : ''}@${option.dataset.mention} `;
+        input.focus();
+        mentionMenu.hidden = true;
+        $('#mentionButton').setAttribute('aria-expanded', 'false');
+      }));
+      $('#composerForm').addEventListener('submit', (event) => {
+        event.preventDefault();
+        showToast('消息保留在本地草稿（静态稿，未发送）');
+      });
+      $('#stopButton').addEventListener('click', () => {
+        $('#stopLabel').textContent = '正在停止…';
+        $('#stopButton').disabled = true;
+        showToast('CampTurn 停止请求已模拟；不存在 Run 级停止按钮');
+      });
+
+      const notes = $('#notesPanel');
+      function setNotes(open) {
+        notes.hidden = !open;
+        $('#notesToggle').setAttribute('aria-expanded', String(open));
+      }
+      $('#notesToggle').addEventListener('click', () => setNotes(notes.hidden));
+      $('#notesClose').addEventListener('click', () => setNotes(false));
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          if (!notes.hidden) setNotes(false);
+          if (!mentionMenu.hidden) { mentionMenu.hidden = true; $('#mentionButton').setAttribute('aria-expanded', 'false'); }
+        }
+      });
+
+      renderDock(selectedAgent, true);
+    }());
+  </script>
+</body>
+</html>

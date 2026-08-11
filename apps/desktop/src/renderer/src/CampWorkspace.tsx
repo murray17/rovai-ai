@@ -741,6 +741,12 @@ export function CampWorkspace({
     setSubmittedExecutionRequest(null)
     executionDrawerTriggerRef.current = null
   }, [snapshot.camp.id])
+  useLayoutEffect(() => {
+    if (executionDrawerAgentId !== null) return
+    const trigger = executionDrawerTriggerRef.current
+    executionDrawerTriggerRef.current = null
+    if (trigger?.isConnected) trigger.focus({ preventScroll: true })
+  }, [executionDrawerAgentId])
 
   const message = useMemo(
     () => structuredCampContentPlainText(messageContent, snapshot.members),
@@ -1214,13 +1220,8 @@ export function CampWorkspace({
   }
 
   const closeExecutionProcess = (): void => {
-    const trigger = executionDrawerTriggerRef.current
     setExecutionDrawerAgentId(null)
     setExecutionDrawerFocusedRunId(null)
-    executionDrawerTriggerRef.current = null
-    if (trigger?.isConnected) {
-      window.requestAnimationFrame(() => trigger.focus({ preventScroll: true }))
-    }
   }
 
   useEffect(() => {
@@ -1258,10 +1259,12 @@ export function CampWorkspace({
               {(() => {
                 const items: JSX.Element[] = []
                 let lastDayKey = ''
+                let previousMessageAuthorKey: string | null = null
                 for (const timelineItem of conversationTimeline) {
                   const dayKey = localDayKey(timelineItem.createdAt)
                   if (dayKey && dayKey !== lastDayKey) {
                     lastDayKey = dayKey
+                    previousMessageAuthorKey = null
                     items.push(
                       <div className="timeline-node timeline-day" key={`day-${dayKey}`}>
                         {timelineDayLabel(timelineItem.createdAt, snapshot.camp.createdAt)}
@@ -1269,6 +1272,7 @@ export function CampWorkspace({
                     )
                   }
                   if (timelineItem.kind === 'task_card') {
+                    previousMessageAuthorKey = null
                     items.push(
                       <TaskTimelineCard
                         key={timelineItem.id}
@@ -1284,6 +1288,7 @@ export function CampWorkspace({
                     continue
                   }
                   if (timelineItem.kind === 'stop_event') {
+                    previousMessageAuthorKey = null
                     const turnRun = snapshot.agentRuns
                       .filter((candidate) => candidate.campTurnId === timelineItem.campTurnId)
                       .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]
@@ -1308,12 +1313,17 @@ export function CampWorkspace({
                     ? runById.get(campMessage.sourceAgentRunId) ?? null
                     : null
                   const displayBody = campMessage.body
+                  const messageAuthorKey = campMessage.authorType === 'user' || campMessage.authorType === 'agent'
+                    ? `${campMessage.authorType}:${campMessage.authorId}`
+                    : null
+                  const followsSameAuthor = messageAuthorKey !== null
+                    && previousMessageAuthorKey === messageAuthorKey
                   const campMessageDeliveries = snapshot.messageDeliveries.filter((delivery) =>
                     delivery.messageId === campMessage.id
                   )
                   items.push(
                     <article
-                      className={`timeline-node conversation-bubble ${campMessage.authorType}`}
+                      className={`timeline-node conversation-bubble ${campMessage.authorType}${followsSameAuthor ? ' same-author' : ''}`}
                       key={campMessage.id}
                       data-camp-turn-id={sourceRun?.campTurnId}
                       tabIndex={sourceRun ? -1 : undefined}
@@ -1393,6 +1403,7 @@ export function CampWorkspace({
                         : <p>{displayBody}</p>}
                     </article>
                   )
+                  previousMessageAuthorKey = messageAuthorKey
                 }
                 return items
               })()}

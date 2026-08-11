@@ -131,6 +131,89 @@ pub fn default_presentation_hint(
     )
 }
 
+pub(crate) fn structured_presentation_hint(item_type: &str, item: &Value) -> Option<String> {
+    match item_type {
+        "commandExecution" => command_actions_presentation_hint(item),
+        "fileChange" => file_changes_presentation_hint(item),
+        _ => None,
+    }
+}
+
+fn command_actions_presentation_hint(item: &Value) -> Option<String> {
+    let actions = item.get("commandActions")?.as_array()?;
+    if actions.is_empty() {
+        return None;
+    }
+    let kinds = actions
+        .iter()
+        .map(|action| action.get("type").and_then(Value::as_str))
+        .collect::<Option<Vec<_>>>()?;
+    if kinds
+        .iter()
+        .any(|kind| !matches!(*kind, "read" | "listFiles" | "search"))
+    {
+        return None;
+    }
+    if kinds.iter().all(|kind| *kind == "read") {
+        let mut paths = actions
+            .iter()
+            .filter_map(|action| action.get("path").and_then(Value::as_str))
+            .filter_map(compact_path_label)
+            .collect::<Vec<_>>();
+        paths.sort();
+        paths.dedup();
+        return Some(match paths.as_slice() {
+            [path] => format!("读取 {path}"),
+            [] => "读取文件".to_string(),
+            paths => format!("读取 {} 个文件", paths.len()),
+        });
+    }
+    if kinds.iter().all(|kind| *kind == "listFiles") {
+        return Some("列出文件".to_string());
+    }
+    if kinds.iter().all(|kind| *kind == "search") {
+        return Some("搜索项目文件".to_string());
+    }
+    Some("检索项目文件".to_string())
+}
+
+fn file_changes_presentation_hint(item: &Value) -> Option<String> {
+    let changes = item.get("changes")?.as_array()?;
+    match changes.as_slice() {
+        [] => None,
+        [change] => {
+            let path = change
+                .get("path")
+                .and_then(Value::as_str)
+                .and_then(compact_path_label);
+            let verb = match change.pointer("/kind/type").and_then(Value::as_str) {
+                Some("add") => "新增",
+                Some("delete") => "删除",
+                _ => "修改",
+            };
+            Some(path.map_or_else(|| format!("{verb}文件"), |path| format!("{verb} {path}")))
+        }
+        changes => Some(format!("修改 {} 个文件", changes.len())),
+    }
+}
+
+fn compact_path_label(path: &str) -> Option<String> {
+    let path = path.trim().trim_end_matches(['/', '\\']);
+    let leaf = path.rsplit(['/', '\\']).next()?.trim();
+    if leaf.is_empty() || matches!(leaf, "." | "..") {
+        return None;
+    }
+    let flattened = leaf.split_whitespace().collect::<Vec<_>>().join(" ");
+    const MAX_CHARS: usize = 56;
+    if flattened.chars().count() <= MAX_CHARS {
+        return Some(flattened);
+    }
+    Some(format!(
+        "{}…",
+        flattened.chars().take(MAX_CHARS).collect::<String>()
+    ))
+}
+
 fn domain(activity_domain: &str, semantic_kind: &str) -> (String, Option<String>) {
     (activity_domain.to_string(), Some(semantic_kind.to_string()))
 }
@@ -201,6 +284,74 @@ mod tests {
         assert_eq!(
             descriptor_for(AdapterKind::AntigravityApp).baseline_coverage,
             "run_level"
+        );
+    }
+
+    #[test]
+    fn codex_command_actions_generate_bounded_presentation_hints() {
+        assert_eq!(
+            structured_presentation_hint(
+                "commandExecution",
+                &json!({
+                    "commandActions": [{
+                        "type": "read",
+                        "name": "sed",
+                        "path": "/repo/docs/README.md"
+                    }]
+                }),
+            )
+            .as_deref(),
+            Some("读取 README.md")
+        );
+        assert_eq!(
+            structured_presentation_hint(
+                "commandExecution",
+                &json!({
+                    "commandActions": [
+                        {"type": "read", "path": "/repo/a.md"},
+                        {"type": "search", "path": "/repo"}
+                    ]
+                }),
+            )
+            .as_deref(),
+            Some("检索项目文件")
+        );
+        assert_eq!(
+            structured_presentation_hint(
+                "commandExecution",
+                &json!({"commandActions": [{"type": "unknown"}]}),
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn codex_file_changes_include_observed_scope_without_exposing_full_paths() {
+        assert_eq!(
+            structured_presentation_hint(
+                "fileChange",
+                &json!({
+                    "changes": [{
+                        "path": "/repo/docs/design.md",
+                        "kind": {"type": "add"}
+                    }]
+                }),
+            )
+            .as_deref(),
+            Some("新增 design.md")
+        );
+        assert_eq!(
+            structured_presentation_hint(
+                "fileChange",
+                &json!({
+                    "changes": [
+                        {"path": "/repo/docs/design.md", "kind": {"type": "update"}},
+                        {"path": "/repo/docs/plan.md", "kind": {"type": "update"}}
+                    ]
+                }),
+            )
+            .as_deref(),
+            Some("修改 2 个文件")
         );
     }
 }

@@ -1,0 +1,2194 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ROVAI · P1 Fog 完整交互设计稿</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --study: #171a1d;
+      --study-line: #2d3237;
+      --side-bg: #f3f4f5;
+      --side-panel: #fafbfc;
+      --side-text: #293239;
+      --side-secondary: #5b6870;
+      --side-icon: #6c7880;
+      --side-hover: #e7e9eb;
+      --side-active: #e9ecee;
+      --side-focus: #4f6e89;
+      --side-line: #d8dde1;
+      --canvas: #f2f4f1;
+      --surface: #fbfcfa;
+      --raised: #ffffff;
+      --subtle: #f6f7f3;
+      --muted-surface: #ecefe9;
+      --selected: #e9ecf7;
+      --ink: #202438;
+      --muted: #5f6678;
+      --faint: #707684;
+      --line: #dde1da;
+      --line-strong: #cbd1c8;
+      --control-line: #8b9389;
+      --brand: #343b72;
+      --brand-soft: #e8eaf6;
+      --success: #236347;
+      --success-soft: #e4f2ea;
+      --warning: #8a5b16;
+      --warning-soft: #f8edd9;
+      --danger: #9d3540;
+      --danger-soft: #f8e6e8;
+      --info: #315d7d;
+      --info-soft: #e6eff5;
+      --shadow-sm: 0 1px 2px rgba(25, 31, 28, .06);
+      --shadow-md: 0 14px 36px rgba(28, 34, 31, .16);
+      --shadow-lg: 0 24px 72px rgba(20, 24, 22, .24);
+      --radius-sm: 8px;
+      --radius: 12px;
+      --radius-lg: 18px;
+      --ease: 160ms cubic-bezier(.2, .7, .2, 1);
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-width: 1120px; min-height: 720px; height: 100%; }
+    body { background: #121416; color: var(--ink); overflow: hidden; }
+    button, input, textarea, select { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+      outline: 2px solid var(--side-focus);
+      outline-offset: 2px;
+    }
+    [hidden] { display: none !important; }
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+    }
+
+    .study-bar {
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 0 16px;
+      color: #d7dadd;
+      background: var(--study);
+      border-bottom: 1px solid #070809;
+      letter-spacing: .01em;
+    }
+    .study-left, .study-right, .token-row { display: flex; align-items: center; gap: 10px; }
+    .study-kicker { font-size: 11px; font-weight: 750; color: #8e989f; text-transform: uppercase; letter-spacing: .12em; }
+    .study-title { font-size: 13px; font-weight: 680; color: #f4f5f6; }
+    .study-chip {
+      display: inline-flex; align-items: center; height: 25px; padding: 0 9px;
+      border: 1px solid #3c444a; border-radius: 999px; background: #22272b;
+      color: #cbd1d5; font-size: 11px; font-weight: 650;
+    }
+    .study-chip::before { content: ""; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: #cfd5d9; }
+    .study-button {
+      height: 30px; padding: 0 11px; border: 1px solid #3c444a; border-radius: 7px;
+      background: #22272b; color: #e2e5e7; font-size: 12px; font-weight: 650;
+    }
+    .study-button:hover { background: #2b3136; }
+    .token { display: flex; align-items: center; gap: 5px; font-size: 10px; color: #89939a; }
+    .swatch { width: 10px; height: 10px; border: 1px solid rgba(255,255,255,.24); border-radius: 3px; }
+
+    .app-shell { height: calc(100vh - 48px); display: grid; grid-template-columns: 272px minmax(0, 1fr); background: var(--canvas); }
+    .sidecar {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      color: var(--side-text);
+      background: var(--side-bg);
+      border-right: 1px solid var(--side-line);
+    }
+    .brand-row {
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 14px 0 18px;
+      border-bottom: 1px solid var(--side-line);
+    }
+    .brand-lockup { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .brand-mark {
+      display: grid; place-items: center; width: 27px; height: 27px; flex: 0 0 auto;
+      border-radius: 8px; color: white; background: var(--brand);
+      font-size: 11px; font-weight: 800; letter-spacing: -.03em;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.12);
+    }
+    .brand-name { font-size: 14px; font-weight: 760; letter-spacing: -.015em; white-space: nowrap; }
+    .icon-button {
+      display: inline-grid; place-items: center; width: 32px; height: 32px;
+      padding: 0; border: 1px solid transparent; border-radius: 8px;
+      color: var(--side-icon); background: transparent;
+    }
+    .icon-button:hover { color: var(--side-text); background: var(--side-hover); }
+    .icon-button.has-dot { position: relative; }
+    .icon-button.has-dot::after {
+      content: ""; position: absolute; right: 7px; top: 6px; width: 6px; height: 6px;
+      border-radius: 50%; background: var(--danger); border: 1.5px solid var(--side-bg);
+    }
+    .side-scroll { overflow: auto; padding: 10px 10px 16px; }
+    .side-section { margin: 11px 0 17px; }
+    .side-label {
+      padding: 0 9px 7px; color: var(--side-secondary); font-size: 10px;
+      font-weight: 760; letter-spacing: .1em; text-transform: uppercase;
+    }
+    .nav-item, .camp-row, .project-row {
+      position: relative; width: 100%; min-height: 36px; display: flex; align-items: center; gap: 9px;
+      padding: 7px 9px; border: 0; border-radius: 8px; background: transparent;
+      color: var(--side-text); text-align: left; font-size: 13px;
+    }
+    .nav-item:hover, .camp-row:hover, .project-row:hover { background: var(--side-hover); }
+    .nav-item.active, .camp-row.active { background: var(--side-active); font-weight: 680; }
+    .nav-item.active::before, .camp-row.active::before {
+      content: ""; position: absolute; left: -5px; top: 7px; bottom: 7px;
+      width: 3px; border-radius: 3px; background: var(--side-focus);
+    }
+    .nav-icon { width: 16px; flex: 0 0 16px; color: var(--side-icon); text-align: center; font-size: 14px; }
+    .nav-text { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .nav-meta { color: var(--side-secondary); font-size: 10px; }
+    .project-row { min-height: 30px; padding-top: 4px; padding-bottom: 4px; color: var(--side-secondary); font-size: 11px; font-weight: 720; }
+    .camp-row { padding-left: 25px; }
+    .camp-dot { width: 6px; height: 6px; border-radius: 50%; background: #8c959b; }
+    .camp-dot.live { background: var(--success); box-shadow: 0 0 0 3px rgba(35,99,71,.1); }
+    .side-bottom { margin-top: auto; padding: 10px; border-top: 1px solid var(--side-line); }
+
+    .main-frame { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--canvas); }
+    .main-header {
+      height: 64px; flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
+      gap: 16px; padding: 0 24px; background: rgba(251,252,250,.94); border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(14px);
+    }
+    .header-copy { min-width: 0; }
+    .eyebrow { margin-bottom: 3px; color: var(--muted); font-size: 10px; font-weight: 760; letter-spacing: .1em; text-transform: uppercase; }
+    .main-title { margin: 0; color: var(--ink); font-size: 17px; font-weight: 730; letter-spacing: -.018em; }
+    .header-actions { display: flex; align-items: center; gap: 8px; }
+    .content { min-height: 0; flex: 1; overflow: auto; }
+    .page { min-height: 100%; }
+    .page-pad { padding: 24px; }
+    .page-max { max-width: 1180px; margin: 0 auto; }
+
+    .button {
+      min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+      padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 8px;
+      background: var(--raised); color: var(--ink); font-size: 12px; font-weight: 680;
+      box-shadow: var(--shadow-sm); transition: background var(--ease), border-color var(--ease), transform var(--ease);
+    }
+    .button:hover { background: var(--subtle); border-color: var(--control-line); }
+    .button:active { transform: translateY(1px); }
+    .button.primary { border-color: var(--brand); background: var(--brand); color: white; }
+    .button.primary:hover { background: #29305f; }
+    .button.quiet { border-color: transparent; background: transparent; box-shadow: none; color: var(--muted); }
+    .button.quiet:hover { background: var(--muted-surface); color: var(--ink); }
+    .button.danger { border-color: #c98289; background: var(--danger-soft); color: var(--danger); }
+    .button.small { min-height: 28px; padding: 0 9px; font-size: 11px; }
+    .button.icon-only { width: 34px; padding: 0; }
+    .button[disabled] { cursor: not-allowed; opacity: .48; transform: none; }
+    .button-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+    .surface { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
+    .surface-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+    .surface-body { padding: 18px; }
+    .section-title { margin: 0; font-size: 14px; font-weight: 720; letter-spacing: -.012em; }
+    .section-copy { margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+    .caption { color: var(--muted); font-size: 11px; line-height: 1.5; }
+    .micro { color: var(--faint); font-size: 10px; line-height: 1.45; }
+    .divider { height: 1px; margin: 14px 0; background: var(--line); }
+    .stack { display: grid; gap: 12px; }
+    .stack-lg { display: grid; gap: 18px; }
+    .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, .64fr); gap: 18px; align-items: start; }
+    .three-col { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; }
+    .two-col { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
+
+    .status {
+      display: inline-flex; align-items: center; gap: 6px; min-height: 22px; padding: 0 8px;
+      border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted);
+      background: var(--subtle); font-size: 10px; font-weight: 720;
+    }
+    .status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .status.success { color: var(--success); border-color: #b7d7c5; background: var(--success-soft); }
+    .status.warning { color: var(--warning); border-color: #e3ccaa; background: var(--warning-soft); }
+    .status.danger { color: var(--danger); border-color: #e5b9be; background: var(--danger-soft); }
+    .status.info { color: var(--info); border-color: #bdd2df; background: var(--info-soft); }
+    .tag { display: inline-flex; align-items: center; min-height: 22px; padding: 0 7px; border-radius: 6px; background: var(--muted-surface); color: var(--muted); font-size: 10px; font-weight: 650; }
+
+    .field { display: grid; gap: 6px; }
+    .field-label { color: var(--ink); font-size: 11px; font-weight: 700; }
+    .field-help { color: var(--muted); font-size: 10px; line-height: 1.5; }
+    .input, .textarea, .select {
+      width: 100%; border: 1px solid var(--line-strong); border-radius: 8px;
+      background: var(--raised); color: var(--ink); font-size: 12px;
+    }
+    .input, .select { height: 36px; padding: 0 10px; }
+    .textarea { min-height: 92px; padding: 9px 10px; resize: vertical; line-height: 1.5; }
+    .input::placeholder, .textarea::placeholder { color: #949a9f; }
+    .check-row { display: flex; align-items: flex-start; gap: 9px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+    .check-row input { margin-top: 2px; accent-color: var(--brand); }
+    .switch { position: relative; width: 34px; height: 20px; flex: 0 0 auto; border-radius: 999px; background: #b9c0ba; }
+    .switch::after { content: ""; position: absolute; width: 16px; height: 16px; left: 2px; top: 2px; border-radius: 50%; background: white; box-shadow: 0 1px 2px rgba(0,0,0,.18); }
+    .switch.on { background: var(--brand); }
+    .switch.on::after { left: 16px; }
+    .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 13px 0; border-bottom: 1px solid var(--line); }
+    .setting-row:last-child { border-bottom: 0; }
+    .setting-name { font-size: 12px; font-weight: 680; }
+    .setting-description { margin-top: 4px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+
+    .tabs { display: flex; align-items: center; gap: 4px; min-height: 36px; padding: 3px; border-radius: 9px; background: var(--muted-surface); }
+    .tab { min-height: 30px; padding: 0 10px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 11px; font-weight: 680; }
+    .tab:hover { color: var(--ink); }
+    .tab.active { color: var(--ink); background: var(--raised); box-shadow: var(--shadow-sm); }
+    .segmented { display: inline-flex; padding: 3px; border-radius: 8px; background: var(--muted-surface); }
+    .segmented button { min-height: 28px; padding: 0 9px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; font-size: 11px; font-weight: 680; }
+    .segmented button.active { color: var(--ink); background: var(--raised); box-shadow: var(--shadow-sm); }
+
+    .avatar { display: inline-grid; place-items: center; width: 30px; height: 30px; flex: 0 0 auto; border-radius: 9px; color: #fff; background: #596274; font-size: 10px; font-weight: 760; }
+    .avatar.large { width: 54px; height: 54px; border-radius: 15px; font-size: 15px; }
+    .avatar.violet { background: #514b7d; }
+    .avatar.green { background: #3e6b57; }
+    .avatar.rust { background: #8a5947; }
+    .list-row { display: flex; align-items: center; gap: 11px; padding: 11px 12px; border-radius: 9px; }
+    .list-row:hover { background: var(--subtle); }
+    .list-row.selected { background: var(--selected); }
+    .list-copy { min-width: 0; flex: 1; }
+    .list-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 690; }
+    .list-subtitle { margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10px; }
+
+    .notice {
+      display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px;
+      border: 1px solid #c7d6df; border-radius: 9px; background: var(--info-soft); color: var(--info);
+      font-size: 11px; line-height: 1.5;
+    }
+    .notice.warning { color: var(--warning); border-color: #e3ccaa; background: var(--warning-soft); }
+    .notice.danger { color: var(--danger); border-color: #e5b9be; background: var(--danger-soft); }
+    .notice.success { color: var(--success); border-color: #b7d7c5; background: var(--success-soft); }
+    .notice strong { display: block; margin-bottom: 2px; color: currentColor; font-size: 11px; }
+
+    .kpi { padding: 15px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+    .kpi-label { color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; }
+    .kpi-value { margin-top: 7px; font-size: 21px; font-weight: 730; letter-spacing: -.03em; }
+    .kpi-meta { margin-top: 4px; color: var(--muted); font-size: 10px; }
+
+    .compose-page { display: grid; place-items: center; min-height: 100%; padding: 38px; }
+    .compose-wrap { width: min(760px, 100%); }
+    .compose-intro { margin-bottom: 28px; text-align: center; }
+    .compose-glyph {
+      display: grid; place-items: center; width: 46px; height: 46px; margin: 0 auto 15px;
+      border: 1px solid var(--line-strong); border-radius: 14px; background: var(--raised);
+      color: var(--brand); font-size: 20px; box-shadow: var(--shadow-sm);
+    }
+    .compose-intro h2 { margin: 0; font-size: 22px; font-weight: 720; letter-spacing: -.035em; }
+    .compose-intro p { margin: 8px auto 0; max-width: 500px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+    .prompt-box { padding: 10px; border: 1px solid var(--line-strong); border-radius: 15px; background: var(--raised); box-shadow: 0 10px 30px rgba(31,37,34,.08); }
+    .prompt-box textarea { width: 100%; min-height: 92px; padding: 8px 9px; border: 0; outline: 0; resize: none; background: transparent; line-height: 1.55; }
+    .prompt-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 2px 0; }
+    .starter-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 9px; margin-top: 14px; }
+    .starter {
+      padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: rgba(251,252,250,.72);
+      color: var(--muted); text-align: left; font-size: 10px; line-height: 1.5;
+    }
+    .starter:hover { border-color: var(--line-strong); background: var(--raised); color: var(--ink); }
+    .starter strong { display: block; margin-bottom: 4px; color: var(--ink); font-size: 11px; }
+
+    .camp-page { min-height: 100%; display: grid; grid-template-rows: auto minmax(0,1fr); }
+    .camp-toolbar {
+      display: flex; align-items: center; justify-content: space-between; gap: 14px;
+      padding: 12px 18px; background: var(--surface); border-bottom: 1px solid var(--line);
+    }
+    .camp-title-row { display: flex; align-items: center; gap: 9px; min-width: 0; }
+    .camp-title { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 720; }
+    .camp-grid { min-height: 0; display: grid; grid-template-columns: minmax(480px,1fr) 340px; }
+    .timeline-column { min-height: 0; display: flex; flex-direction: column; background: var(--canvas); }
+    .timeline { min-height: 0; flex: 1; overflow: auto; padding: 18px clamp(22px,4vw,64px) 16px; }
+    .timeline-inner { max-width: 780px; margin: 0 auto; display: grid; gap: 15px; }
+    .date-rule { display: flex; align-items: center; gap: 10px; color: var(--faint); font-size: 9px; text-transform: uppercase; letter-spacing: .09em; }
+    .date-rule::before, .date-rule::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+    .message { display: grid; grid-template-columns: 30px minmax(0,1fr); gap: 10px; }
+    .message.user { grid-template-columns: minmax(0,1fr) 30px; }
+    .message.user .message-body { grid-column: 1; grid-row: 1; justify-self: end; max-width: 74%; background: #e8ebf4; border-color: #d3d7e6; }
+    .message.user .avatar { grid-column: 2; grid-row: 1; }
+    .message-body {
+      width: fit-content; max-width: 90%; padding: 10px 12px; border: 1px solid var(--line);
+      border-radius: 4px 12px 12px 12px; background: var(--raised); font-size: 11px; line-height: 1.58;
+      box-shadow: var(--shadow-sm);
+    }
+    .message.user .message-body { border-radius: 12px 4px 12px 12px; }
+    .message-meta { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; color: var(--muted); font-size: 9px; }
+    .message-meta strong { color: var(--ink); font-size: 10px; }
+    .tool-call {
+      margin-top: 8px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px;
+      background: var(--subtle); color: var(--muted); font-size: 10px;
+    }
+    .tool-call-head { display: flex; align-items: center; justify-content: space-between; gap: 9px; }
+    .tool-call code { color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; }
+    .task-card { padding: 12px; border: 1px solid #cfd3e2; border-radius: 10px; background: #f8f9fc; }
+    .task-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .task-title { font-size: 11px; font-weight: 720; }
+    .task-progress { height: 5px; overflow: hidden; margin: 10px 0 7px; border-radius: 999px; background: #dfe2e7; }
+    .task-progress span { display: block; width: 66%; height: 100%; border-radius: inherit; background: var(--brand); }
+    .approval-card { padding: 12px; border: 1px solid #e0cba8; border-radius: 10px; background: #fcf4e6; }
+    .approval-card .button-row { margin-top: 10px; }
+    .composer-wrap { flex: 0 0 auto; padding: 10px 18px 14px; background: linear-gradient(180deg,rgba(242,244,241,0),var(--canvas) 20%); }
+    .composer { position: relative; max-width: 820px; margin: 0 auto; padding: 9px; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--raised); box-shadow: 0 8px 24px rgba(30,35,32,.08); }
+    .composer textarea { width: 100%; min-height: 54px; max-height: 120px; padding: 6px 8px; border: 0; outline: 0; resize: none; background: transparent; font-size: 11px; line-height: 1.5; }
+    .composer-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 4px; }
+    .composer-hint { color: var(--faint); font-size: 9px; }
+    .inspector { min-height: 0; display: flex; flex-direction: column; background: var(--surface); border-left: 1px solid var(--line); }
+    .inspector-head { padding: 12px; border-bottom: 1px solid var(--line); }
+    .inspector-body { min-height: 0; flex: 1; overflow: auto; padding: 12px; }
+    .inspector-panel { display: grid; gap: 10px; }
+    .inspector-item { padding: 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--raised); }
+    .inspector-item-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 6px; font-size: 10px; font-weight: 700; }
+    .inspector-item p { margin: 0; color: var(--muted); font-size: 9px; line-height: 1.5; }
+    .empty-state { display: grid; place-items: center; min-height: 360px; padding: 50px; text-align: center; }
+    .empty-state .compose-glyph { margin-bottom: 12px; }
+    .empty-state h3 { margin: 0; font-size: 15px; }
+    .empty-state p { max-width: 380px; margin: 7px auto 15px; color: var(--muted); font-size: 11px; line-height: 1.55; }
+
+    .members-layout { display: grid; grid-template-columns: 300px minmax(0,1fr); gap: 18px; align-items: stretch; min-height: calc(100vh - 160px); }
+    .roster { overflow: hidden; }
+    .roster-search { padding: 12px; border-bottom: 1px solid var(--line); }
+    .roster-list { padding: 7px; }
+    .member-detail { display: flex; flex-direction: column; }
+    .profile-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 18px; border-bottom: 1px solid var(--line); }
+    .profile-lockup { display: flex; align-items: center; gap: 13px; }
+    .profile-name { margin: 0 0 5px; font-size: 17px; font-weight: 730; }
+    .detail-tabs { padding: 10px 18px 0; }
+    .detail-content { padding: 18px; }
+    .identity-card { padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--subtle); }
+    .identity-card dt { color: var(--muted); font-size: 9px; font-weight: 720; letter-spacing: .08em; text-transform: uppercase; }
+    .identity-card dd { margin: 5px 0 13px; font-size: 11px; line-height: 1.55; }
+    .identity-card dd:last-child { margin-bottom: 0; }
+    .runtime-row { display: grid; grid-template-columns: minmax(140px,.8fr) minmax(180px,1fr) auto; gap: 12px; align-items: center; padding: 11px 0; border-bottom: 1px solid var(--line); }
+    .runtime-row:last-child { border-bottom: 0; }
+    .product-mark { width: 27px; height: 27px; display: grid; place-items: center; border-radius: 7px; background: var(--ink); color: white; font-size: 9px; font-weight: 760; }
+
+    .memory-layout { display: grid; grid-template-columns: 310px minmax(0,1fr); gap: 18px; min-height: calc(100vh - 160px); }
+    .memory-list { overflow: hidden; }
+    .filter-strip { display: flex; gap: 6px; padding: 12px; border-bottom: 1px solid var(--line); }
+    .memory-items { padding: 7px; }
+    .memory-card { display: block; width: 100%; padding: 12px; border: 0; border-radius: 9px; background: transparent; text-align: left; }
+    .memory-card:hover { background: var(--subtle); }
+    .memory-card.selected { background: var(--selected); }
+    .memory-card p { margin: 6px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+    .memory-detail { padding: 19px; }
+    .memory-quote { margin: 16px 0; padding: 14px 16px; border-left: 3px solid var(--brand); background: var(--subtle); font-size: 12px; line-height: 1.65; }
+    .provenance { display: grid; grid-template-columns: 95px 1fr; gap: 8px 12px; margin-top: 16px; font-size: 10px; }
+    .provenance dt { color: var(--muted); }
+    .provenance dd { margin: 0; }
+
+    .settings-layout { display: grid; grid-template-columns: 210px minmax(0,1fr); min-height: 100%; }
+    .settings-nav { padding: 18px 12px; background: var(--subtle); border-right: 1px solid var(--line); }
+    .settings-nav h2 { margin: 0 9px 14px; font-size: 15px; }
+    .settings-nav button {
+      width: 100%; min-height: 35px; display: flex; align-items: center; gap: 9px;
+      padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); text-align: left; font-size: 11px; font-weight: 650;
+    }
+    .settings-nav button:hover { color: var(--ink); background: var(--muted-surface); }
+    .settings-nav button.active { color: var(--ink); background: var(--raised); box-shadow: var(--shadow-sm); }
+    .settings-content { padding: 24px; overflow: auto; }
+    .settings-inner { max-width: 900px; margin: 0 auto; }
+    .settings-heading { margin-bottom: 18px; }
+    .settings-heading h2 { margin: 0; font-size: 19px; font-weight: 730; letter-spacing: -.025em; }
+    .settings-heading p { margin: 6px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+    .theme-preview { overflow: hidden; display: grid; grid-template-columns: 70px 1fr; height: 122px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--canvas); }
+    .theme-preview .mini-side { padding: 10px 8px; background: var(--side-bg); border-right: 1px solid var(--side-line); }
+    .mini-line { height: 6px; margin-bottom: 7px; border-radius: 3px; background: #cfd5d9; }
+    .theme-preview .mini-main { padding: 12px; }
+    .mini-card { height: 27px; margin-bottom: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); }
+    .skill-card, .mcp-card, .diagnostic-row { padding: 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--raised); }
+    .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .card-title { font-size: 12px; font-weight: 710; }
+    .card-meta { margin-top: 4px; color: var(--muted); font-size: 9px; line-height: 1.45; }
+    .code-block { overflow: auto; padding: 11px; border: 1px solid var(--line); border-radius: 8px; background: #f0f2ee; color: #414750; font: 9px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace; white-space: pre-wrap; }
+    .permission-list { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 9px; }
+    .diagnostic-row { display: grid; grid-template-columns: 30px minmax(0,1fr) auto; gap: 11px; align-items: center; }
+    .diagnostic-icon { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: var(--success-soft); color: var(--success); font-weight: 800; }
+    .log-view { min-height: 170px; max-height: 250px; overflow: auto; }
+
+    .overlay-root { position: fixed; inset: 48px 0 0; z-index: 50; pointer-events: none; }
+    .overlay-backdrop { position: absolute; inset: 0; background: rgba(22,27,25,.38); opacity: 0; transition: opacity var(--ease); pointer-events: none; }
+    .overlay-root.open { pointer-events: auto; }
+    .overlay-root.open .overlay-backdrop { opacity: 1; pointer-events: auto; }
+    .overlay-root.nonmodal .overlay-backdrop { opacity: 0; pointer-events: none; }
+    .overlay-surface { display: none; position: absolute; z-index: 2; }
+    .overlay-surface.open { display: block; animation: enter var(--ease) both; }
+    @keyframes enter { from { opacity: 0; transform: translateY(7px) scale(.99); } to { opacity: 1; transform: none; } }
+    .dialog {
+      left: 50%; top: 50%; width: min(520px,calc(100vw - 48px)); max-height: calc(100vh - 96px);
+      overflow: auto; transform: translate(-50%,-50%); border: 1px solid var(--line-strong);
+      border-radius: 16px; background: var(--raised); box-shadow: var(--shadow-lg);
+    }
+    .dialog.open { animation: dialog-enter var(--ease) both; }
+    @keyframes dialog-enter { from { opacity: 0; transform: translate(-50%,calc(-50% + 10px)) scale(.985); } to { opacity: 1; transform: translate(-50%,-50%) scale(1); } }
+    .dialog.narrow { width: min(420px,calc(100vw - 48px)); }
+    .dialog.wide { width: min(720px,calc(100vw - 48px)); }
+    .dialog.xwide { width: min(920px,calc(100vw - 48px)); }
+    .dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 18px 20px 14px; border-bottom: 1px solid var(--line); }
+    .dialog-title { margin: 0; font-size: 15px; font-weight: 730; letter-spacing: -.015em; }
+    .dialog-copy { margin: 5px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+    .dialog-body { padding: 18px 20px; }
+    .dialog-footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 13px 20px; border-top: 1px solid var(--line); background: var(--subtle); border-radius: 0 0 16px 16px; }
+    .close-button { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 7px; background: transparent; color: var(--muted); }
+    .close-button:hover { color: var(--ink); background: var(--muted-surface); }
+    .drawer {
+      top: 0; right: 0; bottom: 0; width: min(440px,42vw); overflow: auto;
+      border-left: 1px solid var(--line-strong); background: var(--raised); box-shadow: -16px 0 44px rgba(27,32,29,.16);
+      transform-origin: right center;
+    }
+    .drawer.open { animation: drawer-enter 200ms cubic-bezier(.2,.7,.2,1) both; }
+    @keyframes drawer-enter { from { opacity: .5; transform: translateX(100%); } to { opacity: 1; transform: none; } }
+    .drawer.wide { width: min(620px,56vw); }
+    .drawer-header { position: sticky; top: 0; z-index: 2; display: flex; justify-content: space-between; gap: 12px; padding: 17px 18px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,.96); backdrop-filter: blur(12px); }
+    .drawer-body { padding: 16px 18px; }
+    .menu {
+      width: 220px; padding: 5px; border: 1px solid var(--line-strong); border-radius: 10px;
+      background: var(--raised); box-shadow: var(--shadow-md);
+    }
+    .menu button { width: 100%; min-height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 9px; border: 0; border-radius: 7px; background: transparent; text-align: left; font-size: 11px; }
+    .menu button:hover { background: var(--subtle); }
+    .menu button.danger-text { color: var(--danger); }
+    .camp-menu { left: 236px; top: 198px; }
+    .project-menu { left: 236px; top: 160px; }
+    .runtime-menu { right: 28px; top: 196px; }
+    .popover {
+      left: 340px; bottom: 118px; width: 392px; padding: 10px; border: 1px solid var(--line-strong);
+      border-radius: 12px; background: var(--raised); box-shadow: var(--shadow-md);
+    }
+    .mention-portrait { height: 128px; display: grid; grid-template-columns: 110px 1fr; gap: 12px; padding: 11px; border-radius: 9px; background: var(--subtle); }
+    .portrait-art { display: grid; place-items: center; border-radius: 8px; color: white; background: linear-gradient(145deg,#4d5475,#777f98); font-size: 23px; font-weight: 800; }
+    .command-palette { top: 72px; left: 50%; transform: translateX(-50%); width: min(590px,calc(100vw - 48px)); padding: 10px; border: 1px solid var(--line-strong); border-radius: 13px; background: var(--raised); box-shadow: var(--shadow-lg); }
+    .command-palette.open { animation: palette-enter var(--ease) both; }
+    @keyframes palette-enter { from { opacity: 0; transform: translate(-50%,-7px); } to { opacity: 1; transform: translate(-50%,0); } }
+    .command-input { width: 100%; height: 41px; padding: 0 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--subtle); }
+    .command-results { margin-top: 7px; }
+    .command-result { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px; border-radius: 8px; font-size: 11px; }
+    .command-result:hover, .command-result.selected { background: var(--selected); }
+    .kbd { min-width: 22px; height: 21px; display: inline-grid; place-items: center; padding: 0 5px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 5px; background: var(--raised); color: var(--muted); font-size: 9px; }
+    .lightbox { inset: 18px; display: none; grid-template-rows: auto minmax(0,1fr); border: 1px solid #555b58; border-radius: 15px; background: #202522; box-shadow: var(--shadow-lg); color: white; }
+    .lightbox.open { display: grid; }
+    .lightbox-head { display: flex; justify-content: space-between; align-items: center; padding: 13px 15px; border-bottom: 1px solid #3a403d; }
+    .lightbox-canvas { display: grid; place-items: center; min-height: 0; padding: 30px; }
+    .mock-attachment { width: min(760px,80%); aspect-ratio: 16/10; padding: 28px; border-radius: 8px; background: #f3f4f1; color: var(--ink); box-shadow: 0 16px 50px rgba(0,0,0,.3); }
+    .attachment-diagram { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin-top: 26px; }
+    .attachment-diagram span { height: 70px; display: grid; place-items: center; border: 1px solid var(--line-strong); border-radius: 9px; background: white; font-size: 11px; font-weight: 700; }
+    .coverage-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+    .coverage-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--subtle); }
+    .coverage-item strong { display: block; font-size: 10px; }
+    .coverage-item span { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; }
+    .coverage-item button { flex: 0 0 auto; }
+    .toast-region { position: fixed; right: 18px; bottom: 18px; z-index: 80; display: grid; gap: 8px; pointer-events: none; }
+    .toast { min-width: 300px; max-width: 410px; padding: 11px 13px; border: 1px solid var(--line-strong); border-left: 3px solid var(--success); border-radius: 9px; background: var(--raised); box-shadow: var(--shadow-md); font-size: 11px; animation: toast-enter 200ms ease both; }
+    @keyframes toast-enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+    .toast strong { display: block; margin-bottom: 3px; font-size: 11px; }
+    .toast span { color: var(--muted); font-size: 10px; }
+    .typing { display: inline-flex; gap: 3px; padding: 2px 0; }
+    .typing i { width: 4px; height: 4px; border-radius: 50%; background: var(--faint); animation: pulse 1s infinite alternate; }
+    .typing i:nth-child(2) { animation-delay: .18s; }
+    .typing i:nth-child(3) { animation-delay: .36s; }
+    @keyframes pulse { to { opacity: .28; transform: translateY(-2px); } }
+
+    @media (max-width: 1240px) {
+      .app-shell { grid-template-columns: 248px minmax(0,1fr); }
+      .camp-grid { grid-template-columns: minmax(460px,1fr) 310px; }
+      .token-row { display: none; }
+      .split { grid-template-columns: 1fr; }
+      .camp-menu, .project-menu { left: 214px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="study-bar">
+    <div class="study-left">
+      <span class="study-kicker">Renderer study</span>
+      <span class="study-title">ROVAI 完整界面地图</span>
+      <span class="study-chip">P1 · Fog Sidecar</span>
+      <span class="study-chip" style="border-style:dashed">v0.52 · Design only</span>
+    </div>
+    <div class="study-right">
+      <div class="token-row" aria-label="P1 核心色板">
+        <span class="token"><i class="swatch" style="background:#f3f4f5"></i>#F3F4F5</span>
+        <span class="token"><i class="swatch" style="background:#293239"></i>#293239</span>
+        <span class="token"><i class="swatch" style="background:#4f6e89"></i>#4F6E89</span>
+      </div>
+      <button class="study-button" data-overlay="coverage">交互覆盖 43</button>
+      <button class="study-button" data-action="reset-demo">重置演示</button>
+    </div>
+  </header>
+
+  <div class="app-shell">
+    <aside class="sidecar" aria-label="ROVAI 导航">
+      <div class="brand-row">
+        <div class="brand-lockup">
+          <div class="brand-mark" aria-hidden="true">R</div>
+          <div class="brand-name">Rovai AI</div>
+        </div>
+        <button class="icon-button has-dot" aria-label="打开通知中心" title="通知中心" data-overlay="notifications">◌</button>
+      </div>
+
+      <div class="side-scroll">
+        <nav aria-label="主要页面">
+          <button class="nav-item" data-page-target="compose">
+            <span class="nav-icon">✦</span><span class="nav-text">Quick Chat</span><span class="nav-meta">⌘N</span>
+          </button>
+
+          <div class="side-section">
+            <div class="side-label">Camps</div>
+            <button class="project-row" data-overlay="project-menu">
+              <span class="nav-icon">⌄</span><span class="nav-text">ROVAI Core</span><span class="nav-meta">•••</span>
+            </button>
+            <button class="camp-row active" data-page-target="camp">
+              <span class="camp-dot live"></span><span class="nav-text">Runtime parsing boundary</span><span class="nav-meta">3</span>
+            </button>
+            <button class="camp-row" data-action="show-empty-camp">
+              <span class="camp-dot"></span><span class="nav-text">Local model adapters</span>
+            </button>
+            <button class="project-row" data-overlay="project-menu">
+              <span class="nav-icon">›</span><span class="nav-text">Design System</span><span class="nav-meta">•••</span>
+            </button>
+          </div>
+
+          <div class="side-section">
+            <div class="side-label">Library</div>
+            <button class="nav-item" data-page-target="members">
+              <span class="nav-icon">◎</span><span class="nav-text">Members</span><span class="nav-meta">4</span>
+            </button>
+            <button class="nav-item" data-page-target="memory">
+              <span class="nav-icon">▱</span><span class="nav-text">Memory</span><span class="nav-meta">12</span>
+            </button>
+          </div>
+        </nav>
+      </div>
+
+      <div class="side-bottom">
+        <button class="nav-item" data-page-target="settings">
+          <span class="nav-icon">⚙</span><span class="nav-text">Settings</span><span class="nav-meta">⌘,</span>
+        </button>
+      </div>
+    </aside>
+
+    <main class="main-frame">
+      <header class="main-header">
+        <div class="header-copy">
+          <div class="eyebrow" id="main-eyebrow">Camp · ROVAI Core</div>
+          <h1 class="main-title" id="main-title">Runtime parsing boundary</h1>
+        </div>
+        <div class="header-actions">
+          <button class="button quiet small" data-overlay="command">⌘K&nbsp;&nbsp;跳转</button>
+          <button class="button primary" data-overlay="new-conversation">＋ 新对话</button>
+        </div>
+      </header>
+
+      <div class="content" id="main-content">
+        <section class="page compose-page" data-page="compose" hidden>
+          <div class="compose-wrap">
+            <div class="compose-intro">
+              <div class="compose-glyph">✦</div>
+              <h2>从一个清晰的问题开始</h2>
+              <p>Quick Chat 是轻量入口。发送后会创建可恢复的 Camp，并由所选 Lead 在当前工作目录中继续。</p>
+            </div>
+            <div class="prompt-box">
+              <textarea aria-label="Quick Chat 消息" placeholder="描述你希望团队协助完成的事情…"></textarea>
+              <div class="prompt-footer">
+                <div class="button-row">
+                  <button class="button quiet small" data-overlay="new-conversation">⌁ 工作目录</button>
+                  <button class="button quiet small" data-overlay="mention">＠ Lead · Ada</button>
+                </div>
+                <button class="button primary" data-action="quick-send">发送 ↗</button>
+              </div>
+            </div>
+            <div class="starter-grid">
+              <button class="starter" data-action="seed-prompt"><strong>理解代码</strong>解释当前 runtime 配置的读取路径与错误边界。</button>
+              <button class="starter" data-action="seed-prompt"><strong>规划变更</strong>基于当前版本约束，整理一份可执行的迭代方案。</button>
+              <button class="starter" data-action="seed-prompt"><strong>检查状态</strong>总结当前工作区改动、风险与下一步验证。</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="page camp-page" data-page="camp">
+          <div class="camp-toolbar">
+            <div class="camp-title-row">
+              <span class="status success">Running</span>
+              <h2 class="camp-title">Runtime parsing boundary</h2>
+              <span class="tag">ROVAI Core</span>
+            </div>
+            <div class="button-row">
+              <button class="button small" data-overlay="execution">Execution · 2</button>
+              <button class="button icon-only small" aria-label="Camp 菜单" data-overlay="camp-menu">•••</button>
+            </div>
+          </div>
+
+          <div class="camp-grid">
+            <div class="timeline-column">
+              <div class="timeline">
+                <div class="timeline-inner">
+                  <div class="notice warning">
+                    <div>↻</div>
+                    <div><strong>上次运行已恢复</strong>Core 快照可用，但一个工具调用在应用重启时中断。<button class="button quiet small" data-overlay="runtime-recovery">查看恢复信息</button></div>
+                  </div>
+
+                  <div class="date-rule">今天 · 14:32</div>
+
+                  <article class="message user">
+                    <div class="avatar rust">MX</div>
+                    <div class="message-body">
+                      <div class="message-meta"><strong>你</strong><span>14:32</span></div>
+                      帮我确认 runtime profile 的解析边界，尤其是一次性读取和 Core 快照之间有没有状态漂移。
+                    </div>
+                  </article>
+
+                  <article class="message">
+                    <div class="avatar violet">AD</div>
+                    <div class="message-body">
+                      <div class="message-meta"><strong>Ada · Lead</strong><span>14:33</span><span class="tag">analysis</span></div>
+                      我会先沿当前实现定位 profile 入口，再对照快照契约检查写入与恢复。先不改代码。
+                      <div class="tool-call">
+                        <div class="tool-call-head">
+                          <span>✓ <code>rg runtime_profile apps packages</code></span>
+                          <button class="button quiet small" data-overlay="tool-details">详情</button>
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+
+                  <article class="message">
+                    <div class="avatar green">SC</div>
+                    <div class="message-body">
+                      <div class="message-meta"><strong>Schrödinger</strong><span>14:35</span><span class="tag">delegated</span></div>
+                      我找到一次性解析发生在 renderer admission 前，恢复只消费 Core 投影，不会重新读取 profile。
+                      <div class="task-card" style="margin-top:10px">
+                        <div class="task-head">
+                          <div>
+                            <div class="task-title">验证 runtime profile 与 Core snapshot 边界</div>
+                            <div class="caption">Owner · Schrödinger · 2 / 3 steps</div>
+                          </div>
+                          <span class="status info">In progress</span>
+                        </div>
+                        <div class="task-progress"><span></span></div>
+                        <div class="button-row">
+                          <button class="button small" data-overlay="task-detail">查看任务</button>
+                          <button class="button quiet small" data-overlay="task-editor">编辑</button>
+                          <button class="button quiet small" data-overlay="task-cancel">取消</button>
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+
+                  <article class="message">
+                    <div class="avatar violet">AD</div>
+                    <div class="message-body">
+                      <div class="message-meta"><strong>Ada · Lead</strong><span>14:36</span></div>
+                      这里是当前边界图。点击可以查看原始附件。
+                      <button class="mock-attachment" style="display:block;width:260px;padding:14px;margin-top:9px;aspect-ratio:16/9;border:1px solid var(--line);box-shadow:none;text-align:left" data-overlay="lightbox">
+                        <strong style="font-size:10px">runtime-boundary.png</strong>
+                        <span class="attachment-diagram" style="gap:6px;margin-top:12px">
+                          <span style="height:30px;font-size:8px">Profile</span><span style="height:30px;font-size:8px">Core</span><span style="height:30px;font-size:8px">Renderer</span>
+                        </span>
+                      </button>
+                    </div>
+                  </article>
+
+                  <div class="approval-card">
+                    <div class="task-head">
+                      <div>
+                        <div class="task-title">需要批准 · 运行只读诊断</div>
+                        <div class="caption">命令将在当前项目中读取 3 个配置文件，不会写入。</div>
+                      </div>
+                      <span class="status warning">Waiting</span>
+                    </div>
+                    <div class="code-block" style="margin-top:9px">rovai diagnostics run --scope runtime-profile</div>
+                    <div class="button-row">
+                      <button class="button primary small" data-action="approve-run">批准一次</button>
+                      <button class="button small" data-action="deny-run">拒绝</button>
+                      <button class="button quiet small" data-tab="approvals">在 Inspector 查看</button>
+                    </div>
+                  </div>
+
+                  <article class="message">
+                    <div class="avatar violet">AD</div>
+                    <div class="message-body">
+                      <div class="message-meta"><strong>Ada · Lead</strong><span>正在整理</span></div>
+                      <span class="typing" aria-label="正在输入"><i></i><i></i><i></i></span>
+                    </div>
+                  </article>
+                </div>
+              </div>
+
+              <div class="composer-wrap">
+                <div class="composer">
+                  <textarea id="camp-composer" aria-label="Camp 消息" placeholder="发送消息；输入 @ 提及 Member…"></textarea>
+                  <div class="composer-footer">
+                    <div class="button-row">
+                      <button class="button quiet small" data-overlay="mention">＠ 提及</button>
+                      <button class="button quiet small" data-action="attach-demo">＋ 附件</button>
+                    </div>
+                    <div class="button-row">
+                      <span class="composer-hint">Enter 发送 · ⇧Enter 换行</span>
+                      <button class="button primary small" data-action="camp-send">发送 ↗</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <aside class="inspector">
+              <div class="inspector-head">
+                <div class="tabs" role="tablist" aria-label="Camp Inspector">
+                  <button class="tab active" data-tab="tasks">Tasks <span class="tag">1</span></button>
+                  <button class="tab" data-tab="context">Context</button>
+                  <button class="tab" data-tab="approvals">Approvals <span class="tag">1</span></button>
+                  <button class="tab" data-tab="audit">Audit</button>
+                </div>
+              </div>
+              <div class="inspector-body">
+                <div class="inspector-panel" data-tab-panel="tasks">
+                  <div class="inspector-item">
+                    <div class="inspector-item-head"><span>Runtime profile 边界</span><span class="status info">66%</span></div>
+                    <p>验证一次性解析、Core 快照与 Renderer 消费边界。</p>
+                    <div class="button-row" style="margin-top:8px"><button class="button small" data-overlay="task-detail">打开</button></div>
+                  </div>
+                  <div class="empty-state" style="min-height:160px;padding:20px"><div><div class="micro">其余任务会在 Lead 分派后出现。</div></div></div>
+                </div>
+                <div class="inspector-panel" data-tab-panel="context" hidden>
+                  <div class="inspector-item"><div class="inspector-item-head"><span>工作目录</span><span class="tag">local</span></div><p>/Users/murray.xue/VSCodeProjects/opensource/rovai-ai</p></div>
+                  <div class="inspector-item"><div class="inspector-item-head"><span>当前版本</span><span class="tag">v0.52</span></div><p>架构入口与 UI 约束来自当前 canonical documentation。</p></div>
+                </div>
+                <div class="inspector-panel" data-tab-panel="approvals" hidden>
+                  <div class="inspector-item"><div class="inspector-item-head"><span>只读诊断</span><span class="status warning">Waiting</span></div><p>等待用户确认运行 runtime-profile 诊断。</p><div class="button-row" style="margin-top:8px"><button class="button primary small" data-action="approve-run">批准</button><button class="button small" data-action="deny-run">拒绝</button></div></div>
+                </div>
+                <div class="inspector-panel" data-tab-panel="audit" hidden>
+                  <div class="inspector-item"><div class="inspector-item-head"><span>14:35 · Delegation</span><span class="tag">Core</span></div><p>Ada 将边界核查分派给 Schrödinger。</p></div>
+                  <div class="inspector-item"><div class="inspector-item-head"><span>14:33 · Tool call</span><span class="status success">Success</span></div><p>只读搜索完成，退出码 0。</p></div>
+                </div>
+              </div>
+            </aside>
+          </div>
+          <div class="empty-state" id="empty-camp-state" hidden>
+            <div>
+              <div class="compose-glyph">◇</div>
+              <h3>这个 Camp 还没有消息</h3>
+              <p>工作目录与 Lead 已就绪。发送第一条消息后，时间线、Tasks、Approvals 与 Audit 会从 Core projection 出现。</p>
+              <div class="button-row" style="justify-content:center"><button class="button primary" data-action="activate-empty-camp">发送第一条消息</button><button class="button" data-overlay="camp-delete">删除空 Camp</button></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="page page-pad" data-page="members" hidden>
+          <div class="page-max">
+            <div class="members-layout">
+              <section class="surface roster">
+                <div class="surface-header">
+                  <div><h2 class="section-title">Members</h2><p class="section-copy">4 个协作身份</p></div>
+                  <button class="button primary small" data-overlay="member-create">＋ 创建</button>
+                </div>
+                <div class="roster-search"><input class="input" aria-label="搜索 Member" placeholder="搜索名称或角色"></div>
+                <div class="roster-list">
+                  <button class="list-row selected" style="width:100%;border:0;text-align:left" data-action="select-member">
+                    <span class="avatar violet">AD</span><span class="list-copy"><span class="list-title">Ada</span><span class="list-subtitle">Lead · Product engineer</span></span><span class="status success">Ready</span>
+                  </button>
+                  <button class="list-row" style="width:100%;border:0;text-align:left" data-action="select-member">
+                    <span class="avatar green">SC</span><span class="list-copy"><span class="list-title">Schrödinger</span><span class="list-subtitle">Architecture analyst</span></span>
+                  </button>
+                  <button class="list-row" style="width:100%;border:0;text-align:left" data-action="select-member">
+                    <span class="avatar">ME</span><span class="list-copy"><span class="list-title">Mendel</span><span class="list-subtitle">Renderer specialist</span></span>
+                  </button>
+                  <button class="list-row" style="width:100%;border:0;text-align:left" data-action="select-member">
+                    <span class="avatar rust">HE</span><span class="list-copy"><span class="list-title">Hegel</span><span class="list-subtitle">Design systems</span></span>
+                  </button>
+                </div>
+              </section>
+
+              <section class="surface member-detail">
+                <div class="profile-head">
+                  <div class="profile-lockup">
+                    <div class="avatar large violet">AD</div>
+                    <div>
+                      <h2 class="profile-name">Ada</h2>
+                      <div class="caption">Product engineer · 默认 Lead</div>
+                      <div class="button-row" style="margin-top:8px"><span class="status success">Available</span><span class="tag">Codex</span><span class="tag">default</span></div>
+                    </div>
+                  </div>
+                  <div class="button-row">
+                    <button class="button" data-overlay="member-edit">编辑身份</button>
+                    <button class="button icon-only" aria-label="更多成员操作" data-overlay="member-actions">•••</button>
+                  </div>
+                </div>
+                <div class="detail-tabs">
+                  <div class="tabs" style="display:inline-flex">
+                    <button class="tab active" data-member-tab="identity">Identity</button>
+                    <button class="tab" data-member-tab="runtime">Runtime</button>
+                  </div>
+                </div>
+                <div class="detail-content" data-member-panel="identity">
+                  <div class="split">
+                    <div class="stack">
+                      <div class="identity-card">
+                        <dl style="margin:0">
+                          <dt>职责</dt><dd>负责拆解目标、选择协作者，并在证据充分后给出可验证的结论。</dd>
+                          <dt>协作风格</dt><dd>先建立问题边界，再并行委派。遇到高风险写操作必须向用户请求明确批准。</dd>
+                          <dt>系统指令摘要</dt><dd>遵循当前项目文档路由；以 Core 事实为准；不从 Renderer 推断产品状态。</dd>
+                        </dl>
+                      </div>
+                      <div class="surface">
+                        <div class="surface-header"><div><h3 class="section-title">Capabilities</h3><p class="section-copy">Member 可使用的能力由 Runtime 与 Skills 共同决定。</p></div></div>
+                        <div class="surface-body"><div class="permission-list"><span class="tag">Shell</span><span class="tag">Repository</span><span class="tag">Delegation</span><span class="tag">Browser</span></div></div>
+                      </div>
+                    </div>
+                    <div class="surface">
+                      <div class="surface-header"><div><h3 class="section-title">Avatar</h3><p class="section-copy">统一裁切为 1:1，在消息和名册中复用。</p></div></div>
+                      <div class="surface-body" style="text-align:center">
+                        <div class="avatar large violet" style="width:96px;height:96px;border-radius:25px;margin:0 auto 14px;font-size:25px">AD</div>
+                        <button class="button" data-overlay="avatar-editor">更换头像</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="detail-content" data-member-panel="runtime" hidden>
+                  <div class="notice"><div>i</div><div><strong>运行时配置属于当前 Member</strong>产品可执行文件与默认模型在保存后生效；未保存离开会要求确认。</div></div>
+                  <div class="stack" style="margin-top:14px">
+                    <div class="runtime-row">
+                      <div style="display:flex;align-items:center;gap:9px"><span class="product-mark">CX</span><span><span class="list-title">Codex</span><span class="list-subtitle">Bundled adapter</span></span></div>
+                      <select class="select" data-action="mark-runtime-dirty"><option>gpt-5.6-codex</option><option>gpt-5.5-codex</option></select>
+                      <button class="button icon-only small" data-overlay="runtime-menu">•••</button>
+                    </div>
+                    <div class="runtime-row">
+                      <div style="display:flex;align-items:center;gap:9px"><span class="product-mark" style="background:#88613d">CL</span><span><span class="list-title">Claude Code</span><span class="list-subtitle">Detected locally</span></span></div>
+                      <select class="select" data-action="mark-runtime-dirty"><option>claude-sonnet-4-5</option></select>
+                      <button class="button icon-only small" data-overlay="runtime-menu">•••</button>
+                    </div>
+                    <div class="runtime-row">
+                      <div style="display:flex;align-items:center;gap:9px"><span class="product-mark" style="background:#346653">GM</span><span><span class="list-title">Gemini CLI</span><span class="list-subtitle">Not installed</span></span></div>
+                      <span class="caption">无可用可执行文件</span>
+                      <button class="button small" data-overlay="runtime-install">安装说明</button>
+                    </div>
+                    <div class="runtime-row">
+                      <div style="display:flex;align-items:center;gap:9px"><span class="product-mark" style="background:#545c68">OC</span><span><span class="list-title">OpenCode</span><span class="list-subtitle">Custom runtime</span></span></div>
+                      <span class="caption">/opt/homebrew/bin/opencode</span>
+                      <button class="button small" data-overlay="runtime-custom">配置</button>
+                    </div>
+                  </div>
+                  <div class="button-row" style="justify-content:flex-end;margin-top:18px">
+                    <button class="button" data-action="discard-runtime">还原</button>
+                    <button class="button primary" data-action="save-runtime">保存 Runtime</button>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </section>
+
+        <section class="page page-pad" data-page="memory" hidden>
+          <div class="page-max stack-lg">
+            <div class="three-col">
+              <div class="kpi"><div class="kpi-label">Accepted memories</div><div class="kpi-value">12</div><div class="kpi-meta">跨 3 个 scope</div></div>
+              <div class="kpi"><div class="kpi-label">Proposals</div><div class="kpi-value">3</div><div class="kpi-meta">等待你的决定</div></div>
+              <div class="kpi"><div class="kpi-label">Last revised</div><div class="kpi-value" style="font-size:15px;margin-top:12px">今天 14:08</div><div class="kpi-meta">由 Ada 提议</div></div>
+            </div>
+
+            <div class="memory-layout">
+              <section class="surface memory-list">
+                <div class="surface-header">
+                  <div><h2 class="section-title">Memory library</h2><p class="section-copy">只展示已接受的长期事实。</p></div>
+                  <button class="button primary small" data-overlay="memory-create">＋ 记录</button>
+                </div>
+                <div class="filter-strip">
+                  <button class="button small">All</button><button class="button quiet small">Project</button><button class="button quiet small">Member</button>
+                </div>
+                <div class="memory-items">
+                  <button class="memory-card selected">
+                    <div class="task-head"><span class="list-title">UI 事实必须来自 Core</span><span class="tag">Project</span></div>
+                    <p>Renderer 不得从历史消息或本地缓存推断权威状态。</p>
+                  </button>
+                  <button class="memory-card">
+                    <div class="task-head"><span class="list-title">设计语言：Arctic Dawn</span><span class="tag">Project</span></div>
+                    <p>冷静、证据优先、克制层级，保留浅色主工作区。</p>
+                  </button>
+                  <button class="memory-card">
+                    <div class="task-head"><span class="list-title">默认工作目录</span><span class="tag">User</span></div>
+                    <p>新对话优先使用最近一个可访问的项目目录。</p>
+                  </button>
+                  <button class="memory-card">
+                    <div class="task-head"><span class="list-title">Ada 负责主结论</span><span class="tag">Member</span></div>
+                    <p>其他成员提供证据，Lead 负责统一交付。</p>
+                  </button>
+                </div>
+              </section>
+
+              <section class="surface">
+                <div class="surface-header">
+                  <div><div class="eyebrow">Project memory</div><h2 class="section-title">UI 事实必须来自 Core</h2><p class="section-copy">已接受 · 2026-08-10 14:08</p></div>
+                  <div class="button-row"><button class="button" data-overlay="memory-edit">修订</button><button class="button danger" data-overlay="memory-forget">Forget</button></div>
+                </div>
+                <div class="memory-detail">
+                  <div class="memory-quote">Renderer 只能消费 Core projection 和明确的 command result；不得根据可见消息、组件本地状态或旧缓存反推领域事实。</div>
+                  <h3 class="section-title">为什么保留</h3>
+                  <p class="section-copy">这条事实影响所有页面的状态展示、刷新恢复和错误处理。保留它能避免把视觉便利误当作领域契约。</p>
+                  <dl class="provenance">
+                    <dt>Scope</dt><dd>ROVAI Core</dd>
+                    <dt>Proposed by</dt><dd>Ada · Lead</dd>
+                    <dt>Evidence</dt><dd>ADR-0012 · Renderer projection boundary</dd>
+                    <dt>Revisions</dt><dd>2 个已接受版本</dd>
+                  </dl>
+                  <div class="divider"></div>
+                  <div class="button-row">
+                    <button class="button primary" data-overlay="memory-proposals">查看 3 条 proposals</button>
+                    <button class="button" data-action="copy-memory">复制事实</button>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </section>
+
+        <section class="page" data-page="settings" hidden>
+          <div class="settings-layout">
+            <nav class="settings-nav" aria-label="设置分类">
+              <h2>Settings</h2>
+              <button class="active" data-setting-target="general"><span>⌂</span>General</button>
+              <button data-setting-target="appearance"><span>◐</span>Appearance</button>
+              <button data-setting-target="notifications"><span>◌</span>Notifications</button>
+              <button data-setting-target="skills"><span>◇</span>Skills</button>
+              <button data-setting-target="mcp"><span>⌘</span>MCP Servers</button>
+              <button data-setting-target="runtime"><span>▣</span>Runtime</button>
+              <button data-setting-target="diagnostics"><span>⌁</span>Diagnostics</button>
+            </nav>
+
+            <div class="settings-content">
+              <div class="settings-inner" data-setting-panel="general">
+                <div class="settings-heading"><h2>General</h2><p>控制启动行为、默认项目和新对话的基础选择。</p></div>
+                <div class="stack-lg">
+                  <section class="surface">
+                    <div class="surface-header"><div><h3 class="section-title">Startup</h3><p class="section-copy">应用重启时恢复最后一次可访问位置。</p></div></div>
+                    <div class="surface-body">
+                      <div class="setting-row">
+                        <div><div class="setting-name">恢复上次页面</div><div class="setting-description">优先恢复 Camp、Inspector tab 与滚动位置；失效时回到 Quick Chat。</div></div>
+                        <button class="switch on" aria-label="恢复上次页面：已开启" data-action="toggle-switch"></button>
+                      </div>
+                      <div class="setting-row">
+                        <div><div class="setting-name">启动时显示通知摘要</div><div class="setting-description">仅当存在未读审批或需要恢复的运行时显示。</div></div>
+                        <button class="switch on" aria-label="通知摘要：已开启" data-action="toggle-switch"></button>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="surface">
+                    <div class="surface-header"><div><h3 class="section-title">Current project</h3><p class="section-copy">新 Camp 默认从这个项目继承工作目录与可用 Members。</p></div><span class="status success">Available</span></div>
+                    <div class="surface-body">
+                      <div class="field">
+                        <label class="field-label">项目目录</label>
+                        <div style="display:flex;gap:8px"><input class="input" value="/Users/murray.xue/VSCodeProjects/opensource/rovai-ai" readonly><button class="button" data-action="browse-folder">选择…</button></div>
+                        <div class="field-help">目录只在用户明确选择或创建对话时写入当前配置。</div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="surface">
+                    <div class="surface-header"><div><h3 class="section-title">One-click creation</h3><p class="section-copy">从当前项目和默认 Lead 快速创建 Camp。</p></div></div>
+                    <div class="surface-body">
+                      <div class="two-col">
+                        <div class="field"><label class="field-label">Default Lead</label><select class="select"><option>Ada · Product engineer</option><option>Schrödinger · Architecture analyst</option></select></div>
+                        <div class="field"><label class="field-label">Camp naming</label><select class="select"><option>从首条消息生成</option><option>创建前询问</option></select></div>
+                      </div>
+                      <div class="notice" style="margin-top:14px"><div>i</div><div><strong>会创建真实 Camp</strong>确认后将写入 Core，并立即进入新对话。</div></div>
+                      <div class="button-row" style="margin-top:14px"><button class="button primary" data-overlay="one-click">一键创建 Camp</button></div>
+                    </div>
+                  </section>
+                </div>
+              </div>
+
+              <div class="settings-inner" data-setting-panel="appearance" hidden>
+                <div class="settings-heading"><h2>Appearance</h2><p>工作区维持 Arctic Dawn；Sidecar 可独立切换材质，不改变领域交互。</p></div>
+                <div class="stack-lg">
+                  <section class="surface">
+                    <div class="surface-header"><div><h3 class="section-title">Sidecar material</h3><p class="section-copy">P1 Fog 是本轮设计基线，色板以后可随时替换。</p></div><span class="status info">P1 active</span></div>
+                    <div class="surface-body">
+                      <div class="two-col">
+                        <button class="theme-preview" style="padding:0;text-align:left;outline:2px solid var(--side-focus);outline-offset:2px" data-action="choose-p1">
+                          <span class="mini-side"><i class="mini-line" style="width:46px;background:#293239"></i><i class="mini-line" style="width:38px;background:#d8dde1"></i><i class="mini-line" style="width:46px;background:#e9ecee"></i></span>
+                          <span class="mini-main"><strong style="font-size:11px">P1 · Fog</strong><span class="caption" style="display:block;margin:5px 0 12px">Porcelain gray，低色偏、安静。</span><i class="mini-card" style="display:block"></i><i class="mini-card" style="display:block;width:72%"></i></span>
+                        </button>
+                        <button class="theme-preview" style="padding:0;text-align:left;opacity:.72" data-action="future-palette">
+                          <span class="mini-side" style="background:#eef0ee"><i class="mini-line" style="width:46px"></i><i class="mini-line" style="width:34px"></i></span>
+                          <span class="mini-main"><strong style="font-size:11px">Other material</strong><span class="caption" style="display:block;margin:5px 0 12px">保留插槽，后续可换 P2 或自定义 token。</span><i class="mini-card" style="display:block"></i></span>
+                        </button>
+                      </div>
+                      <div class="permission-list" style="margin-top:14px"><span class="tag">Background #F3F4F5</span><span class="tag">Text #293239</span><span class="tag">Focus #4F6E89</span><span class="tag">Divider #D8DDE1</span></div>
+                    </div>
+                  </section>
+                  <section class="surface">
+                    <div class="surface-header"><div><h3 class="section-title">Workspace</h3><p class="section-copy">主题设置不会改变证据、状态与风险的语义颜色。</p></div></div>
+                    <div class="surface-body">
+                      <div class="setting-row"><div><div class="setting-name">Theme</div><div class="setting-description">Arctic Dawn · Light</div></div><select class="select" style="width:180px"><option>Arctic Dawn</option></select></div>
+                      <div class="setting-row"><div><div class="setting-name">Density</div><div class="setting-description">保持内容密度与可读性的平衡。</div></div><div class="segmented"><button>Comfortable</button><button class="active">Compact</button></div></div>
+                      <div class="setting-row"><div><div class="setting-name">Reduce motion</div><div class="setting-description">关闭非必要过渡动画。</div></div><button class="switch" data-action="toggle-switch" aria-label="减少动画：关闭"></button></div>
+                    </div>
+                  </section>
+                </div>
+              </div>
+
+              <div class="settings-inner" data-setting-panel="notifications" hidden>
+                <div class="settings-heading"><h2>Notifications</h2><p>决定什么事件进入 Sidecar 通知中心，以及何时显示 heads-up。</p></div>
+                <section class="surface">
+                  <div class="surface-header"><div><h3 class="section-title">Delivery</h3><p class="section-copy">系统通知受 macOS 权限影响，应用内通知始终可用。</p></div><button class="button" data-action="test-notification">发送测试通知</button></div>
+                  <div class="surface-body">
+                    <div class="setting-row"><div><div class="setting-name">Approval required</div><div class="setting-description">工具或外部动作等待你的决定。</div></div><button class="switch on" data-action="toggle-switch"></button></div>
+                    <div class="setting-row"><div><div class="setting-name">Run completed</div><div class="setting-description">后台 Camp 完成或失败。</div></div><button class="switch on" data-action="toggle-switch"></button></div>
+                    <div class="setting-row"><div><div class="setting-name">Member needs attention</div><div class="setting-description">成员遇到无法自主解决的阻塞。</div></div><button class="switch on" data-action="toggle-switch"></button></div>
+                    <div class="setting-row"><div><div class="setting-name">Heads-up duration</div><div class="setting-description">短暂浮层不会阻断当前操作。</div></div><select class="select" style="width:160px"><option>6 秒</option><option>10 秒</option><option>仅通知中心</option></select></div>
+                    <div class="setting-row"><div><div class="setting-name">System notifications</div><div class="setting-description">应用不在前台时由 macOS 送达。</div></div><button class="button small" data-action="open-system-settings">打开系统设置</button></div>
+                  </div>
+                </section>
+              </div>
+
+              <div class="settings-inner" data-setting-panel="skills" hidden>
+                <div class="settings-heading"><h2>Skills</h2><p>管理已安装 Skill、来源、更新状态，以及它们可被哪些 Runtime 使用。</p></div>
+                <div class="stack-lg">
+                  <section class="surface">
+                    <div class="surface-header">
+                      <div><h3 class="section-title">Installed skills</h3><p class="section-copy">5 个 bundled · 2 个 user-installed</p></div>
+                      <div class="button-row"><button class="button" data-overlay="skill-add-local">从本地添加</button><button class="button primary" data-overlay="skill-add-github">从 GitHub 添加</button></div>
+                    </div>
+                    <div class="surface-body stack">
+                      <article class="skill-card">
+                        <div class="card-head">
+                          <div><div class="card-title">frontend-design</div><div class="card-meta">Bundled · v0.52 · ROVAI maintained</div></div>
+                          <div class="button-row"><span class="status success">Ready</span><button class="button icon-only small" data-overlay="skill-runtime-menu">•••</button></div>
+                        </div>
+                        <p class="section-copy">把当前产品约束转化为一致、可验证的 renderer 设计。</p>
+                        <div class="permission-list"><span class="tag">Codex</span><span class="tag">Claude Code</span><span class="tag">Gemini CLI</span></div>
+                      </article>
+                      <article class="skill-card">
+                        <div class="card-head">
+                          <div><div class="card-title">architecture-review</div><div class="card-meta">GitHub · github.com/rovai-ai/skills · main@89c2f6a</div></div>
+                          <div class="button-row"><span class="status info">Update available</span><button class="button small" data-overlay="skill-update">更新</button><button class="button icon-only small" data-overlay="skill-runtime-menu">•••</button></div>
+                        </div>
+                        <p class="section-copy">按当前文档路由检查版本架构、契约与实现一致性。</p>
+                        <div class="permission-list"><span class="tag">Codex</span><span class="tag">Read repository</span></div>
+                      </article>
+                      <article class="skill-card">
+                        <div class="card-head">
+                          <div><div class="card-title">local-release-notes</div><div class="card-meta">Local · ~/rovai-skills/release-notes</div></div>
+                          <div class="button-row"><span class="status warning">Needs review</span><button class="button small" data-overlay="skill-inspect">检查</button><button class="button danger small" data-overlay="skill-delete">删除</button></div>
+                        </div>
+                        <p class="section-copy">从当前版本文档整理交付说明。检测到 manifest 变更，启用前需要复核。</p>
+                      </article>
+                    </div>
+                  </section>
+                  <div class="notice"><div>i</div><div><strong>Skill 不直接获得权限</strong>实际能力仍受所选 Runtime、项目范围和每次审批共同约束。</div></div>
+                </div>
+              </div>
+
+              <div class="settings-inner" data-setting-panel="mcp" hidden>
+                <div class="settings-heading"><h2>MCP Servers</h2><p>配置外部能力、环境变量与 Member 分配；高权限变更需要再次确认。</p></div>
+                <div class="stack-lg">
+                  <section class="surface">
+                    <div class="surface-header">
+                      <div><h3 class="section-title">Servers</h3><p class="section-copy">3 configured · 2 connected</p></div>
+                      <div class="button-row"><button class="button" data-overlay="mcp-import">导入配置</button><button class="button primary" data-overlay="mcp-editor">＋ Add server</button></div>
+                    </div>
+                    <div class="surface-body stack">
+                      <article class="mcp-card">
+                        <div class="card-head">
+                          <div><div class="card-title">github</div><div class="card-meta">stdio · npx @modelcontextprotocol/server-github</div></div>
+                          <div class="button-row"><span class="status success">Connected</span><button class="button small" data-overlay="mcp-editor">编辑</button><button class="button danger small" data-overlay="mcp-delete">删除</button></div>
+                        </div>
+                        <div class="permission-list"><span class="tag">Ada</span><span class="tag">Schrödinger</span><span class="tag">Repository write</span></div>
+                      </article>
+                      <article class="mcp-card">
+                        <div class="card-head">
+                          <div><div class="card-title">filesystem-readonly</div><div class="card-meta">stdio · sandboxed · project root only</div></div>
+                          <div class="button-row"><span class="status success">Connected</span><button class="button small" data-overlay="mcp-editor">编辑</button></div>
+                        </div>
+                        <div class="permission-list"><span class="tag">All Members</span><span class="tag">Read only</span></div>
+                      </article>
+                      <article class="mcp-card">
+                        <div class="card-head">
+                          <div><div class="card-title">production-observability</div><div class="card-meta">HTTP · token missing</div></div>
+                          <div class="button-row"><span class="status danger">Unavailable</span><button class="button small" data-overlay="mcp-risk">重新授权</button></div>
+                        </div>
+                        <div class="permission-list"><span class="tag">Network</span><span class="tag">Secrets</span><span class="tag">High permission</span></div>
+                      </article>
+                    </div>
+                  </section>
+
+                  <section class="surface">
+                    <div class="surface-header"><div><h3 class="section-title">Member assignments</h3><p class="section-copy">连接可用不代表每个 Member 都能调用。</p></div></div>
+                    <div class="surface-body">
+                      <div class="setting-row"><div style="display:flex;align-items:center;gap:9px"><span class="avatar violet">AD</span><div><div class="setting-name">Ada</div><div class="setting-description">github · filesystem-readonly</div></div></div><button class="button small" data-overlay="mcp-editor">管理</button></div>
+                      <div class="setting-row"><div style="display:flex;align-items:center;gap:9px"><span class="avatar green">SC</span><div><div class="setting-name">Schrödinger</div><div class="setting-description">filesystem-readonly</div></div></div><button class="button small" data-overlay="mcp-editor">管理</button></div>
+                    </div>
+                  </section>
+                </div>
+              </div>
+
+              <div class="settings-inner" data-setting-panel="runtime" hidden>
+                <div class="settings-heading"><h2>Runtime</h2><p>查看本机支持的 Agent 产品、解析出的可执行文件和默认模型。</p></div>
+                <div class="stack-lg">
+                  <section class="surface">
+                    <div class="surface-header"><div><h3 class="section-title">Detected products</h3><p class="section-copy">状态来自一次性 discovery；刷新会重新解析并生成新的 Core projection。</p></div><button class="button" data-action="refresh-runtimes">↻ Refresh</button></div>
+                    <div class="surface-body">
+                      <div class="runtime-row">
+                        <div style="display:flex;align-items:center;gap:9px"><span class="product-mark">CX</span><span><span class="list-title">Codex</span><span class="list-subtitle">Built-in adapter</span></span></div>
+                        <span class="caption">/Applications/Codex.app/Contents/Resources/codex</span><span class="status success">Ready</span>
+                      </div>
+                      <div class="runtime-row">
+                        <div style="display:flex;align-items:center;gap:9px"><span class="product-mark" style="background:#88613d">CL</span><span><span class="list-title">Claude Code</span><span class="list-subtitle">Shell discovery</span></span></div>
+                        <span class="caption">/opt/homebrew/bin/claude</span><span class="status success">Ready</span>
+                      </div>
+                      <div class="runtime-row">
+                        <div style="display:flex;align-items:center;gap:9px"><span class="product-mark" style="background:#346653">GM</span><span><span class="list-title">Gemini CLI</span><span class="list-subtitle">No executable</span></span></div>
+                        <span class="caption">未找到匹配路径</span><button class="button small" data-overlay="runtime-install">安装说明</button>
+                      </div>
+                      <div class="runtime-row">
+                        <div style="display:flex;align-items:center;gap:9px"><span class="product-mark" style="background:#545c68">OC</span><span><span class="list-title">OpenCode</span><span class="list-subtitle">Custom</span></span></div>
+                        <span class="caption">/opt/homebrew/bin/opencode</span><button class="button small" data-overlay="runtime-custom">编辑</button>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="surface">
+                    <div class="surface-header"><div><h3 class="section-title">Defaults</h3><p class="section-copy">新 Member 的初始值；现有 Member 不会被静默改写。</p></div></div>
+                    <div class="surface-body">
+                      <div class="setting-row"><div><div class="setting-name">Default product</div><div class="setting-description">创建 Member 时预选。</div></div><select class="select" style="width:220px"><option>Codex</option><option>Claude Code</option><option>OpenCode</option></select></div>
+                      <div class="setting-row"><div><div class="setting-name">Runtime recovery</div><div class="setting-description">应用重启后尝试恢复可恢复的活动 Run。</div></div><button class="switch on" data-action="toggle-switch"></button></div>
+                    </div>
+                  </section>
+                </div>
+              </div>
+
+              <div class="settings-inner" data-setting-panel="diagnostics" hidden>
+                <div class="settings-heading"><h2>Diagnostics</h2><p>按证据检查 Renderer、Core、Runtime 与本地目录；修复动作始终单独确认。</p></div>
+                <div class="stack-lg">
+                  <div class="three-col">
+                    <div class="kpi"><div class="kpi-label">Overall</div><div class="kpi-value" style="color:var(--success)">Healthy</div><div class="kpi-meta">最后检查 14:41</div></div>
+                    <div class="kpi"><div class="kpi-label">Checks</div><div class="kpi-value">8 / 9</div><div class="kpi-meta">1 项建议处理</div></div>
+                    <div class="kpi"><div class="kpi-label">Core snapshot</div><div class="kpi-value" style="font-size:15px;margin-top:12px">Fresh</div><div class="kpi-meta">revision 1842</div></div>
+                  </div>
+                  <section class="surface">
+                    <div class="surface-header">
+                      <div><h3 class="section-title">System checks</h3><p class="section-copy">每个结论都带有来源、时间和可执行下一步。</p></div>
+                      <div class="button-row"><button class="button" data-overlay="diagnostics-export">导出报告</button><button class="button primary" data-action="run-diagnostics">运行检查</button></div>
+                    </div>
+                    <div class="surface-body stack">
+                      <article class="diagnostic-row">
+                        <div class="diagnostic-icon">✓</div><div><div class="card-title">Core projection</div><div class="card-meta">revision 1842 可读取，schema 与 renderer 匹配。</div></div><span class="status success">Pass</span>
+                      </article>
+                      <article class="diagnostic-row">
+                        <div class="diagnostic-icon">✓</div><div><div class="card-title">Renderer assets</div><div class="card-meta">bundle、preload bridge 与 CSP 完整。</div></div><span class="status success">Pass</span>
+                      </article>
+                      <article class="diagnostic-row" style="border-color:#e0cba8;background:var(--warning-soft)">
+                        <div class="diagnostic-icon" style="background:#f2dfbd;color:var(--warning)">!</div><div><div class="card-title">Gemini CLI executable</div><div class="card-meta">配置引用的路径不存在；不影响其他 Runtime。</div></div><button class="button small" data-overlay="diagnostics-repair">修复…</button>
+                      </article>
+                    </div>
+                  </section>
+                  <section class="surface">
+                    <div class="surface-header"><div><h3 class="section-title">Evidence log</h3><p class="section-copy">诊断不会用单一“健康”状态掩盖证据。</p></div><span class="status success">Complete</span></div>
+                    <div class="surface-body"><div class="code-block log-view" id="diagnostic-log">14:41:03  core.snapshot      PASS  revision=1842 schema=v7
+14:41:03  renderer.bridge    PASS  preload handshake 18ms
+14:41:04  runtime.codex      PASS  executable resolved
+14:41:04  runtime.claude     PASS  executable resolved
+14:41:04  runtime.gemini     WARN  configured path not found
+14:41:05  workspace          PASS  readable and writable
+14:41:05  notifications      PASS  in-app delivery available</div></div>
+                  </section>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div class="overlay-root" id="overlay-root" aria-live="polite">
+    <div class="overlay-backdrop" data-action="close-overlay"></div>
+
+    <section class="overlay-surface command-palette" data-overlay-id="command" role="dialog" aria-modal="true" aria-label="跳转到对话">
+      <input class="command-input" autofocus placeholder="搜索 Camp、Member 或设置…" aria-label="搜索">
+      <div class="command-results">
+        <button class="command-result selected" style="width:100%;border:0;text-align:left" data-page-jump="camp"><span><strong>Runtime parsing boundary</strong><span class="caption" style="display:block;margin-top:3px">Camp · ROVAI Core</span></span><span class="kbd">↵</span></button>
+        <button class="command-result" style="width:100%;border:0;text-align:left" data-page-jump="members"><span><strong>Ada</strong><span class="caption" style="display:block;margin-top:3px">Member · Product engineer</span></span><span class="kbd">M</span></button>
+        <button class="command-result" style="width:100%;border:0;text-align:left" data-settings-jump="diagnostics"><span><strong>Diagnostics</strong><span class="caption" style="display:block;margin-top:3px">Settings</span></span><span class="kbd">D</span></button>
+      </div>
+      <div class="micro" style="display:flex;justify-content:space-between;padding:7px 4px 0"><span>↑↓ 选择 · Enter 打开</span><span>Esc 关闭</span></div>
+    </section>
+
+    <div class="overlay-surface menu camp-menu" data-overlay-id="camp-menu" data-nonmodal role="menu" aria-label="Camp 菜单">
+      <button role="menuitem" data-action="pin-camp">⌖ 固定 Camp</button>
+      <button role="menuitem" data-overlay="camp-rename">✎ 重命名</button>
+      <button role="menuitem" data-action="copy-camp-id">□ 复制 Camp ID</button>
+      <div class="divider" style="margin:4px 0"></div>
+      <button role="menuitem" class="danger-text" data-overlay="camp-delete">× 删除 Camp…</button>
+    </div>
+
+    <div class="overlay-surface menu project-menu" data-overlay-id="project-menu" data-nonmodal role="menu" aria-label="项目菜单">
+      <button role="menuitem" data-action="pin-project">⌖ 固定项目</button>
+      <button role="menuitem" data-action="copy-project-path">□ 复制项目路径</button>
+      <button role="menuitem" data-action="collapse-project">‹ 折叠其他项目</button>
+    </div>
+
+    <div class="overlay-surface menu runtime-menu" data-overlay-id="runtime-menu" data-nonmodal role="menu" aria-label="Runtime 操作">
+      <button role="menuitem" data-action="test-runtime">✓ 测试连接</button>
+      <button role="menuitem" data-overlay="runtime-custom">✎ 编辑可执行文件</button>
+      <button role="menuitem" data-action="set-runtime-default">⌖ 设为默认</button>
+      <button role="menuitem" data-overlay="runtime-install">? 安装说明</button>
+    </div>
+
+    <div class="overlay-surface menu runtime-menu" data-overlay-id="member-actions" data-nonmodal role="menu" aria-label="Member 操作">
+      <button role="menuitem" data-overlay="member-edit">✎ 编辑身份</button>
+      <button role="menuitem" data-action="duplicate-member">□ 复制 Member</button>
+      <button role="menuitem" data-action="set-default-lead">⌖ 设为默认 Lead</button>
+      <div class="divider" style="margin:4px 0"></div>
+      <button role="menuitem" class="danger-text" data-overlay="member-remove">× 移除 Member…</button>
+    </div>
+
+    <div class="overlay-surface menu runtime-menu" data-overlay-id="skill-runtime-menu" data-nonmodal role="menu" aria-label="Skill 操作">
+      <button role="menuitem" data-action="toggle-skill-runtime">✓ Codex</button>
+      <button role="menuitem" data-action="toggle-skill-runtime">✓ Claude Code</button>
+      <button role="menuitem" data-action="toggle-skill-runtime">　 Gemini CLI</button>
+      <div class="divider" style="margin:4px 0"></div>
+      <button role="menuitem" data-overlay="skill-inspect">查看来源与权限</button>
+    </div>
+
+    <section class="overlay-surface popover" data-overlay-id="mention" data-nonmodal role="dialog" aria-label="提及 Member">
+      <div class="field"><input class="input" autofocus value="@" aria-label="搜索 Member"></div>
+      <div class="mention-portrait" style="margin-top:8px">
+        <div class="portrait-art">AD</div>
+        <div><div class="eyebrow">Lead · Available</div><div class="section-title">Ada</div><p class="section-copy">擅长拆解产品目标、并行委派与整合证据。</p><button class="button primary small" data-action="insert-mention">提及 Ada</button></div>
+      </div>
+      <div class="list-row" data-action="insert-mention"><span class="avatar green">SC</span><span class="list-copy"><span class="list-title">Schrödinger</span><span class="list-subtitle">Architecture analyst</span></span><span class="kbd">2</span></div>
+      <div class="list-row" data-action="insert-all-mention"><span class="avatar">ALL</span><span class="list-copy"><span class="list-title">@all-members</span><span class="list-subtitle">通知当前 Camp 的所有协作者</span></span></div>
+    </section>
+
+    <section class="overlay-surface lightbox" data-overlay-id="lightbox" role="dialog" aria-modal="true" aria-label="附件预览">
+      <div class="lightbox-head"><div><strong style="font-size:12px">runtime-boundary.png</strong><span style="margin-left:9px;color:#aeb5b1;font-size:10px">1440 × 900 · 182 KB</span></div><button class="close-button" style="color:white" data-action="close-overlay" aria-label="关闭">×</button></div>
+      <div class="lightbox-canvas">
+        <div class="mock-attachment">
+          <div class="eyebrow">Runtime boundary · evidence map</div>
+          <h2 style="margin:5px 0 0;font-size:20px">一次性解析，单向投影</h2>
+          <div class="attachment-diagram"><span>Runtime profile</span><span>Core snapshot</span><span>Renderer</span></div>
+          <p class="section-copy" style="margin-top:18px">Renderer 只消费投影；恢复过程不会静默重读 profile。</p>
+        </div>
+      </div>
+    </section>
+
+    <aside class="overlay-surface drawer" data-overlay-id="notifications" role="dialog" aria-modal="true" aria-label="通知中心">
+      <div class="drawer-header"><div><div class="eyebrow">Inbox</div><h2 class="dialog-title">Notifications</h2><p class="dialog-copy">2 条未读 · 按产品事件聚合</p></div><button class="close-button" data-action="close-overlay" aria-label="关闭">×</button></div>
+      <div class="drawer-body stack">
+        <article class="skill-card" style="border-color:#e0cba8;background:var(--warning-soft)">
+          <div class="card-head"><div><div class="card-title">等待批准</div><div class="card-meta">Runtime parsing boundary · 刚刚</div></div><span class="status warning">Action</span></div>
+          <p class="section-copy">Ada 请求运行只读 runtime-profile 诊断。</p>
+          <div class="button-row"><button class="button primary small" data-action="open-approval">查看</button><button class="button quiet small" data-action="mark-read">标为已读</button></div>
+        </article>
+        <article class="skill-card">
+          <div class="card-head"><div><div class="card-title">后台 Camp 已完成</div><div class="card-meta">Docs governance audit · 12 分钟前</div></div><span class="status success">Done</span></div>
+          <p class="section-copy">检查完成：16 passed，0 failed，1 warning。</p>
+          <div class="button-row"><button class="button small" data-action="go-camp">打开 Camp</button></div>
+        </article>
+        <article class="skill-card" style="opacity:.72">
+          <div class="card-head"><div><div class="card-title">Memory proposal</div><div class="card-meta">Ada · 1 小时前</div></div><span class="tag">Read</span></div>
+          <p class="section-copy">建议记录“Renderer 只消费 Core projection”。</p>
+        </article>
+      </div>
+    </aside>
+
+    <aside class="overlay-surface drawer wide" data-overlay-id="execution" role="dialog" aria-modal="true" aria-label="Execution drawer">
+      <div class="drawer-header"><div><div class="eyebrow">Camp execution</div><h2 class="dialog-title">Active runs</h2><p class="dialog-copy">2 个运行 · 1 个等待批准</p></div><button class="close-button" data-action="close-overlay" aria-label="关闭">×</button></div>
+      <div class="drawer-body stack-lg">
+        <section class="surface">
+          <div class="surface-header"><div><h3 class="section-title">Ada · Lead run</h3><p class="section-copy">正在整理所有成员的边界证据。</p></div><span class="status success">Running</span></div>
+          <div class="surface-body">
+            <div class="task-progress"><span style="width:78%"></span></div>
+            <div class="provenance"><dt>Started</dt><dd>14:32:18</dd><dt>Runtime</dt><dd>Codex · gpt-5.6-codex</dd><dt>Current step</dt><dd>Merge delegated findings</dd></div>
+            <div class="button-row" style="margin-top:14px"><button class="button danger small" data-action="stop-run">停止 Run</button></div>
+          </div>
+        </section>
+        <section class="surface">
+          <div class="surface-header"><div><h3 class="section-title">Schrödinger · delegated run</h3><p class="section-copy">边界检查已完成，等待 Lead 消费结果。</p></div><span class="status success">Complete</span></div>
+          <div class="surface-body"><div class="code-block">Result stored in Core
+run_id: run_1842_sc
+exit_status: completed
+artifacts: 1</div></div>
+        </section>
+        <section class="surface">
+          <div class="surface-header"><div><h3 class="section-title">Read-only diagnostics</h3><p class="section-copy">用户尚未批准，因此未启动。</p></div><span class="status warning">Waiting</span></div>
+          <div class="surface-body"><div class="button-row"><button class="button primary small" data-action="approve-run">批准一次</button><button class="button small" data-action="deny-run">拒绝</button></div></div>
+        </section>
+      </div>
+    </aside>
+
+    <aside class="overlay-surface drawer wide" data-overlay-id="task-detail" role="dialog" aria-modal="true" aria-label="任务详情">
+      <div class="drawer-header"><div><div class="eyebrow">Task · task_rt_004</div><h2 class="dialog-title">验证 runtime profile 与 Core snapshot 边界</h2><p class="dialog-copy">Owner · Schrödinger</p></div><button class="close-button" data-action="close-overlay" aria-label="关闭">×</button></div>
+      <div class="drawer-body stack-lg">
+        <div class="notice success"><div>✓</div><div><strong>2 / 3 steps complete</strong>未发现 Renderer 重读 profile 的路径。</div></div>
+        <section class="surface"><div class="surface-body stack">
+          <div class="check-row"><input type="checkbox" checked><div><strong>定位 profile admission</strong><div class="caption">apps/desktop/src/main/runtime · completed 14:34</div></div></div>
+          <div class="check-row"><input type="checkbox" checked><div><strong>核对 Core snapshot schema</strong><div class="caption">revision 1842 · completed 14:35</div></div></div>
+          <div class="check-row"><input type="checkbox"><div><strong>补充恢复路径证据</strong><div class="caption">Waiting for read-only diagnostic approval</div></div></div>
+        </div></section>
+        <section class="surface"><div class="surface-header"><div><h3 class="section-title">Evidence</h3></div></div><div class="surface-body"><div class="code-block">profile loader → admission command → Core projection
+restore path → Core snapshot → renderer store
+no reverse edge found</div></div></section>
+        <div class="button-row"><button class="button" data-overlay="task-editor">编辑任务</button><button class="button danger" data-overlay="task-cancel">取消任务</button></div>
+      </div>
+    </aside>
+
+    <aside class="overlay-surface drawer wide" data-overlay-id="memory-proposals" role="dialog" aria-modal="true" aria-label="Memory proposals">
+      <div class="drawer-header"><div><div class="eyebrow">Review queue</div><h2 class="dialog-title">Memory proposals</h2><p class="dialog-copy">3 条建议不会在接受前进入长期记忆。</p></div><button class="close-button" data-action="close-overlay" aria-label="关闭">×</button></div>
+      <div class="drawer-body stack">
+        <article class="skill-card">
+          <div class="card-head"><div><div class="card-title">Sidecar 材质可独立替换</div><div class="card-meta">Ada · 来自当前 Camp</div></div><span class="tag">Project</span></div>
+          <p class="section-copy">Sidecar token 与主工作区 Arctic Dawn 解耦，不改变页面结构或领域交互。</p>
+          <div class="button-row"><button class="button primary small" data-action="accept-proposal">接受</button><button class="button small" data-overlay="memory-edit-after-accept">接受并编辑</button><button class="button quiet small" data-action="reject-proposal">拒绝</button></div>
+        </article>
+        <article class="skill-card"><div class="card-head"><div><div class="card-title">诊断中心保留证据日志</div><div class="card-meta">Schrödinger · Diagnostics review</div></div><span class="tag">Project</span></div><p class="section-copy">总体状态不可替代逐项证据与修复边界。</p><div class="button-row"><button class="button primary small" data-action="accept-proposal">接受</button><button class="button quiet small" data-action="reject-proposal">拒绝</button></div></article>
+        <article class="skill-card"><div class="card-head"><div><div class="card-title">默认 Lead 使用 Ada</div><div class="card-meta">System · General settings</div></div><span class="tag">User</span></div><p class="section-copy">新 Camp 在用户未选择时预选 Ada。</p><div class="button-row"><button class="button primary small" data-action="accept-proposal">接受</button><button class="button quiet small" data-action="reject-proposal">拒绝</button></div></article>
+      </div>
+    </aside>
+
+    <section class="overlay-surface dialog xwide" data-overlay-id="coverage" role="dialog" aria-modal="true" aria-labelledby="coverage-title">
+      <div class="dialog-header"><div><div class="eyebrow">Prototype map</div><h2 class="dialog-title" id="coverage-title">完整交互覆盖</h2><p class="dialog-copy">这里是设计稿导航，不属于产品 UI。点击任意项目直接检查临时表面。</p></div><button class="close-button" data-action="close-overlay" aria-label="关闭">×</button></div>
+      <div class="dialog-body">
+        <div class="notice"><div>i</div><div><strong>来源边界</strong>页面与交互按 v0.52 当前 Renderer 代码建模；参考稿只提供 P1 Fog 的 Sidecar 材质与交互气质。</div></div>
+        <div class="coverage-grid" id="coverage-grid" style="margin-top:14px"></div>
+      </div>
+      <div class="dialog-footer"><span class="caption" style="margin-right:auto">Esc 关闭 · 支持焦点循环</span><button class="button primary" data-action="close-overlay">完成检查</button></div>
+    </section>
+
+    <section class="overlay-surface dialog" data-overlay-id="new-conversation" role="dialog" aria-modal="true" aria-labelledby="new-conversation-title">
+      <div class="dialog-header"><div><div class="eyebrow">New conversation</div><h2 class="dialog-title" id="new-conversation-title">创建新 Camp</h2><p class="dialog-copy">选择工作目录与 Lead；名称可以稍后生成。</p></div><button class="close-button" data-action="close-overlay" aria-label="关闭">×</button></div>
+      <div class="dialog-body stack">
+        <div class="field"><label class="field-label">Working directory</label><div style="display:flex;gap:8px"><input class="input" value="/Users/murray.xue/VSCodeProjects/opensource/rovai-ai"><button class="button" data-action="browse-folder">选择…</button></div><div class="field-help">目录必须存在且可访问。</div></div>
+        <div class="field"><label class="field-label">Lead</label><select class="select"><option>Ada · Product engineer</option><option>Schrödinger · Architecture analyst</option><option>Mendel · Renderer specialist</option></select></div>
+        <div class="field"><label class="field-label">Camp name <span class="caption">Optional</span></label><input class="input" placeholder="留空则从首条消息生成"></div>
+      </div>
+      <div class="dialog-footer"><button class="button" data-action="close-overlay">取消</button><button class="button primary" data-action="confirm" data-toast="Camp 已创建|已进入新 Camp，等待第一条消息。">创建 Camp</button></div>
+    </section>
+
+    <section class="overlay-surface dialog narrow" data-overlay-id="camp-rename" role="dialog" aria-modal="true" aria-labelledby="camp-rename-title">
+      <div class="dialog-header"><div><h2 class="dialog-title" id="camp-rename-title">重命名 Camp</h2><p class="dialog-copy">名称只改变导航标签，不影响 Camp ID。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body"><div class="field"><label class="field-label">Camp name</label><input class="input" value="Runtime parsing boundary" autofocus><div class="field-help">最多 80 个字符。</div></div></div>
+      <div class="dialog-footer"><button class="button" data-action="close-overlay">取消</button><button class="button primary" data-action="confirm" data-toast="名称已更新|Sidecar 与窗口标题已同步。">保存</button></div>
+    </section>
+
+    <section class="overlay-surface dialog" data-overlay-id="camp-delete" role="dialog" aria-modal="true" aria-labelledby="camp-delete-title">
+      <div class="dialog-header"><div><div class="eyebrow" style="color:var(--danger)">Destructive action</div><h2 class="dialog-title" id="camp-delete-title">删除 “Runtime parsing boundary”？</h2><p class="dialog-copy">删除会移除 Camp 及其会话投影；长期 Memory 不受影响。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body stack">
+        <div class="notice danger"><div>!</div><div><strong>当前 Camp 仍有活动 Run</strong>必须先停止 1 个 Run，并处理 1 个等待批准的请求。</div></div>
+        <div class="surface"><div class="surface-body">
+          <div class="setting-row"><div><div class="setting-name">Ada · Lead run</div><div class="setting-description">Running since 14:32</div></div><button class="button danger small" data-action="stop-run">停止</button></div>
+          <div class="setting-row"><div><div class="setting-name">Read-only diagnostics</div><div class="setting-description">Waiting for approval</div></div><button class="button small" data-action="deny-run">拒绝</button></div>
+        </div></div>
+        <div class="field"><label class="field-label">输入 Camp 名称以确认</label><input class="input" placeholder="Runtime parsing boundary" data-confirm-input></div>
+      </div>
+      <div class="dialog-footer"><button class="button" data-action="close-overlay">取消</button><button class="button danger" data-action="confirm" data-toast="Camp 已删除|本原型仅演示流程，未修改真实数据。">删除 Camp</button></div>
+    </section>
+
+    <section class="overlay-surface dialog narrow" data-overlay-id="startup-gate" role="dialog" aria-modal="true" aria-labelledby="startup-title">
+      <div class="dialog-header"><div><div class="eyebrow">Startup recovery</div><h2 class="dialog-title" id="startup-title">恢复上次工作位置</h2><p class="dialog-copy">应用发现一个可恢复 Camp 与 Inspector 状态。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body stack">
+        <div class="identity-card"><dl style="margin:0"><dt>Camp</dt><dd>Runtime parsing boundary</dd><dt>Last location</dt><dd>Inspector · Approvals</dd><dt>Snapshot</dt><dd>revision 1842 · valid</dd></dl></div>
+        <label class="check-row"><input type="checkbox" checked>以后自动恢复可访问的位置</label>
+      </div>
+      <div class="dialog-footer"><button class="button" data-action="confirm" data-toast="已进入 Quick Chat|本次不恢复上次位置。">暂不恢复</button><button class="button primary" data-action="confirm" data-toast="工作位置已恢复|Camp、Inspector 和滚动位置已恢复。">恢复</button></div>
+    </section>
+
+    <section class="overlay-surface dialog" data-overlay-id="runtime-recovery" role="dialog" aria-modal="true" aria-labelledby="recovery-title">
+      <div class="dialog-header"><div><div class="eyebrow">Runtime recovery</div><h2 class="dialog-title" id="recovery-title">上次运行恢复信息</h2><p class="dialog-copy">恢复结论来自 Core snapshot 与 Runtime 进程状态。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body stack">
+        <div class="notice success"><div>✓</div><div><strong>Camp 与消息已恢复</strong>Core revision 1842 完整，未发现投影损坏。</div></div>
+        <div class="notice warning"><div>!</div><div><strong>一个工具调用被中断</strong>调用尚未产生写入；可安全重试或忽略。</div></div>
+        <div class="code-block">run_id: run_1842_ada
+tool_call: diagnostics.read_runtime_profile
+last_event: tool_started
+recovery: retry_available</div>
+      </div>
+      <div class="dialog-footer"><button class="button" data-action="confirm" data-toast="已忽略中断调用|Camp 将从下一步继续。">忽略</button><button class="button primary" data-action="confirm" data-toast="已加入重试队列|运行会在获得批准后继续。">重试调用</button></div>
+    </section>
+
+    <section class="overlay-surface dialog wide" data-overlay-id="tool-details" role="dialog" aria-modal="true" aria-labelledby="tool-details-title">
+      <div class="dialog-header"><div><div class="eyebrow">Tool call · completed</div><h2 class="dialog-title" id="tool-details-title">Repository search</h2><p class="dialog-copy">调用参数、输出与退出状态均来自执行事实。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body stack">
+        <div class="two-col"><div class="identity-card"><dl style="margin:0"><dt>Member</dt><dd>Ada</dd><dt>Runtime</dt><dd>Codex</dd><dt>Duration</dt><dd>842 ms</dd></dl></div><div class="identity-card"><dl style="margin:0"><dt>Risk</dt><dd>Read only</dd><dt>Exit code</dt><dd>0</dd><dt>Working dir</dt><dd>rovai-ai</dd></dl></div></div>
+        <div class="field"><label class="field-label">Command</label><div class="code-block">rg -n "runtime_profile|CoreSnapshot" apps packages docs</div></div>
+        <div class="field"><label class="field-label">Output</label><div class="code-block">apps/desktop/src/main/runtime/profile.ts:42
+packages/core/src/projection/snapshot.ts:118
+docs/versions/v0.49/production-design.md:231</div></div>
+      </div>
+      <div class="dialog-footer"><button class="button" data-action="copy-tool-output">复制输出</button><button class="button primary" data-action="close-overlay">完成</button></div>
+    </section>
+
+    <section class="overlay-surface dialog" data-overlay-id="task-editor" role="dialog" aria-modal="true" aria-labelledby="task-editor-title">
+      <div class="dialog-header"><div><h2 class="dialog-title" id="task-editor-title">编辑任务</h2><p class="dialog-copy">更新会写入 Core，并在时间线与 Inspector 同步。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body stack">
+        <div class="field"><label class="field-label">Title</label><input class="input" value="验证 runtime profile 与 Core snapshot 边界"></div>
+        <div class="field"><label class="field-label">Description</label><textarea class="textarea">确认一次性解析、Core 投影和 Renderer 恢复之间不存在隐式反向读取。</textarea></div>
+        <div class="two-col"><div class="field"><label class="field-label">Owner</label><select class="select"><option>Schrödinger</option><option>Ada</option><option>Mendel</option></select></div><div class="field"><label class="field-label">Priority</label><select class="select"><option>Normal</option><option>High</option><option>Low</option></select></div></div>
+      </div>
+      <div class="dialog-footer"><button class="button" data-action="close-overlay">取消</button><button class="button primary" data-action="confirm" data-toast="任务已更新|时间线与 Inspector 已同步。">保存任务</button></div>
+    </section>
+
+    <section class="overlay-surface dialog narrow" data-overlay-id="task-cancel" role="dialog" aria-modal="true" aria-labelledby="task-cancel-title">
+      <div class="dialog-header"><div><h2 class="dialog-title" id="task-cancel-title">取消这个任务？</h2><p class="dialog-copy">已产生的消息与证据会保留，任务状态改为 Canceled。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body"><div class="field"><label class="field-label">Reason <span class="caption">Optional</span></label><textarea class="textarea" placeholder="说明为什么不再继续"></textarea></div></div>
+      <div class="dialog-footer"><button class="button" data-action="close-overlay">继续任务</button><button class="button danger" data-action="confirm" data-toast="任务已取消|已有证据仍保留在 Camp 中。">取消任务</button></div>
+    </section>
+
+    <section class="overlay-surface dialog narrow" data-overlay-id="one-click" role="dialog" aria-modal="true" aria-labelledby="one-click-title">
+      <div class="dialog-header"><div><div class="eyebrow">Confirm creation</div><h2 class="dialog-title" id="one-click-title">创建一个新 Camp？</h2><p class="dialog-copy">这个动作会立即写入 Core。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body"><div class="identity-card"><dl style="margin:0"><dt>Project</dt><dd>ROVAI Core</dd><dt>Working directory</dt><dd>/Users/murray.xue/VSCodeProjects/opensource/rovai-ai</dd><dt>Lead</dt><dd>Ada</dd><dt>Name</dt><dd>从首条消息生成</dd></dl></div></div>
+      <div class="dialog-footer"><button class="button" data-action="close-overlay">取消</button><button class="button primary" data-action="confirm" data-toast="Camp 已创建|使用 Ada 和当前项目目录。">确认创建</button></div>
+    </section>
+
+    <section class="overlay-surface dialog wide" data-overlay-id="member-create" role="dialog" aria-modal="true" aria-labelledby="member-create-title">
+      <div class="dialog-header"><div><div class="eyebrow">New identity</div><h2 class="dialog-title" id="member-create-title">创建 Member</h2><p class="dialog-copy">Identity 定义协作方式；Runtime 决定实际执行能力。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body stack">
+        <div class="two-col"><div class="field"><label class="field-label">Name</label><input class="input" placeholder="例如：Mendel"></div><div class="field"><label class="field-label">Role</label><input class="input" placeholder="例如：Renderer specialist"></div></div>
+        <div class="field"><label class="field-label">Responsibility</label><textarea class="textarea" placeholder="这个 Member 负责什么，以及何时应该被委派？"></textarea></div>
+        <div class="field"><label class="field-label">Collaboration style</label><textarea class="textarea" placeholder="描述偏好的工作方式、证据标准与沟通风格。"></textarea></div>
+        <div class="two-col"><div class="field"><label class="field-label">Runtime product</label><select class="select"><option>Codex</option><option>Claude Code</option><option>OpenCode</option></select></div><div class="field"><label class="field-label">Model</label><select class="select"><option>gpt-5.6-codex</option><option>gpt-5.5-codex</option></select></div></div>
+        <label class="check-row"><input type="checkbox">设为新 Camp 的默认 Lead</label>
+      </div>
+      <div class="dialog-footer"><button class="button" data-action="close-overlay">取消</button><button class="button primary" data-action="confirm" data-toast="Member 已创建|Identity 与 Runtime 配置已保存。">创建 Member</button></div>
+    </section>
+
+    <section class="overlay-surface dialog wide" data-overlay-id="member-edit" role="dialog" aria-modal="true" aria-labelledby="member-edit-title">
+      <div class="dialog-header"><div><div class="eyebrow">Identity</div><h2 class="dialog-title" id="member-edit-title">编辑 Ada</h2><p class="dialog-copy">修改不会重写历史消息中的身份快照。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body stack">
+        <div class="two-col"><div class="field"><label class="field-label">Name</label><input class="input" value="Ada"></div><div class="field"><label class="field-label">Role</label><input class="input" value="Product engineer"></div></div>
+        <div class="field"><label class="field-label">Responsibility</label><textarea class="textarea">负责拆解目标、选择协作者，并在证据充分后给出可验证的结论。</textarea></div>
+        <div class="field"><label class="field-label">System instruction summary</label><textarea class="textarea">遵循当前项目文档路由；以 Core 事实为准；高风险动作请求批准。</textarea><div class="field-help">这里只展示摘要；完整内容保存在 Member identity 中。</div></div>
+      </div>
+      <div class="dialog-footer"><button class="button" data-action="close-overlay">取消</button><button class="button primary" data-action="confirm" data-toast="Identity 已更新|新消息将使用最新身份版本。">保存 Identity</button></div>
+    </section>
+
+    <section class="overlay-surface dialog wide" data-overlay-id="avatar-editor" role="dialog" aria-modal="true" aria-labelledby="avatar-title">
+      <div class="dialog-header"><div><div class="eyebrow">Avatar</div><h2 class="dialog-title" id="avatar-title">调整头像</h2><p class="dialog-copy">上传、裁切或选择预设；保存后统一生成 1:1 资源。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body">
+        <div class="split">
+          <div>
+            <div style="height:260px;display:grid;place-items:center;border:1px dashed var(--line-strong);border-radius:12px;background:#e7e9e6">
+              <div style="width:190px;height:190px;display:grid;place-items:center;border-radius:50%;background:linear-gradient(145deg,#4c4775,#7a7699);color:white;font-size:52px;font-weight:800;box-shadow:0 0 0 999px rgba(22,25,24,.23)">AD</div>
+            </div>
+            <div class="field" style="margin-top:12px"><label class="field-label">Zoom</label><input type="range" value="54" style="width:100%;accent-color:var(--brand)"></div>
+          </div>
+          <div class="stack">
+            <button class="button" data-action="choose-avatar-file">选择图片…</button>
+            <div><div class="field-label" style="margin-bottom:8px">Presets</div><div class="button-row"><button class="avatar large violet" style="border:2px solid var(--brand)">AD</button><button class="avatar large green">AD</button><button class="avatar large rust">AD</button><button class="avatar large">AD</button></div></div>
+            <div class="notice"><div>i</div><div>头像只用于识别，不承载运行状态；状态始终用文字和独立标记表达。</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="dialog-footer"><button class="button" data-action="close-overlay">取消</button><button class="button primary" data-action="confirm" data-toast="头像已更新|所有新渲染位置将使用裁切后的资源。">保存头像</button></div>
+    </section>
+
+    <section class="overlay-surface dialog" data-overlay-id="member-remove" role="dialog" aria-modal="true" aria-labelledby="member-remove-title">
+      <div class="dialog-header"><div><div class="eyebrow" style="color:var(--danger)">Remove member</div><h2 class="dialog-title" id="member-remove-title">移除 Ada？</h2><p class="dialog-copy">历史消息和已完成任务保留身份快照。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body stack">
+        <div class="notice danger"><div>!</div><div><strong>目前不能直接移除</strong>Ada 是 2 个 Camp 的 Lead，并拥有 1 个活动 Run。</div></div>
+        <div class="surface"><div class="surface-body">
+          <div class="setting-row"><div><div class="setting-name">Runtime parsing boundary</div><div class="setting-description">Active Lead · running</div></div><button class="button small" data-action="go-camp">打开 Camp</button></div>
+          <div class="setting-row"><div><div class="setting-name">Local model adapters</div><div class="setting-description">Lead · idle</div></div><button class="button small" data-action="reassign-lead">重新分配</button></div>
+        </div></div>
+        <div class="field"><label class="field-label">处理阻塞后，输入 Ada 确认</label><input class="input" placeholder="Ada"></div>
+      </div>
+      <div class="dialog-footer"><button class="button" data-action="close-overlay">取消</button><button class="button danger" data-action="confirm" data-toast="Member 已移除|本原型未修改真实名册。">移除 Member</button></div>
+    </section>
+
+    <section class="overlay-surface dialog narrow" data-overlay-id="runtime-unsaved" role="dialog" aria-modal="true" aria-labelledby="runtime-unsaved-title">
+      <div class="dialog-header"><div><h2 class="dialog-title" id="runtime-unsaved-title">放弃 Runtime 修改？</h2><p class="dialog-copy">Ada 的产品或模型选择尚未保存。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body"><div class="notice warning"><div>!</div><div><strong>2 个字段已修改</strong>Codex model 与 Claude executable 会恢复到上次保存值。</div></div></div>
+      <div class="dialog-footer"><button class="button" data-action="close-overlay">继续编辑</button><button class="button danger" data-action="confirm" data-toast="修改已放弃|Runtime 已恢复到上次保存值。">放弃修改</button><button class="button primary" data-action="confirm" data-toast="Runtime 已保存|新 Run 将使用最新配置。">保存并离开</button></div>
+    </section>
+
+    <section class="overlay-surface dialog" data-overlay-id="runtime-install" role="dialog" aria-modal="true" aria-labelledby="runtime-install-title">
+      <div class="dialog-header"><div><div class="eyebrow">Runtime help</div><h2 class="dialog-title" id="runtime-install-title">安装 Gemini CLI</h2><p class="dialog-copy">ROVAI 不会替你静默安装外部 Agent 产品。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body stack">
+        <div class="field"><label class="field-label">1 · 使用产品官方方式安装</label><div class="code-block">npm install -g @google/gemini-cli</div></div>
+        <div class="field"><label class="field-label">2 · 验证可执行文件</label><div class="code-block">gemini --version</div></div>
+        <div class="field"><label class="field-label">3 · 回到 ROVAI 刷新 Runtime</label><div class="field-help">ROVAI 会重新执行一次性 discovery，并把结果写入新的 Core projection。</div></div>
+      </div>
+      <div class="dialog-footer"><button class="button" data-action="copy-install-command">复制命令</button><button class="button primary" data-action="confirm" data-toast="正在刷新 Runtime|原型展示 discovery 反馈。">我已安装，刷新</button></div>
+    </section>
+
+    <section class="overlay-surface dialog" data-overlay-id="runtime-custom" role="dialog" aria-modal="true" aria-labelledby="runtime-custom-title">
+      <div class="dialog-header"><div><div class="eyebrow">Custom runtime</div><h2 class="dialog-title" id="runtime-custom-title">配置 OpenCode</h2><p class="dialog-copy">明确指定可执行文件与模型发现命令。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body stack">
+        <div class="field"><label class="field-label">Executable path</label><div style="display:flex;gap:8px"><input class="input" value="/opt/homebrew/bin/opencode"><button class="button" data-action="browse-file">选择…</button></div></div>
+        <div class="field"><label class="field-label">Model argument template</label><input class="input" value="--model {model}"><div class="field-help">必须保留 {model} 占位符。</div></div>
+        <div class="two-col"><div class="field"><label class="field-label">Default model</label><input class="input" value="openai/gpt-5.6"></div><div class="field"><label class="field-label">Discovery timeout</label><select class="select"><option>5 seconds</option><option>10 seconds</option></select></div></div>
+        <div class="notice success"><div>✓</div><div><strong>Executable verified</strong>版本 1.2.4，可执行且返回支持的模型列表。</div></div>
+      </div>
+      <div class="dialog-footer"><button class="button" data-action="test-runtime">测试</button><button class="button primary" data-action="confirm" data-toast="Custom Runtime 已保存|OpenCode 可以分配给 Member。">保存 Runtime</button></div>
+    </section>
+
+    <section class="overlay-surface dialog" data-overlay-id="memory-create" role="dialog" aria-modal="true" aria-labelledby="memory-create-title">
+      <div class="dialog-header"><div><div class="eyebrow">Explicit memory</div><h2 class="dialog-title" id="memory-create-title">记录 Memory</h2><p class="dialog-copy">明确记录的事实会直接进入当前 scope；自动提议仍需审核。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body stack">
+        <div class="field"><label class="field-label">Scope</label><select class="select"><option>Project · ROVAI Core</option><option>User</option><option>Member · Ada</option></select></div>
+        <div class="field"><label class="field-label">Title</label><input class="input" placeholder="简短、可识别的事实名称"></div>
+        <div class="field"><label class="field-label">Fact</label><textarea class="textarea" placeholder="只写以后确实需要复用的稳定事实。"></textarea></div>
+        <div class="field"><label class="field-label">Evidence <span class="caption">Optional</span></label><input class="input" placeholder="Camp、ADR 或文件引用"></div>
+      </div>
+      <div class="dialog-footer"><button class="button" data-action="close-overlay">取消</button><button class="button primary" data-action="confirm" data-toast="Memory 已记录|事实已进入所选 scope。">记录</button></div>
+    </section>
+
+    <section class="overlay-surface dialog" data-overlay-id="memory-edit" role="dialog" aria-modal="true" aria-labelledby="memory-edit-title">
+      <div class="dialog-header"><div><div class="eyebrow">Revision</div><h2 class="dialog-title" id="memory-edit-title">修订 Memory</h2><p class="dialog-copy">保存会创建新版本，不覆盖历史来源。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body stack">
+        <div class="field"><label class="field-label">Title</label><input class="input" value="UI 事实必须来自 Core"></div>
+        <div class="field"><label class="field-label">Fact</label><textarea class="textarea">Renderer 只能消费 Core projection 和明确的 command result；不得根据可见消息、组件本地状态或旧缓存反推领域事实。</textarea></div>
+        <div class="field"><label class="field-label">Revision note</label><input class="input" placeholder="为什么需要修订？"></div>
+      </div>
+      <div class="dialog-footer"><button class="button" data-action="close-overlay">取消</button><button class="button primary" data-action="confirm" data-toast="Memory 已修订|版本历史与来源已保留。">保存修订</button></div>
+    </section>
+
+    <section class="overlay-surface dialog" data-overlay-id="memory-edit-after-accept" role="dialog" aria-modal="true" aria-labelledby="memory-edit-accept-title">
+      <div class="dialog-header"><div><div class="eyebrow">Accept and edit</div><h2 class="dialog-title" id="memory-edit-accept-title">接受并整理提议</h2><p class="dialog-copy">原始 proposal 会作为来源保留。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body stack">
+        <div class="field"><label class="field-label">Scope</label><select class="select"><option>Project · ROVAI Core</option><option>User</option></select></div>
+        <div class="field"><label class="field-label">Title</label><input class="input" value="Sidecar 材质可独立替换"></div>
+        <div class="field"><label class="field-label">Fact</label><textarea class="textarea">Sidecar token 与主工作区 Arctic Dawn 解耦；更换材质不改变页面结构、领域语义或交互契约。</textarea></div>
+      </div>
+      <div class="dialog-footer"><button class="button" data-action="close-overlay">返回</button><button class="button primary" data-action="confirm" data-toast="Proposal 已接受|整理后的事实已进入 Project Memory。">接受并保存</button></div>
+    </section>
+
+    <section class="overlay-surface dialog narrow" data-overlay-id="memory-forget" role="dialog" aria-modal="true" aria-labelledby="memory-forget-title">
+      <div class="dialog-header"><div><div class="eyebrow" style="color:var(--danger)">Forget memory</div><h2 class="dialog-title" id="memory-forget-title">忘记这条 Memory？</h2><p class="dialog-copy">之后的对话不会再把它作为长期事实；历史版本仍可审计。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body"><div class="notice danger"><div>!</div><div><strong>UI 事实必须来自 Core</strong>这条事实当前被 2 个 Camp 引用，但不会阻止 Forget。</div></div></div>
+      <div class="dialog-footer"><button class="button" data-action="close-overlay">保留</button><button class="button danger" data-action="confirm" data-toast="Memory 已忘记|历史审计记录仍然保留。">Forget</button></div>
+    </section>
+
+    <section class="overlay-surface dialog" data-overlay-id="skill-add-local" role="dialog" aria-modal="true" aria-labelledby="skill-local-title">
+      <div class="dialog-header"><div><div class="eyebrow">Local source</div><h2 class="dialog-title" id="skill-local-title">从本地添加 Skill</h2><p class="dialog-copy">先读取 manifest 和文件清单，再进入检查步骤。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body stack">
+        <div class="field"><label class="field-label">Skill directory</label><div style="display:flex;gap:8px"><input class="input" placeholder="/path/to/skill"><button class="button" data-action="browse-folder">选择…</button></div></div>
+        <label class="check-row"><input type="checkbox" checked>安装后跟踪这个本地目录的变化</label>
+        <div class="notice"><div>i</div><div>下一步只检查，不会立即安装或覆盖现有 Skill。</div></div>
+      </div>
+      <div class="dialog-footer"><button class="button" data-action="close-overlay">取消</button><button class="button primary" data-overlay="skill-inspect">继续检查</button></div>
+    </section>
+
+    <section class="overlay-surface dialog" data-overlay-id="skill-add-github" role="dialog" aria-modal="true" aria-labelledby="skill-github-title">
+      <div class="dialog-header"><div><div class="eyebrow">GitHub source</div><h2 class="dialog-title" id="skill-github-title">从 GitHub 添加 Skill</h2><p class="dialog-copy">可以固定到 branch、tag 或 commit；安装前会展示解析结果。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body stack">
+        <div class="field"><label class="field-label">Repository URL</label><input class="input" value="https://github.com/rovai-ai/skills"></div>
+        <div class="two-col"><div class="field"><label class="field-label">Path</label><input class="input" value="architecture-review"></div><div class="field"><label class="field-label">Ref</label><input class="input" value="main"></div></div>
+        <div class="field"><label class="field-label">Access</label><select class="select"><option>Public repository</option><option>Use configured GitHub credential</option></select></div>
+      </div>
+      <div class="dialog-footer"><button class="button" data-action="close-overlay">取消</button><button class="button primary" data-overlay="skill-inspect">获取并检查</button></div>
+    </section>
+
+    <section class="overlay-surface dialog xwide" data-overlay-id="skill-inspect" role="dialog" aria-modal="true" aria-labelledby="skill-inspect-title">
+      <div class="dialog-header"><div><div class="eyebrow">Import inspection</div><h2 class="dialog-title" id="skill-inspect-title">检查 architecture-review</h2><p class="dialog-copy">在安装或启用前确认来源、内容和请求能力。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body">
+        <div class="split">
+          <div class="stack">
+            <div class="notice success"><div>✓</div><div><strong>Manifest valid</strong>入口 SKILL.md 可读取，7 个文件，未发现符号链接逃逸。</div></div>
+            <div class="field"><label class="field-label">Source</label><div class="code-block">github.com/rovai-ai/skills
+path: architecture-review
+ref: main → 89c2f6a</div></div>
+            <div class="field"><label class="field-label">Requested capabilities</label><div class="permission-list"><span class="tag">Read repository</span><span class="tag">Run documented checks</span><span class="tag">No network by default</span></div></div>
+          </div>
+          <div class="stack">
+            <div class="field"><label class="field-label">Files</label><div class="code-block">SKILL.md                 4.2 KB
+references/checklist.md  8.4 KB
+scripts/audit_docs.sh    2.1 KB
+assets/report.md         1.3 KB
++ 3 more files</div></div>
+            <label class="check-row"><input type="checkbox" checked>允许 Codex Runtime 使用</label>
+            <label class="check-row"><input type="checkbox">允许 Claude Code Runtime 使用</label>
+            <div class="notice warning"><div>!</div><div>脚本可以启动仓库内的只读检查；每次写操作仍需要单独批准。</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="dialog-footer"><button class="button" data-action="close-overlay">取消</button><button class="button primary" data-action="confirm" data-toast="Skill 已安装|architecture-review 已分配给 Codex。">安装 Skill</button></div>
+    </section>
+
+    <section class="overlay-surface dialog wide" data-overlay-id="skill-update" role="dialog" aria-modal="true" aria-labelledby="skill-update-title">
+      <div class="dialog-header"><div><div class="eyebrow">Update review</div><h2 class="dialog-title" id="skill-update-title">更新 architecture-review？</h2><p class="dialog-copy">从 89c2f6a 更新到 c31df02。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body stack">
+        <div class="three-col"><div class="kpi"><div class="kpi-label">Changed</div><div class="kpi-value">3</div><div class="kpi-meta">files</div></div><div class="kpi"><div class="kpi-label">Added</div><div class="kpi-value">1</div><div class="kpi-meta">reference</div></div><div class="kpi"><div class="kpi-label">Permissions</div><div class="kpi-value" style="font-size:14px;margin-top:12px">Unchanged</div><div class="kpi-meta">safe to review</div></div></div>
+        <div class="code-block">M  SKILL.md                 clarify ADR routing
+M  scripts/audit_docs.sh     include current pointer check
+A  references/versioning.md  new guidance</div>
+        <label class="check-row"><input type="checkbox" checked>保留现有 Runtime 分配</label>
+      </div>
+      <div class="dialog-footer"><button class="button" data-action="close-overlay">稍后</button><button class="button primary" data-action="confirm" data-toast="Skill 已更新|来源固定到 commit c31df02。">确认更新</button></div>
+    </section>
+
+    <section class="overlay-surface dialog narrow" data-overlay-id="skill-delete" role="dialog" aria-modal="true" aria-labelledby="skill-delete-title">
+      <div class="dialog-header"><div><div class="eyebrow" style="color:var(--danger)">Remove skill</div><h2 class="dialog-title" id="skill-delete-title">删除 local-release-notes？</h2><p class="dialog-copy">删除安装副本，不会删除原始本地目录。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body"><div class="notice warning"><div>!</div><div><strong>1 个 Member 正在使用</strong>删除后，新 Run 不再提供这个 Skill；已有 Run 继续使用其启动快照。</div></div></div>
+      <div class="dialog-footer"><button class="button" data-action="close-overlay">取消</button><button class="button danger" data-action="confirm" data-toast="Skill 已删除|原始本地目录未被修改。">删除 Skill</button></div>
+    </section>
+
+    <section class="overlay-surface dialog wide" data-overlay-id="mcp-editor" role="dialog" aria-modal="true" aria-labelledby="mcp-editor-title">
+      <div class="dialog-header"><div><div class="eyebrow">Server configuration</div><h2 class="dialog-title" id="mcp-editor-title">编辑 MCP Server</h2><p class="dialog-copy">配置解析成功后才可保存；密钥值不会回显。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body stack">
+        <div class="two-col"><div class="field"><label class="field-label">Name</label><input class="input" value="github"></div><div class="field"><label class="field-label">Transport</label><select class="select"><option>stdio</option><option>HTTP</option></select></div></div>
+        <div class="field"><label class="field-label">Configuration JSON</label><textarea class="textarea" style="min-height:160px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">{
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-github"],
+  "env": { "GITHUB_TOKEN": "${secret:GITHUB_TOKEN}" }
+}</textarea><div class="field-help">✓ JSON valid · secret reference resolved</div></div>
+        <div class="field"><label class="field-label">Assigned Members</label><div class="permission-list"><label class="check-row"><input type="checkbox" checked>Ada</label><label class="check-row"><input type="checkbox" checked>Schrödinger</label><label class="check-row"><input type="checkbox">Mendel</label></div></div>
+      </div>
+      <div class="dialog-footer"><button class="button" data-action="test-mcp">测试连接</button><button class="button primary" data-overlay="mcp-risk">检查并保存</button></div>
+    </section>
+
+    <section class="overlay-surface dialog wide" data-overlay-id="mcp-import" role="dialog" aria-modal="true" aria-labelledby="mcp-import-title">
+      <div class="dialog-header"><div><div class="eyebrow">Import</div><h2 class="dialog-title" id="mcp-import-title">导入 MCP 配置</h2><p class="dialog-copy">粘贴常见客户端的 JSON；ROVAI 会先解析成候选配置。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body stack">
+        <div class="field"><label class="field-label">Source format</label><select class="select"><option>Auto detect</option><option>Claude Desktop</option><option>VS Code</option><option>Raw MCP JSON</option></select></div>
+        <div class="field"><label class="field-label">JSON</label><textarea class="textarea" style="min-height:170px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace" placeholder='{"mcpServers": { ... }}'></textarea></div>
+        <div class="notice"><div>i</div><div>同名 Server 不会被静默覆盖；下一步会逐项展示新增、更新与冲突。</div></div>
+      </div>
+      <div class="dialog-footer"><button class="button" data-action="close-overlay">取消</button><button class="button primary" data-overlay="mcp-risk">解析并检查</button></div>
+    </section>
+
+    <section class="overlay-surface dialog" data-overlay-id="mcp-risk" role="dialog" aria-modal="true" aria-labelledby="mcp-risk-title">
+      <div class="dialog-header"><div><div class="eyebrow" style="color:var(--warning)">Permission review</div><h2 class="dialog-title" id="mcp-risk-title">确认高权限 MCP 变更</h2><p class="dialog-copy">这个 Server 可访问网络、Secret 与远程仓库写入。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body stack">
+        <div class="notice warning"><div>!</div><div><strong>高权限能力</strong>Server 本身可以发起网络请求；每个工具调用仍会按当前批准规则处理。</div></div>
+        <div class="identity-card"><dl style="margin:0"><dt>Server</dt><dd>github</dd><dt>Transport</dt><dd>stdio</dd><dt>Capabilities</dt><dd>Read issues, write comments, create branches</dd><dt>Members</dt><dd>Ada, Schrödinger</dd></dl></div>
+        <label class="check-row"><input type="checkbox">我已理解这个 Server 的能力范围</label>
+      </div>
+      <div class="dialog-footer"><button class="button" data-action="close-overlay">返回编辑</button><button class="button primary" data-action="confirm" data-toast="MCP 配置已保存|连接测试通过，Member 分配已更新。">确认并保存</button></div>
+    </section>
+
+    <section class="overlay-surface dialog narrow" data-overlay-id="mcp-delete" role="dialog" aria-modal="true" aria-labelledby="mcp-delete-title">
+      <div class="dialog-header"><div><div class="eyebrow" style="color:var(--danger)">Delete server</div><h2 class="dialog-title" id="mcp-delete-title">删除 github MCP？</h2><p class="dialog-copy">配置与 Member 分配会被移除；环境 Secret 不会删除。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body"><div class="notice warning"><div>!</div><div><strong>2 个 Member 正在使用</strong>活动 Run 保留启动时能力快照，新 Run 不再看到这个 Server。</div></div></div>
+      <div class="dialog-footer"><button class="button" data-action="close-overlay">取消</button><button class="button danger" data-action="confirm" data-toast="MCP Server 已删除|环境 Secret 仍然保留。">删除 Server</button></div>
+    </section>
+
+    <section class="overlay-surface dialog" data-overlay-id="diagnostics-export" role="dialog" aria-modal="true" aria-labelledby="diagnostics-export-title">
+      <div class="dialog-header"><div><div class="eyebrow">Export report</div><h2 class="dialog-title" id="diagnostics-export-title">导出诊断报告</h2><p class="dialog-copy">确认内容后会打开系统 Save Dialog。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body stack">
+        <div class="field"><label class="field-label">Format</label><select class="select"><option>Markdown + JSON evidence</option><option>JSON only</option></select></div>
+        <div class="surface"><div class="surface-body">
+          <label class="check-row"><input type="checkbox" checked>系统与版本信息</label>
+          <label class="check-row"><input type="checkbox" checked>逐项诊断证据</label>
+          <label class="check-row"><input type="checkbox" checked>已脱敏日志</label>
+          <label class="check-row"><input type="checkbox">包含绝对工作目录</label>
+        </div></div>
+        <div class="notice"><div>i</div><div><strong>Secrets 永不导出</strong>Token、环境变量值和消息正文默认排除。</div></div>
+      </div>
+      <div class="dialog-footer"><button class="button" data-action="close-overlay">取消</button><button class="button primary" data-action="confirm" data-toast="系统 Save Dialog 将打开|建议文件名：rovai-diagnostics-2026-08-10.zip">继续导出</button></div>
+    </section>
+
+    <section class="overlay-surface dialog" data-overlay-id="diagnostics-repair" role="dialog" aria-modal="true" aria-labelledby="diagnostics-repair-title">
+      <div class="dialog-header"><div><div class="eyebrow" style="color:var(--warning)">Repair action</div><h2 class="dialog-title" id="diagnostics-repair-title">修复 Gemini CLI 路径</h2><p class="dialog-copy">诊断只提出动作；修改配置需要你明确确认。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
+      <div class="dialog-body stack">
+        <div class="identity-card"><dl style="margin:0"><dt>Current</dt><dd>/usr/local/bin/gemini · 不存在</dd><dt>Detected candidate</dt><dd>/opt/homebrew/bin/gemini · executable</dd><dt>Affected</dt><dd>1 Runtime product · 0 active Runs</dd></dl></div>
+        <div class="notice success"><div>✓</div><div>候选路径返回版本 0.2.1，模型发现命令成功。</div></div>
+        <label class="check-row"><input type="checkbox" checked>修复后重新运行 Runtime 检查</label>
+      </div>
+      <div class="dialog-footer"><button class="button" data-action="close-overlay">取消</button><button class="button primary" data-action="confirm" data-toast="Runtime 路径已修复|复查通过：Gemini CLI Ready。">应用修复</button></div>
+    </section>
+  </div>
+
+  <div class="toast-region" aria-live="polite" aria-atomic="true"></div>
+
+  <script>
+    (function () {
+      "use strict";
+
+      var overlayRoot = document.getElementById("overlay-root");
+      var currentOverlay = null;
+      var lastFocused = null;
+      var runtimeDirty = false;
+      var activeSetting = "general";
+
+      var pageMeta = {
+        compose: ["Quick Chat", "从一个清晰的问题开始"],
+        camp: ["Camp · ROVAI Core", "Runtime parsing boundary"],
+        members: ["Library", "Members"],
+        memory: ["Library", "Memory"],
+        settings: ["ROVAI preferences", "Settings · General"]
+      };
+
+      var settingNames = {
+        general: "General",
+        appearance: "Appearance",
+        notifications: "Notifications",
+        skills: "Skills",
+        mcp: "MCP Servers",
+        runtime: "Runtime",
+        diagnostics: "Diagnostics"
+      };
+
+      var coverageItems = [
+        ["new-conversation", "Global", "New Conversation"],
+        ["command", "Global", "Command Palette"],
+        ["notifications", "Global", "Notification Center"],
+        ["startup-gate", "Startup", "Restore Location Gate"],
+        ["camp-menu", "Sidecar", "Camp Context Menu"],
+        ["project-menu", "Sidecar", "Project Context Menu"],
+        ["camp-rename", "Camp", "Rename Camp"],
+        ["camp-delete", "Camp", "Delete Camp + Blockers"],
+        ["runtime-recovery", "Camp", "Runtime Recovery"],
+        ["execution", "Camp", "Execution Drawer"],
+        ["mention", "Camp", "Member Mention Popover"],
+        ["lightbox", "Camp", "Attachment Lightbox"],
+        ["tool-details", "Camp", "Tool Call Details"],
+        ["task-detail", "Camp", "Task Detail Drawer"],
+        ["task-editor", "Camp", "Task Editor"],
+        ["task-cancel", "Camp", "Cancel Task"],
+        ["one-click", "General", "One-click Creation"],
+        ["member-create", "Members", "Create Member"],
+        ["member-edit", "Members", "Edit Identity"],
+        ["avatar-editor", "Members", "Avatar Crop + Presets"],
+        ["member-actions", "Members", "Member Action Menu"],
+        ["member-remove", "Members", "Remove Member + Blockers"],
+        ["runtime-unsaved", "Members", "Unsaved Runtime Changes"],
+        ["runtime-install", "Runtime", "Installation Help"],
+        ["runtime-custom", "Runtime", "Custom Runtime Editor"],
+        ["runtime-menu", "Runtime", "Runtime Product Menu"],
+        ["memory-proposals", "Memory", "Proposal Review Drawer"],
+        ["memory-create", "Memory", "Create Memory"],
+        ["memory-edit", "Memory", "Revise Memory"],
+        ["memory-edit-after-accept", "Memory", "Accept and Edit"],
+        ["memory-forget", "Memory", "Forget Confirmation"],
+        ["skill-add-local", "Skills", "Add Local Skill"],
+        ["skill-add-github", "Skills", "Add GitHub Skill"],
+        ["skill-inspect", "Skills", "Import Inspection"],
+        ["skill-update", "Skills", "Update Review"],
+        ["skill-delete", "Skills", "Delete Skill"],
+        ["skill-runtime-menu", "Skills", "Runtime Assignment Menu"],
+        ["mcp-editor", "MCP", "Server JSON Editor"],
+        ["mcp-import", "MCP", "Import Configuration"],
+        ["mcp-risk", "MCP", "High Permission Review"],
+        ["mcp-delete", "MCP", "Delete Server"],
+        ["diagnostics-export", "Diagnostics", "Export Report"],
+        ["diagnostics-repair", "Diagnostics", "Repair Confirmation"]
+      ];
+
+      function populateCoverage() {
+        var grid = document.getElementById("coverage-grid");
+        coverageItems.forEach(function (item) {
+          var row = document.createElement("div");
+          var copy = document.createElement("div");
+          var strong = document.createElement("strong");
+          var context = document.createElement("span");
+          var button = document.createElement("button");
+          row.className = "coverage-item";
+          strong.textContent = item[2];
+          context.textContent = item[1] + " · " + item[0];
+          copy.appendChild(strong);
+          copy.appendChild(context);
+          button.className = "button small";
+          button.textContent = "打开";
+          button.setAttribute("data-overlay", item[0]);
+          row.appendChild(copy);
+          row.appendChild(button);
+          grid.appendChild(row);
+        });
+      }
+
+      function openOverlay(id, source) {
+        var target = overlayRoot.querySelector('[data-overlay-id="' + id + '"]');
+        if (!target) {
+          showToast("交互尚未连接", id);
+          return;
+        }
+        if (!currentOverlay) {
+          lastFocused = source || document.activeElement;
+        }
+        overlayRoot.querySelectorAll(".overlay-surface.open").forEach(function (surface) {
+          surface.classList.remove("open");
+        });
+        currentOverlay = target;
+        overlayRoot.classList.add("open");
+        overlayRoot.classList.toggle("nonmodal", target.hasAttribute("data-nonmodal"));
+        target.classList.add("open");
+        window.setTimeout(function () {
+          var focusTarget = target.querySelector("[autofocus], input, textarea, select, button");
+          if (focusTarget) {
+            focusTarget.focus();
+          }
+        }, 30);
+      }
+
+      function closeOverlay() {
+        if (currentOverlay) {
+          currentOverlay.classList.remove("open");
+        }
+        currentOverlay = null;
+        overlayRoot.classList.remove("open", "nonmodal");
+        if (lastFocused && typeof lastFocused.focus === "function") {
+          lastFocused.focus();
+        }
+        lastFocused = null;
+      }
+
+      function showToast(message, detail) {
+        var region = document.querySelector(".toast-region");
+        var toast = document.createElement("div");
+        var title = document.createElement("strong");
+        var copy = document.createElement("span");
+        toast.className = "toast";
+        title.textContent = message;
+        copy.textContent = detail || "演示状态已更新。";
+        toast.appendChild(title);
+        toast.appendChild(copy);
+        region.appendChild(toast);
+        window.setTimeout(function () {
+          toast.remove();
+        }, 3600);
+      }
+
+      function setHeader(eyebrow, title) {
+        document.getElementById("main-eyebrow").textContent = eyebrow;
+        document.getElementById("main-title").textContent = title;
+      }
+
+      function setEmptyCamp(empty) {
+        var grid = document.querySelector(".camp-grid");
+        var emptyState = document.getElementById("empty-camp-state");
+        var toolbarTitle = document.querySelector(".camp-title");
+        var toolbarStatus = document.querySelector(".camp-toolbar .status");
+        grid.hidden = empty;
+        emptyState.hidden = !empty;
+        toolbarTitle.textContent = empty ? "Local model adapters" : "Runtime parsing boundary";
+        toolbarStatus.textContent = empty ? "Idle" : "Running";
+        toolbarStatus.className = empty ? "status" : "status success";
+        setHeader("Camp · ROVAI Core", toolbarTitle.textContent);
+      }
+
+      function showPage(name) {
+        document.querySelectorAll("[data-page]").forEach(function (page) {
+          page.hidden = page.getAttribute("data-page") !== name;
+        });
+        document.querySelectorAll("[data-page-target]").forEach(function (button) {
+          button.classList.toggle("active", button.getAttribute("data-page-target") === name);
+        });
+        if (name === "camp") {
+          document.querySelectorAll(".camp-row").forEach(function (row) {
+            row.classList.remove("active");
+          });
+          document.querySelector('.camp-row[data-page-target="camp"]').classList.add("active");
+          setEmptyCamp(false);
+        }
+        if (name === "settings") {
+          showSetting(activeSetting);
+        } else {
+          setHeader(pageMeta[name][0], pageMeta[name][1]);
+        }
+        document.getElementById("main-content").scrollTop = 0;
+      }
+
+      function showSetting(name) {
+        activeSetting = name;
+        document.querySelectorAll("[data-setting-panel]").forEach(function (panel) {
+          panel.hidden = panel.getAttribute("data-setting-panel") !== name;
+        });
+        document.querySelectorAll("[data-setting-target]").forEach(function (button) {
+          button.classList.toggle("active", button.getAttribute("data-setting-target") === name);
+        });
+        setHeader("ROVAI preferences", "Settings · " + settingNames[name]);
+      }
+
+      function showInspectorTab(name) {
+        document.querySelectorAll("[data-tab-panel]").forEach(function (panel) {
+          panel.hidden = panel.getAttribute("data-tab-panel") !== name;
+        });
+        document.querySelectorAll(".inspector [data-tab]").forEach(function (button) {
+          button.classList.toggle("active", button.getAttribute("data-tab") === name);
+        });
+      }
+
+      function showMemberTab(name) {
+        if (name === "identity" && runtimeDirty) {
+          openOverlay("runtime-unsaved");
+          return;
+        }
+        document.querySelectorAll("[data-member-panel]").forEach(function (panel) {
+          panel.hidden = panel.getAttribute("data-member-panel") !== name;
+        });
+        document.querySelectorAll("[data-member-tab]").forEach(function (button) {
+          button.classList.toggle("active", button.getAttribute("data-member-tab") === name);
+        });
+      }
+
+      function genericAction(action, trigger) {
+        var messages = {
+          "pin-camp": ["Camp 已固定", "它会保持在当前项目顶部。"],
+          "pin-project": ["项目已固定", "Sidecar 顺序已更新。"],
+          "copy-camp-id": ["Camp ID 已复制", "camp_rt_boundary_1842"],
+          "copy-project-path": ["项目路径已复制", "/Users/murray.xue/VSCodeProjects/opensource/rovai-ai"],
+          "collapse-project": ["其他项目已折叠", "只保留当前项目展开。"],
+          "approve-run": ["已批准一次", "Runtime profile 诊断已进入执行队列。"],
+          "deny-run": ["请求已拒绝", "Member 会收到明确结果并继续规划。"],
+          "attach-demo": ["附件已加入", "原型展示本地附件的待发送状态。"],
+          "stop-run": ["停止请求已发送", "Core 正在等待 Runtime 退出。"],
+          "mark-read": ["已标为已读", "未读计数已更新。"],
+          "test-runtime": ["Runtime 测试通过", "可执行文件、版本与模型发现均正常。"],
+          "set-runtime-default": ["默认 Runtime 已更新", "只影响之后创建的 Member。"],
+          "toggle-skill-runtime": ["Runtime 分配已更新", "新 Run 会使用最新 Skill 快照。"],
+          "duplicate-member": ["Member 副本已创建", "名称暂定为 Ada Copy。"],
+          "set-default-lead": ["默认 Lead 已更新", "新 Camp 会预选 Ada。"],
+          "copy-memory": ["Memory 已复制", "事实文本已复制到剪贴板。"],
+          "accept-proposal": ["Proposal 已接受", "事实已进入长期 Memory。"],
+          "reject-proposal": ["Proposal 已拒绝", "不会进入长期 Memory。"],
+          "copy-tool-output": ["工具输出已复制", "包含命令、退出码和已展示结果。"],
+          "copy-install-command": ["安装命令已复制", "请在你信任的终端中运行。"],
+          "choose-avatar-file": ["系统文件选择器将打开", "原型不读取真实文件。"],
+          "browse-file": ["系统文件选择器将打开", "原型不读取真实文件。"],
+          "browse-folder": ["系统目录选择器将打开", "原型不修改真实项目设置。"],
+          "open-system-settings": ["系统设置将打开", "目标：通知权限。"],
+          "reassign-lead": ["重新分配入口已准备", "请选择另一个可用 Member。"],
+          "test-mcp": ["MCP 连接测试通过", "握手完成，能力清单已读取。"],
+          "choose-p1": ["P1 Fog 已应用", "Sidecar token 与主工作区保持解耦。"],
+          "future-palette": ["材质插槽已保留", "后续可替换 Sidecar token，不改页面与功能。"],
+          "refresh-runtimes": ["Runtime discovery 完成", "3 Ready · 1 needs attention。"],
+          "copy-install": ["命令已复制", "请在终端中确认后运行。"],
+          "test-notification": ["测试通知", "这是一条应用内 heads-up。"],
+          "save-runtime": ["Runtime 已保存", "新 Run 将使用最新产品与模型。"],
+          "discard-runtime": ["Runtime 已还原", "未保存值已丢弃。"]
+        };
+        if (messages[action]) {
+          showToast(messages[action][0], messages[action][1]);
+        } else {
+          showToast("演示动作已完成", trigger.textContent.trim());
+        }
+      }
+
+      document.addEventListener("click", function (event) {
+        var trigger = event.target.closest("button, [data-action], [data-overlay]");
+        if (!trigger) {
+          return;
+        }
+
+        var overlayId = trigger.getAttribute("data-overlay");
+        if (overlayId) {
+          openOverlay(overlayId, trigger);
+          return;
+        }
+
+        var pageTarget = trigger.getAttribute("data-page-target");
+        if (pageTarget) {
+          if (runtimeDirty && document.querySelector('[data-member-panel="runtime"]') && !document.querySelector('[data-member-panel="runtime"]').hidden) {
+            openOverlay("runtime-unsaved", trigger);
+            return;
+          }
+          closeOverlay();
+          showPage(pageTarget);
+          return;
+        }
+
+        var pageJump = trigger.getAttribute("data-page-jump");
+        if (pageJump) {
+          closeOverlay();
+          showPage(pageJump);
+          return;
+        }
+
+        var settingTarget = trigger.getAttribute("data-setting-target");
+        if (settingTarget) {
+          showSetting(settingTarget);
+          return;
+        }
+
+        var settingsJump = trigger.getAttribute("data-settings-jump");
+        if (settingsJump) {
+          closeOverlay();
+          showPage("settings");
+          showSetting(settingsJump);
+          return;
+        }
+
+        var memberTab = trigger.getAttribute("data-member-tab");
+        if (memberTab) {
+          showMemberTab(memberTab);
+          return;
+        }
+
+        var inspectorTab = trigger.getAttribute("data-tab");
+        if (inspectorTab) {
+          showInspectorTab(inspectorTab);
+          return;
+        }
+
+        var action = trigger.getAttribute("data-action");
+        if (!action) {
+          return;
+        }
+
+        if (action === "close-overlay") {
+          closeOverlay();
+          return;
+        }
+
+        if (action === "confirm") {
+          var toast = trigger.getAttribute("data-toast") || "操作已确认|原型状态已更新。";
+          var parts = toast.split("|");
+          if (currentOverlay && currentOverlay.getAttribute("data-overlay-id") === "runtime-unsaved") {
+            runtimeDirty = false;
+          }
+          closeOverlay();
+          showToast(parts[0], parts[1]);
+          return;
+        }
+
+        if (action === "toggle-switch") {
+          trigger.classList.toggle("on");
+          trigger.setAttribute("aria-checked", trigger.classList.contains("on") ? "true" : "false");
+          return;
+        }
+
+        if (action === "show-empty-camp") {
+          closeOverlay();
+          showPage("camp");
+          setEmptyCamp(true);
+          document.querySelectorAll(".camp-row").forEach(function (row) { row.classList.remove("active"); });
+          trigger.classList.add("active");
+          return;
+        }
+
+        if (action === "activate-empty-camp") {
+          setEmptyCamp(false);
+          var composer = document.getElementById("camp-composer");
+          composer.focus();
+          showToast("可以发送第一条消息", "Camp 已准备好接收输入。");
+          return;
+        }
+
+        if (action === "quick-send") {
+          showPage("camp");
+          showToast("Camp 已创建", "首条消息已交给 Ada。");
+          return;
+        }
+
+        if (action === "seed-prompt") {
+          document.querySelector(".prompt-box textarea").value = trigger.textContent.trim();
+          document.querySelector(".prompt-box textarea").focus();
+          return;
+        }
+
+        if (action === "camp-send") {
+          var composerValue = document.getElementById("camp-composer").value.trim();
+          if (!composerValue) {
+            showToast("还没有消息", "输入内容后再发送。");
+          } else {
+            document.getElementById("camp-composer").value = "";
+            showToast("消息已发送", "Core 已接受消息，Ada 正在处理。");
+          }
+          return;
+        }
+
+        if (action === "insert-mention" || action === "insert-all-mention") {
+          var mentionText = action === "insert-all-mention" ? "@all-members " : "@Ada ";
+          document.getElementById("camp-composer").value += mentionText;
+          closeOverlay();
+          document.getElementById("camp-composer").focus();
+          return;
+        }
+
+        if (action === "open-approval") {
+          closeOverlay();
+          showPage("camp");
+          showInspectorTab("approvals");
+          return;
+        }
+
+        if (action === "go-camp") {
+          closeOverlay();
+          showPage("camp");
+          return;
+        }
+
+        if (action === "select-member") {
+          document.querySelectorAll(".roster-list .list-row").forEach(function (row) { row.classList.remove("selected"); });
+          trigger.classList.add("selected");
+          showToast("Member 已选择", trigger.textContent.trim());
+          return;
+        }
+
+        if (action === "mark-runtime-dirty") {
+          runtimeDirty = true;
+          return;
+        }
+
+        if (action === "save-runtime" || action === "discard-runtime") {
+          runtimeDirty = false;
+          genericAction(action, trigger);
+          return;
+        }
+
+        if (action === "run-diagnostics") {
+          var log = document.getElementById("diagnostic-log");
+          log.textContent = "14:47:12  core.snapshot      PASS  revision=1843 schema=v7\n14:47:12  renderer.bridge    PASS  preload handshake 16ms\n14:47:13  runtime.codex      PASS  executable resolved\n14:47:13  runtime.claude     PASS  executable resolved\n14:47:13  runtime.gemini     WARN  configured path not found\n14:47:14  workspace          PASS  readable and writable\n14:47:14  notifications      PASS  in-app delivery available";
+          showToast("诊断完成", "8 passed · 1 warning · evidence log 已更新。");
+          return;
+        }
+
+        if (action === "reset-demo") {
+          closeOverlay();
+          runtimeDirty = false;
+          activeSetting = "general";
+          showPage("camp");
+          showInspectorTab("tasks");
+          showMemberTab("identity");
+          showToast("演示已重置", "返回 Runtime parsing boundary。");
+          return;
+        }
+
+        genericAction(action, trigger);
+      });
+
+      document.addEventListener("change", function (event) {
+        if (event.target.closest('[data-action="mark-runtime-dirty"]')) {
+          runtimeDirty = true;
+          showToast("Runtime 有未保存修改", "离开前会要求确认。");
+        }
+      });
+
+      document.addEventListener("keydown", function (event) {
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+          event.preventDefault();
+          openOverlay("command");
+          return;
+        }
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n") {
+          event.preventDefault();
+          openOverlay("new-conversation");
+          return;
+        }
+        if ((event.metaKey || event.ctrlKey) && event.key === ",") {
+          event.preventDefault();
+          showPage("settings");
+          return;
+        }
+        if (event.key === "Escape" && currentOverlay) {
+          event.preventDefault();
+          closeOverlay();
+          return;
+        }
+        if (event.key === "Tab" && currentOverlay) {
+          var focusable = Array.prototype.slice.call(currentOverlay.querySelectorAll('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'));
+          if (!focusable.length) {
+            return;
+          }
+          var first = focusable[0];
+          var last = focusable[focusable.length - 1];
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        }
+      });
+
+      populateCoverage();
+      showPage("camp");
+    }());
+  </script>
+</body>
+</html>

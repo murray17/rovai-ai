@@ -25,10 +25,15 @@ const activeRunId = 'run-codex'
 const historicalRunId = 'run-codex-history'
 
 const runtimes = [
-  runtime('codex', 'codex-cli', 'Codex CLI', 'filesystem/read_file', 'Runtime 报告', {
-    protocol: 'codex-app-server', domain: 'tool', semantic: 'tool.mcp.call',
-    evidenceKind: 'activity', eventType: 'activity.completed', payload: {
-      item: { id: 'op-codex', type: 'mcpToolCall', status: 'completed', server: 'filesystem', tool: 'read_file', output: 'README.md' }
+  runtime('codex', 'codex-cli', 'Codex CLI', '读取 README.md', 'Runtime 报告', {
+    protocol: 'codex-app-server', domain: 'shell', semantic: 'shell.execute',
+    evidenceKind: 'command', eventType: 'activity.completed', presentationHint: '读取 README.md', payload: {
+      item: {
+        id: 'op-codex', type: 'commandExecution', status: 'completed', title: null,
+        command: '/bin/zsh -lc "sed -n 1,120p /repo/docs/README.md"',
+        commandActions: [{ type: 'read', name: 'sed', path: '/repo/docs/README.md' }],
+        output: Array.from({ length: 32 }, (_, index) => `${index + 1}: README.md fixture output`).join('\n')
+      }
     }
   }),
   runtime('opencode', 'opencode-cli', 'OpenCode', 'read_file', 'Runtime 报告', acp('read', 'read_file', 'file', 'file.read')),
@@ -77,6 +82,14 @@ try {
     && conversationPresentation.copyBackgrounds[0] === 'rgba(0, 0, 0, 0)'
     && conversationPresentation.surfaceBackgrounds[0] === 'rgba(0, 0, 0, 0)',
     `Agent messages did not share one conversation surface: ${JSON.stringify(conversationPresentation)}`)
+  assert(conversationPresentation.copyButtonPlacements.length === runtimes.length
+    && conversationPresentation.copyButtonPlacements.every((placement) =>
+      placement.position === 'absolute'
+        && placement.top === '-2px'
+        && placement.right === '0px'
+        && Math.abs(placement.topOffset - conversationPresentation.copyButtonPlacements[0].topOffset) <= 0.75
+        && Math.abs(placement.rightOffset) <= 0.75),
+  `Message copy buttons did not share one top-right action anchor: ${JSON.stringify(conversationPresentation.copyButtonPlacements)}`)
   assert(conversationPresentation.dayLabels.length > 0
     && conversationPresentation.dayLabels.every((label) => /^\d{1,2}月\d{1,2}日 周[一二三四五六日] · DAY \d+$/.test(label))
     && conversationPresentation.dayLabels.every((label) => !label.includes('今天') && !label.includes('发布准备')),
@@ -116,6 +129,9 @@ try {
     && handoffFooter.copyButtonPosition === 'absolute',
     `Hidden copy affordance must not reserve a blank line: ${JSON.stringify(handoffFooter)}`)
   assert(handoffFooter.copyButtonFocused && handoffFooter.copyButtonOpacity === '1'
+    && handoffFooter.messageBodyFocusWithin
+    && Math.abs(handoffFooter.copyButtonTopOffset + 2) <= 0.75
+    && Math.abs(handoffFooter.copyButtonRightOffset) <= 0.75
     && handoffFooter.copyButtonHorizontalGap >= 0,
     `Focused copy affordance must stay visible without covering recipients: ${JSON.stringify(handoffFooter)}`)
   await evaluate(app.cdp, `document.activeElement?.blur()`)
@@ -156,6 +172,7 @@ try {
   await evaluate(app.cdp, `(() => {
     const activeChip = [...document.querySelectorAll('.run-pulse-chip[data-agent-id]')]
       .find((chip) => chip.dataset.agentId === ${JSON.stringify(activeAgentId)})
+    activeChip?.focus()
     activeChip?.click()
     return Boolean(activeChip)
   })()`)
@@ -221,6 +238,23 @@ try {
   await openCamp(app.cdp, campId)
   await waitForExpression(app.cdp,
     `document.querySelector('.camp-workspace')?.getAttribute('aria-label') === ${JSON.stringify(`Camp：${campTitle}`)}`)
+  await wait(200)
+  const wideConversationLayout = await collectWideConversationLayout(app.cdp)
+  assert(wideConversationLayout.viewportWidth === 2560
+    && wideConversationLayout.viewportHeight === 1440
+    && wideConversationLayout.documentScrollWidth <= wideConversationLayout.viewportWidth + 1,
+  `2K conversation viewport overflowed: ${JSON.stringify(wideConversationLayout)}`)
+  assert(wideConversationLayout.timelineTrackWidth >= 1038
+    && wideConversationLayout.timelineTrackWidth <= 1042
+    && wideConversationLayout.messageBodyWidth > wideConversationLayout.narrativeWidth + 160
+    && wideConversationLayout.narrativeWidth <= 720,
+  `2K conversation did not preserve a narrow narrative lane inside the wide work lane: ${JSON.stringify(wideConversationLayout)}`)
+  assert(wideConversationLayout.articleBackground === 'rgba(0, 0, 0, 0)'
+    && wideConversationLayout.surfaceBackground === 'rgba(0, 0, 0, 0)'
+    && wideConversationLayout.copyBackground === 'rgba(0, 0, 0, 0)',
+  `2K conversation added an actor-owned message surface: ${JSON.stringify(wideConversationLayout)}`)
+  const wideConversationCapture = join(outputDir, 'runtime-activity-wide-conversation.png')
+  await capture(app.cdp, wideConversationCapture)
   await app.cdp.send('Emulation.setDeviceMetricsOverride', {
     width: 1040, height: 700, deviceScaleFactor: 1, mobile: false
   })
@@ -270,10 +304,17 @@ try {
       agentLevelProcessDock: agentDock,
       recipientOnlyHandoffFooter: handoffFooter,
       wideComposerLayout,
+      wideConversationLayout,
       recipientOnlyCompactLayout: compactLayout
     },
     runtimes: observed,
-    captures: { top: topCapture, bottom: bottomCapture, wide: wideCapture, compact: compactCapture }
+    captures: {
+      top: topCapture,
+      bottom: bottomCapture,
+      wide: wideCapture,
+      wideConversation: wideConversationCapture,
+      compact: compactCapture
+    }
   }
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`)
   console.log(JSON.stringify({ ...report, reportPath }, null, 2))
@@ -531,6 +572,7 @@ async function collectHandoffFooter(cdp) {
     const footer = document.querySelector('.message-delivery-footer')
     const rail = footer?.querySelector('.message-delivery-handoff-rail')
     const messageSurface = footer?.previousElementSibling
+    const messageBody = footer?.closest('.message-body')
     const messageContent = messageSurface?.querySelector(':scope > .final-copy, :scope > .message-bubble')
     const copyButton = messageSurface?.querySelector('.message-copy-button')
     const recipients = footer?.querySelector('.message-delivery-recipients')
@@ -539,6 +581,7 @@ async function collectHandoffFooter(cdp) {
     const copyButtonStyle = copyButton ? getComputedStyle(copyButton) : null
     const footerRect = footer?.getBoundingClientRect()
     const surfaceRect = messageSurface?.getBoundingClientRect()
+    const bodyRect = messageBody?.getBoundingClientRect()
     const contentRect = messageContent?.getBoundingClientRect()
     const copyButtonRect = copyButton?.getBoundingClientRect()
     const recipientsRect = recipients?.getBoundingClientRect()
@@ -563,7 +606,10 @@ async function collectHandoffFooter(cdp) {
       copyButtonOpacity: copyButtonStyle?.opacity ?? null,
       copyButtonFocused: document.activeElement === copyButton,
       surfaceFocusWithin: messageSurface?.matches(':focus-within') ?? false,
+      messageBodyFocusWithin: messageBody?.matches(':focus-within') ?? false,
       documentHasFocus: document.hasFocus(),
+      copyButtonTopOffset: copyButtonRect && bodyRect ? copyButtonRect.top - bodyRect.top : null,
+      copyButtonRightOffset: copyButtonRect && bodyRect ? bodyRect.right - copyButtonRect.right : null,
       copyButtonHorizontalGap: copyButtonRect && recipientsRect ? copyButtonRect.left - recipientsRect.right : null,
       recipientMentions,
       stateLabelCount: footer?.querySelectorAll('.message-delivery-state').length ?? 0,
@@ -588,6 +634,19 @@ async function collectConversationPresentation(cdp) {
         const copy = article.querySelector('.final-copy')
         return copy ? getComputedStyle(copy).backgroundColor : null
       })),
+      copyButtonPlacements: articles.map((article) => {
+        const body = article.querySelector('.message-body')
+        const button = article.querySelector('.message-copy-button')
+        const bodyRect = body?.getBoundingClientRect()
+        const buttonRect = button?.getBoundingClientRect()
+        return {
+          position: button ? getComputedStyle(button).position : null,
+          top: button ? getComputedStyle(button).top : null,
+          right: button ? getComputedStyle(button).right : null,
+          topOffset: bodyRect && buttonRect ? buttonRect.top - bodyRect.top : null,
+          rightOffset: bodyRect && buttonRect ? bodyRect.right - buttonRect.right : null
+        }
+      }),
       dayLabels: [...document.querySelectorAll('.timeline-day')]
         .map((node) => node.textContent?.replace(/\\s+/g, ' ').trim() ?? '')
         .filter(Boolean)
@@ -678,16 +737,41 @@ async function collectWideComposerLayout(cdp) {
   })()`)
 }
 
+async function collectWideConversationLayout(cdp) {
+  return evaluate(cdp, `(() => {
+    const article = document.querySelector(${JSON.stringify(runArticleSelector)})
+    const track = document.querySelector('.timeline-track')
+    const body = article?.querySelector('.message-body')
+    const surface = article?.querySelector('.message-surface')
+    const copy = article?.querySelector('.final-copy')
+    const narrative = copy?.querySelector('.safe-markdown > p')
+      ?? copy?.querySelector('.safe-markdown')
+    const rect = (node) => node?.getBoundingClientRect()
+    return {
+      viewportWidth: innerWidth,
+      viewportHeight: innerHeight,
+      documentScrollWidth: document.documentElement.scrollWidth,
+      timelineTrackWidth: rect(track)?.width ?? 0,
+      messageBodyWidth: rect(body)?.width ?? 0,
+      surfaceWidth: rect(surface)?.width ?? 0,
+      narrativeWidth: rect(narrative)?.width ?? 0,
+      articleBackground: article ? getComputedStyle(article).backgroundColor : null,
+      surfaceBackground: surface ? getComputedStyle(surface).backgroundColor : null,
+      copyBackground: copy ? getComputedStyle(copy).backgroundColor : null
+    }
+  })()`)
+}
+
 async function seedActivity(entry, index) {
   const runId = `run-${entry.key}`
   const operationId = `operation-${entry.key}`
   const occurredAt = `2026-08-05T12:${String(index).padStart(2, '0')}:01Z`
   const evidence = entry.key === 'codex'
     ? [{
-        id: 'evidence-codex-start', sequence: 1, eventType: 'activity.started', kind: 'tool_call', phase: 'started',
+        id: 'evidence-codex-start', sequence: 1, eventType: 'activity.started', kind: entry.evidenceKind, phase: 'started',
         payload: { item: { ...entry.payload.item, status: 'inProgress', output: null } }
       }, {
-        id: 'evidence-codex-complete', sequence: 2, eventType: entry.eventType, kind: 'tool_call', phase: 'completed', payload: entry.payload
+        id: 'evidence-codex-complete', sequence: 2, eventType: entry.eventType, kind: entry.evidenceKind, phase: 'completed', payload: entry.payload
       }]
     : [{
         id: `evidence-${entry.key}`, sequence: 1, eventType: entry.eventType,
@@ -702,7 +786,6 @@ async function seedActivity(entry, index) {
   )`).join(',\n')
   const evidenceIds = evidence.map((item) => item.id)
   const toolName = entry.payload.toolName
-    ?? (entry.key === 'codex' ? 'filesystem/read_file' : null)
     ?? (entry.sourceAuthority === 'core' ? 'camp.message.send' : null)
   await runSql(databasePath, `
     PRAGMA foreign_keys = ON;
@@ -721,7 +804,7 @@ async function seedActivity(entry, index) {
     ) VALUES (
       ${sqlLiteral(runId)}, 1, ${sqlLiteral(operationId)}, 'activity-v1',
       ${sqlLiteral(entry.domain)}, ${sqlLiteral(entry.semantic)}, ${sqlNullable(toolName)},
-      ${sqlLiteral(entry.payload.title ?? toolName ?? 'Runtime 工具调用')},
+      ${sqlLiteral(entry.presentationHint ?? entry.payload.title ?? toolName ?? 'Runtime 工具调用')},
       'terminal', 'succeeded', ${sqlLiteral(entry.credibility ?? 'runtime_structured')},
       'fine_grained', ${sqlLiteral(entry.sourceAuthority ?? 'runtime')},
       ${sqlLiteral(JSON.stringify(evidenceIds))}, 1, ${evidence.length},
@@ -801,6 +884,12 @@ async function collectRuntimeRows(cdp) {
 }
 
 async function verifyExecutionAutoFollowControl(cdp) {
+  await evaluate(cdp, `(() => {
+    document.querySelectorAll('.execution-drawer details.tool-call-disclosure:not([open]) > summary')
+      .forEach((summary) => summary.click())
+    return true
+  })()`)
+  await wait(100)
   const geometry = await evaluate(cdp, `(() => {
     const body = document.querySelector('.execution-drawer-body')
     if (!(body instanceof HTMLElement)) return null

@@ -42,6 +42,11 @@ Skill 一次性补齐缺失分组，同时保留当前 Revision 与显式启停�
 `159ccd47a320f3a7bd0289d07366d422211895a1`，保留 MIT 许可、来源 Notice、全部渐进披露参考与 Rovai
 展示元数据；Core 构建时确定性枚举并嵌入 84 个文件，应用启动不访问网络。
 
+本版本的 Renderer 同时把用户与 Agent 普通消息统一到同一开放阅读平面，并在 2K 宽屏下使用
+“叙述约 76ch、代码与表格最多 930px”的双宽度体系。身份继续由头像、名称、Runtime、时间和 A2A
+metadata 表达；不新增 Agent 默认色、消息底色或领域分组，Task、Approval、AgentRun、Composer 与
+Inspector 的功能边界不变。
+
 真实 Copilot 请求复盘同时收敛三项直接影响 v0.58 验收可读性与恢复体验的缺陷：
 
 - Session Charter 明确 `explicit_send_only` 的公共输出义务，但 Charter 文案变化不触发 Native
@@ -50,6 +55,8 @@ Skill 一次性补齐缺失分组，同时保留当前 Revision 与显式启停�
   每个 AgentRun 唯一的自然语言工作指令，`purpose` 只保留为审计描述；
 - Canonical Runtime Activity 合并保留 started 事件中已报告的 ACP kind/title，稀疏 terminal update
   只推进 phase/outcome；
+- Codex `commandExecution.title` 为空时，Core 使用 app-server 结构化 `commandActions` 生成有界
+  presentation hint；file change 同样使用 `changes` 投影文件名或数量，不再全部显示固定 domain hint；
 - “停止当前执行”只取消拥有非终态 AgentRun 的 Turn，不再顺带取消仅等待人工重试的历史 Turn。
 - Skill 启停提交与可能较慢的投递文件对账解耦，设置页只原位更新当前行；开关自身显示
   “已启用 / 已停用”，不再与独立状态标签重复。
@@ -72,8 +79,8 @@ Skill 一次性补齐缺失分组，同时保留当前 Revision 与显式启停�
 | ADR | 已更新 | ADR-0156 局部替代永久 fingerprint 条款；ADR-0157 局部替代 ADR-0137 的旧 instruction ownership 条款；ADR-0158 局部替代 Skill 默认不分组条款；ADR-0159 完整替代 ADR-0150 并把固定上游 Revision 的 `tasteful-ui` 加入官方集合 |
 | Contracts | 已更新 | ADR-0157 与 Durable Task v3 删除 execution request、AgentRun persistence/read model 的 `expectedOutput` clean break；不增加 Charter 版本轴；Skill wire shape 不变 |
 | Architecture | 已更新 | Built-in Tool Runtime 增加 bounded rebind 与显式公共输出义务，Charter 文案变化不触发 Session 轮换；Skill projection 结构不变，默认策略由 ADR-0158 约束 |
-| UI | 已更新 | Stop 命令目标与按钮可见性统一按非终态 AgentRun 所属 Turn 计算；Skill 设置明确全九组默认，并以单一状态化 Switch 和行级提交反馈替代重复标签与整表刷新 |
-| Runtime Activity | 已更新 | Registry 明确稀疏 terminal lifecycle update 不得降级已报告的结构化分类和标题 |
+| UI | 已更新 | Stop 命令目标与按钮可见性统一按非终态 AgentRun 所属 Turn 计算；Skill 设置明确全九组默认并使用行级反馈；会话普通正文统一为开放平面，2K 下分离叙述与工件宽度 |
+| Runtime Activity | 已更新 | Registry 明确稀疏 terminal lifecycle update 不得降级已报告的结构化分类和标题，并补齐 Codex `commandActions` / `changes` presentation mapping |
 | Runtime compatibility | 确认无需更新 | 不改变支持的 Runtime、最低版本或已验证能力结论 |
 | Documentation routing | 已更新 | CURRENT 的 Skills/MCP 主题新增 ADR-0158 与 ADR-0159，领域术语同步默认分组和 `tasteful-ui` 来源边界 |
 | Root README | 确认无需更新 | 项目定位和常青能力不变，根 README 不记录版本局部恢复机制 |

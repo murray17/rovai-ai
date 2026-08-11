@@ -1,6 +1,7 @@
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
+import { assertUserDataIsIsolated } from './lib/dev-desktop.mjs'
 
 const appPath = process.argv[2]
 const outputPrefix = process.argv[3] ?? '/tmp/rovai-desktop'
@@ -19,6 +20,7 @@ const targetRuntimeLabel = targetRuntimeKind && ({
   'antigravity-app': 'Antigravity App'
 })[targetRuntimeKind]
 if (!appPath) throw new Error('Usage: node scripts/capture-desktop.mjs <Rovai-ai.app> [output-prefix]')
+const userDataDirectory = assertUserDataIsIsolated(process.env.ROVAI_CAPTURE_USER_DATA_DIR)
 if (targetRuntimeKind && !targetRuntimeLabel) throw new Error(`Unknown ROVAI_CAPTURE_RUNTIME_KIND: ${targetRuntimeKind}`)
 if (captureTheme && !['system', 'day', 'night'].includes(captureTheme)) {
   throw new Error(`Unknown ROVAI_CAPTURE_THEME: ${captureTheme}`)
@@ -28,15 +30,13 @@ if (!Number.isFinite(captureScale) || captureScale < 1) {
 }
 
 const executable = join(appPath, 'Contents', 'MacOS', 'Rovai-ai')
-const launchArguments = [`--remote-debugging-port=${port}`]
-if (process.env.ROVAI_CAPTURE_USER_DATA_DIR) {
-  launchArguments.push(`--user-data-dir=${process.env.ROVAI_CAPTURE_USER_DATA_DIR}`)
-}
+const launchArguments = [
+  `--remote-debugging-port=${port}`,
+  `--user-data-dir=${userDataDirectory}`
+]
 const app = spawn(executable, launchArguments, {
   stdio: ['ignore', 'ignore', 'pipe'],
-  env: process.env.ROVAI_CAPTURE_USER_DATA_DIR
-    ? { ...process.env, ROVAI_ALLOW_ISOLATED_INSTANCE: '1' }
-    : process.env
+  env: { ...process.env, ROVAI_ALLOW_ISOLATED_INSTANCE: '1' }
 })
 const stderr = []
 app.stderr.on('data', (chunk) => stderr.push(String(chunk)))

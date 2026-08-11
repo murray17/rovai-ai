@@ -390,6 +390,7 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
                     "status": item.get("status"),
                     "title": item.get("title"),
                     "command": item.get("command"),
+                    "commandActions": public_command_actions(item),
                     "cwd": item.get("cwd"),
                     "durationMs": item.get("durationMs"),
                     "exitCode": item.get("exitCode"),
@@ -405,6 +406,24 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
         }
         _ => Value::Null,
     }
+}
+
+fn public_command_actions(item: &Value) -> Value {
+    let Some(actions) = item.get("commandActions").and_then(Value::as_array) else {
+        return Value::Null;
+    };
+    Value::Array(
+        actions
+            .iter()
+            .map(|action| {
+                serde_json::json!({
+                    "type": action.get("type"),
+                    "name": action.get("name"),
+                    "path": action.get("path"),
+                })
+            })
+            .collect(),
+    )
 }
 
 fn phase_from_payload(payload: &Value) -> &'static str {
@@ -755,6 +774,13 @@ mod tests {
                     "type": "commandExecution",
                     "status": "completed",
                     "command": "pnpm test",
+                    "commandActions": [{
+                        "type": "read",
+                        "name": "test",
+                        "path": "/repo/package.json",
+                        "command": "cat /repo/package.json",
+                        "providerPrivateState": "must-not-persist"
+                    }],
                     "aggregatedOutput": "99 tests passed",
                     "providerPrivateState": "must-not-persist"
                 }
@@ -763,6 +789,12 @@ mod tests {
         let encoded = serde_json::to_string(&normalized).unwrap();
         assert!(encoded.contains("pnpm test"));
         assert!(encoded.contains("99 tests passed"));
+        assert_eq!(normalized["item"]["commandActions"][0]["type"], "read");
+        assert_eq!(
+            normalized["item"]["commandActions"][0]["path"],
+            "/repo/package.json"
+        );
+        assert!(normalized["item"]["commandActions"][0]["command"].is_null());
         assert!(!encoded.contains("hiddenProviderPacket"));
         assert!(!encoded.contains("providerPrivateState"));
         assert!(!encoded.contains("internal-thread"));

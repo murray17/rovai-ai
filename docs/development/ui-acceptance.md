@@ -23,7 +23,8 @@ ROVAI_APP="$(pwd)/dist/mac-arm64/Rovai-ai.app"
 
 ## 隔离 `userData`
 
-所有会创建 Camp、修改设置、写 SQLite 或执行删除的桌面验收都必须使用隔离目录：
+所有桌面验收都必须使用显式隔离目录；`capture-desktop.mjs` 缺少该目录或解析到日常数据目录时会
+在启动 App 前拒绝执行：
 
 ```bash
 FIXTURE_ROOT="$(mktemp -d)"
@@ -31,8 +32,7 @@ ROVAI_CAPTURE_USER_DATA_DIR="$FIXTURE_ROOT/user-data" \
 node scripts/capture-desktop.mjs "$ROVAI_APP" "$FIXTURE_ROOT/capture"
 ```
 
-不要省略 `ROVAI_CAPTURE_USER_DATA_DIR` 后对日常 App 执行带写入、发送、管理或删除参数
-的 capture 命令。
+不要省略 `ROVAI_CAPTURE_USER_DATA_DIR`，也不要把它指向日常目录或其符号链接别名。
 
 打包 App 默认仍只允许一个实例。仓库验收脚本在收到独立
 `ROVAI_CAPTURE_USER_DATA_DIR` 后，会为子进程设置
@@ -110,8 +110,9 @@ pnpm accept:runtime-activity-ui
   时间线；Task/停止结果入口按 Agent 打开过程，顶栏不存在执行入口；
 - Drawer 不提供 Agent 或 Run 级 Stop/Cancel/Retry；唯一 CampTurn Stop、Approval Dock 与 Composer 在
   `2560×1440`、`1440×920`、`1040×700`、200% zoom 和 reduced motion 下均可见、可键盘到达且不互相遮挡；
-- `2560×1440` 下 `.composer-box` 接近 1040px，`Enter` keycap 位于发送按钮紧邻左侧；所有 Agent
-  最终正文使用同一开放阅读表面，身份色只进入头像、名称或身份点；
+- `2560×1440` 下 `.composer-box` 与会话工作列都接近 1040px，`Enter` keycap 位于发送按钮紧邻
+  左侧；用户与所有 Agent 普通正文使用同一开放阅读表面，叙述保持约 76ch，代码、表格、Task
+  和审批等现有结构化内容才可进入更宽工件通道，身份色只进入头像、名称或身份点；
 - Canonical Activity 未报告工具时仍不补造 Tool 行；同一 Runtime 真实报告的 Tool 名称和 source 继续
   与 Runtime evidence 一致。
 
@@ -192,7 +193,7 @@ Composer 与历史消息的人物信息卡截图是此交互的必留视觉证�
 | `scripts/capture-mcp.mjs` | MCP 设置完整操作链 | 脚本创建临时 Home、来源配置和 `userData` |
 | `scripts/capture-skills.mjs` | Skill 页面截图 | 必须设置 `ROVAI_CAPTURE_USER_DATA_DIR` |
 | `scripts/capture-camp-inspectors.mjs` | 已有 Camp 的 Inspector 截图 | 必须设置 `ROVAI_CAPTURE_USER_DATA_DIR` |
-| `scripts/capture-desktop.mjs` | 通用页面、Runtime 和 Camp 流程 | 写入场景必须设置隔离 `userData` |
+| `scripts/capture-desktop.mjs` | 通用页面、Runtime 和 Camp 流程 | 必须设置隔离 `userData`；省略或指向日常目录即拒绝启动 |
 
 ## 从明确来源创建只读隔离副本
 

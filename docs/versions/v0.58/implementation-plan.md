@@ -38,6 +38,7 @@ last_updated: 2026-08-11
 - [x] ADR-0157 删除未进入 Runtime Context 的 `expectedOutput` IPC、持久化与读模型字段；
 - [x] Migration 73 原位删除 `agent_run.expected_output` 并保留历史 Run 其余事实；
 - [x] Canonical Activity lifecycle merge 保留 ACP started kind/title，稀疏 terminal 只更新状态；
+- [x] Codex 保留 app-server `commandActions` 的安全结构字段，并在 `title` 为空时生成有界 command/file presentation hint；
 - [x] Stop 只选择拥有 queued/running/waiting AgentRun 的 running/waiting Turn；
 - [x] 增加 Charter、Canonical lifecycle 和 Renderer cancellation 回归测试。
 
@@ -59,13 +60,26 @@ last_updated: 2026-08-11
 - [x] 新安装 `tasteful-ui` 复用内置 Skill 的默认启用、全九组分配、不可变 Revision 和用户修改保持语义；
 - [x] Core、Skill smoke、Renderer acceptance、领域词汇与 ADR 官方集合清单同步为六个。
 
+## Checkpoint 6：会话叙述与工件双宽度
+
+- [x] 用户消息移除独占 `brand-soft` 气泡，与 Agent 普通正文共用开放阅读平面；
+- [x] 同一作者的相邻真实消息只收紧间距，不隐藏 metadata 或创建回合模型；
+- [x] `min-width: 1800px` 时会话工作列扩展至 1040px，叙述保持约 76ch，代码与表格最多使用 930px；
+- [x] Hover、Focus、Copy、A2A、Task、Approval、AgentRun、Composer 与 Inspector 边界保持不变；
+- [x] 用户、Agent 与 A2A 消息的 Copy 统一锚定消息内容列右上角，不跟随正文或 footer 尺寸漂移；
+- [x] 完成 packaged App 的 1440×920、2560×1440、1040×700 会话视觉验收。
+
 已完成自动化验证：
 
-- `cargo test --workspace`：Library 317、CLI 10、Core binary 54 通过，3 个既有手工 Runtime smoke ignored；
-- `pnpm test`：文档治理 21、Vitest 260、Node qualification/benchmark 150 通过；
+- `cargo test --workspace`：Library 320、CLI 10、Core binary 54 通过，3 个既有手工 Runtime smoke ignored；
+- `pnpm test`：文档治理 21、Vitest 253、Node qualification/benchmark 147 通过；
+- `cargo test -p rovai-core codex_ -- --nocapture`：Codex structured presentation、Adapter 与 MCP fixture 通过；
 - `cargo test -p rovai-core rebind -- --nocapture`：2 个新增 rebind 测试通过；
 - `cargo test -p rovai-core db::tests::v72_backfills_initial_runtime_evidence_without_overwriting_existing_values -- --nocapture`：Migration 72 回填测试通过；
 - `cargo test -p rovai-core db::tests::v73_removes_expected_output_without_losing_agent_runs -- --nocapture`：Migration 73 删列与历史 Run 保留测试通过；
+- `pnpm exec vitest run apps/desktop/src/renderer/src/theme-tokens.test.ts apps/desktop/src/renderer/src/App.test.ts`：2 个文件、79 项 Renderer 契约通过；
+- `pnpm package:mac` 与 `pnpm accept:runtime-activity-ui`：签名 App 验收通过；2560×1440 下会话列 1040px、叙述 622.31px、Composer 1040px，1040×700 无整页或会话列横向溢出；
+- `pnpm accept:member-lifecycle-ui`：用户消息透明开放表面、原生文本选择、Copy、Mention、成员页返回与 200% zoom/reduced motion 回归通过；
 - `cargo test -p rovai-core official_skills_default_to_all_groups_and_preserve_user_changes -- --nocapture`：内置 Skill 初始九组与后续用户修改保持通过；
 - `cargo test -p rovai-core imports_default_to_all_groups_and_updates_preserve_user_changes -- --nocapture`：Imported Skill 初始九组与 Revision 更新保持通过；
 - `cargo test -p rovai-core v74_assigns_every_active_skill_to_all_runtime_groups_once -- --nocapture`：Migration 74 对内置与 Imported Skill 的一次性回填通过；

@@ -23,6 +23,10 @@ last_updated: 2026-08-11
 `dist/`、`out/` 或 `resources/` 运行。只把 `.app` 复制到另一个目录仍不足以完成隔离：开发和验收
 进程还必须使用独立 `userData`。
 
+无论通道如何，Core 都只接受显式绝对 `--data-dir`。它会在打开 SQLite 和执行 startup recovery
+之前独占该目录的 `.rovai-core-instance.lock`；第二个 Core 必须拒绝启动且不得修改数据库。该文件
+会保留供诊断使用，进程退出时释放的是操作系统锁，不要把“删除锁文件”当作并发修复手段。
+
 ## AI 必读规则
 
 任何 AI Agent 在启动 Electron、Core 或真实 Runtime 前必须完成以下判断：
@@ -30,7 +34,8 @@ last_updated: 2026-08-11
 1. 先读取根目录 `AGENTS.md`、[开发者指南](README.md)和本文；
 2. 执行 `git status --short`，保留不属于当前任务的并行改动；
 3. 明确本次属于“开发版”“打包产物”还是“自动验收”，并在更新中写出目标通道；
-4. 在命令执行前解析精确 `userData`；没有独立目录证据时不得启动 App/Core；
+4. 在命令执行前解析精确、绝对的 `userData`；没有独立目录证据时不得启动 App/Core；Core 自身的
+   独占锁是最终防线，不替代通道选择；
 5. 真实日常数据默认只读。诊断不授权启动第二个 Core、写 SQLite、取消 Run、Retry 或发送消息；
 6. 不得为了方便直接调用 `electron-vite dev`、直接打开 `dist/.../Rovai-ai.app`，或让
    `rovai-core --data-dir` 指向日常目录；
@@ -50,7 +55,7 @@ pnpm dev
 - 为当前仓库解析稳定、独立的开发 `userData` 并在启动日志中打印精确路径；
 - 同时传入 `--user-data-dir` 与 `ROVAI_ALLOW_ISOLATED_INSTANCE=1`；
 - 拒绝已知的日常 Rovai/历史 Lumen 数据目录及其子目录；
-- 使用锁文件拒绝两个开发进程共享同一 `userData`。
+- 使用开发启动锁拒绝两个 `pnpm dev` 共享同一 `userData`；Core 再用进程级锁封住所有其他入口。
 
 只检查解析结果而不启动 App：
 
@@ -118,6 +123,9 @@ AI Agent 不得把 `open "$(pwd)/dist/mac-arm64/Rovai-ai.app"` 当作打包验�
 
 发生事故后不要盲目 Retry。先确认 Runtime 是否可能已经接收输入、检查目标工作区副作用，再决定创建
 successor Run、人工恢复或只保留诊断证据。
+
+使用包含 Core 独占锁的新构建时，第二个 Core 会在数据库恢复前失败；若仍看到它写入
+`runtime.v2_recovery_prepared`，先核对实际运行二进制是否来自旧构建，再继续诊断。
 
 ## 最小验证矩阵
 

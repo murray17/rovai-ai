@@ -2366,6 +2366,32 @@ describe('task event projections', () => {
     })
   })
 
+  it('uses the Core Codex presentation hint without parsing the command in Renderer', () => {
+    const progress = buildLiveExecutionProgress([{
+      id: 'codex-command', agentRunId: 'run-codex', eventType: 'activity.started',
+      payload: {
+        item: {
+          id: 'command-1', type: 'commandExecution', status: 'inProgress',
+          command: '/bin/zsh -lc "sed -n 1,120p /repo/docs/README.md"'
+        }
+      },
+      canonical: canonicalActivity('command-1', {
+        activityDomain: 'shell', semanticKind: 'shell.execute',
+        presentationHint: '读取 README.md', phase: 'started', outcome: 'unknown'
+      }),
+      createdAt: '2026-08-11T00:00:00Z'
+    }], 'run-codex')
+
+    expect(progress.items[0]).toMatchObject({
+      kind: 'tool',
+      step: {
+        title: '读取 README.md',
+        detail: '/bin/zsh -lc "sed -n 1,120p /repo/docs/README.md"',
+        activityDomain: 'shell'
+      }
+    })
+  })
+
   it('selects one terminal full-content entry per logical Tool item', () => {
     const evidence: AgentRunExecutionEvidenceView[] = [{
       id: 'command-started', agentRunId: 'run-1', executionEpoch: 1, sequence: 1,

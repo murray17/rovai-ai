@@ -88,6 +88,7 @@ use rovai_core::{
         DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES, MaterializeContextRequest, PreparedContext,
         RuntimeInputDelivery, SkillExposurePreparation,
     },
+    core_data_dir_lock::CoreDataDirLock,
     db::Database,
     diagnostics::{
         DiagnosticCheck, DiagnosticGroup, DiagnosticStatus, DiagnosticsReport, aggregate_counts,
@@ -6998,6 +6999,7 @@ fn main() -> Result<()> {
 
 async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> Result<()> {
     let data_dir = parse_data_dir()?;
+    let _data_dir_lock = CoreDataDirLock::acquire(&data_dir)?;
     let mcp_config_path = parse_mcp_config_path()?;
     let mut database = Database::open(&data_dir)?;
     let compaction_detector_policies =
@@ -9475,20 +9477,29 @@ fn builtin_tool_rejection(
 }
 
 fn parse_data_dir() -> Result<PathBuf> {
-    let mut args = std::env::args().skip(1);
+    parse_data_dir_from(std::env::args().skip(1))
+}
+
+fn parse_data_dir_from(args: impl IntoIterator<Item = String>) -> Result<PathBuf> {
+    let mut args = args.into_iter();
+    let mut data_dir = None;
     while let Some(arg) = args.next() {
         if arg == "--data-dir" {
-            return args
+            let path = args
                 .next()
                 .map(PathBuf::from)
-                .context("--data-dir requires a path");
+                .context("--data-dir requires a path")?;
+            if !path.is_absolute() {
+                anyhow::bail!("--data-dir requires an absolute path");
+            }
+            if data_dir.replace(path).is_some() {
+                anyhow::bail!("--data-dir may be provided only once");
+            }
         }
     }
-    let root = dirs::data_local_dir().context("could not determine a local data directory")?;
-    Ok(rovai_core::brand::preferred_or_existing_legacy_paths(
-        root.join(rovai_core::brand::PRODUCT_NAME),
-        rovai_core::brand::LEGACY_PRODUCT_NAMES.map(|name| root.join(name)),
-    ))
+    data_dir.context(
+        "rovai-core requires an explicit absolute --data-dir; refusing to infer daily userData",
+    )
 }
 
 fn parse_mcp_config_path() -> Result<Option<PathBuf>> {
@@ -9511,6 +9522,44 @@ fn parse_mcp_config_path() -> Result<Option<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn core_data_directory_must_be_explicit_absolute_and_unique() {
+        let directory = std::env::temp_dir().join("rovai-core-explicit-data");
+        assert_eq!(
+            parse_data_dir_from(vec![
+                "--data-dir".to_string(),
+                directory.to_string_lossy().into_owned(),
+            ])
+            .unwrap(),
+            directory
+        );
+        assert!(
+            format!("{:#}", parse_data_dir_from(Vec::new()).unwrap_err())
+                .contains("refusing to infer daily userData")
+        );
+        assert!(
+            format!(
+                "{:#}",
+                parse_data_dir_from(vec!["--data-dir".to_string(), "relative-data".to_string(),])
+                    .unwrap_err()
+            )
+            .contains("absolute path")
+        );
+        assert!(
+            format!(
+                "{:#}",
+                parse_data_dir_from(vec![
+                    "--data-dir".to_string(),
+                    directory.to_string_lossy().into_owned(),
+                    "--data-dir".to_string(),
+                    directory.to_string_lossy().into_owned(),
+                ])
+                .unwrap_err()
+            )
+            .contains("only once")
+        );
+    }
 
     #[test]
     fn provider_tool_call_ids_are_scoped_to_the_authenticated_agent_run() {

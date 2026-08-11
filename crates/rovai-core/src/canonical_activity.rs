@@ -131,10 +131,11 @@ pub fn classify_evidence(
     } else {
         "fine_grained"
     };
-    let explicit_presentation_hint =
-        string_field(payload, "title").or_else(|| string_field(item, "title"));
-    let presentation_hint_is_explicit = explicit_presentation_hint.is_some();
-    let presentation_hint = explicit_presentation_hint.or_else(|| {
+    let observed_presentation_hint = string_field(payload, "title")
+        .or_else(|| string_field(item, "title"))
+        .or_else(|| runtime_activity_mapping::structured_presentation_hint(item_type, item));
+    let presentation_hint_is_explicit = observed_presentation_hint.is_some();
+    let presentation_hint = observed_presentation_hint.or_else(|| {
         runtime_activity_mapping::default_presentation_hint(
             &activity_domain,
             semantic_kind.as_deref(),
@@ -397,6 +398,82 @@ mod tests {
             vec!["evidence-1", "evidence-2"]
         );
         assert_eq!(projection.revision, 2);
+    }
+
+    #[test]
+    fn codex_structured_command_actions_provide_a_readable_title() {
+        let started = classify_evidence(
+            "run-1",
+            1,
+            "evidence-1",
+            "activity.started",
+            "command",
+            "started",
+            &json!({
+                "item": {
+                    "id": "item-1",
+                    "type": "commandExecution",
+                    "status": "inProgress",
+                    "title": null,
+                    "commandActions": [{
+                        "type": "read",
+                        "name": "cat",
+                        "path": "/repo/docs/README.md"
+                    }]
+                }
+            }),
+        );
+        let completed = classify_evidence(
+            "run-1",
+            1,
+            "evidence-2",
+            "activity.completed",
+            "command",
+            "completed",
+            &json!({
+                "item": {
+                    "id": "item-1",
+                    "type": "commandExecution",
+                    "status": "completed",
+                    "title": null
+                }
+            }),
+        );
+        assert_eq!(started.activity_domain, "shell");
+        assert_eq!(started.semantic_kind.as_deref(), Some("shell.execute"));
+        assert_eq!(started.presentation_hint.as_deref(), Some("读取 README.md"));
+        assert!(started.presentation_hint_is_explicit);
+        let projection = new_projection(started, "evidence-1", 1).unwrap();
+        let projection = merge_projection(projection, completed, "evidence-2", 2);
+        assert_eq!(
+            projection.presentation_hint.as_deref(),
+            Some("读取 README.md")
+        );
+        assert_eq!(projection.phase, "terminal");
+        assert_eq!(projection.outcome, "succeeded");
+
+        let unknown = classify_evidence(
+            "run-1",
+            1,
+            "evidence-3",
+            "activity.started",
+            "command",
+            "started",
+            &json!({
+                "item": {
+                    "id": "item-2",
+                    "type": "commandExecution",
+                    "status": "inProgress",
+                    "title": null,
+                    "commandActions": [{"type": "unknown"}]
+                }
+            }),
+        );
+        assert_eq!(
+            unknown.presentation_hint.as_deref(),
+            Some("执行 Shell 命令")
+        );
+        assert!(!unknown.presentation_hint_is_explicit);
     }
 
     #[test]

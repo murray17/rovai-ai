@@ -18,6 +18,15 @@ pnpm core:build:debug
 运行时，重新复制二进制不会替换现有 Core 进程。不要改用裸 `electron-vite dev`；标准入口还负责
 隔离开发 `userData` 和拒绝重复开发实例。
 
+## Core 报告数据目录已被占用
+
+这表示另一个 Core 已经持有相同 `--data-dir` 的操作系统独占锁。新 Core 会在打开 SQLite 和执行
+startup recovery 前退出，因此不要删除 `.rovai-core-instance.lock`，也不要反复重启绕过失败。
+
+先只读检查报错中记录的 PID、可执行文件路径和两个 App 的 `--user-data-dir`。日常安装版保留原目录；
+开发、打包验收或截图进程改用新建的隔离目录。确认原拥有者已经退出后，同一目录可以直接重新启动，
+不需要删除保留的锁文件。
+
 ## 打包后仍看到旧行为
 
 确认打包命令成功结束，并使用独立 `userData` 启动新产物：
@@ -45,6 +54,9 @@ ROVAI_ALLOW_ISOLATED_INSTANCE=1 \
 进程和事件；不要为读取数据再启动一份 Core。若输入已经 `prepared` 但没有 accepted ACK，Runtime
 可能已经执行，不能用普通 Retry 假定“未投递”。先检查 Native Session、目标工作区副作用和事件时序，
 再按恢复合同处理。
+
+新版本若检测到第二个 Core，会在 recovery 之前拒绝启动；已经产生上述事件时，还应确认实际运行的
+App/Core 是否为旧构建，以及冲突 Core 是否曾在升级前打开过该目录。
 
 ## Runtime 未找到或未 Ready
 
