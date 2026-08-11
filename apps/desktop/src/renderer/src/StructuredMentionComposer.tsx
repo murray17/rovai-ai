@@ -19,8 +19,8 @@ import {
 import {
   deleteStructuredBackward,
   deleteStructuredForward,
-  insertAllMembersMention,
-  insertMemberMention,
+  insertAllMembersMentionWithTrailingSpace,
+  insertMemberMentionWithTrailingSpace,
   insertStructuredText,
   normalizeStructuredMentionContent,
   pasteStructuredPlainText,
@@ -304,8 +304,8 @@ export function StructuredMentionComposer({
       selection: { anchor: mentionQuery.start, focus: mentionQuery.end }
     }
     const next = option.kind === 'all_members'
-      ? insertAllMembersMention(state)
-      : insertMemberMention(state, option.member.agentId)
+      ? insertAllMembersMentionWithTrailingSpace(state)
+      : insertMemberMentionWithTrailingSpace(state, option.member.agentId)
     setMentionQuery(null)
     emitState(next)
     window.requestAnimationFrame(() => editorRef.current?.focus())

@@ -3,7 +3,9 @@ import {
   deleteStructuredBackward,
   deleteStructuredForward,
   insertAllMembersMention,
+  insertAllMembersMentionWithTrailingSpace,
   insertMemberMention,
+  insertMemberMentionWithTrailingSpace,
   insertStructuredText,
   normalizeStructuredMentionContent,
   pasteStructuredPlainText,
@@ -91,6 +93,44 @@ describe('structured mention editing model', () => {
     })).toEqual({
       content: [{ kind: 'text', text: '通知' }, allMembers()],
       selection: { anchor: 3, focus: 3 }
+    })
+  })
+
+  it('adds a writable space after a selected candidate without duplicating existing whitespace', () => {
+    expect(insertMemberMentionWithTrailingSpace({
+      content: [{ kind: 'text', text: '请@洛' }],
+      selection: { anchor: 1, focus: 3 }
+    }, 'agent-a')).toEqual({
+      content: [
+        { kind: 'text', text: '请' },
+        member('agent-a'),
+        { kind: 'text', text: ' ' }
+      ],
+      selection: { anchor: 3, focus: 3 }
+    })
+
+    expect(insertMemberMentionWithTrailingSpace({
+      content: [{ kind: 'text', text: '请@洛 继续' }],
+      selection: { anchor: 1, focus: 3 }
+    }, 'agent-a')).toEqual({
+      content: [
+        { kind: 'text', text: '请' },
+        member('agent-a'),
+        { kind: 'text', text: ' 继续' }
+      ],
+      selection: { anchor: 3, focus: 3 }
+    })
+
+    expect(insertAllMembersMentionWithTrailingSpace({
+      content: [{ kind: 'text', text: '通知@所有\n下一行' }],
+      selection: { anchor: 2, focus: 5 }
+    })).toEqual({
+      content: [
+        { kind: 'text', text: '通知' },
+        allMembers(),
+        { kind: 'text', text: '\n下一行' }
+      ],
+      selection: { anchor: 4, focus: 4 }
     })
   })
 

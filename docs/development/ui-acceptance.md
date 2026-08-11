@@ -147,6 +147,8 @@ pnpm accept:structured-mentions-ui
 
 - Composer Mention 是默认无底色的蓝色、不可拆分原子行内文字，耐久 Draft 与发送后的
   Structured Content 保持同一稳定身份；
+- 从队员或所有队员候选中选中 Mention 后自动补一个普通空格，光标位于该空格之后；
+  替换范围后已有空白时不重复插入，模型单测覆盖复用与光标位置；
 - 一条消息在同一 CampTurn 边界为三位唯一收件人创建各自的 AgentRun；
 - Composer 和已发送 Member Mention 具有同一飞书式紧凑样式：`display: inline`、透明背景、
   无边框、`0 1px` 内边距和 3px 圆角；仅 Hover、Focus 或打开态显示轻量蓝色反馈；

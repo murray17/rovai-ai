@@ -114,6 +114,30 @@ export function insertAllMembersMention(
   return replaceStructuredSelection(state, [{ kind: 'all_members_mention' }])
 }
 
+/**
+ * Candidate selection keeps a writable gap after the atomic Mention. If the
+ * replaced query already has whitespace on its right, reuse that whitespace
+ * and move the caret across it instead of inserting a duplicate.
+ */
+export function insertMemberMentionWithTrailingSpace(
+  state: StructuredMentionEditorState,
+  agentId: string
+): StructuredMentionEditorState {
+  if (!agentId.trim()) throw new Error('Member Mention requires an Agent ID')
+  return replaceMentionSelectionWithTrailingSpace(state, {
+    kind: 'member_mention',
+    agentId
+  })
+}
+
+export function insertAllMembersMentionWithTrailingSpace(
+  state: StructuredMentionEditorState
+): StructuredMentionEditorState {
+  return replaceMentionSelectionWithTrailingSpace(state, {
+    kind: 'all_members_mention'
+  })
+}
+
 export function deleteStructuredBackward(
   state: StructuredMentionEditorState
 ): StructuredMentionEditorState {
@@ -210,6 +234,52 @@ function normalizeEditorState(
       focus: clampOffset(state.selection.focus, length)
     }
   }
+}
+
+function replaceMentionSelectionWithTrailingSpace(
+  state: StructuredMentionEditorState,
+  mention: Exclude<StructuredMentionSegment, { kind: 'text' }>
+): StructuredMentionEditorState {
+  const content = normalizeStructuredMentionContent(state.content)
+  const length = structuredMentionContentLength(content)
+  const replacementEnd = Math.max(
+    clampOffset(state.selection.anchor, length),
+    clampOffset(state.selection.focus, length)
+  )
+  const followingWhitespaceLength = structuredWhitespaceLengthAt(content, replacementEnd)
+  if (followingWhitespaceLength === 0) {
+    return replaceStructuredSelection(state, [mention, { kind: 'text', text: ' ' }])
+  }
+
+  const next = replaceStructuredSelection(state, [mention])
+  const caret = Math.min(
+    structuredMentionContentLength(next.content),
+    next.selection.anchor + followingWhitespaceLength
+  )
+  return {
+    content: next.content,
+    selection: { anchor: caret, focus: caret }
+  }
+}
+
+function structuredWhitespaceLengthAt(
+  content: readonly StructuredMentionSegment[],
+  offset: number
+): number {
+  let cursor = 0
+  for (const segment of content) {
+    const segmentLength = segment.kind === 'text' ? segment.text.length : 1
+    const segmentEnd = cursor + segmentLength
+    if (offset < segmentEnd) {
+      if (segment.kind !== 'text') return 0
+      const remaining = segment.text.slice(offset - cursor)
+      if (remaining.startsWith('\r\n')) return 2
+      const firstCharacter = remaining[0]
+      return firstCharacter && /^\s$/u.test(firstCharacter) ? firstCharacter.length : 0
+    }
+    cursor = segmentEnd
+  }
+  return 0
 }
 
 function sliceStructuredMentionContent(

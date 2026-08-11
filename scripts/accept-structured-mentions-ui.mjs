@@ -47,9 +47,9 @@ const expectedContent = [
   { kind: 'member_mention', agentId: 'agent_2' },
   { kind: 'text', text: ' ' },
   { kind: 'member_mention', agentId: 'agent_3' },
-  { kind: 'text', text: '，请给出结论。' }
+  { kind: 'text', text: ' ，请给出结论。' }
 ]
-const expectedBody = '请同时检查这条消息：@小狐狸 @小河狸 @咕咕，请给出结论。'
+const expectedBody = '请同时检查这条消息：@小狐狸 @小河狸 @咕咕 ，请给出结论。'
 const acceptanceExecutableFingerprint = `sha256:${createHash('sha256')
   .update(await readFile(acceptanceExecutablePath))
   .digest('hex')}`
@@ -232,16 +232,27 @@ try {
       candidateMenuCaptured = true
     }
     await mouseClickMentionOption(running.cdp, member.displayName)
-    expectedEditorText += `@${member.displayName}`
+    expectedEditorText += `@${member.displayName} `
     await waitForExpression(running.cdp,
       `document.querySelectorAll('.structured-mention-token.member-mention').length === ${index + 1}
         && document.querySelector('#camp-message')?.textContent === ${JSON.stringify(expectedEditorText)}`)
     await waitForExpression(running.cdp, `document.activeElement?.id === 'camp-message'`)
-    const followingText = expectedContent[(index * 2) + 2].text
-    await running.cdp.send('Input.insertText', { text: followingText })
-    expectedEditorText += followingText
-    await waitForExpression(running.cdp,
-      `document.querySelector('#camp-message')?.textContent === ${JSON.stringify(expectedEditorText)}`)
+    await waitForExpression(running.cdp, `(() => {
+      const editor = document.querySelector('#camp-message')
+      const selection = window.getSelection()
+      if (!editor || !selection?.isCollapsed || !selection.anchorNode) return false
+      const range = document.createRange()
+      range.selectNodeContents(editor)
+      range.setEnd(selection.anchorNode, selection.anchorOffset)
+      return range.toString().length === (editor.textContent ?? '').length
+    })()`)
+    if (index === targetMembers.length - 1) {
+      const followingText = '，请给出结论。'
+      await running.cdp.send('Input.insertText', { text: followingText })
+      expectedEditorText += followingText
+      await waitForExpression(running.cdp,
+        `document.querySelector('#camp-message')?.textContent === ${JSON.stringify(expectedEditorText)}`)
+    }
   }
 
   await running.cdp.send('Input.dispatchMouseEvent', {
