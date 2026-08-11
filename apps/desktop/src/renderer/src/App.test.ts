@@ -46,7 +46,11 @@ import {
   campConversationTimeline,
   campInspectorMembers,
   campMemberIsLeadEligible,
+  clampExecutionDrawerHeight,
+  defaultExecutionDrawerMaxHeight,
   emptyCampRuntimeSummary,
+  executionDrawerHeightBounds,
+  executionDrawerHeightFromStoredValue,
   executionDrawerIsNearBottom,
   executionDisclosureOpenAfterActivity,
   executionDisclosureIsLiveOpen,
@@ -1690,6 +1694,15 @@ describe('task event projections', () => {
       .toBe(false)
     expect(executionDrawerIsNearBottom(648, 1_000, 320)).toBe(true)
     expect(executionDrawerIsNearBottom(647, 1_000, 320)).toBe(false)
+    expect(executionDrawerHeightBounds(600, 54, 920)).toEqual({ min: 160, max: 434 })
+    expect(executionDrawerHeightBounds(260, 54, 700)).toEqual({ min: 141, max: 141 })
+    expect(defaultExecutionDrawerMaxHeight(1_440, 920, { min: 160, max: 434 })).toBe(320)
+    expect(defaultExecutionDrawerMaxHeight(1_040, 700, { min: 160, max: 334 })).toBe(210)
+    expect(clampExecutionDrawerHeight(300, { min: 160, max: 280 })).toBe(280)
+    expect(clampExecutionDrawerHeight(120, { min: 160, max: 280 })).toBe(160)
+    expect(executionDrawerHeightFromStoredValue('312.4')).toBe(312)
+    expect(executionDrawerHeightFromStoredValue('47')).toBeNull()
+    expect(executionDrawerHeightFromStoredValue('not-a-height')).toBeNull()
 
     const markup = renderToStaticMarkup(createElement(CampWorkspace, {
       snapshot: groupedSnapshot,

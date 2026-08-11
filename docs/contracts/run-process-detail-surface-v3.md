@@ -70,6 +70,13 @@ focus trap。
 如果仍处于跟随状态，Run 的终态更新和最后一批输出只完成一次末尾定位，随后停止自动跟随。该机制不得
 滚动公共消息时间线，也不得用 `aria-live` 逐字播报 Runtime 流式内容。
 
+Drawer 顶边提供唯一的水平 resize separator。向上拖拽扩大、向下拖拽缩小；调整值只保存在当前 Main
+Window Session，不进入 Core、Camp、AgentRun 或持久偏好。切换 Agent、收起后重开或离开 Camp 再返回时
+沿用该会话值，Enter、Space 或双击 separator 恢复响应式默认高度。Renderer 必须根据当前会话列真实可用
+高度限制上下界，并始终为公共消息时间线、Agent 执行台、Approval Dock 与 Composer 留出可达空间；窗口
+缩小时只对显示高度作 clamp，不改写 Agent/Run 选择。调整高度时，正在 sticky-bottom 跟随的 Run 继续定位
+最新输出，手动上滚后仍保持原阅读位置。
+
 Task 的 Related execution 与停止结果的“结果待确认”都按 Agent 打开过程，不保留 Run-ID-only Drawer
 route/state。它们不会从 Task 或 CampTurn 推断新的过程成员关系。Camp Header 不再提供另一条执行入口。
 
@@ -103,6 +110,9 @@ Inspector 只保留：
 - Agent 执行台使用 `list` / `button` 语义；每个入口有队员、过程和状态的可读名称，selected 状态可访问；
 - Drawer 使用具名 `region`；视觉、Tab 与 DOM 顺序一致；不使用 `aria-live` 逐字播报 Runtime 流式日志，
   仅播报状态变化；
+- Drawer resize handle 使用可聚焦的水平 `separator` 和 `aria-valuemin / aria-valuemax / aria-valuenow`；
+  上/右方向键扩大、下/左方向键缩小，PageUp/PageDown 大步调整，Home/End 到达边界，Enter/Space
+  恢复默认；指针拖拽与键盘不得改变当前 AgentRun、抢走 Composer 焦点或触发执行命令；
 - 显式发送后的自动定位不得夺走 Composer 焦点；sticky-bottom 在手动上滚后暂停，不能与键盘阅读历史争夺
   滚动位置；
 - Inspector 使用完整 `tablist / tab / tabpanel` 语义和手动激活；Lead picker 使用可访问的单选菜单，

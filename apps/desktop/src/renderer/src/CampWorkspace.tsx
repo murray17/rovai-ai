@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type JSX, type RefObject } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type JSX, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
@@ -48,6 +48,14 @@ import { availableComposerSkillsForLead } from './composer-skill-picker'
 
 const NON_TERMINAL_RUNS = new Set(['queued', 'running', 'waiting'])
 const EXECUTION_EVIDENCE_PAGE_LIMIT = 1_000
+const EXECUTION_DRAWER_HEIGHT_STORAGE_KEY = 'rovai.execution-drawer-height.v1'
+const EXECUTION_DRAWER_HARD_MIN_HEIGHT = 48
+const EXECUTION_DRAWER_PREFERRED_MIN_HEIGHT = 160
+const EXECUTION_DRAWER_MAX_HEIGHT = 520
+const EXECUTION_DRAWER_MAX_VIEWPORT_RATIO = 0.6
+const EXECUTION_DRAWER_MIN_TIMELINE_HEIGHT = 112
+const EXECUTION_DRAWER_KEYBOARD_STEP = 24
+const EXECUTION_DRAWER_KEYBOARD_PAGE_STEP = 80
 export type CampInspectorTab = 'tasks' | 'members'
 
 export type AgentExecutionProcess = {
@@ -154,8 +162,99 @@ export function executionDrawerIsNearBottom(
   return scrollHeight - scrollTop - clientHeight <= threshold
 }
 
+export type ExecutionDrawerHeightBounds = {
+  min: number
+  max: number
+}
+
+export function executionDrawerHeightBounds(
+  timelinePaneHeight: number,
+  runPulseHeight: number,
+  viewportHeight: number
+): ExecutionDrawerHeightBounds {
+  const safePaneHeight = Math.max(0, timelinePaneHeight)
+  const safePulseHeight = Math.max(0, runPulseHeight)
+  const reservedTimelineHeight = Math.min(
+    EXECUTION_DRAWER_MIN_TIMELINE_HEIGHT,
+    Math.max(EXECUTION_DRAWER_HARD_MIN_HEIGHT, Math.floor(safePaneHeight * 0.25))
+  )
+  const availableHeight = Math.max(
+    EXECUTION_DRAWER_HARD_MIN_HEIGHT,
+    Math.floor(safePaneHeight - safePulseHeight - reservedTimelineHeight)
+  )
+  const viewportLimit = Math.max(
+    EXECUTION_DRAWER_HARD_MIN_HEIGHT,
+    Math.floor(Math.max(0, viewportHeight) * EXECUTION_DRAWER_MAX_VIEWPORT_RATIO)
+  )
+  const max = Math.max(
+    EXECUTION_DRAWER_HARD_MIN_HEIGHT,
+    Math.min(EXECUTION_DRAWER_MAX_HEIGHT, availableHeight, viewportLimit)
+  )
+  return {
+    min: Math.min(EXECUTION_DRAWER_PREFERRED_MIN_HEIGHT, max),
+    max
+  }
+}
+
+export function clampExecutionDrawerHeight(
+  height: number,
+  bounds: ExecutionDrawerHeightBounds
+): number {
+  return Math.min(bounds.max, Math.max(bounds.min, Math.round(height)))
+}
+
+export function defaultExecutionDrawerMaxHeight(
+  viewportWidth: number,
+  viewportHeight: number,
+  bounds: ExecutionDrawerHeightBounds
+): number {
+  const responsiveLimit = viewportWidth <= 1_040 && viewportHeight <= 760
+    ? 210
+    : viewportWidth <= 1_040
+      ? 270
+      : 320
+  return Math.max(
+    EXECUTION_DRAWER_HARD_MIN_HEIGHT,
+    Math.min(bounds.max, responsiveLimit, Math.floor(Math.max(0, viewportHeight) * 0.38))
+  )
+}
+
+export function executionDrawerHeightFromStoredValue(value: string | null): number | null {
+  if (value === null || value.trim() === '') return null
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return null
+  const rounded = Math.round(parsed)
+  return rounded >= EXECUTION_DRAWER_HARD_MIN_HEIGHT && rounded <= EXECUTION_DRAWER_MAX_HEIGHT
+    ? rounded
+    : null
+}
+
+function storedExecutionDrawerHeight(): number | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return executionDrawerHeightFromStoredValue(
+      window.sessionStorage.getItem(EXECUTION_DRAWER_HEIGHT_STORAGE_KEY)
+    )
+  } catch {
+    return null
+  }
+}
+
+function persistExecutionDrawerHeight(height: number | null): void {
+  if (typeof window === 'undefined') return
+  try {
+    if (height === null) {
+      window.sessionStorage.removeItem(EXECUTION_DRAWER_HEIGHT_STORAGE_KEY)
+    } else {
+      window.sessionStorage.setItem(EXECUTION_DRAWER_HEIGHT_STORAGE_KEY, String(height))
+    }
+  } catch {
+    // Session persistence is an enhancement; resizing remains usable if storage is unavailable.
+  }
+}
+
 function scrollExecutionDrawerToLatest(body: HTMLElement): void {
-  body.scrollTo({ top: body.scrollHeight, behavior: 'instant' })
+  body.scrollTop = body.scrollHeight
 }
 export type NotificationFocusTarget = {
   requestId: number
@@ -1663,6 +1762,16 @@ function ExecutionDrawer({
 }): JSX.Element {
   const drawerRef = useRef<HTMLElement>(null)
   const drawerBodyRef = useRef<HTMLDivElement>(null)
+  const resizeGestureRef = useRef<{
+    pointerId: number
+    startY: number
+    startHeight: number
+    moved: boolean
+  } | null>(null)
+  const [heightBounds, setHeightBounds] = useState<ExecutionDrawerHeightBounds | null>(null)
+  const [preferredHeight, setPreferredHeight] = useState<number | null>(storedExecutionDrawerHeight)
+  const [measuredHeight, setMeasuredHeight] = useState<number | null>(null)
+  const [resizing, setResizing] = useState(false)
   const processRef = useRef(process)
   processRef.current = process
   const resolvedFocusedRun = process.runs.find((run) => run.id === focusedRunId)
@@ -1682,6 +1791,142 @@ function ExecutionDrawer({
     followingLatestRef.current = following
     setFollowingLatestState((current) => current === following ? current : following)
   }
+  const appliedHeight = preferredHeight !== null && heightBounds
+    ? clampExecutionDrawerHeight(preferredHeight, heightBounds)
+    : null
+
+  const applyPreferredHeight = useCallback((height: number): void => {
+    const bounds = heightBounds ?? {
+      min: EXECUTION_DRAWER_HARD_MIN_HEIGHT,
+      max: EXECUTION_DRAWER_MAX_HEIGHT
+    }
+    const nextHeight = clampExecutionDrawerHeight(height, bounds)
+    setPreferredHeight(nextHeight)
+    persistExecutionDrawerHeight(nextHeight)
+  }, [heightBounds])
+
+  const resetPreferredHeight = useCallback((): void => {
+    setPreferredHeight(null)
+    persistExecutionDrawerHeight(null)
+  }, [])
+
+  const handleResizePointerDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return
+    const drawer = drawerRef.current
+    if (!drawer) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    resizeGestureRef.current = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startHeight: drawer.getBoundingClientRect().height,
+      moved: false
+    }
+    setResizing(true)
+  }
+
+  const handleResizePointerMove = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const gesture = resizeGestureRef.current
+    if (!gesture || gesture.pointerId !== event.pointerId) return
+    const delta = gesture.startY - event.clientY
+    if (!gesture.moved && Math.abs(delta) < 2) return
+    gesture.moved = true
+    event.preventDefault()
+    applyPreferredHeight(gesture.startHeight + delta)
+  }
+
+  const finishResizeGesture = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const gesture = resizeGestureRef.current
+    if (!gesture || gesture.pointerId !== event.pointerId) return
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    resizeGestureRef.current = null
+    setResizing(false)
+  }
+
+  const handleResizeKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+    const bounds = heightBounds
+    if (!bounds) return
+    const currentHeight = preferredHeight
+      ?? measuredHeight
+      ?? drawerRef.current?.getBoundingClientRect().height
+      ?? bounds.min
+    let nextHeight: number | null = null
+    switch (event.key) {
+      case 'ArrowUp':
+      case 'ArrowRight':
+        nextHeight = currentHeight + EXECUTION_DRAWER_KEYBOARD_STEP
+        break
+      case 'ArrowDown':
+      case 'ArrowLeft':
+        nextHeight = currentHeight - EXECUTION_DRAWER_KEYBOARD_STEP
+        break
+      case 'PageUp':
+        nextHeight = currentHeight + EXECUTION_DRAWER_KEYBOARD_PAGE_STEP
+        break
+      case 'PageDown':
+        nextHeight = currentHeight - EXECUTION_DRAWER_KEYBOARD_PAGE_STEP
+        break
+      case 'Home':
+        nextHeight = bounds.min
+        break
+      case 'End':
+        nextHeight = bounds.max
+        break
+      case 'Enter':
+      case ' ':
+        event.preventDefault()
+        resetPreferredHeight()
+        return
+      default:
+        return
+    }
+    event.preventDefault()
+    applyPreferredHeight(nextHeight)
+  }
+
+  useLayoutEffect(() => {
+    const drawer = drawerRef.current
+    const timelinePane = drawer?.parentElement
+    if (!drawer || !timelinePane) return undefined
+    const runPulse = timelinePane.querySelector<HTMLElement>('.run-pulse')
+    const measure = (): void => {
+      const nextBounds = executionDrawerHeightBounds(
+        timelinePane.clientHeight,
+        runPulse?.getBoundingClientRect().height ?? 0,
+        window.innerHeight
+      )
+      setHeightBounds((current) => current
+        && current.min === nextBounds.min
+        && current.max === nextBounds.max
+        ? current
+        : nextBounds)
+      const nextMeasuredHeight = Math.round(drawer.getBoundingClientRect().height)
+      setMeasuredHeight((current) => current === nextMeasuredHeight ? current : nextMeasuredHeight)
+    }
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(timelinePane)
+    observer?.observe(drawer)
+    if (runPulse) observer?.observe(runPulse)
+    window.addEventListener('resize', measure)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [])
+
+  useLayoutEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const drawer = drawerRef.current
+      if (drawer) setMeasuredHeight(Math.round(drawer.getBoundingClientRect().height))
+      if (followingLatestRef.current && drawerBodyRef.current) {
+        scrollExecutionDrawerToLatest(drawerBodyRef.current)
+      }
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [appliedHeight])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
@@ -1732,9 +1977,53 @@ function ExecutionDrawer({
   }, [progressFollowKey, resolvedFocusedRunId])
 
   const displayName = member?.displayName ?? profile?.displayName ?? process.agentId
+  const accessibleHeight = Math.round(
+    measuredHeight ?? appliedHeight ?? heightBounds?.min ?? EXECUTION_DRAWER_HARD_MIN_HEIGHT
+  )
+  const accessibleBounds = heightBounds ?? {
+    min: EXECUTION_DRAWER_HARD_MIN_HEIGHT,
+    max: EXECUTION_DRAWER_MAX_HEIGHT
+  }
+  const defaultMaxHeight = heightBounds && typeof window !== 'undefined'
+    ? defaultExecutionDrawerMaxHeight(window.innerWidth, window.innerHeight, heightBounds)
+    : null
+  const drawerStyle: CSSProperties | undefined = appliedHeight === null
+    ? defaultMaxHeight === null ? undefined : { maxHeight: defaultMaxHeight }
+    : { height: appliedHeight, minHeight: appliedHeight, maxHeight: appliedHeight }
 
   return (
-    <section id="agent-execution-drawer" ref={drawerRef} className="execution-drawer" role="region" aria-labelledby="execution-drawer-title" tabIndex={-1}>
+    <section
+      id="agent-execution-drawer"
+      ref={drawerRef}
+      className={`execution-drawer${preferredHeight !== null ? ' is-user-sized' : ''}${resizing ? ' is-resizing' : ''}`}
+      role="region"
+      aria-labelledby="execution-drawer-title"
+      tabIndex={-1}
+      data-user-sized={preferredHeight !== null ? 'true' : 'false'}
+      style={drawerStyle}
+    >
+        <div
+          className="execution-drawer-resize-handle"
+          role="separator"
+          aria-label="调整执行详情高度"
+          aria-orientation="horizontal"
+          aria-valuemin={accessibleBounds.min}
+          aria-valuemax={accessibleBounds.max}
+          aria-valuenow={accessibleHeight}
+          aria-valuetext={`${accessibleHeight} 像素；上下方向键调整，Enter 恢复默认高度`}
+          tabIndex={0}
+          title="上下拖拽调整；按 Enter 恢复默认高度"
+          onPointerDown={handleResizePointerDown}
+          onPointerMove={handleResizePointerMove}
+          onPointerUp={finishResizeGesture}
+          onPointerCancel={finishResizeGesture}
+          onLostPointerCapture={() => {
+            resizeGestureRef.current = null
+            setResizing(false)
+          }}
+          onKeyDown={handleResizeKeyDown}
+          onDoubleClick={resetPreferredHeight}
+        />
         <header className="execution-drawer-header">
           <div className="execution-drawer-agent">
             <MemberAvatar

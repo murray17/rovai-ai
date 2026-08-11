@@ -87,7 +87,8 @@ try {
       placement.position === 'absolute'
         && placement.top === '-2px'
         && placement.right === '0px'
-        && Math.abs(placement.topOffset - conversationPresentation.copyButtonPlacements[0].topOffset) <= 0.75
+        && placement.topOffset >= -4.25
+        && placement.topOffset <= -1.75
         && Math.abs(placement.rightOffset) <= 0.75),
   `Message copy buttons did not share one top-right action anchor: ${JSON.stringify(conversationPresentation.copyButtonPlacements)}`)
   assert(conversationPresentation.dayLabels.length > 0
@@ -183,6 +184,7 @@ try {
     return focused?.dataset.agentRunId === ${JSON.stringify(activeRunId)}
       && Boolean(focused.querySelector('.execution-disclosure.run-live.is-running'))
   })()`)
+  const executionDrawerResize = await verifyExecutionDrawerResizeControl(app.cdp)
   const executionAutoFollow = await verifyExecutionAutoFollowControl(app.cdp)
 
   await evaluate(app.cdp, `(() => {
@@ -265,6 +267,26 @@ try {
     if (timeline) timeline.scrollTop = timeline.scrollHeight
     return timeline?.scrollTop ?? 0
   })()`)
+  await evaluate(app.cdp, `(() => {
+    const activeChip = [...document.querySelectorAll('.run-pulse-chip[data-agent-id]')]
+      .find((chip) => chip.dataset.agentId === ${JSON.stringify(activeAgentId)})
+    activeChip?.click()
+    const handle = document.querySelector('.execution-drawer-resize-handle')
+    handle?.focus({ preventScroll: true })
+    return Boolean(activeChip && handle)
+  })()`)
+  await waitForExpression(app.cdp, `Boolean(document.querySelector('.execution-drawer-resize-handle'))`)
+  await focusExecutionDrawerResizeHandle(app.cdp)
+  await pressKey(app.cdp, 'End', 'End', 35)
+  await waitForExpression(app.cdp, `(() => {
+    const handle = document.querySelector('.execution-drawer-resize-handle')
+    return handle?.getAttribute('aria-valuenow') === handle?.getAttribute('aria-valuemax')
+  })()`)
+  await evaluate(app.cdp, `(() => {
+    const timeline = document.querySelector('.camp-timeline')
+    if (timeline) timeline.scrollTop = timeline.scrollHeight
+    return timeline?.scrollTop ?? 0
+  })()`)
   await wait(200)
   const compactLayout = await collectCompactHandoffLayout(app.cdp)
   assert(compactLayout.viewportWidth === 1040 && compactLayout.viewportHeight === 700,
@@ -282,8 +304,54 @@ try {
     && compactLayout.dockRight <= compactLayout.timelineRight + 1
     && compactLayout.dockTop >= compactLayout.timelineBottom - 1,
     `Agent dock escaped the compact conversation column: ${JSON.stringify(compactLayout)}`)
+  assert(compactLayout.drawerLeft >= compactLayout.timelineLeft - 1
+    && compactLayout.drawerRight <= compactLayout.timelineRight + 1
+    && compactLayout.drawerBottom <= compactLayout.controlsTop + 1
+    && compactLayout.drawerAriaNow === compactLayout.drawerAriaMax
+    && compactLayout.drawerUserSized
+    && compactLayout.resizeHandleTop >= 0
+    && compactLayout.resizeHandleBottom <= compactLayout.viewportHeight,
+    `Resizable execution Drawer overlapped controls or escaped at 1040x700: ${JSON.stringify(compactLayout)}`)
+  assert(compactLayout.timelineHeight >= 96,
+    `Resizable execution Drawer left too little compact conversation history: ${JSON.stringify(compactLayout)}`)
   const compactCapture = join(outputDir, 'runtime-activity-compact.png')
   await capture(app.cdp, compactCapture)
+
+  await evaluate(app.cdp, `(() => {
+    const toggle = document.querySelector('.topbar-inspector-toggle[aria-pressed="true"]')
+    toggle?.click()
+    return !toggle || true
+  })()`)
+  await app.cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 520, height: 350, deviceScaleFactor: 2, mobile: false,
+    screenWidth: 1040, screenHeight: 700
+  })
+  await waitForExpression(app.cdp, `innerWidth === 520 && innerHeight === 350 && Math.abs(devicePixelRatio - 2) < 0.01`)
+  await waitForExpression(app.cdp, `document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed')`)
+  await focusExecutionDrawerResizeHandle(app.cdp)
+  await pressKey(app.cdp, 'End', 'End', 35)
+  await waitForExpression(app.cdp, `(() => {
+    const handle = document.querySelector('.execution-drawer-resize-handle')
+    return handle?.getAttribute('aria-valuenow') === handle?.getAttribute('aria-valuemax')
+  })()`)
+  await wait(150)
+  const zoomedDrawerLayout = await collectZoomedDrawerLayout(app.cdp)
+  assert(zoomedDrawerLayout.cssViewportWidth === 520
+    && zoomedDrawerLayout.cssViewportHeight === 350
+    && zoomedDrawerLayout.physicalViewportWidth === 1040
+    && zoomedDrawerLayout.physicalViewportHeight === 700
+    && zoomedDrawerLayout.drawerVisible
+    && zoomedDrawerLayout.resizeHandleVisible
+    && zoomedDrawerLayout.drawerAriaNow === zoomedDrawerLayout.drawerAriaMax
+    && Math.min(zoomedDrawerLayout.drawerBottom, zoomedDrawerLayout.timelinePaneBottom)
+      <= zoomedDrawerLayout.controlsTop + 1
+    && zoomedDrawerLayout.composerTop >= zoomedDrawerLayout.controlsTop - 1
+    && zoomedDrawerLayout.composerBottom <= zoomedDrawerLayout.cssViewportHeight + 1
+    && zoomedDrawerLayout.timelineHeight >= 48
+    && zoomedDrawerLayout.drawerBodyScrollable,
+    `200% zoom hid or overlapped the resizable execution Drawer: ${JSON.stringify(zoomedDrawerLayout)}`)
+  const zoomedDrawerCapture = join(outputDir, 'runtime-activity-zoom-200.png')
+  await capture(app.cdp, zoomedDrawerCapture)
 
   const reportPath = join(outputDir, 'runtime-activity-acceptance.json')
   const report = {
@@ -299,6 +367,7 @@ try {
       codexLifecycleMergedToOneRow: observed.find((row) => row.runtime === 'Codex CLI')?.toolTitles.length === 1,
       sameAgentRunsShareOneProcess: observed.find((row) => row.agentId === activeAgentId)?.runCount === 2,
       runningRunFocusedWithEvidence: observed.find((row) => row.agentId === activeAgentId)?.focusedEvidenceOpen === true,
+      executionDrawerResize,
       executionAutoFollow,
       claudeRunLevelDoesNotInventTools: observed.find((row) => row.runtime === 'Claude Code')?.toolTitles.length === 0,
       antigravityCoreToolCatalogName: observed.find((row) => row.runtime === 'Antigravity')?.toolTitles[0] === 'camp.message.send',
@@ -307,7 +376,8 @@ try {
       recipientOnlyHandoffFooter: handoffFooter,
       wideComposerLayout,
       wideConversationLayout,
-      recipientOnlyCompactLayout: compactLayout
+      recipientOnlyCompactLayout: compactLayout,
+      zoomedDrawerLayout
     },
     runtimes: observed,
     captures: {
@@ -315,7 +385,8 @@ try {
       bottom: bottomCapture,
       wide: wideCapture,
       wideConversation: wideConversationCapture,
-      compact: compactCapture
+      compact: compactCapture,
+      zoom200: zoomedDrawerCapture
     }
   }
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`)
@@ -688,9 +759,15 @@ async function collectCompactHandoffLayout(cdp) {
     const footer = document.querySelector('.message-delivery-footer')
     const timeline = document.querySelector('.camp-timeline')
     const dock = document.querySelector('.run-pulse[aria-label="Agent 执行台"]')
+    const drawer = document.querySelector('.execution-drawer')
+    const resizeHandle = drawer?.querySelector('.execution-drawer-resize-handle')
+    const controls = document.querySelector('.conversation-controls')
     const footerRect = footer?.getBoundingClientRect()
     const timelineRect = timeline?.getBoundingClientRect()
     const dockRect = dock?.getBoundingClientRect()
+    const drawerRect = drawer?.getBoundingClientRect()
+    const resizeHandleRect = resizeHandle?.getBoundingClientRect()
+    const controlsRect = controls?.getBoundingClientRect()
     return {
       viewportWidth: innerWidth,
       viewportHeight: innerHeight,
@@ -709,7 +786,57 @@ async function collectCompactHandoffLayout(cdp) {
       footerBottom: footerRect?.bottom ?? 0,
       dockLeft: dockRect?.left ?? 0,
       dockRight: dockRect?.right ?? 0,
-      dockTop: dockRect?.top ?? 0
+      dockTop: dockRect?.top ?? 0,
+      drawerLeft: drawerRect?.left ?? 0,
+      drawerRight: drawerRect?.right ?? 0,
+      drawerBottom: drawerRect?.bottom ?? 0,
+      drawerAriaNow: Number(resizeHandle?.getAttribute('aria-valuenow') ?? 0),
+      drawerAriaMax: Number(resizeHandle?.getAttribute('aria-valuemax') ?? 0),
+      drawerUserSized: drawer?.dataset.userSized === 'true',
+      resizeHandleTop: resizeHandleRect?.top ?? -1,
+      resizeHandleBottom: resizeHandleRect?.bottom ?? -1,
+      controlsTop: controlsRect?.top ?? 0,
+      timelineHeight: timelineRect?.height ?? 0
+    }
+  })()`)
+}
+
+async function collectZoomedDrawerLayout(cdp) {
+  return evaluate(cdp, `(() => {
+    const timeline = document.querySelector('.camp-timeline')
+    const timelinePane = document.querySelector('.timeline-pane')
+    const drawer = document.querySelector('.execution-drawer')
+    const drawerBody = drawer?.querySelector('.execution-drawer-body')
+    const resizeHandle = drawer?.querySelector('.execution-drawer-resize-handle')
+    const controls = document.querySelector('.conversation-controls')
+    const composer = document.querySelector('.composer-box')
+    const timelineRect = timeline?.getBoundingClientRect()
+    const timelinePaneRect = timelinePane?.getBoundingClientRect()
+    const drawerRect = drawer?.getBoundingClientRect()
+    const resizeHandleRect = resizeHandle?.getBoundingClientRect()
+    const controlsRect = controls?.getBoundingClientRect()
+    const composerRect = composer?.getBoundingClientRect()
+    return {
+      cssViewportWidth: innerWidth,
+      cssViewportHeight: innerHeight,
+      devicePixelRatio,
+      physicalViewportWidth: Math.round(innerWidth * devicePixelRatio),
+      physicalViewportHeight: Math.round(innerHeight * devicePixelRatio),
+      drawerVisible: Boolean(drawerRect && drawerRect.width > 0 && drawerRect.height > 0),
+      resizeHandleVisible: Boolean(resizeHandleRect
+        && resizeHandleRect.width > 0
+        && resizeHandleRect.height > 0
+        && resizeHandleRect.top >= 0
+        && resizeHandleRect.bottom <= innerHeight),
+      drawerBottom: drawerRect?.bottom ?? 0,
+      timelinePaneBottom: timelinePaneRect?.bottom ?? 0,
+      drawerAriaNow: Number(resizeHandle?.getAttribute('aria-valuenow') ?? 0),
+      drawerAriaMax: Number(resizeHandle?.getAttribute('aria-valuemax') ?? 0),
+      controlsTop: controlsRect?.top ?? 0,
+      composerTop: composerRect?.top ?? 0,
+      composerBottom: composerRect?.bottom ?? 0,
+      timelineHeight: timelineRect?.height ?? 0,
+      drawerBodyScrollable: Boolean(drawerBody && drawerBody.scrollHeight > drawerBody.clientHeight)
     }
   })()`)
 }
@@ -886,6 +1013,127 @@ async function collectRuntimeRows(cdp) {
     })()`))
   }
   return rows
+}
+
+async function verifyExecutionDrawerResizeControl(cdp) {
+  const geometry = async () => evaluate(cdp, `(() => {
+    const drawer = document.querySelector('.execution-drawer')
+    const handle = drawer?.querySelector('.execution-drawer-resize-handle')
+    const body = drawer?.querySelector('.execution-drawer-body')
+    const focused = drawer?.querySelector('.execution-process-stage.is-focused')
+    const drawerRect = drawer?.getBoundingClientRect()
+    const handleRect = handle?.getBoundingClientRect()
+    return drawer && handle && body && drawerRect && handleRect ? {
+      height: Math.round(drawerRect.height),
+      handleX: Math.round(handleRect.left + handleRect.width / 2),
+      handleY: Math.round(handleRect.top + handleRect.height / 2),
+      role: handle.getAttribute('role'),
+      orientation: handle.getAttribute('aria-orientation'),
+      min: Number(handle.getAttribute('aria-valuemin')),
+      max: Number(handle.getAttribute('aria-valuemax')),
+      now: Number(handle.getAttribute('aria-valuenow')),
+      userSized: drawer.dataset.userSized === 'true',
+      storedHeight: sessionStorage.getItem('rovai.execution-drawer-height.v1'),
+      selectedAgentId: document.querySelector('.run-pulse-chip.is-selected')?.dataset.agentId ?? null,
+      focusedRunId: focused?.dataset.agentRunId ?? null,
+      followingLatest: body.dataset.followingLatest === 'true',
+      bottomDistance: Math.round(body.scrollHeight - body.scrollTop - body.clientHeight)
+    } : null
+  })()`)
+
+  const initial = await geometry()
+  assert(initial
+    && initial.role === 'separator'
+    && initial.orientation === 'horizontal'
+    && initial.min >= 48
+    && initial.max > initial.min
+    && initial.now >= initial.min
+    && initial.now <= initial.max,
+  `Execution Drawer resize separator is not accessible: ${JSON.stringify(initial)}`)
+
+  await focusExecutionDrawerResizeHandle(cdp)
+  await pressKey(cdp, 'Home', 'Home', 36)
+  await waitForExpression(cdp, `(() => {
+    const handle = document.querySelector('.execution-drawer-resize-handle')
+    return handle?.getAttribute('aria-valuenow') === handle?.getAttribute('aria-valuemin')
+      && document.querySelector('.execution-drawer')?.dataset.userSized === 'true'
+  })()`)
+  const minimum = await geometry()
+  await focusExecutionDrawerResizeHandle(cdp)
+  await pressKey(cdp, 'PageUp', 'PageUp', 33)
+  await waitForExpression(cdp, `(() => {
+    const handle = document.querySelector('.execution-drawer-resize-handle')
+    return Number(handle?.getAttribute('aria-valuenow') ?? 0) > Number(handle?.getAttribute('aria-valuemin') ?? 0)
+  })()`)
+  const keyboardSized = await geometry()
+  assert(minimum && keyboardSized
+    && keyboardSized.height > minimum.height
+    && keyboardSized.storedHeight === String(keyboardSized.now),
+  `Keyboard resize or session persistence failed: ${JSON.stringify({ minimum, keyboardSized })}`)
+
+  await evaluate(cdp, `document.querySelector('.execution-drawer-header .quiet-button')?.click()`)
+  await waitForExpression(cdp, `!document.querySelector('.execution-drawer')`)
+  await evaluate(cdp, `(() => {
+    const chip = [...document.querySelectorAll('.run-pulse-chip[data-agent-id]')]
+      .find((candidate) => candidate.dataset.agentId === ${JSON.stringify(activeAgentId)})
+    chip?.click()
+    return Boolean(chip)
+  })()`)
+  await waitForExpression(cdp, `Boolean(document.querySelector('.execution-drawer-resize-handle'))`)
+  const reopened = await geometry()
+  assert(reopened
+    && Math.abs(reopened.height - keyboardSized.height) <= 1
+    && reopened.storedHeight === keyboardSized.storedHeight
+    && reopened.selectedAgentId === activeAgentId
+    && reopened.focusedRunId === activeRunId,
+  `Execution Drawer height did not survive close and reopen: ${JSON.stringify({ keyboardSized, reopened })}`)
+
+  await focusExecutionDrawerResizeHandle(cdp)
+  await pressKey(cdp, 'Enter', 'Enter', 13)
+  await waitForExpression(cdp, `document.querySelector('.execution-drawer')?.dataset.userSized === 'false'
+    && sessionStorage.getItem('rovai.execution-drawer-height.v1') === null`)
+  await wait(100)
+  const reset = await geometry()
+  assert(reset && !reset.userSized && reset.storedHeight === null,
+    `Execution Drawer did not reset to its responsive default: ${JSON.stringify(reset)}`)
+
+  await cdp.send('Input.dispatchMouseEvent', {
+    type: 'mouseMoved', x: reset.handleX, y: reset.handleY,
+    button: 'none', buttons: 0
+  })
+  await cdp.send('Input.dispatchMouseEvent', {
+    type: 'mousePressed', x: reset.handleX, y: reset.handleY,
+    button: 'left', buttons: 1, clickCount: 1
+  })
+  await cdp.send('Input.dispatchMouseEvent', {
+    type: 'mouseMoved', x: reset.handleX, y: reset.handleY + 64,
+    button: 'left', buttons: 1
+  })
+  await cdp.send('Input.dispatchMouseEvent', {
+    type: 'mouseReleased', x: reset.handleX, y: reset.handleY + 64,
+    button: 'left', buttons: 0, clickCount: 1
+  })
+  await waitForExpression(cdp, `document.querySelector('.execution-drawer')?.dataset.userSized === 'true'`)
+  await wait(100)
+  const pointerSized = await geometry()
+  assert(pointerSized
+    && pointerSized.height < reset.height - 30
+    && pointerSized.selectedAgentId === activeAgentId
+    && pointerSized.focusedRunId === activeRunId
+    && pointerSized.followingLatest
+    && pointerSized.bottomDistance <= 2,
+  `Pointer resize changed execution identity or lost live follow: ${JSON.stringify({ reset, pointerSized })}`)
+
+  return {
+    separatorAccessible: true,
+    keyboardResize: { minimum: minimum.height, expanded: keyboardSized.height },
+    pointerResize: { before: reset.height, after: pointerSized.height },
+    sessionHeightSurvivesReopen: true,
+    enterRestoresResponsiveDefault: true,
+    selectedAgentId: pointerSized.selectedAgentId,
+    focusedRunId: pointerSized.focusedRunId,
+    liveFollowPreserved: pointerSized.followingLatest
+  }
 }
 
 async function verifyExecutionAutoFollowControl(cdp) {
@@ -1079,6 +1327,23 @@ async function evaluate(cdp, expression, awaitPromise = false) {
       ?? `Evaluation failed: ${expression}`)
   }
   return response.result?.result?.value
+}
+
+async function focusExecutionDrawerResizeHandle(cdp) {
+  await cdp.send('Page.bringToFront')
+  await wait(80)
+  const focused = await evaluate(cdp, `(() => {
+    const handle = document.querySelector('.execution-drawer-resize-handle')
+    handle?.focus({ preventScroll: true })
+    return document.activeElement === handle
+  })()`)
+  assert(focused, 'Could not focus the Execution Drawer resize separator')
+}
+
+async function pressKey(cdp, key, code, windowsVirtualKeyCode) {
+  const params = { key, code, windowsVirtualKeyCode, nativeVirtualKeyCode: windowsVirtualKeyCode }
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', ...params })
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...params })
 }
 
 async function waitForExpression(cdp, expression, timeoutMs = 10_000) {
