@@ -556,7 +556,7 @@ Recovery 的 Rust/Vitest 回归必须保持通过。真实 Runtime 不可用时�
 用户已明确授权完成编码，六个检查点的产品代码已落地。模型无关的验收由 Rust
 单元/集成测试、TypeScript/Vitest、`smoke:memory`、Desktop Build 与 macOS
 Package 覆盖；会调用第三方模型账户的多 Runtime Smoke 仍按
-[本地开发文档](../../local-development.md)作为环境相关手工证据执行，不用缺失的
+[测试与 Smoke Test](../../development/testing.md) 作为环境相关手工证据执行，不用缺失的
 外部账户伪造成功。
 
 2026-07-25 完成证据：

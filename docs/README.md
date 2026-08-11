@@ -62,7 +62,7 @@ last_updated: 2026-08-11
 `runtime-compatibility.md` 保存 Agent Runtime 实测兼容性证据；`docs/runtime-activity/` 长期维护
 跨 Runtime 活动映射目录和变更门禁；`docs/ui/` 和
 `docs/development/` 分别拥有 UI 规范与本地开发流程。它们都不是领域架构或版本状态
-真源。`local-development.md` 只保留为历史链接的兼容入口。
+真源。本地开发统一从 [开发者指南](development/README.md) 进入。
 
 `docs/contracts/` 保存字段级、可测试的长期接口合同；`docs/architecture/` 保存跨版本系统结构、
 组件职责和权威边界。版本文档只引用它们，不复制完整协议或长期架构。

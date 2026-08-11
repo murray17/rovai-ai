@@ -221,7 +221,7 @@ Renderer 不直接消费原始 Codex Transcript，而是基于 Event Log 构建�
 - macOS 目标为 14+ Apple Silicon，当前使用 Hardened Runtime 和 ad-hoc 签名。
 - 打包后不依赖系统 Node.js、pnpm 或 Rust；仍依赖 Git 和兼容的 Codex CLI。
 
-命令和验证入口见 [../../local-development.md](../../local-development.md)。
+命令和验证入口见 [开发者指南](../../development/README.md)。
 
 ## 11. 验证策略
 

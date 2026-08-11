@@ -32,7 +32,7 @@ pnpm smoke:core
 pnpm smoke:intake
 ```
 
-真实 Runtime smoke 继续按 [本地开发指南](../../local-development.md) 执行。`smoke:core`
+真实 Runtime smoke 继续按 [测试与 Smoke Test](../../development/testing.md) 执行。`smoke:core`
 必须包含普通目录与空 Git 仓库；`smoke:intake` 必须证明目录检查本身零写入、创建才
 持久化 canonical 路径。
 
