@@ -277,6 +277,7 @@ pub struct AgentRunCancellationCandidate {
     pub camp_turn_id: String,
     pub project_binding_kind: String,
     pub project_path: String,
+    pub execution_root: String,
     pub version: i64,
     pub execution_epoch: i64,
     pub status: String,
@@ -681,7 +682,11 @@ impl ExecutionRuntimeService {
             SELECT agent_run.id, camp_turn.camp_id, agent_run.camp_turn_id,
                    agent_run.version, agent_run.execution_epoch, agent_run.status,
                    agent_run.wait_reason, agent_run.runtime_adapter_kind,
-                   camp.project_binding_kind, camp.project_path
+                   camp.project_binding_kind, camp.project_path,
+                   COALESCE(
+                       json_extract(agent_run.workspace_json, '$.executionRoot'),
+                       camp.project_path
+                   )
             FROM agent_run
             JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
             JOIN camp ON camp.id = camp_turn.camp_id
@@ -705,6 +710,7 @@ impl ExecutionRuntimeService {
                     adapter_kind: row.get(7)?,
                     project_binding_kind: row.get(8)?,
                     project_path: row.get(9)?,
+                    execution_root: row.get(10)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?)
@@ -5325,6 +5331,7 @@ mod tests {
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].agent_run_id, agent_run_id);
         assert_eq!(candidates[0].status, "queued");
+        assert_eq!(candidates[0].execution_root, workspace.to_string_lossy());
         let acknowledged = runtime
             .acknowledge_agent_run_cancellation(
                 &mut database,

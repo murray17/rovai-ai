@@ -1267,8 +1267,8 @@ impl SkillLibraryService {
         })
     }
 
-    pub fn install_bundled_skills(&self, database: &mut Database) -> Result<()> {
-        strip_official_skill_name_prefixes(database)?;
+    pub fn install_bundled_skills(&self, database: &mut Database) -> Result<bool> {
+        let mut changed = strip_official_skill_name_prefixes(database)?;
         for definition in BUNDLED_SKILLS {
             if definition.name.starts_with("rovai-") {
                 anyhow::bail!("official Skill names must not use the rovai- prefix");
@@ -1335,6 +1335,7 @@ impl SkillLibraryService {
                             Utc::now().to_rfc3339(),
                         ],
                     )?;
+                    changed = true;
                 }
                 remove_directory_if_present(&staging_root)?;
                 continue;
@@ -1484,9 +1485,10 @@ impl SkillLibraryService {
                     remove_directory_if_present(final_content.parent().unwrap_or(&final_content));
             }
             result?;
+            changed = true;
             remove_directory_if_present(&staging_root)?;
         }
-        Ok(())
+        Ok(changed)
     }
 
     pub fn cleanup_expired_staging(&self) -> Result<()> {
@@ -2426,9 +2428,10 @@ fn publish_directory(source: &Path, final_content: &Path) -> Result<()> {
     Ok(())
 }
 
-fn strip_official_skill_name_prefixes(database: &mut Database) -> Result<()> {
+fn strip_official_skill_name_prefixes(database: &mut Database) -> Result<bool> {
     let now = Utc::now().to_rfc3339();
     let transaction = database.connection_mut().transaction()?;
+    let mut changed = false;
     let actor = ActorRef::System {
         component_id: "skill-library-bootstrap".to_string(),
     };
@@ -2477,9 +2480,10 @@ fn strip_official_skill_name_prefixes(database: &mut Database) -> Result<()> {
                 "name": definition.name,
             }),
         )?;
+        changed = true;
     }
     transaction.commit()?;
-    Ok(())
+    Ok(changed)
 }
 
 fn materialize_bundled_definition(

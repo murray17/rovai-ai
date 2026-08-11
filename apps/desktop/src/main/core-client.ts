@@ -28,8 +28,16 @@ export class CoreClient {
   #restartTimer: NodeJS.Timeout | null = null
   #stableTimer: NodeJS.Timeout | null = null
   #stopping = false
+  #removedSkillProjectRoots: string[] = []
 
-  start(): void {
+  setRemovedSkillProjectRoots(executionRoots: string[]): void {
+    this.#removedSkillProjectRoots = [...new Set(executionRoots)]
+  }
+
+  start(options?: { removedSkillProjectRoots?: string[] }): void {
+    if (options?.removedSkillProjectRoots) {
+      this.setRemovedSkillProjectRoots(options.removedSkillProjectRoots)
+    }
     if (this.#child) return
     this.#stopping = false
     if (this.#restartTimer) {
@@ -40,6 +48,9 @@ export class CoreClient {
     const binary = resolveCoreBinary()
     const userDataPath = app.getPath('userData')
     const args = ['--data-dir', userDataPath]
+    for (const executionRoot of this.#removedSkillProjectRoots) {
+      args.push('--removed-skill-project-root', executionRoot)
+    }
     const child = spawn(binary, args, {
       stdio: ['pipe', 'pipe', 'pipe']
     })

@@ -317,11 +317,16 @@ type ResolvedTheme = "day" | "night"
 - “移除项目”只从这台 Mac 的侧栏隐藏该 directory Project，并同时取消该 Project 与其中 Camp 的
   置顶。确认 Dialog 必须明确不会删除本地目录、Camp、消息、运行记录或审计，也不会停止正在
   运行的执行。该动作可恢复，使用 Steel 主操作而不是 danger 红色；Quick Chat 不提供移除。
+- 本机 Navigation preference 仍是“侧栏隐藏”的权威；Main process 同步一份仅供 Skill projection
+  使用的 Core root-access ledger，不创建 Project entity 或 Camp domain event。无 active AgentRun 时
+  移除动作可对该 root 做一次受管 link 清理；存在 active Run 时只允许它完成，并在 terminal 后做
+  一次 cleanup。此后启动、普通诊断、周期任务和历史 projection observation 都不得再次访问该路径。
 - 移除当前 Project 或其中已打开 Camp 时，Renderer 关闭该 Camp 表面、选择 Quick Chat、提交
   Quick Chat Restorable Location，并把焦点移动到仍存在的 Quick Chat 项目行。取消 Dialog 则返回
   原三点菜单触发器；失败保留原 Project、Dialog 与可恢复错误。
 - 重新选择同一 canonical 工作目录、以其创建新对话，或从通知/启动恢复等受信入口重新打开其中
-  Camp 时取消隐藏并重新显示 Project；恢复不自动恢复移除前的 Project/Camp pin。
+  Camp 时取消隐藏并重新显示 Project，同时把 Skill projection root 标为 active + dirty；实际目录
+  对账留到下一次相关 AgentRun preflight。恢复不自动恢复移除前的 Project/Camp pin。
 - 恢复偏好写入失败时 Project 至少在当前 Main Window Session 重新显示，并呈现可恢复错误；本机
   导航偏好不得阻断 Core-owned Camp 的打开、创建或正在运行的执行。
 - 当前项目文件夹使用稳定 `--surface-selected` 瓷灰底和现有文字语义；当前打开 Camp 使用
@@ -452,6 +457,11 @@ type ResolvedTheme = "day" | "night"
 - 聚焦 non-terminal Run 后，用户停留在 Drawer 底部时跟随最新公开输出；手动上滚后暂停，回到底部后
   恢复。仍处于跟随状态的终态只滚到最后一批输出一次。该行为只作用于 Drawer，不滚动公共消息时间线，
   也不逐字播报流式内容。
+- Drawer 顶边使用轻量 Steel resize separator：向上拖拽扩大、向下拖拽缩小；键盘使用方向键、
+  PageUp/PageDown 与 Home/End 调整，Enter/Space 或双击恢复响应式默认。用户高度只在当前 Main Window
+  Session 沿用，切换 Agent、收起重开和离开 Camp 返回均不丢失，但不写入 Core 或应用偏好。上下界从
+  当前会话列可用高度计算，必须保留消息历史、Agent 执行台、Approval Dock 与 Composer 的可达空间；
+  调整过程不改变 Agent/Run 选择，并继续尊重 sticky-bottom 的跟随/暂停状态。
 - 执行详情按需显示所选 Agent 的连续 AgentRun stage；stage 按时间排序，分别保留 Run/CampTurn、
   调用来源、A2A 深度、Run 状态、Delivery 收件人与 Runtime Activity/Evidence 摘要。ContextManifest
   继续由 Core/Snapshot 保留，但不投影到 ordinary Inspector；过程 grouping 不能合并或遮蔽单次 Run。
@@ -1020,7 +1030,8 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 - 启停状态只由 34×20 Steel Switch 的位置、`aria-checked` 与动作型可访问名称表达；列表不显示
   “已启用 / 已停用 / 保存中”文案，也不并列显示状态 Badge。提交期间仅当前 Skill 行进入
   `aria-busy` 并禁用本行操作；Core 提交成功后原位更新该行，不能重新读取、重排或闪烁整个列表。
-  投递文件对账由后台 Reconciler 继续完成。
+  Core 只把既有 projection 标记 dirty；目录对账由下一次相关 AgentRun 的 current-root preflight
+  完成，不启动全量后台扫描，也不为了让设置页即时变绿访问历史 Project。
 - 关闭 Skill 只弱化名称、说明与来源标签，身份色标记保持原色，并暂停全部 Rovai 投递，不能禁用
   生效组入口。关闭时仍可
   增删分组，已有选择必须保留；重新启用后按保存的分组恢复。删除中的 Imported Skill

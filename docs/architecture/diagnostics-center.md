@@ -12,8 +12,8 @@ last_updated: 2026-08-09
 | Component | Responsibility |
 | --- | --- |
 | Core diagnostics module | Owns public status/group DTOs, summary aggregation, read-only SQLite quick check and the final v5 centralized redaction pass. |
-| Core router | Composes current Core/Git/data-dir facts, strict-read Skill and MCP audits, persistent member Runtime selections and cached Runtime evidence into one `DiagnosticsReport`. |
-| Skill projection reconciler | Exposes a filesystem audit over known managed roots without changing links or observations; the existing reconcile path remains a separate mutation. |
+| Core router | Composes current Core/Git/data-dir facts, stored Skill projection state, strict-read MCP inspection, persistent member Runtime selections and cached Runtime evidence into one `DiagnosticsReport`. |
+| Skill projection reconciler | Exposes stored observation/root-access/dirty diagnostics without reading execution roots; explicit user reconcile remains a separate filesystem mutation. |
 | MCP config store | Exposes `inspect` that never materializes a missing file; `get` and permission repair remain separate user-authorized operations. |
 | Runtime health cache | Supplies all Product Runtime observations without rescan or probe scheduling. Runtime check remains an explicit per-product command. |
 | Renderer Diagnostics Center | Owns Loading/Running/Partial/Error/Success/Disabled/Recovery presentation, attention-only issue projection, filters and the explicit action-to-Core mapping. |
@@ -49,6 +49,8 @@ export
 - No Renderer-derived health calculation can replace Core statuses or summary counts.
 - `diagnostics.check` never invokes an operation whose purpose is reconcile, repair, rescan, probe, login,
   replacement or data mutation.
+- `diagnostics.check` never resolves, canonicalizes, stats, or enumerates a historical Skill execution root;
+  Observation is evidence, not filesystem access authority.
 - `unknown` is evidence insufficiency and never enters the attention issue list.
 - Runtime Catalog visibility and Runtime issue eligibility are different: all nine are visible, only selected
   unavailable products become attention.

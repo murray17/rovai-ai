@@ -52,7 +52,7 @@ Related: Session bootstrap、public delivery 与 product surface 仍从各自 pr
 ## Member identity
 
 - **何时阅读：** 修改队员身份、Presence、移除、头像、routing identity 或 Self/Peer 投影时阅读。
-- **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
+- **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Skill Projection Reconciliation](../architecture/skill-projection-reconciliation.md)
 - **当前合同：** [Collaboration State v2](../contracts/collaboration-state-v2.md)
 
 <!-- adr-current-primary:begin topic=member-identity -->
@@ -189,6 +189,7 @@ Related: Session entrypoint 与 Built-in operation 只作为交叉导航，不�
 | [ADR-0135](0135-compact-agent-output-over-canonical-built-in-tool-envelope.md) | Compact Agent Output over Canonical Built-in Tool Envelope |
 | [ADR-0158](0158-default-all-runtime-delivery-for-managed-skills.md) | Default-All Runtime Delivery for Managed Skills |
 | [ADR-0159](0159-pinned-third-party-tasteful-ui-bundled-skill.md) | Pinned Third-Party Tasteful UI Bundled Skill |
+| [ADR-0161](0161-event-driven-root-scoped-skill-projection-reconciliation.md) | Event-Driven Root-Scoped Skill Projection Reconciliation |
 <!-- adr-current-primary:end -->
 
 Related: 具体 Skill 名称或版本不是治理例外；长期边界仍按本主题的一般 ADR 准入规则判断。

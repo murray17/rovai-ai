@@ -49,8 +49,9 @@ last_updated: 2026-08-11
 - [x] Migration 74 为既有 active Skill 一次性补齐缺失分组，并保留当前 Revision 与显式启停状态；
 - [x] 迁移后用户删除的分组与禁用状态在后续启动中保持，不由 bundled install 强制恢复；
 - [x] Core 回归、Skill smoke 断言、ADR、领域术语和设置 UI 合同同步默认差异。
-- [x] Skill 启停事务提交后立即返回，后台触发 projection reconcile；Renderer 只更新当前行且
-  Switch 独立显示“已启用 / 已停用”，不再渲染重复状态 Badge。
+- [x] Skill 启停事务提交后立即返回并只把已知 projection 标记 dirty，目录对账留到下一次相关 Run
+  preflight；Renderer 只更新当前行，Switch 不显示“已启用 / 已停用 / 保存中”，通过
+  `aria-checked` 与动作型可访问名称表达状态。
 
 ## Checkpoint 5：内置 Tasteful UI Skill
 
@@ -112,6 +113,47 @@ last_updated: 2026-08-11
   1440×920 / 1040×700 无横向溢出；
 - [x] 当前 UI 详规与最终 P2 原型说明明确页面级 Header 是两页唯一右侧顶部，禁止以后恢复占位条。
 
+## Checkpoint 10：Execution Drawer 可调高度
+
+- [x] Drawer 顶边增加轻量 Steel resize separator，支持鼠标、触控和指针捕获，上拖扩大、下拖缩小；
+- [x] 补齐水平 separator 的 ARIA 数值、方向键、PageUp/PageDown、Home/End 与 Enter/Space 恢复默认；
+- [x] 高度只保存在 Main Window Session，切换 Agent、收起重开与离开 Camp 返回时沿用，不写 Core；
+- [x] 根据会话列、执行台与 viewport 动态 clamp，并在 sticky-bottom 跟随时继续定位最新输出；
+- [x] Renderer helper 单测、类型检查、文档合同和 packaged acceptance 脚本同步；
+- [x] 使用最新签名 App 完成 1440×920、1040×700、200% zoom 的真实拖拽、键盘、保持与无覆盖验收。
+
+## Checkpoint 11：事件驱动 Skill projection
+
+- [x] 删除 App 启动全量 root reconcile、30 秒 Skill interval 与配置 mutation 后的全量 filesystem
+  reconcile；Library/Runtime 配置变化只在 SQLite 标记已有 Observation roots dirty/pending cleanup；
+- [x] AgentRun preflight 先在路径解析前拒绝 removed root，只 canonicalize 当前 execution root，按目标
+  Runtime Groups 与同 root active Run Groups reconcile 最新 Library state，并在 error/stale 时阻止启动；
+- [x] `SkillExposureSnapshot` 只冻结启动时 identity/Revision/path/status/conflict Evidence；不同 Agent 的
+  新 Run 不等待旧 Run、不维护 projection generation，旧 Run 之后允许看到共享目录的新内容；
+- [x] Migration 75 增加 projection root access/dirty/cleanup state，并把遗留
+  `skill_projection_drain` waiting Run 原位恢复 queued；
+- [x] Main-owned removed Project preference 在 Core 启动时只做 DB-only sync；移除时无 active Run 可做
+  一次受管 cleanup，有 active Run 则在 terminal 后完成，恢复目录只标 active + dirty；
+- [x] 普通 diagnostics 改读 stored observation/root state，不以历史 Observation 调度目录访问；用户
+  显式 `skills.reconcile` 仍可修复 active known roots；
+- [x] ADR-0161、Skill Projection Reconciliation Architecture、领域术语、current-version 与 UI 的
+  Project removal 边界同步。
+
+## Checkpoint 12：Skill 身份色与列表可读性
+
+- [x] 每个 Skill 复用持久 `Skill.id` 的 FNV-1a 映射，从共享 `--identity-1..8` 选择标记色；名称、
+  启停和 Revision 更新不改变颜色，内置与 Imported Skill 不维护名称特例；
+- [x] 首层来源标签收敛为“Rovai / GitHub / 用户导入”，仓库、上游 Revision、安装与导入来源全部
+  移入详情；详情保持统一 Steel rail/Porcelain background，不继承身份色；
+- [x] Skill 名称、说明、来源标签分别提高到 14/12.5/10.5px，添加区、搜索、投递范围菜单与详情同步
+  提高字号和控件高度；
+- [x] 启停控件收敛为 34×20 Steel Switch，不显示“已启用 / 已停用 / 保存中”，保留 `role="switch"`、
+  `aria-checked`、动作型可访问名称和行级 busy；
+- [x] Renderer 测试、Arctic Dawn/UI acceptance 合同与 packaged capture 同步；真实 `Skill.id` hash、
+  主行无 provenance、详情来源、中性色详情和 Steel Switch 均由脚本计算样式验证；
+- [x] 签名 App 在 1440×920 及同物理画布 200%（720×460 CSS viewport / DPR 2）通过完整操作链，
+  页面和设置面板均无横向溢出。
+
 已完成自动化验证：
 
 - `cargo test --workspace`：Library 325、CLI 10、Core binary 61 通过，3 个既有手工 Runtime smoke ignored；
@@ -129,7 +171,12 @@ last_updated: 2026-08-11
 - `pnpm package:mac` 与 `pnpm accept:runtime-activity-ui`：签名 App 验收通过；2560×1440 下会话列 1040px、叙述 622.31px、Composer 1040px，1040×700 无整页或会话列横向溢出；
 - 本 worktree `pnpm package:mac`：arm64 签名 App 构建通过，`codesign --verify --deep --strict` 及 Core、CLI、native host 单体签名校验通过；
 - `pnpm accept:memory-ui`：1440×920 与 1040×700 的日间/夜间 packaged App 均无 50px 空白顶栏；内容顶点为 0、Memory Library 顶点为 3、Header 顶点为 33，3px Steel 顶边、kicker、操作底对齐与无横向溢出通过；
+- `pnpm accept:runtime-activity-ui`：Execution Drawer separator 键盘从 160px 调到 240px、真实指针从
+  302px 调到 238px，收起重开保持且 Enter 恢复默认；1040×700 最大 391px 时保留 111.5px 时间线，
+  200% zoom 最大 102px 时保留 52px 时间线，Drawer、Composer 与 Stop 无可见覆盖；
 - `scripts/capture-camp-inspectors.mjs`：签名 App 在 1440×920、1040×700 与 200% zoom 下均只显示“任务 / 队员”，Lead 菜单真实 mutation、Header-to-Dock 聚焦、Inspector 状态保持及无横向溢出通过；
+- `pnpm accept:runtime-activity-ui`：9 条 Agent 消息及 A2A footer 的 Copy 均使用 `top: -2px; right: 0` 内容列锚点，聚焦态不覆盖收件人；
+- `pnpm accept:structured-mentions-ui`：用户消息真实 Hover 显示右上角 Copy，原生拖选、`Command+C`、整条复制与剪贴板恢复通过；
 - `pnpm accept:member-lifecycle-ui`：队员页内容顶点为 0、Workbench 顶点为 3、Header 顶点为 33 且无 50px 空白顶栏；用户消息透明开放表面、原生文本选择、Copy、Mention、成员页返回与 200% zoom/reduced motion 回归通过；
 - `cargo test -p rovai-core official_skills_default_to_all_groups_and_preserve_user_changes -- --nocapture`：内置 Skill 初始九组与后续用户修改保持通过；
 - `cargo test -p rovai-core imports_default_to_all_groups_and_updates_preserve_user_changes -- --nocapture`：Imported Skill 初始九组与 Revision 更新保持通过；

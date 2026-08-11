@@ -87,7 +87,7 @@ use rovai_core::{
     context::{
         CharterDeliveryMode, ContextMaterialization, ContextPayloadTooLarge, ContextService,
         DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES, MaterializeContextRequest, PreparedContext,
-        RuntimeInputDelivery, SkillExposurePreparation,
+        RuntimeInputDelivery,
     },
     core_data_dir_lock::CoreDataDirLock,
     db::Database,
@@ -377,6 +377,18 @@ struct SkillIdParams {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SyncSkillProjectAccessParams {
+    removed_execution_roots: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SkillProjectAccessParams {
+    execution_root: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct InspectSkillImportParams {
     path: String,
 }
@@ -626,7 +638,6 @@ struct Core {
     runtime_check_requests: mpsc::UnboundedSender<rovai_core::agent_profile::AdapterKind>,
     compaction_detector_policies: DesiredCompactionDetectorPolicies,
     runtime_resolution_notify: Notify,
-    skill_reconcile_notify: Notify,
     agent_run_cancellation_notify: Notify,
     pending_execution_recovery: Mutex<()>,
     skill_library: SkillLibraryService,
@@ -933,17 +944,29 @@ impl Core {
         AgentProfileService::default().all_profile_ids(database)
     }
 
-    fn reconcile_skills_best_effort(&self, database: &mut Database) {
+    fn mark_skill_projections_dirty_best_effort(
+        &self,
+        database: &mut Database,
+        cleanup_required: bool,
+    ) {
         if let Err(error) =
-            SkillProjectionReconciler.reconcile_known_roots(database, &self.skill_library)
+            SkillProjectionReconciler.mark_observed_roots_dirty(database, cleanup_required)
         {
-            eprintln!("failed to reconcile Skill projections after a state change: {error:#}");
+            eprintln!("failed to mark Skill projections dirty: {error:#}");
         }
     }
 
-    async fn reconcile_skills_periodically(&self) {
+    async fn reconcile_skill_projection_after_run_terminal(&self, execution_root: &str) {
         let mut database = self.database.lock().await;
-        self.reconcile_skills_best_effort(&mut database);
+        if let Err(error) = SkillProjectionReconciler.reconcile_after_run_terminal(
+            &mut database,
+            &self.skill_library,
+            Path::new(execution_root),
+        ) {
+            eprintln!(
+                "failed to reconcile terminal AgentRun Skill projection for {execution_root}: {error:#}"
+            );
+        }
     }
 
     async fn cleanup_mcp_projections_best_effort(&self) {
@@ -1227,8 +1250,8 @@ impl Core {
             let database = self.database.lock().await;
             checks.push(database_integrity_check(&database));
 
-            match SkillProjectionReconciler.audit_known_roots(&database, &self.skill_library) {
-                Ok(issues) if issues.is_empty() => checks.push(
+            match SkillProjectionReconciler.stored_diagnostic_summary(&database) {
+                Ok((0, _)) => checks.push(
                     DiagnosticCheck::new(
                         "skill-projections",
                         DiagnosticGroup::ManagedContent,
@@ -1236,19 +1259,13 @@ impl Core {
                         "Skill 投影",
                         DiagnosticStatus::Ok,
                         "skill_projections_ready",
-                        "Managed Skill projections match current Library revisions",
+                        "Stored Skill projection state has no pending reconciliation",
                     )
                     .with_observed_at(&checked_at)
                     .with_fact("issueCount", "0"),
                 ),
-                Ok(issues) => {
-                    let codes = issues
-                        .iter()
-                        .filter_map(|issue| issue.error_code.as_deref())
-                        .collect::<BTreeSet<_>>()
-                        .into_iter()
-                        .collect::<Vec<_>>()
-                        .join(",");
+                Ok((issue_count, codes)) => {
+                    let codes = codes.into_iter().collect::<Vec<_>>().join(",");
                     checks.push(
                         DiagnosticCheck::new(
                             "skill-projections",
@@ -1257,10 +1274,10 @@ impl Core {
                             "Skill 投影",
                             DiagnosticStatus::Attention,
                             "skill_projections_need_reconcile",
-                            "Managed Skill projections do not match current read-only audit",
+                            "Stored Skill projection state will reconcile on the next relevant Run or explicit repair",
                         )
                         .with_observed_at(&checked_at)
-                        .with_fact("issueCount", issues.len().to_string())
+                        .with_fact("issueCount", issue_count.to_string())
                         .with_fact("issueCodes", codes),
                     );
                 }
@@ -1272,7 +1289,7 @@ impl Core {
                         "Skill 投影",
                         DiagnosticStatus::Unknown,
                         "skill_projection_audit_failed",
-                        "Managed Skill projections could not be confirmed",
+                        "Stored Skill projection state could not be confirmed",
                     )
                     .with_observed_at(&checked_at),
                 ),
@@ -2621,6 +2638,9 @@ impl Core {
                     )?;
                     let needs_resolution = execution.result.status == CommandResultStatus::Applied
                         && !managed_runtime_is_ready(&database, adapter_kind)?;
+                    if execution.result.status == CommandResultStatus::Applied {
+                        self.mark_skill_projections_dirty_best_effort(&mut database, true);
+                    }
                     (execution, needs_resolution)
                 };
                 if execution.result.status == CommandResultStatus::Applied {
@@ -2633,9 +2653,6 @@ impl Core {
                 }
                 if execution.result.status == CommandResultStatus::Applied && !needs_resolution {
                     self.pump_runtime_ready_recipient(&agent_id).await?;
-                }
-                if execution.result.status == CommandResultStatus::Applied {
-                    self.skill_reconcile_notify.notify_one();
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
@@ -2652,7 +2669,7 @@ impl Core {
                     self.runtime_fleet
                         .invalidate_runtime_config(&agent_id)
                         .await;
-                    self.skill_reconcile_notify.notify_one();
+                    self.mark_skill_projections_dirty_best_effort(&mut database, true);
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
@@ -2684,7 +2701,9 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
-                self.reconcile_skills_best_effort(&mut database);
+                if execution.result.status == CommandResultStatus::Applied {
+                    self.mark_skill_projections_dirty_best_effort(&mut database, true);
+                }
                 Ok(serde_json::to_value(execution.result)?)
             }
             "members.removalPreview" => {
@@ -2707,8 +2726,8 @@ impl Core {
                 )?;
                 if execution.result.status == CommandResultStatus::Applied {
                     self.runtime_fleet.invalidate_member(&agent_id).await;
+                    self.mark_skill_projections_dirty_best_effort(&mut database, true);
                 }
-                self.reconcile_skills_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "members.reorder" => {
@@ -2882,8 +2901,8 @@ impl Core {
                     && let Some(adapter_kind) = adapter_kind
                 {
                     self.runtime_fleet.invalidate_adapter(adapter_kind).await;
+                    self.mark_skill_projections_dirty_best_effort(&mut database, true);
                 }
-                self.reconcile_skills_best_effort(&mut database);
                 Ok(serde_json::to_value(execution.result)?)
             }
             "runtime.installations.refresh" => {
@@ -2908,6 +2927,39 @@ impl Core {
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(
                     self.skill_library.list_delivery_groups(&database)?,
+                )?)
+            }
+            "skills.projectAccess.sync" => {
+                let params: SyncSkillProjectAccessParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                SkillProjectionReconciler.synchronize_removed_execution_roots(
+                    &mut database,
+                    &params.removed_execution_roots,
+                )?;
+                Ok(json!({
+                    "removedRootCount": params.removed_execution_roots.len(),
+                }))
+            }
+            "skills.projectAccess.remove" => {
+                let params: SkillProjectAccessParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    SkillProjectionReconciler.remove_execution_root(
+                        &mut database,
+                        &self.skill_library,
+                        Path::new(&params.execution_root),
+                    )?,
+                )?)
+            }
+            "skills.projectAccess.restore" => {
+                let params: SkillProjectAccessParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    SkillProjectionReconciler
+                        .restore_execution_root(&mut database, &params.execution_root)?,
                 )?)
             }
             "skills.revealLocation" => {
@@ -3019,21 +3071,22 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
-                self.reconcile_skills_best_effort(&mut database);
+                if execution.result.status == CommandResultStatus::Applied {
+                    self.mark_skill_projections_dirty_best_effort(&mut database, false);
+                }
                 Ok(serde_json::to_value(execution.result)?)
             }
             "skills.setEnabled" => {
                 let params: UserCommandParams<SetSkillEnabledCommand> =
                     serde_json::from_value(request.params.clone())?;
+                let cleanup_required = !params.command.enabled;
                 let mut database = self.database.lock().await;
                 let execution = self.skill_library.set_enabled(
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
-                let should_reconcile = execution.result.status == CommandResultStatus::Applied;
-                drop(database);
-                if should_reconcile {
-                    self.skill_reconcile_notify.notify_one();
+                if execution.result.status == CommandResultStatus::Applied {
+                    self.mark_skill_projections_dirty_best_effort(&mut database, cleanup_required);
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
@@ -3045,7 +3098,9 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
-                self.reconcile_skills_best_effort(&mut database);
+                if execution.result.status == CommandResultStatus::Applied {
+                    self.mark_skill_projections_dirty_best_effort(&mut database, true);
+                }
                 Ok(serde_json::to_value(execution.result)?)
             }
             "skills.delete" => {
@@ -3056,7 +3111,11 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
-                self.reconcile_skills_best_effort(&mut database);
+                if execution.result.status == CommandResultStatus::Applied {
+                    self.mark_skill_projections_dirty_best_effort(&mut database, true);
+                    SkillProjectionReconciler
+                        .finalize_unprojected_deletions(&mut database, &self.skill_library)?;
+                }
                 Ok(serde_json::to_value(execution.result)?)
             }
             "skills.projections.listIssues" => {
@@ -3278,7 +3337,9 @@ impl Core {
                     &mut database,
                     &user_camp_command_envelope(params.command_id, camp_id, params.command),
                 )?;
-                self.reconcile_skills_best_effort(&mut database);
+                if execution.result.status == CommandResultStatus::Applied {
+                    self.mark_skill_projections_dirty_best_effort(&mut database, true);
+                }
                 let should_remove_attachments =
                     execution.result.status == CommandResultStatus::Applied;
                 let deleted_camp_id = execution
@@ -4018,6 +4079,24 @@ impl Core {
         mut candidate: rovai_core::runtime::QueuedAgentRunCandidate,
         output: mpsc::UnboundedSender<String>,
     ) {
+        let access_removed = {
+            let database = self.database.lock().await;
+            match SkillProjectionReconciler
+                .execution_root_is_removed(&database, &candidate.project_path)
+            {
+                Ok(removed) => removed,
+                Err(error) => {
+                    eprintln!(
+                        "failed to read Skill projection access for AgentRun {}: {error:#}",
+                        candidate.agent_run_id
+                    );
+                    return;
+                }
+            }
+        };
+        if access_removed {
+            return;
+        }
         let workspace = candidate.execution_workspace();
         let workspace_path = match self.validate_dispatch_workspace(&candidate).await {
             Ok(path) => path,
@@ -4269,6 +4348,8 @@ impl Core {
                             "replayed": execution.replayed,
                         }),
                     );
+                    self.reconcile_skill_projection_after_run_terminal(&candidate.execution_root)
+                        .await;
                     let core = self.clone();
                     tokio::spawn(async move {
                         core.record_cancelled_run_ending_git_observation(&candidate)
@@ -4986,9 +5067,8 @@ impl Core {
     async fn prepare_agent_run_skill_exposure(
         &self,
         execution: &AgentRunExecution,
-        output: &mpsc::UnboundedSender<String>,
     ) -> Result<Option<PreparedSkillExposure>> {
-        let preparation = {
+        let exposure = {
             let mut database = self.database.lock().await;
             ContextService.prepare_skill_exposure(
                 &mut database,
@@ -4997,23 +5077,7 @@ impl Core {
                 execution.execution_epoch,
             )
         }?;
-        match preparation {
-            SkillExposurePreparation::Ready(exposure) => Ok(Some(exposure)),
-            SkillExposurePreparation::Waiting(wait) => {
-                emit(
-                    output,
-                    "agent_run.context_waiting",
-                    json!({
-                        "campId": execution.camp_id,
-                        "campTurnId": execution.camp_turn_id,
-                        "agentRunId": execution.agent_run_id,
-                        "executionEpoch": execution.execution_epoch,
-                        "reason": wait.reason,
-                    }),
-                );
-                Ok(None)
-            }
-        }
+        Ok(Some(exposure))
     }
 
     async fn prepare_agent_run_mcp_projection(
@@ -5619,7 +5683,7 @@ impl Core {
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
         let Some(skill_exposure) = self
-            .prepare_agent_run_skill_exposure(execution, output)
+            .prepare_agent_run_skill_exposure(execution)
             .await
             .context("failed to prepare AgentRun Skill exposure")?
         else {
@@ -6240,6 +6304,10 @@ impl Core {
                         "replayed": terminal.replayed,
                     }),
                 );
+                self.reconcile_skill_projection_after_run_terminal(
+                    &current.workspace.execution_root,
+                )
+                .await;
                 return Ok(());
             }
             if attempt < 79
@@ -6583,6 +6651,10 @@ impl Core {
                         "replayed": terminal.replayed,
                     }),
                 );
+                self.reconcile_skill_projection_after_run_terminal(
+                    &current.workspace.execution_root,
+                )
+                .await;
                 return Ok(());
             }
             if attempt < 79
@@ -6864,15 +6936,20 @@ impl Core {
                 },
             )
         };
-        match failure {
-            Ok(execution) if execution.result.status != CommandResultStatus::Rejected => {}
-            Ok(_) => {}
+        let failure_persisted = match failure {
+            Ok(execution) if execution.result.status != CommandResultStatus::Rejected => true,
+            Ok(_) => false,
             Err(failure_error) => {
                 eprintln!(
                     "failed to persist AgentRun {} launch failure: {failure_error:#}",
                     execution.agent_run_id
                 );
+                false
             }
+        };
+        if failure_persisted {
+            self.reconcile_skill_projection_after_run_terminal(&execution.workspace.execution_root)
+                .await;
         }
         match execution.runtime.adapter_kind {
             rovai_core::agent_profile::AdapterKind::CodexCli => {
@@ -6940,15 +7017,22 @@ impl Core {
                 },
             )
         };
-        match failure {
-            Ok(execution) if execution.result.status != CommandResultStatus::Rejected => {}
-            Ok(_) => {}
+        let failure_persisted = match failure {
+            Ok(execution) if execution.result.status != CommandResultStatus::Rejected => true,
+            Ok(_) => false,
             Err(failure_error) => {
                 eprintln!(
                     "failed to close malformed AgentRun {}: {failure_error:#}",
                     candidate.agent_run_id
                 );
+                false
             }
+        };
+        if failure_persisted {
+            self.reconcile_skill_projection_after_run_terminal(
+                &candidate.execution_workspace().execution_root,
+            )
+            .await;
         }
     }
 
@@ -7218,6 +7302,10 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
     let _data_dir_lock = CoreDataDirLock::acquire(&data_dir)?;
     let mcp_config_path = parse_mcp_config_path()?;
     let mut database = Database::open(&data_dir)?;
+    SkillProjectionReconciler.synchronize_removed_execution_roots(
+        &mut database,
+        &parse_removed_skill_project_roots()?,
+    )?;
     let compaction_detector_policies =
         DesiredCompactionDetectorPolicies::from_process_environment();
     for diagnostic in &compaction_detector_policies.diagnostics {
@@ -7284,9 +7372,11 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
     mcp_config.migrate_agent_ids(&database.agent_id_aliases()?)?;
     let mcp_projection = McpProjectionService::new(&data_dir);
     skill_library.cleanup_expired_staging()?;
-    skill_library.install_bundled_skills(&mut database)?;
+    let bundled_skills_changed = skill_library.install_bundled_skills(&mut database)?;
+    if bundled_skills_changed {
+        SkillProjectionReconciler.mark_observed_roots_dirty(&mut database, false)?;
+    }
     skill_library.cleanup_orphan_revisions(&database)?;
-    SkillProjectionReconciler.reconcile_known_roots(&mut database, &skill_library)?;
     mcp_projection.cleanup_terminal_and_orphaned(&database)?;
     let v2_recovery = database.prepare_v2_recovery()?;
     let interrupted_deliveries =
@@ -7348,7 +7438,6 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
         runtime_check_requests: runtime_check_tx,
         compaction_detector_policies: compaction_detector_policies.clone(),
         runtime_resolution_notify: Notify::new(),
-        skill_reconcile_notify: Notify::new(),
         agent_run_cancellation_notify: Notify::new(),
         pending_execution_recovery: Mutex::new(()),
         skill_library,
@@ -8691,6 +8780,10 @@ async fn persist_acp_prompt_completion(
                         "replayed": terminal.replayed,
                     }),
                 );
+                core.reconcile_skill_projection_after_run_terminal(
+                    &execution.workspace.execution_root,
+                )
+                .await;
                 if let Some(adapter) = core.acp_adapter(adapter_kind) {
                     adapter
                         .complete_agent_run(agent_run_id, execution_epoch)
@@ -8984,6 +9077,7 @@ async fn process_agent_run_codex_message(
         None => runtime.final_agent_message().await,
     };
     let mut terminal_persisted = false;
+    let mut terminal_execution_root = None;
     for attempt in 0..80 {
         let execution = {
             let database = core.database.lock().await;
@@ -9099,6 +9193,7 @@ async fn process_agent_run_codex_message(
                     }),
                 );
                 terminal_persisted = true;
+                terminal_execution_root = Some(execution.workspace.execution_root.clone());
                 break;
             }
             Ok(terminal)
@@ -9132,6 +9227,10 @@ async fn process_agent_run_codex_message(
     }
     if !terminal_persisted {
         return;
+    }
+    if let Some(execution_root) = terminal_execution_root {
+        core.reconcile_skill_projection_after_run_terminal(&execution_root)
+            .await;
     }
     runtime.clear_turn(Some(&completed.turn_id)).await;
     core.codex_cli
@@ -9479,11 +9578,11 @@ async fn process_agent_run_scheduler(
 ) {
     let mut interval = tokio::time::interval(Duration::from_millis(500));
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    let mut skill_interval = tokio::time::interval_at(
+    let mut mcp_cleanup_interval = tokio::time::interval_at(
         tokio::time::Instant::now() + Duration::from_secs(30),
         Duration::from_secs(30),
     );
-    skill_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    mcp_cleanup_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let mut pending_execution_interval = tokio::time::interval_at(
         tokio::time::Instant::now() + Duration::from_secs(15),
         Duration::from_secs(15),
@@ -9500,13 +9599,8 @@ async fn process_agent_run_scheduler(
             _ = core.agent_run_cancellation_notify.notified() => {
                 core.dispatch_agent_run_cancellations(&output).await;
             },
-            _ = skill_interval.tick() => {
-                core.reconcile_skills_periodically().await;
+            _ = mcp_cleanup_interval.tick() => {
                 core.cleanup_mcp_projections_best_effort().await;
-            },
-            _ = core.skill_reconcile_notify.notified() => {
-                tokio::time::sleep(Duration::from_millis(100)).await;
-                core.reconcile_skills_periodically().await;
             },
             _ = pending_execution_interval.tick() => {
                 core.recover_pending_execution_intents().await;
@@ -9821,6 +9915,38 @@ fn parse_data_dir() -> Result<PathBuf> {
     parse_data_dir_from(std::env::args().skip(1))
 }
 
+fn parse_removed_skill_project_roots() -> Result<Vec<String>> {
+    parse_removed_skill_project_roots_from(std::env::args().skip(1))
+}
+
+fn parse_removed_skill_project_roots_from(
+    args: impl IntoIterator<Item = String>,
+) -> Result<Vec<String>> {
+    let mut args = args.into_iter();
+    let mut roots = BTreeSet::new();
+    while let Some(arg) = args.next() {
+        if arg != "--removed-skill-project-root" {
+            continue;
+        }
+        let root = args
+            .next()
+            .context("--removed-skill-project-root requires a path")?;
+        let path = Path::new(&root);
+        if !path.is_absolute()
+            || path.components().any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::CurDir | std::path::Component::ParentDir
+                )
+            })
+        {
+            anyhow::bail!("--removed-skill-project-root requires a normalized absolute path");
+        }
+        roots.insert(root);
+    }
+    Ok(roots.into_iter().collect())
+}
+
 fn parse_data_dir_from(args: impl IntoIterator<Item = String>) -> Result<PathBuf> {
     let mut args = args.into_iter();
     let mut data_dir = None;
@@ -9899,6 +10025,42 @@ mod tests {
                 .unwrap_err()
             )
             .contains("only once")
+        );
+    }
+
+    #[test]
+    fn removed_skill_project_roots_are_explicit_normalized_and_deduplicated() {
+        let first = std::env::temp_dir().join("rovai-removed-project-a");
+        let second = std::env::temp_dir().join("rovai-removed-project-b");
+        let parsed = parse_removed_skill_project_roots_from(vec![
+            "--data-dir".to_string(),
+            std::env::temp_dir()
+                .join("rovai-core-data")
+                .to_string_lossy()
+                .into_owned(),
+            "--removed-skill-project-root".to_string(),
+            second.to_string_lossy().into_owned(),
+            "--removed-skill-project-root".to_string(),
+            first.to_string_lossy().into_owned(),
+            "--removed-skill-project-root".to_string(),
+            second.to_string_lossy().into_owned(),
+        ])
+        .unwrap();
+        assert_eq!(
+            parsed,
+            vec![
+                first.to_string_lossy().into_owned(),
+                second.to_string_lossy().into_owned(),
+            ]
+        );
+        assert!(
+            parse_removed_skill_project_roots_from(vec![
+                "--removed-skill-project-root".to_string(),
+                "relative/project".to_string(),
+            ])
+            .unwrap_err()
+            .to_string()
+            .contains("normalized absolute path")
         );
     }
 

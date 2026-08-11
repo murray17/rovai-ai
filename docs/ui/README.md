@@ -21,8 +21,11 @@ New Conversation、七个设置分类、队员、记忆与各类浮层继续使�
 实现与验收状态见[v0.56 实施计划](../versions/v0.56/implementation-plan.md)。
 
 v0.57 在该视觉基线上为 directory Project 增加可恢复的“移除项目”：只从这台 Mac 的侧栏
-隐藏并取消相关置顶，不删除工作目录、Camp 或执行历史；重新选择同一目录即可恢复。当前实施与
-验收状态见[v0.57 实施计划](../versions/v0.57/implementation-plan.md)。
+隐藏并取消相关置顶，不删除工作目录、Camp 或执行历史；重新选择同一目录即可恢复。v0.58 继续
+保持 Main-owned Navigation preference，同时把移除状态镜像为 Core 的 Skill projection root-access
+ledger：active Run 可完成一次终态清理，之后启动、周期任务和历史 observation 不再访问该目录。
+当前实施与验收状态见[v0.57 实施计划](../versions/v0.57/implementation-plan.md)与
+[v0.58 实施计划](../versions/v0.58/implementation-plan.md)。
 
 v0.58 将用户与 Agent 普通正文统一到同一开放阅读平面，并在 2K 宽屏下把自然语言叙述与代码、
 表格等真实工件拆成两种宽度。该变化不增加 Agent 身份底色，不改变 Task、Approval、AgentRun、

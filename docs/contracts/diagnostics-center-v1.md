@@ -52,7 +52,8 @@ interface DiagnosticCheck {
 - 保留最近成功 Runtime 证据时 `stale = true`，并在 facts 中提供非路径的最近成功时间。
 
 该 Method 只读。调用前后不得出现 Skill reconcile、MCP 初始化/权限修改、Runtime rescan/check、
-SQLite 写入、登录或 Runtime replacement。
+SQLite 写入、登录或 Runtime replacement。Skill 检查只读取已持久化的 Observation、root-access 与
+dirty 状态；不得 resolve、canonicalize、stat 或枚举任何历史 Project execution root。
 
 ## 2. 显式下一步
 

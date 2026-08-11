@@ -197,6 +197,20 @@ function publishAppearance(): AppearanceSnapshot {
   return snapshot
 }
 
+function removedSkillProjectRoots(): string[] {
+  return requireNavigationPreferences()
+    .get()
+    .removedProjects
+    .filter((project) => project.targetKey.startsWith('directory:'))
+    .map((project) => project.targetKey.slice('directory:'.length))
+}
+
+async function synchronizeCoreProjectAccessFromNavigation(): Promise<void> {
+  const removedExecutionRoots = removedSkillProjectRoots()
+  await core.request('skills.projectAccess.sync', { removedExecutionRoots })
+  core.setRemovedSkillProjectRoots(removedExecutionRoots)
+}
+
 const MIN_WINDOW_WIDTH = 1040
 const MIN_WINDOW_HEIGHT = 700
 const RAIL_BUTTON_INSET_X = 12
@@ -307,7 +321,9 @@ if (primaryInstance) void app.whenReady().then(async () => {
   nativeTheme.on('updated', publishAppearance)
   publishAppearance()
   void memberAvatars.cleanupStaleTemporaryDirectories().catch(() => undefined)
-  core.start()
+  core.start({
+    removedSkillProjectRoots: removedSkillProjectRoots()
+  })
   core.onEvent((event) => mainWindow?.webContents.send('rovai:event', event))
   createWindow()
 
@@ -439,17 +455,39 @@ ipcMain.handle('rovai:navigation-preferences-replace-pins', (_event, pins: Navig
 
 ipcMain.handle(
   'rovai:navigation-preferences-remove-project',
-  (_event, targetKey: unknown, relatedCampIds: unknown) => {
+  async (_event, targetKey: unknown, relatedCampIds: unknown) => {
     if (typeof targetKey !== 'string' || !Array.isArray(relatedCampIds)) {
       throw new Error('Invalid Project removal request')
     }
-    return requireNavigationPreferences().removeProject(targetKey, relatedCampIds)
+    if (!targetKey.startsWith('directory:')) {
+      throw new Error('Invalid Project removal target')
+    }
+    const executionRoot = targetKey.slice('directory:'.length)
+    await core.request('skills.projectAccess.remove', { executionRoot })
+    try {
+      const result = await requireNavigationPreferences().removeProject(targetKey, relatedCampIds)
+      core.setRemovedSkillProjectRoots(removedSkillProjectRoots())
+      return result
+    } catch (error) {
+      await synchronizeCoreProjectAccessFromNavigation().catch(() => undefined)
+      throw error
+    }
   }
 )
 
-ipcMain.handle('rovai:navigation-preferences-restore-project', (_event, targetKey: unknown) => {
+ipcMain.handle('rovai:navigation-preferences-restore-project', async (_event, targetKey: unknown) => {
   if (typeof targetKey !== 'string') throw new Error('Invalid Project restore request')
-  return requireNavigationPreferences().restoreProject(targetKey)
+  if (!targetKey.startsWith('directory:')) throw new Error('Invalid Project restore target')
+  const executionRoot = targetKey.slice('directory:'.length)
+  await core.request('skills.projectAccess.restore', { executionRoot })
+  try {
+    const result = await requireNavigationPreferences().restoreProject(targetKey)
+    core.setRemovedSkillProjectRoots(removedSkillProjectRoots())
+    return result
+  } catch (error) {
+    await synchronizeCoreProjectAccessFromNavigation().catch(() => undefined)
+    throw error
+  }
 })
 
 ipcMain.handle('rovai:member-avatar-select-source', async () => {

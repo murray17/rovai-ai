@@ -1159,6 +1159,9 @@ impl Database {
             if !self.schema_migration_applied(74)? {
                 self.migrate_skill_default_assignments_v74()?;
             }
+            if !self.schema_migration_applied(75)? {
+                self.migrate_skill_projection_access_v75()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -1430,6 +1433,9 @@ impl Database {
         }
         if !self.schema_migration_applied(74)? {
             self.migrate_skill_default_assignments_v74()?;
+        }
+        if !self.schema_migration_applied(75)? {
+            self.migrate_skill_projection_access_v75()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -6642,6 +6648,59 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_skill_projection_access_v75(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            CREATE TABLE skill_projection_root_state (
+                execution_root TEXT PRIMARY KEY,
+                access_state TEXT NOT NULL DEFAULT 'active'
+                    CHECK(access_state IN ('active', 'removed')),
+                dirty INTEGER NOT NULL DEFAULT 0 CHECK(dirty IN (0, 1)),
+                cleanup_required INTEGER NOT NULL DEFAULT 0
+                    CHECK(cleanup_required IN (0, 1)),
+                removed_at TEXT,
+                updated_at TEXT NOT NULL,
+                CHECK(access_state = 'removed' OR removed_at IS NULL)
+            );
+
+            INSERT INTO skill_projection_root_state(
+                execution_root, access_state, dirty,
+                cleanup_required, removed_at, updated_at
+            )
+            SELECT execution_root, 'active',
+                   MAX(CASE WHEN state = 'pending_removal' THEN 1 ELSE 0 END),
+                   MAX(CASE WHEN state = 'pending_removal' THEN 1 ELSE 0 END),
+                   NULL, datetime('now')
+            FROM skill_projection_observation
+            GROUP BY execution_root;
+
+            UPDATE agent_run
+            SET status = 'queued', wait_reason = NULL,
+                version = version + 1, updated_at = datetime('now')
+            WHERE status = 'waiting'
+              AND wait_reason = 'skill_projection_drain';
+
+            UPDATE camp_turn
+            SET status = 'running', version = version + 1,
+                updated_at = datetime('now')
+            WHERE status = 'waiting'
+              AND EXISTS (
+                  SELECT 1 FROM agent_run
+                  WHERE agent_run.camp_turn_id = camp_turn.id
+                    AND agent_run.status = 'queued'
+              );
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (75, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -11382,6 +11441,66 @@ mod tests {
             )
             .unwrap();
         assert_eq!(assignments, (8, 8));
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v75_persists_skill_projection_root_access_without_reapplying_it() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v75-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("test database should open");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                DROP TABLE skill_projection_root_state;
+                DELETE FROM schema_migration WHERE version = 75;
+                "#,
+            )
+            .expect("test should restore the pre-v75 projection state");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v75 database should migrate");
+        let migration_applied: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 75",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_applied, 1);
+        reopened
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO skill_projection_root_state(
+                    execution_root, access_state, dirty,
+                    cleanup_required, removed_at, updated_at
+                ) VALUES (
+                    '/tmp/rovai-v75-removed', 'removed', 1, 1,
+                    '2026-08-11T00:00:00Z', '2026-08-11T00:00:00Z'
+                )
+                "#,
+                [],
+            )
+            .unwrap();
+        drop(reopened);
+
+        let reopened = Database::open(&directory).expect("v75 database should reopen");
+        let state: (String, i64, i64) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT access_state, dirty, cleanup_required
+                FROM skill_projection_root_state
+                WHERE execution_root = '/tmp/rovai-v75-removed'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(state, ("removed".to_string(), 1, 1));
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }

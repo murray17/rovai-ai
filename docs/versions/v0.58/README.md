@@ -47,6 +47,18 @@ FNV-1a hash 映射到 `--identity-1..8`，颜色只用于 38px 字母标记，�
 右侧操作收敛为带列名的投递范围、无可见状态文案的 Steel Switch 与详情，Imported 删除仍只在详情，
 不再使用意义不明的三点菜单。
 
+Skill projection 同时改为事件驱动、当前 execution-root 强校验：Skill/Runtime 配置变化只在 DB
+标记既有 projection dirty，不扫描历史目录；App 启动和普通诊断只恢复/读取 Library、Observation、
+dirty/pending cleanup 与本机 Project removal ledger。每个新 AgentRun 在启动 Runtime 前仅对本次
+execution root 的目标 Delivery Groups reconcile 到最新状态并 verify，再记录 start-time
+`SkillExposureSnapshot`。不同 Agent 的新 Run 不等待旧 Run drain；共享 native Skill 目录允许随后看到
+最新 Revision。Snapshot 只证明启动时实际 exposure，不承诺整个 Run 生命周期文件冻结。
+
+从侧栏移除 directory Project 仍是 Main-owned 本机 Navigation preference，但会镜像为 Core 的
+`removed` Skill projection root access。无 active Run 时可做一次受管 link cleanup；有 active Run 时
+只在其 terminal 后完成一次 cleanup，之后启动、周期任务、普通诊断与历史 Observation 都不再访问该
+目录。重新选择/恢复目录只标为 `active + dirty`，真正修复留到下一次相关 Run preflight。
+
 本版本的 Renderer 同时把用户与 Agent 普通消息统一到同一开放阅读平面，并在 2K 宽屏下使用
 “叙述约 76ch、代码与表格最多 930px”的双宽度体系。身份继续由头像、名称、Runtime、时间和 A2A
 metadata 表达；不新增 Agent 默认色、消息底色或领域分组，Task、Approval、AgentRun 与 Composer
@@ -60,6 +72,11 @@ Input Delivery Evidence 继续留在 Core/Snapshot，但不再进入普通 Inspe
 队员管理与记忆一级页同时收口 P2 顶部结构：两页直接跨越 App Shell 两行，以 3px Steel 顶边和
 30px 页面留白进入各自可拖拽 Header，不再保留 50px 空白占位条。队员继续显示身份、Presence、
 Runtime 与真实操作；记忆增加 `MEMORY / GOVERNED CONTEXT` 层级并保留真实导出、新增和治理工作台。
+
+Execution Drawer 顶边同时增加可访问的垂直尺寸调整：鼠标或触控上下拖拽，键盘使用方向键、
+PageUp/PageDown、Home/End，Enter/Space 或双击恢复响应式默认。高度只在当前 Main Window Session
+沿用，不写入 Core 或 Camp；动态上界保证公共消息时间线、Agent 执行台、Approval Dock 与 Composer
+仍可达，调整也不改变 AgentRun 聚焦或 sticky-bottom 跟随边界。
 
 Antigravity one-shot Adapter 同时把 Runtime Input accepted ACK 从完整 `agy --print` 退出提前到可验证
 的上游接收点：只有匹配 Native Conversation 的 forward/send 之后出现 `streamGenerateContent`
@@ -98,19 +115,23 @@ accepted 时结算为 `not_accepted`。三类 Adapter 在 accepted 后发生的 
   stdin/pipe write、Hook/init 或本地 send 当作 accepted。
 - 不把 Skill 正文注入 Dynamic Context，不把默认分组解释为 Runtime/模型已读取或获得额外权限；
 - 不持续覆盖用户对内置或 Imported Skill 分组的后续修改，导入内容仍不授予额外执行权限。
+- 不在启动时或固定周期遍历历史 execution roots，不因 projection Observation 历史创建 watcher 或
+  延续目录访问；只有当前 Run preflight、显式用户修复和受限 terminal cleanup 可以触碰相关 root。
+- 不为共享 Runtime-native Skill 目录引入 drain、waiting、generation 或伪 per-Run Revision 隔离；
+  `SkillExposureSnapshot` 是 start-time Evidence，不是 lifetime filesystem lease。
 
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.57 冻结为 historical，v0.58 成为唯一 current，并新增本版本概览与实施计划 |
-| ADR | 已更新 | ADR-0156 局部替代永久 fingerprint 条款；ADR-0157 局部替代 ADR-0137 的旧 instruction ownership 条款；ADR-0158 局部替代 Skill 默认不分组条款；ADR-0159 完整替代 ADR-0150 并把固定上游 Revision 的 `tasteful-ui` 加入官方集合；ADR-0160 局部替代 ADR-0154 的三 Tab Inspector 与重复 Approval surface |
-| Contracts | 已更新 | ADR-0157 与 Durable Task v3 删除 execution request、AgentRun persistence/read model 的 `expectedOutput` clean break；Run Process Detail Surface v3 冻结任务/队员 Inspector 与唯一 Approval Dock；不增加 Charter 版本轴；Skill wire shape 不变 |
-| Architecture | 已更新 | Built-in Tool Runtime 增加 bounded rebind、显式公共输出义务，以及 Antigravity、Claude Code、ACP 的 runtime-produced accepted evidence；Charter 文案变化不触发 Session 轮换；Skill projection 结构不变，默认策略由 ADR-0158 约束 |
-| UI | 已更新 | Stop 命令目标与按钮可见性统一按非终态 AgentRun 所属 Turn 计算；Skill 设置明确全九组默认并使用行级反馈；会话普通正文统一为开放平面，2K 下分离叙述与工件宽度；Camp Inspector 收敛为任务/队员且 Approval 只在 Composer 上方决定；队员与记忆页删除 50px 空白顶栏并由真实页面 Header 直接承接窗口顶部 |
+| ADR | 已更新 | ADR-0156 局部替代永久 fingerprint 条款；ADR-0157 局部替代 ADR-0137 的旧 instruction ownership 条款；ADR-0158 局部替代 Skill 默认不分组条款；ADR-0159 完整替代 ADR-0150 并把固定上游 Revision 的 `tasteful-ui` 加入官方集合；ADR-0160 局部替代 ADR-0154 的三 Tab Inspector 与重复 Approval surface；ADR-0161 局部替代 ADR-0105 的 active-Run Revision retention/stale-new-Run 条款 |
+| Contracts | 已更新 | ADR-0157 与 Durable Task v3 删除 execution request、AgentRun persistence/read model 的 `expectedOutput` clean break；Run Process Detail Surface v3 冻结任务/队员 Inspector 与唯一 Approval Dock；不增加 Charter 版本轴；SkillExposureSnapshot wire shape 不变、语义收敛为 start-time Evidence |
+| Architecture | 已更新 | Built-in Tool Runtime 增加 bounded rebind、显式公共输出义务，以及 Antigravity、Claude Code、ACP 的 runtime-produced accepted evidence；Charter 文案变化不触发 Session 轮换；新增 Skill Projection Reconciliation，冻结事件驱动 dirty、removed root ledger、当前 Run preflight 与无周期历史扫描 |
+| UI | 已更新 | Stop 命令目标与按钮可见性统一按非终态 AgentRun 所属 Turn 计算；Skill 设置明确全九组默认、UUID 稳定八色、短来源标签与无文案 Steel Switch；会话普通正文统一为开放平面，2K 下分离叙述与工件宽度；Camp Inspector 收敛为任务/队员且 Approval 只在 Composer 上方决定；Execution Drawer 可在会话内调整高度且不改变执行聚焦；Project 移除继续是本机导航偏好并同步 Skill root-access 停止后续目录访问；队员与记忆页删除 50px 空白顶栏并由真实页面 Header 直接承接窗口顶部 |
 | Runtime Activity | 已更新 | Registry 明确稀疏 terminal lifecycle update 不得降级已报告的结构化分类和标题，并补齐 Codex `commandActions` / `changes` presentation mapping |
 | Runtime compatibility | 已更新 | 增加 `agy 1.1.12` marker 与 Claude Code `2.1.220` stream focused smoke，并记录六个 ACP Runtime 的共享确认边界；不改变支持范围或十三工具 qualification 结论 |
-| Documentation routing | 已更新 | CURRENT 的 Skills/MCP 主题新增 ADR-0158 与 ADR-0159，领域术语同步默认分组和 `tasteful-ui` 来源边界 |
+| Documentation routing | 已更新 | CURRENT 的 Skills/MCP 主题新增 ADR-0158、ADR-0159 与 ADR-0161；Architecture 索引新增 Skill Projection Reconciliation；领域术语区分 Library、mutable Projection、Observation、Root Access 与 start-time Snapshot |
 | Root README | 确认无需更新 | 项目定位和常青能力不变，根 README 不记录版本局部恢复机制 |
 
 ## References
@@ -120,6 +141,8 @@ accepted 时结算为 `not_accepted`。三类 Adapter 在 accepted 后发生的 
 - [ADR-0158](../../adr/0158-default-all-runtime-delivery-for-managed-skills.md)
 - [ADR-0159](../../adr/0159-pinned-third-party-tasteful-ui-bundled-skill.md)
 - [ADR-0160](../../adr/0160-focused-camp-inspector-and-single-approval-surface.md)
+- [ADR-0161](../../adr/0161-event-driven-root-scoped-skill-projection-reconciliation.md)
 - [Run Process Detail Surface v3](../../contracts/run-process-detail-surface-v3.md)
 - [Built-in Tool Runtime architecture](../../architecture/builtin-tool-runtime.md)
+- [Skill Projection Reconciliation architecture](../../architecture/skill-projection-reconciliation.md)
 - [Runtime compatibility register](../../runtime-compatibility.md)

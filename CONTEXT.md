@@ -317,8 +317,20 @@ An immutable complete content snapshot of one Rovai Skill, published by an offic
 _Avoid_: mutable Skill directory, in-place update, source checkout, parallel same-name Rovai Skill, Runtime cache
 
 **SkillProjection**:
-A reconstructible Rovai-ai-managed filesystem entry that exposes one SkillRevision through a Runtime's native project-level discovery path for an execution root.
-_Avoid_: Skill source of truth, Runtime personal installation, proof that a model loaded the Skill
+A mutable, reconstructible Rovai-ai-managed filesystem view that exposes current Skill Library state through a Runtime's native project-level discovery path for one execution root. Runs sharing that root do not receive lifetime-isolated Revision directories.
+_Avoid_: Skill source of truth, Runtime personal installation, per-Run immutable Skill directory, proof that a model loaded the Skill
+
+**Skill Projection Observation**:
+The durable last-known fact for one Rovai-managed SkillProjection entry, used to prove ownership and explain or repair its observed state. Observation history neither authorizes nor schedules later access to its execution root.
+_Avoid_: filesystem watcher, access grant, reconciliation schedule, live directory health
+
+**Skill Projection Root Access**:
+The local policy stating whether Rovai-ai may automatically prepare or repair SkillProjection entries in one execution root. Removing a Project suspends new access until the directory is explicitly restored, while an already active AgentRun may finish and trigger its one required terminal cleanup.
+_Avoid_: Project aggregate, Camp deletion, filesystem permission, historical observation
+
+**SkillExposureSnapshot**:
+The immutable start-time evidence of Skill identities, Revisions, delivery paths, states, and conflicts actually observed by one AgentRun preflight. It does not promise that shared projection files remain byte-identical for the Run lifetime and does not prove the Runtime loaded them.
+_Avoid_: per-Run Skill copy, lifetime Revision lease, model-read receipt, Skill Library authority
 
 **Skill Enablement**:
 The application-global delivery pause state of one Rovai Skill. A new official or imported Skill starts enabled; disabling it suspends all Rovai-managed delivery without deleting or changing its Skill Group Assignments, those Assignments remain editable while disabled, and re-enabling restores delivery from the saved Assignments.

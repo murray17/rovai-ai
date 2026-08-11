@@ -185,12 +185,6 @@ pub enum ContextMaterialization {
     Waiting(ContextWait),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SkillExposurePreparation {
-    Ready(PreparedSkillExposure),
-    Waiting(ContextWait),
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeInputDelivery {
@@ -311,7 +305,7 @@ impl ContextService {
         skill_library: &SkillLibraryService,
         agent_run_id: &str,
         execution_epoch: i64,
-    ) -> Result<SkillExposurePreparation> {
+    ) -> Result<PreparedSkillExposure> {
         let snapshot = load_run_snapshot(database, agent_run_id, execution_epoch)?
             .context("AgentRun is not active for Skill exposure preparation")?;
         let existing = database
@@ -326,18 +320,17 @@ impl ContextService {
             )
             .optional()?;
         if let Some((snapshot_json, digest)) = existing {
-            let frozen_snapshot: SkillExposureSnapshot = serde_json::from_str(&snapshot_json)
+            let persisted_snapshot: SkillExposureSnapshot = serde_json::from_str(&snapshot_json)
                 .context("stored ContextManifest Skill exposure is invalid")?;
             if digest != "sha256:legacy-empty-skill-exposure"
-                && canonical_json_digest(&serde_json::to_value(&frozen_snapshot)?)? != digest
+                && canonical_json_digest(&serde_json::to_value(&persisted_snapshot)?)? != digest
             {
                 anyhow::bail!("stored ContextManifest Skill exposure digest is invalid");
             }
-            return Ok(SkillExposurePreparation::Ready(PreparedSkillExposure {
-                snapshot: frozen_snapshot,
+            return Ok(PreparedSkillExposure {
+                snapshot: persisted_snapshot,
                 digest,
-                drain_required: false,
-            }));
+            });
         }
         let adapter_kind = snapshot
             .effective_config
@@ -357,13 +350,7 @@ impl ContextService {
             std::path::Path::new(execution_root),
             adapter_kind,
         )?;
-        if prepared.drain_required {
-            let transaction = database.connection_mut().transaction()?;
-            let wait = persist_context_wait(&transaction, &snapshot, "skill_projection_drain")?;
-            transaction.commit()?;
-            return Ok(SkillExposurePreparation::Waiting(wait));
-        }
-        Ok(SkillExposurePreparation::Ready(prepared))
+        Ok(prepared)
     }
 
     fn materialize_inner(
@@ -400,11 +387,7 @@ impl ContextService {
         } else {
             let snapshot = SkillExposureSnapshot::default();
             let digest = canonical_json_digest(&serde_json::to_value(&snapshot)?)?;
-            fallback_skill_exposure = PreparedSkillExposure {
-                snapshot,
-                digest,
-                drain_required: false,
-            };
+            fallback_skill_exposure = PreparedSkillExposure { snapshot, digest };
             &fallback_skill_exposure
         };
         let fallback_mcp_snapshot;
@@ -4118,47 +4101,6 @@ fn append_json_text_section(output: &mut String, name: &str, payload_json: &str)
     output.push_str("\n[/");
     output.push_str(name);
     output.push_str("]\n\n");
-}
-
-fn persist_context_wait(
-    transaction: &Transaction<'_>,
-    snapshot: &RunSnapshot,
-    reason: &str,
-) -> Result<ContextWait> {
-    let now = chrono::Utc::now().to_rfc3339();
-    let updated = transaction.execute(
-        r#"
-        UPDATE agent_run
-        SET status = 'waiting', wait_reason = ?2,
-            execution_lease_owner = NULL,
-            execution_lease_expires_at = NULL,
-            version = version + 1, updated_at = ?3
-        WHERE id = ?1 AND status = 'running' AND execution_epoch = ?4
-        "#,
-        params![snapshot.agent_run_id, reason, now, snapshot.execution_epoch],
-    )?;
-    if updated != 1 {
-        anyhow::bail!("AgentRun changed before context wait state was persisted");
-    }
-    transaction.execute(
-        r#"
-        UPDATE camp_turn
-        SET status = 'waiting', version = version + 1, updated_at = ?2
-        WHERE id = ?1 AND status IN ('running', 'waiting')
-        "#,
-        params![snapshot.camp_turn_id, now],
-    )?;
-    append_context_event(
-        transaction,
-        "context.materialization_waiting",
-        snapshot,
-        &json!({
-            "reason": reason,
-        }),
-    )?;
-    Ok(ContextWait {
-        reason: reason.to_string(),
-    })
 }
 
 fn revalidate_snapshot_for_manifest(
@@ -7915,9 +7857,7 @@ mod tests {
                 fixture.execution_epoch,
             )
             .unwrap();
-        let SkillExposurePreparation::Ready(exposure) = prepared else {
-            panic!("initial Skill exposure should be ready");
-        };
+        let exposure = prepared;
         assert_eq!(exposure.snapshot.skills.len(), 1);
         assert!(
             exposure
@@ -7993,9 +7933,6 @@ mod tests {
                 fixture.execution_epoch,
             )
             .unwrap();
-        let SkillExposurePreparation::Ready(recovered_exposure) = recovered_exposure else {
-            panic!("frozen Skill exposure should be reusable");
-        };
         assert_eq!(recovered_exposure, exposure);
         let recovered = ContextService
             .materialize_with_skill_exposure(
@@ -8548,7 +8485,6 @@ mod tests {
         let skill_exposure = PreparedSkillExposure {
             digest: canonical_json_digest(&serde_json::to_value(&skill_snapshot).unwrap()).unwrap(),
             snapshot: skill_snapshot,
-            drain_required: false,
         };
         let materialized = ContextService
             .materialize_with_exposures(

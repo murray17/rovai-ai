@@ -78,6 +78,14 @@ pub struct SkillProjectionReport {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SkillProjectionRootAccessResult {
+    pub execution_root: String,
+    pub access_state: String,
+    pub cleanup_pending: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SkillProjectionIssue {
     pub execution_root: String,
     pub group_key: SkillDeliveryGroupKey,
@@ -125,7 +133,6 @@ impl Default for SkillExposureSnapshot {
 pub struct PreparedSkillExposure {
     pub snapshot: SkillExposureSnapshot,
     pub digest: String,
-    pub drain_required: bool,
 }
 
 #[derive(Debug)]
@@ -145,6 +152,206 @@ enum EntryState {
 pub struct SkillProjectionReconciler;
 
 impl SkillProjectionReconciler {
+    pub fn synchronize_removed_execution_roots(
+        &self,
+        database: &mut Database,
+        removed_execution_roots: &[String],
+    ) -> Result<()> {
+        let removed_execution_roots = removed_execution_roots
+            .iter()
+            .map(|root| {
+                validate_persisted_execution_root(root)?;
+                Ok(root.clone())
+            })
+            .collect::<Result<BTreeSet<_>>>()?;
+        let existing_removed = {
+            let mut statement = database.connection().prepare(
+                "SELECT execution_root FROM skill_projection_root_state WHERE access_state = 'removed'",
+            )?;
+            statement
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let now = Utc::now().to_rfc3339();
+        let transaction = database.connection_mut().transaction()?;
+        for execution_root in existing_removed {
+            if removed_execution_roots.contains(&execution_root) {
+                continue;
+            }
+            transaction.execute(
+                r#"
+                UPDATE skill_projection_root_state
+                SET access_state = 'active', dirty = 1,
+                    cleanup_required = 0, removed_at = NULL, updated_at = ?2
+                WHERE execution_root = ?1 AND access_state = 'removed'
+                "#,
+                params![execution_root, now],
+            )?;
+        }
+        for execution_root in removed_execution_roots {
+            let observed: i64 = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM skill_projection_observation WHERE execution_root = ?1)",
+                [&execution_root],
+                |row| row.get(0),
+            )?;
+            transaction.execute(
+                r#"
+                INSERT INTO skill_projection_root_state(
+                    execution_root, access_state, dirty,
+                    cleanup_required, removed_at, updated_at
+                ) VALUES (?1, 'removed', ?2, ?2, ?3, ?3)
+                ON CONFLICT(execution_root) DO UPDATE SET
+                    access_state = 'removed',
+                    dirty = MAX(
+                        skill_projection_root_state.cleanup_required,
+                        excluded.dirty
+                    ),
+                    cleanup_required = MAX(
+                        skill_projection_root_state.cleanup_required,
+                        excluded.cleanup_required
+                    ),
+                    removed_at = COALESCE(skill_projection_root_state.removed_at, excluded.removed_at),
+                    updated_at = excluded.updated_at
+                "#,
+                params![execution_root, observed, now],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn remove_execution_root(
+        &self,
+        database: &mut Database,
+        library: &SkillLibraryService,
+        execution_root: &Path,
+    ) -> Result<SkillProjectionRootAccessResult> {
+        let execution_root_text = execution_root.to_string_lossy().to_string();
+        validate_persisted_execution_root(&execution_root_text)?;
+        let observed: i64 = database.connection().query_row(
+            "SELECT EXISTS(SELECT 1 FROM skill_projection_observation WHERE execution_root = ?1)",
+            [&execution_root_text],
+            |row| row.get(0),
+        )?;
+        upsert_root_access_state(
+            database,
+            &execution_root_text,
+            "removed",
+            observed != 0,
+            observed != 0,
+        )?;
+
+        if observed != 0 && !has_active_run(database, &execution_root_text, None, None)? {
+            match self.reconcile_root_internal(database, library, execution_root, &[]) {
+                Ok(_) => {
+                    mark_root_reconciled(database, &execution_root_text)?;
+                    self.finalize_deleting_skills(database, library)?;
+                }
+                Err(error) => eprintln!(
+                    "failed to clean removed Skill projection root {}: {error:#}",
+                    execution_root.display()
+                ),
+            }
+        }
+        let cleanup_pending = root_cleanup_pending(database, &execution_root_text)?;
+        Ok(SkillProjectionRootAccessResult {
+            execution_root: execution_root_text,
+            access_state: "removed".to_string(),
+            cleanup_pending,
+        })
+    }
+
+    pub fn restore_execution_root(
+        &self,
+        database: &mut Database,
+        execution_root: &str,
+    ) -> Result<SkillProjectionRootAccessResult> {
+        validate_persisted_execution_root(execution_root)?;
+        upsert_root_access_state(database, execution_root, "active", true, false)?;
+        Ok(SkillProjectionRootAccessResult {
+            execution_root: execution_root.to_string(),
+            access_state: "active".to_string(),
+            cleanup_pending: false,
+        })
+    }
+
+    pub fn execution_root_is_removed(
+        &self,
+        database: &Database,
+        execution_root: &str,
+    ) -> Result<bool> {
+        root_access_is_removed(database, execution_root)
+    }
+
+    pub fn mark_observed_roots_dirty(
+        &self,
+        database: &mut Database,
+        cleanup_required: bool,
+    ) -> Result<usize> {
+        let now = Utc::now().to_rfc3339();
+        let transaction = database.connection_mut().transaction()?;
+        let inserted = transaction.execute(
+            r#"
+            INSERT INTO skill_projection_root_state(
+                execution_root, access_state, dirty,
+                cleanup_required, removed_at, updated_at
+            )
+            SELECT DISTINCT execution_root, 'active', 1, ?1, NULL, ?2
+            FROM skill_projection_observation
+            WHERE 1 = 1
+            ON CONFLICT(execution_root) DO UPDATE SET
+                dirty = 1,
+                cleanup_required = MAX(
+                    skill_projection_root_state.cleanup_required,
+                    excluded.cleanup_required
+                ),
+                updated_at = excluded.updated_at
+            "#,
+            params![if cleanup_required { 1 } else { 0 }, now],
+        )?;
+        transaction.commit()?;
+        Ok(inserted)
+    }
+
+    pub fn finalize_unprojected_deletions(
+        &self,
+        database: &mut Database,
+        library: &SkillLibraryService,
+    ) -> Result<()> {
+        self.finalize_deleting_skills(database, library)
+    }
+
+    pub fn reconcile_after_run_terminal(
+        &self,
+        database: &mut Database,
+        library: &SkillLibraryService,
+        execution_root: &Path,
+    ) -> Result<()> {
+        let execution_root_text = execution_root.to_string_lossy().to_string();
+        if !root_is_dirty(database, &execution_root_text)? {
+            return Ok(());
+        }
+        let removed = root_access_is_removed(database, &execution_root_text)?;
+        if removed && has_active_run(database, &execution_root_text, None, None)? {
+            return Ok(());
+        }
+        let required_delivery_groups = if removed {
+            Vec::new()
+        } else {
+            let mut groups = observed_delivery_groups(database, &execution_root_text)?;
+            groups.extend(active_run_delivery_groups(
+                database,
+                &execution_root_text,
+                None,
+            )?);
+            groups.into_iter().collect()
+        };
+        self.reconcile_root_internal(database, library, execution_root, &required_delivery_groups)?;
+        mark_root_reconciled(database, &execution_root_text)?;
+        self.finalize_deleting_skills(database, library)?;
+        Ok(())
+    }
+
     pub fn known_execution_roots(
         &self,
         database: &Database,
@@ -211,24 +418,17 @@ impl SkillProjectionReconciler {
                     .extend(capability.delivery_groups);
             }
         }
-        {
-            let mut statement = database
-                .connection()
-                .prepare("SELECT DISTINCT execution_root FROM skill_projection_observation")?;
-            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
-            for row in rows {
-                requirements.entry(row?).or_default();
+        let mut result = Vec::new();
+        for (execution_root, delivery_groups) in requirements {
+            if root_access_is_removed(database, &execution_root)? {
+                continue;
             }
+            result.push(ExecutionRootSkillRequirement {
+                execution_root,
+                delivery_groups: delivery_groups.into_iter().collect(),
+            });
         }
-        Ok(requirements
-            .into_iter()
-            .map(
-                |(execution_root, delivery_groups)| ExecutionRootSkillRequirement {
-                    execution_root,
-                    delivery_groups: delivery_groups.into_iter().collect(),
-                },
-            )
-            .collect())
+        Ok(result)
     }
 
     pub fn reconcile_known_roots(
@@ -259,7 +459,6 @@ impl SkillProjectionReconciler {
         if all_roots_available {
             self.finalize_deleting_skills(database, library)?;
         }
-        self.resume_projection_waits(database)?;
         Ok(reports)
     }
 
@@ -284,6 +483,13 @@ impl SkillProjectionReconciler {
             })
             .collect::<Vec<_>>();
 
+        let requested_root_text = execution_root.to_string_lossy().to_string();
+        if root_access_is_removed(database, &requested_root_text)? {
+            anyhow::bail!(
+                "Skill projection access is suspended for removed Project: {}",
+                execution_root.display()
+            );
+        }
         let canonical_root = execution_root.canonicalize().with_context(|| {
             format!(
                 "Skill projection execution root is unavailable: {}",
@@ -291,26 +497,30 @@ impl SkillProjectionReconciler {
             )
         })?;
         let canonical_root_text = canonical_root.to_string_lossy().to_string();
+        if root_access_is_removed(database, &canonical_root_text)? {
+            anyhow::bail!(
+                "Skill projection access is suspended for removed Project: {}",
+                canonical_root.display()
+            );
+        }
         let mut delivery_groups = capability
             .delivery_groups
             .iter()
             .copied()
             .collect::<BTreeSet<_>>();
-        for requirement in self.known_execution_roots(database)? {
-            if Path::new(&requirement.execution_root)
-                .canonicalize()
-                .is_ok_and(|root| root == canonical_root)
-            {
-                delivery_groups.extend(requirement.delivery_groups);
-            }
-        }
+        delivery_groups.extend(active_run_delivery_groups(
+            database,
+            &canonical_root_text,
+            Some(agent_run_id),
+        )?);
         self.reconcile_root_internal(
             database,
             library,
             &canonical_root,
             &delivery_groups.iter().copied().collect::<Vec<_>>(),
-            Some(agent_run_id),
         )?;
+        mark_root_reconciled(database, &canonical_root_text)?;
+        self.finalize_deleting_skills(database, library)?;
 
         let mut entries = Vec::new();
         for group_key in &capability.delivery_groups {
@@ -394,6 +604,27 @@ impl SkillProjectionReconciler {
                 .then_with(|| left.name.cmp(&right.name))
                 .then_with(|| left.skill_id.cmp(&right.skill_id))
         });
+        let verification_failures = entries
+            .iter()
+            .filter(|entry| matches!(entry.status.as_str(), "error" | "stale"))
+            .map(|entry| {
+                format!(
+                    "{} ({}, {})",
+                    entry.name,
+                    entry.group_key,
+                    entry
+                        .reason_code
+                        .as_deref()
+                        .unwrap_or(entry.status.as_str())
+                )
+            })
+            .collect::<Vec<_>>();
+        if !verification_failures.is_empty() {
+            anyhow::bail!(
+                "Skill projection verification failed: {}",
+                verification_failures.join(", ")
+            );
+        }
         let snapshot = SkillExposureSnapshot {
             schema_version: 2,
             skills: entries,
@@ -401,7 +632,6 @@ impl SkillProjectionReconciler {
         Ok(PreparedSkillExposure {
             digest: canonical_json_digest(&serde_json::to_value(&snapshot)?)?,
             snapshot,
-            drain_required: false,
         })
     }
 
@@ -412,13 +642,14 @@ impl SkillProjectionReconciler {
         execution_root: &Path,
         required_delivery_groups: &[SkillDeliveryGroupKey],
     ) -> Result<SkillProjectionReport> {
-        self.reconcile_root_internal(
+        let report = self.reconcile_root_internal(
             database,
             library,
             execution_root,
             required_delivery_groups,
-            None,
-        )
+        )?;
+        mark_root_reconciled(database, &report.execution_root)?;
+        Ok(report)
     }
 
     fn reconcile_root_internal(
@@ -427,7 +658,6 @@ impl SkillProjectionReconciler {
         library: &SkillLibraryService,
         execution_root: &Path,
         required_delivery_groups: &[SkillDeliveryGroupKey],
-        ignored_agent_run_id: Option<&str>,
     ) -> Result<SkillProjectionReport> {
         let execution_root = execution_root.canonicalize().with_context(|| {
             format!(
@@ -442,8 +672,7 @@ impl SkillProjectionReconciler {
             );
         }
         let execution_root_text = execution_root.to_string_lossy().to_string();
-        let active_run_present =
-            has_active_run(database, &execution_root, ignored_agent_run_id, None)?;
+        let active_run_present = has_active_run(database, &execution_root_text, None, None)?;
         let required_delivery_groups = required_delivery_groups
             .iter()
             .copied()
@@ -466,12 +695,6 @@ impl SkillProjectionReconciler {
             SkillDeliveryGroupKey::Qwen,
         ];
         for group_key in RECONCILE_ORDER {
-            let group_active_run_present = has_active_run(
-                database,
-                &execution_root,
-                ignored_agent_run_id,
-                Some(group_key),
-            )?;
             let native_root = execution_root.join(group_key.relative_path());
             cleanup_safe_temporary_links(database, library, &native_root)?;
             for skill in &skills {
@@ -511,7 +734,6 @@ impl SkillProjectionReconciler {
                         skill,
                         &entry_path,
                         state,
-                        group_active_run_present,
                     )?;
                     let pending_direct_removal =
                         load_observation(database, &execution_root_text, group_key, &skill.id)?
@@ -535,7 +757,6 @@ impl SkillProjectionReconciler {
                         skill,
                         &entry_path,
                         state,
-                        group_active_run_present,
                     )?;
                 } else {
                     reconcile_undesired_entry(
@@ -545,7 +766,6 @@ impl SkillProjectionReconciler {
                         skill,
                         &entry_path,
                         state,
-                        group_active_run_present,
                     )?;
                 }
             }
@@ -597,6 +817,78 @@ impl SkillProjectionReconciler {
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn stored_diagnostic_summary(
+        &self,
+        database: &Database,
+    ) -> Result<(usize, BTreeSet<String>)> {
+        let mut codes = BTreeSet::new();
+        let mut issue_count = 0usize;
+        let mut statement = database.connection().prepare(
+            r#"
+            SELECT observation.last_error_code
+            FROM skill_projection_observation AS observation
+            LEFT JOIN skill_projection_root_state AS root_state
+              ON root_state.execution_root = observation.execution_root
+            WHERE observation.state <> 'ready'
+              AND COALESCE(root_state.access_state, 'active') <> 'removed'
+              AND (
+                  EXISTS (
+                      SELECT 1 FROM camp
+                      WHERE camp.project_path = observation.execution_root
+                  )
+                  OR EXISTS (
+                      SELECT 1
+                      FROM agent_run
+                      JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                      JOIN camp ON camp.id = camp_turn.camp_id
+                      WHERE agent_run.status IN ('running', 'waiting')
+                        AND COALESCE(
+                            json_extract(agent_run.workspace_json, '$.executionRoot'),
+                            camp.project_path
+                        ) = observation.execution_root
+                  )
+              )
+            "#,
+        )?;
+        let rows = statement.query_map([], |row| row.get::<_, Option<String>>(0))?;
+        for row in rows {
+            issue_count += 1;
+            codes.insert(row?.unwrap_or_else(|| "projection_not_ready".to_string()));
+        }
+        let dirty_count: i64 = database.connection().query_row(
+            r#"
+            SELECT COUNT(*)
+            FROM skill_projection_root_state AS root_state
+            WHERE root_state.access_state = 'active'
+              AND root_state.dirty = 1
+              AND (
+                  EXISTS (
+                      SELECT 1 FROM camp
+                      WHERE camp.project_path = root_state.execution_root
+                  )
+                  OR EXISTS (
+                      SELECT 1
+                      FROM agent_run
+                      JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                      JOIN camp ON camp.id = camp_turn.camp_id
+                      WHERE agent_run.status IN ('running', 'waiting')
+                        AND COALESCE(
+                            json_extract(agent_run.workspace_json, '$.executionRoot'),
+                            camp.project_path
+                        ) = root_state.execution_root
+                  )
+              )
+            "#,
+            [],
+            |row| row.get(0),
+        )?;
+        if dirty_count > 0 {
+            issue_count += dirty_count as usize;
+            codes.insert("projection_dirty".to_string());
+        }
+        Ok((issue_count, codes))
     }
 
     /// Re-evaluate every known managed projection from filesystem and Library facts without
@@ -797,14 +1089,6 @@ impl SkillProjectionReconciler {
         database: &mut Database,
         library: &SkillLibraryService,
     ) -> Result<()> {
-        let active_run_count: i64 = database.connection().query_row(
-            "SELECT COUNT(*) FROM agent_run WHERE status IN ('running', 'waiting')",
-            [],
-            |row| row.get(0),
-        )?;
-        if active_run_count != 0 {
-            return Ok(());
-        }
         let deleting = {
             let mut statement = database.connection().prepare(
                 r#"
@@ -851,106 +1135,6 @@ impl SkillProjectionReconciler {
             )?;
             transaction.commit()?;
             library.remove_skill_content(&skill_id)?;
-        }
-        Ok(())
-    }
-
-    fn resume_projection_waits(&self, database: &mut Database) -> Result<()> {
-        let waiting = {
-            let mut statement = database.connection().prepare(
-                r#"
-                SELECT agent_run.id, agent_run.workspace_json, camp.project_path,
-                       agent_run.camp_turn_id, camp_turn.camp_id,
-                       agent_run.execution_epoch
-                FROM agent_run
-                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-                JOIN camp ON camp.id = camp_turn.camp_id
-                WHERE agent_run.status = 'waiting'
-                  AND agent_run.wait_reason = 'skill_projection_drain'
-                  AND NOT EXISTS (
-                      SELECT 1 FROM context_manifest
-                      WHERE context_manifest.agent_run_id = agent_run.id
-                  )
-                ORDER BY agent_run.created_at, agent_run.id
-                "#,
-            )?;
-            statement
-                .query_map([], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, i64>(5)?,
-                    ))
-                })?
-                .collect::<rusqlite::Result<Vec<_>>>()?
-        };
-        for (run_id, workspace_json, project_path, turn_id, camp_id, execution_epoch) in waiting {
-            let execution_root =
-                workspace_execution_root(workspace_json.as_deref()).unwrap_or(project_path);
-            let canonical_root = match Path::new(&execution_root).canonicalize() {
-                Ok(root) => root.to_string_lossy().to_string(),
-                Err(_) => continue,
-            };
-            let pending: i64 = database.connection().query_row(
-                r#"
-                SELECT COUNT(*) FROM skill_projection_observation
-                WHERE execution_root = ?1 AND state = 'pending_removal'
-                "#,
-                [&canonical_root],
-                |row| row.get(0),
-            )?;
-            if pending != 0 {
-                continue;
-            }
-            let now = Utc::now().to_rfc3339();
-            let transaction = database.connection_mut().transaction()?;
-            let updated = transaction.execute(
-                r#"
-                UPDATE agent_run
-                SET status = 'queued', wait_reason = NULL,
-                    version = version + 1, updated_at = ?2
-                WHERE id = ?1 AND status = 'waiting'
-                  AND wait_reason = 'skill_projection_drain'
-                  AND execution_epoch = ?3
-                "#,
-                params![run_id, now, execution_epoch],
-            )?;
-            if updated == 1 {
-                transaction.execute(
-                    r#"
-                    UPDATE camp_turn
-                    SET status = 'running', version = version + 1, updated_at = ?2
-                    WHERE id = ?1 AND status = 'waiting'
-                    "#,
-                    params![turn_id, now],
-                )?;
-                transaction.execute(
-                    r#"
-                    INSERT INTO event_log(
-                        event_id, event_type, payload_json,
-                        camp_id, entity_type, entity_id,
-                        execution_epoch, actor_type, actor_id, created_at
-                    ) VALUES (?1, 'skill.projection_drain_completed', ?2,
-                              ?3, 'agent_run', ?4, ?5,
-                              'system', 'skill-projection-reconciler', ?6)
-                    "#,
-                    params![
-                        Uuid::new_v4().to_string(),
-                        serde_json::to_string(&serde_json::json!({
-                            "agentRunId": run_id,
-                            "executionEpoch": execution_epoch,
-                        }))?,
-                        camp_id,
-                        run_id,
-                        execution_epoch,
-                        now,
-                    ],
-                )?;
-            }
-            transaction.commit()?;
         }
         Ok(())
     }
@@ -1045,7 +1229,6 @@ fn reconcile_desired_entry(
     skill: &SkillView,
     entry_path: &Path,
     state: EntryState,
-    active_run_present: bool,
 ) -> Result<()> {
     if let Err(error) = library.verify_revision_content(&skill.current_revision) {
         upsert_observation(
@@ -1066,16 +1249,6 @@ fn reconcile_desired_entry(
     }
     let desired_target = library.revision_content_path(&skill.id, &skill.current_revision.id);
     match state {
-        EntryState::Missing if active_run_present => upsert_observation(
-            database,
-            execution_root,
-            group_key,
-            skill,
-            &skill.current_revision.id,
-            entry_path,
-            "stale",
-            Some("active_run_projection_change_deferred"),
-        ),
         EntryState::Missing => {
             publish_managed_link(&desired_target, entry_path, false)?;
             upsert_observation(
@@ -1120,25 +1293,6 @@ fn reconcile_desired_entry(
                 None,
             )
         }
-        EntryState::Managed(actual) if actual.skill_id == skill.id && active_run_present => {
-            ensure_observation_proves_entry(
-                database,
-                execution_root,
-                group_key,
-                entry_path,
-                &actual,
-            )?;
-            upsert_observation(
-                database,
-                execution_root,
-                group_key,
-                skill,
-                &actual.revision_id,
-                entry_path,
-                "stale",
-                Some("active_run_revision_switch_deferred"),
-            )
-        }
         EntryState::Managed(actual) if actual.skill_id == skill.id => {
             ensure_observation_proves_entry(
                 database,
@@ -1179,28 +1333,8 @@ fn reconcile_undesired_entry(
     skill: &SkillView,
     entry_path: &Path,
     state: EntryState,
-    active_run_present: bool,
 ) -> Result<()> {
     match state {
-        EntryState::Managed(actual) if actual.skill_id == skill.id && active_run_present => {
-            ensure_observation_proves_entry(
-                database,
-                execution_root,
-                group_key,
-                entry_path,
-                &actual,
-            )?;
-            upsert_observation(
-                database,
-                execution_root,
-                group_key,
-                skill,
-                &actual.revision_id,
-                entry_path,
-                "pending_removal",
-                Some("active_run_projection_removal_deferred"),
-            )
-        }
         EntryState::Managed(actual) if actual.skill_id == skill.id => {
             ensure_observation_proves_entry(
                 database,
@@ -1647,13 +1781,174 @@ fn collect_managed_git_entries(
     Ok(())
 }
 
+fn validate_persisted_execution_root(execution_root: &str) -> Result<()> {
+    let path = Path::new(execution_root);
+    if execution_root.is_empty() || execution_root.len() > 8_192 || !path.is_absolute() {
+        anyhow::bail!("Skill projection execution root must be an absolute path");
+    }
+    if path
+        .components()
+        .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
+    {
+        anyhow::bail!("Skill projection execution root must be normalized");
+    }
+    Ok(())
+}
+
+fn upsert_root_access_state(
+    database: &mut Database,
+    execution_root: &str,
+    access_state: &str,
+    dirty: bool,
+    cleanup_required: bool,
+) -> Result<()> {
+    let now = Utc::now().to_rfc3339();
+    let removed_at = (access_state == "removed").then_some(now.as_str());
+    database.connection().execute(
+        r#"
+        INSERT INTO skill_projection_root_state(
+            execution_root, access_state, dirty,
+            cleanup_required, removed_at, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        ON CONFLICT(execution_root) DO UPDATE SET
+            access_state = excluded.access_state,
+            dirty = excluded.dirty,
+            cleanup_required = excluded.cleanup_required,
+            removed_at = excluded.removed_at,
+            updated_at = excluded.updated_at
+        "#,
+        params![
+            execution_root,
+            access_state,
+            if dirty { 1 } else { 0 },
+            if cleanup_required { 1 } else { 0 },
+            removed_at,
+            now,
+        ],
+    )?;
+    Ok(())
+}
+
+fn mark_root_reconciled(database: &mut Database, execution_root: &str) -> Result<()> {
+    let now = Utc::now().to_rfc3339();
+    database.connection().execute(
+        r#"
+        INSERT INTO skill_projection_root_state(
+            execution_root, access_state, dirty,
+            cleanup_required, removed_at, updated_at
+        ) VALUES (?1, 'active', 0, 0, NULL, ?2)
+        ON CONFLICT(execution_root) DO UPDATE SET
+            dirty = 0,
+            cleanup_required = 0,
+            updated_at = excluded.updated_at
+        "#,
+        params![execution_root, now],
+    )?;
+    Ok(())
+}
+
+fn root_access_is_removed(database: &Database, execution_root: &str) -> Result<bool> {
+    Ok(database
+        .connection()
+        .query_row(
+            "SELECT access_state FROM skill_projection_root_state WHERE execution_root = ?1",
+            [execution_root],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+        .is_some_and(|state| state == "removed"))
+}
+
+fn root_is_dirty(database: &Database, execution_root: &str) -> Result<bool> {
+    Ok(database
+        .connection()
+        .query_row(
+            "SELECT dirty FROM skill_projection_root_state WHERE execution_root = ?1",
+            [execution_root],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?
+        .is_some_and(|dirty| dirty != 0))
+}
+
+fn root_cleanup_pending(database: &Database, execution_root: &str) -> Result<bool> {
+    Ok(database
+        .connection()
+        .query_row(
+            "SELECT cleanup_required FROM skill_projection_root_state WHERE execution_root = ?1",
+            [execution_root],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?
+        .is_some_and(|pending| pending != 0))
+}
+
+fn observed_delivery_groups(
+    database: &Database,
+    execution_root: &str,
+) -> Result<BTreeSet<SkillDeliveryGroupKey>> {
+    let mut statement = database.connection().prepare(
+        "SELECT DISTINCT group_key FROM skill_projection_observation WHERE execution_root = ?1",
+    )?;
+    statement
+        .query_map([execution_root], |row| row.get::<_, String>(0))?
+        .map(|row| SkillDeliveryGroupKey::from_str(&row?).map_err(to_sql_error))
+        .collect::<rusqlite::Result<BTreeSet<_>>>()
+        .map_err(Into::into)
+}
+
+fn active_run_delivery_groups(
+    database: &Database,
+    execution_root: &str,
+    ignored_agent_run_id: Option<&str>,
+) -> Result<BTreeSet<SkillDeliveryGroupKey>> {
+    let registry = AgentRuntimeAdapterRegistry::default();
+    let mut groups = BTreeSet::new();
+    for (agent_run_id, candidate_root, adapter_kind) in active_runs(database)? {
+        if ignored_agent_run_id == Some(agent_run_id.as_str()) || candidate_root != execution_root {
+            continue;
+        }
+        let Some(adapter_kind) = adapter_kind else {
+            continue;
+        };
+        groups.extend(
+            registry
+                .skill_discovery(AdapterKind::from_str(&adapter_kind)?)
+                .delivery_groups,
+        );
+    }
+    Ok(groups)
+}
+
 fn has_active_run(
     database: &Database,
-    execution_root: &Path,
+    execution_root: &str,
     ignored_agent_run_id: Option<&str>,
     delivery_group: Option<SkillDeliveryGroupKey>,
 ) -> Result<bool> {
     let registry = AgentRuntimeAdapterRegistry::default();
+    for (agent_run_id, candidate_root, adapter_kind) in active_runs(database)? {
+        if ignored_agent_run_id == Some(agent_run_id.as_str()) || candidate_root != execution_root {
+            continue;
+        }
+        if let Some(delivery_group) = delivery_group {
+            let Some(adapter_kind) = adapter_kind else {
+                continue;
+            };
+            if !registry
+                .skill_discovery(AdapterKind::from_str(&adapter_kind)?)
+                .delivery_groups
+                .contains(&delivery_group)
+            {
+                continue;
+            }
+        }
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+fn active_runs(database: &Database) -> Result<Vec<(String, String, Option<String>)>> {
     let mut statement = database.connection().prepare(
         r#"
         SELECT agent_run.id, agent_run.workspace_json, camp.project_path,
@@ -1666,10 +1961,6 @@ fn has_active_run(
             agent_run.status = 'running'
             OR (
                 agent_run.status = 'waiting'
-                AND (
-                    agent_run.wait_reason IS NULL
-                    OR agent_run.wait_reason <> 'skill_projection_drain'
-                )
                 AND (
                     conversation.native_session_id IS NOT NULL
                     OR EXISTS (
@@ -1689,33 +1980,13 @@ fn has_active_run(
             row.get::<_, Option<String>>(3)?,
         ))
     })?;
+    let mut active = Vec::new();
     for row in rows {
         let (agent_run_id, workspace_json, project_path, adapter_kind) = row?;
-        if ignored_agent_run_id == Some(agent_run_id.as_str()) {
-            continue;
-        }
-        if let Some(delivery_group) = delivery_group {
-            let Some(adapter_kind) = adapter_kind else {
-                continue;
-            };
-            let adapter_kind = AdapterKind::from_str(&adapter_kind)?;
-            if !registry
-                .skill_discovery(adapter_kind)
-                .delivery_groups
-                .contains(&delivery_group)
-            {
-                continue;
-            }
-        }
         let candidate = workspace_execution_root(workspace_json.as_deref()).unwrap_or(project_path);
-        if Path::new(&candidate)
-            .canonicalize()
-            .is_ok_and(|value| value == execution_root)
-        {
-            return Ok(true);
-        }
+        active.push((agent_run_id, candidate, adapter_kind));
     }
-    Ok(false)
+    Ok(active)
 }
 
 fn workspace_execution_root(workspace_json: Option<&str>) -> Option<String> {
@@ -1934,7 +2205,7 @@ mod tests {
     use super::*;
     use crate::{
         command::{ActorRef, CommandEnvelope},
-        context::{ContextService, SkillExposurePreparation},
+        context::ContextService,
         skill::{
             CommitSkillImportCommand, DeleteSkillCommand, SetSkillEnabledCommand,
             SetSkillGroupAssignmentsCommand, SkillLibraryService,
@@ -2089,6 +2360,7 @@ mod tests {
 
     fn insert_active_run(database: &Database, execution_root: &Path) {
         let now = Utc::now().to_rfc3339();
+        let execution_root = execution_root.canonicalize().unwrap();
         database
             .connection()
             .execute(
@@ -2168,6 +2440,7 @@ mod tests {
 
     fn insert_second_active_run(database: &Database, execution_root: &Path) {
         let now = Utc::now().to_rfc3339();
+        let execution_root = execution_root.canonicalize().unwrap();
         database
             .connection()
             .execute(
@@ -2326,7 +2599,7 @@ mod tests {
     }
 
     #[test]
-    fn run_preflight_ignores_only_itself_and_records_actual_exposure() {
+    fn run_preflight_records_project_owned_shadowing_without_overwriting_it() {
         let root = temporary_directory("rovai-projection-exposure");
         let data = temporary_directory("rovai-projection-db");
         let library_root = temporary_directory("rovai-projection-library");
@@ -2347,7 +2620,6 @@ mod tests {
                 AdapterKind::CodexCli,
             )
             .unwrap();
-        assert!(!exposure.drain_required);
         assert_eq!(exposure.snapshot.schema_version, 2);
         assert_eq!(exposure.snapshot.skills.len(), 1);
         let shadowed = exposure
@@ -2370,7 +2642,7 @@ mod tests {
     }
 
     #[test]
-    fn waiting_native_session_protects_projection_except_for_projection_drain() {
+    fn waiting_native_session_is_an_active_projection_reader() {
         let root = temporary_directory("rovai-projection-wait-lock");
         let data = temporary_directory("rovai-projection-db");
         let database = Database::open(&data).unwrap();
@@ -2397,18 +2669,9 @@ mod tests {
             )
             .unwrap();
         let canonical = root.canonicalize().unwrap();
-        assert!(has_active_run(&database, &canonical, None, None).unwrap());
-        database
-            .connection()
-            .execute(
-                r#"
-                UPDATE agent_run SET wait_reason = 'skill_projection_drain'
-                WHERE id = 'projection-run'
-                "#,
-                [],
-            )
-            .unwrap();
-        assert!(!has_active_run(&database, &canonical, None, None).unwrap());
+        assert!(
+            has_active_run(&database, canonical.to_string_lossy().as_ref(), None, None,).unwrap()
+        );
     }
 
     #[test]
@@ -2483,7 +2746,7 @@ mod tests {
     }
 
     #[test]
-    fn imported_delete_drains_projection_then_hard_deletes_content_and_metadata() {
+    fn imported_delete_finishes_after_current_root_reconcile_removes_the_projection() {
         let root = temporary_directory("rovai-projection-delete");
         let source = temporary_directory("rovai-projection-source");
         let data = temporary_directory("rovai-projection-db");
@@ -2521,7 +2784,7 @@ mod tests {
             .reconcile_root(&mut database, &library, &root, &[])
             .unwrap();
         SkillProjectionReconciler
-            .reconcile_known_roots(&mut database, &library)
+            .finalize_unprojected_deletions(&mut database, &library)
             .unwrap();
         assert!(fs::symlink_metadata(&entry).is_err());
         assert!(library.get(&database, &skill.id).unwrap().is_none());
@@ -2538,8 +2801,8 @@ mod tests {
     }
 
     #[test]
-    fn disabling_waits_for_active_run_before_removing_a_managed_entry() {
-        let root = temporary_directory("rovai-projection-drain");
+    fn disabling_marks_projection_dirty_without_touching_the_execution_root() {
+        let root = temporary_directory("rovai-projection-dirty");
         let data = temporary_directory("rovai-projection-db");
         let library_root = temporary_directory("rovai-projection-library");
         let mut database = Database::open(&data).unwrap();
@@ -2560,7 +2823,6 @@ mod tests {
             .find(|skill| skill.name == "memory-stewardship")
             .unwrap();
         let entry = root.join(".codex/skills/memory-stewardship");
-        insert_active_run(&database, &root);
         library
             .set_enabled(
                 &mut database,
@@ -2574,42 +2836,24 @@ mod tests {
                 ),
             )
             .unwrap();
-        let report = SkillProjectionReconciler
-            .reconcile_root(
-                &mut database,
-                &library,
-                &root,
-                &[SkillDeliveryGroupKey::Codex],
-            )
+        SkillProjectionReconciler
+            .mark_observed_roots_dirty(&mut database, true)
             .unwrap();
         assert!(entry.canonicalize().is_ok());
-        assert!(report.observations.iter().any(|observation| {
-            observation.entry_path.ends_with("/memory-stewardship")
-                && observation.state == "pending_removal"
-        }));
-
-        let now = Utc::now().to_rfc3339();
-        database
+        let state: (i64, i64) = database
             .connection()
-            .execute(
-                "UPDATE agent_run SET status = 'succeeded', ended_at = ?1, updated_at = ?1 WHERE id = 'projection-run'",
-                [&now],
+            .query_row(
+                "SELECT dirty, cleanup_required FROM skill_projection_root_state WHERE execution_root = ?1",
+                [root.canonicalize().unwrap().to_string_lossy().as_ref()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        SkillProjectionReconciler
-            .reconcile_root(
-                &mut database,
-                &library,
-                &root,
-                &[SkillDeliveryGroupKey::Codex],
-            )
-            .unwrap();
-        assert!(fs::symlink_metadata(entry).is_err());
+        assert_eq!(state, (1, 1));
     }
 
     #[test]
-    fn new_run_uses_the_deferred_projection_without_waiting_for_drain() {
-        let root = temporary_directory("rovai-projection-new-run-drain");
+    fn new_run_reconciles_latest_skill_state_while_an_older_run_continues() {
+        let root = temporary_directory("rovai-projection-new-run-latest");
         let data = temporary_directory("rovai-projection-db");
         let library_root = temporary_directory("rovai-projection-library");
         let mut database = Database::open(&data).unwrap();
@@ -2643,6 +2887,36 @@ mod tests {
                 ),
             )
             .unwrap();
+        insert_second_active_run(&database, &root);
+        let prepared = ContextService
+            .prepare_skill_exposure(&mut database, &library, "projection-run-new", 1)
+            .unwrap();
+        assert!(prepared.snapshot.skills.is_empty());
+        assert!(fs::symlink_metadata(root.join(".codex/skills/memory-stewardship")).is_err());
+        let runs: (String, String) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT
+                    (SELECT status FROM agent_run WHERE id = 'projection-run'),
+                    (SELECT status FROM agent_run WHERE id = 'projection-run-new')
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(runs, ("running".to_string(), "running".to_string()));
+    }
+
+    #[test]
+    fn new_run_projects_the_latest_revision_without_waiting_for_an_older_agent() {
+        let root = temporary_directory("rovai-projection-new-revision");
+        let source = temporary_directory("rovai-projection-source");
+        let data = temporary_directory("rovai-projection-db");
+        let library_root = temporary_directory("rovai-projection-library");
+        let mut database = Database::open(&data).unwrap();
+        let library = SkillLibraryService::new(library_root).unwrap();
+        let original = import_skill(&mut database, &library, &source, "revision-change");
         SkillProjectionReconciler
             .reconcile_root(
                 &mut database,
@@ -2651,68 +2925,260 @@ mod tests {
                 &[SkillDeliveryGroupKey::Codex],
             )
             .unwrap();
+        insert_active_run(&database, &root);
+        let entry = root.join(".codex/skills/revision-change");
+        let original_target = entry.canonicalize().unwrap();
+
+        fs::write(
+            source.join("revision-change/SKILL.md"),
+            "---\nname: revision-change\ndescription: Projection test v2\n---\n\nVersion two.\n",
+        )
+        .unwrap();
+        let inspection = library
+            .inspect_import(&database, &source.join("revision-change"))
+            .unwrap();
+        let candidate = inspection.candidates[0].clone();
+        library
+            .commit_import(
+                &mut database,
+                &user_envelope(
+                    "update-projection-skill-during-older-run",
+                    CommitSkillImportCommand {
+                        staging_token: inspection.staging_token,
+                        candidate_name: candidate.name,
+                        expected_digest: candidate.content_digest,
+                        expected_skill_version: Some(original.version),
+                        confirm_update: true,
+                    },
+                ),
+            )
+            .unwrap();
         insert_second_active_run(&database, &root);
-        let prepared = ContextService
+
+        let exposure = ContextService
             .prepare_skill_exposure(&mut database, &library, "projection-run-new", 1)
             .unwrap();
-        let SkillExposurePreparation::Ready(prepared) = prepared else {
-            panic!("new Run must not wait for an older Run to drain its Skill projection");
-        };
-        assert_eq!(prepared.snapshot.skills.len(), 1);
-        assert_eq!(prepared.snapshot.skills[0].status, "stale");
+        let updated = library.get(&database, &original.id).unwrap().unwrap();
+
+        assert_ne!(updated.current_revision.id, original.current_revision.id);
         assert_eq!(
-            prepared.snapshot.skills[0].reason_code.as_deref(),
-            Some("active_run_projection_removal_deferred")
+            exposure.snapshot.skills[0].revision_id,
+            updated.current_revision.id
         );
+        assert_ne!(entry.canonicalize().unwrap(), original_target);
+        let active_run_count: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM agent_run WHERE status = 'running'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(active_run_count, 2);
+    }
+
+    #[test]
+    fn observation_history_does_not_schedule_an_execution_root() {
+        let root = temporary_directory("rovai-projection-observation-only");
+        let data = temporary_directory("rovai-projection-db");
+        let library_root = temporary_directory("rovai-projection-library");
+        let mut database = Database::open(&data).unwrap();
+        let library = SkillLibraryService::new(library_root).unwrap();
+        install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
+        SkillProjectionReconciler
+            .reconcile_root(
+                &mut database,
+                &library,
+                &root,
+                &[SkillDeliveryGroupKey::Codex],
+            )
+            .unwrap();
+
+        assert!(
+            SkillProjectionReconciler
+                .known_execution_roots(&database)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn startup_access_sync_records_a_missing_removed_root_without_resolving_it() {
+        let data = temporary_directory("rovai-projection-db");
+        let mut database = Database::open(&data).unwrap();
+        let missing = std::env::temp_dir()
+            .join(format!("rovai-removed-missing-{}", Uuid::new_v4()))
+            .to_string_lossy()
+            .to_string();
+        assert!(!Path::new(&missing).exists());
+
+        SkillProjectionReconciler
+            .synchronize_removed_execution_roots(&mut database, std::slice::from_ref(&missing))
+            .unwrap();
+
+        assert!(
+            SkillProjectionReconciler
+                .execution_root_is_removed(&database, &missing)
+                .unwrap()
+        );
+        assert!(!Path::new(&missing).exists());
+    }
+
+    #[test]
+    fn startup_access_sync_does_not_turn_db_only_dirty_state_into_removed_root_cleanup() {
+        let data = temporary_directory("rovai-projection-db");
+        let mut database = Database::open(&data).unwrap();
+        let missing = std::env::temp_dir()
+            .join(format!("rovai-removed-dirty-missing-{}", Uuid::new_v4()))
+            .to_string_lossy()
+            .to_string();
+        assert!(!Path::new(&missing).exists());
+        upsert_root_access_state(&mut database, &missing, "active", true, false).unwrap();
+
+        SkillProjectionReconciler
+            .synchronize_removed_execution_roots(&mut database, std::slice::from_ref(&missing))
+            .unwrap();
+
+        let state: (String, i64, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT access_state, dirty, cleanup_required
+                FROM skill_projection_root_state
+                WHERE execution_root = ?1
+                "#,
+                [&missing],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(state, ("removed".to_string(), 0, 0));
+        assert!(!Path::new(&missing).exists());
+    }
+
+    #[test]
+    fn removed_root_waits_for_its_active_run_then_cleans_once() {
+        let root = temporary_directory("rovai-projection-removed-root");
+        let canonical_root = root.canonicalize().unwrap();
+        let data = temporary_directory("rovai-projection-db");
+        let library_root = temporary_directory("rovai-projection-library");
+        let mut database = Database::open(&data).unwrap();
+        let library = SkillLibraryService::new(library_root).unwrap();
+        install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
+        SkillProjectionReconciler
+            .reconcile_root(
+                &mut database,
+                &library,
+                &canonical_root,
+                &[SkillDeliveryGroupKey::Codex],
+            )
+            .unwrap();
+        insert_active_run(&database, &canonical_root);
+        let entry = canonical_root.join(".codex/skills/memory-stewardship");
+
+        let removal = SkillProjectionReconciler
+            .remove_execution_root(&mut database, &library, &canonical_root)
+            .unwrap();
+        assert!(removal.cleanup_pending);
+        assert!(entry.canonicalize().is_ok());
 
         let now = Utc::now().to_rfc3339();
         database
             .connection()
             .execute(
-                r#"
-                UPDATE agent_run
-                SET status = 'succeeded', ended_at = ?1, updated_at = ?1
-                WHERE id = 'projection-run'
-                "#,
+                "UPDATE agent_run SET status = 'succeeded', ended_at = ?1, updated_at = ?1 WHERE id = 'projection-run'",
                 [&now],
             )
             .unwrap();
         SkillProjectionReconciler
-            .reconcile_known_roots(&mut database, &library)
+            .reconcile_after_run_terminal(&mut database, &library, &canonical_root)
             .unwrap();
-        let current: (String, Option<String>) = database
-            .connection()
-            .query_row(
-                "SELECT status, wait_reason FROM agent_run WHERE id = 'projection-run-new'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(current, ("running".to_string(), None));
+        assert!(fs::symlink_metadata(&entry).is_err());
         assert!(
-            root.join(".codex/skills/memory-stewardship")
-                .canonicalize()
-                .is_ok()
+            !root_cleanup_pending(&database, canonical_root.to_string_lossy().as_ref(),).unwrap()
         );
-        database
-            .connection()
-            .execute(
-                r#"
-                UPDATE agent_run
-                SET status = 'succeeded', ended_at = ?1, updated_at = ?1
-                WHERE id = 'projection-run-new'
-                "#,
-                [&now],
+
+        fs::remove_dir_all(&canonical_root).unwrap();
+        let error = SkillProjectionReconciler
+            .prepare_run_exposure(
+                &mut database,
+                &library,
+                "removed-root-new-run",
+                &canonical_root,
+                AdapterKind::CodexCli,
             )
-            .unwrap();
-        SkillProjectionReconciler
-            .reconcile_known_roots(&mut database, &library)
-            .unwrap();
-        assert!(fs::symlink_metadata(root.join(".codex/skills/memory-stewardship")).is_err());
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("access is suspended"));
     }
 
     #[test]
-    fn startup_requirements_union_active_camp_member_adapters() {
+    fn run_preflight_repairs_a_deleted_managed_projection() {
+        let root = temporary_directory("rovai-projection-preflight-repair");
+        let data = temporary_directory("rovai-projection-db");
+        let library_root = temporary_directory("rovai-projection-library");
+        let mut database = Database::open(&data).unwrap();
+        let library = SkillLibraryService::new(library_root).unwrap();
+        install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
+        SkillProjectionReconciler
+            .reconcile_root(
+                &mut database,
+                &library,
+                &root,
+                &[SkillDeliveryGroupKey::Codex],
+            )
+            .unwrap();
+        let entry = root.join(".codex/skills/memory-stewardship");
+        fs::remove_file(&entry).unwrap();
+
+        let exposure = SkillProjectionReconciler
+            .prepare_run_exposure(
+                &mut database,
+                &library,
+                "preflight-repair-run",
+                &root,
+                AdapterKind::CodexCli,
+            )
+            .unwrap();
+
+        assert!(entry.canonicalize().is_ok());
+        assert_eq!(exposure.snapshot.skills.len(), 1);
+        assert_eq!(exposure.snapshot.skills[0].status, "ready");
+    }
+
+    #[test]
+    fn run_preflight_rejects_a_corrupted_library_revision() {
+        let root = temporary_directory("rovai-projection-preflight-corrupted");
+        let data = temporary_directory("rovai-projection-db");
+        let library_root = temporary_directory("rovai-projection-library");
+        let mut database = Database::open(&data).unwrap();
+        let library = SkillLibraryService::new(library_root).unwrap();
+        let skill =
+            install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
+        fs::write(
+            library
+                .revision_content_path(&skill.id, &skill.current_revision.id)
+                .join("SKILL.md"),
+            "corrupted after import",
+        )
+        .unwrap();
+
+        let error = SkillProjectionReconciler
+            .prepare_run_exposure(
+                &mut database,
+                &library,
+                "preflight-corrupted-run",
+                &root,
+                AdapterKind::CodexCli,
+            )
+            .unwrap_err();
+
+        let message = format!("{error:#}");
+        assert!(message.contains("Skill projection verification failed"));
+        assert!(message.contains("memory-stewardship"));
+        assert!(!root.join(".codex/skills/memory-stewardship").exists());
+    }
+
+    #[test]
+    fn explicit_reconciliation_requirements_union_active_camp_member_adapters() {
         let root = temporary_directory("rovai-projection-known-root");
         let data = temporary_directory("rovai-projection-db");
         let library_root = temporary_directory("rovai-projection-library");
