@@ -385,7 +385,7 @@ async function seedFixture() {
         ${sqlLiteral(`run-${entry.key}`)}, ${sqlLiteral(`turn-${entry.key}`)},
         ${sqlLiteral(`conversation-${entry.key}`)}, 0, 0,
         ${sqlLiteral(`direct:${entry.agentId}`)}, 'initial',
-        ${sqlLiteral(`验证 ${entry.runtimeName} Runtime Activity`)}, '展示观测诚实的工具名称',
+        ${sqlLiteral(`验证 ${entry.runtimeName} Runtime Activity`)},
         'required', '{}', ${sqlLiteral(active ? 'queued' : 'succeeded')}, ${sqlLiteral(`runtime-activity-${entry.key}`)},
         1, ${sqlLiteral(`2026-08-05T12:${String(index).padStart(2, '0')}:00Z`)},
         ${sqlNullable(active ? null : `2026-08-05T12:${String(index).padStart(2, '0')}:01Z`)},
@@ -397,7 +397,7 @@ async function seedFixture() {
     `(
       ${sqlLiteral(historicalRunId)}, 'turn-codex-history', 'conversation-codex', 0, 0,
       ${sqlLiteral(`direct:${activeAgentId}:history`)}, 'initial',
-      'Codex 历史 Runtime Activity', '保留历史 AgentRun 边界',
+      'Codex 历史 Runtime Activity',
       'required', '{}', 'succeeded', 'runtime-activity-codex-history',
       1, '2026-08-05T11:58:00Z', '2026-08-05T11:58:01Z',
       '2026-08-05T11:58:02Z', '2026-08-05T11:58:02Z',
@@ -491,7 +491,7 @@ async function seedFixture() {
     INSERT INTO agent_run(
       id, camp_turn_id, conversation_id,
       initial_camp_context_through_sequence, initial_conversation_context_through_sequence,
-      responsibility_key, start_reason, purpose, expected_output, completion_role,
+      responsibility_key, start_reason, purpose, completion_role,
       effective_config_json, status, idempotency_key, execution_epoch,
       created_at, started_at, ended_at, updated_at,
       runtime_adapter_kind, runtime_protocol_version

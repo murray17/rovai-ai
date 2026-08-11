@@ -403,7 +403,6 @@ async function startVerificationRun(coreClient, specification, resumed) {
       purpose: resumed
         ? `Verify ${specification.adapterKind} resume/process reuse receives a new active CLI lease.`
         : `Verify ${specification.adapterKind} executes all 12 CLI-only built-in operations.`,
-      expectedOutput: `Execute the fixed shell qualification and reply exactly ${marker}.`,
       completionRole: 'required'
     }
   })

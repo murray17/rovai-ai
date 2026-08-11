@@ -2128,7 +2128,6 @@ export function campMessageSendParams(
   execution: {
     taskId: null
     purpose: string
-    expectedOutput: string
     completionRole: 'required'
   }
 } {
@@ -2140,7 +2139,6 @@ export function campMessageSendParams(
     execution: {
       taskId: null,
       purpose: draft.body.trim(),
-      expectedOutput: '通过 `rovai send` 在当前 Camp 公共上下文中给出完整、可追溯的回复；Runtime 最终文本不会自动发布。',
       completionRole: 'required'
     }
   }

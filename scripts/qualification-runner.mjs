@@ -298,7 +298,6 @@ async function runTrial(options) {
       execution: {
         taskId: null,
         purpose: 'Complete the user-requested change in the bound workspace.',
-        expectedOutput: 'A verified implementation satisfying the stated acceptance constraints.',
         completionRole: 'required',
         budget: {
           elapsedSeconds: caseBudget.elapsedSeconds,

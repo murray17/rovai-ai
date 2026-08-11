@@ -783,7 +783,6 @@ export interface AgentRunView {
   responsibilityKey: string
   responsibilityGeneration: number
   purpose: string
-  expectedOutput: string
   completionRole: 'required' | 'optional'
   status: 'queued' | 'running' | 'waiting' | 'succeeded' | 'failed' | 'cancelled'
   waitReason: string | null

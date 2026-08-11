@@ -905,7 +905,6 @@ mod tests {
                         execution: Some(ExecutionRequest {
                             task_id: None,
                             purpose: "Verify evidence boundaries".to_string(),
-                            expected_output: "Finish without exposing evidence".to_string(),
                             completion_role: "required".to_string(),
                             budget: None,
                         }),

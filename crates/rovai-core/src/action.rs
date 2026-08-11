@@ -3587,7 +3587,6 @@ mod tests {
                         execution: Some(ExecutionRequest {
                             task_id: None,
                             purpose: "测试动作安全".to_string(),
-                            expected_output: "动作结果".to_string(),
                             completion_role: "required".to_string(),
                             budget: None,
                         }),

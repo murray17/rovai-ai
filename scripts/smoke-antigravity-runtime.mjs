@@ -166,7 +166,6 @@ try {
 async function executeToken(request, camp, agentId, token, project = null) {
   const body = `Do not call tools or inspect files. Reply with exactly ${token} and nothing else.`
   const purpose = 'Verify the Antigravity non-interactive CLI process integration without tools'
-  const expectedOutput = `Exactly ${token}`
   const sent = camp
     ? await request('camp.messages.send', {
         commandId: crypto.randomUUID(),
@@ -177,7 +176,6 @@ async function executeToken(request, camp, agentId, token, project = null) {
         execution: {
           taskId: null,
           purpose,
-          expectedOutput,
           completionRole: 'required'
         }
       })
@@ -186,8 +184,7 @@ async function executeToken(request, camp, agentId, token, project = null) {
         workspace,
         body,
         address: { mode: 'explicit', agentIds: [agentId] },
-        purpose,
-        expectedOutput
+        purpose
       })
   const commandResult = sent.commandResult ?? sent
   const campId = camp?.id ?? commandResult.payload?.campId

@@ -799,12 +799,12 @@ mod tests {
                     initial_camp_context_through_sequence,
                     initial_conversation_context_through_sequence,
                     responsibility_key, responsibility_generation,
-                    start_reason, purpose, expected_output, completion_role,
+                    start_reason, purpose, completion_role,
                     effective_config_json, workspace_json, permission_semantics,
                     status, idempotency_key, version, created_at, updated_at
                 ) VALUES (
                     'run-attention', 'turn-attention', 'conversation-attention', 0, 0,
-                    'attention', 0, 'initial', 'permission fixture', 'evidence', 'required',
+                    'attention', 0, 'initial', 'permission fixture', 'required',
                     '{}', NULL, 'runtime_managed_v2', 'running', 'attention', 1,
                     '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z'
                 );

@@ -2130,14 +2130,14 @@ mod tests {
                     initial_camp_context_through_sequence,
                     initial_conversation_context_through_sequence,
                     trigger_conversation_message_id,
-                    responsibility_key, start_reason, purpose, expected_output,
+                    responsibility_key, start_reason, purpose,
                     completion_role, effective_config_json, workspace_json,
                     status, idempotency_key, runtime_adapter_kind, execution_epoch,
                     created_at, started_at, updated_at
                 ) VALUES (
                     'projection-run', 'projection-turn', 'projection-conversation',
                     0, 0, 'projection-trigger-message',
-                    'projection-test', 'initial', 'test', 'test',
+                    'projection-test', 'initial', 'test',
                     'required', '{"runtimeAdapter":"codex-cli"}', ?1,
                     'running', 'projection-run', 'codex-cli', 1, ?2, ?2, ?2
                 )
@@ -2179,14 +2179,14 @@ mod tests {
                     initial_camp_context_through_sequence,
                     initial_conversation_context_through_sequence,
                     trigger_conversation_message_id,
-                    responsibility_key, start_reason, purpose, expected_output,
+                    responsibility_key, start_reason, purpose,
                     completion_role, effective_config_json, workspace_json,
                     status, idempotency_key, runtime_adapter_kind, execution_epoch,
                     created_at, started_at, updated_at
                 ) VALUES (
                     'projection-run-new', 'projection-turn', 'projection-conversation-new',
                     0, 0, 'projection-trigger-message',
-                    'projection-test-new', 'initial', 'test', 'test',
+                    'projection-test-new', 'initial', 'test',
                     'required', '{"runtimeAdapter":"codex-cli"}', ?1,
                     'running', 'projection-run-new', 'codex-cli', 1, ?2, ?2, ?2
                 )

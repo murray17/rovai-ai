@@ -168,4 +168,5 @@ generated_from: docs/adr-front-matter
 | [ADR-0154](0154-agent-level-execution-process-surface.md) | Agent-Level Continuous Execution Process Surface | `accepted` | `cross-version` | [v0.55](../versions/v0.55/README.md) | — |
 | [ADR-0155](0155-treatment-blind-outcome-and-process-judge-views.md) | Treatment-Blind Outcome and Process Judge Views | `accepted` | `cross-version` | [v0.55](../versions/v0.55/README.md) | — |
 | [ADR-0156](0156-logical-runtime-identity-and-bounded-installation-rebind.md) | Frozen Logical Runtime Identity and Bounded Installation Rebind | `accepted` | `cross-version` | [v0.58](../versions/v0.58/README.md) | — |
+| [ADR-0157](0157-message-owned-agentrun-instruction-without-expected-output.md) | Message-Owned AgentRun Instruction Without Expected Output Metadata | `accepted` | `cross-version` | [v0.58](../versions/v0.58/README.md) | — |
 <!-- adr-history:end -->

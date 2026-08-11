@@ -42,7 +42,6 @@ try {
       '命令结束后只回复 RECOVERY_OK，不要修改文件，也不要调用 rovai Built-in CLI。'
     ].join('\n'),
     purpose: 'Prove that one durable AgentRun resumes after the Core process is killed.',
-    expectedOutput: 'A public reply containing RECOVERY_OK after the delayed command.'
   })
   if (created.status !== 'accepted') {
     throw new Error(`Camp intake was not accepted: ${JSON.stringify(created)}`)

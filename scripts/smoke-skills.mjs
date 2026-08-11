@@ -323,7 +323,6 @@ async function runNativeDiscovery(request, workspace, adapterKind, marker) {
     body: prompt,
     address: { mode: 'explicit', agentIds: ['agent_1'] },
     purpose: `Verify ${adapterKind} discovers the Rovai-ai-managed project Skill through its native directory.`,
-    expectedOutput: 'Exactly the private verification value stored only in the Skill.'
   })
   if (created.status !== 'accepted' || !created.payload?.agentRunIds?.[0]) {
     throw new Error(`${adapterKind} Skill discovery Camp was not accepted: ${JSON.stringify(created)}`)

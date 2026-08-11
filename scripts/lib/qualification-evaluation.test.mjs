@@ -124,7 +124,6 @@ test('Qualification dispatch consumes one persisted structured composer draft re
   const execution = {
     taskId: null,
     purpose: 'Implement the disclosed task.',
-    expectedOutput: 'A verified delivery.',
     completionRole: 'required',
     budget: {
       elapsedSeconds: 900,

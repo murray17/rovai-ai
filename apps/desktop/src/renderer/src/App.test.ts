@@ -396,8 +396,7 @@ describe('task event projections', () => {
     expect(params).not.toHaveProperty('address')
     expect(params).not.toHaveProperty('agentIds')
     expect(params).not.toHaveProperty('preparedAttachmentIds')
-    expect(params.execution.expectedOutput).toContain('`rovai send`')
-    expect(params.execution.expectedOutput).toContain('Runtime 最终文本不会自动发布')
+    expect(params.execution).not.toHaveProperty('expectedOutput')
   })
 
   it('keeps local cancelling state until the authoritative turn becomes terminal', () => {
@@ -1549,7 +1548,7 @@ describe('task event projections', () => {
       agentRuns: [{
         id: 'run-muwa', campTurnId: 'turn-1', conversationId: 'conversation-muwa',
         agentId: 'agent_2', taskId: null, responsibilityKey: 'direct:agent_2',
-        responsibilityGeneration: 0, purpose: '实现复制', expectedOutput: '完成并验证',
+        responsibilityGeneration: 0, purpose: '实现复制',
         completionRole: 'required', status: 'running', waitReason: null, executionEpoch: 1,
         permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct',
         a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,

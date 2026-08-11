@@ -100,7 +100,6 @@ try {
     const profile = await request('members.get', { agentId })
     const body = `Do not call tools or inspect files. Reply with exactly ${specification.token} and nothing else.`
     const purpose = `Verify the ${specification.adapterKind} ACP execution path without tools`
-    const expectedOutput = `Exactly ${specification.token}`
     const sent = camp
       ? await request('camp.messages.send', {
           commandId: crypto.randomUUID(),
@@ -111,7 +110,6 @@ try {
           execution: {
             taskId: null,
             purpose,
-            expectedOutput,
             completionRole: 'required'
           }
         })
@@ -120,8 +118,7 @@ try {
           workspace,
           body,
           address: { mode: 'explicit', agentIds: [profile.agentId] },
-          purpose,
-          expectedOutput
+          purpose
         })
     const commandResult = sent.commandResult ?? sent
     const campId = camp?.id ?? commandResult.payload?.campId
@@ -174,7 +171,6 @@ try {
         execution: {
           taskId: null,
           purpose: 'Verify ACP permission mediation and one-time file write authorization',
-          expectedOutput: 'Create the approved file and reply ACP_WRITE_OK',
           completionRole: 'required'
         }
       })
@@ -261,7 +257,6 @@ try {
         execution: {
           taskId: null,
           purpose: 'Create the requested file and report the concrete result',
-          expectedOutput: 'Create the requested file and reply ACP_DENIED_WRITE_OK',
           completionRole: 'required'
         }
       })

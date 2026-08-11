@@ -221,7 +221,6 @@ impl DomainCommand for AddCampMemberCommand {
 pub struct ExecutionRequest {
     pub task_id: Option<String>,
     pub purpose: String,
-    pub expected_output: String,
     #[serde(default = "required_completion_role")]
     pub completion_role: String,
     #[serde(default)]
@@ -274,7 +273,6 @@ pub(crate) struct TestCampConversationCommand {
     pub body: String,
     pub address: TestCampMessageAddress,
     pub purpose: String,
-    pub expected_output: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -600,7 +598,6 @@ impl CollaborationService {
                     execution: Some(ExecutionRequest {
                         task_id: None,
                         purpose: envelope.payload.purpose.clone(),
-                        expected_output: envelope.payload.expected_output.clone(),
                         completion_role: required_completion_role(),
                         budget: None,
                     }),
@@ -2497,7 +2494,7 @@ fn queue_camp_message_and_runs(
                     initial_conversation_context_through_sequence,
                     responsibility_key, responsibility_generation,
                     predecessor_agent_run_id, start_reason,
-                    purpose, expected_output, completion_role,
+                    purpose, completion_role,
                     effective_config_json, workspace_json, permission_semantics,
                     runtime_adapter_kind, runtime_installation_id,
                     runtime_executable_path, runtime_auth_scope,
@@ -2521,13 +2518,13 @@ fn queue_camp_message_and_runs(
                     cancel_acknowledged_at, version,
                     created_at, started_at, ended_at, updated_at
                 ) VALUES (
-                    ?1, ?2, ?3, ?4, ?31, ?32, NULL, ?5, ?6, ?7, ?8,
-                    ?9, 0, NULL, 'initial', ?10, ?11, ?12,
-                    ?13, ?14, 'runtime_managed_v2',
-                    ?16, ?17, ?18, ?19, ?20, ?21, ?20, ?21,
-                    ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
+                    ?1, ?2, ?3, ?4, ?30, ?31, NULL, ?5, ?6, ?7, ?8,
+                    ?9, 0, NULL, 'initial', ?10, ?11,
+                    ?12, ?13, 'runtime_managed_v2',
+                    ?15, ?16, ?17, ?18, ?19, ?20, ?19, ?20,
+                    ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29,
                     'queued', NULL, NULL,
-                    ?15, 0, 0, NULL, NULL, 0, NULL,
+                    ?14, 0, 0, NULL, NULL, 0, NULL,
                     0, NULL, NULL, NULL, NULL, NULL, 1,
                     ?6, NULL, NULL, ?6
                 )
@@ -2543,7 +2540,6 @@ fn queue_camp_message_and_runs(
                     conversation_sequence,
                     responsibility_key,
                     execution.purpose,
-                    execution.expected_output,
                     execution.completion_role,
                     serde_json::to_string(&prepared.effective_config)?,
                     workspace_json,
@@ -3190,8 +3186,8 @@ fn validate_camp_message_input(command: &SendUserCampDraftCommand) -> Result<()>
         anyhow::bail!("draftRevision must be a positive Core Revision");
     }
     if let Some(execution) = &command.execution {
-        if execution.purpose.trim().is_empty() || execution.expected_output.trim().is_empty() {
-            anyhow::bail!("Execution request requires purpose and expectedOutput");
+        if execution.purpose.trim().is_empty() {
+            anyhow::bail!("Execution request requires purpose");
         }
         if !matches!(execution.completion_role.as_str(), "required" | "optional") {
             anyhow::bail!("completionRole must be required or optional");
@@ -4407,7 +4403,6 @@ mod tests {
                         body: "@luoke 请回答；邮箱 dev@muwa.example 不属于 mention。".to_string(),
                         address: TestCampMessageAddress::Default,
                         purpose: "验证普通文本".to_string(),
-                        expected_output: "回复".to_string(),
                     },
                 ),
             )
@@ -4931,7 +4926,6 @@ mod tests {
                         execution: Some(ExecutionRequest {
                             task_id: None,
                             purpose: "第一条目标".to_string(),
-                            expected_output: "完成目标".to_string(),
                             completion_role: "required".to_string(),
                             budget: None,
                         }),
@@ -4984,7 +4978,6 @@ mod tests {
                         execution: Some(ExecutionRequest {
                             task_id: None,
                             purpose: "验证原子预算".to_string(),
-                            expected_output: "可验证结果".to_string(),
                             completion_role: "required".to_string(),
                             budget: Some(CampTurnExecutionBudgetRequest {
                                 elapsed_seconds: 300,
@@ -5064,7 +5057,6 @@ mod tests {
                         execution: Some(ExecutionRequest {
                             task_id: None,
                             purpose: "验证 root admission".to_string(),
-                            expected_output: "两份结果".to_string(),
                             completion_role: "required".to_string(),
                             budget: Some(CampTurnExecutionBudgetRequest {
                                 elapsed_seconds: 300,
@@ -5127,7 +5119,6 @@ mod tests {
                         execution: Some(ExecutionRequest {
                             task_id: None,
                             purpose: "协作".to_string(),
-                            expected_output: "结果".to_string(),
                             completion_role: "required".to_string(),
                             budget: None,
                         }),
@@ -5253,7 +5244,6 @@ mod tests {
                     execution: Some(ExecutionRequest {
                         task_id: None,
                         purpose: body.to_string(),
-                        expected_output: "公开结果".to_string(),
                         completion_role: "required".to_string(),
                         budget: None,
                     }),
@@ -5353,7 +5343,6 @@ mod tests {
                             agent_ids: vec!["agent_2".to_string(), "agent_1".to_string()],
                         },
                         purpose: "并行回答".to_string(),
-                        expected_output: "两份公开回复".to_string(),
                     },
                 ),
             )
@@ -5460,7 +5449,6 @@ mod tests {
                         execution: Some(ExecutionRequest {
                             task_id: None,
                             purpose: "验证终态执行可随 Camp 删除".to_string(),
-                            expected_output: "完成".to_string(),
                             completion_role: "required".to_string(),
                             budget: None,
                         }),
@@ -5562,7 +5550,6 @@ mod tests {
                         body: "开始执行".to_string(),
                         address: TestCampMessageAddress::Default,
                         purpose: "执行".to_string(),
-                        expected_output: "结果".to_string(),
                     },
                 ),
             )
@@ -5673,7 +5660,6 @@ mod tests {
                 execution: Some(ExecutionRequest {
                     task_id: None,
                     purpose: "验证结构化 Mention".to_string(),
-                    expected_output: "分别回复".to_string(),
                     completion_role: "required".to_string(),
                     budget: None,
                 }),
@@ -5781,7 +5767,6 @@ mod tests {
                         execution: Some(ExecutionRequest {
                             task_id: None,
                             purpose: "广播验证".to_string(),
-                            expected_output: "三份回复".to_string(),
                             completion_role: "required".to_string(),
                             budget: None,
                         }),
@@ -5991,7 +5976,6 @@ mod tests {
                 execution: Some(ExecutionRequest {
                     task_id: None,
                     purpose: "独立分析".to_string(),
-                    expected_output: "公开结论".to_string(),
                     completion_role: "required".to_string(),
                     budget: None,
                 }),
@@ -6532,7 +6516,6 @@ mod tests {
                         execution: Some(ExecutionRequest {
                             task_id: None,
                             purpose: "验证 Task 权限".to_string(),
-                            expected_output: "结构化命令结果".to_string(),
                             completion_role: "required".to_string(),
                             budget: None,
                         }),
@@ -6812,7 +6795,6 @@ mod tests {
                         execution: Some(ExecutionRequest {
                             task_id: Some(task_id.clone()),
                             purpose: "验证 Task grandfathering".to_string(),
-                            expected_output: "执行仍归原接收者".to_string(),
                             completion_role: "required".to_string(),
                             budget: None,
                         }),

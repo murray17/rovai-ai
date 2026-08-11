@@ -1605,7 +1605,6 @@ fn process_dispatch_attempt(
         anyhow::bail!("Message Delivery frozen Context no longer matches its dispatch target");
     }
     let conversation_boundary = frozen_context.conversation_message_boundary_sequence;
-    let expected_output = "Complete the requested work. Use `rovai send` only when publishing a public fact or when a recipient needs the message to continue acting or decide. Acceptance of a Delivery does not imply another Run completed; do not sleep or poll while waiting.";
     transaction.execute(
         r#"
         INSERT INTO agent_run(
@@ -1616,7 +1615,7 @@ fn process_dispatch_attempt(
             initial_conversation_context_through_sequence,
             responsibility_key, responsibility_generation,
             predecessor_agent_run_id, start_reason,
-            purpose, expected_output, completion_role,
+            purpose, completion_role,
             effective_config_json, workspace_json, permission_semantics,
             runtime_adapter_kind, runtime_installation_id,
             runtime_executable_path, runtime_auth_scope,
@@ -1642,17 +1641,17 @@ fn process_dispatch_attempt(
             invocation_kind, a2a_parent_agent_run_id,
             a2a_root_agent_run_id, a2a_depth
         ) VALUES (
-            ?1, ?2, ?3, ?4, ?34, ?35, ?5, ?6, ?7, ?8, ?9,
-            ?10, 0, NULL, 'initial', ?11, ?12, 'required',
-            ?13, ?14, 'runtime_managed_v2',
-            ?15, ?16, ?17, ?18, ?19, ?20, ?19, ?20,
-            ?21, ?22, ?23, ?24, ?25, ?26,
-            ?27, ?28, ?29,
-            'queued', NULL, NULL, ?30, 0, 0,
+            ?1, ?2, ?3, ?4, ?33, ?34, ?5, ?6, ?7, ?8, ?9,
+            ?10, 0, NULL, 'initial', ?11, 'required',
+            ?12, ?13, 'runtime_managed_v2',
+            ?14, ?15, ?16, ?17, ?18, ?19, ?18, ?19,
+            ?20, ?21, ?22, ?23, ?24, ?25,
+            ?26, ?27, ?28,
+            'queued', NULL, NULL, ?29, 0, 0,
             NULL, NULL, 0, NULL,
             0, NULL, NULL, NULL, NULL, NULL, 1,
             ?7, NULL, NULL, ?7,
-            'a2a', ?31, ?32, ?33
+            'a2a', ?30, ?31, ?32
         )
         "#,
         params![
@@ -1670,7 +1669,6 @@ fn process_dispatch_attempt(
                 "Handle public message from AgentRun {}",
                 delivery.source_agent_run_id
             ),
-            expected_output,
             serde_json::to_string(&effective_config)?,
             serde_json::to_string(&workspace)?,
             runtime.adapter_kind.as_str(),

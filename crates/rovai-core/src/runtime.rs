@@ -349,7 +349,6 @@ pub struct AgentRunExecution {
     pub native_installation_generation: Option<i64>,
     pub native_session_compatibility_key: Option<String>,
     pub purpose: String,
-    pub expected_output: String,
     pub effective_config: Value,
     pub runtime: FrozenAgentRuntimeConfig,
     pub workspace: AgentRunWorkspace,
@@ -864,7 +863,7 @@ impl ExecutionRuntimeService {
                        conversation.native_installation_generation,
                        conversation.native_session_compatibility_key,
                        agent_run.purpose,
-                       agent_run.expected_output, agent_run.effective_config_json,
+                       agent_run.effective_config_json,
                        agent_run.workspace_json,
                        agent_run.runtime_adapter_kind,
                        agent_run.runtime_installation_id,
@@ -920,7 +919,7 @@ impl ExecutionRuntimeService {
                         row.get::<_, String>(18)?,
                         row.get::<_, String>(19)?,
                         row.get::<_, String>(20)?,
-                        row.get::<_, String>(21)?,
+                        row.get::<_, Option<String>>(21)?,
                         row.get::<_, Option<String>>(22)?,
                         row.get::<_, Option<String>>(23)?,
                         row.get::<_, Option<String>>(24)?,
@@ -932,13 +931,12 @@ impl ExecutionRuntimeService {
                         row.get::<_, Option<String>>(30)?,
                         row.get::<_, Option<String>>(31)?,
                         row.get::<_, Option<String>>(32)?,
-                        row.get::<_, Option<String>>(33)?,
+                        row.get::<_, Option<i64>>(33)?,
                         row.get::<_, Option<i64>>(34)?,
-                        row.get::<_, Option<i64>>(35)?,
-                        row.get::<_, Option<String>>(36)?,
+                        row.get::<_, Option<String>>(35)?,
+                        row.get::<_, String>(36)?,
                         row.get::<_, String>(37)?,
-                        row.get::<_, String>(38)?,
-                        row.get::<_, Option<String>>(39)?,
+                        row.get::<_, Option<String>>(38)?,
                     ))
                 },
             )
@@ -963,7 +961,6 @@ impl ExecutionRuntimeService {
             native_installation_generation,
             native_session_compatibility_key,
             purpose,
-            expected_output,
             effective_config,
             workspace,
             runtime_adapter_kind,
@@ -1040,7 +1037,6 @@ impl ExecutionRuntimeService {
             native_installation_generation,
             native_session_compatibility_key,
             purpose,
-            expected_output,
             effective_config,
             runtime,
             workspace,
@@ -3990,7 +3986,6 @@ mod tests {
             native_installation_generation: Some(previous_generation),
             native_session_compatibility_key: previous_key.map(str::to_string),
             purpose: "resume safely".to_string(),
-            expected_output: "result".to_string(),
             effective_config: json!({}),
             runtime: FrozenAgentRuntimeConfig {
                 adapter_kind: AdapterKind::CodexCli,
@@ -4466,7 +4461,6 @@ mod tests {
                             execution: Some(ExecutionRequest {
                                 task_id: None,
                                 purpose: format!("职责 {index}"),
-                                expected_output: "公开结果".to_string(),
                                 completion_role: "required".to_string(),
                                 budget: None,
                             }),
@@ -4760,7 +4754,6 @@ mod tests {
                         execution: Some(ExecutionRequest {
                             task_id: None,
                             purpose: "验证调度失败".to_string(),
-                            expected_output: "不启动 Runtime".to_string(),
                             completion_role: "required".to_string(),
                             budget: None,
                         }),
@@ -4881,7 +4874,6 @@ mod tests {
                         execution: Some(ExecutionRequest {
                             task_id: None,
                             purpose: "验证 Runtime rebind".to_string(),
-                            expected_output: "继续调度".to_string(),
                             completion_role: "required".to_string(),
                             budget: None,
                         }),
@@ -5083,7 +5075,6 @@ mod tests {
                         execution: Some(ExecutionRequest {
                             task_id: None,
                             purpose: "验证持久化 deadline".to_string(),
-                            expected_output: "到期后不得启动".to_string(),
                             completion_role: "required".to_string(),
                             budget: Some(CampTurnExecutionBudgetRequest {
                                 elapsed_seconds: 60,
@@ -5295,7 +5286,6 @@ mod tests {
                         execution: Some(ExecutionRequest {
                             task_id: None,
                             purpose: "验证停止运行".to_string(),
-                            expected_output: "不应产生输出".to_string(),
                             completion_role: "required".to_string(),
                             budget: None,
                         }),
@@ -5491,7 +5481,6 @@ mod tests {
                         execution: Some(ExecutionRequest {
                             task_id: None,
                             purpose: "独立分析".to_string(),
-                            expected_output: "公开结论".to_string(),
                             completion_role: "required".to_string(),
                             budget: None,
                         }),

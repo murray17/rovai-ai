@@ -79,7 +79,6 @@ try {
     body: 'Do not call tools or inspect files. Reply with MULTI_AGENT_OK followed by your own Agent ID.',
     address: { mode: 'explicit', agentIds: targetIds },
     purpose: 'Independently return a multi-Agent smoke token and your Agent ID without tools',
-    expectedOutput: 'A public answer containing MULTI_AGENT_OK and the executing Agent ID'
   })
   const campId = result.payload?.campId
   if (result.status !== 'accepted' || !campId || result.payload.agentRunIds?.length !== 2) {

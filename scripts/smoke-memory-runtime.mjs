@@ -49,7 +49,6 @@ async function runAdapterSmoke(adapterKind) {
         '检查结构化回执。只有当 effective=true，且 memoryId/revisionId 均存在时，才只回复 MEMORY_WRITE_OK。'
       ].join('\n'),
       purpose: `Verify ${adapterKind} receives the effective Agent Memory write receipt.`,
-      expectedOutput: 'One effective Companion Lesson and MEMORY_WRITE_OK.'
     })
     const created = createdResponse.commandResult ?? createdResponse
     const campId = created.payload?.campId

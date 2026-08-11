@@ -71,7 +71,6 @@ try {
     execution: {
       taskId: null,
       purpose: 'Verify two addressed Camp members can read the same public attachment path.',
-      expectedOutput: `Exactly ${token}.`,
       completionRole: 'required'
     }
   })
@@ -104,7 +103,6 @@ try {
     execution: {
       taskId: null,
       purpose: 'Verify a later Camp member can discover the earlier public attachment path.',
-      expectedOutput: `Exactly ${token}.`,
       completionRole: 'required'
     }
   })

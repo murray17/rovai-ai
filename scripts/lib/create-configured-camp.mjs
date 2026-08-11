@@ -38,7 +38,6 @@ export async function createConfiguredCampAndSend(request, input) {
     execution: {
       taskId: null,
       purpose: input.purpose,
-      expectedOutput: input.expectedOutput,
       completionRole: 'required'
     }
   })

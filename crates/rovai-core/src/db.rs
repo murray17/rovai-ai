@@ -1153,6 +1153,9 @@ impl Database {
             if !self.schema_migration_applied(72)? {
                 self.migrate_runtime_drift_rebind_v72()?;
             }
+            if !self.schema_migration_applied(73)? {
+                self.migrate_remove_agent_run_expected_output_v73()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -1418,6 +1421,9 @@ impl Database {
         }
         if !self.schema_migration_applied(72)? {
             self.migrate_runtime_drift_rebind_v72()?;
+        }
+        if !self.schema_migration_applied(73)? {
+            self.migrate_remove_agent_run_expected_output_v73()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -6566,6 +6572,24 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_remove_agent_run_expected_output_v73(&mut self) -> Result<()> {
+        let has_expected_output = table_columns(&self.connection, "agent_run")?
+            .iter()
+            .any(|column| column == "expected_output");
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if has_expected_output {
+            transaction.execute_batch("ALTER TABLE agent_run DROP COLUMN expected_output;")?;
+        }
+        transaction.execute(
+            "INSERT OR IGNORE INTO schema_migration(version, applied_at) VALUES (73, datetime('now'))",
+            [],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -11086,7 +11110,7 @@ mod tests {
                     id, conversation_id, camp_turn_id,
                     initial_camp_context_through_sequence,
                     initial_conversation_context_through_sequence,
-                    responsibility_key, start_reason, purpose, expected_output,
+                    responsibility_key, start_reason, purpose,
                     completion_role, effective_config_json,
                     status, idempotency_key, automatic_retry_count,
                     last_error_code, last_error_details_ref,
@@ -11098,7 +11122,7 @@ mod tests {
                 ) VALUES (
                     'v72-run', 'missing-conversation', 'missing-turn',
                     0, 0,
-                    'v72-run', 'initial', 'test', 'test',
+                    'v72-run', 'initial', 'test',
                     'required', '{}',
                     'failed', 'v72-run', 0,
                     NULL, NULL,
@@ -11132,6 +11156,65 @@ mod tests {
         assert_eq!(
             evidence,
             ("1.0.0".to_string(), "sha256:effective".to_string(), 0, 1,)
+        );
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v73_removes_expected_output_without_losing_agent_runs() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v73-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                ALTER TABLE agent_run
+                    ADD COLUMN expected_output TEXT NOT NULL DEFAULT 'legacy output';
+                PRAGMA foreign_keys = OFF;
+                INSERT INTO agent_run(
+                    id, conversation_id, camp_turn_id,
+                    initial_camp_context_through_sequence,
+                    initial_conversation_context_through_sequence,
+                    responsibility_key, start_reason, purpose,
+                    completion_role, effective_config_json,
+                    status, idempotency_key, automatic_retry_count,
+                    manual_retry_allowed, execution_epoch,
+                    runtime_recovery_required, version, created_at, ended_at, updated_at,
+                    expected_output
+                ) VALUES (
+                    'v73-run', 'missing-conversation', 'missing-turn',
+                    0, 0, 'v73-run', 'initial', 'preserved purpose',
+                    'required', '{}', 'failed', 'v73-run', 0,
+                    0, 0, 0, 1, datetime('now'), datetime('now'), datetime('now'),
+                    'obsolete output'
+                );
+                PRAGMA foreign_keys = ON;
+                DELETE FROM schema_migration WHERE version = 73;
+                "#,
+            )
+            .expect("test should restore the pre-v73 schema");
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v72 source should reopen");
+        let preserved: (String, i64) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT purpose,
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 73)
+                FROM agent_run WHERE id = 'v73-run'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(preserved, ("preserved purpose".to_string(), 1));
+        assert!(
+            !table_columns(reopened.connection(), "agent_run")
+                .unwrap()
+                .iter()
+                .any(|column| column == "expected_output")
         );
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
@@ -12283,12 +12366,12 @@ mod tests {
                     initial_camp_context_through_sequence,
                     initial_conversation_context_through_sequence,
                     responsibility_key, responsibility_generation,
-                    start_reason, purpose, expected_output, completion_role,
+                    start_reason, purpose, completion_role,
                     effective_config_json, workspace_json, permission_semantics,
                     status, idempotency_key, version, created_at, updated_at
                 ) VALUES (
                     'run-v42', 'turn-v42', 'conversation-v42', 0, 0,
-                    'identity-v42', 0, 'initial', '验证冻结身份', '证据', 'required',
+                    'identity-v42', 0, 'initial', '验证冻结身份', 'required',
                     '{"schemaVersion":1,"roleDescription":"旧顶层职责","instructions":"旧顶层准则","capabilities":[]}',
                     '{"executionRoot":"/tmp/rovai-v42","access":"read_only"}',
                     'runtime_managed_v2', 'queued', 'identity-v42', 1,
@@ -13009,7 +13092,7 @@ mod tests {
                     initial_camp_context_through_sequence,
                     initial_conversation_context_through_sequence,
                     responsibility_key, responsibility_generation,
-                    start_reason, purpose, expected_output, completion_role,
+                    start_reason, purpose, completion_role,
                     effective_config_json, workspace_json, permission_semantics,
                     status, idempotency_key, version,
                     created_at, ended_at, updated_at
@@ -13017,7 +13100,7 @@ mod tests {
                     (
                         'run-v27-active', 'turn-v27-active', 'conversation-v27',
                         0, 0, 'active-v27', 0,
-                        'initial', 'active', 'active', 'required',
+                        'initial', 'active', 'required',
                         '{}', '{"executionRoot":"/tmp/rovai-v27","access":"read_only"}',
                         'runtime_managed_v2',
                         'queued', 'active-v27', 1,
@@ -13028,14 +13111,14 @@ mod tests {
                     initial_camp_context_through_sequence,
                     initial_conversation_context_through_sequence,
                     responsibility_key, responsibility_generation,
-                    start_reason, purpose, expected_output, completion_role,
+                    start_reason, purpose, completion_role,
                     effective_config_json, workspace_json, permission_semantics,
                     status, idempotency_key, version,
                     created_at, ended_at, updated_at
                 ) VALUES (
                     'run-v27-terminal', 'turn-v27-terminal', 'conversation-v27',
                     0, 0, 'terminal-v27', 0,
-                    'initial', 'terminal', 'terminal', 'required',
+                    'initial', 'terminal', 'required',
                     '{}', '{"executionRoot":"/tmp/rovai-v27","access":"write"}',
                     'runtime_managed_v2',
                     'succeeded', 'terminal-v27', 1,

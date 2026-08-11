@@ -48,7 +48,6 @@ try {
     workspace,
     body: 'Reply with exactly ROVAI_CLAUDE_RUN_ONE and nothing else. Do not call tools.',
     purpose: 'Verify Claude Code CLI execution.',
-    expectedOutput: 'Exactly ROVAI_CLAUDE_RUN_ONE.'
   })
   if (first.status !== 'accepted') {
     throw new Error(`Claude Code Camp intake failed: ${JSON.stringify(first)}`)
@@ -83,7 +82,6 @@ try {
     execution: {
       taskId: null,
       purpose: 'Verify Claude Code Native Session resume.',
-      expectedOutput: 'Exactly ROVAI_CLAUDE_RUN_TWO.',
       completionRole: 'required'
     }
   })

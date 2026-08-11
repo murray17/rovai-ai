@@ -35,16 +35,19 @@ last_updated: 2026-08-11
 
 - [x] Session Charter 明确 Runtime final 不进入公屏、公开回复必须成功调用 `rovai send`；
 - [x] Charter 文案变化不进入 Native Binding compatibility digest，不主动轮换既有 Session；
+- [x] ADR-0157 删除未进入 Runtime Context 的 `expectedOutput` IPC、持久化与读模型字段；
+- [x] Migration 73 原位删除 `agent_run.expected_output` 并保留历史 Run 其余事实；
 - [x] Canonical Activity lifecycle merge 保留 ACP started kind/title，稀疏 terminal 只更新状态；
 - [x] Stop 只选择拥有 queued/running/waiting AgentRun 的 running/waiting Turn；
 - [x] 增加 Charter、Canonical lifecycle 和 Renderer cancellation 回归测试。
 
 已完成自动化验证：
 
-- `cargo test --workspace`：Library 315、CLI 10、Core binary 54 通过，3 个既有手工 Runtime smoke ignored；
+- `cargo test --workspace`：Library 316、CLI 10、Core binary 54 通过，3 个既有手工 Runtime smoke ignored；
 - `pnpm test`：文档治理 21、Vitest 251、Node qualification/benchmark 147 通过；
 - `cargo test -p rovai-core rebind -- --nocapture`：2 个新增 rebind 测试通过；
 - `cargo test -p rovai-core db::tests::v72_backfills_initial_runtime_evidence_without_overwriting_existing_values -- --nocapture`：Migration 72 回填测试通过；
+- `cargo test -p rovai-core db::tests::v73_removes_expected_output_without_losing_agent_runs -- --nocapture`：Migration 73 删列与历史 Run 保留测试通过；
 - `cargo clippy --workspace --all-targets -- -D warnings` 与 `cargo fmt --all -- --check` 通过；
 - `pnpm docs:test`：21 个测试通过；`pnpm docs:check` 通过，覆盖 58 个版本目录与 156 个 ADR。
 

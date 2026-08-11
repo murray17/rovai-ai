@@ -3,7 +3,7 @@ document_type: contract
 contract: durable-task-v3
 status: accepted
 target_version: v0.54
-last_updated: 2026-08-10
+last_updated: 2026-08-11
 ---
 
 # Durable Task v3
@@ -18,6 +18,15 @@ Task 是跨 AgentRun 持续存在、具有明确 owner、可独立完成、阻�
 推进或扩展已有 Task；普通分析、咨询、一次性 review、工具操作、local plan、A2A 请求和一个 Task
 内部的执行步骤不得持久化为新 Task。该语义约束属于 `team.create_task` 的 Lead-facing contract；Core
 只执行确定性的 authority、shape、state、version 与 capacity 校验，不做语义去重。
+
+## AgentRun instruction boundary
+
+Task-linked responsibility admission 只冻结 Task identity、version 与 Assignee 审计事实，不复制 Task
+全文。触发 CampMessage 或 ConversationMessage 的正文是该 AgentRun 唯一的自然语言执行指令，并以
+`CURRENT_INPUT` 交付；`purpose` 只保留为 Core 审计与责任描述。AgentRun 不保存或暴露
+`expectedOutput`，也不根据自由文本输出条件判断成功。该边界由
+[ADR-0157](../adr/0157-message-owned-agentrun-instruction-without-expected-output.md)局部替代
+ADR-0137 的旧 instruction ownership 条款。
 
 ## Create
 

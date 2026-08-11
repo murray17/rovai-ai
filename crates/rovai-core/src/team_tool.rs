@@ -1695,7 +1695,6 @@ mod tests {
                             execution: Some(ExecutionRequest {
                                 task_id: Some(task_id.clone()),
                                 purpose: "Coordinate work".to_string(),
-                                expected_output: "A useful answer".to_string(),
                                 completion_role: "required".to_string(),
                                 budget: None,
                             }),

@@ -1759,7 +1759,7 @@ fn load_run_snapshot<R: ContextReadConnection>(
                    agent_run.camp_turn_id, agent_run.conversation_id,
                    conversation.agent_id, agent_run.task_id,
                    agent_run.execution_epoch, agent_run.purpose,
-                   agent_run.expected_output, agent_run.invocation_kind,
+                   agent_run.invocation_kind,
                    agent_run.a2a_depth,
                    agent_run.initial_camp_context_through_sequence,
                    agent_run.initial_conversation_context_through_sequence,
@@ -1790,8 +1790,8 @@ fn load_run_snapshot<R: ContextReadConnection>(
             "#,
             params![agent_run_id, execution_epoch],
             |row| {
-                let effective_config: String = row.get(16)?;
-                let workspace: String = row.get(17)?;
+                let effective_config: String = row.get(15)?;
+                let workspace: String = row.get(16)?;
                 Ok(RunSnapshot {
                     agent_run_id: row.get(0)?,
                     camp_id: row.get(1)?,
@@ -1800,15 +1800,15 @@ fn load_run_snapshot<R: ContextReadConnection>(
                     agent_id: row.get(4)?,
                     task_id: row.get(5)?,
                     execution_epoch: row.get(6)?,
-                    invocation_kind: row.get(9)?,
-                    a2a_parent_agent_run_id: row.get(29)?,
-                    a2a_root_agent_run_id: row.get(30)?,
-                    a2a_depth: row.get(10)?,
-                    camp_message_boundary_sequence: row.get(11)?,
-                    conversation_message_boundary_sequence: row.get(12)?,
-                    trigger_camp_message_id: row.get(13)?,
-                    trigger_message_delivery_id: row.get(14)?,
-                    trigger_conversation_message_id: row.get(15)?,
+                    invocation_kind: row.get(8)?,
+                    a2a_parent_agent_run_id: row.get(28)?,
+                    a2a_root_agent_run_id: row.get(29)?,
+                    a2a_depth: row.get(9)?,
+                    camp_message_boundary_sequence: row.get(10)?,
+                    conversation_message_boundary_sequence: row.get(11)?,
+                    trigger_camp_message_id: row.get(12)?,
+                    trigger_message_delivery_id: row.get(13)?,
+                    trigger_conversation_message_id: row.get(14)?,
                     effective_config: serde_json::from_str(&effective_config).map_err(|error| {
                         rusqlite::Error::FromSqlConversionFailure(
                             effective_config.len(),
@@ -1823,17 +1823,17 @@ fn load_run_snapshot<R: ContextReadConnection>(
                             Box::new(error),
                         )
                     })?,
-                    runtime_installation_id: row.get(19)?,
-                    runtime_binding_compatibility_digest: row.get(20)?,
-                    native_adapter_installation_id: row.get(21)?,
-                    native_session_id: row.get(22)?,
-                    native_binding_compatibility_digest: row.get(23)?,
-                    native_binding_id: row.get(24)?,
-                    native_binding_generation: row.get(25)?,
-                    last_accepted_public_boundary_sequence: row.get(26)?,
-                    native_charter_digest: row.get(27)?,
-                    native_collaboration_state_digest: row.get(28)?,
-                    default_lead_agent_id: row.get(18)?,
+                    runtime_installation_id: row.get(18)?,
+                    runtime_binding_compatibility_digest: row.get(19)?,
+                    native_adapter_installation_id: row.get(20)?,
+                    native_session_id: row.get(21)?,
+                    native_binding_compatibility_digest: row.get(22)?,
+                    native_binding_id: row.get(23)?,
+                    native_binding_generation: row.get(24)?,
+                    last_accepted_public_boundary_sequence: row.get(25)?,
+                    native_charter_digest: row.get(26)?,
+                    native_collaboration_state_digest: row.get(27)?,
+                    default_lead_agent_id: row.get(17)?,
                 })
             },
         )
@@ -5351,7 +5351,6 @@ mod tests {
                         body: "第一条公开问题".to_string(),
                         address: TestCampMessageAddress::Default,
                         purpose: "回答用户".to_string(),
-                        expected_output: "清楚结论".to_string(),
                     },
                 },
             )
@@ -5595,7 +5594,6 @@ mod tests {
                         execution: Some(ExecutionRequest {
                             task_id: None,
                             purpose: "test Collaboration State refresh".to_string(),
-                            expected_output: "test result".to_string(),
                             completion_role: "required".to_string(),
                             budget: None,
                         }),
@@ -5674,7 +5672,6 @@ mod tests {
                         body: body.to_string(),
                         address: TestCampMessageAddress::Default,
                         purpose: "checkpoint 5 fixture".to_string(),
-                        expected_output: "fixture".to_string(),
                     },
                 },
             )
@@ -5993,7 +5990,6 @@ mod tests {
                         execution: Some(ExecutionRequest {
                             task_id: None,
                             purpose: "checkpoint 5 second run".to_string(),
-                            expected_output: "sequence reuse evidence".to_string(),
                             completion_role: "required".to_string(),
                             budget: None,
                         }),
@@ -6716,7 +6712,6 @@ mod tests {
                         body: "HISTORY_SEARCH_ANCHOR from another Camp".to_string(),
                         address: TestCampMessageAddress::Default,
                         purpose: "historical fixture".to_string(),
-                        expected_output: "fixture".to_string(),
                     },
                 },
             )
@@ -6786,7 +6781,6 @@ mod tests {
                         body: "LATE_JOINED_CAMP_MUST_STAY_HIDDEN".to_string(),
                         address: TestCampMessageAddress::Default,
                         purpose: "late history fixture".to_string(),
-                        expected_output: "fixture".to_string(),
                     },
                 },
             )
@@ -10802,7 +10796,6 @@ mod tests {
                         execution: Some(ExecutionRequest {
                             task_id: None,
                             purpose: "verify binding generation".to_string(),
-                            expected_output: "new output".to_string(),
                             completion_role: "required".to_string(),
                             budget: None,
                         }),

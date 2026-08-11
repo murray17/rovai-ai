@@ -107,7 +107,6 @@ try {
     execution: {
       taskId: null,
       purpose: 'Verify configured Camp intake and public reply.',
-      expectedOutput: 'A public reply containing INTAKE_OK.',
       completionRole: 'required'
     }
   }
@@ -153,7 +152,6 @@ try {
     execution: {
       taskId: null,
       purpose: 'Verify continued Camp conversation.',
-      expectedOutput: 'A public reply containing CONTINUE_OK.',
       completionRole: 'required'
     }
   })

@@ -277,10 +277,7 @@ async function runProjectedTool(request, workspace, adapterKind, adapterMarker, 
     workspace,
     body: toolInstructions.join('\n'),
     address: { mode: 'explicit', agentIds: ['agent_1'] },
-    purpose: `Verify ${adapterKind} preserves Runtime-native MCP and applies its declared same-name policy.`,
-    expectedOutput: adapterKind === 'codex-cli'
-      ? `All three Runtime-native markers for ${adapterMarker}`
-      : `rovai-projection:${adapterMarker}`
+    purpose: `Verify ${adapterKind} preserves Runtime-native MCP and applies its declared same-name policy.`
   })
   if (created.status !== 'accepted' || !created.payload?.agentRunIds?.[0]) {
     throw new Error(`${adapterKind} MCP Projection Camp was not accepted: ${JSON.stringify(created)}`)
