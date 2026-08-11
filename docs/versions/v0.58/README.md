@@ -41,9 +41,11 @@ Skill 一次性补齐缺失分组，同时保留当前 Revision 与显式启停�
 官方集合新增完整 `tasteful-ui` Skill：源码固定到上游
 `159ccd47a320f3a7bd0289d07366d422211895a1`，保留 MIT 许可、来源 Notice、全部渐进披露参考与 Rovai
 展示元数据；Core 构建时确定性枚举并嵌入 84 个文件，应用启动不访问网络。
-Skill 设置页从该真实上游元数据显示“GitHub 三方”、仓库链接与八位 Revision，其他 official 与
-Imported Skill 分别显示“Rovai 内置”和“用户导入”；右侧操作收敛为带列名的投递范围、状态与详情，
-版本元数据和 Imported 删除进入详情，不再使用意义不明的三点菜单。
+Skill 设置页从该真实上游元数据派生来源，但首层只显示“GitHub / Rovai / 用户导入”短标签；仓库、
+八位上游 Revision、安装来源与 Library Revision 全部进入中性详情。每个 Skill 以持久 UUID 经
+FNV-1a hash 映射到 `--identity-1..8`，颜色只用于 38px 字母标记，修改与新 Revision 不改变身份色。
+右侧操作收敛为带列名的投递范围、无可见状态文案的 Steel Switch 与详情，Imported 删除仍只在详情，
+不再使用意义不明的三点菜单。
 
 本版本的 Renderer 同时把用户与 Agent 普通消息统一到同一开放阅读平面，并在 2K 宽屏下使用
 “叙述约 76ch、代码与表格最多 930px”的双宽度体系。身份继续由头像、名称、Runtime、时间和 A2A
@@ -78,8 +80,8 @@ accepted 时结算为 `not_accepted`。三类 Adapter 在 accepted 后发生的 
 - Codex `commandExecution.title` 为空时，Core 使用 app-server 结构化 `commandActions` 生成有界
   presentation hint；file change 同样使用 `changes` 投影文件名或数量，不再全部显示固定 domain hint；
 - “停止当前执行”只取消拥有非终态 AgentRun 的 Turn，不再顺带取消仅等待人工重试的历史 Turn。
-- Skill 启停提交与可能较慢的投递文件对账解耦，设置页只原位更新当前行；开关自身显示
-  “已启用 / 已停用”，不再与独立状态标签重复。
+- Skill 启停提交与可能较慢的投递文件对账解耦，设置页只原位更新当前行；34×20 Steel Switch
+  不显示“已启用 / 已停用 / 保存中”文案，通过 `aria-checked` 与动作型可访问名称表达状态。
 
 ## 冻结边界
 

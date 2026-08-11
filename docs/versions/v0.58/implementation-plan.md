@@ -59,8 +59,8 @@ last_updated: 2026-08-11
 - [x] Core 构建时递归生成完整 84 文件 bundled manifest，拒绝符号链接和非普通文件；
 - [x] 新安装 `tasteful-ui` 复用内置 Skill 的默认启用、全九组分配、不可变 Revision 和用户修改保持语义；
 - [x] Core、Skill smoke、Renderer acceptance、领域词汇与 ADR 官方集合清单同步为六个。
-- [x] Skill 设置从真实上游元数据派生“GitHub 三方”仓库与八位 Revision，保留“Rovai 内置 /
-  用户导入”边界，并用带列名的投递范围、状态与详情替代三点元数据菜单。
+- [x] Skill 设置从真实上游元数据派生“GitHub / Rovai / 用户导入”短标签，仓库、来源与 Revision
+  进入详情，并用带列名的投递范围、无文案状态 Switch 与详情替代三点元数据菜单。
 
 ## Checkpoint 6：会话叙述与工件双宽度
 
@@ -105,12 +105,17 @@ last_updated: 2026-08-11
 已完成自动化验证：
 
 - `cargo test --workspace`：Library 325、CLI 10、Core binary 61 通过，3 个既有手工 Runtime smoke ignored；
-- `pnpm test`：文档治理 21、Vitest 268、Node qualification/benchmark 151 通过；
+- `pnpm test`：文档治理 21、Vitest 269、Node qualification/benchmark 151 通过；
 - `cargo test -p rovai-core codex_ -- --nocapture`：Codex structured presentation、Adapter 与 MCP fixture 通过；
 - `cargo test -p rovai-core rebind -- --nocapture`：2 个新增 rebind 测试通过；
 - `cargo test -p rovai-core db::tests::v72_backfills_initial_runtime_evidence_without_overwriting_existing_values -- --nocapture`：Migration 72 回填测试通过；
 - `cargo test -p rovai-core db::tests::v73_removes_expected_output_without_losing_agent_runs -- --nocapture`：Migration 73 删列与历史 Run 保留测试通过；
 - `pnpm exec vitest run apps/desktop/src/renderer/src/theme-tokens.test.ts apps/desktop/src/renderer/src/App.test.ts`：2 个文件、81 项 Renderer 契约通过；
+- `pnpm exec vitest run`：40 个文件、269 项 Renderer 测试通过；Skill 定向测试与 CSS 契约为 2 个文件、23 项；
+- `pnpm typecheck` 与 `pnpm build:desktop`：TypeScript、Main/Preload/Renderer 生产构建通过；
+- `pnpm package:mac` 与 `scripts/capture-skills.mjs`：签名 App 的 1440×920、200% zoom 两套隔离
+  `userData` 验收通过；六个 official Skill 的真实 UUID hash、字号、短来源、无文案 Steel Switch、
+  中性详情、九组菜单与无横向溢出均通过；
 - `pnpm package:mac` 与 `pnpm accept:runtime-activity-ui`：签名 App 验收通过；2560×1440 下会话列 1040px、叙述 622.31px、Composer 1040px，1040×700 无整页或会话列横向溢出；
 - `scripts/capture-camp-inspectors.mjs`：签名 App 在 1440×920、1040×700 与 200% zoom 下均只显示“任务 / 队员”，Lead 菜单真实 mutation、Header-to-Dock 聚焦、Inspector 状态保持及无横向溢出通过；
 - `pnpm accept:member-lifecycle-ui`：用户消息透明开放表面、原生文本选择、Copy、Mention、成员页返回与 200% zoom/reduced motion 回归通过；

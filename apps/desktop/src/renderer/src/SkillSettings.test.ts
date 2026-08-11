@@ -12,6 +12,7 @@ import {
   projectionStateLabel,
   skillSourcePresentation
 } from './SkillSettings'
+import { identityColorToken } from './theme'
 
 describe('Skill settings', () => {
   it('renders the Skill Library as the safe default settings surface', () => {
@@ -47,7 +48,7 @@ describe('Skill settings', () => {
     expect(formatBytes(2 * 1_024 * 1_024)).toBe('2.0 MB')
   })
 
-  it('uses the switch as the sole enabled-state label', () => {
+  it('uses an accessible switch without visible enabled-state copy', () => {
     const enabled = renderToStaticMarkup(createElement(SkillCard, {
       skill: skillFixture(true),
       groups: [],
@@ -66,11 +67,25 @@ describe('Skill settings', () => {
       onToggleGroup: () => {},
       onDelete: () => {}
     }))
+    const saving = renderToStaticMarkup(createElement(SkillCard, {
+      skill: skillFixture(true),
+      groups: [],
+      operation: 'toggle',
+      busy: null,
+      onToggleEnabled: () => {},
+      onToggleGroup: () => {},
+      onDelete: () => {}
+    }))
 
     expect(enabled).toContain('role="switch"')
     expect(enabled).toContain('aria-checked="true"')
-    expect(enabled).toContain('<b>已启用</b>')
-    expect(disabled).toContain('<b>已停用</b>')
+    expect(enabled).toContain('aria-label="停用 skill-one"')
+    expect(disabled).toContain('aria-label="启用 skill-one"')
+    expect(enabled).not.toContain('已启用')
+    expect(disabled).not.toContain('已停用')
+    expect(saving).toContain('aria-label="正在保存 skill-one"')
+    expect(saving).not.toContain('保存中…')
+    expect(enabled).not.toContain('<b>')
     expect(enabled).not.toContain('status-badge')
     expect(disabled).not.toContain('status-badge')
     expect(enabled).toContain('<span>详情</span>')
@@ -120,14 +135,14 @@ describe('Skill settings', () => {
 
     expect(skillSourcePresentation(bundled)).toMatchObject({
       kind: 'bundled',
-      badgeLabel: 'Rovai 内置',
+      badgeLabel: 'Rovai',
       sourceLabel: '随 Rovai 安装',
       repositoryUrl: null,
       revisionLabel: 'Revision r1'
     })
     expect(skillSourcePresentation(thirdParty)).toMatchObject({
       kind: 'third-party',
-      badgeLabel: 'GitHub 三方',
+      badgeLabel: 'GitHub',
       repositoryUrl: 'https://github.com/DonkeyKing01/tasteful-ui-skill',
       repositoryLabel: 'DonkeyKing01/tasteful-ui-skill',
       revisionLabel: '159ccd47'
@@ -147,7 +162,7 @@ describe('Skill settings', () => {
     })
   })
 
-  it('renders pinned GitHub provenance inline and keeps deletion inside named details', () => {
+  it('keeps short source labels in the row and full provenance inside named details', () => {
     const thirdParty = {
       ...skillFixture(true),
       name: 'tasteful-ui',
@@ -162,7 +177,15 @@ describe('Skill settings', () => {
         }
       }
     } satisfies SkillView
-    const imported = { ...skillFixture(true), origin: 'imported' } satisfies SkillView
+    const imported = {
+      ...skillFixture(true),
+      origin: 'imported',
+      currentRevision: {
+        ...skillFixture(true).currentRevision,
+        sourceType: 'local_folder',
+        sourceMetadata: { source: { sourcePath: '/private/example' } }
+      }
+    } satisfies SkillView
     const thirdPartyMarkup = renderToStaticMarkup(createElement(SkillCard, {
       skill: thirdParty,
       groups: [],
@@ -181,16 +204,66 @@ describe('Skill settings', () => {
       onToggleGroup: () => {},
       onDelete: () => {}
     }))
+    const detailsStart = thirdPartyMarkup.indexOf('<div class="skill-card-details"')
+    const thirdPartyPrimary = thirdPartyMarkup.slice(0, detailsStart)
+    const thirdPartyDetails = thirdPartyMarkup.slice(detailsStart)
+    const importedDetailsStart = importedMarkup.indexOf('<div class="skill-card-details"')
+    const importedPrimary = importedMarkup.slice(0, importedDetailsStart)
+    const importedDetails = importedMarkup.slice(importedDetailsStart)
 
-    expect(thirdPartyMarkup).toContain('GitHub 三方')
-    expect(thirdPartyMarkup).toContain('DonkeyKing01/tasteful-ui-skill')
-    expect(thirdPartyMarkup).toContain('159ccd47')
-    expect(thirdPartyMarkup).toContain('target="_blank"')
+    expect(thirdPartyPrimary).toContain('>GitHub<')
+    expect(thirdPartyPrimary).not.toContain('GitHub 三方')
+    expect(thirdPartyPrimary).not.toContain('skill-card-provenance')
+    expect(thirdPartyPrimary).not.toContain('DonkeyKing01/tasteful-ui-skill')
+    expect(thirdPartyPrimary).not.toContain('159ccd47')
+    expect(thirdPartyDetails).toContain('DonkeyKing01/tasteful-ui-skill')
+    expect(thirdPartyDetails).toContain('159ccd47')
+    expect(thirdPartyDetails).toContain('target="_blank"')
     expect(thirdPartyMarkup).toContain('aria-expanded="false"')
     expect(thirdPartyMarkup).toContain('随 Rovai 安装的固定上游副本')
     expect(thirdPartyMarkup).not.toContain('删除 Skill…')
-    expect(importedMarkup).toContain('用户导入')
-    expect(importedMarkup).toContain('删除 Skill…')
+    expect(importedPrimary).toContain('用户导入')
+    expect(importedPrimary).not.toContain('本地文件夹导入')
+    expect(importedPrimary).not.toContain('Revision r1')
+    expect(importedDetails).toContain('本地文件夹导入')
+    expect(importedDetails).toContain('删除 Skill…')
+  })
+
+  it('derives the identity color from the persistent Skill UUID across edits and revisions', () => {
+    const skillId = '019ff120-6051-7c63-a88f-eff3ecc059fb'
+    const original = {
+      ...skillFixture(true),
+      id: skillId,
+      currentRevision: {
+        ...skillFixture(true).currentRevision,
+        skillId
+      }
+    } satisfies SkillView
+    const edited = {
+      ...original,
+      name: 'renamed-skill',
+      version: original.version + 1,
+      currentRevision: {
+        ...original.currentRevision,
+        id: 'revision-2',
+        revision: 2,
+        name: 'renamed-skill',
+        description: 'Edited without changing identity'
+      }
+    } satisfies SkillView
+    const render = (skill: SkillView): string => renderToStaticMarkup(createElement(SkillCard, {
+      skill,
+      groups: [],
+      operation: null,
+      busy: null,
+      onToggleEnabled: () => {},
+      onToggleGroup: () => {},
+      onDelete: () => {}
+    }))
+    const expectedStyle = `style="--skill-identity:${identityColorToken(skillId)}"`
+
+    expect(render(original)).toContain(expectedStyle)
+    expect(render(edited)).toContain(expectedStyle)
   })
 
   it('summarizes the delivery scope without an ambiguous action label', () => {
