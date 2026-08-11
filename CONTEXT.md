@@ -372,6 +372,10 @@ _Avoid_: synchronous member call, hidden second opinion, automatic reply obligat
 The self-contained official Rovai Skill `grill-duo-with-docs` (“双人追问与文档”) that applies Grill Duo while maintaining resolved domain language and only qualifying architectural decisions. It is enabled and assigned to every Skill Delivery Group by default; its immutable Revision carries its own duo, domain-modeling, glossary, and ADR references rather than requiring another Skill Assignment.
 _Avoid_: dependent `grill-duo` assignment, generic `domain-modeling` bundled Skill, implementation-before-agreement, documentation batch after the session
 
+**Tasteful UI Skill**:
+The official Rovai Skill `tasteful-ui` (“品味优先 UI 设计”) vendored from one exact MIT-licensed upstream revision with its complete taste exploration, reference catalog, project-design format, implementation workflow, and result critique. It is enabled and assigned to every Skill Delivery Group by default; its task-local investment gates guide UI work but never grant Tool, network, filesystem, implementation, approval, or product authority.
+_Avoid_: floating upstream branch, partial reference bundle, Core-enforced design approval, automatic network access, UI permission grant
+
 **Agent Memory Mutation Run Quota**:
 The hard limit of four successfully persisted direct writes and Hearth Memory Proposals per source AgentRun. Idempotent replays and failed calls do not consume another slot, while a later Hearth Proposal decision does not restore one.
 _Avoid_: token budget, pending-only count, rolling window, user management limit

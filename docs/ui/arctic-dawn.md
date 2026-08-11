@@ -997,7 +997,7 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   分组仍显示，队员只用于查看，不进入 Assignment。新安装的 Rovai 内置 Skill 与新导入
   Skill 都默认选择全部九组，用户后续增删分组保持不变。
 - 新内置和 Imported Skill 默认启用。Rovai 内置为 `analyze-agent-codebase`、
-  `memory-stewardship`、`worktree`、`grill-duo` 与 `grill-duo-with-docs`；
+  `memory-stewardship`、`worktree`、`grill-duo`、`grill-duo-with-docs` 与 `tasteful-ui`；
   同名 Imported 更新创建不可变 Revision，内置同名导入拒绝。导入不执行内容，启用、
   内置来源和 `allowed-tools` 都不能授予额外权限。
 - Settings 不展示 Shadowed、Duplicate visible、Stale 或项目级投递清单。这些实际

@@ -1,0 +1,8 @@
+Tasteful UI is vendored from:
+https://github.com/DonkeyKing01/tasteful-ui-skill
+
+Pinned upstream revision:
+159ccd47a320f3a7bd0289d07366d422211895a1
+
+The upstream Skill content is licensed under the MIT License in LICENSE.
+Rovai-ai adds agents/openai.yaml for its built-in Skill presentation metadata.

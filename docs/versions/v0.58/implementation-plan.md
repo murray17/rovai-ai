@@ -51,6 +51,14 @@ last_updated: 2026-08-11
 - [x] Skill 启停事务提交后立即返回，后台触发 projection reconcile；Renderer 只更新当前行且
   Switch 独立显示“已启用 / 已停用”，不再渲染重复状态 Badge。
 
+## Checkpoint 5：内置 Tasteful UI Skill
+
+- [x] 固定 `tasteful-ui` 上游 Revision `159ccd47a320f3a7bd0289d07366d422211895a1`，完整引入 81 个上游文件；
+- [x] 补充 MIT `LICENSE`、固定来源 `NOTICE` 与匹配的 `agents/openai.yaml`，不引入启动时网络依赖；
+- [x] Core 构建时递归生成完整 84 文件 bundled manifest，拒绝符号链接和非普通文件；
+- [x] 新安装 `tasteful-ui` 复用内置 Skill 的默认启用、全九组分配、不可变 Revision 和用户修改保持语义；
+- [x] Core、Skill smoke、Renderer acceptance、领域词汇与 ADR 官方集合清单同步为六个。
+
 已完成自动化验证：
 
 - `cargo test --workspace`：Library 317、CLI 10、Core binary 54 通过，3 个既有手工 Runtime smoke ignored；

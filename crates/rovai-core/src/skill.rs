@@ -61,6 +61,7 @@ const CONTEXT_FORMAT_REFERENCE: &str =
     include_str!("../../../skills/grill-duo-with-docs/references/context-format.md");
 const ADR_FORMAT_REFERENCE: &str =
     include_str!("../../../skills/grill-duo-with-docs/references/adr-format.md");
+include!(concat!(env!("OUT_DIR"), "/tasteful_ui_bundled_files.rs"));
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -328,6 +329,8 @@ struct ExistingSkill {
 struct BundledDefinition {
     name: &'static str,
     files: &'static [(&'static str, &'static str, u32)],
+    upstream_repository: Option<&'static str>,
+    upstream_revision: Option<&'static str>,
 }
 
 const ANALYZE_AGENT_CODEBASE_FILES: &[(&str, &str, u32)] = &[
@@ -376,22 +379,38 @@ const BUNDLED_SKILLS: &[BundledDefinition] = &[
     BundledDefinition {
         name: "analyze-agent-codebase",
         files: ANALYZE_AGENT_CODEBASE_FILES,
+        upstream_repository: None,
+        upstream_revision: None,
     },
     BundledDefinition {
         name: "memory-stewardship",
         files: MEMORY_STEWARDSHIP_FILES,
+        upstream_repository: None,
+        upstream_revision: None,
     },
     BundledDefinition {
         name: "worktree",
         files: WORKTREE_FILES,
+        upstream_repository: None,
+        upstream_revision: None,
     },
     BundledDefinition {
         name: "grill-duo",
         files: GRILL_DUO_FILES,
+        upstream_repository: None,
+        upstream_revision: None,
     },
     BundledDefinition {
         name: "grill-duo-with-docs",
         files: GRILL_DUO_WITH_DOCS_FILES,
+        upstream_repository: None,
+        upstream_revision: None,
+    },
+    BundledDefinition {
+        name: "tasteful-ui",
+        files: TASTEFUL_UI_FILES,
+        upstream_repository: Some("https://github.com/DonkeyKing01/tasteful-ui-skill"),
+        upstream_revision: Some("159ccd47a320f3a7bd0289d07366d422211895a1"),
     },
 ];
 
@@ -1348,10 +1367,18 @@ impl SkillLibraryService {
                 payload: command,
             };
             let now = Utc::now().to_rfc3339();
-            let source_metadata = json!({
+            let mut source_metadata = json!({
                 "bundled": true,
                 "appVersion": env!("CARGO_PKG_VERSION"),
             });
+            if let (Some(repository), Some(revision)) =
+                (definition.upstream_repository, definition.upstream_revision)
+            {
+                source_metadata["upstream"] = json!({
+                    "repository": repository,
+                    "revision": revision,
+                });
+            }
             let existing_id = existing.as_ref().map(|value| value.id.clone());
             let existing_version = existing.as_ref().map(|value| value.version);
             let verified_for_handler = StagedCandidate {
@@ -2721,6 +2748,7 @@ mod tests {
                 "grill-duo",
                 "grill-duo-with-docs",
                 "memory-stewardship",
+                "tasteful-ui",
                 "worktree"
             ]
         );
@@ -2790,6 +2818,35 @@ mod tests {
                     .is_file()
             );
         }
+        let tasteful_ui = skills
+            .iter()
+            .find(|skill| skill.name == "tasteful-ui")
+            .unwrap();
+        assert_eq!(tasteful_ui.current_revision.file_count, 84);
+        assert_eq!(
+            tasteful_ui.current_revision.source_metadata["upstream"]["repository"],
+            "https://github.com/DonkeyKing01/tasteful-ui-skill"
+        );
+        assert_eq!(
+            tasteful_ui.current_revision.source_metadata["upstream"]["revision"],
+            "159ccd47a320f3a7bd0289d07366d422211895a1"
+        );
+        let tasteful_ui_content =
+            service.revision_content_path(&tasteful_ui.id, &tasteful_ui.current_revision.id);
+        for relative in [
+            "LICENSE",
+            "NOTICE",
+            "references/catalog.md",
+            "references/designs/productivity _ saas/linear.md",
+            "workflows/verification.md",
+        ] {
+            assert!(tasteful_ui_content.join(relative).is_file());
+        }
+        assert!(
+            fs::read_to_string(tasteful_ui_content.join("SKILL.md"))
+                .unwrap()
+                .contains("# Tasteful UI")
+        );
         let memory_stewardship = skills
             .iter()
             .find(|skill| skill.name == "memory-stewardship")
@@ -2897,7 +2954,7 @@ mod tests {
         service.install_bundled_skills(&mut database).unwrap();
 
         let skills = service.list(&database).unwrap();
-        assert_eq!(skills.len(), 5);
+        assert_eq!(skills.len(), 6);
         assert!(skills.iter().all(|skill| !skill.name.starts_with("rovai-")));
         let restored = skills
             .iter()

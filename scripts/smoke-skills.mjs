@@ -88,6 +88,7 @@ try {
       'grill-duo',
       'grill-duo-with-docs',
       'memory-stewardship',
+      'tasteful-ui',
       'worktree'
     ])
       && initialSkills.every((skill) => skill.origin === 'official'

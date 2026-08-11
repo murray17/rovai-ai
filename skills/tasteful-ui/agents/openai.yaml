@@ -1,0 +1,4 @@
+interface:
+  display_name: "品味优先 UI 设计"
+  short_description: "先判断产品方向与视觉品味，再选择参考、形成设计规则并验证实现质量"
+  default_prompt: "使用 $tasteful-ui 结合当前产品上下文探索合适的视觉方向，形成可执行设计规则并验证实现结果。"

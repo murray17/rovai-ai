@@ -161,7 +161,7 @@ generated_from: docs/adr-front-matter
 | [ADR-0147](0147-lossless-model-context-projection-and-layered-delivery-evidence.md) | Lossless Model Context Projection and Layered Delivery Evidence | `accepted` | `cross-version` | [v0.50](../versions/v0.50/README.md) | — |
 | [ADR-0148](0148-read-only-diagnostics-and-data-minimized-export.md) | Read-Only Diagnostics and Data-Minimized Export | `accepted` | `cross-version` | [v0.51](../versions/v0.51/README.md) | — |
 | [ADR-0149](0149-bounded-whole-history-omission-evidence.md) | Bounded Whole-History Omission Evidence | `accepted` | `cross-version` | [v0.52](../versions/v0.52/README.md) | — |
-| [ADR-0150](0150-evidence-first-agent-codebase-analysis-bundled-skill.md) | Evidence-First Agent Codebase Analysis Bundled Skill | `accepted` | `cross-version` | [v0.52](../versions/v0.52/README.md) | — |
+| [ADR-0150](0150-evidence-first-agent-codebase-analysis-bundled-skill.md) | Evidence-First Agent Codebase Analysis Bundled Skill | `superseded` | `cross-version` | [v0.52](../versions/v0.52/README.md) | [ADR-0159](0159-pinned-third-party-tasteful-ui-bundled-skill.md) |
 | [ADR-0151](0151-versioned-benchmark-protocol-and-axis-comparability.md) | Versioned Benchmark Protocol and Axis-Scoped Comparability | `accepted` | `cross-version` | [v0.53](../versions/v0.53/README.md) | — |
 | [ADR-0152](0152-lead-owned-task-responsibility-and-self-active-task-awareness.md) | Lead-Owned Task Responsibility and Self-Active Task Awareness | `accepted` | `cross-version` | [v0.54](../versions/v0.54/README.md) | — |
 | [ADR-0153](0153-explicit-empty-self-active-task-snapshot.md) | Explicit Empty Self-Active Task Snapshot | `accepted` | `cross-version` | [v0.54](../versions/v0.54/README.md) | — |
@@ -170,4 +170,5 @@ generated_from: docs/adr-front-matter
 | [ADR-0156](0156-logical-runtime-identity-and-bounded-installation-rebind.md) | Frozen Logical Runtime Identity and Bounded Installation Rebind | `accepted` | `cross-version` | [v0.58](../versions/v0.58/README.md) | — |
 | [ADR-0157](0157-message-owned-agentrun-instruction-without-expected-output.md) | Message-Owned AgentRun Instruction Without Expected Output Metadata | `accepted` | `cross-version` | [v0.58](../versions/v0.58/README.md) | — |
 | [ADR-0158](0158-default-all-runtime-delivery-for-managed-skills.md) | Default-All Runtime Delivery for Managed Skills | `accepted` | `cross-version` | [v0.58](../versions/v0.58/README.md) | — |
+| [ADR-0159](0159-pinned-third-party-tasteful-ui-bundled-skill.md) | Pinned Third-Party Tasteful UI Bundled Skill | `accepted` | `cross-version` | [v0.58](../versions/v0.58/README.md) | — |
 <!-- adr-history:end -->

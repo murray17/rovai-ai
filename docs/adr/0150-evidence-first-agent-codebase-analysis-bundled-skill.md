@@ -2,13 +2,13 @@
 document_type: adr
 id: ADR-0150
 title: Evidence-First Agent Codebase Analysis Bundled Skill
-status: accepted
+status: superseded
 date: 2026-08-10
 decision_scope: cross-version
 source_version: v0.52
 supersedes:
   - ADR-0144
-superseded_by: null
+superseded_by: ADR-0159
 ---
 
 # ADR-0150: Evidence-First Agent Codebase Analysis Bundled Skill

@@ -66,15 +66,15 @@ try {
   await waitForExpression(cdp, `Boolean(document.querySelector('.settings-sidebar-menu'))`, 5_000)
   await openSection(cdp, 'Skill')
   await waitForExpression(cdp, `Boolean(document.querySelector('.skill-settings')) && (
-    document.querySelectorAll('.skill-card').length === 5
+    document.querySelectorAll('.skill-card').length === 6
       || Boolean(document.querySelector('.skill-page-error'))
   )`, 30_000)
   const initialSkillState = await evaluate(cdp, `({
     cardCount: document.querySelectorAll('.skill-card').length,
     error: document.querySelector('.skill-page-error')?.textContent?.trim() ?? null
   })`)
-  if (initialSkillState.cardCount !== 5 || initialSkillState.error) {
-    throw new Error(`Skill settings did not load the five bundled Skills: ${JSON.stringify(initialSkillState)}`)
+  if (initialSkillState.cardCount !== 6 || initialSkillState.error) {
+    throw new Error(`Skill settings did not load the six bundled Skills: ${JSON.stringify(initialSkillState)}`)
   }
 
   await waitForEvaluation(cdp, `(async () => (
@@ -141,13 +141,14 @@ try {
       || result.panelOverflow
       || JSON.stringify(result.subnav) !== JSON.stringify(['通用', '外观', '通知', 'Skill', 'MCP', 'Agent 运行时', '诊断与修复'])
       || result.activeSection !== 'Skill'
-      || result.bundledCount !== 5
-      || result.enabledBundledCount !== 5
+      || result.bundledCount !== 6
+      || result.enabledBundledCount !== 6
       || JSON.stringify(result.skillNames) !== JSON.stringify([
         'analyze-agent-codebase',
         'grill-duo',
         'grill-duo-with-docs',
         'memory-stewardship',
+        'tasteful-ui',
         'worktree'
       ])
       || !result.importButton

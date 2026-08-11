@@ -33,10 +33,14 @@ installation refresh、logical identity revalidation 与 effective Runtime rebin
 - refresh/rebind 后再次执行 snapshot blocker 与 executable integrity 检查，二次漂移或身份/兼容性
   失败才 terminal fail。
 
-本版本同时把全部 Rovai 受管 Skill 的首次投递默认值改为九个 Runtime 生效组：新安装的五个内置
+本版本同时把全部 Rovai 受管 Skill 的首次投递默认值改为九个 Runtime 生效组：新安装的六个内置
 Skill 与新导入 Skill 都保持默认启用并立即获得全部 Group Assignment；Migration 74 为既有 active
 Skill 一次性补齐缺失分组，同时保留当前 Revision 与显式启停状态。迁移完成后，用户对任一 Skill
 的禁用或分组增删不会在后续启动或 Revision 更新时被恢复为默认值。
+
+官方集合新增完整 `tasteful-ui` Skill：源码固定到上游
+`159ccd47a320f3a7bd0289d07366d422211895a1`，保留 MIT 许可、来源 Notice、全部渐进披露参考与 Rovai
+展示元数据；Core 构建时确定性枚举并嵌入 84 个文件，应用启动不访问网络。
 
 真实 Copilot 请求复盘同时收敛三项直接影响 v0.58 验收可读性与恢复体验的缺陷：
 
@@ -65,13 +69,13 @@ Skill 一次性补齐缺失分组，同时保留当前 Revision 与显式启停�
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.57 冻结为 historical，v0.58 成为唯一 current，并新增本版本概览与实施计划 |
-| ADR | 已更新 | ADR-0156 局部替代永久 fingerprint 条款；ADR-0157 局部替代 ADR-0137 的旧 instruction ownership 条款；ADR-0158 局部替代 Skill 默认不分组条款 |
+| ADR | 已更新 | ADR-0156 局部替代永久 fingerprint 条款；ADR-0157 局部替代 ADR-0137 的旧 instruction ownership 条款；ADR-0158 局部替代 Skill 默认不分组条款；ADR-0159 完整替代 ADR-0150 并把固定上游 Revision 的 `tasteful-ui` 加入官方集合 |
 | Contracts | 已更新 | ADR-0157 与 Durable Task v3 删除 execution request、AgentRun persistence/read model 的 `expectedOutput` clean break；不增加 Charter 版本轴；Skill wire shape 不变 |
 | Architecture | 已更新 | Built-in Tool Runtime 增加 bounded rebind 与显式公共输出义务，Charter 文案变化不触发 Session 轮换；Skill projection 结构不变，默认策略由 ADR-0158 约束 |
 | UI | 已更新 | Stop 命令目标与按钮可见性统一按非终态 AgentRun 所属 Turn 计算；Skill 设置明确全九组默认，并以单一状态化 Switch 和行级提交反馈替代重复标签与整表刷新 |
 | Runtime Activity | 已更新 | Registry 明确稀疏 terminal lifecycle update 不得降级已报告的结构化分类和标题 |
 | Runtime compatibility | 确认无需更新 | 不改变支持的 Runtime、最低版本或已验证能力结论 |
-| Documentation routing | 已更新 | CURRENT 的 Skills/MCP 主题新增 ADR-0158，领域术语同步默认分组语义 |
+| Documentation routing | 已更新 | CURRENT 的 Skills/MCP 主题新增 ADR-0158 与 ADR-0159，领域术语同步默认分组和 `tasteful-ui` 来源边界 |
 | Root README | 确认无需更新 | 项目定位和常青能力不变，根 README 不记录版本局部恢复机制 |
 
 ## References
@@ -79,4 +83,5 @@ Skill 一次性补齐缺失分组，同时保留当前 Revision 与显式启停�
 - [v0.58 实施与验收计划](implementation-plan.md)
 - [ADR-0156](../../adr/0156-logical-runtime-identity-and-bounded-installation-rebind.md)
 - [ADR-0158](../../adr/0158-default-all-runtime-delivery-for-managed-skills.md)
+- [ADR-0159](../../adr/0159-pinned-third-party-tasteful-ui-bundled-skill.md)
 - [Built-in Tool Runtime architecture](../../architecture/builtin-tool-runtime.md)
