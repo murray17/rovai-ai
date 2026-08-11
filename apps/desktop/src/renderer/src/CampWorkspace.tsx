@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type JSX, type RefObject } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type JSX, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Tabs from '@radix-ui/react-tabs'
@@ -593,13 +593,13 @@ export function CampWorkspace({
     })),
     [snapshot.members]
   )
-  const closeMentionPopover = (returnFocus: boolean): void => {
+  const closeMentionPopover = useCallback((returnFocus: boolean): void => {
     const trigger = mentionPopover?.trigger
     setMentionPopover(null)
     if (returnFocus && trigger) {
       window.requestAnimationFrame(() => trigger.focus({ preventScroll: true }))
     }
-  }
+  }, [mentionPopover?.trigger])
   const openMemberMentionPopover = (
     agentId: string,
     trigger: HTMLElement,
