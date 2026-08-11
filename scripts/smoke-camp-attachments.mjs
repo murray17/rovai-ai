@@ -12,6 +12,7 @@ const sourcePath = join(fixtureRoot, 'public-attachment.txt')
 const token = `PUBLIC_ATTACHMENT_TOKEN_${crypto.randomUUID().replaceAll('-', '').toUpperCase()}`
 const firstAgents = ['agent_1', 'agent_2']
 const laterAgent = 'agent_4'
+const contextFormatterVersion = 13
 let core = null
 
 try {
@@ -45,8 +46,10 @@ try {
     throw new Error(`Camp creation failed: ${JSON.stringify(created)}`)
   }
 
+  const initialDraft = await core.request('camp.composerDraft.get', { campId })
   const preparedDraft = await core.request('camp.attachments.prepareFromPath', {
     campId,
+    expectedRevision: initialDraft.revision,
     sourcePath,
     displayName: 'Runtime 公共附件.txt'
   })
@@ -57,16 +60,24 @@ try {
     throw new Error(`Attachment preparation failed: ${JSON.stringify(preparedDraft)}`)
   }
 
+  const firstDraft = await core.request('camp.composerDraft.save', {
+    campId,
+    expectedRevision: preparedDraft.revision,
+    content: [
+      { kind: 'member_mention', agentId: firstAgents[0] },
+      { kind: 'text', text: ' ' },
+      { kind: 'member_mention', agentId: firstAgents[1] },
+      { kind: 'text', text: ` ${[
+        '读取本条消息携带的公共附件，不要猜测内容。',
+        '必须使用文件读取工具打开 Current Input 给出的 Camp Attachment Path。',
+        '只回复附件中 TOKEN= 后面的完整值，不要添加其他文字。'
+      ].join('\n')}` }
+    ]
+  })
   const firstSent = await core.request('camp.messages.send', {
     commandId: crypto.randomUUID(),
     campId,
-    body: [
-      '读取本条消息携带的公共附件，不要猜测内容。',
-      '必须使用文件读取工具打开 Current Input 给出的 Camp Attachment Path。',
-      '只回复附件中 TOKEN= 后面的完整值，不要添加其他文字。'
-    ].join('\n'),
-    preparedAttachmentIds: [attachment.id],
-    address: { mode: 'explicit', agentIds: firstAgents },
+    draftRevision: firstDraft.revision,
     replyToCampMessageId: null,
     execution: {
       taskId: null,
@@ -89,16 +100,23 @@ try {
   }, 'two addressed members to read the public attachment', 300_000)
   assertRunRepliesContain(snapshot, firstRunIds, token, 'addressed members')
 
+  const laterDraft = await core.request('camp.composerDraft.get', { campId })
+  const savedLaterDraft = await core.request('camp.composerDraft.save', {
+    campId,
+    expectedRevision: laterDraft.revision,
+    content: [
+      { kind: 'member_mention', agentId: laterAgent },
+      { kind: 'text', text: ` ${[
+        '读取上一条用户消息携带的公共附件，不要依赖其他队员的回答。',
+        '必须使用文件读取工具打开 Shared Conversation 给出的 Camp Attachment Path。',
+        '只回复附件中 TOKEN= 后面的完整值，不要添加其他文字。'
+      ].join('\n')}` }
+    ]
+  })
   const laterSent = await core.request('camp.messages.send', {
     commandId: crypto.randomUUID(),
     campId,
-    body: [
-      '读取上一条用户消息携带的公共附件，不要依赖其他队员的回答。',
-      '必须使用文件读取工具打开 Shared Conversation 给出的 Camp Attachment Path。',
-      '只回复附件中 TOKEN= 后面的完整值，不要添加其他文字。'
-    ].join('\n'),
-    preparedAttachmentIds: [],
-    address: { mode: 'explicit', agentIds: [laterAgent] },
+    draftRevision: savedLaterDraft.revision,
     replyToCampMessageId: null,
     execution: {
       taskId: null,
@@ -131,11 +149,11 @@ try {
   if (firstMessage?.attachments?.length !== 1
       || firstManifests.length !== 2
       || firstManifests.some((manifest) =>
-        manifest.formatterVersion !== 8
+        manifest.formatterVersion !== contextFormatterVersion
         || manifest.attachmentRefs?.length !== 1
         || manifest.attachmentRefs[0]?.attachmentId !== attachment.id
       )
-      || laterManifest?.formatterVersion !== 8
+      || laterManifest?.formatterVersion !== contextFormatterVersion
       || laterManifest.attachmentRefs?.length !== 0) {
     throw new Error(`Frozen attachment context evidence is invalid: ${JSON.stringify({
       firstMessage,
@@ -154,7 +172,7 @@ try {
     tokenVerifiedByRunCount: 3,
     sameStablePathVerifiedByRuntimeReads: true,
     laterSharedConversationDiscoveryVerified: true,
-    contextFormatterVersion: 5
+    contextFormatterVersion
   }, null, 2))
 } finally {
   if (core) await core.stop()

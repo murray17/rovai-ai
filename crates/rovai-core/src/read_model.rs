@@ -1260,6 +1260,44 @@ fn load_messages(
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     drop(statement);
+    let requested_message_ids = rows.iter().map(|row| &row.0).collect::<Vec<_>>();
+    let requested_message_ids_json = serde_json::to_string(&requested_message_ids)?;
+    let mut attachment_statement = transaction.prepare(
+        r#"
+        WITH requested AS (
+            SELECT CAST(value AS TEXT) AS camp_message_id
+            FROM json_each(?1)
+        )
+        SELECT attachment.camp_message_id,
+               attachment.id, attachment.display_name, attachment.media_type,
+               attachment.byte_size, attachment.preview_kind
+        FROM requested
+        JOIN message_attachment AS attachment
+          ON attachment.camp_message_id = requested.camp_message_id
+        ORDER BY attachment.camp_message_id, attachment.position, attachment.id
+        "#,
+    )?;
+    let attachment_rows = attachment_statement.query_map([requested_message_ids_json], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            CampMessageAttachmentView {
+                id: row.get(1)?,
+                display_name: row.get(2)?,
+                media_type: row.get(3)?,
+                byte_size: row.get(4)?,
+                preview_kind: row.get(5)?,
+            },
+        ))
+    })?;
+    let mut attachments_by_message_id = BTreeMap::<String, Vec<CampMessageAttachmentView>>::new();
+    for row in attachment_rows {
+        let (message_id, attachment) = row?;
+        attachments_by_message_id
+            .entry(message_id)
+            .or_default()
+            .push(attachment);
+    }
+    drop(attachment_statement);
     let mut messages = rows
         .into_iter()
         .map(
@@ -1284,25 +1322,7 @@ fn load_messages(
                         .map(normalize_content)
                         .context("CampMessage Structured Content is invalid")?;
                 let body = render_structured_message_content(transaction, &content)?;
-                let mut attachment_statement = transaction.prepare(
-                    r#"
-                    SELECT id, display_name, media_type, byte_size, preview_kind
-                    FROM message_attachment
-                    WHERE camp_message_id = ?1
-                    ORDER BY position, id
-                    "#,
-                )?;
-                let attachments = attachment_statement
-                    .query_map([&id], |row| {
-                        Ok(CampMessageAttachmentView {
-                            id: row.get(0)?,
-                            display_name: row.get(1)?,
-                            media_type: row.get(2)?,
-                            byte_size: row.get(3)?,
-                            preview_kind: row.get(4)?,
-                        })
-                    })?
-                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                let attachments = attachments_by_message_id.remove(&id).unwrap_or_default();
                 Ok(CampMessageView {
                     id: id.clone(),
                     sequence,
@@ -1718,65 +1738,87 @@ fn attach_canonical_activity(
     transaction: &Transaction<'_>,
     evidence: &mut [AgentRunExecutionEvidenceView],
 ) -> Result<()> {
+    if evidence.is_empty() {
+        return Ok(());
+    }
+    let requested = evidence
+        .iter()
+        .map(|item| (&item.id, &item.agent_run_id, item.execution_epoch))
+        .collect::<Vec<_>>();
+    let requested_json = serde_json::to_string(&requested)?;
+    let mut statement = transaction.prepare(
+        r#"
+        WITH requested AS (
+            SELECT
+                CAST(json_extract(value, '$[0]') AS TEXT) AS evidence_id,
+                CAST(json_extract(value, '$[1]') AS TEXT) AS agent_run_id,
+                CAST(json_extract(value, '$[2]') AS INTEGER) AS execution_epoch
+            FROM json_each(?1)
+        )
+        SELECT requested.evidence_id,
+               activity.operation_id, activity.classifier_version,
+               activity.activity_domain,
+               activity.semantic_kind, activity.tool_name,
+               activity.presentation_hint, activity.phase, activity.outcome,
+               activity.credibility, activity.coverage_level,
+               activity.source_authority, activity.source_evidence_ids_json,
+               activity.first_evidence_sequence,
+               activity.last_evidence_sequence, activity.revision
+        FROM requested
+        JOIN canonical_runtime_activity AS activity
+          ON activity.agent_run_id = requested.agent_run_id
+         AND activity.execution_epoch = requested.execution_epoch
+         AND activity.classifier_version = ?2
+        WHERE EXISTS (
+            SELECT 1
+            FROM json_each(activity.source_evidence_ids_json) AS source_evidence
+            WHERE source_evidence.value = requested.evidence_id
+        )
+        "#,
+    )?;
+    let rows = statement.query_map(
+        params![
+            requested_json,
+            crate::canonical_activity::CLASSIFIER_VERSION,
+        ],
+        |row| {
+            let evidence_ids: String = row.get(12)?;
+            let canonical = CanonicalRuntimeActivity {
+                operation_id: row.get(1)?,
+                classifier_version: row.get(2)?,
+                activity_domain: row.get(3)?,
+                semantic_kind: row.get(4)?,
+                tool_name: row.get(5)?,
+                presentation_hint: row.get(6)?,
+                phase: row.get(7)?,
+                outcome: row.get(8)?,
+                credibility: row.get(9)?,
+                coverage_level: row.get(10)?,
+                source_authority: row.get(11)?,
+                source_evidence_ids: serde_json::from_str(&evidence_ids).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        12,
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })?,
+                first_evidence_sequence: row.get(13)?,
+                last_evidence_sequence: row.get(14)?,
+                revision: row.get(15)?,
+            };
+            Ok((row.get::<_, String>(0)?, canonical))
+        },
+    )?;
+    let mut canonical_by_evidence_id = BTreeMap::new();
+    for row in rows {
+        let (evidence_id, canonical) = row?;
+        canonical_by_evidence_id
+            .entry(evidence_id)
+            .or_insert(canonical);
+    }
+    drop(statement);
     for item in evidence {
-        item.canonical = transaction
-            .query_row(
-                r#"
-                SELECT activity.operation_id, activity.classifier_version,
-                       activity.activity_domain,
-                       activity.semantic_kind, activity.tool_name,
-                       activity.presentation_hint, activity.phase, activity.outcome,
-                       activity.credibility, activity.coverage_level,
-                       activity.source_authority, activity.source_evidence_ids_json,
-                       activity.first_evidence_sequence,
-                       activity.last_evidence_sequence, activity.revision
-                FROM canonical_runtime_activity AS activity
-                WHERE activity.agent_run_id = ?2
-                  AND activity.execution_epoch = ?3
-                  AND activity.classifier_version = ?4
-                  AND EXISTS (
-                      SELECT 1
-                      FROM json_each(activity.source_evidence_ids_json)
-                      WHERE json_each.value = ?1
-                  )
-                LIMIT 1
-                "#,
-                params![
-                    item.id,
-                    item.agent_run_id,
-                    item.execution_epoch,
-                    crate::canonical_activity::CLASSIFIER_VERSION,
-                ],
-                |row| {
-                    let evidence_ids: String = row.get(11)?;
-                    Ok(CanonicalRuntimeActivity {
-                        operation_id: row.get(0)?,
-                        classifier_version: row.get(1)?,
-                        activity_domain: row.get(2)?,
-                        semantic_kind: row.get(3)?,
-                        tool_name: row.get(4)?,
-                        presentation_hint: row.get(5)?,
-                        phase: row.get(6)?,
-                        outcome: row.get(7)?,
-                        credibility: row.get(8)?,
-                        coverage_level: row.get(9)?,
-                        source_authority: row.get(10)?,
-                        source_evidence_ids: serde_json::from_str(&evidence_ids).map_err(
-                            |error| {
-                                rusqlite::Error::FromSqlConversionFailure(
-                                    11,
-                                    rusqlite::types::Type::Text,
-                                    Box::new(error),
-                                )
-                            },
-                        )?,
-                        first_evidence_sequence: row.get(12)?,
-                        last_evidence_sequence: row.get(13)?,
-                        revision: row.get(14)?,
-                    })
-                },
-            )
-            .optional()?;
+        item.canonical = canonical_by_evidence_id.remove(&item.id);
     }
     Ok(())
 }
@@ -2914,7 +2956,7 @@ mod tests {
                     ?1, 0, 'operation-command-1', 'activity-v1',
                     'shell', 'shell.execute', NULL, '执行 Shell 命令',
                     'terminal', 'succeeded', 'runtime_structured', 'fine_grained',
-                    'runtime', '["evidence-4"]', 4, 4, 1, ?2, ?2
+                    'runtime', '["evidence-3","evidence-4"]', 3, 4, 1, ?2, ?2
                 )
                 "#,
                 params![agent_run_id, now],
@@ -2932,6 +2974,15 @@ mod tests {
                 .and_then(|evidence| evidence.canonical.as_ref())
                 .map(|canonical| canonical.activity_domain.as_str()),
             Some("shell")
+        );
+        assert_eq!(
+            snapshot
+                .execution_evidence
+                .iter()
+                .find(|evidence| evidence.id == "evidence-3")
+                .and_then(|evidence| evidence.canonical.as_ref())
+                .map(|canonical| canonical.operation_id.as_str()),
+            Some("operation-command-1")
         );
 
         let first = read_model
@@ -2965,6 +3016,13 @@ mod tests {
         assert_eq!(second.evidence.len(), 2);
         assert_eq!(second.evidence[0].payload["delta"], "片段3");
         assert_eq!(
+            second.evidence[0]
+                .canonical
+                .as_ref()
+                .map(|canonical| canonical.operation_id.as_str()),
+            Some("operation-command-1")
+        );
+        assert_eq!(
             second.evidence[1]
                 .canonical
                 .as_ref()
@@ -2981,6 +3039,116 @@ mod tests {
                     2,
                 )
                 .is_err()
+        );
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn snapshot_batches_canonical_activity_for_the_full_evidence_window() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai-evidence-batch-test-{}", Uuid::new_v4()));
+        let workspace = directory.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let mut database = Database::open(&directory).unwrap();
+        configure_test_runtime(&database, &["agent_1"]);
+        let created = CollaborationService::default()
+            .create_test_camp_conversation(
+                &mut database,
+                &user_envelope(
+                    "evidence-batch-create",
+                    None,
+                    TestCampConversationCommand {
+                        project_path: workspace.to_string_lossy().to_string(),
+                        project_binding_kind: ProjectBindingKind::Directory,
+                        body: "验证完整 Evidence 窗口批量投影".to_string(),
+                        address: TestCampMessageAddress::Default,
+                        purpose: "验证 Snapshot 批量 Canonical Activity".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        let camp_id = created.result.payload["campId"].as_str().unwrap();
+        let agent_run_id = created.result.payload["agentRunIds"][0].as_str().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        let transaction = database.connection_mut().transaction().unwrap();
+        {
+            let mut statement = transaction
+                .prepare(
+                    r#"
+                    INSERT INTO agent_run_execution_evidence(
+                        id, agent_run_id, execution_epoch, sequence,
+                        event_type, kind, phase, source_event_key,
+                        payload_preview_json, content_blob_id,
+                        content_byte_count, is_truncated, occurred_at
+                    ) VALUES (
+                        ?1, ?2, 0, ?3, 'activity.completed', 'command',
+                        'completed', NULL, ?4, NULL, 32, 0, ?5
+                    )
+                    "#,
+                )
+                .unwrap();
+            for sequence in 1..=EXECUTION_EVIDENCE_SNAPSHOT_LIMIT {
+                statement
+                    .execute(params![
+                        format!("batch-evidence-{sequence}"),
+                        agent_run_id,
+                        sequence,
+                        json!({ "sequence": sequence }).to_string(),
+                        now,
+                    ])
+                    .unwrap();
+            }
+        }
+        let group_count = (EXECUTION_EVIDENCE_SNAPSHOT_LIMIT + 99) / 100;
+        for group in 0..group_count {
+            let first_sequence = group * 100 + 1;
+            let last_sequence = (first_sequence + 99).min(EXECUTION_EVIDENCE_SNAPSHOT_LIMIT);
+            let evidence_ids = (first_sequence..=last_sequence)
+                .map(|sequence| format!("batch-evidence-{sequence}"))
+                .collect::<Vec<_>>();
+            transaction
+                .execute(
+                    r#"
+                    INSERT INTO canonical_runtime_activity(
+                        agent_run_id, execution_epoch, operation_id, classifier_version,
+                        activity_domain, semantic_kind, tool_name, presentation_hint,
+                        phase, outcome, credibility, coverage_level, source_authority,
+                        source_evidence_ids_json, first_evidence_sequence,
+                        last_evidence_sequence, revision, created_at, updated_at
+                    ) VALUES (
+                        ?1, 0, ?2, 'activity-v1', 'shell', 'shell.execute', NULL,
+                        '执行 Shell 命令', 'terminal', 'succeeded',
+                        'runtime_structured', 'fine_grained', 'runtime',
+                        ?3, ?4, ?5, 1, ?6, ?6
+                    )
+                    "#,
+                    params![
+                        agent_run_id,
+                        format!("batch-operation-{group}"),
+                        serde_json::to_string(&evidence_ids).unwrap(),
+                        first_sequence,
+                        last_sequence,
+                        now,
+                    ],
+                )
+                .unwrap();
+        }
+        transaction.commit().unwrap();
+
+        let snapshot = ReadModelService
+            .camp_snapshot(&mut database, camp_id)
+            .unwrap();
+        assert_eq!(
+            snapshot.execution_evidence.len(),
+            EXECUTION_EVIDENCE_SNAPSHOT_LIMIT as usize
+        );
+        assert!(
+            snapshot
+                .execution_evidence
+                .iter()
+                .all(|evidence| evidence.canonical.is_some())
         );
 
         drop(database);

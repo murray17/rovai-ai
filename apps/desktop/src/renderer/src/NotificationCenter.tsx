@@ -1,9 +1,10 @@
 import {
+  forwardRef,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useRef,
-  useState,
-  type RefObject
+  useState
 } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type {
@@ -17,27 +18,52 @@ import type {
 
 type LoadState = 'loading' | 'ready' | 'error'
 
-export function NotificationCenter({
-  open,
-  onOpenChange,
-  activeCampId,
-  activeCampVisible,
-  refreshSignal,
-  triggerRef,
-  onUnreadCountChange,
-  onNavigate,
-  onRefreshVisibleCamp
-}: {
-  open: boolean
-  onOpenChange(open: boolean): void
+export function notificationInboxWithPendingReads(
+  inbox: InAppNotificationInbox,
+  pendingReadAtById: ReadonlyMap<string, string>,
+  filter: InAppNotificationFilter
+): InAppNotificationInbox {
+  if (pendingReadAtById.size === 0) return inbox
+  let pendingUnreadCount = 0
+  const items = inbox.items.map((item) => {
+    const pendingReadAt = pendingReadAtById.get(item.id)
+    if (!pendingReadAt || item.readAt !== null) return item
+    pendingUnreadCount += 1
+    return { ...item, readAt: pendingReadAt }
+  })
+  return {
+    ...inbox,
+    items: filter === 'unread'
+      ? items.filter((item) => item.readAt === null)
+      : items,
+    unreadCount: Math.max(0, inbox.unreadCount - pendingUnreadCount)
+  }
+}
+
+export interface NotificationCenterHandle {
+  open(trigger?: HTMLButtonElement | null): void
+}
+
+interface NotificationCenterProps {
+  enabled: boolean
   activeCampId: string | null
   activeCampVisible: boolean
   refreshSignal: number
-  triggerRef: RefObject<HTMLButtonElement | null>
   onUnreadCountChange(count: number): void
   onNavigate(notification: InAppNotificationView): Promise<void>
   onRefreshVisibleCamp(campId: string): Promise<boolean>
-}): React.JSX.Element {
+}
+
+export const NotificationCenter = forwardRef<NotificationCenterHandle, NotificationCenterProps>(function NotificationCenter({
+  enabled,
+  activeCampId,
+  activeCampVisible,
+  refreshSignal,
+  onUnreadCountChange,
+  onNavigate,
+  onRefreshVisibleCamp
+}: NotificationCenterProps, ref): React.JSX.Element {
+  const [open, setOpen] = useState(false)
   const [filter, setFilter] = useState<InAppNotificationFilter>('all')
   const [items, setItems] = useState<InAppNotificationView[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
@@ -55,14 +81,35 @@ export function NotificationCenter({
   const pollFailureCount = useRef(0)
   const pollRetryAt = useRef(0)
   const loadGeneration = useRef(0)
+  const inboxRequest = useRef<{
+    filter: InAppNotificationFilter
+    promise: Promise<InAppNotificationInbox>
+  } | null>(null)
+  const pendingReadAtById = useRef(new Map<string, string>())
+  const returnFocusRef = useRef<HTMLButtonElement | null>(null)
+
+  useImperativeHandle(ref, () => ({
+    open(trigger = null): void {
+      returnFocusRef.current = trigger
+      setOpen(true)
+    }
+  }), [])
 
   const acceptInbox = useCallback((inbox: InAppNotificationInbox): void => {
     if (inbox.schemaVersion !== 2) throw new Error('通知中心合同不兼容。')
-    setItems(inbox.items)
-    setNextCursor(inbox.nextCursor)
-    setUnreadCount(inbox.unreadCount)
-    setThroughSequence(inbox.throughSequence)
-    const currentById = new Map(inbox.items.map((item) => [item.id, item]))
+    for (const item of inbox.items) {
+      if (item.readAt !== null) pendingReadAtById.current.delete(item.id)
+    }
+    const acceptedInbox = notificationInboxWithPendingReads(
+      inbox,
+      pendingReadAtById.current,
+      filter
+    )
+    setItems(acceptedInbox.items)
+    setNextCursor(acceptedInbox.nextCursor)
+    setUnreadCount(acceptedInbox.unreadCount)
+    setThroughSequence(acceptedInbox.throughSequence)
+    const currentById = new Map(acceptedInbox.items.map((item) => [item.id, item]))
     setHeadsUpQueue((current) => current.flatMap((item) => {
       const latest = currentById.get(item.id)
       if (
@@ -75,33 +122,46 @@ export function NotificationCenter({
       ) return []
       return [latest]
     }))
-    onUnreadCountChange(inbox.unreadCount)
-  }, [onUnreadCountChange])
+    onUnreadCountChange(acceptedInbox.unreadCount)
+  }, [filter, onUnreadCountChange])
 
-  const loadInbox = useCallback(async (
+  const loadInbox = useCallback((
     selectedFilter: InAppNotificationFilter,
     showLoading = false
   ): Promise<InAppNotificationInbox> => {
+    const existing = inboxRequest.current
+    if (existing?.filter === selectedFilter) {
+      if (showLoading) setState('loading')
+      return existing.promise
+    }
     const generation = ++loadGeneration.current
     if (showLoading) setState('loading')
     setError(null)
-    try {
-      const inbox = await window.rovai.request<InAppNotificationInbox>('notifications.inbox', {
-        filter: selectedFilter,
-        limit: 50
-      })
+    const promise = window.rovai.request<InAppNotificationInbox>('notifications.inbox', {
+      filter: selectedFilter,
+      limit: 50
+    }).then((inbox) => {
       if (generation === loadGeneration.current) {
         acceptInbox(inbox)
         setState('ready')
       }
       return inbox
-    } catch (nextError) {
+    }).catch((nextError: unknown) => {
       if (generation === loadGeneration.current) {
         setState('error')
         setError(errorMessage(nextError))
       }
       throw nextError
+    })
+    const request = {
+      filter: selectedFilter,
+      promise
     }
+    inboxRequest.current = request
+    void promise.finally(() => {
+      if (inboxRequest.current === request) inboxRequest.current = null
+    }).catch(() => undefined)
+    return promise
   }, [acceptInbox])
 
   const loadPreference = useCallback(async (): Promise<InAppNotificationPreference> => {
@@ -119,6 +179,7 @@ export function NotificationCenter({
   }, [])
 
   useEffect(() => {
+    if (!enabled) return undefined
     let cancelled = false
     void Promise.all([
       loadInbox('all', true),
@@ -131,7 +192,7 @@ export function NotificationCenter({
     return () => {
       cancelled = true
     }
-  }, [loadInbox, loadPreference])
+  }, [enabled, loadInbox, loadPreference])
 
   useEffect(() => {
     if (!baselineReady.current) return
@@ -146,10 +207,11 @@ export function NotificationCenter({
   }, [filter, loadInbox, open])
 
   const markRead = useCallback(async (notificationId: string): Promise<void> => {
-    await window.rovai.request<StoredCommandResult>('notifications.markRead', {
+    const result = await window.rovai.request<StoredCommandResult>('notifications.markRead', {
       commandId: crypto.randomUUID(),
       command: { notificationId }
     })
+    if (result.status !== 'applied') throw new Error(result.code)
   }, [])
 
   const enqueueHeadsUps = useCallback((incoming: InAppNotificationView[]): void => {
@@ -241,6 +303,7 @@ export function NotificationCenter({
   ])
 
   useEffect(() => {
+    if (!enabled) return undefined
     const timer = window.setInterval(() => {
       void pollCreated().catch(() => undefined)
     }, 2_500)
@@ -260,29 +323,50 @@ export function NotificationCenter({
       if (eventTimer !== null) window.clearTimeout(eventTimer)
       unsubscribe()
     }
-  }, [loadPreference, pollCreated])
+  }, [enabled, loadPreference, pollCreated])
 
-  const optimisticRead = (notificationId: string): void => {
-    const changed = items.some((item) => item.id === notificationId && item.readAt === null)
+  const invalidateInboxLoad = (): void => {
+    loadGeneration.current += 1
+    inboxRequest.current = null
+  }
+
+  const optimisticRead = (notification: InAppNotificationView): boolean => {
+    const latest = items.find((item) => item.id === notification.id) ?? notification
+    if (latest.readAt !== null || pendingReadAtById.current.has(notification.id)) return false
+    const readAt = new Date().toISOString()
+    pendingReadAtById.current.set(notification.id, readAt)
+    invalidateInboxLoad()
     setItems((current) => current.map((item) => {
-      if (item.id !== notificationId || item.readAt !== null) return item
-      return { ...item, readAt: new Date().toISOString() }
+      if (item.id !== notification.id || item.readAt !== null) return item
+      return { ...item, readAt }
     }))
-    if (changed) {
-      setUnreadCount((count) => {
-        const next = Math.max(0, count - 1)
-        onUnreadCountChange(next)
-        return next
-      })
+    setHeadsUpQueue((current) => current.filter((item) => item.id !== notification.id))
+    setUnreadCount((count) => {
+      const next = Math.max(0, count - 1)
+      onUnreadCountChange(next)
+      return next
+    })
+    return true
+  }
+
+  const persistOptimisticRead = async (notificationId: string): Promise<void> => {
+    try {
+      await markRead(notificationId)
+    } catch (nextError) {
+      pendingReadAtById.current.delete(notificationId)
+      invalidateInboxLoad()
+      await loadInbox(filter).catch(() => undefined)
+      setError(errorMessage(nextError))
+      return
     }
+    pendingReadAtById.current.delete(notificationId)
+    invalidateInboxLoad()
+    await loadInbox(filter).catch(() => undefined)
   }
 
   const openNotification = async (notification: InAppNotificationView): Promise<void> => {
-    optimisticRead(notification.id)
-    void markRead(notification.id).catch(() => {
-      void loadInbox(filter).catch(() => undefined)
-    })
-    onOpenChange(false)
+    if (optimisticRead(notification)) void persistOptimisticRead(notification.id)
+    setOpen(false)
     await onNavigate(notification)
   }
 
@@ -369,9 +453,9 @@ export function NotificationCenter({
   }
 
   const changeOpen = (nextOpen: boolean): void => {
-    onOpenChange(nextOpen)
+    setOpen(nextOpen)
     if (!nextOpen) {
-      window.setTimeout(() => triggerRef.current?.focus(), 0)
+      window.setTimeout(() => returnFocusRef.current?.focus(), 0)
     }
   }
 
@@ -471,7 +555,7 @@ export function NotificationCenter({
       </Dialog.Root>
     </>
   )
-}
+})
 
 function NotificationRow({
   notification,
