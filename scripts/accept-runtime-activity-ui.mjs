@@ -280,7 +280,10 @@ try {
   await pressKey(app.cdp, 'End', 'End', 35)
   await waitForExpression(app.cdp, `(() => {
     const handle = document.querySelector('.execution-drawer-resize-handle')
-    return handle?.getAttribute('aria-valuenow') === handle?.getAttribute('aria-valuemax')
+    const drawer = document.querySelector('.execution-drawer')
+    const now = Number(handle?.getAttribute('aria-valuenow') ?? 0)
+    return now === Number(handle?.getAttribute('aria-valuemax') ?? -1)
+      && Math.abs((drawer?.getBoundingClientRect().height ?? 0) - now) <= 1
   })()`)
   await evaluate(app.cdp, `(() => {
     const timeline = document.querySelector('.camp-timeline')
@@ -332,7 +335,10 @@ try {
   await pressKey(app.cdp, 'End', 'End', 35)
   await waitForExpression(app.cdp, `(() => {
     const handle = document.querySelector('.execution-drawer-resize-handle')
-    return handle?.getAttribute('aria-valuenow') === handle?.getAttribute('aria-valuemax')
+    const drawer = document.querySelector('.execution-drawer')
+    const now = Number(handle?.getAttribute('aria-valuenow') ?? 0)
+    return now === Number(handle?.getAttribute('aria-valuemax') ?? -1)
+      && Math.abs((drawer?.getBoundingClientRect().height ?? 0) - now) <= 1
   })()`)
   await wait(150)
   const zoomedDrawerLayout = await collectZoomedDrawerLayout(app.cdp)
@@ -1023,8 +1029,15 @@ async function verifyExecutionDrawerResizeControl(cdp) {
     const focused = drawer?.querySelector('.execution-process-stage.is-focused')
     const drawerRect = drawer?.getBoundingClientRect()
     const handleRect = handle?.getBoundingClientRect()
+    const drawerStyle = drawer ? getComputedStyle(drawer) : null
     return drawer && handle && body && drawerRect && handleRect ? {
       height: Math.round(drawerRect.height),
+      inlineStyle: drawer.getAttribute('style'),
+      computedHeight: drawerStyle?.height ?? null,
+      computedMinHeight: drawerStyle?.minHeight ?? null,
+      computedMaxHeight: drawerStyle?.maxHeight ?? null,
+      computedFlex: drawerStyle?.flex ?? null,
+      parentHeight: drawer.parentElement?.clientHeight ?? null,
       handleX: Math.round(handleRect.left + handleRect.width / 2),
       handleY: Math.round(handleRect.top + handleRect.height / 2),
       role: handle.getAttribute('role'),
@@ -1055,7 +1068,10 @@ async function verifyExecutionDrawerResizeControl(cdp) {
   await pressKey(cdp, 'Home', 'Home', 36)
   await waitForExpression(cdp, `(() => {
     const handle = document.querySelector('.execution-drawer-resize-handle')
-    return handle?.getAttribute('aria-valuenow') === handle?.getAttribute('aria-valuemin')
+    const drawer = document.querySelector('.execution-drawer')
+    const now = Number(handle?.getAttribute('aria-valuenow') ?? 0)
+    return now === Number(handle?.getAttribute('aria-valuemin') ?? -1)
+      && Math.abs((drawer?.getBoundingClientRect().height ?? 0) - now) <= 1
       && document.querySelector('.execution-drawer')?.dataset.userSized === 'true'
   })()`)
   const minimum = await geometry()
@@ -1063,7 +1079,10 @@ async function verifyExecutionDrawerResizeControl(cdp) {
   await pressKey(cdp, 'PageUp', 'PageUp', 33)
   await waitForExpression(cdp, `(() => {
     const handle = document.querySelector('.execution-drawer-resize-handle')
-    return Number(handle?.getAttribute('aria-valuenow') ?? 0) > Number(handle?.getAttribute('aria-valuemin') ?? 0)
+    const drawer = document.querySelector('.execution-drawer')
+    const now = Number(handle?.getAttribute('aria-valuenow') ?? 0)
+    return now > Number(handle?.getAttribute('aria-valuemin') ?? 0)
+      && Math.abs((drawer?.getBoundingClientRect().height ?? 0) - now) <= 1
   })()`)
   const keyboardSized = await geometry()
   assert(minimum && keyboardSized
@@ -1271,6 +1290,7 @@ async function launchApp(port, width, height) {
     cdp = await connectCdp(target.webSocketDebuggerUrl)
     await cdp.send('Page.enable')
     await cdp.send('Page.bringToFront')
+    await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true })
     await cdp.send('Emulation.setDeviceMetricsOverride', {
       width, height, deviceScaleFactor: 1, mobile: false
     })

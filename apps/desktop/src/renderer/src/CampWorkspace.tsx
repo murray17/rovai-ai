@@ -1978,7 +1978,7 @@ function ExecutionDrawer({
 
   const displayName = member?.displayName ?? profile?.displayName ?? process.agentId
   const accessibleHeight = Math.round(
-    measuredHeight ?? appliedHeight ?? heightBounds?.min ?? EXECUTION_DRAWER_HARD_MIN_HEIGHT
+    appliedHeight ?? measuredHeight ?? heightBounds?.min ?? EXECUTION_DRAWER_HARD_MIN_HEIGHT
   )
   const accessibleBounds = heightBounds ?? {
     min: EXECUTION_DRAWER_HARD_MIN_HEIGHT,

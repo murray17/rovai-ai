@@ -156,8 +156,8 @@ last_updated: 2026-08-11
 
 已完成自动化验证：
 
-- `cargo test --workspace`：Library 325、CLI 10、Core binary 61 通过，3 个既有手工 Runtime smoke ignored；
-- `pnpm test`：文档治理 21、Vitest 269、Node qualification/benchmark 151 通过；
+- `cargo test --workspace`：Library 333、CLI 10、Core binary 62 通过，3 个既有手工 Runtime smoke ignored；
+- `pnpm test`：文档治理 21、Vitest 270、Node qualification/benchmark 151 通过；
 - `cargo test -p rovai-core codex_ -- --nocapture`：Codex structured presentation、Adapter 与 MCP fixture 通过；
 - `cargo test -p rovai-core rebind -- --nocapture`：2 个新增 rebind 测试通过；
 - `cargo test -p rovai-core db::tests::v72_backfills_initial_runtime_evidence_without_overwriting_existing_values -- --nocapture`：Migration 72 回填测试通过；
@@ -181,6 +181,9 @@ last_updated: 2026-08-11
 - `cargo test -p rovai-core official_skills_default_to_all_groups_and_preserve_user_changes -- --nocapture`：内置 Skill 初始九组与后续用户修改保持通过；
 - `cargo test -p rovai-core imports_default_to_all_groups_and_updates_preserve_user_changes -- --nocapture`：Imported Skill 初始九组与 Revision 更新保持通过；
 - `cargo test -p rovai-core v74_assigns_every_active_skill_to_all_runtime_groups_once -- --nocapture`：Migration 74 对内置与 Imported Skill 的一次性回填通过；
+- `cargo test -p rovai-core skill_projection::tests -- --nocapture`：21 项通过；覆盖配置变化 DB-only dirty、历史 Observation 不调度、removed root 启动同步与终态清理、当前 root Run 前修复/强校验、project-owned non-overwrite，以及旧 Run 继续时新 Run 使用最新 Revision；
+- `cargo test -p rovai-core v75_persists_skill_projection_root_access_without_reapplying_it -- --nocapture`：Migration 75 root-access/dirty/cleanup 状态持久化通过；
+- `cargo test -p rovai-core removed_skill_project_roots_are_explicit_normalized_and_deduplicated -- --nocapture`：Main 传入 Core 的 removed-root 启动参数只接受规范绝对路径并稳定去重；
 - `cargo test -p rovai-core antigravity::tests -- --nocapture`：Antigravity 8 项通过、1 项真实 Runtime smoke ignored；覆盖 early accepted、terminal failure、取消与日志清理；
 - 本机 `agy 1.1.12 --print --mode plan --sandbox` focused smoke：匹配 Conversation 的 forward/send 后观察到 `streamGenerateContent ResponseID`，stdout `ACK-SMOKE` 且 exit 0；
 - `cargo test -p rovai-core claude::tests -- --nocapture`：Claude 4 项通过；覆盖 init 负例、Session fencing、early ACK 与 terminal result；
@@ -190,7 +193,7 @@ last_updated: 2026-08-11
 - 本机 Claude Code `2.1.220 --output-format stream-json --include-partial-messages` focused smoke：匹配 Session
   的 `system init` 后出现 `stream_event/message_start`，随后 success result 与 `CLAUDE-STREAM-ACK-SMOKE`；
 - `cargo clippy --workspace --all-targets -- -D warnings` 与 `cargo fmt --all -- --check` 通过；
-- `pnpm docs:test`：21 个测试通过；`pnpm docs:check` 通过，覆盖 58 个版本目录与 160 个 ADR。
+- `pnpm docs:test`：21 个测试通过；`pnpm docs:check` 通过，覆盖 58 个版本目录与 161 个 ADR。
 
 当前限制：自动 rebind 按 AgentRun 持久化限制为一次；尚未用真实 Copilot CLI 原地升级验证
 `dispatch -> refresh -> rebind -> launch` 的完整进程链路，因此本版本仍为 `in_progress`。
