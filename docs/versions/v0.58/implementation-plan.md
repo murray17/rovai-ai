@@ -121,7 +121,7 @@ last_updated: 2026-08-11
 - `cargo test -p rovai-core db::tests::v72_backfills_initial_runtime_evidence_without_overwriting_existing_values -- --nocapture`：Migration 72 回填测试通过；
 - `cargo test -p rovai-core db::tests::v73_removes_expected_output_without_losing_agent_runs -- --nocapture`：Migration 73 删列与历史 Run 保留测试通过；
 - `pnpm exec vitest run apps/desktop/src/renderer/src/theme-tokens.test.ts apps/desktop/src/renderer/src/App.test.ts`：2 个文件、82 项 Renderer 契约通过；
-- `pnpm exec vitest run`：40 个文件、269 项 Renderer 测试通过；Skill 定向测试与 CSS 契约为 2 个文件、23 项；
+- `pnpm exec vitest run`：40 个文件、270 项 Renderer 测试通过；Skill 定向测试与 CSS 契约为 2 个文件、24 项；
 - `pnpm typecheck` 与 `pnpm build:desktop`：TypeScript、Main/Preload/Renderer 生产构建通过；
 - `pnpm package:mac` 与 `scripts/capture-skills.mjs`：签名 App 的 1440×920、200% zoom 两套隔离
   `userData` 验收通过；六个 official Skill 的真实 UUID hash、字号、短来源、无文案 Steel Switch、
