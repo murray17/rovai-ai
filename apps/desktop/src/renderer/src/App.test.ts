@@ -44,9 +44,12 @@ import {
   agentExecutionProcesses,
   campConversationTimeline,
   emptyCampRuntimeSummary,
+  executionDrawerIsNearBottom,
   executionDisclosureOpenAfterActivity,
   executionDisclosureIsLiveOpen,
+  firstSubmittedAgentRun,
   formatStopElapsed,
+  isViewingNonTerminalAgentRun,
   loadCompleteAgentRunExecutionEvidence,
   preferredAgentProcessRun,
   runtimeOptionsForDisplay
@@ -1611,6 +1614,41 @@ describe('task event projections', () => {
     expect(executionDisclosureIsLiveOpen('running', true, false)).toBe(true)
     expect(executionDisclosureIsLiveOpen('running', false, false)).toBe(false)
     expect(executionDisclosureIsLiveOpen('queued', true, true)).toBe(false)
+
+    const submittedFirstRun = {
+      ...snapshot.agentRuns[0],
+      id: 'run-submitted-first',
+      agentId: 'agent_3',
+      campTurnId: 'turn-submitted',
+      status: 'queued' as const,
+      createdAt: '2026-07-28T06:00:00Z'
+    }
+    const submittedSecondRun = {
+      ...snapshot.agentRuns[0],
+      id: 'run-submitted-second',
+      campTurnId: 'turn-submitted',
+      status: 'queued' as const,
+      createdAt: '2026-07-28T06:00:00Z'
+    }
+    const submittedRuns = [submittedSecondRun, submittedFirstRun]
+    expect(firstSubmittedAgentRun({
+      campTurnId: 'turn-submitted',
+      agentRunIds: ['run-submitted-first', 'run-submitted-second'],
+      addressedAgentIds: ['agent_3', 'agent_2']
+    }, submittedRuns)?.id).toBe('run-submitted-first')
+    expect(firstSubmittedAgentRun({
+      campTurnId: 'turn-submitted',
+      agentRunIds: [],
+      addressedAgentIds: ['agent_3', 'agent_2']
+    }, submittedRuns)?.id).toBe('run-submitted-first')
+    expect(isViewingNonTerminalAgentRun('agent_2', 'run-muwa', groupedSnapshot.agentRuns))
+      .toBe(true)
+    expect(isViewingNonTerminalAgentRun('agent_2', 'run-muwa-history', groupedSnapshot.agentRuns))
+      .toBe(false)
+    expect(isViewingNonTerminalAgentRun(null, 'run-muwa', groupedSnapshot.agentRuns))
+      .toBe(false)
+    expect(executionDrawerIsNearBottom(648, 1_000, 320)).toBe(true)
+    expect(executionDrawerIsNearBottom(647, 1_000, 320)).toBe(false)
 
     const markup = renderToStaticMarkup(createElement(CampWorkspace, {
       snapshot: groupedSnapshot,

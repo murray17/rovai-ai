@@ -365,6 +365,28 @@ try {
     `The three AgentRuns were not created at one CampTurn boundary: ${JSON.stringify(sent.runs)}`
   )
 
+  const firstSubmittedRun = sent.runs.find((run) => run.agentId === targetMemberIds[0])
+  assert(firstSubmittedRun,
+    `The first addressed member has no AgentRun: ${JSON.stringify(sent.runs)}`)
+  await waitForExpression(running.cdp, `(() => {
+    const selected = document.querySelector('.run-pulse-chip.is-selected')
+    const focused = document.querySelector('.execution-process-stage.is-focused')
+    return selected?.dataset.agentId === ${JSON.stringify(targetMemberIds[0])}
+      && focused?.dataset.agentRunId === ${JSON.stringify(firstSubmittedRun.id)}
+      && document.activeElement?.id === 'camp-message'
+  })()`)
+  const submittedRunAutoOpen = await evaluate(running.cdp, `(() => ({
+    selectedAgentId: document.querySelector('.run-pulse-chip.is-selected')?.dataset.agentId ?? null,
+    focusedRunId: document.querySelector('.execution-process-stage.is-focused')?.dataset.agentRunId ?? null,
+    composerKeepsFocus: document.activeElement?.id === 'camp-message',
+    drawerCount: document.querySelectorAll('.execution-drawer').length
+  }))()`)
+  assert(submittedRunAutoOpen.drawerCount === 1
+    && submittedRunAutoOpen.selectedAgentId === targetMemberIds[0]
+    && submittedRunAutoOpen.focusedRunId === firstSubmittedRun.id
+    && submittedRunAutoOpen.composerKeepsFocus,
+  `Submitted Run did not auto-open without stealing Composer focus: ${JSON.stringify(submittedRunAutoOpen)}`)
+
   await waitForExpression(running.cdp, `(() => {
     const messages = [...document.querySelectorAll('.conversation-bubble.user')]
     const message = messages.at(-1)
@@ -535,6 +557,7 @@ try {
     agentRunTargets: sent.runs.map((run) => run.agentId),
     agentRunCreatedAt: sent.runs[0].createdAt,
     structuredContent: sent.message.content,
+    submittedRunAutoOpen,
     memberPopoverActivations: ['composer-click', 'history-click', 'history-Enter', 'history-Space'],
     memberPopoverStayedInCamp: true,
     mentionSelectedText,

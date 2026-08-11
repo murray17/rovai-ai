@@ -44,6 +44,7 @@ import {
 import {
   CampWorkspace,
   QuickChatWorkspace,
+  type CampMessageSendReceipt,
   type CampInspectorTab,
   type CampRuntimeRecovery,
   type NotificationFocusTarget
@@ -1421,7 +1422,9 @@ export function App(): React.JSX.Element {
     await loadNavigation()
   }
 
-  const sendCampMessage = async (draft: CampComposerDraftView): Promise<void> => {
+  const sendCampMessage = async (
+    draft: CampComposerDraftView
+  ): Promise<CampMessageSendReceipt | void> => {
     if (!activeCampId || draft.campId !== activeCampId || !draft.body.trim() || draft.revision < 1) return
     const campId = activeCampId
     const commandId = crypto.randomUUID()
@@ -1458,6 +1461,7 @@ export function App(): React.JSX.Element {
       }
       const campMessageId = stringField(result.commandResult.payload, 'campMessageId')
       const campTurnId = stringField(result.commandResult.payload, 'campTurnId')
+      const agentRunIds = stringArrayField(result.commandResult.payload, 'agentRunIds')
       const sequence = typeof result.commandResult.payload.sequence === 'number'
         ? result.commandResult.payload.sequence
         : optimisticMessage.sequence
@@ -1490,6 +1494,11 @@ export function App(): React.JSX.Element {
           if (selectionGeneration === campSelectionGeneration.current) await loadNavigation()
         })
         .catch((nextError) => setError(errorMessage(nextError)))
+      return {
+        campTurnId,
+        agentRunIds,
+        addressedAgentIds: optimisticMessage.addressedAgentIds
+      }
     } catch (nextError) {
       setOptimisticCampMessages((current) =>
         current.filter((entry) => entry.commandId !== commandId)
@@ -2216,6 +2225,12 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function stringField(value: Record<string, unknown>, key: string): string | null {
   return typeof value[key] === 'string' ? value[key] as string : null
+}
+
+function stringArrayField(value: Record<string, unknown>, key: string): string[] {
+  return Array.isArray(value[key])
+    ? value[key].filter((entry): entry is string => typeof entry === 'string')
+    : []
 }
 
 function errorMessage(error: unknown): string {

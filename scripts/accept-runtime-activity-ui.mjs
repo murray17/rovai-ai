@@ -164,6 +164,7 @@ try {
     return focused?.dataset.agentRunId === ${JSON.stringify(activeRunId)}
       && Boolean(focused.querySelector('.execution-disclosure.run-live.is-running'))
   })()`)
+  const executionAutoFollow = await verifyExecutionAutoFollowControl(app.cdp)
 
   await evaluate(app.cdp, `(() => {
     const timeline = document.querySelector('.camp-timeline')
@@ -262,6 +263,7 @@ try {
       codexLifecycleMergedToOneRow: observed.find((row) => row.runtime === 'Codex CLI')?.toolTitles.length === 1,
       sameAgentRunsShareOneProcess: observed.find((row) => row.agentId === activeAgentId)?.runCount === 2,
       runningRunFocusedWithEvidence: observed.find((row) => row.agentId === activeAgentId)?.focusedEvidenceOpen === true,
+      executionAutoFollow,
       claudeRunLevelDoesNotInventTools: observed.find((row) => row.runtime === 'Claude Code')?.toolTitles.length === 0,
       antigravityCoreToolCatalogName: observed.find((row) => row.runtime === 'Antigravity')?.toolTitles[0] === 'camp.message.send',
       conversationPresentation,
@@ -796,6 +798,47 @@ async function collectRuntimeRows(cdp) {
     })()`))
   }
   return rows
+}
+
+async function verifyExecutionAutoFollowControl(cdp) {
+  const geometry = await evaluate(cdp, `(() => {
+    const body = document.querySelector('.execution-drawer-body')
+    if (!(body instanceof HTMLElement)) return null
+    body.scrollTop = body.scrollHeight
+    body.dispatchEvent(new Event('scroll', { bubbles: true }))
+    return {
+      scrollHeight: body.scrollHeight,
+      clientHeight: body.clientHeight,
+      following: body.dataset.followingLatest
+    }
+  })()`)
+  assert(geometry && geometry.scrollHeight > geometry.clientHeight,
+    `Running execution fixture is not scrollable: ${JSON.stringify(geometry)}`)
+  await waitForExpression(cdp,
+    `document.querySelector('.execution-drawer-body')?.dataset.followingLatest === 'true'`)
+  await evaluate(cdp, `(() => {
+    const body = document.querySelector('.execution-drawer-body')
+    if (!(body instanceof HTMLElement)) return false
+    body.scrollTop = 0
+    body.dispatchEvent(new Event('scroll', { bubbles: true }))
+    return true
+  })()`)
+  await waitForExpression(cdp,
+    `document.querySelector('.execution-drawer-body')?.dataset.followingLatest === 'false'`)
+  await evaluate(cdp, `(() => {
+    const body = document.querySelector('.execution-drawer-body')
+    if (!(body instanceof HTMLElement)) return false
+    body.scrollTop = body.scrollHeight
+    body.dispatchEvent(new Event('scroll', { bubbles: true }))
+    return true
+  })()`)
+  await waitForExpression(cdp,
+    `document.querySelector('.execution-drawer-body')?.dataset.followingLatest === 'true'`)
+  return {
+    scrollable: true,
+    manualScrollPauses: true,
+    returningToBottomResumes: true
+  }
 }
 
 function assertRuntimeRows(observed) {

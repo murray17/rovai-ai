@@ -52,6 +52,17 @@ export type AgentExecutionProcess = {
   runs: AgentRunView[]
 }
 
+export type CampMessageSendReceipt = {
+  campTurnId: string | null
+  agentRunIds: string[]
+  addressedAgentIds: string[]
+}
+
+type ExecutionDrawerFocusRequest = {
+  sequence: number
+  moveDomFocus: boolean
+}
+
 export function preferredAgentProcessRun(runs: AgentRunView[]): AgentRunView | null {
   const newestFirst = runs.slice().sort((left, right) =>
     right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id)
@@ -95,6 +106,53 @@ export function executionDisclosureIsLiveOpen(
   cancelling: boolean
 ): boolean {
   return NON_TERMINAL_RUNS.has(status) && focused && !cancelling
+}
+
+export function firstSubmittedAgentRun(
+  receipt: CampMessageSendReceipt,
+  runs: readonly AgentRunView[]
+): AgentRunView | null {
+  const runById = new Map(runs.map((run) => [run.id, run]))
+  for (const runId of receipt.agentRunIds) {
+    const run = runById.get(runId)
+    if (run && (!receipt.campTurnId || run.campTurnId === receipt.campTurnId)) return run
+  }
+  if (!receipt.campTurnId) return null
+  const turnRuns = runs
+    .filter((run) => run.campTurnId === receipt.campTurnId)
+    .sort((left, right) =>
+      left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)
+    )
+  for (const agentId of receipt.addressedAgentIds) {
+    const run = turnRuns.find((candidate) => candidate.agentId === agentId)
+    if (run) return run
+  }
+  return turnRuns[0] ?? null
+}
+
+export function isViewingNonTerminalAgentRun(
+  selectedAgentId: string | null,
+  focusedRunId: string | null,
+  runs: readonly AgentRunView[]
+): boolean {
+  if (!selectedAgentId || !focusedRunId) return false
+  const focusedRun = runs.find((run) =>
+    run.id === focusedRunId && run.agentId === selectedAgentId
+  )
+  return Boolean(focusedRun && NON_TERMINAL_RUNS.has(focusedRun.status))
+}
+
+export function executionDrawerIsNearBottom(
+  scrollTop: number,
+  scrollHeight: number,
+  clientHeight: number,
+  threshold = 32
+): boolean {
+  return scrollHeight - scrollTop - clientHeight <= threshold
+}
+
+function scrollExecutionDrawerToLatest(body: HTMLElement): void {
+  body.scrollTo({ top: body.scrollHeight, behavior: 'instant' })
 }
 export type NotificationFocusTarget = {
   requestId: number
@@ -531,7 +589,7 @@ export function CampWorkspace({
   agents: AgentProfile[]
   liveRuntimeEvents?: LiveRuntimeEvent[]
   busy: boolean
-  onSend(draft: CampComposerDraftView): Promise<void>
+  onSend(draft: CampComposerDraftView): Promise<CampMessageSendReceipt | void>
   onPendingDraftPersisted?(): void
   onPendingCampLeave?(draft: CampComposerDraftView): Promise<void>
   onChangeLead(agentId: string): Promise<void>
@@ -571,7 +629,12 @@ export function CampWorkspace({
   const lastTimelineItemId = useRef<string | null>(null)
   const [localInspectorTab, setLocalInspectorTab] = useState<CampInspectorTab>('tasks')
   const [executionDrawerAgentId, setExecutionDrawerAgentId] = useState<string | null>(null)
-  const [executionDrawerFocusRequest, setExecutionDrawerFocusRequest] = useState(0)
+  const [executionDrawerFocusedRunId, setExecutionDrawerFocusedRunId] = useState<string | null>(null)
+  const [executionDrawerFocusRequest, setExecutionDrawerFocusRequest] = useState<ExecutionDrawerFocusRequest>({
+    sequence: 0,
+    moveDomFocus: true
+  })
+  const [submittedExecutionRequest, setSubmittedExecutionRequest] = useState<CampMessageSendReceipt | null>(null)
   const executionDrawerTriggerRef = useRef<HTMLButtonElement | null>(null)
   const inspectorTab = controlledInspectorTab ?? localInspectorTab
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null)
@@ -636,6 +699,8 @@ export function CampWorkspace({
   useEffect(() => setMentionPopover(null), [snapshot.camp.id])
   useEffect(() => {
     setExecutionDrawerAgentId(null)
+    setExecutionDrawerFocusedRunId(null)
+    setSubmittedExecutionRequest(null)
     executionDrawerTriggerRef.current = null
   }, [snapshot.camp.id])
 
@@ -941,7 +1006,10 @@ export function CampWorkspace({
       const frozenDraft = await saveStructuredDraft(campId, draftContent.current)
       applyComposerDraft(campId, frozenDraft)
       sendAttempted = true
-      await onSend(frozenDraft)
+      const sendReceipt = await onSend(frozenDraft)
+      if (sendReceipt?.agentRunIds.length || sendReceipt?.campTurnId) {
+        setSubmittedExecutionRequest(sendReceipt)
+      }
       const emptyDraft: CampComposerDraftView = {
         campId: snapshot.camp.id,
         body: '',
@@ -1080,22 +1148,55 @@ export function CampWorkspace({
 
   const openExecutionProcess = (
     agentId: string,
-    trigger: HTMLButtonElement | null = null
+    trigger: HTMLButtonElement | null = null,
+    options: { runId?: string | null; moveDomFocus?: boolean } = {}
   ): void => {
-    if (!executionProcessByAgentId.has(agentId)) return
+    const process = executionProcessByAgentId.get(agentId)
+    if (!process) return
+    const requestedRun = options.runId
+      ? process.runs.find((run) => run.id === options.runId) ?? null
+      : null
+    const focusedRunId = requestedRun?.id ?? preferredAgentProcessRun(process.runs)?.id ?? null
     if (trigger) executionDrawerTriggerRef.current = trigger
+    else if (options.moveDomFocus === false) executionDrawerTriggerRef.current = null
     setExecutionDrawerAgentId(agentId)
-    setExecutionDrawerFocusRequest((request) => request + 1)
+    setExecutionDrawerFocusedRunId(focusedRunId)
+    setExecutionDrawerFocusRequest((request) => ({
+      sequence: request.sequence + 1,
+      moveDomFocus: options.moveDomFocus ?? true
+    }))
   }
 
   const closeExecutionProcess = (): void => {
     const trigger = executionDrawerTriggerRef.current
     setExecutionDrawerAgentId(null)
+    setExecutionDrawerFocusedRunId(null)
     executionDrawerTriggerRef.current = null
     if (trigger?.isConnected) {
       window.requestAnimationFrame(() => trigger.focus({ preventScroll: true }))
     }
   }
+
+  useEffect(() => {
+    if (!submittedExecutionRequest) return
+    const targetRun = firstSubmittedAgentRun(submittedExecutionRequest, snapshot.agentRuns)
+    if (!targetRun) return
+    setSubmittedExecutionRequest(null)
+    if (isViewingNonTerminalAgentRun(
+      executionDrawerAgentId,
+      executionDrawerFocusedRunId,
+      snapshot.agentRuns
+    )) return
+    openExecutionProcess(targetRun.agentId, null, {
+      runId: targetRun.id,
+      moveDomFocus: false
+    })
+  }, [
+    executionDrawerAgentId,
+    executionDrawerFocusedRunId,
+    snapshot.agentRuns,
+    submittedExecutionRequest
+  ])
 
   return (
     <section className="workspace-shell camp-workspace" aria-label={`Camp：${snapshot.camp.title}`}>
@@ -1278,6 +1379,7 @@ export function CampWorkspace({
               truncatedEvidenceByRunId={truncatedEvidenceByRunId}
               loadedEvidenceCountByRunId={loadedEvidenceCountByRunId}
               cancellingTurnIds={cancellingTurnIds}
+              focusedRunId={executionDrawerFocusedRunId}
               focusRequest={executionDrawerFocusRequest}
               onClose={closeExecutionProcess}
               memberById={memberById}
@@ -1731,6 +1833,7 @@ function ExecutionDrawer({
   truncatedEvidenceByRunId,
   loadedEvidenceCountByRunId,
   cancellingTurnIds,
+  focusedRunId,
   focusRequest,
   onClose,
   memberById
@@ -1744,16 +1847,32 @@ function ExecutionDrawer({
   truncatedEvidenceByRunId: Map<string, AgentRunExecutionEvidenceView[]>
   loadedEvidenceCountByRunId: Map<string, number>
   cancellingTurnIds: ReadonlySet<string>
-  focusRequest: number
+  focusedRunId: string | null
+  focusRequest: ExecutionDrawerFocusRequest
   onClose(): void
   memberById: Map<string, CampSnapshot['members'][number]>
 }): JSX.Element {
   const drawerRef = useRef<HTMLElement>(null)
+  const drawerBodyRef = useRef<HTMLDivElement>(null)
   const processRef = useRef(process)
   processRef.current = process
-  const [focusedRunId, setFocusedRunId] = useState(
-    () => preferredAgentProcessRun(process.runs)?.id ?? null
-  )
+  const resolvedFocusedRun = process.runs.find((run) => run.id === focusedRunId)
+    ?? preferredAgentProcessRun(process.runs)
+  const resolvedFocusedRunId = resolvedFocusedRun?.id ?? null
+  const focusedProgress = resolvedFocusedRunId
+    ? progressByRunId.get(resolvedFocusedRunId)
+    : undefined
+  const progressFollowKey = JSON.stringify([
+    resolvedFocusedRun?.status ?? null,
+    resolvedFocusedRun?.waitReason ?? null,
+    focusedProgress?.items ?? []
+  ])
+  const followingLatestRef = useRef(false)
+  const [followingLatest, setFollowingLatestState] = useState(false)
+  const setFollowingLatest = (following: boolean): void => {
+    followingLatestRef.current = following
+    setFollowingLatestState((current) => current === following ? current : following)
+  }
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
@@ -1769,18 +1888,39 @@ function ExecutionDrawer({
   }, [onClose])
 
   useLayoutEffect(() => {
-    const runId = preferredAgentProcessRun(processRef.current.runs)?.id ?? null
-    setFocusedRunId(runId)
+    const requestedRunId = focusedRunId
+      && processRef.current.runs.some((run) => run.id === focusedRunId)
+      ? focusedRunId
+      : preferredAgentProcessRun(processRef.current.runs)?.id ?? null
+    const runId = requestedRunId
     if (!runId) return undefined
+    const run = processRef.current.runs.find((candidate) => candidate.id === runId) ?? null
+    const followLatest = Boolean(run && NON_TERMINAL_RUNS.has(run.status))
+    setFollowingLatest(followLatest)
     const frame = window.requestAnimationFrame(() => {
       const target = drawerRef.current?.querySelector<HTMLElement>(
         `[data-agent-run-id="${CSS.escape(runId)}"]`
       )
-      target?.scrollIntoView({ block: 'nearest' })
-      target?.focus({ preventScroll: true })
+      if (followLatest && drawerBodyRef.current) {
+        scrollExecutionDrawerToLatest(drawerBodyRef.current)
+      } else {
+        target?.scrollIntoView({ block: 'nearest' })
+      }
+      if (focusRequest.moveDomFocus) target?.focus({ preventScroll: true })
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [focusRequest, process.agentId])
+  }, [focusRequest.sequence, process.agentId])
+
+  useLayoutEffect(() => {
+    if (!followingLatestRef.current || !resolvedFocusedRun) return undefined
+    const terminal = !NON_TERMINAL_RUNS.has(resolvedFocusedRun.status)
+    const frame = window.requestAnimationFrame(() => {
+      const body = drawerBodyRef.current
+      if (body) scrollExecutionDrawerToLatest(body)
+      if (terminal) setFollowingLatest(false)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [progressFollowKey, resolvedFocusedRunId])
 
   const displayName = member?.displayName ?? profile?.displayName ?? process.agentId
 
@@ -1805,12 +1945,28 @@ function ExecutionDrawer({
           </div>
           <button type="button" className="quiet-button" onClick={onClose} aria-label="收起执行详情">收起</button>
         </header>
-        <div className="execution-drawer-body" aria-label={`${displayName}的连续执行历史`}>
+        <div
+          ref={drawerBodyRef}
+          className="execution-drawer-body"
+          aria-label={`${displayName}的连续执行历史`}
+          data-following-latest={followingLatest ? 'true' : 'false'}
+          onScroll={(event) => {
+            const body = event.currentTarget
+            const eligible = Boolean(
+              resolvedFocusedRun && NON_TERMINAL_RUNS.has(resolvedFocusedRun.status)
+            )
+            setFollowingLatest(eligible && executionDrawerIsNearBottom(
+              body.scrollTop,
+              body.scrollHeight,
+              body.clientHeight
+            ))
+          }}
+        >
           <ol className="execution-process-timeline">
             {process.runs.map((run) => {
               const cancelling = cancellingTurnIds.has(run.campTurnId)
                 && NON_TERMINAL_RUNS.has(run.status)
-              const focused = run.id === focusedRunId
+              const focused = run.id === resolvedFocusedRunId
               const state = agentRunPresentation(run, cancelling)
               const runDeliveries = deliveries.filter((delivery) =>
                 delivery.targetAgentRunId === run.id

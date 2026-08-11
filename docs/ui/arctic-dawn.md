@@ -435,9 +435,14 @@ type ResolvedTheme = "day" | "night"
 - Agent 执行台常驻于会话阅读流之后。当前 Camp 中每位有 AgentRun 的队员只有一个入口，按
   CampMember 顺序展示身份、“执行过程”和来自优先 Run 的本地化状态；不得显示逐 Run chip、
   “N 个执行”或“ N 条投递”。
-- 点击队员入口只选择该 Agent 的执行过程，不自动滚动会话或抢焦点。打开时定位最新 running Run；
-  若没有则定位最新 non-terminal Run，最后才定位最新 terminal Run。后台事件不得自动打开、
-  切换 Agent/stage 或聚焦 Drawer；已打开过程保持 selected，直到主动关闭、选择另一队员或切换 Camp。
+- 点击队员入口只选择该 Agent 的执行过程，不自动滚动公共消息时间线。打开时定位最新 running Run；
+  若没有则定位最新 non-terminal Run，最后才定位最新 terminal Run。当前用户显式发送成功后，如果没有
+  正在查看 non-terminal AgentRun，则按 Core 回执中 `agentRunIds` 的顺序一次性打开第一条 Run 所属 Agent
+  的过程并聚焦该精确 stage；已经在查看任意 non-terminal Run 时不切换，且自动打开不夺走 Composer 的
+  键盘焦点。后台 A2A、Runtime 事件、重载和恢复仍不得自动打开、切换 Agent/stage 或聚焦 Drawer。
+- 聚焦 non-terminal Run 后，用户停留在 Drawer 底部时跟随最新公开输出；手动上滚后暂停，回到底部后
+  恢复。仍处于跟随状态的终态只滚到最后一批输出一次。该行为只作用于 Drawer，不滚动公共消息时间线，
+  也不逐字播报流式内容。
 - 执行详情按需显示所选 Agent 的连续 AgentRun stage；stage 按时间排序，分别保留 Run/CampTurn、
   调用来源、A2A 深度、Run 状态、Delivery 收件人与 Runtime Activity/Evidence 摘要。ContextManifest
   继续在“上下文投递”Inspector 中查看；过程 grouping 不能合并或遮蔽单次 Run。

@@ -3,7 +3,7 @@ document_type: renderer-contract
 contract: run-process-detail-surface-v2
 authority: agent-level-continuous-execution-process-surface
 status: accepted
-last_updated: 2026-08-10
+last_updated: 2026-08-11
 ---
 
 # Run Process Detail Surface v2（Agent 级连续过程）
@@ -53,9 +53,22 @@ Drawer 的选择 identity 为 `agentId`，并以有标题的非模态 `region` �
 继续独立读取其真实证据；不得拼接、删减或把多个 Run 伪装为一次执行。Message Delivery 状态标签不在
 会话 footer 或 Run stage 重复投影；底层 Delivery、ContextManifest 与审计事实保持原有 Read Side 边界。
 
-后台事件不得自动打开 Drawer、改选 Agent、改选 stage、滚动会话或抢焦点。已打开过程只在用户关闭、选择
-其他 Agent 或切换 Camp 时改变。关闭按钮和焦点位于 Drawer 内时的 `Escape` 均关闭该 region 并把焦点
-返回原触发入口；Drawer 不使用 backdrop 或 focus trap。
+用户显式发送消息且 Core 接受本次 CampTurn 后，Renderer 可以用该命令回执中的有序
+`agentRunIds` 做一次性定位：如果用户当前没有正在查看 non-terminal AgentRun，则打开列表中第一条 Run
+所属 Agent 的唯一过程入口，并聚焦这条精确 Run stage；如果已经聚焦任意 `queued / running / waiting`
+Run，则保留当前过程，不因新提交切换。该定位只改变可见过程，不移动 DOM 焦点，Composer 继续保持键盘
+上下文。回执尚未进入 Snapshot 时可以等待同一 CampTurn 的 Run 出现，但切换 Camp 后必须丢弃等待状态。
+
+除上述“当前用户显式发送成功”外，后台 A2A、Runtime/Read Side 事件、重载、恢复和重进 Camp 均不得
+自动打开 Drawer、改选 Agent、改选 stage、滚动公共消息时间线或抢焦点。已打开过程只在用户关闭、选择
+其他 Agent、上述一次性发送定位或切换 Camp 时改变。关闭按钮和焦点位于 Drawer 内时的 `Escape` 均关闭
+该 region；有真实触发入口时把焦点返回原入口，自动打开不伪造焦点返回目标。Drawer 不使用 backdrop 或
+focus trap。
+
+聚焦 non-terminal Run 时，Drawer 内部采用 sticky-bottom 跟随：用户仍停留在底部阈值内时，新公开叙述、
+计划、Tool Call 和状态更新到达后滚动到最新输出；用户向上滚动离开底部后立即暂停，回到底部后恢复。
+如果仍处于跟随状态，Run 的终态更新和最后一批输出只完成一次末尾定位，随后停止自动跟随。该机制不得
+滚动公共消息时间线，也不得用 `aria-live` 逐字播报 Runtime 流式内容。
 
 Task 的 Related execution 与停止结果的“结果待确认”都按 Agent 打开过程，不保留 Run-ID-only Drawer
 route/state。它们不会从 Task 或 CampTurn 推断新的过程成员关系。Camp Header 不再提供另一条执行入口。
@@ -83,6 +96,8 @@ Inspector 只保留：
 - Agent 执行台使用 `list` / `button` 语义；每个入口有队员、过程和状态的可读名称，selected 状态可访问；
 - Drawer 使用具名 `region`；视觉、Tab 与 DOM 顺序一致；不使用 `aria-live` 逐字播报 Runtime 流式日志，
   仅播报状态变化；
+- 显式发送后的自动定位不得夺走 Composer 焦点；sticky-bottom 在手动上滚后暂停，不能与键盘阅读历史争夺
+  滚动位置；
 - Drawer、Approval Dock、Composer 和唯一 Stop 在 200% zoom 下都可达且互不遮挡；
 - 沿用 `1440×920` 基准和最小 `1040×700`。Inspector 隐藏时过程 surface 不得导致时间线横向滚动；
 - `prefers-reduced-motion` 下关闭滑入、脉冲和滚动动画，但不改变 running Run 默认展开行为，并保留
@@ -90,7 +105,7 @@ Inspector 只保留：
 
 ## 5. 数据边界
 
-Agent 过程只消费当前 Camp 的 Core Snapshot、Canonical Runtime Activity、Execution Evidence、Delivery
-收件人和当前 CampMember identity/order。它不读取、推断或写入其他 Camp；不创建
-demo Agent、假 Runtime、布局切换、Activity/Audit Inspector、Run/Agent Stop 或“自动打开”生产 schema、IPC
-或领域命令。HTML 原型只能说明层级，不能成为数据源或覆盖本合同。
+Agent 过程只消费当前 Camp 的 Core Snapshot、当前用户发送命令的既有结果回执、Canonical Runtime
+Activity、Execution Evidence、Delivery 收件人和当前 CampMember identity/order。它不读取、推断或写入
+其他 Camp；不创建 demo Agent、假 Runtime、布局切换、Activity/Audit Inspector、Run/Agent Stop，亦不为
+自动定位新增生产 schema、IPC 或领域命令。HTML 原型只能说明层级，不能成为数据源或覆盖本合同。

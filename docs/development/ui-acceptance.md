@@ -98,8 +98,13 @@ pnpm accept:runtime-activity-ui
   AgentRun 的队员数；
 - 点击入口后 `.execution-drawer` 只显示该 Agent 的所有 Run stage，按创建时间升序保留，并显示
   独立的 AgentRun/CampTurn 边界、调用来源、A2A 深度（适用时）、Delivery 与证据 disclosure；
-- 打开时定位最新 `running`，否则最新 non-terminal，最后最新 terminal Run；后台 Runtime 事件不打开
-  Drawer、不改选队员/stage、不滚动时间线或抢焦点；关闭和 Drawer 内 Escape 将焦点返回原入口；
+- 打开入口时定位最新 `running`，否则最新 non-terminal，最后最新 terminal Run；一次真实的显式多队员
+  用户发送按 Core `agentRunIds` 顺序打开第一条精确 Run，并证明自动打开后 Composer 仍持有键盘焦点；
+  已经聚焦任意 non-terminal Run 时，新提交不得改选；
+- 聚焦 live Run 且位于 Drawer 底部时，新公开输出跟随到底部；手动上滚后 `data-following-latest=false`，
+  回到底部后恢复，仍在跟随时终态最后输出只定位一次；后台 A2A、Runtime 事件、重载和恢复仍不打开
+  Drawer、不改选队员/stage、不滚动公共消息时间线或抢焦点；关闭和 Drawer 内 Escape 将焦点返回真实
+  原入口；
 - Inspector 仅有“任务 / 上下文投递 / 审批”，不存在 Activity/Audit Tab、旧 route/state 或另一条过程
   时间线；Task/停止结果入口按 Agent 打开过程，顶栏不存在执行入口；
 - Drawer 不提供 Agent 或 Run 级 Stop/Cancel/Retry；唯一 CampTurn Stop、Approval Dock 与 Composer 在

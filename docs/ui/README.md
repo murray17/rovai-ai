@@ -186,9 +186,12 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
 - 空 Camp 使用欢迎图形、真实协作配置摘要和三个只填充 Composer 的起步建议，不再显示
   单行空占位。
 - Camp 主阅读流左对齐并按权威顺序阅读。Agent 执行台按队员提供一个过程入口；执行详情
-  按需展示所选 Agent 的连续 AgentRun stage、Run 状态、收件人与过程证据，后台事件
-  不得自动打开、切换或抢焦点。打开优先定位最新 running、否则最新 non-terminal、最后最新 terminal
-  Run；已打开过程保持选中直到用户关闭、切换队员或切换 Camp。
+  按需展示所选 Agent 的连续 AgentRun stage、Run 状态、收件人与过程证据。当前用户显式发送成功且
+  没有正在查看 non-terminal Run 时，按 Core 有序回执打开本次第一条 Run 所属 Agent 的过程并聚焦精确
+  stage，但不夺走 Composer 焦点；已经在查看 non-terminal Run 时保持当前选择。后台 A2A、Runtime
+  事件、重载和恢复仍不得自动打开、切换或抢焦点。打开入口时优先定位最新 running、否则最新
+  non-terminal、最后最新 terminal Run。聚焦 live Run 时只在用户停留 Drawer 底部时跟随最新输出，
+  手动上滚暂停、回到底部恢复，且不滚动公共消息时间线。
 - Agent 公共正文不显示“来自执行”来源条；A2A 消息不显示 compact 投递卡片，只在正文后使用
   Scheme C 短转交轨迹显示“发送给@队员”。所有 Agent 使用同一开放阅读表面，不按角色铺不同消息
   底色；`@队员` 是飞书式蓝色 Mention，可用身份可打开既有人物信息卡。footer 与 Run stage 都不重复投影 Delivery 状态标签；
