@@ -1,0 +1,1308 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rovai Skill 身份色设计稿</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
+      font-synthesis: none;
+      text-rendering: optimizeLegibility;
+      --canvas: #eceeef;
+      --surface: #fbfbfa;
+      --surface-raised: #ffffff;
+      --surface-subtle: #f0f2f4;
+      --surface-muted: #e7eaed;
+      --surface-selected: #e9ecee;
+      --ink: #171b20;
+      --muted: #616a73;
+      --faint: #6e7382;
+      --line: #dfe4e8;
+      --line-strong: #c7cfd6;
+      --control-line: #8b9389;
+      --brand: #526f88;
+      --brand-hover: #3d5874;
+      --brand-soft: #e9eef3;
+      --brand-ink: #405f7e;
+      --danger: #a24c46;
+      --danger-soft: #f7e6e3;
+      --focus: #526f88;
+      --focus-soft: rgba(82, 111, 136, 0.16);
+      --overlay: rgba(28, 32, 43, 0.28);
+      --identity-1: #a65f4a;
+      --identity-2: #39777a;
+      --identity-3: #74628f;
+      --identity-4: #9a6a32;
+      --identity-5: #4f729b;
+      --identity-6: #8a5c75;
+      --identity-7: #547245;
+      --identity-8: #8c6146;
+      --shadow-menu: 0 18px 56px rgba(38, 45, 58, 0.14);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: 100%; min-width: 0; height: 100%; margin: 0; }
+    body { overflow: hidden; color: var(--ink); background: var(--canvas); }
+    button, input { font: inherit; }
+    button { color: inherit; }
+    button, [role="tab"] { -webkit-tap-highlight-color: transparent; }
+    button:active:not(:disabled) { transform: translateY(1px); }
+    button:disabled { cursor: default; opacity: .52; }
+    :where(button, input, [role="tab"]):focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+    ::selection { color: var(--ink); background: var(--brand-soft); }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .app-shell {
+      display: grid;
+      grid-template-columns: 270px minmax(0, 1fr);
+      grid-template-rows: 50px minmax(0, 1fr);
+      height: 100%;
+    }
+
+    .settings-sidebar {
+      z-index: 2;
+      grid-column: 1;
+      grid-row: 1 / -1;
+      display: flex;
+      min-height: 0;
+      flex-direction: column;
+      border-right: 1px solid #dadde0;
+      color: #626b72;
+      background: #f3f4f4;
+    }
+    .brand-row {
+      display: flex;
+      height: 50px;
+      flex: 0 0 50px;
+      align-items: center;
+      gap: 9px;
+      padding: 0 18px;
+      border-bottom: 1px solid #e1e3e5;
+    }
+    .brand-mark {
+      position: relative;
+      width: 22px;
+      height: 22px;
+      border: 1px solid color-mix(in srgb, var(--brand) 42%, #d7dde2);
+      border-radius: 7px;
+      background: var(--brand-soft);
+    }
+    .brand-mark::before,
+    .brand-mark::after {
+      position: absolute;
+      top: 5px;
+      width: 4px;
+      height: 10px;
+      border-radius: 2px;
+      background: var(--brand);
+      content: "";
+    }
+    .brand-mark::before { left: 5px; transform: rotate(-20deg); }
+    .brand-mark::after { right: 5px; transform: rotate(20deg); }
+    .brand-row strong { color: #2d353c; font-size: 13px; font-weight: 730; letter-spacing: -.01em; }
+    .sidebar-body { min-height: 0; padding: 14px 12px 18px; overflow: auto; }
+    .back-button {
+      display: flex;
+      width: 100%;
+      min-height: 34px;
+      align-items: center;
+      gap: 8px;
+      padding: 0 9px;
+      border: 0;
+      border-radius: 7px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+      font-size: 12px;
+      text-align: left;
+    }
+    .back-button:hover { color: var(--ink); background: var(--surface-muted); }
+    .back-button svg { width: 14px; height: 14px; }
+    .sidebar-intro { margin: 17px 9px 20px; }
+    .sidebar-intro strong { display: block; margin-bottom: 5px; color: var(--ink); font-size: 13px; }
+    .sidebar-intro p { margin: 0; color: var(--muted); font-size: 11.5px; line-height: 1.55; }
+    .settings-group + .settings-group { margin-top: 18px; }
+    .settings-group > span {
+      display: block;
+      margin: 0 9px 7px;
+      color: var(--faint);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .08em;
+    }
+    .settings-menu { display: grid; gap: 3px; }
+    .settings-menu button {
+      display: grid;
+      width: 100%;
+      min-height: 38px;
+      grid-template-columns: 18px minmax(0, 1fr);
+      gap: 9px;
+      align-items: center;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 7px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+      font-size: 12px;
+      text-align: left;
+    }
+    .settings-menu button:hover { color: var(--ink); background: var(--surface-muted); }
+    .settings-menu button.active {
+      color: var(--brand-hover);
+      background: var(--brand-soft);
+      box-shadow: inset 2px 0 0 var(--brand);
+      font-weight: 680;
+    }
+    .settings-menu svg { width: 16px; height: 16px; }
+
+    .window-drag-strip {
+      z-index: 1;
+      grid-column: 2;
+      grid-row: 1;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+      -webkit-app-region: drag;
+    }
+    .settings-content {
+      grid-column: 2;
+      grid-row: 1 / -1;
+      min-width: 0;
+      min-height: 0;
+      padding-top: 50px;
+      overflow: auto;
+      background:
+        linear-gradient(180deg, color-mix(in srgb, var(--brand-soft) 56%, var(--surface)) 0, var(--surface) 220px);
+    }
+    .settings-panel {
+      width: min(980px, calc(100% - 42px));
+      margin: 0 auto;
+      padding: 34px 0 64px;
+    }
+    .settings-panel::before {
+      position: fixed;
+      z-index: 3;
+      top: 50px;
+      right: 0;
+      left: 270px;
+      height: 3px;
+      background: var(--brand);
+      content: "";
+      opacity: .9;
+    }
+
+    .settings-page-heading {
+      position: relative;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 28px;
+      padding: 0 0 24px 18px;
+      border-bottom: 2px solid color-mix(in srgb, var(--brand) 30%, var(--line));
+    }
+    .settings-page-heading::before {
+      position: absolute;
+      top: 2px;
+      bottom: 24px;
+      left: 0;
+      width: 2px;
+      border-radius: 2px;
+      background: var(--brand);
+      content: "";
+    }
+    .settings-page-eyebrow {
+      margin: 0 0 8px;
+      color: var(--brand-ink);
+      font: 750 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .11em;
+      text-transform: uppercase;
+    }
+    .settings-page-heading h1 {
+      margin: 0;
+      color: var(--ink);
+      font-size: 28px;
+      font-weight: 720;
+      line-height: 1.18;
+      letter-spacing: -.035em;
+    }
+    .settings-page-heading p:not(.settings-page-eyebrow) {
+      max-width: 680px;
+      margin: 9px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.65;
+    }
+    .settings-page-note,
+    .skill-section-count {
+      flex: 0 0 auto;
+      padding: 6px 9px;
+      border: 1px solid color-mix(in srgb, var(--brand) 32%, var(--line));
+      border-radius: 999px;
+      color: var(--brand-ink);
+      background: var(--brand-soft);
+      font: 700 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      white-space: nowrap;
+    }
+
+    .skill-section { padding: 28px 0 30px; border-bottom: 1px solid var(--line); }
+    .skill-section:last-of-type { border-bottom: 0; }
+    .skill-section-heading {
+      position: relative;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 13px;
+      padding-left: 12px;
+    }
+    .skill-section-heading::before {
+      position: absolute;
+      top: 1px;
+      bottom: 1px;
+      left: 0;
+      width: 4px;
+      border-radius: 2px;
+      background: var(--brand);
+      content: "";
+    }
+    .skill-section-heading h2 {
+      margin: 0;
+      color: var(--brand-hover);
+      font-size: 19px;
+      font-weight: 690;
+      line-height: 1.2;
+      letter-spacing: -.015em;
+    }
+
+    .skill-import-panel {
+      max-width: 860px;
+      border: 1px solid color-mix(in srgb, var(--brand) 26%, var(--line));
+      border-radius: 10px;
+      background: var(--surface-raised);
+    }
+    .skill-import-tabs {
+      display: flex;
+      gap: 3px;
+      padding: 7px 8px 0;
+      border-bottom: 1px solid var(--line);
+      border-radius: 10px 10px 0 0;
+      background: color-mix(in srgb, var(--brand-soft) 36%, var(--surface));
+    }
+    .skill-import-tabs button {
+      position: relative;
+      min-height: 34px;
+      padding: 0 11px 7px;
+      border: 0;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 680;
+    }
+    .skill-import-tabs button:hover { color: var(--ink); }
+    .skill-import-tabs button[aria-selected="true"] { color: var(--brand-hover); }
+    .skill-import-tabs button[aria-selected="true"]::after {
+      position: absolute;
+      right: 8px;
+      bottom: -1px;
+      left: 8px;
+      height: 2px;
+      background: var(--brand);
+      content: "";
+    }
+    .skill-import-body {
+      display: grid;
+      min-height: 84px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 18px;
+      align-items: center;
+      padding: 15px;
+    }
+    .skill-import-copy { display: grid; min-width: 0; gap: 5px; }
+    .skill-import-copy strong { color: var(--ink); font-size: 13px; font-weight: 680; }
+    .skill-import-copy small { color: var(--muted); font-size: 11.5px; line-height: 1.5; }
+    .skill-import-copy code { font: 11.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .skill-import-github-field {
+      width: 100%;
+      height: 38px;
+      padding: 0 11px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      color: var(--ink);
+      background: var(--surface-raised);
+      font-size: 12px;
+      outline: 0;
+    }
+    .skill-import-github-field:focus { border-color: var(--focus); box-shadow: 0 0 0 3px var(--focus-soft); }
+    .primary-button,
+    .quiet-button {
+      min-height: 36px;
+      padding: 0 13px;
+      border-radius: 7px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 680;
+    }
+    .primary-button { border: 1px solid var(--brand); color: #fff; background: var(--brand); }
+    .primary-button:hover { background: var(--brand-hover); }
+    .quiet-button { border: 1px solid var(--line-strong); color: var(--ink); background: var(--surface-raised); }
+    .quiet-button:hover { background: var(--surface-muted); }
+
+    .skill-search-row { position: relative; display: block; margin-bottom: 12px; }
+    .skill-search-row svg {
+      position: absolute;
+      top: 11px;
+      left: 12px;
+      width: 16px;
+      height: 16px;
+      color: var(--faint);
+      pointer-events: none;
+    }
+    .skill-search-row input {
+      width: 100%;
+      height: 39px;
+      padding: 0 13px 0 37px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--ink);
+      background: var(--surface-raised);
+      font-size: 12.5px;
+      outline: 0;
+    }
+    .skill-search-row input:focus { border-color: var(--focus); box-shadow: 0 0 0 3px var(--focus-soft); }
+    .skill-search-row input::placeholder { color: var(--faint); }
+
+    .skill-card-grid {
+      --skill-actions-width: 286px;
+      display: grid;
+      max-width: 940px;
+      border-top: 1px solid var(--line);
+    }
+    .skill-library-columns,
+    .skill-card-primary {
+      display: grid;
+      min-width: 0;
+      grid-template-columns: 42px minmax(0, 1fr) var(--skill-actions-width);
+      gap: 12px;
+      align-items: center;
+    }
+    .skill-library-columns {
+      min-height: 34px;
+      padding: 0 7px;
+      color: var(--faint);
+      background: var(--surface-subtle);
+      font: 700 9.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .045em;
+      text-transform: uppercase;
+    }
+    .skill-library-columns > div,
+    .skill-card-controls {
+      display: grid;
+      min-width: 0;
+      grid-template-columns: 138px 62px 66px;
+      gap: 10px;
+      align-items: center;
+    }
+    .skill-library-columns > div > span { text-align: center; }
+    .skill-card {
+      --skill-color: var(--identity-1);
+      position: relative;
+      min-width: 0;
+      border-bottom: 1px solid var(--line);
+      background: transparent;
+      transition: background-color 140ms ease;
+    }
+    .skill-card:hover,
+    .skill-card:focus-within { background: color-mix(in srgb, var(--brand-soft) 26%, transparent); }
+    .skill-card.is-expanded { background: color-mix(in srgb, var(--brand-soft) 38%, var(--surface)); }
+    .skill-card.is-disabled { background: color-mix(in srgb, var(--surface-subtle) 55%, transparent); }
+    .skill-card.is-disabled .skill-card-title,
+    .skill-card.is-disabled .skill-card-heading > p { opacity: .62; }
+    .skill-card-primary { min-height: 82px; padding: 12px 7px; }
+    .skill-card-mark {
+      display: grid;
+      width: 38px;
+      height: 38px;
+      place-items: center;
+      border: 1px solid color-mix(in srgb, var(--skill-color) 34%, var(--line));
+      border-radius: 9px;
+      color: var(--skill-color);
+      background: color-mix(in srgb, var(--skill-color) 11%, var(--surface-raised));
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--surface-raised) 72%, transparent);
+      font: 780 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: -.02em;
+    }
+    .skill-card-heading { display: grid; min-width: 0; gap: 6px; }
+    .skill-card-title {
+      display: flex;
+      min-width: 0;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 7px;
+      transition: opacity 140ms ease;
+    }
+    .skill-card-title > strong {
+      min-width: 0;
+      max-width: 100%;
+      overflow: hidden;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 710;
+      line-height: 1.25;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .skill-card-heading > p {
+      margin: 0;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 12.5px;
+      line-height: 1.5;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      transition: opacity 140ms ease;
+    }
+    .skill-source {
+      display: inline-flex;
+      min-height: 21px;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 7px;
+      border: 1px solid var(--line-strong);
+      border-radius: 5px;
+      color: var(--muted);
+      background: var(--surface-subtle);
+      font-size: 10.5px;
+      font-weight: 700;
+      line-height: 1;
+      white-space: nowrap;
+    }
+    .skill-source.source-bundled {
+      border-color: color-mix(in srgb, var(--brand) 38%, var(--line));
+      color: var(--brand-ink);
+      background: var(--brand-soft);
+    }
+    .skill-source.source-third-party { color: var(--ink); background: var(--surface-muted); }
+    .skill-source.source-imported { border-style: dashed; background: var(--surface-raised); }
+
+    .skill-card-controls { justify-self: stretch; }
+    .skill-group-select {
+      display: flex;
+      width: 100%;
+      min-height: 36px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 0 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      color: var(--ink);
+      background: var(--surface-raised);
+      cursor: pointer;
+      font-size: 11.5px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+    .skill-group-select:hover,
+    .skill-group-select[aria-expanded="true"] { background: var(--surface-muted); }
+    .skill-group-select svg { width: 13px; height: 13px; transition: transform 140ms ease; }
+    .skill-group-select[aria-expanded="true"] svg { transform: rotate(180deg); }
+    .switch-cell { display: grid; min-height: 36px; place-items: center; }
+    .skill-switch {
+      position: relative;
+      width: 34px;
+      height: 20px;
+      margin: 0;
+      padding: 0;
+      border: 1px solid var(--control-line);
+      border-radius: 999px;
+      background: var(--surface-muted);
+      cursor: pointer;
+      transition: border-color 140ms ease, background-color 140ms ease;
+    }
+    .skill-switch::after {
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: transform 140ms ease, background-color 140ms ease;
+      content: "";
+    }
+    .skill-switch[aria-checked="true"] { border-color: var(--brand); background: var(--brand-soft); }
+    .skill-switch[aria-checked="true"]::after { background: var(--brand); transform: translateX(14px); }
+    .skill-detail-button {
+      display: inline-flex;
+      width: 100%;
+      min-height: 36px;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      padding: 0 5px;
+      border: 0;
+      border-radius: 7px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+      font-size: 11.5px;
+      font-weight: 680;
+      white-space: nowrap;
+    }
+    .skill-detail-button:hover,
+    .skill-detail-button[aria-expanded="true"] { color: var(--brand-ink); background: var(--brand-soft); }
+    .skill-detail-button svg { width: 13px; height: 13px; transition: transform 140ms ease; }
+    .skill-detail-button[aria-expanded="true"] svg { transform: rotate(180deg); }
+
+    .skill-card-details {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 15px 18px;
+      margin: 0 7px 13px 61px;
+      padding: 15px 16px;
+      border-left: 3px solid color-mix(in srgb, var(--brand) 64%, var(--line));
+      background: color-mix(in srgb, var(--brand-soft) 48%, var(--surface));
+    }
+    .skill-card-details[hidden] { display: none; }
+    .skill-detail-fact { display: grid; min-width: 0; gap: 5px; }
+    .skill-detail-fact.source-detail { grid-column: span 2; }
+    .skill-detail-fact dt {
+      color: var(--faint);
+      font-size: 10.5px;
+      font-weight: 680;
+      line-height: 1.25;
+    }
+    .skill-detail-fact dd {
+      min-width: 0;
+      margin: 0;
+      overflow: hidden;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 620;
+      line-height: 1.45;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .detail-source-value { display: flex; min-width: 0; align-items: center; gap: 6px; }
+    .detail-source-value a {
+      min-width: 0;
+      overflow: hidden;
+      color: var(--brand-ink);
+      text-decoration: none;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .detail-source-value a:hover { text-decoration: underline; text-underline-offset: 2px; }
+    .detail-source-value .separator { color: var(--faint); }
+    .skill-card-details code {
+      padding: 1px 4px;
+      border-radius: 4px;
+      color: var(--muted);
+      background: var(--surface-muted);
+      font: 10.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .skill-detail-note {
+      grid-column: 1 / -1;
+      margin: 0;
+      padding-top: 11px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 11.5px;
+      line-height: 1.55;
+    }
+    .skill-detail-footer {
+      display: flex;
+      grid-column: 1 / -1;
+      justify-content: flex-end;
+      padding-top: 9px;
+      border-top: 1px solid var(--line);
+    }
+    .skill-delete-button {
+      min-height: 32px;
+      padding: 0 9px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--danger);
+      background: transparent;
+      cursor: pointer;
+      font-size: 11.5px;
+      font-weight: 680;
+    }
+    .skill-delete-button:hover { background: var(--danger-soft); }
+    .skill-empty {
+      padding: 28px 16px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12.5px;
+      text-align: center;
+    }
+
+    .group-menu {
+      position: fixed;
+      z-index: 80;
+      width: min(390px, calc(100vw - 28px));
+      max-height: min(590px, calc(100vh - 30px));
+      overflow: auto;
+      border: 1px solid var(--line-strong);
+      border-radius: 9px;
+      color: var(--ink);
+      background: var(--surface-raised);
+      box-shadow: var(--shadow-menu);
+    }
+    .group-menu[hidden] { display: none; }
+    .group-menu-header { padding: 14px; border-bottom: 1px solid var(--line); }
+    .group-menu-header strong { display: block; margin-bottom: 5px; font-size: 13px; }
+    .group-menu-header small { display: block; color: var(--muted); font-size: 11px; line-height: 1.5; }
+    .group-options { display: grid; padding: 6px; }
+    .group-option {
+      display: grid;
+      min-height: 52px;
+      grid-template-columns: 18px minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 7px 9px;
+      border-radius: 7px;
+      cursor: pointer;
+    }
+    .group-option:hover { background: var(--surface-subtle); }
+    .group-option input { width: 15px; height: 15px; margin: 0; accent-color: var(--brand); }
+    .group-option span { display: grid; min-width: 0; gap: 3px; }
+    .group-option strong { font-size: 11.5px; }
+    .group-option small { overflow: hidden; color: var(--muted); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .group-option em { color: var(--brand-ink); font-size: 10px; font-style: normal; font-weight: 680; }
+
+    .prototype-note-button {
+      position: fixed;
+      z-index: 60;
+      right: 20px;
+      bottom: 20px;
+      display: inline-flex;
+      min-height: 38px;
+      align-items: center;
+      gap: 8px;
+      padding: 0 13px;
+      border: 1px solid color-mix(in srgb, var(--brand) 46%, var(--line));
+      border-radius: 999px;
+      color: var(--brand-hover);
+      background: color-mix(in srgb, var(--brand-soft) 72%, var(--surface-raised));
+      box-shadow: 0 8px 24px rgba(38, 45, 58, .12);
+      cursor: pointer;
+      font-size: 11.5px;
+      font-weight: 700;
+    }
+    .prototype-note-button svg { width: 15px; height: 15px; }
+    .annotation-scrim {
+      position: fixed;
+      z-index: 89;
+      inset: 0;
+      border: 0;
+      background: var(--overlay);
+      cursor: default;
+    }
+    .annotation-scrim[hidden] { display: none; }
+    .annotation-panel {
+      position: fixed;
+      z-index: 90;
+      top: 0;
+      right: 0;
+      width: min(410px, calc(100vw - 28px));
+      height: 100%;
+      padding: 24px;
+      overflow: auto;
+      border-left: 1px solid var(--line-strong);
+      background: var(--surface-raised);
+      box-shadow: -18px 0 56px rgba(38, 45, 58, .16);
+      transform: translateX(102%);
+      transition: transform 180ms ease;
+    }
+    .annotation-panel.open { transform: translateX(0); }
+    .annotation-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+    .annotation-eyebrow {
+      margin: 0 0 7px;
+      color: var(--brand-ink);
+      font: 750 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .1em;
+    }
+    .annotation-panel h2 { margin: 0; font-size: 22px; letter-spacing: -.025em; }
+    .annotation-close {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      flex: 0 0 34px;
+      place-items: center;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      cursor: pointer;
+      font-size: 20px;
+    }
+    .annotation-close:hover { background: var(--surface-muted); }
+    .annotation-intro { margin: 14px 0 18px; color: var(--muted); font-size: 12px; line-height: 1.65; }
+    .formula {
+      display: block;
+      margin: 0 0 22px;
+      padding: 12px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--ink);
+      background: var(--surface-subtle);
+      font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+      white-space: nowrap;
+    }
+    .palette-list { display: grid; gap: 7px; }
+    .palette-row {
+      display: grid;
+      grid-template-columns: 34px 78px minmax(0, 1fr);
+      gap: 10px;
+      align-items: center;
+      min-height: 44px;
+      padding: 5px 7px;
+      border-bottom: 1px solid var(--line);
+    }
+    .palette-swatch {
+      width: 30px;
+      height: 30px;
+      border: 1px solid color-mix(in srgb, var(--swatch) 38%, var(--line));
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--swatch) 15%, var(--surface-raised));
+      box-shadow: inset 4px 0 0 var(--swatch);
+    }
+    .palette-row strong { color: var(--ink); font-size: 11.5px; }
+    .palette-row code { color: var(--muted); font: 10.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .annotation-rule {
+      margin-top: 22px;
+      padding: 13px;
+      border-left: 3px solid var(--brand);
+      color: var(--muted);
+      background: var(--brand-soft);
+      font-size: 11.5px;
+      line-height: 1.6;
+    }
+    .prototype-label {
+      display: inline-flex;
+      margin-top: 16px;
+      padding: 4px 7px;
+      border-radius: 5px;
+      color: var(--faint);
+      background: var(--surface-muted);
+      font: 700 9.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .toast {
+      position: fixed;
+      z-index: 110;
+      right: 20px;
+      bottom: 70px;
+      max-width: min(360px, calc(100vw - 32px));
+      padding: 10px 12px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      color: var(--ink);
+      background: var(--surface-raised);
+      box-shadow: var(--shadow-menu);
+      font-size: 11.5px;
+      line-height: 1.45;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(6px);
+      transition: opacity 140ms ease, transform 140ms ease;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+
+    @media (max-width: 1120px) {
+      .settings-panel { width: calc(100% - 32px); }
+      .skill-card-grid { --skill-actions-width: 264px; }
+      .skill-library-columns > div,
+      .skill-card-controls { grid-template-columns: 126px 56px 62px; gap: 10px; }
+      .skill-card-heading > p { white-space: normal; }
+    }
+    @media (max-width: 900px) {
+      .app-shell { grid-template-columns: 236px minmax(0, 1fr); }
+      .settings-panel::before { left: 236px; }
+      .settings-page-heading { flex-direction: column; gap: 14px; }
+      .skill-library-columns { display: none; }
+      .skill-card-primary { grid-template-columns: 42px minmax(0, 1fr); gap: 10px 12px; }
+      .skill-card-controls { grid-column: 2; grid-template-columns: minmax(122px, 138px) 58px 66px; justify-content: start; }
+      .skill-card-details { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 700px) {
+      body { overflow: auto; }
+      .app-shell { display: block; height: auto; min-height: 100%; }
+      .settings-sidebar, .window-drag-strip { display: none; }
+      .settings-content { min-height: 100vh; padding-top: 3px; overflow: visible; }
+      .settings-panel { width: calc(100% - 24px); padding-top: 24px; }
+      .settings-panel::before { top: 0; left: 0; }
+      .skill-import-body { grid-template-columns: minmax(0, 1fr); }
+      .skill-import-body .primary-button { justify-self: start; }
+      .skill-card-controls { width: 100%; grid-template-columns: minmax(116px, 1fr) 54px 64px; }
+      .skill-card-details { grid-template-columns: minmax(0, 1fr); margin-left: 0; }
+      .skill-detail-fact.source-detail { grid-column: span 1; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .001ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="settings-sidebar" aria-label="设置导航">
+      <div class="brand-row"><span class="brand-mark" aria-hidden="true"></span><strong>Rovai AI</strong></div>
+      <div class="sidebar-body">
+        <button class="back-button" type="button" data-prototype-action="返回 App">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+          返回 App
+        </button>
+        <div class="sidebar-intro"><strong>设置</strong><p>管理应用行为、能力与本机支持。</p></div>
+        <nav>
+          <div class="settings-group">
+            <span>应用</span>
+            <div class="settings-menu">
+              <button type="button" data-prototype-action="通用"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7h16M7 4v6m10 4v6M4 17h16"/></svg>通用</button>
+              <button type="button" data-prototype-action="外观"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 0 0 16Z"/></svg>外观</button>
+              <button type="button" data-prototype-action="通知"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 7h18s-3 0-3-7M10 20h4"/></svg>通知</button>
+            </div>
+          </div>
+          <div class="settings-group">
+            <span>能力</span>
+            <div class="settings-menu">
+              <button class="active" type="button" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m12 3 2.2 4.5L19 9l-3.5 3.4.8 4.8-4.3-2.3-4.3 2.3.8-4.8L5 9l4.8-1.5Z"/></svg>Skill</button>
+              <button type="button" data-prototype-action="MCP"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/><path d="M10 7h4a3 3 0 0 1 3 3v4M7 10v4a3 3 0 0 0 3 3h4"/></svg>MCP</button>
+              <button type="button" data-prototype-action="Agent 运行时"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="m8 10 2 2-2 2m4 0h4"/></svg>Agent 运行时</button>
+            </div>
+          </div>
+          <div class="settings-group">
+            <span>支持</span>
+            <div class="settings-menu">
+              <button type="button" data-prototype-action="诊断与修复"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5 5L4 17l3 3 5.7-5.7a4 4 0 0 0 5-5l-2.4 2.4-3-3Z"/></svg>诊断与修复</button>
+            </div>
+          </div>
+        </nav>
+      </div>
+    </aside>
+
+    <div class="window-drag-strip" aria-hidden="true"></div>
+
+    <main class="settings-content">
+      <div class="settings-panel">
+        <header class="settings-page-heading">
+          <div>
+            <p class="settings-page-eyebrow">Settings / Skills</p>
+            <h1>Skill 管理</h1>
+            <p>管理 Rovai 内置、固定上游的第三方与用户导入 Skill；来源可追溯，投递范围与启停状态各自独立。</p>
+          </div>
+          <span class="settings-page-note">应用全局配置</span>
+        </header>
+
+        <section class="skill-section" aria-labelledby="add-skill-title">
+          <div class="skill-section-heading"><h2 id="add-skill-title">添加 Skill</h2></div>
+          <div class="skill-import-panel">
+            <div class="skill-import-tabs" role="tablist" aria-label="Skill 添加方式">
+              <button id="local-tab" type="button" role="tab" aria-selected="true" aria-controls="import-panel">本地文件夹</button>
+              <button id="github-tab" type="button" role="tab" aria-selected="false" aria-controls="import-panel" tabindex="-1">GitHub</button>
+            </div>
+            <div class="skill-import-body" id="import-panel" role="tabpanel" aria-labelledby="local-tab">
+              <div class="skill-import-copy" id="import-copy">
+                <strong>选择包含 <code>SKILL.md</code> 的完整目录</strong>
+                <small>导入前会先生成安全预览；确认后复制到 Rovai 本机受管仓库，不再依赖原始文件夹。</small>
+              </div>
+              <button class="primary-button" id="import-action" type="button">选择文件夹</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="skill-section" aria-labelledby="installed-title">
+          <div class="skill-section-heading">
+            <h2 id="installed-title">已安装 Skills</h2>
+            <span class="skill-section-count" id="skill-count">8 个</span>
+          </div>
+          <label class="skill-search-row">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
+            <input id="skill-search" type="search" placeholder="搜索 Skill 名称、简介或来源" aria-label="搜索 Skill">
+          </label>
+          <div class="skill-card-grid" id="skill-grid">
+            <div class="skill-library-columns" aria-hidden="true">
+              <span></span>
+              <span>Skill</span>
+              <div><span>投递范围</span><span>状态</span><span>查看</span></div>
+            </div>
+            <div id="skill-list"></div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div class="group-menu" id="group-menu" hidden>
+    <div class="group-menu-header"><strong>选择 Runtime 生效组</strong><small>可多选。关闭 Skill 不会清除已保存的生效组。</small></div>
+    <div class="group-options" id="group-options"></div>
+  </div>
+
+  <button class="prototype-note-button" id="annotation-open" type="button" aria-haspopup="dialog" aria-controls="annotation-panel">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8h.01"/></svg>
+    8 色映射
+  </button>
+  <button class="annotation-scrim" id="annotation-scrim" type="button" aria-label="关闭原型标注" hidden></button>
+  <aside class="annotation-panel" id="annotation-panel" role="dialog" aria-modal="true" aria-labelledby="annotation-title">
+    <div class="annotation-header">
+      <div><p class="annotation-eyebrow">PROTOTYPE NOTE</p><h2 id="annotation-title">Skill 身份色</h2></div>
+      <button class="annotation-close" id="annotation-close" type="button" aria-label="关闭">×</button>
+    </div>
+    <p class="annotation-intro">复用生产现有的八种身份色与 FNV-1a 算法。唯一输入是创建时的稳定 Skill UUID；名称、Revision、来源和开关状态都不会改变颜色。</p>
+    <code class="formula">fnv1a32(skill.id) % 8 + 1 → --identity-n</code>
+    <div class="palette-list" id="palette-list"></div>
+    <p class="annotation-rule"><strong>来源标签保持简短。</strong> 图标颜色回答“这是哪个 Skill”；标签只显示 Rovai、GitHub 或用户导入，完整来源、仓库与 Revision 都进入详情。</p>
+    <span class="prototype-label">仅原型标注 · 不属于生产页面</span>
+  </aside>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    const identityColors = [
+      '#a65f4a', '#39777a', '#74628f', '#9a6a32',
+      '#4f729b', '#8a5c75', '#547245', '#8c6146'
+    ]
+
+    const skills = [
+      {
+        id: 'e6033d8c-e646-4b33-accb-b273759ad3d8',
+        name: 'analyze-agent-codebase',
+        description: '从真实入口、状态、存储与测试重建 Agent 代码库的执行边界。',
+        source: { kind: 'bundled', label: 'Rovai', line: '随 Rovai 安装', note: '随 Rovai 发布并由应用更新；启用不代表获得额外工具或权限。' },
+        revision: 1, installedAt: '2026-08-09 14:32', files: 3, size: '18.6 KB', digest: 'sha256:64f2…c81a', groups: 9, enabled: true
+      },
+      {
+        id: 'a0572216-f5f4-4b1a-b200-ea545671d20d',
+        name: 'grill-duo',
+        description: '由两位队员逐项追问关键假设，在进入实现前收敛模糊目标。',
+        source: { kind: 'bundled', label: 'Rovai', line: '随 Rovai 安装', note: '随 Rovai 发布并由应用更新；双人协作仍受真实队员与 Runtime 可用性约束。' },
+        revision: 1, installedAt: '2026-08-09 14:32', files: 2, size: '11.2 KB', digest: 'sha256:31c8…9ea4', groups: 9, enabled: true
+      },
+      {
+        id: '4cdbd5cb-1cec-42af-b8c6-fe21a8b00cad',
+        name: 'grill-duo-with-docs',
+        description: '在双人追问基础上产出可审阅的领域术语、上下文与 ADR 草稿。',
+        source: { kind: 'bundled', label: 'Rovai', line: '随 Rovai 安装', note: '随 Rovai 发布并由应用更新；文档写入仍以当前任务授权与工作区权限为准。' },
+        revision: 1, installedAt: '2026-08-09 14:32', files: 6, size: '27.4 KB', digest: 'sha256:af20…6d13', groups: 9, enabled: true
+      },
+      {
+        id: 'fc3775bd-97f7-48f6-9db0-f9db158043de',
+        name: 'memory-stewardship',
+        description: '整理可长期沿用的共同记忆，并区分事实、经验与待确认提案。',
+        source: { kind: 'bundled', label: 'Rovai', line: '随 Rovai 安装', note: '随 Rovai 发布并由应用更新；Skill 不改变 Memory 的容量、权限或复核合同。' },
+        revision: 4, installedAt: '2026-08-09 14:32', files: 2, size: '16.1 KB', digest: 'sha256:56aa…19de', groups: 9, enabled: true
+      },
+      {
+        id: '375f3f35-d8e0-4122-8417-242f2f3a91c9',
+        name: 'tasteful-ui',
+        description: '以产品语境、品味探索与验证门禁指导真实界面的设计和实现。',
+        source: {
+          kind: 'third-party', label: 'GitHub', line: '固定上游副本',
+          repository: 'DonkeyKing01/tasteful-ui-skill', repositoryUrl: 'https://github.com/DonkeyKing01/tasteful-ui-skill', upstreamRevision: '159ccd47',
+          note: '随 Rovai 安装的固定上游副本；启动和使用时不访问 GitHub，也不会随上游自动更新。'
+        },
+        revision: 1, installedAt: '2026-08-09 14:32', files: 81, size: '486 KB', digest: 'sha256:159c…d8bf', groups: 9, enabled: true, expanded: true
+      },
+      {
+        id: 'f85da537-1e5f-40e6-a794-2162a6d5cc22',
+        name: 'worktree',
+        description: '为耐久 Task 建立可复用的隔离 Git worktree，并保留交付证据。',
+        source: { kind: 'bundled', label: 'Rovai', line: '随 Rovai 安装', note: '随 Rovai 发布并由应用更新；创建 worktree 仍需要任务范围内的文件与 Git 授权。' },
+        revision: 2, installedAt: '2026-08-09 14:32', files: 2, size: '13.8 KB', digest: 'sha256:92d4…701b', groups: 9, enabled: true
+      },
+      {
+        id: '0cbf99e2-904e-42c4-8eed-e37d435885f4',
+        name: 'release-note-writer',
+        description: '从已验证的变更与测试证据生成面向用户的发布说明。',
+        source: {
+          kind: 'imported', label: '用户导入', line: 'GitHub 导入',
+          repository: 'rovai-labs/release-note-writer', repositoryUrl: '#', upstreamRevision: '8a34bd2c',
+          note: 'Rovai 已保存独立副本，不依赖原始仓库；后续不会自动同步。'
+        },
+        revision: 3, installedAt: '2026-08-10 09:18', files: 7, size: '42.7 KB', digest: 'sha256:013f…a99d', groups: 6, enabled: true
+      },
+      {
+        id: '0cf6225a-fd1b-48bd-a88f-9152592fc955',
+        name: 'accessibility-checklist',
+        description: '在交付前检查键盘、焦点、语义、对比度与缩放边界。',
+        source: { kind: 'imported', label: '用户导入', line: '本地文件夹导入', note: 'Rovai 已保存独立副本，不依赖原始文件夹；后续不会自动同步。' },
+        revision: 2, installedAt: '2026-08-10 11:46', files: 4, size: '21.3 KB', digest: 'sha256:bc83…76f1', groups: 0, enabled: false
+      }
+    ]
+
+    const runtimeGroups = [
+      ['Codex', '.codex/skills'], ['OpenCode', '.agents/skills'], ['GitHub Copilot', '.agents/skills'],
+      ['Claude Code', '.claude/skills'], ['Antigravity', '.agent/skills'], ['Kiro', '.kiro/skills'],
+      ['Qoder', '.qoder/skills'], ['CodeBuddy', '.codebuddy/skills'], ['Qwen Code', '.qwen/skills']
+    ]
+
+    const list = document.getElementById('skill-list')
+    const search = document.getElementById('skill-search')
+    const count = document.getElementById('skill-count')
+    const groupMenu = document.getElementById('group-menu')
+    const groupOptions = document.getElementById('group-options')
+    const toast = document.getElementById('toast')
+    let activeGroupSkill = null
+    let activeGroupButton = null
+    let toastTimer = null
+
+    function fnv1aIndex(value) {
+      let hash = 0x811c9dc5
+      for (const character of value) {
+        hash ^= character.codePointAt(0) || 0
+        hash = Math.imul(hash, 0x01000193)
+      }
+      return (hash >>> 0) % 8 + 1
+    }
+
+    function initials(name) {
+      return name.split(/[-_\s]+/u).filter(Boolean).slice(0, 2).map(part => Array.from(part)[0] || '').join('').toUpperCase().slice(0, 2) || 'SK'
+    }
+
+    function chevron() {
+      return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m7 9 5 5 5-5"/></svg>'
+    }
+
+    function sourceDetail(skill) {
+      const source = skill.source
+      if (source.repository) {
+        return `<span class="detail-source-value"><a href="${source.repositoryUrl}" data-external-link="true">${source.repository} ↗</a><span class="separator" aria-hidden="true">·</span><code>${source.upstreamRevision}</code></span>`
+      }
+      return `<span class="detail-source-value"><span>${source.line}</span></span>`
+    }
+
+    function skillMarkup(skill) {
+      const colorIndex = fnv1aIndex(skill.id)
+      const detailId = `skill-details-${skill.id}`
+      const sourceClass = `source-${skill.source.kind}`
+      const sourceBadge = `<span class="skill-source ${sourceClass}">${skill.source.label}</span>`
+      return `
+        <article class="skill-card ${skill.enabled ? '' : 'is-disabled'} ${skill.expanded ? 'is-expanded' : ''}" data-skill-id="${skill.id}" data-skill-name="${skill.name}" style="--skill-color: var(--identity-${colorIndex})">
+          <div class="skill-card-primary">
+            <span class="skill-card-mark" aria-hidden="true">${initials(skill.name)}</span>
+            <div class="skill-card-heading">
+              <div class="skill-card-title">
+                <strong title="${skill.name}">${skill.name}</strong>
+                ${sourceBadge}
+              </div>
+              <p>${skill.description}</p>
+            </div>
+            <div class="skill-card-controls">
+              <button class="skill-group-select" type="button" aria-expanded="false" aria-haspopup="menu" aria-label="${skill.name} 投递范围，${groupSummary(skill.groups)}">
+                <span>${groupSummary(skill.groups)}</span>${chevron()}
+              </button>
+              <span class="switch-cell">
+                <button class="skill-switch" type="button" role="switch" aria-checked="${skill.enabled}" aria-label="${skill.enabled ? '停用' : '启用'} ${skill.name}"><span class="sr-only"></span></button>
+              </span>
+              <button class="skill-detail-button" type="button" aria-expanded="${Boolean(skill.expanded)}" aria-controls="${detailId}"><span>详情</span>${chevron()}</button>
+            </div>
+          </div>
+          <dl class="skill-card-details" id="${detailId}" ${skill.expanded ? '' : 'hidden'}>
+            <div class="skill-detail-fact source-detail"><dt>来源</dt><dd>${sourceDetail(skill)}</dd></div>
+            <div class="skill-detail-fact"><dt>Library Revision</dt><dd><code>r${skill.revision}</code></dd></div>
+            <div class="skill-detail-fact"><dt>${skill.source.kind === 'bundled' || skill.source.kind === 'third-party' ? '安装时间' : '更新时间'}</dt><dd>${skill.installedAt}</dd></div>
+            <div class="skill-detail-fact"><dt>内容</dt><dd>${skill.files} 个文件 · ${skill.size}</dd></div>
+            <div class="skill-detail-fact"><dt>内容摘要</dt><dd><code>${skill.digest}</code></dd></div>
+            <p class="skill-detail-note">${skill.source.note}</p>
+            ${skill.source.kind === 'imported' ? '<div class="skill-detail-footer"><button class="skill-delete-button" type="button">删除 Skill…</button></div>' : ''}
+          </dl>
+        </article>`
+    }
+
+    function groupSummary(value) {
+      if (value === 9) return '全部 9 组'
+      if (value === 0) return '未选择'
+      return `${value} / 9 组`
+    }
+
+    function renderSkills() {
+      const query = search.value.trim().toLocaleLowerCase('zh-CN')
+      const visible = skills.filter(skill => [skill.name, skill.description, skill.source.label, skill.source.line, skill.source.repository]
+        .filter(Boolean).join(' ').toLocaleLowerCase('zh-CN').includes(query))
+      list.innerHTML = visible.map(skillMarkup).join('') || `<div class="skill-empty">没有匹配“${search.value.trim()}”的 Skill。</div>`
+      count.textContent = query ? `${visible.length} / ${skills.length} 个` : `${skills.length} 个`
+      wireSkillInteractions()
+    }
+
+    function wireSkillInteractions() {
+      list.querySelectorAll('.skill-switch').forEach(button => {
+        button.addEventListener('click', () => {
+          const card = button.closest('.skill-card')
+          const skill = skills.find(item => item.id === card.dataset.skillId)
+          skill.enabled = !skill.enabled
+          button.setAttribute('aria-checked', String(skill.enabled))
+          button.setAttribute('aria-label', `${skill.enabled ? '停用' : '启用'} ${skill.name}`)
+          card.classList.toggle('is-disabled', !skill.enabled)
+          showToast(`${skill.name} 的设置已在原型中更新。`)
+        })
+      })
+
+      list.querySelectorAll('.skill-detail-button').forEach(button => {
+        button.addEventListener('click', () => {
+          const card = button.closest('.skill-card')
+          const skill = skills.find(item => item.id === card.dataset.skillId)
+          skill.expanded = !skill.expanded
+          button.setAttribute('aria-expanded', String(skill.expanded))
+          card.classList.toggle('is-expanded', skill.expanded)
+          card.querySelector('.skill-card-details').hidden = !skill.expanded
+        })
+      })
+
+      list.querySelectorAll('.skill-group-select').forEach(button => {
+        button.addEventListener('click', event => {
+          event.stopPropagation()
+          const card = button.closest('.skill-card')
+          const skill = skills.find(item => item.id === card.dataset.skillId)
+          if (activeGroupButton === button && !groupMenu.hidden) {
+            closeGroupMenu()
+            return
+          }
+          openGroupMenu(skill, button)
+        })
+      })
+
+      list.querySelectorAll('[data-external-link="true"]').forEach(link => {
+        link.addEventListener('click', event => {
+          event.preventDefault()
+          showToast('设计稿不会打开外部网页。')
+        })
+      })
+
+      list.querySelectorAll('.skill-delete-button').forEach(button => {
+        button.addEventListener('click', () => showToast('删除确认只在生产 Dialog 中执行；设计稿未连接 Core。'))
+      })
+    }
+
+    function openGroupMenu(skill, button) {
+      closeGroupMenu()
+      activeGroupSkill = skill
+      activeGroupButton = button
+      button.setAttribute('aria-expanded', 'true')
+      groupOptions.innerHTML = runtimeGroups.map((group, index) => `
+        <label class="group-option">
+          <input type="checkbox" ${index < skill.groups ? 'checked' : ''}>
+          <span><strong>${group[0]}</strong><small>${group[1]} · 当前示例投递路径</small></span>
+          <em>已验证</em>
+        </label>`).join('')
+      groupOptions.querySelectorAll('input').forEach(input => {
+        input.addEventListener('change', () => {
+          skill.groups = groupOptions.querySelectorAll('input:checked').length
+          activeGroupButton.querySelector('span').textContent = groupSummary(skill.groups)
+          activeGroupButton.setAttribute('aria-label', `${skill.name} 投递范围，${groupSummary(skill.groups)}`)
+        })
+      })
+      groupMenu.hidden = false
+      const rect = button.getBoundingClientRect()
+      const menuWidth = Math.min(390, window.innerWidth - 28)
+      const left = Math.min(rect.left, window.innerWidth - menuWidth - 14)
+      const preferredTop = rect.bottom + 6
+      const menuHeight = Math.min(groupMenu.scrollHeight, window.innerHeight - 30)
+      const top = preferredTop + menuHeight <= window.innerHeight - 14 ? preferredTop : Math.max(14, rect.top - menuHeight - 6)
+      groupMenu.style.left = `${Math.max(14, left)}px`
+      groupMenu.style.top = `${top}px`
+    }
+
+    function closeGroupMenu() {
+      if (activeGroupButton) activeGroupButton.setAttribute('aria-expanded', 'false')
+      groupMenu.hidden = true
+      activeGroupButton = null
+      activeGroupSkill = null
+    }
+
+    function showToast(message) {
+      window.clearTimeout(toastTimer)
+      toast.textContent = message
+      toast.classList.add('show')
+      toastTimer = window.setTimeout(() => toast.classList.remove('show'), 2200)
+    }
+
+    search.addEventListener('input', () => {
+      closeGroupMenu()
+      renderSkills()
+    })
+
+    const tabs = [...document.querySelectorAll('.skill-import-tabs [role="tab"]')]
+    tabs.forEach((tab, index) => {
+      tab.addEventListener('click', () => selectImportTab(index))
+      tab.addEventListener('keydown', event => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+        event.preventDefault()
+        const next = event.key === 'ArrowLeft' || event.key === 'Home' ? 0 : 1
+        selectImportTab(next)
+        tabs[next].focus()
+      })
+    })
+
+    function selectImportTab(index) {
+      tabs.forEach((tab, current) => {
+        tab.setAttribute('aria-selected', String(current === index))
+        tab.tabIndex = current === index ? 0 : -1
+      })
+      const panel = document.getElementById('import-panel')
+      panel.setAttribute('aria-labelledby', tabs[index].id)
+      if (index === 0) {
+        panel.innerHTML = `<div class="skill-import-copy"><strong>选择包含 <code>SKILL.md</code> 的完整目录</strong><small>导入前会先生成安全预览；确认后复制到 Rovai 本机受管仓库，不再依赖原始文件夹。</small></div><button class="primary-button" type="button">选择文件夹</button>`
+      } else {
+        panel.innerHTML = `<div class="skill-import-copy"><strong>从固定 GitHub 地址检查 Skill</strong><input class="skill-import-github-field" aria-label="GitHub Skill 链接" placeholder="粘贴仓库或带 ref / 子目录的链接"><small>检查时固定仓库、路径和 Revision；确认后保存完整副本。</small></div><button class="primary-button" type="button">检查并导入</button>`
+      }
+      panel.querySelector('.primary-button').addEventListener('click', () => showToast('添加流程仅用于展示，不会访问文件系统或网络。'))
+    }
+
+    document.getElementById('import-action').addEventListener('click', () => showToast('添加流程仅用于展示，不会访问文件系统。'))
+    document.querySelectorAll('[data-prototype-action]').forEach(button => button.addEventListener('click', () => showToast(`${button.dataset.prototypeAction} 不在本次 Skill 设计稿范围内。`)))
+
+    document.addEventListener('click', event => {
+      if (!groupMenu.hidden && !groupMenu.contains(event.target) && event.target !== activeGroupButton) closeGroupMenu()
+    })
+    window.addEventListener('resize', closeGroupMenu)
+    document.querySelector('.settings-content').addEventListener('scroll', closeGroupMenu, { passive: true })
+
+    const annotationPanel = document.getElementById('annotation-panel')
+    const annotationScrim = document.getElementById('annotation-scrim')
+    const annotationOpen = document.getElementById('annotation-open')
+    const annotationClose = document.getElementById('annotation-close')
+    document.getElementById('palette-list').innerHTML = identityColors.map((color, index) => `
+      <div class="palette-row" style="--swatch: ${color}">
+        <span class="palette-swatch" aria-hidden="true"></span>
+        <strong>Identity ${index + 1}</strong>
+        <code>${color.toUpperCase()}</code>
+      </div>`).join('')
+
+    function openAnnotation() {
+      annotationScrim.hidden = false
+      annotationPanel.classList.add('open')
+      window.setTimeout(() => annotationClose.focus(), 180)
+    }
+    function closeAnnotation() {
+      annotationPanel.classList.remove('open')
+      annotationScrim.hidden = true
+      annotationOpen.focus()
+    }
+    annotationOpen.addEventListener('click', openAnnotation)
+    annotationClose.addEventListener('click', closeAnnotation)
+    annotationScrim.addEventListener('click', closeAnnotation)
+    document.addEventListener('keydown', event => {
+      if (event.key !== 'Escape') return
+      if (annotationPanel.classList.contains('open')) closeAnnotation()
+      else closeGroupMenu()
+    })
+
+    renderSkills()
+  </script>
+</body>
+</html>
