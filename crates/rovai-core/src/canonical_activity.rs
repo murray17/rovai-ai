@@ -40,8 +40,10 @@ pub struct EvidenceActivityFacts {
     pub identity_authority: String,
     pub activity_domain: String,
     pub semantic_kind: Option<String>,
+    pub classification_is_structured: bool,
     pub tool_name: Option<String>,
     pub presentation_hint: Option<String>,
+    pub presentation_hint_is_explicit: bool,
     pub phase: String,
     pub outcome: String,
     pub credibility: String,
@@ -105,14 +107,19 @@ pub fn classify_evidence(
                 | "runtime.plan"
                 | "runtime.plan.delta"
         );
-    let (activity_domain, semantic_kind) =
-        runtime_activity_mapping::classify(item_type, kind, payload);
+    let (activity_domain, semantic_kind, runtime_classification_is_structured) =
+        runtime_activity_mapping::classify_with_structure(item_type, kind, payload);
+    let classification_is_structured =
+        runtime_classification_is_structured || validated_core_tool.is_some();
     let phase = canonical_phase(event_type, phase, payload);
     let outcome = canonical_outcome(&phase, payload);
     let tool_name = validated_core_tool.clone().or(runtime_tool_name);
     let credibility = if validated_core_tool.is_some() {
         "core_verified"
-    } else if tool_name.is_some() || !item_type.is_empty() || payload.get("kind").is_some() {
+    } else if tool_name.is_some()
+        || !item_type.is_empty()
+        || payload.get("kind").and_then(Value::as_str).is_some()
+    {
         "runtime_structured"
     } else {
         "runtime_reported"
@@ -124,22 +131,25 @@ pub fn classify_evidence(
     } else {
         "fine_grained"
     };
-    let presentation_hint = string_field(payload, "title")
-        .or_else(|| string_field(item, "title"))
-        .or_else(|| {
-            runtime_activity_mapping::default_presentation_hint(
-                &activity_domain,
-                semantic_kind.as_deref(),
-            )
-        });
+    let explicit_presentation_hint =
+        string_field(payload, "title").or_else(|| string_field(item, "title"));
+    let presentation_hint_is_explicit = explicit_presentation_hint.is_some();
+    let presentation_hint = explicit_presentation_hint.or_else(|| {
+        runtime_activity_mapping::default_presentation_hint(
+            &activity_domain,
+            semantic_kind.as_deref(),
+        )
+    });
     EvidenceActivityFacts {
         is_activity,
         operation_id,
         identity_authority: identity_authority.to_string(),
         activity_domain,
         semantic_kind,
+        classification_is_structured,
         tool_name,
         presentation_hint,
+        presentation_hint_is_explicit,
         phase,
         outcome,
         credibility: credibility.to_string(),
@@ -180,6 +190,12 @@ pub fn merge_projection(
 ) -> CanonicalRuntimeActivity {
     let prior_phase = projection.phase.clone();
     let prior_outcome = projection.outcome.clone();
+    let prior_credibility_rank = credibility_rank(&projection.credibility);
+    let incoming_credibility_rank = credibility_rank(&facts.credibility);
+    let prior_default_presentation_hint = runtime_activity_mapping::default_presentation_hint(
+        &projection.activity_domain,
+        projection.semantic_kind.as_deref(),
+    );
     if prior_phase == "terminal"
         && facts.phase == "terminal"
         && is_settled_outcome(&prior_outcome)
@@ -191,14 +207,27 @@ pub fn merge_projection(
         projection.outcome = facts.outcome;
     }
     if facts.phase == "terminal" || facts.phase == "progress" {
-        projection.phase = facts.phase;
+        projection.phase = facts.phase.clone();
     }
-    projection.activity_domain = facts.activity_domain;
-    projection.semantic_kind = facts.semantic_kind.or(projection.semantic_kind);
-    projection.tool_name = facts.tool_name.or(projection.tool_name);
-    projection.presentation_hint = facts.presentation_hint.or(projection.presentation_hint);
-    if projection.credibility == "runtime_reported" {
-        projection.credibility = facts.credibility;
+    let replace_classification = (facts.classification_is_structured
+        || (projection.activity_domain == "unknown" && facts.activity_domain != "unknown"))
+        && incoming_credibility_rank >= prior_credibility_rank;
+    if replace_classification {
+        projection.activity_domain = facts.activity_domain.clone();
+        projection.semantic_kind = facts.semantic_kind.clone();
+    }
+    if facts.tool_name.is_some() && incoming_credibility_rank >= prior_credibility_rank {
+        projection.tool_name = facts.tool_name.clone();
+    }
+    if facts.presentation_hint_is_explicit
+        || projection.presentation_hint.is_none()
+        || (replace_classification
+            && projection.presentation_hint == prior_default_presentation_hint)
+    {
+        projection.presentation_hint = facts.presentation_hint.clone();
+    }
+    if incoming_credibility_rank > prior_credibility_rank {
+        projection.credibility = facts.credibility.clone();
     }
     if projection.coverage_level == "unknown" {
         projection.coverage_level = facts.coverage_level;
@@ -262,6 +291,15 @@ fn is_settled_outcome(outcome: &str) -> bool {
         outcome,
         "succeeded" | "failed" | "denied" | "cancelled" | "not_executed"
     )
+}
+
+fn credibility_rank(credibility: &str) -> u8 {
+    match credibility {
+        "core_verified" => 3,
+        "runtime_structured" => 2,
+        "runtime_reported" => 1,
+        _ => 0,
+    }
 }
 
 fn string_field(value: &Value, key: &str) -> Option<String> {
@@ -359,6 +397,82 @@ mod tests {
             vec!["evidence-1", "evidence-2"]
         );
         assert_eq!(projection.revision, 2);
+    }
+
+    #[test]
+    fn sparse_acp_completion_preserves_structured_start_metadata() {
+        let started = classify_evidence(
+            "run-1",
+            1,
+            "evidence-1",
+            "runtime.action",
+            "tool_call",
+            "updated",
+            &json!({
+                "toolCallId": "call-1",
+                "kind": "execute",
+                "title": "Count APAR rows per side up to 2026-06",
+                "status": "running"
+            }),
+        );
+        let completed = classify_evidence(
+            "run-1",
+            1,
+            "evidence-2",
+            "runtime.action",
+            "tool_result",
+            "completed",
+            &json!({
+                "toolCallId": "call-1",
+                "status": "completed",
+                "kind": null,
+                "toolName": null,
+                "title": null
+            }),
+        );
+        assert!(started.classification_is_structured);
+        assert!(!completed.classification_is_structured);
+        assert_eq!(completed.credibility, "runtime_reported");
+        let projection = new_projection(started, "evidence-1", 1).unwrap();
+        let projection = merge_projection(projection, completed, "evidence-2", 2);
+        assert_eq!(projection.activity_domain, "shell");
+        assert_eq!(projection.semantic_kind.as_deref(), Some("shell.execute"));
+        assert_eq!(
+            projection.presentation_hint.as_deref(),
+            Some("Count APAR rows per side up to 2026-06")
+        );
+        assert_eq!(projection.phase, "terminal");
+        assert_eq!(projection.outcome, "succeeded");
+        assert_eq!(projection.credibility, "runtime_structured");
+    }
+
+    #[test]
+    fn later_structured_fact_upgrades_an_unknown_projection() {
+        let unknown = classify_evidence(
+            "run-1",
+            1,
+            "evidence-1",
+            "runtime.event",
+            "future_event",
+            "updated",
+            &json!({"operationId": "call-1", "status": "running"}),
+        );
+        let structured = classify_evidence(
+            "run-1",
+            1,
+            "evidence-2",
+            "runtime.action",
+            "tool_result",
+            "completed",
+            &json!({"operationId": "call-1", "kind": "read", "status": "completed"}),
+        );
+        assert_eq!(unknown.activity_domain, "unknown");
+        assert!(!unknown.classification_is_structured);
+        let projection = new_projection(unknown, "evidence-1", 1).unwrap();
+        let projection = merge_projection(projection, structured, "evidence-2", 2);
+        assert_eq!(projection.activity_domain, "file");
+        assert_eq!(projection.semantic_kind.as_deref(), Some("file.read"));
+        assert_eq!(projection.presentation_hint.as_deref(), Some("读取文件"));
     }
 
     #[test]

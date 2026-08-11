@@ -396,6 +396,8 @@ describe('task event projections', () => {
     expect(params).not.toHaveProperty('address')
     expect(params).not.toHaveProperty('agentIds')
     expect(params).not.toHaveProperty('preparedAttachmentIds')
+    expect(params.execution.expectedOutput).toContain('`rovai send`')
+    expect(params.execution.expectedOutput).toContain('Runtime 最终文本不会自动发布')
   })
 
   it('keeps local cancelling state until the authoritative turn becomes terminal', () => {
@@ -413,7 +415,27 @@ describe('task event projections', () => {
         endedAt: null
       }]
     }
-    expect(cancellableTurnIds(running)).toEqual(['turn-running'])
+    const cancellationSnapshot = {
+      turns: [{
+        id: 'turn-running',
+        status: 'running' as const
+      }, {
+        id: 'turn-waiting-for-retry',
+        status: 'waiting' as const
+      }],
+      agentRuns: [{
+        campTurnId: 'turn-running',
+        status: 'running' as const
+      }, {
+        campTurnId: 'turn-waiting-for-retry',
+        status: 'failed' as const
+      }]
+    }
+    expect(cancellableTurnIds(cancellationSnapshot)).toEqual(['turn-running'])
+    expect(cancellableTurnIds(cancellationSnapshot, 'camp_cleanup')).toEqual([
+      'turn-running',
+      'turn-waiting-for-retry'
+    ])
 
     const cancelling = new Set(['turn-running'])
     expect(reconcileCancellingTurnIds(cancelling, running)).toBe(cancelling)

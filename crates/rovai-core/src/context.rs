@@ -9538,6 +9538,11 @@ mod tests {
         assert!(!charter.contains("tool list"));
         assert!(!charter.contains("tool describe"));
         assert!(charter.contains("`rovai send`"));
+        assert!(charter.contains(
+            "Runtime narration and the Runtime final response are private execution evidence, not Camp messages."
+        ));
+        assert!(charter.contains("call `rovai send` before ending"));
+        assert!(charter.contains("Only a successful `rovai send` publishes that reply"));
         assert!(charter.contains("current authenticated AgentRun Camp"));
         assert!(!charter.contains("campId"));
         assert!(!charter.contains("--camp-id"));

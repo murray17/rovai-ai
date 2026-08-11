@@ -67,36 +67,49 @@ pub fn descriptor_for(adapter_kind: AdapterKind) -> &'static RuntimeActivityMapp
 }
 
 pub fn classify(item_type: &str, evidence_kind: &str, payload: &Value) -> (String, Option<String>) {
+    let (activity_domain, semantic_kind, _) =
+        classify_with_structure(item_type, evidence_kind, payload);
+    (activity_domain, semantic_kind)
+}
+
+pub(crate) fn classify_with_structure(
+    item_type: &str,
+    evidence_kind: &str,
+    payload: &Value,
+) -> (String, Option<String>, bool) {
     let runtime_kind = payload
         .get("kind")
         .and_then(Value::as_str)
         .unwrap_or_default();
     match item_type {
-        "commandExecution" => return domain("shell", "shell.execute"),
-        "fileChange" => return domain("file", "file.write"),
-        "webSearch" => return domain("tool", "tool.web.search"),
-        "imageGeneration" => return domain("tool", "tool.image.generate"),
-        "mcpToolCall" => return domain("tool", "tool.mcp.call"),
+        "commandExecution" => return structured_domain("shell", "shell.execute"),
+        "fileChange" => return structured_domain("file", "file.write"),
+        "webSearch" => return structured_domain("tool", "tool.web.search"),
+        "imageGeneration" => return structured_domain("tool", "tool.image.generate"),
+        "mcpToolCall" => return structured_domain("tool", "tool.mcp.call"),
         "dynamicToolCall" | "collabToolCall" | "collabAgentToolCall" => {
-            return domain("tool", "tool.call");
+            return structured_domain("tool", "tool.call");
         }
-        "runtime" | "run" => return domain("runtime", "runtime.run"),
+        "runtime" | "run" => return structured_domain("runtime", "runtime.run"),
         _ => {}
     }
     match runtime_kind.to_ascii_lowercase().as_str() {
-        "read" | "read_file" | "readfile" => domain("file", "file.read"),
-        "edit" | "write" | "write_file" | "apply_patch" => domain("file", "file.write"),
-        "execute" | "command" | "terminal" | "shell" => domain("shell", "shell.execute"),
-        "search" | "web_search" => domain("tool", "tool.web.search"),
-        "mcp_tool_call" | "tool" => domain("tool", "tool.call"),
-        "runtime" | "run" => domain("runtime", "runtime.run"),
-        _ => match evidence_kind {
-            "command" => domain("shell", "shell.execute"),
-            "file_change" => domain("file", "file.write"),
-            "tool_call" | "tool_result" => domain("tool", "tool.call"),
-            "runtime_activity" => domain("runtime", "runtime.run"),
-            _ => ("unknown".to_string(), None),
-        },
+        "read" | "read_file" | "readfile" => structured_domain("file", "file.read"),
+        "edit" | "write" | "write_file" | "apply_patch" => structured_domain("file", "file.write"),
+        "execute" | "command" | "terminal" | "shell" => structured_domain("shell", "shell.execute"),
+        "search" | "web_search" => structured_domain("tool", "tool.web.search"),
+        "mcp_tool_call" | "tool" => structured_domain("tool", "tool.call"),
+        "runtime" | "run" => structured_domain("runtime", "runtime.run"),
+        _ => {
+            let (activity_domain, semantic_kind) = match evidence_kind {
+                "command" => domain("shell", "shell.execute"),
+                "file_change" => domain("file", "file.write"),
+                "tool_call" | "tool_result" => domain("tool", "tool.call"),
+                "runtime_activity" => domain("runtime", "runtime.run"),
+                _ => ("unknown".to_string(), None),
+            };
+            (activity_domain, semantic_kind, false)
+        }
     }
 }
 
@@ -120,6 +133,11 @@ pub fn default_presentation_hint(
 
 fn domain(activity_domain: &str, semantic_kind: &str) -> (String, Option<String>) {
     (activity_domain.to_string(), Some(semantic_kind.to_string()))
+}
+
+fn structured_domain(activity_domain: &str, semantic_kind: &str) -> (String, Option<String>, bool) {
+    let (activity_domain, semantic_kind) = domain(activity_domain, semantic_kind);
+    (activity_domain, semantic_kind, true)
 }
 
 #[cfg(test)]

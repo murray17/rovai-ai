@@ -31,9 +31,18 @@ last_updated: 2026-08-11
 - [ ] 使用可控 Copilot CLI v1/v2 fixture 或真实原地升级完成 dispatch smoke，确认同一 Run 继续；
 - [ ] 完成 Runtime drift smoke 后把版本状态同步为 complete。
 
+## Checkpoint 3：真实请求复盘修正
+
+- [x] Session Charter 明确 Runtime final 不进入公屏、公开回复必须成功调用 `rovai send`；
+- [x] Session Charter contract 推进到 v2，使新 Run 轮换仍冻结旧 Charter 的 Session；
+- [x] Canonical Activity lifecycle merge 保留 ACP started kind/title，稀疏 terminal 只更新状态；
+- [x] Stop 只选择拥有 queued/running/waiting AgentRun 的 running/waiting Turn；
+- [x] 增加 Charter、Bootstrap contract、Canonical lifecycle 和 Renderer cancellation 回归测试。
+
 已完成自动化验证：
 
-- `cargo test --workspace`：Library 313、CLI 10、Core binary 54 通过，3 个既有手工 Runtime smoke ignored；
+- `cargo test --workspace`：Library 315、CLI 10、Core binary 54 通过，3 个既有手工 Runtime smoke ignored；
+- `pnpm test`：文档治理 21、Vitest 251、Node qualification/benchmark 147 通过；
 - `cargo test -p rovai-core rebind -- --nocapture`：2 个新增 rebind 测试通过；
 - `cargo test -p rovai-core db::tests::v72_backfills_initial_runtime_evidence_without_overwriting_existing_values -- --nocapture`：Migration 72 回填测试通过；
 - `cargo clippy --workspace --all-targets -- -D warnings` 与 `cargo fmt --all -- --check` 通过；

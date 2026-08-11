@@ -110,6 +110,11 @@ const CANCELLABLE_TURN_STATUSES = new Set<CampSnapshot['turns'][number]['status'
   'running',
   'waiting'
 ])
+const CANCELLABLE_RUN_STATUSES = new Set<CampSnapshot['agentRuns'][number]['status']>([
+  'queued',
+  'running',
+  'waiting'
+])
 const CAMP_INSPECTOR_VISIBILITY_KEY = 'rovai.camp.inspector.visibility'
 
 export function campInspectorVisibleFromStoredValue(value: string | null): boolean {
@@ -130,9 +135,21 @@ function initialCampInspectorVisibility(): boolean {
   }
 }
 
-export function cancellableTurnIds(snapshot: Pick<CampSnapshot, 'turns'>): string[] {
+export function cancellableTurnIds(snapshot: {
+  turns: Pick<CampSnapshot['turns'][number], 'id' | 'status'>[]
+  agentRuns: Pick<CampSnapshot['agentRuns'][number], 'campTurnId' | 'status'>[]
+}, scope: 'current_execution' | 'camp_cleanup' = 'current_execution'): string[] {
+  if (scope === 'camp_cleanup') {
+    return snapshot.turns
+      .filter((turn) => CANCELLABLE_TURN_STATUSES.has(turn.status))
+      .map((turn) => turn.id)
+  }
+  const executingTurnIds = new Set(snapshot.agentRuns
+    .filter((run) => CANCELLABLE_RUN_STATUSES.has(run.status))
+    .map((run) => run.campTurnId))
   return snapshot.turns
-    .filter((turn) => CANCELLABLE_TURN_STATUSES.has(turn.status))
+    .filter((turn) =>
+      CANCELLABLE_TURN_STATUSES.has(turn.status) && executingTurnIds.has(turn.id))
     .map((turn) => turn.id)
 }
 
@@ -1301,7 +1318,11 @@ export function App(): React.JSX.Element {
       const snapshot = campSnapshot?.camp.id === campId
         ? campSnapshot
         : await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
-      const activeTurns = snapshot.turns.filter((turn) => CANCELLABLE_TURN_STATUSES.has(turn.status))
+      const cancellableIds = new Set(cancellableTurnIds(
+        snapshot,
+        camp ? 'camp_cleanup' : 'current_execution'
+      ))
+      const activeTurns = snapshot.turns.filter((turn) => cancellableIds.has(turn.id))
       requestedTurnIds = activeTurns.map((turn) => turn.id)
       if (requestedTurnIds.length === 0) return
       setCancellingTurnIds((current) => new Set([...current, ...requestedTurnIds]))
@@ -2119,7 +2140,7 @@ export function campMessageSendParams(
     execution: {
       taskId: null,
       purpose: draft.body.trim(),
-      expectedOutput: '在当前 Camp 公共上下文中给出完整、可追溯的回复。',
+      expectedOutput: '通过 `rovai send` 在当前 Camp 公共上下文中给出完整、可追溯的回复；Runtime 最终文本不会自动发布。',
       completionRole: 'required'
     }
   }

@@ -2,7 +2,7 @@
 document_type: runtime-activity-mapping-registry
 authority: runtime-activity-mapping-catalog
 classifier_version: activity-v1
-last_updated: 2026-08-05
+last_updated: 2026-08-11
 ---
 
 # Runtime Activity Mapping Registry
@@ -78,6 +78,7 @@ Core-verified Activity，不会反推出其它内部步骤。
 
 - Core Action ID → Runtime native ID → Evidence ID；
 - 只有相同 operationId 合并；
+- lifecycle completion 可以只报告 identity/status；这类稀疏更新只推进 phase/outcome，不得用 Evidence-kind fallback 覆盖同一 operation 已报告的结构化 domain、semantic kind 或 title；
 - terminal 冲突为 `unsettled`；
 - 无结构化工具名时显示 presentation hint 或 activity-domain fallback，不伪造函数名；
 - title、命令字符串、provider 和 Runtime 名称永远不决定 domain 或 identity。

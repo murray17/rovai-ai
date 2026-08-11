@@ -3,7 +3,7 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-08-10
+last_updated: 2026-08-11
 ---
 
 # Built-in Tool Runtime Architecture
@@ -190,6 +190,8 @@ Session Charter 只说明：
 - 使用 bundled `rovai`；
 - 固定业务命令和 `<command> --help`；
 - `camp.message.send` 使用当前 Run Camp，不能传入 Camp ID；
+- 对 `explicit_send_only` Runtime，narration/final response 只是私有执行证据；当前责任需要在 Camp
+  公开 answer/result/status/summary 时必须在结束前调用 `rovai send`，只有成功 send 才发布该回复；
 - Task responsibility definition belongs to the User or current Camp Default Lead；
 - Public Message、Message Delivery、Memory 和 read 工具保持各自稳定业务原则；
 - Dynamic Context 可能截断或省略：单条正文只使用可直接提交给 canonical operation schema 的
@@ -224,7 +226,10 @@ failure 或 `delivery_unknown` 都不能替代它。各层不得通过复制完�
 
 ### Self Identity 与 Peer Routing Identity
 
-Bootstrap v3 按固定顺序组装 Session Charter、`MEMBER_IDENTITY` 和 Memory Entrypoint。
+Bootstrap v3 按固定顺序组装 Session Charter、`MEMBER_IDENTITY` 和 Memory Entrypoint。Session
+Charter contract v2 将显式公共输出义务纳入稳定 Charter；Native Binding compatibility digest 包含
+该合同轴，因此新 Run 不得 Resume 仍冻结旧 Charter 的 Session，而是创建新 Binding generation。
+既有 Run 与 Bootstrap Evidence 不回写。
 `MEMBER_IDENTITY` 是该 Native Session 唯一的 self identity，包含最新已提交的完整六字段；它只在
 既有 eligible Bootstrap boundary 原子读取，不进入 AgentRun Dynamic Context，不持久化 Identity
 Blob、snapshot、digest 或 history。身份编辑不轮换 Session，也不构造下一 Run 的 patch。

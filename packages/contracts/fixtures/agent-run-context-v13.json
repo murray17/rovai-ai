@@ -1,5 +1,6 @@
 {
   "nativeSessionBootstrap": "native_session_bootstrap_v3",
+  "sessionCharterContractVersion": 2,
   "bootstrapFormatterVersion": 3,
   "agentRunContextFormatterVersion": 13,
   "contextManifestVersion": 11,
