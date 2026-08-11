@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: local-development-troubleshooting
-last_updated: 2026-07-30
+last_updated: 2026-08-11
 ---
 
 # 常见问题排查
@@ -15,18 +15,36 @@ pnpm core:build:debug
 ```
 
 确认 `resources/bin/rovai-core` 的修改时间已更新，再重新启动 `pnpm dev`。开发窗口已经
-运行时，重新复制二进制不会替换现有 Core 进程。
+运行时，重新复制二进制不会替换现有 Core 进程。不要改用裸 `electron-vite dev`；标准入口还负责
+隔离开发 `userData` 和拒绝重复开发实例。
 
 ## 打包后仍看到旧行为
 
-确认打包命令成功结束，并彻底退出旧 App：
+确认打包命令成功结束，并使用独立 `userData` 启动新产物：
 
 ```bash
 pnpm package:mac
-open "$(pwd)/dist/mac-arm64/Rovai-ai.app"
+ROVAI_APP="$(pwd)/dist/mac-arm64/Rovai-ai.app"
+FIXTURE_ROOT="$(mktemp -d)"
+ROVAI_ALLOW_ISOLATED_INSTANCE=1 \
+"$ROVAI_APP/Contents/MacOS/Rovai-ai" \
+  --user-data-dir="$FIXTURE_ROOT/user-data"
 ```
 
 可按[打包文档](packaging.md)比较 release Core 与 App 内 Core 的 Mach-O UUID。
+
+## 日常 App 正在从 `dist/` 运行
+
+这是开发/日常通道混用，不是支持的安装方式。先停止新的构建和 Runtime 投递，确认目标工作区没有
+未结副作用，再彻底退出该 App。完成隔离验收后，由用户显式把确认过的 `.app` 安装到仓库外位置；
+开发循环继续使用 `pnpm dev`，打包产物继续使用临时 `userData`。不要在 App 运行时移动或覆盖 bundle。
+
+## 投递期间出现 startup recovery 或 `delivery_unknown`
+
+先检查是否存在两个 Core 共享同一数据目录，或是否有开发/验收命令误用了日常 `userData`。只读检查
+进程和事件；不要为读取数据再启动一份 Core。若输入已经 `prepared` 但没有 accepted ACK，Runtime
+可能已经执行，不能用普通 Retry 假定“未投递”。先检查 Native Session、目标工作区副作用和事件时序，
+再按恢复合同处理。
 
 ## Runtime 未找到或未 Ready
 

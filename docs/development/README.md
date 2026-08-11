@@ -1,7 +1,7 @@
 ---
 document_type: development-index
 authority: development-routing
-last_updated: 2026-08-09
+last_updated: 2026-08-11
 ---
 
 # Rovai-ai 开发者指南
@@ -12,6 +12,9 @@ last_updated: 2026-08-09
 
 ## 快速开始
 
+先阅读[本地开发与 App 隔离流程](local-workflow.md)。日常使用的 `.app` 必须安装在仓库外；
+`dist/` 只是可覆盖的打包产物。开发、打包验收和自动测试都不得共享日常 `userData`。
+
 在仓库根目录安装锁定依赖并启动开发版桌面应用：
 
 ```bash
@@ -21,7 +24,8 @@ pnpm dev
 
 `pnpm dev` 会构建 Debug 版 `rovai-core` 与 bundled `rovai` Agent CLI、复制到
 `resources/bin/`，再构建 macOS 文件面板原生预热器到 `resources/native/`，然后启动
-Electron Vite 开发环境。
+Electron Vite 开发环境。该入口通过 `scripts/dev-desktop.mjs` 自动传入隔离 `userData`、拒绝日常
+数据目录并锁定单一开发实例；不要直接运行 `electron-vite dev` 绕过它。
 
 只重新构建 Debug Core：
 
@@ -80,6 +84,7 @@ pnpm build:desktop
 
 | 任务 | 文档 |
 | --- | --- |
+| 启动开发 App、运行打包产物或区分日常/开发数据 | [本地开发与 App 隔离流程](local-workflow.md) |
 | 判断主机、Node、pnpm、Rust、Git 或 Runtime 前置条件 | [开发环境与依赖](environment.md) |
 | 选择单元测试、集成测试、Smoke 或版本验收命令 | [测试与 Smoke Test](testing.md) |
 | 构建 Release Core、App、DMG，检查签名 | [macOS 构建与打包](packaging.md) |

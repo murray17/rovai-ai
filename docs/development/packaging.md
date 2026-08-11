@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: macos-build-and-packaging
-last_updated: 2026-08-09
+last_updated: 2026-08-11
 ---
 
 # macOS 构建、签名与打包
@@ -65,16 +65,23 @@ codesign --verify --strict \
 正式分发需要独立配置 Developer ID、Hardened Runtime entitlement 和 Apple
 Notarization 凭据，并验证公证结果。不要把证书、密码或 notarization 凭据写入仓库。
 
-## 运行打包 App
+## 隔离运行打包 App
 
-从仓库根目录启动：
+`dist/mac-arm64/Rovai-ai.app` 是可被下次打包覆盖的生成产物，不得作为日常安装版运行。日常 App
+必须位于仓库外；完整边界见[本地开发与 App 隔离流程](local-workflow.md)。
+
+从仓库根目录运行刚生成的 App 时，显式创建隔离 `userData`：
 
 ```bash
-open "$(pwd)/dist/mac-arm64/Rovai-ai.app"
+ROVAI_APP="$(pwd)/dist/mac-arm64/Rovai-ai.app"
+FIXTURE_ROOT="$(mktemp -d)"
+ROVAI_ALLOW_ISOLATED_INSTANCE=1 \
+"$ROVAI_APP/Contents/MacOS/Rovai-ai" \
+  --user-data-dir="$FIXTURE_ROOT/user-data"
 ```
 
-如果刚完成重新打包，先彻底退出旧的 Rovai-ai 进程再打开新 App；已运行进程不会自动
-切换到新 bundle。
+如果刚完成重新打包，正在运行的旧进程不会自动切换到新 bundle。不要通过打开 `dist` 覆盖日常
+进程；只停止本次隔离验收实例后，再用新的隔离目录启动。
 
 打包 App 自身不要求系统安装 Node.js、pnpm 或 Rust。普通启动也不要求九个 Runtime
 全部存在。只有实际启动对应 AgentRun 时，才要求所选 Runtime 已安装、认证且探测
