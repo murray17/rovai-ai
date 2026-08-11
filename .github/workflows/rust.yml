@@ -16,24 +16,6 @@ on:
       - ".rustfmt.toml"
       - "clippy.toml"
       - ".clippy.toml"
-  push:
-    branches:
-      - main
-    paths:
-      - "**/*.rs"
-      - "Cargo.toml"
-      - "**/Cargo.toml"
-      - "Cargo.lock"
-      - "**/Cargo.lock"
-      - ".cargo/**"
-      - "**/.cargo/**"
-      - "rust-toolchain"
-      - "rust-toolchain.toml"
-      - "rustfmt.toml"
-      - ".rustfmt.toml"
-      - "clippy.toml"
-      - ".clippy.toml"
-
 permissions:
   contents: read
 

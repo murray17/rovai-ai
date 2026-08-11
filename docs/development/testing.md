@@ -49,15 +49,15 @@ Main 专属模块由 staged `src/main.rs` 声明、但未由 staged `src/lib.rs`
 脚本使用 NUL 分隔读取路径以支持空格等合法文件名；Git 读取、模块解析或分类失败都会 fail closed
 到全量测试，不会静默跳过。
 
-### 完整 push / PR 验证
+### 完整 PR 验证
 
 ```bash
 pnpm test:rust:full
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-`.github/workflows/rust.yml` 在 pull request 以及 push 到 `main` 时，对 Rust 源码、Cargo 文件和
-Rust 构建/lint 配置改动执行：
+`.github/workflows/rust.yml` 在 pull request 时，对 Rust 源码、Cargo 文件和 Rust 构建/lint
+配置改动执行：
 
 ```bash
 cargo fmt --all --check

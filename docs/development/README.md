@@ -66,8 +66,8 @@ pnpm test:rust:full
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-Rust CI 还会执行 `cargo fmt --all --check`，并在 pull request 及 push 到 `main` 时保留完整
-测试和 Clippy 覆盖。涉及桌面构建或跨边界改动时继续运行：
+Rust CI 还会执行 `cargo fmt --all --check`，并在 pull request 时保留完整测试和
+Clippy 覆盖。涉及桌面构建或跨边界改动时继续运行：
 
 ```bash
 pnpm build:desktop
