@@ -14,6 +14,7 @@ import type {
 import { MemberAvatar } from './MemberAvatar'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { localizeExecutionEngineTerms } from './product-copy'
+import { identityColorToken } from './theme'
 
 type ImportTab = 'local' | 'github'
 type SkillRowOperation = 'toggle' | 'groups'
@@ -291,7 +292,7 @@ export function SkillSettings(): React.JSX.Element {
           <div className="skill-card-grid">
             <div className="skill-library-columns" aria-hidden="true">
               <span />
-              <span>Skill / 来源</span>
+              <span>Skill</span>
               <div><span>投递范围</span><span>状态</span><span>查看</span></div>
             </div>
             {visibleSkills.map((skill) => (
@@ -360,19 +361,16 @@ export function SkillCard({
       className={`skill-card ${!skill.enabled ? 'is-disabled' : ''} ${deleting ? 'is-deleting' : ''} ${detailsOpen ? 'is-expanded' : ''}`}
       data-skill-name={skill.name}
       aria-busy={rowBusy}
+      style={{ '--skill-identity': identityColorToken(skill.id) } as React.CSSProperties}
     >
       <div className="skill-card-primary">
-        <span className={`skill-card-mark source-${source.kind}`} aria-hidden="true">{skillMark(skill.name)}</span>
+        <span className="skill-card-mark" aria-hidden="true">{skillMark(skill.name)}</span>
         <div className="skill-card-heading">
           <div className="skill-card-title">
             <strong title={skill.name}>{skill.name}</strong>
-            <span className={`skill-source source-${source.kind}`}>
-              {source.kind === 'third-party' && <SourceBranchIcon />}
-              {source.badgeLabel}
-            </span>
+            <span className={`skill-source source-${source.kind}`}>{source.badgeLabel}</span>
           </div>
           <p>{skill.currentRevision.description || '未提供说明。'}</p>
-          <SkillProvenance source={source} />
           {deleting && <span className="skill-deleting-note">等待现有执行释放后删除</span>}
         </div>
         <div className="skill-card-controls">
@@ -388,11 +386,13 @@ export function SkillCard({
             type="button"
             role="switch"
             aria-checked={skill.enabled}
-            aria-label={`${skill.enabled ? '停用' : '启用'} ${skill.name}`}
+            aria-label={operation === 'toggle'
+              ? `正在保存 ${skill.name}`
+              : `${skill.enabled ? '停用' : '启用'} ${skill.name}`}
             disabled={rowBusy || deleting}
             onClick={onToggleEnabled}
           >
-            <span aria-hidden="true" /><b>{operation === 'toggle' ? '保存中…' : skill.enabled ? '已启用' : '已停用'}</b>
+            <span aria-hidden="true" />
           </button>
           <button
             className="skill-detail-button"
@@ -406,7 +406,8 @@ export function SkillCard({
         </div>
       </div>
       <div className="skill-card-details" id={detailsId} hidden={!detailsOpen}>
-        <DetailFact label="Revision" value={`r${skill.currentRevision.revision}`} mono />
+        <SkillDetailSource source={source} />
+        <DetailFact label="Library Revision" value={`r${skill.currentRevision.revision}`} mono />
         <DetailFact
           label={skill.currentRevision.sourceType === 'bundled' ? '安装时间' : '更新时间'}
           value={formatTimestamp(skill.currentRevision.installedAt)}
@@ -461,7 +462,7 @@ function skillMark(name: string): string {
 
 export type SkillSourcePresentation = {
   kind: 'bundled' | 'third-party' | 'imported'
-  badgeLabel: 'Rovai 内置' | 'GitHub 三方' | '用户导入'
+  badgeLabel: 'Rovai' | 'GitHub' | '用户导入'
   sourceLabel: string
   repositoryUrl: string | null
   repositoryLabel: string | null
@@ -480,7 +481,7 @@ export function skillSourcePresentation(skill: SkillView): SkillSourcePresentati
     if (repository && revision) {
       return {
         kind: 'third-party',
-        badgeLabel: 'GitHub 三方',
+        badgeLabel: 'GitHub',
         sourceLabel: '固定上游副本',
         repositoryUrl: repository.url,
         repositoryLabel: repository.label,
@@ -490,7 +491,7 @@ export function skillSourcePresentation(skill: SkillView): SkillSourcePresentati
     }
     return {
       kind: 'bundled',
-      badgeLabel: 'Rovai 内置',
+      badgeLabel: 'Rovai',
       sourceLabel: '随 Rovai 安装',
       repositoryUrl: null,
       repositoryLabel: null,
@@ -529,25 +530,27 @@ function skillSearchText(skill: SkillView): string {
   ].filter(Boolean).join('\n')
 }
 
-function SkillProvenance({ source }: { source: SkillSourcePresentation }): React.JSX.Element {
+function SkillDetailSource({ source }: { source: SkillSourcePresentation }): React.JSX.Element {
   return (
-    <div className="skill-card-provenance">
-      <span className="skill-provenance-label">来源</span>
+    <div className="skill-detail-fact skill-detail-source">
+      <span>来源</span>
       {source.repositoryUrl && source.repositoryLabel
         ? (
-          <a
-            className="skill-source-link"
-            href={source.repositoryUrl}
-            target="_blank"
-            rel="noreferrer"
-            aria-label={`${source.repositoryLabel}，在浏览器打开`}
-          >
-            <span>{source.repositoryLabel}</span><ExternalLinkIcon />
-          </a>
+          <div className="skill-detail-source-value">
+            <a
+              className="skill-source-link"
+              href={source.repositoryUrl}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`${source.repositoryLabel}，在浏览器打开`}
+            >
+              <span>{source.repositoryLabel}</span><ExternalLinkIcon />
+            </a>
+            <span aria-hidden="true">·</span>
+            <code className="skill-detail-source-revision">{source.revisionLabel}</code>
+          </div>
           )
-        : <span>{source.sourceLabel}</span>}
-      <span aria-hidden="true">·</span>
-      <code className="skill-provenance-revision">{source.revisionLabel}</code>
+        : <strong>{source.sourceLabel}</strong>}
     </div>
   )
 }
@@ -736,10 +739,6 @@ function ConfirmationDialog({ confirmation, busy, onClose, onConfirm }: {
 
 function SearchIcon(): React.JSX.Element {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" /></svg>
-}
-
-function SourceBranchIcon(): React.JSX.Element {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M7 7h7a3 3 0 0 1 3 3v7M7 7l3-3M7 7l3 3M17 17l-3-3M17 17l-3 3" /></svg>
 }
 
 function ExternalLinkIcon(): React.JSX.Element {

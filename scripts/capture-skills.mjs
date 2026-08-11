@@ -17,12 +17,18 @@ const userDataDir = process.env.ROVAI_CAPTURE_USER_DATA_DIR
 const port = Number(process.env.ROVAI_DEBUG_PORT ?? 9443)
 const width = Number(process.env.ROVAI_CAPTURE_WIDTH ?? 1440)
 const height = Number(process.env.ROVAI_CAPTURE_HEIGHT ?? 920)
+const zoomFactor = Number(process.env.ROVAI_CAPTURE_ZOOM_FACTOR ?? 1)
+const cssWidth = Math.round(width / zoomFactor)
+const cssHeight = Math.round(height / zoomFactor)
 const theme = process.env.ROVAI_CAPTURE_THEME ?? 'day'
 
 if (!appPath || !userDataDir) {
   throw new Error('Usage: ROVAI_CAPTURE_USER_DATA_DIR=<data> node scripts/capture-skills.mjs <Rovai-ai.app> [output.png]')
 }
 if (!['day', 'night'].includes(theme)) throw new Error(`Unknown ROVAI_CAPTURE_THEME: ${theme}`)
+if (!Number.isFinite(zoomFactor) || zoomFactor <= 0) {
+  throw new Error(`ROVAI_CAPTURE_ZOOM_FACTOR must be greater than zero: ${zoomFactor}`)
+}
 
 const executable = join(appPath, 'Contents', 'MacOS', 'Rovai-ai')
 const app = spawn(executable, [
@@ -40,11 +46,20 @@ try {
   const cdp = await connectCdp(target.webSocketDebuggerUrl)
   await cdp.send('Page.bringToFront')
   await cdp.send('Emulation.setDeviceMetricsOverride', {
-    width,
-    height,
-    deviceScaleFactor: 1,
-    mobile: false
+    width: cssWidth,
+    height: cssHeight,
+    deviceScaleFactor: zoomFactor,
+    mobile: false,
+    screenWidth: width,
+    screenHeight: height
   })
+  await waitForExpression(
+    cdp,
+    `window.innerWidth === ${cssWidth}
+      && window.innerHeight === ${cssHeight}
+      && Math.abs(window.devicePixelRatio - ${zoomFactor}) < 0.01`,
+    5_000
+  )
   await waitForExpression(cdp, `Boolean(document.querySelector('.unified-sidebar-footer button[aria-label="设置"]'))`, 45_000)
   await waitForExpression(cdp, `document.querySelector('.startup-gate') === null`, 45_000)
   await cdp.send('Runtime.evaluate', {
@@ -104,10 +119,28 @@ try {
   await openSection(cdp, 'Skill')
   await waitForExpression(cdp, `Boolean(document.querySelector('.skill-card'))`, 5_000)
 
-  const result = await evaluate(cdp, `(() => {
+  const result = await evaluate(cdp, `(async () => {
     const subnavButtons = [...document.querySelectorAll('.settings-sidebar-menu button')]
     const active = document.querySelector('.settings-sidebar-menu button.active')
     const skillCards = [...document.querySelectorAll('.skill-card')]
+    const skillViews = await window.rovai.request('skills.list')
+    const skillViewByName = new Map(skillViews.map((skill) => [skill.name, skill]))
+    const identityColorIndex = (identityId) => {
+      let hash = 0x811c9dc5
+      for (const character of identityId) {
+        hash ^= character.codePointAt(0) ?? 0
+        hash = Math.imul(hash, 0x01000193)
+      }
+      return (hash >>> 0) % 8 + 1
+    }
+    const resolveColorToken = (token) => {
+      const probe = document.createElement('span')
+      probe.style.color = 'var(' + token + ')'
+      document.body.append(probe)
+      const color = getComputedStyle(probe).color
+      probe.remove()
+      return color
+    }
     const bundled = skillCards.filter((card) => card.querySelector('.skill-source.source-bundled'))
     const thirdParty = skillCards.filter((card) => card.querySelector('.skill-source.source-third-party'))
     const official = [...bundled, ...thirdParty]
@@ -116,15 +149,46 @@ try {
     )
     const tastefulUi = skillCards.find((card) => card.dataset.skillName === 'tasteful-ui')
     const panel = document.querySelector('.settings-panel')
+    const cardMetrics = skillCards.map((card) => {
+      const skill = skillViewByName.get(card.dataset.skillName)
+      const mark = card.querySelector('.skill-card-mark')
+      const title = card.querySelector('.skill-card-title > strong')
+      const description = card.querySelector('.skill-card-heading > p')
+      const source = card.querySelector('.skill-source')
+      const toggle = card.querySelector('.skill-toggle')
+      const knob = toggle?.querySelector('span')
+      const details = card.querySelector('.skill-card-details')
+      const toggleRect = toggle?.getBoundingClientRect()
+      return {
+        name: card.dataset.skillName,
+        identityToken: card.style.getPropertyValue('--skill-identity').trim(),
+        expectedIdentityToken: skill ? 'var(--identity-' + identityColorIndex(skill.id) + ')' : null,
+        markColor: mark ? getComputedStyle(mark).color : null,
+        titleFontSize: title ? getComputedStyle(title).fontSize : null,
+        descriptionFontSize: description ? getComputedStyle(description).fontSize : null,
+        sourceFontSize: source ? getComputedStyle(source).fontSize : null,
+        sourceBadge: source?.textContent?.trim(),
+        switchText: toggle?.textContent?.trim(),
+        switchWidth: toggleRect?.width,
+        switchHeight: toggleRect?.height,
+        switchBorderColor: toggle ? getComputedStyle(toggle).borderColor : null,
+        switchBackgroundColor: toggle ? getComputedStyle(toggle).backgroundColor : null,
+        switchKnobColor: knob ? getComputedStyle(knob).backgroundColor : null,
+        detailsRailColor: details ? getComputedStyle(details).borderLeftColor : null,
+        detailsBackgroundColor: details ? getComputedStyle(details).backgroundColor : null
+      }
+    })
     return {
       theme: document.documentElement.dataset.theme,
       viewport: { width: window.innerWidth, height: window.innerHeight },
+      devicePixelRatio: window.devicePixelRatio,
       horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth,
       panelOverflow: panel ? panel.scrollWidth > panel.clientWidth : true,
       subnav: subnavButtons.map((button) => button.querySelector('strong')?.textContent?.trim()),
       activeSection: active?.querySelector('strong')?.textContent?.trim(),
       skillNames: skillCards.map((card) => card.querySelector('.skill-card-title > strong')?.textContent?.trim()),
       bundledCount: bundled.length,
+      bundledBadges: bundled.map((card) => card.querySelector('.skill-source')?.textContent?.trim()),
       thirdPartyCount: thirdParty.length,
       enabledOfficialCount: official.filter((card) =>
         card.querySelector('[role="switch"]')?.getAttribute('aria-checked') === 'true'
@@ -133,28 +197,64 @@ try {
       operationColumns: [...document.querySelectorAll('.skill-library-columns > div > span')]
         .map((column) => column.textContent?.trim()),
       legacyMoreButtonCount: document.querySelectorAll('.skill-more-button').length,
+      primaryProvenanceCount: document.querySelectorAll('.skill-card-primary .skill-card-provenance, .skill-card-primary .skill-source-link').length,
+      cardMetrics,
+      steelColors: {
+        brand: resolveColorToken('--brand'),
+        brandSoft: resolveColorToken('--brand-soft')
+      },
       tastefulUiSource: {
         badge: tastefulUi?.querySelector('.skill-source')?.textContent?.trim(),
-        repository: tastefulUi?.querySelector('.skill-source-link')?.textContent?.trim(),
-        href: tastefulUi?.querySelector('.skill-source-link')?.getAttribute('href'),
-        revision: tastefulUi?.querySelector('.skill-provenance-revision')?.textContent?.trim()
+        repository: tastefulUi?.querySelector('.skill-detail-source .skill-source-link')?.textContent?.trim(),
+        href: tastefulUi?.querySelector('.skill-detail-source .skill-source-link')?.getAttribute('href'),
+        revision: tastefulUi?.querySelector('.skill-detail-source-revision')?.textContent?.trim(),
+        primaryRepository: tastefulUi?.querySelector('.skill-card-primary .skill-source-link')?.textContent?.trim() ?? null
       },
       importButton: [...document.querySelectorAll('.skill-settings button')]
         .some((button) => button.textContent?.trim() === '选择文件夹'),
       projectionStatusVisible: document.querySelector('.skill-settings')?.textContent?.includes('项目投影状态'),
       legacyOfficialVisible: document.querySelector('.skill-settings')?.textContent?.includes('Rovai 官方'),
-      loadingVisible: document.querySelector('.skill-settings')?.textContent?.includes('正在读取 Skill Library')
+      loadingVisible: document.querySelector('.skill-settings')?.textContent?.includes('正在读取 Skill Library'),
+      legacyLongSourceLabelVisible: skillCards.some((card) => {
+        const badge = card.querySelector('.skill-source')?.textContent?.trim()
+        return badge === 'Rovai 内置' || badge === 'GitHub 三方'
+      })
     }
   })()`)
 
+  const identityTokensValid = result.cardMetrics.every((card) =>
+    /^var\(--identity-[1-8]\)$/.test(card.identityToken)
+      && card.identityToken === card.expectedIdentityToken
+  )
+  const readableSkillType = result.cardMetrics.every((card) =>
+    card.titleFontSize === '14px'
+      && card.descriptionFontSize === '12.5px'
+      && card.sourceFontSize === '10.5px'
+  )
+  const switchesValid = result.cardMetrics.every((card) =>
+    card.switchText === ''
+      && Math.abs(card.switchWidth - 34) < 0.1
+      && Math.abs(card.switchHeight - 20) < 0.1
+      && card.switchBorderColor === result.steelColors.brand
+      && card.switchBackgroundColor === result.steelColors.brandSoft
+      && card.switchKnobColor === result.steelColors.brand
+  )
+  const detailStyles = new Set(result.cardMetrics.map((card) =>
+    `${card.detailsRailColor}|${card.detailsBackgroundColor}`
+  ))
+  const detailsStayNeutral = detailStyles.size === 1
+    && result.cardMetrics.every((card) => card.detailsRailColor !== card.markColor)
+
   if (result.theme !== 'day'
-      || result.viewport.width !== width
-      || result.viewport.height !== height
+      || result.viewport.width !== cssWidth
+      || result.viewport.height !== cssHeight
+      || result.devicePixelRatio !== zoomFactor
       || result.horizontalOverflow
       || result.panelOverflow
       || JSON.stringify(result.subnav) !== JSON.stringify(['通用', '外观', '通知', 'Skill', 'MCP', 'Agent 运行时', '诊断与修复'])
       || result.activeSection !== 'Skill'
       || result.bundledCount !== 5
+      || !result.bundledBadges.every((badge) => badge === 'Rovai')
       || result.thirdPartyCount !== 1
       || result.enabledOfficialCount !== 6
       || JSON.stringify(result.skillNames) !== JSON.stringify([
@@ -167,13 +267,20 @@ try {
       ])
       || JSON.stringify(result.operationColumns) !== JSON.stringify(['投递范围', '状态', '查看'])
       || result.legacyMoreButtonCount !== 0
-      || result.tastefulUiSource.badge !== 'GitHub 三方'
+      || result.primaryProvenanceCount !== 0
+      || !identityTokensValid
+      || !readableSkillType
+      || !switchesValid
+      || !detailsStayNeutral
+      || result.tastefulUiSource.badge !== 'GitHub'
       || result.tastefulUiSource.repository !== 'DonkeyKing01/tasteful-ui-skill'
       || result.tastefulUiSource.href !== 'https://github.com/DonkeyKing01/tasteful-ui-skill'
       || result.tastefulUiSource.revision !== '159ccd47'
+      || result.tastefulUiSource.primaryRepository !== null
       || !result.importButton
       || result.projectionStatusVisible
       || result.legacyOfficialVisible
+      || result.legacyLongSourceLabelVisible
       || result.loadingVisible) {
     throw new Error(`Skill settings acceptance failed: ${JSON.stringify(result)}`)
   }
@@ -186,6 +293,9 @@ try {
     return {
       expanded: card?.querySelector('.skill-detail-button')?.getAttribute('aria-expanded'),
       hasRevision: details?.textContent?.includes('Revision'),
+      sourceLabel: details?.querySelector('.skill-detail-source > span')?.textContent?.trim(),
+      sourceRepository: details?.querySelector('.skill-source-link')?.textContent?.trim(),
+      sourceRevision: details?.querySelector('.skill-detail-source-revision')?.textContent?.trim(),
       hasContentDigest: details?.textContent?.includes('内容摘要'),
       explainsPinnedCopy: details?.textContent?.includes('不会随上游自动更新'),
       deleteVisible: details?.textContent?.includes('删除 Skill')
@@ -193,6 +303,9 @@ try {
   })()`)
   if (detailsPanel.expanded !== 'true'
       || !detailsPanel.hasRevision
+      || detailsPanel.sourceLabel !== '来源'
+      || detailsPanel.sourceRepository !== 'DonkeyKing01/tasteful-ui-skill'
+      || detailsPanel.sourceRevision !== '159ccd47'
       || !detailsPanel.hasContentDigest
       || !detailsPanel.explainsPinnedCopy
       || detailsPanel.deleteVisible) {
@@ -299,13 +412,23 @@ async function openSection(cdp, label) {
 }
 
 async function clickElement(cdp, selector) {
-  const rect = await evaluate(cdp, `(() => {
+  const rect = await evaluate(cdp, `(async () => {
     const element = document.querySelector(${JSON.stringify(selector)})
     if (!element) return null
+    element.scrollIntoView({ block: 'center', inline: 'nearest' })
+    await new Promise((resolveFrame) => requestAnimationFrame(() => requestAnimationFrame(resolveFrame)))
     const bounds = element.getBoundingClientRect()
-    return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 }
+    return {
+      x: bounds.left + bounds.width / 2,
+      y: bounds.top + bounds.height / 2,
+      visible: bounds.top >= 0
+        && bounds.left >= 0
+        && bounds.bottom <= window.innerHeight
+        && bounds.right <= window.innerWidth
+    }
   })()`)
   if (!rect) throw new Error(`Element was unavailable: ${selector}`)
+  if (!rect.visible) throw new Error(`Element did not scroll into the viewport: ${selector}`)
   await cdp.send('Input.dispatchMouseEvent', {
     type: 'mousePressed',
     x: rect.x,
