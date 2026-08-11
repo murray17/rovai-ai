@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="zh-CN" data-variant="neutral">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rovai AI · Steel × Porcelain Gray Study</title>
+<style>
+:root{
+  color-scheme:light;
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Segoe UI",sans-serif;
+  --sidebar-w:270px;
+  --control-h:76px;
+
+  --canvas:#eceeef;--surface:#fbfbfa;--surface-2:#f0f2f4;--surface-3:#e7eaed;
+  --ink:#171b20;--muted:#616a73;--faint:#8a949d;--line:#dfe4e8;--line-strong:#cdd5dc;
+  --brand:#4f6f91;--brand-strong:#3d5874;--brand-soft:#e9eef3;--brand-ink:#405f7e;--brand-accent:#8ea9c0;
+  --success:#28745f;--warning:#8b651f;--danger:#a8494b;
+
+  --sidebar-bg:#f3f4f4;--sidebar-panel:#fafbfb;--sidebar-text:#2b3238;--sidebar-secondary:#626b72;
+  --sidebar-icon:#737d84;--sidebar-hover:#e8eaea;--sidebar-active:#e9ecee;--sidebar-indicator:#526f88;
+  --sidebar-divider:#dadde0;--sidebar-focus:#526f88;
+}
+
+html[data-variant="original"]{
+  --sidebar-bg:#f2f5f7;--sidebar-panel:#fafcfd;--sidebar-text:#27333d;--sidebar-secondary:#536471;
+  --sidebar-icon:#647783;--sidebar-hover:#e4eaf0;--sidebar-active:#e8edf2;--sidebar-indicator:#476a89;
+  --sidebar-divider:#d5dee5;--sidebar-focus:#476a89;
+}
+html[data-variant="fog"]{
+  --sidebar-bg:#f3f4f5;--sidebar-panel:#fafbfc;--sidebar-text:#293239;--sidebar-secondary:#5b6870;
+  --sidebar-icon:#6c7880;--sidebar-hover:#e7e9eb;--sidebar-active:#e9ecee;--sidebar-indicator:#4f6e89;
+  --sidebar-divider:#d8dde1;--sidebar-focus:#4f6e89;
+}
+html[data-variant="neutral"]{
+  --sidebar-bg:#f3f4f4;--sidebar-panel:#fafbfb;--sidebar-text:#2b3238;--sidebar-secondary:#626b72;
+  --sidebar-icon:#737d84;--sidebar-hover:#e8eaea;--sidebar-active:#e9ecee;--sidebar-indicator:#526f88;
+  --sidebar-divider:#dadde0;--sidebar-focus:#526f88;
+}
+html[data-variant="ash"]{
+  --sidebar-bg:#f2f3f3;--sidebar-panel:#fafafa;--sidebar-text:#2d3236;--sidebar-secondary:#666d72;
+  --sidebar-icon:#777e83;--sidebar-hover:#e6e8e8;--sidebar-active:#e8e9ea;--sidebar-indicator:#567087;
+  --sidebar-divider:#d7dadc;--sidebar-focus:#567087;
+}
+html[data-variant="stone"]{
+  --sidebar-bg:#f4f3f2;--sidebar-panel:#fbfaf9;--sidebar-text:#302f2e;--sidebar-secondary:#6c6864;
+  --sidebar-icon:#7d7771;--sidebar-hover:#e9e7e5;--sidebar-active:#ebe9e7;--sidebar-indicator:#5c7183;
+  --sidebar-divider:#ddd9d6;--sidebar-focus:#5c7183;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%}
+body{overflow:hidden;background:var(--canvas);color:var(--ink);font-size:13px}
+button,input,select{font:inherit} button{color:inherit}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--sidebar-focus);outline-offset:2px}
+
+.controls{
+  height:var(--control-h);display:flex;align-items:center;gap:16px;padding:0 18px;color:#c9d0d8;
+  background:#12161b;border-bottom:1px solid #282e35
+}
+.controls-brand{min-width:220px}.controls-brand strong{display:block;color:#fff;font-size:12px}.controls-brand small{color:#6f7b89;font:700 8px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em}
+.variant-group{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.control-label{margin-right:2px;color:#697481;font:700 7.5px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.1em;text-transform:uppercase}
+.variant-btn{position:relative;height:38px;min-width:92px;padding:0 10px;border:1px solid #303741;border-radius:7px;color:#9ba6b3;background:#1a1f25;cursor:pointer;text-align:left}
+.variant-btn:hover{color:#fff;border-color:#454e59}.variant-btn.active{color:#fff;border-color:#66727f;background:#282f37}.variant-btn strong{display:block;font-size:8.8px}.variant-btn small{display:block;margin-top:2px;color:#677380;font-size:7.2px}.variant-btn.active small{color:#9eabb8}
+.recommend{position:absolute;top:-7px;right:5px;padding:2px 5px;border-radius:999px;color:#dce7ef;background:#405f7e;font:700 6.7px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.04em}
+.research-badge{margin-left:auto;padding:5px 8px;border:1px solid #303741;border-radius:999px;color:#83909d;background:#171c22;font:650 8px/1 ui-monospace,SFMono-Regular,Menlo,monospace}
+
+.app{height:calc(100vh - var(--control-h));display:grid;grid-template-columns:var(--sidebar-w) minmax(0,1fr)}
+.sidebar{min-height:0;display:flex;flex-direction:column;color:var(--sidebar-text);background:var(--sidebar-bg);border-right:1px solid var(--sidebar-divider);transition:background .16s ease,border-color .16s ease,color .16s ease}
+.sidebar-drag{height:23px;flex:0 0 23px}.sidebar-brand{display:flex;min-height:48px;align-items:center;gap:9px;padding:0 14px 11px;border-bottom:1px solid color-mix(in srgb,var(--sidebar-divider) 72%,transparent)}
+.logo{display:grid;width:29px;height:29px;place-items:center;border-radius:7px;color:var(--brand-ink);background:var(--brand-soft);border:1px solid color-mix(in srgb,var(--brand) 12%,transparent);font-size:14px;font-weight:900}
+.sidebar-brand strong{font-size:13px;letter-spacing:-.02em}.sidebar-brand small{display:block;margin-top:1px;color:var(--sidebar-secondary);font-size:7.8px}.bell{display:grid;width:29px;height:29px;place-items:center;margin-left:auto;border:0;border-radius:6px;color:var(--sidebar-icon);background:transparent;cursor:pointer}.bell:hover{color:var(--sidebar-text);background:var(--sidebar-hover)}
+.back{display:flex;min-height:34px;align-items:center;gap:8px;margin:10px 10px 0;padding:0 8px;border:0;border-radius:6px;color:var(--sidebar-secondary);background:transparent;cursor:pointer;text-align:left}.back:hover{color:var(--sidebar-text);background:var(--sidebar-hover)}.back span:first-child{font-size:13px}.back strong{font-size:9px}
+.settings-title{padding:14px 18px 8px}.settings-title strong{display:block;font-size:18px;letter-spacing:-.035em}.settings-title small{display:block;margin-top:3px;color:var(--sidebar-secondary);font-size:8px}
+.nav-scroll{min-height:0;flex:1;overflow:auto;padding:1px 9px 12px;scrollbar-width:thin}.nav-group{padding-top:11px}.nav-group-title{padding:0 9px 5px;color:var(--sidebar-secondary);font:750 7.5px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;text-transform:uppercase}
+.nav-item{position:relative;display:grid;width:100%;min-height:36px;grid-template-columns:20px minmax(0,1fr);gap:8px;align-items:center;padding:0 9px;border:0;border-radius:6px;color:var(--sidebar-secondary);background:transparent;cursor:pointer;text-align:left}.nav-item:hover,.nav-item.force-hover{color:var(--sidebar-text);background:var(--sidebar-hover)}.nav-item.active{color:var(--sidebar-text);background:var(--sidebar-active)}.nav-item.active:before{position:absolute;top:7px;bottom:7px;left:0;width:3px;border-radius:0 3px 3px 0;background:var(--sidebar-indicator);content:""}.nav-icon{display:grid;width:18px;height:18px;place-items:center;color:var(--sidebar-icon);font-size:11px}.nav-item.active .nav-icon{color:var(--sidebar-indicator)}.nav-item strong{font-size:9.5px;font-weight:650}
+.sidebar-footer{display:grid;gap:7px;padding:10px 14px 13px;border-top:1px solid var(--sidebar-divider);color:var(--sidebar-secondary);font-size:8px}.status{display:flex;align-items:center;gap:6px}.status i{width:6px;height:6px;border-radius:50%;background:var(--success)}.sidebar-footer code{font:7.5px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--sidebar-secondary)}
+
+.workspace{min-width:0;min-height:0;display:grid;grid-template-rows:50px minmax(0,1fr);background:var(--surface)}
+.topbar{display:flex;align-items:center;gap:8px;padding:0 22px;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--surface) 88%,var(--canvas))}.topbar small{color:var(--faint);font-size:8.5px}.topbar strong{font-size:10.5px}.topbar-actions{display:flex;align-items:center;gap:7px;margin-left:auto}.sync{display:inline-flex;min-height:24px;align-items:center;gap:5px;padding:0 8px;border-radius:999px;color:var(--muted);background:var(--surface-2);font-size:8px;font-weight:650}.sync i{width:5px;height:5px;border-radius:50%;background:var(--success)}
+.content{min-height:0;overflow:auto;padding:32px clamp(28px,4vw,60px) 60px}.page{width:min(930px,100%);margin:0 auto}.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;padding-bottom:19px;border-bottom:2px solid var(--ink)}.kicker{margin:0 0 6px;color:var(--brand);font:760 8px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.12em}.page-head h1{margin:0;font-size:26px;letter-spacing:-.045em}.page-head p{max-width:620px;margin:6px 0 0;color:var(--muted);font-size:10px;line-height:1.55}.primary{min-height:30px;padding:0 10px;border:1px solid var(--brand-strong);border-radius:6px;color:#fff;background:var(--brand);cursor:pointer;font-size:8.8px;font-weight:700}
+.variant-readout{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin-top:18px}.readout{padding:9px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface-2)}.readout span{display:block;color:var(--faint);font:700 7px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase;letter-spacing:.07em}.readout strong{display:block;margin-top:4px;font-size:9px}.readout code{display:block;margin-top:2px;color:var(--muted);font:7.5px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace}
+.section{display:grid;grid-template-columns:175px minmax(0,1fr);gap:34px;padding:24px 0;border-bottom:1px solid var(--line)}.section-title span{color:var(--brand);font:750 7.5px/1 ui-monospace,SFMono-Regular,Menlo,monospace}.section-title h2{margin:5px 0 3px;font-size:12px}.section-title p{margin:0;color:var(--muted);font-size:8.5px;line-height:1.45}.section-body{display:grid;gap:12px}.setting-row{display:flex;min-height:48px;align-items:center;justify-content:space-between;gap:18px}.setting-row+.setting-row{padding-top:9px;border-top:1px solid var(--line)}.setting-copy strong{display:block;font-size:9.5px}.setting-copy small{display:block;margin-top:3px;color:var(--muted);font-size:8.3px;line-height:1.45}
+.switch{position:relative;width:34px;height:19px;flex:0 0 34px;appearance:none;border:1px solid var(--line-strong);border-radius:999px;background:var(--surface-3);cursor:pointer}.switch:after{position:absolute;top:3px;left:3px;width:11px;height:11px;border-radius:50%;background:var(--faint);content:""}.switch:checked{border-color:var(--brand);background:var(--brand)}.switch:checked:after{background:#fff;transform:translateX(15px)}
+.choice{display:grid;grid-template-columns:15px minmax(0,1fr);gap:9px;padding:10px 11px;border-left:2px solid var(--line-strong);border-radius:0 5px 5px 0;background:var(--surface-2)}.choice.selected{border-left-color:var(--brand);background:var(--brand-soft)}.choice i{width:12px;height:12px;margin-top:1px;border:1px solid var(--line-strong);border-radius:50%}.choice.selected i{border:4px solid var(--brand)}.choice strong{display:block;font-size:9px}.choice small{display:block;margin-top:2px;color:var(--muted);font-size:7.8px}
+.palette-strip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:7px;margin-top:16px}.palette-card{padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--surface)}.palette-card.active{border-color:var(--brand);box-shadow:inset 0 0 0 1px var(--brand-soft)}.swatches{display:grid;grid-template-columns:1.2fr 1fr 1fr .7fr;gap:3px;height:24px;margin-bottom:6px}.swatches i{border-radius:3px}.palette-card strong{display:block;font-size:8px}.palette-card small{display:block;margin-top:2px;color:var(--muted);font-size:7px;line-height:1.3}
+@media(max-width:1100px){:root{--sidebar-w:244px}.controls{gap:8px;padding:0 10px}.controls-brand,.research-badge{display:none}.variant-btn{min-width:80px}.section{grid-template-columns:1fr;gap:11px}.variant-readout{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style>
+</head>
+<body>
+<header class="controls">
+  <div class="controls-brand"><strong>Rovai AI · Porcelain Gray Study</strong><small>STEEL BRAND × LIGHT SIDEBAR MATERIAL</small></div>
+  <div class="variant-group" aria-label="Porcelain 灰度版本">
+    <span class="control-label">Porcelain</span>
+    <button class="variant-btn" data-variant-btn="original"><strong>P0 Original</strong><small>原版 · 蓝灰明显</small></button>
+    <button class="variant-btn" data-variant-btn="fog"><strong>P1 Fog</strong><small>轻微去蓝</small></button>
+    <button class="variant-btn active" data-variant-btn="neutral"><span class="recommend">推荐</span><strong>P2 Neutral</strong><small>冷瓷灰 · 平衡</small></button>
+    <button class="variant-btn" data-variant-btn="ash"><strong>P3 Ash</strong><small>更中性 · 更灰</small></button>
+    <button class="variant-btn" data-variant-btn="stone"><strong>P4 Stone</strong><small>微暖灰 · 最安静</small></button>
+  </div>
+  <span class="research-badge">Steel fixed · sidebar only</span>
+</header>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="sidebar-drag"></div>
+    <div class="sidebar-brand"><span class="logo">✦</span><span><strong>Rovai AI</strong><small>LOCAL AGENT WORKSPACE</small></span><button class="bell" aria-label="通知">♢</button></div>
+    <button class="back" type="button"><span>←</span><strong>返回 App</strong></button>
+    <div class="settings-title"><strong>设置</strong><small>应用偏好与本机能力</small></div>
+    <div class="nav-scroll">
+      <section class="nav-group"><div class="nav-group-title">Application</div>
+        <button class="nav-item active"><span class="nav-icon">⌂</span><strong>通用</strong></button>
+        <button class="nav-item force-hover"><span class="nav-icon">◐</span><strong>外观</strong></button>
+        <button class="nav-item"><span class="nav-icon">♢</span><strong>通知</strong></button>
+      </section>
+      <section class="nav-group"><div class="nav-group-title">Capabilities</div>
+        <button class="nav-item"><span class="nav-icon">◇</span><strong>Skill</strong></button>
+        <button class="nav-item"><span class="nav-icon">⌘</span><strong>MCP</strong></button>
+        <button class="nav-item"><span class="nav-icon">◈</span><strong>Agent 运行时</strong></button>
+      </section>
+      <section class="nav-group"><div class="nav-group-title">Support</div><button class="nav-item"><span class="nav-icon">⌁</span><strong>诊断与修复</strong></button></section>
+    </div>
+    <footer class="sidebar-footer"><span class="status"><i></i>本地服务正常</span><code>v0.52 · main</code></footer>
+  </aside>
+
+  <section class="workspace">
+    <header class="topbar"><small>设置</small><span style="color:var(--line-strong)">/</span><strong>通用</strong><div class="topbar-actions"><span class="sync"><i></i>已同步</span></div></header>
+    <main class="content">
+      <section class="page">
+        <header class="page-head"><div><p class="kicker">STEEL × PORCELAIN STUDY</p><h1 id="variant-title">P2 Neutral Porcelain</h1><p id="variant-description">把原 Porcelain 的蓝灰压到接近中性灰，只让 Steel 出现在关键状态与主内容交互上。</p></div><button class="primary" type="button">保存默认队员</button></header>
+
+        <div class="variant-readout">
+          <div class="readout"><span>Sidebar</span><strong id="bg-name">冷瓷灰</strong><code id="bg-value">#F3F4F4</code></div>
+          <div class="readout"><span>Hover</span><strong>低对比灰</strong><code id="hover-value">#E8EAEA</code></div>
+          <div class="readout"><span>Active</span><strong>轻微冷感</strong><code id="active-value">#E9ECEE</code></div>
+          <div class="readout"><span>Indicator</span><strong>Steel retained</strong><code id="indicator-value">#526F88</code></div>
+        </div>
+
+        <div class="palette-strip" id="palette-strip"></div>
+
+        <section class="section"><div class="section-title"><span>01</span><h2>启动</h2><p>观察侧栏是否足够安静，不与主内容区争夺注意力。</p></div><div class="section-body">
+          <label class="setting-row"><span class="setting-copy"><strong>登录时启动 Rovai-ai</strong><small>登录 macOS 后自动打开 Rovai-ai。</small></span><input class="switch" type="checkbox" checked></label>
+          <div class="choice selected"><i></i><span><strong>上次使用的位置</strong><small>恢复最近打开的对话、队员页或记忆页。</small></span></div>
+          <div class="choice"><i></i><span><strong>快速对话</strong><small>每次启动都从快速对话首页开始。</small></span></div>
+        </div></section>
+
+        <section class="section"><div class="section-title"><span>02</span><h2>新对话默认值</h2><p>用高频设置区判断灰度是否过冷、过暖或过于办公化。</p></div><div class="section-body">
+          <label class="setting-row"><span class="setting-copy"><strong>一键创建新对话</strong><small>有稳定默认队员和 Lead 时减少重复确认。</small></span><input class="switch" type="checkbox" checked></label>
+          <label class="setting-row"><span class="setting-copy"><strong>创建前检查 Runtime 状态</strong><small>仅做只读可用性检查，不改变结构选择。</small></span><input class="switch" type="checkbox"></label>
+        </div></section>
+      </section>
+    </main>
+  </section>
+</div>
+
+<script>
+(() => {
+  const variants = {
+    original:{title:'P0 Original Porcelain',desc:'当前版本：蓝灰感最明显。作为对照基准，不建议继续加蓝。',bg:'#F2F5F7',hover:'#E4EAF0',active:'#E8EDF2',indicator:'#476A89',name:'蓝灰 Porcelain',note:'蓝感最高'},
+    fog:{title:'P1 Fog Porcelain',desc:'只做第一档去蓝：仍然能看出冷蓝，但已经比原版安静。',bg:'#F3F4F5',hover:'#E7E9EB',active:'#E9ECEE',indicator:'#4F6E89',name:'雾灰',note:'轻度去蓝'},
+    neutral:{title:'P2 Neutral Porcelain',desc:'把原 Porcelain 的蓝灰压到接近中性灰，只让 Steel 出现在关键状态与主内容交互上。',bg:'#F3F4F4',hover:'#E8EAEA',active:'#E9ECEE',indicator:'#526F88',name:'冷瓷灰',note:'推荐平衡'},
+    ash:{title:'P3 Ash Porcelain',desc:'进一步去蓝，侧栏更像精密工具的浅灰外壳；视觉最中性，但品牌温度更低。',bg:'#F2F3F3',hover:'#E6E8E8',active:'#E8E9EA',indicator:'#567087',name:'灰烬灰',note:'中性更强'},
+    stone:{title:'P4 Stone Porcelain',desc:'加入极轻微暖灰，长时间观看最柔和；但与 Steel 的冷感对比会更明显。',bg:'#F4F3F2',hover:'#E9E7E5',active:'#EBE9E7',indicator:'#5C7183',name:'石灰白',note:'微暖最静'}
+  };
+  const order=['original','fog','neutral','ash','stone'];
+  const strip=document.getElementById('palette-strip');
+  order.forEach(key=>{
+    const v=variants[key];
+    const el=document.createElement('button');
+    el.className='palette-card'+(key==='neutral'?' active':'');
+    el.type='button';el.dataset.variantCard=key;
+    el.innerHTML=`<span class="swatches"><i style="background:${v.bg}"></i><i style="background:${v.hover}"></i><i style="background:${v.active}"></i><i style="background:${v.indicator}"></i></span><strong>${v.title.replace(' Porcelain','')}</strong><small>${v.note}</small>`;
+    strip.appendChild(el);
+  });
+  function setVariant(key){
+    const v=variants[key]; document.documentElement.dataset.variant=key;
+    document.querySelectorAll('[data-variant-btn]').forEach(b=>b.classList.toggle('active',b.dataset.variantBtn===key));
+    document.querySelectorAll('[data-variant-card]').forEach(b=>b.classList.toggle('active',b.dataset.variantCard===key));
+    document.getElementById('variant-title').textContent=v.title;
+    document.getElementById('variant-description').textContent=v.desc;
+    document.getElementById('bg-name').textContent=v.name;
+    document.getElementById('bg-value').textContent=v.bg;
+    document.getElementById('hover-value').textContent=v.hover;
+    document.getElementById('active-value').textContent=v.active;
+    document.getElementById('indicator-value').textContent=v.indicator;
+  }
+  document.addEventListener('click',e=>{
+    const btn=e.target.closest('[data-variant-btn]'); if(btn) setVariant(btn.dataset.variantBtn);
+    const card=e.target.closest('[data-variant-card]'); if(card) setVariant(card.dataset.variantCard);
+  });
+})();
+</script>
+</body>
+</html>

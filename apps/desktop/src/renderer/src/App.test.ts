@@ -27,7 +27,8 @@ import {
   reconcileCancellingTurnIds,
   runtimeRecoveryFromCommandResult,
   SettingsView,
-  shouldLoadRuntimeHealth
+  shouldLoadRuntimeHealth,
+  windowDragStripPage
 } from './App'
 import {
   CampNavigation,
@@ -584,7 +585,7 @@ describe('task event projections', () => {
     ])
   })
 
-  it('renders the visible Camp header and structural page drag strips', () => {
+  it('renders the visible Camp header and limits structural drag strips to overlay pages', () => {
     const camp = {
       camp: { activationState: 'active', createdAt: '2026-07-31T00:00:00Z' },
       agentRuns: [{ status: 'running' }],
@@ -611,24 +612,17 @@ describe('task event projections', () => {
     const settingsStrip = renderToStaticMarkup(createElement(WindowDragStrip, {
       page: 'settings'
     }))
-    const membersStrip = renderToStaticMarkup(createElement(WindowDragStrip, {
-      page: 'members'
-    }))
-    const memoryStrip = renderToStaticMarkup(createElement(WindowDragStrip, {
-      page: 'memory'
-    }))
     expect(composeStrip).toContain('window-drag-strip-compose')
     expect(settingsStrip).toContain('window-drag-strip-settings')
-    expect(membersStrip).toContain('window-drag-strip-members')
-    expect(memoryStrip).toContain('window-drag-strip-memory')
     expect(composeStrip).toContain('aria-hidden="true"')
     expect(settingsStrip).toContain('aria-hidden="true"')
-    expect(membersStrip).toContain('aria-hidden="true"')
-    expect(memoryStrip).toContain('aria-hidden="true"')
     expect(composeStrip).not.toContain('快速对话')
     expect(settingsStrip).not.toContain('设置')
-    expect(membersStrip).not.toContain('队员')
-    expect(memoryStrip).not.toContain('记忆')
+    expect(windowDragStripPage('compose')).toBe('compose')
+    expect(windowDragStripPage('settings')).toBe('settings')
+    expect(windowDragStripPage('camp')).toBeNull()
+    expect(windowDragStripPage('members')).toBeNull()
+    expect(windowDragStripPage('memory')).toBeNull()
   })
 
   it('keeps create mode independent from the currently selected member', () => {
@@ -2700,6 +2694,7 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('记忆')
+    expect(markup).toContain('Memory / Governed context')
     expect(markup).toContain('共同记忆')
     expect(markup).toContain('队员记忆')
     expect(markup).toContain('队员间记忆')

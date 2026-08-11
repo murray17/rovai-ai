@@ -103,6 +103,11 @@ type LoadState = 'loading' | 'ready' | 'error'
 type StartupStatus = 'loading' | 'waiting' | 'resolved'
 export type View = 'compose' | 'camp' | 'members' | 'memory' | 'settings'
 export type SettingsSection = NavigationSettingsSection
+export type WindowDragStripPage = Extract<View, 'compose' | 'settings'>
+
+export function windowDragStripPage(view: View): WindowDragStripPage | null {
+  return view === 'compose' || view === 'settings' ? view : null
+}
 
 interface OptimisticCampMessageEntry {
   campId: string
@@ -1601,7 +1606,7 @@ export function App(): React.JSX.Element {
     })
   }
 
-  const windowDragPage = view === 'camp' ? null : view
+  const windowDragPage = windowDragStripPage(view)
   const pageContentClassName: Record<View, string> = {
     compose: 'task-content compose-content',
     camp: 'task-content camp-content',
@@ -1883,7 +1888,7 @@ export function App(): React.JSX.Element {
 export function WindowDragStrip({
   page
 }: {
-  page: 'compose' | 'members' | 'memory' | 'settings'
+  page: WindowDragStripPage
 }): React.JSX.Element {
   return <div className={`window-drag-strip window-drag-strip-${page}`} aria-hidden="true" />
 }

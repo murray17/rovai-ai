@@ -18,11 +18,14 @@ await mkdir(outputDir, { recursive: true })
 
 let first = null
 let second = null
+let dayHeaderGeometry = null
+let compactHeaderGeometry = null
 try {
   first = await launchApp(firstPort, 1440, 920)
   await setTheme(first.cdp, 'day')
   await assertNoMemoryOnboarding(first.cdp, 'Fresh database')
   await openMemory(first.cdp)
+  dayHeaderGeometry = await assertMemoryPageHeaderGeometry(first.cdp, '1440×920 Memory')
 
   await createHearthMemory(first.cdp, initialBody)
   await chooseMemoryTab(first.cdp, '共同记忆')
@@ -75,6 +78,7 @@ try {
   await assertNoMemoryOnboarding(second.cdp, 'Restarted database')
   await setTheme(second.cdp, 'night')
   await openMemory(second.cdp)
+  compactHeaderGeometry = await assertMemoryPageHeaderGeometry(second.cdp, '1040×700 Memory')
   const restartedLibrary = await request(second.cdp, 'memory.list')
   assert(restartedLibrary.memories.some((memory) => memory.currentBody === revisedBody),
     'Packaged Core did not return the active Memory after App restart')
@@ -104,7 +108,12 @@ try {
       sqliteIsTheOnlyMemoryAuthority: true,
       restartPersistence: true,
       dayAndNightPreferenceDayLayouts: true,
+      fullHeightP2HeaderWithoutBlankDragStrip: true,
       horizontalOverflow: false
+    },
+    headerGeometry: {
+      day: dayHeaderGeometry,
+      compact: compactHeaderGeometry
     },
     captures: {
       day: dayCapture,
@@ -145,6 +154,46 @@ async function openMemory(cdp) {
     `Memory navigation label wrapped unexpectedly (${navigation.height}px high)`)
   await waitForSelector(cdp, '.memory-library')
   await waitForExpression(cdp, `!document.querySelector('.memory-library .memory-error')`)
+}
+
+async function assertMemoryPageHeaderGeometry(cdp, context) {
+  const state = await evaluate(cdp, `(() => {
+    const content = document.querySelector('.content.memory-content')
+    const library = document.querySelector('.memory-library')
+    const header = document.querySelector('.memory-library-header')
+    const heading = header?.firstElementChild
+    const actions = document.querySelector('.memory-header-actions')
+    const contentBounds = content?.getBoundingClientRect()
+    const libraryBounds = library?.getBoundingClientRect()
+    const headerBounds = header?.getBoundingClientRect()
+    const headingBounds = heading?.getBoundingClientRect()
+    const actionBounds = actions?.getBoundingClientRect()
+    const round = (value) => value == null ? null : Math.round(value * 10) / 10
+    return {
+      hasBlankDragStrip: Boolean(document.querySelector('.window-drag-strip-memory')),
+      contentTop: round(contentBounds?.top),
+      libraryTop: round(libraryBounds?.top),
+      headerTop: round(headerBounds?.top),
+      topBorderWidth: content ? getComputedStyle(content).borderTopWidth : null,
+      headerAlignment: header ? getComputedStyle(header).alignItems : null,
+      kicker: document.querySelector('.memory-page-kicker')?.textContent?.trim(),
+      actionBottomDelta: headingBounds && actionBounds
+        ? round(actionBounds.bottom - headingBounds.bottom)
+        : null
+    }
+  })()`)
+  assert(
+    !state.hasBlankDragStrip
+      && Math.abs(state.contentTop) <= 0.5
+      && Math.abs(state.libraryTop - 3) <= 0.75
+      && Math.abs(state.headerTop - 33) <= 0.75
+      && state.topBorderWidth === '3px'
+      && state.headerAlignment === 'flex-end'
+      && state.kicker === 'Memory / Governed context'
+      && Math.abs(state.actionBottomDelta) <= 0.75,
+    `${context} did not match the P2 full-height header contract: ${JSON.stringify(state)}`
+  )
+  return state
 }
 
 async function chooseMemoryTab(cdp, label) {

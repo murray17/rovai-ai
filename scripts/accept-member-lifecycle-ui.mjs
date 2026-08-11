@@ -134,6 +134,11 @@ try {
 
   await openMembers(running.cdp)
   const memberWorkbenchStructure = await evaluate(running.cdp, `({
+    hasBlankDragStrip: Boolean(document.querySelector('.window-drag-strip-members')),
+    contentTop: document.querySelector('.content.members-content')?.getBoundingClientRect().top,
+    workspaceTop: document.querySelector('.members-view')?.getBoundingClientRect().top,
+    headerTop: document.querySelector('.member-detail-header')?.getBoundingClientRect().top,
+    workspaceTopBorder: getComputedStyle(document.querySelector('.members-view')).borderTopWidth,
     sidebarWidth: document.querySelector('.unified-sidebar')?.getBoundingClientRect().width,
     hasRoster: Boolean(document.querySelector('.member-sidebar')),
     homeButton: (() => {
@@ -168,7 +173,12 @@ try {
     })()
   })`)
   assert(
-    memberWorkbenchStructure.sidebarWidth === 270
+    !memberWorkbenchStructure.hasBlankDragStrip
+      && Math.abs(memberWorkbenchStructure.contentTop) <= 0.5
+      && Math.abs(memberWorkbenchStructure.workspaceTop) <= 0.5
+      && Math.abs(memberWorkbenchStructure.headerTop - 33) <= 0.75
+      && memberWorkbenchStructure.workspaceTopBorder === '3px'
+      && memberWorkbenchStructure.sidebarWidth === 270
       && memberWorkbenchStructure.hasRoster
       && memberWorkbenchStructure.homeButton.width === 28
       && memberWorkbenchStructure.homeButton.height === 28
@@ -685,6 +695,8 @@ try {
       label: button?.getAttribute('aria-label'),
       insideContent: Boolean(article?.querySelector('.message-surface > .message-copy-button')),
       absentFromMetadata: !article?.querySelector('.bubble-meta .message-copy-button'),
+      top: button ? getComputedStyle(button).top : null,
+      right: button ? getComputedStyle(button).right : null,
       topOffset: bodyRect && buttonRect ? buttonRect.top - bodyRect.top : null,
       rightOffset: bodyRect && buttonRect ? bodyRect.right - buttonRect.right : null
     }
@@ -694,7 +706,8 @@ try {
       && userMessageCopyState.label === '复制这条消息'
       && userMessageCopyState.insideContent
       && userMessageCopyState.absentFromMetadata
-      && Math.abs(userMessageCopyState.topOffset + 2) <= 0.75
+      && userMessageCopyState.top === '-2px'
+      && userMessageCopyState.right === '0px'
       && Math.abs(userMessageCopyState.rightOffset) <= 0.75,
     `User message is not selectable/copyable: ${JSON.stringify(userMessageCopyState)}`
   )
@@ -926,6 +939,7 @@ try {
       mentionComposerUsesMemberName: true,
       contextSettingsDestinationRemoved: true,
       contextualMemberSidebarAndTabs: true,
+      fullHeightP2HeaderWithoutBlankDragStrip: true,
       campComposerMentionMenuVisibleAndKeyboardSelectable: true,
       memberFixedReturnHomeAndHomeWhiteSurface: true,
       equalHeaderStatusControlsAndRuntimeArrow: true,

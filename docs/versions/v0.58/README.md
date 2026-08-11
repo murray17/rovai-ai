@@ -55,6 +55,10 @@ Input Delivery Evidence 继续留在 Core/Snapshot，但不再进入普通 Inspe
 普通审批决定 surface，Header 与通知摘要只定位该 Dock。“队员”页读取真实 CampMember/AgentProfile
 并复用 versioned `camps.changeDefaultLead`，不复制队员管理或 Runtime 配置 mutation。
 
+队员管理与记忆一级页同时收口 P2 顶部结构：两页直接跨越 App Shell 两行，以 3px Steel 顶边和
+30px 页面留白进入各自可拖拽 Header，不再保留 50px 空白占位条。队员继续显示身份、Presence、
+Runtime 与真实操作；记忆增加 `MEMORY / GOVERNED CONTEXT` 层级并保留真实导出、新增和治理工作台。
+
 Antigravity one-shot Adapter 同时把 Runtime Input accepted ACK 从完整 `agy --print` 退出提前到可验证
 的上游接收点：只有匹配 Native Conversation 的 forward/send 之后出现 `streamGenerateContent`
 `ResponseID` 才提前绑定 Session 并确认输入。AgentRun 仍持续到完整生成结束；ACK 后发生的进程失败、
@@ -101,7 +105,7 @@ accepted 时结算为 `not_accepted`。三类 Adapter 在 accepted 后发生的 
 | ADR | 已更新 | ADR-0156 局部替代永久 fingerprint 条款；ADR-0157 局部替代 ADR-0137 的旧 instruction ownership 条款；ADR-0158 局部替代 Skill 默认不分组条款；ADR-0159 完整替代 ADR-0150 并把固定上游 Revision 的 `tasteful-ui` 加入官方集合；ADR-0160 局部替代 ADR-0154 的三 Tab Inspector 与重复 Approval surface |
 | Contracts | 已更新 | ADR-0157 与 Durable Task v3 删除 execution request、AgentRun persistence/read model 的 `expectedOutput` clean break；Run Process Detail Surface v3 冻结任务/队员 Inspector 与唯一 Approval Dock；不增加 Charter 版本轴；Skill wire shape 不变 |
 | Architecture | 已更新 | Built-in Tool Runtime 增加 bounded rebind、显式公共输出义务，以及 Antigravity、Claude Code、ACP 的 runtime-produced accepted evidence；Charter 文案变化不触发 Session 轮换；Skill projection 结构不变，默认策略由 ADR-0158 约束 |
-| UI | 已更新 | Stop 命令目标与按钮可见性统一按非终态 AgentRun 所属 Turn 计算；Skill 设置明确全九组默认并使用行级反馈；会话普通正文统一为开放平面，2K 下分离叙述与工件宽度；Camp Inspector 收敛为任务/队员且 Approval 只在 Composer 上方决定 |
+| UI | 已更新 | Stop 命令目标与按钮可见性统一按非终态 AgentRun 所属 Turn 计算；Skill 设置明确全九组默认并使用行级反馈；会话普通正文统一为开放平面，2K 下分离叙述与工件宽度；Camp Inspector 收敛为任务/队员且 Approval 只在 Composer 上方决定；队员与记忆页删除 50px 空白顶栏并由真实页面 Header 直接承接窗口顶部 |
 | Runtime Activity | 已更新 | Registry 明确稀疏 terminal lifecycle update 不得降级已报告的结构化分类和标题，并补齐 Codex `commandActions` / `changes` presentation mapping |
 | Runtime compatibility | 已更新 | 增加 `agy 1.1.12` marker 与 Claude Code `2.1.220` stream focused smoke，并记录六个 ACP Runtime 的共享确认边界；不改变支持范围或十三工具 qualification 结论 |
 | Documentation routing | 已更新 | CURRENT 的 Skills/MCP 主题新增 ADR-0158 与 ADR-0159，领域术语同步默认分组和 `tasteful-ui` 来源边界 |

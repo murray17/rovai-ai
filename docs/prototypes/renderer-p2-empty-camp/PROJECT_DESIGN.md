@@ -32,7 +32,7 @@
 
 ## 4. Selected References
 
-### `rovai-porcelain-gray-study.html` · P2 Neutral
+### [`rovai-porcelain-gray-study.html`](../porcelain-gray-study/rovai-porcelain-gray-study.html) · P2 Neutral
 
 - **Why it fits:** 它给出经过 P0–P4 对比后的明确中性冷灰侧栏方向，与 Rovai-ai 的固定 270px Sidecar 同构。
 - **Transferable traits:** `#F3F4F4` 侧栏、`#E8EAEA` Hover、`#E9ECEE` Active、`#526F88` Steel indicator/focus、低阴影、细线分隔、系统字体和紧凑工具密度。
@@ -167,7 +167,7 @@
 
 - **Spacing scale:** `4 / 8 / 12 / 16 / 20 / 24 / 32px`。
 - **Container width:** Camp 阅读列使用 `min(790px, 可用宽度 - 54px)`；Composer 在常规桌面沿同一轴线，`>=1800px` 独立扩展到 1040px。
-- **Grid:** 270px Sidecar + 自适应主区。Camp 保留 Header + Conversation + Agent Execution Dock + Approval 预留 + Composer + Inspector；设置使用单列滚动页；队员使用直接详情；记忆使用目录 + 详情双栏。
+- **Grid:** 270px Sidecar + 自适应主区。Camp 保留 Header + Conversation + Agent Execution Dock + Approval 预留 + Composer + Inspector；设置使用单列滚动页；队员使用直接详情；记忆使用目录 + 详情双栏。队员与记忆的右侧工作区跨越窗口完整高度，3px Steel 顶边后直接进入 30px 页面留白与自身可拖拽 Header，不叠加 AppHeader 或独立 50px 空白占位条。
 - **Section rhythm:** 时间分隔 → 公共消息 → 紧凑 Task → 结论消息 → Agent 执行台 → Composer。
 - **Density model:** 工具型紧凑密度，正文仍保持 13px 与充足行高。
 - **Whitespace philosophy:** 空白用于突出输入和当前事实，不用空白制造虚假豪华感。

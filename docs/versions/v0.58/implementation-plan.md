@@ -102,6 +102,16 @@ last_updated: 2026-08-11
   `not_accepted -> prepared` 重试和 accepted 不可降级；本机 Claude Code `2.1.220` focused smoke 观察到
   `system init -> stream_event/message_start -> success result` 的顺序。
 
+## Checkpoint 9：队员与记忆页面顶部收口
+
+- [x] 队员与记忆内容跨越 App Shell 两行，删除两页独立的 50px 空白 `WindowDragStrip`；
+- [x] 两页现有 Header 继续提供窗口拖拽，全部真实操作继续显式 `no-drag`，不恢复重复 AppHeader；
+- [x] 队员页从 3px Steel 顶边进入 30px 留白与现有身份 Header；记忆页同步 P2 kicker、底对齐操作和
+  1080px 有效内容宽度，保留真实 Memory Read Side、治理与 mutation；
+- [x] `App.test.ts`、`theme-tokens.test.ts` 与 packaged App 验收脚本锁定无空白顶栏、Header 几何和
+  1440×920 / 1040×700 无横向溢出；
+- [x] 当前 UI 详规与最终 P2 原型说明明确页面级 Header 是两页唯一右侧顶部，禁止以后恢复占位条。
+
 已完成自动化验证：
 
 - `cargo test --workspace`：Library 325、CLI 10、Core binary 61 通过，3 个既有手工 Runtime smoke ignored；
@@ -110,10 +120,12 @@ last_updated: 2026-08-11
 - `cargo test -p rovai-core rebind -- --nocapture`：2 个新增 rebind 测试通过；
 - `cargo test -p rovai-core db::tests::v72_backfills_initial_runtime_evidence_without_overwriting_existing_values -- --nocapture`：Migration 72 回填测试通过；
 - `cargo test -p rovai-core db::tests::v73_removes_expected_output_without_losing_agent_runs -- --nocapture`：Migration 73 删列与历史 Run 保留测试通过；
-- `pnpm exec vitest run apps/desktop/src/renderer/src/theme-tokens.test.ts apps/desktop/src/renderer/src/App.test.ts`：2 个文件、81 项 Renderer 契约通过；
+- `pnpm exec vitest run apps/desktop/src/renderer/src/theme-tokens.test.ts apps/desktop/src/renderer/src/App.test.ts`：2 个文件、82 项 Renderer 契约通过；
 - `pnpm package:mac` 与 `pnpm accept:runtime-activity-ui`：签名 App 验收通过；2560×1440 下会话列 1040px、叙述 622.31px、Composer 1040px，1040×700 无整页或会话列横向溢出；
+- 本 worktree `pnpm package:mac`：arm64 签名 App 构建通过，`codesign --verify --deep --strict` 及 Core、CLI、native host 单体签名校验通过；
+- `pnpm accept:memory-ui`：1440×920 与 1040×700 的日间/夜间 packaged App 均无 50px 空白顶栏；内容顶点为 0、Memory Library 顶点为 3、Header 顶点为 33，3px Steel 顶边、kicker、操作底对齐与无横向溢出通过；
 - `scripts/capture-camp-inspectors.mjs`：签名 App 在 1440×920、1040×700 与 200% zoom 下均只显示“任务 / 队员”，Lead 菜单真实 mutation、Header-to-Dock 聚焦、Inspector 状态保持及无横向溢出通过；
-- `pnpm accept:member-lifecycle-ui`：用户消息透明开放表面、原生文本选择、Copy、Mention、成员页返回与 200% zoom/reduced motion 回归通过；
+- `pnpm accept:member-lifecycle-ui`：队员页内容顶点为 0、Workbench 顶点为 3、Header 顶点为 33 且无 50px 空白顶栏；用户消息透明开放表面、原生文本选择、Copy、Mention、成员页返回与 200% zoom/reduced motion 回归通过；
 - `cargo test -p rovai-core official_skills_default_to_all_groups_and_preserve_user_changes -- --nocapture`：内置 Skill 初始九组与后续用户修改保持通过；
 - `cargo test -p rovai-core imports_default_to_all_groups_and_updates_preserve_user_changes -- --nocapture`：Imported Skill 初始九组与 Revision 更新保持通过；
 - `cargo test -p rovai-core v74_assigns_every_active_skill_to_all_runtime_groups_once -- --nocapture`：Migration 74 对内置与 Imported Skill 的一次性回填通过；

@@ -1,6 +1,6 @@
 # Renderer P2 · Conversation / Settings / Members / Memory study
 
-这是一次性的、独立自包含 HTML 视觉原型。它沿用 `rovai-porcelain-gray-study.html` 的 P2 Neutral Porcelain 视觉语言，页面结构与交互语义来自当前 Rovai-ai Renderer；不会修改生产 Renderer，也不会连接或写入 Core。
+这是一次性的、独立自包含 HTML 视觉原型。它沿用[Porcelain Gray 来源研究](../porcelain-gray-study/rovai-porcelain-gray-study.html)的 P2 Neutral Porcelain 视觉语言，页面结构与交互语义来自当前 Rovai-ai Renderer；不会修改生产 Renderer，也不会连接或写入 Core。
 
 本轮在既有设置、队员、记忆及覆盖层基础上，把 Camp 会话区同步到生产提交 `95e4aa2`、ADR-0154 与 Run Process Detail Surface v2 的定稿合同；`agent-execution-process-b` 只作为交互参照，不复制它的 App Shell、Composer 或 Approval 示例。
 
@@ -30,6 +30,7 @@ python3 -m http.server 4173 --bind 127.0.0.1 --directory docs/prototypes/rendere
 - 队员名册与详情：身份 / 运行配置两个页签、在队 / 暂离状态、同源圆形 icon 和 4:5 半身照，以及包含四个生产预设的头像选择、身份、离队、移除等本地交互示例。
 - 成员 Header 中 Presence 是静态状态；Runtime 是带状态点、状态文字与右箭头的可点击入口，进入运行配置后聚焦 Runtime 选择器。
 - 记忆目录与详情：共同记忆、队员记忆、队员间记忆，治理筛选、修订 / 停止沿用 / 永久遗忘，以及共同记忆提案 Drawer。
+- 队员与记忆工作区从右侧窗口顶边直接开始，3px Steel 顶边之后进入各自页面 Header；右侧不保留独立 50px 空白拖拽区。两页 Header 自身承担拖拽，真实按钮和菜单保持可点击。
 - 新建 Camp、队员、Skill、MCP、Runtime、诊断、记忆等共用 Dialog，以及通知中心和记忆提案 Drawer；浮层支持 Esc、焦点约束和关闭后焦点返回。
 - P2 冷瓷灰与 Steel 只建立壳层和选择层级；身份、成功、警告、危险、证据继续使用独立语义色。
 - 队员身份色按生产相同的 FNV-1a 规则将稳定 `AgentProfile.id` 映射到 `--identity-1..8`，不随显示名或团队角色变化。

@@ -376,6 +376,7 @@ export function MemoryLibrary({
     <section className="memory-library" aria-labelledby="memory-library-title">
       <header className="memory-library-header">
         <div>
+          <span className="memory-page-kicker">Memory / Governed context</span>
           <h2 id="memory-library-title">记忆</h2>
           <p>所有正在沿用的记忆都立即生效；形成来源仅用于说明和审计。</p>
         </div>

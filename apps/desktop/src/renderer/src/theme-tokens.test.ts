@@ -156,6 +156,20 @@ describe('Neutral Porcelain + Steel theme tokens', () => {
     expect(css).toMatch(/\.project-heading-row\.current-project\s*\{[^}]*background: var\(--surface-selected\)/)
   })
 
+  it('lets the Members and Memory workspaces own the window top edge', () => {
+    expect(css).toContain(`.content.compose-content,
+.content.settings-content,
+.content.members-content,
+.content.memory-content { grid-row: 1 / -1; }`)
+    expect(css).not.toContain('.window-drag-strip-members')
+    expect(css).not.toContain('.window-drag-strip-memory')
+    expect(css).toMatch(/\.memory-library\s*\{[^}]*padding: 30px 28px 24px/)
+    expect(css).toMatch(/\.memory-library-header\s*\{[^}]*align-items: flex-end[^}]*padding: 0 0 19px/)
+    expect(css).toContain('.memory-page-kicker')
+    expect(css).toMatch(/\.member-detail-scroll\s*\{[^}]*padding: 30px 26px 48px/)
+    expect(css).toMatch(/\.member-detail-header\s*\{[^}]*-webkit-app-region: drag/)
+  })
+
   it('keeps user and Agent narrative on one open surface and widens only work artifacts at 2K', () => {
     expect(css).toMatch(/\.conversation-bubble\.agent\s*\{[^}]*--agent-accent: var\(--identity-1\)/)
     expect(css).not.toMatch(/\.conversation-bubble\.agent\s*\{[^}]*background:/)
