@@ -160,8 +160,10 @@ try {
     `Agent dock did not aggregate one entry per Agent: ${JSON.stringify(agentDock)}`)
   assert(agentDock.followsTimeline && agentDock.dockTop >= agentDock.timelineBottom - 1,
     `Agent dock is not attached below the conversation timeline: ${JSON.stringify(agentDock)}`)
-  assert(agentDock.topRunBadgeCount === 0 && agentDock.auditTabCount === 0,
-    `Removed top Run/Audit entries returned: ${JSON.stringify(agentDock)}`)
+  assert(agentDock.topRunBadgeCount === 0
+    && agentDock.auditTabCount === 0
+    && JSON.stringify(agentDock.inspectorTabLabels) === JSON.stringify(['任务', '队员']),
+  `Removed top Run/Audit entries or legacy Inspector tabs returned: ${JSON.stringify(agentDock)}`)
 
   const observed = await collectRuntimeRows(app.cdp)
   assertRuntimeRows(observed)
@@ -665,6 +667,8 @@ async function collectAgentDock(cdp) {
       .filter(Boolean)
     const auditTabCount = [...document.querySelectorAll('.activity-tabs > .tabs-list [role="tab"]')]
       .filter((tab) => tab.textContent?.includes('审计')).length
+    const inspectorTabLabels = [...document.querySelectorAll('.activity-tabs > .tabs-list [role="tab"]')]
+      .map((tab) => tab.textContent?.replace(/\\d+/g, '').replace(/\\s+/g, ' ').trim() ?? '')
     return {
       chipCount: agentIds.length,
       agentIds,
@@ -673,7 +677,8 @@ async function collectAgentDock(cdp) {
       timelineBottom: timelineRect?.bottom ?? 0,
       dockTop: dockRect?.top ?? 0,
       topRunBadgeCount: document.querySelectorAll('.topbar .run-badge').length,
-      auditTabCount
+      auditTabCount,
+      inspectorTabLabels
     }
   })()`)
 }

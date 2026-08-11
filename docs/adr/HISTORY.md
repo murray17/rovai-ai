@@ -171,4 +171,5 @@ generated_from: docs/adr-front-matter
 | [ADR-0157](0157-message-owned-agentrun-instruction-without-expected-output.md) | Message-Owned AgentRun Instruction Without Expected Output Metadata | `accepted` | `cross-version` | [v0.58](../versions/v0.58/README.md) | — |
 | [ADR-0158](0158-default-all-runtime-delivery-for-managed-skills.md) | Default-All Runtime Delivery for Managed Skills | `accepted` | `cross-version` | [v0.58](../versions/v0.58/README.md) | — |
 | [ADR-0159](0159-pinned-third-party-tasteful-ui-bundled-skill.md) | Pinned Third-Party Tasteful UI Bundled Skill | `accepted` | `cross-version` | [v0.58](../versions/v0.58/README.md) | — |
+| [ADR-0160](0160-focused-camp-inspector-and-single-approval-surface.md) | Focused Camp Inspector and Single Approval Surface | `accepted` | `cross-version` | [v0.58](../versions/v0.58/README.md) | — |
 <!-- adr-history:end -->

@@ -47,8 +47,13 @@ Imported Skill 分别显示“Rovai 内置”和“用户导入”；右侧操�
 
 本版本的 Renderer 同时把用户与 Agent 普通消息统一到同一开放阅读平面，并在 2K 宽屏下使用
 “叙述约 76ch、代码与表格最多 930px”的双宽度体系。身份继续由头像、名称、Runtime、时间和 A2A
-metadata 表达；不新增 Agent 默认色、消息底色或领域分组，Task、Approval、AgentRun、Composer 与
-Inspector 的功能边界不变。
+metadata 表达；不新增 Agent 默认色、消息底色或领域分组，Task、Approval、AgentRun 与 Composer
+的领域边界不变。
+
+同一 Renderer 范围把 ordinary Camp Inspector 收敛为“任务 / 队员”。ContextManifest 与 Runtime
+Input Delivery Evidence 继续留在 Core/Snapshot，但不再进入普通 Inspector；Approval Dock 成为唯一
+普通审批决定 surface，Header 与通知摘要只定位该 Dock。“队员”页读取真实 CampMember/AgentProfile
+并复用 versioned `camps.changeDefaultLead`，不复制队员管理或 Runtime 配置 mutation。
 
 真实 Copilot 请求复盘同时收敛三项直接影响 v0.58 验收可读性与恢复体验的缺陷：
 
@@ -79,10 +84,10 @@ Inspector 的功能边界不变。
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.57 冻结为 historical，v0.58 成为唯一 current，并新增本版本概览与实施计划 |
-| ADR | 已更新 | ADR-0156 局部替代永久 fingerprint 条款；ADR-0157 局部替代 ADR-0137 的旧 instruction ownership 条款；ADR-0158 局部替代 Skill 默认不分组条款；ADR-0159 完整替代 ADR-0150 并把固定上游 Revision 的 `tasteful-ui` 加入官方集合 |
-| Contracts | 已更新 | ADR-0157 与 Durable Task v3 删除 execution request、AgentRun persistence/read model 的 `expectedOutput` clean break；不增加 Charter 版本轴；Skill wire shape 不变 |
+| ADR | 已更新 | ADR-0156 局部替代永久 fingerprint 条款；ADR-0157 局部替代 ADR-0137 的旧 instruction ownership 条款；ADR-0158 局部替代 Skill 默认不分组条款；ADR-0159 完整替代 ADR-0150 并把固定上游 Revision 的 `tasteful-ui` 加入官方集合；ADR-0160 局部替代 ADR-0154 的三 Tab Inspector 与重复 Approval surface |
+| Contracts | 已更新 | ADR-0157 与 Durable Task v3 删除 execution request、AgentRun persistence/read model 的 `expectedOutput` clean break；Run Process Detail Surface v3 冻结任务/队员 Inspector 与唯一 Approval Dock；不增加 Charter 版本轴；Skill wire shape 不变 |
 | Architecture | 已更新 | Built-in Tool Runtime 增加 bounded rebind 与显式公共输出义务，Charter 文案变化不触发 Session 轮换；Skill projection 结构不变，默认策略由 ADR-0158 约束 |
-| UI | 已更新 | Stop 命令目标与按钮可见性统一按非终态 AgentRun 所属 Turn 计算；Skill 设置明确全九组默认并使用行级反馈；会话普通正文统一为开放平面，2K 下分离叙述与工件宽度 |
+| UI | 已更新 | Stop 命令目标与按钮可见性统一按非终态 AgentRun 所属 Turn 计算；Skill 设置明确全九组默认并使用行级反馈；会话普通正文统一为开放平面，2K 下分离叙述与工件宽度；Camp Inspector 收敛为任务/队员且 Approval 只在 Composer 上方决定 |
 | Runtime Activity | 已更新 | Registry 明确稀疏 terminal lifecycle update 不得降级已报告的结构化分类和标题，并补齐 Codex `commandActions` / `changes` presentation mapping |
 | Runtime compatibility | 确认无需更新 | 不改变支持的 Runtime、最低版本或已验证能力结论 |
 | Documentation routing | 已更新 | CURRENT 的 Skills/MCP 主题新增 ADR-0158 与 ADR-0159，领域术语同步默认分组和 `tasteful-ui` 来源边界 |
@@ -94,4 +99,6 @@ Inspector 的功能边界不变。
 - [ADR-0156](../../adr/0156-logical-runtime-identity-and-bounded-installation-rebind.md)
 - [ADR-0158](../../adr/0158-default-all-runtime-delivery-for-managed-skills.md)
 - [ADR-0159](../../adr/0159-pinned-third-party-tasteful-ui-bundled-skill.md)
+- [ADR-0160](../../adr/0160-focused-camp-inspector-and-single-approval-surface.md)
+- [Run Process Detail Surface v3](../../contracts/run-process-detail-surface-v3.md)
 - [Built-in Tool Runtime architecture](../../architecture/builtin-tool-runtime.md)

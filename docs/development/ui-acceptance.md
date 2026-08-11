@@ -84,7 +84,7 @@ Scheme C 转交 footer，以及诊断中心双尺寸、只读自检、MCP 权限
 
 ### Agent 执行过程门禁
 
-Renderer 的权威行为见 [Run Process Detail Surface v2](../contracts/run-process-detail-surface-v2.md) 与
+Renderer 的权威行为见 [Run Process Detail Surface v3](../contracts/run-process-detail-surface-v3.md) 与
 [当前 UI 详规：Camp 执行过程](../ui/arctic-dawn.md#camp-执行过程)。修改 AgentRun 分组、执行台、Drawer、
 Task Related execution、停止结果或 Inspector 页签后，至少运行：
 
@@ -106,8 +106,11 @@ pnpm accept:runtime-activity-ui
   回到底部后恢复，仍在跟随时终态最后输出只定位一次；后台 A2A、Runtime 事件、重载和恢复仍不打开
   Drawer、不改选队员/stage、不滚动公共消息时间线或抢焦点；关闭和 Drawer 内 Escape 将焦点返回真实
   原入口；
-- Inspector 仅有“任务 / 上下文投递 / 审批”，不存在 Activity/Audit Tab、旧 route/state 或另一条过程
-  时间线；Task/停止结果入口按 Agent 打开过程，顶栏不存在执行入口；
+- Inspector 仅有“任务 / 队员”，不存在 Context Delivery/Approval/Activity/Audit Tab、旧 route/state
+  或另一条过程时间线；“队员”读取真实 CampMember/AgentProfile，并用既有 Core 命令切换一个符合
+  presence/leave 约束的 Default Lead；Task/停止结果入口按 Agent 打开过程，顶栏不存在执行入口；
+- Approval Dock 是唯一普通审批决定 surface；顶栏与通知摘要只展开、定位并聚焦 Dock，不改变 Inspector
+  显隐或页签。收起/展开不改变队列，解决最后一项后焦点返回 Composer；
 - Drawer 不提供 Agent 或 Run 级 Stop/Cancel/Retry；唯一 CampTurn Stop、Approval Dock 与 Composer 在
   `2560×1440`、`1440×920`、`1040×700`、200% zoom 和 reduced motion 下均可见、可键盘到达且不互相遮挡；
 - `2560×1440` 下 `.composer-box` 与会话工作列都接近 1040px，`Enter` keycap 位于发送按钮紧邻

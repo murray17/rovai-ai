@@ -43,6 +43,8 @@ import {
   TaskPanel,
   agentExecutionProcesses,
   campConversationTimeline,
+  campInspectorMembers,
+  campMemberIsLeadEligible,
   emptyCampRuntimeSummary,
   executionDrawerIsNearBottom,
   executionDisclosureOpenAfterActivity,
@@ -594,11 +596,12 @@ describe('task event projections', () => {
       camp,
       inspectorVisible: false,
       onToggleInspector: () => undefined,
-      onOpenInspector: () => undefined
+      onFocusApprovals: () => undefined
     }))
     expect(campMarkup).toContain('Quick Chat')
     expect(campMarkup).not.toContain('运行中 1')
     expect(campMarkup).toContain('待审批 1')
+    expect(campMarkup).toContain('aria-label="待审批 1，定位输入框上方审批"')
     expect(campMarkup).toContain('aria-label="显示右侧检查器"')
     expect(campMarkup).toContain('aria-pressed="false"')
 
@@ -1349,6 +1352,7 @@ describe('task event projections', () => {
       onResolveApproval: () => undefined,
       stopping: false,
       onStop: () => undefined,
+      inspectorTab: 'members',
       runtimeRecovery: {
         campId: 'camp-1',
         targets: [{
@@ -1370,8 +1374,13 @@ describe('task event projections', () => {
     expect(markup).toContain('先了解项目')
     expect(markup).toContain('整理成任务')
     expect(markup).toContain('检查工作区')
-    expect(markup).toContain('上下文投递')
-    expect(markup).toContain('当前协作配置')
+    expect(markup).toContain('队员 <small>1</small>')
+    expect(markup).toContain('协作队员')
+    expect(markup).toContain('Default Lead · 洛可')
+    expect(markup).toContain('1 位在队 · 0 位暂离')
+    expect(markup).not.toContain('上下文投递')
+    expect(markup).not.toContain('AgentRun 上下文投递清单')
+    expect(markup).not.toContain('value="approvals"')
     expect(markup).not.toContain('当前 Camp 上下文')
     expect(markup).toContain('消息未发送')
     expect(markup).toContain('1 位目标队员暂时不可执行')
@@ -1452,6 +1461,44 @@ describe('task event projections', () => {
     expect(emptyCampRuntimeSummary([member], [ready])).toBe('Agent 运行时可用')
     expect(emptyCampRuntimeSummary([member, secondMember], [ready, unready])).toBe('1/2 个 Agent 运行时可用')
     expect(emptyCampRuntimeSummary([{ ...member, profilePresence: 'away' }], [ready])).toBe('暂无在队的队员')
+  })
+
+  it('projects current Camp members and admits only present members as Default Lead', () => {
+    const present: CampSnapshot['members'][number] = {
+      agentId: 'agent_present', displayName: '洛可', teamRole: '协调',
+      avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', leaveRequestedAt: null,
+      profilePresence: 'present', memberOrder: 2, isDefaultLead: true, version: 1
+    }
+    const away: CampSnapshot['members'][number] = {
+      ...present,
+      agentId: 'agent_away', displayName: '沐瓦', membershipStatus: 'active',
+      profilePresence: 'away', memberOrder: 1, isDefaultLead: false
+    }
+    const leaving: CampSnapshot['members'][number] = {
+      ...present,
+      agentId: 'agent_leaving', displayName: '栖鹿', leaveRequestedAt: '2026-08-11T00:00:00Z',
+      memberOrder: 3, isDefaultLead: false
+    }
+    const removed: CampSnapshot['members'][number] = {
+      ...present,
+      agentId: 'agent_removed', displayName: '已移除', profilePresence: 'removed',
+      memberOrder: 0, isDefaultLead: false
+    }
+    const left: CampSnapshot['members'][number] = {
+      ...present,
+      agentId: 'agent_left', displayName: '已离开', membershipStatus: 'left',
+      memberOrder: 4, isDefaultLead: false
+    }
+
+    expect(campInspectorMembers([present, removed, left, leaving, away]).map((member) => member.agentId)).toEqual([
+      'agent_away',
+      'agent_present',
+      'agent_leaving'
+    ])
+    expect(campMemberIsLeadEligible(present)).toBe(true)
+    expect(campMemberIsLeadEligible(away)).toBe(false)
+    expect(campMemberIsLeadEligible(leaving)).toBe(false)
+    expect(campMemberIsLeadEligible(left)).toBe(false)
   })
 
   it('keeps the Camp composer interactive when reconciliation leaves no Default Lead', () => {
@@ -2004,7 +2051,14 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-label="2 项待审批"')
     expect(markup).toContain('洛可、沐瓦')
     expect(markup).toContain('运行 pnpm test')
+    expect(markup).toContain('aria-label="收起审批详情"')
+    expect(markup).toContain('aria-expanded="true"')
     expect(markup).not.toContain('class="approval-card')
+    expect((markup.match(/role="tab"/g) ?? []).length).toBe(2)
+    expect(markup).toContain('任务 <small>0</small>')
+    expect(markup).toContain('队员 <small>2</small>')
+    expect(markup).not.toContain('上下文投递')
+    expect(markup).not.toContain('>审批<')
     expect(markup.indexOf('class="approval-dock"')).toBeLessThan(markup.indexOf('class="composer"'))
   })
 

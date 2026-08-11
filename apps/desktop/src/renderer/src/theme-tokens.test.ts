@@ -191,6 +191,16 @@ describe('Neutral Porcelain + Steel theme tokens', () => {
     expect(css).toMatch(/\.composer-send\s*\{[^}]*min-height:\s*28px/)
   })
 
+  it('uses a focused Task and Team Inspector without legacy Context or Approval cards', () => {
+    expect(css).toMatch(/\.task-list-row\s*\{[^}]*grid-template-columns:\s*4px minmax\(0, 1fr\) auto/)
+    expect(css).toMatch(/\.task-state-dot\.state-in_progress\s*\{[^}]*background:\s*var\(--brand\)/)
+    expect(css).toMatch(/\.camp-members-summary\s*\{[^}]*position:\s*sticky/)
+    expect(css).toMatch(/\.camp-lead-picker\s*\{[^}]*grid-template-columns:\s*28px minmax\(0, 1fr\) 16px/)
+    expect(css).toMatch(/\.camp-lead-menu-item\[data-disabled\]\s*\{[^}]*cursor:\s*not-allowed/)
+    expect(css).not.toContain('.context-card {')
+    expect(css).not.toContain('.approval-card {')
+  })
+
   it('keeps the Composer Skill picker in the accepted native Steel dropdown', () => {
     expect(css).toMatch(/\.skill-picker-menu\s*\{[^}]*max-height:\s*310px/)
     expect(css).toMatch(/\.skill-picker-menu button\s*\{[^}]*min-height:\s*46px[^}]*grid-template-columns:\s*28px minmax\(0, 1fr\) auto/)
@@ -233,6 +243,9 @@ describe('Neutral Porcelain + Steel theme tokens', () => {
   it('does not reference undeclared custom properties', () => {
     const declared = new Set([...css.matchAll(/(--[a-z0-9-]+)\s*:/gi)].map((match) => match[1]))
     const used = new Set([...css.matchAll(/var\((--[a-z0-9-]+)/gi)].map((match) => match[1]))
-    expect([...used].filter((token) => !declared.has(token))).toEqual([])
+    const runtimeOwned = new Set([
+      '--radix-dropdown-menu-trigger-width'
+    ])
+    expect([...used].filter((token) => !declared.has(token) && !runtimeOwned.has(token))).toEqual([])
   })
 })

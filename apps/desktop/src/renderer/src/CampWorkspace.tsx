@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type JSX, type RefObject } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type JSX, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import * as Dialog from '@radix-ui/react-dialog'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import * as Tabs from '@radix-ui/react-tabs'
 import type {
   ActionApprovalView,
@@ -19,8 +20,7 @@ import type {
   SkillDeliveryGroupView,
   SkillView,
   StoredCommandResult,
-  StructuredCampMessageContent,
-  WorkspaceInspection
+  StructuredCampMessageContent
 } from '@contracts'
 import { EmptyInline } from './ui-elements'
 import { StructuredMentionComposer } from './StructuredMentionComposer'
@@ -48,7 +48,7 @@ import { availableComposerSkillsForLead } from './composer-skill-picker'
 
 const NON_TERMINAL_RUNS = new Set(['queued', 'running', 'waiting'])
 const EXECUTION_EVIDENCE_PAGE_LIMIT = 1_000
-export type CampInspectorTab = 'tasks' | 'context' | 'approvals'
+export type CampInspectorTab = 'tasks' | 'members'
 
 export type AgentExecutionProcess = {
   agentId: string
@@ -393,89 +393,21 @@ export function runtimeOptionsForDisplay(options: ActionApprovalView['options'])
     .map(({ option }) => option)
 }
 
-function workspaceCapabilityStatus(
-  snapshot: CampSnapshot,
-  inspection: WorkspaceInspection | 'unavailable' | null
-): {
-  label: string
-  detail: string
-  tone: 'clean' | 'neutral' | 'attention'
-} {
-  if (snapshot.camp.projectBindingKind === 'quick_chat') {
-    return { label: '快速对话', detail: 'Rovai-ai 管理的快速对话工作区', tone: 'neutral' }
-  }
-  if (inspection === 'unavailable') {
-    return { label: '工作区不可用', detail: '目录当前无法读取；本次执行不会启动。', tone: 'attention' }
-  }
-  if (!inspection) {
-    return { label: '正在检查', detail: '正在探测当前目录能力。', tone: 'neutral' }
-  }
-  if (inspection.gitObservation.state === 'not_git') {
-    return { label: '普通目录', detail: '文件工作可用，Git 相关功能当前不可用。', tone: 'neutral' }
-  }
-  if (inspection.gitObservation.state === 'git_invalid') {
-    return { label: 'Git 状态异常', detail: '普通文件工作可继续，Git 相关功能暂时禁用。', tone: 'attention' }
-  }
-  return inspection.gitObservation.headCommit
-    ? { label: 'Git 仓库', detail: 'Git 相关功能当前可用。', tone: 'clean' }
-    : { label: '空 Git 仓库', detail: 'Git 能力可用，尚无首个提交。', tone: 'clean' }
+export function campInspectorMembers(
+  members: ReadonlyArray<CampSnapshot['members'][number]>
+): CampSnapshot['members'] {
+  return members
+    .filter((member) => member.membershipStatus === 'active' && member.profilePresence !== 'removed')
+    .slice()
+    .sort((left, right) => left.memberOrder - right.memberOrder || left.agentId.localeCompare(right.agentId))
 }
 
-function skillExposurePresentation(status: string): {
-  label: string
-  tone: 'success' | 'attention' | 'danger' | 'neutral'
-  mark: string
-} {
-  switch (status) {
-    case 'ready':
-      return { label: '可发现', tone: 'success', mark: '✓' }
-    case 'stale':
-      return { label: '沿用旧版本', tone: 'attention', mark: '◐' }
-    case 'shadowed':
-      return { label: '项目内容优先', tone: 'attention', mark: '↘' }
-    case 'unsupported':
-      return { label: 'Agent 运行时不支持', tone: 'neutral', mark: '–' }
-    default:
-      return { label: '投影错误', tone: 'danger', mark: '!' }
-  }
-}
-
-function mcpExposurePresentation(status: string): {
-  label: string
-  tone: 'success' | 'attention' | 'danger' | 'neutral'
-  mark: string
-} {
-  switch (status) {
-    case 'ready':
-      return { label: '本轮可用', tone: 'success', mark: '✓' }
-    case 'skipped_native_name_conflict':
-      return { label: '同名原生配置优先', tone: 'attention', mark: '↘' }
-    case 'disabled':
-      return { label: '已停用', tone: 'neutral', mark: '–' }
-    case 'unassigned':
-      return { label: '未分配给队员', tone: 'neutral', mark: '–' }
-    case 'adapter_unsupported':
-      return { label: '本轮未投影', tone: 'neutral', mark: '–' }
-    case 'missing_environment':
-      return { label: '缺少环境变量', tone: 'danger', mark: '!' }
-    default:
-      return { label: '配置无效', tone: 'danger', mark: '!' }
-  }
-}
-
-function skillDeliveryGroupLabel(kind: string): string {
-  switch (kind) {
-    case 'codex': return 'Codex · .codex/skills'
-    case 'opencode': return 'OpenCode · .opencode/skills'
-    case 'copilot': return 'Copilot · .github/skills'
-    case 'claude_compatible': return 'Claude 兼容 · .claude/skills'
-    case 'antigravity': return 'Antigravity · .agent/skills'
-    case 'kiro': return 'Kiro · .kiro/skills'
-    case 'qoder': return 'Qoder · .qoder/skills'
-    case 'codebuddy': return 'CodeBuddy · .codebuddy/skills'
-    case 'qwen': return 'Qwen · .qwen/skills'
-    default: return kind
-  }
+export function campMemberIsLeadEligible(
+  member: CampSnapshot['members'][number]
+): boolean {
+  return member.membershipStatus === 'active'
+    && member.profilePresence === 'present'
+    && member.leaveRequestedAt === null
 }
 
 export function structuredCampContentPlainText(
@@ -563,7 +495,6 @@ export function CampWorkspace({
   snapshot,
   optimisticMessages = [],
   projectName,
-  workspaceInspection = null,
   agents,
   liveRuntimeEvents = [],
   busy,
@@ -588,7 +519,6 @@ export function CampWorkspace({
   snapshot: CampSnapshot
   optimisticMessages?: CampMessageView[]
   projectName: string | null
-  workspaceInspection?: WorkspaceInspection | 'unavailable' | null
   agents: AgentProfile[]
   liveRuntimeEvents?: LiveRuntimeEvent[]
   busy: boolean
@@ -806,9 +736,6 @@ export function CampWorkspace({
     ),
     [composerSkillCatalog.groups, composerSkillCatalog.skills, defaultLead?.agentId]
   )
-  const workspaceStatus = workspaceCapabilityStatus(snapshot, workspaceInspection)
-  const defaultLeadProfile = defaultLead ? profileById.get(defaultLead.agentId) ?? null : null
-  const defaultLeadReady = defaultLeadProfile?.runtimeReadiness.status === 'ready'
   const activeRuns = snapshot.agentRuns.filter((run) => NON_TERMINAL_RUNS.has(run.status))
   const executionBlocked = activeRuns.length > 0 || stopping
   const executionDrawerProcess = executionDrawerAgentId
@@ -978,15 +905,13 @@ export function CampWorkspace({
     if (pendingApprovals.length >= previousCount) return
     if (pendingApprovals.length === 0) {
       composerEditorRef.current?.focus()
-      return
     }
-    approvalDockRef.current
-      ?.querySelector<HTMLButtonElement>('.runtime-option:not(:disabled)')
-      ?.focus()
   }, [pendingApprovals.length])
 
   useEffect(() => {
-    if (!busy && !composerSubmitting) composerEditorRef.current?.focus()
+    if (busy || composerSubmitting) return
+    if (approvalDockRef.current?.contains(document.activeElement)) return
+    composerEditorRef.current?.focus()
   }, [busy, composerSubmitting])
 
   useEffect(() => {
@@ -996,12 +921,6 @@ export function CampWorkspace({
         ? 'auto'
         : 'smooth'
       if (notificationFocus.kind === 'approval') {
-        const option = approvalDockRef.current
-          ?.querySelector<HTMLButtonElement>('.runtime-option:not(:disabled)')
-        if (option) {
-          option.scrollIntoView({ block: 'center', behavior: scrollBehavior })
-          option.focus({ preventScroll: true })
-        }
         return
       }
       const turnId = notificationFocus.campTurnId
@@ -1453,8 +1372,7 @@ export function CampWorkspace({
           >
             <Tabs.List className="tabs-list sticky-tabs" aria-label="Camp 详情">
               <Tabs.Trigger value="tasks">任务 <small>{snapshot.tasks.length}</small></Tabs.Trigger>
-              <Tabs.Trigger value="context">上下文投递 <small>{snapshot.contextManifests.length}</small></Tabs.Trigger>
-              <Tabs.Trigger value="approvals">审批 {pendingApprovals.length > 0 && <b>{pendingApprovals.length}</b>}</Tabs.Trigger>
+              <Tabs.Trigger value="members">队员 <small>{campInspectorMembers(snapshot.members).length}</small></Tabs.Trigger>
             </Tabs.List>
             <Tabs.Content value="tasks" className="tab-scroll task-panel-scroll">
               <TaskPanel
@@ -1466,182 +1384,13 @@ export function CampWorkspace({
                 onOpenAgent={openExecutionProcess}
               />
             </Tabs.Content>
-            <Tabs.Content value="context" className="tab-scroll context-panel">
-              <section className="camp-context-controls" aria-label="当前协作配置">
-                <h3>当前协作配置</h3>
-                <div className="context-control-heading">
-                  <div>
-                    <strong>{projectName ?? '快速对话'}</strong>
-                    <span className={`workspace-summary ${workspaceStatus.tone}`} title={workspaceStatus.detail}>{workspaceStatus.label}</span>
-                  </div>
-                  {!defaultLeadReady && <small>{defaultLead?.displayName ?? 'Default Lead'} 的 Agent 运行时不可用</small>}
-                </div>
-                <label>
-                  <span>Default Lead</span>
-                  <select
-                    value={defaultLead?.agentId ?? ''}
-                    disabled={busy}
-                    onChange={(event) => void onChangeLead(event.currentTarget.value).catch(() => undefined)}
-                  >
-                    {snapshot.members.filter((member) =>
-                      member.membershipStatus === 'active' && member.profilePresence === 'present'
-                    ).map((member) => (
-                      <option value={member.agentId} key={member.agentId}>
-                        {member.displayName}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </section>
-              <div className="context-manifest-heading">
-                <strong>AgentRun 上下文投递清单</strong>
-                <small>冻结内容与投递状态</small>
-              </div>
-              {snapshot.contextManifests.map((manifest) => {
-                const run = runById.get(manifest.agentRunId) ?? null
-                const deliveryStatus = manifest.delivery?.status === 'accepted'
-                  ? { label: '已接收', tone: 'success' as const }
-                  : manifest.delivery?.status === 'delivery_unknown'
-                    ? { label: '待确认', tone: 'danger' as const }
-                    : manifest.delivery
-                      ? { label: '准备中', tone: 'attention' as const }
-                      : { label: '未投递', tone: 'neutral' as const }
-                return (
-                  <article className="context-card" key={manifest.id}>
-                    <div className="context-card-heading">
-                      <div><strong>{run ? memberById.get(run.agentId)?.displayName ?? run.agentId : 'AgentRun'}</strong><code title={manifest.agentRunId}>{shortIdentity(manifest.agentRunId)}</code></div>
-                      <span className={`activity-status tone-${deliveryStatus.tone}`}>{deliveryStatus.label}</span>
-                    </div>
-                    <dl className="context-facts">
-                      <div><dt>Bootstrap</dt><dd>{manifest.bootstrap.deliveryMode === 'native_append' ? 'Native append' : 'First payload'}</dd></div>
-                      <div><dt>已接受边界</dt><dd>seq {manifest.previousAcceptedPublicBoundarySequence}</dd></div>
-                      <div><dt>本次 AgentRun 公共边界</dt><dd>seq {manifest.campMessageBoundarySequence}</dd></div>
-                      <div><dt>最近原文</dt><dd>{manifest.recentMessageCount} 条</dd></div>
-                      <div><dt>原始用户消息</dt><dd>{manifest.originatingPublicUserMessageRef ? '已追溯' : '不适用'}</dd></div>
-                      <div><dt>上下文投递</dt><dd>Profile v{manifest.contextDeliveryProfileVersion}</dd></div>
-                      <div><dt>整条省略</dt><dd>{manifest.omittedMessageCount ? `${manifest.omittedMessageCount} 条 · seq ${manifest.omittedMessageSequenceStart}–${manifest.omittedMessageSequenceEnd}` : '无'}</dd></div>
-                      <div><dt>Binding</dt><dd>Generation {manifest.nativeBindingGeneration}</dd></div>
-                      <div><dt>Formatter</dt><dd>v{manifest.formatterVersion}</dd></div>
-                      <div><dt>Bootstrap 补投</dt><dd>{manifest.delivery?.bootstrapRedeliveryPresent ? `Envelope v${manifest.delivery.bootstrapRedeliveryEnvelopeVersion} · Formatter v${manifest.delivery.bootstrapRedeliveryFormatterVersion}` : '无'}</dd></div>
-                    </dl>
-
-                    {manifest.runNoticeRefs.length > 0 && (
-                      <div className="context-subsection">
-                        <div className="context-subsection-title"><strong>AgentRun Notices</strong><small>冻结时已知的异常行动事实</small></div>
-                        {manifest.runNoticeRefs.map((notice) => (
-                          <code key={`${notice.code}:${notice.taskId ?? ''}`}>
-                            {notice.taskId ? `${notice.code} · Task ${notice.taskId}` : notice.code}
-                          </code>
-                        ))}
-                      </div>
-                    )}
-
-                    {manifest.attachmentRefs.length > 0 && (
-                      <div className="context-subsection">
-                        <div className="context-subsection-title"><strong>Camp Attachment Paths</strong><small>公共稳定路径 · 发现范围随消息边界冻结</small></div>
-                        {manifest.attachmentRefs.map((attachment) => <div className="context-attachment" key={attachment.attachmentId}><div><strong>{shortIdentity(attachment.attachmentId)}</strong><small>{attachment.contentDigest}</small></div><span>冻结范围内可读</span></div>)}
-                      </div>
-                    )}
-
-                    <div className="context-subsection">
-                      <div className="context-subsection-title">
-                        <strong>Skill 投递</strong>
-                        <small>冻结本次 AgentRun 的配置组、Revision 与实际投递路径</small>
-                      </div>
-                      {manifest.skillExposure.skills.map((skill) => {
-                        const presentation = skillExposurePresentation(skill.status)
-                        return (
-                          <div className="skill-exposure-row" key={`${skill.groupKey}:${skill.skillId}`}>
-                            <span className={`skill-exposure-mark tone-${presentation.tone}`} aria-hidden="true">{presentation.mark}</span>
-                            <div>
-                              <strong>{skill.name}</strong>
-                              <small>
-                                {skillDeliveryGroupLabel(skill.groupKey)} · {presentation.label}
-                                {skill.deliveredViaGroupKey && skill.deliveredViaGroupKey !== skill.groupKey
-                                  ? ` · 经 ${skillDeliveryGroupLabel(skill.deliveredViaGroupKey)} 投递`
-                                  : ''}
-                                {skill.conflictStatuses.includes('duplicate_visible') ? ' · Duplicate visible' : ''}
-                              </small>
-                              {skill.reasonCode && <code title={skill.reasonCode}>{skill.reasonCode}</code>}
-                            </div>
-                            <code title={skill.revisionId}>{shortIdentity(skill.revisionId)}</code>
-                          </div>
-                        )
-                      })}
-                      {manifest.skillExposure.skills.length === 0 && (
-                        <p className="context-empty-note">本次 AgentRun 没有 Rovai Skill 投递记录。</p>
-                      )}
-                    </div>
-
-                    <div className="context-subsection">
-                      <div className="context-subsection-title">
-                        <strong>MCP 暴露</strong>
-                        <small>冻结配置摘要，不展示凭据</small>
-                      </div>
-                      {manifest.mcpExposure.configStatus === 'invalid' && (
-                        <p className="context-alert">本轮 MCP 配置无效，未向 Agent 运行时暴露外部 MCP。</p>
-                      )}
-                      {manifest.mcpExposure.servers.map((server) => {
-                        const presentation = mcpExposurePresentation(server.status)
-                        return (
-                          <div className="skill-exposure-row" key={server.name}>
-                            <span className={`skill-exposure-mark tone-${presentation.tone}`} aria-hidden="true">{presentation.mark}</span>
-                            <div>
-                              <strong>{server.name}</strong>
-                              <small>{server.transport === 'stdio' ? 'STDIO' : 'Streamable HTTP'} · {presentation.label}</small>
-                              {server.reason && server.status !== 'adapter_unsupported' && <code title={server.reason}>{server.reason}</code>}
-                            </div>
-                            <code title={server.configDigest}>{shortIdentity(server.configDigest)}</code>
-                          </div>
-                        )
-                      })}
-                      {manifest.mcpExposure.servers.length === 0 && (
-                        <p className="context-empty-note">本次 AgentRun 没有外部 MCP 暴露记录。</p>
-                      )}
-                      {manifest.mcpExposure.warnings.map((warning) => (
-                        <p className="context-alert" key={warning}>{warning}</p>
-                      ))}
-                    </div>
-
-                    <details className="context-digests">
-                      <summary>完整性与版本</summary>
-                      <dl><div><dt>Dynamic Payload</dt><dd><code>{manifest.renderedPayloadDigest}</code></dd></div>{manifest.contextDeliveryProfileDigest && <div><dt>Delivery Profile</dt><dd><code>{manifest.contextDeliveryProfileDigest}</code></dd></div>}<div><dt>Session Charter</dt><dd><code>{manifest.bootstrap.sessionCharterDigest}</code></dd></div><div><dt>Memory Entrypoint</dt><dd><code>{manifest.bootstrap.memoryEntrypointDigest}</code></dd></div><div><dt>Collaboration</dt><dd><code>{manifest.collaborationStateDigest}</code></dd></div><div><dt>AgentRun Notices</dt><dd><code>{manifest.runNoticeDigest}</code></dd></div><div><dt>Attachments</dt><dd><code>{manifest.attachmentDigest}</code></dd></div><div><dt>Skill</dt><dd><code>{manifest.skillExposureDigest}</code></dd></div><div><dt>MCP</dt><dd><code>{manifest.mcpExposureDigest}</code></dd></div></dl>
-                    </details>
-                    {manifest.delivery?.lastError && <p className="context-alert">{manifest.delivery.lastError}</p>}
-                  </article>
-                )
-              })}
-
-              {snapshot.contextManifests.length === 0 && <EmptyInline text="AgentRun 首次调度后，冻结的上下文投递清单会出现在这里。" />}
-            </Tabs.Content>
-            <Tabs.Content value="approvals" className="tab-scroll approvals-panel">
-              {pendingApprovals.map((approval) => (
-                <article className="approval-card pending" key={approval.id}>
-                  <div className="approval-heading"><span className="approval-status status-pending">等待决定</span></div>
-                  <h3>{localizeExecutionEngineTerms(approval.actionSummary)}</h3>
-                  <p className="approval-runtime">{profileById.get(approval.agentId)?.displayName ?? approval.agentId} · {approval.adapterKind}</p>
-                  <p className="approval-reason">{localizeExecutionEngineTerms(approval.reason ?? 'Agent 运行时请求你选择一个原生权限选项。')}</p>
-                  <pre>{JSON.stringify(approval.canonicalInput, null, 2)}</pre>
-                  <div className="approval-actions">
-                    {runtimeOptionsForDisplay(approval.options).map((option) => (
-                      <button
-                        className={`runtime-option option-${option.kind}`}
-                        type="button"
-                        key={option.optionId}
-                        onClick={() => onResolveApproval(approval, option.optionId)}
-                        disabled={busy}
-                      >
-                        <strong>{localizeExecutionEngineTerms(option.label)}</strong>
-                        <small>{localizeExecutionEngineTerms(option.consequence)}</small>
-                      </button>
-                    ))}
-                    {approval.options.length === 0 && <p className="approval-option-error">当前 Agent 运行时未提供可无损回传的原生选项，请求无法提交。</p>}
-                  </div>
-                </article>
-              ))}
-              {pendingApprovals.length === 0 && (
-                <EmptyInline text="当前没有待处理审批；请求会固定显示在输入框正上方，并可在这里查看详情。" />
-              )}
+            <Tabs.Content value="members" className="tab-scroll camp-members-panel">
+              <CampMembersPanel
+                snapshot={snapshot}
+                profileById={profileById}
+                busy={busy}
+                onChangeLead={onChangeLead}
+              />
             </Tabs.Content>
           </Tabs.Root>
           <div className="inspector-meta">
@@ -1656,6 +1405,7 @@ export function CampWorkspace({
               busy={busy}
               onResolve={onResolveApproval}
               containerRef={approvalDockRef}
+              focusRequest={notificationFocus?.kind === 'approval' ? notificationFocus.requestId : null}
             />
           )}
 
@@ -2531,20 +2281,155 @@ function RuntimeRecoveryDock({
   )
 }
 
+function CampMembersPanel({
+  snapshot,
+  profileById,
+  busy,
+  onChangeLead
+}: {
+  snapshot: CampSnapshot
+  profileById: Map<string, AgentProfile>
+  busy: boolean
+  onChangeLead(agentId: string): Promise<void>
+}): JSX.Element {
+  const members = campInspectorMembers(snapshot.members)
+  const defaultLead = members.find((member) => member.isDefaultLead) ?? null
+  const presentCount = members.filter(campMemberIsLeadEligible).length
+  const awayCount = members.length - presentCount
+
+  return (
+    <section aria-label="当前 Camp 队员">
+      <div className="camp-members-summary">
+        <div className="camp-members-summary-line">
+          <div>
+            <strong>协作队员</strong>
+            <small>{presentCount} 位在队 · {awayCount} 位暂离</small>
+          </div>
+          <span className="camp-members-scope">当前 Camp</span>
+        </div>
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <button
+              className="camp-lead-picker"
+              type="button"
+              disabled={busy || presentCount === 0}
+              aria-label={defaultLead
+                ? `Default Lead，${defaultLead.displayName}；更换 Default Lead`
+                : '选择 Default Lead'}
+            >
+              {defaultLead
+                ? <MemberAvatar agentId={defaultLead.agentId} avatarRef={defaultLead.avatarRef} displayName={defaultLead.displayName} size="mention" decorative />
+                : <span className="camp-lead-picker-empty" aria-hidden="true">—</span>}
+              <span className="camp-lead-picker-copy">
+                <strong>Default Lead · {defaultLead?.displayName ?? '未设置'}</strong>
+                <small>{defaultLead?.teamRole || '从在队队员中选择'}</small>
+              </span>
+              <svg className="camp-lead-picker-chevron" aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" viewBox="0 0 16 16">
+                <path d="m4 6 4 4 4-4" />
+              </svg>
+            </button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content
+              className="camp-lead-menu"
+              align="end"
+              sideOffset={5}
+              collisionPadding={10}
+              aria-label="更换 Default Lead"
+            >
+              <DropdownMenu.Label className="camp-lead-menu-label">选择 Default Lead</DropdownMenu.Label>
+              <DropdownMenu.RadioGroup
+                value={defaultLead?.agentId ?? ''}
+                onValueChange={(agentId) => {
+                  if (!agentId || agentId === defaultLead?.agentId) return
+                  void onChangeLead(agentId).catch(() => undefined)
+                }}
+              >
+                {members.map((member) => {
+                  const eligible = campMemberIsLeadEligible(member)
+                  return (
+                    <DropdownMenu.RadioItem
+                      className="camp-lead-menu-item"
+                      value={member.agentId}
+                      key={member.agentId}
+                      disabled={busy || !eligible}
+                      aria-label={`${member.displayName}，${member.teamRole || '团队角色未设置'}${eligible ? '' : '，暂不可选'}`}
+                    >
+                      <MemberAvatar agentId={member.agentId} avatarRef={member.avatarRef} displayName={member.displayName} size="mention" decorative />
+                      <span className="camp-lead-menu-copy">
+                        <strong>{member.displayName}</strong>
+                        <small>{member.teamRole || '团队角色未设置'} · {eligible ? '在队' : '暂离'}</small>
+                      </span>
+                      <DropdownMenu.ItemIndicator className="camp-lead-menu-check">✓</DropdownMenu.ItemIndicator>
+                    </DropdownMenu.RadioItem>
+                  )
+                })}
+              </DropdownMenu.RadioGroup>
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
+      </div>
+
+      <div className="camp-inspector-member-list" role="list" aria-label="Camp 队员列表">
+        {members.map((member) => {
+          const profile = profileById.get(member.agentId) ?? null
+          const present = campMemberIsLeadEligible(member)
+          const presenceLabel = member.leaveRequestedAt
+            ? '正在暂离'
+            : member.profilePresence === 'away'
+              ? '暂离'
+              : '在队'
+          const runtimeLabel = profile ? mentionRuntimeLabel(profile) : 'Agent 运行时未载入'
+          const runtimeTone = profile?.runtimeReadiness.status === 'ready'
+            ? 'ready'
+            : profile?.runtimeReadiness.status === 'needs_attention'
+              ? 'attention'
+              : 'neutral'
+          return (
+            <article className={`camp-inspector-member-row ${present ? '' : 'is-away'}`} role="listitem" key={member.agentId}>
+              <span className="camp-inspector-member-avatar">
+                <MemberAvatar agentId={member.agentId} avatarRef={member.avatarRef} displayName={member.displayName} size="list" decorative />
+                <i className={present ? '' : 'is-away'} aria-hidden="true" />
+              </span>
+              <span className="camp-inspector-member-copy">
+                <span className="camp-inspector-member-name">
+                  <strong>{member.displayName}</strong>
+                  {member.isDefaultLead && <small>Lead</small>}
+                </span>
+                <small>{member.teamRole || '团队角色未设置'}</small>
+              </span>
+              <span className={`camp-inspector-member-state ${present ? '' : 'is-away'}`}>
+                <strong>{presenceLabel}</strong>
+                <small className={`runtime-${runtimeTone}`}>{runtimeLabel}</small>
+              </span>
+            </article>
+          )
+        })}
+        {members.length === 0 && <EmptyInline text="当前 Camp 没有可显示的队员。" />}
+      </div>
+    </section>
+  )
+}
+
 function ApprovalDock({
   approvals,
   profileById,
   busy,
   onResolve,
-  containerRef
+  containerRef,
+  focusRequest
 }: {
   approvals: ActionApprovalView[]
   profileById: Map<string, AgentProfile>
   busy: boolean
   onResolve(approval: ActionApprovalView, optionId: string): void
   containerRef: RefObject<HTMLElement | null>
+  focusRequest: number | null
 }): JSX.Element {
   const [activeIndex, setActiveIndex] = useState(0)
+  const [collapsed, setCollapsed] = useState(false)
+  const contentId = useId()
+  const previousApprovalCount = useRef(approvals.length)
   const currentIndex = Math.min(activeIndex, approvals.length - 1)
   const approval = approvals[currentIndex]
   const memberNames = [...new Set(approvals.map((item) =>
@@ -2555,22 +2440,68 @@ function ApprovalDock({
     if (activeIndex >= approvals.length) setActiveIndex(Math.max(approvals.length - 1, 0))
   }, [activeIndex, approvals.length])
 
+  useEffect(() => {
+    const previousCount = previousApprovalCount.current
+    previousApprovalCount.current = approvals.length
+    if (approvals.length > previousCount) setCollapsed(false)
+    if (approvals.length >= previousCount || approvals.length === 0) return undefined
+    setCollapsed(false)
+    const frame = window.requestAnimationFrame(() => {
+      containerRef.current
+        ?.querySelector<HTMLButtonElement>('.runtime-option:not(:disabled)')
+        ?.focus({ preventScroll: true })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [approvals.length, containerRef])
+
+  useEffect(() => {
+    if (focusRequest !== null) setCollapsed(false)
+  }, [focusRequest])
+
+  useEffect(() => {
+    if (focusRequest === null || collapsed) return undefined
+    const frame = window.requestAnimationFrame(() => {
+      const target = containerRef.current
+        ?.querySelector<HTMLButtonElement>('.runtime-option:not(:disabled)')
+        ?? containerRef.current?.querySelector<HTMLButtonElement>('.approval-dock-collapse')
+      if (!target) return
+      target.scrollIntoView({
+        block: 'center',
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+      })
+      target.focus({ preventScroll: true })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [collapsed, containerRef, focusRequest])
+
   return (
-    <section className="approval-dock" aria-label={`${approvals.length} 项待审批`} ref={containerRef}>
+    <section className={collapsed ? 'approval-dock is-collapsed' : 'approval-dock'} aria-label={`${approvals.length} 项待审批`} ref={containerRef}>
       <header>
         <div>
           <strong>{approvals.length > 1 ? `${approvals.length} 项待审批` : '待审批'}</strong>
           <span>{memberNames.join('、')}</span>
         </div>
-        {approvals.length > 1 && (
-          <nav aria-label="切换审批请求">
+        <nav aria-label="审批请求控制">
+          {approvals.length > 1 && (
+            <>
             <button type="button" aria-label="上一项审批" disabled={currentIndex === 0} onClick={() => setActiveIndex((index) => Math.max(0, index - 1))}>‹</button>
             <span>{currentIndex + 1} / {approvals.length}</span>
             <button type="button" aria-label="下一项审批" disabled={currentIndex === approvals.length - 1} onClick={() => setActiveIndex((index) => Math.min(approvals.length - 1, index + 1))}>›</button>
-          </nav>
-        )}
+            </>
+          )}
+          <button
+            className="approval-dock-collapse"
+            type="button"
+            aria-label={collapsed ? '展开审批详情' : '收起审批详情'}
+            aria-expanded={!collapsed}
+            aria-controls={contentId}
+            onClick={() => setCollapsed((value) => !value)}
+          >
+            {collapsed ? '⌄' : '⌃'}
+          </button>
+        </nav>
       </header>
-      <div className="approval-dock-scroll">
+      {!collapsed && <div className="approval-dock-scroll" id={contentId}>
         <div className="approval-dock-title">
           <strong>{localizeExecutionEngineTerms(approval.actionSummary)}</strong>
           <code>{approval.adapterKind} · {approval.actionKind}</code>
@@ -2594,7 +2525,7 @@ function ApprovalDock({
             <p className="approval-option-error">当前 Agent 运行时未提供可无损回传的原生选项，请求无法提交。</p>
           )}
         </div>
-      </div>
+      </div>}
     </section>
   )
 }

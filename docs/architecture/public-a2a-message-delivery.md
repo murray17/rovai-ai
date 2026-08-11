@@ -140,7 +140,7 @@ CampMessage。
 | 收件人、队列、尝试、waitCondition、目标 Run、终态 | `MessageDelivery` | Dispatch Pump、Delivery Read Side、Drawer、审计 |
 | Runtime 过程和证据 | Canonical Runtime Activity / Execution Evidence | Execution Drawer、审计、诊断 |
 | CampTurn 停止与 fence | CampTurn cancellation authority | Composer Stop、Run/Delivery projection |
-| Approval pending | Approval Read Side | Composer 上方 Approval Dock、Inspector Approvals |
+| Approval pending | Approval Read Side | Composer 上方唯一 Approval Dock；Header/通知摘要只负责定位与聚焦 |
 
 Execution Drawer 只能读取并选择 Run 详情；它不拥有取消命令。CampTurn 存在时 Composer
 发送位置切换为 Stop，由同一 CampTurn 权威 fence 整棵 AgentRun/Delivery 执行树。

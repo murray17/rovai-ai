@@ -67,9 +67,21 @@ last_updated: 2026-08-11
 - [x] 用户消息移除独占 `brand-soft` 气泡，与 Agent 普通正文共用开放阅读平面；
 - [x] 同一作者的相邻真实消息只收紧间距，不隐藏 metadata 或创建回合模型；
 - [x] `min-width: 1800px` 时会话工作列扩展至 1040px，叙述保持约 76ch，代码与表格最多使用 930px；
-- [x] Hover、Focus、Copy、A2A、Task、Approval、AgentRun、Composer 与 Inspector 边界保持不变；
+- [x] Hover、Focus、Copy、A2A、Task、Approval、AgentRun 与 Composer 边界保持不变；
 - [x] 用户、Agent 与 A2A 消息的 Copy 统一锚定消息内容列右上角，不跟随正文或 footer 尺寸漂移；
 - [x] 完成 packaged App 的 1440×920、2560×1440、1040×700 会话视觉验收。
+
+## Checkpoint 7：聚焦 Camp Inspector
+
+- [x] ordinary Inspector 只保留“任务 / 队员”，删除 Context Delivery 与重复 Approval Tab、state、
+  JSX 和专属样式；ContextManifest/Core evidence 保持不变；
+- [x] “队员”页按当前 CampMember 顺序显示真实身份、Presence、Runtime readiness 与 Lead，并以既有
+  versioned `camps.changeDefaultLead` 作为唯一 Camp-local Lead mutation；
+- [x] Approval Dock 成为唯一普通审批决定 surface，支持收起；Header 与通知摘要只展开、定位并聚焦
+  Dock，不改变 Inspector 显隐或页签；
+- [x] ADR-0160、Run Process Detail Surface v3、UI/Architecture/current-version 路由和自动验收脚本同步；
+- [x] 完成 packaged App 的 1440×920、1040×700、200% zoom 双页签、Lead 菜单与 Header-to-Dock
+  焦点验收。
 
 已完成自动化验证：
 
@@ -79,14 +91,15 @@ last_updated: 2026-08-11
 - `cargo test -p rovai-core rebind -- --nocapture`：2 个新增 rebind 测试通过；
 - `cargo test -p rovai-core db::tests::v72_backfills_initial_runtime_evidence_without_overwriting_existing_values -- --nocapture`：Migration 72 回填测试通过；
 - `cargo test -p rovai-core db::tests::v73_removes_expected_output_without_losing_agent_runs -- --nocapture`：Migration 73 删列与历史 Run 保留测试通过；
-- `pnpm exec vitest run apps/desktop/src/renderer/src/theme-tokens.test.ts apps/desktop/src/renderer/src/App.test.ts`：2 个文件、79 项 Renderer 契约通过；
+- `pnpm exec vitest run apps/desktop/src/renderer/src/theme-tokens.test.ts apps/desktop/src/renderer/src/App.test.ts`：2 个文件、81 项 Renderer 契约通过；
 - `pnpm package:mac` 与 `pnpm accept:runtime-activity-ui`：签名 App 验收通过；2560×1440 下会话列 1040px、叙述 622.31px、Composer 1040px，1040×700 无整页或会话列横向溢出；
+- `scripts/capture-camp-inspectors.mjs`：签名 App 在 1440×920、1040×700 与 200% zoom 下均只显示“任务 / 队员”，Lead 菜单真实 mutation、Header-to-Dock 聚焦、Inspector 状态保持及无横向溢出通过；
 - `pnpm accept:member-lifecycle-ui`：用户消息透明开放表面、原生文本选择、Copy、Mention、成员页返回与 200% zoom/reduced motion 回归通过；
 - `cargo test -p rovai-core official_skills_default_to_all_groups_and_preserve_user_changes -- --nocapture`：内置 Skill 初始九组与后续用户修改保持通过；
 - `cargo test -p rovai-core imports_default_to_all_groups_and_updates_preserve_user_changes -- --nocapture`：Imported Skill 初始九组与 Revision 更新保持通过；
 - `cargo test -p rovai-core v74_assigns_every_active_skill_to_all_runtime_groups_once -- --nocapture`：Migration 74 对内置与 Imported Skill 的一次性回填通过；
 - `cargo clippy --workspace --all-targets -- -D warnings` 与 `cargo fmt --all -- --check` 通过；
-- `pnpm docs:test`：21 个测试通过；`pnpm docs:check` 通过，覆盖 58 个版本目录与 158 个 ADR。
+- `pnpm docs:test`：21 个测试通过；`pnpm docs:check` 通过，覆盖 58 个版本目录与 160 个 ADR。
 
 当前限制：自动 rebind 按 AgentRun 持久化限制为一次；尚未用真实 Copilot CLI 原地升级验证
 `dispatch -> refresh -> rebind -> launch` 的完整进程链路，因此本版本仍为 `in_progress`。

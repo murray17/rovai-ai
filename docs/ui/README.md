@@ -79,12 +79,19 @@ AgentRun 过程详情面；Inspector 删除“活动”页。该逐 Run surface 
 
 v0.55 以 Agent 级连续执行过程取代逐 Run 选择：同一 Camp 中每位有 AgentRun 的队员只保留
 一个底部执行过程入口，按需 Drawer 以时间顺序保留该 Agent 的每个 Run stage、收件人与执行证据。
-过程只是一层 Renderer read model，不创建领域 Process 或合并运行事实。Inspector 收敛为“任务 /
+过程只是一层 Renderer read model，不创建领域 Process 或合并运行事实。当时 Inspector 收敛为“任务 /
 上下文投递 / 审批”，Task Related execution 与停止结果均打开对应 Agent 过程；Header 不再显示执行
 入口。详情不提供 Agent/AgentRun 级停止，唯一 CampTurn Stop 仍位于 Composer；Approval Dock 继续
 固定在 Composer 上方，空间不足时过程 surface 收缩或滚动而不遮挡 Approval。完整合同见
 [Run Process Detail Surface v2](../contracts/run-process-detail-surface-v2.md)，实现状态见
 [v0.55 实施计划](../versions/v0.55/implementation-plan.md)。
+
+v0.58 进一步把 ordinary Camp Inspector 收敛为“任务 / 队员”：ContextManifest 和 Runtime Input
+Delivery Evidence 继续留在 Core/Snapshot，但不再占用普通阅读页签；审批只保留 Composer 正上方的
+唯一 Approval Dock。Header 与通知摘要只展开、定位并聚焦该 Dock，不改变 Inspector 显隐或页签。
+“队员”页读取当前 CampMember 与 AgentProfile 事实，并通过既有 versioned Core 命令提供唯一
+Default Lead 选择器。当前合同见
+[Run Process Detail Surface v3](../contracts/run-process-detail-surface-v3.md)。
 
 v0.47 保留 v0.38 的创建位置唯一实时 Task 卡，并把它升级为五态；会话卡继续只显示状态、
 标题和负责人。Inspector list 负责 compact 发现，detail 负责完整责任/审计并只读派生 Related
@@ -126,7 +133,7 @@ Mention，在身份仍可用时复用既有锚定人物信息卡。成功与非�
    Session 启动恢复、登录项和窗口 reset 的版本级 Shell/Renderer 合同。
 5. [v0.51 生产设计](../versions/v0.51/production-design.md)决定诊断中心的摘要、问题、全量结果、单项操作与七态恢复合同。
 6. 原型与 HTML 样例只帮助评审视觉层级，不是生产合同、数据真源或可直接复制的代码。
-7. [Run Process Detail Surface v2](../contracts/run-process-detail-surface-v2.md)决定当前 Camp
+7. [Run Process Detail Surface v3](../contracts/run-process-detail-surface-v3.md)决定当前 Camp
    Agent 执行过程入口、连续 Run stage、Inspector 收敛和与 Approval/Stop 的 layering。
 
 发生冲突时不得用视觉稿覆盖领域或安全合同，也不得用当前旧代码反向覆盖已经冻结的
@@ -221,7 +228,8 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
 - Approval Dock 始终位于 Composer 正上方；Drawer 空间不足时退化为摘要/收起态，不能遮挡
   Dock、Composer 或唯一的 CampTurn Stop。
 - Camp Header 右侧只有待审批摘要和 Inspector 显示/隐藏按钮，没有执行入口、“停止”或 `•••`。
-  停止只占用 Composer 发送位；待审批摘要可恢复 Inspector 并打开“审批”页；置顶、重命名、复制
+  停止只占用 Composer 发送位；待审批摘要只展开、定位并聚焦 Composer 正上方的 Approval Dock，
+  不改变 Inspector 显隐或页签；置顶、重命名、复制
   会话 ID 和删除只从侧栏
   Camp 行进入。
 - 队员页采用半身 portrait + 独立圆形 icon 的双 rendition 身份设计；编辑身份支持

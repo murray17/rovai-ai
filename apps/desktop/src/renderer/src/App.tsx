@@ -251,7 +251,6 @@ export function App(): React.JSX.Element {
   const [newConversationInitialSelection, setNewConversationInitialSelection] = useState<GeneralPreferencesSnapshot['newConversationDefaults']>(null)
   const [newConversationAttention, setNewConversationAttention] = useState<string | null>(null)
   const [explainNewConversationSelectionAdjustments, setExplainNewConversationSelectionAdjustments] = useState(false)
-  const [activeWorkspaceInspection, setActiveWorkspaceInspection] = useState<WorkspaceInspection | 'unavailable' | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
@@ -934,25 +933,6 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     let cancelled = false
-    const camp = campSnapshot?.camp.id === activeCampId ? campSnapshot.camp : null
-    if (!camp || camp.projectBindingKind !== 'directory') {
-      setActiveWorkspaceInspection(null)
-      return undefined
-    }
-    setActiveWorkspaceInspection(null)
-    void window.rovai.request<WorkspaceInspection>('workspaces.inspect', {
-      path: camp.projectPath
-    }).then((inspection) => {
-      if (!cancelled) setActiveWorkspaceInspection(inspection)
-    }).catch(() => {
-      if (!cancelled) setActiveWorkspaceInspection('unavailable')
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [activeCampId, campSnapshot?.camp.id, campSnapshot?.camp.projectBindingKind, campSnapshot?.camp.projectPath])
-  useEffect(() => {
-    let cancelled = false
     let timer: ReturnType<typeof setTimeout> | null = null
     if (!activeCampId || campSnapshot?.camp.id !== activeCampId) return undefined
     const campId = activeCampId
@@ -1225,10 +1205,6 @@ export function App(): React.JSX.Element {
           }
           : null
       setNotificationFocus(target)
-      if (target?.kind === 'approval') {
-        setCampInspectorTab('approvals')
-        setCampInspectorVisible(true)
-      }
       await activateCamp(notification.camp.id, {
         preserveNotificationFocus: target !== null,
         reconcileDefaultLead: notification.sourceAvailable,
@@ -1617,6 +1593,14 @@ export function App(): React.JSX.Element {
     setCampInspectorVisible(true)
   }
 
+  const focusCampApprovals = (): void => {
+    setNotificationFocus({
+      requestId: ++notificationFocusSequence.current,
+      kind: 'approval',
+      campTurnId: null
+    })
+  }
+
   const windowDragPage = view === 'camp' ? null : view
   const pageContentClassName: Record<View, string> = {
     compose: 'task-content compose-content',
@@ -1738,7 +1722,7 @@ export function App(): React.JSX.Element {
         camp={campSnapshot?.camp.id === activeCampId ? campSnapshot : null}
         inspectorVisible={campSnapshot?.camp.activationState === 'active' && campInspectorVisible}
         onToggleInspector={() => setCampInspectorVisible((visible) => !visible)}
-        onOpenInspector={openCampInspector}
+        onFocusApprovals={focusCampApprovals}
       />}
       {windowDragPage && <WindowDragStrip page={windowDragPage} />}
 
@@ -1765,7 +1749,6 @@ export function App(): React.JSX.Element {
               .filter((entry) => entry.campId === activeCampId)
               .map((entry) => entry.message)}
             projectName={activeCampProject?.name ?? null}
-            workspaceInspection={activeWorkspaceInspection}
             agents={agents}
             liveRuntimeEvents={liveRuntimeEvents}
             busy={busy === 'camp-message' || busy === 'change-default-lead' || busy?.startsWith('action-approval-') === true}
@@ -1934,14 +1917,14 @@ export function AppHeader({
   camp,
   inspectorVisible,
   onToggleInspector,
-  onOpenInspector
+  onFocusApprovals
 }: {
   campTitle: string | null
   contextLabel: string | null
   camp: CampSnapshot | null
   inspectorVisible: boolean
   onToggleInspector(): void
-  onOpenInspector(tab: CampInspectorTab): void
+  onFocusApprovals(): void
 }): React.JSX.Element {
   const title = campTitle ?? '正在打开对话'
   const pendingApprovals = camp?.approvals.filter((approval) => approval.status === 'pending').length ?? 0
@@ -1961,8 +1944,8 @@ export function AppHeader({
               <button
                 className="approval-badge"
                 type="button"
-                onClick={() => onOpenInspector('approvals')}
-                aria-label={`待审批 ${pendingApprovals}，打开审批检查器`}
+                onClick={onFocusApprovals}
+                aria-label={`待审批 ${pendingApprovals}，定位输入框上方审批`}
               >
                 ◆ 待审批 {pendingApprovals}
               </button>

@@ -8,6 +8,7 @@ const userDataDir = process.env.ROVAI_CAPTURE_USER_DATA_DIR
 const port = Number(process.env.ROVAI_DEBUG_PORT ?? 9433)
 const width = Number(process.env.ROVAI_CAPTURE_WIDTH ?? 1440)
 const height = Number(process.env.ROVAI_CAPTURE_HEIGHT ?? 920)
+const zoomFactor = Number(process.env.ROVAI_CAPTURE_ZOOM_FACTOR ?? 1)
 const theme = process.env.ROVAI_CAPTURE_THEME ?? null
 const relaxed = process.env.ROVAI_CAPTURE_RELAXED === '1'
 const expectsComposerAttachments =
@@ -35,6 +36,9 @@ if (!appPath || !userDataDir) {
 if (theme && !['system', 'day', 'night'].includes(theme)) {
   throw new Error(`Unknown ROVAI_CAPTURE_THEME: ${theme}`)
 }
+if (!Number.isFinite(zoomFactor) || zoomFactor <= 0) {
+  throw new Error(`Invalid ROVAI_CAPTURE_ZOOM_FACTOR: ${zoomFactor}`)
+}
 
 const executable = join(appPath, 'Contents', 'MacOS', 'Rovai-ai')
 const app = spawn(executable, [
@@ -51,12 +55,23 @@ try {
   const target = await waitForTarget(port)
   const cdp = await connectCdp(target.webSocketDebuggerUrl)
   await cdp.send('Page.bringToFront')
+  const cssWidth = Math.round(width / zoomFactor)
+  const cssHeight = Math.round(height / zoomFactor)
   await cdp.send('Emulation.setDeviceMetricsOverride', {
-    width,
-    height,
-    deviceScaleFactor: 1,
-    mobile: false
+    width: cssWidth,
+    height: cssHeight,
+    deviceScaleFactor: zoomFactor,
+    mobile: false,
+    screenWidth: width,
+    screenHeight: height
   })
+  await waitForExpression(
+    cdp,
+    `window.innerWidth === ${cssWidth}
+      && window.innerHeight === ${cssHeight}
+      && Math.abs(window.devicePixelRatio - ${zoomFactor}) < 0.01`,
+    5_000
+  )
   if (theme) {
     await cdp.send('Runtime.evaluate', {
       expression: `window.rovai.appearance.setPreference(${JSON.stringify(theme)})`,
@@ -68,7 +83,13 @@ try {
   await waitForExpression(cdp, `Boolean(document.querySelector('.camp-nav-row'))`, 45_000)
   await cdp.send('Runtime.evaluate', {
     expression: `(() => {
-      document.querySelector('.camp-nav-row .camp-nav-open')?.click()
+      const requested = ${JSON.stringify(attachmentCampId)}
+      const trigger = requested
+        ? document.querySelector(
+            ${JSON.stringify('.camp-menu-trigger[data-sidebar-menu-target="camp:')} + requested + ${JSON.stringify('"]')}
+          )?.closest('.camp-nav-row')?.querySelector('.camp-nav-open')
+        : document.querySelector('.camp-nav-row .camp-nav-open')
+      trigger?.click()
     })()`,
     returnByValue: true
   })
@@ -89,15 +110,20 @@ try {
       const grid = document.querySelector('.workspace-grid')?.getBoundingClientRect()
       const inspector = document.querySelector('.activity-pane')?.getBoundingClientRect()
       const copy = document.querySelector('.conversation-bubble .message-copy-button')
+      const tabLabels = [...document.querySelectorAll('.activity-tabs > .tabs-list [role="tab"]')]
+        .map((tab) => tab.textContent?.replace(/\\d+/g, '').replace(/\\s+/g, ' ').trim() ?? '')
       return {
         togglePressed: document.querySelector('.topbar-inspector-toggle')?.getAttribute('aria-pressed'),
         aligned: Boolean(track && composer)
-          && Math.abs(track.left - composer.left) <= 2
-          && Math.abs(track.width - composer.width) <= 2,
+          && Math.abs((track.left + track.right) / 2 - (composer.left + composer.right) / 2) <= 9
+          && Math.abs(track.width - composer.width) <= 18,
         inspectorSpansControls: Boolean(grid && inspector)
           && Math.abs(grid.bottom - inspector.bottom) <= 2,
         copyInsideContent: !copy || Boolean(copy.closest('.message-surface')),
         copyAbsentFromMetadata: !document.querySelector('.bubble-meta .message-copy-button'),
+        tabLabels,
+        track: track ? { left: track.left, right: track.right, width: track.width } : null,
+        composer: composer ? { left: composer.left, right: composer.right, width: composer.width } : null,
         horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth
       }
     })()`,
@@ -109,8 +135,54 @@ try {
       || !visibleInspector?.inspectorSpansControls
       || !visibleInspector?.copyInsideContent
       || !visibleInspector?.copyAbsentFromMetadata
+      || JSON.stringify(visibleInspector?.tabLabels) !== JSON.stringify(['任务', '队员'])
       || visibleInspector?.horizontalOverflow) {
     throw new Error(`Visible Camp Inspector acceptance failed: ${JSON.stringify(visibleInspector)}`)
+  }
+  let approvalRouting = { present: false }
+  if (await evaluateValue(cdp, `Boolean(document.querySelector('.approval-badge'))`)) {
+    const approvalBefore = await evaluateValue(cdp, `(() => ({
+      togglePressed: document.querySelector('.topbar-inspector-toggle')?.getAttribute('aria-pressed'),
+      activeTab: document.querySelector('.tabs-list [role="tab"][data-state="active"]')?.textContent
+        ?.replace(/\\d+/g, '').replace(/\\s+/g, ' ').trim() ?? null
+    }))()`)
+    await cdp.send('Runtime.evaluate', {
+      expression: `(() => {
+        const collapse = document.querySelector('.approval-dock-collapse[aria-expanded="true"]')
+        collapse?.click()
+      })()`,
+      returnByValue: true
+    })
+    await waitForExpression(cdp, `document.querySelector('.approval-dock')?.classList.contains('is-collapsed')`, 5_000)
+    await cdp.send('Runtime.evaluate', {
+      expression: `document.querySelector('.approval-badge')?.click()`,
+      returnByValue: true
+    })
+    await waitForExpression(
+      cdp,
+      `!document.querySelector('.approval-dock')?.classList.contains('is-collapsed')
+        && document.activeElement?.matches('.approval-dock .runtime-option:not(:disabled)')`,
+      5_000
+    )
+    const approvalAfter = await evaluateValue(cdp, `(() => ({
+      togglePressed: document.querySelector('.topbar-inspector-toggle')?.getAttribute('aria-pressed'),
+      activeTab: document.querySelector('.tabs-list [role="tab"][data-state="active"]')?.textContent
+        ?.replace(/\\d+/g, '').replace(/\\s+/g, ' ').trim() ?? null,
+      expanded: document.querySelector('.approval-dock-collapse')?.getAttribute('aria-expanded'),
+      optionFocused: document.activeElement?.matches('.approval-dock .runtime-option:not(:disabled)') ?? false
+    }))()`)
+    approvalRouting = {
+      present: true,
+      inspectorUnchanged: approvalAfter.togglePressed === approvalBefore.togglePressed
+        && approvalAfter.activeTab === approvalBefore.activeTab,
+      ...approvalAfter
+    }
+    if (!approvalRouting.inspectorUnchanged
+        || approvalRouting.expanded !== 'true'
+        || !approvalRouting.optionFocused) {
+      throw new Error(`Approval Header-to-Dock routing failed: ${JSON.stringify(approvalRouting)}`)
+    }
+    await capture(cdp, `${outputPrefix}-approval-focus.png`)
   }
   await cdp.send('Runtime.evaluate', {
     expression: `document.querySelector('.topbar-inspector-toggle')?.click()`,
@@ -130,8 +202,8 @@ try {
       return {
         togglePressed: document.querySelector('.topbar-inspector-toggle')?.getAttribute('aria-pressed'),
         aligned: Boolean(track && composer)
-          && Math.abs(track.left - composer.left) <= 2
-          && Math.abs(track.width - composer.width) <= 2,
+          && Math.abs((track.left + track.right) / 2 - (composer.left + composer.right) / 2) <= 9
+          && Math.abs(track.width - composer.width) <= 18,
         inspector: Boolean(document.querySelector('.activity-pane')),
         horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth
       }
@@ -391,9 +463,6 @@ try {
       navigationRestoredDraft: true
     }
   }
-  if (!relaxed) {
-    await waitForExpression(cdp, `document.querySelectorAll('.a2a-row').length === 2`, 30_000)
-  }
   const activityInspection = await cdp.send('Runtime.evaluate', {
     expression: `document.querySelectorAll('.a2a-row').length`,
     returnByValue: true
@@ -403,14 +472,12 @@ try {
 
   if (relaxed) {
     const panelCounts = {}
-    for (const tabName of ['任务', '上下文', '审批', '审计']) {
+    for (const tabName of ['任务', '队员']) {
       await openTab(cdp, tabName)
-      const tabSlug = ({ 任务: 'tasks', 上下文: 'context', 审批: 'approvals', 审计: 'audit' })[tabName]
+      const tabSlug = ({ 任务: 'tasks', 队员: 'members' })[tabName]
       const selector = ({
         任务: '.task-list-row',
-        上下文: '.context-card',
-        审批: '.approval-card',
-        审计: '.audit-row'
+        队员: '.camp-inspector-member-row'
       })[tabName]
       const count = await cdp.send('Runtime.evaluate', {
         expression: `document.querySelectorAll(${JSON.stringify(selector)}).length`,
@@ -429,6 +496,7 @@ try {
     })
     const result = {
       a2aRows,
+      approvalRouting,
       ...panelCounts,
       ...attachments,
       ...relaxedInspection.result?.result?.value
@@ -440,46 +508,98 @@ try {
     console.log(JSON.stringify({ ok: true, ...result }, null, 2))
     process.stdout.write(`${outputPrefix}-activity.png\n`)
     process.stdout.write(`${outputPrefix}-tasks.png\n`)
-    process.stdout.write(`${outputPrefix}-context.png\n`)
-    process.stdout.write(`${outputPrefix}-approvals.png\n`)
-    process.stdout.write(`${outputPrefix}-audit.png\n`)
+    process.stdout.write(`${outputPrefix}-members.png\n`)
     if (captureAttachmentLightbox) {
       process.stdout.write(`${outputPrefix}-attachment-lightbox.png\n`)
     }
+    if (approvalRouting.present) process.stdout.write(`${outputPrefix}-approval-focus.png\n`)
     process.stdout.write(`${outputPrefix}-inspector-hidden.png\n`)
   }
 
   if (!relaxed) {
-    await openTab(cdp, '上下文')
-    await waitForExpression(cdp, `document.querySelectorAll('.context-card').length === 3`, 10_000)
+    await openTab(cdp, '队员')
+    await waitForExpression(cdp, `document.querySelectorAll('.camp-inspector-member-row').length > 0`, 10_000)
+    await cdp.send('Runtime.evaluate', {
+      expression: `(() => {
+        const trigger = document.querySelector('.camp-lead-picker:not(:disabled)')
+        trigger?.focus()
+        trigger?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
+        trigger?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
+        trigger?.click()
+      })()`,
+      returnByValue: true
+    })
+    await waitForExpression(cdp, `Boolean(document.querySelector('.camp-lead-menu'))`, 5_000)
+    await capture(cdp, `${outputPrefix}-members-lead-menu.png`)
+    const leadCandidate = await cdp.send('Runtime.evaluate', {
+      expression: `(() => {
+        const trigger = document.querySelector('.camp-lead-picker')
+        const candidate = [...document.querySelectorAll('.camp-lead-menu-item[role="menuitemradio"]')]
+          .find((item) => !item.hasAttribute('data-disabled') && item.getAttribute('data-state') !== 'checked')
+        const candidateName = candidate?.getAttribute('aria-label')?.split('，')[0] ?? null
+        candidate?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
+        candidate?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
+        candidate?.click()
+        return {
+          previousLead: trigger?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+          candidateName
+        }
+      })()`,
+      returnByValue: true
+    })
+    const leadSelection = leadCandidate.result?.result?.value
+    if (!leadSelection?.candidateName) {
+      throw new Error(`No eligible alternate Default Lead was available: ${JSON.stringify(leadSelection)}`)
+    }
+    await waitForExpression(
+      cdp,
+      `document.querySelector('.camp-lead-picker')?.textContent?.includes(${JSON.stringify(leadSelection.candidateName)})
+        && !document.querySelector('.camp-lead-menu')`,
+      15_000
+    )
     const inspection = await cdp.send('Runtime.evaluate', {
       expression: `(() => {
-        const panel = document.querySelector('.context-panel')
-        const text = panel?.textContent ?? ''
+        const tabLabels = [...document.querySelectorAll('.activity-tabs > .tabs-list [role="tab"]')]
+          .map((tab) => tab.textContent?.replace(/\\d+/g, '').replace(/\\s+/g, ' ').trim() ?? '')
+        const rows = [...document.querySelectorAll('.camp-inspector-member-row')]
+        const triggerText = document.querySelector('.camp-lead-picker')?.textContent?.replace(/\\s+/g, ' ').trim() ?? ''
         return {
-          contextCards: document.querySelectorAll('.context-card').length,
-          compactions: document.querySelectorAll('.compaction-row').length,
-          leakedFrozenPrompt: text.includes('[CURRENT_INPUT]') || text.includes('执行 A2A 验收协议'),
+          tabLabels,
+          memberRows: rows.length,
+          presentRows: rows.filter((row) => !row.classList.contains('is-away')).length,
+          awayRows: rows.filter((row) => row.classList.contains('is-away')).length,
+          summaryPresent: Boolean(document.querySelector('.camp-members-summary')),
+          leadPickerPresent: Boolean(document.querySelector('.camp-lead-picker')),
+          leadChanged: triggerText.includes(${JSON.stringify(leadSelection.candidateName)}),
+          legacyContextTab: tabLabels.includes('上下文投递') || tabLabels.includes('上下文'),
+          legacyApprovalTab: tabLabels.includes('审批'),
           horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth,
-          activeTab: document.activeElement?.textContent?.includes('上下文') ?? false,
+          activeTab: [...document.querySelectorAll('.tabs-list [role="tab"]')]
+            .some((tab) => tab.textContent?.includes('队员') && tab.getAttribute('data-state') === 'active'),
           viewport: { width: window.innerWidth, height: window.innerHeight }
         }
       })()`,
       returnByValue: true
     })
-    const result = { a2aRows, ...inspection.result?.result?.value }
-    if (result.a2aRows !== 2
-        || result?.contextCards !== 3
-        || result?.compactions !== 0
-        || result?.leakedFrozenPrompt
+    const result = { a2aRows, approvalRouting, ...inspection.result?.result?.value }
+    if (JSON.stringify(result?.tabLabels) !== JSON.stringify(['任务', '队员'])
+        || result?.memberRows < 2
+        || !result?.summaryPresent
+        || !result?.leadPickerPresent
+        || !result?.leadChanged
+        || result?.legacyContextTab
+        || result?.legacyApprovalTab
         || result?.horizontalOverflow
         || !result?.activeTab) {
       throw new Error(`Camp Inspector acceptance failed: ${JSON.stringify(result)}`)
     }
-    await capture(cdp, `${outputPrefix}-context.png`)
+    await capture(cdp, `${outputPrefix}-members.png`)
+    await openTab(cdp, '任务')
+    await capture(cdp, `${outputPrefix}-tasks.png`)
     cdp.close()
     console.log(JSON.stringify({ ok: true, ...result }, null, 2))
-    process.stdout.write(`${outputPrefix}-activity.png\n${outputPrefix}-context.png\n${outputPrefix}-inspector-hidden.png\n`)
+    process.stdout.write(`${outputPrefix}-activity.png\n${outputPrefix}-tasks.png\n${outputPrefix}-members.png\n${outputPrefix}-members-lead-menu.png\n${outputPrefix}-inspector-hidden.png\n`)
+    if (approvalRouting.present) process.stdout.write(`${outputPrefix}-approval-focus.png\n`)
   }
 } finally {
   app.kill('SIGTERM')
@@ -538,6 +658,11 @@ async function capture(cdp, path) {
     fromSurface: true
   })
   await writeFile(path, Buffer.from(result.result.data, 'base64'))
+}
+
+async function evaluateValue(cdp, expression) {
+  const result = await cdp.send('Runtime.evaluate', { expression, returnByValue: true })
+  return result.result?.result?.value
 }
 
 async function openTab(cdp, label) {
