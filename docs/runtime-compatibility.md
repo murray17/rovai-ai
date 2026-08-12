@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-08-12
+last_updated: 2026-08-13
 ---
 
 # Agent Runtime 兼容性清单
@@ -19,33 +19,50 @@ Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP
 
 ## 当前 Built-in CLI 正式接入
 
-2026-08-08 的 v0.47 `pnpm smoke:builtin-cli` 在同一轮本机联合矩阵中创建九个真实模型
-AgentRun。每个 Runtime 都只使用固定业务命令，完成全部十三项真实调用、旧 send flag/JSON
-拒绝、一次 stale-version 冲突与 `refresh_then_decide` recovery、完整 Core Envelope Evidence、
-完成后的旧 lease fencing，以及后续 AgentRun 的新 lease。每个完整 AgentRun 都观察到覆盖十三个 canonical
-operation 的 14 条 Core Evidence；没有使用 Agent-facing catalog discovery、mock、fixture 调用
-或单纯 Deep Probe 代替执行。
+2026-08-13 的 v0.67 `pnpm smoke:builtin-cli` 为九个 Runtime 分别创建隔离 Core data-dir、Skill Library
+和 Git workspace，并运行真实模型 AgentRun。每个 Runtime 都完成 13 个 canonical operation、16 条目标
+Core Evidence、direct/stdin/input-file 三种 send 输入、public-only `--to-user`、Agent+user 双轴发送、
+stale-version recovery、完成后的旧 lease fencing 和后继 AgentRun 新 lease。由于当前 Run 的 Context 是
+冻结快照，三条新消息的 exact `camp.read(mode="item")` addressing 由后继 Run 验证；这不是同一 Run
+读取接受后新消息的伪影。每个 Case 同时拒绝旧/虚构 send input，并验证 compact success stdout 不暴露
+`local_user` 或 Notification ID。
 
-| Runtime | 验证版本 / 模型 | 13 项操作 | 冲突 | 初始/恢复 lease fence | continuation | 当前结论 |
-|---|---|---:|---|---|---|---|
-| Codex CLI | `0.146.1` / `gpt-5.6-sol` | 13/13 | pass | pass / pass | logical + native | pass |
-| OpenCode | `1.18.10` / `opencode/big-pickle` | 13/13 | pass | pass / pass | logical + native | pass |
-| GitHub Copilot | `1.0.78` / `claude-sonnet-5` | 13/13 | pass | pass / pass | logical + native | pass |
-| Claude Code | `2.1.220` / runtime default | 13/13 | pass | pass / pass | logical + native | pass |
-| Antigravity | `1.1.11` / runtime default | 13/13 | pass | pass / pass | logical; one-shot native | pass |
-| Kiro | `2.16.1` / `auto` | 13/13 | pass | pass / pass | logical; one-shot native | pass |
-| Qoder | `1.1.14` / `deepseek/deepseek-v4-flash-pg` | 13/13 | pass | pass / pass | logical + native | pass |
-| CodeBuddy | `2.132.0` / `deepseek-v4-flash` | 13/13 | pass | pass / pass | logical + native | pass |
-| Qwen Code | `0.21.5` / `deepseek-v4-flash(openai)` | 13/13 | pass | pass / pass | logical + native | pass |
+同日 `pnpm smoke:skills` 为九个 Runtime 分别验证 `cli-operations` 的复杂协调触发。真实模型从 managed
+Skill projection 读取该 Skill，运行 `rovai task create --help` 与 `rovai send --help`，输出 exact
+`--to-user`，且没有制造 `rovai task --help`、多余的 `task update` 或
+`--request-user-attention` 等不存在/不适用的入口。
+该矩阵同时验证七项 official inventory、默认九组和 managed symlink；不是把 prompt 中的静态答案当作
+Skill 使用证据。
 
-九个 Runtime 的 14 个 Envelope/Projection 样本分别观测到 51.1%–51.5% 字节缩减；这是
-observability metric，不是兼容性或发布门槛。transport-independent response-loss 与
-`outcome_indeterminate` 由确定性 CLI 测试覆盖。
+| Runtime | v0.67 实测版本 / CLI model | 13 项操作 / 三 send 输入 / exact read | conflict / lease fence | continuation | CLI / Skill 结论 |
+|---|---|---|---|---|---|
+| Codex CLI | `codex-cli 0.147.0` / `gpt-5.6-sol` | pass | pass / pass | logical + native | pass / pass |
+| OpenCode | `1.18.10` / `opencode/big-pickle` | pass | pass / pass | logical + native | pass / pass |
+| GitHub Copilot | `GitHub Copilot CLI 1.0.79` / `claude-sonnet-5` | pass | pass / pass | logical + native | pass / pass |
+| Claude Code | `2.1.220` / runtime default | pass | pass / pass | logical + native | pass / pass |
+| Antigravity | `1.1.12` / runtime default | pass | pass / pass | logical + native | pass / pass |
+| Kiro | `2.16.1` / `auto` | pass | pass / pass | logical；每 Run 新 Native Session | pass / pass |
+| Qoder | `1.1.17` / `deepseek/deepseek-v4-flash-pg` | pass | pass / pass | logical + native | pass / pass |
+| CodeBuddy | `2.133.1` / `deepseek-v4-flash` | pass | pass / pass | logical + native | pass / pass |
+| Qwen Code | `0.21.5` / `deepseek-v4-flash(openai)` | pass | pass / pass | logical + native | pass / pass |
+
+九个 Runtime 的 Envelope/Projection 样本分别观测到 57.4%–57.9% 字节缩减；这是 observability
+metric，不是兼容性门槛。Antigravity 的 `agent_run.started` 在首轮日志确认前没有 Session ID，因此
+联合脚本以随后持久绑定的 `agent_run.native_session_bound` 为准；修复后的专项
+`pnpm smoke:antigravity-runtime` 实测两次 Run 使用同一 Native Session。Kiro 的 v0.67 Case 则实测为
+同一 logical Conversation、每 Run 新 Native Session；这不影响本版本 CLI/Skill 合同通过，也不把它
+误报成未验证。transport-independent response-loss、`outcome_indeterminate` 与无 locator stop 继续由
+确定性 CLI/Core 测试覆盖。
 
 当前字段级合同以 [Built-in Tool Transport v7](contracts/builtin-tool-transport-v7.md) 为唯一真源，
-调用结构以 [Built-in Tool Runtime Architecture](architecture/builtin-tool-runtime.md) 为准。上表 v0.47
-实测仍是历史十三项 Transport v4 证据，不自动证明 v0.65 的 `--to-user`、exact Camp read addressing、
-精确 help 或 `cli-operations` progressive discovery；v7 九 Runtime smoke 完成前，不提升该行结论。
+调用结构以 [Built-in Tool Runtime Architecture](architecture/builtin-tool-runtime.md) 为准。
+
+### 历史 v0.47 Transport v4 基线
+
+2026-08-08 的 v0.47 联合矩阵曾证明九个 Runtime 的十三项 Transport v4 操作、冲突恢复与 lease
+fencing；每个完整 AgentRun 观察到 14 条 Core Evidence，Envelope/Projection 缩减为 51.1%–51.5%。
+该历史证据不能单独证明 v0.67 的 `--to-user`、exact Camp read addressing、精确 help 或
+`cli-operations`；这些边界由上方 v7 矩阵接替。
 
 ## Missing-Send Recovery Publication
 

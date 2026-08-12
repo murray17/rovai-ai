@@ -176,7 +176,7 @@ fn item_message_schema() -> Value {
             "messageId", "sequence", "authorType", "authorId", "replyToMessageId",
             "createdAt", "body", "bodyOffset", "bodyLength", "bodyTruncated",
             "nextBodyOffset", "attachmentCount", "attachments", "attachmentsTruncated",
-            "attachmentOmittedCount"
+            "attachmentOmittedCount", "addressing"
         ],
         "properties": {
             "messageId": {"type": "string"},
@@ -205,7 +205,19 @@ fn item_message_schema() -> Value {
                 }
             },
             "attachmentsTruncated": {"type": "boolean"},
-            "attachmentOmittedCount": {"type": "integer", "minimum": 0}
+            "attachmentOmittedCount": {"type": "integer", "minimum": 0},
+            "addressing": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["effectiveAgentRecipients", "mentionsCurrentUser"],
+                "properties": {
+                    "effectiveAgentRecipients": {
+                        "type": "array", "maxItems": 16, "uniqueItems": true,
+                        "items": {"type": "string"}
+                    },
+                    "mentionsCurrentUser": {"type": "boolean"}
+                }
+            }
         }
     })
 }
@@ -461,7 +473,7 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
         json!({
             "name": CAMP_MESSAGE_SEND_TOOL_NAME,
             "title": "Send a public Camp message",
-            "description": "Publish one public Camp message. --to and inline @agent_id wake the addressed Agents; omit both for a public-only update. Addressing your direct caller returns the result and wakes it.",
+            "description": "Publish one public Camp message. --to and inline @agent_id wake Agents; --to-user mentions the current user and creates an Inbox notification. Omit all addressing for a public-only update.",
             "inputSchema": TeamToolService::camp_message_send_input_schema(),
             "outputSchema": {
                 "type": "object",
@@ -671,6 +683,27 @@ mod tests {
         );
         validate_builtin_tool_input(CAMP_MESSAGE_SEND_TOOL_NAME, &json!({"body": "hello"}))
             .unwrap();
+        validate_builtin_tool_input(
+            CAMP_MESSAGE_SEND_TOOL_NAME,
+            &json!({"body": "hello", "mentionUser": true}),
+        )
+        .unwrap();
+        for forbidden in [
+            "userId",
+            "currentUserId",
+            "attentionUserId",
+            "mentionedUserId",
+        ] {
+            let mut input = json!({"body": "hello"});
+            input
+                .as_object_mut()
+                .unwrap()
+                .insert(forbidden.to_string(), json!("local_user"));
+            assert!(
+                validate_builtin_tool_input(CAMP_MESSAGE_SEND_TOOL_NAME, &input).is_err(),
+                "{forbidden} must not cross the closed Agent input boundary"
+            );
+        }
     }
 
     #[test]

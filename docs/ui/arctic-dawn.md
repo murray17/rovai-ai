@@ -3,7 +3,7 @@ document_type: ui-design-system
 authority: renderer-ui-detail
 status: accepted
 design_direction: porcelain-day-steel-night
-target_version: v0.66
+target_version: v0.67
 implementation_status: complete
 last_updated: 2026-08-13
 ---
@@ -53,10 +53,10 @@ v0.61 冻结队员页的来源感知返回：只有从具体 Camp 进入才保�
 directory Project 和“快速对话”分组内的 Camp 语义完全一致；其他一级页面与启动直达统一返回
 App。该目标是当前 Main Window Session 的 Renderer 瞬时状态，不进入 Core 或 Restorable Location。
 
-v0.65 在同一 Porcelain/Steel 系统中增加 Core-owned Current User Mention、Message Mention Inbox
+v0.67 在同一 Porcelain/Steel 系统中补完 Core-owned Current User Mention、Message Mention Inbox
 notification 和独立浮层偏好；同时把 `cli-operations` 作为普通 official bundled Skill 加入现有统一
-Skill 列表。该版本的产品设计已接受，但实现与打包 App 验收尚未完成，状态见
-[v0.65 实施计划](../versions/v0.65/implementation-plan.md)；精确 official inventory 与普通投递见
+Skill 列表。生产实现与 packaged App 验收已完成，状态见
+[v0.67 实施计划](../versions/v0.67/implementation-plan.md)；精确 official inventory 与普通投递见
 [ADR-0167](../adr/0167-seven-skill-official-inventory.md)。
 
 v0.66 保持现有过程 Drawer、状态色和信息架构，只增加 planned-shutdown terminal source/reason 的诚实

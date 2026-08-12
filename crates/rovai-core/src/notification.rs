@@ -4,16 +4,19 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::{
+    camp_content::{StructuredCampMessageContent, render_current_plain_text, validate_content},
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
         DomainCommandGateway, EntityReference, sealed,
     },
+    current_user::CURRENT_USER_ID,
     db::Database,
 };
 
 const DEFAULT_PAGE_LIMIT: usize = 50;
 const MAX_PAGE_LIMIT: usize = 100;
-const IN_APP_NOTIFICATION_ITEM_SCHEMA_VERSION: i64 = 2;
+const IN_APP_NOTIFICATION_ITEM_SCHEMA_VERSION: i64 = 3;
+const MESSAGE_SUMMARY_MAX_SCALARS: usize = 160;
 
 pub(crate) fn maintain_in_app_notification_retention(
     connection: &rusqlite::Connection,
@@ -44,6 +47,7 @@ pub enum InAppNotificationKind {
     RuntimePermissionAttention,
     CampTurnCompleted,
     CampTurnIncomplete,
+    CampMessageUserMention,
 }
 
 impl InAppNotificationKind {
@@ -52,6 +56,7 @@ impl InAppNotificationKind {
             "runtime_permission_attention" => Ok(Self::RuntimePermissionAttention),
             "camp_turn_completed" => Ok(Self::CampTurnCompleted),
             "camp_turn_incomplete" => Ok(Self::CampTurnIncomplete),
+            "camp_message_user_mention" => Ok(Self::CampMessageUserMention),
             _ => anyhow::bail!("unknown In-App Notification kind"),
         }
     }
@@ -86,7 +91,10 @@ pub struct InAppNotificationView {
     pub kind: InAppNotificationKind,
     pub camp: InAppNotificationCampView,
     pub camp_turn_id: Option<String>,
+    pub source_type: Option<String>,
+    pub source_message_id: Option<String>,
     pub source_available: bool,
+    pub message_summary: Option<String>,
     pub attention_state: Option<InAppNotificationAttentionState>,
     pub read_at: Option<String>,
     pub created_at: String,
@@ -121,6 +129,7 @@ pub struct InAppNotificationPreference {
     pub heads_up_enabled: bool,
     pub approval_heads_up_enabled: bool,
     pub execution_heads_up_enabled: bool,
+    pub user_mention_heads_up_enabled: bool,
     pub version: i64,
     pub updated_at: String,
 }
@@ -184,6 +193,7 @@ pub struct UpdateInAppNotificationPreferenceCommand {
     pub heads_up_enabled: bool,
     pub approval_heads_up_enabled: bool,
     pub execution_heads_up_enabled: bool,
+    pub user_mention_heads_up_enabled: bool,
 }
 
 impl sealed::Sealed for UpdateInAppNotificationPreferenceCommand {}
@@ -296,12 +306,12 @@ impl InAppNotificationService {
             params![recipient_user_id, after_sequence, (limit + 1) as i64],
             notification_from_row,
         )?;
-        let mut items = rows
-            .collect::<rusqlite::Result<Vec<_>>>()?
-            .into_iter()
-            .map(validate_notification)
-            .collect::<Result<Vec<_>>>()?;
+        let raw_items = rows.collect::<rusqlite::Result<Vec<_>>>()?;
         drop(statement);
+        let mut items = raw_items
+            .into_iter()
+            .map(|raw| validate_notification(&transaction, raw))
+            .collect::<Result<Vec<_>>>()?;
         let has_more = items.len() > limit;
         if has_more {
             items.truncate(limit);
@@ -513,14 +523,16 @@ impl InAppNotificationService {
                 SET heads_up_enabled = ?1,
                     approval_heads_up_enabled = ?2,
                     execution_heads_up_enabled = ?3,
+                    user_mention_heads_up_enabled = ?4,
                     version = version + 1,
-                    updated_at = ?4
-                WHERE singleton = 1 AND version = ?5
+                    updated_at = ?5
+                WHERE singleton = 1 AND version = ?6
                 "#,
                 params![
                     envelope.payload.heads_up_enabled,
                     envelope.payload.approval_heads_up_enabled,
                     envelope.payload.execution_heads_up_enabled,
+                    envelope.payload.user_mention_heads_up_enabled,
                     now,
                     envelope.payload.expected_version,
                 ],
@@ -551,15 +563,23 @@ fn notification_select() -> &'static str {
     SELECT n.id, n.sequence, n.kind,
            camp.id, camp.title,
            n.camp_turn_id,
+           n.source_message_id,
            CASE
                WHEN n.kind = 'runtime_permission_attention' THEN 1
+               WHEN n.kind = 'camp_message_user_mention'
+                   THEN CASE WHEN source_message.id IS NOT NULL THEN 1 ELSE 0 END
                WHEN camp_turn.id IS NOT NULL THEN 1
                ELSE 0
            END,
+           source_message.structured_content_json,
            n.resolved_at, n.read_at, n.created_at, n.updated_at
     FROM in_app_notification AS n
     JOIN camp ON camp.id = n.camp_id
     LEFT JOIN camp_turn ON camp_turn.id = n.camp_turn_id
+    LEFT JOIN camp_message AS source_message
+      ON source_message.id = n.source_message_id
+     AND source_message.camp_id = n.camp_id
+     AND source_message.tombstoned_at IS NULL
     "#
 }
 
@@ -601,69 +621,106 @@ fn load_notification_page(
             notification_from_row,
         )?
     };
-    rows.collect::<rusqlite::Result<Vec<_>>>()?
+    let raw_items = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(statement);
+    raw_items
         .into_iter()
-        .map(validate_notification)
+        .map(|raw| validate_notification(transaction, raw))
         .collect()
 }
 
-type RawNotification = (
-    String,
-    i64,
-    String,
-    String,
-    String,
-    Option<String>,
-    bool,
-    Option<String>,
-    Option<String>,
-    String,
-    String,
-);
-
-fn notification_from_row(row: &Row<'_>) -> rusqlite::Result<RawNotification> {
-    Ok((
-        row.get(0)?,
-        row.get(1)?,
-        row.get(2)?,
-        row.get(3)?,
-        row.get(4)?,
-        row.get(5)?,
-        row.get(6)?,
-        row.get(7)?,
-        row.get(8)?,
-        row.get(9)?,
-        row.get(10)?,
-    ))
+struct RawNotification {
+    id: String,
+    sequence: i64,
+    kind: String,
+    camp_id: String,
+    camp_title: String,
+    camp_turn_id: Option<String>,
+    source_message_id: Option<String>,
+    source_available: bool,
+    source_structured_content_json: Option<String>,
+    resolved_at: Option<String>,
+    read_at: Option<String>,
+    created_at: String,
+    updated_at: String,
 }
 
-fn validate_notification(raw: RawNotification) -> Result<InAppNotificationView> {
-    let kind = InAppNotificationKind::parse(&raw.2)?;
+fn notification_from_row(row: &Row<'_>) -> rusqlite::Result<RawNotification> {
+    Ok(RawNotification {
+        id: row.get(0)?,
+        sequence: row.get(1)?,
+        kind: row.get(2)?,
+        camp_id: row.get(3)?,
+        camp_title: row.get(4)?,
+        camp_turn_id: row.get(5)?,
+        source_message_id: row.get(6)?,
+        source_available: row.get(7)?,
+        source_structured_content_json: row.get(8)?,
+        resolved_at: row.get(9)?,
+        read_at: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
+    })
+}
+
+fn validate_notification(
+    connection: &rusqlite::Connection,
+    raw: RawNotification,
+) -> Result<InAppNotificationView> {
+    let kind = InAppNotificationKind::parse(&raw.kind)?;
     let attention_state = match kind {
-        InAppNotificationKind::RuntimePermissionAttention => Some(if raw.7.is_some() {
+        InAppNotificationKind::RuntimePermissionAttention => Some(if raw.resolved_at.is_some() {
             InAppNotificationAttentionState::Resolved
         } else {
             InAppNotificationAttentionState::Pending
         }),
-        InAppNotificationKind::CampTurnCompleted | InAppNotificationKind::CampTurnIncomplete => {
-            None
-        }
+        InAppNotificationKind::CampTurnCompleted
+        | InAppNotificationKind::CampTurnIncomplete
+        | InAppNotificationKind::CampMessageUserMention => None,
+    };
+    let is_message_mention = kind == InAppNotificationKind::CampMessageUserMention;
+    let message_summary = if is_message_mention && raw.source_available {
+        let content: StructuredCampMessageContent = serde_json::from_str(
+            raw.source_structured_content_json
+                .as_deref()
+                .context("available message notification has no Structured Content")?,
+        )
+        .context("message notification Structured Content is invalid")?;
+        validate_content(&content)?;
+        Some(bounded_message_summary(&render_current_plain_text(
+            connection, &content,
+        )?))
+    } else {
+        None
     };
     Ok(InAppNotificationView {
-        id: raw.0,
-        sequence: raw.1,
+        id: raw.id,
+        sequence: raw.sequence,
         kind,
         camp: InAppNotificationCampView {
-            id: raw.3,
-            title: raw.4,
+            id: raw.camp_id,
+            title: raw.camp_title,
         },
-        camp_turn_id: raw.5,
-        source_available: raw.6,
+        camp_turn_id: raw.camp_turn_id,
+        source_type: is_message_mention.then(|| "camp_message".to_string()),
+        source_message_id: raw.source_message_id,
+        source_available: raw.source_available,
+        message_summary,
         attention_state,
-        read_at: raw.8,
-        created_at: raw.9,
-        updated_at: raw.10,
+        read_at: raw.read_at,
+        created_at: raw.created_at,
+        updated_at: raw.updated_at,
     })
+}
+
+fn bounded_message_summary(body: &str) -> String {
+    if body.chars().count() <= MESSAGE_SUMMARY_MAX_SCALARS {
+        return body.to_string();
+    }
+    body.chars()
+        .take(MESSAGE_SUMMARY_MAX_SCALARS - 1)
+        .chain(std::iter::once('…'))
+        .collect()
 }
 
 fn notification_high_water(transaction: &Transaction<'_>, _recipient_user_id: &str) -> Result<i64> {
@@ -702,7 +759,8 @@ fn load_preference(connection: &rusqlite::Connection) -> Result<InAppNotificatio
         .query_row(
             r#"
             SELECT heads_up_enabled, approval_heads_up_enabled,
-                   execution_heads_up_enabled, version, updated_at
+                   execution_heads_up_enabled, user_mention_heads_up_enabled,
+                   version, updated_at
             FROM in_app_notification_preference
             WHERE singleton = 1
             "#,
@@ -712,8 +770,9 @@ fn load_preference(connection: &rusqlite::Connection) -> Result<InAppNotificatio
                     heads_up_enabled: row.get(0)?,
                     approval_heads_up_enabled: row.get(1)?,
                     execution_heads_up_enabled: row.get(2)?,
-                    version: row.get(3)?,
-                    updated_at: row.get(4)?,
+                    user_mention_heads_up_enabled: row.get(3)?,
+                    version: row.get(4)?,
+                    updated_at: row.get(5)?,
                 })
             },
         )
@@ -723,7 +782,7 @@ fn load_preference(connection: &rusqlite::Connection) -> Result<InAppNotificatio
 
 fn user_id(actor: &ActorRef) -> Result<&str> {
     match actor {
-        ActorRef::User { user_id } if !user_id.trim().is_empty() => Ok(user_id),
+        ActorRef::User { user_id } if user_id == CURRENT_USER_ID => Ok(user_id),
         _ => anyhow::bail!("In-App Notification commands require a User Actor"),
     }
 }
@@ -856,7 +915,7 @@ mod tests {
                     status, version, requested_at, updated_at, native_options_json
                 ) VALUES (
                     ?1, ?2, 'shell', ?2, 'sha256', '1',
-                    'native permission fixture', 'local-user', '1',
+                    'native permission fixture', 'local_user', '1',
                     'pending', 1, ?3, ?3,
                     '[{"optionId":"deny","kind":"deny","label":"拒绝","consequence":"拒绝","nativeResponseDigest":"digest"}]'
                 )
@@ -905,7 +964,7 @@ mod tests {
         let inbox = InAppNotificationService::default()
             .inbox(
                 &mut database,
-                "local-user",
+                "local_user",
                 InAppNotificationFilter::All,
                 None,
                 50,
@@ -929,7 +988,7 @@ mod tests {
         let renamed = InAppNotificationService::default()
             .inbox(
                 &mut database,
-                "local-user",
+                "local_user",
                 InAppNotificationFilter::All,
                 None,
                 50,
@@ -965,7 +1024,7 @@ mod tests {
         let baseline = service
             .inbox(
                 &mut database,
-                "local-user",
+                "local_user",
                 InAppNotificationFilter::All,
                 None,
                 50,
@@ -980,7 +1039,7 @@ mod tests {
         let envelope = CommandEnvelope {
             command_id: "mark-camp-read".to_string(),
             actor: ActorRef::User {
-                user_id: "local-user".to_string(),
+                user_id: "local_user".to_string(),
             },
             camp_id: Some("camp-one".to_string()),
             expected_versions: Vec::new(),
@@ -997,7 +1056,7 @@ mod tests {
         let unread = service
             .inbox(
                 &mut database,
-                "local-user",
+                "local_user",
                 InAppNotificationFilter::Unread,
                 None,
                 50,
@@ -1018,7 +1077,7 @@ mod tests {
         let remaining = service
             .inbox(
                 &mut database,
-                "local-user",
+                "local_user",
                 InAppNotificationFilter::All,
                 None,
                 50,
@@ -1046,7 +1105,7 @@ mod tests {
         let initial = service
             .inbox(
                 &mut database,
-                "local-user",
+                "local_user",
                 InAppNotificationFilter::All,
                 None,
                 50,
@@ -1061,7 +1120,7 @@ mod tests {
         let clear = CommandEnvelope {
             command_id: "clear-attention".to_string(),
             actor: ActorRef::User {
-                user_id: "local-user".to_string(),
+                user_id: "local_user".to_string(),
             },
             camp_id: Some("camp-attention".to_string()),
             expected_versions: Vec::new(),
@@ -1136,7 +1195,7 @@ mod tests {
         let visible = service
             .inbox(
                 &mut database,
-                "local-user",
+                "local_user",
                 InAppNotificationFilter::All,
                 None,
                 50,
@@ -1146,6 +1205,166 @@ mod tests {
         assert_eq!(
             visible.items[0].attention_state,
             Some(InAppNotificationAttentionState::Pending)
+        );
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn message_mention_projects_summary_and_survives_an_unavailable_source() {
+        let (directory, mut database) = test_database();
+        insert_camp(&database, "camp-message-mention", "Mention Camp");
+        let long_body = format!("{}😀", "界".repeat(MESSAGE_SUMMARY_MAX_SCALARS));
+        let content = vec![
+            crate::camp_content::StructuredCampMessageSegment::CurrentUserMention {
+                user_id: crate::current_user::CURRENT_USER_ID.to_string(),
+            },
+            crate::camp_content::StructuredCampMessageSegment::Text { text: long_body },
+        ];
+        let content_json = serde_json::to_string(&content).unwrap();
+        let projected = render_current_plain_text(database.connection(), &content).unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO camp_message(
+                    id, camp_id, sequence, author_type, author_id, body,
+                    structured_content_json, content_digest, address_mode,
+                    addressed_agent_ids_json, version, created_at, updated_at
+                ) VALUES (
+                    'message-mention', 'camp-message-mention', 1, 'agent', 'agent_1', ?1,
+                    ?2, 'sha256:mention', 'default', '[]', 1,
+                    '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z'
+                )
+                "#,
+                params![projected, content_json],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO in_app_notification(
+                    id, recipient_user_id, kind, camp_id, source_message_id,
+                    version, created_at, updated_at
+                ) VALUES (
+                    'notification-mention', 'local_user', 'camp_message_user_mention',
+                    'camp-message-mention', 'message-mention', 1,
+                    '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z'
+                )
+                "#,
+                [],
+            )
+            .unwrap();
+
+        let service = InAppNotificationService::default();
+        let available = service
+            .inbox(
+                &mut database,
+                "local_user",
+                InAppNotificationFilter::All,
+                None,
+                50,
+            )
+            .unwrap();
+        let item = &available.items[0];
+        assert_eq!(item.source_type.as_deref(), Some("camp_message"));
+        assert_eq!(item.source_message_id.as_deref(), Some("message-mention"));
+        assert!(item.source_available);
+        let summary = item.message_summary.as_deref().unwrap();
+        assert_eq!(summary.chars().count(), MESSAGE_SUMMARY_MAX_SCALARS);
+        assert!(summary.ends_with('…'));
+        assert!(!summary.contains('�'));
+
+        database
+            .connection()
+            .execute(
+                "UPDATE camp_message SET tombstoned_at = '2026-08-01T00:01:00Z' WHERE id = 'message-mention'",
+                [],
+            )
+            .unwrap();
+        let unavailable = service
+            .inbox(
+                &mut database,
+                "local_user",
+                InAppNotificationFilter::All,
+                None,
+                50,
+            )
+            .unwrap();
+        let item = &unavailable.items[0];
+        assert!(!item.source_available);
+        assert_eq!(item.message_summary, None);
+        assert_eq!(item.source_message_id.as_deref(), Some("message-mention"));
+
+        let mark_read = CommandEnvelope {
+            command_id: "mark-unavailable-message-read".to_string(),
+            actor: ActorRef::User {
+                user_id: "local_user".to_string(),
+            },
+            camp_id: Some("camp-message-mention".to_string()),
+            expected_versions: Vec::new(),
+            execution_epoch: None,
+            payload: MarkInAppNotificationReadCommand {
+                notification_id: "notification-mention".to_string(),
+            },
+        };
+        assert_eq!(
+            service
+                .mark_read(&mut database, &mark_read)
+                .unwrap()
+                .result
+                .status,
+            crate::command::CommandResultStatus::Applied
+        );
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn message_mention_source_and_identity_are_closed_and_unique() {
+        let (directory, database) = test_database();
+        insert_camp(&database, "camp-message-source", "Source Camp");
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO camp_message(
+                    id, camp_id, sequence, author_type, author_id, body,
+                    structured_content_json, content_digest, address_mode,
+                    addressed_agent_ids_json, version, created_at, updated_at
+                ) VALUES (
+                    'message-source', 'camp-message-source', 1, 'agent', 'agent_1', 'body',
+                    '[{"kind":"text","text":"body"}]', 'sha256:source', 'default', '[]',
+                    1, '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z'
+                )
+                "#,
+                [],
+            )
+            .unwrap();
+        let insert = |id: &str, recipient: &str, source: &str| {
+            database.connection().execute(
+                r#"
+                INSERT INTO in_app_notification(
+                    id, recipient_user_id, kind, camp_id, source_message_id,
+                    version, created_at, updated_at
+                ) VALUES (?1, ?2, 'camp_message_user_mention', 'camp-message-source', ?3,
+                    1, '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z')
+                "#,
+                params![id, recipient, source],
+            )
+        };
+        insert("notification-source", "local_user", "message-source").unwrap();
+        assert!(insert("notification-duplicate", "local_user", "message-source").is_err());
+        assert!(
+            insert(
+                "notification-invalid-source",
+                "local_user",
+                "missing-message"
+            )
+            .is_err()
         );
 
         drop(database);
@@ -1164,7 +1383,7 @@ mod tests {
                     id, recipient_user_id, kind, camp_id, version,
                     created_at, updated_at
                 ) VALUES (
-                    'notification-expired', 'local-user', 'camp_turn_completed',
+                    'notification-expired', 'local_user', 'camp_turn_completed',
                     'camp-retention', 1, '2000-01-01T00:00:00Z',
                     '2000-01-01T00:00:00Z'
                 );
@@ -1178,7 +1397,7 @@ mod tests {
                     id, recipient_user_id, kind, camp_id, version,
                     created_at, updated_at
                 )
-                SELECT printf('notification-%04d', value), 'local-user',
+                SELECT printf('notification-%04d', value), 'local_user',
                        'camp_turn_completed', 'camp-retention', 1,
                        strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
                        strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
@@ -1197,7 +1416,7 @@ mod tests {
         let page = InAppNotificationService::default()
             .inbox(
                 &mut database,
-                "local-user",
+                "local_user",
                 InAppNotificationFilter::All,
                 None,
                 25,
@@ -1207,7 +1426,7 @@ mod tests {
         assert!(page.next_cursor.is_some());
         assert_eq!(page.through_sequence, 1006);
         let reset = InAppNotificationService::default()
-            .created_since(&mut database, "local-user", 0, 100)
+            .created_since(&mut database, "local_user", 0, 100)
             .unwrap();
         assert!(reset.reset_required);
         assert_eq!(reset.next_sequence, 1006);
@@ -1240,7 +1459,7 @@ mod tests {
         let empty = InAppNotificationService::default()
             .inbox(
                 &mut database,
-                "local-user",
+                "local_user",
                 InAppNotificationFilter::All,
                 None,
                 50,

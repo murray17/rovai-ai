@@ -93,6 +93,7 @@ use rovai_core::{
         RuntimeInputDelivery,
     },
     core_data_dir_lock::CoreDataDirLock,
+    current_user::CURRENT_USER_ID,
     db::Database,
     diagnostics::{
         DiagnosticCheck, DiagnosticGroup, DiagnosticStatus, DiagnosticsReport, aggregate_counts,
@@ -3642,7 +3643,7 @@ impl Core {
                         &database,
                         &params.camp_id,
                         &ActorRef::User {
-                            user_id: "local-user".to_string(),
+                            user_id: CURRENT_USER_ID.to_string(),
                         },
                         None,
                         &TaskListQuery {
@@ -3663,7 +3664,7 @@ impl Core {
                         &params.camp_id,
                         &params.task_id,
                         &ActorRef::User {
-                            user_id: "local-user".to_string(),
+                            user_id: CURRENT_USER_ID.to_string(),
                         },
                         None,
                     )?,
@@ -3770,7 +3771,7 @@ impl Core {
                     &CommandEnvelope {
                         command_id: params.command_id,
                         actor: ActorRef::User {
-                            user_id: "local-user".to_string(),
+                            user_id: CURRENT_USER_ID.to_string(),
                         },
                         camp_id: Some(params.camp_id),
                         expected_versions: Vec::new(),
@@ -3792,7 +3793,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     InAppNotificationService::default().inbox(
                         &mut database,
-                        "local-user",
+                        CURRENT_USER_ID,
                         params.filter,
                         params.cursor.as_deref(),
                         params.limit,
@@ -3806,7 +3807,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     InAppNotificationService::default().created_since(
                         &mut database,
-                        "local-user",
+                        CURRENT_USER_ID,
                         params.after_sequence,
                         params.limit,
                     )?,
@@ -4001,7 +4002,7 @@ impl Core {
         let envelope = CommandEnvelope {
             command_id: params.command_id.clone(),
             actor: ActorRef::User {
-                user_id: "local-user".to_string(),
+                user_id: CURRENT_USER_ID.to_string(),
             },
             camp_id: Some(params.camp_id.clone()),
             expected_versions: Vec::new(),
@@ -7540,7 +7541,7 @@ fn user_command_envelope<P>(command_id: String, payload: P) -> CommandEnvelope<P
     CommandEnvelope {
         command_id,
         actor: ActorRef::User {
-            user_id: "local-user".to_string(),
+            user_id: CURRENT_USER_ID.to_string(),
         },
         camp_id: None,
         expected_versions: Vec::new(),
@@ -7557,7 +7558,7 @@ fn user_camp_command_envelope<P>(
     CommandEnvelope {
         command_id,
         actor: ActorRef::User {
-            user_id: "local-user".to_string(),
+            user_id: CURRENT_USER_ID.to_string(),
         },
         camp_id: Some(camp_id),
         expected_versions: Vec::new(),
@@ -9116,7 +9117,7 @@ async fn process_agent_run_acp_approval_request(
                     runtime_request: Some(action_request.runtime_request),
                     reason: request_reason.clone(),
                     execute_before: None,
-                    requested_for_user_id: "local-user".to_string(),
+                    requested_for_user_id: CURRENT_USER_ID.to_string(),
                 },
             },
         )
@@ -10248,7 +10249,7 @@ async fn process_agent_run_approval_request(
                     runtime_request: Some(action_request.runtime_request),
                     reason: request_reason.clone(),
                     execute_before: None,
-                    requested_for_user_id: "local-user".to_string(),
+                    requested_for_user_id: CURRENT_USER_ID.to_string(),
                 },
             },
         )

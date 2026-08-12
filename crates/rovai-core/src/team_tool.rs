@@ -61,6 +61,8 @@ pub struct CampMessageSendInput {
     pub body: String,
     #[serde(default)]
     pub to: Vec<String>,
+    #[serde(default)]
+    pub mention_user: bool,
     pub task_id: Option<String>,
 }
 
@@ -132,6 +134,7 @@ pub struct CampMessageSendCommand {
     camp_id: String,
     body: String,
     to: Vec<String>,
+    mention_user: bool,
     task_id: Option<String>,
 }
 
@@ -421,6 +424,11 @@ impl TeamToolService {
                     "uniqueItems": true,
                     "items": {"type": "string", "minLength": 1},
                     "description": "Optional Agent to wake; repeat for multiple recipients. Input order is presentation metadata, never scheduling priority."
+                },
+                "mentionUser": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Mention the current user and create an Inbox notification; creates no Agent delivery."
                 },
                 "taskId": {
                     "type": "string",
@@ -901,6 +909,7 @@ impl TeamToolService {
                 camp_id: recorded.camp_id.clone(),
                 body: invocation.input.body.clone(),
                 to: invocation.input.to.clone(),
+                mention_user: invocation.input.mention_user,
                 task_id: invocation.input.task_id.clone(),
             };
             let replay_envelope = CommandEnvelope {
@@ -933,6 +942,7 @@ impl TeamToolService {
             camp_id: sender.camp_id.clone(),
             body: invocation.input.body.clone(),
             to: invocation.input.to.clone(),
+            mention_user: invocation.input.mention_user,
             task_id: invocation.input.task_id.clone(),
         };
         let envelope = CommandEnvelope {
@@ -994,6 +1004,7 @@ impl TeamToolService {
                     current_a2a_depth: current.a2a_depth,
                     body: &envelope.payload.body,
                     explicit_recipients: &envelope.payload.to,
+                    mention_user: envelope.payload.mention_user,
                     task_id: envelope.payload.task_id.as_deref(),
                 },
             )
@@ -1587,7 +1598,7 @@ mod tests {
         CommandEnvelope {
             command_id: command_id.to_string(),
             actor: ActorRef::User {
-                user_id: "local-user".to_string(),
+                user_id: "local_user".to_string(),
             },
             camp_id: camp_id.map(str::to_string),
             expected_versions: Vec::new(),
@@ -1794,6 +1805,7 @@ mod tests {
                 input: CampMessageSendInput {
                     body: body.to_string(),
                     to: to.iter().map(|value| (*value).to_string()).collect(),
+                    mention_user: false,
                     task_id: None,
                 },
             }
@@ -1987,7 +1999,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .unwrap();
-        assert_eq!(message.0, "Please inspect this @agent_2");
+        assert_eq!(message.0, "Please inspect this @小河狸");
         assert_eq!(message.1, r#"["agent_2"]"#);
         assert_eq!(
             serde_json::from_str::<Value>(&message.2).unwrap()["inlineOrder"],
@@ -2120,6 +2132,245 @@ mod tests {
             )
             .unwrap();
         assert_eq!(after, before);
+    }
+
+    #[test]
+    fn current_user_attention_is_orthogonal_atomic_and_replay_safe() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        let before_slots: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT SUM(a2a_run_slots_allocated) FROM camp_turn",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut invocation = fixture.public_send_invocation(
+            "public-current-user-attention",
+            "Please choose A or B",
+            &[],
+        );
+        invocation.input.mention_user = true;
+
+        let sent = service
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
+        assert_eq!(sent.result.payload["effectiveRecipients"], json!([]));
+        assert_eq!(sent.result.payload["deliveryIds"], json!([]));
+        let message_id = sent.result.payload["messageId"].as_str().unwrap();
+        let (body, content_json): (String, String) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT body, structured_content_json FROM camp_message WHERE id = ?1",
+                [message_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(body, "@你 Please choose A or B");
+        assert_eq!(
+            serde_json::from_str::<Value>(&content_json).unwrap(),
+            json!([
+                {"kind": "current_user_mention", "userId": "local_user"},
+                {"kind": "text", "text": "Please choose A or B"}
+            ])
+        );
+        let notification: (String, String, String) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT kind, recipient_user_id, source_message_id
+                FROM in_app_notification
+                WHERE kind = 'camp_message_user_mention'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(notification.0, "camp_message_user_mention");
+        assert_eq!(notification.1, "local_user");
+        assert_eq!(notification.2, message_id);
+        let after_slots: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT SUM(a2a_run_slots_allocated) FROM camp_turn",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(after_slots, before_slots);
+
+        let replay = service
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.result.payload["messageId"], message_id);
+        let notification_count: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM in_app_notification WHERE kind = 'camp_message_user_mention'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(notification_count, 1);
+    }
+
+    #[test]
+    fn current_user_text_lookalikes_do_not_create_attention() {
+        let mut fixture = Fixture::new();
+        let invocation = fixture.public_send_invocation(
+            "public-current-user-lookalikes",
+            "@你 @local_user @local-user are plain text",
+            &[],
+        );
+        TeamToolService::default()
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+        let notification_count: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM in_app_notification WHERE kind = 'camp_message_user_mention'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(notification_count, 0);
+    }
+
+    #[test]
+    fn task_linkage_ignores_current_user_attention_for_recipient_cardinality() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        let mut ambiguous = fixture.public_send_invocation(
+            "task-user-only-is-ambiguous",
+            "This must not be accepted",
+            &[],
+        );
+        ambiguous.input.mention_user = true;
+        ambiguous.input.task_id = Some(fixture.task_id.clone());
+        let rejected = service
+            .send_public_message(&mut fixture.database, &ambiguous)
+            .unwrap();
+        assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
+        assert_eq!(rejected.result.code, "message.task_recipient_ambiguous");
+        let rejected_effects: (i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT
+                    (SELECT COUNT(*) FROM camp_message WHERE body LIKE '%must not be accepted%'),
+                    (SELECT COUNT(*) FROM in_app_notification
+                     WHERE kind = 'camp_message_user_mention')
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(rejected_effects, (0, 0));
+
+        let target_task = CollaborationService::default()
+            .create_task(
+                &mut fixture.database,
+                &user_envelope(
+                    "create-user-attention-target-task",
+                    Some(&fixture.camp_id),
+                    CreateTaskCommand {
+                        camp_id: fixture.camp_id.clone(),
+                        title: "User attention target task".to_string(),
+                        assignee_agent_id: "agent_2".to_string(),
+                        ..Default::default()
+                    },
+                ),
+            )
+            .unwrap();
+        let target_task_id = target_task.result.payload["taskId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let mut accepted = fixture.public_send_invocation(
+            "task-agent-and-user-is-valid",
+            "Coordinate the linked responsibility",
+            &["agent_2"],
+        );
+        accepted.input.mention_user = true;
+        accepted.input.task_id = Some(target_task_id);
+        let sent = service
+            .send_public_message(&mut fixture.database, &accepted)
+            .unwrap();
+        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
+        assert_eq!(
+            sent.result.payload["effectiveRecipients"],
+            json!(["agent_2"])
+        );
+    }
+
+    #[test]
+    fn notification_write_failure_rolls_back_the_entire_send() {
+        let mut fixture = Fixture::new();
+        fixture
+            .database
+            .connection()
+            .execute_batch(
+                r#"
+                CREATE TRIGGER reject_test_user_mention_notification
+                BEFORE INSERT ON in_app_notification
+                WHEN NEW.kind = 'camp_message_user_mention'
+                BEGIN
+                    SELECT RAISE(ABORT, 'test notification failure');
+                END;
+                "#,
+            )
+            .unwrap();
+        let before_sequence: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT last_message_sequence FROM camp WHERE id = ?1",
+                [&fixture.camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut invocation = fixture.public_send_invocation(
+            "notification-failure-is-atomic",
+            "No partial message",
+            &["agent_2"],
+        );
+        invocation.input.mention_user = true;
+        let error = TeamToolService::default()
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("test notification failure"));
+        let after: (i64, i64, i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT
+                    last_message_sequence,
+                    (SELECT COUNT(*) FROM camp_message WHERE body LIKE '%No partial message%'),
+                    (SELECT COUNT(*) FROM message_delivery
+                     WHERE source_agent_run_id = ?2 AND created_at >= '2000-01-01'),
+                    (SELECT COUNT(*) FROM in_app_notification
+                     WHERE kind = 'camp_message_user_mention')
+                FROM camp WHERE id = ?1
+                "#,
+                rusqlite::params![fixture.camp_id, fixture.source_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(after.0, before_sequence);
+        assert_eq!(after.1, 0);
+        assert_eq!(after.2, 0);
+        assert_eq!(after.3, 0);
     }
 
     #[test]

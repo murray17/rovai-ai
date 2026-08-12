@@ -1218,7 +1218,7 @@ async function createCampFixture(
       structured_content_json, address_mode,
       addressed_agent_ids_json, version, created_at, updated_at
     ) VALUES (
-      ${sqlLiteral(messageId)}, ${sqlLiteral(id)}, 1, 'user', 'local-user',
+      ${sqlLiteral(messageId)}, ${sqlLiteral(id)}, 1, 'user', 'local_user',
       '@luoke 验证用户消息复制',
       '[{"kind":"text","text":"@luoke 验证用户消息复制"}]',
       'explicit', '["agent_1"]',

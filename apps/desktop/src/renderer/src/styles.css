@@ -1426,6 +1426,10 @@ button:disabled { opacity: 0.52; cursor: default; }
   text-decoration: underline wavy var(--attention);
   text-underline-offset: 2px;
 }
+.message-mention-token.current-user {
+  color: var(--mention-ink);
+  cursor: text;
+}
 .message-mention-token.is-interactive { cursor: pointer; }
 .message-mention-token.is-interactive:hover,
 .message-mention-token.is-interactive[data-mention-open="true"] {
@@ -4343,6 +4347,7 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 .notification-list { min-height: 0; flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
 .notification-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 34px; border-bottom: 1px solid var(--line); background: var(--surface-raised); }
 .notification-row:hover { background: var(--surface-subtle); }
+.notification-row.highlighted { box-shadow: inset 3px 0 0 var(--mention-ink); background: color-mix(in srgb, var(--mention-ink) 7%, var(--surface-raised)); }
 .notification-row-open { display: grid; min-width: 0; grid-template-columns: 9px minmax(0, 1fr) auto; gap: 9px; align-items: start; padding: 13px 4px 13px 17px; border: 0; background: transparent; cursor: pointer; text-align: left; }
 .notification-unread-mark { width: 7px; height: 7px; margin-top: 5px; border: 1px solid var(--line-strong); border-radius: 2px; background: transparent; }
 .notification-row.unread .notification-unread-mark { border-color: var(--brand); background: var(--brand); }

@@ -1018,7 +1018,7 @@ mod tests {
         CommandEnvelope {
             command_id: command_id.into(),
             actor: ActorRef::User {
-                user_id: "local-user".to_string(),
+                user_id: "local_user".to_string(),
             },
             camp_id: None,
             expected_versions: Vec::new(),
@@ -1088,7 +1088,7 @@ mod tests {
             memory.revisions[0].actor_kind,
             Some(MemoryRevisionActorKind::User)
         );
-        assert_eq!(memory.revisions[0].actor_id.as_deref(), Some("local-user"));
+        assert_eq!(memory.revisions[0].actor_id.as_deref(), Some("local_user"));
         let fts_rows: i64 = database
             .connection()
             .query_row("SELECT COUNT(*) FROM memory_fts", [], |row| row.get(0))

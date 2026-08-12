@@ -18,6 +18,41 @@ import type {
 
 type LoadState = 'loading' | 'ready' | 'error'
 
+export type NotificationHeadsUpEntry = {
+  notifications: InAppNotificationView[]
+}
+
+export function enqueueNotificationHeadsUps(
+  current: readonly NotificationHeadsUpEntry[],
+  incoming: readonly InAppNotificationView[],
+  maximumEntries = 3
+): { entries: NotificationHeadsUpEntry[]; overflow: number } {
+  const entries = current.map((entry) => ({ notifications: [...entry.notifications] }))
+  const known = new Set(entries.flatMap((entry) => entry.notifications.map((item) => item.id)))
+  let overflow = 0
+  for (const notification of incoming) {
+    if (known.has(notification.id)) continue
+    known.add(notification.id)
+    const visible = entries[0]
+    const visibleAnchor = visible?.notifications[0]
+    if (
+      visible
+      && visibleAnchor?.kind === 'camp_message_user_mention'
+      && notification.kind === 'camp_message_user_mention'
+      && visibleAnchor.camp.id === notification.camp.id
+    ) {
+      visible.notifications.push(notification)
+      continue
+    }
+    if (entries.length < maximumEntries) {
+      entries.push({ notifications: [notification] })
+    } else {
+      overflow += 1
+    }
+  }
+  return { entries, overflow }
+}
+
 export function notificationInboxWithPendingReads(
   inbox: InAppNotificationInbox,
   pendingReadAtById: ReadonlyMap<string, string>,
@@ -73,8 +108,9 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
   const [error, setError] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
   const [preference, setPreference] = useState<InAppNotificationPreference | null>(null)
-  const [headsUpQueue, setHeadsUpQueue] = useState<InAppNotificationView[]>([])
+  const [headsUpQueue, setHeadsUpQueue] = useState<NotificationHeadsUpEntry[]>([])
   const [headsUpOverflow, setHeadsUpOverflow] = useState(0)
+  const [aggregateFocusIds, setAggregateFocusIds] = useState<Set<string>>(new Set())
   const creationCursor = useRef(0)
   const baselineReady = useRef(false)
   const pollRunning = useRef(false)
@@ -91,12 +127,13 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
   useImperativeHandle(ref, () => ({
     open(trigger = null): void {
       returnFocusRef.current = trigger
+      setAggregateFocusIds(new Set())
       setOpen(true)
     }
   }), [])
 
   const acceptInbox = useCallback((inbox: InAppNotificationInbox): void => {
-    if (inbox.schemaVersion !== 2) throw new Error('通知中心合同不兼容。')
+    if (inbox.schemaVersion !== 3) throw new Error('通知中心合同不兼容。')
     for (const item of inbox.items) {
       if (item.readAt !== null) pendingReadAtById.current.delete(item.id)
     }
@@ -110,17 +147,20 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
     setUnreadCount(acceptedInbox.unreadCount)
     setThroughSequence(acceptedInbox.throughSequence)
     const currentById = new Map(acceptedInbox.items.map((item) => [item.id, item]))
-    setHeadsUpQueue((current) => current.flatMap((item) => {
-      const latest = currentById.get(item.id)
-      if (
-        !latest
-        || latest.readAt !== null
-        || (
-          latest.kind === 'runtime_permission_attention'
-          && latest.attentionState === 'resolved'
-        )
-      ) return []
-      return [latest]
+    setHeadsUpQueue((current) => current.flatMap((entry) => {
+      const notifications = entry.notifications.flatMap((item) => {
+        const latest = currentById.get(item.id)
+        if (
+          !latest
+          || latest.readAt !== null
+          || (
+            latest.kind === 'runtime_permission_attention'
+            && latest.attentionState === 'resolved'
+          )
+        ) return []
+        return [latest]
+      })
+      return notifications.length > 0 ? [{ notifications }] : []
     }))
     onUnreadCountChange(acceptedInbox.unreadCount)
   }, [filter, onUnreadCountChange])
@@ -172,6 +212,7 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
       typeof next.headsUpEnabled !== 'boolean'
       || typeof next.approvalHeadsUpEnabled !== 'boolean'
       || typeof next.executionHeadsUpEnabled !== 'boolean'
+      || typeof next.userMentionHeadsUpEnabled !== 'boolean'
       || typeof next.version !== 'number'
     ) throw new Error('通知设置合同不兼容。')
     setPreference(next)
@@ -206,6 +247,19 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
     void loadInbox(filter).catch(() => undefined)
   }, [filter, loadInbox, open])
 
+  useEffect(() => {
+    if (!open || aggregateFocusIds.size === 0) return undefined
+    const frame = window.requestAnimationFrame(() => {
+      const firstId = [...aggregateFocusIds][0]
+      const target = document.querySelector<HTMLElement>(
+        `[data-notification-id="${CSS.escape(firstId)}"] .notification-row-open`
+      )
+      target?.focus({ preventScroll: true })
+      target?.scrollIntoView({ block: 'nearest' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [aggregateFocusIds, items, open])
+
   const markRead = useCallback(async (notificationId: string): Promise<void> => {
     const result = await window.rovai.request<StoredCommandResult>('notifications.markRead', {
       commandId: crypto.randomUUID(),
@@ -216,13 +270,11 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
 
   const enqueueHeadsUps = useCallback((incoming: InAppNotificationView[]): void => {
     setHeadsUpQueue((current) => {
-      const known = new Set(current.map((item) => item.id))
-      const eligible = incoming.filter((item) => !known.has(item.id))
-      const available = Math.max(0, 3 - current.length)
-      const queued = eligible.slice(0, available)
-      const overflow = eligible.length - queued.length
-      if (overflow > 0) setHeadsUpOverflow((count) => count + overflow)
-      return [...current, ...queued]
+      const next = enqueueNotificationHeadsUps(current, incoming)
+      if (next.overflow > 0) {
+        setHeadsUpOverflow((count) => count + next.overflow)
+      }
+      return next.entries
     })
   }, [])
 
@@ -241,7 +293,7 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
           'notifications.createdSince',
           { afterSequence: creationCursor.current, limit: 100 }
         )
-        if (batch.schemaVersion !== 2) throw new Error('通知增量合同不兼容。')
+        if (batch.schemaVersion !== 3) throw new Error('通知增量合同不兼容。')
         if (batch.resetRequired) {
           creationCursor.current = batch.throughSequence
           break
@@ -340,7 +392,10 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
       if (item.id !== notification.id || item.readAt !== null) return item
       return { ...item, readAt }
     }))
-    setHeadsUpQueue((current) => current.filter((item) => item.id !== notification.id))
+    setHeadsUpQueue((current) => current.flatMap((entry) => {
+      const notifications = entry.notifications.filter((item) => item.id !== notification.id)
+      return notifications.length > 0 ? [{ notifications }] : []
+    }))
     setUnreadCount((count) => {
       const next = Math.max(0, count - 1)
       onUnreadCountChange(next)
@@ -366,6 +421,9 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
 
   const openNotification = async (notification: InAppNotificationView): Promise<void> => {
     if (optimisticRead(notification)) void persistOptimisticRead(notification.id)
+    if (notification.kind === 'camp_message_user_mention' && !notification.sourceAvailable) {
+      return
+    }
     setOpen(false)
     await onNavigate(notification)
   }
@@ -436,7 +494,7 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
         cursor: nextCursor,
         limit: 50
       })
-      if (page.schemaVersion !== 2) throw new Error('通知中心合同不兼容。')
+      if (page.schemaVersion !== 3) throw new Error('通知中心合同不兼容。')
       setItems((current) => {
         const ids = new Set(current.map((item) => item.id))
         return [...current, ...page.items.filter((item) => !ids.has(item.id))]
@@ -455,18 +513,33 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
   const changeOpen = (nextOpen: boolean): void => {
     setOpen(nextOpen)
     if (!nextOpen) {
+      setAggregateFocusIds(new Set())
       window.setTimeout(() => returnFocusRef.current?.focus(), 0)
     }
   }
 
   const currentHeadsUp = headsUpQueue[0] ?? null
+  const currentHeadsUpNotification = currentHeadsUp?.notifications[0] ?? null
   return (
     <>
-      {currentHeadsUp && (
+      {currentHeadsUpNotification && currentHeadsUp.notifications.length === 1 && (
         <NotificationHeadsUp
-          key={currentHeadsUp.id}
-          notification={currentHeadsUp}
-          onOpen={() => void openNotification(currentHeadsUp)}
+          key={currentHeadsUpNotification.id}
+          notification={currentHeadsUpNotification}
+          onOpen={() => void openNotification(currentHeadsUpNotification)}
+          onDismiss={() => setHeadsUpQueue((current) => current.slice(1))}
+        />
+      )}
+      {currentHeadsUpNotification && currentHeadsUp.notifications.length > 1 && (
+        <NotificationHeadsUpAggregate
+          key={currentHeadsUpNotification.id}
+          notifications={currentHeadsUp.notifications}
+          onOpen={() => {
+            setHeadsUpQueue((current) => current.slice(1))
+            setAggregateFocusIds(new Set(currentHeadsUp.notifications.map((item) => item.id)))
+            setFilter('unread')
+            changeOpen(true)
+          }}
           onDismiss={() => setHeadsUpQueue((current) => current.slice(1))}
         />
       )}
@@ -536,6 +609,7 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
                 <NotificationRow
                   key={notification.id}
                   notification={notification}
+                  highlighted={aggregateFocusIds.has(notification.id)}
                   onOpen={() => void openNotification(notification)}
                   onClear={() => void clearNotification(notification.id)}
                 />
@@ -559,10 +633,12 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
 
 function NotificationRow({
   notification,
+  highlighted,
   onOpen,
   onClear
 }: {
   notification: InAppNotificationView
+  highlighted: boolean
   onOpen(): void
   onClear(): void
 }): React.JSX.Element {
@@ -572,7 +648,10 @@ function NotificationRow({
     timeStyle: 'medium'
   }).format(new Date(notification.createdAt))
   return (
-    <article className={`notification-row ${notification.readAt === null ? 'unread' : ''}`}>
+    <article
+      className={`notification-row ${notification.readAt === null ? 'unread' : ''}${highlighted ? ' highlighted' : ''}`}
+      data-notification-id={notification.id}
+    >
       <button className="notification-row-open" type="button" onClick={onOpen}>
         <span className="notification-unread-mark" aria-hidden="true" />
         <span className="notification-row-copy">
@@ -594,6 +673,47 @@ function NotificationRow({
         onClick={onClear}
       >×</button>
     </article>
+  )
+}
+
+function NotificationHeadsUpAggregate({
+  notifications,
+  onOpen,
+  onDismiss
+}: {
+  notifications: readonly InAppNotificationView[]
+  onOpen(): void
+  onDismiss(): void
+}): React.JSX.Element {
+  const [paused, setPaused] = useState(false)
+  const onDismissRef = useRef(onDismiss)
+  const first = notifications[0]
+  useEffect(() => {
+    onDismissRef.current = onDismiss
+  }, [onDismiss])
+  useEffect(() => {
+    if (paused) return undefined
+    const timer = window.setTimeout(() => onDismissRef.current(), 8_000)
+    return () => window.clearTimeout(timer)
+  }, [paused])
+  return (
+    <aside
+      className="notification-heads-up notification-heads-up-aggregate"
+      aria-live="polite"
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      onFocus={() => setPaused(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setPaused(false)
+      }}
+    >
+      <button className="notification-heads-up-open" type="button" onClick={onOpen}>
+        <strong>消息提及</strong>
+        <span>本 Camp 还有 {notifications.length - 1} 条消息提及你</span>
+        <small>{first?.camp.title}</small>
+      </button>
+      <button className="notification-heads-up-close" type="button" aria-label="关闭本次提醒" onClick={onDismiss}>×</button>
+    </aside>
   )
 }
 
@@ -679,7 +799,7 @@ function NotificationHeadsUpSummary({
 
 export function notificationPresentation(notification: Pick<
   InAppNotificationView,
-  'kind' | 'attentionState'
+  'kind' | 'attentionState' | 'sourceAvailable' | 'messageSummary'
 >): { label: string; message: string } {
   if (notification.kind === 'runtime_permission_attention') {
     return notification.attentionState === 'resolved'
@@ -688,6 +808,14 @@ export function notificationPresentation(notification: Pick<
   }
   if (notification.kind === 'camp_turn_completed') {
     return { label: '执行完成', message: '一次协作已经完成' }
+  }
+  if (notification.kind === 'camp_message_user_mention') {
+    return {
+      label: '消息提及',
+      message: notification.sourceAvailable
+        ? notification.messageSummary ?? '有消息提及你'
+        : '来源不可用'
+    }
   }
   return { label: '执行未完成', message: '一次协作未完成，请返回查看' }
 }
@@ -703,6 +831,9 @@ function shouldShowHeadsUp(
   if (!preference.headsUpEnabled || notification.readAt !== null) return false
   if (notification.kind === 'runtime_permission_attention') {
     return preference.approvalHeadsUpEnabled && notification.attentionState === 'pending'
+  }
+  if (notification.kind === 'camp_message_user_mention') {
+    return preference.userMentionHeadsUpEnabled
   }
   return preference.executionHeadsUpEnabled
 }

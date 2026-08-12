@@ -4122,7 +4122,7 @@ mod tests {
         CommandEnvelope {
             command_id: command_id.to_string(),
             actor: ActorRef::User {
-                user_id: "local-user".to_string(),
+                user_id: "local_user".to_string(),
             },
             camp_id: None,
             expected_versions: Vec::new(),
@@ -5552,7 +5552,7 @@ mod tests {
                 &CommandEnvelope {
                     command_id: "add-default-lead".to_string(),
                     actor: ActorRef::User {
-                        user_id: "local-user".to_string(),
+                        user_id: "local_user".to_string(),
                     },
                     camp_id: Some(camp_id.clone()),
                     expected_versions: Vec::new(),
@@ -5571,7 +5571,7 @@ mod tests {
                 &CommandEnvelope {
                     command_id: "add-default-lead-successor".to_string(),
                     actor: ActorRef::User {
-                        user_id: "local-user".to_string(),
+                        user_id: "local_user".to_string(),
                     },
                     camp_id: Some(camp_id.clone()),
                     expected_versions: Vec::new(),

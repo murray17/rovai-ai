@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { InAppNotificationView } from '@contracts'
 import {
+  enqueueNotificationHeadsUps,
   notificationBadgeLabel,
   notificationInboxWithPendingReads,
   notificationPresentation
@@ -17,7 +18,10 @@ function notification(
     kind,
     camp: { id: 'camp-1', title: 'Current title' },
     campTurnId: kind === 'runtime_permission_attention' ? null : 'turn-1',
+    sourceType: kind === 'camp_message_user_mention' ? 'camp_message' : null,
+    sourceMessageId: kind === 'camp_message_user_mention' ? 'message-1' : null,
     sourceAvailable: true,
+    messageSummary: kind === 'camp_message_user_mention' ? '@你 请确认方案' : null,
     attentionState,
     readAt: null,
     createdAt: '2026-08-01T00:00:00Z',
@@ -43,6 +47,15 @@ describe('In-App Notification presentation', () => {
       label: '执行未完成',
       message: '一次协作未完成，请返回查看'
     })
+    expect(notificationPresentation(notification('camp_message_user_mention'))).toEqual({
+      label: '消息提及',
+      message: '@你 请确认方案'
+    })
+    expect(notificationPresentation({
+      ...notification('camp_message_user_mention'),
+      sourceAvailable: false,
+      messageSummary: null
+    })).toEqual({ label: '消息提及', message: '来源不可用' })
   })
 
   it('caps the visual badge while preserving zero and exact small counts', () => {
@@ -50,6 +63,39 @@ describe('In-App Notification presentation', () => {
     expect(notificationBadgeLabel(1)).toBe('1')
     expect(notificationBadgeLabel(99)).toBe('99')
     expect(notificationBadgeLabel(100)).toBe('99+')
+  })
+
+  it('aggregates only same-Camp current-user mentions in the visible heads-up window', () => {
+    const first = notification('camp_message_user_mention')
+    const second = { ...first, id: 'notification-2', sequence: 2 }
+    const otherCamp = {
+      ...first,
+      id: 'notification-3',
+      sequence: 3,
+      camp: { id: 'camp-2', title: 'Other Camp' }
+    }
+    const otherKind = {
+      ...notification('camp_turn_completed'),
+      id: 'notification-4',
+      sequence: 4
+    }
+
+    expect(enqueueNotificationHeadsUps([], [first, second, otherCamp, otherKind])).toEqual({
+      entries: [
+        { notifications: [first, second] },
+        { notifications: [otherCamp] },
+        { notifications: [otherKind] }
+      ],
+      overflow: 0
+    })
+    expect(enqueueNotificationHeadsUps(
+      [
+        { notifications: [first] },
+        { notifications: [otherCamp] },
+        { notifications: [otherKind] }
+      ],
+      [{ ...otherKind, id: 'notification-5' }]
+    ).overflow).toBe(1)
   })
 
   it('does not let an older inbox snapshot roll back an optimistic single-item read', () => {
@@ -60,7 +106,7 @@ describe('In-App Notification presentation', () => {
       sequence: 2
     }
     const inbox = {
-      schemaVersion: 2 as const,
+      schemaVersion: 3 as const,
       throughSequence: 2,
       unreadCount: 2,
       items: [second, first],
@@ -84,7 +130,7 @@ describe('In-App Notification presentation', () => {
       readAt: '2026-08-01T00:01:00Z'
     }
     const inbox = {
-      schemaVersion: 2 as const,
+      schemaVersion: 3 as const,
       throughSequence: 1,
       unreadCount: 0,
       items: [read],
@@ -104,12 +150,14 @@ describe('In-App Notification presentation', () => {
       headsUpEnabled: true,
       approvalHeadsUpEnabled: false,
       executionHeadsUpEnabled: true,
+      userMentionHeadsUpEnabled: true,
       version: 4,
       updatedAt: '2026-08-01T00:00:00Z'
     })).toEqual({
       headsUpEnabled: true,
       approvalHeadsUpEnabled: false,
       executionHeadsUpEnabled: true,
+      userMentionHeadsUpEnabled: true,
       version: 4,
       updatedAt: '2026-08-01T00:00:00Z'
     })

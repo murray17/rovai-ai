@@ -42,9 +42,30 @@ const ANALYZE_AGENT_CODEBASE_OPENAI: &str =
     include_str!("../../../skills/analyze-agent-codebase/agents/openai.yaml");
 const ANALYZE_AGENT_CODEBASE_DOSSIER_REFERENCE: &str =
     include_str!("../../../skills/analyze-agent-codebase/references/dossier-structure.md");
+const CLI_OPERATIONS_RULES: &str = include_str!("../../../skills/cli-operations/SKILL.md");
+const CLI_OPERATIONS_OPENAI: &str =
+    include_str!("../../../skills/cli-operations/agents/openai.yaml");
+const CLI_OPERATIONS_SEND_REFERENCE: &str =
+    include_str!("../../../skills/cli-operations/references/send.md");
+const CLI_OPERATIONS_TASK_REFERENCE: &str =
+    include_str!("../../../skills/cli-operations/references/task.md");
+const CLI_OPERATIONS_CAMP_HISTORY_REFERENCE: &str =
+    include_str!("../../../skills/cli-operations/references/camp-history.md");
+const CLI_OPERATIONS_MEMORY_REFERENCE: &str =
+    include_str!("../../../skills/cli-operations/references/memory.md");
+const CLI_OPERATIONS_RECOVERY_REFERENCE: &str =
+    include_str!("../../../skills/cli-operations/references/recovery.md");
 const MEMORY_STEWARDSHIP_RULES: &str = include_str!("../../../skills/memory-stewardship/SKILL.md");
 const MEMORY_STEWARDSHIP_OPENAI: &str =
     include_str!("../../../skills/memory-stewardship/agents/openai.yaml");
+const MEMORY_STEWARDSHIP_AUTHORITY_REFERENCE: &str =
+    include_str!("../../../skills/memory-stewardship/references/authority-and-safety.md");
+const MEMORY_STEWARDSHIP_SCOPES_REFERENCE: &str =
+    include_str!("../../../skills/memory-stewardship/references/scopes.md");
+const MEMORY_STEWARDSHIP_WORKFLOW_REFERENCE: &str =
+    include_str!("../../../skills/memory-stewardship/references/read-write-workflow.md");
+const MEMORY_STEWARDSHIP_CONTENT_REFERENCE: &str =
+    include_str!("../../../skills/memory-stewardship/references/content-and-keys.md");
 const WORKTREE_RULES: &str = include_str!("../../../skills/worktree/SKILL.md");
 const WORKTREE_OPENAI: &str = include_str!("../../../skills/worktree/agents/openai.yaml");
 const GRILL_DUO_RULES: &str = include_str!("../../../skills/grill-duo/SKILL.md");
@@ -343,9 +364,51 @@ const ANALYZE_AGENT_CODEBASE_FILES: &[(&str, &str, u32)] = &[
     ),
 ];
 
+const CLI_OPERATIONS_FILES: &[(&str, &str, u32)] = &[
+    ("SKILL.md", CLI_OPERATIONS_RULES, 0o644),
+    ("agents/openai.yaml", CLI_OPERATIONS_OPENAI, 0o644),
+    ("references/send.md", CLI_OPERATIONS_SEND_REFERENCE, 0o644),
+    ("references/task.md", CLI_OPERATIONS_TASK_REFERENCE, 0o644),
+    (
+        "references/camp-history.md",
+        CLI_OPERATIONS_CAMP_HISTORY_REFERENCE,
+        0o644,
+    ),
+    (
+        "references/memory.md",
+        CLI_OPERATIONS_MEMORY_REFERENCE,
+        0o644,
+    ),
+    (
+        "references/recovery.md",
+        CLI_OPERATIONS_RECOVERY_REFERENCE,
+        0o644,
+    ),
+];
+
 const MEMORY_STEWARDSHIP_FILES: &[(&str, &str, u32)] = &[
     ("SKILL.md", MEMORY_STEWARDSHIP_RULES, 0o644),
     ("agents/openai.yaml", MEMORY_STEWARDSHIP_OPENAI, 0o644),
+    (
+        "references/authority-and-safety.md",
+        MEMORY_STEWARDSHIP_AUTHORITY_REFERENCE,
+        0o644,
+    ),
+    (
+        "references/scopes.md",
+        MEMORY_STEWARDSHIP_SCOPES_REFERENCE,
+        0o644,
+    ),
+    (
+        "references/read-write-workflow.md",
+        MEMORY_STEWARDSHIP_WORKFLOW_REFERENCE,
+        0o644,
+    ),
+    (
+        "references/content-and-keys.md",
+        MEMORY_STEWARDSHIP_CONTENT_REFERENCE,
+        0o644,
+    ),
 ];
 
 const WORKTREE_FILES: &[(&str, &str, u32)] = &[
@@ -379,6 +442,12 @@ const BUNDLED_SKILLS: &[BundledDefinition] = &[
     BundledDefinition {
         name: "analyze-agent-codebase",
         files: ANALYZE_AGENT_CODEBASE_FILES,
+        upstream_repository: None,
+        upstream_revision: None,
+    },
+    BundledDefinition {
+        name: "cli-operations",
+        files: CLI_OPERATIONS_FILES,
         upstream_repository: None,
         upstream_revision: None,
     },
@@ -2749,6 +2818,7 @@ mod tests {
             initial_order.iter().map(String::as_str).collect::<Vec<_>>(),
             [
                 "analyze-agent-codebase",
+                "cli-operations",
                 "grill-duo",
                 "grill-duo-with-docs",
                 "memory-stewardship",
@@ -2790,6 +2860,41 @@ mod tests {
                 .unwrap()
                 .contains("证据账本")
         );
+        let cli_operations = skills
+            .iter()
+            .find(|skill| skill.name == "cli-operations")
+            .unwrap();
+        let cli_operations_content =
+            service.revision_content_path(&cli_operations.id, &cli_operations.current_revision.id);
+        for reference in [
+            "send.md",
+            "task.md",
+            "camp-history.md",
+            "memory.md",
+            "recovery.md",
+        ] {
+            assert!(
+                cli_operations_content
+                    .join("references")
+                    .join(reference)
+                    .is_file()
+            );
+        }
+        let cli_rules = fs::read_to_string(cli_operations_content.join("SKILL.md")).unwrap();
+        assert!(cli_rules.contains("普通单一操作"));
+        assert!(cli_rules.contains("references/recovery.md"));
+        let cli_openai =
+            fs::read_to_string(cli_operations_content.join("agents/openai.yaml")).unwrap();
+        assert!(cli_openai.contains("display_name: \"CLI 操作协调\""));
+        assert!(cli_openai.contains("$cli-operations"));
+        for forbidden in [
+            "rovai task --help",
+            "rovai camp --help",
+            "rovai memory --help",
+            "chatgpt.com",
+        ] {
+            assert!(!cli_rules.contains(forbidden));
+        }
         let grill_duo = skills
             .iter()
             .find(|skill| skill.name == "grill-duo")
@@ -2859,6 +2964,58 @@ mod tests {
             &memory_stewardship.id,
             &memory_stewardship.current_revision.id,
         );
+        for reference in [
+            "authority-and-safety.md",
+            "scopes.md",
+            "read-write-workflow.md",
+            "content-and-keys.md",
+        ] {
+            assert!(content.join("references").join(reference).is_file());
+        }
+        let memory_semantics = [
+            fs::read_to_string(content.join("SKILL.md")).unwrap(),
+            fs::read_to_string(content.join("references/authority-and-safety.md")).unwrap(),
+            fs::read_to_string(content.join("references/scopes.md")).unwrap(),
+            fs::read_to_string(content.join("references/read-write-workflow.md")).unwrap(),
+            fs::read_to_string(content.join("references/content-and-keys.md")).unwrap(),
+        ]
+        .join("\n");
+        for required in [
+            "当前用户输入、当前授权、当前工具结果，以及当前仓库与协作状态始终高于 Memory",
+            "discovery cache",
+            "revision_changed",
+            "inactive",
+            "deleted",
+            "access_changed",
+            "unavailable",
+            "文件路径、SQLite、Markdown Projection 或 Skill Projection",
+            "credentials",
+            "当前队员 → counterparty",
+            "baseRevisionId",
+            "Scope、Kind、counterparty 或 Relationship direction",
+            "2,048 UTF-8 bytes",
+            "1–3 个 key",
+            "2–24 UTF-8 bytes",
+            "48 UTF-8 bytes",
+            "rovai memory search --help",
+            "rovai memory read --help",
+            "rovai memory write --help",
+            "rovai memory propose-hearth --help",
+        ] {
+            assert!(
+                memory_semantics.contains(required),
+                "missing Memory semantic: {required}"
+            );
+        }
+        for forbidden in [
+            "`memory.search`",
+            "`memory.read`",
+            "`memory.write`",
+            "`memory.propose_hearth`",
+            "rovai memory --help",
+        ] {
+            assert!(!memory_semantics.contains(forbidden));
+        }
         fs::write(content.join("SKILL.md"), "corrupted by local edit").unwrap();
         service.install_bundled_skills(&mut database).unwrap();
         assert!(
@@ -2958,7 +3115,7 @@ mod tests {
         service.install_bundled_skills(&mut database).unwrap();
 
         let skills = service.list(&database).unwrap();
-        assert_eq!(skills.len(), 6);
+        assert_eq!(skills.len(), 7);
         assert!(skills.iter().all(|skill| !skill.name.starts_with("rovai-")));
         let restored = skills
             .iter()

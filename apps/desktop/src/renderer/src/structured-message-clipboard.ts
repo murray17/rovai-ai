@@ -22,6 +22,7 @@ type PrivateClipboardSegment =
   | { kind: 'text'; text: string }
   | { kind: 'member_mention'; agentId: string; fallbackText: string }
   | { kind: 'all_members_mention'; fallbackText: '@所有队员' }
+  | { kind: 'current_user_mention'; userId: 'local_user'; fallbackText: '@你' }
 
 interface PrivateClipboardPayload {
   version: 1
@@ -71,6 +72,9 @@ function isPrivateClipboardSegment(value: unknown): value is PrivateClipboardSeg
       && segment.fallbackText.startsWith('@')
       && segment.fallbackText.length <= MAX_SEGMENT_TEXT_LENGTH
   }
+  if (segment.kind === 'current_user_mention') {
+    return segment.userId === 'local_user' && segment.fallbackText === '@你'
+  }
   return segment.kind === 'all_members_mention' && segment.fallbackText === '@所有队员'
 }
 
@@ -112,12 +116,21 @@ export function createStructuredMessageClipboardData(
     if (segment.kind === 'all_members_mention') {
       return { kind: 'all_members_mention', fallbackText: '@所有队员' }
     }
+    if (segment.kind === 'current_user_mention') {
+      return { kind: 'current_user_mention', userId: 'local_user', fallbackText: '@你' }
+    }
     return {
       kind: 'member_mention',
       agentId: segment.agentId,
       fallbackText: `@${memberById.get(segment.agentId)?.displayName ?? '不可用队员'}`
     }
   })
+  if (
+    privateContent[0]?.kind === 'current_user_mention'
+    && privateContent.slice(1).some((segment) => privateSegmentText(segment).length > 0)
+  ) {
+    privateContent.splice(1, 0, { kind: 'text', text: ' ' })
+  }
   const text = privateContent.map(privateSegmentText).join('')
   const payload: PrivateClipboardPayload = {
     version: CLIPBOARD_VERSION,
@@ -143,6 +156,9 @@ export function readStructuredMessageClipboardContent(
   return payload.content.map((segment) => {
     if (segment.kind === 'text') return segment
     if (segment.kind === 'all_members_mention') return { kind: 'all_members_mention' }
+    if (segment.kind === 'current_user_mention') {
+      return { kind: 'text', text: segment.fallbackText }
+    }
     if (mentionableMemberIds.has(segment.agentId)) {
       return { kind: 'member_mention', agentId: segment.agentId }
     }

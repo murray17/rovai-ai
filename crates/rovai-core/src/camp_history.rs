@@ -13,6 +13,10 @@ use uuid::Uuid;
 
 use crate::{
     camp_attachment::managed_attachment_summary,
+    camp_content::{
+        StructuredCampMessageContent, mentions_current_user, normalize_content,
+        render_current_plain_text, validate_content,
+    },
     db::Database,
     team_tool::{AuthenticatedTeamToolRun, TeamToolInvocationError},
 };
@@ -366,6 +370,7 @@ impl CampHistoryService {
         let (mut candidates, search_incomplete) =
             load_current_body_candidates(&transaction, &fence, &query, budget)?;
         merge_current_reference_candidates(&transaction, &fence, &query, limit, &mut candidates)?;
+        reproject_search_candidates(&transaction, &query, &mut candidates)?;
         let result = ranked_search_response(candidates, &query, limit, false, search_incomplete)?;
         transaction.commit()?;
         Ok(result)
@@ -427,6 +432,7 @@ impl CampHistoryService {
             limit,
             &mut candidates,
         )?;
+        reproject_search_candidates(&transaction, &query, &mut candidates)?;
         let result = ranked_search_response(candidates, &query, limit, true, search_incomplete)?;
         transaction.commit()?;
         Ok(result)
@@ -1079,6 +1085,22 @@ fn merge_reference_rows(candidates: &mut CandidateMap, rows: Vec<MessageRow>, qu
     }
 }
 
+fn reproject_search_candidates(
+    transaction: &Transaction<'_>,
+    query: &str,
+    candidates: &mut CandidateMap,
+) -> Result<()> {
+    for candidate in candidates.values_mut() {
+        candidate.message.body = projected_message_body(transaction, &candidate.message.id)?;
+        let (occurrence_count, first_match_offset) =
+            literal_match_rank(&candidate.message.body, query);
+        candidate.occurrence_count = occurrence_count;
+        candidate.first_match_offset = first_match_offset;
+        candidate.body_length = candidate.message.body.chars().count();
+    }
+    Ok(())
+}
+
 fn extract_query_references(query: &str) -> Vec<(String, String)> {
     let mut references = Vec::new();
     let mut seen = HashSet::new();
@@ -1287,6 +1309,7 @@ fn read_item(
     let returned = body.chars().count();
     let next_offset = body_offset + returned;
     let (attachments, attachment_count) = load_attachments(transaction, message_id)?;
+    let addressing = load_exact_addressing(transaction, message_id)?;
     let value = json!({
         "campId": target.camp_id,
         "mode": "item",
@@ -1306,6 +1329,7 @@ fn read_item(
             "attachments": attachments,
             "attachmentsTruncated": attachment_count > MAX_ATTACHMENTS,
             "attachmentOmittedCount": attachment_count.saturating_sub(MAX_ATTACHMENTS),
+            "addressing": addressing,
         }]
     });
     if json_chars(&value)? > MAX_RESPONSE_CHARS {
@@ -1315,6 +1339,25 @@ fn read_item(
         ));
     }
     Ok(value)
+}
+
+fn load_exact_addressing(transaction: &Transaction<'_>, message_id: &str) -> Result<Value> {
+    let (recipients_json, content_json): (String, String) = transaction.query_row(
+        r#"
+        SELECT effective_recipient_ids_json, structured_content_json
+        FROM camp_message
+        WHERE id = ?1 AND tombstoned_at IS NULL
+        "#,
+        [message_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let recipients: Vec<String> = serde_json::from_str(&recipients_json)?;
+    let content: StructuredCampMessageContent = serde_json::from_str(&content_json)?;
+    validate_content(&content)?;
+    Ok(json!({
+        "effectiveAgentRecipients": recipients,
+        "mentionsCurrentUser": mentions_current_user(&content),
+    }))
 }
 
 fn read_around(
@@ -1483,14 +1526,30 @@ fn load_visible_message(
             global_boundary,
         ),
     };
-    transaction
+    let mut message = transaction
         .query_row(
             sql,
             params![message_id, target.camp_id, parameter],
             message_search_row,
         )
-        .optional()
-        .map_err(Into::into)
+        .optional()?;
+    if let Some(message) = message.as_mut() {
+        message.body = projected_message_body(transaction, &message.id)?;
+    }
+    Ok(message)
+}
+
+fn projected_message_body(transaction: &Transaction<'_>, message_id: &str) -> Result<String> {
+    let content_json: String = transaction.query_row(
+        "SELECT structured_content_json FROM camp_message WHERE id = ?1",
+        [message_id],
+        |row| row.get(0),
+    )?;
+    let content = normalize_content(serde_json::from_str::<StructuredCampMessageContent>(
+        &content_json,
+    )?);
+    validate_content(&content)?;
+    render_current_plain_text(transaction, &content)
 }
 
 fn load_relative_messages(
@@ -1584,13 +1643,17 @@ fn load_ordered_messages(
     };
     let cursor_parameter = cursor.unwrap_or(0);
     let mut statement = transaction.prepare(&sql)?;
-    statement
+    let mut messages = statement
         .query_map(
             params![target.camp_id, boundary, cursor_parameter, limit as i64],
             message_search_row,
         )?
         .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(Into::into)
+        .map_err(anyhow::Error::from)?;
+    for message in &mut messages {
+        message.body = projected_message_body(transaction, &message.id)?;
+    }
+    Ok(messages)
 }
 
 fn resolve_thread_root(
@@ -1809,7 +1872,7 @@ mod tests {
                 camp_id: "camp-1".to_string(),
                 sequence,
                 author_type: "user".to_string(),
-                author_id: "local-user".to_string(),
+                author_id: "local_user".to_string(),
                 reply_to_message_id: None,
                 body: "任务".to_string(),
                 created_at: "2026-08-01T00:00:00Z".to_string(),
@@ -1839,6 +1902,8 @@ mod tests {
                     author_id TEXT NOT NULL,
                     reply_to_camp_message_id TEXT,
                     body TEXT NOT NULL,
+                    structured_content_json TEXT NOT NULL DEFAULT '[]',
+                    effective_recipient_ids_json TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL,
                     tombstoned_at TEXT
                 );
@@ -1848,7 +1913,7 @@ mod tests {
         for sequence in 1..=9 {
             connection
                 .execute(
-                    "INSERT INTO camp_message(id, camp_id, sequence, author_type, author_id, body, created_at) VALUES (?1, 'camp-1', ?2, 'user', 'local-user', 'x', '2026-08-01T00:00:00Z')",
+                    "INSERT INTO camp_message(id, camp_id, sequence, author_type, author_id, body, created_at) VALUES (?1, 'camp-1', ?2, 'user', 'local_user', 'x', '2026-08-01T00:00:00Z')",
                     params![format!("short-{sequence}"), sequence],
                 )
                 .unwrap();
@@ -1877,7 +1942,7 @@ mod tests {
             camp_id: "camp-1".to_string(),
             sequence: recency,
             author_type: "user".to_string(),
-            author_id: "local-user".to_string(),
+            author_id: "local_user".to_string(),
             reply_to_message_id: None,
             body: body.to_string(),
             created_at: "2026-08-01T00:00:00Z".to_string(),
@@ -1916,6 +1981,75 @@ mod tests {
     }
 
     #[test]
+    fn search_and_collection_reproject_authoritative_structured_content() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE agent_profile(id TEXT PRIMARY KEY, display_name TEXT NOT NULL);
+                CREATE TABLE camp_message (
+                    id TEXT PRIMARY KEY,
+                    camp_id TEXT NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    author_type TEXT NOT NULL,
+                    author_id TEXT NOT NULL,
+                    reply_to_camp_message_id TEXT,
+                    body TEXT NOT NULL,
+                    structured_content_json TEXT NOT NULL,
+                    effective_recipient_ids_json TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL,
+                    tombstoned_at TEXT
+                );
+                INSERT INTO camp_message(
+                    id, camp_id, sequence, author_type, author_id,
+                    body, structured_content_json, created_at
+                ) VALUES (
+                    'message-projection', 'camp-1', 1, 'agent', 'agent_1',
+                    'CORRUPTED CACHE',
+                    '[{"kind":"current_user_mention","userId":"local_user"},{"kind":"text","text":"authoritative body"}]',
+                    '2026-08-01T00:00:00Z'
+                );
+                "#,
+            )
+            .unwrap();
+        let transaction = connection.transaction().unwrap();
+        let row = MessageRow {
+            id: "message-projection".to_string(),
+            camp_id: "camp-1".to_string(),
+            sequence: 1,
+            author_type: "agent".to_string(),
+            author_id: "agent_1".to_string(),
+            reply_to_message_id: None,
+            body: "CORRUPTED CACHE".to_string(),
+            created_at: "2026-08-01T00:00:00Z".to_string(),
+            recency: 1,
+            camp_title: None,
+        };
+        let mut candidates = CandidateMap::from([(
+            (row.camp_id.clone(), row.id.clone()),
+            rank_message(row, "authoritative", false),
+        )]);
+        reproject_search_candidates(&transaction, "authoritative", &mut candidates).unwrap();
+        let search = ranked_search_response(candidates, "authoritative", 10, false, false).unwrap();
+        assert_eq!(search["results"][0]["snippet"], "@你 authoritative body");
+
+        let rows = load_ordered_messages(
+            &transaction,
+            &ReadTarget {
+                camp_id: "camp-1".to_string(),
+                fence: MessageFence::Current { boundary: 1 },
+            },
+            ReadDirection::After,
+            None,
+            false,
+            10,
+            None,
+        )
+        .unwrap();
+        assert_eq!(rows[0].body, "@你 authoritative body");
+    }
+
+    #[test]
     fn response_budget_keeps_collection_items_and_item_reads_use_unicode_scalars() {
         let mut connection = Connection::open_in_memory().unwrap();
         connection
@@ -1929,6 +2063,8 @@ mod tests {
                     author_id TEXT NOT NULL,
                     reply_to_camp_message_id TEXT,
                     body TEXT NOT NULL,
+                    structured_content_json TEXT NOT NULL DEFAULT '[]',
+                    effective_recipient_ids_json TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL,
                     tombstoned_at TEXT
                 );
@@ -1948,9 +2084,12 @@ mod tests {
                     created_at TEXT NOT NULL
                 );
                 INSERT INTO camp_message(
-                    id, camp_id, sequence, author_type, author_id, body, created_at
+                    id, camp_id, sequence, author_type, author_id, body,
+                    structured_content_json, effective_recipient_ids_json, created_at
                 ) VALUES (
-                    'message-1', 'camp-1', 1, 'user', 'local-user', 'A😀中B',
+                    'message-1', 'camp-1', 1, 'user', 'local_user', 'A😀中B',
+                    '[{"kind":"current_user_mention","userId":"local_user"},{"kind":"text","text":"A😀中B"}]',
+                    '["agent_5"]',
                     '2026-08-01T00:00:00Z'
                 );
                 "#,
@@ -1965,7 +2104,7 @@ mod tests {
                         byte_size, content_digest, storage_path, preview_kind,
                         created_by_type, created_by_id, created_at
                     ) VALUES (?1, 'camp-1', 'message-1', ?2, ?3, ?4, 10,
-                               'sha256:attachment', ?5, 'none', 'user', 'local-user',
+                               'sha256:attachment', ?5, 'none', 'user', 'local_user',
                                '2026-08-01T00:00:00Z')
                     "#,
                     params![
@@ -1984,15 +2123,22 @@ mod tests {
             camp_id: "camp-1".to_string(),
             fence: MessageFence::Current { boundary: 1 },
         };
-        let item = read_item(&transaction, &target, "message-1", 1, 2).unwrap();
+        let item = read_item(&transaction, &target, "message-1", 4, 2).unwrap();
         let item = &item["items"][0];
         assert_eq!(item["body"], "😀中");
-        assert_eq!(item["bodyLength"], 4);
-        assert_eq!(item["nextBodyOffset"], 3);
+        assert_eq!(item["bodyLength"], 7);
+        assert_eq!(item["nextBodyOffset"], 6);
         assert_eq!(item["attachmentCount"], 12);
         assert_eq!(item["attachments"].as_array().unwrap().len(), 10);
         assert_eq!(item["attachmentsTruncated"], true);
         assert_eq!(item["attachmentOmittedCount"], 2);
+        assert_eq!(
+            item["addressing"],
+            json!({
+                "effectiveAgentRecipients": ["agent_5"],
+                "mentionsCurrentUser": true,
+            })
+        );
         assert!(item.get("storagePath").is_none());
         assert!(
             item["attachments"]
@@ -2012,7 +2158,7 @@ mod tests {
                 camp_id: "camp-1".to_string(),
                 sequence,
                 author_type: "user".to_string(),
-                author_id: "local-user".to_string(),
+                author_id: "local_user".to_string(),
                 reply_to_message_id: None,
                 body: "x".repeat(1_000),
                 created_at: "2026-08-01T00:00:00Z".to_string(),

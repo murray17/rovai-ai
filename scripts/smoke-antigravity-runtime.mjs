@@ -90,7 +90,7 @@ try {
     null,
     profile.agentId,
     'ROVAI_ANTIGRAVITY_RUN_ONE',
-    project
+    workspace
   )
   const camp = { id: first.campId, defaultLeadAgentId: profile.agentId }
   const firstBound = events.find((event) =>
@@ -163,22 +163,11 @@ try {
   await rm(fixtureRoot, { recursive: true, force: true })
 }
 
-async function executeToken(request, camp, agentId, token, project = null) {
+async function executeToken(request, camp, agentId, token, workspace = null) {
   const body = `Do not call tools or inspect files. Reply with exactly ${token} and nothing else.`
   const purpose = 'Verify the Antigravity non-interactive CLI process integration without tools'
   const sent = camp
-    ? await request('camp.messages.send', {
-        commandId: crypto.randomUUID(),
-        campId: camp.id,
-        body,
-        address: { mode: 'explicit', agentIds: [agentId] },
-        replyToCampMessageId: null,
-        execution: {
-          taskId: null,
-          purpose,
-          completionRole: 'required'
-        }
-      })
+    ? await sendCampMessage(request, camp.id, agentId, body, purpose)
     : await createConfiguredCampAndSend(request, {
         commandId: crypto.randomUUID(),
         workspace,
@@ -207,6 +196,29 @@ async function executeToken(request, camp, agentId, token, project = null) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 250))
   }
   throw new Error(`Antigravity AgentRun timed out: ${agentRunId}`)
+}
+
+async function sendCampMessage(request, campId, agentId, body, purpose) {
+  const draft = await request('camp.composerDraft.get', { campId })
+  const saved = await request('camp.composerDraft.save', {
+    campId,
+    expectedRevision: draft.revision,
+    content: [
+      { kind: 'member_mention', agentId },
+      { kind: 'text', text: ` ${body}` }
+    ]
+  })
+  return request('camp.messages.send', {
+    commandId: crypto.randomUUID(),
+    campId,
+    draftRevision: saved.revision,
+    replyToCampMessageId: null,
+    execution: {
+      taskId: null,
+      purpose,
+      completionRole: 'required'
+    }
+  })
 }
 
 function isUuid(value) {

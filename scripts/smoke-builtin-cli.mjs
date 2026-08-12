@@ -15,6 +15,7 @@ const cliExecutable = resolve(
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-builtin-cli-smoke-'))
 const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
+const skillLibraryRoot = join(fixtureRoot, 'skill-library')
 const historyMarker = 'ROVAI_BUILTIN_HISTORY_V1'
 const expectedOperations = [
   'camp.list',
@@ -126,6 +127,7 @@ try {
     specification.contextPathFile = join(projectRoot, `.context-path-${specification.slug}`)
     specification.resumeContextPathFile = join(projectRoot, `.resume-context-path-${specification.slug}`)
     specification.resumeCompletionFile = join(projectRoot, `.resume-complete-${specification.slug}`)
+    specification.sendEvidencePath = join(projectRoot, `.send-evidence-${specification.slug}.json`)
     specification.diagnosticPath = join(projectRoot, `.diagnostic-${specification.slug}`)
     specification.campId = await createCamp(core.request, {
       name: `${specification.label} Built-in CLI`,
@@ -228,6 +230,14 @@ try {
     )) {
       throw new Error(`${specification.adapterKind} resumed lease did not execute camp.list`)
     }
+    const successorExactReads = resumedEvidence.filter((entry) =>
+      entry.payload?.canonicalTool === 'camp.read'
+        && entry.payload?.status === 'completed'
+        && entry.payload?.sourceAuthority === 'core'
+    )
+    if (successorExactReads.length !== 3) {
+      throw new Error(`${specification.adapterKind} successor Run did not verify all three stable Send locators: ${JSON.stringify(resumedEvidence)}`)
+    }
     const resumedContextPath = (await readFile(specification.resumeContextPathFile, 'utf8')).trim()
     await assertFencedContext(resumedContextPath, specification.adapterKind, 'resumed')
 
@@ -249,6 +259,16 @@ try {
     const recipientRun = recipientSnapshot.agentRuns.find((run) =>
       run.agentId === specification.recipientProfileId
     )
+    const sourceNativeSessionId = nativeSessionIdForRun(
+      core.events,
+      source.agentRunId,
+      sourceStart
+    )
+    const resumedNativeSessionId = nativeSessionIdForRun(
+      core.events,
+      resumed.agentRunId,
+      resumedStart
+    )
 
     results.push({
       adapterKind: specification.adapterKind,
@@ -263,20 +283,23 @@ try {
       agentOutputReduction: measureAgentOutputReduction(evidence),
       legacySendFlagRejected: true,
       legacySendJsonRejected: true,
+      sendInputSources: ['direct_flags', 'stdin', 'input_file'],
+      exactAddressingVerifiedInSuccessorRun: true,
+      successorExactReadCount: successorExactReads.length,
       staleVersionConflict: true,
       initialLeaseFenced: true,
       resumedLeaseFenced: true,
       logicalConversationContinued: true,
       nativeSessionContinued: Boolean(
-        sourceStart.params.nativeThreadId
-          && sourceStart.params.nativeThreadId === resumedStart.params.nativeThreadId
+        sourceNativeSessionId
+          && sourceNativeSessionId === resumedNativeSessionId
       )
     })
   }
 
   console.log(JSON.stringify({
     ok: true,
-    contractVersion: 4,
+    contractVersion: 7,
     ipcProtocolVersion: 1,
     runtimeCount: results.length,
     operationCountPerRuntime: expectedOperations.length,
@@ -293,12 +316,20 @@ try {
   if (!keepFixture) await rm(fixtureRoot, { recursive: true, force: true })
 }
 
+function nativeSessionIdForRun(events, agentRunId, startedEvent) {
+  const bound = events.find((event) =>
+    event.method === 'agent_run.native_session_bound'
+      && event.params?.agentRunId === agentRunId
+  )
+  return bound?.params?.nativeThreadId ?? startedEvent?.params?.nativeThreadId ?? null
+}
+
 function assertBuiltinCliCapability(label, installation) {
   const snapshot = installation?.snapshot
   if (snapshot?.probeStatus !== 'ready'
-      || !snapshot.capabilities.includes('builtin_cli.transport.v4')
+      || !snapshot.capabilities.includes('builtin_cli.transport.v7')
       || !snapshot.models.length) {
-    throw new Error(`${label} is not ready for Built-in CLI v4: ${JSON.stringify(snapshot)}`)
+    throw new Error(`${label} is not ready for Built-in CLI v7: ${JSON.stringify(snapshot)}`)
   }
 }
 
@@ -402,7 +433,7 @@ async function startVerificationRun(coreClient, specification, resumed) {
       taskId: null,
       purpose: resumed
         ? `Verify ${specification.adapterKind} resume/process reuse receives a new active CLI lease.`
-        : `Verify ${specification.adapterKind} executes all 12 CLI-only built-in operations.`,
+        : `Verify ${specification.adapterKind} executes all 13 CLI-only built-in operations.`,
       completionRole: 'required'
     }
   })
@@ -627,7 +658,7 @@ function verificationScript(input) {
     action: 'add',
     scope: 'companion',
     kind: 'preference',
-    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v4 qualification.`,
+    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v7 qualification.`,
     retrievalKeys: [`cli-${input.slug.slice(0, 18)}`]
   })
   const hearth = JSON.stringify({
@@ -638,7 +669,8 @@ function verificationScript(input) {
   })
   const publicSend = JSON.stringify({
     body: `Acknowledge the ${input.adapterKind} Built-in CLI qualification in one sentence.`,
-    to: [input.recipientProfileId]
+    to: [input.recipientProfileId],
+    mentionUser: true
   })
   return `#!/bin/bash
 set -euo pipefail
@@ -691,7 +723,20 @@ assert_fix_input() {
 }
 
 STEP=version
-"$CLI" --version | grep -q 'contract-v4 ipc-v1'
+"$CLI" --version | grep -q 'contract-v7 ipc-v1'
+
+STEP=exact_help
+root_help="$("$CLI" --help)"
+printf '%s\n' "$root_help" | grep -Fq ${shellQuote("Run `rovai --help` to choose an operation, then run that operation's exact `--help`. Do not assume that a command family has its own help entry.")}
+send_help="$("$CLI" send --help)"
+printf '%s\n' "$send_help" | grep -Fq -- '--to-user'
+set +e
+family_help="$("$CLI" camp --help 2>"$RUN_TMP/family-help.err")"
+family_help_status=$?
+set -e
+test "$family_help_status" -eq 2
+test ! -s "$RUN_TMP/family-help.err"
+assert_fix_input "$family_help"
 
 STEP=legacy_send_flag
 set +e
@@ -780,7 +825,33 @@ ROVAI_JSON
 STEP=camp_message_send
 public_send="$("$CLI" send --input-file "$RUN_TMP/public-send.json")"
 assert_success "$public_send" 'camp.message.send'
-printf '%s\n' "$public_send" | "$JQ" -e '.effectiveRecipients | type == "array"' >/dev/null
+printf '%s\n' "$public_send" | "$JQ" -e '
+  (keys | sort) == ["effectiveRecipients", "messageId"]
+  and (.effectiveRecipients | type) == "array"
+' >/dev/null
+public_message_id="$(printf '%s\n' "$public_send" | "$JQ" -er '.messageId')"
+
+STEP=camp_message_send_direct_user_only
+user_only="$("$CLI" send --to-user --body ${shellQuote(`Direct user-only ${input.adapterKind}`)})"
+assert_success "$user_only" 'camp.message.send'
+printf '%s\n' "$user_only" | "$JQ" -e '
+  (keys | sort) == ["effectiveRecipients", "messageId"]
+  and .effectiveRecipients == []
+' >/dev/null
+user_only_id="$(printf '%s\n' "$user_only" | "$JQ" -er '.messageId')"
+
+STEP=camp_message_send_stdin_user_only
+stdin_user_only="$(printf '%s\n' ${shellQuote(JSON.stringify({ body: `Stdin user-only ${input.adapterKind}`, mentionUser: true }))} | "$CLI" send)"
+assert_success "$stdin_user_only" 'camp.message.send'
+stdin_user_only_id="$(printf '%s\n' "$stdin_user_only" | "$JQ" -er '.messageId')"
+
+STEP=freeze_send_locators
+"$JQ" -n \
+  --arg publicMessageId "$public_message_id" \
+  --arg directUserOnlyMessageId "$user_only_id" \
+  --arg stdinUserOnlyMessageId "$stdin_user_only_id" \
+  '{publicMessageId:$publicMessageId,directUserOnlyMessageId:$directUserOnlyMessageId,stdinUserOnlyMessageId:$stdinUserOnlyMessageId}' \
+  > ${shellQuote(input.sendEvidencePath)}
 
 cat > "$RUN_TMP/memory-write.json" <<'ROVAI_JSON'
 ${memoryWrite}
@@ -825,9 +896,38 @@ function resumeVerificationScript(input) {
 set -euo pipefail
 CLI="\${ROVAI_AGENT_CLI:?ROVAI_AGENT_CLI is required}"
 CONTEXT="\${ROVAI_CLI_CONTEXT:?ROVAI_CLI_CONTEXT is required}"
+JQ="$(command -v jq)"
+SEND_EVIDENCE=${shellQuote(input.sendEvidencePath)}
 printf '%s\n' "$CONTEXT" > ${shellQuote(input.resumeContextPathFile)}
 camp_list="$(printf '{}\n' | "$CLI" camp list)"
 printf '%s\n' "$camp_list" | jq -e '((has("contractVersion") | not) and (.camps | type) == "array")' >/dev/null
+
+read_item() {
+  local message_id="$1"
+  "$JQ" -n --arg campId ${shellQuote(input.campId)} --arg messageId "$message_id" \
+    '{mode:"item",campId:$campId,messageId:$messageId}' | "$CLI" camp read
+}
+
+public_message_id="$("$JQ" -er '.publicMessageId' "$SEND_EVIDENCE")"
+public_read="$(read_item "$public_message_id")"
+printf '%s\n' "$public_read" | "$JQ" -e \
+  --arg messageId "$public_message_id" \
+  --arg recipient ${shellQuote(input.recipientProfileId)} '
+    .items[0].messageId == $messageId
+    and .items[0].addressing.effectiveAgentRecipients == [$recipient]
+    and .items[0].addressing.mentionsCurrentUser == true
+  ' >/dev/null
+
+for key in directUserOnlyMessageId stdinUserOnlyMessageId; do
+  message_id="$("$JQ" -er --arg key "$key" '.[$key]' "$SEND_EVIDENCE")"
+  item="$(read_item "$message_id")"
+  printf '%s\n' "$item" | "$JQ" -e --arg messageId "$message_id" '
+    .items[0].messageId == $messageId
+    and .items[0].addressing.effectiveAgentRecipients == []
+    and .items[0].addressing.mentionsCurrentUser == true
+  ' >/dev/null
+done
+
 printf '%s\n' ${shellQuote(input.resumeMarker)} > ${shellQuote(input.resumeCompletionFile)}
 printf '%s\n' ${shellQuote(JSON.stringify({ ok: true, marker: input.resumeMarker, newLease: true }))}
 `
@@ -840,6 +940,10 @@ function shellQuote(value) {
 function startCore(dataDirectory) {
   const child = spawn(coreExecutable, ['--data-dir', dataDirectory], {
     cwd: root,
+    env: {
+      ...process.env,
+      ROVAI_SKILL_LIBRARY_ROOT: skillLibraryRoot
+    },
     stdio: ['pipe', 'pipe', 'pipe']
   })
   const pending = new Map()

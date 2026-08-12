@@ -686,6 +686,7 @@ export type StructuredCampMessageSegment =
   | { kind: 'text'; text: string }
   | { kind: 'member_mention'; agentId: string }
   | { kind: 'all_members_mention' }
+  | { kind: 'current_user_mention'; userId: 'local_user' }
 
 export type StructuredCampMessageContent = StructuredCampMessageSegment[]
 
@@ -1001,7 +1002,7 @@ export interface ContextManifestView {
   mcpProjectionDigest: string
   selfActiveTaskEvidence: unknown
   selfActiveTaskEvidenceDigest: string
-  formatterVersion: 13
+  formatterVersion: 14
   renderedPayloadDigest: string
   delivery: RuntimeInputDeliveryView | null
   createdAt: string
@@ -1142,6 +1143,7 @@ export type InAppNotificationKind =
   | 'runtime_permission_attention'
   | 'camp_turn_completed'
   | 'camp_turn_incomplete'
+  | 'camp_message_user_mention'
 
 export type InAppNotificationFilter = 'all' | 'unread'
 
@@ -1154,7 +1156,10 @@ export interface InAppNotificationView {
     title: string
   }
   campTurnId: string | null
+  sourceType: 'camp_message' | null
+  sourceMessageId: string | null
   sourceAvailable: boolean
+  messageSummary: string | null
   attentionState: 'pending' | 'resolved' | null
   readAt: string | null
   createdAt: string
@@ -1162,7 +1167,7 @@ export interface InAppNotificationView {
 }
 
 export interface InAppNotificationInbox {
-  schemaVersion: 2
+  schemaVersion: 3
   throughSequence: number
   unreadCount: number
   items: InAppNotificationView[]
@@ -1170,7 +1175,7 @@ export interface InAppNotificationInbox {
 }
 
 export interface InAppNotificationCreatedBatch {
-  schemaVersion: 2
+  schemaVersion: 3
   requestedAfterSequence: number
   nextSequence: number
   throughSequence: number
@@ -1183,6 +1188,7 @@ export interface InAppNotificationPreference {
   headsUpEnabled: boolean
   approvalHeadsUpEnabled: boolean
   executionHeadsUpEnabled: boolean
+  userMentionHeadsUpEnabled: boolean
   version: number
   updatedAt: string
 }

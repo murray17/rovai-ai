@@ -683,7 +683,7 @@ mod tests {
                     installation_generation: 1,
                     search_environment_generation: 1,
                     executable_path: executable.to_string_lossy().to_string(),
-                    auth_scope: "local-user".to_string(),
+                    auth_scope: "local_user".to_string(),
                     reported_version: "smoke".to_string(),
                     executable_fingerprint:
                         rovai_core::agent_runtime_adapter::executable_fingerprint(&executable)
@@ -1053,7 +1053,7 @@ echo "Created conversation 0bdd2166-d420-40c6-94be-70b93eb290c5" > "$log_file"
                     installation_generation: 1,
                     search_environment_generation: 1,
                     executable_path: executable.to_string_lossy().to_string(),
-                    auth_scope: "local-user".to_string(),
+                    auth_scope: "local_user".to_string(),
                     reported_version: "test".to_string(),
                     executable_fingerprint: "test-fingerprint".to_string(),
                     capabilities: vec!["cli.print".to_string()],

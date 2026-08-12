@@ -130,7 +130,7 @@ v0.65 在当前消息表面增加非交互的 Current User Mention，并为每�
 已读或清除。通知设置增加独立“消息提及”浮层开关，Skill 统一列表增加普通 official
 `cli-operations` 且保留用户启停/九组 Assignment。精确身份、投影与通知合同见
 [Current User Attention v1](../contracts/current-user-attention-v1.md)，实施状态见
-[v0.65 实施计划](../versions/v0.65/implementation-plan.md)，完整 official inventory 与普通投递见
+[v0.67 实施计划](../versions/v0.67/implementation-plan.md)，完整 official inventory 与普通投递见
 [ADR-0167](../adr/0167-seven-skill-official-inventory.md)。
 
 2026-08-12 在同一 Camp 消息表面把附件拖放命中面从 Composer 扩展到完整主会话列，并增加

@@ -6,6 +6,7 @@ type PreferenceKey =
   | 'headsUpEnabled'
   | 'approvalHeadsUpEnabled'
   | 'executionHeadsUpEnabled'
+  | 'userMentionHeadsUpEnabled'
 
 export function NotificationSettings({
   onOpenNotificationCenter
@@ -51,7 +52,8 @@ export function NotificationSettings({
             expectedVersion: preference.version,
             headsUpEnabled: next.headsUpEnabled,
             approvalHeadsUpEnabled: next.approvalHeadsUpEnabled,
-            executionHeadsUpEnabled: next.executionHeadsUpEnabled
+            executionHeadsUpEnabled: next.executionHeadsUpEnabled,
+            userMentionHeadsUpEnabled: next.userMentionHeadsUpEnabled
           }
         }
       )
@@ -76,7 +78,7 @@ export function NotificationSettings({
       <SettingsPageHeader
         eyebrow="Settings / Notifications"
         title="通知"
-        description="待审批和执行结果始终保存在通知中心；这里只控制新通知的临时浮层。"
+        description="待审批、执行结果和消息提及始终保存在通知中心；这里只控制新通知的临时浮层。"
         aside={(
           <button className="primary-button" type="button" onClick={(event) => onOpenNotificationCenter(event.currentTarget)}>
             打开通知中心
@@ -124,6 +126,13 @@ export function NotificationSettings({
                 disabled={!preference.headsUpEnabled}
                 onChange={(checked) => void update('executionHeadsUpEnabled', checked)}
               />
+              <NotificationSwitch
+                label="消息提及"
+                description="有公共 Camp 消息明确提及你时提醒。"
+                checked={preference.userMentionHeadsUpEnabled}
+                disabled={!preference.headsUpEnabled}
+                onChange={(checked) => void update('userMentionHeadsUpEnabled', checked)}
+              />
             </div>
           </fieldset>
         )}
@@ -137,7 +146,7 @@ export function NotificationSettings({
           <span aria-hidden="true">◇</span>
           <div>
             <strong>关闭浮层不会丢失事项</strong>
-            <p>待审批与执行结果仍进入通知中心；当前对话的 Approval Dock 和执行状态也保持原有位置。</p>
+            <p>待审批、执行结果和消息提及仍进入通知中心；当前对话的 Approval Dock 和执行状态也保持原有位置。</p>
           </div>
         </div>
       </section>
@@ -182,6 +191,7 @@ export function preferenceFromUnknown(value: unknown): InAppNotificationPreferen
     typeof candidate.headsUpEnabled !== 'boolean'
     || typeof candidate.approvalHeadsUpEnabled !== 'boolean'
     || typeof candidate.executionHeadsUpEnabled !== 'boolean'
+    || typeof candidate.userMentionHeadsUpEnabled !== 'boolean'
     || typeof candidate.version !== 'number'
     || typeof candidate.updatedAt !== 'string'
   ) return null

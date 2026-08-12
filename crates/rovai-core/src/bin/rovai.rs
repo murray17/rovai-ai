@@ -64,6 +64,10 @@ fn run() -> Result<u8> {
         print_operation_help(&description);
         return Ok(0);
     }
+    if is_family_help(&args) {
+        print_invalid_input();
+        return Ok(2);
+    }
 
     let context = load_context()?;
     let auth = context.auth()?;
@@ -374,6 +378,10 @@ fn operation_help(args: &[String]) -> Result<Option<BuiltinToolDescription>> {
         .transpose()
 }
 
+fn is_family_help(args: &[String]) -> bool {
+    matches!(args, [family, help] if help == "--help" && matches!(family.as_str(), "task" | "camp" | "history" | "memory"))
+}
+
 fn load_context() -> Result<BuiltinToolCliContext> {
     let path = env::var_os(ROVAI_CLI_CONTEXT_ENV)
         .map(std::path::PathBuf::from)
@@ -581,7 +589,7 @@ enum BuiltinToolIpcFailure {
 
 fn print_root_help() {
     println!(
-        "Rovai Agent CLI\n\nOperations:\n  rovai send\n  rovai task create|get|list|update\n  rovai camp list|search|read\n  rovai history search\n  rovai memory search|read|write|propose-hearth\n\nUse '<command> --help' for concise arguments and examples. Each operation supports direct flags, JSON stdin/heredoc, or --input-file <path>."
+        "Rovai Agent CLI\n\nOperations:\n  rovai send\n  rovai task create|get|list|update\n  rovai camp list|search|read\n  rovai history search\n  rovai memory search|read|write|propose-hearth\n\nRun `rovai --help` to choose an operation, then run that operation's exact `--help`. Do not assume that a command family has its own help entry. Each operation supports direct flags, JSON stdin/heredoc, or --input-file <path>."
     );
 }
 
@@ -639,6 +647,11 @@ fn print_operation_help(description: &BuiltinToolDescription) {
         if description.name == "camp.message.send" && argument.field == "to" {
             println!("      Optional Agent to wake; repeat for multiple recipients.");
         }
+        if description.name == "camp.message.send" && argument.field == "mentionUser" {
+            println!(
+                "      Mention the current user and create an Inbox notification; creates no Agent delivery."
+            );
+        }
     }
     let examples = operation_help_examples(&description.name);
     println!("\nExamples:");
@@ -651,7 +664,8 @@ fn operation_help_examples(operation: &str) -> &'static [&'static str] {
     match operation {
         "camp.message.send" => &[
             "rovai send --body 'Status update'",
-            "rovai send --to agent_5 --body 'Review complete'",
+            "rovai send --to-user --body 'Please choose A or B'",
+            "rovai send --to agent_5 --to-user --body 'Please review and decide'",
         ],
         "team.create_task" => {
             &["rovai task create --title 'Prepare release notes' --assignee-agent-id agent_27"]
@@ -743,6 +757,46 @@ mod tests {
         );
         assert!(builtin_tool_identity_by_command("tool", "list").is_none());
         assert!(builtin_tool_identity_by_command("tool", "describe").is_none());
+        for family in ["task", "camp", "history", "memory"] {
+            let args = [family.to_string(), "--help".to_string()];
+            assert!(operation_help(&args).unwrap().is_none());
+            assert!(is_family_help(&args));
+        }
+    }
+
+    #[test]
+    fn exact_help_surface_covers_all_thirteen_operations_and_no_family_aliases() {
+        let exact_paths: &[&[&str]] = &[
+            &["send", "--help"],
+            &["task", "create", "--help"],
+            &["task", "get", "--help"],
+            &["task", "list", "--help"],
+            &["task", "update", "--help"],
+            &["camp", "list", "--help"],
+            &["camp", "search", "--help"],
+            &["camp", "read", "--help"],
+            &["history", "search", "--help"],
+            &["memory", "search", "--help"],
+            &["memory", "read", "--help"],
+            &["memory", "write", "--help"],
+            &["memory", "propose-hearth", "--help"],
+        ];
+        assert_eq!(exact_paths.len(), 13);
+        for path in exact_paths {
+            let args = path
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect::<Vec<_>>();
+            assert!(
+                operation_help(&args).unwrap().is_some(),
+                "missing exact help for {path:?}"
+            );
+        }
+        for family in ["task", "camp", "history", "memory"] {
+            let args = vec![family.to_string(), "--help".to_string()];
+            assert!(operation_help(&args).unwrap().is_none());
+            assert!(is_family_help(&args));
+        }
     }
 
     #[test]
@@ -775,7 +829,7 @@ mod tests {
         );
         assert!(description.summary.contains("inline @agent_id"));
         assert!(description.summary.contains("public-only"));
-        assert!(description.summary.contains("direct caller"));
+        assert!(description.summary.contains("--to-user"));
         let to = description
             .arguments
             .iter()
@@ -783,11 +837,53 @@ mod tests {
             .unwrap();
         assert_eq!(to.flag, "--to");
         assert!(to.repeatable);
+        let to_user = description
+            .arguments
+            .iter()
+            .find(|argument| argument.field == "mentionUser")
+            .unwrap();
+        assert_eq!(to_user.flag, "--to-user");
+        assert_eq!(to_user.value_kind, "boolean");
+        assert!(!to_user.repeatable);
+        assert!(!to_user.required);
+        assert_eq!(
+            parse_operation_input(
+                &description,
+                &[
+                    "--to-user".to_string(),
+                    "--body".to_string(),
+                    "Choose A or B".to_string(),
+                ]
+            )
+            .unwrap(),
+            json!({"body": "Choose A or B", "mentionUser": true})
+        );
+        let input_file =
+            std::env::temp_dir().join(format!("rovai-send-v4-input-{}.json", Uuid::new_v4()));
+        std::fs::write(
+            &input_file,
+            r#"{"body":"Choose A or B","mentionUser":true}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            parse_operation_input(
+                &description,
+                &[
+                    "--input-file".to_string(),
+                    input_file.to_string_lossy().into_owned(),
+                ],
+            )
+            .unwrap(),
+            json!({"body": "Choose A or B", "mentionUser": true})
+        );
+        std::fs::remove_file(input_file).unwrap();
+        assert!(parse_operation_input(&description, &["--mention-user".to_string()]).is_err());
         assert_eq!(
             operation_help_examples("camp.message.send"),
             [
                 "rovai send --body 'Status update'",
-                "rovai send --to agent_5 --body 'Review complete'",
+                "rovai send --to-user --body 'Please choose A or B'",
+                "rovai send --to agent_5 --to-user --body 'Please review and decide'",
             ]
         );
     }

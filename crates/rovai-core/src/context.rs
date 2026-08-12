@@ -11,7 +11,10 @@ const BUILTIN_CLI_CHARTER: &str = include_str!("../resources/charter-rovai-cli.m
 
 use crate::{
     agent_profile::{AdapterKind, validate_stored_member_identity},
-    camp_content::{StructuredCampMessageContent, normalize_content, render_current_plain_text},
+    camp_content::{
+        StructuredCampMessageContent, mentions_current_user, normalize_content,
+        render_current_plain_text,
+    },
     command::{EntityReference, canonical_json_digest},
     compaction::{
         BOOTSTRAP_REDELIVERY_ENVELOPE_VERSION, BOOTSTRAP_REDELIVERY_FORMATTER_VERSION,
@@ -700,6 +703,7 @@ impl ContextService {
             "conversationMessageId": current_input.source_conversation_message_id,
             "sourceContentDigest": current_input.source_content_digest,
             "projectedBodyDigest": current_input.projected_body_digest,
+            "mentionsCurrentUser": current_input.mentions_current_user,
         });
         let attachment_digest = canonical_json_digest(&serde_json::to_value(&attachment_refs)?)?;
         let originating_public_user_message_ref = shared_conversation
@@ -1183,6 +1187,7 @@ impl ContextService {
                 "conversationMessageId": current_input.source_conversation_message_id,
                 "sourceContentDigest": current_input.source_content_digest,
                 "projectedBodyDigest": current_input.projected_body_digest,
+                "mentionsCurrentUser": current_input.mentions_current_user,
             },
             "attachmentRefs": attachment_refs,
             "attachmentDigest": canonical_json_digest(&serde_json::to_value(&attachment_refs)?)?,
@@ -2669,6 +2674,7 @@ struct SharedMessage {
     sender_id: String,
     source_conversation_id: Option<String>,
     content_digest: String,
+    mentions_current_user: bool,
     reply_to_message_id: Option<String>,
     attachments: Vec<SharedMessageAttachment>,
     body: String,
@@ -2787,6 +2793,7 @@ struct ModelSharedMessage<'a> {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     attachments: Vec<ModelSharedMessageAttachment<'a>>,
     body: &'a str,
+    mentions_current_user: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     body_length: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2813,6 +2820,7 @@ impl SharedMessage {
                 })
                 .collect(),
             body: &self.body,
+            mentions_current_user: self.mentions_current_user,
             body_length: self.body_truncated.then_some(self.body_length),
             body_truncated: self.body_truncated.then_some(true),
             continuation: self
@@ -2925,6 +2933,7 @@ struct SharedMessageProjectionEvidence {
     #[serde(skip_serializing_if = "Option::is_none")]
     reply_to_message_id: Option<String>,
     projected_body_digest: String,
+    mentions_current_user: bool,
     body_length: usize,
     body_truncated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2950,6 +2959,7 @@ impl SharedMessageProjectionEvidence {
             content_digest: message.content_digest.clone(),
             reply_to_message_id: message.reply_to_message_id.clone(),
             projected_body_digest: sha256_text(&message.body),
+            mentions_current_user: message.mentions_current_user,
             body_length: message.body_length,
             body_truncated: message.body_truncated,
             continuation_body_offset: message.next_body_offset,
@@ -3168,7 +3178,8 @@ fn load_public_reference_closure<R: ContextReadConnection>(
             ));
             break;
         }
-        let body = projected_historical_camp_message_body(row.6, row.7);
+        let (body, mentions_current_user) =
+            projected_historical_camp_message(database.context_connection(), row.6, row.7)?;
         let message = project_shared_message(
             database,
             snapshot.camp_id.clone(),
@@ -3179,6 +3190,7 @@ fn load_public_reference_closure<R: ContextReadConnection>(
             row.5,
             row.8.clone(),
             body,
+            mentions_current_user,
             profile,
         )?;
         next_parent_id = row.8;
@@ -3262,7 +3274,11 @@ fn load_recent_public_messages<R: ContextReadConnection>(
         reply_to_message_id,
     ) in rows
     {
-        let body = projected_historical_camp_message_body(stored_body, structured_content_json);
+        let (body, mentions_current_user) = projected_historical_camp_message(
+            database.context_connection(),
+            stored_body,
+            structured_content_json,
+        )?;
         messages.push(project_shared_message(
             database,
             snapshot.camp_id.clone(),
@@ -3273,6 +3289,7 @@ fn load_recent_public_messages<R: ContextReadConnection>(
             source_conversation_id,
             reply_to_message_id,
             body,
+            mentions_current_user,
             profile,
         )?);
     }
@@ -3290,6 +3307,7 @@ fn project_shared_message<R: ContextReadConnection>(
     source_conversation_id: Option<String>,
     reply_to_message_id: Option<String>,
     body: String,
+    mentions_current_user: bool,
     profile: ContextDeliveryProfile,
 ) -> Result<SharedMessage> {
     let content_digest = database.context_connection().query_row(
@@ -3325,6 +3343,7 @@ fn project_shared_message<R: ContextReadConnection>(
         sender_id,
         source_conversation_id,
         content_digest,
+        mentions_current_user,
         reply_to_message_id,
         attachments,
         body: prefix.body,
@@ -3497,7 +3516,8 @@ fn load_originating_public_user_message<R: ContextReadConnection>(
     if row.2 != "user" {
         anyhow::bail!("Originating public message is not authored by a user");
     }
-    let body = projected_historical_camp_message_body(row.5, row.6);
+    let (body, mentions_current_user) =
+        projected_historical_camp_message(database.context_connection(), row.5, row.6)?;
     project_shared_message(
         database,
         snapshot.camp_id.clone(),
@@ -3508,6 +3528,7 @@ fn load_originating_public_user_message<R: ContextReadConnection>(
         row.4,
         row.7,
         body,
+        mentions_current_user,
         profile,
     )
     .map(Some)
@@ -3594,26 +3615,40 @@ fn omitted_public_messages<R: ContextReadConnection>(
     }))
 }
 
-fn projected_historical_camp_message_body(
-    stored_body: String,
-    _structured_content_json: Option<String>,
-) -> String {
-    stored_body
-}
-
-fn projected_current_camp_message_body(
+fn projected_historical_camp_message(
     connection: &rusqlite::Connection,
     stored_body: String,
     structured_content_json: Option<String>,
-) -> Result<String> {
+) -> Result<(String, bool)> {
     let Some(structured_content_json) = structured_content_json else {
-        return Ok(stored_body);
+        return Ok((stored_body, false));
     };
     let content = normalize_content(
         serde_json::from_str::<StructuredCampMessageContent>(&structured_content_json)
             .context("CampMessage Structured Content is invalid")?,
     );
-    render_current_plain_text(connection, &content)
+    Ok((
+        render_current_plain_text(connection, &content)?,
+        mentions_current_user(&content),
+    ))
+}
+
+fn projected_current_camp_message(
+    connection: &rusqlite::Connection,
+    stored_body: String,
+    structured_content_json: Option<String>,
+) -> Result<(String, bool)> {
+    let Some(structured_content_json) = structured_content_json else {
+        return Ok((stored_body, false));
+    };
+    let content = normalize_content(
+        serde_json::from_str::<StructuredCampMessageContent>(&structured_content_json)
+            .context("CampMessage Structured Content is invalid")?,
+    );
+    Ok((
+        render_current_plain_text(connection, &content)?,
+        mentions_current_user(&content),
+    ))
 }
 
 #[derive(Debug)]
@@ -3624,6 +3659,7 @@ struct CurrentInput {
     source_conversation_message_id: Option<String>,
     source_content_digest: String,
     projected_body_digest: String,
+    mentions_current_user: bool,
 }
 
 impl CurrentInput {
@@ -3837,7 +3873,7 @@ fn load_current_input<R: ContextReadConnection>(
         (Some(camp_message_id), None) => {
             let camp_message = load_trigger_camp_message(database, snapshot, camp_message_id)?;
             let source = project_camp_current_input_source(database, snapshot, &camp_message)?;
-            let body = projected_current_camp_message_body(
+            let (body, mentions_current_user) = projected_current_camp_message(
                 database.context_connection(),
                 camp_message.stored_body,
                 camp_message.structured_content_json,
@@ -3848,11 +3884,13 @@ fn load_current_input<R: ContextReadConnection>(
                 payload: json!({
                     "source": source,
                     "message": body,
+                    "mentionsCurrentUser": mentions_current_user,
                 }),
                 source_camp_message_id: Some(camp_message_id.to_string()),
                 source_conversation_message_id: None,
                 source_content_digest: camp_message.content_digest,
                 projected_body_digest,
+                mentions_current_user,
             })
         }
         (None, Some(conversation_message_id)) => {
@@ -3921,11 +3959,13 @@ fn load_current_input<R: ContextReadConnection>(
                         "senderName": sender_name,
                     },
                     "message": body,
+                    "mentionsCurrentUser": false,
                 }),
                 source_camp_message_id: None,
                 source_conversation_message_id: Some(conversation_message_id.to_string()),
                 source_content_digest: body_digest.clone(),
                 projected_body_digest: body_digest,
+                mentions_current_user: false,
             })
         }
         _ => anyhow::bail!("AgentRun must have exactly one ready input trigger"),
@@ -5460,6 +5500,7 @@ mod tests {
                     input: CampMessageSendInput {
                         body: body.to_string(),
                         to: Vec::new(),
+                        mention_user: false,
                         task_id: None,
                     },
                 },
@@ -8310,7 +8351,7 @@ mod tests {
                 &CommandEnvelope {
                     command_id: Uuid::new_v4().to_string(),
                     actor: ActorRef::User {
-                        user_id: "local-user".to_string(),
+                        user_id: "local_user".to_string(),
                     },
                     camp_id: Some(fixture.camp_id.clone()),
                     expected_versions: Vec::new(),
@@ -9896,23 +9937,25 @@ mod tests {
         let charter = build_session_charter(&snapshot);
         assert!(BUILTIN_CLI_CHARTER.len() <= 2_560);
         assert!(
-            charter.contains("Rovai built-in operations are fixed local CLI commands, never MCP")
+            charter.contains("Rovai built-in operations are the following thirteen fixed local CLI commands, never MCP")
         );
-        assert!(charter.contains("Agent-facing discovery commands are unavailable"));
+        assert!(charter.contains(
+            "Run `rovai --help` to choose an operation, then run that operation's exact `--help`. Do not assume that a command family has its own help entry."
+        ));
         assert!(!charter.contains("tool list"));
         assert!(!charter.contains("tool describe"));
         assert!(charter.contains("`rovai send`"));
         assert!(charter.contains(
-            "Runtime narration and the Runtime final response are private execution evidence, not Camp messages."
+            "Runtime narration and the Runtime final response are private execution evidence, not Camp messages;"
         ));
-        assert!(charter.contains("call `rovai send` before ending"));
-        assert!(charter.contains("Only a successful `rovai send` publishes that reply"));
+        assert!(charter.contains("successfully call `rovai send` before ending"));
         assert!(charter.contains("current authenticated AgentRun Camp"));
         assert!(!charter.contains("campId"));
         assert!(!charter.contains("--camp-id"));
         assert!(!charter.contains("`rovai member call`"));
         assert!(charter.contains("`--input-file <path>`"));
         assert!(charter.contains("Every eligible member can invoke every published command"));
+        assert!(charter.contains("without one, publicly report uncertainty and stop the mutation"));
         assert!(charter.contains("Rovai Built-in CLI Contract\n"));
         assert!(!charter.contains("Rovai Built-in CLI Contract (v"));
         assert!(charter.contains(
@@ -10191,7 +10234,12 @@ mod tests {
             .iter()
             .find(|message| message["messageId"].as_str() == Some(source_message_id.as_str()))
             .unwrap();
-        assert!(projected["body"].as_str().unwrap().starts_with("@小王 "));
+        assert!(
+            projected["body"]
+                .as_str()
+                .unwrap()
+                .starts_with("@王工程师（已更名） ")
+        );
         assert_eq!(projected["body"].as_str().unwrap().chars().count(), 2_000);
         assert_eq!(projected["continuation"]["input"]["bodyOffset"], 2_000);
 
@@ -10217,7 +10265,7 @@ mod tests {
             projected["body"].as_str().unwrap(),
             continuation["items"][0]["body"].as_str().unwrap()
         );
-        assert_eq!(reconstructed, stored_body);
+        assert_eq!(reconstructed, format!("@王工程师（已更名） {suffix}"));
         std::fs::remove_dir_all(fixture.directory).unwrap();
     }
 
@@ -10522,6 +10570,7 @@ mod tests {
                 sender_id: "user-1".to_string(),
                 source_conversation_id: None,
                 content_digest: sha256_text(&body),
+                mentions_current_user: false,
                 reply_to_message_id: None,
                 attachments: Vec::new(),
                 body: body.clone(),

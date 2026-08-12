@@ -553,7 +553,7 @@ export function App(): React.JSX.Element {
       const notificationBoundary = await window.rovai.request<InAppNotificationInbox>(
         'notifications.inbox',
         { filter: 'all', limit: 1 }
-      ).then((inbox) => inbox.schemaVersion === 2 ? inbox.throughSequence : null)
+      ).then((inbox) => inbox.schemaVersion === 3 ? inbox.throughSequence : null)
         .catch(() => null)
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
       if (snapshot.schemaVersion !== 29) throw new Error('Camp snapshot schema is incompatible')
@@ -1255,7 +1255,16 @@ export function App(): React.JSX.Element {
     notification: InAppNotificationView
   ): Promise<void> => {
     await requestMemberTransition(async () => {
-      const target: NotificationFocusTarget | null = notification.kind === 'runtime_permission_attention'
+      const target: NotificationFocusTarget | null = notification.kind === 'camp_message_user_mention'
+        ? notification.sourceAvailable && notification.sourceMessageId
+          ? {
+            requestId: ++notificationFocusSequence.current,
+            kind: 'camp_message',
+            campTurnId: null,
+            messageId: notification.sourceMessageId
+          }
+          : null
+        : notification.kind === 'runtime_permission_attention'
         ? notification.attentionState === 'pending'
           ? {
             requestId: ++notificationFocusSequence.current,
@@ -2250,7 +2259,7 @@ export function optimisticCampMessage(
     sequence,
     timelineGlobalSequence: null,
     authorType: 'user',
-    authorId: 'local-user',
+    authorId: 'local_user',
     sourceAgentRunId: null,
     body: draft.body,
     content: draft.content,

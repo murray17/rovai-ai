@@ -26,6 +26,7 @@ import {
   pasteStructuredPlainText,
   replaceStructuredSelection,
   structuredMentionContentLength,
+  type StructuredMentionContent,
   type StructuredMentionEditorState,
   type StructuredMentionSelection
 } from './structured-mention-model'
@@ -301,7 +302,7 @@ export function StructuredMentionComposer({
   const generatedId = useId()
   const mentionMenuId = `${id || generatedId}-mention-options`
   const skillMenuId = `${id || generatedId}-skill-options`
-  const content = useMemo(() => normalizeStructuredMentionContent(value), [value])
+  const content = useMemo(() => authorableStructuredContent(value), [value])
   const memberById = useMemo(
     () => new Map(members.map((member) => [member.agentId, member])),
     [members]
@@ -590,7 +591,7 @@ export function StructuredMentionComposer({
       members
     )
     emitState(structuredContent
-      ? replaceStructuredSelection(editorState(), structuredContent)
+      ? replaceStructuredSelection(editorState(), authorableStructuredContent(structuredContent))
       : pasteStructuredPlainText(editorState(), plainText))
   }
 
@@ -873,8 +874,8 @@ function queryAfterDeletion(
 }
 
 function structuredContentEqual(
-  left: StructuredCampMessageContent,
-  right: StructuredCampMessageContent
+  left: StructuredMentionContent,
+  right: StructuredMentionContent
 ): boolean {
   if (left.length !== right.length) return false
   return left.every((segment, index) => {
@@ -888,8 +889,19 @@ function structuredContentEqual(
   })
 }
 
-function readStructuredContent(editor: HTMLDivElement): StructuredCampMessageContent {
-  const content: StructuredCampMessageContent = []
+function authorableStructuredContent(
+  content: StructuredCampMessageContent
+): StructuredMentionContent {
+  return normalizeStructuredMentionContent(content.map((segment) => {
+    if (segment.kind === 'current_user_mention') {
+      return { kind: 'text' as const, text: '@你' }
+    }
+    return segment
+  }))
+}
+
+function readStructuredContent(editor: HTMLDivElement): StructuredMentionContent {
+  const content: StructuredMentionContent = []
   for (const node of editor.childNodes) {
     if (node.nodeType === Node.ELEMENT_NODE) {
       const element = node as HTMLElement
@@ -916,7 +928,7 @@ function readStructuredContent(editor: HTMLDivElement): StructuredCampMessageCon
 
 function editorDomMatchesReactProjection(
   editor: HTMLDivElement,
-  content: StructuredCampMessageContent
+  content: StructuredMentionContent
 ): boolean {
   const children = [...editor.childNodes]
   if (children.length !== content.length) return false

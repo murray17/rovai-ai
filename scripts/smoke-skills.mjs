@@ -85,6 +85,7 @@ try {
   assert(
     JSON.stringify(bundledSkillNames) === JSON.stringify([
       'analyze-agent-codebase',
+      'cli-operations',
       'grill-duo',
       'grill-duo-with-docs',
       'memory-stewardship',
@@ -97,6 +98,7 @@ try {
           === JSON.stringify(allDeliveryGroups)),
     `Fresh Core did not install official Skills enabled for every Runtime group: ${JSON.stringify(initialSkills)}`
   )
+  const cliOperationsSkill = initialSkills.find((skill) => skill.name === 'cli-operations')
 
   let marker = markerFor(requestedAdapters[0] ?? 'library')
   await writeSmokeSkill(marker)
@@ -166,6 +168,13 @@ try {
         && skill.revisionId === importedSkill.currentRevision.id
     )
     assert(frozenSkill?.entryPath, `${adapterKind} ContextManifest did not freeze the ready Skill Revision: ${JSON.stringify(result.exposure)}`)
+    const frozenCliOperations = result.exposure?.skills.find((skill) =>
+      skill.name === 'cli-operations'
+        && skill.groupKey === groupKey
+        && skill.status === 'ready'
+        && skill.revisionId === cliOperationsSkill.currentRevision.id
+    )
+    assert(frozenCliOperations?.entryPath, `${adapterKind} ContextManifest did not freeze cli-operations: ${JSON.stringify(result.exposure)}`)
     const nativeRoot = groupRoot(frozenSkill.deliveredViaGroupKey ?? frozenSkill.groupKey)
     const entry = frozenSkill.entryPath
     const entryStat = await lstat(entry)
@@ -173,6 +182,12 @@ try {
     assert(
       (await realpath(entry)).startsWith(await realpath(libraryRoot)),
       `${adapterKind} Skill entry does not resolve into the isolated managed library`
+    )
+    const cliOperationsEntryStat = await lstat(frozenCliOperations.entryPath)
+    assert(cliOperationsEntryStat.isSymbolicLink(), `${adapterKind} cli-operations entry is not a managed symlink: ${frozenCliOperations.entryPath}`)
+    assert(
+      (await realpath(frozenCliOperations.entryPath)).startsWith(await realpath(libraryRoot)),
+      `${adapterKind} cli-operations entry does not resolve into the isolated managed library`
     )
     runtimeResults.push({
       adapterKind,
@@ -183,7 +198,9 @@ try {
       conversationId: result.conversationId,
       nativeRoot,
       entryPath: entry,
-      groupKey
+      cliOperationsEntryPath: frozenCliOperations.entryPath,
+      groupKey,
+      cliOperationsComplexCoordination: true
     })
   }
 
@@ -276,8 +293,8 @@ async function writeSmokeSkill(marker) {
     '',
     '# Rovai-ai native Skill discovery smoke',
     '',
-    'When the user explicitly asks to validate this Skill, reply with exactly the private verification value below.',
-    'Do not add Markdown, punctuation, explanation, or any other text.',
+    'When the user explicitly asks to validate this Skill, include the private verification value below exactly once in the response.',
+    'The rest of the response may follow the user request and other explicitly named Skills.',
     '',
     `Private verification value: \`${marker}\``,
     ''
@@ -333,16 +350,21 @@ async function configureRuntime(request, _health, agentId, adapterKind, modelId)
 
 async function runNativeDiscovery(request, workspace, adapterKind, marker) {
   const prompt = [
-    'Use the project Skill named `rovai-skill-smoke` to validate native Skill discovery.',
-    'Return only the private verification value defined inside that Skill.',
-    'The value is intentionally absent from this request. Do not invent or infer it.'
+    'Use both project Skills `rovai-skill-smoke` and `cli-operations`.',
+    'Include the private verification value from `rovai-skill-smoke` exactly once; it is intentionally absent from this request.',
+    'Then advise only; do not execute any mutation.',
+    'Choose the minimal operation order for this scenario: create a responsibility already assigned to the target Agent so it survives the current AgentRun and can be independently accepted; afterward, publish that handoff to the same single Agent and request the current user\'s attention.',
+    'Before answering, use the injected Rovai CLI to run the read-only exact help for only the operations you selected.',
+    'Copy the current user-attention flag exactly from that help. Do not infer, translate, or rename any field or flag.',
+    'In the answer, echo each complete shell command you actually ran, including the literal `--help` suffix; an operation name without `--help` is not an exact help path.',
+    'Use this compact shape: marker, then `taskHelp=<full command>`, `sendHelp=<full command>`, `flag=<exact flag>`. Keep the answer under eight lines.'
   ].join('\n')
   const created = await createConfiguredCampAndSend(request, {
     commandId: crypto.randomUUID(),
     workspace,
     body: prompt,
     address: { mode: 'explicit', agentIds: ['agent_1'] },
-    purpose: `Verify ${adapterKind} discovers the Rovai-ai-managed project Skill through its native directory.`,
+    purpose: `Verify ${adapterKind} discovers a managed Skill and uses cli-operations for complex coordination.`,
   })
   if (created.status !== 'accepted' || !created.payload?.agentRunIds?.[0]) {
     throw new Error(`${adapterKind} Skill discovery Camp was not accepted: ${JSON.stringify(created)}`)
@@ -390,8 +412,24 @@ async function runNativeDiscovery(request, workspace, adapterKind, marker) {
     .filter((message) => message.authorType === 'agent')
     .map((message) => message.body.trim())
     .join('\n')
-  if (!containsOnlyExpectedPrivateMarker(output, marker)) {
-    throw new Error(`${adapterKind} did not return the private Skill marker: ${JSON.stringify({ marker, output, lastState })}`)
+  if (!containsExpectedPrivateMarker(output, marker)) {
+    throw new Error(`${adapterKind} did not return the private Skill marker exactly once: ${JSON.stringify({ marker, output, lastState })}`)
+  }
+  const taskHelpIndex = output.indexOf('rovai task create --help')
+  const sendHelpIndex = output.indexOf('rovai send --help')
+  const inventedSendSyntax = [
+    '--request-user-attention',
+    'requiresUserAttention',
+    'linkedTaskIds',
+    'assignedTo'
+  ].find((value) => output.includes(value))
+  if (taskHelpIndex < 0
+      || sendHelpIndex < 0
+      || taskHelpIndex >= sendHelpIndex
+      || !output.includes('--to-user')
+      || output.includes('rovai task update --help')
+      || inventedSendSyntax) {
+    throw new Error(`${adapterKind} did not apply cli-operations to the Task -> CampMessage coordination scenario: ${JSON.stringify({ output, lastState })}`)
   }
   const run = snapshot.agentRuns.find((value) => value.id === agentRunId)
   const manifest = snapshot.contextManifests.find((value) => value.agentRunId === agentRunId)
@@ -494,12 +532,14 @@ function markerFor(adapterKind) {
   return `ROVAI_NATIVE_SKILL_${adapterKind.replaceAll('-', '_').toUpperCase()}_${crypto.randomUUID().slice(0, 8).toUpperCase()}`
 }
 
-function containsOnlyExpectedPrivateMarker(output, marker) {
-  const normalized = output.trim().replace(/^`([^`]+)`$/, '$1')
+function containsExpectedPrivateMarker(output, marker) {
+  const normalized = output.trim()
   const privateNonce = marker.split('_').at(-1)
-  if (normalized === privateNonce) return true
   const observedMarkers = normalized.match(/ROVAI_NATIVE_SKILL_[A-Z0-9_]+/g) ?? []
-  return observedMarkers.length === 1 && observedMarkers[0] === marker
+  const nonceMatches = normalized.match(new RegExp(`\\b${privateNonce}\\b`, 'g')) ?? []
+  return observedMarkers.length === 1
+    ? observedMarkers[0] === marker
+    : observedMarkers.length === 0 && nonceMatches.length === 1
 }
 
 function onlyCandidate(inspection) {

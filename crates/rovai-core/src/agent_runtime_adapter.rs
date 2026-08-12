@@ -1824,7 +1824,7 @@ mod tests {
             .resolve_runtime(AdapterRuntimeResolutionInput {
                 installation_id: "codex-local",
                 executable_path: "/opt/bin/codex",
-                auth_scope: "local-user",
+                auth_scope: "local_user",
                 executable_fingerprint: "sha256:one",
                 protocols: &protocols,
                 native_session_compatibility_key: Some("codex-cli:app-server-v2"),
@@ -1837,7 +1837,7 @@ mod tests {
                 executable_fingerprint: "sha256:two",
                 installation_id: "codex-local",
                 executable_path: "/opt/bin/codex",
-                auth_scope: "local-user",
+                auth_scope: "local_user",
                 protocols: &protocols,
                 native_session_compatibility_key: Some("codex-cli:app-server-v2"),
                 permissions: &permissions,
@@ -1848,7 +1848,7 @@ mod tests {
             .resolve_runtime(AdapterRuntimeResolutionInput {
                 installation_id: "codex-local",
                 executable_path: "/opt/bin/codex",
-                auth_scope: "local-user",
+                auth_scope: "local_user",
                 executable_fingerprint: "sha256:one",
                 protocols: &protocols,
                 native_session_compatibility_key: Some("codex-cli:app-server-v3"),
@@ -2099,7 +2099,7 @@ mod tests {
                     AdapterRuntimeResolutionInput {
                         installation_id: "copilot-local",
                         executable_path: "/opt/bin/copilot",
-                        auth_scope: "local-user",
+                        auth_scope: "local_user",
                         executable_fingerprint: "sha256:test",
                         protocols: &protocols,
                         native_session_compatibility_key: Some("copilot-cli:acp-v1"),
@@ -2183,7 +2183,7 @@ mod tests {
                     AdapterRuntimeResolutionInput {
                         installation_id: "agy-local",
                         executable_path: "/opt/bin/agy",
-                        auth_scope: "local-user",
+                        auth_scope: "local_user",
                         executable_fingerprint: "sha256:test",
                         protocols: &protocols,
                         native_session_compatibility_key: Some("antigravity-app:cli-v1"),

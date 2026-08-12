@@ -8,7 +8,10 @@ use uuid::Uuid;
 
 use crate::{
     agent_profile::{AdapterKind, resolve_frozen_runtime},
-    camp_content::{StructuredCampMessageSegment, canonical_content_digest, normalize_content},
+    camp_content::{
+        StructuredCampMessageSegment, canonical_content_digest, normalize_content,
+        render_current_plain_text,
+    },
     collaboration::{append_domain_event, build_effective_config},
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
@@ -19,6 +22,7 @@ use crate::{
         DeliveryContextPreview, FrozenDeliveryContext,
     },
     context_index::index_camp_message,
+    current_user::CURRENT_USER_ID,
     db::Database,
     execution_budget::{PRODUCT_MAX_ACCEPTED_A2A, camp_turn_execution_budget_now},
     runtime::AgentRunWorkspace,
@@ -382,6 +386,7 @@ pub struct SendPublicA2aMessage<'a> {
     pub current_a2a_depth: i64,
     pub body: &'a str,
     pub explicit_recipients: &'a [String],
+    pub mention_user: bool,
     pub task_id: Option<&'a str>,
 }
 
@@ -707,7 +712,12 @@ pub fn persist_public_a2a_message(
     )?;
 
     let message_id = Uuid::new_v4().to_string();
-    let content = structured_content_from_inline_addressing(request.body, &inline.occurrences);
+    let content = structured_content_from_inline_addressing(
+        request.body,
+        &inline.occurrences,
+        request.mention_user,
+    );
+    let projected_body = render_current_plain_text(transaction, &content)?;
     let structured_content_json = serde_json::to_string(&content)?;
     let content_digest = canonical_content_digest(&content)?;
     let recipients_json = serde_json::to_string(&effective_recipients)?;
@@ -755,7 +765,7 @@ pub fn persist_public_a2a_message(
             camp_sequence,
             request.author_agent_id,
             request.source_agent_run_id,
-            request.body,
+            projected_body,
             structured_content_json,
             content_digest,
             address_mode,
@@ -772,9 +782,31 @@ pub fn persist_public_a2a_message(
         transaction,
         &message_id,
         request.camp_id,
-        request.body,
+        &projected_body,
         &recipients_json,
     )?;
+
+    if request.mention_user {
+        transaction.execute(
+            r#"
+            INSERT INTO in_app_notification(
+                id, recipient_user_id, kind, camp_id, camp_turn_id,
+                source_message_id, resolved_at, read_at, cleared_at,
+                version, created_at, updated_at
+            ) VALUES (
+                ?1, ?2, 'camp_message_user_mention', ?3, NULL,
+                ?4, NULL, NULL, NULL, 1, ?5, ?5
+            )
+            "#,
+            params![
+                Uuid::new_v4().to_string(),
+                CURRENT_USER_ID,
+                request.camp_id,
+                message_id,
+                now,
+            ],
+        )?;
+    }
 
     let actor = ActorRef::Agent {
         agent_id: request.author_agent_id.to_string(),
@@ -2347,8 +2379,19 @@ fn parse_inline_addressing(body: &str) -> InlineAddressing {
 fn structured_content_from_inline_addressing(
     body: &str,
     occurrences: &[InlineAddressingOccurrence],
+    mention_user: bool,
 ) -> Vec<StructuredCampMessageSegment> {
-    let mut content = Vec::with_capacity(occurrences.len().saturating_mul(2).saturating_add(1));
+    let mut content = Vec::with_capacity(
+        occurrences
+            .len()
+            .saturating_mul(2)
+            .saturating_add(if mention_user { 2 } else { 1 }),
+    );
+    if mention_user {
+        content.push(StructuredCampMessageSegment::CurrentUserMention {
+            user_id: CURRENT_USER_ID.to_string(),
+        });
+    }
     let mut cursor = 0_usize;
     for occurrence in occurrences {
         if cursor < occurrence.start_byte {

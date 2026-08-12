@@ -308,8 +308,9 @@ function scrollExecutionDrawerToLatest(body: HTMLElement): void {
 }
 export type NotificationFocusTarget = {
   requestId: number
-  kind: 'approval' | 'camp_turn'
+  kind: 'approval' | 'camp_turn' | 'camp_message'
   campTurnId: string | null
+  messageId?: string
 }
 export interface CampRuntimeRecoveryTarget {
   agentId: string
@@ -564,11 +565,15 @@ export function structuredCampContentPlainText(
   members: ReadonlyArray<Pick<CampSnapshot['members'][number], 'agentId' | 'displayName'>>
 ): string {
   const names = new Map(members.map((member) => [member.agentId, member.displayName]))
-  return content.map((segment) => {
+  const text = content.map((segment) => {
     if (segment.kind === 'text') return segment.text
     if (segment.kind === 'all_members_mention') return '@所有队员'
+    if (segment.kind === 'current_user_mention') return '@你'
     return `@${names.get(segment.agentId) ?? '不可用队员'}`
   }).join('')
+  return content[0]?.kind === 'current_user_mention' && content.length > 1
+    ? `${text.slice(0, 2)} ${text.slice(2)}`
+    : text
 }
 
 export function emptyCampRuntimeSummary(
@@ -1076,6 +1081,21 @@ export function CampWorkspace({
       if (notificationFocus.kind === 'approval') {
         return
       }
+      if (notificationFocus.kind === 'camp_message') {
+        const messageId = notificationFocus.messageId
+        const target = messageId
+          ? timelineScrollRef.current?.querySelector<HTMLElement>(
+              `[data-message-id="${CSS.escape(messageId)}"]`
+            ) ?? null
+          : null
+        if (target) {
+          target.classList.add('notification-focus-target')
+          target.scrollIntoView({ block: 'center', behavior: scrollBehavior })
+          target.focus({ preventScroll: true })
+          window.setTimeout(() => target.classList.remove('notification-focus-target'), 1_800)
+        }
+        return
+      }
       const turnId = notificationFocus.campTurnId
       const targets = turnId
         ? timelineScrollRef.current?.querySelectorAll<HTMLElement>(
@@ -1525,8 +1545,9 @@ export function CampWorkspace({
                     <article
                       className={`timeline-node conversation-bubble ${campMessage.authorType}${followsSameAuthor ? ' same-author' : ''}`}
                       key={campMessage.id}
+                      data-message-id={campMessage.id}
                       data-camp-turn-id={sourceRun?.campTurnId}
-                      tabIndex={sourceRun ? -1 : undefined}
+                      tabIndex={-1}
                       style={member ? { '--agent-accent': identityColorToken(member.agentId) } as React.CSSProperties : undefined}
                     >
                       {campMessage.authorType === 'agent' && (authorProfileAvailable
@@ -1585,10 +1606,13 @@ export function CampWorkspace({
                                 onCopy={() => copyMessage(
                                   campMessage.id,
                                   displayBody,
-                                  campMessage.authorType === 'user' ? campMessage.content : null
+                                  campMessage.content
                                 )}
                               >
                                 {campMessage.authorType === 'agent'
+                                  && !campMessage.content?.some((segment) =>
+                                    segment.kind === 'current_user_mention'
+                                  )
                                       ? (
                                           <div className="final-copy">
                                             <SafeMarkdown>{displayBody}</SafeMarkdown>
@@ -3257,6 +3281,21 @@ function StructuredMessageBody({
     <p className="structured-message-body">
       {content.map((segment, index) => {
         if (segment.kind === 'text') return <span key={`text-${index}`}>{segment.text}</span>
+        if (segment.kind === 'current_user_mention') {
+          return (
+            <span key={`current-user-${index}`}>
+              <span
+                className="message-mention-token current-user"
+                aria-label="提及当前用户：你"
+              >
+                @你
+              </span>
+              {index === 0 && content.slice(1).some((candidate) => (
+                candidate.kind !== 'text' || candidate.text.length > 0
+              )) ? ' ' : ''}
+            </span>
+          )
+        }
         if (segment.kind === 'all_members_mention') {
           const interactive = Boolean(onActivateAllMembersMention)
           return (

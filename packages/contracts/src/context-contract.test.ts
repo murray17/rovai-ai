@@ -1,14 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import fixture from '../fixtures/agent-run-context-v13.json'
+import fixture from '../fixtures/agent-run-context-v14.json'
 import type { ContextManifestView } from './index'
 
 describe('AgentRun context contract', () => {
-  it('uses the shared frozen v13 fixture', () => {
-    const formatterVersion: ContextManifestView['formatterVersion'] = 13
+  it('uses the shared frozen v14 fixture', () => {
+    const formatterVersion: ContextManifestView['formatterVersion'] = 14
 
     expect(fixture.agentRunContextFormatterVersion).toBe(formatterVersion)
     expect(fixture.contextManifestFormatterVersion).toBe(formatterVersion)
     expect(fixture.contextDeliveryProfileVersion).toBe(3)
+    expect(fixture.contextManifestVersion).toBe(12)
+    expect(fixture.modelCampMessageFields).toEqual(['body', 'mentionsCurrentUser'])
     expect(fixture.selfActiveTaskProjection).toMatchObject({
       section: 'SELF_ACTIVE_TASKS',
       maxTasks: 8,
@@ -34,6 +36,8 @@ describe('AgentRun context contract', () => {
     expect(fixture.truncatedBodyContinuation.operation).toBe('camp.read')
     expect(fixture.omissionRecoveryField).toBe('navigationHint')
     expect(fixture.contextManifestSharedMessageEvidence).toContain('attachmentIdPathDigest')
+    expect(fixture.contextManifestSharedMessageEvidence).toContain('mentionsCurrentUser')
+    expect(fixture.contextManifestSharedMessageEvidence).toContain('projectedBodyDigest')
     expect(fixture.contextManifestOmissionEvidence.wholeHistory).not.toHaveProperty('messageIds')
     expect(fixture.contextManifestOmissionEvidence.boundedCandidate).toEqual({
       kind: 'public_history',

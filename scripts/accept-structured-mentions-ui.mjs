@@ -54,6 +54,13 @@ const expectedContent = [
   { kind: 'text', text: ' ，请给出结论。' }
 ]
 const expectedBody = '请同时检查这条消息：@小狐狸 @小河狸 @咕咕 ，请给出结论。'
+const currentUserMentionMessageId = 'message-current-user-mention-accept'
+const currentUserMentionText = '请选择 v0.65 的方案。'
+const currentUserMentionBody = `@你 ${currentUserMentionText}`
+const currentUserMentionContent = [
+  { kind: 'current_user_mention', userId: 'local_user' },
+  { kind: 'text', text: currentUserMentionText }
+]
 const nativeDomRegressionBody = '原生输入回归'
 const acceptanceExecutableFingerprint = `sha256:${createHash('sha256')
   .update(await readFile(acceptanceExecutablePath))
@@ -742,6 +749,118 @@ try {
   const copiedCapture = join(outputDir, 'structured-mentions-hover-copy.png')
   await capture(running.cdp, copiedCapture)
 
+  // Current User Mention is Agent-only, so create the accepted Core-owned
+  // fixture while the isolated App/Core are stopped. Reopening the packaged
+  // App then exercises the real read model, copy bridge, and Composer paste.
+  await closeApp(running)
+  running = null
+  await insertCurrentUserMentionFixture(databasePath, campId)
+  running = await launchApp(dataDir, debugPort, 1440, 920)
+  await setTheme(running.cdp, 'night')
+  await openCamp(running.cdp, campId)
+  await waitForExpression(running.cdp, `(() => {
+    const message = document.querySelector('[data-message-id=${JSON.stringify(currentUserMentionMessageId)}]')
+    return message?.querySelector('.structured-message-body')?.textContent
+      === ${JSON.stringify(currentUserMentionBody)}
+      && message.querySelectorAll('.message-mention-token.current-user').length === 1
+  })()`, 30_000)
+  await wait(180)
+
+  const currentUserMentionInspection = await evaluate(running.cdp, `(() => {
+    const message = document.querySelector('[data-message-id=${JSON.stringify(currentUserMentionMessageId)}]')
+    const token = message?.querySelector('.message-mention-token.current-user')
+    if (!(message instanceof HTMLElement) || !(token instanceof HTMLElement)) return null
+    const style = getComputedStyle(token)
+    const colorProbe = document.createElement('span')
+    colorProbe.style.color = 'var(--mention-ink)'
+    document.body.appendChild(colorProbe)
+    const mentionInkColor = getComputedStyle(colorProbe).color
+    colorProbe.remove()
+    return {
+      messageText: message.querySelector('.structured-message-body')?.textContent ?? null,
+      tokenText: token.textContent,
+      label: token.getAttribute('aria-label'),
+      role: token.getAttribute('role'),
+      tabIndex: token.getAttribute('tabindex'),
+      hasPopup: token.getAttribute('aria-haspopup'),
+      interactive: token.classList.contains('is-interactive'),
+      display: style.display,
+      borderTopWidth: style.borderTopWidth,
+      backgroundColor: style.backgroundColor,
+      color: style.color,
+      mentionInkColor,
+      theme: document.documentElement.dataset.theme
+    }
+  })()`)
+  assert(
+    currentUserMentionInspection
+      && currentUserMentionInspection.messageText === currentUserMentionBody
+      && currentUserMentionInspection.tokenText === '@你'
+      && currentUserMentionInspection.label === '提及当前用户：你'
+      && currentUserMentionInspection.role === null
+      && currentUserMentionInspection.tabIndex === null
+      && currentUserMentionInspection.hasPopup === null
+      && !currentUserMentionInspection.interactive
+      && currentUserMentionInspection.display === 'inline'
+      && currentUserMentionInspection.borderTopWidth === '0px'
+      && currentUserMentionInspection.backgroundColor === 'rgba(0, 0, 0, 0)'
+      && currentUserMentionInspection.color === currentUserMentionInspection.mentionInkColor
+      && currentUserMentionInspection.theme === 'night',
+    `Current User Mention is not the accepted non-interactive inline token: ${JSON.stringify(currentUserMentionInspection)}`
+  )
+  await evaluate(running.cdp, `(() => {
+    document.querySelector('[data-message-id=${JSON.stringify(currentUserMentionMessageId)}] .message-mention-token.current-user')?.click()
+    return true
+  })()`)
+  assert(!(await evaluate(running.cdp, `Boolean(document.querySelector('.mention-profile-popover'))`)),
+    'Current User Mention incorrectly opened a member profile popover')
+
+  const currentUserMentionCapture = join(outputDir, 'current-user-mention-sent.png')
+  await capture(running.cdp, currentUserMentionCapture)
+  await moveMouseToElement(running.cdp,
+    `[data-message-id=${JSON.stringify(currentUserMentionMessageId)}] .message-bubble`)
+  await wait(200)
+  clipboardTouched = true
+  await mouseClick(running.cdp,
+    `[data-message-id=${JSON.stringify(currentUserMentionMessageId)}] .message-copy-button`)
+  await waitForExpression(running.cdp, `(() => (
+    document.querySelector('[data-message-id=${JSON.stringify(currentUserMentionMessageId)}] .copy-feedback')
+      ?.textContent === '已复制'
+  ))()`)
+  const currentUserClipboardText = await runProcess('/usr/bin/pbpaste', [])
+  assert(currentUserClipboardText === currentUserMentionBody,
+    `Current User Mention plain-text copy is wrong: ${JSON.stringify(currentUserClipboardText)}`)
+  const currentUserClipboardArchive = await snapshotClipboard()
+  const currentUserClipboardPayload = structuredClipboardPayload(currentUserClipboardArchive)
+  assert(
+    currentUserClipboardPayload?.version === 1
+      && currentUserClipboardPayload.content?.[0]?.kind === 'current_user_mention'
+      && currentUserClipboardPayload.content[0].userId === 'local_user'
+      && currentUserClipboardPayload.content[0].fallbackText === '@你',
+    `Private clipboard did not preserve the stable Current User Mention segment: ${JSON.stringify(currentUserClipboardPayload)}`
+  )
+
+  await focusEditorAtEnd(running.cdp)
+  await pasteWithMetaV(running.cdp)
+  const downgradedDraft = await waitForValue(async () =>
+    request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
+    deepEqual(draft.content, [{ kind: 'text', text: currentUserMentionBody }]), 10_000)
+  assert(downgradedDraft.body === currentUserMentionBody,
+    `Composer paste did not downgrade Current User Mention to Text: ${JSON.stringify(downgradedDraft)}`)
+  const downgradedComposer = await evaluate(running.cdp, `(() => {
+    const editor = document.querySelector('#camp-message')
+    return {
+      text: editor?.textContent ?? null,
+      tokenCount: editor?.querySelectorAll('[data-token-kind]').length ?? -1
+    }
+  })()`)
+  assert(
+    downgradedComposer.text === currentUserMentionBody && downgradedComposer.tokenCount === 0,
+    `Composer recreated an Agent-only Current User Mention: ${JSON.stringify(downgradedComposer)}`
+  )
+  const currentUserPasteCapture = join(outputDir, 'current-user-mention-paste-downgraded.png')
+  await capture(running.cdp, currentUserPasteCapture)
+
   result = {
     acceptance: 'structured-mentions-ui',
     appPath,
@@ -754,7 +873,9 @@ try {
       sent: sentCapture,
       memberPopover: memberPopoverCapture,
       nativeSelection: selectionCapture,
-      hoverCopy: copiedCapture
+      hoverCopy: copiedCapture,
+      currentUserMention: currentUserMentionCapture,
+      currentUserPasteDowngraded: currentUserPasteCapture
     },
     campId,
     selectedSkillName: selectableSkill.name,
@@ -771,6 +892,9 @@ try {
     memberPopoverStayedInCamp: true,
     mentionSelectedText,
     selectedText,
+    currentUserMentionInspection,
+    currentUserClipboardPayload,
+    currentUserPasteDowngradedToText: true,
     clipboardItemCountBeforeTest: clipboardArchive.length,
     clipboardRestored: false,
     isolatedUserDataRemoved: false
@@ -861,6 +985,32 @@ async function installAcceptanceRuntime(path, agentIds) {
         default_permission_config_json =
           '{"adapterKind":"codex-cli","schemaVersion":1,"values":{"sandbox_mode":"workspace-write","approval_policy":"on-request"}}'
     WHERE id IN (${ids});
+  `)
+}
+
+async function insertCurrentUserMentionFixture(path, campId) {
+  const contentJson = JSON.stringify(currentUserMentionContent)
+  await runSql(path, `
+    BEGIN IMMEDIATE;
+    UPDATE camp
+    SET last_message_sequence = last_message_sequence + 1,
+        version = version + 1,
+        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE id = ${sqlLiteral(campId)};
+    INSERT INTO camp_message(
+      id, camp_id, sequence, author_type, author_id, body,
+      structured_content_json, content_digest, address_mode,
+      addressed_agent_ids_json, version, created_at, updated_at
+    ) SELECT
+      ${sqlLiteral(currentUserMentionMessageId)}, id, last_message_sequence,
+      'agent', 'agent_1', ${sqlLiteral(currentUserMentionBody)},
+      ${sqlLiteral(contentJson)},
+      ${sqlLiteral(`sha256:structured-mentions-accept:${currentUserMentionMessageId}`)},
+      'default', '[]', 1,
+      strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+      strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    FROM camp WHERE id = ${sqlLiteral(campId)};
+    COMMIT;
   `)
 }
 
@@ -1312,6 +1462,26 @@ async function copySelectionWithMetaC(cdp) {
   })
 }
 
+async function pasteWithMetaV(cdp) {
+  await cdp.send('Input.dispatchKeyEvent', {
+    type: 'rawKeyDown', key: 'Meta', code: 'MetaLeft', modifiers: 4,
+    windowsVirtualKeyCode: 91, nativeVirtualKeyCode: 55
+  })
+  await cdp.send('Input.dispatchKeyEvent', {
+    type: 'rawKeyDown', key: 'v', code: 'KeyV', modifiers: 4,
+    windowsVirtualKeyCode: 86, nativeVirtualKeyCode: 9,
+    commands: ['Paste']
+  })
+  await cdp.send('Input.dispatchKeyEvent', {
+    type: 'keyUp', key: 'v', code: 'KeyV', modifiers: 4,
+    windowsVirtualKeyCode: 86, nativeVirtualKeyCode: 9
+  })
+  await cdp.send('Input.dispatchKeyEvent', {
+    type: 'keyUp', key: 'Meta', code: 'MetaLeft', modifiers: 0,
+    windowsVirtualKeyCode: 91, nativeVirtualKeyCode: 55
+  })
+}
+
 async function setTheme(cdp, preference) {
   await evaluate(cdp,
     `window.rovai.appearance.setPreference(${JSON.stringify(preference)})`, true)
@@ -1523,6 +1693,22 @@ function validateClipboardArchive(archive) {
 function normalizeClipboardArchive(archive) {
   return archive.map((item) => item.slice().sort((left, right) =>
     left.type.localeCompare(right.type)))
+}
+
+function structuredClipboardPayload(archive) {
+  for (const item of archive) {
+    const htmlFlavor = item.find(({ type }) => type === 'public.html')
+    if (!htmlFlavor) continue
+    const html = Buffer.from(htmlFlavor.data, 'base64').toString('utf8')
+    const encoded = /data-rovai-structured-camp-message-v1=["']([^"']+)["']/i.exec(html)?.[1]
+    if (!encoded) continue
+    try {
+      return JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'))
+    } catch {
+      return null
+    }
+  }
+  return null
 }
 
 function runSql(path, sql) {

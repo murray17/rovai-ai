@@ -3505,7 +3505,7 @@ mod tests {
         CommandEnvelope {
             command_id: command_id.to_string(),
             actor: ActorRef::User {
-                user_id: "local-user".to_string(),
+                user_id: "local_user".to_string(),
             },
             camp_id: camp_id.map(str::to_string),
             expected_versions: Vec::new(),
@@ -3673,7 +3673,7 @@ mod tests {
                 runtime_request: None,
                 reason: None,
                 execute_before: None,
-                requested_for_user_id: "local-user".to_string(),
+                requested_for_user_id: "local_user".to_string(),
             },
         }
     }
@@ -3731,7 +3731,7 @@ mod tests {
                 }),
                 reason: None,
                 execute_before: None,
-                requested_for_user_id: "local-user".to_string(),
+                requested_for_user_id: "local_user".to_string(),
             },
         }
     }
@@ -4165,7 +4165,7 @@ mod tests {
             .find(|approval| approval.id == approval_id)
             .unwrap();
         assert_eq!(approval_view.resolved_by_type.as_deref(), Some("user"));
-        assert_eq!(approval_view.resolved_by_id.as_deref(), Some("local-user"));
+        assert_eq!(approval_view.resolved_by_id.as_deref(), Some("local_user"));
         assert_eq!(
             approval_view.resolution_code.as_deref(),
             Some("user_selected_allow")

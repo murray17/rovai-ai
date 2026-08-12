@@ -1,9 +1,9 @@
 {
   "nativeSessionBootstrap": "native_session_bootstrap_v3",
   "bootstrapFormatterVersion": 3,
-  "agentRunContextFormatterVersion": 13,
-  "contextManifestVersion": 11,
-  "contextManifestFormatterVersion": 13,
+  "agentRunContextFormatterVersion": 14,
+  "contextManifestVersion": 12,
+  "contextManifestFormatterVersion": 14,
   "contextDeliveryProfileVersion": 3,
   "selfActiveTaskProjection": {
     "section": "SELF_ACTIVE_TASKS",
@@ -20,6 +20,7 @@
     "user": {"type": "user"},
     "memberCall": {"type": "member_call", "senderAgentId": "source-agent", "senderName": "Source Agent"}
   },
+  "modelCampMessageFields": ["body", "mentionsCurrentUser"],
   "historicalMessageIdentityFields": ["messageId", "sequence", "senderType", "senderId", "replyToMessageId"],
   "historicalAttachmentFields": ["name", "mediaType", "path"],
   "truncatedBodyContinuation": {
@@ -27,7 +28,7 @@
     "inputFields": ["campId", "mode", "messageId", "bodyOffset", "bodyLimit?"]
   },
   "omissionRecoveryField": "navigationHint",
-  "contextManifestSharedMessageEvidence": ["sourceIds", "contentDigest", "attachmentIdPathDigest", "selection", "truncation", "exactDynamicContextBytesDigest"],
+  "contextManifestSharedMessageEvidence": ["sourceIds", "contentDigest", "mentionsCurrentUser", "projectedBodyDigest", "attachmentIdPathDigest", "selection", "truncation", "exactDynamicContextBytesDigest"],
   "contextManifestOmissionEvidence": {
     "wholeHistory": {"kind": "public_history", "reason": "max_public_messages", "count": 985, "sequenceStart": 16, "sequenceEnd": 1000},
     "boundedCandidate": {"kind": "public_history", "messageIds": ["message-123"], "reason": "history_budget"}

@@ -43,8 +43,10 @@ pub struct Database {
     path: PathBuf,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.66";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 32;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.67";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 33;
+const V067_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.66";
+const V067_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 32;
 const V066_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.62";
 const V066_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 31;
 const V062_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.54";
@@ -63,6 +65,7 @@ struct CurrentMigrationState {
     v71: bool,
     v76: bool,
     v77: bool,
+    v78: bool,
 }
 
 impl CurrentMigrationState {
@@ -73,22 +76,27 @@ impl CurrentMigrationState {
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
         {
-            return self.v70 && self.v71 && self.v76 && self.v77;
+            return self.v70 && self.v71 && self.v76 && self.v77 && self.v78;
+        }
+        if contract == V067_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V067_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70 && self.v71 && self.v76 && self.v77 && !self.v78;
         }
         if contract == V066_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V066_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
-            return self.v70 && self.v71 && self.v76 && !self.v77;
+            return self.v70 && self.v71 && self.v76 && !self.v77 && !self.v78;
         }
         if contract == V062_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V062_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
-            return self.v70 && self.v71 && !self.v76 && !self.v77;
+            return self.v70 && self.v71 && !self.v76 && !self.v77 && !self.v78;
         }
         if contract == V062_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V054_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
-            return self.v70 && !self.v71 && !self.v76 && !self.v77;
+            return self.v70 && !self.v71 && !self.v76 && !self.v77 && !self.v78;
         }
         contract == V052_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V052_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
@@ -96,6 +104,7 @@ impl CurrentMigrationState {
             && !self.v71
             && !self.v76
             && !self.v77
+            && !self.v78
     }
 }
 
@@ -161,7 +170,8 @@ fn has_current_data_contract(path: &Path) -> bool {
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 70),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 71),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 76),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 77)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 77),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 78)
         "#,
         [],
         |row| {
@@ -174,6 +184,7 @@ fn has_current_data_contract(path: &Path) -> bool {
                 v71: row.get(5)?,
                 v76: row.get(6)?,
                 v77: row.get(7)?,
+                v78: row.get(8)?,
             })
         },
     );
@@ -1255,6 +1266,9 @@ impl Database {
             if !self.schema_migration_applied(77)? {
                 self.migrate_planned_shutdown_terminal_projection_v77()?;
             }
+            if !self.schema_migration_applied(78)? {
+                self.migrate_current_user_attention_v78()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -1535,6 +1549,9 @@ impl Database {
         }
         if !self.schema_migration_applied(77)? {
             self.migrate_planned_shutdown_terminal_projection_v77()?;
+        }
+        if !self.schema_migration_applied(78)? {
+            self.migrate_current_user_attention_v78()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -6994,6 +7011,350 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_current_user_attention_v78(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let now = chrono::Utc::now().to_rfc3339();
+
+            let notification_triggers = {
+                let mut statement = transaction.prepare(
+                    r#"
+                    SELECT name, sql
+                    FROM sqlite_master
+                    WHERE type = 'trigger' AND sql IS NOT NULL
+                      AND sql LIKE '%in_app_notification%'
+                    ORDER BY name
+                    "#,
+                )?;
+                statement
+                    .query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            for (name, _) in &notification_triggers {
+                transaction.execute_batch(&format!(
+                    "DROP TRIGGER IF EXISTS \"{}\";",
+                    name.replace('"', "\"\"")
+                ))?;
+            }
+
+            transaction.execute(
+                r#"
+                UPDATE message_delivery_attempt
+                SET status = 'failed', wait_condition = NULL,
+                    context_manifest_id = NULL,
+                    failure_code = 'context_formatter_v14_required',
+                    failure_detail_json = '{"reason":"current_user_attention_clean_break"}',
+                    ended_at = ?1
+                WHERE status = 'attempting'
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE message_delivery
+                SET status = CASE
+                        WHEN status = 'pending' AND dispatch_attempt_count = 0
+                        THEN 'interrupted_before_dispatch'
+                        ELSE 'failed'
+                    END,
+                    dispatch_phase = 'terminal', wait_condition = NULL,
+                    active_dispatch_attempt_id = NULL,
+                    context_manifest_id = NULL,
+                    manual_intervention_required = CASE
+                        WHEN status = 'pending' AND dispatch_attempt_count = 0 THEN 1
+                        ELSE 0
+                    END,
+                    failure_code = 'context_formatter_v14_required',
+                    failure_detail_json = '{"reason":"current_user_attention_clean_break"}',
+                    frozen_snapshot_json = CASE
+                        WHEN json_type(frozen_snapshot_json, '$.frozenContext') IS NOT NULL
+                        THEN json_remove(frozen_snapshot_json, '$.frozenContext')
+                        ELSE frozen_snapshot_json
+                    END,
+                    version = version + 1, ended_at = ?1, updated_at = ?1
+                WHERE status = 'running'
+                   OR (status = 'pending' AND dispatch_attempt_count >= 0)
+                   OR context_manifest_id IS NOT NULL
+                   OR json_type(frozen_snapshot_json, '$.frozenContext') IS NOT NULL
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                "UPDATE message_delivery_attempt SET context_manifest_id = NULL WHERE context_manifest_id IS NOT NULL",
+                [],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'failed', ended_at = ?1,
+                    last_error_code = 'context_formatter_v14_required',
+                    wait_reason = NULL, wait_deadline_at = NULL,
+                    runtime_recovery_required = 0,
+                    execution_lease_owner = NULL,
+                    execution_lease_expires_at = NULL,
+                    manual_retry_allowed = 0,
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('queued', 'running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE camp_turn
+                SET status = 'failed', ended_at = ?1,
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute_batch(
+                r#"
+                DELETE FROM bootstrap_redelivery_requirement;
+                DELETE FROM native_session_compaction_observation;
+                DELETE FROM native_session_compaction_observer_lease;
+                DELETE FROM native_session_resume_attempt;
+                DELETE FROM runtime_input_delivery;
+                DELETE FROM context_manifest_history_camp;
+                DELETE FROM context_manifest;
+                DELETE FROM native_session_bootstrap_evidence;
+                "#,
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE conversation
+                SET native_adapter_installation_id = NULL,
+                    native_session_id = NULL,
+                    native_binding_compatibility_digest = NULL,
+                    native_binding_id = NULL,
+                    native_binding_generation = 0,
+                    native_binding_secret_digest = NULL,
+                    last_accepted_public_boundary_sequence = 0,
+                    native_charter_digest = NULL,
+                    native_collaboration_state_digest = NULL,
+                    native_installation_generation = NULL,
+                    native_session_compatibility_key = NULL,
+                    version = version + 1, updated_at = ?1
+                "#,
+                [&now],
+            )?;
+
+            let create_context_manifest: String = transaction.query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest'",
+                [],
+                |row| row.get(0),
+            )?;
+            let create_context_manifest_v78 = create_context_manifest
+                .replacen(
+                    "CREATE TABLE context_manifest",
+                    "CREATE TABLE context_manifest_v78",
+                    1,
+                )
+                .replacen(
+                    "CREATE TABLE \"context_manifest\"",
+                    "CREATE TABLE context_manifest_v78",
+                    1,
+                )
+                .replace("formatter_version = 13", "formatter_version = 14");
+            if create_context_manifest_v78 == create_context_manifest
+                || !create_context_manifest_v78.contains("formatter_version = 14")
+            {
+                anyhow::bail!("v78 could not upgrade ContextManifest formatter constraint");
+            }
+            transaction.execute_batch(&create_context_manifest_v78)?;
+            transaction.execute_batch(
+                r#"
+                DROP INDEX IF EXISTS context_manifest_blob_idx;
+                DROP INDEX IF EXISTS context_manifest_bootstrap_idx;
+                DROP TABLE context_manifest;
+                ALTER TABLE context_manifest_v78 RENAME TO context_manifest;
+                CREATE INDEX context_manifest_blob_idx
+                    ON context_manifest(rendered_payload_blob_id);
+                CREATE INDEX context_manifest_bootstrap_idx
+                    ON context_manifest(bootstrap_evidence_id);
+                "#,
+            )?;
+
+            transaction.execute_batch(
+                r#"
+                CREATE TABLE in_app_notification_v78 (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id TEXT NOT NULL UNIQUE,
+                    recipient_user_id TEXT NOT NULL,
+                    kind TEXT NOT NULL CHECK(kind IN (
+                        'runtime_permission_attention',
+                        'camp_turn_completed',
+                        'camp_turn_incomplete',
+                        'camp_message_user_mention'
+                    )),
+                    camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
+                    camp_turn_id TEXT REFERENCES camp_turn(id) ON DELETE SET NULL,
+                    source_message_id TEXT,
+                    resolved_at TEXT,
+                    read_at TEXT,
+                    cleared_at TEXT,
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    CHECK (
+                        (kind = 'runtime_permission_attention'
+                            AND camp_turn_id IS NULL
+                            AND source_message_id IS NULL)
+                        OR
+                        (kind IN ('camp_turn_completed', 'camp_turn_incomplete')
+                            AND resolved_at IS NULL
+                            AND source_message_id IS NULL)
+                        OR
+                        (kind = 'camp_message_user_mention'
+                            AND camp_turn_id IS NULL
+                            AND source_message_id IS NOT NULL
+                            AND resolved_at IS NULL)
+                    )
+                );
+
+                INSERT INTO in_app_notification_v78(
+                    sequence, id, recipient_user_id, kind, camp_id, camp_turn_id,
+                    source_message_id, resolved_at, read_at, cleared_at,
+                    version, created_at, updated_at
+                )
+                SELECT sequence, id,
+                       CASE recipient_user_id
+                           WHEN 'local-user' THEN 'local_user'
+                           ELSE recipient_user_id
+                       END,
+                       kind, camp_id, camp_turn_id, NULL,
+                       resolved_at, read_at, cleared_at,
+                       version, created_at, updated_at
+                FROM in_app_notification
+                ORDER BY sequence;
+
+                DROP TABLE in_app_notification;
+                ALTER TABLE in_app_notification_v78 RENAME TO in_app_notification;
+
+                CREATE UNIQUE INDEX in_app_notification_terminal_source_unique
+                    ON in_app_notification(recipient_user_id, camp_turn_id)
+                    WHERE camp_turn_id IS NOT NULL;
+                CREATE UNIQUE INDEX in_app_notification_active_attention_unique
+                    ON in_app_notification(recipient_user_id, camp_id)
+                    WHERE kind = 'runtime_permission_attention' AND resolved_at IS NULL;
+                CREATE UNIQUE INDEX in_app_notification_user_mention_source_unique
+                    ON in_app_notification(kind, recipient_user_id, source_message_id)
+                    WHERE kind = 'camp_message_user_mention';
+                CREATE INDEX in_app_notification_inbox_idx
+                    ON in_app_notification(
+                        recipient_user_id, cleared_at, read_at, sequence DESC
+                    );
+                CREATE INDEX in_app_notification_camp_sequence_idx
+                    ON in_app_notification(camp_id, sequence);
+
+                CREATE TRIGGER in_app_notification_user_mention_source_insert
+                BEFORE INSERT ON in_app_notification
+                WHEN NEW.kind = 'camp_message_user_mention'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM camp_message
+                      WHERE id = NEW.source_message_id AND camp_id = NEW.camp_id
+                  )
+                BEGIN
+                    SELECT RAISE(ABORT, 'invalid Current User Mention notification source');
+                END;
+                CREATE TRIGGER in_app_notification_user_mention_source_update
+                BEFORE UPDATE OF kind, camp_id, source_message_id ON in_app_notification
+                WHEN NEW.kind = 'camp_message_user_mention'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM camp_message
+                      WHERE id = NEW.source_message_id AND camp_id = NEW.camp_id
+                  )
+                BEGIN
+                    SELECT RAISE(ABORT, 'invalid Current User Mention notification source');
+                END;
+
+                ALTER TABLE in_app_notification_preference
+                    ADD COLUMN user_mention_heads_up_enabled INTEGER NOT NULL DEFAULT 1
+                    CHECK(user_mention_heads_up_enabled IN (0, 1));
+                "#,
+            )?;
+            for (_, sql) in notification_triggers {
+                transaction.execute_batch(&sql.replace("'local-user'", "'local_user'"))?;
+            }
+
+            transaction.execute_batch(
+                r#"
+                UPDATE camp_message
+                SET author_id = 'local_user'
+                WHERE author_type = 'user' AND author_id = 'local-user';
+                UPDATE conversation_message
+                SET author_id = 'local_user'
+                WHERE author_type = 'user' AND author_id = 'local-user';
+                UPDATE task
+                SET created_by_id = 'local_user'
+                WHERE created_by_type = 'user' AND created_by_id = 'local-user';
+                UPDATE task
+                SET closed_by_id = 'local_user'
+                WHERE closed_by_type = 'user' AND closed_by_id = 'local-user';
+                UPDATE approval
+                SET requested_for_user_id = 'local_user'
+                WHERE requested_for_user_id = 'local-user';
+                UPDATE approval
+                SET resolved_by_id = 'local_user'
+                WHERE resolved_by_type = 'user' AND resolved_by_id = 'local-user';
+                UPDATE event_log
+                SET actor_id = 'local_user'
+                WHERE actor_type = 'user' AND actor_id = 'local-user';
+                UPDATE memory_revision
+                SET actor_id = 'local_user'
+                WHERE actor_kind = 'user' AND actor_id = 'local-user';
+                UPDATE hearth_memory_proposal
+                SET resolved_by_user_id = 'local_user'
+                WHERE resolved_by_user_id = 'local-user';
+                UPDATE message_attachment
+                SET created_by_id = 'local_user'
+                WHERE created_by_type = 'user' AND created_by_id = 'local-user';
+                UPDATE message_delivery_retry
+                SET actor_id = 'local_user'
+                WHERE actor_type = 'user' AND actor_id = 'local-user';
+                UPDATE adapter_installation
+                SET auth_scope = 'local_user'
+                WHERE auth_scope = 'local-user';
+                UPDATE agent_run
+                SET runtime_auth_scope = 'local_user'
+                WHERE runtime_auth_scope = 'local-user';
+
+                DELETE FROM event_log
+                WHERE event_type = 'command.result'
+                  AND command_type = 'camp.message.send';
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v0.67', projection_schema_version = 33,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (78, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v78 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -11399,7 +11760,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn current_data_contract_accepts_current_and_exact_v066_v062_v054_or_v052_sources() {
+    fn current_data_contract_accepts_current_and_exact_v067_v066_v062_v054_or_v052_sources() {
         let directory =
             std::env::temp_dir().join(format!("rovai-current-contract-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -11412,15 +11773,32 @@ mod tests {
             .execute_batch(
                 r#"
                 UPDATE rovai_data_contract
-                SET contract_version = 'v0.62', projection_schema_version = 31
+                SET contract_version = 'v0.66', projection_schema_version = 32
                 WHERE singleton = 1;
-                DELETE FROM schema_migration WHERE version = 77;
+                DELETE FROM schema_migration WHERE version = 78;
                 "#,
             )
             .unwrap();
         assert!(
             has_current_data_contract(&path),
-            "the exact v0.62/schema-31 marker without migration 77 is an upgrade source"
+            "the exact v0.66/schema-32 marker without migration 78 is an upgrade source"
+        );
+
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                UPDATE rovai_data_contract
+                SET contract_version = 'v0.62', projection_schema_version = 31
+                WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 77;
+                DELETE FROM schema_migration WHERE version = 78;
+                "#,
+            )
+            .unwrap();
+        assert!(
+            has_current_data_contract(&path),
+            "the exact v0.62/schema-31 marker without migrations 77 and 78 is an upgrade source"
         );
 
         database
@@ -11431,6 +11809,8 @@ mod tests {
                 SET contract_version = 'v0.54', projection_schema_version = 30
                 WHERE singleton = 1;
                 DELETE FROM schema_migration WHERE version = 76;
+                DELETE FROM schema_migration WHERE version = 77;
+                DELETE FROM schema_migration WHERE version = 78;
                 "#,
             )
             .unwrap();
@@ -11447,6 +11827,8 @@ mod tests {
                 SET contract_version = 'v0.54', projection_schema_version = 29
                 WHERE singleton = 1;
                 DELETE FROM schema_migration WHERE version = 71;
+                DELETE FROM schema_migration WHERE version = 77;
+                DELETE FROM schema_migration WHERE version = 78;
                 "#,
             )
             .unwrap();
@@ -11831,8 +12213,8 @@ mod tests {
     }
 
     #[test]
-    fn v76_freezes_forward_lineage_and_upgrades_the_data_contract_once() {
-        let directory = std::env::temp_dir().join(format!("rovai-db-v76-test-{}", Uuid::new_v4()));
+    fn v78_preserves_v77_lineage_and_upgrades_current_user_attention_once() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v78-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
         let migration_applied: i64 = database
             .connection()
@@ -11872,14 +12254,56 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.66".to_string(), 32));
+        assert_eq!(contract, ("v0.67".to_string(), 33));
+        let v77_applied: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 77",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(v77_applied, 1);
+        let v78_applied: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 78",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(v78_applied, 1);
+        let notification_columns =
+            table_columns(database.connection(), "in_app_notification").unwrap();
+        assert!(notification_columns.contains(&"source_message_id".to_string()));
+        let preference_columns =
+            table_columns(database.connection(), "in_app_notification_preference").unwrap();
+        assert!(preference_columns.contains(&"user_mention_heads_up_enabled".to_string()));
+        let notification_schema: String = database
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'in_app_notification'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(notification_schema.contains("camp_message_user_mention"));
+        let manifest_schema: String = database
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(manifest_schema.contains("formatter_version = 14"));
         drop(database);
 
-        let reopened = Database::open(&directory).expect("v76 database should reopen");
+        let reopened = Database::open(&directory).expect("v78 database should reopen");
         let migration_applied: i64 = reopened
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM schema_migration WHERE version = 76",
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 78",
                 [],
                 |row| row.get(0),
             )
@@ -11939,7 +12363,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.66".to_string(), 32));
+        assert_eq!(contract, ("v0.67".to_string(), 33));
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
@@ -14086,7 +14510,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(agent_cli_contract, ("v0.66".to_string(), 32, 1));
+        assert_eq!(agent_cli_contract, ("v0.67".to_string(), 33, 1));
         assert_eq!(foreign_key_violations, 0);
 
         drop(database);
@@ -14695,7 +15119,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.66".to_string(), 22));
+        assert_eq!(contract, ("v0.67".to_string(), 22));
         let migration_count: i64 = reopened
             .connection()
             .query_row(
@@ -14726,7 +15150,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, (32, 1));
+        assert_eq!(contract, (33, 1));
         let error = database
             .connection()
             .execute(
@@ -15025,7 +15449,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(manifest_schema.contains("formatter_version = 13"));
+        assert!(manifest_schema.contains("formatter_version = 14"));
         assert!(manifest_schema.contains("CHECK(context_delivery_profile_version = 3)"));
         assert!(manifest_schema.contains("collaboration_state_included INTEGER NOT NULL"));
         let delivery_schema: String = database
@@ -15046,7 +15470,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.66".to_string(), 32));
+        assert_eq!(contract, ("v0.67".to_string(), 33));
         let public_a2a_migration_applied: i64 = database
             .connection()
             .query_row(

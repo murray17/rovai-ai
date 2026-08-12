@@ -77,4 +77,18 @@ describe('structured message clipboard', () => {
     expect(createStructuredMessageClipboardData([{ kind: 'text', text: '@爱丽丝' }], members))
       .toBeNull()
   })
+
+  it('copies current-user identity privately but downgrades it on Composer paste', () => {
+    const data = createStructuredMessageClipboardData([
+      { kind: 'current_user_mention', userId: 'local_user' },
+      { kind: 'text', text: '请确认' }
+    ], members)!
+
+    expect(data.text).toBe('@你 请确认')
+    expect(readStructuredMessageClipboardContent(data.html, data.text, members)).toEqual([
+      { kind: 'text', text: '@你' },
+      { kind: 'text', text: ' ' },
+      { kind: 'text', text: '请确认' }
+    ])
+  })
 })

@@ -5038,15 +5038,15 @@ mod tests {
     #[test]
     fn host_manager_reuses_only_the_same_unfenced_key() {
         let mut manager = RuntimeHostManager::default();
-        let first = manager.acquire(host_key("local-user")).unwrap();
-        let reused = manager.acquire(host_key("local-user")).unwrap();
+        let first = manager.acquire(host_key("local_user")).unwrap();
+        let reused = manager.acquire(host_key("local_user")).unwrap();
         let other = manager.acquire(host_key("other-user")).unwrap();
 
         assert_eq!(first.host_instance_id, reused.host_instance_id);
         assert_ne!(first.host_instance_id, other.host_instance_id);
         assert!(manager.fence(&first.host_instance_id));
         assert!(!manager.is_current(&first.host_instance_id));
-        let replacement = manager.acquire(host_key("local-user")).unwrap();
+        let replacement = manager.acquire(host_key("local_user")).unwrap();
         assert_ne!(first.host_instance_id, replacement.host_instance_id);
     }
 
@@ -5225,7 +5225,7 @@ mod tests {
         CommandEnvelope {
             command_id: command_id.to_string(),
             actor: ActorRef::User {
-                user_id: "local-user".to_string(),
+                user_id: "local_user".to_string(),
             },
             camp_id: camp_id.map(str::to_string),
             expected_versions: Vec::new(),

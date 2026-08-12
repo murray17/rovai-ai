@@ -2361,7 +2361,7 @@ mod tests {
         CommandEnvelope {
             command_id: command_id.to_string(),
             actor: ActorRef::User {
-                user_id: "local-user".to_string(),
+                user_id: "local_user".to_string(),
             },
             camp_id: camp_id.map(str::to_string),
             expected_versions: Vec::new(),

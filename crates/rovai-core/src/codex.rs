@@ -1860,7 +1860,7 @@ mod tests {
             installation_generation: 1,
             search_environment_generation: 1,
             executable_path: executable.to_string_lossy().to_string(),
-            auth_scope: "local-user".to_string(),
+            auth_scope: "local_user".to_string(),
             reported_version: "smoke".to_string(),
             executable_fingerprint: rovai_core::agent_runtime_adapter::executable_fingerprint(
                 &executable,

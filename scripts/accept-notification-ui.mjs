@@ -24,18 +24,24 @@ const campId = await createFixtureCamp()
 await insertNotification('notification-approval', 'runtime_permission_attention', '-3 minutes')
 await insertNotification('notification-completed', 'camp_turn_completed', '-2 minutes')
 await insertNotification('notification-incomplete', 'camp_turn_incomplete', '-1 minute')
+await insertMessageMention(
+  'message-mention-initial',
+  'notification-mention-initial',
+  '请确认 v0.65 的精确消息定位。',
+  '-30 seconds'
+)
 
 let dayApp = null
 let compactApp = null
 try {
   dayApp = await launchApp(firstPort, 1440, 920, false)
   await setTheme(dayApp.cdp, 'day')
-  await assertNotificationBadge(dayApp.cdp, 3)
+  await assertNotificationBadge(dayApp.cdp, 4)
   assert(!(await evaluate(dayApp.cdp, `Boolean(document.querySelector('.notification-heads-up'))`)),
     'Existing notifications were replayed as a heads-up after launch')
 
   await openNotificationCenter(dayApp.cdp)
-  await assertNotificationDrawer(dayApp.cdp, 3, 'day desktop')
+  await assertNotificationDrawer(dayApp.cdp, 4, 'day desktop')
   const drawerCapture = join(outputDir, 'notification-center-day.png')
   await capture(dayApp.cdp, drawerCapture)
   await closeDialogWithEscape(dayApp.cdp)
@@ -47,15 +53,19 @@ try {
   await clickFirstButton(dayApp.cdp, '.notification-row-open')
   await waitForExpression(dayApp.cdp, `!document.querySelector('.notification-drawer')`)
   await waitForExpression(dayApp.cdp, `
+    document.querySelector('[data-message-id="message-mention-initial"]')
+      ?.classList.contains('notification-focus-target') === true
+  `, 15_000)
+  await waitForExpression(dayApp.cdp, `
     document.querySelector('.notification-trigger')?.getAttribute('aria-label')
-      !== '通知，3 条未读'
+      !== '通知，4 条未读'
   `, 5_000)
   const clickedInbox = await request(dayApp.cdp, 'notifications.inbox', { filter: 'all', limit: 50 })
-  const clickedNotification = clickedInbox.items.find((item) => item.id === 'notification-incomplete')
+  const clickedNotification = clickedInbox.items.find((item) => item.id === 'notification-mention-initial')
   assert(clickedNotification?.readAt,
     `Clicking one notification did not persist its read state: ${JSON.stringify(clickedInbox)}`)
   await openNotificationCenter(dayApp.cdp)
-  await assertNotificationDrawer(dayApp.cdp, 3, 'day desktop after notification click', null)
+  await assertNotificationDrawer(dayApp.cdp, 4, 'day desktop after notification click', null)
   assert(!(await evaluate(dayApp.cdp,
     `document.querySelector('.notification-row')?.classList.contains('unread')`)),
   'The clicked notification returned to its unread presentation after reopening the drawer')
@@ -85,7 +95,7 @@ try {
   await wait(500)
 
   compactApp = await launchApp(firstPort + 1, 1040, 700, true)
-  await setTheme(compactApp.cdp, 'day')
+  await setTheme(compactApp.cdp, 'night')
   await assertNotificationBadge(compactApp.cdp, 1)
   await evaluate(compactApp.cdp, `document.querySelector('.unified-sidebar button[aria-label="队员"]')?.click()`)
   await waitForSelector(compactApp.cdp, '.members-view')
@@ -95,6 +105,49 @@ try {
     return target?.getAttribute('aria-label') ?? null
   })()`)
   assert(focused === '新对话', 'Could not establish the focus target before the heads-up')
+
+  await insertMessageMentionBatch([
+    {
+      messageId: 'message-mention-live-1',
+      notificationId: 'notification-mention-live-1',
+      body: '第一条实时消息提及。'
+    },
+    {
+      messageId: 'message-mention-live-2',
+      notificationId: 'notification-mention-live-2',
+      body: '第二条实时消息提及。'
+    }
+  ])
+  await waitForSelector(compactApp.cdp, '.notification-heads-up-aggregate', 15_000)
+  const aggregateText = await evaluate(compactApp.cdp,
+    `document.querySelector('.notification-heads-up-aggregate')?.textContent ?? ''`)
+  assert(aggregateText.includes('本 Camp 还有 1 条消息提及你'),
+    `Same-Camp message mentions were not aggregated: ${JSON.stringify(aggregateText)}`)
+  assert(await evaluate(compactApp.cdp,
+    `document.activeElement?.getAttribute('aria-label') === '新对话'`),
+  'The aggregated heads-up stole keyboard focus')
+  await evaluate(compactApp.cdp,
+    `document.querySelector('.notification-heads-up-aggregate .notification-heads-up-open')?.click()`)
+  await waitForSelector(compactApp.cdp, '.notification-drawer')
+  await waitForExpression(compactApp.cdp,
+    `document.querySelectorAll('.notification-row.highlighted').length === 2`)
+  const aggregateInbox = await request(compactApp.cdp, 'notifications.inbox', {
+    filter: 'unread',
+    limit: 50
+  })
+  assert([
+    'notification-mention-live-1',
+    'notification-mention-live-2'
+  ].every((id) => aggregateInbox.items.find((item) => item.id === id)?.readAt === null),
+  `Opening an aggregated heads-up bulk-marked its rows read: ${JSON.stringify(aggregateInbox)}`)
+  await closeDialogWithEscape(compactApp.cdp)
+  const liveFocusBaseline = await evaluate(compactApp.cdp, `(() => {
+    const target = document.querySelector('.unified-sidebar button[aria-label="新对话"]')
+    target?.focus()
+    return target?.getAttribute('aria-label') ?? null
+  })()`)
+  assert(liveFocusBaseline === '新对话',
+    'Could not re-establish the focus target after closing the aggregated heads-up drawer')
 
   await insertNotification('notification-live', 'camp_turn_completed', 'now')
   await waitForSelector(compactApp.cdp, '.notification-heads-up', 15_000)
@@ -107,7 +160,7 @@ try {
       && headsUpText.includes('一次协作已经完成')
       && !headsUpText.includes('README.md'),
   `The heads-up did not use fixed data-minimized copy: ${JSON.stringify(headsUpText)}`)
-  await assertNotificationBadge(compactApp.cdp, 2)
+  await assertNotificationBadge(compactApp.cdp, 4)
   const headsUpCapture = join(outputDir, 'notification-heads-up-compact-reduced-motion.png')
   await capture(compactApp.cdp, headsUpCapture)
 
@@ -115,7 +168,10 @@ try {
   await waitForExpression(compactApp.cdp,
     `!document.querySelector('.notification-heads-up')`)
   await openNotificationCenter(compactApp.cdp)
-  await assertNotificationDrawer(compactApp.cdp, 5, 'compact reduced-motion', 2)
+  await selectNotificationFilter(compactApp.cdp, '全部')
+  await waitForExpression(compactApp.cdp,
+    `document.querySelectorAll('.notification-row').length === 8`)
+  await assertNotificationDrawer(compactApp.cdp, 8, 'compact reduced-motion', 4)
   await clickButton(compactApp.cdp, '.notification-drawer-actions button', '全部已读')
   await waitForExpression(compactApp.cdp,
     `document.querySelector('.notification-drawer-header span')?.textContent === '0 条未读'`)
@@ -143,8 +199,10 @@ try {
       headsUpPreferenceTakesEffectWithoutReplay: true,
       restartPersistence: true,
       liveHeadsUpWithoutFocusTheft: true,
+      sameCampMentionHeadsUpAggregationWithoutBulkRead: true,
+      exactMessageNavigationAndFocus: true,
       escapeRestoresBellFocus: true,
-      dayDesktopAndCompactReducedMotionLayouts: true,
+      dayDesktopAndNightCompactReducedMotionLayouts: true,
       horizontalOverflow: false
     },
     captures: {
@@ -166,7 +224,7 @@ async function createFixtureCamp() {
     const workspace = await core.request('workspaces.inspect', { path: workspaceDir })
     const created = await core.request('camps.create', {
       commandId: crypto.randomUUID(),
-      name: 'v0.28 通知验收 Camp',
+      name: 'v0.65 通知验收 Camp',
       workspace: { projectPath: workspace.projectPath },
       memberAgentIds: preflight.presentMembers.map((member) => member.agentId),
       defaultLeadAgentId: preflight.initialLeadAgentId,
@@ -189,10 +247,52 @@ async function insertNotification(id, kind, modifier) {
       id, recipient_user_id, kind, camp_id, camp_turn_id,
       resolved_at, read_at, cleared_at, version, created_at, updated_at
     ) VALUES (
-      ${sqlLiteral(id)}, 'local-user', ${sqlLiteral(kind)}, ${sqlLiteral(campId)}, NULL,
+      ${sqlLiteral(id)}, 'local_user', ${sqlLiteral(kind)}, ${sqlLiteral(campId)}, NULL,
       NULL, NULL, NULL, 1, ${timestamp}, ${timestamp}
     );
   `])
+}
+
+async function insertMessageMention(messageId, notificationId, body, modifier = 'now') {
+  await insertMessageMentionBatch([{ messageId, notificationId, body, modifier }])
+}
+
+async function insertMessageMentionBatch(fixtures) {
+  const statements = fixtures.map(({ messageId, notificationId, body, modifier = 'now' }) => {
+    const timestamp = modifier === 'now'
+      ? "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
+      : `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ${sqlLiteral(modifier)})`
+    const structuredContent = JSON.stringify([
+      { kind: 'current_user_mention', userId: 'local_user' },
+      { kind: 'text', text: body }
+    ])
+    return `
+      UPDATE camp
+      SET last_message_sequence = last_message_sequence + 1,
+          version = version + 1,
+          updated_at = ${timestamp}
+      WHERE id = ${sqlLiteral(campId)};
+      INSERT INTO camp_message(
+        id, camp_id, sequence, author_type, author_id, body,
+        structured_content_json, content_digest, address_mode,
+        addressed_agent_ids_json, version, created_at, updated_at
+      ) SELECT
+        ${sqlLiteral(messageId)}, id, last_message_sequence, 'agent', 'agent_1',
+        ${sqlLiteral(`@你 ${body}`)}, ${sqlLiteral(structuredContent)},
+        ${sqlLiteral(`sha256:notification-accept:${messageId}`)}, 'default', '[]',
+        1, ${timestamp}, ${timestamp}
+      FROM camp WHERE id = ${sqlLiteral(campId)};
+      INSERT INTO in_app_notification(
+        id, recipient_user_id, kind, camp_id, source_message_id,
+        resolved_at, read_at, cleared_at, version, created_at, updated_at
+      ) VALUES (
+        ${sqlLiteral(notificationId)}, 'local_user', 'camp_message_user_mention',
+        ${sqlLiteral(campId)}, ${sqlLiteral(messageId)},
+        NULL, NULL, NULL, 1, ${timestamp}, ${timestamp}
+      );
+    `
+  }).join('\n')
+  await runProcess('/usr/bin/sqlite3', [databasePath, `BEGIN IMMEDIATE;\n${statements}\nCOMMIT;`])
 }
 
 async function openNotificationCenter(cdp) {
@@ -203,6 +303,21 @@ async function openNotificationCenter(cdp) {
   })()`)
   assert(opened, 'The global notification button was unavailable')
   await waitForSelector(cdp, '.notification-drawer')
+}
+
+async function selectNotificationFilter(cdp, label) {
+  const selected = await evaluate(cdp, `(() => {
+    const button = [...document.querySelectorAll('.notification-filter button')]
+      .find((candidate) => candidate.textContent?.trim() === ${JSON.stringify(label)})
+    button?.click()
+    return Boolean(button)
+  })()`)
+  assert(selected, `Notification filter ${JSON.stringify(label)} was unavailable`)
+  await waitForExpression(cdp, `
+    [...document.querySelectorAll('.notification-filter button')]
+      .find((candidate) => candidate.textContent?.trim() === ${JSON.stringify(label)})
+      ?.getAttribute('aria-pressed') === 'true'
+  `)
 }
 
 async function assertNotificationDrawer(cdp, expectedRows, context, expectedUnread = expectedRows) {
@@ -226,6 +341,7 @@ async function assertNotificationDrawer(cdp, expectedRows, context, expectedUnre
   assert(state.copy.includes('待审批')
       && state.copy.includes('执行完成')
       && state.copy.includes('执行未完成')
+      && state.copy.includes('消息提及')
       && !state.copy.includes('README.md'),
   `${context} notification content was not fixed and data-minimized: ${JSON.stringify(state.copy)}`)
   assert(!state.drawerOverflow && !state.documentOverflow,
@@ -267,7 +383,7 @@ async function openNotificationSettings(cdp) {
 
 async function assertNotificationPreferences(cdp) {
   await waitForExpression(cdp,
-    `document.querySelectorAll('.notification-switch input[role="switch"]').length === 3`)
+    `document.querySelectorAll('.notification-switch input[role="switch"]').length === 4`)
   let values = await evaluate(cdp,
     `[...document.querySelectorAll('.notification-switch input[role="switch"]')]
       .map((input) => input.checked)`)

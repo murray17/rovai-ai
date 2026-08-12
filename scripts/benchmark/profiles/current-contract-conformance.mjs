@@ -30,18 +30,19 @@ const criteria = [
   criterion('CCC-009', 'Large-history omission JSON remains bounded rather than growing with all message IDs', [
     test('crates/rovai-core/src/context.rs', 'whole_history_omission_evidence_stays_bounded_for_large_intervals')
   ]),
-  criterion('CCC-010', 'ContextManifest version is 11', [
+  criterion('CCC-010', 'ContextManifest version is 12', [
     test('crates/rovai-core/src/context_contract.rs', 'binding_contract_freezes_each_context_axis_version')
   ]),
-  criterion('CCC-011', 'Data Contract is v0.66 with projection schema 32', [
-    test('crates/rovai-core/src/db.rs', 'current_data_contract_accepts_current_and_exact_v066_v062_v054_or_v052_sources'),
+  criterion('CCC-011', 'Data Contract is v0.67 with projection schema 33', [
+    test('crates/rovai-core/src/db.rs', 'current_data_contract_accepts_current_and_exact_v067_v066_v062_v054_or_v052_sources'),
+    test('crates/rovai-core/src/db.rs', 'v78_preserves_v77_lineage_and_upgrades_current_user_attention_once'),
     test('crates/rovai-core/src/db.rs', 'v77_adds_planned_shutdown_terminal_provenance_and_turn_aggregate_reason')
   ]),
   criterion('CCC-012', 'CampSnapshot schema is 29', [
     test('crates/rovai-core/src/read_model.rs', 'snapshot_projects_current_names_from_structured_mentions')
   ]),
   criterion('CCC-013', 'The migration chain admits only exact v0.62/v0.54/v0.52 upgrade sources', [
-    test('crates/rovai-core/src/db.rs', 'current_data_contract_accepts_current_and_exact_v066_v062_v054_or_v052_sources')
+    test('crates/rovai-core/src/db.rs', 'current_data_contract_accepts_current_and_exact_v067_v066_v062_v054_or_v052_sources')
   ]),
   criterion('CCC-014', 'Migration preserves completed Camp, Message, Task, and terminal Run/Turn history', [
     test('crates/rovai-core/src/context.rs', 'v68_through_v71_clean_break_preserves_business_history_and_removes_old_context_state')
@@ -57,7 +58,7 @@ export const CURRENT_CONTRACT_PREREQUISITES = Object.freeze([
     evidence: test('crates/rovai-core/src/collaboration.rs', 'agent_task_updates_respect_lead_and_assignee_authority')
   },
   {
-    id: 'built-in-transport-v6',
+    id: 'built-in-transport-v7',
     evidence: test('crates/rovai-core/src/builtin_tool_transport.rs', 'list_and_describe_share_one_digest')
   },
   {
@@ -88,7 +89,7 @@ export const CURRENT_CONTRACT_PROFILE = defineBenchmarkProfile({
     compositeScore: false
   },
   suite: {
-    id: 'rovai-v0.66-current-contract',
+    id: 'rovai-v0.67-current-contract',
     version: '1.4.0',
     shuffle: false,
     rounds: [{ id: 'deterministic', ordinal: 1 }],
