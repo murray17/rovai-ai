@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.60
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -13,6 +13,8 @@ last_updated: 2026-08-12
 > 当前状态：Renderer 实现、真实打包 App 验收与 macOS 安装均已完成。
 >
 > 前置版本：[v0.59 九 Runtime 的零 send 公共输出恢复发布](../v0.59/README.md)
+>
+> 后续版本：[v0.61 队员页来源感知会话返回](../v0.61/README.md)
 
 ## 版本目标
 

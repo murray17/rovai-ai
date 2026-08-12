@@ -3,7 +3,7 @@ document_type: ui-design-system
 authority: renderer-ui-detail
 status: accepted
 design_direction: neutral-porcelain-steel
-target_version: v0.57
+target_version: v0.61
 implementation_status: complete
 last_updated: 2026-08-12
 ---
@@ -44,6 +44,10 @@ CampTurn AgentRun/Message Delivery 执行树；详情不提供 Agent 或 AgentRu
 v0.58 在不改变上述过程、Stop、ContextManifest 或 Approval Read Side 的前提下，把 ordinary
 Inspector 进一步收敛为“任务 / 队员”。Approval Dock 成为唯一普通审批决定 surface；Header 与
 通知摘要只定位该 Dock。ContextManifest 继续作为 Core/Snapshot 证据存在，但不再进入普通 Inspector。
+
+v0.61 冻结队员页的来源感知返回：只有从具体 Camp 进入才保留同一 Camp 的精确返回目标，
+directory Project 和“快速对话”分组内的 Camp 语义完全一致；其他一级页面与启动直达统一返回
+App。该目标是当前 Main Window Session 的 Renderer 瞬时状态，不进入 Core 或 Restorable Location。
 
 v0.47 进一步冻结 Durable Task v2 的四层界面：会话卡只作五态责任感知，Inspector list
 负责发现，Inspector detail 负责完整责任与审计，现有 AgentRun UI 负责执行事实。Task 取消不等于
@@ -773,6 +777,18 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 - 选中队员时的详情 Header 显示 50px 圆形 icon、Member Name、Team Role、
   Presence 与 Runtime 状态，右侧保留“编辑身份”和真实操作菜单；未选中时
   的 Header 骨架不补造操作。
+- 队员名册顶部固定一个独立于“队员 / 数量 / 排序 / 新增”的来源返回区。若进入前正在查看
+  具体 Camp，返回区显示两行“返回会话 · {Project 展示名或快速对话} / {Camp 标题}”，并以
+  稳定 Camp ID 复用既有 Camp 激活路径读取最新 Snapshot；“快速对话”分组内的 Camp 不得降级。
+  若来源是 Memory、Quick Chat 首页、启动直接恢复或没有稳定 Camp 目标，只显示单行“返回 App”，
+  并回到 Quick Chat 首页，不伪造 Memory 筛选、选中项或滚动位置的历史恢复。
+- 返回区是 54px 开放式 Porcelain 表面，使用 2px Steel 上下文轨、32px 箭头 tile、可截断文案和
+  `⌘[` Keycap；默认无四边卡框或阴影，只有 Hover/Focus 使用轻 Steel wash 与边界。点击和
+  `⌘[` 必须共用同一离开动作并经过未保存 Runtime 草稿确认；Dialog、Menu 或其他临时浮层打开
+  时快捷键不穿透。目标已删除或不可读取时安全回到 App，不留下死入口或伪成功 Toast。
+- 该返回目标只在当前 Renderer 窗口存活，不写 Core、SQLite、Main-owned preference、
+  localStorage 或 Restorable Location。进入 Settings 再返回成员页时保留目标；再次从非 Camp
+  来源进入成员页时重置为 App。
 - Header 中 Presence 与 Runtime 是两个独立角标：“在队”是静态 Presence 状态；
   “{Product Runtime} 可用 →”是按钮，必须通过箭头、Pointer、Hover、Focus 和精确可访问名称
   表达可点击性，并切换到该队员现有运行配置后聚焦 Agent 运行时选择。其他 Runtime 状态沿用

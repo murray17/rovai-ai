@@ -32,6 +32,12 @@ v0.58 将用户与 Agent 普通正文统一到同一开放阅读平面，并在 
 Composer 或 Inspector 的功能边界；当前实施与验收状态见
 [v0.58 实施计划](../versions/v0.58/implementation-plan.md)。
 
+v0.61 把队员名册顶部的 icon-only“返回首页”替换为来源感知返回：从任何具体 Camp 进入时，
+无论它属于 directory Project 还是“快速对话”分组，都显示上下文与 Camp 标题并精确返回；从
+Memory、Quick Chat 首页或启动恢复进入时只显示“返回 App”。返回目标只在当前 Renderer 窗口
+存活，并继续经过未保存 Runtime 草稿保护；实现与验收状态见
+[v0.61 实施计划](../versions/v0.61/implementation-plan.md)。
+
 Arctic Dawn 设计文档已经冻结；用户已于 2026-07-30 明确授权生产实现。首轮范围及
 随后确认的导航、设置覆盖与空 Camp 欢迎状态均已通过本地自动化与打包 App 验收；
 v0.26 队员运行参数和会话表面 v3 交互也已通过 Core、Renderer 与打包 App 验收，

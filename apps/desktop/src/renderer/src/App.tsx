@@ -96,6 +96,10 @@ import {
   shouldInvalidateNewConversationDefaults,
   type CurrentProject
 } from './new-conversation-preferences'
+import {
+  memberReturnTargetForSource,
+  type MemberReturnTarget
+} from './member-return'
 
 export { allNavigationCamps }
 
@@ -243,6 +247,7 @@ export function App(): React.JSX.Element {
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null)
   const [memberTab, setMemberTab] = useState<MemberWorkspaceTab>('identity')
   const [memberRuntimeFocusRequest, setMemberRuntimeFocusRequest] = useState(0)
+  const [memberReturnTarget, setMemberReturnTarget] = useState<MemberReturnTarget>({ kind: 'app' })
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general')
   const [generalPreferences, setGeneralPreferences] = useState<GeneralPreferencesSnapshot | null>(null)
   const [currentProject, setCurrentProject] = useState<CurrentProject>(() => readCurrentProject())
@@ -714,6 +719,7 @@ export function App(): React.JSX.Element {
         setCampSnapshot(null)
         setSelectedMemberId(restoredMemberId(target.agentId, nextAgents))
         setMemberTab(target.tab)
+        setMemberReturnTarget({ kind: 'app' })
         lastMainView.current = 'members'
         setView('members')
       } else {
@@ -928,6 +934,10 @@ export function App(): React.JSX.Element {
   const activeCampProject = activeProjectPath && displayNavigation
     ? displayNavigation.projects.find((project) => project.projectPath === activeProjectPath) ?? null
     : null
+  const activeCampTitle = activeCamp?.title
+    ?? (campSnapshot?.camp.id === activeCampId ? campSnapshot.camp.title : '')
+  const activeCampContextLabel = activeCampProject?.name
+    ?? (activeProjectPath === currentProjectPath ? currentProjectLabel : '快速对话')
   const activeCancellingTurnIds = useMemo(
     () => campSnapshot?.camp.id === activeCampId
       ? effectiveCancellingTurnIds(cancellingTurnIds, campSnapshot)
@@ -1104,6 +1114,18 @@ export function App(): React.JSX.Element {
 
   const chooseView = (nextView: View): void => {
     const commit = (): void => {
+      if (nextView === 'members' && viewRef.current !== 'members') {
+        setMemberReturnTarget(memberReturnTargetForSource(
+          viewRef.current,
+          activeCampIdRef.current
+            ? {
+                campId: activeCampIdRef.current,
+                contextLabel: activeCampContextLabel,
+                title: activeCampTitle
+              }
+            : null
+        ))
+      }
       if (nextView !== 'settings') lastMainView.current = nextView
       if (nextView !== 'camp') setNotificationFocus(null)
       setView(nextView)
@@ -1170,7 +1192,18 @@ export function App(): React.JSX.Element {
   }
 
   const closeMembers = (): void => {
-    chooseView('compose')
+    void requestMemberTransition(async () => {
+      if (memberReturnTarget.kind === 'conversation') {
+        await activateCamp(memberReturnTarget.campId, { suppressErrors: true })
+        return
+      }
+      campSelectionGeneration.current += 1
+      setActiveCampId(null)
+      setCampSnapshot(null)
+      setNotificationFocus(null)
+      lastMainView.current = 'compose'
+      setView('compose')
+    })
   }
 
   const beginNewConversation = (): void => {
@@ -1685,6 +1718,7 @@ export function App(): React.JSX.Element {
             runtimeAvailability={health?.runtimeAvailability ?? []}
             runtimeDiscoveryPending={health === null || healthLoading}
             selectedAgentId={selectedMemberId}
+            returnTarget={memberReturnTarget}
             onBack={closeMembers}
             onSelect={chooseMember}
             onCreate={(trigger) => membersViewRef.current?.requestCreate(trigger)}
@@ -1721,9 +1755,8 @@ export function App(): React.JSX.Element {
         onError={(nextError) => setError(errorMessage(nextError))}
       />
       {!startupGateVisible && view === 'camp' && <AppHeader
-        campTitle={(activeCamp?.title
-          ?? (campSnapshot?.camp.id === activeCampId ? campSnapshot.camp.title : '')) || null}
-        contextLabel={activeCampProject?.name ?? '快速对话'}
+        campTitle={activeCampTitle || null}
+        contextLabel={activeCampContextLabel}
         camp={campSnapshot?.camp.id === activeCampId ? campSnapshot : null}
         inspectorVisible={campSnapshot?.camp.activationState === 'active' && campInspectorVisible}
         onToggleInspector={() => setCampInspectorVisible((visible) => !visible)}

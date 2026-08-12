@@ -82,6 +82,22 @@ Scheme C 转交 footer，以及诊断中心双尺寸、只读自检、MCP 权限
 队员半身照与 Runtime 入口、记忆 Workbench、New Conversation 和各类 Dialog/Drawer。
 具体 Schema/Migration 编号属于测试 fixture 和版本证据，不是本文的常青要求。
 
+### 队员页来源返回门禁
+
+修改成员页入口、名册顶部、Main Window Session 导航状态或离开保护后，至少运行：
+
+```bash
+pnpm package:mac
+pnpm accept:member-lifecycle-ui
+```
+
+隔离夹具必须分别证明：从 directory Project Camp 与“快速对话”分组 Camp 进入时，
+`.member-context-return` 显示真实上下文和 Camp 标题并返回同一稳定 Camp；从 Memory、Quick Chat
+首页或启动直达进入时显示“返回 App”并回到 Quick Chat 首页。删除返回目标后必须安全降级为 App。
+点击和 `⌘[` 都要经过现有未保存 Runtime 草稿确认；Dialog/Menu 打开时快捷键不得穿透。
+验收同时覆盖 1440×920、1040×700、200% zoom、reduced motion、Forced Colors、长标题截断和
+侧栏无横向溢出，并保留队员半身照、Runtime 入口、排序、筛选、创建/编辑/移除功能。
+
 ### Agent 执行过程门禁
 
 Renderer 的权威行为见 [Run Process Detail Surface v3](../contracts/run-process-detail-surface-v3.md) 与

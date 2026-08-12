@@ -3525,6 +3525,89 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
   margin: 0 -2px;
   border-top: 1px solid var(--line);
 }
+.member-return-context {
+  position: relative;
+  flex: 0 0 auto;
+  padding: 7px 4px 8px 7px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--brand) 4%, transparent), transparent 82%);
+}
+.member-return-context::before {
+  position: absolute;
+  top: 11px;
+  bottom: 12px;
+  left: 0;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--brand);
+  content: "";
+}
+.member-context-return {
+  display: grid;
+  width: 100%;
+  min-height: 54px;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 7px 5px 5px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--ink);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+.member-context-return:hover {
+  border-color: color-mix(in srgb, var(--brand) 22%, var(--line));
+  background: color-mix(in srgb, var(--brand) 6%, var(--surface));
+}
+.member-context-return:active { transform: none; }
+.member-context-return-arrow {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--brand-ink);
+  background: var(--surface-raised);
+}
+.member-context-return:hover .member-context-return-arrow {
+  border-color: color-mix(in srgb, var(--brand) 40%, var(--line));
+  background: var(--brand-soft);
+}
+.member-context-return-arrow svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.member-context-return-copy { display: grid; min-width: 0; gap: 3px; }
+.member-context-return-copy small,
+.member-context-return-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.member-context-return-copy small { color: var(--faint); font-size: 9.5px; }
+.member-context-return-copy strong { color: var(--ink); font-size: 12px; font-weight: 660; }
+.member-context-return.is-app-return .member-context-return-copy { align-content: center; }
+.member-context-return.is-app-return .member-context-return-copy strong {
+  color: var(--brand-ink);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.member-context-return kbd {
+  padding: 2px 5px;
+  border-radius: 4px;
+  color: var(--faint);
+  background: var(--surface-muted);
+  font: 500 9px/1.25 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+}
 .member-sidebar-heading {
   display: flex;
   min-height: 44px;
@@ -3535,29 +3618,6 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
   padding: 7px 4px 6px 7px;
 }
 .member-sidebar-title { display: flex; min-width: 0; align-items: center; gap: 7px; }
-.member-sidebar-home {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  flex: 0 0 28px;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  color: var(--muted);
-  background: transparent;
-  cursor: pointer;
-}
-.member-sidebar-home:hover { color: var(--ink); background: var(--surface-muted); }
-.member-sidebar-home svg {
-  width: 16px;
-  height: 16px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
 .member-sidebar-heading strong { font-size: 12px; }
 .member-sidebar-heading span { color: var(--faint); font: 600 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .member-sidebar-actions { display: flex; flex: 0 0 auto; gap: 2px; }
@@ -4245,6 +4305,9 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
   .member-tabs button[aria-selected="true"] {
     border-color: CanvasText;
   }
+  .member-return-context::before { background: Highlight; }
+  .member-context-return,
+  .member-context-return-arrow { border-color: CanvasText; }
   .member-preset-card.selected {
     outline: 2px solid Highlight;
     outline-offset: -2px;

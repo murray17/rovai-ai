@@ -9,7 +9,8 @@ import type {
 import {
   MemberSidebar,
   compactRuntimeState,
-  filterMembers
+  filterMembers,
+  shouldHandleMemberReturnShortcut
 } from './MemberSidebar'
 
 describe('v0.29 member sidebar', () => {
@@ -50,6 +51,12 @@ describe('v0.29 member sidebar', () => {
       runtimeAvailability: [availability('codex-cli', 'ready')],
       runtimeDiscoveryPending: false,
       selectedAgentId: 'agent-ready',
+      returnTarget: {
+        kind: 'conversation',
+        campId: 'camp-release',
+        contextLabel: 'rovai-ai',
+        title: '桌面端发布准备'
+      },
       onBack: () => undefined,
       onSelect: () => undefined,
       onCreate: () => undefined,
@@ -57,9 +64,12 @@ describe('v0.29 member sidebar', () => {
     }))
 
     expect(markup).toContain('id="member-sidebar-filter"')
-    expect(markup).toContain('class="member-sidebar-home"')
-    expect(markup).toContain('aria-label="返回首页"')
-    expect(markup).toContain('title="返回首页"')
+    expect(markup).toContain('class="member-context-return"')
+    expect(markup).toContain('aria-label="返回会话：桌面端发布准备（rovai-ai）"')
+    expect(markup).toContain('title="返回会话：桌面端发布准备（rovai-ai）"')
+    expect(markup).toContain('返回会话 · rovai-ai')
+    expect(markup).toContain('桌面端发布准备')
+    expect(markup).toContain('>⌘[</kbd>')
     expect(markup).not.toContain('返回 App')
     expect(markup).toContain('placeholder="名称或团队角色"')
     expect(markup).toContain('沐瓦，Codex CLI，可用；打开运行配置')
@@ -77,6 +87,7 @@ describe('v0.29 member sidebar', () => {
       runtimeAvailability: [],
       runtimeDiscoveryPending: false,
       selectedAgentId: agents[0]?.agentId ?? null,
+      returnTarget: { kind: 'app' },
       onBack: () => undefined,
       onSelect: () => undefined,
       onCreate: () => undefined,
@@ -84,8 +95,29 @@ describe('v0.29 member sidebar', () => {
     }))
     expect(markup.match(/class="member-sidebar-row/g)?.length ?? 0).toBe(count)
     expect(markup.includes('id="member-sidebar-filter"')).toBe(count > 20)
+    expect(markup).toContain('aria-label="返回 App"')
+    expect(markup).toContain('<strong>返回 App</strong>')
+    expect(markup).not.toContain('返回会话 ·')
     expect(markup).not.toContain('virtualized')
     if (count === 0) expect(markup).toContain('还没有队员')
+  })
+
+  it('reserves Command-[ for return without crossing open transient surfaces', () => {
+    const shortcut = {
+      key: '[',
+      code: 'BracketLeft',
+      metaKey: true,
+      ctrlKey: false,
+      altKey: false,
+      shiftKey: false,
+      repeat: false,
+      defaultPrevented: false,
+      isComposing: false
+    }
+    expect(shouldHandleMemberReturnShortcut(shortcut, false)).toBe(true)
+    expect(shouldHandleMemberReturnShortcut({ ...shortcut, repeat: true }, false)).toBe(false)
+    expect(shouldHandleMemberReturnShortcut({ ...shortcut, metaKey: false }, false)).toBe(false)
+    expect(shouldHandleMemberReturnShortcut(shortcut, true)).toBe(false)
   })
 })
 

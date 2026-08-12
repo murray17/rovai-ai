@@ -19,6 +19,7 @@ import {
   type RuntimeUserStatus
 } from './runtime-status'
 import { identityColorToken } from './theme'
+import type { MemberReturnTarget } from './member-return'
 
 export type MemberWorkspaceTab = 'identity' | 'runtime'
 
@@ -44,11 +45,39 @@ export function filterMembers(
   ))
 }
 
+export interface MemberReturnShortcutEvent {
+  key: string
+  code: string
+  metaKey: boolean
+  ctrlKey: boolean
+  altKey: boolean
+  shiftKey: boolean
+  repeat: boolean
+  defaultPrevented: boolean
+  isComposing: boolean
+}
+
+export function shouldHandleMemberReturnShortcut(
+  event: MemberReturnShortcutEvent,
+  transientSurfaceOpen: boolean
+): boolean {
+  return !transientSurfaceOpen
+    && !event.defaultPrevented
+    && !event.repeat
+    && !event.isComposing
+    && event.metaKey
+    && !event.ctrlKey
+    && !event.altKey
+    && !event.shiftKey
+    && (event.code === 'BracketLeft' || event.key === '[')
+}
+
 export function MemberSidebar({
   agents,
   runtimeAvailability,
   runtimeDiscoveryPending,
   selectedAgentId,
+  returnTarget,
   onBack,
   onSelect,
   onCreate,
@@ -58,6 +87,7 @@ export function MemberSidebar({
   runtimeAvailability: ProductRuntimeAvailability[]
   runtimeDiscoveryPending: boolean
   selectedAgentId: string | null
+  returnTarget: MemberReturnTarget
   onBack(): void
   onSelect(agentId: string, tab: MemberWorkspaceTab, focusRuntime: boolean): void
   onCreate(trigger: HTMLButtonElement): void
@@ -84,6 +114,19 @@ export function MemberSidebar({
     && selectedAgentId
     && !visibleAgents.some((agent) => agent.agentId === selectedAgentId)
   )
+
+  useEffect(() => {
+    const handleReturnShortcut = (event: KeyboardEvent): void => {
+      const transientSurfaceOpen = Boolean(document.querySelector(
+        '[role="dialog"], dialog[open], [role="menu"][data-state="open"], [data-radix-menu-content][data-state="open"], details[open] [role="menu"]'
+      ))
+      if (!shouldHandleMemberReturnShortcut(event, transientSurfaceOpen)) return
+      event.preventDefault()
+      onBack()
+    }
+    window.addEventListener('keydown', handleReturnShortcut)
+    return () => window.removeEventListener('keydown', handleReturnShortcut)
+  }, [onBack])
 
   const updateScrollEdges = useCallback((): void => {
     const element = scrollRef.current
@@ -162,19 +205,36 @@ export function MemberSidebar({
 
   return (
     <section className="member-sidebar" aria-label="队员名册">
-      <div className="member-sidebar-heading">
-        <div className="member-sidebar-title">
-          <button
-            className="member-sidebar-home"
-            type="button"
-            aria-label="返回首页"
-            title="返回首页"
-            onClick={onBack}
-          >
-            <svg aria-hidden="true" viewBox="0 0 20 20">
+      <div className="member-return-context">
+        <button
+          className={returnTarget.kind === 'app'
+            ? 'member-context-return is-app-return'
+            : 'member-context-return'}
+          type="button"
+          aria-label={returnTarget.kind === 'conversation'
+            ? `返回会话：${returnTarget.title}（${returnTarget.contextLabel}）`
+            : '返回 App'}
+          title={returnTarget.kind === 'conversation'
+            ? `返回会话：${returnTarget.title}（${returnTarget.contextLabel}）`
+            : '返回 App'}
+          onClick={onBack}
+        >
+          <span className="member-context-return-arrow" aria-hidden="true">
+            <svg viewBox="0 0 20 20">
               <path d="M12.5 4.5 7 10l5.5 5.5M7.5 10h8" />
             </svg>
-          </button>
+          </span>
+          <span className="member-context-return-copy">
+            {returnTarget.kind === 'conversation' && (
+              <small>返回会话 · {returnTarget.contextLabel}</small>
+            )}
+            <strong>{returnTarget.kind === 'conversation' ? returnTarget.title : '返回 App'}</strong>
+          </span>
+          <kbd aria-hidden="true">⌘[</kbd>
+        </button>
+      </div>
+      <div className="member-sidebar-heading">
+        <div className="member-sidebar-title">
           <strong>队员</strong>
           <span>{members.length}</span>
         </div>

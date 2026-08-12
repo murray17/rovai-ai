@@ -79,6 +79,9 @@ await mkdir(outputDir, { recursive: true })
 let running = null
 let campId = null
 let campTitle = null
+let projectCampId = null
+let projectCampTitle = null
+let projectCampPath = null
 const captures = {}
 
 try {
@@ -141,15 +144,20 @@ try {
     workspaceTopBorder: getComputedStyle(document.querySelector('.members-view')).borderTopWidth,
     sidebarWidth: document.querySelector('.unified-sidebar')?.getBoundingClientRect().width,
     hasRoster: Boolean(document.querySelector('.member-sidebar')),
-    homeButton: (() => {
-      const button = document.querySelector('.member-sidebar-home')
+    returnControl: (() => {
+      const button = document.querySelector('.member-context-return')
       const bounds = button?.getBoundingClientRect()
+      const arrow = button?.querySelector('.member-context-return-arrow')?.getBoundingClientRect()
       return {
         width: bounds?.width,
         height: bounds?.height,
         ariaLabel: button?.getAttribute('aria-label'),
         title: button?.getAttribute('title'),
-        precedesTitle: button?.nextElementSibling?.textContent === '队员'
+        text: button?.textContent?.replace(/\s+/g, ' ').trim(),
+        keycap: button?.querySelector('kbd')?.textContent,
+        arrowWidth: arrow?.width,
+        separateFromHeading: button?.closest('.member-return-context')
+          ?.nextElementSibling?.classList.contains('member-sidebar-heading')
       }
     })(),
     detailBackground: getComputedStyle(document.querySelector('.members-view')).backgroundColor,
@@ -180,11 +188,14 @@ try {
       && memberWorkbenchStructure.workspaceTopBorder === '3px'
       && memberWorkbenchStructure.sidebarWidth === 270
       && memberWorkbenchStructure.hasRoster
-      && memberWorkbenchStructure.homeButton.width === 28
-      && memberWorkbenchStructure.homeButton.height === 28
-      && memberWorkbenchStructure.homeButton.ariaLabel === '返回首页'
-      && memberWorkbenchStructure.homeButton.title === '返回首页'
-      && memberWorkbenchStructure.homeButton.precedesTitle
+      && memberWorkbenchStructure.returnControl.width > 240
+      && memberWorkbenchStructure.returnControl.height === 54
+      && memberWorkbenchStructure.returnControl.ariaLabel === '返回 App'
+      && memberWorkbenchStructure.returnControl.title === '返回 App'
+      && memberWorkbenchStructure.returnControl.text === '返回 App⌘['
+      && memberWorkbenchStructure.returnControl.keycap === '⌘['
+      && memberWorkbenchStructure.returnControl.arrowWidth === 32
+      && memberWorkbenchStructure.returnControl.separateFromHeading
       && memberWorkbenchStructure.detailBackgroundImage.includes('linear-gradient')
       && !memberWorkbenchStructure.hasProjectNavigation
       && !memberWorkbenchStructure.duplicateRoster
@@ -287,12 +298,13 @@ try {
   await waitForExpression(running.cdp,
     `!document.querySelector('.member-avatar-dialog')
       && document.activeElement === document.querySelector('.member-portrait-button')`)
-  await mouseClick(running.cdp, '.member-sidebar-home')
+  await mouseClick(running.cdp, '.member-context-return')
   await waitForSelector(running.cdp, '.new-conversation-workspace', 30_000)
   await mouseClick(running.cdp, '.unified-sidebar button[aria-label="记忆"]')
   await waitForSelector(running.cdp, '.memory-library', 30_000)
   await openMembers(running.cdp)
-  await mouseClick(running.cdp, '.member-sidebar-home')
+  await waitForText(running.cdp, '.member-context-return', '返回 App')
+  await pressKey(running.cdp, '[', { meta: true })
   await waitForSelector(running.cdp, '.new-conversation-workspace', 30_000)
   await openMembers(running.cdp)
   const initialMemberOrder = (await request(running.cdp, 'members.list'))
@@ -474,6 +486,17 @@ try {
     campTitle,
     join(freshDataDir, 'quick-chat')
   )
+  projectCampId = 'camp-project-return-accept'
+  projectCampTitle = '项目会话返回验收 · 一个用于确认成员名册单行截断的超长对话标题'
+  projectCampPath = join(freshDataDir, 'project-return')
+  await mkdir(projectCampPath, { recursive: true })
+  await createCampFixture(
+    join(freshDataDir, 'rovai.sqlite'),
+    projectCampId,
+    projectCampTitle,
+    projectCampPath,
+    'directory'
+  )
   running = await launchApp(freshDataDir, firstPort + 1, 1040, 700)
   const configuredPreflight = await request(running.cdp, 'camps.creationPreflight')
   assert(
@@ -583,8 +606,12 @@ try {
     '审批策略',
     'never'
   )
-  await mouseClick(running.cdp, '.member-sidebar-home')
+  await mouseClick(running.cdp, '.member-context-return')
   await waitForSelector(running.cdp, '.member-leave-dialog')
+  await pressKey(running.cdp, '[', { meta: true })
+  await waitForExpression(running.cdp,
+    `Boolean(document.querySelector('.member-leave-dialog'))
+      && Boolean(document.querySelector('.members-view'))`)
   await focusElement(running.cdp, '.member-leave-dialog button', '继续编辑')
   await pressKey(running.cdp, 'Enter')
   await waitForExpression(running.cdp,
@@ -768,6 +795,36 @@ try {
   await replaceContenteditableText(running.cdp, '#camp-message', '')
 
   await openMembers(running.cdp)
+  const quickChatReturnState = await evaluate(running.cdp, `(() => {
+    const button = document.querySelector('.member-context-return')
+    return {
+      label: button?.getAttribute('aria-label'),
+      eyebrow: button?.querySelector('small')?.textContent,
+      title: button?.querySelector('strong')?.textContent,
+      appFallback: button?.classList.contains('is-app-return')
+    }
+  })()`)
+  assert(
+    quickChatReturnState.label === `返回会话：${campTitle}（快速对话）`
+      && quickChatReturnState.eyebrow === '返回会话 · 快速对话'
+      && quickChatReturnState.title === campTitle
+      && !quickChatReturnState.appFallback,
+    `Quick Chat Camp did not become an exact Member return target: ${JSON.stringify(quickChatReturnState)}`
+  )
+  await mouseClick(running.cdp, '.unified-sidebar button[aria-label="设置"]')
+  await waitForSelector(running.cdp, '.settings-sidebar-menu', 30_000)
+  await mouseClick(running.cdp, '.settings-sidebar-back', '返回 App', true)
+  await waitForSelector(running.cdp, '.members-view', 30_000)
+  await waitForText(running.cdp, '.member-context-return', campTitle)
+  captures.memberQuickChatReturn = join(
+    outputDir,
+    'member-quick-chat-return-day-1440x920.png'
+  )
+  await capture(running.cdp, captures.memberQuickChatReturn)
+  await pressKey(running.cdp, '[', { meta: true })
+  await waitForText(running.cdp, '.topbar h1', campTitle)
+  await waitForSelector(running.cdp, '.camp-workspace', 30_000)
+  await openMembers(running.cdp)
   await selectMember(running.cdp, '小兔')
   const qiluBeforeRemoval = await request(running.cdp, 'members.get', {
     agentId: 'agent_4'
@@ -862,6 +919,58 @@ try {
     'fresh-camp-inherited-lead-day-1440x920.png'
   )
   await capture(running.cdp, captures.freshCampInheritedLead)
+  await openCamp(running.cdp, projectCampTitle)
+  await openMembers(running.cdp)
+  const projectReturnState = await evaluate(running.cdp, `(() => {
+    const button = document.querySelector('.member-context-return')
+    const title = button?.querySelector('strong')
+    const titleStyle = title ? getComputedStyle(title) : null
+    return {
+      label: button?.getAttribute('aria-label'),
+      eyebrow: button?.querySelector('small')?.textContent,
+      title: title?.textContent,
+      titleOverflows: Boolean(title && title.scrollWidth > title.clientWidth),
+      titleOverflow: titleStyle?.overflow,
+      titleTextOverflow: titleStyle?.textOverflow,
+      titleWhiteSpace: titleStyle?.whiteSpace
+    }
+  })()`)
+  assert(
+    projectReturnState.label === `返回会话：${projectCampTitle}（project-return）`
+      && projectReturnState.eyebrow === '返回会话 · project-return'
+      && projectReturnState.title === projectCampTitle
+      && projectReturnState.titleOverflows
+      && projectReturnState.titleOverflow === 'hidden'
+      && projectReturnState.titleTextOverflow === 'ellipsis'
+      && projectReturnState.titleWhiteSpace === 'nowrap',
+    `Directory Camp did not preserve its Project return context: ${JSON.stringify(projectReturnState)}`
+  )
+  await assertNoHorizontalOverflow(running.cdp, 'Member return with a long directory Camp title')
+  captures.memberProjectReturn = join(
+    outputDir,
+    'member-project-return-day-1440x920.png'
+  )
+  await capture(running.cdp, captures.memberProjectReturn)
+  await mouseClick(running.cdp, '.member-context-return')
+  await waitForText(running.cdp, '.topbar h1', projectCampTitle)
+  await waitForSelector(running.cdp, '.camp-workspace', 30_000)
+  const projectSnapshot = await request(running.cdp, 'camps.snapshot', {
+    campId: projectCampId
+  })
+  await openMembers(running.cdp)
+  const deletedProjectCamp = await request(running.cdp, 'camps.delete', {
+    commandId: crypto.randomUUID(),
+    command: {
+      campId: projectCampId,
+      expectedVersion: projectSnapshot.camp.version
+    }
+  })
+  assert(
+    deletedProjectCamp.status === 'applied',
+    `Could not delete the stale Member return target: ${JSON.stringify(deletedProjectCamp)}`
+  )
+  await mouseClick(running.cdp, '.member-context-return')
+  await waitForSelector(running.cdp, '.new-conversation-workspace', 30_000)
   await closeApp(running)
   running = null
 
@@ -928,20 +1037,29 @@ try {
     `v0.14 migration state did not survive restart: ${JSON.stringify(restartedUpgrade)}`
   )
 
-  console.log(JSON.stringify({
+  const report = {
     ok: true,
     app: basename(appPath),
     fixtureRoot,
     outputDir,
+    reportPath: join(outputDir, 'member-lifecycle-acceptance.json'),
     verified: {
       freshSchemaV41: true,
       v14MemberRuntimeResetOnSchemaV41: true,
       mentionComposerUsesMemberName: true,
       contextSettingsDestinationRemoved: true,
       contextualMemberSidebarAndTabs: true,
+      appFallbackMemberReturn: true,
+      quickChatCampExactMemberReturn: true,
+      directoryCampExactMemberReturn: true,
+      longMemberReturnTitleEllipsis: true,
+      commandBracketMemberReturn: true,
+      memberReturnShortcutBlockedByDialog: true,
+      settingsRoundTripPreservesMemberReturn: true,
+      invalidMemberReturnTargetFallsBackApp: true,
       fullHeightP2HeaderWithoutBlankDragStrip: true,
       campComposerMentionMenuVisibleAndKeyboardSelectable: true,
-      memberFixedReturnHomeAndHomeWhiteSurface: true,
+      memberContextReturnAndHomeWhiteSurface: true,
       equalHeaderStatusControlsAndRuntimeArrow: true,
       manualMemberTabsArrowHomeEndKeyboard: true,
       memoryTrackSwitchLocalSaveAndReducerRollback: true,
@@ -970,7 +1088,9 @@ try {
       horizontalOverflow: false
     },
     captures
-  }, null, 2))
+  }
+  await writeFile(report.reportPath, `${JSON.stringify(report, null, 2)}\n`)
+  console.log(JSON.stringify(report, null, 2))
 } finally {
   if (running) await closeApp(running).catch(() => undefined)
 }
@@ -1046,13 +1166,21 @@ async function installAcceptanceRuntime(databasePath, agentIds) {
   `)
 }
 
-async function createCampFixture(databasePath, id, title, projectPath) {
+async function createCampFixture(
+  databasePath,
+  id,
+  title,
+  projectPath,
+  projectBindingKind = 'quick_chat'
+) {
+  const conversationPrefix = `${id}-conversation-`
+  const messageId = `${id}-message-user`
   await runSql(databasePath, `
     INSERT INTO camp(
       id, title, project_binding_kind, project_path, default_lead_agent_id,
       last_message_sequence, version, created_at, updated_at
     ) VALUES (
-      ${sqlLiteral(id)}, ${sqlLiteral(title)}, 'quick_chat', ${sqlLiteral(projectPath)},
+      ${sqlLiteral(id)}, ${sqlLiteral(title)}, ${sqlLiteral(projectBindingKind)}, ${sqlLiteral(projectPath)},
       'agent_1', 1, 1, datetime('now'), datetime('now')
     );
     INSERT INTO camp_member(
@@ -1065,7 +1193,7 @@ async function createCampFixture(databasePath, id, title, projectPath) {
     INSERT INTO conversation(
       id, camp_id, agent_id, version, created_at, updated_at
     )
-    SELECT 'conversation-lifecycle-' || handle, ${sqlLiteral(id)}, id,
+    SELECT ${sqlLiteral(conversationPrefix)} || handle, ${sqlLiteral(id)}, id,
            1, datetime('now'), datetime('now')
     FROM agent_profile
     WHERE id IN ('agent_1', 'agent_2', 'agent_3', 'agent_4');
@@ -1074,7 +1202,7 @@ async function createCampFixture(databasePath, id, title, projectPath) {
       structured_content_json, address_mode,
       addressed_agent_ids_json, version, created_at, updated_at
     ) VALUES (
-      'message-lifecycle-user', ${sqlLiteral(id)}, 1, 'user', 'local-user',
+      ${sqlLiteral(messageId)}, ${sqlLiteral(id)}, 1, 'user', 'local-user',
       '@luoke 验证用户消息复制',
       '[{"kind":"text","text":"@luoke 验证用户消息复制"}]',
       'explicit', '["agent_1"]',
@@ -1542,6 +1670,33 @@ async function closeApp(app) {
     throw new Error(`Isolated packaged App did not close on debug port ${app.port}`)
   }
   await terminateChild(app.child)
+  await waitForCoreProcessExit(app.dataDir)
+}
+
+async function waitForCoreProcessExit(dataDir, timeoutMs = 15_000) {
+  const lockPath = join(dataDir, '.rovai-core-instance.lock')
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < timeoutMs) {
+    let processId = null
+    try {
+      const owner = JSON.parse(await readFile(lockPath, 'utf8'))
+      processId = Number.isSafeInteger(owner.processId) ? owner.processId : null
+    } catch {
+      return
+    }
+    if (processId === null || !processIsAlive(processId)) return
+    await wait(100)
+  }
+  throw new Error(`Isolated rovai-core did not exit for ${dataDir}`)
+}
+
+function processIsAlive(processId) {
+  try {
+    process.kill(processId, 0)
+    return true
+  } catch (error) {
+    return error?.code === 'EPERM'
+  }
 }
 
 async function terminateChild(child) {
