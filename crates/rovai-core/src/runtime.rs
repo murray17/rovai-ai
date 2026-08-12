@@ -121,6 +121,19 @@ impl DomainCommand for MarkAgentRunForRecoveryCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ResolveAcceptedInputRecoveryBlockerCommand {
+    pub camp_id: String,
+    pub agent_run_id: String,
+    pub expected_version: i64,
+}
+
+impl sealed::Sealed for ResolveAcceptedInputRecoveryBlockerCommand {}
+impl DomainCommand for ResolveAcceptedInputRecoveryBlockerCommand {
+    const TYPE: &'static str = "agent_run.accepted_input_recovery.resolve";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CancelCampTurnCommand {
     pub camp_id: String,
     pub camp_turn_id: String,
@@ -1415,6 +1428,10 @@ impl ExecutionRuntimeService {
                 WHERE id = ?1 AND status IN ('running', 'waiting')
                   AND version = ?2 AND execution_epoch = ?3
                   AND cancel_requested_at IS NULL
+                  AND NOT (
+                      status = 'waiting'
+                      AND wait_reason = 'recovery_blocked'
+                  )
                   AND EXISTS (
                       SELECT 1 FROM camp_turn
                       WHERE camp_turn.id = agent_run.camp_turn_id
@@ -1455,6 +1472,188 @@ impl ExecutionRuntimeService {
                 Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
             ))
         })
+    }
+
+    pub fn resolve_accepted_input_recovery_blocker(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<ResolveAcceptedInputRecoveryBlockerCommand>,
+    ) -> Result<CommandExecution> {
+        let execution = self.gateway.execute(database, envelope, |transaction| {
+            if !matches!(envelope.actor, ActorRef::User { .. }) {
+                return Ok(rejected(
+                    "agent_run.recovery_blocker_user_required",
+                    "Only the local user may close an accepted-input recovery blocker",
+                ));
+            }
+            let target = transaction
+                .query_row(
+                    r#"
+                    SELECT camp_turn.camp_id, agent_run.camp_turn_id,
+                           agent_run.status, agent_run.wait_reason,
+                           agent_run.version, agent_run.execution_epoch,
+                           agent_run.runtime_recovery_required,
+                           agent_run.cancel_requested_at
+                    FROM agent_run
+                    JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                    WHERE agent_run.id = ?1
+                    "#,
+                    [&envelope.payload.agent_run_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                            row.get::<_, i64>(4)?,
+                            row.get::<_, i64>(5)?,
+                            row.get::<_, i64>(6)?,
+                            row.get::<_, Option<String>>(7)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let Some((
+                camp_id,
+                camp_turn_id,
+                status,
+                wait_reason,
+                version,
+                execution_epoch,
+                runtime_recovery_required,
+                cancel_requested_at,
+            )) = target
+            else {
+                return Ok(rejected("agent_run.not_found", "AgentRun does not exist"));
+            };
+            if envelope.payload.camp_id != camp_id
+                || envelope.camp_id.as_deref() != Some(camp_id.as_str())
+            {
+                return Ok(rejected(
+                    "agent_run.camp_mismatch",
+                    "AgentRun is outside the Camp",
+                ));
+            }
+            if version != envelope.payload.expected_version {
+                return Ok(rejected(
+                    "agent_run.version_conflict",
+                    "AgentRun version is stale",
+                ));
+            }
+            if status != "waiting"
+                || wait_reason.as_deref() != Some("recovery_blocked")
+                || runtime_recovery_required != 0
+            {
+                return Ok(rejected(
+                    "agent_run.recovery_blocker_fenced",
+                    "AgentRun is not an accepted-input recovery blocker",
+                ));
+            }
+            if cancel_requested_at.is_some() {
+                return Ok(rejected(
+                    "agent_run.recovery_blocker_fenced",
+                    "AgentRun is already being closed by another command",
+                ));
+            }
+            if !has_accepted_runtime_input(transaction, &envelope.payload.agent_run_id)? {
+                return Ok(rejected(
+                    "agent_run.accepted_input_missing",
+                    "Recovery blocker no longer has accepted Runtime input evidence",
+                ));
+            }
+            if has_terminal_safety_blocker(transaction, &envelope.payload.agent_run_id)? {
+                return Ok(rejected(
+                    "agent_run.terminal_safety_blocked",
+                    "Approval, Action or Runtime Delivery must settle before the blocker can close",
+                ));
+            }
+
+            let now = chrono::Utc::now().to_rfc3339();
+            let error_details_ref = json!({
+                "reason": "core_restarted_after_runtime_input_accepted",
+                "resolution": "user_closed_unknown_outcome",
+            })
+            .to_string();
+            let updated = transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'failed', wait_reason = NULL, wait_deadline_at = NULL,
+                    runtime_recovery_required = 0,
+                    execution_lease_owner = NULL,
+                    execution_lease_expires_at = NULL,
+                    last_error_code = 'accepted_input_outcome_unknown',
+                    last_error_details_ref = ?2,
+                    manual_retry_allowed = 0,
+                    ended_at = ?3,
+                    version = version + 1,
+                    updated_at = ?3
+                WHERE id = ?1
+                  AND status = 'waiting'
+                  AND wait_reason = 'recovery_blocked'
+                  AND runtime_recovery_required = 0
+                  AND version = ?4
+                  AND cancel_requested_at IS NULL
+                "#,
+                params![
+                    envelope.payload.agent_run_id,
+                    error_details_ref,
+                    now,
+                    envelope.payload.expected_version,
+                ],
+            )?;
+            if updated != 1 {
+                return Ok(rejected(
+                    "agent_run.recovery_blocker_fenced",
+                    "AgentRun changed before the recovery blocker was closed",
+                ));
+            }
+            append_domain_event(
+                transaction,
+                "agent_run.accepted_input_outcome_unknown",
+                &camp_id,
+                ("agent_run", &envelope.payload.agent_run_id),
+                &envelope.actor,
+                Some(execution_epoch),
+                &json!({
+                    "resolutionSource": "user",
+                    "acceptedInputPreserved": true,
+                    "automaticRetryAllowed": false,
+                }),
+            )?;
+            settle_materialized_delivery_for_agent_run(
+                transaction,
+                &envelope.payload.agent_run_id,
+                "failed",
+                Some("accepted_input_outcome_unknown"),
+                &envelope.actor,
+                Some(execution_epoch),
+                &now,
+            )?;
+            let camp_turn_status = recompute_camp_turn(
+                transaction,
+                &camp_id,
+                &camp_turn_id,
+                &envelope.actor,
+                Some(execution_epoch),
+                &now,
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "agent_run.accepted_input_outcome_unknown",
+                json!({
+                    "agentRunId": envelope.payload.agent_run_id,
+                    "campTurnId": camp_turn_id,
+                    "campTurnStatus": camp_turn_status,
+                    "acceptedInputPreserved": true,
+                }),
+                Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
+            ))
+        })?;
+        if !execution.replayed
+            && execution.result.code == "agent_run.accepted_input_outcome_unknown"
+        {
+            pump_target_after_run_terminal(database, &envelope.payload.agent_run_id)?;
+        }
+        Ok(execution)
     }
 
     pub fn request_camp_turn_cancellation(
@@ -1632,7 +1831,8 @@ impl ExecutionRuntimeService {
                 .query_row(
                     r#"
                     SELECT camp_turn.camp_id, agent_run.camp_turn_id,
-                           agent_run.status, agent_run.version,
+                           agent_run.status, agent_run.wait_reason,
+                           agent_run.version,
                            agent_run.execution_epoch, agent_run.cancel_requested_at,
                            agent_run.cancel_reason_code
                     FROM agent_run
@@ -1645,10 +1845,11 @@ impl ExecutionRuntimeService {
                             row.get::<_, String>(0)?,
                             row.get::<_, String>(1)?,
                             row.get::<_, String>(2)?,
-                            row.get::<_, i64>(3)?,
+                            row.get::<_, Option<String>>(3)?,
                             row.get::<_, i64>(4)?,
-                            row.get::<_, Option<String>>(5)?,
+                            row.get::<_, i64>(5)?,
                             row.get::<_, Option<String>>(6)?,
+                            row.get::<_, Option<String>>(7)?,
                         ))
                     },
                 )
@@ -1657,6 +1858,7 @@ impl ExecutionRuntimeService {
                 camp_id,
                 camp_turn_id,
                 status,
+                wait_reason,
                 version,
                 execution_epoch,
                 requested_at,
@@ -1703,6 +1905,104 @@ impl ExecutionRuntimeService {
                 .transpose()?;
             let effect_fence =
                 fence_cancelled_run_effects(transaction, &envelope.payload.agent_run_id, &now)?;
+            if status == "waiting" && wait_reason.as_deref() == Some("recovery_blocked") {
+                if !has_accepted_runtime_input(transaction, &envelope.payload.agent_run_id)? {
+                    return Ok(rejected(
+                        "agent_run.accepted_input_missing",
+                        "Recovery blocker no longer has accepted Runtime input evidence",
+                    ));
+                }
+                let error_details_ref = json!({
+                    "reason": "core_restarted_after_runtime_input_accepted",
+                    "resolution": cancel_reason_code,
+                })
+                .to_string();
+                let updated = transaction.execute(
+                    r#"
+                    UPDATE agent_run
+                    SET status = 'failed', wait_reason = NULL, wait_deadline_at = NULL,
+                        runtime_recovery_required = 0,
+                        execution_lease_owner = NULL,
+                        execution_lease_expires_at = NULL,
+                        last_error_code = 'accepted_input_outcome_unknown',
+                        last_error_details_ref = ?2,
+                        manual_retry_allowed = 0,
+                        ending_git_observation_json = ?3,
+                        cancel_acknowledged_at = ?4,
+                        ended_at = ?4,
+                        version = version + 1,
+                        updated_at = ?4
+                    WHERE id = ?1
+                      AND status = 'waiting'
+                      AND wait_reason = 'recovery_blocked'
+                      AND version = ?5
+                      AND execution_epoch = ?6
+                      AND cancel_requested_at IS NOT NULL
+                    "#,
+                    params![
+                        envelope.payload.agent_run_id,
+                        error_details_ref,
+                        ending_git_observation,
+                        now,
+                        envelope.payload.expected_version,
+                        envelope.payload.execution_epoch,
+                    ],
+                )?;
+                if updated != 1 {
+                    return Ok(rejected(
+                        "agent_run.cancellation_fenced",
+                        "AgentRun changed before recovery blocker acknowledgement",
+                    ));
+                }
+                append_domain_event(
+                    transaction,
+                    "agent_run.accepted_input_outcome_unknown",
+                    &camp_id,
+                    ("agent_run", &envelope.payload.agent_run_id),
+                    &envelope.actor,
+                    Some(envelope.payload.execution_epoch),
+                    &json!({
+                        "resolutionSource": "cancellation_coordinator",
+                        "reasonCode": cancel_reason_code,
+                        "acceptedInputPreserved": true,
+                        "automaticRetryAllowed": false,
+                        "actionsMarkedUnknown": effect_fence.actions_marked_unknown,
+                        "actionsClosed": effect_fence.actions_closed,
+                        "approvalsCancelled": effect_fence.approvals_cancelled,
+                        "deliveriesClosed": effect_fence.deliveries_closed,
+                        "preparedInputsClosed": effect_fence.prepared_inputs_closed,
+                        "endingGitObservation": envelope.payload.ending_git_observation,
+                    }),
+                )?;
+                settle_materialized_delivery_for_agent_run(
+                    transaction,
+                    &envelope.payload.agent_run_id,
+                    "failed",
+                    Some("accepted_input_outcome_unknown"),
+                    &envelope.actor,
+                    Some(envelope.payload.execution_epoch),
+                    &now,
+                )?;
+                let camp_turn_status = recompute_camp_turn(
+                    transaction,
+                    &camp_id,
+                    &camp_turn_id,
+                    &envelope.actor,
+                    Some(envelope.payload.execution_epoch),
+                    &now,
+                )?;
+                return Ok(CommandHandlerResult::applied(
+                    "agent_run.accepted_input_outcome_unknown",
+                    json!({
+                        "agentRunId": envelope.payload.agent_run_id,
+                        "campTurnId": camp_turn_id,
+                        "campTurnStatus": camp_turn_status,
+                        "reasonCode": cancel_reason_code,
+                        "acceptedInputPreserved": true,
+                    }),
+                    Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
+                ));
+            }
             let updated = transaction.execute(
                 r#"
                 UPDATE agent_run
@@ -1775,7 +2075,12 @@ impl ExecutionRuntimeService {
                 Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
             ))
         })?;
-        if !execution.replayed && execution.result.code == "agent_run.cancelled" {
+        if !execution.replayed
+            && matches!(
+                execution.result.code.as_str(),
+                "agent_run.cancelled" | "agent_run.accepted_input_outcome_unknown"
+            )
+        {
             pump_target_after_run_terminal(database, &envelope.payload.agent_run_id)?;
         }
         Ok(execution)

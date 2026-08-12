@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "status": "passed",
+  "capturedAt": "2026-08-12T09:00:59.684Z",
+  "isolatedPaths": true,
+  "runtime": {
+    "executable": "/opt/homebrew/bin/copilot",
+    "resolvedExecutable": "/opt/homebrew/Caskroom/copilot-cli/1.0.35/copilot",
+    "reportedVersion": "GitHub Copilot CLI 1.0.79.",
+    "versionOutputDigest": "sha256:2cf758842469ce2c14ec2bf9ed24b3430ca7a7fcf89df2cc420968694f538d24",
+    "executableDigest": "sha256:637f85f8c6aa0c1b03ba0949ab2d7dbc705d2f0519802fa92c5493841d93925f"
+  },
+  "model": "gpt-5.4",
+  "availableModels": [
+    "auto",
+    "claude-sonnet-5",
+    "claude-opus-5",
+    "claude-opus-4.8",
+    "claude-opus-4.8-fast",
+    "claude-opus-4.7",
+    "claude-sonnet-4.6",
+    "claude-opus-4.6",
+    "claude-sonnet-4.5",
+    "claude-opus-4.5",
+    "claude-haiku-4.5",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.5",
+    "gpt-5.4",
+    "gpt-5.4-mini",
+    "gpt-5.3-codex",
+    "gpt-5-mini",
+    "mai-code-1-flash-picker",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.1-pro-preview",
+    "mai-code-1.1-flash",
+    "nioer/Modelsight/GLM-4.7"
+  ],
+  "checks": {
+    "acpV1Negotiated": true,
+    "hostBPromptRejectedLocally": true,
+    "processGroupSigkillObserved": true,
+    "rawLedgerSanitizerPassed": true,
+    "syntheticCountersPassed": true,
+    "noPromptSent": true
+  },
+  "requestCounts": {
+    "initialize": 2,
+    "session/new": 1
+  },
+  "sessionIdDigest": "sha256:b01862928463be9c5111c78b19ce0e7124bdfad6a8a2f029125b68112197bb4a"
+}

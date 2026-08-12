@@ -62,7 +62,7 @@ export const CURRENT_CONTRACT_PREREQUISITES = Object.freeze([
   },
   {
     id: 'accepted-input-ack',
-    evidence: test('crates/rovai-core/src/context.rs', 'accepted_input_advances_only_the_current_native_binding_marker')
+    evidence: test('crates/rovai-core/src/context.rs', 'accepted_input_advances_only_current_binding_and_restart_blocks_redelivery')
   }
 ])
 

@@ -28,6 +28,7 @@ use crate::member_avatar::{
 #[serde(rename_all = "camelCase")]
 pub struct V2RecoverySummary {
     pub runs_waiting_for_recovery: i64,
+    pub accepted_input_recovery_blockers_created: i64,
     pub actions_returned_to_prepared: i64,
     pub actions_marked_unknown: i64,
     pub intercepted_actions_failed_closed: i64,
@@ -771,6 +772,10 @@ impl Database {
                 END,
                 version = version + 1, updated_at = ?1
             WHERE status IN ('running', 'waiting')
+              AND NOT (
+                  status = 'waiting'
+                  AND wait_reason = 'recovery_blocked'
+              )
               AND (
                   runtime_recovery_required = 0
                   OR status = 'running'
@@ -843,8 +848,60 @@ impl Database {
             "#,
             [&now],
         )?;
+        let accepted_input_recovery_blockers_created = transaction.execute(
+            r#"
+            UPDATE agent_run
+            SET status = 'waiting',
+                wait_reason = 'recovery_blocked',
+                wait_deadline_at = NULL,
+                runtime_recovery_required = 0,
+                execution_lease_owner = NULL,
+                execution_lease_expires_at = NULL,
+                last_error_code = 'accepted_input_outcome_unknown',
+                version = version + 1,
+                updated_at = ?1
+            WHERE status = 'waiting'
+              AND wait_reason = 'runtime_recovery'
+              AND runtime_recovery_required = 1
+              AND cancel_requested_at IS NULL
+              AND EXISTS (
+                  SELECT 1 FROM runtime_input_delivery
+                  WHERE runtime_input_delivery.agent_run_id = agent_run.id
+                    AND runtime_input_delivery.status = 'accepted'
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM approval
+                  JOIN action_execution ON action_execution.id = approval.action_id
+                  WHERE action_execution.agent_run_id = agent_run.id
+                    AND approval.status = 'pending'
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM action_execution
+                  WHERE action_execution.agent_run_id = agent_run.id
+                    AND (
+                        action_execution.status IN ('prepared', 'executing')
+                        OR (
+                            action_execution.status = 'unknown'
+                            AND action_execution.unknown_disposition = 'active'
+                        )
+                    )
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM runtime_delivery_checkpoint
+                  WHERE runtime_delivery_checkpoint.agent_run_id = agent_run.id
+                    AND runtime_delivery_checkpoint.status IN ('pending', 'delivering', 'failed')
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM runtime_input_delivery
+                  WHERE runtime_input_delivery.agent_run_id = agent_run.id
+                    AND runtime_input_delivery.status IN ('prepared', 'delivery_unknown')
+              )
+            "#,
+            [&now],
+        )? as i64;
         let summary = V2RecoverySummary {
             runs_waiting_for_recovery,
+            accepted_input_recovery_blockers_created,
             actions_returned_to_prepared,
             actions_marked_unknown,
             intercepted_actions_failed_closed,
@@ -854,6 +911,7 @@ impl Database {
             input_deliveries_marked_unknown,
         };
         if summary.runs_waiting_for_recovery != 0
+            || summary.accepted_input_recovery_blockers_created != 0
             || summary.actions_returned_to_prepared != 0
             || summary.actions_marked_unknown != 0
             || summary.intercepted_actions_failed_closed != 0

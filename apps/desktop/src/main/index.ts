@@ -115,6 +115,7 @@ const allowedMethods = new Set<CoreMethod>([
   'camps.reconcileDefaultLead',
   'camps.delete',
   'campTurns.cancel',
+  'agentRuns.resolveRecoveryBlocker',
   'camps.snapshot',
   'agentRunEvidence.getContent',
   'agentRunEvidence.list',

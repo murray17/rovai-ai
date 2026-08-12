@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 1,
+  "experiment": "copilot-native-turn-reconciliation",
+  "startedAt": "2026-08-12T09:00:51.707Z",
+  "completedAt": "2026-08-12T09:03:46.851Z",
+  "status": "capability_not_proven",
+  "runtime": {
+    "executable": "/opt/homebrew/bin/copilot",
+    "resolvedExecutable": "/opt/homebrew/Caskroom/copilot-cli/1.0.35/copilot",
+    "reportedVersion": "GitHub Copilot CLI 1.0.79.",
+    "versionOutputDigest": "sha256:2cf758842469ce2c14ec2bf9ed24b3430ca7a7fcf89df2cc420968694f538d24",
+    "executableDigest": "sha256:637f85f8c6aa0c1b03ba0949ab2d7dbc705d2f0519802fa92c5493841d93925f"
+  },
+  "model": "gpt-5.4",
+  "hostBPolicy": {
+    "outboundAllowlist": [
+      "initialize",
+      "session/load"
+    ],
+    "promptForbidden": true
+  },
+  "safetyViolations": [],
+  "caseSummary": [
+    {
+      "case": "control",
+      "repetition": 1,
+      "providerTurnId": null,
+      "observedState": "ambiguous",
+      "terminalResultDigest": null,
+      "hostBPromptRequestCount": 0,
+      "hostBPermissionRequestCount": 0,
+      "toolCallCount": 1,
+      "workspaceNonceCount": 1,
+      "verdict": "capability_not_proven"
+    },
+    {
+      "case": "control",
+      "repetition": 2,
+      "providerTurnId": null,
+      "observedState": "ambiguous",
+      "terminalResultDigest": null,
+      "hostBPromptRequestCount": 0,
+      "hostBPermissionRequestCount": 0,
+      "toolCallCount": 1,
+      "workspaceNonceCount": 1,
+      "verdict": "capability_not_proven"
+    },
+    {
+      "case": "in_flight_kill",
+      "repetition": 1,
+      "providerTurnId": null,
+      "observedState": "ambiguous",
+      "terminalResultDigest": null,
+      "hostBPromptRequestCount": 0,
+      "hostBPermissionRequestCount": 0,
+      "toolCallCount": 1,
+      "workspaceNonceCount": 1,
+      "verdict": "capability_not_proven"
+    },
+    {
+      "case": "in_flight_kill",
+      "repetition": 2,
+      "providerTurnId": null,
+      "observedState": "ambiguous",
+      "terminalResultDigest": null,
+      "hostBPromptRequestCount": 0,
+      "hostBPermissionRequestCount": 0,
+      "toolCallCount": 1,
+      "workspaceNonceCount": 1,
+      "verdict": "capability_not_proven"
+    },
+    {
+      "case": "terminal_before_persist_kill",
+      "repetition": 1,
+      "providerTurnId": null,
+      "observedState": "ambiguous",
+      "terminalResultDigest": null,
+      "hostBPromptRequestCount": 0,
+      "hostBPermissionRequestCount": 0,
+      "toolCallCount": 1,
+      "workspaceNonceCount": 1,
+      "verdict": "capability_not_proven"
+    },
+    {
+      "case": "terminal_before_persist_kill",
+      "repetition": 2,
+      "providerTurnId": null,
+      "observedState": "ambiguous",
+      "terminalResultDigest": null,
+      "hostBPromptRequestCount": 0,
+      "hostBPermissionRequestCount": 0,
+      "toolCallCount": 1,
+      "workspaceNonceCount": 1,
+      "verdict": "capability_not_proven"
+    }
+  ],
+  "artifacts": [
+    {
+      "file": "control-1-ledger.jsonl",
+      "digest": "sha256:ad609cc456ae3f57fd5b8a6f5e1bc37874d5ecb545f833bea0c6c2068c137929"
+    },
+    {
+      "file": "control-1.json",
+      "digest": "sha256:7273cf21cc8f753aa081e2457bf638b79cb2abd680bf7fad16c087464088fd74"
+    },
+    {
+      "file": "control-2-ledger.jsonl",
+      "digest": "sha256:97b4cbbb8b3b71425df219588cb1b1c6f5e255e53f1a003949b5f5e34789c1d9"
+    },
+    {
+      "file": "control-2.json",
+      "digest": "sha256:fb906fd522c1277884381ac052393e7a3f8f636eb2557bdd5ab46ccf11e44d98"
+    },
+    {
+      "file": "in_flight_kill-1-ledger.jsonl",
+      "digest": "sha256:1f5212ce2b65c1ca55b686a3e2cc563eea3b428230520f42066bc63ab78c0bf7"
+    },
+    {
+      "file": "in_flight_kill-1.json",
+      "digest": "sha256:8207305772de32df478464af639750e0c6d9c15849eec1a1899f953929c55a17"
+    },
+    {
+      "file": "in_flight_kill-2-attempt-1-prompt-failure-ledger.jsonl",
+      "digest": "sha256:ae3782536be431a5cb07e266d92bdc2af7cea999c39c3ba28e4fb73a8db662e8"
+    },
+    {
+      "file": "in_flight_kill-2-attempt-1-prompt-failure.json",
+      "digest": "sha256:86ac4c462311133b3af47f87c399dd6d2a6618d5b48e58351b66aabc265314f4"
+    },
+    {
+      "file": "in_flight_kill-2-ledger.jsonl",
+      "digest": "sha256:81c56f19dc66b6e51f00a043fed219dd4ee7ae96fbed239cf797494244130eb2"
+    },
+    {
+      "file": "in_flight_kill-2.json",
+      "digest": "sha256:3e1f4c7638c4ab48bfc1b133190bc99ba39300d5ad4b8ec2a69325f65cbb608a"
+    },
+    {
+      "file": "preflight-ledger.jsonl",
+      "digest": "sha256:8c99e5d9c125496279ab7a86a87c496357ed6346329de7c6935a27e31730b688"
+    },
+    {
+      "file": "preflight.json",
+      "digest": "sha256:df6c53230ccaa12adf449892d21f08d9eaa3708523ebefda80f7833ed2f6a832"
+    },
+    {
+      "file": "terminal_before_persist_kill-1-ledger.jsonl",
+      "digest": "sha256:d6a56722682cf643af16dc64b147b2b4f3d930a4bc5903393ba80a31846d6053"
+    },
+    {
+      "file": "terminal_before_persist_kill-1.json",
+      "digest": "sha256:6682a7db7f0a529f9b610049365d3e640e74ff1bffbf4f74f54f8f74671a4d4a"
+    },
+    {
+      "file": "terminal_before_persist_kill-2-ledger.jsonl",
+      "digest": "sha256:3c4100ad17c756b0aed2d1cd9e3839264b58bfe442de6cbc841cf14be3e16499"
+    },
+    {
+      "file": "terminal_before_persist_kill-2.json",
+      "digest": "sha256:5fa60ec8b332c2c1a675e9c598018a10a39674a448795167f96e4d05f59f4824"
+    }
+  ]
+}

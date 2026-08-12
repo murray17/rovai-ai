@@ -139,7 +139,8 @@ use rovai_core::{
         MissingSendRecoveryCandidate, NativeSessionResumeDisposition, NativeSessionResumeFailure,
         PermissionSemantics, RebindAgentRunRuntimeCommand,
         RecordCancelledAgentRunEndingGitObservationCommand, RejectAgentRunDispatchCommand,
-        RestartNativeSessionCommand, SucceedAgentRunCommand,
+        ResolveAcceptedInputRecoveryBlockerCommand, RestartNativeSessionCommand,
+        SucceedAgentRunCommand,
     },
     runtime_discovery::{
         RuntimeDiscoveryObservation, RuntimeDiscoveryStatus, RuntimeSearchEnvironment,
@@ -3400,6 +3401,18 @@ impl Core {
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }
+            "agentRuns.resolveRecoveryBlocker" => {
+                let params: UserCommandParams<ResolveAcceptedInputRecoveryBlockerCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = ExecutionRuntimeService::default()
+                    .resolve_accepted_input_recovery_blocker(
+                        &mut database,
+                        &user_camp_command_envelope(params.command_id, camp_id, params.command),
+                    )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
             "camps.snapshot" => {
                 let params: CampIdParams = serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
@@ -4337,9 +4350,15 @@ impl Core {
             };
             match acknowledgement {
                 Ok(execution) if execution.result.status == CommandResultStatus::Applied => {
+                    let accepted_input_outcome_unknown =
+                        execution.result.code == "agent_run.accepted_input_outcome_unknown";
                     emit(
                         output,
-                        "agent_run.cancelled",
+                        if accepted_input_outcome_unknown {
+                            "agent_run.recovery_blocker_resolved"
+                        } else {
+                            "agent_run.cancelled"
+                        },
                         json!({
                             "campId": candidate.camp_id,
                             "campTurnId": candidate.camp_turn_id,
@@ -4351,11 +4370,13 @@ impl Core {
                     );
                     self.reconcile_skill_projection_after_run_terminal(&candidate.execution_root)
                         .await;
-                    let core = self.clone();
-                    tokio::spawn(async move {
-                        core.record_cancelled_run_ending_git_observation(&candidate)
-                            .await;
-                    });
+                    if !accepted_input_outcome_unknown {
+                        let core = self.clone();
+                        tokio::spawn(async move {
+                            core.record_cancelled_run_ending_git_observation(&candidate)
+                                .await;
+                        });
+                    }
                 }
                 Ok(execution) if execution.result.code == "agent_run.cancellation_fenced" => {}
                 Ok(execution) => eprintln!(
@@ -5938,22 +5959,9 @@ impl Core {
             )
         }?;
         if delivery.status == "accepted" {
-            emit(
-                output,
-                "agent_run.input_resumed",
-                json!({
-                    "campId": execution.camp_id,
-                    "campTurnId": execution.camp_turn_id,
-                    "agentRunId": execution.agent_run_id,
-                    "agentId": execution.agent_id,
-                    "executionEpoch": execution.execution_epoch,
-                    "adapterKind": execution.runtime.adapter_kind,
-                    "nativeThreadId": thread_id,
-                    "nativeTurnId": delivery.native_input_id,
-                    "contextManifestId": prepared_context.manifest_id,
-                }),
+            anyhow::bail!(
+                "accepted Codex input has no verified cross-process Native Turn reconciliation path"
             );
-            return Ok(());
         }
         if delivery.status != "prepared" {
             anyhow::bail!("Runtime Input Delivery is not ready to send");
@@ -6858,22 +6866,9 @@ impl Core {
             return Ok(());
         };
         if delivery.status == "accepted" {
-            emit(
-                output,
-                "agent_run.input_resumed",
-                json!({
-                    "campId": execution.camp_id,
-                    "campTurnId": execution.camp_turn_id,
-                    "agentRunId": execution.agent_run_id,
-                    "agentId": execution.agent_id,
-                    "executionEpoch": execution.execution_epoch,
-                    "adapterKind": execution.runtime.adapter_kind,
-                    "nativeThreadId": session_id,
-                    "nativeTurnId": delivery.native_input_id,
-                    "contextManifestId": prepared_context.manifest_id,
-                }),
+            anyhow::bail!(
+                "accepted ACP input has no verified cross-process Native Turn reconciliation path"
             );
-            return Ok(());
         }
         if delivery.status != "prepared" {
             anyhow::bail!("Runtime Input Delivery is not ready to send");
@@ -7402,6 +7397,7 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
         );
     }
     if v2_recovery.runs_waiting_for_recovery != 0
+        || v2_recovery.accepted_input_recovery_blockers_created != 0
         || v2_recovery.actions_returned_to_prepared != 0
         || v2_recovery.actions_marked_unknown != 0
         || v2_recovery.intercepted_actions_failed_closed != 0

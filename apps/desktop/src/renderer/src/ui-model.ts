@@ -142,10 +142,11 @@ export function agentRunPresentation(
     label: ({
       delivery_unknown: '投递待确认',
       runtime_recovery: '恢复中',
+      recovery_blocked: '结果待确认',
       approval: '等待审批',
       user_input: '等待用户'
     } as Record<string, string>)[run.waitReason ?? ''] ?? '等待处理',
-    tone: run.waitReason === 'delivery_unknown'
+    tone: run.waitReason === 'delivery_unknown' || run.waitReason === 'recovery_blocked'
       ? 'danger'
       : 'attention'
   }
@@ -164,8 +165,12 @@ export function agentRunStateTag(
   if (run.status === 'failed') return { tag: 'FAILED', tone: 'danger' }
   if (run.status === 'cancelled') return { tag: 'CANCELLED', tone: 'neutral' }
   return {
-    tag: run.waitReason === 'approval' ? 'WAITING APPROVAL' : 'WAITING',
-    tone: run.waitReason === 'delivery_unknown'
+    tag: run.waitReason === 'approval'
+      ? 'WAITING APPROVAL'
+      : run.waitReason === 'recovery_blocked'
+        ? 'REVIEW'
+        : 'WAITING',
+    tone: run.waitReason === 'delivery_unknown' || run.waitReason === 'recovery_blocked'
       ? 'danger'
       : 'attention'
   }
@@ -175,6 +180,7 @@ export function agentRunWaitDetail(waitReason: string | null): string | null {
   return ({
     delivery_unknown: 'Agent 运行时是否接收输入尚不可确认；为避免重复执行，Rovai-ai 不会盲目重发。',
     runtime_recovery: '正在从持久化 AgentRun、Native Session 与输入回执恢复执行。',
+    recovery_blocked: 'Agent 运行时已接受任务，但 Rovai-ai 重启后无法确认原任务的最终结果。原请求不会自动重发。',
     approval: '受限动作正在等待用户处理。',
     user_input: 'Agent 已暂停，等待用户补充信息。'
   } as Record<string, string>)[waitReason ?? ''] ?? null

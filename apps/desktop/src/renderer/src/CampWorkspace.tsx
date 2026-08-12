@@ -67,6 +67,10 @@ export type AgentExecutionProcess = {
   runs: AgentRunView[]
 }
 
+export function agentRunCountsAsExecuting(run: Pick<AgentRunView, 'status' | 'waitReason'>): boolean {
+  return NON_TERMINAL_RUNS.has(run.status) && run.waitReason !== 'recovery_blocked'
+}
+
 export type CampMessageSendReceipt = {
   campTurnId: string | null
   agentRunIds: string[]
@@ -607,6 +611,7 @@ export function CampWorkspace({
   onChangeLead,
   onTasksChanged,
   onResolveApproval,
+  onResolveRecoveryBlocker = async () => undefined,
   cancellingTurnIds = new Set<string>(),
   stopping,
   onStop,
@@ -631,6 +636,7 @@ export function CampWorkspace({
   onChangeLead(agentId: string): Promise<void>
   onTasksChanged(): Promise<void>
   onResolveApproval(approval: ActionApprovalView, optionId: string): void
+  onResolveRecoveryBlocker?(run: AgentRunView): Promise<void>
   cancellingTurnIds?: ReadonlySet<string>
   stopping: boolean
   onStop(): void
@@ -675,6 +681,7 @@ export function CampWorkspace({
     sequence: 0,
     moveDomFocus: true
   })
+  const [resolvingRecoveryBlockerId, setResolvingRecoveryBlockerId] = useState<string | null>(null)
   const [submittedExecutionRequest, setSubmittedExecutionRequest] = useState<CampMessageSendReceipt | null>(null)
   const executionDrawerTriggerRef = useRef<HTMLButtonElement | null>(null)
   const inspectorTab = controlledInspectorTab ?? localInspectorTab
@@ -1247,6 +1254,19 @@ export function CampWorkspace({
     setExecutionDrawerFocusedRunId(null)
   }
 
+  const resolveRecoveryBlocker = async (run: AgentRunView): Promise<void> => {
+    if (resolvingRecoveryBlockerId) return
+    setResolvingRecoveryBlockerId(run.id)
+    try {
+      await onResolveRecoveryBlocker(run)
+      window.requestAnimationFrame(() => composerEditorRef.current?.focus())
+    } catch {
+      // The App surface owns the visible error; keep the execution drawer stable.
+    } finally {
+      setResolvingRecoveryBlockerId(null)
+    }
+  }
+
   useEffect(() => {
     if (!submittedExecutionRequest) return
     const targetRun = firstSubmittedAgentRun(submittedExecutionRequest, snapshot.agentRuns)
@@ -1466,6 +1486,8 @@ export function CampWorkspace({
               focusedRunId={executionDrawerFocusedRunId}
               focusRequest={executionDrawerFocusRequest}
               onClose={closeExecutionProcess}
+              onResolveRecoveryBlocker={resolveRecoveryBlocker}
+              resolvingRecoveryBlockerId={resolvingRecoveryBlockerId}
               memberById={memberById}
             />
           )}
@@ -1687,7 +1709,7 @@ function RunPulse({
     return leftPosition - rightPosition || left.agentId.localeCompare(right.agentId)
   })
   const activeProcessCount = visibleProcesses.filter((process) =>
-    process.runs.some((run) => NON_TERMINAL_RUNS.has(run.status))
+    process.runs.some(agentRunCountsAsExecuting)
   ).length
   if (visibleProcesses.length === 0) return <></>
   return (
@@ -1753,6 +1775,8 @@ function ExecutionDrawer({
   focusedRunId,
   focusRequest,
   onClose,
+  onResolveRecoveryBlocker,
+  resolvingRecoveryBlockerId,
   memberById
 }: {
   process: AgentExecutionProcess
@@ -1767,6 +1791,8 @@ function ExecutionDrawer({
   focusedRunId: string | null
   focusRequest: ExecutionDrawerFocusRequest
   onClose(): void
+  onResolveRecoveryBlocker(run: AgentRunView): Promise<void>
+  resolvingRecoveryBlockerId: string | null
   memberById: Map<string, CampSnapshot['members'][number]>
 }): JSX.Element {
   const drawerRef = useRef<HTMLElement>(null)
@@ -2046,7 +2072,7 @@ function ExecutionDrawer({
               <h2 id="execution-drawer-title">{displayName} · 执行过程</h2>
               <p>
                 共 {process.runs.length} 次执行
-                {process.runs.some((run) => NON_TERMINAL_RUNS.has(run.status)) && ' · 当前有进行中 AgentRun'}
+                {process.runs.some(agentRunCountsAsExecuting) && ' · 当前有进行中 AgentRun'}
               </p>
             </div>
           </div>
@@ -2116,6 +2142,8 @@ function ExecutionDrawer({
                       loadedEvidenceCount={loadedEvidenceCountByRunId.get(run.id) ?? 0}
                       cancelling={cancelling}
                       focused={focused}
+                      onResolveRecoveryBlocker={onResolveRecoveryBlocker}
+                      resolvingRecoveryBlocker={resolvingRecoveryBlockerId === run.id}
                     />
                   </article>
                 </li>
@@ -3309,7 +3337,9 @@ function RunExecutionDisclosure({
   loadedEvidenceCount = 0,
   finalBody = null,
   cancelling = false,
-  focused = false
+  focused = false,
+  onResolveRecoveryBlocker,
+  resolvingRecoveryBlocker = false
 }: {
   run: AgentRunView
   progress?: LiveExecutionProgress
@@ -3319,6 +3349,8 @@ function RunExecutionDisclosure({
   finalBody?: string | null
   cancelling?: boolean
   focused?: boolean
+  onResolveRecoveryBlocker?(run: AgentRunView): Promise<void>
+  resolvingRecoveryBlocker?: boolean
 }): JSX.Element | null {
   const nonTerminal = NON_TERMINAL_RUNS.has(run.status)
   const active = executionDisclosureIsLiveOpen(run.status, focused, cancelling)
@@ -3486,7 +3518,26 @@ function RunExecutionDisclosure({
           {renderCompleteEvidenceControl(evidence)}
         </div>
       ))}
-      {nonTerminal && !cancelling && (
+      {nonTerminal && !cancelling && run.waitReason === 'recovery_blocked' && (
+        <div className="process-recovery-blocker" role="status">
+          <div>
+            <strong>无法安全自动恢复</strong>
+            <p>
+              Agent 运行时已接受该任务，但 Rovai-ai 重启后无法确认原任务的最终结果。
+              为避免重复执行，原请求不会自动重发。请先检查当前工作区，再结束此运行并按需发送新的后续任务。
+            </p>
+          </div>
+          <button
+            className="quiet-button compact"
+            type="button"
+            disabled={resolvingRecoveryBlocker}
+            onClick={() => void onResolveRecoveryBlocker?.(run)}
+          >
+            {resolvingRecoveryBlocker ? '正在结束…' : '结束此运行'}
+          </button>
+        </div>
+      )}
+      {nonTerminal && !cancelling && run.waitReason !== 'recovery_blocked' && (
         <div className="process-action current" role="status">
           <span className="process-spinner" aria-hidden="true" />
           <span>{run.status === 'waiting'

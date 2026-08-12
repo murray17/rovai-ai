@@ -1,7 +1,7 @@
 ---
 document_type: architecture-index
 authority: long-lived-architecture-routing
-last_updated: 2026-08-11
+last_updated: 2026-08-12
 ---
 
 # 长期系统架构
@@ -14,6 +14,7 @@ last_updated: 2026-08-11
 | --- | --- |
 | [Benchmark Protocol](benchmark-protocol.md) | Core 外的 Adapter/Profile/Execution/Evaluation/Reporting 组件、Process/Blinded Outcome Judge View、Lane、文件权威与零执行 Project 投影 |
 | [Diagnostics Center](diagnostics-center.md) | Core 严格只读诊断组装、Skill/MCP 审计、Runtime 缓存事实、Renderer 单项修复复检、Electron v5 导出与 Startup Recovery 边界 |
+| [AgentRun Recovery](agent-run-recovery.md) | AgentRun、Native Session、Runtime Input Delivery 与 Native Turn 分离，accepted-input blocker、Scheduler fence、用户/预算安全收敛与未来 reconcile capability |
 | [Built-in Tool Runtime](builtin-tool-runtime.md) | Agent CLI、Core Router、Runtime Fleet、唯一 Self Identity、peer routing Dynamic Context、四层 Context/Evidence、ContextManifest/ACK 与外部 MCP 的关系 |
 | [Native Session Bootstrap Redelivery](native-session-bootstrap-redelivery.md) | compaction detector、Session Observer、Bootstrap/Member Identity 重投递、Redelivery v2、Dynamic Context 与 accepted-input 水位 |
 | [Public A2A Message 与 Message Delivery](public-a2a-message-delivery.md) | 公共消息事实、forward/caller-return Delivery、Core 管理 reply reference、Context gate、Runtime 输出与 UI projection 的权威边界 |

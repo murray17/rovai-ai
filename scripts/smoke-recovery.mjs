@@ -14,6 +14,7 @@ const adapterKind = process.env.ROVAI_RECOVERY_ADAPTER ?? 'opencode-cli'
 const agentId = 'agent_1'
 let firstCore = null
 let recoveredCore = null
+let restartedCore = null
 
 try {
   await mkdir(projectRoot)
@@ -101,10 +102,10 @@ try {
   const immediatelyRecovered = await waitFor(async () => {
     const snapshot = await recoveredCore.request('camps.snapshot', { campId })
     const run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
-    return run?.status === 'waiting' && run.waitReason === 'runtime_recovery'
+    return run?.status === 'waiting' && run.waitReason === 'recovery_blocked'
       ? { snapshot, run }
       : null
-  }, 'the accepted input to enter explicit recovery reconciliation', 60_000)
+  }, 'the accepted input to enter an explicit recovery blocker', 60_000)
 
   if (immediatelyRecovered.snapshot.agentRuns.length !== 1
       || immediatelyRecovered.snapshot.turns.length !== 1
@@ -133,7 +134,7 @@ try {
   if (finalManifest?.id !== manifestId
       || finalManifest.delivery?.executionEpoch !== originalEpoch
       || finalManifest.delivery?.status !== 'accepted') {
-    throw new Error(`Frozen accepted input was not preserved for reconciliation: ${JSON.stringify({
+    throw new Error(`Frozen accepted input was not preserved behind the recovery blocker: ${JSON.stringify({
       manifestId,
       finalManifest,
       finalRun
@@ -143,20 +144,56 @@ try {
     throw new Error(`Recovery left an unknown action outcome: ${JSON.stringify(finalSnapshot.actions)}`)
   }
 
-  const restarted = startCore(dataDir)
-  await restarted.request('health.check')
-  const afterSecondRestart = await restarted.request('camps.snapshot', { campId })
-  await restarted.stop()
+  await recoveredCore.stop()
+  recoveredCore = null
+  restartedCore = startCore(dataDir)
+  await restartedCore.request('health.check')
+  const afterSecondRestart = await restartedCore.request('camps.snapshot', { campId })
   if (afterSecondRestart.agentRuns.length !== 1
       || afterSecondRestart.messages.length !== finalSnapshot.messages.length
       || afterSecondRestart.contextManifests.length !== 1
       || afterSecondRestart.tasks.length !== 1
       || afterSecondRestart.tasks[0].taskId !== taskId
       || afterSecondRestart.agentRuns[0].status !== 'waiting'
+      || afterSecondRestart.agentRuns[0].waitReason !== 'recovery_blocked'
       || afterSecondRestart.agentRuns[0].executionEpoch !== originalEpoch) {
     throw new Error(`A clean second restart duplicated durable state: ${JSON.stringify({
       before: finalSnapshot,
       after: afterSecondRestart
+    })}`)
+  }
+  const blocker = afterSecondRestart.agentRuns[0]
+  const resolution = await restartedCore.request('agentRuns.resolveRecoveryBlocker', {
+    commandId: crypto.randomUUID(),
+    command: {
+      campId,
+      agentRunId,
+      expectedVersion: blocker.version
+    }
+  })
+  if (resolution.status !== 'applied'
+      || resolution.code !== 'agent_run.accepted_input_outcome_unknown') {
+    throw new Error(`Recovery blocker did not close safely: ${JSON.stringify(resolution)}`)
+  }
+  const terminalSnapshot = await restartedCore.request('camps.snapshot', { campId })
+  await restartedCore.stop()
+  restartedCore = null
+  const terminalRun = terminalSnapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
+  const terminalManifest = terminalSnapshot.contextManifests.find((candidate) =>
+    candidate.agentRunId === agentRunId
+  )
+  const outcomeEvent = terminalSnapshot.timeline.find((event) =>
+    event.eventType === 'agent_run.accepted_input_outcome_unknown'
+      && event.entityId === agentRunId
+  )
+  if (terminalRun?.status !== 'failed'
+      || terminalRun.executionEpoch !== originalEpoch
+      || terminalManifest?.delivery?.status !== 'accepted'
+      || !outcomeEvent) {
+    throw new Error(`Unknown accepted-input outcome lost its safety evidence: ${JSON.stringify({
+      terminalRun,
+      terminalManifest,
+      outcomeEvent
     })}`)
   }
 
@@ -168,7 +205,9 @@ try {
     agentRunId,
     originalExecutionEpoch: originalEpoch,
     recoveredExecutionEpoch: finalRun.executionEpoch,
-    acceptedInputHeldForReconciliation: true,
+    acceptedInputHeldBehindRecoveryBlocker: true,
+    acceptedInputOutcomeClosedUnknown: true,
+    originalPromptResent: false,
     contextManifestPreserved: true,
     taskId,
     taskCommandReplayStable: true,
@@ -179,6 +218,7 @@ try {
 } finally {
   if (firstCore) await firstCore.stop()
   if (recoveredCore) await recoveredCore.stop()
+  if (restartedCore) await restartedCore.stop()
   await rm(fixtureRoot, { recursive: true, force: true })
 }
 

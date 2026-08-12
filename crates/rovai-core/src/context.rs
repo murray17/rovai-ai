@@ -5096,8 +5096,9 @@ mod tests {
         },
         mcp_projection::{McpProjectionRequest, McpProjectionService},
         runtime::{
-            AgentRunWorkspace, BindNativeSessionCommand, ClaimAgentRunCommand,
-            ExecutionRuntimeService, SucceedAgentRunCommand,
+            AcknowledgeAgentRunCancellationCommand, AgentRunWorkspace, BindNativeSessionCommand,
+            ClaimAgentRunCommand, ExecutionRuntimeService,
+            ResolveAcceptedInputRecoveryBlockerCommand, SucceedAgentRunCommand,
         },
         skill::{SetSkillEnabledCommand, SetSkillGroupAssignmentsCommand, SkillLibraryService},
         team_tool::{
@@ -8012,7 +8013,7 @@ mod tests {
     }
 
     #[test]
-    fn accepted_input_advances_only_the_current_native_binding_marker() {
+    fn accepted_input_advances_only_current_binding_and_restart_blocks_redelivery() {
         let mut fixture = fixture();
         let store = ManagedBlobStore::new(&fixture.directory);
         let service = ContextService;
@@ -8228,6 +8229,7 @@ mod tests {
 
         let recovery = fixture.database.prepare_v2_recovery().unwrap();
         assert_eq!(recovery.runs_waiting_for_recovery, 1);
+        assert_eq!(recovery.accepted_input_recovery_blockers_created, 1);
         assert!(
             runtime
                 .list_dispatchable_agent_runs(&fixture.database, 10)
@@ -8235,17 +8237,48 @@ mod tests {
                 .is_empty(),
             "an accepted input cannot be blindly redispatched after restart"
         );
-        let recovered_run: (String, Option<String>, i64, i64) = fixture
+        let recovered_run: (String, Option<String>, i64, i64, i64, Option<String>) = fixture
             .database
             .connection()
             .query_row(
-                "SELECT status, wait_reason, version, execution_epoch FROM agent_run WHERE id = ?1",
+                r#"
+                SELECT status, wait_reason, version, execution_epoch,
+                       runtime_recovery_required, last_error_code
+                FROM agent_run WHERE id = ?1
+                "#,
                 [&fixture.run_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
             )
             .unwrap();
         assert_eq!(recovered_run.0, "waiting");
-        assert_eq!(recovered_run.1.as_deref(), Some("runtime_recovery"));
+        assert_eq!(recovered_run.1.as_deref(), Some("recovery_blocked"));
+        assert_eq!(recovered_run.4, 0);
+        assert_eq!(
+            recovered_run.5.as_deref(),
+            Some("accepted_input_outcome_unknown")
+        );
+        let recovery_again = fixture.database.prepare_v2_recovery().unwrap();
+        assert_eq!(recovery_again.runs_waiting_for_recovery, 0);
+        assert_eq!(recovery_again.accepted_input_recovery_blockers_created, 0);
+        let stable_version: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT version FROM agent_run WHERE id = ?1",
+                [&fixture.run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stable_version, recovered_run.2);
         let rejected = runtime
             .claim_agent_run(
                 &mut fixture.database,
@@ -8269,11 +8302,195 @@ mod tests {
             )
             .unwrap();
         assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
-        assert_eq!(
-            rejected.result.code,
-            "agent_run.accepted_input_requires_reconciliation"
-        );
+        assert_eq!(rejected.result.code, "agent_run.not_claimable");
         assert_eq!(recovered_run.3, fixture.execution_epoch);
+        let resolved = runtime
+            .resolve_accepted_input_recovery_blocker(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: ActorRef::User {
+                        user_id: "local-user".to_string(),
+                    },
+                    camp_id: Some(fixture.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: ResolveAcceptedInputRecoveryBlockerCommand {
+                        camp_id: fixture.camp_id.clone(),
+                        agent_run_id: fixture.run_id.clone(),
+                        expected_version: recovered_run.2,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(resolved.result.status, CommandResultStatus::Applied);
+        assert_eq!(
+            resolved.result.code,
+            "agent_run.accepted_input_outcome_unknown"
+        );
+        let terminal: (String, Option<String>, i64, Option<String>, i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT status, wait_reason, runtime_recovery_required,
+                       last_error_code, manual_retry_allowed,
+                       (SELECT COUNT(*) FROM runtime_input_delivery
+                        WHERE agent_run_id = agent_run.id AND status = 'accepted')
+                FROM agent_run WHERE id = ?1
+                "#,
+                [&fixture.run_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(terminal.0, "failed");
+        assert_eq!(terminal.1, None);
+        assert_eq!(terminal.2, 0);
+        assert_eq!(
+            terminal.3.as_deref(),
+            Some("accepted_input_outcome_unknown")
+        );
+        assert_eq!(terminal.4, 0);
+        assert_eq!(terminal.5, 1, "accepted input evidence must be preserved");
+        std::fs::remove_dir_all(fixture.directory).unwrap();
+    }
+
+    #[test]
+    fn execution_budget_closes_recovery_blocker_as_unknown_without_resending_input() {
+        let mut fixture = fixture();
+        bind_fixture_native_session(&mut fixture, "budget-recovery-session");
+        let store = ManagedBlobStore::new(&fixture.directory);
+        let ContextMaterialization::Ready(prepared) = ContextService
+            .materialize(
+                &mut fixture.database,
+                &store,
+                &MaterializeContextRequest {
+                    agent_run_id: &fixture.run_id,
+                    execution_epoch: fixture.execution_epoch,
+                    charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+            )
+            .unwrap()
+        else {
+            panic!("budget recovery context should be ready");
+        };
+        let delivery = ContextService
+            .prepare_input_delivery(
+                &mut fixture.database,
+                &fixture.run_id,
+                fixture.execution_epoch,
+                &prepared.manifest_id,
+            )
+            .unwrap();
+        ContextService
+            .acknowledge_input_delivery(
+                &mut fixture.database,
+                &delivery.id,
+                "accepted-before-budget-expiry",
+            )
+            .unwrap();
+        let recovery = fixture.database.prepare_v2_recovery().unwrap();
+        assert_eq!(recovery.accepted_input_recovery_blockers_created, 1);
+
+        let runtime = ExecutionRuntimeService::default();
+        let observed_now = chrono::Utc::now();
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE camp_turn
+                SET execution_budget_deadline_at = ?2
+                WHERE id = (SELECT camp_turn_id FROM agent_run WHERE id = ?1)
+                "#,
+                params![
+                    fixture.run_id,
+                    (observed_now - chrono::Duration::seconds(1)).to_rfc3339(),
+                ],
+            )
+            .unwrap();
+        let expired = runtime
+            .expire_elapsed_camp_turn_execution_budgets(&mut fixture.database, observed_now, 10)
+            .unwrap();
+        assert_eq!(expired.len(), 1);
+        let candidate = runtime
+            .list_cancellation_candidates(&fixture.database, 10)
+            .unwrap()
+            .into_iter()
+            .find(|candidate| candidate.agent_run_id == fixture.run_id)
+            .unwrap();
+        let acknowledged = runtime
+            .acknowledge_agent_run_cancellation(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: format!(
+                        "budget-recovery-ack:{}:{}",
+                        candidate.agent_run_id, candidate.execution_epoch
+                    ),
+                    actor: ActorRef::System {
+                        component_id: "runtime-cancellation-coordinator".to_string(),
+                    },
+                    camp_id: Some(fixture.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: AcknowledgeAgentRunCancellationCommand {
+                        agent_run_id: candidate.agent_run_id,
+                        expected_version: candidate.version,
+                        execution_epoch: candidate.execution_epoch,
+                        ending_git_observation: None,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            acknowledged.result.code,
+            "agent_run.accepted_input_outcome_unknown"
+        );
+        assert_eq!(acknowledged.result.payload["campTurnStatus"], "failed");
+        let state: (String, String, Option<String>, i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT agent_run.status, camp_turn.status,
+                       agent_run.last_error_code,
+                       agent_run.manual_retry_allowed,
+                       (SELECT COUNT(*) FROM runtime_input_delivery
+                        WHERE agent_run_id = agent_run.id AND status = 'accepted')
+                FROM agent_run
+                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                WHERE agent_run.id = ?1
+                "#,
+                [&fixture.run_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(state.0, "failed");
+        assert_eq!(state.1, "failed");
+        assert_eq!(state.2.as_deref(), Some("accepted_input_outcome_unknown"));
+        assert_eq!(state.3, 0);
+        assert_eq!(
+            state.4, 1,
+            "budget expiry must preserve accepted input evidence"
+        );
         std::fs::remove_dir_all(fixture.directory).unwrap();
     }
 

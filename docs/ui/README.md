@@ -109,6 +109,11 @@ Delivery Evidence 继续留在 Core/Snapshot，但不再占用普通阅读页签
 Default Lead 选择器。当前合同见
 [Run Process Detail Surface v3](../contracts/run-process-detail-surface-v3.md)。
 
+v0.64 在同一 Agent 过程 Drawer 中增加 accepted-input Recovery Blocker。当 Core 无法证明旧 Native
+Turn 可重新附着时，Run 状态显示“结果待确认”，不显示恢复 spinner；详情说明原请求不会自动重发，
+提供唯一“结束此运行”动作，并要求用户先检查 Workspace 后再自行发送新的后续任务。完整当前合同见
+[Run Process Detail Surface v4](../contracts/run-process-detail-surface-v4.md)。
+
 v0.47 保留 v0.38 的创建位置唯一实时 Task 卡，并把它升级为五态；会话卡继续只显示状态、
 标题和负责人。Inspector list 负责 compact 发现，detail 负责完整责任/审计并只读派生 Related
 execution，现有 AgentRun UI 继续拥有执行事实。编辑器按 projected final state 展示条件字段，
@@ -149,8 +154,9 @@ Mention，在身份仍可用时复用既有锚定人物信息卡。成功与非�
    Session 启动恢复、登录项和窗口 reset 的版本级 Shell/Renderer 合同。
 5. [v0.51 生产设计](../versions/v0.51/production-design.md)决定诊断中心的摘要、问题、全量结果、单项操作与七态恢复合同。
 6. 原型与 HTML 样例只帮助评审视觉层级，不是生产合同、数据真源或可直接复制的代码。
-7. [Run Process Detail Surface v3](../contracts/run-process-detail-surface-v3.md)决定当前 Camp
-   Agent 执行过程入口、连续 Run stage、Inspector 收敛和与 Approval/Stop 的 layering。
+7. [Run Process Detail Surface v4](../contracts/run-process-detail-surface-v4.md)决定当前 Camp
+   Agent 执行过程入口、连续 Run stage、Accepted-Input Recovery Blocker、Inspector 收敛和与
+   Approval/Stop 的 layering。
 
 发生冲突时不得用视觉稿覆盖领域或安全合同，也不得用当前旧代码反向覆盖已经冻结的
 新设计。必须明确报告文档—实现漂移。
@@ -226,6 +232,12 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   事件、重载和恢复仍不得自动打开、切换或抢焦点。打开入口时优先定位最新 running、否则最新
   non-terminal、最后最新 terminal Run。聚焦 live Run 时只在用户停留 Drawer 底部时跟随最新输出，
   手动上滚暂停、回到底部恢复，且不滚动公共消息时间线。
+- `waiting/recovery_blocked` Run 在执行台和 stage 显示“结果待确认”。其 Drawer 不显示 spinner 或
+  “恢复中”，而用 danger token 的可换行 blocker 说明 Runtime 已接受任务、重启后最终结果未知、原请求
+  不会自动重发，并提供唯一“结束此运行”动作。成功后按权威 Snapshot 显示失败并把焦点返回 Composer；
+  该 Run 保留入口但不计入执行中人数或 Drawer 的进行中汇总；Renderer 不确认成功、不重发正文、不创建
+  successor。精确合同见
+  [Run Process Detail Surface v4](../contracts/run-process-detail-surface-v4.md)。
 - Agent 公共正文不显示“来自执行”来源条；A2A 消息不显示 compact 投递卡片，只在正文后使用
   Scheme C 短转交轨迹显示“发送给@队员”。所有 Agent 使用同一开放阅读表面，不按角色铺不同消息
   底色；`@队员` 是飞书式蓝色 Mention，可用身份可打开既有人物信息卡。footer 与 Run stage 都不重复投影 Delivery 状态标签；

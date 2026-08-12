@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.63
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -13,6 +13,8 @@ last_updated: 2026-08-12
 > 当前状态：交互、Renderer、完整自动化门禁、隔离打包 App 验收与视觉复核均已完成。
 >
 > 前置版本：[v0.62 显式 A2A 调用者返回](../v0.62/README.md)
+>
+> 后续版本：[v0.64 Accepted Input 恢复阻断与安全收敛](../v0.64/README.md)
 
 ## 版本目标
 

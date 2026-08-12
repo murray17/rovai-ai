@@ -1,0 +1,42 @@
+{
+  "error": "Host A prompt became terminal before the in-flight nonce was written: {\"stopReason\":\"end_turn\",\"usage\":{\"inputTokens\":4395,\"outputTokens\":175,\"totalTokens\":4570,\"thoughtTokens\":93,\"cachedReadTokens\":0,\"cachedWriteTokens\":0}}",
+  "approvedCommands": [],
+  "permissionViolations": [
+    {
+      "method": "session/request_permission",
+      "command": "printf '%s\n' 'ROVAI_P1_IN_FLIGHT_KILL_2_795967e6c2934fa0aa411c4aa06d8d83' >> p1-nonce.txt && sleep 30",
+      "reason": "command did not match the one-shot allowlist"
+    }
+  ],
+  "promptOutcome": {
+    "result": {
+      "stopReason": "end_turn",
+      "usage": {
+        "inputTokens": 4395,
+        "outputTokens": 175,
+        "totalTokens": 4570,
+        "thoughtTokens": 93,
+        "cachedReadTokens": 0,
+        "cachedWriteTokens": 0
+      }
+    },
+    "status": "resolved",
+    "at": "2026-08-12T09:02:27.115Z"
+  },
+  "streamedAgentText": "Info: Disabled tools: apply_patch, glob, list_agents, list_bash, read_agent, read_bash, rg, session_store_sql, skill, sql, stop_bash, task, view, web_fetch, write_agent",
+  "toolCallIds": [
+    "call_2aPUSE1bd6pyZinWUgjq4LXw"
+  ],
+  "workspaceNonceCount": 0,
+  "stderr": [],
+  "setupAttempts": [
+    {
+      "attempt": 1,
+      "instanceId": "be4c50ac-bc71-4a91-a711-ef1cca746a82",
+      "sessionIdDigest": "sha256:6a0ba000288d0b4578f0e1d74ca28135d931ca3949e56afd5e3bd1abb3df8df1",
+      "sessionModel": "gpt-5.4",
+      "configuredModel": "gpt-5.4",
+      "error": null
+    }
+  ]
+}

@@ -1697,6 +1697,11 @@ button.timeline-event-card:hover { border-color: var(--brand); background: var(-
 .process-copy .safe-markdown { color: inherit; font-size: inherit; line-height: inherit; }
 .process-copy .safe-markdown p { margin-bottom: 0; }
 .execution-uncertain { margin: 0; padding: 7px 9px; border-left: 2px solid var(--attention); color: var(--attention); background: var(--attention-soft); font-size: 10.5px; }
+.process-recovery-blocker { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 14px; padding: 11px 12px; border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--line)); border-left: 3px solid var(--danger); border-radius: 7px; background: var(--danger-soft); }
+.process-recovery-blocker > div { min-width: 0; flex: 1 1 280px; }
+.process-recovery-blocker strong { color: var(--danger); font-size: 12px; font-weight: 650; }
+.process-recovery-blocker p { margin: 4px 0 0; color: var(--ink); font-size: 11.5px; line-height: 1.58; }
+.process-recovery-blocker .quiet-button { flex: 0 0 auto; }
 .complete-evidence-control { display: grid; justify-items: start; gap: 6px; margin: 7px 0 0 24px; }
 .complete-evidence-control pre { max-width: 100%; max-height: 300px; margin: 0; overflow: auto; padding: 7px 8px; border: 1px solid var(--evidence-line); border-radius: 5px; color: var(--evidence-muted); background: var(--evidence-canvas); font: 10px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .complete-evidence-standalone .complete-evidence-control { margin: 0; }

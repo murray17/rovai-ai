@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "case": "control",
+  "repetition": 2,
+  "sampleAttempt": 1,
+  "caseId": "control-2-attempt-1-630286c7-1080-45f0-a8d8-8cc65280b6d5",
+  "capturedAt": "2026-08-12T09:01:53.004Z",
+  "providerVersion": "GitHub Copilot CLI 1.0.79.",
+  "executable": "/opt/homebrew/bin/copilot",
+  "resolvedExecutable": "/opt/homebrew/Caskroom/copilot-cli/1.0.35/copilot",
+  "executableDigest": "sha256:637f85f8c6aa0c1b03ba0949ab2d7dbc705d2f0519802fa92c5493841d93925f",
+  "model": "gpt-5.4",
+  "permissionProfile": {
+    "availableTools": [
+      "bash"
+    ],
+    "builtinMcpsDisabled": true,
+    "customInstructionsDisabled": true,
+    "hostEnvironmentAllowlist": [
+      "HOME",
+      "LANG",
+      "LC_ALL",
+      "LOGNAME",
+      "PATH",
+      "SHELL",
+      "TMPDIR",
+      "USER"
+    ],
+    "networkUrlsDenied": true,
+    "expectedCommandDigest": "sha256:90c9cc6f378cefa2bb3ede0dd9d07f85ec4ab90e9b6a805393ddc580485d7022",
+    "approvedCommandCount": 1,
+    "unexpectedPermissionRequestCount": 0
+  },
+  "workspace": {
+    "beforeHash": null,
+    "afterHash": "sha256:9e16df4ae84e738f4bb50040b3b645d630a034bb07fdcdb2acd730a4e0d7d898",
+    "nonceCount": 1,
+    "nonceFile": "p1-nonce.txt"
+  },
+  "hostA": {
+    "instanceId": "8b7bddc6-184f-4636-a92e-4427877dede4",
+    "setupAttempts": [
+      {
+        "attempt": 1,
+        "instanceId": "8b7bddc6-184f-4636-a92e-4427877dede4",
+        "sessionIdDigest": "sha256:835b209a1c81c9b662981a33e8ed93ab232fb4796105aa28e5336afb68cd4236",
+        "sessionModel": "gpt-5.4",
+        "configuredModel": "gpt-5.4",
+        "error": null
+      }
+    ],
+    "startedAt": "2026-08-12T09:01:26.687Z",
+    "exitedAt": "2026-08-12T09:01:39.042Z",
+    "exitCode": 0,
+    "exitSignal": null,
+    "requestedStopSignal": "SIGTERM",
+    "killedAt": null,
+    "promptRequestCount": 1,
+    "acceptedObserved": true,
+    "acceptedAt": "2026-08-12T09:01:31.124Z",
+    "promptTerminalObserved": true,
+    "promptTerminalAt": "2026-08-12T09:01:37.560Z",
+    "promptTerminalError": null,
+    "terminalResultDigest": "sha256:036b12fdacb59c5e6380c0384685600ec238f008ee133249319cd9a70edb3f71",
+    "uniqueToolCallCount": 1
+  },
+  "hostB": {
+    "attempts": [
+      {
+        "instanceId": "3041ecf3-9982-4b0b-a8b8-fae6f7609cce",
+        "startedAt": "2026-08-12T09:01:39.046Z",
+        "exitedAt": "2026-08-12T09:01:45.800Z",
+        "requestCounts": {
+          "initialize": 1,
+          "session/load": 1
+        },
+        "promptRequestCount": 0,
+        "permissionRequestCount": 0,
+        "sessionLoadCount": 1,
+        "loadResultDigest": "sha256:66f913589ad38bc70705c18caf725141f99510fe6b7c506b9fe3c656638734d1",
+        "replayNotificationCount": 7
+      },
+      {
+        "instanceId": "e21cd550-7f71-44ec-ac11-1e395fc943f8",
+        "startedAt": "2026-08-12T09:01:45.810Z",
+        "exitedAt": "2026-08-12T09:01:52.963Z",
+        "requestCounts": {
+          "initialize": 1,
+          "session/load": 1
+        },
+        "promptRequestCount": 0,
+        "permissionRequestCount": 0,
+        "sessionLoadCount": 1,
+        "loadResultDigest": "sha256:66f913589ad38bc70705c18caf725141f99510fe6b7c506b9fe3c656638734d1",
+        "replayNotificationCount": 7
+      }
+    ],
+    "promptRequestCount": 0,
+    "permissionRequestCount": 0,
+    "sessionLoadCount": 2,
+    "lookupRequestCount": 0
+  },
+  "nativeSessionIdDigest": "sha256:835b209a1c81c9b662981a33e8ed93ab232fb4796105aa28e5336afb68cd4236",
+  "providerTurnId": null,
+  "providerTurnIdCandidates": [],
+  "observedState": "ambiguous",
+  "terminalResultDigest": null,
+  "clientPromptRequestCount": 1,
+  "providerModelRequestCount": null,
+  "providerModelRequestCountReason": "ACP v1 exposes no Provider model-request identity or counter",
+  "toolCallCount": 1,
+  "workspaceNonceCount": 1,
+  "replayNotificationCounts": [
+    7,
+    7
+  ],
+  "criterionResults": {
+    "stableProviderTurnId": false,
+    "machineReadableTurnState": false,
+    "terminalResultRereadByHostB": false,
+    "noHostBPrompt": true,
+    "noHostBExecutionRequest": true,
+    "idempotentReconcile": false,
+    "exactlyOneToolCall": true,
+    "exactlyOneWorkspaceSideEffect": true
+  },
+  "verdict": "capability_not_proven",
+  "ledgerDigest": "sha256:5ab967200501257b788e67509f0973ab5506d848e8b486f6b259e8354643ad47",
+  "excludedAttempts": []
+}

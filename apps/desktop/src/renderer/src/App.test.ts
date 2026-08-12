@@ -43,6 +43,7 @@ import {
   QuickChatWorkspace,
   TaskPanel,
   agentExecutionProcesses,
+  agentRunCountsAsExecuting,
   campConversationTimeline,
   campInspectorMembers,
   campMemberIsLeadEligible,
@@ -1662,6 +1663,8 @@ describe('task event projections', () => {
     expect(executionDisclosureIsLiveOpen('running', true, false)).toBe(true)
     expect(executionDisclosureIsLiveOpen('running', false, false)).toBe(false)
     expect(executionDisclosureIsLiveOpen('queued', true, true)).toBe(false)
+    expect(agentRunCountsAsExecuting({ status: 'waiting', waitReason: 'runtime_recovery' })).toBe(true)
+    expect(agentRunCountsAsExecuting({ status: 'waiting', waitReason: 'recovery_blocked' })).toBe(false)
 
     const submittedFirstRun = {
       ...snapshot.agentRuns[0],
@@ -2289,6 +2292,15 @@ describe('task event projections', () => {
       label: '投递待确认',
       tone: 'danger'
     })
+    expect(agentRunPresentation({ status: 'waiting', waitReason: 'recovery_blocked' })).toEqual({
+      label: '结果待确认',
+      tone: 'danger'
+    })
+    expect(agentRunStateTag({ status: 'waiting', waitReason: 'recovery_blocked' })).toEqual({
+      tag: 'REVIEW',
+      tone: 'danger'
+    })
+    expect(agentRunWaitDetail('recovery_blocked')).toContain('原请求不会自动重发')
     expect(agentRunPresentation({ status: 'running', waitReason: null }, true)).toEqual({
       label: '正在停止…',
       tone: 'neutral'

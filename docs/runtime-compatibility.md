@@ -74,6 +74,29 @@ Copilot 默认 `claude-sonnet-5` 的 zero-send 路径通过，但该模型三次
 model catalog 中的 `gpt-5.6-sol`，报告记录了实际选择。该模型行为观察不改变 Core 的全 send 抑制
 规则，也不以模拟 send 替代 Runtime 调用。
 
+## Copilot Native Turn reconciliation
+
+2026-08-12 的 v0.64 P1 使用 GitHub Copilot CLI `1.0.79`、固定模型 `gpt-5.4` 和 executable SHA-256
+`637f85f8c6aa0c1b03ba0949ab2d7dbc705d2f0519802fa92c5493841d93925f`，在隔离 Git workspace 上完成
+control、in-flight Host kill、terminal-before-persist Host kill 各两个有效重复。每个 Host B 都只执行
+`initialize + session/load` 两次，从未发送 prompt。
+
+| 观察项 | 六个有效样本的结果 |
+| --- | --- |
+| Host A prompt / 唯一 Tool Call / workspace nonce | 每项均恰好 1 |
+| Host B prompt / execution permission request | 每项均为 0 |
+| Session history replay | 可重复；Control 重放 Tool Call 与最终文本，terminal kill 只重放 completed Tool Call |
+| Provider 生成的稳定 Native Turn ID | 未返回 |
+| 机器可判的 Turn 状态 | 未返回；只能记为 `ambiguous` |
+| 旧 Turn terminal result / prompt response 重读 | 不可取得 |
+| `native_turn.reconcile.v1` | `capability_not_proven` |
+
+history replay 没有造成第二次 Tool Call 或 nonce，但也不能证明 Provider 模型请求 exactly-once；ACP v1
+不暴露该计数。该实测是目标 executable/version 的负向 capability 证据，不影响 Copilot 其他已通过的
+Runtime admission 能力，也不把 Session load 提升为旧 Turn reattach。协议、逐 case artifact、raw 脱敏
+ledger 和 digest manifest 见
+[v0.64 P1 实验](versions/v0.64/copilot-native-turn-reconciliation-experiment.md)。
+
 ## Claude Code 与 ACP 输入确认
 
 2026-08-11 使用本机 Claude Code `2.1.220` 按 Adapter 的完整参数执行无工具、无 Session 持久化的

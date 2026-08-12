@@ -14,6 +14,7 @@ const runtimeTempDir = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_RUNTIME_TMP
   ?? tmpdir()
 const outputDir = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_OUTPUT_DIR
   ?? await mkdtemp(join(tmpdir(), 'rovai-runtime-activity-ui-captures-'))
+const recoveryBlockerOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_RECOVERY_BLOCKER_ONLY === '1'
 const databasePath = join(dataDir, 'rovai.sqlite')
 const debugPort = Number(process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DEBUG_PORT ?? 9581)
 const campId = 'camp-runtime-activity-v055'
@@ -24,6 +25,8 @@ const runArticleSelector = 'article.timeline-node.conversation-bubble.agent'
 const activeAgentId = 'agent_101'
 const activeRunId = 'run-codex'
 const historicalRunId = 'run-codex-history'
+const recoveryBlockedAgentId = 'agent_103'
+const recoveryBlockedRunId = 'run-copilot'
 const longToolOutputFirstMarker = 'ROVAI_LONG_TOOL_OUTPUT_BEGIN'
 const longToolOutputMiddleMarker = 'ROVAI_LONG_TOOL_OUTPUT_MIDDLE'
 const longToolOutputLastMarker = 'ROVAI_LONG_TOOL_OUTPUT_END'
@@ -83,6 +86,19 @@ try {
   assert(renderedMessageCount === runtimes.length,
     `Expected ${runtimes.length} rendered Agent messages, found ${renderedMessageCount}: ${await evaluate(app.cdp, 'document.body.innerText.slice(0, 5000)')}`)
 
+  if (recoveryBlockerOnly) {
+    const recoveryBlockerPresentation = await verifyRecoveryBlockerPresentation(app.cdp)
+    const recoveryBlockerCapture = join(outputDir, 'runtime-activity-recovery-blocker.png')
+    await capture(app.cdp, recoveryBlockerCapture)
+    const recoveryBlockerResolution = await verifyRecoveryBlockerResolution(app.cdp)
+    console.log(JSON.stringify({
+      ok: true,
+      mode: 'controlled-recovery-blocker-fixture',
+      recoveryBlockerPresentation,
+      recoveryBlockerResolution,
+      recoveryBlockerCapture
+    }, null, 2))
+  } else {
   const conversationPresentation = await collectConversationPresentation(app.cdp)
   assert(conversationPresentation.articleCount === runtimes.length
     && conversationPresentation.articleBackgrounds.length === 1
@@ -181,6 +197,10 @@ try {
   const totalToolRows = observed.reduce((total, row) => total + row.toolTitles.length, 0)
   assert(totalToolRows === 8,
     `Expected exactly eight observed tool rows and one honest run-level row: ${JSON.stringify(observed)}`)
+
+  const recoveryBlockerPresentation = await verifyRecoveryBlockerPresentation(app.cdp)
+  const recoveryBlockerCapture = join(outputDir, 'runtime-activity-recovery-blocker.png')
+  await capture(app.cdp, recoveryBlockerCapture)
 
   await evaluate(app.cdp, `(() => {
     const activeChip = [...document.querySelectorAll('.run-pulse-chip[data-agent-id]')]
@@ -385,6 +405,7 @@ try {
       canonicalToolRows: totalToolRows,
       codexLifecycleMergedToOneRow: observed.find((row) => row.runtime === 'Codex CLI')?.toolTitles.length === 1,
       sameAgentRunsShareOneProcess: observed.find((row) => row.agentId === activeAgentId)?.runCount === 2,
+      recoveryBlockerPresentation,
       runningRunFocusedWithEvidence: observed.find((row) => row.agentId === activeAgentId)?.focusedEvidenceOpen === true,
       executionDrawerResize,
       executionAutoFollow,
@@ -404,6 +425,7 @@ try {
       top: topCapture,
       bottom: bottomCapture,
       toolOutput: toolOutputCapture,
+      recoveryBlocker: recoveryBlockerCapture,
       wide: wideCapture,
       wideConversation: wideConversationCapture,
       compact: compactCapture,
@@ -412,6 +434,7 @@ try {
   }
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`)
   console.log(JSON.stringify({ ...report, reportPath }, null, 2))
+  }
 } finally {
   if (app) await closeApp(app)
 }
@@ -469,6 +492,10 @@ async function activateControlledRun() {
 
 async function seedFixture() {
   const now = '2026-08-05T12:00:00Z'
+  const recoveryBlob = await seedManagedBlob(
+    Buffer.from(JSON.stringify({ fixture: 'accepted-input-recovery-blocker' })),
+    now
+  )
   const installationRows = runtimes.map((entry) => `(
     ${sqlLiteral(`installation-runtime-${entry.key}`)}, ${sqlLiteral(entry.adapterKind)},
     ${sqlLiteral(`/fixture/${entry.key}`)}, ${sqlLiteral(entry.key)}, 'custom', 'custom',
@@ -495,15 +522,17 @@ async function seedFixture() {
   const turnRows = [
     ...runtimes.map((entry, index) => {
       const active = entry.key === 'codex'
+      const recoveryBlocked = entry.key === 'copilot'
+      const nonTerminal = active || recoveryBlocked
       const updatedAt = `2026-08-05T12:${String(index).padStart(2, '0')}:${active ? '01' : '02'}Z`
       return `(
         ${sqlLiteral(`turn-${entry.key}`)}, ${sqlLiteral(campId)}, 'system_event',
-        ${sqlLiteral(`runtime-activity-${entry.key}`)}, ${sqlLiteral(active ? 'running' : 'completed')},
-        1, ${sqlLiteral(now)}, ${sqlLiteral(active ? '2036-08-06T12:00:00Z' : '2026-08-06T12:00:00Z')}, ${active ? 0 : 86400}, 32, 16, 1,
+        ${sqlLiteral(`runtime-activity-${entry.key}`)}, ${sqlLiteral(nonTerminal ? 'running' : 'completed')},
+        1, ${sqlLiteral(now)}, ${sqlLiteral(nonTerminal ? '2036-08-06T12:00:00Z' : '2026-08-06T12:00:00Z')}, ${nonTerminal ? 0 : 86400}, 32, 16, 1,
         1,
         ${sqlLiteral(`2026-08-05T12:${String(index).padStart(2, '0')}:00Z`)},
         ${sqlLiteral(updatedAt)},
-        ${sqlNullable(active ? null : updatedAt)}
+        ${sqlNullable(nonTerminal ? null : updatedAt)}
       )`
     }),
     `(
@@ -516,16 +545,18 @@ async function seedFixture() {
   const runRows = [
     ...runtimes.map((entry, index) => {
       const active = entry.key === 'codex'
+      const recoveryBlocked = entry.key === 'copilot'
+      const nonTerminal = active || recoveryBlocked
       const updatedAt = `2026-08-05T12:${String(index).padStart(2, '0')}:${active ? '01' : '02'}Z`
       return `(
         ${sqlLiteral(`run-${entry.key}`)}, ${sqlLiteral(`turn-${entry.key}`)},
         ${sqlLiteral(`conversation-${entry.key}`)}, 0, 0,
         ${sqlLiteral(`direct:${entry.agentId}`)}, 'initial',
         ${sqlLiteral(`验证 ${entry.runtimeName} Runtime Activity`)},
-        'required', '{}', ${sqlLiteral(active ? 'queued' : 'succeeded')}, ${sqlLiteral(`runtime-activity-${entry.key}`)},
+        'required', '{}', ${sqlLiteral(nonTerminal ? 'queued' : 'succeeded')}, ${sqlLiteral(`runtime-activity-${entry.key}`)},
         1, ${sqlLiteral(`2026-08-05T12:${String(index).padStart(2, '0')}:00Z`)},
         ${sqlNullable(active ? null : `2026-08-05T12:${String(index).padStart(2, '0')}:01Z`)},
-        ${sqlNullable(active ? null : updatedAt)},
+        ${sqlNullable(nonTerminal ? null : updatedAt)},
         ${sqlLiteral(updatedAt)},
         ${sqlLiteral(entry.adapterKind)}, ${sqlLiteral(entry.protocol)}
       )`
@@ -578,6 +609,14 @@ async function seedFixture() {
   await runSql(databasePath, `
     PRAGMA foreign_keys = ON;
     BEGIN IMMEDIATE;
+    INSERT INTO managed_blob(
+      id, sha256, byte_size, media_type, storage_relative_path,
+      state, sensitivity, created_at, verified_at, updated_at
+    ) VALUES (
+      ${sqlLiteral(recoveryBlob.id)}, ${sqlLiteral(recoveryBlob.digest)}, ${recoveryBlob.byteSize},
+      'application/json', ${sqlLiteral(recoveryBlob.relativePath)},
+      'present', 'normal', ${sqlLiteral(now)}, ${sqlLiteral(now)}, ${sqlLiteral(now)}
+    );
     INSERT INTO adapter_installation(
       id, adapter_kind, executable_path, command_name, installation_class,
       source, auth_scope, enabled, generation, path_state, version,
@@ -615,6 +654,15 @@ async function seedFixture() {
       'conversation-composer-layout', ${sqlLiteral(composerLayoutCampId)}, ${sqlLiteral(runtimes[0].agentId)},
       1, ${sqlLiteral(now)}, ${sqlLiteral(now)}
     );
+    UPDATE conversation
+    SET native_adapter_installation_id = 'installation-runtime-copilot',
+        native_session_id = 'fixture-copilot-session',
+        native_binding_compatibility_digest = 'fixture-copilot-compatibility',
+        native_binding_id = 'fixture-copilot-binding',
+        native_binding_generation = 1,
+        native_installation_generation = 1,
+        native_session_compatibility_key = 'fixture-copilot-session-v1'
+    WHERE id = 'conversation-copilot';
     INSERT INTO camp_turn(
       id, camp_id, trigger_type, trigger_id, status,
       execution_budget_schema_version, execution_budget_accepted_at,
@@ -632,6 +680,71 @@ async function seedFixture() {
       created_at, started_at, ended_at, updated_at,
       runtime_adapter_kind, runtime_protocol_version
     ) VALUES ${runRows};
+    UPDATE agent_run
+    SET status = 'waiting', wait_reason = 'recovery_blocked', runtime_recovery_required = 0,
+        last_error_code = 'accepted_input_outcome_unknown'
+    WHERE id = ${sqlLiteral(recoveryBlockedRunId)};
+    INSERT INTO native_session_bootstrap_evidence(
+      id, conversation_id, native_binding_id, native_binding_generation,
+      contract_version, bootstrap_formatter_version,
+      session_charter_blob_id, session_charter_digest,
+      memory_entrypoint_blob_id, memory_entrypoint_digest,
+      observed_memory_revisions_json, authorization_basis_digest,
+      delivery_mode, created_at
+    ) VALUES (
+      'fixture-copilot-bootstrap', 'conversation-copilot', 'fixture-copilot-binding', 1,
+      'native_session_bootstrap_v3', 3,
+      ${sqlLiteral(recoveryBlob.id)}, ${sqlLiteral(recoveryBlob.digest)},
+      ${sqlLiteral(recoveryBlob.id)}, ${sqlLiteral(recoveryBlob.digest)},
+      '[]', 'fixture-authorization-basis', 'native_append', ${sqlLiteral(now)}
+    );
+    INSERT INTO context_manifest(
+      id, agent_run_id, bootstrap_evidence_id, native_binding_generation,
+      camp_message_boundary_sequence, conversation_message_boundary_sequence,
+      raw_message_refs_json, collaboration_state_digest, collaboration_state_included,
+      run_notice_refs_json, run_notice_digest, current_input_source_json,
+      attachment_refs_json, attachment_digest,
+      skill_exposure_json, skill_exposure_digest,
+      mcp_exposure_json, mcp_exposure_digest, mcp_projection_digest,
+      self_active_task_evidence_json, self_active_task_evidence_digest,
+      history_fence_version, global_public_message_boundary,
+      previous_accepted_public_boundary_sequence,
+      context_delivery_profile_version, context_delivery_profile_json,
+      context_delivery_profile_digest, originating_public_user_message_ref_json,
+      recent_message_refs_json, formatter_version,
+      rendered_payload_blob_id, rendered_payload_digest, created_at,
+      reference_closure_refs_json, omission_entries_json,
+      shared_message_evidence_json, shared_message_evidence_digest,
+      run_notice_payload_json
+    ) VALUES (
+      'fixture-copilot-manifest', ${sqlLiteral(recoveryBlockedRunId)},
+      'fixture-copilot-bootstrap', 1, ${runtimes.length}, 0,
+      '[]', 'fixture-collaboration', 0,
+      '[]', 'fixture-run-notice', '{}',
+      '[]', 'fixture-attachments',
+      '{"schemaVersion":2,"skills":[]}', 'sha256:legacy-empty-skill-exposure',
+      '{"schemaVersion":2,"configDigest":"sha256:empty-mcp-config","configStatus":"ready","projectionMode":"unsupported","sameNamePolicy":null,"warnings":[],"servers":[]}',
+      'sha256:legacy-empty-mcp-exposure', 'fixture-mcp-projection',
+      '[]', 'fixture-active-tasks',
+      0, ${runtimes.length}, 0,
+      3, '{"profileVersion":3,"maxPublicMessages":15,"maxPublicHistoryChars":24000,"maxMessageBodyChars":2000,"maxPublicReferenceChainMessages":3,"maxSelfActiveTasks":8}',
+      'fixture-context-profile', NULL,
+      '[]', 13,
+      ${sqlLiteral(recoveryBlob.id)}, ${sqlLiteral(recoveryBlob.digest)}, ${sqlLiteral(now)},
+      '[]', '[]', '[]', 'fixture-shared-message-evidence', '[]'
+    );
+    INSERT INTO runtime_input_delivery(
+      id, agent_run_id, execution_epoch, context_manifest_id,
+      native_binding_id, native_binding_generation,
+      boundary_camp_message_sequence, dynamic_payload_digest,
+      status, native_input_id, prepared_at, accepted_at, updated_at
+    ) VALUES (
+      'fixture-copilot-input', ${sqlLiteral(recoveryBlockedRunId)}, 1,
+      'fixture-copilot-manifest', 'fixture-copilot-binding', 1,
+      ${runtimes.length}, ${sqlLiteral(recoveryBlob.digest)},
+      'accepted', 'acp-prompt-fixture-host-1',
+      ${sqlLiteral(now)}, ${sqlLiteral(now)}, ${sqlLiteral(now)}
+    );
     INSERT INTO camp_message(
       id, camp_id, sequence, author_type, author_id, source_agent_run_id,
       body, structured_content_json, address_mode, addressed_agent_ids_json, camp_turn_id,
@@ -1089,6 +1202,115 @@ async function collectRuntimeRows(cdp) {
     })()`))
   }
   return rows
+}
+
+async function verifyRecoveryBlockerPresentation(cdp) {
+  const opened = await evaluate(cdp, `(() => {
+    const chip = [...document.querySelectorAll('.run-pulse-chip[data-agent-id]')]
+      .find((candidate) => candidate.dataset.agentId === ${JSON.stringify(recoveryBlockedAgentId)})
+    chip?.click()
+    return Boolean(chip)
+  })()`)
+  assert(opened, 'Could not open the Agent process containing the recovery blocker')
+  await waitForExpression(cdp, `(() => {
+    const stage = document.querySelector(
+      '.execution-process-stage[data-agent-run-id="${recoveryBlockedRunId}"]'
+    )
+    return stage?.classList.contains('status-waiting')
+      && stage.querySelector('.execution-run-boundary-state')?.textContent?.trim() === '结果待确认'
+  })()`)
+  await evaluate(cdp, `(() => {
+    const stage = document.querySelector(
+      '.execution-process-stage[data-agent-run-id="${recoveryBlockedRunId}"]'
+    )
+    stage?.scrollIntoView({ block: 'center' })
+    const disclosure = stage?.querySelector('details.execution-disclosure')
+    if (disclosure && !disclosure.open) disclosure.querySelector('summary')?.click()
+    return Boolean(disclosure)
+  })()`)
+  await waitForExpression(cdp, `Boolean(document.querySelector(
+    '.execution-process-stage[data-agent-run-id="${recoveryBlockedRunId}"] .process-recovery-blocker[role="status"]'
+  ))`)
+  const presentation = await evaluate(cdp, `(() => {
+    const stage = document.querySelector(
+      '.execution-process-stage[data-agent-run-id="${recoveryBlockedRunId}"]'
+    )
+    const blocker = stage?.querySelector('.process-recovery-blocker')
+    const button = blocker?.querySelector('button')
+    const style = blocker ? getComputedStyle(blocker) : null
+    return {
+      state: stage?.querySelector('.execution-run-boundary-state')?.textContent?.trim() ?? '',
+      heading: blocker?.querySelector('strong')?.textContent?.trim() ?? '',
+      copy: blocker?.querySelector('p')?.textContent?.replace(/\\s+/g, ' ').trim() ?? '',
+      button: button?.textContent?.trim() ?? '',
+      buttonDisabled: button?.disabled ?? null,
+      spinnerCount: stage?.querySelectorAll('.process-spinner').length ?? -1,
+      role: blocker?.getAttribute('role') ?? null,
+      borderTopWidth: style?.borderTopWidth ?? null,
+      backgroundColor: style?.backgroundColor ?? null,
+      drawerSummary: document.querySelector('.execution-drawer-header p')?.textContent?.trim() ?? '',
+      dockSummary: document.querySelector('.run-pulse-count')?.textContent?.trim() ?? ''
+    }
+  })()`)
+  assert(presentation.state === '结果待确认'
+    && presentation.heading === '无法安全自动恢复'
+    && presentation.copy.includes('原请求不会自动重发')
+    && presentation.copy.includes('新的后续任务')
+    && presentation.button === '结束此运行'
+    && presentation.buttonDisabled === false
+    && presentation.spinnerCount === 0
+    && presentation.role === 'status'
+    && presentation.borderTopWidth !== '0px'
+    && !presentation.drawerSummary.includes('当前有进行中 AgentRun')
+    && presentation.dockSummary.includes('1 位执行中')
+    && !presentation.dockSummary.includes('2 位执行中'),
+  `Recovery blocker presentation mismatch: ${JSON.stringify(presentation)}`)
+  return presentation
+}
+
+async function verifyRecoveryBlockerResolution(cdp) {
+  const clicked = await evaluate(cdp, `(() => {
+    const stage = document.querySelector(
+      '.execution-process-stage[data-agent-run-id="${recoveryBlockedRunId}"]'
+    )
+    const button = stage?.querySelector('.process-recovery-blocker button')
+    button?.click()
+    return Boolean(button)
+  })()`)
+  assert(clicked, 'Could not invoke the recovery blocker resolution action')
+  await waitForExpression(cdp, `(() => {
+    const stage = document.querySelector(
+      '.execution-process-stage[data-agent-run-id="${recoveryBlockedRunId}"]'
+    )
+    return stage?.classList.contains('status-failed')
+      && stage.querySelector('.execution-run-boundary-state')?.textContent?.trim() === '失败'
+      && !stage.querySelector('.process-recovery-blocker')
+  })()`, 30_000)
+  const snapshot = await evaluate(cdp,
+    `window.rovai.request('camps.snapshot', { campId: ${JSON.stringify(campId)} })`, true)
+  const run = snapshot?.agentRuns?.find((candidate) => candidate.id === recoveryBlockedRunId)
+  const manifest = snapshot?.contextManifests?.find(
+    (candidate) => candidate.agentRunId === recoveryBlockedRunId
+  )
+  const outcomeEvent = snapshot?.timeline?.find((event) =>
+    event.eventType === 'agent_run.accepted_input_outcome_unknown'
+      && event.entityId === recoveryBlockedRunId
+  )
+  const resolution = {
+    status: run?.status ?? null,
+    waitReason: run?.waitReason ?? null,
+    acceptedInputStatus: manifest?.delivery?.status ?? null,
+    outcomeEventRecorded: Boolean(outcomeEvent),
+    toastVisible: await evaluate(cdp,
+      `document.body.innerText.includes('已按“结果未知”结束运行；原请求没有重发')`)
+  }
+  assert(resolution.status === 'failed'
+    && resolution.waitReason === null
+    && resolution.acceptedInputStatus === 'accepted'
+    && resolution.outcomeEventRecorded
+    && resolution.toastVisible,
+  `Recovery blocker resolution mismatch: ${JSON.stringify(resolution)}`)
+  return resolution
 }
 
 async function verifyBoundedToolOutput(cdp) {

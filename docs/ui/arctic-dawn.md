@@ -3,7 +3,7 @@ document_type: ui-design-system
 authority: renderer-ui-detail
 status: accepted
 design_direction: neutral-porcelain-steel
-target_version: v0.63
+target_version: v0.64
 implementation_status: complete
 last_updated: 2026-08-12
 ---
@@ -476,6 +476,12 @@ type ResolvedTheme = "day" | "night"
 - 执行详情按需显示所选 Agent 的连续 AgentRun stage；stage 按时间排序，分别保留 Run/CampTurn、
   调用来源、A2A 深度、Run 状态、Delivery 收件人与 Runtime Activity/Evidence 摘要。ContextManifest
   继续由 Core/Snapshot 保留，但不投影到 ordinary Inspector；过程 grouping 不能合并或遮蔽单次 Run。
+- `waiting/recovery_blocked` Run 使用“结果待确认”而不是“恢复中”。它的 disclosure 不显示 spinner，
+  而使用现有 danger token 说明 Runtime 已接受任务、Rovai 重启后无法确认最终结果、原请求不会自动重发，
+  并提供唯一“结束此运行”动作。用户必须先检查 Workspace；成功后读取权威失败终态并把焦点返回
+  Composer；该 Run 保留执行过程入口但不计入任何进行中汇总。Renderer 不确认成功、不重发正文、不自动
+  创建 successor。精确合同见
+  [Run Process Detail Surface v4](../contracts/run-process-detail-surface-v4.md)。
 - 终态过程仍可收进默认折叠入口，摘要格式为 `处理过程 · {本地化耗时}`；该入口和执行详情只
   提供查看，不产生 Agent 或 AgentRun 级取消协议。关闭或在详情内按 Escape 后焦点返回原入口。
 - 不使用英文 `Worked for …`；Agent 最终回复位于折叠入口之外并保持直接可见。
@@ -1271,7 +1277,7 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   以每位队员一个 Agent 过程入口和按时间保留的 Run stage 替代；v0.58 再删除 ordinary Inspector
   的 Context Delivery / Approval Tab，并增加当前 Camp Team/Lead 投影。不新增 Agent 或 AgentRun
   级 Stop，CampTurn Stop 只保留 Composer 发送位置，Approval Dock 继续位于 Composer 正上方。
-  具体边界见 [Run Process Detail Surface v3](../contracts/run-process-detail-surface-v3.md)。Message Delivery、
+  具体边界见 [Run Process Detail Surface v4](../contracts/run-process-detail-surface-v4.md)。Message Delivery、
   Public A2A 和 Context Profile 的领域语义由对应 ADR/Contract 约束，不能在 Renderer 猜测。
 - v0.56 只替换 Day Token、结构强调和少量现有文案/布局；不得重建生产页面、复制 P2 演示 DOM、
   新增角色消息底色、伪造日期阶段、简化 New Conversation 功能或改变 v0.55 会话边界。

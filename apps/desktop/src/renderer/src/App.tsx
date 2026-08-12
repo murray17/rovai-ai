@@ -3,6 +3,7 @@ import type {
   AdapterInstallation,
   AdapterKind,
   AgentProfile,
+  AgentRunView,
   ActionApprovalView,
   AppearanceSnapshot,
   CampActivationState,
@@ -898,7 +899,7 @@ export function App(): React.JSX.Element {
           void Promise.all([loadHealth(), loadMemberData()]).catch(() => undefined)
         }, 80)
       }
-      if (event.method === 'agent_run.cancelled') {
+      if (event.method === 'agent_run.cancelled' || event.method === 'agent_run.recovery_blocker_resolved') {
         const eventCampId = stringField(params, 'campId')
         const campId = activeCampIdRef.current
         if (campId && (!eventCampId || eventCampId === campId)) {
@@ -1420,6 +1421,34 @@ export function App(): React.JSX.Element {
     }
   }
 
+  const resolveAgentRunRecoveryBlocker = async (run: AgentRunView): Promise<void> => {
+    const campId = activeCampId
+    if (!campId || campSnapshot?.camp.id !== campId) return
+    setError(null)
+    try {
+      const result = await window.rovai.request<StoredCommandResult>(
+        'agentRuns.resolveRecoveryBlocker',
+        {
+          commandId: crypto.randomUUID(),
+          command: {
+            campId,
+            agentRunId: run.id,
+            expectedVersion: run.version
+          }
+        }
+      )
+      if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
+      await Promise.all([
+        refreshActiveCampSnapshot(campId),
+        loadNavigation()
+      ])
+      setToast('已按“结果未知”结束运行；原请求没有重发')
+    } catch (nextError) {
+      setError(errorMessage(nextError))
+      throw nextError
+    }
+  }
+
   const changeDefaultLead = async (agentId: string): Promise<void> => {
     if (!activeCampId || campSnapshot?.camp.id !== activeCampId) return
     setBusy('change-default-lead')
@@ -1798,6 +1827,7 @@ export function App(): React.JSX.Element {
             onResolveApproval={(approval, decision) => {
               void resolveActionApproval(approval, decision)
             }}
+            onResolveRecoveryBlocker={resolveAgentRunRecoveryBlocker}
             cancellingTurnIds={activeCancellingTurnIds}
             stopping={activeCampStopping}
             onStop={() => void stopCampRuns()}

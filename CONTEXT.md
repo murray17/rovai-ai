@@ -956,6 +956,22 @@ _Avoid_: audit projection, Runtime Input Delivery, complete Runtime prompt evide
 The durable delivery-attempt evidence binding one ContextManifest to one AgentRun execution epoch and Native Binding generation. Its accepted acknowledgement may advance the ContextManifest's watermarks, while failure or unknown delivery does not; it neither selects model fields nor stores a complete identity-bearing Runtime payload.
 _Avoid_: ContextManifest, Model Context Projection, transport log, proof the model read or understood input
 
+**Native Turn**:
+One Provider-owned model execution created by submitting one prompt inside a Native Session. Its identity, running state and terminal result are distinct from the Session handle and from Rovai's Runtime Input Delivery or local correlation ID; cross-process recovery exists only when the Provider exposes and Rovai verifies a stable Turn-level reconciliation contract.
+_Avoid_: Native Session, AgentRun, Runtime Input Delivery, JSON-RPC request ID, Rovai correlation ID
+
+**Accepted-Input Recovery Blocker**:
+The durable `waiting/recovery_blocked` AgentRun state established after Core restarts with an accepted Runtime Input Delivery but no verified way to reconcile that same old Native Turn. It clears `runtime_recovery_required`, preserves the accepted evidence and execution epoch, stays outside ordinary scheduling, and forbids automatic redelivery or a claim that recovery is in progress.
+_Avoid_: Runtime Recovery, Session Resume, delivery_unknown, automatic retry, suspended prompt, recovered Turn
+
+**Recovery Blocker Resolution**:
+The versioned local-user decision to end one Accepted-Input Recovery Blocker as `failed/accepted_input_outcome_unknown` after inspecting the execution environment. It preserves accepted input and execution evidence, cannot confirm success or fabricate final output, and never retries the old input or automatically creates a successor Run.
+_Avoid_: success confirmation, cancellation that erases ambiguity, AgentRun retry, automatic successor, input redelivery
+
+**Native Turn Reconciliation Capability**:
+An Adapter capability, provisionally named `native_turn.reconcile.v1`, proven only by a real cross-process experiment showing a Provider-generated stable Turn ID, lookup or reattach without a new model call, distinct running/completed/failed/not-found/ambiguous results, rereadable terminal output and idempotent repetition. Session load, compatibility, installation generation and a reused Session ID cannot imply it.
+_Avoid_: session/load capability, Native Session Compatibility Key, inferred reattach, local prompt ID, best-effort resume
+
 **Collaboration State**:
 A bounded schema-v2 model-facing directory of Peer Member Identity Projections, a nullable Default Lead Agent ID reference, and a derived `selfIsDefaultLead` Boolean. It excludes the current Agent's identity text and is emitted for Bootstrap-required input or a changed complete peer-routing projection. Its digest always identifies the complete final v2 object, while ContextManifest separately records whether the section was rendered. It contains no availability, leave-request state, busy reason, changes hint, or current-Turn inference; Core rechecks live eligibility for every addressed send.
 _Avoid_: self identity patch, `members`, `defaultLead` identity object, routing authority, availability promise, Capability list, raw presence/readiness state, current task, current Turn participant state
