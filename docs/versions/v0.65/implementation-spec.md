@@ -242,7 +242,7 @@ bytes，不因显示名、notification state 或当前 Renderer locale 重投影
 | --- | --- | --- | --- |
 | Data Contract / projection schema | `v0.62 / 31` | `v0.65 / 32` | segment、notification source、preference 与 frozen context 清理 |
 | SQLite migration | `76` | `77` | 原子 User Mention Notification、`local_user` clean break 与技术投影重建 |
-| CampSnapshot / Read Model | `28` | `29` | Structured Content union 与 Renderer message/notification projection |
+| CampSnapshot / Read Model | `29` | `30` | Structured Content union 与 Renderer message/notification projection |
 | In-App Notification item | `2` | `3` | `sourceType/sourceMessageId/sourceAvailable/messageSummary` |
 | Context Formatter / Manifest | `13 / 11` | `14 / 12` | projected body 与显式 `mentionsCurrentUser` evidence |
 | Built-in Tool contract / CLI / capability | `6` | `7` | Send v4、exact addressing 与精确 help/recovery |

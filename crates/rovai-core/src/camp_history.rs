@@ -1,6 +1,7 @@
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
+    path::Path,
 };
 
 use anyhow::Result;
@@ -11,6 +12,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
+    camp_attachment::managed_attachment_summary,
     db::Database,
     team_tool::{AuthenticatedTeamToolRun, TeamToolInvocationError},
 };
@@ -1638,7 +1640,7 @@ fn load_attachments(
     )? as usize;
     let mut statement = transaction.prepare(
         r#"
-        SELECT id, display_name, media_type, byte_size
+        SELECT id, display_name, media_type, byte_size, storage_path
         FROM message_attachment
         WHERE camp_message_id = ?1
         ORDER BY position, id
@@ -1647,14 +1649,31 @@ fn load_attachments(
     )?;
     let attachments = statement
         .query_map(params![message_id, MAX_ATTACHMENTS as i64], |row| {
-            Ok(json!({
-                "attachmentId": row.get::<_, String>(0)?,
-                "name": truncate_metadata(row.get::<_, String>(1)?),
-                "mediaType": truncate_metadata(row.get::<_, String>(2)?),
-                "byteSize": row.get::<_, i64>(3)?,
-            }))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
+            ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    let attachments = attachments
+        .into_iter()
+        .map(
+            |(attachment_id, name, media_type, byte_size, storage_path)| {
+                let summary = managed_attachment_summary(Path::new(&storage_path), &media_type)?;
+                Ok(json!({
+                    "attachmentId": attachment_id,
+                    "name": truncate_metadata(name),
+                    "kind": summary.kind,
+                    "fileCount": summary.file_count,
+                    "mediaType": truncate_metadata(media_type),
+                    "byteSize": byte_size,
+                }))
+            },
+        )
+        .collect::<Result<Vec<_>>>()?;
     Ok((attachments, count))
 }
 

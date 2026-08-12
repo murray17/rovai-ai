@@ -32,7 +32,7 @@ last_updated: 2026-08-12
   Structured Content 投影，不把持久 `body` 当第二真源；
 - [ ] 把 `camp_message.body` 收敛为可重建 projected-body cache；消息接受时同步生成，当前用户显示名或
   fallback locale 变化时事务内重投影相关消息并刷新 FTS，失败不留下混合版本；
-- [ ] Migration 77 发布 Data Contract `v0.65` / projection schema 32、CampSnapshot 29、Notification
+- [ ] Migration 77 发布 Data Contract `v0.65` / projection schema 32、CampSnapshot 30、Notification
   item 3、Context Formatter 14 / Manifest 12，并使 incompatible frozen delivery context 与 native
   context markers 按 clean break 重建；
 - [ ] 一次性把 Rovai-owned `local-user` 身份引用重建为 `local_user`，不保留 alias、双读或双写；

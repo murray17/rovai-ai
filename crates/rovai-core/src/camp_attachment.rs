@@ -1,6 +1,10 @@
 use std::{
+    collections::BTreeSet,
+    ffi::{CStr, CString, OsString},
     fs::{self, File, OpenOptions},
     io::{Read, Write},
+    os::fd::{AsRawFd, FromRawFd},
+    os::unix::ffi::{OsStrExt, OsStringExt},
     path::{Path, PathBuf},
 };
 
@@ -23,22 +27,46 @@ pub const MAX_PREPARED_ATTACHMENTS: usize = 10;
 pub const MAX_ATTACHMENT_BYTES: u64 = 25 * 1024 * 1024;
 pub const MAX_DRAFT_ATTACHMENT_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_PREVIEW_BYTES: u64 = 8 * 1024 * 1024;
+pub const MAX_DIRECTORY_FILES: u64 = 2_000;
+pub const MAX_DIRECTORY_ENTRIES: u64 = 4_000;
+pub const MAX_DIRECTORY_DEPTH: usize = 32;
+pub const DIRECTORY_MEDIA_TYPE: &str = "inode/directory";
 const DRAFT_RETENTION_DAYS: i64 = 7;
 const INSPECTION_PREFIX_BYTES: usize = 64 * 1024;
 const MAX_PREVIEW_EDGE: u64 = 16_384;
 const MAX_PREVIEW_PIXELS: u64 = 40_000_000;
+const ATTACHMENT_METADATA_FILE: &str = ".rovai-attachment.json";
+const ATTACHMENT_METADATA_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreparedAttachmentView {
     pub id: String,
     pub display_name: String,
+    pub kind: String,
+    pub file_count: u64,
     pub media_type: String,
     pub byte_size: u64,
     pub preview_kind: String,
     pub state: String,
     pub error_message: Option<String>,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ManagedAttachmentSummary {
+    pub kind: String,
+    pub file_count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ManagedAttachmentMetadata {
+    schema_version: u32,
+    kind: String,
+    file_count: u64,
+    byte_size: u64,
+    content_digest: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -243,10 +271,13 @@ impl CampAttachmentStore {
         let camp_root = self.camp_root(camp_id)?;
         allow_directory_update(&camp_root)?;
         let attachment_directory = camp_root.join(&attachment_id);
-        let prepared = (|| -> Result<PreparedFile> {
+        let prepared = (|| -> Result<PreparedAttachment> {
             ensure_directory(&attachment_directory)?;
             let destination = attachment_directory.join(&display_name);
-            copy_and_inspect(source_path, &destination)
+            let prepared = copy_and_inspect(source_path, &destination)?;
+            write_attachment_metadata(&attachment_directory, &prepared)?;
+            restrict_discovery(&attachment_directory)?;
+            Ok(prepared)
         })();
         let _ = restrict_discovery(&camp_root);
         let prepared = match prepared {
@@ -419,9 +450,10 @@ impl CampAttachmentStore {
             total = total
                 .checked_add(row.byte_size)
                 .context("Attachment total size overflow")?;
-            validate_owned_file(
+            validate_owned_attachment(
                 &self.root,
                 Path::new(&row.storage_path),
+                &row.media_type,
                 row.byte_size,
                 &row.content_digest,
             )?;
@@ -494,7 +526,7 @@ impl CampAttachmentStore {
         if metadata.file_type().is_symlink() || !metadata.is_dir() {
             anyhow::bail!("Camp Attachment Directory is unsafe");
         }
-        allow_directory_update(&root)?;
+        make_owned_tree_removable(&root)?;
         fs::remove_dir_all(root)?;
         Ok(())
     }
@@ -568,8 +600,10 @@ pub fn consume_prepared_attachments(
 }
 
 #[derive(Debug)]
-struct PreparedFile {
+struct PreparedAttachment {
     path: PathBuf,
+    kind: String,
+    file_count: u64,
     media_type: String,
     byte_size: u64,
     content_digest: String,
@@ -587,11 +621,17 @@ struct PreparedRow {
     preview_kind: String,
 }
 
-fn copy_and_inspect(source_path: &Path, destination: &Path) -> Result<PreparedFile> {
+fn copy_and_inspect(source_path: &Path, destination: &Path) -> Result<PreparedAttachment> {
     let source_metadata = fs::symlink_metadata(source_path)
         .with_context(|| format!("failed to inspect attachment {}", source_path.display()))?;
-    if source_metadata.file_type().is_symlink() || !source_metadata.is_file() {
-        anyhow::bail!("Only regular files can be attached");
+    if source_metadata.file_type().is_symlink() {
+        anyhow::bail!("Attachment symlinks are not supported");
+    }
+    if source_metadata.is_dir() {
+        return copy_directory_snapshot(source_path, destination);
+    }
+    if !source_metadata.is_file() {
+        anyhow::bail!("Only regular files and directories can be attached");
     }
     if source_metadata.len() > MAX_ATTACHMENT_BYTES {
         anyhow::bail!("Attachment exceeds the 25 MiB per-file limit");
@@ -663,13 +703,320 @@ fn copy_and_inspect(source_path: &Path, destination: &Path) -> Result<PreparedFi
     fs::rename(&temporary, destination)?;
     sync_parent(destination)?;
     let inspection = inspect_prefix(&prefix, byte_size);
-    Ok(PreparedFile {
+    Ok(PreparedAttachment {
         path: destination.to_path_buf(),
+        kind: "file".to_string(),
+        file_count: 1,
         media_type: inspection.media_type,
         byte_size,
         content_digest: format!("sha256:{:x}", hasher.finalize()),
         preview_kind: inspection.preview_kind,
     })
+}
+
+#[derive(Debug)]
+struct DirectorySnapshotState {
+    hasher: Sha256,
+    file_count: u64,
+    entry_count: u64,
+    byte_size: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MetadataFingerprint {
+    device: u64,
+    inode: u64,
+    size: u64,
+    modified_seconds: i64,
+    modified_nanoseconds: i64,
+    changed_seconds: i64,
+    changed_nanoseconds: i64,
+}
+
+fn copy_directory_snapshot(source_path: &Path, destination: &Path) -> Result<PreparedAttachment> {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+
+    let source_before = fs::symlink_metadata(source_path)?;
+    if source_before.file_type().is_symlink() || !source_before.is_dir() {
+        anyhow::bail!("Attachment directory changed before snapshotting");
+    }
+    let mut source_options = OpenOptions::new();
+    source_options
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK);
+    let source = source_options.open(source_path).with_context(|| {
+        format!(
+            "failed to open attachment directory {}",
+            source_path.display()
+        )
+    })?;
+    let opened = source.metadata()?;
+    if !opened.is_dir()
+        || source_before.dev() != opened.dev()
+        || source_before.ino() != opened.ino()
+    {
+        anyhow::bail!("Attachment directory changed while it was being opened");
+    }
+
+    ensure_directory(destination)?;
+    let mut state = DirectorySnapshotState {
+        hasher: Sha256::new(),
+        file_count: 0,
+        entry_count: 0,
+        byte_size: 0,
+    };
+    state.hasher.update(b"rovai-directory-snapshot-v1\0");
+    copy_open_directory(&source, destination, Path::new(""), 0, &mut state)?;
+    set_directory_read_only(destination)?;
+    sync_parent(destination)?;
+    Ok(PreparedAttachment {
+        path: destination.to_path_buf(),
+        kind: "directory".to_string(),
+        file_count: state.file_count,
+        media_type: DIRECTORY_MEDIA_TYPE.to_string(),
+        byte_size: state.byte_size,
+        content_digest: format!("sha256:{:x}", state.hasher.finalize()),
+        preview_kind: "none".to_string(),
+    })
+}
+
+fn copy_open_directory(
+    source: &File,
+    destination: &Path,
+    relative_path: &Path,
+    depth: usize,
+    state: &mut DirectorySnapshotState,
+) -> Result<()> {
+    if depth > MAX_DIRECTORY_DEPTH {
+        anyhow::bail!("Attachment directory exceeds the 32-level depth limit");
+    }
+    let before = metadata_fingerprint(&source.metadata()?);
+    hash_tree_entry(&mut state.hasher, b'D', relative_path, 0, None);
+    let names = read_directory_names(source)?;
+    for name in &names {
+        state.entry_count = state
+            .entry_count
+            .checked_add(1)
+            .context("Attachment directory entry count overflow")?;
+        if state.entry_count > MAX_DIRECTORY_ENTRIES {
+            anyhow::bail!("Attachment directory exceeds the 4000-entry limit");
+        }
+        let mut child = open_child_without_following(source, name)?;
+        let metadata = child.metadata()?;
+        let child_relative = relative_path.join(name);
+        let child_destination = destination.join(name);
+        if metadata.is_dir() {
+            ensure_directory(&child_destination)?;
+            copy_open_directory(
+                &child,
+                &child_destination,
+                &child_relative,
+                depth + 1,
+                state,
+            )?;
+            set_directory_read_only(&child_destination)?;
+        } else if metadata.is_file() {
+            state.file_count = state
+                .file_count
+                .checked_add(1)
+                .context("Attachment directory file count overflow")?;
+            if state.file_count > MAX_DIRECTORY_FILES {
+                anyhow::bail!("Attachment directory exceeds the 2000-file limit");
+            }
+            if metadata.len() > MAX_ATTACHMENT_BYTES {
+                anyhow::bail!(
+                    "A file in the attachment directory exceeds the 25 MiB per-file limit"
+                );
+            }
+            if state.byte_size.saturating_add(metadata.len()) > MAX_DRAFT_ATTACHMENT_BYTES {
+                anyhow::bail!("Attachment directory exceeds the 64 MiB total limit");
+            }
+            let copied = copy_open_regular_file(&mut child, &child_destination)?;
+            state.byte_size = state
+                .byte_size
+                .checked_add(copied.byte_size)
+                .context("Attachment directory size overflow")?;
+            hash_tree_entry(
+                &mut state.hasher,
+                b'F',
+                &child_relative,
+                copied.byte_size,
+                Some(&copied.digest),
+            );
+        } else {
+            anyhow::bail!(
+                "Attachment directory contains an unsupported item: {}",
+                child_relative.to_string_lossy()
+            );
+        }
+    }
+    if names != read_directory_names(source)? || before != metadata_fingerprint(&source.metadata()?)
+    {
+        anyhow::bail!("Attachment directory changed while it was being copied");
+    }
+    Ok(())
+}
+
+struct CopiedDirectoryFile {
+    byte_size: u64,
+    digest: [u8; 32],
+}
+
+fn copy_open_regular_file(source: &mut File, destination: &Path) -> Result<CopiedDirectoryFile> {
+    let before = metadata_fingerprint(&source.metadata()?);
+    if before.size > MAX_ATTACHMENT_BYTES {
+        anyhow::bail!("A file in the attachment directory exceeds the 25 MiB per-file limit");
+    }
+    let temporary = destination.with_file_name(format!(".{}.tmp", Uuid::new_v4()));
+    let mut destination_options = OpenOptions::new();
+    destination_options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        destination_options.mode(0o600);
+    }
+    let mut output = destination_options.open(&temporary)?;
+    let mut hasher = Sha256::new();
+    let mut byte_size = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+    let copied = (|| -> Result<()> {
+        loop {
+            let read = source.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            byte_size = byte_size
+                .checked_add(read as u64)
+                .context("Attachment file size overflow")?;
+            if byte_size > MAX_ATTACHMENT_BYTES {
+                anyhow::bail!(
+                    "A file in the attachment directory exceeds the 25 MiB per-file limit"
+                );
+            }
+            hasher.update(&buffer[..read]);
+            output.write_all(&buffer[..read])?;
+        }
+        output.sync_all()?;
+        Ok(())
+    })();
+    if let Err(error) = copied {
+        drop(output);
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+    if byte_size != before.size || before != metadata_fingerprint(&source.metadata()?) {
+        drop(output);
+        let _ = fs::remove_file(&temporary);
+        anyhow::bail!("A file in the attachment directory changed while it was being copied");
+    }
+    set_read_only(&temporary)?;
+    drop(output);
+    fs::rename(&temporary, destination)?;
+    sync_parent(destination)?;
+    Ok(CopiedDirectoryFile {
+        byte_size,
+        digest: hasher.finalize().into(),
+    })
+}
+
+fn open_child_without_following(directory: &File, name: &OsString) -> Result<File> {
+    let name_bytes = name.as_os_str().as_bytes();
+    let c_name = CString::new(name_bytes).context("Attachment name contains a NUL byte")?;
+    let descriptor = unsafe {
+        libc::openat(
+            directory.as_raw_fd(),
+            c_name.as_ptr(),
+            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK,
+        )
+    };
+    if descriptor < 0 {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(libc::ELOOP) {
+            anyhow::bail!("Attachment directory contains a symbolic link");
+        }
+        return Err(error).with_context(|| {
+            format!(
+                "failed to open attachment directory item {}",
+                name.to_string_lossy()
+            )
+        });
+    }
+    Ok(unsafe { File::from_raw_fd(descriptor) })
+}
+
+fn read_directory_names(directory: &File) -> Result<Vec<OsString>> {
+    let duplicated = unsafe { libc::dup(directory.as_raw_fd()) };
+    if duplicated < 0 {
+        return Err(std::io::Error::last_os_error())
+            .context("failed to duplicate directory handle");
+    }
+    let stream = unsafe { libc::fdopendir(duplicated) };
+    if stream.is_null() {
+        let error = std::io::Error::last_os_error();
+        unsafe { libc::close(duplicated) };
+        return Err(error).context("failed to enumerate attachment directory");
+    }
+    unsafe { libc::rewinddir(stream) };
+    let mut names = Vec::new();
+    loop {
+        let entry = unsafe { libc::readdir(stream) };
+        if entry.is_null() {
+            break;
+        }
+        let bytes = unsafe { CStr::from_ptr((*entry).d_name.as_ptr()) }.to_bytes();
+        if bytes == b"." || bytes == b".." {
+            continue;
+        }
+        names.push(OsString::from_vec(bytes.to_vec()));
+    }
+    let close_result = unsafe { libc::closedir(stream) };
+    if close_result != 0 {
+        return Err(std::io::Error::last_os_error()).context("failed to close directory handle");
+    }
+    names.sort_by(|left, right| {
+        left.as_os_str()
+            .as_bytes()
+            .cmp(right.as_os_str().as_bytes())
+    });
+    let unique = names
+        .iter()
+        .map(|name| name.as_os_str().as_bytes())
+        .collect::<BTreeSet<_>>();
+    if unique.len() != names.len() {
+        anyhow::bail!("Attachment directory contains duplicate entry names");
+    }
+    Ok(names)
+}
+
+fn metadata_fingerprint(metadata: &fs::Metadata) -> MetadataFingerprint {
+    use std::os::unix::fs::MetadataExt;
+
+    MetadataFingerprint {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+        size: metadata.size(),
+        modified_seconds: metadata.mtime(),
+        modified_nanoseconds: metadata.mtime_nsec(),
+        changed_seconds: metadata.ctime(),
+        changed_nanoseconds: metadata.ctime_nsec(),
+    }
+}
+
+fn hash_tree_entry(
+    hasher: &mut Sha256,
+    kind: u8,
+    relative_path: &Path,
+    byte_size: u64,
+    digest: Option<&[u8; 32]>,
+) {
+    let path = relative_path.as_os_str().as_bytes();
+    hasher.update([kind]);
+    hasher.update((path.len() as u64).to_be_bytes());
+    hasher.update(path);
+    hasher.update(byte_size.to_be_bytes());
+    if let Some(digest) = digest {
+        hasher.update(digest);
+    }
 }
 
 #[derive(Debug)]
@@ -809,28 +1156,56 @@ fn load_prepared_attachments(
     let mut statement = database.connection().prepare(
         r#"
         SELECT id, display_name, media_type, byte_size, preview_kind,
-               state, last_error_code, created_at
+               state, last_error_code, created_at, storage_path
         FROM prepared_attachment
         WHERE camp_id = ?1
         ORDER BY ordinal, id
         "#,
     )?;
-    statement
+    let rows = statement
         .query_map([camp_id], |row| {
-            let byte_size = row.get::<_, i64>(3)?;
-            Ok(PreparedAttachmentView {
-                id: row.get(0)?,
-                display_name: row.get(1)?,
-                media_type: row.get(2)?,
-                byte_size: byte_size.max(0) as u64,
-                preview_kind: row.get(4)?,
-                state: row.get(5)?,
-                error_message: row.get::<_, Option<String>>(6)?.map(error_message),
-                created_at: row.get(7)?,
-            })
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, String>(8)?,
+            ))
         })?
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(Into::into)
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    rows.into_iter()
+        .map(
+            |(
+                id,
+                display_name,
+                media_type,
+                byte_size,
+                preview_kind,
+                state,
+                last_error_code,
+                created_at,
+                storage_path,
+            )| {
+                let summary = managed_attachment_summary(Path::new(&storage_path), &media_type)?;
+                Ok(PreparedAttachmentView {
+                    id,
+                    display_name,
+                    kind: summary.kind,
+                    file_count: summary.file_count,
+                    media_type,
+                    byte_size: byte_size.max(0) as u64,
+                    preview_kind,
+                    state,
+                    error_message: last_error_code.map(error_message),
+                    created_at,
+                })
+            },
+        )
+        .collect()
 }
 
 pub(crate) fn render_content(
@@ -1005,20 +1380,175 @@ fn normalize_display_name(value: &str) -> Result<String> {
     Ok(normalized.chars().take(120).collect())
 }
 
-fn validate_owned_file(
+pub(crate) fn managed_attachment_summary(
+    storage_path: &Path,
+    media_type: &str,
+) -> Result<ManagedAttachmentSummary> {
+    if media_type != DIRECTORY_MEDIA_TYPE {
+        return Ok(ManagedAttachmentSummary {
+            kind: "file".to_string(),
+            file_count: 1,
+        });
+    }
+    let metadata = read_attachment_metadata(storage_path)?;
+    if metadata.schema_version != ATTACHMENT_METADATA_SCHEMA_VERSION
+        || metadata.kind != "directory"
+        || metadata.file_count > MAX_DIRECTORY_FILES
+    {
+        anyhow::bail!("Attachment directory metadata is invalid");
+    }
+    Ok(ManagedAttachmentSummary {
+        kind: metadata.kind,
+        file_count: metadata.file_count,
+    })
+}
+
+fn write_attachment_metadata(
+    attachment_directory: &Path,
+    prepared: &PreparedAttachment,
+) -> Result<()> {
+    let metadata = ManagedAttachmentMetadata {
+        schema_version: ATTACHMENT_METADATA_SCHEMA_VERSION,
+        kind: prepared.kind.clone(),
+        file_count: prepared.file_count,
+        byte_size: prepared.byte_size,
+        content_digest: prepared.content_digest.clone(),
+    };
+    let destination = attachment_directory.join(ATTACHMENT_METADATA_FILE);
+    let temporary = attachment_directory.join(format!(".{}.metadata.tmp", Uuid::new_v4()));
+    let bytes = serde_json::to_vec(&metadata)?;
+    let mut options = OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut output = options.open(&temporary)?;
+    let write_result = (|| -> Result<()> {
+        output.write_all(&bytes)?;
+        output.sync_all()?;
+        set_read_only(&temporary)?;
+        Ok(())
+    })();
+    drop(output);
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+    fs::rename(&temporary, &destination)?;
+    sync_parent(&destination)?;
+    Ok(())
+}
+
+fn read_attachment_metadata(storage_path: &Path) -> Result<ManagedAttachmentMetadata> {
+    let attachment_directory = storage_path
+        .parent()
+        .context("Attachment path has no owning directory")?;
+    let metadata_path = attachment_directory.join(ATTACHMENT_METADATA_FILE);
+    let file_metadata =
+        fs::symlink_metadata(&metadata_path).context("Attachment metadata is unavailable")?;
+    if file_metadata.file_type().is_symlink()
+        || !file_metadata.is_file()
+        || file_metadata.len() > 4 * 1024
+    {
+        anyhow::bail!("Attachment metadata is unsafe");
+    }
+    let bytes = fs::read(&metadata_path)?;
+    serde_json::from_slice(&bytes).context("Attachment metadata is invalid")
+}
+
+fn validate_owned_attachment(
     root: &Path,
     path: &Path,
+    media_type: &str,
     expected_size: u64,
     expected_digest: &str,
 ) -> Result<()> {
     validate_owned_path(root, path)?;
     let metadata = fs::symlink_metadata(path)?;
-    if metadata.file_type().is_symlink()
-        || !metadata.is_file()
-        || metadata.len() != expected_size
-        || !expected_digest.starts_with("sha256:")
-    {
+    if metadata.file_type().is_symlink() || !expected_digest.starts_with("sha256:") {
         anyhow::bail!("Prepared Attachment is unavailable");
+    }
+    if media_type == DIRECTORY_MEDIA_TYPE {
+        if !metadata.is_dir() {
+            anyhow::bail!("Prepared Attachment directory is unavailable");
+        }
+        let managed = read_attachment_metadata(path)?;
+        if managed.schema_version != ATTACHMENT_METADATA_SCHEMA_VERSION
+            || managed.kind != "directory"
+            || managed.byte_size != expected_size
+            || managed.content_digest != expected_digest
+        {
+            anyhow::bail!("Prepared Attachment directory metadata does not match");
+        }
+        validate_managed_directory_tree(path, &managed)?;
+    } else if !metadata.is_file() || metadata.len() != expected_size {
+        anyhow::bail!("Prepared Attachment is unavailable");
+    }
+    Ok(())
+}
+
+fn validate_managed_directory_tree(
+    path: &Path,
+    expected: &ManagedAttachmentMetadata,
+) -> Result<()> {
+    let mut files = 0_u64;
+    let mut entries = 0_u64;
+    let mut bytes = 0_u64;
+    validate_managed_directory_node(path, 0, &mut files, &mut entries, &mut bytes)?;
+    if files != expected.file_count || bytes != expected.byte_size {
+        anyhow::bail!("Prepared Attachment directory changed after snapshotting");
+    }
+    Ok(())
+}
+
+fn validate_managed_directory_node(
+    path: &Path,
+    depth: usize,
+    files: &mut u64,
+    entries: &mut u64,
+    bytes: &mut u64,
+) -> Result<()> {
+    if depth > MAX_DIRECTORY_DEPTH {
+        anyhow::bail!("Prepared Attachment directory exceeds the depth limit");
+    }
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        anyhow::bail!("Prepared Attachment directory is unsafe");
+    }
+    let mut children = fs::read_dir(path)?.collect::<std::io::Result<Vec<_>>>()?;
+    children.sort_by_key(|entry| entry.file_name());
+    for child in children {
+        *entries = entries
+            .checked_add(1)
+            .context("Prepared Attachment directory entry count overflow")?;
+        if *entries > MAX_DIRECTORY_ENTRIES {
+            anyhow::bail!("Prepared Attachment directory exceeds the entry limit");
+        }
+        let child_path = child.path();
+        let child_metadata = fs::symlink_metadata(&child_path)?;
+        if child_metadata.file_type().is_symlink() {
+            anyhow::bail!("Prepared Attachment directory contains a symbolic link");
+        }
+        if child_metadata.is_dir() {
+            validate_managed_directory_node(&child_path, depth + 1, files, entries, bytes)?;
+        } else if child_metadata.is_file() {
+            *files = files
+                .checked_add(1)
+                .context("Prepared Attachment directory file count overflow")?;
+            *bytes = bytes
+                .checked_add(child_metadata.len())
+                .context("Prepared Attachment directory size overflow")?;
+            if *files > MAX_DIRECTORY_FILES
+                || child_metadata.len() > MAX_ATTACHMENT_BYTES
+                || *bytes > MAX_DRAFT_ATTACHMENT_BYTES
+            {
+                anyhow::bail!("Prepared Attachment directory exceeds its limits");
+            }
+        } else {
+            anyhow::bail!("Prepared Attachment directory contains an unsupported item");
+        }
     }
     Ok(())
 }
@@ -1112,6 +1642,21 @@ fn set_read_only(path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn set_directory_read_only(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o500))?;
+    }
+    #[cfg(not(unix))]
+    {
+        let mut permissions = fs::metadata(path)?.permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(path, permissions)?;
+    }
+    Ok(())
+}
+
 fn remove_attachment_file_parent(path: &Path) -> Result<()> {
     let parent = path
         .parent()
@@ -1133,8 +1678,24 @@ fn remove_attachment_directory(path: &Path) -> Result<()> {
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         anyhow::bail!("Attachment directory is unsafe");
     }
-    allow_directory_update(path)?;
+    make_owned_tree_removable(path)?;
     fs::remove_dir_all(path)?;
+    Ok(())
+}
+
+fn make_owned_tree_removable(path: &Path) -> Result<()> {
+    allow_directory_update(path)?;
+    let children = fs::read_dir(path)?.collect::<std::io::Result<Vec<_>>>()?;
+    for child in children {
+        let child_path = child.path();
+        let metadata = fs::symlink_metadata(&child_path)?;
+        if metadata.file_type().is_symlink() {
+            anyhow::bail!("Attachment directory contains an unsafe symbolic link");
+        }
+        if metadata.is_dir() {
+            make_owned_tree_removable(&child_path)?;
+        }
+    }
     Ok(())
 }
 
@@ -1312,6 +1873,115 @@ mod tests {
         store.remove_camp(camp_id).unwrap();
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn directory_attachment_is_one_frozen_hierarchical_snapshot() {
+        let fixture = std::env::temp_dir().join(format!(
+            "rovai-directory-attachment-test-{}",
+            Uuid::new_v4()
+        ));
+        let data_directory = fixture.join("data");
+        let source = fixture.join("项目资料");
+        fs::create_dir_all(source.join("docs/empty")).unwrap();
+        fs::write(source.join("README.md"), b"directory snapshot").unwrap();
+        fs::write(source.join("docs/plan.txt"), b"frozen plan").unwrap();
+        fs::write(source.join(".env.example"), b"TOKEN=example").unwrap();
+
+        let mut database = Database::open(&data_directory).unwrap();
+        let camp_id = "camp-directory-attachment";
+        insert_test_camp(&database, camp_id);
+        let store = CampAttachmentStore::new(&data_directory);
+        let draft = store
+            .prepare_from_path(&mut database, camp_id, 0, &source, "项目资料")
+            .unwrap();
+        assert_eq!(draft.attachments.len(), 1);
+        let attachment = &draft.attachments[0];
+        assert_eq!(attachment.kind, "directory");
+        assert_eq!(attachment.file_count, 3);
+        assert_eq!(attachment.media_type, DIRECTORY_MEDIA_TYPE);
+        assert_eq!(attachment.preview_kind, "none");
+        assert_eq!(
+            attachment.byte_size,
+            b"directory snapshot".len() as u64
+                + b"frozen plan".len() as u64
+                + b"TOKEN=example".len() as u64
+        );
+
+        let (storage_path, digest): (String, String) = database
+            .connection()
+            .query_row(
+                "SELECT storage_path, content_digest FROM prepared_attachment WHERE id = ?1",
+                [&attachment.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let storage_path = PathBuf::from(storage_path);
+        assert!(storage_path.is_dir());
+        assert_eq!(
+            fs::read(storage_path.join("docs/plan.txt")).unwrap(),
+            b"frozen plan"
+        );
+        assert!(storage_path.join("docs/empty").is_dir());
+        assert_eq!(
+            managed_attachment_summary(&storage_path, DIRECTORY_MEDIA_TYPE).unwrap(),
+            ManagedAttachmentSummary {
+                kind: "directory".to_string(),
+                file_count: 3,
+            }
+        );
+        assert!(digest.starts_with("sha256:"));
+
+        fs::write(source.join("docs/plan.txt"), b"changed original").unwrap();
+        assert_eq!(
+            fs::read(storage_path.join("docs/plan.txt")).unwrap(),
+            b"frozen plan"
+        );
+        store
+            .verify_send(&database, camp_id, std::slice::from_ref(&attachment.id))
+            .unwrap();
+
+        store.remove_camp(camp_id).unwrap();
+        drop(database);
+        fs::remove_dir_all(fixture).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn directory_attachment_rejects_symlinks_without_copying_their_target() {
+        use std::os::unix::fs::symlink;
+
+        let fixture =
+            std::env::temp_dir().join(format!("rovai-directory-symlink-test-{}", Uuid::new_v4()));
+        let data_directory = fixture.join("data");
+        let source = fixture.join("source");
+        fs::create_dir_all(&source).unwrap();
+        let outside = fixture.join("outside-secret.txt");
+        fs::write(&outside, b"must not be copied").unwrap();
+        symlink(&outside, source.join("linked-secret.txt")).unwrap();
+
+        let mut database = Database::open(&data_directory).unwrap();
+        let camp_id = "camp-directory-symlink";
+        insert_test_camp(&database, camp_id);
+        let store = CampAttachmentStore::new(&data_directory);
+        let error = store
+            .prepare_from_path(&mut database, camp_id, 0, &source, "source")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("symbolic link"), "unexpected error: {error}");
+        let prepared_count: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM prepared_attachment WHERE camp_id = ?1",
+                [camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(prepared_count, 0);
+
+        store.remove_camp(camp_id).unwrap();
+        drop(database);
+        fs::remove_dir_all(fixture).unwrap();
     }
 
     #[test]

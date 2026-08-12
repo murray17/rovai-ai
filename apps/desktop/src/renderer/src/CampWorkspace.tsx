@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type JSX, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type FormEvent, type JSX, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
@@ -61,6 +61,40 @@ const EXECUTION_DRAWER_MIN_TIMELINE_HEIGHT = 112
 const EXECUTION_DRAWER_KEYBOARD_STEP = 24
 const EXECUTION_DRAWER_KEYBOARD_PAGE_STEP = 80
 export type CampInspectorTab = 'tasks' | 'members'
+type AttachmentKind = 'file' | 'directory'
+type AttachmentDragKind = 'files' | 'directory'
+type AttachmentPreparationInput = { file: File; kindHint: AttachmentKind }
+
+export function dataTransferContainsFiles(dataTransfer: Pick<DataTransfer, 'types'>): boolean {
+  return Array.from(dataTransfer.types).includes('Files')
+}
+
+export function attachmentDragKind(
+  dataTransfer: Pick<DataTransfer, 'items' | 'types'>
+): AttachmentDragKind | null {
+  if (!dataTransferContainsFiles(dataTransfer)) return null
+  const fileItems = Array.from(dataTransfer.items).filter((item) => item.kind === 'file')
+  if (fileItems.length !== 1) return 'files'
+  const entry = fileItems[0].webkitGetAsEntry?.()
+  return entry?.isDirectory ? 'directory' : 'files'
+}
+
+export function droppedAttachmentInputs(
+  dataTransfer: Pick<DataTransfer, 'files' | 'items'>
+): AttachmentPreparationInput[] {
+  const fromItems = Array.from(dataTransfer.items)
+    .filter((item) => item.kind === 'file')
+    .flatMap((item) => {
+      const file = item.getAsFile()
+      if (!file) return []
+      return [{
+        file,
+        kindHint: item.webkitGetAsEntry?.()?.isDirectory ? 'directory' : 'file'
+      } satisfies AttachmentPreparationInput]
+    })
+  if (fromItems.length > 0) return fromItems
+  return Array.from(dataTransfer.files).map((file) => ({ file, kindHint: 'file' }))
+}
 
 export type AgentExecutionProcess = {
   agentId: string
@@ -651,9 +685,9 @@ export function CampWorkspace({
 }): JSX.Element {
   const [messageContent, setMessageContent] = useState<StructuredCampMessageContent>([])
   const [composerDraft, setComposerDraft] = useState<CampComposerDraftView | null>(null)
-  const [preparingAttachments, setPreparingAttachments] = useState<Array<{ id: string; name: string }>>([])
-  const [failedAttachments, setFailedAttachments] = useState<Array<{ id: string; name: string; error: string }>>([])
-  const [draggingAttachments, setDraggingAttachments] = useState(false)
+  const [preparingAttachments, setPreparingAttachments] = useState<Array<{ id: string; name: string; kind: AttachmentKind }>>([])
+  const [failedAttachments, setFailedAttachments] = useState<Array<{ id: string; name: string; kind: AttachmentKind; error: string }>>([])
+  const [attachmentDragState, setAttachmentDragState] = useState<AttachmentDragKind | null>(null)
   const [composerSubmitting, setComposerSubmitting] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const [mentionPopover, setMentionPopover] = useState<MentionPopoverRequest | null>(null)
@@ -669,7 +703,8 @@ export function CampWorkspace({
   const draftCampId = useRef<string | null>(null)
   const composerDraftRef = useRef<CampComposerDraftView | null>(null)
   const draftMutationQueues = useRef(new Map<string, Promise<CampComposerDraftView>>())
-  const dragDepth = useRef(0)
+  const dragLeaveTimer = useRef<number | null>(null)
+  const dragActivityTimer = useRef<number | null>(null)
   const attachmentPreparationQueue = useRef<Promise<void>>(Promise.resolve())
   const timelineScrollRef = useRef<HTMLDivElement>(null)
   const approvalDockRef = useRef<HTMLElement>(null)
@@ -960,6 +995,7 @@ export function CampWorkspace({
     composerDraftRef.current = null
     setPreparingAttachments([])
     setFailedAttachments([])
+    setAttachmentDragState(null)
     setMessageContent([])
     draftContent.current = []
     draftCampId.current = campId
@@ -1138,17 +1174,18 @@ export function CampWorkspace({
     }, 300)
   }
 
-  const prepareFiles = async (files: File[]): Promise<void> => {
+  const prepareFiles = async (inputs: AttachmentPreparationInput[]): Promise<void> => {
     const campId = snapshot.camp.id
-    const pending = files.map((file, index) => ({
+    const pending = inputs.map(({ file, kindHint }, index) => ({
       id: crypto.randomUUID(),
+      kind: kindHint,
       file: file.name
         ? file
         : new File([file], `粘贴图片-${Date.now()}-${index + 1}.png`, { type: file.type })
     }))
     setPreparingAttachments((current) => [
       ...current,
-      ...pending.map(({ id, file }) => ({ id, name: file.name }))
+      ...pending.map(({ id, file, kind }) => ({ id, name: file.name, kind }))
     ])
     const preparePending = async (): Promise<void> => {
       for (const item of pending) {
@@ -1165,7 +1202,12 @@ export function CampWorkspace({
           if (draftCampId.current === campId) {
             setFailedAttachments((current) => [
               ...current,
-              { id: item.id, name: item.file.name, error: attachmentErrorMessage(error) }
+              {
+                id: item.id,
+                name: item.file.name,
+                kind: item.kind,
+                error: attachmentErrorMessage(error)
+              }
             ])
           }
         } finally {
@@ -1179,6 +1221,94 @@ export function CampWorkspace({
     )
     await attachmentPreparationQueue.current
   }
+
+  const clearAttachmentDragState = (): void => {
+    if (dragLeaveTimer.current !== null) {
+      window.clearTimeout(dragLeaveTimer.current)
+      dragLeaveTimer.current = null
+    }
+    if (dragActivityTimer.current !== null) {
+      window.clearTimeout(dragActivityTimer.current)
+      dragActivityTimer.current = null
+    }
+    setAttachmentDragState(null)
+  }
+
+  const keepAttachmentDragActive = (): void => {
+    if (dragActivityTimer.current !== null) window.clearTimeout(dragActivityTimer.current)
+    dragActivityTimer.current = window.setTimeout(() => {
+      dragActivityTimer.current = null
+      clearAttachmentDragState()
+    }, 1_200)
+  }
+
+  const attachmentDropBlocked = Boolean(executionDrawerProcess || mentionPopover)
+
+  const enterAttachmentDropSurface = (event: ReactDragEvent<HTMLElement>): void => {
+    const kind = attachmentDragKind(event.dataTransfer)
+    if (!kind || attachmentDropBlocked) {
+      if (kind) event.dataTransfer.dropEffect = 'none'
+      return
+    }
+    event.preventDefault()
+    if (dragLeaveTimer.current !== null) {
+      window.clearTimeout(dragLeaveTimer.current)
+      dragLeaveTimer.current = null
+    }
+    keepAttachmentDragActive()
+    setAttachmentDragState(kind)
+  }
+
+  const continueAttachmentDrop = (event: ReactDragEvent<HTMLElement>): void => {
+    const kind = attachmentDragKind(event.dataTransfer)
+    if (!kind) return
+    if (attachmentDropBlocked) {
+      event.dataTransfer.dropEffect = 'none'
+      clearAttachmentDragState()
+      return
+    }
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+    if (dragLeaveTimer.current !== null) {
+      window.clearTimeout(dragLeaveTimer.current)
+      dragLeaveTimer.current = null
+    }
+    keepAttachmentDragActive()
+    if (attachmentDragState !== kind) setAttachmentDragState(kind)
+  }
+
+  const leaveAttachmentDropSurface = (event: ReactDragEvent<HTMLElement>): void => {
+    if (!dataTransferContainsFiles(event.dataTransfer)) return
+    event.preventDefault()
+    if (dragLeaveTimer.current !== null) window.clearTimeout(dragLeaveTimer.current)
+    dragLeaveTimer.current = window.setTimeout(() => {
+      dragLeaveTimer.current = null
+      setAttachmentDragState(null)
+    }, 24)
+  }
+
+  const dropAttachments = (event: ReactDragEvent<HTMLElement>): void => {
+    if (!dataTransferContainsFiles(event.dataTransfer)) return
+    event.preventDefault()
+    event.stopPropagation()
+    if (attachmentDropBlocked) {
+      event.dataTransfer.dropEffect = 'none'
+      clearAttachmentDragState()
+      return
+    }
+    const inputs = droppedAttachmentInputs(event.dataTransfer)
+    clearAttachmentDragState()
+    if (inputs.length > 0) void prepareFiles(inputs)
+  }
+
+  useEffect(() => {
+    if (attachmentDropBlocked) clearAttachmentDragState()
+  }, [attachmentDropBlocked])
+
+  useEffect(() => () => {
+    if (dragLeaveTimer.current !== null) window.clearTimeout(dragLeaveTimer.current)
+    if (dragActivityTimer.current !== null) window.clearTimeout(dragActivityTimer.current)
+  }, [])
 
   const removePreparedAttachment = async (attachmentId: string): Promise<void> => {
     const campId = snapshot.camp.id
@@ -1297,7 +1427,13 @@ export function CampWorkspace({
   return (
     <section className="workspace-shell camp-workspace" aria-label={`Camp：${snapshot.camp.title}`}>
       <div className={`workspace-grid ${inspectorVisible ? '' : 'inspector-collapsed'}`.trim()}>
-        <section className="timeline-pane">
+        <section
+          className="timeline-pane"
+          onDragEnter={enterAttachmentDropSurface}
+          onDragOver={continueAttachmentDrop}
+          onDragLeave={leaveAttachmentDropSurface}
+          onDrop={dropAttachments}
+        >
           <div
             className="timeline-scroll camp-timeline"
             ref={timelineScrollRef}
@@ -1534,7 +1670,25 @@ export function CampWorkspace({
           )}
         </section>
 
-        {inspectorVisible && <aside className="activity-pane" aria-label="Camp 检查器">
+        {inspectorVisible && <aside
+          className="activity-pane"
+          aria-label="Camp 检查器"
+          onDragEnter={(event) => {
+            if (!dataTransferContainsFiles(event.dataTransfer)) return
+            event.dataTransfer.dropEffect = 'none'
+            clearAttachmentDragState()
+          }}
+          onDragOver={(event) => {
+            if (!dataTransferContainsFiles(event.dataTransfer)) return
+            event.dataTransfer.dropEffect = 'none'
+          }}
+          onDrop={(event) => {
+            if (!dataTransferContainsFiles(event.dataTransfer)) return
+            event.preventDefault()
+            event.dataTransfer.dropEffect = 'none'
+            clearAttachmentDragState()
+          }}
+        >
           <Tabs.Root
             value={inspectorTab}
             onValueChange={(value) => selectInspectorTab(value as CampInspectorTab)}
@@ -1568,7 +1722,13 @@ export function CampWorkspace({
             {snapshot.agentRuns.length > 0 && `run ${shortIdentity(snapshot.agentRuns[snapshot.agentRuns.length - 1].id)} · `}seq {snapshot.throughGlobalSequence}
           </div>
         </aside>}
-        <div className="conversation-controls">
+        <div
+          className="conversation-controls"
+          onDragEnter={enterAttachmentDropSurface}
+          onDragOver={continueAttachmentDrop}
+          onDragLeave={leaveAttachmentDropSurface}
+          onDrop={dropAttachments}
+        >
           {pendingApprovals.length > 0 && (
             <ApprovalDock
               approvals={pendingApprovals}
@@ -1591,34 +1751,13 @@ export function CampWorkspace({
           )}
 
           <form
-        className={draggingAttachments ? 'composer is-dragging-attachments' : 'composer'}
+        className={attachmentDragState ? 'composer is-dragging-attachments' : 'composer'}
         onSubmit={(event) => void submit(event)}
-        onDragEnter={(event) => {
-          if (!event.dataTransfer.types.includes('Files')) return
-          event.preventDefault()
-          dragDepth.current += 1
-          setDraggingAttachments(true)
-        }}
-        onDragOver={(event) => {
-          if (!event.dataTransfer.types.includes('Files')) return
-          event.preventDefault()
-          event.dataTransfer.dropEffect = 'copy'
-        }}
-        onDragLeave={(event) => {
-          if (!event.dataTransfer.types.includes('Files')) return
-          event.preventDefault()
-          dragDepth.current = Math.max(0, dragDepth.current - 1)
-          if (dragDepth.current === 0) setDraggingAttachments(false)
-        }}
-        onDrop={(event) => {
-          event.preventDefault()
-          dragDepth.current = 0
-          setDraggingAttachments(false)
-          const files = [...event.dataTransfer.files]
-          if (files.length > 0) void prepareFiles(files)
-        }}
       >
         <div className="composer-box">
+          {attachmentDragState && (
+            <span className="composer-destination">将添加到这条消息</span>
+          )}
           <div className="composer-input">
             {(composerDraft?.attachments.length ?? 0) > 0
               || preparingAttachments.length > 0
@@ -1636,6 +1775,7 @@ export function CampWorkspace({
                       <AttachmentPlaceholder
                         key={attachment.id}
                         name={attachment.name}
+                        kind={attachment.kind}
                         state="preparing"
                       />
                     ))}
@@ -1643,6 +1783,7 @@ export function CampWorkspace({
                       <AttachmentPlaceholder
                         key={attachment.id}
                         name={attachment.name}
+                        kind={attachment.kind}
                         state="error"
                         detail={attachment.error}
                         onRemove={() => setFailedAttachments((current) =>
@@ -1657,7 +1798,9 @@ export function CampWorkspace({
               id="camp-message"
               value={messageContent}
               onChange={changeMessage}
-              onPasteFiles={(files) => void prepareFiles(files)}
+              onPasteFiles={(files) => void prepareFiles(
+                files.map((file) => ({ file, kindHint: 'file' }))
+              )}
               onSubmit={submitMessage}
               members={composerMembers}
               skills={composerSkills}
@@ -1714,10 +1857,36 @@ export function CampWorkspace({
                   </button>
                 )}
           </div>
-          {draggingAttachments && <div className="composer-drop-overlay">释放以添加到这条消息</div>}
         </div>
           </form>
         </div>
+        {attachmentDragState && (
+          <div className="conversation-drop-layer" aria-hidden="true">
+            <div className="conversation-drop-callout">
+              <span className="conversation-drop-glyph">
+                <svg viewBox="0 0 36 36">
+                  <path className="paper" d="M21 7.5h6.2l3.3 3.4v12.9c0 1.5-1.2 2.7-2.7 2.7H21c-1.5 0-2.7-1.2-2.7-2.7V10.2c0-1.5 1.2-2.7 2.7-2.7Z" />
+                  <path d="M27 7.8v4h3.3M21 7.5h6.2l3.3 3.4v12.9c0 1.5-1.2 2.7-2.7 2.7H21c-1.5 0-2.7-1.2-2.7-2.7V10.2c0-1.5 1.2-2.7 2.7-2.7Z" />
+                  <path className="folder-fill" d="M5.5 13.8c0-1.4 1.1-2.5 2.5-2.5h5.1l2.5 2.6h8.1c1.4 0 2.5 1.1 2.5 2.5v9.1c0 1.4-1.1 2.5-2.5 2.5H8c-1.4 0-2.5-1.1-2.5-2.5Z" />
+                  <path d="M5.5 15v-1.2c0-1.4 1.1-2.5 2.5-2.5h5.1l2.5 2.6h8.1c1.4 0 2.5 1.1 2.5 2.5v9.1c0 1.4-1.1 2.5-2.5 2.5H8c-1.4 0-2.5-1.1-2.5-2.5V15Z" />
+                </svg>
+              </span>
+              <span className="conversation-drop-copy">
+                <strong>松手添加到当前消息</strong>
+                <span>
+                  {attachmentDragState === 'directory'
+                    ? '文件夹将保存为只读快照，原文件不会移动'
+                    : '支持文件与文件夹 · 将安全复制到附件队列'}
+                </span>
+              </span>
+            </div>
+          </div>
+        )}
+        <span className="sr-only" aria-live="polite">
+          {attachmentDragState
+            ? '已进入当前消息附件区域，释放以添加文件或文件夹。'
+            : ''}
+        </span>
       </div>
       {mentionPopover && (
         <MentionProfilePopover
@@ -3168,6 +3337,15 @@ function MessageCopyButton({
   )
 }
 
+function AttachmentFolderGlyph(): JSX.Element {
+  return (
+    <svg className="attachment-folder-glyph" viewBox="0 0 24 24">
+      <path className="fill" d="M3.8 7.2c0-1.1.9-2 2-2h4l2 2.1h6.5c1.1 0 2 .9 2 2v7.4c0 1.1-.9 2-2 2H5.8c-1.1 0-2-.9-2-2Z" />
+      <path d="M3.8 8.2V7.1c0-1 .8-1.8 1.8-1.8h4.1l2.1 2.1h6.4c1.1 0 2 .9 2 2v7.3c0 1.1-.9 2-2 2H5.8c-1.1 0-2-.9-2-2V8.2Z" />
+    </svg>
+  )
+}
+
 function AttachmentCard({
   attachment,
   onRemove,
@@ -3207,13 +3385,19 @@ function AttachmentCard({
   const content = (
     <>
       <span className="attachment-visual" aria-hidden="true">
-        {previewUrl
+        {attachment.kind === 'directory'
+          ? <AttachmentFolderGlyph />
+          : previewUrl
           ? <img src={previewUrl} alt="" />
           : attachment.previewKind === 'image' && !previewFailed ? <i className="attachment-loading" /> : '文'}
       </span>
       <span className="attachment-copy">
         <strong title={attachment.displayName}>{attachment.displayName}</strong>
-        <small>{attachmentTypeLabel(attachment.mediaType)} · {formatByteSize(attachment.byteSize)}</small>
+        <small>
+          {attachment.kind === 'directory'
+            ? `${attachment.fileCount} 个文件 · ${formatByteSize(attachment.byteSize)} · 只读快照`
+            : `${attachmentTypeLabel(attachment.mediaType)} · ${formatByteSize(attachment.byteSize)}`}
+        </small>
       </span>
     </>
   )
@@ -3255,11 +3439,13 @@ function AttachmentCard({
 
 function AttachmentPlaceholder({
   name,
+  kind,
   state,
   detail,
   onRemove
 }: {
   name: string
+  kind: AttachmentKind
   state: 'preparing' | 'error'
   detail?: string
   onRemove?: () => void
@@ -3267,11 +3453,24 @@ function AttachmentPlaceholder({
   return (
     <div className={`attachment-card attachment-${state}`}>
       <span className="attachment-visual" aria-hidden="true">
-        {state === 'preparing' ? <i className="attachment-loading" /> : '!'}
+        {kind === 'directory'
+          ? (
+              <span className="attachment-folder-state">
+                <AttachmentFolderGlyph />
+                {state === 'preparing'
+                  ? <i className="attachment-loading" />
+                  : <b>!</b>}
+              </span>
+            )
+          : state === 'preparing' ? <i className="attachment-loading" /> : '!'}
       </span>
       <span className="attachment-copy">
         <strong title={name}>{name}</strong>
-        <small title={detail}>{state === 'preparing' ? '正在安全接入…' : detail ?? '附件处理失败'}</small>
+        <small title={detail}>
+          {state === 'preparing'
+            ? kind === 'directory' ? '正在创建只读快照…' : '正在安全接入…'
+            : detail ?? '附件处理失败'}
+        </small>
       </span>
       {onRemove && (
         <button className="attachment-remove" type="button" aria-label={`移除失败附件 ${name}`} onClick={onRemove}>×</button>
@@ -3281,6 +3480,7 @@ function AttachmentPlaceholder({
 }
 
 function attachmentTypeLabel(mediaType: string): string {
+  if (mediaType === 'inode/directory') return '文件夹'
   if (mediaType.startsWith('image/')) return '图片'
   if (mediaType === 'application/pdf') return 'PDF'
   if (mediaType.includes('zip')) return '压缩文件'
@@ -3292,8 +3492,13 @@ function attachmentErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
   if (message.includes('25 MiB')) return '文件超过 25 MiB'
   if (message.includes('count limit')) return '一条消息最多 10 个附件'
-  if (message.includes('total attachment')) return '附件总大小超过 64 MiB'
-  if (message.includes('regular files')) return '仅支持普通文件'
+  if (message.includes('total attachment') || message.includes('64 MiB')) return '附件总大小超过 64 MiB'
+  if (message.includes('2000-file')) return '文件夹内文件数量超过 2,000 个'
+  if (message.includes('4000-entry')) return '文件夹内项目数量超过 4,000 个'
+  if (message.includes('32-level')) return '文件夹层级超过 32 层'
+  if (message.includes('symbolic link') || message.includes('symlinks')) return '文件夹包含不支持的软链接'
+  if (message.includes('unsupported item')) return '文件夹包含不支持的项目'
+  if (message.includes('regular files and directories')) return '仅支持普通文件或文件夹'
   return '安全接入失败，可移除后重试'
 }
 

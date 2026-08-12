@@ -77,6 +77,7 @@
     "accept:structured-mentions-ui": "node scripts/accept-structured-mentions-ui.mjs",
     "accept:task-card-ui": "node scripts/accept-task-card-ui.mjs",
     "accept:runtime-activity-ui": "node scripts/accept-runtime-activity-ui.mjs",
+    "accept:conversation-drop-zone-ui": "ROVAI_RUNTIME_ACTIVITY_ACCEPT_DROP_ZONE_ONLY=1 node scripts/accept-runtime-activity-ui.mjs",
     "accept:diagnostics-ui": "node scripts/accept-diagnostics-ui.mjs",
     "smoke:recovery": "pnpm core:build:debug && node scripts/smoke-recovery.mjs",
     "smoke:missing-send-recovery": "pnpm core:build:debug && node scripts/smoke-missing-send-recovery.mjs",

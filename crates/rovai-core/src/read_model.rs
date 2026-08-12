@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
+    camp_attachment::managed_attachment_summary,
     camp_content::{StructuredCampMessageContent, normalize_content, render_current_plain_text},
     canonical_activity::CanonicalRuntimeActivity,
     db::Database,
@@ -14,7 +15,7 @@ use crate::{
     skill_projection::SkillExposureSnapshot,
 };
 
-pub const READ_MODEL_SCHEMA_VERSION: i64 = 28;
+pub const READ_MODEL_SCHEMA_VERSION: i64 = 29;
 pub const EVENT_BATCH_SCHEMA_VERSION: i64 = 9;
 pub const NAVIGATION_SCHEMA_VERSION: i64 = 3;
 pub const EXECUTION_EVIDENCE_PAGE_SCHEMA_VERSION: i64 = 1;
@@ -183,6 +184,8 @@ pub struct CampMessageView {
 pub struct CampMessageAttachmentView {
     pub id: String,
     pub display_name: String,
+    pub kind: String,
+    pub file_count: u64,
     pub media_type: String,
     pub byte_size: i64,
     pub preview_kind: String,
@@ -1273,28 +1276,40 @@ fn load_messages(
         )
         SELECT attachment.camp_message_id,
                attachment.id, attachment.display_name, attachment.media_type,
-               attachment.byte_size, attachment.preview_kind
+               attachment.byte_size, attachment.preview_kind, attachment.storage_path
         FROM requested
         JOIN message_attachment AS attachment
           ON attachment.camp_message_id = requested.camp_message_id
         ORDER BY attachment.camp_message_id, attachment.position, attachment.id
         "#,
     )?;
-    let attachment_rows = attachment_statement.query_map([requested_message_ids_json], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            CampMessageAttachmentView {
-                id: row.get(1)?,
-                display_name: row.get(2)?,
-                media_type: row.get(3)?,
-                byte_size: row.get(4)?,
-                preview_kind: row.get(5)?,
-            },
-        ))
-    })?;
+    let attachment_rows = attachment_statement
+        .query_map([requested_message_ids_json], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut attachments_by_message_id = BTreeMap::<String, Vec<CampMessageAttachmentView>>::new();
-    for row in attachment_rows {
-        let (message_id, attachment) = row?;
+    for (message_id, id, display_name, media_type, byte_size, preview_kind, storage_path) in
+        attachment_rows
+    {
+        let summary = managed_attachment_summary(Path::new(&storage_path), &media_type)?;
+        let attachment = CampMessageAttachmentView {
+            id,
+            display_name,
+            kind: summary.kind,
+            file_count: summary.file_count,
+            media_type,
+            byte_size,
+            preview_kind,
+        };
         attachments_by_message_id
             .entry(message_id)
             .or_default()

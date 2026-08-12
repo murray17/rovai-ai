@@ -37,7 +37,7 @@ const criteria = [
     test('crates/rovai-core/src/db.rs', 'current_data_contract_accepts_current_and_exact_v062_v054_or_v052_sources'),
     test('crates/rovai-core/src/db.rs', 'v71_upgrades_the_exact_v052_source_without_compatibility_rows')
   ]),
-  criterion('CCC-012', 'CampSnapshot schema is 28', [
+  criterion('CCC-012', 'CampSnapshot schema is 29', [
     test('crates/rovai-core/src/read_model.rs', 'snapshot_projects_current_names_from_structured_mentions')
   ]),
   criterion('CCC-013', 'Migration 71 admits only the exact v0.54/v0.52 upgrade sources', [

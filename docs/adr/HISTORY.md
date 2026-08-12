@@ -179,4 +179,5 @@ generated_from: docs/adr-front-matter
 | [ADR-0165](0165-core-owned-current-user-message-attention.md) | Core-Owned Current-User Message Attention | `accepted` | `cross-version` | [v0.65](../versions/v0.65/README.md) | — |
 | [ADR-0166](0166-progressive-built-in-cli-teaching.md) | Progressive Built-In CLI Teaching | `accepted` | `cross-version` | [v0.65](../versions/v0.65/README.md) | — |
 | [ADR-0167](0167-seven-skill-official-inventory.md) | Seven-Skill Official Inventory | `accepted` | `cross-version` | [v0.65](../versions/v0.65/README.md) | — |
+| [ADR-0169](0169-core-owned-directory-attachment-snapshots.md) | Core-Owned Directory Attachment Snapshots | `accepted` | `cross-version` | [v0.65](../versions/v0.65/README.md) | — |
 <!-- adr-history:end -->

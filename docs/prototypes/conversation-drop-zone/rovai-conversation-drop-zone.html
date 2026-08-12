@@ -1,0 +1,1066 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="day" data-state="drag-folder">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rovai AI · 全会话区拖入态设计稿</title>
+  <style>
+    * { box-sizing: border-box; }
+
+    :root {
+      color-scheme: light;
+      --canvas: #eceeef;
+      --surface: #fbfbfa;
+      --surface-raised: #ffffff;
+      --surface-subtle: #f0f2f4;
+      --surface-muted: #e7eaed;
+      --surface-selected: #e9ecee;
+      --surface-hover: #e8eaea;
+      --conversation-surface: #ffffff;
+      --inspector-surface: #ffffff;
+      --conversation-inspector-line: #c7cfd6;
+      --input: #ffffff;
+      --topbar: #fbfbfa;
+      --rail: #f3f4f4;
+      --rail-ink: #626b72;
+      --rail-line: #dadde0;
+      --ink: #171b20;
+      --muted: #616a73;
+      --faint: #6e7382;
+      --line: #dfe4e8;
+      --line-strong: #c7cfd6;
+      --control-line: #8b9389;
+      --brand: #526f88;
+      --brand-hover: #3d5874;
+      --brand-contrast: #ffffff;
+      --brand-soft: #e9eef3;
+      --brand-ink: #405f7e;
+      --focus-soft: rgba(82, 111, 136, 0.16);
+      --success: #3e775c;
+      --success-soft: #e7f1ea;
+      --attention: #8a6226;
+      --attention-soft: #f8edda;
+      --info: #416c86;
+      --info-soft: #e5eef3;
+      --danger: #a24c46;
+      --danger-soft: #f7e6e3;
+      --identity-1: #719d94;
+      --identity-2: #9082b4;
+      --shadow-menu: 0 10px 28px rgba(38, 45, 58, 0.12);
+      --shadow-float: 0 18px 56px rgba(38, 45, 58, 0.14);
+      --drop-wash: rgba(82, 111, 136, 0.085);
+      --drop-line: rgba(82, 111, 136, 0.82);
+      --drop-callout: rgba(255, 255, 255, 0.97);
+    }
+
+    html[data-theme="night"] {
+      color-scheme: dark;
+      --canvas: #0d1114;
+      --surface: #151a1e;
+      --surface-raised: #1b2227;
+      --surface-subtle: #1a2024;
+      --surface-muted: #242d33;
+      --surface-selected: #222c33;
+      --surface-hover: #1d252b;
+      --conversation-surface: #181d21;
+      --inspector-surface: #171d21;
+      --conversation-inspector-line: #53616b;
+      --input: #1b2227;
+      --topbar: #151a1e;
+      --rail: #11161a;
+      --rail-ink: #a6b1b8;
+      --rail-line: #313b43;
+      --ink: #e7ecef;
+      --muted: #abb5bc;
+      --faint: #919da6;
+      --line: #333e46;
+      --line-strong: #53616b;
+      --control-line: #687b88;
+      --brand: #7897ae;
+      --brand-hover: #b1c8d8;
+      --brand-contrast: #091116;
+      --brand-soft: #22303a;
+      --brand-ink: #c0d4e1;
+      --focus-soft: rgba(143, 179, 203, 0.18);
+      --success: #82b695;
+      --success-soft: #1a2b22;
+      --attention: #d2ac70;
+      --attention-soft: #302719;
+      --info: #83afc9;
+      --info-soft: #182832;
+      --danger: #d6857f;
+      --danger-soft: #321e1d;
+      --identity-1: #8ab9af;
+      --identity-2: #b4a8d2;
+      --shadow-menu: 0 12px 34px rgba(0, 0, 0, 0.28);
+      --shadow-float: 0 22px 62px rgba(0, 0, 0, 0.34);
+      --drop-wash: rgba(120, 151, 174, 0.10);
+      --drop-line: rgba(143, 179, 203, 0.86);
+      --drop-callout: rgba(27, 34, 39, 0.97);
+    }
+
+    html, body { width: 100%; height: 100%; margin: 0; }
+
+    body {
+      min-width: 900px;
+      overflow: hidden;
+      color: var(--ink);
+      background: var(--canvas);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button, input { font: inherit; }
+    button { color: inherit; }
+
+    .prototype-toolbar {
+      display: flex;
+      height: 48px;
+      align-items: center;
+      gap: 18px;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--rail-line);
+      color: var(--muted);
+      background: var(--surface);
+    }
+
+    .prototype-heading {
+      display: grid;
+      min-width: 210px;
+      gap: 1px;
+    }
+
+    .prototype-heading strong { color: var(--ink); font-size: 11px; letter-spacing: .01em; }
+    .prototype-heading span { color: var(--faint); font: 8px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; }
+
+    .prototype-controls {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .prototype-controls.states { flex: 1 1 auto; }
+    .prototype-controls.theme { flex: 0 0 auto; }
+
+    .control-label {
+      flex: 0 0 auto;
+      color: var(--faint);
+      font-size: 8px;
+      font-weight: 750;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .segmented {
+      display: flex;
+      min-width: 0;
+      gap: 2px;
+      padding: 2px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--surface-subtle);
+    }
+
+    .segmented button {
+      min-height: 25px;
+      padding: 4px 8px;
+      border: 0;
+      border-radius: 5px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 9px;
+      font-weight: 650;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+
+    .segmented button:hover { color: var(--ink); background: var(--surface-hover); }
+    .segmented button[aria-pressed="true"] { color: var(--brand-ink); background: var(--surface-raised); box-shadow: 0 1px 3px rgba(28, 32, 43, .08); }
+    .segmented button:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+
+    .prototype-canvas { height: calc(100vh - 48px); padding: 12px; }
+
+    .app-shell {
+      display: grid;
+      width: 100%;
+      height: 100%;
+      min-height: 620px;
+      grid-template-columns: 270px minmax(0, 1fr);
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: 10px;
+      background: var(--surface);
+      box-shadow: 0 14px 38px rgba(38, 45, 58, .10);
+    }
+
+    .sidebar {
+      display: grid;
+      min-width: 0;
+      grid-template-rows: auto auto minmax(0, 1fr) auto;
+      border-right: 1px solid var(--rail-line);
+      color: var(--rail-ink);
+      background: var(--rail);
+    }
+
+    .window-brand {
+      display: flex;
+      height: 50px;
+      align-items: center;
+      gap: 9px;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--rail-line);
+    }
+
+    .brand-mark {
+      position: relative;
+      width: 24px;
+      height: 24px;
+      border: 1px solid color-mix(in srgb, var(--brand) 45%, var(--line));
+      border-radius: 7px;
+      background: var(--brand-soft);
+    }
+
+    .brand-mark::before, .brand-mark::after {
+      position: absolute;
+      border-radius: 50%;
+      background: var(--brand);
+      content: "";
+    }
+
+    .brand-mark::before { width: 7px; height: 7px; top: 5px; left: 5px; }
+    .brand-mark::after { width: 5px; height: 5px; right: 4px; bottom: 5px; opacity: .62; }
+    .window-brand strong { color: var(--ink); font-size: 13px; letter-spacing: -.1px; }
+
+    .new-conversation {
+      display: flex;
+      min-height: 36px;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      margin: 12px 12px 8px;
+      border: 1px solid var(--brand);
+      border-radius: 7px;
+      color: var(--brand-contrast);
+      background: var(--brand);
+      font-size: 10.5px;
+      font-weight: 700;
+    }
+
+    .sidebar-scroll { min-height: 0; overflow: hidden; padding: 4px 10px 18px; }
+
+    .nav-section { margin-top: 13px; }
+
+    .nav-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 6px 5px;
+      color: var(--faint);
+      font-size: 8px;
+      font-weight: 750;
+      letter-spacing: .08em;
+    }
+
+    .nav-row {
+      display: grid;
+      min-height: 34px;
+      grid-template-columns: 18px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 7px;
+      border-radius: 6px;
+      font-size: 10px;
+    }
+
+    .nav-row + .nav-row { margin-top: 2px; }
+    .nav-row.project { color: var(--ink); font-weight: 700; }
+    .nav-row.camp { padding-left: 15px; }
+    .nav-row.current { color: var(--ink); background: var(--surface-selected); }
+    .nav-row small { color: var(--faint); font-size: 8px; }
+    .nav-row span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .nav-folder, .nav-chat {
+      display: grid;
+      width: 18px;
+      height: 18px;
+      place-items: center;
+      color: var(--brand);
+    }
+
+    .nav-chat::before { width: 7px; height: 7px; border: 1.5px solid currentColor; border-radius: 50%; content: ""; }
+
+    .sidebar-footer {
+      display: flex;
+      min-height: 44px;
+      align-items: center;
+      gap: 8px;
+      padding: 0 16px;
+      border-top: 1px solid var(--rail-line);
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .app-main { display: grid; min-width: 0; min-height: 0; grid-template-rows: 50px minmax(0, 1fr); background: var(--conversation-surface); }
+
+    .camp-header {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 0 15px 0 22px;
+      border-bottom: 1px solid var(--line);
+      background: var(--topbar);
+    }
+
+    .camp-heading { display: grid; min-width: 0; gap: 2px; }
+    .camp-heading strong { overflow: hidden; color: var(--ink); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+    .camp-heading span { color: var(--faint); font-size: 8.5px; }
+
+    .camp-actions { display: flex; align-items: center; gap: 7px; }
+
+    .member-stack { display: flex; padding-right: 3px; }
+
+    .member-dot {
+      display: grid;
+      width: 25px;
+      height: 25px;
+      margin-right: -6px;
+      place-items: center;
+      border: 2px solid var(--topbar);
+      border-radius: 7px;
+      color: #fff;
+      background: var(--identity-1);
+      font-size: 8px;
+      font-weight: 800;
+    }
+
+    .member-dot:nth-child(2) { background: var(--identity-2); }
+
+    .icon-button {
+      display: grid;
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      place-items: center;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--muted);
+      background: var(--surface);
+      font-size: 13px;
+    }
+
+    .workspace-grid {
+      position: relative;
+      display: grid;
+      min-width: 0;
+      min-height: 0;
+      grid-template-columns: minmax(0, 1fr) 310px;
+      grid-template-rows: minmax(0, 1fr) auto;
+      overflow: hidden;
+      background: var(--conversation-surface);
+    }
+
+    .workspace-grid.inspector-collapsed { grid-template-columns: minmax(0, 1fr); }
+    .workspace-grid.inspector-collapsed .activity-pane { display: none; }
+
+    .timeline-pane {
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      grid-column: 1;
+      grid-row: 1;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--conversation-surface);
+    }
+
+    .timeline-scroll { min-height: 0; flex: 1 1 auto; overflow: hidden; padding: 20px 27px 20px; }
+    .timeline-track { width: min(790px, 100%); margin: 0 auto; }
+
+    .timeline-day {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      margin: 3px 0 16px;
+      color: var(--faint);
+      font: 500 9px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .05em;
+    }
+
+    .timeline-day::before, .timeline-day::after { height: 1px; flex: 1 1 auto; background: var(--line); content: ""; }
+
+    .message { position: relative; margin: 13px 0; padding-left: 21px; }
+
+    .message::before {
+      position: absolute;
+      top: 4px;
+      left: 2px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--brand);
+      content: "";
+    }
+
+    .message.agent::before { background: var(--identity-1); }
+    .message.agent.secondary::before { background: var(--identity-2); }
+
+    .message-meta { display: flex; align-items: baseline; gap: 7px; margin-bottom: 3px; }
+    .message-meta strong { color: var(--brand-ink); font-size: 10.5px; }
+    .message.agent .message-meta strong { color: var(--identity-1); }
+    .message.agent.secondary .message-meta strong { color: var(--identity-2); }
+    .message-meta time { color: var(--faint); font-size: 8px; }
+
+    .message-body { max-width: 68ch; color: var(--ink); font-size: 11.5px; line-height: 1.62; }
+    .message-body p { margin: 0; }
+    .message-body p + p { margin-top: 6px; }
+    .mention { color: var(--brand-hover); }
+
+    .message-footer { margin-top: 4px; color: var(--faint); font-size: 8.5px; }
+
+    .task-card {
+      display: grid;
+      width: min(590px, 100%);
+      grid-template-columns: 3px minmax(0, 1fr) auto;
+      gap: 10px;
+      margin: 15px 0 15px 21px;
+      padding: 9px 10px 9px 0;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--surface);
+    }
+
+    .task-rail { border-radius: 4px; background: var(--success); }
+    .task-copy { display: grid; min-width: 0; gap: 3px; }
+    .task-copy strong { font-size: 10.5px; }
+    .task-copy span { color: var(--muted); font-size: 9px; }
+    .task-status { align-self: start; padding: 3px 6px; border-radius: 999px; color: var(--success); background: var(--success-soft); font-size: 8px; font-weight: 750; }
+
+    .run-pulse {
+      position: relative;
+      z-index: 2;
+      display: grid;
+      min-height: 58px;
+      flex: 0 0 auto;
+      grid-template-columns: auto minmax(0, 1fr);
+      align-items: center;
+      gap: 10px;
+      padding: 7px 20px;
+      border-top: 2px solid var(--line-strong);
+      color: var(--muted);
+      background: var(--surface);
+    }
+
+    .run-pulse-heading { display: flex; min-width: 0; align-items: center; gap: 7px; white-space: nowrap; }
+    .run-pulse-mark { display: grid; width: 16px; height: 16px; place-items: center; border-radius: 50%; background: var(--brand-soft); }
+    .run-pulse-mark i { width: 6px; height: 6px; border-radius: 50%; background: var(--brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 18%, transparent); }
+    .run-pulse-heading strong { color: var(--brand-ink); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+    .run-pulse-count { color: var(--faint); font: 500 8px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .run-pulse-list { display: flex; min-width: 0; gap: 5px; margin: 0; overflow: hidden; padding: 0; list-style: none; }
+    .run-pulse-list li { min-width: 0; flex: 0 0 auto; }
+
+    .run-pulse-chip {
+      display: grid;
+      min-width: 146px;
+      max-width: 184px;
+      grid-template-columns: 24px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 7px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--ink);
+      background: var(--surface-raised);
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .run-pulse-chip:hover { border-color: var(--control-line); }
+    .run-pulse-chip:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+    .run-avatar { display: grid; width: 24px; height: 24px; place-items: center; border-radius: 6px; color: #fff; background: var(--identity-1); font-size: 7.5px; font-weight: 800; }
+    .run-avatar.secondary { background: var(--identity-2); }
+    .run-pulse-chip-copy { display: grid; min-width: 0; gap: 1px; }
+    .run-pulse-chip-copy strong, .run-pulse-chip-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .run-pulse-chip-copy strong { color: var(--ink); font-size: 9.5px; }
+    .run-pulse-chip-copy small { color: var(--faint); font-size: 7.5px; }
+    .run-pulse-chip-state { display: inline-flex; align-items: center; gap: 4px; font-size: 8px; font-weight: 750; white-space: nowrap; }
+    .run-pulse-chip-state::before { width: 5px; height: 5px; border: 1px solid currentColor; border-radius: 50%; content: ""; }
+    .run-pulse-chip-state.running { color: var(--info); }
+    .run-pulse-chip-state.running::before { background: currentColor; box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 12%, transparent); }
+    .run-pulse-chip-state.completed { color: var(--success); }
+    .run-pulse-chip-state.completed::before { background: currentColor; }
+
+    .activity-pane {
+      min-width: 0;
+      min-height: 0;
+      grid-column: 2;
+      grid-row: 1 / span 2;
+      overflow: hidden;
+      border-left: 1px solid var(--conversation-inspector-line);
+      background: var(--inspector-surface);
+    }
+
+    .inspector-tabs { display: grid; height: 43px; grid-template-columns: 1fr 1fr; padding: 5px 8px 0; border-bottom: 1px solid var(--line); }
+    .inspector-tab { display: grid; place-items: center; border-bottom: 2px solid transparent; color: var(--faint); font-size: 9.5px; font-weight: 700; }
+    .inspector-tab.active { border-bottom-color: var(--brand); color: var(--brand-ink); }
+    .inspector-scroll { padding: 12px 12px 24px; }
+
+    .inspector-summary { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .inspector-summary strong { font-size: 11px; }
+    .inspector-summary span { color: var(--faint); font-size: 8px; }
+
+    .inspector-card { padding: 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-subtle); }
+    .inspector-card + .inspector-card { margin-top: 8px; }
+    .inspector-card > strong { display: block; margin-bottom: 5px; font-size: 10px; }
+    .inspector-card p { margin: 0; color: var(--muted); font-size: 9px; line-height: 1.5; }
+
+    .inspector-person { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+    .person-avatar { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 7px; color: #fff; background: var(--identity-1); font-size: 8px; font-weight: 800; }
+    .person-copy { display: grid; min-width: 0; gap: 2px; }
+    .person-copy strong { font-size: 9.5px; }
+    .person-copy span { overflow: hidden; color: var(--faint); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+    .person-state { color: var(--success); font-size: 8px; font-weight: 700; }
+
+    .conversation-controls {
+      position: relative;
+      min-width: 0;
+      grid-column: 1;
+      grid-row: 2;
+      padding: 0 27px 14px;
+      background: var(--conversation-surface);
+    }
+
+    .composer {
+      position: relative;
+      z-index: 3;
+      display: flex;
+      width: min(790px, 100%);
+      min-height: 76px;
+      margin: 0 auto;
+      align-items: flex-end;
+      gap: 8px;
+      padding: 8px 8px 8px 12px;
+      border: 1px solid var(--control-line);
+      border-radius: 8px;
+      background: var(--input);
+      transition: border-color 120ms ease, box-shadow 120ms ease;
+    }
+
+    .composer-main { display: grid; min-width: 0; flex: 1 1 auto; gap: 5px; }
+
+    .composer-destination {
+      position: absolute;
+      z-index: 2;
+      top: -11px;
+      left: 14px;
+      display: none;
+      height: 21px;
+      align-items: center;
+      gap: 5px;
+      padding: 0 8px;
+      border: 1px solid var(--brand);
+      border-radius: 999px;
+      color: var(--brand-ink);
+      background: var(--surface-raised);
+      box-shadow: 0 3px 10px rgba(38, 45, 58, .10);
+      font-size: 8.5px;
+      font-weight: 750;
+      letter-spacing: .01em;
+    }
+
+    .composer-destination::before { width: 5px; height: 5px; border-radius: 50%; background: var(--brand); content: ""; }
+
+    .composer-text { min-height: 32px; padding: 4px 1px 1px; color: var(--ink); font-size: 11.5px; line-height: 1.5; }
+    .composer-meta { color: var(--faint); font-size: 8.5px; }
+
+    .composer-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; padding-bottom: 2px; }
+    .enter-hint { padding: 2px 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--faint); background: var(--surface-subtle); font: 650 8px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .send-button { min-height: 28px; padding: 5px 12px; border: 0; border-radius: 6px; color: var(--brand-contrast); background: var(--brand); font-size: 10px; font-weight: 750; }
+
+    .attachment-strip { display: none; min-width: 0; gap: 7px; padding-top: 1px; overflow: hidden; }
+
+    .attachment-card {
+      position: relative;
+      display: flex;
+      width: 222px;
+      height: 52px;
+      min-width: 0;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 25px 5px 5px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--surface);
+    }
+
+    .attachment-icon {
+      position: relative;
+      display: grid;
+      width: 40px;
+      height: 40px;
+      flex: 0 0 40px;
+      place-items: center;
+      border-radius: 5px;
+      color: var(--brand);
+      background: var(--brand-soft);
+    }
+
+    .attachment-copy { display: grid; min-width: 0; gap: 3px; }
+    .attachment-copy strong, .attachment-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .attachment-copy strong { color: var(--ink); font-size: 10px; }
+    .attachment-copy small { color: var(--muted); font-size: 8px; }
+    .attachment-remove { position: absolute; top: 4px; right: 4px; display: grid; width: 18px; height: 18px; place-items: center; border: 0; border-radius: 50%; color: var(--faint); background: var(--surface-subtle); font-size: 11px; }
+
+    .folder-svg { width: 25px; height: 25px; overflow: visible; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
+    .folder-svg .fill { fill: color-mix(in srgb, var(--brand-soft) 82%, transparent); }
+
+    .attachment-status {
+      position: absolute;
+      right: 5px;
+      bottom: 5px;
+      display: grid;
+      width: 14px;
+      height: 14px;
+      place-items: center;
+      border-radius: 50%;
+      color: var(--surface-raised);
+      background: var(--success);
+      font-size: 8px;
+      font-weight: 900;
+    }
+
+    .attachment-status.spinner { border: 1.5px solid var(--line-strong); border-top-color: var(--brand); background: transparent; animation: spin .8s linear infinite; }
+    .attachment-status.error { color: var(--danger); background: var(--danger-soft); }
+    .attachment-card.error { border-color: color-mix(in srgb, var(--danger) 60%, var(--line)); }
+    .attachment-card.error .attachment-icon { color: var(--danger); background: var(--danger-soft); }
+
+    .drop-layer {
+      position: relative;
+      z-index: 8;
+      display: grid;
+      min-width: 0;
+      min-height: 0;
+      grid-column: 1;
+      grid-row: 1 / span 2;
+      margin: 10px;
+      place-items: center;
+      border: 1.5px dashed var(--drop-line);
+      border-radius: 10px;
+      visibility: hidden;
+      opacity: 0;
+      background: var(--drop-wash);
+      pointer-events: none;
+      transition: opacity 120ms ease, visibility 120ms step-end;
+    }
+
+    .drop-callout {
+      display: grid;
+      width: 308px;
+      min-height: 92px;
+      grid-template-columns: 48px minmax(0, 1fr);
+      align-items: center;
+      gap: 12px;
+      padding: 14px 16px;
+      transform: translateY(-34px);
+      border: 1px solid var(--line-strong);
+      border-radius: 10px;
+      background: var(--drop-callout);
+      box-shadow: var(--shadow-float);
+    }
+
+    .drop-glyph {
+      position: relative;
+      display: grid;
+      width: 48px;
+      height: 48px;
+      place-items: center;
+      border: 1px solid color-mix(in srgb, var(--brand) 38%, var(--line));
+      border-radius: 9px;
+      color: var(--brand);
+      background: var(--brand-soft);
+    }
+
+    .drop-glyph svg { width: 31px; height: 31px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.45; }
+    .drop-glyph .paper { fill: var(--surface-raised); }
+    .drop-glyph .folder-fill { fill: color-mix(in srgb, var(--brand) 13%, var(--brand-soft)); }
+
+    .drop-copy { display: grid; min-width: 0; gap: 5px; }
+    .drop-copy strong { color: var(--ink); font-size: 12px; letter-spacing: -.05px; }
+    .drop-copy span { color: var(--muted); font-size: 9px; line-height: 1.45; }
+    .drop-copy .files-only, .drop-copy .folder-only { display: none; }
+
+    .prototype-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+    html[data-state="drag-files"] .drop-layer,
+    html[data-state="drag-folder"] .drop-layer { visibility: visible; opacity: 1; transition: opacity 120ms ease; }
+
+    html[data-state="drag-files"] .composer,
+    html[data-state="drag-folder"] .composer { z-index: 10; border-color: var(--brand); box-shadow: 0 0 0 3px var(--focus-soft); }
+
+    html[data-state="drag-files"] .composer-destination,
+    html[data-state="drag-folder"] .composer-destination { display: flex; }
+
+    html[data-state="drag-files"] .files-only,
+    html[data-state="drag-folder"] .folder-only { display: inline; }
+
+    html[data-state="preparing"] .attachment-strip,
+    html[data-state="ready"] .attachment-strip,
+    html[data-state="error"] .attachment-strip { display: flex; }
+
+    html[data-state="preparing"] .state-ready,
+    html[data-state="preparing"] .state-error,
+    html[data-state="ready"] .state-preparing,
+    html[data-state="ready"] .state-error,
+    html[data-state="error"] .state-preparing,
+    html[data-state="error"] .state-ready { display: none; }
+
+    html[data-state="preparing"] .attachment-status:not(.spinner),
+    html[data-state="ready"] .attachment-status:not(.ready),
+    html[data-state="error"] .attachment-status:not(.error) { display: none; }
+
+    html[data-state="preparing"] .attachment-card { opacity: .82; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @media (min-width: 1800px) {
+      .timeline-track, .composer { width: min(1040px, 100%); }
+    }
+
+    @media (max-width: 1180px) {
+      .prototype-toolbar { gap: 10px; padding-inline: 10px; }
+      .prototype-heading { min-width: 165px; }
+      .segmented button { padding-inline: 6px; }
+      .app-shell { grid-template-columns: 238px minmax(0, 1fr); }
+      .workspace-grid { grid-template-columns: minmax(0, 1fr) 260px; }
+      .timeline-scroll { padding-inline: 18px; }
+      .run-pulse { padding-inline: 14px; }
+      .run-pulse-count { display: none; }
+      .run-pulse-chip { min-width: 128px; }
+      .conversation-controls { padding-inline: 18px; }
+      .drop-layer { margin: 7px; }
+      .drop-callout { width: 280px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .drop-layer, .composer { transition: none; }
+      .attachment-status.spinner { animation-duration: 1.6s; }
+    }
+  </style>
+</head>
+<body>
+  <header class="prototype-toolbar" aria-label="设计稿评审控制">
+    <div class="prototype-heading">
+      <strong>全会话区拖入态</strong>
+      <span>PROTOTYPE · PORCELAIN / STEEL</span>
+    </div>
+
+    <div class="prototype-controls states">
+      <span class="control-label">状态</span>
+      <div class="segmented" aria-label="选择设计稿状态">
+        <button type="button" data-set-state="idle" aria-pressed="false">静止</button>
+        <button type="button" data-set-state="drag-files" aria-pressed="false">拖入文件</button>
+        <button type="button" data-set-state="drag-folder" aria-pressed="true">拖入文件夹</button>
+        <button type="button" data-set-state="preparing" aria-pressed="false">准备中</button>
+        <button type="button" data-set-state="ready" aria-pressed="false">已就绪</button>
+        <button type="button" data-set-state="error" aria-pressed="false">失败</button>
+      </div>
+    </div>
+
+    <div class="prototype-controls theme">
+      <span class="control-label">主题</span>
+      <div class="segmented" aria-label="选择主题">
+        <button type="button" data-set-theme="day" aria-pressed="true">Day</button>
+        <button type="button" data-set-theme="night" aria-pressed="false">Night</button>
+      </div>
+      <button class="icon-button" id="toggle-inspector" type="button" aria-pressed="true" aria-label="显示或隐藏 Inspector" title="显示或隐藏 Inspector">▥</button>
+    </div>
+    <span class="prototype-live" id="prototype-live" aria-live="polite"></span>
+  </header>
+
+  <div class="prototype-canvas">
+    <main class="app-shell" aria-label="Rovai AI 会话区设计稿">
+      <aside class="sidebar" aria-label="App 导航">
+        <div class="window-brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <strong>Rovai AI</strong>
+        </div>
+
+        <button class="new-conversation" type="button"><span aria-hidden="true">＋</span> 新对话</button>
+
+        <div class="sidebar-scroll">
+          <section class="nav-section">
+            <div class="nav-heading"><span>置顶</span></div>
+            <div class="nav-row camp">
+              <span class="nav-chat" aria-hidden="true"></span>
+              <span>发布前检查</span>
+              <small>刚刚</small>
+            </div>
+          </section>
+
+          <section class="nav-section">
+            <div class="nav-heading"><span>项目</span><span>＋</span></div>
+            <div class="nav-row project">
+              <span class="nav-folder" aria-hidden="true">
+                <svg class="folder-svg" viewBox="0 0 24 24"><path class="fill" d="M3.8 7.2c0-1.1.9-2 2-2h4l2 2.1h6.5c1.1 0 2 .9 2 2v7.4c0 1.1-.9 2-2 2H5.8c-1.1 0-2-.9-2-2Z"/><path d="M3.8 8.2V7.1c0-1 .8-1.8 1.8-1.8h4.1l2.1 2.1h6.4c1.1 0 2 .9 2 2v7.3c0 1.1-.9 2-2 2H5.8c-1.1 0-2-.9-2-2V8.2Z"/></svg>
+              </span>
+              <span>rovai-ai</span>
+              <small>•••</small>
+            </div>
+            <div class="nav-row camp current">
+              <span class="nav-chat" aria-hidden="true"></span>
+              <span>文件夹拖入会话区</span>
+              <small>当前</small>
+            </div>
+            <div class="nav-row camp">
+              <span class="nav-chat" aria-hidden="true"></span>
+              <span>附件安全边界</span>
+              <small>昨天</small>
+            </div>
+
+            <div class="nav-row project" style="margin-top: 8px">
+              <span class="nav-folder" aria-hidden="true">
+                <svg class="folder-svg" viewBox="0 0 24 24"><path class="fill" d="M3.8 7.2c0-1.1.9-2 2-2h4l2 2.1h6.5c1.1 0 2 .9 2 2v7.4c0 1.1-.9 2-2 2H5.8c-1.1 0-2-.9-2-2Z"/><path d="M3.8 8.2V7.1c0-1 .8-1.8 1.8-1.8h4.1l2.1 2.1h6.4c1.1 0 2 .9 2 2v7.3c0 1.1-.9 2-2 2H5.8c-1.1 0-2-.9-2-2V8.2Z"/></svg>
+              </span>
+              <span>快速对话</span>
+              <small>＋</small>
+            </div>
+          </section>
+        </div>
+
+        <div class="sidebar-footer"><span aria-hidden="true">⚙</span><span>设置</span></div>
+      </aside>
+
+      <section class="app-main">
+        <header class="camp-header">
+          <div class="camp-heading">
+            <strong>文件夹拖入会话区</strong>
+            <span>rovai-ai · 默认 Lead：小河狸</span>
+          </div>
+          <div class="camp-actions">
+            <div class="member-stack" aria-label="2 位在队队员">
+              <span class="member-dot">河</span>
+              <span class="member-dot">岚</span>
+            </div>
+            <button class="icon-button" type="button" aria-label="通知">◌</button>
+            <button class="icon-button" type="button" aria-label="更多操作">•••</button>
+          </div>
+        </header>
+
+        <div class="workspace-grid" id="workspace-grid">
+          <section class="timeline-pane" id="timeline-pane" aria-label="对话时间线">
+            <div class="timeline-scroll">
+              <div class="timeline-track">
+                <div class="timeline-day">今天</div>
+
+                <article class="message user">
+                  <div class="message-meta"><strong>你</strong><time>10:18</time></div>
+                  <div class="message-body">
+                    <p><span class="mention">@小河狸</span> 先看一下目前附件拖入的交互。现在只有把文件拖到输入框才生效，我希望整个会话区都可以接收。</p>
+                  </div>
+                </article>
+
+                <article class="message agent">
+                  <div class="message-meta"><strong>小河狸</strong><time>10:19</time></div>
+                  <div class="message-body">
+                    <p>现有拖放事件挂在 Composer 上，Electron 和附件准备链路已经具备。可以把接收边界提升到主会话列，同时保留 Composer 作为唯一的草稿归属。</p>
+                    <p>文件夹建议保存成受管只读快照，避免展开后丢失层级或撞上附件数量上限。</p>
+                  </div>
+                  <div class="message-footer">发送给 <span class="mention">@你</span></div>
+                </article>
+
+                <div class="task-card">
+                  <span class="task-rail" aria-hidden="true"></span>
+                  <span class="task-copy"><strong>设计全会话区拖入态</strong><span>接收边界、文件夹快照与 Day/Night 状态</span></span>
+                  <span class="task-status">进行中</span>
+                </div>
+
+                <article class="message agent secondary">
+                  <div class="message-meta"><strong>青岚</strong><time>10:22</time></div>
+                  <div class="message-body">
+                    <p>右侧 Inspector 应继续保持独立，不参与放置反馈。这样用户拖到任务或队员列表上时，不会误以为文件将关联到某个 Inspector 对象。</p>
+                  </div>
+                  <div class="message-footer">发送给 <span class="mention">@小河狸</span></div>
+                </article>
+              </div>
+            </div>
+            <div class="run-pulse" aria-label="Agent 执行台">
+              <div class="run-pulse-heading">
+                <span class="run-pulse-mark" aria-hidden="true"><i></i></span>
+                <strong>执行台</strong>
+                <span class="run-pulse-count">1 位执行中 · 2 位队员</span>
+              </div>
+              <ul class="run-pulse-list" aria-label="队员执行过程入口">
+                <li>
+                  <button class="run-pulse-chip" type="button" aria-label="打开小河狸的执行过程，运行中">
+                    <span class="run-avatar" aria-hidden="true">河</span>
+                    <span class="run-pulse-chip-copy"><strong>小河狸</strong><small>执行过程</small></span>
+                    <span class="run-pulse-chip-state running">运行中</span>
+                  </button>
+                </li>
+                <li>
+                  <button class="run-pulse-chip" type="button" aria-label="打开青岚的执行过程，已完成">
+                    <span class="run-avatar secondary" aria-hidden="true">岚</span>
+                    <span class="run-pulse-chip-copy"><strong>青岚</strong><small>执行过程</small></span>
+                    <span class="run-pulse-chip-state completed">已完成</span>
+                  </button>
+                </li>
+              </ul>
+            </div>
+          </section>
+
+          <aside class="activity-pane" aria-label="Camp Inspector">
+            <div class="inspector-tabs">
+              <div class="inspector-tab active">任务</div>
+              <div class="inspector-tab">队员</div>
+            </div>
+            <div class="inspector-scroll">
+              <div class="inspector-summary"><strong>当前任务</strong><span>1 进行中</span></div>
+              <div class="inspector-card">
+                <strong>设计全会话区拖入态</strong>
+                <p>用主会话列统一接收文件和文件夹，同时确保 Inspector 不成为隐式 Dropzone。</p>
+              </div>
+
+              <div class="inspector-summary" style="margin-top: 18px"><strong>负责队员</strong><span>2 在队</span></div>
+              <div class="inspector-card inspector-person">
+                <span class="person-avatar">河</span>
+                <span class="person-copy"><strong>小河狸</strong><span>产品设计与实现</span></span>
+                <span class="person-state">在队</span>
+              </div>
+              <div class="inspector-card inspector-person">
+                <span class="person-avatar" style="background: var(--identity-2)">岚</span>
+                <span class="person-copy"><strong>青岚</strong><span>交互边界复核</span></span>
+                <span class="person-state">在队</span>
+              </div>
+            </div>
+          </aside>
+
+          <section class="conversation-controls" id="conversation-controls" aria-label="消息输入区">
+            <form class="composer" onsubmit="return false">
+              <span class="composer-destination">将添加到这条消息</span>
+              <div class="composer-main">
+                <div class="attachment-strip" aria-label="待发送附件">
+                  <div class="attachment-card">
+                    <span class="attachment-icon" aria-hidden="true">
+                      <svg class="folder-svg" viewBox="0 0 24 24"><path class="fill" d="M3.8 7.2c0-1.1.9-2 2-2h4l2 2.1h6.5c1.1 0 2 .9 2 2v7.4c0 1.1-.9 2-2 2H5.8c-1.1 0-2-.9-2-2Z"/><path d="M3.8 8.2V7.1c0-1 .8-1.8 1.8-1.8h4.1l2.1 2.1h6.4c1.1 0 2 .9 2 2v7.3c0 1.1-.9 2-2 2H5.8c-1.1 0-2-.9-2-2V8.2Z"/></svg>
+                      <span class="attachment-status spinner"></span>
+                      <span class="attachment-status ready">✓</span>
+                      <span class="attachment-status error">!</span>
+                    </span>
+                    <span class="attachment-copy">
+                      <strong title="产品交互设计资料">产品交互设计资料</strong>
+                      <small class="state-preparing">正在创建只读快照…</small>
+                      <small class="state-ready">128 个文件 · 18.4 MiB · 只读快照</small>
+                      <small class="state-error">文件数量超过限制</small>
+                    </span>
+                    <button class="attachment-remove" type="button" aria-label="移除文件夹">×</button>
+                  </div>
+                </div>
+                <div class="composer-text">重点比较信息层级、拖入边界和失败反馈。</div>
+                <div class="composer-meta">未提及时发送给 Lead</div>
+              </div>
+              <div class="composer-actions">
+                <span class="enter-hint">Enter</span>
+                <button class="send-button" type="submit">发送</button>
+              </div>
+            </form>
+          </section>
+
+          <div class="drop-layer" aria-hidden="true">
+            <div class="drop-callout">
+              <span class="drop-glyph" aria-hidden="true">
+                <svg viewBox="0 0 36 36">
+                  <path class="paper" d="M21 7.5h6.2l3.3 3.4v12.9c0 1.5-1.2 2.7-2.7 2.7H21c-1.5 0-2.7-1.2-2.7-2.7V10.2c0-1.5 1.2-2.7 2.7-2.7Z"/>
+                  <path d="M27 7.8v4h3.3M21 7.5h6.2l3.3 3.4v12.9c0 1.5-1.2 2.7-2.7 2.7H21c-1.5 0-2.7-1.2-2.7-2.7V10.2c0-1.5 1.2-2.7 2.7-2.7Z"/>
+                  <path class="folder-fill" d="M5.5 13.8c0-1.4 1.1-2.5 2.5-2.5h5.1l2.5 2.6h8.1c1.4 0 2.5 1.1 2.5 2.5v9.1c0 1.4-1.1 2.5-2.5 2.5H8c-1.4 0-2.5-1.1-2.5-2.5Z"/>
+                  <path d="M5.5 15v-1.2c0-1.4 1.1-2.5 2.5-2.5h5.1l2.5 2.6h8.1c1.4 0 2.5 1.1 2.5 2.5v9.1c0 1.4-1.1 2.5-2.5 2.5H8c-1.4 0-2.5-1.1-2.5-2.5V15Z"/>
+                </svg>
+              </span>
+              <span class="drop-copy">
+                <strong>松手添加到当前消息</strong>
+                <span class="files-only">3 个文件将安全复制到下方附件队列</span>
+                <span class="folder-only">文件夹将保存为只读快照，原文件不会移动</span>
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const root = document.documentElement
+    const live = document.querySelector('#prototype-live')
+    const workspace = document.querySelector('#workspace-grid')
+    const timeline = document.querySelector('#timeline-pane')
+    const controls = document.querySelector('#conversation-controls')
+
+    const stateLabels = {
+      idle: '静止状态',
+      'drag-files': '正在拖入文件，释放后将添加到当前消息',
+      'drag-folder': '正在拖入文件夹，文件夹将保存为只读快照',
+      preparing: '文件夹正在创建只读快照',
+      ready: '文件夹附件已就绪',
+      error: '文件夹附件准备失败'
+    }
+
+    function setState(state) {
+      root.dataset.state = state
+      document.querySelectorAll('[data-set-state]').forEach((button) => {
+        button.setAttribute('aria-pressed', String(button.dataset.setState === state))
+      })
+      live.textContent = stateLabels[state] || ''
+    }
+
+    function setTheme(theme) {
+      root.dataset.theme = theme
+      document.querySelectorAll('[data-set-theme]').forEach((button) => {
+        button.setAttribute('aria-pressed', String(button.dataset.setTheme === theme))
+      })
+    }
+
+    document.querySelectorAll('[data-set-state]').forEach((button) => {
+      button.addEventListener('click', () => setState(button.dataset.setState))
+    })
+
+    document.querySelectorAll('[data-set-theme]').forEach((button) => {
+      button.addEventListener('click', () => setTheme(button.dataset.setTheme))
+    })
+
+    document.querySelector('#toggle-inspector').addEventListener('click', (event) => {
+      const collapsed = workspace.classList.toggle('inspector-collapsed')
+      event.currentTarget.setAttribute('aria-pressed', String(!collapsed))
+    })
+
+    let dragDepth = 0
+    for (const surface of [timeline, controls]) {
+      surface.addEventListener('dragenter', (event) => {
+        if (!event.dataTransfer?.types.includes('Files')) return
+        event.preventDefault()
+        dragDepth += 1
+        setState('drag-files')
+      })
+
+      surface.addEventListener('dragover', (event) => {
+        if (!event.dataTransfer?.types.includes('Files')) return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'copy'
+      })
+
+      surface.addEventListener('dragleave', (event) => {
+        if (!event.dataTransfer?.types.includes('Files')) return
+        dragDepth = Math.max(0, dragDepth - 1)
+        if (dragDepth === 0) setState('idle')
+      })
+
+      surface.addEventListener('drop', (event) => {
+        if (!event.dataTransfer?.types.includes('Files')) return
+        event.preventDefault()
+        dragDepth = 0
+        setState('preparing')
+      })
+    }
+  </script>
+</body>
+</html>

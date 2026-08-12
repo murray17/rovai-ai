@@ -6,7 +6,7 @@ test('Product Contract Fingerprint reads code/build authority and marks unavaila
   const fingerprint = await collectProductContractFingerprint()
   assert.equal(fingerprint.dataContractVersion.value, 'v0.62')
   assert.equal(fingerprint.dataContractSchemaVersion.value, 31)
-  assert.equal(fingerprint.campSnapshotSchemaVersion.value, 28)
+  assert.equal(fingerprint.campSnapshotSchemaVersion.value, 29)
   assert.equal(fingerprint.contextManifestVersion.value, 11)
   assert.equal(fingerprint.contextFormatterVersion.value, 13)
   assert.equal(fingerprint.contextDeliveryProfileVersion.value, 3)

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
+import { createServer } from 'node:net'
 
 const root = resolve(import.meta.dirname, '..')
 const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai-ai.app'))
@@ -15,8 +16,11 @@ const runtimeTempDir = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_RUNTIME_TMP
 const outputDir = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_OUTPUT_DIR
   ?? await mkdtemp(join(tmpdir(), 'rovai-runtime-activity-ui-captures-'))
 const recoveryBlockerOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_RECOVERY_BLOCKER_ONLY === '1'
+const conversationDropZoneOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DROP_ZONE_ONLY === '1'
 const databasePath = join(dataDir, 'rovai.sqlite')
-const debugPort = Number(process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DEBUG_PORT ?? 9581)
+const debugPort = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DEBUG_PORT
+  ? Number(process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DEBUG_PORT)
+  : await availableLoopbackPort()
 const campId = 'camp-runtime-activity-v055'
 const campTitle = 'v0.55 Agent 执行过程验收'
 const composerLayoutCampId = 'camp-composer-layout-v056'
@@ -36,6 +40,7 @@ const longToolOutput = Array.from({ length: 8_432 }, (_, index) => {
   if (index === 8_431) return `${longToolOutputLastMarker} · line ${index + 1}`
   return `fixture output line ${index + 1} · vehicle prepayment reconciliation`
 }).join('\n')
+const directoryAttachmentSource = join(fixtureRoot, '项目资料')
 
 const runtimes = [
   runtime('codex', 'codex-cli', 'Codex CLI', '读取 README.md', {
@@ -70,6 +75,10 @@ const runtimes = [
 
 await mkdir(dataDir, { recursive: true })
 await mkdir(outputDir, { recursive: true })
+await mkdir(join(directoryAttachmentSource, 'docs', 'empty'), { recursive: true })
+await writeFile(join(directoryAttachmentSource, 'README.md'), 'Conversation drop zone acceptance.\n')
+await writeFile(join(directoryAttachmentSource, 'docs', 'plan.txt'), 'Keep the hierarchy frozen.\n')
+await writeFile(join(directoryAttachmentSource, '.env.example'), 'TOKEN=example-only\n')
 await initializeDatabase()
 await seedFixture()
 
@@ -91,7 +100,21 @@ try {
   assert(renderedMessageCount === runtimes.length,
     `Expected ${runtimes.length} rendered Agent messages, found ${renderedMessageCount}: ${await evaluate(app.cdp, 'document.body.innerText.slice(0, 5000)')}`)
 
-  if (recoveryBlockerOnly) {
+  if (conversationDropZoneOnly) {
+    const dropZoneAcceptance = await verifyConversationDropZone(
+      app.cdp,
+      directoryAttachmentSource,
+      outputDir
+    )
+    console.log(JSON.stringify({
+      ok: true,
+      mode: 'controlled-conversation-drop-zone-fixture',
+      app: basename(appPath),
+      fixtureRoot,
+      outputDir,
+      ...dropZoneAcceptance
+    }, null, 2))
+  } else if (recoveryBlockerOnly) {
     const recoveryBlockerPresentation = await verifyRecoveryBlockerPresentation(app.cdp)
     const recoveryBlockerCapture = join(outputDir, 'runtime-activity-recovery-blocker.png')
     await capture(app.cdp, recoveryBlockerCapture)
@@ -1336,6 +1359,210 @@ async function collectRuntimeRows(cdp) {
   return rows
 }
 
+async function verifyConversationDropZone(cdp, sourceDirectory, capturesDirectory) {
+  assert(!await evaluate(cdp, `Boolean(document.querySelector('.execution-drawer'))`),
+    'Conversation drop acceptance must begin with the Execution Drawer closed')
+
+  const dayDrag = await beginFileDrag(cdp, sourceDirectory, '.timeline-pane')
+  await waitForExpression(cdp, `Boolean(document.querySelector('.conversation-drop-layer'))`)
+  const dayPresentation = await collectConversationDropPresentation(cdp, sourceDirectory)
+  assertConversationDropPresentation(dayPresentation, 'day 1440x920', 308)
+  assert([
+    '文件夹将保存为只读快照，原文件不会移动',
+    '支持文件与文件夹 · 将安全复制到附件队列'
+  ].includes(dayPresentation.directoryCopy),
+  `The drag affordance did not explain directory support: ${JSON.stringify(dayPresentation)}`)
+  const dayDraggingCapture = join(capturesDirectory, 'conversation-drop-zone-day-1440x920.png')
+  await capture(cdp, dayDraggingCapture)
+
+  await dispatchFileDrag(cdp, 'drop', dayDrag)
+  await waitForExpression(cdp, `(() => {
+    const card = [...document.querySelectorAll('.composer-attachment-strip .attachment-card')]
+      .find((candidate) => candidate.textContent?.includes('项目资料'))
+    return !document.querySelector('.conversation-drop-layer')
+      && Boolean(card?.querySelector('.attachment-folder-glyph'))
+      && card?.textContent?.includes('3 个文件')
+      && card?.textContent?.includes('只读快照')
+  })()`, 30_000)
+  const draft = await evaluate(cdp,
+    `window.rovai.request('camp.composerDraft.get', { campId: ${JSON.stringify(campId)} })`,
+    true)
+  const directoryAttachment = draft?.attachments?.find((attachment) =>
+    attachment.displayName === '项目资料')
+  assert(directoryAttachment?.kind === 'directory'
+    && directoryAttachment?.fileCount === 3
+    && directoryAttachment?.mediaType === 'inode/directory'
+    && directoryAttachment?.previewKind === 'none'
+    && directoryAttachment?.byteSize > 0,
+  `Prepared directory attachment did not preserve its explicit model: ${JSON.stringify(draft)}`)
+  const readyCapture = join(capturesDirectory, 'conversation-drop-zone-ready-directory.png')
+  await capture(cdp, readyCapture)
+
+  await setTheme(cdp, 'night')
+  const nightDrag = await beginFileDrag(cdp, sourceDirectory, '.timeline-pane')
+  await waitForExpression(cdp, `Boolean(document.querySelector('.conversation-drop-layer'))`)
+  const nightPresentation = await collectConversationDropPresentation(cdp, sourceDirectory)
+  assertConversationDropPresentation(nightPresentation, 'night 1440x920', 308)
+  const nightDraggingCapture = join(capturesDirectory, 'conversation-drop-zone-night-1440x920.png')
+  await capture(cdp, nightDraggingCapture)
+  await dispatchFileDrag(cdp, 'dragCancel', nightDrag)
+  await waitForExpression(cdp, `!document.querySelector('.conversation-drop-layer')`)
+
+  await setTheme(cdp, 'day')
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 1040,
+    height: 700,
+    deviceScaleFactor: 1,
+    mobile: false,
+    screenWidth: 1040,
+    screenHeight: 700
+  })
+  await waitForExpression(cdp, `innerWidth === 1040 && innerHeight === 700`)
+  const compactDrag = await beginFileDrag(cdp, sourceDirectory, '.timeline-pane')
+  await waitForExpression(cdp, `Boolean(document.querySelector('.conversation-drop-layer'))`)
+  const compactPresentation = await collectConversationDropPresentation(cdp, sourceDirectory)
+  assertConversationDropPresentation(compactPresentation, 'day 1040x700', 280)
+  const compactDraggingCapture = join(capturesDirectory, 'conversation-drop-zone-day-1040x700.png')
+  await capture(cdp, compactDraggingCapture)
+  await dispatchFileDrag(cdp, 'dragCancel', compactDrag)
+  await waitForExpression(cdp, `!document.querySelector('.conversation-drop-layer')`)
+
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 1440,
+    height: 920,
+    deviceScaleFactor: 1,
+    mobile: false,
+    screenWidth: 1440,
+    screenHeight: 920
+  })
+  await waitForExpression(cdp, `innerWidth === 1440 && innerHeight === 920`)
+  const drawerOpened = await evaluate(cdp, `(() => {
+    const trigger = document.querySelector('.run-pulse-chip')
+    trigger?.click()
+    return Boolean(trigger)
+  })()`)
+  assert(drawerOpened, 'The Agent execution console was missing from the drop-zone fixture')
+  await waitForExpression(cdp, `Boolean(document.querySelector('.execution-drawer'))`)
+  const blockedDrag = await beginFileDrag(cdp, sourceDirectory, '.timeline-pane')
+  await wait(180)
+  assert(!await evaluate(cdp, `Boolean(document.querySelector('.conversation-drop-layer'))`),
+    'An open Execution Drawer did not close the underlying drop target')
+  await dispatchFileDrag(cdp, 'dragCancel', blockedDrag)
+
+  const sourcePathLeaked = await evaluate(cdp,
+    `document.body.innerText.includes(${JSON.stringify(sourceDirectory)})`)
+  assert(!sourcePathLeaked, 'The Renderer exposed the original absolute directory path')
+
+  return {
+    verified: {
+      fullConversationColumnHitTarget: true,
+      inspectorAndMenusUnchanged: true,
+      executionConsolePresentAndDrawerBlocksDrop: true,
+      explicitDirectoryReadModel: true,
+      directoryPreparedThroughRealElectronDrag: true,
+      dayNightAndCompactLayouts: true,
+      originalAbsolutePathHidden: true,
+      horizontalOverflow: false
+    },
+    presentation: {
+      day: dayPresentation,
+      night: nightPresentation,
+      compact: compactPresentation
+    },
+    attachment: directoryAttachment,
+    captures: {
+      dayDragging: dayDraggingCapture,
+      ready: readyCapture,
+      nightDragging: nightDraggingCapture,
+      compactDragging: compactDraggingCapture
+    }
+  }
+}
+
+async function beginFileDrag(cdp, sourcePath, selector) {
+  const point = await evaluate(cdp, `(() => {
+    const rect = document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect()
+    return rect ? {
+      x: Math.round(rect.left + Math.min(rect.width * 0.42, rect.width - 20)),
+      y: Math.round(rect.top + Math.min(rect.height * 0.42, rect.height - 20))
+    } : null
+  })()`)
+  assert(point, `Could not resolve drag point for ${selector}`)
+  const drag = {
+    x: point.x,
+    y: point.y,
+    data: {
+      items: [],
+      files: [sourcePath],
+      dragOperationsMask: 1
+    }
+  }
+  await dispatchFileDrag(cdp, 'dragEnter', drag)
+  await dispatchFileDrag(cdp, 'dragOver', drag)
+  return drag
+}
+
+async function dispatchFileDrag(cdp, type, drag) {
+  await cdp.send('Input.dispatchDragEvent', {
+    type,
+    x: drag.x,
+    y: drag.y,
+    data: drag.data
+  })
+}
+
+async function collectConversationDropPresentation(cdp, sourceDirectory) {
+  return evaluate(cdp, `(() => {
+    const grid = document.querySelector('.workspace-grid')?.getBoundingClientRect()
+    const layer = document.querySelector('.conversation-drop-layer')?.getBoundingClientRect()
+    const callout = document.querySelector('.conversation-drop-callout')?.getBoundingClientRect()
+    const inspector = document.querySelector('.activity-pane')?.getBoundingClientRect()
+    const runPulse = document.querySelector('.run-pulse')?.getBoundingClientRect()
+    const destination = document.querySelector('.composer-destination')
+    const tabs = [...document.querySelectorAll('.activity-tabs > .tabs-list [role="tab"]')]
+      .map((tab) => tab.textContent?.replace(/\\d+/g, '').replace(/\\s+/g, ' ').trim())
+    const overlap = (left, right) => Boolean(left && right
+      && left.left < right.right && left.right > right.left
+      && left.top < right.bottom && left.bottom > right.top)
+    return {
+      calloutHeading: document.querySelector('.conversation-drop-copy strong')?.textContent?.trim(),
+      directoryCopy: document.querySelector('.conversation-drop-copy span')?.textContent?.trim(),
+      destination: destination?.textContent?.trim(),
+      composerHighlighted: document.querySelector('.composer')?.classList.contains('is-dragging-attachments'),
+      oldComposerOverlay: Boolean(document.querySelector('.composer-drop-overlay')),
+      runPulseVisible: Boolean(runPulse && runPulse.width > 0 && runPulse.height > 0),
+      calloutCoversRunPulse: overlap(callout, runPulse),
+      layerInsideGrid: Boolean(grid && layer
+        && layer.left >= grid.left + 6
+        && layer.top >= grid.top + 6
+        && layer.bottom <= grid.bottom - 6),
+      inspectorExcluded: !inspector || Boolean(layer && layer.right <= inspector.left - 5),
+      calloutWidth: callout?.width ?? 0,
+      tabs,
+      documentOverflow: document.documentElement.scrollWidth > innerWidth + 1,
+      sourcePathVisible: document.body.innerText.includes(${JSON.stringify(sourceDirectory)}),
+      layer: layer ? { left: layer.left, right: layer.right, top: layer.top, bottom: layer.bottom } : null,
+      inspector: inspector ? { left: inspector.left, right: inspector.right } : null
+    }
+  })()`)
+}
+
+function assertConversationDropPresentation(presentation, context, expectedCalloutWidth) {
+  assert(presentation.calloutHeading === '松手添加到当前消息'
+    && presentation.destination === '将添加到这条消息'
+    && presentation.composerHighlighted
+    && !presentation.oldComposerOverlay
+    && presentation.runPulseVisible
+    && !presentation.calloutCoversRunPulse
+    && presentation.layerInsideGrid
+    && presentation.inspectorExcluded
+    && Math.abs(presentation.calloutWidth - expectedCalloutWidth) <= 1
+    && JSON.stringify(presentation.tabs) === JSON.stringify(['任务', '队员'])
+    && !presentation.documentOverflow
+    && !presentation.sourcePathVisible,
+  `${context} conversation drop presentation failed: ${JSON.stringify(presentation)}`)
+}
+
 async function verifyRecoveryBlockerPresentation(cdp) {
   const opened = await evaluate(cdp, `(() => {
     const chip = [...document.querySelectorAll('.run-pulse-chip[data-agent-id]')]
@@ -2147,4 +2374,21 @@ function assert(condition, message) {
 
 function wait(milliseconds) {
   return new Promise((resolveWait) => setTimeout(resolveWait, milliseconds))
+}
+
+function availableLoopbackPort() {
+  return new Promise((resolvePort, rejectPort) => {
+    const server = createServer()
+    server.unref()
+    server.once('error', rejectPort)
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address()
+      if (!address || typeof address === 'string') {
+        server.close()
+        rejectPort(new Error('Could not allocate an isolated Electron debugging port'))
+        return
+      }
+      server.close((error) => error ? rejectPort(error) : resolvePort(address.port))
+    })
+  })
 }

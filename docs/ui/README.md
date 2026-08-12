@@ -128,6 +128,12 @@ v0.65 在当前消息表面增加非交互的 Current User Mention，并为每�
 [v0.65 实施计划](../versions/v0.65/implementation-plan.md)，完整 official inventory 与普通投递见
 [ADR-0167](../adr/0167-seven-skill-official-inventory.md)。
 
+2026-08-12 在同一 Camp 消息表面把附件拖放命中面从 Composer 扩展到完整主会话列，并增加
+Core-owned 目录只读快照。时间线、Agent 执行台和 Composer 保持可读；Inspector、导航、菜单、
+Execution Drawer 与浮层不成为放置区。目录作为一个顶层附件保留层级，不展开、不显示原路径；
+精确 Drag feedback、目录卡和响应式合同见[Camp 会话区文件与文件夹拖放](conversation-drop-zone.md)，
+数据与安全字段见[Camp Attachment v1](../contracts/camp-attachment-v1.md)。
+
 v0.47 保留 v0.38 的创建位置唯一实时 Task 卡，并把它升级为五态；会话卡继续只显示状态、
 标题和负责人。Inspector list 负责 compact 发现，detail 负责完整责任/审计并只读派生 Related
 execution，现有 AgentRun UI 继续拥有执行事实。编辑器按 projected final state 展示条件字段，

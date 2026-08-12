@@ -45,6 +45,7 @@ Related: Camp content、Evidence 与 Renderer 可分别回到其 primary 主题�
 | [ADR-0081](0081-camp-public-attachment-paths-and-frozen-discovery.md) | Camp-Public Attachment Paths and Frozen Discovery |
 | [ADR-0128](0128-structured-draft-only-user-message-submission.md) | Structured Draft-Only User Camp Message Submission |
 | [ADR-0145](0145-core-owned-pending-camp-draft-activation.md) | Core-Owned Pending Camp Draft Activation |
+| [ADR-0169](0169-core-owned-directory-attachment-snapshots.md) | Core-Owned Directory Attachment Snapshots |
 <!-- adr-current-primary:end -->
 
 Related: Session bootstrap、public delivery 与 product surface 仍从各自 primary 主题进入。

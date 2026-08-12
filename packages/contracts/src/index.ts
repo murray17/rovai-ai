@@ -710,6 +710,8 @@ export interface CampMessageView {
 export interface CampMessageAttachmentView {
   id: string
   displayName: string
+  kind: 'file' | 'directory'
+  fileCount: number
   mediaType: string
   byteSize: number
   previewKind: 'image' | 'none'
@@ -1068,7 +1070,7 @@ export interface DomainEventView {
 }
 
 export interface CampSnapshot {
-  schemaVersion: 28
+  schemaVersion: 29
   throughGlobalSequence: number
   camp: {
     id: string

@@ -44,11 +44,14 @@ import {
   TaskPanel,
   agentExecutionProcesses,
   agentRunCountsAsExecuting,
+  attachmentDragKind,
   campConversationTimeline,
   campInspectorMembers,
   campMemberIsLeadEligible,
   clampExecutionDrawerHeight,
   defaultExecutionDrawerMaxHeight,
+  dataTransferContainsFiles,
+  droppedAttachmentInputs,
   emptyCampRuntimeSummary,
   executionDrawerHeightBounds,
   executionDrawerHeightFromStoredValue,
@@ -137,6 +140,28 @@ function canonicalActivity(
 }
 
 describe('task event projections', () => {
+  it('accepts only file payloads and keeps a dragged directory as one attachment input', () => {
+    const directoryFile = { name: '项目资料' } as File
+    const directoryItem = {
+      kind: 'file',
+      getAsFile: () => directoryFile,
+      webkitGetAsEntry: () => ({ isDirectory: true })
+    } as unknown as DataTransferItem
+    const transfer = {
+      types: ['Files'],
+      items: [directoryItem],
+      files: [directoryFile]
+    } as unknown as DataTransfer
+
+    expect(dataTransferContainsFiles(transfer)).toBe(true)
+    expect(attachmentDragKind(transfer)).toBe('directory')
+    expect(droppedAttachmentInputs(transfer)).toEqual([
+      { file: directoryFile, kindHint: 'directory' }
+    ])
+    expect(dataTransferContainsFiles({ types: ['text/plain'] } as unknown as DataTransfer))
+      .toBe(false)
+  })
+
   it('uses Pending only for one-click creation and Active for the explicit Dialog', () => {
     expect(campActivationStateForCreation('one_click')).toBe('pending')
     expect(campActivationStateForCreation('dialog')).toBe('active')
@@ -359,6 +384,8 @@ describe('task event projections', () => {
         attachments: [{
           id: 'attachment-1',
           displayName: '说明.txt',
+          kind: 'file',
+          fileCount: 1,
           mediaType: 'text/plain',
           byteSize: 12,
           previewKind: 'none',
@@ -1329,7 +1356,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'runtime_not_configured', blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 28,
+      schemaVersion: 29,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-1', title: 'Lead 调整', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1513,7 +1540,7 @@ describe('task event projections', () => {
       presence: 'away'
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 28,
+      schemaVersion: 29,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-empty', title: '暂无可用队员', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -1565,7 +1592,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'ready' as const, blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 28,
+      schemaVersion: 29,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-live', title: '实现功能', activationState: 'active', projectBindingKind: 'directory', projectPath: '/repo',
@@ -2033,7 +2060,7 @@ describe('task event projections', () => {
       resolvedAt: null
     }))
     const snapshot: CampSnapshot = {
-      schemaVersion: 28,
+      schemaVersion: 29,
       throughGlobalSequence: 2,
       camp: {
         id: 'camp-approval', title: '审批停靠区', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -2140,7 +2167,7 @@ describe('task event projections', () => {
     expect(campConversationTimeline([publicMessage]).map((item) => item.id)).toEqual([publicMessage.id])
 
     const snapshot: CampSnapshot = {
-      schemaVersion: 28,
+      schemaVersion: 29,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-a2a', title: 'Agent 协作', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -2265,7 +2292,7 @@ describe('task event projections', () => {
 
   it('renders durable Task records below a single explicit creation action', () => {
     const snapshot: CampSnapshot = {
-      schemaVersion: 28,
+      schemaVersion: 29,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-task', title: 'Task 管理', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
