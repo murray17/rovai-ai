@@ -76,7 +76,7 @@ pnpm accept:diagnostics-ui
 
 它们分别覆盖长期记忆、队员头像、队员生命周期、应用内通知、统一侧栏（含 Project/Camp 置顶、
 可恢复 Project 移除、跨重启隐藏、Quick Chat 焦点回退与 Core 数据保留）、结构化提及和
-Task 单卡原地更新、九 Runtime Canonical Activity 工具名称与 Agent 级连续执行过程、A2A 消息
+Task 创建操作行、完整表单聚焦、取消恢复与单卡原地更新、九 Runtime Canonical Activity 工具名称与 Agent 级连续执行过程、A2A 消息
 Scheme C 转交 footer，以及诊断中心双尺寸、只读自检、MCP 权限修复复检与 v5 脱敏的桌面回归。
 当前 Neutral Porcelain + Steel 视觉迁移还必须按当前版本实施计划覆盖 2K Composer、七个设置页、
 队员半身照与 Runtime 入口、记忆 Workbench、New Conversation 和各类 Dialog/Drawer。
@@ -126,6 +126,27 @@ pnpm accept:runtime-activity-ui
   中保留开头 10 行和明确截断提示；DOM 不包含中段或末尾。右上角只有一个 25px、无边框、具名的
   复制图标；真实点击必须按需读取完整 Evidence、只复制公开输出字段，并证明 8,000 行以上的中段与
   末尾都进入剪贴板而 Evidence 外层 JSON 不进入。读取成功后图标与可访问名称反馈“已复制完整输出”。
+
+### Task Inspector 门禁
+
+Renderer 的权威行为见[当前 UI 详规：Camp 右侧详情栏](../ui/arctic-dawn.md#camp-右侧详情栏inspector)。
+修改 Task 首层入口、空状态、创建/编辑表单、列表或详情后，至少运行：
+
+```bash
+pnpm package:mac
+pnpm accept:task-card-ui
+```
+
+隔离 fixture 必须同时覆盖无任务和已有任务两种列表状态，并证明：
+
+- “任务”Tab 下只有一条 42px“新建任务”操作行；不存在“长期事项”、工具栏说明、解释性空状态、
+  虚线占位或 Tab 栏 Icon-only 创建入口；
+- 点击操作行进入现有完整 Task editor，标题输入框立即获得焦点；不出现快速 Todo 表单、全局 `N`、
+  `Command+Enter` 或可见快捷键提示；
+- 同一操作行在创建态变为“返回任务列表”；返回后无任务 fixture 仍为空，已有任务 fixture 恢复原有
+  列表数量和内容，不写入 Task、CampMessage 或其他 Core 状态；
+- 原有 Task 创建、五态原卡更新、terminal 详情、version conflict 草稿、审计、Related execution、
+  键盘打开与 `1440×920`、`1040×700`、200% zoom 无横向溢出继续通过。
 
 ### A2A 消息 footer 门禁
 

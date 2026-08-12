@@ -3826,16 +3826,21 @@ export function TaskPanel({
 
   return (
     <div className="task-panel">
-      <div className="task-panel-toolbar">
-        <div><strong>长期事项</strong><small>创建或指派不会唤醒队员</small></div>
-        {mode === 'list'
-          ? <button className="quiet-button compact" type="button" onClick={beginCreate} disabled={busy}>＋ 新建</button>
-          : <button className="quiet-button compact" type="button" onClick={resetForm} disabled={submitting}>返回列表</button>}
+      <div className="task-action-row">
+        <button
+          className={mode === 'list' ? 'task-action-button' : 'task-action-button is-back'}
+          type="button"
+          onClick={mode === 'list' ? beginCreate : resetForm}
+          disabled={mode === 'list' ? busy : submitting}
+        >
+          <span aria-hidden="true">{mode === 'list' ? '＋' : '←'}</span>
+          <strong>{mode === 'list' ? '新建任务' : '返回任务列表'}</strong>
+        </button>
       </div>
 
       {mode === 'create' && (
         <form className="task-editor" onSubmit={(event) => void submitCreate(event)}>
-          <div className="task-editor-heading"><strong>新建 Task</strong><span>初始状态为待处理</span></div>
+          <div className="task-editor-heading"><strong>新建任务</strong><span>初始状态为待处理</span></div>
           <TaskFields
             title={title}
             description={description}
@@ -3846,6 +3851,7 @@ export function TaskPanel({
             disabled={submitting || busy}
             showStatus={false}
             requireAssignee
+            autoFocusTitle
             onTitle={setTitle}
             onDescription={setDescription}
             onAcceptanceCriteria={setAcceptanceCriteriaText}
@@ -3853,7 +3859,7 @@ export function TaskPanel({
             onStatus={setStatus}
           />
           {formError && <p className="task-form-error" role="alert">{formError}</p>}
-          <button className="primary-button task-submit" type="submit" disabled={!title.trim() || submitting || busy}>{submitting ? '正在保存…' : '创建 Task'}</button>
+          <button className="primary-button task-submit" type="submit" disabled={!title.trim() || submitting || busy}>{submitting ? '正在保存…' : '创建任务'}</button>
         </form>
       )}
 
@@ -3906,7 +3912,6 @@ export function TaskPanel({
               <span className="task-list-meta"><b>{taskStatusLabel(task.status)}</b><small>{taskAssigneeName(task, snapshot)} · {task.acceptanceCriteria.length} 个验收条件</small></span>
             </button>
           ))}
-          {snapshot.tasks.length === 0 && <EmptyInline text="普通对话不需要 Task；需要跨消息持续跟踪时再创建。" />}
         </div>
       )}
     </div>
@@ -3926,6 +3931,7 @@ function TaskFields({
   disabled,
   showStatus,
   requireAssignee = false,
+  autoFocusTitle = false,
   onTitle,
   onDescription,
   onAcceptanceCriteria,
@@ -3946,6 +3952,7 @@ function TaskFields({
   disabled: boolean
   showStatus: boolean
   requireAssignee?: boolean
+  autoFocusTitle?: boolean
   onTitle(value: string): void
   onDescription(value: string): void
   onAcceptanceCriteria(value: string): void
@@ -3959,7 +3966,7 @@ function TaskFields({
 
   return (
     <>
-      <label className="task-field"><span>标题</span><input value={title} maxLength={160} required disabled={disabled} onChange={(event) => onTitle(event.currentTarget.value)} /></label>
+      <label className="task-field"><span>标题</span><input value={title} maxLength={160} required autoFocus={autoFocusTitle} disabled={disabled} onChange={(event) => onTitle(event.currentTarget.value)} /></label>
       <label className="task-field"><span>说明</span><textarea value={description} rows={4} maxLength={8000} disabled={disabled} onChange={(event) => onDescription(event.currentTarget.value)} placeholder="记录需要跨消息持续跟踪的责任与边界…" /></label>
       <label className="task-field"><span>验收条件（每行一项，最多 12 项）</span><textarea value={acceptanceCriteriaText} rows={3} maxLength={6000} disabled={disabled} onChange={(event) => onAcceptanceCriteria(event.currentTarget.value)} /></label>
       <div className="task-field-grid">

@@ -1834,23 +1834,46 @@ button.timeline-event-card:hover { border-color: var(--brand); background: var(-
 .tab-scroll { flex: 1 1 auto; }
 .task-panel-scroll { padding: 0 12px 20px; }
 .task-panel { min-width: 0; }
-.task-panel-toolbar {
+.task-action-row {
   position: sticky;
   z-index: 4;
   top: 0;
-  display: flex;
-  min-height: 54px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  min-height: 42px;
   margin: 0 -12px;
-  padding: 9px 12px;
+  padding: 0 12px;
   border-bottom: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface-subtle) 94%, transparent);
+  backdrop-filter: blur(10px);
 }
-.task-panel-toolbar > div { display: grid; min-width: 0; gap: 2px; }
-.task-panel-toolbar strong { font-size: 12px; }
-.task-panel-toolbar small { color: var(--faint); font-size: 10px; }
+.task-action-button {
+  display: flex;
+  width: 100%;
+  min-height: 42px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px;
+  border: 0;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+.task-action-button:hover:not(:disabled) { color: var(--brand-ink); }
+.task-action-button:focus-visible { outline-offset: -2px; }
+.task-action-button > span {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+  font-size: 15px;
+  line-height: 1;
+}
+.task-action-button strong { font-size: 11px; font-weight: 650; }
+.task-action-button.is-back > span { background: transparent; }
 .task-list { display: grid; }
 .task-list-row {
   display: grid;

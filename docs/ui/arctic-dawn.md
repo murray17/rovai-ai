@@ -666,8 +666,9 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   需求写入现有 Camp Composer 并聚焦，不自动发送、不改变寻址、不创建 Task 或 AgentRun。
 - 起步建议使用紧凑边界和单一表面；在窄窗口或 200% Zoom 下从三列变为单列，不能
   把 Composer 或 Inspector 推出视口。
-- Inspector 的空状态按各 Tab 说明尚无数据。Approval 文案必须说明请求固定出现在
-  Composer 正上方，禁止声称进入 Inspector 或时间线。
+- Inspector 的“任务”空状态只保留可操作的“新建任务”行，下方保持空白，不显示解释文案、
+  虚线占位或第二个创建入口；其他 Tab 可以按各自合同说明尚无数据。Approval 文案必须说明请求
+  固定出现在 Composer 正上方，禁止声称进入 Inspector 或时间线。
 - 正常发送态使用 `Enter` 提交，`Shift+Enter` 插入换行；不要求
   `Command/Ctrl+Enter`，也不渲染原型中的 `⌘↵` 提示。
 - 输入法组合态不得提交；`@` 候选打开时，`Enter` 先选择候选，不能同时发送。
@@ -703,6 +704,11 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   过程或审计时间线。
 - 执行详情使用“运行中 / 等待审批 / 已完成 / 失败 / 已停止 / 恢复中”等本地化
   文字，不显示原型的 `DONE`；流式更新合并播报，不能通过 `aria-live` 逐字朗读。
+- “任务”页签下第一行固定为 42px、整行可点击的“新建任务”操作；不得重复显示“长期事项”标题、
+  “创建或指派不会唤醒队员”说明、解释性空状态或把 Icon-only `＋` 混入 Tab 栏。进入创建态后同一行
+  变为“返回任务列表”，完整 Task editor 保持 title、description、ordered Criteria 与负责人字段，
+  并把焦点移到标题。返回时丢弃本次未提交草稿并恢复进入前由当前 Snapshot 决定的空列表或任务列表；
+  不新增快速 Todo 创建、全局 `N` / `Command+Enter` 快捷键或可见快捷键提示。
 - “任务”列表使用 compact item 显示标题、状态、负责人、单行 preview 与验收条件数量；详情
   显示完整 description、ordered Criteria、creator/source AgentRun、version/timestamps、条件说明、
   closure 与 audit cause。只读 Related execution 从 CampSnapshot 的 AgentRun/Delivery 关系派生并

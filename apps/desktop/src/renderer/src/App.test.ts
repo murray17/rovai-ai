@@ -2229,7 +2229,7 @@ describe('task event projections', () => {
     expect(markup).not.toContain('alert(1)')
   })
 
-  it('renders lightweight Task records as editable long-lived responsibilities', () => {
+  it('renders durable Task records below a single explicit creation action', () => {
     const snapshot: CampSnapshot = {
       schemaVersion: 27,
       throughGlobalSequence: 1,
@@ -2260,13 +2260,24 @@ describe('task event projections', () => {
       busy: false,
       onTasksChanged: async () => undefined
     }))
+    const emptyMarkup = renderToStaticMarkup(createElement(TaskPanel, {
+      snapshot: { ...snapshot, tasks: [] },
+      busy: false,
+      onTasksChanged: async () => undefined
+    }))
 
-    expect(markup).toContain('长期事项')
-    expect(markup).toContain('＋ 新建')
+    expect(markup).toContain('task-action-row')
+    expect(markup).toContain('task-action-button')
+    expect(markup).toContain('新建任务')
     expect(markup).toContain('实现 Task 工具')
     expect(markup).toContain('跨消息持续跟踪，不自动唤醒负责人。')
     expect(markup).toContain('沐瓦')
     expect(markup).not.toContain('acceptanceCriteria')
+    expect(markup).not.toContain('长期事项')
+    expect(markup).not.toContain('创建或指派不会唤醒队员')
+    expect(emptyMarkup).toContain('新建任务')
+    expect(emptyMarkup).not.toContain('普通对话不需要 Task')
+    expect(emptyMarkup).not.toContain('empty-inline')
   })
 
   it('explains context blockers and A2A delivery without relying on color', () => {

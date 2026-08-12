@@ -33,6 +33,7 @@ try {
   })
   assert(initialSnapshot.messages.length === 0 && initialSnapshot.tasks.length === 0,
     `Task-card fixture did not start empty: ${JSON.stringify(initialSnapshot)}`)
+  await assertTaskCreateAction(desktopApp.cdp, 0)
 
   const createdTask = await request(desktopApp.cdp, 'tasks.create', {
     commandId: crypto.randomUUID(),
@@ -126,6 +127,7 @@ try {
   })
   assert(terminalSnapshot.tasks.length === 2 && terminalSnapshot.messages.length === 0,
     `Task lifecycle created a CampMessage or lost a Task: ${JSON.stringify(terminalSnapshot)}`)
+  await assertTaskCreateAction(desktopApp.cdp, 2)
 
   await openTaskDetails(desktopApp.cdp, '任务卡已原地更新')
   await assertTerminalDetails(desktopApp.cdp, '更新后的说明仍然只能在任务详情里看到。', 2)
@@ -165,6 +167,9 @@ try {
       taskCardOpensCurrentTerminalDetails: true,
       keyboardOpensTaskDetails: true,
       orderedCriteriaAndAuditDetailsVisible: true,
+      taskCreateActionReplacesLegacyToolbar: true,
+      taskCreateTitleReceivesFocus: true,
+      taskCreateCancelRestoresPreviousList: true,
       desktopAndCompactReducedMotionLayouts: true,
       zoom200KeepsTaskFunctionality: true,
       horizontalOverflow: false
@@ -214,6 +219,51 @@ async function getTask(cdp, campId, taskId) {
   const task = await request(cdp, 'tasks.get', { campId, taskId })
   assert(task?.taskId === taskId, `Could not read Task ${taskId}: ${JSON.stringify(task)}`)
   return task
+}
+
+async function assertTaskCreateAction(cdp, expectedTaskRows) {
+  const opened = await evaluate(cdp, `(() => {
+    const action = document.querySelector('.task-action-button')
+    const panelText = document.querySelector('.task-panel')?.textContent ?? ''
+    const before = {
+      glyph: action?.querySelector('span')?.textContent ?? '',
+      label: action?.querySelector('strong')?.textContent ?? '',
+      taskRows: document.querySelectorAll('.task-list-row').length,
+      legacyHeading: panelText.includes('长期事项'),
+      legacyExplanation: panelText.includes('普通对话不需要 Task')
+    }
+    action?.click()
+    return { opened: Boolean(action), before }
+  })()`)
+  assert(opened.opened
+      && opened.before.glyph === '＋'
+      && opened.before.label === '新建任务'
+      && opened.before.taskRows === expectedTaskRows
+      && !opened.before.legacyHeading
+      && !opened.before.legacyExplanation,
+  `Task creation action did not replace the legacy toolbar: ${JSON.stringify(opened)}`)
+
+  await waitForExpression(cdp, `(() => {
+    const editor = document.querySelector('.task-editor')
+    const title = editor?.querySelector('label:first-of-type input')
+    const action = document.querySelector('.task-action-button')
+    return Boolean(editor && title && document.activeElement === title)
+      && action?.querySelector('span')?.textContent === '←'
+      && action?.querySelector('strong')?.textContent === '返回任务列表'
+  })()`)
+
+  const returned = await evaluate(cdp, `(() => {
+    const action = document.querySelector('.task-action-button')
+    action?.click()
+    return Boolean(action)
+  })()`)
+  assert(returned, 'Task creation return action was unavailable')
+  await waitForExpression(cdp, `(() => {
+    return !document.querySelector('.task-editor')
+      && document.querySelectorAll('.task-list-row').length === ${expectedTaskRows}
+      && document.querySelector('.task-action-button span')?.textContent === '＋'
+      && document.querySelector('.task-action-button strong')?.textContent === '新建任务'
+  })()`)
 }
 
 async function waitForTaskCard(cdp, title, status, count) {
@@ -347,8 +397,7 @@ async function assertZoomedTaskFunctionality(cdp) {
   const state = await evaluate(cdp, `(() => {
     const scroll = document.querySelector('.task-panel-scroll')
     const editor = document.querySelector('.task-editor')
-    const returnButton = [...document.querySelectorAll('button')]
-      .find((button) => button.textContent?.includes('返回列表'))
+    const returnButton = document.querySelector('.task-action-button.is-back')
     const returnButtonRect = returnButton?.getBoundingClientRect()
     const before = scroll?.scrollTop ?? 0
     if (scroll) scroll.scrollTop = scroll.scrollHeight
@@ -380,8 +429,7 @@ async function assertZoomedTaskFunctionality(cdp) {
   `200% zoom hid Task functionality: ${JSON.stringify(state)}`)
 
   const returned = await evaluate(cdp, `(() => {
-    const button = [...document.querySelectorAll('button')]
-      .find((candidate) => candidate.textContent?.includes('返回列表'))
+    const button = document.querySelector('.task-action-button.is-back')
     button?.click()
     return Boolean(button)
   })()`)
