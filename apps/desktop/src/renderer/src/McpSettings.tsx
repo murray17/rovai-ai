@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent
+} from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type {
   AgentProfile,
@@ -11,7 +18,9 @@ import type {
   McpServerView
 } from '@contracts'
 import { SettingsPageHeader } from './SettingsPageHeader'
+import { MemberAvatar } from './MemberAvatar'
 import { localizeExecutionEngineTerms } from './product-copy'
+import { identityColorToken } from './theme'
 
 type JsonEditor = {
   serverId: string | null
@@ -28,6 +37,8 @@ type ImportDraft = {
 type RiskAction =
   | { kind: 'enable'; server: McpServerView }
   | { kind: 'assignment'; server: McpServerView; agent: AgentProfile; assigned: boolean }
+
+type McpServerFilter = 'all' | 'assigned' | 'unassigned' | 'enabled' | 'high-risk'
 
 const NEW_SERVER_JSON = `{
   "mcpServers": {
@@ -155,6 +166,50 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
       })
       const outcome = await applyMutation(result)
       if (outcome === 'risk') setRiskAction({ kind: 'assignment', server, agent, assigned })
+    } catch (nextError) {
+      await load().catch(() => undefined)
+      setError(errorMessage(nextError))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const setBulkAssignments = async (
+    agent: AgentProfile,
+    servers: McpServerView[],
+    assigned: boolean
+  ): Promise<void> => {
+    if (!config || servers.length === 0) return
+    setBusy(`assignment-bulk:${agent.agentId}`)
+    setError(null)
+    setFormIssues([])
+    let current = config
+    try {
+      for (const server of servers) {
+        const result = await window.rovai.request<McpMutationResult>('mcp.assignments.set', {
+          expectedConfigDigest: current.configDigest,
+          serverId: server.serverId,
+          agentId: agent.agentId,
+          assigned,
+          acknowledgeHighRisk: false
+        })
+        if (result.status === 'ok') {
+          current = result.config
+          setConfig(current)
+          continue
+        }
+        if (result.status === 'risk_acknowledgement_required') {
+          setRiskAction({ kind: 'assignment', server, agent, assigned })
+          return
+        }
+        if (result.status === 'conflict') {
+          await load()
+          setError('配置文件刚刚发生了变化。页面已重新读取，请再试一次。')
+          return
+        }
+        setFormIssues(result.issues)
+        return
+      }
     } catch (nextError) {
       await load().catch(() => undefined)
       setError(errorMessage(nextError))
@@ -329,24 +384,20 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
 
       <section className="section-block mcp-assignment-section">
         <div className="section-heading">
-          <div><span className="mcp-section-index">01</span><h2>为队员配置 MCP</h2><p>选择一位队员，再勾选其可以使用的 MCP。每次勾选都会立即保存。</p></div>
+          <div><span className="mcp-section-index">01</span><h2>队员分配工作台</h2><p>先选择队员，再搜索和勾选其后续新执行可以使用的 MCP。</p></div>
           <span className="health-score">{members.length} 位队员</span>
         </div>
         {config === null && <div className="skill-empty" aria-live="polite">正在读取 MCP 配置…</div>}
         {config && members.length === 0 && <div className="skill-empty">当前没有可配置的队员。</div>}
         {config && members.length > 0 && (
-          <div className="mcp-member-grid">
-            {members.map((agent) => (
-              <MemberMcpCard
-                key={agent.agentId}
-                agent={agent}
-                servers={config.servers}
-                busy={busy}
-                disabled={Boolean(config.fileIssue)}
-                onAssignment={(server, assigned) => void setAssignment(agent, server, assigned)}
-              />
-            ))}
-          </div>
+          <McpAssignmentWorkbench
+            members={members}
+            servers={config.servers}
+            busy={busy}
+            disabled={Boolean(config.fileIssue)}
+            onAssignment={(agent, server, assigned) => void setAssignment(agent, server, assigned)}
+            onBulkAssignment={(agent, servers, assigned) => void setBulkAssignments(agent, servers, assigned)}
+          />
         )}
       </section>
 
@@ -359,43 +410,14 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
           <div className="mcp-empty"><div><strong>还没有 MCP Server</strong><p>添加标准 JSON，或从本机 Agent 配置中选择可安全迁移的定义。</p></div></div>
         )}
         {config && !config.fileIssue && config.servers.length > 0 && (
-          <div className="mcp-server-grid">
-            {config.servers.map((server) => (
-              <article className={`mcp-server-card ${server.enabled ? 'is-enabled' : ''}`} key={server.serverId}>
-                <div className="mcp-server-card-top">
-                  <div className="mcp-server-icon" aria-hidden="true">{serverInitial(server)}</div>
-                  <div className="mcp-server-main">
-                    <div className="mcp-server-title">
-                      <strong>{server.name}</strong>
-                      {server.source === 'builtin' && <span className="mcp-preset-badge">内置</span>}
-                      {server.riskLevel === 'high' && <span className="mcp-risk-badge">高权限</span>}
-                    </div>
-                    <span>{mcpTransportLabel(server.transport)}</span>
-                  </div>
-                  <button
-                    className="skill-toggle"
-                    type="button"
-                    role="switch"
-                    aria-checked={server.enabled}
-                    aria-label={`${server.enabled ? '停用' : '启用'} ${server.name}`}
-                    onClick={() => void setEnabled(server)}
-                    disabled={busy !== null}
-                  ><span aria-hidden="true" /></button>
-                </div>
-                <code className="mcp-server-endpoint">{server.endpoint}</code>
-                <footer className="mcp-server-card-footer">
-                  <div className="mcp-server-meta">
-                    <span className={`status-badge ${server.enabled ? 'status-completed' : 'status-neutral'}`}><i />{server.enabled ? '已启用' : '已停用'}</span>
-                    <span>{server.assignedAgentIds.length} 位队员</span>
-                  </div>
-                  <div className="mcp-server-card-actions">
-                    <button className="quiet-button compact" type="button" onClick={() => setEditor({ serverId: server.serverId, definitionJson: server.definitionJson })} disabled={busy !== null}>编辑 JSON</button>
-                    <button className="quiet-button compact danger-text" type="button" onClick={() => setDeleting(server)} disabled={busy !== null}>删除</button>
-                  </div>
-                </footer>
-              </article>
-            ))}
-          </div>
+          <McpServerLibrary
+            members={members}
+            servers={config.servers}
+            busy={busy}
+            onToggleEnabled={(server) => void setEnabled(server)}
+            onEdit={(server) => setEditor({ serverId: server.serverId, definitionJson: server.definitionJson })}
+            onDelete={setDeleting}
+          />
         )}
         <p className="mcp-footnote">配置和分配从后续新执行开始生效；已经开始的执行继续使用其冻结投影。</p>
       </section>
@@ -429,51 +451,300 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
   )
 }
 
-export function MemberMcpCard({
-  agent,
+export function McpAssignmentWorkbench({
+  members,
   servers,
   busy,
   disabled,
-  onAssignment
+  onAssignment,
+  onBulkAssignment
 }: {
-  agent: AgentProfile
+  members: AgentProfile[]
   servers: McpServerView[]
   busy: string | null
   disabled: boolean
-  onAssignment(server: McpServerView, assigned: boolean): void
+  onAssignment(agent: AgentProfile, server: McpServerView, assigned: boolean): void
+  onBulkAssignment(agent: AgentProfile, servers: McpServerView[], assigned: boolean): void
 }): React.JSX.Element {
-  const assigned = servers.filter((server) => server.assignedAgentIds.includes(agent.agentId))
+  const [selectedAgentId, setSelectedAgentId] = useState(members[0]?.agentId ?? '')
+  const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState<McpServerFilter>('all')
+  const selectedAgent = members.find((member) => member.agentId === selectedAgentId) ?? members[0]
+
+  useEffect(() => {
+    if (members.length > 0 && !members.some((member) => member.agentId === selectedAgentId)) {
+      setSelectedAgentId(members[0].agentId)
+    }
+  }, [members, selectedAgentId])
+
+  if (!selectedAgent) return <div className="skill-empty">当前没有可配置的队员。</div>
+
+  const visibleServers = filterMcpServers(servers, query, filter, selectedAgent.agentId)
+  const assignedCount = servers.filter((server) => server.assignedAgentIds.includes(selectedAgent.agentId)).length
+  const selectTargets = bulkAssignmentTargets(visibleServers, selectedAgent.agentId, true)
+  const clearTargets = bulkAssignmentTargets(visibleServers, selectedAgent.agentId, false)
+  const skippedHighRisk = visibleServers.some((server) => (
+    server.riskLevel === 'high' && !server.assignedAgentIds.includes(selectedAgent.agentId)
+  ))
+
+  const focusMember = (index: number): void => {
+    const member = members[index]
+    if (!member) return
+    setSelectedAgentId(member.agentId)
+    requestAnimationFrame(() => document.getElementById(memberOptionId(member.agentId))?.focus())
+  }
+
+  const onRosterKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+    const currentIndex = Math.max(0, members.findIndex((member) => member.agentId === selectedAgent.agentId))
+    let nextIndex: number | null = null
+    if (event.key === 'ArrowDown') nextIndex = Math.min(members.length - 1, currentIndex + 1)
+    if (event.key === 'ArrowUp') nextIndex = Math.max(0, currentIndex - 1)
+    if (event.key === 'Home') nextIndex = 0
+    if (event.key === 'End') nextIndex = members.length - 1
+    if (nextIndex === null) return
+    event.preventDefault()
+    focusMember(nextIndex)
+  }
+
   return (
-    <article className="mcp-member-card">
-      <span className="mcp-member-avatar" aria-hidden="true">{agent.displayName.slice(0, 1)}</span>
-      <div className="mcp-member-identity">
-        <strong>{agent.displayName}</strong>
-        <span>{agent.teamRole || '队员'}</span>
-        <small>{assigned.length > 0 ? assigned.map((server) => server.name).join('、') : '尚未配置 MCP'}</small>
-      </div>
-      <details className="mcp-member-picker">
-        <summary aria-label={`为${agent.displayName}选择 MCP`}>{assigned.length > 0 ? `${assigned.length} 个 MCP` : '选择 MCP'}</summary>
-        <div className="mcp-member-picker-menu">
-          {servers.map((server) => {
-            const checked = server.assignedAgentIds.includes(agent.agentId)
-            const saving = busy === `assignment:${agent.agentId}:${server.serverId}`
+    <div className="mcp-assignment-workbench">
+      <aside className="mcp-member-roster-pane" aria-label="选择队员">
+        <div className="mcp-member-roster-heading">
+          <strong>队员</strong>
+          <span>{members.length}</span>
+        </div>
+        <div className="mcp-member-roster" role="listbox" aria-label="队员列表" onKeyDown={onRosterKeyDown}>
+          {members.map((member) => {
+            const memberAssignedCount = servers.filter((server) => server.assignedAgentIds.includes(member.agentId)).length
+            const selected = member.agentId === selectedAgent.agentId
             return (
-              <label key={server.serverId}>
+              <button
+                id={memberOptionId(member.agentId)}
+                className={`mcp-member-roster-row ${selected ? 'is-selected' : ''}`}
+                key={member.agentId}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                tabIndex={selected ? 0 : -1}
+                onClick={() => setSelectedAgentId(member.agentId)}
+              >
+                <MemberAvatar agentId={member.agentId} avatarRef={member.avatarRef} displayName={member.displayName} size="list" decorative />
+                <span>
+                  <strong>{member.displayName}</strong>
+                  <small>{member.teamRole || '队员'} · {memberAssignedCount > 0 ? `${memberAssignedCount} 个 MCP` : '未分配'}</small>
+                </span>
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg>
+              </button>
+            )
+          })}
+        </div>
+      </aside>
+
+      <div className="mcp-assignment-chooser">
+        <header className="mcp-assignment-chooser-heading">
+          <MemberAvatar agentId={selectedAgent.agentId} avatarRef={selectedAgent.avatarRef} displayName={selectedAgent.displayName} size="picker" decorative />
+          <div>
+            <span>正在为队员配置</span>
+            <strong>{selectedAgent.displayName}</strong>
+            <small>{selectedAgent.teamRole || '队员'} · 已分配 {assignedCount} / {servers.length}</small>
+          </div>
+          <span className="mcp-assignment-scope">只影响后续新执行</span>
+        </header>
+
+        <div className="mcp-assignment-toolbar">
+          <label className="mcp-search-field">
+            <SearchIcon />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索 MCP 名称、连接或来源" aria-label="搜索可分配 MCP" />
+          </label>
+          <div className="mcp-filter-rail" aria-label="分配筛选">
+            {([
+              ['all', '全部'],
+              ['assigned', '只看已分配'],
+              ['unassigned', '只看未分配']
+            ] as const).map(([value, label]) => (
+              <button className={filter === value ? 'is-active' : ''} key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>
+            ))}
+          </div>
+        </div>
+
+        <div className="mcp-assignment-options" aria-label={`${selectedAgent.displayName}的 MCP`}>
+          {visibleServers.map((server) => {
+            const checked = server.assignedAgentIds.includes(selectedAgent.agentId)
+            const saving = busy === `assignment:${selectedAgent.agentId}:${server.serverId}`
+            return (
+              <label
+                className={`mcp-assignment-option ${checked ? 'is-assigned' : ''}`}
+                data-mcp-server-name={server.name}
+                key={server.serverId}
+                style={{ '--mcp-identity': identityColorToken(server.serverId) } as CSSProperties}
+              >
+                <span className="mcp-assignment-option-mark" aria-hidden="true">{serverInitial(server)}</span>
+                <span className="mcp-assignment-option-copy">
+                  <strong>{server.name}</strong>
+                  <small>{mcpTransportLabel(server.transport)} · {server.enabled ? '已启用' : '当前停用'}{server.riskLevel === 'high' ? ' · 高权限' : ''}</small>
+                  <code>{server.endpoint}</code>
+                </span>
+                <span className="mcp-assignment-option-state">{saving ? '保存中…' : checked ? '已分配' : '未分配'}</span>
                 <input
                   type="checkbox"
                   checked={checked}
+                  aria-label={`${checked ? '取消分配' : '分配'} ${server.name} 给 ${selectedAgent.displayName}`}
                   disabled={disabled || busy !== null}
-                  onChange={(event) => onAssignment(server, event.target.checked)}
+                  onChange={(event) => onAssignment(selectedAgent, server, event.target.checked)}
                 />
-                <span><b>{server.name}</b><small>{server.enabled ? '已启用' : '当前停用'}{server.riskLevel === 'high' ? ' · 高权限' : ''}</small></span>
-                {saving && <i>保存中…</i>}
               </label>
             )
           })}
-          {servers.length === 0 && <span className="mcp-picker-empty">请先添加 MCP Server。</span>}
+          {visibleServers.length === 0 && (
+            <div className="mcp-assignment-empty">{servers.length === 0 ? '请先添加 MCP Server。' : '当前筛选下没有 MCP。'}</div>
+          )}
         </div>
-      </details>
-    </article>
+
+        <footer className="mcp-assignment-footer">
+          <span>{skippedHighRisk ? '高权限 MCP 需逐项确认，批量选择会自动跳过。' : `${visibleServers.length} 个筛选结果`}</span>
+          <div>
+            <button className="quiet-button compact" type="button" disabled={disabled || busy !== null || clearTargets.length === 0} onClick={() => onBulkAssignment(selectedAgent, clearTargets, false)}>清空当前筛选</button>
+            <button className="quiet-button compact" type="button" disabled={disabled || busy !== null || selectTargets.length === 0} onClick={() => onBulkAssignment(selectedAgent, selectTargets, true)}>选择筛选结果</button>
+          </div>
+        </footer>
+      </div>
+    </div>
+  )
+}
+
+export function McpServerLibrary({
+  members,
+  servers,
+  busy,
+  onToggleEnabled,
+  onEdit,
+  onDelete
+}: {
+  members: AgentProfile[]
+  servers: McpServerView[]
+  busy: string | null
+  onToggleEnabled(server: McpServerView): void
+  onEdit(server: McpServerView): void
+  onDelete(server: McpServerView): void
+}): React.JSX.Element {
+  const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState<McpServerFilter>('all')
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const visibleServers = filterMcpServers(servers, query, filter)
+  const membersById = useMemo(() => new Map(members.map((member) => [member.agentId, member])), [members])
+
+  const toggleDetails = (serverId: string): void => {
+    setExpanded((current) => {
+      const next = new Set(current)
+      if (next.has(serverId)) next.delete(serverId)
+      else next.add(serverId)
+      return next
+    })
+  }
+
+  return (
+    <div className="mcp-library">
+      <div className="mcp-library-toolbar">
+        <label className="mcp-search-field">
+          <SearchIcon />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索 MCP 名称、连接或来源" aria-label="搜索已安装 MCP" />
+        </label>
+        <div className="mcp-filter-rail" aria-label="MCP Library 筛选">
+          {([
+            ['all', '全部'],
+            ['enabled', '已启用'],
+            ['high-risk', '高权限']
+          ] as const).map(([value, label]) => (
+            <button className={filter === value ? 'is-active' : ''} key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>
+          ))}
+        </div>
+      </div>
+
+      {visibleServers.length === 0 && <div className="skill-empty">当前筛选下没有 MCP。</div>}
+      {visibleServers.length > 0 && (
+        <div className="mcp-server-list">
+          <div className="mcp-server-columns" aria-hidden="true">
+            <span />
+            <span>MCP</span>
+            <span>队员范围</span>
+            <span>状态</span>
+            <span>查看</span>
+          </div>
+          {visibleServers.map((server) => {
+            const isExpanded = expanded.has(server.serverId)
+            const assignedMembers = server.assignedAgentIds.flatMap((agentId) => {
+              const member = membersById.get(agentId)
+              return member ? [member] : []
+            })
+            const detailsId = `mcp-details-${safeDomId(server.serverId)}`
+            return (
+              <article
+                className={`mcp-server-row ${server.enabled ? 'is-enabled' : 'is-disabled'} ${isExpanded ? 'is-expanded' : ''}`}
+                data-mcp-server-name={server.name}
+                key={server.serverId}
+                style={{ '--mcp-identity': identityColorToken(server.serverId) } as CSSProperties}
+              >
+                <div className="mcp-server-row-primary">
+                  <span className="mcp-server-mark" aria-hidden="true">{serverInitial(server)}</span>
+                  <div className="mcp-server-main">
+                    <div className="mcp-server-title">
+                      <strong title={server.name}>{server.name}</strong>
+                      <span className={`mcp-source-badge source-${server.source}`}>{mcpSourceLabel(server.source)}</span>
+                      {server.riskLevel === 'high' && <span className="mcp-risk-badge">高权限</span>}
+                    </div>
+                    <p>{mcpTransportLabel(server.transport)}</p>
+                    <code>{server.endpoint}</code>
+                  </div>
+                  <div className="mcp-server-assignees" aria-label={`${server.assignedAgentIds.length} 位队员`}>
+                    <div className="mcp-assignee-stack" aria-hidden="true">
+                      {assignedMembers.slice(0, 3).map((member) => (
+                        <MemberAvatar key={member.agentId} agentId={member.agentId} avatarRef={member.avatarRef} displayName={member.displayName} size="mention" decorative />
+                      ))}
+                      {server.assignedAgentIds.length > 3 && <span>+{server.assignedAgentIds.length - 3}</span>}
+                    </div>
+                    <span>{server.assignedAgentIds.length > 0 ? `${server.assignedAgentIds.length} 位队员` : '未分配'}</span>
+                  </div>
+                  <div className="mcp-server-status-control">
+                    <button
+                      className="skill-toggle"
+                      type="button"
+                      role="switch"
+                      aria-checked={server.enabled}
+                      aria-label={`${server.enabled ? '停用' : '启用'} ${server.name}`}
+                      onClick={() => onToggleEnabled(server)}
+                      disabled={busy !== null}
+                    ><span aria-hidden="true" /></button>
+                    <small>{busy === `toggle:${server.serverId}` ? '保存中…' : server.enabled ? '已启用' : '已停用'}</small>
+                  </div>
+                  <button
+                    className="mcp-server-details-button"
+                    type="button"
+                    aria-expanded={isExpanded}
+                    aria-controls={detailsId}
+                    onClick={() => toggleDetails(server.serverId)}
+                  >
+                    <span>详情</span>
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
+                  </button>
+                </div>
+                <div className="mcp-server-row-details" id={detailsId} hidden={!isExpanded}>
+                  <dl>
+                    <div><dt>连接方式</dt><dd>{mcpTransportLabel(server.transport)}</dd></div>
+                    <div><dt>来源</dt><dd>{mcpSourceLabel(server.source)}</dd></div>
+                    <div className="mcp-server-detail-wide"><dt>Endpoint</dt><dd><code>{server.endpoint}</code></dd></div>
+                    <div className="mcp-server-detail-wide"><dt>可访问队员</dt><dd>{assignedMembers.length > 0 ? assignedMembers.map((member) => member.displayName).join('、') : '尚未分配队员'}</dd></div>
+                  </dl>
+                  <div className="mcp-server-row-actions">
+                    <button className="quiet-button compact" type="button" onClick={() => onEdit(server)} disabled={busy !== null}>编辑 JSON</button>
+                    <button className="quiet-button compact danger-text" type="button" onClick={() => onDelete(server)} disabled={busy !== null}>删除</button>
+                  </div>
+                </div>
+              </article>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -619,8 +890,8 @@ function ConfirmDialogs({
       </Dialog.Root>
       <Dialog.Root open={riskAction !== null} onOpenChange={(open) => { if (!open) onRiskClose() }}>
         <Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="dialog-content compact-dialog mcp-risk-dialog">
-          <Dialog.Title>启用高权限 MCP？</Dialog.Title>
-          <Dialog.Description><strong>{riskAction?.server.name}</strong> 可以操作浏览器或访问更广泛的本机资源。只有在你信任其配置与来源时才继续。</Dialog.Description>
+          <Dialog.Title>{riskAction?.kind === 'assignment' ? '分配高权限 MCP？' : '启用高权限 MCP？'}</Dialog.Title>
+          <Dialog.Description><strong>{riskAction?.server.name}</strong> 可以操作浏览器或访问更广泛的本机资源。只有在你信任其配置与来源时，才{riskAction?.kind === 'assignment' ? '分配给这位队员' : '启用'}。</Dialog.Description>
           <div className="dialog-actions"><button className="quiet-button" type="button" onClick={onRiskClose} disabled={busy}>返回</button><button className="primary-button" type="button" onClick={onRiskConfirm} disabled={busy}>我了解风险，继续</button></div>
         </Dialog.Content></Dialog.Portal>
       </Dialog.Root>
@@ -640,8 +911,49 @@ function buildImportDrafts(inspection: McpImportInspection, servers: McpServerVi
   }))
 }
 
+export function filterMcpServers(
+  servers: McpServerView[],
+  query: string,
+  filter: McpServerFilter,
+  agentId?: string
+): McpServerView[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  return servers.filter((server) => {
+    const assigned = agentId ? server.assignedAgentIds.includes(agentId) : false
+    if (filter === 'assigned' && !assigned) return false
+    if (filter === 'unassigned' && assigned) return false
+    if (filter === 'enabled' && !server.enabled) return false
+    if (filter === 'high-risk' && server.riskLevel !== 'high') return false
+    if (!normalizedQuery) return true
+    return [
+      server.name,
+      server.endpoint,
+      mcpTransportLabel(server.transport),
+      mcpSourceLabel(server.source)
+    ].some((value) => value.toLocaleLowerCase().includes(normalizedQuery))
+  })
+}
+
+export function bulkAssignmentTargets(
+  servers: McpServerView[],
+  agentId: string,
+  assigned: boolean
+): McpServerView[] {
+  return servers.filter((server) => {
+    const currentlyAssigned = server.assignedAgentIds.includes(agentId)
+    if (currentlyAssigned === assigned) return false
+    return !assigned || server.riskLevel !== 'high'
+  })
+}
+
 export function mcpTransportLabel(transport: McpServerView['transport']): string {
   return transport === 'stdio' ? 'Stdio' : 'Streamable HTTP'
+}
+
+export function mcpSourceLabel(source: McpServerView['source']): string {
+  if (source === 'builtin') return 'Rovai 内置'
+  if (source === 'import') return '本机导入'
+  return '用户添加'
 }
 
 export function importCompatibilityLabel(
@@ -672,6 +984,23 @@ function serverInitial(server: McpServerView): string {
   if (server.presetId === 'context7') return 'C7'
   if (server.presetId === 'playwright') return 'PW'
   return server.name.slice(0, 2).toUpperCase()
+}
+
+function safeDomId(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, '-')
+}
+
+function memberOptionId(agentId: string): string {
+  return `mcp-member-${safeDomId(agentId)}`
+}
+
+function SearchIcon(): React.JSX.Element {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <circle cx="8.5" cy="8.5" r="5.25" />
+      <path d="m12.5 12.5 4 4" />
+    </svg>
+  )
 }
 
 function issueText(issue: McpConfigIssue): string {

@@ -59,16 +59,38 @@ try {
   await cdp.send('Page.bringToFront')
   await resize(cdp, 1440, 920)
   await waitForExpression(cdp, `Boolean(document.querySelector('.unified-sidebar-footer button[aria-label="设置"]'))`, 45_000)
+  const existingMembers = await request(cdp, 'members.list')
+  for (let index = existingMembers.length; index < 12; index += 1) {
+    const result = await request(cdp, 'members.create', {
+      commandId: crypto.randomUUID(),
+      command: {
+        displayName: `名册滚动验收 ${String(index + 1).padStart(2, '0')}`,
+        teamRole: index % 2 === 0 ? '长列表协作者' : '能力配置协作者',
+        professionalResponsibilities: '验证大量在队队员时 MCP 分配名册保持在工作台内部滚动。',
+        personalityTraits: ['可验证'],
+        workingPrinciples: '',
+        growthTopic: ''
+      }
+    })
+    assert(result.status === 'applied', `Could not create roster fixture ${index + 1}: ${JSON.stringify(result)}`)
+  }
+  if (existingMembers.length < 12) {
+    await evaluate(cdp, `location.reload()`)
+    await waitForExpression(cdp, `Boolean(document.querySelector('.unified-sidebar-footer button[aria-label="设置"]'))`, 45_000)
+  }
   await click(cdp, `.unified-sidebar-footer button[aria-label="设置"]`)
   await waitForExpression(cdp, `Boolean(document.querySelector('.settings-workbench'))`, 10_000)
   await clickButtonByText(cdp, '.settings-sidebar-menu button', 'MCP')
   await waitForExpression(cdp, `Boolean(document.querySelector('.mcp-settings'))`, 10_000)
-  await waitForExpression(cdp, `document.querySelectorAll('.mcp-server-card').length === 2`, 30_000)
+  await waitForExpression(cdp, `document.querySelectorAll('.mcp-server-row').length === 2`, 30_000)
 
   const initial = await evaluate(cdp, `(() => ({
     subnav: [...document.querySelectorAll('.settings-sidebar-menu strong')].map((node) => node.textContent?.trim()),
     serverNames: [...document.querySelectorAll('.mcp-server-title strong')].map((node) => node.textContent?.trim()),
-    memberCards: document.querySelectorAll('.mcp-member-card').length,
+    memberRows: document.querySelectorAll('.mcp-member-roster-row').length,
+    memberAvatars: document.querySelectorAll('.mcp-member-roster-row .member-avatar').length,
+    rosterOverflowY: getComputedStyle(document.querySelector('.mcp-member-roster')).overflowY,
+    rosterScrollable: document.querySelector('.mcp-member-roster').scrollHeight > document.querySelector('.mcp-member-roster').clientHeight,
     importDialog: Boolean(document.querySelector('.mcp-import-dialog')),
     publicPreview: document.querySelector('.mcp-source-panel pre')?.textContent ?? '',
     hiddenMetadataVisible: document.body.innerText.includes('_rovai'),
@@ -82,12 +104,38 @@ try {
     `Settings navigation is incorrect: ${JSON.stringify(initial)}`
   )
   assert(JSON.stringify(initial.serverNames) === JSON.stringify(['context7', 'playwright']), `Fresh reviewed defaults are incorrect: ${JSON.stringify(initial)}`)
-  assert(initial.memberCards > 0, `Member Assignment cards are missing: ${JSON.stringify(initial)}`)
+  assert(initial.memberRows > 0 && initial.memberAvatars === initial.memberRows, `Member Assignment roster or avatars are missing: ${JSON.stringify(initial)}`)
+  assert(initial.rosterOverflowY === 'auto', `Member roster is not independently scrollable: ${JSON.stringify(initial)}`)
+  if (initial.memberRows >= 8) assert(initial.rosterScrollable, `Tall member roster did not overflow inside the workbench: ${JSON.stringify(initial)}`)
   assert(!initial.importDialog, 'MCP import scanned automatically on first load')
   assert(!initial.hiddenMetadataVisible, 'Hidden _rovai metadata reached the Renderer')
   assert(!initial.sourceSecretVisible, 'Source literal secret reached the Renderer before import')
   assert(initial.sharedHeadingCount === 1 && initial.heading === 'MCP 配置', `MCP did not use the shared Settings heading: ${JSON.stringify(initial)}`)
   assert(initial.legacyHeroCount === 0, `Legacy boxed Hero returned to MCP Settings: ${JSON.stringify(initial)}`)
+
+  const rosterKeyboardStarted = await evaluate(cdp, `(() => {
+    const selected = document.querySelector('.mcp-member-roster-row[aria-selected="true"]')
+    selected?.focus()
+    selected?.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
+    return Boolean(selected)
+  })()`)
+  assert(rosterKeyboardStarted, 'Could not focus the selected member roster row')
+  await waitForExpression(cdp, `(() => {
+    const rows = [...document.querySelectorAll('.mcp-member-roster-row')]
+    return rows.at(-1)?.getAttribute('aria-selected') === 'true' && document.activeElement === rows.at(-1)
+  })()`, 5_000)
+  await evaluate(cdp, `document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }))`)
+  await waitForExpression(cdp, `(() => {
+    const row = document.querySelector('.mcp-member-roster-row')
+    return row?.getAttribute('aria-selected') === 'true' && document.activeElement === row
+  })()`, 5_000)
+
+  await setValue(cdp, '.mcp-assignment-toolbar input', 'play')
+  await waitForExpression(cdp, `document.querySelectorAll('.mcp-assignment-option').length === 1 && document.querySelector('.mcp-assignment-option')?.dataset.mcpServerName === 'playwright'`, 5_000)
+  await setValue(cdp, '.mcp-assignment-toolbar input', '')
+  await clickButtonByText(cdp, '.mcp-assignment-toolbar button', '只看未分配')
+  await waitForExpression(cdp, `[...document.querySelectorAll('.mcp-assignment-option input')].every((node) => !node.checked)`, 5_000)
+  await clickButtonByText(cdp, '.mcp-assignment-toolbar button', '全部')
 
   await clickButtonByText(cdp, '.mcp-settings button', '从本机 Agent 导入')
   await waitForExpression(cdp, `Boolean(document.querySelector('.mcp-import-dialog'))`, 30_000)
@@ -122,9 +170,9 @@ try {
     return Boolean(button) && !button.disabled
   })()`, 5_000)
   await clickButtonByText(cdp, '.mcp-import-dialog button', '导入所选')
-  await waitForExpression(cdp, `document.querySelectorAll('.mcp-server-card').length === 3`, 15_000)
+  await waitForExpression(cdp, `document.querySelectorAll('.mcp-server-row').length === 3`, 15_000)
   const imported = await evaluate(cdp, `(() => {
-    const row = [...document.querySelectorAll('.mcp-server-card')]
+    const row = [...document.querySelectorAll('.mcp-server-row')]
       .find((node) => node.querySelector('.mcp-server-title strong')?.textContent === 'imported_docs')
     return {
       text: row?.innerText,
@@ -142,31 +190,40 @@ try {
     mcpServers: { 'smoke-http': { url: 'https://example.test/mcp' } }
   }, null, 2))
   await clickButtonByText(cdp, '.mcp-editor-dialog button', '保存')
-  await waitForExpression(cdp, `document.querySelectorAll('.mcp-server-card').length === 4`, 10_000)
+  await waitForExpression(cdp, `document.querySelectorAll('.mcp-server-row').length === 4`, 10_000)
   await waitForExpression(cdp, `document.activeElement?.textContent?.includes('添加 MCP')`, 5_000)
 
+  await evaluate(cdp, `[...document.querySelectorAll('.mcp-member-roster-row')].at(-1)?.click()`)
+  await waitForExpression(cdp, `document.querySelectorAll('.mcp-assignment-option input:checked').length === 0`, 5_000)
+  await clickButtonByText(cdp, '.mcp-assignment-footer button', '选择筛选结果')
+  await waitForExpression(cdp, `(() => {
+    const options = [...document.querySelectorAll('.mcp-assignment-option')]
+    const checked = options.filter((node) => node.querySelector('input')?.checked).map((node) => node.dataset.mcpServerName)
+    return checked.length === 3 && !checked.includes('playwright')
+  })()`, 15_000)
+  await clickButtonByText(cdp, '.mcp-assignment-footer button', '清空当前筛选')
+  await waitForExpression(cdp, `document.querySelectorAll('.mcp-assignment-option input:checked').length === 0`, 15_000)
+  await evaluate(cdp, `document.querySelector('.mcp-member-roster-row')?.click()`)
+  await waitForExpression(cdp, `document.querySelector('.mcp-member-roster-row')?.getAttribute('aria-selected') === 'true'`, 5_000)
+
   const assignment = await evaluate(cdp, `(() => {
-    const card = document.querySelector('.mcp-member-card')
-    const picker = card?.querySelector('.mcp-member-picker')
-    if (!picker) return false
-    picker.open = true
-    const label = [...picker.querySelectorAll('label')]
-      .find((node) => node.querySelector('b')?.textContent === 'smoke-http')
+    const label = [...document.querySelectorAll('.mcp-assignment-option')]
+      .find((node) => node.dataset.mcpServerName === 'smoke-http')
     const checkbox = label?.querySelector('input')
     if (!checkbox || checkbox.checked) return false
     checkbox.click()
     return true
   })()`)
-  assert(assignment, 'Member tofu did not expose the MCP Assignment picker')
+  assert(assignment, 'Assignment workbench did not expose the new MCP option')
   await waitForExpression(cdp, `(() => {
-    const row = [...document.querySelectorAll('.mcp-server-card')]
+    const row = [...document.querySelectorAll('.mcp-server-row')]
       .find((node) => node.querySelector('.mcp-server-title strong')?.textContent === 'smoke-http')
-    return row?.querySelector('.mcp-server-meta')?.textContent.includes('1 位队员')
+    return row?.querySelector('.mcp-server-assignees')?.textContent.includes('1 位队员')
   })()`, 10_000)
 
   await clickRowSwitch(cdp, 'smoke-http')
   await waitForExpression(cdp, `(() => {
-    const row = [...document.querySelectorAll('.mcp-server-card')]
+    const row = [...document.querySelectorAll('.mcp-server-row')]
       .find((node) => node.querySelector('.mcp-server-title strong')?.textContent === 'smoke-http')
     return row?.querySelector('[role="switch"]')?.getAttribute('aria-checked') === 'true'
   })()`, 10_000)
@@ -182,11 +239,16 @@ try {
   const day = await layoutState(cdp)
   assertLayout(day, 1440, 920, 'day')
 
-  await evaluate(cdp, `document.querySelectorAll('.mcp-member-picker[open]').forEach((node) => { node.open = false })`)
-  await waitForExpression(cdp, `!document.querySelector('.mcp-member-picker[open]')`, 5_000)
   await capture(cdp, `${outputPrefix}-day-clean.png`)
   const cleanDay = await layoutState(cdp)
   assertLayout(cleanDay, 1440, 920, 'day')
+
+  await evaluate(cdp, `document.querySelector('.mcp-installed-section')?.scrollIntoView({ block: 'start' })`)
+  await wait(150)
+  await capture(cdp, `${outputPrefix}-library-clean.png`)
+  const libraryDay = await layoutState(cdp)
+  assertLayout(libraryDay, 1440, 920, 'day')
+  await evaluate(cdp, `document.querySelector('.settings-panel')?.scrollTo({ top: 0 })`)
 
   await evaluate(cdp, `window.rovai.appearance.setPreference('night')`)
   await waitForExpression(cdp, `document.documentElement.dataset.theme === 'day'`, 5_000)
@@ -209,7 +271,7 @@ try {
   await clickRowButton(cdp, 'smoke-http', '删除')
   await waitForExpression(cdp, `Boolean(document.querySelector('.compact-dialog'))`, 5_000)
   await clickButtonByText(cdp, '.compact-dialog button', '删除')
-  await waitForExpression(cdp, `document.querySelectorAll('.mcp-server-card').length === 3`, 10_000)
+  await waitForExpression(cdp, `document.querySelectorAll('.mcp-server-row').length === 3`, 10_000)
   const finalNames = await evaluate(cdp, `[...document.querySelectorAll('.mcp-server-title > strong')].map((node) => node.textContent)`)
   assert(JSON.stringify(finalNames) === JSON.stringify(['context7', 'imported_docs', 'playwright']), `Delete did not converge: ${JSON.stringify(finalNames)}`)
 
@@ -243,11 +305,15 @@ try {
     importedSecretRedacted: true,
     reviewedDefaultsMaterialized: true,
     noAutomaticImportScan: true,
+    rosterKeyboardNavigation: true,
+    assignmentSearchAndFilter: true,
     memberAssignmentEdited: true,
+    bulkAssignmentEdited: true,
     enableTogglePersisted: true,
     permissionsRepaired: true,
     day,
     cleanDay,
+    libraryDay,
     nightPreferenceDay,
     zoom200,
     reducedMotion,
@@ -256,6 +322,7 @@ try {
     screenshots: [
       `${outputPrefix}-day.png`,
       `${outputPrefix}-day-clean.png`,
+      `${outputPrefix}-library-clean.png`,
       `${outputPrefix}-night-preference-day-compact.png`
     ]
   }, null, 2))
@@ -282,6 +349,8 @@ async function layoutState(cdp) {
   return evaluate(cdp, `(() => {
     const panel = document.querySelector('.settings-panel')
     const dialog = document.querySelector('[data-radix-dialog-content]')
+    const roster = document.querySelector('.mcp-member-roster')
+    const workbench = document.querySelector('.mcp-assignment-workbench')
     const panelRect = panel?.getBoundingClientRect()
     return {
       theme: document.documentElement.dataset.theme,
@@ -303,7 +372,13 @@ async function layoutState(cdp) {
           right: Math.round(node.getBoundingClientRect().right - panelRect.right)
         })) : [],
       dialogOpen: Boolean(dialog),
-      focusVisibleTarget: document.activeElement?.tagName
+      focusVisibleTarget: document.activeElement?.tagName,
+      rosterCount: document.querySelectorAll('.mcp-member-roster-row').length,
+      rosterOverflowX: roster ? getComputedStyle(roster).overflowX : null,
+      rosterOverflowY: roster ? getComputedStyle(roster).overflowY : null,
+      rosterScrollsX: roster ? roster.scrollWidth > roster.clientWidth : false,
+      rosterScrollsY: roster ? roster.scrollHeight > roster.clientHeight : false,
+      workbenchColumns: workbench ? getComputedStyle(workbench).gridTemplateColumns : null
     }
   })()`)
 }
@@ -313,6 +388,12 @@ function assertLayout(value, width, height, theme) {
   assert(value.theme === theme, `Theme mismatch: ${JSON.stringify(value)}`)
   assert(!value.horizontalOverflow && !value.panelOverflow, `MCP settings overflow: ${JSON.stringify(value)}`)
   assert(!value.dialogOpen, `Unexpected dialog obscured acceptance capture: ${JSON.stringify(value)}`)
+  if (value.rosterCount >= 8 && width > 820) {
+    assert(value.rosterOverflowY === 'auto' && value.rosterScrollsY, `Tall roster did not scroll vertically inside the workbench: ${JSON.stringify(value)}`)
+  }
+  if (value.rosterCount >= 8 && width <= 820) {
+    assert(value.rosterOverflowX === 'auto' && value.rosterScrollsX, `Narrow roster did not become a bounded horizontal strip: ${JSON.stringify(value)}`)
+  }
 }
 
 async function setLabeledValue(cdp, root, label, value, control = 'input') {
@@ -350,15 +431,29 @@ async function setValue(cdp, selector, value) {
 
 async function rowText(cdp, name) {
   return evaluate(cdp, `(() => {
-    const row = [...document.querySelectorAll('.mcp-server-card')]
+    const row = [...document.querySelectorAll('.mcp-server-row')]
       .find((node) => node.querySelector('.mcp-server-title strong')?.textContent === ${JSON.stringify(name)})
     return row?.innerText ?? ''
   })()`)
 }
 
 async function clickRowButton(cdp, name, label) {
+  const expanded = await evaluate(cdp, `(() => {
+    const row = [...document.querySelectorAll('.mcp-server-row')]
+      .find((node) => node.querySelector('.mcp-server-title strong')?.textContent === ${JSON.stringify(name)})
+    const details = row?.querySelector('.mcp-server-details-button')
+    if (!row || !details) return false
+    if (details.getAttribute('aria-expanded') !== 'true') details.click()
+    return true
+  })()`)
+  assert(expanded, `Could not expand ${name}`)
+  await waitForExpression(cdp, `(() => {
+    const row = [...document.querySelectorAll('.mcp-server-row')]
+      .find((node) => node.querySelector('.mcp-server-title strong')?.textContent === ${JSON.stringify(name)})
+    return Boolean(row?.querySelector('.mcp-server-row-details:not([hidden])'))
+  })()`, 5_000)
   const clicked = await evaluate(cdp, `(() => {
-    const row = [...document.querySelectorAll('.mcp-server-card')]
+    const row = [...document.querySelectorAll('.mcp-server-row')]
       .find((node) => node.querySelector('.mcp-server-title strong')?.textContent === ${JSON.stringify(name)})
     const button = [...(row?.querySelectorAll('button') ?? [])]
       .find((node) => node.textContent?.trim() === ${JSON.stringify(label)})
@@ -371,7 +466,7 @@ async function clickRowButton(cdp, name, label) {
 
 async function clickRowSwitch(cdp, name) {
   const clicked = await evaluate(cdp, `(() => {
-    const row = [...document.querySelectorAll('.mcp-server-card')]
+    const row = [...document.querySelectorAll('.mcp-server-row')]
       .find((node) => node.querySelector('.mcp-server-title strong')?.textContent === ${JSON.stringify(name)})
     const button = row?.querySelector('[role="switch"]')
     button?.focus()
@@ -422,6 +517,10 @@ async function evaluate(cdp, expression) {
     throw new Error(response.result.exceptionDetails.text)
   }
   return response.result?.result?.value
+}
+
+async function request(cdp, method, params = {}) {
+  return evaluate(cdp, `window.rovai.request(${JSON.stringify(method)}, ${JSON.stringify(params)})`)
 }
 
 async function waitForExpression(cdp, expression, timeoutMs) {

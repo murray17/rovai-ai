@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.62
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -13,6 +13,8 @@ last_updated: 2026-08-12
 > 当前状态：领域、持久化、CLI、文档与完整自动化门禁均已完成。
 >
 > 前置版本：[v0.61 队员页来源感知会话返回](../v0.61/README.md)
+>
+> 后续版本：[v0.63 MCP 队员分配工作台与开放 Library](../v0.63/README.md)
 
 ## 版本目标
 

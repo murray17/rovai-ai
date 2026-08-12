@@ -3,7 +3,7 @@ document_type: ui-design-system
 authority: renderer-ui-detail
 status: accepted
 design_direction: neutral-porcelain-steel
-target_version: v0.61
+target_version: v0.63
 implementation_status: complete
 last_updated: 2026-08-12
 ---
@@ -1080,16 +1080,25 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 
 ### MCP
 
-> v0.37 局部替代：本节的 Server list row、导入默认分配和 typed split Dialog 已由
-> [v0.37 MCP 生产设计](../versions/v0.37/production-design.md) 替代。App Shell、Arctic Dawn
-> Token、状态、安全、响应式与无障碍规则继续有效。
+> v0.37 继续拥有 JSON 真源、导入、安全、mutation 与 Runtime Projection 边界；v0.63 以确认的
+> Variant B 替代其队员 tofu / 原生 `details` picker 和 Server tofu。版本级状态见
+> [v0.63 概览](../versions/v0.63/README.md)与[实施计划](../versions/v0.63/implementation-plan.md)。
 
 - 共享设置页头标题“MCP”，说明它是应用级外部 MCP Library、按队员分配且不修改各 Agent 运行时
   的个人配置；操作为“从本机 Agent 导入 / ＋ 添加 MCP”。
 - 真源路径条显示当前权威 `~/.rovai/mcp.json` 或受控旧命名空间选择结果，并提供
   Finder 入口。UI 是该文件的图形编辑器，不建立 SQLite MCP 真源。
-- Server 行显示启用 Switch、名称、`STDIO / HTTP`、命令或 URL、来源、明确队员
-  分配、编辑与删除。停用是 neutral 状态，不使用危险色或整行不可读透明度。
+- 队员分配区使用 230–260px 在队名册与 `minmax(0,1fr)` MCP chooser；名册展示受控头像、名称、
+  角色和分配数量，并在固定工作台高度内独立纵向滚动。窄宽 / 200% zoom 时名册变为有界横向
+  队员带，不能让整页随队员数量无限增高。
+- chooser 显示当前队员头像、名称、`x / n` 分配数和“只影响后续新执行”；搜索覆盖名称、
+  Endpoint、Transport 与来源，筛选为全部、已分配、未分配。桌面 MCP 选项两列，1040 可用空间
+  不足时改单列；批量选择跳过高权限项，批量清空与单项勾选都以 Core 返回为准。
+- 已安装 MCP 使用与 Skill 同家族的开放列表：稳定 `serverId` 身份色 mark、名称、Transport、
+  Endpoint、来源、风险、真实队员头像摘要、启用 Switch 和一个“详情”入口；只有分隔线，不恢复
+  tofu 卡片墙或常态阴影。展开详情展示完整事实、编辑 JSON 与删除，Library 不提供第二个分配写入口。
+- 停用是 neutral 状态，不使用危险色或把整行降低到不可读；身份色只辅助区分 mark，不代表状态或
+  MCP 官方品牌。详情箭头必须与文字垂直对齐，并以 `aria-expanded`、Hover 与 Focus 表达可点击性。
 - 导入只产生候选；用户逐项确认后一次性复制可移植定义，不同步来源、不写回来源，
   不复制 OAuth 状态、Token 或明文凭据。默认分配具体的当前在队的队员，未来队员不会
   自动获得。
@@ -1099,6 +1108,8 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   不安全时提供显式修复。不能用空配置静默覆盖。
 - 启停、编辑、删除只影响后续 AgentRun；正在执行与恢复中的 AgentRun 保持冻结 Exposure
   Snapshot。普通 UI 不声称 Rovai-ai 审批了 Runtime 原生 MCP 副作用。
+- 高权限 MCP 必须逐项确认，不能通过批量选择静默授权；多项 assignment mutation 必须串行使用
+  前一次响应的新 `configDigest`，遇到 CAS conflict 后重新读取并停止余下写入。
 
 ### Agent 运行时
 

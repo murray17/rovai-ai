@@ -244,7 +244,7 @@ describe('Neutral Porcelain + Steel theme tokens', () => {
     expect(css).not.toContain('.skill-import-help')
   })
 
-  it('uses readable identity-colored Skill rows and compact MCP grids', () => {
+  it('uses readable identity-colored Skill rows and a bounded MCP workbench', () => {
     expect(css).toMatch(/\.skill-card-grid\s*\{[^}]*max-width:\s*940px[^}]*border-top:/)
     expect(css).toMatch(/\.skill-card\s*\{[^}]*--skill-identity:\s*var\(--identity-1\)/)
     expect(css).toMatch(/\.skill-library-columns, \.skill-card-primary\s*\{[^}]*grid-template-columns:\s*42px minmax\(0, 1fr\) var\(--skill-actions-width\)/)
@@ -258,8 +258,12 @@ describe('Neutral Porcelain + Steel theme tokens', () => {
     expect(css).toMatch(/\.skill-source\.source-third-party\s*\{[^}]*background:\s*var\(--surface-muted\)/)
     expect(css).toMatch(/\.skill-card-details\s*\{[^}]*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\)/)
     expect(css).toMatch(/\.skill-detail-source\s*\{[^}]*grid-column:\s*span 2/)
-    expect(css).toMatch(/\.mcp-member-card\s*\{[^}]*grid-template-columns:\s*28px minmax\(0, 1fr\) auto/)
-    expect(css).toMatch(/\.mcp-server-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/)
+    expect(css).toMatch(/\.mcp-assignment-workbench\s*\{[^}]*height:\s*clamp\(370px, 46vh, 430px\)[^}]*grid-template-columns:\s*230px minmax\(0, 1fr\)/)
+    expect(css).toMatch(/\.mcp-member-roster\s*\{[^}]*min-height:\s*0[^}]*overflow-y:\s*auto[^}]*scrollbar-gutter:\s*stable/)
+    expect(css).toMatch(/\.mcp-assignment-options\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)[^}]*overflow-y:\s*auto/)
+    expect(css).toMatch(/\.mcp-server-list\s*\{[^}]*border-top:\s*1px solid var\(--line\)/)
+    expect(css).toMatch(/\.mcp-server-row\s*\{[^}]*--mcp-identity:\s*var\(--identity-1\)[^}]*border-bottom:/)
+    expect(css).toMatch(/\.mcp-server-mark\s*\{[^}]*width:\s*38px[^}]*height:\s*38px/)
   })
 
   it('keeps raw color literals inside the canonical token block', () => {
