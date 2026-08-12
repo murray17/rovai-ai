@@ -54,6 +54,11 @@ import {
   memberRuntimePresentation,
   runtimeAvailabilityPresentation,
 } from './runtime-status'
+import {
+  persistedRuntimeChangeDisposition,
+  persistedRuntimeConfigurationKey,
+  submittedRuntimeConfigurationKey
+} from './member-runtime-conflict'
 import type { MemberWorkspaceTab } from './MemberSidebar'
 
 type MembersViewProps = {
@@ -856,6 +861,7 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
   const [conflict, setConflict] = useState(false)
   const agentIdRef = useRef(agent.agentId)
   const persistedRuntimeKeyRef = useRef(persistedRuntimeKey(agent))
+  const submittedPersistedRuntimeKeyRef = useRef<string | null>(null)
   const currentStateKey = runtimeEditorStateKey({ selectedKind, draft })
   const dirty = currentStateKey !== baselineStateKey
   const availability = runtimeAvailability.find((item) => item.runtimeKind === selectedKind) ?? null
@@ -890,6 +896,7 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
     setConflict(false)
     agentIdRef.current = agent.agentId
     persistedRuntimeKeyRef.current = persistedRuntimeKey(agent)
+    submittedPersistedRuntimeKeyRef.current = null
   }, [agent, installations])
 
   useImperativeHandle(ref, () => ({ discard: resetFromAgent }), [resetFromAgent])
@@ -904,9 +911,19 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
       resetFromAgent()
       return
     }
-    if (persistedRuntimeKeyRef.current === nextPersistedKey) return
+    const disposition = persistedRuntimeChangeDisposition({
+      previousPersistedKey: persistedRuntimeKeyRef.current,
+      nextPersistedKey,
+      submittedPersistedKey: submittedPersistedRuntimeKeyRef.current,
+      dirty
+    })
+    if (disposition === 'unchanged') return
     persistedRuntimeKeyRef.current = nextPersistedKey
-    if (dirty) {
+    if (disposition === 'saved_submission') {
+      resetFromAgent()
+      return
+    }
+    if (disposition === 'external_conflict') {
       setConflict(true)
       setSubmitError('已保存的运行配置在编辑期间发生变化。请重新读取后再编辑，或放弃当前更改。')
       return
@@ -922,6 +939,7 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
     event.preventDefault()
     if (!canSave) return
     setSubmitError(null)
+    submittedPersistedRuntimeKeyRef.current = submittedRuntimeConfigurationKey(selectedKind, draft)
     try {
       if (selectedKind) {
         await onSave(selectedKind, draft)
@@ -930,8 +948,11 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
       }
       setBaselineStateKey(currentStateKey)
       setConflict(false)
+      setSubmitError(null)
     } catch (nextError) {
       setSubmitError(errorMessage(nextError))
+    } finally {
+      submittedPersistedRuntimeKeyRef.current = null
     }
   }
 
@@ -1048,7 +1069,7 @@ function runtimeEditorStateKey(state: MemberRuntimeEditorState): string {
 }
 
 function persistedRuntimeKey(agent: AgentProfile): string {
-  return JSON.stringify(agent.runtimeConfiguration)
+  return persistedRuntimeConfigurationKey(agent.runtimeConfiguration)
 }
 
 function MemberIdentityDialog({ open, agent, agents, busy, returnFocusRef, onOpenChange, onSubmit }: {
