@@ -31,6 +31,7 @@ import {
 } from './structured-mention-model'
 import { MemberAvatar } from './MemberAvatar'
 import type { ComposerSkillOption } from './composer-skill-picker'
+import { readStructuredMessageClipboardContent } from './structured-message-clipboard'
 
 export interface StructuredMentionMember {
   agentId: string
@@ -565,7 +566,15 @@ export function StructuredMentionComposer({
     }
     event.preventDefault()
     setQuery(null)
-    emitState(pasteStructuredPlainText(editorState(), event.clipboardData.getData('text/plain')))
+    const plainText = event.clipboardData.getData('text/plain')
+    const structuredContent = readStructuredMessageClipboardContent(
+      event.clipboardData.getData('text/html'),
+      plainText,
+      members
+    )
+    emitState(structuredContent
+      ? replaceStructuredSelection(editorState(), structuredContent)
+      : pasteStructuredPlainText(editorState(), plainText))
   }
 
   const handleCompositionStart = (_event: CompositionEvent<HTMLDivElement>): void => {

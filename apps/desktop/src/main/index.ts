@@ -1,7 +1,7 @@
 import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, screen, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, screen, shell } from 'electron'
 import type {
   AppearanceSnapshot,
   CoreMethod,
@@ -45,6 +45,7 @@ import {
 import { RestorableLocationStore, parseRestorableLocation } from './restorable-location'
 import { LoginItemService } from './login-item'
 import { DesktopSessionRegistry } from './desktop-session'
+import { parseClipboardWriteRequest } from './clipboard-write'
 
 const allowedMethods = new Set<CoreMethod>([
   'health.check',
@@ -367,6 +368,10 @@ app.on('second-instance', () => {
 ipcMain.handle('rovai:request', async (_event, method: CoreMethod, params?: unknown) => {
   if (!allowedMethods.has(method)) throw new Error(`Renderer requested an unsupported method: ${method}`)
   return core.request(method, params)
+})
+
+ipcMain.handle('rovai:clipboard-write', (_event, input: unknown) => {
+  clipboard.write(parseClipboardWriteRequest(input))
 })
 
 ipcMain.handle('rovai:appearance-get', () => appearanceSnapshot())

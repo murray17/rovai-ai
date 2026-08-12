@@ -141,6 +141,11 @@ const api: RovaiApi = {
       return ipcRenderer.invoke('rovai:composer-attachment-preview', attachmentId)
     }
   },
+  clipboard: {
+    write(input) {
+      return ipcRenderer.invoke('rovai:clipboard-write', input)
+    }
+  },
   selectWorkspaceDirectory() {
     return ipcRenderer.invoke('rovai:select-workspace-directory')
   },

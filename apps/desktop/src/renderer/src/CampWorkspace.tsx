@@ -48,6 +48,7 @@ import { runtimeReadinessLabel } from './runtime-status'
 import { SafeMarkdown } from './SafeMarkdown'
 import { identityColorToken } from './theme'
 import { availableComposerSkillsForLead } from './composer-skill-picker'
+import { createStructuredMessageClipboardData } from './structured-message-clipboard'
 
 const NON_TERMINAL_RUNS = new Set(['queued', 'running', 'waiting'])
 const EXECUTION_EVIDENCE_PAGE_LIMIT = 1_000
@@ -1177,8 +1178,16 @@ export function CampWorkspace({
     )
   }
 
-  const copyMessage = (id: string, body: string): void => {
-    void writeClipboardText(body).then((copied) => {
+  const copyMessage = (
+    id: string,
+    body: string,
+    content: StructuredCampMessageContent | null
+  ): void => {
+    const structuredClipboard = createStructuredMessageClipboardData(content, composerMembers)
+    void writeClipboardText(
+      structuredClipboard?.text ?? body,
+      structuredClipboard?.html
+    ).then((copied) => {
       if (!copied) return
       setCopiedMessageId(id)
       window.setTimeout(() => {
@@ -1368,7 +1377,11 @@ export function CampWorkspace({
                               <MessageSurface
                                 copied={copiedMessageId === campMessage.id}
                                 hasDelivery={campMessageDeliveries.length > 0}
-                                onCopy={() => copyMessage(campMessage.id, displayBody)}
+                                onCopy={() => copyMessage(
+                                  campMessage.id,
+                                  displayBody,
+                                  campMessage.authorType === 'user' ? campMessage.content : null
+                                )}
                               >
                                 {campMessage.authorType === 'agent'
                                       ? (

@@ -1881,6 +1881,9 @@ export interface RovaiApi {
     prepare(campId: string, expectedRevision: number, file: File): Promise<CampComposerDraftView>
     preview(attachmentId: string): Promise<AttachmentPreview | null>
   }
+  clipboard: {
+    write(input: { text: string; html: string | null }): Promise<void>
+  }
   selectWorkspaceDirectory(): Promise<WorkspaceSelection | null>
   selectRuntimeExecutable(): Promise<string | null>
   selectSkillImportDirectory(): Promise<string | null>
