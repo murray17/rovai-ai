@@ -65,5 +65,5 @@ Core 生命周期，也不伪装成文件或 Camp 删除。
 ## References
 
 - [v0.57 实施与验收计划](implementation-plan.md)
-- [当前 UI 详规：统一侧栏](../../ui/arctic-dawn.md#统一侧栏结构)
+- [当前 UI 详规：统一侧栏](../../ui/components/app-shell-navigation.md#统一侧栏结构)
 - [桌面 UI 验收](../../development/ui-acceptance.md)

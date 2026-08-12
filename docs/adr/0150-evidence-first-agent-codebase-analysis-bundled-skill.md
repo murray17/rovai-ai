@@ -105,6 +105,6 @@ Removing the prefix changes explicit invocation and project-native projection pa
 - [v0.52 overview](../versions/v0.52/README.md)
 - [ADR-0105: Runtime-Group Assigned Rovai Skill Delivery](0105-runtime-group-assigned-skill-delivery.md)
 - [ADR-0144: Self-Contained Duo Grilling Bundled Skills](0144-self-contained-duo-grilling-bundled-skills.md)
-- [Skill settings UI contract](../ui/arctic-dawn.md)
+- [Skill settings UI strategy](../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
 - [Domain terminology](../../CONTEXT.md)
 - [`analyze-agent-codebase` source](../../skills/analyze-agent-codebase/SKILL.md)

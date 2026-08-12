@@ -198,7 +198,7 @@ Shell 内部演进的产品偏好与 Renderer 交互。Pending Camp 激活由 AD
 | ADR | 已更新 | ADR-0144 替代 ADR-0109；ADR-0145 冻结 Core-owned Pending Draft、原子首消息激活与窄清理边界 |
 | Contracts | 已更新 | Camp create、Camp Snapshot 与 Navigation 增加 activation state，新增 Pending discard 命令；既有消息 Draft Revision 与 Message Delivery 合同保持不变 |
 | Architecture | 已更新 | `docs/architecture/camp-activation-lifecycle.md` 明确 Core/SQLite、Composer Draft、Navigation、Renderer restore 与启动清理权威；Runtime Adapter 结构不变 |
-| UI | 已更新 | `docs/ui/README.md` 与 `docs/ui/arctic-dawn.md` 补充 Pending 草稿可见性、恢复、灰色“草稿”标签和首消息激活；既有七分类设置与 Skill 清单继续有效 |
+| UI | 已更新 | 当时的 UI 详规与索引补充 Pending 草稿可见性、恢复、灰色“草稿”标签和首消息激活；既有七分类设置与 Skill 清单继续有效；当前路由见 `docs/ui/README.md` |
 | Runtime Activity | 确认无需更新 | Desktop Shell 偏好、窗口几何和登录项不产生或改变 Canonical Runtime Activity |
 | Runtime compatibility | 确认无需更新 | 不改变任何 Agent Runtime adapter、版本或发现能力；既有 Skill native-discovery smoke 仅扩展官方默认集合断言，不产生新的兼容性结论 |
 | Documentation routing | 确认无需更新 | `docs/README.md` 已通过版本索引的唯一 current 指针路由版本工作，不需要硬编码 v0.49 专门入口 |
@@ -210,5 +210,5 @@ Shell 内部演进的产品偏好与 Renderer 交互。Pending Camp 激活由 AD
 - [v0.49 实施与验收计划](implementation-plan.md)
 - [ADR-0144：自包含双人追问官方 Skill](../../adr/0144-self-contained-duo-grilling-bundled-skills.md)
 - [ADR-0145：Core-owned Pending Camp Draft](../../adr/0145-core-owned-pending-camp-draft-activation.md)
-- [Arctic Dawn V3 设置与窗口合同](../../ui/arctic-dawn.md#设置)
+- [Arctic Dawn V3 设置与窗口合同](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
 - [Rovai-ai 领域词汇表](../../../CONTEXT.md)

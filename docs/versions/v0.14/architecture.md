@@ -13,7 +13,7 @@ last_updated: 2026-07-27
 > 跨版本约束：[ADR-0056](../../adr/0056-controlled-member-avatar-assets.md)
 >
 > 当时 UI 约束：Meridian（文件已删除，原文见 Git 历史；当前规范见
-> [Arctic Dawn](../../ui/arctic-dawn.md)）
+> [Arctic Dawn](../../ui/README.md)）
 
 ## 1. 权威与进程边界
 

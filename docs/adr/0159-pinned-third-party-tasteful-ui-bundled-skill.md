@@ -95,7 +95,7 @@ Upstream improvements and security fixes are not automatic; maintainers must rev
 - [ADR-0105: Runtime-Group Assigned Rovai Skill Delivery](0105-runtime-group-assigned-skill-delivery.md)
 - [ADR-0150: Evidence-First Agent Codebase Analysis Bundled Skill](0150-evidence-first-agent-codebase-analysis-bundled-skill.md)
 - [ADR-0158: Default-All Runtime Delivery for Managed Skills](0158-default-all-runtime-delivery-for-managed-skills.md)
-- [Skill settings UI contract](../ui/arctic-dawn.md)
+- [Skill settings UI strategy](../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
 - [Domain terminology](../../CONTEXT.md)
 - [`tasteful-ui` source](../../skills/tasteful-ui/SKILL.md)
 - [Pinned upstream repository](https://github.com/DonkeyKing01/tasteful-ui-skill/tree/159ccd47a320f3a7bd0289d07366d422211895a1/tasteful-ui)

@@ -70,4 +70,4 @@ AgentRun 仍是 Core、Evidence、取消与投递的唯一领域身份，不被 
 - [Run Process Detail Surface v2](../../contracts/run-process-detail-surface-v2.md)
 - [ADR-0155](../../adr/0155-treatment-blind-outcome-and-process-judge-views.md)
 - [Semantic Judge Views v1](../../contracts/semantic-judge-views-v1.md)
-- [Arctic Dawn V3](../../ui/arctic-dawn.md)
+- [Camp 会话工作区](../../ui/components/conversation-workspace.md)

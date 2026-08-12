@@ -49,7 +49,7 @@ Popover、设置和 Quick Chat 首页不接收；相关菜单结构与行为不�
 
 ## References
 
-- [方向原型](../prototypes/conversation-drop-zone/rovai-conversation-drop-zone.html)
-- [设计说明](../prototypes/conversation-drop-zone/PROJECT_DESIGN.md)
-- [Camp Attachment v1](../contracts/camp-attachment-v1.md)
-- [ADR-0169](../adr/0169-core-owned-directory-attachment-snapshots.md)
+- [方向原型](../../prototypes/conversation-drop-zone/rovai-conversation-drop-zone.html)
+- [设计说明](../../prototypes/conversation-drop-zone/PROJECT_DESIGN.md)
+- [Camp Attachment v1](../../contracts/camp-attachment-v1.md)
+- [ADR-0169](../../adr/0169-core-owned-directory-attachment-snapshots.md)

@@ -14,7 +14,7 @@ last_updated: 2026-07-24
 >
 > 稳定 UI 规范：[UI 规范索引](../../ui/README.md)；本版本交付的
 > Hearth & Camp 及后续 Meridian 详细规范均已删除，原文见 Git 历史；当前规范见
-> [Arctic Dawn](../../ui/arctic-dawn.md)
+> [Arctic Dawn](../../ui/README.md)
 >
 > 文档规则：[文档导航](../../README.md)
 

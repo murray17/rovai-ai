@@ -9,7 +9,7 @@ last_updated: 2026-08-07
 # Run Process Detail Surface v1（Scheme C）
 
 本合同只约束现有 Arctic Dawn Camp 会话区中 Run 过程详情的层级和交互。视觉 Token、导航、
-Composer、Approval、响应式和无障碍基础继续以 [Arctic Dawn V3](../ui/arctic-dawn.md) 为准。
+Composer、Approval、响应式和无障碍基础继续以 [Camp 会话工作区](../ui/components/conversation-workspace.md) 为准。
 HTML 仅是[会话区原型](../prototypes/run-activity/README.md)，不是数据或状态真源。
 
 ## 1. 三层会话区

@@ -64,7 +64,7 @@ Home、应用数据、SQLite、Runtime 或项目路径。
 | ADR | 已更新 | ADR-0148 冻结诊断边界；同版本建立通用 CURRENT/HISTORY、直接替代图、历史冻结和 diff-aware ADR 治理，不包含任何 Skill/功能特例 |
 | Contracts | 已更新 | `docs/contracts/diagnostics-center-v1.md` 冻结 Report/Check 字段、三态分类、修复映射和 v5 shape |
 | Architecture | 已更新 | `docs/architecture/diagnostics-center.md` 记录诊断权威边界；根索引增加动态完整性机器区域，后续新增 Architecture 必须同步纳入 |
-| UI | 已更新 | `docs/ui/README.md` 与 `docs/ui/arctic-dawn.md` 用诊断中心交互取代旧四列健康页 |
+| UI | 已更新 | 当时的 UI 详规与索引用诊断中心交互取代旧四列健康页；当前路由见 `docs/ui/README.md` |
 | Runtime Activity | 确认无需更新 | 只读取既有 Runtime availability/discovery/probe 证据，不新增或重分类 Canonical Runtime Activity |
 | Runtime compatibility | 确认无需更新 | 不改变九 Runtime 的上游版本、Adapter 能力、协议、发现或兼容性结论 |
 | Documentation routing | 已更新 | `docs/README.md`、`AGENTS.md` 和开发文档增加 Architecture/CURRENT/HISTORY 路由及通用文档门禁；诊断中心入口保持 |

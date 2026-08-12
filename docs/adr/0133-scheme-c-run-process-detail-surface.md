@@ -51,6 +51,6 @@ superseded_by: ADR-0154
 ## References
 
 - [Run Process Detail Surface v1](../contracts/run-process-detail-surface-v1.md)
-- [Arctic Dawn V3](../ui/arctic-dawn.md)
+- [Camp 会话工作区 UI 合同](../ui/components/conversation-workspace.md)
 - [v0.45 会话区原型](../prototypes/run-activity/README.md)
 - [ADR-0084：Conversation surface controls](0084-conversation-surface-controls-and-stop-outcome-projection.md)

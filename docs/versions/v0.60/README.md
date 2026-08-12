@@ -51,7 +51,7 @@ Drawer 布局的前提下，让超长 Tool 输出保持可读：展开后只显�
 | ADR | 确认无需更新 | 只改变既有公开 Tool Evidence 的 Renderer 有界呈现，不产生跨版本领域或权威决策 |
 | Contracts | 确认无需更新 | 复用现有 `agentRunEvidence.list/getContent`、Camp 授权和 Evidence wire shape，不增删字段或错误语义 |
 | Architecture | 确认无需更新 | Core、Blob Store、IPC 和 Renderer 职责不变；完整内容仍由 Core 按需返回 |
-| UI | 已更新 | [当前 UI 详规](../../ui/arctic-dawn.md)冻结开头预览、Icon-only 复制和不渲染全文边界 |
+| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)冻结开头预览、Icon-only 复制和不渲染全文边界 |
 | Runtime Activity | 确认无需更新 | 不改变 Canonical Activity 分类、标题、生命周期、聚合或来源可信度 |
 | Runtime compatibility | 确认无需更新 | 不改变任何 Runtime Adapter、协议、版本或已验证能力 |
 | Documentation routing | 已更新 | [版本索引](../README.md)指向 v0.60；开发 UI 验收补充真实 Blob 复制门禁 |
@@ -60,5 +60,5 @@ Drawer 布局的前提下，让超长 Tool 输出保持可读：展开后只显�
 ## References
 
 - [v0.60 实施与验收计划](implementation-plan.md)
-- [当前 UI 详规](../../ui/arctic-dawn.md)
+- [Camp 会话工作区](../../ui/components/conversation-workspace.md)
 - [桌面 UI 验收](../../development/ui-acceptance.md)

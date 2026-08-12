@@ -133,7 +133,7 @@ pnpm accept:member-lifecycle-ui
 ### Agent 执行过程门禁
 
 Renderer 的权威行为见 [Run Process Detail Surface v3](../contracts/run-process-detail-surface-v3.md) 与
-[当前 UI 详规：Camp 执行过程](../ui/arctic-dawn.md#camp-执行过程)。修改 AgentRun 分组、执行台、Drawer、
+[当前 UI 详规：Camp 执行过程](../ui/components/conversation-workspace.md#camp-执行过程)。修改 AgentRun 分组、执行台、Drawer、
 Task Related execution、停止结果或 Inspector 页签后，至少运行：
 
 ```bash
@@ -177,7 +177,7 @@ pnpm accept:runtime-activity-ui
 
 ### Task Inspector 门禁
 
-Renderer 的权威行为见[当前 UI 详规：Camp 右侧详情栏](../ui/arctic-dawn.md#camp-右侧详情栏inspector)。
+Renderer 的权威行为见[当前 UI 详规：Camp 右侧详情栏](../ui/components/conversation-workspace.md#camp-右侧详情栏inspector)。
 修改 Task 首层入口、空状态、创建/编辑表单、列表或详情后，至少运行：
 
 ```bash
@@ -198,7 +198,7 @@ pnpm accept:task-card-ui
 
 ### A2A 消息 footer 门禁
 
-Renderer 的权威行为见[当前 UI 详规：A2A 会话消息](../ui/arctic-dawn.md#a2a-会话消息)。修改
+Renderer 的权威行为见[当前 UI 详规：A2A 会话消息](../ui/components/conversation-workspace.md#a2a-会话消息)。修改
 Agent 公共正文头部、消息 Delivery footer 或相关 CSS 后，至少运行：
 
 ```bash
@@ -225,7 +225,7 @@ footer 保持透明、零圆角，短转交折线使用 1px Porcelain/Steel 结�
 ### 结构化 Mention 门禁
 
 Renderer 的权威行为见
-[当前 UI 详规：不得回退的交互合同](../ui/arctic-dawn.md#不得回退的交互合同)。修改会话
+[当前 UI 详规：不得回退的交互合同](../ui/components/structured-mentions.md#不得回退的交互合同)。修改会话
 Mention 的结构、样式、点击、键盘或复制行为后，至少运行：
 
 ```bash

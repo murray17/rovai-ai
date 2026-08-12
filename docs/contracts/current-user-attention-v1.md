@@ -221,5 +221,5 @@ With an authoritative message locator, callers may verify the boolean through ex
 - [ADR-0165](../adr/0165-core-owned-current-user-message-attention.md)
 - [Camp Message Send v4](camp-message-send-v4.md)
 - [ADR-0087: Durable In-App Notification Inbox](../adr/0087-core-owned-durable-in-app-notification-inbox.md)
-- [Current UI detail](../ui/arctic-dawn.md)
+- [Current User Mention UI contract](../ui/components/structured-mentions.md#current-user-mention)
 - [v0.65 implementation specification](../versions/v0.65/implementation-spec.md)

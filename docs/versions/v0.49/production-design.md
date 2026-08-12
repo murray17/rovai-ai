@@ -10,7 +10,8 @@ last_updated: 2026-08-09
 # v0.49 通用、启动与新对话设置生产设计
 
 本文冻结 v0.49 的 Electron Desktop Shell、Preload bridge 与 Renderer 交互合同。全局视觉、
-布局、Token、状态和无障碍继续以 [Arctic Dawn V3](../../ui/arctic-dawn.md)为准；Camp、Member、
+布局、Token、状态和无障碍继续以[全局设计系统](../../../DESIGN.md)和
+[设置工作区策略](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)为准；Camp、Member、
 Memory 与 Navigation 的存在性继续以 Core 当前 Read Side 为准。本文只授权 ADR-0145 所需的
 Pending Camp activation、Migration 67、Navigation/Snapshot 投影、首消息原子激活与窄清理；不授权
 其它 Runtime、审批、执行或恢复协议变化。

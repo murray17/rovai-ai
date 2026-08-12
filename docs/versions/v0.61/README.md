@@ -65,5 +65,5 @@ Quick Chat 首页或启动恢复直接进入队员页时统一返回 App。
 
 - [v0.61 实施与验收计划](implementation-plan.md)
 - [Renderer UI 规范](../../ui/README.md)
-- [Neutral Porcelain + Steel 详规](../../ui/arctic-dawn.md)
+- [App Shell 与统一侧栏](../../ui/components/app-shell-navigation.md)
 - [桌面 UI 验收与隔离数据](../../development/ui-acceptance.md)

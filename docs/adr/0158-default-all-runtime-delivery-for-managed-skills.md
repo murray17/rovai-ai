@@ -81,5 +81,5 @@ show the same default-all policy for both origins while preserving their identit
 - [v0.58 overview](../versions/v0.58/README.md)
 - [ADR-0105: Runtime-Group Assigned Rovai Skill Delivery](0105-runtime-group-assigned-skill-delivery.md)
 - [ADR-0150: Evidence-First Agent Codebase Analysis Bundled Skill](0150-evidence-first-agent-codebase-analysis-bundled-skill.md)
-- [Skill settings UI contract](../ui/arctic-dawn.md)
+- [Skill settings UI strategy](../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
 - [Domain terminology](../../CONTEXT.md)

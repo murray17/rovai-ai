@@ -11,7 +11,7 @@ last_updated: 2026-08-08
 
 本文件局部替代 [v0.38 唯一实时 Task 卡](../v0.38/production-design.md)中的四态文字和
 Task Inspector 细节，但保留“创建位置唯一实时卡”的模型。全局视觉、布局、断点、组件与
-无障碍仍以 [Arctic Dawn V3](../../ui/arctic-dawn.md)为准；领域字段、授权和事务以
+无障碍仍以 [Camp 会话工作区](../../ui/components/conversation-workspace.md)为准；领域字段、授权和事务以
 [Durable Task v2](../../contracts/durable-task-v2.md)为准。
 
 当前状态是设计与生产实现均已完成；Renderer、Core contract 与隔离桌面验收共同约束本文行为。

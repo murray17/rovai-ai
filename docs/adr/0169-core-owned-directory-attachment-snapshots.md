@@ -66,4 +66,4 @@ UI 边界。目录也不能继续引用原位置，否则发送后的内容会�
 - [ADR-0080: Durable Camp Composer Draft](0080-durable-camp-composer-draft-and-atomic-attachment-consumption.md)
 - [ADR-0081: Camp-Public Attachment Paths](0081-camp-public-attachment-paths-and-frozen-discovery.md)
 - [Camp Attachment v1](../contracts/camp-attachment-v1.md)
-- [Camp 会话区拖放 UI](../ui/conversation-drop-zone.md)
+- [Camp 会话区拖放 UI](../ui/components/conversation-drop-zone.md)

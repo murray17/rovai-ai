@@ -112,4 +112,4 @@ CampTurn cancellation.
 - [ADR-0133: Scheme C Run Process Detail Surface](0133-scheme-c-run-process-detail-surface.md)
 - [ADR-0084: Conversation Surface Controls and Stop Outcome Projection](0084-conversation-surface-controls-and-stop-outcome-projection.md)
 - [Run Process Detail Surface v2](../contracts/run-process-detail-surface-v2.md)
-- [Arctic Dawn V3](../ui/arctic-dawn.md)
+- [Camp 会话工作区 UI 合同](../ui/components/conversation-workspace.md)

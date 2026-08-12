@@ -26,3 +26,10 @@ Desktop.ini
 .env
 .env.*
 !.env.example
+
+# Local third-party Impeccable payload for the Codex provider
+/.agents/skills/impeccable/
+
+# Local Impeccable state for the Renderer workspace
+/apps/desktop/.impeccable/config.local.json
+/apps/desktop/.impeccable/mocks/decision/

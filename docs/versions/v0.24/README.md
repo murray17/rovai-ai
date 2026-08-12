@@ -16,7 +16,7 @@ last_updated: 2026-07-31
 >
 > 前置版本：[v0.23 普通目录工作区与动态 Git 能力](../v0.23/README.md)
 >
-> 当前设计权威：[Arctic Dawn V3](../../ui/arctic-dawn.md)
+> 当前设计权威：[Arctic Dawn V3](../../ui/README.md)
 >
 > 跨版本决策：[ADR-0073](../../adr/0073-agent-authored-a2a-conversation-messages.md) ·
 > [ADR-0074](../../adr/0074-quick-chat-ubiquitous-language-and-binding-identity.md) ·
@@ -270,7 +270,7 @@ v0.24 以 `rovai-arctic-dawn-v3-package` 为 Renderer 新一轮视觉与信息�
   Reduced Motion、200% Zoom 与 `1440×920 / 1040×700` 全部进入版本验收。
 
 精确 Token、页面信息架构、文案、状态和适配以
-[Arctic Dawn V3](../../ui/arctic-dawn.md)为准，不在版本概览复制第二套详规。
+[Arctic Dawn V3](../../ui/README.md)为准，不在版本概览复制第二套详规。
 
 ## 实施门禁
 

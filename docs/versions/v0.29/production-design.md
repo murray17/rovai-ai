@@ -10,7 +10,7 @@ last_updated: 2026-08-01
 
 ## 权威与原型边界
 
-本设计在现有 [Arctic Dawn V3](../../ui/arctic-dawn.md)、有效 ADR、Core 合同与生产代码
+本设计在当前[队员工作区策略](../../../apps/desktop/.impeccable/surfaces/member-workspace.md)、有效 ADR、Core 合同与生产代码
 基础上收敛。`rovai-members-a3/index.html` 已在浏览器中实际打开并交互核对；其布局与
 交互是本轮设计输入，但假队员、静态 Runtime 字段、演示状态和单文件实现不是生产合同。
 

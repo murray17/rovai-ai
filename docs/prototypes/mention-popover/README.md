@@ -9,7 +9,7 @@ last_updated: 2026-08-06
 
 > **已确认方向。** 用户于 2026-08-06 再次确认：Mention 视觉采用方案 A，信息弹窗
 > 采用方案 2“4:5 角色卡侧栏”。生产交互的稳定合同见
-> [Arctic Dawn](../../ui/arctic-dawn.md#不得回退的交互合同)；不得把本原型误标为废弃，
+> [Arctic Dawn](../../ui/components/structured-mentions.md#不得回退的交互合同)；不得把本原型误标为废弃，
 > 也不得擅自替换为角色 Toast 或队员页跳转。
 
 这是 Camp 会话区 Mention 视觉与成员信息弹窗的交互式 HTML 设计稿，源自

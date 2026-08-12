@@ -30,7 +30,7 @@ P1 Fog Sidecar token：
 - indicator/focus #4F6E89
 - divider #D8DDE1
 
-主工作区 token 依据 docs/ui/arctic-dawn.md 与当前 apps/desktop/src/renderer/src/styles.css；状态颜色仍使用 success / warning / danger / info 语义，不随 Sidecar 材质改变。
+主工作区 token 依据 `DESIGN.md`、`docs/ui/themes/` 与当前 `apps/desktop/src/renderer/src/styles.css`；状态颜色仍使用 success / warning / danger / info 语义，不随 Sidecar 材质改变。
 
 ## 交互提示
 
@@ -55,4 +55,4 @@ P1 Fog Sidecar token：
 - apps/desktop/src/renderer/src/DiagnosticsCenter.tsx
 - apps/desktop/src/renderer/src/NotificationCenter.tsx
 - apps/desktop/src/renderer/src/NewConversationDialog.tsx
-- docs/ui/README.md 与 docs/ui/arctic-dawn.md
+- `DESIGN.md` 与 `docs/ui/README.md`

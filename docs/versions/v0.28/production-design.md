@@ -14,7 +14,7 @@ last_updated: 2026-08-01
 SQLite 是 In-App Notification 的唯一持久真源；Renderer 只呈现通知中心和临时浮层；
 Electron Main 不保存通知数据，也不创建 macOS 系统通知。
 
-生产界面继续遵守 [Arctic Dawn V3](../../ui/arctic-dawn.md)。通知抽屉和浮层使用现有
+生产界面继续遵守 [Arctic Dawn V3](../../ui/README.md)。通知抽屉和浮层使用现有
 React、Radix Dialog 与 CSS Token，不引入 UI、图标、动画或状态管理依赖。
 
 本版本只有两个用户事件类别：

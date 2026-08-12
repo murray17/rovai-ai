@@ -10,7 +10,7 @@ last_updated: 2026-08-03
 
 ## 权威与原型边界
 
-本设计基于现行 [Arctic Dawn V3](../../ui/arctic-dawn.md)、生产代码和
+本设计基于现行[App Shell 与统一侧栏合同](../../ui/components/app-shell-navigation.md)、生产代码和
 `rovai-sidebar-scheme-2-final` 交付包收敛。交付包的说明、HTML 与两张基准预览已经核对，
 其 SHA-256 清单与实际文件一致。原型中的静态 Camp、Project、时间和演示事件不进入生产。
 

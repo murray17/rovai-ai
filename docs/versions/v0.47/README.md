@@ -161,7 +161,7 @@ v0.47 已按[实施与验收计划](implementation-plan.md)完成，主要证据
 | ADR | 已更新 | [ADR-0136](../../adr/0136-durable-task-v2-responsibility-and-coordination-authority.md)与[ADR-0137](../../adr/0137-one-time-task-linked-responsibility-admission.md)冻结责任、权限、删除级联和一次性 admission；ADR-0057/0058 增加局部替代说明 |
 | Contracts | 已更新 | [Durable Task v2](../../contracts/durable-task-v2.md)、[Built-in Tool Transport v4](../../contracts/builtin-tool-transport-v4.md)及[合同索引](../../contracts/README.md)成为当前入口，Transport v3 标记 historical |
 | Architecture | 已更新 | [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)更新为 v4、13 项命令、完整 canonical Task result 与显式 Agent projection；组件权威边界不另起新组件 |
-| UI | 已更新 | [v0.47 生产设计](production-design.md)、[UI 规范索引](../../ui/README.md)与[Arctic Dawn](../../ui/arctic-dawn.md)冻结五态实时卡、Inspector 分层、冲突恢复和中文删除确认 |
+| UI | 已更新 | [v0.47 生产设计](production-design.md)、[UI 规范索引](../../ui/README.md)与[Camp 会话工作区](../../ui/components/conversation-workspace.md)冻结五态实时卡、Inspector 分层、冲突恢复和中文删除确认 |
 | Runtime Activity | 确认无需更新 | Task operation 增至 13 项但仍属于既有 Built-in Tool Activity domain，不改变 Runtime evidence 到 Canonical Activity 的映射、classifier 或 presentation rules |
 | Runtime compatibility | 已更新 | [Runtime 兼容性清单](../../runtime-compatibility.md)记录同一轮 v0.47/v4 九 Runtime、十三项操作、lease 与 continuation 实测证据 |
 | Documentation routing | 已更新 | [文档导航](../../README.md)把 Built-in 修改路由到 Transport v4，并增加 Durable Task v2 当前合同入口 |

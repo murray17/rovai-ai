@@ -10,7 +10,7 @@ last_updated: 2026-07-31
 
 ## 权威与原型边界
 
-生产界面继续遵守 [Arctic Dawn V3](../../ui/arctic-dawn.md)。用户提供的 HTML 原型只
+生产界面继续遵守当前[队员工作区策略](../../../apps/desktop/.impeccable/surfaces/member-workspace.md)。用户提供的 HTML 原型只
 用于确认字段名称、基础/高级分组和信息排列；其中的配色、组件形态、间距、文案遗留、
 响应式规则和演示数据都不是生产合同。
 

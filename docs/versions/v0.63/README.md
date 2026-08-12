@@ -67,6 +67,6 @@ Endpoint、启停与队员范围。
 
 - [v0.63 实施与验收计划](implementation-plan.md)
 - [Renderer UI 规范](../../ui/README.md)
-- [Neutral Porcelain + Steel 详规](../../ui/arctic-dawn.md)
+- [设置工作区策略](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
 - [v0.37 MCP 生产设计](../v0.37/production-design.md)
 - [桌面 UI 验收与隔离数据](../../development/ui-acceptance.md)

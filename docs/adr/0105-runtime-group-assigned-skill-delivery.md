@@ -154,5 +154,5 @@ inspector as “Skill 投递”.
 
 - [ADR-0150: Evidence-First Agent Codebase Analysis Bundled Skill](0150-evidence-first-agent-codebase-analysis-bundled-skill.md)
 - [ADR-0017: Managed Skill Library and Runtime-Native Projection](0017-managed-skill-library-runtime-projection.md)
-- [Arctic Dawn UI contract](../ui/arctic-dawn.md)
+- [Settings workspace UI strategy](../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
 - [Domain terminology](../../CONTEXT.md)

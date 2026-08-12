@@ -78,5 +78,5 @@ prefix and all Library, Assignment, projection, safety, and presentation decisio
 ## References
 
 - [ADR-0105: Runtime-Group Assigned Rovai Skill Delivery](0105-runtime-group-assigned-skill-delivery.md)
-- [Skill settings UI contract](../ui/arctic-dawn.md)
+- [Skill settings UI strategy](../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
 - [Domain terminology](../../CONTEXT.md)

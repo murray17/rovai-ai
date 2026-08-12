@@ -94,5 +94,5 @@ Snapshot、探测请求、诊断设置页或导出能力。
 - [ADR-0048: Rovai-ai Product Identity](0048-rovai-product-identity-and-legacy-namespace.md)
 - [ADR-0074: Quick Chat Ubiquitous Language](0074-quick-chat-ubiquitous-language-and-binding-identity.md)
 - [v0.24 Arctic Dawn V3](../versions/v0.24/README.md)
-- [Arctic Dawn V3 UI 规范](../ui/arctic-dawn.md)
+- [App Shell 与统一侧栏 UI 合同](../ui/components/app-shell-navigation.md)
 - `rovai-navigation-settings-empty-v7-package`

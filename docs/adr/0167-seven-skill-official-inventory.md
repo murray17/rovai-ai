@@ -73,5 +73,5 @@ Assignment 权威。
 - [ADR-0158: Default-All Runtime Delivery for Managed Skills](0158-default-all-runtime-delivery-for-managed-skills.md)
 - [ADR-0159: Pinned Third-Party Tasteful UI Bundled Skill (historical)](0159-pinned-third-party-tasteful-ui-bundled-skill.md)
 - [ADR-0166: Progressive Built-In CLI Teaching](0166-progressive-built-in-cli-teaching.md)
-- [Skill settings UI contract](../ui/arctic-dawn.md)
+- [Skill settings UI strategy](../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
 - [Domain terminology](../../CONTEXT.md)

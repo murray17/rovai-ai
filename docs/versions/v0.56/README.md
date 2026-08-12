@@ -72,7 +72,7 @@ last_updated: 2026-08-11
 ## References
 
 - [v0.56 实施与验收计划](implementation-plan.md)
-- [Neutral Porcelain + Steel UI 详规](../../ui/arctic-dawn.md)
+- [Porcelain Day 主题合同](../../ui/themes/porcelain-day.md)
 - [UI 规范索引](../../ui/README.md)
 - [桌面 UI 验收](../../development/ui-acceptance.md)
 - [Run Process Detail Surface v2](../../contracts/run-process-detail-surface-v2.md)

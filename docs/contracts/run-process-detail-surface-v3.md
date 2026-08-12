@@ -11,7 +11,7 @@ last_updated: 2026-08-11
 本合同以 [Run Process Detail Surface v2](run-process-detail-surface-v2.md) 的 Agent 级连续过程为
 基础，替代其三 Tab Inspector 和重复 Approval surface；v2 保持历史语义，不作为当前 Renderer
 入口。视觉 Token、导航、Composer、Approval、响应式和无障碍基础继续以
-[Arctic Dawn V3](../ui/arctic-dawn.md) 为准。领域对象和证据权威仍属于 Core；本合同不创建新的
+[Camp 会话工作区](../ui/components/conversation-workspace.md) 为准。领域对象和证据权威仍属于 Core；本合同不创建新的
 Process、Team 或 Approval 数据模型。
 
 ## 1. Agent 过程 read model

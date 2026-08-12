@@ -66,7 +66,7 @@ v0.65 冻结前已经完成普通文件/目录联合附件：目录由 Core 形�
 稳定快照，Renderer 只保留一个目录附件的用户意图，Runtime 读取受管目录根。该增量由
 [ADR-0169](../../adr/0169-core-owned-directory-attachment-snapshots.md)、
 [Camp Attachment v1](../../contracts/camp-attachment-v1.md)和
-[会话区拖放 UI](../../ui/conversation-drop-zone.md)独立拥有，不改变本版本两阶段统一范围仍未完成的事实。
+[会话区拖放 UI](../../ui/components/conversation-drop-zone.md)独立拥有，不改变本版本两阶段统一范围仍未完成的事实。
 
 ## 冻结边界
 
@@ -104,7 +104,7 @@ v0.65 冻结前已经完成普通文件/目录联合附件：目录由 Core 形�
 | ADR | 已更新 | [ADR-0165](../../adr/0165-core-owned-current-user-message-attention.md)冻结 `local_user`、正交 addressing 与原子通知；[ADR-0166](../../adr/0166-progressive-built-in-cli-teaching.md)冻结 progressive CLI teaching；[ADR-0167](../../adr/0167-seven-skill-official-inventory.md)接替六项 inventory 并冻结完整七项 official Skill 集合与普通投递；[ADR-0169](../../adr/0169-core-owned-directory-attachment-snapshots.md)独立冻结已实施的 Core-owned 目录快照 |
 | Contracts | 已更新 | 新增 [Camp Message Send v4](../../contracts/camp-message-send-v4.md)、[Current User Attention v1](../../contracts/current-user-attention-v1.md)、[Built-in Tool Transport v7](../../contracts/builtin-tool-transport-v7.md)、[ContextManifest Evidence v12](../../contracts/context-manifest-evidence-v12.md)和已实施的[Camp Attachment v1](../../contracts/camp-attachment-v1.md) |
 | Architecture | 已更新 | Public A2A 与 Built-in Tool Runtime 增加 User attention 轴、结构化正文投影、v7 help/Charter/Skill 分层和无 locator recovery stop |
-| UI | 已更新 | 当前 Porcelain/Steel 规范增加 Current User Mention、消息通知、独立浮层偏好与普通 official Skill 列表行为；已实施的目录附件拖放由[会话区拖放 UI](../../ui/conversation-drop-zone.md)记录 |
+| UI | 已更新 | 当前 Porcelain/Steel 规范增加 Current User Mention、消息通知、独立浮层偏好与普通 official Skill 列表行为；已实施的目录附件拖放由[会话区拖放 UI](../../ui/components/conversation-drop-zone.md)记录 |
 | Runtime Activity | 确认无需更新 | User Mention 与 Notification 都不是 Runtime operation；不改变 Canonical Activity identity、classifier 或 provider event mapping |
 | Runtime compatibility | 已更新 | 当前 transport authority 路由到 v7，并明确旧九 Runtime 证据不自动证明 v0.65；真实 v7/Skill smoke 留作发布门槛 |
 | Documentation routing | 已更新 | 文档导航、CURRENT、Architecture/Contract/UI 索引与当前版本指针共同路由到 v0.65 权威链 |

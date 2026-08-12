@@ -87,5 +87,5 @@ managed-delivery rules. ADR-0105 continues to own enablement, assignment, projec
 - [ADR-0130: Public A2A Messages and Unified Message Delivery](0130-public-a2a-message-and-unified-delivery.md)
 - [Camp Message Send v2](../contracts/camp-message-send-v2.md)
 - [v0.49 overview](../versions/v0.49/README.md)
-- [Skill settings UI contract](../ui/arctic-dawn.md)
+- [Skill settings UI strategy](../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
 - [Domain terminology](../../CONTEXT.md)

@@ -90,4 +90,4 @@ are outside this decision.
 - [v0.58 overview](../versions/v0.58/README.md)
 - [ADR-0154: Agent-Level Continuous Execution Process Surface](0154-agent-level-execution-process-surface.md)
 - [Run Process Detail Surface v3](../contracts/run-process-detail-surface-v3.md)
-- [Arctic Dawn V3](../ui/arctic-dawn.md)
+- [Camp 会话工作区 UI 合同](../ui/components/conversation-workspace.md)

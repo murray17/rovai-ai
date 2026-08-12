@@ -11,7 +11,7 @@ last_updated: 2026-08-11
 本合同约束 Arctic Dawn Camp 会话区的 Agent 级执行过程。它替代
 [Run Process Detail Surface v1](run-process-detail-surface-v1.md) 的逐 `AgentRun` 选择；v1 保持
 历史语义，不作为当前 Renderer 入口。视觉 Token、导航、Composer、Approval、响应式和无障碍基础
-继续以 [Arctic Dawn V3](../ui/arctic-dawn.md) 为准。领域对象和证据权威仍属于 Core；本合同不创建
+继续以 [Camp 会话工作区](../ui/components/conversation-workspace.md) 为准。领域对象和证据权威仍属于 Core；本合同不创建
 新的 Process 数据模型。
 
 ## 1. Agent 过程 read model

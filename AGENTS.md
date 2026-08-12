@@ -16,4 +16,18 @@
 
 ## Frontend design
 
-- For any UI/UX or renderer-facing change, read and follow [`docs/ui/README.md`](docs/ui/README.md).
+- For any UI/UX or renderer-facing change, read [`DESIGN.md`](DESIGN.md) and
+  [`docs/ui/README.md`](docs/ui/README.md) first.
+- Read `PRODUCT.md`, when it exists, only when the task depends on users, product purpose,
+  positioning, terminology, or durable brand commitments.
+- When a matching `apps/desktop/.impeccable/surfaces/*.md` brief exists for a Renderer target, use
+  it as local surface strategy. It cannot override ADRs, Contracts, current version scope,
+  `DESIGN.md`, or theme contracts.
+- Impeccable is optional provider-local tooling. It may be installed under the current coding
+  agent's native skill directory; do not assume `.agents/skills/impeccable`, a slash command, or a
+  specific provider.
+- When native skill discovery is unavailable, read the installed `impeccable/SKILL.md` and its
+  referenced files directly. The skill is not a repository authority.
+- Do not install or enable Impeccable hooks or plugins without explicit user approval.
+- Incremental work preserves the established Rovai AI visual world. Do not enter a
+  replacement-world flow unless the user explicitly requests a redesign.

@@ -18,7 +18,7 @@ last_updated: 2026-08-13
 | 查询已接入与候选 Agent Runtime 的实测兼容性 | [Runtime 兼容性清单](runtime-compatibility.md) |
 | 新增或修改 Runtime Activity 映射规则 | [Runtime Activity Mapping 维护指南](runtime-activity/README.md)及[Registry](runtime-activity/registry.md) |
 | 修改内置 Agent CLI、IPC、Envelope、receipt、Projection 或幂等合同 | [Built-in Tool Transport v7 合同](contracts/builtin-tool-transport-v7.md)、[Camp Message Send v4](contracts/camp-message-send-v4.md)及[Current User Attention v1](contracts/current-user-attention-v1.md) |
-| 修改 Camp 文件/目录附件、Composer 拖放、快照限制或 Runtime 附件路径 | [Camp Attachment v1](contracts/camp-attachment-v1.md)、[ADR-0169](adr/0169-core-owned-directory-attachment-snapshots.md)及[会话区拖放 UI](ui/conversation-drop-zone.md) |
+| 修改 Camp 文件/目录附件、Composer 拖放、快照限制或 Runtime 附件路径 | [Camp Attachment v1](contracts/camp-attachment-v1.md)、[ADR-0169](adr/0169-core-owned-directory-attachment-snapshots.md)及[会话区拖放 UI](ui/components/conversation-drop-zone.md) |
 | 修改 CLI 教学分层、`cli-operations` 触发/reference，或 official Skill 精确集合与普通投递 | [ADR-0166](adr/0166-progressive-built-in-cli-teaching.md)、[ADR-0167](adr/0167-seven-skill-official-inventory.md)及[Built-in Tool Runtime 架构](architecture/builtin-tool-runtime.md) |
 | 修改 Task 状态、字段、可见性、权限、列表、CampMember 收口、self-active awareness 或 linked execution 准入 | [Durable Task v3](contracts/durable-task-v3.md)、[ADR-0152](adr/0152-lead-owned-task-responsibility-and-self-active-task-awareness.md)、[ADR-0153](adr/0153-explicit-empty-self-active-task-snapshot.md)及[ADR-0137](adr/0137-one-time-task-linked-responsibility-admission.md) |
 | 修改 AgentRun 公共消息/Task 选择、正文/历史预算、引用链或投递 Profile | [ADR-0132](adr/0132-public-reference-context-closure-profile-v2.md)、[ADR-0152](adr/0152-lead-owned-task-responsibility-and-self-active-task-awareness.md)、[Context Delivery Profile v3](contracts/context-delivery-profile-v3.md)及[Message Delivery v2](contracts/message-delivery-v2.md) |
@@ -31,7 +31,7 @@ last_updated: 2026-08-13
 | 修改 Core 重启、accepted Runtime input、Session/Turn 恢复、`recovery_blocked`、Stop/预算收敛或旧 Turn reattach | [AgentRun Recovery 架构](architecture/agent-run-recovery.md)、[ADR-0164](adr/0164-accepted-input-recovery-requires-proven-native-turn-reconciliation.md)及[Accepted Input Recovery v1](contracts/accepted-input-recovery-v1.md) |
 | 修改主动退出/重启/更新、Core drain、launch/terminal admission、Runtime planned stop、shutdown deadline 或 Desktop child-exit wait | [Planned Shutdown 架构](architecture/planned-shutdown.md)、[ADR-0168](adr/0168-planned-shutdown-preserves-runtime-terminal-authority.md)及[Planned Shutdown v1](contracts/planned-shutdown-v1.md) |
 | 理解历史设计与演进原因 | [版本索引](versions/README.md)及对应历史版本；历史内容不能作为当前约束 |
-| 修改 Renderer UI/UX | [UI 规范索引](ui/README.md)；修改当前 Neutral Porcelain + Steel Renderer 时继续读取[当前 UI 详规](ui/arctic-dawn.md) |
+| 修改 Renderer UI/UX | 先读根目录[全局设计系统](../DESIGN.md)和[UI 规范索引](ui/README.md)，再按目标读取对应主题、复杂组件、`apps/desktop/.impeccable/surfaces/` brief 与 QA |
 | 本地运行、测试、Smoke Test 或 macOS 构建 | [开发者指南](development/README.md) |
 | 创建、复用、交接或清理开发用 Git worktree | [Git Worktree 生命周期与清理](development/worktrees.md) |
 

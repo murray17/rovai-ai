@@ -9,7 +9,7 @@ last_updated: 2026-08-06
 
 > 用户于 2026-08-06 再次确认本方向：Mention 视觉方案 A + 信息弹窗布局 2。
 > 本文件记录选型；生产权威与回归边界见
-> [Arctic Dawn](../../ui/arctic-dawn.md#不得回退的交互合同)。
+> [Arctic Dawn](../../ui/components/structured-mentions.md#不得回退的交互合同)。
 
 ## 选定方向
 

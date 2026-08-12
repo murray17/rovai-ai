@@ -89,5 +89,5 @@ CampTurn/AgentRun；详细 JSON/Markdown 位于 `reports/<run-id>/`。旧的一 
 - [Benchmark Protocol architecture](../../architecture/benchmark-protocol.md)
 - [公开 Demo Case 目录](../../../qualification/demo/README.md)
 - [Public A2A Message 与 Message Delivery 架构](../../architecture/public-a2a-message-delivery.md)
-- [Arctic Dawn：A2A 会话消息](../../ui/arctic-dawn.md#a2a-会话消息)
+- [Arctic Dawn：A2A 会话消息](../../ui/components/conversation-workspace.md#a2a-会话消息)
 - [桌面 UI 验收：A2A 消息 footer 门禁](../../development/ui-acceptance.md#a2a-消息-footer-门禁)
