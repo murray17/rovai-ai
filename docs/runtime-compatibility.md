@@ -42,8 +42,10 @@ operation 的 14 条 Core Evidence；没有使用 Agent-facing catalog discovery
 observability metric，不是兼容性或发布门槛。transport-independent response-loss 与
 `outcome_indeterminate` 由确定性 CLI 测试覆盖。
 
-字段级合同以 [Built-in Tool Transport v4](contracts/builtin-tool-transport-v4.md) 为唯一真源，
-调用结构以 [Built-in Tool Runtime Architecture](architecture/builtin-tool-runtime.md) 为准。
+当前字段级合同以 [Built-in Tool Transport v7](contracts/builtin-tool-transport-v7.md) 为唯一真源，
+调用结构以 [Built-in Tool Runtime Architecture](architecture/builtin-tool-runtime.md) 为准。上表 v0.47
+实测仍是历史十三项 Transport v4 证据，不自动证明 v0.65 的 `--to-user`、exact Camp read addressing、
+精确 help 或 `cli-operations` progressive discovery；v7 九 Runtime smoke 完成前，不提升该行结论。
 
 ## Missing-Send Recovery Publication
 

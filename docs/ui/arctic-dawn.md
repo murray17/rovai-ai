@@ -3,8 +3,8 @@ document_type: ui-design-system
 authority: renderer-ui-detail
 status: accepted
 design_direction: porcelain-day-steel-night
-target_version: v0.64
-implementation_status: complete
+target_version: v0.65
+implementation_status: in_progress
 last_updated: 2026-08-12
 ---
 
@@ -52,6 +52,12 @@ Inspector 进一步收敛为“任务 / 队员”。Approval Dock 成为唯一�
 v0.61 冻结队员页的来源感知返回：只有从具体 Camp 进入才保留同一 Camp 的精确返回目标，
 directory Project 和“快速对话”分组内的 Camp 语义完全一致；其他一级页面与启动直达统一返回
 App。该目标是当前 Main Window Session 的 Renderer 瞬时状态，不进入 Core 或 Restorable Location。
+
+v0.65 在同一 Porcelain/Steel 系统中增加 Core-owned Current User Mention、Message Mention Inbox
+notification 和独立浮层偏好；同时把 `cli-operations` 作为普通 official bundled Skill 加入现有统一
+Skill 列表。该版本的产品设计已接受，但实现与打包 App 验收尚未完成，状态见
+[v0.65 实施计划](../versions/v0.65/implementation-plan.md)；精确 official inventory 与普通投递见
+[ADR-0167](../adr/0167-seven-skill-official-inventory.md)。
 
 v0.47 进一步冻结 Durable Task v2 的四层界面：会话卡只作五态责任感知，Inspector list
 负责发现，Inspector detail 负责完整责任与审计，现有 AgentRun UI 负责执行事实。Task 取消不等于
@@ -695,6 +701,31 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   Mention。旧记录已有的收件人 ID 继续作为历史寻址、审计和按队员搜索事实，但不用于
   猜测 Mention 的正文位置；只有新版结构化 Composer 创建的消息拥有可见 Mention。
 
+#### Current User Mention 与消息通知
+
+> Core identity、Structured Content、原子 Notification 和 exact read 以
+> [Current User Attention v1](../contracts/current-user-attention-v1.md)为权威；本节只拥有 Renderer
+> 呈现、交互和可访问性。
+
+- Agent 通过 `--to-user` 产生的 `CurrentUserMention(local_user)` 在历史消息中显示为当前资料名称的
+  `@显示名称`；资料缺失时使用本地化 `@你` / `@You`。显示名变化只更新当前投影，不改写历史身份、
+  semantic digest 或 Runtime 已冻结 Context。
+- token 复用 `--mention-ink` / `--mention-ink-hover`、透明默认背景、无边框、`display:inline`、
+  `padding:0 1px` 与 3px radius，与普通 Text 可视觉区分但不做人物入口。它没有 `role=button`、
+  tab stop、popover、导航或 Core mutation；可访问名称固定为“提及当前用户：{显示名称}”。
+- 鼠标拖选与原生复制必须保留可见文字。整条消息的 private structured Clipboard 可以保留 segment，
+  但粘入用户 Composer 时必须降级为普通 Text；用户 Draft 不能借 Clipboard 创建 Current User Mention。
+- 手写、粘贴或旧消息里的 `@你`、显示名、`@local_user` 或 `@local-user` 继续使用普通 Text 样式，
+  不显示 token、不创建通知，也不根据当前用户资料反向升级。
+- `camp_message_user_mention` 在通知中心使用标签“消息提及”，正文为有界 projected-body 摘要并显示
+  Camp 标题。单项点击通过 `campId + messageId` 精确进入并定位消息；来源不可访问时在原通知行显示
+  “来源不可用”，不得定位到相邻或同正文消息，仍允许标记已读或清除。
+- 每条提及消息在 Inbox 独立保留。临时 heads-up 沿用单槽、8 秒、悬停/聚焦暂停、最多三项和溢出
+  摘要；同一个可见 8 秒窗口内、同 Camp 的后续消息提及可以收敛为“本 Camp 还有 N 条消息提及你”。
+  聚合点击只打开通知中心定位这些新项，不批量已读或清除；不同 Camp/kind/窗口不得合并。
+- Settings → 通知在“待审批”“执行结束”之外新增“消息提及”子开关，默认开启并受总浮层开关 gate。
+  关闭只影响之后的新浮层，不阻止持久通知、不改未读/保留/导航，也不在重新开启时补弹旧项。
+
 - Pending Approval 弹框固定在 Composer 正上方，属于输入停靠区而非会话时间线、
   Dialog 或全屏 Overlay。多个队员同时请求审批时显示聚合计数，例如“2 项待审批”，
   并同时保留队员身份、Runtime、请求范围和每一项的独立决定状态。
@@ -1137,12 +1168,16 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   分组仍显示，队员只用于查看，不进入 Assignment。新安装的 Rovai 内置 Skill 与新导入
   Skill 都默认选择全部九组，用户后续增删分组保持不变。
 - 新内置和 Imported Skill 默认启用。Rovai 内置为 `analyze-agent-codebase`、
-  `memory-stewardship`、`worktree`、`grill-duo`、`grill-duo-with-docs` 与 `tasteful-ui`；
+  `cli-operations`、`memory-stewardship`、`worktree`、`grill-duo`、`grill-duo-with-docs` 与
+  `tasteful-ui`；
   同名 Imported 更新创建不可变 Revision，内置同名导入拒绝。导入不执行内容，启用、
   内置来源和 `allowed-tools` 都不能授予额外权限。
 - Settings 不展示 Shadowed、Duplicate visible、Stale 或项目级投递清单。这些实际
   AgentRun 事实继续保留在 ContextManifest/Core evidence，不投影到 ordinary Inspector，
   也不得声称 Runtime 或模型已经读取正文。
+- `cli-operations` 在列表中只使用现有“Rovai”来源、同一身份色、Steel Switch、详情和九组菜单；
+  不显示 required/锁定标记，不新增“Rovai 内置指导”分组。说明文字只表达“复杂 CLI 操作协调”，
+  不暗示普通 send/read 必须加载该 Skill。
 
 ### MCP
 

@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.64
+current_version: v0.65
 last_updated: 2026-08-12
 ---
 
@@ -115,4 +115,5 @@ last_updated: 2026-08-12
 | v0.61 | `historical` | 队员页来源感知会话返回 | [v0.61/README.md](v0.61/README.md) |
 | v0.62 | `historical` | 显式 A2A 调用者返回、Core 管理 reply reference 与 Built-in Transport v6 | [v0.62/README.md](v0.62/README.md) |
 | v0.63 | `historical` | MCP 队员分配工作台、长名册有界滚动与开放 Library | [v0.63/README.md](v0.63/README.md) |
-| v0.64 | `current` | Accepted Input 恢复阻断、安全收敛与 Copilot Native Turn 负向实验证据 | [v0.64/README.md](v0.64/README.md) |
+| v0.64 | `historical` | Accepted Input 恢复阻断、安全收敛与 Copilot Native Turn 负向实验证据 | [v0.64/README.md](v0.64/README.md) |
+| v0.65 | `current` | Core-owned 当前用户消息注意力与渐进式 Built-in CLI 教学 | [v0.65/README.md](v0.65/README.md) |

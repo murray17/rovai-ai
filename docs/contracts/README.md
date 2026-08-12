@@ -17,6 +17,9 @@ Architecture 解释组件如何组成，Version 文档记录交付范围；它�
 - 新增或切换合同版本时必须同步更新下方索引，明确当前入口与 historical 入口。合同的
   `accepted` 只表示该版本语义成立，不表示它是新执行的当前入口，也不表示代码已经实现。
 
+跨版本合同拥有的 JSON Schema 位于 [`schemas/`](schemas/) 并由独立 catalog 固定 raw-byte digest；不得为了新合同
+修改已冻结的历史 Version schema catalog。
+
 | 合同 | 权威范围 |
 | --- | --- |
 | [Benchmark Protocol v3（当前）](benchmark-protocol-v3.md) | 版本化 Run 信封、Product/Environment fingerprint、五层 Evidence、Adapter/derived projection、逐轴比较资格与 disclosure |
@@ -24,14 +27,13 @@ Architecture 解释组件如何组成，Version 文档记录交付范围；它�
 | [Diagnostics Center v1（当前）](diagnostics-center-v1.md) | `diagnostics.check` typed read model、三态分类、显式单项修复映射、Recovery 与集中脱敏的 `rovai-diagnostics-v5` |
 | [Accepted Input Recovery v1（当前）](accepted-input-recovery-v1.md) | accepted Runtime input 的启动分类、`recovery_blocked`、Scheduler fence、用户命令与 Stop/预算 outcome-unknown 收敛 |
 | [Collaboration State v2（当前）](collaboration-state-v2.md) | peer-only routing identity、稳定 CampMember 选择、Lead ID/Boolean、完整 projection digest、独立 inclusion、accepted ACK 与 v0.50 clean break |
-| [Built-in Tool Transport v6（当前）](builtin-tool-transport-v6.md) | 十三项固定业务命令、Core Envelope/IPC、Agent Output v2、Task v3 与 Camp Message Send v3 schema/help |
-
-跨版本合同拥有的 JSON Schema 位于 [`schemas/`](schemas/) 并由独立 catalog 固定 raw-byte digest；不得为了新合同
-修改已冻结的历史 Version schema catalog。
+| [Built-in Tool Transport v7（当前）](builtin-tool-transport-v7.md) | 十三项固定业务命令、Camp Message Send v4、exact Camp read addressing、精确 help 与渐进式 CLI 教学边界 |
 | [Durable Task v3（当前）](durable-task-v3.md) | User/Lead 责任定义、Assignee execution-state update、Camp-wide read、explicit owner、unassigned holding 与 advisory actions |
-| [Camp Message Send v3（当前）](camp-message-send-v3.md) | `--to`/inline 显式寻址、直属 caller return、Core 管理 reply reference、隐式当前 Run Camp 与 Replay |
+| [Camp Message Send v4（当前）](camp-message-send-v4.md) | v3 显式 Agent 寻址/caller return 加 `--to-user`、Structured Current User Mention 与原子通知 |
+| [Current User Attention v1（当前）](current-user-attention-v1.md) | 唯一 `local_user`、内容投影、Message Mention Notification、Inbox/浮层、exact read 与 Renderer token |
 | [Missing-Send Recovery Publication v1（当前）](missing-send-recovery-publication-v1.md) | 成功 AgentRun 的 typed final candidate、同 Run accepted-send 抑制、recipient-free 原子恢复消息与 terminal replay/竞态语义 |
 | [Pending Camp Activation v1（当前）](pending-camp-activation-v1.md) | 一键 Pending 创建、Snapshot/Navigation activation state、首消息原子激活、mutation guard 与窄 discard/启动清理 |
+| [Built-in Tool Transport v6 (historical)](builtin-tool-transport-v6.md) | v0.62 Camp Message Send v3 transport；不作为 v0.65 parser/help/compatibility 入口 |
 | [Built-in Tool Transport v5 (historical)](builtin-tool-transport-v5.md) | v0.54 Task v3 transport；不作为 v0.62 Runtime/CLI compatibility 入口 |
 | [Built-in Tool Transport v4 (historical)](builtin-tool-transport-v4.md) | v0.47 Task v2 transport；不作为 v0.62 Runtime/CLI compatibility 入口 |
 | [Durable Task v2 (historical)](durable-task-v2.md) | ordinary-Agent create/claim 与受限读取的旧 Task 合同；不作为当前 authority |
@@ -39,10 +41,12 @@ Architecture 解释组件如何组成，Version 文档记录交付范围；它�
 | [Built-in Tool Transport v2 (historical)](builtin-tool-transport-v2.md) | v0.45 Agent CLI、catalog、IPC、Envelope、receipt、幂等、lease 与旧私有 operation clean break |
 | [Camp Message Send v1 (historical)](camp-message-send-v1.md) | v0.45 `camp.message.send` / `rovai send`、Addressing Token、recipient resolution、fanout、lineage 与错误 |
 | [Camp Message Send v2 (historical)](camp-message-send-v2.md) | v0.46 隐式 Camp 与 Agent 输入 reply default target；不作为 v0.62 send 入口 |
+| [Camp Message Send v3 (historical)](camp-message-send-v3.md) | v0.62 caller return 与 Core-managed reply reference；不含 v0.65 Current User Attention |
 | [Message Delivery v2（当前）](message-delivery-v2.md) | `forward | return` 冻结边、target lineage、caller continuation，以及 v1 queue/attempt/recovery/settlement |
 | [Message Delivery v1 (historical)](message-delivery-v1.md) | 无 caller-return 分类的 recipient queue、dispatch attempt、waitCondition、retry/cancel 与 settlement |
-| [ContextManifest Evidence v11（当前）](context-manifest-evidence-v11.md) | v10 evidence 区分 explicit empty self-active snapshot 与 payload-budget whole-section omission；无 Task watermark/ACK |
+| [ContextManifest Evidence v12（当前）](context-manifest-evidence-v12.md) | v11 self-active semantics 加 Formatter v14 的 `mentionsCurrentUser`、Structured Content/projected body evidence 与 frozen recovery |
 | [Context Delivery Profile v3（当前）](context-delivery-profile-v3.md) | v2 public context 加 self-active Task selection/order/max 8 与 public-history-first budget priority |
+| [ContextManifest Evidence v11 (historical)](context-manifest-evidence-v11.md) | Formatter v13 与 self-active empty/omission 语义；不含 Current User Mention metadata |
 | [ContextManifest Evidence v10 (historical)](context-manifest-evidence-v10.md) | self-active Task evidence 的旧空集合语义；不作为 Formatter v13 恢复入口 |
 | [ContextManifest Evidence v9 (historical)](context-manifest-evidence-v9.md) | bounded public omission evidence；不作为 Formatter v13 恢复入口 |
 | [Context Delivery Profile v2 (historical)](context-delivery-profile-v2.md) | 公共引用链与历史 budget 的旧当前合同；不选择 self-active Task |

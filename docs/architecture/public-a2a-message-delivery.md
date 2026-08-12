@@ -9,7 +9,8 @@ last_updated: 2026-08-12
 # Public A2A Message 与 Message Delivery 架构
 
 本文件定义 v0.45 以后 Agent-to-Agent 协作的长期组件边界。字段级输入、错误和状态合同
-分别见 [Camp Message Send v3](../contracts/camp-message-send-v3.md)、
+分别见 [Camp Message Send v4](../contracts/camp-message-send-v4.md)、
+[Current User Attention v1](../contracts/current-user-attention-v1.md)、
 [Message Delivery v2](../contracts/message-delivery-v2.md) 与
 [Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)；决策理由见
 [ADR-0130](../adr/0130-public-a2a-message-and-unified-delivery.md) 和
@@ -17,6 +18,8 @@ last_updated: 2026-08-12
 reply reference 见
 [ADR-0163](../adr/0163-explicit-caller-return-and-core-managed-reply-reference.md)，成功 Run 的 zero-send safety net 见
 [ADR-0162](../adr/0162-missing-send-recovery-publication.md)。
+Current User Attention 的身份、内容与原子通知决定见
+[ADR-0165](../adr/0165-core-owned-current-user-message-attention.md)。
 
 ## 1. 一条公共事实，多个收件人责任
 
@@ -24,7 +27,8 @@ reply reference 见
 AgentRun / user-visible Agent
           ├─ camp.message.send ──► Core Message Send Transaction
           │                          ├─ Public A2A Message (one public Camp fact)
-          │                          └─ Message Delivery × effective recipient (zero or more)
+          │                          ├─ Message Delivery × effective Agent recipient (zero or more)
+          │                          └─ User Mention Notification (zero or one)
           └─ successful zero-send ─► Core Terminal Recovery Transaction
                                      └─ recipient-free Public A2A Message (zero Delivery)
                                   │ dispatch attempt
@@ -32,7 +36,8 @@ AgentRun / user-visible Agent
                          target AgentRun (zero or one)
 ```
 
-`CampMessage` 是公共时间线、公共搜索和 Shared Conversation 的事实来源。它由作者、正文、
+`CampMessage` 是公共时间线、公共搜索和 Shared Conversation 的事实来源。它由作者、Structured
+Content、
 直接回复关系、稳定消息 ID 和冻结的 recipient/presentation snapshot 组成。每个
 `MessageDelivery` 只负责一个 canonical Agent ID，并持有自己的队列位置、调度尝试、等待
 条件、目标 Runtime/Run 绑定、ContextManifest 引用和终态证据。Delivery 的状态不会反写或
@@ -49,18 +54,22 @@ Core 在一个提交事务中完成：
 
 1. 从 authenticated current AgentRun/Lease/Native Binding 推导唯一当前 Camp，并从 Run trigger
    自动确定 Message Reply Reference；
-2. 只解析 `--to` 与正文 Addressing Token；
+2. 只从 `--to` 与正文 Addressing Token 解析 Agent recipients，并独立读取 closed
+   `mentionUser` boolean；
 3. 对所有目标执行 Camp membership、self、presence/removal、fanout、lineage 和 budget
    检查；
 4. 去重并按 canonical Agent ID UTF-8/ASCII 字节序升序冻结 Effective Recipients；
-5. 计算 canonical input、recipient digest、presentation metadata 和 envelope preimage；
+5. 从 Structured Content 计算 canonical input/content digest、recipient digest、projected body、
+   presentation metadata 和 envelope preimage；
 6. 将 exact Immediate Caller 目标分类为 `return`，其他目标分类为 `forward`，并为每个目标
    冻结 target parent/root/depth；
-7. 原子写入一个 Public A2A Message，以及每个目标一个 Message Delivery；
+7. 原子写入一个 Public A2A Message、每个 Agent 目标一个 Message Delivery，并在
+   `mentionUser=true` 时写入唯一 `camp_message_user_mention(local_user, messageId)`；
 8. 记录 idempotency receipt 和 audit facts。
 
 任何一个目标不合格、fanout 超限、self/ancestor cycle 或相同 requestId 输入冲突，都使整笔
-事务失败，不留下公共消息、Delivery 或半成品审计事实。Runtime readiness、busy 和容量不
+事务失败，不留下公共消息、Current User Mention、Notification、Delivery 或半成品审计事实。
+Runtime readiness、busy 和容量不
 属于身份解析失败；它们只在 Delivery 进入调度生命周期后成为 waitCondition。
 
 ## 3. Delivery 生命周期与唯一 Dispatch Pump
@@ -96,7 +105,7 @@ recipient/Camp 的直接相关事件调用 `dispatchPending(agentId)`；没有�
 ## 4. Context gate 与 AgentRun 物化顺序
 
 Delivery 被选中尝试后，Core 先按
-[Context Delivery Profile v2](../contracts/context-delivery-profile-v2.md)完成选择与预算 gate，再由
+[Context Delivery Profile v3](../contracts/context-delivery-profile-v3.md)完成选择与预算 gate，再由
 当前 Context Formatter 形成 Model Context Projection，并由 ContextManifest 冻结 Evidence，最后决定
 是否创建 AgentRun：
 
@@ -161,7 +170,9 @@ stdout 与 ACP `end_turn` 时 last-tool 后 assistant suffix。Core 不回退到
 
 | 事实/投影 | 唯一权威 | 允许的消费者 |
 | --- | --- | --- |
-| 公共正文、作者、reply-to、公共可见性 | `CampMessage` | Camp 时间线、搜索、Shared Conversation、审计引用 |
+| Structured Content、投影正文、作者、reply-to、公共可见性 | `CampMessage` | Camp 时间线、搜索、Shared Conversation、Context、Clipboard、审计引用 |
+| Current User Mention 与 `mentionsCurrentUser` | CampMessage Structured Content | Renderer token、exact Camp read、Context 与 Notification eligibility |
+| User Mention Inbox identity/read/clear | `InAppNotification` | Notification Center、未读徽标、可选 transient heads-up 与精确消息导航 |
 | 收件人、`forward | return`、target lineage、队列、尝试、waitCondition、目标 Run、终态 | `MessageDelivery` | Dispatch Pump、Delivery Read Side、Drawer、审计 |
 | Runtime 过程和证据 | Canonical Runtime Activity / Execution Evidence | Execution Drawer、审计、诊断 |
 | CampTurn 停止与 fence | CampTurn cancellation authority | Composer Stop、Run/Delivery projection |
@@ -170,10 +181,16 @@ stdout 与 ACP `end_turn` 时 last-tool 后 assistant suffix。Core 不回退到
 Execution Drawer 只能读取并选择 Run 详情；它不拥有取消命令。CampTurn 存在时 Composer
 发送位置切换为 Stop，由同一 CampTurn 权威 fence 整棵 AgentRun/Delivery 执行树。
 
+Agent routing 与 User attention 不能相互推导。exact `camp.read item` 分别投影冻结的
+`effectiveAgentRecipients` 与从 Structured Content 派生的 `mentionsCurrentUser`；notification clear、
+retention 或 source unavailable 不改变后者。Renderer 展示名称只是当前 presentation，不能改写
+`local_user` segment、消息 digest 或 Runtime 已冻结的 Context bytes。
+
 ## 7. 并发、重放与清理
 
 - `requestId` 幂等只覆盖同一执行身份与相同 canonical input；运输重试复用 requestId，修正
   寻址使用新 requestId；
+- 同一 send replay 复用原 `local_user`、Structured Content、Notification 和 Delivery IDs；
 - successful terminal command 的 durable replay 不重复运行 recovery；send 先提交则抑制，succeed 先
   提交则 recovery 与 terminal fence 原子成立，迟到 send 被拒绝；
 - Delivery Retry Identity 是独立审计身份，但重试不得重解析、扩大 recipient、改写正文或

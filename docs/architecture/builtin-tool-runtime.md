@@ -9,10 +9,11 @@ last_updated: 2026-08-12
 # Built-in Tool Runtime Architecture
 
 本文件说明 Rovai built-in operations 的长期组件结构。当前字段与版本以
-[Built-in Tool Transport v6](../contracts/builtin-tool-transport-v6.md)、
+[Built-in Tool Transport v7](../contracts/builtin-tool-transport-v7.md)、
 [Durable Task v3](../contracts/durable-task-v3.md) 和
-[Camp Message Send v3](../contracts/camp-message-send-v3.md) 与
-[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md) 为准；v3 及更早 Transport 只保留
+[Camp Message Send v4](../contracts/camp-message-send-v4.md)、
+[Current User Attention v1](../contracts/current-user-attention-v1.md)与
+[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md) 为准；v6 及更早 Transport 只保留
 historical 语义。决策理由见
 [ADR-0124](../adr/0124-cli-only-transport-for-rovai-built-in-operations.md)、
 [ADR-0135](../adr/0135-compact-agent-output-over-canonical-built-in-tool-envelope.md)、
@@ -28,13 +29,17 @@ Runtime Input Delivery Evidence 与 Profile/Formatter/Manifest 权责见
 [ADR-0147](../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)；whole-history
 omission 的 bounded aggregate 边界见
 [ADR-0149](../adr/0149-bounded-whole-history-omission-evidence.md)和
-[ContextManifest Evidence v11](../contracts/context-manifest-evidence-v11.md)。Task authority 与
+[ContextManifest Evidence v12](../contracts/context-manifest-evidence-v12.md)。Task authority 与
 self-active awareness 见
 [ADR-0152](../adr/0152-lead-owned-task-responsibility-and-self-active-task-awareness.md)；真实空集合
 的显式 clearing snapshot 见
 [ADR-0153](../adr/0153-explicit-empty-self-active-task-snapshot.md)。
 Send 的显式 caller return 与 Core-managed reply reference 见
 [ADR-0163](../adr/0163-explicit-caller-return-and-core-managed-reply-reference.md)。
+Current User Attention 与 progressive CLI teaching 分别见
+[ADR-0165](../adr/0165-core-owned-current-user-message-attention.md)和
+[ADR-0166](../adr/0166-progressive-built-in-cli-teaching.md)；完整七项 official Skill inventory 与普通
+投递见 [ADR-0167](../adr/0167-seven-skill-official-inventory.md)。
 
 ## 总体路径
 
@@ -97,7 +102,9 @@ rovai history search
 rovai memory search|read|write|propose-hearth
 ```
 
-`<command> --help` 是唯一的命令发现入口。Help 只列必要 flags、输入来源互斥规则、关键约束
+Agent 先用 `rovai --help` 选择 operation，再用该 operation 的精确 `--help`。根 `send` 使用
+`rovai send --help`；分组命令必须包含 action，例如 `rovai task create --help`。不存在
+`rovai task|camp|memory --help` 教学别名。Help 只列必要 flags、输入来源互斥规则、关键约束
 和短示例，不输出完整 JSON Schema、Envelope、receipt 或 catalog。Dotted canonical operation
 仍是 Core 内部语义身份，不能直接变成通用 Agent 命令。
 
@@ -250,7 +257,7 @@ Session Charter 只说明：
 
 - CLI contract 标题固定为 `Rovai Built-in CLI Contract`，不显示应用 release/version；
 - 使用 bundled `rovai`；
-- 固定业务命令和 `<command> --help`；
+- 固定业务命令，以及“先 `rovai --help`、再运行具体 operation 精确 `--help`，不假设 family help”；
 - `camp.message.send` 使用当前 Run Camp，不能传入 Camp ID；
 - 对 `explicit_send_only` Runtime，narration/final response 只是私有执行证据；当前责任需要在 Camp
   公开 answer/result/status/summary 时必须在结束前调用 `rovai send`，只有成功 send 才发布该回复；
@@ -262,8 +269,10 @@ Session Charter 只说明：
   executable continuation；整条历史的 sequence envelope 只是 navigation hint；公共 A2A 遵循
   Profile v3 的 bounded reference closure 与 self-active Task selection。
 
-Charter 不承载 Task 创建克制、字段权限、Camp-wide read、local planning/A2A、wake/send 或 polling
-操作指导。它们分别属于 `task create/get/update/list --help` 与当前 Task contract。特别是
+Charter 不承载 Task 创建克制、字段权限、Camp-wide read、local planning/A2A、wake/send、Memory
+治理或 polling 操作指导。普通 flags 属于精确 operation help；命令族选择、message→Task、多操作协调
+与复杂 recovery 属于窄触发 `cli-operations` official Skill；Memory 治理属于
+`memory-stewardship`。特别是
 `task create --help` 面向 User/Default Lead 说明只持久化跨 Run/交接的独立责任，并优先推进已有
 Task；Core 不做语义去重。
 
@@ -271,6 +280,11 @@ Bootstrap 不含完整 Schema、Envelope、receipt、catalog digest、socket、p
 AgentRun ID、epoch、Camp ID 或 Native Binding ID。只有无损映射到当前 schema 的完整 operation/input
 对象才是 Executable Retrieval Locator；非可执行 navigation hint 不伪装成 tool input，也不重复
 transport 细节。
+
+`cli-operations` 和 `memory-stewardship` 都沿用 ordinary official Skill Library、默认 enabled、默认九
+Runtime Group Assignment 与用户后续修改保持。Skill Exposure 只证明 Runtime-native discovery 可见，
+不证明模型读取正文，也不授予命令、文件、网络或协作权限。普通单一 send/`--to-user`/list/get/search/read
+不要求加载 `cli-operations`。
 
 ### 四层 Context 权威
 
@@ -297,13 +311,13 @@ Run 与 Bootstrap Evidence 不回写，新建 Native Session 使用当前内置 
 既有 eligible Bootstrap boundary 原子读取，不进入 AgentRun Dynamic Context，不持久化 Identity
 Blob、snapshot、digest 或 history。身份编辑不轮换 Session，也不构造下一 Run 的 patch。
 
-Context Formatter v13 的 `COLLABORATION_STATE` schema v2 只描述 peers。Core 从 stable current
+Context Formatter v14 的 `COLLABORATION_STATE` schema v2 只描述 peers。Core 从 stable current
 CampMembers 中排除 `snapshot.agent_id`；away 和 leave-requested 关系保留到正式 `left`。每个 peer
 只含 Agent ID、Name、Team Role 和 Professional Responsibilities；Default Lead 只以
 `defaultLeadAgentId` 和派生的 `selfIsDefaultLead` 表达。调用资格仍在 BuiltinToolRouter/Domain
 Service admission 时按当前 membership、Presence、Runtime、Capability、quota 与 fence 重判。
 
-Core 先构建完整 v2 projection，再计算 `collaboration_state_digest`。ContextManifest v11 无论本轮是否
+Core 先构建完整 v2 projection，再计算 `collaboration_state_digest`。ContextManifest v12 无论本轮是否
 渲染 section 都冻结该完整 digest，并以 `collaborationStateIncluded` 单独记录 inclusion。只有 Runtime
 Input accepted ACK 才把 `conversation.native_collaboration_state_digest` 推进到 Delivery 冻结的完整
 digest；failure、`delivery_unknown` 和未 accepted 输入不推进。因此 self identity 编辑和其他不改变
@@ -312,14 +326,14 @@ digest；failure、`delivery_unknown` 和未 accepted 输入不推进。因此 s
 ### Self Active Task Projection
 
 Profile v3 对目标 Agent 当前 Camp 中自己负责的 active Task 按 `updatedAt DESC, taskId DESC` 选择最多
-八项。Formatter v13 在 `COLLABORATION_STATE` 后、`SHARED_CONVERSATION` 前独立输出 compact
+八项。Formatter v14 在 `COLLABORATION_STATE` 后、`SHARED_CONVERSATION` 前独立输出 compact
 `SELF_ACTIVE_TASKS`，每项只有 `taskId/title/status`。真实 candidate 空集合必须输出
 `{"tasks":[]}`，以覆盖同一 Native Session 的旧责任认知；只有候选存在但 Runtime payload budget
 将所有 Task entry 淘汰时才省略整个 section。Default Lead 不获得其他成员 Task 的隐式 projection。
 公共历史先为 Runtime budget 让位，随后从 Task tail 移除，并以 aggregate `omittedCount` 说明
 selection/budget omission。
 
-ContextManifest v11 冻结 inclusion、有序 `taskId/version/updatedAt` references、optional omission count
+ContextManifest v12 冻结 inclusion、有序 `taskId/version/updatedAt` references、optional omission count
 与 exact projection digest；真实空集合为 `included:true`、空 refs 与 empty projection digest，预算
 全量淘汰为 `included:false`、空 refs 与 positive omission count。A2A preflight 和 direct
 materialization 使用同一 selector。该 Evidence 不创建 freshness watermark、delta 或 ACK，恢复只

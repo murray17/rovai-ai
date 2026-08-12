@@ -170,10 +170,13 @@ generated_from: docs/adr-front-matter
 | [ADR-0156](0156-logical-runtime-identity-and-bounded-installation-rebind.md) | Frozen Logical Runtime Identity and Bounded Installation Rebind | `accepted` | `cross-version` | [v0.58](../versions/v0.58/README.md) | — |
 | [ADR-0157](0157-message-owned-agentrun-instruction-without-expected-output.md) | Message-Owned AgentRun Instruction Without Expected Output Metadata | `accepted` | `cross-version` | [v0.58](../versions/v0.58/README.md) | — |
 | [ADR-0158](0158-default-all-runtime-delivery-for-managed-skills.md) | Default-All Runtime Delivery for Managed Skills | `accepted` | `cross-version` | [v0.58](../versions/v0.58/README.md) | — |
-| [ADR-0159](0159-pinned-third-party-tasteful-ui-bundled-skill.md) | Pinned Third-Party Tasteful UI Bundled Skill | `accepted` | `cross-version` | [v0.58](../versions/v0.58/README.md) | — |
+| [ADR-0159](0159-pinned-third-party-tasteful-ui-bundled-skill.md) | Pinned Third-Party Tasteful UI Bundled Skill | `superseded` | `cross-version` | [v0.58](../versions/v0.58/README.md) | [ADR-0167](0167-seven-skill-official-inventory.md) |
 | [ADR-0160](0160-focused-camp-inspector-and-single-approval-surface.md) | Focused Camp Inspector and Single Approval Surface | `accepted` | `cross-version` | [v0.58](../versions/v0.58/README.md) | — |
 | [ADR-0161](0161-event-driven-root-scoped-skill-projection-reconciliation.md) | Event-Driven Root-Scoped Skill Projection Reconciliation | `accepted` | `cross-version` | [v0.58](../versions/v0.58/README.md) | — |
 | [ADR-0162](0162-missing-send-recovery-publication.md) | Missing-Send Recovery Publication at Successful AgentRun Termination | `accepted` | `cross-version` | [v0.59](../versions/v0.59/README.md) | — |
 | [ADR-0163](0163-explicit-caller-return-and-core-managed-reply-reference.md) | Explicit Caller Return and Core-Managed Reply Reference | `accepted` | `cross-version` | [v0.62](../versions/v0.62/README.md) | — |
 | [ADR-0164](0164-accepted-input-recovery-requires-proven-native-turn-reconciliation.md) | Accepted Input Recovery Requires Proven Native Turn Reconciliation | `accepted` | `cross-version` | [v0.64](../versions/v0.64/README.md) | — |
+| [ADR-0165](0165-core-owned-current-user-message-attention.md) | Core-Owned Current-User Message Attention | `accepted` | `cross-version` | [v0.65](../versions/v0.65/README.md) | — |
+| [ADR-0166](0166-progressive-built-in-cli-teaching.md) | Progressive Built-In CLI Teaching | `accepted` | `cross-version` | [v0.65](../versions/v0.65/README.md) | — |
+| [ADR-0167](0167-seven-skill-official-inventory.md) | Seven-Skill Official Inventory | `accepted` | `cross-version` | [v0.65](../versions/v0.65/README.md) | — |
 <!-- adr-history:end -->

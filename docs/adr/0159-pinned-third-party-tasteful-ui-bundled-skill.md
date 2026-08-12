@@ -2,13 +2,13 @@
 document_type: adr
 id: ADR-0159
 title: Pinned Third-Party Tasteful UI Bundled Skill
-status: accepted
+status: superseded
 date: 2026-08-11
 decision_scope: cross-version
 source_version: v0.58
 supersedes:
   - ADR-0150
-superseded_by: null
+superseded_by: ADR-0167
 ---
 
 # ADR-0159: Pinned Third-Party Tasteful UI Bundled Skill

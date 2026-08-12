@@ -120,6 +120,14 @@ Turn 可重新附着时，Run 状态显示“结果待确认”，不显示恢�
 提供唯一“结束此运行”动作，并要求用户先检查 Workspace 后再自行发送新的后续任务。完整当前合同见
 [Run Process Detail Surface v4](../contracts/run-process-detail-surface-v4.md)。
 
+v0.65 在当前消息表面增加非交互的 Current User Mention，并为每条真实 structured Mention 原子形成
+独立持久 Inbox notification；同 Camp 的 8 秒 transient heads-up 可以聚合，但不得合并 Inbox row、
+已读或清除。通知设置增加独立“消息提及”浮层开关，Skill 统一列表增加普通 official
+`cli-operations` 且保留用户启停/九组 Assignment。精确身份、投影与通知合同见
+[Current User Attention v1](../contracts/current-user-attention-v1.md)，实施状态见
+[v0.65 实施计划](../versions/v0.65/implementation-plan.md)，完整 official inventory 与普通投递见
+[ADR-0167](../adr/0167-seven-skill-official-inventory.md)。
+
 v0.47 保留 v0.38 的创建位置唯一实时 Task 卡，并把它升级为五态；会话卡继续只显示状态、
 标题和负责人。Inspector list 负责 compact 发现，detail 负责完整责任/审计并只读派生 Related
 execution，现有 AgentRun UI 继续拥有执行事实。编辑器按 projected final state 展示条件字段，
@@ -232,6 +240,9 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   Composer 与发送后的会话历史均使用默认无底色的
   飞书式蓝色行内文字。点击或键盘激活当前队员的 Mention 在原位置打开布局 2 人物信息卡，
   不显示全局角色 Toast，也不导航到队员页。
+- Agent 的 `--to-user` 在历史消息中显示同色但非交互的 `@当前用户` token；它不打开人物卡、不进入
+  tab 顺序，aria-label 明确“提及当前用户：{显示名称}”。只有 Core Structured Content 能产生该
+  token，手写 lookalike 仍是普通 Text。
 - 空 Camp 使用欢迎图形、真实协作配置摘要和三个只填充 Composer 的起步建议，不再显示
   单行空占位。
 - Camp 主阅读流左对齐并按权威顺序阅读。Agent 执行台按队员提供一个过程入口；执行详情

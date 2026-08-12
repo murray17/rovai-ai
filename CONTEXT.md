@@ -372,6 +372,14 @@ _Avoid_: Skill Group Assignment, persisted user intent, implicit fallback Assign
 The transient list of current Agent Profiles whose currently selected Agent Runtime can discover one Skill Delivery Group. It is derived whenever displayed rather than assigned or persisted, and an empty Member View does not remove or hide its Delivery Group.
 _Avoid_: Skill Assignment, persisted Group membership, Camp membership, historical Member snapshot
 
+**Official Skill Inventory**:
+The exact application-release-owned set of official Rovai Skill identities: `analyze-agent-codebase`, `cli-operations`, `memory-stewardship`, `worktree`, `grill-duo`, `grill-duo-with-docs`, and `tasteful-ui`. It is not a scan of Runtime-native Skills, and changing the set requires a successor architecture decision and coordinated package/UI/fixture update.
+_Avoid_: Runtime-native inventory, dynamic directory scan, enabled Skill set, effective Runtime exposure
+
+**CLI Operations Skill**:
+The ordinary official Rovai Skill `cli-operations` that guides command-family choice, message-to-Task escalation, multi-operation coordination, and complex business recovery. Routine single-operation calls, recipient flags, and exact operation flags use that operation's `--help` without loading this Skill; the Skill grants no command, routing, mutation, or recovery authority.
+_Avoid_: universal CLI manual, `--to-user` reference, required Skill, family-level help alias, permission grant
+
 **Memory Stewardship Skill**:
 The official Rovai Skill `memory-stewardship` (“共同记忆维护”) that teaches durable-memory judgment, authorized search/read, atomic wording, Retrieval Keys, duplicate and secret checks, direct non-Hearth writes, and the Hearth Proposal boundary. It is enabled and assigned to every Skill Delivery Group by default, and it grants no Capability or fallback prompt injection.
 _Avoid_: permission grant, per-Scope Skill, Memory authority, mandatory System Prompt, unsupported-Runtime emulation
@@ -1136,6 +1144,18 @@ _Avoid_: per-Approval alert, AgentRun approval batch, CampTurn approval batch
 A Core-owned durable user-attention projection created in the same SQLite transaction as its qualifying source fact and retained in Rovai-ai's Notification Center after its optional transient heads-up disappears. It has its own stable identity and read/clear lifecycle, but never authorizes, completes, reopens, or otherwise becomes authority for its linked Approval, CampTurn, or Camp.
 _Avoid_: macOS notification, ephemeral-only toast, replayed domain event, Electron Main preference file, business-state authority
 
+**Local User (`local_user`)**:
+The sole current human user identity resolved and owned by Core in the single-user product contract. Agents can request attention with `--to-user` but cannot submit, select, infer, or receive this identity; display names are presentation and never replace the stable `local_user` fact.
+_Avoid_: `local-user` alias, Agent-selected user ID, message author as current user, Renderer-inferred identity, multi-user binding
+
+**Current User Mention**:
+A Core-generated `current_user_mention(local_user)` segment in authoritative Structured Camp Message Content, requested only through `mentionUser` / `--to-user`. Its visible `@displayName` and `mentionsCurrentUser` projections never make the user an Agent recipient or Message Delivery target.
+_Avoid_: parsed `@you`, Member Mention, user recipient, notification-only decoration, Renderer token without Core content
+
+**User Mention Notification**:
+The durable `camp_message_user_mention` In-App Notification created atomically with one CampMessage that contains a Current User Mention. It is unique per kind, `local_user`, and source message; each message keeps an independent Inbox row even when transient heads-up presentation aggregates by Camp.
+_Avoid_: per-Camp merged Inbox item, Message Delivery, read receipt, body-matched alert, transient-only toast
+
 **In-App Dynamic Approval**:
 An Adapter capability that lets a native Runtime pause an operation, send its exact permission options to Rovai-ai, and resume from the user's recorded decision. Its absence is an explicit Runtime limitation and never causes Rovai-ai to synthesize a request or reinstate Core resource authorization.
 _Avoid_: universal Runtime feature, synthetic Approval, Core permission fallback
@@ -1353,8 +1373,8 @@ The recipient-scoped pre-Run boundary inside a Delivery Dispatch Attempt that as
 _Avoid_: send-transaction preflight, ghost AgentRun, Runtime capacity wait, whole-message rollback
 
 **Camp Message Send**:
-The authenticated current-AgentRun action exposed as `camp.message.send` and `rovai send`, and the sole Agent-intent path for an Agent to publish into its Camp. Its Camp scope and Message Reply Reference derive only from the authenticated current Run; Core resolves and deduplicates Effective Recipients from explicit targets and valid inline Agent Addressing Tokens, classifies an Immediate Caller recipient as Caller Return, and leaves a recipient-free send public-only. Missing-Send Recovery Publication is a Core terminal safety action rather than an Agent send and cannot carry recipients or send intent.
-_Avoid_: Missing-Send Recovery Publication, Member Call, `team.call_member`, private message, per-recipient public copy, compatibility alias
+The authenticated current-AgentRun action exposed as `camp.message.send` and `rovai send`, and the sole Agent-intent path for an Agent to publish into its Camp. Its Camp scope and Message Reply Reference derive only from the authenticated current Run; Core resolves and deduplicates Effective Agent Recipients from explicit targets and valid inline Agent Addressing Tokens, may independently add Current User Attention for `--to-user`, classifies an Immediate Caller recipient as Caller Return, and leaves a recipient-free send without user attention public-only. Missing-Send Recovery Publication is a Core terminal safety action rather than an Agent send and cannot carry recipients, Current User Attention, or send intent.
+_Avoid_: Missing-Send Recovery Publication, Member Call, `team.call_member`, private message, user as Agent recipient, per-recipient public copy, compatibility alias
 
 **Camp Message Send Idempotency**:
 The exact replay rule keyed by the canonical Camp Message Send input and one invocation identity. The accepted command records its Camp, source AgentRun, and execution epoch; durable Replay reuses those recorded identities rather than the currently active identity, returns the original Envelope and effects, and treats a changed input under the same identity as a conflict. Equal body/recipient content without the same identity remains a new intentional send.
@@ -1393,8 +1413,8 @@ The opaque, monotonically advancing identity of one exact Camp Composer Draft st
 _Avoid_: updated timestamp, Renderer counter, CampMessage version, best-effort autosave marker
 
 **Structured Camp Message Content**:
-The authoritative ordered content of one user-authored Camp Composer Draft and its accepted CampMessage, using only `Text`, `MemberMention(agentId)`, and `AllMembersMention` segments. Plain-text display and recipient projections derive from it; a legacy message remains one Text segment while its existing recipient identities remain separate historical facts.
-_Avoid_: generic rich-text document, HTML, Markdown AST, mention character offsets, parallel body and routing truth
+The authoritative ordered content of one CampMessage and, for user-authored input, its Camp Composer Draft, using the closed `Text`, `MemberMention(agentId)`, `AllMembersMention`, and Core-generated `CurrentUserMention(local_user)` segments. Plain-text display, search, Context, Clipboard, accessibility and mention projections derive from it; submitted or stored plain body must not become a parallel content truth.
+_Avoid_: generic rich-text document, HTML, Markdown AST, mention character offsets, parsed user lookalike, parallel body and routing truth
 
 **Message Attachment**:
 An immutable managed-content resource belonging to one accepted public CampMessage and created by consuming a ready Prepared Attachment with that message. Its single authoritative file has a stable Camp Attachment Path, and its content and metadata share the CampMessage's public visibility for every currently eligible CampMember regardless of message addressing; it supplements a required non-blank message body and can never constitute a body-free message by itself.

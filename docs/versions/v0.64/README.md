@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.64
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -14,6 +14,8 @@ last_updated: 2026-08-12
 > `native_turn.reconcile.v1` 未获证明，P0 blocker 边界保持不变。
 >
 > 前置版本：[v0.63 MCP 队员分配工作台与开放 Library](../v0.63/README.md)
+>
+> 后续版本：[v0.65 当前用户注意力与渐进式 CLI 教学](../v0.65/README.md)
 
 ## 版本目标
 

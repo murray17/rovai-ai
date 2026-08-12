@@ -72,7 +72,7 @@ Related: ADR-0100 的 Session identity delivery 位于 session-context-bootstrap
 
 - **何时阅读：** 修改 A2A、Task、Message、Delivery、协作责任或公共输出时阅读。
 - **当前架构：** [Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
-- **当前合同：** [Durable Task v3](../contracts/durable-task-v3.md)、[Camp Message Send v3](../contracts/camp-message-send-v3.md)、[Message Delivery v2](../contracts/message-delivery-v2.md)、[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)
+- **当前合同：** [Durable Task v3](../contracts/durable-task-v3.md)、[Camp Message Send v4](../contracts/camp-message-send-v4.md)、[Current User Attention v1](../contracts/current-user-attention-v1.md)、[Message Delivery v2](../contracts/message-delivery-v2.md)、[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)
 
 <!-- adr-current-primary:begin topic=collaboration-task-message -->
 | ADR | Decision |
@@ -91,6 +91,7 @@ Related: ADR-0100 的 Session identity delivery 位于 session-context-bootstrap
 | [ADR-0157](0157-message-owned-agentrun-instruction-without-expected-output.md) | Message-Owned AgentRun Instruction Without Expected Output Metadata |
 | [ADR-0162](0162-missing-send-recovery-publication.md) | Missing-Send Recovery Publication at Successful AgentRun Termination |
 | [ADR-0163](0163-explicit-caller-return-and-core-managed-reply-reference.md) | Explicit Caller Return and Core-Managed Reply Reference |
+| [ADR-0165](0165-core-owned-current-user-message-attention.md) | Core-Owned Current-User Message Attention |
 <!-- adr-current-primary:end -->
 
 Related: Context selection、Self/Peer identity 与 Runtime admission 从相应 primary 主题进入。
@@ -125,7 +126,7 @@ Related: Session redelivery、Skill/MCP projection 与 Qualification 分别保�
 
 - **何时阅读：** 修改 Native Session、Bootstrap、Dynamic Context、Profile、redelivery 或 accepted-input ACK 时阅读。
 - **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Native Session Bootstrap Redelivery](../architecture/native-session-bootstrap-redelivery.md)、[Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)
-- **当前合同：** [Context Delivery Profile v3](../contracts/context-delivery-profile-v3.md)、[ContextManifest Evidence v11](../contracts/context-manifest-evidence-v11.md)、[Collaboration State v2](../contracts/collaboration-state-v2.md)
+- **当前合同：** [Context Delivery Profile v3](../contracts/context-delivery-profile-v3.md)、[ContextManifest Evidence v12](../contracts/context-manifest-evidence-v12.md)、[Collaboration State v2](../contracts/collaboration-state-v2.md)
 
 <!-- adr-current-primary:begin topic=session-context-bootstrap -->
 | ADR | Decision |
@@ -176,7 +177,7 @@ Related: Session entrypoint 与 Built-in operation 只作为交叉导航，不�
 
 - **何时阅读：** 修改 Skill/MCP projection、Built-in transport、CLI、catalog 或 Agent output 时阅读。
 - **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
-- **当前合同：** [Built-in Tool Transport v6](../contracts/builtin-tool-transport-v6.md)
+- **当前合同：** [Built-in Tool Transport v7](../contracts/builtin-tool-transport-v7.md)
 
 <!-- adr-current-primary:begin topic=skills-mcp-builtins -->
 | ADR | Decision |
@@ -191,8 +192,9 @@ Related: Session entrypoint 与 Built-in operation 只作为交叉导航，不�
 | [ADR-0125](0125-runtime-native-additive-external-mcp-projection.md) | Runtime-Native Additive External MCP Projection |
 | [ADR-0135](0135-compact-agent-output-over-canonical-built-in-tool-envelope.md) | Compact Agent Output over Canonical Built-in Tool Envelope |
 | [ADR-0158](0158-default-all-runtime-delivery-for-managed-skills.md) | Default-All Runtime Delivery for Managed Skills |
-| [ADR-0159](0159-pinned-third-party-tasteful-ui-bundled-skill.md) | Pinned Third-Party Tasteful UI Bundled Skill |
 | [ADR-0161](0161-event-driven-root-scoped-skill-projection-reconciliation.md) | Event-Driven Root-Scoped Skill Projection Reconciliation |
+| [ADR-0166](0166-progressive-built-in-cli-teaching.md) | Progressive Built-In CLI Teaching |
+| [ADR-0167](0167-seven-skill-official-inventory.md) | Seven-Skill Official Inventory |
 <!-- adr-current-primary:end -->
 
 Related: 具体 Skill 名称或版本不是治理例外；长期边界仍按本主题的一般 ADR 准入规则判断。
