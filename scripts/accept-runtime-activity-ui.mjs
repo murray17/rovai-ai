@@ -74,7 +74,12 @@ await initializeDatabase()
 await seedFixture()
 
 let app = null
+let clipboardArchive = null
+let clipboardTouched = false
+let testFailure = null
+let cleanupFailure = null
 try {
+  clipboardArchive = await snapshotClipboard()
   app = await launchApp(debugPort, 1440, 920)
   await setTheme(app.cdp, 'day')
   await activateControlledRun()
@@ -121,6 +126,76 @@ try {
     && conversationPresentation.dayLabels.every((label) => /^\d{1,2}月\d{1,2}日 周[一二三四五六日] · DAY \d+$/.test(label))
     && conversationPresentation.dayLabels.every((label) => !label.includes('今天') && !label.includes('发布准备')),
     `Timeline did not use durable message dates: ${JSON.stringify(conversationPresentation)}`)
+
+  const messageAuthorProfileTriggers = await collectMessageAuthorProfileTriggers(app.cdp)
+  assert(messageAuthorProfileTriggers.length === runtimes.length
+    && messageAuthorProfileTriggers.every((entry) =>
+      entry.triggerCount === 2
+        && entry.avatar.tagName === 'BUTTON'
+        && entry.nameTrigger.tagName === 'BUTTON'
+        && entry.avatar.label === `查看${entry.name}的基础信息`
+        && entry.nameTrigger.label === `查看${entry.name}的基础信息`
+        && entry.avatar.hasPopup === 'dialog'
+        && entry.nameTrigger.hasPopup === 'dialog'
+        && entry.avatar.tabIndex === 0
+        && entry.nameTrigger.tabIndex === 0
+        && entry.avatar.width >= 28
+        && entry.avatar.height >= 28
+        && entry.nameTrigger.height >= 28
+        && entry.avatar.cursor === 'pointer'
+        && entry.nameTrigger.cursor === 'pointer'),
+  `Agent message authors are not two accessible profile triggers: ${JSON.stringify(messageAuthorProfileTriggers)}`)
+
+  const firstAuthorName = `${runtimes[0].runtimeName} 验收`
+  const firstAuthorPopoverLabel = `${firstAuthorName}的基础信息`
+  const authorPopoverCapture = join(outputDir, 'runtime-activity-author-popover.png')
+  for (const variant of ['avatar', 'name']) {
+    const triggerSelector = `${runArticleSelector} .message-author-${variant}-trigger[data-agent-id="${runtimes[0].agentId}"]`
+    await mouseClickSelector(app.cdp, triggerSelector)
+    await waitForExpression(app.cdp,
+      `document.querySelector('.mention-profile-popover[role="dialog"][aria-label=${JSON.stringify(firstAuthorPopoverLabel)}]')?.classList.contains('is-positioned')`)
+    const authorPointerActivation = await evaluate(app.cdp, `(() => ({
+      stayedInCamp: Boolean(document.querySelector('.camp-workspace')) && !document.querySelector('.members-view'),
+      openedToast: Boolean(document.querySelector('.app-toast')),
+      activeTrigger: document.querySelector(${JSON.stringify(`${triggerSelector}[data-mention-open="true"]`)})?.getAttribute('aria-label') ?? null
+    }))()`)
+    assert(authorPointerActivation.stayedInCamp
+      && !authorPointerActivation.openedToast
+      && authorPointerActivation.activeTrigger === `查看${firstAuthorName}的基础信息`,
+    `Clicking an Agent ${variant} did not open the anchored profile in place: ${JSON.stringify(authorPointerActivation)}`)
+    if (variant === 'avatar') await capture(app.cdp, authorPopoverCapture)
+    await pressKey(app.cdp, 'Escape', 'Escape', 27, 53)
+    await waitForExpression(app.cdp, `!document.querySelector('.mention-profile-popover')`)
+  }
+
+  for (const activation of [
+    { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 36 },
+    { key: ' ', code: 'Space', windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 49 }
+  ]) {
+    const focused = await evaluate(app.cdp, `(() => {
+      const trigger = document.querySelector(
+        ${JSON.stringify(`${runArticleSelector} .message-author-name-trigger[data-agent-id="${runtimes[0].agentId}"]`)}
+      )
+      trigger?.focus({ preventScroll: true })
+      return document.activeElement === trigger
+    })()`)
+    assert(focused, `Could not focus the Agent name trigger for ${activation.code}`)
+    await pressKey(
+      app.cdp,
+      activation.key,
+      activation.code,
+      activation.windowsVirtualKeyCode,
+      activation.nativeVirtualKeyCode
+    )
+    await waitForExpression(app.cdp,
+      `document.querySelector('.mention-profile-popover[role="dialog"][aria-label=${JSON.stringify(firstAuthorPopoverLabel)}]')?.classList.contains('is-positioned')`)
+    await waitForExpression(app.cdp,
+      `document.activeElement?.classList.contains('mention-profile-popover') === true`)
+    await pressKey(app.cdp, 'Escape', 'Escape', 27, 53)
+    await waitForExpression(app.cdp, `!document.querySelector('.mention-profile-popover')`)
+    await waitForExpression(app.cdp,
+      `document.activeElement?.classList.contains('message-author-name-trigger') === true`)
+  }
 
   await evaluate(app.cdp, `(() => {
     const copyButton = document.querySelector('.message-surface.has-delivery .message-copy-button')
@@ -413,6 +488,7 @@ try {
       claudeRunLevelDoesNotInventTools: observed.find((row) => row.runtime === 'Claude Code')?.toolTitles.length === 0,
       antigravityCoreToolCatalogName: observed.find((row) => row.runtime === 'Antigravity')?.toolTitles[0] === 'camp.message.send',
       conversationPresentation,
+      messageAuthorProfileTriggers,
       agentLevelProcessDock: agentDock,
       recipientOnlyHandoffFooter: handoffFooter,
       wideComposerLayout,
@@ -423,6 +499,7 @@ try {
     runtimes: observed,
     captures: {
       top: topCapture,
+      authorPopover: authorPopoverCapture,
       bottom: bottomCapture,
       toolOutput: toolOutputCapture,
       recoveryBlocker: recoveryBlockerCapture,
@@ -435,8 +512,35 @@ try {
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`)
   console.log(JSON.stringify({ ...report, reportPath }, null, 2))
   }
+} catch (error) {
+  testFailure = error
 } finally {
-  if (app) await closeApp(app)
+  if (app) {
+    try {
+      await closeApp(app)
+    } catch (error) {
+      cleanupFailure = error
+    }
+  }
+  if (clipboardTouched && clipboardArchive) {
+    try {
+      await restoreClipboardWithRetry(clipboardArchive)
+    } catch (error) {
+      cleanupFailure = cleanupFailure
+        ? new AggregateError([cleanupFailure, error], 'App cleanup and clipboard restoration failed')
+        : error
+    }
+  }
+}
+
+if (testFailure || cleanupFailure) {
+  process.stderr.write(`Preserved runtime activity fixture: ${fixtureRoot}\n`)
+  process.stderr.write(`Preserved runtime activity captures: ${outputDir}\n`)
+  if (testFailure && cleanupFailure) {
+    throw new AggregateError([testFailure, cleanupFailure],
+      'Runtime activity acceptance and cleanup both failed')
+  }
+  throw testFailure ?? cleanupFailure
 }
 
 function runtime(key, adapterKind, runtimeName, expectedToolName, details) {
@@ -857,6 +961,34 @@ async function collectConversationPresentation(cdp) {
         .map((node) => node.textContent?.replace(/\\s+/g, ' ').trim() ?? '')
         .filter(Boolean)
     }
+  })()`)
+}
+
+async function collectMessageAuthorProfileTriggers(cdp) {
+  return evaluate(cdp, `(() => {
+    const readTrigger = (trigger) => {
+      const rect = trigger?.getBoundingClientRect()
+      const style = trigger ? getComputedStyle(trigger) : null
+      return {
+        tagName: trigger?.tagName ?? null,
+        label: trigger?.getAttribute('aria-label') ?? null,
+        hasPopup: trigger?.getAttribute('aria-haspopup') ?? null,
+        tabIndex: trigger?.tabIndex ?? null,
+        cursor: style?.cursor ?? null,
+        width: rect?.width ?? 0,
+        height: rect?.height ?? 0
+      }
+    }
+    return [...document.querySelectorAll(${JSON.stringify(runArticleSelector)})].map((article) => {
+      const avatar = article.querySelector(':scope > .message-author-avatar-trigger')
+      const nameTrigger = article.querySelector('.bubble-meta > .message-author-name-trigger')
+      return {
+        name: article.querySelector('.bubble-meta strong')?.textContent?.trim() ?? '',
+        triggerCount: article.querySelectorAll('.message-author-trigger').length,
+        avatar: readTrigger(avatar),
+        nameTrigger: readTrigger(nameTrigger)
+      }
+    })
   })()`)
 }
 
@@ -1366,67 +1498,36 @@ async function verifyBoundedToolOutput(cdp) {
     && !presentation.fullOutputLeakedIntoDom,
   `Long Tool output copy affordance was not the accepted light icon: ${JSON.stringify(presentation)}`)
 
-  const installed = await evaluate(cdp, `(() => {
-    const clipboard = navigator.clipboard
-    if (!clipboard || typeof clipboard.writeText !== 'function') return false
-    window.__rovaiToolOutputClipboardHadOwnWriteText = Object.prototype.hasOwnProperty.call(clipboard, 'writeText')
-    window.__rovaiToolOutputClipboardWriteTextDescriptor = Object.getOwnPropertyDescriptor(clipboard, 'writeText')
-    window.__rovaiToolOutputCopiedText = null
-    try {
-      Object.defineProperty(clipboard, 'writeText', {
-        configurable: true,
-        value: async (text) => { window.__rovaiToolOutputCopiedText = text }
-      })
-      return true
-    } catch {
-      return false
+  clipboardTouched = true
+  await evaluate(cdp, `document.querySelector('.execution-drawer .tool-output-copy-button')?.click()`)
+  await waitForExpression(cdp,
+    `document.querySelector('.execution-drawer .tool-output-copy-button')?.getAttribute('aria-label') === '已复制完整输出'`)
+  const text = await runProcess('/usr/bin/pbpaste', [])
+  const copied = await evaluate(cdp, `(() => {
+    const button = document.querySelector('.execution-drawer .tool-output-copy-button')
+    return {
+      buttonLabel: button?.getAttribute('aria-label') ?? null,
+      buttonIcon: button?.textContent?.trim() ?? ''
     }
   })()`)
-  assert(installed, 'Could not install the isolated Tool output clipboard spy')
-
-  try {
-    await evaluate(cdp, `document.querySelector('.execution-drawer .tool-output-copy-button')?.click()`)
-    await waitForExpression(cdp,
-      `typeof window.__rovaiToolOutputCopiedText === 'string'
-        && window.__rovaiToolOutputCopiedText.length === ${longToolOutput.length}`)
-    const copied = await evaluate(cdp, `(() => {
-      const text = window.__rovaiToolOutputCopiedText ?? ''
-      const button = document.querySelector('.execution-drawer .tool-output-copy-button')
-      return {
-        length: text.length,
-        lineCount: text.split('\\n').length,
-        startsWithPublicOutput: text.startsWith(${JSON.stringify(longToolOutputFirstMarker)}),
-        hasMiddleMarker: text.includes(${JSON.stringify(longToolOutputMiddleMarker)}),
-        endsWithPublicOutput: text.endsWith(${JSON.stringify(`${longToolOutputLastMarker} · line 8432`)}),
-        leakedEnvelope: text.startsWith('{') || text.includes('"_rovaiTruncated"'),
-        buttonLabel: button?.getAttribute('aria-label') ?? null,
-        buttonIcon: button?.textContent?.trim() ?? ''
-      }
-    })()`)
-    assert(copied.length === longToolOutput.length
-      && copied.lineCount === 8_432
-      && copied.startsWithPublicOutput
-      && copied.hasMiddleMarker
-      && copied.endsWithPublicOutput
-      && !copied.leakedEnvelope
-      && copied.buttonLabel === '已复制完整输出'
-      && copied.buttonIcon === '✓',
-    `Copy full Tool output did not use the complete public output field: ${JSON.stringify(copied)}`)
-    return { ...presentation, copied }
-  } finally {
-    await evaluate(cdp, `(() => {
-      const clipboard = navigator.clipboard
-      const hadOwn = window.__rovaiToolOutputClipboardHadOwnWriteText
-      const descriptor = window.__rovaiToolOutputClipboardWriteTextDescriptor
-      if (clipboard) {
-        if (hadOwn && descriptor) Object.defineProperty(clipboard, 'writeText', descriptor)
-        else delete clipboard.writeText
-      }
-      delete window.__rovaiToolOutputClipboardHadOwnWriteText
-      delete window.__rovaiToolOutputClipboardWriteTextDescriptor
-      delete window.__rovaiToolOutputCopiedText
-    })()`)
-  }
+  Object.assign(copied, {
+    length: text.length,
+    lineCount: text.split('\n').length,
+    startsWithPublicOutput: text.startsWith(longToolOutputFirstMarker),
+    hasMiddleMarker: text.includes(longToolOutputMiddleMarker),
+    endsWithPublicOutput: text.endsWith(`${longToolOutputLastMarker} · line 8432`),
+    leakedEnvelope: text.startsWith('{') || text.includes('"_rovaiTruncated"')
+  })
+  assert(copied.length === longToolOutput.length
+    && copied.lineCount === 8_432
+    && copied.startsWithPublicOutput
+    && copied.hasMiddleMarker
+    && copied.endsWithPublicOutput
+    && !copied.leakedEnvelope
+    && copied.buttonLabel === '已复制完整输出'
+    && copied.buttonIcon === '✓',
+  `Copy full Tool output did not use the complete public output field: ${JSON.stringify(copied)}`)
+  return { ...presentation, copied }
 }
 
 async function verifyExecutionDrawerResizeControl(cdp) {
@@ -1770,8 +1871,29 @@ async function focusExecutionDrawerResizeHandle(cdp) {
   assert(focused, 'Could not focus the Execution Drawer resize separator')
 }
 
-async function pressKey(cdp, key, code, windowsVirtualKeyCode) {
-  const params = { key, code, windowsVirtualKeyCode, nativeVirtualKeyCode: windowsVirtualKeyCode }
+async function mouseClickSelector(cdp, selector) {
+  const point = await evaluate(cdp, `(() => {
+    const target = document.querySelector(${JSON.stringify(selector)})
+    if (!(target instanceof HTMLElement)) return null
+    target.scrollIntoView({ block: 'center', inline: 'nearest' })
+    const rect = target.getBoundingClientRect()
+    return { x: rect.left + (rect.width / 2), y: rect.top + (rect.height / 2) }
+  })()`)
+  assert(point, `Could not locate pointer target: ${selector}`)
+  await wait(80)
+  await cdp.send('Input.dispatchMouseEvent', {
+    type: 'mouseMoved', x: point.x, y: point.y, button: 'none', buttons: 0
+  })
+  await cdp.send('Input.dispatchMouseEvent', {
+    type: 'mousePressed', x: point.x, y: point.y, button: 'left', buttons: 1, clickCount: 1
+  })
+  await cdp.send('Input.dispatchMouseEvent', {
+    type: 'mouseReleased', x: point.x, y: point.y, button: 'left', buttons: 0, clickCount: 1
+  })
+}
+
+async function pressKey(cdp, key, code, windowsVirtualKeyCode, nativeVirtualKeyCode = windowsVirtualKeyCode) {
+  const params = { key, code, windowsVirtualKeyCode, nativeVirtualKeyCode }
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', ...params })
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...params })
 }
@@ -1876,22 +1998,124 @@ function startCore(dataDirectory) {
   return { request, stop }
 }
 
+async function snapshotClipboard() {
+  const source = String.raw`
+    import AppKit
+    import Foundation
+
+    let pasteboard = NSPasteboard.general
+    var archive: [[[String: String]]] = []
+    for item in pasteboard.pasteboardItems ?? [] {
+      var flavors: [[String: String]] = []
+      for type in item.types {
+        guard let data = item.data(forType: type) else {
+          fatalError("Could not read Pasteboard flavor \(type.rawValue)")
+        }
+        flavors.append(["type": type.rawValue, "data": data.base64EncodedString()])
+      }
+      archive.append(flavors)
+    }
+    let encoded = try JSONSerialization.data(withJSONObject: archive)
+    FileHandle.standardOutput.write(encoded)
+  `
+  const raw = await runProcess('/usr/bin/xcrun', ['swift', '-e', source])
+  const archive = JSON.parse(raw)
+  validateClipboardArchive(archive)
+  return normalizeClipboardArchive(archive)
+}
+
+async function restoreClipboardWithRetry(archive) {
+  let lastError = null
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      await restoreClipboard(archive)
+      const restored = await snapshotClipboard()
+      if (!deepEqual(restored, normalizeClipboardArchive(archive))) {
+        throw new Error('Restored Pasteboard bytes do not match the pre-test archive')
+      }
+      return
+    } catch (error) {
+      lastError = error
+      await wait(100)
+    }
+  }
+  throw new Error(`Could not restore the pre-test Pasteboard after three attempts: ${errorMessage(lastError)}`)
+}
+
+async function restoreClipboard(archive) {
+  validateClipboardArchive(archive)
+  const source = String.raw`
+    import AppKit
+    import Foundation
+
+    let input = FileHandle.standardInput.readDataToEndOfFile()
+    let object = try JSONSerialization.jsonObject(with: input)
+    guard let archive = object as? [[[String: String]]] else {
+      fatalError("Clipboard archive has an invalid shape")
+    }
+    var items: [NSPasteboardItem] = []
+    for flavors in archive {
+      let item = NSPasteboardItem()
+      for flavor in flavors {
+        guard let typeName = flavor["type"],
+              let encoded = flavor["data"],
+              let data = Data(base64Encoded: encoded) else {
+          fatalError("Clipboard archive contains an invalid flavor")
+        }
+        guard item.setData(data, forType: NSPasteboard.PasteboardType(typeName)) else {
+          fatalError("Could not prepare Pasteboard flavor \(typeName)")
+        }
+      }
+      items.append(item)
+    }
+    let pasteboard = NSPasteboard.general
+    pasteboard.clearContents()
+    if !items.isEmpty && !pasteboard.writeObjects(items) {
+      fatalError("Could not restore Pasteboard objects")
+    }
+  `
+  await runProcess('/usr/bin/xcrun', ['swift', '-e', source], {
+    input: JSON.stringify(archive)
+  })
+}
+
+function validateClipboardArchive(archive) {
+  assert(Array.isArray(archive), 'Pasteboard archive is not an array')
+  for (const item of archive) {
+    assert(Array.isArray(item), 'Pasteboard item is not an array')
+    for (const flavor of item) {
+      assert(flavor && typeof flavor === 'object'
+        && typeof flavor.type === 'string'
+        && typeof flavor.data === 'string', 'Pasteboard flavor is invalid')
+    }
+  }
+}
+
+function normalizeClipboardArchive(archive) {
+  return archive.map((item) => item.slice().sort((left, right) =>
+    left.type.localeCompare(right.type)))
+}
+
 function runSql(path, sql) {
   return runProcess('/usr/bin/sqlite3', [path, sql])
 }
 
-function runProcess(command, args) {
+function runProcess(command, args, { input } = {}) {
   return new Promise((resolveRun, rejectRun) => {
-    const child = spawn(command, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(command, args, {
+      cwd: root,
+      stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe']
+    })
     const stdout = []
     const stderr = []
     child.stdout.on('data', (chunk) => stdout.push(String(chunk)))
     child.stderr.on('data', (chunk) => stderr.push(String(chunk)))
     child.once('error', rejectRun)
-    child.once('close', (code) => {
+    child.once('close', (code, signal) => {
       if (code === 0) resolveRun(stdout.join(''))
-      else rejectRun(new Error(`${command} exited ${code}: ${stderr.join('')}`))
+      else rejectRun(new Error(`${command} exited with ${code ?? signal}: ${stderr.join('')}`))
     })
+    if (input !== undefined) child.stdin.end(input)
   })
 }
 
@@ -1901,6 +2125,20 @@ function sqlLiteral(value) {
 
 function sqlNullable(value) {
   return value === null || value === undefined ? 'NULL' : sqlLiteral(value)
+}
+
+function deepEqual(left, right) {
+  return JSON.stringify(canonicalJson(left)) === JSON.stringify(canonicalJson(right))
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return value.map(canonicalJson)
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalJson(value[key])]))
+}
+
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error)
 }
 
 function assert(condition, message) {

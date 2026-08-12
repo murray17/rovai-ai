@@ -2171,33 +2171,36 @@ describe('task event projections', () => {
       actions: [],
       timeline: []
     }
-    const markup = renderToStaticMarkup(createElement(CampWorkspace, {
-      snapshot,
-      projectName: null,
-      agents: [{
-        ...agentProfile(),
-        agentId: 'agent_1',
-        displayName: '洛可',
-        runtimeReadiness: { status: 'ready', blockers: [] }
-      }, {
-        ...agentProfile(),
-        agentId: 'agent_2',
-        displayName: '沐瓦',
-        runtimeReadiness: { status: 'ready', blockers: [] }
-      }, {
-        ...agentProfile(),
-        agentId: 'agent_3',
-        displayName: '小狐狸',
-        runtimeReadiness: { status: 'ready', blockers: [] }
-      }],
-      busy: false,
-      onSend: async () => undefined,
-      onChangeLead: async () => undefined,
-      onTasksChanged: async () => undefined,
-      onResolveApproval: () => undefined,
-      stopping: false,
-      onStop: () => undefined
-    }))
+    const agents: AgentProfile[] = [{
+      ...agentProfile(),
+      agentId: 'agent_1',
+      displayName: '洛可',
+      runtimeReadiness: { status: 'ready', blockers: [] }
+    }, {
+      ...agentProfile(),
+      agentId: 'agent_2',
+      displayName: '沐瓦',
+      runtimeReadiness: { status: 'ready', blockers: [] }
+    }, {
+      ...agentProfile(),
+      agentId: 'agent_3',
+      displayName: '小狐狸',
+      runtimeReadiness: { status: 'ready', blockers: [] }
+    }]
+    const renderWorkspace = (candidateSnapshot: CampSnapshot): string =>
+      renderToStaticMarkup(createElement(CampWorkspace, {
+        snapshot: candidateSnapshot,
+        projectName: null,
+        agents,
+        busy: false,
+        onSend: async () => undefined,
+        onChangeLead: async () => undefined,
+        onTasksChanged: async () => undefined,
+        onResolveApproval: () => undefined,
+        stopping: false,
+        onStop: () => undefined
+      }))
+    const markup = renderWorkspace(snapshot)
 
     expect(markup).not.toContain('<h2>会话</h2>')
     expect(markup).toContain('请检查 Downloads 目录里的页面。')
@@ -2214,6 +2217,11 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-label="查看小狐狸的基础信息"')
     expect(markup).toContain('role="button"')
     expect(markup).toContain('tabindex="0"')
+    expect(markup).toContain('class="message-author-trigger message-author-avatar-trigger"')
+    expect(markup).toContain('class="message-author-trigger message-author-name-trigger"')
+    expect((markup.match(/aria-label="查看洛可的基础信息"/g) ?? [])).toHaveLength(2)
+    expect((markup.match(/data-agent-id="agent_1"/g) ?? [])).toHaveLength(2)
+    expect(markup).not.toContain('message-author-link')
     expect(markup).toMatch(/<div class="timeline-node timeline-day">\d{1,2}月\d{1,2}日 周[一二三四五六日] · DAY \d+<\/div>/)
     expect(markup).not.toContain('今天 ·')
     expect(markup).not.toContain('发布准备')
@@ -2228,6 +2236,16 @@ describe('task event projections', () => {
     expect(markup).not.toContain('Core Outcome')
     expect(markup).not.toContain('返回责任')
     expect(markup).not.toContain('Correlation')
+
+    const unavailableAuthorMarkup = renderWorkspace({
+      ...snapshot,
+      members: snapshot.members.map((member) => member.agentId === publicMessage.authorId
+        ? { ...member, profilePresence: 'removed' as const }
+        : member)
+    })
+    expect(unavailableAuthorMarkup).not.toContain('message-author-trigger')
+    expect(unavailableAuthorMarkup).not.toContain('aria-label="查看洛可的基础信息"')
+    expect(unavailableAuthorMarkup).toContain('<strong>洛可</strong>')
   })
 
   it('renders GFM while removing raw HTML and remote images', () => {

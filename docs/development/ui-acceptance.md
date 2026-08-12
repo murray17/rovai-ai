@@ -179,6 +179,9 @@ pnpm accept:runtime-activity-ui
 可见文案为“发送给@队员”，不保留冒号，也不显示“已送达”“处理中”“排队中”“投递失败”、`!`
 或任何 Delivery 状态。每个收件人都带 `@` 并使用飞书式蓝色 Mention；仍可用身份具有
 `role="button"`、`aria-haspopup="dialog"`、Click/Enter/Space 人物信息卡与拖选不误触边界。
+每条可用队员发言的头像与显示名也必须各自为键盘可达的原生按钮，具有精确可访问名称与
+`aria-haspopup="dialog"`，并分别证明鼠标点击、Enter/Space 打开既有人物信息卡、`Esc` 的焦点返回及不导航边界；
+已离开、已移除或不可解析作者不得渲染这两个按钮。
 footer 保持透明、零圆角，短转交折线使用 1px Porcelain/Steel 结构线，且 footer 边界与最后一个
 正文内容元素的垂直间距不超过 4px；验收必须同时证明透明复制入口不占据文档流，且键盘聚焦后
 可见、不覆盖收件人，并与无 footer 消息共用消息内容列右上角锚点，不能只测

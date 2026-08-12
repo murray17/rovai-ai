@@ -741,12 +741,18 @@ export function CampWorkspace({
       window.requestAnimationFrame(() => trigger.focus({ preventScroll: true }))
     }
   }, [mentionPopover?.trigger])
-  const openMemberMentionPopover = (
+  const openMemberProfilePopover = (
     agentId: string,
     trigger: HTMLElement,
     focusPanel: boolean
   ): void => {
-    if (!memberById.has(agentId) || !profileById.has(agentId)) return
+    const member = memberById.get(agentId)
+    if (
+      !member
+      || member.membershipStatus !== 'active'
+      || member.profilePresence === 'removed'
+      || !profileById.has(agentId)
+    ) return
     if (mentionPopover?.trigger === trigger) {
       closeMentionPopover(true)
       return
@@ -1352,6 +1358,13 @@ export function CampWorkspace({
                     ? '你'
                     : member?.displayName ?? (campMessage.authorType === 'system' ? '系统' : campMessage.authorId)
                   const authorProfile = profileById.get(campMessage.authorId) ?? null
+                  const authorProfileAvailable = Boolean(
+                    campMessage.authorType === 'agent'
+                    && member
+                    && authorProfile
+                    && member.membershipStatus === 'active'
+                    && member.profilePresence !== 'removed'
+                  )
                   const sourceRun = campMessage.sourceAgentRunId
                     ? runById.get(campMessage.sourceAgentRunId) ?? null
                     : null
@@ -1372,15 +1385,32 @@ export function CampWorkspace({
                       tabIndex={sourceRun ? -1 : undefined}
                       style={member ? { '--agent-accent': identityColorToken(member.agentId) } as React.CSSProperties : undefined}
                     >
-                      {campMessage.authorType === 'agent' && (
-                        <MemberAvatar
-                          agentId={campMessage.authorId}
-                          avatarRef={member?.avatarRef ?? null}
-                          displayName={author}
-                          size="list"
-                          decorative
-                        />
-                      )}
+                      {campMessage.authorType === 'agent' && (authorProfileAvailable
+                        ? (
+                            <MessageAuthorProfileTrigger
+                              agentId={campMessage.authorId}
+                              displayName={author}
+                              variant="avatar"
+                              onActivate={openMemberProfilePopover}
+                            >
+                              <MemberAvatar
+                                agentId={campMessage.authorId}
+                                avatarRef={member?.avatarRef ?? null}
+                                displayName={author}
+                                size="list"
+                                decorative
+                              />
+                            </MessageAuthorProfileTrigger>
+                          )
+                        : (
+                            <MemberAvatar
+                              agentId={campMessage.authorId}
+                              avatarRef={member?.avatarRef ?? null}
+                              displayName={author}
+                              size="list"
+                              decorative
+                            />
+                          ))}
                       {campMessage.authorType === 'user' && (
                         <span className="local-message-avatar" aria-hidden="true">你</span>
                       )}
@@ -1388,7 +1418,18 @@ export function CampWorkspace({
                         ? (
                             <div className="message-body">
                               <div className="bubble-meta">
-                                <strong>{author}</strong>
+                                {campMessage.authorType === 'agent' && authorProfileAvailable
+                                  ? (
+                                      <MessageAuthorProfileTrigger
+                                        agentId={campMessage.authorId}
+                                        displayName={author}
+                                        variant="name"
+                                        onActivate={openMemberProfilePopover}
+                                      >
+                                        <strong>{author}</strong>
+                                      </MessageAuthorProfileTrigger>
+                                    )
+                                  : <strong>{author}</strong>}
                                 {campMessage.authorType === 'agent' && authorProfile?.runtimeConfiguration && (
                                   <span>{runtimeAdapterLabel(authorProfile.runtimeConfiguration.adapterKind)}</span>
                                 )}
@@ -1416,7 +1457,7 @@ export function CampWorkspace({
                                                 body={displayBody}
                                                 content={campMessage.content}
                                                 members={snapshot.members}
-                                                onActivateMemberMention={openMemberMentionPopover}
+                                                onActivateMemberMention={openMemberProfilePopover}
                                                 onActivateAllMembersMention={(trigger, focusPanel) =>
                                                   openAllMembersMentionPopover(
                                                     'history',
@@ -1443,7 +1484,7 @@ export function CampWorkspace({
                               <CampMessageDeliveryFooter
                                 deliveries={campMessageDeliveries}
                                 memberById={memberById}
-                                onActivateMemberMention={openMemberMentionPopover}
+                                onActivateMemberMention={openMemberProfilePopover}
                               />
                             </div>
                           )
@@ -1626,7 +1667,7 @@ export function CampWorkspace({
               disabled={busy || composerSubmitting}
               editorRef={composerEditorRef}
               onActivateMemberMention={(member, trigger, focusPanel) =>
-                openMemberMentionPopover(member.agentId, trigger, focusPanel)}
+                openMemberProfilePopover(member.agentId, trigger, focusPanel)}
               onActivateAllMembersMention={(trigger, focusPanel) =>
                 openAllMembersMentionPopover(
                   'composer',
@@ -2190,6 +2231,41 @@ function AgentRunDeliveryRecipients({
         )
       })}
     </div>
+  )
+}
+
+function MessageAuthorProfileTrigger({
+  agentId,
+  displayName,
+  variant,
+  onActivate,
+  children
+}: {
+  agentId: string
+  displayName: string
+  variant: 'avatar' | 'name'
+  onActivate(agentId: string, trigger: HTMLElement, focusPanel: boolean): void
+  children: React.ReactNode
+}): JSX.Element {
+  const label = `查看${displayName}的基础信息`
+  return (
+    <button
+      className={`message-author-trigger message-author-${variant}-trigger`}
+      type="button"
+      data-agent-id={agentId}
+      aria-label={label}
+      aria-haspopup="dialog"
+      aria-expanded={false}
+      title={label}
+      onClick={(event) => onActivate(agentId, event.currentTarget, event.detail === 0)}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        event.preventDefault()
+        onActivate(agentId, event.currentTarget, true)
+      }}
+    >
+      {children}
+    </button>
   )
 }
 

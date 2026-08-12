@@ -260,7 +260,9 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   [Run Process Detail Surface v4](../contracts/run-process-detail-surface-v4.md)。
 - Agent 公共正文不显示“来自执行”来源条；A2A 消息不显示 compact 投递卡片，只在正文后使用
   Scheme C 短转交轨迹显示“发送给@队员”。所有 Agent 使用同一开放阅读表面，不按角色铺不同消息
-  底色；`@队员` 是飞书式蓝色 Mention，可用身份可打开既有人物信息卡。footer 与 Run stage 都不重复投影 Delivery 状态标签；
+  底色；`@队员` 是飞书式蓝色 Mention，可用身份可打开既有人物信息卡。队员发言消息的头像与显示名在身份
+  仍可操作时同样通过单击、Enter 或 Space 打开同一锚定人物信息卡，不导航到队员页；已离开、已移除或不可解析身份保持
+  静态不可操作。footer 与 Run stage 都不重复投影 Delivery 状态标签；
   Delivery 底层状态、失败码与恢复事实仍由原有 Core Read Side 负责。
 - 终态取消以每个 CampTurn 一条“你已在 {耗时} 后停止”进入会话时间线，不再永久
   挂在队员消息标题；未确认外部效果从该事件进入 Inspector。
