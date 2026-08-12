@@ -19,6 +19,25 @@ type CoreWireResponse = {
   params?: unknown
 }
 
+export type PlannedShutdownReport = {
+  protocolVersion: 1
+  status: 'completed'
+  deadlineExpired: boolean
+  activeExecutionsObserved: number
+  stopRequestsIssued: number
+  terminalExecutionsSettled: number
+  unresolvedExecutions: number
+}
+
+export type CoreShutdownResult = {
+  report: PlannedShutdownReport | null
+  forcedSignal: 'SIGTERM' | 'SIGKILL' | null
+}
+
+const PLANNED_SHUTDOWN_DEADLINE_MS = 10_000
+const SHUTDOWN_SIGTERM_GRACE_MS = 3_000
+const SHUTDOWN_SIGKILL_GRACE_MS = 2_000
+
 export class CoreClient {
   #child: ChildProcessWithoutNullStreams | null = null
   #nextId = 1
@@ -28,6 +47,7 @@ export class CoreClient {
   #restartTimer: NodeJS.Timeout | null = null
   #stableTimer: NodeJS.Timeout | null = null
   #stopping = false
+  #shutdownPromise: Promise<CoreShutdownResult> | null = null
   #removedSkillProjectRoots: string[] = []
 
   setRemovedSkillProjectRoots(executionRoots: string[]): void {
@@ -107,9 +127,74 @@ export class CoreClient {
   }
 
   async request<T>(method: CoreMethod, params: unknown = {}): Promise<T> {
+    if (this.#stopping) throw new Error('Rust Core is shutting down')
     if (!this.#child) this.start()
     const child = this.#child
     if (!child) throw new Error('Rust Core is unavailable')
+
+    return this.#sendRequest<T>(child, method, params, 60_000)
+  }
+
+  shutdown(): Promise<CoreShutdownResult> {
+    if (this.#shutdownPromise) return this.#shutdownPromise
+    this.#shutdownPromise = this.#performShutdown()
+    return this.#shutdownPromise
+  }
+
+  async #performShutdown(): Promise<CoreShutdownResult> {
+    this.#stopping = true
+    this.#emit({ method: 'runtime.state', params: { status: 'shutting_down' } })
+    if (this.#restartTimer) clearTimeout(this.#restartTimer)
+    if (this.#stableTimer) clearTimeout(this.#stableTimer)
+    this.#restartTimer = null
+    this.#stableTimer = null
+
+    const child = this.#child
+    if (!child) return { report: null, forcedSignal: null }
+
+    let forcedSignal: CoreShutdownResult['forcedSignal'] = null
+    let sigkillTimer: NodeJS.Timeout | null = null
+    const sigtermTimer = setTimeout(() => {
+      if (child.exitCode !== null || child.signalCode !== null) return
+      forcedSignal = 'SIGTERM'
+      child.kill('SIGTERM')
+      sigkillTimer = setTimeout(() => {
+        if (child.exitCode !== null || child.signalCode !== null) return
+        forcedSignal = 'SIGKILL'
+        child.kill('SIGKILL')
+      }, SHUTDOWN_SIGKILL_GRACE_MS)
+    }, PLANNED_SHUTDOWN_DEADLINE_MS + SHUTDOWN_SIGTERM_GRACE_MS)
+
+    const exited = new Promise<void>((resolve) => {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        resolve()
+        return
+      }
+      child.once('exit', () => resolve())
+    })
+    const reportPromise = this.#sendRequest<PlannedShutdownReport>(
+      child,
+      'core.shutdown',
+      { protocolVersion: 1, deadlineMs: PLANNED_SHUTDOWN_DEADLINE_MS },
+      PLANNED_SHUTDOWN_DEADLINE_MS + SHUTDOWN_SIGTERM_GRACE_MS
+    ).catch((error) => {
+      console.error('Rust Core planned shutdown did not return a report', error)
+      return null
+    })
+
+    await exited
+    clearTimeout(sigtermTimer)
+    if (sigkillTimer) clearTimeout(sigkillTimer)
+    const report = await reportPromise
+    return { report, forcedSignal }
+  }
+
+  #sendRequest<T>(
+    child: ChildProcessWithoutNullStreams,
+    method: CoreMethod | 'core.shutdown',
+    params: unknown,
+    timeoutMs: number
+  ): Promise<T> {
 
     const id = this.#nextId++
     const payload = `${JSON.stringify({ id, method, params })}\n`
@@ -117,7 +202,7 @@ export class CoreClient {
       const timer = setTimeout(() => {
         this.#pending.delete(id)
         reject(new Error(`Rust Core request timed out: ${method}`))
-      }, 60_000)
+      }, timeoutMs)
       this.#pending.set(id, {
         resolve: (value) => resolve(value as T),
         reject,

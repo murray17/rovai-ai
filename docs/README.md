@@ -29,6 +29,7 @@ last_updated: 2026-08-13
 | 理解内置 CLI、Core Router、Runtime Fleet、Bootstrap 与外部 MCP 的长期结构 | [Built-in Tool Runtime 架构](architecture/builtin-tool-runtime.md) |
 | 修改 Native Session compaction detector、Observer Lease、Runtime 补发 policy、Bootstrap Delivery Gate 或 redelivery payload | [Native Session Bootstrap Redelivery 架构](architecture/native-session-bootstrap-redelivery.md)、[ADR-0138](adr/0138-durable-bootstrap-redelivery-requirement.md)至[ADR-0143](adr/0143-best-effort-non-blocking-compaction-detector-capability.md)及[ADR-0147](adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md) |
 | 修改 Core 重启、accepted Runtime input、Session/Turn 恢复、`recovery_blocked`、Stop/预算收敛或旧 Turn reattach | [AgentRun Recovery 架构](architecture/agent-run-recovery.md)、[ADR-0164](adr/0164-accepted-input-recovery-requires-proven-native-turn-reconciliation.md)及[Accepted Input Recovery v1](contracts/accepted-input-recovery-v1.md) |
+| 修改主动退出/重启/更新、Core drain、launch/terminal admission、Runtime planned stop、shutdown deadline 或 Desktop child-exit wait | [Planned Shutdown 架构](architecture/planned-shutdown.md)、[ADR-0168](adr/0168-planned-shutdown-preserves-runtime-terminal-authority.md)及[Planned Shutdown v1](contracts/planned-shutdown-v1.md) |
 | 理解历史设计与演进原因 | [版本索引](versions/README.md)及对应历史版本；历史内容不能作为当前约束 |
 | 修改 Renderer UI/UX | [UI 规范索引](ui/README.md)；修改当前 Neutral Porcelain + Steel Renderer 时继续读取[当前 UI 详规](ui/arctic-dawn.md) |
 | 本地运行、测试、Smoke Test 或 macOS 构建 | [开发者指南](development/README.md) |

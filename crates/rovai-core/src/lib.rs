@@ -33,6 +33,7 @@ pub mod memory_secret;
 pub mod memory_tool;
 pub mod message_delivery;
 pub mod notification;
+pub mod planned_shutdown;
 pub mod read_model;
 pub mod runtime;
 pub mod runtime_activity_mapping;

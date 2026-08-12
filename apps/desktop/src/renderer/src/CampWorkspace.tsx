@@ -195,6 +195,14 @@ export function isViewingNonTerminalAgentRun(
   return Boolean(focusedRun && NON_TERMINAL_RUNS.has(focusedRun.status))
 }
 
+export function agentRunTerminalNote(
+  run: Pick<AgentRunView, 'terminalReasonCode'>
+): string | null {
+  return run.terminalReasonCode === 'planned_shutdown_cancelled'
+    ? '因 Rovai 计划关闭，Runtime 已确认取消本次执行。'
+    : null
+}
+
 export function executionDrawerIsNearBottom(
   scrollTop: number,
   scrollHeight: number,
@@ -2347,6 +2355,9 @@ function ExecutionDrawer({
                         </div>
                       </div>
                     </header>
+                    {agentRunTerminalNote(run) && (
+                      <p className="execution-terminal-note">{agentRunTerminalNote(run)}</p>
+                    )}
                     <AgentRunDeliveryRecipients deliveries={runDeliveries} memberById={memberById} />
                     <RunExecutionDisclosure
                       run={run}
@@ -3676,7 +3687,7 @@ function RunExecutionDisclosure({
     )
   ]
   const hasProgress = processItems.length > 0
-  const showUnsettledWarning = run.hasUnsettledExternalEffects && run.status !== 'cancelled'
+  const showUnsettledWarning = run.hasUnsettledExternalEffects
   if (!nonTerminal && durableEvidenceCount === 0 && !hasProgress && truncatedEvidence.length === 0 && !showUnsettledWarning) {
     return null
   }

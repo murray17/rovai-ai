@@ -1149,15 +1149,31 @@ pub fn dispatch_delivery(
     )
 }
 
+pub(crate) struct AgentRunDeliverySettlement<'a> {
+    pub agent_run_id: &'a str,
+    pub agent_run_status: &'a str,
+    pub agent_run_error_code: Option<&'a str>,
+    pub terminal_resolution_source: Option<&'a str>,
+    pub terminal_reason_code: Option<&'a str>,
+    pub actor: &'a ActorRef,
+    pub execution_epoch: Option<i64>,
+    pub now: &'a str,
+}
+
 pub(crate) fn settle_materialized_delivery_for_agent_run(
     transaction: &Transaction<'_>,
-    agent_run_id: &str,
-    agent_run_status: &str,
-    agent_run_error_code: Option<&str>,
-    actor: &ActorRef,
-    execution_epoch: Option<i64>,
-    now: &str,
+    settlement: AgentRunDeliverySettlement<'_>,
 ) -> Result<Option<SettledDelivery>> {
+    let AgentRunDeliverySettlement {
+        agent_run_id,
+        agent_run_status,
+        agent_run_error_code,
+        terminal_resolution_source,
+        terminal_reason_code,
+        actor,
+        execution_epoch,
+        now,
+    } = settlement;
     let delivery = transaction
         .query_row(
             r#"
@@ -1179,15 +1195,20 @@ pub(crate) fn settle_materialized_delivery_for_agent_run(
     let Some((delivery_id, camp_id, recipient_agent_id)) = delivery else {
         return Ok(None);
     };
-    let (delivery_status, failure_code, manual_intervention_required) = match agent_run_status {
-        "succeeded" => ("settled", None, 0_i64),
-        "failed" => ("failed", Some("target_agent_run_failed"), 1_i64),
-        "cancelled" => ("cancelled", Some("target_agent_run_cancelled"), 0_i64),
-        _ => anyhow::bail!("non-terminal AgentRun cannot settle a Message Delivery"),
-    };
-    let failure_detail = agent_run_error_code
-        .map(|code| serde_json::to_string(&json!({ "agentRunErrorCode": code })))
-        .transpose()?;
+    let (delivery_status, failure_code, manual_intervention_required) =
+        delivery_terminal_semantics(agent_run_status, terminal_reason_code)?;
+    let failure_detail = (delivery_status != "settled"
+        && (agent_run_error_code.is_some()
+            || terminal_resolution_source.is_some()
+            || terminal_reason_code.is_some()))
+    .then(|| {
+        serde_json::to_string(&json!({
+            "agentRunErrorCode": agent_run_error_code,
+            "terminalResolutionSource": terminal_resolution_source,
+            "terminalReasonCode": terminal_reason_code,
+        }))
+    })
+    .transpose()?;
     let updated = transaction.execute(
         r#"
         UPDATE message_delivery
@@ -1227,6 +1248,8 @@ pub(crate) fn settle_materialized_delivery_for_agent_run(
             "status": delivery_status,
             "failureCode": failure_code,
             "agentRunErrorCode": agent_run_error_code,
+            "terminalResolutionSource": terminal_resolution_source,
+            "terminalReasonCode": terminal_reason_code,
         }),
     )?;
     Ok(Some(SettledDelivery {
@@ -1235,6 +1258,23 @@ pub(crate) fn settle_materialized_delivery_for_agent_run(
         recipient_agent_id,
         status: delivery_status.to_string(),
     }))
+}
+
+fn delivery_terminal_semantics(
+    agent_run_status: &str,
+    terminal_reason_code: Option<&str>,
+) -> Result<(&'static str, Option<&'static str>, i64)> {
+    Ok(match agent_run_status {
+        "succeeded" => ("settled", None, 0_i64),
+        "failed" => ("failed", Some("target_agent_run_failed"), 1_i64),
+        "cancelled" if terminal_reason_code == Some("planned_shutdown_cancelled") => (
+            "cancelled",
+            Some("target_agent_run_planned_shutdown_cancelled"),
+            0_i64,
+        ),
+        "cancelled" => ("cancelled", Some("target_agent_run_cancelled"), 0_i64),
+        _ => anyhow::bail!("non-terminal AgentRun cannot settle a Message Delivery"),
+    })
 }
 
 pub(crate) fn cancel_pending_turn_deliveries(
@@ -2391,5 +2431,22 @@ https://example.test/@agent_7
         let mut values = vec!["agent_9".to_string(), "agent_104".to_string()];
         values.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
         assert_eq!(values, vec!["agent_104", "agent_9"]);
+    }
+
+    #[test]
+    fn planned_shutdown_cancellation_has_a_distinct_run_local_delivery_reason() {
+        assert_eq!(
+            delivery_terminal_semantics("cancelled", Some("planned_shutdown_cancelled")).unwrap(),
+            (
+                "cancelled",
+                Some("target_agent_run_planned_shutdown_cancelled"),
+                0,
+            )
+        );
+        assert_eq!(
+            delivery_terminal_semantics("cancelled", None).unwrap(),
+            ("cancelled", Some("target_agent_run_cancelled"), 0)
+        );
+        assert!(delivery_terminal_semantics("running", None).is_err());
     }
 }

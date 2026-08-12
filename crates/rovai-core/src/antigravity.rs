@@ -29,7 +29,6 @@ use tokio::{
 const MAX_CAPTURE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_LOG_INSPECTION_BYTES: u64 = 2 * 1024 * 1024;
 
-#[derive(Clone)]
 pub struct AntigravityRunRequest {
     pub agent_run_id: String,
     pub execution_epoch: i64,
@@ -41,6 +40,7 @@ pub struct AntigravityRunRequest {
     pub attachment_access_root: Option<PathBuf>,
     pub builtin_tools: Option<BuiltinToolProcessConfig>,
     pub input_accepted: Option<mpsc::UnboundedSender<AntigravityInputAccepted>>,
+    pub launch_handoff: Option<oneshot::Sender<()>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,7 +118,7 @@ impl AntigravityAppRuntimeAdapter {
         })
     }
 
-    pub async fn run(&self, request: AntigravityRunRequest) -> Result<AntigravityRunResult> {
+    pub async fn run(&self, mut request: AntigravityRunRequest) -> Result<AntigravityRunResult> {
         let key = (request.agent_run_id.clone(), request.execution_epoch);
         let (interrupt, interrupted) = oneshot::channel();
         let control = Arc::new(AntigravityProcessControl {
@@ -133,7 +133,10 @@ impl AntigravityAppRuntimeAdapter {
             }
             active.insert(key.clone(), control);
         }
-        let result = self.run_process(&request, interrupted).await;
+        let launch_handoff = request.launch_handoff.take();
+        let result = self
+            .run_process(&request, interrupted, launch_handoff)
+            .await;
         self.active.lock().await.remove(&key);
         result
     }
@@ -173,12 +176,14 @@ impl AntigravityAppRuntimeAdapter {
         while !self.active.lock().await.is_empty() && Instant::now() < deadline {
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
+        self.active.lock().await.clear();
     }
 
     async fn run_process(
         &self,
         request: &AntigravityRunRequest,
         interrupted: oneshot::Receiver<()>,
+        launch_handoff: Option<oneshot::Sender<()>>,
     ) -> Result<AntigravityRunResult> {
         let workspace_roots = canonical_antigravity_workspace_roots(
             Path::new(&request.workspace.execution_root),
@@ -283,6 +288,9 @@ impl AntigravityAppRuntimeAdapter {
             .kill_on_drop(true)
             .spawn()
             .with_context(|| format!("failed to start {} in print mode", executable.display()))?;
+        if let Some(handoff) = launch_handoff {
+            let _ = handoff.send(());
+        }
         let stdout = child
             .stdout
             .take()
@@ -706,6 +714,7 @@ mod tests {
                 attachment_access_root: None,
                 builtin_tools: None,
                 input_accepted: None,
+                launch_handoff: None,
             })
             .await
             .unwrap();
@@ -862,6 +871,7 @@ mod tests {
             attachment_access_root: None,
             builtin_tools: None,
             input_accepted: None,
+            launch_handoff: None,
         }
     }
 
@@ -906,10 +916,16 @@ echo "finished"
         let run_id = uuid::Uuid::new_v4().to_string();
         let mut request = fake_antigravity_request(&workspace, &executable, run_id.clone());
         let (accepted_sender, mut accepted_receiver) = mpsc::unbounded_channel();
+        let (handoff_sender, handoff_receiver) = oneshot::channel();
         request.input_accepted = Some(accepted_sender);
+        request.launch_handoff = Some(handoff_sender);
         let running_adapter = Arc::clone(&adapter);
         let task = tokio::spawn(async move { running_adapter.run(request).await });
 
+        tokio::time::timeout(Duration::from_secs(5), handoff_receiver)
+            .await
+            .expect("prompt handoff should follow successful process spawn")
+            .expect("prompt handoff channel should stay open");
         let accepted = tokio::time::timeout(Duration::from_secs(5), accepted_receiver.recv())
             .await
             .expect("accepted evidence should arrive before the process exits")
@@ -1066,6 +1082,7 @@ echo "Created conversation 0bdd2166-d420-40c6-94be-70b93eb290c5" > "$log_file"
                 attachment_access_root: None,
                 builtin_tools: None,
                 input_accepted: None,
+                launch_handoff: None,
             })
             .await
             .expect_err("a verified Session without final text must not look successful");
@@ -1166,6 +1183,7 @@ exec sleep 30
             attachment_access_root: None,
             builtin_tools: None,
             input_accepted: Some(accepted_sender),
+            launch_handoff: None,
         };
         let running_adapter = adapter.clone();
         let task = tokio::spawn(async move { running_adapter.run(request).await });

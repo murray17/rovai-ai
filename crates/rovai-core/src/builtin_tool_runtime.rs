@@ -292,6 +292,21 @@ impl BuiltinToolLeaseRegistry {
         }
     }
 
+    pub(crate) async fn fence_all(&self) -> usize {
+        let _gate = self.invocation_gate.lock().await;
+        let mut processes = self.processes.lock().await;
+        let mut fenced = 0;
+        for process in processes.values_mut() {
+            if process.active.take().is_some() {
+                fenced += 1;
+            }
+            if let Err(error) = process.config.write_context(None) {
+                eprintln!("failed to fence Built-in Tool context: {error:#}");
+            }
+        }
+        fenced
+    }
+
     pub(crate) async fn authenticate(
         &self,
         auth: &BuiltinToolAuth,

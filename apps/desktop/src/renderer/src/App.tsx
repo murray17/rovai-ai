@@ -211,6 +211,30 @@ export function shouldLoadRuntimeHealth(
     )
 }
 
+export function ControlledShutdownOverlay(): React.JSX.Element {
+  return (
+    <div
+      className="shutdown-scrim"
+      role="dialog"
+      aria-modal="true"
+      aria-live="assertive"
+      aria-labelledby="controlled-shutdown-title"
+      aria-describedby="controlled-shutdown-description"
+    >
+      <section className="shutdown-card">
+        <span className="shutdown-progress" aria-hidden="true"><i /></span>
+        <div>
+          <p className="settings-page-eyebrow">CONTROLLED SHUTDOWN</p>
+          <h2 id="controlled-shutdown-title">正在停止运行并关闭 Rovai…</h2>
+          <p id="controlled-shutdown-description">
+            正在等待 Runtime 返回可靠终态；无法确认的执行会保留现场，供下次启动核对。
+          </p>
+        </div>
+      </section>
+    </div>
+  )
+}
+
 export function App(): React.JSX.Element {
   const [appearance, setAppearance] = useState<AppearanceSnapshot>(
     () => initialAppearanceSnapshot(document.documentElement)
@@ -240,6 +264,7 @@ export function App(): React.JSX.Element {
   const [optimisticCampMessages, setOptimisticCampMessages] = useState<OptimisticCampMessageEntry[]>([])
   const [cancellingTurnIds, setCancellingTurnIds] = useState<Set<string>>(() => new Set())
   const [state, setState] = useState<LoadState>('loading')
+  const [shuttingDown, setShuttingDown] = useState(false)
   const [startupSnapshot, setStartupSnapshot] = useState<DesktopStartupSnapshot | null>(null)
   const [startupStatus, setStartupStatus] = useState<StartupStatus>('loading')
   const [startupError, setStartupError] = useState<string | null>(null)
@@ -877,7 +902,9 @@ export function App(): React.JSX.Element {
       }
       if (event.method === 'runtime.state') {
         const runtimeStatus = stringField(params, 'status')
-        if (runtimeStatus === 'crashed') {
+        if (runtimeStatus === 'shutting_down') {
+          setShuttingDown(true)
+        } else if (runtimeStatus === 'crashed') {
           setState('error')
           setError(stringField(params, 'message') ?? 'Rust Core 已停止。')
         } else if (runtimeStatus === 'starting' || runtimeStatus === 'restarting') {
@@ -1944,6 +1971,7 @@ export function App(): React.JSX.Element {
         onNavigate={navigateFromNotification}
         onRefreshVisibleCamp={refreshVisibleNotificationCamp}
       />
+      {shuttingDown && <ControlledShutdownOverlay />}
     </div>
   )
 }

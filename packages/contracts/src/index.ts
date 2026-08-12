@@ -755,6 +755,7 @@ export interface CampTurnView {
   triggerId: string
   status: 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled'
   cancelRequestedAt: string | null
+  aggregateReasonCode: 'required_run_incomplete' | null
   executionBudget: CampTurnExecutionBudgetView
   version: number
   createdAt: string
@@ -788,6 +789,12 @@ export interface AgentRunView {
   completionRole: 'required' | 'optional'
   status: 'queued' | 'running' | 'waiting' | 'succeeded' | 'failed' | 'cancelled'
   waitReason: string | null
+  terminalResolutionSource: 'runtime_terminal' | null
+  terminalReasonCode:
+    | 'planned_shutdown_completed'
+    | 'planned_shutdown_failed'
+    | 'planned_shutdown_cancelled'
+    | null
   executionEpoch: number
   permissionSemantics: 'core_enforced_v1' | 'runtime_managed_v2'
   invocationKind: 'direct' | 'a2a'

@@ -3,9 +3,9 @@ document_type: ui-design-system
 authority: renderer-ui-detail
 status: accepted
 design_direction: porcelain-day-steel-night
-target_version: v0.65
-implementation_status: in_progress
-last_updated: 2026-08-12
+target_version: v0.66
+implementation_status: complete
+last_updated: 2026-08-13
 ---
 
 # Porcelain Day + Steel Night 设计规范
@@ -58,6 +58,13 @@ notification 和独立浮层偏好；同时把 `cli-operations` 作为普通 off
 Skill 列表。该版本的产品设计已接受，但实现与打包 App 验收尚未完成，状态见
 [v0.65 实施计划](../versions/v0.65/implementation-plan.md)；精确 official inventory 与普通投递见
 [ADR-0167](../adr/0167-seven-skill-official-inventory.md)。
+
+v0.66 保持现有过程 Drawer、状态色和信息架构，只增加 planned-shutdown terminal source/reason 的诚实
+文案：Runtime 明确取消显示“已停止”，普通 CampTurn Stop 继续显示“已取消”；cancelled Run 仍有未知
+外部效果时不得隐藏警告。精确数据与可访问性合同见
+[Run Process Detail Surface v5](../contracts/run-process-detail-surface-v5.md)。主动退出时使用无操作按钮的 modal 关闭
+等待面，以可访问标题和说明告知“正在等待可靠终态”与“未确认执行保留现场”；精确交互
+边界见 [Planned Shutdown v1](../contracts/planned-shutdown-v1.md)。
 
 v0.47 进一步冻结 Durable Task v2 的四层界面：会话卡只作五态责任感知，Inspector list
 负责发现，Inspector detail 负责完整责任与审计，现有 AgentRun UI 负责执行事实。Task 取消不等于
@@ -548,7 +555,7 @@ Night 的语义色继续与品牌、身份色分离：`success #82B695 / #1A2B22
   并提供唯一“结束此运行”动作。用户必须先检查 Workspace；成功后读取权威失败终态并把焦点返回
   Composer；该 Run 保留执行过程入口但不计入任何进行中汇总。Renderer 不确认成功、不重发正文、不自动
   创建 successor。精确合同见
-  [Run Process Detail Surface v4](../contracts/run-process-detail-surface-v4.md)。
+  [Run Process Detail Surface v5](../contracts/run-process-detail-surface-v5.md)。
 - Drawer 主标题使用“队员名称 Runtime 产品名”，例如“雾切响子 GitHub Copilot”，不再显示固定的
   “· 执行过程”。Runtime 产品名从当前 AgentProfile 的真实运行配置映射；未配置时只显示队员名称。
   底部 Agent 执行台入口继续保留“执行过程”作为功能标签和可访问语义。
@@ -1377,7 +1384,7 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   以每位队员一个 Agent 过程入口和按时间保留的 Run stage 替代；v0.58 再删除 ordinary Inspector
   的 Context Delivery / Approval Tab，并增加当前 Camp Team/Lead 投影。不新增 Agent 或 AgentRun
   级 Stop，CampTurn Stop 只保留 Composer 发送位置，Approval Dock 继续位于 Composer 正上方。
-  具体边界见 [Run Process Detail Surface v4](../contracts/run-process-detail-surface-v4.md)。Message Delivery、
+  具体边界见 [Run Process Detail Surface v5](../contracts/run-process-detail-surface-v5.md)。Message Delivery、
   Public A2A 和 Context Profile 的领域语义由对应 ADR/Contract 约束，不能在 Renderer 猜测。
 - v0.56 只替换 Day Token、结构强调和少量现有文案/布局；不得重建生产页面、复制 P2 演示 DOM、
   新增角色消息底色、伪造日期阶段、简化 New Conversation 功能或改变 v0.55 会话边界。

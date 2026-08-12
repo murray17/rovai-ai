@@ -127,7 +127,8 @@ export type SemanticStatus = {
 }
 
 export function agentRunPresentation(
-  run: Pick<AgentRunView, 'status' | 'waitReason'>,
+  run: Pick<AgentRunView, 'status' | 'waitReason'>
+    & Partial<Pick<AgentRunView, 'terminalReasonCode'>>,
   cancelling = false
 ): SemanticStatus {
   if (cancelling && ['queued', 'running', 'waiting'].includes(run.status)) {
@@ -137,7 +138,11 @@ export function agentRunPresentation(
   if (run.status === 'running') return { label: '执行中', tone: 'info' }
   if (run.status === 'succeeded') return { label: '已完成', tone: 'success' }
   if (run.status === 'failed') return { label: '失败', tone: 'danger' }
-  if (run.status === 'cancelled') return { label: '已取消', tone: 'neutral' }
+  if (run.status === 'cancelled') {
+    return run.terminalReasonCode === 'planned_shutdown_cancelled'
+      ? { label: '已停止', tone: 'neutral' }
+      : { label: '已取消', tone: 'neutral' }
+  }
   return {
     label: ({
       delivery_unknown: '投递待确认',
@@ -153,7 +158,8 @@ export function agentRunPresentation(
 }
 
 export function agentRunStateTag(
-  run: Pick<AgentRunView, 'status' | 'waitReason'>,
+  run: Pick<AgentRunView, 'status' | 'waitReason'>
+    & Partial<Pick<AgentRunView, 'terminalReasonCode'>>,
   cancelling = false
 ): { tag: string; tone: 'brand' | 'attention' | 'success' | 'danger' | 'neutral' } {
   if (cancelling && ['queued', 'running', 'waiting'].includes(run.status)) {
@@ -163,7 +169,11 @@ export function agentRunStateTag(
   if (run.status === 'queued') return { tag: 'QUEUED', tone: 'neutral' }
   if (run.status === 'succeeded') return { tag: 'DONE', tone: 'success' }
   if (run.status === 'failed') return { tag: 'FAILED', tone: 'danger' }
-  if (run.status === 'cancelled') return { tag: 'CANCELLED', tone: 'neutral' }
+  if (run.status === 'cancelled') {
+    return run.terminalReasonCode === 'planned_shutdown_cancelled'
+      ? { tag: 'STOPPED', tone: 'neutral' }
+      : { tag: 'CANCELLED', tone: 'neutral' }
+  }
   return {
     tag: run.waitReason === 'approval'
       ? 'WAITING APPROVAL'

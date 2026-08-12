@@ -2,14 +2,20 @@
 document_type: implementation-plan
 version: v0.65
 authority: implementation-plan-and-acceptance
-status: in_progress
-last_updated: 2026-08-12
+status: closed_incomplete
+last_updated: 2026-08-13
 ---
 
 # v0.65 实施与验收计划
 
+> 本计划所拥有的当前用户注意力与渐进式 CLI 教学范围在业务实施开始前，因 P0 计划内受控关闭
+> 优先级切换而冻结。下列未勾选项保持为未实施历史事实，不转入 v0.66，也不再作为当前版本门禁。
+> 冻结前独立完成的目录附件增量由 ADR-0169、Camp Attachment v1 和对应 UI 验收拥有，不属于下列
+> 两阶段检查点，也不把本计划提升为 complete。
+
 > Phase 1 与 Phase 2 只决定执行顺序，不是发布切分。任一阶段、任一 Runtime real smoke 或完整
-> 门禁未完成时，本计划和版本概览都保持 `in_progress`。
+> 门禁未完成时，本计划和版本概览在 current 生命周期内保持 `in_progress`；版本切换后以
+> `closed_incomplete` 冻结。
 
 ## Checkpoint 0：领域、ADR 与合同
 

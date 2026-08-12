@@ -9,5 +9,6 @@ describe('Runtime Renderer Core method allowlist', () => {
       'runtime.product.check',
       'runtime.pendingExecution.cancel'
     ])
+    expect(RUNTIME_RENDERER_CORE_METHODS).not.toContain('core.shutdown')
   })
 })

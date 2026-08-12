@@ -24,7 +24,10 @@ use builtin_tool_runtime::{
     BuiltinToolLeaseRegistry, BuiltinToolProcessConfig, builtin_tool_socket_path,
     bundled_cli_executable, request_digest,
 };
-use claude::{ClaudeCodeCliRuntimeAdapter, ClaudeCodeInputAccepted, ClaudeCodeRunRequest};
+use claude::{
+    ClaudeCodeCliRuntimeAdapter, ClaudeCodeDeliveredFailure, ClaudeCodeInputAccepted,
+    ClaudeCodeRunRequest,
+};
 use codex::{
     CodexAgentRunRuntimeRequest, CodexAgentThreadOptions, CodexCliRuntimeAdapter, CodexIncoming,
     CodexRuntime,
@@ -131,13 +134,18 @@ use rovai_core::{
         MarkCampInAppNotificationsReadCommand, MarkInAppNotificationReadCommand,
         UpdateInAppNotificationPreferenceCommand,
     },
+    planned_shutdown::{
+        ActiveExecutionKey, ActiveExecutionSnapshot, ExecutionLaunchPermit,
+        PlannedShutdownCoordinator, RuntimeRouteBinding, RuntimeTerminalObservation,
+        RuntimeTerminalOutcome, TerminalSettlementPermit,
+    },
     read_model::{READ_MODEL_SCHEMA_VERSION, ReadModelService},
     runtime::{
         AcknowledgeAgentRunCancellationCommand, AgentRunCancellationCandidate, AgentRunExecution,
         BindNativeSessionCommand, CancelCampTurnCommand, ClaimAgentRunCommand,
         ExecutionRuntimeService, FailAgentRunCommand, MissingSendRecoveryBoundary,
         MissingSendRecoveryCandidate, NativeSessionResumeDisposition, NativeSessionResumeFailure,
-        PermissionSemantics, RebindAgentRunRuntimeCommand,
+        PermissionSemantics, PlannedShutdownAbortiveTerminal, RebindAgentRunRuntimeCommand,
         RecordCancelledAgentRunEndingGitObservationCommand, RejectAgentRunDispatchCommand,
         ResolveAcceptedInputRecoveryBlockerCommand, RestartNativeSessionCommand,
         SucceedAgentRunCommand,
@@ -175,6 +183,46 @@ use tokio::{
 
 const RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT: Duration = Duration::from_secs(2);
 const RUNTIME_CANCELLATION_FENCE_TIMEOUT: Duration = Duration::from_secs(1);
+const PLANNED_SHUTDOWN_PROTOCOL_VERSION: u32 = 1;
+const PLANNED_SHUTDOWN_MIN_DEADLINE_MS: u64 = 100;
+const PLANNED_SHUTDOWN_MAX_DEADLINE_MS: u64 = 30_000;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PlannedShutdownParams {
+    protocol_version: u32,
+    deadline_ms: u64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlannedShutdownReport {
+    protocol_version: u32,
+    status: &'static str,
+    deadline_expired: bool,
+    active_executions_observed: usize,
+    stop_requests_issued: usize,
+    terminal_executions_settled: usize,
+    unresolved_executions: usize,
+}
+
+fn parse_planned_shutdown_params(value: Value) -> Result<PlannedShutdownParams> {
+    let params = serde_json::from_value::<PlannedShutdownParams>(value)
+        .context("planned shutdown params are invalid")?;
+    if params.protocol_version != PLANNED_SHUTDOWN_PROTOCOL_VERSION {
+        anyhow::bail!("planned shutdown protocolVersion must be 1");
+    }
+    if !(PLANNED_SHUTDOWN_MIN_DEADLINE_MS..=PLANNED_SHUTDOWN_MAX_DEADLINE_MS)
+        .contains(&params.deadline_ms)
+    {
+        anyhow::bail!(
+            "planned shutdown deadlineMs must be between {} and {}",
+            PLANNED_SHUTDOWN_MIN_DEADLINE_MS,
+            PLANNED_SHUTDOWN_MAX_DEADLINE_MS
+        );
+    }
+    Ok(params)
+}
 
 enum RuntimeIntegrityPreflight {
     Verified,
@@ -656,7 +704,19 @@ struct Core {
     builtin_tool_leases: Arc<BuiltinToolLeaseRegistry>,
     claude_code_cli: ClaudeCodeCliRuntimeAdapter,
     antigravity_app: AntigravityAppRuntimeAdapter,
+    planned_shutdown: Arc<PlannedShutdownCoordinator>,
+    agent_run_tasks: Mutex<tokio::task::JoinSet<()>>,
     data_dir: PathBuf,
+}
+
+struct PreparedRuntimeLaunch<'a> {
+    execution: &'a AgentRunExecution,
+    resume_disposition: NativeSessionResumeDisposition,
+    skill_exposure: &'a PreparedSkillExposure,
+    mcp_projection: &'a PreparedMcpProjection,
+    attachment_access_root: &'a Path,
+    output: &'a mpsc::UnboundedSender<String>,
+    launch_permit: &'a mut ExecutionLaunchPermit,
 }
 
 enum AgentRunRuntime {
@@ -1845,6 +1905,9 @@ impl Core {
     }
 
     async fn recover_pending_execution_intents(&self) {
+        if self.planned_shutdown.is_draining() {
+            return;
+        }
         let Ok(_recovery_guard) = self.pending_execution_recovery.try_lock() else {
             return;
         };
@@ -1959,6 +2022,88 @@ impl Core {
             .get_agent_run(agent_run_id, execution_epoch)
             .await
             .map(AgentRunRuntime::Acp)
+    }
+
+    async fn request_planned_stop(&self, execution: &ActiveExecutionSnapshot) -> bool {
+        match execution.adapter_kind {
+            AdapterKind::ClaudeCodeCli => {
+                if !self
+                    .planned_shutdown
+                    .mark_planned_stop_requested(&execution.key)
+                    .await
+                {
+                    return false;
+                }
+                self.claude_code_cli
+                    .interrupt(&execution.key.agent_run_id, execution.key.execution_epoch)
+                    .await
+            }
+            AdapterKind::AntigravityApp => {
+                if !self
+                    .planned_shutdown
+                    .mark_planned_stop_requested(&execution.key)
+                    .await
+                {
+                    return false;
+                }
+                self.antigravity_app
+                    .interrupt(&execution.key.agent_run_id, execution.key.execution_epoch)
+                    .await
+            }
+            _ => {
+                let Some(runtime) = self
+                    .agent_run_runtime(&execution.key.agent_run_id, execution.key.execution_epoch)
+                    .await
+                else {
+                    return false;
+                };
+                if !self
+                    .planned_shutdown
+                    .mark_planned_stop_requested(&execution.key)
+                    .await
+                {
+                    return false;
+                }
+                match run_with_cancellation_deadline(
+                    RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT,
+                    runtime.cancel(),
+                )
+                .await
+                {
+                    Some(Ok(())) => {}
+                    Some(Err(error)) => eprintln!(
+                        "planned stop failed for AgentRun {}: {error:#}",
+                        execution.key.agent_run_id
+                    ),
+                    None => eprintln!(
+                        "planned stop timed out for AgentRun {}",
+                        execution.key.agent_run_id
+                    ),
+                }
+                true
+            }
+        }
+    }
+
+    async fn abort_agent_run_tasks(&self) {
+        let mut tasks = self.agent_run_tasks.lock().await;
+        tasks.abort_all();
+        while tasks.join_next().await.is_some() {}
+    }
+
+    async fn shutdown_all_runtimes(&self) {
+        tokio::join!(
+            self.codex_cli.shutdown_all(),
+            self.opencode_cli.shutdown_all(),
+            self.copilot_cli.shutdown_all(),
+            self.kiro_cli.shutdown_all(),
+            self.qoder_cli.shutdown_all(),
+            self.codebuddy_cli.shutdown_all(),
+            self.qwen_code.shutdown_all(),
+            self.claude_code_cli.shutdown_all(),
+            self.antigravity_app.shutdown_all(),
+        );
+        self.runtime_fleet.shutdown_all().await;
     }
 
     fn acp_adapter(
@@ -4093,6 +4238,9 @@ impl Core {
         mut candidate: rovai_core::runtime::QueuedAgentRunCandidate,
         output: mpsc::UnboundedSender<String>,
     ) {
+        let Some(launch_permit) = self.planned_shutdown.enter_launch().await else {
+            return;
+        };
         let access_removed = {
             let database = self.database.lock().await;
             match SkillProjectionReconciler
@@ -4212,23 +4360,156 @@ impl Core {
                 return;
             }
         };
+        let active_key =
+            ActiveExecutionKey::new(&execution.agent_run_id, execution.execution_epoch);
+        if !self
+            .planned_shutdown
+            .register_active(
+                &launch_permit,
+                active_key.clone(),
+                execution.runtime.adapter_kind,
+            )
+            .await
+        {
+            let error = anyhow::anyhow!(
+                "AgentRun execution could not enter the generation-local active registry"
+            );
+            self.fail_claimed_agent_run(
+                &execution,
+                "runtime_launch_admission_failed",
+                &error,
+                false,
+            )
+            .await;
+            return;
+        }
         let core = self.clone();
-        tokio::spawn(async move {
-            if let Err(error) = core.launch_agent_run(&execution, &output).await {
+        let mut agent_run_tasks = self.agent_run_tasks.lock().await;
+        while agent_run_tasks.try_join_next().is_some() {}
+        agent_run_tasks.spawn(async move {
+            let mut launch_permit = launch_permit;
+            let launch_result = core
+                .launch_agent_run(&execution, &output, &mut launch_permit)
+                .await;
+            if launch_result.is_ok() {
+                core.planned_shutdown
+                    .remove_active_if_unbound(&active_key)
+                    .await;
+                return;
+            }
+            if let Err(error) = launch_result {
                 eprintln!(
                     "failed to launch AgentRun {}: {error:#}",
                     execution.agent_run_id
                 );
+                let delivered_one_shot_failure = error
+                    .downcast_ref::<AntigravityDeliveredFailure>()
+                    .map(|failure| (failure.native_turn_id.clone(), failure.error_code))
+                    .or_else(|| {
+                        error
+                            .downcast_ref::<ClaudeCodeDeliveredFailure>()
+                            .map(|failure| (failure.native_turn_id.clone(), failure.error_code))
+                    });
+                let runtime_terminal_observed = delivered_one_shot_failure.is_some();
                 let error_code = if error.downcast_ref::<ContextPayloadTooLarge>().is_some() {
                     "context_payload_too_large"
                 } else {
-                    error
-                        .downcast_ref::<AntigravityDeliveredFailure>()
-                        .map(|failure| failure.error_code)
+                    delivered_one_shot_failure
+                        .as_ref()
+                        .map(|(_, error_code)| *error_code)
                         .unwrap_or("runtime_launch_failed")
                 };
-                core.fail_claimed_agent_run(&execution, error_code, &error)
-                    .await;
+                if core.planned_shutdown.is_draining() {
+                    if let Some((native_turn_id, delivered_error_code)) =
+                        delivered_one_shot_failure
+                    {
+                        let Some(_runtime_route_permit) =
+                            core.planned_shutdown.enter_runtime_route().await
+                        else {
+                            return;
+                        };
+                        let binding = RuntimeRouteBinding {
+                            route_identity: match execution.runtime.adapter_kind {
+                                AdapterKind::ClaudeCodeCli => format!(
+                                    "claude-code-process:{}:{}",
+                                    execution.agent_run_id, execution.execution_epoch
+                                ),
+                                AdapterKind::AntigravityApp => format!(
+                                    "agy-process:{}:{}",
+                                    execution.agent_run_id, execution.execution_epoch
+                                ),
+                                _ => unreachable!(
+                                    "only one-shot Adapters return one-shot terminal proof"
+                                ),
+                            },
+                            adapter_turn_correlation: native_turn_id,
+                            provider_turn_id: None,
+                        };
+                        match core
+                            .admit_planned_shutdown_terminal(
+                                &execution.agent_run_id,
+                                execution.execution_epoch,
+                                binding,
+                                RuntimeTerminalOutcome::Failed,
+                                delivered_error_code,
+                            )
+                            .await
+                        {
+                            Ok(Some(permit)) => {
+                                match core
+                                    .settle_planned_shutdown_abortive_terminal(
+                                        &permit,
+                                        PlannedShutdownAbortiveTerminal {
+                                            agent_run_id: execution.agent_run_id.clone(),
+                                            execution_epoch: execution.execution_epoch,
+                                            outcome: RuntimeTerminalOutcome::Failed,
+                                            error_code: delivered_error_code.to_string(),
+                                            error_detail: Some(format!("{error:#}")),
+                                            manual_retry_allowed: true,
+                                        },
+                                    )
+                                    .await
+                                {
+                                    Ok(settlement) => {
+                                        emit(
+                                            &output,
+                                            "agent_run.terminal",
+                                            json!({
+                                                "agentRunId": execution.agent_run_id,
+                                                "executionEpoch": execution.execution_epoch,
+                                                "adapterKind": execution.runtime.adapter_kind,
+                                                "settlement": settlement,
+                                            }),
+                                        );
+                                        core.reconcile_skill_projection_after_run_terminal(
+                                            &execution.workspace.execution_root,
+                                        )
+                                        .await;
+                                        core.planned_shutdown.remove_active(&active_key).await;
+                                    }
+                                    Err(settlement_error) => eprintln!(
+                                        "failed to settle planned shutdown terminal for AgentRun {}: {settlement_error:#}",
+                                        execution.agent_run_id
+                                    ),
+                                }
+                            }
+                            Ok(None) => {}
+                            Err(admission_error) => eprintln!(
+                                "planned shutdown terminal was fenced for AgentRun {}: {admission_error:#}",
+                                execution.agent_run_id
+                            ),
+                        }
+                    }
+                    return;
+                }
+                core.fail_claimed_agent_run(
+                    &execution,
+                    error_code,
+                    &error,
+                    runtime_terminal_observed,
+                )
+                .await;
+                core.planned_shutdown.remove_active(&active_key).await;
             }
         });
     }
@@ -4369,6 +4650,12 @@ impl Core {
                         }),
                     );
                     self.reconcile_skill_projection_after_run_terminal(&candidate.execution_root)
+                        .await;
+                    self.planned_shutdown
+                        .remove_active(&ActiveExecutionKey::new(
+                            &candidate.agent_run_id,
+                            candidate.execution_epoch,
+                        ))
                         .await;
                     if !accepted_input_outcome_unknown {
                         let core = self.clone();
@@ -5164,6 +5451,61 @@ impl Core {
         Ok(())
     }
 
+    async fn bind_active_runtime_route(
+        &self,
+        execution: &AgentRunExecution,
+        binding: RuntimeRouteBinding,
+    ) -> Result<()> {
+        let key = ActiveExecutionKey::new(&execution.agent_run_id, execution.execution_epoch);
+        if !self.planned_shutdown.bind_route(&key, binding).await {
+            anyhow::bail!("Runtime route did not match the current generation active execution");
+        }
+        Ok(())
+    }
+
+    async fn admit_planned_shutdown_terminal(
+        &self,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        binding: RuntimeRouteBinding,
+        outcome: RuntimeTerminalOutcome,
+        terminal_discriminator: &str,
+    ) -> Result<Option<TerminalSettlementPermit>> {
+        if !self.planned_shutdown.is_draining() {
+            return Ok(None);
+        }
+        let fingerprint = format!(
+            "{}:{agent_run_id}:{execution_epoch}:{}:{terminal_discriminator}",
+            outcome.as_str(),
+            binding.adapter_turn_correlation
+        );
+        self.planned_shutdown
+            .admit_terminal(RuntimeTerminalObservation {
+                key: ActiveExecutionKey::new(agent_run_id, execution_epoch),
+                binding,
+                outcome,
+                fingerprint,
+            })
+            .await
+            .map(Some)
+            .map_err(|error| {
+                anyhow::anyhow!("planned shutdown terminal observation was fenced: {error:?}")
+            })
+    }
+
+    async fn settle_planned_shutdown_abortive_terminal(
+        &self,
+        permit: &TerminalSettlementPermit,
+        terminal: PlannedShutdownAbortiveTerminal,
+    ) -> Result<rovai_core::runtime::PlannedShutdownTerminalSettlement> {
+        let mut database = self.database.lock().await;
+        ExecutionRuntimeService::default().settle_planned_shutdown_abortive_terminal(
+            &mut database,
+            permit,
+            &terminal,
+        )
+    }
+
     async fn prepare_builtin_tool_binding(
         &self,
         execution: &AgentRunExecution,
@@ -5265,6 +5607,23 @@ impl Core {
         accepted: &AntigravityInputAccepted,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
+        let _runtime_route_permit = self
+            .planned_shutdown
+            .enter_runtime_route()
+            .await
+            .context("Antigravity Runtime route was fenced before input acceptance settled")?;
+        self.bind_active_runtime_route(
+            execution,
+            RuntimeRouteBinding {
+                route_identity: format!(
+                    "agy-process:{}:{}",
+                    execution.agent_run_id, execution.execution_epoch
+                ),
+                adapter_turn_correlation: accepted.native_turn_id.clone(),
+                provider_turn_id: None,
+            },
+        )
+        .await?;
         if let Err(error) = self
             .bind_prepared_native_session(execution, credential, &accepted.native_session_id)
             .await
@@ -5303,11 +5662,28 @@ impl Core {
         accepted: &ClaudeCodeInputAccepted,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
+        let _runtime_route_permit = self
+            .planned_shutdown
+            .enter_runtime_route()
+            .await
+            .context("Claude Code Runtime route was fenced before input acceptance settled")?;
         if accepted.native_session_id != target.expected_native_session_id
             || accepted.native_turn_id != target.expected_native_turn_id
         {
             anyhow::bail!("Claude Code accepted-input evidence identity did not match its Run");
         }
+        self.bind_active_runtime_route(
+            execution,
+            RuntimeRouteBinding {
+                route_identity: format!(
+                    "claude-code-process:{}:{}",
+                    execution.agent_run_id, execution.execution_epoch
+                ),
+                adapter_turn_correlation: accepted.native_turn_id.clone(),
+                provider_turn_id: None,
+            },
+        )
+        .await?;
         if !target.is_new_session
             && let Err(error) = self
                 .bind_prepared_native_session(execution, credential, &accepted.native_session_id)
@@ -5703,6 +6079,7 @@ impl Core {
         self: &Arc<Self>,
         execution: &AgentRunExecution,
         output: &mpsc::UnboundedSender<String>,
+        launch_permit: &mut ExecutionLaunchPermit,
     ) -> Result<()> {
         let Some(skill_exposure) = self
             .prepare_agent_run_skill_exposure(execution)
@@ -5739,38 +6116,41 @@ impl Core {
         if execution.runtime.adapter_kind == rovai_core::agent_profile::AdapterKind::AntigravityApp
         {
             return self
-                .launch_antigravity_agent_run(
+                .launch_antigravity_agent_run(PreparedRuntimeLaunch {
                     execution,
                     resume_disposition,
-                    &skill_exposure,
-                    &mcp_projection,
-                    &attachment_access_root,
+                    skill_exposure: &skill_exposure,
+                    mcp_projection: &mcp_projection,
+                    attachment_access_root: &attachment_access_root,
                     output,
-                )
+                    launch_permit,
+                })
                 .await;
         }
         if execution.runtime.adapter_kind == rovai_core::agent_profile::AdapterKind::ClaudeCodeCli {
             return self
-                .launch_claude_code_agent_run(
+                .launch_claude_code_agent_run(PreparedRuntimeLaunch {
                     execution,
                     resume_disposition,
-                    &skill_exposure,
-                    &mcp_projection,
-                    &attachment_access_root,
+                    skill_exposure: &skill_exposure,
+                    mcp_projection: &mcp_projection,
+                    attachment_access_root: &attachment_access_root,
                     output,
-                )
+                    launch_permit,
+                })
                 .await;
         }
         if execution.runtime.adapter_kind.uses_acp() {
             return self
-                .launch_acp_agent_run(
+                .launch_acp_agent_run(PreparedRuntimeLaunch {
                     execution,
                     resume_disposition,
-                    &skill_exposure,
-                    &mcp_projection,
-                    &attachment_access_root,
+                    skill_exposure: &skill_exposure,
+                    mcp_projection: &mcp_projection,
+                    attachment_access_root: &attachment_access_root,
                     output,
-                )
+                    launch_permit,
+                })
                 .await;
         }
         if execution.runtime.adapter_kind.as_str() != "codex-cli" {
@@ -5985,6 +6365,16 @@ impl Core {
                 return Err(error).context("Codex input delivery outcome is unknown");
             }
         };
+        self.bind_active_runtime_route(
+            execution,
+            RuntimeRouteBinding {
+                route_identity: runtime.host_instance_id().to_string(),
+                adapter_turn_correlation: native_turn_id.clone(),
+                provider_turn_id: Some(native_turn_id.clone()),
+            },
+        )
+        .await?;
+        launch_permit.complete_handoff();
         self.acknowledge_runtime_input(&delivery.id, &native_turn_id)
             .await?;
         emit(
@@ -6009,15 +6399,16 @@ impl Core {
         Ok(())
     }
 
-    async fn launch_claude_code_agent_run(
-        &self,
-        execution: &AgentRunExecution,
-        resume_disposition: NativeSessionResumeDisposition,
-        skill_exposure: &PreparedSkillExposure,
-        mcp_projection: &PreparedMcpProjection,
-        attachment_access_root: &Path,
-        output: &mpsc::UnboundedSender<String>,
-    ) -> Result<()> {
+    async fn launch_claude_code_agent_run(&self, launch: PreparedRuntimeLaunch<'_>) -> Result<()> {
+        let PreparedRuntimeLaunch {
+            execution,
+            resume_disposition,
+            skill_exposure,
+            mcp_projection,
+            attachment_access_root,
+            output,
+            launch_permit,
+        } = launch;
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
         if !execution_root.is_dir() {
             anyhow::bail!(
@@ -6121,6 +6512,7 @@ impl Core {
         self.bind_builtin_tool_runtime(&builtin_tools, execution, &binding_credential)
             .await?;
         let (input_accepted_sender, mut input_accepted_receiver) = mpsc::unbounded_channel();
+        let (launch_handoff_sender, mut launch_handoff_receiver) = oneshot::channel();
         let run = self.claude_code_cli.run(ClaudeCodeRunRequest {
             agent_run_id: execution.agent_run_id.clone(),
             execution_epoch: execution.execution_epoch,
@@ -6136,12 +6528,39 @@ impl Core {
             attachment_access_root: Some(attachment_access_root.to_path_buf()),
             persist_session: true,
             input_accepted: Some(input_accepted_sender),
+            launch_handoff: Some(launch_handoff_sender),
         });
         tokio::pin!(run);
+        let mut early_result = tokio::select! {
+            biased;
+            handoff = &mut launch_handoff_receiver => {
+                handoff.context("Claude Code launch handoff was lost")?;
+                self.bind_active_runtime_route(
+                    execution,
+                    RuntimeRouteBinding {
+                        route_identity: format!(
+                            "claude-code-process:{}:{}",
+                            execution.agent_run_id, execution.execution_epoch
+                        ),
+                        adapter_turn_correlation: native_turn_id.clone(),
+                        provider_turn_id: None,
+                    },
+                )
+                .await?;
+                launch_permit.complete_handoff();
+                None
+            }
+            result = &mut run => {
+                Some(result)
+            }
+        };
         let result_and_acceptance: Result<_> = async {
             let mut accepted_input = None;
             let mut acceptance_channel_open = true;
             let result = loop {
+                if let Some(result) = early_result.take() {
+                    break result;
+                }
                 let (observed_acceptance, completed) = tokio::select! {
                     biased;
                     observed = input_accepted_receiver.recv(), if acceptance_channel_open => {
@@ -6212,6 +6631,32 @@ impl Core {
                 result
             }
             Err(error) => {
+                if let Some(delivered) = error.downcast_ref::<ClaudeCodeDeliveredFailure>().cloned()
+                {
+                    if let Some(accepted) = accepted_input.as_ref()
+                        && (accepted.native_session_id != delivered.native_session_id
+                            || accepted.native_turn_id != delivered.native_turn_id)
+                    {
+                        anyhow::bail!(
+                            "Claude Code terminal identity did not match its accepted input evidence"
+                        );
+                    }
+                    if accepted_input.is_none() {
+                        let observed_acceptance = ClaudeCodeInputAccepted {
+                            native_session_id: delivered.native_session_id.clone(),
+                            native_turn_id: delivered.native_turn_id.clone(),
+                        };
+                        self.settle_claude_input_acceptance(
+                            execution,
+                            &binding_credential,
+                            &acceptance_target,
+                            &observed_acceptance,
+                            output,
+                        )
+                        .await?;
+                    }
+                    return Err(error).context(delivered.error_code);
+                }
                 if accepted_input.is_some() {
                     return Err(error).context("Claude Code failed after accepting its input");
                 }
@@ -6265,6 +6710,39 @@ impl Core {
         missing_send_recovery_candidate: &MissingSendRecoveryCandidate,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
+        let _runtime_route_permit = self
+            .planned_shutdown
+            .enter_runtime_route()
+            .await
+            .context("one-shot Runtime route was fenced before terminal settlement")?;
+        let route_identity = match execution.runtime.adapter_kind {
+            AdapterKind::ClaudeCodeCli => format!(
+                "claude-code-process:{}:{}",
+                execution.agent_run_id, execution.execution_epoch
+            ),
+            AdapterKind::AntigravityApp => format!(
+                "agy-process:{}:{}",
+                execution.agent_run_id, execution.execution_epoch
+            ),
+            _ => anyhow::bail!("one-shot terminal used an unsupported Runtime Adapter"),
+        };
+        let terminal_discriminator = canonical_json_digest(&json!({
+            "nativeTurnId": native_turn_id,
+            "finalOutput": final_output,
+        }))?;
+        let planned_terminal_permit = self
+            .admit_planned_shutdown_terminal(
+                &execution.agent_run_id,
+                execution.execution_epoch,
+                RuntimeRouteBinding {
+                    route_identity,
+                    adapter_turn_correlation: native_turn_id.to_string(),
+                    provider_turn_id: None,
+                },
+                RuntimeTerminalOutcome::Succeeded,
+                &terminal_discriminator,
+            )
+            .await?;
         for attempt in 0..80 {
             let current = {
                 let database = self.database.lock().await;
@@ -6275,39 +6753,49 @@ impl Core {
                 )
             }?;
             let Some(current) = current else {
+                self.planned_shutdown
+                    .remove_active(&ActiveExecutionKey::new(
+                        &execution.agent_run_id,
+                        execution.execution_epoch,
+                    ))
+                    .await;
                 return Ok(());
             };
             let ending_git_observation = self
                 .observe_run_git(&current.project_binding_kind, &current.project_path)
                 .await;
+            let terminal_envelope = CommandEnvelope {
+                command_id: uuid::Uuid::new_v4().to_string(),
+                actor: ActorRef::System {
+                    component_id: format!(
+                        "runtime-adapter:{}",
+                        execution.runtime.adapter_kind.as_str()
+                    ),
+                },
+                camp_id: Some(current.camp_id.clone()),
+                expected_versions: Vec::new(),
+                execution_epoch: None,
+                payload: SucceedAgentRunCommand {
+                    agent_run_id: current.agent_run_id.clone(),
+                    expected_version: current.version,
+                    execution_epoch: current.execution_epoch,
+                    native_turn_id: native_turn_id.to_string(),
+                    final_output: final_output.to_string(),
+                    missing_send_recovery_candidate: Some(missing_send_recovery_candidate.clone()),
+                    ending_git_observation,
+                },
+            };
             let terminal = {
                 let mut database = self.database.lock().await;
-                ExecutionRuntimeService::default().succeed_agent_run(
-                    &mut database,
-                    &CommandEnvelope {
-                        command_id: uuid::Uuid::new_v4().to_string(),
-                        actor: ActorRef::System {
-                            component_id: format!(
-                                "runtime-adapter:{}",
-                                execution.runtime.adapter_kind.as_str()
-                            ),
-                        },
-                        camp_id: Some(current.camp_id.clone()),
-                        expected_versions: Vec::new(),
-                        execution_epoch: None,
-                        payload: SucceedAgentRunCommand {
-                            agent_run_id: current.agent_run_id.clone(),
-                            expected_version: current.version,
-                            execution_epoch: current.execution_epoch,
-                            native_turn_id: native_turn_id.to_string(),
-                            final_output: final_output.to_string(),
-                            missing_send_recovery_candidate: Some(
-                                missing_send_recovery_candidate.clone(),
-                            ),
-                            ending_git_observation,
-                        },
-                    },
-                )
+                let service = ExecutionRuntimeService::default();
+                match planned_terminal_permit.as_ref() {
+                    Some(permit) => service.succeed_agent_run_during_planned_shutdown(
+                        &mut database,
+                        permit,
+                        &terminal_envelope,
+                    ),
+                    None => service.succeed_agent_run(&mut database, &terminal_envelope),
+                }
             }?;
             if terminal.result.status != CommandResultStatus::Rejected {
                 emit(
@@ -6325,6 +6813,12 @@ impl Core {
                     &current.workspace.execution_root,
                 )
                 .await;
+                self.planned_shutdown
+                    .remove_active(&ActiveExecutionKey::new(
+                        &execution.agent_run_id,
+                        execution.execution_epoch,
+                    ))
+                    .await;
                 return Ok(());
             }
             if attempt < 79
@@ -6350,15 +6844,16 @@ impl Core {
         )
     }
 
-    async fn launch_antigravity_agent_run(
-        &self,
-        execution: &AgentRunExecution,
-        resume_disposition: NativeSessionResumeDisposition,
-        skill_exposure: &PreparedSkillExposure,
-        mcp_projection: &PreparedMcpProjection,
-        attachment_access_root: &Path,
-        output: &mpsc::UnboundedSender<String>,
-    ) -> Result<()> {
+    async fn launch_antigravity_agent_run(&self, launch: PreparedRuntimeLaunch<'_>) -> Result<()> {
+        let PreparedRuntimeLaunch {
+            execution,
+            resume_disposition,
+            skill_exposure,
+            mcp_projection,
+            attachment_access_root,
+            output,
+            launch_permit,
+        } = launch;
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
         if !execution_root.is_dir() {
             anyhow::bail!(
@@ -6448,6 +6943,7 @@ impl Core {
         self.bind_builtin_tool_runtime(&builtin_tools, execution, &binding_credential)
             .await?;
         let (input_accepted_sender, mut input_accepted_receiver) = mpsc::unbounded_channel();
+        let (launch_handoff_sender, mut launch_handoff_receiver) = oneshot::channel();
         let run = self.antigravity_app.run(AntigravityRunRequest {
             agent_run_id: execution.agent_run_id.clone(),
             execution_epoch: execution.execution_epoch,
@@ -6459,12 +6955,39 @@ impl Core {
             attachment_access_root: Some(attachment_access_root.to_path_buf()),
             builtin_tools: Some(builtin_tools.clone()),
             input_accepted: Some(input_accepted_sender),
+            launch_handoff: Some(launch_handoff_sender),
         });
         tokio::pin!(run);
+        let mut early_result = tokio::select! {
+            biased;
+            handoff = &mut launch_handoff_receiver => {
+                handoff.context("Antigravity launch handoff was lost")?;
+                self.bind_active_runtime_route(
+                    execution,
+                    RuntimeRouteBinding {
+                        route_identity: format!(
+                            "agy-process:{}:{}",
+                            execution.agent_run_id, execution.execution_epoch
+                        ),
+                        adapter_turn_correlation: native_turn_id.clone(),
+                        provider_turn_id: None,
+                    },
+                )
+                .await?;
+                launch_permit.complete_handoff();
+                None
+            }
+            result = &mut run => {
+                Some(result)
+            }
+        };
         let result_and_acceptance: Result<_> = async {
             let mut accepted_input = None;
             let mut acceptance_channel_open = true;
             let result = loop {
+                if let Some(result) = early_result.take() {
+                    break result;
+                }
                 let (observed_acceptance, completed) = tokio::select! {
                     biased;
                     observed = input_accepted_receiver.recv(), if acceptance_channel_open => {
@@ -6618,96 +7141,32 @@ impl Core {
             .await?;
         }
 
-        for attempt in 0..80 {
-            let current = {
-                let database = self.database.lock().await;
-                ExecutionRuntimeService::default().load_agent_run_execution(
-                    &database,
-                    &execution.agent_run_id,
-                    execution.execution_epoch,
-                )
-            }?;
-            let Some(current) = current else {
-                return Ok(());
-            };
-            let ending_git_observation = self
-                .observe_run_git(&current.project_binding_kind, &current.project_path)
-                .await;
-            let terminal = {
-                let mut database = self.database.lock().await;
-                ExecutionRuntimeService::default().succeed_agent_run(
-                    &mut database,
-                    &CommandEnvelope {
-                        command_id: uuid::Uuid::new_v4().to_string(),
-                        actor: ActorRef::System {
-                            component_id: "runtime-adapter:antigravity-app".to_string(),
-                        },
-                        camp_id: Some(current.camp_id.clone()),
-                        expected_versions: Vec::new(),
-                        execution_epoch: None,
-                        payload: SucceedAgentRunCommand {
-                            agent_run_id: current.agent_run_id.clone(),
-                            expected_version: current.version,
-                            execution_epoch: current.execution_epoch,
-                            native_turn_id: result.native_turn_id.clone(),
-                            final_output: result.final_output.clone(),
-                            missing_send_recovery_candidate: Some(
-                                MissingSendRecoveryCandidate::new(
-                                    MissingSendRecoveryBoundary::AntigravityPrintStdout,
-                                    result.final_output.clone(),
-                                ),
-                            ),
-                            ending_git_observation,
-                        },
-                    },
-                )
-            }?;
-            if terminal.result.status != CommandResultStatus::Rejected {
-                emit(
-                    output,
-                    "agent_run.terminal",
-                    json!({
-                        "agentRunId": execution.agent_run_id,
-                        "executionEpoch": execution.execution_epoch,
-                        "adapterKind": execution.runtime.adapter_kind,
-                        "result": terminal.result,
-                        "replayed": terminal.replayed,
-                    }),
-                );
-                self.reconcile_skill_projection_after_run_terminal(
-                    &current.workspace.execution_root,
-                )
-                .await;
-                return Ok(());
-            }
-            if attempt < 79
-                && matches!(
-                    terminal.result.code.as_str(),
-                    "agent_run.version_conflict"
-                        | "agent_run.terminal_fenced"
-                        | "agent_run.terminal_safety_blocked"
-                )
-            {
-                tokio::time::sleep(Duration::from_millis(25)).await;
-                continue;
-            }
-            anyhow::bail!(
-                "Antigravity AgentRun completion was rejected: {}",
-                terminal.result.code
-            );
-        }
-        anyhow::bail!("Antigravity AgentRun completion did not converge")
+        self.complete_one_shot_agent_run(
+            execution,
+            &result.native_turn_id,
+            &result.final_output,
+            &MissingSendRecoveryCandidate::new(
+                MissingSendRecoveryBoundary::AntigravityPrintStdout,
+                result.final_output.clone(),
+            ),
+            output,
+        )
+        .await
     }
 
     async fn launch_acp_agent_run(
         self: &Arc<Self>,
-        execution: &AgentRunExecution,
-        resume_disposition: NativeSessionResumeDisposition,
-        skill_exposure: &PreparedSkillExposure,
-        mcp_projection: &PreparedMcpProjection,
-        attachment_access_root: &Path,
-        output: &mpsc::UnboundedSender<String>,
+        launch: PreparedRuntimeLaunch<'_>,
     ) -> Result<()> {
+        let PreparedRuntimeLaunch {
+            execution,
+            resume_disposition,
+            skill_exposure,
+            mcp_projection,
+            attachment_access_root,
+            output,
+            launch_permit,
+        } = launch;
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
         if !execution_root.is_dir() {
             anyhow::bail!(
@@ -6888,6 +7347,16 @@ impl Core {
                 return Err(error).context("ACP input delivery outcome is unknown");
             }
         };
+        self.bind_active_runtime_route(
+            execution,
+            RuntimeRouteBinding {
+                route_identity: runtime.host_instance_id().to_string(),
+                adapter_turn_correlation: native_prompt_id.clone(),
+                provider_turn_id: None,
+            },
+        )
+        .await?;
+        launch_permit.complete_handoff();
         emit(
             output,
             "agent_run.started",
@@ -6915,36 +7384,40 @@ impl Core {
         execution: &AgentRunExecution,
         error_code: &str,
         error: &anyhow::Error,
+        runtime_terminal_observed: bool,
     ) {
         let ending_git_observation = self
             .observe_run_git(&execution.project_binding_kind, &execution.project_path)
             .await;
         let failure = {
             let mut database = self.database.lock().await;
-            ExecutionRuntimeService::default().fail_agent_run(
-                &mut database,
-                &CommandEnvelope {
-                    command_id: uuid::Uuid::new_v4().to_string(),
-                    actor: ActorRef::System {
-                        component_id: format!(
-                            "runtime-adapter:{}",
-                            execution.runtime.adapter_kind.as_str()
-                        ),
-                    },
-                    camp_id: Some(execution.camp_id.clone()),
-                    expected_versions: Vec::new(),
-                    execution_epoch: None,
-                    payload: FailAgentRunCommand {
-                        agent_run_id: execution.agent_run_id.clone(),
-                        expected_version: execution.version,
-                        execution_epoch: execution.execution_epoch,
-                        error_code: error_code.to_string(),
-                        error_detail: Some(format!("{error:#}")),
-                        manual_retry_allowed: true,
-                        ending_git_observation,
-                    },
+            let envelope = CommandEnvelope {
+                command_id: uuid::Uuid::new_v4().to_string(),
+                actor: ActorRef::System {
+                    component_id: format!(
+                        "runtime-adapter:{}",
+                        execution.runtime.adapter_kind.as_str()
+                    ),
                 },
-            )
+                camp_id: Some(execution.camp_id.clone()),
+                expected_versions: Vec::new(),
+                execution_epoch: None,
+                payload: FailAgentRunCommand {
+                    agent_run_id: execution.agent_run_id.clone(),
+                    expected_version: execution.version,
+                    execution_epoch: execution.execution_epoch,
+                    error_code: error_code.to_string(),
+                    error_detail: Some(format!("{error:#}")),
+                    manual_retry_allowed: true,
+                    ending_git_observation,
+                },
+            };
+            let service = ExecutionRuntimeService::default();
+            if runtime_terminal_observed {
+                service.fail_agent_run(&mut database, &envelope)
+            } else {
+                service.fail_agent_run_without_runtime_terminal(&mut database, &envelope)
+            }
         };
         let failure_persisted = match failure {
             Ok(execution) if execution.result.status != CommandResultStatus::Rejected => true,
@@ -7005,7 +7478,7 @@ impl Core {
             .await;
         let failure = {
             let mut database = self.database.lock().await;
-            ExecutionRuntimeService::default().fail_agent_run(
+            ExecutionRuntimeService::default().fail_agent_run_without_runtime_terminal(
                 &mut database,
                 &CommandEnvelope {
                     command_id: uuid::Uuid::new_v4().to_string(),
@@ -7425,6 +7898,7 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
         &data_dir,
         builtin_tool_leases.clone(),
     ));
+    let planned_shutdown = PlannedShutdownCoordinator::new(uuid::Uuid::new_v4().to_string());
     let core = Arc::new(Core {
         database: Mutex::new(database),
         output: output_tx.clone(),
@@ -7511,12 +7985,14 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
         )?,
         claude_code_cli,
         antigravity_app,
+        planned_shutdown,
+        agent_run_tasks: Mutex::new(tokio::task::JoinSet::new()),
         runtime_fleet,
         builtin_tool_leases,
         data_dir,
     });
     let (fleet_sweeper_shutdown_tx, fleet_sweeper_shutdown_rx) = oneshot::channel();
-    let fleet_sweeper_handle = tokio::spawn(
+    let mut fleet_sweeper_handle = tokio::spawn(
         core.runtime_fleet
             .clone()
             .run_idle_sweeper(fleet_sweeper_shutdown_rx),
@@ -7544,13 +8020,13 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
         acp_shutdown_rx,
     ));
     let (scheduler_shutdown_tx, scheduler_shutdown_rx) = oneshot::channel();
-    let scheduler_handle = tokio::spawn(process_agent_run_scheduler(
+    let mut scheduler_handle = tokio::spawn(process_agent_run_scheduler(
         core.clone(),
         output_tx.clone(),
         scheduler_shutdown_rx,
     ));
     let (runtime_check_shutdown_tx, runtime_check_shutdown_rx) = oneshot::channel();
-    let runtime_check_handle = tokio::spawn(process_runtime_check_manager(
+    let mut runtime_check_handle = tokio::spawn(process_runtime_check_manager(
         core.clone(),
         runtime_check_rx,
         runtime_check_shutdown_rx,
@@ -7558,7 +8034,7 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
 
     eprintln!("rovai-core {} ready", env!("CARGO_PKG_VERSION"));
     let runtime_discovery_core = core.clone();
-    tokio::spawn(async move {
+    let runtime_discovery_handle = tokio::spawn(async move {
         runtime_discovery_core.run_runtime_discovery().await;
         runtime_discovery_core
             .recover_pending_execution_intents()
@@ -7568,6 +8044,7 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
     let stdin = BufReader::new(tokio::io::stdin());
     let mut lines = stdin.lines();
     let mut background_requests = tokio::task::JoinSet::new();
+    let mut planned_shutdown_request = None;
 
     loop {
         let line = match lines.next_line().await {
@@ -7596,6 +8073,30 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
             }
         };
 
+        if request.method == "core.shutdown" {
+            let parsed = parse_planned_shutdown_params(request.params.clone());
+            match parsed {
+                Ok(params) => {
+                    planned_shutdown_request = Some((request.id, params));
+                    break;
+                }
+                Err(error) => {
+                    enqueue_response(
+                        &output_tx,
+                        &Response {
+                            id: request.id,
+                            result: None,
+                            error: Some(ErrorBody {
+                                code: "CORE_SHUTDOWN_INVALID".to_string(),
+                                message: format!("{error:#}"),
+                            }),
+                        },
+                    )?;
+                    continue;
+                }
+            }
+        }
+
         if request_runs_outside_main_queue(&request.method) {
             let request_core = core.clone();
             let request_output = output_tx.clone();
@@ -7612,30 +8113,173 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
         enqueue_response(&output_tx, &response)?;
     }
 
-    background_requests.abort_all();
-    while background_requests.join_next().await.is_some() {}
-    let _ = scheduler_shutdown_tx.send(());
-    let _ = scheduler_handle.await;
-    let _ = runtime_check_shutdown_tx.send(());
-    let _ = runtime_check_handle.await;
-    let _ = builtin_tool_shutdown_tx.send(());
-    let _ = builtin_tool_handle.await;
-    let _ = event_shutdown_tx.send(());
-    let _ = event_handle.await;
-    let _ = acp_shutdown_tx.send(());
-    let _ = acp_event_handle.await;
-    let _ = fleet_sweeper_shutdown_tx.send(());
-    let _ = fleet_sweeper_handle.await;
-    core.codex_cli.shutdown_all().await;
-    core.opencode_cli.shutdown_all().await;
-    core.copilot_cli.shutdown_all().await;
-    core.kiro_cli.shutdown_all().await;
-    core.qoder_cli.shutdown_all().await;
-    core.codebuddy_cli.shutdown_all().await;
-    core.qwen_code.shutdown_all().await;
-    core.claude_code_cli.shutdown_all().await;
-    core.antigravity_app.shutdown_all().await;
-    core.runtime_fleet.shutdown_all().await;
+    if let Some((request_id, params)) = planned_shutdown_request {
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(params.deadline_ms);
+        let launch_quiesced =
+            tokio::time::timeout_at(deadline, core.planned_shutdown.begin_drain())
+                .await
+                .is_ok();
+        if !launch_quiesced {
+            eprintln!("planned shutdown deadline reached while launch handoff was draining");
+        }
+
+        runtime_discovery_handle.abort();
+        let _ = runtime_discovery_handle.await;
+
+        let _ = scheduler_shutdown_tx.send(());
+        let _ = runtime_check_shutdown_tx.send(());
+        let _ = fleet_sweeper_shutdown_tx.send(());
+        let scheduler_forced_abort = if !launch_quiesced {
+            // The deadline can expire while a candidate or Adapter-specific launch
+            // still owns a launch permit. Abort both task sets, then finish the
+            // writer barrier before enumerating active executions. No prompt can
+            // cross the handoff boundary after this point.
+            scheduler_handle.abort();
+            let _ = (&mut scheduler_handle).await;
+            core.abort_agent_run_tasks().await;
+            core.planned_shutdown.begin_drain().await;
+            true
+        } else {
+            false
+        };
+
+        // Launch admission is already closed, so the active registry is stable.
+        // Issue planned stops before waiting for unrelated requests or background
+        // workers; they continue draining in parallel against the same deadline.
+        let active = core.planned_shutdown.active_snapshots().await;
+        let active_executions_observed = active.len();
+        let mut stop_tasks = tokio::task::JoinSet::new();
+        for execution in active {
+            let core = core.clone();
+            stop_tasks.spawn(async move { core.request_planned_stop(&execution).await });
+        }
+        let mut stop_requests_issued = 0;
+        let stop_wait = async {
+            while let Some(result) = stop_tasks.join_next().await {
+                match result {
+                    Ok(true) => stop_requests_issued += 1,
+                    Ok(false) => {}
+                    Err(error) => eprintln!("planned stop worker failed: {error}"),
+                }
+            }
+        };
+        let stop_wait_completed = tokio::time::timeout_at(deadline, stop_wait).await.is_ok();
+        if !stop_wait_completed {
+            stop_tasks.abort_all();
+            while stop_tasks.join_next().await.is_some() {}
+        }
+
+        let background_requests_quiesced = tokio::time::timeout_at(deadline, async {
+            while background_requests.join_next().await.is_some() {}
+        })
+        .await
+        .is_ok();
+        if !background_requests_quiesced {
+            background_requests.abort_all();
+            while background_requests.join_next().await.is_some() {}
+        }
+        let scheduler_quiesced = if scheduler_forced_abort {
+            false
+        } else if tokio::time::timeout_at(deadline, &mut scheduler_handle)
+            .await
+            .is_err()
+        {
+            scheduler_handle.abort();
+            let _ = scheduler_handle.await;
+            false
+        } else {
+            true
+        };
+        let runtime_checks_quiesced =
+            if tokio::time::timeout_at(deadline, &mut runtime_check_handle)
+                .await
+                .is_err()
+            {
+                runtime_check_handle.abort();
+                let _ = runtime_check_handle.await;
+                false
+            } else {
+                true
+            };
+        let fleet_sweeper_quiesced = if tokio::time::timeout_at(deadline, &mut fleet_sweeper_handle)
+            .await
+            .is_err()
+        {
+            fleet_sweeper_handle.abort();
+            let _ = fleet_sweeper_handle.await;
+            false
+        } else {
+            true
+        };
+
+        let all_settled = core
+            .planned_shutdown
+            .wait_for_no_active_until(deadline)
+            .await;
+        core.planned_shutdown
+            .close_terminal_admission_and_drain()
+            .await;
+        core.planned_shutdown.close_runtime_routes_and_drain().await;
+        let drain_deadline_expired = tokio::time::Instant::now() >= deadline;
+        let unresolved_executions = core.planned_shutdown.active_snapshots().await.len();
+        let terminal_executions_settled =
+            active_executions_observed.saturating_sub(unresolved_executions);
+        let _ = core.builtin_tool_leases.fence_all().await;
+
+        core.abort_agent_run_tasks().await;
+        core.shutdown_all_runtimes().await;
+
+        let _ = builtin_tool_shutdown_tx.send(());
+        let _ = builtin_tool_handle.await;
+        let _ = event_shutdown_tx.send(());
+        let _ = event_handle.await;
+        let _ = acp_shutdown_tx.send(());
+        let _ = acp_event_handle.await;
+
+        let report = PlannedShutdownReport {
+            protocol_version: PLANNED_SHUTDOWN_PROTOCOL_VERSION,
+            status: "completed",
+            deadline_expired: drain_deadline_expired
+                || !launch_quiesced
+                || !background_requests_quiesced
+                || !scheduler_quiesced
+                || !runtime_checks_quiesced
+                || !fleet_sweeper_quiesced
+                || !stop_wait_completed
+                || !all_settled,
+            active_executions_observed,
+            stop_requests_issued,
+            terminal_executions_settled,
+            unresolved_executions,
+        };
+        enqueue_response(
+            &output_tx,
+            &Response {
+                id: request_id,
+                result: Some(serde_json::to_value(report)?),
+                error: None,
+            },
+        )?;
+    } else {
+        background_requests.abort_all();
+        while background_requests.join_next().await.is_some() {}
+        runtime_discovery_handle.abort();
+        let _ = runtime_discovery_handle.await;
+        let _ = scheduler_shutdown_tx.send(());
+        let _ = scheduler_handle.await;
+        let _ = runtime_check_shutdown_tx.send(());
+        let _ = runtime_check_handle.await;
+        let _ = fleet_sweeper_shutdown_tx.send(());
+        let _ = fleet_sweeper_handle.await;
+        core.abort_agent_run_tasks().await;
+        core.shutdown_all_runtimes().await;
+        let _ = builtin_tool_shutdown_tx.send(());
+        let _ = builtin_tool_handle.await;
+        let _ = event_shutdown_tx.send(());
+        let _ = event_handle.await;
+        let _ = acp_shutdown_tx.send(());
+        let _ = acp_event_handle.await;
+    }
     drop(core);
     drop(output_tx);
     output_handle
@@ -7658,6 +8302,9 @@ async fn process_codex_events(
                 None => break,
             },
             _ = &mut shutdown => break,
+        };
+        let Some(_runtime_route_permit) = core.planned_shutdown.enter_runtime_route().await else {
+            break;
         };
         match incoming {
             CodexIncoming::Message {
@@ -7733,6 +8380,9 @@ async fn process_acp_events(
                 None => break,
             },
             _ = &mut shutdown => break,
+        };
+        let Some(_runtime_route_permit) = core.planned_shutdown.enter_runtime_route().await else {
+            break;
         };
         match incoming {
             AcpIncoming::InputAccepted {
@@ -8147,7 +8797,7 @@ async fn process_agent_run_acp_message(
             )
         };
         if let Ok(Some(execution)) = execution {
-            core.fail_claimed_agent_run(&execution, "action_audit_failed", &error)
+            core.fail_claimed_agent_run(&execution, "action_audit_failed", &error, false)
                 .await;
         }
         return;
@@ -8715,6 +9365,82 @@ async fn persist_acp_prompt_completion(
     } else {
         None
     };
+    let planned_outcome = if stop_reason == "end_turn" && final_agent_message.is_some() {
+        RuntimeTerminalOutcome::Succeeded
+    } else if stop_reason == "cancelled" {
+        RuntimeTerminalOutcome::Cancelled
+    } else {
+        RuntimeTerminalOutcome::Failed
+    };
+    let terminal_discriminator =
+        canonical_json_digest(params).unwrap_or_else(|_| format!("{prompt_id}:{stop_reason}"));
+    let planned_terminal_permit = core
+        .admit_planned_shutdown_terminal(
+            agent_run_id,
+            execution_epoch,
+            RuntimeRouteBinding {
+                route_identity: runtime.host_instance_id().to_string(),
+                adapter_turn_correlation: prompt_id.to_string(),
+                provider_turn_id: None,
+            },
+            planned_outcome,
+            &terminal_discriminator,
+        )
+        .await?;
+    if let Some(permit) = planned_terminal_permit.as_ref()
+        && planned_outcome != RuntimeTerminalOutcome::Succeeded
+    {
+        let terminal_execution_root = {
+            let database = core.database.lock().await;
+            ExecutionRuntimeService::default()
+                .load_agent_run_execution(&database, agent_run_id, execution_epoch)?
+                .map(|execution| execution.workspace.execution_root)
+        };
+        let settlement = core
+            .settle_planned_shutdown_abortive_terminal(
+                permit,
+                PlannedShutdownAbortiveTerminal {
+                    agent_run_id: agent_run_id.to_string(),
+                    execution_epoch,
+                    outcome: planned_outcome,
+                    error_code: if stop_reason == "end_turn" {
+                        "runtime_missing_final_output".to_string()
+                    } else {
+                        format!("runtime_prompt_{stop_reason}")
+                    },
+                    error_detail: Some(
+                        response_error
+                            .map(str::to_string)
+                            .unwrap_or_else(|| format!("ACP prompt ended as {stop_reason}")),
+                    ),
+                    manual_retry_allowed: planned_outcome == RuntimeTerminalOutcome::Failed,
+                },
+            )
+            .await?;
+        emit(
+            output,
+            "agent_run.terminal",
+            json!({
+                "agentRunId": agent_run_id,
+                "executionEpoch": execution_epoch,
+                "adapterKind": adapter_kind,
+                "settlement": settlement,
+            }),
+        );
+        if let Some(execution_root) = terminal_execution_root {
+            core.reconcile_skill_projection_after_run_terminal(&execution_root)
+                .await;
+        }
+        if let Some(adapter) = core.acp_adapter(adapter_kind) {
+            adapter
+                .complete_agent_run(agent_run_id, execution_epoch)
+                .await;
+        }
+        core.planned_shutdown
+            .remove_active(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
+            .await;
+        return Ok(());
+    }
     for attempt in 0..80 {
         let execution = {
             let database = core.database.lock().await;
@@ -8733,28 +9459,33 @@ async fn persist_acp_prompt_completion(
         let terminal = if stop_reason == "end_turn" {
             if let Some(final_output) = final_agent_message.clone() {
                 let mut database = core.database.lock().await;
-                ExecutionRuntimeService::default().succeed_agent_run(
-                    &mut database,
-                    &CommandEnvelope {
-                        command_id: uuid::Uuid::new_v4().to_string(),
-                        actor: ActorRef::System {
-                            component_id: format!("runtime-adapter:{}", adapter_kind.as_str()),
-                        },
-                        camp_id: Some(execution.camp_id.clone()),
-                        expected_versions: Vec::new(),
-                        execution_epoch: None,
-                        payload: SucceedAgentRunCommand {
-                            agent_run_id: agent_run_id.to_string(),
-                            expected_version: execution.version,
-                            execution_epoch,
-                            native_turn_id: prompt_id.to_string(),
-                            final_output,
-                            missing_send_recovery_candidate: missing_send_recovery_candidate
-                                .clone(),
-                            ending_git_observation: ending_git_observation.clone(),
-                        },
+                let envelope = CommandEnvelope {
+                    command_id: uuid::Uuid::new_v4().to_string(),
+                    actor: ActorRef::System {
+                        component_id: format!("runtime-adapter:{}", adapter_kind.as_str()),
                     },
-                )
+                    camp_id: Some(execution.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: SucceedAgentRunCommand {
+                        agent_run_id: agent_run_id.to_string(),
+                        expected_version: execution.version,
+                        execution_epoch,
+                        native_turn_id: prompt_id.to_string(),
+                        final_output,
+                        missing_send_recovery_candidate: missing_send_recovery_candidate.clone(),
+                        ending_git_observation: ending_git_observation.clone(),
+                    },
+                };
+                let service = ExecutionRuntimeService::default();
+                match planned_terminal_permit.as_ref() {
+                    Some(permit) => service.succeed_agent_run_during_planned_shutdown(
+                        &mut database,
+                        permit,
+                        &envelope,
+                    ),
+                    None => service.succeed_agent_run(&mut database, &envelope),
+                }
             } else {
                 let mut database = core.database.lock().await;
                 ExecutionRuntimeService::default().fail_agent_run(
@@ -8831,6 +9562,9 @@ async fn persist_acp_prompt_completion(
                         .complete_agent_run(agent_run_id, execution_epoch)
                         .await;
                 }
+                core.planned_shutdown
+                    .remove_active(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
+                    .await;
                 return Ok(());
             }
             Ok(terminal)
@@ -8870,6 +9604,9 @@ async fn process_acp_agent_run_exit(
     agent_run_id: &str,
     execution_epoch: i64,
 ) {
+    if core.planned_shutdown.is_draining() {
+        return;
+    }
     if acp_runtime_on_host(
         core,
         adapter_kind,
@@ -8887,6 +9624,9 @@ async fn process_acp_agent_run_exit(
             .forget_agent_run(agent_run_id, execution_epoch)
             .await;
     }
+    core.planned_shutdown
+        .remove_active(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
+        .await;
     let execution = {
         let database = core.database.lock().await;
         ExecutionRuntimeService::default().load_agent_run_execution(
@@ -9121,6 +9861,108 @@ async fn process_agent_run_codex_message(
         Some(message) => Some(message),
         None => runtime.final_agent_message().await,
     };
+    let planned_outcome = if completed.status == "completed" && final_agent_message.is_some() {
+        RuntimeTerminalOutcome::Succeeded
+    } else if matches!(completed.status.as_str(), "cancelled" | "interrupted") {
+        RuntimeTerminalOutcome::Cancelled
+    } else {
+        RuntimeTerminalOutcome::Failed
+    };
+    let terminal_discriminator = canonical_json_digest(&params)
+        .unwrap_or_else(|_| format!("{}:{}", completed.turn_id, completed.status));
+    let planned_terminal_permit = match core
+        .admit_planned_shutdown_terminal(
+            agent_run_id,
+            execution_epoch,
+            RuntimeRouteBinding {
+                route_identity: host_instance_id.to_string(),
+                adapter_turn_correlation: completed.turn_id.clone(),
+                provider_turn_id: Some(completed.turn_id.clone()),
+            },
+            planned_outcome,
+            &terminal_discriminator,
+        )
+        .await
+    {
+        Ok(permit) => permit,
+        Err(error) => {
+            eprintln!(
+                "planned shutdown fenced Codex terminal for AgentRun {agent_run_id}: {error:#}"
+            );
+            return;
+        }
+    };
+    if let Some(permit) = planned_terminal_permit.as_ref()
+        && planned_outcome != RuntimeTerminalOutcome::Succeeded
+    {
+        let terminal_execution_root = {
+            let database = core.database.lock().await;
+            ExecutionRuntimeService::default()
+                .load_agent_run_execution(&database, agent_run_id, execution_epoch)
+                .ok()
+                .flatten()
+                .map(|execution| execution.workspace.execution_root)
+        };
+        let error_code = if completed.status == "completed" {
+            "runtime_missing_final_output".to_string()
+        } else {
+            format!("runtime_turn_{}", completed.status)
+        };
+        let error_detail = Some(match &completed.error {
+            Some(error) => format!(
+                "Codex Native Turn {} ended as {}: {}",
+                completed.turn_id, completed.status, error
+            ),
+            None if completed.status == "completed" => {
+                "Codex completed the Turn without an Agent message".to_string()
+            }
+            None => format!(
+                "Codex Native Turn {} ended as {}",
+                completed.turn_id, completed.status
+            ),
+        });
+        match core
+            .settle_planned_shutdown_abortive_terminal(
+                permit,
+                PlannedShutdownAbortiveTerminal {
+                    agent_run_id: agent_run_id.to_string(),
+                    execution_epoch,
+                    outcome: planned_outcome,
+                    error_code,
+                    error_detail,
+                    manual_retry_allowed: planned_outcome == RuntimeTerminalOutcome::Failed,
+                },
+            )
+            .await
+        {
+            Ok(settlement) => {
+                emit(
+                    output,
+                    "agent_run.terminal",
+                    json!({
+                        "agentRunId": agent_run_id,
+                        "executionEpoch": execution_epoch,
+                        "settlement": settlement,
+                    }),
+                );
+                if let Some(execution_root) = terminal_execution_root {
+                    core.reconcile_skill_projection_after_run_terminal(&execution_root)
+                        .await;
+                }
+                runtime.clear_turn(Some(&completed.turn_id)).await;
+                core.codex_cli
+                    .complete_agent_run(agent_run_id, execution_epoch)
+                    .await;
+                core.planned_shutdown
+                    .remove_active(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
+                    .await;
+            }
+            Err(error) => eprintln!(
+                "failed to persist planned shutdown terminal for AgentRun {agent_run_id}: {error:#}"
+            ),
+        }
+        return;
+    }
     let mut terminal_persisted = false;
     let mut terminal_execution_root = None;
     for attempt in 0..80 {
@@ -9146,28 +9988,33 @@ async fn process_agent_run_codex_message(
         let terminal = if completed.status == "completed" {
             if let Some(final_output) = final_agent_message.clone() {
                 let mut database = core.database.lock().await;
-                ExecutionRuntimeService::default().succeed_agent_run(
-                    &mut database,
-                    &CommandEnvelope {
-                        command_id: uuid::Uuid::new_v4().to_string(),
-                        actor: ActorRef::System {
-                            component_id: "runtime-adapter:codex".to_string(),
-                        },
-                        camp_id: Some(execution.camp_id.clone()),
-                        expected_versions: Vec::new(),
-                        execution_epoch: None,
-                        payload: SucceedAgentRunCommand {
-                            agent_run_id: agent_run_id.to_string(),
-                            expected_version: execution.version,
-                            execution_epoch,
-                            native_turn_id: completed.turn_id.clone(),
-                            final_output,
-                            missing_send_recovery_candidate: missing_send_recovery_candidate
-                                .clone(),
-                            ending_git_observation: ending_git_observation.clone(),
-                        },
+                let envelope = CommandEnvelope {
+                    command_id: uuid::Uuid::new_v4().to_string(),
+                    actor: ActorRef::System {
+                        component_id: "runtime-adapter:codex".to_string(),
                     },
-                )
+                    camp_id: Some(execution.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: SucceedAgentRunCommand {
+                        agent_run_id: agent_run_id.to_string(),
+                        expected_version: execution.version,
+                        execution_epoch,
+                        native_turn_id: completed.turn_id.clone(),
+                        final_output,
+                        missing_send_recovery_candidate: missing_send_recovery_candidate.clone(),
+                        ending_git_observation: ending_git_observation.clone(),
+                    },
+                };
+                let service = ExecutionRuntimeService::default();
+                match planned_terminal_permit.as_ref() {
+                    Some(permit) => service.succeed_agent_run_during_planned_shutdown(
+                        &mut database,
+                        permit,
+                        &envelope,
+                    ),
+                    None => service.succeed_agent_run(&mut database, &envelope),
+                }
             } else {
                 let mut database = core.database.lock().await;
                 ExecutionRuntimeService::default().fail_agent_run(
@@ -9282,6 +10129,9 @@ async fn process_agent_run_codex_message(
     runtime.clear_turn(Some(&completed.turn_id)).await;
     core.codex_cli
         .complete_agent_run(agent_run_id, execution_epoch)
+        .await;
+    core.planned_shutdown
+        .remove_active(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
         .await;
 }
 
@@ -9560,6 +10410,9 @@ async fn process_agent_run_exit(
     agent_run_id: &str,
     execution_epoch: i64,
 ) {
+    if core.planned_shutdown.is_draining() {
+        return;
+    }
     if core
         .codex_cli
         .get_agent_run_on_host(host_instance_id, agent_run_id, execution_epoch)
@@ -9570,6 +10423,9 @@ async fn process_agent_run_exit(
     }
     core.codex_cli
         .forget_agent_run(agent_run_id, execution_epoch)
+        .await;
+    core.planned_shutdown
+        .remove_active(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
         .await;
     let execution = {
         let database = core.database.lock().await;
@@ -10036,6 +10892,42 @@ fn parse_mcp_config_path() -> Result<Option<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn planned_shutdown_request_is_closed_versioned_and_bounded() {
+        let valid = parse_planned_shutdown_params(json!({
+            "protocolVersion": 1,
+            "deadlineMs": 10_000,
+        }))
+        .unwrap();
+        assert_eq!(valid.deadline_ms, 10_000);
+        assert!(
+            parse_planned_shutdown_params(json!({
+                "protocolVersion": 2,
+                "deadlineMs": 10_000,
+            }))
+            .unwrap_err()
+            .to_string()
+            .contains("protocolVersion")
+        );
+        assert!(
+            parse_planned_shutdown_params(json!({
+                "protocolVersion": 1,
+                "deadlineMs": 99,
+            }))
+            .unwrap_err()
+            .to_string()
+            .contains("deadlineMs")
+        );
+        assert!(
+            parse_planned_shutdown_params(json!({
+                "protocolVersion": 1,
+                "deadlineMs": 10_000,
+                "rendererAuthority": true,
+            }))
+            .is_err()
+        );
+    }
 
     #[test]
     fn core_data_directory_must_be_explicit_absolute_and_unique() {

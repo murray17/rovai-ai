@@ -1,5 +1,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
+    error::Error as StdError,
+    fmt,
     path::{Path, PathBuf},
     process::Stdio,
     sync::Arc,
@@ -45,6 +47,7 @@ pub struct ClaudeCodeRunRequest {
     pub attachment_access_root: Option<PathBuf>,
     pub persist_session: bool,
     pub input_accepted: Option<mpsc::UnboundedSender<ClaudeCodeInputAccepted>>,
+    pub launch_handoff: Option<oneshot::Sender<()>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,6 +62,25 @@ pub struct ClaudeCodeRunResult {
     pub native_turn_id: String,
     pub final_output: String,
 }
+
+#[derive(Debug, Clone)]
+pub struct ClaudeCodeDeliveredFailure {
+    pub native_session_id: String,
+    pub native_turn_id: String,
+    pub error_code: &'static str,
+}
+
+impl fmt::Display for ClaudeCodeDeliveredFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "Claude Code accepted the input but ended with {}",
+            self.error_code
+        )
+    }
+}
+
+impl StdError for ClaudeCodeDeliveredFailure {}
 
 #[derive(Debug)]
 struct ClaudeCodeProcessControl {
@@ -88,7 +110,7 @@ impl ClaudeCodeCliRuntimeAdapter {
         })
     }
 
-    pub async fn run(&self, request: ClaudeCodeRunRequest) -> Result<ClaudeCodeRunResult> {
+    pub async fn run(&self, mut request: ClaudeCodeRunRequest) -> Result<ClaudeCodeRunResult> {
         let key = (request.agent_run_id.clone(), request.execution_epoch);
         let (interrupt, interrupted) = oneshot::channel();
         let control = Arc::new(ClaudeCodeProcessControl {
@@ -101,7 +123,10 @@ impl ClaudeCodeCliRuntimeAdapter {
             }
             active.insert(key.clone(), control);
         }
-        let result = self.run_process(&request, interrupted).await;
+        let launch_handoff = request.launch_handoff.take();
+        let result = self
+            .run_process(&request, interrupted, launch_handoff)
+            .await;
         self.active.lock().await.remove(&key);
         result
     }
@@ -141,12 +166,14 @@ impl ClaudeCodeCliRuntimeAdapter {
         while !self.active.lock().await.is_empty() && Instant::now() < deadline {
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
+        self.active.lock().await.clear();
     }
 
     async fn run_process(
         &self,
         request: &ClaudeCodeRunRequest,
         interrupted: oneshot::Receiver<()>,
+        launch_handoff: Option<oneshot::Sender<()>>,
     ) -> Result<ClaudeCodeRunResult> {
         let execution_root = Path::new(&request.workspace.execution_root);
         if !execution_root.is_dir() {
@@ -297,6 +324,9 @@ impl ClaudeCodeCliRuntimeAdapter {
             .await
             .context("failed to close Claude Code stdin after frozen input")?;
         drop(stdin);
+        if let Some(handoff) = launch_handoff {
+            let _ = handoff.send(());
+        }
         let stdout = child
             .stdout
             .take()
@@ -351,31 +381,49 @@ impl ClaudeCodeCliRuntimeAdapter {
         let output = stdout
             .final_result
             .context("Claude Code stream omitted its final result event")?;
-        if output.is_error || output.subtype.as_deref() != Some("success") {
-            anyhow::bail!(
-                "Claude Code returned a non-success result (subtype={})",
-                output.subtype.as_deref().unwrap_or("unknown")
-            );
-        }
-        let observed_session_id = output
-            .session_id
-            .context("Claude Code result omitted session_id")?;
-        validate_session_id(&observed_session_id)?;
-        if observed_session_id != native_session_id {
-            anyhow::bail!(
-                "Claude Code returned a different session than requested (expected {native_session_id}, observed {observed_session_id})"
-            );
-        }
-        let final_output = output.result.trim().to_string();
-        if final_output.is_empty() {
-            anyhow::bail!("Claude Code completed without a final response");
-        }
+        let final_output =
+            validate_claude_terminal_result(&output, &native_session_id, &native_turn_id)?;
         Ok(ClaudeCodeRunResult {
             native_session_id,
             native_turn_id,
             final_output,
         })
     }
+}
+
+fn validate_claude_terminal_result(
+    output: &ClaudeCodeJsonResult,
+    native_session_id: &str,
+    native_turn_id: &str,
+) -> Result<String> {
+    let observed_session_id = output
+        .session_id
+        .as_deref()
+        .context("Claude Code result omitted session_id")?;
+    validate_session_id(observed_session_id)?;
+    if observed_session_id != native_session_id {
+        anyhow::bail!(
+            "Claude Code returned a different session than requested (expected {native_session_id}, observed {observed_session_id})"
+        );
+    }
+    if output.is_error || output.subtype.as_deref() != Some("success") {
+        return Err(ClaudeCodeDeliveredFailure {
+            native_session_id: native_session_id.to_string(),
+            native_turn_id: native_turn_id.to_string(),
+            error_code: "runtime_terminal_failure",
+        }
+        .into());
+    }
+    let final_output = output.result.trim().to_string();
+    if final_output.is_empty() {
+        return Err(ClaudeCodeDeliveredFailure {
+            native_session_id: native_session_id.to_string(),
+            native_turn_id: native_turn_id.to_string(),
+            error_code: "runtime_missing_final_output",
+        }
+        .into());
+    }
+    Ok(final_output)
 }
 
 fn explicit_mcp_config_rejection(stderr: &[u8]) -> bool {
@@ -673,6 +721,34 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn only_identity_matched_structured_results_create_terminal_failure_proof() {
+        let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+        let native_turn_id = "claude-code:run-1:1";
+        let terminal_failure = ClaudeCodeJsonResult {
+            subtype: Some("error".to_string()),
+            is_error: true,
+            result: "provider detail".to_string(),
+            session_id: Some(session_id.to_string()),
+        };
+        let error = validate_claude_terminal_result(&terminal_failure, session_id, native_turn_id)
+            .expect_err("a structured non-success result should be terminal failure proof");
+        let proof = error
+            .downcast_ref::<ClaudeCodeDeliveredFailure>()
+            .expect("the reliable failure must retain its typed proof");
+        assert_eq!(proof.native_session_id, session_id);
+        assert_eq!(proof.native_turn_id, native_turn_id);
+        assert_eq!(proof.error_code, "runtime_terminal_failure");
+
+        let mismatched = ClaudeCodeJsonResult {
+            session_id: Some("5ade59ac-f87e-4827-8cf2-0e1f3ba720ea".to_string()),
+            ..terminal_failure
+        };
+        let error = validate_claude_terminal_result(&mismatched, session_id, native_turn_id)
+            .expect_err("a different Session must be fenced");
+        assert!(error.downcast_ref::<ClaudeCodeDeliveredFailure>().is_none());
     }
 
     #[tokio::test]

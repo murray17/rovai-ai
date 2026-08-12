@@ -3,11 +3,16 @@ document_type: implementation-specification
 version: v0.65
 authority: version-implementation-specification
 status: accepted
-implementation_status: in_progress
-last_updated: 2026-08-12
+implementation_status: closed_incomplete
+last_updated: 2026-08-13
 ---
 
 # v0.65 统一实现规格
+
+> 本规格在当前用户注意力与渐进式 CLI 教学尚未进入业务实施时随 v0.65 冻结；目录附件是由
+> ADR-0169 与 Camp Attachment v1 独立拥有的已实施增量，不属于本规格。下文的 Migration 77、
+> Data Contract `v0.65 / 32` 与 CampSnapshot 30 都是当时拟议目标，未发布也未保留编号；当前实际
+> Migration 77 与 Data Contract `v0.66 / 32` 由 v0.66 权威链拥有。
 
 本文把已确认的产品决定映射为可直接实施的模块、状态和验收边界。长期理由由
 [ADR-0165](../../adr/0165-core-owned-current-user-message-attention.md)、

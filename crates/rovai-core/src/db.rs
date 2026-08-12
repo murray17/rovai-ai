@@ -43,14 +43,61 @@ pub struct Database {
     path: PathBuf,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.62";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 31;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.66";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 32;
+const V066_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.62";
+const V066_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 31;
 const V062_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.54";
 const V062_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 30;
 const V054_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 29;
 const V052_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.52";
 const V052_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 28;
 const V043_CLASSIFIER_VERSION: &str = "activity-v1";
+
+struct CurrentMigrationState {
+    v66: bool,
+    v67: bool,
+    v68: bool,
+    v69: bool,
+    v70: bool,
+    v71: bool,
+    v76: bool,
+    v77: bool,
+}
+
+impl CurrentMigrationState {
+    fn admits(&self, contract: &str, schema: i64) -> bool {
+        let through_v69 = self.v66 && self.v67 && self.v68 && self.v69;
+        if !through_v69 {
+            return false;
+        }
+        if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70 && self.v71 && self.v76 && self.v77;
+        }
+        if contract == V066_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V066_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70 && self.v71 && self.v76 && !self.v77;
+        }
+        if contract == V062_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V062_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70 && self.v71 && !self.v76 && !self.v77;
+        }
+        if contract == V062_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V054_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70 && !self.v71 && !self.v76 && !self.v77;
+        }
+        contract == V052_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V052_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+            && !self.v70
+            && !self.v71
+            && !self.v76
+            && !self.v77
+    }
+}
 
 const V043_RESET_FILES: &[&str] = &[
     "rovai.sqlite",
@@ -105,70 +152,36 @@ fn has_current_data_contract(path: &Path) -> bool {
         [],
         |row| row.get(0),
     );
-    let migration_state: rusqlite::Result<(bool, bool, bool, bool, bool, bool, bool)> = connection
-        .query_row(
-            r#"
+    let migration_state: rusqlite::Result<CurrentMigrationState> = connection.query_row(
+        r#"
         SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 66),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 67),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 68),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 69),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 70),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 71),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 76)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 76),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 77)
         "#,
-            [],
-            |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                    row.get(6)?,
-                ))
-            },
-        );
+        [],
+        |row| {
+            Ok(CurrentMigrationState {
+                v66: row.get(0)?,
+                v67: row.get(1)?,
+                v68: row.get(2)?,
+                v69: row.get(3)?,
+                v70: row.get(4)?,
+                v71: row.get(5)?,
+                v76: row.get(6)?,
+                v77: row.get(7)?,
+            })
+        },
+    );
     matches!(
         (marker, projection_exists, migration_state),
-        (Ok(Some((contract, schema, classifier))), Ok(true), Ok((v66, v67, v68, v69, v70, v71, v76)))
+        (Ok(Some((contract, schema, classifier))), Ok(true), Ok(migrations))
             if classifier == V043_CLASSIFIER_VERSION
-                && ((contract == CURRENT_DATA_CONTRACT_VERSION
-                    && schema == CURRENT_PROJECTION_SCHEMA_VERSION
-                    && v66
-                    && v67
-                    && v68
-                    && v69
-                    && v70
-                    && v71
-                    && v76)
-                    || (contract == V062_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
-                        && schema == V062_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
-                        && v66
-                        && v67
-                        && v68
-                        && v69
-                        && v70
-                        && v71
-                        && !v76)
-                    || (contract == V062_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
-                        && schema == V054_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
-                        && v66
-                        && v67
-                        && v68
-                        && v69
-                        && v70
-                        && !v71
-                        && !v76)
-                    || (contract == V052_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
-                        && schema == V052_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
-                        && v66
-                        && v67
-                        && v68
-                        && v69
-                        && !v70
-                        && !v71
-                        && !v76))
+                && migrations.admits(&contract, schema)
     )
 }
 
@@ -1239,6 +1252,9 @@ impl Database {
             if !self.schema_migration_applied(76)? {
                 self.migrate_explicit_caller_return_delivery_v76()?;
             }
+            if !self.schema_migration_applied(77)? {
+                self.migrate_planned_shutdown_terminal_projection_v77()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -1516,6 +1532,9 @@ impl Database {
         }
         if !self.schema_migration_applied(76)? {
             self.migrate_explicit_caller_return_delivery_v76()?;
+        }
+        if !self.schema_migration_applied(77)? {
+            self.migrate_planned_shutdown_terminal_projection_v77()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -6936,6 +6955,45 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_planned_shutdown_terminal_projection_v77(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE agent_run ADD COLUMN terminal_resolution_source TEXT
+                CHECK(
+                    terminal_resolution_source IS NULL
+                    OR terminal_resolution_source = 'runtime_terminal'
+                );
+            ALTER TABLE agent_run ADD COLUMN terminal_reason_code TEXT
+                CHECK(
+                    terminal_reason_code IS NULL
+                    OR terminal_reason_code IN (
+                        'planned_shutdown_completed',
+                        'planned_shutdown_failed',
+                        'planned_shutdown_cancelled'
+                    )
+                );
+            ALTER TABLE camp_turn ADD COLUMN aggregate_reason_code TEXT
+                CHECK(
+                    aggregate_reason_code IS NULL
+                    OR aggregate_reason_code = 'required_run_incomplete'
+                );
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v0.66', projection_schema_version = 32,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (77, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -11341,13 +11399,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn current_data_contract_accepts_current_and_exact_v062_v054_or_v052_sources() {
+    fn current_data_contract_accepts_current_and_exact_v066_v062_v054_or_v052_sources() {
         let directory =
             std::env::temp_dir().join(format!("rovai-current-contract-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
         let path = directory.join("rovai.sqlite");
 
         assert!(has_current_data_contract(&path));
+
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                UPDATE rovai_data_contract
+                SET contract_version = 'v0.62', projection_schema_version = 31
+                WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 77;
+                "#,
+            )
+            .unwrap();
+        assert!(
+            has_current_data_contract(&path),
+            "the exact v0.62/schema-31 marker without migration 77 is an upgrade source"
+        );
 
         database
             .connection()
@@ -11798,7 +11872,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.62".to_string(), 31));
+        assert_eq!(contract, ("v0.66".to_string(), 32));
         drop(database);
 
         let reopened = Database::open(&directory).expect("v76 database should reopen");
@@ -11812,6 +11886,61 @@ mod tests {
             .unwrap();
         assert_eq!(migration_applied, 1);
         drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v77_adds_planned_shutdown_terminal_provenance_and_turn_aggregate_reason() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v77-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        let migration_applied: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 77",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_applied, 1);
+
+        let run_columns = table_columns(database.connection(), "agent_run").unwrap();
+        assert!(run_columns.contains(&"terminal_resolution_source".to_string()));
+        assert!(run_columns.contains(&"terminal_reason_code".to_string()));
+        let turn_columns = table_columns(database.connection(), "camp_turn").unwrap();
+        assert!(turn_columns.contains(&"aggregate_reason_code".to_string()));
+
+        let run_schema: String = database
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_run'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(run_schema.contains("terminal_resolution_source = 'runtime_terminal'"));
+        assert!(run_schema.contains("planned_shutdown_completed"));
+        assert!(run_schema.contains("planned_shutdown_failed"));
+        assert!(run_schema.contains("planned_shutdown_cancelled"));
+        let turn_schema: String = database
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'camp_turn'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(turn_schema.contains("required_run_incomplete"));
+
+        let contract: (String, i64) = database
+            .connection()
+            .query_row(
+                "SELECT contract_version, projection_schema_version FROM rovai_data_contract WHERE singleton = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(contract, ("v0.66".to_string(), 32));
+        drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
@@ -13957,7 +14086,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(agent_cli_contract, ("v0.62".to_string(), 31, 1));
+        assert_eq!(agent_cli_contract, ("v0.66".to_string(), 32, 1));
         assert_eq!(foreign_key_violations, 0);
 
         drop(database);
@@ -14566,7 +14695,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.62".to_string(), 22));
+        assert_eq!(contract, ("v0.66".to_string(), 22));
         let migration_count: i64 = reopened
             .connection()
             .query_row(
@@ -14597,7 +14726,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, (31, 1));
+        assert_eq!(contract, (32, 1));
         let error = database
             .connection()
             .execute(
@@ -14917,7 +15046,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.62".to_string(), 31));
+        assert_eq!(contract, ("v0.66".to_string(), 32));
         let public_a2a_migration_applied: i64 = database
             .connection()
             .query_row(

@@ -1308,6 +1308,14 @@ _Avoid_: silent truncation, local Blob path, raw protocol log, Markdown executio
 The user-requested, idempotent cancellation of an active CampTurn's complete collaboration execution scope, including AgentRuns and unmaterialized Message Deliveries. Core atomically fences the Turn, cancels pending deliveries, closes new message/evidence/built-in-operation/descendant writes, and attempts native Runtime interruption before marking execution cancelled; Public A2A Messages, Message Deliveries, and Audit facts remain durable, while cancellation never creates a message to another member. The Composer's send position is the sole ordinary stop control while a CampTurn is active; Run Pulse, Header, Inspector, and Execution Drawer may project state or navigate but cannot cancel one Run or the Turn.
 _Avoid_: stop current UI row only, external transaction rollback, Task cancellation, process signal without fencing
 
+**Planned Shutdown**:
+The bounded Core process-lifecycle protocol used only for an intentional Rovai quit, restart, or update. It linearly closes new execution launch admission, requests stop for current-generation active execution handles, and temporarily preserves their live Runtime terminal and Built-in routes. It creates no CampTurn cancellation intent and no AgentRun cancellation request; only a matching Runtime Terminal Observation may settle a Run before the deadline, while an unresolved accepted input remains non-terminal for next-generation recovery classification.
+_Avoid_: CampTurn Stop, Core crash recovery, process kill as cancellation, cross-generation Runtime reattach, accepted-input retry
+
+**Runtime Terminal Observation**:
+An Adapter-recognized Provider success, failure, or cancellation bound to one current-generation live route, AgentRun execution epoch, and Adapter Turn correlation, with Provider Turn ID included when available. Interrupt acknowledgement, process exit, route detach, reap, or a shutdown-induced transport failure is not a terminal observation. During Planned Shutdown, a matching cancellation additionally requires that the active execution was asked to stop.
+_Avoid_: process status, interrupt RPC result, inferred cancellation, log phrase, Native Session resume
+
 **Execution Drawer**:
 The Scheme C bottom-docked, user-selected projection of one AgentRun's current and historical execution state, activities, evidence links, waits, failures, and Public Messages. It derives from Core Read Side facts, can switch which Run is inspected, and owns no stop, approval, dispatch, retry, or message authority; v0.45 introduces no single-Run cancellation action.
 _Avoid_: terminal emulator, independent activity store, Run controller, public timeline item, per-Run stop panel
@@ -1329,7 +1337,7 @@ The compact conversation-area projection of currently active or attention-releva
 _Avoid_: live log, public status message, automatic Drawer trigger, Scheduler authority, per-Run stop control
 
 **Unsettled External Effect**:
-A Runtime delivery, Action, command, tool, file, or network effect whose occurrence or outcome remains unknown after its AgentRun has been fenced and cancelled. It remains an independently recoverable authoritative record and produces the user-facing warning “已停止 · 结果待确认” without blocking Composer reuse or automatically retrying the effect.
+A Runtime delivery, Action, command, tool, file, or network effect whose occurrence or outcome remains unknown after its AgentRun has reached an abortive failed or cancelled terminal. It remains an independently recoverable authoritative record and produces an explicit user-facing result-unknown warning without blocking Composer reuse or automatically retrying the effect. AgentRun terminal source never proves that this separate effect did or did not occur.
 _Avoid_: running AgentRun, proof of non-execution, forced failure, automatic retry, cancellation blocker
 
 **Structured Timeline Event**:
@@ -1393,7 +1401,7 @@ A new AgentRun for one eligible CampMember inside the same CampTurn, created by 
 _Avoid_: Lead Turn, new CampTurn, reopened CampTurn, Native Session resume, unbudgeted response, reply batch
 
 **CampTurn Collaboration Settlement**:
-The authoritative aggregation that keeps a CampTurn non-terminal while any Message Delivery is pending, `interrupted_before_dispatch`, or any AgentRun is `queued`, `running`, or `waiting`. Once those accepted execution responsibilities settle through normal completion, failure, cancellation, or Delivery Manual Intervention, Core determines the terminal result without requiring the original sender or Default Lead to run again; missing integration may be a semantic-review finding but never a response obligation or settlement blocker.
+The authoritative aggregation that keeps a CampTurn non-terminal while any Message Delivery is pending, `interrupted_before_dispatch`, or any AgentRun is `queued`, `running`, or `waiting`. Once those accepted execution responsibilities settle, `CampTurn.cancelled` is possible only from an explicit CampTurn cancellation intent; without that intent, a cancelled required Run is incomplete responsibility and yields a failed aggregate, while optional failed or cancelled Runs do not block completion. Core never requires the original sender or Default Lead to run again; missing integration may be a semantic-review finding but never a response obligation or settlement blocker.
 _Avoid_: AgentRun-only aggregation, early completion, Outcome-as-recovery, business-result verification
 
 **Application-Managed File Safety**:

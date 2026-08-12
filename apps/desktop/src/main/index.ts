@@ -157,6 +157,8 @@ let lastAppearanceSignature = ''
 let generalPreferences: GeneralPreferencesStore | null = null
 let restorableLocations: RestorableLocationStore | null = null
 let navigationPreferences: NavigationPreferencesStore | null = null
+let quitDrainStarted = false
+let quitDrainCompleted = false
 const desktopSessions = new DesktopSessionRegistry()
 
 const legacyDataPath = legacyUserDataPath(
@@ -756,9 +758,20 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
+  if (quitDrainCompleted) return
+  event.preventDefault()
+  if (quitDrainStarted) return
+  quitDrainStarted = true
   nativeTheme.removeListener('updated', publishAppearance)
-  core.stop()
+  void core.shutdown()
+    .catch((error) => {
+      console.error('Rovai Core controlled shutdown failed', error)
+    })
+    .finally(() => {
+      quitDrainCompleted = true
+      app.quit()
+    })
 })
 
 function requireGeneralPreferences(): GeneralPreferencesStore {

@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: desktop-ui-acceptance-infrastructure
-last_updated: 2026-08-12
+last_updated: 2026-08-13
 ---
 
 # 桌面 UI 验收与隔离数据
@@ -81,6 +81,38 @@ Scheme C 转交 footer，以及诊断中心双尺寸、只读自检、MCP 权限
 当前 Neutral Porcelain + Steel 视觉迁移还必须按当前版本实施计划覆盖 2K Composer、七个设置页、
 队员半身照与 Runtime 入口、记忆 Workbench、New Conversation 和各类 Dialog/Drawer。
 具体 Schema/Migration 编号属于测试 fixture 和版本证据，不是本文的常青要求。
+
+### 计划内关闭真实 Runtime 门禁
+
+修改 Desktop quit、Core lifecycle coordinator、Runtime planned stop、terminal settlement、accepted-input
+恢复或关闭等待面后，运行：
+
+```bash
+pnpm package:mac
+pnpm accept:planned-shutdown
+```
+
+这个专项门禁会调用本机已认证的真实 Claude Code Runtime，因此不进入上面的无模型 UI 回归集合，也
+不进入普通 commit 门禁。脚本自行创建临时 Git workspace、隔离 `userData` 和动态 DevTools port；固定
+提示禁止工具、命令、文件读取与工作区修改，并在 Runtime input 变为 `accepted` 后立即请求 packaged
+App 退出。
+
+验收必须证明：
+
+- `before-quit` 显示无操作控件的 accessible modal；Day/Night、`1040×700`、200% zoom 与 reduced
+  motion 下标题、unknown 说明和卡片边界均完整；
+- Desktop 等待 Core 自行完成 drain 和子进程真实退出，App 以 `exit 0` 自然结束；只有验收清理失败
+  分支才可对明确记录的隔离进程树发送信号；
+- one-shot Runtime 进程中断不产生 cancellation acknowledgement：AgentRun 与 CampTurn 均无取消
+  intent、无伪造 terminal source/reason，accepted Runtime Input Delivery 保持不变；
+- 同一隔离数据目录重启后，原 Run 保持相同 execution epoch，进入既有
+  `waiting/recovery_blocked`，不自动重发，并展示“无法安全自动恢复”与“结束此运行”；
+- 两次 packaged App 退出后，脚本观察到的 Core、Runtime 与 Electron helper 子进程全部被 reap。
+
+成功时脚本输出 JSON report 与 Day/Night、200% zoom、recovery blocker 四张截图；失败时保留
+fixture 和截图路径用于排查。可用 `ROVAI_PLANNED_SHUTDOWN_ACCEPT_FIXTURE_ROOT`、
+`ROVAI_PLANNED_SHUTDOWN_ACCEPT_OUTPUT_DIR` 指定绝对隔离位置，用
+`ROVAI_KEEP_PLANNED_SHUTDOWN_FIXTURE=1` 保留成功 fixture；不得指向日常 App 数据目录。
 
 ### 队员页来源返回门禁
 

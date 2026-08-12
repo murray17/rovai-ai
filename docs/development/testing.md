@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-command-routing
-last_updated: 2026-08-09
+last_updated: 2026-08-13
 ---
 
 # 测试与 Smoke Test
@@ -100,6 +100,7 @@ pnpm build:desktop
 | `pnpm smoke:memory-runtime` | Codex + Claude Code | 可只选一种；Claude 有 bounded model/budget 配置 |
 | `pnpm smoke:recovery` | OpenCode 默认 | 可选择其他产品 Runtime；创建 Git fixture 并杀死 Core 验证恢复 |
 | `pnpm smoke:missing-send-recovery` | 全部九种正式 Runtime | 每种 Runtime 使用独立临时 data-dir/Git workspace，真实执行 zero-send 与 accepted-send suppression；六个 ACP 额外执行 tool→final 并生成独立协议 fixture；任一项缺失即失败 |
+| `pnpm accept:planned-shutdown` | Claude Code + packaged App | 在隔离 Git workspace/`userData` 中等待真实 input accepted 后退出，验证 deadline、自然 child exit、无伪 terminal、进程 reap、重启 blocker 与关闭 modal 截图；运行前先执行 `pnpm package:mac` |
 
 `pnpm smoke:runtime-permissions` 是 `smoke:action-approval` 与
 `smoke:multi-agent` 的聚合命令。
@@ -146,6 +147,9 @@ Team Case 可在密封 manifest 中声明 `collaboration` 合同。Runner 将它
 | `ROVAI_MISSING_SEND_RECOVERY_ADAPTERS` | Missing-Send Recovery Runtime 列表或 `all`（默认） |
 | `ROVAI_MISSING_SEND_RECOVERY_REPORT_DIR` | Missing-Send Recovery 的持久 report/protocol fixture 输出目录 |
 | `ROVAI_MISSING_SEND_RECOVERY_MODEL_<ADAPTER_SLUG>` | 为单个 Missing-Send Runtime 选择真实显式模型；Adapter slug 转为大写并把 `-` 换成 `_`，例如 `ROVAI_MISSING_SEND_RECOVERY_MODEL_COPILOT_CLI=gpt-5.6-sol` |
+| `ROVAI_PLANNED_SHUTDOWN_ACCEPT_FIXTURE_ROOT` | Planned Shutdown 验收的显式隔离 fixture root |
+| `ROVAI_PLANNED_SHUTDOWN_ACCEPT_OUTPUT_DIR` | Planned Shutdown JSON report 与四张截图输出目录 |
+| `ROVAI_KEEP_PLANNED_SHUTDOWN_FIXTURE=1` | 成功后保留 Planned Shutdown 隔离 fixture |
 | `ROVAI_KEEP_SMOKE_FIXTURE=1` | 保留 intake fixture 供排查 |
 
 脚本支持的精确值、默认值和额外模型变量以脚本源码为准。新增 selector 时应在同一改动

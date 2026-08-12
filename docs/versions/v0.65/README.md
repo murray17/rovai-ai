@@ -1,19 +1,23 @@
 ---
 document_type: version-overview
 version: v0.65
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: in_progress
-last_updated: 2026-08-12
+implementation_status: closed_incomplete
+last_updated: 2026-08-13
 ---
 
 # Rovai-ai v0.65：当前用户注意力与渐进式 CLI 教学
 
-> 当前状态：产品决定、长期 ADR、字段级合同和两阶段实施规格已接受；业务代码、Migration、
-> bundled Skill、Renderer 与九 Runtime 验收尚未完成，因此版本保持 `in_progress`。
+> 冻结状态：当前用户注意力与渐进式 CLI 教学的产品决定、长期 ADR、字段级合同和两阶段实施规格
+> 已接受，但其业务代码、Migration、bundled Skill、Renderer 与九 Runtime 验收尚未开始。切换前另有
+> 一个独立的目录附件增量已经完成；它不满足本版本统一发布门槛。因 P0 计划内受控关闭优先级切换，
+> 本版本以 `closed_incomplete` 历史快照结束，不把未实现的注意力与 CLI 范围带入 v0.66。
 >
 > 前置版本：[v0.64 Accepted Input 恢复阻断与安全收敛](../v0.64/README.md)
+>
+> 后续版本：[v0.66 计划内受控关闭与可靠终态收口](../v0.66/README.md)
 
 ## 版本目标
 
@@ -56,6 +60,14 @@ clean-break 数据升级、完整门禁和九 Runtime 验收都完成后，v0.65
 完整字段、事务、投影、文件落点和验收矩阵见[实现规格](implementation-spec.md)与
 [实施计划](implementation-plan.md)。
 
+## 已完成的并行增量
+
+v0.65 冻结前已经完成普通文件/目录联合附件：目录由 Core 形成有界、只读、不可跟随 symlink 的
+稳定快照，Renderer 只保留一个目录附件的用户意图，Runtime 读取受管目录根。该增量由
+[ADR-0169](../../adr/0169-core-owned-directory-attachment-snapshots.md)、
+[Camp Attachment v1](../../contracts/camp-attachment-v1.md)和
+[会话区拖放 UI](../../ui/conversation-drop-zone.md)独立拥有，不改变本版本两阶段统一范围仍未完成的事实。
+
 ## 冻结边界
 
 - 本版本只有一个当前本地用户 `local_user`，不提前设计多用户 authenticated binding、可变 user ID
@@ -89,10 +101,10 @@ clean-break 数据升级、完整门禁和九 Runtime 验收都完成后，v0.65
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.64 按已完成事实冻结为 historical，v0.65 成为唯一 current，并新增统一范围、实现规格与两阶段计划 |
-| ADR | 已更新 | [ADR-0165](../../adr/0165-core-owned-current-user-message-attention.md)冻结 `local_user`、正交 addressing 与原子通知；[ADR-0166](../../adr/0166-progressive-built-in-cli-teaching.md)冻结 progressive CLI teaching；[ADR-0167](../../adr/0167-seven-skill-official-inventory.md)接替六项 inventory 并冻结完整七项 official Skill 集合与普通投递 |
-| Contracts | 已更新 | 新增 [Camp Message Send v4](../../contracts/camp-message-send-v4.md)、[Current User Attention v1](../../contracts/current-user-attention-v1.md)、[Built-in Tool Transport v7](../../contracts/builtin-tool-transport-v7.md)和[ContextManifest Evidence v12](../../contracts/context-manifest-evidence-v12.md) |
+| ADR | 已更新 | [ADR-0165](../../adr/0165-core-owned-current-user-message-attention.md)冻结 `local_user`、正交 addressing 与原子通知；[ADR-0166](../../adr/0166-progressive-built-in-cli-teaching.md)冻结 progressive CLI teaching；[ADR-0167](../../adr/0167-seven-skill-official-inventory.md)接替六项 inventory 并冻结完整七项 official Skill 集合与普通投递；[ADR-0169](../../adr/0169-core-owned-directory-attachment-snapshots.md)独立冻结已实施的 Core-owned 目录快照 |
+| Contracts | 已更新 | 新增 [Camp Message Send v4](../../contracts/camp-message-send-v4.md)、[Current User Attention v1](../../contracts/current-user-attention-v1.md)、[Built-in Tool Transport v7](../../contracts/builtin-tool-transport-v7.md)、[ContextManifest Evidence v12](../../contracts/context-manifest-evidence-v12.md)和已实施的[Camp Attachment v1](../../contracts/camp-attachment-v1.md) |
 | Architecture | 已更新 | Public A2A 与 Built-in Tool Runtime 增加 User attention 轴、结构化正文投影、v7 help/Charter/Skill 分层和无 locator recovery stop |
-| UI | 已更新 | 当前 Porcelain/Steel 规范增加 Current User Mention、消息通知、独立浮层偏好与普通 official Skill 列表行为 |
+| UI | 已更新 | 当前 Porcelain/Steel 规范增加 Current User Mention、消息通知、独立浮层偏好与普通 official Skill 列表行为；已实施的目录附件拖放由[会话区拖放 UI](../../ui/conversation-drop-zone.md)记录 |
 | Runtime Activity | 确认无需更新 | User Mention 与 Notification 都不是 Runtime operation；不改变 Canonical Activity identity、classifier 或 provider event mapping |
 | Runtime compatibility | 已更新 | 当前 transport authority 路由到 v7，并明确旧九 Runtime 证据不自动证明 v0.65；真实 v7/Skill smoke 留作发布门槛 |
 | Documentation routing | 已更新 | 文档导航、CURRENT、Architecture/Contract/UI 索引与当前版本指针共同路由到 v0.65 权威链 |
@@ -105,9 +117,11 @@ clean-break 数据升级、完整门禁和九 Runtime 验收都完成后，v0.65
 - [ADR-0165](../../adr/0165-core-owned-current-user-message-attention.md)
 - [ADR-0166](../../adr/0166-progressive-built-in-cli-teaching.md)
 - [ADR-0167](../../adr/0167-seven-skill-official-inventory.md)
+- [ADR-0169](../../adr/0169-core-owned-directory-attachment-snapshots.md)
 - [Camp Message Send v4](../../contracts/camp-message-send-v4.md)
 - [Current User Attention v1](../../contracts/current-user-attention-v1.md)
 - [Built-in Tool Transport v7](../../contracts/builtin-tool-transport-v7.md)
 - [ContextManifest Evidence v12](../../contracts/context-manifest-evidence-v12.md)
+- [Camp Attachment v1](../../contracts/camp-attachment-v1.md)
 - [Public A2A Message 与 Message Delivery](../../architecture/public-a2a-message-delivery.md)
 - [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)

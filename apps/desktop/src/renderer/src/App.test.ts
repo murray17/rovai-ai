@@ -14,6 +14,7 @@ import type {
 } from '@contracts'
 import {
   AppHeader,
+  ControlledShutdownOverlay,
   WindowDragStrip,
   allNavigationCamps,
   campActivationStateForCreation,
@@ -43,6 +44,7 @@ import {
   QuickChatWorkspace,
   TaskPanel,
   agentExecutionProcesses,
+  agentRunTerminalNote,
   agentRunCountsAsExecuting,
   attachmentDragKind,
   campConversationTimeline,
@@ -160,6 +162,19 @@ describe('task event projections', () => {
     ])
     expect(dataTransferContainsFiles({ types: ['text/plain'] } as unknown as DataTransfer))
       .toBe(false)
+  })
+
+  it('renders controlled shutdown as an assertive non-cancellable dialog with honest unknown copy', () => {
+    const markup = renderToStaticMarkup(createElement(ControlledShutdownOverlay))
+    expect(markup).toContain('role="dialog"')
+    expect(markup).toContain('aria-modal="true"')
+    expect(markup).toContain('aria-live="assertive"')
+    expect(markup).toContain('aria-labelledby="controlled-shutdown-title"')
+    expect(markup).toContain('aria-describedby="controlled-shutdown-description"')
+    expect(markup).toContain('正在停止运行并关闭 Rovai')
+    expect(markup).toContain('Runtime 返回可靠终态')
+    expect(markup).toContain('无法确认的执行会保留现场')
+    expect(markup).not.toContain('<button')
   })
 
   it('uses Pending only for one-click creation and Active for the explicit Dialog', () => {
@@ -449,6 +464,7 @@ describe('task event projections', () => {
         triggerId: 'message-1',
         status: 'running' as const,
         cancelRequestedAt: null,
+        aggregateReasonCode: null,
         executionBudget: TEST_EXECUTION_BUDGET,
         version: 1,
         createdAt: '2026-07-30T10:00:00Z',
@@ -526,6 +542,7 @@ describe('task event projections', () => {
       triggerId: userMessage.id,
       status: 'cancelled' as const,
       cancelRequestedAt: '2026-07-31T10:02:18Z',
+      aggregateReasonCode: null,
       executionBudget: TEST_EXECUTION_BUDGET,
       version: 3,
       createdAt: '2026-07-31T10:00:00Z',
@@ -1622,7 +1639,7 @@ describe('task event projections', () => {
       }],
       turns: [{
         id: 'turn-1', triggerType: 'camp_message', triggerId: 'message-user', status: 'running',
-        cancelRequestedAt: null, executionBudget: TEST_EXECUTION_BUDGET,
+        cancelRequestedAt: null, aggregateReasonCode: null, executionBudget: TEST_EXECUTION_BUDGET,
         version: 1, createdAt: '2026-07-28T05:00:00Z',
         updatedAt: '2026-07-28T05:01:00Z', endedAt: null
       }],
@@ -1631,6 +1648,7 @@ describe('task event projections', () => {
         agentId: 'agent_2', taskId: null, responsibilityKey: 'direct:agent_2',
         responsibilityGeneration: 0, purpose: '实现复制',
         completionRole: 'required', status: 'running', waitReason: null, executionEpoch: 1,
+        terminalResolutionSource: null, terminalReasonCode: null,
         permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct',
         a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
         executionEvidenceCount: 3,
@@ -2011,6 +2029,40 @@ describe('task event projections', () => {
     expect(cancelledMarkup).toContain('结果待确认 · 查看执行详情')
     expect(cancelledMarkup).not.toContain('run-message-state tone-neutral')
     expect(cancelledMarkup).not.toContain('pnpm test')
+
+    const plannedStoppedMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+      snapshot: {
+        ...snapshot,
+        throughGlobalSequence: 5,
+        turns: snapshot.turns.map((turn) => ({
+          ...turn,
+          status: 'failed' as const,
+          cancelRequestedAt: null,
+          aggregateReasonCode: 'required_run_incomplete' as const,
+          endedAt: '2026-07-28T05:00:06Z'
+        })),
+        agentRuns: snapshot.agentRuns.map((run) => ({
+          ...run,
+          status: 'cancelled' as const,
+          terminalResolutionSource: 'runtime_terminal' as const,
+          terminalReasonCode: 'planned_shutdown_cancelled' as const,
+          hasUnsettledExternalEffects: true,
+          endedAt: '2026-07-28T05:00:06Z'
+        })),
+        timeline: []
+      },
+      projectName: 'Rovai',
+      agents: [profile],
+      busy: false,
+      onSend: async () => undefined,
+      onChangeLead: async () => undefined,
+      onTasksChanged: async () => undefined,
+      onResolveApproval: () => undefined,
+      stopping: false,
+      onStop: () => undefined,
+      inspectorVisible: false
+    }))
+    expect(plannedStoppedMarkup).toContain('已停止')
   })
 
   it('labels the execution drawer with the member and configured Runtime product', () => {
@@ -2363,6 +2415,30 @@ describe('task event projections', () => {
       tag: '正在停止',
       tone: 'neutral'
     })
+    expect(agentRunPresentation({
+      status: 'cancelled',
+      waitReason: null,
+      terminalReasonCode: 'planned_shutdown_cancelled'
+    })).toEqual({
+      label: '已停止',
+      tone: 'neutral'
+    })
+    expect(agentRunStateTag({
+      status: 'cancelled',
+      waitReason: null,
+      terminalReasonCode: 'planned_shutdown_cancelled'
+    })).toEqual({
+      tag: 'STOPPED',
+      tone: 'neutral'
+    })
+    expect(agentRunStateTag({ status: 'cancelled', waitReason: null })).toEqual({
+      tag: 'CANCELLED',
+      tone: 'neutral'
+    })
+    expect(agentRunTerminalNote({
+      terminalReasonCode: 'planned_shutdown_cancelled'
+    })).toBe('因 Rovai 计划关闭，Runtime 已确认取消本次执行。')
+    expect(agentRunTerminalNote({ terminalReasonCode: null })).toBeNull()
     expect(formatByteSize(4_096)).toBe('4.0 KB')
   })
 
