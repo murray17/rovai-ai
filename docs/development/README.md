@@ -1,7 +1,7 @@
 ---
 document_type: development-index
 authority: development-routing
-last_updated: 2026-08-11
+last_updated: 2026-08-12
 ---
 
 # Rovai-ai 开发者指南
@@ -91,7 +91,7 @@ pnpm build:desktop
 | 选择单元测试、集成测试、Smoke 或版本验收命令 | [测试与 Smoke Test](testing.md) |
 | 构建 Release Core、App、DMG，检查签名 | [macOS 构建与打包](packaging.md) |
 | 使用隔离 `userData` 运行真实 App、截图或桌面验收 | [桌面 UI 验收](ui-acceptance.md) |
-| 处理 Core、Runtime、Git、签名或测试卡住 | [常见问题排查](troubleshooting.md) |
+| 处理 Core、Runtime、Git、签名、测试卡住或 Rust `target/` 膨胀 | [常见问题排查](troubleshooting.md) |
 
 具体版本的页面矩阵、Schema 版本、Migration 路径和验收证据属于
 [`docs/versions/`](../versions/README.md)。唯一当前版本指针由
@@ -101,7 +101,7 @@ pnpm build:desktop
 
 - 命令名和命令组合：[`package.json#scripts`](../../package.json)。
 - Node 与 macOS 打包声明：`package.json#engines` 和 `package.json#build.mac`。
-- Rust workspace 声明：[`Cargo.toml`](../../Cargo.toml)；当前没有最低 Rust 版本或
+- Rust workspace 与共享构建 profile：[`Cargo.toml`](../../Cargo.toml)；当前没有最低 Rust 版本或
   `rust-toolchain.toml`，文档不得自行补造。
 - 正式 Runtime 产品目录：Core 的
   [`AdapterKind::ALL`](../../crates/rovai-core/src/agent_profile.rs)。
@@ -123,7 +123,7 @@ pnpm build:desktop
 | 路径 | 内容 |
 | --- | --- |
 | `node_modules/` | pnpm 安装依赖 |
-| `target/` | Rust Debug/Release 构建结果 |
+| `target/` | Rust Debug/Test/Release 构建结果与增量编译缓存 |
 | `resources/bin/` | 复制后供 Electron 使用的 Rust Core 与 Agent CLI |
 | `resources/native/` | macOS 文件面板原生预热器 |
 | `out/` | Electron Vite 构建结果 |

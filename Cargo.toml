@@ -7,6 +7,13 @@ version = "0.0.1"
 edition = "2024"
 license = "UNLICENSED"
 
+# Daily development relies on logs and tests instead of a native debugger.
+# Avoid macOS unpacked debug objects; the test profile inherits this setting.
+# Incremental compilation remains enabled for fast edit-build feedback.
+[profile.dev]
+debug = 0
+incremental = true
+
 # Runtime executables are large (100-250 MB). Keep SHA-256 optimized in local
 # development so capability refreshes and preflight checks do not stall the
 # desktop app merely because the Core was built with the dev profile.

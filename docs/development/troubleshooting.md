@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: local-development-troubleshooting
-last_updated: 2026-08-11
+last_updated: 2026-08-12
 ---
 
 # 常见问题排查
@@ -17,6 +17,48 @@ pnpm core:build:debug
 确认 `resources/bin/rovai-core` 的修改时间已更新，再重新启动 `pnpm dev`。开发窗口已经
 运行时，重新复制二进制不会替换现有 Core 进程。不要改用裸 `electron-vite dev`；标准入口还负责
 隔离开发 `userData` 和拒绝重复开发实例。
+
+## `target/` 占用异常增长或磁盘不足
+
+根 `Cargo.toml` 的日常 `dev` profile 不生成原生调试信息；`cargo test` 使用的 `test` profile
+继承该设置。增量编译保持启用，以优先保证编辑、构建和测试反馈速度。因此 `target/debug/incremental`
+仍会随活跃开发增长，而工具链、feature、`RUSTFLAGS`、分支或包名变更产生的旧编译指纹也可能长期保留。
+
+不要按日或在 `pnpm dev`、测试脚本中自动清理，这会持续破坏增量编译收益。出现以下任一情况时再清理：
+
+- 磁盘开始紧张，或 `target/` 明显高于一次干净构建后的基线；
+- Rust 工具链、feature、`RUSTFLAGS` 或包名发生较大变化；
+- `target/debug/deps` 中仍有当前 `cargo metadata` 已不存在的旧包名前缀；
+- 增量编译异常、指纹反复失效，且普通重建无法恢复。
+
+先停止所有 Cargo、`pnpm dev`、Rust 测试和打包进程，再只读检查范围：
+
+```bash
+du -sh target
+du -sh target/debug/deps
+du -sh target/debug/incremental
+cargo clean --dry-run --profile dev
+```
+
+文件数量很大时，`du` 和 dry run 也可能需要数分钟。若只需丢弃增量状态、保留已编译依赖：
+
+```bash
+rm -rf target/debug/incremental
+```
+
+若 `deps` 也包含大量历史产物，清理整个 Debug/Test profile，同时保留 Release：
+
+```bash
+cargo clean --profile dev
+```
+
+只有确认 Release 也无需保留时才运行完整清理：
+
+```bash
+cargo clean
+```
+
+这些命令只删除 Cargo 生成物，不触碰源码或 Electron `userData`；代价是下一次对应构建需要完整重编。
 
 ## Core 报告数据目录已被占用
 
