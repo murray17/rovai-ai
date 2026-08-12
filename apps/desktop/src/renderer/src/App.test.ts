@@ -53,6 +53,7 @@ import {
   executionDrawerHeightBounds,
   executionDrawerHeightFromStoredValue,
   executionDrawerIsNearBottom,
+  executionDrawerTitle,
   executionDisclosureOpenAfterActivity,
   executionDisclosureIsLiveOpen,
   firstSubmittedAgentRun,
@@ -1982,6 +1983,13 @@ describe('task event projections', () => {
     expect(cancelledMarkup).toContain('结果待确认 · 查看执行详情')
     expect(cancelledMarkup).not.toContain('run-message-state tone-neutral')
     expect(cancelledMarkup).not.toContain('pnpm test')
+  })
+
+  it('labels the execution drawer with the member and configured Runtime product', () => {
+    expect(executionDrawerTitle('雾切响子', 'copilot-cli'))
+      .toBe('雾切响子 GitHub Copilot')
+    expect(executionDrawerTitle('爱丽丝', 'codex-cli')).toBe('爱丽丝 Codex CLI')
+    expect(executionDrawerTitle('药师寺惠', null)).toBe('药师寺惠')
   })
 
   it('keeps concurrent Runtime approvals in one dock directly above the composer', () => {

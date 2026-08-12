@@ -482,6 +482,9 @@ type ResolvedTheme = "day" | "night"
   Composer；该 Run 保留执行过程入口但不计入任何进行中汇总。Renderer 不确认成功、不重发正文、不自动
   创建 successor。精确合同见
   [Run Process Detail Surface v4](../contracts/run-process-detail-surface-v4.md)。
+- Drawer 主标题使用“队员名称 Runtime 产品名”，例如“雾切响子 GitHub Copilot”，不再显示固定的
+  “· 执行过程”。Runtime 产品名从当前 AgentProfile 的真实运行配置映射；未配置时只显示队员名称。
+  底部 Agent 执行台入口继续保留“执行过程”作为功能标签和可访问语义。
 - 终态过程仍可收进默认折叠入口，摘要格式为 `处理过程 · {本地化耗时}`；该入口和执行详情只
   提供查看，不产生 Agent 或 AgentRun 级取消协议。关闭或在详情内按 Escape 后焦点返回原入口。
 - 不使用英文 `Worked for …`；Agent 最终回复位于折叠入口之外并保持直接可见。

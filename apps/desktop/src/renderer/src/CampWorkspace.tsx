@@ -2012,6 +2012,10 @@ function ExecutionDrawer({
   }, [progressFollowKey, resolvedFocusedRunId])
 
   const displayName = member?.displayName ?? profile?.displayName ?? process.agentId
+  const drawerTitle = executionDrawerTitle(
+    displayName,
+    profile?.runtimeConfiguration?.adapterKind ?? null
+  )
   const accessibleHeight = Math.round(
     appliedHeight ?? measuredHeight ?? heightBounds?.min ?? EXECUTION_DRAWER_HARD_MIN_HEIGHT
   )
@@ -2069,7 +2073,7 @@ function ExecutionDrawer({
               decorative
             />
             <div>
-              <h2 id="execution-drawer-title">{displayName} · 执行过程</h2>
+              <h2 id="execution-drawer-title">{drawerTitle}</h2>
               <p>
                 共 {process.runs.length} 次执行
                 {process.runs.some(agentRunCountsAsExecuting) && ' · 当前有进行中 AgentRun'}
@@ -3631,6 +3635,15 @@ function runtimeAdapterLabel(kind: string): string {
     'qwen-code': 'Qwen Code',
     'antigravity-app': 'Antigravity'
   } as Record<string, string>)[kind] ?? kind
+}
+
+export function executionDrawerTitle(
+  displayName: string,
+  runtimeAdapterKind: string | null
+): string {
+  return runtimeAdapterKind
+    ? `${displayName} ${runtimeAdapterLabel(runtimeAdapterKind)}`
+    : displayName
 }
 
 function runDurationLabel(run: AgentRunView): string {

@@ -1148,7 +1148,7 @@ async function collectRuntimeRows(cdp) {
       const selected = document.querySelector('.run-pulse-chip.is-selected')
       const title = document.querySelector('#execution-drawer-title')?.textContent?.trim() ?? ''
       return selected?.dataset.agentId === ${JSON.stringify(expected.agentId)}
-        && title === ${JSON.stringify(`${memberName} · 执行过程`)}
+        && title === ${JSON.stringify(`${memberName} ${expected.runtimeName}`)}
     })()`)
     if (expected.agentId === activeAgentId) {
       await waitForExpression(cdp, `(() => {
