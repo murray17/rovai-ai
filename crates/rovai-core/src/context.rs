@@ -2560,7 +2560,9 @@ fn build_run_notices<R: ContextReadConnection>(
     a2a_run_count: i64,
 ) -> Result<Vec<RunNotice>> {
     let mut notices = Vec::new();
-    if let Some(notice) = a2a_task_context_notice(snapshot.a2a_depth, snapshot.task_id.as_deref()) {
+    if let Some(notice) =
+        a2a_task_context_notice(&snapshot.invocation_kind, snapshot.task_id.as_deref())
+    {
         notices.push(notice);
     }
     if requires_new_native_session && snapshot.native_session_id.is_some() {
@@ -2604,8 +2606,8 @@ fn build_run_notices<R: ContextReadConnection>(
     Ok(notices)
 }
 
-fn a2a_task_context_notice(a2a_depth: i64, task_id: Option<&str>) -> Option<RunNotice> {
-    (a2a_depth > 0)
+fn a2a_task_context_notice(invocation_kind: &str, task_id: Option<&str>) -> Option<RunNotice> {
+    (invocation_kind == "a2a")
         .then_some(task_id)
         .flatten()
         .map(|task_id| RunNotice {
@@ -3338,23 +3340,50 @@ fn load_originating_public_user_message<R: ContextReadConnection>(
     profile: ContextDeliveryProfile,
     starting_agent_run_id: Option<&str>,
 ) -> Result<Option<SharedMessage>> {
-    if snapshot.a2a_depth == 0 {
+    if snapshot.invocation_kind == "direct" {
+        if snapshot.a2a_depth != 0 || snapshot.a2a_parent_agent_run_id.is_some() {
+            anyhow::bail!("Direct AgentRun has invalid A2A lineage metadata");
+        }
         return Ok(None);
     }
-    if snapshot.invocation_kind != "a2a" || snapshot.a2a_parent_agent_run_id.is_none() {
+    if snapshot.invocation_kind != "a2a"
+        || (snapshot.a2a_depth > 0 && snapshot.a2a_parent_agent_run_id.is_none())
+        || (snapshot.a2a_depth == 0 && snapshot.a2a_parent_agent_run_id.is_some())
+    {
         anyhow::bail!("Member Call AgentRun has invalid A2A lineage metadata");
     }
     let root_id = snapshot
         .a2a_root_agent_run_id
         .as_deref()
         .context("A2A AgentRun is missing its frozen root AgentRun")?;
-    let mut current_id = starting_agent_run_id
-        .map(str::to_string)
-        .unwrap_or_else(|| snapshot.agent_run_id.clone());
+    let mut current_id = if let Some(starting_agent_run_id) = starting_agent_run_id {
+        starting_agent_run_id.to_string()
+    } else if snapshot.a2a_depth > 0 {
+        snapshot.agent_run_id.clone()
+    } else {
+        let delivery_id = snapshot
+            .trigger_message_delivery_id
+            .as_deref()
+            .context("Root return AgentRun has no trigger Message Delivery")?;
+        database
+            .context_connection()
+            .query_row(
+                r#"
+                SELECT return_to_agent_run_id
+                FROM message_delivery
+                WHERE id = ?1 AND edge_kind = 'return'
+                "#,
+                [delivery_id],
+                |row| row.get::<_, Option<String>>(0),
+            )?
+            .context("Root return Message Delivery has no caller Run")?
+    };
     let mut expected_depth = if starting_agent_run_id.is_some() {
         snapshot.a2a_depth - 1
-    } else {
+    } else if snapshot.a2a_depth > 0 {
         snapshot.a2a_depth
+    } else {
+        0
     };
     let mut visited = HashSet::new();
     let originating_message_id = loop {
@@ -3367,7 +3396,8 @@ fn load_originating_public_user_message<R: ContextReadConnection>(
                 r#"
                 SELECT camp_turn_id, invocation_kind,
                        a2a_parent_agent_run_id, a2a_root_agent_run_id,
-                       a2a_depth, trigger_camp_message_id
+                       a2a_depth, trigger_camp_message_id,
+                       trigger_message_delivery_id
                 FROM agent_run WHERE id = ?1
                 "#,
                 [&current_id],
@@ -3379,6 +3409,7 @@ fn load_originating_public_user_message<R: ContextReadConnection>(
                         row.get::<_, Option<String>>(3)?,
                         row.get::<_, i64>(4)?,
                         row.get::<_, Option<String>>(5)?,
+                        row.get::<_, Option<String>>(6)?,
                     ))
                 },
             )
@@ -3394,6 +3425,24 @@ fn load_originating_public_user_message<R: ContextReadConnection>(
             break row
                 .5
                 .context("A2A root AgentRun has no originating public user message")?;
+        }
+        if row.1 == "a2a" && row.2.is_none() && row.3.as_deref() == Some(root_id) && row.4 == 0 {
+            let delivery_id = row
+                .6
+                .context("Root return continuation has no trigger Message Delivery")?;
+            current_id = database
+                .context_connection()
+                .query_row(
+                    r#"
+                    SELECT return_to_agent_run_id
+                    FROM message_delivery
+                    WHERE id = ?1 AND edge_kind = 'return'
+                    "#,
+                    [delivery_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )?
+                .context("Root return continuation has no caller Run")?;
+            continue;
         }
         if row.1 != "a2a" || row.3.as_deref() != Some(root_id) || row.4 < 1 {
             anyhow::bail!("A2A AgentRun lineage has invalid root or invocation metadata");
@@ -3691,14 +3740,16 @@ fn validate_a2a_delivery_binding<R: ContextReadConnection>(
             FROM message_delivery
             WHERE id = ?1 AND camp_id = ?2 AND camp_turn_id = ?3
               AND message_id = ?4 AND recipient_agent_id = ?5
-              AND source_agent_run_id = ?6 AND a2a_root_agent_run_id = ?7
-              AND a2a_depth = ?8
+              AND source_agent_run_id = ?6
+              AND target_parent_agent_run_id IS ?7
+              AND a2a_root_agent_run_id = ?8
+              AND a2a_depth = ?9
               AND (
                     (target_agent_run_id IS NULL
                      AND status = 'pending'
                      AND dispatch_phase = 'attempting'
                      AND active_dispatch_attempt_id IS NOT NULL)
-                 OR (target_agent_run_id = ?9
+                 OR (target_agent_run_id = ?10
                      AND status = 'running'
                      AND dispatch_phase = 'materialized')
               )
@@ -3711,6 +3762,7 @@ fn validate_a2a_delivery_binding<R: ContextReadConnection>(
             camp_message.id,
             snapshot.agent_id,
             source_agent_run_id,
+            snapshot.a2a_parent_agent_run_id,
             root_agent_run_id,
             snapshot.a2a_depth,
             snapshot.agent_run_id,
@@ -3742,13 +3794,14 @@ fn project_camp_current_input_source<R: ContextReadConnection>(
             Ok(json!({ "type": "user" }))
         }
         "a2a" => {
-            let source_agent_run_id = snapshot
-                .a2a_parent_agent_run_id
+            let source_agent_run_id = camp_message
+                .source_agent_run_id
                 .as_deref()
-                .context("A2A AgentRun requires a parent AgentRun")?;
+                .context("A2A Current Input CampMessage requires a source AgentRun")?;
             if camp_message.author_type != "agent"
-                || camp_message.source_agent_run_id.as_deref() != Some(source_agent_run_id)
-                || !(1..=5).contains(&snapshot.a2a_depth)
+                || !(0..=5).contains(&snapshot.a2a_depth)
+                || snapshot.trigger_message_delivery_id.is_none()
+                || snapshot.a2a_root_agent_run_id.is_none()
             {
                 anyhow::bail!("A2A Current Input CampMessage author lineage is inconsistent");
             }
@@ -5406,7 +5459,6 @@ mod tests {
                     input: CampMessageSendInput {
                         body: body.to_string(),
                         to: Vec::new(),
-                        reply_to_camp_message_id: None,
                         task_id: None,
                     },
                 },
@@ -6220,7 +6272,9 @@ mod tests {
                         id, camp_id, camp_turn_id, message_id,
                         recipient_agent_id, recipient_canonical_position,
                         recipient_digest, message_body_digest,
-                        source_agent_run_id, a2a_root_agent_run_id, a2a_depth,
+                        source_agent_run_id, edge_kind,
+                        target_parent_agent_run_id, return_to_agent_run_id,
+                        a2a_root_agent_run_id, a2a_depth,
                         ancestor_agent_ids_json, recipient_presentation_snapshot_json,
                         frozen_snapshot_json, queue_sequence,
                         status, dispatch_phase, wait_condition,
@@ -6231,7 +6285,7 @@ mod tests {
                     ) VALUES (
                         ?1, ?2, ?3, ?4, 'agent_1', 0,
                         'sha256:recipient', 'sha256:body',
-                        ?5, ?5, 1, '[]', '{}',
+                        ?5, 'forward', ?5, NULL, ?5, 1, '[]', '{}',
                         '{"frozenContext":{"formatterVersion":10}}', ?6,
                         'pending', ?7, ?8, 1, ?9, ?10, ?11,
                         0, 0, 1, ?12, ?12
@@ -10040,7 +10094,9 @@ mod tests {
                     id, camp_id, camp_turn_id, message_id,
                     recipient_agent_id, recipient_canonical_position,
                     recipient_digest, message_body_digest,
-                    source_agent_run_id, a2a_root_agent_run_id, a2a_depth,
+                    source_agent_run_id, edge_kind,
+                    target_parent_agent_run_id, return_to_agent_run_id,
+                    a2a_root_agent_run_id, a2a_depth,
                     ancestor_agent_ids_json, recipient_presentation_snapshot_json,
                     frozen_snapshot_json, queue_sequence,
                     status, dispatch_phase, dispatch_attempt_count,
@@ -10050,7 +10106,7 @@ mod tests {
                 ) VALUES (
                     ?1, ?2, ?3, ?4, ?5, 0,
                     'sha256:test-recipient', 'sha256:test-body',
-                    ?6, ?6, 1, '[]', '{}', '{}', 1,
+                    ?6, 'forward', ?6, NULL, ?6, 1, '[]', '{}', '{}', 1,
                     'pending', 'attempting', 1, ?7, 0, 0, 1, ?8, ?8
                 )
                 "#,
@@ -10604,9 +10660,9 @@ mod tests {
 
     #[test]
     fn linked_a2a_task_notice_keeps_task_context_historical_and_non_polling() {
-        assert!(a2a_task_context_notice(0, Some("task-1")).is_none());
-        assert!(a2a_task_context_notice(1, None).is_none());
-        let notice = a2a_task_context_notice(1, Some("task-1")).unwrap();
+        assert!(a2a_task_context_notice("direct", Some("task-1")).is_none());
+        assert!(a2a_task_context_notice("a2a", None).is_none());
+        let notice = a2a_task_context_notice("a2a", Some("task-1")).unwrap();
         assert_eq!(notice.code, "a2a_task_context");
         assert_eq!(notice.task_id.as_deref(), Some("task-1"));
         assert_eq!(

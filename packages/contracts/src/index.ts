@@ -1068,7 +1068,7 @@ export interface DomainEventView {
 }
 
 export interface CampSnapshot {
-  schemaVersion: 27
+  schemaVersion: 28
   throughGlobalSequence: number
   camp: {
     id: string
@@ -1101,6 +1101,9 @@ export interface MessageDeliveryView {
   taskId: string | null
   recipientAgentId: string
   recipientCanonicalPosition: number
+  edgeKind: 'forward' | 'return'
+  targetParentAgentRunId: string | null
+  returnToAgentRunId: string | null
   status: 'pending' | 'running' | 'settled' | 'failed' | 'cancelled' | 'interrupted_before_dispatch' | string
   dispatchPhase: 'never_attempted' | 'attempting' | 'attempted_waiting' | 'materialized' | 'terminal' | string
   waitCondition: 'target_busy' | 'runtime_unavailable' | 'capacity_unavailable' | null

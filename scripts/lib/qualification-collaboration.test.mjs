@@ -193,7 +193,7 @@ function passingSnapshot() {
 
 function currentPublicA2aSnapshot() {
   return {
-    schemaVersion: 27,
+    schemaVersion: 28,
     agentRuns: [{
       id: 'run-lead',
       campTurnId: 'turn-current',

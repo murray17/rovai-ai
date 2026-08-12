@@ -530,7 +530,7 @@ export function App(): React.JSX.Element {
       ).then((inbox) => inbox.schemaVersion === 2 ? inbox.throughSequence : null)
         .catch(() => null)
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
-      if (snapshot.schemaVersion !== 27) throw new Error('Camp snapshot schema is incompatible')
+      if (snapshot.schemaVersion !== 28) throw new Error('Camp snapshot schema is incompatible')
       if (selectionGeneration !== campSelectionGeneration.current) return
       if (snapshot.camp.projectBindingKind === 'directory') {
         await restoreNavigationProject(snapshot.camp.projectPath)
@@ -574,7 +574,7 @@ export function App(): React.JSX.Element {
 
   const refreshActiveCampSnapshot = useCallback(async (campId: string): Promise<void> => {
     const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
-    if (snapshot.schemaVersion !== 27) throw new Error('Camp snapshot schema is incompatible')
+    if (snapshot.schemaVersion !== 28) throw new Error('Camp snapshot schema is incompatible')
     if (activeCampIdRef.current !== campId) return
     if (snapshot.throughGlobalSequence < campEventSequenceMarker.current) return
     campEventSequenceMarker.current = snapshot.throughGlobalSequence
@@ -728,7 +728,7 @@ export function App(): React.JSX.Element {
           snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', {
             campId: target.campId
           })
-          if (snapshot.schemaVersion !== 27) {
+          if (snapshot.schemaVersion !== 28) {
             throw new Error('Camp snapshot schema is incompatible')
           }
         } catch (snapshotError) {
@@ -956,7 +956,7 @@ export function App(): React.JSX.Element {
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', {
         campId
       })
-      if (snapshot.schemaVersion !== 27) throw new Error('Camp snapshot schema is incompatible')
+      if (snapshot.schemaVersion !== 28) throw new Error('Camp snapshot schema is incompatible')
       if (cancelled) return
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
@@ -1553,7 +1553,7 @@ export function App(): React.JSX.Element {
       ))
       void window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
         .then(async (snapshot) => {
-          if (snapshot.schemaVersion !== 27) throw new Error('Camp snapshot schema is incompatible')
+          if (snapshot.schemaVersion !== 28) throw new Error('Camp snapshot schema is incompatible')
           if (selectionGeneration !== campSelectionGeneration.current) return
           campEventSequenceMarker.current = snapshot.throughGlobalSequence
           setCampSnapshot(snapshot)

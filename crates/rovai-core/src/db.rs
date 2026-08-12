@@ -42,8 +42,10 @@ pub struct Database {
     path: PathBuf,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.54";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 30;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.62";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 31;
+const V062_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.54";
+const V062_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 30;
 const V054_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 29;
 const V052_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.52";
 const V052_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 28;
@@ -102,7 +104,7 @@ fn has_current_data_contract(path: &Path) -> bool {
         [],
         |row| row.get(0),
     );
-    let migration_state: rusqlite::Result<(bool, bool, bool, bool, bool, bool)> = connection
+    let migration_state: rusqlite::Result<(bool, bool, bool, bool, bool, bool, bool)> = connection
         .query_row(
             r#"
         SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 66),
@@ -110,7 +112,8 @@ fn has_current_data_contract(path: &Path) -> bool {
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 68),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 69),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 70),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 71)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 71),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 76)
         "#,
             [],
             |row| {
@@ -121,12 +124,13 @@ fn has_current_data_contract(path: &Path) -> bool {
                     row.get(3)?,
                     row.get(4)?,
                     row.get(5)?,
+                    row.get(6)?,
                 ))
             },
         );
     matches!(
         (marker, projection_exists, migration_state),
-        (Ok(Some((contract, schema, classifier))), Ok(true), Ok((v66, v67, v68, v69, v70, v71)))
+        (Ok(Some((contract, schema, classifier))), Ok(true), Ok((v66, v67, v68, v69, v70, v71, v76)))
             if classifier == V043_CLASSIFIER_VERSION
                 && ((contract == CURRENT_DATA_CONTRACT_VERSION
                     && schema == CURRENT_PROJECTION_SCHEMA_VERSION
@@ -135,15 +139,26 @@ fn has_current_data_contract(path: &Path) -> bool {
                     && v68
                     && v69
                     && v70
-                    && v71)
-                    || (contract == CURRENT_DATA_CONTRACT_VERSION
+                    && v71
+                    && v76)
+                    || (contract == V062_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+                        && schema == V062_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+                        && v66
+                        && v67
+                        && v68
+                        && v69
+                        && v70
+                        && v71
+                        && !v76)
+                    || (contract == V062_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
                         && schema == V054_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
                         && v66
                         && v67
                         && v68
                         && v69
                         && v70
-                        && !v71)
+                        && !v71
+                        && !v76)
                     || (contract == V052_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
                         && schema == V052_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
                         && v66
@@ -151,7 +166,8 @@ fn has_current_data_contract(path: &Path) -> bool {
                         && v68
                         && v69
                         && !v70
-                        && !v71))
+                        && !v71
+                        && !v76))
     )
 }
 
@@ -1162,6 +1178,9 @@ impl Database {
             if !self.schema_migration_applied(75)? {
                 self.migrate_skill_projection_access_v75()?;
             }
+            if !self.schema_migration_applied(76)? {
+                self.migrate_explicit_caller_return_delivery_v76()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_in_app_notification_retention(self.connection())
             {
@@ -1436,6 +1455,9 @@ impl Database {
         }
         if !self.schema_migration_applied(75)? {
             self.migrate_skill_projection_access_v75()?;
+        }
+        if !self.schema_migration_applied(76)? {
+            self.migrate_explicit_caller_return_delivery_v76()?;
         }
         if let Err(error) =
             crate::notification::maintain_in_app_notification_retention(self.connection())
@@ -6701,6 +6723,161 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_explicit_caller_return_delivery_v76(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let create_message_delivery: String = transaction.query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'message_delivery'",
+                [],
+                |row| row.get(0),
+            )?;
+            let mut create_message_delivery_v76 = create_message_delivery.replacen(
+                "CREATE TABLE message_delivery",
+                "CREATE TABLE message_delivery_v76",
+                1,
+            );
+            if create_message_delivery_v76 == create_message_delivery {
+                create_message_delivery_v76 = create_message_delivery.replacen(
+                    "CREATE TABLE \"message_delivery\"",
+                    "CREATE TABLE message_delivery_v76",
+                    1,
+                );
+            }
+            create_message_delivery_v76 = create_message_delivery_v76.replacen(
+                "source_agent_run_id TEXT NOT NULL REFERENCES agent_run(id),",
+                r#"source_agent_run_id TEXT NOT NULL REFERENCES agent_run(id),
+                edge_kind TEXT NOT NULL DEFAULT 'forward'
+                    CHECK(edge_kind IN ('forward', 'return')),
+                target_parent_agent_run_id TEXT REFERENCES agent_run(id),
+                return_to_agent_run_id TEXT REFERENCES agent_run(id),"#,
+                1,
+            );
+            create_message_delivery_v76 = create_message_delivery_v76.replacen(
+                "a2a_depth INTEGER NOT NULL CHECK(a2a_depth BETWEEN 1 AND 5),",
+                "a2a_depth INTEGER NOT NULL CHECK(a2a_depth BETWEEN 0 AND 5),",
+                1,
+            );
+            if !create_message_delivery_v76.contains("edge_kind TEXT")
+                || !create_message_delivery_v76
+                    .contains("a2a_depth INTEGER NOT NULL CHECK(a2a_depth BETWEEN 0 AND 5)")
+            {
+                anyhow::bail!("v76 could not extend the Message Delivery lineage schema");
+            }
+            let closing = create_message_delivery_v76
+                .rfind(')')
+                .context("Message Delivery schema has no closing delimiter")?;
+            create_message_delivery_v76.insert_str(
+                closing,
+                r#",
+                CHECK(
+                    (edge_kind = 'forward'
+                     AND target_parent_agent_run_id = source_agent_run_id
+                     AND return_to_agent_run_id IS NULL
+                     AND a2a_depth BETWEEN 1 AND 5)
+                    OR
+                    (edge_kind = 'return'
+                     AND return_to_agent_run_id IS NOT NULL
+                     AND a2a_depth BETWEEN 0 AND 4)
+                )"#,
+            );
+
+            let columns = {
+                let mut statement = transaction.prepare("PRAGMA table_info(message_delivery)")?;
+                statement
+                    .query_map([], |row| row.get::<_, String>(1))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            let quoted_columns = columns
+                .iter()
+                .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let schema_objects = {
+                let mut statement = transaction.prepare(
+                    r#"
+                    SELECT name, sql
+                    FROM sqlite_master
+                    WHERE tbl_name = 'message_delivery'
+                      AND type IN ('index', 'trigger')
+                      AND sql IS NOT NULL
+                    ORDER BY type, name
+                    "#,
+                )?;
+                statement
+                    .query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+
+            transaction.execute_batch(&create_message_delivery_v76)?;
+            transaction.execute_batch(&format!(
+                r#"
+                INSERT INTO message_delivery_v76(
+                    {quoted_columns}, edge_kind,
+                    target_parent_agent_run_id, return_to_agent_run_id
+                )
+                SELECT {quoted_columns}, 'forward', source_agent_run_id, NULL
+                FROM message_delivery
+                "#
+            ))?;
+            transaction.execute_batch(
+                r#"
+                DROP TABLE message_delivery;
+                ALTER TABLE message_delivery_v76 RENAME TO message_delivery;
+                "#,
+            )?;
+            for (name, sql) in schema_objects {
+                transaction.execute_batch(&sql).with_context(|| {
+                    format!("failed to restore Message Delivery schema object {name}")
+                })?;
+            }
+            transaction.execute_batch(
+                r#"
+                UPDATE message_delivery
+                SET frozen_snapshot_json = json_set(
+                    frozen_snapshot_json,
+                    '$.schemaVersion', 2,
+                    '$.edgeKind', 'forward',
+                    '$.targetParentAgentRunId', source_agent_run_id,
+                    '$.returnToAgentRunId', NULL
+                );
+
+                DELETE FROM event_log
+                WHERE event_type = 'command.result'
+                  AND command_type = 'camp.message.send';
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v0.62', projection_schema_version = 31,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (76, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v76 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -11106,13 +11283,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn current_data_contract_accepts_current_and_exact_v054_or_v052_sources() {
+    fn current_data_contract_accepts_current_and_exact_v062_v054_or_v052_sources() {
         let directory =
             std::env::temp_dir().join(format!("rovai-current-contract-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
         let path = directory.join("rovai.sqlite");
 
         assert!(has_current_data_contract(&path));
+
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                UPDATE rovai_data_contract
+                SET contract_version = 'v0.54', projection_schema_version = 30
+                WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 76;
+                "#,
+            )
+            .unwrap();
+        assert!(
+            has_current_data_contract(&path),
+            "the exact v0.54/schema-30 marker without migration 76 is an upgrade source"
+        );
 
         database
             .connection()
@@ -11501,6 +11694,65 @@ mod tests {
             )
             .unwrap();
         assert_eq!(state, ("removed".to_string(), 1, 1));
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v76_freezes_forward_lineage_and_upgrades_the_data_contract_once() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v76-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        let migration_applied: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 76",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_applied, 1);
+        let columns = table_columns(database.connection(), "message_delivery").unwrap();
+        for required in [
+            "edge_kind",
+            "target_parent_agent_run_id",
+            "return_to_agent_run_id",
+        ] {
+            assert!(
+                columns.contains(&required.to_string()),
+                "missing {required}"
+            );
+        }
+        let schema: String = database
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'message_delivery'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(schema.contains("edge_kind IN ('forward', 'return')"));
+        assert!(schema.contains("a2a_depth BETWEEN 0 AND 5"));
+        let contract: (String, i64) = database
+            .connection()
+            .query_row(
+                "SELECT contract_version, projection_schema_version FROM rovai_data_contract WHERE singleton = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(contract, ("v0.62".to_string(), 31));
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v76 database should reopen");
+        let migration_applied: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 76",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_applied, 1);
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
@@ -13647,7 +13899,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(agent_cli_contract, ("v0.54".to_string(), 30, 1));
+        assert_eq!(agent_cli_contract, ("v0.62".to_string(), 31, 1));
         assert_eq!(foreign_key_violations, 0);
 
         drop(database);
@@ -14256,7 +14508,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.54".to_string(), 22));
+        assert_eq!(contract, ("v0.62".to_string(), 22));
         let migration_count: i64 = reopened
             .connection()
             .query_row(
@@ -14287,7 +14539,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, (30, 1));
+        assert_eq!(contract, (31, 1));
         let error = database
             .connection()
             .execute(
@@ -14607,7 +14859,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.54".to_string(), 30));
+        assert_eq!(contract, ("v0.62".to_string(), 31));
         let public_a2a_migration_applied: i64 = database
             .connection()
             .query_row(

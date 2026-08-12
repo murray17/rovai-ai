@@ -461,7 +461,7 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
         json!({
             "name": CAMP_MESSAGE_SEND_TOOL_NAME,
             "title": "Send a public Camp message",
-            "description": "Publish exactly one Agent-authored Camp message. Effective recipients are the union of explicit to values, strict inline @agent_id tokens, and the eligible direct reply author. The canonical recipient set is atomic and creates one Message Delivery per recipient; a recipient-free message remains public-only.",
+            "description": "Publish one public Camp message. --to and inline @agent_id wake the addressed Agents; omit both for a public-only update. Addressing your direct caller returns the result and wakes it.",
             "inputSchema": TeamToolService::camp_message_send_input_schema(),
             "outputSchema": {
                 "type": "object",
@@ -651,9 +651,21 @@ mod tests {
         assert_eq!(send["inputSchema"]["required"], json!(["body"]));
         assert!(send["inputSchema"]["properties"].get("campId").is_none());
         assert!(
+            send["inputSchema"]["properties"]
+                .get("replyToCampMessageId")
+                .is_none()
+        );
+        assert!(
             validate_builtin_tool_input(
                 CAMP_MESSAGE_SEND_TOOL_NAME,
                 &json!({"campId": "camp-legacy", "body": "hello"})
+            )
+            .is_err()
+        );
+        assert!(
+            validate_builtin_tool_input(
+                CAMP_MESSAGE_SEND_TOOL_NAME,
+                &json!({"body": "hello", "replyToCampMessageId": "message-legacy"})
             )
             .is_err()
         );

@@ -9,9 +9,9 @@ last_updated: 2026-08-12
 # Built-in Tool Runtime Architecture
 
 本文件说明 Rovai built-in operations 的长期组件结构。当前字段与版本以
-[Built-in Tool Transport v5](../contracts/builtin-tool-transport-v5.md)、
+[Built-in Tool Transport v6](../contracts/builtin-tool-transport-v6.md)、
 [Durable Task v3](../contracts/durable-task-v3.md) 和
-[Camp Message Send v2](../contracts/camp-message-send-v2.md) 与
+[Camp Message Send v3](../contracts/camp-message-send-v3.md) 与
 [Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md) 为准；v3 及更早 Transport 只保留
 historical 语义。决策理由见
 [ADR-0124](../adr/0124-cli-only-transport-for-rovai-built-in-operations.md)、
@@ -33,6 +33,8 @@ self-active awareness 见
 [ADR-0152](../adr/0152-lead-owned-task-responsibility-and-self-active-task-awareness.md)；真实空集合
 的显式 clearing snapshot 见
 [ADR-0153](../adr/0153-explicit-empty-self-active-task-snapshot.md)。
+Send 的显式 caller return 与 Core-managed reply reference 见
+[ADR-0163](../adr/0163-explicit-caller-return-and-core-managed-reply-reference.md)。
 
 ## 总体路径
 

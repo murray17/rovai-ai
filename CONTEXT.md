@@ -81,7 +81,7 @@ A reserved `@agent_<positive integer>` token in an Agent-authored `camp.message.
 _Avoid_: Member Mention, natural-language mention, display-name match, handle parsing
 
 **Effective Recipients**:
-The deduplicated recipient set resolved for one Camp Message Send from explicit `--to` Agent IDs, valid Agent Addressing Tokens, and any `Reply-to Default Target`, then frozen in normalized Agent ID UTF-8/ASCII byte order. Any unresolved or invalid recipient fails the whole send before persistence; only this canonical set is the sole input from which Message Deliveries, Envelopes, idempotency digests, audit facts, and retries are created, and no recipient source starts a separate dispatch path.
+The deduplicated recipient set resolved for one Camp Message Send from explicit `--to` Agent IDs and valid Agent Addressing Tokens, then frozen in normalized Agent ID UTF-8/ASCII byte order. Any unresolved or invalid recipient fails the whole send before persistence; only this canonical set is the sole input from which Message Deliveries, Envelopes, idempotency digests, audit facts, and retries are created, and no recipient source starts a separate dispatch path.
 _Avoid_: delivery list assembled by the Renderer, recipient text, repeated fan-out, implicit Lead target
 
 **Recipient Presentation Metadata**:
@@ -101,12 +101,20 @@ The atomic upper bound on one addressed Camp Message Send: its Effective Recipie
 _Avoid_: per-recipient partial acceptance, independent hidden cap, Runtime concurrency limit, public-message count
 
 **Addressing Resolution Failure**:
-The fail-closed result of a Camp Message Send whose explicit target, Agent Addressing Token, or reply-to default cannot resolve to a Recipient Identity Eligible Camp Member. Core persists no Public A2A Message or Message Delivery and returns one structured error envelope containing the complete set of offending sources, their original values, stable reasons, and the instruction to use a new `requestId` after correction; it never leaks Camp-external roster candidates. Runtime readiness is not an addressing failure and is represented by Delivery scheduling state instead.
+The fail-closed result of a Camp Message Send whose explicit target or Agent Addressing Token cannot resolve to a Recipient Identity Eligible Camp Member. Core persists no Public A2A Message or Message Delivery and returns one structured error envelope containing the complete set of offending sources, their original values, stable reasons, and the instruction to use a new `requestId` after correction; it never leaks Camp-external roster candidates. Runtime readiness is not an addressing failure and is represented by Delivery scheduling state instead.
 _Avoid_: partial fan-out, public message with a dropped target, silent literal fallback, Runtime execution failure
 
-**Reply-to Default Target**:
-The one Agent author of a replied-to Public A2A Message, added to Effective Recipients when no explicit target rule excludes it. A replied-to user message or system event contributes no Delivery; the original message's other recipients are never expanded, and a self target remains invalid.
-_Avoid_: reply obligation, recipient fan-in, original recipient broadcast, automatic result route
+**Message Reply Reference**:
+The Core-managed public-message relation from an Agent-authored Camp Message Send to the CampMessage that triggered its current AgentRun. It supports thread presentation and bounded Context reference closure but never contributes an Effective Recipient or wakes an Agent.
+_Avoid_: addressing source, Agent-selected parent ID, Reply-to Default Target, execution route
+
+**Immediate Caller**:
+The AgentRun at the direct parent position of the current A2A call lineage. Addressing its Agent through `--to` or an Agent Addressing Token selects Caller Return semantics; no other ancestor receives this exception.
+_Avoid_: message author inferred from reply, arbitrary ancestor, Default Lead, original user
+
+**Caller Return**:
+A Message Delivery addressed explicitly to the current AgentRun's Immediate Caller. It wakes that caller through a new continuation AgentRun, restores the caller's prior parent/root/depth lineage, and remains a budgeted Delivery rather than a recursive forward edge.
+_Avoid_: `--return-to`, implicit reply recipient, Native Session resume, unbudgeted response
 
 **All Members Mention**:
 The single explicit structured `@所有队员` reference in one user-authored Camp message. At accepted send it expands to and freezes the exact set of present CampMembers addressed by that message, while remaining one atomic token in the Composer and history; later membership or Presence changes never rewrite its historical recipient set.
@@ -753,7 +761,7 @@ A non-composite diagnostic projection of one Autonomous Qualification Trial's ac
 _Avoid_: formal Trial collaboration gate, collaboration score, leaderboard, Agent self-assessment, delivery verdict
 
 **Message Delivery Lifecycle**:
-The objective chain linking one accepted Message Delivery to its queued, materialized, failed, cancelled, or settled state, any recipient Run created from it, and the terminal failure or completion facts of that execution responsibility. A recipient Run's later Public A2A Message is a separate send and never acts as a privileged response edge.
+The objective chain linking one accepted Message Delivery to its queued, materialized, failed, cancelled, or settled state, any recipient Run created from it, and the terminal failure or completion facts of that execution responsibility. A recipient Run's later Public A2A Message is a separate send; when explicitly addressed to its Immediate Caller, its Delivery is classified as Caller Return rather than inferred from completion or reply metadata.
 _Avoid_: message count, semantic Handoff result, Task completion, inferred feedback absorption
 
 **Message Delivery Settlement**:
@@ -765,12 +773,12 @@ Two Message Deliveries from separately accepted sends by the same source Run wit
 _Avoid_: repeated route, idempotent replay, similar request, repeated reviewer use
 
 **Forward Delivery Cycle**:
-A Message Delivery whose target is already on its forward-delivery ancestor lineage. A later delivery back to the original sender is therefore another forward edge and a cycle, not a privileged return path.
-_Avoid_: repeated direction without ancestry, source Resume, multi-stage review
+A forward Message Delivery whose target is already on its source AgentRun's ancestor lineage. The Immediate Caller is reachable only through Caller Return; all other ancestor targets remain cycles.
+_Avoid_: Caller Return, repeated direction without ancestry, source Resume, multi-stage review
 
 **A2A Lineage Guard**:
-The Core admission invariant for a new Message Delivery: the source AgentRun's root depth is `0`, each delivered target Run increments depth by one, and no accepted Delivery may exceed product maximum depth `5` or target an Agent already present on the source's ancestor lineage. Self-send, depth overflow, and any remaining CampTurn A2A/Run budget failure are rejected atomically before the Public A2A Message or Delivery is persisted; there is no additional per-Run send-count or time-window quota.
-_Avoid_: semantic loop classifier, privileged return edge, automatic depth reset, Renderer recursion check
+The Core admission invariant for a new Message Delivery: a forward target increments the source lineage depth and may not appear on that lineage, while Caller Return restores the Immediate Caller's prior lineage without admitting another ancestor. Self-send, forward depth overflow, non-immediate ancestor targeting, and any remaining CampTurn A2A/Run budget failure are rejected atomically before the Public A2A Message or Delivery is persisted; there is no additional per-Run send-count or time-window quota.
+_Avoid_: semantic loop classifier, arbitrary ancestor return, Renderer recursion check, unbounded ping-pong
 
 **Delivery Semantic Disposition**:
 The Semantic Engineering Review finding that work or information associated with an independent Message Delivery was integrated, rejected, superseded, abandoned, or remains indeterminate. It is never inferred by Core from matching code, Task state, a later send, or message timing and never changes Hard Outcome.
@@ -1297,7 +1305,7 @@ An immutable Agent-authored public Camp message that may address zero or more Ca
 _Avoid_: private handoff, per-recipient message copy, delivery status message, user-only projection
 
 **Message Delivery**:
-The recipient-specific A2A execution responsibility created by one accepted Public A2A Message. Each Delivery owns its recipient identity snapshot, recipient-local queue position, frozen execution basis, and `pending | running | failed | cancelled | settled | interrupted_before_dispatch` lifecycle; `pending` distinguishes an initial no-attempt state from a post-attempt temporary wait condition, while `interrupted_before_dispatch` is a manual-intervention state because no dispatch attempt was established before a Core crash.
+The recipient-specific A2A execution responsibility created by one accepted Public A2A Message. Each Delivery freezes `forward | return` edge kind, the lineage of its future target Run, recipient identity, recipient-local queue position, execution basis, and `pending | running | failed | cancelled | settled | interrupted_before_dispatch` lifecycle; `pending` distinguishes an initial no-attempt state from a post-attempt temporary wait condition, while `interrupted_before_dispatch` is a manual-intervention state because no dispatch attempt was established before a Core crash.
 _Avoid_: per-recipient message, passive read receipt, AgentRun, public timeline item
 
 **Delivery Wait Condition**:
@@ -1329,7 +1337,7 @@ The recipient-scoped pre-Run boundary inside a Delivery Dispatch Attempt that as
 _Avoid_: send-transaction preflight, ghost AgentRun, Runtime capacity wait, whole-message rollback
 
 **Camp Message Send**:
-The authenticated current-AgentRun action exposed as `camp.message.send` and `rovai send`, and the sole Agent-intent path for an Agent to publish into its Camp. Its Camp scope is derived only from the authenticated current Run, never selected or overridden by Agent input; Core resolves and deduplicates Effective Recipients from explicit targets, valid inline Agent Addressing Tokens, and reply-to defaults, with no private A2A path. Missing-Send Recovery Publication is a Core terminal safety action rather than an Agent send and cannot carry recipients or send intent.
+The authenticated current-AgentRun action exposed as `camp.message.send` and `rovai send`, and the sole Agent-intent path for an Agent to publish into its Camp. Its Camp scope and Message Reply Reference derive only from the authenticated current Run; Core resolves and deduplicates Effective Recipients from explicit targets and valid inline Agent Addressing Tokens, classifies an Immediate Caller recipient as Caller Return, and leaves a recipient-free send public-only. Missing-Send Recovery Publication is a Core terminal safety action rather than an Agent send and cannot carry recipients or send intent.
 _Avoid_: Missing-Send Recovery Publication, Member Call, `team.call_member`, private message, per-recipient public copy, compatibility alias
 
 **Camp Message Send Idempotency**:
@@ -1341,12 +1349,12 @@ The explicit user-issued identity for one new Dispatch Attempt on an existing in
 _Avoid_: new Public A2A Message, new recipient fan-out, automatic retry token, content-based retry
 
 **A2A Delivery Slot Reservation**:
-The acceptance-time accounting unit that preserves the per-CampTurn maximum of sixteen accepted A2A target AgentRuns even while Message Deliveries remain pending. Every accepted Message Delivery allocates exactly one slot for its recipient Run, including a later delivery back to an earlier member; allocated slots are never recycled within the Turn.
-_Avoid_: post-Run counting, response reservation, unbounded pending queue, reusable concurrency permit, Runtime worker slot
+The acceptance-time accounting unit that preserves the per-CampTurn maximum of sixteen accepted A2A target AgentRuns even while Message Deliveries remain pending. Every accepted forward or return Message Delivery allocates exactly one slot for its recipient Run; allocated slots are never recycled within the Turn.
+_Avoid_: post-Run counting, free return, unbounded pending queue, reusable concurrency permit, Runtime worker slot
 
 **A2A Target AgentRun**:
-A new AgentRun for one eligible CampMember inside the same CampTurn, created by exactly one Message Delivery after the recipient-scoped dispatch and Context gate succeed. Every forward Delivery enters one logical A2A depth deeper, including a delivery back to an earlier member; there is no special return path, reply batching, new CampTurn, or Runtime retry.
-_Avoid_: Lead Turn, new CampTurn, reopened CampTurn, Native Session resume, Lead-only continuation, reply batch
+A new AgentRun for one eligible CampMember inside the same CampTurn, created by exactly one Message Delivery after the recipient-scoped dispatch and Context gate succeed. A forward Delivery enters one logical A2A depth deeper; a Caller Return creates a continuation at the Immediate Caller's prior depth and parent lineage, while both remain ordinary budgeted Runs with no reply batching, new CampTurn, or Runtime retry.
+_Avoid_: Lead Turn, new CampTurn, reopened CampTurn, Native Session resume, unbudgeted response, reply batch
 
 **CampTurn Collaboration Settlement**:
 The authoritative aggregation that keeps a CampTurn non-terminal while any Message Delivery is pending, `interrupted_before_dispatch`, or any AgentRun is `queued`, `running`, or `waiting`. Once those accepted execution responsibilities settle through normal completion, failure, cancellation, or Delivery Manual Intervention, Core determines the terminal result without requiring the original sender or Default Lead to run again; missing integration may be a semantic-review finding but never a response obligation or settlement blocker.
@@ -1389,8 +1397,8 @@ The immutable absolute, existing startup and recovery working directory of one A
 _Avoid_: permission boundary, sandbox root, inherited sender permission, project ownership
 
 **A2A Parent Run**:
-The authenticated source AgentRun from which Core accepts a Message Delivery and later creates its consuming AgentRun. Core derives and freezes the parent, root, and depth identities from the current Runtime binding; no LLM input may supply or override them.
-_Avoid_: built-in operation argument, model-generated Run ID, Task ownership, permission inheritance
+The direct parent on an AgentRun's active A2A call lineage. A forward Delivery assigns its source Run as the target's parent; a Caller Return restores the Immediate Caller's previous parent, while preserving the return source separately as Delivery causality. Core derives and freezes all identities from the current Runtime binding; no LLM input may supply or override them.
+_Avoid_: Message Delivery source, built-in operation argument, model-generated Run ID, Task ownership, permission inheritance
 
 **A2A Context Transfer**:
 The bounded collaboration handoff in which the sending LLM supplies only the necessary `content`, recipient and optional historical Task link. Core deterministically assembles the target AgentRun input from that handoff, the recipient's own Conversation continuity, authorized Camp context, and frozen context boundaries; it never copies the sender's complete prompt, private Conversation, hidden reasoning, or generic model-supplied references.

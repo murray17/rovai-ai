@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.61
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -13,6 +13,8 @@ last_updated: 2026-08-12
 > 当前状态：交互、Renderer 实现、全量前端门禁、打包 App 验收与视觉复核均已完成。
 >
 > 前置版本：[v0.60 有界 Tool 输出预览与按需全文复制](../v0.60/README.md)
+>
+> 后续版本：[v0.62 显式 A2A 调用者返回](../v0.62/README.md)
 
 ## 版本目标
 

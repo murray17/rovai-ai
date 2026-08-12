@@ -636,33 +636,40 @@ fn print_operation_help(description: &BuiltinToolDescription) {
             },
             if argument.required { " required" } else { "" },
         );
+        if description.name == "camp.message.send" && argument.field == "to" {
+            println!("      Optional Agent to wake; repeat for multiple recipients.");
+        }
     }
-    println!(
-        "\nExample:\n  {}",
-        operation_help_example(&description.name)
-    );
+    let examples = operation_help_examples(&description.name);
+    println!("\nExamples:");
+    for example in examples {
+        println!("  {example}");
+    }
 }
 
-fn operation_help_example(operation: &str) -> &'static str {
+fn operation_help_examples(operation: &str) -> &'static [&'static str] {
     match operation {
-        "camp.message.send" => "rovai send --body 'Status update'",
+        "camp.message.send" => &[
+            "rovai send --body 'Status update'",
+            "rovai send --to agent_5 --body 'Review complete'",
+        ],
         "team.create_task" => {
-            "rovai task create --title 'Prepare release notes' --assignee-agent-id agent_27"
+            &["rovai task create --title 'Prepare release notes' --assignee-agent-id agent_27"]
         }
-        "team.get_task" => "rovai task get --task-id task_123",
-        "team.list_tasks" => "rovai task list --limit 10",
+        "team.get_task" => &["rovai task get --task-id task_123"],
+        "team.list_tasks" => &["rovai task list --limit 10"],
         "team.update_task" => {
-            "rovai task update --task-id task_123 --expected-version 1 --status in_progress"
+            &["rovai task update --task-id task_123 --expected-version 1 --status in_progress"]
         }
-        "camp.list" => "rovai camp list --limit 10",
-        "camp.search" => "rovai camp search --query 'release' --limit 5",
-        "camp.read" => "rovai camp read --camp-id camp_123 --mode item --message-id msg_123",
-        "history.search" => "rovai history search --query 'decision' --limit 5",
-        "memory.search" => "rovai memory search --query 'preferences' --limit 6",
-        "memory.read" => "rovai memory read --memory-ids memory_123",
-        "memory.write" => "rovai memory write --input-file memory-write.json",
-        "memory.propose_hearth" => "rovai memory propose-hearth --input-file proposal.json",
-        _ => "rovai --help",
+        "camp.list" => &["rovai camp list --limit 10"],
+        "camp.search" => &["rovai camp search --query 'release' --limit 5"],
+        "camp.read" => &["rovai camp read --camp-id camp_123 --mode item --message-id msg_123"],
+        "history.search" => &["rovai history search --query 'decision' --limit 5"],
+        "memory.search" => &["rovai memory search --query 'preferences' --limit 6"],
+        "memory.read" => &["rovai memory read --memory-ids memory_123"],
+        "memory.write" => &["rovai memory write --input-file memory-write.json"],
+        "memory.propose_hearth" => &["rovai memory propose-hearth --input-file proposal.json"],
+        _ => &["rovai --help"],
     }
 }
 
@@ -743,18 +750,45 @@ mod tests {
         let description = operation_help(&["send".to_string(), "--help".to_string()])
             .unwrap()
             .unwrap();
-        assert!(
-            description
-                .arguments
-                .iter()
-                .all(|argument| argument.field != "campId" && argument.flag != "--camp-id")
-        );
+        assert!(description.arguments.iter().all(|argument| {
+            argument.field != "campId"
+                && argument.flag != "--camp-id"
+                && argument.field != "replyToCampMessageId"
+                && argument.flag != "--reply-to-camp-message-id"
+        }));
         assert!(
             parse_operation_input(
                 &description,
                 &["--camp-id".to_string(), "camp-legacy".to_string()]
             )
             .is_err()
+        );
+        assert!(
+            parse_operation_input(
+                &description,
+                &[
+                    "--reply-to-camp-message-id".to_string(),
+                    "message-legacy".to_string(),
+                ]
+            )
+            .is_err()
+        );
+        assert!(description.summary.contains("inline @agent_id"));
+        assert!(description.summary.contains("public-only"));
+        assert!(description.summary.contains("direct caller"));
+        let to = description
+            .arguments
+            .iter()
+            .find(|argument| argument.field == "to")
+            .unwrap();
+        assert_eq!(to.flag, "--to");
+        assert!(to.repeatable);
+        assert_eq!(
+            operation_help_examples("camp.message.send"),
+            [
+                "rovai send --body 'Status update'",
+                "rovai send --to agent_5 --body 'Review complete'",
+            ]
         );
     }
 

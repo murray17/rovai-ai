@@ -61,7 +61,6 @@ pub struct CampMessageSendInput {
     pub body: String,
     #[serde(default)]
     pub to: Vec<String>,
-    pub reply_to_camp_message_id: Option<String>,
     pub task_id: Option<String>,
 }
 
@@ -133,7 +132,6 @@ pub struct CampMessageSendCommand {
     camp_id: String,
     body: String,
     to: Vec<String>,
-    reply_to_camp_message_id: Option<String>,
     task_id: Option<String>,
 }
 
@@ -422,12 +420,7 @@ impl TeamToolService {
                     "maxItems": 16,
                     "uniqueItems": true,
                     "items": {"type": "string", "minLength": 1},
-                    "description": "Optional explicit recipients. Input order is presentation metadata, never scheduling priority."
-                },
-                "replyToCampMessageId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Optional direct public parent message. An Agent-authored public A2A parent contributes its author as a default recipient."
+                    "description": "Optional Agent to wake; repeat for multiple recipients. Input order is presentation metadata, never scheduling priority."
                 },
                 "taskId": {
                     "type": "string",
@@ -908,7 +901,6 @@ impl TeamToolService {
                 camp_id: recorded.camp_id.clone(),
                 body: invocation.input.body.clone(),
                 to: invocation.input.to.clone(),
-                reply_to_camp_message_id: invocation.input.reply_to_camp_message_id.clone(),
                 task_id: invocation.input.task_id.clone(),
             };
             let replay_envelope = CommandEnvelope {
@@ -941,7 +933,6 @@ impl TeamToolService {
             camp_id: sender.camp_id.clone(),
             body: invocation.input.body.clone(),
             to: invocation.input.to.clone(),
-            reply_to_camp_message_id: invocation.input.reply_to_camp_message_id.clone(),
             task_id: invocation.input.task_id.clone(),
         };
         let envelope = CommandEnvelope {
@@ -1003,7 +994,6 @@ impl TeamToolService {
                     current_a2a_depth: current.a2a_depth,
                     body: &envelope.payload.body,
                     explicit_recipients: &envelope.payload.to,
-                    reply_to_camp_message_id: envelope.payload.reply_to_camp_message_id.as_deref(),
                     task_id: envelope.payload.task_id.as_deref(),
                 },
             )
@@ -1322,18 +1312,13 @@ fn validate_public_send_invocation(invocation: &CampMessageSendInvocation) -> Re
     }
     if invocation
         .input
-        .reply_to_camp_message_id
+        .task_id
         .as_deref()
         .is_some_and(|value| value.trim().is_empty())
-        || invocation
-            .input
-            .task_id
-            .as_deref()
-            .is_some_and(|value| value.trim().is_empty())
     {
         return Err(invocation_error(
             "message.invalid_input",
-            "replyToCampMessageId and taskId must not be empty when supplied",
+            "taskId must not be empty when supplied",
         ));
     }
     Ok(())
@@ -1591,6 +1576,7 @@ mod tests {
             HearthProposalToolInput, HearthProposalToolInvocation, MemoryToolService,
             MemoryWriteToolInput, MemoryWriteToolInvocation,
         },
+        message_delivery::{DeliveryDispatchTrigger, dispatch_pending_for_recipient},
         runtime::{
             BindNativeSessionCommand, ClaimAgentRunCommand, ExecutionRuntimeService,
             MissingSendRecoveryBoundary, MissingSendRecoveryCandidate, SucceedAgentRunCommand,
@@ -1627,7 +1613,7 @@ mod tests {
             let workspace = directory.join("workspace");
             std::fs::create_dir_all(&workspace).expect("workspace should exist");
             let mut database = Database::open(&directory).expect("database should open");
-            configure_test_runtime(&database, &["agent_1", "agent_2"]);
+            configure_test_runtime(&database, &["agent_1", "agent_2", "agent_3"]);
             let collaboration = CollaborationService::default();
             let camp = collaboration
                 .create_camp(
@@ -1637,14 +1623,14 @@ mod tests {
                         None,
                         CreateCampCommand::for_test_with_members(
                             workspace.to_string_lossy().to_string(),
-                            &["agent_1", "agent_2"],
+                            &["agent_1", "agent_2", "agent_3"],
                             "agent_1",
                         ),
                     ),
                 )
                 .expect("Camp should be created");
             let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
-            for (index, agent_id) in ["agent_1", "agent_2"].iter().enumerate() {
+            for (index, agent_id) in ["agent_1", "agent_2", "agent_3"].iter().enumerate() {
                 collaboration
                     .add_camp_member(
                         &mut database,
@@ -1791,14 +1777,23 @@ mod tests {
             body: &str,
             to: &[&str],
         ) -> CampMessageSendInvocation {
+            self.public_send_invocation_for(&self.credential, call_id, body, to)
+        }
+
+        fn public_send_invocation_for(
+            &self,
+            credential: &BuiltinToolBindingCredential,
+            call_id: &str,
+            body: &str,
+            to: &[&str],
+        ) -> CampMessageSendInvocation {
             CampMessageSendInvocation {
-                native_binding_id: self.credential.native_binding_id.clone(),
-                binding_credential: self.credential.binding_credential.clone(),
+                native_binding_id: credential.native_binding_id.clone(),
+                binding_credential: credential.binding_credential.clone(),
                 runtime_tool_call_id: call_id.to_string(),
                 input: CampMessageSendInput {
                     body: body.to_string(),
                     to: to.iter().map(|value| (*value).to_string()).collect(),
-                    reply_to_camp_message_id: None,
                     task_id: None,
                 },
             }
@@ -2000,32 +1995,53 @@ mod tests {
         );
         assert!(!message.3.is_empty());
 
-        let delivery: (String, String, i64, i64, Option<String>) = fixture
+        struct DeliveryAuditRow {
+            recipient_agent_id: String,
+            edge_kind: String,
+            target_parent_agent_run_id: Option<String>,
+            return_to_agent_run_id: Option<String>,
+            status: String,
+            dispatch_attempt_count: i64,
+            a2a_depth: i64,
+            target_agent_run_id: Option<String>,
+        }
+        let delivery = fixture
             .database
             .connection()
             .query_row(
                 r#"
-                SELECT recipient_agent_id, status, dispatch_attempt_count,
+                SELECT recipient_agent_id, edge_kind,
+                       target_parent_agent_run_id, return_to_agent_run_id,
+                       status, dispatch_attempt_count,
                        a2a_depth, target_agent_run_id
                 FROM message_delivery WHERE message_id = ?1
                 "#,
                 [message_id],
                 |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                    ))
+                    Ok(DeliveryAuditRow {
+                        recipient_agent_id: row.get(0)?,
+                        edge_kind: row.get(1)?,
+                        target_parent_agent_run_id: row.get(2)?,
+                        return_to_agent_run_id: row.get(3)?,
+                        status: row.get(4)?,
+                        dispatch_attempt_count: row.get(5)?,
+                        a2a_depth: row.get(6)?,
+                        target_agent_run_id: row.get(7)?,
+                    })
                 },
             )
             .unwrap();
-        assert_eq!(delivery.0, "agent_2");
-        assert_eq!(delivery.1, "running");
-        assert_eq!(delivery.2, 1);
-        assert_eq!(delivery.3, 1);
-        assert!(delivery.4.is_some());
+        assert_eq!(delivery.recipient_agent_id, "agent_2");
+        assert_eq!(delivery.edge_kind, "forward");
+        assert_eq!(
+            delivery.target_parent_agent_run_id.as_deref(),
+            Some(fixture.source_run_id.as_str())
+        );
+        assert_eq!(delivery.return_to_agent_run_id, None);
+        assert_eq!(delivery.status, "running");
+        assert_eq!(delivery.dispatch_attempt_count, 1);
+        assert_eq!(delivery.a2a_depth, 1);
+        assert!(delivery.target_agent_run_id.is_some());
         let after_slots: i64 = fixture
             .database
             .connection()
@@ -2055,6 +2071,15 @@ mod tests {
     fn public_only_send_consumes_no_a2a_slot() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
+        let trigger_message_id: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT trigger_camp_message_id FROM agent_run WHERE id = ?1",
+                [&fixture.source_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
         let before: i64 = fixture
             .database
             .connection()
@@ -2074,6 +2099,17 @@ mod tests {
             .unwrap();
         assert_eq!(sent.result.payload["deliveryIds"], json!([]));
         assert_eq!(sent.result.payload["effectiveRecipients"], json!([]));
+        let message_id = sent.result.payload["messageId"].as_str().unwrap();
+        let reply_to_message_id: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT reply_to_camp_message_id FROM camp_message WHERE id = ?1",
+                [message_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(reply_to_message_id, trigger_message_id);
         let after: i64 = fixture
             .database
             .connection()
@@ -2084,6 +2120,429 @@ mod tests {
             )
             .unwrap();
         assert_eq!(after, before);
+    }
+
+    #[test]
+    fn agent_send_rejects_a_tombstoned_trigger_message() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE camp_message SET tombstoned_at = '2026-08-12T00:00:00Z' WHERE id = (SELECT trigger_camp_message_id FROM agent_run WHERE id = ?1)",
+                [&fixture.source_run_id],
+            )
+            .unwrap();
+
+        let invocation = fixture.public_send_invocation(
+            "tombstoned-trigger-send",
+            "This message must not be persisted.",
+            &[],
+        );
+        let error = service
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("trigger CampMessage is tombstoned")
+        );
+        let persisted: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM camp_message WHERE body = 'This message must not be persisted.'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(persisted, 0);
+    }
+
+    #[test]
+    fn a2a_send_rejects_a_missing_trigger_delivery() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        let forward_invocation = fixture.public_send_invocation(
+            "missing-trigger-forward",
+            "Create an A2A child",
+            &["agent_2"],
+        );
+        let forward = service
+            .send_public_message(&mut fixture.database, &forward_invocation)
+            .unwrap();
+        let child_run_id: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT target_agent_run_id FROM message_delivery WHERE id = ?1",
+                [forward.result.payload["deliveryIds"][0].as_str().unwrap()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let (_child_epoch, child_credential) =
+            fixture.claim_bind_and_issue(&child_run_id, "native-missing-trigger");
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET trigger_message_delivery_id = NULL WHERE id = ?1",
+                [&child_run_id],
+            )
+            .unwrap();
+
+        let invocation = fixture.public_send_invocation_for(
+            &child_credential,
+            "missing-trigger-send",
+            "This message must not be persisted either.",
+            &[],
+        );
+        let error = service
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("A2A AgentRun has no trigger Message Delivery")
+        );
+        let persisted: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM camp_message WHERE body = 'This message must not be persisted either.'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(persisted, 0);
+    }
+
+    #[test]
+    fn addressing_the_immediate_caller_deduplicates_into_a_return_delivery() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        let forward_invocation = fixture.public_send_invocation(
+            "forward-to-agent-2",
+            "Please inspect this",
+            &["agent_2"],
+        );
+        let forward = service
+            .send_public_message(&mut fixture.database, &forward_invocation)
+            .unwrap();
+        let forward_message_id = forward.result.payload["messageId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let child_run_id = forward.result.payload["deliveryIds"][0]
+            .as_str()
+            .and_then(|delivery_id| {
+                fixture
+                    .database
+                    .connection()
+                    .query_row(
+                        "SELECT target_agent_run_id FROM message_delivery WHERE id = ?1",
+                        [delivery_id],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .unwrap()
+            })
+            .unwrap();
+        let (_child_epoch, child_credential) =
+            fixture.claim_bind_and_issue(&child_run_id, "native-child-return");
+
+        let return_invocation = fixture.public_send_invocation_for(
+            &child_credential,
+            "return-to-agent-1",
+            "Review complete @agent_1",
+            &["agent_1"],
+        );
+        let returned = service
+            .send_public_message(&mut fixture.database, &return_invocation)
+            .unwrap();
+        assert_eq!(returned.result.status, CommandResultStatus::Accepted);
+        assert_eq!(
+            returned.result.payload["effectiveRecipients"],
+            json!(["agent_1"])
+        );
+        assert_eq!(
+            returned.result.payload["deliveryIds"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        let return_message_id = returned.result.payload["messageId"].as_str().unwrap();
+        let reply_to_message_id: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT reply_to_camp_message_id FROM camp_message WHERE id = ?1",
+                [return_message_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(reply_to_message_id, forward_message_id);
+
+        let return_delivery_id = returned.result.payload["deliveryIds"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let return_delivery: (
+            String,
+            Option<String>,
+            Option<String>,
+            i64,
+            String,
+            Option<String>,
+        ) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT edge_kind, target_parent_agent_run_id,
+                       return_to_agent_run_id, a2a_depth,
+                       wait_condition, target_agent_run_id
+                FROM message_delivery WHERE id = ?1
+                "#,
+                [&return_delivery_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(return_delivery.0, "return");
+        assert_eq!(return_delivery.1, None);
+        assert_eq!(
+            return_delivery.2.as_deref(),
+            Some(fixture.source_run_id.as_str())
+        );
+        assert_eq!(return_delivery.3, 0);
+        assert_eq!(return_delivery.4, "target_busy");
+        assert_eq!(return_delivery.5, None);
+
+        let source_run_id = fixture.source_run_id.clone();
+        fixture.succeed_run(&source_run_id, fixture.source_epoch, "caller yielded");
+        let status: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT status FROM message_delivery WHERE id = ?1",
+                [&return_delivery_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        if status == "pending" {
+            dispatch_pending_for_recipient(
+                &mut fixture.database,
+                &fixture.camp_id,
+                "agent_1",
+                DeliveryDispatchTrigger::TargetRunEnded,
+                true,
+            )
+            .unwrap();
+        }
+        let returned_run: (String, Option<String>, Option<String>, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT target.id, target.a2a_parent_agent_run_id,
+                       target.a2a_root_agent_run_id, target.a2a_depth
+                FROM message_delivery AS delivery
+                JOIN agent_run AS target ON target.id = delivery.target_agent_run_id
+                WHERE delivery.id = ?1
+                "#,
+                [&return_delivery_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert!(!returned_run.0.is_empty());
+        assert_eq!(returned_run.1, None);
+        assert_eq!(
+            returned_run.2.as_deref(),
+            Some(fixture.source_run_id.as_str())
+        );
+        assert_eq!(returned_run.3, 0);
+    }
+
+    #[test]
+    fn a_non_immediate_ancestor_remains_rejected() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        let to_agent_2_invocation =
+            fixture.public_send_invocation("ancestor-chain-agent-2", "Ask agent 2", &["agent_2"]);
+        let to_agent_2 = service
+            .send_public_message(&mut fixture.database, &to_agent_2_invocation)
+            .unwrap();
+        let agent_2_run_id: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT target_agent_run_id FROM message_delivery WHERE id = ?1",
+                [to_agent_2.result.payload["deliveryIds"][0]
+                    .as_str()
+                    .unwrap()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let (agent_2_epoch, agent_2_credential) =
+            fixture.claim_bind_and_issue(&agent_2_run_id, "native-ancestor-agent-2");
+        let to_agent_3_invocation = fixture.public_send_invocation_for(
+            &agent_2_credential,
+            "ancestor-chain-agent-3",
+            "Ask agent 3",
+            &["agent_3"],
+        );
+        let to_agent_3 = service
+            .send_public_message(&mut fixture.database, &to_agent_3_invocation)
+            .unwrap();
+        let agent_3_run_id: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT target_agent_run_id FROM message_delivery WHERE id = ?1",
+                [to_agent_3.result.payload["deliveryIds"][0]
+                    .as_str()
+                    .unwrap()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let (_agent_3_epoch, agent_3_credential) =
+            fixture.claim_bind_and_issue(&agent_3_run_id, "native-ancestor-agent-3");
+        let rejected_invocation = fixture.public_send_invocation_for(
+            &agent_3_credential,
+            "reject-non-immediate-ancestor",
+            "Do not recurse to agent 1",
+            &["agent_1"],
+        );
+        let rejected = service
+            .send_public_message(&mut fixture.database, &rejected_invocation)
+            .unwrap();
+        assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
+        assert_eq!(rejected.result.code, "message.addressing_invalid");
+        assert_eq!(
+            rejected.result.payload["details"]["offending"],
+            json!([{
+                "source": "--to",
+                "value": "agent_1",
+                "reason": "ancestor_cycle"
+            }])
+        );
+
+        let return_to_agent_2_invocation = fixture.public_send_invocation_for(
+            &agent_3_credential,
+            "return-to-immediate-agent-2",
+            "Return to the direct caller",
+            &["agent_2"],
+        );
+        let returned_to_agent_2 = service
+            .send_public_message(&mut fixture.database, &return_to_agent_2_invocation)
+            .unwrap();
+        assert_eq!(
+            returned_to_agent_2.result.status,
+            CommandResultStatus::Accepted
+        );
+        let return_to_agent_2_delivery_id = returned_to_agent_2.result.payload["deliveryIds"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let popped_lineage: (String, Option<String>, Option<String>, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT edge_kind, target_parent_agent_run_id,
+                       return_to_agent_run_id, a2a_depth
+                FROM message_delivery WHERE id = ?1
+                "#,
+                [&return_to_agent_2_delivery_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(popped_lineage.0, "return");
+        assert_eq!(
+            popped_lineage.1.as_deref(),
+            Some(fixture.source_run_id.as_str())
+        );
+        assert_eq!(popped_lineage.2.as_deref(), Some(agent_2_run_id.as_str()));
+        assert_eq!(popped_lineage.3, 1);
+
+        fixture.succeed_run(&agent_2_run_id, agent_2_epoch, "caller yielded");
+        let status: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT status FROM message_delivery WHERE id = ?1",
+                [&return_to_agent_2_delivery_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        if status == "pending" {
+            dispatch_pending_for_recipient(
+                &mut fixture.database,
+                &fixture.camp_id,
+                "agent_2",
+                DeliveryDispatchTrigger::TargetRunEnded,
+                true,
+            )
+            .unwrap();
+        }
+        let returned_agent_2_run_id: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT target_agent_run_id FROM message_delivery WHERE id = ?1",
+                [&return_to_agent_2_delivery_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let (_returned_agent_2_epoch, returned_agent_2_credential) =
+            fixture.claim_bind_and_issue(&returned_agent_2_run_id, "native-returned-agent-2");
+        let return_to_agent_1_invocation = fixture.public_send_invocation_for(
+            &returned_agent_2_credential,
+            "returned-agent-2-to-agent-1",
+            "Now return to the original caller",
+            &["agent_1"],
+        );
+        let returned_to_agent_1 = service
+            .send_public_message(&mut fixture.database, &return_to_agent_1_invocation)
+            .unwrap();
+        assert_eq!(
+            returned_to_agent_1.result.status,
+            CommandResultStatus::Accepted
+        );
+        let final_edge: (String, Option<String>, Option<String>, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT edge_kind, target_parent_agent_run_id,
+                       return_to_agent_run_id, a2a_depth
+                FROM message_delivery WHERE id = ?1
+                "#,
+                [returned_to_agent_1.result.payload["deliveryIds"][0]
+                    .as_str()
+                    .unwrap()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(final_edge.0, "return");
+        assert_eq!(final_edge.1, None);
+        assert_eq!(
+            final_edge.2.as_deref(),
+            Some(fixture.source_run_id.as_str())
+        );
+        assert_eq!(final_edge.3, 0);
     }
 
     #[test]
@@ -2284,7 +2743,7 @@ mod tests {
             .unwrap_err();
         assert!(
             format!("{error:#}")
-                .contains("A2A Current Input CampMessage author lineage is inconsistent")
+                .contains("A2A Current Input CampMessage requires a source AgentRun")
         );
     }
 

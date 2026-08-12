@@ -362,6 +362,9 @@ struct DispatchDelivery {
     task_version_at_admission: Option<i64>,
     assignee_agent_id_at_admission: Option<String>,
     source_agent_run_id: String,
+    edge_kind: String,
+    target_parent_agent_run_id: Option<String>,
+    return_to_agent_run_id: Option<String>,
     a2a_root_agent_run_id: String,
     a2a_depth: i64,
     retry_generation: i64,
@@ -379,8 +382,26 @@ pub struct SendPublicA2aMessage<'a> {
     pub current_a2a_depth: i64,
     pub body: &'a str,
     pub explicit_recipients: &'a [String],
-    pub reply_to_camp_message_id: Option<&'a str>,
     pub task_id: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ImmediateCaller {
+    agent_run_id: String,
+    agent_id: String,
+    parent_agent_run_id: Option<String>,
+    root_agent_run_id: String,
+    a2a_depth: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DeliveryLineage {
+    edge_kind: &'static str,
+    target_parent_agent_run_id: Option<String>,
+    return_to_agent_run_id: Option<String>,
+    root_agent_run_id: String,
+    a2a_depth: i64,
+    ancestor_agent_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -410,6 +431,8 @@ pub fn persist_public_a2a_message(
     transaction: &Transaction<'_>,
     request: &SendPublicA2aMessage<'_>,
 ) -> Result<CommandHandlerResult> {
+    let reply_to_camp_message_id =
+        load_trigger_reply_reference(transaction, request.source_agent_run_id, request.camp_id)?;
     let inline = parse_inline_addressing(request.body);
     let explicit_order = stable_unique(
         request
@@ -443,34 +466,6 @@ pub fn persist_public_a2a_message(
         }
     }
 
-    let reply_default = match request.reply_to_camp_message_id {
-        Some(message_id) => {
-            let reply = transaction
-                .query_row(
-                    r#"
-                    SELECT author_type, author_id
-                    FROM camp_message
-                    WHERE id = ?1 AND camp_id = ?2 AND tombstoned_at IS NULL
-                    "#,
-                    params![message_id, request.camp_id],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-                )
-                .optional()?;
-            let Some((author_type, author_id)) = reply else {
-                return Ok(rejected_with_details(
-                    "message.reply_invalid",
-                    "replyToCampMessageId must identify a visible message in the current Camp",
-                    json!({
-                        "replyToCampMessageId": message_id,
-                        "newRequestIdRequired": true,
-                    }),
-                ));
-            };
-            (author_type == "agent").then_some(author_id)
-        }
-        None => None,
-    };
-
     let mut candidate_sources = Vec::new();
     candidate_sources.extend(
         explicit_order
@@ -480,16 +475,17 @@ pub fn persist_public_a2a_message(
             .map(|value| ("--to", value)),
     );
     candidate_sources.extend(inline_order.iter().cloned().map(|value| ("inline", value)));
-    if let Some(recipient) = reply_default.as_ref() {
-        candidate_sources.push(("reply", recipient.clone()));
-    }
 
     let ancestor_agent_ids = load_lineage_agent_ids(transaction, request.source_agent_run_id)?;
+    let immediate_caller = load_immediate_caller(transaction, request.source_agent_run_id)?;
     let active_agent_ids = load_active_camp_agent_ids(transaction, request.camp_id)?;
     for (source, value) in &candidate_sources {
+        let is_immediate_caller = immediate_caller
+            .as_ref()
+            .is_some_and(|caller| caller.agent_id == *value);
         let reason = if value == request.author_agent_id {
             Some("self_target")
-        } else if ancestor_agent_ids.contains(value) {
+        } else if ancestor_agent_ids.contains(value) && !is_immediate_caller {
             Some("ancestor_cycle")
         } else if !active_agent_ids.contains(value) {
             Some("not_current_camp_member")
@@ -541,12 +537,15 @@ pub fn persist_public_a2a_message(
             }),
         ));
     }
-    if !effective_recipients.is_empty()
-        && request.current_a2a_depth >= MESSAGE_DELIVERY_MAX_A2A_DEPTH
-    {
+    let has_forward_recipient = effective_recipients.iter().any(|recipient| {
+        !immediate_caller
+            .as_ref()
+            .is_some_and(|caller| caller.agent_id == *recipient)
+    });
+    if has_forward_recipient && request.current_a2a_depth >= MESSAGE_DELIVERY_MAX_A2A_DEPTH {
         return Ok(rejected_with_details(
             "message.a2a_depth_exhausted",
-            "This public A2A send would exceed the maximum delivery depth of five",
+            "A forward recipient would exceed the maximum delivery depth of five",
             json!({
                 "currentDepth": request.current_a2a_depth,
                 "maximumDepth": MESSAGE_DELIVERY_MAX_A2A_DEPTH,
@@ -726,7 +725,6 @@ pub fn persist_public_a2a_message(
         "inlineOccurrences": inline.occurrences,
         "explicitOrder": explicit_order,
         "footerRecipients": footer_recipients,
-        "replyDefaultRecipient": reply_default,
     });
     let recipient_presentation_json = serde_json::to_string(&recipient_presentation)?;
     let address_mode = if effective_recipients.is_empty() {
@@ -762,7 +760,7 @@ pub fn persist_public_a2a_message(
             content_digest,
             address_mode,
             recipients_json,
-            request.reply_to_camp_message_id,
+            reply_to_camp_message_id,
             request.camp_turn_id,
             now,
             recipient_set_digest,
@@ -785,10 +783,40 @@ pub fn persist_public_a2a_message(
     let root_agent_run_id = request
         .current_a2a_root_agent_run_id
         .unwrap_or(request.source_agent_run_id);
-    let target_depth = request.current_a2a_depth + 1;
-    let lineage_snapshot = stable_unique(ancestor_agent_ids.iter().cloned());
+    let forward_lineage_snapshot = stable_unique(ancestor_agent_ids.iter().cloned());
+    let return_lineage_snapshot = match immediate_caller
+        .as_ref()
+        .and_then(|caller| caller.parent_agent_run_id.as_deref())
+    {
+        Some(parent_agent_run_id) => {
+            stable_unique(load_lineage_agent_ids(transaction, parent_agent_run_id)?)
+        }
+        None => Vec::new(),
+    };
     let mut delivery_ids = Vec::with_capacity(effective_recipients.len());
     for (position, recipient_agent_id) in effective_recipients.iter().enumerate() {
+        let lineage = if let Some(caller) = immediate_caller
+            .as_ref()
+            .filter(|caller| caller.agent_id == *recipient_agent_id)
+        {
+            DeliveryLineage {
+                edge_kind: "return",
+                target_parent_agent_run_id: caller.parent_agent_run_id.clone(),
+                return_to_agent_run_id: Some(caller.agent_run_id.clone()),
+                root_agent_run_id: caller.root_agent_run_id.clone(),
+                a2a_depth: caller.a2a_depth,
+                ancestor_agent_ids: return_lineage_snapshot.clone(),
+            }
+        } else {
+            DeliveryLineage {
+                edge_kind: "forward",
+                target_parent_agent_run_id: Some(request.source_agent_run_id.to_string()),
+                return_to_agent_run_id: None,
+                root_agent_run_id: root_agent_run_id.to_string(),
+                a2a_depth: request.current_a2a_depth + 1,
+                ancestor_agent_ids: forward_lineage_snapshot.clone(),
+            }
+        };
         let delivery_id = Uuid::new_v4().to_string();
         let queue_sequence: i64 = transaction.query_row(
             r#"
@@ -806,10 +834,9 @@ pub fn persist_public_a2a_message(
         let presentation_snapshot = json!({
             "inline": inline_order.contains(recipient_agent_id),
             "explicit": explicit_order.contains(recipient_agent_id),
-            "replyDefault": reply_default.as_ref() == Some(recipient_agent_id),
         });
         let frozen_snapshot = json!({
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "messageId": message_id,
             "campId": request.camp_id,
             "campTurnId": request.camp_turn_id,
@@ -817,14 +844,17 @@ pub fn persist_public_a2a_message(
             "recipientCanonicalPosition": position,
             "recipientDigest": recipient_digest,
             "messageBodyDigest": content_digest,
-            "replyToCampMessageId": request.reply_to_camp_message_id,
+            "replyToCampMessageId": reply_to_camp_message_id,
             "taskId": linked_task_id,
             "taskVersionAtAdmission": task_admission.as_ref().map(|value| value.task_version),
             "assigneeAgentIdAtAdmission": task_admission.as_ref().map(|value| value.assignee_agent_id.as_str()),
             "sourceAgentRunId": request.source_agent_run_id,
-            "a2aRootAgentRunId": root_agent_run_id,
-            "a2aDepth": target_depth,
-            "ancestorAgentIds": lineage_snapshot,
+            "edgeKind": lineage.edge_kind,
+            "targetParentAgentRunId": lineage.target_parent_agent_run_id,
+            "returnToAgentRunId": lineage.return_to_agent_run_id,
+            "a2aRootAgentRunId": lineage.root_agent_run_id,
+            "a2aDepth": lineage.a2a_depth,
+            "ancestorAgentIds": lineage.ancestor_agent_ids,
             "recipientPresentation": presentation_snapshot,
         });
         transaction.execute(
@@ -835,7 +865,9 @@ pub fn persist_public_a2a_message(
                 recipient_digest, message_body_digest,
                 reply_to_camp_message_id, task_id,
                 task_version_at_admission, assignee_agent_id_at_admission,
-                source_agent_run_id, a2a_root_agent_run_id, a2a_depth,
+                source_agent_run_id, edge_kind,
+                target_parent_agent_run_id, return_to_agent_run_id,
+                a2a_root_agent_run_id, a2a_depth,
                 ancestor_agent_ids_json, recipient_presentation_snapshot_json,
                 frozen_snapshot_json, queue_sequence,
                 status, dispatch_phase, wait_condition,
@@ -846,10 +878,11 @@ pub fn persist_public_a2a_message(
                 version, created_at, updated_at, ended_at
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
-                ?9, ?10, ?19, ?20, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
+                ?9, ?10, ?22, ?23, ?11, ?12, ?13, ?14, ?15, ?16,
+                ?17, ?18, ?19, ?20,
                 'pending', 'never_attempted', NULL,
                 0, NULL, NULL, NULL, NULL, 0, 0, NULL, NULL,
-                1, ?18, ?18, NULL
+                1, ?21, ?21, NULL
             )
             "#,
             params![
@@ -861,12 +894,15 @@ pub fn persist_public_a2a_message(
                 position as i64,
                 recipient_digest,
                 content_digest,
-                request.reply_to_camp_message_id,
+                reply_to_camp_message_id,
                 linked_task_id,
                 request.source_agent_run_id,
-                root_agent_run_id,
-                target_depth,
-                serde_json::to_string(&lineage_snapshot)?,
+                lineage.edge_kind,
+                lineage.target_parent_agent_run_id,
+                lineage.return_to_agent_run_id,
+                lineage.root_agent_run_id,
+                lineage.a2a_depth,
+                serde_json::to_string(&lineage.ancestor_agent_ids)?,
                 serde_json::to_string(&presentation_snapshot)?,
                 serde_json::to_string(&frozen_snapshot)?,
                 queue_sequence,
@@ -891,7 +927,10 @@ pub fn persist_public_a2a_message(
                 "recipientAgentId": recipient_agent_id,
                 "recipientCanonicalPosition": position,
                 "queueSequence": queue_sequence,
-                "a2aDepth": target_depth,
+                "edgeKind": lineage.edge_kind,
+                "targetParentAgentRunId": lineage.target_parent_agent_run_id,
+                "returnToAgentRunId": lineage.return_to_agent_run_id,
+                "a2aDepth": lineage.a2a_depth,
             }),
         )?;
         delivery_ids.push(delivery_id);
@@ -1544,7 +1583,7 @@ fn process_dispatch_attempt(
         agent_id: &delivery.recipient_agent_id,
         task_id: delivery.task_id.as_deref(),
         execution_epoch: 1,
-        a2a_parent_agent_run_id: Some(&delivery.source_agent_run_id),
+        a2a_parent_agent_run_id: delivery.target_parent_agent_run_id.as_deref(),
         a2a_root_agent_run_id: Some(&delivery.a2a_root_agent_run_id),
         a2a_depth: delivery.a2a_depth,
         camp_message_boundary_sequence: delivery.message_sequence,
@@ -1690,7 +1729,7 @@ fn process_dispatch_attempt(
                 "message-delivery:{}:retry:{}",
                 delivery.id, delivery.retry_generation
             ),
-            delivery.source_agent_run_id,
+            delivery.target_parent_agent_run_id,
             delivery.a2a_root_agent_run_id,
             delivery.a2a_depth,
             delivery.task_version_at_admission,
@@ -1733,6 +1772,8 @@ fn process_dispatch_attempt(
             "contextFrozen": true,
             "targetAgentRunId": agent_run_id,
             "recipientAgentId": delivery.recipient_agent_id,
+            "edgeKind": delivery.edge_kind,
+            "returnToAgentRunId": delivery.return_to_agent_run_id,
         }),
     )?;
     append_domain_event(
@@ -1748,7 +1789,9 @@ fn process_dispatch_attempt(
             "invocationKind": "a2a",
             "messageDeliveryId": delivery.id,
             "triggerCampMessageId": delivery.message_id,
-            "a2aParentAgentRunId": delivery.source_agent_run_id,
+            "edgeKind": delivery.edge_kind,
+            "a2aParentAgentRunId": delivery.target_parent_agent_run_id,
+            "returnToAgentRunId": delivery.return_to_agent_run_id,
             "a2aRootAgentRunId": delivery.a2a_root_agent_run_id,
             "a2aDepth": delivery.a2a_depth,
         }),
@@ -1770,7 +1813,10 @@ fn load_dispatch_delivery(
                    delivery.recipient_agent_id, delivery.task_id,
                    delivery.task_version_at_admission,
                    delivery.assignee_agent_id_at_admission,
-                   delivery.source_agent_run_id, delivery.a2a_root_agent_run_id,
+                   delivery.source_agent_run_id, delivery.edge_kind,
+                   delivery.target_parent_agent_run_id,
+                   delivery.return_to_agent_run_id,
+                   delivery.a2a_root_agent_run_id,
                    delivery.a2a_depth, delivery.retry_generation
             FROM message_delivery AS delivery
             JOIN camp_message AS message ON message.id = delivery.message_id
@@ -1791,9 +1837,12 @@ fn load_dispatch_delivery(
                     task_version_at_admission: row.get(7)?,
                     assignee_agent_id_at_admission: row.get(8)?,
                     source_agent_run_id: row.get(9)?,
-                    a2a_root_agent_run_id: row.get(10)?,
-                    a2a_depth: row.get(11)?,
-                    retry_generation: row.get(12)?,
+                    edge_kind: row.get(10)?,
+                    target_parent_agent_run_id: row.get(11)?,
+                    return_to_agent_run_id: row.get(12)?,
+                    a2a_root_agent_run_id: row.get(13)?,
+                    a2a_depth: row.get(14)?,
+                    retry_generation: row.get(15)?,
                 })
             },
         )
@@ -2015,6 +2064,139 @@ fn load_active_camp_agent_ids(
     Ok(statement
         .query_map([camp_id], |row| row.get::<_, String>(0))?
         .collect::<rusqlite::Result<HashSet<_>>>()?)
+}
+
+fn load_trigger_reply_reference(
+    transaction: &Transaction<'_>,
+    source_agent_run_id: &str,
+    camp_id: &str,
+) -> Result<Option<String>> {
+    let trigger = transaction
+        .query_row(
+            r#"
+            SELECT source.trigger_camp_message_id,
+                   source.trigger_message_delivery_id,
+                   delivery.message_id,
+                   message.camp_id,
+                   message.tombstoned_at,
+                   source.invocation_kind
+            FROM agent_run AS source
+            JOIN camp_turn ON camp_turn.id = source.camp_turn_id
+            LEFT JOIN message_delivery AS delivery
+              ON delivery.id = source.trigger_message_delivery_id
+            LEFT JOIN camp_message AS message
+              ON message.id = source.trigger_camp_message_id
+            WHERE source.id = ?1 AND camp_turn.camp_id = ?2
+            "#,
+            params![source_agent_run_id, camp_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            },
+        )
+        .optional()?
+        .context("Agent-authored send source Run is outside the current Camp")?;
+    let (
+        trigger_message_id,
+        trigger_delivery_id,
+        delivered_message_id,
+        trigger_camp_id,
+        trigger_tombstoned_at,
+        invocation_kind,
+    ) = trigger;
+    let trigger_message_id =
+        trigger_message_id.context("Agent-authored send source Run has no trigger CampMessage")?;
+    if trigger_camp_id.as_deref() != Some(camp_id) {
+        anyhow::bail!("Agent-authored send trigger CampMessage is outside the current Camp");
+    }
+    if trigger_tombstoned_at.is_some() {
+        anyhow::bail!("Agent-authored send trigger CampMessage is tombstoned");
+    }
+    if invocation_kind == "a2a" && trigger_delivery_id.is_none() {
+        anyhow::bail!("A2A AgentRun has no trigger Message Delivery");
+    }
+    if trigger_delivery_id.is_some()
+        && delivered_message_id.as_deref() != Some(trigger_message_id.as_str())
+    {
+        anyhow::bail!("AgentRun trigger Message Delivery does not match its trigger CampMessage");
+    }
+    Ok(Some(trigger_message_id))
+}
+
+fn load_immediate_caller(
+    transaction: &Transaction<'_>,
+    source_agent_run_id: &str,
+) -> Result<Option<ImmediateCaller>> {
+    let source = transaction
+        .query_row(
+            r#"
+            SELECT a2a_parent_agent_run_id, a2a_root_agent_run_id, a2a_depth
+            FROM agent_run WHERE id = ?1
+            "#,
+            [source_agent_run_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
+        )
+        .optional()?
+        .context("Agent-authored send source Run does not exist")?;
+    let Some(caller_run_id) = source.0 else {
+        if source.2 != 0 {
+            anyhow::bail!("A2A source Run has depth without an immediate caller");
+        }
+        return Ok(None);
+    };
+    let caller = transaction
+        .query_row(
+            r#"
+            SELECT caller.id, conversation.agent_id,
+                   caller.a2a_parent_agent_run_id,
+                   caller.a2a_root_agent_run_id,
+                   caller.a2a_depth
+            FROM agent_run AS source
+            JOIN agent_run AS caller
+              ON caller.id = source.a2a_parent_agent_run_id
+             AND caller.camp_turn_id = source.camp_turn_id
+            JOIN conversation ON conversation.id = caller.conversation_id
+            WHERE source.id = ?1 AND caller.id = ?2
+            "#,
+            params![source_agent_run_id, caller_run_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, i64>(4)?,
+                ))
+            },
+        )
+        .optional()?
+        .context("A2A source Run immediate caller is missing or outside its CampTurn")?;
+    if caller.4 + 1 != source.2 {
+        anyhow::bail!("A2A source Run depth is inconsistent with its immediate caller");
+    }
+    let root_agent_run_id = caller.3.clone().unwrap_or_else(|| caller.0.clone());
+    if source.1.as_deref() != Some(root_agent_run_id.as_str()) {
+        anyhow::bail!("A2A source Run root is inconsistent with its immediate caller");
+    }
+    Ok(Some(ImmediateCaller {
+        agent_run_id: caller.0,
+        agent_id: caller.1,
+        parent_agent_run_id: caller.2,
+        root_agent_run_id,
+        a2a_depth: caller.4,
+    }))
 }
 
 fn load_lineage_agent_ids(

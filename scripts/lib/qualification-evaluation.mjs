@@ -1184,7 +1184,7 @@ export function observedDurableMemberCallEffects(snapshot, campTurnId) {
 }
 
 function isCurrentPublicA2aSnapshot(snapshot) {
-  return Number.isInteger(snapshot?.schemaVersion) && snapshot.schemaVersion >= 27
+  return Number.isInteger(snapshot?.schemaVersion) && snapshot.schemaVersion >= 28
 }
 
 function deriveCurrentMessageDeliverySettlement(snapshot, turn, deliveries) {

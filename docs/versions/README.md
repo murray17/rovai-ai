@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.61
+current_version: v0.62
 last_updated: 2026-08-12
 ---
 
@@ -112,4 +112,5 @@ last_updated: 2026-08-12
 | v0.58 | `historical` | 可恢复 Runtime 漂移与受控重绑定；冻结时真实 Copilot 原地漂移 smoke 未完成 | [v0.58/README.md](v0.58/README.md) |
 | v0.59 | `historical` | 九 Runtime 的零 send 公共输出恢复发布 | [v0.59/README.md](v0.59/README.md) |
 | v0.60 | `historical` | 有界 Tool 输出预览与按需全文复制 | [v0.60/README.md](v0.60/README.md) |
-| v0.61 | `current` | 队员页来源感知会话返回 | [v0.61/README.md](v0.61/README.md) |
+| v0.61 | `historical` | 队员页来源感知会话返回 | [v0.61/README.md](v0.61/README.md) |
+| v0.62 | `current` | 显式 A2A 调用者返回、Core 管理 reply reference 与 Built-in Transport v6 | [v0.62/README.md](v0.62/README.md) |

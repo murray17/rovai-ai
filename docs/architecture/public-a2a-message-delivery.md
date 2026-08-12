@@ -9,11 +9,13 @@ last_updated: 2026-08-12
 # Public A2A Message 与 Message Delivery 架构
 
 本文件定义 v0.45 以后 Agent-to-Agent 协作的长期组件边界。字段级输入、错误和状态合同
-分别见 [Camp Message Send v2](../contracts/camp-message-send-v2.md)、
-[Message Delivery v1](../contracts/message-delivery-v1.md) 与
+分别见 [Camp Message Send v3](../contracts/camp-message-send-v3.md)、
+[Message Delivery v2](../contracts/message-delivery-v2.md) 与
 [Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)；决策理由见
 [ADR-0130](../adr/0130-public-a2a-message-and-unified-delivery.md) 和
-[ADR-0131](../adr/0131-recipient-scoped-event-driven-delivery-recovery.md)，成功 Run 的 zero-send safety net 见
+[ADR-0131](../adr/0131-recipient-scoped-event-driven-delivery-recovery.md)，显式 caller return 与 Core 管理
+reply reference 见
+[ADR-0163](../adr/0163-explicit-caller-return-and-core-managed-reply-reference.md)，成功 Run 的 zero-send safety net 见
 [ADR-0162](../adr/0162-missing-send-recovery-publication.md)。
 
 ## 1. 一条公共事实，多个收件人责任
@@ -45,14 +47,17 @@ Migration 中删除，不作为当前约束或回退来源。
 
 Core 在一个提交事务中完成：
 
-1. 从 authenticated current AgentRun/Lease/Native Binding 推导唯一当前 Camp，验证 AgentRun/CampTurn、正文和 `replyToCampMessageId`；
-2. 解析 `--to`、正文 Addressing Token 和 reply-to default target；
+1. 从 authenticated current AgentRun/Lease/Native Binding 推导唯一当前 Camp，并从 Run trigger
+   自动确定 Message Reply Reference；
+2. 只解析 `--to` 与正文 Addressing Token；
 3. 对所有目标执行 Camp membership、self、presence/removal、fanout、lineage 和 budget
    检查；
 4. 去重并按 canonical Agent ID UTF-8/ASCII 字节序升序冻结 Effective Recipients；
 5. 计算 canonical input、recipient digest、presentation metadata 和 envelope preimage；
-6. 原子写入一个 Public A2A Message，以及每个目标一个 Message Delivery；
-7. 记录 idempotency receipt 和 audit facts。
+6. 将 exact Immediate Caller 目标分类为 `return`，其他目标分类为 `forward`，并为每个目标
+   冻结 target parent/root/depth；
+7. 原子写入一个 Public A2A Message，以及每个目标一个 Message Delivery；
+8. 记录 idempotency receipt 和 audit facts。
 
 任何一个目标不合格、fanout 超限、self/ancestor cycle 或相同 requestId 输入冲突，都使整笔
 事务失败，不留下公共消息、Delivery 或半成品审计事实。Runtime readiness、busy 和容量不
@@ -61,7 +66,13 @@ Core 在一个提交事务中完成：
 ## 3. Delivery 生命周期与唯一 Dispatch Pump
 
 Message Delivery Dispatch Pump 是投递、排队和物化的唯一权威。它读取 Delivery 自己冻结的
-recipient、message、Task、lineage 和 presentation snapshot，不重新解析正文或扩大目标。
+recipient、message、Task、`forward | return` edge、target lineage 和 presentation snapshot，不重新
+解析正文或扩大目标。
+
+Forward Delivery 把 source Run 作为 target parent 并将 depth 加一。Return Delivery 保留 source Run
+作为因果作者，但把 target parent/root/depth 恢复为 Immediate Caller 原先的调用 lineage；它仍进入
+同一个 recipient queue、消耗一个 A2A slot，并创建新的 caller continuation AgentRun。非直属祖先
+继续被 lineage guard 拒绝。
 
 ```text
 accepted/pending (no attempt)
@@ -99,7 +110,7 @@ Delivery attempt
   → if not fit: terminal Delivery failure, no AgentRun
 ```
 
-完整 Current Input、直接父消息（当 `replyToCampMessageId` 有效时）和 mandatory structure
+完整 Current Input、Core 管理的直接父消息和 mandatory structure
 优先于可选 recent history。若清除可选内容后仍无法容纳，Delivery 以
 `context_payload_too_large` 终态失败；Public Message、其他 recipient Deliveries 和
 CampTurn 事实保持不变。该失败不是 waitCondition，也不会被自动重试；需要新的公共发送
@@ -108,8 +119,8 @@ CampTurn 事实保持不变。该失败不是 waitCondition，也不会被自动
 Current Input 保留触发来源的权威差异。普通用户触发精确投影为
 `{"source":{"type":"user"},"message":...}`；Public A2A target Run 精确投影为
 `{"source":{"type":"member_call","senderAgentId":...,"senderName":...},"message":...}`。
-Core 在 preflight 和 frozen Context materialization 时验证 CampMessage 作者、source AgentRun、
-MessageDelivery、recipient 与 A2A lineage 一致；不把 CampMessage ID、MessageDelivery ID 或 source
+Core 在 preflight 和 frozen Context materialization 时验证 CampMessage 作者、Delivery causal source、
+target parent/root/depth、recipient 与 A2A lineage 一致；不把 CampMessage ID、MessageDelivery ID 或 source
 AgentRun ID 暴露给模型。
 
 ContextManifest 只证明冻结的 Model Context Projection 及其 source/selection Evidence。随后独立的
@@ -151,7 +162,7 @@ stdout 与 ACP `end_turn` 时 last-tool 后 assistant suffix。Core 不回退到
 | 事实/投影 | 唯一权威 | 允许的消费者 |
 | --- | --- | --- |
 | 公共正文、作者、reply-to、公共可见性 | `CampMessage` | Camp 时间线、搜索、Shared Conversation、审计引用 |
-| 收件人、队列、尝试、waitCondition、目标 Run、终态 | `MessageDelivery` | Dispatch Pump、Delivery Read Side、Drawer、审计 |
+| 收件人、`forward | return`、target lineage、队列、尝试、waitCondition、目标 Run、终态 | `MessageDelivery` | Dispatch Pump、Delivery Read Side、Drawer、审计 |
 | Runtime 过程和证据 | Canonical Runtime Activity / Execution Evidence | Execution Drawer、审计、诊断 |
 | CampTurn 停止与 fence | CampTurn cancellation authority | Composer Stop、Run/Delivery projection |
 | Approval pending | Approval Read Side | Composer 上方唯一 Approval Dock；Header/通知摘要只负责定位与聚焦 |

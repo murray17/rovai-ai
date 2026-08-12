@@ -86,7 +86,7 @@ test('Evidence Index exposes only bounded Public A2A content and mechanical deli
   const input = fixture()
   delete input.snapshot.inboxMessages
   delete input.snapshot.conversationInputs
-  input.snapshot.schemaVersion = 27
+  input.snapshot.schemaVersion = 28
   input.snapshot.agentRuns.push({
     id: 'run-reviewer',
     campTurnId: 'turn-1',

@@ -33,15 +33,15 @@ const criteria = [
   criterion('CCC-010', 'ContextManifest version is 11', [
     test('crates/rovai-core/src/context_contract.rs', 'binding_contract_freezes_each_context_axis_version')
   ]),
-  criterion('CCC-011', 'Data Contract is v0.54 with projection schema 30', [
-    test('crates/rovai-core/src/db.rs', 'current_data_contract_accepts_current_and_exact_v054_or_v052_sources'),
+  criterion('CCC-011', 'Data Contract is v0.62 with projection schema 31', [
+    test('crates/rovai-core/src/db.rs', 'current_data_contract_accepts_current_and_exact_v062_v054_or_v052_sources'),
     test('crates/rovai-core/src/db.rs', 'v71_upgrades_the_exact_v052_source_without_compatibility_rows')
   ]),
-  criterion('CCC-012', 'CampSnapshot schema is 27', [
+  criterion('CCC-012', 'CampSnapshot schema is 28', [
     test('crates/rovai-core/src/read_model.rs', 'snapshot_projects_current_names_from_structured_mentions')
   ]),
   criterion('CCC-013', 'Migration 71 admits only the exact v0.54/v0.52 upgrade sources', [
-    test('crates/rovai-core/src/db.rs', 'current_data_contract_accepts_current_and_exact_v054_or_v052_sources')
+    test('crates/rovai-core/src/db.rs', 'current_data_contract_accepts_current_and_exact_v062_v054_or_v052_sources')
   ]),
   criterion('CCC-014', 'Migration preserves completed Camp, Message, Task, and terminal Run/Turn history', [
     test('crates/rovai-core/src/context.rs', 'v68_through_v71_clean_break_preserves_business_history_and_removes_old_context_state')
@@ -57,7 +57,7 @@ export const CURRENT_CONTRACT_PREREQUISITES = Object.freeze([
     evidence: test('crates/rovai-core/src/collaboration.rs', 'agent_task_updates_respect_lead_and_assignee_authority')
   },
   {
-    id: 'built-in-transport-v5',
+    id: 'built-in-transport-v6',
     evidence: test('crates/rovai-core/src/builtin_tool_transport.rs', 'list_and_describe_share_one_digest')
   },
   {
@@ -70,7 +70,7 @@ export const CURRENT_CONTRACT_CRITERIA = Object.freeze(criteria)
 
 export const CURRENT_CONTRACT_PROFILE = defineBenchmarkProfile({
   id: 'current-contract-conformance',
-  version: '1.2.0',
+  version: '1.3.0',
   lane: 'contract-conformance',
   hardOutcomeDefinition: {
     validity: 'deterministic_source_and_harness_valid',
@@ -88,8 +88,8 @@ export const CURRENT_CONTRACT_PROFILE = defineBenchmarkProfile({
     compositeScore: false
   },
   suite: {
-    id: 'rovai-v0.54-current-contract',
-    version: '1.2.0',
+    id: 'rovai-v0.62-current-contract',
+    version: '1.3.0',
     shuffle: false,
     rounds: [{ id: 'deterministic', ordinal: 1 }],
     cases: criteria.map((entry) => ({

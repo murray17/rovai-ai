@@ -313,7 +313,7 @@ function deriveLegacyCollaborationEvidence(snapshot, dispatchBoundary) {
 }
 
 function isCurrentPublicA2aSnapshot(snapshot) {
-  return Number.isInteger(snapshot?.schemaVersion) && snapshot.schemaVersion >= 27
+  return Number.isInteger(snapshot?.schemaVersion) && snapshot.schemaVersion >= 28
 }
 
 function deriveCurrentMechanicalSettlement(delivery, recipientRun) {

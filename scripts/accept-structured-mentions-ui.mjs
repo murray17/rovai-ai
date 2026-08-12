@@ -188,8 +188,8 @@ try {
   await reloadRenderer(running.cdp)
   await openCamp(running.cdp, campId)
   const initialSnapshot = await request(running.cdp, 'camps.snapshot', { campId })
-  assert(initialSnapshot.schemaVersion === 27,
-    `Camp snapshot schema is not v27: ${initialSnapshot.schemaVersion}`)
+  assert(initialSnapshot.schemaVersion === 28,
+    `Camp snapshot schema is not v28: ${initialSnapshot.schemaVersion}`)
   assert(
     deepEqual(initialSnapshot.members.map((member) => member.agentId), targetMemberIds),
     `Camp does not contain exactly the three target members: ${JSON.stringify(initialSnapshot.members)}`

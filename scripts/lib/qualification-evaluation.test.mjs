@@ -518,7 +518,7 @@ test('Convergence uses settlement facts and does not fail merely because a Run f
 
 test('current Message Delivery coverage, not a missing retired Conversation Input array, determines collaboration settlement', () => {
   const snapshot = hardEvidenceSnapshot()
-  snapshot.schemaVersion = 27
+  snapshot.schemaVersion = 28
   delete snapshot.conversationInputs
   delete snapshot.inboxMessages
   snapshot.turns[0].executionBudget = { acceptedA2a: 1 }

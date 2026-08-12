@@ -174,4 +174,5 @@ generated_from: docs/adr-front-matter
 | [ADR-0160](0160-focused-camp-inspector-and-single-approval-surface.md) | Focused Camp Inspector and Single Approval Surface | `accepted` | `cross-version` | [v0.58](../versions/v0.58/README.md) | — |
 | [ADR-0161](0161-event-driven-root-scoped-skill-projection-reconciliation.md) | Event-Driven Root-Scoped Skill Projection Reconciliation | `accepted` | `cross-version` | [v0.58](../versions/v0.58/README.md) | — |
 | [ADR-0162](0162-missing-send-recovery-publication.md) | Missing-Send Recovery Publication at Successful AgentRun Termination | `accepted` | `cross-version` | [v0.59](../versions/v0.59/README.md) | — |
+| [ADR-0163](0163-explicit-caller-return-and-core-managed-reply-reference.md) | Explicit Caller Return and Core-Managed Reply Reference | `accepted` | `cross-version` | [v0.62](../versions/v0.62/README.md) | — |
 <!-- adr-history:end -->

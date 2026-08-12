@@ -14,7 +14,7 @@ use crate::{
     skill_projection::SkillExposureSnapshot,
 };
 
-pub const READ_MODEL_SCHEMA_VERSION: i64 = 27;
+pub const READ_MODEL_SCHEMA_VERSION: i64 = 28;
 pub const EVENT_BATCH_SCHEMA_VERSION: i64 = 9;
 pub const NAVIGATION_SCHEMA_VERSION: i64 = 3;
 pub const EXECUTION_EVIDENCE_PAGE_SCHEMA_VERSION: i64 = 1;
@@ -504,6 +504,9 @@ pub struct MessageDeliveryView {
     pub task_id: Option<String>,
     pub recipient_agent_id: String,
     pub recipient_canonical_position: i64,
+    pub edge_kind: String,
+    pub target_parent_agent_run_id: Option<String>,
+    pub return_to_agent_run_id: Option<String>,
     pub status: String,
     pub dispatch_phase: String,
     pub wait_condition: Option<String>,
@@ -1416,7 +1419,9 @@ fn load_message_deliveries(
     let mut statement = transaction.prepare(
         r#"
         SELECT id, message_id, camp_turn_id, task_id, recipient_agent_id,
-               recipient_canonical_position, status, dispatch_phase,
+               recipient_canonical_position, edge_kind,
+               target_parent_agent_run_id, return_to_agent_run_id,
+               status, dispatch_phase,
                wait_condition, dispatch_attempt_count, retry_generation,
                context_manifest_id, target_agent_run_id,
                manual_intervention_required, failure_code,
@@ -1435,19 +1440,22 @@ fn load_message_deliveries(
                 task_id: row.get(3)?,
                 recipient_agent_id: row.get(4)?,
                 recipient_canonical_position: row.get(5)?,
-                status: row.get(6)?,
-                dispatch_phase: row.get(7)?,
-                wait_condition: row.get(8)?,
-                dispatch_attempt_count: row.get(9)?,
-                retry_generation: row.get(10)?,
-                context_manifest_id: row.get(11)?,
-                target_agent_run_id: row.get(12)?,
-                manual_intervention_required: row.get::<_, i64>(13)? != 0,
-                failure_code: row.get(14)?,
-                version: row.get(15)?,
-                created_at: row.get(16)?,
-                updated_at: row.get(17)?,
-                ended_at: row.get(18)?,
+                edge_kind: row.get(6)?,
+                target_parent_agent_run_id: row.get(7)?,
+                return_to_agent_run_id: row.get(8)?,
+                status: row.get(9)?,
+                dispatch_phase: row.get(10)?,
+                wait_condition: row.get(11)?,
+                dispatch_attempt_count: row.get(12)?,
+                retry_generation: row.get(13)?,
+                context_manifest_id: row.get(14)?,
+                target_agent_run_id: row.get(15)?,
+                manual_intervention_required: row.get::<_, i64>(16)? != 0,
+                failure_code: row.get(17)?,
+                version: row.get(18)?,
+                created_at: row.get(19)?,
+                updated_at: row.get(20)?,
+                ended_at: row.get(21)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?)
