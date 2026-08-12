@@ -291,11 +291,13 @@ export function StructuredMentionComposer({
   const fallbackEditorRef = useRef<HTMLDivElement>(null)
   const editorRef = providedEditorRef ?? fallbackEditorRef
   const pendingSelectionRef = useRef<StructuredMentionSelection | null>(null)
+  const restoreFocusAfterDomResetRef = useRef(false)
   const lastSelectionRef = useRef<StructuredMentionSelection>({ anchor: 0, focus: 0 })
   const isComposingRef = useRef(false)
   const compositionFrameRef = useRef<number | null>(null)
   const [query, setQuery] = useState<StructuredComposerQuery | null>(null)
   const [activeOption, setActiveOption] = useState(0)
+  const [editorDomRevision, setEditorDomRevision] = useState(0)
   const generatedId = useId()
   const mentionMenuId = `${id || generatedId}-mention-options`
   const skillMenuId = `${id || generatedId}-skill-options`
@@ -332,12 +334,15 @@ export function StructuredMentionComposer({
 
   useLayoutEffect(() => {
     const editor = editorRef.current
-    if (editor) removeUnmanagedEditorChildren(editor)
     const pending = pendingSelectionRef.current
     if (!editor || !pending) return
+    if (restoreFocusAfterDomResetRef.current) {
+      editor.focus({ preventScroll: true })
+    }
     restoreDomSelection(editor, pending)
     pendingSelectionRef.current = null
-  }, [content])
+    restoreFocusAfterDomResetRef.current = false
+  }, [content, editorDomRevision])
 
   const currentSelection = (): StructuredMentionSelection => {
     const editor = editorRef.current
@@ -374,7 +379,19 @@ export function StructuredMentionComposer({
     if (!editor) return
     const nextContent = readStructuredContent(editor)
     const nextSelection = readDomSelection(editor)
+    const requiresOwnershipReset = !editorDomMatchesReactProjection(editor, content)
     lastSelectionRef.current = nextSelection
+    if (requiresOwnershipReset) {
+      // IME and native contenteditable editing may wrap, replace, or insert
+      // nodes below the editor. Never remove those nodes imperatively: doing so
+      // can detach a React-owned descendant and make a later commit throw from
+      // removeChild. Remount the editor host instead, so React discards the
+      // mutated subtree as one unit and establishes ownership again.
+      pendingSelectionRef.current = nextSelection
+      restoreFocusAfterDomResetRef.current = restoreFocusAfterDomResetRef.current
+        || document.activeElement === editor
+      setEditorDomRevision((current) => current + 1)
+    }
     if (!structuredContentEqual(content, nextContent)) {
       pendingSelectionRef.current = nextSelection
       onChange(nextContent)
@@ -610,6 +627,7 @@ export function StructuredMentionComposer({
   return (
     <div className={rootClassName} style={{ position: 'relative', minWidth: 0 }}>
       <div
+        key={editorDomRevision}
         ref={editorRef}
         id={id}
         className="structured-mention-editor"
@@ -896,15 +914,28 @@ function readStructuredContent(editor: HTMLDivElement): StructuredCampMessageCon
   return normalizeStructuredMentionContent(content)
 }
 
-function removeUnmanagedEditorChildren(editor: HTMLDivElement): void {
-  for (const node of [...editor.childNodes]) {
-    if (
-      node.nodeType !== Node.ELEMENT_NODE
-      || !(node as HTMLElement).dataset.editorSegment
-    ) {
-      node.remove()
+function editorDomMatchesReactProjection(
+  editor: HTMLDivElement,
+  content: StructuredCampMessageContent
+): boolean {
+  const children = [...editor.childNodes]
+  if (children.length !== content.length) return false
+  return children.every((node, index) => {
+    if (node.nodeType !== Node.ELEMENT_NODE) return false
+    const element = node as HTMLElement
+    const segment = content[index]
+    if (!segment) return false
+    if (segment.kind === 'text') {
+      return element.dataset.editorSegment === 'text'
+        && [...element.childNodes].every((child) => child.nodeType === Node.TEXT_NODE)
     }
-  }
+    if (element.dataset.editorSegment !== 'token') return false
+    if (segment.kind === 'all_members_mention') {
+      return element.dataset.tokenKind === 'all_members_mention'
+    }
+    return element.dataset.tokenKind === 'member_mention'
+      && element.dataset.agentId === segment.agentId
+  })
 }
 
 function readDomSelection(editor: HTMLDivElement): StructuredMentionSelection {

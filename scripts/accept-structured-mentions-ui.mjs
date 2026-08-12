@@ -54,6 +54,7 @@ const expectedContent = [
   { kind: 'text', text: ' ，请给出结论。' }
 ]
 const expectedBody = '请同时检查这条消息：@小狐狸 @小河狸 @咕咕 ，请给出结论。'
+const nativeDomRegressionBody = '原生输入回归'
 const acceptanceExecutableFingerprint = `sha256:${createHash('sha256')
   .update(await readFile(acceptanceExecutablePath))
   .digest('hex')}`
@@ -299,6 +300,79 @@ try {
     `document.querySelector('#camp-message')?.textContent === ''`)
   await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
     (draft) => deepEqual(draft.content, []), 10_000)
+
+  // A native contenteditable/IME edit may wrap a React-owned segment. The
+  // Composer must replace the editor host instead of imperatively removing the
+  // wrapper, otherwise the next controlled clear crashes React in removeChild
+  // and leaves the entire App root blank.
+  await focusEditorAtEnd(running.cdp)
+  await running.cdp.send('Input.insertText', { text: '原生输入' })
+  await waitForExpression(running.cdp, `(() => {
+    const editor = document.querySelector('#camp-message')
+    return editor?.textContent === '原生输入'
+      && editor.querySelectorAll(':scope > [data-editor-segment="text"]').length === 1
+  })()`)
+  const nativeMutationSetup = await evaluate(running.cdp, `(() => {
+    const editor = document.querySelector('#camp-message')
+    const segment = editor?.querySelector(':scope > [data-editor-segment="text"]')
+    if (!(editor instanceof HTMLDivElement) || !(segment instanceof HTMLElement)) return null
+    window.__structuredMentionOwnershipErrors = []
+    window.addEventListener('error', (event) => {
+      window.__structuredMentionOwnershipErrors.push({
+        message: event.message,
+        error: event.error instanceof Error ? event.error.message : null
+      })
+    })
+    window.__structuredMentionMutatedEditor = editor
+    const wrapper = document.createElement('div')
+    editor.insertBefore(wrapper, segment)
+    wrapper.appendChild(segment)
+    segment.textContent += '回归'
+    const selection = window.getSelection()
+    const range = document.createRange()
+    range.selectNodeContents(segment)
+    range.collapse(false)
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    editor.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      inputType: 'insertCompositionText',
+      data: '回归'
+    }))
+    return { text: editor.textContent, wrapperCount: editor.querySelectorAll(':scope > div').length }
+  })()`)
+  assert(nativeMutationSetup?.text === nativeDomRegressionBody
+    && nativeMutationSetup.wrapperCount === 1,
+    `Could not prepare the native DOM ownership regression: ${JSON.stringify(nativeMutationSetup)}`)
+  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+    (draft) => deepEqual(draft.content, [{ kind: 'text', text: nativeDomRegressionBody }]), 10_000)
+  await waitForExpression(running.cdp, `(() => {
+    const editor = document.querySelector('#camp-message')
+    return editor !== window.__structuredMentionMutatedEditor
+      && editor?.textContent === ${JSON.stringify(nativeDomRegressionBody)}
+      && editor.querySelectorAll(':scope > [data-editor-segment="text"]').length === 1
+      && !editor.querySelector(':scope > div')
+      && document.activeElement === editor
+  })()`)
+  await waitForExpression(running.cdp,
+    `document.querySelector('.composer .composer-send')?.disabled === false`)
+  await mouseClick(running.cdp, '.composer .composer-send')
+  await waitForValue(async () => {
+    const snapshot = await request(running.cdp, 'camps.snapshot', { campId })
+    return snapshot.messages.find((message) =>
+      message.authorType === 'user' && message.body === nativeDomRegressionBody) ?? null
+  }, Boolean, 30_000)
+  await waitForExpression(running.cdp, `(() => {
+    const root = document.querySelector('#root')
+    const editor = document.querySelector('#camp-message')
+    return Boolean(root?.firstElementChild) && editor?.textContent === ''
+  })()`, 10_000)
+  const nativeOwnershipErrors = await evaluate(running.cdp,
+    `window.__structuredMentionOwnershipErrors ?? []`)
+  assert(!nativeOwnershipErrors.some((error) =>
+    `${error.message}\n${error.error}`.includes('removeChild')),
+    `Native DOM ownership still crashed React: ${JSON.stringify(nativeOwnershipErrors)}`)
+
   await focusEditorAtEnd(running.cdp)
   await running.cdp.send('Input.insertText', { text: expectedContent[0].text })
   let expectedEditorText = expectedContent[0].text
