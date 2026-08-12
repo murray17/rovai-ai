@@ -90,6 +90,7 @@ import {
   executionEvidenceCopyText,
   formatByteSize,
   liveRuntimeEventFromCore,
+  liveRuntimeEventFromExecutionEvidence,
   parseGitStatus,
   selectCompleteExecutionEvidence,
   toolDetailPreview
@@ -2422,6 +2423,54 @@ describe('task event projections', () => {
     ])
     expect(progress.items[0]).toMatchObject({ body: '第一段说明。' })
     expect(progress.items[2]).toMatchObject({ body: '第二段说明。' })
+  })
+
+  it('preserves canonical identity when rebuilding terminal execution history', () => {
+    const canonical = canonicalActivity('command-1', {
+      activityDomain: 'shell', semanticKind: 'shell.execute',
+      presentationHint: '读取 SKILL.md', phase: 'terminal', outcome: 'succeeded',
+      sourceEvidenceIds: ['command-started', 'command-completed'],
+      firstEvidenceSequence: 1, lastEvidenceSequence: 2, revision: 2
+    })
+    const evidence: AgentRunExecutionEvidenceView[] = [{
+      id: 'command-started', agentRunId: 'run-terminal', executionEpoch: 1, sequence: 1,
+      eventType: 'activity.started', kind: 'command', phase: 'started',
+      payload: {
+        item: {
+          id: 'native-command-1', type: 'commandExecution',
+          command: 'sed -n 1,120p SKILL.md', status: 'inProgress'
+        }
+      },
+      canonical,
+      contentBlobId: null, contentByteCount: 0, isTruncated: false,
+      occurredAt: '2026-08-12T03:14:07Z'
+    }, {
+      id: 'command-completed', agentRunId: 'run-terminal', executionEpoch: 1, sequence: 2,
+      eventType: 'activity.completed', kind: 'command', phase: 'completed',
+      payload: {
+        item: {
+          id: 'native-command-1', type: 'commandExecution',
+          command: 'sed -n 1,120p SKILL.md', status: 'completed'
+        }
+      },
+      canonical,
+      contentBlobId: null, contentByteCount: 0, isTruncated: false,
+      occurredAt: '2026-08-12T03:14:08Z'
+    }]
+
+    const progress = buildLiveExecutionProgress(
+      evidence.map(liveRuntimeEventFromExecutionEvidence),
+      'run-terminal'
+    )
+
+    expect(progress.items).toEqual([expect.objectContaining({
+      kind: 'tool',
+      step: expect.objectContaining({
+        id: 'command-1',
+        title: '读取 SKILL.md',
+        status: 'completed'
+      })
+    })])
   })
 
   it('does not present a denied or not-executed canonical outcome as completed', () => {

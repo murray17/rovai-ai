@@ -30,6 +30,7 @@ import {
   buildLiveExecutionProgress,
   executionEvidenceCopyText,
   formatByteSize,
+  liveRuntimeEventFromExecutionEvidence,
   type LiveExecutionProgress,
   type LiveRuntimeEvent,
   localDayKey,
@@ -847,14 +848,7 @@ export function CampWorkspace({
   const executionEvents = useMemo(() => {
     const events = new Map<string, LiveRuntimeEvent>()
     for (const evidence of snapshot.executionEvidence) {
-      events.set(evidence.id, {
-        id: evidence.id,
-        agentRunId: evidence.agentRunId,
-        eventType: evidence.eventType,
-        payload: evidence.payload,
-        canonical: evidence.canonical,
-        createdAt: evidence.occurredAt
-      })
+      events.set(evidence.id, liveRuntimeEventFromExecutionEvidence(evidence))
     }
     for (const event of liveRuntimeEvents) {
       if (!events.has(event.id)) events.set(event.id, event)
@@ -3328,13 +3322,10 @@ function RunExecutionDisclosure({
   const durableEvidenceCount = Math.max(0, run.executionEvidenceCount)
   const historyNeeded = !nonTerminal && loadedEvidenceCount < durableEvidenceCount
   const historicalProgress = useMemo(() => historicalEvidence
-    ? buildLiveExecutionProgress(historicalEvidence.map((evidence) => ({
-        id: evidence.id,
-        agentRunId: evidence.agentRunId,
-        eventType: evidence.eventType,
-        payload: evidence.payload,
-        createdAt: evidence.occurredAt
-      })), run.id)
+    ? buildLiveExecutionProgress(
+        historicalEvidence.map(liveRuntimeEventFromExecutionEvidence),
+        run.id
+      )
     : null, [historicalEvidence, run.id])
   const effectiveTruncatedEvidence = (historicalEvidence ?? truncatedEvidence)
     .filter((evidence) => evidence.isTruncated)

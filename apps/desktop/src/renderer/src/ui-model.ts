@@ -219,6 +219,19 @@ export function liveRuntimeEventFromCore(
   }
 }
 
+export function liveRuntimeEventFromExecutionEvidence(
+  evidence: AgentRunExecutionEvidenceView
+): LiveRuntimeEvent {
+  return {
+    id: evidence.id,
+    agentRunId: evidence.agentRunId,
+    eventType: evidence.eventType,
+    payload: evidence.payload,
+    canonical: evidence.canonical,
+    createdAt: evidence.occurredAt
+  }
+}
+
 export function buildLiveExecutionProgress(
   events: LiveRuntimeEvent[],
   agentRunId: string
