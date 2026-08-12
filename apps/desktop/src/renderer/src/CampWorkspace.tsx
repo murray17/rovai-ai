@@ -3358,9 +3358,6 @@ function RunExecutionDisclosure({
             <summary>
               <ToolCallIcon activityDomain={step.activityDomain} status={step.status} />
               <span className="tool-call-title">{step.title}</span>
-              <span className="tool-call-source">
-                {step.credibility === 'core_verified' ? 'Core 已验证' : 'Runtime 报告'}
-              </span>
               <span className={`tool-call-result status-${step.status}`}>
                 {toolCallStatusLabel(step.status)}
               </span>

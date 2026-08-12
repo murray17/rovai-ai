@@ -1710,7 +1710,6 @@ button.timeline-event-card:hover { border-color: var(--brand); background: var(-
 .tool-call-icon { display: inline-grid; width: 16px; height: 16px; flex: 0 0 16px; place-items: center; color: var(--muted); font: 650 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .tool-call-icon.status-running { border: 1px solid var(--line-strong); border-top-color: var(--info); border-radius: 50%; color: transparent; animation: camp-marker-spin 700ms linear infinite; }
 .tool-call-title { color: var(--muted); }
-.tool-call-source { padding: 1px 5px; border: 1px solid var(--line); border-radius: 999px; color: var(--faint); font-size: 9px; line-height: 1.25; }
 .tool-call-result { margin-left: 2px; font-size: 10px; }
 .tool-call-result.status-completed { color: var(--success); }
 .tool-call-result.status-failed { color: var(--danger); }

@@ -25,7 +25,7 @@ const activeRunId = 'run-codex'
 const historicalRunId = 'run-codex-history'
 
 const runtimes = [
-  runtime('codex', 'codex-cli', 'Codex CLI', '读取 README.md', 'Runtime 报告', {
+  runtime('codex', 'codex-cli', 'Codex CLI', '读取 README.md', {
     protocol: 'codex-app-server', domain: 'shell', semantic: 'shell.execute',
     evidenceKind: 'command', eventType: 'activity.completed', presentationHint: '读取 README.md', payload: {
       item: {
@@ -36,16 +36,16 @@ const runtimes = [
       }
     }
   }),
-  runtime('opencode', 'opencode-cli', 'OpenCode', 'read_file', 'Runtime 报告', acp('read', 'read_file', 'file', 'file.read')),
-  runtime('copilot', 'copilot-cli', 'GitHub Copilot', 'edit_file', 'Runtime 报告', acp('edit', 'edit_file', 'file', 'file.write')),
-  runtime('kiro', 'kiro-cli', 'Kiro', 'execute', 'Runtime 报告', acp('execute', 'execute', 'shell', 'shell.execute')),
-  runtime('qoder', 'qoder-cli', 'Qoder', 'search_workspace', 'Runtime 报告', acp('search', 'search_workspace', 'tool', 'tool.web.search')),
-  runtime('codebuddy', 'codebuddy-cli', 'CodeBuddy', 'mcp_call', 'Runtime 报告', acp('mcp_tool_call', 'mcp_call', 'tool', 'tool.call')),
-  runtime('qwen', 'qwen-code', 'Qwen Code', 'write_file', 'Runtime 报告', acp('write_file', 'write_file', 'file', 'file.write')),
-  runtime('claude', 'claude-code-cli', 'Claude Code', null, null, {
+  runtime('opencode', 'opencode-cli', 'OpenCode', 'read_file', acp('read', 'read_file', 'file', 'file.read')),
+  runtime('copilot', 'copilot-cli', 'GitHub Copilot', 'edit_file', acp('edit', 'edit_file', 'file', 'file.write')),
+  runtime('kiro', 'kiro-cli', 'Kiro', 'execute', acp('execute', 'execute', 'shell', 'shell.execute')),
+  runtime('qoder', 'qoder-cli', 'Qoder', 'search_workspace', acp('search', 'search_workspace', 'tool', 'tool.web.search')),
+  runtime('codebuddy', 'codebuddy-cli', 'CodeBuddy', 'mcp_call', acp('mcp_tool_call', 'mcp_call', 'tool', 'tool.call')),
+  runtime('qwen', 'qwen-code', 'Qwen Code', 'write_file', acp('write_file', 'write_file', 'file', 'file.write')),
+  runtime('claude', 'claude-code-cli', 'Claude Code', null, {
     protocol: 'claude-stream-json', domain: 'runtime', semantic: 'runtime.run', runLevelOnly: true
   }),
-  runtime('antigravity', 'antigravity-app', 'Antigravity', 'camp.message.send', 'Core 已验证', {
+  runtime('antigravity', 'antigravity-app', 'Antigravity', 'camp.message.send', {
     protocol: 'antigravity-log', domain: 'tool', semantic: 'tool.call',
     evidenceKind: 'runtime.action', eventType: 'runtime.action', sourceAuthority: 'core',
     credibility: 'core_verified', payload: {
@@ -401,14 +401,13 @@ try {
   if (app) await closeApp(app)
 }
 
-function runtime(key, adapterKind, runtimeName, expectedToolName, expectedSource, details) {
+function runtime(key, adapterKind, runtimeName, expectedToolName, details) {
   return {
     key,
     agentId: `agent_${101 + runtimesLengthHint(key)}`,
     adapterKind,
     runtimeName,
     expectedToolName,
-    expectedSource,
     ...details
   }
 }
@@ -1012,7 +1011,10 @@ async function collectRuntimeRows(cdp) {
           '.execution-run-list, .execution-run-item, [aria-label="选择 AgentRun"]'
         ).length,
         toolTitles: [...document.querySelectorAll('.execution-drawer .tool-call-title')].map((node) => node.textContent?.trim() ?? ''),
-        toolSources: [...document.querySelectorAll('.execution-drawer .tool-call-source')].map((node) => node.textContent?.trim() ?? ''),
+        toolSourceLabelCount: document.querySelectorAll('.execution-drawer .tool-call-source').length,
+        hasVisibleSourceLabel: /Core 已验证|Runtime 报告/.test(
+          document.querySelector('.execution-drawer')?.textContent ?? ''
+        ),
         body: article?.querySelector('.message-content')?.textContent?.trim()
           ?? article?.querySelector('.safe-markdown')?.textContent?.trim() ?? ''
       }
@@ -1234,8 +1236,8 @@ function assertRuntimeRows(observed) {
     }
     assert(row.toolTitles.length === 1 && row.toolTitles[0] === expected.expectedToolName,
       `${expected.runtimeName} tool title mismatch: ${JSON.stringify(row)}`)
-    assert(row.toolSources[0] === expected.expectedSource,
-      `${expected.runtimeName} source label mismatch: ${JSON.stringify(row)}`)
+    assert(row.toolSourceLabelCount === 0 && row.hasVisibleSourceLabel === false,
+      `${expected.runtimeName} exposed a redundant source label: ${JSON.stringify(row)}`)
   }
 }
 
