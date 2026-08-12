@@ -25,13 +25,13 @@ describe('appearance preference', () => {
   })
 
   it('maps preferences and system colors deterministically', () => {
-    expect(nativeThemeSource('system')).toBe('light')
+    expect(nativeThemeSource('system')).toBe('system')
     expect(nativeThemeSource('day')).toBe('light')
-    expect(nativeThemeSource('night')).toBe('light')
+    expect(nativeThemeSource('night')).toBe('dark')
     expect(resolvedTheme(false)).toBe('day')
-    expect(resolvedTheme(true)).toBe('day')
+    expect(resolvedTheme(true)).toBe('night')
     expect(themeBackground('day')).toBe('#F2F4F1')
-    expect(themeBackground('night')).toBe('#F2F4F1')
+    expect(themeBackground('night')).toBe('#0D1114')
   })
 
   it('persists a valid preference atomically and restores it', async () => {

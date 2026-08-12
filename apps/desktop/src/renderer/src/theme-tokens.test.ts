@@ -109,8 +109,9 @@ function expectTextContrast(tokens: Record<string, string>): void {
   }
 }
 
-describe('Neutral Porcelain + Steel theme tokens', () => {
+describe('Porcelain Day + Steel Night theme tokens', () => {
   const day = tokenBlock(':root')
+  const night = tokenBlock(':root[data-theme="night"]')
 
   it('defines the complete canonical Day token contract', () => {
     for (const token of requiredTokens) {
@@ -121,8 +122,18 @@ describe('Neutral Porcelain + Steel theme tokens', () => {
     }
   })
 
+  it('defines the complete canonical Night token contract', () => {
+    for (const token of requiredTokens) {
+      expect(night[token], `Night ${token}`).toBeTruthy()
+    }
+    for (let index = 1; index <= 8; index += 1) {
+      expect(night[`--identity-${index}`]).toBeTruthy()
+    }
+  })
+
   it('keeps normal text and semantic labels at WCAG AA contrast', () => {
     expectTextContrast(day)
+    expectTextContrast(night)
   })
 
   it('scopes the approved porcelain surfaces and Steel emphasis', () => {
@@ -149,6 +160,29 @@ describe('Neutral Porcelain + Steel theme tokens', () => {
     expect(css).toContain('background: var(--brand-soft)')
     expect(css).toMatch(/\.final-copy\s*\{[^}]*color: var\(--ink\)[^}]*\}/)
     expect(css).not.toMatch(/\.final-copy\s*\{[^}]*background:/)
+  })
+
+  it('uses the independently designed Steel Night palette without collapsing semantic colors', () => {
+    expect(night['--canvas']).toBe('#0d1114')
+    expect(night['--conversation-surface']).toBe('#181d21')
+    expect(night['--inspector-surface']).toBe('#171d21')
+    expect(night['--surface']).toBe('#151a1e')
+    expect(night['--surface-raised']).toBe('#1b2227')
+    expect(night['--brand']).toBe('#7897ae')
+    expect(night['--brand-soft']).toBe('#22303a')
+    expect(night['--mention-ink']).toBe('#9cc7e2')
+    expect(night['--success']).not.toBe(night['--brand'])
+    expect(night['--attention']).not.toBe(night['--brand'])
+    expect(night['--danger']).not.toBe(night['--brand'])
+    expect(night['--info']).not.toBe(night['--brand'])
+    expect(contrast(night['--mention-ink'], night['--surface'])).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it('preserves stable identity colors for Skill, MCP, and member marks in both themes', () => {
+    expect(new Set(Array.from({ length: 8 }, (_, index) => day[`--identity-${index + 1}`])).size).toBe(8)
+    expect(new Set(Array.from({ length: 8 }, (_, index) => night[`--identity-${index + 1}`])).size).toBe(8)
+    expect(css).toMatch(/\.skill-card-mark\s*\{[^}]*color:\s*var\(--skill-identity\)/)
+    expect(css).toMatch(/\.mcp-assignment-option-mark, \.mcp-server-mark\s*\{[^}]*color:\s*var\(--mcp-identity\)/)
   })
 
   it('uses quiet selected backgrounds for the active Camp and current Project', () => {
@@ -275,14 +309,15 @@ describe('Neutral Porcelain + Steel theme tokens', () => {
   })
 
   it('keeps raw color literals inside the canonical token block', () => {
-    const componentCss = css.replace(/:root\s*\{[\s\S]*?\n\}/, '')
+    const componentCss = css.replace(/:root(?:\[data-theme="night"\])?\s*\{[\s\S]*?\n\}/g, '')
 
     expect(componentCss).not.toMatch(/#[0-9a-f]{3,8}\b/i)
     expect(componentCss).not.toMatch(/\brgba?\(/i)
   })
 
-  it('does not ship an inferred Night token block', () => {
-    expect(css).not.toContain(':root[data-theme="night"]')
+  it('ships Night as a token-only theme override rather than component color branches', () => {
+    expect(css).toContain(':root[data-theme="night"]')
+    expect(css).not.toMatch(/\[data-theme="night"\][^{]*\.(?:skill|mcp|member|camp|memory|settings)-/)
   })
 
   it('does not reference undeclared custom properties', () => {

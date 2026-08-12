@@ -2100,10 +2100,10 @@ export function SettingsView({
             <SettingsPageHeader
               eyebrow="Settings / Appearance"
               title="外观"
-              description="瓷灰日间主题已覆盖全部页面；Night 偏好暂时同样解析为日间。"
+              description="瓷灰日间与 Steel Night 共享全部产品功能、语义色和交互边界。"
               aside={(
                 <span className="settings-page-note">
-                  当前 · {appearance.resolvedTheme === 'day' ? '瓷灰日间' : '夜间'} · 偏好：{appearancePreferenceLabel(appearance.preference)}
+                  当前 · {appearance.resolvedTheme === 'day' ? '瓷灰日间' : 'Steel Night'} · 偏好：{appearancePreferenceLabel(appearance.preference)}
                 </span>
               )}
             />

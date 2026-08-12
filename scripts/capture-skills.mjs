@@ -67,7 +67,8 @@ try {
     awaitPromise: true,
     returnByValue: true
   })
-  await waitForExpression(cdp, `document.documentElement.dataset.theme === 'day'`, 5_000)
+  await waitForExpression(cdp,
+    `document.documentElement.dataset.theme === ${JSON.stringify(theme)}`, 5_000)
   const opened = await cdp.send('Runtime.evaluate', {
     expression: `(() => {
       const button = document.querySelector('.unified-sidebar-footer button[aria-label="设置"]')
@@ -164,6 +165,9 @@ try {
         identityToken: card.style.getPropertyValue('--skill-identity').trim(),
         expectedIdentityToken: skill ? 'var(--identity-' + identityColorIndex(skill.id) + ')' : null,
         markColor: mark ? getComputedStyle(mark).color : null,
+        expectedMarkColor: skill
+          ? resolveColorToken('--identity-' + identityColorIndex(skill.id))
+          : null,
         titleFontSize: title ? getComputedStyle(title).fontSize : null,
         descriptionFontSize: description ? getComputedStyle(description).fontSize : null,
         sourceFontSize: source ? getComputedStyle(source).fontSize : null,
@@ -225,7 +229,9 @@ try {
   const identityTokensValid = result.cardMetrics.every((card) =>
     /^var\(--identity-[1-8]\)$/.test(card.identityToken)
       && card.identityToken === card.expectedIdentityToken
+      && card.markColor === card.expectedMarkColor
   )
+  const coloredIdentityMarks = new Set(result.cardMetrics.map((card) => card.markColor)).size > 1
   const readableSkillType = result.cardMetrics.every((card) =>
     card.titleFontSize === '14px'
       && card.descriptionFontSize === '12.5px'
@@ -245,7 +251,7 @@ try {
   const detailsStayNeutral = detailStyles.size === 1
     && result.cardMetrics.every((card) => card.detailsRailColor !== card.markColor)
 
-  if (result.theme !== 'day'
+  if (result.theme !== theme
       || result.viewport.width !== cssWidth
       || result.viewport.height !== cssHeight
       || result.devicePixelRatio !== zoomFactor
@@ -269,6 +275,7 @@ try {
       || result.legacyMoreButtonCount !== 0
       || result.primaryProvenanceCount !== 0
       || !identityTokensValid
+      || !coloredIdentityMarks
       || !readableSkillType
       || !switchesValid
       || !detailsStayNeutral

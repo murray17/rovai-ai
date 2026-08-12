@@ -1198,7 +1198,9 @@ async function request(cdp, method, params = {}) {
 
 async function setTheme(cdp, preference) {
   await evaluate(cdp, `window.rovai.appearance.setPreference(${JSON.stringify(preference)})`, true)
-  await waitForExpression(cdp, `document.documentElement.dataset.theme === 'day'`)
+  const expectedTheme = preference === 'night' ? 'night' : 'day'
+  await waitForExpression(cdp,
+    `document.documentElement.dataset.theme === ${JSON.stringify(expectedTheme)}`)
 }
 
 async function launchApp(port, width, height, reducedMotion) {

@@ -10,7 +10,7 @@ export const THEME_OPTIONS: ReadonlyArray<{
     value: 'system',
     label: '跟随系统',
     englishLabel: 'System',
-    description: '当前统一使用瓷灰日间主题。'
+    description: '随 macOS 外观自动使用瓷灰日间或 Steel Night。'
   },
   {
     value: 'day',
@@ -21,14 +21,13 @@ export const THEME_OPTIONS: ReadonlyArray<{
   {
     value: 'night',
     label: '夜间',
-    englishLabel: 'Night · Reserved',
-    description: '偏好会保留；当前仍显示瓷灰日间主题。'
+    englishLabel: 'Steel Night',
+    description: '冷石墨表面与低饱和 Steel，适合低光环境。'
   }
 ]
 
 export function resolvedThemeFromDocument(root: HTMLElement): ResolvedTheme {
-  void root
-  return 'day'
+  return root.dataset.theme === 'night' ? 'night' : 'day'
 }
 
 export function initialAppearanceSnapshot(root: HTMLElement): AppearanceSnapshot {
@@ -40,10 +39,10 @@ export function initialAppearanceSnapshot(root: HTMLElement): AppearanceSnapshot
 
 export function applyAppearanceSnapshot(
   root: HTMLElement,
-  _snapshot: AppearanceSnapshot
+  snapshot: AppearanceSnapshot
 ): void {
-  root.dataset.theme = 'day'
-  root.style.colorScheme = 'light'
+  root.dataset.theme = snapshot.resolvedTheme
+  root.style.colorScheme = snapshot.resolvedTheme === 'night' ? 'dark' : 'light'
 }
 
 const IDENTITY_COLOR_COUNT = 8

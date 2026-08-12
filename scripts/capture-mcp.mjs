@@ -275,11 +275,11 @@ try {
   await evaluate(cdp, `document.querySelector('.settings-panel')?.scrollTo({ top: 0 })`)
 
   await evaluate(cdp, `window.rovai.appearance.setPreference('night')`)
-  await waitForExpression(cdp, `document.documentElement.dataset.theme === 'day'`, 5_000)
+  await waitForExpression(cdp, `document.documentElement.dataset.theme === 'night'`, 5_000)
   await resize(cdp, 1040, 700)
-  await capture(cdp, `${outputPrefix}-night-preference-day-compact.png`)
-  const nightPreferenceDay = await layoutState(cdp)
-  assertLayout(nightPreferenceDay, 1040, 700, 'day')
+  await capture(cdp, `${outputPrefix}-night-compact.png`)
+  const night = await layoutState(cdp)
+  assertLayout(night, 1040, 700, 'night')
 
   await evaluate(cdp, `[...document.querySelectorAll('details')].forEach((node) => { node.open = false })`)
   await cdp.send('Emulation.setEmulatedMedia', {
@@ -289,7 +289,7 @@ try {
   assert(reducedMotion, 'Reduced-motion media emulation was not applied')
   await resize(cdp, 520, 700)
   const zoom200 = await layoutState(cdp)
-  assertLayout(zoom200, 520, 700, 'day')
+  assertLayout(zoom200, 520, 700, 'night')
   await resize(cdp, 1040, 700)
 
   await clickRowButton(cdp, 'smoke-http', '删除')
@@ -342,7 +342,7 @@ try {
     day,
     cleanDay,
     libraryDay,
-    nightPreferenceDay,
+    night,
     zoom200,
     reducedMotion,
     finalNames,
@@ -351,7 +351,7 @@ try {
       `${outputPrefix}-day.png`,
       `${outputPrefix}-day-clean.png`,
       `${outputPrefix}-library-clean.png`,
-      `${outputPrefix}-night-preference-day-compact.png`
+      `${outputPrefix}-night-compact.png`
     ]
   }, null, 2))
 } finally {
@@ -382,12 +382,35 @@ async function dispatchKey(cdp, key) {
 }
 
 async function layoutState(cdp) {
-  return evaluate(cdp, `(() => {
+  return evaluate(cdp, `(async () => {
     const panel = document.querySelector('.settings-panel')
     const dialog = document.querySelector('[data-radix-dialog-content]')
     const roster = document.querySelector('.mcp-member-roster')
     const workbench = document.querySelector('.mcp-assignment-workbench')
     const panelRect = panel?.getBoundingClientRect()
+    const config = await window.rovai.request('mcp.config.get')
+    const serverByName = new Map(config.servers.map((server) => [server.name, server]))
+    const identityColorIndex = (identityId) => {
+      let hash = 0x811c9dc5
+      for (const character of identityId) {
+        hash ^= character.codePointAt(0) ?? 0
+        hash = Math.imul(hash, 0x01000193)
+      }
+      return (hash >>> 0) % 8 + 1
+    }
+    const mcpMarkMetrics = [...document.querySelectorAll('.mcp-server-row')].map((row) => {
+      const name = row.dataset.mcpServerName
+      const server = serverByName.get(name)
+      const mark = row.querySelector('.mcp-server-mark')
+      return {
+        name,
+        identityToken: row.style.getPropertyValue('--mcp-identity').trim(),
+        expectedIdentityToken: server
+          ? 'var(--identity-' + identityColorIndex(server.serverId) + ')'
+          : null,
+        markColor: mark ? getComputedStyle(mark).color : null
+      }
+    })
     return {
       theme: document.documentElement.dataset.theme,
       width: window.innerWidth,
@@ -414,7 +437,8 @@ async function layoutState(cdp) {
       rosterOverflowY: roster ? getComputedStyle(roster).overflowY : null,
       rosterScrollsX: roster ? roster.scrollWidth > roster.clientWidth : false,
       rosterScrollsY: roster ? roster.scrollHeight > roster.clientHeight : false,
-      workbenchColumns: workbench ? getComputedStyle(workbench).gridTemplateColumns : null
+      workbenchColumns: workbench ? getComputedStyle(workbench).gridTemplateColumns : null,
+      mcpMarkMetrics
     }
   })()`)
 }
@@ -424,6 +448,14 @@ function assertLayout(value, width, height, theme) {
   assert(value.theme === theme, `Theme mismatch: ${JSON.stringify(value)}`)
   assert(!value.horizontalOverflow && !value.panelOverflow, `MCP settings overflow: ${JSON.stringify(value)}`)
   assert(!value.dialogOpen, `Unexpected dialog obscured acceptance capture: ${JSON.stringify(value)}`)
+  assert(value.mcpMarkMetrics.length > 0
+    && value.mcpMarkMetrics.every((mark) =>
+      /^var\(--identity-[1-8]\)$/.test(mark.identityToken)
+        && mark.identityToken === mark.expectedIdentityToken
+        && Boolean(mark.markColor)),
+  `MCP stable identity-color mapping failed: ${JSON.stringify(value.mcpMarkMetrics)}`)
+  assert(new Set(value.mcpMarkMetrics.map((mark) => mark.markColor)).size > 1,
+    `MCP marks collapsed to one monochrome color: ${JSON.stringify(value.mcpMarkMetrics)}`)
   if (value.rosterCount >= 8 && width > 820) {
     assert(value.rosterOverflowY === 'auto' && value.rosterScrollsY, `Tall roster did not scroll vertically inside the workbench: ${JSON.stringify(value)}`)
   }

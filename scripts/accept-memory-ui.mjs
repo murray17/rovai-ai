@@ -107,7 +107,7 @@ try {
       irreversibleForget: true,
       sqliteIsTheOnlyMemoryAuthority: true,
       restartPersistence: true,
-      dayAndNightPreferenceDayLayouts: true,
+      dayAndNightLayouts: true,
       fullHeightP2HeaderWithoutBlankDragStrip: true,
       horizontalOverflow: false
     },
@@ -117,7 +117,7 @@ try {
     },
     captures: {
       day: dayCapture,
-      compactNightPreferenceDay: nightCapture
+      compactNight: nightCapture
     }
   }, null, 2))
 } finally {
@@ -287,7 +287,9 @@ async function request(cdp, method, params = {}) {
 
 async function setTheme(cdp, preference) {
   await evaluate(cdp, `window.rovai.appearance.setPreference(${JSON.stringify(preference)})`, true)
-  await waitForExpression(cdp, `document.documentElement.dataset.theme === 'day'`)
+  const expectedTheme = preference === 'night' ? 'night' : 'day'
+  await waitForExpression(cdp,
+    `document.documentElement.dataset.theme === ${JSON.stringify(expectedTheme)}`)
 }
 
 async function hasText(cdp, selector, text) {

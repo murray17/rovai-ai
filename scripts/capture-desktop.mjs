@@ -10,6 +10,9 @@ const captureWidth = Number(process.env.ROVAI_CAPTURE_WIDTH ?? 1440)
 const captureHeight = Number(process.env.ROVAI_CAPTURE_HEIGHT ?? 920)
 const captureScale = Number(process.env.ROVAI_CAPTURE_SCALE ?? 1)
 const captureTheme = process.env.ROVAI_CAPTURE_THEME ?? null
+const expectedCaptureTheme = captureTheme === 'day' || captureTheme === 'night'
+  ? captureTheme
+  : null
 const reducedMotion = process.env.ROVAI_REDUCED_MOTION === '1'
 const targetRuntimeKind = process.env.ROVAI_CAPTURE_RUNTIME_KIND ?? null
 const targetRuntimeLabel = targetRuntimeKind && ({
@@ -64,7 +67,9 @@ try {
       awaitPromise: true,
       returnByValue: true
     })
-    await waitForExpression(cdp, `document.documentElement.dataset.theme === 'day'`, 5_000)
+    await waitForExpression(cdp, expectedCaptureTheme
+      ? `document.documentElement.dataset.theme === ${JSON.stringify(expectedCaptureTheme)}`
+      : `['day', 'night'].includes(document.documentElement.dataset.theme)`, 5_000)
   }
   await waitForSelector(cdp, '.new-conversation-workspace', 10_000)
   const defaultQuickChat = await cdp.send('Runtime.evaluate', {
@@ -93,7 +98,9 @@ try {
       || defaultQuickChatState?.coreHealthEntry
       || defaultQuickChatState?.lastProjectGroup !== 'quick-chat'
       || defaultQuickChatState?.horizontalOverflow
-      || (captureTheme && defaultQuickChatState?.theme !== 'day')) {
+      || (expectedCaptureTheme && defaultQuickChatState?.theme !== expectedCaptureTheme)
+      || (captureTheme === 'system'
+        && !['day', 'night'].includes(defaultQuickChatState?.theme))) {
     throw new Error(`Packaged App did not open simplified Quick Chat by default: ${JSON.stringify(defaultQuickChatState)}`)
   }
   await capture(cdp, `${outputPrefix}-home.png`)
@@ -136,25 +143,25 @@ try {
     returnByValue: true
   })
   if (openedMembers.result?.result?.value) {
-    await waitForSelector(cdp, '.member-workbench', 5_000)
+    await waitForSelector(cdp, '.members-view', 30_000)
     const initialMemberState = await cdp.send('Runtime.evaluate', {
       expression: `({
-        selected: document.querySelectorAll('.member-list-item.selected').length,
+        selected: document.querySelectorAll('.member-sidebar-row.selected').length,
         empty: Boolean(document.querySelector('.member-empty')),
-        members: document.querySelectorAll('.member-list-item').length
+        members: document.querySelectorAll('.member-sidebar-select').length
       })`,
       returnByValue: true
     })
     const initial = initialMemberState.result?.result?.value
-    if (initial?.selected !== 0 || !initial?.empty || initial?.members !== 4) {
-      throw new Error(`Members view did not preserve explicit selection: ${JSON.stringify(initial)}`)
+    if (initial?.selected !== 1 || initial?.empty || initial?.members !== 4) {
+      throw new Error(`Members view did not select one contextual member: ${JSON.stringify(initial)}`)
     }
     await capture(cdp, `${outputPrefix}-members.png`)
     capturedMembers = true
 
     const selectedMember = await cdp.send('Runtime.evaluate', {
       expression: `(() => {
-        const member = document.querySelector('.member-list-item')
+        const member = document.querySelector('.member-sidebar-select')
         if (!member) return false
         member.click()
         return true
@@ -301,9 +308,9 @@ try {
       returnByValue: true
     })
     if (reopenedMembers.result?.result?.value) {
-      await waitForSelector(cdp, '.member-workbench', 5_000)
+      await waitForSelector(cdp, '.members-view', 30_000)
       await cdp.send('Runtime.evaluate', {
-        expression: `document.querySelector('.member-list-item')?.click()`,
+        expression: `document.querySelector('.member-sidebar-select')?.click()`,
         returnByValue: true
       })
       await waitForSelector(cdp, '.member-identity-section', 5_000)

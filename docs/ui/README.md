@@ -2,7 +2,7 @@
 document_type: ui-style-index
 authority: renderer-ui
 status: accepted
-design_direction: neutral-porcelain-steel
+design_direction: porcelain-day-steel-night
 target_version: cross-version
 implementation_status: complete
 last_updated: 2026-08-12
@@ -10,8 +10,8 @@ last_updated: 2026-08-12
 
 # Rovai-ai UI 规范
 
-本文是 Renderer UI/UX 工作的跨版本稳定入口。当前全局视觉方向是 Neutral Porcelain +
-Steel；完整信息架构与交互详规继续由历史稳定路径
+本文是 Renderer UI/UX 工作的跨版本稳定入口。当前全局视觉方向由 Neutral Porcelain +
+Steel Day 与 Steel Night 组成；完整信息架构与交互详规继续由历史稳定路径
 [当前 UI 详规](arctic-dawn.md)承载。当前交付版本与实施状态始终从
 [文档导航](../README.md)进入。历史版本只解释当时范围，不能覆盖本文或当前详规中的合同。
 
@@ -19,6 +19,12 @@ v0.56 把一次性 P2 HTML 中确认的瓷灰表面与 Steel 强调迁移进生�
 现有功能、数据、交互和安全边界。P2 不是新的产品模型：Project、Camp、Agent 级执行过程、
 New Conversation、七个设置分类、队员、记忆与各类浮层继续使用原生产组件和 Read Side。
 实现与验收状态见[v0.56 实施计划](../versions/v0.56/implementation-plan.md)。
+
+2026-08-12 在相同产品结构上补齐独立设计的 Steel Night。Night 只覆盖主题 Token 和首屏
+解析，不复制页面、不重建组件，也不改变任何 Read Side、业务状态或安全边界；Neutral
+Porcelain + Steel Day 原样保留。`system` 跟随 macOS 明暗外观，`day` 与 `night` 分别固定
+解析为对应主题。Skill、MCP 与队员继续用稳定 ID 映射 `--identity-1..8`；Night 只提供通过
+AA 的亮色身份色值，不得把这些彩色标记收敛为单一 Steel，也不得拿状态色替代身份色。
 
 v0.57 在该视觉基线上为 directory Project 增加可恢复的“移除项目”：只从这台 Mac 的侧栏
 隐藏并取消相关置顶，不删除工作目录、Camp 或执行历史；重新选择同一目录即可恢复。v0.58 继续
@@ -50,7 +56,7 @@ Renderer 合同；生产实现已重新打包，并通过 `pnpm accept:structure
 证据记录在对应当前版本实施计划。
 
 v0.27 的队员身份 HTML 原型只提供六字段命名、基础/高级分组与排列参考；颜色、
-组件、间距、响应式行为和整体视觉继续以当前 Neutral Porcelain + Steel 详规为准，不能从原型反向覆盖
+组件、间距、响应式行为和整体视觉继续以当前 Porcelain Day + Steel Night 详规为准，不能从原型反向覆盖
 现有设计系统。
 
 v0.28 在同一 Arctic Dawn App Shell 中增加持久应用内通知入口、右侧通知抽屉、未读
@@ -145,7 +151,7 @@ Mention，在身份仍可用时复用既有锚定人物信息卡。成功与非�
 ## 权威边界
 
 1. 有效 ADR、`CONTEXT.md`、Core 合同和安全边界决定领域语义与可执行行为。
-2. [当前 UI 详规](arctic-dawn.md)决定 Renderer 信息架构、Neutral Porcelain + Steel Token、组件层级、
+2. [当前 UI 详规](arctic-dawn.md)决定 Renderer 信息架构、Porcelain Day / Steel Night Token、组件层级、
    产品文案、交互和适配。
 3. [v0.47 生产设计](../versions/v0.47/production-design.md)决定当前 Task 卡、Inspector、
    冲突恢复和删除确认合同；它保留 [v0.38](../versions/v0.38/README.md)的唯一实时卡模型。
@@ -194,15 +200,18 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
 
 ## 当前设计摘要
 
-- v0.56 全界面使用 Neutral Porcelain + Steel Day。`system | day | night` 偏好继续保存，但当前
-  三种都解析为 Day；Night 等待后续独立设计。
+- 全界面同时支持 Neutral Porcelain + Steel Day 与独立 Steel Night。`system | day | night`
+  偏好继续由 Main 原子保存；`system` 跟随 macOS，显式 `day` / `night` 固定对应解析。
+- 主题切换只改变 root Token 和 Electron 窗口背景，不重新挂载页面，也不得改变 Camp、Tab、
+  Draft、滚动、列表选择或 Dialog。Skill / MCP / 队员的稳定身份色映射和全部状态色语义在
+  两个主题中保持不变。
 - 所有一级页面常驻 270px 统一侧栏；Camp Inspector 展开时为 310px，在
   `1040–1179px` 收窄为 260px，并可从 Camp 顶栏完整隐藏或恢复。
 - 普通侧栏显示“置顶 / 项目”；Quick Chat 只在 Renderer 中作为项目列表末尾的
   文件夹式投影，底层继续是独立 `quick_chat`。侧栏品牌字标为 `Rovai AI`，无副标题。
 - Camp 与可置顶 Project 只通过三点菜单置顶或取消置顶；Project 继续显示文件夹、项目级
   `＋` 和唯一三点菜单，主行本身承担展开/折叠且不显示独立折叠图标。当前项目使用稳定
-  `--surface-selected` 瓷灰底色。Camp 菜单同时承载重命名、
+  主题对应的 `--surface-selected` 中性底色。Camp 菜单同时承载重命名、
   “复制会话 ID”和删除。复制只写入稳定会话 ID 原文；Project 标题与“查看更多 / 收起”
   不显示会话数量，快速对话不显示 Project 菜单。
 - 设置分类覆盖同一 270px 侧栏槽位，固定分为“应用 / 能力 / 支持”三组：“应用”包含
@@ -278,7 +287,7 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
 - 工作目录选择先完成目录安全校验并立即可用于创建；动态 Git 能力随后异步加载，检测中或
   失败只影响 Git 状态提示，不阻塞普通目录 Camp 创建。
 - 记忆、通用、技能、Agent 运行时、外观、通知、诊断与修复和创建新对话 Dialog 以当前 UI
-  详规为准。七个设置分类、队员、记忆和浮层统一使用 Porcelain 表面与低频 Steel 顶边、标题轨和
+  详规为准。七个设置分类、队员、记忆和浮层统一使用当前主题的中性表面与低频 Steel 顶边、标题轨和
   选中态；attention、danger、success 与 evidence 继续使用各自语义色。MCP 的 JSON 真源、导入
   与 Runtime Projection 边界继续来自 v0.37；当前工作台、开放列表和不投影风险分类的普通操作
   流程由 v0.63 替代，并复用同一 App Shell、Token 与通用交互规则。
@@ -335,7 +344,8 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
 
 ## 完成检查
 
-- [x] 全部主题偏好都渲染同一套 Neutral Porcelain + Steel Day，且没有加载旧 Night。
+- [x] Day 原样保留；Night 使用独立 Steel Night Token，System 正确跟随 macOS，且不加载旧 Meridian Night。
+- [x] Skill、MCP 与队员在双主题中继续按稳定 ID 映射八种身份色，启停与状态语义没有被主题覆盖。
 - [x] v7 导航投影、覆盖式设置侧栏和空 Camp 欢迎状态在两个目标尺寸无溢出。
 - [x] Camp 阅读流、Tool Call、Task、固定 Approval 队列、Composer 与 Inspector
   符合详规。

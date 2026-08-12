@@ -2,16 +2,16 @@
 document_type: ui-design-system
 authority: renderer-ui-detail
 status: accepted
-design_direction: neutral-porcelain-steel
+design_direction: porcelain-day-steel-night
 target_version: v0.64
 implementation_status: complete
 last_updated: 2026-08-12
 ---
 
-# Neutral Porcelain + Steel 设计规范
+# Porcelain Day + Steel Night 设计规范
 
 本文是 Renderer 当前唯一的视觉与交互详规。文件路径 `arctic-dawn.md` 为历史稳定链接，
-当前视觉层已在 v0.56 切换为 Neutral Porcelain + Steel；Arctic Dawn V3 留下的有效信息架构、
+当前视觉层由 Neutral Porcelain + Steel Day 与 Steel Night 组成；Arctic Dawn V3 留下的有效信息架构、
 交互决定与领域/安全边界继续保留，不再用其旧靛蓝、极光绿与晨曦色定义当前生产表面。
 
 v0.56 以一次性 P2 HTML 为视觉选型输入，把冷瓷灰 Canvas、近白 Surface、Steel 强调和克制
@@ -21,6 +21,10 @@ Camp、Agent 级执行过程、New Conversation、七个设置分类、队员、
 [v0.56 实施计划](../versions/v0.56/implementation-plan.md)和代码证据为准。v0.57 在同一视觉与
 信息架构上增加可恢复的 Project 侧栏移除；该局部功能的实现状态以
 [v0.57 实施计划](../versions/v0.57/implementation-plan.md)和代码证据为准。
+
+2026-08-12 用户确认 Steel Night 全应用交互稿并授权生产编码。Night 是同一 React Renderer 的
+独立 Token 层：页面 DOM、组件、业务状态、彩色身份标记、语义状态和安全合同全部复用生产实现；
+Day Token 不被改写。原型只决定暗色亮度层级和色值，不把假数据、演示动作或新产品结构带入生产。
 
 2026-08-03 新增的结构化 Mention 与用户消息原生拖选已经完成生产实现；2026-08-06 用户再次
 确认“Mention 视觉方案 A + 信息弹窗布局 2”，本节继续冻结 Composer、历史 Mention 和 v0.56
@@ -76,7 +80,7 @@ v0.49 进一步冻结设置“通用”、每个 Main Window Session 一次性�
 
 ### 设计方向切换
 
-- Neutral Porcelain + Steel 取代 Arctic Dawn V3 中与其冲突的色彩与表面层；Arctic Dawn 已确认的
+- Porcelain Day + Steel Night 取代 Arctic Dawn V3 中与其冲突的色彩与表面层；Arctic Dawn 已确认的
   信息架构和交互合同继续有效。
 - 原型必须在现有 React、Radix 和 CSS Variables 技术栈中重建，不直接复制单文件
   HTML。
@@ -109,15 +113,19 @@ type ThemePreference = "system" | "day" | "night"
 type ResolvedTheme = "day" | "night"
 ```
 
-- Neutral Porcelain + Steel 是当前 Day 的设计基准，覆盖生产全部页面。
-- Night 保留为正式主题能力，但最终视觉等待用户后续提供独立设计稿。
-- 实现者不得把 Day Token 机械反色或自行补全为最终 Night，也不得把 Meridian Night
-  或旧 Arctic Dawn 色表重新命名后视作已经完成的当前 Night。
-- v0.24 中 `system`、`day`、`night` 三种偏好全部解析为 `ResolvedTheme = "day"`。
-  选择 `night` 或深色系统下的 `system` 都渲染 Neutral Porcelain + Steel Day，不加载 Meridian
-  Night Token。
-- 偏好值可以继续持久化，但本版本不承诺旧 Night 视觉兼容。全界面 Day 完成即可
-  满足 v0.24 主题范围；后续 Night 设计与实现另开版本。
+- Neutral Porcelain + Steel 是 Day 的完整设计基准；Steel Night 是独立暗色基准。两者覆盖同一
+  生产页面和状态矩阵，任何一方都不能以缺页、禁用功能或替换业务组件换取视觉一致。
+- `system` 设置 Electron `nativeTheme.themeSource = "system"` 并跟随 macOS；`day` 固定为
+  `light`，`night` 固定为 `dark`。`ResolvedTheme` 必须来自实际 `shouldUseDarkColors`，不能再
+  把 Night 强制解析为 Day。
+- Main 在创建窗口前完成主题来源解析并提供相符背景；Renderer 的 head 根据
+  `prefers-color-scheme` 同步设置首次 `data-theme`，随后以 Main Snapshot 为权威，避免先亮后暗。
+- 切换主题只更新 root `data-theme` / `color-scheme` 与 BrowserWindow 背景，不重新挂载页面，不移动
+  焦点，也不改变 Camp、Tab、Draft、滚动、选择、Dialog 或任何 Core/IPC 事实。
+- Night 不从 Day 机械反色，也不复用 Meridian Night 或旧 Arctic Dawn 色表。组件不得添加
+  `theme === ...` 颜色分支；全部主题色差异必须位于 canonical Token block。
+- Skill、MCP 与队员继续用稳定 ID 映射八种身份色；主题只为相同 token name 提供不同的可读色值。
+  身份色不得被 Steel、状态色或单色 icon 替代，停用时也继续保留原身份色。
 
 ### Neutral Porcelain + Steel Day Token
 
@@ -196,6 +204,52 @@ type ResolvedTheme = "day" | "night"
 证据区不继承品牌渐变、队员底色或插画。Diff 还必须使用 `+/-`、行号与结构，不能只
 依靠红绿色。
 
+### Steel Night Token
+
+Steel Night 使用冷石墨亮度层级与低饱和 Steel，不是 Day 的算法反色。下表是生产暗色基准；
+未列出的几何、排版和组件变量继续与 Day 共用，不能在组件选择器中增加主题专属色值。
+
+| Token | 值 | 用途 |
+|---|---:|---|
+| `--canvas` | `#0D1114` | App 最深背景 |
+| `--surface` | `#151A1E` | 主工作表面 |
+| `--surface-raised` | `#1B2227` | Dialog、Popover、输入和浮层 |
+| `--surface-subtle` | `#1A2024` | 次级面板 |
+| `--surface-muted` | `#242D33` | Hover、Disabled、弱分组 |
+| `--surface-selected` | `#222C33` | 当前 Project、Tab 与稳定列表选择 |
+| `--surface-hover` | `#1D252B` | Hover 表面 |
+| `--surface-sunken` | `#10161A` | 收入式或遗忘态表面 |
+| `--conversation-surface` | `#181D21` | Camp 开放阅读区与输入停靠区 |
+| `--inspector-surface` | `#171D21` | Camp Inspector |
+| `--conversation-inspector-line` | `#53616B` | 会话区与 Inspector 强分隔 |
+| `--home-surface` | `#181D21` | Quick Chat 主内容区 |
+| `--topbar` | `#151A1E` | 顶栏与窗口拖拽表面 |
+| `--input` | `#1B2227` | 输入控件 |
+| `--ink` | `#E7ECEF` | 主文字 |
+| `--muted` | `#ABB5BC` | 次级正文 |
+| `--faint` | `#919DA6` | 小字号元数据 |
+| `--line` | `#333E46` | 装饰分隔与非交互边界 |
+| `--line-strong` | `#53616B` | 强结构边界 |
+| `--control-line` | `#687B88` | 输入与交互控件边界 |
+| `--brand` | `#7897AE` | Steel 品牌、主操作与选择 |
+| `--brand-hover` | `#B1C8D8` | 主操作 Hover 与标题强调 |
+| `--brand-contrast` | `#091116` | Brand 表面上的文字 |
+| `--brand-soft` | `#22303A` | Steel 弱背景 |
+| `--brand-ink` | `#C0D4E1` | Brand-soft 上的文字和图标 |
+| `--mention-ink` | `#9CC7E2` | 行内 Mention |
+| `--mention-ink-hover` | `#C2DDEB` | Mention Hover / Focus |
+| `--rail` | `#11161A` | 统一侧栏 |
+| `--rail-ink` | `#A6B1B8` | 侧栏文字 |
+| `--rail-line` | `#313B43` | 侧栏结构线 |
+| `--focus` | `#8FB3CB` | Focus ring |
+
+Night 的语义色继续与品牌、身份色分离：`success #82B695 / #1A2B22`、
+`attention #D2AC70 / #302719`、`danger #D6857F / #321E1D`、
+`info #83AFC9 / #182832`、`neutral #ABB5BC / #242D33`。证据区使用
+`#12191D / #171F24 / #DCE4E9 / #9EABB3 / #35424A`；Diff 使用
+`#92C7A5 / #1A2B22` 和 `#E09A94 / #321E1D`。所有正文、语义标签与八种身份色在目标表面上
+必须达到 WCAG AA；颜色仍需配合文字、图标、形状或稳定位置。
+
 ### 字体、密度与表面
 
 - 正文采用系统无衬线栈：
@@ -213,9 +267,12 @@ type ResolvedTheme = "day" | "night"
 
 ### 队员身份与图像
 
-- `AgentProfile.id` 稳定映射 `--identity-1..8`：
+- `AgentProfile.id`、`Skill.id` 与 MCP `serverId` 各自在既有组件中稳定映射
+  `--identity-1..8`。Day 使用
   `#A65F4A / #39777A / #74628F / #9A6A32 / #4F729B / #8A5C75 /
-  #547245 / #8C6146`。
+  #547245 / #8C6146`；Night 使用
+  `#C98572 / #70B0AE / #A89AC8 / #D0A46C / #80ABD1 / #B37D9A /
+  #89A878 / #B58B68`。稳定 ID 决定 token 序号，主题只决定该 token 的可读色值。
 - 身份色只进入头像环、名称或小型身份点，不表示运行、权限、审批、Presence、
   Lead 或 Capability。
 - 一个受控 `avatarRef` 同时解析 [ADR-0056](../adr/0056-controlled-member-avatar-assets.md)
@@ -982,7 +1039,7 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   全部设置分类的内容滚动面板统一使用实白页面底色。
   App Shell 右侧第一行叠加一条与页面表面同色的 50px 隐形拖拽栏，设置内容
   继续跨越两行，不因该拖拽栏下移。
-- 七个分类的右侧内容统一使用 Neutral Porcelain + Steel：页面顶部 3px Steel 结构边、前 220px
+- 七个分类的右侧内容统一使用当前 Porcelain Day / Steel Night Token：页面顶部 3px Steel 结构边、前 220px
   低强度 Steel wash、共享页头 2px Steel 混合下划线、标题左侧 2px Steel 轨，section heading
   使用低频 Steel 标记。选中的启动位置、默认队员和同类稳定选项使用淡 Steel 背景与左侧 inset
   轨；其余内容继续以分隔线和单一表面组织，不能退化为灰色卡片墙或把全部控件铺满 Steel。
@@ -1099,7 +1156,7 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   Finder 入口。UI 是该文件的图形编辑器，不建立 SQLite MCP 真源。
 - 队员分配区使用 230–260px 在队名册与 `minmax(0,1fr)` MCP chooser；名册展示受控头像、名称、
   角色和分配数量，并在固定工作台高度内独立纵向滚动。名册标题与列表之间没有横向分隔；普通
-  行使用中性白底，只有当前行使用 Steel soft wash 与 2px 短轨。窄宽 / 200% zoom 时名册变为
+  行使用主题中性表面，只有当前行使用 Steel soft wash 与 2px 短轨。窄宽 / 200% zoom 时名册变为
   有界横向队员带，不能让整页随队员数量无限增高。
 - chooser 标题显示当前队员头像、名称与 `x / n` 分配数，右侧固定放 MCP 搜索，不显示“只影响
   后续新执行”胶囊或重复的底部生效脚注。搜索覆盖名称、Endpoint、Transport 与来源，筛选为全部、已分配、未分配。
@@ -1146,13 +1203,13 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 
 - 页面使用三个可选择卡：“跟随系统 / 日间 / 夜间”，不再显示
   “晨线 / 夜航 / Meridian Day / Meridian Night”。
-- 顶部同时显示“当前 · 瓷灰日间”和真实保存的偏好，避免用户选择 Night 后误以为
-  Night 已实现。
-- `日间`显示 `Porcelain Day` 与冷瓷灰/Steel 说明；`跟随系统`说明当前统一使用瓷灰日间；
-  `夜间`显示“视觉待设计”而不是伪造暗色 miniature，并说明当前仍路由到 Day。
+- 顶部同时显示真实解析结果“当前 · 瓷灰日间 / Steel Night”和保存偏好。系统外观与保存偏好
+  可以不同，UI 必须分别表达，不能只回显单选项。
+- `日间`显示 `Porcelain Day` 与冷瓷灰/Steel 说明；`夜间`显示 `Steel Night` 与冷石墨/Steel
+  说明；`跟随系统`明确会随 macOS 在两者之间自动切换。
 - 切换原子保存 `ThemePreference`，不做全应用颜色渐变，不移动焦点，也不改变
-  Camp、Tab、草稿、滚动、列表选择或 Dialog。首次绘制前解析，不能先闪 Meridian
-  Night 或其他旧主题。
+  Camp、Tab、草稿、滚动、列表选择或 Dialog。首次绘制前根据 `nativeTheme` 解析，不能先闪
+  相反主题、Meridian Night 或其他旧主题。
 
 ### 诊断与修复
 
@@ -1223,11 +1280,12 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 - `recovering` 和 Unsettled External Effect 使用明确对象、最后已知状态、不确定性
   和下一步；不得声称停止等于外部副作用已回滚。
 
-### Porcelain / Steel 页面与浮层
+### Porcelain Day / Steel Night 页面与浮层
 
-- 设置、队员、记忆使用同一 Porcelain 主表面；队员与设置页面可在顶部使用低强度 Steel wash，
-  记忆保持证据友好的近白内容区，并以 Steel 顶边、标题左轨和 Tab/选中态建立层级。
-- 通用 Dialog、New Conversation、Notification Drawer、Memory Proposal Drawer 使用 3px Steel
+- 设置、队员、记忆使用同一主题的中性主表面；Day 使用瓷灰/近白层级，Night 使用冷石墨层级。
+  记忆继续使用独立 evidence token，并以 Steel 顶边、标题左轨和 Tab/选中态建立层级。
+- 通用 Dialog、New Conversation、Notification Drawer、Memory Proposal Drawer 使用当前
+  `--surface-raised`、3px Steel
   顶边和 `--line-strong` 外框。安全风险浮层可以用 `attention` 覆盖顶边；确认删除、错误和恢复
   的正文/按钮继续使用 danger/attention 语义色，不能因统一品牌而失真。
 - Steel 是结构和可操作性的低频强调，不是页面底色。普通正文、证据、Tool 输出、Diff、Memory
@@ -1266,13 +1324,13 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 
 ## 实施迁移边界
 
-- Neutral Porcelain + Steel 在现有 React 19、Radix、CSS Variables 和 Renderer 测试结构中重建；
+- Porcelain Day + Steel Night 在现有 React 19、Radix、CSS Variables 和 Renderer 测试结构中重建；
   不新增 CSS 框架、CSS-in-JS、字体、图标库、动画库或状态管理库。
 - 共享色值只在 Token 层定义；组件不得新增散落的主题专属十六进制或按
   `theme === ...` 分支硬编码颜色。
 - 删除旧图标轨、对话列、竖向时间轨、EXEC 节点、Thinking/Progress/Steps 分区、
   旧 Approval 时间线卡、Quick Chat Composer、Header Stop/`•••`、Meridian 文案、
-  Night Token 使用者、188px 设置二级导航、侧栏 Core 健康入口及无使用者的
+  旧 Meridian Night Token 使用者、188px 设置二级导航、侧栏 Core 健康入口及无使用者的
   CSS/class/test fixture。
 - v0.44 删除 `MemberAdvancedSettings`、`SummaryModelSettings`、“高级设置”展开入口、
   “对话压缩模型”文案及对应 state/import/CSS/test；不得删除 Member Runtime Parameters。
@@ -1284,8 +1342,10 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   Public A2A 和 Context Profile 的领域语义由对应 ADR/Contract 约束，不能在 Renderer 猜测。
 - v0.56 只替换 Day Token、结构强调和少量现有文案/布局；不得重建生产页面、复制 P2 演示 DOM、
   新增角色消息底色、伪造日期阶段、简化 New Conversation 功能或改变 v0.55 会话边界。
+- Steel Night 只新增 canonical Night Token、Main/nativeTheme 解析、首屏同步主题与外观文案；
+  不复制 Day 组件、不增加暗色专属功能分支，也不改变 Skill、MCP、队员、状态或证据的稳定颜色语义。
 - 删除 `rovai.rail-expanded` 等旧纯 UI 偏好，不迁移、不双读。Pin 使用新的
-  `navigation.json`；ThemePreference 按已确认合同保留但全部解析为 Day。
+  `navigation.json`；ThemePreference 按已确认合同保留，System / Day / Night 分别解析为实际主题。
 - v0.49 新增 Main-owned `general-preferences.json` 与 `restorable-location.json`，继续复用并增强
   `window-state.json`。这些文件不进入 Core/SQLite；登录项状态只从 macOS 读取，不在文件中保存
   第二份 Boolean。Renderer 只能通过窄 Preload bridge 访问，不能读取文件路径或任意 JSON。
@@ -1303,7 +1363,8 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 
 ## 明确非目标
 
-- v0.24 不实现 Arctic Dawn Night，不根据 Day 自动生成暗色。
+- 不恢复 Arctic Dawn / Meridian Night，也不根据 Day 自动生成或运行时推导暗色 Token。
+- 不删除、弱化或延后 Day 功能；不为 Night 建立第二套页面、组件、状态或数据流。
 - 不新增 Project 领域实体、Quick Chat 实体、账号/资料菜单、Camp archive/trash、
   拖拽调宽、移动端布局或原型页面切换器。
 - v0.49 不增加隐藏/后台登录启动、关闭窗口行为、默认 Project、执行恢复、自动批准、语言、

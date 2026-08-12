@@ -13,7 +13,9 @@ describe('appearance settings', () => {
 
     expect(markup).toContain('跟随系统')
     expect(markup).toContain('Porcelain Day')
-    expect(markup).toContain('Night · Reserved')
+    expect(markup).toContain('Steel Night')
+    expect(markup).toContain('随 macOS 外观自动使用瓷灰日间或 Steel Night')
+    expect(markup).not.toContain('Reserved')
     expect(markup).not.toContain('当前视觉语言')
     expect(markup).not.toContain('Steel Strong')
     expect(markup).not.toContain('Camp 主题')

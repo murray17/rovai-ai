@@ -1236,7 +1236,7 @@ describe('task event projections', () => {
 
   it('keeps the resolved theme and saved preference in the Appearance page header', () => {
     const markup = renderToStaticMarkup(createElement(SettingsView, {
-      appearance: { preference: 'night', resolvedTheme: 'day' },
+      appearance: { preference: 'night', resolvedTheme: 'night' },
       health: null,
       agents: [],
       installations: [],
@@ -1248,7 +1248,8 @@ describe('task event projections', () => {
       onThemeChange: () => undefined
     }))
 
-    expect(markup).toContain('当前 · 瓷灰日间 · 偏好：夜间')
+    expect(markup).toContain('当前 · Steel Night · 偏好：夜间')
+    expect(markup).toContain('瓷灰日间与 Steel Night 共享全部产品功能')
     expect(markup).not.toContain('当前视觉语言')
   })
 

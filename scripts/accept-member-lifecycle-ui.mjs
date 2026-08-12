@@ -694,6 +694,7 @@ try {
       return node ? getComputedStyle(node)[property] : null
     }
     return {
+      theme: document.documentElement.dataset.theme,
       conversation: color('.timeline-pane', 'backgroundColor'),
       controls: color('.conversation-controls', 'backgroundColor'),
       inspector: color('.activity-pane', 'backgroundColor'),
@@ -702,12 +703,27 @@ try {
       userMessage: color('.conversation-bubble.user .message-bubble', 'backgroundColor')
     }
   })()`)
+  const expectedCampColors = campColorState.theme === 'night'
+    ? {
+        conversation: 'rgb(24, 29, 33)',
+        controls: 'rgb(24, 29, 33)',
+        inspector: 'rgb(23, 29, 33)',
+        divider: 'rgb(83, 97, 107)',
+        rail: 'rgb(17, 22, 26)'
+      }
+    : {
+        conversation: 'rgb(255, 255, 255)',
+        controls: 'rgb(255, 255, 255)',
+        inspector: 'rgb(255, 255, 255)',
+        divider: 'rgb(199, 207, 214)',
+        rail: 'rgb(243, 244, 244)'
+      }
   assert(
-    campColorState.conversation === 'rgb(255, 255, 255)'
-      && campColorState.controls === 'rgb(255, 255, 255)'
-      && campColorState.inspector === 'rgb(255, 255, 255)'
-      && campColorState.divider === 'rgb(199, 207, 214)'
-      && campColorState.rail === 'rgb(243, 244, 244)'
+    campColorState.conversation === expectedCampColors.conversation
+      && campColorState.controls === expectedCampColors.controls
+      && campColorState.inspector === expectedCampColors.inspector
+      && campColorState.divider === expectedCampColors.divider
+      && campColorState.rail === expectedCampColors.rail
       && campColorState.userMessage === 'rgba(0, 0, 0, 0)',
     `Camp color scope drifted: ${JSON.stringify(campColorState)}`
   )
@@ -1059,7 +1075,7 @@ try {
       invalidMemberReturnTargetFallsBackApp: true,
       fullHeightP2HeaderWithoutBlankDragStrip: true,
       campComposerMentionMenuVisibleAndKeyboardSelectable: true,
-      memberContextReturnAndHomeWhiteSurface: true,
+      memberContextReturnAndThemeSurface: true,
       equalHeaderStatusControlsAndRuntimeArrow: true,
       manualMemberTabsArrowHomeEndKeyboard: true,
       memoryTrackSwitchLocalSaveAndReducerRollback: true,
@@ -1069,7 +1085,7 @@ try {
       effective200PercentZoomReducedMotionAndForcedColors: true,
       summaryModelAdvancedSettingsRemoved: true,
       memberHandlesHiddenAndDuplicateNameBlocked: true,
-      campWhiteSurfacesStrongDividerAndPreservedRailMessageColors: true,
+      campThemeSurfacesStrongDividerAndPreservedRailMessageColors: true,
       userMessageSelectableAndCopyable: true,
       freshNoRuntimeComposerToastAndDraft: true,
       leaveByMouseAndRejoinByKeyboard: true,
@@ -1083,7 +1099,7 @@ try {
       noSuccessorLeadNullComposerToastAndDraft: true,
       memberOrderLeadInheritance: 'agent_2',
       restartPersistence: true,
-      dayAndNightPreferenceDayWideCompactMatrix: true,
+      dayAndNightWideCompactMatrix: true,
       runtimeSettingsNineProductsAndAdvancedPathBoundary: true,
       horizontalOverflow: false
     },
@@ -1521,7 +1537,9 @@ async function setTheme(cdp, preference) {
     `window.rovai.appearance.setPreference(${JSON.stringify(preference)})`,
     true
   )
-  await waitForExpression(cdp, `document.documentElement.dataset.theme === 'day'`)
+  const expectedTheme = preference === 'night' ? 'night' : 'day'
+  await waitForExpression(cdp,
+    `document.documentElement.dataset.theme === ${JSON.stringify(expectedTheme)}`)
 }
 
 async function setViewport(cdp, width, height) {

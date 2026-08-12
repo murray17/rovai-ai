@@ -35,7 +35,7 @@ try {
   })
   await waitForExpression(
     cdp,
-    `document.documentElement.dataset.theme === 'day'`,
+    `document.documentElement.dataset.theme === ${JSON.stringify(theme)}`,
     5_000
   )
   const existingDialog = await cdp.send('Runtime.evaluate', {

@@ -10,6 +10,7 @@ const width = Number(process.env.ROVAI_CAPTURE_WIDTH ?? 1440)
 const height = Number(process.env.ROVAI_CAPTURE_HEIGHT ?? 920)
 const zoomFactor = Number(process.env.ROVAI_CAPTURE_ZOOM_FACTOR ?? 1)
 const theme = process.env.ROVAI_CAPTURE_THEME ?? null
+const expectedTheme = theme === 'day' || theme === 'night' ? theme : null
 const relaxed = process.env.ROVAI_CAPTURE_RELAXED === '1'
 const expectsComposerAttachments =
   process.env.ROVAI_CAPTURE_EXPECT_COMPOSER_ATTACHMENTS !== undefined
@@ -78,7 +79,9 @@ try {
       awaitPromise: true,
       returnByValue: true
     })
-    await waitForExpression(cdp, `document.documentElement.dataset.theme === 'day'`, 5_000)
+    await waitForExpression(cdp, expectedTheme
+      ? `document.documentElement.dataset.theme === ${JSON.stringify(expectedTheme)}`
+      : `['day', 'night'].includes(document.documentElement.dataset.theme)`, 5_000)
   }
   await waitForExpression(cdp, `Boolean(document.querySelector('.camp-nav-row'))`, 45_000)
   await cdp.send('Runtime.evaluate', {
@@ -501,7 +504,9 @@ try {
       ...attachments,
       ...relaxedInspection.result?.result?.value
     }
-    if (result.horizontalOverflow || (theme && result.theme !== 'day')) {
+    if (result.horizontalOverflow
+        || (expectedTheme && result.theme !== expectedTheme)
+        || (theme === 'system' && !['day', 'night'].includes(result.theme))) {
       throw new Error(`Camp workspace acceptance failed: ${JSON.stringify(result)}`)
     }
     cdp.close()

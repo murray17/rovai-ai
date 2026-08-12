@@ -221,18 +221,18 @@ try {
   await selectMember(second.cdp, customDisplayName)
   await waitForExpression(second.cdp,
     `document.querySelector('.member-portrait img[src^="blob:"]')?.naturalWidth > 0`)
-  await assertThemeRendition(second.cdp, 'day')
-  await assertNoHorizontalOverflow(second.cdp, '1040×700 Night preference rendered as Day')
-  const nightPreferenceDayCapture = join(outputDir, 'member-avatar-night-preference-day-compact.png')
-  await capture(second.cdp, nightPreferenceDayCapture)
+  await assertThemeRendition(second.cdp, 'night')
+  await assertNoHorizontalOverflow(second.cdp, '1040×700 Steel Night')
+  const nightCapture = join(outputDir, 'member-avatar-night-compact.png')
+  await capture(second.cdp, nightCapture)
 
   await openCreateDialog(second.cdp)
   await assertDialogFitsViewport(second.cdp, '1040×700 compact night create dialog')
-  const nightPreferenceDayDialogCapture = join(
+  const nightDialogCapture = join(
     outputDir,
-    'member-avatar-create-night-preference-day-compact.png'
+    'member-avatar-create-night-compact.png'
   )
-  await capture(second.cdp, nightPreferenceDayDialogCapture)
+  await capture(second.cdp, nightDialogCapture)
   await clickButton(second.cdp, '.member-dialog button', '取消')
   await waitForExpression(second.cdp, `!document.querySelector('.member-dialog')`)
 
@@ -290,7 +290,7 @@ try {
       awayAssetRetention: true,
       orphanAssetRetention: true,
       missingIconControlledFallback: true,
-      dayAndNightPreferenceDayLayouts: true,
+      dayAndNightLayouts: true,
       horizontalOverflow: false
     },
     captures: {
@@ -299,8 +299,8 @@ try {
       dayAvatarDialog: dayAvatarDialogCapture,
       dayCreateDialog: dayDialogCapture,
       newConversation: newConversationCapture,
-      compactNightPreferenceDay: nightPreferenceDayCapture,
-      compactNightPreferenceDayCreateDialog: nightPreferenceDayDialogCapture
+      compactNight: nightCapture,
+      compactNightCreateDialog: nightDialogCapture
     }
   }, null, 2))
 } finally {
@@ -342,8 +342,8 @@ async function assertBuiltinRenditions(cdp, theme) {
       portraitFrameRatio: frame ? frame.width / frame.height : null
     }
   })()`)
-  assert(state.listImages >= 4, 'Builtin member list did not render Day glyphs')
-  assert(state.portraitImages === 1, 'Builtin member detail did not render one Day portrait')
+  assert(state.listImages >= 4, 'Builtin member list did not render glyphs')
+  assert(state.portraitImages === 1, 'Builtin member detail did not render one portrait')
   assert(
     JSON.stringify(state.identityFields) === JSON.stringify([
       '专业职责',
@@ -359,7 +359,7 @@ async function assertBuiltinRenditions(cdp, theme) {
       && Math.abs(state.portraitFrameRatio - 4 / 5) < 0.001,
     `Member portrait did not cover its 4:5 frame: ${JSON.stringify(state)}`
   )
-  assert(theme === 'day', `Builtin rendition acceptance only supports Arctic Dawn Day: ${theme}`)
+  await assertThemeRendition(cdp, theme)
 }
 
 async function assertThemeRendition(cdp, theme) {
@@ -719,7 +719,9 @@ async function setTheme(cdp, preference) {
     `window.rovai.appearance.setPreference(${JSON.stringify(preference)})`,
     true
   )
-  await waitForExpression(cdp, `document.documentElement.dataset.theme === 'day'`)
+  const expectedTheme = preference === 'night' ? 'night' : 'day'
+  await waitForExpression(cdp,
+    `document.documentElement.dataset.theme === ${JSON.stringify(expectedTheme)}`)
 }
 
 async function launchApp(port, width, height) {
