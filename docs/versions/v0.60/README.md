@@ -4,13 +4,13 @@ version: v0.60
 lifecycle: current
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: in_progress
+implementation_status: complete
 last_updated: 2026-08-12
 ---
 
 # Rovai-ai v0.60：有界 Tool 输出预览与按需全文复制
 
-> 当前状态：Renderer 实现与自动化验证进行中。
+> 当前状态：Renderer 实现、真实打包 App 验收与 macOS 安装均已完成。
 >
 > 前置版本：[v0.59 九 Runtime 的零 send 公共输出恢复发布](../v0.59/README.md)
 
