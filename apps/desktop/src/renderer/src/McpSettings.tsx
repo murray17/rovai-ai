@@ -34,11 +34,7 @@ type ImportDraft = {
   definitionJson: string
 }
 
-type RiskAction =
-  | { kind: 'enable'; server: McpServerView }
-  | { kind: 'assignment'; server: McpServerView; agent: AgentProfile; assigned: boolean }
-
-type McpServerFilter = 'all' | 'assigned' | 'unassigned' | 'enabled' | 'high-risk'
+type McpServerFilter = 'all' | 'assigned' | 'unassigned' | 'enabled'
 
 const NEW_SERVER_JSON = `{
   "mcpServers": {
@@ -59,7 +55,6 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
   const [config, setConfig] = useState<McpConfigView | null>(null)
   const [editor, setEditor] = useState<JsonEditor | null>(null)
   const [deleting, setDeleting] = useState<McpServerView | null>(null)
-  const [riskAction, setRiskAction] = useState<RiskAction | null>(null)
   const [inspection, setInspection] = useState<McpImportInspection | null>(null)
   const [importDrafts, setImportDrafts] = useState<Record<string, ImportDraft>>({})
   const [busy, setBusy] = useState<string | null>(null)
@@ -85,13 +80,16 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
     }
   }, [load])
 
-  const applyMutation = useCallback(async (result: McpMutationResult): Promise<'ok' | 'risk' | 'failed'> => {
+  const applyMutation = useCallback(async (result: McpMutationResult): Promise<'ok' | 'failed'> => {
     if (result.status === 'ok') {
       setConfig(result.config)
       setFormIssues([])
       return 'ok'
     }
-    if (result.status === 'risk_acknowledgement_required') return 'risk'
+    if (result.status === 'risk_acknowledgement_required') {
+      setError('MCP 配置未能保存，请重新读取后再试。')
+      return 'failed'
+    }
     if (result.status === 'conflict') {
       await load()
       setError('配置文件刚刚发生了变化。页面已重新读取，请再试一次。')
@@ -125,7 +123,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
     }
   }
 
-  const setEnabled = async (server: McpServerView, acknowledgeHighRisk = false): Promise<void> => {
+  const setEnabled = async (server: McpServerView): Promise<void> => {
     if (!config) return
     setBusy(`toggle:${server.serverId}`)
     setError(null)
@@ -134,10 +132,9 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
         expectedConfigDigest: config.configDigest,
         serverId: server.serverId,
         enabled: !server.enabled,
-        acknowledgeHighRisk
+        acknowledgeHighRisk: true
       })
-      const outcome = await applyMutation(result)
-      if (outcome === 'risk') setRiskAction({ kind: 'enable', server })
+      await applyMutation(result)
     } catch (nextError) {
       await load().catch(() => undefined)
       setError(errorMessage(nextError))
@@ -149,8 +146,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
   const setAssignment = async (
     agent: AgentProfile,
     server: McpServerView,
-    assigned: boolean,
-    acknowledgeHighRisk = false
+    assigned: boolean
   ): Promise<void> => {
     if (!config) return
     const key = `assignment:${agent.agentId}:${server.serverId}`
@@ -162,10 +158,9 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
         serverId: server.serverId,
         agentId: agent.agentId,
         assigned,
-        acknowledgeHighRisk
+        acknowledgeHighRisk: true
       })
-      const outcome = await applyMutation(result)
-      if (outcome === 'risk') setRiskAction({ kind: 'assignment', server, agent, assigned })
+      await applyMutation(result)
     } catch (nextError) {
       await load().catch(() => undefined)
       setError(errorMessage(nextError))
@@ -191,7 +186,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
           serverId: server.serverId,
           agentId: agent.agentId,
           assigned,
-          acknowledgeHighRisk: false
+          acknowledgeHighRisk: true
         })
         if (result.status === 'ok') {
           current = result.config
@@ -199,7 +194,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
           continue
         }
         if (result.status === 'risk_acknowledgement_required') {
-          setRiskAction({ kind: 'assignment', server, agent, assigned })
+          setError('MCP 配置未能保存，请重新读取后再试。')
           return
         }
         if (result.status === 'conflict') {
@@ -215,17 +210,6 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
       setError(errorMessage(nextError))
     } finally {
       setBusy(null)
-    }
-  }
-
-  const confirmRisk = async (): Promise<void> => {
-    const action = riskAction
-    if (!action) return
-    setRiskAction(null)
-    if (action.kind === 'enable') {
-      await setEnabled(action.server, true)
-    } else {
-      await setAssignment(action.agent, action.server, action.assigned, true)
     }
   }
 
@@ -419,7 +403,6 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
             onDelete={setDeleting}
           />
         )}
-        <p className="mcp-footnote">配置和分配从后续新执行开始生效；已经开始的执行继续使用其冻结投影。</p>
       </section>
 
       <JsonEditorDialog
@@ -438,14 +421,11 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
         onClose={() => { setInspection(null); setImportDrafts({}); setFormIssues([]) }}
         onCommit={() => void commitImport()}
       />
-      <ConfirmDialogs
+      <DeleteServerDialog
         deleting={deleting}
-        riskAction={riskAction}
         busy={busy !== null}
         onDeleteClose={() => setDeleting(null)}
         onDelete={() => void deleteServer()}
-        onRiskClose={() => setRiskAction(null)}
-        onRiskConfirm={() => void confirmRisk()}
       />
     </div>
   )
@@ -483,9 +463,6 @@ export function McpAssignmentWorkbench({
   const assignedCount = servers.filter((server) => server.assignedAgentIds.includes(selectedAgent.agentId)).length
   const selectTargets = bulkAssignmentTargets(visibleServers, selectedAgent.agentId, true)
   const clearTargets = bulkAssignmentTargets(visibleServers, selectedAgent.agentId, false)
-  const skippedHighRisk = visibleServers.some((server) => (
-    server.riskLevel === 'high' && !server.assignedAgentIds.includes(selectedAgent.agentId)
-  ))
 
   const focusMember = (index: number): void => {
     const member = members[index]
@@ -542,20 +519,21 @@ export function McpAssignmentWorkbench({
 
       <div className="mcp-assignment-chooser">
         <header className="mcp-assignment-chooser-heading">
-          <MemberAvatar agentId={selectedAgent.agentId} avatarRef={selectedAgent.avatarRef} displayName={selectedAgent.displayName} size="picker" decorative />
-          <div>
-            <span>正在为队员配置</span>
-            <strong>{selectedAgent.displayName}</strong>
-            <small>{selectedAgent.teamRole || '队员'} · 已分配 {assignedCount} / {servers.length}</small>
+          <div className="mcp-chosen-member">
+            <MemberAvatar agentId={selectedAgent.agentId} avatarRef={selectedAgent.avatarRef} displayName={selectedAgent.displayName} size="picker" decorative />
+            <div>
+              <span>正在为队员配置</span>
+              <strong>{selectedAgent.displayName}</strong>
+              <small>{selectedAgent.teamRole || '队员'} · {assignedCount} / {servers.length} 个 MCP 已分配</small>
+            </div>
           </div>
-          <span className="mcp-assignment-scope">只影响后续新执行</span>
-        </header>
-
-        <div className="mcp-assignment-toolbar">
           <label className="mcp-search-field">
             <SearchIcon />
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索 MCP 名称、连接或来源" aria-label="搜索可分配 MCP" />
           </label>
+        </header>
+
+        <div className="mcp-assignment-toolbar">
           <div className="mcp-filter-rail" aria-label="分配筛选">
             {([
               ['all', '全部'],
@@ -564,6 +542,10 @@ export function McpAssignmentWorkbench({
             ] as const).map(([value, label]) => (
               <button className={filter === value ? 'is-active' : ''} key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>
             ))}
+          </div>
+          <div className="mcp-bulk-actions">
+            <button type="button" disabled={disabled || busy !== null || selectTargets.length === 0} onClick={() => onBulkAssignment(selectedAgent, selectTargets, true)}>选择筛选结果</button>
+            <button type="button" disabled={disabled || busy !== null || clearTargets.length === 0} onClick={() => onBulkAssignment(selectedAgent, clearTargets, false)}>清空当前筛选</button>
           </div>
         </div>
 
@@ -581,10 +563,9 @@ export function McpAssignmentWorkbench({
                 <span className="mcp-assignment-option-mark" aria-hidden="true">{serverInitial(server)}</span>
                 <span className="mcp-assignment-option-copy">
                   <strong>{server.name}</strong>
-                  <small>{mcpTransportLabel(server.transport)} · {server.enabled ? '已启用' : '当前停用'}{server.riskLevel === 'high' ? ' · 高权限' : ''}</small>
+                  <small>{saving ? '保存中…' : `${mcpTransportLabel(server.transport)} · ${server.enabled ? '已启用' : '当前停用'}`}</small>
                   <code>{server.endpoint}</code>
                 </span>
-                <span className="mcp-assignment-option-state">{saving ? '保存中…' : checked ? '已分配' : '未分配'}</span>
                 <input
                   type="checkbox"
                   checked={checked}
@@ -599,14 +580,6 @@ export function McpAssignmentWorkbench({
             <div className="mcp-assignment-empty">{servers.length === 0 ? '请先添加 MCP Server。' : '当前筛选下没有 MCP。'}</div>
           )}
         </div>
-
-        <footer className="mcp-assignment-footer">
-          <span>{skippedHighRisk ? '高权限 MCP 需逐项确认，批量选择会自动跳过。' : `${visibleServers.length} 个筛选结果`}</span>
-          <div>
-            <button className="quiet-button compact" type="button" disabled={disabled || busy !== null || clearTargets.length === 0} onClick={() => onBulkAssignment(selectedAgent, clearTargets, false)}>清空当前筛选</button>
-            <button className="quiet-button compact" type="button" disabled={disabled || busy !== null || selectTargets.length === 0} onClick={() => onBulkAssignment(selectedAgent, selectTargets, true)}>选择筛选结果</button>
-          </div>
-        </footer>
       </div>
     </div>
   )
@@ -652,8 +625,7 @@ export function McpServerLibrary({
         <div className="mcp-filter-rail" aria-label="MCP Library 筛选">
           {([
             ['all', '全部'],
-            ['enabled', '已启用'],
-            ['high-risk', '高权限']
+            ['enabled', '已启用']
           ] as const).map(([value, label]) => (
             <button className={filter === value ? 'is-active' : ''} key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>
           ))}
@@ -690,7 +662,6 @@ export function McpServerLibrary({
                     <div className="mcp-server-title">
                       <strong title={server.name}>{server.name}</strong>
                       <span className={`mcp-source-badge source-${server.source}`}>{mcpSourceLabel(server.source)}</span>
-                      {server.riskLevel === 'high' && <span className="mcp-risk-badge">高权限</span>}
                     </div>
                     <p>{mcpTransportLabel(server.transport)}</p>
                     <code>{server.endpoint}</code>
@@ -862,22 +833,16 @@ function ImportDialog({
   )
 }
 
-function ConfirmDialogs({
+function DeleteServerDialog({
   deleting,
-  riskAction,
   busy,
   onDeleteClose,
-  onDelete,
-  onRiskClose,
-  onRiskConfirm
+  onDelete
 }: {
   deleting: McpServerView | null
-  riskAction: RiskAction | null
   busy: boolean
   onDeleteClose(): void
   onDelete(): void
-  onRiskClose(): void
-  onRiskConfirm(): void
 }): React.JSX.Element {
   return (
     <>
@@ -886,13 +851,6 @@ function ConfirmDialogs({
           <Dialog.Title>删除 MCP Server？</Dialog.Title>
           <Dialog.Description>将删除 <strong>{deleting?.name}</strong> 的定义和全部队员分配。已经开始的执行不受影响。</Dialog.Description>
           <div className="dialog-actions"><button className="quiet-button" type="button" onClick={onDeleteClose} disabled={busy}>取消</button><button className="danger-button" type="button" onClick={onDelete} disabled={busy}>删除</button></div>
-        </Dialog.Content></Dialog.Portal>
-      </Dialog.Root>
-      <Dialog.Root open={riskAction !== null} onOpenChange={(open) => { if (!open) onRiskClose() }}>
-        <Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="dialog-content compact-dialog mcp-risk-dialog">
-          <Dialog.Title>{riskAction?.kind === 'assignment' ? '分配高权限 MCP？' : '启用高权限 MCP？'}</Dialog.Title>
-          <Dialog.Description><strong>{riskAction?.server.name}</strong> 可以操作浏览器或访问更广泛的本机资源。只有在你信任其配置与来源时，才{riskAction?.kind === 'assignment' ? '分配给这位队员' : '启用'}。</Dialog.Description>
-          <div className="dialog-actions"><button className="quiet-button" type="button" onClick={onRiskClose} disabled={busy}>返回</button><button className="primary-button" type="button" onClick={onRiskConfirm} disabled={busy}>我了解风险，继续</button></div>
         </Dialog.Content></Dialog.Portal>
       </Dialog.Root>
     </>
@@ -923,7 +881,6 @@ export function filterMcpServers(
     if (filter === 'assigned' && !assigned) return false
     if (filter === 'unassigned' && assigned) return false
     if (filter === 'enabled' && !server.enabled) return false
-    if (filter === 'high-risk' && server.riskLevel !== 'high') return false
     if (!normalizedQuery) return true
     return [
       server.name,
@@ -939,11 +896,7 @@ export function bulkAssignmentTargets(
   agentId: string,
   assigned: boolean
 ): McpServerView[] {
-  return servers.filter((server) => {
-    const currentlyAssigned = server.assignedAgentIds.includes(agentId)
-    if (currentlyAssigned === assigned) return false
-    return !assigned || server.riskLevel !== 'high'
-  })
+  return servers.filter((server) => server.assignedAgentIds.includes(agentId) !== assigned)
 }
 
 export function mcpTransportLabel(transport: McpServerView['transport']): string {

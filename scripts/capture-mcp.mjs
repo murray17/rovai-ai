@@ -95,6 +95,16 @@ try {
     publicPreview: document.querySelector('.mcp-source-panel pre')?.textContent ?? '',
     hiddenMetadataVisible: document.body.innerText.includes('_rovai'),
     sourceSecretVisible: document.body.innerText.includes('rovai-secret-must-not-render'),
+    persistentRiskText: document.querySelector('.mcp-settings')?.innerText.includes('高权限') ?? false,
+    riskTagCount: document.querySelectorAll('.mcp-risk-badge, .mcp-risk-dialog').length,
+    assignmentScopeCount: document.querySelectorAll('.mcp-assignment-scope').length,
+    assignmentFootnoteCount: document.querySelectorAll('.mcp-footnote').length,
+    assignmentOptionStateCount: document.querySelectorAll('.mcp-assignment-option-state').length,
+    searchInChooserHeading: Boolean(document.querySelector('.mcp-assignment-chooser-heading .mcp-search-field input')),
+    rosterHeadingBorderBottom: getComputedStyle(document.querySelector('.mcp-member-roster-heading')).borderBottomWidth,
+    selectedRosterBackground: getComputedStyle(document.querySelector('.mcp-member-roster-row[aria-selected="true"]')).backgroundColor,
+    unselectedRosterBackgrounds: [...document.querySelectorAll('.mcp-member-roster-row:not([aria-selected="true"])')]
+      .map((node) => getComputedStyle(node).backgroundColor),
     sharedHeadingCount: document.querySelectorAll('.settings-page-heading').length,
     legacyHeroCount: document.querySelectorAll('.project-hero').length,
     heading: document.querySelector('.settings-page-heading h1')?.textContent
@@ -110,29 +120,43 @@ try {
   assert(!initial.importDialog, 'MCP import scanned automatically on first load')
   assert(!initial.hiddenMetadataVisible, 'Hidden _rovai metadata reached the Renderer')
   assert(!initial.sourceSecretVisible, 'Source literal secret reached the Renderer before import')
+  assert(!initial.persistentRiskText && initial.riskTagCount === 0, `Persistent MCP risk UI is still visible: ${JSON.stringify(initial)}`)
+  assert(initial.assignmentScopeCount === 0, `Legacy assignment scope badge is still visible: ${JSON.stringify(initial)}`)
+  assert(initial.assignmentFootnoteCount === 0, `Legacy assignment scope footnote is still visible: ${JSON.stringify(initial)}`)
+  assert(initial.assignmentOptionStateCount === 0, `Legacy assignment state labels are still visible: ${JSON.stringify(initial)}`)
+  assert(initial.searchInChooserHeading, `Assignment search was not placed in the chooser heading: ${JSON.stringify(initial)}`)
+  assert(initial.rosterHeadingBorderBottom === '0px', `Roster heading still has a separator: ${JSON.stringify(initial)}`)
+  assert(new Set(initial.unselectedRosterBackgrounds).size === 1, `Unselected roster rows do not share one neutral background: ${JSON.stringify(initial)}`)
+  assert(!initial.unselectedRosterBackgrounds.includes(initial.selectedRosterBackground), `Selected roster row is not the only persistent colored row: ${JSON.stringify(initial)}`)
   assert(initial.sharedHeadingCount === 1 && initial.heading === 'MCP 配置', `MCP did not use the shared Settings heading: ${JSON.stringify(initial)}`)
   assert(initial.legacyHeroCount === 0, `Legacy boxed Hero returned to MCP Settings: ${JSON.stringify(initial)}`)
 
   const rosterKeyboardStarted = await evaluate(cdp, `(() => {
     const selected = document.querySelector('.mcp-member-roster-row[aria-selected="true"]')
     selected?.focus()
-    selected?.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
-    return Boolean(selected)
+    return Boolean(selected) && document.activeElement === selected
   })()`)
   assert(rosterKeyboardStarted, 'Could not focus the selected member roster row')
-  await waitForExpression(cdp, `(() => {
+  await dispatchKey(cdp, 'End')
+  await wait(250)
+  const rosterEndState = await evaluate(cdp, `(() => {
     const rows = [...document.querySelectorAll('.mcp-member-roster-row')]
-    return rows.at(-1)?.getAttribute('aria-selected') === 'true' && document.activeElement === rows.at(-1)
-  })()`, 5_000)
-  await evaluate(cdp, `document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }))`)
+    return {
+      selectedIndex: rows.findIndex((row) => row.getAttribute('aria-selected') === 'true'),
+      activeIndex: rows.indexOf(document.activeElement),
+      count: rows.length
+    }
+  })()`)
+  assert(rosterEndState.count > 0 && rosterEndState.selectedIndex === rosterEndState.count - 1 && rosterEndState.activeIndex === rosterEndState.count - 1, `End did not select and focus the last roster row: ${JSON.stringify(rosterEndState)}`)
+  await dispatchKey(cdp, 'Home')
   await waitForExpression(cdp, `(() => {
     const row = document.querySelector('.mcp-member-roster-row')
     return row?.getAttribute('aria-selected') === 'true' && document.activeElement === row
   })()`, 5_000)
 
-  await setValue(cdp, '.mcp-assignment-toolbar input', 'play')
+  await setValue(cdp, '.mcp-assignment-chooser-heading input', 'play')
   await waitForExpression(cdp, `document.querySelectorAll('.mcp-assignment-option').length === 1 && document.querySelector('.mcp-assignment-option')?.dataset.mcpServerName === 'playwright'`, 5_000)
-  await setValue(cdp, '.mcp-assignment-toolbar input', '')
+  await setValue(cdp, '.mcp-assignment-chooser-heading input', '')
   await clickButtonByText(cdp, '.mcp-assignment-toolbar button', '只看未分配')
   await waitForExpression(cdp, `[...document.querySelectorAll('.mcp-assignment-option input')].every((node) => !node.checked)`, 5_000)
   await clickButtonByText(cdp, '.mcp-assignment-toolbar button', '全部')
@@ -195,13 +219,13 @@ try {
 
   await evaluate(cdp, `[...document.querySelectorAll('.mcp-member-roster-row')].at(-1)?.click()`)
   await waitForExpression(cdp, `document.querySelectorAll('.mcp-assignment-option input:checked').length === 0`, 5_000)
-  await clickButtonByText(cdp, '.mcp-assignment-footer button', '选择筛选结果')
+  await clickButtonByText(cdp, '.mcp-bulk-actions button', '选择筛选结果')
   await waitForExpression(cdp, `(() => {
     const options = [...document.querySelectorAll('.mcp-assignment-option')]
     const checked = options.filter((node) => node.querySelector('input')?.checked).map((node) => node.dataset.mcpServerName)
-    return checked.length === 3 && !checked.includes('playwright')
+    return checked.length === 4 && checked.includes('playwright') && !document.querySelector('.mcp-risk-dialog')
   })()`, 15_000)
-  await clickButtonByText(cdp, '.mcp-assignment-footer button', '清空当前筛选')
+  await clickButtonByText(cdp, '.mcp-bulk-actions button', '清空当前筛选')
   await waitForExpression(cdp, `document.querySelectorAll('.mcp-assignment-option input:checked').length === 0`, 15_000)
   await evaluate(cdp, `document.querySelector('.mcp-member-roster-row')?.click()`)
   await waitForExpression(cdp, `document.querySelector('.mcp-member-roster-row')?.getAttribute('aria-selected') === 'true'`, 5_000)
@@ -307,6 +331,10 @@ try {
     noAutomaticImportScan: true,
     rosterKeyboardNavigation: true,
     assignmentSearchAndFilter: true,
+    searchInChooserHeading: true,
+    neutralRosterWithSelectedSteelState: true,
+    persistentRiskUiRemoved: true,
+    highRiskMutationUsesOrdinaryFlow: true,
     memberAssignmentEdited: true,
     bulkAssignmentEdited: true,
     enableTogglePersisted: true,
@@ -343,6 +371,14 @@ async function resize(cdp, width, height) {
     deviceScaleFactor: 1,
     mobile: false
   })
+}
+
+async function dispatchKey(cdp, key) {
+  const windowsVirtualKeyCode = key === 'End' ? 35 : 36
+  const nativeVirtualKeyCode = key === 'End' ? 119 : 115
+  const params = { key, code: key, windowsVirtualKeyCode, nativeVirtualKeyCode }
+  await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...params })
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...params })
 }
 
 async function layoutState(cdp) {

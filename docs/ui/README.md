@@ -72,9 +72,10 @@ v0.37 以确认的 MCP v4 HTML 原型为定向输入，局部替代本文与当�
 Porcelain/Steel Token，具体三段结构、队员 tofu、Server tofu 与 JSON Dialog 见
 [v0.37 MCP 生产设计](../versions/v0.37/production-design.md)。
 
-v0.63 保留 v0.37 的 JSON 真源、导入、安全、mutation 与 Runtime Projection 边界，但以
+v0.63 保留 v0.37 的 JSON 真源、导入、mutation 与 Runtime Projection 边界，但以
 确认的 Variant B 取代其队员 tofu / 原生 `details` picker 和 Server tofu：上方是长名册有界滚动、
-可搜索筛选与批量处理的队员分配工作台，下方是与 Skill 同家族的开放 MCP Library。版本级实施
+仅当前队员使用 Steel 选中态、标题栏内搜索和统一批量处理的队员分配工作台，下方是与 Skill
+同家族的开放 MCP Library。普通 UI 不再投影风险标签、风险筛选或额外风险确认。版本级实施
 与验收以 [v0.63 概览](../versions/v0.63/README.md)和
 [实施计划](../versions/v0.63/implementation-plan.md)为准。
 
@@ -266,9 +267,9 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
   失败只影响 Git 状态提示，不阻塞普通目录 Camp 创建。
 - 记忆、通用、技能、Agent 运行时、外观、通知、诊断与修复和创建新对话 Dialog 以当前 UI
   详规为准。七个设置分类、队员、记忆和浮层统一使用 Porcelain 表面与低频 Steel 顶边、标题轨和
-  选中态；attention、danger、success 与 evidence 继续使用各自语义色。MCP 的领域与安全边界
-  继续来自 v0.37，当前工作台和开放列表结构由 v0.63 替代，并复用同一 App Shell、Token 与
-  通用交互规则。
+  选中态；attention、danger、success 与 evidence 继续使用各自语义色。MCP 的 JSON 真源、导入
+  与 Runtime Projection 边界继续来自 v0.37；当前工作台、开放列表和不投影风险分类的普通操作
+  流程由 v0.63 替代，并复用同一 App Shell、Token 与通用交互规则。
 - 创建新对话继续提供工作目录、安全校验、动态 Git 能力、队员、Lead 和可选名称；不增加
   原型式“创建摘要”区或黄色静态提示。会话日期只从真实时间戳和 Camp 创建时间派生，不补造
   “今天 · 发布准备”等不可取得阶段字段。

@@ -25,13 +25,14 @@ describe('MCP settings', () => {
     expect(markup).toContain('正在读取 MCP 配置')
     expect(markup).toContain('队员分配工作台')
     expect(markup).not.toContain('Context7')
+    expect(markup).not.toContain('配置和分配从后续新执行开始生效')
   })
 
   it('renders a searchable assignment workbench with real member avatars and a bounded roster', () => {
     const members = Array.from({ length: 12 }, (_, index) => agent(index))
     const markup = renderToStaticMarkup(createElement(McpAssignmentWorkbench, {
       members,
-      servers: [server()],
+      servers: [server({ riskLevel: 'high' })],
       busy: null,
       disabled: false,
       onAssignment: () => undefined,
@@ -43,13 +44,17 @@ describe('MCP settings', () => {
     expect(markup.match(/role="option"/g)).toHaveLength(12)
     expect(markup).toContain('class="member-avatar')
     expect(markup).toContain('placeholder="搜索 MCP 名称、连接或来源"')
+    expect(markup).toMatch(/mcp-assignment-chooser-heading[\s\S]*mcp-search-field/)
     expect(markup).toContain('只看已分配')
     expect(markup).toContain('选择筛选结果')
     expect(markup).not.toContain('mcp-member-picker')
+    expect(markup).not.toContain('mcp-assignment-scope')
+    expect(markup).not.toContain('mcp-assignment-option-state')
+    expect(markup).not.toContain('高权限')
   })
 
   it('renders the MCP Library as Skill-family open rows with deterministic marks', () => {
-    const docs = server({ assignedAgentIds: ['agent_0', 'agent_1'] })
+    const docs = server({ assignedAgentIds: ['agent_0', 'agent_1'], riskLevel: 'high' })
     const markup = renderToStaticMarkup(createElement(McpServerLibrary, {
       members: [agent(0), agent(1)],
       servers: [docs],
@@ -68,6 +73,8 @@ describe('MCP settings', () => {
     expect(markup).toContain('aria-expanded="false"')
     expect(markup).toContain('<svg')
     expect(markup).not.toContain('mcp-server-card')
+    expect(markup).not.toContain('mcp-risk-badge')
+    expect(markup).not.toContain('高权限')
   })
 
   it('filters large MCP sets by text and assignment state', () => {
@@ -86,12 +93,12 @@ describe('MCP settings', () => {
     expect(filterMcpServers([docs, browser], '用户添加', 'all')).toEqual([docs, browser])
   })
 
-  it('keeps high-risk assignment acknowledgement individual during bulk selection', () => {
+  it('treats every visible MCP uniformly during bulk selection', () => {
     const standard = server()
     const highRisk = server({ serverId: 'browser', name: 'browser', riskLevel: 'high' })
 
     expect(bulkAssignmentTargets([standard, highRisk], 'agent_0', true)).toEqual([])
-    expect(bulkAssignmentTargets([standard, highRisk], 'agent_1', true)).toEqual([standard])
+    expect(bulkAssignmentTargets([standard, highRisk], 'agent_1', true)).toEqual([standard, highRisk])
     expect(bulkAssignmentTargets([standard, highRisk], 'agent_0', false)).toEqual([standard, highRisk])
   })
 

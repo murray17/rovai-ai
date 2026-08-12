@@ -1089,13 +1089,15 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
 - 真源路径条显示当前权威 `~/.rovai/mcp.json` 或受控旧命名空间选择结果，并提供
   Finder 入口。UI 是该文件的图形编辑器，不建立 SQLite MCP 真源。
 - 队员分配区使用 230–260px 在队名册与 `minmax(0,1fr)` MCP chooser；名册展示受控头像、名称、
-  角色和分配数量，并在固定工作台高度内独立纵向滚动。窄宽 / 200% zoom 时名册变为有界横向
-  队员带，不能让整页随队员数量无限增高。
-- chooser 显示当前队员头像、名称、`x / n` 分配数和“只影响后续新执行”；搜索覆盖名称、
-  Endpoint、Transport 与来源，筛选为全部、已分配、未分配。桌面 MCP 选项两列，1040 可用空间
-  不足时改单列；批量选择跳过高权限项，批量清空与单项勾选都以 Core 返回为准。
+  角色和分配数量，并在固定工作台高度内独立纵向滚动。名册标题与列表之间没有横向分隔；普通
+  行使用中性白底，只有当前行使用 Steel soft wash 与 2px 短轨。窄宽 / 200% zoom 时名册变为
+  有界横向队员带，不能让整页随队员数量无限增高。
+- chooser 标题显示当前队员头像、名称与 `x / n` 分配数，右侧固定放 MCP 搜索，不显示“只影响
+  后续新执行”胶囊或重复的底部生效脚注。搜索覆盖名称、Endpoint、Transport 与来源，筛选为全部、已分配、未分配。
+  桌面 MCP 选项两列，1040 可用空间不足时改单列；选项行只用 checkbox 表达分配，不重复显示
+  “已分配 / 未分配”。批量选择、批量清空与单项勾选都以 Core 返回为准。
 - 已安装 MCP 使用与 Skill 同家族的开放列表：稳定 `serverId` 身份色 mark、名称、Transport、
-  Endpoint、来源、风险、真实队员头像摘要、启用 Switch 和一个“详情”入口；只有分隔线，不恢复
+  Endpoint、来源、真实队员头像摘要、启用 Switch 和一个“详情”入口；只有分隔线，不恢复
   tofu 卡片墙或常态阴影。展开详情展示完整事实、编辑 JSON 与删除，Library 不提供第二个分配写入口。
 - 停用是 neutral 状态，不使用危险色或把整行降低到不可读；身份色只辅助区分 mark，不代表状态或
   MCP 官方品牌。详情箭头必须与文字垂直对齐，并以 `aria-expanded`、Hover 与 Focus 表达可点击性。
@@ -1108,8 +1110,9 @@ Hover、Focus 或弹窗打开时才使用 8% `--mention-ink` 背景与同强度�
   不安全时提供显式修复。不能用空配置静默覆盖。
 - 启停、编辑、删除只影响后续 AgentRun；正在执行与恢复中的 AgentRun 保持冻结 Exposure
   Snapshot。普通 UI 不声称 Rovai-ai 审批了 Runtime 原生 MCP 副作用。
-- 高权限 MCP 必须逐项确认，不能通过批量选择静默授权；多项 assignment mutation 必须串行使用
-  前一次响应的新 `configDigest`，遇到 CAS conflict 后重新读取并停止余下写入。
+- 风险分类不进入普通 Renderer：不显示“高权限”标签、筛选或额外确认 Dialog。分配和启停的
+  显式用户动作统一提交已有 `acknowledgeHighRisk` 兼容字段；多项 assignment mutation 必须串行
+  使用前一次响应的新 `configDigest`，遇到 CAS conflict 后重新读取并停止余下写入。
 
 ### Agent 运行时
 
