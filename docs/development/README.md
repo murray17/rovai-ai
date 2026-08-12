@@ -1,7 +1,7 @@
 ---
 document_type: development-index
 authority: development-routing
-last_updated: 2026-08-12
+last_updated: 2026-08-13
 ---
 
 # Rovai-ai 开发者指南
@@ -16,6 +16,11 @@ last_updated: 2026-08-12
 `dist/` 只是可覆盖的打包产物。开发、打包验收和自动测试都不得共享日常 `userData`。
 所有 `rovai-core` 启动都必须收到显式绝对 `--data-dir`，并在打开 SQLite 或执行 startup recovery
 之前获取该目录的进程级独占锁；这是启动器检查之外的最终写入边界。
+
+为 durable Task 创建或复用隔离目录时，同时阅读
+[Git Worktree 生命周期与清理](worktrees.md)。Rovai-ai 的 Rust、Electron 和打包生成物会让每个
+活跃 worktree 占用数 GiB；Task 已合入或明确放弃后，清理 worktree 是同一次任务收口的一部分，
+不能无限期留待以后处理。
 
 在仓库根目录安装锁定依赖并启动开发版桌面应用：
 
@@ -87,6 +92,7 @@ pnpm build:desktop
 | 任务 | 文档 |
 | --- | --- |
 | 启动开发 App、运行打包产物或区分日常/开发数据 | [本地开发与 App 隔离流程](local-workflow.md) |
+| 创建、复用、交接、合入或清理 Git worktree | [Git Worktree 生命周期与清理](worktrees.md) |
 | 判断主机、Node、pnpm、Rust、Git 或 Runtime 前置条件 | [开发环境与依赖](environment.md) |
 | 选择单元测试、集成测试、Smoke 或版本验收命令 | [测试与 Smoke Test](testing.md) |
 | 构建 Release Core、App、DMG，检查签名 | [macOS 构建与打包](packaging.md) |
@@ -128,6 +134,11 @@ pnpm build:desktop
 | `resources/native/` | macOS 文件面板原生预热器 |
 | `out/` | Electron Vite 构建结果 |
 | `dist/` | macOS App 和 DMG |
+
+不同 worktree 默认各自拥有这些生成目录。Task 已完成时，应按
+[Worktree 清理流程](worktrees.md#任务收口与安全清理)删除整个 worktree；仍在开发的 worktree
+若只需处理 Rust 缓存异常，则按[常见问题排查](troubleshooting.md#target-占用异常增长或磁盘不足)
+选择性清理，不把每日 `cargo clean` 当作常规维护。
 
 Camp、运行、事件和审批数据位于 Electron `userData`。诊断中心和 v5 导出不再显示或输出绝对
 `userData` / SQLite 路径；需要制作数据库副本时，应从已退出的隔离验收环境或 Electron 开发日志取得精确位置，

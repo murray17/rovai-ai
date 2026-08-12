@@ -1,7 +1,7 @@
 ---
 document_type: documentation-index
 authority: documentation-routing
-last_updated: 2026-08-12
+last_updated: 2026-08-13
 ---
 
 # Rovai-ai 文档导航
@@ -32,6 +32,7 @@ last_updated: 2026-08-12
 | 理解历史设计与演进原因 | [版本索引](versions/README.md)及对应历史版本；历史内容不能作为当前约束 |
 | 修改 Renderer UI/UX | [UI 规范索引](ui/README.md)；修改当前 Neutral Porcelain + Steel Renderer 时继续读取[当前 UI 详规](ui/arctic-dawn.md) |
 | 本地运行、测试、Smoke Test 或 macOS 构建 | [开发者指南](development/README.md) |
+| 创建、复用、交接或清理开发用 Git worktree | [Git Worktree 生命周期与清理](development/worktrees.md) |
 
 读取相关文档后，仍必须检查目标代码、Migration 和测试；文档不能替代实施事实。
 
