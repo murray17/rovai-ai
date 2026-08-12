@@ -196,6 +196,13 @@ describe('Neutral Porcelain + Steel theme tokens', () => {
     )
   })
 
+  it('keeps long Tool output copy as a light icon inside the existing evidence preview', () => {
+    expect(css).toMatch(/\.tool-call-detail\s*\{[^}]*position:\s*relative[^}]*margin:\s*7px 0 0 24px/)
+    expect(css).toMatch(/\.tool-output-copy-button\s*\{[^}]*position:\s*absolute[^}]*width:\s*25px[^}]*height:\s*25px[^}]*border:\s*0/)
+    expect(css).toMatch(/\.tool-call-detail\.is-truncated > pre\s*\{[^}]*padding-right:\s*36px/)
+    expect(css).not.toContain('.tool-output-copy-button {\n  border: 1px')
+  })
+
   it('widens the 2K composer and keeps the Enter keycap beside Send', () => {
     expect(css).toMatch(
       /@media\s*\(min-width:\s*1800px\)\s*\{\s*\.composer-box\s*\{[^}]*width:\s*min\(1040px,\s*100%\)/

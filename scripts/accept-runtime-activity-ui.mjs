@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -23,6 +24,15 @@ const runArticleSelector = 'article.timeline-node.conversation-bubble.agent'
 const activeAgentId = 'agent_101'
 const activeRunId = 'run-codex'
 const historicalRunId = 'run-codex-history'
+const longToolOutputFirstMarker = 'ROVAI_LONG_TOOL_OUTPUT_BEGIN'
+const longToolOutputMiddleMarker = 'ROVAI_LONG_TOOL_OUTPUT_MIDDLE'
+const longToolOutputLastMarker = 'ROVAI_LONG_TOOL_OUTPUT_END'
+const longToolOutput = Array.from({ length: 8_432 }, (_, index) => {
+  if (index === 0) return `${longToolOutputFirstMarker} · line 1`
+  if (index === 4_215) return `${longToolOutputMiddleMarker} · line ${index + 1}`
+  if (index === 8_431) return `${longToolOutputLastMarker} · line ${index + 1}`
+  return `fixture output line ${index + 1} · vehicle prepayment reconciliation`
+}).join('\n')
 
 const runtimes = [
   runtime('codex', 'codex-cli', 'Codex CLI', '读取 README.md', {
@@ -32,7 +42,7 @@ const runtimes = [
         id: 'op-codex', type: 'commandExecution', status: 'completed', title: null,
         command: '/bin/zsh -lc "sed -n 1,120p /repo/docs/README.md"',
         commandActions: [{ type: 'read', name: 'sed', path: '/repo/docs/README.md' }],
-        output: Array.from({ length: 32 }, (_, index) => `${index + 1}: README.md fixture output`).join('\n')
+        output: longToolOutput
       }
     }
   }),
@@ -186,6 +196,9 @@ try {
   })()`)
   const executionDrawerResize = await verifyExecutionDrawerResizeControl(app.cdp)
   const executionAutoFollow = await verifyExecutionAutoFollowControl(app.cdp)
+  const boundedToolOutput = await verifyBoundedToolOutput(app.cdp)
+  const toolOutputCapture = join(outputDir, 'runtime-activity-tool-output.png')
+  await capture(app.cdp, toolOutputCapture)
 
   await evaluate(app.cdp, `(() => {
     const timeline = document.querySelector('.camp-timeline')
@@ -375,6 +388,7 @@ try {
       runningRunFocusedWithEvidence: observed.find((row) => row.agentId === activeAgentId)?.focusedEvidenceOpen === true,
       executionDrawerResize,
       executionAutoFollow,
+      boundedToolOutput,
       claudeRunLevelDoesNotInventTools: observed.find((row) => row.runtime === 'Claude Code')?.toolTitles.length === 0,
       antigravityCoreToolCatalogName: observed.find((row) => row.runtime === 'Antigravity')?.toolTitles[0] === 'camp.message.send',
       conversationPresentation,
@@ -389,6 +403,7 @@ try {
     captures: {
       top: topCapture,
       bottom: bottomCapture,
+      toolOutput: toolOutputCapture,
       wide: wideCapture,
       wideConversation: wideConversationCapture,
       compact: compactCapture,
@@ -914,19 +929,45 @@ async function seedActivity(entry, index) {
         id: `evidence-${entry.key}`, sequence: 1, eventType: entry.eventType,
         kind: 'tool_result', phase: 'completed', payload: entry.payload
       }]
-  const evidenceRows = evidence.map((item) => `(
+  const preparedEvidence = []
+  for (const item of evidence) {
+    const encoded = Buffer.from(JSON.stringify(item.payload))
+    const blob = encoded.byteLength > 16 * 1024
+      ? await seedManagedBlob(encoded, occurredAt)
+      : null
+    preparedEvidence.push({
+      ...item,
+      payloadPreview: blob ? boundedEvidencePreview(item.payload) : item.payload,
+      contentBlobId: blob?.id ?? null,
+      contentByteCount: encoded.byteLength,
+      isTruncated: Boolean(blob),
+      blob
+    })
+  }
+  const evidenceRows = preparedEvidence.map((item) => `(
     ${sqlLiteral(item.id)}, ${sqlLiteral(runId)}, 1, ${item.sequence},
     ${sqlLiteral(item.eventType)}, ${sqlLiteral(item.kind)}, ${sqlLiteral(item.phase)},
     ${sqlLiteral(`${item.eventType}:${operationId}:${item.phase}`)},
-    ${sqlLiteral(JSON.stringify(item.payload))}, NULL,
-    ${Buffer.byteLength(JSON.stringify(item.payload))}, 0, ${sqlLiteral(occurredAt)}
+    ${sqlLiteral(JSON.stringify(item.payloadPreview))}, ${sqlNullable(item.contentBlobId)},
+    ${item.contentByteCount}, ${item.isTruncated ? 1 : 0}, ${sqlLiteral(occurredAt)}
   )`).join(',\n')
+  const managedBlobStatements = preparedEvidence.flatMap((item) => item.blob ? [`
+    INSERT INTO managed_blob(
+      id, sha256, byte_size, media_type, storage_relative_path,
+      state, sensitivity, created_at, verified_at, updated_at
+    ) VALUES (
+      ${sqlLiteral(item.blob.id)}, ${sqlLiteral(item.blob.digest)}, ${item.blob.byteSize},
+      'application/json', ${sqlLiteral(item.blob.relativePath)},
+      'present', 'normal', ${sqlLiteral(occurredAt)}, ${sqlLiteral(occurredAt)}, ${sqlLiteral(occurredAt)}
+    ) ON CONFLICT(sha256) DO NOTHING;
+  `] : []).join('\n')
   const evidenceIds = evidence.map((item) => item.id)
   const toolName = entry.payload.toolName
     ?? (entry.sourceAuthority === 'core' ? 'camp.message.send' : null)
   await runSql(databasePath, `
     PRAGMA foreign_keys = ON;
     BEGIN IMMEDIATE;
+    ${managedBlobStatements}
     INSERT INTO agent_run_execution_evidence(
       id, agent_run_id, execution_epoch, sequence, event_type, kind, phase,
       source_event_key, payload_preview_json, content_blob_id,
@@ -949,6 +990,33 @@ async function seedActivity(entry, index) {
     );
     COMMIT;
   `)
+}
+
+function boundedEvidencePreview(value) {
+  if (typeof value === 'string') {
+    const characters = Array.from(value)
+    return characters.length <= 4_000
+      ? value
+      : `${characters.slice(0, 4_000).join('')}\n…（内容已截断，可按需读取完整证据）`
+  }
+  if (Array.isArray(value)) return value.slice(0, 24).map(boundedEvidencePreview)
+  if (value !== null && typeof value === 'object') {
+    return {
+      ...Object.fromEntries(Object.entries(value).slice(0, 24).map(([key, child]) => [key, boundedEvidencePreview(child)])),
+      _rovaiTruncated: true
+    }
+  }
+  return value
+}
+
+async function seedManagedBlob(bytes, occurredAt) {
+  const digest = createHash('sha256').update(bytes).digest('hex')
+  const id = `blob-sha256-${digest}`
+  const relativePath = `sha256/${digest.slice(0, 2)}/${digest}`
+  const directory = join(dataDir, 'managed-blobs', 'sha256', digest.slice(0, 2))
+  await mkdir(directory, { recursive: true })
+  await writeFile(join(dataDir, 'managed-blobs', relativePath), bytes)
+  return { id, digest, relativePath, byteSize: bytes.byteLength, occurredAt }
 }
 
 async function collectRuntimeRows(cdp) {
@@ -1021,6 +1089,122 @@ async function collectRuntimeRows(cdp) {
     })()`))
   }
   return rows
+}
+
+async function verifyBoundedToolOutput(cdp) {
+  const opened = await evaluate(cdp, `(() => {
+    const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
+      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === '读取 README.md')
+    if (disclosure && !disclosure.open) disclosure.querySelector('summary')?.click()
+    return Boolean(disclosure)
+  })()`)
+  assert(opened, 'Could not open the long Tool output disclosure')
+  await waitForExpression(cdp, `Boolean(document.querySelector('.execution-drawer .tool-call-detail.is-truncated'))`)
+
+  const presentation = await evaluate(cdp, `(() => {
+    const detail = document.querySelector('.execution-drawer .tool-call-detail.is-truncated')
+    const preview = detail?.querySelector('pre')
+    const button = detail?.querySelector('.tool-output-copy-button')
+    const buttonStyle = button ? getComputedStyle(button) : null
+    const buttonRect = button?.getBoundingClientRect()
+    const text = preview?.textContent ?? ''
+    return {
+      previewText: text,
+      previewLineCount: text.split('\\n').length,
+      previewVerticalOverflow: preview ? preview.scrollHeight > preview.clientHeight + 1 : null,
+      hasFirstMarker: text.includes(${JSON.stringify(longToolOutputFirstMarker)}),
+      hasMiddleMarker: text.includes(${JSON.stringify(longToolOutputMiddleMarker)}),
+      hasLastMarker: text.includes(${JSON.stringify(longToolOutputLastMarker)}),
+      hasCutNotice: text.endsWith('…（后续内容未显示）'),
+      copyButtonCount: detail?.querySelectorAll('.tool-output-copy-button').length ?? 0,
+      copyButtonText: button?.textContent?.trim() ?? '',
+      copyAriaLabel: button?.getAttribute('aria-label') ?? null,
+      copyBorderWidth: buttonStyle?.borderTopWidth ?? null,
+      copyWidth: buttonRect?.width ?? 0,
+      copyHeight: buttonRect?.height ?? 0,
+      legacyCompleteControlCount: detail?.parentElement?.querySelectorAll('.complete-evidence-control').length ?? 0,
+      fullOutputLeakedIntoDom: document.body.innerText.includes(${JSON.stringify(longToolOutputMiddleMarker)})
+        || document.body.innerText.includes(${JSON.stringify(longToolOutputLastMarker)})
+    }
+  })()`)
+  assert(presentation.hasFirstMarker
+    && !presentation.hasMiddleMarker
+    && !presentation.hasLastMarker
+    && presentation.hasCutNotice
+    && presentation.previewLineCount === 11
+    && presentation.previewVerticalOverflow === false,
+  `Long Tool output did not keep one bounded beginning preview: ${JSON.stringify(presentation)}`)
+  assert(presentation.copyButtonCount === 1
+    && presentation.copyButtonText === ''
+    && presentation.copyAriaLabel === '复制完整输出'
+    && presentation.copyBorderWidth === '0px'
+    && Math.abs(presentation.copyWidth - 25) <= 0.5
+    && Math.abs(presentation.copyHeight - 25) <= 0.5
+    && presentation.legacyCompleteControlCount === 0
+    && !presentation.fullOutputLeakedIntoDom,
+  `Long Tool output copy affordance was not the accepted light icon: ${JSON.stringify(presentation)}`)
+
+  const installed = await evaluate(cdp, `(() => {
+    const clipboard = navigator.clipboard
+    if (!clipboard || typeof clipboard.writeText !== 'function') return false
+    window.__rovaiToolOutputClipboardHadOwnWriteText = Object.prototype.hasOwnProperty.call(clipboard, 'writeText')
+    window.__rovaiToolOutputClipboardWriteTextDescriptor = Object.getOwnPropertyDescriptor(clipboard, 'writeText')
+    window.__rovaiToolOutputCopiedText = null
+    try {
+      Object.defineProperty(clipboard, 'writeText', {
+        configurable: true,
+        value: async (text) => { window.__rovaiToolOutputCopiedText = text }
+      })
+      return true
+    } catch {
+      return false
+    }
+  })()`)
+  assert(installed, 'Could not install the isolated Tool output clipboard spy')
+
+  try {
+    await evaluate(cdp, `document.querySelector('.execution-drawer .tool-output-copy-button')?.click()`)
+    await waitForExpression(cdp,
+      `typeof window.__rovaiToolOutputCopiedText === 'string'
+        && window.__rovaiToolOutputCopiedText.length === ${longToolOutput.length}`)
+    const copied = await evaluate(cdp, `(() => {
+      const text = window.__rovaiToolOutputCopiedText ?? ''
+      const button = document.querySelector('.execution-drawer .tool-output-copy-button')
+      return {
+        length: text.length,
+        lineCount: text.split('\\n').length,
+        startsWithPublicOutput: text.startsWith(${JSON.stringify(longToolOutputFirstMarker)}),
+        hasMiddleMarker: text.includes(${JSON.stringify(longToolOutputMiddleMarker)}),
+        endsWithPublicOutput: text.endsWith(${JSON.stringify(`${longToolOutputLastMarker} · line 8432`)}),
+        leakedEnvelope: text.startsWith('{') || text.includes('"_rovaiTruncated"'),
+        buttonLabel: button?.getAttribute('aria-label') ?? null,
+        buttonIcon: button?.textContent?.trim() ?? ''
+      }
+    })()`)
+    assert(copied.length === longToolOutput.length
+      && copied.lineCount === 8_432
+      && copied.startsWithPublicOutput
+      && copied.hasMiddleMarker
+      && copied.endsWithPublicOutput
+      && !copied.leakedEnvelope
+      && copied.buttonLabel === '已复制完整输出'
+      && copied.buttonIcon === '✓',
+    `Copy full Tool output did not use the complete public output field: ${JSON.stringify(copied)}`)
+    return { ...presentation, copied }
+  } finally {
+    await evaluate(cdp, `(() => {
+      const clipboard = navigator.clipboard
+      const hadOwn = window.__rovaiToolOutputClipboardHadOwnWriteText
+      const descriptor = window.__rovaiToolOutputClipboardWriteTextDescriptor
+      if (clipboard) {
+        if (hadOwn && descriptor) Object.defineProperty(clipboard, 'writeText', descriptor)
+        else delete clipboard.writeText
+      }
+      delete window.__rovaiToolOutputClipboardHadOwnWriteText
+      delete window.__rovaiToolOutputClipboardWriteTextDescriptor
+      delete window.__rovaiToolOutputCopiedText
+    })()`)
+  }
 }
 
 async function verifyExecutionDrawerResizeControl(cdp) {

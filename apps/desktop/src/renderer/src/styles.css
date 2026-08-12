@@ -1717,7 +1717,40 @@ button.timeline-event-card:hover { border-color: var(--brand); background: var(-
 .tool-call-result.status-waiting { color: var(--attention); }
 .tool-call-chevron { margin-left: auto; color: var(--faint); transition: transform 120ms ease; }
 .tool-call-disclosure[open] .tool-call-chevron { transform: rotate(180deg); }
-.tool-call-disclosure > pre { max-height: 220px; margin: 7px 0 0 24px; overflow: auto; padding: 7px 8px; border: 1px solid var(--evidence-line); border-radius: 5px; color: var(--evidence-muted); background: var(--evidence-canvas); font: 10px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tool-call-detail { position: relative; min-width: 0; margin: 7px 0 0 24px; }
+.tool-call-detail > pre { max-height: 220px; margin: 0; overflow: auto; padding: 7px 8px; border: 1px solid var(--evidence-line); border-radius: 5px; color: var(--evidence-muted); background: var(--evidence-canvas); font: 10px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tool-call-detail.is-truncated > pre { padding-right: 36px; }
+.tool-output-copy-button {
+  position: absolute;
+  z-index: 1;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  width: 25px;
+  height: 25px;
+  margin: 0;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 4px;
+  opacity: .62;
+  color: var(--faint);
+  background: transparent;
+  cursor: pointer;
+  font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  transition: opacity 120ms ease, color 120ms ease, background-color 120ms ease;
+}
+.tool-output-copy-button svg { width: 14px; height: 14px; }
+.tool-call-detail:hover .tool-output-copy-button,
+.tool-output-copy-button:hover,
+.tool-output-copy-button:focus-visible { opacity: 1; color: var(--brand-ink); background: var(--brand-soft); }
+.tool-output-copy-button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.tool-output-copy-button.state-copied { opacity: 1; color: var(--success); background: var(--success-soft); }
+.tool-output-copy-button.state-failed { opacity: 1; color: var(--danger); background: var(--danger-soft); }
+.tool-output-copy-button:disabled { cursor: wait; }
+@media (hover: none), (pointer: coarse) {
+  .tool-output-copy-button { opacity: 1; }
+}
 .process-plan { color: var(--muted); font-size: 11.5px; }
 .live-progress-plan ol { display: grid; gap: 5px; margin: 6px 0 0; padding: 0; list-style: none; }
 .live-progress-plan li { display: grid; grid-template-columns: 14px minmax(0, 1fr); align-items: start; gap: 5px; color: var(--evidence-muted); font-size: 11px; line-height: 1.45; }

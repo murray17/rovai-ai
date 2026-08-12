@@ -87,10 +87,12 @@ import {
   buildGitStatusEntries,
   buildLiveExecutionProgress,
   diffLineKind,
+  executionEvidenceCopyText,
   formatByteSize,
   liveRuntimeEventFromCore,
   parseGitStatus,
-  selectCompleteExecutionEvidence
+  selectCompleteExecutionEvidence,
+  toolDetailPreview
 } from './ui-model'
 
 const TEST_EXECUTION_BUDGET = {
@@ -2520,6 +2522,53 @@ describe('task event projections', () => {
     expect(selected.byToolId.get('files-1')?.id).toBe('files-failed')
     expect(selected.byToolId.get('command-2')?.id).toBe('second-command')
     expect(selected.unassigned.map((item) => item.id)).toEqual(['narration'])
+  })
+
+  it('keeps only the beginning of long Tool output and extracts copyable public content', () => {
+    expect(toolDetailPreview('short output', false)).toEqual({
+      text: 'short output',
+      truncated: false
+    })
+    expect(toolDetailPreview('short output', true)).toEqual({
+      text: 'short output',
+      truncated: false
+    })
+    const lines = Array.from({ length: 14 }, (_, index) => `line ${index + 1}`)
+    const preview = toolDetailPreview(lines.join('\n'), false)
+    expect(preview.truncated).toBe(true)
+    expect(preview.text).toContain('line 1')
+    expect(preview.text).toContain('line 10')
+    expect(preview.text).not.toContain('line 11')
+    expect(preview.text).not.toContain('line 14')
+    expect(preview.text).toMatch(/line 10\n…（后续内容未显示）$/)
+
+    expect(toolDetailPreview(
+      `first line\n…（内容已截断，可按需读取完整证据）`,
+      true
+    )).toEqual({
+      text: 'first line\n…（后续内容未显示）',
+      truncated: true
+    })
+
+    expect(executionEvidenceCopyText('activity.completed', {
+      item: {
+        command: 'git diff',
+        aggregatedOutput: '\u001b[31mfull diff\u001b[0m\nsecond line',
+        exitCode: 0
+      },
+      _rovaiTruncated: true
+    })).toBe('full diff\nsecond line')
+    expect(executionEvidenceCopyText('runtime.action', {
+      output: { status: 'accepted', receiptId: 'receipt-1' },
+      rawOutputDigest: 'must-not-be-copied'
+    })).toBe('{\n  "status": "accepted",\n  "receiptId": "receipt-1"\n}')
+    expect(executionEvidenceCopyText('file.change.updated', {
+      patch: '*** Begin Patch\n*** End Patch',
+      itemId: 'hidden-identity'
+    })).toBe('*** Begin Patch\n*** End Patch')
+    expect(executionEvidenceCopyText('agent.text.delta', {
+      delta: 'not a Tool output'
+    })).toBeNull()
   })
 
   it('loads complete historical execution evidence through stable per-AgentRun pages', async () => {

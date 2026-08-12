@@ -28,6 +28,7 @@ import {
   agentRunPresentation,
   agentRunWaitDetail,
   buildLiveExecutionProgress,
+  executionEvidenceCopyText,
   formatByteSize,
   type LiveExecutionProgress,
   type LiveRuntimeEvent,
@@ -35,6 +36,7 @@ import {
   messageClockTime,
   relativeTimeLabel,
   selectCompleteExecutionEvidence,
+  toolDetailPreview,
   timelineDayLabel
 } from './ui-model'
 import { MemberAvatar } from './MemberAvatar'
@@ -3205,6 +3207,93 @@ function TaskTimelineCard({
   )
 }
 
+type ToolOutputCopyState = 'idle' | 'loading' | 'copied' | 'failed'
+
+function ToolCallDetail({
+  campId,
+  detail,
+  completeEvidence
+}: {
+  campId: string
+  detail: string
+  completeEvidence?: PresentableExecutionEvidence
+}): JSX.Element {
+  const preview = toolDetailPreview(detail, Boolean(completeEvidence))
+  const [copyState, setCopyState] = useState<ToolOutputCopyState>('idle')
+  const resetTimer = useRef<number | null>(null)
+  useEffect(() => () => {
+    if (resetTimer.current !== null) window.clearTimeout(resetTimer.current)
+  }, [])
+
+  const resetCopyStateLater = (): void => {
+    if (resetTimer.current !== null) window.clearTimeout(resetTimer.current)
+    resetTimer.current = window.setTimeout(() => {
+      setCopyState('idle')
+      resetTimer.current = null
+    }, 1_800)
+  }
+
+  const copyFullOutput = async (): Promise<void> => {
+    if (copyState === 'loading') return
+    setCopyState('loading')
+    try {
+      const fullText = completeEvidence
+        ? await window.rovai.request<{ payload: unknown }>('agentRunEvidence.getContent', {
+            campId,
+            evidenceId: completeEvidence.id
+          }).then((result) => executionEvidenceCopyText(completeEvidence.eventType, result.payload))
+        : detail
+      if (fullText === null || !(await writeClipboardText(fullText))) {
+        throw new Error('Complete Tool output is unavailable')
+      }
+      setCopyState('copied')
+    } catch {
+      setCopyState('failed')
+    } finally {
+      resetCopyStateLater()
+    }
+  }
+
+  const copyLabel = ({
+    idle: '复制完整输出',
+    loading: '正在读取完整输出',
+    copied: '已复制完整输出',
+    failed: '复制完整输出失败，重试'
+  } as const)[copyState]
+
+  return (
+    <div className={`tool-call-detail${preview.truncated ? ' is-truncated' : ''}`}>
+      <pre>{preview.text}</pre>
+      {preview.truncated && (
+        <button
+          className={`tool-output-copy-button state-${copyState}`}
+          type="button"
+          aria-label={copyLabel}
+          title={copyLabel}
+          disabled={copyState === 'loading'}
+          onClick={() => void copyFullOutput()}
+        >
+          {copyState === 'loading'
+            ? <span aria-hidden="true">…</span>
+            : copyState === 'copied'
+              ? <span aria-hidden="true">✓</span>
+              : copyState === 'failed'
+                ? <span aria-hidden="true">!</span>
+                : (
+                    <svg aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+                      <rect height="10" rx="2" width="10" x="8" y="8" />
+                      <path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1" />
+                    </svg>
+                  )}
+        </button>
+      )}
+      <span className="sr-only" role="status" aria-live="polite">
+        {copyState === 'idle' ? '' : copyLabel}
+      </span>
+    </div>
+  )
+}
+
 function RunExecutionDisclosure({
   run,
   progress,
@@ -3363,8 +3452,14 @@ function RunExecutionDisclosure({
               </span>
               <span className="tool-call-chevron" aria-hidden="true">⌄</span>
             </summary>
-            {step.detail && <pre>{step.detail}</pre>}
-            {fullEvidence && renderCompleteEvidenceControl(fullEvidence)}
+            {step.detail && (
+              <ToolCallDetail
+                campId={campId}
+                detail={step.detail}
+                completeEvidence={fullEvidence}
+              />
+            )}
+            {!step.detail && fullEvidence && renderCompleteEvidenceControl(fullEvidence)}
           </details>
         )
       })}

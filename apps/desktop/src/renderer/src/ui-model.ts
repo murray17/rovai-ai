@@ -535,6 +535,71 @@ function stripAnsi(value: string): string {
   return value.replace(/\u001B(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001B\\))/g, '')
 }
 
+const TOOL_DETAIL_PREVIEW_MAX_LINES = 10
+const TOOL_DETAIL_PREVIEW_MAX_CHARS = 2_000
+const CORE_EVIDENCE_TRUNCATION_NOTICE = '…（内容已截断，可按需读取完整证据）'
+
+export type ToolDetailPreview = {
+  text: string
+  truncated: boolean
+}
+
+export function toolDetailPreview(
+  detail: string,
+  completeEvidenceAvailable: boolean
+): ToolDetailPreview {
+  const coreStringWasTruncated = detail.endsWith(CORE_EVIDENCE_TRUNCATION_NOTICE)
+  const coreStructuredValueWasTruncated = detail.includes('"_rovaiTruncated": true')
+  const source = coreStringWasTruncated
+    ? detail.slice(0, -CORE_EVIDENCE_TRUNCATION_NOTICE.length).trimEnd()
+    : detail
+  const characters = Array.from(source)
+  const characterBounded = characters.slice(0, TOOL_DETAIL_PREVIEW_MAX_CHARS).join('')
+  const lines = characterBounded.split('\n')
+  const head = lines.slice(0, TOOL_DETAIL_PREVIEW_MAX_LINES).join('\n').trimEnd()
+  const truncated = characters.length > TOOL_DETAIL_PREVIEW_MAX_CHARS
+    || lines.length > TOOL_DETAIL_PREVIEW_MAX_LINES
+    || source !== detail
+    || (completeEvidenceAvailable && coreStructuredValueWasTruncated)
+  return truncated
+    ? { text: `${head}\n…（后续内容未显示）`, truncated: true }
+    : { text: detail, truncated: false }
+}
+
+function fullEvidenceValue(value: unknown): string | null {
+  if (typeof value === 'string') return stripAnsi(value)
+  if (value === null || value === undefined) return null
+  return JSON.stringify(value, null, 2) ?? String(value)
+}
+
+export function executionEvidenceCopyText(
+  eventType: AgentRunExecutionEvidenceView['eventType'],
+  payloadValue: unknown
+): string | null {
+  const payload = asRecord(payloadValue)
+  if (eventType === 'activity.started' || eventType === 'activity.completed') {
+    const item = asRecord(payload.item)
+    const output = item.aggregatedOutput ?? item.output
+    return fullEvidenceValue(output)
+      ?? fullEvidenceValue(item.command)
+      ?? fullEvidenceValue(item.changes)
+      ?? runtimeToolDetail(item, stringField(item, 'type') ?? 'activity')
+      ?? stringField(item, 'status')
+  }
+  if (eventType === 'runtime.action') {
+    return fullEvidenceValue(payload.output)
+      ?? fullEvidenceValue(payload.input)
+      ?? stringField(payload, 'kind')
+  }
+  if (eventType === 'command.output.delta') {
+    return fullEvidenceValue(payload.delta ?? payload.output)
+  }
+  if (eventType === 'file.change.updated') {
+    return fullEvidenceValue(payload.patch ?? payload.delta)
+  }
+  return null
+}
+
 function activityStatus(status: string | null, eventType: string): ActivityStatus {
   const normalized = status?.toLowerCase() ?? ''
   if (normalized.includes('fail') || normalized.includes('error')) return 'failed'

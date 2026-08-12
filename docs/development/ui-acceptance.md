@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: desktop-ui-acceptance-infrastructure
-last_updated: 2026-08-11
+last_updated: 2026-08-12
 ---
 
 # 桌面 UI 验收与隔离数据
@@ -122,6 +122,10 @@ pnpm accept:runtime-activity-ui
   和审批等现有结构化内容才可进入更宽工件通道，身份色只进入头像、名称或身份点；
 - Canonical Activity 未报告工具时仍不补造 Tool 行；同一 Runtime 真实报告的 Tool 名称和 source 继续
   与 Runtime evidence 一致。
+- 超过 Renderer 预览上限且由 Managed Blob 保存完整 Payload 的 Tool 输出只在原 Evidence `pre`
+  中保留开头 10 行和明确截断提示；DOM 不包含中段或末尾。右上角只有一个 25px、无边框、具名的
+  复制图标；真实点击必须按需读取完整 Evidence、只复制公开输出字段，并证明 8,000 行以上的中段与
+  末尾都进入剪贴板而 Evidence 外层 JSON 不进入。读取成功后图标与可访问名称反馈“已复制完整输出”。
 
 ### A2A 消息 footer 门禁
 

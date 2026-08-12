@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.59
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -13,6 +13,8 @@ last_updated: 2026-08-12
 > 当前状态：生产实现、完整门禁和九个 Runtime 逐项真实验收均已完成。
 >
 > 前置版本：[v0.58 可恢复 Runtime 漂移与受控重绑定](../v0.58/README.md)
+>
+> 后续版本：[v0.60 有界 Tool 输出预览与按需全文复制](../v0.60/README.md)
 
 ## 版本目标
 

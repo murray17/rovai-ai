@@ -5,7 +5,7 @@ status: accepted
 design_direction: neutral-porcelain-steel
 target_version: v0.57
 implementation_status: complete
-last_updated: 2026-08-11
+last_updated: 2026-08-12
 ---
 
 # Neutral Porcelain + Steel 设计规范
@@ -430,6 +430,12 @@ type ResolvedTheme = "day" | "night"
   来源权威与可信度继续保留在 Core Evidence，不因 Renderer 降噪而改变。
 - Tool Call 的参数、精确范围、`cwd`、退出码、时长、输出和失败原因在数据存在时
   仍须结构化保留并可按需展开。轻量摘要不能以丢失证据为代价。
+- Tool Call 展开后继续使用现有单块 Evidence 预览。输出超过 10 行或 2,000 个 Unicode 字符，
+  或 Core 已标记完整 Evidence 位于 Blob 时，Renderer 只显示开头并明确标注后续未显示；不得
+  拼接末尾、渲染完整 Payload 或增加第二层详情面板。预览右上角只提供无常驻边框的 Icon-only
+  “复制完整输出”：存在 Blob 时通过 `agentRunEvidence.getContent` 按需读取，但只提取该 Tool
+  对应的公开输出字段写入剪贴板，不复制 Evidence 外层 JSON、内部标识或摘要元数据。读取中、成功、
+  失败重试都通过按钮可访问名称、图标和不占布局的 `aria-live` 状态表达。
 - Tool Call 自身的失败属于该 Tool Call；Runtime 崩溃、执行准入拒绝、恢复不确定
   等没有对应 Tool Call 的系统失败仍按其真实 AgentRun/Pending Intent 状态进入活动、
   审计或就地错误提示，不得为了视觉统一伪造成 Tool Call。

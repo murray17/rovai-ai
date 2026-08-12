@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.59
+current_version: v0.60
 last_updated: 2026-08-12
 ---
 
@@ -110,4 +110,5 @@ last_updated: 2026-08-12
 | v0.56 | `historical` | Neutral Porcelain + Steel Renderer 与生产功能保真迁移 | [v0.56/README.md](v0.56/README.md) |
 | v0.57 | `historical` | 可恢复的项目侧栏移除与本机导航偏好迁移 | [v0.57/README.md](v0.57/README.md) |
 | v0.58 | `historical` | 可恢复 Runtime 漂移与受控重绑定；冻结时真实 Copilot 原地漂移 smoke 未完成 | [v0.58/README.md](v0.58/README.md) |
-| v0.59 | `current` | 九 Runtime 的零 send 公共输出恢复发布 | [v0.59/README.md](v0.59/README.md) |
+| v0.59 | `historical` | 九 Runtime 的零 send 公共输出恢复发布 | [v0.59/README.md](v0.59/README.md) |
+| v0.60 | `current` | 有界 Tool 输出预览与按需全文复制 | [v0.60/README.md](v0.60/README.md) |

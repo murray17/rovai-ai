@@ -5,7 +5,7 @@ status: accepted
 design_direction: neutral-porcelain-steel
 target_version: cross-version
 implementation_status: complete
-last_updated: 2026-08-11
+last_updated: 2026-08-12
 ---
 
 # Rovai-ai UI 规范
@@ -311,6 +311,7 @@ Agent 运行时、专业职责、工作准则和性格底色。它不是队员�
 - [x] v7 导航投影、覆盖式设置侧栏和空 Camp 欢迎状态在两个目标尺寸无溢出。
 - [x] Camp 阅读流、Tool Call、Task、固定 Approval 队列、Composer 与 Inspector
   符合详规。
+- [x] 超长 Tool 输出只保留开头预览，全文通过轻量复制图标按需读取且不渲染进 Drawer。
 - [x] Header 没有 Stop/`•••`；Sidebar 行操作和 Composer Stop 可键盘访问。
 - [x] Quick Chat 项目式视觉投影、七个覆盖式设置入口与空 Camp 边界状态完整。
 - [x] 品牌色、身份色、状态色、证据 Token 没有混用。
