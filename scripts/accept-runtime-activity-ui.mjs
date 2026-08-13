@@ -2145,6 +2145,44 @@ async function verifyCampWorldMap(cdp, capturesDirectory) {
   const liveDayCapture = join(capturesDirectory, 'camp-world-map-live-day-1440x920.png')
   await capture(cdp, liveDayCapture)
 
+  await evaluate(cdp, `window.dispatchEvent(new Event('blur'))`)
+  await waitForExpression(cdp, `(() => {
+    const map = document.querySelector('.camp-world-map')
+    return map?.getAttribute('data-motion-state') === 'paused'
+      && map.classList.contains('is-static')
+      && !document.querySelector('.camp-world-map-speech.is-ambient')
+  })()`)
+  const inactiveWindowPresentation = await evaluate(cdp, `(async () => {
+    const readPositions = () => [...document.querySelectorAll('.camp-world-map-agent')]
+      .map((agent) => [agent.style.left, agent.style.top])
+    const positionsBefore = readPositions()
+    await new Promise((resolve) => setTimeout(resolve, 450))
+    const positionsAfter = readPositions()
+    const realSpeech = document.querySelector('.camp-world-map-speech.is-real')
+    const runningButton = document.querySelector(
+      '.camp-world-map-agent[data-mode="running"] .camp-world-map-agent-button'
+    )
+    return {
+      positionsStable: JSON.stringify(positionsBefore) === JSON.stringify(positionsAfter),
+      routeAnimationNames: [...document.querySelectorAll('.camp-world-map-route')]
+        .map((route) => getComputedStyle(route).animationName),
+      runningPulseAnimationName: runningButton
+        ? getComputedStyle(runningButton, '::before').animationName
+        : null,
+      realSpeechAnimationName: realSpeech ? getComputedStyle(realSpeech).animationName : null,
+      realSpeechText: realSpeech?.textContent?.trim() ?? ''
+    }
+  })()`, true)
+  assert(inactiveWindowPresentation.positionsStable
+    && inactiveWindowPresentation.routeAnimationNames.every((name) => name === 'none')
+    && inactiveWindowPresentation.runningPulseAnimationName === 'none'
+    && inactiveWindowPresentation.realSpeechAnimationName === 'none'
+    && inactiveWindowPresentation.realSpeechText.includes('AgentRun · 真实执行'),
+  `Inactive App window did not pause map motion while preserving real output: ${JSON.stringify(inactiveWindowPresentation)}`)
+  await evaluate(cdp, `window.dispatchEvent(new Event('focus'))`)
+  await waitForExpression(cdp,
+    `document.querySelector('.camp-world-map')?.getAttribute('data-motion-state') === 'active'`)
+
   await setTheme(cdp, 'night')
   const nightCapture = join(capturesDirectory, 'camp-world-map-live-night-1440x920.png')
   await capture(cdp, nightCapture)
@@ -2265,6 +2303,7 @@ async function verifyCampWorldMap(cdp, capturesDirectory) {
       labeledIdlePreset: true,
       fixedRouteToggle: true,
       reducedMotionKeepsRealText: true,
+      inactiveWindowPausesMotionKeepsRealText: true,
       existingResizableExecutionDrawer: true,
       compressedContainerLayout: compressedPresentation,
       wideLayout,

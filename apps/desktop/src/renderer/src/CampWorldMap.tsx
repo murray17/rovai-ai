@@ -99,6 +99,38 @@ function usePrefersReducedMotion(): boolean {
   return reduced
 }
 
+function useWindowActive(): boolean {
+  const [windowActive, setWindowActive] = useState(() =>
+    typeof document === 'undefined'
+      ? true
+      : document.visibilityState === 'visible' && document.hasFocus()
+  )
+
+  useEffect(() => {
+    const handleFocus = (): void => {
+      setWindowActive(document.visibilityState === 'visible')
+    }
+    const handleBlur = (): void => {
+      setWindowActive(false)
+    }
+    const handleVisibilityChange = (): void => {
+      setWindowActive(document.visibilityState === 'visible' && document.hasFocus())
+    }
+
+    handleVisibilityChange()
+    window.addEventListener('focus', handleFocus)
+    window.addEventListener('blur', handleBlur)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      window.removeEventListener('focus', handleFocus)
+      window.removeEventListener('blur', handleBlur)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [])
+
+  return windowActive
+}
+
 function nextRandom(motion: WorldMapAgentMotion): number {
   motion.randomState = (Math.imul(motion.randomState, 1664525) + 1013904223) >>> 0
   return motion.randomState / 4294967296
@@ -135,6 +167,8 @@ export function CampWorldMap({
   onOpenExecutionProcess
 }: CampWorldMapProps): JSX.Element {
   const reducedMotion = usePrefersReducedMotion()
+  const windowActive = useWindowActive()
+  const motionActive = active && windowActive && !reducedMotion
   const viewportRef = useRef<HTMLDivElement>(null)
   const agentElementById = useRef(new Map<string, HTMLDivElement>())
   const routeElementById = useRef(new Map<string, SVGPathElement>())
@@ -340,13 +374,13 @@ export function CampWorldMap({
   }, [agentModesKey, agents, ambientBubble])
 
   useEffect(() => {
-    if (!reducedMotion) return
+    if (motionActive) return
     ambientBubbleRef.current = null
     setAmbientBubble(null)
-  }, [reducedMotion])
+  }, [motionActive])
 
   useEffect(() => {
-    if (!active || reducedMotion || typeof window === 'undefined') return
+    if (!motionActive || typeof window === 'undefined') return
     let frame = 0
 
     const pauseAll = (now: number): void => {
@@ -479,12 +513,11 @@ export function CampWorldMap({
       pauseAll(performance.now())
     }
   }, [
-    active,
     campId,
     cancelMovement,
     clearRendezvousOffset,
     deactivateRoute,
-    reducedMotion,
+    motionActive,
     setAgentPoint,
     showRendezvousOffset,
     startEdge,
@@ -524,8 +557,9 @@ export function CampWorldMap({
 
   return (
     <section
-      className={`camp-world-map${routesVisible ? ' routes-visible' : ''}${reducedMotion ? ' is-static' : ''}`}
+      className={`camp-world-map${routesVisible ? ' routes-visible' : ''}${motionActive ? '' : ' is-static'}`}
       data-density={density}
+      data-motion-state={motionActive ? 'active' : 'paused'}
       data-population={agents.length > 6 ? 'crowded' : 'normal'}
       aria-label="Camp 世界地图"
     >
@@ -639,9 +673,6 @@ export function CampWorldMap({
               <span>{condensedRealAgent.speech.text}</span>
             </button>
           )}
-          <p className="camp-world-map-note">
-            位置只表达存在感与协作关系；真实执行详情仍在下方 Agent 执行台。
-          </p>
           {agents.length === 0 && (
             <div className="camp-world-map-empty">
               当前 Camp 暂无可在地图中呈现的队员。
