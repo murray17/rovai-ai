@@ -73,7 +73,7 @@ Related: ADR-0100 的 Session identity delivery 位于 session-context-bootstrap
 
 - **何时阅读：** 修改 A2A、Task、Message、Delivery、协作责任或公共输出时阅读。
 - **当前架构：** [Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
-- **当前合同：** [Durable Task v3](../contracts/durable-task-v3.md)、[Camp Message Send v4](../contracts/camp-message-send-v4.md)、[Current User Attention v2](../contracts/current-user-attention-v2.md)、[Message Delivery v2](../contracts/message-delivery-v2.md)、[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)
+- **当前合同：** [Durable Task v3](../contracts/durable-task-v3.md)、[Camp Message Send v5](../contracts/camp-message-send-v5.md)、[Current User Attention v2](../contracts/current-user-attention-v2.md)、[Message Delivery v2](../contracts/message-delivery-v2.md)、[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)
 
 <!-- adr-current-primary:begin topic=collaboration-task-message -->
 | ADR | Decision |
@@ -180,7 +180,7 @@ Related: Session entrypoint 与 Built-in operation 只作为交叉导航，不�
 
 - **何时阅读：** 修改 Skill/MCP projection、Built-in transport、CLI、catalog 或 Agent output 时阅读。
 - **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
-- **当前合同：** [Built-in Tool Transport v7](../contracts/builtin-tool-transport-v7.md)
+- **当前合同：** [Built-in Tool Transport v8](../contracts/builtin-tool-transport-v8.md)
 
 <!-- adr-current-primary:begin topic=skills-mcp-builtins -->
 | ADR | Decision |

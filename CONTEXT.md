@@ -378,7 +378,7 @@ _Avoid_: Runtime-native inventory, dynamic directory scan, enabled Skill set, ef
 
 **CLI Operations Skill**:
 The ordinary official Rovai Skill `cli-operations` that guides command-family choice, message-to-Task escalation, multi-operation coordination, and complex business recovery. Routine single-operation calls, recipient flags, and exact operation flags use that operation's `--help` without loading this Skill; the Skill grants no command, routing, mutation, or recovery authority.
-_Avoid_: universal CLI manual, `--to-user` reference, required Skill, family-level help alias, permission grant
+_Avoid_: universal CLI manual, routine `--to-user` flag manual, required Skill, family-level help alias, permission grant
 
 **Memory Stewardship Skill**:
 The official Rovai Skill `memory-stewardship` (“共同记忆维护”) that teaches durable-memory judgment, authorized search/read, atomic wording, Retrieval Keys, duplicate and secret checks, direct non-Hearth writes, and the Hearth Proposal boundary. It is enabled and assigned to every Skill Delivery Group by default, and it grants no Capability or fallback prompt injection.
@@ -1183,6 +1183,10 @@ _Avoid_: `local-user` alias, Agent-selected user ID, message author as current u
 **Current User Mention**:
 A Core-generated `current_user_mention(local_user)` segment in authoritative Structured Camp Message Content, requested only through `mentionUser` / `--to-user`. Its visible `@displayName` and `mentionsCurrentUser` projections never make the user an Agent recipient or Message Delivery target.
 _Avoid_: parsed `@you`, Member Mention, user recipient, notification-only decoration, Renderer token without Core content
+
+**Current User Attention**:
+The message-local escalation produced by `mentionUser=true` / `--to-user` when a public CampMessage creates a new unresolved user decision, required answer or action, or fulfills the user's explicit request for an important asynchronous-result notification. Ordinary CampMessages are already user-visible; attention is re-evaluated for every new message and never propagates through replies, Tasks, parent/child AgentRuns, A2A work, prior mentions, or Agent roles. Core deterministically executes the submitted boolean and does not infer, inherit, suppress, or authorize it from prose.
+_Avoid_: user visibility, user recipient, ordinary final reply, internal handoff, inherited mention, user approval, Core role policy
 
 **User Mention Notification**:
 The durable `camp_message_user_mention` In-App Notification created atomically with one CampMessage that contains a Current User Mention. It is unique per kind, `local_user`, and source message; each message keeps an independent Inbox row even when transient heads-up presentation aggregates by Camp.

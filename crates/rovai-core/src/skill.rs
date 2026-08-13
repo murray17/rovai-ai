@@ -2883,6 +2883,13 @@ mod tests {
         let cli_rules = fs::read_to_string(cli_operations_content.join("SKILL.md")).unwrap();
         assert!(cli_rules.contains("普通单一操作"));
         assert!(cli_rules.contains("references/recovery.md"));
+        let send_reference =
+            fs::read_to_string(cli_operations_content.join("references/send.md")).unwrap();
+        assert!(send_reference.contains("普通 CampMessage 已经对用户可见"));
+        assert!(send_reference.contains("User attention 只属于当前消息"));
+        assert!(send_reference.contains("相互独立的行动时才组合"));
+        assert!(send_reference.contains("不是 Core authorization 或角色拒绝规则"));
+        assert!(!send_reference.contains("需要用户查看或决定时增加 User attention"));
         let cli_openai =
             fs::read_to_string(cli_operations_content.join("agents/openai.yaml")).unwrap();
         assert!(cli_openai.contains("display_name: \"CLI 操作协调\""));

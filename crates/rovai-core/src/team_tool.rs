@@ -12,6 +12,7 @@ use crate::{
     camp_history::{
         CAMP_LIST_TOOL_NAME, CAMP_READ_TOOL_NAME, CAMP_SEARCH_TOOL_NAME, HISTORY_SEARCH_TOOL_NAME,
     },
+    camp_message_send_teaching::CAMP_MESSAGE_SEND_TO_USER_SCHEMA_DESCRIPTION,
     collaboration::{
         CollaborationService, CreateTaskCommand, TaskAcceptanceCriteriaUpdate, TaskAssigneeFilter,
         TaskAssigneeUpdate, TaskDetail, TaskListPage, TaskListQuery, TaskStatus, UpdateTaskCommand,
@@ -428,7 +429,7 @@ impl TeamToolService {
                 "mentionUser": {
                     "type": "boolean",
                     "default": false,
-                    "description": "Mention the current user and create an Inbox notification; creates no Agent delivery."
+                    "description": CAMP_MESSAGE_SEND_TO_USER_SCHEMA_DESCRIPTION
                 },
                 "taskId": {
                     "type": "string",

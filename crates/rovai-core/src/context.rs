@@ -9950,6 +9950,11 @@ mod tests {
         ));
         assert!(charter.contains("successfully call `rovai send` before ending"));
         assert!(charter.contains("current authenticated AgentRun Camp"));
+        assert!(charter.contains("Ordinary Camp messages are already visible to the user"));
+        assert!(charter.contains(
+            "Add `--to-user` only when the current message creates a new unresolved user decision, answer, or action"
+        ));
+        assert!(charter.contains("User attention is message-local and is never inherited"));
         assert!(!charter.contains("campId"));
         assert!(!charter.contains("--camp-id"));
         assert!(!charter.contains("`rovai member call`"));

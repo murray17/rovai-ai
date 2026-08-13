@@ -8,6 +8,7 @@ use crate::{
         CampListInput, CampReadInput, CampSearchInput, HISTORY_SEARCH_TOOL_NAME,
         HistorySearchInput,
     },
+    camp_message_send_teaching::CAMP_MESSAGE_SEND_SUMMARY,
     memory_retrieval::{
         MEMORY_READ_TOOL_NAME, MEMORY_SEARCH_TOOL_NAME, MemoryReadInput, MemoryRetrievalService,
         MemorySearchInput,
@@ -473,7 +474,7 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
         json!({
             "name": CAMP_MESSAGE_SEND_TOOL_NAME,
             "title": "Send a public Camp message",
-            "description": "Publish one public Camp message. --to and inline @agent_id wake Agents; --to-user mentions the current user and creates an Inbox notification. Omit all addressing for a public-only update.",
+            "description": CAMP_MESSAGE_SEND_SUMMARY,
             "inputSchema": TeamToolService::camp_message_send_input_schema(),
             "outputSchema": {
                 "type": "object",

@@ -174,7 +174,10 @@ try {
       specification.campId,
       source.agentRunId
     )
-    const observedOperations = [...new Set(evidence.map((entry) => entry.payload?.canonicalTool))]
+    const terminalEvidence = evidence.filter((entry) =>
+      entry.payload?.status === 'completed' || entry.payload?.status === 'failed'
+    )
+    const observedOperations = [...new Set(terminalEvidence.map((entry) => entry.payload?.canonicalTool))]
       .filter(Boolean)
       .sort()
     if (JSON.stringify(observedOperations) !== JSON.stringify(expectedOperations)) {
@@ -183,7 +186,7 @@ try {
         evidence
       })}`)
     }
-    const invalidEnvelopeEvidence = evidence.find((entry) => {
+    const invalidEnvelopeEvidence = terminalEvidence.find((entry) => {
       const envelope = entry.payload?.coreEnvelope
       return envelope?.contractVersion !== 1
         || envelope.operation !== entry.payload?.canonicalTool
@@ -194,12 +197,12 @@ try {
     if (invalidEnvelopeEvidence) {
       throw new Error(`${specification.adapterKind} Evidence did not retain a valid Core Envelope: ${JSON.stringify(invalidEnvelopeEvidence)}`)
     }
-    const staleConflict = evidence.find((entry) =>
+    const staleConflict = terminalEvidence.find((entry) =>
       entry.payload?.canonicalTool === 'team.update_task'
         && entry.payload?.status === 'failed'
         && entry.payload?.errorCode === 'task.version_conflict'
     )
-    if (!staleConflict || evidence.some((entry) => entry.payload?.sourceAuthority !== 'core')) {
+    if (!staleConflict || terminalEvidence.some((entry) => entry.payload?.sourceAuthority !== 'core')) {
       throw new Error(`${specification.adapterKind} evidence did not prove the Core Router boundary`)
     }
 
@@ -303,7 +306,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    contractVersion: 7,
+    contractVersion: 8,
     ipcProtocolVersion: 1,
     runtimeCount: results.length,
     operationCountPerRuntime: expectedOperations.length,
@@ -331,9 +334,9 @@ function nativeSessionIdForRun(events, agentRunId, startedEvent) {
 function assertBuiltinCliCapability(label, installation) {
   const snapshot = installation?.snapshot
   if (snapshot?.probeStatus !== 'ready'
-      || !snapshot.capabilities.includes('builtin_cli.transport.v7')
+      || !snapshot.capabilities.includes('builtin_cli.transport.v8')
       || !snapshot.models.length) {
-    throw new Error(`${label} is not ready for Built-in CLI v7: ${JSON.stringify(snapshot)}`)
+    throw new Error(`${label} is not ready for Built-in CLI v8: ${JSON.stringify(snapshot)}`)
   }
 }
 
@@ -662,7 +665,7 @@ function verificationScript(input) {
     action: 'add',
     scope: 'companion',
     kind: 'preference',
-    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v7 qualification.`,
+    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v8 qualification.`,
     retrievalKeys: [`cli-${input.slug.slice(0, 18)}`]
   })
   const hearth = JSON.stringify({
@@ -672,7 +675,7 @@ function verificationScript(input) {
     retrievalKeys: [`hearth-${input.slug.slice(0, 14)}`]
   })
   const publicSend = JSON.stringify({
-    body: `Acknowledge the ${input.adapterKind} Built-in CLI qualification in one sentence.`,
+    body: `Please confirm the ${input.adapterKind} qualification record; ${input.recipientProfileId} independently verify the retained evidence.`,
     to: [input.recipientProfileId],
     mentionUser: true
   })
@@ -727,13 +730,19 @@ assert_fix_input() {
 }
 
 STEP=version
-"$CLI" --version | grep -q 'contract-v7 ipc-v1'
+"$CLI" --version | grep -q 'contract-v8 ipc-v1'
 
 STEP=exact_help
 root_help="$("$CLI" --help)"
 printf '%s\n' "$root_help" | grep -Fq ${shellQuote("Run `rovai --help` to choose an operation, then run that operation's exact `--help`. Do not assume that a command family has its own help entry.")}
 send_help="$("$CLI" send --help)"
 printf '%s\n' "$send_help" | grep -Fq -- '--to-user'
+printf '%s\n' "$send_help" | grep -Fq -- 'Ordinary Camp messages are already visible to the user.'
+printf '%s\n' "$send_help" | grep -Fq -- 'User attention is message-local and is never inherited'
+printf '%s\n' "$send_help" | grep -Fq -- "rovai send --to agent_5 --body 'Please review and report back'"
+if printf '%s\n' "$send_help" | grep -Fq -- 'rovai send --to agent_5 --to-user'; then
+  exit 1
+fi
 set +e
 family_help="$("$CLI" camp --help 2>"$RUN_TMP/family-help.err")"
 family_help_status=$?

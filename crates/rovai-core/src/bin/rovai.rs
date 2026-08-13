@@ -19,6 +19,9 @@ use rovai_core::builtin_tool_transport::{
     CompactionHookIpcResponse, CompactionObservationOutboxRecord, ROVAI_CLI_CONTEXT_ENV,
     builtin_tool_description, builtin_tool_identity_by_command,
 };
+use rovai_core::camp_message_send_teaching::{
+    CAMP_MESSAGE_SEND_HELP_EXAMPLES, CAMP_MESSAGE_SEND_TO_USER_HELP,
+};
 use rovai_core::command::canonical_json_digest;
 use serde_json::{Map, Value, json};
 use uuid::Uuid;
@@ -626,13 +629,23 @@ fn print_invalid_input() {
 }
 
 fn print_operation_help(description: &BuiltinToolDescription) {
-    println!(
+    print!("{}", operation_help_text(description));
+}
+
+fn operation_help_text(description: &BuiltinToolDescription) -> String {
+    use std::fmt::Write as _;
+
+    let mut output = String::new();
+    writeln!(
+        output,
         "rovai {}\n{}\n\nInput: direct flags, JSON stdin/heredoc, or --input-file <path>\n",
         description.command.join(" "),
         description.summary
-    );
+    )
+    .expect("writing help to a String cannot fail");
     for argument in &description.arguments {
-        println!(
+        writeln!(
+            output,
             "  {:<28} field={} type={}{}{}",
             argument.flag,
             argument.field,
@@ -643,30 +656,36 @@ fn print_operation_help(description: &BuiltinToolDescription) {
                 ""
             },
             if argument.required { " required" } else { "" },
-        );
+        )
+        .expect("writing help to a String cannot fail");
         if description.name == "camp.message.send" && argument.field == "to" {
-            println!("      Optional Agent to wake; repeat for multiple recipients.");
+            writeln!(
+                output,
+                "      Optional Agent to wake; repeat for multiple recipients."
+            )
+            .expect("writing help to a String cannot fail");
         }
         if description.name == "camp.message.send" && argument.field == "mentionUser" {
-            println!(
-                "      Mention the current user and create an Inbox notification; creates no Agent delivery."
-            );
+            for line in CAMP_MESSAGE_SEND_TO_USER_HELP.lines() {
+                if line.is_empty() {
+                    writeln!(output).expect("writing help to a String cannot fail");
+                } else {
+                    writeln!(output, "      {line}").expect("writing help to a String cannot fail");
+                }
+            }
         }
     }
     let examples = operation_help_examples(&description.name);
-    println!("\nExamples:");
+    writeln!(output, "\nExamples:").expect("writing help to a String cannot fail");
     for example in examples {
-        println!("  {example}");
+        writeln!(output, "  {example}").expect("writing help to a String cannot fail");
     }
+    output
 }
 
 fn operation_help_examples(operation: &str) -> &'static [&'static str] {
     match operation {
-        "camp.message.send" => &[
-            "rovai send --body 'Status update'",
-            "rovai send --to-user --body 'Please choose A or B'",
-            "rovai send --to agent_5 --to-user --body 'Please review and decide'",
-        ],
+        "camp.message.send" => &CAMP_MESSAGE_SEND_HELP_EXAMPLES,
         "team.create_task" => {
             &["rovai task create --title 'Prepare release notes' --assignee-agent-id agent_27"]
         }
@@ -882,10 +901,16 @@ mod tests {
             operation_help_examples("camp.message.send"),
             [
                 "rovai send --body 'Status update'",
+                "rovai send --to agent_5 --body 'Please review and report back'",
                 "rovai send --to-user --body 'Please choose A or B'",
-                "rovai send --to agent_5 --to-user --body 'Please review and decide'",
             ]
         );
+        let help = operation_help_text(&description);
+        assert!(help.contains("Ordinary Camp messages are already visible to the user."));
+        assert!(help.contains("new unresolved user decision, answer, or action"));
+        assert!(help.contains("User attention is message-local"));
+        assert!(help.contains("does not represent user approval"));
+        assert!(!help.contains("--to agent_5 --to-user"));
     }
 
     #[test]

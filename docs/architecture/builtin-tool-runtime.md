@@ -9,9 +9,9 @@ last_updated: 2026-08-13
 # Built-in Tool Runtime Architecture
 
 本文件说明 Rovai built-in operations 的长期组件结构。当前字段与版本以
-[Built-in Tool Transport v7](../contracts/builtin-tool-transport-v7.md)、
+[Built-in Tool Transport v8](../contracts/builtin-tool-transport-v8.md)、
 [Durable Task v3](../contracts/durable-task-v3.md) 和
-[Camp Message Send v4](../contracts/camp-message-send-v4.md)、
+[Camp Message Send v5](../contracts/camp-message-send-v5.md)、
 [Current User Attention v2](../contracts/current-user-attention-v2.md)与
 [Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md) 为准；v6 及更早 Transport 只保留
 historical 语义。决策理由见
@@ -107,6 +107,11 @@ Agent 先用 `rovai --help` 选择 operation，再用该 operation 的精确 `--
 `rovai task|camp|memory --help` 教学别名。Help 只列必要 flags、输入来源互斥规则、关键约束
 和短示例，不输出完整 JSON Schema、Envelope、receipt 或 catalog。Dotted canonical operation
 仍是 Core 内部语义身份，不能直接变成通用 Agent 命令。
+
+`rovai send --help` 的基础示例分别演示 public-only、Agent-only 与 User-attention-only，不把 `--to` 与
+`--to-user` 组合成默认模式。`--to-user` 的精确字段帮助拥有“新产生且未解决的用户决定、回答或行动”
+正向条件、常规负向场景、消息局部不继承、无 Agent Delivery 与不代表用户批准。非例行组合只在
+`cli-operations` Send reference 中说明：用户和 Agent 必须各有相互独立的行动。
 
 ## Agent Result Projection
 
@@ -266,6 +271,8 @@ Session Charter 只说明：
 - `camp.message.send` 使用当前 Run Camp，不能传入 Camp ID；
 - 对 `explicit_send_only` Runtime，narration/final response 只是私有执行证据；当前责任需要在 Camp
   公开 answer/result/status/summary 时必须在结束前调用 `rovai send`，只有成功 send 才发布该回复；
+- 普通 CampMessage 已对用户可见；只有当前消息产生新的未解决用户决定、回答或行动，或履行用户明确
+  要求的重要结果通知时才使用 `--to-user`，且 attention 不从历史、reply、Task 或 A2A 继承；
 - Core 可能在 successful zero-send 且 Adapter final boundary 可靠时执行 Missing-Send Recovery，但它不
   保证完整最终结论公开，也不应被 Agent 当作省略 `rovai send` 的正常路径；
 - Task responsibility definition belongs to the User or current Camp Default Lead；
@@ -310,8 +317,11 @@ failure 或 `delivery_unknown` 都不能替代它。各层不得通过复制完�
 ### Self Identity 与 Peer Routing Identity
 
 Bootstrap v3 按固定顺序组装 Session Charter、`MEMBER_IDENTITY` 和 Memory Entrypoint。Charter
-文案变化不参与 Native Binding compatibility digest，也不主动轮换已存在的 Native Session；既有
-Run 与 Bootstrap Evidence 不回写，新建 Native Session 使用当前内置 Charter。
+文案变化本身不参与 Native Binding compatibility digest，也不主动轮换全部既有 Native Session；既有
+Run 与 Bootstrap Evidence 不回写，新建 Native Session 使用当前内置 Charter。Built-in Transport v8
+另外改变 catalog digest；Antigravity 的既有 binding compatibility 已包含 Built-in contract version 与
+catalog digest，因此会建立 replacement Session。其他 Runtime 的续接进程直接使用当前 v8 CLI、精确 help
+与 official Skill Revision，不因 Charter copy 单独丢弃 Native Session。
 `MEMBER_IDENTITY` 是该 Native Session 唯一的 self identity，包含最新已提交的完整六字段；它只在
 既有 eligible Bootstrap boundary 原子读取，不进入 AgentRun Dynamic Context，不持久化 Identity
 Blob、snapshot、digest 或 history。身份编辑不轮换 Session，也不构造下一 Run 的 patch。

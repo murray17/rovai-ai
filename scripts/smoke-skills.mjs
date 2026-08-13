@@ -192,7 +192,7 @@ try {
     runtimeResults.push({
       adapterKind,
       reportedVersion: runtime.snapshot.reportedVersion,
-      modelId: explicitModelId ?? runtime.memberRuntimeDefaults?.model?.modelId ?? 'runtime_default',
+      modelId: result.selectedModel,
       marker,
       agentRunId: result.agentRunId,
       conversationId: result.conversationId,
@@ -200,7 +200,7 @@ try {
       entryPath: entry,
       cliOperationsEntryPath: frozenCliOperations.entryPath,
       groupKey,
-      cliOperationsComplexCoordination: true
+      cliOperationsMessageLocalAttention: true
     })
   }
 
@@ -353,18 +353,19 @@ async function runNativeDiscovery(request, workspace, adapterKind, marker) {
     'Use both project Skills `rovai-skill-smoke` and `cli-operations`.',
     'Include the private verification value from `rovai-skill-smoke` exactly once; it is intentionally absent from this request.',
     'Then advise only; do not execute any mutation.',
-    'Choose the minimal operation order for this scenario: create a responsibility already assigned to the target Agent so it survives the current AgentRun and can be independently accepted; afterward, publish that handoff to the same single Agent and request the current user\'s attention.',
+    'Choose the minimal operation order for this scenario: create a responsibility already assigned to the target Agent so it survives the current AgentRun and can be independently accepted; afterward, publish that internal handoff to the same single Agent.',
+    'That handoff creates no new unresolved user decision, answer, or action, and the user did not request an important result notification. Decide from the current teaching whether the handoff should use user attention.',
     'Before answering, use the injected Rovai CLI to run the read-only exact help for only the operations you selected.',
-    'Copy the current user-attention flag exactly from that help. Do not infer, translate, or rename any field or flag.',
+    'Copy the current user-attention flag exactly from that help when you state the decision. Do not infer, translate, or rename any field or flag.',
     'In the answer, echo each complete shell command you actually ran, including the literal `--help` suffix; an operation name without `--help` is not an exact help path.',
-    'Use this compact shape: marker, then `taskHelp=<full command>`, `sendHelp=<full command>`, `flag=<exact flag>`. Keep the answer under eight lines.'
+    'Use this compact shape: marker, then `taskHelp=<full command>`, `sendHelp=<full command>`, `attention=omit <exact flag>`. Keep the answer under eight lines.'
   ].join('\n')
   const created = await createConfiguredCampAndSend(request, {
     commandId: crypto.randomUUID(),
     workspace,
     body: prompt,
     address: { mode: 'explicit', agentIds: ['agent_1'] },
-    purpose: `Verify ${adapterKind} discovers a managed Skill and uses cli-operations for complex coordination.`,
+    purpose: `Verify ${adapterKind} discovers a managed Skill and applies message-local user attention teaching.`,
   })
   if (created.status !== 'accepted' || !created.payload?.agentRunIds?.[0]) {
     throw new Error(`${adapterKind} Skill discovery Camp was not accepted: ${JSON.stringify(created)}`)
@@ -398,18 +399,23 @@ async function runNativeDiscovery(request, workspace, adapterKind, marker) {
       resolvedApprovals.add(approval.id)
     }
     const run = candidate.agentRuns.find((value) => value.id === agentRunId)
-    const output = candidate.messages
-      .filter((message) => message.authorType === 'agent')
+    const agentMessages = candidate.messages
+      .filter((message) => message.authorType === 'agent' && message.sourceAgentRunId === agentRunId)
+    const output = agentMessages
       .map((message) => message.body)
       .join('\n')
-    lastState = { run, output, timeline: candidate.timeline.slice(-8) }
+    const mentionsCurrentUser = agentMessages.some((message) =>
+      message.content.some((segment) => segment.kind === 'current_user_mention')
+    )
+    lastState = { run, output, mentionsCurrentUser, timeline: candidate.timeline.slice(-8) }
     if (run?.status === 'failed' || run?.status === 'cancelled') {
       throw new Error(`${adapterKind} native Skill AgentRun failed: ${JSON.stringify(lastState)}`)
     }
     return run?.status === 'succeeded' ? candidate : null
   }, `${adapterKind} native Skill discovery`, 360_000)
-  const output = snapshot.messages
-    .filter((message) => message.authorType === 'agent')
+  const agentMessages = snapshot.messages
+    .filter((message) => message.authorType === 'agent' && message.sourceAgentRunId === agentRunId)
+  const output = agentMessages
     .map((message) => message.body.trim())
     .join('\n')
   if (!containsExpectedPrivateMarker(output, marker)) {
@@ -423,19 +429,30 @@ async function runNativeDiscovery(request, workspace, adapterKind, marker) {
     'linkedTaskIds',
     'assignedTo'
   ].find((value) => output.includes(value))
+  const mentionsCurrentUser = agentMessages.some((message) =>
+    message.content.some((segment) => segment.kind === 'current_user_mention')
+  )
   if (taskHelpIndex < 0
       || sendHelpIndex < 0
       || taskHelpIndex >= sendHelpIndex
-      || !output.includes('--to-user')
+      || !output.includes('attention=omit --to-user')
       || output.includes('rovai task update --help')
-      || inventedSendSyntax) {
-    throw new Error(`${adapterKind} did not apply cli-operations to the Task -> CampMessage coordination scenario: ${JSON.stringify({ output, lastState })}`)
+      || inventedSendSyntax
+      || mentionsCurrentUser) {
+    throw new Error(`${adapterKind} did not apply message-local user attention teaching to the internal handoff: ${JSON.stringify({ output, mentionsCurrentUser, lastState })}`)
   }
   const run = snapshot.agentRuns.find((value) => value.id === agentRunId)
   const manifest = snapshot.contextManifests.find((value) => value.agentRunId === agentRunId)
+  const started = core.events.find((event) =>
+    event.method === 'agent_run.started' && event.params?.agentRunId === agentRunId
+  )
+  if (started?.params?.adapterKind !== adapterKind || !started.params.modelId) {
+    throw new Error(`${adapterKind} did not emit exact Runtime/model evidence: ${JSON.stringify(started)}`)
+  }
   return {
     agentRunId,
     conversationId: run.conversationId,
+    selectedModel: started.params.modelId,
     exposure: manifest?.skillExposure
   }
 }
@@ -457,7 +474,10 @@ async function runNativeDiscoveryWithRetry(request, workspace, adapterKind, mark
 }
 
 function startCore() {
-  const child = spawn(join(root, 'target', 'debug', 'rovai-core'), [
+  const coreExecutable = process.env.ROVAI_CORE_EXECUTABLE
+    ? resolve(process.env.ROVAI_CORE_EXECUTABLE)
+    : join(root, 'target', 'debug', 'rovai-core')
+  const child = spawn(coreExecutable, [
     '--data-dir',
     dataDir
   ], {
@@ -470,10 +490,14 @@ function startCore() {
   })
   child.stderr.pipe(process.stderr)
   const pending = new Map()
+  const events = []
   let nextId = 1
   createInterface({ input: child.stdout }).on('line', (line) => {
     const message = JSON.parse(line)
-    if (message.method) return
+    if (message.method) {
+      events.push(message)
+      return
+    }
     const pendingRequest = pending.get(message.id)
     if (!pendingRequest) return
     clearTimeout(pendingRequest.timer)
@@ -499,7 +523,7 @@ function startCore() {
     ])
     if (child.exitCode === null) child.kill('SIGTERM')
   }
-  return { request, stop }
+  return { request, stop, events }
 }
 
 function groupRoot(groupKey) {

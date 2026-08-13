@@ -1669,14 +1669,12 @@ impl AgentRuntimeAdapter for AntigravityAppAdapterPolicy {
         // one invocation.
         // They do not change the identity or resume semantics of the underlying
         // conversation, so a permission edit need not discard useful context.
-        let binding_compatibility_digest = canonical_json_digest(&json!({
-            "adapterKind": self.kind(),
-            "installationId": input.installation_id,
-            "protocolVersion": protocol_version,
-            "contextContract": native_binding_context_contract(),
-            "builtinToolContractVersion": BUILTIN_TOOL_CONTRACT_VERSION,
-            "builtinToolCatalogDigest": builtin_tool_catalog_digest()?,
-        }))?;
+        let binding_compatibility_digest = antigravity_binding_compatibility_digest(
+            input.installation_id,
+            &protocol_version,
+            BUILTIN_TOOL_CONTRACT_VERSION,
+            &builtin_tool_catalog_digest()?,
+        )?;
         let host_config_digest = canonical_json_digest(&json!({
             "adapterKind": self.kind(),
             "installationId": input.installation_id,
@@ -1693,6 +1691,22 @@ impl AgentRuntimeAdapter for AntigravityAppAdapterPolicy {
             host_config_digest,
         })
     }
+}
+
+fn antigravity_binding_compatibility_digest(
+    installation_id: &str,
+    protocol_version: &str,
+    builtin_tool_contract_version: u32,
+    builtin_tool_catalog_digest: &str,
+) -> Result<String> {
+    canonical_json_digest(&json!({
+        "adapterKind": AdapterKind::AntigravityApp,
+        "installationId": installation_id,
+        "protocolVersion": protocol_version,
+        "contextContract": native_binding_context_contract(),
+        "builtinToolContractVersion": builtin_tool_contract_version,
+        "builtinToolCatalogDigest": builtin_tool_catalog_digest,
+    }))
 }
 
 #[cfg(test)]
@@ -2200,6 +2214,26 @@ mod tests {
             plan.binding_compatibility_digest
         );
         assert_ne!(edits.host_config_digest, plan.host_config_digest);
+    }
+
+    #[test]
+    fn antigravity_catalog_upgrade_replaces_the_native_conversation_binding() {
+        let current_catalog = builtin_tool_catalog_digest().unwrap();
+        let current = antigravity_binding_compatibility_digest(
+            "agy-local",
+            "antigravity-app-cli-v1",
+            BUILTIN_TOOL_CONTRACT_VERSION,
+            &current_catalog,
+        )
+        .unwrap();
+        let legacy = antigravity_binding_compatibility_digest(
+            "agy-local",
+            "antigravity-app-cli-v1",
+            7,
+            &format!("sha256:{}", "0".repeat(64)),
+        )
+        .unwrap();
+        assert_ne!(current, legacy);
     }
 
     #[test]

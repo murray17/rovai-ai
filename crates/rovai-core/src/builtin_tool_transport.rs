@@ -6,13 +6,13 @@ use serde_json::{Map, Value, json};
 
 use crate::{command::canonical_json_digest, team_tool_catalog::builtin_tool_definitions};
 
-pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 7;
+pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 8;
 pub const BUILTIN_TOOL_IPC_PROTOCOL_VERSION: u32 = 1;
 pub const BUILTIN_TOOL_ENVELOPE_VERSION: u32 = 1;
 pub const BUILTIN_TOOL_RECEIPT_VERSION: u32 = 1;
-pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 7;
+pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 8;
 pub const BUILTIN_TOOL_AGENT_OUTPUT_CONTRACT_VERSION: u32 = 2;
-pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v7";
+pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v8";
 pub const BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES: usize = 1024 * 1024;
 pub const ROVAI_AGENT_CLI_ENV: &str = "ROVAI_AGENT_CLI";
 pub const ROVAI_CLI_CONTEXT_ENV: &str = "ROVAI_CLI_CONTEXT";
@@ -598,7 +598,7 @@ fn direct_arguments(input_schema: &Value) -> Vec<BuiltinToolArgument> {
 
 fn direct_argument_flag(field: &str) -> String {
     match field {
-        // Camp Message Send v4 intentionally exposes an attention-oriented CLI
+        // Camp Message Send v5 intentionally exposes an attention-oriented CLI
         // name while keeping the Core input free of a user-selectable identity.
         "mentionUser" => "--to-user".to_string(),
         _ => format!("--{}", camel_to_kebab(field)),
@@ -872,9 +872,9 @@ mod tests {
 
     #[test]
     fn cli_mapping_is_complete_unique_and_contract_valid() {
-        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 7);
-        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 7);
-        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v7");
+        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 8);
+        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 8);
+        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v8");
         validate_builtin_tool_contract().unwrap();
         let operations = BUILTIN_TOOL_CLI_IDENTITIES
             .iter()
@@ -989,5 +989,28 @@ mod tests {
                 .iter()
                 .any(|error| error.code == "builtin_tool.idempotency_conflict")
         );
+        assert!(
+            send.input_schema["properties"]["mentionUser"]["description"]
+                .as_str()
+                .is_some_and(|description| {
+                    description.contains("new unresolved user decision, answer, or action")
+                        && description.contains("Do not inherit it from prior messages")
+                })
+        );
+    }
+
+    #[test]
+    fn catalog_digest_changes_with_agent_facing_send_teaching() {
+        let current = catalog_digest_operations().unwrap();
+        let current_digest = builtin_tool_catalog_digest_from(&current).unwrap();
+        let mut legacy_teaching = current.clone();
+        let send = legacy_teaching
+            .iter_mut()
+            .find(|operation| operation.name == "camp.message.send")
+            .unwrap();
+        send.input_schema["properties"]["mentionUser"]["description"] =
+            json!("Mention the current user and create an Inbox notification.");
+        let legacy_digest = builtin_tool_catalog_digest_from(&legacy_teaching).unwrap();
+        assert_ne!(current_digest, legacy_digest);
     }
 }

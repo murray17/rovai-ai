@@ -29,11 +29,13 @@ Architecture 解释组件如何组成，Version 文档记录交付范围；它�
 | [Diagnostics Center v1（当前）](diagnostics-center-v1.md) | `diagnostics.check` typed read model、三态分类、显式单项修复映射、Recovery 与集中脱敏的 `rovai-diagnostics-v5` |
 | [Accepted Input Recovery v1（当前）](accepted-input-recovery-v1.md) | accepted Runtime input 的启动分类、`recovery_blocked`、Scheduler fence、用户命令与 Stop/预算 outcome-unknown 收敛 |
 | [Collaboration State v2（当前）](collaboration-state-v2.md) | peer-only routing identity、稳定 CampMember 选择、Lead ID/Boolean、完整 projection digest、独立 inclusion、accepted ACK 与 v0.50 clean break |
-| [Built-in Tool Transport v7（当前）](builtin-tool-transport-v7.md) | 十三项固定业务命令、Camp Message Send v4、exact Camp read addressing、精确 help 与渐进式 CLI 教学边界 |
-| [Built-in Tool Transport v7 Errata](builtin-tool-transport-v7-errata.md) | 不改变 v7 wire/version；让 locator-present recovery 通过 ADR-0170 的窄 self-write exact-read 成为可执行路径 |
+| [Built-in Tool Transport v8（当前）](builtin-tool-transport-v8.md) | v7 十三项命令与 wire 不变；Camp Message Send v5、收窄的 User Attention schema/help/Charter/Skill 教学及 catalog/session rollout |
+| [Built-in Tool Transport v7 (historical)](builtin-tool-transport-v7.md) | v0.67 的 Camp Message Send v4、exact Camp read addressing 与初版渐进式 CLI 教学；不作为 v0.70 CLI context/catalog 入口 |
+| [Built-in Tool Transport v7 Errata](builtin-tool-transport-v7-errata.md) | 历史 v7 locator-present recovery 勘误；其 self-write exact-read 语义已由 v8 继承 |
 | [Durable Task v3（当前）](durable-task-v3.md) | User/Lead 责任定义、Assignee execution-state update、Camp-wide read、explicit owner、unassigned holding 与 advisory actions |
-| [Camp Message Send v4（当前）](camp-message-send-v4.md) | v3 显式 Agent 寻址/caller return 加 `--to-user`、Structured Current User Mention 与原子通知 |
-| [Camp Message Send v4 Errata](camp-message-send-v4-errata.md) | v4 wire/version 不变；Current User Attention 生命周期与 locator-present exact verification 使用现行勘误 |
+| [Camp Message Send v5（当前）](camp-message-send-v5.md) | v4 Core 效果与 wire 不变；收窄 `mentionUser` / `--to-user` 的消息局部使用边界、组合责任与精确教学 |
+| [Camp Message Send v4 (historical)](camp-message-send-v4.md) | v3 显式 Agent 寻址/caller return 加初版 `--to-user`、Structured Current User Mention 与原子通知 |
+| [Camp Message Send v4 Errata](camp-message-send-v4-errata.md) | 历史 v4 Current User Attention 生命周期与 locator-present exact verification 勘误；其修正已由 v5 继承 |
 | [Current User Attention v2（当前）](current-user-attention-v2.md) | v1 当前用户注意力加 Message Mention 独立已读、锚点导航、焦点确认与 Markdown 保真 Renderer |
 | [Current User Attention v1 (historical)](current-user-attention-v1.md) | 当前用户身份、结构化内容与原子通知基线；不含独立已读、锚点窗口与 Markdown 保真勘误 |
 | [Missing-Send Recovery Publication v1（当前）](missing-send-recovery-publication-v1.md) | 成功 AgentRun 的 typed final candidate、同 Run accepted-send 抑制、recipient-free 原子恢复消息与 terminal replay/竞态语义 |

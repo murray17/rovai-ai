@@ -77,5 +77,6 @@ projection、用户 Assignment 或 Runtime-native discovery 权威。
 - [ADR-0124: CLI-Only Transport](0124-cli-only-transport-for-rovai-built-in-operations.md)
 - [ADR-0135: Compact Agent Output](0135-compact-agent-output-over-canonical-built-in-tool-envelope.md)
 - [ADR-0167: Seven-Skill Official Inventory](0167-seven-skill-official-inventory.md)
-- [Built-in Tool Transport v7](../contracts/builtin-tool-transport-v7.md)
+- [Built-in Tool Transport v8](../contracts/builtin-tool-transport-v8.md)
+- [Built-in Tool Transport v7 (historical)](../contracts/builtin-tool-transport-v7.md)
 - [Built-in Tool Runtime architecture](../architecture/builtin-tool-runtime.md)

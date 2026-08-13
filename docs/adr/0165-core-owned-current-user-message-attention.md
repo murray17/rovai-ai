@@ -84,5 +84,6 @@ Public Message/Delivery 分离和 ADR-0135 的 compact output；这些 ADR 的�
 - [ADR-0128: Structured Draft-Only User Message Submission](0128-structured-draft-only-user-message-submission.md)
 - [ADR-0130: Public A2A Messages and Unified Delivery](0130-public-a2a-message-and-unified-delivery.md)
 - [ADR-0135: Compact Agent Output](0135-compact-agent-output-over-canonical-built-in-tool-envelope.md)
-- [Camp Message Send v4](../contracts/camp-message-send-v4.md)
+- [Camp Message Send v5](../contracts/camp-message-send-v5.md)
+- [Camp Message Send v4 (historical)](../contracts/camp-message-send-v4.md)
 - [Current User Attention v1](../contracts/current-user-attention-v1.md)

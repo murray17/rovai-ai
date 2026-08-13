@@ -55,8 +55,17 @@ Native Session：Adapter 在终态对外可见前停止持有 Session lock 的 p
 `session/load`；smoke 现以 session ID 相等作为硬断言。transport-independent response-loss、
 `outcome_indeterminate` 与无 locator stop 继续由确定性 CLI/Core 测试覆盖。
 
-当前字段级合同以 [Built-in Tool Transport v7](contracts/builtin-tool-transport-v7.md) 为唯一真源，
-调用结构以 [Built-in Tool Runtime Architecture](architecture/builtin-tool-runtime.md) 为准。
+当前字段级合同以 [Built-in Tool Transport v8](contracts/builtin-tool-transport-v8.md) 为唯一真源，
+调用结构以 [Built-in Tool Runtime Architecture](architecture/builtin-tool-runtime.md) 为准。上方九 Runtime
+矩阵仍是 v7 的真实模型证据，不能冒充 v8 收窄后的 schema/help/Charter/Skill 教学已经完成实机复测；v8
+的确定性测试已证明 catalog digest、三类分离示例与 Antigravity binding replacement。
+
+2026-08-13 的 v0.70 聚焦复测以全新隔离 Core data-dir 和 Native Session 运行 Codex CLI `0.147.0` / `gpt-5.6-sol`：
+内部 Agent handoff 没有新增用户决定、回答或行动时，真实模型在读取 exact help 后选择
+`attention=omit --to-user`，最终结构化 Camp Message 不含 `current_user_mention`；同日 Codex v8
+`smoke:builtin-cli` 的 13 项 operation、successor exact reads 与 Native Session continuation 也通过。该单
+Runtime 证据不外推到其余八个 Runtime；九 Runtime v8 正式矩阵仍需在 v0.70 发布前补跑。完整输入与
+AgentRun 证据记录在 [v0.70 实施计划](versions/v0.70/implementation-plan.md)。
 
 ### 历史 v0.47 Transport v4 基线
 
