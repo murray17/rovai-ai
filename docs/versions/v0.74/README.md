@@ -10,8 +10,8 @@ last_updated: 2026-08-14
 
 # Rovai-ai v0.74：Runtime 对齐的协作 Skill 与双轴代码评审
 
-> 当前状态：设计已确认；四个 Skill 内容、`review-duo` official bundle 与 successor ADR 正在实施，
-> 自动化、打包安装和最终发布证据尚未完成。
+> 当前状态：设计与实现已落地，自动化、打包、签名和 `/Applications` 安装证据已完成；
+> 真实 duo dry-run 与当前 `main` 的严格 Clippy 基线仍有缺口，因此实施状态继续为 `in_progress`。
 >
 > 前置版本：[v0.73 在线长期记忆捕获与 Hearth 审核隔离](../v0.73/README.md)
 

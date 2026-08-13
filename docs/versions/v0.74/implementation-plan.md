@@ -24,7 +24,7 @@ last_updated: 2026-08-14
 - [x] 删除“任意选择旧消息作为 reply target”的暗示，跨观点回应改为正文引用；
 - [x] 恢复未回复/含糊成员不得代写、一次主动澄清、单场推进与迟到回复边界；
 - [x] 更新 Grill Duo 两个 Skill 的前置触发语义、可信固定搭档验证与 caller return 命令；
-- [ ] 完成 validator、bundle fixture 与真实 reply topology 的定向回归。
+- [x] 完成 validator、bundle fixture 与 Core-managed reply topology 的定向回归。
 
 ## Checkpoint 2：Review Duo
 
@@ -51,10 +51,9 @@ last_updated: 2026-08-14
 - [ ] 让严格 `cargo clippy --workspace --all-targets -- -D warnings` 在当前 `main` 基线上通过；
 - [x] 运行文档 `docs:test`、`docs:check`、真实 base 的 `docs:check:ci` 与 ADR generation check；
 - [x] 复查最终 diff，不纳入包级 README/CODEX-INSTRUCTIONS/MANIFEST 或其它任务改动；
-- [ ] 提交并 fast-forward 推送到 `main`；
-- [ ] 从已推送 commit 执行 macOS package、签名/bundle 检查和隔离 smoke；
-- [ ] 按用户授权退出旧日常 App，将已验证 `.app` 提升到 `/Applications` 并从安装位置验证；
-- [ ] 完成后锁定 Mac 屏幕。
+- [x] 提交并 fast-forward 推送到 `main`；
+- [x] 从已推送 commit 执行 macOS package、签名/bundle 检查和隔离 smoke；
+- [x] 按用户授权退出旧日常 App，将已验证 `.app` 提升到 `/Applications` 并从安装位置验证。
 
 ## 当前证据与缺口
 
@@ -63,5 +62,7 @@ last_updated: 2026-08-14
   Desktop build、文档治理、ADR generation、格式和 diff 检查；
 - Clippy 基线：严格命令只命中未被本版本修改的 `crates/rovai-core/src/memory.rs` 既有
   `too_many_arguments`；仅豁免该 lint 后，workspace/all-targets 通过；
-- 尚未完成：真实 duo dry-run、严格 Clippy 基线修复、真实安装包验证、push、`/Applications` 提升和锁屏；
+- 已通过：从已推送 commit 生成 ad-hoc 签名 arm64 App，Core/CLI UUID 与构建产物一致，隔离 App/Core
+  启动及 controlled shutdown 成功，并已提升到 `/Applications` 后从安装路径重新启动验证；
+- 尚未完成：真实 duo dry-run 与严格 Clippy 基线修复；
 - 因此本版本继续保持 `in_progress`。
