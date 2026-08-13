@@ -40,6 +40,6 @@ Occurrence 的显式批量确认，并受 `throughChangeSequence` 限制。
 ## References
 
 - [Current User Attention v2（historical）](current-user-attention-v2.md)
-- [Notification Episode v1](notification-episode-v1.md)
+- [Notification Episode v2](notification-episode-v2.md)
 - [ADR-0165](../adr/0165-core-owned-current-user-message-attention.md)
 - [ADR-0175](../adr/0175-core-owned-notification-occurrence-episode-and-change-journal.md)

@@ -69,21 +69,31 @@ last_updated: 2026-08-13
 - [x] 不新增 ADR、Core session state、CampMessage field、hidden protocol ID 或 official Skill；只更新当前
   v0.71 范围与验收记录。
 
+## Checkpoint 7：v2 领域合同修正
+
+- [x] Clear 边界前 Occurrence 只保留历史统计，不再进入当前未读、Mention 选择、action、heads-up 或
+  retention active-attention 判断；
+- [x] `changesSince` schema v5 为每条 Journal change 水合 exact HeadsUpSignal，Renderer 不再复用 Episode
+  primary semantic/action；
+- [x] Renderer 使用 candidate cursor，分页、精确可见性处理、Inbox 接收和 heads-up 入队完成后才提交；
+- [x] Approval action pending-first，只剩 resolved 未确认来源时提供可用的“知道了”；
+- [x] Core 与 Renderer 回归测试覆盖 Clear 后旧 Mention 不复活、双 Mention 精确 signal、分页失败重试、
+  mixed pending/resolved Approval 与 cleared terminal retention。
+
 ## 当前证据
 
 ### 确定性门禁
 
-- v0.71 实现完成后的 `cargo test --workspace`：404 个 library、11 个 CLI、72 个 Core binary
-  测试通过，3 个显式 real-Runtime manual tests 按合同 ignored；最终快进 main 只新增 library/UI
-  改动，随后 `cargo test -p rovai-core --lib` 的 405 个测试再次全部通过；并行隔离修复写入后，
-  `cargo test -p rovai-core --bin rovai-core` 的 73 个非 ignored 测试通过；
+- v2 修正与 Skill 增量整合后的 `cargo test --workspace`：407 个 library、11 个 CLI、73 个 Core binary
+  测试通过，3 个显式 real-Runtime manual tests 按合同 ignored；
 - `cargo fmt --all -- --check` 与
   `cargo clippy --workspace --all-targets -- -D warnings`：通过；
-- `pnpm test`：Docs 21、Vitest 47 files / 314 tests、Node 179 tests 全部通过；
+- `pnpm test`：Docs 21、Vitest 47 files / 318 tests、Node 179 tests 全部通过；
   `pnpm typecheck`：通过；
 - `pnpm package:mac`：通过，生成隔离验收使用的 `dist/mac-arm64/Rovai-ai.app`；
 - `pnpm docs:test`、`pnpm docs:check`、`pnpm docs:adr:generate -- --check` 与
-  `DOCS_BASE_REF=a6397f32 pnpm docs:check:ci`：通过；`git diff --check`：通过。
+  `DOCS_BASE_REF=origin/main pnpm docs:check:ci`：通过；Impeccable hardening detector 返回空问题集，
+  `git diff --check` 通过。
 
 ### 隔离打包 App 验收
 
@@ -115,4 +125,4 @@ last_updated: 2026-08-13
 - official Skill 数量、名称、来源、管理策略和默认投递不变；`agents/openai.yaml` 仍与固定搭档及对应
   Skill 名称一致，因此无需制造 metadata diff。
 
-Checkpoint 0–6 与全部发布门槛已完成，版本 `implementation_status` 为 `complete`。
+Checkpoint 0–7 与全部发布门槛已完成，版本 `implementation_status` 为 `complete`。

@@ -1177,6 +1177,7 @@ export type NotificationActionKind =
   | 'open_camp_message'
   | 'open_camp_turn'
   | 'open_camp'
+  | 'acknowledge_only'
 
 export interface NotificationReasonView {
   semantic: NotificationSemantic
@@ -1232,7 +1233,7 @@ export interface NotificationEpisodeView {
 }
 
 export interface NotificationEpisodeInbox {
-  schemaVersion: 4
+  schemaVersion: 5
   throughChangeSequence: number
   unreadCount: number
   items: NotificationEpisodeView[]
@@ -1252,13 +1253,19 @@ export interface NotificationEpisodeChange {
     | 'resolved'
     | 'cleared'
     | 'retained'
-  headsUpReason: NotificationSemantic | null
+  headsUpSignal: NotificationHeadsUpSignal | null
   changedAt: string
   episode: NotificationEpisodeView | null
 }
 
+export interface NotificationHeadsUpSignal {
+  semantic: NotificationSemantic
+  action: NotificationActionView
+  mention: NotificationMentionView | null
+}
+
 export interface NotificationEpisodeChangeBatch {
-  schemaVersion: 4
+  schemaVersion: 5
   requestedAfterChangeSequence: number
   nextChangeSequence: number
   throughChangeSequence: number

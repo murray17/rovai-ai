@@ -141,11 +141,11 @@ try {
   )
   await waitForExpression(compactApp.cdp, `
     document.querySelector('.notification-heads-up')?.textContent
-      ?.includes('另有 1 条提到你') === true
+      ?.includes('第二条实时消息提到你。') === true
   `, 15_000)
   assert(await evaluate(compactApp.cdp,
     `window.__notificationAcceptHeadsUp === document.querySelector('.notification-heads-up')`),
-  'A new Occurrence remounted the existing Episode heads-up instead of updating it in place')
+  'A new exact Occurrence signal remounted the existing Episode heads-up instead of updating it in place')
   assert(await evaluate(compactApp.cdp,
     `document.activeElement?.getAttribute('aria-label') === '新对话'`),
   'The updated Episode heads-up stole keyboard focus')

@@ -2,15 +2,20 @@ import { describe, expect, it } from 'vitest'
 import type {
   NotificationActionView,
   NotificationEpisodeChange,
+  NotificationEpisodeChangeBatch,
   NotificationEpisodeView,
+  NotificationHeadsUpSignal,
   NotificationSemantic
 } from '@contracts'
 import {
   applyNotificationChanges,
   enqueueNotificationHeadsUps,
   episodeHasActiveHeadsUpReason,
+  episodeHasActiveHeadsUpSignal,
   notificationBadgeLabel,
-  notificationPresentation
+  notificationHeadsUpPresentation,
+  notificationPresentation,
+  readNotificationChangePages
 } from './NotificationCenter'
 import { preferenceFromUnknown } from './NotificationSettings'
 
@@ -90,6 +95,7 @@ function change(
   sequence: number,
   reason: NotificationSemantic | null = item.primarySemantic
 ): NotificationEpisodeChange {
+  const signal = reason ? headsUpSignal(item, reason) : null
   return {
     changeSequence: sequence,
     episodeId: item.id,
@@ -97,9 +103,24 @@ function change(
     attentionRevision: item.attentionRevision,
     operation: 'upsert',
     changeCause: 'occurrence_admitted',
-    headsUpReason: reason,
+    headsUpSignal: signal,
     changedAt: item.updatedAt,
     episode: item
+  }
+}
+
+function headsUpSignal(
+  item: NotificationEpisodeView,
+  semantic: NotificationSemantic
+): NotificationHeadsUpSignal {
+  return {
+    semantic,
+    action: action(item.id, semantic === 'approval_pending'
+      ? 'open_approval'
+      : semantic === 'user_mention'
+        ? 'open_camp_message'
+        : 'open_camp_turn'),
+    mention: semantic === 'user_mention' ? item.mention : null
   }
 }
 
@@ -168,7 +189,7 @@ describe('Notification Episode presentation', () => {
     expect(next.entries).toHaveLength(2)
     expect(next.entries[0]).toMatchObject({
       episode: { id: first.id, episodeVersion: 2 },
-      reason: 'turn_failed',
+      signal: { semantic: 'turn_failed' },
       changeSequence: 2
     })
   })
@@ -189,9 +210,73 @@ describe('Notification Episode presentation', () => {
       }]
     })
     expect(episodeHasActiveHeadsUpReason(acknowledgedMention, 'user_mention')).toBe(false)
-    expect(enqueueNotificationHeadsUps([], [
-      change(acknowledgedMention, 2, 'user_mention')
-    ]).entries).toEqual([])
+    const inactiveChange = change(acknowledgedMention, 2, null)
+    expect(enqueueNotificationHeadsUps([], [inactiveChange]).entries).toEqual([])
+  })
+
+  it('reconciles a queued signal by exact acknowledgement identity', () => {
+    const current = episode('user_mention')
+    const stale = headsUpSignal(current, 'user_mention')
+    stale.action.acknowledgementId = 'occurrence-old'
+    expect(episodeHasActiveHeadsUpSignal(current, stale)).toBe(false)
+    stale.action.acknowledgementId = current.primaryAction.acknowledgementId
+    expect(episodeHasActiveHeadsUpSignal(current, stale)).toBe(true)
+  })
+
+  it('presents and opens the exact signal rather than the Episode current primary state', () => {
+    const current = episode('turn_completed', {
+      mention: {
+        messageId: 'message-new',
+        authorId: 'agent-1',
+        authorDisplayName: '洛克',
+        summary: '第二条消息提到你',
+        available: true
+      },
+      primaryAction: action('episode-1', 'open_camp_turn')
+    })
+    const signal = headsUpSignal(current, 'user_mention')
+    signal.action.messageId = 'message-new'
+    const queued = enqueueNotificationHeadsUps([], [{
+      ...change(current, 7, null),
+      headsUpSignal: signal
+    }])
+
+    expect(queued.entries[0].signal.action.messageId).toBe('message-new')
+    expect(notificationHeadsUpPresentation(queued.entries[0].signal)).toEqual({
+      label: '提到你',
+      message: '第二条消息提到你'
+    })
+  })
+
+  it('does not commit a candidate cursor when a later page fails', async () => {
+    const first = episode('user_mention')
+    const requests: number[] = []
+    const request = async (cursor: number): Promise<NotificationEpisodeChangeBatch> => {
+      requests.push(cursor)
+      if (cursor === 0) return {
+        schemaVersion: 5,
+        requestedAfterChangeSequence: 0,
+        nextChangeSequence: 1,
+        throughChangeSequence: 2,
+        resetRequired: false,
+        hasMore: true,
+        changes: [change(first, 1)]
+      }
+      throw new Error('page two failed')
+    }
+
+    await expect(readNotificationChangePages(0, request)).rejects.toThrow('page two failed')
+    expect(requests).toEqual([0, 1])
+    const retried = await readNotificationChangePages(0, async (cursor) => ({
+      schemaVersion: 5,
+      requestedAfterChangeSequence: cursor,
+      nextChangeSequence: 2,
+      throughChangeSequence: 2,
+      resetRequired: false,
+      hasMore: false,
+      changes: [change(first, 1)]
+    }))
+    expect(retried.nextChangeSequence).toBe(2)
   })
 
   it('hydrates upserts and removes by Episode identity', () => {

@@ -17,7 +17,7 @@ last_updated: 2026-08-13
 
 - **何时阅读：** 修改领域真源、Managed Content、Blob 或 read side 时阅读。
 - **当前架构：** [Notification Episode](../architecture/notification-episodes.md)
-- **当前合同：** [Notification Episode v1](../contracts/notification-episode-v1.md)
+- **当前合同：** [Notification Episode v2](../contracts/notification-episode-v2.md)
 
 <!-- adr-current-primary:begin topic=core-data -->
 | ADR | Decision |

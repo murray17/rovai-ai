@@ -43,6 +43,8 @@ Episode 更新通过最小 Change Journal 驱动浮层和增量刷新。
 - 来源事实、Occurrence、Episode 与 Journal 同事务；
 - collaboration/message/approval-generation 三种聚合键；
 - `episodeVersion` / `attentionRevision` 分离，bounded acknowledge/clear/mark-all；
+- Clear 前历史来源与 Active Attention 分离；当前未读、动作、heads-up 与 retention 只看 Active Attention；
+- changesSince schema v5 返回 exact HeadsUpSignal；Approval 使用 pending-first / acknowledge-only action；
 - Journal floor、reset、分页 high-water 与 90 天终结 Episode 保留。
 
 ### Current User Attention v3
@@ -57,6 +59,7 @@ Episode 更新通过最小 Change Journal 驱动浮层和增量刷新。
 - Notification Center 只渲染 Core Episode，不做二次聚合；
 - display semantic 与 attention action 分离，主动作不可用时仅展示显式次动作；
 - 当前浮层同 Episode 原地升级，reload 建立 high-water 而不补弹历史；
+- 浮层只消费 exact signal；增量分页全部成功并接收 Inbox 后才提交共享 cursor；
 - 设置固定为总开关、待审批、提到你、本轮完成、执行未完成，默认开启；
 - 保持 Porcelain Day / Steel Night、键盘焦点、长文本、错误恢复和 200% zoom 合同。
 
@@ -83,7 +86,7 @@ Episode 更新通过最小 Change Journal 驱动浮层和增量刷新。
 
 1. Core module tests 覆盖事务原子性、聚合/顺序无关、逐 Mention 确认、并发边界、approval generation、
    completion satisfaction、失败诚实性、clear reappearance、Journal reset 与 retention；
-2. JSON-RPC、TypeScript 与 Main allowlist 只暴露 v1 深模块接口，旧方法不可调用；
+2. JSON-RPC、TypeScript 与 Main allowlist 只暴露 v2/schema v5 深模块接口，旧方法不可调用；
 3. Renderer tests 覆盖同 Episode heads-up 原地更新、启动不补弹、不可用主动作、部分未读与 CAS 错误恢复；
 4. 双主题真实 App 验收覆盖 Drawer、Toast、设置、长 CJK/emoji、键盘、最小窗口与 200% zoom；
 5. `cargo test --workspace`、Fmt、Clippy、Typecheck、Desktop build、`pnpm test` 与全部文档治理通过；
@@ -97,10 +100,10 @@ Episode 更新通过最小 Change Journal 驱动浮层和增量刷新。
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.70 以未执行九 Runtime v8 matrix 的事实冻结为 historical/closed_incomplete；v0.71 成为唯一 current |
-| ADR | 已更新 | 新增 ADR-0175，细化通知真源、聚合、Journal 与 Renderer seam；ADR-0176 替代十项 official inventory 并冻结 system-required policy；Grill Duo 标题调整未改变有效 ADR 所有的固定搭档、自包含或异步边界，无需新 ADR |
-| Contracts | 已更新 | Notification Episode v1 成为通知接口；Current User Attention v3 替代 v2；SkillView 增加 management policy；Grill Duo 仍使用既有 CampMessage 与 caller-return 合同 |
-| Architecture | 已更新 | 新增 Notification Episode 架构；Built-in Tool Runtime 与 Skill Projection 记录十一项 inventory 及系统必需自愈边界 |
-| UI | 已更新 | 新增通知中心组件合同；Settings surface 同步九项可配置 Skill，并完全省略两项系统必需 Skill |
+| ADR | 已更新 | ADR-0175 细化通知真源、聚合、Journal 与 Renderer seam；ADR-0176 替代十项 official inventory 并冻结 system-required policy；Grill Duo 标题与本次 v2 合同修正均未改变既有 ADR 决策，无需新 ADR |
+| Contracts | 已更新 | Notification Episode v2 替代 v1，冻结 Active Attention、exact HeadsUpSignal、事务式 cursor 与 acknowledge-only；Current User Attention v3 继续拥有逐消息精确确认；SkillView 增加 management policy；Grill Duo 仍使用既有 CampMessage 与 caller-return 合同 |
+| Architecture | 已更新 | Notification Episode 架构补齐 Active Attention、signal hydration 和 Renderer cursor commit seam；Built-in Tool Runtime 与 Skill Projection 记录十一项 inventory 及系统必需自愈边界 |
+| UI | 已更新 | 通知中心组件合同补齐 exact signal 呈现/点击、“知道了”动作与失败重试边界；Settings surface 同步九项可配置 Skill，并完全省略两项系统必需 Skill |
 | Runtime Activity | 确认无需更新 | 不新增 Runtime operation、provider event、Activity classifier 或 Evidence mapping |
 | Runtime compatibility | 确认无需更新 | 不改变 Adapter、Native Session、Built-in Transport v8 或模型教学 identity |
 | Documentation routing | 已更新 | docs map、Contract/Architecture/UI/ADR/current-version 路由切换到 v0.71，并把 Skills 主题指向 ADR-0176 |
@@ -109,7 +112,7 @@ Episode 更新通过最小 Change Journal 驱动浮层和增量刷新。
 ## References
 
 - [实施与验收计划](implementation-plan.md)
-- [Notification Episode v1](../../contracts/notification-episode-v1.md)
+- [Notification Episode v2](../../contracts/notification-episode-v2.md)
 - [Current User Attention v3](../../contracts/current-user-attention-v3.md)
 - [ADR-0175](../../adr/0175-core-owned-notification-occurrence-episode-and-change-journal.md)
 - [ADR-0176](../../adr/0176-eleven-skill-official-inventory-and-system-required-operations.md)

@@ -1200,6 +1200,10 @@ _Avoid_: `event_log`, notification history source, full read-view snapshot, Rend
 The monotonic Notification Episode revision that advances only when a new attention-worthy source meaning is admitted. Presentation-only hydration changes, acknowledgement, satisfaction, resolution, Camp renaming and source availability do not advance it; clear is bounded through an observed Attention Revision.
 _Avoid_: Episode version, database row version, display revision, timestamp
 
+**Active Attention**:
+The subset of a Notification Episode's Occurrences admitted after its current clear boundary and not made inactive by acknowledgement or satisfaction. It alone determines current unread attention, attention actions, heads-up eligibility, and whether attention blocks retention; Occurrences outside it remain historical source facts rather than becoming active again when a later Occurrence reopens the Episode. A resolved Approval remains Active Attention until acknowledged.
+_Avoid_: all unacknowledged history, current Episode version, deleted Occurrence, clear-as-temporary-hide, business state alone
+
 **Local User (`local_user`)**:
 The sole current human user identity resolved and owned by Core in the single-user product contract. Agents can request attention with `--to-user` but cannot submit, select, infer, or receive this identity; display names are presentation and never replace the stable `local_user` fact.
 _Avoid_: `local-user` alias, Agent-selected user ID, message author as current user, Renderer-inferred identity, multi-user binding

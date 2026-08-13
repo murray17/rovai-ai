@@ -14,6 +14,7 @@ import type {
   NotificationEpisodeFilter,
   NotificationEpisodeInbox,
   NotificationEpisodeView,
+  NotificationHeadsUpSignal,
   NotificationPreference,
   NotificationSemantic,
   StoredCommandResult
@@ -23,7 +24,7 @@ type LoadState = 'loading' | 'ready' | 'error'
 
 export type NotificationHeadsUpEntry = {
   episode: NotificationEpisodeView
-  reason: NotificationSemantic
+  signal: NotificationHeadsUpSignal
   changeSequence: number
 }
 
@@ -38,12 +39,11 @@ export function enqueueNotificationHeadsUps(
     if (
       change.operation !== 'upsert'
       || !change.episode
-      || !change.headsUpReason
-      || !episodeHasActiveHeadsUpReason(change.episode, change.headsUpReason)
+      || !change.headsUpSignal
     ) continue
     const next = {
       episode: change.episode,
-      reason: change.headsUpReason,
+      signal: change.headsUpSignal,
       changeSequence: change.changeSequence
     }
     const existingIndex = entries.findIndex((entry) => entry.episode.id === change.episodeId)
@@ -56,6 +56,43 @@ export function enqueueNotificationHeadsUps(
     }
   }
   return { entries, overflow }
+}
+
+export async function readNotificationChangePages(
+  startCursor: number,
+  requestPage: (afterChangeSequence: number) => Promise<NotificationEpisodeChangeBatch>,
+  maximumPages = 10
+): Promise<{
+  changes: NotificationEpisodeChange[]
+  nextChangeSequence: number
+  resetRequired: boolean
+}> {
+  const changes: NotificationEpisodeChange[] = []
+  let candidateCursor = startCursor
+  for (let page = 0; page < maximumPages; page += 1) {
+    const batch = await requestPage(candidateCursor)
+    if (batch.schemaVersion !== 5) throw new Error('通知增量合同不兼容。')
+    if (batch.requestedAfterChangeSequence !== candidateCursor) {
+      throw new Error('通知增量游标边界不一致。')
+    }
+    if (batch.resetRequired) {
+      return {
+        changes: [],
+        nextChangeSequence: batch.nextChangeSequence,
+        resetRequired: true
+      }
+    }
+    if (
+      batch.nextChangeSequence < candidateCursor
+      || batch.nextChangeSequence > batch.throughChangeSequence
+      || (batch.hasMore && batch.nextChangeSequence === candidateCursor)
+    ) throw new Error('通知增量游标没有单调推进。')
+    changes.push(...batch.changes)
+    candidateCursor = batch.nextChangeSequence
+    if (!batch.hasMore) break
+    await Promise.resolve()
+  }
+  return { changes, nextChangeSequence: candidateCursor, resetRequired: false }
 }
 
 export function applyNotificationChanges(
@@ -146,7 +183,7 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
     }), [onCancelNavigation])
 
     const acceptInbox = useCallback((inbox: NotificationEpisodeInbox): void => {
-      if (inbox.schemaVersion !== 4) throw new Error('通知中心合同不兼容。')
+      if (inbox.schemaVersion !== 5) throw new Error('通知中心合同不兼容。')
       setItems(inbox.items)
       setNextCursor(inbox.nextCursor)
       setUnreadCount(inbox.unreadCount)
@@ -154,7 +191,7 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
       const currentById = new Map(inbox.items.map((episode) => [episode.id, episode]))
       setHeadsUpQueue((current) => current.flatMap((entry) => {
         const episode = currentById.get(entry.episode.id)
-        return episode && episodeHasActiveHeadsUpReason(episode, entry.reason)
+        return episode && episodeHasActiveHeadsUpSignal(episode, entry.signal)
           ? [{ ...entry, episode }]
           : []
       }))
@@ -163,7 +200,8 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
 
     const loadInbox = useCallback(async (
       selectedFilter: NotificationEpisodeFilter,
-      showLoading = false
+      showLoading = false,
+      requireAcceptance = false
     ): Promise<NotificationEpisodeInbox> => {
       const generation = ++loadGeneration.current
       if (showLoading) setState('loading')
@@ -176,6 +214,8 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
         if (generation === loadGeneration.current) {
           acceptInbox(inbox)
           setState('ready')
+        } else if (requireAcceptance) {
+          throw new Error('通知读取已被更新请求取代。')
         }
         return inbox
       } catch (nextError) {
@@ -251,26 +291,26 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
       ) return
       pollRunning.current = true
       try {
-        const changes: NotificationEpisodeChange[] = []
-        let requestCount = 0
-        for (;;) {
-          const batch = await window.rovai.request<NotificationEpisodeChangeBatch>(
+        const startCursor = changeCursor.current
+        const collected = await readNotificationChangePages(
+          startCursor,
+          (afterChangeSequence) => window.rovai.request<NotificationEpisodeChangeBatch>(
             'notifications.changesSince',
-            { afterChangeSequence: changeCursor.current, limit: 100 }
+            { afterChangeSequence, limit: 100 }
           )
-          if (batch.schemaVersion !== 4) throw new Error('通知增量合同不兼容。')
-          if (batch.resetRequired) {
-            const reset = await loadInbox(filter)
-            changeCursor.current = reset.throughChangeSequence
-            changes.length = 0
-            break
-          }
-          changes.push(...batch.changes)
-          changeCursor.current = batch.nextChangeSequence
-          requestCount += 1
-          if (!batch.hasMore || requestCount >= 10) break
-          await new Promise<void>((resolve) => window.setTimeout(resolve, 0))
+        )
+        if (collected.resetRequired) {
+          const reset = await loadInbox(filter, false, true)
+          changeCursor.current = reset.throughChangeSequence
+          pollFailureCount.current = 0
+          pollRetryAt.current = 0
+          return
         }
+        const changes = collected.changes
+        const hasHeadsUpSignal = changes.some((change) => change.headsUpSignal !== null)
+        const effectivePreference = hasHeadsUpSignal
+          ? preference ?? await loadPreference()
+          : preference
 
         const headsUpChanges: NotificationEpisodeChange[] = []
         for (const change of changes) {
@@ -278,11 +318,11 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
           if (
             change.operation !== 'upsert'
             || !episode
-            || !change.headsUpReason
-            || !episodeHasActiveHeadsUpReason(episode, change.headsUpReason)
+            || !change.headsUpSignal
           ) continue
-          const exactMentionAction = change.headsUpReason === 'user_mention'
-            ? actionForSemantic(episode, 'user_mention')
+          const signal = change.headsUpSignal
+          const exactMentionAction = signal.semantic === 'user_mention'
+            ? signal.action
             : null
           const exactSourceMayBeVisible = exactMentionAction
             && exactMentionAction.messageId
@@ -307,13 +347,14 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
             }
           }
           if (
-            preference
-            && shouldShowHeadsUp(change.headsUpReason, preference)
+            effectivePreference
+            && shouldShowHeadsUp(signal.semantic, effectivePreference)
             && !open
             && document.visibilityState === 'visible'
             && document.hasFocus()
           ) headsUpChanges.push(change)
         }
+        if (changes.length > 0) await loadInbox(filter, false, true)
         if (headsUpChanges.length > 0) {
           setHeadsUpQueue((current) => {
             const next = enqueueNotificationHeadsUps(current, headsUpChanges)
@@ -323,10 +364,7 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
             return next.entries
           })
         }
-        if (changes.length > 0) {
-          setItems((current) => applyNotificationChanges(current, changes))
-          await loadInbox(filter).catch(() => undefined)
-        }
+        changeCursor.current = collected.nextChangeSequence
         pollFailureCount.current = 0
         pollRetryAt.current = 0
       } catch (nextError) {
@@ -345,6 +383,7 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
       activeCampVisible,
       filter,
       loadInbox,
+      loadPreference,
       onRefreshVisibleCamp,
       open,
       preference
@@ -387,7 +426,11 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
         if (action.acknowledgementId) {
           await acknowledgeAction(episode, action)
           acknowledgementPersisted = true
-          await loadInbox(filter).catch(() => undefined)
+          await loadInbox(filter)
+        }
+        if (action.kind === 'acknowledge_only') {
+          window.setTimeout(() => { returnFocusRef.current = null }, 0)
+          return
         }
         const result = await onNavigate(episode, action)
         if (generation !== navigationGeneration.current) {
@@ -486,7 +529,7 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
           'notifications.inbox',
           { filter, cursor: nextCursor, limit: 50 }
         )
-        if (page.schemaVersion !== 4) throw new Error('通知中心合同不兼容。')
+        if (page.schemaVersion !== 5) throw new Error('通知中心合同不兼容。')
         setItems((current) => {
           const ids = new Set(current.map((item) => item.id))
           return [...current, ...page.items.filter((item) => !ids.has(item.id))]
@@ -519,8 +562,7 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
             key={currentHeadsUp.episode.id}
             entry={currentHeadsUp}
             onOpen={() => void openAction(
-              currentHeadsUp.episode,
-              currentHeadsUp.episode.primaryAction
+              currentHeadsUp.episode, currentHeadsUp.signal.action
             )}
             onDismiss={() => setHeadsUpQueue((current) => current.slice(1))}
           />
@@ -668,7 +710,9 @@ function NotificationRow({
               disabled={disabled || !episode.primaryAction.available}
               aria-busy={busy ? 'true' : undefined}
               onClick={() => onAction(episode.primaryAction)}
-            >{busy ? '正在打开…' : actionLabel(episode.primaryAction)}</button>
+            >{busy
+                ? episode.primaryAction.kind === 'acknowledge_only' ? '正在确认…' : '正在打开…'
+                : actionLabel(episode.primaryAction)}</button>
             {episode.secondaryActions.map((action) => (
               <button
                 key={action.actionId}
@@ -706,7 +750,7 @@ function NotificationHeadsUp({
 }): React.JSX.Element {
   const [paused, setPaused] = useState(false)
   const onDismissRef = useRef(onDismiss)
-  const presentation = notificationPresentation(entry.episode)
+  const presentation = notificationHeadsUpPresentation(entry.signal)
   useEffect(() => {
     onDismissRef.current = onDismiss
   }, [onDismiss])
@@ -729,17 +773,12 @@ function NotificationHeadsUp({
       <button
         className="notification-heads-up-open"
         type="button"
-        disabled={!entry.episode.primaryAction.available}
+        disabled={!entry.signal.action.available}
         onClick={onOpen}
       >
         <strong>{presentation.label}</strong>
         <span>{presentation.message}</span>
-        <small>
-          {entry.episode.camp.title}
-          {entry.episode.unacknowledgedMentionCount > 1
-            ? ` · 另有 ${entry.episode.unacknowledgedMentionCount - 1} 条提到你`
-            : ''}
-        </small>
+        <small>{entry.episode.camp.title}</small>
       </button>
       <button
         className="notification-heads-up-close"
@@ -827,6 +866,28 @@ export function notificationPresentation(notification: Pick<
   }
 }
 
+export function notificationHeadsUpPresentation(
+  signal: NotificationHeadsUpSignal
+): { label: string; message: string } {
+  switch (signal.semantic) {
+    case 'approval_pending':
+      return { label: '待审批', message: '有操作等待你确认' }
+    case 'turn_failed':
+      return { label: '执行失败', message: '本轮协作失败，请返回查看' }
+    case 'turn_incomplete':
+      return { label: '执行未完成', message: '本轮协作未能证明完成，请返回查看' }
+    case 'turn_completed':
+      return { label: '等待你的下一步', message: '本轮协作已经完成' }
+    case 'user_mention':
+      return {
+        label: '提到你',
+        message: signal.mention?.available
+          ? signal.mention.summary ?? '有消息明确提到你'
+          : '原消息来源不可用'
+      }
+  }
+}
+
 export function notificationBadgeLabel(unreadCount: number): string {
   return unreadCount > 99 ? '99+' : String(Math.max(0, unreadCount))
 }
@@ -842,18 +903,15 @@ export function episodeHasActiveHeadsUpReason(
   return reason.state === 'unacknowledged'
 }
 
-function actionForSemantic(
+export function episodeHasActiveHeadsUpSignal(
   episode: NotificationEpisodeView,
-  semantic: NotificationSemantic
-): NotificationActionView | null {
-  const actions = [episode.primaryAction, ...episode.secondaryActions]
-  if (semantic === 'user_mention') {
-    return actions.find((action) => action.kind === 'open_camp_message') ?? null
-  }
-  if (semantic === 'approval_pending') {
-    return actions.find((action) => action.kind === 'open_approval') ?? null
-  }
-  return actions.find((action) => action.kind === 'open_camp_turn') ?? null
+  signal: NotificationHeadsUpSignal
+): boolean {
+  const acknowledgementId = signal.action.acknowledgementId
+  if (!acknowledgementId) return false
+  return [episode.primaryAction, ...episode.secondaryActions].some((action) => (
+    action.acknowledgementId === acknowledgementId
+  ))
 }
 
 function actionLabel(action: NotificationActionView): string {
@@ -863,6 +921,7 @@ function actionLabel(action: NotificationActionView): string {
     case 'open_camp_message': return '查看消息'
     case 'open_camp_turn': return '查看本轮'
     case 'open_camp': return '打开 Camp'
+    case 'acknowledge_only': return '知道了'
   }
 }
 
