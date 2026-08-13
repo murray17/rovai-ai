@@ -2112,7 +2112,7 @@ impl CollaborationService {
                     command_id: &envelope.command_id,
                     now: &now,
                     generated_camp_name: matches!(envelope.actor, ActorRef::User { .. })
-                        .then(|| generated_camp_name(&submission.body)),
+                        .then(|| submission.generated_camp_name.clone()),
                 },
             )?;
             let result_payload = json!({
@@ -2166,6 +2166,7 @@ struct CampMessageSubmission {
     structured_content: StructuredCampMessageContent,
     prepared_attachment_ids: Vec<String>,
     address: CampMessageAddress,
+    generated_camp_name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -2249,6 +2250,8 @@ fn load_structured_draft_submission(
             "Camp message body must not be empty",
         )));
     }
+    let generated_camp_name =
+        generated_camp_name(&content, |agent_id| member_names.get(agent_id).cloned())?;
 
     let address = if has_all_members_mention(&content) {
         CampMessageAddress::Broadcast
@@ -2277,6 +2280,7 @@ fn load_structured_draft_submission(
         structured_content: content,
         prepared_attachment_ids,
         address,
+        generated_camp_name,
     }))
 }
 
@@ -3387,11 +3391,56 @@ fn normalize_camp_name(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn generated_camp_name(body: &str) -> String {
-    normalize_camp_name(body)
+fn generated_camp_name(
+    content: &[StructuredCampMessageSegment],
+    member_name: impl FnMut(&str) -> Option<String>,
+) -> Result<String> {
+    let title_content = content_after_leading_mentions(content);
+    let title = normalize_camp_name(&render_plain_text(title_content, member_name)?)
         .chars()
         .take(CAMP_NAME_MAX_SCALARS)
-        .collect()
+        .collect::<String>();
+    Ok(if title.is_empty() {
+        "未命名对话".to_string()
+    } else {
+        title
+    })
+}
+
+fn content_after_leading_mentions(
+    content: &[StructuredCampMessageSegment],
+) -> &[StructuredCampMessageSegment] {
+    let mut cursor = 0;
+    while matches!(
+        content.get(cursor),
+        Some(StructuredCampMessageSegment::Text { text }) if text.trim().is_empty()
+    ) {
+        cursor += 1;
+    }
+
+    let mut removed_mention = false;
+    loop {
+        match content.get(cursor) {
+            Some(
+                StructuredCampMessageSegment::MemberMention { .. }
+                | StructuredCampMessageSegment::AllMembersMention,
+            ) => {
+                removed_mention = true;
+                cursor += 1;
+            }
+            Some(StructuredCampMessageSegment::Text { text })
+                if removed_mention && text.trim().is_empty() =>
+            {
+                cursor += 1;
+            }
+            _ => break,
+        }
+    }
+
+    if !removed_mention {
+        return content;
+    }
+    &content[cursor..]
 }
 
 fn camp_delete_blockers(transaction: &Connection, camp_id: &str) -> Result<Vec<Value>> {
@@ -4902,7 +4951,64 @@ mod tests {
         assert_eq!(normalize_camp_name(&"界".repeat(79)).chars().count(), 79);
         assert_eq!(normalize_camp_name(&"😀".repeat(80)).chars().count(), 80);
         assert_eq!(normalize_camp_name(&"😀".repeat(81)).chars().count(), 81);
-        assert_eq!(generated_camp_name(&"😀".repeat(81)).chars().count(), 80);
+        let long_content = vec![Segment::Text {
+            text: "😀".repeat(81),
+        }];
+        assert_eq!(
+            generated_camp_name(&long_content, |_| None)
+                .unwrap()
+                .chars()
+                .count(),
+            80
+        );
+    }
+
+    #[test]
+    fn generated_camp_name_removes_only_the_leading_structured_mention_block() {
+        let content = vec![
+            Segment::Text {
+                text: " \n ".to_string(),
+            },
+            Segment::MemberMention {
+                agent_id: "agent_1".to_string(),
+            },
+            Segment::Text {
+                text: "  ".to_string(),
+            },
+            Segment::AllMembersMention,
+            Segment::Text {
+                text: "  讨论 ".to_string(),
+            },
+            Segment::MemberMention {
+                agent_id: "agent_2".to_string(),
+            },
+            Segment::Text {
+                text: " 的方案  ".to_string(),
+            },
+        ];
+        let title = generated_camp_name(&content, |agent_id| match agent_id {
+            "agent_1" => Some("开头队员".to_string()),
+            "agent_2" => Some("中间队员".to_string()),
+            _ => None,
+        })
+        .unwrap();
+        assert_eq!(title, "讨论 @中间队员 的方案");
+
+        let literal = vec![Segment::Text {
+            text: "  @手写名字 仍是标题文字  ".to_string(),
+        }];
+        assert_eq!(
+            generated_camp_name(&literal, |_| None).unwrap(),
+            "@手写名字 仍是标题文字"
+        );
+
+        let mention_only = vec![Segment::MemberMention {
+            agent_id: "agent_1".to_string(),
+        }];
+        assert_eq!(
+            generated_camp_name(&mention_only, |_| Some("开头队员".to_string())).unwrap(),
+            "未命名对话"
+        );
     }
 
     #[test]
@@ -5339,7 +5445,7 @@ mod tests {
                     TestCampConversationCommand {
                         project_path: directory.join("workspace").to_string_lossy().to_string(),
                         project_binding_kind: ProjectBindingKind::Directory,
-                        body: "@muwa 和 @luoke 请分别回答".to_string(),
+                        body: "请分别回答".to_string(),
                         address: TestCampMessageAddress::Explicit {
                             agent_ids: vec!["agent_2".to_string(), "agent_1".to_string()],
                         },
@@ -5358,17 +5464,21 @@ mod tests {
             2
         );
         let camp_id = result.result.payload["campId"].as_str().unwrap();
-        let (address_mode, addressed): (String, String) = database
+        let (title, address_mode, addressed): (String, String, String) = database
             .connection()
             .query_row(
                 r#"
-                SELECT address_mode, addressed_agent_ids_json
-                FROM camp_message WHERE camp_id = ?1
+                SELECT camp.title, camp_message.address_mode,
+                       camp_message.addressed_agent_ids_json
+                FROM camp_message
+                JOIN camp ON camp.id = camp_message.camp_id
+                WHERE camp_message.camp_id = ?1
                 "#,
                 [camp_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
+        assert_eq!(title, "请分别回答");
         assert_eq!(address_mode, "explicit");
         assert_eq!(
             serde_json::from_str::<Value>(&addressed).unwrap(),

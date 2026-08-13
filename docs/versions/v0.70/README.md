@@ -13,7 +13,8 @@ last_updated: 2026-08-13
 > 当前状态：实现、确定性门禁与 Codex 单 Runtime 行为 smoke 已通过；九 Runtime v8 正式矩阵尚未执行，
 > 因此版本保持 `in_progress`。Core-owned Current User Attention 的持久化、Notification、Delivery 与
 > 权限语义保持不变。同一 current snapshot 已把三项固定 `mattpocock/skills` 工程工作流纳入十项
-> official Skill inventory。
+> official Skill inventory，并完成自动生成 Camp 标题的起始 Structured Mention 去噪与本地预发布
+> 数据刷新。
 >
 > 前置版本：[v0.69 Planned Shutdown 线性化与硬期限修正](../v0.69/README.md)
 
@@ -30,6 +31,9 @@ Mention，也不从 reply、Task、父子 AgentRun、A2A 或历史消息继承 a
 Skill inventory 增量以 [ADR-0174](../../adr/0174-ten-skill-official-inventory-and-pinned-matt-pocock-imports.md)
 替代七项集合，离线引入 `diagnosing-bugs`、`tdd` 与 `writing-for-agents`；不改变 Skill Library、
 Runtime Group Assignment 或权限模型。
+
+Camp 标题增量以 [ADR-0173](../../adr/0173-leading-structured-mentions-excluded-from-generated-camp-names.md)
+收窄首条用户消息的自动命名投影；不改变 Message、Mention 寻址或侧栏操作。
 
 ## 交付范围
 
@@ -71,21 +75,32 @@ Runtime Group Assignment 或权限模型。
 - `code-review` 暂不原样导入，先围绕 Camp public A2A、独立双轴审查、solo fallback 与 authority
   boundary 设计 Rovai-native 版本。
 
+### 自动生成 Camp 标题去噪
+
+- Core 从首条用户 Structured Content 生成默认标题时，只移除开头连续的真实队员/所有队员 Mention block；
+- 首段正文之后的 Mention 与手写 `@文字` 继续作为普通标题文字，避免字符串规则误删；
+- 去除后为空时保存“未命名对话”并把 origin 收口为 `generated`，后续消息不再二次命名；
+- 侧栏 Camp 行保持单一会话导航目标，不增加 Mention 人物卡、复制或独立点击能力；
+- 本机四条 `generated` 历史 Camp 已按同一规则备份后刷新；预发布阶段不建立旧版本兼容或通用 Migration。
+
 完整字段与长期边界由 [Camp Message Send v5](../../contracts/camp-message-send-v5.md)、
 [Built-in Tool Transport v8](../../contracts/builtin-tool-transport-v8.md)、
 [Current User Attention v2](../../contracts/current-user-attention-v2.md)、[ADR-0165](../../adr/0165-core-owned-current-user-message-attention.md)
-与 [ADR-0166](../../adr/0166-progressive-built-in-cli-teaching.md) 拥有；实施证据见
+与 [ADR-0166](../../adr/0166-progressive-built-in-cli-teaching.md) 拥有；自动 Camp 标题规则由
+[ADR-0173](../../adr/0173-leading-structured-mentions-excluded-from-generated-camp-names.md)拥有；实施证据见
 [实施计划](implementation-plan.md)。
 
 ## 冻结边界
 
-- 不修改 Current User identity、Structured Content、Notification、read lifecycle、Renderer 或数据库；
+- User Attention 增量不修改 Current User identity、Structured Content、Notification、read lifecycle、
+  Renderer 或数据库；
 - 不新增字段、Migration、Agent recipient、Delivery、Task cardinality、A2A budget 或用户批准语义；
 - 不让 Core 分析正文价值、推断 Agent 角色、限制提醒频率或修正 Agent 提交的布尔值；
 - 不把完整 Send 决策树塞入 Charter，也不扩大 `cli-operations` 的普通单操作触发范围；
 - 不把文案变化冒充模型行为已经改善；真实 Runtime 行为必须由单独 smoke 证据确认。
 - 不动态扫描或导入上游仓库其他 Skill，不跟随浮动分支，不在构建/运行时联网更新固定副本；
 - 不让 Skill trigger、默认启用或 GitHub 来源成为诊断、修复、实现、测试 seam、文档写入或 Tool 权限。
+- Camp 标题不解析手写 `@文字`，不隐藏中后部 Mention，不新增侧栏 Mention 交互，也不引入通用数据迁移。
 
 ## 发布门槛
 
@@ -96,20 +111,22 @@ Runtime Group Assignment 或权限模型。
 5. 至少一个目标 Runtime 完成针对“普通最终回复/内部协作不再连续提醒用户”的真实行为 smoke；九 Runtime
    正式兼容矩阵在发布前补齐，未执行时不得声称 v8 real-model compatibility 已证明；
 6. Skill validator、Core manifest/provenance/risk tests、Renderer source presentation、十项 fresh-Core
-   inventory fixture 与文档治理全部通过。
+   inventory fixture 与文档治理全部通过；
+7. Camp 标题测试证明只移除开头真实 Structured Mention，保留中后部 Mention 与手写 `@文字`，并完成
+   本机历史数据库备份、四条标题刷新和安装版重启复核。
 
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.69 按已完成事实冻结为 historical；v0.70 成为唯一 current，并记录 User Attention 教学收窄范围与证据缺口 |
-| ADR | 已更新 | ADR-0165/0166 只增加当前 v5/v8 Contract References；新增 [ADR-0174](../../adr/0174-ten-skill-official-inventory-and-pinned-matt-pocock-imports.md)替代七项 official inventory |
+| ADR | 已更新 | ADR-0165/0166 只增加当前 v5/v8 Contract References；新增 [ADR-0173](../../adr/0173-leading-structured-mentions-excluded-from-generated-camp-names.md)细化自动标题投影；[ADR-0174](../../adr/0174-ten-skill-official-inventory-and-pinned-matt-pocock-imports.md)替代七项 official inventory |
 | Contracts | 已更新 | 新增 Camp Message Send v5 与 Built-in Tool Transport v8；v4/v7 转为 historical current-entry，不改 Current User Attention v2 |
 | Architecture | 已更新 | Built-in Tool Runtime 与 Public A2A 路由到 v5/v8，并记录十项 inventory 与固定 GitHub 来源的离线边界 |
-| UI | 已更新 | Current User Attention 的 Renderer 合同不变；Settings surface 与 UI 验收同步十项普通列表和四项 GitHub 来源 |
+| UI | 已更新 | Current User Attention 的 Renderer 合同不变；Settings surface 与 UI 验收同步十项普通列表和四项 GitHub 来源；[App Shell 与统一侧栏](../../ui/components/app-shell-navigation.md)明确自动标题投影与 Camp 行单一点击语义 |
 | Runtime Activity | 确认无需更新 | 不新增 operation、Activity identity、provider event 或 classifier；现有 send Evidence 形状不变 |
 | Runtime compatibility | 已更新 | 当前合同入口切换到 v8；Codex 聚焦行为 smoke 已通过，v7 九 Runtime 证据仍不能冒充 v8 全矩阵 |
-| Documentation routing | 已更新 | docs map、CURRENT、Contract/Architecture 索引和 current version pointer 路由到 v0.70 权威，Skills 主题入口切换到 ADR-0174 |
+| Documentation routing | 已更新 | docs map、CURRENT、Contract/Architecture 索引和 current version pointer 路由到 v0.70 权威；Camp/workspace 与 Skills 主题分别进入 ADR-0173/0174 |
 | Root README | 确认无需更新 | 项目定位、常青能力与支持 Runtime 集合不变；根 README 不记录版本局部教学修正 |
 
 ## References
@@ -117,7 +134,9 @@ Runtime Group Assignment 或权限模型。
 - [v0.70 实施与验收计划](implementation-plan.md)
 - [ADR-0165](../../adr/0165-core-owned-current-user-message-attention.md)
 - [ADR-0166](../../adr/0166-progressive-built-in-cli-teaching.md)
+- [ADR-0173](../../adr/0173-leading-structured-mentions-excluded-from-generated-camp-names.md)
 - [ADR-0174](../../adr/0174-ten-skill-official-inventory-and-pinned-matt-pocock-imports.md)
 - [Camp Message Send v5](../../contracts/camp-message-send-v5.md)
 - [Built-in Tool Transport v8](../../contracts/builtin-tool-transport-v8.md)
 - [Built-in Tool Runtime 架构](../../architecture/builtin-tool-runtime.md)
+- [App Shell 与统一侧栏](../../ui/components/app-shell-navigation.md)

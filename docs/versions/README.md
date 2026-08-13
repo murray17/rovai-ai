@@ -121,4 +121,4 @@ last_updated: 2026-08-13
 | v0.67 | `historical` | 已完成 Core-owned 当前用户消息注意力与渐进式 Built-in CLI 教学 | [v0.67/README.md](v0.67/README.md) |
 | v0.68 | `historical` | Opportunity-based Tool-use 测量、独立 LLM Judge 与 Team/Solo 配对协作价值协议 | [v0.68/README.md](v0.68/README.md) |
 | v0.69 | `historical` | Planned Shutdown launch/terminal 线性化、waiting 终态与硬期限正确性修正 | [v0.69/README.md](v0.69/README.md) |
-| v0.70 | `current` | 消息局部 User Attention 教学收窄、十项 official Skill inventory 与 Built-in Tool Transport v8 | [v0.70/README.md](v0.70/README.md) |
+| v0.70 | `current` | 消息局部 User Attention 教学收窄、Camp 标题去噪、十项 official Skill inventory 与 Built-in Tool Transport v8 | [v0.70/README.md](v0.70/README.md) |

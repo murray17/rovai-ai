@@ -20,6 +20,10 @@ last_updated: 2026-08-13
 Camp 行显示稳定标题和必要状态。三点菜单是置顶/取消置顶、重命名、复制会话 ID 和删除的唯一
 入口；复制只写稳定 Camp ID 原文。Camp 顶栏不得重复这些操作。
 
+自动生成的 Camp 标题不把开头连续的真实队员 Mention / 所有队员 Mention 当作标题内容；只保留
+首段正文开始后的文字，正文中后部的 Mention 和手写 `@文字` 继续作为普通标题文字。Camp 行不把
+任何 `@文字` 渲染为身份 Token、人物卡入口或独立点击目标，整行仍只负责打开会话。
+
 Project 的“移除项目”只从此 Mac 的导航移除并取消相关置顶，不删除工作目录、Camp 或历史。
 重新选择相同目录可恢复。Core 的访问 ledger 与运行中清理边界由架构/ADR 决定，Renderer 不用
 隐藏行状态推断目录已经删除。
@@ -60,6 +64,7 @@ Project/Camp 行、菜单、通知入口和设置返回均可键盘操作，Icon
 
 - [ADR-0074: Quick Chat 全栈切换](../../adr/0074-quick-chat-ubiquitous-language-and-binding-identity.md)
 - [ADR-0078: Navigation projection](../../adr/0078-navigation-projection-and-sidebar-wordmark-boundary.md)
+- [ADR-0173: Generated Camp names exclude leading Structured Mentions](../../adr/0173-leading-structured-mentions-excluded-from-generated-camp-names.md)
 - [v0.57 Project remove 实施计划](../../versions/v0.57/implementation-plan.md)
 - [v0.58 实施计划](../../versions/v0.58/implementation-plan.md)
 - [v0.61 实施计划](../../versions/v0.61/implementation-plan.md)

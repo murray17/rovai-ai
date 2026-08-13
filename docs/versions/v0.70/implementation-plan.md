@@ -59,12 +59,20 @@ last_updated: 2026-08-13
 - [x] Settings 来源单测、fresh-Core smoke fixture、UI acceptance 数量与术语同步四项固定 GitHub 来源；
 - [x] 完成 Skill validator、Rust/Renderer 聚焦回归、文档治理、生成 HISTORY 与 diff check。
 
+## Checkpoint 7：自动生成 Camp 标题去噪
+
+- [x] 标题生成改为读取权威 Structured Content，只移除开头连续的真实队员/所有队员 Mention；
+- [x] 中后部 Mention 与手写 `@文字` 保留为普通标题文字，侧栏不新增 Mention 点击或人物卡入口；
+- [x] 纯 Mention 首条消息稳定回退“未命名对话”并收口为 `generated`，不允许后续消息二次命名；
+- [x] 日常数据库完成一致性检查、备份与四条 `generated` 历史标题刷新，用户命名不变；
+- [x] 完成 Rust/文档最终门禁、macOS 打包安装与日常数据重启复核。
+
 ## 当前证据
 
 ### 确定性门禁
 
-- `cargo test -p rovai-core --lib`：403 passed；`cargo test -p rovai-core --bin rovai`：11 passed；
-- `cargo test --workspace`：403 lib + 11 CLI + 72 Core binary passed，3 个显式 real-Runtime manual tests ignored；
+- `cargo test -p rovai-core --lib`：404 passed；`cargo test -p rovai-core --bin rovai`：11 passed；
+- `cargo test --workspace`：404 lib + 11 CLI + 72 Core binary passed，3 个显式 real-Runtime manual tests ignored；
 - `cargo fmt --all -- --check` 与 `cargo clippy --workspace --all-targets -- -D warnings`：通过；
 - `pnpm test`：Docs 21、Vitest 47 files / 311 tests、Node 179 tests 全部通过；`pnpm typecheck`：通过；
 - `pnpm docs:test`、`pnpm docs:check`、`DOCS_BASE_REF=origin/main pnpm docs:check:ci`、
@@ -87,6 +95,25 @@ last_updated: 2026-08-13
   此模式明确不调用真实模型，`runtimes=[]`，不新增 Runtime compatibility 结论；
 - `pnpm docs:test` 为 `21/21`，`pnpm docs:check`、`DOCS_BASE_REF=origin/main pnpm docs:check:ci`、
   `pnpm docs:adr:generate -- --check` 与 `git diff --check` 通过，HISTORY 已包含 ADR-0174。
+
+### Camp 标题去噪
+
+- `cargo test -p rovai-core collaboration::tests` 为 `29/29`；单元边界覆盖多个开头 Mention、
+  中后部 Mention、手写 `@文字`、纯 Mention 回退和 80 Unicode scalar 上限，端到端路径证明显式
+  双成员寻址仍唤醒两名队员，而持久 Camp 标题只保留正文；
+- 日常数据库在 App 退出后通过 SQLite Backup API 保存为
+  `rovai.sqlite.pre-title-refresh-20260813-144339.backup`，备份和更新后数据库均通过 `integrity_check`；
+  四条 `name_origin = generated` 标题按同一 Structured Content 规则刷新，数量与 origin 不变，
+  `user` 标题未写入；
+- `pnpm package:mac` 生成 arm64 App；bundle、Core、CLI 与原生预热模块均通过严格 codesign，
+  Core/CLI Mach-O UUID 分别为 `ED25FC44-2996-3CAC-98B7-7CE649A329EE` 与
+  `DFBDF1F5-2289-30EB-8DEB-899411DF6B56`，和 release 构建一致；
+- packaged App 以独立临时 `userData` 启动到 Renderer/Core，临时数据库 `integrity_check = ok`，
+  受控退出报告 `deadlineExpired=false`、`forcedSignal=null`；随后安装到 `/Applications/Rovai-ai.app`，
+  旧 bundle 备份为 `/Applications/Rovai-ai.backup-20260813-154719.app`；
+- 日常安装版从 `/Applications` 启动，Renderer 与 Core 均使用
+  `/Users/murray.xue/Library/Application Support/Rovai-ai`；重启后的日常数据库一致性为 `ok`，
+  四条 generated 标题均保持去除开头 Mention 后的值。
 
 ### 真实模型行为
 

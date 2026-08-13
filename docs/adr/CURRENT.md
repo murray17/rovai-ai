@@ -46,6 +46,7 @@ Related: Camp content、Evidence 与 Renderer 可分别回到其 primary 主题�
 | [ADR-0128](0128-structured-draft-only-user-message-submission.md) | Structured Draft-Only User Camp Message Submission |
 | [ADR-0145](0145-core-owned-pending-camp-draft-activation.md) | Core-Owned Pending Camp Draft Activation |
 | [ADR-0169](0169-core-owned-directory-attachment-snapshots.md) | Core-Owned Directory Attachment Snapshots |
+| [ADR-0173](0173-leading-structured-mentions-excluded-from-generated-camp-names.md) | Leading Structured Mentions Excluded from Generated Camp Names |
 <!-- adr-current-primary:end -->
 
 Related: Session bootstrap、public delivery 与 product surface 仍从各自 primary 主题进入。

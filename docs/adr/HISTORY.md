@@ -184,5 +184,6 @@ generated_from: docs/adr-front-matter
 | [ADR-0170](0170-current-run-committed-self-write-exact-read.md) | Current-Run Committed Self-Write Exact Read | `accepted` | `cross-version` | [v0.67](../versions/v0.67/README.md) | — |
 | [ADR-0171](0171-opportunity-based-tool-interaction-measurement.md) | Opportunity-Based Tool Interaction Measurement and Independent Tool-Use Judge | `accepted` | `cross-version` | [v0.68](../versions/v0.68/README.md) | — |
 | [ADR-0172](0172-paired-collaboration-value-and-outcome-conditioned-efficiency.md) | Paired Collaboration Value and Outcome-Conditioned Efficiency | `accepted` | `cross-version` | [v0.68](../versions/v0.68/README.md) | — |
+| [ADR-0173](0173-leading-structured-mentions-excluded-from-generated-camp-names.md) | Leading Structured Mentions Excluded from Generated Camp Names | `accepted` | `cross-version` | [v0.70](../versions/v0.70/README.md) | — |
 | [ADR-0174](0174-ten-skill-official-inventory-and-pinned-matt-pocock-imports.md) | Ten-Skill Official Inventory and Pinned Matt Pocock Imports | `accepted` | `cross-version` | [v0.70](../versions/v0.70/README.md) | — |
 <!-- adr-history:end -->
