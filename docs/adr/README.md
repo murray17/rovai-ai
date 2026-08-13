@@ -1,7 +1,7 @@
 ---
 document_type: adr-index
 authority: architecture-decisions
-last_updated: 2026-08-13
+last_updated: 2026-08-14
 ---
 
 # Rovai-ai Architecture Decision Records
@@ -285,8 +285,9 @@ pnpm docs:adr:generate -- --check
 | [ADR-0166](0166-progressive-built-in-cli-teaching.md) | Progressive Built-In CLI Teaching | `accepted` | [v0.65](../versions/v0.65/README.md) | 冻结三层 CLI 教学、窄触发 `cli-operations`、精确 help/no-locator recovery 与 Memory 无损拆分 |
 | [ADR-0167](0167-seven-skill-official-inventory.md) | Seven-Skill Official Inventory | `superseded` | [v0.65](../versions/v0.65/README.md) | ← ADR-0159；→ ADR-0174；官方集合曾冻结为七项并继承 pinned `tasteful-ui` |
 | [ADR-0174](0174-ten-skill-official-inventory-and-pinned-matt-pocock-imports.md) | Ten-Skill Official Inventory and Pinned Matt Pocock Imports | `superseded` | [v0.70](../versions/v0.70/README.md) | ← ADR-0167；→ ADR-0176；官方集合曾冻结为十项并纳入三项 pinned `mattpocock/skills` 导入 |
-| [ADR-0176](0176-eleven-skill-official-inventory-and-system-required-operations.md) | Eleven-Skill Official Inventory and System-Required Operations | `accepted` | [v0.71](../versions/v0.71/README.md) | ← ADR-0174；冻结十一项 official Skill、Rovai Campfire 与两项 system-required operational Skill |
+| [ADR-0176](0176-eleven-skill-official-inventory-and-system-required-operations.md) | Eleven-Skill Official Inventory and System-Required Operations | `superseded` | [v0.71](../versions/v0.71/README.md) | ← ADR-0174；→ ADR-0181；官方集合曾冻结为十一项，并引入 Rovai Campfire 与两项 system-required operational Skill |
 | [ADR-0177](0177-controlled-shutdown-fences-product-execution.md) | Controlled Shutdown Fences Product Execution Without Claiming Runtime Outcome | `accepted` | [v0.71](../versions/v0.71/README.md) | 局部替代 ADR-0168 的非终态 blocker 规则；保留可靠 Runtime terminal 权威并增加 durable product fence |
 | [ADR-0178](0178-best-effort-online-memory-capture-and-actor-bounded-mutation.md) | Best-Effort Online Memory Capture and Actor-Bounded Agent Mutation | `accepted` | [v0.73](../versions/v0.73/README.md) | ← ADR-0069；冻结 best-effort online capture、Agent 自身 Companion/有向 Relationship 与 Hearth user review 权威 |
 | [ADR-0179](0179-normalized-memory-store-v3-with-isolated-hearth-review.md) | Normalized Memory Store v3 with Isolated Hearth Review | `accepted` | [v0.73](../versions/v0.73/README.md) | ← ADR-0070；冻结独立 Review Item、terminal body clearing、publication reconciliation 与 Forget 闭包 |
 | [ADR-0180](0180-single-agent-memory-write-command.md) | Single Agent Memory Write Command with Outcome-Discriminated Output | `accepted` | [v0.73](../versions/v0.73/README.md) | 局部替代 ADR-0124/ADR-0135 的 Memory command/output 条款；统一 write 不合并领域聚合 |
+| [ADR-0181](0181-twelve-skill-official-inventory-and-runtime-aligned-collaboration.md) | Twelve-Skill Official Inventory and Runtime-Aligned Collaboration | `accepted` | [v0.74](../versions/v0.74/README.md) | ← ADR-0176；冻结十二项 official Skill、Runtime 对齐协作消息拓扑与 Review Duo 输入边界 |

@@ -3,7 +3,7 @@ document_type: architecture
 architecture: skill-projection-reconciliation
 authority: skill-projection-access-and-reconciliation-boundaries
 status: accepted
-last_updated: 2026-08-13
+last_updated: 2026-08-14
 ---
 
 # Skill Projection Reconciliation Architecture
@@ -14,7 +14,7 @@ SkillExposureSnapshot 的长期组件边界。决策理由见
 [ADR-0158](../adr/0158-default-all-runtime-delivery-for-managed-skills.md)和
 [ADR-0161](../adr/0161-event-driven-root-scoped-skill-projection-reconciliation.md)。当前 official
 inventory 与 system-required policy 见
-[ADR-0176](../adr/0176-eleven-skill-official-inventory-and-system-required-operations.md)。
+[ADR-0181](../adr/0181-twelve-skill-official-inventory-and-runtime-aligned-collaboration.md)。
 
 ## 三层状态
 

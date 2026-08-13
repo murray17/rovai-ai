@@ -1,7 +1,7 @@
 ---
 document_type: documentation-index
 authority: documentation-routing
-last_updated: 2026-08-13
+last_updated: 2026-08-14
 ---
 
 # Rovai-ai 文档导航
@@ -21,7 +21,7 @@ last_updated: 2026-08-13
 | 修改 Memory 在线捕获、Agent mutation、Hearth Review、候选清除、Forget 闭包或审核并发 | [Online Memory Capture 架构](architecture/online-memory-capture.md)、[Memory Capture v1](contracts/memory-capture-v1.md)、[ADR-0178](adr/0178-best-effort-online-memory-capture-and-actor-bounded-mutation.md)及[ADR-0179](adr/0179-normalized-memory-store-v3-with-isolated-hearth-review.md) |
 | 修改通知来源、Episode 聚合、未读/清除、增量、浮层设置或类型化导航 | [Notification Episode v3](contracts/notification-episode-v3.md)、[ADR-0175](adr/0175-core-owned-notification-occurrence-episode-and-change-journal.md)及[Notification Episode 架构](architecture/notification-episodes.md) |
 | 修改 Camp 文件/目录附件、Composer 拖放、快照限制或 Runtime 附件路径 | [Camp Attachment v1](contracts/camp-attachment-v1.md)、[ADR-0169](adr/0169-core-owned-directory-attachment-snapshots.md)及[会话区拖放 UI](ui/components/conversation-drop-zone.md) |
-| 修改 CLI 教学分层、`cli-operations` 触发/reference，或 official Skill 精确集合、固定 GitHub 来源与管理策略 | [ADR-0166](adr/0166-progressive-built-in-cli-teaching.md)、[ADR-0176](adr/0176-eleven-skill-official-inventory-and-system-required-operations.md)及[Built-in Tool Runtime 架构](architecture/builtin-tool-runtime.md) |
+| 修改 CLI 教学分层、协作 Skill 消息拓扑、`cli-operations` 触发/reference，或 official Skill 精确集合、固定 GitHub 来源与管理策略 | [ADR-0163](adr/0163-explicit-caller-return-and-core-managed-reply-reference.md)、[ADR-0166](adr/0166-progressive-built-in-cli-teaching.md)、[ADR-0181](adr/0181-twelve-skill-official-inventory-and-runtime-aligned-collaboration.md)及[Built-in Tool Runtime 架构](architecture/builtin-tool-runtime.md) |
 | 修改 Task 状态、字段、可见性、权限、列表、CampMember 收口、self-active awareness 或 linked execution 准入 | [Durable Task v3](contracts/durable-task-v3.md)、[ADR-0152](adr/0152-lead-owned-task-responsibility-and-self-active-task-awareness.md)、[ADR-0153](adr/0153-explicit-empty-self-active-task-snapshot.md)及[ADR-0137](adr/0137-one-time-task-linked-responsibility-admission.md) |
 | 修改 AgentRun 公共消息/Task 选择、正文/历史预算、引用链或投递 Profile | [ADR-0132](adr/0132-public-reference-context-closure-profile-v2.md)、[ADR-0152](adr/0152-lead-owned-task-responsibility-and-self-active-task-awareness.md)、[Context Delivery Profile v3](contracts/context-delivery-profile-v3.md)及[Message Delivery v2](contracts/message-delivery-v2.md) |
 | 修改模型可见上下文字段/JSON、截断 continuation、遗漏 navigation hint、ContextManifest Evidence、Runtime Input Delivery Evidence 或 Formatter/Manifest/Profile 版本边界 | [ADR-0147](adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)、[ADR-0149](adr/0149-bounded-whole-history-omission-evidence.md)、[ADR-0152](adr/0152-lead-owned-task-responsibility-and-self-active-task-awareness.md)、[ADR-0153](adr/0153-explicit-empty-self-active-task-snapshot.md)、[ContextManifest Evidence v12](contracts/context-manifest-evidence-v12.md)及当前版本实施计划 |

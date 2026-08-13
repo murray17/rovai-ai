@@ -1,0 +1,22 @@
+review-duo is original Rovai work.
+
+Design inspiration:
+- Repository: mattpocock/skills
+- Path: skills/engineering/code-review/SKILL.md
+- Revision: 8b78b531ab965735c5dc74f6f7a219e1e37326df
+- Upstream license: MIT
+- Copyright: 2026 Matt Pocock
+
+Retained design principles:
+- review a fixed comparison point;
+- keep Standards and Spec as independent axes;
+- report both axes separately without cross-axis merging or reranking.
+
+Rovai-specific original work includes the Camp-native public A2A workflow,
+fixed-partner topology, snapshot contract, natural public messages,
+public request/reply collaboration, event-driven continuation, fallback rules,
+finding schema, progressive disclosure, and official Skill packaging.
+
+No upstream runtime file is vendored by this directory. If future changes copy a
+substantial portion of upstream text or code, preserve the applicable MIT license
+and copyright notice with that copied material.

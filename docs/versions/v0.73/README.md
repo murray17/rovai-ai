@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.73
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: in_progress
@@ -15,6 +15,8 @@ last_updated: 2026-08-14
 > 真实模型矩阵与完整隔离 App 视觉/交互矩阵仍待验收，因此尚不能把 v0.73 声明为 complete。
 >
 > 前置版本：[v0.72 Camp 沉浸世界地图会话视图](../v0.72/README.md)
+>
+> 后续版本：[v0.74 Runtime 对齐的协作 Skill 与双轴代码评审](../v0.74/README.md)
 
 ## 版本目标
 

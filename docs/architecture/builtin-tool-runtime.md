@@ -3,7 +3,7 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-08-13
+last_updated: 2026-08-14
 ---
 
 # Built-in Tool Runtime Architecture
@@ -38,9 +38,9 @@ Send 的显式 caller return 与 Core-managed reply reference 见
 [ADR-0163](../adr/0163-explicit-caller-return-and-core-managed-reply-reference.md)。
 Current User Attention 与 progressive CLI teaching 分别见
 [ADR-0165](../adr/0165-core-owned-current-user-message-attention.md)和
-[ADR-0166](../adr/0166-progressive-built-in-cli-teaching.md)；完整十一项 official Skill inventory、
-Campfire、四项固定 GitHub 来源与 management policy 见
-[ADR-0176](../adr/0176-eleven-skill-official-inventory-and-system-required-operations.md)。
+[ADR-0166](../adr/0166-progressive-built-in-cli-teaching.md)；完整十二项 official Skill inventory、
+Runtime 对齐的 Camp 协作 Skill、四项固定 GitHub 来源与 management policy 见
+[ADR-0181](../adr/0181-twelve-skill-official-inventory-and-runtime-aligned-collaboration.md)。
 Memory 单命令的局部 Transport 决策见
 [ADR-0180](../adr/0180-single-agent-memory-write-command.md)，独立 Hearth Review 与 actor-bounded mutation
 组合见 [Online Memory Capture](online-memory-capture.md)。
@@ -311,6 +311,14 @@ send/`--to-user`/list/get/search/read 不要求加载 `cli-operations`。
 `campfire` 是无外部上游的 Rovai original official Skill，并使用 ordinary `user_managed` delivery。
 它仅以公开 A2A Camp Messages 组织 2–3 位成员的独立开场、有限定向回应与 Default Lead 终止纪要；
 自然阶段标题不是 Core protocol，`### 篝火纪要` 不触发续跑，也不产生 Task、Memory、ADR 或实施副作用。
+
+`grill-duo`、`grill-duo-with-docs` 与 `review-duo` 同样使用 ordinary `user_managed` delivery。自然标题只
+提供 discovery 与公屏阅读线索；Skill 进入后使用可信 Current Input sender、显式 Agent recipient 和
+reference closure 中的真实 reply relation。Agent 不提供或选择 reply ID，Core 始终把新消息链接到当前
+AgentRun trigger。Review Duo 因而把启动标记、Standards 请求与 Spec 结果作为初始 user trigger 的
+sibling messages，搭档结果回复 Standards 请求，最终报告回复触发 Lead continuation 的搭档结果。
+`review-duo` 是带原则级 MIT attribution、但无 vendored upstream 的 Rovai original Skill；完整 duo v1
+只接受双方可解析的 Git-object-backed SHA 范围或用户已提供的稳定共享 patch/attachment。
 
 ### 四层 Context 权威
 

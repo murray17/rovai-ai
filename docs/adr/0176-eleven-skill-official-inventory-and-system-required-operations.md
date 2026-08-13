@@ -2,13 +2,13 @@
 document_type: adr
 id: ADR-0176
 title: Eleven-Skill Official Inventory and System-Required Operations
-status: accepted
+status: superseded
 date: 2026-08-13
 decision_scope: cross-version
 source_version: v0.71
 supersedes:
   - ADR-0174
-superseded_by: null
+superseded_by: ADR-0181
 ---
 
 # ADR-0176: Eleven-Skill Official Inventory and System-Required Operations

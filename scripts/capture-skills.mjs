@@ -82,15 +82,15 @@ try {
   await waitForExpression(cdp, `Boolean(document.querySelector('.settings-sidebar-menu'))`, 5_000)
   await openSection(cdp, 'Skill')
   await waitForExpression(cdp, `Boolean(document.querySelector('.skill-settings')) && (
-    document.querySelectorAll('.skill-card').length === 9
+    document.querySelectorAll('.skill-card').length === 10
       || Boolean(document.querySelector('.skill-page-error'))
   )`, 30_000)
   const initialSkillState = await evaluate(cdp, `({
     cardCount: document.querySelectorAll('.skill-card').length,
     error: document.querySelector('.skill-page-error')?.textContent?.trim() ?? null
   })`)
-  if (initialSkillState.cardCount !== 9 || initialSkillState.error) {
-    throw new Error(`Skill settings did not load the nine configurable official Skills: ${JSON.stringify(initialSkillState)}`)
+  if (initialSkillState.cardCount !== 10 || initialSkillState.error) {
+    throw new Error(`Skill settings did not load the ten configurable official Skills: ${JSON.stringify(initialSkillState)}`)
   }
 
   await waitForEvaluation(cdp, `(async () => (

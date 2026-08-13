@@ -1,7 +1,7 @@
 ---
 document_type: architecture-index
 authority: long-lived-architecture-routing
-last_updated: 2026-08-13
+last_updated: 2026-08-14
 ---
 
 # 长期系统架构
@@ -15,7 +15,7 @@ last_updated: 2026-08-13
 | [Benchmark Protocol](benchmark-protocol.md) | Core 外的 Adapter/Profile/Execution/Evaluation/Reporting、Process/Outcome/Tool-Use Judge、Tool Interaction、typed Resource 与 paired counterfactual 模块 |
 | [Diagnostics Center](diagnostics-center.md) | Core 严格只读诊断组装、Skill/MCP 审计、Runtime 缓存事实、Renderer 单项修复复检、Electron v5 导出与 Startup Recovery 边界 |
 | [AgentRun Recovery](agent-run-recovery.md) | AgentRun、Native Session、Runtime Input Delivery 与 Native Turn 分离，accepted-input blocker、Scheduler fence、用户/预算安全收敛与未来 reconcile capability |
-| [Built-in Tool Runtime](builtin-tool-runtime.md) | Agent CLI v9、Core Router、Runtime Fleet、精确 help、Charter/official Skill 渐进教学、peer routing Dynamic Context、ContextManifest/ACK 与外部 MCP 的关系 |
+| [Built-in Tool Runtime](builtin-tool-runtime.md) | Agent CLI v9、Core Router、Runtime Fleet、精确 help、十二项 official Skill 与 Runtime 对齐协作消息、peer routing Dynamic Context、ContextManifest/ACK 与外部 MCP 的关系 |
 | [Native Session Bootstrap Redelivery](native-session-bootstrap-redelivery.md) | compaction detector、Session Observer、Bootstrap/Member Identity 重投递、Redelivery v2、Dynamic Context 与 accepted-input 水位 |
 | [Notification Episode](notification-episodes.md) | Occurrence/Disposition/Episode/Change Journal 原子投影、五方法 Core 深模块、read hydration、并发边界与保留 |
 | [Online Memory Capture](online-memory-capture.md) | best-effort Skill discovery、Agent Memory Facade、direct mutation、隔离 Hearth Review、formal publication、候选清除与 Forget 闭包 |

@@ -139,6 +139,25 @@ const CONTEXT_FORMAT_REFERENCE: &str =
     include_str!("../../../skills/grill-duo-with-docs/references/context-format.md");
 const ADR_FORMAT_REFERENCE: &str =
     include_str!("../../../skills/grill-duo-with-docs/references/adr-format.md");
+const REVIEW_DUO_RULES: &str = include_str!("../../../skills/review-duo/SKILL.md");
+const REVIEW_DUO_NOTICE: &str = include_str!("../../../skills/review-duo/NOTICE");
+const REVIEW_DUO_OPENAI: &str = include_str!("../../../skills/review-duo/agents/openai.yaml");
+const REVIEW_DUO_ACCEPTANCE_REFERENCE: &str =
+    include_str!("../../../skills/review-duo/references/acceptance.md");
+const REVIEW_DUO_FALLBACKS_REFERENCE: &str =
+    include_str!("../../../skills/review-duo/references/fallbacks.md");
+const REVIEW_DUO_FINDINGS_REFERENCE: &str =
+    include_str!("../../../skills/review-duo/references/findings.md");
+const REVIEW_DUO_LEAD_REFERENCE: &str =
+    include_str!("../../../skills/review-duo/references/lead.md");
+const REVIEW_DUO_MESSAGES_REFERENCE: &str =
+    include_str!("../../../skills/review-duo/references/messages-and-replies.md");
+const REVIEW_DUO_SNAPSHOT_REFERENCE: &str =
+    include_str!("../../../skills/review-duo/references/snapshot.md");
+const REVIEW_DUO_SPEC_REVIEWER_REFERENCE: &str =
+    include_str!("../../../skills/review-duo/references/spec-reviewer.md");
+const REVIEW_DUO_STANDARDS_REVIEWER_REFERENCE: &str =
+    include_str!("../../../skills/review-duo/references/standards-reviewer.md");
 include!(concat!(env!("OUT_DIR"), "/third_party_bundled_files.rs"));
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -516,6 +535,48 @@ const GRILL_DUO_WITH_DOCS_FILES: &[(&str, &str, u32)] = &[
     ("references/adr-format.md", ADR_FORMAT_REFERENCE, 0o644),
 ];
 
+const REVIEW_DUO_FILES: &[(&str, &str, u32)] = &[
+    ("SKILL.md", REVIEW_DUO_RULES, 0o644),
+    ("NOTICE", REVIEW_DUO_NOTICE, 0o644),
+    ("agents/openai.yaml", REVIEW_DUO_OPENAI, 0o644),
+    (
+        "references/acceptance.md",
+        REVIEW_DUO_ACCEPTANCE_REFERENCE,
+        0o644,
+    ),
+    (
+        "references/fallbacks.md",
+        REVIEW_DUO_FALLBACKS_REFERENCE,
+        0o644,
+    ),
+    (
+        "references/findings.md",
+        REVIEW_DUO_FINDINGS_REFERENCE,
+        0o644,
+    ),
+    ("references/lead.md", REVIEW_DUO_LEAD_REFERENCE, 0o644),
+    (
+        "references/messages-and-replies.md",
+        REVIEW_DUO_MESSAGES_REFERENCE,
+        0o644,
+    ),
+    (
+        "references/snapshot.md",
+        REVIEW_DUO_SNAPSHOT_REFERENCE,
+        0o644,
+    ),
+    (
+        "references/spec-reviewer.md",
+        REVIEW_DUO_SPEC_REVIEWER_REFERENCE,
+        0o644,
+    ),
+    (
+        "references/standards-reviewer.md",
+        REVIEW_DUO_STANDARDS_REVIEWER_REFERENCE,
+        0o644,
+    ),
+];
+
 const BUNDLED_SKILLS: &[BundledDefinition] = &[
     BundledDefinition {
         name: "analyze-agent-codebase",
@@ -569,6 +630,13 @@ const BUNDLED_SKILLS: &[BundledDefinition] = &[
     BundledDefinition {
         name: "grill-duo-with-docs",
         files: GRILL_DUO_WITH_DOCS_FILES,
+        upstream_repository: None,
+        upstream_revision: None,
+        management_policy: SkillManagementPolicy::UserManaged,
+    },
+    BundledDefinition {
+        name: "review-duo",
+        files: REVIEW_DUO_FILES,
         upstream_repository: None,
         upstream_revision: None,
         management_policy: SkillManagementPolicy::UserManaged,
@@ -3236,6 +3304,7 @@ mod tests {
                 "grill-duo",
                 "grill-duo-with-docs",
                 "memory-stewardship",
+                "review-duo",
                 "tasteful-ui",
                 "tdd",
                 "worktree",
@@ -3315,6 +3384,8 @@ mod tests {
             "`### 篝火纪要` 表示讨论已经结束",
             "由 Campfire 主动发起的短澄清，整场最多一次",
             "默认使用一条共享邀请",
+            "不选择任意旧消息作为 reply target",
+            "不带 Agent 收件人的 `rovai send`",
         ] {
             assert!(
                 campfire_rules.contains(required),
@@ -3377,8 +3448,9 @@ mod tests {
             "### 双人追问 · 搭档建议",
             "同一场双人追问一次只推进一个尚未解决的决策点",
             "标题只提示阶段，不证明身份",
-            "迟到的旧建议只作为补充信息",
-            "rovai send",
+            "旧邀请的迟到回复只作为补充",
+            "rovai send --to <固定搭档 Agent ID>",
+            "Core 会自动让建议直接回复这条邀请",
         ] {
             assert!(
                 grill_duo_rules.contains(required),
@@ -3416,9 +3488,9 @@ mod tests {
         for required in [
             "### 双人追问与文档 · 复核邀请",
             "### 双人追问与文档 · 搭档建议",
-            "只读取\n  [双人追问协议]",
+            "只读取 [双人追问协议]",
             "不修改项目文档",
-            "收到文档版建议后始终恢复本 Skill 的邀请者分支",
+            "可信发送者和当前触发消息的直接回复关系",
         ] {
             assert!(
                 grill_duo_with_docs_rules.contains(required),
@@ -3433,10 +3505,72 @@ mod tests {
         .unwrap();
         assert!(docs_duo_protocol.contains("### 双人追问与文档 · 复核邀请"));
         assert!(docs_duo_protocol.contains("### 双人追问与文档 · 搭档建议"));
-        assert!(docs_duo_protocol.contains("当前固定搭档通过受信 Runtime 身份"));
+        assert!(docs_duo_protocol.contains("Runtime 可信发送者是当前固定搭档"));
+        assert!(docs_duo_protocol.contains("Core 自动建立对邀请的直接回复关系"));
         for retired_marker in &retired_duo_markers {
             assert!(!docs_duo_protocol.contains(retired_marker));
         }
+        let review_duo = skills
+            .iter()
+            .find(|skill| skill.name == "review-duo")
+            .unwrap();
+        assert_eq!(review_duo.current_revision.file_count, 11);
+        assert!(
+            review_duo
+                .current_revision
+                .source_metadata
+                .get("upstream")
+                .is_none()
+        );
+        let review_duo_content =
+            service.revision_content_path(&review_duo.id, &review_duo.current_revision.id);
+        for relative in [
+            "NOTICE",
+            "references/acceptance.md",
+            "references/fallbacks.md",
+            "references/findings.md",
+            "references/lead.md",
+            "references/messages-and-replies.md",
+            "references/snapshot.md",
+            "references/spec-reviewer.md",
+            "references/standards-reviewer.md",
+        ] {
+            assert!(review_duo_content.join(relative).is_file());
+        }
+        let review_duo_rules = fs::read_to_string(review_duo_content.join("SKILL.md")).unwrap();
+        for required in [
+            "普通单人 code review 不自动触发",
+            "启动消息是用户可读的评审标记",
+            "最终报告因此直接回复该结果",
+            "Agent 不能选择任意 reply target",
+            "Skill-only v1 的完整 duo 只接受两类输入",
+            "同一位 Review Lead 在同一个 Camp 中同一时间只主动推进一场",
+        ] {
+            assert!(
+                review_duo_rules.contains(required),
+                "missing review-duo rule: {required}"
+            );
+        }
+        assert!(!review_duo_rules.contains("workflow_session_id"));
+        assert!(!review_duo_rules.contains("[REVIEW_DUO_"));
+        let review_duo_messages = fs::read_to_string(
+            review_duo_content
+                .join("references")
+                .join("messages-and-replies.md"),
+        )
+        .unwrap();
+        assert!(review_duo_messages.contains(
+            "Lead 初始 Run 中的启动、Standards 请求、Spec 结果和等待状态都是用户触发消息的子消息"
+        ));
+        assert!(review_duo_messages.contains("rovai send --to <固定搭档 Agent ID>"));
+        assert!(review_duo_messages.contains("这条消息自动回复当前 Standards 结果"));
+        let review_duo_standards = fs::read_to_string(
+            review_duo_content
+                .join("references")
+                .join("standards-reviewer.md"),
+        )
+        .unwrap();
+        assert!(review_duo_standards.contains("rovai send --to <请求发送者 Agent ID>"));
         let tasteful_ui = skills
             .iter()
             .find(|skill| skill.name == "tasteful-ui")
@@ -3773,7 +3907,7 @@ mod tests {
         service.install_bundled_skills(&mut database).unwrap();
 
         let skills = service.list(&database).unwrap();
-        assert_eq!(skills.len(), 11);
+        assert_eq!(skills.len(), 12);
         assert!(skills.iter().all(|skill| !skill.name.starts_with("rovai-")));
         let restored = skills
             .iter()

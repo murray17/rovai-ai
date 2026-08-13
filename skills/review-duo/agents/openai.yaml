@@ -1,0 +1,4 @@
+interface:
+  display_name: "双轴代码评审"
+  short_description: "由当前队员与固定 Camp 搭档分别评审 Standards 和 Spec"
+  default_prompt: "使用 $review-duo 对这份冻结代码差异做只读双轴评审：固定搭档检查 Standards（仓库规范与代码质量），当前队员检查 Spec（需求符合度），最后按轴独立报告，不跨轴合并或重排。"
