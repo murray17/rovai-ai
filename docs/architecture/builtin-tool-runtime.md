@@ -9,11 +9,11 @@ last_updated: 2026-08-13
 # Built-in Tool Runtime Architecture
 
 本文件说明 Rovai built-in operations 的长期组件结构。当前字段与版本以
-[Built-in Tool Transport v8](../contracts/builtin-tool-transport-v8.md)、
+[Built-in Tool Transport v9](../contracts/builtin-tool-transport-v9.md)、
 [Durable Task v3](../contracts/durable-task-v3.md) 和
 [Camp Message Send v5](../contracts/camp-message-send-v5.md)、
 [Current User Attention v3](../contracts/current-user-attention-v3.md)与
-[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md) 为准；v6 及更早 Transport 只保留
+[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md) 为准；v8 及更早 Transport 只保留
 historical 语义。决策理由见
 [ADR-0124](../adr/0124-cli-only-transport-for-rovai-built-in-operations.md)、
 [ADR-0135](../adr/0135-compact-agent-output-over-canonical-built-in-tool-envelope.md)、
@@ -41,6 +41,9 @@ Current User Attention 与 progressive CLI teaching 分别见
 [ADR-0166](../adr/0166-progressive-built-in-cli-teaching.md)；完整十一项 official Skill inventory、
 Campfire、四项固定 GitHub 来源与 management policy 见
 [ADR-0176](../adr/0176-eleven-skill-official-inventory-and-system-required-operations.md)。
+Memory 单命令的局部 Transport 决策见
+[ADR-0180](../adr/0180-single-agent-memory-write-command.md)，独立 Hearth Review 与 actor-bounded mutation
+组合见 [Online Memory Capture](online-memory-capture.md)。
 
 ## 总体路径
 
@@ -93,14 +96,14 @@ Core 只维护一份 catalog。它服务 IPC 校验、合同测试、Qualificati
 identity 不构成 Agent discovery 协议。
 
 Agent Runtime 没有 `rovai tool list`、`rovai tool describe`、隐藏 discovery、`tool invoke` 或
-`tool call`。Agent 只使用十三个固定业务命令：
+`tool call`。Agent 只使用十二个固定业务命令：
 
 ```text
 rovai send
 rovai task create|get|update|list
 rovai camp list|search|read
 rovai history search
-rovai memory search|read|write|propose-hearth
+rovai memory search|read|write
 ```
 
 Agent 先用 `rovai --help` 选择 operation，再用该 operation 的精确 `--help`。根 `send` 使用
@@ -125,8 +128,8 @@ Agent 先用 `rovai --help` 选择 operation，再用该 operation 的精确 `--
 | `team.get_task` | 完整 `TaskDetail` |
 | `team.update_task` | `{taskId, title, status, assigneeAgentId, version, changed, availableActions}` |
 | `team.list_tasks` | 紧凑 `TaskListPage` |
-| `memory.write` | `{memoryId, revisionId}` |
-| 其余七项 | 去除 Envelope wrapper 后的 canonical result |
+| `memory.write` | `{outcome: effective, memoryId, revisionId} \| {outcome: review_pending, reviewItemId}` |
+| 其余六项 | 去除 Envelope wrapper 后的 canonical result |
 
 Task service 在 mutation 事务中形成完整 exact-version `TaskDetail` canonical result，并由
 Command Gateway 持久化后才交给 Transport projection。CLI 不能在 commit 后重新读取 live Task，
@@ -329,9 +332,9 @@ failure 或 `delivery_unknown` 都不能替代它。各层不得通过复制完�
 
 Bootstrap v3 按固定顺序组装 Session Charter、`MEMBER_IDENTITY` 和 Memory Entrypoint。Charter
 文案变化本身不参与 Native Binding compatibility digest，也不主动轮换全部既有 Native Session；既有
-Run 与 Bootstrap Evidence 不回写，新建 Native Session 使用当前内置 Charter。Built-in Transport v8
+Run 与 Bootstrap Evidence 不回写，新建 Native Session 使用当前内置 Charter。Built-in Transport v9
 另外改变 catalog digest；Antigravity 的既有 binding compatibility 已包含 Built-in contract version 与
-catalog digest，因此会建立 replacement Session。其他 Runtime 的续接进程直接使用当前 v8 CLI、精确 help
+catalog digest，因此会建立 replacement Session。其他 Runtime 的续接进程直接使用当前 v9 CLI、精确 help
 与 official Skill Revision，不因 Charter copy 单独丢弃 Native Session。
 `MEMBER_IDENTITY` 是该 Native Session 唯一的 self identity，包含最新已提交的完整六字段；它只在
 既有 eligible Bootstrap boundary 原子读取，不进入 AgentRun Dynamic Context，不持久化 Identity

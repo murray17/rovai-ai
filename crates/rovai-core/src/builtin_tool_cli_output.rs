@@ -28,25 +28,32 @@ pub fn agent_output_schema(operation: &str) -> Result<Value> {
             }
         })),
         "memory.write" => Ok(json!({
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["memoryId", "revisionId"],
-            "properties": {
-                "memoryId": {"type": "string"},
-                "revisionId": {"type": "string"}
-            }
+            "oneOf": [
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["outcome", "memoryId", "revisionId"],
+                    "properties": {
+                        "outcome": {"const": "effective"},
+                        "memoryId": {"type": "string"},
+                        "revisionId": {"type": "string"}
+                    }
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["outcome", "reviewItemId"],
+                    "properties": {
+                        "outcome": {"const": "review_pending"},
+                        "reviewItemId": {"type": "string"}
+                    }
+                }
+            ]
         })),
         "team.create_task" => Ok(task_mutation_agent_schema(false)),
         "team.update_task" => Ok(task_mutation_agent_schema(true)),
-        "team.get_task"
-        | "team.list_tasks"
-        | "camp.list"
-        | "camp.search"
-        | "camp.read"
-        | "history.search"
-        | "memory.search"
-        | "memory.read"
-        | "memory.propose_hearth" => builtin_tool_definitions()
+        "team.get_task" | "team.list_tasks" | "camp.list" | "camp.search" | "camp.read"
+        | "history.search" | "memory.search" | "memory.read" => builtin_tool_definitions()
             .into_iter()
             .find(|definition| definition["name"].as_str() == Some(operation))
             .map(|definition| definition["outputSchema"].clone())
@@ -87,25 +94,28 @@ fn project_success(operation: &str, result: &Value) -> Result<Value> {
                 .get("effectiveRecipients")
                 .context("camp.message.send result has no effectiveRecipients")?,
         })),
-        "memory.write" => Ok(json!({
-            "memoryId": object
-                .get("memoryId")
-                .context("memory.write result has no memoryId")?,
-            "revisionId": object
-                .get("revisionId")
-                .context("memory.write result has no revisionId")?,
-        })),
+        "memory.write" => match object.get("outcome").and_then(Value::as_str) {
+            Some("effective") => Ok(json!({
+                "outcome": "effective",
+                "memoryId": object
+                    .get("memoryId")
+                    .context("effective memory.write result has no memoryId")?,
+                "revisionId": object
+                    .get("revisionId")
+                    .context("effective memory.write result has no revisionId")?,
+            })),
+            Some("review_pending") => Ok(json!({
+                "outcome": "review_pending",
+                "reviewItemId": object
+                    .get("reviewItemId")
+                    .context("pending memory.write result has no reviewItemId")?,
+            })),
+            _ => bail!("memory.write result has an unknown outcome"),
+        },
         "team.create_task" => project_task_mutation(object, false),
         "team.update_task" => project_task_mutation(object, true),
-        "team.get_task"
-        | "team.list_tasks"
-        | "camp.list"
-        | "camp.search"
-        | "camp.read"
-        | "history.search"
-        | "memory.search"
-        | "memory.read"
-        | "memory.propose_hearth" => Ok(result.clone()),
+        "team.get_task" | "team.list_tasks" | "camp.list" | "camp.search" | "camp.read"
+        | "history.search" | "memory.search" | "memory.read" => Ok(result.clone()),
         _ => bail!("unknown built-in operation for Agent output projection"),
     }
 }
@@ -453,13 +463,49 @@ mod tests {
     }
 
     #[test]
+    fn memory_write_projects_both_closed_outcome_members() {
+        for (canonical, expected) in [
+            (
+                json!({
+                    "outcome": "effective",
+                    "memoryId": "memory_123",
+                    "revisionId": "revision_123"
+                }),
+                json!({
+                    "outcome": "effective",
+                    "memoryId": "memory_123",
+                    "revisionId": "revision_123"
+                }),
+            ),
+            (
+                json!({
+                    "outcome": "review_pending",
+                    "reviewItemId": "review_123"
+                }),
+                json!({
+                    "outcome": "review_pending",
+                    "reviewItemId": "review_123"
+                }),
+            ),
+        ] {
+            let envelope = BuiltinToolInvocationEnvelope::success(
+                "memory.write",
+                "7b5db24c-4a43-4cab-9217-d982b08f7691",
+                canonical,
+            )
+            .unwrap();
+            assert_eq!(project_envelope(&envelope).unwrap(), expected);
+        }
+    }
+
+    #[test]
     fn every_operation_has_a_schema_valid_golden_projection() {
         let golden: Value = serde_json::from_str(include_str!(
             "../tests/fixtures/builtin-tool-agent-output-v5.json"
         ))
         .unwrap();
         let documents = golden.as_object().unwrap();
-        assert_eq!(documents.len(), 13);
+        assert_eq!(documents.len(), 12);
         for definition in builtin_tool_definitions() {
             let operation = definition["name"].as_str().unwrap();
             let fixture = documents

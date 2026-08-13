@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0069
 title: "Single Effective Memory and Scope-Bounded Agent Mutation"
-status: accepted
+status: superseded
 date: 2026-07-29
 decision_scope: cross-version
 source_version: v0.21
 supersedes: [ADR-0024, ADR-0025, ADR-0036, ADR-0037, ADR-0038, ADR-0039, ADR-0040, ADR-0052, ADR-0064]
-superseded_by: null
+superseded_by: ADR-0178
 ---
 
 # ADR-0069: Single Effective Memory and Scope-Bounded Agent Mutation

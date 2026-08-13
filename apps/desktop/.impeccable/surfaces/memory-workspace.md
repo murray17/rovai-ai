@@ -1,5 +1,5 @@
 ---
-version: 1
+version: 2
 slug: "memory-workspace"
 primary_target: "apps/desktop/src/renderer/src/MemoryLibrary.tsx"
 related_targets:
@@ -10,13 +10,13 @@ related_targets:
 
 ## User goal
 
-Understand what the system remembers, which scope and authority own it, review pending proposals, and
+Understand what the system remembers, which scope and authority own it, review pending Hearth Review Items, and
 perform explicit governed writes without confusing projected evidence with editable source material.
 
 ## First view and hierarchy
 
 Keep the shared App rail, then a full-width Memory header, a compact four-part summary strip and a
-bounded attention banner when proposals need review. The main workbench is a list/detail split, not a
+bounded attention banner when Hearth Review Items need review. The main workbench is a list/detail split, not a
 wall of cards. At desktop widths the list is at least 310px and the detail at least 390px; at the
 minimum window they reflow without whole-page horizontal scrolling.
 
@@ -24,15 +24,21 @@ Memory uses current theme surfaces but preserves evidence tokens for source text
 projection details. Steel establishes top edges, tabs and selection; attention marks pending review,
 not ordinary Memory content.
 
-## Summary, policy and proposals
+## Summary, policy and Hearth review
 
 Summary numbers reflect the current read model and remain honest in Loading, Partial and Recovery.
 Policy/automatic-memory controls state their actual scope and do not promise model behavior beyond
 the authoritative configuration.
 
-Pending proposals open the dedicated proposal drawer. Show proposed content, source/authority,
-scope, rationale and the exact available decision. Approval, rejection or edit is explicit; Toast is
-only completion feedback and never the sole review surface.
+Pending Review Items open the dedicated review drawer. Make it explicit that candidate content is not an active
+Memory and is visible only on this user review surface. Show candidate content, source, requested add/revise action,
+target/base where applicable, and the exact available decision. A fresh item supports accept, edit body/keys then
+accept, or reject; a derived stale revise supports reject only and explains the changed target without offering silent
+rebase. Drawer dismiss changes no domain state. Toast is only completion feedback and never the sole review surface.
+
+Accepted, rejected and invalidated items are body-free history. `target_forgotten` and
+`exact_candidate_published` may be explained with safe product copy, but the UI must not reconstruct cleared text or
+claim that invalidation was a user rejection.
 
 ## Scope, search and workbench
 
@@ -43,7 +49,8 @@ and a useful next step.
 
 ## Writes and concurrency
 
-Create, edit, forget and proposal decisions use the current version/digest. Keep the user's draft and
+Create, edit, forget and Review Decisions use the current Memory or Review Item version plus the exact base Revision
+when the command requires it. Keep the user's draft and
 selection on conflict, refresh the authoritative record, explain what changed and require an explicit
 retry. Forgetting uses danger semantics and a preview; it is not represented as ordinary disabled or
 archive state.
@@ -55,5 +62,5 @@ the Core response, not optimistic visual state.
 
 Inherit root [`DESIGN.md`](../../../../DESIGN.md), theme evidence tokens and the
 [accessibility baseline](../../../../docs/ui/qa/accessibility.md). This brief owns composition only;
-Memory scope, authority, proposal policy, persistence and concurrency remain in current ADRs,
+Memory scope, authority, Hearth Review policy, persistence and concurrency remain in current ADRs,
 Contracts and Core read/write models.

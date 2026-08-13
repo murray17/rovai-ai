@@ -1,7 +1,7 @@
 ---
 document_type: adr-index
 authority: architecture-decisions
-last_updated: 2026-08-12
+last_updated: 2026-08-13
 ---
 
 # Rovai-ai Architecture Decision Records
@@ -185,8 +185,8 @@ pnpm docs:adr:generate -- --check
 | [ADR-0066](0066-managed-product-runtime-resolution.md) | Managed Product Runtime Discovery, Resolution, and Relocation | `accepted` | [v0.20](../versions/v0.20/README.md) | — |
 | [ADR-0067](0067-native-session-bootstrap-and-agentrun-context-v3.md) | Native Session Bootstrap and AgentRun Context v3 | `accepted` | [v0.21](../versions/v0.21/README.md) | ← ADR-0049、ADR-0063；局部替代 ADR-0014/ADR-0058 的 Task Context 条款；Bootstrap 身份与恢复条款见 ADR-0100；公共消息上下文与边界条款见 ADR-0129 |
 | [ADR-0068](0068-brokered-memory-retrieval-and-session-entrypoint.md) | Brokered Memory Retrieval and Session Entrypoint | `accepted` | [v0.21](../versions/v0.21/README.md) | ← ADR-0035、ADR-0042 |
-| [ADR-0069](0069-single-effective-memory-and-scope-bounded-agent-mutation.md) | Single Effective Memory and Scope-Bounded Agent Mutation | `accepted` | [v0.21](../versions/v0.21/README.md) | ← ADR-0024、ADR-0025、ADR-0036～ADR-0040、ADR-0052、ADR-0064；局部替代 ADR-0057 的 Memory Capability 条款 |
-| [ADR-0070](0070-normalized-sqlite-memory-store-v2.md) | Normalized SQLite Memory Store v2 | `accepted` | [v0.21](../versions/v0.21/README.md) | ← ADR-0045 |
+| [ADR-0069](0069-single-effective-memory-and-scope-bounded-agent-mutation.md) | Single Effective Memory and Scope-Bounded Agent Mutation | `superseded` | [v0.21](../versions/v0.21/README.md) | ← ADR-0024、ADR-0025、ADR-0036～ADR-0040、ADR-0052、ADR-0064；→ ADR-0178 |
+| [ADR-0070](0070-normalized-sqlite-memory-store-v2.md) | Normalized SQLite Memory Store v2 | `superseded` | [v0.21](../versions/v0.21/README.md) | ← ADR-0045；→ ADR-0179 |
 | [ADR-0071](0071-configured-camp-creation-and-lazy-conversations.md) | Configured Camp Creation and Lazy Conversations | `accepted` | [v0.22](../versions/v0.22/README.md) | 局部替代 ADR-0058 的 Camp 创建、空 Camp 与 Conversation 分配条款；一键入口的 Pending Draft 例外见 ADR-0145 |
 | [ADR-0072](0072-directory-workspace-and-dynamic-git-capability.md) | Directory Workspace Identity and Dynamic Git Capability | `accepted` | [v0.23](../versions/v0.23/README.md) | 局部替代 ADR-0071 的 Repository/Project Binding 条款；Quick Chat 命名与 binding literal 见 ADR-0074 |
 | [ADR-0073](0073-agent-authored-a2a-conversation-messages.md) | Agent-Authored A2A Conversation Messages | `superseded` | [v0.24](../versions/v0.24/README.md) | → ADR-0130；历史公共呈现背景 |
@@ -287,3 +287,6 @@ pnpm docs:adr:generate -- --check
 | [ADR-0174](0174-ten-skill-official-inventory-and-pinned-matt-pocock-imports.md) | Ten-Skill Official Inventory and Pinned Matt Pocock Imports | `superseded` | [v0.70](../versions/v0.70/README.md) | ← ADR-0167；→ ADR-0176；官方集合曾冻结为十项并纳入三项 pinned `mattpocock/skills` 导入 |
 | [ADR-0176](0176-eleven-skill-official-inventory-and-system-required-operations.md) | Eleven-Skill Official Inventory and System-Required Operations | `accepted` | [v0.71](../versions/v0.71/README.md) | ← ADR-0174；冻结十一项 official Skill、Rovai Campfire 与两项 system-required operational Skill |
 | [ADR-0177](0177-controlled-shutdown-fences-product-execution.md) | Controlled Shutdown Fences Product Execution Without Claiming Runtime Outcome | `accepted` | [v0.71](../versions/v0.71/README.md) | 局部替代 ADR-0168 的非终态 blocker 规则；保留可靠 Runtime terminal 权威并增加 durable product fence |
+| [ADR-0178](0178-best-effort-online-memory-capture-and-actor-bounded-mutation.md) | Best-Effort Online Memory Capture and Actor-Bounded Agent Mutation | `accepted` | [v0.73](../versions/v0.73/README.md) | ← ADR-0069；冻结 best-effort online capture、Agent 自身 Companion/有向 Relationship 与 Hearth user review 权威 |
+| [ADR-0179](0179-normalized-memory-store-v3-with-isolated-hearth-review.md) | Normalized Memory Store v3 with Isolated Hearth Review | `accepted` | [v0.73](../versions/v0.73/README.md) | ← ADR-0070；冻结独立 Review Item、terminal body clearing、publication reconciliation 与 Forget 闭包 |
+| [ADR-0180](0180-single-agent-memory-write-command.md) | Single Agent Memory Write Command with Outcome-Discriminated Output | `accepted` | [v0.73](../versions/v0.73/README.md) | 局部替代 ADR-0124/ADR-0135 的 Memory command/output 条款；统一 write 不合并领域聚合 |

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type {
-  AcceptHearthMemoryProposalCommand,
+  AcceptHearthReviewItemCommand,
   AgentProfile,
   CreateMemoryCommand,
-  HearthMemoryProposal,
+  HearthReviewItem,
   MemoryDirection,
   MemoryKind,
   MemoryLibraryView,
@@ -19,7 +19,7 @@ type GovernanceFilter = 'all' | 'agent' | 'review' | 'stopped'
 type Editor =
   | { kind: 'create' }
   | { kind: 'revise'; memory: MemoryRecord }
-  | { kind: 'proposal'; proposal: HearthMemoryProposal }
+  | { kind: 'reviewItem'; reviewItem: HearthReviewItem }
   | null
 
 interface Draft {
@@ -31,6 +31,11 @@ interface Draft {
   secondAgentId: string
   direction: MemoryDirection
   directedActorAgentId: string
+}
+
+interface MemorySnapshot {
+  library: MemoryLibraryView
+  reviewItems: HearthReviewItem[]
 }
 
 const initialDraft: Draft = {
@@ -62,8 +67,8 @@ export function MemoryLibrary({
   topNotices,
   refreshSignal = 0,
   focusMemoryId = null,
-  proposalDrawerSignal = 0,
-  onProposalDrawerSignalConsumed,
+  reviewDrawerSignal = 0,
+  onReviewDrawerSignalConsumed,
   onPendingCountChange,
   onReady
 }: {
@@ -71,19 +76,18 @@ export function MemoryLibrary({
   topNotices?: ReactNode
   refreshSignal?: number
   focusMemoryId?: string | null
-  proposalDrawerSignal?: number
-  onProposalDrawerSignalConsumed?(): void
+  reviewDrawerSignal?: number
+  onReviewDrawerSignalConsumed?(): void
   onPendingCountChange?(count: number): void
   onReady?(): void
 }): React.JSX.Element {
   const [library, setLibrary] = useState<MemoryLibraryView | null>(null)
-  const [proposals, setProposals] = useState<HearthMemoryProposal[]>([])
+  const [reviewItems, setReviewItems] = useState<HearthReviewItem[]>([])
   const [scope, setScope] = useState<MemoryScopeKind>('hearth')
   const [governance, setGovernance] = useState<GovernanceFilter>('all')
   const [search, setSearch] = useState('')
   const [selectedMemoryId, setSelectedMemoryId] = useState<string | null>(null)
-  const [proposalDrawerOpen, setProposalDrawerOpen] = useState(false)
-  const [selectedProposalIds, setSelectedProposalIds] = useState<Set<string>>(new Set())
+  const [reviewDrawerOpen, setReviewDrawerOpen] = useState(false)
   const [editor, setEditor] = useState<Editor>(null)
   const [draft, setDraft] = useState<Draft>(initialDraft)
   const [forgetTarget, setForgetTarget] = useState<MemoryRecord | null>(null)
@@ -91,14 +95,15 @@ export function MemoryLibrary({
   const [error, setError] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<string | null>(null)
 
-  const load = useCallback(async (): Promise<void> => {
-    const [nextLibrary, nextProposals] = await Promise.all([
+  const load = useCallback(async (): Promise<MemorySnapshot> => {
+    const [nextLibrary, nextReviewItems] = await Promise.all([
       window.rovai.request<MemoryLibraryView>('memory.list'),
-      window.rovai.request<HearthMemoryProposal[]>('memory.hearthProposals.list')
+      window.rovai.request<HearthReviewItem[]>('memory.hearthReviewItems.list')
     ])
     setLibrary(nextLibrary)
-    setProposals(nextProposals)
-    onPendingCountChange?.(nextProposals.filter((proposal) => proposal.status === 'pending').length)
+    setReviewItems(nextReviewItems)
+    onPendingCountChange?.(nextReviewItems.filter((reviewItem) => reviewItem.status === 'pending').length)
+    return { library: nextLibrary, reviewItems: nextReviewItems }
   }, [onPendingCountChange])
 
   useEffect(() => {
@@ -122,10 +127,10 @@ export function MemoryLibrary({
   }, [load, refreshSignal])
 
   useEffect(() => {
-    if (proposalDrawerSignal <= 0) return
-    setProposalDrawerOpen(true)
-    onProposalDrawerSignalConsumed?.()
-  }, [onProposalDrawerSignalConsumed, proposalDrawerSignal])
+    if (reviewDrawerSignal <= 0) return
+    setReviewDrawerOpen(true)
+    onReviewDrawerSignalConsumed?.()
+  }, [onReviewDrawerSignalConsumed, reviewDrawerSignal])
 
   useEffect(() => {
     if (!focusMemoryId || !library) return
@@ -144,7 +149,7 @@ export function MemoryLibrary({
     return () => window.clearTimeout(timer)
   }, [feedback])
 
-  const pending = proposals.filter((proposal) => proposal.status === 'pending')
+  const pending = reviewItems.filter((reviewItem) => reviewItem.status === 'pending')
   const visibleMemories = useMemo(() => (library?.memories ?? [])
     .filter((memory) => memory.scope === scope && memory.lifecycle !== 'forgotten')
     .filter((memory) => {
@@ -186,7 +191,17 @@ export function MemoryLibrary({
       await operation()
       await load()
     } catch (nextError) {
-      setError(errorMessage(nextError))
+      if (nextError instanceof CommandRejectedError && isMemoryConflict(nextError.code)) {
+        try {
+          const snapshot = await load()
+          setEditor((current) => refreshEditorAuthority(current, snapshot))
+          setError('审核状态或记忆版本已经变化。已刷新权威状态并保留当前草稿，请核对后明确重试。')
+        } catch (refreshError) {
+          setError(`状态冲突，且刷新失败：${errorMessage(refreshError)}`)
+        }
+      } else {
+        setError(errorMessage(nextError))
+      }
     } finally {
       setBusy(null)
     }
@@ -219,15 +234,16 @@ export function MemoryLibrary({
     setEditor({ kind: 'revise', memory })
   }
 
-  const openProposalEdit = (proposal: HearthMemoryProposal): void => {
+  const openReviewEdit = (reviewItem: HearthReviewItem): void => {
+    if (reviewItem.status !== 'pending' || reviewItem.stale) return
     setDraft({
       ...initialDraft,
       scope: 'hearth',
-      kind: proposal.kind ?? 'agreement',
-      body: proposal.body ?? '',
-      retrievalKeys: proposal.retrievalKeys.join(', ')
+      kind: reviewItem.candidateKind ?? 'agreement',
+      body: reviewItem.candidateBody ?? '',
+      retrievalKeys: (reviewItem.candidateRetrievalKeys ?? []).join(', ')
     })
-    setEditor({ kind: 'proposal', proposal })
+    setEditor({ kind: 'reviewItem', reviewItem })
   }
 
   const retrievalKeys = (): string[] => draft.retrievalKeys
@@ -275,62 +291,50 @@ export function MemoryLibrary({
           }
         })
       } else {
-        const command: AcceptHearthMemoryProposalCommand = {
-          proposalId: editor.proposal.id,
-          expectedVersion: editor.proposal.version,
-          finalKind: editor.proposal.action === 'add' ? draft.kind : null,
+        const command: AcceptHearthReviewItemCommand = {
+          reviewItemId: editor.reviewItem.reviewItemId,
+          expectedReviewItemVersion: editor.reviewItem.version,
           finalBody: draft.body.trim(),
           finalRetrievalKeys: retrievalKeys()
         }
-        result = await window.rovai.request('memory.hearthProposals.accept', {
+        result = await window.rovai.request('memory.hearthReviewItems.accept', {
           commandId: crypto.randomUUID(),
           command
         })
       }
       assertApplied(result)
       setEditor(null)
+      setFeedback(editor.kind === 'reviewItem'
+        ? '已按最终内容接受，候选内容现在成为正式共同记忆。'
+        : '记忆已保存。')
     })
   }
 
-  const acceptProposal = (proposal: HearthMemoryProposal): Promise<void> =>
-    run(`accept-${proposal.id}`, async () => {
-      const result = await window.rovai.request<StoredCommandResult>('memory.hearthProposals.accept', {
+  const acceptReview = (reviewItem: HearthReviewItem): Promise<void> =>
+    run(`accept-${reviewItem.reviewItemId}`, async () => {
+      const result = await window.rovai.request<StoredCommandResult>('memory.hearthReviewItems.accept', {
         commandId: crypto.randomUUID(),
         command: {
-          proposalId: proposal.id,
-          expectedVersion: proposal.version,
-          finalKind: null,
-          finalBody: null,
-          finalRetrievalKeys: null
+          reviewItemId: reviewItem.reviewItemId,
+          expectedReviewItemVersion: reviewItem.version
         }
       })
       assertApplied(result)
+      setFeedback('已接受，候选内容现在成为正式共同记忆。')
     })
 
-  const rejectProposal = (proposal: HearthMemoryProposal): Promise<void> =>
-    run(`reject-${proposal.id}`, async () => {
-      const result = await window.rovai.request<StoredCommandResult>('memory.hearthProposals.reject', {
+  const rejectReview = (reviewItem: HearthReviewItem): Promise<void> =>
+    run(`reject-${reviewItem.reviewItemId}`, async () => {
+      const result = await window.rovai.request<StoredCommandResult>('memory.hearthReviewItems.reject', {
         commandId: crypto.randomUUID(),
-        command: { proposalId: proposal.id, expectedVersion: proposal.version }
+        command: {
+          reviewItemId: reviewItem.reviewItemId,
+          expectedReviewItemVersion: reviewItem.version
+        }
       })
       assertApplied(result)
+      setFeedback('已拒绝这条审核项；候选内容已清除。')
     })
-
-  const rejectSelected = (): Promise<void> => run('reject-batch', async () => {
-    const selected = pending.filter((proposal) => selectedProposalIds.has(proposal.id))
-    if (selected.length === 0) return
-    const result = await window.rovai.request<StoredCommandResult>('memory.hearthProposals.rejectBatch', {
-      commandId: crypto.randomUUID(),
-      command: {
-        proposals: selected.map((proposal) => ({
-          proposalId: proposal.id,
-          expectedVersion: proposal.version
-        }))
-      }
-    })
-    assertApplied(result)
-    setSelectedProposalIds(new Set())
-  })
 
   const lifecycle = (
     method: 'memory.retire' | 'memory.reactivate',
@@ -376,7 +380,6 @@ export function MemoryLibrary({
     <section className="memory-library" aria-labelledby="memory-library-title">
       <header className="memory-library-header">
         <div>
-          <span className="memory-page-kicker">Memory / Governed context</span>
           <h2 id="memory-library-title">记忆</h2>
           <p>所有正在沿用的记忆都立即生效；形成来源仅用于说明和审计。</p>
         </div>
@@ -393,15 +396,15 @@ export function MemoryLibrary({
 
       <div className="memory-summary-strip" aria-label="记忆概览">
         <div><strong>{activeCount}</strong><span>正在沿用</span></div>
-        <div className={pending.length > 0 ? 'attention' : ''}><strong>{pending.length}</strong><span>共同记忆提案</span></div>
+        <div className={pending.length > 0 ? 'attention' : ''}><strong>{pending.length}</strong><span>待审核</span></div>
         <div><strong>{agentCount}</strong><span>队员形成</span></div>
         <div><strong>{reviewCount}</strong><span>建议复核</span></div>
       </div>
 
       {pending.length > 0 && (
-        <button className="memory-pending-banner" type="button" onClick={() => setProposalDrawerOpen(true)}>
-          <span><strong>{pending.length} 条共同记忆提案等待确认</strong><small>只有接受后才会生效。</small></span>
-          <b>查看提案 →</b>
+        <button className="memory-pending-banner" type="button" onClick={() => setReviewDrawerOpen(true)}>
+          <span><strong>{pending.length} 条共同记忆审核项等待处理</strong><small>候选内容与正式记忆隔离，只有接受后才会生效。</small></span>
+          <b>查看审核 →</b>
         </button>
       )}
 
@@ -419,7 +422,7 @@ export function MemoryLibrary({
         ))}
       </nav>
 
-      <div className="memory-toolbar">
+      <div className="memory-filter-row">
         <div className="memory-governance-tabs">
           {governanceTabs.map(([value, label]) => (
             <button
@@ -438,17 +441,20 @@ export function MemoryLibrary({
 
       <CapacityStrip library={library} scope={scope} />
 
-      <div className="memory-catalog-layout">
-        <div className="memory-catalog-list">
-          {!library && <EmptyMemory text="正在读取记忆…" />}
-          {library && visibleMemories.length === 0 && <EmptyMemory text="当前筛选下没有记忆。" />}
-          {visibleMemories.map((memory) => (
-            <button key={memory.id} type="button" className={`memory-catalog-item ${selectedMemoryId === memory.id ? 'selected' : ''}`} onClick={() => setSelectedMemoryId(memory.id)}>
-              <span className="memory-catalog-meta"><KindBadge kind={memory.kind} /><OriginBadge origin={memory.creationOrigin} /></span>
-              <strong>{memory.currentBody ?? '正文已清除'}</strong>
-              <small>{memory.currentRetrievalKeys.join(' · ') || '无 Retrieval Keys'} · {memoryPeopleLabel(memory, agents)}</small>
-            </button>
-          ))}
+      <div className="memory-workbench">
+        <div className="memory-catalog">
+          <div className="memory-catalog-heading"><strong>{scopeTabs.find(([value]) => value === scope)?.[1]}</strong><span>{visibleMemories.length} 条</span></div>
+          <div className="memory-catalog-list">
+            {!library && <EmptyMemory text="正在读取记忆…" />}
+            {library && visibleMemories.length === 0 && <EmptyMemory text="当前筛选下没有记忆。" />}
+            {visibleMemories.map((memory) => (
+              <button key={memory.id} type="button" className={`memory-catalog-item ${selectedMemoryId === memory.id ? 'selected' : ''}`} onClick={() => setSelectedMemoryId(memory.id)}>
+                <span className="memory-catalog-meta"><KindBadge kind={memory.kind} /><OriginBadge origin={memory.creationOrigin} /></span>
+                <strong>{memory.currentBody ?? '正文已清除'}</strong>
+                <small>{memory.currentRetrievalKeys.join(' · ') || '无 Retrieval Keys'} · {memoryPeopleLabel(memory, agents)}</small>
+              </button>
+            ))}
+          </div>
         </div>
         <MemoryDetail
           memory={selectedMemory}
@@ -462,18 +468,16 @@ export function MemoryLibrary({
         />
       </div>
 
-      <ProposalDrawer
-        open={proposalDrawerOpen}
-        proposals={pending}
+      <ReviewDrawer
+        open={reviewDrawerOpen}
+        reviewItems={reviewItems}
+        memories={library?.memories ?? []}
         agents={agents}
         busy={busy}
-        selected={selectedProposalIds}
-        onOpenChange={setProposalDrawerOpen}
-        onSelection={setSelectedProposalIds}
-        onAccept={acceptProposal}
-        onEdit={openProposalEdit}
-        onReject={rejectProposal}
-        onRejectSelected={rejectSelected}
+        onOpenChange={setReviewDrawerOpen}
+        onAccept={acceptReview}
+        onEdit={openReviewEdit}
+        onReject={rejectReview}
       />
 
       <MemoryEditorDialog editor={editor} draft={draft} agents={agents} busy={busy !== null} onDraft={setDraft} onClose={() => setEditor(null)} onSubmit={submitEditor} />
@@ -586,58 +590,75 @@ function MemoryDetail({
   )
 }
 
-function ProposalDrawer({
+function ReviewDrawer({
   open,
-  proposals,
+  reviewItems,
+  memories,
   agents,
   busy,
-  selected,
   onOpenChange,
-  onSelection,
   onAccept,
   onEdit,
-  onReject,
-  onRejectSelected
+  onReject
 }: {
   open: boolean
-  proposals: HearthMemoryProposal[]
+  reviewItems: HearthReviewItem[]
+  memories: MemoryRecord[]
   agents: AgentProfile[]
   busy: string | null
-  selected: Set<string>
   onOpenChange(open: boolean): void
-  onSelection(value: Set<string>): void
-  onAccept(proposal: HearthMemoryProposal): Promise<void>
-  onEdit(proposal: HearthMemoryProposal): void
-  onReject(proposal: HearthMemoryProposal): Promise<void>
-  onRejectSelected(): Promise<void>
+  onAccept(reviewItem: HearthReviewItem): Promise<void>
+  onEdit(reviewItem: HearthReviewItem): void
+  onReject(reviewItem: HearthReviewItem): Promise<void>
 }): React.JSX.Element {
+  const pending = reviewItems.filter((reviewItem) => reviewItem.status === 'pending')
+  const history = reviewItems.filter((reviewItem) => reviewItem.status !== 'pending')
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay memory-drawer-overlay" />
-        <Dialog.Content className="memory-proposal-drawer">
+        <Dialog.Content className="memory-review-drawer">
           <header>
-            <div><Dialog.Title>共同记忆提案</Dialog.Title><Dialog.Description>这些内容尚未生效；接受或编辑后接受才会进入共同记忆。</Dialog.Description></div>
-            <Dialog.Close asChild><button className="icon-button" type="button" aria-label="关闭提案抽屉">×</button></Dialog.Close>
+            <div><Dialog.Title>共同记忆审核</Dialog.Title><Dialog.Description>待审核候选与正式记忆隔离；接受后才会进入共同记忆。关闭抽屉不会改变审核状态。</Dialog.Description></div>
+            <Dialog.Close asChild><button className="icon-button" type="button" aria-label="关闭共同记忆审核">×</button></Dialog.Close>
           </header>
-          {proposals.length > 0 && <div className="memory-drawer-batch"><label><input type="checkbox" checked={selected.size === proposals.length} onChange={(event) => onSelection(event.target.checked ? new Set(proposals.map((proposal) => proposal.id)) : new Set())} /> 全选</label><button className="quiet-button compact" type="button" disabled={selected.size === 0 || busy !== null} onClick={() => void onRejectSelected()}>拒绝所选</button></div>}
-          <div className="memory-proposal-drawer-list">
-            {proposals.length === 0 && <EmptyMemory text="没有等待确认的共同记忆提案。" />}
-            {proposals.map((proposal) => (
-              <article key={proposal.id} className="memory-proposal-item">
-                <label className="memory-select"><input type="checkbox" checked={selected.has(proposal.id)} onChange={(event) => { const next = new Set(selected); if (event.target.checked) next.add(proposal.id); else next.delete(proposal.id); onSelection(next) }} /><span className="sr-only">选择提案</span></label>
-                <div>
-                  <span className="memory-catalog-meta"><KindBadge kind={proposal.kind} /><b>{proposal.action === 'add' ? '新增' : '修订'}</b>{proposal.stale && <strong className="memory-stale">基准已变化</strong>}</span>
-                  <p>{proposal.body ?? '候选内容已清除'}</p>
-                  <small>{proposal.retrievalKeys.join(' · ')} · {agentName(proposal.proposedByAgentId, agents)} 提议 · {formatTime(proposal.proposedAt)}</small>
-                </div>
-                <footer>
-                  <button className="quiet-button compact" type="button" onClick={() => void onReject(proposal)} disabled={busy !== null}>拒绝</button>
-                  <button className="quiet-button compact" type="button" onClick={() => onEdit(proposal)} disabled={proposal.stale || busy !== null}>编辑</button>
-                  <button className="primary-button compact" type="button" onClick={() => void onAccept(proposal)} disabled={proposal.stale || busy !== null}>接受</button>
-                </footer>
-              </article>
-            ))}
+          <div className="memory-review-drawer-list">
+            <section className="memory-review-section" aria-labelledby="pending-review-items-title">
+              <div className="memory-review-section-heading"><strong id="pending-review-items-title">待审核</strong><span>{pending.length}</span></div>
+              {pending.length === 0 && <EmptyMemory text="没有等待处理的共同记忆审核项。" />}
+              {pending.map((reviewItem) => (
+                <article key={reviewItem.reviewItemId} className={`memory-review-item ${reviewItem.stale ? 'is-stale' : ''}`}>
+                  <div>
+                    <span className="memory-catalog-meta"><KindBadge kind={reviewItem.candidateKind} /><b>{reviewItem.requestedAction === 'add' ? '新增' : '修订'}</b>{reviewItem.stale && <strong className="memory-stale">基准已变化</strong>}</span>
+                    <p>{reviewItem.candidateBody}</p>
+                    {(reviewItem.candidateRetrievalKeys?.length ?? 0) > 0 && <small>Retrieval Keys：{reviewItem.candidateRetrievalKeys?.join(' · ')}</small>}
+                    <small>{agentName(reviewItem.sourceAgentId, agents)} 提交 · {formatTime(reviewItem.createdAt)}</small>
+                    {reviewItem.requestedAction === 'revise' && <small>目标：{reviewTargetLabel(reviewItem, memories)} · 基准 {shortId(reviewItem.baseRevisionId)}</small>}
+                    {reviewItem.stale && <p className="memory-review-warning">目标记忆已变化，不能再接受或编辑；你仍可以明确拒绝并结束这条审核。</p>}
+                  </div>
+                  <footer>
+                    <button className="quiet-button compact" type="button" onClick={() => void onReject(reviewItem)} disabled={busy !== null}>拒绝</button>
+                    {!reviewItem.stale && <button className="quiet-button compact" type="button" onClick={() => onEdit(reviewItem)} disabled={busy !== null}>编辑后接受</button>}
+                    {!reviewItem.stale && <button className="primary-button compact" type="button" onClick={() => void onAccept(reviewItem)} disabled={busy !== null}>接受</button>}
+                  </footer>
+                </article>
+              ))}
+            </section>
+            <section className="memory-review-section memory-review-history" aria-labelledby="review-history-title">
+              <div className="memory-review-section-heading"><strong id="review-history-title">处理记录</strong><span>{history.length}</span></div>
+              {history.length === 0 && <EmptyMemory text="还没有已处理的审核记录。" />}
+              {history.map((reviewItem) => (
+                <article key={reviewItem.reviewItemId} className="memory-review-item is-terminal">
+                  <div>
+                    <span className="memory-catalog-meta"><span className={`status-badge status-${reviewStatusTone(reviewItem.status)}`}><i />{reviewStatusLabel(reviewItem.status)}</span><b>{reviewItem.requestedAction === 'add' ? '新增' : '修订'}</b></span>
+                    <p className="memory-review-terminal-copy">候选内容已从审核区清除，不在历史记录中保留或重建。</p>
+                    <small>{agentName(reviewItem.sourceAgentId, agents)} 提交 · {formatTime(reviewItem.createdAt)}</small>
+                    <small>{reviewResolutionLabel(reviewItem)}{reviewItem.resolvedAt ? ` · ${formatTime(reviewItem.resolvedAt)}` : ''}</small>
+                    {reviewItem.status === 'accepted' && <small>正式记忆 {shortId(reviewItem.acceptedMemoryId)} · 版本 {shortId(reviewItem.acceptedRevisionId)}{reviewItem.editedBeforeAcceptance ? ' · 接受前已编辑' : ''}</small>}
+                  </div>
+                </article>
+              ))}
+            </section>
           </div>
         </Dialog.Content>
       </Dialog.Portal>
@@ -662,7 +683,7 @@ function MemoryEditorDialog({
   onClose(): void
   onSubmit(event: React.FormEvent): void
 }): React.JSX.Element {
-  const identityLocked = editor?.kind === 'revise' || editor?.kind === 'proposal'
+  const identityLocked = editor?.kind === 'revise' || editor?.kind === 'reviewItem'
   const keys = draft.retrievalKeys.split(',').map((key) => key.trim()).filter(Boolean)
   const keyBytes = keys.reduce((total, key) => total + new TextEncoder().encode(key).length, 0)
   const identityValid = draft.scope === 'hearth'
@@ -670,17 +691,19 @@ function MemoryEditorDialog({
     || (draft.scope === 'relationship' && draft.kind !== 'preference' && draft.firstAgentId !== '' && draft.secondAgentId !== '' && draft.firstAgentId !== draft.secondAgentId && (draft.direction === 'mutual' || [draft.firstAgentId, draft.secondAgentId].includes(draft.directedActorAgentId)))
   const keysValid = keys.length >= 1 && keys.length <= 3 && keys.every((key) => new TextEncoder().encode(key).length >= 2 && new TextEncoder().encode(key).length <= 24) && keyBytes <= 48
   const bodyBytes = new TextEncoder().encode(draft.body).length
+  const reviewItemEditable = editor?.kind !== 'reviewItem'
+    || (editor.reviewItem.status === 'pending' && !editor.reviewItem.stale)
   return (
     <Dialog.Root open={editor !== null} onOpenChange={(open) => { if (!open) onClose() }}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content memory-editor-dialog">
           <form onSubmit={onSubmit}>
-            <Dialog.Title>{editor?.kind === 'create' ? '新增记忆' : editor?.kind === 'proposal' ? '编辑后接受共同记忆提案' : '修订记忆'}</Dialog.Title>
+            <Dialog.Title>{editor?.kind === 'create' ? '新增记忆' : editor?.kind === 'reviewItem' ? '编辑后接受共同记忆审核项' : '修订记忆'}</Dialog.Title>
             <Dialog.Description>正文写成面向未来、可独立理解且不含秘密的信息。Retrieval Keys 用于搜索，不代替正文。</Dialog.Description>
             <div className="memory-editor-grid">
               <label className="field-label">范围<select value={draft.scope} disabled={identityLocked || busy} onChange={(event) => onDraft({ ...draft, scope: event.target.value as MemoryScopeKind })}><option value="hearth">共同记忆</option><option value="companion">队员记忆</option><option value="relationship">队员间记忆</option></select></label>
-              <label className="field-label">类型<select value={draft.kind} disabled={(identityLocked && editor?.kind !== 'proposal') || busy} onChange={(event) => onDraft({ ...draft, kind: event.target.value as MemoryKind })}><option value="preference" disabled={draft.scope === 'relationship'}>偏好</option><option value="agreement">约定</option><option value="lesson">经验</option></select></label>
+              <label className="field-label">类型<select value={draft.kind} disabled={identityLocked || busy} onChange={(event) => onDraft({ ...draft, kind: event.target.value as MemoryKind })}><option value="preference" disabled={draft.scope === 'relationship'}>偏好</option><option value="agreement">约定</option><option value="lesson">经验</option></select></label>
               {draft.scope === 'companion' && <AgentSelect label="队员" value={draft.firstAgentId} agents={agents} disabled={identityLocked || busy} onChange={(firstAgentId) => onDraft({ ...draft, firstAgentId })} />}
               {draft.scope === 'relationship' && <>
                 <AgentSelect label="队员 A" value={draft.firstAgentId} agents={agents} disabled={identityLocked || busy} onChange={(firstAgentId) => onDraft({ ...draft, firstAgentId })} />
@@ -691,7 +714,8 @@ function MemoryEditorDialog({
             </div>
             <label className="field-label memory-body-field">Retrieval Keys<input value={draft.retrievalKeys} disabled={busy} placeholder="1–3 个关键词，使用逗号分隔" onChange={(event) => onDraft({ ...draft, retrievalKeys: event.target.value })} /><small>{keys.length}/3 项 · {keyBytes}/48 bytes</small></label>
             <label className="field-label memory-body-field">正文<textarea autoFocus value={draft.body} rows={7} disabled={busy} onChange={(event) => onDraft({ ...draft, body: event.target.value })} /><small>{bodyBytes}/2048 bytes</small></label>
-            <div className="dialog-actions"><Dialog.Close asChild><button className="quiet-button" type="button" disabled={busy}>取消</button></Dialog.Close><button className="primary-button" type="submit" disabled={!draft.body.trim() || bodyBytes > 2048 || !identityValid || !keysValid || busy}>{busy ? '正在保存…' : editor?.kind === 'proposal' ? '接受最终内容' : '保存'}</button></div>
+            {!reviewItemEditable && <div className="memory-review-warning" role="status">权威审核状态已变化。草稿仍保留，但这条审核不能再接受；请关闭后查看最新记录。</div>}
+            <div className="dialog-actions"><Dialog.Close asChild><button className="quiet-button" type="button" disabled={busy}>取消</button></Dialog.Close><button className="primary-button" type="submit" disabled={!draft.body.trim() || bodyBytes > 2048 || !identityValid || !keysValid || !reviewItemEditable || busy}>{busy ? '正在保存…' : editor?.kind === 'reviewItem' ? '接受最终内容' : '保存'}</button></div>
           </form>
         </Dialog.Content>
       </Dialog.Portal>
@@ -717,11 +741,41 @@ function OriginBadge({ origin }: { origin: MemoryRecord['creationOrigin'] }): Re
   return <span className={`memory-authority ${origin === 'agent' ? 'agent-origin' : 'user-origin'}`}>{originLabel(origin)}</span>
 }
 
+class CommandRejectedError extends Error {
+  constructor(readonly code: string, message: string) {
+    super(message)
+    this.name = 'CommandRejectedError'
+  }
+}
+
 function assertApplied(result: StoredCommandResult): void {
   if (result.status === 'rejected') {
     const message = typeof result.payload.message === 'string' ? result.payload.message : result.code
-    throw new Error(message)
+    throw new CommandRejectedError(result.code, message)
   }
+}
+
+function isMemoryConflict(code: string): boolean {
+  return code === 'memory.version_conflict'
+    || code === 'memory.revision_conflict'
+    || code === 'memory.lifecycle_conflict'
+    || code === 'memory.review_version_conflict'
+    || code === 'memory.review_conflict'
+    || code === 'memory.review_stale'
+}
+
+function refreshEditorAuthority(editor: Editor, snapshot: MemorySnapshot): Editor {
+  if (editor?.kind === 'revise') {
+    const memory = snapshot.library.memories.find((candidate) => candidate.id === editor.memory.id)
+    return memory ? { kind: 'revise', memory } : editor
+  }
+  if (editor?.kind === 'reviewItem') {
+    const reviewItem = snapshot.reviewItems.find((candidate) =>
+      candidate.reviewItemId === editor.reviewItem.reviewItemId
+    )
+    return reviewItem ? { kind: 'reviewItem', reviewItem } : editor
+  }
+  return editor
 }
 
 function scopeLabel(scope: MemoryScopeKind | null): string {
@@ -733,7 +787,29 @@ function kindLabel(kind: MemoryKind | null): string {
 }
 
 function originLabel(origin: MemoryRecord['creationOrigin']): string {
-  return origin === 'agent' ? '队员形成' : origin === 'accepted_hearth_proposal' ? '队员提议 · 用户采纳' : origin === 'user' ? '用户创建' : '—'
+  return origin === 'agent' ? '队员形成' : origin === 'accepted_hearth_review' ? '队员提交 · 用户采纳' : origin === 'user' ? '用户创建' : '—'
+}
+
+function reviewStatusLabel(status: HearthReviewItem['status']): string {
+  return status === 'accepted' ? '已接受' : status === 'rejected' ? '已拒绝' : status === 'invalidated' ? '已失效' : '待审核'
+}
+
+function reviewStatusTone(status: HearthReviewItem['status']): string {
+  return status === 'accepted' ? 'completed' : status === 'rejected' ? 'failed' : 'pending'
+}
+
+function reviewResolutionLabel(reviewItem: HearthReviewItem): string {
+  if (reviewItem.status === 'accepted') return '已由用户接受'
+  if (reviewItem.status === 'rejected') return '已由用户拒绝'
+  if (reviewItem.invalidationReason === 'target_forgotten') return '目标记忆已永久遗忘，审核项自动失效'
+  if (reviewItem.invalidationReason === 'exact_candidate_published') return '同一候选已经成为正式记忆，审核项自动失效'
+  return '审核项已失效'
+}
+
+function reviewTargetLabel(reviewItem: HearthReviewItem, memories: MemoryRecord[]): string {
+  const memory = memories.find((candidate) => candidate.id === reviewItem.targetMemoryId)
+  if (!memory) return shortId(reviewItem.targetMemoryId)
+  return memory.currentBody ? `${shortId(memory.id)} · ${memory.currentBody}` : shortId(memory.id)
 }
 
 function lifecycleLabel(lifecycle: MemoryRecord['lifecycle']): string {

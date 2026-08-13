@@ -5,12 +5,11 @@ use serde_json::{Value, json};
 use crate::{
     command::{ActorRef, CommandEnvelope, CommandExecution},
     db::Database,
-    memory::{AgentMemoryWriteCommand, MemoryService, ProposeHearthMemoryCommand},
+    memory::{AgentMemoryWriteCommand, MemoryService},
     team_tool::{TeamToolInvocationError, TeamToolService},
 };
 
 pub const MEMORY_WRITE_TOOL_NAME: &str = "memory.write";
-pub const MEMORY_PROPOSE_HEARTH_TOOL_NAME: &str = "memory.propose_hearth";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -26,17 +25,6 @@ pub struct MemoryWriteToolInput {
     pub base_revision_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct HearthProposalToolInput {
-    pub action: String,
-    pub kind: Option<crate::memory::MemoryKind>,
-    pub body: String,
-    pub retrieval_keys: Vec<String>,
-    pub memory_id: Option<String>,
-    pub base_revision_id: Option<String>,
-}
-
 #[derive(Debug, Clone)]
 pub struct MemoryWriteToolInvocation {
     pub native_binding_id: String,
@@ -45,113 +33,90 @@ pub struct MemoryWriteToolInvocation {
     pub input: MemoryWriteToolInput,
 }
 
-#[derive(Debug, Clone)]
-pub struct HearthProposalToolInvocation {
-    pub native_binding_id: String,
-    pub binding_credential: String,
-    pub runtime_tool_call_id: String,
-    pub input: HearthProposalToolInput,
-}
-
 #[derive(Debug, Default)]
 pub struct MemoryToolService;
 
 impl MemoryToolService {
     pub fn write_input_schema() -> Value {
+        let body = json!({
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "description": "One atomic durable preference, agreement, or reusable lesson. Never include credentials or task state."
+        });
+        let retrieval_keys = json!({
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 2, "maxLength": 24},
+            "description": "The complete set of one to three specific discovery keys."
+        });
         json!({
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["action", "body", "retrievalKeys"],
-            "properties": {
-                "action": {
-                    "type": "string",
-                    "enum": ["add", "revise"],
-                    "description": "Add an active Companion/Relationship Memory or revise a current accessible one."
+            "oneOf": [
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["action", "scope", "kind", "body", "retrievalKeys"],
+                    "properties": {
+                        "action": {"const": "add"},
+                        "scope": {"const": "companion"},
+                        "kind": {"type": "string", "enum": ["preference", "agreement", "lesson"]},
+                        "body": body.clone(),
+                        "retrievalKeys": retrieval_keys.clone()
+                    }
                 },
-                "scope": {
-                    "type": "string",
-                    "enum": ["companion", "relationship"],
-                    "description": "Required only for add. Companion always means the current Agent."
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                        "action", "scope", "kind", "body", "retrievalKeys",
+                        "counterpartyAgentId", "direction"
+                    ],
+                    "properties": {
+                        "action": {"const": "add"},
+                        "scope": {"const": "relationship"},
+                        "kind": {"type": "string", "enum": ["agreement", "lesson"]},
+                        "body": body.clone(),
+                        "retrievalKeys": retrieval_keys.clone(),
+                        "counterpartyAgentId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Another present member of the current Camp."
+                        },
+                        "direction": {
+                            "const": "directed",
+                            "description": "Always current Agent to counterparty."
+                        }
+                    }
                 },
-                "kind": {
-                    "type": "string",
-                    "enum": ["preference", "agreement", "lesson"],
-                    "description": "Required only for add. Relationship allows agreement or lesson."
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["action", "scope", "kind", "body", "retrievalKeys"],
+                    "properties": {
+                        "action": {"const": "add"},
+                        "scope": {"const": "hearth"},
+                        "kind": {"type": "string", "enum": ["preference", "agreement", "lesson"]},
+                        "body": body.clone(),
+                        "retrievalKeys": retrieval_keys.clone()
+                    }
                 },
-                "body": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 2048,
-                    "description": "One atomic durable preference, agreement, or reusable lesson. Never include credentials or task state."
-                },
-                "retrievalKeys": {
-                    "type": "array",
-                    "minItems": 1,
-                    "maxItems": 3,
-                    "uniqueItems": true,
-                    "items": {"type": "string", "minLength": 2, "maxLength": 24},
-                    "description": "One to three specific discovery keys for this Revision."
-                },
-                "counterpartyAgentId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "For Relationship add, another present member of the current Camp."
-                },
-                "direction": {
-                    "type": "string",
-                    "enum": ["mutual", "directed"],
-                    "description": "For Relationship add. directed always means current Agent to counterparty."
-                },
-                "memoryId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Required only for revise."
-                },
-                "baseRevisionId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Required only for revise and must still be current."
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                        "action", "memoryId", "baseRevisionId", "body", "retrievalKeys"
+                    ],
+                    "properties": {
+                        "action": {"const": "revise"},
+                        "memoryId": {"type": "string", "minLength": 1},
+                        "baseRevisionId": {"type": "string", "minLength": 1},
+                        "body": body,
+                        "retrievalKeys": retrieval_keys
+                    }
                 }
-            }
-        })
-    }
-
-    pub fn propose_hearth_input_schema() -> Value {
-        json!({
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["action", "body", "retrievalKeys"],
-            "properties": {
-                "action": {"type": "string", "enum": ["add", "revise"]},
-                "kind": {
-                    "type": "string",
-                    "enum": ["preference", "agreement", "lesson"],
-                    "description": "Required only for add."
-                },
-                "body": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 2048,
-                    "description": "Proposed Hearth content. It remains ineffective until user acceptance."
-                },
-                "retrievalKeys": {
-                    "type": "array",
-                    "minItems": 1,
-                    "maxItems": 3,
-                    "uniqueItems": true,
-                    "items": {"type": "string", "minLength": 2, "maxLength": 24}
-                },
-                "memoryId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Required only for revise."
-                },
-                "baseRevisionId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Required only for revise and must still be current."
-                }
-            }
+            ]
         })
     }
 
@@ -207,63 +172,6 @@ impl MemoryToolService {
                         retrieval_keys: input.retrieval_keys.clone(),
                         counterparty_agent_id: input.counterparty_agent_id.clone(),
                         direction: input.direction,
-                        memory_id: input.memory_id.clone(),
-                        base_revision_id: input.base_revision_id.clone(),
-                    },
-                },
-            )
-            .map_err(map_memory_tool_error)
-    }
-
-    pub fn propose_hearth(
-        &self,
-        database: &mut Database,
-        invocation: &HearthProposalToolInvocation,
-    ) -> Result<CommandExecution> {
-        self.propose_hearth_authorized(database, invocation, None)
-    }
-
-    pub fn propose_hearth_attested(
-        &self,
-        database: &mut Database,
-        invocation: &HearthProposalToolInvocation,
-        agent_run_id: &str,
-        execution_epoch: i64,
-    ) -> Result<CommandExecution> {
-        self.propose_hearth_authorized(database, invocation, Some((agent_run_id, execution_epoch)))
-    }
-
-    fn propose_hearth_authorized(
-        &self,
-        database: &mut Database,
-        invocation: &HearthProposalToolInvocation,
-        attested_run: Option<(&str, i64)>,
-    ) -> Result<CommandExecution> {
-        let (identity, command_id) = authenticate(
-            database,
-            &invocation.native_binding_id,
-            &invocation.binding_credential,
-            &invocation.runtime_tool_call_id,
-            attested_run,
-        )?;
-        let input = &invocation.input;
-        MemoryService::default()
-            .propose_hearth(
-                database,
-                &CommandEnvelope {
-                    command_id,
-                    actor: ActorRef::Agent {
-                        agent_id: identity.agent_id,
-                        source_agent_run_id: identity.agent_run_id,
-                    },
-                    camp_id: Some(identity.camp_id),
-                    expected_versions: Vec::new(),
-                    execution_epoch: Some(identity.execution_epoch),
-                    payload: ProposeHearthMemoryCommand {
-                        action: input.action.clone(),
-                        kind: input.kind,
-                        body: input.body.clone(),
-                        retrieval_keys: input.retrieval_keys.clone(),
                         memory_id: input.memory_id.clone(),
                         base_revision_id: input.base_revision_id.clone(),
                     },

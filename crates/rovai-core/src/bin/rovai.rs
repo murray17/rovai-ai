@@ -592,7 +592,7 @@ enum BuiltinToolIpcFailure {
 
 fn print_root_help() {
     println!(
-        "Rovai Agent CLI\n\nOperations:\n  rovai send\n  rovai task create|get|list|update\n  rovai camp list|search|read\n  rovai history search\n  rovai memory search|read|write|propose-hearth\n\nRun `rovai --help` to choose an operation, then run that operation's exact `--help`. Do not assume that a command family has its own help entry. Each operation supports direct flags, JSON stdin/heredoc, or --input-file <path>."
+        "Rovai Agent CLI\n\nOperations:\n  rovai send\n  rovai task create|get|list|update\n  rovai camp list|search|read\n  rovai history search\n  rovai memory search|read|write\n\nRun `rovai --help` to choose an operation, then run that operation's exact `--help`. Do not assume that a command family has its own help entry. Each operation supports direct flags, JSON stdin/heredoc, or --input-file <path>."
     );
 }
 
@@ -701,7 +701,6 @@ fn operation_help_examples(operation: &str) -> &'static [&'static str] {
         "memory.search" => &["rovai memory search --query 'preferences' --limit 6"],
         "memory.read" => &["rovai memory read --memory-ids memory_123"],
         "memory.write" => &["rovai memory write --input-file memory-write.json"],
-        "memory.propose_hearth" => &["rovai memory propose-hearth --input-file proposal.json"],
         _ => &["rovai --help"],
     }
 }
@@ -768,12 +767,7 @@ mod tests {
                 .operation,
             "camp.message.send"
         );
-        assert_eq!(
-            builtin_tool_identity_by_command("memory", "propose-hearth")
-                .unwrap()
-                .operation,
-            "memory.propose_hearth"
-        );
+        assert!(builtin_tool_identity_by_command("memory", "propose-hearth").is_none());
         assert!(builtin_tool_identity_by_command("tool", "list").is_none());
         assert!(builtin_tool_identity_by_command("tool", "describe").is_none());
         for family in ["task", "camp", "history", "memory"] {
@@ -784,7 +778,7 @@ mod tests {
     }
 
     #[test]
-    fn exact_help_surface_covers_all_thirteen_operations_and_no_family_aliases() {
+    fn exact_help_surface_covers_all_twelve_operations_and_no_family_aliases() {
         let exact_paths: &[&[&str]] = &[
             &["send", "--help"],
             &["task", "create", "--help"],
@@ -798,9 +792,8 @@ mod tests {
             &["memory", "search", "--help"],
             &["memory", "read", "--help"],
             &["memory", "write", "--help"],
-            &["memory", "propose-hearth", "--help"],
         ];
-        assert_eq!(exact_paths.len(), 13);
+        assert_eq!(exact_paths.len(), 12);
         for path in exact_paths {
             let args = path
                 .iter()

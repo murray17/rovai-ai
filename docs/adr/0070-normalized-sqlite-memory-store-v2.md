@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0070
 title: "Normalized SQLite Memory Store v2"
-status: accepted
+status: superseded
 date: 2026-07-29
 decision_scope: cross-version
 source_version: v0.21
 supersedes: [ADR-0045]
-superseded_by: null
+superseded_by: ADR-0179
 ---
 
 # ADR-0070: Normalized SQLite Memory Store v2

@@ -3576,7 +3576,10 @@ mod tests {
             "rovai memory search --help",
             "rovai memory read --help",
             "rovai memory write --help",
-            "rovai memory propose-hearth --help",
+            "outcome: effective",
+            "outcome: review_pending",
+            "Mutual 只属于 structured user governance",
+            "Retire、Reactivate、Forget、Supersession",
         ] {
             assert!(
                 memory_semantics.contains(required),

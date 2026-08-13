@@ -34,7 +34,7 @@ pub const TEAM_CREATE_TASK_TOOL_NAME: &str = "team.create_task";
 pub const TEAM_GET_TASK_TOOL_NAME: &str = "team.get_task";
 pub const TEAM_UPDATE_TASK_TOOL_NAME: &str = "team.update_task";
 pub const TEAM_LIST_TASKS_TOOL_NAME: &str = "team.list_tasks";
-pub const TEAM_TOOL_NAMES: [&str; 13] = [
+pub const TEAM_TOOL_NAMES: [&str; 12] = [
     CAMP_MESSAGE_SEND_TOOL_NAME,
     TEAM_CREATE_TASK_TOOL_NAME,
     TEAM_GET_TASK_TOOL_NAME,
@@ -47,7 +47,6 @@ pub const TEAM_TOOL_NAMES: [&str; 13] = [
     "memory.search",
     "memory.read",
     "memory.write",
-    "memory.propose_hearth",
 ];
 pub const MAX_A2A_DEPTH: i64 = 5;
 pub const MAX_A2A_RUNS_PER_TURN: i64 = PRODUCT_MAX_ACCEPTED_A2A;
@@ -1576,18 +1575,16 @@ mod tests {
         },
         managed_blob::ManagedBlobStore,
         memory::{
-            AcceptHearthMemoryProposalCommand, CreateMemoryCommand, ForgetMemoryCommand,
-            MemoryCreationOrigin, MemoryKind, MemoryScopeKind, MemoryService, RetireMemoryCommand,
+            AcceptHearthReviewItemCommand, CreateMemoryCommand, ForgetMemoryCommand,
+            MemoryCreationOrigin, MemoryKind, MemoryScopeKind, MemoryService,
+            RejectHearthReviewItemCommand, RelationshipDirection, RetireMemoryCommand,
             ReviseMemoryCommand,
         },
         memory_retrieval::{
             MemoryCacheState, MemoryReadInput, MemoryRetrievalInvocation, MemoryRetrievalService,
             MemorySearchInput,
         },
-        memory_tool::{
-            HearthProposalToolInput, HearthProposalToolInvocation, MemoryToolService,
-            MemoryWriteToolInput, MemoryWriteToolInvocation,
-        },
+        memory_tool::{MemoryToolService, MemoryWriteToolInput, MemoryWriteToolInvocation},
         message_delivery::{DeliveryDispatchTrigger, dispatch_pending_for_recipient},
         runtime::{
             BindNativeSessionCommand, ClaimAgentRunCommand, ExecutionRuntimeService,
@@ -4190,7 +4187,7 @@ Use this exact public input @agent_2";
             )
             .unwrap();
         assert_eq!(companion.result.status, CommandResultStatus::Applied);
-        assert_eq!(companion.result.payload["effective"], true);
+        assert_eq!(companion.result.payload["outcome"], "effective");
         let companion_id = companion.result.payload["memoryId"].as_str().unwrap();
         let companion_memory = MemoryService::default()
             .get(&fixture.database, companion_id)
@@ -4203,18 +4200,21 @@ Use this exact public input @agent_2";
         assert_eq!(companion_memory.lifecycle, "active");
 
         let proposed = tools
-            .propose_hearth(
+            .write(
                 &mut fixture.database,
-                &HearthProposalToolInvocation {
+                &MemoryWriteToolInvocation {
                     native_binding_id: fixture.credential.native_binding_id.clone(),
                     binding_credential: fixture.credential.binding_credential.clone(),
-                    runtime_tool_call_id: "memory-propose-hearth".to_string(),
-                    input: HearthProposalToolInput {
+                    runtime_tool_call_id: "memory-write-hearth".to_string(),
+                    input: MemoryWriteToolInput {
                         action: "add".to_string(),
+                        scope: Some(MemoryScopeKind::Hearth),
                         kind: Some(MemoryKind::Agreement),
                         body: "All recovery retries must reuse the exact frozen payload."
                             .to_string(),
                         retrieval_keys: vec!["exact retry".to_string()],
+                        counterparty_agent_id: None,
+                        direction: None,
                         memory_id: None,
                         base_revision_id: None,
                     },
@@ -4222,8 +4222,8 @@ Use this exact public input @agent_2";
             )
             .unwrap();
         assert_eq!(proposed.result.status, CommandResultStatus::Accepted);
-        assert_eq!(proposed.result.payload["effective"], false);
-        let proposal_id = proposed.result.payload["proposalId"]
+        assert_eq!(proposed.result.payload["outcome"], "review_pending");
+        let review_item_id = proposed.result.payload["reviewItemId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -4238,15 +4238,14 @@ Use this exact public input @agent_2";
         );
 
         let accepted = MemoryService::default()
-            .accept_hearth_proposal(
+            .accept_hearth_review_item(
                 &mut fixture.database,
                 &user_envelope(
-                    "accept-hearth-proposal",
+                    "accept-hearth-review",
                     None,
-                    AcceptHearthMemoryProposalCommand {
-                        proposal_id,
-                        expected_version: 1,
-                        final_kind: None,
+                    AcceptHearthReviewItemCommand {
+                        review_item_id,
+                        expected_review_item_version: 1,
                         final_body: None,
                         final_retrieval_keys: None,
                     },
@@ -4261,9 +4260,532 @@ Use this exact public input @agent_2";
             .unwrap();
         assert_eq!(
             hearth.creation_origin,
-            Some(MemoryCreationOrigin::AcceptedHearthProposal)
+            Some(MemoryCreationOrigin::AcceptedHearthReview)
         );
         assert_eq!(hearth.lifecycle, "active");
+    }
+
+    #[test]
+    fn agent_memory_write_is_actor_bounded_and_denies_unowned_targets_without_oracles() {
+        let mut fixture = Fixture::new();
+        let tools = MemoryToolService;
+        let native_binding_id = fixture.credential.native_binding_id.clone();
+        let binding_credential = fixture.credential.binding_credential.clone();
+        let invocation =
+            |call_id: &str, input: MemoryWriteToolInput| -> MemoryWriteToolInvocation {
+                MemoryWriteToolInvocation {
+                    native_binding_id: native_binding_id.clone(),
+                    binding_credential: binding_credential.clone(),
+                    runtime_tool_call_id: call_id.to_string(),
+                    input,
+                }
+            };
+
+        let directed = tools
+            .write(
+                &mut fixture.database,
+                &invocation(
+                    "directed-add",
+                    MemoryWriteToolInput {
+                        action: "add".to_string(),
+                        scope: Some(MemoryScopeKind::Relationship),
+                        kind: Some(MemoryKind::Agreement),
+                        body: "I will provide agent two with exact handoff evidence.".to_string(),
+                        retrieval_keys: vec!["exact handoff".to_string()],
+                        counterparty_agent_id: Some("agent_2".to_string()),
+                        direction: Some(RelationshipDirection::Directed),
+                        memory_id: None,
+                        base_revision_id: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(directed.result.status, CommandResultStatus::Applied);
+        let directed_memory = MemoryService::default()
+            .get(
+                &fixture.database,
+                directed.result.payload["memoryId"].as_str().unwrap(),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            directed_memory.directed_actor_agent_id.as_deref(),
+            Some("agent_1")
+        );
+
+        let mutual_error = tools
+            .write(
+                &mut fixture.database,
+                &invocation(
+                    "mutual-add",
+                    MemoryWriteToolInput {
+                        action: "add".to_string(),
+                        scope: Some(MemoryScopeKind::Relationship),
+                        kind: Some(MemoryKind::Lesson),
+                        body: "Both agents should claim the same future obligation.".to_string(),
+                        retrieval_keys: vec!["mutual obligation".to_string()],
+                        counterparty_agent_id: Some("agent_2".to_string()),
+                        direction: Some(RelationshipDirection::Mutual),
+                        memory_id: None,
+                        base_revision_id: None,
+                    },
+                ),
+            )
+            .unwrap_err();
+        assert!(mutual_error.to_string().contains("memory.scope_forbidden"));
+
+        let other_companion = MemoryService::default()
+            .create(
+                &mut fixture.database,
+                &user_envelope(
+                    "other-companion",
+                    None,
+                    CreateMemoryCommand {
+                        scope: MemoryScopeKind::Companion,
+                        kind: MemoryKind::Lesson,
+                        body: "Agent two owns this Companion lesson.".to_string(),
+                        retrieval_keys: vec!["agent two lesson".to_string()],
+                        companion_agent_id: Some("agent_2".to_string()),
+                        relationship_agent_ids: Vec::new(),
+                        direction: None,
+                        directed_actor_agent_id: None,
+                        review_after: None,
+                    },
+                ),
+            )
+            .unwrap();
+        let other_companion_id = other_companion.result.payload["memoryId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let other_revision_id = other_companion.result.payload["revisionId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let denied = tools
+            .write(
+                &mut fixture.database,
+                &invocation(
+                    "other-companion-revise",
+                    MemoryWriteToolInput {
+                        action: "revise".to_string(),
+                        scope: None,
+                        kind: None,
+                        body: "Agent one must not revise agent two's Companion.".to_string(),
+                        retrieval_keys: vec!["ownership boundary".to_string()],
+                        counterparty_agent_id: None,
+                        direction: None,
+                        memory_id: Some(other_companion_id),
+                        base_revision_id: Some(other_revision_id),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(denied.result.status, CommandResultStatus::Rejected);
+        assert_eq!(denied.result.code, "memory.unavailable");
+
+        let guessed = tools
+            .write(
+                &mut fixture.database,
+                &invocation(
+                    "guessed-memory-revise",
+                    MemoryWriteToolInput {
+                        action: "revise".to_string(),
+                        scope: None,
+                        kind: None,
+                        body: "A guessed identifier must reveal no target facts.".to_string(),
+                        retrieval_keys: vec!["guessed target".to_string()],
+                        counterparty_agent_id: None,
+                        direction: None,
+                        memory_id: Some(Uuid::new_v4().to_string()),
+                        base_revision_id: Some(Uuid::new_v4().to_string()),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(guessed.result.status, CommandResultStatus::Rejected);
+        assert_eq!(guessed.result.code, "memory.unavailable");
+        assert_eq!(
+            guessed.result.payload,
+            json!({"message": "Memory is unavailable"})
+        );
+    }
+
+    #[test]
+    fn hearth_review_terminalizes_candidates_and_reconciles_exact_publication() {
+        let mut fixture = Fixture::new();
+        let tools = MemoryToolService;
+        let write_hearth =
+            |fixture: &mut Fixture, call_id: &str, body: &str, key: &str| -> CommandExecution {
+                tools
+                    .write(
+                        &mut fixture.database,
+                        &MemoryWriteToolInvocation {
+                            native_binding_id: fixture.credential.native_binding_id.clone(),
+                            binding_credential: fixture.credential.binding_credential.clone(),
+                            runtime_tool_call_id: call_id.to_string(),
+                            input: MemoryWriteToolInput {
+                                action: "add".to_string(),
+                                scope: Some(MemoryScopeKind::Hearth),
+                                kind: Some(MemoryKind::Lesson),
+                                body: body.to_string(),
+                                retrieval_keys: vec![key.to_string()],
+                                counterparty_agent_id: None,
+                                direction: None,
+                                memory_id: None,
+                                base_revision_id: None,
+                            },
+                        },
+                    )
+                    .unwrap()
+            };
+
+        let first_body = "Verify recovery evidence before retrying a frozen action.";
+        let final_body = "Reuse the same verified evidence before every recovery retry.";
+        let first = write_hearth(
+            &mut fixture,
+            "review-add-first",
+            first_body,
+            "frozen recovery",
+        );
+        let duplicate = write_hearth(
+            &mut fixture,
+            "review-add-duplicate",
+            first_body,
+            "different retrieval key",
+        );
+        assert_eq!(duplicate.result.status, CommandResultStatus::Rejected);
+        assert_eq!(duplicate.result.code, "memory.duplicate_pending");
+        assert_eq!(
+            duplicate.result.payload,
+            json!({"message": "An identical pending Hearth Review Item already exists"})
+        );
+        let matching = write_hearth(
+            &mut fixture,
+            "review-add-matching",
+            final_body,
+            "verified retry",
+        );
+        let first_id = first.result.payload["reviewItemId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let matching_id = matching.result.payload["reviewItemId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let accepted = MemoryService::default()
+            .accept_hearth_review_item(
+                &mut fixture.database,
+                &user_envelope(
+                    "edit-and-accept-review",
+                    None,
+                    AcceptHearthReviewItemCommand {
+                        review_item_id: first_id.clone(),
+                        expected_review_item_version: 1,
+                        final_body: Some(final_body.to_string()),
+                        final_retrieval_keys: Some(vec!["final recovery".to_string()]),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(accepted.result.status, CommandResultStatus::Applied);
+
+        let reviews = MemoryService::default()
+            .list_hearth_review_items(&fixture.database)
+            .unwrap();
+        let accepted_review = reviews
+            .iter()
+            .find(|review| review.review_item_id == first_id)
+            .unwrap();
+        assert_eq!(accepted_review.status, "accepted");
+        assert_eq!(accepted_review.edited_before_acceptance, Some(true));
+        assert!(accepted_review.candidate_kind.is_none());
+        assert!(accepted_review.candidate_body.is_none());
+        assert!(accepted_review.candidate_retrieval_keys.is_none());
+        let invalidated = reviews
+            .iter()
+            .find(|review| review.review_item_id == matching_id)
+            .unwrap();
+        assert_eq!(invalidated.status, "invalidated");
+        assert_eq!(
+            invalidated.invalidation_reason.as_deref(),
+            Some("exact_candidate_published")
+        );
+        assert!(invalidated.candidate_body.is_none());
+
+        let stale_decision = MemoryService::default()
+            .reject_hearth_review_item(
+                &mut fixture.database,
+                &user_envelope(
+                    "reject-terminal-review",
+                    None,
+                    RejectHearthReviewItemCommand {
+                        review_item_id: first_id,
+                        expected_review_item_version: 1,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(stale_decision.result.status, CommandResultStatus::Rejected);
+        assert_eq!(stale_decision.result.code, "memory.review_version_conflict");
+
+        let leaked_event_rows: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT COUNT(*) FROM event_log
+                WHERE event_type LIKE 'memory.hearth_review_%'
+                  AND (instr(payload_json, ?1) > 0 OR instr(payload_json, ?2) > 0)
+                "#,
+                params![first_body, final_body],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(leaked_event_rows, 0);
+    }
+
+    #[test]
+    fn pending_hearth_review_is_unreadable_stale_is_reject_only_and_forget_closes_history() {
+        let mut fixture = Fixture::new();
+        let service = MemoryService::default();
+        let original_body = "Preserve the original verified recovery record.";
+        let created = service
+            .create(
+                &mut fixture.database,
+                &user_envelope(
+                    "create-review-target",
+                    None,
+                    CreateMemoryCommand {
+                        scope: MemoryScopeKind::Hearth,
+                        kind: MemoryKind::Lesson,
+                        body: original_body.to_string(),
+                        retrieval_keys: vec!["verified record".to_string()],
+                        companion_agent_id: None,
+                        relationship_agent_ids: Vec::new(),
+                        direction: None,
+                        directed_actor_agent_id: None,
+                        review_after: None,
+                    },
+                ),
+            )
+            .unwrap();
+        let memory_id = created.result.payload["memoryId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let original_revision_id = created.result.payload["revisionId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let candidate_body = "candidate-only-marker should replace the recovery record.";
+        let first_review = MemoryToolService
+            .write(
+                &mut fixture.database,
+                &MemoryWriteToolInvocation {
+                    native_binding_id: fixture.credential.native_binding_id.clone(),
+                    binding_credential: fixture.credential.binding_credential.clone(),
+                    runtime_tool_call_id: "hearth-revise-first".to_string(),
+                    input: MemoryWriteToolInput {
+                        action: "revise".to_string(),
+                        scope: None,
+                        kind: None,
+                        body: candidate_body.to_string(),
+                        retrieval_keys: vec!["candidate marker".to_string()],
+                        counterparty_agent_id: None,
+                        direction: None,
+                        memory_id: Some(memory_id.clone()),
+                        base_revision_id: Some(original_revision_id.clone()),
+                    },
+                },
+            )
+            .unwrap();
+        let first_review_id = first_review.result.payload["reviewItemId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let retrieval = MemoryRetrievalService;
+        let hidden = retrieval
+            .search(
+                &mut fixture.database,
+                &MemoryRetrievalInvocation {
+                    native_binding_id: fixture.credential.native_binding_id.clone(),
+                    binding_credential: fixture.credential.binding_credential.clone(),
+                    runtime_tool_call_id: "search-pending-review".to_string(),
+                    input: MemorySearchInput {
+                        query: "candidate-only-marker".to_string(),
+                        limit: Some(6),
+                    },
+                },
+            )
+            .unwrap();
+        assert!(hidden.results.is_empty());
+        let guessed_review = retrieval
+            .read(
+                &mut fixture.database,
+                &MemoryRetrievalInvocation {
+                    native_binding_id: fixture.credential.native_binding_id.clone(),
+                    binding_credential: fixture.credential.binding_credential.clone(),
+                    runtime_tool_call_id: "read-review-id-as-memory".to_string(),
+                    input: MemoryReadInput {
+                        memory_ids: vec![first_review_id.clone()],
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            guessed_review.memories[0].cache_state,
+            MemoryCacheState::Unavailable
+        );
+        assert!(guessed_review.memories[0].body.is_none());
+
+        let revised = service
+            .revise(
+                &mut fixture.database,
+                &user_envelope(
+                    "advance-review-target",
+                    None,
+                    ReviseMemoryCommand {
+                        memory_id: memory_id.clone(),
+                        expected_version: 1,
+                        base_revision_id: original_revision_id,
+                        body: "Use the current verified recovery record.".to_string(),
+                        retrieval_keys: vec!["current record".to_string()],
+                        review_after: None,
+                    },
+                ),
+            )
+            .unwrap();
+        let current_revision_id = revised.result.payload["revisionId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let stale = service
+            .list_hearth_review_items(&fixture.database)
+            .unwrap()
+            .into_iter()
+            .find(|review| review.review_item_id == first_review_id)
+            .unwrap();
+        assert!(stale.stale);
+        let stale_accept = service
+            .accept_hearth_review_item(
+                &mut fixture.database,
+                &user_envelope(
+                    "accept-stale-review",
+                    None,
+                    AcceptHearthReviewItemCommand {
+                        review_item_id: first_review_id.clone(),
+                        expected_review_item_version: 1,
+                        final_body: None,
+                        final_retrieval_keys: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(stale_accept.result.code, "memory.review_stale");
+        let stale_reject = service
+            .reject_hearth_review_item(
+                &mut fixture.database,
+                &user_envelope(
+                    "reject-stale-review",
+                    None,
+                    RejectHearthReviewItemCommand {
+                        review_item_id: first_review_id.clone(),
+                        expected_review_item_version: 1,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(stale_reject.result.status, CommandResultStatus::Applied);
+
+        let second_review = MemoryToolService
+            .write(
+                &mut fixture.database,
+                &MemoryWriteToolInvocation {
+                    native_binding_id: fixture.credential.native_binding_id.clone(),
+                    binding_credential: fixture.credential.binding_credential.clone(),
+                    runtime_tool_call_id: "hearth-revise-before-forget".to_string(),
+                    input: MemoryWriteToolInput {
+                        action: "revise".to_string(),
+                        scope: None,
+                        kind: None,
+                        body: "A pending target revision must clear when forgotten.".to_string(),
+                        retrieval_keys: vec!["forget target".to_string()],
+                        counterparty_agent_id: None,
+                        direction: None,
+                        memory_id: Some(memory_id.clone()),
+                        base_revision_id: Some(current_revision_id),
+                    },
+                },
+            )
+            .unwrap();
+        let second_review_id = second_review.result.payload["reviewItemId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let historical_add = MemoryToolService
+            .write(
+                &mut fixture.database,
+                &MemoryWriteToolInvocation {
+                    native_binding_id: fixture.credential.native_binding_id.clone(),
+                    binding_credential: fixture.credential.binding_credential.clone(),
+                    runtime_tool_call_id: "hearth-add-historical-body".to_string(),
+                    input: MemoryWriteToolInput {
+                        action: "add".to_string(),
+                        scope: Some(MemoryScopeKind::Hearth),
+                        kind: Some(MemoryKind::Lesson),
+                        body: original_body.to_string(),
+                        retrieval_keys: vec!["historical body".to_string()],
+                        counterparty_agent_id: None,
+                        direction: None,
+                        memory_id: None,
+                        base_revision_id: None,
+                    },
+                },
+            )
+            .unwrap();
+        let historical_add_id = historical_add.result.payload["reviewItemId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        service
+            .forget(
+                &mut fixture.database,
+                &user_envelope(
+                    "forget-review-target",
+                    None,
+                    ForgetMemoryCommand {
+                        memory_id,
+                        expected_version: 2,
+                    },
+                ),
+            )
+            .unwrap();
+        let reviews = service.list_hearth_review_items(&fixture.database).unwrap();
+        let target_review = reviews
+            .iter()
+            .find(|review| review.review_item_id == second_review_id)
+            .unwrap();
+        assert_eq!(target_review.status, "invalidated");
+        assert_eq!(
+            target_review.invalidation_reason.as_deref(),
+            Some("target_forgotten")
+        );
+        assert!(target_review.candidate_body.is_none());
+        let historical = reviews
+            .iter()
+            .find(|review| review.review_item_id == historical_add_id)
+            .unwrap();
+        assert_eq!(historical.status, "invalidated");
+        assert_eq!(
+            historical.invalidation_reason.as_deref(),
+            Some("exact_candidate_published")
+        );
+        assert!(historical.candidate_body.is_none());
     }
 
     #[cfg(any())]

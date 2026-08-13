@@ -28,6 +28,5 @@
   "history.search": {"canonicalResult":{"results":[],"truncated":false,"searchIncomplete":false},"agentOutput":{"results":[],"truncated":false,"searchIncomplete":false}},
   "memory.search": {"canonicalResult":{"results":[]},"agentOutput":{"results":[]}},
   "memory.read": {"canonicalResult":{"memories":[]},"agentOutput":{"memories":[]}},
-  "memory.write": {"canonicalResult":{"action":"add","memoryId":"memory_123","revisionId":"revision_123","effective":true},"agentOutput":{"memoryId":"memory_123","revisionId":"revision_123"}},
-  "memory.propose_hearth": {"canonicalResult":{"proposalId":"proposal_123","status":"pending","effective":false},"agentOutput":{"proposalId":"proposal_123","status":"pending","effective":false}}
+  "memory.write": {"canonicalResult":{"outcome":"effective","memoryId":"memory_123","revisionId":"revision_123"},"agentOutput":{"outcome":"effective","memoryId":"memory_123","revisionId":"revision_123"}}
 }

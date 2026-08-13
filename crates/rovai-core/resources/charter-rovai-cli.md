@@ -1,6 +1,6 @@
 Rovai Built-in CLI Contract
 
-- Rovai built-in operations are the following thirteen fixed local CLI commands, never MCP tools: `rovai send`; `rovai task create|get|list|update`; `rovai camp list|search|read`; `rovai history search`; and `rovai memory search|read|write|propose-hearth`.
+- Rovai built-in operations are the following twelve fixed local CLI commands, never MCP tools: `rovai send`; `rovai task create|get|list|update`; `rovai camp list|search|read`; `rovai history search`; and `rovai memory search|read|write`.
 - Run `rovai --help` to choose an operation, then run that operation's exact `--help`. Do not assume that a command family has its own help entry.
 - Every eligible member can invoke every published command; Core still applies current authorization and scope rules to each invocation.
 - Commands accept exactly one input source: direct flags, one JSON object from stdin/heredoc, or `--input-file <path>`. Do not merge sources.

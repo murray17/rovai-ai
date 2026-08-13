@@ -27,7 +27,7 @@ import type {
   NavigationSnapshot,
   ProjectNavigationGroup,
   RestorableLocation,
-  HearthMemoryProposal,
+  HearthReviewItem,
   SendCampMessageResult,
   StoredCommandResult,
   ThemePreference,
@@ -251,7 +251,7 @@ export function App(): React.JSX.Element {
   const [removedProjectKeys, setRemovedProjectKeys] = useState<Set<string>>(() => new Set())
   const [pinnedCampItems, setPinnedCampItems] = useState<NavigationCampItem[]>([])
   const [pendingMemoryCount, setPendingMemoryCount] = useState(0)
-  const [memoryProposalNotice, setMemoryProposalNotice] = useState(false)
+  const [memoryReviewNotice, setMemoryReviewNotice] = useState(false)
   const [memoryAutoNotice, setMemoryAutoNotice] = useState<{
     count: number
     memoryId: string | null
@@ -259,7 +259,7 @@ export function App(): React.JSX.Element {
   }>({ count: 0, memoryId: null, scope: null })
   const [memoryRefreshKey, setMemoryRefreshKey] = useState(0)
   const [memoryFocusId, setMemoryFocusId] = useState<string | null>(null)
-  const [memoryProposalDrawerSignal, setMemoryProposalDrawerSignal] = useState(0)
+  const [memoryReviewDrawerSignal, setMemoryReviewDrawerSignal] = useState(0)
   const [campSnapshot, setCampSnapshot] = useState<CampSnapshot | null>(null)
   const [campInspectorVisible, setCampInspectorVisible] = useState(initialCampInspectorVisibility)
   const [campInspectorTab, setCampInspectorTab] = useState<CampInspectorTab>('tasks')
@@ -391,13 +391,13 @@ export function App(): React.JSX.Element {
             setInstallations(nextInstallations)
             return nextInstallations
           })
-        const nextMemoryProposalsPromise = window.rovai
-          .request<HearthMemoryProposal[]>('memory.hearthProposals.list')
-          .then((nextMemoryProposals) => {
+        const nextMemoryReviewItemsPromise = window.rovai
+          .request<HearthReviewItem[]>('memory.hearthReviewItems.list')
+          .then((nextMemoryReviewItems) => {
             setPendingMemoryCount(
-              nextMemoryProposals.filter((proposal) => proposal.status === 'pending').length
+              nextMemoryReviewItems.filter((reviewItem) => reviewItem.status === 'pending').length
             )
-            return nextMemoryProposals
+            return nextMemoryReviewItems
           })
         const nextNavigationPreferencesPromise = window.rovai.navigationPreferences.get()
 
@@ -423,7 +423,7 @@ export function App(): React.JSX.Element {
         await Promise.all([
           nextAgentsPromise,
           nextInstallationsPromise,
-          nextMemoryProposalsPromise
+          nextMemoryReviewItemsPromise
         ])
         setState('ready')
         return true
@@ -1017,14 +1017,14 @@ export function App(): React.JSX.Element {
           limit: 250
         })
         if (cancelled) return
-        const proposalSaved = batch.events.some((event) =>
-          event.eventType === 'memory.hearth_proposal_created'
+        const reviewItemCreated = batch.events.some((event) =>
+          event.eventType === 'memory.hearth_review_created'
         )
         const autoAppliedEvents = batch.events.filter((event) =>
           event.eventType === 'memory.agent_created' || event.eventType === 'memory.agent_revised'
         )
-        if (proposalSaved || autoAppliedEvents.length > 0) {
-          if (proposalSaved) setMemoryProposalNotice(true)
+        if (reviewItemCreated || autoAppliedEvents.length > 0) {
+          if (reviewItemCreated) setMemoryReviewNotice(true)
           if (autoAppliedEvents.length > 0) {
             const lastPayload = asRecord(autoAppliedEvents.at(-1)?.payload)
             const lastMemoryId = typeof lastPayload.memoryId === 'string'
@@ -1040,9 +1040,9 @@ export function App(): React.JSX.Element {
             }))
           }
           setMemoryRefreshKey((current) => current + 1)
-          void window.rovai.request<HearthMemoryProposal[]>('memory.hearthProposals.list')
-            .then((proposals) => setPendingMemoryCount(
-              proposals.filter((proposal) => proposal.status === 'pending').length
+          void window.rovai.request<HearthReviewItem[]>('memory.hearthReviewItems.list')
+            .then((reviewItems) => setPendingMemoryCount(
+              reviewItems.filter((reviewItem) => reviewItem.status === 'pending').length
             ))
             .catch(() => undefined)
         }
@@ -1198,10 +1198,10 @@ export function App(): React.JSX.Element {
     chooseView('members')
   }
 
-  const openMemoryProposals = (): void => {
-    setMemoryProposalNotice(false)
+  const openMemoryReviews = (): void => {
+    setMemoryReviewNotice(false)
     setMemoryFocusId(null)
-    setMemoryProposalDrawerSignal((current) => current + 1)
+    setMemoryReviewDrawerSignal((current) => current + 1)
     chooseView('memory')
   }
 
@@ -1847,17 +1847,17 @@ export function App(): React.JSX.Element {
     settings: 'settings-content'
   }
   const startupGateVisible = startupStatus !== 'resolved'
-  const inlineNotices = memoryProposalNotice || memoryAutoNotice.count > 0 || error || locationSaveError
+  const inlineNotices = memoryReviewNotice || memoryAutoNotice.count > 0 || error || locationSaveError
     ? (
         <>
-          {memoryProposalNotice && (
-            <div className="memory-proposal-notice" role="status">
-              <div><strong>队员提出了一条记忆建议</strong><span>提案尚未生效，你可以稍后在“记忆”中逐条确认。</span></div>
-              <div><button className="quiet-button compact" type="button" onClick={openMemoryProposals}>查看提案</button><button className="icon-button" type="button" aria-label="暂时忽略记忆提案提示" onClick={() => setMemoryProposalNotice(false)}>×</button></div>
+          {memoryReviewNotice && (
+            <div className="memory-review-notice" role="status">
+              <div><strong>队员提交了一条共同记忆审核</strong><span>候选内容尚未成为正式记忆，你可以稍后在“记忆”中逐条处理。</span></div>
+              <div><button className="quiet-button compact" type="button" onClick={openMemoryReviews}>查看审核</button><button className="icon-button" type="button" aria-label="暂时忽略共同记忆审核提示" onClick={() => setMemoryReviewNotice(false)}>×</button></div>
             </div>
           )}
           {memoryAutoNotice.count > 0 && (
-            <div className="memory-proposal-notice memory-auto-applied-notice" role="status" aria-live="polite">
+            <div className="memory-review-notice memory-auto-applied-notice" role="status" aria-live="polite">
               <div><strong>已自动形成 {memoryAutoNotice.count} 条{memoryAutoNotice.count === 1 ? memoryAutoNotice.scope === 'relationship' ? '队员间记忆' : memoryAutoNotice.scope === 'companion' ? '队员记忆' : '共同记忆' : '记忆'}</strong><span>已立即用于后续协作，你可以随时查看、修订、停止沿用或遗忘。</span></div>
               <div><button className="quiet-button compact" type="button" onClick={openAutomaticMemory}>查看</button><button className="icon-button" type="button" aria-label="关闭自动形成提示" onClick={() => setMemoryAutoNotice({ count: 0, memoryId: null, scope: null })}>×</button></div>
             </div>
@@ -2031,8 +2031,8 @@ export function App(): React.JSX.Element {
             topNotices={inlineNotices}
             refreshSignal={memoryRefreshKey}
             focusMemoryId={memoryFocusId}
-            proposalDrawerSignal={memoryProposalDrawerSignal}
-            onProposalDrawerSignalConsumed={() => setMemoryProposalDrawerSignal(0)}
+            reviewDrawerSignal={memoryReviewDrawerSignal}
+            onReviewDrawerSignalConsumed={() => setMemoryReviewDrawerSignal(0)}
             onPendingCountChange={setPendingMemoryCount}
             onReady={commitMemoryLocation}
           />

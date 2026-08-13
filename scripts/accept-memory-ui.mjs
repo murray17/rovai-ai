@@ -176,7 +176,7 @@ async function assertMemoryPageHeaderGeometry(cdp, context) {
       headerTop: round(headerBounds?.top),
       topBorderWidth: content ? getComputedStyle(content).borderTopWidth : null,
       headerAlignment: header ? getComputedStyle(header).alignItems : null,
-      kicker: document.querySelector('.memory-page-kicker')?.textContent?.trim(),
+      hasKicker: Boolean(document.querySelector('.memory-page-kicker')),
       actionBottomDelta: headingBounds && actionBounds
         ? round(actionBounds.bottom - headingBounds.bottom)
         : null
@@ -189,7 +189,7 @@ async function assertMemoryPageHeaderGeometry(cdp, context) {
       && Math.abs(state.headerTop - 33) <= 0.75
       && state.topBorderWidth === '3px'
       && state.headerAlignment === 'flex-end'
-      && state.kicker === 'Memory / Governed context'
+      && !state.hasKicker
       && Math.abs(state.actionBottomDelta) <= 0.75,
     `${context} did not match the P2 full-height header contract: ${JSON.stringify(state)}`
   )

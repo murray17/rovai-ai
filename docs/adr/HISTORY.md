@@ -80,8 +80,8 @@ generated_from: docs/adr-front-matter
 | [ADR-0066](0066-managed-product-runtime-resolution.md) | Managed Product Runtime Discovery, Resolution, and Relocation | `accepted` | `cross-version` | [v0.20](../versions/v0.20/README.md) | — |
 | [ADR-0067](0067-native-session-bootstrap-and-agentrun-context-v3.md) | Native Session Bootstrap and AgentRun Context v3 | `accepted` | `cross-version` | [v0.21](../versions/v0.21/README.md) | — |
 | [ADR-0068](0068-brokered-memory-retrieval-and-session-entrypoint.md) | Brokered Memory Retrieval and Session Entrypoint | `accepted` | `cross-version` | [v0.21](../versions/v0.21/README.md) | — |
-| [ADR-0069](0069-single-effective-memory-and-scope-bounded-agent-mutation.md) | Single Effective Memory and Scope-Bounded Agent Mutation | `accepted` | `cross-version` | [v0.21](../versions/v0.21/README.md) | — |
-| [ADR-0070](0070-normalized-sqlite-memory-store-v2.md) | Normalized SQLite Memory Store v2 | `accepted` | `cross-version` | [v0.21](../versions/v0.21/README.md) | — |
+| [ADR-0069](0069-single-effective-memory-and-scope-bounded-agent-mutation.md) | Single Effective Memory and Scope-Bounded Agent Mutation | `superseded` | `cross-version` | [v0.21](../versions/v0.21/README.md) | [ADR-0178](0178-best-effort-online-memory-capture-and-actor-bounded-mutation.md) |
+| [ADR-0070](0070-normalized-sqlite-memory-store-v2.md) | Normalized SQLite Memory Store v2 | `superseded` | `cross-version` | [v0.21](../versions/v0.21/README.md) | [ADR-0179](0179-normalized-memory-store-v3-with-isolated-hearth-review.md) |
 | [ADR-0071](0071-configured-camp-creation-and-lazy-conversations.md) | Configured Camp Creation and Lazy Conversations | `accepted` | `cross-version` | [v0.22](../versions/v0.22/README.md) | — |
 | [ADR-0072](0072-directory-workspace-and-dynamic-git-capability.md) | Directory Workspace Identity and Dynamic Git Capability | `accepted` | `cross-version` | [v0.23](../versions/v0.23/README.md) | — |
 | [ADR-0073](0073-agent-authored-a2a-conversation-messages.md) | Agent-Authored A2A Conversation Messages | `superseded` | `cross-version` | [v0.24](../versions/v0.24/README.md) | [ADR-0130](0130-public-a2a-message-and-unified-delivery.md) |
@@ -189,4 +189,7 @@ generated_from: docs/adr-front-matter
 | [ADR-0175](0175-core-owned-notification-occurrence-episode-and-change-journal.md) | Core-Owned Notification Occurrence, Episode and Change Journal | `accepted` | `cross-version` | [v0.71](../versions/v0.71/README.md) | — |
 | [ADR-0176](0176-eleven-skill-official-inventory-and-system-required-operations.md) | Eleven-Skill Official Inventory and System-Required Operations | `accepted` | `cross-version` | [v0.71](../versions/v0.71/README.md) | — |
 | [ADR-0177](0177-controlled-shutdown-fences-product-execution.md) | Controlled Shutdown Fences Product Execution Without Claiming Runtime Outcome | `accepted` | `cross-version` | [v0.71](../versions/v0.71/README.md) | — |
+| [ADR-0178](0178-best-effort-online-memory-capture-and-actor-bounded-mutation.md) | Best-Effort Online Memory Capture and Actor-Bounded Agent Mutation | `accepted` | `cross-version` | [v0.73](../versions/v0.73/README.md) | — |
+| [ADR-0179](0179-normalized-memory-store-v3-with-isolated-hearth-review.md) | Normalized Memory Store v3 with Isolated Hearth Review | `accepted` | `cross-version` | [v0.73](../versions/v0.73/README.md) | — |
+| [ADR-0180](0180-single-agent-memory-write-command.md) | Single Agent Memory Write Command with Outcome-Discriminated Output | `accepted` | `cross-version` | [v0.73](../versions/v0.73/README.md) | — |
 <!-- adr-history:end -->

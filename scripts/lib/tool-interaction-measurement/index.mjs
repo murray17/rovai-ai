@@ -29,7 +29,7 @@ const MODES = new Set(['forced_use', 'natural_use', 'non_use_control'])
 const ADAPTER_OPERATIONS = Object.freeze({
   camp_history: Object.freeze(['camp.list', 'camp.search', 'camp.read']),
   memory_retrieval: Object.freeze(['memory.search', 'memory.read']),
-  memory_mutation: Object.freeze(['memory.write', 'memory.propose_hearth']),
+  memory_mutation: Object.freeze(['memory.write']),
   camp_message_send: Object.freeze(['camp.message.send'])
 })
 
@@ -1085,7 +1085,7 @@ function projectOperationInput(operation, value) {
   if (operation === 'memory.read') return {
     memoryIds: normalizedIdentifiers(value.memoryIds)
   }
-  if (operation === 'memory.write' || operation === 'memory.propose_hearth') return compactObject({
+  if (operation === 'memory.write') return compactObject({
     action: boundedNullableString(value.action),
     memoryId: boundedNullableString(value.memoryId),
     baseRevisionId: boundedNullableString(value.baseRevisionId ?? value.expectedRevisionId),
@@ -1167,16 +1167,11 @@ function projectOperationResult(operation, value) {
     nextCursor: boundedNullableString(value.nextCursor)
   })
   if (operation === 'memory.write') return compactObject({
+    outcome: boundedNullableString(value.outcome),
     memoryId: boundedNullableString(value.memoryId),
     revisionId: boundedNullableString(value.revisionId),
+    reviewItemId: boundedNullableString(value.reviewItemId),
     action: boundedNullableString(value.action),
-    effective: booleanOrNull(value.effective),
-    version: boundedInteger(value.version)
-  })
-  if (operation === 'memory.propose_hearth') return compactObject({
-    proposalId: boundedNullableString(value.proposalId),
-    status: boundedNullableString(value.status),
-    effective: booleanOrNull(value.effective),
     version: boundedInteger(value.version)
   })
   return compactObject({
@@ -1726,7 +1721,7 @@ function extractResultIdentities(value) {
     value.campTurnId,
     value.memoryId,
     value.revisionId,
-    value.proposalId,
+    value.reviewItemId,
     ...(value.deliveryIds ?? []),
     ...(value.messageIds ?? []),
     ...(value.campIds ?? []),

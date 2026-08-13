@@ -8,7 +8,10 @@
 - `rovai memory search --help`
 - `rovai memory read --help`
 - `rovai memory write --help`
-- `rovai memory propose-hearth --help`
+
+Hearth、Companion 与 directed Relationship 都通过 `memory write`；Hearth 的成功结果是
+`review_pending`，不是已生效 Memory。Mutual Relationship 与 Lifecycle/Forget/Review decision 只属于
+structured user governance。
 
 本 reference 不拥有 Memory 的 authority 顺序、Entrypoint/cache state、安全边界、Revision、正文或
 retrieval-key 限制；这些规则全部由 `$memory-stewardship` 管理，不能用这里的 CLI 路由摘要替代。

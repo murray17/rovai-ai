@@ -43,8 +43,10 @@ pub struct Database {
     path: PathBuf,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.71";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 36;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.73";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 37;
+const V082_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.71";
+const V082_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 36;
 const V081_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.71";
 const V081_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 35;
 const V080_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.71";
@@ -75,6 +77,7 @@ struct CurrentMigrationState {
     v79: bool,
     v80: bool,
     v81: bool,
+    v82: bool,
 }
 
 impl CurrentMigrationState {
@@ -84,6 +87,22 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82;
+        }
+        if self.v82 {
+            return false;
+        }
+        if contract == V082_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V082_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -257,7 +276,8 @@ fn has_current_data_contract(path: &Path) -> bool {
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 78),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 79),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 80),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 81)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 81),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 82)
         "#,
         [],
         |row| {
@@ -274,6 +294,7 @@ fn has_current_data_contract(path: &Path) -> bool {
                 v79: row.get(9)?,
                 v80: row.get(10)?,
                 v81: row.get(11)?,
+                v82: row.get(12)?,
             })
         },
     );
@@ -1367,6 +1388,9 @@ impl Database {
             if !self.schema_migration_applied(81)? {
                 self.migrate_notification_heads_up_invalidation_v81()?;
             }
+            if !self.schema_migration_applied(82)? {
+                self.migrate_memory_store_v3_v82()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -1659,6 +1683,9 @@ impl Database {
         }
         if !self.schema_migration_applied(81)? {
             self.migrate_notification_heads_up_invalidation_v81()?;
+        }
+        if !self.schema_migration_applied(82)? {
+            self.migrate_memory_store_v3_v82()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -8394,6 +8421,605 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_memory_store_v3_v82(&mut self) -> Result<()> {
+        #[derive(Debug)]
+        struct LegacyReviewCandidate {
+            id: String,
+            action: String,
+            status: String,
+            candidate_kind: Option<String>,
+            candidate_body: Option<String>,
+            candidate_body_utf8_bytes: Option<i64>,
+            candidate_retrieval_keys_json: Option<String>,
+            target_memory_id: Option<String>,
+            base_revision_id: Option<String>,
+            source_agent_id: String,
+            source_camp_id: String,
+            source_agent_run_id: String,
+            source_execution_epoch: i64,
+            accepted_memory_id: Option<String>,
+            accepted_revision_id: Option<String>,
+            resolved_by_user_id: Option<String>,
+            version: i64,
+            created_at: String,
+            resolved_at: Option<String>,
+            candidate_cleared_at: Option<String>,
+        }
+
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(
+                r#"
+                CREATE TABLE memory_v82 (
+                    id TEXT PRIMARY KEY,
+                    scope_kind TEXT
+                        CHECK(scope_kind IN ('hearth', 'companion', 'relationship')),
+                    kind TEXT
+                        CHECK(kind IN ('preference', 'agreement', 'lesson')),
+                    creation_origin TEXT
+                        CHECK(creation_origin IN (
+                            'user', 'agent', 'accepted_hearth_review'
+                        )),
+                    companion_agent_id TEXT REFERENCES agent_profile(id),
+                    relationship_agent_low_id TEXT REFERENCES agent_profile(id),
+                    relationship_agent_high_id TEXT REFERENCES agent_profile(id),
+                    relationship_direction TEXT
+                        CHECK(relationship_direction IN ('mutual', 'directed')),
+                    directed_actor_agent_id TEXT REFERENCES agent_profile(id),
+                    lifecycle_status TEXT NOT NULL
+                        CHECK(lifecycle_status IN ('active', 'retired', 'forgotten')),
+                    current_revision_id TEXT REFERENCES memory_revision_v82(id)
+                        DEFERRABLE INITIALLY DEFERRED,
+                    review_after TEXT,
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    retired_at TEXT,
+                    forgotten_at TEXT,
+                    CHECK (
+                        (
+                            lifecycle_status = 'forgotten'
+                            AND scope_kind IS NULL
+                            AND kind IS NULL
+                            AND creation_origin IS NULL
+                            AND companion_agent_id IS NULL
+                            AND relationship_agent_low_id IS NULL
+                            AND relationship_agent_high_id IS NULL
+                            AND relationship_direction IS NULL
+                            AND directed_actor_agent_id IS NULL
+                            AND current_revision_id IS NULL
+                            AND review_after IS NULL
+                            AND forgotten_at IS NOT NULL
+                        )
+                        OR
+                        (
+                            lifecycle_status IN ('active', 'retired')
+                            AND scope_kind IS NOT NULL
+                            AND kind IS NOT NULL
+                            AND creation_origin IS NOT NULL
+                            AND current_revision_id IS NOT NULL
+                            AND forgotten_at IS NULL
+                            AND (
+                                (
+                                    scope_kind = 'hearth'
+                                    AND companion_agent_id IS NULL
+                                    AND relationship_agent_low_id IS NULL
+                                    AND relationship_agent_high_id IS NULL
+                                    AND relationship_direction IS NULL
+                                    AND directed_actor_agent_id IS NULL
+                                )
+                                OR
+                                (
+                                    scope_kind = 'companion'
+                                    AND companion_agent_id IS NOT NULL
+                                    AND relationship_agent_low_id IS NULL
+                                    AND relationship_agent_high_id IS NULL
+                                    AND relationship_direction IS NULL
+                                    AND directed_actor_agent_id IS NULL
+                                )
+                                OR
+                                (
+                                    scope_kind = 'relationship'
+                                    AND companion_agent_id IS NULL
+                                    AND relationship_agent_low_id IS NOT NULL
+                                    AND relationship_agent_high_id IS NOT NULL
+                                    AND relationship_agent_low_id <
+                                        relationship_agent_high_id
+                                    AND relationship_direction IS NOT NULL
+                                    AND kind IN ('agreement', 'lesson')
+                                    AND (
+                                        (
+                                            relationship_direction = 'mutual'
+                                            AND directed_actor_agent_id IS NULL
+                                        )
+                                        OR
+                                        (
+                                            relationship_direction = 'directed'
+                                            AND directed_actor_agent_id IN (
+                                                relationship_agent_low_id,
+                                                relationship_agent_high_id
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                );
+
+                CREATE TABLE memory_revision_v82 (
+                    id TEXT PRIMARY KEY,
+                    memory_id TEXT NOT NULL REFERENCES memory_v82(id)
+                        DEFERRABLE INITIALLY DEFERRED,
+                    body TEXT,
+                    body_utf8_bytes INTEGER CHECK(
+                        body_utf8_bytes IS NULL
+                        OR body_utf8_bytes BETWEEN 1 AND 2048
+                    ),
+                    body_digest TEXT,
+                    actor_kind TEXT CHECK(actor_kind IN ('user', 'agent')),
+                    actor_id TEXT,
+                    source_camp_id TEXT,
+                    source_agent_run_id TEXT,
+                    source_execution_epoch INTEGER CHECK(
+                        source_execution_epoch IS NULL OR source_execution_epoch >= 1
+                    ),
+                    created_from_hearth_review_item_id TEXT
+                        REFERENCES hearth_review_item_v82(id)
+                        DEFERRABLE INITIALLY DEFERRED,
+                    created_at TEXT NOT NULL,
+                    cleared_at TEXT,
+                    CHECK (
+                        (
+                            body IS NOT NULL
+                            AND length(body) > 0
+                            AND body_utf8_bytes IS NOT NULL
+                            AND body_digest IS NOT NULL
+                            AND actor_kind IS NOT NULL
+                            AND actor_id IS NOT NULL
+                            AND cleared_at IS NULL
+                            AND (
+                                (
+                                    actor_kind = 'user'
+                                    AND source_camp_id IS NULL
+                                    AND source_agent_run_id IS NULL
+                                    AND source_execution_epoch IS NULL
+                                )
+                                OR
+                                (
+                                    actor_kind = 'agent'
+                                    AND source_camp_id IS NOT NULL
+                                    AND source_agent_run_id IS NOT NULL
+                                    AND source_execution_epoch IS NOT NULL
+                                )
+                            )
+                        )
+                        OR
+                        (
+                            body IS NULL
+                            AND body_utf8_bytes IS NULL
+                            AND body_digest IS NULL
+                            AND actor_kind IS NULL
+                            AND actor_id IS NULL
+                            AND source_camp_id IS NULL
+                            AND source_agent_run_id IS NULL
+                            AND source_execution_epoch IS NULL
+                            AND created_from_hearth_review_item_id IS NULL
+                            AND cleared_at IS NOT NULL
+                        )
+                    )
+                );
+
+                CREATE TABLE memory_revision_retrieval_key_v82 (
+                    revision_id TEXT NOT NULL
+                        REFERENCES memory_revision_v82(id) ON DELETE CASCADE,
+                    position INTEGER NOT NULL CHECK(position BETWEEN 0 AND 2),
+                    normalized_key TEXT NOT NULL CHECK(
+                        length(normalized_key) > 0 AND length(normalized_key) <= 24
+                    ),
+                    PRIMARY KEY(revision_id, position),
+                    UNIQUE(revision_id, normalized_key)
+                );
+
+                CREATE TABLE hearth_review_item_v82 (
+                    id TEXT PRIMARY KEY,
+                    requested_action TEXT NOT NULL
+                        CHECK(requested_action IN ('add', 'revise')),
+                    status TEXT NOT NULL
+                        CHECK(status IN ('pending', 'accepted', 'rejected', 'invalidated')),
+                    candidate_kind TEXT
+                        CHECK(candidate_kind IN ('preference', 'agreement', 'lesson')),
+                    candidate_body TEXT,
+                    candidate_body_utf8_bytes INTEGER CHECK(
+                        candidate_body_utf8_bytes IS NULL
+                        OR candidate_body_utf8_bytes BETWEEN 1 AND 2048
+                    ),
+                    candidate_retrieval_keys_json TEXT,
+                    target_memory_id TEXT REFERENCES memory_v82(id),
+                    base_revision_id TEXT REFERENCES memory_revision_v82(id),
+                    pending_key_digest TEXT,
+                    source_agent_id TEXT NOT NULL,
+                    source_camp_id TEXT NOT NULL,
+                    source_agent_run_id TEXT NOT NULL,
+                    source_execution_epoch INTEGER NOT NULL
+                        CHECK(source_execution_epoch >= 1),
+                    accepted_memory_id TEXT REFERENCES memory_v82(id),
+                    accepted_revision_id TEXT REFERENCES memory_revision_v82(id),
+                    resolved_by_user_id TEXT,
+                    invalidation_reason TEXT CHECK(
+                        invalidation_reason IN (
+                            'target_forgotten', 'exact_candidate_published'
+                        )
+                    ),
+                    edited_before_acceptance INTEGER CHECK(
+                        edited_before_acceptance IS NULL
+                        OR edited_before_acceptance IN (0, 1)
+                    ),
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    resolved_at TEXT,
+                    candidate_cleared_at TEXT,
+                    CHECK (
+                        (
+                            status = 'pending'
+                            AND candidate_body IS NOT NULL
+                            AND length(candidate_body) > 0
+                            AND candidate_body_utf8_bytes IS NOT NULL
+                            AND candidate_retrieval_keys_json IS NOT NULL
+                            AND candidate_cleared_at IS NULL
+                            AND pending_key_digest IS NOT NULL
+                            AND resolved_at IS NULL
+                            AND accepted_memory_id IS NULL
+                            AND accepted_revision_id IS NULL
+                            AND resolved_by_user_id IS NULL
+                            AND invalidation_reason IS NULL
+                            AND edited_before_acceptance IS NULL
+                            AND (
+                                (
+                                    requested_action = 'add'
+                                    AND candidate_kind IS NOT NULL
+                                    AND target_memory_id IS NULL
+                                    AND base_revision_id IS NULL
+                                )
+                                OR
+                                (
+                                    requested_action = 'revise'
+                                    AND candidate_kind IS NULL
+                                    AND target_memory_id IS NOT NULL
+                                    AND base_revision_id IS NOT NULL
+                                )
+                            )
+                        )
+                        OR
+                        (
+                            status = 'accepted'
+                            AND candidate_kind IS NULL
+                            AND candidate_body IS NULL
+                            AND candidate_body_utf8_bytes IS NULL
+                            AND candidate_retrieval_keys_json IS NULL
+                            AND candidate_cleared_at IS NOT NULL
+                            AND pending_key_digest IS NULL
+                            AND accepted_memory_id IS NOT NULL
+                            AND accepted_revision_id IS NOT NULL
+                            AND resolved_by_user_id IS NOT NULL
+                            AND invalidation_reason IS NULL
+                            AND edited_before_acceptance IN (0, 1)
+                            AND resolved_at IS NOT NULL
+                        )
+                        OR
+                        (
+                            status = 'rejected'
+                            AND candidate_kind IS NULL
+                            AND candidate_body IS NULL
+                            AND candidate_body_utf8_bytes IS NULL
+                            AND candidate_retrieval_keys_json IS NULL
+                            AND candidate_cleared_at IS NOT NULL
+                            AND pending_key_digest IS NULL
+                            AND accepted_memory_id IS NULL
+                            AND accepted_revision_id IS NULL
+                            AND resolved_by_user_id IS NOT NULL
+                            AND invalidation_reason IS NULL
+                            AND edited_before_acceptance IS NULL
+                            AND resolved_at IS NOT NULL
+                        )
+                        OR
+                        (
+                            status = 'invalidated'
+                            AND candidate_kind IS NULL
+                            AND candidate_body IS NULL
+                            AND candidate_body_utf8_bytes IS NULL
+                            AND candidate_retrieval_keys_json IS NULL
+                            AND candidate_cleared_at IS NOT NULL
+                            AND pending_key_digest IS NULL
+                            AND accepted_memory_id IS NULL
+                            AND accepted_revision_id IS NULL
+                            AND resolved_by_user_id IS NULL
+                            AND invalidation_reason IS NOT NULL
+                            AND edited_before_acceptance IS NULL
+                            AND resolved_at IS NOT NULL
+                        )
+                    )
+                );
+
+                CREATE TABLE memory_supersession_v82 (
+                    predecessor_memory_id TEXT NOT NULL REFERENCES memory_v82(id),
+                    successor_memory_id TEXT NOT NULL REFERENCES memory_v82(id),
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(predecessor_memory_id, successor_memory_id),
+                    CHECK(predecessor_memory_id <> successor_memory_id)
+                );
+
+                INSERT INTO memory_v82
+                SELECT id, scope_kind, kind,
+                       CASE creation_origin
+                           WHEN 'accepted_hearth_proposal' THEN 'accepted_hearth_review'
+                           ELSE creation_origin
+                       END,
+                       companion_agent_id,
+                       relationship_agent_low_id, relationship_agent_high_id,
+                       relationship_direction, directed_actor_agent_id,
+                       lifecycle_status, current_revision_id, review_after,
+                       version, created_at, updated_at, retired_at, forgotten_at
+                FROM memory;
+
+                INSERT INTO memory_revision_v82
+                SELECT id, memory_id, body, body_utf8_bytes, body_digest,
+                       actor_kind, actor_id, source_camp_id, source_agent_run_id,
+                       source_execution_epoch, created_from_hearth_proposal_id,
+                       created_at, cleared_at
+                FROM memory_revision;
+
+                INSERT INTO memory_revision_retrieval_key_v82
+                SELECT revision_id, position, normalized_key
+                FROM memory_revision_retrieval_key;
+
+                INSERT INTO memory_supersession_v82
+                SELECT predecessor_memory_id, successor_memory_id, created_at
+                FROM memory_supersession;
+                "#,
+            )?;
+
+            let legacy = {
+                let mut statement = transaction.prepare(
+                    r#"
+                    SELECT id, action, status, candidate_kind, candidate_body,
+                           candidate_body_utf8_bytes, candidate_retrieval_keys_json,
+                           target_memory_id, base_revision_id, proposed_by_agent_id,
+                           source_camp_id, source_agent_run_id, source_execution_epoch,
+                           accepted_memory_id, accepted_revision_id, resolved_by_user_id,
+                           version, proposed_at, resolved_at, candidate_cleared_at
+                    FROM hearth_memory_proposal
+                    ORDER BY proposed_at, id
+                    "#,
+                )?;
+                statement
+                    .query_map([], |row| {
+                        Ok(LegacyReviewCandidate {
+                            id: row.get(0)?,
+                            action: row.get(1)?,
+                            status: row.get(2)?,
+                            candidate_kind: row.get(3)?,
+                            candidate_body: row.get(4)?,
+                            candidate_body_utf8_bytes: row.get(5)?,
+                            candidate_retrieval_keys_json: row.get(6)?,
+                            target_memory_id: row.get(7)?,
+                            base_revision_id: row.get(8)?,
+                            source_agent_id: row.get(9)?,
+                            source_camp_id: row.get(10)?,
+                            source_agent_run_id: row.get(11)?,
+                            source_execution_epoch: row.get(12)?,
+                            accepted_memory_id: row.get(13)?,
+                            accepted_revision_id: row.get(14)?,
+                            resolved_by_user_id: row.get(15)?,
+                            version: row.get(16)?,
+                            created_at: row.get(17)?,
+                            resolved_at: row.get(18)?,
+                            candidate_cleared_at: row.get(19)?,
+                        })
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            let migrated_at = chrono::Utc::now().to_rfc3339();
+            for candidate in legacy {
+                let mut status = candidate.status.clone();
+                let mut kind = candidate.candidate_kind.clone();
+                let mut body = candidate.candidate_body.clone();
+                let mut body_bytes = candidate.candidate_body_utf8_bytes;
+                let mut keys_json = candidate.candidate_retrieval_keys_json.clone();
+                let mut digest = None;
+                let mut resolved_at = candidate.resolved_at.clone();
+                let mut cleared_at = candidate.candidate_cleared_at.clone();
+                let mut invalidation_reason: Option<&str> = None;
+                let edited_before_acceptance: Option<bool> = None;
+
+                if status == "pending" {
+                    let candidate_body = body
+                        .as_deref()
+                        .context("pending legacy Hearth proposal has no body")?;
+                    let keys: Vec<String> = serde_json::from_str(
+                        keys_json
+                            .as_deref()
+                            .context("pending legacy Hearth proposal has no Retrieval Keys")?,
+                    )?;
+                    if candidate.action == "add" {
+                        let candidate_kind = kind
+                            .as_deref()
+                            .context("pending legacy Hearth add has no Kind")?;
+                        let formally_published: bool = transaction.query_row(
+                            r#"
+                            SELECT EXISTS(
+                                SELECT 1
+                                FROM memory_v82 AS memory
+                                JOIN memory_revision_v82 AS revision
+                                  ON revision.memory_id = memory.id
+                                WHERE memory.scope_kind = 'hearth'
+                                  AND memory.kind = ?1
+                                  AND revision.body = ?2
+                            )
+                            "#,
+                            params![candidate_kind, candidate_body],
+                            |row| row.get(0),
+                        )?;
+                        if formally_published {
+                            status = "invalidated".to_string();
+                            kind = None;
+                            body = None;
+                            body_bytes = None;
+                            keys_json = None;
+                            resolved_at = Some(migrated_at.clone());
+                            cleared_at = Some(migrated_at.clone());
+                            invalidation_reason = Some("exact_candidate_published");
+                        } else {
+                            digest = Some(canonical_json_digest(&json!({
+                                "domain": "rovai.memory.hearth-review.v1",
+                                "action": "add",
+                                "scope": "hearth",
+                                "kind": candidate_kind,
+                                "canonicalBody": candidate_body,
+                            }))?);
+                        }
+                    } else {
+                        digest = Some(canonical_json_digest(&json!({
+                            "domain": "rovai.memory.hearth-review.v1",
+                            "action": "revise",
+                            "targetMemoryId": candidate.target_memory_id,
+                            "baseRevisionId": candidate.base_revision_id,
+                            "canonicalBody": candidate_body,
+                            "normalizedRetrievalKeys": keys,
+                        }))?);
+                    }
+                } else {
+                    kind = None;
+                    body = None;
+                    body_bytes = None;
+                    keys_json = None;
+                    cleared_at = Some(cleared_at.unwrap_or_else(|| {
+                        resolved_at.clone().unwrap_or_else(|| migrated_at.clone())
+                    }));
+                }
+
+                transaction.execute(
+                    r#"
+                    INSERT INTO hearth_review_item_v82(
+                        id, requested_action, status, candidate_kind,
+                        candidate_body, candidate_body_utf8_bytes,
+                        candidate_retrieval_keys_json,
+                        target_memory_id, base_revision_id, pending_key_digest,
+                        source_agent_id, source_camp_id, source_agent_run_id,
+                        source_execution_epoch, accepted_memory_id,
+                        accepted_revision_id, resolved_by_user_id,
+                        invalidation_reason, edited_before_acceptance,
+                        version, created_at, resolved_at, candidate_cleared_at
+                    ) VALUES (
+                        ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+                        ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19,
+                        ?20, ?21, ?22, ?23
+                    )
+                    "#,
+                    params![
+                        candidate.id,
+                        candidate.action,
+                        status,
+                        kind,
+                        body,
+                        body_bytes,
+                        keys_json,
+                        candidate.target_memory_id,
+                        candidate.base_revision_id,
+                        digest,
+                        candidate.source_agent_id,
+                        candidate.source_camp_id,
+                        candidate.source_agent_run_id,
+                        candidate.source_execution_epoch,
+                        candidate.accepted_memory_id,
+                        candidate.accepted_revision_id,
+                        candidate.resolved_by_user_id,
+                        invalidation_reason,
+                        edited_before_acceptance,
+                        candidate.version,
+                        candidate.created_at,
+                        resolved_at,
+                        cleared_at,
+                    ],
+                )?;
+            }
+
+            transaction.execute_batch(
+                r#"
+                DROP TABLE memory_supersession;
+                DROP TABLE memory_revision_retrieval_key;
+                DROP TABLE hearth_memory_proposal;
+                DROP TABLE memory_revision;
+                DROP TABLE memory;
+
+                ALTER TABLE memory_v82 RENAME TO memory;
+                ALTER TABLE memory_revision_v82 RENAME TO memory_revision;
+                ALTER TABLE memory_revision_retrieval_key_v82
+                    RENAME TO memory_revision_retrieval_key;
+                ALTER TABLE hearth_review_item_v82 RENAME TO hearth_review_item;
+                ALTER TABLE memory_supersession_v82 RENAME TO memory_supersession;
+
+                CREATE INDEX memory_scope_lifecycle_idx
+                    ON memory(
+                        scope_kind, companion_agent_id,
+                        relationship_agent_low_id, relationship_agent_high_id,
+                        lifecycle_status, id
+                    );
+                CREATE INDEX memory_review_due_idx
+                    ON memory(review_after, id)
+                    WHERE lifecycle_status = 'active' AND review_after IS NOT NULL;
+                CREATE INDEX memory_origin_scope_idx
+                    ON memory(creation_origin, scope_kind, lifecycle_status, id);
+                CREATE INDEX memory_revision_memory_created_idx
+                    ON memory_revision(memory_id, created_at DESC, id);
+                CREATE INDEX memory_revision_source_run_idx
+                    ON memory_revision(source_agent_run_id, created_at, id)
+                    WHERE source_agent_run_id IS NOT NULL;
+                CREATE INDEX hearth_review_item_pending_digest_idx
+                    ON hearth_review_item(pending_key_digest)
+                    WHERE status = 'pending';
+                CREATE INDEX hearth_review_item_status_time_idx
+                    ON hearth_review_item(status, created_at, id);
+                CREATE INDEX hearth_review_item_source_run_idx
+                    ON hearth_review_item(source_agent_run_id, created_at, id);
+                CREATE INDEX hearth_review_item_target_idx
+                    ON hearth_review_item(target_memory_id, status, created_at, id);
+                CREATE INDEX hearth_review_item_accepted_memory_idx
+                    ON hearth_review_item(accepted_memory_id, status, created_at, id);
+                CREATE INDEX memory_supersession_successor_idx
+                    ON memory_supersession(successor_memory_id, predecessor_memory_id);
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v0.73', projection_schema_version = 37,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (82, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v82 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -12815,6 +13441,7 @@ mod tests {
                 SET contract_version = 'v0.71', projection_schema_version = 35
                 WHERE singleton = 1;
                 DELETE FROM schema_migration WHERE version = 81;
+                DELETE FROM schema_migration WHERE version = 82;
                 "#,
             )
             .unwrap();
@@ -13347,7 +13974,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.71".to_string(), 36));
+        assert_eq!(contract, ("v0.73".to_string(), 37));
         let v77_applied: i64 = database
             .connection()
             .query_row(
@@ -13457,7 +14084,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.71".to_string(), 36));
+        assert_eq!(contract, ("v0.73".to_string(), 37));
         drop(database);
 
         let reopened = Database::open(&directory).expect("v80 database should reopen");
@@ -13561,7 +14188,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.71".to_string(), 36));
+        assert_eq!(contract, ("v0.73".to_string(), 37));
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
@@ -15189,14 +15816,14 @@ mod tests {
     }
 
     #[test]
-    fn v32_installs_single_effective_memory_store_without_legacy_authority() {
-        let directory = std::env::temp_dir().join(format!("rovai-db-v32-test-{}", Uuid::new_v4()));
+    fn v82_installs_isolated_hearth_review_store_without_legacy_authority() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v82-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
         for table in [
             "memory",
             "memory_revision",
             "memory_revision_retrieval_key",
-            "hearth_memory_proposal",
+            "hearth_review_item",
             "memory_supersession",
             "memory_fts",
             "memory_access_evidence",
@@ -15213,6 +15840,7 @@ mod tests {
         }
         for removed in [
             "memory_proposal",
+            "hearth_memory_proposal",
             "memory_projection_observation",
             "memory_auto_policy",
         ] {
@@ -15234,7 +15862,7 @@ mod tests {
             "actor_kind",
             "actor_id",
             "source_agent_run_id",
-            "created_from_hearth_proposal_id",
+            "created_from_hearth_review_item_id",
         ] {
             assert!(revision_columns.contains(&required.to_string()));
         }
@@ -15251,11 +15879,11 @@ mod tests {
         assert!(!capabilities.contains(&"memory.propose_change".to_string()));
         drop(database);
 
-        let reopened = Database::open(&directory).expect("v32 database should reopen");
+        let reopened = Database::open(&directory).expect("v82 database should reopen");
         let migration_count: i64 = reopened
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM schema_migration WHERE version = 32",
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 82",
                 [],
                 |row| row.get(0),
             )
@@ -15271,6 +15899,300 @@ mod tests {
                 .count(),
             0
         );
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v82_migrates_legacy_review_rows_and_preserves_formal_memory() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai-db-v82-fixture-{}", Uuid::new_v4()));
+        let mut database = Database::open(&directory).expect("database should open");
+        crate::agent_profile::configure_test_runtime(&database, &["agent_1", "agent_2"]);
+
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                PRAGMA foreign_keys = OFF;
+                DROP TABLE hearth_review_item;
+                DELETE FROM schema_migration WHERE version = 32;
+                PRAGMA foreign_keys = ON;
+                "#,
+            )
+            .unwrap();
+        database
+            .migrate_memory_store_v32()
+            .expect("legacy Memory v2 schema should be restorable for the fixture");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                PRAGMA defer_foreign_keys = ON;
+                BEGIN IMMEDIATE;
+
+                INSERT INTO memory(
+                    id, scope_kind, kind, creation_origin, lifecycle_status,
+                    current_revision_id, version, created_at, updated_at
+                ) VALUES (
+                    'legacy-hearth', 'hearth', 'agreement',
+                    'accepted_hearth_proposal', 'active',
+                    'legacy-hearth-revision', 1, '2026-08-01T00:00:00Z',
+                    '2026-08-01T00:00:00Z'
+                );
+                INSERT INTO memory_revision(
+                    id, memory_id, body, body_utf8_bytes, body_digest,
+                    actor_kind, actor_id, created_from_hearth_proposal_id,
+                    created_at
+                ) VALUES (
+                    'legacy-hearth-revision', 'legacy-hearth',
+                    'Always preserve the verified handoff.', 37, 'sha256:formal',
+                    'user', 'local_user', 'legacy-accepted',
+                    '2026-08-01T00:00:00Z'
+                );
+                INSERT INTO memory_revision_retrieval_key(
+                    revision_id, position, normalized_key
+                ) VALUES ('legacy-hearth-revision', 0, 'verified handoff');
+
+                INSERT INTO memory(
+                    id, scope_kind, kind, creation_origin,
+                    relationship_agent_low_id, relationship_agent_high_id,
+                    relationship_direction, lifecycle_status,
+                    current_revision_id, version, created_at, updated_at
+                ) VALUES (
+                    'legacy-mutual', 'relationship', 'lesson', 'agent',
+                    'agent_1', 'agent_2', 'mutual', 'active',
+                    'legacy-mutual-revision', 1, '2026-08-01T00:00:01Z',
+                    '2026-08-01T00:00:01Z'
+                );
+                INSERT INTO memory_revision(
+                    id, memory_id, body, body_utf8_bytes, body_digest,
+                    actor_kind, actor_id, source_camp_id, source_agent_run_id,
+                    source_execution_epoch, created_at
+                ) VALUES (
+                    'legacy-mutual-revision', 'legacy-mutual',
+                    'Coordinate through exact handoffs.', 34, 'sha256:mutual',
+                    'agent', 'agent_1', 'missing-camp', 'missing-run', 1,
+                    '2026-08-01T00:00:01Z'
+                );
+                INSERT INTO memory_revision_retrieval_key(
+                    revision_id, position, normalized_key
+                ) VALUES ('legacy-mutual-revision', 0, 'exact handoff');
+
+                INSERT INTO hearth_memory_proposal(
+                    id, action, status, candidate_kind, candidate_body,
+                    candidate_body_utf8_bytes, candidate_retrieval_keys_json,
+                    pending_key_digest, proposed_by_agent_id, source_camp_id,
+                    source_agent_run_id, source_execution_epoch, version, proposed_at
+                ) VALUES
+                (
+                    'legacy-exact', 'add', 'pending', 'agreement',
+                    'Always preserve the verified handoff.', 37, '["alternate key"]',
+                    'legacy-exact-digest', 'agent_1', 'missing-camp', 'missing-run-a',
+                    1, 1, '2026-08-01T00:00:02Z'
+                ),
+                (
+                    'legacy-pending', 'add', 'pending', 'lesson',
+                    'Reuse evidence-backed recovery steps.', 37, '["recovery steps"]',
+                    'legacy-pending-digest', 'missing-agent', 'missing-camp',
+                    'missing-run-b', 2, 1, '2026-08-01T00:00:03Z'
+                );
+                INSERT INTO hearth_memory_proposal(
+                    id, action, status, candidate_kind, candidate_body,
+                    candidate_body_utf8_bytes, candidate_retrieval_keys_json,
+                    target_memory_id, base_revision_id, pending_key_digest,
+                    proposed_by_agent_id, source_camp_id, source_agent_run_id,
+                    source_execution_epoch, version, proposed_at
+                ) VALUES (
+                    'legacy-revise', 'revise', 'pending', NULL,
+                    'Always preserve the latest verified handoff.', 44,
+                    '["latest handoff"]', 'legacy-hearth', 'legacy-hearth-revision',
+                    'legacy-revise-digest', 'agent_1', 'missing-camp', 'missing-run-c',
+                    3, 1, '2026-08-01T00:00:04Z'
+                );
+                INSERT INTO hearth_memory_proposal(
+                    id, action, status, candidate_kind, candidate_body,
+                    candidate_body_utf8_bytes, candidate_retrieval_keys_json,
+                    pending_key_digest, proposed_by_agent_id, source_camp_id,
+                    source_agent_run_id, source_execution_epoch,
+                    accepted_memory_id, accepted_revision_id, resolved_by_user_id,
+                    version, proposed_at, resolved_at
+                ) VALUES (
+                    'legacy-accepted', 'add', 'accepted', 'agreement',
+                    'Accepted legacy candidate must clear.', 37, '["legacy accepted"]',
+                    NULL, 'agent_1', 'missing-camp', 'missing-run-d', 4,
+                    'legacy-hearth', 'legacy-hearth-revision', 'local_user', 2,
+                    '2026-08-01T00:00:00Z', '2026-08-01T00:00:05Z'
+                );
+                INSERT INTO hearth_memory_proposal(
+                    id, action, status, candidate_kind, candidate_body,
+                    candidate_body_utf8_bytes, candidate_retrieval_keys_json,
+                    pending_key_digest, proposed_by_agent_id, source_camp_id,
+                    source_agent_run_id, source_execution_epoch,
+                    resolved_by_user_id, version, proposed_at, resolved_at,
+                    candidate_cleared_at
+                ) VALUES (
+                    'legacy-rejected', 'add', 'rejected', NULL, NULL, NULL, NULL,
+                    NULL, 'agent_1', 'missing-camp', 'missing-run-e', 5,
+                    'local_user', 2, '2026-08-01T00:00:06Z',
+                    '2026-08-01T00:00:07Z', '2026-08-01T00:00:07Z'
+                );
+
+                COMMIT;
+                DELETE FROM schema_migration WHERE version = 82;
+                UPDATE rovai_data_contract
+                SET contract_version = 'v0.71', projection_schema_version = 36
+                WHERE singleton = 1;
+                "#,
+            )
+            .expect("legacy fixture should satisfy the pre-v3 schema");
+
+        database
+            .migrate_memory_store_v3_v82()
+            .expect("v82 migration should preserve formal data and isolate Review Items");
+
+        let origin: String = database
+            .connection()
+            .query_row(
+                "SELECT creation_origin FROM memory WHERE id = 'legacy-hearth'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(origin, "accepted_hearth_review");
+        let mutual: (String, String, String) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT creation_origin, relationship_direction, current_revision_id
+                FROM memory WHERE id = 'legacy-mutual'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            mutual,
+            (
+                "agent".into(),
+                "mutual".into(),
+                "legacy-mutual-revision".into()
+            )
+        );
+        let review_link: String = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT created_from_hearth_review_item_id
+                FROM memory_revision WHERE id = 'legacy-hearth-revision'
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(review_link, "legacy-accepted");
+
+        let exact: (String, Option<String>, Option<String>, Option<String>) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT status, candidate_body, pending_key_digest, invalidation_reason
+                FROM hearth_review_item WHERE id = 'legacy-exact'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            exact,
+            (
+                "invalidated".into(),
+                None,
+                None,
+                Some("exact_candidate_published".into())
+            )
+        );
+
+        let pending: (String, String, String, String) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT status, candidate_body, candidate_retrieval_keys_json,
+                       pending_key_digest
+                FROM hearth_review_item WHERE id = 'legacy-pending'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(pending.0, "pending");
+        assert_eq!(pending.1, "Reuse evidence-backed recovery steps.");
+        assert_eq!(pending.2, "[\"recovery steps\"]");
+        assert_ne!(pending.3, "legacy-pending-digest");
+
+        let revise: (String, Option<String>, String, String) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT status, candidate_kind, target_memory_id, base_revision_id
+                FROM hearth_review_item WHERE id = 'legacy-revise'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            revise,
+            (
+                "pending".into(),
+                None,
+                "legacy-hearth".into(),
+                "legacy-hearth-revision".into()
+            )
+        );
+
+        for review_item_id in ["legacy-accepted", "legacy-rejected"] {
+            let cleared: (
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+            ) = database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT candidate_kind, candidate_body,
+                           candidate_retrieval_keys_json, pending_key_digest
+                    FROM hearth_review_item WHERE id = ?1
+                    "#,
+                    [review_item_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .unwrap();
+            assert_eq!(cleared, (None, None, None, None));
+        }
+        assert_eq!(
+            database
+                .connection()
+                .prepare("PRAGMA foreign_key_check")
+                .unwrap()
+                .query_map([], |_| Ok(()))
+                .unwrap()
+                .count(),
+            0
+        );
+
+        drop(database);
+        let reopened = Database::open(&directory).expect("migrated v82 fixture should reopen");
+        let migration_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 82",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_count, 1);
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
@@ -15709,7 +16631,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(agent_cli_contract, ("v0.71".to_string(), 36, 1));
+        assert_eq!(agent_cli_contract, ("v0.73".to_string(), 37, 1));
         assert_eq!(foreign_key_violations, 0);
 
         drop(database);
@@ -16339,7 +17261,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.71".to_string(), 22));
+        assert_eq!(contract, ("v0.73".to_string(), 22));
         let migration_count: i64 = reopened
             .connection()
             .query_row(
@@ -16370,7 +17292,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, (36, 1));
+        assert_eq!(contract, (37, 1));
         let error = database
             .connection()
             .execute(
@@ -16690,7 +17612,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.71".to_string(), 36));
+        assert_eq!(contract, ("v0.73".to_string(), 37));
         let public_a2a_migration_applied: i64 = database
             .connection()
             .query_row(

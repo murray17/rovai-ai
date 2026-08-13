@@ -1,34 +1,33 @@
 # Scopes、Kind 与方向
 
-多个 Scope 看似合理时，选择能完整表达含义的最小 Scope。
-
-## Hearth
-
-Hearth 保存所有同行者都应理解的共享偏好、原则或经验，允许 `preference`、`agreement`、`lesson`。
-队员不能直接写 Hearth；使用 `rovai memory propose-hearth` 提交建议。成功 receipt 只证明 pending
-proposal 存在，只有用户采纳后才成为有效 Memory。
-
-判断问题：这件事是否应该让用户的所有队员都知道？
+多个 Scope 看似合理时，选择能完整表达含义的最小 Scope。修订不能改变既有 Memory 的
+Scope、Kind、counterparty 或 Relationship direction；需要不同身份时重新判断是否新增。
 
 ## Companion
 
-Companion 保存用户与当前队员之间的稳定协作理解，允许 `preference`、`agreement`、`lesson`。使用
-`rovai memory write`；当前队员只能写自己的 Companion 范围。
+保存用户与当前队员之间的稳定协作理解，允许 `preference`、`agreement`、`lesson`。当前队员只能新增或
+修订自己的 Companion；成功 `outcome: effective` 后立即用于后续协作。
 
-判断问题：这件事是否只需要我以后与用户协作时记住？
+判断：这件事是否只需要我以后与用户协作时记住？
 
 ## Relationship
 
-Relationship 保存当前队员与当前 Camp 中另一位在场队员之间的协作约定或经验，只允许
-`agreement`、`lesson`，不允许 `preference`。
+保存当前队员与当前 Camp 中另一位在场队员之间的协作约定或经验，只允许 `agreement`、`lesson`。
+Agent 只能新增或修订 `当前队员 → counterparty` 的 `directed` Relationship：方向表示当前队员对对方承担
+未来责任。Agent 不能写 `mutual`、反向 directed、另一队员的 Companion，也不能替对方承诺。
 
-方向：
+Agent 可以读取适用于自己的既有 mutual Relationship，但这不授予修改权。
+Mutual 只属于 structured user governance。
 
-- `mutual`：双方都应遵循。
-- `directed`：当前队员对 counterparty 承担未来责任，方向始终是
-  `当前队员 → counterparty`。
+判断：这件事是否只影响我对某位在场队员今后的协作方式？
 
-不能替另一位队员写下其对当前队员的责任。判断问题：这件事是否只影响我与某位队员今后的协作方式？
+## Hearth
 
-修订不能改变既有 Memory 的 Scope、Kind、counterparty 或 Relationship direction；这些字段组成身份，
-若候选含义要求不同身份，应重新判断是否需要独立 Memory，而不是用 revise 偷换范围。
+保存所有同行者都应理解的共享偏好、原则或经验，允许 `preference`、`agreement`、`lesson`。Agent 仍用
+`rovai memory write` 提交，但 Core 只创建隔离的 pending Hearth Review Item；成功输出必须是
+`outcome: review_pending`。候选不会成为 Memory、Revision 或 Agent 可读内容，只有用户接受后才生效。
+
+判断：这件事是否应该让用户的所有队员都知道？
+
+Retire、Reactivate、Forget、Supersession、Review schedule 和 Review decision 都只属于 structured user
+governance。不要用相反正文模拟 Forget。

@@ -1764,7 +1764,7 @@ export type MemoryScopeKind = 'hearth' | 'companion' | 'relationship'
 export type MemoryKind = 'preference' | 'agreement' | 'lesson'
 export type MemoryDirection = 'mutual' | 'directed'
 export type MemoryLifecycle = 'active' | 'retired' | 'forgotten'
-export type MemoryCreationOrigin = 'user' | 'agent' | 'accepted_hearth_proposal'
+export type MemoryCreationOrigin = 'user' | 'agent' | 'accepted_hearth_review'
 export type MemoryRevisionActorKind = 'user' | 'agent'
 
 export interface MemoryRevision {
@@ -1777,7 +1777,7 @@ export interface MemoryRevision {
   sourceCampId: string | null
   sourceAgentRunId: string | null
   sourceExecutionEpoch: number | null
-  createdFromHearthProposalId: string | null
+  createdFromHearthReviewItemId: string | null
   createdAt: string
   clearedAt: string | null
 }
@@ -1822,26 +1822,30 @@ export interface MemoryLibraryView {
   capacities: MemoryCapacity[]
 }
 
-export interface HearthMemoryProposal {
-  id: string
-  action: 'add' | 'revise'
-  status: 'pending' | 'accepted' | 'rejected'
-  kind: MemoryKind | null
-  body: string | null
-  retrievalKeys: string[]
+export type HearthReviewItemStatus = 'pending' | 'accepted' | 'rejected' | 'invalidated'
+export type HearthReviewInvalidationReason = 'target_forgotten' | 'exact_candidate_published'
+
+export interface HearthReviewItem {
+  reviewItemId: string
+  requestedAction: 'add' | 'revise'
+  status: HearthReviewItemStatus
+  stale: boolean
+  version: number
+  candidateKind: MemoryKind | null
+  candidateBody: string | null
+  candidateRetrievalKeys: string[] | null
   targetMemoryId: string | null
   baseRevisionId: string | null
-  proposedByAgentId: string
+  sourceAgentId: string
   sourceCampId: string
   sourceAgentRunId: string
   sourceExecutionEpoch: number
-  sourceUnavailable: boolean
-  stale: boolean
   acceptedMemoryId: string | null
   acceptedRevisionId: string | null
   resolvedByUserId: string | null
-  version: number
-  proposedAt: string
+  invalidationReason: HearthReviewInvalidationReason | null
+  editedBeforeAcceptance: boolean | null
+  createdAt: string
   resolvedAt: string | null
 }
 
@@ -1875,21 +1879,16 @@ export interface ScheduleMemoryReviewCommand extends MemoryVersionCommand {
   reviewAfter: string | null
 }
 
-export interface AcceptHearthMemoryProposalCommand {
-  proposalId: string
-  expectedVersion: number
-  finalKind: MemoryKind | null
-  finalBody: string | null
-  finalRetrievalKeys: string[] | null
+export interface AcceptHearthReviewItemCommand {
+  reviewItemId: string
+  expectedReviewItemVersion: number
+  finalBody?: string
+  finalRetrievalKeys?: string[]
 }
 
-export interface RejectHearthMemoryProposalCommand {
-  proposalId: string
-  expectedVersion: number
-}
-
-export interface RejectHearthMemoryProposalsCommand {
-  proposals: Array<{ proposalId: string; expectedVersion: number }>
+export interface RejectHearthReviewItemCommand {
+  reviewItemId: string
+  expectedReviewItemVersion: number
 }
 
 export type CoreMethod =
@@ -1920,10 +1919,9 @@ export type CoreMethod =
   | 'memory.forget'
   | 'memory.supersede'
   | 'memory.review.schedule'
-  | 'memory.hearthProposals.list'
-  | 'memory.hearthProposals.accept'
-  | 'memory.hearthProposals.reject'
-  | 'memory.hearthProposals.rejectBatch'
+  | 'memory.hearthReviewItems.list'
+  | 'memory.hearthReviewItems.accept'
+  | 'memory.hearthReviewItems.reject'
   | 'memory.export'
   | 'runtime.installations.list'
   | 'runtime.installations.create'

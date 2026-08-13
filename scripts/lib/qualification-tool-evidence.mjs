@@ -19,8 +19,7 @@ const MUTATING_CORE_TOOLS = new Set([
   'camp.message.send',
   'team.create_task',
   'team.update_task',
-  'memory.write',
-  'memory.propose_hearth'
+  'memory.write'
 ])
 const READ_ONLY_CORE_TOOLS = new Set([
   'team.list_tasks',

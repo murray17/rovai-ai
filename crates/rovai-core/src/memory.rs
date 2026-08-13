@@ -116,7 +116,7 @@ impl RelationshipDirection {
 pub enum MemoryCreationOrigin {
     User,
     Agent,
-    AcceptedHearthProposal,
+    AcceptedHearthReview,
 }
 
 impl MemoryCreationOrigin {
@@ -124,7 +124,7 @@ impl MemoryCreationOrigin {
         match self {
             Self::User => "user",
             Self::Agent => "agent",
-            Self::AcceptedHearthProposal => "accepted_hearth_proposal",
+            Self::AcceptedHearthReview => "accepted_hearth_review",
         }
     }
 
@@ -132,7 +132,7 @@ impl MemoryCreationOrigin {
         match value {
             "user" => Ok(Self::User),
             "agent" => Ok(Self::Agent),
-            "accepted_hearth_proposal" => Ok(Self::AcceptedHearthProposal),
+            "accepted_hearth_review" => Ok(Self::AcceptedHearthReview),
             _ => anyhow::bail!("unknown Memory creation origin: {value}"),
         }
     }
@@ -373,63 +373,28 @@ impl DomainCommand for AgentMemoryWriteCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ProposeHearthMemoryCommand {
-    pub action: String,
-    pub kind: Option<MemoryKind>,
-    pub body: String,
-    pub retrieval_keys: Vec<String>,
-    pub memory_id: Option<String>,
-    pub base_revision_id: Option<String>,
-}
-
-impl sealed::Sealed for ProposeHearthMemoryCommand {}
-impl DomainCommand for ProposeHearthMemoryCommand {
-    const TYPE: &'static str = "memory.propose_hearth";
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AcceptHearthMemoryProposalCommand {
-    pub proposal_id: String,
-    pub expected_version: i64,
-    pub final_kind: Option<MemoryKind>,
+pub struct AcceptHearthReviewItemCommand {
+    pub review_item_id: String,
+    pub expected_review_item_version: i64,
     pub final_body: Option<String>,
     pub final_retrieval_keys: Option<Vec<String>>,
 }
 
-impl sealed::Sealed for AcceptHearthMemoryProposalCommand {}
-impl DomainCommand for AcceptHearthMemoryProposalCommand {
-    const TYPE: &'static str = "memory.hearth_proposal.accept";
+impl sealed::Sealed for AcceptHearthReviewItemCommand {}
+impl DomainCommand for AcceptHearthReviewItemCommand {
+    const TYPE: &'static str = "memory.hearth_review.accept";
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RejectHearthMemoryProposalCommand {
-    pub proposal_id: String,
-    pub expected_version: i64,
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RejectHearthReviewItemCommand {
+    pub review_item_id: String,
+    pub expected_review_item_version: i64,
 }
 
-impl sealed::Sealed for RejectHearthMemoryProposalCommand {}
-impl DomainCommand for RejectHearthMemoryProposalCommand {
-    const TYPE: &'static str = "memory.hearth_proposal.reject";
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProposalVersionRef {
-    pub proposal_id: String,
-    pub expected_version: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RejectHearthMemoryProposalsCommand {
-    pub proposals: Vec<ProposalVersionRef>,
-}
-
-impl sealed::Sealed for RejectHearthMemoryProposalsCommand {}
-impl DomainCommand for RejectHearthMemoryProposalsCommand {
-    const TYPE: &'static str = "memory.hearth_proposal.reject_batch";
+impl sealed::Sealed for RejectHearthReviewItemCommand {}
+impl DomainCommand for RejectHearthReviewItemCommand {
+    const TYPE: &'static str = "memory.hearth_review.reject";
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -444,7 +409,7 @@ pub struct MemoryRevisionView {
     pub source_camp_id: Option<String>,
     pub source_agent_run_id: Option<String>,
     pub source_execution_epoch: Option<i64>,
-    pub created_from_hearth_proposal_id: Option<String>,
+    pub created_from_hearth_review_item_id: Option<String>,
     pub created_at: String,
     pub cleared_at: Option<String>,
 }
@@ -497,26 +462,27 @@ pub struct MemoryListView {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct HearthMemoryProposalView {
-    pub id: String,
-    pub action: String,
+pub struct HearthReviewItemView {
+    pub review_item_id: String,
+    pub requested_action: String,
     pub status: String,
-    pub kind: Option<MemoryKind>,
-    pub body: Option<String>,
-    pub retrieval_keys: Vec<String>,
+    pub candidate_kind: Option<MemoryKind>,
+    pub candidate_body: Option<String>,
+    pub candidate_retrieval_keys: Option<Vec<String>>,
     pub target_memory_id: Option<String>,
     pub base_revision_id: Option<String>,
-    pub proposed_by_agent_id: String,
+    pub source_agent_id: String,
     pub source_camp_id: String,
     pub source_agent_run_id: String,
     pub source_execution_epoch: i64,
-    pub source_unavailable: bool,
     pub stale: bool,
     pub accepted_memory_id: Option<String>,
     pub accepted_revision_id: Option<String>,
     pub resolved_by_user_id: Option<String>,
+    pub invalidation_reason: Option<String>,
+    pub edited_before_acceptance: Option<bool>,
     pub version: i64,
-    pub proposed_at: String,
+    pub created_at: String,
     pub resolved_at: Option<String>,
 }
 
@@ -569,24 +535,26 @@ struct RevisionActor {
 }
 
 #[derive(Debug, Clone)]
-struct HearthProposalRecord {
+struct HearthReviewRecord {
     id: String,
     action: String,
     status: String,
     kind: Option<MemoryKind>,
     body: Option<String>,
-    retrieval_keys: Vec<String>,
+    retrieval_keys: Option<Vec<String>>,
     target_memory_id: Option<String>,
     base_revision_id: Option<String>,
-    proposed_by_agent_id: String,
+    source_agent_id: String,
     source_camp_id: String,
     source_agent_run_id: String,
     source_execution_epoch: i64,
     accepted_memory_id: Option<String>,
     accepted_revision_id: Option<String>,
     resolved_by_user_id: Option<String>,
+    invalidation_reason: Option<String>,
+    edited_before_acceptance: Option<bool>,
     version: i64,
-    proposed_at: String,
+    created_at: String,
     resolved_at: Option<String>,
 }
 
@@ -622,6 +590,15 @@ impl MemoryService {
                 None,
                 &now,
             )?;
+            if candidate.scope.kind == MemoryScopeKind::Hearth {
+                invalidate_matching_pending_hearth_adds(
+                    transaction,
+                    candidate.kind,
+                    &candidate.body,
+                    None,
+                    &now,
+                )?;
+            }
             append_memory_event(
                 transaction,
                 "memory.created",
@@ -713,7 +690,7 @@ impl MemoryService {
                     body: &normalized.payload.body,
                     retrieval_keys: &normalized.payload.retrieval_keys,
                     actor: &actor,
-                    created_from_hearth_proposal_id: None,
+                    created_from_hearth_review_item_id: None,
                     created_at: &now,
                 },
             )?;
@@ -732,6 +709,15 @@ impl MemoryService {
                 params![record.id, revision_id, review_after, now],
             )?;
             refresh_memory_fts(transaction, &record.id)?;
+            if record.scope.as_ref().map(|scope| scope.kind) == Some(MemoryScopeKind::Hearth) {
+                invalidate_matching_pending_hearth_adds(
+                    transaction,
+                    kind,
+                    &normalized.payload.body,
+                    None,
+                    &now,
+                )?;
+            }
             append_memory_event(
                 transaction,
                 "memory.revised",
@@ -879,6 +865,39 @@ impl MemoryService {
                 ));
             }
             let now = Utc::now().to_rfc3339();
+            if record.scope.as_ref().map(|scope| scope.kind) == Some(MemoryScopeKind::Hearth) {
+                let kind = record.kind.context("Hearth Memory has no Kind")?;
+                let historical_bodies = {
+                    let mut statement = transaction.prepare(
+                        r#"
+                        SELECT body FROM memory_revision
+                        WHERE memory_id = ?1 AND body IS NOT NULL
+                        ORDER BY created_at, id
+                        "#,
+                    )?;
+                    statement
+                        .query_map([&record.id], |row| row.get::<_, String>(0))?
+                        .collect::<rusqlite::Result<Vec<_>>>()?
+                };
+                for body in historical_bodies {
+                    invalidate_matching_pending_hearth_adds(transaction, kind, &body, None, &now)?;
+                }
+            }
+            transaction.execute(
+                r#"
+                UPDATE hearth_review_item
+                SET status = 'invalidated',
+                    candidate_kind = NULL, candidate_body = NULL,
+                    candidate_body_utf8_bytes = NULL,
+                    candidate_retrieval_keys_json = NULL,
+                    pending_key_digest = NULL,
+                    invalidation_reason = 'target_forgotten',
+                    candidate_cleared_at = ?2, resolved_at = ?2,
+                    version = version + 1
+                WHERE target_memory_id = ?1 AND status = 'pending'
+                "#,
+                params![record.id, now],
+            )?;
             transaction.execute("DELETE FROM memory_fts WHERE memory_id = ?1", [&record.id])?;
             transaction.execute(
                 r#"
@@ -896,7 +915,7 @@ impl MemoryService {
                     actor_kind = NULL, actor_id = NULL,
                     source_camp_id = NULL, source_agent_run_id = NULL,
                     source_execution_epoch = NULL,
-                    created_from_hearth_proposal_id = NULL,
+                    created_from_hearth_review_item_id = NULL,
                     cleared_at = ?2
                 WHERE memory_id = ?1
                 "#,
@@ -904,10 +923,11 @@ impl MemoryService {
             )?;
             transaction.execute(
                 r#"
-                UPDATE hearth_memory_proposal
+                UPDATE hearth_review_item
                 SET candidate_kind = NULL, candidate_body = NULL,
                     candidate_body_utf8_bytes = NULL,
                     candidate_retrieval_keys_json = NULL,
+                    pending_key_digest = NULL,
                     candidate_cleared_at = COALESCE(candidate_cleared_at, ?2)
                 WHERE accepted_memory_id = ?1
                 "#,
@@ -1352,7 +1372,7 @@ fn validate_candidate(transaction: &Transaction<'_>, candidate: &Candidate) -> R
         anyhow::bail!("memory.secret_rejected: Credential-like secrets cannot be stored");
     }
     if active_exact_memory_exists(transaction, candidate)? {
-        anyhow::bail!("memory.already_exists: An identical active Memory already exists");
+        anyhow::bail!("memory.duplicate: An identical active Memory already exists");
     }
     Ok(())
 }
@@ -1394,7 +1414,7 @@ fn insert_memory(
     candidate: &Candidate,
     origin: MemoryCreationOrigin,
     actor: &RevisionActor,
-    hearth_proposal_id: Option<&str>,
+    hearth_review_item_id: Option<&str>,
     now: &str,
 ) -> Result<(String, String)> {
     let memory_id = Uuid::new_v4().to_string();
@@ -1407,7 +1427,7 @@ fn insert_memory(
             body: &candidate.body,
             retrieval_keys: &candidate.retrieval_keys,
             actor,
-            created_from_hearth_proposal_id: hearth_proposal_id,
+            created_from_hearth_review_item_id: hearth_review_item_id,
             created_at: now,
         },
     )?;
@@ -1453,7 +1473,7 @@ struct NewRevision<'a> {
     body: &'a str,
     retrieval_keys: &'a [String],
     actor: &'a RevisionActor,
-    created_from_hearth_proposal_id: Option<&'a str>,
+    created_from_hearth_review_item_id: Option<&'a str>,
     created_at: &'a str,
 }
 
@@ -1463,7 +1483,7 @@ fn insert_revision(transaction: &Transaction<'_>, revision: NewRevision<'_>) -> 
         INSERT INTO memory_revision(
             id, memory_id, body, body_utf8_bytes, body_digest,
             actor_kind, actor_id, source_camp_id, source_agent_run_id,
-            source_execution_epoch, created_from_hearth_proposal_id, created_at
+            source_execution_epoch, created_from_hearth_review_item_id, created_at
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
         "#,
         params![
@@ -1480,7 +1500,7 @@ fn insert_revision(transaction: &Transaction<'_>, revision: NewRevision<'_>) -> 
             revision.actor.source_camp_id,
             revision.actor.source_agent_run_id,
             revision.actor.source_execution_epoch,
-            revision.created_from_hearth_proposal_id,
+            revision.created_from_hearth_review_item_id,
             revision.created_at,
         ],
     )?;
@@ -1702,6 +1722,60 @@ fn active_exact_memory_exists(
                     .as_ref()
                     .is_some_and(|scope| scope.same_identity(&candidate.scope))
         }))
+}
+
+fn hearth_add_digest(kind: MemoryKind, body: &str) -> Result<String> {
+    canonical_json_digest(&json!({
+        "domain": "rovai.memory.hearth-review.v1",
+        "action": "add",
+        "scope": "hearth",
+        "kind": kind,
+        "canonicalBody": body,
+    }))
+}
+
+fn hearth_revise_digest(
+    target_memory_id: &str,
+    base_revision_id: &str,
+    body: &str,
+    retrieval_keys: &[String],
+) -> Result<String> {
+    canonical_json_digest(&json!({
+        "domain": "rovai.memory.hearth-review.v1",
+        "action": "revise",
+        "targetMemoryId": target_memory_id,
+        "baseRevisionId": base_revision_id,
+        "canonicalBody": body,
+        "normalizedRetrievalKeys": retrieval_keys,
+    }))
+}
+
+fn invalidate_matching_pending_hearth_adds(
+    transaction: &Transaction<'_>,
+    kind: MemoryKind,
+    body: &str,
+    except_review_item_id: Option<&str>,
+    now: &str,
+) -> Result<usize> {
+    let digest = hearth_add_digest(kind, body)?;
+    Ok(transaction.execute(
+        r#"
+        UPDATE hearth_review_item
+        SET status = 'invalidated',
+            candidate_kind = NULL, candidate_body = NULL,
+            candidate_body_utf8_bytes = NULL,
+            candidate_retrieval_keys_json = NULL,
+            pending_key_digest = NULL,
+            invalidation_reason = 'exact_candidate_published',
+            candidate_cleared_at = ?3, resolved_at = ?3,
+            version = version + 1
+        WHERE status = 'pending'
+          AND requested_action = 'add'
+          AND pending_key_digest = ?1
+          AND (?2 IS NULL OR id <> ?2)
+        "#,
+        params![digest, except_review_item_id, now],
+    )?)
 }
 
 fn ensure_capacity(
@@ -1928,17 +2002,17 @@ fn enforce_agent_mutation_quota(
         [source_agent_run_id],
         |row| row.get(0),
     )?;
-    let proposal_count: i64 = transaction.query_row(
+    let review_count: i64 = transaction.query_row(
         r#"
-        SELECT COUNT(*) FROM hearth_memory_proposal
+        SELECT COUNT(*) FROM hearth_review_item
         WHERE source_agent_run_id = ?1
         "#,
         [source_agent_run_id],
         |row| row.get(0),
     )?;
-    if revision_count + proposal_count >= MEMORY_AGENT_MUTATIONS_PER_RUN {
+    if revision_count + review_count >= MEMORY_AGENT_MUTATIONS_PER_RUN {
         anyhow::bail!(
-            "memory.run_quota_exhausted: AgentRun already persisted {MEMORY_AGENT_MUTATIONS_PER_RUN} Memory mutations"
+            "memory.run_quota_exceeded: AgentRun already persisted {MEMORY_AGENT_MUTATIONS_PER_RUN} Memory mutations"
         );
     }
     Ok(())
@@ -1953,9 +2027,10 @@ fn agent_add_scope(
     let scope = input.scope.context("add requires scope")?;
     match scope {
         MemoryScopeKind::Hearth => {
-            anyhow::bail!(
-                "memory.scope_forbidden: use memory.propose_hearth for Hearth suggestions"
-            )
+            if input.counterparty_agent_id.is_some() || input.direction.is_some() {
+                anyhow::bail!("memory.invalid_input: Hearth add has no Relationship fields");
+            }
+            Ok(MemoryScope::hearth())
         }
         MemoryScopeKind::Companion => {
             if input.counterparty_agent_id.is_some() || input.direction.is_some() {
@@ -1978,6 +2053,9 @@ fn agent_add_scope(
             let direction = input
                 .direction
                 .context("Relationship add requires direction")?;
+            if direction != RelationshipDirection::Directed {
+                anyhow::bail!("memory.scope_forbidden: Agent Relationship writes must be directed");
+            }
             MemoryScope::relationship(
                 agent_id.to_string(),
                 counterparty,
@@ -1988,7 +2066,7 @@ fn agent_add_scope(
     }
 }
 
-fn memory_applicable_to_agent(
+fn memory_mutable_by_agent(
     transaction: &Transaction<'_>,
     record: &MemoryRecord,
     agent_id: &str,
@@ -1998,23 +2076,18 @@ fn memory_applicable_to_agent(
         return Ok(false);
     };
     match scope.kind {
-        MemoryScopeKind::Hearth => Ok(true),
+        MemoryScopeKind::Hearth => Ok(false),
         MemoryScopeKind::Companion => Ok(scope.companion_agent_id.as_deref() == Some(agent_id)),
         MemoryScopeKind::Relationship => {
-            if !scope.contains_agent(agent_id) {
+            if scope.relationship_direction != Some(RelationshipDirection::Directed)
+                || scope.directed_actor_agent_id.as_deref() != Some(agent_id)
+            {
                 return Ok(false);
             }
-            let counterparty = scope
-                .counterparty(agent_id)
-                .context("Relationship Memory pair is invalid")?;
-            if !is_current_camp_member(transaction, camp_id, counterparty)? {
+            let Some(counterparty) = scope.counterparty(agent_id) else {
                 return Ok(false);
-            }
-            Ok(
-                scope.relationship_direction == Some(RelationshipDirection::Mutual)
-                    || (scope.relationship_direction == Some(RelationshipDirection::Directed)
-                        && scope.directed_actor_agent_id.as_deref() == Some(agent_id)),
-            )
+            };
+            is_current_camp_member(transaction, camp_id, counterparty)
         }
     }
 }
@@ -2041,23 +2114,24 @@ pub(crate) fn is_current_camp_member(
     Ok(count == 1)
 }
 
-fn load_hearth_proposal_record(
+fn load_hearth_review_record(
     connection: &Connection,
-    proposal_id: &str,
-) -> Result<Option<HearthProposalRecord>> {
+    review_item_id: &str,
+) -> Result<Option<HearthReviewRecord>> {
     connection
         .query_row(
             r#"
-            SELECT id, action, status, candidate_kind, candidate_body,
+            SELECT id, requested_action, status, candidate_kind, candidate_body,
                    candidate_retrieval_keys_json,
                    target_memory_id, base_revision_id,
-                   proposed_by_agent_id, source_camp_id,
+                   source_agent_id, source_camp_id,
                    source_agent_run_id, source_execution_epoch,
                    accepted_memory_id, accepted_revision_id,
-                   resolved_by_user_id, version, proposed_at, resolved_at
-            FROM hearth_memory_proposal WHERE id = ?1
+                   resolved_by_user_id, invalidation_reason,
+                   edited_before_acceptance, version, created_at, resolved_at
+            FROM hearth_review_item WHERE id = ?1
             "#,
-            [proposal_id],
+            [review_item_id],
             |row| {
                 let kind = row
                     .get::<_, Option<String>>(3)?
@@ -2076,9 +2150,8 @@ fn load_hearth_proposal_record(
                             rusqlite::types::Type::Text,
                             error.into(),
                         )
-                    })?
-                    .unwrap_or_default();
-                Ok(HearthProposalRecord {
+                    })?;
+                Ok(HearthReviewRecord {
                     id: row.get(0)?,
                     action: row.get(1)?,
                     status: row.get(2)?,
@@ -2087,16 +2160,18 @@ fn load_hearth_proposal_record(
                     retrieval_keys,
                     target_memory_id: row.get(6)?,
                     base_revision_id: row.get(7)?,
-                    proposed_by_agent_id: row.get(8)?,
+                    source_agent_id: row.get(8)?,
                     source_camp_id: row.get(9)?,
                     source_agent_run_id: row.get(10)?,
                     source_execution_epoch: row.get(11)?,
                     accepted_memory_id: row.get(12)?,
                     accepted_revision_id: row.get(13)?,
                     resolved_by_user_id: row.get(14)?,
-                    version: row.get(15)?,
-                    proposed_at: row.get(16)?,
-                    resolved_at: row.get(17)?,
+                    invalidation_reason: row.get(15)?,
+                    edited_before_acceptance: row.get(16)?,
+                    version: row.get(17)?,
+                    created_at: row.get(18)?,
+                    resolved_at: row.get(19)?,
                 })
             },
         )
@@ -2104,15 +2179,15 @@ fn load_hearth_proposal_record(
         .map_err(Into::into)
 }
 
-fn reject_hearth_proposal_row(
+fn reject_hearth_review_row(
     transaction: &Transaction<'_>,
-    proposal_id: &str,
+    review_item_id: &str,
     user_id: &str,
 ) -> Result<()> {
     let now = Utc::now().to_rfc3339();
     transaction.execute(
         r#"
-        UPDATE hearth_memory_proposal
+        UPDATE hearth_review_item
         SET status = 'rejected', candidate_kind = NULL,
             candidate_body = NULL, candidate_body_utf8_bytes = NULL,
             candidate_retrieval_keys_json = NULL,
@@ -2121,9 +2196,113 @@ fn reject_hearth_proposal_row(
             version = version + 1
         WHERE id = ?1 AND status = 'pending'
         "#,
-        params![proposal_id, user_id, now],
+        params![review_item_id, user_id, now],
     )?;
     Ok(())
+}
+
+fn save_hearth_review_item<C: DomainCommand>(
+    transaction: &Transaction<'_>,
+    envelope: &CommandEnvelope<C>,
+    actor: &RevisionActor,
+    action: &str,
+    kind: Option<MemoryKind>,
+    target_memory_id: Option<&str>,
+    base_revision_id: Option<&str>,
+    body: &str,
+    retrieval_keys: &[String],
+) -> Result<CommandHandlerResult> {
+    let pending_key = match action {
+        "add" => hearth_add_digest(
+            kind.context("memory.invalid_input: Hearth add requires kind")?,
+            body,
+        )?,
+        "revise" => hearth_revise_digest(
+            target_memory_id.context("memory.invalid_input: Hearth revise requires memoryId")?,
+            base_revision_id
+                .context("memory.invalid_input: Hearth revise requires baseRevisionId")?,
+            body,
+            retrieval_keys,
+        )?,
+        _ => anyhow::bail!("memory.invalid_input: action must be add or revise"),
+    };
+    let duplicate_exists: bool = transaction.query_row(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM hearth_review_item
+            WHERE status = 'pending' AND pending_key_digest = ?1
+        )
+        "#,
+        [&pending_key],
+        |row| row.get(0),
+    )?;
+    if duplicate_exists {
+        return Ok(rejected(
+            "memory.duplicate_pending",
+            "An identical pending Hearth Review Item already exists",
+        ));
+    }
+
+    let review_item_id = Uuid::new_v4().to_string();
+    let now = Utc::now().to_rfc3339();
+    let (agent_id, camp_id) = agent_identity(envelope)?;
+    let source_agent_run_id = actor
+        .source_agent_run_id
+        .as_deref()
+        .context("Agent Revision actor has no source Run")?;
+    transaction.execute(
+        r#"
+        INSERT INTO hearth_review_item(
+            id, requested_action, status, candidate_kind,
+            candidate_body, candidate_body_utf8_bytes,
+            candidate_retrieval_keys_json,
+            target_memory_id, base_revision_id, pending_key_digest,
+            source_agent_id, source_camp_id,
+            source_agent_run_id, source_execution_epoch,
+            version, created_at
+        ) VALUES (
+            ?1, ?2, 'pending', ?3, ?4, ?5, ?6,
+            ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1, ?14
+        )
+        "#,
+        params![
+            review_item_id,
+            action,
+            kind.map(MemoryKind::as_str),
+            body,
+            body.len() as i64,
+            serde_json::to_string(retrieval_keys)?,
+            target_memory_id,
+            base_revision_id,
+            pending_key,
+            agent_id,
+            camp_id,
+            source_agent_run_id,
+            actor.source_execution_epoch,
+            now,
+        ],
+    )?;
+    append_memory_event(
+        transaction,
+        "memory.hearth_review_created",
+        &review_item_id,
+        envelope,
+        json!({
+            "reviewItemId": review_item_id,
+            "requestedAction": action,
+        }),
+    )?;
+    Ok(CommandHandlerResult::accepted(
+        "hearth_review_item_saved",
+        json!({
+            "outcome": "review_pending",
+            "reviewItemId": review_item_id,
+        }),
+        Some(EntityReference {
+            entity_type: "hearth_review_item".to_string(),
+            entity_id: review_item_id,
+        }),
+    ))
 }
 
 fn memory_view_from_record(
@@ -2188,15 +2367,10 @@ fn memory_view_from_record(
     })
 }
 
-fn hearth_proposal_view(
+fn hearth_review_view(
     connection: &Connection,
-    record: HearthProposalRecord,
-) -> Result<HearthMemoryProposalView> {
-    let source_unavailable = connection.query_row(
-        "SELECT COUNT(*) = 0 FROM agent_run WHERE id = ?1",
-        [&record.source_agent_run_id],
-        |row| row.get::<_, bool>(0),
-    )?;
+    record: HearthReviewRecord,
+) -> Result<HearthReviewItemView> {
     let stale = if record.status == "pending" && record.action == "revise" {
         match (
             record.target_memory_id.as_deref(),
@@ -2214,26 +2388,27 @@ fn hearth_proposal_view(
     } else {
         false
     };
-    Ok(HearthMemoryProposalView {
-        id: record.id,
-        action: record.action,
+    Ok(HearthReviewItemView {
+        review_item_id: record.id,
+        requested_action: record.action,
         status: record.status,
-        kind: record.kind,
-        body: record.body,
-        retrieval_keys: record.retrieval_keys,
+        candidate_kind: record.kind,
+        candidate_body: record.body,
+        candidate_retrieval_keys: record.retrieval_keys,
         target_memory_id: record.target_memory_id,
         base_revision_id: record.base_revision_id,
-        proposed_by_agent_id: record.proposed_by_agent_id,
+        source_agent_id: record.source_agent_id,
         source_camp_id: record.source_camp_id,
         source_agent_run_id: record.source_agent_run_id,
         source_execution_epoch: record.source_execution_epoch,
-        source_unavailable,
         stale,
         accepted_memory_id: record.accepted_memory_id,
         accepted_revision_id: record.accepted_revision_id,
         resolved_by_user_id: record.resolved_by_user_id,
+        invalidation_reason: record.invalidation_reason,
+        edited_before_acceptance: record.edited_before_acceptance,
         version: record.version,
-        proposed_at: record.proposed_at,
+        created_at: record.created_at,
         resolved_at: record.resolved_at,
     })
 }
@@ -2447,8 +2622,8 @@ fn append_memory_event<C: DomainCommand>(
         event_type,
         envelope.camp_id.as_deref(),
         Some((
-            if event_type.contains("proposal") {
-                "hearth_memory_proposal"
+            if event_type.contains("hearth_review") {
+                "hearth_review_item"
             } else {
                 "memory"
             },
@@ -2497,7 +2672,7 @@ impl MemoryService {
             r#"
             SELECT id, body, body_utf8_bytes, actor_kind, actor_id,
                    source_camp_id, source_agent_run_id, source_execution_epoch,
-                   created_from_hearth_proposal_id, created_at, cleared_at
+                   created_from_hearth_review_item_id, created_at, cleared_at
             FROM memory_revision
             WHERE memory_id = ?1
             ORDER BY created_at DESC, id DESC
@@ -2521,7 +2696,7 @@ impl MemoryService {
                     source_camp_id: row.get(5)?,
                     source_agent_run_id: row.get(6)?,
                     source_execution_epoch: row.get(7)?,
-                    created_from_hearth_proposal_id: row.get(8)?,
+                    created_from_hearth_review_item_id: row.get(8)?,
                     created_at: row.get(9)?,
                     cleared_at: row.get(10)?,
                 })
@@ -2545,21 +2720,23 @@ impl MemoryService {
         )?))
     }
 
-    pub fn list_hearth_proposals(
+    pub fn list_hearth_review_items(
         &self,
         database: &Database,
-    ) -> Result<Vec<HearthMemoryProposalView>> {
+    ) -> Result<Vec<HearthReviewItemView>> {
         let mut statement = database
             .connection()
-            .prepare("SELECT id FROM hearth_memory_proposal ORDER BY proposed_at DESC, id DESC")?;
+            .prepare("SELECT id FROM hearth_review_item ORDER BY created_at DESC, id DESC")?;
         let ids = statement
             .query_map([], |row| row.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         ids.into_iter()
             .map(|id| {
-                let record = load_hearth_proposal_record(database.connection(), &id)?
-                    .with_context(|| format!("Hearth proposal {id} disappeared while listing"))?;
-                hearth_proposal_view(database.connection(), record)
+                let record =
+                    load_hearth_review_record(database.connection(), &id)?.with_context(|| {
+                        format!("Hearth Review Item {id} disappeared while listing")
+                    })?;
+                hearth_review_view(database.connection(), record)
             })
             .collect()
     }
@@ -2629,7 +2806,7 @@ impl MemoryService {
             .into_iter()
             .filter(|memory| memory.lifecycle != "forgotten")
             .collect::<Vec<_>>();
-        let proposals = self.list_hearth_proposals(database)?;
+        let review_items = self.list_hearth_review_items(database)?;
         let mut statement = database.connection().prepare(
             r#"
             SELECT predecessor_memory_id, successor_memory_id, created_at
@@ -2650,7 +2827,7 @@ impl MemoryService {
             "format": "rovai-memory-export-v3",
             "exportedAt": Utc::now().to_rfc3339(),
             "memories": memories,
-            "hearthProposals": proposals,
+            "hearthReviewItems": review_items,
             "supersessions": supersessions,
         }))
     }
@@ -2676,13 +2853,14 @@ impl MemoryService {
                 }))
             },
         )?;
-        let proposal_counts = database.connection().query_row(
+        let review_counts = database.connection().query_row(
             r#"
             SELECT
                 SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END),
                 SUM(CASE WHEN status = 'accepted' THEN 1 ELSE 0 END),
-                SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END)
-            FROM hearth_memory_proposal
+                SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN status = 'invalidated' THEN 1 ELSE 0 END)
+            FROM hearth_review_item
             "#,
             [],
             |row| {
@@ -2690,6 +2868,7 @@ impl MemoryService {
                     "pending": row.get::<_, Option<i64>>(0)?.unwrap_or(0),
                     "accepted": row.get::<_, Option<i64>>(1)?.unwrap_or(0),
                     "rejected": row.get::<_, Option<i64>>(2)?.unwrap_or(0),
+                    "invalidated": row.get::<_, Option<i64>>(3)?.unwrap_or(0),
                 }))
             },
         )?;
@@ -2710,19 +2889,26 @@ impl MemoryService {
         )?;
         Ok(json!({
             "counts": memory_counts,
-            "hearthProposalCounts": proposal_counts,
+            "hearthReviewCounts": review_counts,
             "search": search_state,
         }))
     }
 }
 
 impl MemoryService {
-    pub fn accept_hearth_proposal(
+    pub fn accept_hearth_review_item(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<AcceptHearthMemoryProposalCommand>,
+        envelope: &CommandEnvelope<AcceptHearthReviewItemCommand>,
     ) -> Result<CommandExecution> {
         let mut normalized = envelope.clone();
+        if normalized.payload.final_body.is_some()
+            != normalized.payload.final_retrieval_keys.is_some()
+        {
+            anyhow::bail!(
+                "memory.invalid_input: finalBody and finalRetrievalKeys must be provided together"
+            );
+        }
         if let Some(body) = &mut normalized.payload.final_body {
             *body = canonicalize_memory_body(body)?;
         }
@@ -2732,40 +2918,41 @@ impl MemoryService {
         self.gateway.execute(database, &normalized, |transaction| {
             let actor = user_revision_actor(&normalized.actor)?;
             let user_id = actor.actor_id.as_str();
-            let Some(proposal) =
-                load_hearth_proposal_record(transaction, &normalized.payload.proposal_id)?
+            let Some(review_item) =
+                load_hearth_review_record(transaction, &normalized.payload.review_item_id)?
             else {
                 return Ok(rejected(
-                    "memory.proposal_not_found",
-                    "Hearth proposal does not exist",
+                    "memory.review_not_found",
+                    "Hearth Review Item does not exist",
                 ));
             };
-            if proposal.version != normalized.payload.expected_version {
+            if review_item.version != normalized.payload.expected_review_item_version {
                 return Ok(CommandHandlerResult::rejected(
-                    "memory.version_conflict",
+                    "memory.review_version_conflict",
                     json!({
-                        "proposalId": proposal.id,
-                        "currentVersion": proposal.version,
+                        "reviewItemId": review_item.id,
+                        "currentVersion": review_item.version,
                     }),
                 ));
             }
-            if proposal.status != "pending" {
+            if review_item.status != "pending" {
                 return Ok(rejected(
-                    "memory.proposal_conflict",
-                    "Only pending Hearth proposals can be accepted",
+                    "memory.review_conflict",
+                    "Only pending Hearth Review Items can be accepted",
                 ));
             }
             let body = normalized
                 .payload
                 .final_body
                 .clone()
-                .or_else(|| proposal.body.clone())
-                .context("Hearth proposal candidate body was cleared")?;
+                .or_else(|| review_item.body.clone())
+                .context("Hearth Review Item candidate body was cleared")?;
             let retrieval_keys = normalized
                 .payload
                 .final_retrieval_keys
                 .clone()
-                .unwrap_or_else(|| proposal.retrieval_keys.clone());
+                .or_else(|| review_item.retrieval_keys.clone())
+                .context("Hearth Review Item candidate Retrieval Keys were cleared")?;
             let retrieval_keys = normalize_retrieval_keys(&retrieval_keys)?;
             if memory_secret::contains_secret(&body) {
                 return Ok(rejected(
@@ -2774,57 +2961,53 @@ impl MemoryService {
                 ));
             }
             let now = Utc::now().to_rfc3339();
-            let (memory_id, revision_id) = match proposal.action.as_str() {
+            let (memory_id, revision_id, final_kind) = match review_item.action.as_str() {
                 "add" => {
-                    let kind = normalized
-                        .payload
-                        .final_kind
-                        .or(proposal.kind)
-                        .context("Hearth add proposal has no kind")?;
+                    let kind = review_item.kind.context("Hearth Review add has no Kind")?;
                     let candidate = Candidate {
                         scope: MemoryScope::hearth(),
                         kind,
-                        body,
+                        body: body.clone(),
                         body_bytes: 0,
-                        retrieval_keys,
+                        retrieval_keys: retrieval_keys.clone(),
                         review_after: default_review_after(kind),
                     };
                     let mut candidate = candidate;
                     candidate.body_bytes = candidate.body.len() as i64;
-                    validate_candidate(transaction, &candidate)?;
+                    if active_exact_memory_exists(transaction, &candidate)? {
+                        return Ok(rejected(
+                            "memory.duplicate",
+                            "An identical active Memory already exists",
+                        ));
+                    }
                     ensure_capacity(
                         transaction,
                         &candidate.scope,
-                        MemoryCreationOrigin::AcceptedHearthProposal,
+                        MemoryCreationOrigin::AcceptedHearthReview,
                         None,
                     )?;
-                    insert_memory(
+                    let (memory_id, revision_id) = insert_memory(
                         transaction,
                         &candidate,
-                        MemoryCreationOrigin::AcceptedHearthProposal,
+                        MemoryCreationOrigin::AcceptedHearthReview,
                         &actor,
-                        Some(&proposal.id),
+                        Some(&review_item.id),
                         &now,
-                    )?
+                    )?;
+                    (memory_id, revision_id, kind)
                 }
                 "revise" => {
-                    if normalized.payload.final_kind.is_some() {
-                        return Ok(rejected(
-                            "memory.invalid_input",
-                            "A revise proposal cannot change Memory kind",
-                        ));
-                    }
-                    let memory_id = proposal
+                    let memory_id = review_item
                         .target_memory_id
                         .as_deref()
-                        .context("Hearth revise proposal has no target")?;
-                    let base_revision_id = proposal
+                        .context("Hearth Review revise has no target")?;
+                    let base_revision_id = review_item
                         .base_revision_id
                         .as_deref()
-                        .context("Hearth revise proposal has no base Revision")?;
+                        .context("Hearth Review revise has no base Revision")?;
                     let Some(record) = load_memory_record(transaction, memory_id)? else {
                         return Ok(rejected(
-                            "memory.proposal_stale",
+                            "memory.review_stale",
                             "Target Hearth Memory no longer exists",
                         ));
                     };
@@ -2834,8 +3017,8 @@ impl MemoryService {
                         || record.current_revision_id.as_deref() != Some(base_revision_id)
                     {
                         return Ok(rejected(
-                            "memory.proposal_stale",
-                            "Hearth revise proposal is stale",
+                            "memory.review_stale",
+                            "Hearth Review revise is stale",
                         ));
                     }
                     if revision_matches(transaction, base_revision_id, &body, &retrieval_keys)? {
@@ -2853,7 +3036,7 @@ impl MemoryService {
                             body: &body,
                             retrieval_keys: &retrieval_keys,
                             actor: &actor,
-                            created_from_hearth_proposal_id: Some(&proposal.id),
+                            created_from_hearth_review_item_id: Some(&review_item.id),
                             created_at: &now,
                         },
                     )?;
@@ -2868,46 +3051,65 @@ impl MemoryService {
                         params![memory_id, revision_id, default_review_after(kind), now],
                     )?;
                     refresh_memory_fts(transaction, memory_id)?;
-                    (memory_id.to_string(), revision_id)
+                    (memory_id.to_string(), revision_id, kind)
                 }
                 _ => {
                     return Ok(rejected(
                         "memory.invalid_input",
-                        "Unknown Hearth proposal action",
+                        "Unknown Hearth Review Item action",
                     ));
                 }
             };
             transaction.execute(
                 r#"
-                UPDATE hearth_memory_proposal
-                SET status = 'accepted', pending_key_digest = NULL,
+                UPDATE hearth_review_item
+                SET status = 'accepted',
+                    candidate_kind = NULL, candidate_body = NULL,
+                    candidate_body_utf8_bytes = NULL,
+                    candidate_retrieval_keys_json = NULL,
+                    pending_key_digest = NULL,
                     accepted_memory_id = ?2, accepted_revision_id = ?3,
                     resolved_by_user_id = ?4,
-                    version = version + 1, resolved_at = ?5
+                    edited_before_acceptance = ?5,
+                    candidate_cleared_at = ?6,
+                    version = version + 1, resolved_at = ?6
                 WHERE id = ?1
                 "#,
-                params![proposal.id, memory_id, revision_id, user_id, now],
+                params![
+                    review_item.id,
+                    memory_id,
+                    revision_id,
+                    user_id,
+                    normalized.payload.final_body.is_some(),
+                    now,
+                ],
+            )?;
+            invalidate_matching_pending_hearth_adds(
+                transaction,
+                final_kind,
+                &body,
+                Some(&review_item.id),
+                &now,
             )?;
             append_memory_event(
                 transaction,
-                "memory.hearth_proposal_accepted",
-                &proposal.id,
+                "memory.hearth_review_accepted",
+                &review_item.id,
                 &normalized,
                 json!({
-                    "proposalId": proposal.id,
+                    "reviewItemId": review_item.id,
                     "memoryId": memory_id,
                     "revisionId": revision_id,
-                    "effective": true,
                 }),
             )?;
             Ok(CommandHandlerResult::applied(
-                "hearth_memory_proposal_accepted",
+                "hearth_review_item_accepted",
                 json!({
-                    "proposalId": proposal.id,
+                    "reviewItemId": review_item.id,
+                    "status": "accepted",
                     "memoryId": memory_id,
                     "revisionId": revision_id,
-                    "effective": true,
-                    "version": proposal.version + 1,
+                    "version": review_item.version + 1,
                 }),
                 Some(EntityReference {
                     entity_type: "memory".to_string(),
@@ -2917,109 +3119,58 @@ impl MemoryService {
         })
     }
 
-    pub fn reject_hearth_proposal(
+    pub fn reject_hearth_review_item(
         &self,
         database: &mut Database,
-        envelope: &CommandEnvelope<RejectHearthMemoryProposalCommand>,
+        envelope: &CommandEnvelope<RejectHearthReviewItemCommand>,
     ) -> Result<CommandExecution> {
         self.gateway.execute(database, envelope, |transaction| {
             let user_id = require_user(&envelope.actor)?;
-            let Some(proposal) =
-                load_hearth_proposal_record(transaction, &envelope.payload.proposal_id)?
+            let Some(review_item) =
+                load_hearth_review_record(transaction, &envelope.payload.review_item_id)?
             else {
                 return Ok(rejected(
-                    "memory.proposal_not_found",
-                    "Hearth proposal does not exist",
+                    "memory.review_not_found",
+                    "Hearth Review Item does not exist",
                 ));
             };
-            if proposal.version != envelope.payload.expected_version {
+            if review_item.version != envelope.payload.expected_review_item_version {
                 return Ok(CommandHandlerResult::rejected(
-                    "memory.version_conflict",
+                    "memory.review_version_conflict",
                     json!({
-                        "proposalId": proposal.id,
-                        "currentVersion": proposal.version,
+                        "reviewItemId": review_item.id,
+                        "currentVersion": review_item.version,
                     }),
                 ));
             }
-            if proposal.status != "pending" {
+            if review_item.status != "pending" {
                 return Ok(rejected(
-                    "memory.proposal_conflict",
-                    "Only pending Hearth proposals can be rejected",
+                    "memory.review_conflict",
+                    "Only pending Hearth Review Items can be rejected",
                 ));
             }
-            reject_hearth_proposal_row(transaction, &proposal.id, user_id)?;
+            reject_hearth_review_row(transaction, &review_item.id, user_id)?;
             append_memory_event(
                 transaction,
-                "memory.hearth_proposal_rejected",
-                &proposal.id,
+                "memory.hearth_review_rejected",
+                &review_item.id,
                 envelope,
-                json!({"proposalId": proposal.id, "version": proposal.version + 1}),
+                json!({
+                    "reviewItemId": review_item.id,
+                    "version": review_item.version + 1
+                }),
             )?;
             Ok(CommandHandlerResult::applied(
-                "hearth_memory_proposal_rejected",
+                "hearth_review_item_rejected",
                 json!({
-                    "proposalId": proposal.id,
+                    "reviewItemId": review_item.id,
                     "status": "rejected",
-                    "version": proposal.version + 1,
+                    "version": review_item.version + 1,
                 }),
                 Some(EntityReference {
-                    entity_type: "hearth_memory_proposal".to_string(),
-                    entity_id: proposal.id,
+                    entity_type: "hearth_review_item".to_string(),
+                    entity_id: review_item.id,
                 }),
-            ))
-        })
-    }
-
-    pub fn reject_hearth_proposals(
-        &self,
-        database: &mut Database,
-        envelope: &CommandEnvelope<RejectHearthMemoryProposalsCommand>,
-    ) -> Result<CommandExecution> {
-        self.gateway.execute(database, envelope, |transaction| {
-            let user_id = require_user(&envelope.actor)?;
-            if envelope.payload.proposals.is_empty() {
-                return Ok(rejected(
-                    "memory.invalid_input",
-                    "At least one Hearth proposal is required",
-                ));
-            }
-            let mut ids = BTreeSet::new();
-            for reference in &envelope.payload.proposals {
-                if !ids.insert(reference.proposal_id.clone()) {
-                    return Ok(rejected(
-                        "memory.invalid_input",
-                        "Hearth proposal IDs must be unique",
-                    ));
-                }
-                let Some(proposal) =
-                    load_hearth_proposal_record(transaction, &reference.proposal_id)?
-                else {
-                    return Ok(rejected(
-                        "memory.proposal_not_found",
-                        "Hearth proposal does not exist",
-                    ));
-                };
-                if proposal.version != reference.expected_version || proposal.status != "pending" {
-                    return Ok(rejected(
-                        "memory.proposal_conflict",
-                        "Hearth proposal changed or is no longer pending",
-                    ));
-                }
-            }
-            for proposal_id in &ids {
-                reject_hearth_proposal_row(transaction, proposal_id, user_id)?;
-            }
-            append_memory_event(
-                transaction,
-                "memory.hearth_proposals_rejected",
-                "batch",
-                envelope,
-                json!({"proposalIds": ids}),
-            )?;
-            Ok(CommandHandlerResult::applied(
-                "hearth_memory_proposals_rejected",
-                json!({"proposalIds": ids}),
-                None,
             ))
         })
     }
@@ -3123,6 +3274,15 @@ impl MemoryService {
                             None,
                             &now,
                         )?;
+                        if candidate.scope.kind == MemoryScopeKind::Hearth {
+                            invalidate_matching_pending_hearth_adds(
+                                transaction,
+                                candidate.kind,
+                                &candidate.body,
+                                None,
+                                &now,
+                            )?;
+                        }
                         (
                             memory_id,
                             Some(revision_id),
@@ -3240,6 +3400,25 @@ impl MemoryService {
                         retrieval_keys: normalized.payload.retrieval_keys.clone(),
                         review_after: default_review_after(kind),
                     };
+                    if candidate.scope.kind == MemoryScopeKind::Hearth {
+                        if active_exact_memory_exists(transaction, &candidate)? {
+                            return Ok(rejected(
+                                "memory.duplicate",
+                                "An identical active Memory already exists",
+                            ));
+                        }
+                        return save_hearth_review_item(
+                            transaction,
+                            &normalized,
+                            &actor,
+                            "add",
+                            Some(kind),
+                            None,
+                            None,
+                            &candidate.body,
+                            &candidate.retrieval_keys,
+                        );
+                    }
                     validate_candidate(transaction, &candidate)?;
                     ensure_capacity(
                         transaction,
@@ -3272,10 +3451,9 @@ impl MemoryService {
                     Ok(CommandHandlerResult::applied(
                         "memory_write_applied",
                         json!({
-                            "action": "add",
+                            "outcome": "effective",
                             "memoryId": memory_id,
                             "revisionId": revision_id,
-                            "effective": true,
                         }),
                         Some(EntityReference {
                             entity_type: "memory".to_string(),
@@ -3308,13 +3486,7 @@ impl MemoryService {
                     let Some(record) = load_memory_record(transaction, memory_id)? else {
                         return Ok(rejected("memory.unavailable", "Memory is unavailable"));
                     };
-                    if record.lifecycle != "active"
-                        || record
-                            .scope
-                            .as_ref()
-                            .is_some_and(|scope| scope.kind == MemoryScopeKind::Hearth)
-                        || !memory_applicable_to_agent(transaction, &record, agent_id, camp_id)?
-                    {
+                    if record.lifecycle != "active" {
                         return Ok(rejected("memory.unavailable", "Memory is unavailable"));
                     }
                     if record.current_revision_id.as_deref() != Some(base_revision_id) {
@@ -3334,6 +3506,24 @@ impl MemoryService {
                             "Memory body and Retrieval Keys are unchanged",
                         ));
                     }
+                    if record.scope.as_ref().map(|scope| scope.kind)
+                        == Some(MemoryScopeKind::Hearth)
+                    {
+                        return save_hearth_review_item(
+                            transaction,
+                            &normalized,
+                            &actor,
+                            "revise",
+                            None,
+                            Some(memory_id),
+                            Some(base_revision_id),
+                            &normalized.payload.body,
+                            &normalized.payload.retrieval_keys,
+                        );
+                    }
+                    if !memory_mutable_by_agent(transaction, &record, agent_id, camp_id)? {
+                        return Ok(rejected("memory.unavailable", "Memory is unavailable"));
+                    }
                     let revision_id = Uuid::new_v4().to_string();
                     let now = Utc::now().to_rfc3339();
                     insert_revision(
@@ -3344,7 +3534,7 @@ impl MemoryService {
                             body: &normalized.payload.body,
                             retrieval_keys: &normalized.payload.retrieval_keys,
                             actor: &actor,
-                            created_from_hearth_proposal_id: None,
+                            created_from_hearth_review_item_id: None,
                             created_at: &now,
                         },
                     )?;
@@ -3373,10 +3563,9 @@ impl MemoryService {
                     Ok(CommandHandlerResult::applied(
                         "memory_write_applied",
                         json!({
-                            "action": "revise",
+                            "outcome": "effective",
                             "memoryId": memory_id,
                             "revisionId": revision_id,
-                            "effective": true,
                         }),
                         Some(EntityReference {
                             entity_type: "memory".to_string(),
@@ -3389,189 +3578,6 @@ impl MemoryService {
                     "action must be add or revise",
                 )),
             }
-        })
-    }
-
-    pub fn propose_hearth(
-        &self,
-        database: &mut Database,
-        envelope: &CommandEnvelope<ProposeHearthMemoryCommand>,
-    ) -> Result<CommandExecution> {
-        let mut normalized = envelope.clone();
-        normalized.payload.body = canonicalize_memory_body(&normalized.payload.body)?;
-        normalized.payload.retrieval_keys =
-            normalize_retrieval_keys(&normalized.payload.retrieval_keys)?;
-        self.gateway.execute(database, &normalized, |transaction| {
-            let actor = validate_agent_mutation(transaction, &normalized)?;
-            let source_agent_run_id = actor
-                .source_agent_run_id
-                .as_deref()
-                .context("Agent Revision actor has no source Run")?;
-            enforce_agent_mutation_quota(transaction, source_agent_run_id)?;
-            if memory_secret::contains_secret(&normalized.payload.body) {
-                return Ok(rejected(
-                    "memory.secret_rejected",
-                    "Credential-like secrets cannot be stored in Memory",
-                ));
-            }
-            let (kind, target_memory_id, base_revision_id) =
-                match normalized.payload.action.as_str() {
-                    "add" => {
-                        if normalized.payload.memory_id.is_some()
-                            || normalized.payload.base_revision_id.is_some()
-                        {
-                            return Ok(rejected(
-                                "memory.invalid_input",
-                                "add cannot include memoryId or baseRevisionId",
-                            ));
-                        }
-                        let kind = normalized.payload.kind.context("add requires kind")?;
-                        (Some(kind), None, None)
-                    }
-                    "revise" => {
-                        if normalized.payload.kind.is_some() {
-                            return Ok(rejected(
-                                "memory.invalid_input",
-                                "revise cannot include kind",
-                            ));
-                        }
-                        let memory_id = normalized
-                            .payload
-                            .memory_id
-                            .as_deref()
-                            .context("revise requires memoryId")?;
-                        let base_revision_id = normalized
-                            .payload
-                            .base_revision_id
-                            .as_deref()
-                            .context("revise requires baseRevisionId")?;
-                        let Some(record) = load_memory_record(transaction, memory_id)? else {
-                            return Ok(rejected(
-                                "memory.unavailable",
-                                "Hearth Memory is unavailable",
-                            ));
-                        };
-                        if record.lifecycle != "active"
-                            || record.scope.as_ref().map(|scope| scope.kind)
-                                != Some(MemoryScopeKind::Hearth)
-                        {
-                            return Ok(rejected(
-                                "memory.unavailable",
-                                "Hearth Memory is unavailable",
-                            ));
-                        }
-                        if record.current_revision_id.as_deref() != Some(base_revision_id) {
-                            return Ok(rejected(
-                                "memory.revision_conflict",
-                                "baseRevisionId is not current",
-                            ));
-                        }
-                        if revision_matches(
-                            transaction,
-                            base_revision_id,
-                            &normalized.payload.body,
-                            &normalized.payload.retrieval_keys,
-                        )? {
-                            return Ok(rejected(
-                                "memory.no_change",
-                                "Memory body and Retrieval Keys are unchanged",
-                            ));
-                        }
-                        (
-                            None,
-                            Some(memory_id.to_string()),
-                            Some(base_revision_id.to_string()),
-                        )
-                    }
-                    _ => {
-                        return Ok(rejected(
-                            "memory.invalid_input",
-                            "action must be add or revise",
-                        ));
-                    }
-                };
-            let pending_key = canonical_json_digest(&json!({
-                "action": normalized.payload.action,
-                "kind": kind,
-                "body": normalized.payload.body,
-                "retrievalKeys": normalized.payload.retrieval_keys,
-                "targetMemoryId": target_memory_id,
-                "baseRevisionId": base_revision_id,
-            }))?;
-            let duplicate: Option<String> = transaction
-                .query_row(
-                    r#"
-                    SELECT id FROM hearth_memory_proposal
-                    WHERE status = 'pending' AND pending_key_digest = ?1
-                    "#,
-                    [&pending_key],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            if duplicate.is_some() {
-                return Ok(rejected(
-                    "memory.duplicate_pending",
-                    "An identical pending Hearth proposal already exists",
-                ));
-            }
-            let proposal_id = Uuid::new_v4().to_string();
-            let now = Utc::now().to_rfc3339();
-            let (agent_id, camp_id) = agent_identity(&normalized)?;
-            transaction.execute(
-                r#"
-                INSERT INTO hearth_memory_proposal(
-                    id, action, status, candidate_kind,
-                    candidate_body, candidate_body_utf8_bytes,
-                    candidate_retrieval_keys_json,
-                    target_memory_id, base_revision_id, pending_key_digest,
-                    proposed_by_agent_id, source_camp_id,
-                    source_agent_run_id, source_execution_epoch,
-                    version, proposed_at
-                ) VALUES (
-                    ?1, ?2, 'pending', ?3, ?4, ?5, ?6,
-                    ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1, ?14
-                )
-                "#,
-                params![
-                    proposal_id,
-                    normalized.payload.action,
-                    kind.map(MemoryKind::as_str),
-                    normalized.payload.body,
-                    normalized.payload.body.len() as i64,
-                    serde_json::to_string(&normalized.payload.retrieval_keys)?,
-                    target_memory_id,
-                    base_revision_id,
-                    pending_key,
-                    agent_id,
-                    camp_id,
-                    source_agent_run_id,
-                    actor.source_execution_epoch,
-                    now,
-                ],
-            )?;
-            append_memory_event(
-                transaction,
-                "memory.hearth_proposal_created",
-                &proposal_id,
-                &normalized,
-                json!({
-                    "proposalId": proposal_id,
-                    "status": "pending",
-                    "effective": false,
-                }),
-            )?;
-            Ok(CommandHandlerResult::accepted(
-                "hearth_memory_proposal_saved",
-                json!({
-                    "proposalId": proposal_id,
-                    "status": "pending",
-                    "effective": false,
-                }),
-                Some(EntityReference {
-                    entity_type: "hearth_memory_proposal".to_string(),
-                    entity_id: proposal_id,
-                }),
-            ))
         })
     }
 }

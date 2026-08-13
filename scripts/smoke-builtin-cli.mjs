@@ -23,7 +23,6 @@ const expectedOperations = [
   'camp.read',
   'camp.search',
   'history.search',
-  'memory.propose_hearth',
   'memory.read',
   'memory.search',
   'memory.write',
@@ -163,7 +162,7 @@ try {
 
   const results = []
   for (const specification of runtimeSpecifications) {
-    process.stderr.write(`\n[builtin-cli] ${specification.adapterKind}: full 13-operation Run\n`)
+    process.stderr.write(`\n[builtin-cli] ${specification.adapterKind}: full 12-operation Run\n`)
     const source = await startVerificationRun(core, specification, false)
     const sourceSnapshot = await waitForRun(core, specification.campId, source.agentRunId, {
       marker: specification.successMarker,
@@ -306,7 +305,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    contractVersion: 8,
+    contractVersion: 9,
     ipcProtocolVersion: 1,
     runtimeCount: results.length,
     operationCountPerRuntime: expectedOperations.length,
@@ -334,9 +333,9 @@ function nativeSessionIdForRun(events, agentRunId, startedEvent) {
 function assertBuiltinCliCapability(label, installation) {
   const snapshot = installation?.snapshot
   if (snapshot?.probeStatus !== 'ready'
-      || !snapshot.capabilities.includes('builtin_cli.transport.v8')
+      || !snapshot.capabilities.includes('builtin_cli.transport.v9')
       || !snapshot.models.length) {
-    throw new Error(`${label} is not ready for Built-in CLI v8: ${JSON.stringify(snapshot)}`)
+    throw new Error(`${label} is not ready for Built-in CLI v9: ${JSON.stringify(snapshot)}`)
   }
 }
 
@@ -440,7 +439,7 @@ async function startVerificationRun(coreClient, specification, resumed) {
       taskId: null,
       purpose: resumed
         ? `Verify ${specification.adapterKind} resume/process reuse receives a new active CLI lease.`
-        : `Verify ${specification.adapterKind} executes all 13 CLI-only built-in operations.`,
+        : `Verify ${specification.adapterKind} executes all 12 CLI-only built-in operations.`,
       completionRole: 'required'
     }
   })
@@ -599,10 +598,16 @@ function projectEnvelopeForMeasurement(envelope) {
         effectiveRecipients: envelope.result.effectiveRecipients
       }
     case 'memory.write':
-      return {
-        memoryId: envelope.result.memoryId,
-        revisionId: envelope.result.revisionId
-      }
+      return envelope.result.outcome === 'effective'
+        ? {
+            outcome: 'effective',
+            memoryId: envelope.result.memoryId,
+            revisionId: envelope.result.revisionId
+          }
+        : {
+            outcome: 'review_pending',
+            reviewItemId: envelope.result.reviewItemId
+          }
     case 'team.create_task':
       return selectFields(envelope.result, ['taskId', 'title', 'status', 'assigneeAgentId', 'version', 'availableActions'])
     case 'team.update_task':
@@ -611,7 +616,6 @@ function projectEnvelopeForMeasurement(envelope) {
     case 'camp.read':
     case 'camp.search':
     case 'history.search':
-    case 'memory.propose_hearth':
     case 'memory.read':
     case 'memory.search':
     case 'team.get_task':
@@ -665,11 +669,12 @@ function verificationScript(input) {
     action: 'add',
     scope: 'companion',
     kind: 'preference',
-    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v8 qualification.`,
+    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v9 qualification.`,
     retrievalKeys: [`cli-${input.slug.slice(0, 18)}`]
   })
   const hearth = JSON.stringify({
     action: 'add',
+    scope: 'hearth',
     kind: 'lesson',
     body: `The ${input.adapterKind} Runtime can invoke Rovai built-ins only through the local CLI.`,
     retrievalKeys: [`hearth-${input.slug.slice(0, 14)}`]
@@ -710,7 +715,8 @@ assert_success() {
     and (if $operation == "camp.message.send"
          then (.messageId | type) == "string" and (.effectiveRecipients | type) == "array"
          elif $operation == "memory.write"
-         then (.memoryId | type) == "string" and (.revisionId | type) == "string"
+         then ((.outcome == "effective" and (.memoryId | type) == "string" and (.revisionId | type) == "string")
+           or (.outcome == "review_pending" and (.reviewItemId | type) == "string"))
          else type == "object"
          end)
   ' >/dev/null
@@ -730,7 +736,7 @@ assert_fix_input() {
 }
 
 STEP=version
-"$CLI" --version | grep -q 'contract-v8 ipc-v1'
+"$CLI" --version | grep -q 'contract-v9 ipc-v1'
 
 STEP=exact_help
 root_help="$("$CLI" --help)"
@@ -768,6 +774,15 @@ set -e
 test "$legacy_json_status" -eq 1
 test ! -s "$RUN_TMP/legacy-json.err"
 assert_fix_input "$legacy_json"
+
+STEP=removed_memory_command
+set +e
+removed_memory_command="$("$CLI" memory propose-hearth 2>"$RUN_TMP/removed-memory-command.err")"
+removed_memory_command_status=$?
+set -e
+test "$removed_memory_command_status" -eq 2
+test ! -s "$RUN_TMP/removed-memory-command.err"
+assert_fix_input "$removed_memory_command"
 
 cat > "$RUN_TMP/task-create.json" <<'ROVAI_JSON'
 ${taskCreate}
@@ -872,6 +887,7 @@ ROVAI_JSON
 STEP=memory_write
 memory_write="$("$CLI" memory write --input-file "$RUN_TMP/memory-write.json")"
 assert_success "$memory_write" 'memory.write'
+printf '%s\n' "$memory_write" | "$JQ" -e '.outcome == "effective"' >/dev/null
 memory_id="$(printf '%s\n' "$memory_write" | "$JQ" -er '.memoryId')"
 
 STEP=memory_search
@@ -888,17 +904,21 @@ printf '%s\n' "$memory_read" | "$JQ" -e --arg memoryId "$memory_id" '.memories |
 cat > "$RUN_TMP/hearth.json" <<'ROVAI_JSON'
 ${hearth}
 ROVAI_JSON
-STEP=memory_propose_hearth
-hearth_result="$("$CLI" memory propose-hearth --input-file "$RUN_TMP/hearth.json")"
-assert_success "$hearth_result" 'memory.propose_hearth'
-printf '%s\n' "$hearth_result" | "$JQ" -e '.status == "pending" and .effective == false' >/dev/null
+STEP=memory_write_hearth
+hearth_result="$("$CLI" memory write --input-file "$RUN_TMP/hearth.json")"
+assert_success "$hearth_result" 'memory.write'
+printf '%s\n' "$hearth_result" | "$JQ" -e '
+  (keys | sort) == ["outcome", "reviewItemId"]
+  and .outcome == "review_pending"
+  and (.reviewItemId | type) == "string"
+' >/dev/null
 
 STEP=complete
 trap - EXIT
 printf '%s\n' ${shellQuote(JSON.stringify({
     ok: true,
     marker: input.successMarker,
-    operationCount: 13,
+    operationCount: 12,
     versionConflict: 'refresh_then_decide'
   }))}
 `

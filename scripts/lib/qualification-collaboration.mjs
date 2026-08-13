@@ -107,8 +107,7 @@ function safeProjectionValue(value, operation, position, depth) {
         || (/secret/i.test(key) && !/SecretDetected$/.test(key))) {
       return false
     }
-    if (key === 'body' && !(position === 'input'
-      && ['memory.write', 'memory.propose_hearth'].includes(operation))) return false
+    if (key === 'body' && !(position === 'input' && operation === 'memory.write')) return false
     if (!safeProjectionValue(item, operation, position, depth + 1)) return false
   }
   return true

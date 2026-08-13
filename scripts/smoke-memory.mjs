@@ -12,8 +12,8 @@ try {
   core = startCore(dataDir)
   const empty = await core.request('memory.list')
   assert(empty.memories.length === 0, 'Fresh database inferred Memory from unrelated state')
-  assert((await core.request('memory.hearthProposals.list')).length === 0,
-    'Fresh Hearth proposal queue is not empty')
+  assert((await core.request('memory.hearthReviewItems.list')).length === 0,
+    'Fresh Hearth Review queue is not empty')
 
   let secretRejected = false
   try {
@@ -116,7 +116,7 @@ try {
 
   const exported = await core.request('memory.export')
   assert(exported.format === 'rovai-memory-export-v3'
-    && Array.isArray(exported.hearthProposals),
+    && Array.isArray(exported.hearthReviewItems),
   'Memory export v3 format is unstable')
   assert(!JSON.stringify(exported).includes(forgetBody), 'Forgotten body leaked into export')
   assert(!exported.memories.some((memory) => memory.id === forgetCandidate.payload.memoryId),
@@ -139,7 +139,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    schema: 'memory-v2',
+    schema: 'memory-v3',
     hearthCapacity: 32,
     singleEffectiveState: true,
     agentMemoryWriteSetting: true,

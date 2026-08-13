@@ -8,7 +8,7 @@ use crate::{
     command::canonical_json_digest,
     memory_retrieval::{MEMORY_READ_TOOL_NAME, MEMORY_SEARCH_TOOL_NAME},
     memory_secret,
-    memory_tool::{MEMORY_PROPOSE_HEARTH_TOOL_NAME, MEMORY_WRITE_TOOL_NAME},
+    memory_tool::MEMORY_WRITE_TOOL_NAME,
     message_delivery::CAMP_MESSAGE_SEND_TOOL_NAME,
     team_tool::{
         TEAM_CREATE_TASK_TOOL_NAME, TEAM_GET_TASK_TOOL_NAME, TEAM_LIST_TASKS_TOOL_NAME,
@@ -192,36 +192,25 @@ fn project_input(operation: &str, input: &Value) -> Result<Value> {
             insert_string_array(&mut projected, "memoryIds", input.get("memoryIds"));
         }
         MEMORY_WRITE_TOOL_NAME => {
-            project_memory_mutation_input(&mut projected, input, true);
-        }
-        MEMORY_PROPOSE_HEARTH_TOOL_NAME => {
-            project_memory_mutation_input(&mut projected, input, false);
+            project_memory_mutation_input(&mut projected, input);
         }
         _ => anyhow::bail!("unsupported Built-in Tool Evidence operation: {operation}"),
     }
     Ok(Value::Object(projected))
 }
 
-fn project_memory_mutation_input(
-    projected: &mut Map<String, Value>,
-    input: &Value,
-    relationship: bool,
-) {
+fn project_memory_mutation_input(projected: &mut Map<String, Value>, input: &Value) {
     insert_enum(projected, "action", input.get("action"));
     insert_enum(projected, "scope", input.get("scope"));
     insert_enum(projected, "kind", input.get("kind"));
-    insert_semantic_text(projected, "body", input.get("body"));
-    insert_bounded_semantic_array(projected, "retrievalKeys", input.get("retrievalKeys"), 64);
     insert_identifier(projected, "memoryId", input.get("memoryId"));
     insert_identifier(projected, "baseRevisionId", input.get("baseRevisionId"));
-    if relationship {
-        insert_identifier(
-            projected,
-            "counterpartyAgentId",
-            input.get("counterpartyAgentId"),
-        );
-        insert_enum(projected, "direction", input.get("direction"));
-    }
+    insert_identifier(
+        projected,
+        "counterpartyAgentId",
+        input.get("counterpartyAgentId"),
+    );
+    insert_enum(projected, "direction", input.get("direction"));
 }
 
 fn project_result(operation: &str, result: &Value) -> Result<Value> {
@@ -313,15 +302,10 @@ fn project_result(operation: &str, result: &Value) -> Result<Value> {
             projected.insert("memoriesTruncated".to_string(), json!(memories.truncated));
         }
         MEMORY_WRITE_TOOL_NAME => {
+            insert_enum(&mut projected, "outcome", result.get("outcome"));
             insert_identifier(&mut projected, "memoryId", result.get("memoryId"));
             insert_identifier(&mut projected, "revisionId", result.get("revisionId"));
-            insert_i64(&mut projected, "version", result.get("version"));
-        }
-        MEMORY_PROPOSE_HEARTH_TOOL_NAME => {
-            insert_identifier(&mut projected, "proposalId", result.get("proposalId"));
-            insert_enum(&mut projected, "status", result.get("status"));
-            insert_bool(&mut projected, "effective", result.get("effective"));
-            insert_i64(&mut projected, "version", result.get("version"));
+            insert_identifier(&mut projected, "reviewItemId", result.get("reviewItemId"));
         }
         _ => anyhow::bail!("unsupported Built-in Tool Evidence operation: {operation}"),
     }

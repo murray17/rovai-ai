@@ -13,10 +13,7 @@ use crate::{
         MEMORY_READ_TOOL_NAME, MEMORY_SEARCH_TOOL_NAME, MemoryReadInput, MemoryRetrievalService,
         MemorySearchInput,
     },
-    memory_tool::{
-        HearthProposalToolInput, MEMORY_PROPOSE_HEARTH_TOOL_NAME, MEMORY_WRITE_TOOL_NAME,
-        MemoryToolService, MemoryWriteToolInput,
-    },
+    memory_tool::{MEMORY_WRITE_TOOL_NAME, MemoryToolService, MemoryWriteToolInput},
     message_delivery::CAMP_MESSAGE_SEND_TOOL_NAME,
     team_tool::{
         CampMessageSendInput, TEAM_CREATE_TASK_TOOL_NAME, TEAM_GET_TASK_TOOL_NAME,
@@ -64,9 +61,6 @@ pub fn validate_builtin_tool_input(canonical_name: &str, input: &Value) -> Resul
         }
         MEMORY_WRITE_TOOL_NAME => {
             serde_json::from_value::<MemoryWriteToolInput>(input.clone()).map(|_| ())
-        }
-        MEMORY_PROPOSE_HEARTH_TOOL_NAME => {
-            serde_json::from_value::<HearthProposalToolInput>(input.clone()).map(|_| ())
         }
         _ => bail!("unknown built-in operation: {canonical_name}"),
     };
@@ -576,29 +570,31 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": MEMORY_WRITE_TOOL_NAME,
-            "title": "Write active partner Memory",
-            "description": "Add an active Companion/Relationship Memory or publish a Revision to an accessible one. Hearth is not writable through this tool.",
+            "title": "Write actor-bounded Memory",
+            "description": "Add or revise Memory within the current Agent's authority. Companion and directed Relationship writes are immediately effective; Hearth writes create a pending user Review Item.",
             "inputSchema": MemoryToolService::write_input_schema(),
             "outputSchema": {
-                "type": "object", "additionalProperties": false,
-                "required": ["action", "memoryId", "revisionId", "effective"],
-                "properties": {
-                    "action": {"type": "string", "enum": ["add", "revise"]}, "memoryId": {"type": "string"},
-                    "revisionId": {"type": "string"}, "effective": {"const": true}
-                }
-            }
-        }),
-        json!({
-            "name": MEMORY_PROPOSE_HEARTH_TOOL_NAME,
-            "title": "Propose Hearth Memory",
-            "description": "Submit one Hearth add or revise proposal. It is not effective until the user accepts it.",
-            "inputSchema": MemoryToolService::propose_hearth_input_schema(),
-            "outputSchema": {
-                "type": "object", "additionalProperties": false,
-                "required": ["proposalId", "status", "effective"],
-                "properties": {
-                    "proposalId": {"type": "string"}, "status": {"const": "pending"}, "effective": {"const": false}
-                }
+                "oneOf": [
+                    {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["outcome", "memoryId", "revisionId"],
+                        "properties": {
+                            "outcome": {"const": "effective"},
+                            "memoryId": {"type": "string"},
+                            "revisionId": {"type": "string"}
+                        }
+                    },
+                    {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["outcome", "reviewItemId"],
+                        "properties": {
+                            "outcome": {"const": "review_pending"},
+                            "reviewItemId": {"type": "string"}
+                        }
+                    }
+                ]
             }
         }),
     ]

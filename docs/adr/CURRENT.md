@@ -160,8 +160,8 @@ Related: Member identity、Message delivery、Memory entrypoint 与 Evidence 仍
 ## Memory
 
 - **何时阅读：** 修改 Memory authority、scope、revision、forgetting、retrieval、mutation 或 storage 时阅读。
-- **当前架构：** ADR-only；architecture summary pending
-- **当前合同：** 无
+- **当前架构：** [Online Memory Capture](../architecture/online-memory-capture.md)
+- **当前合同：** [Memory Capture v1](../contracts/memory-capture-v1.md)
 
 <!-- adr-current-primary:begin topic=memory -->
 | ADR | Decision |
@@ -173,8 +173,8 @@ Related: Member identity、Message delivery、Memory entrypoint 与 Evidence 仍
 | [ADR-0029](0029-bounded-memory-reactivation.md) | Bounded Memory Reactivation |
 | [ADR-0047](0047-user-initiated-memory-export-boundary.md) | User-Initiated Memory Export Boundary |
 | [ADR-0068](0068-brokered-memory-retrieval-and-session-entrypoint.md) | Brokered Memory Retrieval and Session Entrypoint |
-| [ADR-0069](0069-single-effective-memory-and-scope-bounded-agent-mutation.md) | Single Effective Memory and Scope-Bounded Agent Mutation |
-| [ADR-0070](0070-normalized-sqlite-memory-store-v2.md) | Normalized SQLite Memory Store v2 |
+| [ADR-0178](0178-best-effort-online-memory-capture-and-actor-bounded-mutation.md) | Best-Effort Online Memory Capture and Actor-Bounded Agent Mutation |
+| [ADR-0179](0179-normalized-memory-store-v3-with-isolated-hearth-review.md) | Normalized Memory Store v3 with Isolated Hearth Review |
 <!-- adr-current-primary:end -->
 
 Related: Session entrypoint 与 Built-in operation 只作为交叉导航，不改变 Memory authority。
@@ -183,7 +183,7 @@ Related: Session entrypoint 与 Built-in operation 只作为交叉导航，不�
 
 - **何时阅读：** 修改 Skill/MCP projection、Built-in transport、CLI、catalog 或 Agent output 时阅读。
 - **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
-- **当前合同：** [Built-in Tool Transport v8](../contracts/builtin-tool-transport-v8.md)
+- **当前合同：** [Built-in Tool Transport v9](../contracts/builtin-tool-transport-v9.md)
 
 <!-- adr-current-primary:begin topic=skills-mcp-builtins -->
 | ADR | Decision |
@@ -201,6 +201,7 @@ Related: Session entrypoint 与 Built-in operation 只作为交叉导航，不�
 | [ADR-0161](0161-event-driven-root-scoped-skill-projection-reconciliation.md) | Event-Driven Root-Scoped Skill Projection Reconciliation |
 | [ADR-0166](0166-progressive-built-in-cli-teaching.md) | Progressive Built-In CLI Teaching |
 | [ADR-0176](0176-eleven-skill-official-inventory-and-system-required-operations.md) | Eleven-Skill Official Inventory and System-Required Operations |
+| [ADR-0180](0180-single-agent-memory-write-command.md) | Single Agent Memory Write Command with Outcome-Discriminated Output |
 <!-- adr-current-primary:end -->
 
 Related: 具体 Skill 名称或版本不是治理例外；长期边界仍按本主题的一般 ADR 准入规则判断。

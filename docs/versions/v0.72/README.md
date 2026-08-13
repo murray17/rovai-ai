@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.72
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -14,6 +14,8 @@ last_updated: 2026-08-13
 > 静态模式和既有执行台复用均已实现；自动化、打包 App 与多尺寸隔离验收完成。
 >
 > 前置版本：[v0.71 Notification Episode、Skill 管理与受控关闭终态收敛](../v0.71/README.md)
+>
+> 后续版本：[v0.73 在线长期记忆捕获与 Hearth 审核隔离](../v0.73/README.md)
 
 ## 版本目标
 

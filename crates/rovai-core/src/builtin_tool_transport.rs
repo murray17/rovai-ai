@@ -6,13 +6,13 @@ use serde_json::{Map, Value, json};
 
 use crate::{command::canonical_json_digest, team_tool_catalog::builtin_tool_definitions};
 
-pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 8;
+pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 9;
 pub const BUILTIN_TOOL_IPC_PROTOCOL_VERSION: u32 = 1;
 pub const BUILTIN_TOOL_ENVELOPE_VERSION: u32 = 1;
 pub const BUILTIN_TOOL_RECEIPT_VERSION: u32 = 1;
-pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 8;
+pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 9;
 pub const BUILTIN_TOOL_AGENT_OUTPUT_CONTRACT_VERSION: u32 = 2;
-pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v8";
+pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v9";
 pub const BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES: usize = 1024 * 1024;
 pub const ROVAI_AGENT_CLI_ENV: &str = "ROVAI_AGENT_CLI";
 pub const ROVAI_CLI_CONTEXT_ENV: &str = "ROVAI_CLI_CONTEXT";
@@ -128,7 +128,7 @@ pub struct BuiltinToolCliIdentity {
     pub action: &'static str,
 }
 
-pub const BUILTIN_TOOL_CLI_IDENTITIES: [BuiltinToolCliIdentity; 13] = [
+pub const BUILTIN_TOOL_CLI_IDENTITIES: [BuiltinToolCliIdentity; 12] = [
     BuiltinToolCliIdentity {
         operation: "camp.message.send",
         group: "send",
@@ -188,11 +188,6 @@ pub const BUILTIN_TOOL_CLI_IDENTITIES: [BuiltinToolCliIdentity; 13] = [
         operation: "memory.write",
         group: "memory",
         action: "write",
-    },
-    BuiltinToolCliIdentity {
-        operation: "memory.propose_hearth",
-        group: "memory",
-        action: "propose-hearth",
     },
 ];
 
@@ -722,11 +717,13 @@ fn error_contracts(operation: &str) -> Vec<BuiltinToolErrorContract> {
             code: "task.version_conflict".to_string(),
             recovery: BuiltinToolRecovery::RefreshThenDecide,
         }),
-        "memory.write" | "memory.propose_hearth" => {
-            errors.push(BuiltinToolErrorContract {
-                code: "memory.version_conflict".to_string(),
-                recovery: BuiltinToolRecovery::RefreshThenDecide,
-            });
+        "memory.write" => {
+            for code in ["memory.revision_conflict", "memory.review_version_conflict"] {
+                errors.push(BuiltinToolErrorContract {
+                    code: code.to_string(),
+                    recovery: BuiltinToolRecovery::RefreshThenDecide,
+                });
+            }
         }
         _ => {}
     }
@@ -739,18 +736,10 @@ pub fn projection_identity(operation: &str) -> Result<&'static str> {
         // The compact Agent projection is still the same two-field v1 shape;
         // the domain send contract is v4 and remains hidden behind it.
         "camp.message.send" => Ok("camp-message-send-v1"),
-        "memory.write" => Ok("memory-write-v1"),
-        "team.create_task"
-        | "team.get_task"
-        | "team.list_tasks"
-        | "team.update_task"
-        | "camp.list"
-        | "camp.search"
-        | "camp.read"
-        | "history.search"
-        | "memory.search"
-        | "memory.read"
-        | "memory.propose_hearth" => Ok("canonical-result-v1"),
+        "memory.write" => Ok("memory-write-v2"),
+        "team.create_task" | "team.get_task" | "team.list_tasks" | "team.update_task"
+        | "camp.list" | "camp.search" | "camp.read" | "history.search" | "memory.search"
+        | "memory.read" => Ok("canonical-result-v1"),
         _ => bail!("unknown built-in operation for Agent output projection"),
     }
 }
@@ -758,7 +747,8 @@ pub fn projection_identity(operation: &str) -> Result<&'static str> {
 pub fn recovery_for_error_code(code: &str) -> BuiltinToolRecovery {
     if code.ends_with(".version_conflict")
         || code.ends_with(".revision_conflict")
-        || code.ends_with(".proposal_conflict")
+        || code.ends_with(".review_conflict")
+        || code.ends_with(".review_stale")
     {
         BuiltinToolRecovery::RefreshThenDecide
     } else if code.ends_with(".invalid_input")
@@ -872,9 +862,9 @@ mod tests {
 
     #[test]
     fn cli_mapping_is_complete_unique_and_contract_valid() {
-        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 8);
-        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 8);
-        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v8");
+        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 9);
+        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 9);
+        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v9");
         validate_builtin_tool_contract().unwrap();
         let operations = BUILTIN_TOOL_CLI_IDENTITIES
             .iter()
@@ -884,8 +874,8 @@ mod tests {
             .iter()
             .map(|identity| (identity.group, identity.action))
             .collect::<BTreeSet<_>>();
-        assert_eq!(operations.len(), 13);
-        assert_eq!(commands.len(), 13);
+        assert_eq!(operations.len(), 12);
+        assert_eq!(commands.len(), 12);
     }
 
     #[test]

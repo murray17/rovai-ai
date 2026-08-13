@@ -111,17 +111,15 @@ use rovai_core::{
     mcp_import::McpImportScanner,
     mcp_projection::{McpProjectionRequest, McpProjectionService, PreparedMcpProjection},
     memory::{
-        AcceptHearthMemoryProposalCommand, CreateMemoryCommand, ForgetMemoryCommand, MemoryService,
-        ReactivateMemoryCommand, RejectHearthMemoryProposalCommand,
-        RejectHearthMemoryProposalsCommand, RetireMemoryCommand, ReviseMemoryCommand,
-        ScheduleMemoryReviewCommand, SupersedeMemoriesCommand,
+        AcceptHearthReviewItemCommand, CreateMemoryCommand, ForgetMemoryCommand, MemoryService,
+        ReactivateMemoryCommand, RejectHearthReviewItemCommand, RetireMemoryCommand,
+        ReviseMemoryCommand, ScheduleMemoryReviewCommand, SupersedeMemoriesCommand,
     },
     memory_retrieval::{
         MEMORY_READ_TOOL_NAME, MEMORY_SEARCH_TOOL_NAME, MemoryReadInput, MemoryRetrievalInvocation,
         MemoryRetrievalService, MemorySearchInput,
     },
     memory_tool::{
-        HearthProposalToolInput, HearthProposalToolInvocation, MEMORY_PROPOSE_HEARTH_TOOL_NAME,
         MEMORY_WRITE_TOOL_NAME, MemoryToolService, MemoryWriteToolInput, MemoryWriteToolInvocation,
     },
     message_delivery::{
@@ -2669,29 +2667,6 @@ impl Core {
                     evidence_replayed = execution.replayed;
                     command_execution_payload(execution)
                 }
-                MEMORY_PROPOSE_HEARTH_TOOL_NAME => {
-                    let input = serde_json::from_value::<HearthProposalToolInput>(request.input)
-                        .context("private memory.propose_hearth input is invalid")?;
-                    let invocation = HearthProposalToolInvocation {
-                        native_binding_id: request.native_binding_id,
-                        binding_credential: request.binding_credential,
-                        runtime_tool_call_id: request.runtime_tool_call_id,
-                        input,
-                    };
-                    let execution =
-                        if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
-                            MemoryToolService.propose_hearth_attested(
-                                &mut database,
-                                &invocation,
-                                agent_run_id,
-                                *execution_epoch,
-                            )
-                        } else {
-                            MemoryToolService.propose_hearth(&mut database, &invocation)
-                        }?;
-                    evidence_replayed = execution.replayed;
-                    command_execution_payload(execution)
-                }
                 MEMORY_SEARCH_TOOL_NAME => {
                     let input = serde_json::from_value::<MemorySearchInput>(request.input)
                         .context("private memory.search input is invalid")?;
@@ -3128,37 +3103,27 @@ impl Core {
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
-            "memory.hearthProposals.list" => {
+            "memory.hearthReviewItems.list" => {
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    MemoryService::default().list_hearth_proposals(&database)?,
+                    MemoryService::default().list_hearth_review_items(&database)?,
                 )?)
             }
-            "memory.hearthProposals.accept" => {
-                let params: UserCommandParams<AcceptHearthMemoryProposalCommand> =
+            "memory.hearthReviewItems.accept" => {
+                let params: UserCommandParams<AcceptHearthReviewItemCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                let execution = MemoryService::default().accept_hearth_proposal(
+                let execution = MemoryService::default().accept_hearth_review_item(
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
-            "memory.hearthProposals.reject" => {
-                let params: UserCommandParams<RejectHearthMemoryProposalCommand> =
+            "memory.hearthReviewItems.reject" => {
+                let params: UserCommandParams<RejectHearthReviewItemCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                let execution = MemoryService::default().reject_hearth_proposal(
-                    &mut database,
-                    &user_command_envelope(params.command_id, params.command),
-                )?;
-                Ok(serde_json::to_value(execution.result)?)
-            }
-            "memory.hearthProposals.rejectBatch" => {
-                let params: UserCommandParams<RejectHearthMemoryProposalsCommand> =
-                    serde_json::from_value(request.params.clone())?;
-                let mut database = self.database.lock().await;
-                let execution = MemoryService::default().reject_hearth_proposals(
+                let execution = MemoryService::default().reject_hearth_review_item(
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;

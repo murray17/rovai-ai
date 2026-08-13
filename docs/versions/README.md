@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.72
+current_version: v0.73
 last_updated: 2026-08-13
 ---
 
@@ -123,4 +123,5 @@ last_updated: 2026-08-13
 | v0.69 | `historical` | Planned Shutdown launch/terminal 线性化、waiting 终态与硬期限正确性修正 | [v0.69/README.md](v0.69/README.md) |
 | v0.70 | `historical` | 消息局部 User Attention 教学收窄、Camp 标题去噪、十项 official Skill inventory 与 Built-in Tool Transport v8；九 Runtime v8 matrix 未执行即关闭 | [v0.70/README.md](v0.70/README.md) |
 | v0.71 | `historical` | Core-owned Notification Episode；Campfire、系统必需 operational Skill 管理与受控关闭终态收敛 | [v0.71/README.md](v0.71/README.md) |
-| v0.72 | `current` | Camp 会话区沉浸世界地图、真实执行播报与只读协作叙事 | [v0.72/README.md](v0.72/README.md) |
+| v0.72 | `historical` | Camp 会话区沉浸世界地图、真实执行播报与只读协作叙事 | [v0.72/README.md](v0.72/README.md) |
+| v0.73 | `current` | best-effort 在线长期记忆捕获、actor-bounded mutation、隔离 Hearth Review 与 Built-in Transport v9 | [v0.73/README.md](v0.73/README.md) |
