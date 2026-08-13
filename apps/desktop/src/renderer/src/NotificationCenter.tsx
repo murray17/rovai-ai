@@ -79,14 +79,20 @@ export interface NotificationCenterHandle {
   open(trigger?: HTMLButtonElement | null): void
 }
 
+export type NotificationNavigationResult =
+  | { status: 'navigated' }
+  | { status: 'failed'; message: string }
+
 interface NotificationCenterProps {
   enabled: boolean
   activeCampId: string | null
   activeCampVisible: boolean
   refreshSignal: number
   onUnreadCountChange(count: number): void
-  onNavigate(notification: InAppNotificationView): Promise<void>
-  onRefreshVisibleCamp(campId: string): Promise<boolean>
+  onNavigate(notification: InAppNotificationView): Promise<NotificationNavigationResult>
+  onPresentNavigation(notification: InAppNotificationView): Promise<boolean>
+  onCancelNavigation(): void
+  onRefreshVisibleCamp(notification: InAppNotificationView): Promise<boolean>
 }
 
 export const NotificationCenter = forwardRef<NotificationCenterHandle, NotificationCenterProps>(function NotificationCenter({
@@ -96,6 +102,8 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
   refreshSignal,
   onUnreadCountChange,
   onNavigate,
+  onPresentNavigation,
+  onCancelNavigation,
   onRefreshVisibleCamp
 }: NotificationCenterProps, ref): React.JSX.Element {
   const [open, setOpen] = useState(false)
@@ -106,6 +114,8 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
   const [throughSequence, setThroughSequence] = useState(0)
   const [state, setState] = useState<LoadState>('loading')
   const [error, setError] = useState<string | null>(null)
+  const [navigationError, setNavigationError] = useState<string | null>(null)
+  const [openingNotificationId, setOpeningNotificationId] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
   const [preference, setPreference] = useState<InAppNotificationPreference | null>(null)
   const [headsUpQueue, setHeadsUpQueue] = useState<NotificationHeadsUpEntry[]>([])
@@ -123,14 +133,19 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
   } | null>(null)
   const pendingReadAtById = useRef(new Map<string, string>())
   const returnFocusRef = useRef<HTMLButtonElement | null>(null)
+  const navigationRunning = useRef(false)
+  const navigationGeneration = useRef(0)
 
   useImperativeHandle(ref, () => ({
     open(trigger = null): void {
+      navigationGeneration.current += 1
+      onCancelNavigation()
       returnFocusRef.current = trigger
       setAggregateFocusIds(new Set())
+      setNavigationError(null)
       setOpen(true)
     }
-  }), [])
+  }), [onCancelNavigation])
 
   const acceptInbox = useCallback((inbox: InAppNotificationInbox): void => {
     if (inbox.schemaVersion !== 3) throw new Error('通知中心合同不兼容。')
@@ -314,10 +329,18 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
           && document.visibilityState === 'visible'
           && document.hasFocus()
         if (sourceAlreadyVisible) {
-          const rendered = await onRefreshVisibleCamp(notification.camp.id)
-          if (rendered) {
-            await markRead(notification.id).catch(() => undefined)
-            continue
+          const rendered = await onRefreshVisibleCamp(notification)
+          if (
+            rendered
+            && document.visibilityState === 'visible'
+            && document.hasFocus()
+          ) {
+            try {
+              await markRead(notification.id)
+              continue
+            } catch {
+              // Keep the unread notification eligible for a heads-up when persistence fails.
+            }
           }
         }
         if (
@@ -420,12 +443,55 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
   }
 
   const openNotification = async (notification: InAppNotificationView): Promise<void> => {
-    if (optimisticRead(notification)) void persistOptimisticRead(notification.id)
-    if (notification.kind === 'camp_message_user_mention' && !notification.sourceAvailable) {
-      return
+    if (navigationRunning.current) return
+    const generation = ++navigationGeneration.current
+    navigationRunning.current = true
+    onCancelNavigation()
+    setOpeningNotificationId(notification.id)
+    setNavigationError(null)
+    try {
+      if (optimisticRead(notification)) void persistOptimisticRead(notification.id)
+      if (notification.kind === 'camp_message_user_mention' && !notification.sourceAvailable) {
+        setNavigationError('原消息已不可用。通知仍保留在“全部”列表中。')
+        setOpen(true)
+        return
+      }
+      const result = await onNavigate(notification)
+      if (generation !== navigationGeneration.current) {
+        onCancelNavigation()
+        return
+      }
+      if (result.status === 'navigated') {
+        setOpen(false)
+        setAggregateFocusIds(new Set())
+        await afterNextPaint()
+        const presented = await onPresentNavigation(notification)
+        if (generation !== navigationGeneration.current) {
+          onCancelNavigation()
+          return
+        }
+        if (!presented) {
+          onCancelNavigation()
+          setNavigationError('已打开 Camp，但原消息未能获得焦点。通知仍保留，可稍后重试。')
+          setOpen(true)
+        } else {
+          setNavigationError(null)
+          window.setTimeout(() => returnFocusRef.current = null, 0)
+        }
+        return
+      }
+      onCancelNavigation()
+      setNavigationError(result.message)
+      setOpen(true)
+    } catch (nextError) {
+      onCancelNavigation()
+      if (generation !== navigationGeneration.current) return
+      setNavigationError(`暂时无法打开通知来源：${errorMessage(nextError)}`)
+      setOpen(true)
+    } finally {
+      navigationRunning.current = false
+      setOpeningNotificationId(null)
     }
-    setOpen(false)
-    await onNavigate(notification)
   }
 
   const markAllRead = async (): Promise<void> => {
@@ -513,7 +579,10 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
   const changeOpen = (nextOpen: boolean): void => {
     setOpen(nextOpen)
     if (!nextOpen) {
+      navigationGeneration.current += 1
+      onCancelNavigation()
       setAggregateFocusIds(new Set())
+      setNavigationError(null)
       window.setTimeout(() => returnFocusRef.current?.focus(), 0)
     }
   }
@@ -610,10 +679,15 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
                   key={notification.id}
                   notification={notification}
                   highlighted={aggregateFocusIds.has(notification.id)}
+                  disabled={openingNotificationId !== null}
+                  opening={openingNotificationId === notification.id}
                   onOpen={() => void openNotification(notification)}
                   onClear={() => void clearNotification(notification.id)}
                 />
               ))}
+              {navigationError && (
+                <p className="notification-page-error" role="alert">{navigationError}</p>
+              )}
               {nextCursor && (
                 <button
                   className="notification-load-more"
@@ -634,11 +708,15 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
 function NotificationRow({
   notification,
   highlighted,
+  disabled,
+  opening,
   onOpen,
   onClear
 }: {
   notification: InAppNotificationView
   highlighted: boolean
+  disabled: boolean
+  opening: boolean
   onOpen(): void
   onClear(): void
 }): React.JSX.Element {
@@ -652,7 +730,13 @@ function NotificationRow({
       className={`notification-row ${notification.readAt === null ? 'unread' : ''}${highlighted ? ' highlighted' : ''}`}
       data-notification-id={notification.id}
     >
-      <button className="notification-row-open" type="button" onClick={onOpen}>
+      <button
+        className="notification-row-open"
+        type="button"
+        disabled={disabled}
+        aria-busy={opening ? 'true' : undefined}
+        onClick={onOpen}
+      >
         <span className="notification-unread-mark" aria-hidden="true" />
         <span className="notification-row-copy">
           <strong>{presentation.label}</strong>
@@ -669,6 +753,7 @@ function NotificationRow({
       <button
         className="notification-row-clear"
         type="button"
+        disabled={disabled}
         aria-label={`清除“${presentation.label}”通知`}
         onClick={onClear}
       >×</button>
@@ -849,6 +934,14 @@ function relativeTime(value: string, now = Date.now()): string {
   if (hours < 24) return `${hours} 小时前`
   const days = Math.floor(hours / 24)
   return `${days} 天前`
+}
+
+function afterNextPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => resolve())
+    })
+  })
 }
 
 function errorMessage(error: unknown): string {

@@ -401,6 +401,13 @@ struct CampIdParams {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CampMessageAroundParams {
+    camp_id: String,
+    message_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ExecutionEvidenceContentParams {
     camp_id: String,
     evidence_id: String,
@@ -3564,6 +3571,18 @@ impl Core {
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
                     ReadModelService.camp_snapshot(&mut database, &params.camp_id)?,
+                )?)
+            }
+            "camp.messages.around" => {
+                let params: CampMessageAroundParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ReadModelService.camp_messages_around(
+                        &mut database,
+                        &params.camp_id,
+                        &params.message_id,
+                    )?,
                 )?)
             }
             "agentRunEvidence.getContent" => {

@@ -117,6 +117,7 @@ const allowedMethods = new Set<CoreMethod>([
   'campTurns.cancel',
   'agentRuns.resolveRecoveryBlocker',
   'camps.snapshot',
+  'camp.messages.around',
   'agentRunEvidence.getContent',
   'agentRunEvidence.list',
   'tasks.create',

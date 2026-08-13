@@ -17,7 +17,7 @@ last_updated: 2026-08-13
 | 判断当前版本目标、范围、进度或验收口径 | 从[版本索引中的唯一 `current` 条目](versions/README.md)进入对应版本概览与实施计划 |
 | 查询已接入与候选 Agent Runtime 的实测兼容性 | [Runtime 兼容性清单](runtime-compatibility.md) |
 | 新增或修改 Runtime Activity 映射规则 | [Runtime Activity Mapping 维护指南](runtime-activity/README.md)及[Registry](runtime-activity/registry.md) |
-| 修改内置 Agent CLI、IPC、Envelope、receipt、Projection 或幂等合同 | [Built-in Tool Transport v7 合同](contracts/builtin-tool-transport-v7.md)、[Camp Message Send v4](contracts/camp-message-send-v4.md)及[Current User Attention v1](contracts/current-user-attention-v1.md) |
+| 修改内置 Agent CLI、IPC、Envelope、receipt、Projection 或幂等合同 | [Built-in Tool Transport v7 合同](contracts/builtin-tool-transport-v7.md)、[Camp Message Send v4](contracts/camp-message-send-v4.md)及[Current User Attention v2](contracts/current-user-attention-v2.md) |
 | 修改 Camp 文件/目录附件、Composer 拖放、快照限制或 Runtime 附件路径 | [Camp Attachment v1](contracts/camp-attachment-v1.md)、[ADR-0169](adr/0169-core-owned-directory-attachment-snapshots.md)及[会话区拖放 UI](ui/components/conversation-drop-zone.md) |
 | 修改 CLI 教学分层、`cli-operations` 触发/reference，或 official Skill 精确集合与普通投递 | [ADR-0166](adr/0166-progressive-built-in-cli-teaching.md)、[ADR-0167](adr/0167-seven-skill-official-inventory.md)及[Built-in Tool Runtime 架构](architecture/builtin-tool-runtime.md) |
 | 修改 Task 状态、字段、可见性、权限、列表、CampMember 收口、self-active awareness 或 linked execution 准入 | [Durable Task v3](contracts/durable-task-v3.md)、[ADR-0152](adr/0152-lead-owned-task-responsibility-and-self-active-task-awareness.md)、[ADR-0153](adr/0153-explicit-empty-self-active-task-snapshot.md)及[ADR-0137](adr/0137-one-time-task-linked-responsibility-admission.md) |

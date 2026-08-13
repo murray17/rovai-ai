@@ -3,7 +3,7 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-08-12
+last_updated: 2026-08-13
 ---
 
 # Built-in Tool Runtime Architecture
@@ -12,7 +12,7 @@ last_updated: 2026-08-12
 [Built-in Tool Transport v7](../contracts/builtin-tool-transport-v7.md)、
 [Durable Task v3](../contracts/durable-task-v3.md) 和
 [Camp Message Send v4](../contracts/camp-message-send-v4.md)、
-[Current User Attention v1](../contracts/current-user-attention-v1.md)与
+[Current User Attention v2](../contracts/current-user-attention-v2.md)与
 [Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md) 为准；v6 及更早 Transport 只保留
 historical 语义。决策理由见
 [ADR-0124](../adr/0124-cli-only-transport-for-rovai-built-in-operations.md)、

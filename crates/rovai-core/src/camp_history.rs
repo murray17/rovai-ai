@@ -18,6 +18,7 @@ use crate::{
         render_current_plain_text, validate_content,
     },
     db::Database,
+    message_delivery::CAMP_MESSAGE_SEND_TOOL_NAME,
     team_tool::{AuthenticatedTeamToolRun, TeamToolInvocationError},
 };
 
@@ -469,6 +470,7 @@ impl CampHistoryService {
                 read_item(
                     &transaction,
                     &target,
+                    run,
                     message_id,
                     body_offset.unwrap_or(0),
                     effective_limit(*body_limit, MAX_BODY_CHARS, MAX_BODY_CHARS)?,
@@ -1288,12 +1290,13 @@ fn cap_top_k_response(mut response: Value, key: &str) -> Result<Value> {
 fn read_item(
     transaction: &Transaction<'_>,
     target: &ReadTarget,
+    run: &AuthenticatedTeamToolRun,
     message_id: &str,
     body_offset: usize,
     body_limit: usize,
 ) -> Result<Value> {
     let message =
-        load_visible_message(transaction, target, message_id)?.ok_or_else(read_unavailable)?;
+        load_item_message(transaction, target, run, message_id)?.ok_or_else(read_unavailable)?;
     let body_length = message.body.chars().count();
     if body_offset > body_length {
         return Err(invalid_argument(
@@ -1339,6 +1342,88 @@ fn read_item(
         ));
     }
     Ok(value)
+}
+
+fn load_item_message(
+    transaction: &Transaction<'_>,
+    target: &ReadTarget,
+    run: &AuthenticatedTeamToolRun,
+    message_id: &str,
+) -> Result<Option<MessageRow>> {
+    if let Some(message) = load_visible_message(transaction, target, message_id)? {
+        return Ok(Some(message));
+    }
+
+    load_committed_self_written_message(transaction, target, run, message_id)
+}
+
+/// Exact item reads may verify a public send committed by this authenticated
+/// AgentRun after its immutable ContextManifest boundary. This is deliberately
+/// separate from `load_visible_message`: around, thread, timeline, and search
+/// keep using the original fence and therefore cannot traverse post-boundary
+/// content.
+fn load_committed_self_written_message(
+    transaction: &Transaction<'_>,
+    target: &ReadTarget,
+    run: &AuthenticatedTeamToolRun,
+    message_id: &str,
+) -> Result<Option<MessageRow>> {
+    let MessageFence::Current { boundary } = target.fence else {
+        return Ok(None);
+    };
+    if target.camp_id != run.camp_id {
+        return Ok(None);
+    }
+
+    let mut message = transaction
+        .query_row(
+            r#"
+            SELECT message.id, message.camp_id, message.sequence,
+                   message.author_type, message.author_id,
+                   message.reply_to_camp_message_id, message.body,
+                   message.created_at, message.sequence, NULL
+            FROM camp_message AS message
+            JOIN event_log AS outcome
+              ON outcome.event_type = 'command.result'
+             AND outcome.command_id = message.source_operation_id
+            WHERE message.id = ?1
+              AND message.camp_id = ?2
+              AND message.sequence > ?3
+              AND message.tombstoned_at IS NULL
+              AND message.author_type = 'agent'
+              AND message.author_id = ?4
+              AND message.source_agent_run_id = ?5
+              AND message.source_operation_id IS NOT NULL
+              AND length(trim(message.source_operation_id)) > 0
+              AND outcome.command_type = ?6
+              AND outcome.result_status = 'accepted'
+              AND outcome.result_code = 'camp_message.send_accepted'
+              AND outcome.result_entity_type = 'camp_message'
+              AND outcome.result_entity_id = message.id
+              AND outcome.camp_id = message.camp_id
+              AND outcome.actor_type = 'agent'
+              AND outcome.actor_id = ?4
+              AND outcome.source_agent_run_id = ?5
+              AND outcome.execution_epoch = ?7
+              AND json_extract(outcome.result_payload_json, '$.messageId') = message.id
+            LIMIT 1
+            "#,
+            params![
+                message_id,
+                target.camp_id,
+                boundary,
+                run.agent_id,
+                run.agent_run_id,
+                CAMP_MESSAGE_SEND_TOOL_NAME,
+                run.execution_epoch,
+            ],
+            message_search_row,
+        )
+        .optional()?;
+    if let Some(message) = message.as_mut() {
+        message.body = projected_message_body(transaction, &message.id)?;
+    }
+    Ok(message)
 }
 
 fn load_exact_addressing(transaction: &Transaction<'_>, message_id: &str) -> Result<Value> {
@@ -2050,6 +2135,202 @@ mod tests {
     }
 
     #[test]
+    fn exact_item_read_narrowly_allows_only_this_runs_committed_send() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE agent_profile(id TEXT PRIMARY KEY, display_name TEXT NOT NULL);
+                CREATE TABLE camp_message (
+                    id TEXT PRIMARY KEY,
+                    camp_id TEXT NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    author_type TEXT NOT NULL,
+                    author_id TEXT NOT NULL,
+                    source_agent_run_id TEXT,
+                    source_operation_id TEXT,
+                    reply_to_camp_message_id TEXT,
+                    body TEXT NOT NULL,
+                    structured_content_json TEXT NOT NULL,
+                    effective_recipient_ids_json TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL,
+                    tombstoned_at TEXT
+                );
+                CREATE TABLE message_attachment (
+                    id TEXT PRIMARY KEY,
+                    camp_message_id TEXT,
+                    position INTEGER NOT NULL DEFAULT 0,
+                    display_name TEXT NOT NULL DEFAULT '',
+                    media_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+                    byte_size INTEGER NOT NULL DEFAULT 0,
+                    storage_path TEXT NOT NULL DEFAULT ''
+                );
+                CREATE TABLE event_log (
+                    event_type TEXT NOT NULL,
+                    command_id TEXT,
+                    command_type TEXT,
+                    result_status TEXT,
+                    result_code TEXT,
+                    result_payload_json TEXT,
+                    result_entity_type TEXT,
+                    result_entity_id TEXT,
+                    camp_id TEXT,
+                    actor_type TEXT,
+                    actor_id TEXT,
+                    source_agent_run_id TEXT,
+                    execution_epoch INTEGER
+                );
+
+                INSERT INTO camp_message(
+                    id, camp_id, sequence, author_type, author_id,
+                    source_agent_run_id, source_operation_id, body,
+                    structured_content_json, created_at, tombstoned_at
+                ) VALUES
+                    ('self-send', 'camp-1', 2, 'agent', 'agent-1', 'run-1',
+                     'operation-self', 'body-self-send',
+                     '[{"kind":"text","text":"body-self-send"}]',
+                     '2026-08-13T00:00:00Z', NULL),
+                    ('other-run', 'camp-1', 3, 'agent', 'agent-2', 'run-2',
+                     'operation-other-run', 'other run',
+                     '[{"kind":"text","text":"other run"}]',
+                     '2026-08-13T00:00:00Z', NULL),
+                    ('user-message', 'camp-1', 4, 'user', 'local_user', 'run-1',
+                     'operation-user-message', 'user body',
+                     '[{"kind":"text","text":"user body"}]',
+                     '2026-08-13T00:00:00Z', NULL),
+                    ('null-operation', 'camp-1', 5, 'agent', 'agent-1', 'run-1',
+                     NULL, 'null operation',
+                     '[{"kind":"text","text":"null operation"}]',
+                     '2026-08-13T00:00:00Z', NULL),
+                    ('fake-operation', 'camp-1', 6, 'agent', 'agent-1', 'run-1',
+                     'operation-without-outcome', 'fake operation',
+                     '[{"kind":"text","text":"fake operation"}]',
+                     '2026-08-13T00:00:00Z', NULL),
+                    ('outcome-other-run', 'camp-1', 7, 'agent', 'agent-1', 'run-1',
+                     'operation-outcome-other-run', 'other outcome',
+                     '[{"kind":"text","text":"other outcome"}]',
+                     '2026-08-13T00:00:00Z', NULL),
+                    ('wrong-epoch', 'camp-1', 8, 'agent', 'agent-1', 'run-1',
+                     'operation-wrong-epoch', 'wrong epoch',
+                     '[{"kind":"text","text":"wrong epoch"}]',
+                     '2026-08-13T00:00:00Z', NULL),
+                    ('wrong-command', 'camp-1', 9, 'agent', 'agent-1', 'run-1',
+                     'operation-wrong-command', 'wrong command',
+                     '[{"kind":"text","text":"wrong command"}]',
+                     '2026-08-13T00:00:00Z', NULL),
+                    ('tombstoned-self-send', 'camp-1', 10, 'agent', 'agent-1', 'run-1',
+                     'operation-tombstoned', 'tombstoned',
+                     '[{"kind":"text","text":"tombstoned"}]',
+                     '2026-08-13T00:00:00Z', '2026-08-13T00:01:00Z'),
+                    ('other-camp', 'camp-2', 2, 'agent', 'agent-1', 'run-1',
+                     'operation-other-camp', 'other camp',
+                     '[{"kind":"text","text":"other camp"}]',
+                     '2026-08-13T00:00:00Z', NULL);
+
+                INSERT INTO event_log(
+                    event_type, command_id, command_type, result_status, result_code,
+                    result_payload_json, result_entity_type, result_entity_id, camp_id,
+                    actor_type, actor_id, source_agent_run_id, execution_epoch
+                ) VALUES
+                    ('command.result', 'operation-self', 'camp.message.send', 'accepted',
+                     'camp_message.send_accepted', '{"messageId":"self-send"}',
+                     'camp_message', 'self-send', 'camp-1', 'agent', 'agent-1', 'run-1', 7),
+                    ('command.result', 'operation-other-run', 'camp.message.send', 'accepted',
+                     'camp_message.send_accepted', '{"messageId":"other-run"}',
+                     'camp_message', 'other-run', 'camp-1', 'agent', 'agent-2', 'run-2', 7),
+                    ('command.result', 'operation-user-message', 'camp.message.send', 'accepted',
+                     'camp_message.send_accepted', '{"messageId":"user-message"}',
+                     'camp_message', 'user-message', 'camp-1', 'agent', 'agent-1', 'run-1', 7),
+                    ('command.result', 'operation-outcome-other-run', 'camp.message.send', 'accepted',
+                     'camp_message.send_accepted', '{"messageId":"outcome-other-run"}',
+                     'camp_message', 'outcome-other-run', 'camp-1', 'agent', 'agent-1', 'run-2', 7),
+                    ('command.result', 'operation-wrong-epoch', 'camp.message.send', 'accepted',
+                     'camp_message.send_accepted', '{"messageId":"wrong-epoch"}',
+                     'camp_message', 'wrong-epoch', 'camp-1', 'agent', 'agent-1', 'run-1', 8),
+                    ('command.result', 'operation-wrong-command', 'team.create_task', 'accepted',
+                     'camp_message.send_accepted', '{"messageId":"wrong-command"}',
+                     'camp_message', 'wrong-command', 'camp-1', 'agent', 'agent-1', 'run-1', 7),
+                    ('command.result', 'operation-tombstoned', 'camp.message.send', 'accepted',
+                     'camp_message.send_accepted', '{"messageId":"tombstoned-self-send"}',
+                     'camp_message', 'tombstoned-self-send', 'camp-1', 'agent', 'agent-1', 'run-1', 7),
+                    ('command.result', 'operation-other-camp', 'camp.message.send', 'accepted',
+                     'camp_message.send_accepted', '{"messageId":"other-camp"}',
+                     'camp_message', 'other-camp', 'camp-2', 'agent', 'agent-1', 'run-1', 7);
+                "#,
+            )
+            .unwrap();
+
+        let transaction = connection.transaction().unwrap();
+        let run = AuthenticatedTeamToolRun {
+            camp_id: "camp-1".to_string(),
+            agent_id: "agent-1".to_string(),
+            agent_run_id: "run-1".to_string(),
+            execution_epoch: 7,
+        };
+        let target = ReadTarget {
+            camp_id: "camp-1".to_string(),
+            fence: MessageFence::Current { boundary: 1 },
+        };
+
+        let item = read_item(&transaction, &target, &run, "self-send", 0, 4_000).unwrap();
+        assert_eq!(item["items"][0]["messageId"], "self-send");
+        assert_eq!(item["items"][0]["body"], "body-self-send");
+
+        for message_id in [
+            "other-run",
+            "user-message",
+            "null-operation",
+            "fake-operation",
+            "outcome-other-run",
+            "wrong-epoch",
+            "wrong-command",
+            "tombstoned-self-send",
+        ] {
+            let error = read_item(&transaction, &target, &run, message_id, 0, 4_000)
+                .expect_err("unproven post-boundary message must remain fenced");
+            assert_eq!(
+                error
+                    .downcast_ref::<TeamToolInvocationError>()
+                    .map(|error| error.code.as_str()),
+                Some("camp.read_unavailable"),
+                "unexpected error for {message_id}: {error:#}",
+            );
+        }
+
+        let other_camp_target = ReadTarget {
+            camp_id: "camp-2".to_string(),
+            fence: MessageFence::Current { boundary: 1 },
+        };
+        assert!(
+            read_item(
+                &transaction,
+                &other_camp_target,
+                &run,
+                "other-camp",
+                0,
+                4_000,
+            )
+            .is_err()
+        );
+
+        assert!(read_around(&transaction, &target, "self-send", 1, 1).is_err());
+        assert!(
+            read_thread(
+                &transaction,
+                &target,
+                "self-send",
+                ReadDirection::After,
+                None,
+                20,
+            )
+            .is_err()
+        );
+        let timeline =
+            read_timeline(&transaction, &target, ReadDirection::After, None, 20).unwrap();
+        assert!(timeline["items"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
     fn response_budget_keeps_collection_items_and_item_reads_use_unicode_scalars() {
         let mut connection = Connection::open_in_memory().unwrap();
         connection
@@ -2123,7 +2404,13 @@ mod tests {
             camp_id: "camp-1".to_string(),
             fence: MessageFence::Current { boundary: 1 },
         };
-        let item = read_item(&transaction, &target, "message-1", 4, 2).unwrap();
+        let run = AuthenticatedTeamToolRun {
+            camp_id: "camp-1".to_string(),
+            agent_id: "agent_1".to_string(),
+            agent_run_id: "run-1".to_string(),
+            execution_epoch: 1,
+        };
+        let item = read_item(&transaction, &target, &run, "message-1", 4, 2).unwrap();
         let item = &item["items"][0];
         assert_eq!(item["body"], "😀中");
         assert_eq!(item["bodyLength"], 7);

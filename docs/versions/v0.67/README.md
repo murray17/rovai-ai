@@ -37,7 +37,8 @@ Migration 78 发布 Data Contract `v0.67` / projection schema 33，不复用或�
 - timeline、exact read/search、Context、Clipboard、通知摘要与 accessibility 均从 Structured Content
   投影；`camp_message.body` 只是可重建 cache；
 - Notification Center 支持独立 Inbox row、精确消息导航、来源不可用、独立 heads-up preference 与
-  8 秒同 Camp transient 聚合，聚合不合并已读或清除状态。
+  8 秒同 Camp transient 聚合，聚合不合并已读或清除状态；完成后勘误增加按 `messageId` 的有界
+  锚点读取、真实视口确认和 Message Mention 独立已读语义，避免最近 1,000 条快照与 Camp 级已读误伤；
 
 ### Progressive CLI teaching
 
@@ -50,8 +51,8 @@ Migration 78 发布 Data Contract `v0.67` / projection schema 33，不复用或�
   Assignment。
 
 完整字段与稳定边界继续由 [Camp Message Send v4](../../contracts/camp-message-send-v4.md)、
-[Current User Attention v1](../../contracts/current-user-attention-v1.md)、
-[Built-in Tool Transport v7](../../contracts/builtin-tool-transport-v7.md)、ADR-0165～0167 和当前代码拥有；
+[Current User Attention v2](../../contracts/current-user-attention-v2.md)、
+[Built-in Tool Transport v7](../../contracts/builtin-tool-transport-v7.md)、ADR-0165～0170 和当前代码拥有；
 完整实施证据见[实施计划](implementation-plan.md)。
 
 ## 验收证据
@@ -76,6 +77,8 @@ Migration 78 发布 Data Contract `v0.67` / projection schema 33，不复用或�
 - 手写 `@你`、显示名、`@local_user` 或 lookalike 始终是 Text；
 - Agent success stdout 仍精确为 `{messageId,effectiveRecipients}`，不暴露用户或 Notification ID；
 - 没有权威 locator 的 `confirm_outcome` 不搜索正文、不猜近似消息、不盲目重发；
+- 当前 Run 只可对自己已提交且由权威 command result 绑定的消息做边界后 exact item 核验；所有
+  collection read 与其他来源消息继续受不可变 ContextManifest fence；
 - 不新增 Runtime、外部 MCP、系统通知或第二套 Skill delivery authority。
 
 ## 跨版本文档影响
@@ -83,8 +86,8 @@ Migration 78 发布 Data Contract `v0.67` / projection schema 33，不复用或�
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.66 按完整验收事实冻结为 historical；v0.67 成为唯一 current，并记录 v0.65 统一范围的前向补完 |
-| ADR | 确认无需更新 | ADR-0165、ADR-0166、ADR-0167 已拥有 Current User Attention、progressive CLI teaching 与七项 official inventory 的稳定决定，本版本未改变其语义 |
-| Contracts | 已更新 | Camp Message Send v4、Current User Attention v1、Built-in Tool Transport v7 与 ContextManifest Evidence v12 已成为实现合同；Data Contract 前移为 v0.67/schema 33 |
+| ADR | 已更新 | ADR-0170 冻结 current-Run committed self-write 的窄 exact-read 例外；ADR-0165～0167 继续拥有其原稳定决定 |
+| Contracts | 已更新 | Current User Attention v2 冻结 Message Mention 独立已读、锚点窗口、焦点确认和 Markdown 保真；Camp Message Send v4 与 Built-in Tool Transport v7 的 Agent wire/version 不变 |
 | Architecture | 已更新 | Public A2A 与 Built-in Tool Runtime 已组合正交 User attention、结构化正文投影、原子通知和 Charter/help/Skill 分层，同时保留 v0.66 planned-shutdown 边界 |
 | UI | 已更新 | 当前 Porcelain/Steel 规范中的 Current User Mention、消息通知、独立浮层偏好与普通 official Skill 列表已完成生产实现和 packaged 验收 |
 | Runtime Activity | 确认无需更新 | User Mention、Notification 与 CLI teaching 不新增 Canonical Runtime Activity identity、classifier 或 provider event mapping |
@@ -101,7 +104,9 @@ Migration 78 发布 Data Contract `v0.67` / projection schema 33，不复用或�
 - [ADR-0167](../../adr/0167-seven-skill-official-inventory.md)
 - [Camp Message Send v4](../../contracts/camp-message-send-v4.md)
 - [Current User Attention v1](../../contracts/current-user-attention-v1.md)
+- [Current User Attention v2](../../contracts/current-user-attention-v2.md)
 - [Built-in Tool Transport v7](../../contracts/builtin-tool-transport-v7.md)
+- [ADR-0170](../../adr/0170-current-run-committed-self-write-exact-read.md)
 - [ContextManifest Evidence v12](../../contracts/context-manifest-evidence-v12.md)
 - [Public A2A Message 与 Message Delivery](../../architecture/public-a2a-message-delivery.md)
 - [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)

@@ -394,6 +394,7 @@ impl InAppNotificationService {
                 SET read_at = ?4, version = version + 1, updated_at = ?4
                 WHERE recipient_user_id = ?1 AND camp_id = ?2
                   AND sequence <= ?3 AND cleared_at IS NULL AND read_at IS NULL
+                  AND kind <> 'camp_message_user_mention'
                 "#,
                 params![
                     recipient_user_id,
@@ -1085,6 +1086,90 @@ mod tests {
             .unwrap();
         assert_eq!(remaining.items.len(), 1);
         assert_eq!(remaining.items[0].camp.id, "camp-two");
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn camp_read_does_not_consume_user_mentions() {
+        let (directory, mut database) = test_database();
+        insert_camp(&database, "camp-mention-read", "Mention Read");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO camp_message(
+                    id, camp_id, sequence, author_type, author_id, body,
+                    structured_content_json, content_digest, address_mode,
+                    addressed_agent_ids_json, version, created_at, updated_at
+                ) VALUES (
+                    'message-mention-read', 'camp-mention-read', 1, 'agent', 'agent_1', '@你 请确认',
+                    '[{"kind":"current_user_mention","userId":"local_user"},{"kind":"text","text":"请确认"}]',
+                    'sha256:mention-read', 'default', '[]', 1,
+                    '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z'
+                );
+                INSERT INTO in_app_notification(
+                    id, recipient_user_id, kind, camp_id, source_message_id,
+                    version, created_at, updated_at
+                ) VALUES (
+                    'notification-mention-read', 'local_user', 'camp_message_user_mention',
+                    'camp-mention-read', 'message-mention-read', 1,
+                    '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z'
+                );
+                INSERT INTO camp_turn(
+                    id, camp_id, trigger_type, trigger_id, status,
+                    version, created_at, updated_at, ended_at
+                ) VALUES (
+                    'turn-mention-read', 'camp-mention-read', 'system_event', 'mention-read',
+                    'completed', 1, '2026-08-01T00:00:00Z',
+                    '2026-08-01T00:01:00Z', '2026-08-01T00:01:00Z'
+                );
+                "#,
+            )
+            .unwrap();
+
+        let service = InAppNotificationService::default();
+        let baseline = service
+            .inbox(
+                &mut database,
+                "local_user",
+                InAppNotificationFilter::All,
+                None,
+                50,
+            )
+            .unwrap();
+        assert_eq!(baseline.items.len(), 2);
+        let envelope = CommandEnvelope {
+            command_id: "mark-camp-with-mention-read".to_string(),
+            actor: ActorRef::User {
+                user_id: "local_user".to_string(),
+            },
+            camp_id: Some("camp-mention-read".to_string()),
+            expected_versions: Vec::new(),
+            execution_epoch: None,
+            payload: MarkCampInAppNotificationsReadCommand {
+                camp_id: "camp-mention-read".to_string(),
+                through_sequence: baseline.through_sequence,
+            },
+        };
+        let execution = service.mark_camp_read(&mut database, &envelope).unwrap();
+        assert_eq!(execution.result.payload["changed"], 1);
+
+        let unread = service
+            .inbox(
+                &mut database,
+                "local_user",
+                InAppNotificationFilter::Unread,
+                None,
+                50,
+            )
+            .unwrap();
+        assert_eq!(unread.items.len(), 1);
+        assert_eq!(
+            unread.items[0].kind,
+            InAppNotificationKind::CampMessageUserMention
+        );
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();

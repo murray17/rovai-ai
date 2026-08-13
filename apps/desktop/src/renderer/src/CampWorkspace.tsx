@@ -311,6 +311,7 @@ export type NotificationFocusTarget = {
   kind: 'approval' | 'camp_turn' | 'camp_message'
   campTurnId: string | null
   messageId?: string
+  active?: boolean
 }
 export interface CampRuntimeRecoveryTarget {
   agentId: string
@@ -574,6 +575,35 @@ export function structuredCampContentPlainText(
   return content[0]?.kind === 'current_user_mention' && content.length > 1
     ? `${text.slice(0, 2)} ${text.slice(2)}`
     : text
+}
+
+export function projectLeadingCurrentUserMentionMarkdownBody(
+  content: StructuredCampMessageContent | null,
+  members: ReadonlyArray<Pick<CampSnapshot['members'][number], 'agentId' | 'displayName'>>
+): string | null {
+  if (!content) return null
+  const leadingSegment = content[0]
+  if (
+    leadingSegment?.kind !== 'current_user_mention'
+    || leadingSegment.userId !== 'local_user'
+    || content.slice(1).some((segment) => segment.kind === 'current_user_mention')
+  ) return null
+
+  const names = new Map(members.map((member) => [member.agentId, member.displayName]))
+  return content.slice(1).map((segment) => {
+    if (segment.kind === 'text') return segment.text
+    if (segment.kind === 'all_members_mention') return escapeMarkdownLiteral('@所有队员')
+    if (segment.kind === 'member_mention') {
+      return escapeMarkdownLiteral(`@${names.get(segment.agentId) ?? '不可用队员'}`)
+    }
+    return ''
+  }).join('')
+}
+
+function escapeMarkdownLiteral(value: string): string {
+  return value
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/([\\`*_{}\[\]()<>#+\-.!|])/g, '\\$1')
 }
 
 export function emptyCampRuntimeSummary(
@@ -1073,7 +1103,7 @@ export function CampWorkspace({
   }, [busy, composerSubmitting])
 
   useEffect(() => {
-    if (!notificationFocus) return undefined
+    if (!notificationFocus?.active) return undefined
     const frame = window.requestAnimationFrame(() => {
       const scrollBehavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches
         ? 'auto'
@@ -1625,6 +1655,7 @@ export function CampWorkspace({
                                                 body={displayBody}
                                                 content={campMessage.content}
                                                 members={snapshot.members}
+                                                renderLeadingCurrentUserMarkdown={campMessage.authorType === 'agent'}
                                                 onActivateMemberMention={openMemberProfilePopover}
                                                 onActivateAllMembersMention={(trigger, focusPanel) =>
                                                   openAllMembersMentionPopover(
@@ -1768,7 +1799,9 @@ export function CampWorkspace({
               busy={busy}
               onResolve={onResolveApproval}
               containerRef={approvalDockRef}
-              focusRequest={notificationFocus?.kind === 'approval' ? notificationFocus.requestId : null}
+              focusRequest={notificationFocus?.kind === 'approval' && notificationFocus.active
+                ? notificationFocus.requestId
+                : null}
             />
           )}
 
@@ -3262,12 +3295,14 @@ function StructuredMessageBody({
   body,
   content,
   members,
+  renderLeadingCurrentUserMarkdown = false,
   onActivateMemberMention,
   onActivateAllMembersMention
 }: {
   body: string
   content: StructuredCampMessageContent | null
   members: CampSnapshot['members']
+  renderLeadingCurrentUserMarkdown?: boolean
   onActivateMemberMention?(
     agentId: string,
     trigger: HTMLElement,
@@ -3276,6 +3311,22 @@ function StructuredMessageBody({
   onActivateAllMembersMention?(trigger: HTMLElement, focusPanel: boolean): void
 }): JSX.Element {
   if (content === null) return <p>{body}</p>
+  const markdownBody = renderLeadingCurrentUserMarkdown
+    ? projectLeadingCurrentUserMentionMarkdownBody(content, members)
+    : null
+  if (markdownBody !== null) {
+    return (
+      <div className="current-user-markdown-body">
+        <span className="current-user-mention-prefix">
+          <CurrentUserMentionToken />
+          {markdownBody.length > 0 ? ' ' : ''}
+        </span>
+        {markdownBody.length > 0 && (
+          <SafeMarkdown className="current-user-markdown-content">{markdownBody}</SafeMarkdown>
+        )}
+      </div>
+    )
+  }
   const memberById = new Map(members.map((member) => [member.agentId, member]))
   return (
     <p className="structured-message-body">
@@ -3284,12 +3335,7 @@ function StructuredMessageBody({
         if (segment.kind === 'current_user_mention') {
           return (
             <span key={`current-user-${index}`}>
-              <span
-                className="message-mention-token current-user"
-                aria-label="提及当前用户：你"
-              >
-                @你
-              </span>
+              <CurrentUserMentionToken />
               {index === 0 && content.slice(1).some((candidate) => (
                 candidate.kind !== 'text' || candidate.text.length > 0
               )) ? ' ' : ''}
@@ -3360,6 +3406,17 @@ function StructuredMessageBody({
         )
       })}
     </p>
+  )
+}
+
+function CurrentUserMentionToken(): JSX.Element {
+  return (
+    <span
+      className="message-mention-token current-user"
+      aria-label="提及当前用户：你"
+    >
+      @你
+    </span>
   )
 }
 

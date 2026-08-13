@@ -1,7 +1,7 @@
 ---
 document_type: contracts-index
 authority: protocol-contract-routing
-last_updated: 2026-08-12
+last_updated: 2026-08-13
 ---
 
 # 长期接口合同
@@ -28,9 +28,12 @@ Architecture 解释组件如何组成，Version 文档记录交付范围；它�
 | [Accepted Input Recovery v1（当前）](accepted-input-recovery-v1.md) | accepted Runtime input 的启动分类、`recovery_blocked`、Scheduler fence、用户命令与 Stop/预算 outcome-unknown 收敛 |
 | [Collaboration State v2（当前）](collaboration-state-v2.md) | peer-only routing identity、稳定 CampMember 选择、Lead ID/Boolean、完整 projection digest、独立 inclusion、accepted ACK 与 v0.50 clean break |
 | [Built-in Tool Transport v7（当前）](builtin-tool-transport-v7.md) | 十三项固定业务命令、Camp Message Send v4、exact Camp read addressing、精确 help 与渐进式 CLI 教学边界 |
+| [Built-in Tool Transport v7 Errata](builtin-tool-transport-v7-errata.md) | 不改变 v7 wire/version；让 locator-present recovery 通过 ADR-0170 的窄 self-write exact-read 成为可执行路径 |
 | [Durable Task v3（当前）](durable-task-v3.md) | User/Lead 责任定义、Assignee execution-state update、Camp-wide read、explicit owner、unassigned holding 与 advisory actions |
 | [Camp Message Send v4（当前）](camp-message-send-v4.md) | v3 显式 Agent 寻址/caller return 加 `--to-user`、Structured Current User Mention 与原子通知 |
-| [Current User Attention v1（当前）](current-user-attention-v1.md) | 唯一 `local_user`、内容投影、Message Mention Notification、Inbox/浮层、exact read 与 Renderer token |
+| [Camp Message Send v4 Errata](camp-message-send-v4-errata.md) | v4 wire/version 不变；Current User Attention 生命周期与 locator-present exact verification 使用现行勘误 |
+| [Current User Attention v2（当前）](current-user-attention-v2.md) | v1 当前用户注意力加 Message Mention 独立已读、锚点导航、焦点确认与 Markdown 保真 Renderer |
+| [Current User Attention v1 (historical)](current-user-attention-v1.md) | 当前用户身份、结构化内容与原子通知基线；不含独立已读、锚点窗口与 Markdown 保真勘误 |
 | [Missing-Send Recovery Publication v1（当前）](missing-send-recovery-publication-v1.md) | 成功 AgentRun 的 typed final candidate、同 Run accepted-send 抑制、recipient-free 原子恢复消息与 terminal replay/竞态语义 |
 | [Pending Camp Activation v1（当前）](pending-camp-activation-v1.md) | 一键 Pending 创建、Snapshot/Navigation activation state、首消息原子激活、mutation guard 与窄 discard/启动清理 |
 | [Camp Attachment v1（当前）](camp-attachment-v1.md) | 普通文件/目录联合、Core-owned 只读快照、限制、Draft 原子消费、Snapshot 29 与 Runtime 稳定路径 |

@@ -22,9 +22,12 @@ import {
   cancellableTurnIds,
   campCreationPreflightFromAgents,
   campMessageSendParams,
+  campSnapshotWithCurrentAnchor,
+  campSnapshotWithAnchoredMessages,
   commandFailureMessage,
   effectiveCancellingTurnIds,
   optimisticCampMessage,
+  rectanglesIntersect,
   reconcileCancellingTurnIds,
   runtimeRecoveryFromCommandResult,
   SettingsView,
@@ -381,6 +384,70 @@ describe('task event projections', () => {
     expect(shouldLoadRuntimeHealth('settings', 'diagnostics', false, false)).toBe(false)
     expect(shouldLoadRuntimeHealth('members', 'skills', true, false)).toBe(false)
     expect(shouldLoadRuntimeHealth('members', 'skills', false, true)).toBe(false)
+  })
+
+  it('merges an anchored message window without replacing newer snapshot messages', () => {
+    const campMessage = (id: string, sequence: number, body: string): CampMessageView => ({
+      id,
+      sequence,
+      timelineGlobalSequence: sequence,
+      authorType: 'agent',
+      authorId: 'agent_1',
+      sourceAgentRunId: 'run-1',
+      body,
+      content: [{ kind: 'text', text: body }],
+      attachments: [],
+      addressMode: 'default',
+      addressedAgentIds: [],
+      replyToCampMessageId: null,
+      campTurnId: null,
+      presentation: null,
+      createdAt: `2026-08-01T00:00:${String(sequence % 60).padStart(2, '0')}Z`
+    })
+    const latest = campMessage('message-latest', 1001, 'latest')
+    const anchor = campMessage('message-anchor', 1, 'anchor')
+    const neighbor = campMessage('message-neighbor', 2, 'neighbor')
+    const snapshot = {
+      messages: [latest]
+    } as unknown as CampSnapshot
+
+    const merged = campSnapshotWithAnchoredMessages(snapshot, [neighbor, anchor, latest])
+
+    expect(merged.messages.map((entry) => entry.id)).toEqual([
+      'message-anchor',
+      'message-neighbor',
+      'message-latest'
+    ])
+    expect(merged.messages.filter((entry) => entry.id === latest.id)).toHaveLength(1)
+    expect(snapshot.messages).toEqual([latest])
+    expect(campSnapshotWithCurrentAnchor(snapshot, 'camp-1', {
+      campId: 'camp-1',
+      messages: [anchor]
+    }).messages.map((entry) => entry.id)).toEqual(['message-anchor', 'message-latest'])
+    expect(campSnapshotWithCurrentAnchor(snapshot, 'camp-1', {
+      campId: 'camp-other',
+      messages: [anchor]
+    })).toBe(snapshot)
+  })
+
+  it('requires a message rectangle to intersect the timeline viewport before auto-read', () => {
+    const viewport = { top: 100, right: 500, bottom: 500, left: 100 }
+    expect(rectanglesIntersect(
+      { top: 450, right: 300, bottom: 550, left: 200 },
+      viewport
+    )).toBe(true)
+    expect(rectanglesIntersect(
+      { top: 500, right: 300, bottom: 550, left: 200 },
+      viewport
+    )).toBe(false)
+    expect(rectanglesIntersect(
+      { top: 0, right: 300, bottom: 100, left: 200 },
+      viewport
+    )).toBe(false)
+    expect(rectanglesIntersect(
+      { top: 200, right: 100, bottom: 300, left: 0 },
+      viewport
+    )).toBe(false)
   })
 
   it('projects a user message into the conversation before Core acknowledgement', () => {

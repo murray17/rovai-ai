@@ -39,6 +39,9 @@ Hover、Focus 或信息卡打开时只使用 8% mention feedback。它是 Core S
 
 只有 Core Structured Content 能生成历史消息中的 `@当前用户`。它与 Member Mention 使用相同
 行内色彩语言，但不可交互、不进入 tab 顺序、不打开信息卡；其可访问名称包含当前显示名称。
+Agent 消息中的 Current User Mention 保持为 Markdown 正文之前的行内结构化前缀；其余权威
+Structured Content 继续通过 sanitized GFM 呈现。正文里的 Agent Mention 在该路径只投影可见文本，
+显示名必须先按 Markdown literal 转义并折叠换行，不能注入链接、标题、代码或表格结构。
 
 ## Authority and regression
 

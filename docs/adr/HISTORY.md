@@ -181,4 +181,5 @@ generated_from: docs/adr-front-matter
 | [ADR-0167](0167-seven-skill-official-inventory.md) | Seven-Skill Official Inventory | `accepted` | `cross-version` | [v0.65](../versions/v0.65/README.md) | — |
 | [ADR-0168](0168-planned-shutdown-preserves-runtime-terminal-authority.md) | Planned Shutdown Preserves Runtime Terminal Authority | `accepted` | `cross-version` | [v0.66](../versions/v0.66/README.md) | — |
 | [ADR-0169](0169-core-owned-directory-attachment-snapshots.md) | Core-Owned Directory Attachment Snapshots | `accepted` | `cross-version` | [v0.65](../versions/v0.65/README.md) | — |
+| [ADR-0170](0170-current-run-committed-self-write-exact-read.md) | Current-Run Committed Self-Write Exact Read | `accepted` | `cross-version` | [v0.67](../versions/v0.67/README.md) | — |
 <!-- adr-history:end -->

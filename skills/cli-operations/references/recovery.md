@@ -11,7 +11,9 @@
 ## `confirm_outcome`
 
 有权威 CampMessage locator 时，查看 `rovai camp read --help`，用 stable message ID 做 exact item read，
-再根据权威状态决定后续动作。成功 Send 只证明消息与冻结效果已提交；缺少下游完成不能反推 Send 失败。
+再根据权威状态决定后续动作。当前 AgentRun 可以核验自己已提交的这条精确消息；该例外不允许
+读取边界后的邻域、thread、timeline、search 或其他作者/Run 的消息。成功 Send 只证明消息与冻结
+效果已提交；缺少下游完成不能反推 Send 失败。
 
 没有 locator 时，公开说明 outcome 不确定并停止该 mutation。不得按正文、作者、时间或相似内容搜索，
 不得猜测 request identity，也不得换 request identity 重发。近似命中既不能证明成功，也不能证明失败。

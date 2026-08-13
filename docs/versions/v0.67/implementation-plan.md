@@ -59,6 +59,12 @@ last_updated: 2026-08-13
 - [x] heads-up 点击并行 mark-read/navigation，偏好默认开启且只影响新 heads-up；
 - [x] 8 秒同 Camp heads-up 聚合保持每条 Inbox row 独立；
 - [x] Day/Night、1440×920、1040×700、200% zoom、键盘、读屏、拖选与 reduced-motion 通过。
+- [x] 完成后勘误：Message Mention 不再被 Camp 级批量已读；自动已读要求精确消息节点仍位于聚焦
+  可见视口；旧消息使用 `camp.messages.around` 有界锚点窗口并在抽屉关闭后确认精确焦点；
+- [x] 完成后勘误：Current User token 后的 Agent 正文继续走 sanitized GFM，结构化 Agent Mention
+  显示名先做 Markdown literal escape；
+- [x] 完成后勘误：当前 Run 的已提交 self-write 只通过 exact item + 权威 command result 做窄核验，
+  collection read 与其他 post-boundary 消息不放宽。
 
 ## Phase 2：CLI 渐进式教学
 

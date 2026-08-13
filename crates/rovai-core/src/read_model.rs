@@ -19,8 +19,10 @@ pub const READ_MODEL_SCHEMA_VERSION: i64 = 29;
 pub const EVENT_BATCH_SCHEMA_VERSION: i64 = 9;
 pub const NAVIGATION_SCHEMA_VERSION: i64 = 3;
 pub const EXECUTION_EVIDENCE_PAGE_SCHEMA_VERSION: i64 = 1;
+pub const CAMP_MESSAGE_AROUND_SCHEMA_VERSION: i64 = 1;
 pub const NAVIGATION_RECENT_CAMP_LIMIT: usize = 5;
 const EXECUTION_EVIDENCE_SNAPSHOT_LIMIT: i64 = 1_200;
+const CAMP_MESSAGE_AROUND_RADIUS: i64 = 20;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -503,6 +505,17 @@ pub struct CampSnapshot {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CampMessageAroundSnapshot {
+    pub schema_version: i64,
+    pub through_global_sequence: i64,
+    pub camp_id: String,
+    pub anchor_message_id: String,
+    pub source_available: bool,
+    pub messages: Vec<CampMessageView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MessageDeliveryView {
     pub id: String,
     pub message_id: String,
@@ -718,6 +731,48 @@ impl ReadModelService {
             approvals,
             actions,
             timeline,
+        })
+    }
+
+    pub fn camp_messages_around(
+        &self,
+        database: &mut Database,
+        camp_id: &str,
+        message_id: &str,
+    ) -> Result<CampMessageAroundSnapshot> {
+        let transaction = database.connection_mut().transaction()?;
+        let through_global_sequence = current_global_sequence(&transaction)?;
+        let anchor_sequence = transaction
+            .query_row(
+                r#"
+                SELECT sequence
+                FROM camp_message
+                WHERE id = ?2
+                  AND camp_id = ?1
+                  AND tombstoned_at IS NULL
+                "#,
+                params![camp_id, message_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?;
+        let messages = match anchor_sequence {
+            Some(sequence) => load_messages_around(
+                &transaction,
+                camp_id,
+                message_id,
+                sequence,
+                CAMP_MESSAGE_AROUND_RADIUS,
+            )?,
+            None => Vec::new(),
+        };
+        transaction.commit()?;
+        Ok(CampMessageAroundSnapshot {
+            schema_version: CAMP_MESSAGE_AROUND_SCHEMA_VERSION,
+            through_global_sequence,
+            camp_id: camp_id.to_string(),
+            anchor_message_id: message_id.to_string(),
+            source_available: anchor_sequence.is_some(),
+            messages,
         })
     }
 
@@ -1219,6 +1274,42 @@ fn load_tasks(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<TaskVi
     Ok(result)
 }
 
+struct CampMessageRow {
+    id: String,
+    sequence: i64,
+    timeline_global_sequence: Option<i64>,
+    author_type: String,
+    author_id: String,
+    source_agent_run_id: Option<String>,
+    _stored_body: String,
+    structured_content_json: String,
+    address_mode: String,
+    addressed_agent_ids_json: String,
+    reply_to_camp_message_id: Option<String>,
+    camp_turn_id: Option<String>,
+    presentation_json: Option<String>,
+    created_at: String,
+}
+
+fn camp_message_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CampMessageRow> {
+    Ok(CampMessageRow {
+        id: row.get(0)?,
+        sequence: row.get(1)?,
+        timeline_global_sequence: row.get(2)?,
+        author_type: row.get(3)?,
+        author_id: row.get(4)?,
+        source_agent_run_id: row.get(5)?,
+        _stored_body: row.get(6)?,
+        structured_content_json: row.get(7)?,
+        address_mode: row.get(8)?,
+        addressed_agent_ids_json: row.get(9)?,
+        reply_to_camp_message_id: row.get(10)?,
+        camp_turn_id: row.get(11)?,
+        presentation_json: row.get(12)?,
+        created_at: row.get(13)?,
+    })
+}
+
 fn load_messages(
     transaction: &Transaction<'_>,
     camp_id: &str,
@@ -1248,28 +1339,88 @@ fn load_messages(
         "#,
     )?;
     let rows = statement
-        .query_map(params![camp_id, limit], |row| {
-            let addressed: String = row.get(9)?;
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, Option<i64>>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, Option<String>>(5)?,
-                row.get::<_, String>(6)?,
-                row.get::<_, String>(7)?,
-                row.get::<_, String>(8)?,
-                addressed,
-                row.get::<_, Option<String>>(10)?,
-                row.get::<_, Option<String>>(11)?,
-                row.get::<_, Option<String>>(12)?,
-                row.get::<_, String>(13)?,
-            ))
-        })?
+        .query_map(params![camp_id, limit], camp_message_row)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     drop(statement);
-    let requested_message_ids = rows.iter().map(|row| &row.0).collect::<Vec<_>>();
+    let mut messages = hydrate_message_views(transaction, rows)?;
+    messages.reverse();
+    Ok(messages)
+}
+
+fn load_messages_around(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    message_id: &str,
+    anchor_sequence: i64,
+    radius: i64,
+) -> Result<Vec<CampMessageView>> {
+    let mut statement = transaction.prepare(
+        r#"
+        WITH window_ids(id) AS (
+            SELECT id FROM (
+                SELECT id
+                FROM camp_message
+                WHERE camp_id = ?1
+                  AND tombstoned_at IS NULL
+                  AND sequence < ?3
+                ORDER BY sequence DESC
+                LIMIT ?4
+            )
+            UNION ALL
+            SELECT id
+            FROM camp_message
+            WHERE camp_id = ?1
+              AND id = ?2
+              AND tombstoned_at IS NULL
+            UNION ALL
+            SELECT id FROM (
+                SELECT id
+                FROM camp_message
+                WHERE camp_id = ?1
+                  AND tombstoned_at IS NULL
+                  AND sequence > ?3
+                ORDER BY sequence ASC
+                LIMIT ?4
+            )
+        )
+        SELECT camp_message.id, camp_message.sequence,
+               (
+                   SELECT MAX(event_log.global_sequence)
+                   FROM event_log
+                   WHERE event_log.entity_type = 'camp_message'
+                     AND event_log.entity_id = camp_message.id
+                     AND event_log.event_type = 'camp_message.sent'
+               ),
+               camp_message.author_type, camp_message.author_id,
+               camp_message.source_agent_run_id, camp_message.body,
+               camp_message.structured_content_json, camp_message.address_mode,
+               camp_message.addressed_agent_ids_json,
+               camp_message.reply_to_camp_message_id, camp_message.camp_turn_id,
+               CASE WHEN camp_message.author_type = 'agent'
+                    THEN camp_message.recipient_presentation_json
+                    ELSE camp_message.presentation_json
+               END,
+               camp_message.created_at
+        FROM camp_message
+        JOIN window_ids ON window_ids.id = camp_message.id
+        ORDER BY camp_message.sequence ASC, camp_message.id ASC
+        "#,
+    )?;
+    let rows = statement
+        .query_map(
+            params![camp_id, message_id, anchor_sequence, radius],
+            camp_message_row,
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(statement);
+    hydrate_message_views(transaction, rows)
+}
+
+fn hydrate_message_views(
+    transaction: &Transaction<'_>,
+    rows: Vec<CampMessageRow>,
+) -> Result<Vec<CampMessageView>> {
+    let requested_message_ids = rows.iter().map(|row| &row.id).collect::<Vec<_>>();
     let requested_message_ids_json = serde_json::to_string(&requested_message_ids)?;
     let mut attachment_statement = transaction.prepare(
         r#"
@@ -1319,56 +1470,39 @@ fn load_messages(
             .push(attachment);
     }
     drop(attachment_statement);
-    let mut messages = rows
-        .into_iter()
-        .map(
-            |(
-                id,
-                sequence,
-                timeline_global_sequence,
-                author_type,
-                author_id,
-                source_agent_run_id,
-                _stored_body,
-                structured_content_json,
-                address_mode,
-                addressed,
-                reply_to_camp_message_id,
-                camp_turn_id,
-                presentation,
-                created_at,
-            )| {
-                let content =
-                    serde_json::from_str::<StructuredCampMessageContent>(&structured_content_json)
-                        .map(normalize_content)
-                        .context("CampMessage Structured Content is invalid")?;
-                let body = render_structured_message_content(transaction, &content)?;
-                let attachments = attachments_by_message_id.remove(&id).unwrap_or_default();
-                Ok(CampMessageView {
-                    id: id.clone(),
-                    sequence,
-                    timeline_global_sequence,
-                    author_type,
-                    author_id,
-                    source_agent_run_id,
-                    body,
-                    content,
-                    attachments,
-                    address_mode,
-                    addressed_agent_ids: serde_json::from_str(&addressed)?,
-                    reply_to_camp_message_id,
-                    camp_turn_id,
-                    presentation: presentation
-                        .map(|value| serde_json::from_str(&value))
-                        .transpose()
-                        .context("CampMessage presentation is invalid")?,
-                    created_at,
-                })
-            },
-        )
-        .collect::<Result<Vec<_>>>()?;
-    messages.reverse();
-    Ok(messages)
+    rows.into_iter()
+        .map(|row| {
+            let content =
+                serde_json::from_str::<StructuredCampMessageContent>(&row.structured_content_json)
+                    .map(normalize_content)
+                    .context("CampMessage Structured Content is invalid")?;
+            let body = render_structured_message_content(transaction, &content)?;
+            let attachments = attachments_by_message_id
+                .remove(&row.id)
+                .unwrap_or_default();
+            Ok(CampMessageView {
+                id: row.id,
+                sequence: row.sequence,
+                timeline_global_sequence: row.timeline_global_sequence,
+                author_type: row.author_type,
+                author_id: row.author_id,
+                source_agent_run_id: row.source_agent_run_id,
+                body,
+                content,
+                attachments,
+                address_mode: row.address_mode,
+                addressed_agent_ids: serde_json::from_str(&row.addressed_agent_ids_json)?,
+                reply_to_camp_message_id: row.reply_to_camp_message_id,
+                camp_turn_id: row.camp_turn_id,
+                presentation: row
+                    .presentation_json
+                    .map(|value| serde_json::from_str(&value))
+                    .transpose()
+                    .context("CampMessage presentation is invalid")?,
+                created_at: row.created_at,
+            })
+        })
+        .collect::<Result<Vec<_>>>()
 }
 
 fn render_structured_message_content(
@@ -2492,6 +2626,167 @@ mod tests {
                 text: "旧消息仍是 @muwa".to_string(),
             }]
         );
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn message_around_reads_a_bounded_old_window_without_leaking_unavailable_sources() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-read-model-message-around-{}",
+            Uuid::new_v4()
+        ));
+        let mut database = Database::open(&directory).unwrap();
+        let collaboration = CollaborationService::default();
+        let created = collaboration
+            .create_camp(
+                &mut database,
+                &user_envelope(
+                    "create-message-around-camp",
+                    None,
+                    CreateCampCommand::for_test(
+                        directory.join("workspace").to_string_lossy().to_string(),
+                    ),
+                ),
+            )
+            .unwrap();
+        let camp_id = created.result.payload["campId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let other = collaboration
+            .create_camp(
+                &mut database,
+                &user_envelope(
+                    "create-other-message-around-camp",
+                    None,
+                    CreateCampCommand::for_test(
+                        directory
+                            .join("other-workspace")
+                            .to_string_lossy()
+                            .to_string(),
+                    ),
+                ),
+            )
+            .unwrap();
+        let other_camp_id = other.result.payload["campId"].as_str().unwrap().to_string();
+        let transaction = database.connection_mut().transaction().unwrap();
+        {
+            let mut statement = transaction
+                .prepare(
+                    r#"
+                    INSERT INTO camp_message(
+                        id, camp_id, sequence, author_type, author_id, body,
+                        structured_content_json, content_digest, address_mode,
+                        addressed_agent_ids_json, version, created_at, updated_at
+                    ) VALUES (
+                        ?1, ?2, ?3, 'user', 'local_user', ?4,
+                        ?5, ?6, 'default', '[]', 1, ?7, ?7
+                    )
+                    "#,
+                )
+                .unwrap();
+            for sequence in 1..=1_050_i64 {
+                let message_id = format!("around-message-{sequence}");
+                let body = format!("消息 {sequence}");
+                let content =
+                    serde_json::to_string(&vec![Segment::Text { text: body.clone() }]).unwrap();
+                statement
+                    .execute(params![
+                        message_id,
+                        camp_id,
+                        sequence,
+                        body,
+                        content,
+                        format!("sha256:around-{sequence}"),
+                        format!("2026-08-01T00:00:{:02}Z", sequence % 60),
+                    ])
+                    .unwrap();
+            }
+        }
+        let attachment_path = directory.join("anchor-attachment.txt");
+        transaction
+            .execute(
+                r#"
+                INSERT INTO message_attachment(
+                    id, camp_id, camp_message_id, conversation_message_id,
+                    position, display_name, media_type, byte_size,
+                    content_digest, storage_path, preview_kind,
+                    created_by_type, created_by_id, created_at
+                ) VALUES (
+                    'around-attachment', ?1, 'around-message-25', NULL,
+                    0, 'anchor.txt', 'text/plain', 12,
+                    'sha256:anchor-attachment', ?2, 'none',
+                    'user', 'local_user', '2026-08-01T00:00:00Z'
+                )
+                "#,
+                params![camp_id, attachment_path.to_string_lossy()],
+            )
+            .unwrap();
+        transaction.commit().unwrap();
+
+        let read_model = ReadModelService;
+        let recent = read_model.camp_snapshot(&mut database, &camp_id).unwrap();
+        assert_eq!(recent.messages.len(), 1_000);
+        assert!(
+            recent
+                .messages
+                .iter()
+                .all(|message| message.id != "around-message-25")
+        );
+
+        let around = read_model
+            .camp_messages_around(&mut database, &camp_id, "around-message-25")
+            .unwrap();
+        assert_eq!(around.schema_version, CAMP_MESSAGE_AROUND_SCHEMA_VERSION);
+        assert_eq!(around.camp_id, camp_id);
+        assert_eq!(around.anchor_message_id, "around-message-25");
+        assert!(around.source_available);
+        assert_eq!(around.messages.len(), 41);
+        assert_eq!(around.messages.first().unwrap().sequence, 5);
+        assert_eq!(around.messages.last().unwrap().sequence, 45);
+        assert!(
+            around
+                .messages
+                .windows(2)
+                .all(|pair| pair[0].sequence < pair[1].sequence)
+        );
+        let anchor = around
+            .messages
+            .iter()
+            .find(|message| message.id == around.anchor_message_id)
+            .unwrap();
+        assert_eq!(anchor.attachments.len(), 1);
+        assert_eq!(anchor.attachments[0].display_name, "anchor.txt");
+        assert_eq!(anchor.attachments[0].kind, "file");
+        assert_eq!(anchor.attachments[0].file_count, 1);
+
+        for (requested_camp, requested_message) in [
+            (other_camp_id.as_str(), "around-message-25"),
+            (camp_id.as_str(), "missing-message"),
+        ] {
+            let unavailable = read_model
+                .camp_messages_around(&mut database, requested_camp, requested_message)
+                .unwrap();
+            assert!(!unavailable.source_available);
+            assert!(unavailable.messages.is_empty());
+            assert_eq!(unavailable.camp_id, requested_camp);
+            assert_eq!(unavailable.anchor_message_id, requested_message);
+        }
+
+        database
+            .connection()
+            .execute(
+                "UPDATE camp_message SET tombstoned_at = '2026-08-01T01:00:00Z' WHERE id = 'around-message-25'",
+                [],
+            )
+            .unwrap();
+        let tombstoned = read_model
+            .camp_messages_around(&mut database, &camp_id, "around-message-25")
+            .unwrap();
+        assert!(!tombstoned.source_available);
+        assert!(tombstoned.messages.is_empty());
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();

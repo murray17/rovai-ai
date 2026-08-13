@@ -3,14 +3,14 @@ document_type: architecture
 architecture: public-a2a-message-delivery
 authority: public-message-and-delivery-boundaries
 status: accepted
-last_updated: 2026-08-12
+last_updated: 2026-08-13
 ---
 
 # Public A2A Message 与 Message Delivery 架构
 
 本文件定义 v0.45 以后 Agent-to-Agent 协作的长期组件边界。字段级输入、错误和状态合同
 分别见 [Camp Message Send v4](../contracts/camp-message-send-v4.md)、
-[Current User Attention v1](../contracts/current-user-attention-v1.md)、
+[Current User Attention v2](../contracts/current-user-attention-v2.md)、
 [Message Delivery v2](../contracts/message-delivery-v2.md) 与
 [Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)；决策理由见
 [ADR-0130](../adr/0130-public-a2a-message-and-unified-delivery.md) 和
@@ -185,6 +185,11 @@ Agent routing 与 User attention 不能相互推导。exact `camp.read item` 分
 `effectiveAgentRecipients` 与从 Structured Content 派生的 `mentionsCurrentUser`；notification clear、
 retention 或 source unavailable 不改变后者。Renderer 展示名称只是当前 presentation，不能改写
 `local_user` segment、消息 digest 或 Runtime 已冻结的 Context bytes。
+
+`camp.read item` 对当前 Run 自己已提交的 accepted send 具有一条 command-result-bound 的窄
+receipt verification 例外；它不改变 ContextManifest 历史边界，也不扩展 collection read。Renderer
+的 Message Mention 导航是独立的用户 read side：通过 `camp.messages.around` 读取同 Camp 有界锚点
+窗口，不进入 Agent built-in operation catalog，也不授予 Agent post-boundary 历史访问。
 
 ## 7. 并发、重放与清理
 

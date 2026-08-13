@@ -9,6 +9,7 @@ import type {
   CampActivationState,
   CampCreationPreflight,
   CampComposerDraftView,
+  CampMessageAroundSnapshot,
   CampMessageView,
   CampSnapshot,
   CreateCampRequest,
@@ -59,7 +60,8 @@ import { NewConversationDialog } from './NewConversationDialog'
 import { AppearanceSettings } from './AppearanceSettings'
 import {
   NotificationCenter,
-  type NotificationCenterHandle
+  type NotificationCenterHandle,
+  type NotificationNavigationResult
 } from './NotificationCenter'
 import { NotificationSettings } from './NotificationSettings'
 import { SkillSettings } from './SkillSettings'
@@ -282,6 +284,10 @@ export function App(): React.JSX.Element {
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0)
   const [notificationRefreshSignal, setNotificationRefreshSignal] = useState(0)
   const [notificationFocus, setNotificationFocus] = useState<NotificationFocusTarget | null>(null)
+  const [notificationAnchor, setNotificationAnchor] = useState<{
+    campId: string
+    messages: readonly CampMessageView[]
+  } | null>(null)
   const [newConversationOpen, setNewConversationOpen] = useState(false)
   const [newConversationInitialWorkspace, setNewConversationInitialWorkspace] = useState<WorkspaceSelection | null>(null)
   const [newConversationInitialSelection, setNewConversationInitialSelection] = useState<GeneralPreferencesSnapshot['newConversationDefaults']>(null)
@@ -531,10 +537,14 @@ export function App(): React.JSX.Element {
       reconcileDefaultLead?: boolean
       preserveNotificationFocus?: boolean
       suppressErrors?: boolean
+      anchoredMessages?: readonly CampMessageView[]
     } = {}
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     const selectionGeneration = ++campSelectionGeneration.current
-    if (!options.preserveNotificationFocus) setNotificationFocus(null)
+    if (!options.preserveNotificationFocus) {
+      setNotificationFocus(null)
+      setNotificationAnchor(null)
+    }
     if (activeCampId !== campId) {
       setCampSnapshot(null)
       campEventSequenceMarker.current = 0
@@ -557,15 +567,21 @@ export function App(): React.JSX.Element {
         .catch(() => null)
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
       if (snapshot.schemaVersion !== 29) throw new Error('Camp snapshot schema is incompatible')
-      if (selectionGeneration !== campSelectionGeneration.current) return
+      if (selectionGeneration !== campSelectionGeneration.current) return false
       if (snapshot.camp.projectBindingKind === 'directory') {
         await restoreNavigationProject(snapshot.camp.projectPath)
-        if (selectionGeneration !== campSelectionGeneration.current) return
+        if (selectionGeneration !== campSelectionGeneration.current) return false
       }
       const snapshotProject = currentProjectForCamp(snapshot.camp)
       setCurrentProject(snapshotProject)
       persistCurrentProject(snapshotProject)
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
+      if (options.anchoredMessages && options.anchoredMessages.length > 0) {
+        setNotificationAnchor({
+          campId,
+          messages: options.anchoredMessages
+        })
+      }
       setCampSnapshot(snapshot)
       await afterNextPaint()
       if (selectionGeneration === campSelectionGeneration.current && notificationBoundary !== null) {
@@ -582,8 +598,9 @@ export function App(): React.JSX.Element {
         campId,
         throughGlobalSequence: snapshot.throughGlobalSequence
       })
-      if (selectionGeneration !== campSelectionGeneration.current) return
+      if (selectionGeneration !== campSelectionGeneration.current) return false
       await loadNavigation()
+      return selectionGeneration === campSelectionGeneration.current
     } catch (nextError) {
       if (selectionGeneration === campSelectionGeneration.current) {
         if (options.suppressErrors) {
@@ -595,6 +612,7 @@ export function App(): React.JSX.Element {
           setError(errorMessage(nextError))
         }
       }
+      return false
     }
   }, [activeCampId, loadNavigation, restoreNavigationProject])
 
@@ -607,11 +625,17 @@ export function App(): React.JSX.Element {
     setCampSnapshot(snapshot)
   }, [])
 
-  const refreshVisibleNotificationCamp = useCallback(async (campId: string): Promise<boolean> => {
+  const refreshVisibleNotificationCamp = useCallback(async (
+    notification: InAppNotificationView
+  ): Promise<boolean> => {
+    const campId = notification.camp.id
     if (activeCampIdRef.current !== campId || viewRef.current !== 'camp') return false
     await refreshActiveCampSnapshot(campId)
     await afterNextPaint()
-    return activeCampIdRef.current === campId && viewRef.current === 'camp'
+    if (activeCampIdRef.current !== campId || viewRef.current !== 'camp') return false
+    if (notification.kind !== 'camp_message_user_mention') return true
+    if (!notification.sourceAvailable || !notification.sourceMessageId) return false
+    return notificationMessageIsVisible(notification.sourceMessageId)
   }, [refreshActiveCampSnapshot])
 
   useEffect(() => {
@@ -619,6 +643,10 @@ export function App(): React.JSX.Element {
     const timer = setTimeout(() => setToast(null), 3_200)
     return () => clearTimeout(timer)
   }, [toast])
+
+  useEffect(() => {
+    if (notificationFocus?.kind !== 'camp_message') setNotificationAnchor(null)
+  }, [notificationFocus])
 
   useEffect(() => {
     if (!campSnapshot) return
@@ -1247,46 +1275,150 @@ export function App(): React.JSX.Element {
       setNotificationFocus(null)
       return activateCamp(camp.id, {
         reconcileDefaultLead: camp.activationState !== 'pending'
-      })
+      }).then(() => undefined)
     })
   }
 
   const navigateFromNotification = useCallback(async (
     notification: InAppNotificationView
-  ): Promise<void> => {
-    await requestMemberTransition(async () => {
-      const target: NotificationFocusTarget | null = notification.kind === 'camp_message_user_mention'
-        ? notification.sourceAvailable && notification.sourceMessageId
-          ? {
-            requestId: ++notificationFocusSequence.current,
-            kind: 'camp_message',
-            campTurnId: null,
-            messageId: notification.sourceMessageId
+  ): Promise<NotificationNavigationResult> => {
+    let result: NotificationNavigationResult = {
+      status: 'failed',
+      message: '当前页面尚未完成切换，请稍后重试。'
+    }
+    let transitionActionCompleted = false
+    const transitioned = await requestMemberTransition(async () => {
+      try {
+        let anchoredMessages: readonly CampMessageView[] = []
+        if (notification.kind === 'camp_message_user_mention') {
+          if (!notification.sourceAvailable || !notification.sourceMessageId) {
+            result = {
+              status: 'failed',
+              message: '原消息已不可用。通知仍保留在“全部”列表中。'
+            }
+            return
           }
-          : null
-        : notification.kind === 'runtime_permission_attention'
-        ? notification.attentionState === 'pending'
-          ? {
-            requestId: ++notificationFocusSequence.current,
-            kind: 'approval',
-            campTurnId: null
+          const around = await window.rovai.request<CampMessageAroundSnapshot>(
+            'camp.messages.around',
+            {
+              campId: notification.camp.id,
+              messageId: notification.sourceMessageId
+            }
+          )
+          if (
+            around.schemaVersion !== 1
+            || around.campId !== notification.camp.id
+            || around.anchorMessageId !== notification.sourceMessageId
+          ) throw new Error('消息定位合同不兼容。')
+          if (!around.sourceAvailable) {
+            result = {
+              status: 'failed',
+              message: '原消息已删除或暂时不可用。通知仍保留在“全部”列表中。'
+            }
+            return
           }
-          : null
-        : notification.sourceAvailable && notification.campTurnId
-          ? {
-            requestId: ++notificationFocusSequence.current,
-            kind: 'camp_turn',
-            campTurnId: notification.campTurnId
+          if (!around.messages.some((message) => message.id === notification.sourceMessageId)) {
+            throw new Error('消息定位结果未包含目标消息。')
           }
-          : null
-      setNotificationFocus(target)
-      await activateCamp(notification.camp.id, {
-        preserveNotificationFocus: target !== null,
-        reconcileDefaultLead: notification.sourceAvailable,
-        suppressErrors: true
-      })
+          anchoredMessages = around.messages
+        }
+        const target: NotificationFocusTarget | null = notification.kind === 'camp_message_user_mention'
+          ? notification.sourceMessageId
+            ? {
+              requestId: ++notificationFocusSequence.current,
+              kind: 'camp_message',
+              campTurnId: null,
+              messageId: notification.sourceMessageId
+            }
+            : null
+          : notification.kind === 'runtime_permission_attention'
+          ? notification.attentionState === 'pending'
+            ? {
+              requestId: ++notificationFocusSequence.current,
+              kind: 'approval',
+              campTurnId: null
+            }
+            : null
+          : notification.sourceAvailable && notification.campTurnId
+            ? {
+              requestId: ++notificationFocusSequence.current,
+              kind: 'camp_turn',
+              campTurnId: notification.campTurnId
+            }
+            : null
+        setNotificationFocus(target ? { ...target, active: false } : null)
+        const activated = await activateCamp(notification.camp.id, {
+          preserveNotificationFocus: target !== null,
+          reconcileDefaultLead: notification.sourceAvailable,
+          suppressErrors: true,
+          anchoredMessages
+        })
+        if (!activated) {
+          result = {
+            status: 'failed',
+            message: '暂时无法打开通知来源。通知仍保留，可稍后重试。'
+          }
+          return
+        }
+        if (
+          notification.kind === 'camp_message_user_mention'
+          && notification.sourceMessageId
+          && !document.querySelector(
+            `[data-message-id="${CSS.escape(notification.sourceMessageId)}"]`
+          )
+        ) {
+          result = {
+            status: 'failed',
+            message: '已打开 Camp，但原消息未能呈现。通知仍保留，可稍后重试。'
+          }
+          return
+        }
+        result = { status: 'navigated' }
+      } catch (nextError) {
+        result = {
+          status: 'failed',
+          message: `暂时无法打开通知来源：${errorMessage(nextError)}`
+        }
+      } finally {
+        transitionActionCompleted = true
+      }
     })
+    return transitioned || transitionActionCompleted ? result : {
+      status: 'failed',
+      message: '请先处理当前队员页面中尚未保存的更改，再打开这条通知。'
+    }
   }, [activateCamp, requestMemberTransition])
+
+  const presentNotificationNavigation = useCallback(async (
+    notification: InAppNotificationView
+  ): Promise<boolean> => {
+    if (activeCampIdRef.current !== notification.camp.id || viewRef.current !== 'camp') return false
+    setNotificationFocus((current) => current ? { ...current, active: true } : current)
+    await afterNextPaint()
+    if (notification.kind === 'camp_message_user_mention') {
+      if (!notification.sourceMessageId) return false
+      const target = document.querySelector<HTMLElement>(
+        `[data-message-id="${CSS.escape(notification.sourceMessageId)}"]`
+      )
+      return target !== null && document.activeElement === target
+    }
+    if (notification.kind === 'runtime_permission_attention' && notification.attentionState === 'pending') {
+      const approvalDock = document.querySelector<HTMLElement>('.approval-dock')
+      return approvalDock?.contains(document.activeElement) === true
+    }
+    if (notification.sourceAvailable && notification.campTurnId) {
+      const targets = document.querySelectorAll<HTMLElement>(
+        `[data-camp-turn-id="${CSS.escape(notification.campTurnId)}"]`
+      )
+      return [...targets].some((target) => target === document.activeElement)
+    }
+    return true
+  }, [])
+
+  const cancelNotificationNavigation = useCallback((): void => {
+    setNotificationFocus(null)
+    setNotificationAnchor(null)
+  }, [])
 
   const toggleNavigationPin = async (
     kind: NavigationPin['kind'],
@@ -1700,11 +1832,15 @@ export function App(): React.JSX.Element {
     setNotificationFocus({
       requestId: ++notificationFocusSequence.current,
       kind: 'approval',
-      campTurnId: null
+      campTurnId: null,
+      active: true
     })
   }
 
   const windowDragPage = windowDragStripPage(view)
+  const visibleCampSnapshot = campSnapshot && activeCampId
+    ? campSnapshotWithCurrentAnchor(campSnapshot, activeCampId, notificationAnchor)
+    : campSnapshot
   const pageContentClassName: Record<View, string> = {
     compose: 'task-content compose-content',
     camp: 'task-content camp-content',
@@ -1845,9 +1981,9 @@ export function App(): React.JSX.Element {
           </div>
         )}
 
-        {!startupGateVisible && view === 'camp' && activeCampId && campSnapshot?.camp.id === activeCampId && (
+        {!startupGateVisible && view === 'camp' && activeCampId && visibleCampSnapshot?.camp.id === activeCampId && (
           <CampWorkspace
-            snapshot={campSnapshot}
+            snapshot={visibleCampSnapshot}
             optimisticMessages={optimisticCampMessages
               .filter((entry) => entry.campId === activeCampId)
               .map((entry) => entry.message)}
@@ -1859,7 +1995,7 @@ export function App(): React.JSX.Element {
             onPendingDraftPersisted={refreshPendingCampNavigation}
             onPendingCampLeave={settlePendingCampOnLeave}
             onChangeLead={changeDefaultLead}
-            onTasksChanged={() => activateCamp(activeCampId)}
+            onTasksChanged={() => activateCamp(activeCampId).then(() => undefined)}
             onResolveApproval={(approval, decision) => {
               void resolveActionApproval(approval, decision)
             }}
@@ -1867,7 +2003,7 @@ export function App(): React.JSX.Element {
             cancellingTurnIds={activeCancellingTurnIds}
             stopping={activeCampStopping}
             onStop={() => void stopCampRuns()}
-            inspectorVisible={campSnapshot.camp.activationState === 'active' && campInspectorVisible}
+            inspectorVisible={visibleCampSnapshot.camp.activationState === 'active' && campInspectorVisible}
             inspectorTab={campInspectorTab}
             onInspectorTabChange={setCampInspectorTab}
             onOpenInspector={openCampInspector}
@@ -1878,7 +2014,7 @@ export function App(): React.JSX.Element {
           />
         )}
 
-        {!startupGateVisible && view === 'camp' && (!activeCampId || campSnapshot?.camp.id !== activeCampId) && (
+        {!startupGateVisible && view === 'camp' && (!activeCampId || visibleCampSnapshot?.camp.id !== activeCampId) && (
           <EmptyState title="正在打开对话" body="Rovai-ai 正在从 SQLite 权威快照恢复 Camp、队员与运行状态。" />
         )}
 
@@ -1978,6 +2114,8 @@ export function App(): React.JSX.Element {
         refreshSignal={notificationRefreshSignal}
         onUnreadCountChange={setNotificationUnreadCount}
         onNavigate={navigateFromNotification}
+        onPresentNavigation={presentNotificationNavigation}
+        onCancelNavigation={cancelNotificationNavigation}
         onRefreshVisibleCamp={refreshVisibleNotificationCamp}
       />
       {shuttingDown && <ControlledShutdownOverlay />}
@@ -2170,6 +2308,52 @@ function appearancePreferenceLabel(preference: ThemePreference): string {
 
 function EmptyState({ title, body, action, onAction }: { title: string; body: string; action?: string; onAction?(): void }): React.JSX.Element {
   return <section className="empty-state"><span>⌁</span><h2>{title}</h2><p>{body}</p>{action && onAction && <button className="primary-button" onClick={onAction}>{action}</button>}</section>
+}
+
+export function campSnapshotWithAnchoredMessages(
+  snapshot: CampSnapshot,
+  anchoredMessages: readonly CampMessageView[]
+): CampSnapshot {
+  if (anchoredMessages.length === 0) return snapshot
+  const messagesById = new Map(snapshot.messages.map((message) => [message.id, message]))
+  for (const message of anchoredMessages) {
+    if (!messagesById.has(message.id)) messagesById.set(message.id, message)
+  }
+  return {
+    ...snapshot,
+    messages: [...messagesById.values()].sort((left, right) =>
+      left.sequence - right.sequence || left.id.localeCompare(right.id)
+    )
+  }
+}
+
+export function campSnapshotWithCurrentAnchor(
+  snapshot: CampSnapshot,
+  campId: string,
+  anchor: { campId: string; messages: readonly CampMessageView[] } | null
+): CampSnapshot {
+  return anchor?.campId === campId
+    ? campSnapshotWithAnchoredMessages(snapshot, anchor.messages)
+    : snapshot
+}
+
+export function rectanglesIntersect(
+  target: Pick<DOMRect, 'top' | 'right' | 'bottom' | 'left'>,
+  viewport: Pick<DOMRect, 'top' | 'right' | 'bottom' | 'left'>
+): boolean {
+  return target.bottom > viewport.top
+    && target.top < viewport.bottom
+    && target.right > viewport.left
+    && target.left < viewport.right
+}
+
+export function notificationMessageIsVisible(messageId: string): boolean {
+  const target = document.querySelector<HTMLElement>(
+    `[data-message-id="${CSS.escape(messageId)}"]`
+  )
+  const viewport = target?.closest<HTMLElement>('.timeline-scroll') ?? null
+  if (!target || !viewport) return false
+  return rectanglesIntersect(target.getBoundingClientRect(), viewport.getBoundingClientRect())
 }
 
 async function resolveNavigationPins(

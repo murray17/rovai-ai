@@ -1104,6 +1104,20 @@ export interface CampSnapshot {
   timeline: DomainEventView[]
 }
 
+export interface CampMessageAroundSnapshot {
+  schemaVersion: 1
+  throughGlobalSequence: number
+  campId: string
+  anchorMessageId: string
+  sourceAvailable: boolean
+  messages: CampMessageView[]
+}
+
+export interface CampMessageAroundParams {
+  campId: string
+  messageId: string
+}
+
 export interface MessageDeliveryView {
   id: string
   messageId: string
@@ -1859,6 +1873,7 @@ export type CoreMethod =
   | 'campTurns.cancel'
   | 'agentRuns.resolveRecoveryBlocker'
   | 'camps.snapshot'
+  | 'camp.messages.around'
   | 'agentRunEvidence.getContent'
   | 'agentRunEvidence.list'
   | 'tasks.create'

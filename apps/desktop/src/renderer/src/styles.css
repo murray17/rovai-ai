@@ -1405,6 +1405,11 @@ button:disabled { opacity: 0.52; cursor: default; }
   background: transparent;
 }
 .structured-message-body { white-space: pre-wrap; }
+.current-user-markdown-body > .current-user-mention-prefix,
+.current-user-markdown-body > .current-user-markdown-content > :first-child:is(p, h3, h4) {
+  display: inline;
+}
+.current-user-markdown-body > .current-user-markdown-content { display: contents; }
 .message-mention-token {
   display: inline;
   max-width: 100%;
