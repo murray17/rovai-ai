@@ -203,6 +203,13 @@ export function agentRunTerminalNote(
     : null
 }
 
+export function agentRunShowsUnsettledWarning(
+  run: Pick<AgentRunView, 'status' | 'hasUnsettledExternalEffects'>
+): boolean {
+  return run.hasUnsettledExternalEffects
+    && (run.status === 'failed' || run.status === 'cancelled')
+}
+
 export function executionDrawerIsNearBottom(
   scrollTop: number,
   scrollHeight: number,
@@ -3931,7 +3938,7 @@ function RunExecutionDisclosure({
     )
   ]
   const hasProgress = processItems.length > 0
-  const showUnsettledWarning = run.hasUnsettledExternalEffects
+  const showUnsettledWarning = agentRunShowsUnsettledWarning(run)
   if (!nonTerminal && durableEvidenceCount === 0 && !hasProgress && truncatedEvidence.length === 0 && !showUnsettledWarning) {
     return null
   }

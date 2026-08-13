@@ -49,6 +49,7 @@ import {
   agentExecutionProcesses,
   agentRunTerminalNote,
   agentRunCountsAsExecuting,
+  agentRunShowsUnsettledWarning,
   attachmentDragKind,
   campConversationTimeline,
   campInspectorMembers,
@@ -665,6 +666,29 @@ describe('task event projections', () => {
     expect(campInspectorVisibleFromStoredValue('visible')).toBe(true)
     expect(campInspectorVisibleFromStoredValue('hidden')).toBe(false)
     expect(campInspectorVisibleFromStoredValue('legacy-value')).toBe(true)
+  })
+
+  it('shows unsettled external effects only after a failed or cancelled AgentRun', () => {
+    expect(agentRunShowsUnsettledWarning({
+      status: 'running',
+      hasUnsettledExternalEffects: true
+    })).toBe(false)
+    expect(agentRunShowsUnsettledWarning({
+      status: 'waiting',
+      hasUnsettledExternalEffects: true
+    })).toBe(false)
+    expect(agentRunShowsUnsettledWarning({
+      status: 'failed',
+      hasUnsettledExternalEffects: true
+    })).toBe(true)
+    expect(agentRunShowsUnsettledWarning({
+      status: 'cancelled',
+      hasUnsettledExternalEffects: true
+    })).toBe(true)
+    expect(agentRunShowsUnsettledWarning({
+      status: 'failed',
+      hasUnsettledExternalEffects: false
+    })).toBe(false)
   })
 
   it('keeps every Runtime option while placing cancel and deny first', () => {
