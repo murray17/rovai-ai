@@ -11,6 +11,25 @@ Camp 是开放阅读面，不按角色铺不同底色。时间线、Agent 执行
 Composer 共享主列；Inspector 是右侧辅助列。普通叙述保持 `76ch` 阅读宽度，代码、表格等工件
 可以扩展到 `930px`，2K Composer/工作区上限为 `1040px`。
 
+## 常规会话与世界地图
+
+会话阅读面可以在常规时间线与沉浸世界地图之间切换。切换入口与地图路线显隐使用阅读面内的紧凑
+悬浮控件，不占用 Camp Header 或独立工具栏；左侧导航、Inspector、Approval/Recovery Dock、Composer
+与 Agent 执行台保持既有位置和权威。切换不得清空时间线滚动、Draft、Inspector 选择、Approval、
+执行台焦点或正在接收的真实活动更新。
+
+世界地图只消费当前 Camp 中可呈现队员和既有 AgentRun、Runtime activity、A2A/Delivery 事实的有界
+只读投影。固定地点、路线、稳定随机移动、停留、视觉会合和闲时文案都属于 Renderer 瞬时状态；地图
+位置不表示 Task 进度、Run 阶段、投递状态或协作成功，不持久化，也不向 Core 或 Runtime 写回。
+
+忙时气泡只能压缩展示已有 narration、plan 或 tool activity；长文本可以有界省略，但不得合成步骤、
+百分比或成功判断。没有进行中任务时可以显示组合式环境预设，但必须标记“闲时 · 环境预设”，不能
+伪装成 Agent 输出。等待或结果待确认的队员保持静止，并沿用既有诚实文案。
+
+地图必须按会话容器而非窗口高度适配：Inspector 显隐和可上下拖动执行台压缩主列时，地图收缩、裁切
+或降低次要信息密度，不能遮住 Approval/Recovery Dock、Composer 或执行台。静态模式与 reduced motion
+停止角色移动、路线流光、脉冲和会合动画，但不能停止 Snapshot/Runtime 驱动的真实文字更新。
+
 ## A2A 会话消息
 
 Agent 公共正文不显示“来自执行”来源条，也不投影 compact 投递卡。已交付 A2A 消息只在正文后

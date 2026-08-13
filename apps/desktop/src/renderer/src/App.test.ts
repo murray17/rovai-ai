@@ -51,6 +51,7 @@ import {
   agentRunCountsAsExecuting,
   agentRunShowsUnsettledWarning,
   attachmentDragKind,
+  campConversationViewFromStoredValue,
   campConversationTimeline,
   campInspectorMembers,
   campMemberIsLeadEligible,
@@ -1848,6 +1849,9 @@ describe('task event projections', () => {
     expect(executionDrawerHeightFromStoredValue('312.4')).toBe(312)
     expect(executionDrawerHeightFromStoredValue('47')).toBeNull()
     expect(executionDrawerHeightFromStoredValue('not-a-height')).toBeNull()
+    expect(campConversationViewFromStoredValue('conversation')).toBe('conversation')
+    expect(campConversationViewFromStoredValue('world')).toBe('world')
+    expect(campConversationViewFromStoredValue(null)).toBe('world')
 
     const markup = renderToStaticMarkup(createElement(CampWorkspace, {
       snapshot: groupedSnapshot,
@@ -1894,7 +1898,9 @@ describe('task event projections', () => {
     expect(markup).not.toContain('Progress')
     expect(markup).not.toContain('正在补充复制入口。')
     expect(markup).not.toContain('Steps')
-    expect(markup).not.toContain('pnpm test')
+    expect(markup).toContain('aria-label="Camp 世界地图"')
+    expect(markup).toContain('AgentRun · 真实执行')
+    expect(markup).toContain('执行 Shell 命令：pnpm test')
     expect(markup).not.toContain('conversation-bubble agent agent-run-message')
     expect(markup).not.toContain('execution-disclosure')
     expect(markup).not.toContain('stream-reasoning')

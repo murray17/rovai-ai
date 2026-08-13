@@ -1,0 +1,723 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rovai AI · 侧栏字重与 Task 实时卡交互稿</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      font-synthesis: none;
+      text-rendering: optimizeLegibility;
+      --lab-canvas: #171c20;
+      --lab-surface: #22282d;
+      --lab-line: #394249;
+      --lab-ink: #edf1f3;
+      --lab-muted: #aeb7bd;
+      --canvas: #eceeef;
+      --surface: #fbfbfa;
+      --surface-raised: #ffffff;
+      --surface-subtle: #f0f2f4;
+      --surface-muted: #e7eaed;
+      --surface-selected: #e9ecee;
+      --surface-hover: #e8eaea;
+      --conversation-surface: #ffffff;
+      --topbar: #fbfbfa;
+      --rail: #f3f4f4;
+      --rail-line: #dadde0;
+      --rail-project-ink: #3f4a53;
+      --rail-camp-ink: #59636b;
+      --rail-selected-ink: #354b5c;
+      --ink: #171b20;
+      --muted: #59636c;
+      --faint: #6b747c;
+      --line: #dfe4e8;
+      --line-strong: #c7cfd6;
+      --control-line: #8b938d;
+      --input: #ffffff;
+      --brand: #526f88;
+      --brand-hover: #3d5874;
+      --brand-soft: #e9eef3;
+      --brand-ink: #405f7e;
+      --brand-contrast: #ffffff;
+      --success: #3e775c;
+      --success-soft: #e7f1ea;
+      --attention: #8a6226;
+      --attention-soft: #f8edda;
+      --info: #416c86;
+      --info-soft: #e5eef3;
+      --neutral: #606a72;
+      --neutral-soft: #edf0f2;
+      --focus: #526f88;
+      --focus-soft: rgba(82, 111, 136, .16);
+      --identity: #a65f4a;
+      --shadow-float: 0 18px 56px rgba(38, 45, 58, .14);
+      --task-tone: var(--neutral);
+      --task-soft: var(--neutral-soft);
+    }
+
+    body[data-theme="night"] {
+      color-scheme: dark;
+      --lab-canvas: #080b0d;
+      --lab-surface: #13181c;
+      --lab-line: #303a41;
+      --lab-ink: #edf2f4;
+      --lab-muted: #aeb8bf;
+      --canvas: #0d1114;
+      --surface: #151a1e;
+      --surface-raised: #1b2227;
+      --surface-subtle: #1a2024;
+      --surface-muted: #242d33;
+      --surface-selected: #222c33;
+      --surface-hover: #1d252b;
+      --conversation-surface: #181d21;
+      --topbar: #151a1e;
+      --rail: #11161a;
+      --rail-line: #313b43;
+      --rail-project-ink: #c0c9ce;
+      --rail-camp-ink: #9faab1;
+      --rail-selected-ink: #d5e0e6;
+      --ink: #e7ecef;
+      --muted: #abb5bc;
+      --faint: #919da6;
+      --line: #333e46;
+      --line-strong: #53616b;
+      --control-line: #687b88;
+      --input: #1b2227;
+      --brand: #7897ae;
+      --brand-hover: #b1c8d8;
+      --brand-soft: #22303a;
+      --brand-ink: #c0d4e1;
+      --brand-contrast: #091116;
+      --success: #82b695;
+      --success-soft: #1a2b22;
+      --attention: #d2ac70;
+      --attention-soft: #302719;
+      --info: #83afc9;
+      --info-soft: #182832;
+      --neutral: #abb5bc;
+      --neutral-soft: #242d33;
+      --focus: #8fb3cb;
+      --focus-soft: rgba(143, 179, 203, .18);
+      --identity: #c98572;
+      --shadow-float: 0 22px 64px rgba(0, 0, 0, .42);
+    }
+
+    body[data-task-state="unassigned"],
+    body[data-task-state="blocked"] {
+      --task-tone: var(--attention);
+      --task-soft: var(--attention-soft);
+    }
+    body[data-task-state="in_progress"] {
+      --task-tone: var(--info);
+      --task-soft: var(--info-soft);
+    }
+    body[data-task-state="completed"] {
+      --task-tone: var(--success);
+      --task-soft: var(--success-soft);
+    }
+    body[data-task-state="cancelled"] {
+      --task-tone: var(--neutral);
+      --task-soft: var(--neutral-soft);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: 100%; min-width: 1040px; min-height: 700px; height: 100%; margin: 0; }
+    body { overflow: hidden; color: var(--ink); background: var(--lab-canvas); }
+    button, textarea { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: default; opacity: .52; }
+    button:active:not(:disabled) { transform: translateY(1px); }
+    :where(button, textarea):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+    ::selection { color: var(--ink); background: var(--brand-soft); }
+    [hidden] { display: none !important; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    .svg-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+    .icon { width: 17px; height: 17px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.65; }
+    .icon-sm { width: 14px; height: 14px; }
+
+    .labbar {
+      display: grid;
+      height: 58px;
+      grid-template-columns: minmax(190px, .8fr) minmax(430px, 1.4fr) minmax(245px, .8fr);
+      align-items: center;
+      gap: 14px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--lab-line);
+      color: var(--lab-ink);
+      background: var(--lab-surface);
+    }
+    .lab-title { display: grid; min-width: 0; gap: 2px; }
+    .lab-title strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+    .lab-title span { overflow: hidden; color: var(--lab-muted); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .state-lab { display: flex; min-width: 0; align-items: center; justify-content: center; gap: 4px; }
+    .state-lab-label { margin-right: 3px; color: var(--lab-muted); font-size: 10.5px; white-space: nowrap; }
+    .lab-button, .state-button {
+      display: inline-flex;
+      min-height: 28px;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border: 1px solid var(--lab-line);
+      border-radius: 6px;
+      color: var(--lab-ink);
+      background: transparent;
+      font-size: 10.5px;
+      white-space: nowrap;
+    }
+    .lab-button:hover, .state-button:hover { background: rgba(255, 255, 255, .06); }
+    .state-button[aria-pressed="true"] { border-color: var(--brand); color: #ffffff; background: var(--brand-hover); }
+    .play-button { width: 29px; padding: 0; }
+    .lab-actions { display: flex; min-width: 0; align-items: center; justify-content: flex-end; gap: 6px; }
+    .nav-mode-button[aria-pressed="true"] { border-color: var(--brand); color: #ffffff; background: var(--brand-hover); }
+
+    .stage { height: calc(100% - 58px); padding: 12px; }
+    .app-frame {
+      display: grid;
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      min-height: 0;
+      grid-template-columns: 270px minmax(0, 1fr);
+      grid-template-rows: 50px minmax(0, 1fr);
+      overflow: hidden;
+      border: 1px solid var(--lab-line);
+      border-radius: 12px;
+      background: var(--canvas);
+      box-shadow: 0 20px 58px rgba(0, 0, 0, .24);
+    }
+
+    .sidebar {
+      display: flex;
+      min-height: 0;
+      grid-column: 1;
+      grid-row: 1 / -1;
+      flex-direction: column;
+      padding: 0 10px 10px;
+      border-right: 1px solid var(--rail-line);
+      background: var(--rail);
+    }
+    .sidebar-drag { height: 26px; flex: 0 0 26px; }
+    .brand-row { display: flex; min-height: 43px; align-items: center; justify-content: space-between; gap: 8px; padding: 0 7px 9px; }
+    .wordmark { color: var(--ink); font-size: 15px; font-weight: 730; letter-spacing: -.02em; }
+    .icon-button { display: inline-grid; width: 30px; height: 30px; padding: 0; place-items: center; border: 0; border-radius: 6px; color: var(--muted); background: transparent; }
+    .icon-button:hover { color: var(--brand-ink); background: var(--surface-muted); }
+    .notification-button { position: relative; }
+    .notification-badge { position: absolute; top: 1px; right: 0; min-width: 14px; height: 14px; padding: 0 3px; border: 2px solid var(--rail); border-radius: 999px; color: var(--brand-contrast); background: var(--brand); font: 700 10px/10px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .primary-nav { display: grid; gap: 3px; padding: 2px 0 9px; border-bottom: 1px solid var(--rail-line); }
+    .nav-row { position: relative; display: grid; width: 100%; min-height: 34px; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 6px 8px; border: 0; border-radius: 6px; color: var(--rail-camp-ink); background: transparent; text-align: left; font-size: 12.5px; }
+    .nav-row:hover { color: var(--ink); background: var(--surface-hover); }
+    .nav-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .new-conversation { color: var(--brand-ink); font-weight: 600; }
+    .nav-scroll { min-height: 0; flex: 1 1 auto; overflow: auto; padding: 13px 0 12px; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+    .section-heading { display: flex; min-height: 30px; align-items: center; justify-content: space-between; padding: 0 5px 4px 8px; }
+    .section-heading strong { color: var(--faint); font-size: 10.5px; font-weight: 650; }
+    .project-row {
+      display: grid;
+      width: 100%;
+      min-height: 34px;
+      grid-template-columns: 17px minmax(0, 1fr) 24px 24px;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 4px 5px 8px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--rail-project-ink);
+      background: transparent;
+      text-align: left;
+      font-size: 12.5px;
+      font-weight: 560;
+      line-height: 1.35;
+    }
+    .project-row:hover { background: var(--surface-hover); }
+    .project-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .folder-icon { color: var(--brand-ink); }
+    .row-action { display: grid; width: 24px; height: 24px; padding: 0; place-items: center; border: 0; border-radius: 6px; color: var(--faint); background: transparent; }
+    .row-action:hover { color: var(--brand-ink); background: var(--surface-raised); }
+    .camp-list { display: grid; gap: 0; margin: 0 0 8px; padding-left: 12px; }
+    .camp-row { position: relative; display: grid; width: 100%; min-height: 28px; grid-template-columns: 8px minmax(0, 1fr) 24px; align-items: center; gap: 7px; padding: 2px 4px 2px 7px; border: 0; border-radius: 6px; color: var(--rail-camp-ink); background: transparent; text-align: left; font-size: 12px; font-weight: 400; line-height: 1.35; }
+    .camp-row:hover { color: var(--rail-project-ink); background: var(--surface-hover); }
+    .camp-row.is-selected { color: var(--rail-selected-ink); background: var(--surface-selected); font-weight: 450; }
+    .camp-row.is-selected::before { position: absolute; top: 4px; bottom: 4px; left: -12px; width: 2px; border-radius: 2px; background: var(--brand); content: ""; }
+    .camp-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .camp-dot { width: 6px; height: 6px; justify-self: center; border-radius: 50%; visibility: hidden; }
+    .camp-dot.is-active { visibility: visible; background: var(--info); }
+    .camp-row .row-action { opacity: .68; }
+    .sidebar-footer { padding-top: 8px; border-top: 1px solid var(--rail-line); }
+    .type-spec { margin: 0 7px 9px; padding: 8px 0; border-top: 1px solid var(--rail-line); border-bottom: 1px solid var(--rail-line); color: var(--faint); font-size: 10.5px; line-height: 1.55; }
+    .type-spec strong { color: var(--rail-project-ink); font-weight: 600; }
+
+    body[data-nav-mode="current"] .project-row { color: var(--ink); font-size: 13px; font-weight: 500; }
+    body[data-nav-mode="current"] .camp-row { color: var(--ink); font-size: 13px; font-weight: 400; }
+    body[data-nav-mode="current"] .camp-row.is-selected { color: var(--brand-ink); font-weight: 500; }
+
+    .topbar { display: flex; min-width: 0; grid-column: 2; grid-row: 1; align-items: center; gap: 9px; padding: 0 18px; border-bottom: 1px solid var(--line); background: var(--topbar); }
+    .breadcrumb { display: flex; min-width: 0; align-items: baseline; gap: 7px; }
+    .breadcrumb span { color: var(--faint); font-size: 12px; }
+    .breadcrumb h1 { margin: 0; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+    .day-badge { padding: 2px 6px; border-radius: 6px; color: var(--faint); background: var(--surface-muted); font: 500 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .topbar-note { margin-left: auto; color: var(--faint); font-size: 10.5px; }
+
+    .workspace { display: flex; min-width: 0; min-height: 0; grid-column: 2; grid-row: 2; flex-direction: column; background: var(--conversation-surface); }
+    .timeline-scroll { min-height: 0; flex: 1 1 auto; overflow: auto; padding: 0 26px 28px; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+    .timeline-track { width: min(760px, 100%); margin: 0 auto; }
+    .record-header { position: sticky; z-index: 3; top: 0; display: flex; min-height: 56px; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); background: var(--conversation-surface); }
+    .record-header h2 { margin: 0; font-size: 13px; }
+    .record-header span { color: var(--faint); font-size: 10.5px; }
+    .day-separator { display: flex; align-items: center; gap: 12px; margin: 17px 0 14px; color: var(--faint); font: 500 10.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .day-separator::before, .day-separator::after { height: 1px; flex: 1 1 auto; background: var(--line); content: ""; }
+    .message { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; margin: 17px 0; }
+    .avatar { display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid currentColor; border-radius: 50%; color: var(--identity); background: var(--surface-raised); font-size: 10.5px; font-weight: 700; }
+    .avatar.user { color: var(--brand-ink); }
+    .message-body { min-width: 0; }
+    .message-meta { display: flex; min-height: 22px; align-items: baseline; gap: 8px; }
+    .message-meta strong { font-size: 12.5px; }
+    .message-meta span { color: var(--faint); font-size: 10.5px; }
+    .message-meta time { margin-left: auto; color: var(--faint); font: 10px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .message-body p { max-width: 72ch; margin: 4px 0 0; font-size: 13px; line-height: 1.65; }
+
+    .task-anchor { position: relative; margin: 20px 0; }
+    .task-anchor-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 7px; color: var(--faint); font-size: 10.5px; }
+    .task-anchor-label code { color: var(--faint); font: 10px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .task-live-card {
+      position: relative;
+      display: grid;
+      width: 100%;
+      min-height: 116px;
+      grid-template-columns: 38px minmax(0, 1fr) 24px;
+      align-items: start;
+      gap: 11px;
+      overflow: hidden;
+      padding: 13px 12px;
+      border: 1px solid var(--line-strong);
+      border-radius: 10px;
+      color: var(--ink);
+      background: var(--surface-raised);
+      text-align: left;
+    }
+    .task-live-card:hover { border-color: var(--control-line); }
+    .task-live-card::after {
+      position: absolute;
+      z-index: 0;
+      inset: 0;
+      background: var(--task-soft);
+      content: "";
+      opacity: 0;
+      pointer-events: none;
+      clip-path: inset(0 100% 0 0);
+    }
+    .task-live-card.is-changing::after { animation: task-state-sweep 320ms cubic-bezier(.16, 1, .3, 1); }
+    @keyframes task-state-sweep {
+      0% { opacity: .58; clip-path: inset(0 100% 0 0); }
+      62% { opacity: .38; clip-path: inset(0 0 0 0); }
+      100% { opacity: 0; clip-path: inset(0 0 0 0); }
+    }
+    .task-live-card > * { position: relative; z-index: 1; }
+    .task-glyph { display: grid; width: 36px; height: 36px; place-items: center; border: 1px solid color-mix(in srgb, var(--task-tone) 42%, var(--line)); border-radius: 10px; color: var(--task-tone); background: var(--task-soft); }
+    .task-card-content { display: grid; min-width: 0; gap: 5px; }
+    .task-state-line { display: flex; min-width: 0; align-items: center; gap: 8px; }
+    .task-state-line strong { min-width: 0; overflow: hidden; color: var(--task-tone); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .task-status { display: inline-flex; min-height: 20px; align-items: center; padding: 1px 6px; border-radius: 6px; color: var(--task-tone); background: var(--task-soft); font-size: 10.5px; font-weight: 700; white-space: nowrap; }
+    .task-title { margin: 0; overflow: hidden; font-size: 13px; font-weight: 680; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+    .task-meta { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 5px 10px; color: var(--muted); font-size: 10.5px; }
+    .task-owner { display: inline-flex; min-width: 0; align-items: center; gap: 5px; }
+    .owner-mark { display: grid; width: 17px; height: 17px; flex: 0 0 17px; place-items: center; border: 1px solid currentColor; border-radius: 50%; color: var(--identity); font-size: 10px; font-style: normal; font-weight: 700; }
+    body[data-task-state="unassigned"] .owner-mark { border-style: dashed; color: var(--attention); }
+    .task-updated { color: var(--faint); font: 10px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .task-state-note { min-width: 0; margin: 1px 0 0; overflow: hidden; color: var(--muted); font-size: 12.5px; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
+    .task-state-note strong { color: var(--task-tone); font-weight: 650; }
+    .task-open-icon { display: grid; width: 24px; height: 24px; place-items: center; color: var(--faint); }
+    .task-live-card:hover .task-open-icon { color: var(--brand-ink); transform: translateX(1px); }
+    .task-observer { display: flex; min-height: 29px; align-items: center; justify-content: space-between; gap: 14px; padding: 5px 4px 0; color: var(--faint); font-size: 10.5px; }
+    .task-observer code { color: var(--faint); font: 10px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .terminal-note { color: var(--muted); }
+    body:not([data-task-state="completed"]):not([data-task-state="cancelled"]) .terminal-note { display: none; }
+
+    .composer { flex: 0 0 auto; padding: 9px 26px 14px; background: var(--conversation-surface); }
+    .composer-box { display: flex; width: min(760px, 100%); margin: 0 auto; align-items: flex-end; gap: 8px; padding: 8px 8px 8px 12px; border: 1px solid var(--control-line); border-radius: 10px; background: var(--input); }
+    .composer-box:focus-within { border-color: var(--focus); box-shadow: 0 0 0 2px var(--focus-soft); }
+    .composer textarea { width: 100%; min-height: 38px; flex: 1 1 auto; resize: none; padding: 6px 0; border: 0; outline: 0; color: var(--ink); background: transparent; font-size: 13px; line-height: 1.5; }
+    .composer textarea::placeholder { color: var(--faint); }
+    .send-button { min-height: 29px; padding: 5px 12px; border: 1px solid var(--brand); border-radius: 6px; color: var(--brand-contrast); background: var(--brand); font-size: 12.5px; font-weight: 700; }
+
+    .notes-panel { position: fixed; z-index: 80; top: 68px; right: 18px; width: 350px; overflow: hidden; border: 1px solid var(--lab-line); border-radius: 10px; color: var(--lab-ink); background: var(--lab-surface); box-shadow: 0 22px 64px rgba(0, 0, 0, .36); }
+    .notes-panel header { display: flex; min-height: 44px; align-items: center; justify-content: space-between; padding: 7px 8px 7px 13px; border-bottom: 1px solid var(--lab-line); }
+    .notes-panel h2 { margin: 0; font-size: 13px; }
+    .notes-body { padding: 12px 14px 15px; }
+    .notes-body p { margin: 0 0 9px; color: var(--lab-muted); font-size: 12.5px; line-height: 1.55; }
+    .notes-body dl { display: grid; margin: 0; }
+    .notes-body dl > div { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 8px; padding: 7px 0; border-top: 1px solid var(--lab-line); }
+    .notes-body dt { color: var(--lab-muted); font-size: 10.5px; }
+    .notes-body dd { margin: 0; font-size: 12.5px; line-height: 1.45; }
+    .toast { position: fixed; z-index: 100; right: 22px; bottom: 22px; max-width: 380px; padding: 9px 12px; border: 1px solid var(--line-strong); border-radius: 10px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow-float); font-size: 12.5px; }
+
+    @media (max-width: 1180px) {
+      .labbar { grid-template-columns: 175px minmax(420px, 1fr) 220px; gap: 8px; padding-inline: 10px; }
+      .lab-title span { display: none; }
+      .state-lab-label { display: none; }
+      .state-button { padding-inline: 6px; font-size: 10.5px; }
+      .lab-button { padding-inline: 7px; }
+      .stage { padding: 0; }
+      .app-frame { border-right: 0; border-left: 0; border-radius: 0; }
+      .timeline-scroll, .composer { padding-right: 18px; padding-left: 18px; }
+    }
+
+    @media (max-height: 760px) {
+      .record-header { min-height: 48px; }
+      .message { margin: 13px 0; }
+      .task-anchor { margin: 14px 0; }
+      .task-live-card { min-height: 108px; padding-block: 10px; }
+      .composer { padding-top: 6px; padding-bottom: 8px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+    }
+  </style>
+</head>
+<body data-theme="day" data-nav-mode="proposed" data-task-state="pending">
+  <!--
+  THESIS: Two narrow refinements: sidebar hierarchy comes from size, tone and selection structure rather than bold black Camp titles; one Task stays at its creation anchor while its authoritative state copy updates in place.
+  OWN-WORLD: Porcelain Day / Steel Night, native UI type, open reading plane, semantic dividers, small state surfaces and no decorative gradients.
+  STORY: Compare the lighter Project/Camp hierarchy, then inspect every legal Task presentation without creating duplicate timeline events.
+  FIRST VIEWPORT: Fixed 270px rail, one Camp timeline and one live Task card; the external lab bar switches snapshot states and typography comparison without pretending to be product chrome.
+  FORM: Established-world component refinement; user pinned both targets and no replacement-world concept selection was needed.
+  FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+  -->
+
+  <svg class="svg-sprite" aria-hidden="true">
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6.5 10.5a5.5 5.5 0 0 1 11 0c0 5 2 5.2 2 6.5h-15c0-1.3 2-1.5 2-6.5Z"/><path d="M9.7 19a2.5 2.5 0 0 0 4.6 0"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-memory" viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="16" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><circle cx="16.5" cy="9" r="2.5"/><path d="M3.5 19c.5-4 2.3-6 5.5-6s5 2 5.5 6M14 14c3 0 4.8 1.7 5.4 5"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.4 1a7 7 0 0 0-2-1.1L14.2 3h-4l-.4 2.8a7 7 0 0 0-2 1.1l-2.4-1-2 3.4 2 1.5A7 7 0 0 0 5.3 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.4-1a7 7 0 0 0 2 1.1l.4 2.8h4l.4-2.8a7 7 0 0 0 2-1.1l2.4 1 2-3.4-2-1.5c.1-.4.1-.8.1-1.2Z"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7h6l2 2h9v9.5h-17V7Z"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 7 5 5-5 5"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 5 10 7-10 7V5Z"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 15.8A8.5 8.5 0 0 1 8.2 4a8.5 8.5 0 1 0 11.8 11.8Z"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M18.7 5.3l-1.4 1.4M6.7 17.3l-1.4 1.4"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 10.5v6M12 7.5v.1"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></symbol>
+    <symbol id="i-pending" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4.5l3 2"/></symbol>
+    <symbol id="i-unassigned" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 19c.5-4 2.3-6 5.5-6 2.2 0 3.8.9 4.7 2.7M16 11h5M18.5 8.5v5"/></symbol>
+    <symbol id="i-progress" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="m10 8 4 4-4 4"/></symbol>
+    <symbol id="i-blocked" viewBox="0 0 24 24"><path d="M12 3.5 20.5 12 12 20.5 3.5 12 12 3.5Z"/><path d="M12 8v5M12 16.5v.1"/></symbol>
+    <symbol id="i-completed" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="m8 12 2.6 2.6L16.5 9"/></symbol>
+    <symbol id="i-cancelled" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="3"/><path d="m9 9 6 6M15 9l-6 6"/></symbol>
+  </svg>
+
+  <header class="labbar">
+    <div class="lab-title"><strong>侧栏字重 × Task 实时卡</strong><span>本稿只验证这两个局部</span></div>
+    <div class="state-lab" role="group" aria-label="查看 Task 快照">
+      <span class="state-lab-label">查看快照</span>
+      <button class="state-button" type="button" data-state="pending" aria-pressed="true">待处理</button>
+      <button class="state-button" type="button" data-state="unassigned" aria-pressed="false">未分配变体</button>
+      <button class="state-button" type="button" data-state="in_progress" aria-pressed="false">进行中</button>
+      <button class="state-button" type="button" data-state="blocked" aria-pressed="false">已阻塞</button>
+      <button class="state-button" type="button" data-state="completed" aria-pressed="false">已完成</button>
+      <button class="state-button" type="button" data-state="cancelled" aria-pressed="false">已取消</button>
+      <button class="state-button play-button" id="playButton" type="button" aria-label="播放合法状态路径" title="播放：待处理 → 进行中 → 已阻塞 → 进行中 → 已完成"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-play"/></svg></button>
+    </div>
+    <div class="lab-actions">
+      <button class="lab-button nav-mode-button" id="navModeButton" type="button" aria-pressed="false">对照当前字重</button>
+      <button class="lab-button" id="notesButton" type="button" aria-expanded="false" aria-controls="notesPanel"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-info"/></svg>说明</button>
+      <button class="lab-button" id="themeButton" type="button" aria-pressed="false"><svg class="icon icon-sm" aria-hidden="true"><use id="themeUse" href="#i-moon"/></svg><span id="themeLabel">夜间</span></button>
+    </div>
+  </header>
+
+  <div class="stage">
+    <div class="app-frame">
+      <aside class="sidebar" aria-label="全局导航">
+        <div class="sidebar-drag" aria-hidden="true"></div>
+        <div class="brand-row">
+          <span class="wordmark">Rovai AI</span>
+          <button class="icon-button notification-button" type="button" aria-label="通知，2 条未读" data-toast="通知入口保持原位"><svg class="icon" aria-hidden="true"><use href="#i-bell"/></svg><span class="notification-badge">2</span></button>
+        </div>
+        <nav class="primary-nav" aria-label="主要页面">
+          <button class="nav-row new-conversation" type="button"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg><span>新对话</span></button>
+          <button class="nav-row" type="button"><svg class="icon" aria-hidden="true"><use href="#i-memory"/></svg><span>记忆</span></button>
+          <button class="nav-row" type="button"><svg class="icon" aria-hidden="true"><use href="#i-users"/></svg><span>队员</span></button>
+        </nav>
+
+        <div class="nav-scroll">
+          <div class="section-heading"><strong>项目</strong><button class="icon-button" type="button" aria-label="添加项目"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-plus"/></svg></button></div>
+          <button class="project-row" type="button"><svg class="icon folder-icon" aria-hidden="true"><use href="#i-folder"/></svg><span>rovai-ai</span><span class="row-action" aria-hidden="true"><svg class="icon icon-sm"><use href="#i-more"/></svg></span><span class="row-action" aria-hidden="true"><svg class="icon icon-sm"><use href="#i-plus"/></svg></span></button>
+          <div class="camp-list">
+            <button class="camp-row is-selected" type="button"><i class="camp-dot is-active" aria-label="有执行进行中"></i><span>可靠退出收口</span><span class="row-action" aria-hidden="true"><svg class="icon icon-sm"><use href="#i-more"/></svg></span></button>
+            <button class="camp-row" type="button"><i class="camp-dot"></i><span>附件快照验收</span><span class="row-action" aria-hidden="true"><svg class="icon icon-sm"><use href="#i-more"/></svg></span></button>
+            <button class="camp-row" type="button"><i class="camp-dot"></i><span>v0.67 文档治理</span><span class="row-action" aria-hidden="true"><svg class="icon icon-sm"><use href="#i-more"/></svg></span></button>
+          </div>
+
+          <button class="project-row" type="button"><svg class="icon folder-icon" aria-hidden="true"><use href="#i-folder"/></svg><span>payment-orchestration-runtime</span><span class="row-action" aria-hidden="true"><svg class="icon icon-sm"><use href="#i-more"/></svg></span><span class="row-action" aria-hidden="true"><svg class="icon icon-sm"><use href="#i-plus"/></svg></span></button>
+          <div class="camp-list">
+            <button class="camp-row" type="button"><i class="camp-dot"></i><span>修复超长会话标题在侧栏中的截断与定位</span><span class="row-action" aria-hidden="true"><svg class="icon icon-sm"><use href="#i-more"/></svg></span></button>
+          </div>
+
+          <button class="project-row" type="button"><svg class="icon folder-icon" aria-hidden="true"><use href="#i-folder"/></svg><span>快速对话</span><span class="row-action" aria-hidden="true"><svg class="icon icon-sm"><use href="#i-more"/></svg></span><span></span></button>
+          <div class="camp-list">
+            <button class="camp-row" type="button"><i class="camp-dot"></i><span>审视当前界面</span><span class="row-action" aria-hidden="true"><svg class="icon icon-sm"><use href="#i-more"/></svg></span></button>
+          </div>
+        </div>
+
+        <p class="type-spec" id="typeSpec"><strong>拟采用</strong> · Project 12.5 / 560<br>Camp 12 / 400 · 选中 450</p>
+        <div class="sidebar-footer"><button class="nav-row" type="button"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg><span>设置</span></button></div>
+      </aside>
+
+      <header class="topbar">
+        <div class="breadcrumb"><span>rovai-ai</span><span aria-hidden="true">›</span><h1>可靠退出收口</h1></div>
+        <span class="day-badge">第 4 天</span>
+        <span class="topbar-note">演示数据 · 不写入 Core</span>
+      </header>
+
+      <main class="workspace">
+        <div class="timeline-scroll">
+          <div class="timeline-track">
+            <header class="record-header"><h2>公共记录</h2><span>Task 保持在创建位置</span></header>
+            <div class="day-separator">今天</div>
+
+            <article class="message">
+              <span class="avatar user">你</span>
+              <div class="message-body"><div class="message-meta"><strong>你</strong><time>09:40</time></div><p>把 Planned Shutdown 的验收交给洛可，重点确认未验证的外部效果不会被写成成功。</p></div>
+            </article>
+
+            <article class="task-anchor" aria-label="Task 实时卡创建位置">
+              <div class="task-anchor-label"><span>任务创建于 09:41 · 此位置不再新增状态事件</span><code id="anchorVersion">task_8f2a · v1</code></div>
+              <button class="task-live-card" id="taskCard" type="button" aria-label="打开任务：Planned Shutdown 验收" aria-describedby="taskStateNote">
+                <span class="task-glyph"><svg class="icon" aria-hidden="true"><use id="taskIconUse" href="#i-pending"/></svg></span>
+                <span class="task-card-content">
+                  <span class="task-state-line"><strong id="taskHeadline">任务责任已更新</strong><span class="task-status" id="taskStatus">待处理</span></span>
+                  <span class="task-title">Planned Shutdown 验收</span>
+                  <span class="task-meta">
+                    <span class="task-owner"><i class="owner-mark" id="ownerMark">洛</i><span id="taskOwner">负责人 · 洛可</span></span>
+                    <span>3 个验收条件</span>
+                    <time class="task-updated" id="taskUpdated">更新 09:41</time>
+                  </span>
+                  <span class="task-state-note" id="taskStateNote"><strong id="taskNoteLabel">当前</strong> · <span id="taskNote">等待负责人开始；创建不会自动启动 AgentRun</span></span>
+                </span>
+                <span class="task-open-icon"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-chevron"/></svg></span>
+              </button>
+              <div class="task-observer" aria-live="polite"><span id="liveAnnouncement">当前快照：待处理，负责人洛可</span><span class="terminal-note">终态不可再修改</span><code>同一 DOM · 原地更新</code></div>
+            </article>
+
+            <article class="message">
+              <span class="avatar">洛</span>
+              <div class="message-body"><div class="message-meta"><strong>洛可</strong><span>默认负责人</span><time>09:44</time></div><p>收到。我会按三项验收条件推进；执行证据仍留在 Agent 过程，Task 卡只表达责任当前态。</p></div>
+            </article>
+          </div>
+        </div>
+
+        <form class="composer" id="composerForm">
+          <div class="composer-box"><textarea aria-label="给默认负责人发消息" placeholder="继续提问、补充约束或交付下一项职责…"></textarea><button class="send-button" type="submit" disabled>发送</button></div>
+        </form>
+      </main>
+    </div>
+  </div>
+
+  <aside class="notes-panel" id="notesPanel" aria-label="设计说明" hidden>
+    <header><h2>本稿的两项决定</h2><button class="lab-button" id="closeNotesButton" type="button" aria-label="关闭说明"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-close"/></svg></button></header>
+    <div class="notes-body">
+      <p>状态栏按钮只切换 Read Side 快照，不代表允许从任意状态互相跳转。“播放”使用合法路径。</p>
+      <dl>
+        <div><dt>Project</dt><dd>12.5px / 560；保持目录锚点，但不压过当前 Camp。</dd></div>
+        <div><dt>Camp</dt><dd>12px / 400；选中仅到 450，主要依赖底色与 2px rail。</dd></div>
+        <div><dt>Task</dt><dd>五态共用同一张卡；阻塞、完成、取消分别显示其权威说明。</dd></div>
+        <div><dt>未分配</dt><dd>仍是 pending，仅作为合法恢复变体展示，不创造第六种状态。</dd></div>
+      </dl>
+    </div>
+  </aside>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <script>
+    (() => {
+      const states = {
+        pending: {
+          status: '待处理',
+          headline: '任务责任已更新',
+          icon: '#i-pending',
+          owner: '负责人 · 洛可',
+          ownerMark: '洛',
+          noteLabel: '当前',
+          note: '等待负责人开始；创建不会自动启动 AgentRun',
+          updated: '更新 09:41',
+          version: 'task_8f2a · v1',
+          announcement: '当前快照：待处理，负责人洛可'
+        },
+        unassigned: {
+          status: '待处理',
+          headline: '任务等待重新分配',
+          icon: '#i-unassigned',
+          owner: '负责人 · 未分配',
+          ownerMark: '—',
+          noteLabel: '需要处理',
+          note: '原负责人已离开；用户或默认负责人需要重新分配',
+          updated: '更新 10:04',
+          version: 'task_8f2a · v2',
+          announcement: '当前快照：待处理，负责人未分配'
+        },
+        in_progress: {
+          status: '进行中',
+          headline: '任务正在推进',
+          icon: '#i-progress',
+          owner: '负责人 · 洛可',
+          ownerMark: '洛',
+          noteLabel: '当前',
+          note: '洛可已开始推进；3 个验收条件保持原定义',
+          updated: '更新 10:12',
+          version: 'task_8f2a · v3',
+          announcement: '当前快照：进行中，负责人洛可'
+        },
+        blocked: {
+          status: '已阻塞',
+          headline: '任务暂时受阻',
+          icon: '#i-blocked',
+          owner: '负责人 · 洛可',
+          ownerMark: '洛',
+          noteLabel: '阻塞原因',
+          note: '等待 macOS 签名证书；责任仍由洛可持有',
+          updated: '更新 10:38',
+          version: 'task_8f2a · v4',
+          announcement: '当前快照：已阻塞，等待 macOS 签名证书'
+        },
+        completed: {
+          status: '已完成',
+          headline: '任务已经完成',
+          icon: '#i-completed',
+          owner: '负责人 · 洛可',
+          ownerMark: '洛',
+          noteLabel: '完成摘要',
+          note: '47 项测试通过，实机退出符合验收条件',
+          updated: '更新 11:06',
+          version: 'task_8f2a · v5',
+          announcement: '当前快照：已完成，47 项测试通过'
+        },
+        cancelled: {
+          status: '已取消',
+          headline: '任务已经取消',
+          icon: '#i-cancelled',
+          owner: '负责人 · 洛可',
+          ownerMark: '洛',
+          noteLabel: '取消原因',
+          note: '范围已合并到 v0.68 发布验收，不等同于执行失败',
+          updated: '更新 10:55',
+          version: 'task_8f2a · v5',
+          announcement: '当前快照：已取消，范围已合并到发布验收'
+        }
+      };
+
+      const body = document.body;
+      const taskCard = document.getElementById('taskCard');
+      const toast = document.getElementById('toast');
+      const navModeButton = document.getElementById('navModeButton');
+      const typeSpec = document.getElementById('typeSpec');
+      const notesPanel = document.getElementById('notesPanel');
+      const notesButton = document.getElementById('notesButton');
+      const themeButton = document.getElementById('themeButton');
+      let toastTimer = null;
+      let playTimers = [];
+
+      function showToast(message) {
+        window.clearTimeout(toastTimer);
+        toast.textContent = message;
+        toast.hidden = false;
+        toastTimer = window.setTimeout(() => { toast.hidden = true; }, 2400);
+      }
+
+      function clearPlayback() {
+        playTimers.forEach((timer) => window.clearTimeout(timer));
+        playTimers = [];
+        document.getElementById('playButton').disabled = false;
+      }
+
+      function setTaskState(key, animate = true) {
+        const state = states[key];
+        if (!state) return;
+        body.dataset.taskState = key;
+        document.querySelectorAll('[data-state]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.state === key)));
+        document.getElementById('taskHeadline').textContent = state.headline;
+        document.getElementById('taskStatus').textContent = state.status;
+        document.getElementById('taskIconUse').setAttribute('href', state.icon);
+        document.getElementById('taskOwner').textContent = state.owner;
+        document.getElementById('ownerMark').textContent = state.ownerMark;
+        document.getElementById('taskNoteLabel').textContent = state.noteLabel;
+        document.getElementById('taskNote').textContent = state.note;
+        document.getElementById('taskUpdated').textContent = state.updated;
+        document.getElementById('anchorVersion').textContent = state.version;
+        document.getElementById('liveAnnouncement').textContent = state.announcement;
+        if (animate) {
+          taskCard.classList.remove('is-changing');
+          window.requestAnimationFrame(() => taskCard.classList.add('is-changing'));
+          window.setTimeout(() => taskCard.classList.remove('is-changing'), 360);
+        }
+      }
+
+      document.querySelectorAll('[data-state]').forEach((button) => button.addEventListener('click', () => {
+        clearPlayback();
+        setTaskState(button.dataset.state);
+      }));
+
+      document.getElementById('playButton').addEventListener('click', () => {
+        clearPlayback();
+        const path = ['pending', 'in_progress', 'blocked', 'in_progress', 'completed'];
+        document.getElementById('playButton').disabled = true;
+        path.forEach((state, index) => {
+          playTimers.push(window.setTimeout(() => {
+            setTaskState(state, index !== 0);
+            if (index === path.length - 1) {
+              document.getElementById('playButton').disabled = false;
+              showToast('已播放合法路径：待处理 → 进行中 → 已阻塞 → 进行中 → 已完成');
+            }
+          }, index * 850));
+        });
+      });
+
+      navModeButton.addEventListener('click', () => {
+        const current = body.dataset.navMode === 'current';
+        body.dataset.navMode = current ? 'proposed' : 'current';
+        navModeButton.setAttribute('aria-pressed', String(!current));
+        navModeButton.textContent = current ? '对照当前字重' : '返回拟采用';
+        typeSpec.innerHTML = current
+          ? '<strong>拟采用</strong> · Project 12.5 / 560<br>Camp 12 / 400 · 选中 450'
+          : '<strong>当前对照</strong> · Project 13 / 500<br>Camp 13 / 400 · 选中 500';
+      });
+
+      themeButton.addEventListener('click', () => {
+        const night = body.dataset.theme === 'night';
+        body.dataset.theme = night ? 'day' : 'night';
+        themeButton.setAttribute('aria-pressed', String(!night));
+        document.getElementById('themeUse').setAttribute('href', night ? '#i-moon' : '#i-sun');
+        document.getElementById('themeLabel').textContent = night ? '夜间' : '白昼';
+      });
+
+      notesButton.addEventListener('click', () => {
+        const open = notesPanel.hidden;
+        notesPanel.hidden = !open;
+        notesButton.setAttribute('aria-expanded', String(open));
+      });
+      document.getElementById('closeNotesButton').addEventListener('click', () => {
+        notesPanel.hidden = true;
+        notesButton.setAttribute('aria-expanded', 'false');
+        notesButton.focus();
+      });
+
+      taskCard.addEventListener('click', () => showToast('生产界面中，此入口会定位右侧 Inspector 的同一 Task 详情'));
+      document.querySelectorAll('[data-toast]').forEach((button) => button.addEventListener('click', () => showToast(button.dataset.toast)));
+      document.getElementById('composerForm').addEventListener('submit', (event) => event.preventDefault());
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        if (!notesPanel.hidden) {
+          notesPanel.hidden = true;
+          notesButton.setAttribute('aria-expanded', 'false');
+          notesButton.focus();
+        } else {
+          clearPlayback();
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

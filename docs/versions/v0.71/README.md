@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.71
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -15,6 +15,8 @@ last_updated: 2026-08-13
 > 同一 current snapshot 的 durable AgentRun product fence、真实 Runtime 关闭/重启验收与完整门禁也已完成。
 >
 > 前置版本：[v0.70 User Attention 教学与十项 official Skill](../v0.70/README.md)
+>
+> 后续版本：[v0.72 Camp 沉浸世界地图会话视图](../v0.72/README.md)
 
 ## 版本目标
 

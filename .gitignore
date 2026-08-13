@@ -33,3 +33,7 @@ Desktop.ini
 # Local Impeccable state for the Renderer workspace
 /apps/desktop/.impeccable/config.local.json
 /apps/desktop/.impeccable/mocks/decision/
+
+# Local workspace caches and design-tool state
+/.pnpm-store/
+/.impeccable/

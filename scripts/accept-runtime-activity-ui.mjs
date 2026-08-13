@@ -17,6 +17,7 @@ const outputDir = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_OUTPUT_DIR
   ?? await mkdtemp(join(tmpdir(), 'rovai-runtime-activity-ui-captures-'))
 const recoveryBlockerOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_RECOVERY_BLOCKER_ONLY === '1'
 const conversationDropZoneOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DROP_ZONE_ONLY === '1'
+const worldMapOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_WORLD_MAP_ONLY === '1'
 const databasePath = join(dataDir, 'rovai.sqlite')
 const debugPort = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DEBUG_PORT
   ? Number(process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DEBUG_PORT)
@@ -27,6 +28,7 @@ const composerLayoutCampId = 'camp-composer-layout-v056'
 const composerLayoutCampTitle = 'v0.56 Composer 布局验收'
 const runArticleSelector = 'article.timeline-node.conversation-bubble.agent'
 const activeAgentId = 'agent_101'
+const worldMapVisibleRuntimeCount = 4
 const activeRunId = 'run-codex'
 const historicalRunId = 'run-codex-history'
 const recoveryBlockedAgentId = 'agent_103'
@@ -100,7 +102,18 @@ try {
   assert(renderedMessageCount === runtimes.length,
     `Expected ${runtimes.length} rendered Agent messages, found ${renderedMessageCount}: ${await evaluate(app.cdp, 'document.body.innerText.slice(0, 5000)')}`)
 
-  if (conversationDropZoneOnly) {
+  if (worldMapOnly) {
+    const worldMapAcceptance = await verifyCampWorldMap(app.cdp, outputDir)
+    console.log(JSON.stringify({
+      ok: true,
+      mode: 'controlled-camp-world-map-fixture',
+      app: basename(appPath),
+      fixtureRoot,
+      outputDir,
+      ...worldMapAcceptance
+    }, null, 2))
+  } else if (conversationDropZoneOnly) {
+    await selectCampConversationView(app.cdp, 'conversation')
     const dropZoneAcceptance = await verifyConversationDropZone(
       app.cdp,
       directoryAttachmentSource,
@@ -115,6 +128,7 @@ try {
       ...dropZoneAcceptance
     }, null, 2))
   } else if (recoveryBlockerOnly) {
+    await selectCampConversationView(app.cdp, 'conversation')
     const recoveryBlockerPresentation = await verifyRecoveryBlockerPresentation(app.cdp)
     const recoveryBlockerCapture = join(outputDir, 'runtime-activity-recovery-blocker.png')
     await capture(app.cdp, recoveryBlockerCapture)
@@ -127,6 +141,7 @@ try {
       recoveryBlockerCapture
     }, null, 2))
   } else {
+  await selectCampConversationView(app.cdp, 'conversation')
   const conversationPresentation = await collectConversationPresentation(app.cdp)
   assert(conversationPresentation.articleCount === runtimes.length
     && conversationPresentation.articleBackgrounds.length === 1
@@ -632,7 +647,7 @@ async function seedFixture() {
     ${sqlLiteral(`uuid-runtime-${entry.key}`)}, ${sqlLiteral(entry.agentId)},
     ${sqlLiteral(`runtime-${entry.key}`)}, ${sqlLiteral(`${entry.runtimeName} 验收`)},
     ${sqlLiteral(['#5B6C8F', '#4C7A78', '#6B668E', '#7A6756', '#5E7485', '#76627A', '#5C7960', '#786C59', '#596D7B'][index])},
-    1, '{}', ${sqlLiteral(now)}, ${sqlLiteral(now)}, '[]', 'present', 1,
+    1, '{}', ${sqlLiteral(now)}, ${sqlLiteral(now)}, '[]', ${sqlLiteral(worldMapOnly && index >= worldMapVisibleRuntimeCount ? 'away' : 'present')}, 1,
     ${sqlLiteral(`runtime_${entry.key}`)}, ${100 + index},
     ${sqlLiteral(entry.adapterKind)}, ${sqlLiteral(`installation-runtime-${entry.key}`)},
     '{"mode":"runtime_default"}',
@@ -856,7 +871,7 @@ async function seedFixture() {
       0, ${runtimes.length}, 0,
       3, '{"profileVersion":3,"maxPublicMessages":15,"maxPublicHistoryChars":24000,"maxMessageBodyChars":2000,"maxPublicReferenceChainMessages":3,"maxSelfActiveTasks":8}',
       'fixture-context-profile', NULL,
-      '[]', 13,
+      '[]', 14,
       ${sqlLiteral(recoveryBlob.id)}, ${sqlLiteral(recoveryBlob.digest)}, ${sqlLiteral(now)},
       '[]', '[]', '[]', 'fixture-shared-message-evidence', '[]'
     );
@@ -1844,7 +1859,7 @@ async function verifyExecutionDrawerResizeControl(cdp) {
   `Execution Drawer height did not survive close and reopen: ${JSON.stringify({ keyboardSized, reopened })}`)
 
   await focusExecutionDrawerResizeHandle(cdp)
-  await pressKey(cdp, 'Enter', 'Enter', 13)
+  await pressKey(cdp, ' ', 'Space', 32)
   await waitForExpression(cdp, `document.querySelector('.execution-drawer')?.dataset.userSized === 'false'
     && sessionStorage.getItem('rovai.execution-drawer-height.v1') === null`)
   await wait(100)
@@ -2000,6 +2015,328 @@ async function openCamp(cdp, id) {
     })`)
     throw new Error(`Camp ${id} did not open: ${JSON.stringify(state)}`, { cause: error })
   }
+}
+
+async function selectCampConversationView(cdp, view) {
+  const label = view === 'world' ? '地图' : '会话'
+  const clicked = await evaluate(cdp, `(() => {
+    const button = [...document.querySelectorAll('.camp-conversation-view-controls button')]
+      .find((candidate) => candidate.textContent?.trim() === ${JSON.stringify(label)})
+    button?.click()
+    return Boolean(button)
+  })()`)
+  assert(clicked, `Camp conversation view button was missing: ${label}`)
+  await waitForExpression(cdp, `(() => {
+    const button = [...document.querySelectorAll('.camp-conversation-view-controls button')]
+      .find((candidate) => candidate.textContent?.trim() === ${JSON.stringify(label)})
+    return button?.getAttribute('aria-pressed') === 'true'
+  })()`)
+}
+
+async function verifyCampWorldMap(cdp, capturesDirectory) {
+  await selectCampConversationView(cdp, 'world')
+  await waitForExpression(cdp,
+    `document.querySelector('.camp-world-map-panel:not([hidden]) .camp-world-map-image')?.complete === true`)
+  const focusedConversationButton = await evaluate(cdp, `(() => {
+    const button = [...document.querySelectorAll('.camp-conversation-view-controls button')]
+      .find((candidate) => candidate.textContent?.trim() === '会话')
+    button?.focus()
+    return document.activeElement === button
+  })()`)
+  assert(focusedConversationButton, 'Camp conversation view switch could not receive keyboard focus')
+  await pressKey(cdp, ' ', 'Space', 32)
+  await waitForExpression(cdp, `(() => {
+    const button = [...document.querySelectorAll('.camp-conversation-view-controls button')]
+      .find((candidate) => candidate.textContent?.trim() === '会话')
+    return button?.getAttribute('aria-pressed') === 'true'
+      && document.querySelector('.camp-world-map-panel')?.hasAttribute('hidden') === true
+  })()`)
+  const focusedWorldButton = await evaluate(cdp, `(() => {
+    const button = [...document.querySelectorAll('.camp-conversation-view-controls button')]
+      .find((candidate) => candidate.textContent?.trim() === '地图')
+    button?.focus()
+    return document.activeElement === button
+  })()`)
+  assert(focusedWorldButton, 'Camp world map view switch could not receive keyboard focus')
+  await selectCampConversationView(cdp, 'world')
+  const staticPresentation = await evaluate(cdp, `(() => {
+    const stage = document.querySelector('.camp-conversation-stage')
+    const map = document.querySelector('.camp-world-map')
+    const frame = document.querySelector('.camp-world-map-frame')
+    const controls = document.querySelector('.camp-conversation-view-controls')
+    const routeToggle = document.querySelector('.camp-world-map-route-toggle')
+    const image = document.querySelector('.camp-world-map-image')
+    const stageBounds = stage?.getBoundingClientRect()
+    const frameBounds = frame?.getBoundingClientRect()
+    const controlsBounds = controls?.getBoundingClientRect()
+    return {
+      agentCount: document.querySelectorAll('.camp-world-map-agent').length,
+      realSpeechCount: document.querySelectorAll('.camp-world-map-speech.is-real').length,
+      ambientSpeechCount: document.querySelectorAll('.camp-world-map-speech.is-ambient').length,
+      isStatic: map?.classList.contains('is-static') ?? false,
+      routesPressed: routeToggle?.getAttribute('aria-pressed') ?? null,
+      routeCount: document.querySelectorAll('.camp-world-map-route').length,
+      imageWidth: image?.naturalWidth ?? 0,
+      imageHeight: image?.naturalHeight ?? 0,
+      stageWidth: stageBounds?.width ?? 0,
+      stageHeight: stageBounds?.height ?? 0,
+      frameWidth: frameBounds?.width ?? 0,
+      frameHeight: frameBounds?.height ?? 0,
+      controlsWidth: controlsBounds?.width ?? 0,
+      controlsInsideStage: Boolean(stageBounds && controlsBounds
+        && controlsBounds.top >= stageBounds.top
+        && controlsBounds.right <= stageBounds.right + 1),
+      documentOverflow: document.documentElement.scrollWidth - innerWidth,
+      realSpeechText: document.querySelector('.camp-world-map-speech.is-real')?.textContent?.trim() ?? ''
+    }
+  })()`)
+  assert(staticPresentation.agentCount === worldMapVisibleRuntimeCount
+    && staticPresentation.realSpeechCount === 1
+    && staticPresentation.ambientSpeechCount === 0
+    && staticPresentation.isStatic
+    && staticPresentation.routesPressed === 'false'
+    && staticPresentation.routeCount === 15
+    && staticPresentation.imageWidth === 2560
+    && staticPresentation.imageHeight === 1440,
+  `Static world map did not preserve real members, output and the 2K asset: ${JSON.stringify(staticPresentation)}`)
+  assert(staticPresentation.stageWidth > 0
+    && staticPresentation.stageHeight > 0
+    && staticPresentation.frameWidth <= staticPresentation.stageWidth + 1
+    && staticPresentation.frameHeight <= staticPresentation.stageHeight + 1
+    && staticPresentation.controlsWidth <= 180
+    && staticPresentation.controlsInsideStage
+    && staticPresentation.documentOverflow <= 1,
+  `World map or floating controls escaped the conversation surface: ${JSON.stringify(staticPresentation)}`)
+  assert(staticPresentation.realSpeechText.includes('AgentRun · 真实执行')
+    && staticPresentation.realSpeechText.includes('读取 README.md'),
+  `World map did not use the real AgentRun activity summary: ${JSON.stringify(staticPresentation)}`)
+
+  const routeToggleClicked = await evaluate(cdp, `(() => {
+    const toggle = document.querySelector('.camp-world-map-route-toggle')
+    toggle?.click()
+    return Boolean(toggle)
+  })()`)
+  assert(routeToggleClicked, 'World map route toggle was not available')
+  await waitForExpression(cdp,
+    `document.querySelector('.camp-world-map-route-toggle')?.getAttribute('aria-pressed') === 'true'`)
+  const visibleRoutes = await evaluate(cdp, `(() => {
+    const routes = [...document.querySelectorAll('.camp-world-map-route')]
+    return routes.filter((route) => Number(getComputedStyle(route).opacity) > 0).length
+  })()`)
+  assert(visibleRoutes === 15, `Route toggle did not reveal all fixed routes: ${visibleRoutes}`)
+  const staticDayCapture = join(capturesDirectory, 'camp-world-map-static-day-1440x920.png')
+  await capture(cdp, staticDayCapture)
+
+  await cdp.send('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }]
+  })
+  await waitForExpression(cdp, `!document.querySelector('.camp-world-map')?.classList.contains('is-static')`)
+  await waitForExpression(cdp,
+    `Boolean(document.querySelector('.camp-world-map-speech.is-ambient'))`, 32_000)
+  const livePresentation = await evaluate(cdp, `(() => ({
+    ambientLabel: document.querySelector('.camp-world-map-speech.is-ambient .camp-world-map-speech-kind')?.textContent?.trim() ?? '',
+    realSpeechCount: document.querySelectorAll('.camp-world-map-speech.is-real').length,
+    activeRouteCount: document.querySelectorAll('.camp-world-map-route[data-active]').length
+  }))()`)
+  assert(livePresentation.ambientLabel === '闲时 · 环境预设'
+    && livePresentation.realSpeechCount === 1
+    && livePresentation.activeRouteCount > 0,
+  `Live world map did not distinguish preset idle speech from real output: ${JSON.stringify(livePresentation)}`)
+  const liveDayCapture = join(capturesDirectory, 'camp-world-map-live-day-1440x920.png')
+  await capture(cdp, liveDayCapture)
+
+  await setTheme(cdp, 'night')
+  const nightCapture = join(capturesDirectory, 'camp-world-map-live-night-1440x920.png')
+  await capture(cdp, nightCapture)
+
+  const opened = await evaluate(cdp, `(() => {
+    const trigger = document.querySelector('.camp-world-map-agent[data-mode="running"] .camp-world-map-agent-button')
+    trigger?.click()
+    return Boolean(trigger)
+  })()`)
+  assert(opened, 'The running map member did not expose the existing execution Drawer')
+  await waitForExpression(cdp, `Boolean(document.querySelector('.execution-drawer-resize-handle'))`)
+  await focusExecutionDrawerResizeHandle(cdp)
+  await pressKey(cdp, 'End', 'End', 35)
+  await waitForExpression(cdp, `(() => {
+    const handle = document.querySelector('.execution-drawer-resize-handle')
+    return handle?.getAttribute('aria-valuenow') === handle?.getAttribute('aria-valuemax')
+  })()`)
+  await waitForExpression(cdp, `(() => {
+    const stage = document.querySelector('.camp-conversation-stage')?.getBoundingClientRect()
+    const frame = document.querySelector('.camp-world-map-frame')?.getBoundingClientRect()
+    const density = document.querySelector('.camp-world-map')?.getAttribute('data-density')
+    return Boolean(stage && frame
+      && frame.height <= stage.height + 1
+      && ['compact', 'condensed'].includes(density))
+  })()`)
+  const compressedPresentation = await evaluate(cdp, `(() => {
+    const stage = document.querySelector('.camp-conversation-stage')?.getBoundingClientRect()
+    const frame = document.querySelector('.camp-world-map-frame')?.getBoundingClientRect()
+    const drawer = document.querySelector('.execution-drawer')?.getBoundingClientRect()
+    const controls = document.querySelector('.conversation-controls')?.getBoundingClientRect()
+    return {
+      stageHeight: stage?.height ?? 0,
+      frameHeight: frame?.height ?? 0,
+      density: document.querySelector('.camp-world-map')?.getAttribute('data-density') ?? null,
+      drawerBottom: drawer?.bottom ?? 0,
+      controlsTop: controls?.top ?? 0,
+      realSpeechText: document.querySelector('.camp-world-map-speech.is-real')?.textContent?.trim() ?? '',
+      liveCaptionText: document.querySelector('.camp-world-map-live-caption')?.textContent?.trim() ?? '',
+      documentOverflow: document.documentElement.scrollWidth - innerWidth
+    }
+  })()`)
+  assert(compressedPresentation.stageHeight >= 48
+    && compressedPresentation.frameHeight <= compressedPresentation.stageHeight + 1
+    && ['compact', 'condensed'].includes(compressedPresentation.density)
+    && compressedPresentation.drawerBottom <= compressedPresentation.controlsTop + 1
+    && compressedPresentation.realSpeechText.includes('AgentRun · 真实执行')
+    && compressedPresentation.liveCaptionText.includes('真实执行 · Codex CLI 验收')
+    && compressedPresentation.documentOverflow <= 1,
+  `Resizable execution Drawer broke the compressed world map: ${JSON.stringify(compressedPresentation)}`)
+  const compressedCapture = join(capturesDirectory, 'camp-world-map-compressed-night-1440x920.png')
+  await capture(cdp, compressedCapture)
+
+  await pressKey(cdp, 'Escape', 'Escape', 27, 53)
+  await waitForExpression(cdp, `!document.querySelector('.execution-drawer')`)
+  await setTheme(cdp, 'day')
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 2560, height: 1440, deviceScaleFactor: 1, mobile: false,
+    screenWidth: 2560, screenHeight: 1440
+  })
+  await waitForExpression(cdp, `innerWidth === 2560 && innerHeight === 1440`)
+  await waitForWorldMapFit(cdp)
+  const wideLayout = await collectCampWorldMapLayout(cdp)
+  assertCampWorldMapLayout(wideLayout, '2560×1440', worldMapVisibleRuntimeCount)
+  assert(wideLayout.frameWidth >= 1_700 && wideLayout.frameHeight >= 950,
+    `2K world map did not use the available conversation plane: ${JSON.stringify(wideLayout)}`)
+  const wideCapture = join(capturesDirectory, 'camp-world-map-day-2560x1440.png')
+  await capture(cdp, wideCapture)
+
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 1040, height: 700, deviceScaleFactor: 1, mobile: false,
+    screenWidth: 1040, screenHeight: 700
+  })
+  await waitForExpression(cdp, `innerWidth === 1040 && innerHeight === 700`)
+  await waitForWorldMapFit(cdp)
+  const compactLayout = await collectCampWorldMapLayout(cdp)
+  assertCampWorldMapLayout(compactLayout, '1040×700', worldMapVisibleRuntimeCount)
+  assert(['regular', 'compact', 'condensed'].includes(compactLayout.density),
+    `Compact world map density was not classified: ${JSON.stringify(compactLayout)}`)
+  const compactCapture = join(capturesDirectory, 'camp-world-map-day-1040x700.png')
+  await capture(cdp, compactCapture)
+
+  await evaluate(cdp, `(() => {
+    const toggle = document.querySelector('.topbar-inspector-toggle[aria-pressed="true"]')
+    toggle?.click()
+    return true
+  })()`)
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 520, height: 350, deviceScaleFactor: 2, mobile: false,
+    screenWidth: 1040, screenHeight: 700
+  })
+  await waitForExpression(cdp, `innerWidth === 520 && innerHeight === 350 && Math.abs(devicePixelRatio - 2) < 0.01`)
+  await waitForExpression(cdp, `document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed')`)
+  await waitForWorldMapFit(cdp)
+  const zoomLayout = await collectCampWorldMapLayout(cdp)
+  assertCampWorldMapLayout(zoomLayout, '200% zoom', worldMapVisibleRuntimeCount)
+  assert(zoomLayout.cssWidth === 520
+    && zoomLayout.cssHeight === 350
+    && zoomLayout.devicePixelRatio === 2,
+  `200% zoom world map used the wrong viewport: ${JSON.stringify(zoomLayout)}`)
+  const zoomCapture = join(capturesDirectory, 'camp-world-map-day-zoom-200.png')
+  await capture(cdp, zoomCapture)
+
+  await cdp.send('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-reduced-motion', value: 'reduce' }]
+  })
+  await waitForExpression(cdp, `document.querySelector('.camp-world-map')?.classList.contains('is-static') === true`)
+  const staticTextAfterMotionChange = await evaluate(cdp,
+    `document.querySelector('.camp-world-map-speech.is-real')?.textContent?.trim() ?? ''`)
+  assert(staticTextAfterMotionChange.includes('AgentRun · 真实执行'),
+    'Reduced motion removed the real execution text')
+
+  return {
+    verified: {
+      defaultWorldView: true,
+      keyboardViewSwitch: true,
+      supplied2kAsset: true,
+      realAgentRunSpeech: true,
+      labeledIdlePreset: true,
+      fixedRouteToggle: true,
+      reducedMotionKeepsRealText: true,
+      existingResizableExecutionDrawer: true,
+      compressedContainerLayout: compressedPresentation,
+      wideLayout,
+      compactLayout,
+      zoomLayout
+    },
+    captures: {
+      staticDay: staticDayCapture,
+      liveDay: liveDayCapture,
+      liveNight: nightCapture,
+      compressedNight: compressedCapture,
+      wideDay: wideCapture,
+      compactDay: compactCapture,
+      zoom200Day: zoomCapture
+    }
+  }
+}
+
+async function waitForWorldMapFit(cdp) {
+  await waitForExpression(cdp, `(() => {
+    const stage = document.querySelector('.camp-conversation-stage')?.getBoundingClientRect()
+    const frame = document.querySelector('.camp-world-map-frame')?.getBoundingClientRect()
+    return Boolean(stage && frame
+      && frame.width <= stage.width + 1
+      && frame.height <= stage.height + 1)
+  })()`)
+}
+
+async function collectCampWorldMapLayout(cdp) {
+  return evaluate(cdp, `(() => {
+    const stage = document.querySelector('.camp-conversation-stage')?.getBoundingClientRect()
+    const frame = document.querySelector('.camp-world-map-frame')?.getBoundingClientRect()
+    const controls = document.querySelector('.camp-conversation-view-controls')?.getBoundingClientRect()
+    return {
+      cssWidth: innerWidth,
+      cssHeight: innerHeight,
+      devicePixelRatio,
+      density: document.querySelector('.camp-world-map')?.getAttribute('data-density') ?? null,
+      stageWidth: stage?.width ?? 0,
+      stageHeight: stage?.height ?? 0,
+      frameWidth: frame?.width ?? 0,
+      frameHeight: frame?.height ?? 0,
+      frameInsideStage: Boolean(stage && frame
+        && frame.left >= stage.left - 1
+        && frame.right <= stage.right + 1
+        && frame.top >= stage.top - 1
+        && frame.bottom <= stage.bottom + 1),
+      controlsInsideStage: Boolean(stage && controls
+        && controls.left >= stage.left - 1
+        && controls.right <= stage.right + 1
+        && controls.top >= stage.top - 1
+        && controls.bottom <= stage.bottom + 1),
+      agentCount: document.querySelectorAll('.camp-world-map-agent').length,
+      realSpeechText: document.querySelector('.camp-world-map-speech.is-real')?.textContent?.trim() ?? '',
+      liveCaptionText: document.querySelector('.camp-world-map-live-caption')?.textContent?.trim() ?? '',
+      documentOverflow: document.documentElement.scrollWidth - innerWidth
+    }
+  })()`)
+}
+
+function assertCampWorldMapLayout(layout, label, expectedAgentCount) {
+  assert(layout.stageWidth > 0
+    && layout.stageHeight > 0
+    && layout.frameWidth > 0
+    && layout.frameHeight > 0
+    && layout.frameInsideStage
+    && layout.controlsInsideStage
+    && layout.agentCount === expectedAgentCount
+    && layout.realSpeechText.includes('AgentRun · 真实执行')
+    && (layout.density !== 'condensed' || layout.liveCaptionText.includes('真实执行 · Codex CLI 验收'))
+    && layout.documentOverflow <= 1,
+  `${label} world map escaped its conversation container or lost real output: ${JSON.stringify(layout)}`)
 }
 
 async function setTheme(cdp, preference) {

@@ -1,0 +1,887 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="day">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rovai AI · 2K 工作台交互稿</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #eceeef;
+      --surface: #fbfbfa;
+      --surface-raised: #ffffff;
+      --surface-subtle: #f0f2f4;
+      --surface-muted: #e7eaed;
+      --surface-selected: #e9ecee;
+      --surface-hover: #e8eaea;
+      --surface-sunken: #e4e8eb;
+      --home-surface: #ffffff;
+      --topbar: #fbfbfa;
+      --input: #ffffff;
+      --ink: #171b20;
+      --muted: #616a73;
+      --faint: #6e7382;
+      --line: #dfe4e8;
+      --line-strong: #c7cfd6;
+      --control-line: #8b9389;
+      --rail: #f3f4f4;
+      --rail-ink: #626b72;
+      --rail-line: #dadde0;
+      --brand: #526f88;
+      --brand-hover: #3d5874;
+      --brand-contrast: #ffffff;
+      --brand-soft: #e9eef3;
+      --brand-ink: #405f7e;
+      --success: #3e775c;
+      --success-soft: #e7f1ea;
+      --attention: #8a6226;
+      --attention-soft: #f8edda;
+      --danger: #a24c46;
+      --danger-soft: #f7e6e3;
+      --info: #416c86;
+      --info-soft: #e5eef3;
+      --neutral-soft: #ecefe9;
+      --focus: #526f88;
+      --identity-1: #a65f4a;
+      --identity-2: #39777a;
+      --identity-3: #74628f;
+      --identity-4: #9a6a32;
+      --evidence-canvas: #f4f6f3;
+      --evidence-surface: #ffffff;
+      --evidence-ink: #252a36;
+      --evidence-muted: #5f6678;
+      --evidence-line: #d5dad3;
+      --overlay: rgba(28, 32, 43, 0.42);
+      --shadow-float: 0 18px 56px rgba(38, 45, 58, 0.14);
+      --rail-width: 270px;
+      --prototype-scale: .5;
+      --prototype-width: 2560px;
+      --prototype-height: 1440px;
+      --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    :root[data-theme="night"] {
+      color-scheme: dark;
+      --canvas: #0d1114;
+      --surface: #151a1e;
+      --surface-raised: #1b2227;
+      --surface-subtle: #1a2024;
+      --surface-muted: #242d33;
+      --surface-selected: #222c33;
+      --surface-hover: #1d252b;
+      --surface-sunken: #10161a;
+      --home-surface: #181d21;
+      --topbar: #151a1e;
+      --input: #1b2227;
+      --ink: #e7ecef;
+      --muted: #abb5bc;
+      --faint: #919da6;
+      --line: #333e46;
+      --line-strong: #53616b;
+      --control-line: #687b88;
+      --rail: #11161a;
+      --rail-ink: #a6b1b8;
+      --rail-line: #313b43;
+      --brand: #7897ae;
+      --brand-hover: #b1c8d8;
+      --brand-contrast: #091116;
+      --brand-soft: #22303a;
+      --brand-ink: #c0d4e1;
+      --success: #82b695;
+      --success-soft: #1a2b22;
+      --attention: #d2ac70;
+      --attention-soft: #302719;
+      --danger: #d6857f;
+      --danger-soft: #321e1d;
+      --info: #83afc9;
+      --info-soft: #182832;
+      --neutral-soft: #242d33;
+      --focus: #8fb3cb;
+      --identity-1: #c98572;
+      --identity-2: #70b0ae;
+      --identity-3: #a89ac8;
+      --identity-4: #d0a46c;
+      --evidence-canvas: #12191d;
+      --evidence-surface: #171f24;
+      --evidence-ink: #dce4e9;
+      --evidence-muted: #9eabb3;
+      --evidence-line: #35424a;
+      --overlay: rgba(0, 0, 0, 0.58);
+      --shadow-float: 0 22px 64px rgba(0, 0, 0, 0.42);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; margin: 0; }
+    body {
+      color: var(--ink);
+      background: var(--canvas);
+      font: 400 13px/1.6 var(--font);
+      text-rendering: optimizeLegibility;
+    }
+    button, input, select, textarea { color: inherit; font: inherit; }
+    button { -webkit-tap-highlight-color: transparent; }
+    ::selection { color: var(--brand-contrast); background: var(--brand); }
+    :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+    [hidden] { display: none !important; }
+    code { font-family: var(--mono); font-size: .92em; }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 22px; line-height: 1.25; letter-spacing: -.02em; }
+    h2 { font-size: 15px; line-height: 1.35; }
+    h3 { font-size: 13px; line-height: 1.45; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+    .prototype-toolbar {
+      position: sticky;
+      z-index: 100;
+      top: 0;
+      display: flex;
+      min-height: 58px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 10px 18px;
+      border-bottom: 1px solid var(--line-strong);
+      color: var(--ink);
+      background: var(--surface-raised);
+    }
+    .prototype-toolbar-copy { display: grid; gap: 1px; min-width: 190px; }
+    .prototype-toolbar-copy strong { font-size: 13px; font-weight: 700; }
+    .prototype-toolbar-copy small { color: var(--muted); font-size: 10.5px; }
+    .prototype-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+    .segmented { display: inline-flex; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-subtle); }
+    .segmented button { min-height: 29px; padding: 4px 9px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; font-size: 11px; }
+    .segmented button[aria-pressed="true"] { color: var(--ink); background: var(--surface-raised); box-shadow: 0 1px 3px color-mix(in srgb, var(--ink) 12%, transparent); }
+    .prototype-page-select { min-height: 33px; padding: 5px 30px 5px 9px; border: 1px solid var(--control-line); border-radius: 6px; color: var(--ink); background: var(--input); }
+    .prototype-boundary { color: var(--muted); font: 500 10.5px/1.4 var(--mono); }
+
+    .viewport-stage { width: 100%; padding: 24px; overflow: auto; }
+    .viewport-shell {
+      position: relative;
+      width: calc(var(--prototype-width) * var(--prototype-scale));
+      height: calc(var(--prototype-height) * var(--prototype-scale));
+      margin: 0 auto;
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: 12px;
+      background: var(--canvas);
+      box-shadow: 0 22px 70px color-mix(in srgb, var(--ink) 14%, transparent);
+    }
+    .product-window {
+      position: relative;
+      width: var(--prototype-width);
+      height: var(--prototype-height);
+      overflow: hidden;
+      transform: scale(var(--prototype-scale));
+      transform-origin: top left;
+      background: var(--canvas);
+    }
+    .app-shell { display: grid; width: 100%; height: 100%; grid-template-columns: var(--rail-width) minmax(0, 1fr); }
+
+    /* Electron supplies these controls natively; the HTML prototype mirrors the
+       production x:12 / y:14 placement so the rail keeps the real macOS inset. */
+    .mac-window-controls {
+      position: absolute;
+      z-index: 90;
+      top: 10px;
+      left: 8px;
+      display: flex;
+      -webkit-app-region: no-drag;
+    }
+    .mac-window-control {
+      position: relative;
+      display: grid;
+      width: 20px;
+      height: 20px;
+      padding: 0;
+      place-items: center;
+      border: 0;
+      color: rgba(35, 20, 18, .72);
+      background: transparent;
+      cursor: default;
+    }
+    .mac-window-control::before {
+      position: absolute;
+      width: 12px;
+      height: 12px;
+      border: 1px solid rgba(0, 0, 0, .16);
+      border-radius: 50%;
+      background: var(--mac-control-fill);
+      content: "";
+    }
+    .mac-window-control span {
+      z-index: 1;
+      opacity: 0;
+      font: 800 9px/1 var(--font);
+      transition: opacity 120ms ease;
+    }
+    .mac-window-controls:hover .mac-window-control span,
+    .mac-window-control:focus-visible span { opacity: 1; }
+    .mac-window-control.close { --mac-control-fill: #ff5f57; }
+    .mac-window-control.minimize { --mac-control-fill: #febc2e; }
+    .mac-window-control.zoom { --mac-control-fill: #28c840; }
+
+    .app-rail { display: flex; min-width: 0; flex-direction: column; overflow: hidden; border-right: 1px solid var(--rail-line); background: var(--rail); }
+    .rail-drag-strip { flex: 0 0 38px; -webkit-app-region: drag; }
+    .brand-row { display: flex; min-height: 52px; align-items: center; gap: 10px; padding: 0 18px 14px; color: var(--ink); }
+    .brand-star { display: grid; width: 22px; height: 22px; place-items: center; color: var(--brand); }
+    .brand-star svg { width: 18px; height: 18px; }
+    .brand-row strong { font-size: 14px; }
+    .notification-button, .icon-button { display: grid; min-width: 30px; min-height: 30px; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; }
+    .notification-button { margin-left: auto; }
+    .rail-nav { display: grid; gap: 3px; padding: 8px; }
+    .rail-button { position: relative; display: flex; min-height: 36px; align-items: center; gap: 10px; padding: 7px 10px; border: 0; border-radius: 6px; color: var(--rail-ink); background: transparent; cursor: pointer; text-align: left; }
+    .rail-button:hover { background: var(--surface-hover); }
+    .rail-button.active { color: var(--ink); background: var(--surface-selected); }
+    .rail-button.active::before { position: absolute; top: 7px; bottom: 7px; left: 0; width: 2px; background: var(--brand); content: ""; }
+    .rail-icon { display: grid; width: 17px; flex: 0 0 17px; place-items: center; color: var(--brand); }
+    .rail-divider { height: 1px; margin: 9px 16px; background: var(--rail-line); }
+    .rail-section { display: grid; gap: 5px; padding: 8px 12px; }
+    .rail-section-label { padding: 0 5px; color: var(--faint); font-size: 10.5px; font-weight: 700; letter-spacing: .04em; }
+    .rail-camp { position: relative; display: grid; width: 100%; min-height: 38px; grid-template-columns: 12px minmax(0,1fr); align-items: center; gap: 7px; padding: 6px 7px; border: 0; border-radius: 6px; color: var(--rail-ink); background: transparent; cursor: pointer; text-align: left; }
+    .rail-camp:hover { background: var(--surface-hover); }
+    .rail-camp strong { overflow: hidden; font-size: 11.5px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+    .rail-camp small { display: block; color: var(--faint); font-size: 9.5px; }
+    .rail-marker { width: 6px; height: 6px; border-radius: 50%; background: var(--info); }
+    .rail-spacer { flex: 1; }
+    .rail-footer { padding: 10px 8px 14px; border-top: 1px solid var(--rail-line); }
+
+    .settings-rail .rail-nav { padding-top: 4px; }
+    .settings-back { margin: 8px; border-bottom: 1px solid var(--rail-line); padding-bottom: 10px; }
+    .settings-group { display: grid; gap: 3px; padding: 9px 8px 0; }
+    .settings-group > span { padding: 0 10px 4px; color: var(--faint); font-size: 9.5px; font-weight: 700; letter-spacing: .08em; }
+
+    .main-surface { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: var(--surface); }
+    .page { width: 100%; height: 100%; min-width: 0; overflow: hidden; }
+    .page-scroll { width: 100%; height: 100%; overflow: auto; scrollbar-color: var(--line-strong) transparent; }
+    .page-scroll::-webkit-scrollbar { width: 10px; }
+    .page-scroll::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 10px; background: var(--line-strong); background-clip: padding-box; }
+    .page-inner { width: min(1600px, calc(100% - 96px)); margin: 0 auto; padding: 48px 0 64px; }
+    .page-header { display: flex; min-height: 84px; align-items: flex-start; justify-content: space-between; gap: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--line-strong); }
+    .page-header-copy { display: grid; max-width: 720px; gap: 6px; }
+    .page-kicker { color: var(--brand); font: 700 10.5px/1.3 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+    .page-header p { color: var(--muted); font-size: 12.5px; }
+    .page-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+    .primary-button, .quiet-button, .danger-button { display: inline-flex; min-height: 32px; align-items: center; justify-content: center; gap: 7px; padding: 5px 11px; border-radius: 6px; cursor: pointer; font-size: 11.5px; font-weight: 650; }
+    .primary-button { border: 1px solid var(--brand); color: var(--brand-contrast); background: var(--brand); }
+    .primary-button:hover { background: var(--brand-hover); }
+    .quiet-button { border: 1px solid var(--control-line); color: var(--ink); background: var(--surface-raised); }
+    .quiet-button:hover { background: var(--surface-hover); }
+    .danger-button { border: 1px solid var(--danger); color: var(--danger); background: var(--danger-soft); }
+    .compact { min-height: 28px; padding: 3px 8px; font-size: 10.5px; }
+    button:disabled { cursor: not-allowed; opacity: .55; }
+
+    .quick-page { background: var(--home-surface); }
+    .quick-layout { display: grid; width: min(1240px, calc(100% - 128px)); height: 100%; margin: 0 auto; grid-template-columns: 420px minmax(0, 1fr); align-items: center; gap: 72px; }
+    .quick-action { display: grid; align-content: center; justify-items: start; }
+    .quick-mark { width: 96px; height: 66px; margin-bottom: 20px; color: var(--brand); }
+    .quick-mark .sun { fill: var(--attention); }
+    .quick-label { margin-bottom: 8px; color: var(--brand); font: 700 10.5px/1.3 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+    .quick-action h1 { margin-bottom: 10px; }
+    .quick-action p { max-width: 410px; color: var(--muted); font-size: 12.5px; }
+    .quick-action .primary-button { margin-top: 24px; }
+    .recent-pane { padding-left: 48px; border-left: 1px solid var(--line-strong); }
+    .recent-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 12px; color: var(--faint); font-size: 10.5px; font-weight: 700; letter-spacing: .04em; }
+    .recent-list { border-top: 1px solid var(--line); }
+    .recent-row { display: grid; width: 100%; min-height: 52px; grid-template-columns: 12px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px; border: 0; border-bottom: 1px solid var(--line); color: var(--ink); background: transparent; cursor: pointer; text-align: left; }
+    .recent-row:hover { background: var(--surface-hover); }
+    .recent-row strong { overflow: hidden; font-size: 12.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+    .recent-row small { color: var(--faint); font: 500 10px/1.4 var(--mono); }
+    .recent-state { display: grid; width: 8px; height: 8px; place-items: center; }
+    .recent-state.unread { border-radius: 50%; background: var(--info); }
+    .recent-state.running { border: 1.5px solid var(--info); border-top-color: transparent; border-radius: 50%; animation: spin .9s linear infinite; }
+
+    .summary-strip { display: grid; margin-top: 18px; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .summary-strip > div { display: flex; min-height: 56px; align-items: baseline; gap: 8px; padding: 14px 16px; border-right: 1px solid var(--line); }
+    .summary-strip > div:last-child { border-right: 0; }
+    .summary-strip strong { font: 700 17px/1 var(--mono); }
+    .summary-strip span { color: var(--muted); font-size: 10.5px; }
+    .summary-strip .attention strong { color: var(--attention); }
+    .attention-banner { display: flex; width: 100%; min-height: 50px; align-items: center; justify-content: space-between; gap: 20px; margin-top: 14px; padding: 9px 14px; border: 1px solid color-mix(in srgb, var(--attention) 45%, var(--line)); border-radius: 8px; color: var(--ink); background: var(--attention-soft); cursor: pointer; text-align: left; }
+    .attention-banner span { display: grid; }
+    .attention-banner small { color: var(--muted); }
+    .attention-banner b { flex: 0 0 auto; color: var(--attention); }
+    .tabs { display: flex; min-height: 42px; align-items: flex-end; gap: 18px; border-bottom: 1px solid var(--line); }
+    .tabs button { position: relative; min-height: 38px; padding: 7px 2px; border: 0; color: var(--muted); background: transparent; cursor: pointer; font-size: 11px; font-weight: 650; }
+    .tabs button.active { color: var(--brand-ink); }
+    .tabs button.active::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: var(--brand); content: ""; }
+    .memory-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; }
+    .filter-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+    .filter-tabs button { min-height: 29px; padding: 4px 9px; border: 1px solid transparent; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; font-size: 10.5px; }
+    .filter-tabs button.active { border-color: var(--line-strong); color: var(--ink); background: var(--surface-muted); }
+    .search-input { width: min(360px, 40%); min-height: 32px; padding: 6px 10px; border: 1px solid var(--control-line); border-radius: 6px; color: var(--ink); background: var(--input); }
+    .capacity-strip { display: flex; gap: 10px; padding: 8px 0 12px; border-bottom: 1px solid var(--line); color: var(--muted); }
+    .capacity-strip span { display: flex; align-items: baseline; gap: 5px; padding-right: 12px; border-right: 1px solid var(--line); }
+    .capacity-strip strong { color: var(--ink); font: 650 10.5px/1.4 var(--mono); }
+    .capacity-strip small { font-size: 9.5px; }
+    .memory-workbench { display: grid; min-height: 680px; margin-top: 18px; grid-template-columns: 440px minmax(0, 1fr); overflow: hidden; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); }
+    .memory-list-pane { min-width: 0; border-right: 1px solid var(--line-strong); background: var(--surface-subtle); }
+    .pane-heading { display: flex; min-height: 42px; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+    .pane-heading strong { font-size: 11px; }
+    .pane-heading span { color: var(--faint); font: 500 9.5px/1.4 var(--mono); }
+    .memory-list { max-height: 760px; overflow: auto; }
+    .memory-row { position: relative; display: grid; width: 100%; gap: 6px; padding: 13px 14px; border: 0; border-bottom: 1px solid var(--line); color: var(--ink); background: transparent; cursor: pointer; text-align: left; }
+    .memory-row:hover { background: var(--surface-hover); }
+    .memory-row.selected { background: var(--brand-soft); }
+    .memory-row.selected::before { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; background: var(--brand); content: ""; }
+    .memory-row strong { display: -webkit-box; overflow: hidden; font-size: 11.5px; font-weight: 600; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+    .memory-row small { overflow: hidden; color: var(--muted); font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .badges { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+    .badge { display: inline-flex; min-height: 19px; align-items: center; gap: 4px; padding: 1px 6px; border-radius: 999px; color: var(--muted); background: var(--neutral-soft); font-size: 8.5px; font-weight: 700; }
+    .badge.kind { color: var(--brand-ink); background: var(--brand-soft); }
+    .badge.agent { color: var(--success); background: var(--success-soft); }
+    .badge.review { color: var(--attention); background: var(--attention-soft); }
+    .badge.success { color: var(--success); background: var(--success-soft); }
+    .badge.unknown { color: var(--muted); background: var(--neutral-soft); }
+    .memory-detail { min-width: 0; max-height: 804px; overflow: auto; background: var(--surface-raised); }
+    .memory-detail-header { padding: 24px 28px 20px; border-bottom: 1px solid var(--line); }
+    .memory-detail-header h2 { max-width: 760px; margin-top: 10px; font-size: 17px; line-height: 1.55; }
+    .memory-detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; }
+    .memory-detail-main { display: grid; align-content: start; gap: 0; padding: 0 28px 32px; }
+    .memory-detail-side { padding: 0 18px 28px; border-left: 1px solid var(--line); background: var(--surface-subtle); }
+    .detail-section { padding: 20px 0; border-bottom: 1px solid var(--line); }
+    .detail-section:last-child { border-bottom: 0; }
+    .detail-section > h3 { margin-bottom: 10px; }
+    .detail-section > p { max-width: 72ch; color: var(--muted); }
+    .people-row { display: flex; flex-wrap: wrap; gap: 7px; }
+    .person-token { display: inline-flex; min-height: 28px; align-items: center; gap: 6px; padding: 3px 8px 3px 4px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-raised); font-size: 10px; }
+    .avatar { display: grid; width: 25px; height: 25px; place-items: center; flex: 0 0 25px; border: 1px solid color-mix(in srgb, currentColor 38%, var(--line)); border-radius: 50%; color: var(--identity-1); background: color-mix(in srgb, currentColor 10%, var(--surface-raised)); font-size: 9px; font-weight: 750; }
+    .avatar.two { color: var(--identity-2); }
+    .avatar.three { color: var(--identity-3); }
+    .revision { border-top: 1px solid var(--evidence-line); color: var(--evidence-ink); background: var(--evidence-canvas); }
+    .revision:first-of-type { border-top: 0; }
+    .revision summary { display: grid; min-height: 48px; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 8px 12px; cursor: pointer; }
+    .revision summary span { display: grid; }
+    .revision summary small { color: var(--evidence-muted); font: 500 9.5px/1.4 var(--mono); }
+    .revision-body { padding: 0 12px 13px; color: var(--evidence-muted); font-size: 10.5px; }
+    .detail-facts { display: grid; gap: 0; }
+    .detail-facts > div { display: grid; gap: 3px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+    .detail-facts dt { color: var(--faint); font-size: 9.5px; }
+    .detail-facts dd { margin: 0; color: var(--ink); font-size: 10.5px; }
+    .governance-actions { display: grid; gap: 7px; padding-top: 16px; }
+
+    .members-shell { display: grid; height: 100%; grid-template-columns: 286px minmax(0,1fr); background: var(--surface); }
+    .member-roster { min-width: 0; overflow: auto; border-right: 1px solid var(--line-strong); background: var(--surface-subtle); }
+    .member-roster-header { display: flex; min-height: 58px; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+    .member-roster-header span { color: var(--faint); font: 500 10px/1.4 var(--mono); }
+    .member-roster-group { padding: 12px 8px 4px; color: var(--faint); font-size: 9.5px; font-weight: 700; letter-spacing: .06em; }
+    .member-row { position: relative; display: grid; width: 100%; min-height: 54px; grid-template-columns: 34px minmax(0,1fr) auto; align-items: center; gap: 8px; padding: 7px 10px; border: 0; color: var(--ink); background: transparent; cursor: pointer; text-align: left; }
+    .member-row:hover { background: var(--surface-hover); }
+    .member-row.selected { background: var(--brand-soft); }
+    .member-row.selected::before { position: absolute; top: 7px; bottom: 7px; left: 0; width: 2px; background: var(--brand); content: ""; }
+    .member-row .avatar { width: 32px; height: 32px; }
+    .member-row span { min-width: 0; }
+    .member-row strong, .member-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .member-row strong { font-size: 11.5px; }
+    .member-row small { color: var(--muted); font-size: 9.5px; }
+    .presence-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+    .presence-dot.away { background: var(--attention); }
+    .member-detail-scroll { height: 100%; overflow: auto; }
+    .member-detail-page { width: min(1280px, calc(100% - 128px)); margin: 0; padding: 46px 0 64px 64px; }
+    .member-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 28px; padding-bottom: 20px; border-bottom: 1px solid var(--line-strong); }
+    .member-title { display: grid; grid-template-columns: 52px minmax(0,1fr); gap: 14px; }
+    .member-title .avatar { width: 50px; height: 50px; font-size: 14px; }
+    .member-title-copy { display: grid; gap: 3px; }
+    .member-title-copy > small { color: var(--brand); font: 700 9.5px/1.3 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+    .member-title-copy h1 { font-size: 20px; }
+    .member-title-copy p { color: var(--muted); font-size: 11px; }
+    .member-statuses { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+    .member-statuses button.badge { min-height: 28px; cursor: pointer; }
+    .member-header-actions { display: flex; gap: 7px; }
+    .member-tabs { margin-top: 10px; }
+    .identity-layout { display: grid; margin-top: 24px; grid-template-columns: minmax(0, 1fr) 280px; align-items: start; gap: 32px; }
+    .identity-fields { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); border-top: 1px solid var(--line); border-left: 1px solid var(--line); }
+    .identity-field { min-height: 154px; padding: 18px 20px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .identity-field span { display: block; margin-bottom: 8px; color: var(--faint); font-size: 9.5px; font-weight: 700; }
+    .identity-field p { max-width: 50ch; font-size: 12px; line-height: 1.7; }
+    .trait-list { display: flex; flex-wrap: wrap; gap: 6px; }
+    .trait-list i { padding: 3px 7px; border-radius: 999px; color: var(--brand-ink); background: var(--brand-soft); font-style: normal; font-size: 9.5px; }
+    .portrait { position: relative; aspect-ratio: 4 / 5; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--brand-soft); }
+    .portrait-scene { position: absolute; inset: 0; display: grid; place-items: center; }
+    .portrait-scene img { display: block; width: 100%; height: 100%; object-fit: cover; }
+    .portrait-caption { position: absolute; right: 9px; bottom: 9px; left: 9px; display: flex; min-height: 32px; align-items: center; justify-content: center; border: 1px solid color-mix(in srgb, var(--surface-raised) 72%, var(--line)); border-radius: 6px; color: var(--ink); background: color-mix(in srgb, var(--surface-raised) 88%, transparent); font-size: 9.5px; font-weight: 650; }
+    .runtime-member-panel { max-width: 980px; padding-top: 24px; }
+    .runtime-intro { max-width: 74ch; margin-bottom: 20px; color: var(--muted); }
+    .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 16px; }
+    .field { display: grid; gap: 6px; }
+    .field label { color: var(--muted); font-size: 10px; font-weight: 650; }
+    .field select { min-height: 36px; padding: 6px 9px; border: 1px solid var(--control-line); border-radius: 6px; background: var(--input); }
+    .runtime-parameters { margin-top: 18px; border-top: 1px solid var(--line-strong); }
+    .runtime-parameters summary { padding: 14px 0; cursor: pointer; font-weight: 650; }
+
+    .settings-page .page-inner { width: min(1560px, calc(100% - 96px)); }
+    .settings-description { max-width: 680px; }
+    .section-block { padding: 22px 0 0; }
+    .section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; padding-bottom: 10px; border-bottom: 1px solid var(--line-strong); }
+    .section-heading p { margin-top: 4px; color: var(--muted); font-size: 11px; }
+    .prototype-snapshot-note { display: inline-flex; min-height: 25px; align-items: center; padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--surface-subtle); font: 500 9.5px/1.4 var(--mono); }
+    .runtime-catalog { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 32px; }
+    .runtime-column { border-top: 1px solid var(--line); }
+    .runtime-product-row { display: grid; min-height: 122px; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 22px; padding: 15px 4px; border-bottom: 1px solid var(--line); }
+    .runtime-product-copy { display: grid; min-width: 0; gap: 4px; }
+    .runtime-product-title { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+    .runtime-product-title strong { font-size: 12px; }
+    .runtime-product-copy > span { color: var(--muted); font-size: 10.5px; }
+    .runtime-product-copy > small { color: var(--faint); font-size: 9.5px; }
+    .self-check { color: var(--evidence-muted); font: 500 9.5px/1.5 var(--mono); }
+    .runtime-product-actions { display: flex; flex-direction: column; gap: 6px; }
+    .advanced-disclosure { margin-top: 18px; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); }
+    .advanced-disclosure > summary { padding: 15px 2px; cursor: pointer; font-weight: 650; }
+    .advanced-content { display: grid; gap: 10px; padding: 0 2px 18px; color: var(--muted); }
+    .evidence-row { display: grid; grid-template-columns: 180px minmax(0,1fr) auto; gap: 14px; padding: 11px 12px; border-top: 1px solid var(--evidence-line); color: var(--evidence-ink); background: var(--evidence-canvas); }
+    .evidence-row:first-of-type { border-top: 0; }
+    .evidence-row code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .privacy-note { display: flex; align-items: flex-start; gap: 9px; margin-top: 18px; padding: 11px 13px; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); color: var(--muted); background: var(--surface-subtle); font-size: 10.5px; }
+    .privacy-note strong { color: var(--ink); }
+    .diagnostics-summary { display: grid; margin-top: 18px; grid-template-columns: minmax(0,1fr) 450px; align-items: center; gap: 28px; padding: 18px 0; border-bottom: 1px solid var(--line-strong); }
+    .diagnostics-summary-copy { display: grid; grid-template-columns: 42px minmax(0,1fr); align-items: center; gap: 12px; }
+    .summary-mark { display: grid; width: 38px; height: 38px; place-items: center; border: 1px solid var(--attention); border-radius: 50%; color: var(--attention); background: var(--attention-soft); font-weight: 800; }
+    .diagnostics-summary-copy span { color: var(--faint); font-size: 9.5px; }
+    .diagnostics-summary-copy h2 { margin: 2px 0 3px; font-size: 16px; }
+    .diagnostics-summary-copy p { color: var(--muted); font-size: 10.5px; }
+    .diagnostic-counts { display: grid; grid-template-columns: repeat(3, 1fr); border-left: 1px solid var(--line); }
+    .diagnostic-counts > div { display: grid; gap: 2px; padding: 8px 14px; border-right: 1px solid var(--line); }
+    .diagnostic-counts dt { color: var(--muted); font-size: 9.5px; }
+    .diagnostic-counts dd { margin: 0; font: 700 18px/1.2 var(--mono); }
+    .diagnostics-columns { display: grid; margin-top: 22px; grid-template-columns: 480px minmax(0,1fr); align-items: start; gap: 32px; }
+    .issues-pane, .results-pane { min-width: 0; }
+    .issue-list, .result-list { border-top: 1px solid var(--line); }
+    .issue-row { display: grid; grid-template-columns: 26px minmax(0,1fr); gap: 10px; padding: 14px 4px; border-bottom: 1px solid var(--line); }
+    .issue-mark { display: grid; width: 24px; height: 24px; place-items: center; border-radius: 50%; color: var(--attention); background: var(--attention-soft); font-weight: 800; }
+    .issue-copy { display: grid; gap: 4px; }
+    .issue-copy p, .issue-copy small { color: var(--muted); font-size: 10px; }
+    .issue-copy .quiet-button, .issue-copy .primary-button { justify-self: start; margin-top: 5px; }
+    .results-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; }
+    .results-toolbar > span { color: var(--faint); font: 500 9.5px/1.4 var(--mono); }
+    .result-group-heading { display: flex; min-height: 34px; align-items: center; justify-content: space-between; padding: 7px 8px; border-bottom: 1px solid var(--line-strong); background: var(--surface-subtle); }
+    .result-group-heading strong { font-size: 10.5px; }
+    .result-group-heading span { color: var(--faint); font-size: 9px; }
+    .result-row { display: grid; min-height: 55px; grid-template-columns: 24px 180px minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 8px; border-bottom: 1px solid var(--line); }
+    .result-status { display: grid; width: 20px; height: 20px; place-items: center; border-radius: 50%; font-size: 10px; font-weight: 800; }
+    .result-status.ok { color: var(--success); background: var(--success-soft); }
+    .result-status.attention { color: var(--attention); background: var(--attention-soft); }
+    .result-status.unknown { color: var(--muted); background: var(--neutral-soft); }
+    .result-name { display: grid; }
+    .result-name strong { font-size: 10.5px; }
+    .result-name small, .result-detail { color: var(--muted); font-size: 9.5px; }
+    .result-details { grid-column: 2 / -1; width: 100%; }
+    .result-details summary { cursor: pointer; color: var(--brand-ink); font-size: 9.5px; }
+    .result-details dl { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); margin: 8px 0 0; border-top: 1px solid var(--evidence-line); background: var(--evidence-canvas); }
+    .result-details dl > div { display: grid; gap: 3px; padding: 8px 10px; border-right: 1px solid var(--evidence-line); border-bottom: 1px solid var(--evidence-line); }
+    .result-details dt { color: var(--evidence-muted); font-size: 8.5px; }
+    .result-details dd { margin: 0; color: var(--evidence-ink); font: 500 9px/1.45 var(--mono); }
+    .running-banner { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface-subtle); }
+    .spinner { width: 14px; height: 14px; border: 2px solid var(--line-strong); border-top-color: var(--brand); border-radius: 50%; animation: spin .8s linear infinite; }
+    .running-banner div { display: grid; }
+    .running-banner small { color: var(--muted); }
+    .left-actions { justify-content: flex-start; margin-top: 18px; }
+    .empty-results { padding: 18px 8px; color: var(--muted); }
+
+    .drawer-overlay, .dialog-overlay { position: absolute; z-index: 40; inset: 0; background: var(--overlay); }
+    .proposal-drawer { position: absolute; z-index: 41; top: 0; right: 0; bottom: 0; width: 560px; display: flex; flex-direction: column; border-left: 1px solid var(--line-strong); background: var(--surface-raised); box-shadow: var(--shadow-float); }
+    .drawer-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 22px 20px 17px; border-top: 3px solid var(--attention); border-bottom: 1px solid var(--line); }
+    .drawer-header div { display: grid; gap: 4px; }
+    .drawer-header p { color: var(--muted); font-size: 10.5px; }
+    .drawer-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+    .drawer-toolbar label { display: flex; align-items: center; gap: 6px; }
+    .proposal-list { flex: 1; overflow: auto; }
+    .proposal-item { display: grid; grid-template-columns: 24px minmax(0,1fr); gap: 9px; padding: 15px; border-bottom: 1px solid var(--line); }
+    .proposal-copy { display: grid; gap: 8px; }
+    .proposal-copy p { font-size: 11.5px; }
+    .proposal-copy small { color: var(--muted); font-size: 9.5px; }
+    .proposal-actions { display: flex; justify-content: flex-end; gap: 6px; }
+    .dialog { position: absolute; z-index: 51; top: 50%; left: 50%; width: min(480px, calc(100% - 72px)); padding: 22px; border: 1px solid var(--line-strong); border-top: 3px solid var(--danger); border-radius: 12px; background: var(--surface-raised); box-shadow: var(--shadow-float); transform: translate(-50%, -50%); }
+    .dialog h2 { margin-bottom: 8px; }
+    .dialog p { color: var(--muted); }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+    .toast { position: absolute; z-index: 70; right: 22px; bottom: 22px; max-width: 380px; padding: 10px 13px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow-float); }
+    .toast strong { display: block; font-size: 11px; }
+    .toast small { color: var(--muted); font-size: 9.5px; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; } }
+    .viewport-shell[data-viewport="1440"] .page-inner { width: min(980px, calc(100% - 64px)); padding-top: 34px; }
+    .viewport-shell[data-viewport="1440"] .quick-layout { width: min(680px, calc(100% - 72px)); grid-template-columns: 1fr; align-content: center; gap: 28px; }
+    .viewport-shell[data-viewport="1440"] .quick-action { justify-items: center; text-align: center; }
+    .viewport-shell[data-viewport="1440"] .recent-pane { padding: 18px 0 0; border-top: 1px solid var(--line-strong); border-left: 0; }
+    .viewport-shell[data-viewport="1440"] .memory-workbench { min-height: 590px; grid-template-columns: 340px minmax(0, 1fr); }
+    .viewport-shell[data-viewport="1440"] .memory-detail-grid { grid-template-columns: 1fr; }
+    .viewport-shell[data-viewport="1440"] .memory-detail-side { border-top: 1px solid var(--line); border-left: 0; }
+    .viewport-shell[data-viewport="1440"] .members-shell { grid-template-columns: 250px minmax(0,1fr); }
+    .viewport-shell[data-viewport="1440"] .member-detail-page { width: min(980px, calc(100% - 48px)); margin: 0 auto; padding: 34px 0 48px; }
+    .viewport-shell[data-viewport="1440"] .identity-layout { grid-template-columns: minmax(0,1fr) 220px; gap: 24px; }
+    .viewport-shell[data-viewport="1440"] .settings-page .page-inner { width: min(980px, calc(100% - 64px)); }
+    .viewport-shell[data-viewport="1440"] .runtime-catalog { grid-template-columns: 1fr; }
+    .viewport-shell[data-viewport="1440"] .diagnostics-summary { grid-template-columns: 1fr; }
+    .viewport-shell[data-viewport="1440"] .diagnostics-columns { grid-template-columns: 1fr; }
+    .viewport-shell[data-viewport="1440"] .proposal-drawer { width: 440px; }
+    @media (max-width: 1100px) {
+      .prototype-toolbar { align-items: flex-start; flex-direction: column; }
+      .prototype-controls { justify-content: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <header class="prototype-toolbar" aria-label="原型控制栏">
+    <div class="prototype-toolbar-copy">
+      <strong>Rovai AI · 2K 工作台交互稿</strong>
+      <small>交互只保留在当前 HTML，不读取或写入 Core</small>
+    </div>
+    <div class="prototype-controls">
+      <label>
+        <span class="sr-only">页面</span>
+        <select class="prototype-page-select" id="page-select">
+          <option value="quick">快速对话首页</option>
+          <option value="memory">记忆工作台</option>
+          <option value="members">队员详情</option>
+          <option value="runtime">Agent 运行时</option>
+          <option value="diagnostics">诊断与修复</option>
+        </select>
+      </label>
+      <div class="segmented" aria-label="设计视口">
+        <button type="button" data-viewport="1440" aria-pressed="false">1440×920</button>
+        <button type="button" data-viewport="2560" aria-pressed="true">2560×1440</button>
+      </div>
+      <div class="segmented" aria-label="主题">
+        <button type="button" data-theme-choice="day" aria-pressed="true">Porcelain Day</button>
+        <button type="button" data-theme-choice="night" aria-pressed="false">Steel Night</button>
+      </div>
+      <span class="prototype-boundary">概念稿 · 非实现证据</span>
+    </div>
+  </header>
+
+  <main class="viewport-stage">
+    <div class="viewport-shell" id="viewport-shell">
+      <div class="product-window">
+        <div class="mac-window-controls" aria-label="macOS 窗口控制">
+          <button class="mac-window-control close" type="button" aria-label="关闭窗口" data-window-action="关闭"><span aria-hidden="true">×</span></button>
+          <button class="mac-window-control minimize" type="button" aria-label="最小化窗口" data-window-action="最小化"><span aria-hidden="true">−</span></button>
+          <button class="mac-window-control zoom" type="button" aria-label="缩放窗口" data-window-action="缩放"><span aria-hidden="true">＋</span></button>
+        </div>
+        <div class="app-shell">
+          <aside class="app-rail" id="normal-rail" aria-label="全局导航">
+            <div class="rail-drag-strip" aria-hidden="true"></div>
+            <div class="brand-row">
+              <span class="brand-star" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 1.8 14.2 9.8 22.2 12l-8 2.2-2.2 8-2.2-8-8-2.2 8-2.2Z" fill="currentColor"/></svg>
+              </span>
+              <strong>Rovai AI</strong>
+              <button class="notification-button" type="button" aria-label="通知">○</button>
+            </div>
+            <nav class="rail-nav">
+              <button class="rail-button active" type="button" data-nav-page="quick"><span class="rail-icon">＋</span><span>新对话</span></button>
+              <button class="rail-button" type="button" data-nav-page="members"><span class="rail-icon">◎</span><span>队员</span></button>
+              <button class="rail-button" type="button" data-nav-page="memory"><span class="rail-icon">◇</span><span>记忆</span></button>
+            </nav>
+            <div class="rail-divider"></div>
+            <section class="rail-section">
+              <div class="rail-section-label">项目</div>
+              <button class="rail-camp" type="button"><span>▱</span><span><strong>产品体验</strong><small>目录项目</small></span></button>
+              <button class="rail-camp" type="button"><span class="rail-marker"></span><span><strong>2K 工作区布局</strong><small>12 分钟前</small></span></button>
+              <button class="rail-camp" type="button"><span>○</span><span><strong>Memory 治理审计</strong><small>昨天 18:32</small></span></button>
+              <button class="rail-camp" type="button"><span>▱</span><span><strong>快速对话</strong><small>本机</small></span></button>
+            </section>
+            <div class="rail-spacer"></div>
+            <div class="rail-footer"><button class="rail-button" type="button" data-nav-page="runtime"><span class="rail-icon">⚙</span><span>设置</span></button></div>
+          </aside>
+
+          <aside class="app-rail settings-rail" id="settings-rail" aria-label="设置分类" hidden>
+            <div class="rail-drag-strip" aria-hidden="true"></div>
+            <div class="brand-row"><span class="brand-star" aria-hidden="true">✦</span><strong>Rovai AI</strong></div>
+            <div class="settings-back"><button class="rail-button" type="button" data-nav-page="quick"><span class="rail-icon">←</span><span>返回 App</span></button></div>
+            <div class="settings-group"><span>应用</span><button class="rail-button" type="button"><span class="rail-icon">⌂</span><span>通用</span></button><button class="rail-button" type="button"><span class="rail-icon">◐</span><span>外观</span></button><button class="rail-button" type="button"><span class="rail-icon">○</span><span>通知</span></button></div>
+            <div class="settings-group"><span>能力</span><button class="rail-button" type="button"><span class="rail-icon">⌘</span><span>Skill</span></button><button class="rail-button" type="button"><span class="rail-icon">⇄</span><span>MCP</span></button><button class="rail-button active" type="button" data-nav-page="runtime"><span class="rail-icon">◈</span><span>Agent 运行时</span></button></div>
+            <div class="settings-group"><span>支持</span><button class="rail-button" type="button" data-nav-page="diagnostics"><span class="rail-icon">▣</span><span>诊断与修复</span></button></div>
+            <div class="rail-spacer"></div>
+          </aside>
+
+          <section class="main-surface" id="main-surface">
+            <section class="page quick-page" data-page="quick" aria-label="快速对话">
+              <div class="quick-layout">
+                <div class="quick-action">
+                  <svg class="quick-mark" viewBox="0 0 96 66" aria-hidden="true"><path d="M48 3 51.8 18.2 67 22l-15.2 3.8L48 41l-3.8-15.2L29 22l15.2-3.8Z" fill="currentColor"/><path d="M13 61Q48 40 83 61" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><circle class="sun" cx="48" cy="54" r="3.4"/></svg>
+                  <span class="quick-label">Quick Chat</span>
+                  <h1>开始下一段协作</h1>
+                  <p>创建一个对话，选好队员与工作区，再写下这次协作的目标。</p>
+                  <button class="primary-button" type="button" data-local-action="已打开“创建新对话”原型入口。">新对话</button>
+                </div>
+                <section class="recent-pane" aria-labelledby="recent-title">
+                  <div class="recent-heading"><span id="recent-title">继续未完成的事</span><span>最近 5 条</span></div>
+                  <div class="recent-list">
+                    <button class="recent-row" type="button" data-open-camp="2K 工作区布局"><span class="recent-state running" aria-label="正在运行"></span><strong>2K 工作区布局</strong><small>12 分钟前</small></button>
+                    <button class="recent-row" type="button" data-open-camp="Memory 治理审计"><span class="recent-state unread" aria-label="有未读完成结果"></span><strong>Memory 治理审计</strong><small>昨天 18:32</small></button>
+                    <button class="recent-row" type="button" data-open-camp="Agent 运行时契约"><span class="recent-state"></span><strong>Agent 运行时契约</strong><small>8月11日</small></button>
+                    <button class="recent-row" type="button" data-open-camp="通知交互收口"><span class="recent-state"></span><strong>通知交互收口</strong><small>8月10日</small></button>
+                    <button class="recent-row" type="button" data-open-camp="发布前视觉验收"><span class="recent-state"></span><strong>发布前视觉验收</strong><small>8月8日</small></button>
+                  </div>
+                </section>
+              </div>
+            </section>
+
+            <section class="page" data-page="memory" aria-label="记忆" hidden>
+              <div class="page-scroll">
+                <div class="page-inner">
+                  <header class="page-header"><div class="page-header-copy"><span class="page-kicker">Memory / Governed context</span><h1>记忆</h1><p>所有正在沿用的记忆都立即生效；形成来源仅用于说明和审计。</p></div><div class="page-actions"><button class="quiet-button" type="button" data-local-action="导出仅为原型反馈；没有生成文件。">导出…</button><button class="primary-button" type="button" data-local-action="已打开“新增记忆”原型入口。">＋ 新增记忆</button></div></header>
+                  <div class="summary-strip" aria-label="记忆概览"><div><strong>18</strong><span>正在沿用</span></div><div class="attention"><strong>2</strong><span>共同记忆提案</span></div><div><strong>7</strong><span>队员形成</span></div><div><strong>3</strong><span>建议复核</span></div></div>
+                  <button class="attention-banner" id="open-proposals" type="button"><span><strong>2 条共同记忆提案等待确认</strong><small>只有接受后才会生效。</small></span><b>查看提案 →</b></button>
+                  <nav class="tabs" aria-label="记忆范围"><button class="active" type="button" data-memory-scope="共同记忆">共同记忆</button><button type="button" data-memory-scope="队员记忆">队员记忆</button><button type="button" data-memory-scope="队员间记忆">队员间记忆</button></nav>
+                  <div class="memory-toolbar"><div class="filter-tabs" aria-label="治理筛选"><button class="active" type="button" data-memory-filter="all">全部</button><button type="button" data-memory-filter="agent">队员形成</button><button type="button" data-memory-filter="review">建议复核</button><button type="button" data-memory-filter="retired">已停止沿用</button></div><input class="search-input" id="memory-search" type="search" placeholder="搜索正文、Retrieval Keys 或队员" aria-label="搜索记忆"></div>
+                  <div class="capacity-strip"><span><strong>18/32</strong> 总量 <small>7/16 队员形成</small></span><span><strong>共同记忆</strong><small>当前范围</small></span></div>
+                  <div class="memory-workbench">
+                    <section class="memory-list-pane" aria-label="记忆目录"><div class="pane-heading"><strong>共同记忆</strong><span id="memory-count">4 条</span></div><div class="memory-list" id="memory-list">
+                      <button class="memory-row selected" type="button" data-memory-id="m1" data-filter="user" data-search="验收 证据 生产合同 用户"><span class="badges"><span class="badge kind">约定</span><span class="badge">用户创建</span></span><strong>重要改动应提供明确、可复现的验证结果。</strong><small>证据 · 生产合同 · 双方共同</small></button>
+                      <button class="memory-row" type="button" data-memory-id="m2" data-filter="agent review" data-search="renderer 视觉改动 2560 1440 1040 沐瓦"><span class="badges"><span class="badge kind">经验</span><span class="badge agent">队员形成</span><span class="badge review">建议复核</span></span><strong>Renderer 视觉改动需要同时检查 2560×1440、1440×920 与 1040×700。</strong><small>viewport · 视觉回归 · 沐瓦</small></button>
+                      <button class="memory-row" type="button" data-memory-id="m3" data-filter="agent" data-search="正文宽度 76ch 代码 930 栖鹿"><span class="badges"><span class="badge kind">偏好</span><span class="badge agent">队员形成</span></span><strong>叙述正文保持 76ch；代码与表格可以进入更宽的工件轨道。</strong><small>排版 · artifact · 栖鹿</small></button>
+                      <button class="memory-row" type="button" data-memory-id="m4" data-filter="retired" data-search="自动拉伸 页面 旧版 已停止沿用"><span class="badges"><span class="badge kind">约定</span><span class="badge">已停止沿用</span></span><strong>宽屏页面统一拉伸到可用宽度。</strong><small>旧版布局 · 已停止沿用</small></button>
+                    </div></section>
+                    <article class="memory-detail" id="memory-detail" aria-live="polite"></article>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="page" data-page="members" aria-label="队员" hidden>
+              <div class="members-shell">
+                <aside class="member-roster" aria-label="队员名册"><div class="member-roster-header"><strong>队员</strong><span>4</span></div><div class="member-roster-group">在队</div>
+                  <button class="member-row selected" type="button" data-member="luoke"><span class="avatar">洛</span><span><strong>洛可</strong><small>产品工程 · 默认 Lead</small></span><i class="presence-dot" aria-label="在队"></i></button>
+                  <button class="member-row" type="button" data-member="muwa"><span class="avatar two">沐</span><span><strong>沐瓦</strong><small>Renderer 工程</small></span><i class="presence-dot" aria-label="在队"></i></button>
+                  <button class="member-row" type="button" data-member="gugu"><span class="avatar three">咕</span><span><strong>咕咕</strong><small>绘图师</small></span><i class="presence-dot" aria-label="在队"></i></button>
+                  <div class="member-roster-group">暂离</div><button class="member-row" type="button" data-member="qilu"><span class="avatar">栖</span><span><strong>栖鹿</strong><small>架构分析</small></span><i class="presence-dot away" aria-label="暂离"></i></button>
+                </aside>
+                <div class="member-detail-scroll"><article class="member-detail-page"><header class="member-header"><div class="member-title"><span class="avatar" id="member-avatar">洛</span><div class="member-title-copy"><small>Member / Long-lived identity</small><h1 id="member-name">洛可</h1><p id="member-role">产品工程 · 默认 Lead</p><div class="member-statuses"><span class="badge success" id="member-presence">在队</span><button class="badge" id="member-runtime-shortcut" type="button">Codex CLI · 可用 →</button></div></div></div><div class="member-header-actions"><button class="quiet-button" type="button" data-local-action="身份编辑仅在原型中打开。">编辑身份</button><button class="icon-button" type="button" aria-label="更多队员操作">•••</button></div></header>
+                  <nav class="tabs member-tabs" aria-label="队员详情"><button class="active" type="button" data-member-tab="identity">身份</button><button type="button" data-member-tab="runtime">运行配置</button></nav>
+                  <section id="member-identity-panel"><div class="identity-layout"><div class="identity-fields"><section class="identity-field"><span>专业职责</span><p id="member-responsibility">负责产品结构、验收口径与跨模块决策，确保协作结果可落地。</p></section><section class="identity-field"><span>性格底色</span><div class="trait-list" id="member-traits"><i>务实</i><i>清晰</i><i>克制</i></div></section><section class="identity-field"><span>工作准则</span><p id="member-principle">先确认事实与边界，再选择最小但完整的方案。</p></section><section class="identity-field"><span>成长课题</span><p id="member-growth">在复杂决策中更早暴露取舍，让团队快速形成共同理解。</p></section></div><button class="portrait" type="button" data-local-action="角色图片编辑仅在原型中打开。" aria-label="更换角色图片"><span class="portrait-scene"><img id="member-portrait-image" src="../../../apps/desktop/src/renderer/src/assets/characters/luoke/source.png" alt="洛可的队员半身照"></span><span class="portrait-caption">更换角色图片</span></button></div></section>
+                  <section class="runtime-member-panel" id="member-runtime-panel" hidden><p class="runtime-intro">为这位队员设置后续执行使用的 Agent 运行时、模型和该运行时提供的权限选项。保存后仅影响之后开始的新执行。</p><div class="form-grid"><div class="field"><label for="member-runtime-select">Agent 运行时</label><select id="member-runtime-select"><option>Codex CLI</option><option>OpenCode</option><option>Claude Code</option><option>GitHub Copilot</option></select></div><div class="field"><label for="member-model-select">模型</label><select id="member-model-select"><option>使用运行时默认模型</option><option>能力快照中的模型</option></select></div></div><details class="runtime-parameters"><summary>运行参数</summary><div class="form-grid"><div class="field"><label for="member-reasoning">Reasoning</label><select id="member-reasoning"><option>运行时默认</option><option>High</option></select></div><div class="field"><label for="member-permission">权限</label><select id="member-permission"><option>使用当前原生权限</option></select></div></div></details><div class="page-actions left-actions"><button class="primary-button" type="button" data-local-action="运行配置仅在原型中保存。">保存运行配置</button></div></section>
+                </article></div>
+              </div>
+            </section>
+
+            <section class="page settings-page" data-page="runtime" aria-label="Agent 运行时" hidden><div class="page-scroll"><div class="page-inner"><header class="page-header"><div class="page-header-copy settings-description"><span class="page-kicker">Settings / Runtime</span><h1>Agent 运行时</h1><p>选择产品、检查可用性并管理 Rovai 自动发现的本机入口。</p></div><div class="page-actions"><span class="prototype-snapshot-note">示例快照 · 不读取本机</span><button class="quiet-button" id="check-all-runtimes" type="button">重新检测全部</button></div></header><section class="section-block"><div class="section-heading"><div><h2>Agent 运行时目录</h2><p>九种已支持产品始终显示；状态说明与下一步保持在同一行。</p></div><span class="prototype-snapshot-note">9 种产品</span></div><div class="runtime-catalog" id="runtime-catalog"></div><details class="advanced-disclosure"><summary>高级诊断与自定义启动入口</summary><div class="advanced-content"><p>以下内容仅用于展示证据层级。原型不会读取真实路径或 fingerprint。</p><div class="evidence-row"><strong>Codex CLI</strong><code>/示例/受管入口/codex</code><span>2 个模型 · 2 位队员引用</span></div><div class="evidence-row"><strong>OpenCode</strong><code>/示例/受管入口/opencode</code><span>最近探测：示例时间</span></div><button class="quiet-button" type="button" data-local-action="自定义入口 Dialog 仅在原型中打开。">添加自定义启动入口</button></div></details></section></div></div></section>
+
+            <section class="page settings-page" data-page="diagnostics" aria-label="诊断与修复" hidden><div class="page-scroll"><div class="page-inner"><header class="page-header"><div class="page-header-copy settings-description"><span class="page-kicker">Settings / Diagnostics</span><h1>诊断与修复</h1><p>检查本地依赖、受管内容和 Agent 运行时，并为可安全处理的问题提供明确下一步。</p></div><div class="page-actions"><span class="prototype-snapshot-note">15 项示例快照</span><button class="primary-button" id="run-diagnostics" type="button">运行完整自检</button><button class="quiet-button" type="button" data-local-action="导出模拟不会生成文件。">导出诊断 JSON</button></div></header><div class="privacy-note"><span aria-hidden="true">▣</span><p><strong>隐私边界：</strong>屏幕和 v5 导出不会包含 Token、Cookie、登录信息、用户消息、记忆正文、附件正文、Tool 输出或绝对 Home、Runtime、项目路径。</p></div><div id="diagnostic-running-slot"></div><section class="diagnostics-summary"><div class="diagnostics-summary-copy"><span class="summary-mark">!</span><div><span>最近一次完整自检</span><h2>发现 2 项需要处理，1 项暂时无法确认</h2><p>这是匿名示例快照；交互稿不代表当前设备状态。</p></div></div><dl class="diagnostic-counts"><div><dt>正常</dt><dd>12</dd></div><div><dt>需要处理</dt><dd>2</dd></div><div><dt>暂时无法确认</dt><dd>1</dd></div></dl></section><div class="diagnostics-columns"><section class="issues-pane"><div class="section-heading"><div><h2>需要处理的问题</h2><p>每项只有一个明确下一步。</p></div><span class="badge review">2 项</span></div><div class="issue-list"><article class="issue-row"><span class="issue-mark">!</span><div class="issue-copy"><h3>MCP 配置权限不安全</h3><p>配置文件当前允许不必要的其他用户访问。</p><small><strong>影响：</strong>新的 AgentRun 暂不应依赖外部 MCP。</small><button class="primary-button compact" type="button" data-repair="MCP 文件权限">修复文件权限</button></div></article><article class="issue-row"><span class="issue-mark">!</span><div class="issue-copy"><h3>Claude Code 当前不可用</h3><p>最近一次可用性证据表明需要登录。</p><small><strong>影响：</strong>使用该产品的后续新执行无法启动。</small><button class="quiet-button compact" type="button" data-nav-page="runtime">前往 Agent 运行时</button></div></article></div></section><section class="results-pane"><div class="section-heading"><div><h2>完整检查结果</h2><p>按本地依赖、受管内容和 Agent 运行时分组。</p></div></div><div class="results-toolbar"><div class="filter-tabs" aria-label="检查结果筛选"><button class="active" type="button" data-diagnostic-filter="all">全部</button><button type="button" data-diagnostic-filter="attention">需要处理</button><button type="button" data-diagnostic-filter="ok">正常</button><button type="button" data-diagnostic-filter="unknown">暂时无法确认</button></div><span>示例检查时间</span></div><div class="result-list" id="diagnostic-results"></div></section></div></div></div></section>
+
+            <div class="drawer-overlay" id="drawer-overlay" hidden></div><aside class="proposal-drawer" id="proposal-drawer" aria-label="共同记忆提案" hidden><header class="drawer-header"><div><span class="page-kicker">共同记忆提案</span><h2>等待确认</h2><p>只有接受后才会生效；当前 read model 不提供独立提案理由。</p></div><button class="icon-button" id="close-proposals" type="button" aria-label="关闭提案">×</button></header><div class="drawer-toolbar"><label><input type="checkbox" id="select-all-proposals"> 全选</label><button class="danger-button compact" type="button" data-local-action="所选提案仅在原型中标记为拒绝。">拒绝所选</button></div><div class="proposal-list"><article class="proposal-item"><input type="checkbox" aria-label="选择第一条提案"><div class="proposal-copy"><div class="badges"><span class="badge kind">新增</span><span class="badge agent">队员提议</span></div><p>2K 工作台优先增加同时可见的信息面，不拉长普通叙述正文。</p><small>Retrieval Keys：2K、workspace · 沐瓦 · 共同记忆</small><div class="proposal-actions"><button class="quiet-button compact" type="button" data-local-action="提案仅在原型中标记为拒绝。">拒绝</button><button class="quiet-button compact" type="button" data-local-action="提案编辑器仅在原型中打开。">编辑</button><button class="primary-button compact" type="button" data-local-action="提案仅在原型中标记为接受。">接受</button></div></div></article><article class="proposal-item"><input type="checkbox" aria-label="选择第二条提案"><div class="proposal-copy"><div class="badges"><span class="badge kind">修订</span><span class="badge review">基准已变化</span></div><p>设置页的宽屏工作区扩展到所有分类。</p><small>旧基准已经变化；仍可拒绝，但不能编辑或接受。</small><div class="proposal-actions"><button class="quiet-button compact" type="button" data-local-action="过期提案仅在原型中标记为拒绝。">拒绝</button><button class="quiet-button compact" type="button" disabled>编辑</button><button class="primary-button compact" type="button" disabled>接受</button></div></div></article></div></aside>
+            <div class="dialog-overlay" id="dialog-overlay" hidden></div><section class="dialog" id="forget-dialog" role="dialog" aria-modal="true" aria-labelledby="forget-title" hidden><h2 id="forget-title">永久遗忘这条记忆？</h2><p>正文、Retrieval Keys 与受控候选内容会被清除，操作不可撤销。原型不会执行该操作。</p><div class="dialog-actions"><button class="quiet-button" id="cancel-forget" type="button">取消</button><button class="danger-button" id="confirm-forget" type="button">永久遗忘</button></div></section>
+            <div class="toast" id="toast" role="status" aria-live="polite" hidden><strong id="toast-title">原型反馈</strong><small id="toast-detail">没有写入 Core。</small></div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    (() => {
+      const root = document.documentElement;
+      const shell = document.getElementById('viewport-shell');
+      const pageSelect = document.getElementById('page-select');
+      const normalRail = document.getElementById('normal-rail');
+      const settingsRail = document.getElementById('settings-rail');
+      const toast = document.getElementById('toast');
+      const toastTitle = document.getElementById('toast-title');
+      const toastDetail = document.getElementById('toast-detail');
+      let toastTimer = 0;
+
+      const memoryDetails = {
+        m1: { kind: '约定', origin: '用户创建', body: '重要改动应提供明确、可复现的验证结果。', people: ['洛可', '沐瓦'], keys: '证据、生产合同', review: '未设置', version: 'v3 · rev_4f91', source: '用户创建', active: true },
+        m2: { kind: '经验', origin: '队员提议 · 用户采纳', body: 'Renderer 视觉改动需要同时检查 2560×1440、1440×920 与 1040×700。', people: ['沐瓦'], keys: 'viewport、视觉回归', review: '2026 年 9 月 1 日', version: 'v2 · rev_87ac', source: '队员提议 · 用户采纳', active: true },
+        m3: { kind: '偏好', origin: '队员提议 · 用户采纳', body: '叙述正文保持 76ch；代码与表格可以进入更宽的工件轨道。', people: ['栖鹿'], keys: '排版、artifact、76ch', review: '未设置', version: 'v1 · rev_218d', source: '队员提议 · 用户采纳', active: true },
+        m4: { kind: '约定', origin: '用户创建', body: '宽屏页面统一拉伸到可用宽度。', people: ['洛可', '沐瓦'], keys: '旧版布局', review: '已停止沿用', version: 'v4 · rev_90b1', source: '用户创建', active: false }
+      };
+
+      const members = {
+        luoke: { name: '洛可', role: '产品工程 · 默认 Lead', initial: '洛', avatarClass: '', portrait: '../../../apps/desktop/src/renderer/src/assets/characters/luoke/source.png', presence: '在队', runtime: 'Codex CLI · 可用 →', responsibility: '负责产品结构、验收口径与跨模块决策，确保协作结果可落地。', traits: ['务实','清晰','克制'], principle: '先确认事实与边界，再选择最小但完整的方案。', growth: '在复杂决策中更早暴露取舍，让团队快速形成共同理解。' },
+        muwa: { name: '沐瓦', role: 'Renderer 工程', initial: '沐', avatarClass: 'two', portrait: '../../../apps/desktop/src/renderer/src/assets/characters/muwa/source.png', presence: '在队', runtime: 'Codex CLI · 可用 →', responsibility: '负责 Renderer 结构、交互细节与真实 App 视觉验收。', traits: ['细致','直接','耐心'], principle: '交互必须可复现，视觉必须回到真实窗口核对。', growth: '在保持实现完整的同时，更早识别可以删除的复杂度。' },
+        gugu: { name: '咕咕', role: '绘图师', initial: '咕', avatarClass: 'three', portrait: '../../../apps/desktop/src/renderer/src/assets/characters/mianzhi/source.png', presence: '在队', runtime: '未配置 Agent 运行时 →', responsibility: '负责图像、角色资产与视觉表达的一致性。', traits: ['敏锐','好奇','温和'], principle: '先理解语义，再决定图像是否真的必要。', growth: '让复杂视觉表达更精确地服务于操作任务。' },
+        qilu: { name: '栖鹿', role: '架构分析', initial: '栖', avatarClass: '', portrait: '../../../apps/desktop/src/renderer/src/assets/characters/qilu/source.png', presence: '暂离', runtime: 'Claude Code · 需要登录 →', responsibility: '负责契约边界、架构证据与长期演进风险。', traits: ['审慎','系统','诚实'], principle: '不以文档状态替代实现证据，也不以演示状态替代事实。', growth: '把架构判断压缩为团队容易执行的下一步。' }
+      };
+
+      const runtimes = [
+        ['Claude Code','需要登录','请先完成该 Agent 运行时的登录。','claude --version','attention'],
+        ['Codex CLI','可用','正在后台刷新最近一次检查结果。','codex --version','success'],
+        ['GitHub Copilot','暂时无法确认','尚无最近一次检查结果，系统将在后台继续确认。','copilot --version','unknown'],
+        ['OpenCode','可用','后台刷新失败，当前继续使用最近一次可用结果。','opencode --version','success'],
+        ['Kiro','未安装','本机未找到可用的 Agent 运行时入口。','kiro --version','unknown'],
+        ['Qoder','版本不支持','当前版本或必要能力不受支持，请更新后重试。','qoder --version','attention'],
+        ['CodeBuddy','不可用','该 Agent 运行时已停用。','codebuddy --version','attention'],
+        ['Qwen Code','可用','正在后台刷新最近一次检查结果。','qwen --version','success'],
+        ['Antigravity','正在检查…','保留最近结果，等待本次检查完成。','agy --version','unknown']
+      ];
+
+      const diagnosticChecks = [
+        ['本地依赖','Core','正常','Core 连接和协议版本可用。','ok','core.ok'],
+        ['本地依赖','数据目录','正常','受管数据目录可读取。','ok','data.ok'],
+        ['本地依赖','Git','正常','Git 可用于目录能力检查。','ok','git.ok'],
+        ['本地依赖','SQLite','正常','SQLite 读写能力可用。','ok','sqlite.ok'],
+        ['受管内容','Skill 投影','正常','受管投影与当前来源一致。','ok','skill.ok'],
+        ['受管内容','MCP 配置','需要处理','配置文件权限不安全。','attention','mcp.permissions_too_broad'],
+        ['Agent 运行时','Claude Code','需要处理','最近一次证据表明需要登录。','attention','runtime.authentication_required'],
+        ['Agent 运行时','Codex CLI','正常','最近成功能力快照可用。','ok','runtime.ready'],
+        ['Agent 运行时','GitHub Copilot','暂时无法确认','尚无最近一次检查结果。','unknown','runtime.unknown'],
+        ['Agent 运行时','OpenCode','正常','最近成功能力快照可用。','ok','runtime.ready'],
+        ['Agent 运行时','Kiro','正常','当前未被队员使用。','ok','runtime.unused'],
+        ['Agent 运行时','Qoder','正常','当前未被队员使用。','ok','runtime.unused'],
+        ['Agent 运行时','CodeBuddy','正常','当前未被队员使用。','ok','runtime.unused'],
+        ['Agent 运行时','Qwen Code','正常','最近成功能力快照可用。','ok','runtime.ready'],
+        ['Agent 运行时','Antigravity','正常','当前未被队员使用。','ok','runtime.unused']
+      ];
+
+      function showToast(title, detail = '没有写入 Core、文件系统或本机配置。') {
+        window.clearTimeout(toastTimer);
+        toastTitle.textContent = title;
+        toastDetail.textContent = detail;
+        toast.hidden = false;
+        toastTimer = window.setTimeout(() => { toast.hidden = true; }, 3200);
+      }
+
+      function setViewport(value) {
+        const isWide = value === '2560';
+        root.style.setProperty('--prototype-width', isWide ? '2560px' : '1440px');
+        root.style.setProperty('--prototype-height', isWide ? '1440px' : '920px');
+        root.style.setProperty('--prototype-scale', isWide ? '.5' : '.72');
+        document.querySelectorAll('[data-viewport]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.viewport === value)));
+        shell.dataset.viewport = value;
+      }
+
+      function setTheme(value) {
+        root.dataset.theme = value;
+        document.querySelectorAll('[data-theme-choice]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.themeChoice === value)));
+      }
+
+      function showPage(page) {
+        document.querySelectorAll('[data-page]').forEach(section => { section.hidden = section.dataset.page !== page; });
+        const settings = page === 'runtime' || page === 'diagnostics';
+        normalRail.hidden = settings;
+        settingsRail.hidden = !settings;
+        document.querySelectorAll('[data-nav-page]').forEach(button => button.classList.toggle('active', button.dataset.navPage === page));
+        settingsRail.querySelectorAll('[data-nav-page]').forEach(button => button.classList.toggle('active', button.dataset.navPage === page));
+        pageSelect.value = page;
+        closeOverlays();
+      }
+
+      function renderMemory(id) {
+        const memory = memoryDetails[id];
+        const detail = document.getElementById('memory-detail');
+        const people = memory.people.map((name, index) => `<span class="person-token"><i class="avatar ${index === 1 ? 'two' : ''}">${name.slice(0,1)}</i>${name}</span>`).join('');
+        detail.innerHTML = `<header class="memory-detail-header"><div class="badges"><span class="badge kind">${memory.kind}</span><span class="badge ${memory.origin.includes('队员') ? 'agent' : ''}">${memory.origin}</span><span class="badge ${memory.active ? 'success' : ''}">${memory.active ? '正在沿用' : '已停止沿用'}</span></div><h2>${memory.body}</h2></header><div class="memory-detail-grid"><div class="memory-detail-main"><section class="detail-section"><h3>适用队员</h3><div class="people-row">${people}</div></section><section class="detail-section"><h3>正文</h3><p>${memory.body}</p></section><section class="detail-section"><h3>版本记录</h3><details class="revision" open><summary><span><strong>用户修订</strong><small>今天 16:20 · ${memory.version.split(' · ')[1]}</small></span><b>当前</b></summary><div class="revision-body">完整正文快照：${memory.body}<br>Retrieval Keys：${memory.keys}</div></details><details class="revision"><summary><span><strong>${memory.origin.includes('队员') ? '队员修订' : '用户创建'}</strong><small>8 月 1 日 · rev_10a2</small></span><b>历史</b></summary><div class="revision-body">历史版本展示完整 snapshot；原型不伪造权威 diff。</div></details></section></div><aside class="memory-detail-side"><section class="detail-section"><h3>治理信息</h3><dl class="detail-facts"><div><dt>形成来源</dt><dd>${memory.source}</dd></div><div><dt>Retrieval Keys</dt><dd>${memory.keys}</dd></div><div><dt>建议复核</dt><dd>${memory.review}</dd></div><div><dt>当前版本</dt><dd><code>${memory.version}</code></dd></div></dl></section><div class="governance-actions"><button class="primary-button" type="button" data-local-action="修订编辑器仅在原型中打开。">修订</button><button class="quiet-button" type="button" data-local-action="复核时间仅在原型中更新。">设置复核时间</button><button class="quiet-button" type="button" data-local-action="生命周期仅在原型中切换。">${memory.active ? '停止沿用' : '重新沿用'}</button><button class="danger-button" type="button" id="open-forget">永久遗忘…</button></div></aside></div>`;
+        detail.querySelectorAll('[data-local-action]').forEach(bindLocalAction);
+        document.getElementById('open-forget').addEventListener('click', openForget);
+      }
+
+      function filterMemories() {
+        const filter = document.querySelector('[data-memory-filter].active').dataset.memoryFilter;
+        const query = document.getElementById('memory-search').value.trim().toLowerCase();
+        let count = 0;
+        document.querySelectorAll('.memory-row').forEach(row => {
+          const matchesFilter = filter === 'all' || row.dataset.filter.includes(filter);
+          const matchesQuery = !query || row.dataset.search.toLowerCase().includes(query);
+          row.hidden = !(matchesFilter && matchesQuery);
+          if (!row.hidden) count += 1;
+        });
+        document.getElementById('memory-count').textContent = `${count} 条`;
+      }
+
+      function renderMember(id) {
+        const member = members[id];
+        document.getElementById('member-name').textContent = member.name;
+        document.getElementById('member-role').textContent = member.role;
+        document.getElementById('member-presence').textContent = member.presence;
+        document.getElementById('member-runtime-shortcut').textContent = member.runtime;
+        document.getElementById('member-responsibility').textContent = member.responsibility;
+        document.getElementById('member-principle').textContent = member.principle;
+        document.getElementById('member-growth').textContent = member.growth;
+        document.getElementById('member-traits').innerHTML = member.traits.map(trait => `<i>${trait}</i>`).join('');
+        const portrait = document.getElementById('member-portrait-image');
+        portrait.src = member.portrait;
+        portrait.alt = `${member.name}的队员半身照`;
+        const avatar = document.getElementById('member-avatar');
+        avatar.textContent = member.initial;
+        avatar.className = `avatar ${member.avatarClass}`;
+      }
+
+      function setMemberTab(tab, focusRuntime = false) {
+        document.querySelectorAll('[data-member-tab]').forEach(button => button.classList.toggle('active', button.dataset.memberTab === tab));
+        document.getElementById('member-identity-panel').hidden = tab !== 'identity';
+        document.getElementById('member-runtime-panel').hidden = tab !== 'runtime';
+        if (focusRuntime) document.getElementById('member-runtime-select').focus();
+      }
+
+      function runtimeRow(item, index) {
+        const [name, status, detail, command, tone] = item;
+        return `<article class="runtime-product-row" data-runtime-index="${index}"><div class="runtime-product-copy"><div class="runtime-product-title"><strong>${name}</strong><span class="badge ${tone}">${status}</span></div><span>${detail}</span><small>版本：示例快照，不读取本机</small><code class="self-check">自查命令：${command}</code></div><div class="runtime-product-actions"><button class="quiet-button compact" type="button" data-check-runtime="${index}">检查可用性</button><button class="quiet-button compact" type="button" data-local-action="安装说明链接在原型中不打开外部页面。">安装说明</button></div></article>`;
+      }
+
+      function renderRuntimes() {
+        const first = runtimes.slice(0,5).map(runtimeRow).join('');
+        const second = runtimes.slice(5).map((item,index) => runtimeRow(item,index + 5)).join('');
+        document.getElementById('runtime-catalog').innerHTML = `<div class="runtime-column">${first}</div><div class="runtime-column">${second}</div>`;
+        document.querySelectorAll('[data-check-runtime]').forEach(button => button.addEventListener('click', () => {
+          const original = button.textContent;
+          button.textContent = '正在检查…';
+          button.disabled = true;
+          window.setTimeout(() => { button.textContent = original; button.disabled = false; showToast('重新检测完成', '示例状态保持不变；没有读取本机。'); }, 900);
+        }));
+        document.querySelectorAll('#runtime-catalog [data-local-action]').forEach(bindLocalAction);
+      }
+
+      function renderDiagnostics(filter = 'all') {
+        const groups = ['本地依赖','受管内容','Agent 运行时'];
+        const html = groups.map(group => {
+          const checks = diagnosticChecks.filter(check => check[0] === group && (filter === 'all' || check[4] === filter));
+          if (!checks.length) return '';
+          return `<section><div class="result-group-heading"><strong>${group}</strong><span>${checks.length} 项</span></div>${checks.map(check => `<article class="result-row" data-status="${check[4]}"><span class="result-status ${check[4]}">${check[4] === 'ok' ? '✓' : check[4] === 'attention' ? '!' : '?'}</span><span class="result-name"><strong>${check[1]}</strong><small>${check[2]}</small></span><span class="result-detail">${check[3]}</span>${check[4] === 'unknown' ? '<button class="quiet-button compact" type="button" data-local-action="重新检测仅改变原型按钮状态。">重新检测</button>' : '<span></span>'}<details class="result-details"><summary>诊断详情</summary><dl><div><dt>状态代码</dt><dd>${check[5]}</dd></div><div><dt>检查时间</dt><dd>示例检查时间</dd></div><div><dt>检查证据</dt><dd>${check[3]}</dd></div><div><dt>数据边界</dt><dd>已脱敏示例</dd></div></dl></details></article>`).join('')}</section>`;
+        }).join('');
+        document.getElementById('diagnostic-results').innerHTML = html || '<p class="empty-results">当前筛选条件下没有检查结果。</p>';
+        document.querySelectorAll('#diagnostic-results [data-local-action]').forEach(bindLocalAction);
+      }
+
+      function bindLocalAction(element) {
+        element.addEventListener('click', () => showToast(element.dataset.localAction));
+      }
+
+      function closeOverlays() {
+        document.getElementById('drawer-overlay').hidden = true;
+        document.getElementById('proposal-drawer').hidden = true;
+        document.getElementById('dialog-overlay').hidden = true;
+        document.getElementById('forget-dialog').hidden = true;
+      }
+      function openProposals() { document.getElementById('drawer-overlay').hidden = false; document.getElementById('proposal-drawer').hidden = false; document.getElementById('close-proposals').focus(); }
+      function openForget() { document.getElementById('dialog-overlay').hidden = false; document.getElementById('forget-dialog').hidden = false; document.getElementById('cancel-forget').focus(); }
+
+      document.querySelectorAll('[data-viewport]').forEach(button => button.addEventListener('click', () => setViewport(button.dataset.viewport)));
+      document.querySelectorAll('[data-theme-choice]').forEach(button => button.addEventListener('click', () => setTheme(button.dataset.themeChoice)));
+      document.querySelectorAll('[data-window-action]').forEach(button => button.addEventListener('click', () => showToast(`${button.dataset.windowAction}窗口`, 'HTML 原型不会改变浏览器窗口；生产 App 由 macOS 原生窗口控件处理。')));
+      document.querySelectorAll('[data-nav-page]').forEach(button => button.addEventListener('click', () => showPage(button.dataset.navPage)));
+      pageSelect.addEventListener('change', () => showPage(pageSelect.value));
+      document.querySelectorAll('[data-local-action]').forEach(bindLocalAction);
+      document.querySelectorAll('[data-open-camp]').forEach(button => button.addEventListener('click', () => showToast(`已选择“${button.dataset.openCamp}”`, '生产 App 会进入对应对话；原型不改变导航数据。')));
+      document.getElementById('open-proposals').addEventListener('click', openProposals);
+      document.getElementById('close-proposals').addEventListener('click', closeOverlays);
+      document.getElementById('drawer-overlay').addEventListener('click', closeOverlays);
+      document.getElementById('dialog-overlay').addEventListener('click', closeOverlays);
+      document.getElementById('cancel-forget').addEventListener('click', closeOverlays);
+      document.getElementById('confirm-forget').addEventListener('click', () => { closeOverlays(); showToast('原型未执行永久遗忘', '生产操作必须由 Core 确认后才能显示成功。'); });
+      document.getElementById('select-all-proposals').addEventListener('change', event => document.querySelectorAll('.proposal-item input[type="checkbox"]').forEach(input => { input.checked = event.target.checked; }));
+      document.querySelectorAll('[data-memory-scope]').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('[data-memory-scope]').forEach(item => item.classList.toggle('active', item === button)); showToast(`已切换到${button.dataset.memoryScope}`, '原型继续复用同一匿名数据集。'); }));
+      document.querySelectorAll('[data-memory-filter]').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('[data-memory-filter]').forEach(item => item.classList.toggle('active', item === button)); filterMemories(); }));
+      document.getElementById('memory-search').addEventListener('input', filterMemories);
+      document.querySelectorAll('.memory-row').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('.memory-row').forEach(item => item.classList.toggle('selected', item === button)); renderMemory(button.dataset.memoryId); }));
+      document.querySelectorAll('.member-row').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('.member-row').forEach(item => item.classList.toggle('selected', item === button)); renderMember(button.dataset.member); setMemberTab('identity'); }));
+      document.querySelectorAll('[data-member-tab]').forEach(button => button.addEventListener('click', () => setMemberTab(button.dataset.memberTab)));
+      document.getElementById('member-runtime-shortcut').addEventListener('click', () => setMemberTab('runtime', true));
+      document.getElementById('check-all-runtimes').addEventListener('click', event => { const button = event.currentTarget; button.textContent = '正在重新检测…'; button.disabled = true; window.setTimeout(() => { button.textContent = '重新检测全部'; button.disabled = false; showToast('重新检测完成', '九种产品的示例状态保持不变。'); }, 1100); });
+      document.querySelectorAll('[data-diagnostic-filter]').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('[data-diagnostic-filter]').forEach(item => item.classList.toggle('active', item === button)); renderDiagnostics(button.dataset.diagnosticFilter); }));
+      document.getElementById('run-diagnostics').addEventListener('click', event => { const button = event.currentTarget; const slot = document.getElementById('diagnostic-running-slot'); button.textContent = '正在检查…'; button.disabled = true; slot.innerHTML = '<div class="running-banner" role="status"><span class="spinner"></span><div><strong>正在运行严格只读的完整自检</strong><small>保留最近一次成功结果；不会触发同步、修复或 Runtime 重检。</small></div></div>'; window.setTimeout(() => { slot.innerHTML = ''; button.textContent = '运行完整自检'; button.disabled = false; showToast('完整自检示例已结束', '结果仍是匿名 fixture，不代表当前设备状态。'); }, 1300); });
+      document.querySelectorAll('[data-repair]').forEach(button => button.addEventListener('click', () => { const label = button.dataset.repair; button.textContent = '正在处理…'; button.disabled = true; window.setTimeout(() => { button.textContent = '重新检查'; button.disabled = false; showToast(`${label}已进入复检`, '原型不修改 MCP 配置或文件权限。'); }, 900); }));
+      document.addEventListener('keydown', event => { if (event.key === 'Escape') closeOverlays(); });
+
+      renderMemory('m1');
+      renderMember('luoke');
+      renderRuntimes();
+      renderDiagnostics();
+      setViewport('2560');
+      showPage('quick');
+    })();
+  </script>
+</body>
+</html>

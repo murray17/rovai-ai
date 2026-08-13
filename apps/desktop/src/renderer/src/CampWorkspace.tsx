@@ -49,6 +49,8 @@ import { SafeMarkdown } from './SafeMarkdown'
 import { identityColorToken } from './theme'
 import { availableComposerSkillsForLead } from './composer-skill-picker'
 import { createStructuredMessageClipboardData } from './structured-message-clipboard'
+import { CampWorldMap } from './CampWorldMap'
+import { projectCampWorldMap } from './camp-world-map-model'
 
 const NON_TERMINAL_RUNS = new Set(['queued', 'running', 'waiting'])
 const EXECUTION_EVIDENCE_PAGE_LIMIT = 1_000
@@ -60,10 +62,16 @@ const EXECUTION_DRAWER_MAX_VIEWPORT_RATIO = 0.6
 const EXECUTION_DRAWER_MIN_TIMELINE_HEIGHT = 112
 const EXECUTION_DRAWER_KEYBOARD_STEP = 24
 const EXECUTION_DRAWER_KEYBOARD_PAGE_STEP = 80
+const CAMP_CONVERSATION_VIEW_STORAGE_KEY = 'rovai.camp-conversation-view.v1'
 export type CampInspectorTab = 'tasks' | 'members'
+export type CampConversationView = 'conversation' | 'world'
 type AttachmentKind = 'file' | 'directory'
 type AttachmentDragKind = 'files' | 'directory'
 type AttachmentPreparationInput = { file: File; kindHint: AttachmentKind }
+
+export function campConversationViewFromStoredValue(value: string | null): CampConversationView {
+  return value === 'conversation' ? 'conversation' : 'world'
+}
 
 export function dataTransferContainsFiles(dataTransfer: Pick<DataTransfer, 'types'>): boolean {
   return Array.from(dataTransfer.types).includes('Files')
@@ -760,6 +768,15 @@ export function CampWorkspace({
   const timelineScrollRef = useRef<HTMLDivElement>(null)
   const approvalDockRef = useRef<HTMLElement>(null)
   const lastTimelineItemId = useRef<string | null>(null)
+  const [conversationView, setConversationView] = useState<CampConversationView>(() => {
+    if (typeof window === 'undefined') return 'world'
+    try {
+      return campConversationViewFromStoredValue(window.localStorage.getItem(CAMP_CONVERSATION_VIEW_STORAGE_KEY))
+    } catch {
+      return 'world'
+    }
+  })
+  const [worldMapRoutesVisible, setWorldMapRoutesVisible] = useState(false)
   const [localInspectorTab, setLocalInspectorTab] = useState<CampInspectorTab>('tasks')
   const [executionDrawerAgentId, setExecutionDrawerAgentId] = useState<string | null>(null)
   const [executionDrawerFocusedRunId, setExecutionDrawerFocusedRunId] = useState<string | null>(null)
@@ -773,6 +790,13 @@ export function CampWorkspace({
   const inspectorTab = controlledInspectorTab ?? localInspectorTab
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null)
   const [taskFocusRequest, setTaskFocusRequest] = useState(0)
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(CAMP_CONVERSATION_VIEW_STORAGE_KEY, conversationView)
+    } catch {
+      // A denied storage surface must not block the Camp reading plane.
+    }
+  }, [conversationView])
   const memberById = useMemo(
     () => new Map(snapshot.members.map((member) => [member.agentId, member])),
     [snapshot.members]
@@ -962,6 +986,10 @@ export function CampWorkspace({
     ])),
     [executionEvents, snapshot.agentRuns]
   )
+  const worldMapProjection = useMemo(
+    () => projectCampWorldMap(snapshot.members, snapshot.agentRuns, executionProgressByRunId),
+    [executionProgressByRunId, snapshot.agentRuns, snapshot.members]
+  )
   const truncatedEvidenceByRunId = useMemo(() => {
     const grouped = new Map<string, AgentRunExecutionEvidenceView[]>()
     for (const evidence of snapshot.executionEvidence) {
@@ -1109,6 +1137,11 @@ export function CampWorkspace({
     if (approvalDockRef.current?.contains(document.activeElement)) return
     composerEditorRef.current?.focus()
   }, [busy, composerSubmitting])
+
+  useEffect(() => {
+    if (!notificationFocus?.active || notificationFocus.kind === 'approval') return
+    setConversationView('conversation')
+  }, [notificationFocus])
 
   useEffect(() => {
     if (!notificationFocus?.active) return undefined
@@ -1500,13 +1533,47 @@ export function CampWorkspace({
           onDragLeave={leaveAttachmentDropSurface}
           onDrop={dropAttachments}
         >
-          <div
-            className="timeline-scroll camp-timeline"
-            ref={timelineScrollRef}
-            tabIndex={-1}
-            aria-label="对话时间线"
-          >
-            <div className="timeline-track">
+          <div className="camp-conversation-stage">
+            <div className="camp-conversation-view-controls" role="group" aria-label="会话区视图">
+              <button
+                type="button"
+                aria-pressed={conversationView === 'conversation'}
+                onClick={() => setConversationView('conversation')}
+              >
+                会话
+              </button>
+              <button
+                type="button"
+                aria-pressed={conversationView === 'world'}
+                onClick={() => setConversationView('world')}
+              >
+                地图
+              </button>
+              {conversationView === 'world' && (
+                <button
+                  className="camp-world-map-route-toggle"
+                  type="button"
+                  aria-label={worldMapRoutesVisible ? '隐藏地图路线' : '展示地图路线'}
+                  aria-pressed={worldMapRoutesVisible}
+                  title={worldMapRoutesVisible ? '隐藏路线' : '展示路线'}
+                  onClick={() => setWorldMapRoutesVisible((visible) => !visible)}
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M5 18c2.2-4 3.2-7.4 7-7.4 3.1 0 3.1-4.6 7-4.6" />
+                    <circle cx="5" cy="18" r="1.8" />
+                    <circle cx="19" cy="6" r="1.8" />
+                  </svg>
+                </button>
+              )}
+            </div>
+            <div
+              className="timeline-scroll camp-timeline"
+              ref={timelineScrollRef}
+              tabIndex={-1}
+              aria-label="对话时间线"
+              hidden={conversationView !== 'conversation'}
+            >
+              <div className="timeline-track">
               {(() => {
                 const items: JSX.Element[] = []
                 let lastDayKey = ''
@@ -1710,6 +1777,17 @@ export function CampWorkspace({
                   onChoosePrompt={chooseStarterPrompt}
                 />
               )}
+              </div>
+            </div>
+            <div className="camp-world-map-panel" hidden={conversationView !== 'world'}>
+              <CampWorldMap
+                campId={snapshot.camp.id}
+                agents={worldMapProjection.agents}
+                rendezvous={worldMapProjection.rendezvous}
+                routesVisible={worldMapRoutesVisible}
+                active={conversationView === 'world'}
+                onOpenExecutionProcess={(agentId, trigger) => openExecutionProcess(agentId, trigger)}
+              />
             </div>
           </div>
           <RunPulse
