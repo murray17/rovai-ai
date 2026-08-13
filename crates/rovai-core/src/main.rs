@@ -184,12 +184,13 @@ use tokio::{
 
 const RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT: Duration = Duration::from_secs(2);
 const RUNTIME_CANCELLATION_FENCE_TIMEOUT: Duration = Duration::from_secs(1);
-const PLANNED_SHUTDOWN_PROTOCOL_VERSION: u32 = 1;
+const PLANNED_SHUTDOWN_PROTOCOL_VERSION: u32 = 2;
 const PLANNED_SHUTDOWN_MIN_DEADLINE_MS: u64 = 100;
 const PLANNED_SHUTDOWN_MAX_DEADLINE_MS: u64 = 30_000;
 const PLANNED_SHUTDOWN_CLEANUP_RESERVE: Duration = Duration::from_secs(2);
 const PLANNED_SHUTDOWN_OUTPUT_RESERVE: Duration = Duration::from_millis(250);
 const PLANNED_SHUTDOWN_GUARD_GRACE: Duration = Duration::from_millis(250);
+const PLANNED_SHUTDOWN_FENCE_SETTLEMENT_RESERVE: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -207,6 +208,9 @@ struct PlannedShutdownReport {
     active_executions_observed: usize,
     stop_requests_issued: usize,
     terminal_executions_settled: usize,
+    fenced_agent_runs_settled: usize,
+    unsettled_effect_agent_runs: usize,
+    controlled_shutdown_cycle_persisted: bool,
     unresolved_executions: usize,
 }
 
@@ -218,7 +222,7 @@ fn parse_planned_shutdown_params(value: Value) -> Result<PlannedShutdownParams> 
     let params = serde_json::from_value::<PlannedShutdownParams>(value)
         .context("planned shutdown params are invalid")?;
     if params.protocol_version != PLANNED_SHUTDOWN_PROTOCOL_VERSION {
-        anyhow::bail!("planned shutdown protocolVersion must be 1");
+        anyhow::bail!("planned shutdown protocolVersion must be 2");
     }
     if !(PLANNED_SHUTDOWN_MIN_DEADLINE_MS..=PLANNED_SHUTDOWN_MAX_DEADLINE_MS)
         .contains(&params.deadline_ms)
@@ -8021,6 +8025,17 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
     let _data_dir_lock = CoreDataDirLock::acquire(&data_dir)?;
     let mcp_config_path = parse_mcp_config_path()?;
     let mut database = Database::open(&data_dir)?;
+    let controlled_shutdown_recovery = ExecutionRuntimeService::default()
+        .recover_interrupted_controlled_shutdowns(&mut database)?;
+    if controlled_shutdown_recovery.cycles_settled != 0
+        || !controlled_shutdown_recovery.fenced_agent_runs.is_empty()
+    {
+        eprintln!(
+            "controlled shutdown startup recovery settled {} cycle(s) and fenced {} AgentRun(s)",
+            controlled_shutdown_recovery.cycles_settled,
+            controlled_shutdown_recovery.fenced_agent_runs.len(),
+        );
+    }
     SkillProjectionReconciler.synchronize_removed_execution_roots(
         &mut database,
         &parse_removed_skill_project_roots()?,
@@ -8094,6 +8109,18 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
     let bundled_skills_changed = skill_library.install_bundled_skills(&mut database)?;
     if bundled_skills_changed {
         SkillProjectionReconciler.mark_observed_roots_dirty(&mut database, false)?;
+    }
+    for execution_root in controlled_shutdown_recovery
+        .fenced_agent_runs
+        .iter()
+        .map(|run| run.execution_root.as_str())
+        .collect::<BTreeSet<_>>()
+    {
+        SkillProjectionReconciler.reconcile_after_run_terminal(
+            &mut database,
+            &skill_library,
+            Path::new(execution_root),
+        )?;
     }
     skill_library.cleanup_orphan_revisions(&database)?;
     mcp_projection.cleanup_terminal_and_orphaned(&database)?;
@@ -8364,8 +8391,41 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
                 cleanup_reserve / 4,
             ))
             .unwrap_or(deadline);
+        let fence_settlement_deadline = output_deadline
+            .checked_sub(std::cmp::min(
+                PLANNED_SHUTDOWN_FENCE_SETTLEMENT_RESERVE,
+                cleanup_reserve / 2,
+            ))
+            .unwrap_or(output_deadline);
         let mut deadline_expired = false;
 
+        // Persist the user's controlled-shutdown intent before the in-memory
+        // launch gate closes. A crash in either direction is therefore
+        // recoverable: every Run present before the next startup is fenced by
+        // this cycle, including a launch that was already crossing handoff.
+        let controlled_shutdown_cycle_persisted =
+            match tokio::time::timeout_at(settlement_deadline, async {
+                let mut database = core.database.lock().await;
+                ExecutionRuntimeService::default().record_controlled_shutdown_cycle(
+                    &mut database,
+                    core.planned_shutdown.generation(),
+                    PLANNED_SHUTDOWN_PROTOCOL_VERSION,
+                )
+            })
+            .await
+            {
+                Ok(Ok(())) => true,
+                Ok(Err(error)) => {
+                    eprintln!("controlled shutdown intent persistence failed: {error:#}");
+                    deadline_expired = true;
+                    false
+                }
+                Err(_) => {
+                    eprintln!("controlled shutdown intent persistence exceeded its deadline");
+                    deadline_expired = true;
+                    false
+                }
+            };
         // This store is the launch-admission linearization point. Worker stop
         // signals follow it, so no new recovery or scheduler launch can enter.
         core.planned_shutdown.close_launch_admission();
@@ -8456,24 +8516,40 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
             .close_terminal_and_runtime_route_admission();
         let _ = event_shutdown_tx.send(());
         let _ = acp_shutdown_tx.send(());
+        let _ = builtin_tool_shutdown_tx.send(());
         event_handle.abort();
         acp_event_handle.abort();
         let agent_tasks_aborted = core
             .abort_agent_run_tasks_now_until(std::cmp::min(
-                output_deadline,
+                fence_settlement_deadline,
                 tokio::time::Instant::now() + PLANNED_SHUTDOWN_GUARD_GRACE,
             ))
             .await;
         let (terminal_drained, routes_drained) = core
             .planned_shutdown
-            .drain_terminal_and_runtime_routes_until(output_deadline)
+            .drain_terminal_and_runtime_routes_until(fence_settlement_deadline)
             .await;
         if !terminal_drained || !routes_drained {
             deadline_expired = true;
         }
+        let builtin_tool_quiesced =
+            join_or_abort_until(&mut builtin_tool_handle, fence_settlement_deadline).await;
+        let builtin_tools_fenced = core
+            .builtin_tool_leases
+            .fence_all_until(fence_settlement_deadline)
+            .await
+            .is_some();
+        let agent_tasks_quiesced = agent_tasks_aborted
+            && core
+                .drain_agent_run_tasks_until(fence_settlement_deadline)
+                .await;
+        let event_quiesced =
+            join_or_abort_until(&mut event_handle, fence_settlement_deadline).await;
+        let acp_event_quiesced =
+            join_or_abort_until(&mut acp_event_handle, fence_settlement_deadline).await;
 
-        let unresolved_executions = match tokio::time::timeout_at(
-            output_deadline,
+        let unresolved_executions_before_fence = match tokio::time::timeout_at(
+            fence_settlement_deadline,
             core.planned_shutdown.active_snapshots(),
         )
         .await
@@ -8484,22 +8560,83 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
                 active_executions_observed
             }
         };
-        active_executions_observed = active_executions_observed.max(unresolved_executions);
+        active_executions_observed =
+            active_executions_observed.max(unresolved_executions_before_fence);
         let terminal_executions_settled =
-            active_executions_observed.saturating_sub(unresolved_executions);
-        let _ = builtin_tool_shutdown_tx.send(());
-        let builtin_tool_quiesced =
-            join_or_abort_until(&mut builtin_tool_handle, output_deadline).await;
-        let builtin_tools_fenced = core
-            .builtin_tool_leases
-            .fence_all_until(output_deadline)
-            .await
-            .is_some();
-        let agent_tasks_quiesced =
-            agent_tasks_aborted && core.drain_agent_run_tasks_until(output_deadline).await;
+            active_executions_observed.saturating_sub(unresolved_executions_before_fence);
+        let fence_prerequisites_quiesced = controlled_shutdown_cycle_persisted
+            && launch_quiesced
+            && terminal_drained
+            && routes_drained
+            && runtime_discovery_quiesced
+            && background_requests_quiesced
+            && scheduler_quiesced
+            && runtime_checks_quiesced
+            && fleet_sweeper_quiesced
+            && builtin_tool_quiesced
+            && builtin_tools_fenced
+            && agent_tasks_quiesced
+            && event_quiesced
+            && acp_event_quiesced;
+        let controlled_fence_settlement = if fence_prerequisites_quiesced {
+            Some(
+                tokio::time::timeout_at(output_deadline, async {
+                    let mut database = core.database.lock().await;
+                    ExecutionRuntimeService::default().settle_controlled_shutdown_cycle(
+                        &mut database,
+                        core.planned_shutdown.generation(),
+                    )
+                })
+                .await,
+            )
+        } else {
+            eprintln!(
+                "controlled shutdown left its durable cycle pending because execution writers did not quiesce"
+            );
+            deadline_expired = true;
+            None
+        };
+        let (fenced_agent_runs_settled, unsettled_effect_agent_runs) =
+            match controlled_fence_settlement {
+                Some(Ok(Ok(settlement))) => {
+                    let unsettled = settlement
+                        .fenced_agent_runs
+                        .iter()
+                        .filter(|run| run.has_unsettled_external_effects)
+                        .count();
+                    (settlement.fenced_agent_runs.len(), unsettled)
+                }
+                Some(Ok(Err(error))) => {
+                    eprintln!("controlled shutdown fence settlement failed: {error:#}");
+                    deadline_expired = true;
+                    (0, 0)
+                }
+                Some(Err(_)) => {
+                    eprintln!("controlled shutdown fence settlement exceeded its deadline");
+                    deadline_expired = true;
+                    (0, 0)
+                }
+                None => (0, 0),
+            };
+        let unresolved_executions = match tokio::time::timeout_at(output_deadline, async {
+            let database = core.database.lock().await;
+            ExecutionRuntimeService::default().count_nonterminal_agent_runs(&database)
+        })
+        .await
+        {
+            Ok(Ok(count)) => count,
+            Ok(Err(error)) => {
+                eprintln!("controlled shutdown could not count unresolved AgentRuns: {error:#}");
+                deadline_expired = true;
+                unresolved_executions_before_fence
+            }
+            Err(_) => {
+                eprintln!("controlled shutdown unresolved AgentRun count exceeded its deadline");
+                deadline_expired = true;
+                unresolved_executions_before_fence
+            }
+        };
         let runtimes_quiesced = core.shutdown_all_runtimes_until(output_deadline).await;
-        let event_quiesced = join_or_abort_until(&mut event_handle, output_deadline).await;
-        let acp_event_quiesced = join_or_abort_until(&mut acp_event_handle, output_deadline).await;
 
         deadline_expired |= tokio::time::Instant::now() >= deadline
             || !launch_quiesced
@@ -8526,6 +8663,9 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
             active_executions_observed,
             stop_requests_issued,
             terminal_executions_settled,
+            fenced_agent_runs_settled,
+            unsettled_effect_agent_runs,
+            controlled_shutdown_cycle_persisted,
             unresolved_executions,
         };
         enqueue_response(
@@ -11292,14 +11432,14 @@ mod tests {
     #[test]
     fn planned_shutdown_request_is_closed_versioned_and_bounded() {
         let valid = parse_planned_shutdown_params(json!({
-            "protocolVersion": 1,
+            "protocolVersion": 2,
             "deadlineMs": 10_000,
         }))
         .unwrap();
         assert_eq!(valid.deadline_ms, 10_000);
         assert!(
             parse_planned_shutdown_params(json!({
-                "protocolVersion": 2,
+                "protocolVersion": 1,
                 "deadlineMs": 10_000,
             }))
             .unwrap_err()
@@ -11308,7 +11448,7 @@ mod tests {
         );
         assert!(
             parse_planned_shutdown_params(json!({
-                "protocolVersion": 1,
+                "protocolVersion": 2,
                 "deadlineMs": 99,
             }))
             .unwrap_err()
@@ -11317,7 +11457,7 @@ mod tests {
         );
         assert!(
             parse_planned_shutdown_params(json!({
-                "protocolVersion": 1,
+                "protocolVersion": 2,
                 "deadlineMs": 10_000,
                 "rendererAuthority": true,
             }))

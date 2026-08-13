@@ -229,7 +229,7 @@ export function ControlledShutdownOverlay(): React.JSX.Element {
           <p className="settings-page-eyebrow">CONTROLLED SHUTDOWN</p>
           <h2 id="controlled-shutdown-title">正在停止运行并关闭 Rovai…</h2>
           <p id="controlled-shutdown-description">
-            正在等待 Runtime 返回可靠终态；无法确认的执行会保留现场，供下次启动核对。
+            正在等待 Runtime 返回可靠终态；无法确认的执行也会停止，并保留外部效果现场供下次核对。
           </p>
         </div>
       </section>

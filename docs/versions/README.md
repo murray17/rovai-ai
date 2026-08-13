@@ -122,4 +122,4 @@ last_updated: 2026-08-13
 | v0.68 | `historical` | Opportunity-based Tool-use 测量、独立 LLM Judge 与 Team/Solo 配对协作价值协议 | [v0.68/README.md](v0.68/README.md) |
 | v0.69 | `historical` | Planned Shutdown launch/terminal 线性化、waiting 终态与硬期限正确性修正 | [v0.69/README.md](v0.69/README.md) |
 | v0.70 | `historical` | 消息局部 User Attention 教学收窄、Camp 标题去噪、十项 official Skill inventory 与 Built-in Tool Transport v8；九 Runtime v8 matrix 未执行即关闭 | [v0.70/README.md](v0.70/README.md) |
-| v0.71 | `current` | Core-owned Notification Episode；Campfire 与系统必需 operational Skill 管理 | [v0.71/README.md](v0.71/README.md) |
+| v0.71 | `current` | Core-owned Notification Episode；Campfire、系统必需 operational Skill 管理与受控关闭终态收敛 | [v0.71/README.md](v0.71/README.md) |

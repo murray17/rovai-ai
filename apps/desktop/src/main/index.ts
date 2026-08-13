@@ -775,7 +775,10 @@ app.on('before-quit', (event) => {
     })
     .finally(() => {
       quitDrainCompleted = true
-      app.quit()
+      // The first native quit cycle was intentionally cancelled while Core
+      // drained. Core has now exited, so finish without a second native
+      // termination negotiation extending the bounded shutdown window.
+      app.exit(0)
     })
 })
 

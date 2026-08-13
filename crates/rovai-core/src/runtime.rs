@@ -304,6 +304,27 @@ pub struct PlannedShutdownTerminalSettlement {
     pub already_settled: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControlledShutdownFencedAgentRun {
+    pub agent_run_id: String,
+    pub execution_epoch: i64,
+    pub execution_root: String,
+    pub has_unsettled_external_effects: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControlledShutdownCycleSettlement {
+    pub core_generation: String,
+    pub fenced_agent_runs: Vec<ControlledShutdownFencedAgentRun>,
+    pub already_settled: bool,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ControlledShutdownStartupRecovery {
+    pub cycles_settled: usize,
+    pub fenced_agent_runs: Vec<ControlledShutdownFencedAgentRun>,
+}
+
 impl sealed::Sealed for FailAgentRunCommand {}
 impl DomainCommand for FailAgentRunCommand {
     const TYPE: &'static str = "agent_run.fail";
@@ -3425,6 +3446,299 @@ impl ExecutionRuntimeService {
         Ok(execution)
     }
 
+    pub fn record_controlled_shutdown_cycle(
+        &self,
+        database: &mut Database,
+        core_generation: &str,
+        protocol_version: u32,
+    ) -> Result<()> {
+        if core_generation.trim().is_empty() {
+            anyhow::bail!("controlled shutdown core generation must not be empty");
+        }
+        if protocol_version != 2 {
+            anyhow::bail!("controlled shutdown cycle requires protocol version 2");
+        }
+        let transaction = database
+            .connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let requested_at = chrono::Utc::now().to_rfc3339();
+        transaction.execute(
+            r#"
+            INSERT OR IGNORE INTO planned_shutdown_cycle(
+                core_generation, protocol_version, requested_at
+            ) VALUES (?1, ?2, ?3)
+            "#,
+            params![core_generation, protocol_version, requested_at],
+        )?;
+        let persisted_protocol: i64 = transaction.query_row(
+            "SELECT protocol_version FROM planned_shutdown_cycle WHERE core_generation = ?1",
+            [core_generation],
+            |row| row.get(0),
+        )?;
+        if persisted_protocol != i64::from(protocol_version) {
+            anyhow::bail!("controlled shutdown cycle has a conflicting protocol version");
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn recover_interrupted_controlled_shutdowns(
+        &self,
+        database: &mut Database,
+    ) -> Result<ControlledShutdownStartupRecovery> {
+        let generations = {
+            let mut statement = database.connection().prepare(
+                r#"
+                SELECT core_generation
+                FROM planned_shutdown_cycle
+                WHERE settled_at IS NULL
+                ORDER BY requested_at, core_generation
+                "#,
+            )?;
+            statement
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let mut recovery = ControlledShutdownStartupRecovery::default();
+        for generation in generations {
+            let settlement = self.settle_controlled_shutdown_cycle(database, &generation)?;
+            if !settlement.already_settled {
+                recovery.cycles_settled += 1;
+            }
+            recovery
+                .fenced_agent_runs
+                .extend(settlement.fenced_agent_runs);
+        }
+        Ok(recovery)
+    }
+
+    pub fn count_nonterminal_agent_runs(&self, database: &Database) -> Result<usize> {
+        let count: i64 = database.connection().query_row(
+            "SELECT COUNT(*) FROM agent_run WHERE status IN ('queued', 'running', 'waiting')",
+            [],
+            |row| row.get(0),
+        )?;
+        usize::try_from(count).context("non-terminal AgentRun count is invalid")
+    }
+
+    pub fn settle_controlled_shutdown_cycle(
+        &self,
+        database: &mut Database,
+        core_generation: &str,
+    ) -> Result<ControlledShutdownCycleSettlement> {
+        let transaction = database
+            .connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let cycle = transaction
+            .query_row(
+                r#"
+                SELECT protocol_version, settled_at
+                FROM planned_shutdown_cycle
+                WHERE core_generation = ?1
+                "#,
+                [core_generation],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
+            .optional()?
+            .context("controlled shutdown cycle does not exist")?;
+        if cycle.0 != 2 {
+            anyhow::bail!("controlled shutdown cycle protocol is unsupported");
+        }
+        if cycle.1.is_some() {
+            transaction.commit()?;
+            return Ok(ControlledShutdownCycleSettlement {
+                core_generation: core_generation.to_string(),
+                fenced_agent_runs: Vec::new(),
+                already_settled: true,
+            });
+        }
+
+        let targets = {
+            let mut statement = transaction.prepare(
+                r#"
+                SELECT agent_run.id, camp_turn.camp_id, agent_run.camp_turn_id,
+                       agent_run.execution_epoch, agent_run.cancel_reason_code,
+                       COALESCE(
+                           json_extract(agent_run.workspace_json, '$.executionRoot'),
+                           camp.project_path
+                       )
+                FROM agent_run
+                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                JOIN camp ON camp.id = camp_turn.camp_id
+                WHERE agent_run.status IN ('queued', 'running', 'waiting')
+                ORDER BY agent_run.created_at, agent_run.id
+                "#,
+            )?;
+            statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, String>(5)?,
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let actor = ActorRef::System {
+            component_id: "controlled-shutdown-fence".to_string(),
+        };
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut camp_turns = BTreeSet::new();
+        let mut fenced_agent_runs = Vec::with_capacity(targets.len());
+
+        for (
+            agent_run_id,
+            camp_id,
+            camp_turn_id,
+            execution_epoch,
+            cancel_reason_code,
+            execution_root,
+        ) in targets
+        {
+            let effect_closure = close_abortive_run_effects(
+                &transaction,
+                &agent_run_id,
+                &now,
+                AbortiveEffectClosureReason::controlled_shutdown_fence(),
+            )?;
+            let has_unsettled_external_effects: bool = transaction.query_row(
+                r#"
+                SELECT
+                    EXISTS(
+                        SELECT 1 FROM action_execution
+                        WHERE agent_run_id = ?1
+                          AND status = 'unknown'
+                          AND unknown_disposition = 'active'
+                    )
+                    OR EXISTS(
+                        SELECT 1 FROM runtime_input_delivery
+                        WHERE agent_run_id = ?1
+                          AND status IN ('accepted', 'delivery_unknown')
+                    )
+                "#,
+                [&agent_run_id],
+                |row| row.get(0),
+            )?;
+            let error_code = if has_unsettled_external_effects {
+                "planned_shutdown_outcome_unknown"
+            } else {
+                "planned_shutdown_cancelled"
+            };
+            let reason_code = cancel_reason_code
+                .as_deref()
+                .unwrap_or("planned_shutdown_cancelled");
+            let error_details_ref = json!({
+                "reason": "controlled_app_shutdown",
+                "coreGeneration": core_generation,
+                "hasUnsettledExternalEffects": has_unsettled_external_effects,
+            })
+            .to_string();
+            let updated = transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'cancelled', wait_reason = NULL, wait_deadline_at = NULL,
+                    runtime_recovery_required = 0,
+                    execution_lease_owner = NULL, execution_lease_expires_at = NULL,
+                    terminal_resolution_source = NULL, terminal_reason_code = NULL,
+                    last_error_code = ?2, last_error_details_ref = ?3,
+                    manual_retry_allowed = 0,
+                    cancel_acknowledged_at = CASE
+                        WHEN cancel_requested_at IS NOT NULL
+                        THEN COALESCE(cancel_acknowledged_at, ?4)
+                        ELSE cancel_acknowledged_at
+                    END,
+                    ended_at = ?4, version = version + 1, updated_at = ?4
+                WHERE id = ?1 AND status IN ('queued', 'running', 'waiting')
+                  AND execution_epoch = ?5
+                "#,
+                params![
+                    agent_run_id,
+                    error_code,
+                    error_details_ref,
+                    now,
+                    execution_epoch,
+                ],
+            )?;
+            if updated != 1 {
+                anyhow::bail!("AgentRun changed inside controlled shutdown fence settlement");
+            }
+            append_domain_event(
+                &transaction,
+                "agent_run.cancelled",
+                &camp_id,
+                ("agent_run", &agent_run_id),
+                &actor,
+                Some(execution_epoch),
+                &json!({
+                    "reasonCode": reason_code,
+                    "errorCode": error_code,
+                    "resolutionSource": "controlled_shutdown_fence",
+                    "coreGeneration": core_generation,
+                    "hasUnsettledExternalEffects": has_unsettled_external_effects,
+                    "actionsMarkedUnknown": effect_closure.actions_marked_unknown,
+                    "actionsClosed": effect_closure.actions_closed,
+                    "approvalsCancelled": effect_closure.approvals_cancelled,
+                    "deliveriesClosed": effect_closure.deliveries_closed,
+                    "preparedInputsClosed": effect_closure.prepared_inputs_closed,
+                }),
+            )?;
+            settle_materialized_delivery_for_agent_run(
+                &transaction,
+                AgentRunDeliverySettlement {
+                    agent_run_id: &agent_run_id,
+                    agent_run_status: "cancelled",
+                    agent_run_error_code: Some(error_code),
+                    terminal_resolution_source: None,
+                    terminal_reason_code: None,
+                    actor: &actor,
+                    execution_epoch: Some(execution_epoch),
+                    now: &now,
+                },
+            )?;
+            camp_turns.insert((camp_id, camp_turn_id));
+            fenced_agent_runs.push(ControlledShutdownFencedAgentRun {
+                agent_run_id,
+                execution_epoch,
+                execution_root,
+                has_unsettled_external_effects,
+            });
+        }
+
+        for (camp_id, camp_turn_id) in camp_turns {
+            recompute_camp_turn(&transaction, &camp_id, &camp_turn_id, &actor, None, &now)?;
+        }
+        let unsettled_effect_agent_run_count = fenced_agent_runs
+            .iter()
+            .filter(|run| run.has_unsettled_external_effects)
+            .count();
+        let updated = transaction.execute(
+            r#"
+            UPDATE planned_shutdown_cycle
+            SET settled_at = ?2, fenced_agent_run_count = ?3,
+                unsettled_effect_agent_run_count = ?4
+            WHERE core_generation = ?1 AND settled_at IS NULL
+            "#,
+            params![
+                core_generation,
+                now,
+                fenced_agent_runs.len() as i64,
+                unsettled_effect_agent_run_count as i64,
+            ],
+        )?;
+        if updated != 1 {
+            anyhow::bail!("controlled shutdown cycle changed before settlement");
+        }
+        transaction.commit()?;
+        Ok(ControlledShutdownCycleSettlement {
+            core_generation: core_generation.to_string(),
+            fenced_agent_runs,
+            already_settled: false,
+        })
+    }
+
     pub fn settle_planned_shutdown_abortive_terminal(
         &self,
         database: &mut Database,
@@ -3606,6 +3920,13 @@ struct AbortiveEffectClosureReason<'a> {
     approval_resolver_id: &'a str,
     runtime_delivery_error: &'a str,
     prepared_input_error: &'a str,
+    prepared_input_disposition: AbortivePreparedInputDisposition,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum AbortivePreparedInputDisposition {
+    NotAccepted,
+    DeliveryUnknown,
 }
 
 impl AbortiveEffectClosureReason<'static> {
@@ -3617,6 +3938,7 @@ impl AbortiveEffectClosureReason<'static> {
             approval_resolver_id: "runtime-cancellation-coordinator",
             runtime_delivery_error: "agent_run_cancelled",
             prepared_input_error: "agent_run_cancelled",
+            prepared_input_disposition: AbortivePreparedInputDisposition::NotAccepted,
         }
     }
 
@@ -3628,6 +3950,19 @@ impl AbortiveEffectClosureReason<'static> {
             approval_resolver_id: "planned-shutdown-coordinator",
             runtime_delivery_error: "planned_shutdown_runtime_terminal",
             prepared_input_error: "planned_shutdown_runtime_terminal",
+            prepared_input_disposition: AbortivePreparedInputDisposition::NotAccepted,
+        }
+    }
+
+    const fn controlled_shutdown_fence() -> Self {
+        Self {
+            action_unknown_error_code: "controlled_shutdown_fenced_after_dispatch",
+            action_not_executed_reason: "controlled_shutdown_fenced",
+            approval_reason: "controlled_shutdown_fenced",
+            approval_resolver_id: "controlled-shutdown-fence",
+            runtime_delivery_error: "controlled_shutdown_fenced",
+            prepared_input_error: "controlled_shutdown_before_input_accepted",
+            prepared_input_disposition: AbortivePreparedInputDisposition::DeliveryUnknown,
         }
     }
 }
@@ -3720,15 +4055,26 @@ fn close_abortive_run_effects(
         "#,
         params![agent_run_id, now, reason.runtime_delivery_error],
     )?;
-    let prepared_inputs_closed = transaction.execute(
-        r#"
-        UPDATE runtime_input_delivery
-        SET status = 'not_accepted', resolved_at = ?2,
-            last_error = ?3, updated_at = ?2
-        WHERE agent_run_id = ?1 AND status = 'prepared'
-        "#,
-        params![agent_run_id, now, reason.prepared_input_error],
-    )?;
+    let prepared_inputs_closed = match reason.prepared_input_disposition {
+        AbortivePreparedInputDisposition::NotAccepted => transaction.execute(
+            r#"
+            UPDATE runtime_input_delivery
+            SET status = 'not_accepted', resolved_at = ?2,
+                last_error = ?3, updated_at = ?2
+            WHERE agent_run_id = ?1 AND status = 'prepared'
+            "#,
+            params![agent_run_id, now, reason.prepared_input_error],
+        )?,
+        AbortivePreparedInputDisposition::DeliveryUnknown => transaction.execute(
+            r#"
+            UPDATE runtime_input_delivery
+            SET status = 'delivery_unknown', resolved_at = NULL,
+                last_error = ?3, updated_at = ?2
+            WHERE agent_run_id = ?1 AND status = 'prepared'
+            "#,
+            params![agent_run_id, now, reason.prepared_input_error],
+        )?,
+    };
     Ok(AbortiveEffectClosure {
         actions_marked_unknown,
         actions_closed,
@@ -4788,6 +5134,7 @@ mod tests {
             ActiveExecutionKey, PlannedShutdownCoordinator, RuntimeRouteBinding,
             RuntimeTerminalAdmission, RuntimeTerminalObservation,
         },
+        read_model::ReadModelService,
     };
     use std::path::PathBuf;
 
@@ -5371,6 +5718,49 @@ mod tests {
         assert_eq!(updated, 1);
     }
 
+    fn insert_test_runtime_input(
+        database: &Database,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        status: &str,
+    ) {
+        let now = chrono::Utc::now().to_rfc3339();
+        database
+            .connection()
+            .execute_batch("PRAGMA foreign_keys = OFF;")
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO runtime_input_delivery(
+                    id, agent_run_id, execution_epoch, context_manifest_id,
+                    native_binding_id, native_binding_generation,
+                    boundary_camp_message_sequence, dynamic_payload_digest,
+                    status, native_input_id, prepared_at, accepted_at,
+                    resolved_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, 1, 1, ?6, ?7, ?8, ?9, ?10, ?10, ?9)
+                "#,
+                params![
+                    format!("test-input-{agent_run_id}"),
+                    agent_run_id,
+                    execution_epoch,
+                    format!("test-manifest-{agent_run_id}"),
+                    format!("test-binding-{agent_run_id}"),
+                    format!("sha256:{agent_run_id}"),
+                    status,
+                    (status == "accepted").then(|| format!("native-input-{agent_run_id}")),
+                    now,
+                    (status == "accepted").then_some(now.as_str()),
+                ],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute_batch("PRAGMA foreign_keys = ON;")
+            .unwrap();
+    }
+
     async fn planned_terminal_permit(
         agent_run_id: &str,
         execution_epoch: i64,
@@ -5470,6 +5860,203 @@ mod tests {
             drop(database);
             std::fs::remove_dir_all(directory).unwrap();
         }
+    }
+
+    #[test]
+    fn controlled_shutdown_fence_terminalizes_accepted_input_without_erasing_uncertainty() {
+        struct ControlledShutdownState {
+            run_status: String,
+            wait_reason: Option<String>,
+            terminal_resolution_source: Option<String>,
+            terminal_reason_code: Option<String>,
+            last_error_code: String,
+            input_delivery_status: String,
+            aggregate_reason_code: Option<String>,
+        }
+
+        let (directory, mut database, camp_id, camp_turn_id, agent_run_id, execution_epoch) =
+            claimed_run_for_planned_shutdown("required");
+        insert_test_runtime_input(&database, &agent_run_id, execution_epoch, "accepted");
+        let service = ExecutionRuntimeService::default();
+        service
+            .record_controlled_shutdown_cycle(&mut database, "generation-accepted", 2)
+            .unwrap();
+        let settlement = service
+            .settle_controlled_shutdown_cycle(&mut database, "generation-accepted")
+            .unwrap();
+        assert!(!settlement.already_settled);
+        assert_eq!(settlement.fenced_agent_runs.len(), 1);
+        assert!(settlement.fenced_agent_runs[0].has_unsettled_external_effects);
+
+        let state: ControlledShutdownState = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT agent_run.status, agent_run.wait_reason,
+                       agent_run.terminal_resolution_source,
+                       agent_run.terminal_reason_code,
+                       agent_run.last_error_code,
+                       runtime_input_delivery.status,
+                       camp_turn.aggregate_reason_code
+                FROM agent_run
+                JOIN runtime_input_delivery
+                  ON runtime_input_delivery.agent_run_id = agent_run.id
+                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                WHERE agent_run.id = ?1
+                "#,
+                [&agent_run_id],
+                |row| {
+                    Ok(ControlledShutdownState {
+                        run_status: row.get(0)?,
+                        wait_reason: row.get(1)?,
+                        terminal_resolution_source: row.get(2)?,
+                        terminal_reason_code: row.get(3)?,
+                        last_error_code: row.get(4)?,
+                        input_delivery_status: row.get(5)?,
+                        aggregate_reason_code: row.get(6)?,
+                    })
+                },
+            )
+            .unwrap();
+        assert_eq!(state.run_status, "cancelled");
+        assert!(
+            state.wait_reason.is_none()
+                && state.terminal_resolution_source.is_none()
+                && state.terminal_reason_code.is_none()
+        );
+        assert_eq!(state.last_error_code, "planned_shutdown_outcome_unknown");
+        assert_eq!(state.input_delivery_status, "accepted");
+        assert_eq!(
+            state.aggregate_reason_code.as_deref(),
+            Some("required_run_incomplete")
+        );
+
+        let snapshot = ReadModelService
+            .camp_snapshot(&mut database, &camp_id)
+            .unwrap();
+        let run = snapshot
+            .agent_runs
+            .iter()
+            .find(|run| run.id == agent_run_id)
+            .unwrap();
+        assert_eq!(run.status, "cancelled");
+        assert!(run.has_unsettled_external_effects);
+        let turn = snapshot
+            .turns
+            .iter()
+            .find(|turn| turn.id == camp_turn_id)
+            .unwrap();
+        assert_eq!(turn.status, "failed");
+
+        let replay = service
+            .settle_controlled_shutdown_cycle(&mut database, "generation-accepted")
+            .unwrap();
+        assert!(replay.already_settled);
+        assert!(replay.fenced_agent_runs.is_empty());
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn controlled_shutdown_fence_closes_an_existing_accepted_input_recovery_blocker() {
+        let (directory, mut database, camp_id, _camp_turn_id, agent_run_id, execution_epoch) =
+            claimed_run_for_planned_shutdown("required");
+        insert_test_runtime_input(&database, &agent_run_id, execution_epoch, "accepted");
+        let recovery = database.prepare_v2_recovery().unwrap();
+        assert_eq!(recovery.accepted_input_recovery_blockers_created, 1);
+        let before: (String, Option<String>, i64) = database
+            .connection()
+            .query_row(
+                "SELECT status, wait_reason, runtime_recovery_required FROM agent_run WHERE id = ?1",
+                [&agent_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(before.0, "waiting");
+        assert_eq!(before.1.as_deref(), Some("recovery_blocked"));
+        assert_eq!(before.2, 0);
+
+        let service = ExecutionRuntimeService::default();
+        service
+            .record_controlled_shutdown_cycle(&mut database, "generation-existing-blocker", 2)
+            .unwrap();
+        let settlement = service
+            .settle_controlled_shutdown_cycle(&mut database, "generation-existing-blocker")
+            .unwrap();
+        assert_eq!(settlement.fenced_agent_runs.len(), 1);
+        let after: (String, Option<String>, i64, String) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT status, wait_reason, runtime_recovery_required, last_error_code
+                FROM agent_run WHERE id = ?1
+                "#,
+                [&agent_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(after.0, "cancelled");
+        assert!(after.1.is_none());
+        assert_eq!(after.2, 0);
+        assert_eq!(after.3, "planned_shutdown_outcome_unknown");
+        let snapshot = ReadModelService
+            .camp_snapshot(&mut database, &camp_id)
+            .unwrap();
+        let run = snapshot
+            .agent_runs
+            .iter()
+            .find(|run| run.id == agent_run_id)
+            .unwrap();
+        assert!(run.has_unsettled_external_effects);
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn controlled_shutdown_startup_recovery_converges_prepared_input_to_terminal_unknown() {
+        let (directory, mut database, _camp_id, _camp_turn_id, agent_run_id, execution_epoch) =
+            claimed_run_for_planned_shutdown("required");
+        insert_test_runtime_input(&database, &agent_run_id, execution_epoch, "prepared");
+        let service = ExecutionRuntimeService::default();
+        service
+            .record_controlled_shutdown_cycle(&mut database, "generation-interrupted", 2)
+            .unwrap();
+
+        let recovery = service
+            .recover_interrupted_controlled_shutdowns(&mut database)
+            .unwrap();
+        assert_eq!(recovery.cycles_settled, 1);
+        assert_eq!(recovery.fenced_agent_runs.len(), 1);
+        assert!(recovery.fenced_agent_runs[0].has_unsettled_external_effects);
+        let state: (String, String, String, Option<String>) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT agent_run.status, agent_run.last_error_code,
+                       runtime_input_delivery.status,
+                       runtime_input_delivery.resolved_at
+                FROM agent_run
+                JOIN runtime_input_delivery
+                  ON runtime_input_delivery.agent_run_id = agent_run.id
+                WHERE agent_run.id = ?1
+                "#,
+                [&agent_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(state.0, "cancelled");
+        assert_eq!(state.1, "planned_shutdown_outcome_unknown");
+        assert_eq!(state.2, "delivery_unknown");
+        assert!(state.3.is_none());
+
+        let replay = service
+            .recover_interrupted_controlled_shutdowns(&mut database)
+            .unwrap();
+        assert_eq!(replay.cycles_settled, 0);
+        assert!(replay.fenced_agent_runs.is_empty());
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[tokio::test]

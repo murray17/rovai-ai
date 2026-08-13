@@ -84,7 +84,8 @@ try {
     `Packaged App did not own the expected Core/Runtime process tree: ${liveDescendantPids.join(', ')}`)
 
   const shutdownStartedAt = Date.now()
-  const browserClose = firstApp.cdp.send('Browser.close').catch(() => undefined)
+  const quitRequest = requestAppQuit(firstApp)
+  trace(`normal quit requested for pid ${firstApp.child.pid}`)
   await waitForExpression(firstApp.cdp, `Boolean(document.querySelector('.shutdown-scrim'))`, 3_000, 20)
 
   const dayOverlay = await collectShutdownOverlay(firstApp.cdp, 'day', 1040, 700, 1)
@@ -114,8 +115,9 @@ try {
   await capture(firstApp.cdp, zoomCapture)
 
   const firstExit = await waitForChildExit(firstApp.child, 18_000)
+  trace(`packaged App exited: ${JSON.stringify(firstExit)}`)
   const shutdownElapsedMs = Date.now() - shutdownStartedAt
-  await browserClose
+  await quitRequest
   firstApp.cdp.close()
   const firstShutdownResult = parseShutdownResult(firstApp.stderr)
   firstApp = null
@@ -123,22 +125,30 @@ try {
     `Packaged App did not exit naturally after controlled shutdown: ${JSON.stringify(firstExit)}`)
   assert(firstShutdownResult?.forcedSignal === null && firstShutdownResult?.report?.status === 'completed',
     `Desktop did not observe a natural Core shutdown report: ${JSON.stringify(firstShutdownResult)}`)
+  assert(firstShutdownResult.report.protocolVersion === 2
+    && firstShutdownResult.report.controlledShutdownCyclePersisted === true
+    && firstShutdownResult.report.fencedAgentRunsSettled >= 1
+    && firstShutdownResult.report.unsettledEffectAgentRuns >= 1
+    && firstShutdownResult.report.unresolvedExecutions === 0,
+  `Controlled shutdown did not fence its unresolved AgentRun: ${JSON.stringify(firstShutdownResult.report)}`)
   assert(shutdownElapsedMs <= shutdownDeadlineMs + 3_000 && shutdownElapsedMs < 18_000,
     `Controlled shutdown did not honor its bounded Core deadline: ${shutdownElapsedMs}ms`)
   await assertProcessesExited(liveDescendantPids)
 
   const afterShutdown = await readRunFacts(agentRunId)
   assert(afterShutdown.run
-    && ['running', 'waiting'].includes(afterShutdown.run.status)
+    && afterShutdown.run.status === 'cancelled'
     && afterShutdown.run.cancel_requested_at === null
     && afterShutdown.run.terminal_resolution_source === null
     && afterShutdown.run.terminal_reason_code === null
-    && afterShutdown.run.ended_at === null,
-  `Process interruption fabricated an AgentRun terminal: ${JSON.stringify(afterShutdown.run)}`)
+    && afterShutdown.run.last_error_code === 'planned_shutdown_outcome_unknown'
+    && afterShutdown.run.ended_at !== null,
+  `Controlled shutdown did not terminalize the unresolved AgentRun honestly: ${JSON.stringify(afterShutdown.run)}`)
   assert(afterShutdown.delivery?.status === 'accepted',
     `Controlled shutdown changed accepted input evidence: ${JSON.stringify(afterShutdown.delivery)}`)
   assert(afterShutdown.turn?.cancel_requested_at === null
-    && afterShutdown.turn?.status !== 'cancelled',
+    && afterShutdown.turn?.status === 'failed'
+    && afterShutdown.turn?.aggregate_reason_code === 'required_run_incomplete',
   `Planned shutdown leaked into CampTurn cancellation: ${JSON.stringify(afterShutdown.turn)}`)
 
   recoveredApp = await launchApp(await availablePort(), 1040, 700)
@@ -146,27 +156,28 @@ try {
   const recoveredSnapshot = await waitFor(async () => {
     const snapshot = await recoveredRequest('camps.snapshot', { campId })
     const run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
-    return run?.status === 'waiting' && run.waitReason === 'recovery_blocked'
+    return run?.status === 'cancelled' && run.hasUnsettledExternalEffects === true
       ? snapshot
       : null
-  }, 'accepted-input recovery blocker after restart', 45_000, 100)
+  }, 'controlled-shutdown terminal after restart', 45_000, 100)
   const recoveredRun = recoveredSnapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
   assert(recoveredRun?.executionEpoch === 1
+    && recoveredRun.waitReason === null
     && recoveredRun.terminalResolutionSource === null
     && recoveredRun.terminalReasonCode === null,
-  `Restart changed the unresolved execution identity or terminal proof: ${JSON.stringify(recoveredRun)}`)
+  `Restart changed the fenced execution identity or fabricated Runtime terminal proof: ${JSON.stringify(recoveredRun)}`)
   await openCamp(recoveredApp.cdp, campId)
   await openAgentProcess(recoveredApp.cdp, agentId)
-  const blocker = await collectRecoveryBlocker(recoveredApp.cdp)
-  const blockerCapture = join(outputDir, 'planned-shutdown-recovery-blocker.png')
-  await capture(recoveredApp.cdp, blockerCapture)
+  const terminal = await collectFencedTerminal(recoveredApp.cdp)
+  const terminalCapture = join(outputDir, 'planned-shutdown-fenced-terminal.png')
+  await capture(recoveredApp.cdp, terminalCapture)
 
   const recoveredDescendantPids = await descendantProcessIds(recoveredApp.child.pid)
   const recoveredShutdownStartedAt = Date.now()
-  const recoveredClose = recoveredApp.cdp.send('Browser.close').catch(() => undefined)
+  const recoveredQuitRequest = requestAppQuit(recoveredApp)
   const recoveredExit = await waitForChildExit(recoveredApp.child, 18_000)
   const recoveredShutdownElapsedMs = Date.now() - recoveredShutdownStartedAt
-  await recoveredClose
+  await recoveredQuitRequest
   recoveredApp.cdp.close()
   const recoveredShutdownResult = parseShutdownResult(recoveredApp.stderr)
   recoveredApp = null
@@ -180,13 +191,13 @@ try {
   await assertProcessesExited(recoveredDescendantPids)
 
   const finalFacts = await readRunFacts(agentRunId)
-  assert(finalFacts.run?.status === 'waiting'
-    && finalFacts.run.wait_reason === 'recovery_blocked'
-    && finalFacts.run.last_error_code === 'accepted_input_outcome_unknown'
+  assert(finalFacts.run?.status === 'cancelled'
+    && finalFacts.run.wait_reason === null
+    && finalFacts.run.last_error_code === 'planned_shutdown_outcome_unknown'
     && finalFacts.run.cancel_requested_at === null
     && finalFacts.run.terminal_resolution_source === null
     && finalFacts.run.terminal_reason_code === null,
-  `Restart did not preserve the accepted-input recovery blocker: ${JSON.stringify(finalFacts.run)}`)
+  `Restart did not preserve the controlled-shutdown terminal: ${JSON.stringify(finalFacts.run)}`)
 
   const report = {
     ok: true,
@@ -208,14 +219,16 @@ try {
       report: firstShutdownResult.report,
       recoveredReport: recoveredShutdownResult.report,
       observedDescendantProcesses: liveDescendantPids.length,
-      terminalFabricated: false,
+      runtimeTerminalFabricated: false,
+      executionFencedTerminal: true,
       campTurnCancellationWritten: false
     },
     recovery: {
       status: recoveredRun.status,
       waitReason: recoveredRun.waitReason,
       executionEpoch: recoveredRun.executionEpoch,
-      blocker
+      hasUnsettledExternalEffects: recoveredRun.hasUnsettledExternalEffects,
+      terminal
     },
     overlays: {
       day: dayOverlay,
@@ -226,13 +239,19 @@ try {
       day: dayCapture,
       night: nightCapture,
       zoom200: zoomCapture,
-      recoveryBlocker: blockerCapture
+      fencedTerminal: terminalCapture
     }
   }
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`)
   console.log(JSON.stringify({ ...report, reportPath }, null, 2))
   failed = false
 } finally {
+  if (failed && firstApp?.stderr.length) {
+    await writeFile(join(outputDir, 'first-app-stderr.log'), firstApp.stderr.join(''))
+  }
+  if (failed && recoveredApp?.stderr.length) {
+    await writeFile(join(outputDir, 'recovered-app-stderr.log'), recoveredApp.stderr.join(''))
+  }
   if (firstApp) await terminateIsolatedApp(firstApp)
   if (recoveredApp) await terminateIsolatedApp(recoveredApp)
   if (!failed && process.env.ROVAI_KEEP_PLANNED_SHUTDOWN_FIXTURE !== '1') {
@@ -254,7 +273,13 @@ async function launchApp(port, width, height) {
     stdio: ['ignore', 'ignore', 'pipe'],
     env: { ...process.env, ROVAI_ALLOW_ISOLATED_INSTANCE: '1', TMPDIR: runtimeTempDir }
   })
-  child.stderr.on('data', (chunk) => stderr.push(String(chunk)))
+  child.stderr.on('data', (chunk) => {
+    const text = String(chunk)
+    stderr.push(text)
+    if (process.env.ROVAI_PLANNED_SHUTDOWN_ACCEPT_TRACE === '1') {
+      process.stderr.write(`[${new Date().toISOString()}] packaged App stderr\n${text}`)
+    }
+  })
   let cdp = null
   try {
     const target = await waitForTarget(port, stderr)
@@ -311,6 +336,22 @@ async function setTheme(cdp, preference) {
     `document.documentElement.dataset.theme === ${JSON.stringify(preference)}`)
 }
 
+async function requestAppQuit(app) {
+  const script = [
+    'ObjC.import("AppKit")',
+    `const target = $.NSRunningApplication.runningApplicationWithProcessIdentifier(${app.child.pid})`,
+    'if (!target.js) throw new Error("Isolated packaged App is not running")',
+    'if (!target.terminate) throw new Error("macOS rejected the normal termination request")'
+  ].join('; ')
+  await runProcess('/usr/bin/osascript', ['-l', 'JavaScript', '-e', script])
+}
+
+function trace(message) {
+  if (process.env.ROVAI_PLANNED_SHUTDOWN_ACCEPT_TRACE === '1') {
+    process.stderr.write(`[${new Date().toISOString()}] ${message}\n`)
+  }
+}
+
 async function openCamp(cdp, campId) {
   await waitForExpression(cdp, `(() => {
     const target = ${JSON.stringify(`camp:${campId}`)}
@@ -336,7 +377,7 @@ async function openAgentProcess(cdp, targetAgentId) {
     return Boolean(chip)
   })()`)
   assert(opened, `Could not open the recovered process for ${targetAgentId}`)
-  await waitForExpression(cdp, `Boolean(document.querySelector('.process-recovery-blocker'))`, 10_000)
+  await waitForExpression(cdp, `Boolean(document.querySelector('.execution-uncertain'))`, 10_000)
 }
 
 async function collectShutdownOverlay(cdp, theme, viewportWidth, viewportHeight, deviceScaleFactor) {
@@ -371,7 +412,8 @@ async function collectShutdownOverlay(cdp, theme, viewportWidth, viewportHeight,
     && overlay.describedBy === 'controlled-shutdown-description'
     && overlay.title === '正在停止运行并关闭 Rovai…'
     && overlay.description.includes('Runtime 返回可靠终态')
-    && overlay.description.includes('无法确认的执行会保留现场')
+    && overlay.description.includes('无法确认的执行也会停止')
+    && overlay.description.includes('保留外部效果现场')
     && overlay.actionCount === 0
     && overlay.viewport.width === viewportWidth
     && overlay.viewport.height === viewportHeight
@@ -387,23 +429,22 @@ async function collectShutdownOverlay(cdp, theme, viewportWidth, viewportHeight,
   return overlay
 }
 
-async function collectRecoveryBlocker(cdp) {
-  const blocker = await evaluate(cdp, `(() => {
-    const value = document.querySelector('.process-recovery-blocker')
+async function collectFencedTerminal(cdp) {
+  const terminal = await evaluate(cdp, `(() => {
+    const value = document.querySelector('.execution-uncertain')
+    const drawer = value?.closest('.process-content')
     return value ? {
-      heading: value.querySelector('strong')?.textContent?.trim() ?? null,
       text: value.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
-      button: value.querySelector('button')?.textContent?.trim() ?? null,
-      spinnerCount: value.querySelectorAll('.spinner, [aria-busy="true"]').length
+      recoveryBlockerCount: drawer?.querySelectorAll('.process-recovery-blocker').length ?? null,
+      spinnerCount: drawer?.querySelectorAll('.spinner, [aria-busy="true"]').length ?? null
     } : null
   })()`)
-  assert(blocker
-    && blocker.heading === '无法安全自动恢复'
-    && blocker.text.includes('原请求不会自动重发')
-    && blocker.button === '结束此运行'
-    && blocker.spinnerCount === 0,
-  `Recovered Run did not show the honest blocker: ${JSON.stringify(blocker)}`)
-  return blocker
+  assert(terminal
+    && terminal.text.includes('外部效果待确认')
+    && terminal.recoveryBlockerCount === 0
+    && terminal.spinnerCount === 0,
+  `Fenced Run did not show an honest terminal warning: ${JSON.stringify(terminal)}`)
+  return terminal
 }
 
 async function readRunFacts(agentRunId) {

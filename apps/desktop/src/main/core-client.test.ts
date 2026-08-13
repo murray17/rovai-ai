@@ -53,7 +53,7 @@ describe('CoreClient planned shutdown', () => {
 while IFS= read -r request; do
   case "$request" in
     *'"method":"core.shutdown"'*)
-      printf '%s\\n' '{"id":1,"result":{"protocolVersion":1,"status":"completed","deadlineExpired":false,"activeExecutionsObserved":1,"stopRequestsIssued":1,"terminalExecutionsSettled":1,"unresolvedExecutions":0}}'
+      printf '%s\\n' '{"id":1,"result":{"protocolVersion":2,"status":"completed","deadlineExpired":true,"activeExecutionsObserved":1,"stopRequestsIssued":1,"terminalExecutionsSettled":0,"fencedAgentRunsSettled":1,"unsettledEffectAgentRuns":1,"controlledShutdownCyclePersisted":true,"unresolvedExecutions":0}}'
       sleep 0.05
       exit 0
       ;;
@@ -74,12 +74,15 @@ done
       expect(second).toBe(first)
       await expect(first).resolves.toEqual({
         report: {
-          protocolVersion: 1,
+          protocolVersion: 2,
           status: 'completed',
-          deadlineExpired: false,
+          deadlineExpired: true,
           activeExecutionsObserved: 1,
           stopRequestsIssued: 1,
-          terminalExecutionsSettled: 1,
+          terminalExecutionsSettled: 0,
+          fencedAgentRunsSettled: 1,
+          unsettledEffectAgentRuns: 1,
+          controlledShutdownCyclePersisted: true,
           unresolvedExecutions: 0
         },
         forcedSignal: null

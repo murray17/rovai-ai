@@ -20,12 +20,15 @@ type CoreWireResponse = {
 }
 
 export type PlannedShutdownReport = {
-  protocolVersion: 1
+  protocolVersion: 2
   status: 'completed'
   deadlineExpired: boolean
   activeExecutionsObserved: number
   stopRequestsIssued: number
   terminalExecutionsSettled: number
+  fencedAgentRunsSettled: number
+  unsettledEffectAgentRuns: number
+  controlledShutdownCyclePersisted: boolean
   unresolvedExecutions: number
 }
 
@@ -198,7 +201,7 @@ export class CoreClient {
     const reportPromise = this.#sendRequest<PlannedShutdownReport>(
       child,
       'core.shutdown',
-      { protocolVersion: 1, deadlineMs: PLANNED_SHUTDOWN_DEADLINE_MS },
+      { protocolVersion: 2, deadlineMs: PLANNED_SHUTDOWN_DEADLINE_MS },
       PLANNED_SHUTDOWN_DEADLINE_MS + SHUTDOWN_SIGTERM_GRACE_MS
     ).catch((error) => {
       console.error('Rust Core planned shutdown did not return a report', error)

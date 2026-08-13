@@ -2,14 +2,16 @@
 document_type: architecture
 architecture: agent-run-recovery
 authority: agent-run-session-and-native-turn-recovery-boundaries
-last_updated: 2026-08-12
+last_updated: 2026-08-13
 ---
 
 # AgentRun Recovery
 
 本文描述 Core 重启后 AgentRun、Native Session 与 Native Turn 的长期恢复边界。规范依据是
-[ADR-0164](../adr/0164-accepted-input-recovery-requires-proven-native-turn-reconciliation.md)，字段级状态与命令
-见 [Accepted Input Recovery v1](../contracts/accepted-input-recovery-v1.md)。
+[ADR-0164](../adr/0164-accepted-input-recovery-requires-proven-native-turn-reconciliation.md)。受控关闭后的 product
+fence 由 [ADR-0177](../adr/0177-controlled-shutdown-fences-product-execution.md)拥有；字段级状态与命令见
+[Accepted Input Recovery v1](../contracts/accepted-input-recovery-v1.md)与
+[Planned Shutdown v2](../contracts/planned-shutdown-v2.md)。
 
 ## 1. 三个独立恢复对象
 
@@ -26,8 +28,12 @@ Session 恢复只重新建立会话 handle，不能恢复旧 Host 内存中的 p
 
 ## 2. 启动恢复分类
 
-Startup Recovery Coordinator 在同一事务内先收敛 Action、Approval、Runtime Delivery 和 prepared input，
-再分类 AgentRun：
+Core 在普通 Startup Recovery Coordinator 之前先检查 pending `planned_shutdown_cycle`。cycle 覆盖的
+AgentRun 通过 durable product fence 直接收敛为 terminal cancelled，同时保留 accepted/delivery-unknown
+input 与 unknown external effects；它们不进入下面的普通分类，也不会恢复旧 Run 执行权。
+
+没有 pending controlled-shutdown cycle 时，Startup Recovery Coordinator 在同一事务内先收敛 Action、
+Approval、Runtime Delivery 和 prepared input，再分类 AgentRun：
 
 - 无 accepted input 且没有其他 safety blocker：可以保持 `runtime_session_recovery` 语义，由 Scheduler
   领取并执行安全的 Session 恢复；

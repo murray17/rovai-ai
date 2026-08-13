@@ -80,11 +80,21 @@ last_updated: 2026-08-13
 - [x] Core 与 Renderer 回归测试覆盖 Clear 后旧 Mention 不复活、双 Mention 精确 signal、分页失败重试、
   mixed pending/resolved Approval 与 cleared terminal retention。
 
+## Checkpoint 8：受控关闭后的 AgentRun 终态收敛
+
+- [x] 接受 ADR-0177 与 Planned Shutdown v2，区分可靠 Runtime terminal 与 product-fenced terminal；
+- [x] Migration 80 增加 durable `planned_shutdown_cycle`，v2 request 在 launch gate 前持久化 intent；
+- [x] route/terminal/Built-in/writer cutoff 后原子 fence 剩余 Run，accepted/delivery-unknown 保留，prepared 转为 unknown；
+- [x] startup 在普通 recovery 前补偿 pending cycle，终态 Run 不恢复、不重发、不创建 successor；
+- [x] 既有 `waiting/recovery_blocked` 回归证明下一次 v2 controlled shutdown 可将其收敛为终态；
+- [x] Desktop v2 report、关闭等待文案、真实 Runtime acceptance 脚本与 terminal unknown-effect surface 已更新；
+- [x] 完成全量 Rust/Renderer/Node、Clippy、类型、文档治理和 packaged real-Claude acceptance。
+
 ## 当前证据
 
 ### 确定性门禁
 
-- v2 修正与 Skill 增量整合后的 `cargo test --workspace`：407 个 library、11 个 CLI、73 个 Core binary
+- v2 修正、Skill 与 Planned Shutdown 增量整合后的 `cargo test --workspace`：411 个 library、11 个 CLI、73 个 Core binary
   测试通过，3 个显式 real-Runtime manual tests 按合同 ignored；
 - `cargo fmt --all -- --check` 与
   `cargo clippy --workspace --all-targets -- -D warnings`：通过；
@@ -125,4 +135,21 @@ last_updated: 2026-08-13
 - official Skill 数量、名称、来源、管理策略和默认投递不变；`agents/openai.yaml` 仍与固定搭档及对应
   Skill 名称一致，因此无需制造 metadata diff。
 
-Checkpoint 0–7 与全部发布门槛已完成，版本 `implementation_status` 为 `complete`。
+### Planned Shutdown v2 增量
+
+- `cargo test --workspace`：411 个 library、11 个 CLI、73 个 Core binary 测试通过，3 个显式
+  real-Runtime manual tests 按合同 ignored；Fmt 与 `cargo clippy --workspace --all-targets -- -D warnings` 通过；
+- `pnpm typecheck`、`pnpm test` 通过：Docs 21、Vitest 47 files / 318 tests、Node 179 tests；Desktop production
+  build、macOS arm64 package、`DOCS_BASE_REF=origin/main pnpm docs:check:ci`、ADR generation 与
+  `git diff --check` 通过；
+- `pnpm accept:planned-shutdown` 使用真实 Claude Code `2.1.220` 与隔离 `userData`/workspace 通过：input
+  `accepted` 后首次 App 在 8740ms 退出，重启后空闲 App 在 6200ms 退出，两次均 exit 0、无 forced signal；
+- 首次 v2 report 证明 1 个 active Run 被 product-fence、1 个 unknown-effect Run 被保留且 nonterminal 为 0；
+  数据库与重启 Read Side 均为 `cancelled`、epoch 1、无 Runtime terminal 伪造或 CampTurn cancel intent，UI
+  显示“外部效果待确认”且 spinner/recovery blocker 均为 0；
+- 验收按隔离 App 精确 PID 发起 macOS normal termination，并观察 5 个 Core/Runtime/Electron descendant
+  全部退出；Day/Night、1040×700、200% zoom 与 terminal warning 四张截图通过。对照验收还证明 Core
+  settle 后再次 `app.quit()` 会把总窗口扩大到 18411ms，因此 Desktop 在 shutdown Promise settle 后使用
+  `app.exit(0)` 完成已授权退出。
+
+Checkpoint 0–8 与全部发布门槛已完成，版本 `implementation_status` 为 `complete`。

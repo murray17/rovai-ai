@@ -8,11 +8,11 @@ implementation_status: complete
 last_updated: 2026-08-13
 ---
 
-# Rovai-ai v0.71：Notification Episode
+# Rovai-ai v0.71：Notification Episode、Skill 管理与受控关闭终态收敛
 
 > 当前状态：Notification Episode 的领域模型、合同、ADR、Core/IPC/Renderer clean-break 与隔离打包
-> App 验收均已完成；同一 current version 的独立 Skill 增量也已纳入 Campfire，并完成系统必需
-> operational Skill 的 Core/Settings 收口。
+> App 验收均已完成；Campfire、系统必需 operational Skill 与 Grill Duo 自然标题增量也已完成。
+> 同一 current snapshot 的 durable AgentRun product fence、真实 Runtime 关闭/重启验收与完整门禁也已完成。
 >
 > 前置版本：[v0.70 User Attention 教学与十项 official Skill](../v0.70/README.md)
 
@@ -33,6 +33,10 @@ Episode 更新通过最小 Change Journal 驱动浮层和增量刷新。
 “双人追问”，文档版使用“双人追问与文档”。标题只负责 Skill-only continuation；发送者和直接调用者
 返回仍由 Runtime 的受信 Current Input 与 Message Delivery lineage 决定，不新增 message kind 或会话对象。
 
+受控关闭增量把“外部效果是否确定”与“Rovai 是否仍持有执行权”拆开：可靠 Runtime terminal 继续优先；
+主动退出后的剩余 Run 必须终态收敛，同时保留 accepted/delivery-unknown input 与 unknown Action 现场，
+不得在下次启动继续显示永久 spinner 或自动重发原输入。
+
 ## 交付范围
 
 ### Core 深模块
@@ -46,6 +50,17 @@ Episode 更新通过最小 Change Journal 驱动浮层和增量刷新。
 - Clear 前历史来源与 Active Attention 分离；当前未读、动作、heads-up 与 retention 只看 Active Attention；
 - changesSince schema v5 返回 exact HeadsUpSignal；Approval 使用 pending-first / acknowledge-only action；
 - Journal floor、reset、分页 high-water 与 90 天终结 Episode 保留。
+
+### 受控关闭的 durable product fence
+
+- Migration 80 把当前 Data Contract 提升到 `v0.71 / projection schema 35`，新增 generation-local
+  `planned_shutdown_cycle`；
+- `core.shutdown` v2 在关闭 launch admission 前持久化 cycle，可靠 Runtime terminal 仍保留既有 provenance；
+- terminal/live-route、Built-in invocation 与受跟踪 writer 全部 fence 后，剩余 `queued | running | waiting`
+  Run 原子收敛为 `cancelled`，但不伪造 Provider cancellation；
+- accepted/delivery-unknown input 保留，prepared input 在模糊 handoff 边界转为 `delivery_unknown`；
+- fence transaction 未提交时由下一 Core generation 在普通 recovery 前幂等补偿，不恢复、重发或创建 successor；
+- Renderer 关闭面明确无法确认的执行也会停止；终态 Run 可独立显示“外部效果待确认”。
 
 ### Current User Attention v3
 
@@ -82,6 +97,9 @@ Episode 更新通过最小 Change Journal 驱动浮层和增量刷新。
 不修改 Camp、CampMessage、CampTurn、Approval、Project、附件、Runtime Session 或 Runtime-owned 数据；
 没有 alias、双 reader、双 writer 或回填路径。
 
+受控关闭 fence 同样不把 process exit、interrupt acknowledgement 或 route detach 当作 Runtime terminal，
+不写 CampTurn Stop intent，也不改变没有 durable shutdown cycle 的普通 crash/断电恢复边界。
+
 ## 发布门槛
 
 1. Core module tests 覆盖事务原子性、聚合/顺序无关、逐 Mention 确认、并发边界、approval generation、
@@ -93,20 +111,22 @@ Episode 更新通过最小 Change Journal 驱动浮层和增量刷新。
 6. Campfire validator/情景演练、十一项 fresh-Core smoke、system-required 命令拒绝与九项 Settings
    列表 fixture 通过；
 7. 两项 Grill Duo validator、自然标题 bundled manifest、受信 sender/caller-return 回归与普通/文档/伪造
-   迟到建议三类 continuation dry-run 通过，两个 active Skill 目录中的旧方括号标签归零。
+   迟到建议三类 continuation dry-run 通过，两个 active Skill 目录中的旧方括号标签归零；
+8. Planned Shutdown v2 验收证明 durable intent、writer fence、可靠 terminal 优先、fallback terminal、
+   accepted/prepared uncertainty、startup compensation、Desktop report 与 terminal unknown-effect UI。
 
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
-| Version lifecycle | 已更新 | v0.70 以未执行九 Runtime v8 matrix 的事实冻结为 historical/closed_incomplete；v0.71 成为唯一 current |
-| ADR | 已更新 | ADR-0175 细化通知真源、聚合、Journal 与 Renderer seam；ADR-0176 替代十项 official inventory 并冻结 system-required policy；Grill Duo 标题与本次 v2 合同修正均未改变既有 ADR 决策，无需新 ADR |
-| Contracts | 已更新 | Notification Episode v2 替代 v1，冻结 Active Attention、exact HeadsUpSignal、事务式 cursor 与 acknowledge-only；Current User Attention v3 继续拥有逐消息精确确认；SkillView 增加 management policy；Grill Duo 仍使用既有 CampMessage 与 caller-return 合同 |
-| Architecture | 已更新 | Notification Episode 架构补齐 Active Attention、signal hydration 和 Renderer cursor commit seam；Built-in Tool Runtime 与 Skill Projection 记录十一项 inventory 及系统必需自愈边界 |
-| UI | 已更新 | 通知中心组件合同补齐 exact signal 呈现/点击、“知道了”动作与失败重试边界；Settings surface 同步九项可配置 Skill，并完全省略两项系统必需 Skill |
+| Version lifecycle | 已更新 | v0.70 以未执行九 Runtime v8 matrix 的事实冻结为 historical/closed_incomplete；v0.71 成为唯一 current，并承载受控关闭增量 |
+| ADR | 已更新 | ADR-0175 细化通知真源、聚合、Journal 与 Renderer seam；ADR-0176 替代十项 official inventory 并冻结 system-required policy；新增 [ADR-0177](../../adr/0177-controlled-shutdown-fences-product-execution.md)冻结 product fence 与 unknown effects 分离；Grill Duo 标题与 Notification v2 合同修正不改变既有 ADR 决策 |
+| Contracts | 已更新 | Notification Episode v2 替代 v1，冻结 Active Attention、exact HeadsUpSignal、事务式 cursor 与 acknowledge-only；Current User Attention v3 继续拥有逐消息精确确认；SkillView 增加 management policy；[Planned Shutdown v2](../../contracts/planned-shutdown-v2.md)替代 v1 当前入口；Grill Duo 仍使用既有 CampMessage 与 caller-return 合同 |
+| Architecture | 已更新 | Notification Episode 架构补齐 Active Attention、signal hydration 和 Renderer cursor commit seam；Built-in Tool Runtime 与 Skill Projection 记录十一项 inventory 及系统必需自愈边界；Planned Shutdown 增加 durable cycle、writer fence、product settlement 与 startup compensation |
+| UI | 已更新 | 通知中心组件合同补齐 exact signal 呈现/点击、“知道了”动作与失败重试边界；Settings surface 同步九项可配置 Skill；[Camp 会话工作区](../../ui/components/conversation-workspace.md)同步关闭等待与 terminal unknown-effect 文案 |
 | Runtime Activity | 确认无需更新 | 不新增 Runtime operation、provider event、Activity classifier 或 Evidence mapping |
 | Runtime compatibility | 确认无需更新 | 不改变 Adapter、Native Session、Built-in Transport v8 或模型教学 identity |
-| Documentation routing | 已更新 | docs map、Contract/Architecture/UI/ADR/current-version 路由切换到 v0.71，并把 Skills 主题指向 ADR-0176 |
+| Documentation routing | 已更新 | docs map、Contract/Architecture/UI/ADR/current-version 路由到 v0.71；Skills 指向 ADR-0176，Planned Shutdown 当前入口切换到 ADR-0177/v2 |
 | Root README | 确认无需更新 | 产品定位、常青能力与 Runtime 支持范围不变，根 README 不记录版本局部实现 |
 
 ## References
@@ -116,5 +136,7 @@ Episode 更新通过最小 Change Journal 驱动浮层和增量刷新。
 - [Current User Attention v3](../../contracts/current-user-attention-v3.md)
 - [ADR-0175](../../adr/0175-core-owned-notification-occurrence-episode-and-change-journal.md)
 - [ADR-0176](../../adr/0176-eleven-skill-official-inventory-and-system-required-operations.md)
+- [ADR-0177](../../adr/0177-controlled-shutdown-fences-product-execution.md)
 - [Notification Episode 架构](../../architecture/notification-episodes.md)
 - [`campfire` bundled source](../../../skills/campfire/SKILL.md)
+- [Planned Shutdown v2](../../contracts/planned-shutdown-v2.md)

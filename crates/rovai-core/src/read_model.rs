@@ -1663,6 +1663,15 @@ fn load_agent_runs(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<A
                    WHERE runtime_input_delivery.agent_run_id = agent_run.id
                      AND runtime_input_delivery.status IN ('prepared', 'delivery_unknown')
                  )
+                 OR (
+                   agent_run.status IN ('failed', 'cancelled')
+                   AND agent_run.last_error_code = 'planned_shutdown_outcome_unknown'
+                   AND EXISTS(
+                     SELECT 1 FROM runtime_input_delivery
+                     WHERE runtime_input_delivery.agent_run_id = agent_run.id
+                       AND runtime_input_delivery.status = 'accepted'
+                   )
+                 )
                ),
                agent_run.workspace_json,
                agent_run.starting_git_observation_json,

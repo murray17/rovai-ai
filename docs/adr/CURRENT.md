@@ -104,7 +104,7 @@ Related: Context selection、Self/Peer identity 与 Runtime admission 从相应 
 
 - **何时阅读：** 修改 Runtime ownership、权限、安全、Fleet、执行恢复或诊断读写边界时阅读。
 - **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Diagnostics Center](../architecture/diagnostics-center.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)、[Planned Shutdown](../architecture/planned-shutdown.md)
-- **当前合同：** [Diagnostics Center v1](../contracts/diagnostics-center-v1.md)、[Accepted Input Recovery v1](../contracts/accepted-input-recovery-v1.md)、[Planned Shutdown v1](../contracts/planned-shutdown-v1.md)
+- **当前合同：** [Diagnostics Center v1](../contracts/diagnostics-center-v1.md)、[Accepted Input Recovery v1](../contracts/accepted-input-recovery-v1.md)、[Planned Shutdown v2](../contracts/planned-shutdown-v2.md)
 
 <!-- adr-current-primary:begin topic=runtime-execution-security -->
 | ADR | Decision |
@@ -123,6 +123,7 @@ Related: Context selection、Self/Peer identity 与 Runtime admission 从相应 
 | [ADR-0156](0156-logical-runtime-identity-and-bounded-installation-rebind.md) | Frozen Logical Runtime Identity and Bounded Installation Rebind |
 | [ADR-0164](0164-accepted-input-recovery-requires-proven-native-turn-reconciliation.md) | Accepted Input Recovery Requires Proven Native Turn Reconciliation |
 | [ADR-0168](0168-planned-shutdown-preserves-runtime-terminal-authority.md) | Planned Shutdown Preserves Runtime Terminal Authority |
+| [ADR-0177](0177-controlled-shutdown-fences-product-execution.md) | Controlled Shutdown Fences Product Execution Without Claiming Runtime Outcome |
 <!-- adr-current-primary:end -->
 
 Related: Session redelivery、Skill/MCP projection 与 Qualification 分别保留独立 primary。

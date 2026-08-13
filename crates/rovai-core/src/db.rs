@@ -44,7 +44,9 @@ pub struct Database {
 }
 
 const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.71";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 34;
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 35;
+const V080_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.71";
+const V080_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 34;
 const V071_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.67";
 const V071_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 33;
 const V067_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.66";
@@ -69,6 +71,7 @@ struct CurrentMigrationState {
     v77: bool,
     v78: bool,
     v79: bool,
+    v80: bool,
 }
 
 impl CurrentMigrationState {
@@ -79,32 +82,79 @@ impl CurrentMigrationState {
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
         {
-            return self.v70 && self.v71 && self.v76 && self.v77 && self.v78 && self.v79;
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80;
+        }
+        if contract == V080_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V080_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && !self.v80;
         }
         if contract == V071_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V071_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
-            return self.v70 && self.v71 && self.v76 && self.v77 && self.v78 && !self.v79;
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && !self.v79
+                && !self.v80;
         }
         if contract == V067_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V067_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
-            return self.v70 && self.v71 && self.v76 && self.v77 && !self.v78 && !self.v79;
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && !self.v78
+                && !self.v79
+                && !self.v80;
         }
         if contract == V066_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V066_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
-            return self.v70 && self.v71 && self.v76 && !self.v77 && !self.v78 && !self.v79;
+            return self.v70
+                && self.v71
+                && self.v76
+                && !self.v77
+                && !self.v78
+                && !self.v79
+                && !self.v80;
         }
         if contract == V062_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V062_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
-            return self.v70 && self.v71 && !self.v76 && !self.v77 && !self.v78 && !self.v79;
+            return self.v70
+                && self.v71
+                && !self.v76
+                && !self.v77
+                && !self.v78
+                && !self.v79
+                && !self.v80;
         }
         if contract == V062_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V054_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
-            return self.v70 && !self.v71 && !self.v76 && !self.v77 && !self.v78 && !self.v79;
+            return self.v70
+                && !self.v71
+                && !self.v76
+                && !self.v77
+                && !self.v78
+                && !self.v79
+                && !self.v80;
         }
         contract == V052_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V052_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
@@ -114,6 +164,7 @@ impl CurrentMigrationState {
             && !self.v77
             && !self.v78
             && !self.v79
+            && !self.v80
     }
 }
 
@@ -181,7 +232,8 @@ fn has_current_data_contract(path: &Path) -> bool {
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 76),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 77),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 78),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 79)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 79),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 80)
         "#,
         [],
         |row| {
@@ -196,6 +248,7 @@ fn has_current_data_contract(path: &Path) -> bool {
                 v77: row.get(7)?,
                 v78: row.get(8)?,
                 v79: row.get(9)?,
+                v80: row.get(10)?,
             })
         },
     );
@@ -1283,6 +1336,9 @@ impl Database {
             if !self.schema_migration_applied(79)? {
                 self.migrate_notification_episodes_v79()?;
             }
+            if !self.schema_migration_applied(80)? {
+                self.migrate_controlled_shutdown_fence_v80()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -1569,6 +1625,9 @@ impl Database {
         }
         if !self.schema_migration_applied(79)? {
             self.migrate_notification_episodes_v79()?;
+        }
+        if !self.schema_migration_applied(80)? {
+            self.migrate_controlled_shutdown_fence_v80()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -8115,6 +8174,54 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_controlled_shutdown_fence_v80(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            CREATE TABLE planned_shutdown_cycle (
+                core_generation TEXT PRIMARY KEY
+                    CHECK(length(trim(core_generation)) > 0),
+                protocol_version INTEGER NOT NULL
+                    CHECK(protocol_version = 2),
+                requested_at TEXT NOT NULL,
+                settled_at TEXT,
+                fenced_agent_run_count INTEGER
+                    CHECK(fenced_agent_run_count IS NULL OR fenced_agent_run_count >= 0),
+                unsettled_effect_agent_run_count INTEGER
+                    CHECK(
+                        unsettled_effect_agent_run_count IS NULL
+                        OR unsettled_effect_agent_run_count >= 0
+                    ),
+                CHECK (
+                    (settled_at IS NULL
+                        AND fenced_agent_run_count IS NULL
+                        AND unsettled_effect_agent_run_count IS NULL)
+                    OR
+                    (settled_at IS NOT NULL
+                        AND fenced_agent_run_count IS NOT NULL
+                        AND unsettled_effect_agent_run_count IS NOT NULL)
+                )
+            );
+
+            CREATE INDEX planned_shutdown_cycle_pending_idx
+                ON planned_shutdown_cycle(requested_at, core_generation)
+                WHERE settled_at IS NULL;
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v0.71', projection_schema_version = 35,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (80, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -12520,7 +12627,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn current_data_contract_accepts_current_and_exact_v071_v067_v066_v062_v054_or_v052_sources() {
+    fn current_data_contract_accepts_current_and_exact_v071_schema34_and_older_sources() {
         let directory =
             std::env::temp_dir().join(format!("rovai-current-contract-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -12533,9 +12640,26 @@ mod tests {
             .execute_batch(
                 r#"
                 UPDATE rovai_data_contract
+                SET contract_version = 'v0.71', projection_schema_version = 34
+                WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 80;
+                "#,
+            )
+            .unwrap();
+        assert!(
+            has_current_data_contract(&path),
+            "the exact v0.71/schema-34 marker without migration 80 is an upgrade source"
+        );
+
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                UPDATE rovai_data_contract
                 SET contract_version = 'v0.67', projection_schema_version = 33
                 WHERE singleton = 1;
                 DELETE FROM schema_migration WHERE version = 79;
+                DELETE FROM schema_migration WHERE version = 80;
                 "#,
             )
             .unwrap();
@@ -12552,6 +12676,7 @@ mod tests {
                 SET contract_version = 'v0.66', projection_schema_version = 32
                 WHERE singleton = 1;
                 DELETE FROM schema_migration WHERE version = 78;
+                DELETE FROM schema_migration WHERE version = 79;
                 "#,
             )
             .unwrap();
@@ -12569,6 +12694,7 @@ mod tests {
                 WHERE singleton = 1;
                 DELETE FROM schema_migration WHERE version = 77;
                 DELETE FROM schema_migration WHERE version = 78;
+                DELETE FROM schema_migration WHERE version = 79;
                 "#,
             )
             .unwrap();
@@ -12587,6 +12713,7 @@ mod tests {
                 DELETE FROM schema_migration WHERE version = 76;
                 DELETE FROM schema_migration WHERE version = 77;
                 DELETE FROM schema_migration WHERE version = 78;
+                DELETE FROM schema_migration WHERE version = 79;
                 "#,
             )
             .unwrap();
@@ -12605,6 +12732,7 @@ mod tests {
                 DELETE FROM schema_migration WHERE version = 71;
                 DELETE FROM schema_migration WHERE version = 77;
                 DELETE FROM schema_migration WHERE version = 78;
+                DELETE FROM schema_migration WHERE version = 79;
                 "#,
             )
             .unwrap();
@@ -13030,7 +13158,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.71".to_string(), 34));
+        assert_eq!(contract, ("v0.71".to_string(), 35));
         let v77_applied: i64 = database
             .connection()
             .query_row(
@@ -13109,6 +13237,53 @@ mod tests {
     }
 
     #[test]
+    fn v80_adds_durable_controlled_shutdown_cycles() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v80-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        let migration_applied: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 80",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_applied, 1);
+        let cycle_schema: String = database
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'planned_shutdown_cycle'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(cycle_schema.contains("protocol_version = 2"));
+        assert!(cycle_schema.contains("fenced_agent_run_count"));
+        assert!(cycle_schema.contains("unsettled_effect_agent_run_count"));
+        let contract: (String, i64) = database
+            .connection()
+            .query_row(
+                "SELECT contract_version, projection_schema_version FROM rovai_data_contract WHERE singleton = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(contract, ("v0.71".to_string(), 35));
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v80 database should reopen");
+        let cycle_count: i64 = reopened
+            .connection()
+            .query_row("SELECT COUNT(*) FROM planned_shutdown_cycle", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(cycle_count, 0);
+        drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
     fn v77_adds_planned_shutdown_terminal_provenance_and_turn_aggregate_reason() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v77-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -13158,7 +13333,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.71".to_string(), 34));
+        assert_eq!(contract, ("v0.71".to_string(), 35));
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
@@ -15306,7 +15481,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(agent_cli_contract, ("v0.71".to_string(), 34, 1));
+        assert_eq!(agent_cli_contract, ("v0.71".to_string(), 35, 1));
         assert_eq!(foreign_key_violations, 0);
 
         drop(database);
@@ -15783,7 +15958,9 @@ mod tests {
                 );
                 INSERT INTO in_app_notification_preference(singleton, heads_up_enabled)
                 VALUES (1, 0);
+                DROP TABLE planned_shutdown_cycle;
                 DELETE FROM schema_migration WHERE version = 79;
+                DELETE FROM schema_migration WHERE version = 80;
                 "#,
             )
             .expect("test should restore the pre-v79 notification boundary");
@@ -15964,7 +16141,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, (34, 1));
+        assert_eq!(contract, (35, 1));
         let error = database
             .connection()
             .execute(
@@ -16284,7 +16461,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.71".to_string(), 34));
+        assert_eq!(contract, ("v0.71".to_string(), 35));
         let public_a2a_migration_applied: i64 = database
             .connection()
             .query_row(

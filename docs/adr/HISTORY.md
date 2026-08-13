@@ -188,4 +188,5 @@ generated_from: docs/adr-front-matter
 | [ADR-0174](0174-ten-skill-official-inventory-and-pinned-matt-pocock-imports.md) | Ten-Skill Official Inventory and Pinned Matt Pocock Imports | `superseded` | `cross-version` | [v0.70](../versions/v0.70/README.md) | [ADR-0176](0176-eleven-skill-official-inventory-and-system-required-operations.md) |
 | [ADR-0175](0175-core-owned-notification-occurrence-episode-and-change-journal.md) | Core-Owned Notification Occurrence, Episode and Change Journal | `accepted` | `cross-version` | [v0.71](../versions/v0.71/README.md) | — |
 | [ADR-0176](0176-eleven-skill-official-inventory-and-system-required-operations.md) | Eleven-Skill Official Inventory and System-Required Operations | `accepted` | `cross-version` | [v0.71](../versions/v0.71/README.md) | — |
+| [ADR-0177](0177-controlled-shutdown-fences-product-execution.md) | Controlled Shutdown Fences Product Execution Without Claiming Runtime Outcome | `accepted` | `cross-version` | [v0.71](../versions/v0.71/README.md) | — |
 <!-- adr-history:end -->

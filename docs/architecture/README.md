@@ -18,7 +18,7 @@ last_updated: 2026-08-13
 | [Built-in Tool Runtime](builtin-tool-runtime.md) | Agent CLI v7、Core Router、Runtime Fleet、精确 help、Charter/official Skill 渐进教学、peer routing Dynamic Context、ContextManifest/ACK 与外部 MCP 的关系 |
 | [Native Session Bootstrap Redelivery](native-session-bootstrap-redelivery.md) | compaction detector、Session Observer、Bootstrap/Member Identity 重投递、Redelivery v2、Dynamic Context 与 accepted-input 水位 |
 | [Notification Episode](notification-episodes.md) | Occurrence/Disposition/Episode/Change Journal 原子投影、五方法 Core 深模块、read hydration、并发边界与保留 |
-| [Planned Shutdown](planned-shutdown.md) | Core execution/terminal 双准入、current-generation active execution registry、可靠 Runtime terminal、统一 deadline、route fence/reap 与 Desktop child-exit 边界 |
+| [Planned Shutdown](planned-shutdown.md) | Core execution/terminal 双准入、durable shutdown cycle、可靠 Runtime terminal 优先、product fence 启动补偿、统一 deadline、route reap 与 Desktop child-exit 边界 |
 | [Public A2A Message 与 Message Delivery](public-a2a-message-delivery.md) | 公共 Structured Message、正交 Current User Attention、forward/caller-return Delivery、原子通知、Context gate 与 UI projection 边界 |
 | [Camp Activation Lifecycle](camp-activation-lifecycle.md) | 一键 Pending、Composer Draft、Navigation、Restorable Location、首消息原子激活与启动清理的组件权威 |
 | [Skill Projection Reconciliation](skill-projection-reconciliation.md) | Skill Library desired state、root access ledger、事件驱动 dirty、当前 Run preflight、start-time SkillExposureSnapshot 与无历史目录扫描边界 |

@@ -7,10 +7,12 @@ last_updated: 2026-08-13
 
 # Planned Shutdown
 
-本文组合计划内退出、重启和更新时的 Core 生命周期结构。长期边界由
-[ADR-0168](../adr/0168-planned-shutdown-preserves-runtime-terminal-authority.md)拥有，精确 wire、字段、
-幂等和 deadline 语义由 [Planned Shutdown v1](../contracts/planned-shutdown-v1.md)拥有。异常崩溃、强杀、
-断电和下一 generation 的 accepted-input 分类仍由 [AgentRun Recovery](agent-run-recovery.md)负责。
+本文组合计划内退出、重启和更新时的 Core 生命周期结构。可靠 Runtime terminal 边界由
+[ADR-0168](../adr/0168-planned-shutdown-preserves-runtime-terminal-authority.md)拥有；关闭后必须终止 Rovai
+执行权、同时保留未知外部效果的边界由
+[ADR-0177](../adr/0177-controlled-shutdown-fences-product-execution.md)拥有。精确 wire、字段、幂等和 deadline
+语义由 [Planned Shutdown v2](../contracts/planned-shutdown-v2.md)拥有。没有 durable shutdown cycle 的异常
+崩溃、强杀、断电和下一 generation accepted-input 分类仍由 [AgentRun Recovery](agent-run-recovery.md)负责。
 
 ## 1. 单调生命周期与三个准入面
 
@@ -19,6 +21,11 @@ last_updated: 2026-08-13
 ```text
 accepting → closing_launch → draining → terminal_closed
 ```
+
+Main 的合法 v2 request 先把当前 generation 写入 durable `planned_shutdown_cycle`，再关闭内存 launch
+admission。因此 cycle record 与 launch gate 之间不存在会把新 Run 排除在两者之外的 check-then-act 窗口：
+在 gate 关闭前已经跨过或正在跨过 handoff 的 Run 最终都由同一 cycle 覆盖；cycle 持久化后若进程中断，
+下一 generation 在普通 startup recovery 前补偿收敛。
 
 `closing_launch` 立即拒绝新的 execution launch，但尚未改变 terminal settlement 语义。它先等待已经
 进入 launch critical section 的执行完成 route handoff 或在 input 尚未 accepted 时安全退出；只有该
@@ -85,7 +92,29 @@ AgentRun terminal transaction，以及 transaction 成功后的 active → settl
 active handle 收口后立即同时释放两个 guard。Renderer event emit、Skill/MCP reconciliation、
 Adapter detach/complete/release 等可延后工作位于 guard 外，并可在 deadline 收口时中止。
 
-## 4. Deadline 与 Reap
+## 4. Durable product fence
+
+可靠 terminal 等待结束后，Core 先关闭并排空 terminal 与 live Runtime route admission，再关闭 Built-in
+Tool listener、fence invocation gate，并 abort/drain 受跟踪的 AgentRun 与 event writer。所有 writer fence
+都 quiesce 后，Core 才以 immediate transaction 结算当前 `planned_shutdown_cycle`。事务选择所有仍为
+`queued | running | waiting` 的 AgentRun，关闭它们继续调度和写入的资格，并写为普通 `cancelled` 终态。
+该状态只证明 Rovai product execution 已经 fence，不证明 Provider Native Turn 的
+succeeded/failed/cancelled outcome；因此不写
+`terminal_resolution_source=runtime_terminal` 或 `planned_shutdown_*` Runtime reason。
+
+effect certainty 继续由自己的记录拥有：accepted 与 delivery-unknown input 保留；prepared input 在此路径
+转为 `delivery_unknown`，因为 prompt handoff 可能已经发生但 ACK 未持久化；可能 dispatch 的 Action 留为
+unknown/reconciler。Read Side 在 cancelled Run 上独立投影 `hasUnsettledExternalEffects=true`，Renderer 显示
+“外部效果待确认”，但不再显示 spinner、投递待确认、结果待确认或恢复动作。
+
+cycle settlement 同事务更新 Run-local obligation、目标 Message Delivery、CampTurn aggregate 与 cycle
+计数。它不创建 CampTurn cancellation intent；无显式 Stop 时 required cancelled Run 使 Turn 进入
+`failed/required_run_incomplete`，optional cancelled Run 不阻止 completed。cycle 若已 settled 则幂等返回；
+若 writer 未在保留窗口内 quiesce，Core 不在本 generation 发布可能被迟到写入推翻的终态，而是保留 pending
+cycle；Core 在事务前被 watchdog 终止时也相同。下一次启动在 `prepare_v2_recovery` 之前运行补偿事务。终态
+Run 从不重新进入 Scheduler，也不自动创建 successor。
+
+## 5. Deadline 与 Reap
 
 Core 使用一个 monotonic 全局 deadline：
 
@@ -97,8 +126,9 @@ enter closing_launch and close execution launch admission
 → preserve terminal, Built-in IPC and Adapter event routes
 → wait for reliable terminal settlement
 → before the reserved cleanup budget, close terminal and live-route admission
-→ abort tracked guard holders and drain only until the hard deadline
-→ fence Built-in leases and boundedly reap unresolved Runtime processes
+→ abort tracked guard holders, close/fence Built-in invocation, and drain execution writers
+→ settle every remaining non-terminal Run through the durable product fence
+→ boundedly reap unresolved Runtime processes
 → boundedly stop event processors and remaining workers
 → flush stdout and exit
 ```
@@ -110,12 +140,16 @@ hard deadline 后继续无界等待。若 guard 没有及时释放，Core 关闭
 再做领域写入、等待 guard、Runtime graceful shutdown 或 worker join。该 grace 的精确值是位于 Desktop
 outer watchdog 内的实现常量，不构成第二个领域结算窗口。
 
-deadline 之后仍非终态的 Run 不被写成 cancelled 或 failed。旧 route 被 fence 后的任何 event 都不能修改
-Run；下一次启动按 ADR-0164 分类 accepted input。Desktop watchdog 仍是 Core 完全失去响应时的最终兜底，
-不是普通 callback、cleanup 或 reap 卡住时的主要收口机制。
+若 product-fence transaction 在 hard deadline 前完成，shutdown report 的 `unresolvedExecutions` 为零；未知
+external effects 不计作 non-terminal execution。若 deadline/watchdog 在事务提交前终止 Core，durable cycle
+保留为 pending，下一次启动补偿提交。旧 route 被 fence 后的任何 event 都不能修改 Run。Desktop watchdog
+仍是 Core 完全失去响应时的最终兜底，不是普通 callback、cleanup 或 reap 卡住时的主要收口机制。
 
-## 5. Desktop Boundary
+## 6. Desktop Boundary
 
 Electron Main 是唯一调用方。`CoreClient.shutdown()` 在第一次调用时禁止自动重启、发送一次
-`core.shutdown`、等待 shutdown report，再等待子进程真实 exit；重复调用复用同一个 Promise。外层
-watchdog 只在 Core 协议未按期结束时依次发送 SIGTERM 和 SIGKILL。Preload/Renderer 不暴露此方法。
+`core.shutdown` v2、等待 shutdown report，再等待子进程真实 exit；重复调用复用同一个 Promise。外层
+watchdog 只在 Core 协议未按期结束时依次发送 SIGTERM 和 SIGKILL。Main 的第一次 `before-quit` 通过
+`preventDefault()` 保留等待面；Core child 已退出且 shutdown Promise settle 后，以 `app.exit(0)` 完成这次
+已授权退出，不能再进入一轮 native termination negotiation 并扩大有界关闭窗口。Preload/Renderer 不暴露
+此方法。

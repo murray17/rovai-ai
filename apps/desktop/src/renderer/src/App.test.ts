@@ -177,7 +177,8 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-describedby="controlled-shutdown-description"')
     expect(markup).toContain('正在停止运行并关闭 Rovai')
     expect(markup).toContain('Runtime 返回可靠终态')
-    expect(markup).toContain('无法确认的执行会保留现场')
+    expect(markup).toContain('无法确认的执行也会停止')
+    expect(markup).toContain('保留外部效果现场')
     expect(markup).not.toContain('<button')
   })
 
