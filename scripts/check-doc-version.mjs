@@ -82,6 +82,48 @@ for (const version of versionDirectories) {
     frontMatter.lifecycle === "current" || frontMatter.lifecycle === "historical",
     repoPath(readmePath) + " must declare lifecycle: current or historical"
   );
+  const implementationPlanPath = path.join(
+    versionsRoot,
+    version,
+    "implementation-plan.md"
+  );
+  let implementationPlanText = null;
+  try {
+    implementationPlanText = await readFile(implementationPlanPath, "utf8");
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      errors.push("Unable to read " + repoPath(implementationPlanPath) + ": " + error.message);
+    }
+  }
+  if (implementationPlanText !== null) {
+    const implementationPlanFrontMatter = parseFrontMatter(
+      implementationPlanText,
+      implementationPlanPath
+    );
+    check(
+      implementationPlanFrontMatter.document_type === "implementation-plan",
+      repoPath(implementationPlanPath) + " must declare document_type: implementation-plan"
+    );
+    check(
+      implementationPlanFrontMatter.version === version,
+      repoPath(implementationPlanPath) + " must declare version: " + version
+    );
+    if (frontMatter.implementation_status) {
+      const implementationPlanStatus =
+        implementationPlanFrontMatter.status ??
+        implementationPlanFrontMatter.implementation_status;
+      check(
+        implementationPlanStatus === frontMatter.implementation_status,
+        repoPath(implementationPlanPath) +
+          " status must match " +
+          repoPath(readmePath) +
+          " implementation_status: expected " +
+          frontMatter.implementation_status +
+          ", found " +
+          (implementationPlanStatus || "missing")
+      );
+    }
+  }
 
   if (version === currentVersion) {
     check(

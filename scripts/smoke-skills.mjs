@@ -272,7 +272,6 @@ try {
 
   let shadowed = null
   if (requestedAdapters.length > 0) {
-    const finalAdapter = requestedAdapters.at(-1)
     const finalResult = runtimeResults.at(-1)
     const entry = finalResult.entryPath
     await unlink(entry)
@@ -285,7 +284,7 @@ try {
     const issues = await core.request('skills.projections.listIssues')
     shadowed = issues.find((issue) =>
       issue.skillId === importedSkill.id
-        && issue.groupKey === deliveryGroup(finalAdapter)
+        && issue.entryPath === entry
         && issue.state === 'shadowed'
     )
     assert(shadowed, `Project-owned same-name Skill was not reported as Shadowed: ${JSON.stringify(issues)}`)
@@ -468,6 +467,7 @@ async function runNativeDiscovery(request, workspace, adapterKind, marker) {
   }
   const taskHelpIndex = output.indexOf('rovai task create --help')
   const sendHelpIndex = output.indexOf('rovai send --help')
+  const markdownNormalizedOutput = output.replaceAll('`', '')
   const inventedSendSyntax = [
     '--request-user-attention',
     'requiresUserAttention',
@@ -480,7 +480,7 @@ async function runNativeDiscovery(request, workspace, adapterKind, marker) {
   if (taskHelpIndex < 0
       || sendHelpIndex < 0
       || taskHelpIndex >= sendHelpIndex
-      || !output.includes('attention=omit --to-user')
+      || !markdownNormalizedOutput.includes('attention=omit --to-user')
       || output.includes('rovai task update --help')
       || inventedSendSyntax
       || mentionsCurrentUser) {

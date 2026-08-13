@@ -111,7 +111,8 @@ Camp 标题增量以 [ADR-0173](../../adr/0173-leading-structured-mentions-exclu
 3. CLI smoke 验证 Transport v8 capability/version、精确 help 正反断言和原有 `mentionUser` Core effects；
 4. 文档链接、版本生命周期、合同/Architecture 路由、ADR history 与 diff-aware governance 全部通过；
 5. 至少一个目标 Runtime 完成针对“普通最终回复/内部协作不再连续提醒用户”的真实行为 smoke；九 Runtime
-   正式兼容矩阵在发布前补齐，未执行时不得声称 v8 real-model compatibility 已证明；
+   正式兼容矩阵应在发布前补齐。该矩阵未在版本关闭前执行，因此本版本以 `closed_incomplete` 冻结；
+   关闭后的补测只能作为追溯证据，不能倒推版本当时已经完成；
 6. Skill validator、Core manifest/provenance/risk tests、Renderer source presentation、十项 fresh-Core
    inventory fixture 与文档治理全部通过；
 7. Camp 标题测试证明只移除开头真实 Structured Mention，保留中后部 Mention 与手写 `@文字`，并完成
@@ -127,9 +128,22 @@ Camp 标题增量以 [ADR-0173](../../adr/0173-leading-structured-mentions-exclu
 | Architecture | 已更新 | Built-in Tool Runtime 与 Public A2A 路由到 v5/v8，并记录十项 inventory 与固定 GitHub 来源的离线边界 |
 | UI | 已更新 | Current User Attention 的 Renderer 合同不变；Settings surface 与 UI 验收同步十项普通列表和四项 GitHub 来源；[App Shell 与统一侧栏](../../ui/components/app-shell-navigation.md)明确自动标题投影与 Camp 行单一点击语义 |
 | Runtime Activity | 确认无需更新 | 不新增 operation、Activity identity、provider event 或 classifier；现有 send Evidence 形状不变 |
-| Runtime compatibility | 已更新 | 当前合同入口切换到 v8；Codex 聚焦行为 smoke 已通过，v7 九 Runtime 证据仍不能冒充 v8 全矩阵 |
+| Runtime compatibility | 已更新 | 当前合同入口切换到 v8；冻结时只有 Codex 聚焦证据，关闭后在最终快照补跑为 Built-in CLI 与 Skill 各 8/9 通过、Copilot 配额阻塞；该追溯证据不改写 `closed_incomplete` |
 | Documentation routing | 已更新 | docs map、CURRENT、Contract/Architecture 索引和 current version pointer 路由到 v0.70 权威；Camp/workspace 与 Skills 主题分别进入 ADR-0173/0174 |
 | Root README | 确认无需更新 | 项目定位、常青能力与支持 Runtime 集合不变；根 README 不记录版本局部教学修正 |
+
+## 关闭后兼容性补测
+
+2026-08-13 在 v0.70 最终产品快照 `a6397f32` 上，以全新隔离 Core data-dir、Skill Library、Git
+workspace 与 Native Session 补跑九 Runtime v8 矩阵。Codex、OpenCode、Claude Code、Antigravity、
+Kiro、Qoder、CodeBuddy 与 Qwen Code 的 Built-in CLI v8 和 managed Skill discovery 均通过；GitHub
+Copilot CLI 两类用例都在接受输入后明确返回月度配额耗尽，因此记为外部条件阻塞，不记 pass，也不
+归因于 v0.70 产品失败。
+
+这组结果把关闭后的实测覆盖提高到两类矩阵各 `8/9 pass + 1 blocked`，但没有满足“版本关闭前完成
+九 Runtime 正式矩阵”的原发布门槛；版本状态继续是 `closed_incomplete`。具体 Runtime/模型版本、
+断言范围与测试夹具修正见[实施计划](implementation-plan.md)和
+[Runtime 兼容性清单](../../runtime-compatibility.md)。
 
 ## References
 

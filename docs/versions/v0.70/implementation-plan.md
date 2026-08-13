@@ -2,7 +2,7 @@
 document_type: implementation-plan
 version: v0.70
 authority: implementation-plan-and-acceptance
-status: in_progress
+status: closed_incomplete
 last_updated: 2026-08-13
 ---
 
@@ -48,7 +48,9 @@ last_updated: 2026-08-13
 
 - [x] 使用 Codex Runtime 复现普通内部协作链，确认最终 Camp Message 不生成 Current User Mention；
 - [x] 记录 Runtime/模型版本、Native Session 新建方式、输入场景与 exact addressing 证据；
-- [ ] 发布前运行九 Runtime v8 Built-in CLI/Skill 矩阵，或明确保持版本 `in_progress` 且不更新兼容性结论。
+- [ ] 在版本关闭前运行九 Runtime v8 Built-in CLI/Skill 矩阵；该门槛未按时完成，版本以
+  `closed_incomplete` 冻结。
+- [x] 关闭后在 v0.70 最终快照补跑矩阵并记录 `8/9 pass + 1 blocked` 的追溯证据，不倒推发布门槛完成。
 
 ## Checkpoint 6：固定 GitHub 来源的三项工程 Skill
 
@@ -130,5 +132,39 @@ last_updated: 2026-08-13
 - smoke 同时验证 official `cli-operations` Revision 与测试 Skill 均由隔离 managed library 投递。
 
 v0.67 的九 Runtime v7 矩阵只证明旧 Core effects、CLI transport 和初版 Skill delivery，不证明本版本
-收窄后的模型行为。九 Runtime v8 正式矩阵尚未执行，因此 v0.70 保持 `in_progress`，兼容性文档不声明
-v8 real-model compatibility 已整体证明。
+收窄后的模型行为。v0.70 关闭时九 Runtime v8 正式矩阵尚未执行，因此历史状态为
+`closed_incomplete`；关闭后的补测记录如下，不能改写当时的完成度。
+
+### 关闭后九 Runtime v8 补测
+
+2026-08-13 从 v0.70 最终产品快照 `a6397f32` 构建 debug Core/CLI，并为每个用例创建独立临时
+Core data-dir、Skill Library、Git workspace 与 Native Session。产品代码保持该快照；补测过程中只
+修正两项 smoke 自身的假阴性断言，并把相同修正带回当前分支：
+
+- Shadowed 检查按 Core 返回的精确 `entryPath` 识别 projection，不再用逻辑 Runtime Group 猜测
+  物理投递组；OpenCode 的逻辑组为 `opencode`，实际复用 `.claude/skills`；
+- 对 `attention=omit --to-user` 的比较先去除 Markdown 反引号，允许 Runtime 把参数格式化为行内代码，
+  同时继续要求 `mentionsCurrentUser=false` 并拒绝虚构参数。
+
+| Runtime | 实测版本 / 模型 | Built-in CLI v8 | managed Skill v8 |
+| --- | --- | --- | --- |
+| Codex CLI | `0.147.0` / `gpt-5.6-sol` | pass | pass |
+| OpenCode | `1.18.10` / `opencode/big-pickle` | pass | pass |
+| GitHub Copilot CLI | `1.0.79` / `claude-sonnet-5` | blocked：月度配额耗尽 | blocked：月度配额耗尽，两次一致 |
+| Claude Code | `2.1.220` / runtime default | pass（聚焦重试） | pass |
+| Antigravity | `1.1.12` / runtime default | pass | pass |
+| Kiro | `2.16.1` / `auto` | pass | pass |
+| Qoder | `1.1.17` / `deepseek/deepseek-v4-flash-pg` | pass | pass |
+| CodeBuddy | `2.133.1` / `deepseek-v4-flash` | pass | pass |
+| Qwen Code | `0.21.5` / `deepseek-v4-flash(openai)` | pass | pass |
+
+通过的八个 Built-in CLI Case 均完成 13 项 canonical operation、三种 send 输入、successor exact
+reads、stale-version conflict、前后 lease fencing 以及 logical/native continuation；通过的八个 Skill
+Case 均完成 managed projection、私有 marker、exact task/send help、消息局部 attention、重启恢复、
+Shadowed 与删除边界。Claude Built-in 首次批量运行在接受输入后无 stderr 退出，聚焦重试完整通过；
+最终记 pass。Copilot 两类用例均得到服务商明确配额错误，不能形成兼容性 pass，也没有证据表明是
+产品回归。
+
+最终追溯结论为 Built-in CLI v8 `8/9 pass + 1 blocked`、managed Skill v8
+`8/9 pass + 1 blocked`。它补足了可执行证据，但仍未满足冻结前的九 Runtime 发布门槛，因此本计划
+状态与版本 overview 一致保持 `closed_incomplete`。

@@ -3,8 +3,8 @@ document_type: version-architecture
 version: v0.31
 authority: implementation-contract
 status: frozen
-implementation_status: in_progress
-last_updated: 2026-08-02
+implementation_status: closed_incomplete
+last_updated: 2026-08-13
 ---
 
 # v0.31 实施设计

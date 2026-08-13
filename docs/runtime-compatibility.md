@@ -60,12 +60,36 @@ Native Session：Adapter 在终态对外可见前停止持有 Session lock 的 p
 矩阵仍是 v7 的真实模型证据，不能冒充 v8 收窄后的 schema/help/Charter/Skill 教学已经完成实机复测；v8
 的确定性测试已证明 catalog digest、三类分离示例与 Antigravity binding replacement。
 
-2026-08-13 的 v0.70 聚焦复测以全新隔离 Core data-dir 和 Native Session 运行 Codex CLI `0.147.0` / `gpt-5.6-sol`：
-内部 Agent handoff 没有新增用户决定、回答或行动时，真实模型在读取 exact help 后选择
-`attention=omit --to-user`，最终结构化 Camp Message 不含 `current_user_mention`；同日 Codex v8
-`smoke:builtin-cli` 的 13 项 operation、successor exact reads 与 Native Session continuation 也通过。该单
-Runtime 证据不外推到其余八个 Runtime；九 Runtime v8 正式矩阵仍需在 v0.70 发布前补跑。完整输入与
-AgentRun 证据记录在 [v0.70 实施计划](versions/v0.70/implementation-plan.md)。
+v0.70 关闭时只有 Codex 聚焦复测：以全新隔离 Core data-dir 和 Native Session 运行 Codex CLI
+`0.147.0` / `gpt-5.6-sol`，在内部 handoff 没有新增用户决定、回答或行动时，真实模型读取 exact help
+后选择 `attention=omit --to-user`，最终结构化 Camp Message 不含 `current_user_mention`。由于其余
+八个 Runtime 尚未运行，v0.70 以 `closed_incomplete` 冻结。
+
+关闭后于 2026-08-13 从 v0.70 最终产品快照 `a6397f32` 构建 Core/CLI，并为每个 Case 使用全新隔离
+Core data-dir、Skill Library、Git workspace 与 Native Session，追溯补跑 Built-in CLI v8 和 managed
+Skill v8 九 Runtime 矩阵：
+
+| Runtime | v0.70 补测版本 / CLI model | Built-in CLI v8 | managed Skill v8 |
+| --- | --- | --- | --- |
+| Codex CLI | `0.147.0` / `gpt-5.6-sol` | pass | pass |
+| OpenCode | `1.18.10` / `opencode/big-pickle` | pass | pass |
+| GitHub Copilot CLI | `1.0.79` / `claude-sonnet-5` | blocked：月度配额耗尽 | blocked：月度配额耗尽，两次一致 |
+| Claude Code | `2.1.220` / runtime default | pass（聚焦重试） | pass |
+| Antigravity | `1.1.12` / runtime default | pass | pass |
+| Kiro | `2.16.1` / `auto` | pass | pass |
+| Qoder | `1.1.17` / `deepseek/deepseek-v4-flash-pg` | pass | pass |
+| CodeBuddy | `2.133.1` / `deepseek-v4-flash` | pass | pass |
+| Qwen Code | `0.21.5` / `deepseek-v4-flash(openai)` | pass | pass |
+
+八个 Built-in pass 均覆盖十三项 canonical operation、direct/stdin/input-file 三种 send 输入、successor
+exact reads、stale-version conflict、旧 lease fencing、新 lease 与 logical/native continuation。八个
+Skill pass 均覆盖 managed projection、私有 marker、exact task/send help、消息局部 attention、重启
+恢复、Shadowed 与删除边界。Copilot 两类用例都在接受输入后明确返回月度配额耗尽，故记为外部条件
+阻塞，不记 pass，也不归因于 v0.70 产品失败。
+
+这组追溯证据的结论是两类矩阵各 `8/9 pass + 1 blocked`，不是完整 `9/9`。它也不能倒推 v0.70
+在关闭时满足发布门槛；版本状态继续是 `closed_incomplete`。完整执行口径和 smoke 假阴性修正记录在
+[v0.70 实施计划](versions/v0.70/implementation-plan.md)。
 
 ### 历史 v0.47 Transport v4 基线
 

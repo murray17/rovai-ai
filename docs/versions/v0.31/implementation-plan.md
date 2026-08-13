@@ -2,9 +2,9 @@
 document_type: implementation-plan
 version: v0.31
 authority: implementation-status
-status: in_progress
+status: closed_incomplete
 implementation_authorized: true
-last_updated: 2026-08-02
+last_updated: 2026-08-13
 ---
 
 # v0.31 实施与验收计划
@@ -27,7 +27,8 @@ v0.31 的生产实现、打包态十三工具 Gate、Qualification Runner、公�
 密封 Case、相同 30 分钟 / 10 AgentRun / 9 A2A 预算完成了有效校准：外部 verifier 与完整 Run
 树均通过，四名成员全部参与，实际使用 7 AgentRun / 6 accepted A2A，且没有投递后人工干预。
 校准不计分；十二次自主 Trial 仍未启动，因此 Pass Rate 仍不存在。当前结论是协作链路门禁
-已通过、自主交付资格尚待正式套件；`implementation_status` 继续为 `in_progress`。
+已通过、自主交付资格尚待正式套件。版本后来在十二次自主 Trial 未运行的情况下冻结，因此
+`implementation_status` 为 `closed_incomplete`；这不改写本节记录的当时实施进度。
 
 ## 实施前本机准备记录（非产品完成度）
 
