@@ -2,13 +2,13 @@ use std::{
     collections::HashMap,
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
     },
 };
 
 use tokio::{
     sync::{Mutex, Notify, OwnedRwLockReadGuard, RwLock},
-    time::Instant,
+    time::{Instant, timeout_at},
 };
 
 use crate::agent_profile::AdapterKind;
@@ -95,7 +95,7 @@ pub struct ExecutionLaunchPermit {
 }
 
 impl ExecutionLaunchPermit {
-    pub fn complete_handoff(&mut self) {
+    fn complete_handoff(&mut self) {
         self.guard.take();
     }
 }
@@ -108,7 +108,7 @@ pub struct TerminalSettlementPermit {
     generation: String,
     observation: RuntimeTerminalObservation,
     planned_stop_requested: bool,
-    _guard: OwnedRwLockReadGuard<()>,
+    guard: Option<OwnedRwLockReadGuard<()>>,
 }
 
 /// A short-lived guard for one callback that arrived through a live Runtime
@@ -116,7 +116,7 @@ pub struct TerminalSettlementPermit {
 /// window, then closes and drains it before Runtime reap.
 #[derive(Debug)]
 pub struct RuntimeRoutePermit {
-    _guard: OwnedRwLockReadGuard<()>,
+    guard: Option<OwnedRwLockReadGuard<()>>,
 }
 
 impl TerminalSettlementPermit {
@@ -132,11 +132,25 @@ impl TerminalSettlementPermit {
             && self.observation.outcome == outcome
             && (outcome != RuntimeTerminalOutcome::Cancelled || self.planned_stop_requested)
     }
+
+    /// Release the terminal barrier immediately after the authoritative
+    /// transaction finishes. Runtime cleanup and event emission are not part
+    /// of terminal settlement admission.
+    pub fn complete_settlement(&mut self) {
+        self.guard.take();
+    }
+}
+
+impl RuntimeRoutePermit {
+    /// Release the live-route barrier once the callback's authoritative writes
+    /// are complete. Adapter cleanup may continue after the route is fenced.
+    pub fn complete_callback(&mut self) {
+        self.guard.take();
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TerminalAdmissionError {
-    NotDraining,
     Closed,
     ExecutionNotActive,
     RouteMismatch,
@@ -145,15 +159,59 @@ pub enum TerminalAdmissionError {
 }
 
 #[derive(Debug)]
+pub enum RuntimeTerminalAdmission {
+    Ordinary {
+        guard: Option<OwnedRwLockReadGuard<()>>,
+    },
+    Planned(TerminalSettlementPermit),
+}
+
+impl RuntimeTerminalAdmission {
+    pub fn planned_permit(&self) -> Option<&TerminalSettlementPermit> {
+        match self {
+            Self::Ordinary { .. } => None,
+            Self::Planned(permit) => Some(permit),
+        }
+    }
+
+    pub fn complete_settlement(&mut self) {
+        match self {
+            Self::Ordinary { guard } => {
+                guard.take();
+            }
+            Self::Planned(permit) => permit.complete_settlement(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+enum ShutdownPhase {
+    Accepting = 0,
+    ClosingLaunch = 1,
+    Draining = 2,
+    TerminalClosed = 3,
+}
+
+impl ShutdownPhase {
+    fn from_u8(value: u8) -> Self {
+        match value {
+            0 => Self::Accepting,
+            1 => Self::ClosingLaunch,
+            2 => Self::Draining,
+            _ => Self::TerminalClosed,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct PlannedShutdownCoordinator {
     generation: String,
-    launch_open: AtomicBool,
+    phase: AtomicU8,
     launch_gate: Arc<RwLock<()>>,
-    terminal_open: AtomicBool,
     terminal_gate: Arc<RwLock<()>>,
     runtime_routes_open: AtomicBool,
     runtime_route_gate: Arc<RwLock<()>>,
-    draining: AtomicBool,
     active: Mutex<HashMap<ActiveExecutionKey, ActiveExecution>>,
     settled: Mutex<HashMap<ActiveExecutionKey, SettledExecution>>,
     active_changed: Notify,
@@ -163,13 +221,11 @@ impl PlannedShutdownCoordinator {
     pub fn new(generation: impl Into<String>) -> Arc<Self> {
         Arc::new(Self {
             generation: generation.into(),
-            launch_open: AtomicBool::new(true),
+            phase: AtomicU8::new(ShutdownPhase::Accepting as u8),
             launch_gate: Arc::new(RwLock::new(())),
-            terminal_open: AtomicBool::new(true),
             terminal_gate: Arc::new(RwLock::new(())),
             runtime_routes_open: AtomicBool::new(true),
             runtime_route_gate: Arc::new(RwLock::new(())),
-            draining: AtomicBool::new(false),
             active: Mutex::new(HashMap::new()),
             settled: Mutex::new(HashMap::new()),
             active_changed: Notify::new(),
@@ -180,16 +236,21 @@ impl PlannedShutdownCoordinator {
         &self.generation
     }
 
-    pub fn is_draining(&self) -> bool {
-        self.draining.load(Ordering::Acquire)
+    fn phase(&self) -> ShutdownPhase {
+        ShutdownPhase::from_u8(self.phase.load(Ordering::Acquire))
+    }
+
+    /// True as soon as planned shutdown has closed execution launch admission.
+    pub fn shutdown_started(&self) -> bool {
+        self.phase() != ShutdownPhase::Accepting
     }
 
     pub async fn enter_launch(&self) -> Option<ExecutionLaunchPermit> {
-        if !self.launch_open.load(Ordering::Acquire) {
+        if self.phase() != ShutdownPhase::Accepting {
             return None;
         }
         let guard = self.launch_gate.clone().read_owned().await;
-        if !self.launch_open.load(Ordering::Acquire) {
+        if self.phase() != ShutdownPhase::Accepting {
             return None;
         }
         Some(ExecutionLaunchPermit {
@@ -198,11 +259,43 @@ impl PlannedShutdownCoordinator {
         })
     }
 
-    pub async fn begin_drain(&self) {
-        self.draining.store(true, Ordering::Release);
-        self.launch_open.store(false, Ordering::Release);
-        let barrier = self.launch_gate.write().await;
+    /// Linearization point for planned shutdown. New launch permits are denied
+    /// immediately, while terminals from handoffs already in progress continue
+    /// through the ordinary route until the launch barrier closes.
+    pub fn close_launch_admission(&self) {
+        let _ = self.phase.compare_exchange(
+            ShutdownPhase::Accepting as u8,
+            ShutdownPhase::ClosingLaunch as u8,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+    }
+
+    /// Wait for every admitted launch to bind its route or abandon the launch.
+    /// Only then does terminal classification switch to planned-shutdown rules.
+    pub async fn finish_launch_closure_until(&self, deadline: Instant) -> bool {
+        self.close_launch_admission();
+        if self.phase() == ShutdownPhase::Draining {
+            return true;
+        }
+        if self.phase() == ShutdownPhase::TerminalClosed {
+            return false;
+        }
+        let Ok(barrier) = timeout_at(deadline, self.launch_gate.write()).await else {
+            return false;
+        };
+        let transitioned = self
+            .phase
+            .compare_exchange(
+                ShutdownPhase::ClosingLaunch as u8,
+                ShutdownPhase::Draining as u8,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+            || self.phase() == ShutdownPhase::Draining;
         drop(barrier);
+        transitioned
     }
 
     pub async fn register_active(
@@ -233,6 +326,14 @@ impl PlannedShutdownCoordinator {
     }
 
     pub async fn bind_route(&self, key: &ActiveExecutionKey, binding: RuntimeRouteBinding) -> bool {
+        self.bind_route_inner(key, binding).await
+    }
+
+    async fn bind_route_inner(
+        &self,
+        key: &ActiveExecutionKey,
+        binding: RuntimeRouteBinding,
+    ) -> bool {
         let mut active = self.active.lock().await;
         let Some(execution) = active.get_mut(key) else {
             return false;
@@ -246,6 +347,24 @@ impl PlannedShutdownCoordinator {
                 true
             }
         }
+    }
+
+    /// Atomically establishes the generation-local route binding before the
+    /// launch permit releases the handoff barrier.
+    pub async fn complete_handoff(
+        &self,
+        permit: &mut ExecutionLaunchPermit,
+        key: &ActiveExecutionKey,
+        binding: RuntimeRouteBinding,
+    ) -> bool {
+        if permit.generation != self.generation || permit.guard.is_none() {
+            return false;
+        }
+        if !self.bind_route_inner(key, binding).await {
+            return false;
+        }
+        permit.complete_handoff();
+        true
     }
 
     pub async fn mark_planned_stop_requested(&self, key: &ActiveExecutionKey) -> bool {
@@ -269,6 +388,21 @@ impl PlannedShutdownCoordinator {
                 planned_stop_requested: execution.planned_stop_requested,
             })
             .collect()
+    }
+
+    /// A non-terminal launch/transport error cannot resolve an execution after
+    /// its Runtime handoff is bound. From that point on, only a correlated
+    /// Runtime terminal may remove the active execution; otherwise the outcome
+    /// must remain unknown for generation-local settlement or startup recovery.
+    pub async fn must_preserve_unresolved_after_nonterminal_error(
+        &self,
+        key: &ActiveExecutionKey,
+    ) -> bool {
+        self.active
+            .lock()
+            .await
+            .get(key)
+            .is_some_and(|execution| execution.binding.is_some())
     }
 
     pub async fn remove_active(&self, key: &ActiveExecutionKey) -> bool {
@@ -311,16 +445,17 @@ impl PlannedShutdownCoordinator {
     pub async fn admit_terminal(
         &self,
         observation: RuntimeTerminalObservation,
-    ) -> Result<TerminalSettlementPermit, TerminalAdmissionError> {
-        if !self.is_draining() {
-            return Err(TerminalAdmissionError::NotDraining);
-        }
-        if !self.terminal_open.load(Ordering::Acquire) {
+    ) -> Result<RuntimeTerminalAdmission, TerminalAdmissionError> {
+        if self.phase() == ShutdownPhase::TerminalClosed {
             return Err(TerminalAdmissionError::Closed);
         }
         let guard = self.terminal_gate.clone().read_owned().await;
-        if !self.terminal_open.load(Ordering::Acquire) {
-            return Err(TerminalAdmissionError::Closed);
+        match self.phase() {
+            ShutdownPhase::Accepting | ShutdownPhase::ClosingLaunch => {
+                return Ok(RuntimeTerminalAdmission::Ordinary { guard: Some(guard) });
+            }
+            ShutdownPhase::Draining => {}
+            ShutdownPhase::TerminalClosed => return Err(TerminalAdmissionError::Closed),
         }
         let planned_stop_requested = {
             let mut active = self.active.lock().await;
@@ -373,18 +508,14 @@ impl PlannedShutdownCoordinator {
                 execution.planned_stop_requested
             }
         };
-        Ok(TerminalSettlementPermit {
-            generation: self.generation.clone(),
-            observation,
-            planned_stop_requested,
-            _guard: guard,
-        })
-    }
-
-    pub async fn close_terminal_admission_and_drain(&self) {
-        self.terminal_open.store(false, Ordering::Release);
-        let barrier = self.terminal_gate.write().await;
-        drop(barrier);
+        Ok(RuntimeTerminalAdmission::Planned(
+            TerminalSettlementPermit {
+                generation: self.generation.clone(),
+                observation,
+                planned_stop_requested,
+                guard: Some(guard),
+            },
+        ))
     }
 
     pub async fn enter_runtime_route(&self) -> Option<RuntimeRoutePermit> {
@@ -395,20 +526,53 @@ impl PlannedShutdownCoordinator {
         if !self.runtime_routes_open.load(Ordering::Acquire) {
             return None;
         }
-        Some(RuntimeRoutePermit { _guard: guard })
+        Some(RuntimeRoutePermit { guard: Some(guard) })
     }
 
-    pub async fn close_runtime_routes_and_drain(&self) {
+    /// Close both correctness-sensitive admissions before waiting for either
+    /// barrier. The shared absolute deadline prevents one drain from starving
+    /// the other.
+    pub async fn close_terminal_and_runtime_routes_until(&self, deadline: Instant) -> (bool, bool) {
+        self.close_terminal_and_runtime_route_admission();
+        self.drain_terminal_and_runtime_routes_until(deadline).await
+    }
+
+    /// Synchronously fence late terminal and callback admission. This must run
+    /// before aborting guard-owning tasks at the settlement cutoff.
+    pub fn close_terminal_and_runtime_route_admission(&self) {
+        self.phase
+            .store(ShutdownPhase::TerminalClosed as u8, Ordering::Release);
         self.runtime_routes_open.store(false, Ordering::Release);
-        let barrier = self.runtime_route_gate.write().await;
-        drop(barrier);
+    }
+
+    pub async fn drain_terminal_and_runtime_routes_until(&self, deadline: Instant) -> (bool, bool) {
+        let terminal_gate = self.terminal_gate.clone();
+        let route_gate = self.runtime_route_gate.clone();
+        tokio::join!(
+            async move {
+                timeout_at(deadline, terminal_gate.write())
+                    .await
+                    .map(drop)
+                    .is_ok()
+            },
+            async move {
+                timeout_at(deadline, route_gate.write())
+                    .await
+                    .map(drop)
+                    .is_ok()
+            }
+        )
     }
 
     pub async fn wait_for_no_active_until(&self, deadline: Instant) -> bool {
         loop {
-            if self.active.lock().await.is_empty() {
+            let Ok(active) = timeout_at(deadline, self.active.lock()).await else {
+                return false;
+            };
+            if active.is_empty() {
                 return true;
             }
+            drop(active);
             let notified = self.active_changed.notified();
             let now = Instant::now();
             if now >= deadline {
@@ -425,8 +589,16 @@ impl PlannedShutdownCoordinator {
 
     #[cfg(test)]
     pub async fn close_for_test(&self) {
-        self.begin_drain().await;
-        self.close_terminal_admission_and_drain().await;
+        self.close_launch_admission();
+        assert!(
+            self.finish_launch_closure_until(Instant::now() + std::time::Duration::from_secs(1))
+                .await
+        );
+        let _ = self
+            .close_terminal_and_runtime_routes_until(
+                Instant::now() + std::time::Duration::from_secs(1),
+            )
+            .await;
     }
 }
 
@@ -442,19 +614,101 @@ mod tests {
         }
     }
 
+    fn planned(admission: RuntimeTerminalAdmission) -> TerminalSettlementPermit {
+        match admission {
+            RuntimeTerminalAdmission::Planned(permit) => permit,
+            RuntimeTerminalAdmission::Ordinary { .. } => {
+                panic!("expected planned-shutdown terminal admission")
+            }
+        }
+    }
+
+    async fn finish_launch_closure(coordinator: &PlannedShutdownCoordinator) {
+        coordinator.close_launch_admission();
+        assert!(
+            coordinator
+                .finish_launch_closure_until(Instant::now() + std::time::Duration::from_secs(1))
+                .await
+        );
+    }
+
     #[tokio::test]
     async fn drain_waits_for_launch_handoff_and_rejects_new_launch() {
         let coordinator = PlannedShutdownCoordinator::new("generation-1");
         let mut permit = coordinator.enter_launch().await.expect("launch is open");
+        let key = ActiveExecutionKey::new("run-1", 1);
+        assert!(
+            coordinator
+                .register_active(&permit, key.clone(), AdapterKind::CodexCli)
+                .await
+        );
+        coordinator.close_launch_admission();
         let draining = {
             let coordinator = coordinator.clone();
-            tokio::spawn(async move { coordinator.begin_drain().await })
+            tokio::spawn(async move {
+                coordinator
+                    .finish_launch_closure_until(Instant::now() + std::time::Duration::from_secs(1))
+                    .await
+            })
         };
         tokio::task::yield_now().await;
         assert!(!draining.is_finished());
-        permit.complete_handoff();
-        draining.await.unwrap();
         assert!(coordinator.enter_launch().await.is_none());
+
+        // A terminal can race ahead of the Core route binding after the
+        // Provider has accepted the prompt. ClosingLaunch must keep it on the
+        // ordinary path instead of rejecting it as RouteMismatch.
+        assert!(matches!(
+            coordinator
+                .admit_terminal(RuntimeTerminalObservation {
+                    key: key.clone(),
+                    binding: binding(),
+                    outcome: RuntimeTerminalOutcome::Failed,
+                    fingerprint: "failed:turn-1".to_string(),
+                })
+                .await
+                .unwrap(),
+            RuntimeTerminalAdmission::Ordinary { .. }
+        ));
+        assert!(
+            coordinator
+                .complete_handoff(&mut permit, &key, binding())
+                .await
+        );
+        assert!(draining.await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn stable_wrong_route_is_fenced_after_launch_handoff() {
+        let coordinator = PlannedShutdownCoordinator::new("generation-1");
+        let mut permit = coordinator.enter_launch().await.expect("launch is open");
+        let key = ActiveExecutionKey::new("run-1", 1);
+        assert!(
+            coordinator
+                .register_active(&permit, key.clone(), AdapterKind::CodexCli)
+                .await
+        );
+        assert!(
+            coordinator
+                .complete_handoff(&mut permit, &key, binding())
+                .await
+        );
+        finish_launch_closure(&coordinator).await;
+
+        let mut wrong_binding = binding();
+        wrong_binding.adapter_turn_correlation = "wrong-turn".to_string();
+        assert_eq!(
+            coordinator
+                .admit_terminal(RuntimeTerminalObservation {
+                    key,
+                    binding: wrong_binding,
+                    outcome: RuntimeTerminalOutcome::Failed,
+                    fingerprint: "failed:wrong-turn".to_string(),
+                })
+                .await
+                .unwrap_err(),
+            TerminalAdmissionError::RouteMismatch
+        );
     }
 
     #[tokio::test]
@@ -467,9 +721,12 @@ mod tests {
                 .register_active(&permit, key.clone(), AdapterKind::CodexCli)
                 .await
         );
-        assert!(coordinator.bind_route(&key, binding()).await);
-        permit.complete_handoff();
-        coordinator.begin_drain().await;
+        assert!(
+            coordinator
+                .complete_handoff(&mut permit, &key, binding())
+                .await
+        );
+        finish_launch_closure(&coordinator).await;
 
         let observation = RuntimeTerminalObservation {
             key: key.clone(),
@@ -485,7 +742,7 @@ mod tests {
             TerminalAdmissionError::PlannedStopNotRequested
         );
         assert!(coordinator.mark_planned_stop_requested(&key).await);
-        let permit = coordinator.admit_terminal(observation).await.unwrap();
+        let permit = planned(coordinator.admit_terminal(observation).await.unwrap());
         assert!(permit.authorizes("run-1", 2, RuntimeTerminalOutcome::Cancelled));
     }
 
@@ -499,9 +756,12 @@ mod tests {
                 .register_active(&permit, key.clone(), AdapterKind::CodexCli)
                 .await
         );
-        assert!(coordinator.bind_route(&key, binding()).await);
-        permit.complete_handoff();
-        coordinator.begin_drain().await;
+        assert!(
+            coordinator
+                .complete_handoff(&mut permit, &key, binding())
+                .await
+        );
+        finish_launch_closure(&coordinator).await;
         assert!(coordinator.mark_planned_stop_requested(&key).await);
         let accepted = RuntimeTerminalObservation {
             key: key.clone(),
@@ -509,7 +769,7 @@ mod tests {
             outcome: RuntimeTerminalOutcome::Failed,
             fingerprint: "failed:turn-1".to_string(),
         };
-        let permit = coordinator.admit_terminal(accepted).await.unwrap();
+        let permit = planned(coordinator.admit_terminal(accepted).await.unwrap());
         drop(permit);
         let conflicting = RuntimeTerminalObservation {
             key,
@@ -533,9 +793,12 @@ mod tests {
                 .register_active(&permit, key.clone(), AdapterKind::CodexCli)
                 .await
         );
-        assert!(coordinator.bind_route(&key, binding()).await);
-        permit.complete_handoff();
-        coordinator.begin_drain().await;
+        assert!(
+            coordinator
+                .complete_handoff(&mut permit, &key, binding())
+                .await
+        );
+        finish_launch_closure(&coordinator).await;
         assert!(coordinator.mark_planned_stop_requested(&key).await);
         let observation = RuntimeTerminalObservation {
             key: key.clone(),
@@ -588,21 +851,146 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn launch_closure_respects_its_deadline_without_entering_drain() {
+        let coordinator = PlannedShutdownCoordinator::new("generation-1");
+        let _permit = coordinator.enter_launch().await.expect("launch is open");
+        coordinator.close_launch_admission();
+
+        assert!(
+            !coordinator
+                .finish_launch_closure_until(Instant::now() + std::time::Duration::from_millis(5),)
+                .await
+        );
+        assert!(coordinator.shutdown_started());
+        assert!(matches!(
+            coordinator
+                .admit_terminal(RuntimeTerminalObservation {
+                    key: ActiveExecutionKey::new("run-1", 1),
+                    binding: binding(),
+                    outcome: RuntimeTerminalOutcome::Failed,
+                    fingerprint: "failed:turn-1".to_string(),
+                })
+                .await
+                .unwrap(),
+            RuntimeTerminalAdmission::Ordinary { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn bound_handoff_always_preserves_unknown_after_nonterminal_error() {
+        let coordinator = PlannedShutdownCoordinator::new("generation-1");
+        let mut bound_permit = coordinator.enter_launch().await.expect("launch is open");
+        let bound_key = ActiveExecutionKey::new("run-bound", 1);
+        assert!(
+            coordinator
+                .register_active(&bound_permit, bound_key.clone(), AdapterKind::CodexCli)
+                .await
+        );
+        assert!(
+            coordinator
+                .complete_handoff(&mut bound_permit, &bound_key, binding())
+                .await
+        );
+
+        let unbound_permit = coordinator.enter_launch().await.expect("launch is open");
+        let unbound_key = ActiveExecutionKey::new("run-unbound", 1);
+        assert!(
+            coordinator
+                .register_active(&unbound_permit, unbound_key.clone(), AdapterKind::CodexCli)
+                .await
+        );
+
+        assert!(
+            coordinator
+                .must_preserve_unresolved_after_nonterminal_error(&bound_key)
+                .await
+        );
+        coordinator.close_launch_admission();
+        assert!(
+            !coordinator
+                .must_preserve_unresolved_after_nonterminal_error(&unbound_key)
+                .await
+        );
+        drop(unbound_permit);
+        assert!(
+            coordinator
+                .finish_launch_closure_until(Instant::now() + std::time::Duration::from_secs(1),)
+                .await
+        );
+        assert!(
+            coordinator
+                .must_preserve_unresolved_after_nonterminal_error(&bound_key)
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn terminal_and_route_drain_respect_one_absolute_deadline() {
+        let coordinator = PlannedShutdownCoordinator::new("generation-1");
+        finish_launch_closure(&coordinator).await;
+        let terminal = coordinator.terminal_gate.clone().read_owned().await;
+        let route = coordinator
+            .enter_runtime_route()
+            .await
+            .expect("live routes remain admitted during drain");
+
+        coordinator.close_terminal_and_runtime_route_admission();
+        assert_eq!(
+            coordinator
+                .drain_terminal_and_runtime_routes_until(
+                    Instant::now() + std::time::Duration::from_millis(5),
+                )
+                .await,
+            (false, false)
+        );
+        assert!(coordinator.enter_runtime_route().await.is_none());
+        assert_eq!(
+            coordinator
+                .admit_terminal(RuntimeTerminalObservation {
+                    key: ActiveExecutionKey::new("run-1", 1),
+                    binding: binding(),
+                    outcome: RuntimeTerminalOutcome::Failed,
+                    fingerprint: "failed:turn-1".to_string(),
+                })
+                .await
+                .unwrap_err(),
+            TerminalAdmissionError::Closed
+        );
+
+        drop(terminal);
+        drop(route);
+        assert_eq!(
+            coordinator
+                .drain_terminal_and_runtime_routes_until(
+                    Instant::now() + std::time::Duration::from_secs(1),
+                )
+                .await,
+            (true, true)
+        );
+    }
+
+    #[tokio::test]
     async fn runtime_route_fence_waits_for_entered_callbacks_and_rejects_late_events() {
         let coordinator = PlannedShutdownCoordinator::new("generation-1");
-        coordinator.begin_drain().await;
-        let permit = coordinator
+        finish_launch_closure(&coordinator).await;
+        let mut permit = coordinator
             .enter_runtime_route()
             .await
             .expect("live routes remain admitted during drain");
         let fencing = {
             let coordinator = coordinator.clone();
-            tokio::spawn(async move { coordinator.close_runtime_routes_and_drain().await })
+            tokio::spawn(async move {
+                coordinator
+                    .close_terminal_and_runtime_routes_until(
+                        Instant::now() + std::time::Duration::from_secs(1),
+                    )
+                    .await
+            })
         };
         tokio::task::yield_now().await;
         assert!(!fencing.is_finished());
-        drop(permit);
-        fencing.await.unwrap();
+        permit.complete_callback();
+        assert_eq!(fencing.await.unwrap(), (true, true));
         assert!(coordinator.enter_runtime_route().await.is_none());
     }
 }

@@ -23,6 +23,7 @@ use serde_json::json;
 use tokio::{
     process::Command,
     sync::{Mutex, MutexGuard},
+    time::Instant,
 };
 
 #[derive(Clone)]
@@ -305,6 +306,12 @@ impl BuiltinToolLeaseRegistry {
             }
         }
         fenced
+    }
+
+    pub(crate) async fn fence_all_until(&self, deadline: Instant) -> Option<usize> {
+        tokio::time::timeout_at(deadline, self.fence_all())
+            .await
+            .ok()
     }
 
     pub(crate) async fn authenticate(

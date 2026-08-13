@@ -3479,7 +3479,9 @@ impl ExecutionRuntimeService {
                 already_settled: true,
             });
         }
-        if target.status != "running" || target.cancel_requested_at.is_some() {
+        if !matches!(target.status.as_str(), "running" | "waiting")
+            || target.cancel_requested_at.is_some()
+        {
             anyhow::bail!("planned shutdown terminal target is no longer active");
         }
         if target.final_conversation_message_id.is_some() || target.final_camp_message_id.is_some()
@@ -3513,7 +3515,7 @@ impl ExecutionRuntimeService {
                 last_error_code = ?4, last_error_details_ref = ?5,
                 manual_retry_allowed = ?6,
                 ended_at = ?7, version = version + 1, updated_at = ?7
-            WHERE id = ?1 AND status = 'running'
+            WHERE id = ?1 AND status IN ('running', 'waiting')
               AND execution_epoch = ?8 AND cancel_requested_at IS NULL
             "#,
             params![
@@ -4784,7 +4786,7 @@ mod tests {
         execution_budget::CampTurnExecutionBudgetRequest,
         planned_shutdown::{
             ActiveExecutionKey, PlannedShutdownCoordinator, RuntimeRouteBinding,
-            RuntimeTerminalObservation,
+            RuntimeTerminalAdmission, RuntimeTerminalObservation,
         },
     };
     use std::path::PathBuf;
@@ -5351,6 +5353,24 @@ mod tests {
         )
     }
 
+    fn mark_claimed_run_waiting(database: &Database, agent_run_id: &str, wait_reason: &str) {
+        let now = chrono::Utc::now().to_rfc3339();
+        let updated = database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'waiting', wait_reason = ?2,
+                    wait_deadline_at = '2099-01-01T00:00:00Z',
+                    version = version + 1, updated_at = ?3
+                WHERE id = ?1 AND status = 'running'
+                "#,
+                params![agent_run_id, wait_reason, now],
+            )
+            .unwrap();
+        assert_eq!(updated, 1);
+    }
+
     async fn planned_terminal_permit(
         agent_run_id: &str,
         execution_epoch: i64,
@@ -5369,11 +5389,21 @@ mod tests {
             adapter_turn_correlation: "planned-shutdown-test-turn".to_string(),
             provider_turn_id: Some("planned-shutdown-test-turn".to_string()),
         };
-        assert!(coordinator.bind_route(&key, binding.clone()).await);
-        launch.complete_handoff();
-        coordinator.begin_drain().await;
+        assert!(
+            coordinator
+                .complete_handoff(&mut launch, &key, binding.clone())
+                .await
+        );
+        coordinator.close_launch_admission();
+        assert!(
+            coordinator
+                .finish_launch_closure_until(
+                    tokio::time::Instant::now() + std::time::Duration::from_secs(1),
+                )
+                .await
+        );
         assert!(coordinator.mark_planned_stop_requested(&key).await);
-        coordinator
+        match coordinator
             .admit_terminal(RuntimeTerminalObservation {
                 key,
                 binding,
@@ -5382,6 +5412,12 @@ mod tests {
             })
             .await
             .unwrap()
+        {
+            RuntimeTerminalAdmission::Planned(permit) => permit,
+            RuntimeTerminalAdmission::Ordinary { .. } => {
+                panic!("terminal remained ordinary after launch closure")
+            }
+        }
     }
 
     #[test]
@@ -5433,6 +5469,131 @@ mod tests {
             );
             drop(database);
             std::fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn planned_shutdown_abortive_terminal_settles_live_waiting_runs() {
+        struct WaitingTerminalState {
+            run_status: String,
+            wait_reason: Option<String>,
+            wait_deadline_at: Option<String>,
+            runtime_recovery_required: i64,
+            execution_lease_owner: Option<String>,
+            execution_lease_expires_at: Option<String>,
+            terminal_resolution_source: Option<String>,
+            terminal_reason_code: Option<String>,
+            turn_status: String,
+            aggregate_reason_code: Option<String>,
+            turn_cancel_requested_at: Option<String>,
+        }
+
+        for wait_reason in ["approval", "action_execution", "runtime_delivery"] {
+            for outcome in [
+                RuntimeTerminalOutcome::Failed,
+                RuntimeTerminalOutcome::Cancelled,
+            ] {
+                let (
+                    directory,
+                    mut database,
+                    _camp_id,
+                    camp_turn_id,
+                    agent_run_id,
+                    execution_epoch,
+                ) = claimed_run_for_planned_shutdown("required");
+                mark_claimed_run_waiting(&database, &agent_run_id, wait_reason);
+                let permit = planned_terminal_permit(&agent_run_id, execution_epoch, outcome).await;
+                let expected_run_status = match outcome {
+                    RuntimeTerminalOutcome::Failed => "failed",
+                    RuntimeTerminalOutcome::Cancelled => "cancelled",
+                    RuntimeTerminalOutcome::Succeeded => unreachable!(),
+                };
+                let expected_terminal_reason = match outcome {
+                    RuntimeTerminalOutcome::Failed => "planned_shutdown_failed",
+                    RuntimeTerminalOutcome::Cancelled => "planned_shutdown_cancelled",
+                    RuntimeTerminalOutcome::Succeeded => unreachable!(),
+                };
+                let settlement = ExecutionRuntimeService::default()
+                    .settle_planned_shutdown_abortive_terminal(
+                        &mut database,
+                        &permit,
+                        &PlannedShutdownAbortiveTerminal {
+                            agent_run_id: agent_run_id.clone(),
+                            execution_epoch,
+                            outcome,
+                            error_code: format!("runtime_{expected_run_status}"),
+                            error_detail: Some(format!(
+                                "Runtime returned {expected_run_status} while waiting for {wait_reason}"
+                            )),
+                            manual_retry_allowed: false,
+                        },
+                    )
+                    .unwrap();
+                assert_eq!(settlement.agent_run_status, expected_run_status);
+                assert_eq!(settlement.camp_turn_status, "failed");
+
+                let state = database
+                    .connection()
+                    .query_row(
+                        r#"
+                        SELECT agent_run.status,
+                               agent_run.wait_reason,
+                               agent_run.wait_deadline_at,
+                               agent_run.runtime_recovery_required,
+                               agent_run.execution_lease_owner,
+                               agent_run.execution_lease_expires_at,
+                               agent_run.terminal_resolution_source,
+                               agent_run.terminal_reason_code,
+                               camp_turn.status,
+                               camp_turn.aggregate_reason_code,
+                               camp_turn.cancel_requested_at
+                        FROM agent_run
+                        JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                        WHERE agent_run.id = ?1 AND camp_turn.id = ?2
+                        "#,
+                        params![agent_run_id, camp_turn_id],
+                        |row| {
+                            Ok(WaitingTerminalState {
+                                run_status: row.get(0)?,
+                                wait_reason: row.get(1)?,
+                                wait_deadline_at: row.get(2)?,
+                                runtime_recovery_required: row.get(3)?,
+                                execution_lease_owner: row.get(4)?,
+                                execution_lease_expires_at: row.get(5)?,
+                                terminal_resolution_source: row.get(6)?,
+                                terminal_reason_code: row.get(7)?,
+                                turn_status: row.get(8)?,
+                                aggregate_reason_code: row.get(9)?,
+                                turn_cancel_requested_at: row.get(10)?,
+                            })
+                        },
+                    )
+                    .unwrap();
+                assert_eq!(state.run_status, expected_run_status);
+                assert!(state.wait_reason.is_none());
+                assert!(state.wait_deadline_at.is_none());
+                assert_eq!(state.runtime_recovery_required, 0);
+                assert!(state.execution_lease_owner.is_none());
+                assert!(state.execution_lease_expires_at.is_none());
+                assert_eq!(
+                    state.terminal_resolution_source.as_deref(),
+                    Some("runtime_terminal")
+                );
+                assert_eq!(
+                    state.terminal_reason_code.as_deref(),
+                    Some(expected_terminal_reason)
+                );
+                assert_eq!(state.turn_status, "failed");
+                assert_eq!(
+                    state.aggregate_reason_code.as_deref(),
+                    (outcome == RuntimeTerminalOutcome::Cancelled)
+                        .then_some("required_run_incomplete")
+                );
+                assert!(state.turn_cancel_requested_at.is_none());
+
+                drop(database);
+                std::fs::remove_dir_all(directory).unwrap();
+            }
         }
     }
 
@@ -5756,6 +5917,7 @@ mod tests {
             "agent_run.terminal_safety_blocked"
         );
 
+        mark_claimed_run_waiting(&database, &agent_run_id, "approval");
         let permit = planned_terminal_permit(
             &agent_run_id,
             execution_epoch,

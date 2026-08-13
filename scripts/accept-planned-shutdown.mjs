@@ -117,10 +117,13 @@ try {
   const shutdownElapsedMs = Date.now() - shutdownStartedAt
   await browserClose
   firstApp.cdp.close()
+  const firstShutdownResult = parseShutdownResult(firstApp.stderr)
   firstApp = null
   assert(firstExit.code === 0 && firstExit.signal === null,
     `Packaged App did not exit naturally after controlled shutdown: ${JSON.stringify(firstExit)}`)
-  assert(shutdownElapsedMs >= shutdownDeadlineMs - 1_000 && shutdownElapsedMs < 18_000,
+  assert(firstShutdownResult?.forcedSignal === null && firstShutdownResult?.report?.status === 'completed',
+    `Desktop did not observe a natural Core shutdown report: ${JSON.stringify(firstShutdownResult)}`)
+  assert(shutdownElapsedMs <= shutdownDeadlineMs + 3_000 && shutdownElapsedMs < 18_000,
     `Controlled shutdown did not honor its bounded Core deadline: ${shutdownElapsedMs}ms`)
   await assertProcessesExited(liveDescendantPids)
 
@@ -165,9 +168,13 @@ try {
   const recoveredShutdownElapsedMs = Date.now() - recoveredShutdownStartedAt
   await recoveredClose
   recoveredApp.cdp.close()
+  const recoveredShutdownResult = parseShutdownResult(recoveredApp.stderr)
   recoveredApp = null
   assert(recoveredExit.code === 0 && recoveredExit.signal === null,
     `Recovered packaged App did not exit naturally: ${JSON.stringify(recoveredExit)}`)
+  assert(recoveredShutdownResult?.forcedSignal === null
+    && recoveredShutdownResult?.report?.status === 'completed',
+  `Recovered Desktop did not observe a natural Core shutdown report: ${JSON.stringify(recoveredShutdownResult)}`)
   assert(recoveredShutdownElapsedMs < 18_000,
     `Recovered packaged App exceeded its outer shutdown window: ${recoveredShutdownElapsedMs}ms`)
   await assertProcessesExited(recoveredDescendantPids)
@@ -196,6 +203,10 @@ try {
       elapsedMs: shutdownElapsedMs,
       recoveredElapsedMs: recoveredShutdownElapsedMs,
       naturalExit: true,
+      forcedSignal: firstShutdownResult.forcedSignal,
+      recoveredForcedSignal: recoveredShutdownResult.forcedSignal,
+      report: firstShutdownResult.report,
+      recoveredReport: recoveredShutdownResult.report,
       observedDescendantProcesses: liveDescendantPids.length,
       terminalFabricated: false,
       campTurnCancellationWritten: false
@@ -270,6 +281,20 @@ async function launchApp(port, width, height) {
     await terminateProcessTree(child)
     throw error
   }
+}
+
+function parseShutdownResult(stderr) {
+  const prefix = '[rovai-core] controlled shutdown result '
+  for (const chunk of stderr.toReversed()) {
+    const line = chunk.split(/\r?\n/).find((candidate) => candidate.includes(prefix))
+    if (!line) continue
+    try {
+      return JSON.parse(line.slice(line.indexOf(prefix) + prefix.length))
+    } catch {
+      return null
+    }
+  }
+  return null
 }
 
 async function appRequest(cdp, method, params = {}) {

@@ -18,6 +18,24 @@ last_updated: 2026-08-13
 > 因优先级切换冻结为 `closed_incomplete`；其已完成的目录附件独立增量保留在主线，但未实现设计不构成
 > 本版本的发布依赖。
 
+## 历史勘误（2026-08-13）
+
+v0.66 下方记录的自动化、真实 Claude Code 与 packaged App 验收均为当时真实通过的发布证据；
+`implementation_status: complete` 也继续表示该版本交付包已经结束。后续源码审查确认，当时的测试没有
+覆盖三个会使实现偏离 ADR-0168 / Planned Shutdown v1 的并发边界，因此“完整实现”不能继续被解释为
+这些边界已经获得证明：
+
+- coordinator 在等待 launch handoff barrier 前已经设置 `draining`，Provider route 已激活但 Core
+  binding 尚未完成时到达的真实 terminal 可能被 planned admission 以 route mismatch fence；
+- abortive settlement 只接受 `running`，仍持有当前 generation live Runtime route 的 `waiting` Run
+  无法使用已经取得的可靠 failed/cancelled terminal；
+- Core deadline 后仍存在无界 launch/terminal/route barrier、Runtime reap 与 worker join，且部分 terminal
+  handler 在领域事务完成后仍长期持有 guard。
+
+这些缺口不推翻 v0.66 冻结的领域决定、Migration 77 或当时已验证的诚实 unknown 行为；其实现修正和
+新增竞态证据由后续 [v0.69](../v0.69/README.md)负责。v0.66 实施计划中的完成勾选是当时验收快照，
+不得作为 v0.69 三项新增门槛已经通过的证据。
+
 ## 版本目标
 
 让用户主动退出、应用主动重启或更新前重启时，Rovai 先线性化关闭新执行准入，再向当前 Core

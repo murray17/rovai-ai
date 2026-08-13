@@ -766,6 +766,9 @@ app.on('before-quit', (event) => {
   quitDrainStarted = true
   nativeTheme.removeListener('updated', publishAppearance)
   void core.shutdown()
+    .then((result) => {
+      console.error(`[rovai-core] controlled shutdown result ${JSON.stringify(result)}`)
+    })
     .catch((error) => {
       console.error('Rovai Core controlled shutdown failed', error)
     })

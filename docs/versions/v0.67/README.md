@@ -14,6 +14,8 @@ last_updated: 2026-08-13
 > Core/CLI、bundled Skill、Renderer、packaged App 验收和九 Runtime real smoke 均已完成。
 >
 > 前置版本：[v0.66 计划内受控关闭与可靠终态收口](../v0.66/README.md)
+>
+> 后续版本：[v0.68 Tool-use 测量与配对协作价值实验](../v0.68/README.md)
 
 ## 版本目标
 

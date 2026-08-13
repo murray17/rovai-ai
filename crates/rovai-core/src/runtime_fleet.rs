@@ -2,7 +2,6 @@ use std::{
     collections::{BTreeSet, HashMap, HashSet},
     future::Future,
     path::{Path, PathBuf},
-    process::Command,
     sync::Arc,
     time::Duration,
 };
@@ -12,7 +11,8 @@ use rovai_core::agent_profile::AdapterKind;
 use serde::{Deserialize, Serialize};
 use tokio::{
     sync::{Mutex, oneshot},
-    time::{Instant, MissedTickBehavior, timeout},
+    task::JoinSet,
+    time::{Instant, MissedTickBehavior, timeout, timeout_at},
 };
 
 use crate::{
@@ -88,6 +88,16 @@ pub(crate) enum FleetResidency {
 pub(crate) enum RuntimeProcessHost {
     Codex(Arc<CodexHost>),
     Acp(Arc<AcpHost>),
+    #[cfg(test)]
+    Fake(Arc<FakeRuntimeProcessHost>),
+}
+
+#[cfg(test)]
+#[derive(Debug)]
+pub(crate) struct FakeRuntimeProcessHost {
+    process_id: String,
+    shutdown_delay: Duration,
+    reaped: std::sync::atomic::AtomicBool,
 }
 
 impl RuntimeProcessHost {
@@ -95,6 +105,8 @@ impl RuntimeProcessHost {
         match self {
             Self::Codex(host) => host.host_instance_id(),
             Self::Acp(host) => host.host_instance_id(),
+            #[cfg(test)]
+            Self::Fake(host) => &host.process_id,
         }
     }
 
@@ -102,6 +114,8 @@ impl RuntimeProcessHost {
         match self {
             Self::Codex(host) => host.is_alive(),
             Self::Acp(host) => host.is_alive(),
+            #[cfg(test)]
+            Self::Fake(host) => !host.reaped.load(std::sync::atomic::Ordering::Acquire),
         }
     }
 
@@ -109,6 +123,8 @@ impl RuntimeProcessHost {
         match self {
             Self::Codex(host) => host.is_quiescent().await,
             Self::Acp(host) => host.is_quiescent().await,
+            #[cfg(test)]
+            Self::Fake(host) => !host.reaped.load(std::sync::atomic::Ordering::Acquire),
         }
     }
 
@@ -116,6 +132,12 @@ impl RuntimeProcessHost {
         match self {
             Self::Codex(host) => host.shutdown_and_reap().await,
             Self::Acp(host) => host.shutdown_and_reap().await,
+            #[cfg(test)]
+            Self::Fake(host) => {
+                tokio::time::sleep(host.shutdown_delay).await;
+                host.reaped
+                    .store(true, std::sync::atomic::Ordering::Release);
+            }
         }
     }
 
@@ -123,6 +145,10 @@ impl RuntimeProcessHost {
         match self {
             Self::Codex(host) => host.pid(),
             Self::Acp(host) => host.pid(),
+            #[cfg(test)]
+            Self::Fake(host) => {
+                (!host.reaped.load(std::sync::atomic::Ordering::Acquire)).then_some(42)
+            }
         }
     }
 
@@ -130,6 +156,8 @@ impl RuntimeProcessHost {
         match self {
             Self::Codex(host) => host.executable_path(),
             Self::Acp(host) => host.executable_path(),
+            #[cfg(test)]
+            Self::Fake(_) => Path::new("fake-runtime"),
         }
     }
 
@@ -137,6 +165,8 @@ impl RuntimeProcessHost {
         match self {
             Self::Codex(host) => host.builtin_tool_process_config().cloned(),
             Self::Acp(host) => host.builtin_tool_process_config().cloned(),
+            #[cfg(test)]
+            Self::Fake(_) => None,
         }
     }
 
@@ -144,6 +174,8 @@ impl RuntimeProcessHost {
         match self {
             Self::Codex(host) => Ok(host),
             Self::Acp(_) => bail!("Fleet returned an ACP Host to the Codex Adapter"),
+            #[cfg(test)]
+            Self::Fake(_) => bail!("Fleet returned a fake Host to the Codex Adapter"),
         }
     }
 
@@ -151,7 +183,23 @@ impl RuntimeProcessHost {
         match self {
             Self::Acp(host) => Ok(host),
             Self::Codex(_) => bail!("Fleet returned a Codex Host to an ACP Adapter"),
+            #[cfg(test)]
+            Self::Fake(_) => bail!("Fleet returned a fake Host to the ACP Adapter"),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RuntimeFleetShutdownOutcome {
+    pub observed_processes: usize,
+    pub reaped_processes: usize,
+    pub force_kill_signals_sent: usize,
+    pub deadline_expired: bool,
+}
+
+impl RuntimeFleetShutdownOutcome {
+    pub(crate) fn all_reaped(self) -> bool {
+        self.reaped_processes == self.observed_processes
     }
 }
 
@@ -303,6 +351,8 @@ struct RuntimeOwnerRecord {
     pid: u32,
     process_group_id: i32,
     executable_path: String,
+    #[serde(default)]
+    process_start_identity: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -351,6 +401,9 @@ impl RuntimeOwnerRecordStore {
                 }
             },
             executable_path: host.executable_path().to_string_lossy().into_owned(),
+            process_start_identity: owner_process_start_identity(
+                host.pid().context("Runtime process has no root PID")?,
+            ),
         };
         std::fs::write(self.record_path(process_id), serde_json::to_vec(&record)?)?;
         Ok(())
@@ -358,6 +411,53 @@ impl RuntimeOwnerRecordStore {
 
     fn remove(&self, process_id: &str) {
         let _ = std::fs::remove_file(self.record_path(process_id));
+    }
+
+    fn current_generation_records(&self) -> Vec<RuntimeOwnerRecord> {
+        let Ok(entries) = std::fs::read_dir(&self.root) else {
+            return Vec::new();
+        };
+        entries
+            .flatten()
+            .filter_map(|entry| std::fs::read(entry.path()).ok())
+            .filter_map(|bytes| serde_json::from_slice::<RuntimeOwnerRecord>(&bytes).ok())
+            .filter(|record| record.core_generation == self.core_generation)
+            .collect()
+    }
+
+    /// Sends a final process-group kill only to ownership records created by
+    /// this Core generation. Records intentionally remain durable until a
+    /// later observation proves that the child was reaped.
+    fn force_kill_current_generation(&self) -> usize {
+        #[cfg(unix)]
+        {
+            self.force_kill_current_generation_with(owner_process_matches)
+        }
+        #[cfg(not(unix))]
+        {
+            0
+        }
+    }
+
+    #[cfg(unix)]
+    fn force_kill_current_generation_with(
+        &self,
+        matches_owner: impl Fn(u32, &str) -> bool,
+    ) -> usize {
+        self.current_generation_records()
+            .into_iter()
+            .filter(|record| {
+                record.pid > 1
+                    && record.process_group_id > 1
+                    && record.pid != std::process::id()
+                    && unsafe { libc::getpgid(record.pid as i32) == record.process_group_id }
+                    && record.process_start_identity.is_some_and(|expected| {
+                        owner_process_start_identity(record.pid) == Some(expected)
+                    })
+                    && matches_owner(record.pid, &record.executable_path)
+                    && unsafe { libc::killpg(record.process_group_id, libc::SIGKILL) == 0 }
+            })
+            .count()
     }
 
     fn cleanup_stale(&self) {
@@ -376,12 +476,14 @@ impl RuntimeOwnerRecordStore {
                     && record.pid > 1
                     && record.pid != std::process::id()
                     && unsafe { libc::getpgid(record.pid as i32) == record.process_group_id }
+                    && record.process_start_identity.is_some_and(|expected| {
+                        owner_process_start_identity(record.pid) == Some(expected)
+                    })
                     && owner_process_matches(record.pid, &record.executable_path)
                 {
                     unsafe {
-                        libc::killpg(record.pid as i32, libc::SIGKILL);
+                        libc::killpg(record.process_group_id, libc::SIGKILL);
                     }
-                    remove_record = true;
                 }
                 #[cfg(unix)]
                 if unsafe { libc::getpgid(record.pid as i32) == -1 } {
@@ -401,17 +503,167 @@ impl RuntimeOwnerRecordStore {
 
 #[cfg(unix)]
 fn owner_process_matches(pid: u32, executable_path: &str) -> bool {
-    let expected = Path::new(executable_path)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(executable_path);
-    Command::new("ps")
-        .args(["-p", &pid.to_string(), "-o", "command="])
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| String::from_utf8(output.stdout).ok())
-        .is_some_and(|command| command.contains(expected))
+    let expected = PathBuf::from(executable_path);
+    if owner_process_executable(pid)
+        .is_some_and(|observed| process_path_matches(&observed, &expected))
+    {
+        return true;
+    }
+    owner_process_arguments(pid).is_some_and(|arguments| {
+        arguments
+            .iter()
+            .any(|observed| process_path_matches(observed, &expected))
+    })
+}
+
+#[cfg(unix)]
+fn process_path_matches(observed: &Path, expected: &Path) -> bool {
+    if observed == expected {
+        return true;
+    }
+    let Some(observed) = std::fs::canonicalize(observed).ok() else {
+        return false;
+    };
+    std::fs::canonicalize(expected).is_ok_and(|expected| observed == expected)
+}
+
+#[cfg(target_os = "macos")]
+fn owner_process_start_identity(pid: u32) -> Option<u64> {
+    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as i32;
+    let read = unsafe {
+        libc::proc_pidinfo(
+            pid as i32,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    if read != size {
+        return None;
+    }
+    let info = unsafe { info.assume_init() };
+    Some(
+        info.pbi_start_tvsec
+            .saturating_mul(1_000_000)
+            .saturating_add(info.pbi_start_tvusec),
+    )
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn owner_process_start_identity(pid: u32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let fields = stat
+        .rsplit_once(") ")?
+        .1
+        .split_whitespace()
+        .collect::<Vec<_>>();
+    fields.get(19)?.parse().ok()
+}
+
+#[cfg(not(unix))]
+fn owner_process_start_identity(_pid: u32) -> Option<u64> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn owner_process_executable(pid: u32) -> Option<PathBuf> {
+    let mut buffer = vec![0_u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+    let length = unsafe {
+        libc::proc_pidpath(
+            pid as libc::c_int,
+            buffer.as_mut_ptr().cast(),
+            buffer.len() as u32,
+        )
+    };
+    if length <= 0 {
+        return None;
+    }
+    buffer.truncate(length as usize);
+    Some(PathBuf::from(String::from_utf8(buffer).ok()?))
+}
+
+#[cfg(target_os = "macos")]
+fn owner_process_arguments(pid: u32) -> Option<Vec<PathBuf>> {
+    use std::mem::{size_of, size_of_val};
+
+    let mut arg_max = 0_i32;
+    let mut arg_max_size = size_of::<i32>();
+    let mut arg_max_mib = [libc::CTL_KERN, libc::KERN_ARGMAX];
+    if unsafe {
+        libc::sysctl(
+            arg_max_mib.as_mut_ptr(),
+            arg_max_mib.len() as u32,
+            (&mut arg_max as *mut i32).cast(),
+            &mut arg_max_size,
+            std::ptr::null_mut(),
+            0,
+        )
+    } != 0
+        || arg_max <= 0
+    {
+        return None;
+    }
+
+    let mut buffer = vec![0_u8; arg_max as usize];
+    let mut buffer_size = buffer.len();
+    let mut process_mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid as i32];
+    if unsafe {
+        libc::sysctl(
+            process_mib.as_mut_ptr(),
+            process_mib.len() as u32,
+            buffer.as_mut_ptr().cast(),
+            &mut buffer_size,
+            std::ptr::null_mut(),
+            0,
+        )
+    } != 0
+        || buffer_size < size_of::<i32>()
+    {
+        return None;
+    }
+    buffer.truncate(buffer_size);
+    let argc = i32::from_ne_bytes(buffer[..size_of::<i32>()].try_into().ok()?);
+    if argc <= 0 {
+        return Some(Vec::new());
+    }
+
+    let mut cursor = size_of_val(&argc);
+    cursor += buffer.get(cursor..)?.iter().position(|byte| *byte == 0)? + 1;
+    while buffer.get(cursor) == Some(&0) {
+        cursor += 1;
+    }
+    let mut arguments = Vec::with_capacity(argc as usize);
+    for _ in 0..argc {
+        let remaining = buffer.get(cursor..)?;
+        let length = remaining.iter().position(|byte| *byte == 0)?;
+        if length == 0 {
+            break;
+        }
+        let argument = std::str::from_utf8(&remaining[..length]).ok()?;
+        arguments.push(PathBuf::from(argument));
+        cursor += length + 1;
+    }
+    Some(arguments)
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn owner_process_executable(pid: u32) -> Option<PathBuf> {
+    std::fs::read_link(format!("/proc/{pid}/exe")).ok()
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn owner_process_arguments(pid: u32) -> Option<Vec<PathBuf>> {
+    let bytes = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+    Some(
+        bytes
+            .split(|byte| *byte == 0)
+            .filter(|argument| !argument.is_empty())
+            .filter_map(|argument| std::str::from_utf8(argument).ok())
+            .map(PathBuf::from)
+            .collect(),
+    )
 }
 
 impl AgentRuntimeFleetManager {
@@ -811,6 +1063,167 @@ impl AgentRuntimeFleetManager {
         true
     }
 
+    /// Stops every process owned by this Fleet without allowing per-process
+    /// grace periods to accumulate serially. `deadline` is absolute and also
+    /// includes the final owner-record force-kill pass.
+    pub(crate) async fn shutdown_all_until(
+        &self,
+        deadline: Instant,
+    ) -> RuntimeFleetShutdownOutcome {
+        let started_at = Instant::now();
+        let remaining = deadline.saturating_duration_since(started_at);
+        let force_kill_reserve = std::cmp::min(Duration::from_millis(250), remaining / 4);
+        let graceful_deadline = deadline
+            .checked_sub(force_kill_reserve)
+            .unwrap_or(started_at);
+        let mut deadline_expired = false;
+
+        let _operation = match timeout_at(graceful_deadline, self.operations.lock()).await {
+            Ok(operation) => operation,
+            Err(_) => {
+                let observed_processes = self
+                    .owner_records
+                    .as_ref()
+                    .map_or(0, |records| records.current_generation_records().len());
+                let force_kill_signals_sent = self
+                    .owner_records
+                    .as_ref()
+                    .map_or(0, RuntimeOwnerRecordStore::force_kill_current_generation);
+                return RuntimeFleetShutdownOutcome {
+                    observed_processes,
+                    reaped_processes: 0,
+                    force_kill_signals_sent,
+                    deadline_expired: true,
+                };
+            }
+        };
+
+        let (observed_processes, targets) = match timeout_at(graceful_deadline, async {
+            let mut state = self.state.lock().await;
+            let process_ids = state.processes.keys().cloned().collect::<Vec<_>>();
+            let observed_processes = process_ids.len();
+            let targets = process_ids
+                .into_iter()
+                .filter_map(|fleet_process_id| {
+                    state
+                        .mark_stopping(&fleet_process_id)
+                        .map(|host| (fleet_process_id, host))
+                })
+                .collect::<Vec<_>>();
+            (observed_processes, targets)
+        })
+        .await
+        {
+            Ok(snapshot) => snapshot,
+            Err(_) => {
+                let observed_processes = self
+                    .owner_records
+                    .as_ref()
+                    .map_or(0, |records| records.current_generation_records().len());
+                let force_kill_signals_sent = self
+                    .owner_records
+                    .as_ref()
+                    .map_or(0, RuntimeOwnerRecordStore::force_kill_current_generation);
+                return RuntimeFleetShutdownOutcome {
+                    observed_processes,
+                    reaped_processes: 0,
+                    force_kill_signals_sent,
+                    deadline_expired: true,
+                };
+            }
+        };
+
+        let mut lease_cleanup_tasks = JoinSet::new();
+        let mut stop_tasks = JoinSet::new();
+        for (fleet_process_id, host) in targets {
+            if let Some(config) = host.builtin_tool_process_config() {
+                let leases = self.builtin_tool_leases.clone();
+                lease_cleanup_tasks.spawn(async move {
+                    leases.unregister(config.process_id()).await;
+                });
+            }
+            let owner_process_id = host.process_id().to_string();
+            let stop_timeout = self.config.stop_timeout;
+            stop_tasks.spawn(async move {
+                let host_deadline = std::cmp::min(
+                    graceful_deadline,
+                    Instant::now()
+                        .checked_add(stop_timeout)
+                        .unwrap_or(graceful_deadline),
+                );
+                let stop_completed = timeout_at(host_deadline, host.shutdown_and_reap())
+                    .await
+                    .is_ok();
+                let reaped = stop_completed && host.pid().is_none();
+                (fleet_process_id, owner_process_id, reaped, !stop_completed)
+            });
+        }
+
+        let mut reaped = Vec::new();
+        let stop_wait = timeout_at(graceful_deadline, async {
+            while let Some(result) = stop_tasks.join_next().await {
+                match result {
+                    Ok((fleet_process_id, owner_process_id, true, timed_out)) => {
+                        deadline_expired |= timed_out;
+                        reaped.push((fleet_process_id, owner_process_id));
+                    }
+                    Ok((_, _, false, timed_out)) => deadline_expired |= timed_out,
+                    Err(_) => deadline_expired = true,
+                }
+            }
+        })
+        .await;
+        if stop_wait.is_err() {
+            deadline_expired = true;
+            stop_tasks.abort_all();
+        }
+        drop(stop_tasks);
+
+        let lease_cleanup = timeout_at(graceful_deadline, async {
+            while lease_cleanup_tasks.join_next().await.is_some() {}
+        })
+        .await;
+        if lease_cleanup.is_err() {
+            deadline_expired = true;
+            lease_cleanup_tasks.abort_all();
+        }
+        drop(lease_cleanup_tasks);
+
+        for (_, owner_process_id) in &reaped {
+            if let Some(owner_records) = &self.owner_records {
+                owner_records.remove(owner_process_id);
+            }
+        }
+        if timeout_at(graceful_deadline, async {
+            let mut state = self.state.lock().await;
+            for (fleet_process_id, _) in &reaped {
+                state.remove_process(fleet_process_id);
+            }
+        })
+        .await
+        .is_err()
+        {
+            deadline_expired = true;
+        }
+
+        let unresolved_processes = observed_processes.saturating_sub(reaped.len());
+        let force_kill_signals_sent = if unresolved_processes == 0 && !deadline_expired {
+            0
+        } else {
+            self.owner_records
+                .as_ref()
+                .map_or(0, RuntimeOwnerRecordStore::force_kill_current_generation)
+        };
+        deadline_expired |= Instant::now() >= deadline;
+
+        RuntimeFleetShutdownOutcome {
+            observed_processes,
+            reaped_processes: reaped.len(),
+            force_kill_signals_sent,
+            deadline_expired,
+        }
+    }
+
     pub(crate) async fn shutdown_all(&self) {
         let _operation = self.operations.lock().await;
         let process_ids = self
@@ -843,6 +1256,50 @@ impl AgentRuntimeFleetManager {
 mod tests {
     use super::*;
 
+    fn test_config(stop_timeout: Duration) -> AgentRuntimeFleetConfig {
+        AgentRuntimeFleetConfig {
+            stop_timeout,
+            ..AgentRuntimeFleetConfig::default()
+        }
+    }
+
+    async fn insert_fake_process(
+        fleet: &AgentRuntimeFleetManager,
+        process_id: &str,
+        shutdown_delay: Duration,
+    ) {
+        let run_lease = RunLeaseKey {
+            agent_run_id: format!("run-{process_id}"),
+            execution_epoch: 1,
+        };
+        let mut state = fleet.state.lock().await;
+        state
+            .process_by_run
+            .insert(run_lease.clone(), process_id.to_string());
+        state.processes.insert(
+            process_id.to_string(),
+            ProcessEntry {
+                process_id: process_id.to_string(),
+                adapter_kind: AdapterKind::CodexCli,
+                compatibility: RuntimeCompatibilityKey {
+                    camp_id: "camp-1".to_string(),
+                    agent_id: "agent-1".to_string(),
+                    runtime_compatibility_digest: "digest-1".to_string(),
+                },
+                state: FleetProcessState::BusyBurst,
+                host: Some(RuntimeProcessHost::Fake(Arc::new(FakeRuntimeProcessHost {
+                    process_id: process_id.to_string(),
+                    shutdown_delay,
+                    reaped: std::sync::atomic::AtomicBool::new(false),
+                }))),
+                run_lease: Some(run_lease),
+                idle_since: None,
+                last_used_sequence: 0,
+                retire_after_run: false,
+            },
+        );
+    }
+
     #[test]
     fn default_limits_match_the_runtime_fleet_contract() {
         let config = AgentRuntimeFleetConfig::default();
@@ -859,5 +1316,161 @@ mod tests {
         assert!(FleetProcessState::IdleWarm.is_resident());
         assert!(FleetProcessState::Stopping.is_resident());
         assert!(!FleetProcessState::BusyBurst.is_resident());
+    }
+
+    #[tokio::test]
+    async fn deadline_shutdown_stops_hosts_concurrently_instead_of_accumulating_timeouts() {
+        let fleet = AgentRuntimeFleetManager::new(test_config(Duration::from_secs(2)));
+        for process_id in ["process-1", "process-2", "process-3", "process-4"] {
+            insert_fake_process(&fleet, process_id, Duration::from_millis(150)).await;
+        }
+
+        let started_at = Instant::now();
+        let outcome = fleet
+            .shutdown_all_until(started_at + Duration::from_millis(400))
+            .await;
+
+        assert_eq!(outcome.observed_processes, 4);
+        assert_eq!(outcome.reaped_processes, 4);
+        assert_eq!(outcome.force_kill_signals_sent, 0);
+        assert!(!outcome.deadline_expired);
+        assert!(outcome.all_reaped());
+        assert!(started_at.elapsed() < Duration::from_millis(350));
+        assert!(fleet.state.lock().await.processes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn deadline_shutdown_aborts_unreaped_stops_without_waiting_past_the_bound() {
+        let fleet = AgentRuntimeFleetManager::new(test_config(Duration::from_secs(5)));
+        insert_fake_process(&fleet, "process-1", Duration::from_secs(2)).await;
+        insert_fake_process(&fleet, "process-2", Duration::from_secs(2)).await;
+
+        let started_at = Instant::now();
+        let outcome = fleet
+            .shutdown_all_until(started_at + Duration::from_millis(120))
+            .await;
+
+        assert_eq!(outcome.observed_processes, 2);
+        assert_eq!(outcome.reaped_processes, 0);
+        assert_eq!(outcome.force_kill_signals_sent, 0);
+        assert!(outcome.deadline_expired);
+        assert!(!outcome.all_reaped());
+        assert!(started_at.elapsed() < Duration::from_millis(200));
+        assert!(
+            fleet
+                .state
+                .lock()
+                .await
+                .processes
+                .values()
+                .all(|entry| entry.state == FleetProcessState::Stopping)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn force_kill_targets_only_current_generation_and_preserves_unreaped_records() {
+        use std::os::unix::process::CommandExt;
+        use std::process::Command;
+
+        let root = std::env::temp_dir().join(format!(
+            "rovai-runtime-owner-force-kill-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let store = RuntimeOwnerRecordStore {
+            root: root.clone(),
+            core_generation: "current-generation".to_string(),
+        };
+
+        let spawn_group = || {
+            let mut command = Command::new("/bin/sleep");
+            command.arg("60").process_group(0);
+            command.spawn().unwrap()
+        };
+        let mut current = spawn_group();
+        let mut foreign = spawn_group();
+        let mut mismatched = spawn_group();
+        let current_pid = current.id();
+        let foreign_pid = foreign.id();
+        let mismatched_pid = mismatched.id();
+        let current_executable = "/bin/sleep".to_string();
+        let foreign_executable = "/bin/sleep".to_string();
+        let current_record_path = store.record_path("current-process");
+        let foreign_record_path = store.record_path("foreign-process");
+        let mismatched_record_path = store.record_path("mismatched-process");
+        std::fs::write(
+            &current_record_path,
+            serde_json::to_vec(&RuntimeOwnerRecord {
+                core_generation: store.core_generation.clone(),
+                pid: current_pid,
+                process_group_id: unsafe { libc::getpgid(current_pid as i32) },
+                executable_path: current_executable,
+                process_start_identity: owner_process_start_identity(current_pid),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            &foreign_record_path,
+            serde_json::to_vec(&RuntimeOwnerRecord {
+                core_generation: "another-generation".to_string(),
+                pid: foreign_pid,
+                process_group_id: unsafe { libc::getpgid(foreign_pid as i32) },
+                executable_path: foreign_executable,
+                process_start_identity: owner_process_start_identity(foreign_pid),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            &mismatched_record_path,
+            serde_json::to_vec(&RuntimeOwnerRecord {
+                core_generation: store.core_generation.clone(),
+                pid: mismatched_pid,
+                process_group_id: unsafe { libc::getpgid(mismatched_pid as i32) },
+                executable_path: "/bin/not-the-owned-runtime".to_string(),
+                process_start_identity: owner_process_start_identity(mismatched_pid),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        let signalled = store.force_kill_current_generation();
+        let current_exited = (0..100).any(|_| {
+            if current.try_wait().unwrap().is_some() {
+                true
+            } else {
+                std::thread::sleep(Duration::from_millis(10));
+                false
+            }
+        });
+        let foreign_survived = foreign.try_wait().unwrap().is_none();
+        let mismatched_survived = mismatched.try_wait().unwrap().is_none();
+        let records_preserved = current_record_path.is_file()
+            && foreign_record_path.is_file()
+            && mismatched_record_path.is_file();
+
+        unsafe {
+            if !current_exited {
+                libc::killpg(current_pid as i32, libc::SIGKILL);
+            }
+            if foreign_survived {
+                libc::killpg(foreign_pid as i32, libc::SIGKILL);
+            }
+            if mismatched_survived {
+                libc::killpg(mismatched_pid as i32, libc::SIGKILL);
+            }
+        }
+        let _ = current.wait();
+        let _ = foreign.wait();
+        let _ = mismatched.wait();
+        let _ = std::fs::remove_dir_all(root);
+
+        assert_eq!(signalled, 1);
+        assert!(current_exited);
+        assert!(foreign_survived);
+        assert!(mismatched_survived);
+        assert!(records_preserved);
     }
 }

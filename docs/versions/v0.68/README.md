@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.68
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -14,6 +14,8 @@ last_updated: 2026-08-13
 > protocol 已按接受的合同完成实现与离线协议验证；真实模型 Trial、Formal isolation 与统计 claim 仍未执行。
 >
 > 前置版本：[v0.67 当前用户注意力与渐进式 CLI 教学](../v0.67/README.md)
+>
+> 后续版本：[v0.69 Planned Shutdown 线性化与硬期限修正](../v0.69/README.md)
 
 ## 版本目标
 

@@ -3,7 +3,7 @@ document_type: runtime-contract
 contract: planned-shutdown-v1
 authority: planned-core-shutdown-wire-terminal-binding-and-settlement
 status: accepted
-last_updated: 2026-08-12
+last_updated: 2026-08-13
 ---
 
 # Planned Shutdown v1
@@ -24,7 +24,7 @@ last_updated: 2026-08-12
 }
 ```
 
-`protocolVersion` 必须为 `1`；`deadlineMs` 是 Core monotonic drain window，固定产品值为 `10000`，测试可
+`protocolVersion` 必须为 `1`；`deadlineMs` 是 Core monotonic hard deadline，固定产品值为 `10000`，测试可
 在 `100..30000` 内覆盖边界。该 method 只加入 Main 的 `CoreMethod` 类型，不进入 Preload API、Renderer
 IPC allowlist 或 Agent Built-in catalog。
 
@@ -48,11 +48,24 @@ Core 完成 drain、route fence、Runtime reap 和 worker 收口后返回：
 
 ## 2. Execution 与 terminal admission
 
-`beginDrain` 之后不得有任何 Run 新跨过 claim、Runtime acquire、input prepare 或 prompt send。
-已经进入 launch critical section 的执行必须完成以下二者之一后才能释放 permit：
+Core shutdown lifecycle 使用以下单调阶段：
 
-- 注册匹配当前 generation 的 active handle，并完成 prompt-send handoff；
+```text
+accepting → closing_launch → draining → terminal_closed
+```
+
+进入 `closing_launch` 后不得有任何 Run 新跨过 claim、Runtime acquire、input prepare 或 prompt send；
+此阶段同时停止新的 recovery 与后台 Runtime 启动。已经进入 launch critical section 的执行必须完成以下
+二者之一后才能释放 permit：
+
+- 注册匹配当前 generation 的 active handle，写入 route binding，并完成 prompt-send handoff；
 - 在 input 尚未 accepted 时安全失败并持久化普通 preflight/launch 结果。
+
+route binding 写入必须 happens-before permit 释放。Core 取得 launch writer barrier 后才能从
+`closing_launch` 进入 `draining`、读取稳定 active registry 并发出 planned stop。在
+`closing_launch` 到达的 terminal 必须继续走普通 terminal 路径；只有 `draining` terminal 才请求
+planned-shutdown guard。进入 `draining` 后出现未绑定 active execution 是 coordinator invariant violation，
+不能把真正的 `RouteMismatch` 改成等待、重试或宽松匹配。
 
 draining 期间 CampMessage、Action/Approval 结果、Runtime Delivery、Runtime Input ACK 和 terminal
 transactions 仍允许写入；这些写入产生的 queued Run 只留待下一次启动。shutdown request 之前已经进入
@@ -60,10 +73,19 @@ Main background request set 的工作必须在统一 deadline 内等待收口；
 也不能把关联 Run 写成 failed 或 cancelled。它们与 planned stop 和 terminal 等待并行排空，不得被 Core 作为
 向 active execution 发出 planned stop 的前置 barrier。
 
-deadline 到达时必须按顺序关闭 terminal guard 创建、等待已进入事务完成、关闭并排空 live
-Runtime route callback、fence Built-in lease，再 reap Runtime。每个 Codex/ACP callback 以及 one-shot
-acceptance/terminal 提交都必须先进入该 route admission；围栏后的排队事件不得再写领域状态。
-guard 之外的 Git observation、Skill/MCP cleanup 和 Renderer event emit 不参与 drain。
+Core 必须在 hard deadline 前预留 cleanup budget；terminal wait 不得占满整个 `deadlineMs`。进入该预算后
+必须按顺序关闭 terminal guard 创建、关闭 live Runtime route callback admission、abort 持有 guard 的
+tracked event/AgentRun task，并只等待已经进入的 correctness-critical work 到 hard deadline。随后 fence
+Built-in lease，并只在剩余窗口内 reap Runtime、停止 worker 和 flush stdout。每个 Codex/ACP callback、
+one-shot acceptance/terminal 提交及 Built-in invocation 都必须属于可 fence、可 abort、可跟踪的 task；
+围栏后的排队事件不得再写领域状态。
+
+terminal guard 与对应 live-route guard 只覆盖 route/correlation 校验、必要前置读取、AgentRun terminal
+transaction，以及事务成功后的 active → settled registry transition/notification；随后必须立即同时释放。
+Skill/MCP reconciliation、Renderer event emit、Adapter detach/complete/release 等 follow-up
+位于 guard 外，可在 deadline 时中止。hard deadline 后不得继续等待 launch/terminal/route barrier、
+Runtime graceful shutdown/reap、worker join 或领域写入；只允许固定、严格有界且位于 Desktop outer
+watchdog 内的 process-runtime teardown grace。该 grace 不参与领域结算，也不是第二个 terminal window。
 
 ## 3. Same-generation terminal binding
 
@@ -105,8 +127,9 @@ planned-shutdown `failed` 保留 Adapter 冻结的 `last_error_code`、detail �
 
 ## 5. Abortive settlement
 
-私有 abortive settlement 只接受 generation-local terminal guard，不是公共 DomainCommand。`failed` 与
-`cancelled` 在一个事务内：
+私有 abortive settlement 只接受 generation-local terminal guard，不是公共 DomainCommand。目标 Run
+必须处于 `running | waiting` 且匹配 guard 的 execution epoch；`waiting/recovery_blocked` 等没有当前
+generation live route 的 Run 无法取得该 guard。`failed` 与 `cancelled` 在一个事务内：
 
 1. 可能已经 dispatch 的 Action → `unknown/active`，`resolution_source` 继续为 `reconciler`；
 2. 未 dispatch 的 Action → `not_executed`；
@@ -124,6 +147,8 @@ failure_code = target_agent_run_planned_shutdown_cancelled
 ```
 
 兄弟 Delivery、同 Turn queued/waiting Run 与 CampTurn cancellation intent 均不得被修改。
+普通 `succeeded` terminal 继续使用 success settlement 与既有 blocker；它不能因目标 Run 是 `waiting`
+而转用本节的 abortive closure。
 
 ## 6. CampTurn aggregate
 
