@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="day">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Rovai AI 设置·通知 A/B/C 三套交互方案"
+    />
+    <title>Rovai AI · 设置通知交互稿</title>
+    <link rel="stylesheet" href="prototype.css" />
+  </head>
+  <body>
+    <!--
+      Non-production interaction study for Settings > Notifications.
+      The three variants share the same five persisted booleans and preserve the established
+      Porcelain Day / Steel Night visual world. Illustrative heads-up content is labeled in UI.
+    -->
+    <svg class="icon-sprite" aria-hidden="true">
+      <symbol id="icon-logo" viewBox="0 0 24 24">
+        <path d="m12 1 2.2 8.8L23 12l-8.8 2.2L12 23l-2.2-8.8L1 12l8.8-2.2Z" />
+      </symbol>
+      <symbol id="icon-bell" viewBox="0 0 24 24">
+        <path d="M6.5 10.5a5.5 5.5 0 0 1 11 0c0 5 2 5.2 2 6.5h-15c0-1.3 2-1.5 2-6.5Z" />
+        <path d="M9.7 19a2.5 2.5 0 0 0 4.6 0" />
+      </symbol>
+      <symbol id="icon-back" viewBox="0 0 24 24">
+        <path d="m15 18-6-6 6-6" />
+      </symbol>
+      <symbol id="icon-sliders" viewBox="0 0 24 24">
+        <path d="M4 7h10M18 7h2M4 17h2M10 17h10" />
+        <circle cx="16" cy="7" r="2" />
+        <circle cx="8" cy="17" r="2" />
+      </symbol>
+      <symbol id="icon-sun" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="4" />
+        <path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" />
+      </symbol>
+      <symbol id="icon-moon" viewBox="0 0 24 24">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z" />
+      </symbol>
+      <symbol id="icon-spark" viewBox="0 0 24 24">
+        <path d="m12 3 1.4 5.6L19 10l-5.6 1.4L12 17l-1.4-5.6L5 10l5.6-1.4Z" />
+        <path d="m19 16 .7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7Z" />
+      </symbol>
+      <symbol id="icon-plug" viewBox="0 0 24 24">
+        <path d="M8 12h8v2a4 4 0 0 1-8 0Zm2-7v7m4-7v7M6 8h12M12 18v3" />
+      </symbol>
+      <symbol id="icon-terminal" viewBox="0 0 24 24">
+        <rect x="3" y="4" width="18" height="16" rx="2" />
+        <path d="m7 9 3 3-3 3m6 0h4" />
+      </symbol>
+      <symbol id="icon-health" viewBox="0 0 24 24">
+        <path d="M3 12h4l2-6 4 12 2-6h6" />
+      </symbol>
+      <symbol id="icon-external" viewBox="0 0 24 24">
+        <path d="M15 3h6v6M10 14 21 3M18 13v7a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h7" />
+      </symbol>
+      <symbol id="icon-reset" viewBox="0 0 24 24">
+        <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+        <path d="M3 3v5h5" />
+      </symbol>
+      <symbol id="icon-alert" viewBox="0 0 24 24">
+        <path d="M12 3 2.5 20h19Z" />
+        <path d="M12 9v5m0 3h.01" />
+      </symbol>
+      <symbol id="icon-check" viewBox="0 0 24 24">
+        <path d="m5 12 4 4L19 6" />
+      </symbol>
+      <symbol id="icon-close" viewBox="0 0 24 24">
+        <path d="M6 6l12 12M18 6 6 18" />
+      </symbol>
+      <symbol id="icon-eye" viewBox="0 0 24 24">
+        <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" />
+        <circle cx="12" cy="12" r="2.5" />
+      </symbol>
+    </svg>
+
+    <div class="prototype-shell">
+      <header class="prototype-toolbar">
+        <div class="prototype-title">
+          <strong>设置 · 通知交互稿</strong>
+          <span id="variant-summary" aria-live="polite"></span>
+        </div>
+
+        <div class="variant-tabs" role="tablist" aria-label="选择通知设置方案">
+          <button type="button" role="tab" data-variant="a">A <span>主从清单</span></button>
+          <button type="button" role="tab" data-variant="b">B <span>场景分组</span></button>
+          <button type="button" role="tab" data-variant="c">C <span>实时预览</span></button>
+        </div>
+
+        <div class="prototype-actions">
+          <button
+            class="lab-button"
+            id="fail-next"
+            type="button"
+            aria-label="模拟下次保存失败"
+            title="模拟下次保存失败"
+            aria-pressed="false"
+          >
+            <svg aria-hidden="true"><use href="#icon-alert" /></svg><span>下次保存失败</span>
+          </button>
+          <button class="lab-button" id="theme-toggle" type="button" aria-label="切换到夜间主题" title="切换到夜间主题">
+            <svg aria-hidden="true"><use href="#icon-moon" /></svg><span>夜间</span>
+          </button>
+          <button class="lab-button" id="reset" type="button" aria-label="重置通知设置原型" title="重置通知设置原型">
+            <svg aria-hidden="true"><use href="#icon-reset" /></svg><span>重置</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="app-shell">
+        <aside class="settings-sidebar" aria-label="设置分类">
+          <div class="drag-strip" aria-hidden="true"><i></i><i></i><i></i></div>
+          <div class="brand-row">
+            <span class="brand"><svg aria-hidden="true"><use href="#icon-logo" /></svg><strong>Rovai AI</strong></span>
+            <button class="icon-button" type="button" aria-label="通知，4 项未读">
+              <svg aria-hidden="true"><use href="#icon-bell" /></svg><span class="badge">4</span>
+            </button>
+          </div>
+
+          <div class="settings-heading">
+            <button type="button"><svg aria-hidden="true"><use href="#icon-back" /></svg><strong>返回 App</strong></button>
+            <div><strong>设置</strong><span>应用级偏好与本机能力</span></div>
+          </div>
+
+          <nav class="settings-nav" aria-label="设置页面">
+            <section aria-labelledby="group-app">
+              <h2 id="group-app">应用</h2>
+              <button type="button"><svg aria-hidden="true"><use href="#icon-sliders" /></svg><strong>通用</strong></button>
+              <button type="button"><svg aria-hidden="true"><use href="#icon-sun" /></svg><strong>外观</strong></button>
+              <button class="active" type="button" aria-current="page"><svg aria-hidden="true"><use href="#icon-bell" /></svg><strong>通知</strong></button>
+            </section>
+            <section aria-labelledby="group-capability">
+              <h2 id="group-capability">能力</h2>
+              <button type="button"><svg aria-hidden="true"><use href="#icon-spark" /></svg><strong>Skill</strong></button>
+              <button type="button"><svg aria-hidden="true"><use href="#icon-plug" /></svg><strong>MCP</strong></button>
+              <button type="button"><svg aria-hidden="true"><use href="#icon-terminal" /></svg><strong>Agent 运行时</strong></button>
+            </section>
+            <section aria-labelledby="group-support">
+              <h2 id="group-support">支持</h2>
+              <button type="button"><svg aria-hidden="true"><use href="#icon-health" /></svg><strong>诊断与修复</strong></button>
+            </section>
+          </nav>
+        </aside>
+
+        <main class="settings-content">
+          <div class="settings-panel">
+            <header class="page-header">
+              <div>
+                <h1>通知</h1>
+                <p>这里只决定当前窗口何时显示临时浮层；所有事项仍会保存在通知中心。</p>
+              </div>
+              <button class="open-center" type="button" data-action="open-center">
+                打开通知中心<svg aria-hidden="true"><use href="#icon-external" /></svg>
+              </button>
+            </header>
+
+            <div id="settings-variant"></div>
+          </div>
+        </main>
+
+        <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+      </div>
+    </div>
+
+    <script src="prototype.js"></script>
+  </body>
+</html>

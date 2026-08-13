@@ -621,7 +621,7 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
       <>
         {currentHeadsUp && (
           <NotificationHeadsUp
-            key={currentHeadsUp.changeSequence}
+            key={currentHeadsUp.episode.id}
             entry={currentHeadsUp}
             onOpen={() => void openAction(
               currentHeadsUp.episode, currentHeadsUp.signal.action

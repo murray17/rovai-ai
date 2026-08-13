@@ -117,6 +117,16 @@ try {
   await assertNotificationBadge(compactApp.cdp, 1)
   assert(!(await evaluate(compactApp.cdp, `Boolean(document.querySelector('.notification-heads-up'))`)),
     'Unread Episode history was replayed as a heads-up after restart')
+  await openNotificationSettings(compactApp.cdp)
+  await assertNotificationPreferences(compactApp.cdp)
+  const compactSettingsCapture = join(outputDir, 'notification-settings-night-compact.png')
+  await capture(compactApp.cdp, compactSettingsCapture)
+  await emulateDesktopZoom(compactApp.cdp, 1040, 700, 2)
+  await assertNotificationPreferenceRecovery(compactApp.cdp)
+  await emulateDesktopZoom(compactApp.cdp, 1040, 700, 1)
+  await evaluate(compactApp.cdp,
+    `document.querySelector('.settings-sidebar-back')?.click()`)
+  await waitForSelector(compactApp.cdp, '.unified-sidebar')
   await evaluate(compactApp.cdp,
     `document.querySelector('.unified-sidebar button[aria-label="队员"]')?.click()`)
   await waitForSelector(compactApp.cdp, '.members-view')
@@ -243,6 +253,7 @@ try {
       exactMentionAcknowledgementAndNavigation: true,
       boundedMarkAllAndRevisionBoundedClear: true,
       fiveNotificationPreferences: true,
+      preferenceFailurePreservesFocusAndScroll: true,
       headsUpPreferenceTakesEffectWithoutReplay: true,
       restartPersistence: true,
       liveHeadsUpWithoutFocusTheft: true,
@@ -255,6 +266,7 @@ try {
     captures: {
       drawer: drawerCapture,
       settings: settingsCapture,
+      compactSettings: compactSettingsCapture,
       compactHeadsUp: headsUpCapture,
       zoomedDrawer: zoomCapture
     }
@@ -489,10 +501,28 @@ async function openNotificationSettings(cdp) {
 async function assertNotificationPreferences(cdp) {
   await waitForExpression(cdp,
     `document.querySelectorAll('.notification-switch input[role="switch"]').length === 5`)
-  const values = await evaluate(cdp,
-    `[...document.querySelectorAll('.notification-switch input[role="switch"]')]
-      .map((input) => input.checked)`)
-  assert(values.every(Boolean), `Notification preferences did not default on: ${JSON.stringify(values)}`)
+  const state = await evaluate(cdp, `(() => ({
+    values: [...document.querySelectorAll('.notification-switch input[role="switch"]')]
+      .map((input) => input.checked),
+    names: [...document.querySelectorAll('.notification-switch input[role="switch"]')]
+      .map((input) => input.getAttribute('aria-label')),
+    scenarios: [...document.querySelectorAll('.notification-scenario-heading h3')]
+      .map((heading) => heading.textContent?.trim()),
+    scenarioCounts: [...document.querySelectorAll('.notification-scenario-heading span')]
+      .map((count) => count.textContent?.trim()),
+    hasMasterPanel: Boolean(document.querySelector('.notification-master-panel')),
+    hasBoundarySection: Boolean(document.querySelector('.notification-boundary')),
+    documentOverflow: document.documentElement.scrollWidth > window.innerWidth + 1
+  }))()`)
+  assert(state.values.every(Boolean),
+    `Notification preferences did not default on: ${JSON.stringify(state.values)}`)
+  assert(JSON.stringify(state.names) === JSON.stringify([
+    '浮层提醒', '待审批', '提到你', '本轮完成', '执行未完成'
+  ]), `Notification preference order or accessible names drifted: ${JSON.stringify(state.names)}`)
+  assert(JSON.stringify(state.scenarios) === JSON.stringify(['需要响应', '本轮结果'])
+      && state.scenarioCounts.every((count) => count === '2 / 2 项已开启')
+      && state.hasMasterPanel && !state.hasBoundarySection && !state.documentOverflow,
+  `Notification preference hierarchy was incomplete: ${JSON.stringify(state)}`)
 }
 
 async function setPrimaryHeadsUpPreference(cdp, enabled) {
@@ -509,6 +539,102 @@ async function setPrimaryHeadsUpPreference(cdp, enabled) {
   await waitForExpression(cdp,
     `document.querySelector('.notification-switch input[role="switch"]')?.checked
       === ${JSON.stringify(enabled)}`)
+  await waitForExpression(cdp, `(() => {
+    const children = [...document.querySelectorAll(
+      '.notification-scenario .notification-switch input[role="switch"]'
+    )]
+    const counts = [...document.querySelectorAll('.notification-scenario-heading span')]
+      .map((count) => count.textContent ?? '')
+    return children.length === 4
+      && children.every((input) => input.disabled === ${JSON.stringify(!enabled)})
+      && counts.every((count) => count.includes(${JSON.stringify(enabled ? '已开启' : '已保留')}))
+  })()`)
+}
+
+async function assertNotificationPreferenceRecovery(cdp) {
+  const current = await request(cdp, 'notifications.preference.get')
+  assert(current.approvalHeadsUpEnabled === true,
+    `Approval heads-up preference was not available for recovery: ${JSON.stringify(current)}`)
+  const baseline = await evaluate(cdp, `(() => {
+    const panel = document.querySelector('.settings-panel-notifications')
+    const input = document.querySelector(
+      '[data-notification-preference="approvalHeadsUpEnabled"]'
+    )
+    if (!panel || !input) return null
+    panel.scrollTop = Math.min(48, Math.max(0, panel.scrollHeight - panel.clientHeight))
+    input.focus({ preventScroll: true })
+    return {
+      scrollTop: panel.scrollTop,
+      maxScroll: panel.scrollHeight - panel.clientHeight,
+      focused: document.activeElement === input
+    }
+  })()`)
+  assert(baseline?.focused && baseline.maxScroll > 0,
+    `Could not establish preference focus and scroll baseline: ${JSON.stringify(baseline)}`)
+
+  const externalUpdate = await request(cdp, 'notifications.preference.update', {
+    commandId: crypto.randomUUID(),
+    command: {
+      expectedVersion: current.version,
+      headsUpEnabled: current.headsUpEnabled,
+      approvalHeadsUpEnabled: false,
+      userMentionHeadsUpEnabled: current.userMentionHeadsUpEnabled,
+      turnCompletedHeadsUpEnabled: current.turnCompletedHeadsUpEnabled,
+      turnIncompleteHeadsUpEnabled: current.turnIncompleteHeadsUpEnabled
+    }
+  })
+  assert(externalUpdate.status === 'applied',
+    `Could not create a real preference version conflict: ${JSON.stringify(externalUpdate)}`)
+  await evaluate(cdp, `document.querySelector(
+    '[data-notification-preference="approvalHeadsUpEnabled"]'
+  )?.click()`)
+  await waitForSelector(cdp, '.notification-settings-error')
+  await waitForExpression(cdp,
+    `document.querySelector('.notification-switches')?.getAttribute('aria-busy') === 'false'`)
+  const failed = await evaluate(cdp, `(() => {
+    const panel = document.querySelector('.settings-panel-notifications')
+    const input = document.querySelector(
+      '[data-notification-preference="approvalHeadsUpEnabled"]'
+    )
+    return {
+      checked: input?.checked,
+      focused: document.activeElement === input,
+      scrollTop: panel?.scrollTop,
+      error: document.querySelector('.notification-settings-error')?.textContent ?? ''
+    }
+  })()`)
+  assert(failed.checked === false
+      && failed.focused
+      && Math.abs(failed.scrollTop - baseline.scrollTop) <= 1
+      && failed.error.includes('其他窗口更新'),
+  `Preference conflict lost focus, scroll, or authoritative state: ${JSON.stringify({ baseline, failed })}`)
+
+  await clickFirstButton(cdp, '.notification-settings-error button')
+  await waitForExpression(cdp, `!document.querySelector('.notification-settings-error')`)
+  await waitForExpression(cdp,
+    `window.rovai.request('notifications.preference.get')
+      .then((value) => value.approvalHeadsUpEnabled === false)`,
+  15_000, true)
+  const retried = await evaluate(cdp, `(() => {
+    const panel = document.querySelector('.settings-panel-notifications')
+    const input = document.querySelector(
+      '[data-notification-preference="approvalHeadsUpEnabled"]'
+    )
+    return {
+      focused: document.activeElement === input,
+      scrollTop: panel?.scrollTop
+    }
+  })()`)
+  assert(retried.focused && Math.abs(retried.scrollTop - baseline.scrollTop) <= 1,
+    `Preference retry lost focus or scroll: ${JSON.stringify({ baseline, retried })}`)
+
+  await evaluate(cdp, `document.querySelector(
+    '[data-notification-preference="approvalHeadsUpEnabled"]'
+  )?.click()`)
+  await waitForExpression(cdp,
+    `window.rovai.request('notifications.preference.get')
+      .then((value) => value.approvalHeadsUpEnabled === true)`,
+  15_000, true)
 }
 
 async function focusNewConversation(cdp) {

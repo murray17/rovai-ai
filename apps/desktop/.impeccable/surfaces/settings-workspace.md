@@ -50,6 +50,12 @@ Notification settings contain one master heads-up switch and exactly four defaul
 `turn_incomplete`, while cards keep their honest distinct copy. Ordinary Agent messages have no
 notification category or setting.
 
+The master heads-up control is the dominant panel. Its four child categories sit below in two open
+scenario groups: “需要响应” contains 待审批 and 提到你; “本轮结果” contains 本轮完成 and
+执行未完成. Turning the master off disables delivery without erasing child choices, and group
+counts describe those choices as retained rather than active. “打开通知中心” remains a tertiary
+header action; do not repeat the same persistence explanation in a separate boundary card.
+
 Current User Mention creates one immutable Occurrence per source message. Occurrences in one CampTurn
 share a durable Episode card but remain independently acknowledged; the earliest unacknowledged
 message is the current exact action. Settings only affect Journal-qualified transient heads-up and

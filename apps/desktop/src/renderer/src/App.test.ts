@@ -1350,7 +1350,7 @@ describe('task event projections', () => {
     }
   })
 
-  it('uses the Porcelain and Steel notification hierarchy without hiding the real notification center', () => {
+  it('keeps the real notification center available from the notification settings header', () => {
     const markup = renderToStaticMarkup(createElement(SettingsView, {
       appearance: { preference: 'system', resolvedTheme: 'day' },
       health: null,
@@ -1364,11 +1364,11 @@ describe('task event projections', () => {
       onThemeChange: () => undefined
     }))
 
-    expect(markup).toContain('<button class="primary-button" type="button">打开通知中心</button>')
-    expect(markup).toContain('id="notification-heads-up-heading"')
-    expect(markup).toContain('id="notification-boundary-heading"')
-    expect(markup).toContain('关闭浮层不会丢失事项')
-    expect(markup).toContain('普通队员消息只留在 Camp 时间线，不产生通知')
+    expect(markup).toContain('<button class="notification-center-link" type="button">')
+    expect(markup).toContain('这里只决定当前窗口何时显示临时浮层')
+    expect(markup).toContain('aria-label="通知浮层设置"')
+    expect(markup).toContain('正在读取通知设置')
+    expect(markup).not.toContain('持久边界')
   })
 
   it('keeps the resolved theme and saved preference in the Appearance page header', () => {
