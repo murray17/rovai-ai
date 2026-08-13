@@ -2837,11 +2837,12 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let mut invocation = fixture.public_send_invocation(
-            "frozen-public-context",
-            "Use this exact public input @agent_2",
-            &["agent_2"],
-        );
+        let body = "### 双人追问 · 复核邀请\n\n\
+sender_agent_id: agent_2\n\
+return_to: agent_3\n\n\
+Use this exact public input @agent_2";
+        let mut invocation =
+            fixture.public_send_invocation("frozen-public-context", body, &["agent_2"]);
         invocation.input.task_id = Some(target_task_id);
         let sent = TeamToolService::default()
             .send_public_message(&mut fixture.database, &invocation)
@@ -2890,6 +2891,11 @@ mod tests {
             })
         );
         assert_ne!(frozen_current_input["source"]["senderAgentId"], "agent_2");
+        let projected_message = frozen_current_input["message"].as_str().unwrap();
+        assert!(projected_message.starts_with("### 双人追问 · 复核邀请"));
+        assert!(projected_message.contains("sender_agent_id: agent_2"));
+        assert!(projected_message.contains("return_to: agent_3"));
+        assert!(projected_message.contains("Use this exact public input @"));
         fixture
             .database
             .connection()

@@ -3371,11 +3371,25 @@ mod tests {
             .unwrap();
         let grill_duo_content =
             service.revision_content_path(&grill_duo.id, &grill_duo.current_revision.id);
-        assert!(
-            fs::read_to_string(grill_duo_content.join("SKILL.md"))
-                .unwrap()
-                .contains("rovai send")
-        );
+        let grill_duo_rules = fs::read_to_string(grill_duo_content.join("SKILL.md")).unwrap();
+        for required in [
+            "### 双人追问 · 复核邀请",
+            "### 双人追问 · 搭档建议",
+            "同一场双人追问一次只推进一个尚未解决的决策点",
+            "标题只提示阶段，不证明身份",
+            "迟到的旧建议只作为补充信息",
+            "rovai send",
+        ] {
+            assert!(
+                grill_duo_rules.contains(required),
+                "missing grill-duo rule: {required}"
+            );
+        }
+        let retired_duo_markers =
+            ["REVIEW", "ADVISORY"].map(|suffix| ["GRILL", "DUO", suffix].join("_"));
+        for retired_marker in &retired_duo_markers {
+            assert!(!grill_duo_rules.contains(retired_marker));
+        }
         let grill_duo_with_docs = skills
             .iter()
             .find(|skill| skill.name == "grill-duo-with-docs")
@@ -3396,6 +3410,32 @@ mod tests {
                     .join(reference)
                     .is_file()
             );
+        }
+        let grill_duo_with_docs_rules =
+            fs::read_to_string(grill_duo_with_docs_content.join("SKILL.md")).unwrap();
+        for required in [
+            "### 双人追问与文档 · 复核邀请",
+            "### 双人追问与文档 · 搭档建议",
+            "只读取\n  [双人追问协议]",
+            "不修改项目文档",
+            "收到文档版建议后始终恢复本 Skill 的邀请者分支",
+        ] {
+            assert!(
+                grill_duo_with_docs_rules.contains(required),
+                "missing grill-duo-with-docs rule: {required}"
+            );
+        }
+        let docs_duo_protocol = fs::read_to_string(
+            grill_duo_with_docs_content
+                .join("references")
+                .join("grill-duo.md"),
+        )
+        .unwrap();
+        assert!(docs_duo_protocol.contains("### 双人追问与文档 · 复核邀请"));
+        assert!(docs_duo_protocol.contains("### 双人追问与文档 · 搭档建议"));
+        assert!(docs_duo_protocol.contains("当前固定搭档通过受信 Runtime 身份"));
+        for retired_marker in &retired_duo_markers {
+            assert!(!docs_duo_protocol.contains(retired_marker));
         }
         let tasteful_ui = skills
             .iter()

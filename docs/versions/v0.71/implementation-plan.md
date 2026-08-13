@@ -56,6 +56,19 @@ last_updated: 2026-08-13
   UI acceptance 与 ADR-0176；
 - [x] 完成 Campfire validator、三个无既有对话上下文的情景演练、完整 Rust/Renderer/文档门禁与 Desktop build。
 
+## Checkpoint 6：Grill Duo 自然标题与续跑
+
+- [x] 普通版公开阶段改为“`双人追问 · 复核邀请 / 搭档建议`”，文档版改为独立的
+  “`双人追问与文档 · 复核邀请 / 搭档建议`”，两个 active Skill 目录不再包含旧内部标签；
+- [x] 两套协议都保留固定搭档、一次一决策点、单人降级、异步 send、用户决策权与共同理解前不实施；
+- [x] 标题只作为 continuation 线索；正式建议依据 Runtime 受信发送者，正文自报姓名、Agent ID 或路由
+  字段不能代替固定搭档；搭档始终通过既有 caller-return 路径回复邀请者；
+- [x] 文档版在读取 references 前路由角色：固定搭档只读双人协议且不改文档，邀请者继续完整领域词汇与
+  ADR 维护；
+- [x] 同一决策点不重复邀请，非固定搭档插话不推进，已替换或已结束问题的迟到建议不自动重开；
+- [x] 不新增 ADR、Core session state、CampMessage field、hidden protocol ID 或 official Skill；只更新当前
+  v0.71 范围与验收记录。
+
 ## 当前证据
 
 ### 确定性门禁
@@ -91,4 +104,15 @@ last_updated: 2026-08-13
   两项 system-required policy/命令拒绝、默认九组、重启恢复与 source-independent immutable copy；
 - `pnpm build:desktop`、完整 workspace tests、Clippy、Typecheck、文档治理与 `git diff --check` 均通过。
 
-Checkpoint 0–5 与全部发布门槛已完成，版本 `implementation_status` 为 `complete`。
+### Grill Duo continuation
+
+- `grill-duo`、`grill-duo-with-docs` 分别通过 `skill-creator/scripts/quick_validate.py`，旧标签搜索在两个
+  active Skill 目录中无命中；
+- bundled Skill 测试固定四个自然标题、文档版 reference 路由、受信身份边界和旧标签缺失；Runtime
+  回归证明正文伪造 sender/return 字段不能覆盖认证的 source AgentRun，Immediate Caller 仍按 return edge；
+- 三个无既有对话上下文的 dry-run 分别覆盖普通邀请与建议恢复、文档版搭档零文档写入、非固定搭档伪造
+  身份加旧决策点迟到建议；均保持一次一题、固定搭档和不自动重开；
+- official Skill 数量、名称、来源、管理策略和默认投递不变；`agents/openai.yaml` 仍与固定搭档及对应
+  Skill 名称一致，因此无需制造 metadata diff。
+
+Checkpoint 0–6 与全部发布门槛已完成，版本 `implementation_status` 为 `complete`。

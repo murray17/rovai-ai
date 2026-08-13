@@ -29,6 +29,10 @@ Episode 更新通过最小 Change Journal 驱动浮层和增量刷新。
 `cli-operations`、`memory-stewardship` 收口为始终启用、投递全部 Runtime Group 且不在 Settings
 展示的系统必需 Skill。该增量不改变 CampMessage wire shape、Runtime 权限或 Notification Episode。
 
+两项既有 Grill Duo Skill 也把公开阶段线索从方括号内部标签改为互不混淆的自然标题：普通版使用
+“双人追问”，文档版使用“双人追问与文档”。标题只负责 Skill-only continuation；发送者和直接调用者
+返回仍由 Runtime 的受信 Current Input 与 Message Delivery lineage 决定，不新增 message kind 或会话对象。
+
 ## 交付范围
 
 ### Core 深模块
@@ -64,6 +68,10 @@ Episode 更新通过最小 Change Journal 驱动浮层和增量刷新。
   installation 时恢复 enabled 与全部九组 Assignment；
 - Renderer Skill Settings 只展示九项 `user_managed` official Skills；两项系统必需 Skill 仍参与
   Runtime 原生发现与投递。
+- `grill-duo` 与 `grill-duo-with-docs` 分别使用自己的“复核邀请 / 搭档建议”自然标题；邀请者只接受
+  固定搭档的正式建议，同一决策点不重复邀请，已替换或结束问题的迟到建议不自动重开；
+- 文档版在角色路由后渐进读取 reference：固定搭档只加载双人协议并且不修改项目文档，邀请者收到建议后
+  恢复完整领域词汇与 ADR 维护职责。
 
 ## Clean break
 
@@ -80,15 +88,17 @@ Episode 更新通过最小 Change Journal 驱动浮层和增量刷新。
 4. 双主题真实 App 验收覆盖 Drawer、Toast、设置、长 CJK/emoji、键盘、最小窗口与 200% zoom；
 5. `cargo test --workspace`、Fmt、Clippy、Typecheck、Desktop build、`pnpm test` 与全部文档治理通过；
 6. Campfire validator/情景演练、十一项 fresh-Core smoke、system-required 命令拒绝与九项 Settings
-   列表 fixture 通过。
+   列表 fixture 通过；
+7. 两项 Grill Duo validator、自然标题 bundled manifest、受信 sender/caller-return 回归与普通/文档/伪造
+   迟到建议三类 continuation dry-run 通过，两个 active Skill 目录中的旧方括号标签归零。
 
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.70 以未执行九 Runtime v8 matrix 的事实冻结为 historical/closed_incomplete；v0.71 成为唯一 current |
-| ADR | 已更新 | 新增 ADR-0175，细化通知真源、聚合、Journal 与 Renderer seam；ADR-0176 替代十项 official inventory 并冻结 system-required policy |
-| Contracts | 已更新 | Notification Episode v1 成为通知接口；Current User Attention v3 替代 v2；SkillView 增加 management policy，CampMessage wire 不变 |
+| ADR | 已更新 | 新增 ADR-0175，细化通知真源、聚合、Journal 与 Renderer seam；ADR-0176 替代十项 official inventory 并冻结 system-required policy；Grill Duo 标题调整未改变有效 ADR 所有的固定搭档、自包含或异步边界，无需新 ADR |
+| Contracts | 已更新 | Notification Episode v1 成为通知接口；Current User Attention v3 替代 v2；SkillView 增加 management policy；Grill Duo 仍使用既有 CampMessage 与 caller-return 合同 |
 | Architecture | 已更新 | 新增 Notification Episode 架构；Built-in Tool Runtime 与 Skill Projection 记录十一项 inventory 及系统必需自愈边界 |
 | UI | 已更新 | 新增通知中心组件合同；Settings surface 同步九项可配置 Skill，并完全省略两项系统必需 Skill |
 | Runtime Activity | 确认无需更新 | 不新增 Runtime operation、provider event、Activity classifier 或 Evidence mapping |
