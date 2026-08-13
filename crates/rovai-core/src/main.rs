@@ -7390,6 +7390,14 @@ impl Core {
         let ending_git_observation = self
             .observe_run_git(&execution.project_binding_kind, &execution.project_path)
             .await;
+        if let Some(adapter) = self.acp_adapter(execution.runtime.adapter_kind) {
+            adapter
+                .prepare_agent_run_terminal_visibility(
+                    &execution.agent_run_id,
+                    execution.execution_epoch,
+                )
+                .await;
+        }
         let failure = {
             let mut database = self.database.lock().await;
             let envelope = CommandEnvelope {
@@ -9388,6 +9396,11 @@ async fn persist_acp_prompt_completion(
             &terminal_discriminator,
         )
         .await?;
+    if let Some(adapter) = core.acp_adapter(adapter_kind) {
+        adapter
+            .prepare_agent_run_terminal_visibility(agent_run_id, execution_epoch)
+            .await;
+    }
     if let Some(permit) = planned_terminal_permit.as_ref()
         && planned_outcome != RuntimeTerminalOutcome::Succeeded
     {

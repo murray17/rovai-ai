@@ -41,7 +41,7 @@ Skill 使用证据。
 | GitHub Copilot | `GitHub Copilot CLI 1.0.79` / `claude-sonnet-5` | pass | pass / pass | logical + native | pass / pass |
 | Claude Code | `2.1.220` / runtime default | pass | pass / pass | logical + native | pass / pass |
 | Antigravity | `1.1.12` / runtime default | pass | pass / pass | logical + native | pass / pass |
-| Kiro | `2.16.1` / `auto` | pass | pass / pass | logical；每 Run 新 Native Session | pass / pass |
+| Kiro | `2.16.1` / `auto` | pass | pass / pass | logical + native | pass / pass |
 | Qoder | `1.1.17` / `deepseek/deepseek-v4-flash-pg` | pass | pass / pass | logical + native | pass / pass |
 | CodeBuddy | `2.133.1` / `deepseek-v4-flash` | pass | pass / pass | logical + native | pass / pass |
 | Qwen Code | `0.21.5` / `deepseek-v4-flash(openai)` | pass | pass / pass | logical + native | pass / pass |
@@ -49,10 +49,11 @@ Skill 使用证据。
 九个 Runtime 的 Envelope/Projection 样本分别观测到 57.4%–57.9% 字节缩减；这是 observability
 metric，不是兼容性门槛。Antigravity 的 `agent_run.started` 在首轮日志确认前没有 Session ID，因此
 联合脚本以随后持久绑定的 `agent_run.native_session_bound` 为准；修复后的专项
-`pnpm smoke:antigravity-runtime` 实测两次 Run 使用同一 Native Session。Kiro 的 v0.67 Case 则实测为
-同一 logical Conversation、每 Run 新 Native Session；这不影响本版本 CLI/Skill 合同通过，也不把它
-误报成未验证。transport-independent response-loss、`outcome_indeterminate` 与无 locator stop 继续由
-确定性 CLI/Core 测试覆盖。
+`pnpm smoke:antigravity-runtime` 实测两次 Run 使用同一 Native Session。Kiro `2.16.1` 的 focused
+`ROVAI_BUILTIN_CLI_ADAPTERS=kiro-cli pnpm smoke:builtin-cli` 复测也证明 successor Run 复用同一
+Native Session：Adapter 在终态对外可见前停止持有 Session lock 的 per-Run Host，再由新 Host 执行
+`session/load`；smoke 现以 session ID 相等作为硬断言。transport-independent response-loss、
+`outcome_indeterminate` 与无 locator stop 继续由确定性 CLI/Core 测试覆盖。
 
 当前字段级合同以 [Built-in Tool Transport v7](contracts/builtin-tool-transport-v7.md) 为唯一真源，
 调用结构以 [Built-in Tool Runtime Architecture](architecture/builtin-tool-runtime.md) 为准。

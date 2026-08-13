@@ -57,13 +57,13 @@ Migration 78 发布 Data Contract `v0.67` / projection schema 33，不复用或�
 ## 验收证据
 
 - Core、CLI、Renderer、Skill、Context、notification 与 clean-break migration 自动化通过：378 library、
-  11 CLI、68 Core、304 Vitest、155 Node 与 21 docs tests 全绿，3 个 manual Runtime smoke ignored；
+  11 CLI、69 Core、304 Vitest、155 Node 与 21 docs tests 全绿，3 个 manual Runtime smoke ignored；
 - arm64 packaged App 通过签名验证，并完成 Day/Night、1440×920、1040×700、200% zoom、reduced
   motion、Current User Mention、copy/paste、通知导航/聚合/设置和 Skill 列表验收；
 - Codex、OpenCode、Copilot、Claude、Antigravity、Kiro、Qoder、CodeBuddy、Qwen 的 v7 Built-in CLI
   与 `cli-operations` real smoke 全部通过；
-- Antigravity 另有同 Native Session 续接证据；Kiro 保持 logical Conversation，但每个 Run 创建新的
-  Native Session，这不影响 v7 CLI/Skill 合同。
+- Antigravity 与 Kiro 均有 successor Run 复用同一 Native Session 的专项证据；Kiro 的 per-Run Host
+  在终态公开前释放原生 Session lock，再由新 Host 执行 `session/load`。
 
 精确命令、计数、截图名、Runtime 版本和限制记录在
 [实施计划的当前证据](implementation-plan.md#当前证据)与
@@ -88,7 +88,7 @@ Migration 78 发布 Data Contract `v0.67` / projection schema 33，不复用或�
 | Architecture | 已更新 | Public A2A 与 Built-in Tool Runtime 已组合正交 User attention、结构化正文投影、原子通知和 Charter/help/Skill 分层，同时保留 v0.66 planned-shutdown 边界 |
 | UI | 已更新 | 当前 Porcelain/Steel 规范中的 Current User Mention、消息通知、独立浮层偏好与普通 official Skill 列表已完成生产实现和 packaged 验收 |
 | Runtime Activity | 确认无需更新 | User Mention、Notification 与 CLI teaching 不新增 Canonical Runtime Activity identity、classifier 或 provider event mapping |
-| Runtime compatibility | 已更新 | 九 Runtime 已完成 v7 `--to-user`、exact addressing、精确 help 与 `cli-operations` real smoke；AGY/Kiro 原生续接差异已明确记录 |
+| Runtime compatibility | 已更新 | 九 Runtime 已完成 v7 `--to-user`、exact addressing、精确 help 与 `cli-operations` real smoke；AGY/Kiro 原生续接均有实测证据 |
 | Documentation routing | 已更新 | 版本索引切换到 v0.67；文档地图、CURRENT、Architecture、Contract 和 UI 索引继续路由到现行稳定权威 |
 | Root README | 确认无需更新 | 项目定位、常青能力和支持 Runtime 集合不变；根 README 不记录当前版本协议细节 |
 

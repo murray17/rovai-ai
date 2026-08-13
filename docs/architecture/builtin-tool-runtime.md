@@ -175,6 +175,11 @@ Resume 重新投递稳定 Bootstrap，但不改变 catalog 真源；新 Run 必�
 process 被新 Run acquire 后轮换 lease，再绑定新的 Session/Run route。任何旧 lease、迟到 callback
 或旧 request 都 fail closed。Core restart 不接管旧 process context。
 
+Kiro 的 additive MCP Host 配置按 AgentRun 冻结，且 ACP process 在存活期间持有 Native Session lock，
+因此 Kiro Host 不进入 IdleWarm。Adapter 必须在 AgentRun terminal 对 successor 可见前停止并回收旧
+Host；后继 Run 由新 Host 通过 `session/load` 续接持久 Native Session。停止 Host 不能清除 compatible
+Native Session binding。
+
 ### Antigravity one-shot 输入确认
 
 Antigravity companion 的 `--print` 进程同时承担输入投递与完整生成，进程退出不是唯一可用的 accepted

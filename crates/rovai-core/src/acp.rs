@@ -1706,9 +1706,22 @@ impl AcpCliRuntimeAdapter {
             .release(
                 agent_run_id,
                 execution_epoch,
-                FleetReleaseDisposition::Reusable,
+                completed_run_release_disposition(self.kind),
             )
             .await;
+    }
+
+    pub async fn prepare_agent_run_terminal_visibility(
+        &self,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) {
+        if completed_run_release_disposition(self.kind) == FleetReleaseDisposition::Stop {
+            // Finish non-reusable Host teardown before the durable terminal
+            // state allows a successor Run to start. complete_agent_run is
+            // idempotent, so the common post-terminal cleanup remains safe.
+            self.complete_agent_run(agent_run_id, execution_epoch).await;
+        }
     }
 
     pub async fn shutdown_all(&self) {
@@ -1722,6 +1735,18 @@ impl AcpCliRuntimeAdapter {
         for runtime in runtimes {
             runtime.detach().await;
         }
+    }
+}
+
+fn completed_run_release_disposition(adapter_kind: AdapterKind) -> FleetReleaseDisposition {
+    if adapter_kind == AdapterKind::KiroCli {
+        // Kiro keeps a Native Session locked for the lifetime of its ACP
+        // process. Its additive MCP configuration is also frozen per
+        // AgentRun, so a successor Run cannot safely reuse this Host. Stop it
+        // here so the successor process can load the persisted Session.
+        FleetReleaseDisposition::Stop
+    } else {
+        FleetReleaseDisposition::Reusable
     }
 }
 
@@ -2847,6 +2872,29 @@ fn canonicalize_allow_missing(path: &Path) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn completed_kiro_run_uses_stop_disposition() {
+        assert_eq!(
+            completed_run_release_disposition(AdapterKind::KiroCli),
+            FleetReleaseDisposition::Stop
+        );
+
+        for adapter_kind in [
+            AdapterKind::OpencodeCli,
+            AdapterKind::CopilotCli,
+            AdapterKind::QoderCli,
+            AdapterKind::CodebuddyCli,
+            AdapterKind::QwenCode,
+        ] {
+            assert_eq!(
+                completed_run_release_disposition(adapter_kind),
+                FleetReleaseDisposition::Reusable,
+                "{} should retain normal warm-Host reuse",
+                adapter_kind.as_str()
+            );
+        }
+    }
 
     #[test]
     fn recovery_collector_uses_the_latest_identified_assistant_message() {

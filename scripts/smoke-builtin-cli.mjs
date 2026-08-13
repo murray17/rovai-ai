@@ -269,6 +269,13 @@ try {
       resumed.agentRunId,
       resumedStart
     )
+    const nativeSessionContinued = Boolean(
+      sourceNativeSessionId
+        && sourceNativeSessionId === resumedNativeSessionId
+    )
+    if (specification.adapterKind === 'kiro-cli' && !nativeSessionContinued) {
+      throw new Error('kiro-cli did not resume the persisted Native Session')
+    }
 
     results.push({
       adapterKind: specification.adapterKind,
@@ -290,10 +297,7 @@ try {
       initialLeaseFenced: true,
       resumedLeaseFenced: true,
       logicalConversationContinued: true,
-      nativeSessionContinued: Boolean(
-        sourceNativeSessionId
-          && sourceNativeSessionId === resumedNativeSessionId
-      )
+      nativeSessionContinued
     })
   }
 

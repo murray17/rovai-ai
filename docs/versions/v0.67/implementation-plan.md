@@ -95,7 +95,7 @@ last_updated: 2026-08-13
 
 ### 自动化与构建
 
-- `cargo test --workspace -- --test-threads=1`：378 library、11 `rovai` CLI、68 `rovai-core` 通过，
+- `cargo test --workspace -- --test-threads=1`：378 library、11 `rovai` CLI、69 `rovai-core` 通过，
   3 个真实 Runtime manual smoke 保持 ignored；workspace check、严格 Clippy 与 fmt 通过；
 - `pnpm test`：45 个 Vitest 文件 / 304 项、155 Node、21 docs 通过；typecheck、desktop build、
   ADR generated history、diff-aware docs CI 与 diff check 通过；
@@ -114,7 +114,8 @@ last_updated: 2026-08-13
 
 每个 Built-in CLI Case 完成 13 个 canonical operation、16 条目标 Evidence、三种 send 输入、
 public-only `--to-user`、Agent+user 双轴、3 条 exact addressing read、conflict 与 lease fencing；
-每个 Skill Case 从 managed projection 读取 `cli-operations`，实际调用精确 operation help。
+每个 Skill Case 从 managed projection 读取 `cli-operations`，实际调用精确 operation help。Kiro
+focused 复测额外断言 successor Run 的 Native Session ID 与 source Run 相同。
 
 | Runtime | 实测版本 / 模型 | Built-in CLI | `cli-operations` |
 | --- | --- | --- | --- |
@@ -130,7 +131,7 @@ public-only `--to-user`、Agent+user 双轴、3 条 exact addressing read、conf
 
 ### 已知限制
 
-- Antigravity 专项 smoke 证明 successor Run 复用同一 Native Session；Kiro 保持 logical Conversation，
-  但每个 Run 新建 Native Session；两者的 v7 CLI/Skill 合同均已验证；
+- Antigravity 与 Kiro 专项 smoke 均证明 successor Run 复用同一 Native Session；Kiro 使用新的 per-Run
+  Host 执行 `session/load`，不是复用带旧 Run MCP Projection 的 Host；
 - 当前用户仍是 Core-owned 单一本地身份；资料编辑 UI 不在本版本范围；
 - 本机包为 ad-hoc 签名，notarization 按开发工作流跳过，不等同于可分发公证包。
