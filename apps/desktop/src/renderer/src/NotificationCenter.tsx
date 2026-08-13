@@ -8,44 +8,49 @@ import {
 } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type {
-  InAppNotificationCreatedBatch,
-  InAppNotificationFilter,
-  InAppNotificationInbox,
-  InAppNotificationPreference,
-  InAppNotificationView,
+  NotificationActionView,
+  NotificationEpisodeChange,
+  NotificationEpisodeChangeBatch,
+  NotificationEpisodeFilter,
+  NotificationEpisodeInbox,
+  NotificationEpisodeView,
+  NotificationPreference,
+  NotificationSemantic,
   StoredCommandResult
 } from '@contracts'
 
 type LoadState = 'loading' | 'ready' | 'error'
 
 export type NotificationHeadsUpEntry = {
-  notifications: InAppNotificationView[]
+  episode: NotificationEpisodeView
+  reason: NotificationSemantic
+  changeSequence: number
 }
 
 export function enqueueNotificationHeadsUps(
   current: readonly NotificationHeadsUpEntry[],
-  incoming: readonly InAppNotificationView[],
+  incoming: readonly NotificationEpisodeChange[],
   maximumEntries = 3
 ): { entries: NotificationHeadsUpEntry[]; overflow: number } {
-  const entries = current.map((entry) => ({ notifications: [...entry.notifications] }))
-  const known = new Set(entries.flatMap((entry) => entry.notifications.map((item) => item.id)))
+  const entries = current.map((entry) => ({ ...entry }))
   let overflow = 0
-  for (const notification of incoming) {
-    if (known.has(notification.id)) continue
-    known.add(notification.id)
-    const visible = entries[0]
-    const visibleAnchor = visible?.notifications[0]
+  for (const change of incoming) {
     if (
-      visible
-      && visibleAnchor?.kind === 'camp_message_user_mention'
-      && notification.kind === 'camp_message_user_mention'
-      && visibleAnchor.camp.id === notification.camp.id
-    ) {
-      visible.notifications.push(notification)
-      continue
+      change.operation !== 'upsert'
+      || !change.episode
+      || !change.headsUpReason
+      || !episodeHasActiveHeadsUpReason(change.episode, change.headsUpReason)
+    ) continue
+    const next = {
+      episode: change.episode,
+      reason: change.headsUpReason,
+      changeSequence: change.changeSequence
     }
-    if (entries.length < maximumEntries) {
-      entries.push({ notifications: [notification] })
+    const existingIndex = entries.findIndex((entry) => entry.episode.id === change.episodeId)
+    if (existingIndex >= 0) {
+      entries[existingIndex] = next
+    } else if (entries.length < maximumEntries) {
+      entries.push(next)
     } else {
       overflow += 1
     }
@@ -53,26 +58,16 @@ export function enqueueNotificationHeadsUps(
   return { entries, overflow }
 }
 
-export function notificationInboxWithPendingReads(
-  inbox: InAppNotificationInbox,
-  pendingReadAtById: ReadonlyMap<string, string>,
-  filter: InAppNotificationFilter
-): InAppNotificationInbox {
-  if (pendingReadAtById.size === 0) return inbox
-  let pendingUnreadCount = 0
-  const items = inbox.items.map((item) => {
-    const pendingReadAt = pendingReadAtById.get(item.id)
-    if (!pendingReadAt || item.readAt !== null) return item
-    pendingUnreadCount += 1
-    return { ...item, readAt: pendingReadAt }
-  })
-  return {
-    ...inbox,
-    items: filter === 'unread'
-      ? items.filter((item) => item.readAt === null)
-      : items,
-    unreadCount: Math.max(0, inbox.unreadCount - pendingUnreadCount)
+export function applyNotificationChanges(
+  current: readonly NotificationEpisodeView[],
+  changes: readonly NotificationEpisodeChange[]
+): NotificationEpisodeView[] {
+  const byId = new Map(current.map((episode) => [episode.id, episode]))
+  for (const change of changes) {
+    if (change.operation === 'remove' || !change.episode) byId.delete(change.episodeId)
+    else byId.set(change.episodeId, change.episode)
   }
+  return [...byId.values()]
 }
 
 export interface NotificationCenterHandle {
@@ -89,739 +84,637 @@ interface NotificationCenterProps {
   activeCampVisible: boolean
   refreshSignal: number
   onUnreadCountChange(count: number): void
-  onNavigate(notification: InAppNotificationView): Promise<NotificationNavigationResult>
-  onPresentNavigation(notification: InAppNotificationView): Promise<boolean>
+  onNavigate(
+    episode: NotificationEpisodeView,
+    action: NotificationActionView
+  ): Promise<NotificationNavigationResult>
+  onPresentNavigation(
+    episode: NotificationEpisodeView,
+    action: NotificationActionView
+  ): Promise<boolean>
   onCancelNavigation(): void
-  onRefreshVisibleCamp(notification: InAppNotificationView): Promise<boolean>
+  onRefreshVisibleCamp(
+    episode: NotificationEpisodeView,
+    action: NotificationActionView
+  ): Promise<boolean>
 }
 
-export const NotificationCenter = forwardRef<NotificationCenterHandle, NotificationCenterProps>(function NotificationCenter({
-  enabled,
-  activeCampId,
-  activeCampVisible,
-  refreshSignal,
-  onUnreadCountChange,
-  onNavigate,
-  onPresentNavigation,
-  onCancelNavigation,
-  onRefreshVisibleCamp
-}: NotificationCenterProps, ref): React.JSX.Element {
-  const [open, setOpen] = useState(false)
-  const [filter, setFilter] = useState<InAppNotificationFilter>('all')
-  const [items, setItems] = useState<InAppNotificationView[]>([])
-  const [nextCursor, setNextCursor] = useState<string | null>(null)
-  const [unreadCount, setUnreadCount] = useState(0)
-  const [throughSequence, setThroughSequence] = useState(0)
-  const [state, setState] = useState<LoadState>('loading')
-  const [error, setError] = useState<string | null>(null)
-  const [navigationError, setNavigationError] = useState<string | null>(null)
-  const [openingNotificationId, setOpeningNotificationId] = useState<string | null>(null)
-  const [loadingMore, setLoadingMore] = useState(false)
-  const [preference, setPreference] = useState<InAppNotificationPreference | null>(null)
-  const [headsUpQueue, setHeadsUpQueue] = useState<NotificationHeadsUpEntry[]>([])
-  const [headsUpOverflow, setHeadsUpOverflow] = useState(0)
-  const [aggregateFocusIds, setAggregateFocusIds] = useState<Set<string>>(new Set())
-  const creationCursor = useRef(0)
-  const baselineReady = useRef(false)
-  const pollRunning = useRef(false)
-  const pollFailureCount = useRef(0)
-  const pollRetryAt = useRef(0)
-  const loadGeneration = useRef(0)
-  const inboxRequest = useRef<{
-    filter: InAppNotificationFilter
-    promise: Promise<InAppNotificationInbox>
-  } | null>(null)
-  const pendingReadAtById = useRef(new Map<string, string>())
-  const returnFocusRef = useRef<HTMLButtonElement | null>(null)
-  const navigationRunning = useRef(false)
-  const navigationGeneration = useRef(0)
-
-  useImperativeHandle(ref, () => ({
-    open(trigger = null): void {
-      navigationGeneration.current += 1
-      onCancelNavigation()
-      returnFocusRef.current = trigger
-      setAggregateFocusIds(new Set())
-      setNavigationError(null)
-      setOpen(true)
-    }
-  }), [onCancelNavigation])
-
-  const acceptInbox = useCallback((inbox: InAppNotificationInbox): void => {
-    if (inbox.schemaVersion !== 3) throw new Error('通知中心合同不兼容。')
-    for (const item of inbox.items) {
-      if (item.readAt !== null) pendingReadAtById.current.delete(item.id)
-    }
-    const acceptedInbox = notificationInboxWithPendingReads(
-      inbox,
-      pendingReadAtById.current,
-      filter
-    )
-    setItems(acceptedInbox.items)
-    setNextCursor(acceptedInbox.nextCursor)
-    setUnreadCount(acceptedInbox.unreadCount)
-    setThroughSequence(acceptedInbox.throughSequence)
-    const currentById = new Map(acceptedInbox.items.map((item) => [item.id, item]))
-    setHeadsUpQueue((current) => current.flatMap((entry) => {
-      const notifications = entry.notifications.flatMap((item) => {
-        const latest = currentById.get(item.id)
-        if (
-          !latest
-          || latest.readAt !== null
-          || (
-            latest.kind === 'runtime_permission_attention'
-            && latest.attentionState === 'resolved'
-          )
-        ) return []
-        return [latest]
-      })
-      return notifications.length > 0 ? [{ notifications }] : []
-    }))
-    onUnreadCountChange(acceptedInbox.unreadCount)
-  }, [filter, onUnreadCountChange])
-
-  const loadInbox = useCallback((
-    selectedFilter: InAppNotificationFilter,
-    showLoading = false
-  ): Promise<InAppNotificationInbox> => {
-    const existing = inboxRequest.current
-    if (existing?.filter === selectedFilter) {
-      if (showLoading) setState('loading')
-      return existing.promise
-    }
-    const generation = ++loadGeneration.current
-    if (showLoading) setState('loading')
-    setError(null)
-    const promise = window.rovai.request<InAppNotificationInbox>('notifications.inbox', {
-      filter: selectedFilter,
-      limit: 50
-    }).then((inbox) => {
-      if (generation === loadGeneration.current) {
-        acceptInbox(inbox)
-        setState('ready')
-      }
-      return inbox
-    }).catch((nextError: unknown) => {
-      if (generation === loadGeneration.current) {
-        setState('error')
-        setError(errorMessage(nextError))
-      }
-      throw nextError
-    })
-    const request = {
-      filter: selectedFilter,
-      promise
-    }
-    inboxRequest.current = request
-    void promise.finally(() => {
-      if (inboxRequest.current === request) inboxRequest.current = null
-    }).catch(() => undefined)
-    return promise
-  }, [acceptInbox])
-
-  const loadPreference = useCallback(async (): Promise<InAppNotificationPreference> => {
-    const next = await window.rovai.request<InAppNotificationPreference>(
-      'notifications.preference.get'
-    )
-    if (
-      typeof next.headsUpEnabled !== 'boolean'
-      || typeof next.approvalHeadsUpEnabled !== 'boolean'
-      || typeof next.executionHeadsUpEnabled !== 'boolean'
-      || typeof next.userMentionHeadsUpEnabled !== 'boolean'
-      || typeof next.version !== 'number'
-    ) throw new Error('通知设置合同不兼容。')
-    setPreference(next)
-    return next
-  }, [])
-
-  useEffect(() => {
-    if (!enabled) return undefined
-    let cancelled = false
-    void Promise.all([
-      loadInbox('all', true),
-      loadPreference().catch(() => null)
-    ]).then(([inbox]) => {
-      if (cancelled) return
-      creationCursor.current = inbox.throughSequence
-      baselineReady.current = true
-    }).catch(() => undefined)
-    return () => {
-      cancelled = true
-    }
-  }, [enabled, loadInbox, loadPreference])
-
-  useEffect(() => {
-    if (!baselineReady.current) return
-    void loadInbox(filter).catch(() => undefined)
-  }, [filter, loadInbox, refreshSignal])
-
-  useEffect(() => {
-    if (!open) return
-    setHeadsUpQueue([])
-    setHeadsUpOverflow(0)
-    void loadInbox(filter).catch(() => undefined)
-  }, [filter, loadInbox, open])
-
-  useEffect(() => {
-    if (!open || aggregateFocusIds.size === 0) return undefined
-    const frame = window.requestAnimationFrame(() => {
-      const firstId = [...aggregateFocusIds][0]
-      const target = document.querySelector<HTMLElement>(
-        `[data-notification-id="${CSS.escape(firstId)}"] .notification-row-open`
-      )
-      target?.focus({ preventScroll: true })
-      target?.scrollIntoView({ block: 'nearest' })
-    })
-    return () => window.cancelAnimationFrame(frame)
-  }, [aggregateFocusIds, items, open])
-
-  const markRead = useCallback(async (notificationId: string): Promise<void> => {
-    const result = await window.rovai.request<StoredCommandResult>('notifications.markRead', {
-      commandId: crypto.randomUUID(),
-      command: { notificationId }
-    })
-    if (result.status !== 'applied') throw new Error(result.code)
-  }, [])
-
-  const enqueueHeadsUps = useCallback((incoming: InAppNotificationView[]): void => {
-    setHeadsUpQueue((current) => {
-      const next = enqueueNotificationHeadsUps(current, incoming)
-      if (next.overflow > 0) {
-        setHeadsUpOverflow((count) => count + next.overflow)
-      }
-      return next.entries
-    })
-  }, [])
-
-  const pollCreated = useCallback(async (): Promise<void> => {
-    if (
-      !baselineReady.current
-      || pollRunning.current
-      || Date.now() < pollRetryAt.current
-    ) return
-    pollRunning.current = true
-    try {
-      const incoming: InAppNotificationView[] = []
-      let requestCount = 0
-      for (;;) {
-        const batch = await window.rovai.request<InAppNotificationCreatedBatch>(
-          'notifications.createdSince',
-          { afterSequence: creationCursor.current, limit: 100 }
-        )
-        if (batch.schemaVersion !== 3) throw new Error('通知增量合同不兼容。')
-        if (batch.resetRequired) {
-          creationCursor.current = batch.throughSequence
-          break
-        }
-        incoming.push(...batch.items)
-        creationCursor.current = batch.nextSequence
-        requestCount += 1
-        if (!batch.hasMore || requestCount >= 10) break
-        await new Promise<void>((resolve) => window.setTimeout(resolve, 0))
-      }
-
-      const headsUps: InAppNotificationView[] = []
-      for (const notification of incoming) {
-        if (notification.readAt !== null) continue
-        const sourceAlreadyVisible = notification.camp.id === activeCampId
-          && activeCampVisible
-          && !open
-          && document.visibilityState === 'visible'
-          && document.hasFocus()
-        if (sourceAlreadyVisible) {
-          const rendered = await onRefreshVisibleCamp(notification)
-          if (
-            rendered
-            && document.visibilityState === 'visible'
-            && document.hasFocus()
-          ) {
-            try {
-              await markRead(notification.id)
-              continue
-            } catch {
-              // Keep the unread notification eligible for a heads-up when persistence fails.
-            }
-          }
-        }
-        if (
-          preference
-          && shouldShowHeadsUp(notification, preference)
-          && !open
-          && document.visibilityState === 'visible'
-          && document.hasFocus()
-        ) headsUps.push(notification)
-      }
-      if (headsUps.length > 0) enqueueHeadsUps(headsUps)
-      await loadInbox(filter).catch(() => undefined)
-      pollFailureCount.current = 0
-      pollRetryAt.current = 0
-    } catch (error) {
-      pollFailureCount.current += 1
-      pollRetryAt.current = Date.now() + Math.min(
-        30_000,
-        2_500 * 2 ** Math.min(pollFailureCount.current, 4)
-      )
-      throw error
-    } finally {
-      pollRunning.current = false
-    }
-  }, [
+export const NotificationCenter = forwardRef<NotificationCenterHandle, NotificationCenterProps>(
+  function NotificationCenter({
+    enabled,
     activeCampId,
     activeCampVisible,
-    enqueueHeadsUps,
-    filter,
-    loadInbox,
-    markRead,
-    onRefreshVisibleCamp,
-    open,
-    preference
-  ])
+    refreshSignal,
+    onUnreadCountChange,
+    onNavigate,
+    onPresentNavigation,
+    onCancelNavigation,
+    onRefreshVisibleCamp
+  }: NotificationCenterProps, ref): React.JSX.Element {
+    const [open, setOpen] = useState(false)
+    const [filter, setFilter] = useState<NotificationEpisodeFilter>('all')
+    const [items, setItems] = useState<NotificationEpisodeView[]>([])
+    const [nextCursor, setNextCursor] = useState<string | null>(null)
+    const [unreadCount, setUnreadCount] = useState(0)
+    const [throughChangeSequence, setThroughChangeSequence] = useState(0)
+    const [state, setState] = useState<LoadState>('loading')
+    const [error, setError] = useState<string | null>(null)
+    const [navigationError, setNavigationError] = useState<string | null>(null)
+    const [busyEpisodeId, setBusyEpisodeId] = useState<string | null>(null)
+    const [globalBusy, setGlobalBusy] = useState(false)
+    const [loadingMore, setLoadingMore] = useState(false)
+    const [preference, setPreference] = useState<NotificationPreference | null>(null)
+    const [headsUpQueue, setHeadsUpQueue] = useState<NotificationHeadsUpEntry[]>([])
+    const [headsUpOverflow, setHeadsUpOverflow] = useState(0)
+    const changeCursor = useRef(0)
+    const baselineReady = useRef(false)
+    const pollRunning = useRef(false)
+    const pollFailureCount = useRef(0)
+    const pollRetryAt = useRef(0)
+    const loadGeneration = useRef(0)
+    const returnFocusRef = useRef<HTMLButtonElement | null>(null)
+    const navigationGeneration = useRef(0)
 
-  useEffect(() => {
-    if (!enabled) return undefined
-    const timer = window.setInterval(() => {
-      void pollCreated().catch(() => undefined)
-    }, 2_500)
-    let eventTimer: number | null = null
-    const unsubscribe = window.rovai.onEvent((event) => {
-      if (event.method === 'in_app_notification.preference_changed') {
-        void loadPreference().catch(() => undefined)
-      }
-      if (eventTimer !== null) window.clearTimeout(eventTimer)
-      eventTimer = window.setTimeout(() => {
-        eventTimer = null
-        void pollCreated().catch(() => undefined)
-      }, 80)
-    })
-    return () => {
-      window.clearInterval(timer)
-      if (eventTimer !== null) window.clearTimeout(eventTimer)
-      unsubscribe()
-    }
-  }, [enabled, loadPreference, pollCreated])
-
-  const invalidateInboxLoad = (): void => {
-    loadGeneration.current += 1
-    inboxRequest.current = null
-  }
-
-  const optimisticRead = (notification: InAppNotificationView): boolean => {
-    const latest = items.find((item) => item.id === notification.id) ?? notification
-    if (latest.readAt !== null || pendingReadAtById.current.has(notification.id)) return false
-    const readAt = new Date().toISOString()
-    pendingReadAtById.current.set(notification.id, readAt)
-    invalidateInboxLoad()
-    setItems((current) => current.map((item) => {
-      if (item.id !== notification.id || item.readAt !== null) return item
-      return { ...item, readAt }
-    }))
-    setHeadsUpQueue((current) => current.flatMap((entry) => {
-      const notifications = entry.notifications.filter((item) => item.id !== notification.id)
-      return notifications.length > 0 ? [{ notifications }] : []
-    }))
-    setUnreadCount((count) => {
-      const next = Math.max(0, count - 1)
-      onUnreadCountChange(next)
-      return next
-    })
-    return true
-  }
-
-  const persistOptimisticRead = async (notificationId: string): Promise<void> => {
-    try {
-      await markRead(notificationId)
-    } catch (nextError) {
-      pendingReadAtById.current.delete(notificationId)
-      invalidateInboxLoad()
-      await loadInbox(filter).catch(() => undefined)
-      setError(errorMessage(nextError))
-      return
-    }
-    pendingReadAtById.current.delete(notificationId)
-    invalidateInboxLoad()
-    await loadInbox(filter).catch(() => undefined)
-  }
-
-  const openNotification = async (notification: InAppNotificationView): Promise<void> => {
-    if (navigationRunning.current) return
-    const generation = ++navigationGeneration.current
-    navigationRunning.current = true
-    onCancelNavigation()
-    setOpeningNotificationId(notification.id)
-    setNavigationError(null)
-    try {
-      if (optimisticRead(notification)) void persistOptimisticRead(notification.id)
-      if (notification.kind === 'camp_message_user_mention' && !notification.sourceAvailable) {
-        setNavigationError('原消息已不可用。通知仍保留在“全部”列表中。')
-        setOpen(true)
-        return
-      }
-      const result = await onNavigate(notification)
-      if (generation !== navigationGeneration.current) {
+    useImperativeHandle(ref, () => ({
+      open(trigger = null): void {
+        navigationGeneration.current += 1
         onCancelNavigation()
-        return
+        returnFocusRef.current = trigger
+        setNavigationError(null)
+        setOpen(true)
       }
-      if (result.status === 'navigated') {
+    }), [onCancelNavigation])
+
+    const acceptInbox = useCallback((inbox: NotificationEpisodeInbox): void => {
+      if (inbox.schemaVersion !== 4) throw new Error('通知中心合同不兼容。')
+      setItems(inbox.items)
+      setNextCursor(inbox.nextCursor)
+      setUnreadCount(inbox.unreadCount)
+      setThroughChangeSequence(inbox.throughChangeSequence)
+      const currentById = new Map(inbox.items.map((episode) => [episode.id, episode]))
+      setHeadsUpQueue((current) => current.flatMap((entry) => {
+        const episode = currentById.get(entry.episode.id)
+        return episode && episodeHasActiveHeadsUpReason(episode, entry.reason)
+          ? [{ ...entry, episode }]
+          : []
+      }))
+      onUnreadCountChange(inbox.unreadCount)
+    }, [onUnreadCountChange])
+
+    const loadInbox = useCallback(async (
+      selectedFilter: NotificationEpisodeFilter,
+      showLoading = false
+    ): Promise<NotificationEpisodeInbox> => {
+      const generation = ++loadGeneration.current
+      if (showLoading) setState('loading')
+      setError(null)
+      try {
+        const inbox = await window.rovai.request<NotificationEpisodeInbox>(
+          'notifications.inbox',
+          { filter: selectedFilter, limit: 50 }
+        )
+        if (generation === loadGeneration.current) {
+          acceptInbox(inbox)
+          setState('ready')
+        }
+        return inbox
+      } catch (nextError) {
+        if (generation === loadGeneration.current) {
+          setState('error')
+          setError(errorMessage(nextError))
+        }
+        throw nextError
+      }
+    }, [acceptInbox])
+
+    const loadPreference = useCallback(async (): Promise<NotificationPreference> => {
+      const next = await window.rovai.request<NotificationPreference>(
+        'notifications.preference.get'
+      )
+      if (!validPreference(next)) throw new Error('通知设置合同不兼容。')
+      setPreference(next)
+      return next
+    }, [])
+
+    useEffect(() => {
+      if (!enabled) return undefined
+      let cancelled = false
+      void Promise.all([
+        loadInbox('all', true),
+        loadPreference().catch(() => null)
+      ]).then(([inbox]) => {
+        if (cancelled) return
+        changeCursor.current = inbox.throughChangeSequence
+        baselineReady.current = true
+      }).catch(() => undefined)
+      return () => {
+        cancelled = true
+      }
+    }, [enabled, loadInbox, loadPreference])
+
+    useEffect(() => {
+      if (!baselineReady.current) return
+      void loadInbox(filter).catch(() => undefined)
+    }, [filter, loadInbox, refreshSignal])
+
+    useEffect(() => {
+      if (!open) return
+      setHeadsUpQueue([])
+      setHeadsUpOverflow(0)
+      void loadInbox(filter).catch(() => undefined)
+    }, [filter, loadInbox, open])
+
+    const acknowledgeAction = useCallback(async (
+      episode: NotificationEpisodeView,
+      action: NotificationActionView
+    ): Promise<void> => {
+      if (!action.acknowledgementId) return
+      const result = await window.rovai.request<StoredCommandResult>(
+        'notifications.acknowledge',
+        {
+          commandId: crypto.randomUUID(),
+          command: {
+            episodeId: episode.id,
+            observedEpisodeVersion: action.observedEpisodeVersion,
+            acknowledgementId: action.acknowledgementId
+          }
+        }
+      )
+      if (result.status !== 'applied') throw new Error(commandFailure(result))
+    }, [])
+
+    const pollChanges = useCallback(async (): Promise<void> => {
+      if (
+        !baselineReady.current
+        || pollRunning.current
+        || Date.now() < pollRetryAt.current
+      ) return
+      pollRunning.current = true
+      try {
+        const changes: NotificationEpisodeChange[] = []
+        let requestCount = 0
+        for (;;) {
+          const batch = await window.rovai.request<NotificationEpisodeChangeBatch>(
+            'notifications.changesSince',
+            { afterChangeSequence: changeCursor.current, limit: 100 }
+          )
+          if (batch.schemaVersion !== 4) throw new Error('通知增量合同不兼容。')
+          if (batch.resetRequired) {
+            const reset = await loadInbox(filter)
+            changeCursor.current = reset.throughChangeSequence
+            changes.length = 0
+            break
+          }
+          changes.push(...batch.changes)
+          changeCursor.current = batch.nextChangeSequence
+          requestCount += 1
+          if (!batch.hasMore || requestCount >= 10) break
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 0))
+        }
+
+        const headsUpChanges: NotificationEpisodeChange[] = []
+        for (const change of changes) {
+          const episode = change.episode
+          if (
+            change.operation !== 'upsert'
+            || !episode
+            || !change.headsUpReason
+            || !episodeHasActiveHeadsUpReason(episode, change.headsUpReason)
+          ) continue
+          const exactMentionAction = change.headsUpReason === 'user_mention'
+            ? actionForSemantic(episode, 'user_mention')
+            : null
+          const exactSourceMayBeVisible = exactMentionAction
+            && exactMentionAction.messageId
+            && episode.camp.id === activeCampId
+            && activeCampVisible
+            && !open
+            && document.visibilityState === 'visible'
+            && document.hasFocus()
+          if (exactSourceMayBeVisible) {
+            const rendered = await onRefreshVisibleCamp(episode, exactMentionAction)
+            if (
+              rendered
+              && document.visibilityState === 'visible'
+              && document.hasFocus()
+            ) {
+              try {
+                await acknowledgeAction(episode, exactMentionAction)
+                continue
+              } catch {
+                // Persistence failure keeps the exact occurrence unread and eligible for heads-up.
+              }
+            }
+          }
+          if (
+            preference
+            && shouldShowHeadsUp(change.headsUpReason, preference)
+            && !open
+            && document.visibilityState === 'visible'
+            && document.hasFocus()
+          ) headsUpChanges.push(change)
+        }
+        if (headsUpChanges.length > 0) {
+          setHeadsUpQueue((current) => {
+            const next = enqueueNotificationHeadsUps(current, headsUpChanges)
+            if (next.overflow > 0) {
+              setHeadsUpOverflow((count) => count + next.overflow)
+            }
+            return next.entries
+          })
+        }
+        if (changes.length > 0) {
+          setItems((current) => applyNotificationChanges(current, changes))
+          await loadInbox(filter).catch(() => undefined)
+        }
+        pollFailureCount.current = 0
+        pollRetryAt.current = 0
+      } catch (nextError) {
+        pollFailureCount.current += 1
+        pollRetryAt.current = Date.now() + Math.min(
+          30_000,
+          2_500 * 2 ** Math.min(pollFailureCount.current, 4)
+        )
+        throw nextError
+      } finally {
+        pollRunning.current = false
+      }
+    }, [
+      acknowledgeAction,
+      activeCampId,
+      activeCampVisible,
+      filter,
+      loadInbox,
+      onRefreshVisibleCamp,
+      open,
+      preference
+    ])
+
+    useEffect(() => {
+      if (!enabled) return undefined
+      const timer = window.setInterval(() => {
+        void pollChanges().catch(() => undefined)
+      }, 2_500)
+      let eventTimer: number | null = null
+      const unsubscribe = window.rovai.onEvent((event) => {
+        if (event.method === 'notification_episode.preference_changed') {
+          void loadPreference().catch(() => undefined)
+        }
+        if (eventTimer !== null) window.clearTimeout(eventTimer)
+        eventTimer = window.setTimeout(() => {
+          eventTimer = null
+          void pollChanges().catch(() => undefined)
+        }, 80)
+      })
+      return () => {
+        window.clearInterval(timer)
+        if (eventTimer !== null) window.clearTimeout(eventTimer)
+        unsubscribe()
+      }
+    }, [enabled, loadPreference, pollChanges])
+
+    const openAction = async (
+      episode: NotificationEpisodeView,
+      action: NotificationActionView
+    ): Promise<void> => {
+      if (busyEpisodeId || !action.available) return
+      const generation = ++navigationGeneration.current
+      setBusyEpisodeId(episode.id)
+      setNavigationError(null)
+      onCancelNavigation()
+      let acknowledgementPersisted = false
+      try {
+        if (action.acknowledgementId) {
+          await acknowledgeAction(episode, action)
+          acknowledgementPersisted = true
+          await loadInbox(filter).catch(() => undefined)
+        }
+        const result = await onNavigate(episode, action)
+        if (generation !== navigationGeneration.current) {
+          onCancelNavigation()
+          return
+        }
+        if (result.status === 'failed') {
+          onCancelNavigation()
+          setNavigationError(acknowledgementPersisted
+            ? `${result.message} 这条来源已按你的动作标记为已读。`
+            : result.message)
+          setOpen(true)
+          return
+        }
         setOpen(false)
-        setAggregateFocusIds(new Set())
         await afterNextPaint()
-        const presented = await onPresentNavigation(notification)
+        const presented = await onPresentNavigation(episode, action)
         if (generation !== navigationGeneration.current) {
           onCancelNavigation()
           return
         }
         if (!presented) {
           onCancelNavigation()
-          setNavigationError('已打开 Camp，但原消息未能获得焦点。通知仍保留，可稍后重试。')
+          setNavigationError(acknowledgementPersisted
+            ? '已打开 Camp，但目标未能获得焦点；这条来源已按你的动作标记为已读。'
+            : '已打开 Camp，但目标未能获得焦点。你可以稍后重试。')
           setOpen(true)
         } else {
-          setNavigationError(null)
-          window.setTimeout(() => returnFocusRef.current = null, 0)
+          window.setTimeout(() => { returnFocusRef.current = null }, 0)
         }
-        return
+      } catch (nextError) {
+        onCancelNavigation()
+        if (generation !== navigationGeneration.current) return
+        setNavigationError(acknowledgementPersisted
+          ? `来源已标记为已读，但导航失败：${errorMessage(nextError)}`
+          : `操作未完成：${errorMessage(nextError)}`)
+        setOpen(true)
+      } finally {
+        setBusyEpisodeId(null)
       }
-      onCancelNavigation()
-      setNavigationError(result.message)
-      setOpen(true)
-    } catch (nextError) {
-      onCancelNavigation()
-      if (generation !== navigationGeneration.current) return
-      setNavigationError(`暂时无法打开通知来源：${errorMessage(nextError)}`)
-      setOpen(true)
-    } finally {
-      navigationRunning.current = false
-      setOpeningNotificationId(null)
     }
-  }
 
-  const markAllRead = async (): Promise<void> => {
-    const now = new Date().toISOString()
-    setItems((current) => current.map((item) => ({ ...item, readAt: item.readAt ?? now })))
-    setUnreadCount(0)
-    onUnreadCountChange(0)
-    try {
-      const result = await window.rovai.request<StoredCommandResult>('notifications.markAllRead', {
-        commandId: crypto.randomUUID(),
-        command: {}
-      })
-      if (result.status !== 'applied') throw new Error(result.code)
-    } catch (nextError) {
-      setError(errorMessage(nextError))
-    } finally {
-      void loadInbox(filter).catch(() => undefined)
+    const markAllRead = async (): Promise<void> => {
+      if (globalBusy || unreadCount === 0) return
+      setGlobalBusy(true)
+      setError(null)
+      try {
+        const result = await window.rovai.request<StoredCommandResult>(
+          'notifications.markAllRead',
+          {
+            commandId: crypto.randomUUID(),
+            command: { throughChangeSequence }
+          }
+        )
+        if (result.status !== 'applied') throw new Error(commandFailure(result))
+      } catch (nextError) {
+        setError(`无法完成全部已读：${errorMessage(nextError)}`)
+      } finally {
+        setGlobalBusy(false)
+        void loadInbox(filter).catch(() => undefined)
+      }
     }
-  }
 
-  const clearNotification = async (notificationId: string): Promise<void> => {
-    const existing = items.find((item) => item.id === notificationId)
-    setItems((current) => current.filter((item) => item.id !== notificationId))
-    if (existing?.readAt === null) {
-      setUnreadCount((count) => {
-        const next = Math.max(0, count - 1)
-        onUnreadCountChange(next)
-        return next
-      })
+    const clearEpisode = async (episode: NotificationEpisodeView): Promise<void> => {
+      if (busyEpisodeId) return
+      setBusyEpisodeId(episode.id)
+      setError(null)
+      try {
+        const result = await window.rovai.request<StoredCommandResult>(
+          'notifications.clear',
+          {
+            commandId: crypto.randomUUID(),
+            command: {
+              episodeId: episode.id,
+              throughAttentionRevision: episode.attentionRevision
+            }
+          }
+        )
+        if (result.status !== 'applied') throw new Error(commandFailure(result))
+        setItems((current) => current.filter((item) => item.id !== episode.id))
+        setHeadsUpQueue((current) => current.filter((entry) => entry.episode.id !== episode.id))
+      } catch (nextError) {
+        setError(`无法清除这项通知：${errorMessage(nextError)}`)
+      } finally {
+        setBusyEpisodeId(null)
+        void loadInbox(filter).catch(() => undefined)
+      }
     }
-    try {
-      const result = await window.rovai.request<StoredCommandResult>('notifications.clear', {
-        commandId: crypto.randomUUID(),
-        command: { notificationId }
-      })
-      if (result.status !== 'applied') throw new Error(result.code)
-    } catch (nextError) {
-      setError(errorMessage(nextError))
-    } finally {
-      void loadInbox(filter).catch(() => undefined)
+
+    const loadMore = async (): Promise<void> => {
+      if (!nextCursor || loadingMore) return
+      setLoadingMore(true)
+      setError(null)
+      try {
+        const page = await window.rovai.request<NotificationEpisodeInbox>(
+          'notifications.inbox',
+          { filter, cursor: nextCursor, limit: 50 }
+        )
+        if (page.schemaVersion !== 4) throw new Error('通知中心合同不兼容。')
+        setItems((current) => {
+          const ids = new Set(current.map((item) => item.id))
+          return [...current, ...page.items.filter((item) => !ids.has(item.id))]
+        })
+        setNextCursor(page.nextCursor)
+        setUnreadCount(page.unreadCount)
+        onUnreadCountChange(page.unreadCount)
+      } catch (nextError) {
+        setError(`无法加载更多通知：${errorMessage(nextError)}`)
+      } finally {
+        setLoadingMore(false)
+      }
     }
-  }
 
-  const clearRead = async (): Promise<void> => {
-    setItems((current) => current.filter((item) => item.readAt === null))
-    try {
-      const result = await window.rovai.request<StoredCommandResult>('notifications.clearRead', {
-        commandId: crypto.randomUUID(),
-        command: {}
-      })
-      if (result.status !== 'applied') throw new Error(result.code)
-    } catch (nextError) {
-      setError(errorMessage(nextError))
-    } finally {
-      void loadInbox(filter).catch(() => undefined)
+    const changeOpen = (nextOpen: boolean): void => {
+      setOpen(nextOpen)
+      if (!nextOpen) {
+        navigationGeneration.current += 1
+        onCancelNavigation()
+        setNavigationError(null)
+        window.setTimeout(() => returnFocusRef.current?.focus(), 0)
+      }
     }
-  }
 
-  const loadMore = async (): Promise<void> => {
-    if (!nextCursor || loadingMore) return
-    setLoadingMore(true)
-    setError(null)
-    try {
-      const page = await window.rovai.request<InAppNotificationInbox>('notifications.inbox', {
-        filter,
-        cursor: nextCursor,
-        limit: 50
-      })
-      if (page.schemaVersion !== 3) throw new Error('通知中心合同不兼容。')
-      setItems((current) => {
-        const ids = new Set(current.map((item) => item.id))
-        return [...current, ...page.items.filter((item) => !ids.has(item.id))]
-      })
-      setNextCursor(page.nextCursor)
-      setUnreadCount(page.unreadCount)
-      setThroughSequence(page.throughSequence)
-      onUnreadCountChange(page.unreadCount)
-    } catch (nextError) {
-      setError(errorMessage(nextError))
-    } finally {
-      setLoadingMore(false)
-    }
-  }
+    const currentHeadsUp = headsUpQueue[0] ?? null
+    return (
+      <>
+        {currentHeadsUp && (
+          <NotificationHeadsUp
+            key={currentHeadsUp.episode.id}
+            entry={currentHeadsUp}
+            onOpen={() => void openAction(
+              currentHeadsUp.episode,
+              currentHeadsUp.episode.primaryAction
+            )}
+            onDismiss={() => setHeadsUpQueue((current) => current.slice(1))}
+          />
+        )}
+        {!currentHeadsUp && headsUpOverflow > 0 && (
+          <NotificationHeadsUpSummary
+            count={headsUpOverflow}
+            onOpen={() => {
+              setHeadsUpOverflow(0)
+              changeOpen(true)
+            }}
+            onDismiss={() => setHeadsUpOverflow(0)}
+          />
+        )}
 
-  const changeOpen = (nextOpen: boolean): void => {
-    setOpen(nextOpen)
-    if (!nextOpen) {
-      navigationGeneration.current += 1
-      onCancelNavigation()
-      setAggregateFocusIds(new Set())
-      setNavigationError(null)
-      window.setTimeout(() => returnFocusRef.current?.focus(), 0)
-    }
-  }
-
-  const currentHeadsUp = headsUpQueue[0] ?? null
-  const currentHeadsUpNotification = currentHeadsUp?.notifications[0] ?? null
-  return (
-    <>
-      {currentHeadsUpNotification && currentHeadsUp.notifications.length === 1 && (
-        <NotificationHeadsUp
-          key={currentHeadsUpNotification.id}
-          notification={currentHeadsUpNotification}
-          onOpen={() => void openNotification(currentHeadsUpNotification)}
-          onDismiss={() => setHeadsUpQueue((current) => current.slice(1))}
-        />
-      )}
-      {currentHeadsUpNotification && currentHeadsUp.notifications.length > 1 && (
-        <NotificationHeadsUpAggregate
-          key={currentHeadsUpNotification.id}
-          notifications={currentHeadsUp.notifications}
-          onOpen={() => {
-            setHeadsUpQueue((current) => current.slice(1))
-            setAggregateFocusIds(new Set(currentHeadsUp.notifications.map((item) => item.id)))
-            setFilter('unread')
-            changeOpen(true)
-          }}
-          onDismiss={() => setHeadsUpQueue((current) => current.slice(1))}
-        />
-      )}
-      {!currentHeadsUp && headsUpOverflow > 0 && (
-        <NotificationHeadsUpSummary
-          count={headsUpOverflow}
-          onOpen={() => {
-            setHeadsUpOverflow(0)
-            changeOpen(true)
-          }}
-          onDismiss={() => setHeadsUpOverflow(0)}
-        />
-      )}
-
-      <Dialog.Root open={open} onOpenChange={changeOpen}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="notification-drawer-overlay" />
-          <Dialog.Content className="notification-drawer" aria-describedby={undefined}>
-            <header className="notification-drawer-header">
-              <div>
-                <Dialog.Title>通知</Dialog.Title>
-                <span>{unreadCount} 条未读</span>
-              </div>
-              <Dialog.Close asChild>
-                <button className="dialog-close" type="button" aria-label="关闭通知中心">×</button>
-              </Dialog.Close>
-            </header>
-            <div className="notification-drawer-actions">
-              <span className="sr-only">当前序号 {throughSequence}</span>
-              <button type="button" onClick={() => void markAllRead()} disabled={unreadCount === 0}>
-                全部已读
-              </button>
-              <span aria-hidden="true">·</span>
-              <button type="button" onClick={() => void clearRead()}>清除已读</button>
-            </div>
-            <div className="notification-filter" role="group" aria-label="通知筛选">
-              <button
-                type="button"
-                aria-pressed={filter === 'all'}
-                onClick={() => setFilter('all')}
-              >全部</button>
-              <button
-                type="button"
-                aria-pressed={filter === 'unread'}
-                onClick={() => setFilter('unread')}
-              >未读</button>
-            </div>
-            <div className="notification-list" aria-live="polite">
-              {state === 'loading' && items.length === 0 && (
-                <p className="notification-list-state">正在读取通知…</p>
-              )}
-              {state === 'error' && items.length === 0 && (
-                <div className="notification-list-state" role="alert">
-                  <strong>通知暂时无法读取</strong>
-                  <span>{error}</span>
-                  <button className="quiet-button compact" type="button" onClick={() => void loadInbox(filter, true)}>
-                    重试
-                  </button>
+        <Dialog.Root open={open} onOpenChange={changeOpen}>
+          <Dialog.Portal>
+            <Dialog.Overlay className="notification-drawer-overlay" />
+            <Dialog.Content className="notification-drawer" aria-describedby={undefined}>
+              <header className="notification-drawer-header">
+                <div>
+                  <Dialog.Title>通知</Dialog.Title>
+                  <span>{unreadCount} 项未读</span>
                 </div>
-              )}
-              {state === 'ready' && items.length === 0 && (
-                <p className="notification-list-state">
-                  {filter === 'unread' ? '没有未读通知' : '还没有通知'}
-                </p>
-              )}
-              {items.map((notification) => (
-                <NotificationRow
-                  key={notification.id}
-                  notification={notification}
-                  highlighted={aggregateFocusIds.has(notification.id)}
-                  disabled={openingNotificationId !== null}
-                  opening={openingNotificationId === notification.id}
-                  onOpen={() => void openNotification(notification)}
-                  onClear={() => void clearNotification(notification.id)}
-                />
-              ))}
-              {navigationError && (
-                <p className="notification-page-error" role="alert">{navigationError}</p>
-              )}
-              {nextCursor && (
+                <Dialog.Close asChild>
+                  <button className="dialog-close" type="button" aria-label="关闭通知中心">
+                    <CloseIcon />
+                  </button>
+                </Dialog.Close>
+              </header>
+              <div className="notification-drawer-actions">
+                <span className="sr-only">当前变更序号 {throughChangeSequence}</span>
                 <button
-                  className="notification-load-more"
                   type="button"
-                  onClick={() => void loadMore()}
-                  disabled={loadingMore}
-                >{loadingMore ? '加载中…' : '加载更多'}</button>
-              )}
-              {error && items.length > 0 && <p className="notification-page-error" role="alert">{error}</p>}
-            </div>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
-    </>
-  )
-})
+                  onClick={() => void markAllRead()}
+                  disabled={unreadCount === 0 || globalBusy}
+                >{globalBusy ? '处理中…' : '全部已读'}</button>
+              </div>
+              <div className="notification-filter" role="group" aria-label="通知筛选">
+                <button
+                  type="button"
+                  aria-pressed={filter === 'all'}
+                  onClick={() => setFilter('all')}
+                >全部</button>
+                <button
+                  type="button"
+                  aria-pressed={filter === 'unread'}
+                  onClick={() => setFilter('unread')}
+                >未读</button>
+              </div>
+              <div className="notification-list" aria-live="polite">
+                {state === 'loading' && items.length === 0 && (
+                  <p className="notification-list-state">正在读取通知…</p>
+                )}
+                {state === 'error' && items.length === 0 && (
+                  <div className="notification-list-state" role="alert">
+                    <strong>通知暂时无法读取</strong>
+                    <span>{error}</span>
+                    <button
+                      className="quiet-button compact"
+                      type="button"
+                      onClick={() => void loadInbox(filter, true)}
+                    >重试</button>
+                  </div>
+                )}
+                {state === 'ready' && items.length === 0 && (
+                  <p className="notification-list-state">
+                    {filter === 'unread' ? '没有未读事项' : '还没有需要你关注的事项'}
+                  </p>
+                )}
+                {items.map((episode) => (
+                  <NotificationRow
+                    key={episode.id}
+                    episode={episode}
+                    disabled={busyEpisodeId !== null || globalBusy}
+                    busy={busyEpisodeId === episode.id}
+                    onAction={(action) => void openAction(episode, action)}
+                    onClear={() => void clearEpisode(episode)}
+                  />
+                ))}
+                {navigationError && (
+                  <p className="notification-page-error" role="alert">{navigationError}</p>
+                )}
+                {nextCursor && (
+                  <button
+                    className="notification-load-more"
+                    type="button"
+                    onClick={() => void loadMore()}
+                    disabled={loadingMore}
+                  >{loadingMore ? '加载中…' : '加载更多'}</button>
+                )}
+                {error && items.length > 0 && (
+                  <p className="notification-page-error" role="alert">{error}</p>
+                )}
+              </div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
+      </>
+    )
+  }
+)
 
 function NotificationRow({
-  notification,
-  highlighted,
+  episode,
   disabled,
-  opening,
-  onOpen,
+  busy,
+  onAction,
   onClear
 }: {
-  notification: InAppNotificationView
-  highlighted: boolean
+  episode: NotificationEpisodeView
   disabled: boolean
-  opening: boolean
-  onOpen(): void
+  busy: boolean
+  onAction(action: NotificationActionView): void
   onClear(): void
 }): React.JSX.Element {
-  const presentation = notificationPresentation(notification)
+  const presentation = notificationPresentation(episode)
   const absoluteTime = new Intl.DateTimeFormat(undefined, {
     dateStyle: 'medium',
     timeStyle: 'medium'
-  }).format(new Date(notification.createdAt))
+  }).format(new Date(episode.updatedAt))
   return (
     <article
-      className={`notification-row ${notification.readAt === null ? 'unread' : ''}${highlighted ? ' highlighted' : ''}`}
-      data-notification-id={notification.id}
+      className={`notification-row${episode.unread ? ' unread' : ''}`}
+      data-notification-id={episode.id}
     >
-      <button
-        className="notification-row-open"
-        type="button"
-        disabled={disabled}
-        aria-busy={opening ? 'true' : undefined}
-        onClick={onOpen}
-      >
+      <div className="notification-row-main">
         <span className="notification-unread-mark" aria-hidden="true" />
-        <span className="notification-row-copy">
-          <strong>{presentation.label}</strong>
+        <div className="notification-row-copy">
+          <div className="notification-row-title">
+            <strong>{presentation.label}</strong>
+            <time dateTime={episode.updatedAt} title={absoluteTime} aria-label={absoluteTime}>
+              {relativeTime(episode.updatedAt)}
+            </time>
+          </div>
           <span>{presentation.message}</span>
-          <small>
-            <span>{notification.camp.title}</span>
-          </small>
-        </span>
-        <time dateTime={notification.createdAt} title={absoluteTime} aria-label={absoluteTime}>
-          {relativeTime(notification.createdAt)}
-        </time>
-        {notification.readAt === null && <span className="sr-only">未读</span>}
-      </button>
+          {episode.unacknowledgedMentionCount > 1 && (
+            <em>另有 {episode.unacknowledgedMentionCount - 1} 条提到你</em>
+          )}
+          <small>{episode.camp.title}</small>
+          <div className="notification-row-actions">
+            <button
+              className="notification-primary-action"
+              type="button"
+              disabled={disabled || !episode.primaryAction.available}
+              aria-busy={busy ? 'true' : undefined}
+              onClick={() => onAction(episode.primaryAction)}
+            >{busy ? '正在打开…' : actionLabel(episode.primaryAction)}</button>
+            {episode.secondaryActions.map((action) => (
+              <button
+                key={action.actionId}
+                type="button"
+                disabled={disabled || !action.available}
+                onClick={() => onAction(action)}
+              >{actionLabel(action)}</button>
+            ))}
+          </div>
+          {!episode.primaryAction.available && (
+            <span className="notification-source-unavailable">主要来源不可用，可选择其他动作。</span>
+          )}
+        </div>
+      </div>
       <button
         className="notification-row-clear"
         type="button"
         disabled={disabled}
-        aria-label={`清除“${presentation.label}”通知`}
+        aria-label={`清除“${presentation.label}”事项`}
         onClick={onClear}
-      >×</button>
+      ><CloseIcon /></button>
+      {!episode.unread && <span className="sr-only">已读</span>}
     </article>
   )
 }
 
-function NotificationHeadsUpAggregate({
-  notifications,
-  onOpen,
-  onDismiss
-}: {
-  notifications: readonly InAppNotificationView[]
-  onOpen(): void
-  onDismiss(): void
-}): React.JSX.Element {
-  const [paused, setPaused] = useState(false)
-  const onDismissRef = useRef(onDismiss)
-  const first = notifications[0]
-  useEffect(() => {
-    onDismissRef.current = onDismiss
-  }, [onDismiss])
-  useEffect(() => {
-    if (paused) return undefined
-    const timer = window.setTimeout(() => onDismissRef.current(), 8_000)
-    return () => window.clearTimeout(timer)
-  }, [paused])
-  return (
-    <aside
-      className="notification-heads-up notification-heads-up-aggregate"
-      aria-live="polite"
-      onMouseEnter={() => setPaused(true)}
-      onMouseLeave={() => setPaused(false)}
-      onFocus={() => setPaused(true)}
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) setPaused(false)
-      }}
-    >
-      <button className="notification-heads-up-open" type="button" onClick={onOpen}>
-        <strong>消息提及</strong>
-        <span>本 Camp 还有 {notifications.length - 1} 条消息提及你</span>
-        <small>{first?.camp.title}</small>
-      </button>
-      <button className="notification-heads-up-close" type="button" aria-label="关闭本次提醒" onClick={onDismiss}>×</button>
-    </aside>
-  )
-}
-
 function NotificationHeadsUp({
-  notification,
+  entry,
   onOpen,
   onDismiss
 }: {
-  notification: InAppNotificationView
+  entry: NotificationHeadsUpEntry
   onOpen(): void
   onDismiss(): void
 }): React.JSX.Element {
   const [paused, setPaused] = useState(false)
   const onDismissRef = useRef(onDismiss)
-  const presentation = notificationPresentation(notification)
+  const presentation = notificationPresentation(entry.episode)
   useEffect(() => {
     onDismissRef.current = onDismiss
   }, [onDismiss])
   useEffect(() => {
-    if (paused) return undefined
+    if (paused || document.visibilityState !== 'visible') return undefined
     const timer = window.setTimeout(() => onDismissRef.current(), 8_000)
     return () => window.clearTimeout(timer)
-  }, [paused])
+  }, [paused, entry.changeSequence])
   return (
     <aside
       className="notification-heads-up"
@@ -833,12 +726,27 @@ function NotificationHeadsUp({
         if (!event.currentTarget.contains(event.relatedTarget)) setPaused(false)
       }}
     >
-      <button className="notification-heads-up-open" type="button" onClick={onOpen}>
+      <button
+        className="notification-heads-up-open"
+        type="button"
+        disabled={!entry.episode.primaryAction.available}
+        onClick={onOpen}
+      >
         <strong>{presentation.label}</strong>
         <span>{presentation.message}</span>
-        <small>{notification.camp.title}</small>
+        <small>
+          {entry.episode.camp.title}
+          {entry.episode.unacknowledgedMentionCount > 1
+            ? ` · 另有 ${entry.episode.unacknowledgedMentionCount - 1} 条提到你`
+            : ''}
+        </small>
       </button>
-      <button className="notification-heads-up-close" type="button" aria-label="关闭本次提醒" onClick={onDismiss}>×</button>
+      <button
+        className="notification-heads-up-close"
+        type="button"
+        aria-label="关闭本次提醒"
+        onClick={onDismiss}
+      ><CloseIcon /></button>
     </aside>
   )
 }
@@ -858,7 +766,7 @@ function NotificationHeadsUpSummary({
     onDismissRef.current = onDismiss
   }, [onDismiss])
   useEffect(() => {
-    if (paused) return undefined
+    if (paused || document.visibilityState !== 'visible') return undefined
     const timer = window.setTimeout(() => onDismissRef.current(), 8_000)
     return () => window.clearTimeout(timer)
   }, [paused])
@@ -874,53 +782,116 @@ function NotificationHeadsUpSummary({
       }}
     >
       <button className="notification-heads-up-open" type="button" onClick={onOpen}>
-        <strong>还有 {count} 条新通知</strong>
+        <strong>还有 {count} 项新提醒</strong>
         <span>打开通知中心查看</span>
       </button>
-      <button className="notification-heads-up-close" type="button" aria-label="关闭本次提醒" onClick={onDismiss}>×</button>
+      <button
+        className="notification-heads-up-close"
+        type="button"
+        aria-label="关闭本次提醒"
+        onClick={onDismiss}
+      ><CloseIcon /></button>
     </aside>
   )
 }
 
 export function notificationPresentation(notification: Pick<
-  InAppNotificationView,
-  'kind' | 'attentionState' | 'sourceAvailable' | 'messageSummary'
+  NotificationEpisodeView,
+  'primarySemantic' | 'resolved' | 'satisfied' | 'mention' | 'pendingApprovalCount'
 >): { label: string; message: string } {
-  if (notification.kind === 'runtime_permission_attention') {
-    return notification.attentionState === 'resolved'
-      ? { label: '待审批 · 已处理', message: '相关操作已处理' }
-      : { label: '待审批', message: '有操作等待你确认' }
+  switch (notification.primarySemantic) {
+    case 'approval_pending':
+      return notification.resolved
+        ? { label: '待审批 · 已处理', message: '相关操作已经处理' }
+        : {
+          label: '待审批',
+          message: notification.pendingApprovalCount > 1
+            ? `${notification.pendingApprovalCount} 个操作等待你确认`
+            : '有操作等待你确认'
+        }
+    case 'turn_failed':
+      return { label: '执行失败', message: '本轮协作失败，请返回查看' }
+    case 'turn_incomplete':
+      return { label: '执行未完成', message: '本轮协作未能证明完成，请返回查看' }
+    case 'turn_completed':
+      return notification.satisfied
+        ? { label: '本轮完成', message: '你已经开始下一步协作' }
+        : { label: '等待你的下一步', message: '本轮协作已经完成' }
+    case 'user_mention':
+      return {
+        label: '提到你',
+        message: notification.mention?.available
+          ? notification.mention.summary ?? '有消息明确提到你'
+          : '原消息来源不可用'
+      }
   }
-  if (notification.kind === 'camp_turn_completed') {
-    return { label: '执行完成', message: '一次协作已经完成' }
-  }
-  if (notification.kind === 'camp_message_user_mention') {
-    return {
-      label: '消息提及',
-      message: notification.sourceAvailable
-        ? notification.messageSummary ?? '有消息提及你'
-        : '来源不可用'
-    }
-  }
-  return { label: '执行未完成', message: '一次协作未完成，请返回查看' }
 }
 
 export function notificationBadgeLabel(unreadCount: number): string {
   return unreadCount > 99 ? '99+' : String(Math.max(0, unreadCount))
 }
 
-function shouldShowHeadsUp(
-  notification: InAppNotificationView,
-  preference: InAppNotificationPreference
+export function episodeHasActiveHeadsUpReason(
+  episode: NotificationEpisodeView,
+  semantic: NotificationSemantic
 ): boolean {
-  if (!preference.headsUpEnabled || notification.readAt !== null) return false
-  if (notification.kind === 'runtime_permission_attention') {
-    return preference.approvalHeadsUpEnabled && notification.attentionState === 'pending'
+  const reason = episode.reasons.find((candidate) => candidate.semantic === semantic)
+  if (!reason || reason.unacknowledgedCount === 0) return false
+  if (semantic === 'approval_pending') return reason.state === 'pending'
+  if (semantic === 'turn_completed') return reason.state === 'unsatisfied'
+  return reason.state === 'unacknowledged'
+}
+
+function actionForSemantic(
+  episode: NotificationEpisodeView,
+  semantic: NotificationSemantic
+): NotificationActionView | null {
+  const actions = [episode.primaryAction, ...episode.secondaryActions]
+  if (semantic === 'user_mention') {
+    return actions.find((action) => action.kind === 'open_camp_message') ?? null
   }
-  if (notification.kind === 'camp_message_user_mention') {
-    return preference.userMentionHeadsUpEnabled
+  if (semantic === 'approval_pending') {
+    return actions.find((action) => action.kind === 'open_approval') ?? null
   }
-  return preference.executionHeadsUpEnabled
+  return actions.find((action) => action.kind === 'open_camp_turn') ?? null
+}
+
+function actionLabel(action: NotificationActionView): string {
+  if (!action.available) return '来源不可用'
+  switch (action.kind) {
+    case 'open_approval': return '处理审批'
+    case 'open_camp_message': return '查看消息'
+    case 'open_camp_turn': return '查看本轮'
+    case 'open_camp': return '打开 Camp'
+  }
+}
+
+function shouldShowHeadsUp(
+  semantic: NotificationSemantic,
+  preference: NotificationPreference
+): boolean {
+  if (!preference.headsUpEnabled) return false
+  if (semantic === 'approval_pending') return preference.approvalHeadsUpEnabled
+  if (semantic === 'user_mention') return preference.userMentionHeadsUpEnabled
+  if (semantic === 'turn_completed') return preference.turnCompletedHeadsUpEnabled
+  return preference.turnIncompleteHeadsUpEnabled
+}
+
+function validPreference(value: NotificationPreference): boolean {
+  return typeof value.headsUpEnabled === 'boolean'
+    && typeof value.approvalHeadsUpEnabled === 'boolean'
+    && typeof value.userMentionHeadsUpEnabled === 'boolean'
+    && typeof value.turnCompletedHeadsUpEnabled === 'boolean'
+    && typeof value.turnIncompleteHeadsUpEnabled === 'boolean'
+    && typeof value.version === 'number'
+    && typeof value.updatedAt === 'string'
+}
+
+function commandFailure(result: StoredCommandResult): string {
+  const message = result.payload && typeof result.payload === 'object'
+    ? (result.payload as { message?: unknown }).message
+    : null
+  return typeof message === 'string' ? message : result.code
 }
 
 function relativeTime(value: string, now = Date.now()): string {
@@ -932,8 +903,15 @@ function relativeTime(value: string, now = Date.now()): string {
   if (minutes < 60) return `${minutes} 分钟前`
   const hours = Math.floor(minutes / 60)
   if (hours < 24) return `${hours} 小时前`
-  const days = Math.floor(hours / 24)
-  return `${days} 天前`
+  return `${Math.floor(hours / 24)} 天前`
+}
+
+function CloseIcon(): React.JSX.Element {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="m4 4 8 8M12 4l-8 8" />
+    </svg>
+  )
 }
 
 function afterNextPaint(): Promise<void> {

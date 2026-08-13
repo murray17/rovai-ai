@@ -18,16 +18,16 @@ const firstPort = Number(process.env.ROVAI_NOTIFICATION_ACCEPT_DEBUG_PORT ?? 947
 await mkdir(dataDir, { recursive: true })
 await mkdir(workspaceDir, { recursive: true })
 await mkdir(outputDir, { recursive: true })
-await writeFile(join(workspaceDir, 'README.md'), '# Notification UI acceptance\n')
+await writeFile(join(workspaceDir, 'README.md'), '# Notification Episode UI acceptance\n')
 
 const campId = await createFixtureCamp()
-await insertNotification('notification-approval', 'runtime_permission_attention', '-3 minutes')
-await insertNotification('notification-completed', 'camp_turn_completed', '-2 minutes')
-await insertNotification('notification-incomplete', 'camp_turn_incomplete', '-1 minute')
+await insertApprovalEpisode('episode-approval-initial', '-3 minutes')
+await insertTerminalTurn('turn-completed-initial', 'completed', '-2 minutes')
+await insertTerminalTurn('turn-incomplete-initial', 'cancelled', '-1 minute')
 await insertMessageMention(
   'message-mention-initial',
-  'notification-mention-initial',
-  '请确认 v0.65 的精确消息定位。',
+  '请确认 v0.71 的精确消息定位。',
+  null,
   '-30 seconds'
 )
 
@@ -38,7 +38,7 @@ try {
   await setTheme(dayApp.cdp, 'day')
   await assertNotificationBadge(dayApp.cdp, 4)
   assert(!(await evaluate(dayApp.cdp, `Boolean(document.querySelector('.notification-heads-up'))`)),
-    'Existing notifications were replayed as a heads-up after launch')
+    'Existing Episode history was replayed as a heads-up after launch')
 
   await openNotificationCenter(dayApp.cdp)
   await assertNotificationDrawer(dayApp.cdp, 4, 'day desktop')
@@ -49,33 +49,51 @@ try {
     `document.activeElement === document.querySelector('.notification-trigger')`),
   'Closing the notification center did not restore focus to the bell')
 
+  const initialInbox = await request(dayApp.cdp, 'notifications.inbox', {
+    filter: 'all',
+    limit: 50
+  })
+  const initialMention = initialInbox.items.find(
+    (item) => item.mention?.messageId === 'message-mention-initial'
+  )
+  assert(initialMention, `Initial Mention Episode was unavailable: ${JSON.stringify(initialInbox)}`)
   await openNotificationCenter(dayApp.cdp)
-  await clickFirstButton(dayApp.cdp, '.notification-row-open')
+  await clickEpisodeAction(dayApp.cdp, initialMention.id, '查看消息')
   await waitForExpression(dayApp.cdp, `!document.querySelector('.notification-drawer')`)
   await waitForExpression(dayApp.cdp, `
     document.querySelector('[data-message-id="message-mention-initial"]')
       ?.classList.contains('notification-focus-target') === true
   `, 15_000)
-  await waitForExpression(dayApp.cdp, `
-    document.querySelector('.notification-trigger')?.getAttribute('aria-label')
-      !== '通知，4 条未读'
-  `, 5_000)
-  const clickedInbox = await request(dayApp.cdp, 'notifications.inbox', { filter: 'all', limit: 50 })
-  const clickedNotification = clickedInbox.items.find((item) => item.id === 'notification-mention-initial')
-  assert(clickedNotification?.readAt,
-    `Clicking one notification did not persist its read state: ${JSON.stringify(clickedInbox)}`)
+  await assertNotificationBadge(dayApp.cdp, 3)
+  const clickedInbox = await request(dayApp.cdp, 'notifications.inbox', {
+    filter: 'all',
+    limit: 50
+  })
+  const clickedEpisode = clickedInbox.items.find((item) => item.id === initialMention.id)
+  assert(clickedEpisode?.unread === false
+      && clickedEpisode.unacknowledgedMentionCount === 0
+      && clickedEpisode.reasons.some(
+        (reason) => reason.semantic === 'user_mention' && reason.state === 'acknowledged'
+      ),
+  `Exact Mention acknowledgement did not persist: ${JSON.stringify(clickedInbox)}`)
   await openNotificationCenter(dayApp.cdp)
-  await assertNotificationDrawer(dayApp.cdp, 4, 'day desktop after notification click', null)
+  await assertNotificationDrawer(dayApp.cdp, 4, 'day desktop after exact acknowledgement', 3)
   assert(!(await evaluate(dayApp.cdp,
-    `document.querySelector('.notification-row')?.classList.contains('unread')`)),
-  'The clicked notification returned to its unread presentation after reopening the drawer')
+    `document.querySelector('[data-notification-id="${initialMention.id}"]')
+      ?.classList.contains('unread')`)),
+  'The acknowledged Mention Episode returned to its unread presentation')
   await closeDialogWithEscape(dayApp.cdp)
+
+  const markBoundary = await request(dayApp.cdp, 'notifications.inbox', {
+    filter: 'all',
+    limit: 50
+  })
   const readAllResult = await request(dayApp.cdp, 'notifications.markAllRead', {
     commandId: crypto.randomUUID(),
-    command: {}
+    command: { throughChangeSequence: markBoundary.throughChangeSequence }
   })
   assert(readAllResult.status === 'applied',
-    `Could not normalize the notification fixture after the single-item assertion: ${JSON.stringify(readAllResult)}`)
+    `Could not normalize the Episode fixture: ${JSON.stringify(readAllResult)}`)
   await assertNotificationBadge(dayApp.cdp, 0)
 
   await openNotificationSettings(dayApp.cdp)
@@ -83,11 +101,11 @@ try {
   const settingsCapture = join(outputDir, 'notification-settings-day.png')
   await capture(dayApp.cdp, settingsCapture)
   await setPrimaryHeadsUpPreference(dayApp.cdp, false)
-  await insertNotification('notification-muted', 'camp_turn_completed', 'now')
+  await insertTerminalTurn('turn-completed-muted', 'completed')
   await assertNotificationBadge(dayApp.cdp, 1)
   await wait(3_000)
   assert(!(await evaluate(dayApp.cdp, `Boolean(document.querySelector('.notification-heads-up'))`)),
-    'A notification created while heads-up was disabled still opened a heads-up')
+    'An Episode admitted while heads-up was disabled still opened a heads-up')
   await setPrimaryHeadsUpPreference(dayApp.cdp, true)
 
   await closeApp(dayApp)
@@ -97,91 +115,119 @@ try {
   compactApp = await launchApp(firstPort + 1, 1040, 700, true)
   await setTheme(compactApp.cdp, 'night')
   await assertNotificationBadge(compactApp.cdp, 1)
-  await evaluate(compactApp.cdp, `document.querySelector('.unified-sidebar button[aria-label="队员"]')?.click()`)
+  assert(!(await evaluate(compactApp.cdp, `Boolean(document.querySelector('.notification-heads-up'))`)),
+    'Unread Episode history was replayed as a heads-up after restart')
+  await evaluate(compactApp.cdp,
+    `document.querySelector('.unified-sidebar button[aria-label="队员"]')?.click()`)
   await waitForSelector(compactApp.cdp, '.members-view')
-  const focused = await evaluate(compactApp.cdp, `(() => {
-    const target = document.querySelector('.unified-sidebar button[aria-label="新对话"]')
-    target?.focus()
-    return target?.getAttribute('aria-label') ?? null
-  })()`)
-  assert(focused === '新对话', 'Could not establish the focus target before the heads-up')
+  await focusNewConversation(compactApp.cdp)
 
-  await insertMessageMentionBatch([
-    {
-      messageId: 'message-mention-live-1',
-      notificationId: 'notification-mention-live-1',
-      body: '第一条实时消息提及。'
-    },
-    {
-      messageId: 'message-mention-live-2',
-      notificationId: 'notification-mention-live-2',
-      body: '第二条实时消息提及。'
-    }
-  ])
-  await waitForSelector(compactApp.cdp, '.notification-heads-up-aggregate', 15_000)
-  const aggregateText = await evaluate(compactApp.cdp,
-    `document.querySelector('.notification-heads-up-aggregate')?.textContent ?? ''`)
-  assert(aggregateText.includes('本 Camp 还有 1 条消息提及你'),
-    `Same-Camp message mentions were not aggregated: ${JSON.stringify(aggregateText)}`)
+  await insertRunningTurn('turn-mention-live')
+  await insertMessageMention(
+    'message-mention-live-1',
+    '第一条实时消息提到你。',
+    'turn-mention-live'
+  )
+  await waitForSelector(compactApp.cdp, '.notification-heads-up', 15_000)
+  assert(await evaluate(compactApp.cdp, `(() => {
+    window.__notificationAcceptHeadsUp = document.querySelector('.notification-heads-up')
+    return Boolean(window.__notificationAcceptHeadsUp)
+  })()`), 'Could not retain the live Episode heads-up identity')
+  await wait(75)
+  await insertMessageMention(
+    'message-mention-live-2',
+    '第二条实时消息提到你。',
+    'turn-mention-live'
+  )
+  await waitForExpression(compactApp.cdp, `
+    document.querySelector('.notification-heads-up')?.textContent
+      ?.includes('另有 1 条提到你') === true
+  `, 15_000)
+  assert(await evaluate(compactApp.cdp,
+    `window.__notificationAcceptHeadsUp === document.querySelector('.notification-heads-up')`),
+  'A new Occurrence remounted the existing Episode heads-up instead of updating it in place')
   assert(await evaluate(compactApp.cdp,
     `document.activeElement?.getAttribute('aria-label') === '新对话'`),
-  'The aggregated heads-up stole keyboard focus')
-  await evaluate(compactApp.cdp,
-    `document.querySelector('.notification-heads-up-aggregate .notification-heads-up-open')?.click()`)
-  await waitForSelector(compactApp.cdp, '.notification-drawer')
-  await waitForExpression(compactApp.cdp,
-    `document.querySelectorAll('.notification-row.highlighted').length === 2`)
+  'The updated Episode heads-up stole keyboard focus')
+  await assertNotificationBadge(compactApp.cdp, 2)
   const aggregateInbox = await request(compactApp.cdp, 'notifications.inbox', {
     filter: 'unread',
     limit: 50
   })
-  assert([
-    'notification-mention-live-1',
-    'notification-mention-live-2'
-  ].every((id) => aggregateInbox.items.find((item) => item.id === id)?.readAt === null),
-  `Opening an aggregated heads-up bulk-marked its rows read: ${JSON.stringify(aggregateInbox)}`)
-  await closeDialogWithEscape(compactApp.cdp)
-  const liveFocusBaseline = await evaluate(compactApp.cdp, `(() => {
-    const target = document.querySelector('.unified-sidebar button[aria-label="新对话"]')
-    target?.focus()
-    return target?.getAttribute('aria-label') ?? null
-  })()`)
-  assert(liveFocusBaseline === '新对话',
-    'Could not re-establish the focus target after closing the aggregated heads-up drawer')
+  const liveMentionEpisodes = aggregateInbox.items.filter(
+    (item) => item.campTurnId === 'turn-mention-live'
+  )
+  assert(liveMentionEpisodes.length === 1
+      && liveMentionEpisodes[0].mentionCount === 2
+      && liveMentionEpisodes[0].unacknowledgedMentionCount === 2,
+  `Same-turn Mentions did not materialize as one partially readable Episode: ${JSON.stringify(aggregateInbox)}`)
+  await clickFirstButton(compactApp.cdp, '.notification-heads-up-close')
+  await waitForExpression(compactApp.cdp, `!document.querySelector('.notification-heads-up')`)
+  await focusNewConversation(compactApp.cdp)
 
-  await insertNotification('notification-live', 'camp_turn_completed', 'now')
+  await insertTerminalTurn('turn-completed-live', 'completed')
   await waitForSelector(compactApp.cdp, '.notification-heads-up', 15_000)
   assert(await evaluate(compactApp.cdp,
     `document.activeElement?.getAttribute('aria-label') === '新对话'`),
-  'The heads-up stole keyboard focus')
+  'The completion heads-up stole keyboard focus')
   const headsUpText = await evaluate(compactApp.cdp,
     `document.querySelector('.notification-heads-up')?.textContent ?? ''`)
-  assert(headsUpText.includes('执行完成')
-      && headsUpText.includes('一次协作已经完成')
+  assert(headsUpText.includes('等待你的下一步')
+      && headsUpText.includes('本轮协作已经完成')
       && !headsUpText.includes('README.md'),
   `The heads-up did not use fixed data-minimized copy: ${JSON.stringify(headsUpText)}`)
-  await assertNotificationBadge(compactApp.cdp, 4)
+  await assertNotificationBadge(compactApp.cdp, 3)
   const headsUpCapture = join(outputDir, 'notification-heads-up-compact-reduced-motion.png')
   await capture(compactApp.cdp, headsUpCapture)
 
-  await clickButton(compactApp.cdp, '.notification-heads-up-close', '×')
-  await waitForExpression(compactApp.cdp,
-    `!document.querySelector('.notification-heads-up')`)
+  await clickFirstButton(compactApp.cdp, '.notification-heads-up-close')
+  await waitForExpression(compactApp.cdp, `!document.querySelector('.notification-heads-up')`)
   await openNotificationCenter(compactApp.cdp)
   await selectNotificationFilter(compactApp.cdp, '全部')
   await waitForExpression(compactApp.cdp,
-    `document.querySelectorAll('.notification-row').length === 8`)
-  await assertNotificationDrawer(compactApp.cdp, 8, 'compact reduced-motion', 4)
+    `document.querySelectorAll('.notification-row').length === 7`)
+  await assertNotificationDrawer(compactApp.cdp, 7, 'compact reduced-motion', 3)
   await clickButton(compactApp.cdp, '.notification-drawer-actions button', '全部已读')
   await waitForExpression(compactApp.cdp,
-    `document.querySelector('.notification-drawer-header span')?.textContent === '0 条未读'`)
+    `document.querySelector('.notification-drawer-header span')?.textContent === '0 项未读'`)
   await assertNotificationBadge(compactApp.cdp, 0)
-  await clickButton(compactApp.cdp, '.notification-drawer-actions button', '清除已读')
+
+  await emulateDesktopZoom(compactApp.cdp, 1040, 700, 2)
+  await assertNotificationDrawer(compactApp.cdp, 7, '200% zoom', 0)
+  await assertZoomedNotificationFunctionality(compactApp.cdp)
+  await selectNotificationFilter(compactApp.cdp, '未读')
   await waitForExpression(compactApp.cdp,
     `document.querySelectorAll('.notification-row').length === 0`)
-  const inbox = await request(compactApp.cdp, 'notifications.inbox', { filter: 'all', limit: 50 })
-  assert(inbox.unreadCount === 0 && inbox.items.length === 0,
-    `Packaged notification commands did not persist: ${JSON.stringify(inbox)}`)
+  await selectNotificationFilter(compactApp.cdp, '全部')
+  await waitForExpression(compactApp.cdp,
+    `document.querySelectorAll('.notification-row').length === 7`)
+  const zoomCapture = join(outputDir, 'notification-center-night-200-percent.png')
+  await capture(compactApp.cdp, zoomCapture)
+  await emulateDesktopZoom(compactApp.cdp, 1040, 700, 1)
+
+  const visibleEpisodes = await request(compactApp.cdp, 'notifications.inbox', {
+    filter: 'all',
+    limit: 50
+  })
+  for (const episode of visibleEpisodes.items) {
+    const result = await request(compactApp.cdp, 'notifications.clear', {
+      commandId: crypto.randomUUID(),
+      command: {
+        episodeId: episode.id,
+        throughAttentionRevision: episode.attentionRevision
+      }
+    })
+    assert(result.status === 'applied',
+      `Could not clear Episode ${episode.id}: ${JSON.stringify(result)}`)
+  }
+  await waitForExpression(compactApp.cdp,
+    `document.querySelectorAll('.notification-row').length === 0`, 15_000)
+  const emptyInbox = await request(compactApp.cdp, 'notifications.inbox', {
+    filter: 'all',
+    limit: 50
+  })
+  assert(emptyInbox.unreadCount === 0 && emptyInbox.items.length === 0,
+    `Packaged Episode commands did not persist: ${JSON.stringify(emptyInbox)}`)
 
   console.log(JSON.stringify({
     ok: true,
@@ -190,25 +236,27 @@ try {
     outputDir,
     verified: {
       packagedRendererToCoreIpc: true,
-      existingNotificationsDoNotReplayHeadsUp: true,
-      unreadBadgeAndAccessibleName: true,
+      sourceFactsMaterializeEpisodes: true,
+      existingEpisodesDoNotReplayHeadsUp: true,
+      unreadEpisodeBadgeAndAccessibleName: true,
       persistentDrawerAndFixedCopy: true,
-      singleNotificationReadPersistsWithoutSnapshotRollback: true,
-      allUnreadAndClearReadCommands: true,
-      notificationPreferences: true,
+      exactMentionAcknowledgementAndNavigation: true,
+      boundedMarkAllAndRevisionBoundedClear: true,
+      fiveNotificationPreferences: true,
       headsUpPreferenceTakesEffectWithoutReplay: true,
       restartPersistence: true,
       liveHeadsUpWithoutFocusTheft: true,
-      sameCampMentionHeadsUpAggregationWithoutBulkRead: true,
-      exactMessageNavigationAndFocus: true,
+      sameTurnMentionsUpdateOneHeadsUpInPlace: true,
       escapeRestoresBellFocus: true,
       dayDesktopAndNightCompactReducedMotionLayouts: true,
+      twoHundredPercentZoomKeepsDrawerFunctional: true,
       horizontalOverflow: false
     },
     captures: {
       drawer: drawerCapture,
       settings: settingsCapture,
-      compactHeadsUp: headsUpCapture
+      compactHeadsUp: headsUpCapture,
+      zoomedDrawer: zoomCapture
     }
   }, null, 2))
 } finally {
@@ -224,75 +272,132 @@ async function createFixtureCamp() {
     const workspace = await core.request('workspaces.inspect', { path: workspaceDir })
     const created = await core.request('camps.create', {
       commandId: crypto.randomUUID(),
-      name: 'v0.65 通知验收 Camp',
+      name: 'v0.71 通知 Episode 验收 Camp',
       workspace: { projectPath: workspace.projectPath },
       memberAgentIds: preflight.presentMembers.map((member) => member.agentId),
       defaultLeadAgentId: preflight.initialLeadAgentId,
       collaborationMode: 'peer'
     })
     assert(created.status === 'applied' && created.payload?.campId,
-      `Could not create the notification fixture Camp: ${JSON.stringify(created)}`)
+      `Could not create the Notification Episode fixture Camp: ${JSON.stringify(created)}`)
     return created.payload.campId
   } finally {
     await core.stop()
   }
 }
 
-async function insertNotification(id, kind, modifier) {
-  const timestamp = modifier === 'now'
-    ? "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
-    : `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ${sqlLiteral(modifier)})`
+async function insertApprovalEpisode(episodeId, modifier = 'now') {
+  const timestamp = sqliteTimestamp(modifier)
   await runProcess('/usr/bin/sqlite3', [databasePath, `
-    INSERT INTO in_app_notification(
-      id, recipient_user_id, kind, camp_id, camp_turn_id,
-      resolved_at, read_at, cleared_at, version, created_at, updated_at
+    PRAGMA foreign_keys = ON;
+    BEGIN IMMEDIATE;
+    UPDATE notification_change_clock
+    SET current_sequence = current_sequence + 1
+    WHERE singleton = 1;
+    INSERT INTO notification_episode(
+      id, aggregation_key, recipient_user_id, kind, camp_id,
+      camp_turn_id, source_message_id, approval_generation,
+      version, attention_revision, created_change_sequence,
+      last_change_sequence, sort_at, created_at, updated_at
     ) VALUES (
-      ${sqlLiteral(id)}, 'local_user', ${sqlLiteral(kind)}, ${sqlLiteral(campId)}, NULL,
-      NULL, NULL, NULL, 1, ${timestamp}, ${timestamp}
+      ${sqlLiteral(episodeId)},
+      ${sqlLiteral(`approval:local_user:${campId}:1`)},
+      'local_user', 'approval', ${sqlLiteral(campId)},
+      NULL, NULL, 1, 0, 0,
+      (SELECT current_sequence FROM notification_change_clock WHERE singleton = 1),
+      (SELECT current_sequence FROM notification_change_clock WHERE singleton = 1),
+      ${timestamp}, ${timestamp}, ${timestamp}
+    );
+    INSERT INTO notification_occurrence(
+      id, episode_id, recipient_user_id, semantic, source_type,
+      source_id, source_revision, camp_id, camp_turn_id,
+      source_message_id, approval_id, admitted_episode_version,
+      admitted_attention_revision, admitted_change_sequence, occurred_at
+    ) VALUES (
+      'occurrence-approval-initial', ${sqlLiteral(episodeId)}, 'local_user',
+      'approval_pending', 'approval', 'approval-fixture', 1,
+      ${sqlLiteral(campId)}, NULL, NULL, 'approval-fixture', 1, 1,
+      (SELECT current_sequence FROM notification_change_clock WHERE singleton = 1),
+      ${timestamp}
+    );
+    COMMIT;
+  `])
+}
+
+async function insertTerminalTurn(turnId, status, modifier = 'now') {
+  assert(['completed', 'failed', 'cancelled'].includes(status),
+    `Unsupported terminal fixture status: ${status}`)
+  const timestamp = sqliteTimestamp(modifier)
+  await runProcess('/usr/bin/sqlite3', [databasePath, `
+    PRAGMA foreign_keys = ON;
+    INSERT INTO camp_turn(
+      id, camp_id, trigger_type, trigger_id, status,
+      execution_budget_schema_version, execution_budget_accepted_at,
+      execution_budget_deadline_at, execution_budget_elapsed_seconds,
+      execution_budget_max_agent_run_responsibilities,
+      execution_budget_max_accepted_a2a,
+      execution_budget_root_agent_run_responsibilities,
+      version, created_at, updated_at, ended_at
+    ) VALUES (
+      ${sqlLiteral(turnId)}, ${sqlLiteral(campId)}, 'system_event',
+      ${sqlLiteral(`notification-accept:${turnId}`)}, ${sqlLiteral(status)},
+      1, ${timestamp}, datetime(${timestamp}, '+1 day'), 86400, 32, 16, 1,
+      1, ${timestamp}, ${timestamp}, ${timestamp}
     );
   `])
 }
 
-async function insertMessageMention(messageId, notificationId, body, modifier = 'now') {
-  await insertMessageMentionBatch([{ messageId, notificationId, body, modifier }])
+async function insertRunningTurn(turnId) {
+  await runProcess('/usr/bin/sqlite3', [databasePath, `
+    PRAGMA foreign_keys = ON;
+    INSERT INTO camp_turn(
+      id, camp_id, trigger_type, trigger_id, status,
+      execution_budget_schema_version, execution_budget_accepted_at,
+      execution_budget_deadline_at, execution_budget_elapsed_seconds,
+      execution_budget_max_agent_run_responsibilities,
+      execution_budget_max_accepted_a2a,
+      execution_budget_root_agent_run_responsibilities,
+      version, created_at, updated_at, ended_at
+    ) VALUES (
+      ${sqlLiteral(turnId)}, ${sqlLiteral(campId)}, 'system_event',
+      ${sqlLiteral(`notification-accept:${turnId}`)}, 'running',
+      1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+      datetime('now', '+1 day'), 86400, 32, 16, 1,
+      1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+      strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), NULL
+    );
+  `])
 }
 
-async function insertMessageMentionBatch(fixtures) {
-  const statements = fixtures.map(({ messageId, notificationId, body, modifier = 'now' }) => {
-    const timestamp = modifier === 'now'
-      ? "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
-      : `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ${sqlLiteral(modifier)})`
-    const structuredContent = JSON.stringify([
-      { kind: 'current_user_mention', userId: 'local_user' },
-      { kind: 'text', text: body }
-    ])
-    return `
-      UPDATE camp
-      SET last_message_sequence = last_message_sequence + 1,
-          version = version + 1,
-          updated_at = ${timestamp}
-      WHERE id = ${sqlLiteral(campId)};
-      INSERT INTO camp_message(
-        id, camp_id, sequence, author_type, author_id, body,
-        structured_content_json, content_digest, address_mode,
-        addressed_agent_ids_json, version, created_at, updated_at
-      ) SELECT
-        ${sqlLiteral(messageId)}, id, last_message_sequence, 'agent', 'agent_1',
-        ${sqlLiteral(`@你 ${body}`)}, ${sqlLiteral(structuredContent)},
-        ${sqlLiteral(`sha256:notification-accept:${messageId}`)}, 'default', '[]',
-        1, ${timestamp}, ${timestamp}
-      FROM camp WHERE id = ${sqlLiteral(campId)};
-      INSERT INTO in_app_notification(
-        id, recipient_user_id, kind, camp_id, source_message_id,
-        resolved_at, read_at, cleared_at, version, created_at, updated_at
-      ) VALUES (
-        ${sqlLiteral(notificationId)}, 'local_user', 'camp_message_user_mention',
-        ${sqlLiteral(campId)}, ${sqlLiteral(messageId)},
-        NULL, NULL, NULL, 1, ${timestamp}, ${timestamp}
-      );
-    `
-  }).join('\n')
-  await runProcess('/usr/bin/sqlite3', [databasePath, `BEGIN IMMEDIATE;\n${statements}\nCOMMIT;`])
+async function insertMessageMention(messageId, body, campTurnId = null, modifier = 'now') {
+  const timestamp = sqliteTimestamp(modifier)
+  const structuredContent = JSON.stringify([
+    { kind: 'current_user_mention', userId: 'local_user' },
+    { kind: 'text', text: body }
+  ])
+  await runProcess('/usr/bin/sqlite3', [databasePath, `
+    PRAGMA foreign_keys = ON;
+    BEGIN IMMEDIATE;
+    UPDATE camp
+    SET last_message_sequence = last_message_sequence + 1,
+        version = version + 1,
+        updated_at = ${timestamp}
+    WHERE id = ${sqlLiteral(campId)};
+    INSERT INTO camp_message(
+      id, camp_id, sequence, author_type, author_id, source_agent_run_id,
+      body, address_mode, addressed_agent_ids_json, reply_to_camp_message_id,
+      camp_turn_id, agent_run_id, tombstoned_at, version,
+      created_at, updated_at, structured_content_json, content_digest
+    ) SELECT
+      ${sqlLiteral(messageId)}, id, last_message_sequence, 'agent',
+      COALESCE(default_lead_agent_id, 'agent-muwa'), NULL,
+      ${sqlLiteral(`@你 ${body}`)}, 'default', '[]', NULL,
+      ${campTurnId ? sqlLiteral(campTurnId) : 'NULL'}, NULL, NULL, 1,
+      ${timestamp}, ${timestamp}, ${sqlLiteral(structuredContent)},
+      ${sqlLiteral(`sha256:notification-accept:${messageId}`)}
+    FROM camp WHERE id = ${sqlLiteral(campId)};
+    COMMIT;
+  `])
 }
 
 async function openNotificationCenter(cdp) {
@@ -333,17 +438,17 @@ async function assertNotificationDrawer(cdp, expectedRows, context, expectedUnre
     closeName: document.querySelector('.notification-drawer .dialog-close')?.getAttribute('aria-label')
   })`)
   assert(state.rows === expectedRows,
-    `${context} notification row count was ${state.rows}, expected ${expectedRows}`)
+    `${context} Episode row count was ${state.rows}, expected ${expectedRows}`)
   if (expectedUnread !== null) {
-    assert(state.title.includes(`${expectedUnread} 条未读`),
-      `${context} notification unread summary was incorrect: ${JSON.stringify(state.title)}`)
+    assert(state.title.includes(`${expectedUnread} 项未读`),
+      `${context} unread Episode summary was incorrect: ${JSON.stringify(state.title)}`)
   }
   assert(state.copy.includes('待审批')
-      && state.copy.includes('执行完成')
+      && state.copy.includes('等待你的下一步')
       && state.copy.includes('执行未完成')
-      && state.copy.includes('消息提及')
+      && state.copy.includes('提到你')
       && !state.copy.includes('README.md'),
-  `${context} notification content was not fixed and data-minimized: ${JSON.stringify(state.copy)}`)
+  `${context} content was not fixed and data-minimized: ${JSON.stringify(state.copy)}`)
   assert(!state.drawerOverflow && !state.documentOverflow,
     `${context} notification center overflowed horizontally: ${JSON.stringify(state)}`)
   assert(state.closeName === '关闭通知中心',
@@ -354,7 +459,7 @@ async function assertNotificationBadge(cdp, expected, timeout = 15_000) {
   await waitForExpression(cdp, `(() => {
     const button = document.querySelector('.notification-trigger')
     return button?.getAttribute('aria-label') === ${JSON.stringify(
-      expected > 0 ? `通知，${expected} 条未读` : '通知'
+      expected > 0 ? `通知，${expected} 项未读` : '通知'
     )}
   })()`, timeout)
   const badge = await evaluate(cdp,
@@ -383,8 +488,8 @@ async function openNotificationSettings(cdp) {
 
 async function assertNotificationPreferences(cdp) {
   await waitForExpression(cdp,
-    `document.querySelectorAll('.notification-switch input[role="switch"]').length === 4`)
-  let values = await evaluate(cdp,
+    `document.querySelectorAll('.notification-switch input[role="switch"]').length === 5`)
+  const values = await evaluate(cdp,
     `[...document.querySelectorAll('.notification-switch input[role="switch"]')]
       .map((input) => input.checked)`)
   assert(values.every(Boolean), `Notification preferences did not default on: ${JSON.stringify(values)}`)
@@ -406,11 +511,34 @@ async function setPrimaryHeadsUpPreference(cdp, enabled) {
       === ${JSON.stringify(enabled)}`)
 }
 
+async function focusNewConversation(cdp) {
+  const focused = await evaluate(cdp, `(() => {
+    const target = document.querySelector('.unified-sidebar button[aria-label="新对话"]')
+    target?.focus()
+    return target?.getAttribute('aria-label') ?? null
+  })()`)
+  assert(focused === '新对话', 'Could not establish the heads-up focus baseline')
+}
+
 async function closeDialogWithEscape(cdp) {
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' })
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape' })
   await waitForExpression(cdp, `!document.querySelector('.notification-drawer')`)
   await wait(50)
+}
+
+async function clickEpisodeAction(cdp, episodeId, label) {
+  const clicked = await evaluate(cdp, `(() => {
+    const row = document.querySelector(
+      '[data-notification-id=${JSON.stringify(episodeId)}]'
+    )
+    const button = [...(row?.querySelectorAll('button') ?? [])]
+      .find((candidate) => candidate.textContent?.trim() === ${JSON.stringify(label)})
+    if (!button || button.disabled) return false
+    button.click()
+    return true
+  })()`)
+  assert(clicked, `Could not click ${JSON.stringify(label)} for Episode ${episodeId}`)
 }
 
 async function clickButton(cdp, selector, label) {
@@ -444,6 +572,61 @@ async function setTheme(cdp, preference) {
   const expectedTheme = preference === 'night' ? 'night' : 'day'
   await waitForExpression(cdp,
     `document.documentElement.dataset.theme === ${JSON.stringify(expectedTheme)}`)
+}
+
+async function emulateDesktopZoom(cdp, physicalWidth, physicalHeight, zoomFactor) {
+  const cssWidth = Math.round(physicalWidth / zoomFactor)
+  const cssHeight = Math.round(physicalHeight / zoomFactor)
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: cssWidth,
+    height: cssHeight,
+    deviceScaleFactor: zoomFactor,
+    mobile: false,
+    screenWidth: physicalWidth,
+    screenHeight: physicalHeight
+  })
+  await waitForExpression(cdp, `(() => {
+    return window.innerWidth === ${cssWidth}
+      && window.innerHeight === ${cssHeight}
+      && Math.abs(window.devicePixelRatio - ${zoomFactor}) < 0.01
+  })()`)
+}
+
+async function assertZoomedNotificationFunctionality(cdp) {
+  const state = await evaluate(cdp, `(() => {
+    const drawer = document.querySelector('.notification-drawer')
+    const list = document.querySelector('.notification-list')
+    const close = document.querySelector('.notification-drawer .dialog-close')
+    const closeRect = close?.getBoundingClientRect()
+    const before = list?.scrollTop ?? 0
+    if (list) list.scrollTop = list.scrollHeight
+    const after = list?.scrollTop ?? 0
+    if (list) list.scrollTop = before
+    return {
+      cssViewport: [window.innerWidth, window.innerHeight],
+      devicePixelRatio: window.devicePixelRatio,
+      physicalViewport: [
+        Math.round(window.innerWidth * window.devicePixelRatio),
+        Math.round(window.innerHeight * window.devicePixelRatio)
+      ],
+      drawerVisible: Boolean(drawer),
+      closeVisible: Boolean(closeRect
+        && closeRect.width > 0
+        && closeRect.height > 0
+        && closeRect.bottom > 0
+        && closeRect.top < window.innerHeight),
+      filtersVisible: document.querySelectorAll('.notification-filter button').length === 2,
+      scrollable: Boolean(list && list.scrollHeight > list.clientHeight && after > before),
+      drawerOverflow: drawer ? drawer.scrollWidth > drawer.clientWidth + 1 : true,
+      documentOverflow: document.documentElement.scrollWidth > window.innerWidth + 1
+    }
+  })()`)
+  assert(state.cssViewport[0] === 520 && state.cssViewport[1] === 350
+      && Math.abs(state.devicePixelRatio - 2) < 0.01
+      && state.physicalViewport[0] === 1040 && state.physicalViewport[1] === 700
+      && state.drawerVisible && state.closeVisible && state.filtersVisible && state.scrollable
+      && !state.drawerOverflow && !state.documentOverflow,
+  `200% zoom hid Notification Center functionality: ${JSON.stringify(state)}`)
 }
 
 async function launchApp(port, width, height, reducedMotion) {
@@ -611,7 +794,12 @@ async function connectCdp(url) {
 }
 
 function startCore(dataDirectory) {
-  const child = spawn(join(root, 'resources', 'bin', 'rovai-core'), ['--data-dir', dataDirectory], {
+  const child = spawn(join(root, 'resources', 'bin', 'rovai-core'), [
+    '--data-dir',
+    dataDirectory,
+    '--skill-library-root',
+    join(dataDirectory, 'managed-skill-library')
+  ], {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe']
   })
@@ -647,6 +835,12 @@ function startCore(dataDirectory) {
     if (child.exitCode === null) child.kill('SIGTERM')
   }
   return { request, stop }
+}
+
+function sqliteTimestamp(modifier) {
+  return modifier === 'now'
+    ? "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
+    : `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ${sqlLiteral(modifier)})`
 }
 
 function sqlLiteral(value) {

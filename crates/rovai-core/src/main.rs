@@ -131,10 +131,9 @@ use rovai_core::{
         runtime_waiting_recipients,
     },
     notification::{
-        ClearInAppNotificationCommand, ClearReadInAppNotificationsCommand, InAppNotificationFilter,
-        InAppNotificationService, MarkAllInAppNotificationsReadCommand,
-        MarkCampInAppNotificationsReadCommand, MarkInAppNotificationReadCommand,
-        UpdateInAppNotificationPreferenceCommand,
+        AcknowledgeNotificationEpisodeCommand, ClearNotificationEpisodeCommand,
+        MarkAllNotificationEpisodesReadCommand, NotificationEpisodeFilter,
+        NotificationEpisodeService, UpdateNotificationPreferenceCommand,
     },
     planned_shutdown::{
         ActiveExecutionKey, ActiveExecutionSnapshot, ExecutionLaunchPermit,
@@ -632,20 +631,20 @@ struct SubscribeEventsParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct NotificationInboxParams {
     #[serde(default = "default_notification_filter")]
-    filter: InAppNotificationFilter,
+    filter: NotificationEpisodeFilter,
     cursor: Option<String>,
     #[serde(default)]
     limit: usize,
 }
 
-fn default_notification_filter() -> InAppNotificationFilter {
-    InAppNotificationFilter::All
+fn default_notification_filter() -> NotificationEpisodeFilter {
+    NotificationEpisodeFilter::All
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct NotificationCreatedSinceParams {
-    after_sequence: i64,
+struct NotificationChangesSinceParams {
+    after_change_sequence: i64,
     #[serde(default)]
     limit: usize,
 }
@@ -3955,7 +3954,7 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    InAppNotificationService::default().inbox(
+                    NotificationEpisodeService::default().inbox(
                         &mut database,
                         CURRENT_USER_ID,
                         params.filter,
@@ -3964,102 +3963,74 @@ impl Core {
                     )?,
                 )?)
             }
-            "notifications.createdSince" => {
-                let params: NotificationCreatedSinceParams =
+            "notifications.changesSince" => {
+                let params: NotificationChangesSinceParams =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    InAppNotificationService::default().created_since(
+                    NotificationEpisodeService::default().changes_since(
                         &mut database,
                         CURRENT_USER_ID,
-                        params.after_sequence,
+                        params.after_change_sequence,
                         params.limit,
                     )?,
                 )?)
             }
-            "notifications.markRead" => {
-                let params: UserCommandParams<MarkInAppNotificationReadCommand> =
+            "notifications.acknowledge" => {
+                let params: UserCommandParams<AcknowledgeNotificationEpisodeCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                let execution = InAppNotificationService::default().mark_read(
+                let execution = NotificationEpisodeService::default().acknowledge(
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
-                emit(&self.output, "in_app_notification.changed", json!({}));
-                Ok(serde_json::to_value(execution.result)?)
-            }
-            "notifications.markCampRead" => {
-                let params: UserCommandParams<MarkCampInAppNotificationsReadCommand> =
-                    serde_json::from_value(request.params.clone())?;
-                let camp_id = params.command.camp_id.clone();
-                let mut database = self.database.lock().await;
-                let execution = InAppNotificationService::default().mark_camp_read(
-                    &mut database,
-                    &user_camp_command_envelope(params.command_id, camp_id, params.command),
-                )?;
-                emit(&self.output, "in_app_notification.changed", json!({}));
+                emit(&self.output, "notification_episode.changed", json!({}));
                 Ok(serde_json::to_value(execution.result)?)
             }
             "notifications.markAllRead" => {
-                let params: UserCommandParams<MarkAllInAppNotificationsReadCommand> =
+                let params: UserCommandParams<MarkAllNotificationEpisodesReadCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                let execution = InAppNotificationService::default().mark_all_read(
+                let execution = NotificationEpisodeService::default().mark_all_read(
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
-                emit(&self.output, "in_app_notification.changed", json!({}));
+                emit(&self.output, "notification_episode.changed", json!({}));
                 Ok(serde_json::to_value(execution.result)?)
             }
             "notifications.clear" => {
-                let params: UserCommandParams<ClearInAppNotificationCommand> =
+                let params: UserCommandParams<ClearNotificationEpisodeCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                let execution = InAppNotificationService::default().clear(
+                let execution = NotificationEpisodeService::default().clear(
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
                 if let Err(error) =
-                    InAppNotificationService::default().maintain_retention(&database)
+                    NotificationEpisodeService::default().maintain_retention(&database)
                 {
-                    eprintln!("In-App Notification clear retention failed: {error:#}");
+                    eprintln!("Notification Episode clear retention failed: {error:#}");
                 }
-                emit(&self.output, "in_app_notification.changed", json!({}));
-                Ok(serde_json::to_value(execution.result)?)
-            }
-            "notifications.clearRead" => {
-                let params: UserCommandParams<ClearReadInAppNotificationsCommand> =
-                    serde_json::from_value(request.params.clone())?;
-                let mut database = self.database.lock().await;
-                let execution = InAppNotificationService::default().clear_read(
-                    &mut database,
-                    &user_command_envelope(params.command_id, params.command),
-                )?;
-                if let Err(error) =
-                    InAppNotificationService::default().maintain_retention(&database)
-                {
-                    eprintln!("In-App Notification clear retention failed: {error:#}");
-                }
-                emit(&self.output, "in_app_notification.changed", json!({}));
+                emit(&self.output, "notification_episode.changed", json!({}));
                 Ok(serde_json::to_value(execution.result)?)
             }
             "notifications.preference.get" => {
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    InAppNotificationService::default().preference(&database)?,
+                    NotificationEpisodeService::default().preference(&database)?,
                 )?)
             }
             "notifications.preference.update" => {
-                let params: UserCommandParams<UpdateInAppNotificationPreferenceCommand> =
+                let params: UserCommandParams<UpdateNotificationPreferenceCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                let execution = InAppNotificationService::default().update_preference(
+                let execution = NotificationEpisodeService::default().update_preference(
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
                 emit(
                     &self.output,
-                    "in_app_notification.preference_changed",
+                    "notification_episode.preference_changed",
                     json!({}),
                 );
                 Ok(serde_json::to_value(execution.result)?)
@@ -8043,6 +8014,10 @@ fn main() -> Result<()> {
 
 async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> Result<()> {
     let data_dir = parse_data_dir()?;
+    let skill_library_root = match parse_skill_library_root()? {
+        Some(root) => root,
+        None => SkillLibraryService::default_root()?,
+    };
     let _data_dir_lock = CoreDataDirLock::acquire(&data_dir)?;
     let mcp_config_path = parse_mcp_config_path()?;
     let mut database = Database::open(&data_dir)?;
@@ -8108,7 +8083,7 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
         search_summary.generation,
         &search_summary.created_at,
     )?;
-    let skill_library = SkillLibraryService::new(SkillLibraryService::default_root()?)?;
+    let skill_library = SkillLibraryService::new(skill_library_root)?;
     let mcp_config = McpConfigStore::new(match mcp_config_path {
         Some(path) => path,
         None => McpConfigStore::default_path()?,
@@ -11205,6 +11180,10 @@ fn parse_data_dir() -> Result<PathBuf> {
     parse_data_dir_from(std::env::args().skip(1))
 }
 
+fn parse_skill_library_root() -> Result<Option<PathBuf>> {
+    parse_skill_library_root_from(std::env::args().skip(1))
+}
+
 fn parse_removed_skill_project_roots() -> Result<Vec<String>> {
     parse_removed_skill_project_roots_from(std::env::args().skip(1))
 }
@@ -11257,6 +11236,36 @@ fn parse_data_dir_from(args: impl IntoIterator<Item = String>) -> Result<PathBuf
     data_dir.context(
         "rovai-core requires an explicit absolute --data-dir; refusing to infer daily userData",
     )
+}
+
+fn parse_skill_library_root_from(
+    args: impl IntoIterator<Item = String>,
+) -> Result<Option<PathBuf>> {
+    let mut args = args.into_iter();
+    let mut skill_library_root = None;
+    while let Some(arg) = args.next() {
+        if arg != "--skill-library-root" {
+            continue;
+        }
+        let path = args
+            .next()
+            .map(PathBuf::from)
+            .context("--skill-library-root requires a path")?;
+        if !path.is_absolute()
+            || path.components().any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::CurDir | std::path::Component::ParentDir
+                )
+            })
+        {
+            anyhow::bail!("--skill-library-root requires a normalized absolute path");
+        }
+        if skill_library_root.replace(path).is_some() {
+            anyhow::bail!("--skill-library-root may be provided only once");
+        }
+    }
+    Ok(skill_library_root)
 }
 
 fn parse_mcp_config_path() -> Result<Option<PathBuf>> {
@@ -11350,6 +11359,41 @@ mod tests {
                 ])
                 .unwrap_err()
             )
+            .contains("only once")
+        );
+    }
+
+    #[test]
+    fn skill_library_root_is_optional_explicit_absolute_and_unique() {
+        assert_eq!(parse_skill_library_root_from(Vec::new()).unwrap(), None);
+
+        let directory = std::env::temp_dir().join("rovai-core-isolated-skill-library");
+        assert_eq!(
+            parse_skill_library_root_from(vec![
+                "--skill-library-root".to_string(),
+                directory.to_string_lossy().into_owned(),
+            ])
+            .unwrap(),
+            Some(directory.clone())
+        );
+        assert!(
+            parse_skill_library_root_from(vec![
+                "--skill-library-root".to_string(),
+                "relative/skills".to_string(),
+            ])
+            .unwrap_err()
+            .to_string()
+            .contains("normalized absolute path")
+        );
+        assert!(
+            parse_skill_library_root_from(vec![
+                "--skill-library-root".to_string(),
+                directory.to_string_lossy().into_owned(),
+                "--skill-library-root".to_string(),
+                directory.to_string_lossy().into_owned(),
+            ])
+            .unwrap_err()
+            .to_string()
             .contains("only once")
         );
     }

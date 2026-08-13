@@ -786,28 +786,6 @@ pub fn persist_public_a2a_message(
         &recipients_json,
     )?;
 
-    if request.mention_user {
-        transaction.execute(
-            r#"
-            INSERT INTO in_app_notification(
-                id, recipient_user_id, kind, camp_id, camp_turn_id,
-                source_message_id, resolved_at, read_at, cleared_at,
-                version, created_at, updated_at
-            ) VALUES (
-                ?1, ?2, 'camp_message_user_mention', ?3, NULL,
-                ?4, NULL, NULL, NULL, 1, ?5, ?5
-            )
-            "#,
-            params![
-                Uuid::new_v4().to_string(),
-                CURRENT_USER_ID,
-                request.camp_id,
-                message_id,
-                now,
-            ],
-        )?;
-    }
-
     let actor = ActorRef::Agent {
         agent_id: request.author_agent_id.to_string(),
         source_agent_run_id: request.source_agent_run_id.to_string(),

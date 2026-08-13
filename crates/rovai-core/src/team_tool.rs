@@ -2184,15 +2184,15 @@ mod tests {
             .connection()
             .query_row(
                 r#"
-                SELECT kind, recipient_user_id, source_message_id
-                FROM in_app_notification
-                WHERE kind = 'camp_message_user_mention'
+                SELECT semantic, recipient_user_id, source_message_id
+                FROM notification_occurrence
+                WHERE semantic = 'user_mention'
                 "#,
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(notification.0, "camp_message_user_mention");
+        assert_eq!(notification.0, "user_mention");
         assert_eq!(notification.1, "local_user");
         assert_eq!(notification.2, message_id);
         let after_slots: i64 = fixture
@@ -2215,7 +2215,7 @@ mod tests {
             .database
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM in_app_notification WHERE kind = 'camp_message_user_mention'",
+                "SELECT COUNT(*) FROM notification_occurrence WHERE semantic = 'user_mention'",
                 [],
                 |row| row.get(0),
             )
@@ -2238,7 +2238,7 @@ mod tests {
             .database
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM in_app_notification WHERE kind = 'camp_message_user_mention'",
+                "SELECT COUNT(*) FROM notification_occurrence WHERE semantic = 'user_mention'",
                 [],
                 |row| row.get(0),
             )
@@ -2269,8 +2269,8 @@ mod tests {
                 r#"
                 SELECT
                     (SELECT COUNT(*) FROM camp_message WHERE body LIKE '%must not be accepted%'),
-                    (SELECT COUNT(*) FROM in_app_notification
-                     WHERE kind = 'camp_message_user_mention')
+                    (SELECT COUNT(*) FROM notification_occurrence
+                     WHERE semantic = 'user_mention')
                 "#,
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
@@ -2323,8 +2323,8 @@ mod tests {
             .execute_batch(
                 r#"
                 CREATE TRIGGER reject_test_user_mention_notification
-                BEFORE INSERT ON in_app_notification
-                WHEN NEW.kind = 'camp_message_user_mention'
+                BEFORE INSERT ON notification_occurrence
+                WHEN NEW.semantic = 'user_mention'
                 BEGIN
                     SELECT RAISE(ABORT, 'test notification failure');
                 END;
@@ -2360,8 +2360,8 @@ mod tests {
                     (SELECT COUNT(*) FROM camp_message WHERE body LIKE '%No partial message%'),
                     (SELECT COUNT(*) FROM message_delivery
                      WHERE source_agent_run_id = ?2 AND created_at >= '2000-01-01'),
-                    (SELECT COUNT(*) FROM in_app_notification
-                     WHERE kind = 'camp_message_user_mention')
+                    (SELECT COUNT(*) FROM notification_occurrence
+                     WHERE semantic = 'user_mention')
                 FROM camp WHERE id = ?1
                 "#,
                 rusqlite::params![fixture.camp_id, fixture.source_run_id],

@@ -533,7 +533,7 @@ export function CampNavigation({
             className="notification-trigger"
             type="button"
             aria-label={notificationUnreadCount > 0
-              ? `通知，${notificationUnreadCount} 条未读`
+              ? `通知，${notificationUnreadCount} 项未读`
               : '通知'}
             title="通知"
             onClick={onNotifications}

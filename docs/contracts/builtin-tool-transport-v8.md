@@ -144,7 +144,7 @@ unchanged from v7.
 ## References
 
 - [Camp Message Send v5](camp-message-send-v5.md)
-- [Current User Attention v2](current-user-attention-v2.md)
+- [Current User Attention v3](current-user-attention-v3.md)
 - [Built-in Tool Transport v7 (historical)](builtin-tool-transport-v7.md)
 - [Built-in Tool Transport v7 Errata](builtin-tool-transport-v7-errata.md)
 - [Built-in Tool Transport v6 (historical)](builtin-tool-transport-v6.md)

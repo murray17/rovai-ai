@@ -16,8 +16,8 @@ last_updated: 2026-08-13
 ## Core data 与 read side
 
 - **何时阅读：** 修改领域真源、Managed Content、Blob 或 read side 时阅读。
-- **当前架构：** ADR-only；architecture summary pending
-- **当前合同：** 无
+- **当前架构：** [Notification Episode](../architecture/notification-episodes.md)
+- **当前合同：** [Notification Episode v1](../contracts/notification-episode-v1.md)
 
 <!-- adr-current-primary:begin topic=core-data -->
 | ADR | Decision |
@@ -25,6 +25,7 @@ last_updated: 2026-08-13
 | [ADR-0001](0001-core-transaction.md) | Core Transaction |
 | [ADR-0013](0013-managed-content-and-read-side-v2.md) | Managed Content and Read Side v2 |
 | [ADR-0087](0087-core-owned-durable-in-app-notification-inbox.md) | Core-Owned Durable In-App Notification Inbox |
+| [ADR-0175](0175-core-owned-notification-occurrence-episode-and-change-journal.md) | Core-Owned Notification Occurrence, Episode and Change Journal |
 <!-- adr-current-primary:end -->
 
 Related: Camp content、Evidence 与 Renderer 可分别回到其 primary 主题。
@@ -74,7 +75,7 @@ Related: ADR-0100 的 Session identity delivery 位于 session-context-bootstrap
 
 - **何时阅读：** 修改 A2A、Task、Message、Delivery、协作责任或公共输出时阅读。
 - **当前架构：** [Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
-- **当前合同：** [Durable Task v3](../contracts/durable-task-v3.md)、[Camp Message Send v5](../contracts/camp-message-send-v5.md)、[Current User Attention v2](../contracts/current-user-attention-v2.md)、[Message Delivery v2](../contracts/message-delivery-v2.md)、[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)
+- **当前合同：** [Durable Task v3](../contracts/durable-task-v3.md)、[Camp Message Send v5](../contracts/camp-message-send-v5.md)、[Current User Attention v3](../contracts/current-user-attention-v3.md)、[Message Delivery v2](../contracts/message-delivery-v2.md)、[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)
 
 <!-- adr-current-primary:begin topic=collaboration-task-message -->
 | ADR | Decision |

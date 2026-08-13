@@ -1153,56 +1153,126 @@ export interface EventBatch {
   events: DomainEventView[]
 }
 
-export type InAppNotificationKind =
-  | 'runtime_permission_attention'
-  | 'camp_turn_completed'
-  | 'camp_turn_incomplete'
-  | 'camp_message_user_mention'
+export type NotificationEpisodeKind = 'collaboration' | 'message' | 'approval'
 
-export type InAppNotificationFilter = 'all' | 'unread'
+export type NotificationSemantic =
+  | 'approval_pending'
+  | 'user_mention'
+  | 'turn_completed'
+  | 'turn_failed'
+  | 'turn_incomplete'
 
-export interface InAppNotificationView {
+export type NotificationEpisodeFilter = 'all' | 'unread'
+
+export type NotificationReasonState =
+  | 'pending'
+  | 'resolved'
+  | 'unacknowledged'
+  | 'acknowledged'
+  | 'unsatisfied'
+  | 'satisfied'
+
+export type NotificationActionKind =
+  | 'open_approval'
+  | 'open_camp_message'
+  | 'open_camp_turn'
+  | 'open_camp'
+
+export interface NotificationReasonView {
+  semantic: NotificationSemantic
+  occurrenceCount: number
+  unacknowledgedCount: number
+  state: NotificationReasonState
+}
+
+export interface NotificationMentionView {
+  messageId: string
+  authorId: string
+  authorDisplayName: string | null
+  summary: string | null
+  available: boolean
+}
+
+export interface NotificationActionView {
+  actionId: string
+  kind: NotificationActionKind
+  available: boolean
+  campId: string
+  campTurnId: string | null
+  messageId: string | null
+  approvalId: string | null
+  acknowledgementId: string | null
+  observedEpisodeVersion: number
+}
+
+export interface NotificationEpisodeView {
   id: string
-  sequence: number
-  kind: InAppNotificationKind
+  kind: NotificationEpisodeKind
+  episodeVersion: number
+  attentionRevision: number
+  changeSequence: number
   camp: {
     id: string
     title: string
   }
   campTurnId: string | null
-  sourceType: 'camp_message' | null
-  sourceMessageId: string | null
-  sourceAvailable: boolean
-  messageSummary: string | null
-  attentionState: 'pending' | 'resolved' | null
-  readAt: string | null
+  primarySemantic: NotificationSemantic
+  unread: boolean
+  resolved: boolean
+  satisfied: boolean
+  pendingApprovalCount: number
+  mentionCount: number
+  unacknowledgedMentionCount: number
+  mention: NotificationMentionView | null
+  reasons: NotificationReasonView[]
+  primaryAction: NotificationActionView
+  secondaryActions: NotificationActionView[]
   createdAt: string
   updatedAt: string
 }
 
-export interface InAppNotificationInbox {
-  schemaVersion: 3
-  throughSequence: number
+export interface NotificationEpisodeInbox {
+  schemaVersion: 4
+  throughChangeSequence: number
   unreadCount: number
-  items: InAppNotificationView[]
+  items: NotificationEpisodeView[]
   nextCursor: string | null
 }
 
-export interface InAppNotificationCreatedBatch {
-  schemaVersion: 3
-  requestedAfterSequence: number
-  nextSequence: number
-  throughSequence: number
-  resetRequired: boolean
-  hasMore: boolean
-  items: InAppNotificationView[]
+export interface NotificationEpisodeChange {
+  changeSequence: number
+  episodeId: string
+  episodeVersion: number
+  attentionRevision: number
+  operation: 'upsert' | 'remove'
+  changeCause:
+    | 'occurrence_admitted'
+    | 'acknowledged'
+    | 'satisfied'
+    | 'resolved'
+    | 'cleared'
+    | 'retained'
+  headsUpReason: NotificationSemantic | null
+  changedAt: string
+  episode: NotificationEpisodeView | null
 }
 
-export interface InAppNotificationPreference {
+export interface NotificationEpisodeChangeBatch {
+  schemaVersion: 4
+  requestedAfterChangeSequence: number
+  nextChangeSequence: number
+  throughChangeSequence: number
+  resetRequired: boolean
+  hasMore: boolean
+  changes: NotificationEpisodeChange[]
+}
+
+export interface NotificationPreference {
   headsUpEnabled: boolean
   approvalHeadsUpEnabled: boolean
-  executionHeadsUpEnabled: boolean
   userMentionHeadsUpEnabled: boolean
+  turnCompletedHeadsUpEnabled: boolean
+  turnIncompleteHeadsUpEnabled: boolean
   version: number
   updatedAt: string
 }
@@ -1887,12 +1957,10 @@ export type CoreMethod =
   | 'camp.messages.send'
   | 'action.approvals.resolve'
   | 'notifications.inbox'
-  | 'notifications.createdSince'
-  | 'notifications.markRead'
-  | 'notifications.markCampRead'
+  | 'notifications.changesSince'
+  | 'notifications.acknowledge'
   | 'notifications.markAllRead'
   | 'notifications.clear'
-  | 'notifications.clearRead'
   | 'notifications.preference.get'
   | 'notifications.preference.update'
   | 'events.subscribe'

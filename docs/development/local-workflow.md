@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: local-development-workflow
-last_updated: 2026-08-11
+last_updated: 2026-08-13
 ---
 
 # 本地开发与 App 隔离流程
@@ -21,7 +21,8 @@ last_updated: 2026-08-11
 
 `dist/` 是可被 `pnpm package:mac` 覆盖的生成目录，不是安装位置。日常 App 不得从仓库的
 `dist/`、`out/` 或 `resources/` 运行。只把 `.app` 复制到另一个目录仍不足以完成隔离：开发和验收
-进程还必须使用独立 `userData`。
+进程还必须使用独立 `userData`。显式隔离的 Desktop 实例会同时把 Core Skill Library 绑定到该
+`userData` 下的 `managed-skill-library/`；只隔离 SQLite、却继续共享日常 Skill Library 不构成完整隔离。
 
 无论通道如何，Core 都只接受显式绝对 `--data-dir`。它会在打开 SQLite 和执行 startup recovery
 之前独占该目录的 `.rovai-core-instance.lock`；第二个 Core 必须拒绝启动且不得修改数据库。该文件
@@ -53,6 +54,7 @@ pnpm dev
 `pnpm dev` 先构建 Debug Core 和原生模块，再通过 `scripts/dev-desktop.mjs` 启动 Electron。启动器会：
 
 - 为当前仓库解析稳定、独立的开发 `userData` 并在启动日志中打印精确路径；
+- 让 Desktop 通过显式 Core 参数把 Skill Library 固定在该开发 `userData` 内；
 - 同时传入 `--user-data-dir` 与 `ROVAI_ALLOW_ISOLATED_INSTANCE=1`；
 - 拒绝已知的日常 Rovai/历史 Lumen 数据目录及其子目录；
 - 使用开发启动锁拒绝两个 `pnpm dev` 共享同一 `userData`；Core 再用进程级锁封住所有其他入口。
@@ -89,6 +91,10 @@ ROVAI_ALLOW_ISOLATED_INSTANCE=1 \
 "$ROVAI_APP/Contents/MacOS/Rovai-ai" \
   --user-data-dir="$FIXTURE_ROOT/user-data"
 ```
+
+Desktop 检测到这组显式隔离标记后，会以
+`--skill-library-root "$FIXTURE_ROOT/user-data/managed-skill-library"` 启动 Core；验收脚本不得绕过
+Desktop 另起一个仍指向日常全局 Skill Library 的 Core。
 
 AI Agent 不得把 `open "$(pwd)/dist/mac-arm64/Rovai-ai.app"` 当作打包验证，因为该命令没有证明
 `userData` 隔离。签名和二进制检查不需要启动 App，优先使用

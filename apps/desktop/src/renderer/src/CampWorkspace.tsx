@@ -318,6 +318,7 @@ export type NotificationFocusTarget = {
   kind: 'approval' | 'camp_turn' | 'camp_message'
   campTurnId: string | null
   messageId?: string
+  approvalId?: string
   active?: boolean
 }
 export interface CampRuntimeRecoveryTarget {
@@ -1809,6 +1810,9 @@ export function CampWorkspace({
               focusRequest={notificationFocus?.kind === 'approval' && notificationFocus.active
                 ? notificationFocus.requestId
                 : null}
+              focusApprovalId={notificationFocus?.kind === 'approval'
+                ? notificationFocus.approvalId ?? null
+                : null}
             />
           )}
 
@@ -3067,7 +3071,8 @@ function ApprovalDock({
   busy,
   onResolve,
   containerRef,
-  focusRequest
+  focusRequest,
+  focusApprovalId
 }: {
   approvals: ActionApprovalView[]
   profileById: Map<string, AgentProfile>
@@ -3075,6 +3080,7 @@ function ApprovalDock({
   onResolve(approval: ActionApprovalView, optionId: string): void
   containerRef: RefObject<HTMLElement | null>
   focusRequest: number | null
+  focusApprovalId: string | null
 }): JSX.Element {
   const [activeIndex, setActiveIndex] = useState(0)
   const [collapsed, setCollapsed] = useState(false)
@@ -3105,8 +3111,13 @@ function ApprovalDock({
   }, [approvals.length, containerRef])
 
   useEffect(() => {
-    if (focusRequest !== null) setCollapsed(false)
-  }, [focusRequest])
+    if (focusRequest === null) return
+    setCollapsed(false)
+    if (focusApprovalId) {
+      const targetIndex = approvals.findIndex((candidate) => candidate.id === focusApprovalId)
+      if (targetIndex >= 0) setActiveIndex(targetIndex)
+    }
+  }, [approvals, focusApprovalId, focusRequest])
 
   useEffect(() => {
     if (focusRequest === null || collapsed) return undefined
@@ -3122,7 +3133,7 @@ function ApprovalDock({
       target.focus({ preventScroll: true })
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [collapsed, containerRef, focusRequest])
+  }, [activeIndex, collapsed, containerRef, focusRequest])
 
   return (
     <section className={collapsed ? 'approval-dock is-collapsed' : 'approval-dock'} aria-label={`${approvals.length} 项待审批`} ref={containerRef}>
@@ -3151,7 +3162,11 @@ function ApprovalDock({
           </button>
         </nav>
       </header>
-      {!collapsed && <div className="approval-dock-scroll" id={contentId}>
+      {!collapsed && <div
+        className="approval-dock-scroll"
+        id={contentId}
+        data-approval-id={approval.id}
+      >
         <div className="approval-dock-title">
           <strong>{localizeExecutionEngineTerms(approval.actionSummary)}</strong>
           <code>{approval.adapterKind} · {approval.actionKind}</code>

@@ -79,8 +79,8 @@ export async function runCurrentContractConformance({
   const hardOutcome = infrastructurePassed ? (testsPassed ? 'pass' : 'fail') : 'unavailable'
   const failureTaxonomy = classifyBenchmarkFailure({
     benchmarkContractValid: true,
-    productContractMatched: productContract.dataContractVersion.value === 'v0.67'
-      && productContract.dataContractSchemaVersion.value === 33,
+    productContractMatched: productContract.dataContractVersion.value === 'v0.71'
+      && productContract.dataContractSchemaVersion.value === 34,
     environmentValid: infrastructurePassed,
     evaluationState: infrastructurePassed ? 'complete' : 'pending',
     verifiedDelivery: infrastructurePassed ? (testsPassed ? 'pass' : 'fail') : 'unavailable',

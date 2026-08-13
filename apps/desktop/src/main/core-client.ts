@@ -34,6 +34,24 @@ export type CoreShutdownResult = {
   forcedSignal: 'SIGTERM' | 'SIGKILL' | null
 }
 
+export function coreLaunchArguments(
+  userDataPath: string,
+  skillLibraryRoot: string | null,
+  removedSkillProjectRoots: readonly string[]
+): string[] {
+  const args = ['--data-dir', userDataPath]
+  if (skillLibraryRoot) args.push('--skill-library-root', skillLibraryRoot)
+  for (const executionRoot of removedSkillProjectRoots) {
+    args.push('--removed-skill-project-root', executionRoot)
+  }
+  return args
+}
+
+type CoreStartOptions = {
+  removedSkillProjectRoots?: string[]
+  skillLibraryRoot?: string
+}
+
 const PLANNED_SHUTDOWN_DEADLINE_MS = 10_000
 const SHUTDOWN_SIGTERM_GRACE_MS = 3_000
 const SHUTDOWN_SIGKILL_GRACE_MS = 2_000
@@ -49,14 +67,18 @@ export class CoreClient {
   #stopping = false
   #shutdownPromise: Promise<CoreShutdownResult> | null = null
   #removedSkillProjectRoots: string[] = []
+  #skillLibraryRoot: string | null = null
 
   setRemovedSkillProjectRoots(executionRoots: string[]): void {
     this.#removedSkillProjectRoots = [...new Set(executionRoots)]
   }
 
-  start(options?: { removedSkillProjectRoots?: string[] }): void {
+  start(options?: CoreStartOptions): void {
     if (options?.removedSkillProjectRoots) {
       this.setRemovedSkillProjectRoots(options.removedSkillProjectRoots)
+    }
+    if (options?.skillLibraryRoot) {
+      this.#skillLibraryRoot = options.skillLibraryRoot
     }
     if (this.#child) return
     this.#stopping = false
@@ -67,10 +89,11 @@ export class CoreClient {
 
     const binary = resolveCoreBinary()
     const userDataPath = app.getPath('userData')
-    const args = ['--data-dir', userDataPath]
-    for (const executionRoot of this.#removedSkillProjectRoots) {
-      args.push('--removed-skill-project-root', executionRoot)
-    }
+    const args = coreLaunchArguments(
+      userDataPath,
+      this.#skillLibraryRoot,
+      this.#removedSkillProjectRoots
+    )
     const child = spawn(binary, args, {
       stdio: ['pipe', 'pipe', 'pipe']
     })

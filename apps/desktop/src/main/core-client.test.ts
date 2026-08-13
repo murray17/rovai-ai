@@ -11,7 +11,7 @@ vi.mock('electron', () => ({
   }
 }))
 
-import { CoreClient } from './core-client'
+import { CoreClient, coreLaunchArguments } from './core-client'
 
 const temporaryRoots: string[] = []
 
@@ -24,6 +24,25 @@ afterEach(() => {
 })
 
 describe('CoreClient planned shutdown', () => {
+  it('passes an isolated Skill Library root to Core', () => {
+    expect(coreLaunchArguments(
+      '/tmp/rovai-accept/user-data',
+      '/tmp/rovai-accept/user-data/managed-skill-library',
+      ['/tmp/removed-project']
+    )).toEqual([
+      '--data-dir',
+      '/tmp/rovai-accept/user-data',
+      '--skill-library-root',
+      '/tmp/rovai-accept/user-data/managed-skill-library',
+      '--removed-skill-project-root',
+      '/tmp/removed-project'
+    ])
+    expect(coreLaunchArguments('/daily/user-data', null, [])).toEqual([
+      '--data-dir',
+      '/daily/user-data'
+    ])
+  })
+
   it.runIf(process.platform !== 'win32')(
     'reuses one Promise, keeps shutdown Main-only, and waits for the child exit',
     async () => {

@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: macos-build-and-packaging
-last_updated: 2026-08-11
+last_updated: 2026-08-13
 ---
 
 # macOS 构建、签名与打包
@@ -30,6 +30,38 @@ pnpm build:desktop
 ```bash
 pnpm package:mac
 ```
+
+### Electron 下载与受限网络
+
+`package:mac` 在完成 Rust 和 Electron Vite 构建后，`electron-builder` 仍可能访问
+`https://github.com/electron/electron/releases/` 获取 Electron arm64 归档或校验信息。macOS 的默认归档
+缓存位于 `~/Library/Caches/electron/`，但“ZIP 已缓存”不保证 `electron-builder` 不再联网读取校验信息。
+
+已知当前执行环境不能访问 GitHub，且尚未确认本地归档可用时，不要先在该受限环境运行一遍完整打包再
+等待下载失败；应从第一次尝试就使用可访问 GitHub 的执行环境。不得用关闭 TLS、关闭 checksum 或提交
+个人镜像地址的方式绕过。
+
+GitHub 暂时不可用、但依赖安装曾成功完成时，可以先从 Electron 包自带的 checksum 验证本地归档，再用
+`electronDist` 直接打包。以下命令不硬编码 Electron 版本：
+
+```bash
+ELECTRON_ARCHIVE_NAME="$(node -p "'electron-v' + require('./node_modules/electron/package.json').version + '-darwin-arm64.zip'")"
+ELECTRON_ARCHIVE="$(find "$HOME/Library/Caches/electron" -type f -name "$ELECTRON_ARCHIVE_NAME" -print | sed -n '1p')"
+test -n "$ELECTRON_ARCHIVE" || { echo "Electron archive cache miss" >&2; false; }
+
+EXPECTED_ELECTRON_SHA="$(node -p "require('./node_modules/electron/checksums.json')[process.argv[1]]" "$ELECTRON_ARCHIVE_NAME")"
+ACTUAL_ELECTRON_SHA="$(shasum -a 256 "$ELECTRON_ARCHIVE" | awk '{print $1}')"
+test "$ACTUAL_ELECTRON_SHA" = "$EXPECTED_ELECTRON_SHA" || { echo "Electron archive checksum mismatch" >&2; false; }
+
+pnpm build
+CSC_IDENTITY_AUTO_DISCOVERY=false pnpm exec electron-builder \
+  --mac dir --arm64 --config.electronDist="$ELECTRON_ARCHIVE"
+```
+
+如果同一轮 `pnpm package:mac` 已明确完成前置 `pnpm build`、只在 Electron 下载阶段失败，恢复时跳过上面
+的 `pnpm build`，直接执行最后一条 `electron-builder` 命令，避免重复 Release 编译。生成 DMG 时把
+`--mac dir` 改为 `--mac dmg`。缓存缺失或 checksum 不匹配时必须恢复可信网络后使用标准命令，不得把
+未验证归档传给 `electronDist`。
 
 产物：
 

@@ -131,12 +131,10 @@ const allowedMethods = new Set<CoreMethod>([
   'camp.messages.send',
   'action.approvals.resolve',
   'notifications.inbox',
-  'notifications.createdSince',
-  'notifications.markRead',
-  'notifications.markCampRead',
+  'notifications.changesSince',
+  'notifications.acknowledge',
   'notifications.markAllRead',
   'notifications.clear',
-  'notifications.clearRead',
   'notifications.preference.get',
   'notifications.preference.update',
   'events.subscribe',
@@ -327,7 +325,10 @@ if (primaryInstance) void app.whenReady().then(async () => {
   publishAppearance()
   void memberAvatars.cleanupStaleTemporaryDirectories().catch(() => undefined)
   core.start({
-    removedSkillProjectRoots: removedSkillProjectRoots()
+    removedSkillProjectRoots: removedSkillProjectRoots(),
+    skillLibraryRoot: isolatedAcceptanceInstance
+      ? join(app.getPath('userData'), 'managed-skill-library')
+      : undefined
   })
   core.onEvent((event) => mainWindow?.webContents.send('rovai:event', event))
   createWindow()

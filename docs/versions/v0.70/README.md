@@ -1,20 +1,22 @@
 ---
 document_type: version-overview
 version: v0.70
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: in_progress
+implementation_status: closed_incomplete
 last_updated: 2026-08-13
 ---
 
 # Rovai-ai v0.70：消息局部 User Attention 教学收窄
 
-> 当前状态：实现、确定性门禁与 Codex 单 Runtime 行为 smoke 已通过；九 Runtime v8 正式矩阵尚未执行，
-> 因此版本保持 `in_progress`。Core-owned Current User Attention 的持久化、Notification、Delivery 与
+> 冻结状态：实现、确定性门禁与 Codex 单 Runtime 行为 smoke 已通过；九 Runtime v8 正式矩阵未在
+> 版本关闭前执行，因此以 `closed_incomplete` 保留该证据缺口。Core-owned Current User Attention 的持久化、Notification、Delivery 与
 > 权限语义保持不变。同一 current snapshot 已把三项固定 `mattpocock/skills` 工程工作流纳入十项
 > official Skill inventory，并完成自动生成 Camp 标题的起始 Structured Mention 去噪与本地预发布
 > 数据刷新。
+>
+> 后续版本：[v0.71 Notification Episode](../v0.71/README.md)
 >
 > 前置版本：[v0.69 Planned Shutdown 线性化与硬期限修正](../v0.69/README.md)
 

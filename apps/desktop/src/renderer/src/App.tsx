@@ -18,8 +18,8 @@ import type {
   EventBatch,
   GeneralPreferencesSnapshot,
   HealthStatus,
-  InAppNotificationInbox,
-  InAppNotificationView,
+  NotificationActionView,
+  NotificationEpisodeView,
   NavigationCampItem,
   NavigationCampPage,
   NavigationPin,
@@ -560,11 +560,6 @@ export function App(): React.JSX.Element {
         })
         if (reconciliation.status === 'rejected') throw new Error(commandFailureMessage(reconciliation))
       }
-      const notificationBoundary = await window.rovai.request<InAppNotificationInbox>(
-        'notifications.inbox',
-        { filter: 'all', limit: 1 }
-      ).then((inbox) => inbox.schemaVersion === 3 ? inbox.throughSequence : null)
-        .catch(() => null)
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
       if (snapshot.schemaVersion !== 29) throw new Error('Camp snapshot schema is incompatible')
       if (selectionGeneration !== campSelectionGeneration.current) return false
@@ -584,16 +579,6 @@ export function App(): React.JSX.Element {
       }
       setCampSnapshot(snapshot)
       await afterNextPaint()
-      if (selectionGeneration === campSelectionGeneration.current && notificationBoundary !== null) {
-        void window.rovai.request<StoredCommandResult>('notifications.markCampRead', {
-          commandId: crypto.randomUUID(),
-          command: {
-            campId,
-            throughSequence: notificationBoundary
-          }
-        }).then(() => setNotificationRefreshSignal((signal) => signal + 1))
-          .catch(() => undefined)
-      }
       await window.rovai.request('navigation.campViewed', {
         campId,
         throughGlobalSequence: snapshot.throughGlobalSequence
@@ -626,16 +611,17 @@ export function App(): React.JSX.Element {
   }, [])
 
   const refreshVisibleNotificationCamp = useCallback(async (
-    notification: InAppNotificationView
+    _episode: NotificationEpisodeView,
+    action: NotificationActionView
   ): Promise<boolean> => {
-    const campId = notification.camp.id
+    if (action.kind !== 'open_camp_message' || !action.messageId) return false
+    const campId = action.campId
     if (activeCampIdRef.current !== campId || viewRef.current !== 'camp') return false
     await refreshActiveCampSnapshot(campId)
     await afterNextPaint()
     if (activeCampIdRef.current !== campId || viewRef.current !== 'camp') return false
-    if (notification.kind !== 'camp_message_user_mention') return true
-    if (!notification.sourceAvailable || !notification.sourceMessageId) return false
-    return notificationMessageIsVisible(notification.sourceMessageId)
+    if (!action.available) return false
+    return notificationMessageIsVisible(action.messageId)
   }, [refreshActiveCampSnapshot])
 
   useEffect(() => {
@@ -1280,7 +1266,8 @@ export function App(): React.JSX.Element {
   }
 
   const navigateFromNotification = useCallback(async (
-    notification: InAppNotificationView
+    _episode: NotificationEpisodeView,
+    action: NotificationActionView
   ): Promise<NotificationNavigationResult> => {
     let result: NotificationNavigationResult = {
       status: 'failed',
@@ -1289,26 +1276,33 @@ export function App(): React.JSX.Element {
     let transitionActionCompleted = false
     const transitioned = await requestMemberTransition(async () => {
       try {
+        if (!action.available) {
+          result = {
+            status: 'failed',
+            message: '这个来源当前不可用。你可以显式选择卡片上的其他动作。'
+          }
+          return
+        }
         let anchoredMessages: readonly CampMessageView[] = []
-        if (notification.kind === 'camp_message_user_mention') {
-          if (!notification.sourceAvailable || !notification.sourceMessageId) {
+        if (action.kind === 'open_camp_message') {
+          if (!action.messageId) {
             result = {
               status: 'failed',
-              message: '原消息已不可用。通知仍保留在“全部”列表中。'
+              message: '消息动作没有可用的精确定位目标。'
             }
             return
           }
           const around = await window.rovai.request<CampMessageAroundSnapshot>(
             'camp.messages.around',
             {
-              campId: notification.camp.id,
-              messageId: notification.sourceMessageId
+              campId: action.campId,
+              messageId: action.messageId
             }
           )
           if (
             around.schemaVersion !== 1
-            || around.campId !== notification.camp.id
-            || around.anchorMessageId !== notification.sourceMessageId
+            || around.campId !== action.campId
+            || around.anchorMessageId !== action.messageId
           ) throw new Error('消息定位合同不兼容。')
           if (!around.sourceAvailable) {
             result = {
@@ -1317,39 +1311,38 @@ export function App(): React.JSX.Element {
             }
             return
           }
-          if (!around.messages.some((message) => message.id === notification.sourceMessageId)) {
+          if (!around.messages.some((message) => message.id === action.messageId)) {
             throw new Error('消息定位结果未包含目标消息。')
           }
           anchoredMessages = around.messages
         }
-        const target: NotificationFocusTarget | null = notification.kind === 'camp_message_user_mention'
-          ? notification.sourceMessageId
+        const target: NotificationFocusTarget | null = action.kind === 'open_camp_message'
+          ? action.messageId
             ? {
               requestId: ++notificationFocusSequence.current,
               kind: 'camp_message',
-              campTurnId: null,
-              messageId: notification.sourceMessageId
+              campTurnId: action.campTurnId,
+              messageId: action.messageId
             }
             : null
-          : notification.kind === 'runtime_permission_attention'
-          ? notification.attentionState === 'pending'
+          : action.kind === 'open_approval'
             ? {
               requestId: ++notificationFocusSequence.current,
               kind: 'approval',
-              campTurnId: null
+              campTurnId: null,
+              approvalId: action.approvalId ?? undefined
             }
-            : null
-          : notification.sourceAvailable && notification.campTurnId
+          : action.kind === 'open_camp_turn' && action.campTurnId
             ? {
               requestId: ++notificationFocusSequence.current,
               kind: 'camp_turn',
-              campTurnId: notification.campTurnId
+              campTurnId: action.campTurnId
             }
             : null
         setNotificationFocus(target ? { ...target, active: false } : null)
-        const activated = await activateCamp(notification.camp.id, {
+        const activated = await activateCamp(action.campId, {
           preserveNotificationFocus: target !== null,
-          reconcileDefaultLead: notification.sourceAvailable,
+          reconcileDefaultLead: true,
           suppressErrors: true,
           anchoredMessages
         })
@@ -1361,10 +1354,10 @@ export function App(): React.JSX.Element {
           return
         }
         if (
-          notification.kind === 'camp_message_user_mention'
-          && notification.sourceMessageId
+          action.kind === 'open_camp_message'
+          && action.messageId
           && !document.querySelector(
-            `[data-message-id="${CSS.escape(notification.sourceMessageId)}"]`
+            `[data-message-id="${CSS.escape(action.messageId)}"]`
           )
         ) {
           result = {
@@ -1390,25 +1383,30 @@ export function App(): React.JSX.Element {
   }, [activateCamp, requestMemberTransition])
 
   const presentNotificationNavigation = useCallback(async (
-    notification: InAppNotificationView
+    _episode: NotificationEpisodeView,
+    action: NotificationActionView
   ): Promise<boolean> => {
-    if (activeCampIdRef.current !== notification.camp.id || viewRef.current !== 'camp') return false
+    if (activeCampIdRef.current !== action.campId || viewRef.current !== 'camp') return false
     setNotificationFocus((current) => current ? { ...current, active: true } : current)
     await afterNextPaint()
-    if (notification.kind === 'camp_message_user_mention') {
-      if (!notification.sourceMessageId) return false
+    if (action.kind === 'open_camp_message') {
+      if (!action.messageId) return false
       const target = document.querySelector<HTMLElement>(
-        `[data-message-id="${CSS.escape(notification.sourceMessageId)}"]`
+        `[data-message-id="${CSS.escape(action.messageId)}"]`
       )
       return target !== null && document.activeElement === target
     }
-    if (notification.kind === 'runtime_permission_attention' && notification.attentionState === 'pending') {
-      const approvalDock = document.querySelector<HTMLElement>('.approval-dock')
-      return approvalDock?.contains(document.activeElement) === true
+    if (action.kind === 'open_approval') {
+      const approvalTarget = action.approvalId
+        ? document.querySelector<HTMLElement>(
+          `[data-approval-id="${CSS.escape(action.approvalId)}"]`
+        )
+        : document.querySelector<HTMLElement>('.approval-dock')
+      return approvalTarget?.contains(document.activeElement) === true
     }
-    if (notification.sourceAvailable && notification.campTurnId) {
+    if (action.kind === 'open_camp_turn' && action.campTurnId) {
       const targets = document.querySelectorAll<HTMLElement>(
-        `[data-camp-turn-id="${CSS.escape(notification.campTurnId)}"]`
+        `[data-camp-turn-id="${CSS.escape(action.campTurnId)}"]`
       )
       return [...targets].some((target) => target === document.activeElement)
     }
@@ -2348,6 +2346,7 @@ export function rectanglesIntersect(
 }
 
 export function notificationMessageIsVisible(messageId: string): boolean {
+  if (document.visibilityState !== 'visible' || !document.hasFocus()) return false
   const target = document.querySelector<HTMLElement>(
     `[data-message-id="${CSS.escape(messageId)}"]`
   )

@@ -47,6 +47,12 @@ SkillExposureSnapshot (immutable start-time evidence in ContextManifest)
 | Electron Main navigation preferences | 拥有本机 Project 隐藏偏好，并通过私有 Core method 同步 root access ledger |
 | Diagnostics | 默认只读取 DB stored state；用户显式“修复”才允许检查仍 active 的已知 roots |
 
+这里的“应用全局”只表示同一日常应用数据权威内共享，不表示不同 Core 数据目录可以共享一套可清理的
+Revision filesystem。日常安装版未显式覆盖时继续使用现有全局 Skill Library；开发版和打包验收版等
+显式隔离 Desktop 实例必须通过绝对 `--skill-library-root` 把 Library 绑定到自己的 `userData`。Core
+自动重启保留同一参数，任何一个实例的 `cleanup_orphan_revisions` 都只能清理本实例数据库拥有的私有
+Library。
+
 Renderer 不能直接调用 `skills.projectAccess.*`。Project 移除和恢复由 Main process 先同步 Core
 access state，再提交本机 Navigation preference；写入失败时恢复 Core access state。该 ledger 不引入
 Project table、Project aggregate 或 Camp 删除语义。

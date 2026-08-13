@@ -1181,12 +1181,24 @@ A native Runtime request asking the user to authorize a specific operation or re
 _Avoid_: Core policy decision, Workspace upgrade, silent permission grant
 
 **Runtime Permission Attention Episode**:
-A Camp-scoped period that begins when its eligible pending Runtime Permission Requests change from none to one or more and ends only when none remain. It represents one continuous need for user attention even when multiple AgentRuns or CampTurns contribute requests.
+A Camp-scoped generation that begins when its eligible pending Runtime Permission Requests change from none to one or more and resolves when none remain. A later zero-to-nonzero transition is a new generation and therefore a new Notification Episode.
 _Avoid_: per-Approval alert, AgentRun approval batch, CampTurn approval batch
 
-**In-App Notification**:
-A Core-owned durable user-attention projection created in the same SQLite transaction as its qualifying source fact and retained in Rovai-ai's Notification Center after its optional transient heads-up disappears. It has its own stable identity and read/clear lifecycle, but never authorizes, completes, reopens, or otherwise becomes authority for its linked Approval, CampTurn, or Camp.
-_Avoid_: macOS notification, ephemeral-only toast, replayed domain event, Electron Main preference file, business-state authority
+**Notification Occurrence**:
+An immutable Core-owned record that one qualifying source fact created user-attention meaning for `local_user`. It is admitted in the source fact's SQLite transaction and keeps only stable source references and semantic identity; acknowledgement, satisfaction and resolution belong to a separate disposition.
+_Avoid_: Inbox row, mutable notification, copied title or message body, replayed domain event
+
+**Notification Episode**:
+The Core-owned materialized user-visible item that aggregates Notification Occurrences by one stable collaboration, unassociated-message or approval-generation key. It is the only unit counted and rendered in the Notification Center, but never becomes authority for CampMessage, CampTurn, Approval or Camp state.
+_Avoid_: source fact, per-event toast, Renderer aggregation, business-state authority, ordinary Agent message
+
+**Notification Change Journal**:
+The minimal durable sequence of Notification Episode membership and attention changes used for bounded incremental refresh and transient heads-up eligibility. It stores identities, versions, operation and cause rather than a copied Episode Read View; reads hydrate current display semantics and actions from Core sources.
+_Avoid_: `event_log`, notification history source, full read-view snapshot, Renderer cursor file
+
+**Notification Attention Revision**:
+The monotonic Notification Episode revision that advances only when a new attention-worthy source meaning is admitted. Presentation-only hydration changes, acknowledgement, satisfaction, resolution, Camp renaming and source availability do not advance it; clear is bounded through an observed Attention Revision.
+_Avoid_: Episode version, database row version, display revision, timestamp
 
 **Local User (`local_user`)**:
 The sole current human user identity resolved and owned by Core in the single-user product contract. Agents can request attention with `--to-user` but cannot submit, select, infer, or receive this identity; display names are presentation and never replace the stable `local_user` fact.
@@ -1200,9 +1212,9 @@ _Avoid_: parsed `@you`, Member Mention, user recipient, notification-only decora
 The message-local escalation produced by `mentionUser=true` / `--to-user` when a public CampMessage creates a new unresolved user decision, required answer or action, or fulfills the user's explicit request for an important asynchronous-result notification. Ordinary CampMessages are already user-visible; attention is re-evaluated for every new message and never propagates through replies, Tasks, parent/child AgentRuns, A2A work, prior mentions, or Agent roles. Core deterministically executes the submitted boolean and does not infer, inherit, suppress, or authorize it from prose.
 _Avoid_: user visibility, user recipient, ordinary final reply, internal handoff, inherited mention, user approval, Core role policy
 
-**User Mention Notification**:
-The durable `camp_message_user_mention` In-App Notification created atomically with one CampMessage that contains a Current User Mention. It is unique per kind, `local_user`, and source message; each message keeps an independent Inbox row even when transient heads-up presentation aggregates by Camp.
-_Avoid_: per-Camp merged Inbox item, Message Delivery, read receipt, body-matched alert, transient-only toast
+**User Mention Occurrence**:
+The immutable Notification Occurrence created atomically with one CampMessage containing a Current User Mention. Every source message remains independently acknowledgeable and exactly navigable even when several occurrences share one CampTurn Notification Episode; the earliest unacknowledged source is the Episode's primary mention action.
+_Avoid_: per-message Inbox row, merged acknowledgement, Message Delivery, read receipt, body-matched alert
 
 **In-App Dynamic Approval**:
 An Adapter capability that lets a native Runtime pause an operation, send its exact permission options to Rovai-ai, and resume from the user's recorded decision. Its absence is an explicit Runtime limitation and never causes Rovai-ai to synthesize a request or reinstate Core resource authorization.

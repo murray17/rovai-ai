@@ -67,7 +67,7 @@ historical recipient set never adds an Agent recipient.
 
 ```text
 current_user_mention(userId="local_user")
-  + camp_message_user_mention(recipientUserId="local_user")
+  + user_mention NotificationOccurrence(recipientUserId="local_user")
 ```
 
 It creates no Message Delivery, target AgentRun, wakeup or A2A slot. Agent input/output does not expose
@@ -107,7 +107,7 @@ following body content. Display name fallback is localized `你` / `You`; the id
 
 Renderer, exact/collection Camp reads, search, Context, plain-text Clipboard, notification summary and accessibility
 derive from the same projected content. Canonical content digest includes segment kind and stable identity, not the
-current display name. Full rules are in [Current User Attention v2](current-user-attention-v2.md).
+current display name. Full rules are in [Current User Attention v3](current-user-attention-v3.md).
 
 ## 4. Forward and caller return
 
@@ -163,7 +163,7 @@ Acceptance persists in one Core transaction:
 
 - one public CampMessage with normalized Structured Content, content digest, frozen Agent recipient/presentation
   metadata, source operation identity and reply reference;
-- exactly one `camp_message_user_mention` Notification when `mentionUser=true`, otherwise none;
+- exactly one immutable `user_mention` NotificationOccurrence when `mentionUser=true`, otherwise none;
 - one Message Delivery v2 and one CampTurn slot reservation per Effective Agent Recipient;
 - one send event, one notification event when applicable, one event per Delivery, receipt and durable command result.
 
@@ -266,7 +266,7 @@ shortcuts.
 ## References
 
 - [ADR-0165: Core-Owned Current-User Message Attention](../adr/0165-core-owned-current-user-message-attention.md)
-- [Current User Attention v2](current-user-attention-v2.md)
+- [Current User Attention v3](current-user-attention-v3.md)
 - [Message Delivery v2](message-delivery-v2.md)
 - [Built-in Tool Transport v8](builtin-tool-transport-v8.md)
 - [Camp Message Send v4 (historical)](camp-message-send-v4.md)

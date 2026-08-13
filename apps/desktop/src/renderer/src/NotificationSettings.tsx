@@ -1,19 +1,20 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { InAppNotificationPreference, StoredCommandResult } from '@contracts'
+import type { NotificationPreference, StoredCommandResult } from '@contracts'
 import { SettingsPageHeader } from './SettingsPageHeader'
 
 type PreferenceKey =
   | 'headsUpEnabled'
   | 'approvalHeadsUpEnabled'
-  | 'executionHeadsUpEnabled'
   | 'userMentionHeadsUpEnabled'
+  | 'turnCompletedHeadsUpEnabled'
+  | 'turnIncompleteHeadsUpEnabled'
 
 export function NotificationSettings({
   onOpenNotificationCenter
 }: {
   onOpenNotificationCenter(trigger: HTMLButtonElement): void
 }): React.JSX.Element {
-  const [preference, setPreference] = useState<InAppNotificationPreference | null>(null)
+  const [preference, setPreference] = useState<NotificationPreference | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -22,7 +23,7 @@ export function NotificationSettings({
     setLoading(true)
     setError(null)
     try {
-      const next = await window.rovai.request<InAppNotificationPreference>(
+      const next = await window.rovai.request<NotificationPreference>(
         'notifications.preference.get'
       )
       setPreference(assertPreference(next))
@@ -52,8 +53,9 @@ export function NotificationSettings({
             expectedVersion: preference.version,
             headsUpEnabled: next.headsUpEnabled,
             approvalHeadsUpEnabled: next.approvalHeadsUpEnabled,
-            executionHeadsUpEnabled: next.executionHeadsUpEnabled,
-            userMentionHeadsUpEnabled: next.userMentionHeadsUpEnabled
+            userMentionHeadsUpEnabled: next.userMentionHeadsUpEnabled,
+            turnCompletedHeadsUpEnabled: next.turnCompletedHeadsUpEnabled,
+            turnIncompleteHeadsUpEnabled: next.turnIncompleteHeadsUpEnabled
           }
         }
       )
@@ -78,7 +80,7 @@ export function NotificationSettings({
       <SettingsPageHeader
         eyebrow="Settings / Notifications"
         title="通知"
-        description="待审批、执行结果和消息提及始终保存在通知中心；这里只控制新通知的临时浮层。"
+        description="待审批、提到你和本轮结果始终保存在通知中心；这里只控制新事项的临时浮层。"
         aside={(
           <button className="primary-button" type="button" onClick={(event) => onOpenNotificationCenter(event.currentTarget)}>
             打开通知中心
@@ -120,18 +122,25 @@ export function NotificationSettings({
                 onChange={(checked) => void update('approvalHeadsUpEnabled', checked)}
               />
               <NotificationSwitch
-                label="执行结束"
-                description="一次协作完成或未完成时提醒。"
-                checked={preference.executionHeadsUpEnabled}
-                disabled={!preference.headsUpEnabled}
-                onChange={(checked) => void update('executionHeadsUpEnabled', checked)}
-              />
-              <NotificationSwitch
-                label="消息提及"
-                description="有公共 Camp 消息明确提及你时提醒。"
+                label="提到你"
+                description="队员在公共 Camp 消息中明确提到你时提醒。"
                 checked={preference.userMentionHeadsUpEnabled}
                 disabled={!preference.headsUpEnabled}
                 onChange={(checked) => void update('userMentionHeadsUpEnabled', checked)}
+              />
+              <NotificationSwitch
+                label="本轮完成"
+                description="本轮协作完成，等待你的下一步时提醒。"
+                checked={preference.turnCompletedHeadsUpEnabled}
+                disabled={!preference.headsUpEnabled}
+                onChange={(checked) => void update('turnCompletedHeadsUpEnabled', checked)}
+              />
+              <NotificationSwitch
+                label="执行未完成"
+                description="本轮失败或未能证明完成时提醒，卡片会区分两种结果。"
+                checked={preference.turnIncompleteHeadsUpEnabled}
+                disabled={!preference.headsUpEnabled}
+                onChange={(checked) => void update('turnIncompleteHeadsUpEnabled', checked)}
               />
             </div>
           </fieldset>
@@ -143,10 +152,15 @@ export function NotificationSettings({
           <h2 id="notification-boundary-heading">持久边界</h2>
         </div>
         <div className="notification-boundary-band">
-          <span aria-hidden="true">◇</span>
+          <span aria-hidden="true">
+            <svg viewBox="0 0 20 20">
+              <path d="M10 3.25 16.75 10 10 16.75 3.25 10 10 3.25Z" />
+              <path d="M10 7.25v3.5M10 13.5h.01" />
+            </svg>
+          </span>
           <div>
             <strong>关闭浮层不会丢失事项</strong>
-            <p>待审批、执行结果和消息提及仍进入通知中心；当前对话的 Approval Dock 和执行状态也保持原有位置。</p>
+            <p>待审批、提到你和本轮结果仍进入通知中心；普通队员消息只留在 Camp 时间线，不产生通知。</p>
           </div>
         </div>
       </section>
@@ -184,21 +198,22 @@ function NotificationSwitch({
   )
 }
 
-export function preferenceFromUnknown(value: unknown): InAppNotificationPreference | null {
+export function preferenceFromUnknown(value: unknown): NotificationPreference | null {
   if (!value || typeof value !== 'object') return null
-  const candidate = value as Partial<InAppNotificationPreference>
+  const candidate = value as Partial<NotificationPreference>
   if (
     typeof candidate.headsUpEnabled !== 'boolean'
     || typeof candidate.approvalHeadsUpEnabled !== 'boolean'
-    || typeof candidate.executionHeadsUpEnabled !== 'boolean'
     || typeof candidate.userMentionHeadsUpEnabled !== 'boolean'
+    || typeof candidate.turnCompletedHeadsUpEnabled !== 'boolean'
+    || typeof candidate.turnIncompleteHeadsUpEnabled !== 'boolean'
     || typeof candidate.version !== 'number'
     || typeof candidate.updatedAt !== 'string'
   ) return null
-  return candidate as InAppNotificationPreference
+  return candidate as NotificationPreference
 }
 
-function assertPreference(value: unknown): InAppNotificationPreference {
+function assertPreference(value: unknown): NotificationPreference {
   const preference = preferenceFromUnknown(value)
   if (!preference) throw new Error('通知设置合同不兼容。')
   return preference

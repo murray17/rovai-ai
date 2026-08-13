@@ -1366,7 +1366,7 @@ describe('task event projections', () => {
     expect(markup).toContain('id="notification-heads-up-heading"')
     expect(markup).toContain('id="notification-boundary-heading"')
     expect(markup).toContain('关闭浮层不会丢失事项')
-    expect(markup).toContain('Approval Dock')
+    expect(markup).toContain('普通队员消息只留在 Camp 时间线，不产生通知')
   })
 
   it('keeps the resolved theme and saved preference in the Appearance page header', () => {

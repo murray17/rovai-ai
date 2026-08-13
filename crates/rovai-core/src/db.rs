@@ -43,8 +43,10 @@ pub struct Database {
     path: PathBuf,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.67";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 33;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.71";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 34;
+const V071_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.67";
+const V071_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 33;
 const V067_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.66";
 const V067_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 32;
 const V066_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.62";
@@ -66,6 +68,7 @@ struct CurrentMigrationState {
     v76: bool,
     v77: bool,
     v78: bool,
+    v79: bool,
 }
 
 impl CurrentMigrationState {
@@ -76,27 +79,32 @@ impl CurrentMigrationState {
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
         {
-            return self.v70 && self.v71 && self.v76 && self.v77 && self.v78;
+            return self.v70 && self.v71 && self.v76 && self.v77 && self.v78 && self.v79;
+        }
+        if contract == V071_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V071_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70 && self.v71 && self.v76 && self.v77 && self.v78 && !self.v79;
         }
         if contract == V067_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V067_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
-            return self.v70 && self.v71 && self.v76 && self.v77 && !self.v78;
+            return self.v70 && self.v71 && self.v76 && self.v77 && !self.v78 && !self.v79;
         }
         if contract == V066_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V066_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
-            return self.v70 && self.v71 && self.v76 && !self.v77 && !self.v78;
+            return self.v70 && self.v71 && self.v76 && !self.v77 && !self.v78 && !self.v79;
         }
         if contract == V062_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V062_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
-            return self.v70 && self.v71 && !self.v76 && !self.v77 && !self.v78;
+            return self.v70 && self.v71 && !self.v76 && !self.v77 && !self.v78 && !self.v79;
         }
         if contract == V062_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V054_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
-            return self.v70 && !self.v71 && !self.v76 && !self.v77 && !self.v78;
+            return self.v70 && !self.v71 && !self.v76 && !self.v77 && !self.v78 && !self.v79;
         }
         contract == V052_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V052_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
@@ -105,6 +113,7 @@ impl CurrentMigrationState {
             && !self.v76
             && !self.v77
             && !self.v78
+            && !self.v79
     }
 }
 
@@ -171,7 +180,8 @@ fn has_current_data_contract(path: &Path) -> bool {
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 71),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 76),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 77),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 78)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 78),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 79)
         "#,
         [],
         |row| {
@@ -185,6 +195,7 @@ fn has_current_data_contract(path: &Path) -> bool {
                 v76: row.get(6)?,
                 v77: row.get(7)?,
                 v78: row.get(8)?,
+                v79: row.get(9)?,
             })
         },
     );
@@ -1269,10 +1280,13 @@ impl Database {
             if !self.schema_migration_applied(78)? {
                 self.migrate_current_user_attention_v78()?;
             }
+            if !self.schema_migration_applied(79)? {
+                self.migrate_notification_episodes_v79()?;
+            }
             if let Err(error) =
-                crate::notification::maintain_in_app_notification_retention(self.connection())
+                crate::notification::maintain_notification_episode_retention(self.connection())
             {
-                eprintln!("In-App Notification startup retention failed: {error:#}");
+                eprintln!("Notification Episode startup retention failed: {error:#}");
             }
             return Ok(());
         }
@@ -1553,10 +1567,13 @@ impl Database {
         if !self.schema_migration_applied(78)? {
             self.migrate_current_user_attention_v78()?;
         }
+        if !self.schema_migration_applied(79)? {
+            self.migrate_notification_episodes_v79()?;
+        }
         if let Err(error) =
-            crate::notification::maintain_in_app_notification_retention(self.connection())
+            crate::notification::maintain_notification_episode_retention(self.connection())
         {
-            eprintln!("In-App Notification startup retention failed: {error:#}");
+            eprintln!("Notification Episode startup retention failed: {error:#}");
         }
         Ok(())
     }
@@ -7355,6 +7372,749 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_notification_episodes_v79(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            DROP TRIGGER IF EXISTS in_app_notification_created_event;
+            DROP TRIGGER IF EXISTS in_app_notification_changed_event;
+            DROP TRIGGER IF EXISTS in_app_notification_camp_turn_insert;
+            DROP TRIGGER IF EXISTS in_app_notification_camp_turn_update;
+            DROP TRIGGER IF EXISTS in_app_notification_attention_insert;
+            DROP TRIGGER IF EXISTS in_app_notification_attention_pending_update;
+            DROP TRIGGER IF EXISTS in_app_notification_attention_resolve;
+            DROP TRIGGER IF EXISTS in_app_notification_retention;
+            DROP TRIGGER IF EXISTS in_app_notification_user_mention_source_insert;
+            DROP TRIGGER IF EXISTS in_app_notification_user_mention_source_update;
+            DROP TABLE IF EXISTS in_app_notification;
+            DROP TABLE IF EXISTS in_app_notification_preference;
+
+            CREATE TABLE notification_change_clock (
+                singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+                current_sequence INTEGER NOT NULL DEFAULT 0 CHECK(current_sequence >= 0),
+                retained_floor_sequence INTEGER NOT NULL DEFAULT 0
+                    CHECK(retained_floor_sequence >= 0
+                        AND retained_floor_sequence <= current_sequence)
+            );
+            INSERT INTO notification_change_clock(
+                singleton, current_sequence, retained_floor_sequence
+            ) VALUES (1, 0, 0);
+
+            CREATE TABLE notification_episode (
+                id TEXT PRIMARY KEY,
+                aggregation_key TEXT NOT NULL UNIQUE,
+                recipient_user_id TEXT NOT NULL CHECK(recipient_user_id = 'local_user'),
+                kind TEXT NOT NULL CHECK(kind IN ('collaboration', 'message', 'approval')),
+                camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
+                camp_turn_id TEXT,
+                source_message_id TEXT,
+                approval_generation INTEGER,
+                version INTEGER NOT NULL DEFAULT 0 CHECK(version >= 0),
+                attention_revision INTEGER NOT NULL DEFAULT 0 CHECK(attention_revision >= 0),
+                created_change_sequence INTEGER NOT NULL CHECK(created_change_sequence >= 1),
+                last_change_sequence INTEGER NOT NULL CHECK(last_change_sequence >= 1),
+                sort_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                CHECK (
+                    (kind = 'collaboration' AND camp_turn_id IS NOT NULL
+                        AND source_message_id IS NULL AND approval_generation IS NULL)
+                    OR
+                    (kind = 'message' AND camp_turn_id IS NULL
+                        AND source_message_id IS NOT NULL AND approval_generation IS NULL)
+                    OR
+                    (kind = 'approval' AND camp_turn_id IS NULL
+                        AND source_message_id IS NULL AND approval_generation >= 1)
+                )
+            );
+            CREATE INDEX notification_episode_inbox_idx
+                ON notification_episode(recipient_user_id, sort_at DESC, id DESC);
+            CREATE INDEX notification_episode_camp_idx
+                ON notification_episode(camp_id, kind, approval_generation DESC);
+
+            CREATE TABLE notification_episode_disposition (
+                episode_id TEXT PRIMARY KEY REFERENCES notification_episode(id) ON DELETE CASCADE,
+                cleared_through_attention_revision INTEGER NOT NULL DEFAULT 0
+                    CHECK(cleared_through_attention_revision >= 0),
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE notification_occurrence (
+                id TEXT PRIMARY KEY,
+                episode_id TEXT NOT NULL REFERENCES notification_episode(id) ON DELETE CASCADE,
+                recipient_user_id TEXT NOT NULL CHECK(recipient_user_id = 'local_user'),
+                semantic TEXT NOT NULL CHECK(semantic IN (
+                    'approval_pending', 'user_mention', 'turn_completed',
+                    'turn_failed', 'turn_incomplete'
+                )),
+                source_type TEXT NOT NULL CHECK(source_type IN (
+                    'approval', 'camp_message', 'camp_turn'
+                )),
+                source_id TEXT NOT NULL,
+                source_revision INTEGER NOT NULL CHECK(source_revision >= 1),
+                camp_id TEXT NOT NULL,
+                camp_turn_id TEXT,
+                source_message_id TEXT,
+                approval_id TEXT,
+                admitted_episode_version INTEGER NOT NULL
+                    CHECK(admitted_episode_version >= 1),
+                admitted_attention_revision INTEGER NOT NULL
+                    CHECK(admitted_attention_revision >= 1),
+                admitted_change_sequence INTEGER NOT NULL
+                    CHECK(admitted_change_sequence >= 1),
+                occurred_at TEXT NOT NULL,
+                UNIQUE(
+                    recipient_user_id, semantic, source_type, source_id, source_revision
+                ),
+                CHECK (
+                    (semantic = 'user_mention' AND source_type = 'camp_message'
+                        AND source_message_id = source_id AND approval_id IS NULL)
+                    OR
+                    (semantic IN ('turn_completed', 'turn_failed', 'turn_incomplete')
+                        AND source_type = 'camp_turn' AND camp_turn_id = source_id
+                        AND source_message_id IS NULL AND approval_id IS NULL)
+                    OR
+                    (semantic = 'approval_pending' AND source_type = 'approval'
+                        AND approval_id = source_id AND source_message_id IS NULL)
+                )
+            );
+            CREATE INDEX notification_occurrence_episode_idx
+                ON notification_occurrence(
+                    episode_id, admitted_attention_revision, occurred_at, id
+                );
+            CREATE INDEX notification_occurrence_source_idx
+                ON notification_occurrence(source_type, source_id, source_revision);
+            CREATE INDEX notification_occurrence_change_idx
+                ON notification_occurrence(recipient_user_id, admitted_change_sequence);
+
+            CREATE TABLE notification_occurrence_disposition (
+                occurrence_id TEXT PRIMARY KEY
+                    REFERENCES notification_occurrence(id) ON DELETE CASCADE,
+                acknowledged_at TEXT,
+                satisfied_at TEXT,
+                resolved_at TEXT,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE notification_change_journal (
+                change_sequence INTEGER PRIMARY KEY CHECK(change_sequence >= 1),
+                episode_id TEXT NOT NULL,
+                episode_version INTEGER NOT NULL CHECK(episode_version >= 1),
+                attention_revision INTEGER NOT NULL CHECK(attention_revision >= 1),
+                operation TEXT NOT NULL CHECK(operation IN ('upsert', 'remove')),
+                change_cause TEXT NOT NULL CHECK(change_cause IN (
+                    'occurrence_admitted', 'acknowledged', 'satisfied', 'resolved',
+                    'cleared', 'retained'
+                )),
+                heads_up_reason TEXT CHECK(heads_up_reason IN (
+                    'approval_pending', 'user_mention', 'turn_completed',
+                    'turn_failed', 'turn_incomplete'
+                )),
+                changed_at TEXT NOT NULL
+            );
+            CREATE INDEX notification_change_journal_episode_idx
+                ON notification_change_journal(episode_id, change_sequence DESC);
+
+            CREATE TABLE notification_preference (
+                singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+                heads_up_enabled INTEGER NOT NULL DEFAULT 1
+                    CHECK(heads_up_enabled IN (0, 1)),
+                approval_heads_up_enabled INTEGER NOT NULL DEFAULT 1
+                    CHECK(approval_heads_up_enabled IN (0, 1)),
+                user_mention_heads_up_enabled INTEGER NOT NULL DEFAULT 1
+                    CHECK(user_mention_heads_up_enabled IN (0, 1)),
+                turn_completed_heads_up_enabled INTEGER NOT NULL DEFAULT 1
+                    CHECK(turn_completed_heads_up_enabled IN (0, 1)),
+                turn_incomplete_heads_up_enabled INTEGER NOT NULL DEFAULT 1
+                    CHECK(turn_incomplete_heads_up_enabled IN (0, 1)),
+                version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO notification_preference(
+                singleton, heads_up_enabled, approval_heads_up_enabled,
+                user_mention_heads_up_enabled, turn_completed_heads_up_enabled,
+                turn_incomplete_heads_up_enabled, version, updated_at
+            ) VALUES (1, 1, 1, 1, 1, 1, 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+
+            CREATE TRIGGER notification_episode_disposition_insert
+            AFTER INSERT ON notification_episode
+            BEGIN
+                INSERT INTO notification_episode_disposition(
+                    episode_id, cleared_through_attention_revision, updated_at
+                ) VALUES (NEW.id, 0, NEW.created_at);
+            END;
+
+            CREATE TRIGGER notification_occurrence_update_guard
+            BEFORE UPDATE ON notification_occurrence
+            BEGIN
+                SELECT RAISE(ABORT, 'Notification Occurrence is immutable');
+            END;
+
+            CREATE TRIGGER notification_occurrence_materialize_episode
+            AFTER INSERT ON notification_occurrence
+            BEGIN
+                INSERT INTO notification_occurrence_disposition(
+                    occurrence_id, acknowledged_at, satisfied_at, resolved_at, updated_at
+                ) VALUES (NEW.id, NULL, NULL, NULL, NEW.occurred_at);
+
+                UPDATE notification_episode
+                SET version = version + 1,
+                    attention_revision = NEW.admitted_attention_revision,
+                    last_change_sequence = NEW.admitted_change_sequence,
+                    sort_at = NEW.occurred_at,
+                    updated_at = NEW.occurred_at
+                WHERE id = NEW.episode_id;
+
+                INSERT INTO notification_change_journal(
+                    change_sequence, episode_id, episode_version, attention_revision,
+                    operation, change_cause, heads_up_reason, changed_at
+                )
+                SELECT NEW.admitted_change_sequence, id, version, attention_revision,
+                       'upsert', 'occurrence_admitted', NEW.semantic, NEW.occurred_at
+                FROM notification_episode WHERE id = NEW.episode_id;
+
+                INSERT INTO event_log(
+                    event_id, task_id, turn_id, sequence, event_type, native_method,
+                    payload_json, camp_id, entity_type, entity_id,
+                    actor_type, actor_id, created_at
+                )
+                SELECT lower(hex(randomblob(16))), NULL, NULL, NULL,
+                       'notification_episode.changed', NULL,
+                       json_object(
+                           'episodeId', id,
+                           'episodeVersion', version,
+                           'attentionRevision', attention_revision,
+                           'changeSequence', NEW.admitted_change_sequence,
+                           'changeCause', 'occurrence_admitted'
+                       ),
+                       camp_id, 'notification_episode', id,
+                       'system', 'notification-module', NEW.occurred_at
+                FROM notification_episode WHERE id = NEW.episode_id;
+            END;
+
+            CREATE TRIGGER notification_occurrence_disposition_changed
+            AFTER UPDATE OF acknowledged_at, satisfied_at, resolved_at
+            ON notification_occurrence_disposition
+            WHEN OLD.acknowledged_at IS NOT NEW.acknowledged_at
+              OR OLD.satisfied_at IS NOT NEW.satisfied_at
+              OR OLD.resolved_at IS NOT NEW.resolved_at
+            BEGIN
+                UPDATE notification_change_clock
+                SET current_sequence = current_sequence + 1
+                WHERE singleton = 1;
+
+                UPDATE notification_episode
+                SET version = version + 1,
+                    last_change_sequence = (
+                        SELECT current_sequence FROM notification_change_clock
+                        WHERE singleton = 1
+                    ),
+                    updated_at = NEW.updated_at
+                WHERE id = (
+                    SELECT episode_id FROM notification_occurrence
+                    WHERE id = NEW.occurrence_id
+                );
+
+                INSERT INTO notification_change_journal(
+                    change_sequence, episode_id, episode_version, attention_revision,
+                    operation, change_cause, heads_up_reason, changed_at
+                )
+                SELECT clock.current_sequence, episode.id, episode.version,
+                       episode.attention_revision, 'upsert',
+                       CASE
+                           WHEN OLD.acknowledged_at IS NULL AND NEW.acknowledged_at IS NOT NULL
+                               THEN 'acknowledged'
+                           WHEN OLD.satisfied_at IS NULL AND NEW.satisfied_at IS NOT NULL
+                               THEN 'satisfied'
+                           ELSE 'resolved'
+                       END,
+                       NULL, NEW.updated_at
+                FROM notification_change_clock AS clock
+                JOIN notification_occurrence AS occurrence
+                  ON occurrence.id = NEW.occurrence_id
+                JOIN notification_episode AS episode
+                  ON episode.id = occurrence.episode_id
+                WHERE clock.singleton = 1;
+
+                INSERT INTO event_log(
+                    event_id, task_id, turn_id, sequence, event_type, native_method,
+                    payload_json, camp_id, entity_type, entity_id,
+                    actor_type, actor_id, created_at
+                )
+                SELECT lower(hex(randomblob(16))), NULL, NULL, NULL,
+                       'notification_episode.changed', NULL,
+                       json_object(
+                           'episodeId', episode.id,
+                           'episodeVersion', episode.version,
+                           'attentionRevision', episode.attention_revision,
+                           'changeSequence', clock.current_sequence,
+                           'changeCause', CASE
+                               WHEN OLD.acknowledged_at IS NULL
+                                    AND NEW.acknowledged_at IS NOT NULL THEN 'acknowledged'
+                               WHEN OLD.satisfied_at IS NULL
+                                    AND NEW.satisfied_at IS NOT NULL THEN 'satisfied'
+                               ELSE 'resolved'
+                           END
+                       ),
+                       episode.camp_id, 'notification_episode', episode.id,
+                       'system', 'notification-module', NEW.updated_at
+                FROM notification_change_clock AS clock
+                JOIN notification_occurrence AS occurrence
+                  ON occurrence.id = NEW.occurrence_id
+                JOIN notification_episode AS episode
+                  ON episode.id = occurrence.episode_id
+                WHERE clock.singleton = 1;
+            END;
+
+            CREATE TRIGGER notification_episode_cleared
+            AFTER UPDATE OF cleared_through_attention_revision
+            ON notification_episode_disposition
+            WHEN NEW.cleared_through_attention_revision
+                 > OLD.cleared_through_attention_revision
+            BEGIN
+                UPDATE notification_change_clock
+                SET current_sequence = current_sequence + 1
+                WHERE singleton = 1;
+
+                UPDATE notification_episode
+                SET version = version + 1,
+                    last_change_sequence = (
+                        SELECT current_sequence FROM notification_change_clock
+                        WHERE singleton = 1
+                    ),
+                    updated_at = NEW.updated_at
+                WHERE id = NEW.episode_id;
+
+                INSERT INTO notification_change_journal(
+                    change_sequence, episode_id, episode_version, attention_revision,
+                    operation, change_cause, heads_up_reason, changed_at
+                )
+                SELECT clock.current_sequence, episode.id, episode.version,
+                       episode.attention_revision,
+                       CASE WHEN episode.attention_revision
+                                      <= NEW.cleared_through_attention_revision
+                            THEN 'remove' ELSE 'upsert' END,
+                       'cleared', NULL, NEW.updated_at
+                FROM notification_change_clock AS clock
+                JOIN notification_episode AS episode ON episode.id = NEW.episode_id
+                WHERE clock.singleton = 1;
+            END;
+
+            CREATE TRIGGER notification_episode_retained_remove
+            BEFORE DELETE ON notification_episode
+            BEGIN
+                UPDATE notification_change_clock
+                SET current_sequence = current_sequence + 1
+                WHERE singleton = 1;
+
+                INSERT INTO notification_change_journal(
+                    change_sequence, episode_id, episode_version, attention_revision,
+                    operation, change_cause, heads_up_reason, changed_at
+                )
+                SELECT current_sequence, OLD.id, OLD.version + 1,
+                       MAX(OLD.attention_revision, 1), 'remove', 'retained', NULL,
+                       strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                FROM notification_change_clock WHERE singleton = 1;
+            END;
+
+            CREATE TRIGGER notification_user_mention_occurrence
+            AFTER INSERT ON camp_message
+            WHEN NEW.author_type = 'agent'
+              AND NEW.structured_content_json IS NOT NULL
+              AND json_valid(NEW.structured_content_json)
+              AND EXISTS (
+                  SELECT 1 FROM json_each(NEW.structured_content_json)
+                  WHERE json_extract(value, '$.kind') = 'current_user_mention'
+                    AND json_extract(value, '$.userId') = 'local_user'
+              )
+            BEGIN
+                UPDATE notification_change_clock
+                SET current_sequence = current_sequence + 1 WHERE singleton = 1;
+
+                INSERT INTO notification_episode(
+                    id, aggregation_key, recipient_user_id, kind, camp_id,
+                    camp_turn_id, source_message_id, approval_generation,
+                    version, attention_revision, created_change_sequence,
+                    last_change_sequence, sort_at, created_at, updated_at
+                ) VALUES (
+                    lower(hex(randomblob(16))),
+                    CASE WHEN NEW.camp_turn_id IS NOT NULL
+                         THEN 'turn:local_user:' || NEW.camp_turn_id
+                         ELSE 'message:local_user:' || NEW.id END,
+                    'local_user',
+                    CASE WHEN NEW.camp_turn_id IS NOT NULL
+                         THEN 'collaboration' ELSE 'message' END,
+                    NEW.camp_id, NEW.camp_turn_id,
+                    CASE WHEN NEW.camp_turn_id IS NULL THEN NEW.id ELSE NULL END,
+                    NULL, 0, 0,
+                    (SELECT current_sequence FROM notification_change_clock WHERE singleton = 1),
+                    (SELECT current_sequence FROM notification_change_clock WHERE singleton = 1),
+                    NEW.created_at, NEW.created_at, NEW.created_at
+                ) ON CONFLICT(aggregation_key) DO NOTHING;
+
+                INSERT INTO notification_occurrence(
+                    id, episode_id, recipient_user_id, semantic,
+                    source_type, source_id, source_revision, camp_id,
+                    camp_turn_id, source_message_id, approval_id,
+                    admitted_episode_version, admitted_attention_revision,
+                    admitted_change_sequence, occurred_at
+                )
+                SELECT lower(hex(randomblob(16))), episode.id, 'local_user',
+                       'user_mention', 'camp_message', NEW.id, NEW.version, NEW.camp_id,
+                       NEW.camp_turn_id, NEW.id, NULL, episode.version + 1,
+                       episode.attention_revision + 1,
+                       clock.current_sequence, NEW.created_at
+                FROM notification_episode AS episode
+                JOIN notification_change_clock AS clock ON clock.singleton = 1
+                WHERE episode.aggregation_key = CASE WHEN NEW.camp_turn_id IS NOT NULL
+                    THEN 'turn:local_user:' || NEW.camp_turn_id
+                    ELSE 'message:local_user:' || NEW.id END
+                ON CONFLICT(
+                    recipient_user_id, semantic, source_type, source_id, source_revision
+                ) DO NOTHING;
+            END;
+
+            CREATE TRIGGER notification_camp_turn_terminal_insert
+            AFTER INSERT ON camp_turn
+            WHEN NEW.status IN ('completed', 'failed', 'cancelled')
+              AND NOT (NEW.status = 'cancelled' AND NEW.cancel_requested_at IS NOT NULL)
+            BEGIN
+                UPDATE notification_change_clock
+                SET current_sequence = current_sequence + 1 WHERE singleton = 1;
+
+                INSERT INTO notification_episode(
+                    id, aggregation_key, recipient_user_id, kind, camp_id,
+                    camp_turn_id, source_message_id, approval_generation,
+                    version, attention_revision, created_change_sequence,
+                    last_change_sequence, sort_at, created_at, updated_at
+                ) VALUES (
+                    lower(hex(randomblob(16))), 'turn:local_user:' || NEW.id,
+                    'local_user', 'collaboration', NEW.camp_id, NEW.id, NULL, NULL,
+                    0, 0,
+                    (SELECT current_sequence FROM notification_change_clock WHERE singleton = 1),
+                    (SELECT current_sequence FROM notification_change_clock WHERE singleton = 1),
+                    COALESCE(NEW.ended_at, NEW.updated_at),
+                    COALESCE(NEW.ended_at, NEW.updated_at),
+                    COALESCE(NEW.ended_at, NEW.updated_at)
+                ) ON CONFLICT(aggregation_key) DO NOTHING;
+
+                INSERT INTO notification_occurrence(
+                    id, episode_id, recipient_user_id, semantic,
+                    source_type, source_id, source_revision, camp_id,
+                    camp_turn_id, source_message_id, approval_id,
+                    admitted_episode_version, admitted_attention_revision,
+                    admitted_change_sequence, occurred_at
+                )
+                SELECT lower(hex(randomblob(16))), episode.id, 'local_user',
+                       CASE NEW.status WHEN 'completed' THEN 'turn_completed'
+                            WHEN 'failed' THEN 'turn_failed' ELSE 'turn_incomplete' END,
+                       'camp_turn', NEW.id, NEW.version, NEW.camp_id,
+                       NEW.id, NULL, NULL, episode.version + 1,
+                       episode.attention_revision + 1,
+                       clock.current_sequence, COALESCE(NEW.ended_at, NEW.updated_at)
+                FROM notification_episode AS episode
+                JOIN notification_change_clock AS clock ON clock.singleton = 1
+                WHERE episode.aggregation_key = 'turn:local_user:' || NEW.id
+                ON CONFLICT(
+                    recipient_user_id, semantic, source_type, source_id, source_revision
+                ) DO NOTHING;
+            END;
+
+            CREATE TRIGGER notification_camp_turn_terminal_update
+            AFTER UPDATE OF status ON camp_turn
+            WHEN OLD.status NOT IN ('completed', 'failed', 'cancelled')
+              AND NEW.status IN ('completed', 'failed', 'cancelled')
+              AND NOT (NEW.status = 'cancelled' AND NEW.cancel_requested_at IS NOT NULL)
+            BEGIN
+                UPDATE notification_change_clock
+                SET current_sequence = current_sequence + 1 WHERE singleton = 1;
+
+                INSERT INTO notification_episode(
+                    id, aggregation_key, recipient_user_id, kind, camp_id,
+                    camp_turn_id, source_message_id, approval_generation,
+                    version, attention_revision, created_change_sequence,
+                    last_change_sequence, sort_at, created_at, updated_at
+                ) VALUES (
+                    lower(hex(randomblob(16))), 'turn:local_user:' || NEW.id,
+                    'local_user', 'collaboration', NEW.camp_id, NEW.id, NULL, NULL,
+                    0, 0,
+                    (SELECT current_sequence FROM notification_change_clock WHERE singleton = 1),
+                    (SELECT current_sequence FROM notification_change_clock WHERE singleton = 1),
+                    COALESCE(NEW.ended_at, NEW.updated_at),
+                    COALESCE(NEW.ended_at, NEW.updated_at),
+                    COALESCE(NEW.ended_at, NEW.updated_at)
+                ) ON CONFLICT(aggregation_key) DO NOTHING;
+
+                INSERT INTO notification_occurrence(
+                    id, episode_id, recipient_user_id, semantic,
+                    source_type, source_id, source_revision, camp_id,
+                    camp_turn_id, source_message_id, approval_id,
+                    admitted_episode_version, admitted_attention_revision,
+                    admitted_change_sequence, occurred_at
+                )
+                SELECT lower(hex(randomblob(16))), episode.id, 'local_user',
+                       CASE NEW.status WHEN 'completed' THEN 'turn_completed'
+                            WHEN 'failed' THEN 'turn_failed' ELSE 'turn_incomplete' END,
+                       'camp_turn', NEW.id, NEW.version, NEW.camp_id,
+                       NEW.id, NULL, NULL, episode.version + 1,
+                       episode.attention_revision + 1,
+                       clock.current_sequence, COALESCE(NEW.ended_at, NEW.updated_at)
+                FROM notification_episode AS episode
+                JOIN notification_change_clock AS clock ON clock.singleton = 1
+                WHERE episode.aggregation_key = 'turn:local_user:' || NEW.id
+                ON CONFLICT(
+                    recipient_user_id, semantic, source_type, source_id, source_revision
+                ) DO NOTHING;
+            END;
+
+            CREATE TRIGGER notification_completion_satisfied_by_user_turn
+            AFTER INSERT ON camp_message
+            WHEN NEW.author_type = 'user' AND NEW.author_id = 'local_user'
+              AND NEW.camp_turn_id IS NOT NULL
+            BEGIN
+                UPDATE notification_occurrence_disposition
+                SET satisfied_at = NEW.created_at, updated_at = NEW.created_at
+                WHERE satisfied_at IS NULL
+                  AND occurrence_id IN (
+                      SELECT occurrence.id
+                      FROM notification_occurrence AS occurrence
+                      WHERE occurrence.camp_id = NEW.camp_id
+                        AND occurrence.semantic = 'turn_completed'
+                        AND occurrence.camp_turn_id <> NEW.camp_turn_id
+                        AND occurrence.occurred_at <= NEW.created_at
+                  );
+            END;
+
+            CREATE TRIGGER notification_approval_pending_insert
+            AFTER INSERT ON approval
+            WHEN NEW.status = 'pending'
+              AND NEW.requested_for_user_id = 'local_user'
+              AND json_valid(NEW.native_options_json)
+              AND json_type(NEW.native_options_json) = 'array'
+              AND json_array_length(NEW.native_options_json) > 0
+              AND EXISTS (
+                  SELECT 1 FROM action_execution
+                  JOIN agent_run ON agent_run.id = action_execution.agent_run_id
+                  WHERE action_execution.id = NEW.action_id
+                    AND action_execution.control_mode = 'intercepted'
+                    AND action_execution.input_completeness = 'complete'
+                    AND action_execution.native_request_method IS NOT NULL
+                    AND action_execution.native_request_id_json IS NOT NULL
+                    AND action_execution.native_request_digest IS NOT NULL
+                    AND agent_run.permission_semantics = 'runtime_managed_v2'
+              )
+            BEGIN
+                UPDATE notification_change_clock
+                SET current_sequence = current_sequence + 1 WHERE singleton = 1;
+
+                INSERT INTO notification_episode(
+                    id, aggregation_key, recipient_user_id, kind, camp_id,
+                    camp_turn_id, source_message_id, approval_generation,
+                    version, attention_revision, created_change_sequence,
+                    last_change_sequence, sort_at, created_at, updated_at
+                )
+                SELECT lower(hex(randomblob(16))),
+                       'approval:local_user:' || camp_turn.camp_id || ':' ||
+                           (COALESCE((SELECT MAX(candidate.approval_generation)
+                              FROM notification_episode AS candidate
+                              WHERE candidate.kind = 'approval'
+                                AND candidate.camp_id = camp_turn.camp_id), 0) + 1),
+                       'local_user', 'approval', camp_turn.camp_id,
+                       NULL, NULL,
+                       COALESCE((SELECT MAX(candidate.approval_generation)
+                          FROM notification_episode AS candidate
+                          WHERE candidate.kind = 'approval'
+                            AND candidate.camp_id = camp_turn.camp_id), 0) + 1,
+                       0, 0, clock.current_sequence, clock.current_sequence,
+                       NEW.requested_at, NEW.requested_at, NEW.requested_at
+                FROM action_execution
+                JOIN agent_run ON agent_run.id = action_execution.agent_run_id
+                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                JOIN notification_change_clock AS clock ON clock.singleton = 1
+                WHERE action_execution.id = NEW.action_id
+                  AND (SELECT COUNT(*) FROM approval AS pending
+                       JOIN action_execution AS pending_action
+                         ON pending_action.id = pending.action_id
+                       JOIN agent_run AS pending_run
+                         ON pending_run.id = pending_action.agent_run_id
+                       JOIN camp_turn AS pending_turn
+                         ON pending_turn.id = pending_run.camp_turn_id
+                       WHERE pending_turn.camp_id = camp_turn.camp_id
+                         AND pending.status = 'pending'
+                         AND pending.requested_for_user_id = 'local_user'
+                         AND json_valid(pending.native_options_json)
+                         AND json_type(pending.native_options_json) = 'array'
+                         AND json_array_length(pending.native_options_json) > 0
+                         AND pending_action.control_mode = 'intercepted'
+                         AND pending_action.input_completeness = 'complete'
+                         AND pending_action.native_request_method IS NOT NULL
+                         AND pending_action.native_request_id_json IS NOT NULL
+                         AND pending_action.native_request_digest IS NOT NULL
+                         AND pending_run.permission_semantics = 'runtime_managed_v2') = 1
+                ON CONFLICT(aggregation_key) DO NOTHING;
+
+                INSERT INTO notification_occurrence(
+                    id, episode_id, recipient_user_id, semantic,
+                    source_type, source_id, source_revision, camp_id,
+                    camp_turn_id, source_message_id, approval_id,
+                    admitted_episode_version, admitted_attention_revision,
+                    admitted_change_sequence, occurred_at
+                )
+                SELECT lower(hex(randomblob(16))), episode.id, 'local_user',
+                       'approval_pending', 'approval', NEW.id, NEW.version,
+                       camp_turn.camp_id, NULL, NULL, NEW.id, episode.version + 1,
+                       episode.attention_revision + 1,
+                       clock.current_sequence, NEW.requested_at
+                FROM action_execution
+                JOIN agent_run ON agent_run.id = action_execution.agent_run_id
+                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                JOIN notification_episode AS episode
+                  ON episode.kind = 'approval'
+                 AND episode.camp_id = camp_turn.camp_id
+                 AND episode.approval_generation = (
+                     SELECT MAX(candidate.approval_generation)
+                     FROM notification_episode AS candidate
+                     WHERE candidate.kind = 'approval'
+                       AND candidate.camp_id = camp_turn.camp_id
+                 )
+                JOIN notification_change_clock AS clock ON clock.singleton = 1
+                WHERE action_execution.id = NEW.action_id
+                ON CONFLICT(
+                    recipient_user_id, semantic, source_type, source_id, source_revision
+                ) DO NOTHING;
+            END;
+
+            CREATE TRIGGER notification_approval_pending_update
+            AFTER UPDATE OF status ON approval
+            WHEN OLD.status <> 'pending' AND NEW.status = 'pending'
+              AND NEW.requested_for_user_id = 'local_user'
+              AND json_valid(NEW.native_options_json)
+              AND json_type(NEW.native_options_json) = 'array'
+              AND json_array_length(NEW.native_options_json) > 0
+              AND EXISTS (
+                  SELECT 1 FROM action_execution
+                  JOIN agent_run ON agent_run.id = action_execution.agent_run_id
+                  WHERE action_execution.id = NEW.action_id
+                    AND action_execution.control_mode = 'intercepted'
+                    AND action_execution.input_completeness = 'complete'
+                    AND action_execution.native_request_method IS NOT NULL
+                    AND action_execution.native_request_id_json IS NOT NULL
+                    AND action_execution.native_request_digest IS NOT NULL
+                    AND agent_run.permission_semantics = 'runtime_managed_v2'
+              )
+            BEGIN
+                UPDATE notification_change_clock
+                SET current_sequence = current_sequence + 1 WHERE singleton = 1;
+
+                INSERT INTO notification_episode(
+                    id, aggregation_key, recipient_user_id, kind, camp_id,
+                    camp_turn_id, source_message_id, approval_generation,
+                    version, attention_revision, created_change_sequence,
+                    last_change_sequence, sort_at, created_at, updated_at
+                )
+                SELECT lower(hex(randomblob(16))),
+                       'approval:local_user:' || camp_turn.camp_id || ':' ||
+                           (COALESCE((SELECT MAX(candidate.approval_generation)
+                              FROM notification_episode AS candidate
+                              WHERE candidate.kind = 'approval'
+                                AND candidate.camp_id = camp_turn.camp_id), 0) + 1),
+                       'local_user', 'approval', camp_turn.camp_id,
+                       NULL, NULL,
+                       COALESCE((SELECT MAX(candidate.approval_generation)
+                          FROM notification_episode AS candidate
+                          WHERE candidate.kind = 'approval'
+                            AND candidate.camp_id = camp_turn.camp_id), 0) + 1,
+                       0, 0, clock.current_sequence, clock.current_sequence,
+                       NEW.updated_at, NEW.updated_at, NEW.updated_at
+                FROM action_execution
+                JOIN agent_run ON agent_run.id = action_execution.agent_run_id
+                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                JOIN notification_change_clock AS clock ON clock.singleton = 1
+                WHERE action_execution.id = NEW.action_id
+                  AND (SELECT COUNT(*) FROM approval AS pending
+                       JOIN action_execution AS pending_action
+                         ON pending_action.id = pending.action_id
+                       JOIN agent_run AS pending_run
+                         ON pending_run.id = pending_action.agent_run_id
+                       JOIN camp_turn AS pending_turn
+                         ON pending_turn.id = pending_run.camp_turn_id
+                       WHERE pending_turn.camp_id = camp_turn.camp_id
+                         AND pending.status = 'pending'
+                         AND pending.requested_for_user_id = 'local_user'
+                         AND json_valid(pending.native_options_json)
+                         AND json_type(pending.native_options_json) = 'array'
+                         AND json_array_length(pending.native_options_json) > 0
+                         AND pending_action.control_mode = 'intercepted'
+                         AND pending_action.input_completeness = 'complete'
+                         AND pending_action.native_request_method IS NOT NULL
+                         AND pending_action.native_request_id_json IS NOT NULL
+                         AND pending_action.native_request_digest IS NOT NULL
+                         AND pending_run.permission_semantics = 'runtime_managed_v2') = 1
+                ON CONFLICT(aggregation_key) DO NOTHING;
+
+                INSERT INTO notification_occurrence(
+                    id, episode_id, recipient_user_id, semantic,
+                    source_type, source_id, source_revision, camp_id,
+                    camp_turn_id, source_message_id, approval_id,
+                    admitted_episode_version, admitted_attention_revision,
+                    admitted_change_sequence, occurred_at
+                )
+                SELECT lower(hex(randomblob(16))), episode.id, 'local_user',
+                       'approval_pending', 'approval', NEW.id, NEW.version,
+                       camp_turn.camp_id, NULL, NULL, NEW.id, episode.version + 1,
+                       episode.attention_revision + 1,
+                       clock.current_sequence, NEW.updated_at
+                FROM action_execution
+                JOIN agent_run ON agent_run.id = action_execution.agent_run_id
+                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                JOIN notification_episode AS episode
+                  ON episode.kind = 'approval'
+                 AND episode.camp_id = camp_turn.camp_id
+                 AND episode.approval_generation = (
+                     SELECT MAX(candidate.approval_generation)
+                     FROM notification_episode AS candidate
+                     WHERE candidate.kind = 'approval'
+                       AND candidate.camp_id = camp_turn.camp_id
+                 )
+                JOIN notification_change_clock AS clock ON clock.singleton = 1
+                WHERE action_execution.id = NEW.action_id
+                ON CONFLICT(
+                    recipient_user_id, semantic, source_type, source_id, source_revision
+                ) DO NOTHING;
+            END;
+
+            CREATE TRIGGER notification_approval_resolved
+            AFTER UPDATE OF status ON approval
+            WHEN OLD.status = 'pending' AND NEW.status <> 'pending'
+            BEGIN
+                UPDATE notification_occurrence_disposition
+                SET resolved_at = NEW.updated_at, updated_at = NEW.updated_at
+                WHERE resolved_at IS NULL
+                  AND occurrence_id = (
+                      SELECT occurrence.id
+                      FROM notification_occurrence AS occurrence
+                      WHERE occurrence.semantic = 'approval_pending'
+                        AND occurrence.approval_id = NEW.id
+                      ORDER BY occurrence.source_revision DESC
+                      LIMIT 1
+                  );
+            END;
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v0.71', projection_schema_version = 34,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (79, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -11760,13 +12520,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn current_data_contract_accepts_current_and_exact_v067_v066_v062_v054_or_v052_sources() {
+    fn current_data_contract_accepts_current_and_exact_v071_v067_v066_v062_v054_or_v052_sources() {
         let directory =
             std::env::temp_dir().join(format!("rovai-current-contract-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
         let path = directory.join("rovai.sqlite");
 
         assert!(has_current_data_contract(&path));
+
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                UPDATE rovai_data_contract
+                SET contract_version = 'v0.67', projection_schema_version = 33
+                WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 79;
+                "#,
+            )
+            .unwrap();
+        assert!(
+            has_current_data_contract(&path),
+            "the exact v0.67/schema-33 marker without migration 79 is an upgrade source"
+        );
 
         database
             .connection()
@@ -12213,8 +12989,8 @@ mod tests {
     }
 
     #[test]
-    fn v78_preserves_v77_lineage_and_upgrades_current_user_attention_once() {
-        let directory = std::env::temp_dir().join(format!("rovai-db-v78-test-{}", Uuid::new_v4()));
+    fn v79_preserves_v78_lineage_and_installs_notification_episodes_once() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v79-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
         let migration_applied: i64 = database
             .connection()
@@ -12254,7 +13030,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.67".to_string(), 33));
+        assert_eq!(contract, ("v0.71".to_string(), 34));
         let v77_applied: i64 = database
             .connection()
             .query_row(
@@ -12273,21 +13049,40 @@ mod tests {
             )
             .unwrap();
         assert_eq!(v78_applied, 1);
-        let notification_columns =
-            table_columns(database.connection(), "in_app_notification").unwrap();
-        assert!(notification_columns.contains(&"source_message_id".to_string()));
-        let preference_columns =
-            table_columns(database.connection(), "in_app_notification_preference").unwrap();
-        assert!(preference_columns.contains(&"user_mention_heads_up_enabled".to_string()));
-        let notification_schema: String = database
+        let v79_applied: i64 = database
             .connection()
             .query_row(
-                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'in_app_notification'",
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 79",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(notification_schema.contains("camp_message_user_mention"));
+        assert_eq!(v79_applied, 1);
+        let notification_columns =
+            table_columns(database.connection(), "notification_occurrence").unwrap();
+        assert!(notification_columns.contains(&"source_message_id".to_string()));
+        assert!(notification_columns.contains(&"admitted_episode_version".to_string()));
+        let preference_columns =
+            table_columns(database.connection(), "notification_preference").unwrap();
+        assert!(preference_columns.contains(&"user_mention_heads_up_enabled".to_string()));
+        let notification_schema: String = database
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'notification_occurrence'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(notification_schema.contains("user_mention"));
+        let legacy_table_count: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'in_app_notification'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(legacy_table_count, 0);
         let manifest_schema: String = database
             .connection()
             .query_row(
@@ -12299,11 +13094,11 @@ mod tests {
         assert!(manifest_schema.contains("formatter_version = 14"));
         drop(database);
 
-        let reopened = Database::open(&directory).expect("v78 database should reopen");
+        let reopened = Database::open(&directory).expect("v79 database should reopen");
         let migration_applied: i64 = reopened
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM schema_migration WHERE version = 78",
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 79",
                 [],
                 |row| row.get(0),
             )
@@ -12363,7 +13158,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.67".to_string(), 33));
+        assert_eq!(contract, ("v0.71".to_string(), 34));
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
@@ -13180,6 +13975,7 @@ mod tests {
                 );
                 DROP TRIGGER IF EXISTS camp_message_structured_content_insert;
                 DROP TRIGGER IF EXISTS camp_message_structured_content_update;
+                DROP TRIGGER IF EXISTS notification_user_mention_occurrence;
                 INSERT INTO camp_message(
                     id, camp_id, sequence, author_type, author_id,
                     source_agent_run_id, body, address_mode,
@@ -14510,7 +15306,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(agent_cli_contract, ("v0.67".to_string(), 33, 1));
+        assert_eq!(agent_cli_contract, ("v0.71".to_string(), 34, 1));
         assert_eq!(foreign_key_violations, 0);
 
         drop(database);
@@ -14753,6 +15549,7 @@ mod tests {
 
                 DROP TRIGGER IF EXISTS camp_message_structured_content_insert;
                 DROP TRIGGER IF EXISTS camp_message_structured_content_update;
+                DROP TRIGGER IF EXISTS notification_user_mention_occurrence;
                 INSERT INTO camp_message(
                     id, camp_id, sequence, author_type, author_id, body,
                     content_digest, address_mode, addressed_agent_ids_json,
@@ -14945,74 +15742,91 @@ mod tests {
     }
 
     #[test]
-    fn v43_creates_an_empty_notification_inbox_without_backfill() {
-        let directory = std::env::temp_dir().join(format!("rovai-db-v43-test-{}", Uuid::new_v4()));
+    fn v79_clean_break_discards_unlaunched_notification_rows_without_backfill() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v79-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
         database
             .connection()
             .execute_batch(
                 r#"
-                INSERT INTO camp(
-                    id, title, name_origin, collaboration_mode,
-                    project_binding_kind, project_path,
-                    last_message_sequence, version, created_at, updated_at
-                ) VALUES (
-                    'camp-v43-history', 'Historical terminal Turn', 'user', 'peer',
-                    'quick_chat', '/quick-chat', 0, 1,
-                    '2026-07-31T00:00:00Z', '2026-07-31T00:00:00Z'
-                );
-                INSERT INTO camp_turn(
-                    id, camp_id, trigger_type, trigger_id, status,
-                    version, created_at, updated_at, ended_at
-                ) VALUES (
-                    'turn-v43-history', 'camp-v43-history', 'system_event', 'history',
-                    'completed', 1, '2026-07-31T00:00:00Z',
-                    '2026-07-31T00:01:00Z', '2026-07-31T00:01:00Z'
-                );
+                DROP TRIGGER notification_episode_disposition_insert;
+                DROP TRIGGER notification_occurrence_update_guard;
+                DROP TRIGGER notification_occurrence_materialize_episode;
+                DROP TRIGGER notification_occurrence_disposition_changed;
+                DROP TRIGGER notification_episode_cleared;
+                DROP TRIGGER notification_episode_retained_remove;
+                DROP TRIGGER notification_user_mention_occurrence;
+                DROP TRIGGER notification_camp_turn_terminal_insert;
+                DROP TRIGGER notification_camp_turn_terminal_update;
+                DROP TRIGGER notification_completion_satisfied_by_user_turn;
+                DROP TRIGGER notification_approval_pending_insert;
+                DROP TRIGGER notification_approval_pending_update;
+                DROP TRIGGER notification_approval_resolved;
+                DROP TABLE notification_change_journal;
+                DROP TABLE notification_occurrence_disposition;
+                DROP TABLE notification_occurrence;
+                DROP TABLE notification_episode_disposition;
+                DROP TABLE notification_episode;
+                DROP TABLE notification_preference;
+                DROP TABLE notification_change_clock;
 
-                DROP TRIGGER in_app_notification_created_event;
-                DROP TRIGGER in_app_notification_changed_event;
-                DROP TRIGGER in_app_notification_camp_turn_insert;
-                DROP TRIGGER in_app_notification_camp_turn_update;
-                DROP TRIGGER in_app_notification_attention_insert;
-                DROP TRIGGER in_app_notification_attention_pending_update;
-                DROP TRIGGER in_app_notification_attention_resolve;
-                DROP TRIGGER in_app_notification_retention;
-                DROP TABLE in_app_notification;
-                DROP TABLE in_app_notification_preference;
-                DELETE FROM schema_migration WHERE version = 43;
+                CREATE TABLE in_app_notification(
+                    id TEXT PRIMARY KEY,
+                    recipient_user_id TEXT NOT NULL,
+                    kind TEXT NOT NULL
+                );
+                INSERT INTO in_app_notification(id, recipient_user_id, kind)
+                VALUES ('legacy-unlaunched-row', 'local_user', 'camp_turn_completed');
+                CREATE TABLE in_app_notification_preference(
+                    singleton INTEGER PRIMARY KEY,
+                    heads_up_enabled INTEGER NOT NULL
+                );
+                INSERT INTO in_app_notification_preference(singleton, heads_up_enabled)
+                VALUES (1, 0);
+                DELETE FROM schema_migration WHERE version = 79;
                 "#,
             )
-            .expect("test should restore the pre-v43 schema while keeping history");
+            .expect("test should restore the pre-v79 notification boundary");
         drop(database);
 
-        let reopened = Database::open(&directory).expect("v43 database should reopen");
+        let reopened = Database::open(&directory).expect("v79 database should reopen");
         let notification_count: i64 = reopened
             .connection()
-            .query_row("SELECT COUNT(*) FROM in_app_notification", [], |row| {
+            .query_row("SELECT COUNT(*) FROM notification_occurrence", [], |row| {
                 row.get(0)
             })
             .unwrap();
         assert_eq!(notification_count, 0);
-        let preference: (i64, i64, i64, i64) = reopened
+        let preference: (i64, i64, i64, i64, i64, i64) = reopened
             .connection()
             .query_row(
                 r#"
                 SELECT heads_up_enabled, approval_heads_up_enabled,
-                       execution_heads_up_enabled, version
-                FROM in_app_notification_preference WHERE singleton = 1
+                       user_mention_heads_up_enabled,
+                       turn_completed_heads_up_enabled,
+                       turn_incomplete_heads_up_enabled, version
+                FROM notification_preference WHERE singleton = 1
                 "#,
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
             )
             .unwrap();
-        assert_eq!(preference, (1, 1, 1, 1));
+        assert_eq!(preference, (1, 1, 1, 1, 1, 1));
         let prohibited_columns: i64 = reopened
             .connection()
             .query_row(
                 r#"
                 SELECT COUNT(*)
-                FROM pragma_table_info('in_app_notification')
+                FROM pragma_table_info('notification_episode')
                 WHERE name IN (
                     'title', 'body', 'prompt', 'summary', 'command',
                     'path', 'error', 'runtime'
@@ -15026,7 +15840,7 @@ mod tests {
         let migration_count: i64 = reopened
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM schema_migration WHERE version = 43",
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 79",
                 [],
                 |row| row.get(0),
             )
@@ -15119,7 +15933,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.67".to_string(), 22));
+        assert_eq!(contract, ("v0.71".to_string(), 22));
         let migration_count: i64 = reopened
             .connection()
             .query_row(
@@ -15150,7 +15964,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, (33, 1));
+        assert_eq!(contract, (34, 1));
         let error = database
             .connection()
             .execute(
@@ -15470,7 +16284,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.67".to_string(), 33));
+        assert_eq!(contract, ("v0.71".to_string(), 34));
         let public_a2a_migration_applied: i64 = database
             .connection()
             .query_row(

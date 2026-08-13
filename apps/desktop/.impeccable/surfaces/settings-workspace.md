@@ -45,10 +45,15 @@ Notification settings control the accepted categories and floating preference wi
 the durable notification center. The persistent drawer, unread count and focus return use the same
 theme surfaces and existing notification read model.
 
-Current User Mention creates one durable Inbox item per accepted source message. Its transient
-heads-up preference is independent from durable Inbox creation; aggregation may reduce interruption
-but cannot merge or delete Inbox facts. Opening an item uses the authoritative Camp/message locator
-and marks read through the existing notification command, not a Renderer-only flag.
+Notification settings contain one master heads-up switch and exactly four default-on categories:
+待审批、提到你、本轮完成、执行未完成. The last category controls both `turn_failed` and
+`turn_incomplete`, while cards keep their honest distinct copy. Ordinary Agent messages have no
+notification category or setting.
+
+Current User Mention creates one immutable Occurrence per source message. Occurrences in one CampTurn
+share a durable Episode card but remain independently acknowledged; the earliest unacknowledged
+message is the current exact action. Settings only affect Journal-qualified transient heads-up and
+never durable Episode admission, acknowledgement, clearing or the global unread count.
 
 ## Skill
 

@@ -54,8 +54,8 @@ brief 只拥有具体 surface 的信息优先级和构图；它不能覆盖全�
 - [桌面 UI 验收流程](../development/ui-acceptance.md)
 
 文档状态不等于实现完成。当前范围与证据从[唯一 current 版本](../versions/README.md)进入；当前用户
-注意力、Message Mention Inbox 与 `cli-operations` 的实现证据见
-[v0.67 实施计划](../versions/v0.67/implementation-plan.md)。生产事实仍由代码、Migration、测试和
+注意力、Notification Episode 与类型化动作的当前实现证据见
+[v0.71 实施计划](../versions/v0.71/implementation-plan.md)。生产事实仍由代码、Migration、测试和
 可复现真实 App 验收证明。
 
 ## 权威边界

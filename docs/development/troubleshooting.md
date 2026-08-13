@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: local-development-troubleshooting
-last_updated: 2026-08-12
+last_updated: 2026-08-13
 ---
 
 # 常见问题排查
@@ -68,6 +68,19 @@ startup recovery 前退出，因此不要删除 `.rovai-core-instance.lock`，�
 先只读检查报错中记录的 PID、可执行文件路径和两个 App 的 `--user-data-dir`。日常安装版保留原目录；
 开发、打包验收或截图进程改用新建的隔离目录。确认原拥有者已经退出后，同一目录可以直接重新启动，
 不需要删除保留的锁文件。
+
+## `electron-builder` 下载 Electron 时报告 `ENOTFOUND github.com`
+
+这表示 Electron 归档或校验信息的 GitHub DNS/网络访问失败，不表示 Rust、TypeScript 或 Electron Vite
+构建失败。即使 `~/Library/Caches/electron/` 中已有 ZIP，当前打包链仍可能联网读取校验信息。
+
+- 本地没有通过 checksum 验证的目标版本 arm64 归档时，不要在同一个无 GitHub 网络的执行环境反复
+  运行 `pnpm package:mac`；第一次尝试就改用可访问 GitHub 的执行环境。
+- 本地归档存在时，按[打包文档的受限网络流程](packaging.md#electron-下载与受限网络)使用 Electron 包
+  自带 checksum 验证后，通过 `electronDist` 直接读取该 ZIP。
+- 若失败日志表明前置 `pnpm build` 已成功，恢复时不要再次执行 Release 编译，只重跑文档中的
+  `electron-builder` 命令。
+- 不要删除有效缓存，也不要通过关闭 TLS、关闭 checksum 或使用未审核镜像来消除错误。
 
 ## 打包后仍看到旧行为
 
