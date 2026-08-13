@@ -15,7 +15,7 @@ use crate::{
 
 const DEFAULT_PAGE_LIMIT: usize = 50;
 const MAX_PAGE_LIMIT: usize = 100;
-const NOTIFICATION_EPISODE_SCHEMA_VERSION: i64 = 5;
+const NOTIFICATION_EPISODE_SCHEMA_VERSION: i64 = 6;
 const MESSAGE_SUMMARY_MAX_SCALARS: usize = 160;
 
 /// Retention only removes inactive, terminal Episodes. A delete first records a remove
@@ -347,6 +347,7 @@ pub struct NotificationEpisodeChange {
     pub operation: NotificationChangeOperation,
     pub change_cause: NotificationChangeCause,
     pub heads_up_signal: Option<NotificationHeadsUpSignal>,
+    pub heads_up_invalidation: Option<NotificationHeadsUpInvalidation>,
     pub changed_at: String,
     pub episode: Option<NotificationEpisodeView>,
 }
@@ -355,8 +356,25 @@ pub struct NotificationEpisodeChange {
 #[serde(rename_all = "camelCase")]
 pub struct NotificationHeadsUpSignal {
     pub semantic: NotificationSemantic,
+    pub admitted_attention_revision: i64,
     pub action: NotificationActionView,
     pub mention: Option<NotificationMentionView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationHeadsUpInvalidation {
+    pub kind: NotificationHeadsUpInvalidationKind,
+    pub acknowledgement_id: Option<String>,
+    pub through_attention_revision: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotificationHeadsUpInvalidationKind {
+    SourceStateChanged,
+    AttentionCleared,
+    EpisodeRemoved,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -543,7 +561,9 @@ impl NotificationEpisodeService {
         let mut statement = transaction.prepare(
             r#"
             SELECT change_sequence, episode_id, episode_version, attention_revision,
-                   operation, change_cause, heads_up_reason, changed_at
+                   operation, change_cause, heads_up_reason,
+                   affected_acknowledgement_id,
+                   cleared_through_attention_revision, changed_at
             FROM notification_change_journal
             WHERE change_sequence > ?1 AND change_sequence <= ?2
             ORDER BY change_sequence ASC
@@ -573,6 +593,7 @@ impl NotificationEpisodeService {
                 .as_deref()
                 .map(NotificationSemantic::parse)
                 .transpose()?;
+            let change_cause = NotificationChangeCause::parse(&raw.change_cause)?;
             let episode = if persisted_operation == NotificationChangeOperation::Upsert {
                 load_episode_by_id(&transaction, recipient_user_id, &raw.episode_id)?
             } else {
@@ -599,14 +620,16 @@ impl NotificationEpisodeService {
             } else {
                 NotificationChangeOperation::Remove
             };
+            let heads_up_invalidation = heads_up_invalidation(&raw, change_cause)?;
             changes.push(NotificationEpisodeChange {
                 change_sequence: raw.change_sequence,
                 episode_id: raw.episode_id,
                 episode_version: raw.episode_version,
                 attention_revision: raw.attention_revision,
                 operation,
-                change_cause: NotificationChangeCause::parse(&raw.change_cause)?,
+                change_cause,
                 heads_up_signal,
+                heads_up_invalidation,
                 changed_at: raw.changed_at,
                 episode,
             });
@@ -940,7 +963,45 @@ struct RawChange {
     operation: String,
     change_cause: String,
     heads_up_reason: Option<String>,
+    affected_acknowledgement_id: Option<String>,
+    cleared_through_attention_revision: Option<i64>,
     changed_at: String,
+}
+
+fn heads_up_invalidation(
+    change: &RawChange,
+    cause: NotificationChangeCause,
+) -> Result<Option<NotificationHeadsUpInvalidation>> {
+    let invalidation = match cause {
+        NotificationChangeCause::Acknowledged
+        | NotificationChangeCause::Satisfied
+        | NotificationChangeCause::Resolved => NotificationHeadsUpInvalidation {
+            kind: NotificationHeadsUpInvalidationKind::SourceStateChanged,
+            acknowledgement_id: Some(
+                change
+                    .affected_acknowledgement_id
+                    .clone()
+                    .context("notification disposition change lacks acknowledgement identity")?,
+            ),
+            through_attention_revision: None,
+        },
+        NotificationChangeCause::Cleared => NotificationHeadsUpInvalidation {
+            kind: NotificationHeadsUpInvalidationKind::AttentionCleared,
+            acknowledgement_id: None,
+            through_attention_revision: Some(
+                change
+                    .cleared_through_attention_revision
+                    .context("notification clear change lacks attention boundary")?,
+            ),
+        },
+        NotificationChangeCause::Retained => NotificationHeadsUpInvalidation {
+            kind: NotificationHeadsUpInvalidationKind::EpisodeRemoved,
+            acknowledgement_id: None,
+            through_attention_revision: None,
+        },
+        NotificationChangeCause::OccurrenceAdmitted => return Ok(None),
+    };
+    Ok(Some(invalidation))
 }
 
 fn normalized_limit(limit: usize) -> usize {
@@ -1324,6 +1385,7 @@ fn load_heads_up_signal(
         });
     Ok(Some(NotificationHeadsUpSignal {
         semantic,
+        admitted_attention_revision: occurrence.admitted_attention_revision,
         action: action_for_occurrence(&episode, &occurrence, true),
         mention,
     }))
@@ -1774,7 +1836,9 @@ fn raw_change_from_row(row: &Row<'_>) -> rusqlite::Result<RawChange> {
         operation: row.get(4)?,
         change_cause: row.get(5)?,
         heads_up_reason: row.get(6)?,
-        changed_at: row.get(7)?,
+        affected_acknowledgement_id: row.get(7)?,
+        cleared_through_attention_revision: row.get(8)?,
+        changed_at: row.get(9)?,
     })
 }
 
@@ -2462,6 +2526,14 @@ mod tests {
         assert!(changes.changes.iter().any(|change| {
             change.operation == NotificationChangeOperation::Remove
                 && change.change_cause == NotificationChangeCause::Cleared
+                && change
+                    .heads_up_invalidation
+                    .as_ref()
+                    .is_some_and(|invalidation| {
+                        invalidation.kind == NotificationHeadsUpInvalidationKind::AttentionCleared
+                            && invalidation.through_attention_revision
+                                == Some(episode.attention_revision)
+                    })
         }));
         assert!(changes.changes.iter().any(|change| {
             change.operation == NotificationChangeOperation::Upsert
@@ -2594,6 +2666,13 @@ mod tests {
         assert_eq!(
             mention_signals
                 .iter()
+                .map(|signal| signal.admitted_attention_revision)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert_eq!(
+            mention_signals
+                .iter()
                 .map(|signal| signal.action.message_id.as_deref().unwrap())
                 .collect::<Vec<_>>(),
             vec!["message-signal-one", "message-signal-two"]
@@ -2659,6 +2738,11 @@ mod tests {
         assert_eq!(first.items.len(), 1);
         assert_eq!(first.items[0].pending_approval_count, 2);
         assert_eq!(first.items[0].attention_revision, 2);
+        let approval_one_acknowledgement_id = first.items[0]
+            .primary_action
+            .acknowledgement_id
+            .clone()
+            .unwrap();
 
         database
             .connection()
@@ -2672,6 +2756,25 @@ mod tests {
                 [],
             )
             .unwrap();
+        let resolution_changes = service
+            .changes_since(
+                &mut database,
+                CURRENT_USER_ID,
+                first.through_change_sequence,
+                50,
+            )
+            .unwrap();
+        assert!(resolution_changes.changes.iter().any(|change| {
+            change.change_cause == NotificationChangeCause::Resolved
+                && change
+                    .heads_up_invalidation
+                    .as_ref()
+                    .is_some_and(|invalidation| {
+                        invalidation.kind == NotificationHeadsUpInvalidationKind::SourceStateChanged
+                            && invalidation.acknowledgement_id.as_deref()
+                                == Some(approval_one_acknowledgement_id.as_str())
+                    })
+        }));
         let mixed = service
             .inbox(
                 &mut database,
@@ -2878,6 +2981,12 @@ mod tests {
         assert!(changes.changes.iter().any(|change| {
             change.operation == NotificationChangeOperation::Remove
                 && change.change_cause == NotificationChangeCause::Retained
+                && change
+                    .heads_up_invalidation
+                    .as_ref()
+                    .is_some_and(|invalidation| {
+                        invalidation.kind == NotificationHeadsUpInvalidationKind::EpisodeRemoved
+                    })
         }));
         let reset = service
             .changes_since(&mut database, CURRENT_USER_ID, 0, 50)

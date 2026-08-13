@@ -44,7 +44,9 @@ pub struct Database {
 }
 
 const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.71";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 35;
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 36;
+const V081_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.71";
+const V081_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 35;
 const V080_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.71";
 const V080_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 34;
 const V071_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.67";
@@ -72,6 +74,7 @@ struct CurrentMigrationState {
     v78: bool,
     v79: bool,
     v80: bool,
+    v81: bool,
 }
 
 impl CurrentMigrationState {
@@ -88,7 +91,20 @@ impl CurrentMigrationState {
                 && self.v77
                 && self.v78
                 && self.v79
-                && self.v80;
+                && self.v80
+                && self.v81;
+        }
+        if contract == V081_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V081_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && !self.v81;
         }
         if contract == V080_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V080_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
@@ -99,7 +115,8 @@ impl CurrentMigrationState {
                 && self.v77
                 && self.v78
                 && self.v79
-                && !self.v80;
+                && !self.v80
+                && !self.v81;
         }
         if contract == V071_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V071_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
@@ -110,7 +127,8 @@ impl CurrentMigrationState {
                 && self.v77
                 && self.v78
                 && !self.v79
-                && !self.v80;
+                && !self.v80
+                && !self.v81;
         }
         if contract == V067_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V067_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
@@ -121,7 +139,8 @@ impl CurrentMigrationState {
                 && self.v77
                 && !self.v78
                 && !self.v79
-                && !self.v80;
+                && !self.v80
+                && !self.v81;
         }
         if contract == V066_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V066_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
@@ -132,7 +151,8 @@ impl CurrentMigrationState {
                 && !self.v77
                 && !self.v78
                 && !self.v79
-                && !self.v80;
+                && !self.v80
+                && !self.v81;
         }
         if contract == V062_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V062_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
@@ -143,7 +163,8 @@ impl CurrentMigrationState {
                 && !self.v77
                 && !self.v78
                 && !self.v79
-                && !self.v80;
+                && !self.v80
+                && !self.v81;
         }
         if contract == V062_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V054_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
@@ -154,7 +175,8 @@ impl CurrentMigrationState {
                 && !self.v77
                 && !self.v78
                 && !self.v79
-                && !self.v80;
+                && !self.v80
+                && !self.v81;
         }
         contract == V052_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V052_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
@@ -165,6 +187,7 @@ impl CurrentMigrationState {
             && !self.v78
             && !self.v79
             && !self.v80
+            && !self.v81
     }
 }
 
@@ -233,7 +256,8 @@ fn has_current_data_contract(path: &Path) -> bool {
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 77),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 78),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 79),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 80)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 80),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 81)
         "#,
         [],
         |row| {
@@ -249,6 +273,7 @@ fn has_current_data_contract(path: &Path) -> bool {
                 v78: row.get(8)?,
                 v79: row.get(9)?,
                 v80: row.get(10)?,
+                v81: row.get(11)?,
             })
         },
     );
@@ -1339,6 +1364,9 @@ impl Database {
             if !self.schema_migration_applied(80)? {
                 self.migrate_controlled_shutdown_fence_v80()?;
             }
+            if !self.schema_migration_applied(81)? {
+                self.migrate_notification_heads_up_invalidation_v81()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -1628,6 +1656,9 @@ impl Database {
         }
         if !self.schema_migration_applied(80)? {
             self.migrate_controlled_shutdown_fence_v80()?;
+        }
+        if !self.schema_migration_applied(81)? {
+            self.migrate_notification_heads_up_invalidation_v81()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -8222,6 +8253,147 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_notification_heads_up_invalidation_v81(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE notification_change_journal
+            ADD COLUMN affected_acknowledgement_id TEXT;
+            ALTER TABLE notification_change_journal
+            ADD COLUMN cleared_through_attention_revision INTEGER
+                CHECK(
+                    cleared_through_attention_revision IS NULL
+                    OR cleared_through_attention_revision >= 0
+                );
+
+            DROP TRIGGER notification_occurrence_disposition_changed;
+            CREATE TRIGGER notification_occurrence_disposition_changed
+            AFTER UPDATE OF acknowledged_at, satisfied_at, resolved_at
+            ON notification_occurrence_disposition
+            WHEN OLD.acknowledged_at IS NOT NEW.acknowledged_at
+              OR OLD.satisfied_at IS NOT NEW.satisfied_at
+              OR OLD.resolved_at IS NOT NEW.resolved_at
+            BEGIN
+                UPDATE notification_change_clock
+                SET current_sequence = current_sequence + 1
+                WHERE singleton = 1;
+
+                UPDATE notification_episode
+                SET version = version + 1,
+                    last_change_sequence = (
+                        SELECT current_sequence FROM notification_change_clock
+                        WHERE singleton = 1
+                    ),
+                    updated_at = NEW.updated_at
+                WHERE id = (
+                    SELECT episode_id FROM notification_occurrence
+                    WHERE id = NEW.occurrence_id
+                );
+
+                INSERT INTO notification_change_journal(
+                    change_sequence, episode_id, episode_version, attention_revision,
+                    operation, change_cause, heads_up_reason,
+                    affected_acknowledgement_id, changed_at
+                )
+                SELECT clock.current_sequence, episode.id, episode.version,
+                       episode.attention_revision, 'upsert',
+                       CASE
+                           WHEN OLD.acknowledged_at IS NULL AND NEW.acknowledged_at IS NOT NULL
+                               THEN 'acknowledged'
+                           WHEN OLD.satisfied_at IS NULL AND NEW.satisfied_at IS NOT NULL
+                               THEN 'satisfied'
+                           ELSE 'resolved'
+                       END,
+                       NULL, NEW.occurrence_id, NEW.updated_at
+                FROM notification_change_clock AS clock
+                JOIN notification_occurrence AS occurrence
+                  ON occurrence.id = NEW.occurrence_id
+                JOIN notification_episode AS episode
+                  ON episode.id = occurrence.episode_id
+                WHERE clock.singleton = 1;
+
+                INSERT INTO event_log(
+                    event_id, task_id, turn_id, sequence, event_type, native_method,
+                    payload_json, camp_id, entity_type, entity_id,
+                    actor_type, actor_id, created_at
+                )
+                SELECT lower(hex(randomblob(16))), NULL, NULL, NULL,
+                       'notification_episode.changed', NULL,
+                       json_object(
+                           'episodeId', episode.id,
+                           'episodeVersion', episode.version,
+                           'attentionRevision', episode.attention_revision,
+                           'changeSequence', clock.current_sequence,
+                           'changeCause', CASE
+                               WHEN OLD.acknowledged_at IS NULL
+                                    AND NEW.acknowledged_at IS NOT NULL THEN 'acknowledged'
+                               WHEN OLD.satisfied_at IS NULL
+                                    AND NEW.satisfied_at IS NOT NULL THEN 'satisfied'
+                               ELSE 'resolved'
+                           END
+                       ),
+                       episode.camp_id, 'notification_episode', episode.id,
+                       'system', 'notification-module', NEW.updated_at
+                FROM notification_change_clock AS clock
+                JOIN notification_occurrence AS occurrence
+                  ON occurrence.id = NEW.occurrence_id
+                JOIN notification_episode AS episode
+                  ON episode.id = occurrence.episode_id
+                WHERE clock.singleton = 1;
+            END;
+
+            DROP TRIGGER notification_episode_cleared;
+            CREATE TRIGGER notification_episode_cleared
+            AFTER UPDATE OF cleared_through_attention_revision
+            ON notification_episode_disposition
+            WHEN NEW.cleared_through_attention_revision
+                 > OLD.cleared_through_attention_revision
+            BEGIN
+                UPDATE notification_change_clock
+                SET current_sequence = current_sequence + 1
+                WHERE singleton = 1;
+
+                UPDATE notification_episode
+                SET version = version + 1,
+                    last_change_sequence = (
+                        SELECT current_sequence FROM notification_change_clock
+                        WHERE singleton = 1
+                    ),
+                    updated_at = NEW.updated_at
+                WHERE id = NEW.episode_id;
+
+                INSERT INTO notification_change_journal(
+                    change_sequence, episode_id, episode_version, attention_revision,
+                    operation, change_cause, heads_up_reason,
+                    cleared_through_attention_revision, changed_at
+                )
+                SELECT clock.current_sequence, episode.id, episode.version,
+                       episode.attention_revision,
+                       CASE WHEN episode.attention_revision
+                                      <= NEW.cleared_through_attention_revision
+                            THEN 'remove' ELSE 'upsert' END,
+                       'cleared', NULL,
+                       NEW.cleared_through_attention_revision, NEW.updated_at
+                FROM notification_change_clock AS clock
+                JOIN notification_episode AS episode ON episode.id = NEW.episode_id
+                WHERE clock.singleton = 1;
+            END;
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v0.71', projection_schema_version = 36,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (81, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -12627,13 +12799,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn current_data_contract_accepts_current_and_exact_v071_schema34_and_older_sources() {
+    fn current_data_contract_accepts_current_and_exact_v071_schema35_and_older_sources() {
         let directory =
             std::env::temp_dir().join(format!("rovai-current-contract-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
         let path = directory.join("rovai.sqlite");
 
         assert!(has_current_data_contract(&path));
+
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                UPDATE rovai_data_contract
+                SET contract_version = 'v0.71', projection_schema_version = 35
+                WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 81;
+                "#,
+            )
+            .unwrap();
+        assert!(
+            has_current_data_contract(&path),
+            "the exact v0.71/schema-35 marker without migration 81 is an upgrade source"
+        );
 
         database
             .connection()
@@ -12660,6 +12848,7 @@ mod tests {
                 WHERE singleton = 1;
                 DELETE FROM schema_migration WHERE version = 79;
                 DELETE FROM schema_migration WHERE version = 80;
+                DELETE FROM schema_migration WHERE version = 81;
                 "#,
             )
             .unwrap();
@@ -13158,7 +13347,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.71".to_string(), 35));
+        assert_eq!(contract, ("v0.71".to_string(), 36));
         let v77_applied: i64 = database
             .connection()
             .query_row(
@@ -13268,7 +13457,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.71".to_string(), 35));
+        assert_eq!(contract, ("v0.71".to_string(), 36));
         drop(database);
 
         let reopened = Database::open(&directory).expect("v80 database should reopen");
@@ -13280,6 +13469,45 @@ mod tests {
             .unwrap();
         assert_eq!(cycle_count, 0);
         drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v81_adds_exact_notification_heads_up_invalidation_facts() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v81-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        let migration_applied: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 81",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(migration_applied, 1);
+        let journal_columns =
+            table_columns(database.connection(), "notification_change_journal").unwrap();
+        assert!(journal_columns.contains(&"affected_acknowledgement_id".to_string()));
+        assert!(journal_columns.contains(&"cleared_through_attention_revision".to_string()));
+        let disposition_trigger: String = database
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'notification_occurrence_disposition_changed'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(disposition_trigger.contains("affected_acknowledgement_id"));
+        let clear_trigger: String = database
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'notification_episode_cleared'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(clear_trigger.contains("cleared_through_attention_revision"));
+        drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
@@ -13333,7 +13561,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.71".to_string(), 35));
+        assert_eq!(contract, ("v0.71".to_string(), 36));
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
@@ -15481,7 +15709,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(agent_cli_contract, ("v0.71".to_string(), 35, 1));
+        assert_eq!(agent_cli_contract, ("v0.71".to_string(), 36, 1));
         assert_eq!(foreign_key_violations, 0);
 
         drop(database);
@@ -15961,6 +16189,7 @@ mod tests {
                 DROP TABLE planned_shutdown_cycle;
                 DELETE FROM schema_migration WHERE version = 79;
                 DELETE FROM schema_migration WHERE version = 80;
+                DELETE FROM schema_migration WHERE version = 81;
                 "#,
             )
             .expect("test should restore the pre-v79 notification boundary");
@@ -16141,7 +16370,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, (35, 1));
+        assert_eq!(contract, (36, 1));
         let error = database
             .connection()
             .execute(
@@ -16461,7 +16690,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.71".to_string(), 35));
+        assert_eq!(contract, ("v0.71".to_string(), 36));
         let public_a2a_migration_applied: i64 = database
             .connection()
             .query_row(

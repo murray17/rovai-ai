@@ -10,7 +10,7 @@ last_updated: 2026-08-13
 
 # Rovai-ai v0.71：Notification Episode、Skill 管理与受控关闭终态收敛
 
-> 当前状态：Notification Episode 的领域模型、合同、ADR、Core/IPC/Renderer clean-break 与隔离打包
+> 当前状态：Notification Episode v3 的领域模型、合同、ADR、Core/IPC/Renderer clean-break 与隔离打包
 > App 验收均已完成；Campfire、系统必需 operational Skill 与 Grill Duo 自然标题增量也已完成。
 > 同一 current snapshot 的 durable AgentRun product fence、真实 Runtime 关闭/重启验收与完整门禁也已完成。
 >
@@ -48,7 +48,10 @@ Episode 更新通过最小 Change Journal 驱动浮层和增量刷新。
 - collaboration/message/approval-generation 三种聚合键；
 - `episodeVersion` / `attentionRevision` 分离，bounded acknowledge/clear/mark-all；
 - Clear 前历史来源与 Active Attention 分离；当前未读、动作、heads-up 与 retention 只看 Active Attention；
-- changesSince schema v5 返回 exact HeadsUpSignal；Approval 使用 pending-first / acknowledge-only action；
+- changesSince schema v6 返回 exact HeadsUpSignal 与 acknowledgement/Clear/remove invalidation；Approval 使用
+  pending-first / acknowledge-only action；
+- Migration 81 把当前 Data Contract 提升到 `v0.71 / projection schema 36`，为 Journal 增加精确
+  acknowledgement identity 与 Clear attention revision 边界；
 - Journal floor、reset、分页 high-water 与 90 天终结 Episode 保留。
 
 ### 受控关闭的 durable product fence
@@ -74,7 +77,8 @@ Episode 更新通过最小 Change Journal 驱动浮层和增量刷新。
 - Notification Center 只渲染 Core Episode，不做二次聚合；
 - display semantic 与 attention action 分离，主动作不可用时仅展示显式次动作；
 - 当前浮层同 Episode 原地升级，reload 建立 high-water 而不补弹历史；
-- 浮层只消费 exact signal；增量分页全部成功并接收 Inbox 后才提交共享 cursor；
+- 浮层只消费 exact signal；普通 Inbox reload 不清理队列，Journal exact invalidation 同时覆盖可见项与
+  overflow，reset 直接清空；增量分页全部成功并接收 Inbox 后才提交共享 cursor；
 - 设置固定为总开关、待审批、提到你、本轮完成、执行未完成，默认开启；
 - 保持 Porcelain Day / Steel Night、键盘焦点、长文本、错误恢复和 200% zoom 合同。
 
@@ -104,7 +108,7 @@ Episode 更新通过最小 Change Journal 驱动浮层和增量刷新。
 
 1. Core module tests 覆盖事务原子性、聚合/顺序无关、逐 Mention 确认、并发边界、approval generation、
    completion satisfaction、失败诚实性、clear reappearance、Journal reset 与 retention；
-2. JSON-RPC、TypeScript 与 Main allowlist 只暴露 v2/schema v5 深模块接口，旧方法不可调用；
+2. JSON-RPC、TypeScript 与 Main allowlist 只暴露 v3/schema v6 深模块接口，旧方法不可调用；
 3. Renderer tests 覆盖同 Episode heads-up 原地更新、启动不补弹、不可用主动作、部分未读与 CAS 错误恢复；
 4. 双主题真实 App 验收覆盖 Drawer、Toast、设置、长 CJK/emoji、键盘、最小窗口与 200% zoom；
 5. `cargo test --workspace`、Fmt、Clippy、Typecheck、Desktop build、`pnpm test` 与全部文档治理通过；
@@ -120,10 +124,10 @@ Episode 更新通过最小 Change Journal 驱动浮层和增量刷新。
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.70 以未执行九 Runtime v8 matrix 的事实冻结为 historical/closed_incomplete；v0.71 成为唯一 current，并承载受控关闭增量 |
-| ADR | 已更新 | ADR-0175 细化通知真源、聚合、Journal 与 Renderer seam；ADR-0176 替代十项 official inventory 并冻结 system-required policy；新增 [ADR-0177](../../adr/0177-controlled-shutdown-fences-product-execution.md)冻结 product fence 与 unknown effects 分离；Grill Duo 标题与 Notification v2 合同修正不改变既有 ADR 决策 |
-| Contracts | 已更新 | Notification Episode v2 替代 v1，冻结 Active Attention、exact HeadsUpSignal、事务式 cursor 与 acknowledge-only；Current User Attention v3 继续拥有逐消息精确确认；SkillView 增加 management policy；[Planned Shutdown v2](../../contracts/planned-shutdown-v2.md)替代 v1 当前入口；Grill Duo 仍使用既有 CampMessage 与 caller-return 合同 |
-| Architecture | 已更新 | Notification Episode 架构补齐 Active Attention、signal hydration 和 Renderer cursor commit seam；Built-in Tool Runtime 与 Skill Projection 记录十一项 inventory 及系统必需自愈边界；Planned Shutdown 增加 durable cycle、writer fence、product settlement 与 startup compensation |
-| UI | 已更新 | 通知中心组件合同补齐 exact signal 呈现/点击、“知道了”动作与失败重试边界；Settings surface 同步九项可配置 Skill；[Camp 会话工作区](../../ui/components/conversation-workspace.md)同步关闭等待与 terminal unknown-effect 文案 |
+| ADR | 已更新 | ADR-0175 细化通知真源、聚合、Journal 与 Renderer seam；ADR-0176 替代十项 official inventory 并冻结 system-required policy；新增 [ADR-0177](../../adr/0177-controlled-shutdown-fences-product-execution.md)冻结 product fence 与 unknown effects 分离；Grill Duo 标题与 Notification v3 精确失效修正不改变既有 ADR 决策 |
+| Contracts | 已更新 | Notification Episode v3 替代 v2，冻结 Journal exact invalidation、顺序队列归约与 reset 清空；Current User Attention v3 继续拥有逐消息精确确认；SkillView 增加 management policy；[Planned Shutdown v2](../../contracts/planned-shutdown-v2.md)替代 v1 当前入口；Grill Duo 仍使用既有 CampMessage 与 caller-return 合同 |
+| Architecture | 已更新 | Notification Episode 架构补齐 Active/Heads-Up Eligible Attention、signal hydration、exact invalidation 和 Renderer cursor commit seam；Built-in Tool Runtime 与 Skill Projection 记录十一项 inventory 及系统必需自愈边界；Planned Shutdown 增加 durable cycle、writer fence、product settlement 与 startup compensation |
+| UI | 已更新 | 通知中心组件合同补齐 exact signal 呈现/点击/失效、“知道了”动作、overflow identity 与 reset 边界；Settings surface 同步九项可配置 Skill；[Camp 会话工作区](../../ui/components/conversation-workspace.md)同步关闭等待与 terminal unknown-effect 文案 |
 | Runtime Activity | 确认无需更新 | 不新增 Runtime operation、provider event、Activity classifier 或 Evidence mapping |
 | Runtime compatibility | 确认无需更新 | 不改变 Adapter、Native Session、Built-in Transport v8 或模型教学 identity |
 | Documentation routing | 已更新 | docs map、Contract/Architecture/UI/ADR/current-version 路由到 v0.71；Skills 指向 ADR-0176，Planned Shutdown 当前入口切换到 ADR-0177/v2 |
@@ -132,7 +136,7 @@ Episode 更新通过最小 Change Journal 驱动浮层和增量刷新。
 ## References
 
 - [实施与验收计划](implementation-plan.md)
-- [Notification Episode v2](../../contracts/notification-episode-v2.md)
+- [Notification Episode v3](../../contracts/notification-episode-v3.md)
 - [Current User Attention v3](../../contracts/current-user-attention-v3.md)
 - [ADR-0175](../../adr/0175-core-owned-notification-occurrence-episode-and-change-journal.md)
 - [ADR-0176](../../adr/0176-eleven-skill-official-inventory-and-system-required-operations.md)

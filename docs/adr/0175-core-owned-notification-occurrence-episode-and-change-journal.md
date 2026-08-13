@@ -54,7 +54,7 @@ Current User Attention v3 替代，不原地修改 ADR-0165。
 
 ## References
 
-- [Notification Episode v2](../contracts/notification-episode-v2.md)
+- [Notification Episode v3](../contracts/notification-episode-v3.md)
 - [Current User Attention v3](../contracts/current-user-attention-v3.md)
 - [ADR-0087](0087-core-owned-durable-in-app-notification-inbox.md)
 - [ADR-0165](0165-core-owned-current-user-message-attention.md)

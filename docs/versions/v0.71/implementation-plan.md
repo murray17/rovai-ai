@@ -90,15 +90,27 @@ last_updated: 2026-08-13
 - [x] Desktop v2 report、关闭等待文案、真实 Runtime acceptance 脚本与 terminal unknown-effect surface 已更新；
 - [x] 完成全量 Rust/Renderer/Node、Clippy、类型、文档治理和 packaged real-Claude acceptance。
 
+## Checkpoint 9：v3 Heads-Up 精确生命周期
+
+- [x] Migration 81 为 disposition change 保存精确 acknowledgement identity，为 Clear 保存实际
+  attention revision 边界，并把当前 Data Contract 提升到 projection schema 36；
+- [x] `changesSince` schema v6 返回 closed `headsUpInvalidation`，exact signal 同时携带来源
+  `admittedAttentionRevision`；
+- [x] Renderer 普通 Inbox reload 不再用推荐动作列表清理队列，按 Journal 顺序先失效旧 signal 再接收新
+  signal，reset/初始化直接清空临时队列；
+- [x] 可见队列和 overflow 都保存精确 signal identity；成功确认立即按 acknowledgement ID 幂等移除；
+- [x] Core/Renderer 回归覆盖 Mention B 不被 Mention A 挡掉、resolved Approval 删除旧 pending signal、
+  Clear 后较高 revision signal 保留以及 retention remove 失效。
+
 ## 当前证据
 
 ### 确定性门禁
 
-- v2 修正、Skill 与 Planned Shutdown 增量整合后的 `cargo test --workspace`：411 个 library、11 个 CLI、73 个 Core binary
+- v3 修正、Skill 与 Planned Shutdown 增量整合后的 `cargo test --workspace`：412 个 library、11 个 CLI、73 个 Core binary
   测试通过，3 个显式 real-Runtime manual tests 按合同 ignored；
 - `cargo fmt --all -- --check` 与
   `cargo clippy --workspace --all-targets -- -D warnings`：通过；
-- `pnpm test`：Docs 21、Vitest 47 files / 318 tests、Node 179 tests 全部通过；
+- `pnpm test`：Docs 21、Vitest 47 files / 321 tests、Node 179 tests 全部通过；
   `pnpm typecheck`：通过；
 - `pnpm package:mac`：通过，生成隔离验收使用的 `dist/mac-arm64/Rovai-ai.app`；
 - `pnpm docs:test`、`pnpm docs:check`、`pnpm docs:adr:generate -- --check` 与
@@ -152,4 +164,4 @@ last_updated: 2026-08-13
   settle 后再次 `app.quit()` 会把总窗口扩大到 18411ms，因此 Desktop 在 shutdown Promise settle 后使用
   `app.exit(0)` 完成已授权退出。
 
-Checkpoint 0–8 与全部发布门槛已完成，版本 `implementation_status` 为 `complete`。
+Checkpoint 0–9 与全部发布门槛已完成，版本 `implementation_status` 为 `complete`。

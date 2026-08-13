@@ -1201,8 +1201,12 @@ The monotonic Notification Episode revision that advances only when a new attent
 _Avoid_: Episode version, database row version, display revision, timestamp
 
 **Active Attention**:
-The subset of a Notification Episode's Occurrences admitted after its current clear boundary and not made inactive by acknowledgement or satisfaction. It alone determines current unread attention, attention actions, heads-up eligibility, and whether attention blocks retention; Occurrences outside it remain historical source facts rather than becoming active again when a later Occurrence reopens the Episode. A resolved Approval remains Active Attention until acknowledged.
+The subset of a Notification Episode's Occurrences admitted after its current clear boundary and not made inactive by acknowledgement or satisfaction. It determines current unread attention, attention actions, and whether attention blocks retention, and is a prerequisite for heads-up eligibility; Occurrences outside it remain historical source facts rather than becoming active again when a later Occurrence reopens the Episode. A resolved Approval remains Active Attention until acknowledged.
 _Avoid_: all unacknowledged history, current Episode version, deleted Occurrence, clear-as-temporary-hide, business state alone
+
+**Heads-Up Eligible Attention**:
+Active Attention whose current source state still permits a transient heads-up. Resolution can end an Approval's heads-up eligibility without acknowledging or removing its underlying Active Attention; a queued heads-up therefore follows its exact source identity and disposition rather than the Episode's current recommended actions.
+_Avoid_: Active Attention, unread, primary action, secondary action, queued toast, Episode action index
 
 **Local User (`local_user`)**:
 The sole current human user identity resolved and owned by Core in the single-user product contract. Agents can request attention with `--to-user` but cannot submit, select, infer, or receive this identity; display names are presentation and never replace the stable `local_user` fact.

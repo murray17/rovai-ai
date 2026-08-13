@@ -1233,7 +1233,7 @@ export interface NotificationEpisodeView {
 }
 
 export interface NotificationEpisodeInbox {
-  schemaVersion: 5
+  schemaVersion: 6
   throughChangeSequence: number
   unreadCount: number
   items: NotificationEpisodeView[]
@@ -1254,18 +1254,37 @@ export interface NotificationEpisodeChange {
     | 'cleared'
     | 'retained'
   headsUpSignal: NotificationHeadsUpSignal | null
+  headsUpInvalidation: NotificationHeadsUpInvalidation | null
   changedAt: string
   episode: NotificationEpisodeView | null
 }
 
 export interface NotificationHeadsUpSignal {
   semantic: NotificationSemantic
+  admittedAttentionRevision: number
   action: NotificationActionView
   mention: NotificationMentionView | null
 }
 
+export type NotificationHeadsUpInvalidation =
+  | {
+    kind: 'source_state_changed'
+    acknowledgementId: string
+    throughAttentionRevision: null
+  }
+  | {
+    kind: 'attention_cleared'
+    acknowledgementId: null
+    throughAttentionRevision: number
+  }
+  | {
+    kind: 'episode_removed'
+    acknowledgementId: null
+    throughAttentionRevision: null
+  }
+
 export interface NotificationEpisodeChangeBatch {
-  schemaVersion: 5
+  schemaVersion: 6
   requestedAfterChangeSequence: number
   nextChangeSequence: number
   throughChangeSequence: number

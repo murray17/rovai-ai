@@ -34,7 +34,7 @@ const criteria = [
     test('crates/rovai-core/src/context_contract.rs', 'binding_contract_freezes_each_context_axis_version')
   ]),
   criterion('CCC-011', 'Data Contract is v0.71 with projection schema 35', [
-    test('crates/rovai-core/src/db.rs', 'current_data_contract_accepts_current_and_exact_v071_schema34_and_older_sources'),
+    test('crates/rovai-core/src/db.rs', 'current_data_contract_accepts_current_and_exact_v071_schema35_and_older_sources'),
     test('crates/rovai-core/src/db.rs', 'v80_adds_durable_controlled_shutdown_cycles'),
     test('crates/rovai-core/src/db.rs', 'v79_preserves_v78_lineage_and_installs_notification_episodes_once'),
     test('crates/rovai-core/src/db.rs', 'v77_adds_planned_shutdown_terminal_provenance_and_turn_aggregate_reason')
@@ -43,7 +43,7 @@ const criteria = [
     test('crates/rovai-core/src/read_model.rs', 'snapshot_projects_current_names_from_structured_mentions')
   ]),
   criterion('CCC-013', 'The migration chain admits only exact v0.67/v0.66/v0.62/v0.54/v0.52 upgrade sources', [
-    test('crates/rovai-core/src/db.rs', 'current_data_contract_accepts_current_and_exact_v071_schema34_and_older_sources')
+    test('crates/rovai-core/src/db.rs', 'current_data_contract_accepts_current_and_exact_v071_schema35_and_older_sources')
   ]),
   criterion('CCC-014', 'Migration preserves completed Camp, Message, Task, and terminal Run/Turn history', [
     test('crates/rovai-core/src/context.rs', 'v68_through_v71_clean_break_preserves_business_history_and_removes_old_context_state')

@@ -28,14 +28,42 @@ export type NotificationHeadsUpEntry = {
   changeSequence: number
 }
 
-export function enqueueNotificationHeadsUps(
-  current: readonly NotificationHeadsUpEntry[],
+export type NotificationHeadsUpState = {
+  entries: NotificationHeadsUpEntry[]
+  overflowEntries: NotificationHeadsUpEntry[]
+}
+
+const emptyHeadsUpState = (): NotificationHeadsUpState => ({
+  entries: [],
+  overflowEntries: []
+})
+
+export function applyNotificationHeadsUpChanges(
+  current: NotificationHeadsUpState,
   incoming: readonly NotificationEpisodeChange[],
   maximumEntries = 3
-): { entries: NotificationHeadsUpEntry[]; overflow: number } {
-  const entries = current.map((entry) => ({ ...entry }))
-  let overflow = 0
+): NotificationHeadsUpState {
+  let nextEntries = current.entries.map((entry) => ({ ...entry }))
+  let overflowEntries = current.overflowEntries.map((entry) => ({ ...entry }))
   for (const change of incoming) {
+    const invalidation = change.headsUpInvalidation
+    if (invalidation?.kind === 'source_state_changed') {
+      const retainsSignal = (entry: NotificationHeadsUpEntry): boolean => (
+        entry.signal.action.acknowledgementId !== invalidation.acknowledgementId
+      )
+      nextEntries = nextEntries.filter(retainsSignal)
+      overflowEntries = overflowEntries.filter(retainsSignal)
+    } else if (invalidation?.kind === 'attention_cleared') {
+      const retainsSignal = (entry: NotificationHeadsUpEntry): boolean => (
+        entry.episode.id !== change.episodeId
+        || entry.signal.admittedAttentionRevision > invalidation.throughAttentionRevision
+      )
+      nextEntries = nextEntries.filter(retainsSignal)
+      overflowEntries = overflowEntries.filter(retainsSignal)
+    } else if (invalidation?.kind === 'episode_removed') {
+      nextEntries = nextEntries.filter((entry) => entry.episode.id !== change.episodeId)
+      overflowEntries = overflowEntries.filter((entry) => entry.episode.id !== change.episodeId)
+    }
     if (
       change.operation !== 'upsert'
       || !change.episode
@@ -46,16 +74,49 @@ export function enqueueNotificationHeadsUps(
       signal: change.headsUpSignal,
       changeSequence: change.changeSequence
     }
-    const existingIndex = entries.findIndex((entry) => entry.episode.id === change.episodeId)
+    const existingIndex = nextEntries.findIndex((entry) => entry.episode.id === change.episodeId)
     if (existingIndex >= 0) {
-      entries[existingIndex] = next
-    } else if (entries.length < maximumEntries) {
-      entries.push(next)
+      nextEntries[existingIndex] = next
+      continue
+    }
+    const existingOverflowIndex = overflowEntries.findIndex(
+      (entry) => entry.episode.id === change.episodeId
+    )
+    if (existingOverflowIndex >= 0) {
+      overflowEntries[existingOverflowIndex] = next
+    } else if (nextEntries.length < maximumEntries) {
+      nextEntries.push(next)
     } else {
-      overflow += 1
+      overflowEntries.push(next)
     }
   }
-  return { entries, overflow }
+  return { entries: nextEntries, overflowEntries }
+}
+
+function removeHeadsUpByAcknowledgementId(
+  current: NotificationHeadsUpState,
+  acknowledgementId: string
+): NotificationHeadsUpState {
+  const retainsSignal = (entry: NotificationHeadsUpEntry): boolean => (
+    entry.signal.action.acknowledgementId !== acknowledgementId
+  )
+  return {
+    entries: current.entries.filter(retainsSignal),
+    overflowEntries: current.overflowEntries.filter(retainsSignal)
+  }
+}
+
+function removeHeadsUpByEpisodeId(
+  current: NotificationHeadsUpState,
+  episodeId: string
+): NotificationHeadsUpState {
+  const retainsEpisode = (entry: NotificationHeadsUpEntry): boolean => (
+    entry.episode.id !== episodeId
+  )
+  return {
+    entries: current.entries.filter(retainsEpisode),
+    overflowEntries: current.overflowEntries.filter(retainsEpisode)
+  }
 }
 
 export async function readNotificationChangePages(
@@ -71,7 +132,7 @@ export async function readNotificationChangePages(
   let candidateCursor = startCursor
   for (let page = 0; page < maximumPages; page += 1) {
     const batch = await requestPage(candidateCursor)
-    if (batch.schemaVersion !== 5) throw new Error('通知增量合同不兼容。')
+    if (batch.schemaVersion !== 6) throw new Error('通知增量合同不兼容。')
     if (batch.requestedAfterChangeSequence !== candidateCursor) {
       throw new Error('通知增量游标边界不一致。')
     }
@@ -161,8 +222,7 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
     const [globalBusy, setGlobalBusy] = useState(false)
     const [loadingMore, setLoadingMore] = useState(false)
     const [preference, setPreference] = useState<NotificationPreference | null>(null)
-    const [headsUpQueue, setHeadsUpQueue] = useState<NotificationHeadsUpEntry[]>([])
-    const [headsUpOverflow, setHeadsUpOverflow] = useState(0)
+    const [headsUpState, setHeadsUpState] = useState<NotificationHeadsUpState>(emptyHeadsUpState)
     const changeCursor = useRef(0)
     const baselineReady = useRef(false)
     const pollRunning = useRef(false)
@@ -183,18 +243,11 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
     }), [onCancelNavigation])
 
     const acceptInbox = useCallback((inbox: NotificationEpisodeInbox): void => {
-      if (inbox.schemaVersion !== 5) throw new Error('通知中心合同不兼容。')
+      if (inbox.schemaVersion !== 6) throw new Error('通知中心合同不兼容。')
       setItems(inbox.items)
       setNextCursor(inbox.nextCursor)
       setUnreadCount(inbox.unreadCount)
       setThroughChangeSequence(inbox.throughChangeSequence)
-      const currentById = new Map(inbox.items.map((episode) => [episode.id, episode]))
-      setHeadsUpQueue((current) => current.flatMap((entry) => {
-        const episode = currentById.get(entry.episode.id)
-        return episode && episodeHasActiveHeadsUpSignal(episode, entry.signal)
-          ? [{ ...entry, episode }]
-          : []
-      }))
       onUnreadCountChange(inbox.unreadCount)
     }, [onUnreadCountChange])
 
@@ -244,6 +297,7 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
         loadPreference().catch(() => null)
       ]).then(([inbox]) => {
         if (cancelled) return
+        setHeadsUpState(emptyHeadsUpState())
         changeCursor.current = inbox.throughChangeSequence
         baselineReady.current = true
       }).catch(() => undefined)
@@ -259,8 +313,7 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
 
     useEffect(() => {
       if (!open) return
-      setHeadsUpQueue([])
-      setHeadsUpOverflow(0)
+      setHeadsUpState(emptyHeadsUpState())
       void loadInbox(filter).catch(() => undefined)
     }, [filter, loadInbox, open])
 
@@ -268,7 +321,8 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
       episode: NotificationEpisodeView,
       action: NotificationActionView
     ): Promise<void> => {
-      if (!action.acknowledgementId) return
+      const acknowledgementId = action.acknowledgementId
+      if (!acknowledgementId) return
       const result = await window.rovai.request<StoredCommandResult>(
         'notifications.acknowledge',
         {
@@ -276,11 +330,15 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
           command: {
             episodeId: episode.id,
             observedEpisodeVersion: action.observedEpisodeVersion,
-            acknowledgementId: action.acknowledgementId
+            acknowledgementId
           }
         }
       )
       if (result.status !== 'applied') throw new Error(commandFailure(result))
+      setHeadsUpState((current) => removeHeadsUpByAcknowledgementId(
+        current,
+        acknowledgementId
+      ))
     }, [])
 
     const pollChanges = useCallback(async (): Promise<void> => {
@@ -301,6 +359,7 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
         )
         if (collected.resetRequired) {
           const reset = await loadInbox(filter, false, true)
+          setHeadsUpState(emptyHeadsUpState())
           changeCursor.current = reset.throughChangeSequence
           pollFailureCount.current = 0
           pollRetryAt.current = 0
@@ -319,7 +378,10 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
             change.operation !== 'upsert'
             || !episode
             || !change.headsUpSignal
-          ) continue
+          ) {
+            headsUpChanges.push(change)
+            continue
+          }
           const signal = change.headsUpSignal
           const exactMentionAction = signal.semantic === 'user_mention'
             ? signal.action
@@ -340,6 +402,7 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
             ) {
               try {
                 await acknowledgeAction(episode, exactMentionAction)
+                headsUpChanges.push({ ...change, headsUpSignal: null })
                 continue
               } catch {
                 // Persistence failure keeps the exact occurrence unread and eligible for heads-up.
@@ -353,16 +416,14 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
             && document.visibilityState === 'visible'
             && document.hasFocus()
           ) headsUpChanges.push(change)
+          else headsUpChanges.push({ ...change, headsUpSignal: null })
         }
         if (changes.length > 0) await loadInbox(filter, false, true)
         if (headsUpChanges.length > 0) {
-          setHeadsUpQueue((current) => {
-            const next = enqueueNotificationHeadsUps(current, headsUpChanges)
-            if (next.overflow > 0) {
-              setHeadsUpOverflow((count) => count + next.overflow)
-            }
-            return next.entries
-          })
+          setHeadsUpState((current) => applyNotificationHeadsUpChanges(
+            current,
+            headsUpChanges
+          ))
         }
         changeCursor.current = collected.nextChangeSequence
         pollFailureCount.current = 0
@@ -511,7 +572,7 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
         )
         if (result.status !== 'applied') throw new Error(commandFailure(result))
         setItems((current) => current.filter((item) => item.id !== episode.id))
-        setHeadsUpQueue((current) => current.filter((entry) => entry.episode.id !== episode.id))
+        setHeadsUpState((current) => removeHeadsUpByEpisodeId(current, episode.id))
       } catch (nextError) {
         setError(`无法清除这项通知：${errorMessage(nextError)}`)
       } finally {
@@ -529,7 +590,7 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
           'notifications.inbox',
           { filter, cursor: nextCursor, limit: 50 }
         )
-        if (page.schemaVersion !== 5) throw new Error('通知中心合同不兼容。')
+        if (page.schemaVersion !== 6) throw new Error('通知中心合同不兼容。')
         setItems((current) => {
           const ids = new Set(current.map((item) => item.id))
           return [...current, ...page.items.filter((item) => !ids.has(item.id))]
@@ -554,27 +615,34 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
       }
     }
 
-    const currentHeadsUp = headsUpQueue[0] ?? null
+    const currentHeadsUp = headsUpState.entries[0] ?? null
+    const headsUpOverflow = headsUpState.overflowEntries.length
     return (
       <>
         {currentHeadsUp && (
           <NotificationHeadsUp
-            key={currentHeadsUp.episode.id}
+            key={currentHeadsUp.changeSequence}
             entry={currentHeadsUp}
             onOpen={() => void openAction(
               currentHeadsUp.episode, currentHeadsUp.signal.action
             )}
-            onDismiss={() => setHeadsUpQueue((current) => current.slice(1))}
+            onDismiss={() => setHeadsUpState((current) => ({
+              ...current,
+              entries: current.entries.slice(1)
+            }))}
           />
         )}
         {!currentHeadsUp && headsUpOverflow > 0 && (
           <NotificationHeadsUpSummary
             count={headsUpOverflow}
             onOpen={() => {
-              setHeadsUpOverflow(0)
+              setHeadsUpState(emptyHeadsUpState())
               changeOpen(true)
             }}
-            onDismiss={() => setHeadsUpOverflow(0)}
+            onDismiss={() => setHeadsUpState((current) => ({
+              ...current,
+              overflowEntries: []
+            }))}
           />
         )}
 
@@ -901,17 +969,6 @@ export function episodeHasActiveHeadsUpReason(
   if (semantic === 'approval_pending') return reason.state === 'pending'
   if (semantic === 'turn_completed') return reason.state === 'unsatisfied'
   return reason.state === 'unacknowledged'
-}
-
-export function episodeHasActiveHeadsUpSignal(
-  episode: NotificationEpisodeView,
-  signal: NotificationHeadsUpSignal
-): boolean {
-  const acknowledgementId = signal.action.acknowledgementId
-  if (!acknowledgementId) return false
-  return [episode.primaryAction, ...episode.secondaryActions].some((action) => (
-    action.acknowledgementId === acknowledgementId
-  ))
 }
 
 function actionLabel(action: NotificationActionView): string {

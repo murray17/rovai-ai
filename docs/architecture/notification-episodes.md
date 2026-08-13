@@ -15,7 +15,7 @@ CampMessage / CampTurn / Approval source transaction
        ├─ immutable Occurrence
        ├─ mutable Occurrence Disposition
        ├─ materialized Episode identity + revisions
-       └─ minimal Change Journal entry
+       └─ minimal Change Journal entry + exact heads-up invalidation facts
 
 Core Notification module
   ├─ inbox() ────────────── current hydrated Episode views
@@ -54,6 +54,11 @@ Journal 行的 heads-up reason 只用于 Core 定位同一 `admittedChangeSequen
 Episode primary fields。Approval Read Side 先选择仍 pending 的 Active Attention；只剩 resolved 未确认来源
 时返回不导航的 `acknowledge_only`。
 
+Journal 另外保存 disposition change 的精确 acknowledgement identity 与 Clear 的实际 attention revision
+边界，并投影 closed heads-up invalidation。resolved Approval 仍可保持 Active Attention，但已退出 Heads-Up
+Eligible Attention；其旧 pending signal 按 identity 失效。Episode `primaryAction + secondaryActions` 只是
+推荐/展示动作，不是全部 attention identity 的索引。
+
 ## 并发和恢复
 
 - 每个 attention-worthy source 先获得全局 change sequence，再以同一边界写 Occurrence 与 Journal；
@@ -63,6 +68,8 @@ Episode primary fields。Approval Read Side 先选择仍 pending 的 Active Atte
 - App/Renderer 启动先读取 Inbox high-water，历史未读不形成 heads-up；运行中只消费之后的 Journal。
 - Renderer 分页使用局部 candidate cursor；所有分页、精确可见性处理、Inbox 接收和 heads-up 入队成功后
   才提交共享 cursor，失败保持原边界重试。
+- Renderer 按 Journal 顺序先归约 exact invalidation、再接收同 change 的新 signal；普通 Inbox hydration
+  不改变临时队列，reset/重新建立 baseline 时直接清空且不从 Episode actions 恢复。
 
 ## 保留
 
@@ -73,5 +80,5 @@ cascade 和 Journal trigger 收口。
 ## References
 
 - [ADR-0175](../adr/0175-core-owned-notification-occurrence-episode-and-change-journal.md)
-- [Notification Episode v2](../contracts/notification-episode-v2.md)
+- [Notification Episode v3](../contracts/notification-episode-v3.md)
 - [Current User Attention v3](../contracts/current-user-attention-v3.md)

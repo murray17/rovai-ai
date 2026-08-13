@@ -8,10 +8,9 @@ import type {
   NotificationSemantic
 } from '@contracts'
 import {
+  applyNotificationHeadsUpChanges,
   applyNotificationChanges,
-  enqueueNotificationHeadsUps,
   episodeHasActiveHeadsUpReason,
-  episodeHasActiveHeadsUpSignal,
   notificationBadgeLabel,
   notificationHeadsUpPresentation,
   notificationPresentation,
@@ -104,6 +103,7 @@ function change(
     operation: 'upsert',
     changeCause: 'occurrence_admitted',
     headsUpSignal: signal,
+    headsUpInvalidation: null,
     changedAt: item.updatedAt,
     episode: item
   }
@@ -115,6 +115,7 @@ function headsUpSignal(
 ): NotificationHeadsUpSignal {
   return {
     semantic,
+    admittedAttentionRevision: item.attentionRevision,
     action: action(item.id, semantic === 'approval_pending'
       ? 'open_approval'
       : semantic === 'user_mention'
@@ -180,8 +181,11 @@ describe('Notification Episode presentation', () => {
       updatedAt: '2026-08-01T00:01:00Z'
     })
     const other = episode('turn_completed', { id: 'episode-2' })
-    const initial = enqueueNotificationHeadsUps([], [change(first, 1)])
-    const next = enqueueNotificationHeadsUps(initial.entries, [
+    const initial = applyNotificationHeadsUpChanges(
+      { entries: [], overflowEntries: [] },
+      [change(first, 1)]
+    )
+    const next = applyNotificationHeadsUpChanges(initial, [
       change(updated, 2, 'turn_failed'),
       change(other, 3)
     ])
@@ -211,16 +215,119 @@ describe('Notification Episode presentation', () => {
     })
     expect(episodeHasActiveHeadsUpReason(acknowledgedMention, 'user_mention')).toBe(false)
     const inactiveChange = change(acknowledgedMention, 2, null)
-    expect(enqueueNotificationHeadsUps([], [inactiveChange]).entries).toEqual([])
+    expect(applyNotificationHeadsUpChanges(
+      { entries: [], overflowEntries: [] },
+      [inactiveChange]
+    ).entries).toEqual([])
   })
 
-  it('reconciles a queued signal by exact acknowledgement identity', () => {
-    const current = episode('user_mention')
-    const stale = headsUpSignal(current, 'user_mention')
-    stale.action.acknowledgementId = 'occurrence-old'
-    expect(episodeHasActiveHeadsUpSignal(current, stale)).toBe(false)
-    stale.action.acknowledgementId = current.primaryAction.acknowledgementId
-    expect(episodeHasActiveHeadsUpSignal(current, stale)).toBe(true)
+  it('keeps the newest exact Mention signal across unrelated Episode changes', () => {
+    const first = episode('user_mention')
+    const firstChange = change(first, 1)
+    firstChange.headsUpSignal!.action.acknowledgementId = 'mention-a'
+    const second = episode('user_mention', {
+      episodeVersion: 2,
+      attentionRevision: 2,
+      changeSequence: 2
+    })
+    const secondChange = change(second, 2)
+    secondChange.headsUpSignal!.action.acknowledgementId = 'mention-b'
+    const queued = applyNotificationHeadsUpChanges(
+      { entries: [], overflowEntries: [] },
+      [firstChange, secondChange]
+    )
+    const unrelated = change(episode('turn_completed', { id: 'episode-2' }), 3, null)
+
+    const retained = applyNotificationHeadsUpChanges(queued, [unrelated])
+
+    expect(retained.entries).toHaveLength(1)
+    expect(retained.entries[0].signal.action.acknowledgementId).toBe('mention-b')
+  })
+
+  it('removes a pending Approval signal when its exact source state changes', () => {
+    const approval = episode('approval_pending')
+    const admitted = change(approval, 1)
+    const acknowledgementId = admitted.headsUpSignal!.action.acknowledgementId as string
+    const queued = applyNotificationHeadsUpChanges(
+      { entries: [], overflowEntries: [] },
+      [admitted]
+    )
+    const resolved: NotificationEpisodeChange = {
+      ...change(episode('approval_pending', {
+        resolved: true,
+        primaryAction: {
+          ...action(approval.id, 'acknowledge_only'),
+          acknowledgementId
+        }
+      }), 2, null),
+      changeCause: 'resolved',
+      headsUpInvalidation: {
+        kind: 'source_state_changed',
+        acknowledgementId,
+        throughAttentionRevision: null
+      }
+    }
+
+    expect(applyNotificationHeadsUpChanges(queued, [resolved])).toEqual({
+      entries: [],
+      overflowEntries: []
+    })
+  })
+
+  it('applies a Clear boundary before admitting a newer signal', () => {
+    const first = episode('user_mention')
+    const queued = applyNotificationHeadsUpChanges(
+      { entries: [], overflowEntries: [] },
+      [change(first, 1)]
+    )
+    const cleared: NotificationEpisodeChange = {
+      ...change(first, 2, null),
+      operation: 'remove',
+      changeCause: 'cleared',
+      episode: null,
+      headsUpInvalidation: {
+        kind: 'attention_cleared',
+        acknowledgementId: null,
+        throughAttentionRevision: 1
+      }
+    }
+    const second = episode('user_mention', {
+      episodeVersion: 3,
+      attentionRevision: 2,
+      changeSequence: 3
+    })
+
+    const next = applyNotificationHeadsUpChanges(queued, [cleared, change(second, 3)])
+
+    expect(next.entries).toHaveLength(1)
+    expect(next.entries[0].signal.admittedAttentionRevision).toBe(2)
+  })
+
+  it('invalidates exact signals retained in overflow', () => {
+    const visible = episode('user_mention')
+    const overflow = episode('approval_pending', { id: 'episode-2' })
+    const overflowChange = change(overflow, 2)
+    const acknowledgementId = overflowChange.headsUpSignal!.action.acknowledgementId as string
+    const queued = applyNotificationHeadsUpChanges(
+      { entries: [], overflowEntries: [] },
+      [change(visible, 1), overflowChange],
+      1
+    )
+    expect(queued.overflowEntries).toHaveLength(1)
+    const resolved: NotificationEpisodeChange = {
+      ...change(overflow, 3, null),
+      changeCause: 'resolved',
+      headsUpInvalidation: {
+        kind: 'source_state_changed',
+        acknowledgementId,
+        throughAttentionRevision: null
+      }
+    }
+
+    const next = applyNotificationHeadsUpChanges(queued, [resolved], 1)
+
+    expect(next.entries).toHaveLength(1)
+    expect(next.overflowEntries).toEqual([])
   })
 
   it('presents and opens the exact signal rather than the Episode current primary state', () => {
@@ -236,7 +343,7 @@ describe('Notification Episode presentation', () => {
     })
     const signal = headsUpSignal(current, 'user_mention')
     signal.action.messageId = 'message-new'
-    const queued = enqueueNotificationHeadsUps([], [{
+    const queued = applyNotificationHeadsUpChanges({ entries: [], overflowEntries: [] }, [{
       ...change(current, 7, null),
       headsUpSignal: signal
     }])
@@ -254,7 +361,7 @@ describe('Notification Episode presentation', () => {
     const request = async (cursor: number): Promise<NotificationEpisodeChangeBatch> => {
       requests.push(cursor)
       if (cursor === 0) return {
-        schemaVersion: 5,
+        schemaVersion: 6,
         requestedAfterChangeSequence: 0,
         nextChangeSequence: 1,
         throughChangeSequence: 2,
@@ -268,7 +375,7 @@ describe('Notification Episode presentation', () => {
     await expect(readNotificationChangePages(0, request)).rejects.toThrow('page two failed')
     expect(requests).toEqual([0, 1])
     const retried = await readNotificationChangePages(0, async (cursor) => ({
-      schemaVersion: 5,
+      schemaVersion: 6,
       requestedAfterChangeSequence: cursor,
       nextChangeSequence: 2,
       throughChangeSequence: 2,

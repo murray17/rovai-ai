@@ -31,6 +31,11 @@ exact `headsUpSignal` 可重新显示。浮层标题、摘要、点击和确认�
 primary semantic/action 替代。启动与 reload 先建立 Inbox high-water，不补弹历史。Hover、focus 和窗口
 不可见时暂停计时；关闭只关闭本次浮层，不 acknowledge 或 clear。
 
+已排队 signal 只由 Journal 的 exact acknowledgement、Clear revision 或 Episode remove invalidation 失效。
+普通 Inbox reload、筛选切换和其他 Episode 更新不拿 `primaryAction + secondaryActions` 清理浮层；这些字段
+不是 Active Attention 全集。resolved Approval 的旧 pending signal 必须删除，即使卡片继续以同一
+acknowledgement ID 提供“知道了”。可见队列与 overflow 都保留精确 identity；reset 直接清空临时队列。
+
 ## 状态与操作
 
 - All / Unread filter 保持 Drawer、焦点和分页上下文；
@@ -49,6 +54,6 @@ primary semantic/action 替代。启动与 reload 先建立 Inbox high-water，�
 
 ## References
 
-- [Notification Episode v2](../../contracts/notification-episode-v2.md)
+- [Notification Episode v3](../../contracts/notification-episode-v3.md)
 - [Current User Attention v3](../../contracts/current-user-attention-v3.md)
 - [DESIGN.md](../../../DESIGN.md)
