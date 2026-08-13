@@ -3609,6 +3609,118 @@ function attachmentErrorMessage(error: unknown): string {
   return '安全接入失败，可移除后重试'
 }
 
+type TaskTimelineCardPresentation = {
+  headline: string
+  noteLabel: string
+  note: string
+  unassigned: boolean
+}
+
+function taskTimelineCardPresentation(task: TaskView): TaskTimelineCardPresentation {
+  if (task.status === 'pending' && !task.assigneeAgentId) {
+    return {
+      headline: '任务等待重新分配',
+      noteLabel: '需要处理',
+      note: '等待用户或默认负责人重新分配',
+      unassigned: true
+    }
+  }
+  if (task.status === 'pending') {
+    return {
+      headline: '任务责任已更新',
+      noteLabel: '当前',
+      note: '等待负责人开始；创建不会自动启动 AgentRun',
+      unassigned: false
+    }
+  }
+  if (task.status === 'in_progress') {
+    return {
+      headline: '任务正在推进',
+      noteLabel: '当前',
+      note: '任务处于进行中；打开详情可查看责任与关联执行',
+      unassigned: false
+    }
+  }
+  if (task.status === 'blocked') {
+    return {
+      headline: '任务暂时受阻',
+      noteLabel: '阻塞原因',
+      note: task.blockedReason?.trim() || '阻塞原因尚未提供',
+      unassigned: false
+    }
+  }
+  if (task.status === 'completed') {
+    return {
+      headline: '任务已经完成',
+      noteLabel: '完成摘要',
+      note: task.completionSummary?.trim() || '完成摘要尚未提供',
+      unassigned: false
+    }
+  }
+  return {
+    headline: '任务已经取消',
+    noteLabel: '取消原因',
+    note: task.cancelReason?.trim() || '取消原因尚未提供',
+    unassigned: false
+  }
+}
+
+function TaskTimelineStatusIcon({
+  status,
+  unassigned
+}: {
+  status: TaskStatus
+  unassigned: boolean
+}): JSX.Element {
+  if (unassigned) {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="9" cy="8" r="2.75" />
+        <path d="M4.5 18c.65-3 2.2-4.5 4.5-4.5 1.45 0 2.6.58 3.4 1.72" />
+        <path d="M17.5 7.5v6M14.5 10.5h6" />
+      </svg>
+    )
+  }
+  if (status === 'in_progress') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="8.5" />
+        <path d="m10 8.5 5 3.5-5 3.5Z" />
+      </svg>
+    )
+  }
+  if (status === 'blocked') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M8 3.5h8L20.5 8v8L16 20.5H8L3.5 16V8Z" />
+        <path d="M12 7.5v5.75M12 16.5h.01" />
+      </svg>
+    )
+  }
+  if (status === 'completed') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="8.5" />
+        <path d="m8.25 12.15 2.4 2.4 5.25-5.35" />
+      </svg>
+    )
+  }
+  if (status === 'cancelled') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="8.5" />
+        <path d="m9 9 6 6M15 9l-6 6" />
+      </svg>
+    )
+  }
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7.5v4.8l3 1.8" />
+    </svg>
+  )
+}
+
 function TaskTimelineCard({
   task,
   assigneeName,
@@ -3618,18 +3730,54 @@ function TaskTimelineCard({
   assigneeName: string
   onOpen(): void
 }): JSX.Element {
+  const descriptionId = useId()
+  const presentation = taskTimelineCardPresentation(task)
+  const acceptanceCriteriaLabel = `${task.acceptanceCriteria.length} 个验收条件`
+  const ownerStyle = task.assigneeAgentId
+    ? { '--task-owner-accent': identityColorToken(task.assigneeAgentId) } as CSSProperties
+    : undefined
   return (
     <button
       aria-label={`打开任务：${task.title}`}
-      className="timeline-node timeline-event-card task-event-card"
+      aria-describedby={descriptionId}
+      className={`timeline-node timeline-event-card task-event-card status-${task.status}${presentation.unassigned ? ' is-unassigned' : ''}`}
+      data-task-assignment={presentation.unassigned ? 'unassigned' : 'assigned'}
+      data-task-status={task.status}
+      style={ownerStyle}
       type="button"
       onClick={onOpen}
     >
-      <span className={`event-card-status status-${task.status}`}>
-        {taskStatusLabel(task.status)}
+      <span className="task-card-glyph" aria-hidden="true">
+        <TaskTimelineStatusIcon status={task.status} unassigned={presentation.unassigned} />
       </span>
-      <strong>{task.title}</strong>
-      <small>负责人 · {assigneeName}</small>
+      <span className="task-card-copy">
+        <span className="task-card-state-row">
+          <span className="task-card-headline">{presentation.headline}</span>
+          <span className="event-card-status">{taskStatusLabel(task.status)}</span>
+        </span>
+        <strong className="task-card-title">{task.title}</strong>
+        <span className="task-card-meta">
+          <span className={`task-card-owner${presentation.unassigned ? ' is-unassigned' : ''}`}>
+            <i className="task-owner-mark" aria-hidden="true" />
+            <span>负责人 · {assigneeName}</span>
+          </span>
+          <span>{acceptanceCriteriaLabel}</span>
+          <time dateTime={task.updatedAt}>更新于 {messageClockTime(task.updatedAt)}</time>
+        </span>
+        <span className="task-card-note">
+          <b>{presentation.noteLabel}</b>
+          <span>{presentation.note}</span>
+        </span>
+      </span>
+      <span className="task-card-chevron" aria-hidden="true">
+        <svg viewBox="0 0 16 16">
+          <path d="m6 3.5 4.5 4.5L6 12.5" />
+        </svg>
+      </span>
+      <span className="sr-only" id={descriptionId}>
+        状态：{taskStatusLabel(task.status)}；负责人：{assigneeName}；{acceptanceCriteriaLabel}；
+        {presentation.noteLabel}：{presentation.note}
+      </span>
     </button>
   )
 }

@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 
 const root = resolve(import.meta.dirname, '..')
 const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai-ai.app'))
@@ -33,6 +33,7 @@ try {
   await setTheme(desktopApp.cdp, 'day')
   await assertSidebarContract(desktopApp.cdp, '1440×920')
   await assertProjectActionsReveal(desktopApp.cdp)
+  await assertCampActionsReveal(desktopApp.cdp)
   await wait(2_500)
   await assertLongTitleIsTruncated(desktopApp.cdp, fixture.longTitleCampId)
   await assertProjectRowAndPagination(desktopApp.cdp)
@@ -175,6 +176,7 @@ try {
       projectRowSelectsAndTogglesDisclosure: true,
       fiveThenTenCampPagination: true,
       paginationCacheSurvivesCollapseAndPinMigration: true,
+      projectAndCampActionsHiddenUntilHoverOrFocus: true,
       hoverFocusOpenAndCoarsePointerVisibility: true,
       questionMarkHelpIsHoverOnly: true,
       arrowHomeEndEscapeAndOutsideClick: true,
@@ -303,10 +305,25 @@ async function assertSidebarContract(cdp, context) {
       projectCreateOpacity: projectGroups[0]
         ? Number(getComputedStyle(projectGroups[0].querySelector('.group-create-button')).opacity)
         : -1,
+      campMenuOpacity: projectGroups[0]
+        ? Number(getComputedStyle(projectGroups[0].querySelector('.camp-menu-trigger')).opacity)
+        : -1,
+      campMenuPointerEvents: projectGroups[0]
+        ? getComputedStyle(projectGroups[0].querySelector('.camp-menu-trigger')).pointerEvents
+        : null,
       coarsePointer: matchMedia('(pointer: coarse)').matches || matchMedia('(hover: none)').matches,
       campRowFont: projectGroups[0]
         ? getComputedStyle(projectGroups[0].querySelector('.camp-nav-open')).fontSize
         : null,
+      campRowHeight: (() => {
+        const row = projectGroups[0]?.querySelector('.camp-nav-row')
+        return row?.getBoundingClientRect().height ?? null
+      })(),
+      campRowPitch: (() => {
+        const rows = projectGroups[0]?.querySelectorAll('.camp-nav-row') ?? []
+        if (rows.length < 2) return null
+        return rows[1].getBoundingClientRect().top - rows[0].getBoundingClientRect().top
+      })(),
       sectionFont: getComputedStyle(document.querySelector('#projects-heading')).fontSize,
       plusCenterDelta: (() => {
         const sectionPlus = document.querySelector('.navigation-section-title .section-create-button')
@@ -338,16 +355,80 @@ async function assertSidebarContract(cdp, context) {
   `${context} pagination labels exposed counts or legacy copy: ${JSON.stringify(state.paginationLabels)}`)
   assert(state.projectRowSemantics,
     `${context} project row disclosure semantics were incomplete: ${JSON.stringify(state)}`)
-  assert(state.sectionFont === '14px' && state.projectRowFont === '13px' && state.campRowFont === '13px',
+  assert(state.sectionFont === '14px' && state.projectRowFont === '12.5px' && state.campRowFont === '12px',
     `${context} sidebar type hierarchy drifted: ${JSON.stringify(state)}`)
+  assert(state.campRowHeight !== null && Math.abs(state.campRowHeight - 28) < 0.6
+      && state.campRowPitch !== null && Math.abs(state.campRowPitch - 28) < 0.6,
+  `${context} Camp rows did not keep the approved 28px pitch: ${JSON.stringify(state)}`)
   assert(state.coarsePointer
       ? state.projectMenuOpacity > 0.95 && state.projectCreateOpacity > 0.95
-      : state.projectMenuOpacity < 0.05 && state.projectCreateOpacity < 0.05,
+        && state.campMenuOpacity > 0.95 && state.campMenuPointerEvents === 'auto'
+      : state.projectMenuOpacity < 0.05 && state.projectCreateOpacity < 0.05
+        && state.campMenuOpacity < 0.05 && state.campMenuPointerEvents === 'none',
   `${context} Project actions did not follow hover/touch visibility: ${JSON.stringify(state)}`)
   assert(state.plusCenterDelta !== null && state.plusCenterDelta < 0.6,
     `${context} Project create action columns were misaligned: ${JSON.stringify(state)}`)
   assert(!state.sidebarOverflow && !state.documentOverflow,
     `${context} sidebar overflowed horizontally: ${JSON.stringify(state)}`)
+}
+
+async function assertCampActionsReveal(cdp) {
+  const selector = '.navigation-projects .camp-nav-group:not([data-group="quick-chat"]) .camp-nav-row'
+  await evaluate(cdp, `document.activeElement instanceof HTMLElement && document.activeElement.blur()`)
+  await cdp.send('Input.dispatchMouseEvent', {
+    type: 'mouseMoved',
+    x: 20,
+    y: 80
+  })
+  await wait(180)
+  const initial = await evaluate(cdp, `(() => {
+    const trigger = document.querySelector(${JSON.stringify(selector)})?.querySelector('.camp-menu-trigger')
+    return trigger ? {
+      opacity: Number(getComputedStyle(trigger).opacity),
+      pointerEvents: getComputedStyle(trigger).pointerEvents
+    } : null
+  })()`)
+  assert(initial?.opacity < 0.05 && initial.pointerEvents === 'none',
+    `Camp action was not hidden by default: ${JSON.stringify(initial)}`)
+
+  await forcePseudoState(cdp, selector, ['hover'])
+  await wait(180)
+  const hovered = await evaluate(cdp, `(() => {
+    const trigger = document.querySelector(${JSON.stringify(selector)})?.querySelector('.camp-menu-trigger')
+    return trigger ? {
+      opacity: Number(getComputedStyle(trigger).opacity),
+      pointerEvents: getComputedStyle(trigger).pointerEvents
+    } : null
+  })()`)
+  assert(hovered?.opacity > 0.95 && hovered.pointerEvents === 'auto',
+    `Camp action was hidden while its row was hovered: ${JSON.stringify(hovered)}`)
+  await forcePseudoState(cdp, selector, [])
+
+  const focused = await evaluate(cdp, `(() => {
+    const trigger = document.querySelector(${JSON.stringify(selector)})?.querySelector('.camp-menu-trigger')
+    trigger?.focus()
+    return Boolean(trigger && document.activeElement === trigger)
+  })()`)
+  assert(focused, 'Could not focus the Camp action trigger')
+  await wait(180)
+  const focusedState = await evaluate(cdp, `(() => {
+    const trigger = document.querySelector(${JSON.stringify(selector)})?.querySelector('.camp-menu-trigger')
+    return trigger ? {
+      opacity: Number(getComputedStyle(trigger).opacity),
+      pointerEvents: getComputedStyle(trigger).pointerEvents
+    } : null
+  })()`)
+  assert(focusedState?.opacity > 0.95 && focusedState.pointerEvents === 'auto',
+    `Camp action was hidden during focus-within: ${JSON.stringify(focusedState)}`)
+
+  await evaluate(cdp, `document.activeElement instanceof HTMLElement && document.activeElement.blur()`)
+  await wait(180)
+  const restored = await evaluate(cdp, `(() => {
+    const trigger = document.querySelector(${JSON.stringify(selector)})?.querySelector('.camp-menu-trigger')
+    return trigger ? Number(getComputedStyle(trigger).opacity) : null
+  })()`)
+  assert(restored !== null && restored < 0.05,
+    `Camp action stayed visible after hover and focus left the row: ${restored}`)
 }
 
 async function assertProjectActionsReveal(cdp) {
@@ -856,7 +937,6 @@ async function assertCampIdCopy(cdp, target, expectedCampId) {
     await pressKey(cdp, 'ArrowDown')
     await assertHighlightedItem(cdp, '复制会话 ID')
     await pressKey(cdp, 'Enter')
-    await waitForExpression(cdp, `window.__rovaiSidebarCopiedText === ${JSON.stringify(expectedCampId)}`)
     await waitForExpression(cdp, `document.querySelector('.app-toast')?.textContent?.includes('已复制会话 ID') === true`)
     await waitForTargetFocus(cdp, target)
     const state = await evaluate(cdp, `({
@@ -864,8 +944,9 @@ async function assertCampIdCopy(cdp, target, expectedCampId) {
       menuOpen: Boolean(document.querySelector('.sidebar-action-menu[data-state="open"]')),
       toast: document.querySelector('.app-toast')?.textContent?.trim() ?? null
     })`)
-    assert(state.copiedText === expectedCampId && !state.menuOpen && state.toast?.includes('已复制会话 ID'),
-      `Camp ID copy semantics were incorrect: ${JSON.stringify(state)}`)
+    const copiedText = state.copiedText ?? execFileSync('/usr/bin/pbpaste', { encoding: 'utf8' })
+    assert(copiedText === expectedCampId && !state.menuOpen && state.toast?.includes('已复制会话 ID'),
+      `Camp ID copy semantics were incorrect: ${JSON.stringify({ ...state, copiedText })}`)
   } finally {
     await evaluate(cdp, `(() => {
       const clipboard = navigator.clipboard

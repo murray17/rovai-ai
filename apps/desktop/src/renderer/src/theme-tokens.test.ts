@@ -186,7 +186,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
   })
 
   it('uses quiet selected backgrounds for the active Camp and current Project', () => {
-    expect(css).toMatch(/\.camp-nav-row\.selected\s*\{[^}]*background: var\(--surface-muted\)/)
+    expect(css).toMatch(/\.camp-nav-row\.selected\s*\{[^}]*background: var\(--surface-selected\)/)
     expect(css).toMatch(/\.project-heading-row\.current-project\s*\{[^}]*background: var\(--surface-selected\)/)
   })
 

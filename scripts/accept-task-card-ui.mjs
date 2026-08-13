@@ -47,12 +47,17 @@ try {
   assert(createdTask.status === 'applied' && completedTaskId,
     `Could not create completed-path Task: ${JSON.stringify(createdTask)}`)
 
-  await waitForTaskCard(desktopApp.cdp, '确认任务卡创建位置', '待处理', 1)
+  await waitForTaskCard(desktopApp.cdp, '确认任务卡创建位置', '待处理', 1, '任务责任已更新')
   await markTaskCard(desktopApp.cdp, completedTaskId)
   await assertTaskCardProjection(desktopApp.cdp, {
     title: '确认任务卡创建位置',
     status: '待处理',
+    statusKey: 'pending',
+    headline: '任务责任已更新',
+    noteLabel: '当前',
+    note: '等待负责人开始；创建不会自动启动 AgentRun',
     assigneeName: fixture.primaryAssignee.name,
+    assignment: 'assigned',
     count: 1
   })
 
@@ -72,14 +77,61 @@ try {
   })
   assert(startedTask.status === 'applied',
     `Could not update Task in place: ${JSON.stringify(startedTask)}`)
-  await waitForTaskCard(desktopApp.cdp, '任务卡已原地更新', '进行中', 1)
+  await waitForTaskCard(desktopApp.cdp, '任务卡已原地更新', '进行中', 1, '任务正在推进')
   await assertMarkedTaskCard(desktopApp.cdp, completedTaskId)
   await assertTaskCardProjection(desktopApp.cdp, {
     title: '任务卡已原地更新',
     status: '进行中',
+    statusKey: 'in_progress',
+    headline: '任务正在推进',
+    noteLabel: '当前',
+    note: '任务处于进行中；打开详情可查看责任与关联执行',
     assigneeName: fixture.secondaryAssignee.name,
+    assignment: 'assigned',
     count: 1
   })
+
+  task = await getTask(desktopApp.cdp, fixture.campId, completedTaskId)
+  const blockedTask = await request(desktopApp.cdp, 'tasks.update', {
+    commandId: crypto.randomUUID(),
+    campId: fixture.campId,
+    taskId: completedTaskId,
+    expectedVersion: task.version,
+    status: 'blocked',
+    assignee: { operation: 'unchanged' },
+    acceptanceCriteria: { operation: 'unchanged' },
+    blockedReason: '等待确认外部依赖的可用窗口。'
+  })
+  assert(blockedTask.status === 'applied',
+    `Could not block Task in place: ${JSON.stringify(blockedTask)}`)
+  await waitForTaskCard(desktopApp.cdp, '任务卡已原地更新', '已阻塞', 1, '任务暂时受阻')
+  await assertMarkedTaskCard(desktopApp.cdp, completedTaskId)
+  await assertTaskCardProjection(desktopApp.cdp, {
+    title: '任务卡已原地更新',
+    status: '已阻塞',
+    statusKey: 'blocked',
+    headline: '任务暂时受阻',
+    noteLabel: '阻塞原因',
+    note: '等待确认外部依赖的可用窗口。',
+    assigneeName: fixture.secondaryAssignee.name,
+    assignment: 'assigned',
+    count: 1
+  })
+
+  task = await getTask(desktopApp.cdp, fixture.campId, completedTaskId)
+  const resumedTask = await request(desktopApp.cdp, 'tasks.update', {
+    commandId: crypto.randomUUID(),
+    campId: fixture.campId,
+    taskId: completedTaskId,
+    expectedVersion: task.version,
+    status: 'in_progress',
+    assignee: { operation: 'unchanged' },
+    acceptanceCriteria: { operation: 'unchanged' }
+  })
+  assert(resumedTask.status === 'applied',
+    `Could not resume Task in place: ${JSON.stringify(resumedTask)}`)
+  await waitForTaskCard(desktopApp.cdp, '任务卡已原地更新', '进行中', 1, '任务正在推进')
+  await assertMarkedTaskCard(desktopApp.cdp, completedTaskId)
 
   task = await getTask(desktopApp.cdp, fixture.campId, completedTaskId)
   const completedTask = await request(desktopApp.cdp, 'tasks.update', {
@@ -92,8 +144,19 @@ try {
   })
   assert(completedTask.status === 'applied',
     `Could not complete Task: ${JSON.stringify(completedTask)}`)
-  await waitForTaskCard(desktopApp.cdp, '任务卡已原地更新', '已完成', 1)
+  await waitForTaskCard(desktopApp.cdp, '任务卡已原地更新', '已完成', 1, '任务已经完成')
   await assertMarkedTaskCard(desktopApp.cdp, completedTaskId)
+  await assertTaskCardProjection(desktopApp.cdp, {
+    title: '任务卡已原地更新',
+    status: '已完成',
+    statusKey: 'completed',
+    headline: '任务已经完成',
+    noteLabel: '完成摘要',
+    note: '任务卡路径已验证完成。',
+    assigneeName: fixture.secondaryAssignee.name,
+    assignment: 'assigned',
+    count: 1
+  })
 
   const createdCancelledTask = await request(desktopApp.cdp, 'tasks.create', {
     commandId: crypto.randomUUID(),
@@ -105,8 +168,54 @@ try {
   const cancelledTaskId = createdCancelledTask.payload?.taskId
   assert(createdCancelledTask.status === 'applied' && cancelledTaskId,
     `Could not create cancellation-path Task: ${JSON.stringify(createdCancelledTask)}`)
-  await waitForTaskCard(desktopApp.cdp, '取消路径仍复用原卡', '待处理', 2)
+  await waitForTaskCard(desktopApp.cdp, '取消路径仍复用原卡', '待处理', 2, '任务责任已更新')
   await markTaskCard(desktopApp.cdp, cancelledTaskId)
+
+  task = await getTask(desktopApp.cdp, fixture.campId, cancelledTaskId)
+  const releasedTask = await request(desktopApp.cdp, 'tasks.update', {
+    commandId: crypto.randomUUID(),
+    campId: fixture.campId,
+    taskId: cancelledTaskId,
+    expectedVersion: task.version,
+    status: 'pending',
+    assignee: { operation: 'clear' },
+    acceptanceCriteria: { operation: 'unchanged' }
+  })
+  assert(releasedTask.status === 'applied',
+    `Could not release Task responsibility: ${JSON.stringify(releasedTask)}`)
+  await waitForTaskCard(desktopApp.cdp, '取消路径仍复用原卡', '待处理', 2, '任务等待重新分配')
+  await assertMarkedTaskCard(desktopApp.cdp, cancelledTaskId)
+  await assertTaskCardProjection(desktopApp.cdp, {
+    title: '取消路径仍复用原卡',
+    status: '待处理',
+    statusKey: 'pending',
+    headline: '任务等待重新分配',
+    noteLabel: '需要处理',
+    note: '等待用户或默认负责人重新分配',
+    assigneeName: '未分配',
+    assignment: 'unassigned',
+    count: 2
+  })
+  const liveStatesCapture = join(outputDir, 'task-card-live-states-day-1440x920.png')
+  await capture(desktopApp.cdp, liveStatesCapture)
+
+  task = await getTask(desktopApp.cdp, fixture.campId, cancelledTaskId)
+  const reassignedTask = await request(desktopApp.cdp, 'tasks.update', {
+    commandId: crypto.randomUUID(),
+    campId: fixture.campId,
+    taskId: cancelledTaskId,
+    expectedVersion: task.version,
+    status: 'pending',
+    assignee: {
+      operation: 'assign',
+      agentId: fixture.primaryAssignee.id
+    },
+    acceptanceCriteria: { operation: 'unchanged' }
+  })
+  assert(reassignedTask.status === 'applied',
+    `Could not reassign Task responsibility: ${JSON.stringify(reassignedTask)}`)
+  await waitForTaskCard(desktopApp.cdp, '取消路径仍复用原卡', '待处理', 2, '任务责任已更新')
+  await assertMarkedTaskCard(desktopApp.cdp, cancelledTaskId)
 
   task = await getTask(desktopApp.cdp, fixture.campId, cancelledTaskId)
   const cancelledTask = await request(desktopApp.cdp, 'tasks.update', {
@@ -119,8 +228,19 @@ try {
   })
   assert(cancelledTask.status === 'applied',
     `Could not cancel Task: ${JSON.stringify(cancelledTask)}`)
-  await waitForTaskCard(desktopApp.cdp, '取消路径仍复用原卡', '已取消', 2)
+  await waitForTaskCard(desktopApp.cdp, '取消路径仍复用原卡', '已取消', 2, '任务已经取消')
   await assertMarkedTaskCard(desktopApp.cdp, cancelledTaskId)
+  await assertTaskCardProjection(desktopApp.cdp, {
+    title: '取消路径仍复用原卡',
+    status: '已取消',
+    statusKey: 'cancelled',
+    headline: '任务已经取消',
+    noteLabel: '取消原因',
+    note: '该责任不再需要继续。',
+    assigneeName: fixture.primaryAssignee.name,
+    assignment: 'assigned',
+    count: 2
+  })
 
   const terminalSnapshot = await request(desktopApp.cdp, 'camps.snapshot', {
     campId: fixture.campId
@@ -140,9 +260,11 @@ try {
   await wait(500)
 
   compactApp = await launchApp(firstPort + 1, 1040, 700, true)
-  await setTheme(compactApp.cdp, 'day')
+  await setTheme(compactApp.cdp, 'night')
   await openCamp(compactApp.cdp, fixture.campId)
-  await waitForTaskCard(compactApp.cdp, '任务卡已原地更新', '已完成', 2)
+  await waitForTaskCard(compactApp.cdp, '任务卡已原地更新', '已完成', 2, '任务已经完成')
+  const compactCardCapture = join(outputDir, 'task-card-night-1040x700-reduced-motion.png')
+  await capture(compactApp.cdp, compactCardCapture)
   await openTaskDetailsWithKeyboard(compactApp.cdp, '取消路径仍复用原卡')
   await assertTerminalDetails(compactApp.cdp, '取消后保留在任务详情与审计记录。', 0)
   await assertNoHorizontalOverflow(compactApp.cdp, '1040×700 reduced-motion')
@@ -161,7 +283,10 @@ try {
     verified: {
       createProjectsExactlyOneCard: true,
       titleStatusAndAssigneeUpdateInPlace: true,
+      pendingInProgressBlockedCompletedCancelledStates: true,
+      unassignedPendingRecoveryVariant: true,
       completionAndCancellationReuseCard: true,
+      prototypeOnlyAnnotationsExcluded: true,
       descriptionOnlyAppearsInDetails: true,
       taskLifecycleCreatesNoCampMessages: true,
       taskCardOpensCurrentTerminalDetails: true,
@@ -170,12 +295,15 @@ try {
       taskCreateActionReplacesLegacyToolbar: true,
       taskCreateTitleReceivesFocus: true,
       taskCreateCancelRestoresPreviousList: true,
+      dayAndNightTaskCardThemes: true,
       desktopAndCompactReducedMotionLayouts: true,
       zoom200KeepsTaskFunctionality: true,
       horizontalOverflow: false
     },
     captures: {
+      liveStates: liveStatesCapture,
       desktop: desktopCapture,
+      compactCard: compactCardCapture,
       compact: compactCapture,
       zoom200: zoomCapture
     }
@@ -266,13 +394,17 @@ async function assertTaskCreateAction(cdp, expectedTaskRows) {
   })()`)
 }
 
-async function waitForTaskCard(cdp, title, status, count) {
+async function waitForTaskCard(cdp, title, status, count, headline) {
+  const headlineMatch = headline
+    ? `card?.textContent?.includes(${JSON.stringify(headline)})`
+    : 'true'
   await waitForExpression(cdp, `(() => {
     const cards = [...document.querySelectorAll('button.task-event-card')]
     const card = cards.find((candidate) => candidate.getAttribute('aria-label')
       === ${JSON.stringify(`打开任务：${title}`)})
     return cards.length === ${count}
       && card?.textContent?.includes(${JSON.stringify(status)})
+      && ${headlineMatch}
   })()`, 20_000)
 }
 
@@ -303,26 +435,48 @@ async function assertTaskCardProjection(cdp, expected) {
     const cards = [...document.querySelectorAll('button.task-event-card')]
     return {
       count: cards.length,
-      copy: cards.map((card) => card.textContent ?? ''),
-      labels: cards.map((card) => card.getAttribute('aria-label')),
+      cards: cards.map((card) => ({
+        copy: card.textContent ?? '',
+        label: card.getAttribute('aria-label'),
+        statusKey: card.dataset.taskStatus,
+        assignment: card.dataset.taskAssignment,
+        headline: card.querySelector('.task-card-headline')?.textContent ?? '',
+        noteLabel: card.querySelector('.task-card-note b')?.textContent ?? '',
+        note: card.querySelector('.task-card-note span')?.textContent ?? ''
+      })),
       widths: cards.map((card) => ({ client: card.clientWidth, scroll: card.scrollWidth })),
       descriptionVisible: [
         '这段说明只能出现在任务详情',
         '更新后的说明仍然只能在任务详情',
         '取消后保留在任务详情与审计记录'
       ].some((description) => document.querySelector('.camp-timeline')?.textContent
-        ?.includes(description) ?? false)
+        ?.includes(description) ?? false),
+      prototypeAnnotationVisible: [
+        '任务创建于',
+        '此位置不再新增状态事件',
+        '当前快照：',
+        'task_8f2a'
+      ].some((annotation) => document.querySelector('.camp-timeline')?.textContent
+        ?.includes(annotation) ?? false)
     }
   })()`)
   assert(state.count === expected.count,
     `Task card count was ${state.count}, expected ${expected.count}: ${JSON.stringify(state)}`)
-  assert(state.labels.includes(`打开任务：${expected.title}`)
-      && state.copy.some((copy) => copy.includes(expected.title)
-        && copy.includes(expected.status)
-        && copy.includes(`负责人 · ${expected.assigneeName}`)),
+  const card = state.cards.find((candidate) => candidate.label === `打开任务：${expected.title}`)
+  assert(card
+      && card.copy.includes(expected.title)
+      && card.copy.includes(expected.status)
+      && card.copy.includes(`负责人 · ${expected.assigneeName}`)
+      && card.statusKey === expected.statusKey
+      && card.assignment === expected.assignment
+      && card.headline === expected.headline
+      && card.noteLabel === expected.noteLabel
+      && card.note === expected.note,
   `Task card did not project current fields: ${JSON.stringify(state)}`)
   assert(!state.descriptionVisible,
     `Task description leaked into the conversation card: ${JSON.stringify(state)}`)
+  assert(!state.prototypeAnnotationVisible,
+    `Prototype-only annotation leaked into the product card: ${JSON.stringify(state)}`)
   assert(state.widths.every((width) => width.scroll <= width.client + 1),
     `Task card overflowed horizontally: ${JSON.stringify(state.widths)}`)
 }
