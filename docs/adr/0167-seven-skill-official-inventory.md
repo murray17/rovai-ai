@@ -2,13 +2,13 @@
 document_type: adr
 id: ADR-0167
 title: Seven-Skill Official Inventory
-status: accepted
+status: superseded
 date: 2026-08-12
 decision_scope: cross-version
 source_version: v0.65
 supersedes:
   - ADR-0159
-superseded_by: null
+superseded_by: ADR-0174
 ---
 
 # ADR-0167: Seven-Skill Official Inventory

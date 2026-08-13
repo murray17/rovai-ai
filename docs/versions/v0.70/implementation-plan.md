@@ -27,7 +27,7 @@ last_updated: 2026-08-13
 - [x] Session Charter 增加一条短边界，不复制完整 schema 或组合决策树；
 - [x] Send reference 删除“需要用户查看”条件，增加 message-local non-inheritance；
 - [x] 记录内部 Agent 与用户侧闭环责任，以及独立行动才允许组合的规则；
-- [x] 保持 `cli-operations` 窄触发和七项 official inventory 不变。
+- [x] 保持 `cli-operations` 窄触发；official inventory 的独立增量由 Checkpoint 6 与 ADR-0174 拥有。
 
 ## Checkpoint 3：Transport、catalog 与 Session compatibility
 
@@ -50,12 +50,21 @@ last_updated: 2026-08-13
 - [x] 记录 Runtime/模型版本、Native Session 新建方式、输入场景与 exact addressing 证据；
 - [ ] 发布前运行九 Runtime v8 Built-in CLI/Skill 矩阵，或明确保持版本 `in_progress` 且不更新兼容性结论。
 
+## Checkpoint 6：固定 GitHub 来源的三项工程 Skill
+
+- [x] 固定 `mattpocock/skills` 精确 Revision，完整 vendor 三个选定目录并附 MIT LICENSE/NOTICE；
+- [x] 收窄 `diagnosing-bugs`、`tdd`、`writing-for-agents` description，并提供本地化
+  `agents/openai.yaml`，不改写其余上游内容；
+- [x] Core 构建 manifest、official installation、provenance、文件数与脚本风险摘要覆盖十项 inventory；
+- [x] Settings 来源单测、fresh-Core smoke fixture、UI acceptance 数量与术语同步四项固定 GitHub 来源；
+- [x] 完成 Skill validator、Rust/Renderer 聚焦回归、文档治理、生成 HISTORY 与 diff check。
+
 ## 当前证据
 
 ### 确定性门禁
 
-- `cargo test -p rovai-core --lib`：397 passed；`cargo test -p rovai-core --bin rovai`：11 passed；
-- `cargo test --workspace`：397 lib + 11 CLI + 72 Core binary passed，3 个显式 real-Runtime manual tests ignored；
+- `cargo test -p rovai-core --lib`：403 passed；`cargo test -p rovai-core --bin rovai`：11 passed；
+- `cargo test --workspace`：403 lib + 11 CLI + 72 Core binary passed，3 个显式 real-Runtime manual tests ignored；
 - `cargo fmt --all -- --check` 与 `cargo clippy --workspace --all-targets -- -D warnings`：通过；
 - `pnpm test`：Docs 21、Vitest 47 files / 311 tests、Node 179 tests 全部通过；`pnpm typecheck`：通过；
 - `pnpm docs:test`、`pnpm docs:check`、`DOCS_BASE_REF=origin/main pnpm docs:check:ci`、
@@ -64,6 +73,20 @@ last_updated: 2026-08-13
 - Codex 单 Runtime `smoke-builtin-cli` 完成 13 项 v8 operation、successor exact reads 与 Native Session
   continuation。运行时发现夹具曾错误要求 started evidence 携带 Core Envelope；现已限定为验证
   completed/failed terminal evidence，产品合同未变。
+
+### Skill inventory
+
+- 三个新增目录分别通过 `skill-creator/scripts/quick_validate.py`；与 pinned archive 对比证明除
+  description 和 `agents/openai.yaml` 外的上游正文/资源及三份 LICENSE 字节一致；
+- `cargo test -p rovai-core skill::tests` 为 `13/13`，
+  `cargo clippy -p rovai-core --all-targets -- -D warnings`、`cargo fmt --all -- --check` 通过；
+  Skill Settings 聚焦 Vitest 为 `9/9`，并通过
+  `pnpm typecheck` 与两个 smoke/acceptance 脚本的 Node syntax check；
+- `ROVAI_SKILL_SMOKE_ADAPTERS='' node scripts/smoke-skills.mjs` 在隔离 Core 上证明十项 official
+  inventory、三项共同 pinned provenance、默认九组、重启恢复与 source-independent immutable copy；
+  此模式明确不调用真实模型，`runtimes=[]`，不新增 Runtime compatibility 结论；
+- `pnpm docs:test` 为 `21/21`，`pnpm docs:check`、`DOCS_BASE_REF=origin/main pnpm docs:check:ci`、
+  `pnpm docs:adr:generate -- --check` 与 `git diff --check` 通过，HISTORY 已包含 ADR-0174。
 
 ### 真实模型行为
 

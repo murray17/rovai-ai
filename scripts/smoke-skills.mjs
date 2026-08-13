@@ -86,17 +86,29 @@ try {
     JSON.stringify(bundledSkillNames) === JSON.stringify([
       'analyze-agent-codebase',
       'cli-operations',
+      'diagnosing-bugs',
       'grill-duo',
       'grill-duo-with-docs',
       'memory-stewardship',
       'tasteful-ui',
-      'worktree'
+      'tdd',
+      'worktree',
+      'writing-for-agents'
     ])
       && initialSkills.every((skill) => skill.origin === 'official'
         && skill.enabled
         && JSON.stringify(skill.groupAssignments.map((assignment) => assignment.groupKey).sort())
           === JSON.stringify(allDeliveryGroups)),
     `Fresh Core did not install official Skills enabled for every Runtime group: ${JSON.stringify(initialSkills)}`
+  )
+  const mattSkillNames = new Set(['diagnosing-bugs', 'tdd', 'writing-for-agents'])
+  const mattSkills = initialSkills.filter((skill) => mattSkillNames.has(skill.name))
+  assert(
+    mattSkills.length === mattSkillNames.size
+      && mattSkills.every((skill) =>
+        skill.currentRevision.sourceMetadata?.upstream?.repository === 'https://github.com/mattpocock/skills'
+          && skill.currentRevision.sourceMetadata?.upstream?.revision === '84fdeffd12f2ee307994d1eb6feb48173b6e0502'),
+    `Pinned mattpocock/skills provenance is incomplete: ${JSON.stringify(mattSkills)}`
   )
   const cliOperationsSkill = initialSkills.find((skill) => skill.name === 'cli-operations')
 

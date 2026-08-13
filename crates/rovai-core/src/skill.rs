@@ -34,7 +34,57 @@ pub const MAX_SKILL_FILES: usize = 1_000;
 pub const MAX_SKILL_DEPTH: usize = 32;
 pub const MAX_SKILL_FILE_BYTES: u64 = 10 * 1024 * 1024;
 pub const MAX_SKILL_TOTAL_BYTES: u64 = 50 * 1024 * 1024;
+const MAX_SKILL_DISCOVERY_DEPTH: usize = 8;
 const STAGING_TTL: Duration = Duration::from_secs(30 * 60);
+
+const SKILL_DISCOVERY_IGNORED_DIRECTORIES: &[&str] = &[
+    ".cache",
+    ".git",
+    ".gradle",
+    ".hg",
+    ".mypy_cache",
+    ".next",
+    ".nuxt",
+    ".output",
+    ".parcel-cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".turbo",
+    ".venv",
+    "__pycache__",
+    "__tests__",
+    "asset",
+    "assets",
+    "build",
+    "coverage",
+    "dist",
+    "doc",
+    "docs",
+    "documentation",
+    "example",
+    "examples",
+    "fixture",
+    "fixtures",
+    "node_modules",
+    "out",
+    "reference",
+    "references",
+    "resource",
+    "resources",
+    "sample",
+    "samples",
+    "target",
+    "temp",
+    "test",
+    "testdata",
+    "testing",
+    "tests",
+    "tmp",
+    "vendor",
+    "venv",
+];
 
 const ANALYZE_AGENT_CODEBASE_RULES: &str =
     include_str!("../../../skills/analyze-agent-codebase/SKILL.md");
@@ -82,7 +132,7 @@ const CONTEXT_FORMAT_REFERENCE: &str =
     include_str!("../../../skills/grill-duo-with-docs/references/context-format.md");
 const ADR_FORMAT_REFERENCE: &str =
     include_str!("../../../skills/grill-duo-with-docs/references/adr-format.md");
-include!(concat!(env!("OUT_DIR"), "/tasteful_ui_bundled_files.rs"));
+include!(concat!(env!("OUT_DIR"), "/third_party_bundled_files.rs"));
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -354,6 +404,9 @@ struct BundledDefinition {
     upstream_revision: Option<&'static str>,
 }
 
+const MATTPOCOCK_SKILLS_REPOSITORY: &str = "https://github.com/mattpocock/skills";
+const MATTPOCOCK_SKILLS_REVISION: &str = "84fdeffd12f2ee307994d1eb6feb48173b6e0502";
+
 const ANALYZE_AGENT_CODEBASE_FILES: &[(&str, &str, u32)] = &[
     ("SKILL.md", ANALYZE_AGENT_CODEBASE_RULES, 0o644),
     ("agents/openai.yaml", ANALYZE_AGENT_CODEBASE_OPENAI, 0o644),
@@ -452,6 +505,12 @@ const BUNDLED_SKILLS: &[BundledDefinition] = &[
         upstream_revision: None,
     },
     BundledDefinition {
+        name: "diagnosing-bugs",
+        files: DIAGNOSING_BUGS_FILES,
+        upstream_repository: Some(MATTPOCOCK_SKILLS_REPOSITORY),
+        upstream_revision: Some(MATTPOCOCK_SKILLS_REVISION),
+    },
+    BundledDefinition {
         name: "memory-stewardship",
         files: MEMORY_STEWARDSHIP_FILES,
         upstream_repository: None,
@@ -480,6 +539,18 @@ const BUNDLED_SKILLS: &[BundledDefinition] = &[
         files: TASTEFUL_UI_FILES,
         upstream_repository: Some("https://github.com/DonkeyKing01/tasteful-ui-skill"),
         upstream_revision: Some("159ccd47a320f3a7bd0289d07366d422211895a1"),
+    },
+    BundledDefinition {
+        name: "tdd",
+        files: TDD_FILES,
+        upstream_repository: Some(MATTPOCOCK_SKILLS_REPOSITORY),
+        upstream_revision: Some(MATTPOCOCK_SKILLS_REVISION),
+    },
+    BundledDefinition {
+        name: "writing-for-agents",
+        files: WRITING_FOR_AGENTS_FILES,
+        upstream_repository: Some(MATTPOCOCK_SKILLS_REPOSITORY),
+        upstream_revision: Some(MATTPOCOCK_SKILLS_REVISION),
     },
 ];
 
@@ -1943,29 +2014,92 @@ fn delivery_group_label(key: SkillDeliveryGroupKey) -> &'static str {
 }
 
 fn discover_source_candidates(selected_path: &Path) -> Result<Vec<PathBuf>> {
-    if fs::symlink_metadata(selected_path.join("SKILL.md"))
-        .is_ok_and(|metadata| metadata.file_type().is_file())
-    {
+    if has_regular_skill_manifest(selected_path)? {
         return Ok(vec![selected_path.to_path_buf()]);
     }
+
+    let entries = sorted_directory_entries(selected_path)?;
     let mut candidates = Vec::new();
-    for entry in fs::read_dir(selected_path)? {
-        let entry = entry?;
-        let metadata = fs::symlink_metadata(entry.path())?;
-        if metadata.file_type().is_dir()
-            && fs::symlink_metadata(entry.path().join("SKILL.md"))
-                .is_ok_and(|skill| skill.file_type().is_file())
-        {
-            candidates.push(entry.path());
+    let mut nested_roots = Vec::new();
+    for entry in &entries {
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)?;
+        if !metadata.file_type().is_dir() || should_skip_skill_discovery_directory(&path) {
+            continue;
         }
+        if has_regular_skill_manifest(&path)? {
+            candidates.push(path);
+        } else {
+            nested_roots.push(path);
+        }
+    }
+
+    for nested_root in nested_roots {
+        discover_nested_skill_candidates(
+            &nested_root,
+            1,
+            MAX_SKILL_DISCOVERY_DEPTH,
+            &mut candidates,
+        )?;
     }
     candidates.sort();
     if candidates.is_empty() {
-        anyhow::bail!(
-            "Selected directory is neither a Skill nor a collection with first-level Skills"
-        );
+        anyhow::bail!("未发现可导入的 Skill。请确认目录中包含 SKILL.md，或提供更具体的目录链接。");
     }
     Ok(candidates)
+}
+
+fn discover_nested_skill_candidates(
+    directory: &Path,
+    depth: usize,
+    maximum_depth: usize,
+    candidates: &mut Vec<PathBuf>,
+) -> Result<()> {
+    if depth > maximum_depth || should_skip_skill_discovery_directory(directory) {
+        return Ok(());
+    }
+    let metadata = fs::symlink_metadata(directory)?;
+    if !metadata.file_type().is_dir() {
+        return Ok(());
+    }
+    if has_regular_skill_manifest(directory)? {
+        candidates.push(directory.to_path_buf());
+        return Ok(());
+    }
+    if depth == maximum_depth {
+        return Ok(());
+    }
+    for entry in sorted_directory_entries(directory)? {
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_dir() && !should_skip_skill_discovery_directory(&path) {
+            discover_nested_skill_candidates(&path, depth + 1, maximum_depth, candidates)?;
+        }
+    }
+    Ok(())
+}
+
+fn has_regular_skill_manifest(directory: &Path) -> Result<bool> {
+    match fs::symlink_metadata(directory.join("SKILL.md")) {
+        Ok(metadata) => Ok(metadata.file_type().is_file()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn sorted_directory_entries(directory: &Path) -> Result<Vec<fs::DirEntry>> {
+    let mut entries = fs::read_dir(directory)?.collect::<std::io::Result<Vec<_>>>()?;
+    entries.sort_by_key(|entry| entry.file_name());
+    Ok(entries)
+}
+
+fn should_skip_skill_discovery_directory(directory: &Path) -> bool {
+    let Some(name) = directory.file_name().and_then(|value| value.to_str()) else {
+        return true;
+    };
+    let normalized = name.to_ascii_lowercase();
+    normalized.starts_with("cmake-build-")
+        || SKILL_DISCOVERY_IGNORED_DIRECTORIES.contains(&normalized.as_str())
 }
 
 fn stage_candidate(
@@ -2803,6 +2937,119 @@ mod tests {
     }
 
     #[test]
+    fn nested_discovery_stages_skill_from_repository_root() {
+        let root = temporary_directory("rovai-skill-library");
+        let source = temporary_directory("rovai-skill-source");
+        let data = temporary_directory("rovai-skill-db");
+        let database = Database::open(&data).unwrap();
+        let service = SkillLibraryService::new(root.clone()).unwrap();
+        let skill_path = write_skill(
+            &source.join("skills").join(".curated"),
+            "deep-skill",
+            "deep",
+        );
+
+        let inspection = service.inspect_import(&database, &source).unwrap();
+
+        assert_eq!(inspection.candidates.len(), 1);
+        assert_eq!(inspection.candidates[0].name, "deep-skill");
+        assert_eq!(
+            inspection.candidates[0].source_path,
+            skill_path.canonicalize().unwrap().display().to_string()
+        );
+        assert!(inspection.rejected_candidates.is_empty());
+        remove_directory_if_present(&root).unwrap();
+        remove_directory_if_present(&source).unwrap();
+        remove_directory_if_present(&data).unwrap();
+    }
+
+    #[test]
+    fn nested_discovery_combines_shallow_and_deep_candidates() {
+        let source = temporary_directory("rovai-skill-source");
+        let shallow = write_skill(&source, "shallow-skill", "shallow");
+        let deep = write_skill(&source.join("category"), "deep-skill", "deep");
+
+        let candidates = discover_source_candidates(&source)
+            .unwrap()
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(candidates, BTreeSet::from([shallow, deep]));
+        remove_directory_if_present(&source).unwrap();
+    }
+
+    #[test]
+    fn nested_discovery_stops_below_discovered_skill_root() {
+        let source = temporary_directory("rovai-skill-source");
+        let outer = write_skill(&source.join("category"), "outer-skill", "outer");
+        write_skill(&outer, "inner-skill", "inner");
+
+        let candidates = discover_source_candidates(&source).unwrap();
+
+        assert_eq!(candidates, vec![outer]);
+        remove_directory_if_present(&source).unwrap();
+    }
+
+    #[test]
+    fn nested_discovery_skips_ignored_directories() {
+        let source = temporary_directory("rovai-skill-source");
+        let valid = write_skill(
+            &source.join("skills").join(".curated"),
+            "valid-skill",
+            "valid",
+        );
+        for (index, ignored) in SKILL_DISCOVERY_IGNORED_DIRECTORIES.iter().enumerate() {
+            write_skill(
+                &source.join(ignored).join("category"),
+                &format!("ignored-skill-{index}"),
+                "ignored",
+            );
+        }
+        write_skill(
+            &source.join("cmake-build-debug").join("category"),
+            "ignored-cmake-skill",
+            "ignored",
+        );
+
+        let candidates = discover_source_candidates(&source).unwrap();
+
+        assert_eq!(candidates, vec![valid]);
+        remove_directory_if_present(&source).unwrap();
+    }
+
+    #[test]
+    fn nested_discovery_enforces_maximum_depth() {
+        let source = temporary_directory("rovai-skill-source");
+        let mut allowed_parent = source.clone();
+        for level in 1..MAX_SKILL_DISCOVERY_DEPTH {
+            allowed_parent = allowed_parent.join(format!("allowed-group-{level}"));
+        }
+        let allowed = write_skill(&allowed_parent, "allowed-skill", "allowed");
+        let mut too_deep_parent = source.clone();
+        for level in 1..=MAX_SKILL_DISCOVERY_DEPTH {
+            too_deep_parent = too_deep_parent.join(format!("deep-group-{level}"));
+        }
+        write_skill(&too_deep_parent, "too-deep-skill", "too deep");
+
+        let candidates = discover_source_candidates(&source).unwrap();
+
+        assert_eq!(candidates, vec![allowed]);
+        remove_directory_if_present(&source).unwrap();
+    }
+
+    #[test]
+    fn nested_discovery_reports_not_found_after_bounded_scan() {
+        let source = temporary_directory("rovai-skill-source");
+        fs::create_dir_all(source.join("skills").join("category")).unwrap();
+
+        let error = discover_source_candidates(&source).unwrap_err();
+
+        assert!(error.to_string().contains("未发现可导入的 Skill"));
+        assert!(error.to_string().contains("更具体的目录链接"));
+        remove_directory_if_present(&source).unwrap();
+    }
+
+    #[test]
     fn official_skills_default_to_all_groups_and_preserve_user_changes() {
         let root = temporary_directory("rovai-skill-library");
         let data = temporary_directory("rovai-skill-db");
@@ -2819,11 +3066,14 @@ mod tests {
             [
                 "analyze-agent-codebase",
                 "cli-operations",
+                "diagnosing-bugs",
                 "grill-duo",
                 "grill-duo-with-docs",
                 "memory-stewardship",
                 "tasteful-ui",
-                "worktree"
+                "tdd",
+                "worktree",
+                "writing-for-agents"
             ]
         );
         assert!(skills.iter().all(|skill| skill.enabled));
@@ -2962,6 +3212,72 @@ mod tests {
             fs::read_to_string(tasteful_ui_content.join("SKILL.md"))
                 .unwrap()
                 .contains("# Tasteful UI")
+        );
+        for (name, file_count, required_files, description_fragment) in [
+            (
+                "diagnosing-bugs",
+                5,
+                &["LICENSE", "NOTICE", "scripts/hitl-loop.template.sh"][..],
+                "a diagnosis-only request does not authorize implementing a fix",
+            ),
+            (
+                "tdd",
+                6,
+                &["LICENSE", "NOTICE", "mocking.md", "tests.md"][..],
+                "Do not trigger merely because tests will be added",
+            ),
+            (
+                "writing-for-agents",
+                5,
+                &["LICENSE", "NOTICE", "SKILL-MECHANICS.md"][..],
+                "not for ordinary user documentation",
+            ),
+        ] {
+            let skill = skills.iter().find(|skill| skill.name == name).unwrap();
+            assert_eq!(skill.current_revision.file_count, file_count);
+            assert_eq!(
+                skill.current_revision.source_metadata["upstream"]["repository"],
+                MATTPOCOCK_SKILLS_REPOSITORY
+            );
+            assert_eq!(
+                skill.current_revision.source_metadata["upstream"]["revision"],
+                MATTPOCOCK_SKILLS_REVISION
+            );
+            let content = service.revision_content_path(&skill.id, &skill.current_revision.id);
+            for relative in required_files {
+                assert!(
+                    content.join(relative).is_file(),
+                    "{name} is missing {relative}"
+                );
+            }
+            assert!(
+                fs::read_to_string(content.join("SKILL.md"))
+                    .unwrap()
+                    .contains(description_fragment)
+            );
+            assert!(
+                fs::read_to_string(content.join("agents/openai.yaml"))
+                    .unwrap()
+                    .contains(&format!("${name}"))
+            );
+        }
+        let diagnosing_bugs = skills
+            .iter()
+            .find(|skill| skill.name == "diagnosing-bugs")
+            .unwrap();
+        assert_eq!(
+            diagnosing_bugs
+                .current_revision
+                .risk_summary
+                .script_file_count,
+            1
+        );
+        assert_eq!(
+            diagnosing_bugs
+                .current_revision
+                .risk_summary
+                .executable_file_count,
+            0
         );
         let memory_stewardship = skills
             .iter()
@@ -3122,7 +3438,7 @@ mod tests {
         service.install_bundled_skills(&mut database).unwrap();
 
         let skills = service.list(&database).unwrap();
-        assert_eq!(skills.len(), 7);
+        assert_eq!(skills.len(), 10);
         assert!(skills.iter().all(|skill| !skill.name.starts_with("rovai-")));
         let restored = skills
             .iter()

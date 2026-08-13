@@ -82,15 +82,15 @@ try {
   await waitForExpression(cdp, `Boolean(document.querySelector('.settings-sidebar-menu'))`, 5_000)
   await openSection(cdp, 'Skill')
   await waitForExpression(cdp, `Boolean(document.querySelector('.skill-settings')) && (
-    document.querySelectorAll('.skill-card').length === 7
+    document.querySelectorAll('.skill-card').length === 10
       || Boolean(document.querySelector('.skill-page-error'))
   )`, 30_000)
   const initialSkillState = await evaluate(cdp, `({
     cardCount: document.querySelectorAll('.skill-card').length,
     error: document.querySelector('.skill-page-error')?.textContent?.trim() ?? null
   })`)
-  if (initialSkillState.cardCount !== 7 || initialSkillState.error) {
-    throw new Error(`Skill settings did not load the seven bundled Skills: ${JSON.stringify(initialSkillState)}`)
+  if (initialSkillState.cardCount !== 10 || initialSkillState.error) {
+    throw new Error(`Skill settings did not load the ten official Skills: ${JSON.stringify(initialSkillState)}`)
   }
 
   await waitForEvaluation(cdp, `(async () => (
@@ -149,6 +149,7 @@ try {
       card.querySelector('[role="switch"]')?.getAttribute('aria-checked') === 'true'
     )
     const tastefulUi = skillCards.find((card) => card.dataset.skillName === 'tasteful-ui')
+    const diagnosingBugs = skillCards.find((card) => card.dataset.skillName === 'diagnosing-bugs')
     const panel = document.querySelector('.settings-panel')
     const cardMetrics = skillCards.map((card) => {
       const skill = skillViewByName.get(card.dataset.skillName)
@@ -214,6 +215,13 @@ try {
         revision: tastefulUi?.querySelector('.skill-detail-source-revision')?.textContent?.trim(),
         primaryRepository: tastefulUi?.querySelector('.skill-card-primary .skill-source-link')?.textContent?.trim() ?? null
       },
+      mattSkillSource: {
+        badge: diagnosingBugs?.querySelector('.skill-source')?.textContent?.trim(),
+        repository: diagnosingBugs?.querySelector('.skill-detail-source .skill-source-link')?.textContent?.trim(),
+        href: diagnosingBugs?.querySelector('.skill-detail-source .skill-source-link')?.getAttribute('href'),
+        revision: diagnosingBugs?.querySelector('.skill-detail-source-revision')?.textContent?.trim(),
+        primaryRepository: diagnosingBugs?.querySelector('.skill-card-primary .skill-source-link')?.textContent?.trim() ?? null
+      },
       importButton: [...document.querySelectorAll('.skill-settings button')]
         .some((button) => button.textContent?.trim() === '选择文件夹'),
       projectionStatusVisible: document.querySelector('.skill-settings')?.textContent?.includes('项目投影状态'),
@@ -261,16 +269,19 @@ try {
       || result.activeSection !== 'Skill'
       || result.bundledCount !== 6
       || !result.bundledBadges.every((badge) => badge === 'Rovai')
-      || result.thirdPartyCount !== 1
-      || result.enabledOfficialCount !== 7
+      || result.thirdPartyCount !== 4
+      || result.enabledOfficialCount !== 10
       || JSON.stringify(result.skillNames) !== JSON.stringify([
         'analyze-agent-codebase',
         'cli-operations',
+        'diagnosing-bugs',
         'grill-duo',
         'grill-duo-with-docs',
         'memory-stewardship',
         'tasteful-ui',
-        'worktree'
+        'tdd',
+        'worktree',
+        'writing-for-agents'
       ])
       || JSON.stringify(result.operationColumns) !== JSON.stringify(['投递范围', '状态', '查看'])
       || result.legacyMoreButtonCount !== 0
@@ -285,6 +296,11 @@ try {
       || result.tastefulUiSource.href !== 'https://github.com/DonkeyKing01/tasteful-ui-skill'
       || result.tastefulUiSource.revision !== '159ccd47'
       || result.tastefulUiSource.primaryRepository !== null
+      || result.mattSkillSource.badge !== 'GitHub'
+      || result.mattSkillSource.repository !== 'mattpocock/skills'
+      || result.mattSkillSource.href !== 'https://github.com/mattpocock/skills'
+      || result.mattSkillSource.revision !== '84fdeffd'
+      || result.mattSkillSource.primaryRepository !== null
       || !result.importButton
       || result.projectionStatusVisible
       || result.legacyOfficialVisible

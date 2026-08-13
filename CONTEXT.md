@@ -373,7 +373,7 @@ The transient list of current Agent Profiles whose currently selected Agent Runt
 _Avoid_: Skill Assignment, persisted Group membership, Camp membership, historical Member snapshot
 
 **Official Skill Inventory**:
-The exact application-release-owned set of official Rovai Skill identities: `analyze-agent-codebase`, `cli-operations`, `memory-stewardship`, `worktree`, `grill-duo`, `grill-duo-with-docs`, and `tasteful-ui`. It is not a scan of Runtime-native Skills, and changing the set requires a successor architecture decision and coordinated package/UI/fixture update.
+The exact application-release-owned set of official Rovai Skill identities: `analyze-agent-codebase`, `cli-operations`, `diagnosing-bugs`, `grill-duo`, `grill-duo-with-docs`, `memory-stewardship`, `tasteful-ui`, `tdd`, `worktree`, and `writing-for-agents`. It is not a scan of Runtime-native Skills, and changing the set requires a successor architecture decision and coordinated package/UI/fixture update.
 _Avoid_: Runtime-native inventory, dynamic directory scan, enabled Skill set, effective Runtime exposure
 
 **CLI Operations Skill**:
@@ -403,6 +403,18 @@ _Avoid_: dependent `grill-duo` assignment, generic `domain-modeling` bundled Ski
 **Tasteful UI Skill**:
 The official Rovai Skill `tasteful-ui` (“品味优先 UI 设计”) vendored from one exact MIT-licensed upstream revision with its complete taste exploration, reference catalog, project-design format, implementation workflow, and result critique. It is enabled and assigned to every Skill Delivery Group by default; its task-local investment gates guide UI work but never grant Tool, network, filesystem, implementation, approval, or product authority.
 _Avoid_: floating upstream branch, partial reference bundle, Core-enforced design approval, automatic network access, UI permission grant
+
+**Diagnosing Bugs Skill**:
+The pinned GitHub-origin official Rovai Skill `diagnosing-bugs` (“系统化故障诊断”) that requires a tight red-capable feedback loop before root-cause hypotheses for explicit hard, intermittent, performance, regression, or failed-fix investigations. It is enabled and assigned to every Skill Delivery Group by default; diagnosis does not grant permission to instrument production, expose secrets, or implement a fix.
+_Avoid_: generic compile-error helper, speculative diagnosis without a feedback loop, implicit fix authorization, unredacted artifact
+
+**TDD Skill**:
+The pinned GitHub-origin official Rovai Skill `tdd` (“测试驱动开发”) that implements an explicitly test-first request through red-green vertical slices at user-agreed public seams. It is enabled and assigned to every Skill Delivery Group by default; ordinary work that happens to add tests does not trigger it, and the Skill does not choose a public seam or authorize implementation on the user's behalf.
+_Avoid_: tests-after implementation, internal-detail testing, unconfirmed seam, automatic implementation permission
+
+**Writing for Agents Skill**:
+The pinned GitHub-origin official Rovai Skill `writing-for-agents` (“Agent 文档写作”) that shapes Skills and other coding-agent instructions through precise invocation metadata, progressive disclosure, explicit completion criteria, and low-noise wording. It is enabled and assigned to every Skill Delivery Group by default; ordinary user documentation, product copy, and code comments stay outside its scope.
+_Avoid_: general technical writing, product copy editor, verbose agent handbook, implicit document mutation authority
 
 **Agent Memory Mutation Run Quota**:
 The hard limit of four successfully persisted direct writes and Hearth Memory Proposals per source AgentRun. Idempotent replays and failed calls do not consume another slot, while a later Hearth Proposal decision does not restore one.

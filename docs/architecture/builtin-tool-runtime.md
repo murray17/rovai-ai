@@ -38,8 +38,9 @@ Send 的显式 caller return 与 Core-managed reply reference 见
 [ADR-0163](../adr/0163-explicit-caller-return-and-core-managed-reply-reference.md)。
 Current User Attention 与 progressive CLI teaching 分别见
 [ADR-0165](../adr/0165-core-owned-current-user-message-attention.md)和
-[ADR-0166](../adr/0166-progressive-built-in-cli-teaching.md)；完整七项 official Skill inventory 与普通
-投递见 [ADR-0167](../adr/0167-seven-skill-official-inventory.md)。
+[ADR-0166](../adr/0166-progressive-built-in-cli-teaching.md)；完整十项 official Skill inventory、三项固定
+GitHub 来源与普通投递见
+[ADR-0174](../adr/0174-ten-skill-official-inventory-and-pinned-matt-pocock-imports.md)。
 
 ## 总体路径
 
@@ -297,6 +298,11 @@ transport 细节。
 Runtime Group Assignment 与用户后续修改保持。Skill Exposure 只证明 Runtime-native discovery 可见，
 不证明模型读取正文，也不授予命令、文件、网络或协作权限。普通单一 send/`--to-user`/list/get/search/read
 不要求加载 `cli-operations`。
+
+`diagnosing-bugs`、`tdd` 与 `writing-for-agents` 同样使用 ordinary official delivery，但以
+`mattpocock/skills@84fdeffd12f2ee307994d1eb6feb48173b6e0502` 的完整选定目录、MIT license 与 NOTICE
+离线打包。Core 不在 build、install 或运行时解析浮动 GitHub 状态；Renderer 的“GitHub”只表示固定
+上游来源，不把它们变成用户 Imported Skill，也不赋予诊断、测试 seam、文档写入或实现权威。
 
 ### 四层 Context 权威
 

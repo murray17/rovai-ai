@@ -109,6 +109,20 @@ describe('Skill settings', () => {
         }
       }
     } satisfies SkillView
+    const mattThirdParty = {
+      ...skillFixture(true),
+      name: 'diagnosing-bugs',
+      currentRevision: {
+        ...skillFixture(true).currentRevision,
+        name: 'diagnosing-bugs',
+        sourceMetadata: {
+          upstream: {
+            repository: 'https://github.com/mattpocock/skills',
+            revision: '84fdeffd12f2ee307994d1eb6feb48173b6e0502'
+          }
+        }
+      }
+    } satisfies SkillView
     const importedLocal = {
       ...skillFixture(true),
       origin: 'imported',
@@ -146,6 +160,13 @@ describe('Skill settings', () => {
       repositoryUrl: 'https://github.com/DonkeyKing01/tasteful-ui-skill',
       repositoryLabel: 'DonkeyKing01/tasteful-ui-skill',
       revisionLabel: '159ccd47'
+    })
+    expect(skillSourcePresentation(mattThirdParty)).toMatchObject({
+      kind: 'third-party',
+      badgeLabel: 'GitHub',
+      repositoryUrl: 'https://github.com/mattpocock/skills',
+      repositoryLabel: 'mattpocock/skills',
+      revisionLabel: '84fdeffd'
     })
     expect(skillSourcePresentation(importedLocal)).toMatchObject({
       kind: 'imported',

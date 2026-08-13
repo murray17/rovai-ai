@@ -1,0 +1,13 @@
+tdd is adapted from:
+https://github.com/mattpocock/skills
+
+Pinned upstream revision:
+84fdeffd12f2ee307994d1eb6feb48173b6e0502
+
+Pinned upstream directory:
+skills/engineering/tdd
+
+The upstream content is licensed under the MIT License in LICENSE.
+Rovai-ai narrows the SKILL.md description for product-safe discovery and
+provides localized agents/openai.yaml presentation metadata. All other
+upstream files in this bundled Skill are retained unchanged.

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent 文档写作"
+  short_description: "优化 Skill 与 Agent 指令的触发、渐进披露和完成条件"
+  default_prompt: "使用 $writing-for-agents 改进这份 Agent 可见文档的触发指针、信息层级、完成条件与冗余控制。"

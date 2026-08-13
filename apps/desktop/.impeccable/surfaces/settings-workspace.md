@@ -53,9 +53,10 @@ and marks read through the existing notification command, not a Renderer-only fl
 ## Skill
 
 Use one open list with stable identity mark, name, source, enabled switch and details. Current official
-Rovai Skills use the same list, including `cli-operations`; do not add a required/locked badge or a
-special built-in group. Imported revisions, enablement and `allowed-tools` do not imply extra Runtime
-permission or proof that a model read the Skill.
+Rovai Skills use the same list, including `cli-operations` and the four pinned GitHub-origin Skills;
+GitHub provenance changes only the short source badge and details, not grouping or lifecycle. Do not
+add a required/locked badge or a special built-in group. Imported revisions, enablement and
+`allowed-tools` do not imply extra Runtime permission or proof that a model read the Skill.
 
 ## MCP
 

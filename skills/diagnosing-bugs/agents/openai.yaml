@@ -1,0 +1,4 @@
+interface:
+  display_name: "系统化故障诊断"
+  short_description: "先建立可变红的反馈回路，再最小化、验证根因并形成回归证据"
+  default_prompt: "使用 $diagnosing-bugs 为这个困难故障建立紧凑反馈回路，最小化复现并以可证伪假设定位根因；只有当前请求明确授权时才实施修复。"

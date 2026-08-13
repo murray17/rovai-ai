@@ -1,0 +1,4 @@
+interface:
+  display_name: "测试驱动开发"
+  short_description: "按已确认测试缝执行红—绿纵向切片并保留行为级测试规范"
+  default_prompt: "使用 $tdd 在已确认的公共测试缝上按红—绿纵向切片完成这项工作，避免实现耦合测试与过度 Mock。"

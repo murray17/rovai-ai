@@ -278,10 +278,11 @@ Composer 与历史消息的人物信息卡截图是此交互的必留视觉证�
 | `scripts/capture-camp-inspectors.mjs` | 已有 Camp 的 Inspector 截图 | 必须设置 `ROVAI_CAPTURE_USER_DATA_DIR` |
 | `scripts/capture-desktop.mjs` | 通用页面、Runtime 和 Camp 流程 | 必须设置隔离 `userData`；省略或指向日常目录即拒绝启动 |
 
-Skill 页面验收必须证明七个 official Skill 都由持久 `Skill.id` 经 FNV-1a 映射到
-`--identity-1..8` 中一个 token（不要求七项覆盖八种颜色），六个短标签显示“Rovai”，固定上游的
-`tasteful-ui` 短标签显示“GitHub”；主行不存在来源明细，`DonkeyKing01/tasteful-ui-skill` 可点击仓库
-与 `159ccd47` Revision 只在“详情”中出现。列表名称/简介/来源字号至少为 14/12.5/10.5px，列名固定为
+Skill 页面验收必须证明十个 official Skill 都由持久 `Skill.id` 经 FNV-1a 映射到
+`--identity-1..8` 中一个 token（不要求十项覆盖八种颜色），六个短标签显示“Rovai”，四个固定上游
+Skill 短标签显示“GitHub”；主行不存在来源明细，`DonkeyKing01/tasteful-ui-skill` / `159ccd47` 与
+`mattpocock/skills` / `84fdeffd` 只在“详情”中出现。列表名称/简介/来源字号至少为
+14/12.5/10.5px，列名固定为
 “投递范围 / 状态 / 查看”，不存在旧三点菜单。34×20 Steel Switch 不显示“已启用 / 已停用 / 保存中”
 文案，并保留 `role="switch"`、`aria-checked` 和动作型可访问名称。详情必须包含真实 Revision、安装或
 更新时间、文件信息、内容摘要与固定副本说明，其 Steel rail/Porcelain background 在不同身份色之间
