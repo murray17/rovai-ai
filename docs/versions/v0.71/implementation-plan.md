@@ -46,6 +46,16 @@ last_updated: 2026-08-13
 - [x] docs test/check/diff-aware/generation；
 - [x] 隔离 App 双主题截图、键盘、最小窗口与 200% zoom 验收。
 
+## Checkpoint 5：十一项 official Skill 与管理策略
+
+- [x] 新增 Rovai 原生 `campfire` 六文件包，冻结自然阶段标题、共享邀请、单次主动澄清、终止与迟到回复边界；
+- [x] `cli-operations`、`memory-stewardship` 标记为 `system_required`，Core 拒绝 enablement/Assignment
+  修改并在 bundled installation 时修复旧配置漂移；
+- [x] Skill Settings 只展示九项 user-managed official Skills，不渲染系统必需行或锁定控件；
+- [x] 更新 TypeScript contract、Core manifest/projection fixtures、smoke/capture、Architecture、Contract、
+  UI acceptance 与 ADR-0176；
+- [x] 完成 Campfire validator、三个无既有对话上下文的情景演练、完整 Rust/Renderer/文档门禁与 Desktop build。
+
 ## 当前证据
 
 ### 确定性门禁
@@ -71,4 +81,14 @@ last_updated: 2026-08-13
 - bounded mark-all、attention-revision clear、五个设置开关、关闭恢复焦点与 heads-up 不抢焦点成立；
 - Porcelain Day、Steel Night、最小窗口、reduced motion 与 200% zoom 均无横向溢出且保留可操作性。
 
-Checkpoint 0–4 与全部发布门槛已完成，版本 `implementation_status` 为 `complete`。
+### Official Skill 增量
+
+- `campfire` 通过 `skill-creator/scripts/quick_validate.py`；三次独立情景演练覆盖 Default Lead 共享邀请与
+  话题替换、成员开场与终止纪要、单次主动澄清与无终止副作用；
+- Skill Settings 聚焦测试证明两项 `system_required` Skill 即使搜索命中也不展示；Core tests 证明支持的
+  配置命令失败关闭，并能恢复 DB-only legacy drift；
+- `ROVAI_SKILL_SMOKE_ADAPTERS='' node scripts/smoke-skills.mjs` 在隔离 Core 上证明十一项 inventory、
+  两项 system-required policy/命令拒绝、默认九组、重启恢复与 source-independent immutable copy；
+- `pnpm build:desktop`、完整 workspace tests、Clippy、Typecheck、文档治理与 `git diff --check` 均通过。
+
+Checkpoint 0–5 与全部发布门槛已完成，版本 `implementation_status` 为 `complete`。

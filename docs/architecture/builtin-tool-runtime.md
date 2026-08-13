@@ -38,9 +38,9 @@ Send 的显式 caller return 与 Core-managed reply reference 见
 [ADR-0163](../adr/0163-explicit-caller-return-and-core-managed-reply-reference.md)。
 Current User Attention 与 progressive CLI teaching 分别见
 [ADR-0165](../adr/0165-core-owned-current-user-message-attention.md)和
-[ADR-0166](../adr/0166-progressive-built-in-cli-teaching.md)；完整十项 official Skill inventory、三项固定
-GitHub 来源与普通投递见
-[ADR-0174](../adr/0174-ten-skill-official-inventory-and-pinned-matt-pocock-imports.md)。
+[ADR-0166](../adr/0166-progressive-built-in-cli-teaching.md)；完整十一项 official Skill inventory、
+Campfire、四项固定 GitHub 来源与 management policy 见
+[ADR-0176](../adr/0176-eleven-skill-official-inventory-and-system-required-operations.md)。
 
 ## 总体路径
 
@@ -294,15 +294,20 @@ AgentRun ID、epoch、Camp ID 或 Native Binding ID。只有无损映射到当�
 对象才是 Executable Retrieval Locator；非可执行 navigation hint 不伪装成 tool input，也不重复
 transport 细节。
 
-`cli-operations` 和 `memory-stewardship` 都沿用 ordinary official Skill Library、默认 enabled、默认九
-Runtime Group Assignment 与用户后续修改保持。Skill Exposure 只证明 Runtime-native discovery 可见，
-不证明模型读取正文，也不授予命令、文件、网络或协作权限。普通单一 send/`--to-user`/list/get/search/read
-不要求加载 `cli-operations`。
+`cli-operations` 和 `memory-stewardship` 都沿用 official Skill Library，但 management policy 为
+`system_required`：Core 始终保持 enabled 与九个 Runtime Group Assignment，拒绝相关修改命令，并在
+bundled install 时修复旧配置漂移；Renderer Settings 不展示这两个非配置项。Skill Exposure 只证明
+Runtime-native discovery 可见，不证明模型读取正文，也不授予命令、文件、网络或协作权限。普通单一
+send/`--to-user`/list/get/search/read 不要求加载 `cli-operations`。
 
 `diagnosing-bugs`、`tdd` 与 `writing-for-agents` 同样使用 ordinary official delivery，但以
 `mattpocock/skills@84fdeffd12f2ee307994d1eb6feb48173b6e0502` 的完整选定目录、MIT license 与 NOTICE
 离线打包。Core 不在 build、install 或运行时解析浮动 GitHub 状态；Renderer 的“GitHub”只表示固定
 上游来源，不把它们变成用户 Imported Skill，也不赋予诊断、测试 seam、文档写入或实现权威。
+
+`campfire` 是无外部上游的 Rovai original official Skill，并使用 ordinary `user_managed` delivery。
+它仅以公开 A2A Camp Messages 组织 2–3 位成员的独立开场、有限定向回应与 Default Lead 终止纪要；
+自然阶段标题不是 Core protocol，`### 篝火纪要` 不触发续跑，也不产生 Task、Memory、ADR 或实施副作用。
 
 ### 四层 Context 权威
 

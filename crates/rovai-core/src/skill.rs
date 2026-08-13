@@ -92,6 +92,13 @@ const ANALYZE_AGENT_CODEBASE_OPENAI: &str =
     include_str!("../../../skills/analyze-agent-codebase/agents/openai.yaml");
 const ANALYZE_AGENT_CODEBASE_DOSSIER_REFERENCE: &str =
     include_str!("../../../skills/analyze-agent-codebase/references/dossier-structure.md");
+const CAMPFIRE_RULES: &str = include_str!("../../../skills/campfire/SKILL.md");
+const CAMPFIRE_NOTICE: &str = include_str!("../../../skills/campfire/NOTICE");
+const CAMPFIRE_OPENAI: &str = include_str!("../../../skills/campfire/agents/openai.yaml");
+const CAMPFIRE_LEAD_REFERENCE: &str = include_str!("../../../skills/campfire/references/lead.md");
+const CAMPFIRE_MEMBER_REFERENCE: &str =
+    include_str!("../../../skills/campfire/references/member.md");
+const CAMPFIRE_NOTES_REFERENCE: &str = include_str!("../../../skills/campfire/references/notes.md");
 const CLI_OPERATIONS_RULES: &str = include_str!("../../../skills/cli-operations/SKILL.md");
 const CLI_OPERATIONS_OPENAI: &str =
     include_str!("../../../skills/cli-operations/agents/openai.yaml");
@@ -139,6 +146,13 @@ include!(concat!(env!("OUT_DIR"), "/third_party_bundled_files.rs"));
 pub enum SkillOrigin {
     Official,
     Imported,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillManagementPolicy {
+    UserManaged,
+    SystemRequired,
 }
 
 impl SkillOrigin {
@@ -239,6 +253,7 @@ pub struct SkillView {
     pub id: String,
     pub name: String,
     pub origin: SkillOrigin,
+    pub management_policy: SkillManagementPolicy,
     pub enabled: bool,
     pub lifecycle_status: String,
     pub current_revision: SkillRevisionView,
@@ -402,6 +417,7 @@ struct BundledDefinition {
     files: &'static [(&'static str, &'static str, u32)],
     upstream_repository: Option<&'static str>,
     upstream_revision: Option<&'static str>,
+    management_policy: SkillManagementPolicy,
 }
 
 const MATTPOCOCK_SKILLS_REPOSITORY: &str = "https://github.com/mattpocock/skills";
@@ -415,6 +431,15 @@ const ANALYZE_AGENT_CODEBASE_FILES: &[(&str, &str, u32)] = &[
         ANALYZE_AGENT_CODEBASE_DOSSIER_REFERENCE,
         0o644,
     ),
+];
+
+const CAMPFIRE_FILES: &[(&str, &str, u32)] = &[
+    ("SKILL.md", CAMPFIRE_RULES, 0o644),
+    ("NOTICE", CAMPFIRE_NOTICE, 0o644),
+    ("agents/openai.yaml", CAMPFIRE_OPENAI, 0o644),
+    ("references/lead.md", CAMPFIRE_LEAD_REFERENCE, 0o644),
+    ("references/member.md", CAMPFIRE_MEMBER_REFERENCE, 0o644),
+    ("references/notes.md", CAMPFIRE_NOTES_REFERENCE, 0o644),
 ];
 
 const CLI_OPERATIONS_FILES: &[(&str, &str, u32)] = &[
@@ -497,62 +522,101 @@ const BUNDLED_SKILLS: &[BundledDefinition] = &[
         files: ANALYZE_AGENT_CODEBASE_FILES,
         upstream_repository: None,
         upstream_revision: None,
+        management_policy: SkillManagementPolicy::UserManaged,
+    },
+    BundledDefinition {
+        name: "campfire",
+        files: CAMPFIRE_FILES,
+        upstream_repository: None,
+        upstream_revision: None,
+        management_policy: SkillManagementPolicy::UserManaged,
     },
     BundledDefinition {
         name: "cli-operations",
         files: CLI_OPERATIONS_FILES,
         upstream_repository: None,
         upstream_revision: None,
+        management_policy: SkillManagementPolicy::SystemRequired,
     },
     BundledDefinition {
         name: "diagnosing-bugs",
         files: DIAGNOSING_BUGS_FILES,
         upstream_repository: Some(MATTPOCOCK_SKILLS_REPOSITORY),
         upstream_revision: Some(MATTPOCOCK_SKILLS_REVISION),
+        management_policy: SkillManagementPolicy::UserManaged,
     },
     BundledDefinition {
         name: "memory-stewardship",
         files: MEMORY_STEWARDSHIP_FILES,
         upstream_repository: None,
         upstream_revision: None,
+        management_policy: SkillManagementPolicy::SystemRequired,
     },
     BundledDefinition {
         name: "worktree",
         files: WORKTREE_FILES,
         upstream_repository: None,
         upstream_revision: None,
+        management_policy: SkillManagementPolicy::UserManaged,
     },
     BundledDefinition {
         name: "grill-duo",
         files: GRILL_DUO_FILES,
         upstream_repository: None,
         upstream_revision: None,
+        management_policy: SkillManagementPolicy::UserManaged,
     },
     BundledDefinition {
         name: "grill-duo-with-docs",
         files: GRILL_DUO_WITH_DOCS_FILES,
         upstream_repository: None,
         upstream_revision: None,
+        management_policy: SkillManagementPolicy::UserManaged,
     },
     BundledDefinition {
         name: "tasteful-ui",
         files: TASTEFUL_UI_FILES,
         upstream_repository: Some("https://github.com/DonkeyKing01/tasteful-ui-skill"),
         upstream_revision: Some("159ccd47a320f3a7bd0289d07366d422211895a1"),
+        management_policy: SkillManagementPolicy::UserManaged,
     },
     BundledDefinition {
         name: "tdd",
         files: TDD_FILES,
         upstream_repository: Some(MATTPOCOCK_SKILLS_REPOSITORY),
         upstream_revision: Some(MATTPOCOCK_SKILLS_REVISION),
+        management_policy: SkillManagementPolicy::UserManaged,
     },
     BundledDefinition {
         name: "writing-for-agents",
         files: WRITING_FOR_AGENTS_FILES,
         upstream_repository: Some(MATTPOCOCK_SKILLS_REPOSITORY),
         upstream_revision: Some(MATTPOCOCK_SKILLS_REVISION),
+        management_policy: SkillManagementPolicy::UserManaged,
     },
 ];
+
+fn bundled_definition(name: &str) -> Option<&'static BundledDefinition> {
+    BUNDLED_SKILLS
+        .iter()
+        .find(|definition| definition.name == name)
+}
+
+fn skill_management_policy(origin: &SkillOrigin, name: &str) -> SkillManagementPolicy {
+    if *origin != SkillOrigin::Official {
+        return SkillManagementPolicy::UserManaged;
+    }
+    bundled_definition(name)
+        .map(|definition| definition.management_policy)
+        .unwrap_or(SkillManagementPolicy::UserManaged)
+}
+
+fn is_system_required_official_skill(origin: &str, name: &str) -> bool {
+    origin == "official"
+        && bundled_definition(name).is_some_and(|definition| {
+            definition.management_policy == SkillManagementPolicy::SystemRequired
+        })
+}
 
 pub struct SkillLibraryService {
     root: PathBuf,
@@ -1123,19 +1187,20 @@ impl SkillLibraryService {
         self.gateway.execute(database, envelope, |transaction| {
             let current = transaction
                 .query_row(
-                    "SELECT origin, enabled, lifecycle_status, version FROM skill WHERE id = ?1",
+                    "SELECT name, origin, enabled, lifecycle_status, version FROM skill WHERE id = ?1",
                     [&envelope.payload.skill_id],
                     |row| {
                         Ok((
                             row.get::<_, String>(0)?,
-                            row.get::<_, bool>(1)?,
-                            row.get::<_, String>(2)?,
-                            row.get::<_, i64>(3)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, bool>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, i64>(4)?,
                         ))
                     },
                 )
                 .optional()?;
-            let Some((_origin, current_enabled, lifecycle_status, version)) = current else {
+            let Some((name, origin, current_enabled, lifecycle_status, version)) = current else {
                 return Ok(CommandHandlerResult::rejected(
                     "skill_missing",
                     json!({"message": "Skill 不存在。"}),
@@ -1145,6 +1210,15 @@ impl SkillLibraryService {
                 return Ok(CommandHandlerResult::rejected(
                     "skill_deleting",
                     json!({"message": "正在删除的 Skill 不能改变启用状态。"}),
+                ));
+            }
+            if is_system_required_official_skill(&origin, &name) {
+                return Ok(CommandHandlerResult::rejected(
+                    "skill_configuration_locked",
+                    json!({
+                        "message": "系统必需 Skill 始终启用，不能改变启用状态。",
+                        "skillId": envelope.payload.skill_id,
+                    }),
                 ));
             }
             if version != envelope.payload.expected_version {
@@ -1207,7 +1281,7 @@ impl SkillLibraryService {
             let current = transaction
                 .query_row(
                     r#"
-                    SELECT current_revision_id, lifecycle_status, version
+                    SELECT name, origin, current_revision_id, lifecycle_status, version
                     FROM skill
                     WHERE id = ?1
                     "#,
@@ -1216,12 +1290,14 @@ impl SkillLibraryService {
                         Ok((
                             row.get::<_, String>(0)?,
                             row.get::<_, String>(1)?,
-                            row.get::<_, i64>(2)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, i64>(4)?,
                         ))
                     },
                 )
                 .optional()?;
-            let Some((revision_id, lifecycle_status, version)) = current else {
+            let Some((name, origin, revision_id, lifecycle_status, version)) = current else {
                 return Ok(CommandHandlerResult::rejected(
                     "skill_missing",
                     json!({"message": "Skill 不存在。"}),
@@ -1231,6 +1307,15 @@ impl SkillLibraryService {
                 return Ok(CommandHandlerResult::rejected(
                     "skill_deleting",
                     json!({"message": "正在删除的 Skill 不能改变生效组。"}),
+                ));
+            }
+            if is_system_required_official_skill(&origin, &name) {
+                return Ok(CommandHandlerResult::rejected(
+                    "skill_configuration_locked",
+                    json!({
+                        "message": "系统必需 Skill 始终投递至全部 Runtime Group，不能改变生效组。",
+                        "skillId": envelope.payload.skill_id,
+                    }),
                 ));
             }
             if version != envelope.payload.expected_version {
@@ -1477,6 +1562,9 @@ impl SkillLibraryService {
                     )?;
                     changed = true;
                 }
+                if restore_system_required_skill_configuration(database, definition.name)? {
+                    changed = true;
+                }
                 remove_directory_if_present(&staging_root)?;
                 continue;
             }
@@ -1625,6 +1713,7 @@ impl SkillLibraryService {
                     remove_directory_if_present(final_content.parent().unwrap_or(&final_content));
             }
             result?;
+            restore_system_required_skill_configuration(database, definition.name)?;
             changed = true;
             remove_directory_if_present(&staging_root)?;
         }
@@ -1812,14 +1901,17 @@ impl SkillLibraryService {
 
 fn skill_view_from_row(row: &Row<'_>) -> rusqlite::Result<SkillView> {
     let skill_id = row.get::<_, String>(0)?;
+    let name = row.get::<_, String>(1)?;
     let origin_value = row.get::<_, String>(2)?;
+    let origin = SkillOrigin::parse(&origin_value).map_err(anyhow_to_sql_error)?;
     let source_type_value = row.get::<_, String>(13)?;
     let source_metadata_json = row.get::<_, String>(15)?;
     let risk_summary_json = row.get::<_, String>(16)?;
     Ok(SkillView {
         id: skill_id.clone(),
-        name: row.get(1)?,
-        origin: SkillOrigin::parse(&origin_value).map_err(anyhow_to_sql_error)?,
+        name: name.clone(),
+        management_policy: skill_management_policy(&origin, &name),
+        origin,
         enabled: row.get(3)?,
         lifecycle_status: row.get(4)?,
         version: row.get(5)?,
@@ -2689,6 +2781,79 @@ fn strip_official_skill_name_prefixes(database: &mut Database) -> Result<bool> {
     Ok(changed)
 }
 
+fn restore_system_required_skill_configuration(
+    database: &mut Database,
+    name: &str,
+) -> Result<bool> {
+    if bundled_definition(name).is_none_or(|definition| {
+        definition.management_policy != SkillManagementPolicy::SystemRequired
+    }) {
+        return Ok(false);
+    }
+
+    let now = Utc::now().to_rfc3339();
+    let transaction = database.connection_mut().transaction()?;
+    let current = transaction
+        .query_row(
+            r#"
+            SELECT id, current_revision_id
+            FROM skill
+            WHERE name = ?1 AND origin = 'official'
+            "#,
+            [name],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?;
+    let Some((skill_id, revision_id)) = current else {
+        transaction.commit()?;
+        return Ok(false);
+    };
+
+    let mut changed = transaction.execute(
+        "UPDATE skill SET enabled = 1 WHERE id = ?1 AND enabled = 0",
+        [&skill_id],
+    )? > 0;
+    for group_key in SkillDeliveryGroupKey::ALL {
+        changed |= transaction.execute(
+            r#"
+            INSERT INTO skill_group_assignment(
+                group_key, skill_id, revision_id, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?4)
+            ON CONFLICT(group_key, skill_id) DO UPDATE SET
+                revision_id = excluded.revision_id,
+                updated_at = excluded.updated_at
+            WHERE skill_group_assignment.revision_id <> excluded.revision_id
+            "#,
+            params![group_key.as_str(), skill_id, revision_id, now],
+        )? > 0;
+    }
+
+    if changed {
+        transaction.execute(
+            "UPDATE skill SET version = version + 1, updated_at = ?1 WHERE id = ?2",
+            params![now, skill_id],
+        )?;
+        append_skill_event(
+            &transaction,
+            "skill.system_configuration_restored",
+            &skill_id,
+            &ActorRef::System {
+                component_id: "skill-library-bootstrap".to_string(),
+            },
+            json!({
+                "skillId": skill_id,
+                "enabled": true,
+                "groupKeys": SkillDeliveryGroupKey::ALL
+                    .into_iter()
+                    .map(|group_key| group_key.as_str())
+                    .collect::<Vec<_>>(),
+            }),
+        )?;
+    }
+    transaction.commit()?;
+    Ok(changed)
+}
+
 fn materialize_bundled_definition(
     destination: &Path,
     definition: &BundledDefinition,
@@ -3050,7 +3215,7 @@ mod tests {
     }
 
     #[test]
-    fn official_skills_default_to_all_groups_and_preserve_user_changes() {
+    fn official_skills_apply_management_policy_and_preserve_user_managed_changes() {
         let root = temporary_directory("rovai-skill-library");
         let data = temporary_directory("rovai-skill-db");
         let mut database = Database::open(&data).unwrap();
@@ -3065,6 +3230,7 @@ mod tests {
             initial_order.iter().map(String::as_str).collect::<Vec<_>>(),
             [
                 "analyze-agent-codebase",
+                "campfire",
                 "cli-operations",
                 "diagnosing-bugs",
                 "grill-duo",
@@ -3077,6 +3243,14 @@ mod tests {
             ]
         );
         assert!(skills.iter().all(|skill| skill.enabled));
+        assert!(skills.iter().all(|skill| {
+            skill.management_policy
+                == if matches!(skill.name.as_str(), "cli-operations" | "memory-stewardship") {
+                    SkillManagementPolicy::SystemRequired
+                } else {
+                    SkillManagementPolicy::UserManaged
+                }
+        }));
         let all_groups = SkillDeliveryGroupKey::ALL
             .into_iter()
             .collect::<BTreeSet<_>>();
@@ -3110,6 +3284,45 @@ mod tests {
                 .unwrap()
                 .contains("证据账本")
         );
+        let campfire = skills
+            .iter()
+            .find(|skill| skill.name == "campfire")
+            .unwrap();
+        assert_eq!(campfire.current_revision.file_count, 6);
+        assert!(
+            campfire
+                .current_revision
+                .source_metadata
+                .get("upstream")
+                .is_none()
+        );
+        let campfire_content =
+            service.revision_content_path(&campfire.id, &campfire.current_revision.id);
+        for relative in [
+            "NOTICE",
+            "references/lead.md",
+            "references/member.md",
+            "references/notes.md",
+        ] {
+            assert!(campfire_content.join(relative).is_file());
+        }
+        let campfire_rules = fs::read_to_string(campfire_content.join("SKILL.md")).unwrap();
+        for required in [
+            "### 篝火讨论 · 邀请",
+            "### 篝火讨论 · 开场观点",
+            "### 篝火讨论 · 定向回应",
+            "### 篝火讨论 · 澄清",
+            "`### 篝火纪要` 表示讨论已经结束",
+            "由 Campfire 主动发起的短澄清，整场最多一次",
+            "默认使用一条共享邀请",
+        ] {
+            assert!(
+                campfire_rules.contains(required),
+                "missing Campfire rule: {required}"
+            );
+        }
+        assert!(!campfire_rules.contains("[CAMPFIRE_"));
+        assert!(!campfire_rules.contains("请使用 `$campfire`"));
         let cli_operations = skills
             .iter()
             .find(|skill| skill.name == "cli-operations")
@@ -3355,30 +3568,33 @@ mod tests {
             )
             .unwrap();
         assert_eq!(repair_count, 1);
+        let worktree = service
+            .list(&database)
+            .unwrap()
+            .into_iter()
+            .find(|skill| skill.name == "worktree")
+            .unwrap();
         let disable = user_envelope(
-            "disable-bundled",
+            "disable-user-managed-official",
             SetSkillEnabledCommand {
-                skill_id: memory_stewardship.id.clone(),
-                expected_version: memory_stewardship.version,
+                skill_id: worktree.id.clone(),
+                expected_version: worktree.version,
                 enabled: false,
             },
         );
         let disable_result = service.set_enabled(&mut database, &disable).unwrap();
         assert_eq!(
             disable_result.result.payload["version"],
-            memory_stewardship.version + 1
+            worktree.version + 1
         );
-        let disabled = service
-            .get(&database, &memory_stewardship.id)
-            .unwrap()
-            .unwrap();
+        let disabled = service.get(&database, &worktree.id).unwrap().unwrap();
         service
             .set_group_assignments(
                 &mut database,
                 &user_envelope(
-                    "remove-one-bundled-group",
+                    "remove-one-user-managed-official-group",
                     SetSkillGroupAssignmentsCommand {
-                        skill_id: memory_stewardship.id.clone(),
+                        skill_id: worktree.id.clone(),
                         expected_version: disabled.version,
                         group_keys: SkillDeliveryGroupKey::ALL
                             .into_iter()
@@ -3389,10 +3605,7 @@ mod tests {
             )
             .unwrap();
         service.install_bundled_skills(&mut database).unwrap();
-        let refreshed = service
-            .get(&database, &memory_stewardship.id)
-            .unwrap()
-            .unwrap();
+        let refreshed = service.get(&database, &worktree.id).unwrap().unwrap();
         assert!(!refreshed.enabled);
         assert_eq!(refreshed.group_assignments.len(), 8);
         assert!(
@@ -3401,6 +3614,85 @@ mod tests {
                 .iter()
                 .all(|assignment| assignment.group_key != SkillDeliveryGroupKey::Qwen)
         );
+
+        for required_name in ["cli-operations", "memory-stewardship"] {
+            let required = service
+                .list(&database)
+                .unwrap()
+                .into_iter()
+                .find(|skill| skill.name == required_name)
+                .unwrap();
+            let disable_required = service
+                .set_enabled(
+                    &mut database,
+                    &user_envelope(
+                        &format!("disable-{required_name}"),
+                        SetSkillEnabledCommand {
+                            skill_id: required.id.clone(),
+                            expected_version: required.version,
+                            enabled: false,
+                        },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(disable_required.result.code, "skill_configuration_locked");
+            let reassign_required = service
+                .set_group_assignments(
+                    &mut database,
+                    &user_envelope(
+                        &format!("reassign-{required_name}"),
+                        SetSkillGroupAssignmentsCommand {
+                            skill_id: required.id.clone(),
+                            expected_version: required.version,
+                            group_keys: vec![],
+                        },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(reassign_required.result.code, "skill_configuration_locked");
+            database
+                .connection()
+                .execute("UPDATE skill SET enabled = 0 WHERE id = ?1", [&required.id])
+                .unwrap();
+            database
+                .connection()
+                .execute(
+                    "DELETE FROM skill_group_assignment WHERE skill_id = ?1 AND group_key = 'qwen'",
+                    [&required.id],
+                )
+                .unwrap();
+        }
+        service.install_bundled_skills(&mut database).unwrap();
+        for required_name in ["cli-operations", "memory-stewardship"] {
+            let required = service
+                .list(&database)
+                .unwrap()
+                .into_iter()
+                .find(|skill| skill.name == required_name)
+                .unwrap();
+            assert!(required.enabled);
+            assert_eq!(
+                required.management_policy,
+                SkillManagementPolicy::SystemRequired
+            );
+            assert_eq!(
+                required
+                    .group_assignments
+                    .iter()
+                    .map(|assignment| assignment.group_key)
+                    .collect::<BTreeSet<_>>(),
+                all_groups
+            );
+        }
+        let restore_count: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM event_log WHERE event_type = 'skill.system_configuration_restored'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(restore_count, 2);
         assert_eq!(
             service
                 .list(&database)
@@ -3438,7 +3730,7 @@ mod tests {
         service.install_bundled_skills(&mut database).unwrap();
 
         let skills = service.list(&database).unwrap();
-        assert_eq!(skills.len(), 10);
+        assert_eq!(skills.len(), 11);
         assert!(skills.iter().all(|skill| !skill.name.starts_with("rovai-")));
         let restored = skills
             .iter()

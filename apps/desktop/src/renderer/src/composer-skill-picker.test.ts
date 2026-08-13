@@ -12,6 +12,7 @@ function skill(
     id,
     name,
     origin: 'official',
+    managementPolicy: 'user_managed',
     enabled: true,
     lifecycleStatus: 'active',
     currentRevision: {

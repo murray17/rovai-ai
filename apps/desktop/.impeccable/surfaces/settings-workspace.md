@@ -57,11 +57,13 @@ never durable Episode admission, acknowledgement, clearing or the global unread 
 
 ## Skill
 
-Use one open list with stable identity mark, name, source, enabled switch and details. Current official
-Rovai Skills use the same list, including `cli-operations` and the four pinned GitHub-origin Skills;
-GitHub provenance changes only the short source badge and details, not grouping or lifecycle. Do not
-add a required/locked badge or a special built-in group. Imported revisions, enablement and
-`allowed-tools` do not imply extra Runtime permission or proof that a model read the Skill.
+Use one open list with stable identity mark, name, source, enabled switch and details for supported
+configuration choices. The list contains the nine `user_managed` official Skills, including
+`campfire` and the four pinned GitHub-origin Skills; GitHub provenance changes only the short source
+badge and details, not grouping or lifecycle. `cli-operations` and `memory-stewardship` are
+`system_required`: omit them entirely instead of adding locked rows, disabled controls, a required
+badge or a special built-in group. Imported revisions, enablement and `allowed-tools` do not imply
+extra Runtime permission or proof that a model read the Skill.
 
 ## MCP
 

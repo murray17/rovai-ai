@@ -68,13 +68,10 @@ export function SkillSettings(): React.JSX.Element {
     if (params.status === 'ready') void load().catch((nextError) => setError(errorMessage(nextError)))
   }), [load])
 
-  const visibleSkills = useMemo(() => {
-    const query = search.trim().toLocaleLowerCase('zh-CN')
-    if (!skills || query.length === 0) return skills
-    return skills.filter((skill) => skillSearchText(skill)
-      .toLocaleLowerCase('zh-CN')
-      .includes(query))
-  }, [search, skills])
+  const visibleSkills = useMemo(
+    () => settingsVisibleSkills(skills, search),
+    [search, skills]
+  )
 
   const inspectLocalImport = async (): Promise<void> => {
     setBusy('inspect-local')
@@ -213,7 +210,7 @@ export function SkillSettings(): React.JSX.Element {
       <SettingsPageHeader
         eyebrow="Settings / Skills"
         title="Skill 管理"
-        description="管理 Rovai 内置、固定上游的第三方与用户导入 Skill；来源可追溯，投递范围与启停状态各自独立。"
+        description="管理可配置的 Rovai 内置、固定上游第三方与用户导入 Skill；来源可追溯，投递范围与启停状态各自独立。"
         aside={<span className="settings-page-note">应用全局配置</span>}
       />
 
@@ -331,6 +328,19 @@ export function SkillSettings(): React.JSX.Element {
       />
     </div>
   )
+}
+
+export function settingsVisibleSkills(
+  skills: SkillView[] | null,
+  search: string
+): SkillView[] | null {
+  if (!skills) return null
+  const configurable = skills.filter((skill) => skill.managementPolicy === 'user_managed')
+  const query = search.trim().toLocaleLowerCase('zh-CN')
+  if (query.length === 0) return configurable
+  return configurable.filter((skill) => skillSearchText(skill)
+    .toLocaleLowerCase('zh-CN')
+    .includes(query))
 }
 
 export function SkillCard({

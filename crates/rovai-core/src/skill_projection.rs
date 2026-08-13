@@ -2333,21 +2333,13 @@ mod tests {
     ) -> SkillView {
         library.install_bundled_skills(database).unwrap();
         let installed = library.list(database).unwrap();
-        for skill in installed
-            .iter()
-            .filter(|skill| skill.name != "memory-stewardship")
-        {
-            assign_skill_to_groups(
-                database,
-                library,
-                skill,
-                &[],
-                &format!("clear-unrelated-official-projection-skill-{}", skill.id),
-            );
-        }
+        database
+            .connection()
+            .execute("DELETE FROM skill_group_assignment", [])
+            .unwrap();
         let skill = installed
             .into_iter()
-            .find(|skill| skill.name == "memory-stewardship")
+            .find(|skill| skill.name == "analyze-agent-codebase")
             .unwrap();
         assign_skill_to_groups(
             database,
@@ -2525,8 +2517,8 @@ mod tests {
                 .iter()
                 .all(|observation| observation.state == "ready")
         );
-        let codex = root.join(".codex/skills/memory-stewardship");
-        let claude = root.join(".claude/skills/memory-stewardship");
+        let codex = root.join(".codex/skills/analyze-agent-codebase");
+        let claude = root.join(".claude/skills/analyze-agent-codebase");
         assert!(
             fs::symlink_metadata(&codex)
                 .unwrap()
@@ -2549,8 +2541,8 @@ mod tests {
         assert!(!root.join(".github/skills").exists());
         let exclude_content = fs::read_to_string(exclude).unwrap();
         assert!(exclude_content.contains("# user rule\n/local-only"));
-        assert!(exclude_content.contains("/.codex/skills/memory-stewardship"));
-        assert!(exclude_content.contains("/.claude/skills/memory-stewardship"));
+        assert!(exclude_content.contains("/.codex/skills/analyze-agent-codebase"));
+        assert!(exclude_content.contains("/.claude/skills/analyze-agent-codebase"));
         let status = Command::new("git")
             .args(["status", "--porcelain", "--untracked-files=all"])
             .current_dir(&root)
@@ -2606,7 +2598,7 @@ mod tests {
         let mut database = Database::open(&data).unwrap();
         let library = SkillLibraryService::new(library_root).unwrap();
         install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
-        let conflict = root.join(".codex/skills/memory-stewardship");
+        let conflict = root.join(".codex/skills/analyze-agent-codebase");
         fs::create_dir_all(&conflict).unwrap();
         fs::write(conflict.join("SKILL.md"), "project owned").unwrap();
         insert_active_run(&database, &root);
@@ -2626,7 +2618,7 @@ mod tests {
             .snapshot
             .skills
             .iter()
-            .find(|skill| skill.name == "memory-stewardship")
+            .find(|skill| skill.name == "analyze-agent-codebase")
             .unwrap();
         assert_eq!(shadowed.status, "shadowed");
         assert_eq!(
@@ -2682,7 +2674,7 @@ mod tests {
         let mut database = Database::open(&data).unwrap();
         let library = SkillLibraryService::new(library_root).unwrap();
         install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
-        let conflict = root.join(".codex/skills/memory-stewardship");
+        let conflict = root.join(".codex/skills/analyze-agent-codebase");
         fs::create_dir_all(&conflict).unwrap();
         fs::write(conflict.join("SKILL.md"), "project owned").unwrap();
 
@@ -2697,7 +2689,7 @@ mod tests {
         let shadowed = report
             .observations
             .iter()
-            .find(|observation| observation.entry_path.ends_with("/memory-stewardship"))
+            .find(|observation| observation.entry_path.ends_with("/analyze-agent-codebase"))
             .unwrap();
         assert_eq!(shadowed.state, "shadowed");
         assert_eq!(
@@ -2706,7 +2698,7 @@ mod tests {
         );
 
         fs::remove_dir_all(&conflict).unwrap();
-        let managed = root.join(".codex/skills/memory-stewardship");
+        let managed = root.join(".codex/skills/analyze-agent-codebase");
         SkillProjectionReconciler
             .reconcile_root(
                 &mut database,
@@ -2719,7 +2711,7 @@ mod tests {
         let managed_entry_path = root
             .canonicalize()
             .unwrap()
-            .join(".codex/skills/memory-stewardship")
+            .join(".codex/skills/analyze-agent-codebase")
             .to_string_lossy()
             .to_string();
         database
@@ -2820,9 +2812,9 @@ mod tests {
             .list(&database)
             .unwrap()
             .into_iter()
-            .find(|skill| skill.name == "memory-stewardship")
+            .find(|skill| skill.name == "analyze-agent-codebase")
             .unwrap();
-        let entry = root.join(".codex/skills/memory-stewardship");
+        let entry = root.join(".codex/skills/analyze-agent-codebase");
         library
             .set_enabled(
                 &mut database,
@@ -2872,7 +2864,7 @@ mod tests {
             .list(&database)
             .unwrap()
             .into_iter()
-            .find(|skill| skill.name == "memory-stewardship")
+            .find(|skill| skill.name == "analyze-agent-codebase")
             .unwrap();
         library
             .set_enabled(
@@ -2892,7 +2884,7 @@ mod tests {
             .prepare_skill_exposure(&mut database, &library, "projection-run-new", 1)
             .unwrap();
         assert!(prepared.snapshot.skills.is_empty());
-        assert!(fs::symlink_metadata(root.join(".codex/skills/memory-stewardship")).is_err());
+        assert!(fs::symlink_metadata(root.join(".codex/skills/analyze-agent-codebase")).is_err());
         let runs: (String, String) = database
             .connection()
             .query_row(
@@ -3073,7 +3065,7 @@ mod tests {
             )
             .unwrap();
         insert_active_run(&database, &canonical_root);
-        let entry = canonical_root.join(".codex/skills/memory-stewardship");
+        let entry = canonical_root.join(".codex/skills/analyze-agent-codebase");
 
         let removal = SkillProjectionReconciler
             .remove_execution_root(&mut database, &library, &canonical_root)
@@ -3126,7 +3118,7 @@ mod tests {
                 &[SkillDeliveryGroupKey::Codex],
             )
             .unwrap();
-        let entry = root.join(".codex/skills/memory-stewardship");
+        let entry = root.join(".codex/skills/analyze-agent-codebase");
         fs::remove_file(&entry).unwrap();
 
         let exposure = SkillProjectionReconciler
@@ -3173,8 +3165,8 @@ mod tests {
 
         let message = format!("{error:#}");
         assert!(message.contains("Skill projection verification failed"));
-        assert!(message.contains("memory-stewardship"));
-        assert!(!root.join(".codex/skills/memory-stewardship").exists());
+        assert!(message.contains("analyze-agent-codebase"));
+        assert!(!root.join(".codex/skills/analyze-agent-codebase").exists());
     }
 
     #[test]
@@ -3294,7 +3286,7 @@ mod tests {
         for native_root in [".codex/skills", ".claude/skills", ".agent/skills"] {
             assert!(
                 root.join(native_root)
-                    .join("memory-stewardship")
+                    .join("analyze-agent-codebase")
                     .canonicalize()
                     .is_ok()
             );
@@ -3327,7 +3319,7 @@ mod tests {
             .reconcile_root(&mut database, &library, &root, &required)
             .unwrap();
 
-        let name = "memory-stewardship";
+        let name = "analyze-agent-codebase";
         assert!(
             root.join(".claude/skills")
                 .join(name)
@@ -3385,7 +3377,7 @@ mod tests {
         let mut database = Database::open(&data).unwrap();
         let library = SkillLibraryService::new(library_root).unwrap();
         install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
-        let native = root.join(".agents/skills/memory-stewardship");
+        let native = root.join(".agents/skills/analyze-agent-codebase");
         fs::create_dir_all(&native).unwrap();
         fs::write(native.join("SKILL.md"), "runtime native").unwrap();
 
@@ -3403,7 +3395,7 @@ mod tests {
             "runtime native"
         );
         assert!(
-            root.join(".codex/skills/memory-stewardship")
+            root.join(".codex/skills/analyze-agent-codebase")
                 .canonicalize()
                 .is_ok()
         );
@@ -3461,9 +3453,9 @@ mod tests {
             .list(&database)
             .unwrap()
             .into_iter()
-            .find(|skill| skill.name == "memory-stewardship")
+            .find(|skill| skill.name == "analyze-agent-codebase")
             .unwrap();
-        let entry = root.join(".codex/skills/memory-stewardship");
+        let entry = root.join(".codex/skills/analyze-agent-codebase");
         fs::remove_file(&entry).unwrap();
         symlink(&external, &entry).unwrap();
         library

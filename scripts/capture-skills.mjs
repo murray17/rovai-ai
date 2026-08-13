@@ -82,15 +82,15 @@ try {
   await waitForExpression(cdp, `Boolean(document.querySelector('.settings-sidebar-menu'))`, 5_000)
   await openSection(cdp, 'Skill')
   await waitForExpression(cdp, `Boolean(document.querySelector('.skill-settings')) && (
-    document.querySelectorAll('.skill-card').length === 10
+    document.querySelectorAll('.skill-card').length === 9
       || Boolean(document.querySelector('.skill-page-error'))
   )`, 30_000)
   const initialSkillState = await evaluate(cdp, `({
     cardCount: document.querySelectorAll('.skill-card').length,
     error: document.querySelector('.skill-page-error')?.textContent?.trim() ?? null
   })`)
-  if (initialSkillState.cardCount !== 10 || initialSkillState.error) {
-    throw new Error(`Skill settings did not load the ten official Skills: ${JSON.stringify(initialSkillState)}`)
+  if (initialSkillState.cardCount !== 9 || initialSkillState.error) {
+    throw new Error(`Skill settings did not load the nine configurable official Skills: ${JSON.stringify(initialSkillState)}`)
   }
 
   await waitForEvaluation(cdp, `(async () => (
@@ -191,6 +191,14 @@ try {
       panelOverflow: panel ? panel.scrollWidth > panel.clientWidth : true,
       subnav: subnavButtons.map((button) => button.querySelector('strong')?.textContent?.trim()),
       activeSection: active?.querySelector('strong')?.textContent?.trim(),
+      officialSkillNames: skillViews
+        .filter((skill) => skill.origin === 'official')
+        .map((skill) => skill.name)
+        .sort(),
+      systemRequiredNames: skillViews
+        .filter((skill) => skill.managementPolicy === 'system_required')
+        .map((skill) => skill.name)
+        .sort(),
       skillNames: skillCards.map((card) => card.querySelector('.skill-card-title > strong')?.textContent?.trim()),
       bundledCount: bundled.length,
       bundledBadges: bundled.map((card) => card.querySelector('.skill-source')?.textContent?.trim()),
@@ -267,17 +275,33 @@ try {
       || result.panelOverflow
       || JSON.stringify(result.subnav) !== JSON.stringify(['通用', '外观', '通知', 'Skill', 'MCP', 'Agent 运行时', '诊断与修复'])
       || result.activeSection !== 'Skill'
-      || result.bundledCount !== 6
-      || !result.bundledBadges.every((badge) => badge === 'Rovai')
-      || result.thirdPartyCount !== 4
-      || result.enabledOfficialCount !== 10
-      || JSON.stringify(result.skillNames) !== JSON.stringify([
+      || JSON.stringify(result.officialSkillNames) !== JSON.stringify([
         'analyze-agent-codebase',
+        'campfire',
         'cli-operations',
         'diagnosing-bugs',
         'grill-duo',
         'grill-duo-with-docs',
         'memory-stewardship',
+        'tasteful-ui',
+        'tdd',
+        'worktree',
+        'writing-for-agents'
+      ])
+      || JSON.stringify(result.systemRequiredNames) !== JSON.stringify([
+        'cli-operations',
+        'memory-stewardship'
+      ])
+      || result.bundledCount !== 5
+      || !result.bundledBadges.every((badge) => badge === 'Rovai')
+      || result.thirdPartyCount !== 4
+      || result.enabledOfficialCount !== 9
+      || JSON.stringify(result.skillNames) !== JSON.stringify([
+        'analyze-agent-codebase',
+        'campfire',
+        'diagnosing-bugs',
+        'grill-duo',
+        'grill-duo-with-docs',
         'tasteful-ui',
         'tdd',
         'worktree',

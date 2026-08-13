@@ -199,7 +199,7 @@ Related: Session entrypoint 与 Built-in operation 只作为交叉导航，不�
 | [ADR-0158](0158-default-all-runtime-delivery-for-managed-skills.md) | Default-All Runtime Delivery for Managed Skills |
 | [ADR-0161](0161-event-driven-root-scoped-skill-projection-reconciliation.md) | Event-Driven Root-Scoped Skill Projection Reconciliation |
 | [ADR-0166](0166-progressive-built-in-cli-teaching.md) | Progressive Built-In CLI Teaching |
-| [ADR-0174](0174-ten-skill-official-inventory-and-pinned-matt-pocock-imports.md) | Ten-Skill Official Inventory and Pinned Matt Pocock Imports |
+| [ADR-0176](0176-eleven-skill-official-inventory-and-system-required-operations.md) | Eleven-Skill Official Inventory and System-Required Operations |
 <!-- adr-current-primary:end -->
 
 Related: 具体 Skill 名称或版本不是治理例外；长期边界仍按本主题的一般 ADR 准入规则判断。

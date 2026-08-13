@@ -10,7 +10,9 @@ last_updated: 2026-08-13
 
 # Rovai-ai v0.71：Notification Episode
 
-> 当前状态：领域模型、合同、ADR、Core/IPC/Renderer clean-break 与隔离打包 App 验收均已完成。
+> 当前状态：Notification Episode 的领域模型、合同、ADR、Core/IPC/Renderer clean-break 与隔离打包
+> App 验收均已完成；同一 current version 的独立 Skill 增量也已纳入 Campfire，并完成系统必需
+> operational Skill 的 Core/Settings 收口。
 >
 > 前置版本：[v0.70 User Attention 教学与十项 official Skill](../v0.70/README.md)
 
@@ -22,6 +24,10 @@ Episode 更新通过最小 Change Journal 驱动浮层和增量刷新。
 
 普通 Agent 公屏消息只留在 Camp 时间线。通知中心只承载待审批、提到你、本轮完成、执行失败和执行
 未完成。用户主动 Stop 静默；`turn_failed` 与只能证明未完成的 `turn_incomplete` 必须诚实区分。
+
+同一版本另把 official Skill inventory 从十项扩展为十一项：新增 Rovai 原生 `campfire`，并把
+`cli-operations`、`memory-stewardship` 收口为始终启用、投递全部 Runtime Group 且不在 Settings
+展示的系统必需 Skill。该增量不改变 CampMessage wire shape、Runtime 权限或 Notification Episode。
 
 ## 交付范围
 
@@ -50,6 +56,15 @@ Episode 更新通过最小 Change Journal 驱动浮层和增量刷新。
 - 设置固定为总开关、待审批、提到你、本轮完成、执行未完成，默认开启；
 - 保持 Porcelain Day / Steel Night、键盘焦点、长文本、错误恢复和 200% zoom 合同。
 
+### Official Skill 与管理策略
+
+- 新增六文件 Rovai 原生 `campfire`，用自然公屏标题组织 2–3 位成员独立开场、有限定向回应与终止纪要；
+- Campfire Skill-only v1 使用受信 Runtime 发送者身份，不新增 discussion state、隐藏协议 ID 或自动副作用；
+- `cli-operations`、`memory-stewardship` 使用 `system_required` policy，Core 拒绝配置修改并在 bundled
+  installation 时恢复 enabled 与全部九组 Assignment；
+- Renderer Skill Settings 只展示九项 `user_managed` official Skills；两项系统必需 Skill 仍参与
+  Runtime 原生发现与投递。
+
 ## Clean break
 
 功能尚未上线，不迁移旧通知数据、已读/清除、设置或 cursor。Migration 只清理 Rovai-owned 通知域，
@@ -63,20 +78,22 @@ Episode 更新通过最小 Change Journal 驱动浮层和增量刷新。
 2. JSON-RPC、TypeScript 与 Main allowlist 只暴露 v1 深模块接口，旧方法不可调用；
 3. Renderer tests 覆盖同 Episode heads-up 原地更新、启动不补弹、不可用主动作、部分未读与 CAS 错误恢复；
 4. 双主题真实 App 验收覆盖 Drawer、Toast、设置、长 CJK/emoji、键盘、最小窗口与 200% zoom；
-5. `cargo test --workspace`、Fmt、Clippy、Typecheck、Desktop build、`pnpm test` 与全部文档治理通过。
+5. `cargo test --workspace`、Fmt、Clippy、Typecheck、Desktop build、`pnpm test` 与全部文档治理通过；
+6. Campfire validator/情景演练、十一项 fresh-Core smoke、system-required 命令拒绝与九项 Settings
+   列表 fixture 通过。
 
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.70 以未执行九 Runtime v8 matrix 的事实冻结为 historical/closed_incomplete；v0.71 成为唯一 current |
-| ADR | 已更新 | 新增 ADR-0175，细化 ADR-0087/0165 的通知真源、聚合、Journal 与 Renderer seam |
-| Contracts | 已更新 | Notification Episode v1 成为通知接口；Current User Attention v3 替代 v2 的 per-message Inbox row |
-| Architecture | 已更新 | 新增 Notification Episode 架构并更新 Public A2A 的 User Mention projection ownership |
-| UI | 已更新 | 新增通知中心组件合同并更新 Settings surface 的 Episode/类别/动作边界 |
+| ADR | 已更新 | 新增 ADR-0175，细化通知真源、聚合、Journal 与 Renderer seam；ADR-0176 替代十项 official inventory 并冻结 system-required policy |
+| Contracts | 已更新 | Notification Episode v1 成为通知接口；Current User Attention v3 替代 v2；SkillView 增加 management policy，CampMessage wire 不变 |
+| Architecture | 已更新 | 新增 Notification Episode 架构；Built-in Tool Runtime 与 Skill Projection 记录十一项 inventory 及系统必需自愈边界 |
+| UI | 已更新 | 新增通知中心组件合同；Settings surface 同步九项可配置 Skill，并完全省略两项系统必需 Skill |
 | Runtime Activity | 确认无需更新 | 不新增 Runtime operation、provider event、Activity classifier 或 Evidence mapping |
 | Runtime compatibility | 确认无需更新 | 不改变 Adapter、Native Session、Built-in Transport v8 或模型教学 identity |
-| Documentation routing | 已更新 | docs map、Contract/Architecture/UI/ADR/current-version 路由切换到 v0.71 权威 |
+| Documentation routing | 已更新 | docs map、Contract/Architecture/UI/ADR/current-version 路由切换到 v0.71，并把 Skills 主题指向 ADR-0176 |
 | Root README | 确认无需更新 | 产品定位、常青能力与 Runtime 支持范围不变，根 README 不记录版本局部实现 |
 
 ## References
@@ -85,4 +102,6 @@ Episode 更新通过最小 Change Journal 驱动浮层和增量刷新。
 - [Notification Episode v1](../../contracts/notification-episode-v1.md)
 - [Current User Attention v3](../../contracts/current-user-attention-v3.md)
 - [ADR-0175](../../adr/0175-core-owned-notification-occurrence-episode-and-change-journal.md)
+- [ADR-0176](../../adr/0176-eleven-skill-official-inventory-and-system-required-operations.md)
 - [Notification Episode 架构](../../architecture/notification-episodes.md)
+- [`campfire` bundled source](../../../skills/campfire/SKILL.md)

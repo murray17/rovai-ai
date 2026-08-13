@@ -10,6 +10,7 @@ import {
   importActionLabel,
   patchSkillEnabledResult,
   projectionStateLabel,
+  settingsVisibleSkills,
   skillSourcePresentation
 } from './SkillSettings'
 import { identityColorToken } from './theme'
@@ -22,7 +23,7 @@ describe('Skill settings', () => {
     expect(markup).toContain('添加 Skill')
     expect(markup).toContain('正在读取 Skill Library')
     expect(markup).toContain('应用全局配置')
-    expect(markup).toContain('管理 Rovai 内置、固定上游的第三方与用户导入 Skill')
+    expect(markup).toContain('管理可配置的 Rovai 内置、固定上游第三方与用户导入 Skill')
     expect(markup).toContain('class="settings-page-heading"')
     expect(markup).toContain('<h1>Skill 管理</h1>')
     expect(markup).toContain('id="skill-import-local-tab"')
@@ -31,6 +32,31 @@ describe('Skill settings', () => {
     expect(markup).toContain('导入前会先生成安全预览')
     expect(markup).not.toContain('class="skill-import-help"')
     expect(markup).not.toContain('允许执行')
+  })
+
+  it('keeps system-required Skills out of the settings list and search results', () => {
+    const configurable = skillFixture(true)
+    const cliOperations = {
+      ...skillFixture(true),
+      id: 'skill-cli-operations',
+      name: 'cli-operations',
+      managementPolicy: 'system_required'
+    } satisfies SkillView
+    const memoryStewardship = {
+      ...skillFixture(true),
+      id: 'skill-memory-stewardship',
+      name: 'memory-stewardship',
+      managementPolicy: 'system_required'
+    } satisfies SkillView
+
+    expect(settingsVisibleSkills(
+      [configurable, cliOperations, memoryStewardship],
+      ''
+    )).toEqual([configurable])
+    expect(settingsVisibleSkills(
+      [configurable, cliOperations, memoryStewardship],
+      'memory'
+    )).toEqual([])
   })
 
   it('explains import and projection states without relying on color', () => {
@@ -311,6 +337,7 @@ function skillFixture(enabled: boolean): SkillView {
     id: 'skill-1',
     name: 'skill-one',
     origin: 'official',
+    managementPolicy: 'user_managed',
     enabled,
     lifecycleStatus: 'active',
     currentRevision: {

@@ -85,6 +85,7 @@ try {
   assert(
     JSON.stringify(bundledSkillNames) === JSON.stringify([
       'analyze-agent-codebase',
+      'campfire',
       'cli-operations',
       'diagnosing-bugs',
       'grill-duo',
@@ -97,6 +98,11 @@ try {
     ])
       && initialSkills.every((skill) => skill.origin === 'official'
         && skill.enabled
+        && skill.managementPolicy === (
+          ['cli-operations', 'memory-stewardship'].includes(skill.name)
+            ? 'system_required'
+            : 'user_managed'
+        )
         && JSON.stringify(skill.groupAssignments.map((assignment) => assignment.groupKey).sort())
           === JSON.stringify(allDeliveryGroups)),
     `Fresh Core did not install official Skills enabled for every Runtime group: ${JSON.stringify(initialSkills)}`
@@ -111,6 +117,33 @@ try {
     `Pinned mattpocock/skills provenance is incomplete: ${JSON.stringify(mattSkills)}`
   )
   const cliOperationsSkill = initialSkills.find((skill) => skill.name === 'cli-operations')
+  for (const requiredName of ['cli-operations', 'memory-stewardship']) {
+    const required = initialSkills.find((skill) => skill.name === requiredName)
+    const disabled = await core.request('skills.setEnabled', {
+      commandId: crypto.randomUUID(),
+      command: {
+        skillId: required.id,
+        expectedVersion: required.version,
+        enabled: false
+      }
+    })
+    assert(
+      disabled.status === 'rejected' && disabled.code === 'skill_configuration_locked',
+      `System-required Skill could be disabled: ${JSON.stringify(disabled)}`
+    )
+    const reassigned = await core.request('skills.setGroupAssignments', {
+      commandId: crypto.randomUUID(),
+      command: {
+        skillId: required.id,
+        expectedVersion: required.version,
+        groupKeys: []
+      }
+    })
+    assert(
+      reassigned.status === 'rejected' && reassigned.code === 'skill_configuration_locked',
+      `System-required Skill delivery could be changed: ${JSON.stringify(reassigned)}`
+    )
+  }
 
   let marker = markerFor(requestedAdapters[0] ?? 'library')
   await writeSmokeSkill(marker)

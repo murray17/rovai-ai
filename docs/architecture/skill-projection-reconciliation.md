@@ -3,7 +3,7 @@ document_type: architecture
 architecture: skill-projection-reconciliation
 authority: skill-projection-access-and-reconciliation-boundaries
 status: accepted
-last_updated: 2026-08-11
+last_updated: 2026-08-13
 ---
 
 # Skill Projection Reconciliation Architecture
@@ -12,7 +12,9 @@ last_updated: 2026-08-11
 SkillExposureSnapshot 的长期组件边界。决策理由见
 [ADR-0105](../adr/0105-runtime-group-assigned-skill-delivery.md)、
 [ADR-0158](../adr/0158-default-all-runtime-delivery-for-managed-skills.md)和
-[ADR-0161](../adr/0161-event-driven-root-scoped-skill-projection-reconciliation.md)。
+[ADR-0161](../adr/0161-event-driven-root-scoped-skill-projection-reconciliation.md)。当前 official
+inventory 与 system-required policy 见
+[ADR-0176](../adr/0176-eleven-skill-official-inventory-and-system-required-operations.md)。
 
 ## 三层状态
 
@@ -34,6 +36,11 @@ SkillExposureSnapshot (immutable start-time evidence in ContextManifest)
 
 `skill_projection_observation` 证明上次看到的 entry 和 Rovai 所有权，只能支持安全清理、诊断和
 下一次当前-root 修复。它不能把 execution root 加入启动、定时或 watcher 调度。
+
+Skill Library view 的 `managementPolicy` 来自 bundled official manifest，而不是用户可改数据库字段。
+`cli-operations` 与 `memory-stewardship` 为 `system_required`：bundled install 以 DB-only 事务恢复 enabled
+与全部九组 Assignment，命令边界拒绝修改；其他 Skill 为 `user_managed`。该策略只决定 Library desired
+state，不改变 projection ownership、preflight、Snapshot 或 Runtime load 证明。
 
 ## 组件职责
 

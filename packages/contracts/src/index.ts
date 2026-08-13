@@ -1521,6 +1521,7 @@ export interface SkillView {
   id: string
   name: string
   origin: SkillOrigin
+  managementPolicy: 'user_managed' | 'system_required'
   enabled: boolean
   lifecycleStatus: 'active' | 'deleting'
   currentRevision: SkillRevisionView

@@ -7904,27 +7904,11 @@ mod tests {
         library
             .install_bundled_skills(&mut fixture.database)
             .unwrap();
-        for skill in library.list(&fixture.database).unwrap() {
-            library
-                .set_group_assignments(
-                    &mut fixture.database,
-                    &CommandEnvelope {
-                        command_id: format!("clear-before-manifest-{}", skill.id),
-                        actor: ActorRef::User {
-                            user_id: "test-user".to_string(),
-                        },
-                        camp_id: None,
-                        expected_versions: Vec::new(),
-                        execution_epoch: None,
-                        payload: SetSkillGroupAssignmentsCommand {
-                            skill_id: skill.id,
-                            expected_version: skill.version,
-                            group_keys: Vec::new(),
-                        },
-                    },
-                )
-                .unwrap();
-        }
+        fixture
+            .database
+            .connection()
+            .execute("DELETE FROM skill_group_assignment", [])
+            .unwrap();
         let official = library.list(&fixture.database).unwrap().remove(0);
         library
             .set_group_assignments(
@@ -7996,11 +7980,11 @@ mod tests {
         );
         assert_eq!(persisted.1, exposure.digest);
 
-        let memory_stewardship = library
+        let analyze_agent_codebase = library
             .list(&fixture.database)
             .unwrap()
             .into_iter()
-            .find(|skill| skill.name == "memory-stewardship")
+            .find(|skill| skill.name == "analyze-agent-codebase")
             .unwrap();
         library
             .set_enabled(
@@ -8014,8 +7998,8 @@ mod tests {
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: SetSkillEnabledCommand {
-                        skill_id: memory_stewardship.id,
-                        expected_version: memory_stewardship.version,
+                        skill_id: analyze_agent_codebase.id,
+                        expected_version: analyze_agent_codebase.version,
                         enabled: false,
                     },
                 },

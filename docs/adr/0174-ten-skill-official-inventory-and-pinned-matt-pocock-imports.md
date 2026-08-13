@@ -2,13 +2,13 @@
 document_type: adr
 id: ADR-0174
 title: Ten-Skill Official Inventory and Pinned Matt Pocock Imports
-status: accepted
+status: superseded
 date: 2026-08-13
 decision_scope: cross-version
 source_version: v0.70
 supersedes:
   - ADR-0167
-superseded_by: null
+superseded_by: ADR-0176
 ---
 
 # ADR-0174: Ten-Skill Official Inventory and Pinned Matt Pocock Imports

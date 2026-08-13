@@ -99,14 +99,16 @@ Session Charter owns the fixed command set, exact-help rule, single input source
 explicit public-send obligation and safe recovery. It does not embed complete schemas, every flag, command-family
 decision trees or Memory governance.
 
-The ordinary official bundled `cli-operations` Skill is loaded only for command-family ambiguity, message→Task
+The system-required official bundled `cli-operations` Skill is loaded only for command-family ambiguity, message→Task
 choice, multi-operation coordination or complex recovery. Routine one-operation send/recipient/list/get/search/read
 uses exact help and does not require the Skill. `--to-user` belongs to `rovai send --help`; the Skill's Send reference
 adds only the non-routine independent-actions combination rule and user-facing closure responsibility guidance.
 That guidance cannot become Core role authorization or rejection.
 
-`memory-stewardship` remains the Memory governance authority and may be losslessly split into references. All Agent
-commands in it use `rovai memory <action>`; internal dotted operation names are not CLI examples.
+`memory-stewardship` remains the system-required Memory governance authority and may be losslessly split into
+references. Both operational Skills remain enabled and assigned to every Runtime Group, but that availability does
+not mean every turn loads them. All Agent commands in `memory-stewardship` use `rovai memory <action>`; internal
+dotted operation names are not CLI examples.
 
 ## Catalog and Native Session rollout
 

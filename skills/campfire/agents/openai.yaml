@@ -1,0 +1,4 @@
+interface:
+  display_name: "篝火讨论"
+  short_description: "让 2–3 位 Camp 成员独立表达、回应分歧并形成统一纪要"
+  default_prompt: "使用 $campfire 组织这场讨论：邀请 2–3 位互补成员先独立表达，再围绕最重要的分岔点有限回应，最后由 Default Lead 发布《篝火纪要》。"
