@@ -1,5 +1,5 @@
 {
-  "catalogVersion": "1.0.0",
+  "catalogVersion": "1.2.0",
   "hashAlgorithm": "sha256",
   "digestInput": "raw_file_bytes",
   "schemas": [
@@ -8,6 +8,48 @@
       "schemaUri": "https://schemas.rovai.invalid/contracts/semantic-judge-view-suite-v1.schema.json",
       "schemaVersion": "1.0.0",
       "digest": "sha256:4d577791caeebd6dbeb4657e987ab11def1cb945ef1af44472190b62d2eb86a7"
+    },
+    {
+      "file": "tool-interaction-measurement-v1.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/contracts/tool-interaction-measurement-v1.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:f8d267dfd79500a2ced9904967f1704adb10e97b29ce94794e50e2b8a9dd27e3"
+    },
+    {
+      "file": "tool-use-judge-pack-v1.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/contracts/tool-use-judge-pack-v1.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:db3999ba739b376f7c0a951acd801a838361b9fc481e39363119283a82658074"
+    },
+    {
+      "file": "tool-use-judge-configuration-v1.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/contracts/tool-use-judge-configuration-v1.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:9edd1c9aea6d929eff1ae56e4f510a85501bb23700d893d99808910899f13b72"
+    },
+    {
+      "file": "tool-use-judge-replica-result-v1.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/contracts/tool-use-judge-replica-result-v1.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:394df19951de3d3b889b3db75f33a905656c2195245371b45245efeac411be3f"
+    },
+    {
+      "file": "tool-use-review-v1.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/contracts/tool-use-review-v1.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:3800a3acec333b880676656e67cd34d5bf0b0f92b3ee819ca63739beabc9ea5d"
+    },
+    {
+      "file": "resource-measurement-v1.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/contracts/resource-measurement-v1.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:909b97b780d95df284bca8dbe2664df157dbb01def77522a18b920df9209959b"
+    },
+    {
+      "file": "paired-collaboration-experiment-v1.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/contracts/paired-collaboration-experiment-v1.schema.json",
+      "schemaVersion": "1.0.0",
+      "digest": "sha256:3acf8b0bbad36ab74a06a9c8008552978a681357f7be48b7bc1714ab54019918"
     }
   ]
 }

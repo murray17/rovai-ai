@@ -4,6 +4,7 @@ import {
   collectAgentRunExecutionEvidencePages,
   deriveToolEvidence
 } from './qualification-tool-evidence.mjs'
+import { digestJson } from './qualification-common.mjs'
 
 test('execution evidence pagination proves sequence and declared-total coverage', async () => {
   const calls = []
@@ -112,6 +113,107 @@ test('Tool evidence remains unavailable when the authoritative run boundary is a
   })
 })
 
+test('current Camp send keeps only digest-bound bounded operation projection', () => {
+  const validProjection = operationProjection()
+  const snapshot = {
+    agentRuns: [{ id: 'run-1', campTurnId: 'turn-1', executionEvidenceCount: 2 }],
+    executionEvidence: [
+      runtimeAction('send-valid', 1, {
+        toolCallId: 'sha256:send-call',
+        status: 'completed',
+        kind: 'mcp_tool_call',
+        sourceAuthority: 'core',
+        canonicalTool: 'camp.message.send',
+        authorizationDecision: 'allowed',
+        rawInputDigest: 'sha256:input-send',
+        rawOutputDigest: 'sha256:output-send',
+        idempotentReplay: false,
+        receiptId: 'receipt-send',
+        operationProjection: validProjection
+      }),
+      runtimeAction('send-tampered', 2, {
+        toolCallId: 'sha256:tampered-call',
+        status: 'completed',
+        kind: 'mcp_tool_call',
+        sourceAuthority: 'core',
+        canonicalTool: 'camp.message.send',
+        authorizationDecision: 'allowed',
+        rawInputDigest: 'sha256:different-input',
+        rawOutputDigest: 'sha256:output-send',
+        idempotentReplay: false,
+        receiptId: 'receipt-tampered',
+        operationProjection: validProjection
+      })
+    ]
+  }
+  const result = deriveToolEvidence(snapshot, { campTurnId: 'turn-1' }, {
+    coverage: { state: 'complete', reason: null },
+    declaredTotal: 2
+  })
+  const valid = result.ledger.find((record) => record.receiptId === 'receipt-send')
+  const tampered = result.ledger.find((record) => record.receiptId === 'receipt-tampered')
+  assert.deepEqual(valid.operationProjection, validProjection)
+  assert.equal(valid.sideEffectIdentity, 'receipt-send')
+  assert.equal(valid.mutationIntent, 'yes')
+  assert.equal(tampered.operationProjection, null)
+  assert.equal(JSON.stringify(result).includes('private A2A body'), false)
+})
+
+test('Core Built-in coverage is complete only with a durable pre-effect start fence', () => {
+  const terminalProjection = operationProjection()
+  const startProjection = startedOperationProjection(terminalProjection)
+  const base = {
+    toolCallId: 'sha256:fenced-call',
+    kind: 'builtin_tool_invocation',
+    sourceAuthority: 'core',
+    canonicalTool: 'camp.message.send',
+    authorizationDecision: 'allowed',
+    rawInputDigest: 'sha256:input-send',
+    idempotentReplay: false,
+    receiptId: null
+  }
+  const snapshot = {
+    agentRuns: [{ id: 'run-1', campTurnId: 'turn-1', executionEvidenceCount: 2 }],
+    executionEvidence: [
+      runtimeAction('send-started', 1, {
+        ...base,
+        status: 'started',
+        rawOutputDigest: null,
+        operationProjection: startProjection
+      }),
+      runtimeAction('send-completed', 2, {
+        ...base,
+        status: 'completed',
+        rawOutputDigest: 'sha256:output-send',
+        receiptId: 'receipt-send',
+        operationProjection: terminalProjection
+      })
+    ]
+  }
+  const complete = deriveToolEvidence(snapshot, { campTurnId: 'turn-1' }, {
+    coverage: { state: 'complete', reason: null },
+    declaredTotal: 2
+  })
+  assert.deepEqual(complete.sourceBoundary.coreBuiltinInvocationCoverage, {
+    state: 'complete', reason: null
+  })
+  assert.equal(complete.ledger[0].coreInvocationStartObserved, true)
+  assert.deepEqual(complete.ledger[0].operationProjection, terminalProjection)
+
+  const terminalOnly = deriveToolEvidence({
+    ...snapshot,
+    executionEvidence: [snapshot.executionEvidence[1]]
+  }, { campTurnId: 'turn-1' }, {
+    coverage: { state: 'complete', reason: null },
+    declaredTotal: 1
+  })
+  assert.equal(terminalOnly.sourceBoundary.coreBuiltinInvocationCoverage.state, 'partial')
+  assert.equal(
+    terminalOnly.sourceBoundary.coreBuiltinInvocationCoverage.reason.code,
+    'tool_evidence.core_builtin_start_fence_unattested'
+  )
+})
+
 function toolSnapshot() {
   return {
     agentRuns: [
@@ -182,6 +284,42 @@ function toolSnapshot() {
   }
 }
 
+function operationProjection() {
+  const projection = {
+    schemaVersion: 1,
+    operation: 'camp.message.send',
+    canonicalInput: {
+      recipientAgentIds: ['agent_2'],
+      contentDigest: 'sha256:body',
+      contentCharCount: 16,
+      contentSecretDetected: false
+    },
+    canonicalResult: {
+      messageId: 'message-1',
+      deliveryIds: ['delivery-1'],
+      effectiveRecipients: ['agent_2']
+    },
+    digestBinding: {
+      input: { evidenceField: 'rawInputDigest', digest: 'sha256:input-send' },
+      result: { evidenceField: 'rawOutputDigest', digest: 'sha256:output-send' }
+    },
+    inputDigest: 'sha256:input-send',
+    resultDigest: 'sha256:output-send'
+  }
+  return { ...projection, projectionDigest: digestJson(projection) }
+}
+
+function startedOperationProjection(terminal) {
+  const projection = {
+    ...structuredClone(terminal),
+    canonicalResult: null,
+    digestBinding: { input: structuredClone(terminal.digestBinding.input), result: null },
+    resultDigest: null
+  }
+  delete projection.projectionDigest
+  return { ...projection, projectionDigest: digestJson(projection) }
+}
+
 function runtimeAction(id, sequence, payload) {
   return {
     id,
@@ -189,8 +327,10 @@ function runtimeAction(id, sequence, payload) {
     executionEpoch: 1,
     sequence,
     eventType: 'runtime.action',
-    kind: 'tool_result',
-    phase: payload.status === 'failed' ? 'failed' : 'completed',
+    kind: payload.status === 'started' ? 'tool_call' : 'tool_result',
+    phase: payload.status === 'started'
+      ? 'started'
+      : payload.status === 'failed' ? 'failed' : 'completed',
     payload,
     isTruncated: false,
     occurredAt: `2026-08-03T00:00:0${sequence}Z`

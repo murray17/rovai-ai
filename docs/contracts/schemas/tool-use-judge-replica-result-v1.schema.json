@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/contracts/tool-use-judge-replica-result-v1.schema.json",
+  "title": "Rovai Tool-Use Judge Replica Result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["artifactId", "schemaId", "schemaVersion", "producer", "binding", "sourceBoundaries", "payloadDigest", "payload"],
+  "properties": {
+    "artifactId": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/stableId" },
+    "schemaId": { "const": "rovai.qualification.tool-use-judge-replica-result" },
+    "schemaVersion": { "const": "1.0.0" },
+    "producer": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/producer" },
+    "binding": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/binding" },
+    "sourceBoundaries": { "type": "array", "minItems": 1, "maxItems": 1 },
+    "payloadDigest": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/digest" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["replicaResultId", "judgeExecutionId", "configurationArtifact", "measurementArtifact", "packArtifact", "replica", "presentationOrder", "state", "attempts", "items", "unavailableReason"],
+      "properties": {
+        "replicaResultId": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/stableId" },
+        "judgeExecutionId": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/stableId" },
+        "configurationArtifact": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/artifactRef" },
+        "measurementArtifact": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/artifactRef" },
+        "packArtifact": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/artifactRef" },
+        "replica": { "enum": ["A", "B"] },
+        "presentationOrder": { "type": "array", "minItems": 5, "maxItems": 5, "uniqueItems": true },
+        "state": { "enum": ["complete", "unavailable"] },
+        "attempts": { "type": "array", "minItems": 1 },
+        "items": { "type": "array" },
+        "unavailableReason": { "type": ["object", "null"] }
+      }
+    }
+  }
+}

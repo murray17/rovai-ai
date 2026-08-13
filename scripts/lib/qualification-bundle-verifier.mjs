@@ -1,4 +1,4 @@
-import { readFile, realpath, stat } from 'node:fs/promises'
+import { readFile, readdir, realpath, stat } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import { canonicalJson, digestJson, sha256 } from './qualification-common.mjs'
 import { validateEvidenceBundleManifest } from './qualification-bundle.mjs'
@@ -18,6 +18,15 @@ import {
 import {
   validateCollaborationMessageEvidence
 } from './qualification-semantic-evidence.mjs'
+import {
+  validateToolInteractionArtifacts,
+  validateToolInteractionSourceArtifact
+} from './tool-interaction-measurement/index.mjs'
+import {
+  validateToolUseJudgeConfiguration,
+  validateToolUseJudgeReplicaResult,
+  validateToolUseReviewArtifacts
+} from './qualification-tool-use-judge.mjs'
 
 const ROLE_LOCATORS = Object.freeze({
   qualification_case: (id) => join('normalized-artifacts', 'qualification_case', `${id}.json`),
@@ -140,6 +149,15 @@ export async function verifyQualificationEvidenceBundle(evidenceDirectory, {
   }
 
   const result = await readJson(join(root, 'result.json'))
+  await verifyFreshStateAttestation(root, result)
+  const verifiedToolUse = await verifyToolUseArtifacts({
+    root,
+    result,
+    evidenceIndex,
+    qualificationCase: artifacts.get('qualification_case'),
+    forbiddenCanaries,
+    deferSafeProjectionChecks
+  })
   const publicReport = artifacts.get('public_export')
   const trial = artifacts.get('qualification_trial')
   assertHardOutcome(result)
@@ -174,9 +192,12 @@ export async function verifyQualificationEvidenceBundle(evidenceDirectory, {
   }
   if (semanticMarker) {
     if (semanticReviewArtifact?.schemaId === JUDGE_VIEW_SUITE_SCHEMA_ID) {
+      const markerRevision = await readResultRevisionById(root, semanticMarker.resultRevisionId)
       if (semanticMarker.schemaVersion !== 2
           || semanticMarker.trialId !== result.trialId
-          || semanticMarker.resultRevisionId !== result.resultRevision?.revisionId
+          || markerRevision.trialId !== result.trialId
+          || markerRevision.result?.semanticEngineeringReview?.artifactId
+            !== semanticReviewArtifact.artifactId
           || semanticMarker.semanticReview?.artifactId !== semanticReviewArtifact.artifactId
           || semanticMarker.semanticReview?.payloadDigest !== semanticReviewArtifact.payloadDigest
           || semanticMarker.semanticReview?.state !== semanticReviewArtifact.payload.state
@@ -213,10 +234,184 @@ export async function verifyQualificationEvidenceBundle(evidenceDirectory, {
     bundleKind: manifest.payload.bundleKind,
     hardOutcome: result.overall,
     semanticReview: result.semanticEngineeringReview?.status ?? 'unavailable',
+    toolUseReview: verifiedToolUse.reviewState,
     presentArtifacts: artifacts.size,
     evidenceRecords: indexRecords.size,
     manifestDigest: marker.manifestDigest
   }
+}
+
+async function verifyFreshStateAttestation(root, result) {
+  const reference = result.freshStateAttestation
+  if (!reference) return
+  const current = await readJson(join(root, 'fresh-state-attestation.json'))
+  const immutable = await readPrivateArtifact(
+    root,
+    'fresh-state-attestations',
+    artifactReference(current)
+  )
+  if (canonicalJson(current) !== canonicalJson(immutable)
+      || current.artifactId !== reference.artifactId
+      || current.schemaId !== 'rovai.benchmark.fresh-state-attestation'
+      || current.schemaVersion !== '1.0.0'
+      || current.payloadDigest !== `sha256:${digestJson(current.payload)}`
+      || current.payloadDigest !== reference.payloadDigest
+      || current.binding?.trialId !== result.trialId
+      || current.binding?.treatment !== result.treatment
+      || current.payload?.status !== reference.status
+      || canonicalJson(current.payload?.identities) !== canonicalJson(reference.identities)) {
+    throw new Error('Fresh State Attestation replay binding is invalid')
+  }
+}
+
+async function verifyToolUseArtifacts({
+  root,
+  result,
+  evidenceIndex,
+  qualificationCase,
+  forbiddenCanaries,
+  deferSafeProjectionChecks
+}) {
+  const measurement = await readOptionalJson(join(root, 'tool-interaction-measurement.json'))
+  const pack = await readOptionalJson(join(root, 'tool-use-judge-pack.json'))
+  const expected = result.toolMeasurement?.status === 'measured'
+  if (expected && (!measurement || !pack)) {
+    throw new Error('Measured Trial is missing Tool Interaction artifacts')
+  }
+  if ((measurement === null) !== (pack === null)) {
+    throw new Error('Tool Interaction Measurement and Judge Pack must be retained together')
+  }
+  if (!measurement) {
+    return { reviewState: 'not_applicable' }
+  }
+  validateCatalogedQualificationArtifact(measurement)
+  validateCatalogedQualificationArtifact(pack)
+  validateToolInteractionArtifacts({ measurement, judgePack: pack, evidenceIndex })
+  const disclosedTask = qualificationCase ? {
+    title: qualificationCase.payload.title,
+    requirements: qualificationCase.payload.requirements.map((requirement) => requirement.statement)
+  } : null
+  if (!disclosedTask
+      || canonicalJson(pack.payload.modelInput.disclosedTask) !== canonicalJson(disclosedTask)) {
+    throw new Error('Tool-Use Judge disclosed task differs from sealed Qualification Case')
+  }
+  const immutableMeasurement = await readPrivateArtifact(
+    root,
+    'tool-interaction-measurements',
+    artifactReference(measurement)
+  )
+  const immutablePack = await readPrivateArtifact(
+    root,
+    'tool-use-judge-packs',
+    artifactReference(pack)
+  )
+  if (canonicalJson(immutableMeasurement) !== canonicalJson(measurement)
+      || canonicalJson(immutablePack) !== canonicalJson(pack)) {
+    throw new Error('Tool Interaction current projection differs from immutable artifact')
+  }
+  const source = await readJson(join(root, 'tool-interaction-source.json'))
+  const immutableSource = await readPrivateArtifact(
+    root,
+    'tool-interaction-sources',
+    {
+      artifactId: source.artifactId,
+      schemaId: source.schemaId,
+      schemaVersion: source.schemaVersion,
+      payloadDigest: source.payloadDigest
+    }
+  )
+  if (canonicalJson(source) !== canonicalJson(immutableSource)) {
+    throw new Error('Tool Interaction private replay source differs from immutable artifact')
+  }
+  validateToolInteractionSourceArtifact(source, measurement)
+  const preparedReference = source.payload.preparedFixtureArtifact
+  const preparedPath = await containedPath(root, preparedReference.locator)
+  const preparedFixture = await readJson(preparedPath)
+  const { payloadDigest: _preparedDigest, ...preparedPayload } = preparedFixture
+  if (preparedFixture.schemaId !== preparedReference.schemaId
+      || preparedFixture.schemaVersion !== preparedReference.schemaVersion
+      || preparedFixture.payloadDigest !== preparedReference.payloadDigest
+      || preparedFixture.payloadDigest !== `sha256:${digestJson(preparedPayload)}`
+      || preparedFixture.payloadDigest !== result.toolMeasurement?.preparedFixtureDigest
+      || ((await stat(preparedPath)).mode & 0o077) !== 0) {
+    throw new Error('Prepared Tool Fixture Manifest replay binding is invalid')
+  }
+  if (!deferSafeProjectionChecks) {
+    assertSafeProjection(pack.payload.modelInput, forbiddenCanaries, 'Tool-Use Judge model input')
+  }
+
+  const review = await readOptionalJson(join(root, 'tool-use-review.json'))
+  const marker = await readOptionalJson(join(root, 'TOOL_USE_REVIEW_COMPLETE'))
+  if (!review) {
+    if (marker) throw new Error('Tool-Use Review marker exists without a Review artifact')
+    return { reviewState: 'unavailable' }
+  }
+  if (!marker) throw new Error('Tool-Use Review is missing its completion marker')
+  const retainedReview = await readPrivateArtifact(
+    root,
+    'tool-use-reviews',
+    artifactReference(review)
+  )
+  if (canonicalJson(retainedReview) !== canonicalJson(review)) {
+    throw new Error('Tool-Use Review current projection differs from immutable artifact')
+  }
+  const configuration = await readPrivateArtifact(
+    root,
+    'tool-use-judge-configurations',
+    review.payload.configurationArtifact
+  )
+  const currentConfiguration = await readJson(join(root, 'tool-use-judge-configuration.json'))
+  if (canonicalJson(currentConfiguration) !== canonicalJson(configuration)) {
+    throw new Error('Tool-Use Judge current Configuration differs from immutable artifact')
+  }
+  const replicas = []
+  for (const reference of review.payload.replicaArtifacts) {
+    replicas.push(await readPrivateArtifact(
+      root,
+      'tool-use-judge-replica-results',
+      reference
+    ))
+  }
+  validateCatalogedQualificationArtifact(configuration)
+  validateToolUseJudgeConfiguration(configuration)
+  for (const replica of replicas) {
+    validateCatalogedQualificationArtifact(replica)
+    validateToolUseJudgeReplicaResult(replica, { configuration, measurement, pack })
+  }
+  validateCatalogedQualificationArtifact(review)
+  validateToolUseReviewArtifacts({ configuration, measurement, pack, replicas, review })
+  const resultReview = result.toolMeasurement?.semanticReview
+  if (resultReview?.artifactId !== review.artifactId
+      || resultReview?.payloadDigest !== review.payloadDigest
+      || resultReview?.status !== review.payload.state) {
+    throw new Error('Trial Tool-Use Review projection differs from retained Review')
+  }
+  if (marker.schemaVersion !== 1
+      || marker.trialId !== result.trialId
+      || marker.modelInputDigest !== pack.payload.modelInputDigest
+      || marker.reviewState !== review.payload.state
+      || marker.judgeExecutionId !== review.payload.judgeExecutionId
+      || canonicalJson(marker.measurementArtifact) !== canonicalJson(artifactReference(measurement))
+      || canonicalJson(marker.reviewArtifact) !== canonicalJson(artifactReference(review))) {
+    throw new Error('Tool-Use Review completion marker binding is invalid')
+  }
+  const markerRevision = await readResultRevisionById(root, marker.resultRevisionId)
+  if (markerRevision.trialId !== result.trialId
+      || markerRevision.result?.toolMeasurement?.semanticReview?.artifactId !== review.artifactId) {
+    throw new Error('Tool-Use Review completion marker revision is invalid')
+  }
+  const hardDigest = digestJson({
+    validity: result.validity,
+    evaluationState: result.evaluationState,
+    verifiedDelivery: result.verifiedDelivery,
+    orchestrationConvergence: result.orchestrationConvergence,
+    postDispatchHumanIntervention: result.postDispatchHumanIntervention,
+    overall: result.overall
+  })
+  if (marker.hardOutcomeDigest !== hardDigest) {
+    throw new Error('Tool-Use Review completion marker does not preserve Hard Outcome')
+  }
+  return { reviewState: review.payload.state }
 }
 
 async function verifySemanticJudgeViewArtifacts(
@@ -397,6 +592,23 @@ async function containedPath(root, locator) {
     throw new Error('Evidence Bundle artifact locator escapes its root')
   }
   return path
+}
+
+async function readResultRevisionById(root, revisionId) {
+  if (typeof revisionId !== 'string'
+      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,239}$/.test(revisionId)) {
+    throw new Error('Review completion marker revision ID is invalid')
+  }
+  const directory = await containedPath(root, 'result-revisions')
+  const matches = (await readdir(directory)).filter((name) => name.endsWith(`-${revisionId}.json`))
+  if (matches.length !== 1) throw new Error('Review completion marker revision is unavailable')
+  const record = await readJson(await containedPath(root, join('result-revisions', matches[0])))
+  if (record.revisionId !== revisionId
+      || record.result?.resultRevision?.revisionId !== revisionId
+      || record.resultDigest !== digestJson(record.result)) {
+    throw new Error('Review completion marker revision record is invalid')
+  }
+  return record
 }
 
 async function readJson(path) {

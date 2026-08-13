@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto'
+import { extractEvidenceIdentity } from './qualification-collaboration.mjs'
+import { canonicalJson } from './qualification-common.mjs'
 
 const TERMINAL_PHASES = new Set(['completed', 'failed'])
 const TOOL_EVIDENCE_KINDS = new Set(['tool_call', 'tool_result', 'command', 'file_change'])
@@ -14,6 +16,7 @@ const RUNTIME_TOOL_ITEM_TYPES = new Set([
 ])
 const MUTATING_CORE_TOOLS = new Set([
   'team.call_member',
+  'camp.message.send',
   'team.create_task',
   'team.update_task',
   'memory.write',
@@ -163,6 +166,9 @@ export function deriveToolEvidence(snapshot, dispatchBoundary, sourceCoverage) {
     ).length
   }
   const sourceComplete = sourceCoverage?.coverage?.state === 'complete'
+  const coreBuiltinStartFenceComplete = ledger
+    .filter((record) => record.authorityClass === 'core' && record.canonicalTool !== null)
+    .every((record) => record.coreInvocationStartObserved === true)
   const coverage = sourceComplete
     ? {
         state: 'partial',
@@ -195,7 +201,18 @@ export function deriveToolEvidence(snapshot, dispatchBoundary, sourceCoverage) {
       coverage: sourceCoverage?.coverage ?? {
         state: 'partial',
         reason: { code: 'tool_evidence.complete_pagination_unavailable' }
-      }
+      },
+      coreBuiltinInvocationCoverage: sourceComplete && coreBuiltinStartFenceComplete
+        ? { state: 'complete', reason: null }
+        : sourceComplete
+          ? {
+              state: 'partial',
+              reason: { code: 'tool_evidence.core_builtin_start_fence_unattested' }
+            }
+          : sourceCoverage?.coverage ?? {
+              state: 'partial',
+              reason: { code: 'tool_evidence.complete_pagination_unavailable' }
+            }
     },
     ledger,
     summary: {
@@ -221,6 +238,19 @@ function buildToolCallRecord(group) {
     ({ payload }) => stableLabel(payload.canonicalTool)
   ))
   const canonicalTool = canonicalTools.length === 1 ? canonicalTools[0] : null
+  const terminalCoreObservations = coreObservations.filter(
+    ({ evidence }) => TERMINAL_PHASES.has(evidence.phase)
+  )
+  const projectionObservations = terminalCoreObservations.length > 0
+    ? terminalCoreObservations
+    : coreObservations
+  const operationProjections = uniqueCanonicalValues(projectionObservations
+    .map(({ payload }) => extractEvidenceIdentity(payload)?.operationProjection)
+    .filter(Boolean))
+  const operationProjection = operationProjections.length === 1
+    && operationProjections[0].operation === canonicalTool
+    ? operationProjections[0]
+    : null
   const toolCallId = stableToolCallId(group.agentRunId, group.family, group.nativeIdentity)
   const authorization = deriveAuthorization(authorityClass, coreObservations)
   const lifecycle = deriveLifecycle(observations, authorization.decision)
@@ -275,7 +305,9 @@ function buildToolCallRecord(group) {
     timing,
     retryRelation,
     receiptId,
-    sideEffectIdentity: canonicalTool === 'team.call_member' ? receiptId : null,
+    sideEffectIdentity: ['team.call_member', 'camp.message.send'].includes(canonicalTool)
+      ? receiptId
+      : null,
     duplicateEffect,
     mutationIntent,
     verificationReferences: [],
@@ -290,6 +322,12 @@ function buildToolCallRecord(group) {
       mutationIntent
     }),
     sourceEvidenceIds: observations.map(({ evidence }) => evidence.id),
+    operationProjection,
+    inputDigest: operationProjection?.inputDigest ?? null,
+    resultDigest: operationProjection?.resultDigest ?? null,
+    coreInvocationStartObserved: coreObservations.some(
+      ({ evidence }) => evidence.phase === 'started'
+    ),
     firstSequence: observations[0].evidence.sequence
   }
 }
@@ -438,7 +476,7 @@ function fieldCoverage({
     receipt: receiptId
       ? completeCoverage()
       : partialCoverage('tool_evidence.receipt_unavailable'),
-    sideEffect: canonicalTool === 'team.call_member' && receiptId
+    sideEffect: ['team.call_member', 'camp.message.send'].includes(canonicalTool) && receiptId
       ? completeCoverage()
       : partialCoverage('tool_evidence.side_effect_identity_unavailable'),
     mutation: mutationIntent === 'indeterminate'
@@ -446,6 +484,17 @@ function fieldCoverage({
       : completeCoverage(),
     verification: partialCoverage('tool_evidence.verification_relation_not_implemented')
   }
+}
+
+function uniqueCanonicalValues(values) {
+  const byDigest = new Map()
+  for (const value of values) {
+    const encoded = canonicalJson(value)
+    byDigest.set(encoded, value)
+  }
+  return [...byDigest.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, value]) => structuredClone(value))
 }
 
 function validPageEnvelope(page, agentRunId, requestedAfterSequence) {

@@ -36,7 +36,8 @@ export function buildEvidenceIndex({
   termination,
   isolationProfile,
   isolationContinuity,
-  finalResponses = []
+  finalResponses = [],
+  toolRetrievedMessageIds = []
 }) {
   const artifactId = `evidence-index:${sha256(`${trialId}:${evaluationAttemptId ?? 'capture'}`).slice(0, 32)}`
   const binding = compactObject({
@@ -90,6 +91,7 @@ export function buildEvidenceIndex({
   const finalResponseIds = new Set(finalResponses
     .filter((message) => message.isFinal === true)
     .map((message) => message.messageId))
+  const retrievedMessageIds = new Set(toolRetrievedMessageIds)
 
   const addSourceRecord = ({
     evidenceId,
@@ -259,6 +261,7 @@ export function buildEvidenceIndex({
       const evidenceId = stableEvidenceId('core.message', message.id)
       const isFinalResponse = finalResponseIds.has(message.id)
       const isDeliveredA2aMessage = deliveriesByMessageId.has(message.id)
+      const isToolRetrievedMessage = retrievedMessageIds.has(message.id)
       addSourceRecord({
         evidenceId,
         evidenceType: isFinalResponse ? 'final_response' : 'core_domain',
@@ -295,10 +298,10 @@ export function buildEvidenceIndex({
           observedAt: message.createdAt,
           content,
           contentDigestOverride: bodyDigest,
-          safeForJudge: isFinalResponse || isDeliveredA2aMessage,
+          safeForJudge: isFinalResponse || isDeliveredA2aMessage || isToolRetrievedMessage,
           safeForPublic: false
         })
-        if (isFinalResponse || isDeliveredA2aMessage) {
+        if (isFinalResponse || isDeliveredA2aMessage || isToolRetrievedMessage) {
           references.messageContents[message.id] = evidenceReference(
             artifactId,
             contentEvidenceId

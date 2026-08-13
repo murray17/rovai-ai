@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/contracts/resource-measurement-v1.schema.json",
+  "title": "Rovai Resource Measurement v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaId", "schemaVersion", "profile", "measurements", "integrity"],
+  "properties": {
+    "schemaId": { "const": "rovai.benchmark.resource-measurement" },
+    "schemaVersion": { "const": "1.0.0" },
+    "profile": { "$ref": "#/$defs/profileReference" },
+    "measurements": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/measurement" }
+    },
+    "integrity": { "$ref": "#/$defs/integrity" }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^(?:sha256:)?[a-f0-9]{64}$"
+    },
+    "profileReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "payloadDigest"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "payloadDigest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requirement", "status", "observedCount", "reasonCodes"],
+      "properties": {
+        "requirement": { "enum": ["complete_required", "partial_allowed"] },
+        "status": { "enum": ["complete", "partial", "unavailable", "invalid"] },
+        "observedCount": {
+          "oneOf": [
+            { "type": "integer", "minimum": 0 },
+            { "type": "null" }
+          ]
+        },
+        "reasonCodes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      }
+    },
+    "evidenceReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifactRole", "schemaId", "schemaVersion", "payloadDigest", "disclosure"],
+      "properties": {
+        "artifactRole": { "type": "string", "minLength": 1 },
+        "schemaId": { "type": "string", "minLength": 1 },
+        "schemaVersion": { "type": "string", "minLength": 1 },
+        "payloadDigest": { "$ref": "#/$defs/digest" },
+        "disclosure": { "enum": ["private", "public"] },
+        "trialId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "reason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 }
+      }
+    },
+    "measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "unit", "direction", "interval", "aggregation", "clockDomain", "authority", "status", "coverage", "evidenceReferences"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "unit": { "type": "string", "minLength": 1 },
+        "direction": { "enum": ["lower_is_better", "higher_is_better", "descriptive"] },
+        "interval": { "type": "string", "minLength": 1 },
+        "aggregation": { "enum": ["elapsed", "union", "sum", "maximum", "longest_path", "receipt_total"] },
+        "clockDomain": { "enum": ["runner_monotonic", "core_persisted_wall_clock", "provider_receipt"] },
+        "authority": { "enum": ["runner", "core", "provider"] },
+        "status": { "enum": ["available", "unavailable"] },
+        "value": { "type": "number", "minimum": 0 },
+        "reason": { "$ref": "#/$defs/reason" },
+        "coverage": { "$ref": "#/$defs/coverage" },
+        "evidenceReferences": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/evidenceReference" },
+          "uniqueItems": true
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "available" } } },
+          "then": {
+            "required": ["value"],
+            "not": { "required": ["reason"] },
+            "properties": {
+              "coverage": {
+                "properties": {
+                  "status": { "const": "complete" },
+                  "observedCount": { "type": "integer", "minimum": 0 },
+                  "reasonCodes": { "maxItems": 0 }
+                }
+              },
+              "evidenceReferences": { "minItems": 1 }
+            }
+          },
+          "else": {
+            "required": ["reason"],
+            "not": { "required": ["value"] },
+            "properties": {
+              "coverage": {
+                "properties": {
+                  "observedCount": { "type": "null" },
+                  "reasonCodes": { "minItems": 1 }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["payloadDigest"],
+      "properties": {
+        "payloadDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    }
+  }
+}

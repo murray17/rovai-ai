@@ -54,6 +54,7 @@ use rovai_core::{
         ClaudeCodeProbeObservation, CodexProbeObservation, ExecutableIntegrityStatus,
         executable_fingerprint as fingerprint_executable, verify_executable_integrity,
     },
+    builtin_tool_evidence_projection::project_builtin_tool_invocation,
     builtin_tool_transport::{
         BUILTIN_TOOL_CONTRACT_VERSION, BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
         BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES, BuiltinToolError, BuiltinToolInvocationEnvelope,
@@ -2351,12 +2352,9 @@ impl Core {
         evidence_request_id: Option<String>,
     ) -> TeamToolIpcResponse {
         let evidence_tool_name = request.tool_name.clone();
+        let evidence_input = request.input.clone();
         let evidence_input_digest = canonical_json_digest(&request.input).ok();
-        let evidence_tool_call_digest = canonical_json_digest(&json!({
-            "runtimeToolCallId": request.runtime_tool_call_id,
-            "tool": request.tool_name,
-        }))
-        .ok();
+        let mut evidence_tool_call_digest = None;
         let mut evidence_run = None;
         let mut evidence_replayed = false;
         let mut evidence_receipt_id = None;
@@ -2399,6 +2397,48 @@ impl Core {
                 &authenticated_run.agent_run_id,
                 &request.runtime_tool_call_id,
             );
+            evidence_tool_call_digest = canonical_json_digest(&json!({
+                "runtimeToolCallId": request.runtime_tool_call_id,
+                "tool": request.tool_name,
+            }))
+            .ok();
+            let input_digest = evidence_input_digest
+                .as_deref()
+                .context("Built-in Tool input digest is unavailable")?;
+            let tool_call_id = evidence_tool_call_digest
+                .as_deref()
+                .context("Built-in Tool Call identity is unavailable")?;
+            let operation_projection = project_builtin_tool_invocation(
+                &evidence_tool_name,
+                &evidence_input,
+                None,
+                input_digest,
+                None,
+            )?;
+            let started_evidence = json!({
+                "toolCallId": tool_call_id,
+                "status": "started",
+                "kind": "builtin_tool_invocation",
+                "title": evidence_tool_name,
+                "sourceAuthority": "core",
+                "canonicalTool": evidence_tool_name,
+                "authorizationDecision": "allowed",
+                "rawInputDigest": input_digest,
+                "rawOutputDigest": null,
+                "errorCode": null,
+                "idempotentReplay": false,
+                "receiptId": null,
+                "operationProjection": operation_projection,
+            });
+            ExecutionEvidenceService
+                .record_builtin_tool_started(
+                    &mut database,
+                    &ManagedBlobStore::new(&self.data_dir),
+                    &authenticated_run.agent_run_id,
+                    authenticated_run.execution_epoch,
+                    &started_evidence,
+                )?
+                .context("Built-in Tool start evidence was not durably admitted")?;
             let operation_result = match request.tool_name.as_str() {
                 CAMP_MESSAGE_SEND_TOOL_NAME => {
                     let input = serde_json::from_value::<CampMessageSendInput>(request.input)
@@ -2644,6 +2684,23 @@ impl Core {
                 .as_ref()
                 .ok()
                 .and_then(|output| canonical_json_digest(output).ok());
+            let operation_projection = evidence_input_digest.as_deref().and_then(|input_digest| {
+                match project_builtin_tool_invocation(
+                    &evidence_tool_name,
+                    &evidence_input,
+                    result.as_ref().ok(),
+                    input_digest,
+                    raw_output_digest.as_deref(),
+                ) {
+                    Ok(projection) => Some(projection),
+                    Err(error) => {
+                        eprintln!(
+                            "failed to project Built-in Tool measurement evidence: {error:#}"
+                        );
+                        None
+                    }
+                }
+            });
             let core_envelope = evidence_request_id
                 .as_deref()
                 .and_then(|request_id| match result.as_ref() {
@@ -2682,6 +2739,7 @@ impl Core {
                 "errorCode": error_code,
                 "idempotentReplay": evidence_replayed,
                 "receiptId": evidence_receipt_id,
+                "operationProjection": operation_projection,
                 "coreEnvelope": core_envelope,
             });
             let evidence_result = {

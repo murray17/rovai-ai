@@ -124,6 +124,8 @@ export async function computeQualificationEvaluatorDigest() {
     join(repositoryRoot, 'scripts', 'qualification-runner.mjs'),
     join(repositoryRoot, 'scripts', 'qualification-evaluate.mjs'),
     join(repositoryRoot, 'scripts', 'qualification-semantic-review.mjs'),
+    join(repositoryRoot, 'scripts', 'qualification-tool-use-review.mjs'),
+    join(repositoryRoot, 'scripts', 'benchmark-paired-collaboration.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-common.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-evaluation.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-recovery.mjs'),
@@ -145,7 +147,14 @@ export async function computeQualificationEvaluatorDigest() {
     join(repositoryRoot, 'scripts', 'lib', 'qualification-judge-views.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-tool-evidence.mjs'),
     join(repositoryRoot, 'scripts', 'lib', 'qualification-tool-ledger.mjs'),
-    join(repositoryRoot, 'scripts', 'lib', 'qualification-workspace-mutation-ledger.mjs')
+    join(repositoryRoot, 'scripts', 'lib', 'qualification-workspace-mutation-ledger.mjs'),
+    join(repositoryRoot, 'scripts', 'lib', 'qualification-tool-measurement-spec.mjs'),
+    join(repositoryRoot, 'scripts', 'lib', 'qualification-tool-use-judge.mjs'),
+    join(repositoryRoot, 'scripts', 'lib', 'tool-interaction-measurement', 'index.mjs'),
+    join(repositoryRoot, 'scripts', 'benchmark', 'measurement', 'resources', 'profile.mjs'),
+    join(repositoryRoot, 'scripts', 'benchmark', 'measurement', 'resources', 'measure.mjs'),
+    join(repositoryRoot, 'scripts', 'benchmark', 'measurement', 'paired', 'definition.mjs'),
+    join(repositoryRoot, 'scripts', 'benchmark', 'measurement', 'paired', 'compare.mjs')
   ]
   return digestJson(await Promise.all(files.map(async (path) => ({
     path: path.slice(repositoryRoot.length + 1),

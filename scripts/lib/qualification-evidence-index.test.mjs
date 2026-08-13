@@ -178,6 +178,34 @@ test('Evidence Index separates Judge-safe workspace change facts from exact cont
   assert.notEqual(changeReference.evidenceId, contentReference.evidenceId)
 })
 
+test('Evidence Index exposes retrieved Camp content only for explicitly bound Tool results', () => {
+  const input = fixture()
+  input.snapshot.messages.push({
+    id: 'retrieved-message',
+    authorType: 'user',
+    sequence: 3,
+    createdAt: '2026-08-04T00:00:03.000Z',
+    body: 'The prior decision requires optimistic concurrency.'
+  }, {
+    id: 'unretrieved-message',
+    authorType: 'user',
+    sequence: 4,
+    createdAt: '2026-08-04T00:00:04.000Z',
+    body: 'A private distractor that no Tool result returned.'
+  })
+  input.toolRetrievedMessageIds = ['retrieved-message']
+  const { artifact, references } = buildEvidenceIndex(input)
+  const records = new Map(artifact.payload.records.map((record) => [record.evidenceId, record]))
+
+  assert.equal(records.get('core.message-content:retrieved-message').safeForJudge, true)
+  assert.equal(records.get('core.message-content:unretrieved-message').safeForJudge, false)
+  assert.deepEqual(references.messageContents['retrieved-message'], {
+    artifactId: artifact.artifactId,
+    evidenceId: 'core.message-content:retrieved-message'
+  })
+  assert.equal(references.messageContents['unretrieved-message'], undefined)
+})
+
 function fixture() {
   const snapshot = {
     schemaVersion: 19,

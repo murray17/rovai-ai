@@ -812,6 +812,38 @@ _Avoid_: empty array, false default, best-effort completeness, source authority
 The normalized, append-only evaluation projection of observed Core-mediated and Runtime-reported Tool calls, retaining each source's authority and coverage alongside identity, lifecycle, authorization, retry, receipt, effect, latency, and verification facts. A common schema never upgrades partial Runtime telemetry into Core-authoritative evidence; unavailable fields remain explicit.
 _Avoid_: raw Runtime log, command transcript, complete-observation claim, tool success score
 
+**Tool Measurement Opportunity**:
+A pre-dispatch, stable-ID occasion in a Qualification Case where one bounded Tool-use behavior is expected, optional, or intentionally unnecessary and can be assessed against a sealed operation-specific oracle. Its class is `forced_use | natural_use | non_use_control`; it, rather than Agent-created Tool call volume, defines the measurement denominator.
+_Avoid_: observed Tool call, minimum-call gate, post-hoc metric, hidden delivery requirement
+
+**Tool Interaction Measurement**:
+The non-gating, replayable assessment that binds one or more Core-authoritative Canonical Operation traces to a Tool Measurement Opportunity and reports functional integrity, oracle alignment, evidence coverage, and semantic candidate evidence. It retains operation-specific bounded input/result projections without turning Tool success, call count, or LLM opinion into Hard Outcome or an aggregate score.
+_Avoid_: Tool Call Ledger, raw Tool payload, collaboration score, Hard Check
+
+**Prepared Tool Fixture Manifest**:
+The private, immutable mapping from symbolic fixture references in one admitted Tool Measurement Spec to the fresh Camp, CampMessage, Memory, and MemoryRevision identities materialized before a Trial dispatch. It is evidence for deterministic oracle evaluation and never enters Agent input, a Model-Visible Judge Pack, or a public report.
+_Avoid_: Qualification Case prompt, Judge evidence, reusable production state, hidden answer
+
+**Tool-Use Judge**:
+The independent, advisory LLM review of whether a Tool invocation was necessary, its bounded input strategy was suitable, its observed result was interpreted correctly, and the retrieved information or mutation was used appropriately. It receives a treatment-blind allowlist projection with local Evidence IDs, never sees the sealed oracle or deterministic verdict, and remains separate from Process and Blinded Outcome Judge Views.
+_Avoid_: Tool execution verifier, Process Judge, Hard Outcome authority, numeric Tool score
+
+**Resource Measurement Profile**:
+The pre-registered definition of each Benchmark resource measure, including construct, unit, direction, measured interval, aggregation, clock domain, authority requirement, coverage rule, and whether the measure is descriptive or eligible for paired efficiency comparison. A value without that metadata is not an efficiency measurement.
+_Avoid_: open metrics object, wall-clock sum, implicit lower-is-better rule, weighted cost score
+
+**Paired Collaboration Experiment**:
+A pre-registered counterfactual comparison of one Team arm and one Solo arm that share the same sealed Case, starting fixture, request, model/runtime/permission policy, ordinary Tool availability, Measurement Profile, and fresh-state contract, except for an explicit treatment declaration. It estimates collaboration value for the evaluated pair rather than reinterpreting a cross-version comparison or Process Judge verdict as causal evidence.
+_Avoid_: Independent Qualification Repeat, version comparison, Team ranking, role attribution
+
+**Paired Experiment Arm**:
+One independently materialized Team or Solo execution inside a Paired Collaboration Experiment, with a fresh Core data directory, Camp, Workspace, Memory Store, Conversation, and Native Session. An Arm is bound to its pre-dispatch assignment and cannot reuse state from its peer or from an earlier Trial.
+_Avoid_: retry, reused Trial, mutable treatment label, shared Camp
+
+**Outcome-Conditioned Collaboration Efficiency**:
+The paired comparison of compatible Resource Measurements only after the Team and Solo delivery outcomes satisfy the pre-registered equivalence or non-inferiority condition. A Team-only or Solo-only pass is an outcome difference with resource observations, not a speedup; both-fail pairs never reward faster failure.
+_Avoid_: duration divided by calls, fewer Agents as quality, speedup across unequal outcomes, aggregate efficiency score
+
 **Workspace Mutation Ledger**:
 The ordered evidence of content-identified filesystem mutations and writer provenance captured under an admitted Intervention Isolation Profile. It can establish multi-Agent path overlap, overwrite, and exact rollback only within declared complete coverage; otherwise those findings remain indeterminate.
 _Avoid_: final tree diff, Tool Call Ledger entry, inferred Agent ownership, Git status

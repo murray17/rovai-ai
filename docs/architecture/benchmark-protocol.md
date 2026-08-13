@@ -2,7 +2,7 @@
 document_type: architecture
 authority: benchmark-protocol-components-and-boundaries
 status: accepted
-last_updated: 2026-08-11
+last_updated: 2026-08-13
 ---
 
 # Benchmark Protocol 架构
@@ -21,6 +21,13 @@ Pass Rate 或排行榜的业务真源。
 6. `reporting/` 从文件权威源生成 JSON/Markdown/Project 投影，并可选创建 Rovai Review Camp。
 7. Qualification Layer 5 的 Judge View Module 从一个 allowlist source Pack 投影 Process 与 Blinded Outcome 两个
    Model-Visible Pack，并在 adapter 之外保留 local-to-authoritative Evidence Map。
+8. Trial Measurement Module 从 Core-authoritative Canonical Operation Evidence 和预注册 Opportunity 构建可重放的
+   Camp/Memory/A2A Tool Interaction，不让 observed call volume 生成 measurement denominator；
+9. 独立 Tool-Use Judge Module 只评估选择必要性、输入策略、结果解释、后续使用与 Memory retention quality，
+   不加入 `process | outcome` View 闭集；
+10. Resource Measurement Module 以 typed unit/direction/interval/aggregation/clock/authority/coverage 保存资源向量；
+11. Paired Counterfactual Module 从一个 pre-dispatch Definition 计划 fresh Team/Solo arms，并在 outcome/quality gate 后
+    才计算 compatible resource deltas。
 
 旧 `qualification:suite` 和 `qualification:project` CLI 只保留薄 wrapper。v0.34 的严格 3×4 规则位于
 legacy adapter/profile，通用 Suite 不知道历史 Case ID 或固定矩阵。
@@ -52,6 +59,23 @@ self-disclosure 的完美检测。
 综合分，也不影响 Hard Outcome。该结构隔离过程构念和结果构念，但 Team/Solo 因果价值仍须由独立 paired
 counterfactual protocol 证明。
 
+## Tool-use 与 paired counterfactual
+
+Tool-use measurement 由 Case 预注册的 Opportunity 驱动。Core 只投影 operation-specific、digest-bound、长度有界的
+canonical input/result；Runner 以 sealed oracle 确定性判断实体、revision、cursor、receipt/effect 与 coverage。原始 Tool
+payload、secret、完整 transcript 和 oracle answer 不进入模型。Camp message send 的 mechanical integrity 可进入 Tool
+Interaction，但 delegation/handoff/contribution/feedback/integration 仍由 Process Judge判断，避免同一构念被两套 Judge
+重复评估。
+
+Tool-Use Judge 是独立 advisory review，复用双 Replica、reverse order、tool-disabled、local Evidence closure 和
+non-interference 不变量，但只见 treatment-blind allowlist。它不重判 Tool 是否执行成功，也不生成 Tool score。
+
+Paired experiment 的 Team/Solo arms 各自拥有 fresh Core/Camp/Workspace/Memory/Conversation/Native Session。Definition
+冻结唯一 treatment diff、Case/fixture/request/verifier、lead runtime/model/permission、Tool availability、预算、arm order、
+holdout 与 estimand。Comparison 先按 Hard Outcome 分层，再使用 blinded Outcome non-inferiority；只有 both-pass 且资源
+descriptor/authority/coverage compatible 时才发布 per-metric delta/ratio。Process/Tool-Use 只解释机制，faster failure
+不会成为效率收益。
+
 ## Authority flow
 
 ```text
@@ -59,8 +83,11 @@ Profile + source artifacts
   -> Adapter Registry / strict Normalizer
   -> Profile-driven planned slots and execution
   -> Benchmark Protocol v3 Run + artifact index
+  -> Opportunity-bound Tool Interaction + typed Resource Measurement
   -> Process / Blinded Outcome Model-Visible Packs
+  -> independent Tool-Use Model-Visible Pack
   -> dual-replica per-view reconciliation
+  -> pre-registered Team/Solo paired comparison
   -> per-axis comparison eligibility
   -> JSON / Markdown / Project Review projection
 ```
@@ -79,6 +106,10 @@ Bundle/文件始终是投影的唯一权威源。默认 Rovai 投影只创建一
 
 - [Benchmark Protocol v3](../contracts/benchmark-protocol-v3.md)
 - [Semantic Judge Views v1](../contracts/semantic-judge-views-v1.md)
+- [Tool Interaction Measurement v1](../contracts/tool-interaction-measurement-v1.md)
+- [Paired Collaboration Experiment v1](../contracts/paired-collaboration-experiment-v1.md)
+- [ADR-0171](../adr/0171-opportunity-based-tool-interaction-measurement.md)
+- [ADR-0172](../adr/0172-paired-collaboration-value-and-outcome-conditioned-efficiency.md)
 - [ADR-0155](../adr/0155-treatment-blind-outcome-and-process-judge-views.md)
 - [ADR-0151](../adr/0151-versioned-benchmark-protocol-and-axis-comparability.md)
 - [ADR-0095](../adr/0095-layered-qualification-authority-and-semantic-review.md)

@@ -228,7 +228,7 @@ Related: Diagnostics、Qualification 与 ContextManifest Evidence 不因此合�
 
 - **何时阅读：** 修改评测准入、试验隔离、判定、报告或可复现证据时阅读。
 - **当前架构：** [Benchmark Protocol](../architecture/benchmark-protocol.md)
-- **当前合同：** [Benchmark Protocol v3](../contracts/benchmark-protocol-v3.md)、[Semantic Judge Views v1](../contracts/semantic-judge-views-v1.md)
+- **当前合同：** [Benchmark Protocol v3](../contracts/benchmark-protocol-v3.md)、[Semantic Judge Views v1](../contracts/semantic-judge-views-v1.md)、[Tool Interaction Measurement v1](../contracts/tool-interaction-measurement-v1.md)、[Paired Collaboration Experiment v1](../contracts/paired-collaboration-experiment-v1.md)
 
 <!-- adr-current-primary:begin topic=qualification -->
 | ADR | Decision |
@@ -243,6 +243,8 @@ Related: Diagnostics、Qualification 与 ContextManifest Evidence 不因此合�
 | [ADR-0102](0102-immutable-diagnostic-portfolio-authority.md) | Immutable Diagnostic Portfolio Authority and Two-Repeat Stability |
 | [ADR-0151](0151-versioned-benchmark-protocol-and-axis-comparability.md) | Versioned Benchmark Protocol and Axis-Scoped Comparability |
 | [ADR-0155](0155-treatment-blind-outcome-and-process-judge-views.md) | Treatment-Blind Outcome and Process Judge Views |
+| [ADR-0171](0171-opportunity-based-tool-interaction-measurement.md) | Opportunity-Based Tool Interaction Measurement and Independent Tool-Use Judge |
+| [ADR-0172](0172-paired-collaboration-value-and-outcome-conditioned-efficiency.md) | Paired Collaboration Value and Outcome-Conditioned Efficiency |
 <!-- adr-current-primary:end -->
 
 Related: Runtime Activity 与 Execution Evidence 作为输入，不替代 Qualification 的判定边界。

@@ -1,4 +1,4 @@
-import { sha256 } from './qualification-common.mjs'
+import { digestJson, sha256 } from './qualification-common.mjs'
 
 export function extractEvidenceIdentity(payload) {
   if (!payload || typeof payload !== 'object') return null
@@ -13,6 +13,8 @@ export function extractEvidenceIdentity(payload) {
     'status',
     'sourceAuthority',
     'authorizationDecision',
+    'rawInputDigest',
+    'rawOutputDigest',
     'errorCode',
     'receiptId'
   ]) {
@@ -21,6 +23,8 @@ export function extractEvidenceIdentity(payload) {
   if (typeof payload.idempotentReplay === 'boolean') {
     identity.idempotentReplay = payload.idempotentReplay
   }
+  const operationProjection = normalizeOperationProjection(payload)
+  if (operationProjection) identity.operationProjection = operationProjection
   for (const [sourceKey, targetKey] of [
     ['type', 'nativeItemType'],
     ['status', 'nativeItemStatus'],
@@ -39,6 +43,79 @@ export function extractEvidenceIdentity(payload) {
     identity.pollingPrimitive = 'sleep'
   }
   return Object.keys(identity).length > 0 ? identity : null
+}
+
+function normalizeOperationProjection(payload) {
+  const projection = payload?.operationProjection
+  if (!projection || typeof projection !== 'object' || Array.isArray(projection)) return null
+  const keys = Object.keys(projection).sort()
+  const expectedKeys = [
+    'canonicalInput', 'canonicalResult', 'digestBinding', 'inputDigest', 'operation',
+    'projectionDigest', 'resultDigest', 'schemaVersion'
+  ].sort()
+  if (JSON.stringify(keys) !== JSON.stringify(expectedKeys)
+      || projection.schemaVersion !== 1
+      || typeof projection.operation !== 'string'
+      || projection.operation !== payload.canonicalTool
+      || typeof projection.inputDigest !== 'string'
+      || projection.inputDigest !== payload.rawInputDigest
+      || projection.resultDigest !== (payload.rawOutputDigest ?? null)
+      || !validDigestBinding(projection.digestBinding, projection)
+      || !safeProjectionValue(projection.canonicalInput, projection.operation, 'input', 0)
+      || !safeProjectionValue(projection.canonicalResult, projection.operation, 'result', 0)
+      || typeof projection.projectionDigest !== 'string'
+      || !/^[a-f0-9]{64}$/.test(projection.projectionDigest)
+      || projection.projectionDigest !== digestJson(Object.fromEntries(
+        Object.entries(projection).filter(([key]) => key !== 'projectionDigest')
+      ))) {
+    return null
+  }
+  return structuredClone(projection)
+}
+
+function validDigestBinding(binding, projection) {
+  if (!binding || typeof binding !== 'object' || Array.isArray(binding)
+      || JSON.stringify(Object.keys(binding).sort()) !== JSON.stringify(['input', 'result'])) return false
+  const input = binding.input
+  const result = binding.result
+  if (!input || typeof input !== 'object' || Array.isArray(input)
+      || JSON.stringify(Object.keys(input).sort()) !== JSON.stringify(['digest', 'evidenceField'])
+      || input.evidenceField !== 'rawInputDigest'
+      || input.digest !== projection.inputDigest) return false
+  if (projection.resultDigest === null) return result === null
+  return result && typeof result === 'object' && !Array.isArray(result)
+    && JSON.stringify(Object.keys(result).sort()) === JSON.stringify(['digest', 'evidenceField'])
+    && result.evidenceField === 'rawOutputDigest'
+    && result.digest === projection.resultDigest
+}
+
+function safeProjectionValue(value, operation, position, depth) {
+  if (depth > 7) return false
+  if (value === null || typeof value === 'boolean') return true
+  if (typeof value === 'number') return Number.isSafeInteger(value) && value >= 0
+  if (typeof value === 'string') return value.length <= 2_048 && !looksLikeSecret(value)
+  if (Array.isArray(value)) {
+    return value.length <= 64
+      && value.every((item) => safeProjectionValue(item, operation, position, depth + 1))
+  }
+  if (!value || typeof value !== 'object') return false
+  const entries = Object.entries(value)
+  if (entries.length > 96) return false
+  for (const [key, item] of entries) {
+    if (!/^[a-zA-Z][a-zA-Z0-9]{0,63}$/.test(key)
+        || /(?:credential|password|authorization|token|snippet|transcript|outputText)/i.test(key)
+        || (/secret/i.test(key) && !/SecretDetected$/.test(key))) {
+      return false
+    }
+    if (key === 'body' && !(position === 'input'
+      && ['memory.write', 'memory.propose_hearth'].includes(operation))) return false
+    if (!safeProjectionValue(item, operation, position, depth + 1)) return false
+  }
+  return true
+}
+
+function looksLikeSecret(value) {
+  return /(?:authorization\s*:\s*(?:bearer|basic)|-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:api|access|refresh)[_-]?token\s*[:=])/i.test(value)
 }
 
 export function deriveCollaborationEvidence(snapshot, dispatchBoundary) {

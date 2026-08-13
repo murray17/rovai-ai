@@ -98,6 +98,28 @@ impl ExecutionEvidenceService {
         )
     }
 
+    pub fn record_builtin_tool_started(
+        &self,
+        database: &mut Database,
+        blob_store: &ManagedBlobStore,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        payload: &Value,
+    ) -> Result<Option<AgentRunExecutionEvidence>> {
+        if payload.get("status").and_then(Value::as_str) != Some("started") {
+            anyhow::bail!("Built-in Tool start evidence must be started");
+        }
+        self.record_runtime_event_with_fence_policy(
+            database,
+            blob_store,
+            agent_run_id,
+            execution_epoch,
+            "runtime.action",
+            payload,
+            false,
+        )
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn record_runtime_event_with_fence_policy(
         &self,
@@ -375,6 +397,7 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
                 "errorCode": payload.get("errorCode"),
                 "idempotentReplay": payload.get("idempotentReplay"),
                 "receiptId": payload.get("receiptId"),
+                "operationProjection": payload.get("operationProjection"),
             });
             if let Some(core_envelope) = payload.get("coreEnvelope") {
                 normalized["coreEnvelope"] = core_envelope.clone();
@@ -837,6 +860,25 @@ mod tests {
                 "errorCode": "team_tool.execution_budget_exhausted",
                 "idempotentReplay": true,
                 "receiptId": "receipt-1",
+                "operationProjection": {
+                    "schemaVersion": 1,
+                    "operation": "camp.message.send",
+                    "canonicalInput": {
+                        "recipientAgentIds": ["agent_5"],
+                        "contentDigest": "safe-content-digest"
+                    },
+                    "canonicalResult": null,
+                    "digestBinding": {
+                        "input": {
+                            "evidenceField": "rawInputDigest",
+                            "digest": "input-digest"
+                        },
+                        "result": null
+                    },
+                    "inputDigest": "input-digest",
+                    "resultDigest": null,
+                    "projectionDigest": "safe-projection-digest"
+                },
                 "coreEnvelope": {
                     "contractVersion": 1,
                     "ok": false,
@@ -861,6 +903,14 @@ mod tests {
         assert_eq!(normalized["receiptId"], "receipt-1");
         assert_eq!(normalized["sourceAuthority"], "core");
         assert_eq!(normalized["canonicalTool"], "camp.message.send");
+        assert_eq!(
+            normalized["operationProjection"]["operation"],
+            "camp.message.send"
+        );
+        assert_eq!(
+            normalized["operationProjection"]["canonicalInput"]["recipientAgentIds"][0],
+            "agent_5"
+        );
         assert_eq!(
             normalized["coreEnvelope"]["requestId"],
             "7b5db24c-4a43-4cab-9217-d982b08f7691"
@@ -1019,6 +1069,29 @@ mod tests {
             .unwrap();
         assert_eq!(canonical_count, 1);
 
+        let started_tool = ExecutionEvidenceService
+            .record_builtin_tool_started(
+                &mut database,
+                &blob_store,
+                &run_id,
+                execution_epoch,
+                &json!({
+                    "toolCallId": "team-tool-call-started",
+                    "status": "started",
+                    "kind": "builtin_tool_invocation",
+                    "sourceAuthority": "core",
+                    "canonicalTool": "camp.message.send",
+                    "authorizationDecision": "allowed",
+                    "rawInputDigest": "input-digest",
+                    "rawOutputDigest": null,
+                    "idempotentReplay": false,
+                    "receiptId": null,
+                }),
+            )
+            .unwrap()
+            .expect("a Built-in Tool start must be durable before execution");
+        assert_eq!(started_tool.sequence, 2);
+
         let materialized = ContextService
             .materialize(
                 &mut database,
@@ -1096,7 +1169,7 @@ mod tests {
             )
             .unwrap()
             .expect("terminal Team Tool result must survive the Turn fence");
-        assert_eq!(failed.sequence, 2);
+        assert_eq!(failed.sequence, 3);
         assert_eq!(
             failed.payload["errorCode"],
             "team_tool.execution_budget_exhausted"
@@ -1126,7 +1199,7 @@ mod tests {
             )
             .unwrap()
             .expect("the first replay observation must remain visible");
-        assert_eq!(replay.sequence, 3);
+        assert_eq!(replay.sequence, 4);
         assert_eq!(replay.payload["idempotentReplay"], true);
 
         let replay_duplicate = ExecutionEvidenceService
@@ -1140,7 +1213,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_ne!(replay_duplicate.id, replay.id);
-        assert_eq!(replay_duplicate.sequence, 4);
+        assert_eq!(replay_duplicate.sequence, 5);
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();

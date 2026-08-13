@@ -1,4 +1,4 @@
-import { appendFile, chmod, mkdir, rm, writeFile } from 'node:fs/promises'
+import { appendFile, chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { arch, platform, release, type as osType } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import {
@@ -22,7 +22,8 @@ import {
   sha256,
   treeDiff,
   treeManifest,
-  verifyStoredCaseSeal
+  verifyStoredCaseSeal,
+  writePrivateJsonExclusive
 } from './lib/qualification-common.mjs'
 import {
   runV3PublicChecks
@@ -95,6 +96,18 @@ import {
   retainCollaborationMessageEvidence
 } from './lib/qualification-semantic-evidence.mjs'
 import { publishQualificationEvidenceBundle } from './lib/qualification-bundle.mjs'
+import {
+  materializeMeasurementSpecForBuilder,
+  materializeToolMeasurementFixtures,
+  retainPreparedToolFixtureManifest,
+  verifyToolMeasurementPack
+} from './lib/qualification-tool-measurement-spec.mjs'
+import {
+  buildToolInteractionMeasurement,
+  buildToolInteractionSourceArtifact,
+  buildToolUseJudgePack,
+  retainToolInteractionArtifacts
+} from './lib/tool-interaction-measurement/index.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const arguments_ = parseArguments(process.argv.slice(2))
@@ -102,6 +115,7 @@ const QUALIFICATION_RUNTIME_EXIT_GRACE_MS = 60_000
 
 async function runTrial(options) {
   const trialId = options.trialId ?? crypto.randomUUID()
+  const freshStateNonce = options.pairedPlanDigest ? crypto.randomUUID() : null
   const startedAt = new Date().toISOString()
   let dispatchAccepted = false
   let core = null
@@ -109,6 +123,7 @@ async function runTrial(options) {
   let lock = null
   let evidenceDirectory = null
   let temporaryRoot = null
+  let dataDirectory = null
   let workspacePath = null
   let runtimeCacheDirectory = null
   let baselineManifest = null
@@ -124,6 +139,9 @@ async function runTrial(options) {
   let evaluationIdentity = null
   let environmentManifest = null
   let caseRecord = null
+  let toolMeasurementPack = null
+  let preparedToolFixtureManifest = null
+  let preparedToolFixtureLocator = null
   let budgetEvent = null
   let termination = null
   let dispatchBoundary = null
@@ -134,6 +152,12 @@ async function runTrial(options) {
   let observationIntegrityIssues = []
   let budgetWatchdogEvent = null
   let executionEvidenceCoverage = null
+  let resourceObservation = null
+  let toolInteractionMeasurement = null
+  let toolUseJudgePack = null
+  let retainedToolInteractionArtifacts = null
+  let freshStateAttestation = null
+  let retainedFreshStateAttestation = null
   const runtimePrivateDiagnostics = []
   let droppedRuntimePrivateDiagnostics = 0
   let isolationProfileAdmission = null
@@ -165,6 +189,12 @@ async function runTrial(options) {
     caseRecord = await verifyStoredCaseSeal(options.caseDirectory, options.expectedSeal)
     if (caseRecord.contract.manifest.visibility !== options.mode) {
       throw new Error(`${options.mode} mode requires a ${options.mode} Case`)
+    }
+    if (options.toolMeasurementPackDirectory) {
+      toolMeasurementPack = await verifyToolMeasurementPack(
+        options.toolMeasurementPackDirectory,
+        caseRecord
+      )
     }
     if (options.mode === 'formal') {
       if (!options.isolationProfilePath) {
@@ -209,7 +239,7 @@ async function runTrial(options) {
       throw new Error(`a Rovai App/Core is already running: ${competingProcesses.map((item) => item.pid).join(',')}`)
     }
     temporaryRoot = await makeTemporaryDirectory(`rovai-qualification-${caseRecord.contract.manifest.id}-`)
-    const dataDirectory = join(temporaryRoot, 'data')
+    dataDirectory = join(temporaryRoot, 'data')
     runtimeCacheDirectory = join(temporaryRoot, 'runtime-cache')
     workspacePath = join(temporaryRoot, 'workspace')
     await mkdir(dataDirectory, { recursive: true, mode: 0o700 })
@@ -235,7 +265,8 @@ async function runTrial(options) {
       }
     })
     await core.request('health.check', {}, 120_000)
-    const configured = await configureFrozenRuntimes(core.request)
+    const trialTeam = options.treatment === 'solo' ? [FROZEN_TEAM[0]] : FROZEN_TEAM
+    const configured = await configureFrozenRuntimes(core.request, trialTeam)
     environmentManifest = await collectEnvironmentManifest({
       core,
       options,
@@ -254,13 +285,37 @@ async function runTrial(options) {
       commandId: crypto.randomUUID(),
       name: `Qualification ${caseRecord.contract.manifest.id}`,
       workspace: { projectPath: workspacePath },
-      memberAgentIds: FROZEN_TEAM.map((member) => member.agentId),
+      memberAgentIds: trialTeam.map((member) => member.agentId),
       defaultLeadAgentId: 'agent_1',
       collaborationMode: 'peer'
     })
     const campId = createResult.payload?.campId
     if (createResult.status !== 'applied' || !campId) {
       throw new Error(`qualification Camp creation failed: ${JSON.stringify(createResult)}`)
+    }
+    if (toolMeasurementPack) {
+      preparedToolFixtureManifest = await materializeToolMeasurementFixtures({
+        request: core.request,
+        campId,
+        pack: toolMeasurementPack,
+        armId: options.armId ?? trialId,
+        treatment: options.treatment
+      })
+      const preparedFixtureRetention = await retainPreparedToolFixtureManifest(
+        evidenceDirectory,
+        preparedToolFixtureManifest
+      )
+      preparedToolFixtureLocator = preparedFixtureRetention.locator
+      await atomicWriteJson(
+        join(evidenceDirectory, 'prepared-tool-fixture-manifest.json'),
+        preparedToolFixtureManifest
+      )
+      await appendLifecycle('tool_fixtures_materialized', {
+        specificationId: toolMeasurementPack.spec.specificationId,
+        preparedFixtureDigest: preparedToolFixtureManifest.payloadDigest,
+        preparedFixtureLocator: preparedFixtureRetention.locator,
+        entityCount: preparedToolFixtureManifest.entities.length
+      })
     }
     const reconciliation = await core.request('skills.reconcile', {
       commandId: crypto.randomUUID(),
@@ -358,6 +413,7 @@ async function runTrial(options) {
     observationIntegrityIssues.push(...observation.integrityIssues)
     budgetWatchdogEvent = observation.watchdogEvent
     executionEvidenceCoverage = observation.executionEvidenceCoverage
+    resourceObservation = observation.resourceObservation
     if (budgetEvent) await appendLifecycle('stopping', budgetEvent)
     else if (budgetWatchdogEvent) await appendLifecycle('stopping', budgetWatchdogEvent)
     await appendLifecycle('runtime_termination_requested')
@@ -574,6 +630,11 @@ async function runTrial(options) {
     dispatchBoundary,
     executionEvidenceCoverage
   )
+  const evaluatorDigest = environmentManifest?.runnerDigest
+    ?? await computeQualificationEvaluatorDigest()
+  const toolRetrievedMessageIds = toolMeasurementPack && preparedToolFixtureManifest
+    ? collectToolRetrievedFixtureMessageIds(rawToolEvidence, preparedToolFixtureManifest)
+    : []
   const finalResponses = collectFinalResponseEvidence(finalSnapshot, dispatchBoundary)
   if (finalResponses.privateMessages.length > 0) {
     await atomicWriteJson(join(evidenceDirectory, 'final-response-evidence.json'), {
@@ -619,7 +680,7 @@ async function runTrial(options) {
     plannedSlotId: options.plannedSlotId ?? trialId,
     caseId: caseRecord.contract.manifest.id,
     caseSeal: caseRecord.seal,
-    producerDigest: environmentManifest?.runnerDigest ?? await computeQualificationEvaluatorDigest(),
+    producerDigest: evaluatorDigest,
     snapshot: finalSnapshot ? normalizeSnapshot(finalSnapshot) : null,
     dispatchBoundary,
     environmentManifest,
@@ -640,7 +701,8 @@ async function runTrial(options) {
     termination,
     isolationProfile: isolationProfileSummary,
     isolationContinuity,
-    finalResponses: finalResponses.privateMessages
+    finalResponses: finalResponses.privateMessages,
+    toolRetrievedMessageIds
   })
   const evidenceIndex = await retainEvidenceIndexArtifact(
     evidenceDirectory,
@@ -653,7 +715,7 @@ async function runTrial(options) {
     collaborationEvidence: collaboration,
     evidenceReferences: evidenceIndexBuild.references,
     evidenceIndex: evidenceIndexBuild.artifact,
-    producerDigest: environmentManifest?.runnerDigest ?? await computeQualificationEvaluatorDigest()
+    producerDigest: evaluatorDigest
   })
   await retainCollaborationMessageEvidence(
     evidenceDirectory,
@@ -666,7 +728,7 @@ async function runTrial(options) {
     suiteId: options.suiteId,
     caseId: caseRecord.contract.manifest.id,
     caseSeal: caseRecord.seal,
-    producerDigest: environmentManifest?.runnerDigest ?? await computeQualificationEvaluatorDigest(),
+    producerDigest: evaluatorDigest,
     collaborationEvidence: collaboration,
     evidenceIndex: evidenceIndexBuild.artifact,
     evidenceReferences: evidenceIndexBuild.references
@@ -687,7 +749,7 @@ async function runTrial(options) {
     suiteId: options.suiteId,
     caseId: caseRecord.contract.manifest.id,
     caseSeal: caseRecord.seal,
-    producerDigest: environmentManifest?.runnerDigest ?? await computeQualificationEvaluatorDigest(),
+    producerDigest: evaluatorDigest,
     toolEvidence,
     evidenceIndex: evidenceIndexBuild.artifact
   })
@@ -703,7 +765,7 @@ async function runTrial(options) {
     suiteId: options.suiteId,
     caseId: caseRecord.contract.manifest.id,
     caseSeal: caseRecord.seal,
-    producerDigest: environmentManifest?.runnerDigest ?? await computeQualificationEvaluatorDigest(),
+    producerDigest: evaluatorDigest,
     workspaceDiff: finalDiff,
     observedAt: new Date().toISOString(),
     evidenceIndex: evidenceIndexBuild.artifact,
@@ -716,6 +778,83 @@ async function runTrial(options) {
     evidenceIndexBuild.artifact,
     toolCallLedgerArtifact
   )
+  if (toolMeasurementPack && preparedToolFixtureManifest) {
+    const measurementSpec = materializeMeasurementSpecForBuilder(
+      toolMeasurementPack,
+      preparedToolFixtureManifest
+    )
+    const measuredToolEvidence = toolInteractionEvidenceInput(
+      toolEvidence,
+      measurementSpec.opportunities.flatMap((opportunity) => opportunity.allowedOperations)
+    )
+    const effectEvidence = await buildToolInteractionEffectEvidence({
+      rawToolEvidence,
+      finalSnapshot,
+      finalResponses: finalResponses.privateMessages,
+      deliveredSnapshot,
+      workspaceDiff: finalDiff,
+      evidenceReferences: evidenceIndexBuild.references,
+      preparedToolFixtureManifest
+    })
+    toolInteractionMeasurement = buildToolInteractionMeasurement({
+      caseId: caseRecord.contract.manifest.id,
+      trialId,
+      measurementSpec,
+      toolEvidence: measuredToolEvidence,
+      effectEvidence,
+      producerDigest: evaluatorDigest
+    })
+    toolUseJudgePack = buildToolUseJudgePack({
+      measurement: toolInteractionMeasurement,
+      disclosedTask: {
+        title: caseRecord.contract.manifest.title ?? caseRecord.contract.manifest.id,
+        requirements: caseRecord.contract.manifest.requirements.map((requirement) => (
+          requirement.statement
+        ))
+      },
+      producerDigest: evaluatorDigest
+    })
+    const toolInteractionSource = buildToolInteractionSourceArtifact({
+      measurement: toolInteractionMeasurement,
+      measurementSpec,
+      toolEvidence: measuredToolEvidence,
+      effectEvidence,
+      preparedFixtureArtifact: {
+        schemaId: preparedToolFixtureManifest.schemaId,
+        schemaVersion: preparedToolFixtureManifest.schemaVersion,
+        payloadDigest: preparedToolFixtureManifest.payloadDigest,
+        locator: preparedToolFixtureLocator
+      },
+      producerDigest: evaluatorDigest
+    })
+    retainedToolInteractionArtifacts = await retainToolInteractionArtifacts(
+      evidenceDirectory,
+      {
+        measurement: toolInteractionMeasurement,
+        judgePack: toolUseJudgePack,
+        source: toolInteractionSource
+      },
+      evidenceIndexBuild.artifact
+    )
+  }
+  if (options.pairedPlanDigest) {
+    freshStateAttestation = buildFreshStateAttestation({
+      trialId,
+      treatment: options.treatment,
+      freshStateNonce,
+      dataDirectory,
+      workspacePath,
+      campId: dispatchBoundary?.campId ?? null,
+      campTurnId: dispatchBoundary?.campTurnId ?? null,
+      snapshot: finalSnapshot,
+      evidenceIndex: evidenceIndexBuild.artifact,
+      producerDigest: evaluatorDigest
+    })
+    retainedFreshStateAttestation = await retainFreshStateAttestation(
+      evidenceDirectory,
+      freshStateAttestation
+    )
+  }
   const finalResponseReferences = finalResponses.references.map((message) => ({
     ...message,
     evidenceReference: evidenceIndexBuild.references.messageContents[message.messageId]
@@ -740,6 +879,15 @@ async function runTrial(options) {
     suiteId: options.suiteId ?? null,
     plannedSlotId: options.plannedSlotId ?? trialId,
     mode: options.mode,
+    treatment: options.treatment,
+    pairedExperimentId: options.pairedExperimentId,
+    pairedArmId: options.armId,
+    pairedPlanBinding: options.pairedPlanDigest ? {
+      planDigest: options.pairedPlanDigest,
+      pairSlotId: options.pairedPairSlotId,
+      armPlanId: options.armId,
+      dispatchOrdinal: options.pairedDispatchOrdinal
+    } : null,
     case: {
       id: caseRecord.contract.manifest.id,
       version: caseRecord.contract.manifest.version,
@@ -787,6 +935,36 @@ async function runTrial(options) {
         : 'unavailable'
     },
     environmentManifestDigest: environmentManifest ? digestJson(environmentManifest) : null,
+    toolMeasurement: toolMeasurementPack ? {
+      specificationId: toolMeasurementPack.spec.specificationId,
+      partition: toolMeasurementPack.spec.partition,
+      specificationDigest: toolMeasurementPack.references.specificationDigest,
+      fixtureDigest: toolMeasurementPack.references.fixtureDigest,
+      oracleDigest: toolMeasurementPack.references.oracleDigest,
+      preparedFixtureDigest: preparedToolFixtureManifest?.payloadDigest ?? null,
+      preparedFixtureLocator: preparedToolFixtureLocator,
+      status: toolInteractionMeasurement ? 'measured' : 'unavailable',
+      interactionMeasurement: retainedToolInteractionArtifacts?.measurement ?? null,
+      judgePack: retainedToolInteractionArtifacts?.judgePack ?? null,
+      replaySource: retainedToolInteractionArtifacts?.source ?? null,
+      deterministicSummary: toolInteractionMeasurement ? {
+        coverage: toolInteractionMeasurement.payload.sourceCoverage,
+        denominator: toolInteractionMeasurement.payload.denominator
+      } : null,
+      semanticReview: {
+        status: 'unavailable',
+        reason: { code: 'tool_use_judge.not_invoked' }
+      }
+    } : {
+      status: 'not_applicable'
+    },
+    resourceObservation,
+    freshStateAttestation: freshStateAttestation ? {
+      ...retainedFreshStateAttestation,
+      status: freshStateAttestation.payload.status,
+      identities: freshStateAttestation.payload.identities,
+      coverage: freshStateAttestation.sourceBoundaries[0].coverage
+    } : null,
     isolationProfile: isolationProfileSummary,
     interventionIsolationContinuity: isolationContinuity,
     ambientMcpIsolation: environmentManifest?.ambientMcpIsolation ?? 'unavailable',
@@ -862,7 +1040,7 @@ async function runTrial(options) {
   return { resultBundle: finalResultBundle, redactedSummary, evidenceDirectory, ...publication }
 }
 
-async function configureFrozenRuntimes(request) {
+async function configureFrozenRuntimes(request, trialTeam = FROZEN_TEAM) {
   for (const adapterKind of ['codex-cli', 'opencode-cli', 'antigravity-app']) {
     await request('runtime.product.check', { runtimeKind: adapterKind }, 120_000)
   }
@@ -879,7 +1057,7 @@ async function configureFrozenRuntimes(request) {
       ? selected
       : null
   }, 'frozen Runtime installations', 180_000)
-  for (const member of FROZEN_TEAM) {
+  for (const member of trialTeam) {
     const before = await request('members.get', { agentId: member.agentId })
     const applied = await request('members.runtime.set', {
       commandId: crypto.randomUUID(),
@@ -894,7 +1072,7 @@ async function configureFrozenRuntimes(request) {
     if (applied.status !== 'applied') throw new Error(`could not configure ${member.agentId}: ${JSON.stringify(applied)}`)
   }
   const profiles = await request('members.list')
-  for (const member of FROZEN_TEAM) {
+  for (const member of trialTeam) {
     const profile = profiles.find((candidate) => candidate.agentId === member.agentId)
     if (!profile || profile.runtimeReadiness?.status !== 'ready'
         || profile.runtimeConfiguration?.adapterKind !== member.adapterKind
@@ -957,6 +1135,15 @@ async function collectEnvironmentManifest({
     runnerVersion: QUALIFICATION_RUNNER_VERSION,
     runnerDigest,
     mode: options.mode,
+    treatment: options.treatment,
+    pairedExperimentId: options.pairedExperimentId,
+    pairedArmId: options.armId,
+    pairedPlanBinding: options.pairedPlanDigest ? {
+      planDigest: options.pairedPlanDigest,
+      pairSlotId: options.pairedPairSlotId,
+      armPlanId: options.armId,
+      dispatchOrdinal: options.pairedDispatchOrdinal
+    } : null,
     collectedAt: new Date().toISOString(),
     productGit: {
       commit: gitHead.stdout.trim(),
@@ -1215,6 +1402,7 @@ async function observeTrial({
   }
 
   async function finishObservation(snapshot, runs, coverageOverride = null) {
+    const terminalMonotonicMs = performance.now()
     const executionEvidenceCoverage = await collectAgentRunExecutionEvidencePages(
       core.request,
       campId,
@@ -1242,6 +1430,33 @@ async function observeTrial({
       watchdogEvent,
       integrityIssues,
       executionEvidenceCoverage,
+      resourceObservation: {
+        schemaVersion: 1,
+        dispatchToTerminal: {
+          valueMilliseconds: Math.max(0, terminalMonotonicMs - runnerClockAnchor.monotonicMs),
+          interval: 'dispatch_to_terminal',
+          clockDomain: 'runner_monotonic',
+          authority: 'runner',
+          coverage: { state: 'complete', reason: null }
+        },
+        agentRunIntervals: runs.map((run) => ({
+          agentRunId: run.id,
+          parentAgentRunId: run.a2aParentAgentRunId ?? null,
+          startedAt: run.startedAt ?? null,
+          endedAt: run.endedAt ?? null,
+          clockDomain: 'core_persisted_wall_clock'
+        })),
+        dependencyCoverage: {
+          state: Array.isArray(snapshot.messageDeliveries) ? 'complete' : 'partial',
+          reason: Array.isArray(snapshot.messageDeliveries)
+            ? null
+            : { code: 'resource_measurement.delivery_dependency_unavailable' }
+        },
+        providerUsage: {
+          state: 'unavailable',
+          reason: { code: 'resource_measurement.provider_receipt_unavailable' }
+        }
+      },
       observationDigest: sha256(observationHashInput)
     }
   }
@@ -1331,6 +1546,263 @@ function collectFinalResponseEvidence(snapshot, dispatchBoundary) {
   }
 }
 
+function collectToolRetrievedFixtureMessageIds(toolEvidence, preparedManifest) {
+  const fixtureMessageIds = new Set((preparedManifest.entities ?? [])
+    .filter((entity) => entity.entityType === 'camp_message')
+    .map((entity) => entity.entityId))
+  const observed = new Set()
+  for (const record of toolEvidence?.ledger ?? []) {
+    if (!['camp.search', 'camp.read'].includes(record.canonicalTool)) continue
+    const result = record.operationProjection?.canonicalResult
+      ?? record.operationProjection?.result
+      ?? null
+    for (const messageId of result?.messageIds ?? []) observed.add(messageId)
+    for (const item of [...(result?.results ?? []), ...(result?.items ?? [])]) {
+      if (typeof item?.messageId === 'string') observed.add(item.messageId)
+    }
+  }
+  return [...observed].filter((messageId) => fixtureMessageIds.has(messageId)).sort()
+}
+
+function toolInteractionEvidenceInput(toolEvidence, allowedOperations) {
+  const allowed = new Set(allowedOperations)
+  const sourceCoverage = toolEvidence?.sourceBoundary?.coreBuiltinInvocationCoverage ?? {
+    state: 'unavailable',
+    reason: { code: 'tool_measurement.core_builtin_invocation_coverage_unavailable' }
+  }
+  return {
+    coverage: sourceCoverage,
+    interactions: (toolEvidence?.ledger ?? [])
+      .filter((record) => (
+        record.authorityClass === 'core'
+        && allowed.has(record.canonicalTool)
+      ))
+      .map((record) => ({
+        ...record,
+        sourceAuthority: record.authorityClass
+      }))
+  }
+}
+
+async function buildToolInteractionEffectEvidence({
+  rawToolEvidence,
+  finalSnapshot,
+  finalResponses,
+  deliveredSnapshot,
+  workspaceDiff,
+  evidenceReferences,
+  preparedToolFixtureManifest
+}) {
+  const effects = []
+  const retrievedIds = new Set(collectToolRetrievedFixtureMessageIds(
+    rawToolEvidence,
+    preparedToolFixtureManifest
+  ))
+  const messages = new Map((finalSnapshot?.messages ?? []).map((message) => [message.id, message]))
+  for (const messageId of [...retrievedIds].sort()) {
+    const message = messages.get(messageId)
+    const reference = evidenceReferences.messageContents[messageId]
+    if (typeof message?.body !== 'string' || !reference) continue
+    effects.push({
+      effectId: `retrieved-content:${sha256(messageId).slice(0, 32)}`,
+      kind: 'retrieved_content',
+      content: message.body,
+      contentDigest: `sha256:${sha256(message.body)}`,
+      relatedResultIdentities: [messageId],
+      evidenceReference: reference
+    })
+  }
+
+  for (const record of rawToolEvidence?.ledger ?? []) {
+    if (record.authorityClass !== 'core'
+        || record.canonicalTool !== 'camp.message.send'
+        || !record.operationProjection) continue
+    const result = record.operationProjection.canonicalResult
+      ?? record.operationProjection.result
+      ?? null
+    const messageId = result?.messageId
+    const message = typeof messageId === 'string' ? messages.get(messageId) : null
+    const reference = typeof messageId === 'string'
+      ? evidenceReferences.messageContents[messageId]
+      : null
+    if (typeof message?.body !== 'string' || !reference) continue
+    effects.push({
+      effectId: `message-effect:${sha256(messageId).slice(0, 32)}`,
+      kind: 'message',
+      content: message.body,
+      contentDigest: `sha256:${sha256(message.body)}`,
+      relatedResultIdentities: [messageId],
+      evidenceReference: reference
+    })
+  }
+
+  const candidateToolCallIds = (rawToolEvidence?.ledger ?? [])
+    .filter((record) => (
+      record.authorityClass === 'core'
+      && record.operationProjection
+      && record.canonicalTool !== 'camp.message.send'
+    ))
+    .map((record) => record.toolCallId)
+    .sort()
+  if (candidateToolCallIds.length === 0) return effects
+
+  for (const response of finalResponses.filter((message) => message.isFinal === true)) {
+    const reference = evidenceReferences.messageContents[response.messageId]
+    if (!reference || typeof response.body !== 'string') continue
+    effects.push({
+      effectId: `final-response:${sha256(response.messageId).slice(0, 32)}`,
+      kind: 'final_response',
+      content: response.body,
+      contentDigest: `sha256:${sha256(response.body)}`,
+      relatedToolCallIds: candidateToolCallIds,
+      evidenceReference: reference
+    })
+  }
+
+  if (deliveredSnapshot?.path) {
+    for (const change of workspaceDiff?.changed ?? []) {
+      if (change.after?.type !== 'file') continue
+      const reference = evidenceReferences.workspaceContents[change.path]
+      if (!reference) continue
+      const content = await readFile(join(deliveredSnapshot.path, change.path), 'utf8')
+        .catch(() => null)
+      if (content === null
+          || content.includes('\u0000')
+          || content.length > 20_000
+          || sha256(content) !== change.after.digest) continue
+      effects.push({
+        effectId: `workspace-change:${sha256(change.path).slice(0, 32)}`,
+        kind: 'workspace_change',
+        content,
+        contentDigest: `sha256:${sha256(content)}`,
+        relatedToolCallIds: candidateToolCallIds,
+        evidenceReference: reference
+      })
+    }
+  }
+  return effects
+}
+
+function buildFreshStateAttestation({
+  trialId,
+  treatment,
+  freshStateNonce,
+  dataDirectory,
+  workspacePath,
+  campId,
+  campTurnId,
+  snapshot,
+  evidenceIndex,
+  producerDigest
+}) {
+  const trialRuns = (snapshot?.agentRuns ?? []).filter((run) => run.campTurnId === campTurnId)
+  const conversationIds = [...new Set(trialRuns
+    .map((run) => run.conversationId)
+    .filter((value) => typeof value === 'string' && value.length > 0))].sort()
+  const nativeSessionIds = [...new Set((snapshot?.timeline ?? [])
+    .filter((event) => event.eventType === 'conversation.native_session_bound')
+    .map((event) => event.payload?.nativeSessionId)
+    .filter((value) => typeof value === 'string' && value.length > 0))].sort()
+  const attested = typeof dataDirectory === 'string'
+    && typeof workspacePath === 'string'
+    && typeof campId === 'string'
+    && typeof campTurnId === 'string'
+    && conversationIds.length > 0
+    && nativeSessionIds.length > 0
+  const identities = {
+    coreData: typeof dataDirectory === 'string'
+      ? `sha256:${sha256(`core-data:${dataDirectory}`)}`
+      : null,
+    camp: campId,
+    workspace: typeof workspacePath === 'string'
+      ? `sha256:${sha256(`workspace:${workspacePath}`)}`
+      : null,
+    memory: typeof dataDirectory === 'string'
+      ? `sha256:${sha256(`memory-store:${dataDirectory}`)}`
+      : null,
+    conversation: conversationIds.length > 0
+      ? `sha256:${digestJson(conversationIds)}`
+      : null,
+    nativeSession: nativeSessionIds.length > 0
+      ? `sha256:${digestJson(nativeSessionIds)}`
+      : null
+  }
+  const coverage = attested
+    ? { state: 'complete', reason: null }
+    : {
+        state: 'unavailable',
+        reason: { code: 'paired.fresh_state_identity_coverage_incomplete' }
+      }
+  const payload = {
+    policyId: 'paired-fresh-state-attestation-v1',
+    status: attested ? 'attested' : 'unavailable',
+    identities,
+    identityCounts: {
+      conversations: conversationIds.length,
+      nativeSessions: nativeSessionIds.length
+    },
+    creationFacts: {
+      coreData: 'runner_created_private_temporary_directory',
+      camp: 'core_created_after_runner_preflight',
+      workspace: 'runner_copied_sealed_fixture_to_private_temporary_directory',
+      memory: 'fresh_core_data_namespace',
+      conversation: 'core_created_for_trial_agent_runs',
+      nativeSession: 'core_persisted_native_session_binding_events'
+    },
+    nonceDigest: `sha256:${sha256(freshStateNonce)}`,
+    evidenceIndexArtifact: {
+      artifactId: evidenceIndex.artifactId,
+      schemaId: evidenceIndex.schemaId,
+      schemaVersion: evidenceIndex.schemaVersion,
+      payloadDigest: evidenceIndex.payloadDigest
+    }
+  }
+  const binding = { trialId, treatment }
+  const sourceId = 'runner.paired-fresh-state'
+  const artifactId = `fresh-state-attestation:${sha256(`${trialId}:${freshStateNonce}`).slice(0, 32)}`
+  return {
+    artifactId,
+    schemaId: 'rovai.benchmark.fresh-state-attestation',
+    schemaVersion: '1.0.0',
+    producer: {
+      id: 'rovai-qualification-runner',
+      version: QUALIFICATION_RUNNER_VERSION,
+      digest: producerDigest.startsWith('sha256:') ? producerDigest : `sha256:${producerDigest}`
+    },
+    binding,
+    sourceBoundaries: [{
+      authorityClass: 'runner',
+      sourceId,
+      digest: `sha256:${digestJson({ binding, sourceId, payload })}`,
+      coverage
+    }],
+    payloadDigest: `sha256:${digestJson(payload)}`,
+    payload
+  }
+}
+
+async function retainFreshStateAttestation(evidenceDirectory, artifact) {
+  const locator = join('fresh-state-attestations', `${artifact.artifactId}.json`)
+  const path = join(evidenceDirectory, locator)
+  try {
+    await writePrivateJsonExclusive(path, artifact)
+  } catch (error) {
+    if (error?.code !== 'EEXIST') throw error
+    const existing = JSON.parse(await readFile(path, 'utf8'))
+    if (canonicalJson(existing) !== canonicalJson(artifact)) {
+      throw new Error('immutable Fresh State Attestation identity collision')
+    }
+  }
+  await atomicWriteJson(join(evidenceDirectory, 'fresh-state-attestation.json'), artifact)
+  return {
+    artifactId: artifact.artifactId,
+    schemaId: artifact.schemaId,
+    schemaVersion: artifact.schemaVersion,
+    payloadDigest: artifact.payloadDigest,
+    locator
+  }
+}
+
 async function finishInvalid({ trialId, options, startedAt, error, evidenceDirectory, lifecyclePath, caseRecord, environmentManifest }) {
   const resultBundle = {
     schemaVersion: QUALIFICATION_TRIAL_SCHEMA_VERSION,
@@ -1339,6 +1811,15 @@ async function finishInvalid({ trialId, options, startedAt, error, evidenceDirec
     suiteId: options.suiteId ?? null,
     plannedSlotId: options.plannedSlotId ?? trialId,
     mode: options.mode,
+    treatment: options.treatment,
+    pairedExperimentId: options.pairedExperimentId,
+    pairedArmId: options.armId,
+    pairedPlanBinding: options.pairedPlanDigest ? {
+      planDigest: options.pairedPlanDigest,
+      pairSlotId: options.pairedPairSlotId,
+      armPlanId: options.armId,
+      dispatchOrdinal: options.pairedDispatchOrdinal
+    } : null,
     startedAt,
     completedAt: new Date().toISOString(),
     dispatchAccepted: false,
@@ -1492,12 +1973,31 @@ function parseArguments(args) {
       'trial-id',
       'planned-slot-id',
       'suite-id',
-      'isolation-profile'
+      'isolation-profile',
+      'treatment',
+      'paired-experiment-id',
+      'arm-id',
+      'paired-plan-digest',
+      'paired-pair-slot-id',
+      'paired-dispatch-ordinal',
+      'tool-measurement-pack'
     ].includes(key)) usage()
     values[key] = args.shift()
     if (!values[key]) usage()
   }
   if (!['demo', 'diagnostic', 'formal'].includes(values.mode) || !values.core || !values.case || !values['evidence-root']) usage()
+  if (values.treatment && !['team', 'solo'].includes(values.treatment)) usage()
+  if (values['paired-dispatch-ordinal'] !== undefined
+      && !['0', '1'].includes(values['paired-dispatch-ordinal'])) usage()
+  const pairedFields = [
+    values['paired-experiment-id'],
+    values['arm-id'],
+    values['paired-plan-digest'],
+    values['paired-pair-slot-id'],
+    values['paired-dispatch-ordinal']
+  ]
+  if (pairedFields.some((value) => value !== undefined)
+      && pairedFields.some((value) => value === undefined)) usage()
   return {
     mode: values.mode,
     coreExecutable: resolve(values.core),
@@ -1507,6 +2007,17 @@ function parseArguments(args) {
     isolationProfilePath: values['isolation-profile']
       ? resolve(values['isolation-profile'])
       : null,
+    treatment: values.treatment ?? 'team',
+    pairedExperimentId: values['paired-experiment-id'] ?? null,
+    armId: values['arm-id'] ?? null,
+    pairedPlanDigest: values['paired-plan-digest'] ?? null,
+    pairedPairSlotId: values['paired-pair-slot-id'] ?? null,
+    pairedDispatchOrdinal: values['paired-dispatch-ordinal'] === undefined
+      ? null
+      : Number(values['paired-dispatch-ordinal']),
+    toolMeasurementPackDirectory: values['tool-measurement-pack']
+      ? resolve(values['tool-measurement-pack'])
+      : null,
     suiteId: values['suite-id'] ?? null,
     trialId: values['trial-id'] ?? null,
     plannedSlotId: values['planned-slot-id'] ?? null
@@ -1514,7 +2025,7 @@ function parseArguments(args) {
 }
 
 function usage() {
-  console.error('Usage: node scripts/qualification-runner.mjs --mode <demo|diagnostic|formal> --core <path> --case <path> --evidence-root <path> [--expected-seal <sha256>] [--trial-id <id>] [--planned-slot-id <id>] [--suite-id <id>] [--isolation-profile <private-json>]')
+  console.error('Usage: node scripts/qualification-runner.mjs --mode <demo|diagnostic|formal> --core <path> --case <path> --evidence-root <path> [--expected-seal <sha256>] [--trial-id <id>] [--planned-slot-id <id>] [--suite-id <id>] [--isolation-profile <private-json>] [--treatment <team|solo>] [--paired-experiment-id <id>] [--arm-id <id>] [--paired-plan-digest <sha256>] [--paired-pair-slot-id <id>] [--paired-dispatch-ordinal <0|1>] [--tool-measurement-pack <private-dir>]')
   process.exit(2)
 }
 

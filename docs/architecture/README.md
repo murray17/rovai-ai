@@ -12,7 +12,7 @@ last_updated: 2026-08-13
 <!-- architecture-index:begin -->
 | 架构 | 内容 |
 | --- | --- |
-| [Benchmark Protocol](benchmark-protocol.md) | Core 外的 Adapter/Profile/Execution/Evaluation/Reporting 组件、Process/Blinded Outcome Judge View、Lane、文件权威与零执行 Project 投影 |
+| [Benchmark Protocol](benchmark-protocol.md) | Core 外的 Adapter/Profile/Execution/Evaluation/Reporting、Process/Outcome/Tool-Use Judge、Tool Interaction、typed Resource 与 paired counterfactual 模块 |
 | [Diagnostics Center](diagnostics-center.md) | Core 严格只读诊断组装、Skill/MCP 审计、Runtime 缓存事实、Renderer 单项修复复检、Electron v5 导出与 Startup Recovery 边界 |
 | [AgentRun Recovery](agent-run-recovery.md) | AgentRun、Native Session、Runtime Input Delivery 与 Native Turn 分离，accepted-input blocker、Scheduler fence、用户/预算安全收敛与未来 reconcile capability |
 | [Built-in Tool Runtime](builtin-tool-runtime.md) | Agent CLI v7、Core Router、Runtime Fleet、精确 help、Charter/official Skill 渐进教学、peer routing Dynamic Context、ContextManifest/ACK 与外部 MCP 的关系 |

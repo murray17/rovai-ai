@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/contracts/tool-interaction-measurement-v1.schema.json",
+  "title": "Rovai Tool Interaction Measurement v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["artifactId", "schemaId", "schemaVersion", "producer", "binding", "sourceBoundaries", "payloadDigest", "payload"],
+  "properties": {
+    "artifactId": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/stableId" },
+    "schemaId": { "const": "rovai.qualification.tool-interaction-measurement" },
+    "schemaVersion": { "const": "1.0.0" },
+    "producer": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/producer" },
+    "binding": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/binding" },
+    "sourceBoundaries": { "type": "array", "minItems": 1, "items": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/sourceBoundary" } },
+    "payloadDigest": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/digest" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policyId", "specification", "sourceCoverage", "interactions", "opportunities", "denominator"],
+      "properties": {
+        "policyId": { "const": "tool-interaction-measurement-v1" },
+        "specification": { "type": "object" },
+        "sourceCoverage": { "$ref": "#/$defs/coverage" },
+        "interactions": { "type": "array", "items": { "$ref": "#/$defs/interaction" } },
+        "opportunities": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/opportunity" } },
+        "denominator": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["basis", "total", "pass", "fail", "indeterminate"],
+          "properties": {
+            "basis": { "const": "pre_registered_opportunities" },
+            "total": { "type": "integer", "minimum": 1 },
+            "pass": { "type": "integer", "minimum": 0 },
+            "fail": { "type": "integer", "minimum": 0 },
+            "indeterminate": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "reason"],
+      "properties": {
+        "state": { "enum": ["complete", "partial", "unavailable"] },
+        "reason": { "type": ["object", "null"] }
+      }
+    },
+    "interaction": {
+      "type": "object",
+      "required": ["interactionId", "sourceAuthority", "canonicalTool", "operationProjection", "evidenceReferences"],
+      "properties": {
+        "interactionId": { "type": "string" },
+        "sourceAuthority": { "const": "core" },
+        "canonicalTool": { "type": "string" },
+        "operationProjection": { "type": "object" },
+        "evidenceReferences": { "type": "array", "minItems": 1 }
+      }
+    },
+    "opportunity": {
+      "type": "object",
+      "required": ["opportunityId", "adapter", "mode", "oracleDigest", "status", "deterministicAssessment", "evidenceReferences"],
+      "properties": {
+        "opportunityId": { "type": "string" },
+        "adapter": { "enum": ["camp_history", "memory_retrieval", "memory_mutation", "camp_message_send"] },
+        "mode": { "enum": ["forced_use", "natural_use", "non_use_control"] },
+        "oracleDigest": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/digest" },
+        "status": { "enum": ["pass", "fail", "indeterminate"] },
+        "deterministicAssessment": { "type": "object" },
+        "evidenceReferences": { "type": "array" }
+      }
+    }
+  }
+}

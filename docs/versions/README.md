@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.67
+current_version: v0.68
 last_updated: 2026-08-13
 ---
 
@@ -118,4 +118,5 @@ last_updated: 2026-08-13
 | v0.64 | `historical` | Accepted Input 恢复阻断、安全收敛与 Copilot Native Turn 负向实验证据 | [v0.64/README.md](v0.64/README.md) |
 | v0.65 | `historical` | 当前用户注意力与渐进式 CLI 教学未实施冻结；目录附件独立增量已完成 | [v0.65/README.md](v0.65/README.md) |
 | v0.66 | `historical` | 已完成计划内受控关闭、同 generation 可靠终态与诚实 unknown 保留 | [v0.66/README.md](v0.66/README.md) |
-| v0.67 | `current` | 已完成 Core-owned 当前用户消息注意力与渐进式 Built-in CLI 教学 | [v0.67/README.md](v0.67/README.md) |
+| v0.67 | `historical` | 已完成 Core-owned 当前用户消息注意力与渐进式 Built-in CLI 教学 | [v0.67/README.md](v0.67/README.md) |
+| v0.68 | `current` | Opportunity-based Tool-use 测量、独立 LLM Judge 与 Team/Solo 配对协作价值协议 | [v0.68/README.md](v0.68/README.md) |

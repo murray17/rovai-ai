@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rovai.invalid/contracts/tool-use-review-v1.schema.json",
+  "title": "Rovai Tool-Use Review v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["artifactId", "schemaId", "schemaVersion", "producer", "binding", "sourceBoundaries", "payloadDigest", "payload"],
+  "properties": {
+    "artifactId": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/stableId" },
+    "schemaId": { "const": "rovai.qualification.tool-use-review" },
+    "schemaVersion": { "const": "1.0.0" },
+    "producer": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/producer" },
+    "binding": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/binding" },
+    "sourceBoundaries": { "type": "array", "minItems": 1, "maxItems": 1 },
+    "payloadDigest": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/digest" },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reviewId", "judgeExecutionId", "configurationArtifact", "measurementArtifact", "packArtifact", "replicaArtifacts", "state", "items", "unavailableReason"],
+      "properties": {
+        "reviewId": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/stableId" },
+        "judgeExecutionId": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/stableId" },
+        "configurationArtifact": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/artifactRef" },
+        "measurementArtifact": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/artifactRef" },
+        "packArtifact": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/artifactRef" },
+        "replicaArtifacts": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "$ref": "https://schemas.rovai.invalid/v0.34/artifact-envelope.schema.json#/$defs/artifactRef" } },
+        "state": { "enum": ["complete", "disagreement", "unavailable"] },
+        "items": { "type": "array" },
+        "unavailableReason": { "type": ["object", "null"] }
+      }
+    }
+  }
+}
