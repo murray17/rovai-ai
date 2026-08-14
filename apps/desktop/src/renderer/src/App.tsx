@@ -2019,7 +2019,7 @@ export function App(): React.JSX.Element {
         )}
 
         {!startupGateVisible && view === 'camp' && (!activeCampId || visibleCampSnapshot?.camp.id !== activeCampId) && (
-          <EmptyState title="正在打开对话" body="Rovai-ai 正在从本地数据恢复会话、队员与运行状态。" />
+          <EmptyState title="正在打开对话" body="Rovai AI 正在从本地数据恢复会话、队员与运行状态。" />
         )}
 
         {!startupGateVisible && view === 'compose' && (
@@ -2150,7 +2150,7 @@ export function StartupGate({
       <p className="settings-page-eyebrow">MAIN WINDOW SESSION</p>
       <h1>{waiting ? '暂时无法恢复上次位置' : '正在恢复上次位置'}</h1>
       <p>{waiting
-        ? 'Rovai-ai 会保留这次窗口冻结的恢复目标。后台服务恢复后将继续验证同一位置，不会清除或改走其他启动路线。'
+        ? 'Rovai AI 会保留这次窗口冻结的恢复目标。后台服务恢复后将继续验证同一位置，不会清除或改走其他启动路线。'
         : '正在读取窗口偏好，并通过本地数据验证最近的稳定页面。'}</p>
       {error && <small role="alert">{error}</small>}
       {waiting && <button className="quiet-button" type="button" onClick={onRetry}>重试恢复</button>}

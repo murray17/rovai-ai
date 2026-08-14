@@ -318,5 +318,5 @@ function resolveCoreBinary(): string {
     }
   }
 
-  throw new Error(`Rovai-ai Rust Core binary was not found. Checked: ${candidates.filter(Boolean).join(', ')}`)
+  throw new Error(`Rovai AI Rust Core binary was not found. Checked: ${candidates.filter(Boolean).join(', ')}`)
 }

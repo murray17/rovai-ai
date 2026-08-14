@@ -240,7 +240,7 @@ export function GeneralSettings({
       <SettingsPageHeader
         eyebrow="Settings / General"
         title="通用"
-        description="设置 Rovai-ai 的启动位置、新对话与窗口行为。"
+        description="设置 Rovai AI 的启动位置、新对话与窗口行为。"
       />
 
       <section className="section-block general-settings-section" aria-labelledby="general-startup-heading">
@@ -276,7 +276,7 @@ export function GeneralSettings({
           </div>
         )}
         <p className="general-recovery-note">
-          此设置只决定启动后显示的位置。已有会话、草稿、任务、审批和运行记录仍按 Rovai-ai 的既有恢复规则处理。
+          此设置只决定启动后显示的位置。已有会话、草稿、任务、审批和运行记录仍按 Rovai AI 的既有恢复规则处理。
         </p>
       </section>
 
@@ -402,7 +402,7 @@ export function GeneralSettings({
       <section className="section-block general-settings-section" aria-labelledby="general-window-heading">
         <div className="section-heading"><div><h2 id="general-window-heading">窗口</h2></div></div>
         <p className="general-window-description">
-          Rovai-ai 会自动保存窗口大小和位置，并确保下次打开时窗口仍位于可见的显示器区域。
+          Rovai AI 会自动保存窗口大小和位置，并确保下次打开时窗口仍位于可见的显示器区域。
         </p>
         <button
           className="quiet-button"

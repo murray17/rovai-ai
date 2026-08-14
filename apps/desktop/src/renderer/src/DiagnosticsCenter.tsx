@@ -285,7 +285,7 @@ function DiagnosticsLoading(): React.JSX.Element {
   return (
     <section className="diagnostics-state" aria-live="polite">
       <span className="diagnostics-spinner" aria-hidden="true" />
-      <div><h2>正在读取诊断事实</h2><p>Rovai-ai 正在读取当前 Core 快照；不会在加载时运行修复。</p></div>
+      <div><h2>正在读取诊断事实</h2><p>Rovai AI 正在读取当前 Core 快照；不会在加载时运行修复。</p></div>
     </section>
   )
 }

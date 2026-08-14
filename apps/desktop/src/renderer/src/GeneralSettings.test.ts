@@ -14,7 +14,7 @@ describe('General settings', () => {
     const markup = renderToStaticMarkup(createElement(GeneralSettings, {}))
     expect(markup).toContain('Settings / General')
     expect(markup).toContain('<h1>通用</h1>')
-    expect(markup).not.toContain('登录时启动 Rovai-ai')
+    expect(markup).not.toContain('登录时启动 Rovai AI')
     expect(markup).not.toContain('登录项服务')
     expect(markup).toContain('role="switch"')
     expect(markup).toContain('<legend>启动后打开</legend>')

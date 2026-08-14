@@ -659,6 +659,7 @@ export function QuickChatWorkspace({
           <svg className="quick-chat-mark" data-brand-mark="horizon" data-brand-layout="separated" width="96" height="66" viewBox="0 0 72 56" aria-hidden="true">
             <path d="M36 4 L39.6 16.7 L53.9 20.4 L39.6 24.1 L36 36.8 L32.4 24.1 L18.1 20.4 L32.4 16.7 Z" fill="currentColor" />
             <path d="M8 49.5 Q36 37.5 64 49.5" stroke="currentColor" strokeWidth="5" fill="none" strokeLinecap="round" />
+            <circle className="brand-rendezvous-point" data-brand-point="rendezvous" cx="36" cy="43.5" r="2.6" />
           </svg>
           <p className="eyebrow quick-chat-eyebrow">Quick Chat</p>
           <h2>开始下一段协作</h2>
@@ -4223,7 +4224,7 @@ export function RunExecutionDisclosure({
           <div>
             <strong>无法安全自动恢复</strong>
             <p>
-              Agent 运行时已接受该任务，但 Rovai-ai 重启后无法确认原任务的最终结果。
+              Agent 运行时已接受该任务，但 Rovai AI 重启后无法确认原任务的最终结果。
               为避免重复执行，原请求不会自动重发。请先检查当前工作区，再结束此运行并按需发送新的后续任务。
             </p>
           </div>

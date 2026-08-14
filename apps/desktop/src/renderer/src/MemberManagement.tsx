@@ -1611,14 +1611,14 @@ function CustomRuntimeDialog({ open, busy, onOpenChange, onSubmit }: {
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content runtime-dialog" aria-describedby="runtime-dialog-description">
           <div className="dialog-heading"><div><Dialog.Title>添加本机 Agent 运行时</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭 Agent 运行时编辑" disabled={busy}>×</Dialog.Close></div>
-          <Dialog.Description id="runtime-dialog-description">选择本机已有 CLI。Rovai-ai 会保存稳定路径，并按当前 Agent 运行时的安全准入级别检查版本、能力缺口或协议能力。</Dialog.Description>
+          <Dialog.Description id="runtime-dialog-description">选择本机已有 CLI。Rovai AI 会保存稳定路径，并按当前 Agent 运行时的安全准入级别检查版本、能力缺口或协议能力。</Dialog.Description>
           <form onSubmit={(event) => void submit(event)}>
             <label className="field-label">Agent 运行时类型<select value={adapterKind} onChange={(event) => setAdapterKind(event.target.value as AdapterKind)}><option value="codex-cli">Codex CLI</option><option value="opencode-cli">OpenCode</option><option value="copilot-cli">GitHub Copilot</option><option value="claude-code-cli">Claude Code</option><option value="kiro-cli">Kiro</option><option value="qoder-cli">Qoder</option><option value="codebuddy-cli">CodeBuddy</option><option value="qwen-code">Qwen Code</option><option value="antigravity-app">Antigravity（通过 agy companion）</option></select></label>
             <label className="field-label">可执行文件路径
               <span className="path-field"><input value={path} onChange={(event) => setPath(event.target.value)} placeholder={runtimePathPlaceholder(adapterKind)} autoFocus /><button className="quiet-button" type="button" onClick={() => void browse()}>浏览…</button></span>
             </label>
             <label className="field-label">认证 / 配置作用域<input value={authScope} onChange={(event) => setAuthScope(event.target.value)} placeholder="default" /></label>
-            <div className="authorization-box"><strong>边界说明</strong><ul><li>Rovai-ai 保存的是这个启动入口，不固定上游版本。</li><li>刷新会执行该 Agent 运行时已验证安全的版本探测与协议握手。</li><li>Rovai-ai 不修改 CLI 的全局配置或凭据。</li></ul></div>
+            <div className="authorization-box"><strong>边界说明</strong><ul><li>Rovai AI 保存的是这个启动入口，不固定上游版本。</li><li>刷新会执行该 Agent 运行时已验证安全的版本探测与协议握手。</li><li>Rovai AI 不修改 CLI 的全局配置或凭据。</li></ul></div>
             {submitError && <div className="inline-error">{submitError}</div>}
             <div className="dialog-actions"><Dialog.Close className="quiet-button" type="button" disabled={busy}>取消</Dialog.Close><button className="primary-button" disabled={busy || !path.trim() || !authScope.trim()}>{busy ? '正在探测…' : '添加并探测'}</button></div>
           </form>

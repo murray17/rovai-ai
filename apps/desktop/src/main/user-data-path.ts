@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
-export const LEGACY_APP_NAMES = ['Horizonward', 'Horizonward AI', 'Lumen AI'] as const
+export const LEGACY_APP_NAMES = ['Rovai-ai', 'Horizonward', 'Horizonward AI', 'Lumen AI'] as const
 
 export function legacyUserDataPath(
   appDataPath: string,

@@ -150,6 +150,8 @@
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "extendInfo": {
+        "CFBundleDisplayName": "Rovai AI",
+        "CFBundleName": "Rovai AI",
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": false,
           "NSAllowsLocalNetworking": true

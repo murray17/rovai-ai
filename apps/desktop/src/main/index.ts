@@ -138,7 +138,7 @@ const allowedMethods = new Set<CoreMethod>([
   'events.subscribe',
   'diagnostics.export'
 ])
-const APP_NAME = 'Rovai-ai'
+const APP_NAME = 'Rovai AI'
 app.setName(APP_NAME)
 const hasExplicitUserDataDirectory = app.commandLine.hasSwitch('user-data-dir')
 const isolatedAcceptanceInstance =
@@ -686,12 +686,12 @@ ipcMain.handle('rovai:reveal-mcp-config', async () => {
 ipcMain.handle('rovai:export-diagnostics', async () => {
   const result = mainWindow
     ? await dialog.showSaveDialog(mainWindow, {
-        title: '导出 Rovai-ai 诊断数据',
+        title: '导出 Rovai AI 诊断数据',
         defaultPath: `rovai-diagnostics-${new Date().toISOString().slice(0, 10)}.json`,
         filters: [{ name: 'JSON', extensions: ['json'] }]
       })
     : await dialog.showSaveDialog({
-        title: '导出 Rovai-ai 诊断数据',
+        title: '导出 Rovai AI 诊断数据',
         defaultPath: `rovai-diagnostics-${new Date().toISOString().slice(0, 10)}.json`,
         filters: [{ name: 'JSON', extensions: ['json'] }]
   })
@@ -723,7 +723,7 @@ ipcMain.handle('rovai:reveal-diagnostics-export', (_event, path: unknown) => {
 
 ipcMain.handle('rovai:export-memory', async () => {
   const options = {
-    title: '导出 Rovai-ai 记忆',
+    title: '导出 Rovai AI 记忆',
     defaultPath: `rovai-memory-${new Date().toISOString().slice(0, 10)}.json`,
     filters: [{ name: 'JSON', extensions: ['json'] }]
   }

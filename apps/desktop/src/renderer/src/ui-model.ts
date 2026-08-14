@@ -188,9 +188,9 @@ export function agentRunStateTag(
 
 export function agentRunWaitDetail(waitReason: string | null): string | null {
   return ({
-    delivery_unknown: 'Agent 运行时是否接收输入尚不可确认；为避免重复执行，Rovai-ai 不会盲目重发。',
+    delivery_unknown: 'Agent 运行时是否接收输入尚不可确认；为避免重复执行，Rovai AI 不会盲目重发。',
     runtime_recovery: '正在从已保存的执行、运行会话与输入回执恢复。',
-    recovery_blocked: 'Agent 运行时已接受任务，但 Rovai-ai 重启后无法确认原任务的最终结果。原请求不会自动重发。',
+    recovery_blocked: 'Agent 运行时已接受任务，但 Rovai AI 重启后无法确认原任务的最终结果。原请求不会自动重发。',
     approval: '受限动作正在等待用户处理。',
     user_input: 'Agent 已暂停，等待用户补充信息。'
   } as Record<string, string>)[waitReason ?? ''] ?? null

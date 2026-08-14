@@ -7,7 +7,7 @@ import {
 const baseOptions = {
   platform: 'darwin' as const,
   isPackaged: false,
-  resourcesPath: '/Applications/Rovai-ai.app/Contents/Resources',
+  resourcesPath: '/Applications/Rovai AI.app/Contents/Resources',
   appPath: '/workspace/rovai-ai'
 }
 
@@ -17,7 +17,7 @@ describe('open-panel prewarming', () => {
       '/workspace/rovai-ai/resources/native/open-panel-prewarm.node'
     )
     expect(resolveOpenPanelPrewarmerPath({ ...baseOptions, isPackaged: true })).toBe(
-      '/Applications/Rovai-ai.app/Contents/Resources/native/open-panel-prewarm.node'
+      '/Applications/Rovai AI.app/Contents/Resources/native/open-panel-prewarm.node'
     )
   })
 

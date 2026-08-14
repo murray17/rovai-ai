@@ -178,7 +178,7 @@ export function NewConversationDialog({
   }
 
   const projectLabel = workspace?.name ?? '使用快速对话'
-  const projectDetail = workspace?.projectPath ?? 'Rovai-ai 管理的快速对话目录'
+  const projectDetail = workspace?.projectPath ?? 'Rovai AI 管理的快速对话目录'
   const capability = workspaceCapability(workspace, gitInspectionStatus)
 
   return (
@@ -246,7 +246,7 @@ export function NewConversationDialog({
                     <div className="new-camp-picker-menu" role="listbox" aria-label="选择工作目录">
                       <ProjectOption
                         label="使用快速对话"
-                        detail="Rovai-ai 管理的快速对话目录"
+                        detail="Rovai AI 管理的快速对话目录"
                         selected={workspace === null}
                         onSelect={() => {
                           setWorkspace(null)
