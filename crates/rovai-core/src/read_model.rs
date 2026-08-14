@@ -1665,7 +1665,8 @@ fn load_agent_runs(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<A
                  )
                  OR (
                    agent_run.status IN ('failed', 'cancelled')
-                   AND agent_run.last_error_code = 'planned_shutdown_outcome_unknown'
+                   AND COALESCE(agent_run.last_error_code, '')
+                       = 'planned_shutdown_outcome_unknown'
                    AND EXISTS(
                      SELECT 1 FROM runtime_input_delivery
                      WHERE runtime_input_delivery.agent_run_id = agent_run.id
@@ -2635,6 +2636,89 @@ mod tests {
                 text: "旧消息仍是 @muwa".to_string(),
             }]
         );
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn snapshot_treats_accepted_input_without_shutdown_error_as_settled() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-read-model-null-unsettled-effect-{}",
+            Uuid::new_v4()
+        ));
+        let workspace = directory.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let mut database = Database::open(&directory).unwrap();
+        configure_test_runtime(&database, &["agent_1"]);
+        let created = CollaborationService::default()
+            .create_test_camp_conversation(
+                &mut database,
+                &user_envelope(
+                    "null-unsettled-effect-create",
+                    None,
+                    TestCampConversationCommand {
+                        project_path: workspace.to_string_lossy().to_string(),
+                        project_binding_kind: ProjectBindingKind::Directory,
+                        body: "验证空错误码投影".to_string(),
+                        address: TestCampMessageAddress::Default,
+                        purpose: "验证外部效果布尔值非空".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        let camp_id = created.result.payload["campId"].as_str().unwrap();
+        let agent_run_id = created.result.payload["agentRunIds"][0].as_str().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        database
+            .connection()
+            .execute_batch("PRAGMA foreign_keys = OFF;")
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO runtime_input_delivery(
+                    id, agent_run_id, execution_epoch, context_manifest_id,
+                    native_binding_id, native_binding_generation,
+                    boundary_camp_message_sequence, dynamic_payload_digest,
+                    status, native_input_id, prepared_at, accepted_at, updated_at
+                ) VALUES (
+                    'null-unsettled-effect-input', ?1, 1,
+                    'null-unsettled-effect-manifest', 'null-unsettled-effect-binding',
+                    1, 1, 'sha256:null-unsettled-effect', 'accepted',
+                    'null-unsettled-effect-native-input', ?2, ?2, ?2
+                )
+                "#,
+                params![agent_run_id, now],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute_batch("PRAGMA foreign_keys = ON;")
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'failed', last_error_code = NULL,
+                    ended_at = ?2, updated_at = ?2
+                WHERE id = ?1
+                "#,
+                params![agent_run_id, now],
+            )
+            .unwrap();
+
+        let snapshot = ReadModelService
+            .camp_snapshot(&mut database, camp_id)
+            .unwrap();
+        let run = snapshot
+            .agent_runs
+            .iter()
+            .find(|run| run.id == agent_run_id)
+            .unwrap();
+        assert!(!run.has_unsettled_external_effects);
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
