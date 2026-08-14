@@ -3,7 +3,7 @@ document_type: ui-component
 authority: notification-center-presentation
 status: accepted
 target_version: cross-version
-last_updated: 2026-08-13
+last_updated: 2026-08-14
 ---
 
 # Notification Center
@@ -14,14 +14,15 @@ Notification Center 是 Core Notification Episode 的桌面呈现，不是第二
 ## 信息层级
 
 每行依次呈现：未读标识、Core primary semantic 的本地化标题、主要说明、可选 Mention 摘要/剩余数量、
-Camp 与相对时间。优先级为失败、未完成、未满足完成、Mention；Approval 独立排序在待处理事项前部。
+会话标题与相对时间。优先级为失败、未完成、未满足完成、Mention；Approval 独立排序在待处理事项前部。
 标题保留最高来源语义，当前 attention action 可以在高优先级原因已确认后推进到较低优先级 Mention。
 
 Main action 只执行 Core 返回的 typed action。不可用动作保持 disabled 并解释“来源不可用”；可用次动作
 作为独立文字按钮，不能自动 fallback。激活带 acknowledgement 的 action 时先持久化精确确认；保存失败
 保留未读和 Drawer，保存成功后导航失败不恢复未读，并显示可恢复的行内错误。
+内部 `open_camp` action 在普通界面统一呈现为“打开会话”，不得暴露领域对象名。
 
-`acknowledge_only` 呈现为“知道了”，只持久化精确确认并留在 Drawer，不进入 Camp 导航。Approval 卡片
+`acknowledge_only` 呈现为“知道了”，只持久化精确确认并留在 Drawer，不进入会话导航。Approval 卡片
 必须优先提供仍 pending 的可处理动作，不能让已处理的旧 Approval 形成 disabled 主按钮。
 
 ## Heads-up
@@ -49,7 +50,7 @@ acknowledgement ID 提供“知道了”。可见队列与 overflow 都保留精
 ## 视觉与无障碍
 
 沿用 Porcelain Day / Steel Night 的 raised overlay、Steel edge 和 open rows，不增加卡片墙、渐变、glow 或
-主题分叉。长 Camp 名和 CJK/emoji 摘要允许收缩/换行且不挤掉动作；支持键盘导航、Escape 关闭、焦点
+主题分叉。长会话名和 CJK/emoji 摘要允许收缩/换行且不挤掉动作；支持键盘导航、Escape 关闭、焦点
 返回、`aria-live=polite`、reduced motion、最小窗口与 200% zoom。
 
 ## References

@@ -976,7 +976,7 @@ function importIssueText(code: string, fallback: string): string {
     'mcp.import_tool_policy_unsupported': '来源包含工具白名单、黑名单或审批策略，已阻止自动导入。',
     'mcp.import_trust_unsupported': '来源包含 trust 配置，已阻止自动导入。',
     'mcp.import_oauth_unsupported': '来源依赖 OAuth 状态或凭据缓存，已阻止自动导入。',
-    'mcp.import_runtime_option_dropped': '已丢弃不影响权限的 Runtime 专属参数。'
+    'mcp.import_runtime_option_dropped': '已丢弃不影响权限的 Agent 运行时专属参数。'
   }
   return known[code] ?? fallback
 }

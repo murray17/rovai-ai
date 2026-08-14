@@ -11,6 +11,7 @@ import {
   applyNotificationHeadsUpChanges,
   applyNotificationChanges,
   episodeHasActiveHeadsUpReason,
+  notificationActionLabel,
   notificationBadgeLabel,
   notificationHeadsUpPresentation,
   notificationPresentation,
@@ -126,6 +127,10 @@ function headsUpSignal(
 }
 
 describe('Notification Episode presentation', () => {
+  it('uses user-facing conversation language for the generic open action', () => {
+    expect(notificationActionLabel(action('episode-1', 'open_camp'))).toBe('打开会话')
+  })
+
   it('uses distinct closed copy for all attention semantics', () => {
     expect(notificationPresentation(episode('approval_pending'))).toEqual({
       label: '待审批',

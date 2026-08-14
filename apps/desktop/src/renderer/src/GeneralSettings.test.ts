@@ -21,7 +21,7 @@ describe('General settings', () => {
     expect(markup).toContain('type="radio"')
     expect(markup).toContain('上次使用的位置')
     expect(markup).toContain('快速对话')
-    expect(markup).toContain('已有 Camp、草稿、任务、审批和运行记录')
+    expect(markup).toContain('已有会话、草稿、任务、审批和运行记录')
     expect(markup).toContain('<h2 id="general-new-conversation-heading">新对话</h2>')
     expect(markup).toContain('保存默认配置')
     expect(markup).toContain('一键创建新对话')
@@ -29,7 +29,7 @@ describe('General settings', () => {
     expect(markup).toContain('role="tooltip"')
     expect(markup).not.toContain('general-help-button')
     expect(markup).toContain('使用入口对应的项目')
-    expect(markup).toContain('请先保存默认队员与 Lead')
+    expect(markup).toContain('请先保存默认队员与默认负责人')
     expect(markup).toContain('重置窗口大小与位置')
     expect(markup).not.toContain('记住窗口位置')
     expect(markup).not.toContain('隐藏启动')
@@ -67,7 +67,7 @@ describe('General settings', () => {
       initialPreferences: preferences,
       currentProjectLabel: 'rovai-ai'
     }))
-    expect(markup).toContain('当前生效：rovai-ai · 2 位默认队员 · Lead 洛可')
+    expect(markup).toContain('当前生效：rovai-ai · 2 位默认队员 · 负责人 洛可')
     expect(markup).toContain('aria-label="一键创建新对话" checked=""')
     expect(markup).not.toContain('默认队员配置需要重新确认')
   })

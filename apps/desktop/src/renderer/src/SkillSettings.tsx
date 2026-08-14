@@ -443,7 +443,7 @@ export function patchSkillEnabledResult(
   const enabled = result.payload.enabled
   const version = result.payload.version
   if (typeof enabled !== 'boolean' || typeof version !== 'number') {
-    throw new Error('Core 返回了无效的 Skill 启停结果。')
+    throw new Error('Skill 启停结果无效，请重试。')
   }
   return skills.map((skill) => skill.id === skillId
     ? { ...skill, enabled, version }
@@ -630,7 +630,7 @@ function SkillGroupMenu({ skill, groups, selected, disabled, onToggle }: {
       <DropdownMenu.Portal>
         <DropdownMenu.Content className="skill-group-menu" align="start" sideOffset={5} collisionPadding={12}>
           <div className="skill-group-menu-header">
-            <div><strong>选择 Runtime 生效组</strong><small>可多选。队员根据当前 Runtime 实时计算，仅用于展示。</small></div>
+            <div><strong>选择 Agent 运行时生效组</strong><small>可多选。队员根据当前 Agent 运行时实时计算，仅用于展示。</small></div>
             <span>{selected.size} / {groups.length}</span>
           </div>
           <div className="skill-group-options">
@@ -650,7 +650,7 @@ function SkillGroupMenu({ skill, groups, selected, disabled, onToggle }: {
                     <strong>{group.label}</strong><code>{group.relativePath}</code>
                     <i className={group.verification === 'verified' ? 'verified' : 'unverified'}>{group.verification === 'verified' ? '已验证' : '暂未验证'}</i>
                   </span>
-                  <span className="skill-runtime-line">对应 Runtime：{group.adapterKinds.map(adapterLabel).join('、') || '暂无'}</span>
+                  <span className="skill-runtime-line">对应 Agent 运行时：{group.adapterKinds.map(adapterLabel).join('、') || '暂无'}</span>
                   <span className="skill-member-line">
                     {group.members.length > 0
                       ? <><span className="skill-member-stack">{group.members.slice(0, 4).map((member) => <MemberAvatar key={member.agentId} agentId={member.agentId} avatarRef={member.avatarRef} displayName={member.displayName} size="mention" decorative />)}</span><span>{group.members.map((member) => member.displayName).join('、')}</span></>
@@ -692,7 +692,7 @@ function ImportInspectionDialog({ inspection, busy, onClose, onCommit }: {
             <Dialog.Title>检查 Skill 导入</Dialog.Title>
             <Dialog.Close className="dialog-close" aria-label="关闭" disabled={busy !== null}>×</Dialog.Close>
           </div>
-          <Dialog.Description>确认后写入 Rovai Skill Library。新 Skill 默认启用并选择全部 Runtime 生效组；之后仍可逐项调整。</Dialog.Description>
+          <Dialog.Description>确认后写入 Rovai Skill Library。新 Skill 默认启用并选择全部 Agent 运行时生效组；之后仍可逐项调整。</Dialog.Description>
           {inspection && <>
             <code className="inspection-path">{inspection.sourcePath}</code>
             <div className="import-candidate-list">
@@ -736,7 +736,7 @@ function ConfirmationDialog({ confirmation, busy, onClose, onConfirm }: {
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content camp-action-dialog">
           <Dialog.Title>{deleting ? '删除导入的 Skill？' : '更新现有 Skill？'}</Dialog.Title>
-          <Dialog.Description>{deleting ? `“${confirmation?.kind === 'delete' ? confirmation.skill.name : ''}”会停止新投递，并在现有执行释放后删除受管内容；不会删除 Runtime 原生的同名 Skill。` : `“${confirmation?.kind === 'update' ? confirmation.candidate.name : ''}”将创建新的不可变 Revision；已有生效组会保留，正在进行的执行不会切换版本。`}</Dialog.Description>
+          <Dialog.Description>{deleting ? `“${confirmation?.kind === 'delete' ? confirmation.skill.name : ''}”会停止新投递，并在现有执行释放后删除受管内容；不会删除 Agent 运行时原生的同名 Skill。` : `“${confirmation?.kind === 'update' ? confirmation.candidate.name : ''}”将创建新的不可变 Revision；已有生效组会保留，正在进行的执行不会切换版本。`}</Dialog.Description>
           <div className="dialog-actions">
             <Dialog.Close className="quiet-button" disabled={busy !== null}>取消</Dialog.Close>
             <button className={deleting ? 'danger-button' : 'primary-button'} type="button" onClick={onConfirm} disabled={busy !== null}>{busy?.startsWith(deleting ? 'delete-' : 'import-') ? deleting ? '正在删除…' : '正在更新…' : deleting ? '确认删除' : '确认更新'}</button>
@@ -813,7 +813,7 @@ function shortDigest(value: string): string {
 
 function assertCommandApplied(result: StoredCommandResult): void {
   if (result.status === 'rejected') {
-    const message = typeof result.payload.message === 'string' ? result.payload.message : `Core 拒绝了命令：${result.code}`
+    const message = typeof result.payload.message === 'string' ? result.payload.message : `操作未完成：${result.code}`
     throw new Error(message)
   }
 }

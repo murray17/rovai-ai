@@ -779,7 +779,7 @@ export function StructuredMentionComposer({
           className={`structured-mention-menu mention-menu${query.kind === 'skill' ? ' skill-picker-menu' : ''}`}
           id={menuId}
           role="listbox"
-          aria-label={query.kind === 'skill' ? '选择当前 Lead 可用的 Skill' : '选择在队的队员'}
+          aria-label={query.kind === 'skill' ? '选择当前负责人可用的 Skill' : '选择在队的队员'}
         >
           <div className="mention-menu-heading" role="presentation">
             <strong>{query.kind === 'skill' ? 'Skills' : '@ 提及队员'}</strong>
@@ -840,11 +840,11 @@ export function StructuredMentionComposer({
               {query.kind === 'mention'
                 ? '没有匹配的在队队员'
                 : skillCatalogStatus === 'loading'
-                  ? '正在读取当前 Lead 可用的 Skill…'
+                  ? '正在读取当前负责人可用的 Skill…'
                   : skillCatalogStatus === 'error'
                     ? '暂时无法读取 Skill；输入内容仍可正常发送。'
                     : (skills?.length ?? 0) === 0
-                      ? '当前 Lead 没有已配置的可用 Skill'
+                      ? '当前负责人没有已配置的可用 Skill'
                       : '没有匹配的 Skill'}
             </p>
           )}

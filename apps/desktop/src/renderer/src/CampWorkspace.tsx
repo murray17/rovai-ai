@@ -207,7 +207,7 @@ export function agentRunTerminalNote(
   run: Pick<AgentRunView, 'terminalReasonCode'>
 ): string | null {
   return run.terminalReasonCode === 'planned_shutdown_cancelled'
-    ? '因 Rovai 计划关闭，Runtime 已确认取消本次执行。'
+    ? '因 Rovai 计划关闭，执行引擎已确认取消本次执行。'
     : null
 }
 
@@ -713,6 +713,7 @@ export function CampWorkspace({
   onInspectorTabChange,
   onOpenInspector,
   notificationFocus = null,
+  onNotificationFocusPresented,
   runtimeRecovery = null,
   onConfigureRuntime,
   onDismissRuntimeRecovery
@@ -738,6 +739,7 @@ export function CampWorkspace({
   onInspectorTabChange?(tab: CampInspectorTab): void
   onOpenInspector?(tab: CampInspectorTab): void
   notificationFocus?: NotificationFocusTarget | null
+  onNotificationFocusPresented?(requestId: number): void
   runtimeRecovery?: CampRuntimeRecovery | null
   onConfigureRuntime?(agentId: string): void
   onDismissRuntimeRecovery?(): void
@@ -1145,10 +1147,31 @@ export function CampWorkspace({
 
   useEffect(() => {
     if (!notificationFocus?.active) return undefined
-    const frame = window.requestAnimationFrame(() => {
-      const scrollBehavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-        ? 'auto'
-        : 'smooth'
+    let frame: number | null = null
+    let preparedTarget: HTMLElement | null = null
+    let focusObserved = false
+    const presentTarget = (target: HTMLElement): void => {
+      if (preparedTarget !== target) {
+        preparedTarget = target
+        focusObserved = false
+        target.classList.add('notification-focus-target')
+        target.scrollIntoView({
+          block: 'center',
+          behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+            ? 'auto'
+            : 'smooth'
+        })
+        window.setTimeout(() => target.classList.remove('notification-focus-target'), 1_800)
+      }
+      if (focusObserved && document.activeElement === target) {
+        onNotificationFocusPresented?.(notificationFocus.requestId)
+        return
+      }
+      target.focus({ preventScroll: true })
+      focusObserved = document.activeElement === target
+      frame = window.requestAnimationFrame(present)
+    }
+    const present = (): void => {
       if (notificationFocus.kind === 'approval') {
         return
       }
@@ -1160,10 +1183,9 @@ export function CampWorkspace({
             ) ?? null
           : null
         if (target) {
-          target.classList.add('notification-focus-target')
-          target.scrollIntoView({ block: 'center', behavior: scrollBehavior })
-          target.focus({ preventScroll: true })
-          window.setTimeout(() => target.classList.remove('notification-focus-target'), 1_800)
+          presentTarget(target)
+        } else {
+          frame = window.requestAnimationFrame(present)
         }
         return
       }
@@ -1175,20 +1197,16 @@ export function CampWorkspace({
         : null
       const target = targets && targets.length > 0 ? targets[targets.length - 1] : null
       if (target) {
-        target.classList.add('notification-focus-target')
-        target.scrollIntoView({ block: 'center', behavior: scrollBehavior })
-        target.focus({ preventScroll: true })
-        window.setTimeout(() => target.classList.remove('notification-focus-target'), 1_800)
+        presentTarget(target)
       } else {
-        const scroll = timelineScrollRef.current
-        if (scroll) {
-          scroll.scrollTop = scroll.scrollHeight
-          scroll.focus({ preventScroll: true })
-        }
+        frame = window.requestAnimationFrame(present)
       }
-    })
-    return () => window.cancelAnimationFrame(frame)
-  }, [notificationFocus, snapshot.messages, snapshot.agentRuns])
+    }
+    frame = window.requestAnimationFrame(present)
+    return () => {
+      if (frame !== null) window.cancelAnimationFrame(frame)
+    }
+  }, [notificationFocus, onNotificationFocusPresented, snapshot.messages, snapshot.agentRuns])
 
   useEffect(() => {
     const nextLastId = conversationTimeline.at(-1)?.id ?? null
@@ -1524,7 +1542,7 @@ export function CampWorkspace({
   ])
 
   return (
-    <section className="workspace-shell camp-workspace" aria-label={`Camp：${snapshot.camp.title}`}>
+    <section className="workspace-shell camp-workspace" aria-label={`会话：${snapshot.camp.title}`}>
       <div className={`workspace-grid ${inspectorVisible ? '' : 'inspector-collapsed'}`.trim()}>
         <section
           className="timeline-pane"
@@ -1821,7 +1839,7 @@ export function CampWorkspace({
 
         {inspectorVisible && <aside
           className="activity-pane"
-          aria-label="Camp 检查器"
+          aria-label="会话详情"
           onDragEnter={(event) => {
             if (!dataTransferContainsFiles(event.dataTransfer)) return
             event.dataTransfer.dropEffect = 'none'
@@ -1844,7 +1862,7 @@ export function CampWorkspace({
             activationMode="manual"
             className="activity-tabs"
           >
-            <Tabs.List className="tabs-list sticky-tabs" aria-label="Camp 详情">
+            <Tabs.List className="tabs-list sticky-tabs" aria-label="会话详情">
               <Tabs.Trigger value="tasks">任务 <small>{snapshot.tasks.length}</small></Tabs.Trigger>
               <Tabs.Trigger value="members">队员 <small>{campInspectorMembers(snapshot.members).length}</small></Tabs.Trigger>
             </Tabs.List>
@@ -1891,6 +1909,7 @@ export function CampWorkspace({
               focusApprovalId={notificationFocus?.kind === 'approval'
                 ? notificationFocus.approvalId ?? null
                 : null}
+              onFocusPresented={onNotificationFocusPresented}
             />
           )}
 
@@ -1959,7 +1978,7 @@ export function CampWorkspace({
               members={composerMembers}
               skills={composerSkills}
               skillCatalogStatus={composerSkillCatalog.status}
-              ariaLabel={`给 ${defaultLead?.displayName ?? 'Default Lead'} 发消息`}
+              ariaLabel={`给 ${defaultLead?.displayName ?? '默认负责人'} 发消息`}
               placeholder="继续提问、补充约束或交付下一项职责…"
               disabled={busy || composerSubmitting}
               editorRef={composerEditorRef}
@@ -1976,7 +1995,7 @@ export function CampWorkspace({
                 )}
             />
             <span className="mention-target-summary">
-              未提及时发送给 Lead
+              未提及时发送给负责人
             </span>
           </div>
           <div className="composer-actions">
@@ -2082,7 +2101,7 @@ function RunPulse({
         <span className="run-pulse-mark" aria-hidden="true"><i /></span>
         <strong>执行台</strong>
         <span className="run-pulse-count" aria-live="polite">
-          {stopping ? '正在停止当前 CampTurn · ' : activeProcessCount > 0 ? `${activeProcessCount} 位执行中 · ` : ''}
+          {stopping ? '正在停止本轮协作 · ' : activeProcessCount > 0 ? `${activeProcessCount} 位执行中 · ` : ''}
           {visibleProcesses.length} 位队员
         </span>
       </div>
@@ -2440,7 +2459,7 @@ function ExecutionDrawer({
               <h2 id="execution-drawer-title">{drawerTitle}</h2>
               <p>
                 共 {process.runs.length} 次执行
-                {process.runs.some(agentRunCountsAsExecuting) && ' · 当前有进行中 AgentRun'}
+                {process.runs.some(agentRunCountsAsExecuting) && ' · 当前正在执行'}
               </p>
             </div>
           </div>
@@ -2490,14 +2509,14 @@ function ExecutionDrawer({
                           <time>{runIntervalLabel(run)}</time>
                           <span className={`execution-run-boundary-state tone-${state.tone}`}>{state.label}</span>
                           {focused && NON_TERMINAL_RUNS.has(run.status) && (
-                            <span className="current-run-badge">当前 AgentRun</span>
+                            <span className="current-run-badge">当前执行</span>
                           )}
                         </div>
                         <div className="execution-run-meta">
-                          <span>AgentRun <code>{shortIdentity(run.id)}</code></span>
+                          <span>执行 <code>{shortIdentity(run.id)}</code></span>
                           <span>{run.invocationKind === 'a2a' ? 'A2A' : '直接执行'}</span>
                           {run.invocationKind === 'a2a' && <span>深度 {run.a2aDepth}</span>}
-                          <span>CampTurn <code>{shortIdentity(run.campTurnId)}</code></span>
+                          <span>本轮 <code>{shortIdentity(run.campTurnId)}</code></span>
                         </div>
                       </div>
                     </header>
@@ -2906,7 +2925,7 @@ function MentionAllMembersPopover({
         <span aria-hidden="true">@</span>
         <div>
           <h2>所有队员</h2>
-          <p>广播 Mention</p>
+          <p>群体提及</p>
         </div>
       </header>
       <div className="mention-profile-status">
@@ -3030,14 +3049,14 @@ function CampMembersPanel({
   const awayCount = members.length - presentCount
 
   return (
-    <section aria-label="当前 Camp 队员">
+    <section aria-label="当前会话队员">
       <div className="camp-members-summary">
         <div className="camp-members-summary-line">
           <div>
             <strong>协作队员</strong>
             <small>{presentCount} 位在队 · {awayCount} 位暂离</small>
           </div>
-          <span className="camp-members-scope">当前 Camp</span>
+          <span className="camp-members-scope">当前会话</span>
         </div>
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
@@ -3046,14 +3065,14 @@ function CampMembersPanel({
               type="button"
               disabled={busy || presentCount === 0}
               aria-label={defaultLead
-                ? `Default Lead，${defaultLead.displayName}；更换 Default Lead`
-                : '选择 Default Lead'}
+                ? `默认负责人，${defaultLead.displayName}；更换默认负责人`
+                : '选择默认负责人'}
             >
               {defaultLead
                 ? <MemberAvatar agentId={defaultLead.agentId} avatarRef={defaultLead.avatarRef} displayName={defaultLead.displayName} size="mention" decorative />
                 : <span className="camp-lead-picker-empty" aria-hidden="true">—</span>}
               <span className="camp-lead-picker-copy">
-                <strong>Default Lead · {defaultLead?.displayName ?? '未设置'}</strong>
+                <strong>默认负责人 · {defaultLead?.displayName ?? '未设置'}</strong>
                 <small>{defaultLead?.teamRole || '从在队队员中选择'}</small>
               </span>
               <svg className="camp-lead-picker-chevron" aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" viewBox="0 0 16 16">
@@ -3067,9 +3086,9 @@ function CampMembersPanel({
               align="end"
               sideOffset={5}
               collisionPadding={10}
-              aria-label="更换 Default Lead"
+              aria-label="更换默认负责人"
             >
-              <DropdownMenu.Label className="camp-lead-menu-label">选择 Default Lead</DropdownMenu.Label>
+              <DropdownMenu.Label className="camp-lead-menu-label">选择默认负责人</DropdownMenu.Label>
               <DropdownMenu.RadioGroup
                 value={defaultLead?.agentId ?? ''}
                 onValueChange={(agentId) => {
@@ -3102,7 +3121,7 @@ function CampMembersPanel({
         </DropdownMenu.Root>
       </div>
 
-      <div className="camp-inspector-member-list" role="list" aria-label="Camp 队员列表">
+      <div className="camp-inspector-member-list" role="list" aria-label="会话队员列表">
         {members.map((member) => {
           const profile = profileById.get(member.agentId) ?? null
           const present = campMemberIsLeadEligible(member)
@@ -3126,7 +3145,7 @@ function CampMembersPanel({
               <span className="camp-inspector-member-copy">
                 <span className="camp-inspector-member-name">
                   <strong>{member.displayName}</strong>
-                  {member.isDefaultLead && <small>Lead</small>}
+                  {member.isDefaultLead && <small>负责人</small>}
                 </span>
                 <small>{member.teamRole || '团队角色未设置'}</small>
               </span>
@@ -3137,7 +3156,7 @@ function CampMembersPanel({
             </article>
           )
         })}
-        {members.length === 0 && <EmptyInline text="当前 Camp 没有可显示的队员。" />}
+        {members.length === 0 && <EmptyInline text="当前会话没有可显示的队员。" />}
       </div>
     </section>
   )
@@ -3150,7 +3169,8 @@ function ApprovalDock({
   onResolve,
   containerRef,
   focusRequest,
-  focusApprovalId
+  focusApprovalId,
+  onFocusPresented
 }: {
   approvals: ActionApprovalView[]
   profileById: Map<string, AgentProfile>
@@ -3159,6 +3179,7 @@ function ApprovalDock({
   containerRef: RefObject<HTMLElement | null>
   focusRequest: number | null
   focusApprovalId: string | null
+  onFocusPresented?(requestId: number): void
 }): JSX.Element {
   const [activeIndex, setActiveIndex] = useState(0)
   const [collapsed, setCollapsed] = useState(false)
@@ -3199,19 +3220,45 @@ function ApprovalDock({
 
   useEffect(() => {
     if (focusRequest === null || collapsed) return undefined
-    const frame = window.requestAnimationFrame(() => {
-      const target = containerRef.current
+    if (focusApprovalId && approval.id !== focusApprovalId) return undefined
+    let frame: number | null = null
+    let scrolled = false
+    let focusObserved = false
+    const present = (): void => {
+      const presentationRoot = focusApprovalId
+        ? containerRef.current?.querySelector<HTMLElement>(
+            `[data-approval-id="${CSS.escape(focusApprovalId)}"]`
+          ) ?? null
+        : containerRef.current
+      const target = presentationRoot
         ?.querySelector<HTMLButtonElement>('.runtime-option:not(:disabled)')
-        ?? containerRef.current?.querySelector<HTMLButtonElement>('.approval-dock-collapse')
-      if (!target) return
-      target.scrollIntoView({
-        block: 'center',
-        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
-      })
+        ?? (!focusApprovalId
+          ? containerRef.current?.querySelector<HTMLButtonElement>('.approval-dock-collapse')
+          : null)
+      if (!target) {
+        frame = window.requestAnimationFrame(present)
+        return
+      }
+      if (!scrolled) {
+        scrolled = true
+        target.scrollIntoView({
+          block: 'center',
+          behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+        })
+      }
+      if (focusObserved && document.activeElement === target) {
+        onFocusPresented?.(focusRequest)
+        return
+      }
       target.focus({ preventScroll: true })
-    })
-    return () => window.cancelAnimationFrame(frame)
-  }, [activeIndex, collapsed, containerRef, focusRequest])
+      focusObserved = document.activeElement === target
+      frame = window.requestAnimationFrame(present)
+    }
+    frame = window.requestAnimationFrame(present)
+    return () => {
+      if (frame !== null) window.cancelAnimationFrame(frame)
+    }
+  }, [activeIndex, approval.id, collapsed, containerRef, focusApprovalId, focusRequest, onFocusPresented])
 
   return (
     <section className={collapsed ? 'approval-dock is-collapsed' : 'approval-dock'} aria-label={`${approvals.length} 项待审批`} ref={containerRef}>
@@ -3314,7 +3361,7 @@ function EmptyCampWelcome({
       <p className="empty-camp-description">
         {snapshot.camp.activationState === 'pending'
           ? '当前只是一份草稿。输入内容后会自动保留；发送第一条消息时才会正式创建对话。'
-          : '这里已经保留当前工作区、队员和 Default Lead。发送第一条消息后，公共讨论、执行过程和最终结论会依次展开。'}
+          : '这里已经保留当前工作区、队员和默认负责人。发送第一条消息后，公共讨论、执行过程和最终结论会依次展开。'}
       </p>
 
       <div className="empty-camp-context" aria-label="当前协作配置">
@@ -3330,7 +3377,7 @@ function EmptyCampWelcome({
               className="empty-camp-avatar"
             />
           )}
-          <strong>{lead ? `Lead · ${lead.displayName}` : 'Default Lead 未设置'}</strong>
+          <strong>{lead ? `负责人 · ${lead.displayName}` : '默认负责人未设置'}</strong>
         </span>
         <span><i aria-hidden="true">◎</i><strong>{activeMembers.length} 位队员已在队</strong></span>
         <span><i className="empty-camp-readiness" aria-hidden="true" /><strong>{emptyCampRuntimeSummary(snapshot.members, agents)}</strong></span>
@@ -3729,7 +3776,7 @@ function taskTimelineCardPresentation(task: TaskView): TaskTimelineCardPresentat
     return {
       headline: '任务责任已更新',
       noteLabel: '当前',
-      note: '等待负责人开始；创建不会自动启动 AgentRun',
+      note: '等待负责人开始；创建不会自动启动执行',
       unassigned: false
     }
   }
@@ -4413,7 +4460,7 @@ export function TaskPanel({
       beginEdit(task)
     } else {
       resetForm()
-      setFormError('这项 Task 当前不可见，无法打开详情。')
+      setFormError('这项任务当前不可见，无法打开详情。')
     }
   }, [focusRequest, focusTaskId])
 
@@ -4452,7 +4499,7 @@ export function TaskPanel({
     event.preventDefault()
     if (!selectedTask || !title.trim() || submitting || busy) return
     if ((status === 'in_progress' || status === 'blocked') && !assigneeAgentId) {
-      setFormError('进行中或已阻塞的 Task 必须有负责人。')
+      setFormError('进行中或已阻塞的任务必须有负责人。')
       return
     }
     if (status === 'blocked' && !blockedReason.trim()) {
@@ -4495,7 +4542,7 @@ export function TaskPanel({
           })
           if (current) setExpectedVersion(current.version)
           await onTasksChanged()
-          setFormError('这项 Task 已被其他操作更新。当前版本已刷新，你的草稿仍保留；确认后可再次提交。')
+          setFormError('这项任务已被其他操作更新。当前版本已刷新，你的草稿仍保留；确认后可再次提交。')
         } else {
           setFormError(taskCommandMessage(result))
         }
@@ -4583,7 +4630,7 @@ export function TaskPanel({
 
       {mode === 'edit' && selectedTask && (
         <form className="task-editor" onSubmit={(event) => void submitUpdate(event)}>
-          <div className="task-editor-heading"><strong>{terminal ? 'Task 详情' : '编辑 Task'}</strong><span>版本 {expectedVersion}</span></div>
+          <div className="task-editor-heading"><strong>{terminal ? '任务详情' : '编辑任务'}</strong><span>版本 {expectedVersion}</span></div>
           <TaskFields
             title={title}
             description={description}
@@ -4608,14 +4655,14 @@ export function TaskPanel({
           <RelatedTaskExecution task={selectedTask} snapshot={snapshot} onOpenAgent={onOpenAgent} />
           {formError && <p className="task-form-error" role="alert">{formError}</p>}
           {terminal
-            ? <p className="task-terminal-note">已结束的 Task 保留为只读记录，不能重新打开或删除。</p>
+            ? <p className="task-terminal-note">已结束的任务保留为只读记录，不能重新打开或删除。</p>
             : <>
                 <button className="primary-button task-submit" type="submit" disabled={!title.trim() || submitting || busy}>{submitting ? '正在保存…' : '保存修改'}</button>
                 <div className="task-cancel-zone">
-                  <strong>取消 Task</strong>
-                  <p>取消 Task 不会取消已经接受或正在运行的 AgentRun。</p>
+                  <strong>取消任务</strong>
+                  <p>取消任务不会取消已经接受或正在运行的执行。</p>
                   <label className="task-field"><span>取消原因</span><textarea value={cancelReason} rows={2} maxLength={4000} disabled={submitting || busy} onChange={(event) => setCancelReason(event.currentTarget.value)} /></label>
-                  <button className="danger-button" type="button" disabled={!cancelReason.trim() || submitting || busy} onClick={() => void submitCancel()}>确认取消 Task</button>
+                  <button className="danger-button" type="button" disabled={!cancelReason.trim() || submitting || busy} onClick={() => void submitCancel()}>确认取消任务</button>
                 </div>
               </>}
         </form>
@@ -4740,11 +4787,11 @@ function TaskAuditDetail({ task, snapshot }: { task: TaskView; snapshot: CampSna
     ? String((releaseEvent.payload as { cause?: unknown }).cause ?? '')
     : ''
   return (
-    <section className="task-detail-section" aria-label="Task 审计信息">
+    <section className="task-detail-section" aria-label="任务审计信息">
       <strong>责任与审计</strong>
       <dl className="task-detail-grid">
         <div><dt>创建者</dt><dd>{task.createdByType} · {task.createdById}</dd></div>
-        <div><dt>来源 AgentRun</dt><dd>{task.sourceAgentRunId ?? '无'}</dd></div>
+        <div><dt>来源执行</dt><dd>{task.sourceAgentRunId ?? '无'}</dd></div>
         <div><dt>创建时间</dt><dd>{formatDateTime(task.createdAt)}</dd></div>
         <div><dt>更新时间</dt><dd>{formatDateTime(task.updatedAt)}</dd></div>
         <div><dt>结束者</dt><dd>{task.closedByType ? `${task.closedByType} · ${task.closedById}` : '未结束'}</dd></div>
@@ -4770,7 +4817,7 @@ function RelatedTaskExecution({
   return (
     <section className="task-detail-section" aria-label="关联执行">
       <strong>关联执行</strong>
-      <p>{runs.length} 个 AgentRun · {deliveries.length} 个 MessageDelivery</p>
+      <p>{runs.length} 个执行 · {deliveries.length} 个消息投递</p>
       <div className="task-related-runs">
         {processes.map((process) => {
           const run = preferredAgentProcessRun(process.runs)
@@ -4801,12 +4848,12 @@ function taskAssigneeName(task: TaskView, snapshot: CampSnapshot): string {
 
 function taskCommandMessage(result: StoredCommandResult): string {
   const messages: Record<string, string> = {
-    'task.terminal': '已完成或已取消的 Task 不能再修改。',
-    'task.assignee_unavailable': '所选负责人已不在当前 Camp，或当前不可用。',
-    'task.invalid_status_transition': '当前 Task 状态不允许这样变更。',
-    'task.version_conflict': 'Task 已被其他操作更新，请刷新后重试。'
+    'task.terminal': '已完成或已取消的任务不能再修改。',
+    'task.assignee_unavailable': '所选负责人已不在当前会话，或当前不可用。',
+    'task.invalid_status_transition': '当前任务状态不允许这样变更。',
+    'task.version_conflict': '任务已被其他操作更新，请刷新后重试。'
   }
-  return messages[result.code] ?? `Core 拒绝了这次修改：${result.code}`
+  return messages[result.code] ?? `修改未完成：${result.code}`
 }
 
 function shortIdentity(value: string): string {

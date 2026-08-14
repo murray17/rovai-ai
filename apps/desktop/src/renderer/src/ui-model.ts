@@ -189,7 +189,7 @@ export function agentRunStateTag(
 export function agentRunWaitDetail(waitReason: string | null): string | null {
   return ({
     delivery_unknown: 'Agent 运行时是否接收输入尚不可确认；为避免重复执行，Rovai-ai 不会盲目重发。',
-    runtime_recovery: '正在从持久化 AgentRun、Native Session 与输入回执恢复执行。',
+    runtime_recovery: '正在从已保存的执行、运行会话与输入回执恢复。',
     recovery_blocked: 'Agent 运行时已接受任务，但 Rovai-ai 重启后无法确认原任务的最终结果。原请求不会自动重发。',
     approval: '受限动作正在等待用户处理。',
     user_input: 'Agent 已暂停，等待用户补充信息。'
@@ -666,18 +666,22 @@ function canonicalRuntimeActivity(value: unknown): CanonicalRuntimeActivityView 
 
 function canonicalActivityTitle(canonical: CanonicalRuntimeActivityView | null | undefined): string {
   if (canonical?.toolName) return canonical.toolName
-  if (canonical?.presentationHint) return canonical.presentationHint
+  if (canonical?.presentationHint) {
+    return canonical.presentationHint
+      .replaceAll('Runtime 工具调用', '工具调用')
+      .replaceAll('Runtime 活动', '系统活动')
+  }
   return ({
     shell: '终端操作',
     file: '文件操作',
     git: 'Git 操作',
     network: '网络操作',
-    tool: 'Runtime 工具调用',
+    tool: '工具调用',
     permission: '权限处理',
     runtime: 'Agent 运行',
     plan: '计划更新',
-    unknown: 'Runtime 活动'
-  } as Record<string, string>)[canonical?.activityDomain ?? 'unknown'] ?? 'Runtime 活动'
+    unknown: '系统活动'
+  } as Record<string, string>)[canonical?.activityDomain ?? 'unknown'] ?? '系统活动'
 }
 
 function canonicalActivityStatus(

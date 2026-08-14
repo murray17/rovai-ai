@@ -475,7 +475,7 @@ function assertApplied(result: StoredCommandResult): void {
     : typeof result.payload.detail === 'string'
       ? result.payload.detail
       : null
-  throw new Error(detail ?? `Core 拒绝了排序：${result.code}`)
+  throw new Error(detail ?? `排序未完成：${result.code}`)
 }
 
 function errorMessage(error: unknown): string {

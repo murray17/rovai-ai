@@ -281,7 +281,7 @@ export function NewConversationDialog({
               <section className="new-camp-section">
                 <SectionHeading
                   step="02"
-                  title="队员与 Lead"
+                  title="队员与负责人"
                   suffix={`已选 ${selectedMembers.length} / ${preflight.presentMembers.length}`}
                   detail="默认选择全部在队的队员；Agent 运行时状态不影响结构选择。"
                 />
@@ -316,7 +316,7 @@ export function NewConversationDialog({
                           {memberMenuOpen && (
                             <div className="new-camp-picker-menu member-menu" role="listbox" aria-label="选择队员" aria-multiselectable="true">
                               <div className="new-camp-member-toolbar">
-                                <span>本次 Camp 队员</span>
+                                <span>本次会话队员</span>
                                 <button
                                   type="button"
                                   disabled={busy || selectedMembers.length === preflight.presentMembers.length}
@@ -346,7 +346,7 @@ export function NewConversationDialog({
                         </div>
                         {memberError && <p className="new-camp-field-error" role="alert">{memberError}</p>}
                         <label className="new-camp-lead-field">
-                          <span>Lead</span>
+                          <span>负责人</span>
                           <select value={leadId} disabled={busy} onChange={(event) => setLeadId(event.target.value)}>
                             {selectedMembers.map((member) => (
                               <option key={member.agentId} value={member.agentId}>
@@ -420,7 +420,7 @@ export function NewConversationDialog({
             <footer className="new-camp-dialog-footer">
               <div>
                 <span>{workspace?.name ?? '快速对话'} · <strong>{selectedMembers.length} 位队员</strong></span>
-                {lead && <span> · Lead：{lead.displayName}</span>}
+                {lead && <span> · 负责人：{lead.displayName}</span>}
                 {submitError && <p role="alert">{submitError}</p>}
               </div>
               <div>
@@ -622,18 +622,18 @@ export function describeInitialCampSelectionAdjustments(
     const originalLead = profileById.get(preferred.defaultLeadAgentId)
     if (!originalLead) {
       items.push(preferred.defaultLeadAgentId
-        ? `原默认 Lead“${preferred.defaultLeadAgentId}”当前不存在`
-        : '未保存有效的默认 Lead')
+        ? `原默认负责人“${preferred.defaultLeadAgentId}”当前不存在`
+        : '未保存有效的默认负责人')
     } else if (originalLead.presence === 'removed' || originalLead.removedAt !== null) {
-      items.push(`原默认 Lead ${originalLead.displayName}已永久移除`)
+      items.push(`原默认负责人 ${originalLead.displayName}已永久移除`)
     } else if (originalLead.presence === 'away') {
-      items.push(`原默认 Lead ${originalLead.displayName}已暂时离队`)
+      items.push(`原默认负责人 ${originalLead.displayName}已暂时离队`)
     } else {
-      items.push(`原默认 Lead ${originalLead.displayName}当前不可用`)
+      items.push(`原默认负责人 ${originalLead.displayName}当前不可用`)
     }
     items.push(plan.leadId
-      ? `本次暂时选择${displayName(plan.leadId)}作为 Lead`
-      : '当前没有可用队员可作为 Lead')
+      ? `本次暂时选择${displayName(plan.leadId)}作为负责人`
+      : '当前没有可用队员可作为负责人')
   }
 
   if (items.length === 0) {

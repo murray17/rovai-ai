@@ -496,8 +496,8 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
                 )}
                 {removal.preview.nonTerminalAgentRunCount === 0 && (
                   <div className="inline-notice">
-                    将从 {removal.preview.currentCampMembershipCount} 个 Camp 移除，并释放 {removal.preview.openAssignedTaskCount} 个未完成 Task。
-                    {removal.preview.defaultLeadCampCount > 0 && ` 其中 ${removal.preview.defaultLeadCampCount} 个 Camp 将重新选择默认负责人。`}
+                    将从 {removal.preview.currentCampMembershipCount} 个会话移除，并释放 {removal.preview.openAssignedTaskCount} 个未完成任务。
+                    {removal.preview.defaultLeadCampCount > 0 && ` 其中 ${removal.preview.defaultLeadCampCount} 个会话将重新选择默认负责人。`}
                   </div>
                 )}
                 <label className="field-label">输入 {removal.displayName} 确认
@@ -752,7 +752,7 @@ function MemberIdentitySummary({ agent, busy, onEditAvatar }: {
           </button>
         </div>
       </div>
-      {agent.presence === 'away' && <div className="member-status-note" role="status">队员仍属于已有 Camp；已有执行不会中断，但不会再启动新的执行。</div>}
+      {agent.presence === 'away' && <div className="member-status-note" role="status">队员仍属于已有会话；已有执行不会中断，但不会再启动新的执行。</div>}
     </section>
   )
 }
@@ -1472,7 +1472,7 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
         <div className="section-heading">
           <div><h2>Agent 运行时目录</h2></div>
         </div>
-        <p className="section-intro">九种已支持产品始终显示。页面优先使用最近一次结果，缺失或过期时由 Core 在后台刷新；重新检查会执行你的交互式登录 Shell 初始化，但只读取 PATH。</p>
+        <p className="section-intro">九种已支持产品始终显示。页面优先使用最近一次结果，缺失或过期时在后台刷新；重新检查会执行你的交互式登录 Shell 初始化，但只读取 PATH。</p>
 
         <div className="runtime-installation-list">
           {PRODUCT_RUNTIMES.map((runtimeKind) => {
@@ -1557,7 +1557,7 @@ async function createAndRefreshRuntimeInstallation(
   })
   assertApplied(result)
   const installationId = result.resultEntity?.entityId ?? stringField(result.payload, 'installationId')
-  if (!installationId) throw new Error('Core 没有返回新 Agent 运行时 ID。')
+  if (!installationId) throw new Error('新 Agent 运行时已创建，但暂时无法打开。请重新检测后重试。')
   const refreshed = await window.rovai.request<StoredCommandResult>('runtime.installations.refresh', {
     commandId: crypto.randomUUID(),
     installationId
@@ -1725,10 +1725,10 @@ function commandCodeLabel(code: string): string {
   return ({
     'agent_profile.display_name_conflict': '该名称已被其他队员使用',
     'agent_profile.version_conflict': '队员已被其他操作更新，请刷新后重试',
-    'agent_profile.default_lead_successor_required': '该队员仍是 Camp 的 Default Lead，请先在 Camp 中指定继任者',
+    'agent_profile.default_lead_successor_required': '该队员仍是某个会话的默认负责人，请先在对应会话中指定继任者',
     'adapter_installation.already_exists': '这个 Agent 运行时已经存在',
     'adapter_installation.version_conflict': 'Agent 运行时已被更新，请刷新后重试'
-  } as Record<string, string>)[code] ?? `Core 拒绝了操作：${code}`
+  } as Record<string, string>)[code] ?? `操作未完成：${code}`
 }
 
 function adapterLabel(kind: AdapterKind): string {

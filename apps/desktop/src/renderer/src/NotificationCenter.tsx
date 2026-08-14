@@ -507,7 +507,6 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
           return
         }
         setOpen(false)
-        await afterNextPaint()
         const presented = await onPresentNavigation(episode, action)
         if (generation !== navigationGeneration.current) {
           onCancelNavigation()
@@ -516,8 +515,8 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
         if (!presented) {
           onCancelNavigation()
           setNavigationError(acknowledgementPersisted
-            ? '已打开 Camp，但目标未能获得焦点；这条来源已按你的动作标记为已读。'
-            : '已打开 Camp，但目标未能获得焦点。你可以稍后重试。')
+            ? '已打开会话，但目标未能获得焦点；这条来源已按你的动作标记为已读。'
+            : '已打开会话，但目标未能获得焦点。你可以稍后重试。')
           setOpen(true)
         } else {
           window.setTimeout(() => { returnFocusRef.current = null }, 0)
@@ -780,14 +779,14 @@ function NotificationRow({
               onClick={() => onAction(episode.primaryAction)}
             >{busy
                 ? episode.primaryAction.kind === 'acknowledge_only' ? '正在确认…' : '正在打开…'
-                : actionLabel(episode.primaryAction)}</button>
+                : notificationActionLabel(episode.primaryAction)}</button>
             {episode.secondaryActions.map((action) => (
               <button
                 key={action.actionId}
                 type="button"
                 disabled={disabled || !action.available}
                 onClick={() => onAction(action)}
-              >{actionLabel(action)}</button>
+              >{notificationActionLabel(action)}</button>
             ))}
           </div>
           {!episode.primaryAction.available && (
@@ -971,13 +970,13 @@ export function episodeHasActiveHeadsUpReason(
   return reason.state === 'unacknowledged'
 }
 
-function actionLabel(action: NotificationActionView): string {
+export function notificationActionLabel(action: NotificationActionView): string {
   if (!action.available) return '来源不可用'
   switch (action.kind) {
     case 'open_approval': return '处理审批'
     case 'open_camp_message': return '查看消息'
     case 'open_camp_turn': return '查看本轮'
-    case 'open_camp': return '打开 Camp'
+    case 'open_camp': return '打开会话'
     case 'acknowledge_only': return '知道了'
   }
 }
@@ -1028,14 +1027,6 @@ function CloseIcon(): React.JSX.Element {
       <path d="m4 4 8 8M12 4l-8 8" />
     </svg>
   )
-}
-
-function afterNextPaint(): Promise<void> {
-  return new Promise((resolve) => {
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => resolve())
-    })
-  })
 }
 
 function errorMessage(error: unknown): string {

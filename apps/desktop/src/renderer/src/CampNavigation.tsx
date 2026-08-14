@@ -163,7 +163,7 @@ export async function revealMoreNavigationCamps(
   }
 
   const page = await loadPage(state.serverOffset, NAVIGATION_MORE_CAMPS_STEP)
-  if (page.schemaVersion !== 3) throw new Error('Navigation group schema is incompatible')
+  if (page.schemaVersion !== 3) throw new Error('会话列表数据版本不兼容。')
   const camps = appendUniqueNavigationCamps(state.camps, page.camps)
   const pageTotalCount = Math.max(0, page.totalCount)
   return {
@@ -749,14 +749,14 @@ export function CampNavigation({
             {action?.kind === 'rename' ? (
               <form onSubmit={(event) => void submitRename(event)}>
                 <Dialog.Title>重命名对话</Dialog.Title>
-                <Dialog.Description>只修改侧栏标题，不改变 Camp 的项目归属、队员或活动顺序。</Dialog.Description>
+                <Dialog.Description>只修改侧栏标题，不改变会话的项目归属、队员或活动顺序。</Dialog.Description>
                 <label className="field-label" htmlFor="rename-camp-title">标题<input id="rename-camp-title" autoFocus value={renameTitle} onChange={(event) => setRenameTitle(event.target.value)} disabled={actionBusy} /></label>
                 <div className="dialog-actions"><Dialog.Close asChild><button className="quiet-button" type="button" disabled={actionBusy}>取消</button></Dialog.Close><button className="primary-button" type="submit" disabled={!renameTitle.trim() || actionBusy}>{actionBusy ? '保存中…' : '保存'}</button></div>
               </form>
             ) : action?.kind === 'delete' ? (
               <div>
                 <Dialog.Title>永久删除“{action.camp.title}”？</Dialog.Title>
-                <Dialog.Description>这会删除 Camp 的会话、队员连续性、运行记录和关联数据。此操作不能撤销，也不会删除本地 Repository。</Dialog.Description>
+                <Dialog.Description>这会删除该会话的消息、队员连续性、运行记录和关联数据。此操作不能撤销，也不会删除本地项目目录。</Dialog.Description>
                 {deleteBlockers.length > 0 && (
                   <div className="delete-blockers" role="alert">
                     <strong>当前还不能删除</strong>
@@ -770,7 +770,7 @@ export function CampNavigation({
               <div>
                 <Dialog.Title>从侧栏移除“{action.project.name}”？</Dialog.Title>
                 <Dialog.Description>
-                  项目会从这台 Mac 的侧栏隐藏，并取消项目及其中对话的置顶。不会删除本地目录、Camp、消息、运行记录或审计；正在运行的执行也不会停止。之后重新选择同一工作目录即可恢复。
+                  项目会从这台 Mac 的侧栏隐藏，并取消项目及其中对话的置顶。不会删除本地目录、会话、消息、运行记录或审计；正在运行的执行也不会停止。之后重新选择同一工作目录即可恢复。
                 </Dialog.Description>
                 <div className="dialog-actions">
                   <Dialog.Close asChild><button className="quiet-button" type="button" disabled={actionBusy}>取消</button></Dialog.Close>
@@ -1274,13 +1274,13 @@ function projectKey(project: ProjectNavigationGroup): string {
 function deleteBlockerLabel(code: string): string {
   return ({
     nonterminal_agent_run: '仍有 Agent 正在执行或等待',
-    nonterminal_camp_turn: '仍有 CampTurn 未结束',
+    nonterminal_camp_turn: '本轮协作仍未结束',
     pending_approval: '仍有待处理审批',
     unsettled_action: '仍有未收敛动作',
     pending_message_delivery: '仍有公共消息投递未完成',
     pending_runtime_delivery: '仍有 Agent 运行时结果待确认',
     active_worker_lease: '仍有执行器持有租约',
     unfinished_membership_change: '仍有队员变更未完成',
-    unfinished_task_cancellation: '仍有 Task 取消未完成'
+    unfinished_task_cancellation: '仍有任务取消未完成'
   } as Record<string, string>)[code] ?? code
 }

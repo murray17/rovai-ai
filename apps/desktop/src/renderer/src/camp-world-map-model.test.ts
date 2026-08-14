@@ -143,7 +143,7 @@ describe('Camp world map model', () => {
       mode: 'running',
       speech: {
         kind: 'real',
-        label: 'AgentRun · 真实执行',
+        label: '执行 · 正在运行',
         text: '正在核对 会话区尺寸约束。'
       }
     })
@@ -151,7 +151,7 @@ describe('Camp world map model', () => {
       mode: 'waiting',
       speech: {
         kind: 'waiting',
-        label: 'AgentRun · 结果待确认',
+        label: '执行 · 结果待确认',
         text: '读取文件：CampWorkspace.tsx'
       }
     })
@@ -167,7 +167,7 @@ describe('Camp world map model', () => {
     expect(projection.agents[0]?.speech).toEqual({
       key: 'run_alice:running-without-output',
       kind: 'real',
-      label: 'AgentRun · 等待输出',
+      label: '执行 · 等待输出',
       text: '运行已开始，暂未收到可展示步骤。'
     })
   })

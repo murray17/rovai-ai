@@ -11,7 +11,8 @@ import type {
   CampSnapshot,
   CanonicalRuntimeActivityView,
   HealthStatus,
-  MessageDeliveryView
+  MessageDeliveryView,
+  NotificationActionView
 } from '@contracts'
 import {
   AppHeader,
@@ -27,6 +28,7 @@ import {
   campSnapshotWithAnchoredMessages,
   commandFailureMessage,
   effectiveCancellingTurnIds,
+  notificationFocusMatchesAction,
   optimisticCampMessage,
   rectanglesIntersect,
   reconcileCancellingTurnIds,
@@ -179,7 +181,7 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-labelledby="controlled-shutdown-title"')
     expect(markup).toContain('aria-describedby="controlled-shutdown-description"')
     expect(markup).toContain('正在停止运行并关闭 Rovai')
-    expect(markup).toContain('Runtime 返回可靠终态')
+    expect(markup).toContain('执行引擎返回可靠终态')
     expect(markup).toContain('无法确认的执行也会停止')
     expect(markup).toContain('保留外部效果现场')
     expect(markup).not.toContain('<button')
@@ -453,6 +455,38 @@ describe('task event projections', () => {
       { top: 200, right: 100, bottom: 300, left: 0 },
       viewport
     )).toBe(false)
+  })
+
+  it('binds presentation completion to the exact typed notification target', () => {
+    const messageAction = {
+      kind: 'open_camp_message',
+      messageId: 'message-1',
+      campTurnId: 'turn-1',
+      approvalId: null
+    } as NotificationActionView
+    expect(notificationFocusMatchesAction({
+      requestId: 1,
+      kind: 'camp_message',
+      campTurnId: 'turn-1',
+      messageId: 'message-1'
+    }, messageAction)).toBe(true)
+    expect(notificationFocusMatchesAction({
+      requestId: 2,
+      kind: 'camp_message',
+      campTurnId: 'turn-1',
+      messageId: 'message-stale'
+    }, messageAction)).toBe(false)
+    expect(notificationFocusMatchesAction({
+      requestId: 3,
+      kind: 'camp_turn',
+      campTurnId: 'turn-1'
+    }, { ...messageAction, kind: 'open_camp_turn', messageId: null })).toBe(true)
+    expect(notificationFocusMatchesAction({
+      requestId: 4,
+      kind: 'approval',
+      campTurnId: null,
+      approvalId: 'approval-1'
+    }, { ...messageAction, kind: 'open_approval', messageId: null, approvalId: 'approval-1' })).toBe(true)
   })
 
   it('projects a user message into the conversation before Core acknowledgement', () => {
@@ -873,8 +907,8 @@ describe('task event projections', () => {
     expect(describeInitialCampSelectionAdjustments(plan, preferred, agents)).toEqual({
       items: [
         '沐瓦已暂时离队，本次未加入',
-        '原默认 Lead 沐瓦已暂时离队',
-        '本次暂时选择洛可作为 Lead'
+        '原默认负责人 沐瓦已暂时离队',
+        '本次暂时选择洛可作为负责人'
       ],
       note: '以上调整只用于本次创建，不会修改“设置 → 通用”中保存的默认配置。'
     })
@@ -927,8 +961,8 @@ describe('task event projections', () => {
     expect(explanation?.items).toEqual([
       '沐瓦已永久移除，本次未加入',
       '默认队员均不可用，本次暂时选择全部当前在队队员：洛可',
-      '原默认 Lead 沐瓦已永久移除',
-      '本次暂时选择洛可作为 Lead'
+      '原默认负责人 沐瓦已永久移除',
+      '本次暂时选择洛可作为负责人'
     ])
   })
 
@@ -1508,10 +1542,10 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('给 洛可 发消息')
-    expect(markup).toContain('未提及时发送给 Lead')
+    expect(markup).toContain('未提及时发送给负责人')
     expect(markup).toContain('开始这段协作')
     expect(markup).toContain('快速对话')
-    expect(markup).toContain('Lead · 洛可')
+    expect(markup).toContain('负责人 · 洛可')
     expect(markup).toContain('1 位队员已在队')
     expect(markup).toContain('Agent 运行时不可用')
     expect(markup).toContain('先了解项目')
@@ -1519,7 +1553,7 @@ describe('task event projections', () => {
     expect(markup).toContain('检查工作区')
     expect(markup).toContain('队员 <small>1</small>')
     expect(markup).toContain('协作队员')
-    expect(markup).toContain('Default Lead · 洛可')
+    expect(markup).toContain('默认负责人 · 洛可')
     expect(markup).toContain('1 位在队 · 0 位暂离')
     expect(markup).not.toContain('上下文投递')
     expect(markup).not.toContain('AgentRun 上下文投递清单')
@@ -1681,7 +1715,7 @@ describe('task event projections', () => {
       onStop: () => undefined
     }))
 
-    expect(markup).toContain('给 Default Lead 发消息')
+    expect(markup).toContain('给 默认负责人 发消息')
     expect(markup).not.toMatch(/id="camp-message"[^>]*disabled/)
     expect(commandFailureMessage({
       commandId: 'command-1',
@@ -1900,8 +1934,8 @@ describe('task event projections', () => {
     expect(markup).not.toContain('Progress')
     expect(markup).not.toContain('正在补充复制入口。')
     expect(markup).not.toContain('Steps')
-    expect(markup).toContain('aria-label="Camp 世界地图"')
-    expect(markup).toContain('AgentRun · 真实执行')
+    expect(markup).toContain('aria-label="会话世界地图"')
+    expect(markup).toContain('执行 · 正在运行')
     expect(markup).toContain('执行 Shell 命令：pnpm test')
     expect(markup).not.toContain('conversation-bubble agent agent-run-message')
     expect(markup).not.toContain('execution-disclosure')
@@ -2124,7 +2158,7 @@ describe('task event projections', () => {
       inspectorVisible: false
     }))
     expect(cancelledMarkup).toContain('workspace-grid inspector-collapsed')
-    expect(cancelledMarkup).not.toContain('aria-label="Camp 检查器"')
+    expect(cancelledMarkup).not.toContain('aria-label="会话详情"')
     expect(cancelledMarkup).toContain('你已在 5 秒后停止')
     expect(cancelledMarkup).toContain('结果待确认 · 查看执行详情')
     expect(cancelledMarkup).not.toContain('run-message-state tone-neutral')
@@ -2537,7 +2571,7 @@ describe('task event projections', () => {
     })
     expect(agentRunTerminalNote({
       terminalReasonCode: 'planned_shutdown_cancelled'
-    })).toBe('因 Rovai 计划关闭，Runtime 已确认取消本次执行。')
+    })).toBe('因 Rovai 计划关闭，执行引擎已确认取消本次执行。')
     expect(agentRunTerminalNote({ terminalReasonCode: null })).toBeNull()
     expect(formatByteSize(4_096)).toBe('4.0 KB')
   })

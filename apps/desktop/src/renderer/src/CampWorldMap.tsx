@@ -561,7 +561,7 @@ export function CampWorldMap({
       data-density={density}
       data-motion-state={motionActive ? 'active' : 'paused'}
       data-population={agents.length > 6 ? 'crowded' : 'normal'}
-      aria-label="Camp 世界地图"
+      aria-label="会话世界地图"
     >
       <div
         className="camp-world-map-backdrop"
@@ -675,7 +675,7 @@ export function CampWorldMap({
           )}
           {agents.length === 0 && (
             <div className="camp-world-map-empty">
-              当前 Camp 暂无可在地图中呈现的队员。
+              当前会话暂无可在地图中呈现的队员。
             </div>
           )}
         </div>

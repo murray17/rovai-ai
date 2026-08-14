@@ -49,7 +49,7 @@ const NOTIFICATION_SCENARIOS: readonly NotificationScenario[] = [
       {
         key: 'userMentionHeadsUpEnabled',
         label: '提到你',
-        description: '队员在公共 Camp 中明确提到你'
+        description: '队员在公共会话中明确提到你'
       }
     ]
   },

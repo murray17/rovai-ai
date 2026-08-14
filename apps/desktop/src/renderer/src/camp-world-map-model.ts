@@ -416,13 +416,13 @@ function mapSpeechForRun(
       ? {
           key: `${run.id}:${summary.itemKey}:${summary.text}`,
           kind: 'real',
-          label: 'AgentRun · 真实执行',
+          label: '执行 · 正在运行',
           text: summary.text
         }
       : {
           key: `${run.id}:running-without-output`,
           kind: 'real',
-          label: 'AgentRun · 等待输出',
+          label: '执行 · 等待输出',
           text: '运行已开始，暂未收到可展示步骤。'
         }
   }
@@ -430,7 +430,7 @@ function mapSpeechForRun(
   return {
     key: `${run.id}:${run.status}:${summary?.itemKey ?? 'without-output'}:${summary?.text ?? ''}`,
     kind: 'waiting',
-    label: queued ? 'AgentRun · 已排队' : 'AgentRun · 结果待确认',
+    label: queued ? '执行 · 已排队' : '执行 · 结果待确认',
     text: summary?.text
       ?? (queued
         ? '任务已进入队列，暂未收到可展示步骤。'

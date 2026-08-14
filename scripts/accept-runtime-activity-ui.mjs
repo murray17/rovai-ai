@@ -365,7 +365,7 @@ try {
   })
   await openCamp(app.cdp, composerLayoutCampId)
   await waitForExpression(app.cdp,
-    `document.querySelector('.camp-workspace')?.getAttribute('aria-label') === ${JSON.stringify(`Camp：${composerLayoutCampTitle}`)}`)
+    `document.querySelector('.camp-workspace')?.getAttribute('aria-label') === ${JSON.stringify(`会话：${composerLayoutCampTitle}`)}`)
   await wait(200)
   const wideComposerLayout = await collectWideComposerLayout(app.cdp)
   assert(wideComposerLayout.viewportWidth === 2560 && wideComposerLayout.viewportHeight === 1440,
@@ -387,7 +387,7 @@ try {
 
   await openCamp(app.cdp, campId)
   await waitForExpression(app.cdp,
-    `document.querySelector('.camp-workspace')?.getAttribute('aria-label') === ${JSON.stringify(`Camp：${campTitle}`)}`)
+    `document.querySelector('.camp-workspace')?.getAttribute('aria-label') === ${JSON.stringify(`会话：${campTitle}`)}`)
   await wait(200)
   const wideConversationLayout = await collectWideConversationLayout(app.cdp)
   assert(wideConversationLayout.viewportWidth === 2560
@@ -1047,7 +1047,7 @@ async function collectAgentDock(cdp) {
       chipCount: agentIds.length,
       agentIds,
       uniqueAgentIds: [...new Set(agentIds)],
-      followsTimeline: timeline?.nextElementSibling === dock,
+      followsTimeline: timeline?.closest('.camp-conversation-stage')?.nextElementSibling === dock,
       timelineBottom: timelineRect?.bottom ?? 0,
       dockTop: dockRect?.top ?? 0,
       topRunBadgeCount: document.querySelectorAll('.topbar .run-badge').length,
@@ -1265,7 +1265,7 @@ async function seedActivity(entry, index) {
     ) VALUES (
       ${sqlLiteral(runId)}, 1, ${sqlLiteral(operationId)}, 'activity-v1',
       ${sqlLiteral(entry.domain)}, ${sqlLiteral(entry.semantic)}, ${sqlNullable(toolName)},
-      ${sqlLiteral(entry.presentationHint ?? entry.payload.title ?? toolName ?? 'Runtime 工具调用')},
+      ${sqlLiteral(entry.presentationHint ?? entry.payload.title ?? toolName ?? '工具调用')},
       'terminal', 'succeeded', ${sqlLiteral(entry.credibility ?? 'runtime_structured')},
       'fine_grained', ${sqlLiteral(entry.sourceAuthority ?? 'runtime')},
       ${sqlLiteral(JSON.stringify(evidenceIds))}, 1, ${evidence.length},
@@ -2117,7 +2117,7 @@ async function verifyCampWorldMap(cdp, capturesDirectory) {
     && staticPresentation.controlsInsideStage
     && staticPresentation.documentOverflow <= 1,
   `World map or floating controls escaped the conversation surface: ${JSON.stringify(staticPresentation)}`)
-  assert(staticPresentation.realSpeechText.includes('AgentRun · 真实执行')
+  assert(staticPresentation.realSpeechText.includes('执行 · 正在运行')
     && staticPresentation.realSpeechText.includes('读取 README.md'),
   `World map did not use the real AgentRun activity summary: ${JSON.stringify(staticPresentation)}`)
 
@@ -2187,7 +2187,7 @@ async function verifyCampWorldMap(cdp, capturesDirectory) {
     && inactiveWindowPresentation.routeAnimationNames.every((name) => name === 'none')
     && inactiveWindowPresentation.runningPulseAnimationName === 'none'
     && inactiveWindowPresentation.realSpeechAnimationName === 'none'
-    && inactiveWindowPresentation.realSpeechText.includes('AgentRun · 真实执行'),
+    && inactiveWindowPresentation.realSpeechText.includes('执行 · 正在运行'),
   `Inactive App window did not pause map motion while preserving real output: ${JSON.stringify(inactiveWindowPresentation)}`)
   await evaluate(cdp, `window.dispatchEvent(new Event('focus'))`)
   await waitForExpression(cdp,
@@ -2238,7 +2238,7 @@ async function verifyCampWorldMap(cdp, capturesDirectory) {
     && compressedPresentation.frameHeight <= compressedPresentation.stageHeight + 1
     && ['compact', 'condensed'].includes(compressedPresentation.density)
     && compressedPresentation.drawerBottom <= compressedPresentation.controlsTop + 1
-    && compressedPresentation.realSpeechText.includes('AgentRun · 真实执行')
+    && compressedPresentation.realSpeechText.includes('执行 · 正在运行')
     && compressedPresentation.liveCaptionText.includes('真实执行 · Codex CLI 验收')
     && compressedPresentation.documentOverflow <= 1,
   `Resizable execution Drawer broke the compressed world map: ${JSON.stringify(compressedPresentation)}`)
@@ -2301,7 +2301,7 @@ async function verifyCampWorldMap(cdp, capturesDirectory) {
   await waitForExpression(cdp, `document.querySelector('.camp-world-map')?.classList.contains('is-static') === true`)
   const staticTextAfterMotionChange = await evaluate(cdp,
     `document.querySelector('.camp-world-map-speech.is-real')?.textContent?.trim() ?? ''`)
-  assert(staticTextAfterMotionChange.includes('AgentRun · 真实执行'),
+  assert(staticTextAfterMotionChange.includes('执行 · 正在运行'),
     'Reduced motion removed the real execution text')
 
   return {
@@ -2382,7 +2382,7 @@ function assertCampWorldMapLayout(layout, label, expectedAgentCount) {
     && layout.frameInsideStage
     && layout.controlsInsideStage
     && layout.agentCount === expectedAgentCount
-    && layout.realSpeechText.includes('AgentRun · 真实执行')
+    && layout.realSpeechText.includes('执行 · 正在运行')
     && (layout.density !== 'condensed' || layout.liveCaptionText.includes('真实执行 · Codex CLI 验收'))
     && layout.documentOverflow <= 1,
   `${label} world map escaped its conversation container or lost real output: ${JSON.stringify(layout)}`)

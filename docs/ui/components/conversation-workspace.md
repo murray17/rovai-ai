@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-08-13
+last_updated: 2026-08-14
 ---
 
 # Camp 会话工作区
@@ -101,7 +101,7 @@ Agent 的 Core-owned `--to-user` 在历史消息中显示同色但非交互的 `
 纯文本；详细的 Markdown literal 防注入规则见[结构化 Mention](structured-mentions.md#current-user-mention)。
 
 Message Mention 通知导航必须以 `campId + sourceMessageId` 加载和定位精确消息。通知抽屉关闭后才
-滚动并转移焦点；来源不可用、渲染或聚焦失败时显示可恢复错误，不静默落到最近消息。仅打开 Camp
+滚动并转移焦点；来源不可用、渲染或聚焦失败时显示可恢复错误，不静默落到最近消息。仅执行“打开会话”
 不会批量读掉 Message Mention；自动已读要求精确消息节点在仍聚焦、可见的时间线视口内。
 
 ### Composer 附件

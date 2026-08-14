@@ -28,7 +28,7 @@ describe('member runtime parameters', () => {
     expect(markup).toContain('运行参数')
     expect(markup).not.toContain('<details')
     expect(markup).not.toContain('<summary')
-    expect(markup).toContain('跟随 Runtime 默认')
+    expect(markup).toContain('跟随 Agent 运行时默认')
     expect(markup).toContain('文件系统访问')
     expect(markup).toContain('审批策略')
     expect(markup).toContain('danger-full-access')

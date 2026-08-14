@@ -303,7 +303,7 @@ function ModelFields({
           disabled={disabled}
           onChange={(event) => setStrategy(event.target.value as ModelSelection['mode'])}
         >
-          <option value="runtime_default">跟随 Runtime 默认</option>
+          <option value="runtime_default">跟随 Agent 运行时默认</option>
           <option value="explicit" disabled={models.length === 0}>固定模型</option>
         </select>
       </label>

@@ -57,13 +57,42 @@ try {
     (item) => item.mention?.messageId === 'message-mention-initial'
   )
   assert(initialMention, `Initial Mention Episode was unavailable: ${JSON.stringify(initialInbox)}`)
+  await evaluate(dayApp.cdp, `(() => {
+    const probe = {
+      originalFocus: HTMLElement.prototype.focus,
+      suppressedAttempts: 0
+    }
+    window.__notificationFocusDelayProbe = probe
+    HTMLElement.prototype.focus = function (...args) {
+      if (this.dataset?.messageId === 'message-mention-initial'
+          && probe.suppressedAttempts < 4) {
+        probe.suppressedAttempts += 1
+        return
+      }
+      return probe.originalFocus.apply(this, args)
+    }
+  })()`)
   await openNotificationCenter(dayApp.cdp)
   await clickEpisodeAction(dayApp.cdp, initialMention.id, '查看消息')
   await waitForExpression(dayApp.cdp, `!document.querySelector('.notification-drawer')`)
+  await waitForExpression(dayApp.cdp,
+    `window.__notificationFocusDelayProbe?.suppressedAttempts === 4`, 15_000)
+  await waitForExpression(dayApp.cdp,
+    `document.activeElement?.dataset?.messageId === 'message-mention-initial'`, 15_000)
   await waitForExpression(dayApp.cdp, `
     document.querySelector('[data-message-id="message-mention-initial"]')
       ?.classList.contains('notification-focus-target') === true
   `, 15_000)
+  await wait(1_800)
+  assert(await evaluate(dayApp.cdp, `
+    !document.querySelector('.notification-drawer')
+      && document.activeElement?.dataset?.messageId === 'message-mention-initial'
+  `), 'Delayed notification focus did not remain stable after the presentation timeout boundary')
+  await evaluate(dayApp.cdp, `(() => {
+    const probe = window.__notificationFocusDelayProbe
+    if (probe?.originalFocus) HTMLElement.prototype.focus = probe.originalFocus
+    delete window.__notificationFocusDelayProbe
+  })()`)
   await assertNotificationBadge(dayApp.cdp, 3)
   const clickedInbox = await request(dayApp.cdp, 'notifications.inbox', {
     filter: 'all',
@@ -251,6 +280,7 @@ try {
       unreadEpisodeBadgeAndAccessibleName: true,
       persistentDrawerAndFixedCopy: true,
       exactMentionAcknowledgementAndNavigation: true,
+      delayedFocusHandshake: true,
       boundedMarkAllAndRevisionBoundedClear: true,
       fiveNotificationPreferences: true,
       preferenceFailurePreservesFocusAndScroll: true,
@@ -459,6 +489,8 @@ async function assertNotificationDrawer(cdp, expectedRows, context, expectedUnre
       && state.copy.includes('等待你的下一步')
       && state.copy.includes('执行未完成')
       && state.copy.includes('提到你')
+      && state.copy.includes('打开会话')
+      && !state.copy.includes('打开 Camp')
       && !state.copy.includes('README.md'),
   `${context} content was not fixed and data-minimized: ${JSON.stringify(state.copy)}`)
   assert(!state.drawerOverflow && !state.documentOverflow,

@@ -101,7 +101,7 @@ export function insertMemberMention(
   state: StructuredMentionEditorState,
   agentId: string
 ): StructuredMentionEditorState {
-  if (!agentId.trim()) throw new Error('Member Mention requires an Agent ID')
+  if (!agentId.trim()) throw new Error('队员提及缺少身份信息。')
   return replaceStructuredSelection(state, [{
     kind: 'member_mention',
     agentId
@@ -123,7 +123,7 @@ export function insertMemberMentionWithTrailingSpace(
   state: StructuredMentionEditorState,
   agentId: string
 ): StructuredMentionEditorState {
-  if (!agentId.trim()) throw new Error('Member Mention requires an Agent ID')
+  if (!agentId.trim()) throw new Error('队员提及缺少身份信息。')
   return replaceMentionSelectionWithTrailingSpace(state, {
     kind: 'member_mention',
     agentId

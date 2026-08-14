@@ -63,6 +63,10 @@ import {
   type NotificationCenterHandle,
   type NotificationNavigationResult
 } from './NotificationCenter'
+import {
+  createNotificationPresentationCoordinator,
+  type NotificationPresentationCoordinator
+} from './NotificationPresentationCoordinator'
 import { NotificationSettings } from './NotificationSettings'
 import { SkillSettings } from './SkillSettings'
 import { McpSettings } from './McpSettings'
@@ -229,7 +233,7 @@ export function ControlledShutdownOverlay(): React.JSX.Element {
           <p className="settings-page-eyebrow">CONTROLLED SHUTDOWN</p>
           <h2 id="controlled-shutdown-title">正在停止运行并关闭 Rovai…</h2>
           <p id="controlled-shutdown-description">
-            正在等待 Runtime 返回可靠终态；无法确认的执行也会停止，并保留外部效果现场供下次核对。
+            正在等待执行引擎返回可靠终态；无法确认的执行也会停止，并保留外部效果现场供下次核对。
           </p>
         </div>
       </section>
@@ -305,6 +309,8 @@ export function App(): React.JSX.Element {
   const notificationButtonRef = useRef<HTMLButtonElement>(null)
   const notificationCenterRef = useRef<NotificationCenterHandle>(null)
   const notificationFocusSequence = useRef(0)
+  const notificationFocusRef = useRef<NotificationFocusTarget | null>(null)
+  const notificationPresentationRef = useRef<NotificationPresentationCoordinator | null>(null)
   const healthRequest = useRef<Promise<HealthStatus> | null>(null)
   const agentListRequest = useRef<Promise<AgentProfile[]> | null>(null)
   const navigationRequest = useRef<Promise<NavigationSnapshot> | null>(null)
@@ -324,6 +330,14 @@ export function App(): React.JSX.Element {
   )
   activeCampIdRef.current = activeCampId
   viewRef.current = view
+  notificationFocusRef.current = notificationFocus
+  if (notificationPresentationRef.current === null) {
+    notificationPresentationRef.current = createNotificationPresentationCoordinator()
+  }
+
+  useEffect(() => () => {
+    notificationPresentationRef.current?.cancel()
+  }, [])
 
   useEffect(() => {
     if (view !== 'members') return
@@ -561,7 +575,7 @@ export function App(): React.JSX.Element {
         if (reconciliation.status === 'rejected') throw new Error(commandFailureMessage(reconciliation))
       }
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
-      if (snapshot.schemaVersion !== 29) throw new Error('Camp snapshot schema is incompatible')
+      if (snapshot.schemaVersion !== 29) throw new Error('会话数据版本不兼容。')
       if (selectionGeneration !== campSelectionGeneration.current) return false
       if (snapshot.camp.projectBindingKind === 'directory') {
         await restoreNavigationProject(snapshot.camp.projectPath)
@@ -603,7 +617,7 @@ export function App(): React.JSX.Element {
 
   const refreshActiveCampSnapshot = useCallback(async (campId: string): Promise<void> => {
     const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
-    if (snapshot.schemaVersion !== 29) throw new Error('Camp snapshot schema is incompatible')
+    if (snapshot.schemaVersion !== 29) throw new Error('会话数据版本不兼容。')
     if (activeCampIdRef.current !== campId) return
     if (snapshot.throughGlobalSequence < campEventSequenceMarker.current) return
     campEventSequenceMarker.current = snapshot.throughGlobalSequence
@@ -769,7 +783,7 @@ export function App(): React.JSX.Element {
             campId: target.campId
           })
           if (snapshot.schemaVersion !== 29) {
-            throw new Error('Camp snapshot schema is incompatible')
+            throw new Error('会话数据版本不兼容。')
           }
         } catch (snapshotError) {
           const authoritativeNavigation = await loadNavigation()
@@ -920,7 +934,7 @@ export function App(): React.JSX.Element {
           setShuttingDown(true)
         } else if (runtimeStatus === 'crashed') {
           setState('error')
-          setError(stringField(params, 'message') ?? 'Rust Core 已停止。')
+          setError(stringField(params, 'message') ?? '后台服务已停止。')
         } else if (runtimeStatus === 'starting' || runtimeStatus === 'restarting') {
           setState('loading')
           setHealth(null)
@@ -998,7 +1012,7 @@ export function App(): React.JSX.Element {
       const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', {
         campId
       })
-      if (snapshot.schemaVersion !== 29) throw new Error('Camp snapshot schema is incompatible')
+      if (snapshot.schemaVersion !== 29) throw new Error('会话数据版本不兼容。')
       if (cancelled) return
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
@@ -1108,7 +1122,7 @@ export function App(): React.JSX.Element {
       } catch (nextError) {
         openNewConversation(
           workspace,
-          `一键创建未完成：${errorMessage(nextError)} 请重新确认项目、队员与 Lead。`
+          `一键创建未完成：${errorMessage(nextError)} 请重新确认项目、队员与默认负责人。`
         )
         return 'dialog'
       }
@@ -1362,7 +1376,7 @@ export function App(): React.JSX.Element {
         ) {
           result = {
             status: 'failed',
-            message: '已打开 Camp，但原消息未能呈现。通知仍保留，可稍后重试。'
+            message: '已打开会话，但原消息未能呈现。通知仍保留，可稍后重试。'
           }
           return
         }
@@ -1387,33 +1401,24 @@ export function App(): React.JSX.Element {
     action: NotificationActionView
   ): Promise<boolean> => {
     if (activeCampIdRef.current !== action.campId || viewRef.current !== 'camp') return false
-    setNotificationFocus((current) => current ? { ...current, active: true } : current)
-    await afterNextPaint()
-    if (action.kind === 'open_camp_message') {
-      if (!action.messageId) return false
-      const target = document.querySelector<HTMLElement>(
-        `[data-message-id="${CSS.escape(action.messageId)}"]`
-      )
-      return target !== null && document.activeElement === target
-    }
-    if (action.kind === 'open_approval') {
-      const approvalTarget = action.approvalId
-        ? document.querySelector<HTMLElement>(
-          `[data-approval-id="${CSS.escape(action.approvalId)}"]`
-        )
-        : document.querySelector<HTMLElement>('.approval-dock')
-      return approvalTarget?.contains(document.activeElement) === true
-    }
-    if (action.kind === 'open_camp_turn' && action.campTurnId) {
-      const targets = document.querySelectorAll<HTMLElement>(
-        `[data-camp-turn-id="${CSS.escape(action.campTurnId)}"]`
-      )
-      return [...targets].some((target) => target === document.activeElement)
-    }
-    return true
+    if (action.kind === 'open_camp') return true
+    const focus = notificationFocusRef.current
+    if (!focus || !notificationFocusMatchesAction(focus, action)) return false
+    const coordinator = notificationPresentationRef.current
+    if (!coordinator) return false
+    const presentation = coordinator.waitFor(focus.requestId)
+    setNotificationFocus((current) => current?.requestId === focus.requestId
+      ? { ...current, active: true }
+      : current)
+    return presentation
+  }, [])
+
+  const completeNotificationNavigation = useCallback((requestId: number): void => {
+    notificationPresentationRef.current?.complete(requestId)
   }, [])
 
   const cancelNotificationNavigation = useCallback((): void => {
+    notificationPresentationRef.current?.cancel()
     setNotificationFocus(null)
     setNotificationAnchor(null)
   }, [])
@@ -1657,7 +1662,7 @@ export function App(): React.JSX.Element {
       })
       if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
       const campId = stringField(result.payload, 'campId')
-      if (!campId) throw new Error('Core 已创建 Camp，但没有返回 Camp ID。')
+      if (!campId) throw new Error('会话已创建，但暂时无法打开。请刷新会话列表后重试。')
       setNewConversationOpen(false)
       await activateCamp(campId, { reconcileDefaultLead: false })
     } finally {
@@ -1717,7 +1722,7 @@ export function App(): React.JSX.Element {
         campMessageSendParams(commandId, campId, draft)
       )
       if (!result.commandResult) {
-        throw new Error('Core 未返回消息提交结果。')
+        throw new Error('消息提交结果暂时不可用，请稍后重试。')
       }
       if (result.commandResult.status === 'rejected') {
         const recovery = runtimeRecoveryFromCommandResult(campId, result.commandResult)
@@ -1748,7 +1753,7 @@ export function App(): React.JSX.Element {
       ))
       void window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
         .then(async (snapshot) => {
-          if (snapshot.schemaVersion !== 29) throw new Error('Camp snapshot schema is incompatible')
+          if (snapshot.schemaVersion !== 29) throw new Error('会话数据版本不兼容。')
           if (selectionGeneration !== campSelectionGeneration.current) return
           campEventSequenceMarker.current = snapshot.throughGlobalSequence
           setCampSnapshot(snapshot)
@@ -2006,6 +2011,7 @@ export function App(): React.JSX.Element {
             onInspectorTabChange={setCampInspectorTab}
             onOpenInspector={openCampInspector}
             notificationFocus={notificationFocus}
+            onNotificationFocusPresented={completeNotificationNavigation}
             runtimeRecovery={runtimeRecovery?.campId === activeCampId ? runtimeRecovery : null}
             onConfigureRuntime={configureMemberRuntime}
             onDismissRuntimeRecovery={() => setRuntimeRecovery(null)}
@@ -2013,7 +2019,7 @@ export function App(): React.JSX.Element {
         )}
 
         {!startupGateVisible && view === 'camp' && (!activeCampId || visibleCampSnapshot?.camp.id !== activeCampId) && (
-          <EmptyState title="正在打开对话" body="Rovai-ai 正在从 SQLite 权威快照恢复 Camp、队员与运行状态。" />
+          <EmptyState title="正在打开对话" body="Rovai-ai 正在从本地数据恢复会话、队员与运行状态。" />
         )}
 
         {!startupGateVisible && view === 'compose' && (
@@ -2144,8 +2150,8 @@ export function StartupGate({
       <p className="settings-page-eyebrow">MAIN WINDOW SESSION</p>
       <h1>{waiting ? '暂时无法恢复上次位置' : '正在恢复上次位置'}</h1>
       <p>{waiting
-        ? 'Rovai-ai 会保留这次窗口冻结的恢复目标。Core 恢复后将继续验证同一位置，不会清除或改走其他启动路线。'
-        : '正在读取 Desktop Shell 偏好，并通过 Core 权威数据验证最近的稳定页面。'}</p>
+        ? 'Rovai-ai 会保留这次窗口冻结的恢复目标。后台服务恢复后将继续验证同一位置，不会清除或改走其他启动路线。'
+        : '正在读取窗口偏好，并通过本地数据验证最近的稳定页面。'}</p>
       {error && <small role="alert">{error}</small>}
       {waiting && <button className="quiet-button" type="button" onClick={onRetry}>重试恢复</button>}
     </section>
@@ -2355,6 +2361,24 @@ export function notificationMessageIsVisible(messageId: string): boolean {
   return rectanglesIntersect(target.getBoundingClientRect(), viewport.getBoundingClientRect())
 }
 
+export function notificationFocusMatchesAction(
+  focus: NotificationFocusTarget,
+  action: NotificationActionView
+): boolean {
+  if (focus.kind === 'camp_message') {
+    return action.kind === 'open_camp_message'
+      && Boolean(focus.messageId)
+      && focus.messageId === action.messageId
+  }
+  if (focus.kind === 'camp_turn') {
+    return action.kind === 'open_camp_turn'
+      && Boolean(focus.campTurnId)
+      && focus.campTurnId === action.campTurnId
+  }
+  return action.kind === 'open_approval'
+    && (focus.approvalId ?? null) === (action.approvalId ?? null)
+}
+
 async function resolveNavigationPins(
   navigation: NavigationSnapshot,
   pins: NavigationPin[]
@@ -2394,7 +2418,7 @@ async function resolveNavigationPins(
           offset,
           limit: 200
         })
-        if (page.schemaVersion !== 3) throw new Error('Navigation group schema is incompatible')
+        if (page.schemaVersion !== 3) throw new Error('会话列表数据版本不兼容。')
         for (const camp of page.camps) {
           if (unresolvedCampIds.delete(camp.id)) campById.set(camp.id, camp)
         }
@@ -2522,7 +2546,7 @@ export function commandFailureMessage(result: StoredCommandResult): string {
   if (result.code === 'agent_run.runtime_not_ready') {
     return '目标队员的 Agent 运行时暂不可用。'
   }
-  return localizeExecutionEngineTerms(stringField(result.payload, 'message') ?? `Core 拒绝了命令：${result.code}`)
+  return localizeExecutionEngineTerms(stringField(result.payload, 'message') ?? `操作未完成：${result.code}`)
 }
 
 export function runtimeRecoveryFromCommandResult(

@@ -152,7 +152,7 @@ export function GeneralSettings({
       setDefaultMemberIds(saved.newConversationDefaults?.memberAgentIds ?? [])
       setDefaultLeadId(saved.newConversationDefaults?.defaultLeadAgentId ?? '')
       setDefaultsDirty(false)
-      setFeedback('默认队员与 Lead 已保存。')
+      setFeedback('默认队员与默认负责人已保存。')
     } catch (error) {
       setDefaultsError(errorMessage(error))
     } finally {
@@ -276,7 +276,7 @@ export function GeneralSettings({
           </div>
         )}
         <p className="general-recovery-note">
-          此设置只决定启动后显示的位置。已有 Camp、草稿、任务、审批和运行记录仍按 Rovai-ai 的既有恢复规则处理。
+          此设置只决定启动后显示的位置。已有会话、草稿、任务、审批和运行记录仍按 Rovai-ai 的既有恢复规则处理。
         </p>
       </section>
 
@@ -286,7 +286,7 @@ export function GeneralSettings({
           <div className="general-subsection-heading">
             <div>
               <h3>默认队员</h3>
-              <p>选择创建新对话时默认加入的队员，并指定一位默认 Lead。</p>
+              <p>选择创建新对话时默认加入的队员，并指定一位默认负责人。</p>
             </div>
             <span>{defaultMemberIds.length > 0 ? `已选 ${defaultMemberIds.length} 位` : '尚未配置'}</span>
           </div>
@@ -325,7 +325,7 @@ export function GeneralSettings({
             )}
           </div>
           <label className="general-default-lead">
-            <span>默认 Lead</span>
+            <span>默认负责人</span>
             <select
               value={defaultLeadId}
               disabled={defaultsBusy || defaultMemberIds.length === 0}
@@ -335,7 +335,7 @@ export function GeneralSettings({
                 setDefaultsError(null)
               }}
             >
-              <option value="">请选择默认 Lead</option>
+              <option value="">请选择默认负责人</option>
               {defaultMemberIds.map((agentId) => {
                 const agent = profileById.get(agentId)
                 const valid = agent?.presence === 'present' && agent.removedAt === null
@@ -345,7 +345,7 @@ export function GeneralSettings({
           </label>
           {preferences?.newConversationDefaultsRequireConfirmation && (
             <p className="general-defaults-attention" role="status">
-              已保存的默认队员或 Lead 曾失效，请重新选择并保存确认。
+              已保存的默认队员或默认负责人曾失效，请重新选择并保存确认。
             </p>
           )}
           {defaultsDirty && <p className="general-unsaved-note" role="status">默认配置有未保存的更改。</p>}
@@ -370,9 +370,9 @@ export function GeneralSettings({
                   <span className="general-help-mark" aria-hidden="true">?</span>
                   <span className="general-help-popover" id="general-one-click-help" role="tooltip">
                     <strong>一键创建如何工作？</strong>
-                    <span>开启后，新对话入口会立即创建空对话，不再询问项目、队员、Lead 或名称。</span>
+                    <span>开启后，新对话入口会立即创建空对话，不再询问项目、队员、负责人或名称。</span>
                     <span>{ONE_CLICK_PROJECT_HELP}</span>
-                    <span>队员和 Lead 始终使用本页保存的默认配置。</span>
+                    <span>队员和负责人始终使用本页保存的默认配置。</span>
                     <span>关闭此开关即可恢复创建弹窗。</span>
                   </span>
                 </span>
@@ -390,11 +390,11 @@ export function GeneralSettings({
           </div>
           {oneClickEnabled && (
             savedDefaults
-              ? <p className="general-effective-summary">当前生效：{currentProjectLabel} · {savedDefaults.members.length} 位默认队员 · Lead {savedDefaults.lead.displayName}</p>
+              ? <p className="general-effective-summary">当前生效：{currentProjectLabel} · {savedDefaults.members.length} 位默认队员 · 负责人 {savedDefaults.lead.displayName}</p>
               : <p className="general-effective-summary attention" role="status">默认队员配置需要重新确认。一键创建时将改为打开创建弹窗。</p>
           )}
           {!preferences?.newConversationDefaults && (
-            <p className="general-one-click-unavailable">请先保存默认队员与 Lead，再开启一键创建。</p>
+            <p className="general-one-click-unavailable">请先保存默认队员与默认负责人，再开启一键创建。</p>
           )}
         </div>
       </section>
@@ -437,9 +437,9 @@ export function GeneralSettings({
             <strong>新对话将使用：</strong>
             <span>项目：由使用的新建入口决定</span>
             <span>队员：{savedMemberNames.join('、') || '—'}</span>
-            <span>Lead：{savedLeadName ?? '—'}</span>
+            <span>负责人：{savedLeadName ?? '—'}</span>
           </div>
-          <p>如需重新选择项目、队员、Lead 或对话名称，请先在设置中关闭“一键创建新对话”。</p>
+          <p>如需重新选择项目、队员、负责人或对话名称，请先在设置中关闭“一键创建新对话”。</p>
           <div className="dialog-actions">
             <Dialog.Close asChild><button className="quiet-button" type="button" disabled={oneClickBusy}>取消</button></Dialog.Close>
             <button className="primary-button" type="button" disabled={oneClickBusy} onClick={() => void confirmOneClickEnabled()}>
@@ -459,7 +459,7 @@ export function newConversationDefaultsDraftError(
 ): string | null {
   if (defaults.memberAgentIds.length === 0) return '至少选择一位默认队员。'
   if (!defaults.memberAgentIds.includes(defaults.defaultLeadAgentId)) {
-    return '默认 Lead 必须属于默认队员。'
+    return '默认负责人必须属于默认队员。'
   }
   const profileById = new Map(agents.map((agent) => [agent.agentId, agent]))
   if (defaults.memberAgentIds.some((agentId) => {
@@ -468,7 +468,7 @@ export function newConversationDefaultsDraftError(
   })) return '默认队员中包含已失效队员，请重新选择。'
   const lead = profileById.get(defaults.defaultLeadAgentId)
   if (!lead || lead.presence !== 'present' || lead.removedAt !== null) {
-    return '默认 Lead 已失效，请重新选择。'
+    return '默认负责人已失效，请重新选择。'
   }
   return null
 }
