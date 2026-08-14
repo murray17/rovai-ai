@@ -127,6 +127,8 @@ const allowedMethods = new Set<CoreMethod>([
   'camp.composerDraft.startReply',
   'camp.composerDraft.cancelReply',
   'camp.composerDraft.resolveReplyRecipient',
+  'camp.composerDraft.dismissContinuation',
+  'camp.composerDraft.resolveContinuationRecipient',
   'camp.composerDraft.removeAttachment',
   'camp.composerDraft.discard',
   'camp.messages.send',

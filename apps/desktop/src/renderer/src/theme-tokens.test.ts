@@ -217,6 +217,9 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.message-surface\s*\{[^}]*position: static/)
     expect(css).toContain('.conversation-bubble:hover .message-copy-button')
     expect(css).toContain('.conversation-bubble:hover .message-reply-button')
+    expect(css).toContain('.composer.suppress-pointer-focus-ring .structured-mention-editor:focus-visible')
+    expect(css).not.toContain('.composer.suppress-reply-focus-ring')
+    expect(css).toMatch(/\.composer-continuation\s*\{[^}]*background:\s*transparent|\.composer-continuation\s*\{[^}]*color:/)
     expect(css).not.toContain('.message-surface.has-delivery .message-copy-button')
     expect(css).toMatch(
       /@media\s*\(min-width:\s*1800px\)[\s\S]*?\.timeline-track\s*\{[^}]*width:\s*min\(var\(--conversation-wide-width\), 100%\)/

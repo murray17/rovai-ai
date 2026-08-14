@@ -61,6 +61,7 @@ import {
   attachmentDragKind,
   campConversationViewFromStoredValue,
   campConversationTimeline,
+  composerDraftNeedsContinuationRepair,
   composerDraftNeedsReplyRepair,
   composerRecipientSummary,
   campInspectorMembers,
@@ -191,13 +192,13 @@ describe('task event projections', () => {
         profilePresence: 'present', memberOrder: 1, isDefaultLead: false, version: 1
       }
     ]
-    expect(composerRecipientSummary([], members)).toBe('Default Lead · 叮叮')
+    expect(composerRecipientSummary([], members)).toBe('默认由 Lead · 叮叮接收')
     expect(composerRecipientSummary([
       { kind: 'member_mention', agentId: 'agent_2' },
       { kind: 'member_mention', agentId: 'agent_1' }
-    ], members)).toBe('发送给 @芝士、@叮叮')
+    ], members)).toBeNull()
     expect(composerRecipientSummary([{ kind: 'all_members_mention' }], members))
-      .toBe('发送给 @所有队员（叮叮、芝士）')
+      .toBeNull()
   })
 
   it('requires explicit repair only until an unavailable reply author is visibly replaced', () => {
@@ -205,6 +206,7 @@ describe('task event projections', () => {
       campId: 'camp-1', body: '继续', revision: 4, attachments: [],
       updatedAt: '2026-08-14T00:00:00Z', expiresAt: '2026-08-21T00:00:00Z',
       content: [{ kind: 'member_mention', agentId: 'agent_2' }],
+      continuationIntent: null,
       replyIntent: {
         replyToCampMessageId: 'message-1', targetState: 'available', excerpt: '原消息',
         recipientSelectionRequired: false,
@@ -612,6 +614,7 @@ describe('task event projections', () => {
           errorMessage: null,
           createdAt: '2026-07-30T09:59:00Z'
         }],
+        continuationIntent: null,
         replyIntent: {
           replyToCampMessageId: 'message-parent',
           targetState: 'available',
@@ -658,6 +661,7 @@ describe('task event projections', () => {
       revision: 7,
       attachments: [],
       replyIntent: null,
+      continuationIntent: null,
       updatedAt: '2026-08-03T00:00:00Z',
       expiresAt: '2026-08-10T00:00:00Z'
     })
@@ -840,6 +844,38 @@ describe('task event projections', () => {
       status: 'failed',
       hasUnsettledExternalEffects: false
     })).toBe(false)
+  })
+
+  it('requires continuation repair only after payload exists and never while reply owns routing', () => {
+    const members: CampSnapshot['members'] = [{
+      agentId: 'agent_2', displayName: '芝士', teamRole: 'Reviewer', avatarRef: null,
+      accent: '#4F7F9F', membershipStatus: 'active', leaveRequestedAt: null,
+      profilePresence: 'away', memberOrder: 1, isDefaultLead: false, version: 1
+    }]
+    const draft: CampComposerDraftView = {
+      campId: 'camp-1', body: '继续', revision: 3, attachments: [],
+      updatedAt: '2026-08-14T00:00:00Z', expiresAt: '2026-08-21T00:00:00Z',
+      content: [{ kind: 'text', text: '继续' }], replyIntent: null,
+      continuationIntent: {
+        sourceCampMessageId: 'message-1', recipientSelectionRequired: false,
+        recipient: {
+          agentId: 'agent_2', displayName: '芝士', recipientAvailability: 'available'
+        }
+      }
+    }
+    expect(composerDraftNeedsContinuationRepair(draft, members, true)).toBe(true)
+    expect(composerDraftNeedsContinuationRepair(draft, members, false)).toBe(false)
+    expect(composerDraftNeedsContinuationRepair({
+      ...draft,
+      replyIntent: {
+        replyToCampMessageId: 'message-2', targetState: 'available', excerpt: '引用',
+        recipientSelectionRequired: false,
+        author: {
+          authorType: 'user', authorId: 'current-user', displayName: '你',
+          recipientAvailability: 'not_applicable'
+        }
+      }
+    }, members, true)).toBe(false)
   })
 
   it('keeps every Runtime option while placing cancel and deny first', () => {
@@ -1678,7 +1714,7 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('给 洛可 发消息')
-    expect(markup).toContain('Default Lead · 洛可')
+    expect(markup).toContain('默认由 Lead · 洛可接收')
     expect(markup).toContain('开始这段协作')
     expect(markup).toContain('快速对话')
     expect(markup).toContain('负责人 · 洛可')
@@ -2050,6 +2086,7 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('aria-label="复制这条消息"')
+    expect(markup).toContain('>复制</button>')
     expect(markup).toContain('class="message-surface"')
     expect(markup).toContain('class="message-mention-token is-interactive"')
     expect(markup).toContain('data-agent-id="agent_2"')

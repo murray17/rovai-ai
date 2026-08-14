@@ -197,4 +197,5 @@ generated_from: docs/adr-front-matter
 | [ADR-0183](0183-scope-identified-agent-memory-revision-targets.md) | Scope-Identified Agent Memory Revision Targets | `accepted` | `cross-version` | [v0.75](../versions/v0.75/README.md) | — |
 | [ADR-0184](0184-line-leading-display-name-inline-addressing-alias.md) | Line-Leading Display-Name Inline Addressing Alias | `accepted` | `cross-version` | [v0.76](../versions/v0.76/README.md) | — |
 | [ADR-0185](0185-durable-composer-reply-intent-and-explicit-recipient-resolution.md) | Durable Composer Reply Intent and Explicit Recipient Resolution | `accepted` | `cross-version` | [v0.77](../versions/v0.77/README.md) | — |
+| [ADR-0186](0186-durable-composer-recipient-continuation.md) | Durable Composer Recipient Continuation | `accepted` | `cross-version` | [v0.78](../versions/v0.78/README.md) | — |
 <!-- adr-history:end -->

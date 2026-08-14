@@ -2184,6 +2184,27 @@ impl CampMessageAddress {
     }
 }
 
+fn materialize_leading_member_mention(
+    content: &mut StructuredCampMessageContent,
+    agent_id: String,
+) {
+    content.insert(0, StructuredCampMessageSegment::MemberMention { agent_id });
+    let has_leading_whitespace = matches!(
+        content.get(1),
+        Some(StructuredCampMessageSegment::Text { text })
+            if text.chars().next().is_some_and(char::is_whitespace)
+    );
+    if !has_leading_whitespace {
+        content.insert(
+            1,
+            StructuredCampMessageSegment::Text {
+                text: " ".to_string(),
+            },
+        );
+    }
+    *content = normalize_content(std::mem::take(content));
+}
+
 fn load_structured_draft_submission(
     transaction: &Transaction<'_>,
     camp_id: &str,
@@ -2193,7 +2214,10 @@ fn load_structured_draft_submission(
         .query_row(
             r#"
             SELECT structured_content_json, revision,
-                   reply_to_camp_message_id, recipient_selection_required
+                   reply_to_camp_message_id, recipient_selection_required,
+                   continuation_source_message_id,
+                   continuation_suppressed_source_message_id,
+                   recipient_selection_touched
             FROM camp_composer_draft
             WHERE camp_id = ?1
             "#,
@@ -2204,11 +2228,22 @@ fn load_structured_draft_submission(
                     row.get::<_, i64>(1)?,
                     row.get::<_, Option<String>>(2)?,
                     row.get::<_, bool>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, bool>(6)?,
                 ))
             },
         )
         .optional()?;
-    let Some((content_json, revision, reply_to_camp_message_id, recipient_required)) = stored
+    let Some((
+        content_json,
+        revision,
+        reply_to_camp_message_id,
+        recipient_required,
+        continuation_source_message_id,
+        continuation_suppressed_source_message_id,
+        recipient_selection_touched,
+    )) = stored
     else {
         return Ok(Err(rejected(
             "draft_changed",
@@ -2246,11 +2281,56 @@ fn load_structured_draft_submission(
         }
     }
 
-    let content = normalize_content(
+    let mut content = normalize_content(
         serde_json::from_str::<StructuredCampMessageContent>(&content_json)
             .context("Camp Composer Draft contains invalid Structured Content")?,
     );
     validate_user_authored_content(&content)?;
+    if reply_to_camp_message_id.is_none()
+        && !recipient_selection_touched
+        && !has_all_members_mention(&content)
+        && member_mention_ids(&content).is_empty()
+    {
+        if let Some(source_message_id) = continuation_source_message_id.as_deref()
+            && continuation_suppressed_source_message_id.as_deref() != Some(source_message_id)
+        {
+            let source_recipient = transaction
+                .query_row(
+                    r#"
+                    SELECT address_mode, addressed_agent_ids_json
+                    FROM camp_message
+                    WHERE id = ?1 AND camp_id = ?2
+                      AND author_type = 'user'
+                      AND tombstoned_at IS NULL
+                    "#,
+                    params![source_message_id, camp_id],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                )
+                .optional()?;
+            let continuation_agent_id = source_recipient.and_then(|(mode, agent_ids_json)| {
+                if mode != "explicit" {
+                    return None;
+                }
+                serde_json::from_str::<Vec<String>>(&agent_ids_json)
+                    .ok()
+                    .filter(|agent_ids| agent_ids.len() == 1)
+                    .and_then(|mut agent_ids| agent_ids.pop())
+            });
+            let Some(continuation_agent_id) = continuation_agent_id else {
+                return Ok(Err(rejected(
+                    "continuation_recipient_required",
+                    "Continuation recipient is no longer valid; choose an explicit replacement recipient",
+                )));
+            };
+            if active_address_target(transaction, camp_id, &continuation_agent_id)?.is_none() {
+                return Ok(Err(rejected(
+                    "continuation_recipient_required",
+                    "Continuation recipient is unavailable; choose an explicit replacement recipient",
+                )));
+            }
+            materialize_leading_member_mention(&mut content, continuation_agent_id);
+        }
+    }
     let mentioned_agent_ids = member_mention_ids(&content);
     let mut member_names = BTreeMap::new();
     for agent_id in &mentioned_agent_ids {
@@ -3737,6 +3817,12 @@ pub(crate) fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> 
                 SELECT id FROM task WHERE camp_id = ?1
            ))
         "#,
+        [camp_id],
+    )?;
+    // Draft reply/continuation sources reference Camp messages. Remove the Draft
+    // before deleting those messages; prepared rows cascade with the Draft.
+    transaction.execute(
+        "DELETE FROM camp_composer_draft WHERE camp_id = ?1",
         [camp_id],
     )?;
     transaction.execute(
@@ -6177,6 +6263,205 @@ mod tests {
             .unwrap();
         assert_eq!(stored_reply.as_deref(), Some(parent_id.as_str()));
         assert_eq!(row_count(&database, "camp_composer_draft"), 0);
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn continuation_send_materializes_one_mention_and_never_falls_back_when_unavailable() {
+        let (mut database, directory) = test_database();
+        let service = CollaborationService::default();
+        let camp_id =
+            create_camp_with_members(&service, &mut database, &directory, &["agent_1", "agent_2"]);
+        let source = service
+            .send_test_camp_message(
+                &mut database,
+                &user_envelope(
+                    "continuation-source-send",
+                    Some(&camp_id),
+                    TestCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: None,
+                        body: "先交给第二位成员".into(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: TestCampMessageAddress::Explicit {
+                            agent_ids: vec!["agent_2".into()],
+                        },
+                        reply_to_camp_message_id: None,
+                        execution: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(source.result.status, CommandResultStatus::Applied);
+        let source_message_id = source.result.payload["campMessageId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let store = CampAttachmentStore::new(&directory);
+        let empty = store.load_draft(&database, &camp_id).unwrap();
+        assert_eq!(
+            empty
+                .continuation_intent
+                .as_ref()
+                .unwrap()
+                .recipient
+                .agent_id,
+            "agent_2"
+        );
+        let draft = store
+            .save_content_with_continuation(
+                &mut database,
+                &camp_id,
+                empty.revision,
+                vec![Segment::Text {
+                    text: "继续处理下一步".into(),
+                }],
+                Some(&source_message_id),
+            )
+            .unwrap();
+        let continued = service
+            .send_user_camp_draft(
+                &mut database,
+                &user_envelope(
+                    "continuation-materialized-send",
+                    Some(&camp_id),
+                    SendUserCampDraftCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: draft.revision,
+                        execution: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(continued.result.status, CommandResultStatus::Applied);
+        let (continued_mode, continued_addressed, continued_reply, continued_content): (
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+        ) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT address_mode, addressed_agent_ids_json,
+                       reply_to_camp_message_id, structured_content_json
+                FROM camp_message ORDER BY sequence DESC LIMIT 1
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(continued_mode, "explicit");
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(&continued_addressed).unwrap(),
+            vec!["agent_2"]
+        );
+        assert!(continued_reply.is_none());
+        assert!(matches!(
+            serde_json::from_str::<StructuredCampMessageContent>(
+                continued_content.as_deref().unwrap()
+            )
+            .unwrap()
+            .first(),
+            Some(Segment::MemberMention { agent_id }) if agent_id == "agent_2"
+        ));
+
+        let next_empty = store.load_draft(&database, &camp_id).unwrap();
+        let blocked_draft = store
+            .save_content_with_continuation(
+                &mut database,
+                &camp_id,
+                next_empty.revision,
+                vec![Segment::Text {
+                    text: "对象失效时保留".into(),
+                }],
+                Some(
+                    &next_empty
+                        .continuation_intent
+                        .as_ref()
+                        .unwrap()
+                        .source_camp_message_id,
+                ),
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET profile_status = 'away' WHERE id = 'agent_2'",
+                [],
+            )
+            .unwrap();
+
+        let rejected = service
+            .send_user_camp_draft(
+                &mut database,
+                &user_envelope(
+                    "continuation-unavailable-send",
+                    Some(&camp_id),
+                    SendUserCampDraftCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: blocked_draft.revision,
+                        execution: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(rejected.result.code, "continuation_recipient_required");
+        assert_eq!(row_count(&database, "camp_message"), 2);
+        assert_eq!(row_count(&database, "camp_composer_draft"), 1);
+
+        let repaired = store
+            .resolve_continuation_recipient(
+                &mut database,
+                &camp_id,
+                blocked_draft.revision,
+                "agent_1",
+            )
+            .unwrap();
+        let sent = service
+            .send_user_camp_draft(
+                &mut database,
+                &user_envelope(
+                    "continuation-repaired-send",
+                    Some(&camp_id),
+                    SendUserCampDraftCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: repaired.revision,
+                        execution: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(sent.result.status, CommandResultStatus::Applied);
+        let (mode, addressed, reply_to, content): (String, String, Option<String>, Option<String>) =
+            database
+                .connection()
+                .query_row(
+                    r#"
+                SELECT address_mode, addressed_agent_ids_json,
+                       reply_to_camp_message_id, structured_content_json
+                FROM camp_message
+                ORDER BY sequence DESC
+                LIMIT 1
+                "#,
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .unwrap();
+        assert_eq!(mode, "explicit");
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(&addressed).unwrap(),
+            vec!["agent_1"]
+        );
+        assert!(reply_to.is_none());
+        assert!(matches!(
+            serde_json::from_str::<StructuredCampMessageContent>(content.as_deref().unwrap())
+                .unwrap()
+                .first(),
+            Some(Segment::MemberMention { agent_id }) if agent_id == "agent_1"
+        ));
 
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");

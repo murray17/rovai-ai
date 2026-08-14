@@ -589,6 +589,7 @@ struct SaveCampComposerDraftParams {
     camp_id: String,
     expected_revision: i64,
     content: StructuredCampMessageContent,
+    continuation_source_message_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -612,6 +613,22 @@ struct ResolveCampComposerReplyRecipientParams {
     camp_id: String,
     expected_revision: i64,
     recipient: CampComposerReplyRecipient,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DismissCampComposerContinuationParams {
+    camp_id: String,
+    expected_revision: i64,
+    source_camp_message_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ResolveCampComposerContinuationRecipientParams {
+    camp_id: String,
+    expected_revision: i64,
+    agent_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -3838,11 +3855,12 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    CampAttachmentStore::new(&self.data_dir).save_content(
+                    CampAttachmentStore::new(&self.data_dir).save_content_with_continuation(
                         &mut database,
                         &params.camp_id,
                         params.expected_revision,
                         params.content,
+                        params.continuation_source_message_id.as_deref(),
                     )?,
                 )?)
             }
@@ -3881,6 +3899,32 @@ impl Core {
                         &params.camp_id,
                         params.expected_revision,
                         params.recipient,
+                    )?,
+                )?)
+            }
+            "camp.composerDraft.dismissContinuation" => {
+                let params: DismissCampComposerContinuationParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    CampAttachmentStore::new(&self.data_dir).dismiss_continuation(
+                        &mut database,
+                        &params.camp_id,
+                        params.expected_revision,
+                        &params.source_camp_message_id,
+                    )?,
+                )?)
+            }
+            "camp.composerDraft.resolveContinuationRecipient" => {
+                let params: ResolveCampComposerContinuationRecipientParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    CampAttachmentStore::new(&self.data_dir).resolve_continuation_recipient(
+                        &mut database,
+                        &params.camp_id,
+                        params.expected_revision,
+                        &params.agent_id,
                     )?,
                 )?)
             }

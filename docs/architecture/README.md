@@ -22,6 +22,6 @@ last_updated: 2026-08-14
 | [Planned Shutdown](planned-shutdown.md) | Core execution/terminal 双准入、durable shutdown cycle、可靠 Runtime terminal 优先、product fence 启动补偿、统一 deadline、route reap 与 Desktop child-exit 边界 |
 | [Public A2A Message 与 Message Delivery](public-a2a-message-delivery.md) | 公共 Structured Message、canonical/line-leading display-name addressing、正交 Current User Attention、forward/caller-return Delivery、原子通知、Context gate 与 UI projection 边界 |
 | [Camp Activation Lifecycle](camp-activation-lifecycle.md) | 一键 Pending、Composer Draft、Navigation、Restorable Location、首消息原子激活与启动清理的组件权威 |
-| [Camp Composer Draft](camp-composer-draft.md) | Structured Content、附件、持久 reply intent、显式接收者修复、exact-revision user send 与 timeline projection 的组件权威 |
+| [Camp Composer Draft](camp-composer-draft.md) | Structured Content、附件、持久 reply/continuation、显式接收者修复、发送物化、exact-revision user send 与 timeline projection 的组件权威 |
 | [Skill Projection Reconciliation](skill-projection-reconciliation.md) | Skill Library desired state、root access ledger、事件驱动 dirty、当前 Run preflight、start-time SkillExposureSnapshot 与无历史目录扫描边界 |
 <!-- architecture-index:end -->

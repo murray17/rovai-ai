@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.77
+current_version: v0.78
 last_updated: 2026-08-14
 ---
 
@@ -128,4 +128,5 @@ last_updated: 2026-08-14
 | v0.74 | `historical` | Runtime 对齐的 Campfire/Grill Duo、双轴代码评审与十二项 official Skill inventory；真实 duo dry-run 与严格 Clippy 基线未完成即冻结 | [v0.74/README.md](v0.74/README.md) |
 | v0.75 | `historical` | 当前 Camp 成员显示名 inline alias；Review Duo 与 Scope-identified Memory 正确性收口 | [v0.75/README.md](v0.75/README.md) |
 | v0.76 | `historical` | 显示名 inline alias 的行首寻址门禁 | [v0.76/README.md](v0.76/README.md) |
-| v0.77 | `current` | 持久消息回复链、Draft-only reply intent 与显式接收者修复 | [v0.77/README.md](v0.77/README.md) |
+| v0.77 | `historical` | 持久消息回复链、Draft-only reply intent 与显式接收者修复 | [v0.77/README.md](v0.77/README.md) |
+| v0.78 | `current` | Core-owned 接收者延续、失效修复与 Composer 路由去重 | [v0.78/README.md](v0.78/README.md) |

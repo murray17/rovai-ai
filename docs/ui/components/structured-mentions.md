@@ -27,6 +27,12 @@ Composer 保留引用并要求用户显式选择新的有效 Mention；发送前
 Default Lead。Snapshot 后才失效的 token 使用既有 unavailable 样式与 Core error，替代选择移除原作者
 失效 occurrence 后再插入新 token。取消引用不删除已经可见的 Mention。
 
+“继续发给”是第二个受控 Mention 来源：它只投影最近 accepted user message 的唯一非 Lead 显式接收者，
+不是正文 token 或 reply relation。只有发送事务确认 frozen source 与对象仍有效时，Core 才在消息开头物化
+canonical Member Mention；历史中看到的 Structured Content、address snapshot 与真实投递因此一致。
+continuation 对象失效且 Draft 已有正文/附件时，必须阻断并显式选择新成员，不能忽略失败来源后使用
+Default Lead。用户手动改址后，即使删除全部 Mention，也不再从同一来源自动生成 Mention。
+
 ## 锚定人物信息卡
 
 单击、Enter 或 Space 在原 token 附近打开非模态人物信息卡，并保持当前 Camp。信息卡宽 392px，
@@ -58,6 +64,7 @@ Structured Content 继续通过 sanitized GFM 呈现。正文里的 Agent Mentio
 | 层级 | 权威入口 |
 |---|---|
 | Core identity、耐久内容、失效校验与派生寻址 | [ADR-0096](../../adr/0096-core-owned-structured-mentions-and-derived-addressing.md) |
+| Draft continuation 来源、物化与无 fallback | [ADR-0186](../../adr/0186-durable-composer-recipient-continuation.md)与[Camp Composer Draft v2](../../contracts/camp-composer-draft-v2.md) |
 | Renderer 视觉、Popover、键盘、拖选与复制粘贴 | 本文 |
 | 自动化与打包 App 回归 | [结构化 Mention 门禁](../../development/ui-acceptance.md#结构化-mention-门禁) |
 

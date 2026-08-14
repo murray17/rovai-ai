@@ -36,8 +36,9 @@ Agent 公共正文不显示“来自执行”来源条，也不投影 compact �
 显示简短转交轨迹“发送给 @队员”；底层 Delivery 状态、失败码和恢复事实仍由 Core Read Side
 拥有，不在 footer 或 Run stage 重复展示。
 
-用户、队员和已交付 A2A 正文支持原生鼠标拖选与系统复制。整条消息的复制入口固定在内容列
-右上角，只在悬停或键盘聚焦消息区域时显现；不能随正文、宽屏工件或 footer 漂移。用户消息保持
+用户、队员和已交付 A2A 正文支持原生鼠标拖选与系统复制。整条消息使用可见文字“复制”作为入口，固定在
+内容列右上角，只在悬停或键盘聚焦消息区域时显现；不能退回只有图标的含糊操作，也不能随正文、宽屏
+工件或 footer 漂移。用户消息保持
 精确纯文本；Agent 正文使用清洗后的 GFM；Tool 输出使用结构化证据组件。
 
 当前可操作的队员头像、显示名和 Mention 可打开同一个锚定人物信息卡，不导航。已离开、移除或
@@ -55,9 +56,10 @@ Agent 公共正文不显示“来自执行”来源条，也不投影 compact �
 `focus-visible` 提示；不得用去除全部焦点反馈来实现鼠标无框。
 
 回复当前可寻址 Agent 是一次明确的用户双意图：同一 Draft revision 设置 reply target，并插入或复用
-可见 Member Mention。接收者摘要仍单独展示完整 fanout；已有其他 Mention 时显示全部成员，
+可见 Member Mention。已有其他 Mention 时全部保留，
 `@所有队员` 已覆盖作者时不重复插入。回复当前用户自己的消息只建立引用，不从原消息的历史 recipient、
-作者或 reply relation 猜 Agent；无 Mention 时必须明确显示当前 Default Lead。
+作者或 reply relation 猜 Agent；无 Mention 时必须明确显示“默认由 Lead · {name}接收”。显式 Mention、
+`@所有队员`、reply 或接收者修复已经足以表达路由，不再重复显示“实际接收者”汇总。
 
 原作者已退出 Camp、变为 `away`、被移除或不可解析时，reply dock 保留引用，但不插入失效 Mention，
 并原位显示“原作者当前不可接收，请选择其他成员”。发送保持阻断，直到用户从当前可提及成员中显式
@@ -68,8 +70,28 @@ Agent 公共正文不显示“来自执行”来源条，也不投影 compact �
 一层紧凑父引用，作者与摘要同样只占一个可视行，超出显示省略号；点击通过 same-Camp anchor load 定位并
 聚焦原消息。父消息不可用时显示“引用的消息当前不可用”，不落到最近消息。不递归展开祖先、不缩进
 时间线，也不创建私密 thread。失效作者错误和替代成员选择独立展开，不受单行引用规则裁切。领域与字段边界见
-[Camp Composer Draft v1](../../contracts/camp-composer-draft-v1.md)，评审方向见
+[Camp Composer Draft v2](../../contracts/camp-composer-draft-v2.md)，评审方向见
 [HTML 交互稿](../../prototypes/message-reply-chain/README.md)。
+
+## Recipient continuation
+
+当最近一条已接受 user message 的最终路由恰好是一个非 Lead 成员，且当前 Draft 没有 reply、显式
+Mention、修复或手动接收者修改时，Composer 左下显示轻量无框标签“继续发给 @成员”。标签不是正文
+Mention，也不创建父引用；发送成功时 Core 才把对象物化为 canonical Structured Mention。
+
+标签与默认 Lead 文案占用同一行。标签出现时不显示默认文案；显式 Member Mention、多人 Mention、
+`@所有队员` 和 reply 出现时两者都隐藏。点击标签的关闭按钮只取消当前来源延续并恢复
+“默认由 Lead · {name}接收”；同一 source 在导航、重载或重新进入 Camp 后不得复现。
+
+reply 比 continuation 优先。回复 Agent 后取消引用，自动加入的 Mention 保留，因此延续不恢复；回复用户
+消息未产生 Mention 且用户未改址时，取消可恢复此前只被隐藏的标签。用户主动改变过接收者后，即使再删光
+Mention，本 Draft 也只回到默认 Lead，不能让路由控件反复出现。
+
+标签出现后对象在空白 Draft 失效时，标签消失并持久抑制该来源；正文或附件已经存在时，保留全部 Draft，
+展开“原接收者当前不可接收，请选择其他成员”，禁用发送并把焦点交给第一个有效替代选择。不得隐藏错误、
+自动插入失效 Mention 或改投 Lead。字段和竞态边界见
+[Camp Composer Draft v2](../../contracts/camp-composer-draft-v2.md)，交互探索见
+[延续路由原型](../../prototypes/composer-continuation-routing/index.html)。
 
 ## Camp 执行过程
 
@@ -111,8 +133,9 @@ Agent/AgentRun 级 Stop。终态用户取消以一条“你已在 {耗时} 后�
 ## Camp Composer
 
 Composer 与消息轨道同宽同轴，Inspector 显隐不得改变二者关系。发送、Stop、Approval Dock、
-附件、Skill 候选、Mention 和 reply intent 都使用同一 Core-owned Draft；任何浮层都不能建立第二份
-草稿真源。回复条位于附件队列之上、正文编辑器之内，并与 Composer 共用开放工作面，不创建 focus trap。
+附件、Skill 候选、Mention、reply intent 和 continuation intent 都使用同一 Core-owned Draft；任何浮层
+都不能建立第二份草稿真源。回复条位于附件队列之上、正文编辑器之内，并与 Composer 共用开放工作面，
+不创建 focus trap。鼠标点击 Composer 任意位置都不增加编辑器内层描边；键盘进入仍保留局部焦点提示。
 
 ### Skill 快速选择
 

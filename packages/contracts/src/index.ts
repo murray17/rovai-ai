@@ -731,8 +731,19 @@ export interface CampComposerDraftView {
   revision: number
   attachments: PreparedAttachmentView[]
   replyIntent: CampComposerReplyIntentView | null
+  continuationIntent: CampComposerContinuationIntentView | null
   updatedAt: string | null
   expiresAt: string | null
+}
+
+export interface CampComposerContinuationIntentView {
+  sourceCampMessageId: string
+  recipient: {
+    agentId: string
+    displayName: string
+    recipientAvailability: 'available' | 'unavailable'
+  }
+  recipientSelectionRequired: boolean
 }
 
 export interface CampComposerReplyIntentView {
@@ -1979,6 +1990,8 @@ export type CoreMethod =
   | 'camp.composerDraft.startReply'
   | 'camp.composerDraft.cancelReply'
   | 'camp.composerDraft.resolveReplyRecipient'
+  | 'camp.composerDraft.dismissContinuation'
+  | 'camp.composerDraft.resolveContinuationRecipient'
   | 'camp.composerDraft.removeAttachment'
   | 'camp.composerDraft.discard'
   | 'camp.messages.send'
