@@ -2368,6 +2368,11 @@ fn parse_inline_addressing(body: &str, active_agents: &[ActiveCampAgent]) -> Inl
             continue;
         }
 
+        if !is_line_leading_display_name_alias(body, index) {
+            index += 1;
+            continue;
+        }
+
         if let Some((agent_id, end_byte)) = match_display_name_mention(body, index, active_agents) {
             occurrences.push(InlineAddressingOccurrence {
                 agent_id: agent_id.to_string(),
@@ -2385,6 +2390,14 @@ fn parse_inline_addressing(body: &str, active_agents: &[ActiveCampAgent]) -> Inl
         occurrences,
         malformed,
     }
+}
+
+fn is_line_leading_display_name_alias(body: &str, at_byte: usize) -> bool {
+    let line_start = body[..at_byte]
+        .rfind('\n')
+        .map(|position| position + 1)
+        .unwrap_or(0);
+    body[line_start..at_byte].chars().all(char::is_whitespace)
 }
 
 fn match_display_name_mention<'a>(
@@ -2537,14 +2550,14 @@ https://example.test/@agent_7
     }
 
     #[test]
-    fn display_name_alias_accepts_end_of_body_and_requires_whitespace_boundary() {
+    fn display_name_alias_accepts_indented_line_end_and_requires_whitespace_boundary() {
         let active_agents = vec![ActiveCampAgent {
             agent_id: "agent_6".to_string(),
             display_name: "爱丽丝".to_string(),
         }];
 
         assert_eq!(
-            parse_inline_addressing("请 @爱丽丝", &active_agents).occurrences[0].agent_id,
+            parse_inline_addressing("背景\r\n\t@爱丽丝", &active_agents).occurrences[0].agent_id,
             "agent_6"
         );
         for body in ["@爱丽丝同学 请看一下", "@爱丽丝，请看一下"] {
@@ -2555,6 +2568,43 @@ https://example.test/@agent_7
                 "unexpected display-name mention in {body}"
             );
         }
+    }
+
+    #[test]
+    fn display_name_alias_requires_the_first_non_whitespace_position_on_a_line() {
+        let active_agents = vec![ActiveCampAgent {
+            agent_id: "agent_6".to_string(),
+            display_name: "爱丽丝".to_string(),
+        }];
+
+        let addressed = parse_inline_addressing(
+            "迁移背景与约束……\n\n  @爱丽丝 请分析这个迁移方案",
+            &active_agents,
+        );
+        assert_eq!(addressed.occurrences.len(), 1);
+        assert_eq!(addressed.occurrences[0].agent_id, "agent_6");
+
+        for body in [
+            "让 Bob 分析一下 @爱丽丝 提出的迁移方案",
+            "迁移背景\n最后请 @爱丽丝 分析",
+            "- @爱丽丝 请分析",
+            "> @爱丽丝 请分析",
+        ] {
+            assert!(
+                parse_inline_addressing(body, &active_agents)
+                    .occurrences
+                    .is_empty(),
+                "unexpected mid-line display-name mention in {body}"
+            );
+        }
+    }
+
+    #[test]
+    fn canonical_inline_agent_id_keeps_its_existing_mid_line_position() {
+        let parsed = parse_inline_addressing("请让 @agent_6 分析迁移方案", &[]);
+
+        assert_eq!(parsed.occurrences.len(), 1);
+        assert_eq!(parsed.occurrences[0].agent_id, "agent_6");
     }
 
     #[test]

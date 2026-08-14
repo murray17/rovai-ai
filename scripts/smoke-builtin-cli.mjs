@@ -744,7 +744,8 @@ printf '%s\n' "$root_help" | grep -Fq ${shellQuote("Run `rovai --help` to choose
 send_help="$("$CLI" send --help)"
 printf '%s\n' "$send_help" | grep -Fq -- '--to-user'
 printf '%s\n' "$send_help" | grep -Fq -- 'Ordinary Camp messages are already visible to the user.'
-printf '%s\n' "$send_help" | grep -Fq -- 'exact active Camp member @display-name followed by whitespace or end-of-body'
+printf '%s\n' "$send_help" | grep -Fq -- 'exact active Camp member @display-name alias is accepted only as the first non-whitespace token on a line'
+printf '%s\n' "$send_help" | grep -Fq -- 'put trailing routing on a dedicated final line'
 printf '%s\n' "$send_help" | grep -Fq -- '[] means no Agent was routed.'
 printf '%s\n' "$send_help" | grep -Fq -- 'User attention is message-local and is never inherited'
 printf '%s\n' "$send_help" | grep -Fq -- "rovai send --to agent_5 --body 'Please review and report back'"

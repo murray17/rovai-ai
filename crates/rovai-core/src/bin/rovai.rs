@@ -846,6 +846,11 @@ mod tests {
                 .contains("exact active Camp member @display-name")
         );
         assert!(description.summary.contains("inspect effectiveRecipients"));
+        assert!(
+            description
+                .summary
+                .contains("first non-whitespace token on a line")
+        );
         assert!(description.summary.contains("public-only"));
         assert!(description.summary.contains("--to-user"));
         let to = description
@@ -910,6 +915,7 @@ mod tests {
         assert!(help.contains("User attention is message-local"));
         assert!(help.contains("does not represent user approval"));
         assert!(help.contains("whitespace or end-of-body"));
+        assert!(help.contains("dedicated final line"));
         assert!(help.contains("[] means no Agent was routed"));
         assert!(help.contains("Display names are accepted only as inline aliases"));
         assert!(!help.contains("--to agent_5 --to-user"));
