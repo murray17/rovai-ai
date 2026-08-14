@@ -15,11 +15,11 @@ Mention、message-local `mentionUser`、逐 Occurrence acknowledgement、Episode
 
 ## 会话可见即精确确认
 
-用户不必从通知中心的“查看消息”或“查看本轮”进入。无论通过侧栏、恢复位置还是通知动作打开会话，
-只要以下条件同时成立，对应 Active Attention Occurrence 就可以确认：
+用户不必通过某个特定提醒动作进入。无论通过侧栏、恢复位置还是应用内提醒打开会话，只要以下条件
+同时成立，对应 Active Attention Occurrence 就可以确认：
 
 - Rovai AI 窗口在前台且拥有应用焦点；
-- 当前展示“会话”视图，而不是地图或被通知抽屉覆盖的状态；
+- 当前展示“会话”视图，而不是地图、设置或记忆等其他一级页面；
 - 精确 Message 节点与会话时间线视口相交；
 - 对 CampTurn 终态，至少一个绑定该 `campTurnId` 的精确消息节点可见；
 - 对 Approval，仍 pending 的精确审批详情实际展开并进入可见窗口。
@@ -33,8 +33,9 @@ Renderer 每次只回报当前可见的稳定来源 ID。Core 以通知 Read Sid
 边界内已 admitted 的精确 Occurrence。边界之后新到达的 Mention、本轮结果或审批保持未读，即使复用了
 相同 CampTurn。
 
-确认成功后 Renderer 立即重读 Inbox 并更新全局角标；命令失败时保留未读并在来源仍可见时有界重试。
-命令按 occurrence disposition 幂等，重复可见性报告不得创造新的注意力或重复业务效果。
+确认成功后 Renderer 立即重读轻量未读状态；命令失败时保留未读并在来源仍可见时有界重试。命令按
+occurrence disposition 幂等，重复可见性报告不得创造新的注意力或重复业务效果。生产 Renderer 暂不
+展示全局通知总数，但 Core unread 事实仍用于避免无未读时提交可见来源命令。
 
 ## 显式通知动作
 

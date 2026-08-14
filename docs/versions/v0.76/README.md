@@ -65,6 +65,17 @@ last_updated: 2026-08-14
   交叉验证，屏幕外来源与边界后新到达的通知保持未读；
 - 地图、后台窗口、通知抽屉/模态遮罩、收起审批和仅加载 Camp 均不算已读，重复可见性报告保持幂等。
 
+### 交付后提醒简化
+
+- 生产 Shell 暂时隐藏持久通知中心、品牌行铃铛和全局未读总数，Core Episode/Occurrence/Journal 与命令
+  保持不变；设置入口使用“提醒”，只控制临时应用内浮层；
+- Renderer 启动只读取 unread `limit=1` 的 high-water/布尔状态，运行期只响应精确通知事件，并以 30 秒
+  恢复轮询和窗口重新聚焦兜底，不再因每个无关 Core event 扫描通知；
+- 应用失焦或隐藏时新 signal 暂存在内存，回到前台后才显示并开始超时；reset/重启清空临时队列，不
+  补弹历史；
+- Camp 行恢复“有新回复”小点和读屏文案；只有目标会话真正显示且应用拥有焦点后才清除，设置、记忆、
+  队员页或后台 Snapshot 刷新均不再误清。
+
 ## 非目标与冻结边界
 
 - 不解析普通句子中的 display-name mention，即使它位于最后一个逻辑行；
@@ -82,8 +93,8 @@ last_updated: 2026-08-14
 4. 集成测试证明 mid-line display alias 创建零 Delivery，行首 alias 仍创建一条 canonical Delivery；
 5. Camp Message Send v7、ADR-0184、Architecture、CURRENT、Contract 与 Version 路由一致；
 6. 定向/完整 Core tests、Rust format、script syntax、文档治理和 diff 检查通过后方可标记 complete。
-7. 通知修正必须以打包 App 证明普通进入会话后精确来源已读、观察边界后的新通知不被误读，且角标
-   立即同步。
+7. 通知修正必须以打包 App 证明普通进入会话后精确来源已读、观察边界后的新通知不被误读；提醒简化
+   还需证明中心已隐藏、后台 signal 回到前台才显示、Camp 未读点在打开会话前保持且打开后消除。
 
 ## 验收证据
 
@@ -93,9 +104,10 @@ last_updated: 2026-08-14
 - `pnpm docs:check`、以当前 `origin/main` SHA 为 `DOCS_BASE_REF` 的 `pnpm docs:check:ci` 与
   `pnpm docs:adr:generate -- --check` 通过；
 - `cargo fmt --all -- --check`、`node --check scripts/smoke-builtin-cli.mjs` 与 `git diff --check` 通过。
-- 通知定向验证：11 个 Core notification tests、95 个 Renderer tests、TypeScript 和 macOS packaged UI
-  acceptance 通过；真实验收返回 `ordinaryCampVisibilityAcknowledgement: true`，并覆盖精确导航、重启、
-  200% 缩放和清除。
+- 通知定向验证：15 个 Core notification tests、94 个 Renderer tests、TypeScript 和 macOS packaged UI
+  acceptance 通过；真实验收返回 `notificationCenterHidden`、`ordinaryCampVisibilityAcknowledgement`、
+  `campCompletionMarkerVisibleUntilCampIsOpened`、`backgroundSignalsWaitForAppAttention` 均为 true，并覆盖
+  两主题、最小窗口、reduced motion、200% 缩放、重启和 exact signal 原地更新。
 
 ## 跨版本文档影响
 
@@ -105,7 +117,7 @@ last_updated: 2026-08-14
 | ADR | 已更新 | 新增 [ADR-0184](../../adr/0184-line-leading-display-name-inline-addressing-alias.md)，局部收窄 ADR-0182 的 alias position |
 | Contracts | 已更新 | 新增 [Camp Message Send v7](../../contracts/camp-message-send-v7.md)，v6 转为 historical current-entry；交付后以 [Notification Episode v4](../../contracts/notification-episode-v4.md)和 [Current User Attention v4](../../contracts/current-user-attention-v4.md)补充会话可见确认 |
 | Architecture | 已更新 | [Public A2A Message 与 Message Delivery](../../architecture/public-a2a-message-delivery.md)和[Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)增加 line-leading alias ownership；[Notification Episode](../../architecture/notification-episodes.md)增加可见来源 seam |
-| UI | 已更新 | [会话工作区](../../ui/components/conversation-workspace.md)和[通知中心](../../ui/components/notification-center.md)冻结普通进入会话后的精确可见确认与角标同步 |
+| UI | 已更新 | [会话工作区](../../ui/components/conversation-workspace.md)和[应用内提醒与会话未读](../../ui/components/notification-center.md)冻结普通进入会话后的精确可见确认、轻量提醒与 Camp 未读点 |
 | Runtime Activity | 确认无需更新 | 位置门禁不新增 provider event、activity domain、semantic kind 或 evidence shape |
 | Runtime compatibility | 确认无需更新 | Transport v10 capability 与 command version不变，本版本不声称新的真实 Runtime 实测结论 |
 | Documentation routing | 已更新 | 文档导航、CURRENT、ADR/Contract/Architecture/Version 索引切换到 v0.76、ADR-0184、Camp Message Send v7 与 Notification Episode/Current User Attention v4 |

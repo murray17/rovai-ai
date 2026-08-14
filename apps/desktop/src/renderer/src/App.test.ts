@@ -20,6 +20,7 @@ import {
   WindowDragStrip,
   allNavigationCamps,
   campActivationStateForCreation,
+  campViewIsVisibleForReadAcknowledgement,
   campInspectorVisibleFromStoredValue,
   cancellableTurnIds,
   campCreationPreflightFromAgents,
@@ -846,6 +847,24 @@ describe('task event projections', () => {
     expect(windowDragStripPage('memory')).toBeNull()
   })
 
+  it('only acknowledges a Camp as viewed while that exact conversation is visible', () => {
+    expect(campViewIsVisibleForReadAcknowledgement(
+      'camp', 'camp-1', 'camp-1', 'visible', true
+    )).toBe(true)
+    expect(campViewIsVisibleForReadAcknowledgement(
+      'settings', 'camp-1', 'camp-1', 'visible', true
+    )).toBe(false)
+    expect(campViewIsVisibleForReadAcknowledgement(
+      'camp', 'camp-1', 'camp-1', 'hidden', true
+    )).toBe(false)
+    expect(campViewIsVisibleForReadAcknowledgement(
+      'camp', 'camp-1', 'camp-1', 'visible', false
+    )).toBe(false)
+    expect(campViewIsVisibleForReadAcknowledgement(
+      'camp', 'camp-1', 'camp-2', 'visible', true
+    )).toBe(false)
+  })
+
   it('keeps create mode independent from the currently selected member', () => {
     const selected = agentProfile()
     expect(memberIdentityTargetAgent('create', selected)).toBeNull()
@@ -1319,6 +1338,9 @@ describe('task event projections', () => {
     expect(markup).not.toContain('camp-marker-none')
     expect(markup).toContain('camp-marker-unread_completed')
     expect(markup).toContain('camp-marker-loading')
+    expect(markup).toContain('aria-label="unread 对话，有新回复"')
+    expect(markup).toContain('title="unread 对话 · 有新回复"')
+    expect(markup).toContain('<span class="sr-only">有新回复</span>')
     expect(markup).toContain('role="img" aria-label="正在运行"')
     expect(markup.match(/class="camp-draft-badge">草稿/g)).toHaveLength(3)
     expect(markup).toContain('aria-expanded="true" aria-controls="camp-group-content-directory--repo"')
@@ -1385,9 +1407,9 @@ describe('task event projections', () => {
     const supportGroup = markup.slice(supportStart)
     expect(applicationGroup).toContain('<strong>通用</strong>')
     expect(applicationGroup).toContain('<strong>外观</strong>')
-    expect(applicationGroup).toContain('<strong>通知</strong>')
+    expect(applicationGroup).toContain('<strong>提醒</strong>')
     expect(applicationGroup.indexOf('<strong>通用</strong>')).toBeLessThan(applicationGroup.indexOf('<strong>外观</strong>'))
-    expect(applicationGroup.indexOf('<strong>外观</strong>')).toBeLessThan(applicationGroup.indexOf('<strong>通知</strong>'))
+    expect(applicationGroup.indexOf('<strong>外观</strong>')).toBeLessThan(applicationGroup.indexOf('<strong>提醒</strong>'))
     expect(capabilitiesGroup).toContain('<strong>Skill</strong>')
     expect(capabilitiesGroup).toContain('<strong>MCP</strong>')
     expect(capabilitiesGroup).toContain('<strong>Agent 运行时</strong>')
@@ -1408,7 +1430,6 @@ describe('task event projections', () => {
       agents: [],
       installations: [],
       busy: null,
-      onOpenNotifications: () => undefined,
       onDiagnosticsNavigate: () => undefined,
       onReload: async () => undefined,
       onThemeChange: () => undefined
@@ -1419,7 +1440,7 @@ describe('task event projections', () => {
       mcp: 'MCP 配置',
       runtime: 'Agent 运行时',
       appearance: '外观',
-      notifications: '通知',
+      notifications: '提醒',
       diagnostics: '诊断与修复'
     }
     for (const [section, heading] of Object.entries(contentBySection) as Array<[NavigationSettingsSection, string]>) {
@@ -1430,7 +1451,7 @@ describe('task event projections', () => {
     }
   })
 
-  it('keeps the real notification center available from the notification settings header', () => {
+  it('keeps only lightweight in-app reminder settings', () => {
     const markup = renderToStaticMarkup(createElement(SettingsView, {
       appearance: { preference: 'system', resolvedTheme: 'day' },
       health: null,
@@ -1438,16 +1459,16 @@ describe('task event projections', () => {
       installations: [],
       busy: null,
       section: 'notifications',
-      onOpenNotifications: () => undefined,
       onDiagnosticsNavigate: () => undefined,
       onReload: async () => undefined,
       onThemeChange: () => undefined
     }))
 
-    expect(markup).toContain('<button class="notification-center-link" type="button">')
-    expect(markup).toContain('这里只决定当前窗口何时显示临时浮层')
-    expect(markup).toContain('aria-label="通知浮层设置"')
-    expect(markup).toContain('正在读取通知设置')
+    expect(markup).not.toContain('notification-center-link')
+    expect(markup).not.toContain('打开通知中心')
+    expect(markup).toContain('Rovai AI 不在前台时会先保留')
+    expect(markup).toContain('aria-label="应用内提醒设置"')
+    expect(markup).toContain('正在读取提醒设置')
     expect(markup).not.toContain('持久边界')
   })
 
@@ -1459,7 +1480,6 @@ describe('task event projections', () => {
       installations: [],
       busy: null,
       section: 'appearance',
-      onOpenNotifications: () => undefined,
       onDiagnosticsNavigate: () => undefined,
       onReload: async () => undefined,
       onThemeChange: () => undefined
@@ -1478,7 +1498,6 @@ describe('task event projections', () => {
       installations: [],
       busy: null,
       section: 'runtime',
-      onOpenNotifications: () => undefined,
       onDiagnosticsNavigate: () => undefined,
       onReload: async () => undefined,
       onThemeChange: () => undefined
@@ -3145,7 +3164,6 @@ describe('task event projections', () => {
       installations: [],
       busy: null,
       section: 'appearance',
-      onOpenNotifications: () => undefined,
       onDiagnosticsNavigate: () => undefined,
       onReload: async () => undefined,
       onThemeChange: () => undefined
@@ -3163,7 +3181,6 @@ describe('task event projections', () => {
       installations: [],
       busy: null,
       section: 'diagnostics',
-      onOpenNotifications: () => undefined,
       onDiagnosticsNavigate: () => undefined,
       onReload: async () => undefined,
       onThemeChange: () => undefined

@@ -8,15 +8,13 @@ import type {
   NotificationSemantic
 } from '@contracts'
 import {
+  NOTIFICATION_RECOVERY_INTERVAL_MS,
   applyNotificationHeadsUpChanges,
-  applyNotificationChanges,
-  episodeHasActiveHeadsUpReason,
-  notificationActionLabel,
-  notificationBadgeLabel,
+  promoteNotificationHeadsUpOverflow,
   notificationHeadsUpPresentation,
-  notificationPresentation,
-  readNotificationChangePages
-} from './NotificationCenter'
+  readNotificationChangePages,
+  shouldPollForNotificationEvent
+} from './NotificationAttentionController'
 import { preferenceFromUnknown } from './NotificationSettings'
 
 function action(
@@ -126,55 +124,12 @@ function headsUpSignal(
   }
 }
 
-describe('Notification Episode presentation', () => {
-  it('uses user-facing conversation language for the generic open action', () => {
-    expect(notificationActionLabel(action('episode-1', 'open_camp'))).toBe('打开会话')
-  })
-
-  it('uses distinct closed copy for all attention semantics', () => {
-    expect(notificationPresentation(episode('approval_pending'))).toEqual({
-      label: '待审批',
-      message: '有操作等待你确认'
-    })
-    expect(notificationPresentation(episode('turn_completed'))).toEqual({
-      label: '等待你的下一步',
-      message: '本轮协作已经完成'
-    })
-    expect(notificationPresentation(episode('turn_failed'))).toEqual({
-      label: '执行失败',
-      message: '本轮协作失败，请返回查看'
-    })
-    expect(notificationPresentation(episode('turn_incomplete'))).toEqual({
-      label: '执行未完成',
-      message: '本轮协作未能证明完成，请返回查看'
-    })
-    expect(notificationPresentation(episode('user_mention'))).toEqual({
-      label: '提到你',
-      message: '@你 请确认方案'
-    })
-  })
-
-  it('keeps resolved approval and unavailable mention copy honest', () => {
-    expect(notificationPresentation(episode('approval_pending', { resolved: true }))).toEqual({
-      label: '待审批 · 已处理',
-      message: '相关操作已经处理'
-    })
-    expect(notificationPresentation(episode('user_mention', {
-      mention: {
-        messageId: 'message-1',
-        authorId: 'agent-1',
-        authorDisplayName: null,
-        summary: null,
-        available: false
-      }
-    }))).toEqual({ label: '提到你', message: '原消息来源不可用' })
-  })
-
-  it('caps the visual badge while preserving exact small counts', () => {
-    expect(notificationBadgeLabel(0)).toBe('0')
-    expect(notificationBadgeLabel(1)).toBe('1')
-    expect(notificationBadgeLabel(99)).toBe('99')
-    expect(notificationBadgeLabel(100)).toBe('99+')
+describe('Notification attention controller', () => {
+  it('uses event-driven refresh with a low-frequency recovery poll', () => {
+    expect(NOTIFICATION_RECOVERY_INTERVAL_MS).toBe(30_000)
+    expect(shouldPollForNotificationEvent('notification_episode.changed')).toBe(true)
+    expect(shouldPollForNotificationEvent('camp_message.sent')).toBe(false)
+    expect(shouldPollForNotificationEvent('agent_run.succeeded')).toBe(false)
   })
 
   it('updates one visible heads-up in place for the same Episode', () => {
@@ -218,7 +173,6 @@ describe('Notification Episode presentation', () => {
         state: 'unacknowledged'
       }]
     })
-    expect(episodeHasActiveHeadsUpReason(acknowledgedMention, 'user_mention')).toBe(false)
     const inactiveChange = change(acknowledgedMention, 2, null)
     expect(applyNotificationHeadsUpChanges(
       { entries: [], overflowEntries: [] },
@@ -335,6 +289,24 @@ describe('Notification Episode presentation', () => {
     expect(next.overflowEntries).toEqual([])
   })
 
+  it('lets the user advance overflow reminders without a notification center', () => {
+    const first = episode('user_mention')
+    const second = episode('turn_completed', { id: 'episode-2' })
+    const queued = applyNotificationHeadsUpChanges(
+      { entries: [], overflowEntries: [] },
+      [change(first, 1), change(second, 2)],
+      1
+    )
+
+    const promoted = promoteNotificationHeadsUpOverflow({
+      entries: [],
+      overflowEntries: queued.overflowEntries
+    }, 1)
+
+    expect(promoted.entries[0].episode.id).toBe('episode-2')
+    expect(promoted.overflowEntries).toEqual([])
+  })
+
   it('presents and opens the exact signal rather than the Episode current primary state', () => {
     const current = episode('turn_completed', {
       mention: {
@@ -389,22 +361,6 @@ describe('Notification Episode presentation', () => {
       changes: [change(first, 1)]
     }))
     expect(retried.nextChangeSequence).toBe(2)
-  })
-
-  it('hydrates upserts and removes by Episode identity', () => {
-    const first = episode('user_mention')
-    const second = episode('turn_completed', { id: 'episode-2' })
-    const updated = { ...first, episodeVersion: 2, primarySemantic: 'turn_failed' as const }
-    const remove: NotificationEpisodeChange = {
-      ...change(second, 3, null),
-      operation: 'remove',
-      changeCause: 'cleared',
-      episode: null
-    }
-    expect(applyNotificationChanges(
-      [first, second],
-      [change(updated, 2, 'turn_failed'), remove]
-    )).toEqual([updated])
   })
 
   it('fails closed when a preference snapshot is incomplete', () => {

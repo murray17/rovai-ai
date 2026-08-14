@@ -15,7 +15,7 @@ Dialog、Popover 等基础原子遵守根目录 [`DESIGN.md`](../../../DESIGN.md
 | [App Shell 与统一侧栏](app-shell-navigation.md) | 一级导航、Project/Camp 投影、Quick Chat、设置入口和窗口布局 |
 | [Camp 会话工作区](conversation-workspace.md) | 消息、过程 Drawer、Task、Approval、Composer、Inspector、Stop 与关闭等待面 |
 | [结构化 Mention](structured-mentions.md) | Composer/历史消息的身份 token、Popover、复制粘贴、键盘和选择边界 |
-| [Notification Center](notification-center.md) | Episode 一项一卡、未读/清除、typed action、heads-up 更新、错误恢复与焦点行为 |
+| [应用内提醒与会话未读](notification-center.md) | 暂时隐藏持久中心后的轻量 heads-up、Camp 未读点、精确可见确认与错误恢复 |
 | [队员身份与图像](member-identity.md) | stable identity color、portrait/icon、身份入口和降级行为 |
 | [会话区文件与文件夹拖放](conversation-drop-zone.md) | Drop target、Drag feedback、目录快照附件卡和响应式边界 |
 
