@@ -34,7 +34,7 @@ pub const TEAM_CREATE_TASK_TOOL_NAME: &str = "team.create_task";
 pub const TEAM_GET_TASK_TOOL_NAME: &str = "team.get_task";
 pub const TEAM_UPDATE_TASK_TOOL_NAME: &str = "team.update_task";
 pub const TEAM_LIST_TASKS_TOOL_NAME: &str = "team.list_tasks";
-pub const TEAM_TOOL_NAMES: [&str; 12] = [
+pub const TEAM_TOOL_NAMES: [&str; 13] = [
     CAMP_MESSAGE_SEND_TOOL_NAME,
     TEAM_CREATE_TASK_TOOL_NAME,
     TEAM_GET_TASK_TOOL_NAME,
@@ -44,6 +44,7 @@ pub const TEAM_TOOL_NAMES: [&str; 12] = [
     CAMP_SEARCH_TOOL_NAME,
     HISTORY_SEARCH_TOOL_NAME,
     CAMP_READ_TOOL_NAME,
+    "memory.view",
     "memory.search",
     "memory.read",
     "memory.write",
@@ -248,9 +249,24 @@ impl TeamToolService {
         binding_credential: &str,
         runtime_tool_call_id: &str,
     ) -> Result<AuthenticatedTeamToolRun> {
+        self.authenticate_read_binding_on_connection(
+            database.connection(),
+            native_binding_id,
+            binding_credential,
+            runtime_tool_call_id,
+        )
+    }
+
+    pub(crate) fn authenticate_read_binding_on_connection(
+        &self,
+        connection: &Connection,
+        native_binding_id: &str,
+        binding_credential: &str,
+        runtime_tool_call_id: &str,
+    ) -> Result<AuthenticatedTeamToolRun> {
         validate_invocation_identity(native_binding_id, binding_credential, runtime_tool_call_id)?;
         let identity = resolve_sender_identity(
-            database.connection(),
+            connection,
             native_binding_id,
             &credential_digest(binding_credential),
             None,
@@ -272,6 +288,25 @@ impl TeamToolService {
         agent_run_id: &str,
         execution_epoch: i64,
     ) -> Result<AuthenticatedTeamToolRun> {
+        self.authenticate_attested_binding_on_connection(
+            database.connection(),
+            native_binding_id,
+            binding_credential,
+            runtime_tool_call_id,
+            agent_run_id,
+            execution_epoch,
+        )
+    }
+
+    pub(crate) fn authenticate_attested_binding_on_connection(
+        &self,
+        connection: &Connection,
+        native_binding_id: &str,
+        binding_credential: &str,
+        runtime_tool_call_id: &str,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> Result<AuthenticatedTeamToolRun> {
         if agent_run_id.trim().is_empty() || execution_epoch <= 0 {
             return Err(invocation_error(
                 "team_tool.invalid_attested_run",
@@ -280,7 +315,7 @@ impl TeamToolService {
         }
         validate_invocation_identity(native_binding_id, binding_credential, runtime_tool_call_id)?;
         let identity = resolve_sender_identity(
-            database.connection(),
+            connection,
             native_binding_id,
             &credential_digest(binding_credential),
             Some((agent_run_id, execution_epoch)),
@@ -1576,13 +1611,14 @@ mod tests {
         managed_blob::ManagedBlobStore,
         memory::{
             AcceptHearthReviewItemCommand, CreateMemoryCommand, ForgetMemoryCommand,
-            MEMORY_AGENT_MUTATIONS_PER_RUN, MemoryCreationOrigin, MemoryKind, MemoryScopeKind,
-            MemoryService, RejectHearthReviewItemCommand, RelationshipDirection,
-            RetireMemoryCommand, ReviseMemoryCommand,
+            MEMORY_AGENT_MUTATIONS_PER_RUN, MEMORY_BODY_MAX_BYTES, MemoryCreationOrigin,
+            MemoryKind, MemoryScopeKind, MemoryService, MemoryTarget,
+            RejectHearthReviewItemCommand, RelationshipDirection, RetireMemoryCommand,
+            ReviseMemoryCommand,
         },
         memory_retrieval::{
             MemoryCacheState, MemoryReadInput, MemoryRetrievalInvocation, MemoryRetrievalService,
-            MemorySearchInput,
+            MemorySearchInput, MemoryViewInput, MemoryViewOutput,
         },
         memory_tool::{MemoryToolService, MemoryWriteToolInput, MemoryWriteToolInvocation},
         message_delivery::{DeliveryDispatchTrigger, dispatch_pending_for_recipient},
@@ -1870,6 +1906,22 @@ mod tests {
             )
         }
 
+        fn memory_view(
+            &mut self,
+            call_id: &str,
+            input: MemoryViewInput,
+        ) -> Result<MemoryViewOutput> {
+            MemoryRetrievalService.view(
+                &mut self.database,
+                &MemoryRetrievalInvocation {
+                    native_binding_id: self.credential.native_binding_id.clone(),
+                    binding_credential: self.credential.binding_credential.clone(),
+                    runtime_tool_call_id: call_id.to_string(),
+                    input,
+                },
+            )
+        }
+
         fn memory_revise(
             &mut self,
             call_id: &str,
@@ -1899,18 +1951,23 @@ mod tests {
                 call_id,
                 MemoryWriteToolInput {
                     action: "revise".to_string(),
-                    scope: Some(scope),
+                    scope: None,
                     kind: None,
                     body: body.to_string(),
                     retrieval_keys: retrieval_keys
                         .iter()
                         .map(|value| (*value).to_string())
                         .collect(),
-                    counterparty_agent_id,
-                    direction: (scope == MemoryScopeKind::Relationship)
-                        .then_some(RelationshipDirection::Directed),
-                    memory_id: Some(memory_id.to_string()),
-                    base_revision_id: Some(base_revision_id.to_string()),
+                    counterparty_agent_id: None,
+                    direction: None,
+                    target: Some(MemoryTarget {
+                        memory_id: memory_id.to_string(),
+                        revision_id: base_revision_id.to_string(),
+                        scope,
+                        counterparty_agent_id,
+                        direction: (scope == MemoryScopeKind::Relationship)
+                            .then_some(RelationshipDirection::Directed),
+                    }),
                 },
             )
             .unwrap()
@@ -1932,8 +1989,7 @@ mod tests {
                     retrieval_keys: vec![retrieval_key.to_string()],
                     counterparty_agent_id: None,
                     direction: None,
-                    memory_id: None,
-                    base_revision_id: None,
+                    target: None,
                 },
             )
             .unwrap()
@@ -4291,9 +4347,10 @@ Use this exact public input @agent_2";
             )
             .unwrap();
         assert_eq!(current.memories[0].cache_state, MemoryCacheState::Current);
-        assert_eq!(current.memories[0].scope, Some(MemoryScopeKind::Hearth));
-        assert!(current.memories[0].counterparty_agent_id.is_none());
-        assert!(current.memories[0].direction.is_none());
+        let target = current.memories[0].target.as_ref().unwrap();
+        assert_eq!(target.scope, MemoryScopeKind::Hearth);
+        assert!(target.counterparty_agent_id.is_none());
+        assert!(target.direction.is_none());
         assert!(
             current.memories[0]
                 .body
@@ -4372,7 +4429,7 @@ Use this exact public input @agent_2";
         assert_eq!(inactive.memories[0].cache_state, MemoryCacheState::Inactive);
         assert!(inactive.memories[0].body.is_none());
         assert!(inactive.memories[0].retrieval_keys.is_empty());
-        assert!(inactive.memories[0].scope.is_none());
+        assert!(inactive.memories[0].target.is_none());
         assert!(
             serde_json::to_value(&inactive.memories[0])
                 .unwrap()
@@ -4498,20 +4555,546 @@ Use this exact public input @agent_2";
             )
             .unwrap();
         assert_eq!(read.memories.len(), 2);
-        assert_eq!(read.memories[0].scope, Some(MemoryScopeKind::Relationship));
         assert_eq!(
-            read.memories[0].counterparty_agent_id.as_deref(),
+            read.memories[0].target.as_ref().unwrap().scope,
+            MemoryScopeKind::Relationship
+        );
+        assert_eq!(
+            read.memories[0]
+                .target
+                .as_ref()
+                .unwrap()
+                .counterparty_agent_id
+                .as_deref(),
             Some("agent_2")
         );
         assert_eq!(
-            read.memories[1].counterparty_agent_id.as_deref(),
+            read.memories[1]
+                .target
+                .as_ref()
+                .unwrap()
+                .counterparty_agent_id
+                .as_deref(),
             Some("agent_3")
         );
         assert!(
             read.memories
                 .iter()
-                .all(|memory| memory.direction == Some(RelationshipDirection::Directed))
+                .all(|memory| memory.target.as_ref().unwrap().direction
+                    == Some(RelationshipDirection::Directed))
         );
+    }
+
+    #[test]
+    fn memory_view_returns_complete_exact_scope_targets_in_deterministic_order() {
+        let mut fixture = Fixture::new();
+        let service = MemoryService::default();
+        let companion_id = {
+            let mut create = |command_id: &str, command: CreateMemoryCommand| {
+                service
+                    .create(
+                        &mut fixture.database,
+                        &user_envelope(command_id, None, command),
+                    )
+                    .unwrap()
+            };
+
+            for (command_id, kind, body, key) in [
+                (
+                    "view-hearth-lesson",
+                    MemoryKind::Lesson,
+                    "Keep the verified recovery trail.",
+                    "recovery trail",
+                ),
+                (
+                    "view-hearth-preference",
+                    MemoryKind::Preference,
+                    "Prefer concise status updates.",
+                    "concise status",
+                ),
+                (
+                    "view-hearth-agreement",
+                    MemoryKind::Agreement,
+                    "Every handoff includes exact evidence.",
+                    "exact evidence",
+                ),
+            ] {
+                create(
+                    command_id,
+                    CreateMemoryCommand {
+                        scope: MemoryScopeKind::Hearth,
+                        kind,
+                        body: body.to_string(),
+                        retrieval_keys: vec![key.to_string()],
+                        companion_agent_id: None,
+                        relationship_agent_ids: Vec::new(),
+                        direction: None,
+                        directed_actor_agent_id: None,
+                        review_after: None,
+                    },
+                );
+            }
+            let companion = create(
+                "view-companion-agent-one",
+                CreateMemoryCommand {
+                    scope: MemoryScopeKind::Companion,
+                    kind: MemoryKind::Lesson,
+                    body: "Agent one validates the exact frozen payload.".to_string(),
+                    retrieval_keys: vec!["frozen payload".to_string()],
+                    companion_agent_id: Some("agent_1".to_string()),
+                    relationship_agent_ids: Vec::new(),
+                    direction: None,
+                    directed_actor_agent_id: None,
+                    review_after: None,
+                },
+            );
+            let companion_id = companion.result.payload["memoryId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            create(
+                "view-companion-agent-two",
+                CreateMemoryCommand {
+                    scope: MemoryScopeKind::Companion,
+                    kind: MemoryKind::Lesson,
+                    body: "Agent two owns a separate Companion Memory.".to_string(),
+                    retrieval_keys: vec!["separate companion".to_string()],
+                    companion_agent_id: Some("agent_2".to_string()),
+                    relationship_agent_ids: Vec::new(),
+                    direction: None,
+                    directed_actor_agent_id: None,
+                    review_after: None,
+                },
+            );
+
+            for (command_id, kind, body, key, pair, direction, actor) in [
+                (
+                    "view-forward-lesson",
+                    MemoryKind::Lesson,
+                    "I give agent two exact test output.",
+                    "test output",
+                    ["agent_1", "agent_2"],
+                    RelationshipDirection::Directed,
+                    Some("agent_1"),
+                ),
+                (
+                    "view-reverse-agreement",
+                    MemoryKind::Agreement,
+                    "Agent two gives me exact test output.",
+                    "reverse output",
+                    ["agent_1", "agent_2"],
+                    RelationshipDirection::Directed,
+                    Some("agent_2"),
+                ),
+                (
+                    "view-mutual-agreement",
+                    MemoryKind::Agreement,
+                    "We acknowledge handoffs before continuing.",
+                    "acknowledge handoff",
+                    ["agent_1", "agent_2"],
+                    RelationshipDirection::Mutual,
+                    None,
+                ),
+                (
+                    "view-forward-agreement",
+                    MemoryKind::Agreement,
+                    "I identify the tested revision for agent two.",
+                    "tested revision",
+                    ["agent_1", "agent_2"],
+                    RelationshipDirection::Directed,
+                    Some("agent_1"),
+                ),
+                (
+                    "view-other-pair",
+                    MemoryKind::Lesson,
+                    "I give agent three a separate handoff.",
+                    "separate handoff",
+                    ["agent_1", "agent_3"],
+                    RelationshipDirection::Directed,
+                    Some("agent_1"),
+                ),
+            ] {
+                create(
+                    command_id,
+                    CreateMemoryCommand {
+                        scope: MemoryScopeKind::Relationship,
+                        kind,
+                        body: body.to_string(),
+                        retrieval_keys: vec![key.to_string()],
+                        companion_agent_id: None,
+                        relationship_agent_ids: pair.into_iter().map(str::to_string).collect(),
+                        direction: Some(direction),
+                        directed_actor_agent_id: actor.map(str::to_string),
+                        review_after: None,
+                    },
+                );
+            }
+            companion_id
+        };
+
+        let pending_marker = "pending-view-candidate-marker";
+        let pending = fixture.hearth_review_add(
+            "view-pending-hearth-review",
+            pending_marker,
+            "pending view marker",
+        );
+        assert_eq!(pending.result.status, CommandResultStatus::Accepted);
+
+        let hearth = fixture
+            .memory_view(
+                "view-hearth",
+                MemoryViewInput {
+                    scope: MemoryScopeKind::Hearth,
+                    counterparty_agent_id: None,
+                },
+            )
+            .unwrap();
+        assert!(hearth.complete);
+        assert_eq!(hearth.item_count, 3);
+        assert_eq!(
+            hearth
+                .items
+                .iter()
+                .map(|item| item.kind)
+                .collect::<Vec<_>>(),
+            vec![
+                MemoryKind::Agreement,
+                MemoryKind::Preference,
+                MemoryKind::Lesson
+            ]
+        );
+        assert_eq!(
+            hearth.total_body_bytes,
+            hearth
+                .items
+                .iter()
+                .map(|item| item.body.len())
+                .sum::<usize>()
+        );
+        assert!(hearth.items.iter().all(|item| {
+            item.target.scope == MemoryScopeKind::Hearth
+                && item.target.counterparty_agent_id.is_none()
+                && item.target.direction.is_none()
+                && item.agent_can_revise
+                && item.body != pending_marker
+        }));
+
+        let companion = fixture
+            .memory_view(
+                "view-companion",
+                MemoryViewInput {
+                    scope: MemoryScopeKind::Companion,
+                    counterparty_agent_id: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(companion.item_count, 1);
+        assert_eq!(companion.items[0].target.memory_id, companion_id);
+        assert_eq!(companion.items[0].target.scope, MemoryScopeKind::Companion);
+        assert!(companion.items[0].agent_can_revise);
+
+        let relationship = fixture
+            .memory_view(
+                "view-relationship-agent-two",
+                MemoryViewInput {
+                    scope: MemoryScopeKind::Relationship,
+                    counterparty_agent_id: Some("agent_2".to_string()),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            relationship.counterparty_agent_id.as_deref(),
+            Some("agent_2")
+        );
+        assert_eq!(relationship.item_count, 3);
+        assert_eq!(
+            relationship
+                .items
+                .iter()
+                .map(|item| (item.target.direction, item.kind))
+                .collect::<Vec<_>>(),
+            vec![
+                (Some(RelationshipDirection::Directed), MemoryKind::Agreement),
+                (Some(RelationshipDirection::Directed), MemoryKind::Lesson),
+                (Some(RelationshipDirection::Mutual), MemoryKind::Agreement),
+            ]
+        );
+        assert!(
+            relationship.items[..2]
+                .iter()
+                .all(|item| item.agent_can_revise)
+        );
+        assert!(!relationship.items[2].agent_can_revise);
+        assert!(
+            relationship
+                .items
+                .iter()
+                .all(|item| { item.target.counterparty_agent_id.as_deref() == Some("agent_2") })
+        );
+
+        let revised = fixture
+            .memory_write(
+                "view-copy-target-revise",
+                MemoryWriteToolInput {
+                    action: "revise".to_string(),
+                    scope: None,
+                    kind: None,
+                    body: "Agent one validates the exact immutable payload.".to_string(),
+                    retrieval_keys: vec!["immutable payload".to_string()],
+                    counterparty_agent_id: None,
+                    direction: None,
+                    target: Some(companion.items[0].target.clone()),
+                },
+            )
+            .unwrap();
+        assert_eq!(revised.result.status, CommandResultStatus::Applied);
+        let mutual_revise = fixture
+            .memory_write(
+                "view-mutual-target-revise",
+                MemoryWriteToolInput {
+                    action: "revise".to_string(),
+                    scope: None,
+                    kind: None,
+                    body: "A mutual target must remain user governed.".to_string(),
+                    retrieval_keys: vec!["mutual governance".to_string()],
+                    counterparty_agent_id: None,
+                    direction: None,
+                    target: Some(relationship.items[2].target.clone()),
+                },
+            )
+            .unwrap();
+        assert_eq!(mutual_revise.result.status, CommandResultStatus::Rejected);
+        assert_eq!(mutual_revise.result.code, "memory.invalid_input");
+
+        let delivered: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM memory_access_evidence WHERE evidence_kind = 'view'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(delivered, 7);
+        let leaked_pending: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM memory_access_evidence WHERE memory_id = ?1",
+                [pending.result.payload["reviewItemId"].as_str().unwrap()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(leaked_pending, 0);
+
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET profile_status = 'away' WHERE id = 'agent_3'",
+                [],
+            )
+            .unwrap();
+        let unavailable = fixture
+            .memory_view(
+                "view-away-counterparty",
+                MemoryViewInput {
+                    scope: MemoryScopeKind::Relationship,
+                    counterparty_agent_id: Some("agent_3".to_string()),
+                },
+            )
+            .unwrap_err();
+        let unavailable = unavailable
+            .downcast_ref::<TeamToolInvocationError>()
+            .unwrap();
+        assert_eq!(unavailable.code, "memory.view_unavailable");
+        assert_eq!(unavailable.message, "Memory View is unavailable");
+    }
+
+    #[test]
+    fn memory_view_fails_closed_before_recording_evidence_for_invalid_scope_state() {
+        let mut fixture = Fixture::new();
+        let service = MemoryService::default();
+        for index in 0..8 {
+            let created = service
+                .create(
+                    &mut fixture.database,
+                    &user_envelope(
+                        &format!("view-full-hearth-{index}"),
+                        None,
+                        CreateMemoryCommand {
+                            scope: MemoryScopeKind::Hearth,
+                            kind: MemoryKind::Agreement,
+                            body: format!("{index}{}", "q".repeat(MEMORY_BODY_MAX_BYTES - 1)),
+                            retrieval_keys: vec![format!("view quota {index}")],
+                            companion_agent_id: None,
+                            relationship_agent_ids: Vec::new(),
+                            direction: None,
+                            directed_actor_agent_id: None,
+                            review_after: None,
+                        },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(created.result.status, CommandResultStatus::Applied);
+        }
+        fixture
+            .database
+            .connection()
+            .execute_batch(
+                r#"
+                PRAGMA defer_foreign_keys = ON;
+                BEGIN IMMEDIATE;
+                INSERT INTO memory(
+                    id, scope_kind, kind, creation_origin, lifecycle_status,
+                    current_revision_id, version, created_at, updated_at
+                ) VALUES (
+                    'invalid-view-memory', 'hearth', 'lesson', 'user', 'active',
+                    'invalid-view-revision', 1, '2026-08-14T00:00:00Z',
+                    '2026-08-14T00:00:00Z'
+                );
+                INSERT INTO memory_revision(
+                    id, memory_id, body, body_utf8_bytes, body_digest,
+                    actor_kind, actor_id, created_at
+                ) VALUES (
+                    'invalid-view-revision', 'invalid-view-memory', 'z', 1,
+                    'sha256:invalid-view', 'user', 'local_user',
+                    '2026-08-14T00:00:00Z'
+                );
+                COMMIT;
+                "#,
+            )
+            .unwrap();
+
+        let error = fixture
+            .memory_view(
+                "view-invalid-scope-state",
+                MemoryViewInput {
+                    scope: MemoryScopeKind::Hearth,
+                    counterparty_agent_id: None,
+                },
+            )
+            .unwrap_err();
+        assert_eq!(
+            error
+                .downcast_ref::<TeamToolInvocationError>()
+                .unwrap()
+                .code,
+            "memory.view_unavailable"
+        );
+        let evidence: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM memory_access_evidence WHERE evidence_kind = 'view'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(evidence, 0);
+    }
+
+    #[test]
+    fn hearth_review_acceptance_checks_body_quota_and_replays_the_first_rejection() {
+        let mut fixture = Fixture::new();
+        let service = MemoryService::default();
+        let mut first_memory_id = None;
+        for index in 0..8 {
+            let created = service
+                .create(
+                    &mut fixture.database,
+                    &user_envelope(
+                        &format!("review-quota-hearth-{index}"),
+                        None,
+                        CreateMemoryCommand {
+                            scope: MemoryScopeKind::Hearth,
+                            kind: MemoryKind::Agreement,
+                            body: format!("{index}{}", "h".repeat(MEMORY_BODY_MAX_BYTES - 1)),
+                            retrieval_keys: vec![format!("review quota {index}")],
+                            companion_agent_id: None,
+                            relationship_agent_ids: Vec::new(),
+                            direction: None,
+                            directed_actor_agent_id: None,
+                            review_after: None,
+                        },
+                    ),
+                )
+                .unwrap();
+            first_memory_id.get_or_insert_with(|| {
+                created.result.payload["memoryId"]
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            });
+        }
+        let review = fixture.hearth_review_add(
+            "review-quota-propose",
+            "Accept only after aggregate body capacity is available.",
+            "aggregate acceptance",
+        );
+        let review_item_id = review.result.payload["reviewItemId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let accept = user_envelope(
+            "review-quota-accept",
+            None,
+            AcceptHearthReviewItemCommand {
+                review_item_id: review_item_id.clone(),
+                expected_review_item_version: 1,
+                final_body: None,
+                final_retrieval_keys: None,
+            },
+        );
+        let rejected = service
+            .accept_hearth_review_item(&mut fixture.database, &accept)
+            .unwrap();
+        assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
+        assert_eq!(rejected.result.code, "memory.capacity_exceeded");
+        let pending = service
+            .list_hearth_review_items(&fixture.database)
+            .unwrap()
+            .into_iter()
+            .find(|item| item.review_item_id == review_item_id)
+            .unwrap();
+        assert_eq!(pending.status, "pending");
+        assert!(pending.candidate_body.is_some());
+
+        service
+            .retire(
+                &mut fixture.database,
+                &user_envelope(
+                    "review-quota-retire",
+                    None,
+                    RetireMemoryCommand {
+                        memory_id: first_memory_id.unwrap(),
+                        expected_version: 1,
+                    },
+                ),
+            )
+            .unwrap();
+        let replay = service
+            .accept_hearth_review_item(&mut fixture.database, &accept)
+            .unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.result, rejected.result);
+
+        let accepted = service
+            .accept_hearth_review_item(
+                &mut fixture.database,
+                &user_envelope(
+                    "review-quota-accept-new-command",
+                    None,
+                    AcceptHearthReviewItemCommand {
+                        review_item_id,
+                        expected_review_item_version: 1,
+                        final_body: None,
+                        final_retrieval_keys: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(accepted.result.status, CommandResultStatus::Applied);
     }
 
     #[test]
@@ -4533,8 +5116,7 @@ Use this exact public input @agent_2";
                         retrieval_keys: vec!["frozen digest".to_string()],
                         counterparty_agent_id: None,
                         direction: None,
-                        memory_id: None,
-                        base_revision_id: None,
+                        target: None,
                     },
                 },
             )
@@ -4568,8 +5150,7 @@ Use this exact public input @agent_2";
                         retrieval_keys: vec!["exact retry".to_string()],
                         counterparty_agent_id: None,
                         direction: None,
-                        memory_id: None,
-                        base_revision_id: None,
+                        target: None,
                     },
                 },
             )
@@ -4632,8 +5213,7 @@ Use this exact public input @agent_2";
                     retrieval_keys: vec!["exact handoff".to_string()],
                     counterparty_agent_id: Some("agent_2".to_string()),
                     direction: Some(RelationshipDirection::Directed),
-                    memory_id: None,
-                    base_revision_id: None,
+                    target: None,
                 },
             )
             .unwrap();
@@ -4654,15 +5234,20 @@ Use this exact public input @agent_2";
                 "directed-wrong-target-wrong-base",
                 MemoryWriteToolInput {
                     action: "revise".to_string(),
-                    scope: Some(MemoryScopeKind::Relationship),
+                    scope: None,
                     kind: None,
                     body: "This must not revise the relationship selected for agent two."
                         .to_string(),
                     retrieval_keys: vec!["wrong counterparty".to_string()],
-                    counterparty_agent_id: Some("agent_3".to_string()),
-                    direction: Some(RelationshipDirection::Directed),
-                    memory_id: Some(directed_memory.id.clone()),
-                    base_revision_id: Some(Uuid::new_v4().to_string()),
+                    counterparty_agent_id: None,
+                    direction: None,
+                    target: Some(MemoryTarget {
+                        memory_id: directed_memory.id.clone(),
+                        revision_id: Uuid::new_v4().to_string(),
+                        scope: MemoryScopeKind::Relationship,
+                        counterparty_agent_id: Some("agent_3".to_string()),
+                        direction: Some(RelationshipDirection::Directed),
+                    }),
                 },
             )
             .unwrap();
@@ -4672,14 +5257,19 @@ Use this exact public input @agent_2";
                 "directed-wrong-target-exact",
                 MemoryWriteToolInput {
                     action: "revise".to_string(),
-                    scope: Some(MemoryScopeKind::Relationship),
+                    scope: None,
                     kind: None,
                     body: "I will provide agent two with exact handoff evidence.".to_string(),
                     retrieval_keys: vec!["exact handoff".to_string()],
-                    counterparty_agent_id: Some("agent_3".to_string()),
-                    direction: Some(RelationshipDirection::Directed),
-                    memory_id: Some(directed_memory.id.clone()),
-                    base_revision_id: directed_memory.current_revision_id.clone(),
+                    counterparty_agent_id: None,
+                    direction: None,
+                    target: Some(MemoryTarget {
+                        memory_id: directed_memory.id.clone(),
+                        revision_id: directed_memory.current_revision_id.clone().unwrap(),
+                        scope: MemoryScopeKind::Relationship,
+                        counterparty_agent_id: Some("agent_3".to_string()),
+                        direction: Some(RelationshipDirection::Directed),
+                    }),
                 },
             )
             .unwrap();
@@ -4696,8 +5286,7 @@ Use this exact public input @agent_2";
                     retrieval_keys: vec!["mutual obligation".to_string()],
                     counterparty_agent_id: Some("agent_2".to_string()),
                     direction: Some(RelationshipDirection::Mutual),
-                    memory_id: None,
-                    base_revision_id: None,
+                    target: None,
                 },
             )
             .unwrap();
@@ -4915,8 +5504,7 @@ Use this exact public input @agent_2";
             retrieval_keys: vec!["retry evidence".to_string()],
             counterparty_agent_id: Some("agent_3".to_string()),
             direction: Some(RelationshipDirection::Directed),
-            memory_id: None,
-            base_revision_id: None,
+            target: None,
         };
         let first = fixture
             .memory_write("durable-counterparty-rejection", input.clone())
@@ -4964,8 +5552,7 @@ Use this exact public input @agent_2";
             retrieval_keys: vec!["quota replay".to_string()],
             counterparty_agent_id: None,
             direction: None,
-            memory_id: None,
-            base_revision_id: None,
+            target: None,
         };
         let quota = fixture
             .memory_write("durable-run-quota-rejection", quota_input.clone())
@@ -5001,8 +5588,7 @@ Use this exact public input @agent_2";
                                 retrieval_keys: vec![key.to_string()],
                                 counterparty_agent_id: None,
                                 direction: None,
-                                memory_id: None,
-                                base_revision_id: None,
+                                target: None,
                             },
                         },
                     )
@@ -5159,14 +5745,19 @@ Use this exact public input @agent_2";
                     runtime_tool_call_id: "hearth-revise-first".to_string(),
                     input: MemoryWriteToolInput {
                         action: "revise".to_string(),
-                        scope: Some(MemoryScopeKind::Hearth),
+                        scope: None,
                         kind: None,
                         body: candidate_body.to_string(),
                         retrieval_keys: vec!["candidate marker".to_string()],
                         counterparty_agent_id: None,
                         direction: None,
-                        memory_id: Some(memory_id.clone()),
-                        base_revision_id: Some(original_revision_id.clone()),
+                        target: Some(MemoryTarget {
+                            memory_id: memory_id.clone(),
+                            revision_id: original_revision_id.clone(),
+                            scope: MemoryScopeKind::Hearth,
+                            counterparty_agent_id: None,
+                            direction: None,
+                        }),
                     },
                 },
             )
@@ -5279,14 +5870,19 @@ Use this exact public input @agent_2";
                     runtime_tool_call_id: "hearth-revise-before-forget".to_string(),
                     input: MemoryWriteToolInput {
                         action: "revise".to_string(),
-                        scope: Some(MemoryScopeKind::Hearth),
+                        scope: None,
                         kind: None,
                         body: "A pending target revision must clear when forgotten.".to_string(),
                         retrieval_keys: vec!["forget target".to_string()],
                         counterparty_agent_id: None,
                         direction: None,
-                        memory_id: Some(memory_id.clone()),
-                        base_revision_id: Some(current_revision_id),
+                        target: Some(MemoryTarget {
+                            memory_id: memory_id.clone(),
+                            revision_id: current_revision_id,
+                            scope: MemoryScopeKind::Hearth,
+                            counterparty_agent_id: None,
+                            direction: None,
+                        }),
                     },
                 },
             )
@@ -5310,8 +5906,7 @@ Use this exact public input @agent_2";
                         retrieval_keys: vec!["historical body".to_string()],
                         counterparty_agent_id: None,
                         direction: None,
-                        memory_id: None,
-                        base_revision_id: None,
+                        target: None,
                     },
                 },
             )

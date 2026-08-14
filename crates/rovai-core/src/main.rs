@@ -116,8 +116,8 @@ use rovai_core::{
         ReviseMemoryCommand, ScheduleMemoryReviewCommand, SupersedeMemoriesCommand,
     },
     memory_retrieval::{
-        MEMORY_READ_TOOL_NAME, MEMORY_SEARCH_TOOL_NAME, MemoryReadInput, MemoryRetrievalInvocation,
-        MemoryRetrievalService, MemorySearchInput,
+        MEMORY_READ_TOOL_NAME, MEMORY_SEARCH_TOOL_NAME, MEMORY_VIEW_TOOL_NAME, MemoryReadInput,
+        MemoryRetrievalInvocation, MemoryRetrievalService, MemorySearchInput, MemoryViewInput,
     },
     memory_tool::{
         MEMORY_WRITE_TOOL_NAME, MemoryToolService, MemoryWriteToolInput, MemoryWriteToolInvocation,
@@ -2705,6 +2705,28 @@ impl Core {
                         }?;
                     evidence_replayed = execution.replayed;
                     command_execution_payload(execution)
+                }
+                MEMORY_VIEW_TOOL_NAME => {
+                    let input = serde_json::from_value::<MemoryViewInput>(request.input)
+                        .context("private memory.view input is invalid")?;
+                    let invocation = MemoryRetrievalInvocation {
+                        native_binding_id: request.native_binding_id,
+                        binding_credential: request.binding_credential,
+                        runtime_tool_call_id: request.runtime_tool_call_id,
+                        input,
+                    };
+                    let output =
+                        if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
+                            MemoryRetrievalService.view_attested(
+                                &mut database,
+                                &invocation,
+                                agent_run_id,
+                                *execution_epoch,
+                            )
+                        } else {
+                            MemoryRetrievalService.view(&mut database, &invocation)
+                        }?;
+                    serde_json::to_value(output).map_err(Into::into)
                 }
                 MEMORY_SEARCH_TOOL_NAME => {
                     let input = serde_json::from_value::<MemorySearchInput>(request.input)

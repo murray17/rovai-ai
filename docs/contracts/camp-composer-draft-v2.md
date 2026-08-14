@@ -156,13 +156,13 @@ continuation 当成“无显式寻址”后交给 Default Lead。Renderer 可以
 
 ## 7. Migration
 
-schema migration 84 / projection schema 39 增加三个字段。旧 Draft 不伪造 continuation source；已有正文或
+schema migration 85 / projection schema 40 增加三个字段。旧 Draft 不伪造 continuation source；已有正文或
 附件的旧 Draft 迁移为 `recipientSelectionTouched=true`，保持升级前的显式/Default 路由。空白旧 Draft
 可以按升级后的最近 accepted user message 动态投影候选。
 
 ## References
 
-- [ADR-0186](../adr/0186-durable-composer-recipient-continuation.md)
+- [ADR-0187](../adr/0187-durable-composer-recipient-continuation.md)
 - [ADR-0185](../adr/0185-durable-composer-reply-intent-and-explicit-recipient-resolution.md)
 - [Camp Composer Draft v1（historical）](camp-composer-draft-v1.md)
 - [Camp Attachment v1](camp-attachment-v1.md)

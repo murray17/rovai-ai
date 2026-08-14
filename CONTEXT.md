@@ -209,8 +209,12 @@ The immutable application-level ownership and maximum visibility boundary select
 _Avoid_: mutable label, folder path, Camp visibility, revision field
 
 **Agent Memory Scope Identity**:
-The authenticated-Agent-relative projection of one Memory's immutable target boundary: `scope`, plus `counterpartyAgentId` and `direction` for Relationship. Authorized current Search/Read results expose it so a revise can repeat the exact target assertion; it never grants access, changes Scope, or substitutes for Core authorization.
+The authenticated-Agent-relative projection of one Memory's immutable target boundary: `scope`, plus `counterpartyAgentId` and `direction` for Relationship. Memory Search exposes it as flat discovery metadata; it never grants access, changes Scope, or substitutes for Core authorization.
 _Avoid_: editable Scope fields, Memory capability, inferred counterparty, body-based target identity
+
+**Memory Target**:
+The indivisible Agent-facing revision target returned by a complete Memory View item or authorized body-bearing Memory Read: `memoryId`, current `revisionId`, and complete Agent Memory Scope Identity. Agent revise copies it unchanged; reconstructing, splitting or editing its fields cannot establish authority.
+_Avoid_: editable Memory identity, inferred revision, flat revise fields, permission token
 
 **Memory Kind**:
 The immutable semantic classification selected when a Memory is created: Preference, Agreement, or Lesson. Reclassification creates a new Memory; Kind is not a tag or Revision field.
@@ -256,12 +260,16 @@ _Avoid_: current Memory truth, Memory Guide, projection path list, Memory body i
 A short, Revision-bound discovery phrase that helps an Agent find one Memory without changing its Scope, Kind, applicability, priority, or Lifecycle. Retrieval Keys are immutable with their MemoryRevision and are not tags on the stable Memory.
 _Avoid_: Memory authority, mutable tag, task fact, permission label
 
+**Memory View**:
+An authorized, transactionally formed, complete read of one exact effective Memory scope for online add/revise judgment. Hearth View is local-home application-global, Companion View belongs to the authenticated AgentProfile, and Relationship View contains mutual plus current-Agent-directed content for one exact unordered pair. A successful View is never paginated, truncated or partial and every item carries a copyable Memory Target.
+_Avoid_: ranked search result, complete user-governance Relationship pair, Camp memory, paginated scope snapshot
+
 **Memory Search**:
-An authorized search over the current Agent's applicable active current MemoryRevisions, including entries omitted from its bounded Memory Entrypoint. Search returns discovery metadata, Agent Memory Scope Identity and snippets rather than granting access or returning complete bodies.
+An authorized cross-Scope search over the current Agent's applicable active current MemoryRevisions, including entries omitted from its bounded Memory Entrypoint. Search returns discovery metadata, Agent Memory Scope Identity and snippets rather than granting access, returning complete bodies or proving complete Scope inspection.
 _Avoid_: complete Memory Library search, historical Revision search, authorization by ID possession
 
 **Memory Read**:
-An authorized, bounded read of the latest current Revision for stable Memory IDs. Every call revalidates the active AgentRun, Memory applicability and Lifecycle; authorized current/revised results include Agent Memory Scope Identity, while inactive, deleted, access-changed and unavailable results remain body- and identity-free. A stale reference never returns an old or unauthorized body.
+An authorized, bounded read of the latest current Revision for stable Memory IDs. Every call revalidates the active AgentRun, Memory applicability and Lifecycle; authorized current/revised body-bearing results include one copyable Memory Target, while inactive, deleted, access-changed and unavailable results remain body- and target-free. A stale reference never returns an old or unauthorized body.
 _Avoid_: frozen Entrypoint body, historical Revision read, Session rotation, capability by reference
 
 **Preference Memory**:
@@ -293,11 +301,11 @@ The immutable Agent-facing applicability of one Relationship Memory: `mutual` en
 _Avoid_: directional Relationship Scope, user-hidden note, mutable revision field
 
 **Agent Memory Write**:
-A unified `memory.write` add or revise from a current fenced AgentRun. Core makes Companion(current Agent) and directed Relationship(current Agent → present counterparty) immediately effective, routes Hearth to an isolated pending Review Item, and rejects mutual, reverse-directed, other-Companion and lifecycle mutations.
+A unified `memory.write` add or revise from a current fenced AgentRun. Add selects one closed Scope; revise copies a Memory Target from the deciding View or authoritative Read. Core makes Companion(current Agent) and directed Relationship(current Agent → present counterparty) immediately effective, routes Hearth to an isolated pending Review Item, and rejects mutual, reverse-directed, other-Companion and lifecycle mutations.
 _Avoid_: Agent-selected proposal verb, automatic confirmation, mutual Agent write, lifecycle request
 
 **Hearth Review Item**:
-A durable, independently versioned but non-effective Hearth add or revise candidate submitted through Agent Memory Write. Only an explicit user decision can create the active Hearth Memory or Revision; the Review Item never enters Memory Search, Memory Read, Memory Entrypoint, FTS, export, or Agent-origin Memory capacity.
+A durable, independently versioned but non-effective Hearth add or revise candidate submitted through Agent Memory Write. Only an explicit user decision can create the active Hearth Memory or Revision; the Review Item never enters Memory View, Memory Search, Memory Read, Memory Entrypoint, FTS, export, or Agent-origin Memory capacity.
 _Avoid_: Hearth Memory Proposal, active Memory, pending MemoryRevision, user draft
 
 **Stale Hearth Review Item**:
@@ -389,7 +397,7 @@ The ordinary official Rovai Skill `cli-operations` that guides command-family ch
 _Avoid_: universal CLI manual, routine `--to-user` flag manual, required Skill, family-level help alias, permission grant
 
 **Memory Stewardship Skill**:
-The system-required official Rovai Skill `memory-stewardship` (“共同记忆维护”) that best-effort teaches durable-memory judgment, authorized search/read, atomic wording, Retrieval Keys, duplicate and secret checks, actor-bounded add/revise, and the Hearth Review boundary. It is enabled and assigned to every Skill Delivery Group, but availability neither proves per-turn model loading nor grants Capability or fallback prompt injection.
+The system-required official Rovai Skill `memory-stewardship` (“共同记忆维护”) that best-effort teaches durable-memory judgment, exact-Scope View before online add/revise, Search/Read for broad recall, copyable target use, atomic wording, Retrieval Keys, duplicate and secret checks, actor-bounded mutation, and the Hearth Review boundary. It is enabled and assigned to every Skill Delivery Group, but availability neither proves per-turn model loading nor grants Capability or fallback prompt injection.
 _Avoid_: permission grant, per-Scope Skill, Memory authority, mandatory System Prompt, unsupported-Runtime emulation
 
 **Worktree Skill**:
@@ -449,7 +457,7 @@ A derived management condition where a Hearth Review Item's weak source Camp/Age
 _Avoid_: Review invalidation, cascade deletion, cached source transcript, restored source authority
 
 **Non-Participating AgentProfile Memory**:
-An otherwise active Companion or Relationship Memory involving an away or removed AgentProfile. Member Presence does not mutate Memory Lifecycle, Revision, Hearth Review Item, Origin, or Supersession data; no Agent Memory Entrypoint, search/read result, or direct write target is produced while ineligible. Returning from away restores applicability without a new Revision, while removed is permanently ineligible.
+An otherwise active Companion or Relationship Memory involving an away or removed AgentProfile. Member Presence does not mutate Memory Lifecycle, Revision, Hearth Review Item, Origin, or Supersession data; no Agent Memory Entrypoint, View, Search/Read result, or direct write target is produced while ineligible. Returning from away restores applicability without a new Revision, while removed is permanently ineligible.
 _Avoid_: automatically retired Memory, removed Memory scope, deleted Hearth Review Item, removal-driven Forget
 
 **Memory Body Limit**:
@@ -469,8 +477,12 @@ The non-overridable Core validation that rejects credentials and authentication 
 _Avoid_: user override, post-persistence scanner, sensitive-personality profile, secret audit snippet
 
 **Active Memory Scope Capacity**:
-The hard entry-count limit for one active Hearth set, one AgentProfile's active Companion set, one unordered pair's active Relationship set, or one AgentProfile's applicable Relationship set. Hearth Review Items, retired Memories and historical Revisions do not reserve it; every command that would expand the active set revalidates it without automatic eviction, while body size is governed independently by Memory Body Limit.
-_Avoid_: aggregate byte quota, database storage quota, Review queue capacity, revision-history limit, automatic retention policy
+The paired hard entry-count and active-current-body-byte limits for one application-global Hearth set, one AgentProfile's Companion set, or one unordered Relationship pair. Limits are respectively 32/16 KiB, 32/16 KiB and 12/12 KiB. Hearth Review candidates, retired or forgotten Memories and historical Revisions consume neither limit; every net-growing transaction checks its final state without eviction or truncation.
+_Avoid_: database storage quota, Review queue capacity, revision-history limit, transport truncation budget, automatic retention policy
+
+**Memory View Output Limit**:
+The 64 KiB maximum measured over the production minified canonical JSON Agent projection of one complete Memory View. Scope capacities are designed to fit legal extreme payloads; if corruption or another broken invariant still exceeds the limit, the whole View fails closed before access evidence rather than returning a prefix.
+_Avoid_: body-byte estimate, pagination threshold, partial response, item eviction
 
 **Agent-Origin Memory Capacity**:
 The additional count bound on active Memories formed directly by an Agent, applied per Companion, Relationship pair and each Agent's applicable Relationship set. A user revision does not change formation origin or release the slot; a user-accepted Hearth Review is not a direct Agent-origin Memory. Reaching the bound rejects new Agent-origin entries rather than creating pending non-Hearth work.

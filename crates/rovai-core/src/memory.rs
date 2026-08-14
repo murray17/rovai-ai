@@ -32,6 +32,9 @@ pub const MEMORY_AGENT_MUTATIONS_PER_RUN: i64 = 4;
 pub const HEARTH_MAX_COUNT: i64 = 32;
 pub const COMPANION_MAX_COUNT: i64 = 32;
 pub const RELATIONSHIP_PAIR_MAX_COUNT: i64 = 12;
+pub const HEARTH_ACTIVE_BODY_MAX_BYTES: i64 = 16 * 1_024;
+pub const COMPANION_ACTIVE_BODY_MAX_BYTES: i64 = 16 * 1_024;
+pub const RELATIONSHIP_PAIR_ACTIVE_BODY_MAX_BYTES: i64 = 12 * 1_024;
 pub const RELATIONSHIP_APPLICABLE_MAX_COUNT: i64 = 48;
 pub const AGENT_COMPANION_MAX_COUNT: i64 = 8;
 pub const AGENT_RELATIONSHIP_PAIR_MAX_COUNT: i64 = 4;
@@ -96,7 +99,7 @@ impl MemoryScopeKind {
         }
     }
 
-    fn parse(value: &str) -> Result<Self> {
+    pub(crate) fn parse(value: &str) -> Result<Self> {
         match value {
             "hearth" => Ok(Self::Hearth),
             "companion" => Ok(Self::Companion),
@@ -123,7 +126,7 @@ impl MemoryKind {
         }
     }
 
-    fn parse(value: &str) -> Result<Self> {
+    pub(crate) fn parse(value: &str) -> Result<Self> {
         match value {
             "preference" => Ok(Self::Preference),
             "agreement" => Ok(Self::Agreement),
@@ -148,13 +151,25 @@ impl RelationshipDirection {
         }
     }
 
-    fn parse(value: &str) -> Result<Self> {
+    pub(crate) fn parse(value: &str) -> Result<Self> {
         match value {
             "mutual" => Ok(Self::Mutual),
             "directed" => Ok(Self::Directed),
             _ => anyhow::bail!("unknown Relationship direction: {value}"),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MemoryTarget {
+    pub memory_id: String,
+    pub revision_id: String,
+    pub scope: MemoryScopeKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub counterparty_agent_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direction: Option<RelationshipDirection>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -421,8 +436,7 @@ pub struct AgentMemoryWriteCommand {
     pub retrieval_keys: Vec<String>,
     pub counterparty_agent_id: Option<String>,
     pub direction: Option<RelationshipDirection>,
-    pub memory_id: Option<String>,
-    pub base_revision_id: Option<String>,
+    pub target: Option<MemoryTarget>,
 }
 
 impl sealed::Sealed for AgentMemoryWriteCommand {}
@@ -508,6 +522,8 @@ pub struct MemoryCapacityView {
     pub scope_key: String,
     pub active_count: i64,
     pub max_count: i64,
+    pub active_body_bytes: i64,
+    pub max_body_bytes: Option<i64>,
     pub agent_origin_count: i64,
     pub agent_origin_max_count: i64,
 }
@@ -654,6 +670,7 @@ impl MemoryService {
             ensure_capacity(
                 transaction,
                 &candidate.scope,
+                candidate.body_bytes,
                 MemoryCreationOrigin::User,
                 None,
             )?;
@@ -761,6 +778,7 @@ impl MemoryService {
                     "Memory body and Retrieval Keys are unchanged",
                 ));
             }
+            ensure_revision_capacity(transaction, &record, normalized.payload.body.len() as i64)?;
             let kind = record.kind.context("non-forgotten Memory has no Kind")?;
             let now = Utc::now().to_rfc3339();
             let revision_id = Uuid::new_v4().to_string();
@@ -899,7 +917,10 @@ impl MemoryService {
             let origin = record
                 .creation_origin
                 .context("retired Memory has no creation origin")?;
-            ensure_capacity(transaction, scope, origin, None)?;
+            let body_bytes = record
+                .current_body_utf8_bytes
+                .context("retired Memory has no current body byte count")?;
+            ensure_capacity(transaction, scope, body_bytes, origin, None)?;
             let now = Utc::now().to_rfc3339();
             transaction.execute(
                 r#"
@@ -1148,6 +1169,22 @@ mod tests {
         }
     }
 
+    fn sized_hearth_candidate(index: usize, body_bytes: usize) -> CreateMemoryCommand {
+        assert!(body_bytes >= 2);
+        let prefix = format!("{index:02}");
+        CreateMemoryCommand {
+            scope: MemoryScopeKind::Hearth,
+            kind: MemoryKind::Agreement,
+            body: format!("{prefix}{}", "x".repeat(body_bytes - prefix.len())),
+            retrieval_keys: vec![format!("quota {index}")],
+            companion_agent_id: None,
+            relationship_agent_ids: Vec::new(),
+            direction: None,
+            directed_actor_agent_id: None,
+            review_after: None,
+        }
+    }
+
     #[test]
     fn retrieval_keys_are_normalized_bounded_and_not_generic() {
         assert_eq!(
@@ -1206,7 +1243,7 @@ mod tests {
     }
 
     #[test]
-    fn hearth_capacity_is_32_without_aggregate_byte_quota() {
+    fn hearth_count_capacity_remains_32_and_rejections_are_durable() {
         let directory =
             std::env::temp_dir().join(format!("rovai-memory-capacity-{}", Uuid::new_v4()));
         let mut database = Database::open(&directory).unwrap();
@@ -1285,6 +1322,371 @@ mod tests {
                 .all(|memory| memory.current_body.as_deref()
                     != Some("Durable Hearth agreement number 99."))
         );
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn hearth_body_quota_checks_transaction_final_state_and_lifecycle_release() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai-memory-body-capacity-{}", Uuid::new_v4()));
+        let mut database = Database::open(&directory).unwrap();
+        let service = MemoryService::default();
+        let mut memories = Vec::new();
+        for index in 0..8 {
+            let created = service
+                .create(
+                    &mut database,
+                    &user_envelope(
+                        format!("body-capacity-{index}"),
+                        sized_hearth_candidate(index, MEMORY_BODY_MAX_BYTES),
+                    ),
+                )
+                .unwrap();
+            memories.push((
+                created.result.payload["memoryId"]
+                    .as_str()
+                    .unwrap()
+                    .to_string(),
+                created.result.payload["revisionId"]
+                    .as_str()
+                    .unwrap()
+                    .to_string(),
+            ));
+        }
+        let capacity = service
+            .list(&database)
+            .unwrap()
+            .capacities
+            .into_iter()
+            .find(|capacity| capacity.scope_key == "hearth")
+            .unwrap();
+        assert_eq!(capacity.active_count, 8);
+        assert_eq!(capacity.active_body_bytes, HEARTH_ACTIVE_BODY_MAX_BYTES);
+        assert_eq!(capacity.max_body_bytes, Some(HEARTH_ACTIVE_BODY_MAX_BYTES));
+
+        let overflow_envelope =
+            user_envelope("body-capacity-overflow", sized_hearth_candidate(90, 2));
+        let overflow = service.create(&mut database, &overflow_envelope).unwrap();
+        assert_eq!(overflow.result.status, CommandResultStatus::Rejected);
+        assert_eq!(overflow.result.code, "memory.capacity_exceeded");
+        assert_eq!(
+            service
+                .create(&mut database, &overflow_envelope)
+                .unwrap()
+                .result,
+            overflow.result
+        );
+
+        let shrunk_body = format!("00{}", "s".repeat(MEMORY_BODY_MAX_BYTES - 3));
+        let shrunk = service
+            .revise(
+                &mut database,
+                &user_envelope(
+                    "body-capacity-shrink",
+                    ReviseMemoryCommand {
+                        memory_id: memories[0].0.clone(),
+                        expected_version: 1,
+                        base_revision_id: memories[0].1.clone(),
+                        body: shrunk_body,
+                        retrieval_keys: vec!["quota shrink".to_string()],
+                        review_after: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(shrunk.result.status, CommandResultStatus::Applied);
+        let one_byte = CreateMemoryCommand {
+            scope: MemoryScopeKind::Hearth,
+            kind: MemoryKind::Lesson,
+            body: "z".to_string(),
+            retrieval_keys: vec!["quota byte".to_string()],
+            companion_agent_id: None,
+            relationship_agent_ids: Vec::new(),
+            direction: None,
+            directed_actor_agent_id: None,
+            review_after: None,
+        };
+        let one_byte = service
+            .create(
+                &mut database,
+                &user_envelope("body-capacity-exact", one_byte),
+            )
+            .unwrap();
+        assert_eq!(one_byte.result.status, CommandResultStatus::Applied);
+        let one_byte_id = one_byte.result.payload["memoryId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let one_byte_revision_id = one_byte.result.payload["revisionId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let growth = service
+            .revise(
+                &mut database,
+                &user_envelope(
+                    "body-capacity-growth",
+                    ReviseMemoryCommand {
+                        memory_id: one_byte_id,
+                        expected_version: 1,
+                        base_revision_id: one_byte_revision_id,
+                        body: "zz".to_string(),
+                        retrieval_keys: vec!["quota growth".to_string()],
+                        review_after: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(growth.result.status, CommandResultStatus::Rejected);
+        assert_eq!(growth.result.code, "memory.capacity_exceeded");
+
+        let retired = service
+            .retire(
+                &mut database,
+                &user_envelope(
+                    "body-capacity-retire",
+                    RetireMemoryCommand {
+                        memory_id: memories[1].0.clone(),
+                        expected_version: 1,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(retired.result.status, CommandResultStatus::Applied);
+        let filler = service
+            .create(
+                &mut database,
+                &user_envelope(
+                    "body-capacity-filler",
+                    sized_hearth_candidate(91, MEMORY_BODY_MAX_BYTES),
+                ),
+            )
+            .unwrap();
+        assert_eq!(filler.result.status, CommandResultStatus::Applied);
+        let filler_id = filler.result.payload["memoryId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let blocked_reactivation = service
+            .reactivate(
+                &mut database,
+                &user_envelope(
+                    "body-capacity-reactivate-blocked",
+                    ReactivateMemoryCommand {
+                        memory_id: memories[1].0.clone(),
+                        expected_version: 2,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(blocked_reactivation.result.code, "memory.capacity_exceeded");
+
+        let forgotten = service
+            .forget(
+                &mut database,
+                &user_envelope(
+                    "body-capacity-forget",
+                    ForgetMemoryCommand {
+                        memory_id: filler_id,
+                        expected_version: 1,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(forgotten.result.status, CommandResultStatus::Applied);
+        let reactivated = service
+            .reactivate(
+                &mut database,
+                &user_envelope(
+                    "body-capacity-reactivate",
+                    ReactivateMemoryCommand {
+                        memory_id: memories[1].0.clone(),
+                        expected_version: 2,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(reactivated.result.status, CommandResultStatus::Applied);
+
+        let supersession = service
+            .supersede(
+                &mut database,
+                &user_envelope(
+                    "body-capacity-supersession-growth",
+                    SupersedeMemoriesCommand {
+                        predecessors: vec![MemoryVersionRef {
+                            memory_id: memories[0].0.clone(),
+                            expected_version: 2,
+                        }],
+                        successor: SupersessionSuccessor::Create {
+                            candidate: sized_hearth_candidate(92, MEMORY_BODY_MAX_BYTES),
+                        },
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(supersession.result.status, CommandResultStatus::Rejected);
+        assert_eq!(supersession.result.code, "memory.capacity_exceeded");
+        assert_eq!(
+            service
+                .get(&database, &memories[0].0)
+                .unwrap()
+                .unwrap()
+                .lifecycle,
+            "active"
+        );
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn companion_and_relationship_body_quotas_are_identity_scoped() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-memory-identity-body-capacity-{}",
+            Uuid::new_v4()
+        ));
+        let mut database = Database::open(&directory).unwrap();
+        configure_test_runtime(&database, &["agent_1", "agent_2", "agent_3"]);
+        let service = MemoryService::default();
+
+        for index in 0..8 {
+            let body = format!("c{index}{}", "c".repeat(MEMORY_BODY_MAX_BYTES - 2));
+            let created = service
+                .create(
+                    &mut database,
+                    &user_envelope(
+                        format!("companion-body-{index}"),
+                        CreateMemoryCommand {
+                            scope: MemoryScopeKind::Companion,
+                            kind: MemoryKind::Lesson,
+                            body,
+                            retrieval_keys: vec![format!("companion quota {index}")],
+                            companion_agent_id: Some("agent_1".to_string()),
+                            relationship_agent_ids: Vec::new(),
+                            direction: None,
+                            directed_actor_agent_id: None,
+                            review_after: None,
+                        },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(created.result.status, CommandResultStatus::Applied);
+        }
+        let companion_overflow = service
+            .create(
+                &mut database,
+                &user_envelope(
+                    "companion-body-overflow",
+                    CreateMemoryCommand {
+                        scope: MemoryScopeKind::Companion,
+                        kind: MemoryKind::Lesson,
+                        body: "overflow".to_string(),
+                        retrieval_keys: vec!["companion overflow".to_string()],
+                        companion_agent_id: Some("agent_1".to_string()),
+                        relationship_agent_ids: Vec::new(),
+                        direction: None,
+                        directed_actor_agent_id: None,
+                        review_after: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(companion_overflow.result.code, "memory.capacity_exceeded");
+        let other_companion = service
+            .create(
+                &mut database,
+                &user_envelope(
+                    "companion-other-agent",
+                    CreateMemoryCommand {
+                        scope: MemoryScopeKind::Companion,
+                        kind: MemoryKind::Lesson,
+                        body: "Agent two has an independent body quota.".to_string(),
+                        retrieval_keys: vec!["independent quota".to_string()],
+                        companion_agent_id: Some("agent_2".to_string()),
+                        relationship_agent_ids: Vec::new(),
+                        direction: None,
+                        directed_actor_agent_id: None,
+                        review_after: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(other_companion.result.status, CommandResultStatus::Applied);
+
+        for index in 0..6 {
+            let body = format!("r{index}{}", "r".repeat(MEMORY_BODY_MAX_BYTES - 2));
+            let created = service
+                .create(
+                    &mut database,
+                    &user_envelope(
+                        format!("relationship-body-{index}"),
+                        CreateMemoryCommand {
+                            scope: MemoryScopeKind::Relationship,
+                            kind: MemoryKind::Agreement,
+                            body,
+                            retrieval_keys: vec![format!("pair quota {index}")],
+                            companion_agent_id: None,
+                            relationship_agent_ids: vec![
+                                "agent_1".to_string(),
+                                "agent_2".to_string(),
+                            ],
+                            direction: Some(RelationshipDirection::Mutual),
+                            directed_actor_agent_id: None,
+                            review_after: None,
+                        },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(created.result.status, CommandResultStatus::Applied);
+        }
+        let relationship_overflow = service
+            .create(
+                &mut database,
+                &user_envelope(
+                    "relationship-body-overflow",
+                    CreateMemoryCommand {
+                        scope: MemoryScopeKind::Relationship,
+                        kind: MemoryKind::Lesson,
+                        body: "overflow".to_string(),
+                        retrieval_keys: vec!["pair overflow".to_string()],
+                        companion_agent_id: None,
+                        relationship_agent_ids: vec!["agent_1".to_string(), "agent_2".to_string()],
+                        direction: Some(RelationshipDirection::Mutual),
+                        directed_actor_agent_id: None,
+                        review_after: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            relationship_overflow.result.code,
+            "memory.capacity_exceeded"
+        );
+        let other_pair = service
+            .create(
+                &mut database,
+                &user_envelope(
+                    "relationship-other-pair",
+                    CreateMemoryCommand {
+                        scope: MemoryScopeKind::Relationship,
+                        kind: MemoryKind::Lesson,
+                        body: "Agent one and three have an independent pair quota.".to_string(),
+                        retrieval_keys: vec!["other pair quota".to_string()],
+                        companion_agent_id: None,
+                        relationship_agent_ids: vec!["agent_1".to_string(), "agent_3".to_string()],
+                        direction: Some(RelationshipDirection::Mutual),
+                        directed_actor_agent_id: None,
+                        review_after: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(other_pair.result.status, CommandResultStatus::Applied);
+
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }
@@ -2217,9 +2619,16 @@ fn invalidate_matching_pending_hearth_adds(
 fn ensure_capacity(
     transaction: &Transaction<'_>,
     candidate_scope: &MemoryScope,
+    candidate_body_bytes: i64,
     origin: MemoryCreationOrigin,
     exclude_memory_ids: Option<&BTreeSet<String>>,
 ) -> Result<()> {
+    if !(1..=MEMORY_BODY_MAX_BYTES as i64).contains(&candidate_body_bytes) {
+        return Err(rule_violation(
+            "memory.invalid_input",
+            "Memory body byte count is outside the legal range",
+        ));
+    }
     let records = load_active_memory_records(transaction)?
         .into_iter()
         .filter(|record| {
@@ -2257,12 +2666,13 @@ fn ensure_capacity(
     };
     match candidate_scope.kind {
         MemoryScopeKind::Hearth => {
-            let count = records
+            let matching = records
                 .iter()
                 .filter(|record| {
                     record.scope.as_ref().map(|scope| scope.kind) == Some(MemoryScopeKind::Hearth)
                 })
-                .count() as i64;
+                .collect::<Vec<_>>();
+            let count = matching.len() as i64;
             if count >= HEARTH_MAX_COUNT {
                 return Err(rule_violation(
                     "memory.capacity_exceeded",
@@ -2275,13 +2685,19 @@ fn ensure_capacity(
                     "Agent cannot directly create Hearth Memory",
                 ));
             }
+            ensure_body_capacity(
+                matching.into_iter(),
+                candidate_body_bytes,
+                HEARTH_ACTIVE_BODY_MAX_BYTES,
+                "Hearth",
+            )?;
         }
         MemoryScopeKind::Companion => {
             let agent = candidate_scope
                 .companion_agent_id
                 .as_deref()
                 .context("Companion Scope has no Agent")?;
-            let count = records
+            let matching = records
                 .iter()
                 .filter(|record| {
                     record.scope.as_ref().is_some_and(|scope| {
@@ -2289,7 +2705,8 @@ fn ensure_capacity(
                             && scope.companion_agent_id.as_deref() == Some(agent)
                     })
                 })
-                .count() as i64;
+                .collect::<Vec<_>>();
+            let count = matching.len() as i64;
             if count >= COMPANION_MAX_COUNT {
                 return Err(rule_violation(
                     "memory.capacity_exceeded",
@@ -2316,6 +2733,12 @@ fn ensure_capacity(
                     ));
                 }
             }
+            ensure_body_capacity(
+                matching.into_iter(),
+                candidate_body_bytes,
+                COMPANION_ACTIVE_BODY_MAX_BYTES,
+                "Companion",
+            )?;
         }
         MemoryScopeKind::Relationship => {
             let pair = pair_count(false);
@@ -2384,9 +2807,75 @@ fn ensure_capacity(
                     ));
                 }
             }
+            let matching = records.iter().filter(|record| {
+                record.scope.as_ref().is_some_and(|scope| {
+                    scope.kind == MemoryScopeKind::Relationship
+                        && scope.relationship_agent_low_id
+                            == candidate_scope.relationship_agent_low_id
+                        && scope.relationship_agent_high_id
+                            == candidate_scope.relationship_agent_high_id
+                })
+            });
+            ensure_body_capacity(
+                matching,
+                candidate_body_bytes,
+                RELATIONSHIP_PAIR_ACTIVE_BODY_MAX_BYTES,
+                "Relationship pair",
+            )?;
         }
     }
     Ok(())
+}
+
+fn ensure_body_capacity<'a>(
+    mut records: impl Iterator<Item = &'a MemoryRecord>,
+    candidate_body_bytes: i64,
+    max_body_bytes: i64,
+    scope_label: &str,
+) -> Result<()> {
+    let active_body_bytes = records.try_fold(0_i64, |total, record| {
+        let body_bytes = validated_active_body_bytes(record)?;
+        total
+            .checked_add(body_bytes)
+            .context("active Memory body byte total overflowed")
+    })?;
+    let final_body_bytes = active_body_bytes
+        .checked_add(candidate_body_bytes)
+        .context("final active Memory body byte total overflowed")?;
+    if final_body_bytes > max_body_bytes {
+        return Err(rule_violation(
+            "memory.capacity_exceeded",
+            format!(
+                "{scope_label} active bodies would use {final_body_bytes}/{max_body_bytes} UTF-8 bytes"
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_revision_capacity(
+    transaction: &Transaction<'_>,
+    record: &MemoryRecord,
+    candidate_body_bytes: i64,
+) -> Result<()> {
+    if record.lifecycle != "active" {
+        return Ok(());
+    }
+    let scope = record
+        .scope
+        .as_ref()
+        .context("active Memory has no Scope")?;
+    let origin = record
+        .creation_origin
+        .context("active Memory has no creation origin")?;
+    let excluded = BTreeSet::from([record.id.clone()]);
+    ensure_capacity(
+        transaction,
+        scope,
+        candidate_body_bytes,
+        origin,
+        Some(&excluded),
+    )
 }
 
 fn validate_agent_mutation<C: DomainCommand>(
@@ -2593,37 +3082,47 @@ fn memory_mutable_by_agent(
 }
 
 fn validate_agent_revise_target(input: &AgentMemoryWriteCommand) -> Result<()> {
-    if input.kind.is_some() {
+    if input.scope.is_some()
+        || input.kind.is_some()
+        || input.counterparty_agent_id.is_some()
+        || input.direction.is_some()
+    {
         return Err(rule_violation(
             "memory.invalid_input",
-            "revise cannot include kind",
+            "revise accepts identity only inside target",
         ));
     }
-    let scope = input.scope.ok_or_else(|| {
+    let target = input.target.as_ref().ok_or_else(|| {
         rule_violation(
             "memory.invalid_input",
-            "revise requires the Scope identity returned by memory.read",
+            "revise requires the target returned by memory.view or memory.read",
         )
     })?;
-    match scope {
+    if target.memory_id.trim().is_empty() || target.revision_id.trim().is_empty() {
+        return Err(rule_violation(
+            "memory.invalid_input",
+            "target memoryId and revisionId must not be empty",
+        ));
+    }
+    match target.scope {
         MemoryScopeKind::Hearth | MemoryScopeKind::Companion => {
-            if input.counterparty_agent_id.is_some() || input.direction.is_some() {
+            if target.counterparty_agent_id.is_some() || target.direction.is_some() {
                 return Err(rule_violation(
                     "memory.invalid_input",
-                    "Hearth and Companion revise have no Relationship identity fields",
+                    "Hearth and Companion targets have no Relationship identity fields",
                 ));
             }
         }
         MemoryScopeKind::Relationship => {
-            if input
+            if target
                 .counterparty_agent_id
                 .as_deref()
                 .is_none_or(str::is_empty)
-                || input.direction != Some(RelationshipDirection::Directed)
+                || target.direction != Some(RelationshipDirection::Directed)
             {
                 return Err(rule_violation(
                     "memory.invalid_input",
-                    "Relationship revise requires counterpartyAgentId and directed direction",
+                    "Relationship target requires counterpartyAgentId and directed direction",
                 ));
             }
         }
@@ -2639,18 +3138,20 @@ fn agent_revise_target_matches(
     let Some(actual) = record.scope.as_ref() else {
         return false;
     };
-    match input.scope {
-        Some(MemoryScopeKind::Hearth) => actual.kind == MemoryScopeKind::Hearth,
-        Some(MemoryScopeKind::Companion) => {
+    let Some(target) = input.target.as_ref() else {
+        return false;
+    };
+    match target.scope {
+        MemoryScopeKind::Hearth => actual.kind == MemoryScopeKind::Hearth,
+        MemoryScopeKind::Companion => {
             actual.kind == MemoryScopeKind::Companion
                 && actual.companion_agent_id.as_deref() == Some(agent_id)
         }
-        Some(MemoryScopeKind::Relationship) => {
+        MemoryScopeKind::Relationship => {
             actual.kind == MemoryScopeKind::Relationship
-                && actual.relationship_direction == input.direction
-                && actual.counterparty(agent_id) == input.counterparty_agent_id.as_deref()
+                && actual.relationship_direction == target.direction
+                && actual.counterparty(agent_id) == target.counterparty_agent_id.as_deref()
         }
-        None => false,
     }
 }
 
@@ -3002,16 +3503,19 @@ fn hearth_review_view(
 
 fn capacity_views(database: &Database) -> Result<Vec<MemoryCapacityView>> {
     let records = load_active_memory_records(database.connection())?;
+    let hearth = records
+        .iter()
+        .filter(|record| {
+            record.scope.as_ref().map(|scope| scope.kind) == Some(MemoryScopeKind::Hearth)
+        })
+        .collect::<Vec<_>>();
     let mut views = vec![MemoryCapacityView {
         scope: MemoryScopeKind::Hearth,
         scope_key: "hearth".to_string(),
-        active_count: records
-            .iter()
-            .filter(|record| {
-                record.scope.as_ref().map(|scope| scope.kind) == Some(MemoryScopeKind::Hearth)
-            })
-            .count() as i64,
+        active_count: hearth.len() as i64,
         max_count: HEARTH_MAX_COUNT,
+        active_body_bytes: summed_body_bytes(&hearth)?,
+        max_body_bytes: Some(HEARTH_ACTIVE_BODY_MAX_BYTES),
         agent_origin_count: 0,
         agent_origin_max_count: 0,
     }];
@@ -3053,6 +3557,8 @@ fn capacity_views(database: &Database) -> Result<Vec<MemoryCapacityView>> {
             scope_key: format!("companion:{agent}"),
             active_count: matching.len() as i64,
             max_count: COMPANION_MAX_COUNT,
+            active_body_bytes: summed_body_bytes(&matching)?,
+            max_body_bytes: Some(COMPANION_ACTIVE_BODY_MAX_BYTES),
             agent_origin_count: matching
                 .iter()
                 .filter(|record| record.creation_origin == Some(MemoryCreationOrigin::Agent))
@@ -3076,6 +3582,8 @@ fn capacity_views(database: &Database) -> Result<Vec<MemoryCapacityView>> {
             scope_key: format!("relationship:{low}:{high}"),
             active_count: matching.len() as i64,
             max_count: RELATIONSHIP_PAIR_MAX_COUNT,
+            active_body_bytes: summed_body_bytes(&matching)?,
+            max_body_bytes: Some(RELATIONSHIP_PAIR_ACTIVE_BODY_MAX_BYTES),
             agent_origin_count: matching
                 .iter()
                 .filter(|record| record.creation_origin == Some(MemoryCreationOrigin::Agent))
@@ -3100,6 +3608,8 @@ fn capacity_views(database: &Database) -> Result<Vec<MemoryCapacityView>> {
             scope_key: format!("relationship-applicable:{agent}"),
             active_count: matching.len() as i64,
             max_count: RELATIONSHIP_APPLICABLE_MAX_COUNT,
+            active_body_bytes: summed_body_bytes(&matching)?,
+            max_body_bytes: None,
             agent_origin_count: matching
                 .iter()
                 .filter(|record| record.creation_origin == Some(MemoryCreationOrigin::Agent))
@@ -3109,6 +3619,32 @@ fn capacity_views(database: &Database) -> Result<Vec<MemoryCapacityView>> {
     }
     views.sort_by(|left, right| left.scope_key.cmp(&right.scope_key));
     Ok(views)
+}
+
+fn summed_body_bytes(records: &[&MemoryRecord]) -> Result<i64> {
+    records.iter().try_fold(0_i64, |total, record| {
+        total
+            .checked_add(validated_active_body_bytes(record)?)
+            .context("active Memory body byte total overflowed")
+    })
+}
+
+fn validated_active_body_bytes(record: &MemoryRecord) -> Result<i64> {
+    let body = record
+        .current_body
+        .as_deref()
+        .context("active Memory has no current body")?;
+    let body_bytes = record
+        .current_body_utf8_bytes
+        .context("active Memory has no current body byte count")?;
+    let is_canonical = canonicalize_memory_body(body).is_ok_and(|value| value == body);
+    if body_bytes != body.len() as i64
+        || !(1..=MEMORY_BODY_MAX_BYTES as i64).contains(&body_bytes)
+        || !is_canonical
+    {
+        anyhow::bail!("active Memory current body invariant is invalid");
+    }
+    Ok(body_bytes)
 }
 
 fn load_edge_ids(connection: &Connection, memory_id: &str, outgoing: bool) -> Result<Vec<String>> {
@@ -3589,6 +4125,7 @@ impl MemoryService {
                     ensure_capacity(
                         transaction,
                         &candidate.scope,
+                        candidate.body_bytes,
                         MemoryCreationOrigin::AcceptedHearthReview,
                         None,
                     )?;
@@ -3633,6 +4170,7 @@ impl MemoryService {
                             "Memory body and Retrieval Keys are unchanged",
                         ));
                     }
+                    ensure_revision_capacity(transaction, &record, body.len() as i64)?;
                     let revision_id = Uuid::new_v4().to_string();
                     insert_revision(
                         transaction,
@@ -3883,6 +4421,7 @@ impl MemoryService {
                 ensure_capacity(
                     transaction,
                     &candidate.scope,
+                    candidate.body_bytes,
                     MemoryCreationOrigin::User,
                     Some(&predecessor_ids),
                 )?;
@@ -3994,12 +4533,10 @@ impl MemoryService {
             }
             match normalized.payload.action.as_str() {
                 "add" => {
-                    if normalized.payload.memory_id.is_some()
-                        || normalized.payload.base_revision_id.is_some()
-                    {
+                    if normalized.payload.target.is_some() {
                         return Ok(rejected(
                             "memory.invalid_input",
-                            "add cannot include memoryId or baseRevisionId",
+                            "add cannot include target",
                         ));
                     }
                     let (agent_id, camp_id) = agent_identity(&normalized)?;
@@ -4039,6 +4576,7 @@ impl MemoryService {
                     ensure_capacity(
                         transaction,
                         &candidate.scope,
+                        candidate.body_bytes,
                         MemoryCreationOrigin::Agent,
                         None,
                     )?;
@@ -4080,16 +4618,13 @@ impl MemoryService {
                 "revise" => {
                     validate_agent_revise_target(&normalized.payload)?;
                     let (agent_id, camp_id) = agent_identity(&normalized)?;
-                    let memory_id = normalized.payload.memory_id.as_deref().ok_or_else(|| {
-                        rule_violation("memory.invalid_input", "revise requires memoryId")
-                    })?;
-                    let base_revision_id = normalized
+                    let target = normalized
                         .payload
-                        .base_revision_id
-                        .as_deref()
-                        .ok_or_else(|| {
-                            rule_violation("memory.invalid_input", "revise requires baseRevisionId")
-                        })?;
+                        .target
+                        .as_ref()
+                        .context("validated revise has no target")?;
+                    let memory_id = target.memory_id.as_str();
+                    let base_revision_id = target.revision_id.as_str();
                     let Some(record) = load_memory_record(transaction, memory_id)? else {
                         return Ok(rejected("memory.unavailable", "Memory is unavailable"));
                     };
@@ -4136,6 +4671,11 @@ impl MemoryService {
                             },
                         );
                     }
+                    ensure_revision_capacity(
+                        transaction,
+                        &record,
+                        normalized.payload.body.len() as i64,
+                    )?;
                     let revision_id = Uuid::new_v4().to_string();
                     let now = Utc::now().to_rfc3339();
                     insert_revision(

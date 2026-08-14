@@ -2290,46 +2290,44 @@ fn load_structured_draft_submission(
         && !recipient_selection_touched
         && !has_all_members_mention(&content)
         && member_mention_ids(&content).is_empty()
+        && let Some(source_message_id) = continuation_source_message_id.as_deref()
+        && continuation_suppressed_source_message_id.as_deref() != Some(source_message_id)
     {
-        if let Some(source_message_id) = continuation_source_message_id.as_deref()
-            && continuation_suppressed_source_message_id.as_deref() != Some(source_message_id)
-        {
-            let source_recipient = transaction
-                .query_row(
-                    r#"
-                    SELECT address_mode, addressed_agent_ids_json
-                    FROM camp_message
-                    WHERE id = ?1 AND camp_id = ?2
-                      AND author_type = 'user'
-                      AND tombstoned_at IS NULL
-                    "#,
-                    params![source_message_id, camp_id],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-                )
-                .optional()?;
-            let continuation_agent_id = source_recipient.and_then(|(mode, agent_ids_json)| {
-                if mode != "explicit" {
-                    return None;
-                }
-                serde_json::from_str::<Vec<String>>(&agent_ids_json)
-                    .ok()
-                    .filter(|agent_ids| agent_ids.len() == 1)
-                    .and_then(|mut agent_ids| agent_ids.pop())
-            });
-            let Some(continuation_agent_id) = continuation_agent_id else {
-                return Ok(Err(rejected(
-                    "continuation_recipient_required",
-                    "Continuation recipient is no longer valid; choose an explicit replacement recipient",
-                )));
-            };
-            if active_address_target(transaction, camp_id, &continuation_agent_id)?.is_none() {
-                return Ok(Err(rejected(
-                    "continuation_recipient_required",
-                    "Continuation recipient is unavailable; choose an explicit replacement recipient",
-                )));
+        let source_recipient = transaction
+            .query_row(
+                r#"
+                SELECT address_mode, addressed_agent_ids_json
+                FROM camp_message
+                WHERE id = ?1 AND camp_id = ?2
+                  AND author_type = 'user'
+                  AND tombstoned_at IS NULL
+                "#,
+                params![source_message_id, camp_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        let continuation_agent_id = source_recipient.and_then(|(mode, agent_ids_json)| {
+            if mode != "explicit" {
+                return None;
             }
-            materialize_leading_member_mention(&mut content, continuation_agent_id);
+            serde_json::from_str::<Vec<String>>(&agent_ids_json)
+                .ok()
+                .filter(|agent_ids| agent_ids.len() == 1)
+                .and_then(|mut agent_ids| agent_ids.pop())
+        });
+        let Some(continuation_agent_id) = continuation_agent_id else {
+            return Ok(Err(rejected(
+                "continuation_recipient_required",
+                "Continuation recipient is no longer valid; choose an explicit replacement recipient",
+            )));
+        };
+        if active_address_target(transaction, camp_id, &continuation_agent_id)?.is_none() {
+            return Ok(Err(rejected(
+                "continuation_recipient_required",
+                "Continuation recipient is unavailable; choose an explicit replacement recipient",
+            )));
         }
+        materialize_leading_member_mention(&mut content, continuation_agent_id);
     }
     let mentioned_agent_ids = member_mention_ids(&content);
     let mut member_names = BTreeMap::new();

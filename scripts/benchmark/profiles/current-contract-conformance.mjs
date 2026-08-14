@@ -33,9 +33,11 @@ const criteria = [
   criterion('CCC-010', 'ContextManifest version is 12', [
     test('crates/rovai-core/src/context_contract.rs', 'binding_contract_freezes_each_context_axis_version')
   ]),
-  criterion('CCC-011', 'Data Contract is v0.77 with projection schema 38', [
+  criterion('CCC-011', 'Data Contract is v0.80 with projection schema 40', [
     test('crates/rovai-core/src/db.rs', 'current_data_contract_accepts_current_and_exact_upgrade_sources'),
     test('crates/rovai-core/src/db.rs', 'v83_preserves_existing_composer_drafts_and_installs_null_reply_state'),
+    test('crates/rovai-core/src/db.rs', 'v84_clean_break_clears_only_memory_domain_state_and_admits_view_evidence'),
+    test('crates/rovai-core/src/db.rs', 'v85_preserves_existing_drafts_without_inventing_continuation_routes'),
     test('crates/rovai-core/src/db.rs', 'v80_adds_durable_controlled_shutdown_cycles'),
     test('crates/rovai-core/src/db.rs', 'v79_preserves_v78_lineage_and_installs_notification_episodes_once'),
     test('crates/rovai-core/src/db.rs', 'v77_adds_planned_shutdown_terminal_provenance_and_turn_aggregate_reason')
@@ -43,7 +45,7 @@ const criteria = [
   criterion('CCC-012', 'CampSnapshot schema is 29', [
     test('crates/rovai-core/src/read_model.rs', 'snapshot_projects_current_names_from_structured_mentions')
   ]),
-  criterion('CCC-013', 'The migration chain admits only exact v0.73/v0.71/v0.67/v0.66/v0.62/v0.54/v0.52 upgrade sources', [
+  criterion('CCC-013', 'The migration chain admits only exact v0.78/v0.77/v0.73/v0.71/v0.67/v0.66/v0.62/v0.54/v0.52 upgrade sources', [
     test('crates/rovai-core/src/db.rs', 'current_data_contract_accepts_current_and_exact_upgrade_sources')
   ]),
   criterion('CCC-014', 'Migration preserves completed Camp, Message, Task, and terminal Run/Turn history', [

@@ -1714,7 +1714,7 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('给 洛可 发消息')
-    expect(markup).toContain('默认由 Lead · 洛可接收')
+    expect(markup).not.toContain('默认由 Lead · 洛可接收')
     expect(markup).toContain('开始这段协作')
     expect(markup).toContain('快速对话')
     expect(markup).toContain('负责人 · 洛可')

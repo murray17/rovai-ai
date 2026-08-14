@@ -1,16 +1,16 @@
 ---
 document_type: adr
-id: ADR-0186
+id: ADR-0187
 title: Durable Composer Recipient Continuation
 status: accepted
 date: 2026-08-14
 decision_scope: cross-version
-source_version: v0.78
+source_version: v0.80
 supersedes: []
 superseded_by: null
 ---
 
-# ADR-0186: Durable Composer Recipient Continuation
+# ADR-0187: Durable Composer Recipient Continuation
 
 ## Context
 
@@ -71,7 +71,7 @@ Message Delivery 或 Agent caller return。
 
 ## References
 
-- [v0.78 版本目标](../versions/v0.78/README.md)
+- [v0.80 版本目标](../versions/v0.80/README.md)
 - [Camp Composer Draft v2](../contracts/camp-composer-draft-v2.md)
 - [ADR-0080: Durable Camp Composer Draft](0080-durable-camp-composer-draft-and-atomic-attachment-consumption.md)
 - [ADR-0128: Structured Draft-Only User Message Submission](0128-structured-draft-only-user-message-submission.md)

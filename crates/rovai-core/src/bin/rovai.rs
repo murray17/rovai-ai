@@ -592,7 +592,7 @@ enum BuiltinToolIpcFailure {
 
 fn print_root_help() {
     println!(
-        "Rovai Agent CLI\n\nOperations:\n  rovai send\n  rovai task create|get|list|update\n  rovai camp list|search|read\n  rovai history search\n  rovai memory search|read|write\n\nRun `rovai --help` to choose an operation, then run that operation's exact `--help`. Do not assume that a command family has its own help entry. Each operation supports direct flags, JSON stdin/heredoc, or --input-file <path>."
+        "Rovai Agent CLI\n\nOperations:\n  rovai send\n  rovai task create|get|list|update\n  rovai camp list|search|read\n  rovai history search\n  rovai memory view|search|read|write\n\nRun `rovai --help` to choose an operation, then run that operation's exact `--help`. Do not assume that a command family has its own help entry. Each operation supports direct flags, JSON stdin/heredoc, or --input-file <path>."
     );
 }
 
@@ -674,6 +674,17 @@ fn operation_help_text(description: &BuiltinToolDescription) -> String {
                 }
             }
         }
+        if description.name == "memory.view" && argument.field == "scope" {
+            writeln!(output, "      One of: hearth, companion, relationship.")
+                .expect("writing help to a String cannot fail");
+        }
+        if description.name == "memory.view" && argument.field == "counterpartyAgentId" {
+            writeln!(
+                output,
+                "      Required only when --scope relationship selects an exact pair."
+            )
+            .expect("writing help to a String cannot fail");
+        }
     }
     let examples = operation_help_examples(&description.name);
     writeln!(output, "\nExamples:").expect("writing help to a String cannot fail");
@@ -698,6 +709,10 @@ fn operation_help_examples(operation: &str) -> &'static [&'static str] {
         "camp.search" => &["rovai camp search --query 'release' --limit 5"],
         "camp.read" => &["rovai camp read --camp-id camp_123 --mode item --message-id msg_123"],
         "history.search" => &["rovai history search --query 'decision' --limit 5"],
+        "memory.view" => &[
+            "rovai memory view --scope companion",
+            "rovai memory view --scope relationship --counterparty-agent-id agent_3",
+        ],
         "memory.search" => &["rovai memory search --query 'preferences' --limit 6"],
         "memory.read" => &["rovai memory read --memory-ids memory_123"],
         "memory.write" => &["rovai memory write --input-file memory-write.json"],
@@ -743,6 +758,28 @@ mod tests {
     }
 
     #[test]
+    fn memory_view_direct_flags_form_the_exact_relationship_input() {
+        let description = builtin_tool_description("memory.view").unwrap();
+        let input = parse_operation_input(
+            &description,
+            &[
+                "--scope".to_string(),
+                "relationship".to_string(),
+                "--counterparty-agent-id".to_string(),
+                "agent_3".to_string(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            input,
+            json!({
+                "scope": "relationship",
+                "counterpartyAgentId": "agent_3"
+            })
+        );
+    }
+
+    #[test]
     fn direct_flags_and_input_file_are_mutually_exclusive() {
         let description = builtin_tool_description("team.create_task").unwrap();
         assert!(
@@ -778,7 +815,7 @@ mod tests {
     }
 
     #[test]
-    fn exact_help_surface_covers_all_twelve_operations_and_no_family_aliases() {
+    fn exact_help_surface_covers_all_thirteen_operations_and_no_family_aliases() {
         let exact_paths: &[&[&str]] = &[
             &["send", "--help"],
             &["task", "create", "--help"],
@@ -789,11 +826,12 @@ mod tests {
             &["camp", "search", "--help"],
             &["camp", "read", "--help"],
             &["history", "search", "--help"],
+            &["memory", "view", "--help"],
             &["memory", "search", "--help"],
             &["memory", "read", "--help"],
             &["memory", "write", "--help"],
         ];
-        assert_eq!(exact_paths.len(), 12);
+        assert_eq!(exact_paths.len(), 13);
         for path in exact_paths {
             let args = path
                 .iter()
@@ -809,6 +847,10 @@ mod tests {
             assert!(operation_help(&args).unwrap().is_none());
             assert!(is_family_help(&args));
         }
+        let view = builtin_tool_description("memory.view").unwrap();
+        let help = operation_help_text(&view);
+        assert!(help.contains("One of: hearth, companion, relationship."));
+        assert!(help.contains("Required only when --scope relationship"));
     }
 
     #[test]

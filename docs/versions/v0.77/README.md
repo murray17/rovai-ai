@@ -15,6 +15,8 @@ last_updated: 2026-08-14
 > `focus-visible`。Core Draft schema/mutation、Draft-only send、IPC、Renderer、迁移、文档与真实打包 App 验收全部闭环。
 >
 > 前置版本：[v0.76 显示名 Inline Alias 行首寻址门禁](../v0.76/README.md)
+>
+> 后续版本：[v0.78 完整 Exact-Scope Memory View 与 Copyable Target](../v0.78/README.md)
 
 ## 版本目标
 

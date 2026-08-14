@@ -2373,6 +2373,7 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .reply-recipient-repair-copy span { color: color-mix(in srgb, var(--attention) 78%, var(--ink)); font-size: 10px; line-height: 1.45; }
 .reply-recipient-options { display: flex; flex-wrap: wrap; gap: 5px; }
 .reply-recipient-options .quiet-button { min-height: 26px; color: var(--attention); background: var(--surface-raised); }
+.reply-recipient-empty { color: color-mix(in srgb, var(--attention) 78%, var(--ink)); font-size: 10px; line-height: 1.45; }
 .composer-reply-status { min-height: 0; color: var(--danger); font-size: 10px; line-height: 1.4; }
 .composer-continuation { display: inline-flex; width: fit-content; max-width: 100%; min-height: 20px; align-items: center; gap: 4px; overflow: hidden; color: var(--faint); font-size: 10px; line-height: 1.35; white-space: nowrap; }
 .composer-continuation > svg { flex: 0 0 auto; width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.35; }

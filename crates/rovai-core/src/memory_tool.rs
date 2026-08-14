@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use crate::{
     command::{ActorRef, CommandEnvelope, CommandExecution},
     db::Database,
-    memory::{AgentMemoryWriteCommand, MemoryService},
+    memory::{AgentMemoryWriteCommand, MemoryService, MemoryTarget},
     team_tool::{TeamToolInvocationError, TeamToolService},
 };
 
@@ -21,8 +21,7 @@ pub struct MemoryWriteToolInput {
     pub retrieval_keys: Vec<String>,
     pub counterparty_agent_id: Option<String>,
     pub direction: Option<crate::memory::RelationshipDirection>,
-    pub memory_id: Option<String>,
-    pub base_revision_id: Option<String>,
+    pub target: Option<MemoryTarget>,
 }
 
 #[derive(Debug, Clone)]
@@ -102,70 +101,9 @@ impl MemoryToolService {
                         "retrievalKeys": retrieval_keys.clone()
                     }
                 },
-                {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                        "action", "scope", "memoryId", "baseRevisionId", "body", "retrievalKeys"
-                    ],
-                    "properties": {
-                        "action": {"const": "revise"},
-                        "scope": {
-                            "const": "companion",
-                            "description": "Immutable target identity copied from memory.read."
-                        },
-                        "memoryId": {"type": "string", "minLength": 1},
-                        "baseRevisionId": {"type": "string", "minLength": 1},
-                        "body": body.clone(),
-                        "retrievalKeys": retrieval_keys.clone()
-                    }
-                },
-                {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                        "action", "scope", "memoryId", "baseRevisionId", "body", "retrievalKeys",
-                        "counterpartyAgentId", "direction"
-                    ],
-                    "properties": {
-                        "action": {"const": "revise"},
-                        "scope": {
-                            "const": "relationship",
-                            "description": "Immutable target identity copied from memory.read."
-                        },
-                        "memoryId": {"type": "string", "minLength": 1},
-                        "baseRevisionId": {"type": "string", "minLength": 1},
-                        "body": body.clone(),
-                        "retrievalKeys": retrieval_keys.clone(),
-                        "counterpartyAgentId": {
-                            "type": "string",
-                            "minLength": 1,
-                            "description": "Exact immutable counterparty identity copied from memory.read."
-                        },
-                        "direction": {
-                            "const": "directed",
-                            "description": "Exact immutable direction copied from memory.read."
-                        }
-                    }
-                },
-                {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                        "action", "scope", "memoryId", "baseRevisionId", "body", "retrievalKeys"
-                    ],
-                    "properties": {
-                        "action": {"const": "revise"},
-                        "scope": {
-                            "const": "hearth",
-                            "description": "Immutable target identity copied from memory.read."
-                        },
-                        "memoryId": {"type": "string", "minLength": 1},
-                        "baseRevisionId": {"type": "string", "minLength": 1},
-                        "body": body,
-                        "retrievalKeys": retrieval_keys
-                    }
-                }
+                revise_schema("companion", false, body.clone(), retrieval_keys.clone()),
+                revise_schema("relationship", true, body.clone(), retrieval_keys.clone()),
+                revise_schema("hearth", false, body, retrieval_keys)
             ]
         })
     }
@@ -222,13 +160,43 @@ impl MemoryToolService {
                         retrieval_keys: input.retrieval_keys.clone(),
                         counterparty_agent_id: input.counterparty_agent_id.clone(),
                         direction: input.direction,
-                        memory_id: input.memory_id.clone(),
-                        base_revision_id: input.base_revision_id.clone(),
+                        target: input.target.clone(),
                     },
                 },
             )
             .map_err(map_memory_tool_error)
     }
+}
+
+fn revise_schema(scope: &str, relationship: bool, body: Value, retrieval_keys: Value) -> Value {
+    let mut target_required = vec!["memoryId", "revisionId", "scope"];
+    let mut target_properties = json!({
+        "memoryId": {"type": "string", "minLength": 1},
+        "revisionId": {"type": "string", "minLength": 1},
+        "scope": {"const": scope}
+    });
+    if relationship {
+        target_required.extend(["counterpartyAgentId", "direction"]);
+        target_properties["counterpartyAgentId"] = json!({"type": "string", "minLength": 1});
+        target_properties["direction"] = json!({"const": "directed"});
+    }
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["action", "target", "body", "retrievalKeys"],
+        "properties": {
+            "action": {"const": "revise"},
+            "target": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": target_required,
+                "properties": target_properties,
+                "description": "Copy this object unchanged from the deciding memory.view or current memory.read result."
+            },
+            "body": body,
+            "retrievalKeys": retrieval_keys
+        }
+    })
 }
 
 fn authenticate(

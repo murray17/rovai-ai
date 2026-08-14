@@ -1086,6 +1086,10 @@ export function CampWorkspace({
     segment.kind === 'member_mention' || segment.kind === 'all_members_mention'
   )
   const continuationIntent = composerDraft?.continuationIntent ?? null
+  const continuationReplacementMembers = composerMembers.filter((member) =>
+    member.mentionable !== false
+      && member.agentId !== continuationIntent?.recipient.agentId
+  )
   const continuationRecipient = continuationIntent
     ? memberById.get(continuationIntent.recipient.agentId) ?? null
     : null
@@ -2696,12 +2700,9 @@ export function CampWorkspace({
                   </span>
                 </div>
                 <div className="reply-recipient-options" aria-label="选择替代接收者">
-                  {composerMembers
-                    .filter((member) =>
-                      member.mentionable !== false
-                        && member.agentId !== continuationIntent.recipient.agentId
-                    )
-                    .map((member, index) => (
+                  {continuationReplacementMembers.length === 0
+                    ? <span className="reply-recipient-empty">当前没有其他可接收成员</span>
+                    : continuationReplacementMembers.map((member, index) => (
                       <button
                         ref={index === 0 ? recipientRepairFirstOptionRef : undefined}
                         className="quiet-button compact"

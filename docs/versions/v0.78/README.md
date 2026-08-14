@@ -1,82 +1,107 @@
 ---
 document_type: version-overview
 version: v0.78
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: in_progress
+implementation_status: complete
 last_updated: 2026-08-14
 ---
 
-# Rovai-ai v0.78：接收者延续与可修复路由
+# Rovai-ai v0.78：完整 Exact-Scope Memory View 与 Copyable Target
 
-> 当前状态：用户已确认轻量无框“继续发给”方向。Core Draft migration、continuation projection、
-> exact-revision mutations、发送物化与无 fallback rejection 已实现；Renderer 标签、互斥、修复、默认文案、
-> 文字“复制”和 pointer focus 收敛已接入，正在完成完整门禁与真实交互验收。
+> 当前状态：长期决策、字段合同、Core、CLI、Skill、clean-break migration 与自动化验收均已完成。
 >
-> 前置版本：[v0.77 持久消息回复链与显式接收者修复](../v0.77/README.md)
+> 前置版本：[v0.77 Durable Composer Reply Intent 与显式收件人解析](../v0.77/README.md)
+>
+> 后续版本：[v0.79 Camp 会话轻量打开与分段性能诊断](../v0.79/README.md)
 
 ## 版本目标
 
-当用户刚刚成功把消息显式交给唯一一位非 Lead 队员时，让下一份 Draft 以轻量标签延续同一责任人，减少
-遗漏 `@` 后误交 Lead。延续只表达路由，不伪造回复链；发送时由 Core 物化可审计 Structured Mention。
+让在线长期记忆判断从 bounded Search 收敛为一次 complete exact-Scope View，再进行至多一次 Write。Agent
+不再从 flat Search/Read 字段重组 revise identity，而是原样复制 View/Read 交付的不可分割 target。
 
-危险边界保持与 reply 一致：对象在编辑期间 `away`、退出 Camp 或被移除时，已有正文与附件必须保留，
-发送必须阻断并要求显式换人，绝不悄悄回退 Default Lead。
+本版本采用 pre-release clean break：产品尚未上线，不引入 grandfather、旧 Scope over-quota、pending
+candidate 迁移或过渡状态；只清理 Memory domain，保留协作、成员、Runtime 与应用其他状态。
 
 ## 交付范围
 
-### Core-owned continuation
+### Complete View 与 target
 
-- 最近 accepted user message 只有唯一非 Lead explicit recipient 时投影候选；Agent 发言、Default、Lead、
-  Broadcast 和多人消息不产生候选；
-- Draft 持久 source、同来源 suppression 与 recipient touched，和 content、附件、reply 共用 revision、expiry、
-  导航/重启恢复及 accepted 后消费；
-- `save` 验证 Renderer 交回的 source；新增 dismiss/resolve exact-revision mutations；旧有内容 Draft 迁移时
-  不从历史突然改变路由；
-- send 只在无 reply、无显式 Mention、未手动改址时物化 canonical Member Mention；对象失效返回
-  `continuation_recipient_required`，不创建任何发送副作用或 fallback。
+- 新增第十三项 operation `memory.view`，支持 Hearth、当前 Agent Companion 与 exact Relationship pair；
+- Hearth 是 local Rovai home application-global；Relationship 是 current Agent 的 complete applicable set，
+  即 mutual 加 `current -> counterparty`，不含反向 directed；
+- 成功一次返回 `complete=true + itemCount + totalBodyBytes + items`，无 pagination、cursor、truncation 或
+  partial success；
+- 每个 item 交付 `target(memoryId, revisionId, complete Scope identity)`；authorized body-bearing Read 使用
+  同一 target，revise 只能原样复制；mutual item 明确不可由 Agent revise；
+- View 在一个 SQLite transaction 内完成授权、查询、production serialization、64 KiB limit 与 evidence，
+  超限或不变量损坏在 evidence 前 fail closed。
 
-### Composer routing hierarchy
+### Capacity 与 clean break
 
-- 优先级固定为 repair > reply > explicit Mention > continuation > Default Lead；
-- 标签为无框单行“继续发给 @成员”，`×` 持久取消同一 source；reply 期间隐藏，按是否留下 Mention 决定
-  取消 reply 后是否恢复；
-- 用户主动改过接收者后，即使删光 Mention也不恢复同一 Draft 的标签；
-- 空白 Draft 对象失效时取消候选；已有正文/附件时展开显式替代成员选择并阻止发送。
+- 保留单条 canonical Memory Body 2,048 bytes 和既有条数限制；
+- 新增 active current-body aggregate quota：Hearth application-global 16 KiB、Companion per AgentProfile
+  16 KiB、Relationship unordered pair 12 KiB；
+- create、active revise、reactivate、Hearth Review accept 和 Supersession Create 按事务最终状态检查净增长，
+  Retire/Forget 释放配额；predictable rejection 继续形成 durable replay fact；
+- schema 39 / migration 84 清理 formal Memory、Revision、keys、Review、Supersession、Memory evidence/FTS、
+  Memory events/results，并保留非 Memory application state。
 
-### 文案与交互收敛
+### Transport 与 Skill
 
-- 仅纯 Default 状态显示“默认由 Lead · {name}接收”；显式 Mention、reply、continuation 和 repair 不再重复
-  显示“实际接收者”；
-- 消息操作的复制入口从 icon-only 改为可见文字“复制”，继续保留复制成功状态；
-- Composer 的鼠标点击与程序化 reply focus 不再生成编辑器内层黑框；键盘 `focus-visible` 保留；
-- reply dock 继续严格单行，长作者和摘要使用省略号。
+- Built-in Tool Transport、CLI command version 与 Runtime capability 一起推进到 v11；Catalog 固定十三项；
+- `memory.view` 使用 canonical-result-v1 Agent projection；Read/revise closed schema 改用 nested target；
+- `memory-stewardship` 默认在线路径改为 `view -> write`，`search -> read` 只服务跨 Scope 广泛发现；
+- v10 Session/capability 不能兼容 v11 catalog，不允许 mixed surface。
 
-## 非目标
+## 非目标与冻结边界
 
-- 不创建嵌套 thread、私密会话或 continuation reply relation；
-- 不从 Agent 最后发言、普通 `@文字`、历史 reply author 或 Runtime 活动推断接收者；
-- 不在对象失效后提供“仍然发送”、自动选 Lead 或自动选择另一成员；
-- 不改变 Agent-authored send、Message Delivery、caller return、Task responsibility 或 Runtime admission。
+- 不分页、不返回 completion token、不降低 2,048-byte 单条语义上限；
+- 不增加 embedding、多路召回、semantic duplicate authority 或 View/Write 跨调用 snapshot token；
+- 不迁移或导出旧 Memory，不建立 grandfather/over-quota 过渡；
+- 不改变 Hearth user review 权威、mutual user governance、Search ranking、Memory Entrypoint 或 Renderer UI；
+- 不修改 Camp/Task/Message、Runtime Activity semantic taxonomy 或真实 Runtime 支持结论。
+
+## 发布门槛
+
+1. View 三 Scope、排序、Relationship actor-relative selection、complete/no-partial 和 pending isolation 通过；
+2. copy-target Read/revise、mutual non-revisability 与 guessed/mismatched anti-oracle 通过；
+3. legal extreme production serialization 可证明小于 64 KiB，corrupt/oversized 在 evidence 前 fail closed；
+4. aggregate quota 覆盖所有净增长/释放路径、Supersession final state 与 durable replay；
+5. migration fixture 证明只清理 Memory domain 并使 `view` evidence schema 可用；
+6. v11 constants、十三项 catalog/CLI/help/golden/smoke 与 v10 compatibility fence 一致；
+7. Core 全量、Rust format、Skill validation、script syntax、文档治理和 diff 门禁通过后标记 complete。
+
+## 当前验收证据
+
+- `cargo test --workspace` 通过：Library 445、CLI 12、Core 73；3 项真实 Runtime smoke 按合同保持手工 ignored；
+- `cargo clippy --workspace --all-targets -- -D warnings`、`cargo fmt --all --check` 与 `pnpm typecheck` 通过；
+- `pnpm test` 通过：ADR tests 21、Vitest 51 files / 337 tests、Node 179 tests；
+- `pnpm smoke:memory` 通过；该 smoke 不调用模型或真实 Runtime；
+- `DOCS_BASE_REF=origin/main pnpm docs:check:ci`、ADR HISTORY check、两个受影响 Skill 的
+  `quick_validate.py` 与修改脚本的 Node syntax check 通过；
+- 独立 Skill forward test 正确选择 exact Relationship View、复制 target、限制一次 mutation，并在
+  incomplete/unavailable View 时停止；未执行真实 Runtime Skill smoke，因此不新增 Runtime 兼容性结论。
 
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
-| Version lifecycle | 已更新 | v0.77 已冻结为 historical；本概览、[实施计划](implementation-plan.md)与[版本索引](../README.md)建立唯一 current v0.78。 |
-| ADR | 已更新 | [ADR-0186](../../adr/0186-durable-composer-recipient-continuation.md)冻结 durable source、优先级、发送物化与无 fallback。 |
-| Contracts | 已更新 | [Camp Composer Draft v2](../../contracts/camp-composer-draft-v2.md)拥有新增字段、mutation、错误与迁移。 |
-| Architecture | 已更新 | [Camp Composer Draft 架构](../../architecture/camp-composer-draft.md)加入 continuation component authority 与 flow。 |
-| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)与[结构化 Mention](../../ui/components/structured-mentions.md)冻结标签、互斥、修复、复制和 focus 合同。 |
-| Runtime Activity | 确认无需更新 | 本版本不改变 Runtime activity 映射、证据或展示。 |
-| Runtime compatibility | 确认无需更新 | 本版本不改变 Runtime 版本、传输能力或兼容性矩阵。 |
-| Documentation routing | 已更新 | [文档导航](../../README.md)、Contract/Architecture/ADR current 索引指向 v2 与 ADR-0186。 |
-| Root README | 确认无需更新 | 项目定位与常青能力不变，Root README 不记录版本局部 Composer 交互。 |
+| Version lifecycle | 已更新 | v0.77 切换为 historical；v0.78 在交付时成为 current，后由 v0.79 冻结为 historical；本概览与[实施计划](implementation-plan.md)保留完成证据 |
+| ADR | 已更新 | [ADR-0186](../../adr/0186-complete-exact-scope-memory-view-and-copyable-target.md)完整替代 ADR-0183，冻结 complete View、copyable target、capacity 与 clean break |
+| Contracts | 已更新 | 新增 [Memory Capture v3](../../contracts/memory-capture-v3.md)和[Built-in Tool Transport v11](../../contracts/builtin-tool-transport-v11.md)，v2/v10 转 historical 入口 |
+| Architecture | 已更新 | [Online Memory Capture](../../architecture/online-memory-capture.md)与[Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)切换到 View/target/v11 组件边界 |
+| UI | 确认无需更新 | 本版本没有 Renderer surface；Memory View 是 Agent CLI operation，用户 Hearth Review 与治理 UI 不变 |
+| Runtime Activity | 确认无需更新 | View 复用既有 Built-in Tool Activity/evidence domain，不增加 activity domain、phase、outcome 或 Renderer mapping |
+| Runtime compatibility | 确认无需更新 | capability 字符串推进由 Transport 合同与代码覆盖；本版本不声称新的真实 Runtime matrix 实测结论 |
+| Documentation routing | 已更新 | 文档导航、CURRENT、ADR/Contract/Architecture/Version 索引切换到 v0.78、ADR-0186、Memory v3 与 Transport v11 |
+| Root README | 确认无需更新 | 项目定位、常青能力和 Runtime 支持范围不变；根 README 不记录内部 Memory transport 版本 |
 
 ## References
 
 - [实施与验收计划](implementation-plan.md)
-- [ADR-0186](../../adr/0186-durable-composer-recipient-continuation.md)
-- [Camp Composer Draft v2](../../contracts/camp-composer-draft-v2.md)
-- [延续路由交互稿](../../prototypes/composer-continuation-routing/index.html)
+- [ADR-0186: Complete Exact-Scope Memory View](../../adr/0186-complete-exact-scope-memory-view-and-copyable-target.md)
+- [Memory Capture v3](../../contracts/memory-capture-v3.md)
+- [Built-in Tool Transport v11](../../contracts/builtin-tool-transport-v11.md)
+- [Online Memory Capture architecture](../../architecture/online-memory-capture.md)

@@ -49,7 +49,7 @@ Related: Camp content、Evidence 与 Renderer 可分别回到其 primary 主题�
 | [ADR-0169](0169-core-owned-directory-attachment-snapshots.md) | Core-Owned Directory Attachment Snapshots |
 | [ADR-0173](0173-leading-structured-mentions-excluded-from-generated-camp-names.md) | Leading Structured Mentions Excluded from Generated Camp Names |
 | [ADR-0185](0185-durable-composer-reply-intent-and-explicit-recipient-resolution.md) | Durable Composer Reply Intent and Explicit Recipient Resolution |
-| [ADR-0186](0186-durable-composer-recipient-continuation.md) | Durable Composer Recipient Continuation |
+| [ADR-0187](0187-durable-composer-recipient-continuation.md) | Durable Composer Recipient Continuation |
 <!-- adr-current-primary:end -->
 
 Related: Session bootstrap、public delivery 与 product surface 仍从各自 primary 主题进入。
@@ -165,7 +165,7 @@ Related: Member identity、Message delivery、Memory entrypoint 与 Evidence 仍
 
 - **何时阅读：** 修改 Memory authority、scope、revision、forgetting、retrieval、mutation 或 storage 时阅读。
 - **当前架构：** [Online Memory Capture](../architecture/online-memory-capture.md)
-- **当前合同：** [Memory Capture v2](../contracts/memory-capture-v2.md)
+- **当前合同：** [Memory Capture v3](../contracts/memory-capture-v3.md)
 
 <!-- adr-current-primary:begin topic=memory -->
 | ADR | Decision |
@@ -179,7 +179,7 @@ Related: Member identity、Message delivery、Memory entrypoint 与 Evidence 仍
 | [ADR-0068](0068-brokered-memory-retrieval-and-session-entrypoint.md) | Brokered Memory Retrieval and Session Entrypoint |
 | [ADR-0178](0178-best-effort-online-memory-capture-and-actor-bounded-mutation.md) | Best-Effort Online Memory Capture and Actor-Bounded Agent Mutation |
 | [ADR-0179](0179-normalized-memory-store-v3-with-isolated-hearth-review.md) | Normalized Memory Store v3 with Isolated Hearth Review |
-| [ADR-0183](0183-scope-identified-agent-memory-revision-targets.md) | Scope-Identified Agent Memory Revision Targets |
+| [ADR-0186](0186-complete-exact-scope-memory-view-and-copyable-target.md) | Complete Exact-Scope Memory View and Copyable Revision Target |
 <!-- adr-current-primary:end -->
 
 Related: Session entrypoint 与 Built-in operation 只作为交叉导航，不改变 Memory authority。
@@ -188,7 +188,7 @@ Related: Session entrypoint 与 Built-in operation 只作为交叉导航，不�
 
 - **何时阅读：** 修改 Skill/MCP projection、Built-in transport、CLI、catalog 或 Agent output 时阅读。
 - **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
-- **当前合同：** [Built-in Tool Transport v10](../contracts/builtin-tool-transport-v10.md)
+- **当前合同：** [Built-in Tool Transport v11](../contracts/builtin-tool-transport-v11.md)
 
 <!-- adr-current-primary:begin topic=skills-mcp-builtins -->
 | ADR | Decision |

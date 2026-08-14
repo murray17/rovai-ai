@@ -213,12 +213,14 @@ impl CampAttachmentStore {
                 let continuation_intent = project_continuation_intent(
                     database.connection(),
                     camp_id,
-                    continuation_source.as_deref(),
-                    continuation_suppressed_source.as_deref(),
-                    recipient_selection_touched,
-                    &content,
-                    reply_to.as_deref(),
-                    !attachments.is_empty(),
+                    ContinuationProjectionInput {
+                        stored_source_message_id: continuation_source.as_deref(),
+                        suppressed_source_message_id: continuation_suppressed_source.as_deref(),
+                        recipient_selection_touched,
+                        content: &content,
+                        reply_to_camp_message_id: reply_to.as_deref(),
+                        has_attachments: !attachments.is_empty(),
+                    },
                 )?;
                 CampComposerDraftView {
                     camp_id: camp_id.to_string(),
@@ -241,12 +243,14 @@ impl CampAttachmentStore {
                 let continuation_intent = project_continuation_intent(
                     database.connection(),
                     camp_id,
-                    None,
-                    None,
-                    false,
-                    &[],
-                    None,
-                    !attachments.is_empty(),
+                    ContinuationProjectionInput {
+                        stored_source_message_id: None,
+                        suppressed_source_message_id: None,
+                        recipient_selection_touched: false,
+                        content: &[],
+                        reply_to_camp_message_id: None,
+                        has_attachments: !attachments.is_empty(),
+                    },
                 )?;
                 CampComposerDraftView {
                     camp_id: camp_id.to_string(),
@@ -333,18 +337,16 @@ impl CampAttachmentStore {
                 .and_then(|draft| draft.reply_to_camp_message_id.as_ref())
                 .is_none()
             && !has_explicit_recipient(&content)
+            && let Some(requested_source) = continuation_source_message_id
         {
-            if let Some(requested_source) = continuation_source_message_id {
-                let latest = latest_continuation_candidate(database.connection(), camp_id)?
-                    .context("continuation_source_invalid")?;
-                if latest.source_message_id != requested_source
-                    || continuation_suppressed_source_message_id.as_deref()
-                        == Some(requested_source)
-                {
-                    anyhow::bail!("continuation_source_invalid");
-                }
-                resolved_continuation_source = Some(requested_source.to_string());
+            let latest = latest_continuation_candidate(database.connection(), camp_id)?
+                .context("continuation_source_invalid")?;
+            if latest.source_message_id != requested_source
+                || continuation_suppressed_source_message_id.as_deref() == Some(requested_source)
+            {
+                anyhow::bail!("continuation_source_invalid");
             }
+            resolved_continuation_source = Some(requested_source.to_string());
         }
 
         if current.as_ref().is_some_and(|draft| {
@@ -477,12 +479,14 @@ impl CampAttachmentStore {
             camp_id,
             expected_revision,
             current.as_ref(),
-            content,
-            Some(reply_to_camp_message_id),
-            recipient_selection_required,
-            current
-                .as_ref()
-                .is_some_and(|draft| draft.recipient_selection_touched),
+            ReplyMutation {
+                content,
+                reply_to_camp_message_id: Some(reply_to_camp_message_id),
+                recipient_selection_required,
+                recipient_selection_touched: current
+                    .as_ref()
+                    .is_some_and(|draft| draft.recipient_selection_touched),
+            },
         )?;
         transaction.commit()?;
         self.load_draft(database, camp_id)
@@ -510,10 +514,12 @@ impl CampAttachmentStore {
             camp_id,
             expected_revision,
             Some(current),
-            current.content.clone(),
-            None,
-            false,
-            current.recipient_selection_touched,
+            ReplyMutation {
+                content: current.content.clone(),
+                reply_to_camp_message_id: None,
+                recipient_selection_required: false,
+                recipient_selection_touched: current.recipient_selection_touched,
+            },
         )?;
         transaction.commit()?;
         self.load_draft(database, camp_id)
@@ -575,10 +581,12 @@ impl CampAttachmentStore {
             camp_id,
             expected_revision,
             Some(current),
-            content,
-            Some(reply_to),
-            false,
-            true,
+            ReplyMutation {
+                content,
+                reply_to_camp_message_id: Some(reply_to),
+                recipient_selection_required: false,
+                recipient_selection_touched: true,
+            },
         )?;
         transaction.commit()?;
         self.load_draft(database, camp_id)
@@ -622,15 +630,17 @@ impl CampAttachmentStore {
             camp_id,
             expected_revision,
             current.as_ref(),
-            current
-                .as_ref()
-                .map(|draft| draft.content.clone())
-                .unwrap_or_default(),
-            None,
-            Some(source_camp_message_id),
-            current
-                .as_ref()
-                .is_some_and(|draft| draft.recipient_selection_touched),
+            ContinuationMutation {
+                content: current
+                    .as_ref()
+                    .map(|draft| draft.content.clone())
+                    .unwrap_or_default(),
+                continuation_source_message_id: None,
+                continuation_suppressed_source_message_id: Some(source_camp_message_id),
+                recipient_selection_touched: current
+                    .as_ref()
+                    .is_some_and(|draft| draft.recipient_selection_touched),
+            },
         )?;
         transaction.commit()?;
         self.load_draft(database, camp_id)
@@ -695,10 +705,12 @@ impl CampAttachmentStore {
             camp_id,
             expected_revision,
             Some(current),
-            content,
-            None,
-            Some(source_message_id),
-            true,
+            ContinuationMutation {
+                content,
+                continuation_source_message_id: None,
+                continuation_suppressed_source_message_id: Some(source_message_id),
+                recipient_selection_touched: true,
+            },
         )?;
         transaction.commit()?;
         self.load_draft(database, camp_id)
@@ -1009,6 +1021,20 @@ struct DraftMutationState {
     recipient_selection_touched: bool,
 }
 
+struct ReplyMutation<'a> {
+    content: StructuredCampMessageContent,
+    reply_to_camp_message_id: Option<&'a str>,
+    recipient_selection_required: bool,
+    recipient_selection_touched: bool,
+}
+
+struct ContinuationMutation<'a> {
+    content: StructuredCampMessageContent,
+    continuation_source_message_id: Option<&'a str>,
+    continuation_suppressed_source_message_id: Option<&'a str>,
+    recipient_selection_touched: bool,
+}
+
 fn load_draft_mutation_state(
     connection: &Connection,
     camp_id: &str,
@@ -1080,11 +1106,14 @@ fn persist_reply_mutation(
     camp_id: &str,
     expected_revision: i64,
     current: Option<&DraftMutationState>,
-    content: StructuredCampMessageContent,
-    reply_to_camp_message_id: Option<&str>,
-    recipient_selection_required: bool,
-    recipient_selection_touched: bool,
+    mutation: ReplyMutation<'_>,
 ) -> Result<bool> {
+    let ReplyMutation {
+        content,
+        reply_to_camp_message_id,
+        recipient_selection_required,
+        recipient_selection_touched,
+    } = mutation;
     let content = normalize_content(content);
     validate_user_authored_content(&content)?;
     if current.is_some_and(|draft| {
@@ -1157,11 +1186,14 @@ fn persist_continuation_mutation(
     camp_id: &str,
     expected_revision: i64,
     current: Option<&DraftMutationState>,
-    content: StructuredCampMessageContent,
-    continuation_source_message_id: Option<&str>,
-    continuation_suppressed_source_message_id: Option<&str>,
-    recipient_selection_touched: bool,
+    mutation: ContinuationMutation<'_>,
 ) -> Result<bool> {
+    let ContinuationMutation {
+        content,
+        continuation_source_message_id,
+        continuation_suppressed_source_message_id,
+        recipient_selection_touched,
+    } = mutation;
     let content = normalize_content(content);
     validate_user_authored_content(&content)?;
     if current.is_some_and(|draft| {
@@ -1237,6 +1269,15 @@ struct ContinuationCandidate {
     agent_id: String,
     display_name: String,
     available: bool,
+}
+
+struct ContinuationProjectionInput<'a> {
+    stored_source_message_id: Option<&'a str>,
+    suppressed_source_message_id: Option<&'a str>,
+    recipient_selection_touched: bool,
+    content: &'a [StructuredCampMessageSegment],
+    reply_to_camp_message_id: Option<&'a str>,
+    has_attachments: bool,
 }
 
 fn recipient_signature(content: &[StructuredCampMessageSegment]) -> (bool, Vec<String>) {
@@ -1350,13 +1391,16 @@ fn continuation_candidate_from_message(
 fn project_continuation_intent(
     connection: &Connection,
     camp_id: &str,
-    stored_source_message_id: Option<&str>,
-    suppressed_source_message_id: Option<&str>,
-    recipient_selection_touched: bool,
-    content: &[StructuredCampMessageSegment],
-    reply_to_camp_message_id: Option<&str>,
-    has_attachments: bool,
+    input: ContinuationProjectionInput<'_>,
 ) -> Result<Option<CampComposerContinuationIntentView>> {
+    let ContinuationProjectionInput {
+        stored_source_message_id,
+        suppressed_source_message_id,
+        recipient_selection_touched,
+        content,
+        reply_to_camp_message_id,
+        has_attachments,
+    } = input;
     if recipient_selection_touched {
         return Ok(None);
     }

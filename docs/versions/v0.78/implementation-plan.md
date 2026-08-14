@@ -2,42 +2,45 @@
 document_type: implementation-plan
 version: v0.78
 authority: implementation-plan-and-acceptance
-status: in_progress
+status: complete
 last_updated: 2026-08-14
 ---
 
 # v0.78 实施与验收计划
 
-## Checkpoint 0：版本、决策与交互
+## Checkpoint 0：决策与版本
 
-- [x] 从已完成 v0.77 的 `origin/main` 基线开启唯一 current v0.78；
-- [x] 接受 ADR-0186 与 Camp Composer Draft v2，冻结 source、suppression、touched 与无 fallback；
-- [x] 产出轻量无框 HTML 交互稿并按用户反馈收敛 continuation、默认文案、单行 reply 与复制文字。
+- [x] 将 complete v0.77 冻结为 historical，并建立唯一 current v0.78；
+- [x] 接受 ADR-0186、Memory Capture v3 与 Built-in Tool Transport v11；
+- [x] 冻结 complete exact-Scope View、copyable target、64 KiB production projection limit 与 clean break；
+- [x] 完成九项跨版本文档影响判断。
 
-## Checkpoint 1：Core Draft 与 migration
+## Checkpoint 1：Memory Core
 
-- [x] migration 84 / schema 39 持久化 continuation source、suppression 与 recipient touched；
-- [x] Core 只从最近 accepted user message 投影唯一非 Lead explicit candidate；
-- [x] `save / dismissContinuation / resolveContinuationRecipient` 使用同一 exact revision；
-- [x] 旧有内容/附件 Draft 迁移为 touched，避免升级后历史路由突变。
+- [x] 新增三种 exact-Scope View、actor-relative Relationship selection、排序与 complete output；
+- [x] 在同一 SQLite transaction 内完成授权、production serialization limit 与 access evidence；
+- [x] Read/Revise 收敛为 nested target，并保持 unavailable anti-oracle 在 CAS/no-change 之前；
+- [x] 增加三类 active body aggregate quota，覆盖所有净增长与释放路径；
+- [x] 使用 schema 39 / migration 84 清理 Memory domain 并保留非 Memory 状态。
 
-## Checkpoint 2：发送物化与竞态拒绝
+## Checkpoint 2：Transport 与 Skill
 
-- [x] exact Draft send 在满足优先级时物化 canonical Member Mention，且不创建 reply relation；
-- [x] 对象失效返回 `continuation_recipient_required`，保留 Draft 并证明零 Default Lead fallback；
-- [x] explicit replacement 写入当前有效 Member Mention；accepted 后按最终冻结接收者推进下一 Draft。
+- [x] Built-in Transport/CLI/capability 推进到 v11，Catalog/Charter/CLI 固定十三项 operation；
+- [x] 增加 View closed schema、canonical projection、exact help 与 smoke assertions；
+- [x] 更新 `memory-stewardship` 为 `view -> write`，并保留 `search -> read` broad recall；
+- [x] 完成 Skill validation 与独立 forward test。
 
-## Checkpoint 3：Renderer 状态与视觉
+## Checkpoint 3：验证与交付
 
-- [x] 实现无框 continuation 标签、持久 `×`、reply/explicit 优先级、默认 Lead 独占文案；
-- [x] 实现空白失效 suppression、有 payload 失效 repair 与显式换人；
-- [x] 消息复制改为可见文字，reply 保持单行省略，pointer focus 不增加编辑器内框；
-- [x] 键盘 focus、ARIA error/status、Day/Night 与窄宽状态复用既有 semantic tokens。
+- [x] 增加 View exactness、pending isolation、copy-target、mutual、evidence 与 corruption regressions；
+- [x] 增加 legal extreme serializer、aggregate quota 和 clean-break migration regressions；
+- [x] 运行完整 Core、TypeScript/contracts、Rust format、script syntax 与 smoke-compatible automated gates；
+- [x] 运行文档治理、ADR history generation/check 与 diff 检查；
+- [x] 只在全部自动门禁通过后把本计划和版本概览标记 complete。
 
-## Checkpoint 4：验证与发布
+## 当前证据与缺口
 
-- [ ] Core migration、candidate、dismiss/touched、send materialization、unavailable/replacement 定向测试；
-- [ ] Renderer helper、markup、theme、typecheck 与完整 Vitest；
-- [ ] Rust workspace tests/check、strict Clippy、desktop build 和文档治理；
-- [ ] localhost 真实交互验收 desktop + minimum width，并记录 Impeccable detector；
-- [ ] 回填完成证据、把本计划与版本状态改为 complete。
+- `cargo test --workspace`、严格 Clippy、Rust format、TypeScript、完整 JS tests 与非模型 Memory smoke 通过；
+- View、quota、serializer、target anti-oracle、migration 83/84 串联与 clean-break 定向回归通过；
+- 文档真实 base-diff、ADR generated history、Skill static validation、独立 forward test 与最终 diff 门禁通过；
+- 真实 Runtime smoke 与 Renderer UI 不在本版本验收声明范围，未据此新增兼容性结论。

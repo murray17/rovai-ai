@@ -25,6 +25,7 @@ const expectedOperations = [
   'history.search',
   'memory.read',
   'memory.search',
+  'memory.view',
   'memory.write',
   'team.create_task',
   'team.get_task',
@@ -162,7 +163,7 @@ try {
 
   const results = []
   for (const specification of runtimeSpecifications) {
-    process.stderr.write(`\n[builtin-cli] ${specification.adapterKind}: full 12-operation Run\n`)
+    process.stderr.write(`\n[builtin-cli] ${specification.adapterKind}: full 13-operation Run\n`)
     const source = await startVerificationRun(core, specification, false)
     const sourceSnapshot = await waitForRun(core, specification.campId, source.agentRunId, {
       marker: specification.successMarker,
@@ -305,7 +306,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    contractVersion: 10,
+    contractVersion: 11,
     ipcProtocolVersion: 1,
     runtimeCount: results.length,
     operationCountPerRuntime: expectedOperations.length,
@@ -333,9 +334,9 @@ function nativeSessionIdForRun(events, agentRunId, startedEvent) {
 function assertBuiltinCliCapability(label, installation) {
   const snapshot = installation?.snapshot
   if (snapshot?.probeStatus !== 'ready'
-      || !snapshot.capabilities.includes('builtin_cli.transport.v10')
+      || !snapshot.capabilities.includes('builtin_cli.transport.v11')
       || !snapshot.models.length) {
-    throw new Error(`${label} is not ready for Built-in CLI v10: ${JSON.stringify(snapshot)}`)
+    throw new Error(`${label} is not ready for Built-in CLI v11: ${JSON.stringify(snapshot)}`)
   }
 }
 
@@ -438,7 +439,7 @@ async function startVerificationRun(coreClient, specification, resumed) {
       taskId: null,
       purpose: resumed
         ? `Verify ${specification.adapterKind} resume/process reuse receives a new active CLI lease.`
-        : `Verify ${specification.adapterKind} executes all 12 CLI-only built-in operations.`,
+        : `Verify ${specification.adapterKind} executes all 13 CLI-only built-in operations.`,
       completionRole: 'required'
     }
   })
@@ -615,6 +616,7 @@ function projectEnvelopeForMeasurement(envelope) {
     case 'camp.read':
     case 'camp.search':
     case 'history.search':
+    case 'memory.view':
     case 'memory.read':
     case 'memory.search':
     case 'team.get_task':
@@ -668,7 +670,7 @@ function verificationScript(input) {
     action: 'add',
     scope: 'companion',
     kind: 'preference',
-    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v10 qualification.`,
+    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v11 qualification.`,
     retrievalKeys: [`cli-${input.slug.slice(0, 18)}`]
   })
   const hearth = JSON.stringify({
@@ -735,7 +737,7 @@ assert_fix_input() {
 }
 
 STEP=version
-"$CLI" --version | grep -q 'contract-v9 ipc-v1'
+"$CLI" --version | grep -q 'contract-v11 ipc-v1'
 
 STEP=exact_help
 root_help="$("$CLI" --help)"
@@ -892,6 +894,22 @@ assert_success "$memory_write" 'memory.write'
 printf '%s\n' "$memory_write" | "$JQ" -e '.outcome == "effective"' >/dev/null
 memory_id="$(printf '%s\n' "$memory_write" | "$JQ" -er '.memoryId')"
 
+STEP=memory_view
+memory_view="$("$CLI" memory view --scope companion)"
+assert_success "$memory_view" 'memory.view'
+printf '%s\n' "$memory_view" | "$JQ" -e --arg memoryId "$memory_id" '
+  .scope == "companion"
+  and .complete == true
+  and .itemCount == (.items | length)
+  and (.totalBodyBytes | type) == "number"
+  and (.items | any(
+    .target.memoryId == $memoryId
+    and .target.scope == "companion"
+    and (.target.revisionId | type) == "string"
+    and .agentCanRevise == true
+  ))
+' >/dev/null
+
 STEP=memory_search
 memory_search="$("$CLI" memory search --query ${shellQuote(`cli-${input.slug.slice(0, 18)}`)} --limit 6)"
 assert_success "$memory_search" 'memory.search'
@@ -905,8 +923,10 @@ memory_read_input="$("$JQ" -nc --arg memoryId "$memory_id" '{memoryIds:[$memoryI
 memory_read="$(printf '%s\n' "$memory_read_input" | "$CLI" memory read)"
 assert_success "$memory_read" 'memory.read'
 printf '%s\n' "$memory_read" | "$JQ" -e --arg memoryId "$memory_id" '
-  .memories | any(.memoryId == $memoryId and .cacheState == "current" and .scope == "companion"
-    and (has("counterpartyAgentId") | not) and (has("direction") | not))
+  .memories | any(.memoryId == $memoryId and .cacheState == "current"
+    and .target.memoryId == $memoryId and .target.scope == "companion"
+    and (.target.revisionId | type) == "string"
+    and .agentCanRevise == true)
 ' >/dev/null
 
 cat > "$RUN_TMP/hearth.json" <<'ROVAI_JSON'
@@ -926,7 +946,7 @@ trap - EXIT
 printf '%s\n' ${shellQuote(JSON.stringify({
     ok: true,
     marker: input.successMarker,
-    operationCount: 12,
+    operationCount: 13,
     versionConflict: 'refresh_then_decide'
   }))}
 `

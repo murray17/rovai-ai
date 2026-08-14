@@ -64,7 +64,7 @@ Structured Content 继续通过 sanitized GFM 呈现。正文里的 Agent Mentio
 | 层级 | 权威入口 |
 |---|---|
 | Core identity、耐久内容、失效校验与派生寻址 | [ADR-0096](../../adr/0096-core-owned-structured-mentions-and-derived-addressing.md) |
-| Draft continuation 来源、物化与无 fallback | [ADR-0186](../../adr/0186-durable-composer-recipient-continuation.md)与[Camp Composer Draft v2](../../contracts/camp-composer-draft-v2.md) |
+| Draft continuation 来源、物化与无 fallback | [ADR-0187](../../adr/0187-durable-composer-recipient-continuation.md)与[Camp Composer Draft v2](../../contracts/camp-composer-draft-v2.md) |
 | Renderer 视觉、Popover、键盘、拖选与复制粘贴 | 本文 |
 | 自动化与打包 App 回归 | [结构化 Mention 门禁](../../development/ui-acceptance.md#结构化-mention-门禁) |
 
