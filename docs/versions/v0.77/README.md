@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.77
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -15,6 +15,8 @@ last_updated: 2026-08-14
 > `focus-visible`。Core Draft schema/mutation、Draft-only send、IPC、Renderer、迁移、文档与真实打包 App 验收全部闭环。
 >
 > 前置版本：[v0.76 显示名 Inline Alias 行首寻址门禁](../v0.76/README.md)
+>
+> 后续版本：[v0.79 Camp 会话轻量打开与分段性能诊断](../v0.79/README.md)
 
 ## 版本目标
 
