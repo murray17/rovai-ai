@@ -12,6 +12,7 @@ Review Lead 在任一轴开始前读取本文件。
 - [Standards Bundle](#standards-bundle)
 - [Coverage Manifest](#coverage-manifest)
 - [超大 diff](#超大-diff)
+- [结果传输预算](#结果传输预算)
 - [Freshness](#freshness)
 - [只读检查](#只读检查)
 
@@ -158,6 +159,14 @@ binary
 将 Coverage Manifest 稳定分块，两个轴使用同一 chunk 顺序，各自在轴内顺序处理。
 
 无法完整覆盖时设为 `partial`，列出已覆盖、limited、未覆盖、原因和不能排除的风险。不静默抽样，不把 partial 写成“无问题”。
+
+## 结果传输预算
+
+冻结 Coverage Manifest 时同时估算两个轴可能形成的 finding 数量和结果体量，但不能因为消息预算而少 review 代码或提前改变 finding 顺序。代码 coverage 与结果 transport 是两个独立状态。
+
+每个轴按 [Finding 与结果格式](findings.md) 使用 30 KiB 单消息工作上限、完整 finding 边界、最多 128 parts、最后 compact manifest 与 canonical result digest。Coverage 很大时在 manifest 中保留总数、分类、limited/skipped 和稳定 snapshot locator，不重复粘贴整份 diff 或大段文件清单；完整 coverage 仍由冻结 snapshot/manifest 作为依据。
+
+若结果无法在预算内完整传输，把 transport 和轴状态降为 `partial` 或 `failed`，列出未传输 finding IDs；不得把“代码已检查”误写成“完整结果已交付”。
 
 ## Freshness
 

@@ -29,11 +29,16 @@ last_updated: 2026-08-14
 ### Campfire 与 Grill Duo 校准
 
 - `campfire` 的触发描述覆盖邀请、开场观点、定向回应与澄清，但最终《篝火纪要》只终止、不续跑；
-- Default Lead 使用共享邀请和准确 Agent ID；参与者从请求触发的 Run 返回给可信请求者；
+- 非 Lead 使用 Collaboration State 的准确 `defaultLeadAgentId` 显式 A2A 交接，不能用普通 final 假装唤醒；
+- Default Lead 使用共享邀请和准确 Agent ID，冻结 accepted recipients、invitation message IDs 与唯一
+  Campfire ID；Opening Barrier 未满足前只允许 public-only 等待，不能标记分岔或发布纪要；
+- 参与者从请求触发的 Run 返回给可信请求者，并在开场正文中保留 Campfire ID 与 invitation message ID；
 - 定向回应需要引用非当前触发观点时写入正文，不伪装成可以选择任意历史 reply target；
 - 最终纪要 public-only 发布，未回复或含糊成员不被代写，结束后迟到回复不自动重开；
 - `grill-duo` 与 `grill-duo-with-docs` 保留各自自然标题，固定搭档从当前邀请触发的 Run 返回，
   Retry 创建新邀请，旧邀请回复不满足新请求；
+- 两个 Grill 的 frontmatter 覆盖用户只回答上一题或确认共同理解的续跑；搭档建议返回后，邀请者以
+  `rovai send --to-user` 发布当前消息新产生的唯一用户问题，普通进度、A2A 和无决策收尾不升级注意力；
 - 文档版继续由邀请者维护领域词汇与达到项目准入门槛的 ADR，搭档只做独立复核。
 
 ### Review Duo
@@ -42,8 +47,16 @@ last_updated: 2026-08-14
   双轴或团队 code review 时自动触发，不接管普通单人 review；
 - Review Lead 与一位固定搭档分别负责 Spec 和 Standards，两个轴锁定后独立呈现，不跨轴合并、
   去重、改严重度或重排；
-- Lead 初始 Run 的启动标记、Standards 请求、Spec 结果和可选等待状态都回复同一用户触发消息；
-  搭档结果直接回复 Standards 请求，最终报告从该结果触发的 Lead 续跑 public-only 发布；
+- Lead 初始 Run 的启动标记、Standards 请求、Spec parts/manifest 和可选等待状态都回复同一用户触发
+  消息；Standards parts public-only 回复请求，最后 manifest 才寻址 Lead，最终摘要从该 manifest 触发的
+  continuation public-only 发布；
+- Lead 先 accepted Standards 请求，避免主动把 Spec 写入请求 payload/既定前置历史并给搭档最早启动
+  机会；公开 Camp 仍只提供程序性独立，不保证技术盲评。随后 Spec manifest 绑定真实 request message ID；
+  最终 Run 搜索唯一 locator 取得 Camp ID，并 exact-read 两轴 manifests/parts，不依赖
+  15 条 recent history 或 2,000 字符投影；
+- 每条 axis part、manifest 和 final 都使用 30 KiB UTF-8 工作上限；完整 findings 按冻结轴内顺序分片，
+  manifest 列出 accepted part IDs 与 digest，final 只保留状态、数量、最高严重度和最多三条原序摘要；
+  缺 part、超预算、locator 不唯一或 digest 不匹配时必须标记 `partial`；
 - 同一 Lead/Camp 同时只推进一场未结束 Review Duo；Retry 使用新 Standards 请求，wrong sender、
   wrong direct parent、snapshot mismatch、重复和迟到结果都不能推进当前评审；
 - 完整 duo 的 Skill-only v1 只接受双方可解析的 Git-object-backed SHA 范围，或用户已提供且双方
@@ -75,7 +88,8 @@ last_updated: 2026-08-14
    bundled file table 一致；
 2. Core 精确安装十二项 official Skill，`review-duo` 十一文件、无 upstream，全部 Skill 默认全组投递；
 3. Settings 只展示十项 `user_managed` official Skill，两项 `system_required` 无列表行或配置控件；
-4. 定向测试证明 Campfire、Grill 与 Review Duo 的自然标题不承担身份认证，并冻结真实 reply topology、
+4. 定向测试证明 Campfire、Grill 与 Review Duo 的自然标题不承担身份认证，并冻结 Opening Barrier、
+   Default Lead 交接、Grill User attention、真实 reply topology、locator/exact-read、30 KiB 分片、
    accepted/pending、Retry、duplicate、late result 与 snapshot fallback 边界；
 5. `pnpm test`、`pnpm typecheck`、完整 Rust tests、Clippy、Desktop build、Skill validator、文档治理和
    `git diff --check` 通过；

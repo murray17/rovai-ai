@@ -75,7 +75,11 @@ Spec finding 必须引用 Requirement，并解释代码如何偏离它。单纯�
 
 在本轴内处理精确重复，再按 severity、Requirement 顺序、Coverage 文件顺序和 finding ID 锁定。
 
-通过 `rovai send --body <Spec 结果>` public-only 发布，不带 `--to` 或 `--to-user`。Core 会让它回复当前 Lead Run 的用户触发消息，而不是启动标记。只有命令 accepted 后结果才视为锁定；之后收到 Standards 结果时，不为了对齐另一轴而修改结论。
+先取得本次已 accepted Standards request 的准确 `messageId`。按 [Finding 与结果格式](findings.md) 计算 UTF-8 byte budget 和 canonical digest；存在 findings 时，以完整 finding 为边界形成 Spec parts，逐条通过不带 `--to` 或 `--to-user` 的 public-only `rovai send` 发布并保留 accepted `messageId`。
+
+最后 public-only 发布 compact Spec manifest，列出所有 part IDs、Requirement coverage、限制和 digest，并包含精确行 `Spec source locator <accepted Standards request messageId>`。Core 会让 parts 与 manifest 回复当前 Lead Run 的用户触发消息，而不是启动标记。
+
+只有所有预期 parts 与 manifest 都 accepted、manifest 中 IDs 与 digest 完整时结果才视为完整锁定；部分发送失败时降级为 `partial` 或 `failed`，不得截断后称为 complete。之后收到 Standards 结果时，不为了对齐另一轴而修改结论。
 
 ## 只读边界
 

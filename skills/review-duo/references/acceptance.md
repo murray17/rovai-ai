@@ -5,9 +5,9 @@
 必须验证：
 
 - Standards 结果来自选定的固定搭档；
-- Standards 结果直接回复当前 Standards 请求；
-- 启动、Standards 请求、Spec 和等待状态从同一 Lead Run 发出时共同回复用户触发消息，而不是互相伪装成父子；
-- 最终报告从 Standards 结果触发的续跑发出并直接回复该结果；
+- Standards parts 与最终 manifest 直接回复当前 Standards 请求，只有 manifest 寻址 Lead；
+- 启动、Standards 请求、Spec parts/manifest 和等待状态从同一 Lead Run 发出时共同回复用户触发消息，而不是互相伪装成父子；
+- 最终报告从 Standards manifest 触发的续跑发出并直接回复该 manifest；
 - 每次 Retry 创建新的请求；
 - 旧请求的迟到结果不满足新请求；
 - 同一请求的重复结果只采用一次；
@@ -18,13 +18,14 @@
 1. Lead 冻结 Diff、Spec、Standards；
 2. 选择固定搭档；
 3. public-only 发布启动标记；
-4. 通过准确 Agent ID 发送 Standards 请求；
+4. 通过准确 Agent ID 发送 Standards 请求并冻结 accepted request message ID；
 5. accepted 后不声称搭档开始；
-6. Lead 独立完成并 public-only 锁定 Spec；
-7. 搭档直接回复 Standards 请求；
-8. Lead 验证可信 sender、直接父请求与 snapshot identifier；
-9. 在 Standards 结果触发的续跑中组装并 public-only 发布两个固定区块；
-10. 不修改代码或创建其它领域对象。
+6. Lead 独立完成 Spec，按预算 public-only 发布 parts 与带 current request locator 的 manifest；
+7. 搭档按预算 public-only 发布 Standards parts，最后只用 manifest 返回 Lead；
+8. Lead 验证可信 sender、直接父请求、真实 request ID 与 snapshot identifier；
+9. Lead 通过 current request locator 搜索取得 Camp ID，再 exact-read 两轴 manifests/parts 并验证 digest；
+10. 在 Standards manifest 触发的续跑中 public-only 发布两个固定区块的有界摘要；
+11. 不修改代码或创建其它领域对象。
 
 ## 双轴独立
 
@@ -41,6 +42,10 @@ Standards 请求不含 Spec finding；Lead 在吸收 Standards 前锁定 Spec；
 ## Messaging
 
 自然标题应保持用户可读并作为发现线索；标题省略但语义和 Runtime 事实清楚时仍可继续，标题正确但 sender/直接父请求错误时不推进。普通单人 code review 不应被本 Skill 自动接管，最终报告标题也不触发续跑。
+
+## Result transport
+
+覆盖单条 32 KiB hard rejection 边界、30 KiB working limit、多字节 UTF-8、零 finding、单 part、多 part、单 finding 过大、part rejected、manifest rejected、超过 128 parts、part ID 缺失、digest mismatch、Spec locator 唯一命中、重复 locator、Retry pointer、completion locator、recent history 中没有 Spec、最终摘要不复制全文，以及任何不完整传输都不能称为 complete。
 
 ## Fallback
 

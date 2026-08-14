@@ -3384,6 +3384,8 @@ mod tests {
             "`### 篝火纪要` 表示讨论已经结束",
             "由 Campfire 主动发起的短澄清，整场最多一次",
             "默认使用一条共享邀请",
+            "Opening Barrier 未满足前，不得标记分岔点或发布纪要",
+            "defaultLeadAgentId",
             "不选择任意旧消息作为 reply target",
             "不带 Agent 收件人的 `rovai send`",
         ] {
@@ -3450,6 +3452,8 @@ mod tests {
             "标题只提示阶段，不证明身份",
             "旧邀请的迟到回复只作为补充",
             "rovai send --to <固定搭档 Agent ID>",
+            "rovai send --to-user --body <解释、推荐和唯一问题>",
+            "正在继续一场普通双人追问",
             "Core 会自动让建议直接回复这条邀请",
         ] {
             assert!(
@@ -3490,6 +3494,7 @@ mod tests {
             "### 双人追问与文档 · 搭档建议",
             "只读取 [双人追问协议]",
             "不修改项目文档",
+            "正在继续一场双人追问与文档会话",
             "可信发送者和当前触发消息的直接回复关系",
         ] {
             assert!(
@@ -3507,6 +3512,7 @@ mod tests {
         assert!(docs_duo_protocol.contains("### 双人追问与文档 · 搭档建议"));
         assert!(docs_duo_protocol.contains("Runtime 可信发送者是当前固定搭档"));
         assert!(docs_duo_protocol.contains("Core 自动建立对邀请的直接回复关系"));
+        assert!(docs_duo_protocol.contains("rovai send --to-user --body <解释、推荐和唯一问题>"));
         for retired_marker in &retired_duo_markers {
             assert!(!docs_duo_protocol.contains(retired_marker));
         }
@@ -3541,10 +3547,13 @@ mod tests {
         for required in [
             "普通单人 code review 不自动触发",
             "启动消息是用户可读的评审标记",
-            "最终报告因此直接回复该结果",
+            "最终报告因此直接回复该 manifest",
             "Agent 不能选择任意 reply target",
             "Skill-only v1 的完整 duo 只接受两类输入",
             "同一位 Review Lead 在同一个 Camp 中同一时间只主动推进一场",
+            "Spec source locator",
+            "30 KiB 工作上限",
+            "最终报告只做有界摘要",
         ] {
             assert!(
                 review_duo_rules.contains(required),
@@ -3560,10 +3569,11 @@ mod tests {
         )
         .unwrap();
         assert!(review_duo_messages.contains(
-            "Lead 初始 Run 中的启动、Standards 请求、Spec 结果和等待状态都是用户触发消息的子消息"
+            "Lead 初始 Run 中的启动、Standards 请求、Spec parts/manifest 和等待状态都是用户触发消息的子消息"
         ));
         assert!(review_duo_messages.contains("rovai send --to <固定搭档 Agent ID>"));
-        assert!(review_duo_messages.contains("这条消息自动回复当前 Standards 结果"));
+        assert!(review_duo_messages.contains("Spec source locator <request messageId>"));
+        assert!(review_duo_messages.contains("这条消息自动回复当前 Standards manifest"));
         let review_duo_standards = fs::read_to_string(
             review_duo_content
                 .join("references")
@@ -3571,6 +3581,7 @@ mod tests {
         )
         .unwrap();
         assert!(review_duo_standards.contains("rovai send --to <请求发送者 Agent ID>"));
+        assert!(review_duo_standards.contains("Standards result locator"));
         let tasteful_ui = skills
             .iter()
             .find(|skill| skill.name == "tasteful-ui")

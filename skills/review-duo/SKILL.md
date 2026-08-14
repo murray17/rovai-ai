@@ -35,18 +35,19 @@ description: 在 Rovai Camp 中由当前队员与一位固定搭档，对冻结�
 当前用户评审请求
 ├── 双轴代码评审启动消息（public-only）
 ├── Standards 请求 → 固定搭档
-├── 当前队员 Spec 结果（public-only）
+├── 当前队员 Spec parts + manifest（public-only）
 └── 等待搭档（可选，public-only）
 
 Standards 请求
-└── 固定搭档 Standards 结果 → Review Lead
-    └── 最终双轴报告（public-only）
+├── 固定搭档 Standards parts（public-only）
+└── 固定搭档 Standards manifest → Review Lead
+    └── 最终双轴摘要报告（public-only）
 ```
 
 - 启动消息是用户可读的评审标记，不是可供 Skill 任意选择的 reply root；
-- 启动、Standards 请求、Spec 结果和等待状态从同一个 Lead Run 发送时，Core 会让它们都回复该 Run 的用户触发消息；
-- 固定搭档直接回复 Standards 请求；
-- Review Lead 的续跑由 Standards 结果触发，最终报告因此直接回复该结果；
+- 启动、Standards 请求、Spec parts/manifest 和等待状态从同一个 Lead Run 发送时，Core 会让它们都回复该 Run 的用户触发消息；
+- 固定搭档的 Standards parts 与最终 manifest 都直接回复 Standards 请求，只有 manifest 显式寻址 Review Lead；
+- Review Lead 的续跑由 Standards manifest 触发，最终报告因此直接回复该 manifest；
 - 需要重试时创建新的 Standards 请求，旧请求的迟到结果只作为补充。
 
 公开消息可以使用以下自然标题：
@@ -54,8 +55,10 @@ Standards 请求
 ```text
 ### 双轴代码评审 · 启动
 ### 双轴代码评审 · Standards（规范）请求
-### 双轴代码评审 · Standards（规范）结果
-### 双轴代码评审 · Spec（需求）结果
+### 双轴代码评审 · Standards（规范）结果 · Part
+### 双轴代码评审 · Standards（规范）结果 · Manifest
+### 双轴代码评审 · Spec（需求）结果 · Part
+### 双轴代码评审 · Spec（需求）结果 · Manifest
 ### 双轴代码评审 · 等待搭档
 # 双轴代码评审结果
 ```
@@ -75,6 +78,9 @@ Standards 请求
 9. 等待搭档时不 sleep、不轮询、不代写其结论。
 10. 最终报告固定按 `Standards`、`Spec` 顺序呈现，不生成会掩盖其中一轴的单一总分。
 11. Agent 不能选择任意 reply target；每次发送都由 Core 自动回复当前 AgentRun 的触发消息。
+12. 每条 `rovai send` 正文都先按 UTF-8 bytes 计算并保持在 30 KiB 工作上限内；32 KiB 是 Core 硬上限，不依赖 rejected 后再截断。
+13. 完整 finding 放在有界 parts 中，最后一条 axis manifest 锁定 part message IDs 与 digest；最终报告只做有界摘要并引用完整结果，不再次复制两轴全文。
+14. accepted Standards request `messageId` 是本轮唯一关联键；Spec manifest 使用 `Spec source locator <request messageId>`，最终 Lead 先搜索取得 Camp ID，再 exact-read 完整结果。
 
 ## 默认分工
 
@@ -154,19 +160,23 @@ Skill-only v1 的完整 duo 只接受两类输入：两个成员都可解析的 
         ↓
 发布 public-only“评审启动”标记
         ↓
-向固定搭档发送 Standards 请求
+向固定搭档发送 Standards 请求并保留 accepted request messageId
         ↓
-当前队员独立完成、锁定并 public-only 发布 Spec
+当前队员独立完成 Spec，public-only 发布 parts 与 manifest；manifest 绑定 request messageId
         ↓
 结束本次响应，等待固定搭档回复
         ↓
-确认可信发送者、直接父请求和 snapshot identifier 都正确
+固定搭档 public-only 发布 Standards parts，最后仅用 manifest 返回 Lead
         ↓
-锁定 Standards
+确认可信发送者、直接父请求、request messageId 和 snapshot identifier 都正确
+        ↓
+用 current request messageId 定位并 exact-read Spec manifest 与所有 parts
+        ↓
+验证两轴 part IDs、digest 与传输完整性
         ↓
 重新检查快照是否 stale
         ↓
-从 Standards 结果触发的续跑中组装并 public-only 发布最终报告
+从 Standards manifest 触发的续跑中组装并 public-only 发布有界最终摘要
 ```
 
 向搭档发送 Standards 请求时，不附带当前队员的 Spec 推荐或结论，避免锚定。
@@ -209,6 +219,8 @@ Standards 评审者只依据冻结的 Diff 与 Standards 来源形成结果。Sp
 - 不得跨轴重新排序。
 
 同一轴中的精确重复由该轴评审者在锁定前处理。
+
+轴结果的传输也属于锁定条件。所有预期 parts 和最后 manifest 都 accepted、message IDs 完整且 digest 可验证时，才可把该轴称为完整传输；缺 part、超预算、digest 不匹配或 locator 不唯一时必须标记 `partial` 或 `failed`。
 
 ## 结果状态
 

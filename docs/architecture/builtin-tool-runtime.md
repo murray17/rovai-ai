@@ -310,13 +310,22 @@ send/`--to-user`/list/get/search/read 不要求加载 `cli-operations`。
 
 `campfire` 是无外部上游的 Rovai original official Skill，并使用 ordinary `user_managed` delivery。
 它仅以公开 A2A Camp Messages 组织 2–3 位成员的独立开场、有限定向回应与 Default Lead 终止纪要；
-自然阶段标题不是 Core protocol，`### 篝火纪要` 不触发续跑，也不产生 Task、Memory、ADR 或实施副作用。
+非 Lead 通过 `defaultLeadAgentId` 显式寻址交接；邀请 accepted 后冻结 participant/invitation 清单，每次
+开场回传都经过 Opening Barrier，未收齐有效直接回复或权威终态前只能 public-only 等待，不能提前形成
+分岔点或纪要。自然阶段标题不是 Core protocol，`### 篝火纪要` 不触发续跑，也不产生 Task、Memory、
+ADR 或实施副作用。
 
 `grill-duo`、`grill-duo-with-docs` 与 `review-duo` 同样使用 ordinary `user_managed` delivery。自然标题只
 提供 discovery 与公屏阅读线索；Skill 进入后使用可信 Current Input sender、显式 Agent recipient 和
 reference closure 中的真实 reply relation。Agent 不提供或选择 reply ID，Core 始终把新消息链接到当前
-AgentRun trigger。Review Duo 因而把启动标记、Standards 请求与 Spec 结果作为初始 user trigger 的
-sibling messages，搭档结果回复 Standards 请求，最终报告回复触发 Lead continuation 的搭档结果。
+AgentRun trigger。两个 Grill 在搭档返回后使用 `--to-user` 发布当前消息新产生的唯一用户决策题，并在
+frontmatter 覆盖用户只回答上一题的续跑；搭档内部往返与无新决定的收尾不升级 User attention。
+
+Review Duo 因而把启动标记、Standards 请求与 Spec parts/manifest 作为初始 user trigger 的 sibling
+messages；Standards parts public-only 回复请求，最后 manifest 才寻址 Lead 并触发 continuation。Lead
+使用 accepted Standards request message ID 搜索唯一 Spec locator，取得 Camp ID 后用 `camp.read item`
+精确读取两轴 manifests/parts。每条结果使用 30 KiB 工作上限、轴内稳定分片和 digest，最终报告只做
+有界摘要并引用完整 parts；缺失或不一致时必须标记 partial，不能依赖 recent history 或记忆补齐。
 `review-duo` 是带原则级 MIT attribution、但无 vendored upstream 的 Rovai original Skill；完整 duo v1
 只接受双方可解析的 Git-object-backed SHA 范围或用户已提供的稳定共享 patch/attachment。
 

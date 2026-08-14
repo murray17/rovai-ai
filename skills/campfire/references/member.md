@@ -21,12 +21,22 @@ rovai send --help
 
 用 `rovai send --to <请求发送者 Agent ID> --body <结果正文>` 发送。只有命令 accepted 时才视为结果已建立；随后结束本次响应，等待后续邀请。
 
+开场回复必须从当前触发消息的可信元数据复制准确 invitation `messageId`，并保留邀请正文中的 Campfire ID。不要根据标题或话题猜 ID。
+
 ## 独立开场
 
 只根据邀请中的话题、分配视角和共同事实形成判断。即使公共 Camp 历史已经出现同场其他人的开场，也不要引用或跟随；保留自己的独立判断。
 
 ```markdown
 ### 篝火讨论 · 开场观点
+
+**Campfire ID**
+
+`<邀请中的唯一 ID>`
+
+**邀请消息**
+
+`<当前触发 invitation messageId>`
 
 **话题**
 
@@ -63,6 +73,10 @@ rovai send --help
 
 ```markdown
 ### 篝火讨论 · 定向回应
+
+**Campfire ID**
+
+`<请求中的唯一 ID>`
 
 **话题**
 
@@ -101,6 +115,10 @@ Default Lead 只要求确认一句总结时，仅回复该澄清请求：
 
 ```markdown
 ### 篝火讨论 · 澄清
+
+**Campfire ID**
+
+`<请求中的唯一 ID>`
 
 准确。
 ```

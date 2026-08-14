@@ -23,7 +23,10 @@ last_updated: 2026-08-14
 - [x] 将共享邀请、成员返回、定向回应、澄清和纪要全部写成显式 `rovai send` 行为；
 - [x] 删除“任意选择旧消息作为 reply target”的暗示，跨观点回应改为正文引用；
 - [x] 恢复未回复/含糊成员不得代写、一次主动澄清、单场推进与迟到回复边界；
+- [x] 增加 accepted recipient/invitation 清单与 Opening Barrier，未收齐回复或权威终态前禁止分岔和纪要；
+- [x] 把非 Lead 主持交接改为使用 `defaultLeadAgentId` 的显式 `rovai send --to`；
 - [x] 更新 Grill Duo 两个 Skill 的前置触发语义、可信固定搭档验证与 caller return 命令；
+- [x] 恢复两个 Grill 的用户回答续跑 trigger，并让新产生的唯一用户问题和最终确认显式 `--to-user`；
 - [x] 完成 validator、bundle fixture 与 Core-managed reply topology 的定向回归。
 
 ## Checkpoint 2：Review Duo
@@ -34,6 +37,9 @@ last_updated: 2026-08-14
 - [x] 补齐 public-only / addressed `rovai send`、accepted、pending、Retry、duplicate、late result 与单场边界；
 - [x] 把完整 duo 输入收窄为 Git SHA 或用户已提供的稳定共享 patch/附件；
 - [x] 修复 Standards 结果模板引用，并为长 references 增加导航；
+- [x] 用 accepted Standards request message ID、唯一 Spec locator、`camp.search` 和 exact `camp.read item`
+  形成不依赖 recent history 的确定性 Spec 恢复链，同时保持 Standards 请求先于公开 Spec；
+- [x] 为两轴结果增加 30 KiB UTF-8 工作预算、稳定 parts、accepted message ID manifest、digest 与有界 final；
 - [ ] 完成正常 duo、wrong sender/parent、retry、stale、missing Spec、solo 与只读 dry-run 验收。
 
 ## Checkpoint 3：Official bundle 与 Settings
