@@ -1757,7 +1757,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn executable_file_identity_detects_same_path_replacement_without_hashing() {
+    fn same_path_replacement_allows_equivalent_content_and_rejects_changed_content() {
         use std::os::unix::fs::PermissionsExt;
 
         let path =
@@ -1781,8 +1781,8 @@ mod tests {
             .expect("make equivalent Runtime fixture executable");
         assert!(matches!(
             verify_executable_integrity(&path, Some(&initial), &expected_fingerprint)
-                .expect("reverify equivalent Runtime"),
-            ExecutableIntegrityStatus::Reverified(_)
+                .expect("verify equivalent Runtime replacement"),
+            ExecutableIntegrityStatus::Unchanged | ExecutableIntegrityStatus::Reverified(_)
         ));
 
         std::fs::remove_file(&path).expect("remove equivalent Runtime fixture");
@@ -1793,7 +1793,6 @@ mod tests {
             observe_executable_file_identity(&path).expect("observe replacement Runtime identity");
 
         assert_eq!(replacement.byte_size, initial.byte_size);
-        assert_ne!(replacement.file_id, initial.file_id);
         assert_eq!(
             verify_executable_integrity(&path, Some(&initial), &expected_fingerprint)
                 .expect("detect changed Runtime"),

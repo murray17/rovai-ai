@@ -8,6 +8,8 @@
 - Current cross-version architecture navigation: [`docs/adr/CURRENT.md`](docs/adr/CURRENT.md); lifecycle, admission, and generated history rules: [`docs/adr/README.md`](docs/adr/README.md). Read only the ADRs relevant to the task.
 - When adding or changing an ADR, Architecture, Contract, version document, or documentation route, run the generic documentation gates described in [`docs/adr/README.md#自动治理`](docs/adr/README.md#自动治理). Do not add feature-, version-, or Skill-specific checker exceptions.
 - Local environment, development run, tests, and macOS builds: [`docs/development/README.md`](docs/development/README.md).
+- Before adding, merging, permanently disabling, or deleting Rust tests, follow the canonical
+  [Rust test admission and retirement policy](docs/development/testing.md#rust-测试准入与退役门槛).
 - Before starting Electron, `rovai-core`, a packaged App, or a real Runtime, read and follow
   [`docs/development/local-workflow.md`](docs/development/local-workflow.md). Use `pnpm dev` rather than
   bare `electron-vite dev`; never run the daily App from `dist/`, and never point development or acceptance

@@ -672,22 +672,38 @@ mod tests {
     }
 
     #[test]
-    fn projection_excludes_credentials_and_redacts_detected_secret_semantics() {
-        let input = json!({
-            "query": "Authorization: Bearer abcdefghijklmnopqrstuvwxyz",
-            "limit": 2,
-            "bindingCredential": "credential-must-never-persist",
-            "requestToken": "request-token-must-never-persist"
-        });
-        let result = json!({"results": []});
-        let projected = projection(MEMORY_SEARCH_TOOL_NAME, input, result);
-        let encoded = serde_json::to_string(&projected).unwrap();
-        assert_eq!(projected["canonicalInput"]["queryRedacted"], true);
-        assert!(!encoded.contains("abcdefghijklmnopqrstuvwxyz"));
-        assert!(!encoded.contains("credential-must-never-persist"));
-        assert!(!encoded.contains("request-token-must-never-persist"));
-        assert!(!encoded.contains("bindingCredential"));
-        assert!(!encoded.contains("requestToken"));
+    fn projection_never_persists_private_input_semantics_or_transport_credentials() {
+        for query in [
+            "Authorization: Bearer abcdefghijklmnopqrstuvwxyz",
+            "requestToken=opaque-value-not-a-known-prefix",
+            "bindingCredential: opaque-value-not-a-known-prefix",
+            "Authorization: <redacted>",
+        ] {
+            let projected = projection(
+                MEMORY_SEARCH_TOOL_NAME,
+                json!({
+                    "query": query,
+                    "limit": 2,
+                    "bindingCredential": "credential-must-never-persist",
+                    "requestToken": "request-token-must-never-persist"
+                }),
+                json!({"results": []}),
+            );
+            let encoded = serde_json::to_string(&projected).unwrap();
+            assert_eq!(
+                projected["canonicalInput"]["queryRedacted"], true,
+                "query should be redacted: {query}"
+            );
+            for forbidden in [
+                query,
+                "credential-must-never-persist",
+                "request-token-must-never-persist",
+                "bindingCredential",
+                "requestToken",
+            ] {
+                assert!(!encoded.contains(forbidden), "leaked {forbidden}");
+            }
+        }
     }
 
     #[test]
@@ -796,22 +812,5 @@ mod tests {
         );
         assert_eq!(projected["canonicalResult"]["resultCount"], 100);
         assert_eq!(projected["canonicalResult"]["resultsTruncated"], true);
-    }
-
-    #[test]
-    fn projection_redacts_transport_identity_markers_even_without_known_token_prefixes() {
-        for query in [
-            "requestToken=opaque-value-not-a-known-prefix",
-            "bindingCredential: opaque-value-not-a-known-prefix",
-            "Authorization: <redacted>",
-        ] {
-            let projected = projection(
-                MEMORY_SEARCH_TOOL_NAME,
-                json!({"query": query}),
-                json!({"results": []}),
-            );
-            assert_eq!(projected["canonicalInput"]["queryRedacted"], true);
-            assert!(!serde_json::to_string(&projected).unwrap().contains(query));
-        }
     }
 }

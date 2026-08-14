@@ -32,6 +32,12 @@ pub const MAX_DIRECTORY_FILES: u64 = 2_000;
 pub const MAX_DIRECTORY_ENTRIES: u64 = 4_000;
 pub const MAX_DIRECTORY_DEPTH: usize = 32;
 pub const DIRECTORY_MEDIA_TYPE: &str = "inode/directory";
+
+const _: () = {
+    assert!(MAX_PREVIEW_BYTES < MAX_ATTACHMENT_BYTES);
+    assert!(MAX_ATTACHMENT_BYTES < MAX_DRAFT_ATTACHMENT_BYTES);
+};
+
 const DRAFT_RETENTION_DAYS: i64 = 7;
 const INSPECTION_PREFIX_BYTES: usize = 64 * 1024;
 const MAX_PREVIEW_EDGE: u64 = 16_384;
@@ -2822,13 +2828,5 @@ mod tests {
             "_a__b.png"
         );
         assert!(normalize_display_name("..").is_err());
-    }
-
-    #[test]
-    fn byte_limit_constants_are_consistent() {
-        const {
-            assert!(MAX_PREVIEW_BYTES < MAX_ATTACHMENT_BYTES);
-            assert!(MAX_ATTACHMENT_BYTES < MAX_DRAFT_ATTACHMENT_BYTES);
-        }
     }
 }

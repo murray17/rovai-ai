@@ -32,7 +32,9 @@ import {
   notificationFocusMatchesAction,
   optimisticCampMessage,
   rectanglesIntersect,
+  recentCampSnapshot,
   reconcileCancellingTurnIds,
+  rememberCampSnapshot,
   runtimeRecoveryFromCommandResult,
   SettingsView,
   shouldLoadRuntimeHealth,
@@ -152,6 +154,26 @@ function canonicalActivity(
     ...overrides
   }
 }
+
+describe('Camp snapshot cache', () => {
+  it('keeps a bounded least-recently-used Camp snapshot cache', () => {
+    const snapshot = (campId: string): CampSnapshot => ({
+      camp: { id: campId }
+    } as CampSnapshot)
+    const cache = new Map<string, CampSnapshot>()
+    const first = snapshot('camp-1')
+    const second = snapshot('camp-2')
+    const third = snapshot('camp-3')
+
+    rememberCampSnapshot(cache, first, 2)
+    rememberCampSnapshot(cache, second, 2)
+    expect(recentCampSnapshot(cache, 'camp-1')).toBe(first)
+    rememberCampSnapshot(cache, third, 2)
+
+    expect([...cache.keys()]).toEqual(['camp-1', 'camp-3'])
+    expect(recentCampSnapshot(cache, 'camp-2')).toBeNull()
+  })
+})
 
 describe('task event projections', () => {
   it('shows the complete structured recipient fanout and never infers recipients from a reply', () => {

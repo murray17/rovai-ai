@@ -5770,7 +5770,7 @@ mod tests {
     }
 
     #[test]
-    fn checkpoint_5_current_boundaries_empty_fallback_and_id_guessing_are_fail_closed() {
+    fn current_history_boundaries_fail_closed_without_id_guessing() {
         let mut fixture = fixture();
         let run = materialize_history_fixture(&mut fixture);
         let initial_message_id: String = fixture
@@ -5902,7 +5902,7 @@ mod tests {
     }
 
     #[test]
-    fn checkpoint_5_freezes_history_order_and_snapshot_titles_across_late_changes() {
+    fn history_snapshot_order_and_titles_remain_frozen() {
         let mut fixture = fixture();
         let (first_camp_id, _) = create_history_camp(
             &mut fixture.database,
@@ -6002,7 +6002,7 @@ mod tests {
     }
 
     #[test]
-    fn checkpoint_5_reuses_camp_sequence_ids_across_distinct_agent_runs() {
+    fn camp_sequence_ids_are_stable_across_agent_runs() {
         let mut fixture = fixture();
         let first_run = materialize_history_fixture(&mut fixture);
         let first_manifest_id: String = fixture
@@ -7809,91 +7809,6 @@ mod tests {
                 .contains("[SELF_ACTIVE_TASKS]")
         );
         std::fs::remove_dir_all(budget_fixture.directory).unwrap();
-    }
-
-    #[cfg(any())]
-    #[test]
-    fn memory_guide_freezes_only_live_projection_locations_and_never_the_body() {
-        let mut fixture = fixture();
-        let body = "MEMORY_BODY_MUST_STAY_OUT_OF_THE_AGENTRUN_PROMPT";
-        let created = MemoryService::default()
-            .create(
-                &mut fixture.database,
-                &CommandEnvelope {
-                    command_id: "create-context-memory".to_string(),
-                    actor: ActorRef::User {
-                        user_id: "test-user".to_string(),
-                    },
-                    camp_id: None,
-                    expected_versions: Vec::new(),
-                    execution_epoch: None,
-                    payload: CreateMemoryCommand {
-                        scope: MemoryScopeKind::Hearth,
-                        kind: MemoryKind::Agreement,
-                        body: body.to_string(),
-                        retrieval_keys: vec!["context handoff".to_string()],
-                        companion_agent_id: None,
-                        relationship_agent_ids: Vec::new(),
-                        direction: None,
-                        directed_actor_agent_id: None,
-                        review_after: None,
-                    },
-                },
-            )
-            .unwrap();
-        assert_eq!(created.result.status, CommandResultStatus::Applied);
-        let projection = MemoryProjectionService::new(&fixture.directory);
-        let guide = projection
-            .prepare_guide(&mut fixture.database, &fixture.camp_id, "agent_1")
-            .unwrap();
-        assert_eq!(guide.locations.len(), 3);
-        assert!(guide.locations[2].path.ends_with("/relationships/current"));
-        assert!(!guide.guide.contains(body));
-        assert!(
-            std::fs::read_to_string(&guide.locations[0].path)
-                .unwrap()
-                .contains(body)
-        );
-
-        let materialized = ContextService
-            .materialize_inner(
-                &mut fixture.database,
-                &ManagedBlobStore::new(&fixture.directory),
-                None,
-                None,
-                Some(&guide),
-                &MaterializeContextRequest {
-                    agent_run_id: &fixture.run_id,
-                    execution_epoch: fixture.execution_epoch,
-                    charter_delivery_mode: CharterDeliveryMode::NativeAppend,
-                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
-                },
-            )
-            .unwrap();
-        let ContextMaterialization::Ready(context) = materialized else {
-            panic!("Memory Guide context should be ready");
-        };
-        assert!(context.rendered_payload.contains("[MEMORY_GUIDE]"));
-        assert!(context.rendered_payload.contains(&guide.locations[0].path));
-        assert!(!context.rendered_payload.contains(body));
-        let persisted: (String, String) = fixture
-            .database
-            .connection()
-            .query_row(
-                r#"
-                SELECT memory_guide_json, memory_guide_digest
-                FROM context_manifest WHERE agent_run_id = ?1
-                "#,
-                [&fixture.run_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert!(!persisted.0.contains(body));
-        assert_eq!(
-            persisted.1,
-            canonical_json_digest(&serde_json::to_value(&guide).unwrap()).unwrap()
-        );
-        std::fs::remove_dir_all(fixture.directory).unwrap();
     }
 
     #[test]
@@ -11312,114 +11227,6 @@ mod tests {
                 .rendered_payload
                 .contains("[CURRENT_INPUT]")
         );
-        std::fs::remove_dir_all(fixture.directory).unwrap();
-    }
-
-    #[cfg(any())]
-    fn one_shot_runtime_prepares_delivery_before_future_native_binding() {
-        let mut fixture = fixture();
-        let store = ManagedBlobStore::new(&fixture.directory);
-        let materialized = ContextService
-            .materialize(
-                &mut fixture.database,
-                &store,
-                &MaterializeContextRequest {
-                    agent_run_id: &fixture.run_id,
-                    execution_epoch: fixture.execution_epoch,
-                    charter_delivery_mode: CharterDeliveryMode::FirstPayload,
-                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
-                },
-            )
-            .unwrap();
-        let ContextMaterialization::Ready(prepared) = materialized else {
-            panic!("initial one-shot context should be ready")
-        };
-        assert!(prepared.requires_new_native_session);
-        let proposed_binding_id: String = fixture
-            .database
-            .connection()
-            .query_row(
-                r#"
-                SELECT conversation.native_binding_id
-                FROM agent_run
-                JOIN conversation ON conversation.id = agent_run.conversation_id
-                WHERE agent_run.id = ?1
-                "#,
-                [&fixture.run_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let delivery = ContextService
-            .prepare_input_delivery_for_binding(
-                &mut fixture.database,
-                &fixture.run_id,
-                fixture.execution_epoch,
-                &prepared.manifest_id,
-                &proposed_binding_id,
-            )
-            .unwrap();
-        assert_eq!(delivery.status, "prepared");
-
-        let runtime = ExecutionRuntimeService::default();
-        let execution = runtime
-            .load_agent_run_execution(&fixture.database, &fixture.run_id, fixture.execution_epoch)
-            .unwrap()
-            .unwrap();
-        let binding = runtime
-            .bind_native_session(
-                &mut fixture.database,
-                &CommandEnvelope {
-                    command_id: Uuid::new_v4().to_string(),
-                    actor: ActorRef::System {
-                        component_id: "runtime-adapter:antigravity-app".to_string(),
-                    },
-                    camp_id: Some(fixture.camp_id.clone()),
-                    expected_versions: Vec::new(),
-                    execution_epoch: None,
-                    payload: BindNativeSessionCommand {
-                        conversation_id: execution.conversation_id.clone(),
-                        agent_run_id: execution.agent_run_id.clone(),
-                        expected_conversation_version: execution.conversation_version,
-                        expected_execution_epoch: execution.execution_epoch,
-                        previous_adapter_installation_id: execution
-                            .native_adapter_installation_id
-                            .clone(),
-                        previous_native_session_id: execution.native_session_id.clone(),
-                        previous_binding_compatibility_digest: execution
-                            .native_binding_compatibility_digest
-                            .clone(),
-                        proposed_binding_id: Some(proposed_binding_id.clone()),
-                        adapter_installation_id: execution.runtime.installation_id.clone(),
-                        native_session_id: "agy-native-session".to_string(),
-                        binding_compatibility_digest: execution
-                            .runtime
-                            .binding_compatibility_digest
-                            .clone(),
-                    },
-                },
-            )
-            .unwrap();
-        assert_eq!(
-            binding.result.payload["nativeBindingId"],
-            proposed_binding_id
-        );
-        ContextService
-            .acknowledge_input_delivery(&mut fixture.database, &delivery.id, "agy-native-input")
-            .unwrap();
-        let state: (String, i64) = fixture
-            .database
-            .connection()
-            .query_row(
-                r#"
-                SELECT native_binding_id, last_accepted_public_boundary_sequence
-                FROM conversation WHERE id = ?1
-                "#,
-                [&execution.conversation_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(state.0, proposed_binding_id);
-        assert_eq!(state.1, prepared.camp_message_boundary_sequence);
         std::fs::remove_dir_all(fixture.directory).unwrap();
     }
 
