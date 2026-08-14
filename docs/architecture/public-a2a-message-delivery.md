@@ -3,13 +3,13 @@ document_type: architecture
 architecture: public-a2a-message-delivery
 authority: public-message-and-delivery-boundaries
 status: accepted
-last_updated: 2026-08-13
+last_updated: 2026-08-14
 ---
 
 # Public A2A Message 与 Message Delivery 架构
 
 本文件定义 v0.45 以后 Agent-to-Agent 协作的长期组件边界。字段级输入、错误和状态合同
-分别见 [Camp Message Send v6](../contracts/camp-message-send-v6.md)、
+分别见 [Camp Message Send v7](../contracts/camp-message-send-v7.md)、
 [Current User Attention v3](../contracts/current-user-attention-v3.md)、
 [Message Delivery v2](../contracts/message-delivery-v2.md) 与
 [Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)；决策理由见
@@ -19,7 +19,8 @@ reply reference 见
 [ADR-0163](../adr/0163-explicit-caller-return-and-core-managed-reply-reference.md)，成功 Run 的 zero-send safety net 见
 [ADR-0162](../adr/0162-missing-send-recovery-publication.md)。
 当前 Camp 显示名 inline alias 的 Core 解析与 canonical freeze 见
-[ADR-0182](../adr/0182-core-resolved-current-camp-display-name-inline-addressing-alias.md)。
+[ADR-0182](../adr/0182-core-resolved-current-camp-display-name-inline-addressing-alias.md)，line-leading position
+门禁见 [ADR-0184](../adr/0184-line-leading-display-name-inline-addressing-alias.md)。
 Current User Attention 的身份、内容与原子通知决定见
 [ADR-0165](../adr/0165-core-owned-current-user-message-attention.md)。
 
@@ -74,10 +75,12 @@ Core 在一个提交事务中完成：
 Runtime readiness、busy 和容量不
 属于身份解析失败；它们只在 Delivery 进入调度生命周期后成为 waitCondition。
 
-Display-name alias 只在上述发送事务内存在。Core 要求完整当前显示名后跟 Unicode 空白或正文结束，
-canonical `@agent_N` 优先，最长完整显示名获胜，同长歧义按普通文本 fail closed。代码区、URL、转义、
-标点近似、昵称和 `--to` display name 不参与。命中后立即转换为 canonical Agent ID 与 Structured Member
-Mention；Dispatch Pump、Read Side 和 Renderer 都不得重新解析投影正文。
+Display-name alias 只在上述发送事务内存在。Core 只在 logical line 的首个非空白 token 解析它；推荐的
+trailing handoff 是专门的最后一个非空行，该行仍须以 alias 开头。普通 mid-line prose 即使位于最后一行
+也不寻址。完整显示名后须为 Unicode 空白或正文结束；canonical `@agent_N` 位置语义不变并保持优先，
+最长完整显示名获胜，同长歧义按普通文本 fail closed。代码区、URL、转义、标点近似、昵称和 `--to`
+display name 不参与。命中后立即转换为 canonical Agent ID 与 Structured Member Mention；Dispatch Pump、
+Read Side 和 Renderer 都不得重新解析投影正文。
 
 ## 3. Delivery 生命周期与唯一 Dispatch Pump
 

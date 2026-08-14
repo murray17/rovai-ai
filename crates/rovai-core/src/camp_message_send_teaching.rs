@@ -1,4 +1,4 @@
-pub const CAMP_MESSAGE_SEND_SUMMARY: &str = "Publish one public Camp message. Ordinary Camp messages are already visible to the user. Use --to agent_N or canonical inline @agent_N for stable Agent routing; an exact active Camp member @display-name followed by whitespace or end-of-body is also accepted. Use --to-user only for a new unresolved user decision, answer, or action, or an explicitly requested important-result notification. Omit addressing for a public-only update. Always inspect effectiveRecipients; [] means no Agent was routed.";
+pub const CAMP_MESSAGE_SEND_SUMMARY: &str = "Publish one public Camp message. Ordinary Camp messages are already visible to the user. Use --to agent_N or canonical inline @agent_N for stable Agent routing. An exact active Camp member @display-name alias is accepted only as the first non-whitespace token on a line and must be followed by whitespace or end-of-body; put trailing routing on a dedicated final line. Use --to-user only for a new unresolved user decision, answer, or action, or an explicitly requested important-result notification. Omit addressing for a public-only update. Always inspect effectiveRecipients; [] means no Agent was routed.";
 
 pub const CAMP_MESSAGE_SEND_TO_USER_SCHEMA_DESCRIPTION: &str = "Escalate this public CampMessage to current-user attention by creating a Current User Mention and Inbox notification. Ordinary Camp messages are already visible to the user. Set true only when this message creates a new unresolved user decision, answer, or action, or fulfills an explicit request for notification of an important asynchronous result. Do not inherit it from prior messages and do not use it for internal Agent routing, review handoffs, routine progress, acknowledgements, or ordinary final replies. Creates no Agent Delivery and does not represent user approval.";
 
@@ -37,6 +37,8 @@ mod tests {
     #[test]
     fn agent_routing_teaching_exposes_exact_display_name_alias_and_postcondition() {
         assert!(CAMP_MESSAGE_SEND_SUMMARY.contains("exact active Camp member @display-name"));
+        assert!(CAMP_MESSAGE_SEND_SUMMARY.contains("first non-whitespace token on a line"));
+        assert!(CAMP_MESSAGE_SEND_SUMMARY.contains("dedicated final line"));
         assert!(CAMP_MESSAGE_SEND_SUMMARY.contains("whitespace or end-of-body"));
         assert!(CAMP_MESSAGE_SEND_SUMMARY.contains("inspect effectiveRecipients"));
         assert!(CAMP_MESSAGE_SEND_SUMMARY.contains("[] means no Agent was routed"));

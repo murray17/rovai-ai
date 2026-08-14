@@ -1,16 +1,16 @@
 ---
 document_type: adr
-id: ADR-0184
+id: ADR-0185
 title: Durable Composer Reply Intent and Explicit Recipient Resolution
 status: accepted
 date: 2026-08-14
 decision_scope: cross-version
-source_version: v0.76
+source_version: v0.77
 supersedes: []
 superseded_by: null
 ---
 
-# ADR-0184: Durable Composer Reply Intent and Explicit Recipient Resolution
+# ADR-0185: Durable Composer Reply Intent and Explicit Recipient Resolution
 
 ## Context
 
@@ -66,7 +66,7 @@ Draft 持久化范围；两者关于 exact revision、Structured Content、附�
 
 ## References
 
-- [v0.76 版本目标](../versions/v0.76/README.md)
+- [v0.77 版本目标](../versions/v0.77/README.md)
 - [Camp Composer Draft v1](../contracts/camp-composer-draft-v1.md)
 - [ADR-0080: Durable Camp Composer Draft](0080-durable-camp-composer-draft-and-atomic-attachment-consumption.md)
 - [ADR-0128: Structured Draft-Only User Message Submission](0128-structured-draft-only-user-message-submission.md)

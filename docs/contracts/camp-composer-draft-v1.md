@@ -156,7 +156,7 @@ Delivery。Renderer 可以用当前 Draft projection 提前禁用发送并聚焦
 
 ## References
 
-- [ADR-0184](../adr/0184-durable-composer-reply-intent-and-explicit-recipient-resolution.md)
+- [ADR-0185](../adr/0185-durable-composer-reply-intent-and-explicit-recipient-resolution.md)
 - [ADR-0080](../adr/0080-durable-camp-composer-draft-and-atomic-attachment-consumption.md)
 - [ADR-0128](../adr/0128-structured-draft-only-user-message-submission.md)
 - [Camp Attachment v1](camp-attachment-v1.md)

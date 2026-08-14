@@ -12,7 +12,7 @@ Camp Composer Draft 是用户下一条 Camp 消息的唯一持久编辑真源。
 [Camp Composer Draft v1](../contracts/camp-composer-draft-v1.md)；长期取舍见
 [ADR-0080](../adr/0080-durable-camp-composer-draft-and-atomic-attachment-consumption.md)、
 [ADR-0128](../adr/0128-structured-draft-only-user-message-submission.md)与
-[ADR-0184](../adr/0184-durable-composer-reply-intent-and-explicit-recipient-resolution.md)。
+[ADR-0185](../adr/0185-durable-composer-reply-intent-and-explicit-recipient-resolution.md)。
 
 ## Component authority
 

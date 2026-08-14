@@ -3,7 +3,10 @@ import { legacyUserDataPath } from './user-data-path'
 
 describe('legacyUserDataPath', () => {
   it('keeps the existing Rovai-ai data directory after the display name changes to Rovai AI', () => {
-    const existing = new Set(['/application-support/Rovai-ai'])
+    const existing = new Set([
+      '/application-support/Rovai AI',
+      '/application-support/Rovai-ai'
+    ])
     expect(
       legacyUserDataPath(
         '/application-support',

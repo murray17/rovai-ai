@@ -43,7 +43,7 @@ pub struct Database {
     path: PathBuf,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.76";
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.77";
 const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 38;
 const V083_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.73";
 const V083_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 37;
@@ -9067,7 +9067,7 @@ impl Database {
               AND json_type(payload_json, '$.replyToCampMessageId') IS NOT NULL;
 
             UPDATE rovai_data_contract
-            SET contract_version = 'v0.76', projection_schema_version = 38,
+            SET contract_version = 'v0.77', projection_schema_version = 38,
                 reset_reason = NULL, updated_at = datetime('now')
             WHERE singleton = 1;
 
@@ -16061,7 +16061,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.76".into(), 38));
+        assert_eq!(contract, ("v0.77".into(), 38));
         assert!(database.schema_migration_applied(83).unwrap());
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");

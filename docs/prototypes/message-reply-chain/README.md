@@ -1,13 +1,13 @@
 ---
 document_type: ui-prototype-readme
 status: accepted-design-input
-target_version: v0.76
+target_version: v0.77
 last_updated: 2026-08-14
 ---
 
 # Camp 消息回复与显式接收者交互稿
 
-这是 v0.76 “消息回复链与安全接收者选择”的交互式 HTML 设计稿，用于在生产实现前评审
+这是 v0.77 “消息回复链与安全接收者选择”的交互式 HTML 设计稿，用于在生产实现前评审
 引用关系、结构化 Mention、Default Lead 与失效作者之间的交互边界。它不替代 Core、Contract、
 ADR 或生产 Renderer。
 

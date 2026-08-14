@@ -416,7 +416,7 @@ impl TeamToolService {
                     "type": "string",
                     "minLength": 1,
                     "maxLength": CAMP_MESSAGE_SEND_MAX_BODY_BYTES,
-                    "description": "Exact public message body. Canonical inline @agent_N tokens and exact active Camp member @display-name aliases followed by whitespace or end-of-body participate in addressing outside code, URLs, and escaped literal regions."
+                    "description": "Exact public message body. Canonical inline @agent_N tokens retain their existing positions. An exact active Camp member @display-name alias participates only as the first non-whitespace token on a line and must be followed by whitespace or end-of-body; put trailing routing on a dedicated final line. Code, URLs, and escaped literal regions are excluded."
                 },
                 "to": {
                     "type": "array",
@@ -2080,6 +2080,8 @@ mod tests {
         let to_description = schema["properties"]["to"]["description"].as_str().unwrap();
 
         assert!(body_description.contains("exact active Camp member @display-name"));
+        assert!(body_description.contains("first non-whitespace token on a line"));
+        assert!(body_description.contains("dedicated final line"));
         assert!(body_description.contains("whitespace or end-of-body"));
         assert!(to_description.contains("canonical Agent ID"));
         assert!(to_description.contains("Display names are not accepted here"));
@@ -2267,6 +2269,52 @@ mod tests {
             ])
         );
         assert_eq!(delivery_count, 1);
+    }
+
+    #[test]
+    fn public_send_keeps_mid_line_display_name_alias_as_public_text() {
+        let mut fixture = Fixture::new();
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET display_name = 'Alice' WHERE id = 'agent_2'",
+                [],
+            )
+            .unwrap();
+        let body = "让 Bob 分析一下 @Alice 提出的迁移方案";
+        let invocation =
+            fixture.public_send_invocation("public-send-mid-line-display-name", body, &[]);
+
+        let sent = TeamToolService::default()
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+
+        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
+        assert_eq!(sent.result.payload["effectiveRecipients"], json!([]));
+        assert_eq!(sent.result.payload["deliveryIds"], json!([]));
+        let message_id = sent.result.payload["messageId"].as_str().unwrap();
+        let (stored_body, content_json, delivery_count): (String, String, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT message.body, message.structured_content_json,
+                       (SELECT COUNT(*) FROM message_delivery
+                        WHERE message_id = message.id)
+                FROM camp_message AS message
+                WHERE message.id = ?1
+                "#,
+                [message_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(stored_body, body);
+        assert_eq!(
+            serde_json::from_str::<Value>(&content_json).unwrap(),
+            json!([{"kind": "text", "text": body}])
+        );
+        assert_eq!(delivery_count, 0);
     }
 
     #[test]

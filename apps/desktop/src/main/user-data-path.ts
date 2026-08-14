@@ -12,11 +12,15 @@ export function legacyUserDataPath(
   if (hasExplicitUserDataPath) return null
 
   const currentPath = join(appDataPath, currentAppName)
-  if (pathExists(currentPath)) return null
+  const currentNameIsLegacy = LEGACY_APP_NAMES.some(
+    (legacyAppName) => legacyAppName === currentAppName
+  )
+  if (currentNameIsLegacy && pathExists(currentPath)) return null
 
   for (const legacyAppName of LEGACY_APP_NAMES) {
     const legacyPath = join(appDataPath, legacyAppName)
     if (currentPath !== legacyPath && pathExists(legacyPath)) return legacyPath
   }
+  if (pathExists(currentPath)) return null
   return null
 }

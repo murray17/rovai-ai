@@ -48,7 +48,7 @@ Related: Camp content、Evidence 与 Renderer 可分别回到其 primary 主题�
 | [ADR-0145](0145-core-owned-pending-camp-draft-activation.md) | Core-Owned Pending Camp Draft Activation |
 | [ADR-0169](0169-core-owned-directory-attachment-snapshots.md) | Core-Owned Directory Attachment Snapshots |
 | [ADR-0173](0173-leading-structured-mentions-excluded-from-generated-camp-names.md) | Leading Structured Mentions Excluded from Generated Camp Names |
-| [ADR-0184](0184-durable-composer-reply-intent-and-explicit-recipient-resolution.md) | Durable Composer Reply Intent and Explicit Recipient Resolution |
+| [ADR-0185](0185-durable-composer-reply-intent-and-explicit-recipient-resolution.md) | Durable Composer Reply Intent and Explicit Recipient Resolution |
 <!-- adr-current-primary:end -->
 
 Related: Session bootstrap、public delivery 与 product surface 仍从各自 primary 主题进入。
@@ -76,7 +76,7 @@ Related: ADR-0100 的 Session identity delivery 位于 session-context-bootstrap
 
 - **何时阅读：** 修改 A2A、Task、Message、Delivery、协作责任或公共输出时阅读。
 - **当前架构：** [Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
-- **当前合同：** [Durable Task v3](../contracts/durable-task-v3.md)、[Camp Message Send v6](../contracts/camp-message-send-v6.md)、[Current User Attention v3](../contracts/current-user-attention-v3.md)、[Message Delivery v2](../contracts/message-delivery-v2.md)、[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)
+- **当前合同：** [Durable Task v3](../contracts/durable-task-v3.md)、[Camp Message Send v7](../contracts/camp-message-send-v7.md)、[Current User Attention v3](../contracts/current-user-attention-v3.md)、[Message Delivery v2](../contracts/message-delivery-v2.md)、[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)
 
 <!-- adr-current-primary:begin topic=collaboration-task-message -->
 | ADR | Decision |
@@ -98,6 +98,7 @@ Related: ADR-0100 的 Session identity delivery 位于 session-context-bootstrap
 | [ADR-0165](0165-core-owned-current-user-message-attention.md) | Core-Owned Current-User Message Attention |
 | [ADR-0170](0170-current-run-committed-self-write-exact-read.md) | Current-Run Committed Self-Write Exact Read |
 | [ADR-0182](0182-core-resolved-current-camp-display-name-inline-addressing-alias.md) | Core-Resolved Current-Camp Display-Name Inline Addressing Alias |
+| [ADR-0184](0184-line-leading-display-name-inline-addressing-alias.md) | Line-Leading Display-Name Inline Addressing Alias |
 <!-- adr-current-primary:end -->
 
 Related: Context selection、Self/Peer identity 与 Runtime admission 从相应 primary 主题进入。

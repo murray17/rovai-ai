@@ -4,7 +4,7 @@ authority: directional-input
 status: accepted
 implementation_status: prototype
 target_surface: camp-message-reply-chain
-target_version: v0.76
+target_version: v0.77
 design_direction: porcelain-day-steel-night
 last_updated: 2026-08-14
 ---
@@ -99,7 +99,7 @@ Renderer 只是把用户点击转换为可见、可删除且由 Draft 持久化�
 - Shared contracts：`CampComposerDraftView` 与 Draft mutation/send 参数；
 - Core：Draft schema/migration、Camp Attachment/Draft store、user send validation 与 Read Model；
 - UI 合同：`conversation-workspace.md`、`structured-mentions.md`；
-- 长期边界：[ADR-0184](../../adr/0184-durable-composer-reply-intent-and-explicit-recipient-resolution.md)
+- 长期边界：[ADR-0185](../../adr/0185-durable-composer-reply-intent-and-explicit-recipient-resolution.md)
   已冻结 durable reply intent 与显式换人；ADR-0128 的 Draft-only user send、ADR-0163 的
   reply/recipient orthogonality 继续有效，原型本身不创造架构权威。
 

@@ -15,7 +15,7 @@ last_updated: 2026-08-14
 >
 > 前置版本：[v0.74 Runtime 对齐的协作 Skill 与双轴代码评审](../v0.74/README.md)
 >
-> 后续版本：[v0.76 持久消息回复链与显式接收者修复](../v0.76/README.md)
+> 后续版本：[v0.76 显示名 Inline Alias 行首寻址门禁](../v0.76/README.md)
 
 ## 版本目标
 
