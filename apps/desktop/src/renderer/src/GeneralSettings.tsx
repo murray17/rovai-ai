@@ -3,7 +3,6 @@ import * as Dialog from '@radix-ui/react-dialog'
 import type {
   AgentProfile,
   GeneralPreferencesSnapshot,
-  LoginItemSnapshot,
   NewConversationDefaults,
   StartupLocationMode,
   WindowResetCapability
@@ -11,21 +10,6 @@ import type {
 import { MemberAvatar } from './MemberAvatar'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { resolveNewConversationDefaults } from './new-conversation-preferences'
-
-export function loginItemStatusMessage(snapshot: LoginItemSnapshot | null): string {
-  if (!snapshot) return '正在读取 macOS 登录项状态…'
-  if (snapshot.status === 'development') return '仅在已安装的 Rovai-ai 应用中可配置'
-  if (snapshot.status === 'requires-approval') return '等待系统授权，当前尚未生效。'
-  if (snapshot.status === 'not-found') return '未找到 Rovai-ai 登录项服务，请重新安装或修复应用。'
-  if (snapshot.status === 'enabled') return '已开启。'
-  return '登录 macOS 后自动打开 Rovai-ai。'
-}
-
-export function loginItemCanToggle(snapshot: LoginItemSnapshot | null): boolean {
-  return snapshot !== null
-    && snapshot.status !== 'development'
-    && snapshot.status !== 'not-found'
-}
 
 export const ONE_CLICK_ENTRY_DESCRIPTIONS = [
   '左上角“新对话”',
@@ -61,9 +45,6 @@ export function GeneralSettings({
   const [defaultsError, setDefaultsError] = useState<string | null>(null)
   const [oneClickBusy, setOneClickBusy] = useState(false)
   const [oneClickConfirmOpen, setOneClickConfirmOpen] = useState(false)
-  const [loginItem, setLoginItem] = useState<LoginItemSnapshot | null>(null)
-  const [loginBusy, setLoginBusy] = useState(false)
-  const [loginError, setLoginError] = useState<string | null>(null)
   const [resetCapability, setResetCapability] = useState<WindowResetCapability | null>(null)
   const [resetBusy, setResetBusy] = useState(false)
   const [resetError, setResetError] = useState<string | null>(null)
@@ -83,15 +64,6 @@ export function GeneralSettings({
     }
   }, [acceptPreferences])
 
-  const loadLoginItem = useCallback(async (): Promise<void> => {
-    setLoginError(null)
-    try {
-      setLoginItem(await window.rovai.loginItem.get())
-    } catch (error) {
-      setLoginError(errorMessage(error))
-    }
-  }, [])
-
   const loadResetCapability = useCallback(async (): Promise<void> => {
     try {
       setResetCapability(await window.rovai.windowControls.getResetCapability())
@@ -102,8 +74,8 @@ export function GeneralSettings({
   }, [])
 
   useEffect(() => {
-    void Promise.all([loadPreferences(), loadLoginItem(), loadResetCapability()])
-  }, [loadLoginItem, loadPreferences, loadResetCapability])
+    void Promise.all([loadPreferences(), loadResetCapability()])
+  }, [loadPreferences, loadResetCapability])
 
   useEffect(() => {
     if (!initialPreferences) return
@@ -117,34 +89,22 @@ export function GeneralSettings({
   }, [defaultsDirty, preferences])
 
   useEffect(() => {
-    const refreshShellState = (): void => {
-      void Promise.all([loadLoginItem(), loadResetCapability()])
+    const refreshWindowState = (): void => {
+      void loadResetCapability()
     }
-    window.addEventListener('focus', refreshShellState)
+    window.addEventListener('focus', refreshWindowState)
     window.addEventListener('resize', loadResetCapability)
     return () => {
-      window.removeEventListener('focus', refreshShellState)
+      window.removeEventListener('focus', refreshWindowState)
       window.removeEventListener('resize', loadResetCapability)
     }
-  }, [loadLoginItem, loadResetCapability])
+  }, [loadResetCapability])
 
   useEffect(() => {
     if (!feedback) return undefined
     const timer = window.setTimeout(() => setFeedback(null), 3_200)
     return () => window.clearTimeout(timer)
   }, [feedback])
-
-  const setLoginEnabled = async (enabled: boolean): Promise<void> => {
-    setLoginBusy(true)
-    setLoginError(null)
-    try {
-      setLoginItem(await window.rovai.loginItem.setEnabled(enabled))
-    } catch (error) {
-      setLoginError(errorMessage(error))
-    } finally {
-      setLoginBusy(false)
-    }
-  }
 
   const setStartupLocationMode = async (mode: StartupLocationMode): Promise<void> => {
     if (!preferences || mode === preferences.startupLocationMode || preferenceBusy) return
@@ -232,15 +192,6 @@ export function GeneralSettings({
     }
   }
 
-  const openSystemSettings = async (): Promise<void> => {
-    setLoginError(null)
-    try {
-      await window.rovai.loginItem.openSystemSettings()
-    } catch (error) {
-      setLoginError(errorMessage(error))
-    }
-  }
-
   const resetWindow = async (): Promise<void> => {
     setResetBusy(true)
     setResetError(null)
@@ -259,9 +210,6 @@ export function GeneralSettings({
     }
   }
 
-  const loginMessage = loginBusy
-    ? '正在保存并读取 macOS 系统状态…'
-    : loginItemStatusMessage(loginItem)
   const startupMode = preferences?.startupLocationMode ?? 'last_location'
   const resetBlockedByFullscreen = resetCapability?.reason === 'fullscreen'
   const profileById = new Map(agents.map((agent) => [agent.agentId, agent]))
@@ -292,35 +240,11 @@ export function GeneralSettings({
       <SettingsPageHeader
         eyebrow="Settings / General"
         title="通用"
-        description="设置 Rovai-ai 的启动方式、新对话与窗口行为。"
+        description="设置 Rovai-ai 的启动位置、新对话与窗口行为。"
       />
 
       <section className="section-block general-settings-section" aria-labelledby="general-startup-heading">
         <div className="section-heading"><div><h2 id="general-startup-heading">启动</h2></div></div>
-        <div className="general-setting-row">
-          <label className="notification-switch general-login-switch">
-            <span>
-              <strong>登录时启动 Rovai-ai</strong>
-              <small>登录 macOS 后自动打开 Rovai-ai。</small>
-            </span>
-            <input
-              type="checkbox"
-              role="switch"
-              aria-label="登录时启动 Rovai-ai"
-              checked={loginItem?.checked ?? false}
-              disabled={loginBusy || !loginItemCanToggle(loginItem)}
-              onChange={(event) => void setLoginEnabled(event.target.checked)}
-            />
-          </label>
-          <div className={`general-inline-status ${loginError ? 'is-error' : ''}`} role={loginError ? 'alert' : 'status'}>
-            <span>{loginError ?? loginMessage}</span>
-            {loginError && <button className="quiet-button compact" type="button" onClick={() => void loadLoginItem()}>重试</button>}
-            {loginItem?.status === 'requires-approval' && !loginError && (
-              <button className="quiet-button compact" type="button" onClick={() => void openSystemSettings()}>打开系统设置</button>
-            )}
-          </div>
-        </div>
-
         <fieldset className="startup-location-options" disabled={!preferences || preferenceBusy}>
           <legend>启动后打开</legend>
           <label className="startup-location-option">

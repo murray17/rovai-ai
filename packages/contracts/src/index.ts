@@ -1364,19 +1364,6 @@ export interface DesktopStartupSnapshot {
   restorableLocationStatus: 'valid' | 'missing' | 'invalid'
 }
 
-export type LoginItemStatus =
-  | 'development'
-  | 'enabled'
-  | 'not-registered'
-  | 'requires-approval'
-  | 'not-found'
-
-export interface LoginItemSnapshot {
-  status: LoginItemStatus
-  checked: boolean
-  effective: boolean
-}
-
 export interface WindowResetCapability {
   canReset: boolean
   reason: 'fullscreen' | null
@@ -1399,12 +1386,6 @@ export interface GeneralPreferencesApi {
   setNewConversationDefaults(defaults: NewConversationDefaults): Promise<GeneralPreferencesSnapshot>
   setOneClickNewConversationEnabled(enabled: boolean): Promise<GeneralPreferencesSnapshot>
   invalidateNewConversationDefaults(): Promise<GeneralPreferencesSnapshot>
-}
-
-export interface LoginItemApi {
-  get(): Promise<LoginItemSnapshot>
-  setEnabled(enabled: boolean): Promise<LoginItemSnapshot>
-  openSystemSettings(): Promise<void>
 }
 
 export interface WindowControlsApi {
@@ -1997,7 +1978,6 @@ export interface RovaiApi {
   appearance: AppearanceApi
   desktopSession: DesktopSessionApi
   generalPreferences: GeneralPreferencesApi
-  loginItem: LoginItemApi
   windowControls: WindowControlsApi
   navigationPreferences: NavigationPreferencesApi
   memberAvatars: MemberAvatarsApi

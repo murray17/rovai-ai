@@ -43,7 +43,6 @@ import {
   isStartupLocationMode
 } from './general-preferences'
 import { RestorableLocationStore, parseRestorableLocation } from './restorable-location'
-import { LoginItemService } from './login-item'
 import { DesktopSessionRegistry } from './desktop-session'
 import { parseClipboardWriteRequest } from './clipboard-write'
 
@@ -166,18 +165,18 @@ const legacyDataPath = legacyUserDataPath(
 )
 if (legacyDataPath) app.setPath('userData', legacyDataPath)
 const memberAvatars = new MemberAvatarAssetService(app.getPath('userData'))
-const loginItems = new LoginItemService({
-  platform: process.platform,
-  isPackaged: () => app.isPackaged,
-  getStatus: () => app.getLoginItemSettings({ type: 'mainAppService' }).status,
-  setEnabled: (enabled) => app.setLoginItemSettings({
-    type: 'mainAppService',
-    openAtLogin: enabled
-  }),
-  openSystemSettings: () => shell.openExternal(
-    'x-apple.systempreferences:com.apple.LoginItems-Settings.extension'
-  )
-})
+
+function removeRetiredLoginItemRegistration(): void {
+  if (process.platform !== 'darwin' || !app.isPackaged) return
+  try {
+    app.setLoginItemSettings({
+      type: 'mainAppService',
+      openAtLogin: false
+    })
+  } catch (error) {
+    console.warn('[rovai] Retired macOS login item cleanup failed; continuing.', error)
+  }
+}
 
 function appearanceSnapshot(): AppearanceSnapshot {
   return {
@@ -304,6 +303,7 @@ function createWindow(): void {
 }
 
 if (primaryInstance) void app.whenReady().then(async () => {
+  removeRetiredLoginItemRegistration()
   await deleteRetiredManagedDirectory(app.getPath('userData'))
   appearanceFilePath = join(app.getPath('userData'), 'appearance.json')
   const [
@@ -426,15 +426,6 @@ ipcMain.handle('rovai:general-preferences-set-one-click-new-conversation', (_eve
 ipcMain.handle('rovai:general-preferences-invalidate-new-conversation-defaults', () => {
   return requireGeneralPreferences().invalidateNewConversationDefaults()
 })
-
-ipcMain.handle('rovai:login-item-get', () => loginItems.get())
-
-ipcMain.handle('rovai:login-item-set-enabled', (_event, enabled: unknown) => {
-  if (typeof enabled !== 'boolean') throw new Error('Unsupported login item state')
-  return loginItems.setEnabled(enabled)
-})
-
-ipcMain.handle('rovai:login-item-open-system-settings', () => loginItems.openSystemSettings())
 
 ipcMain.handle('rovai:window-reset-capability', (event) => {
   const window = requireMainWindow(event.sender)

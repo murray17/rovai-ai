@@ -76,7 +76,7 @@ describe('general preferences', () => {
       newConversationDefaults: null,
       newConversationDefaultsRequireConfirmation: false,
       oneClickNewConversationEnabled: false,
-      loginItemEnabled: true
+      unexpectedField: true
     })).toBeNull()
     expect(parseGeneralPreferences({
       schemaVersion: 2,

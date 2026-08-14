@@ -30,9 +30,9 @@ scroll and focus.
 
 ## 通用
 
-General owns stable startup location, macOS login-item state and window reset. Stable choices commit
-immediately through the narrow Desktop bridge. The UI distinguishes requested preference from OS
-effective state, does not write these settings to Core/SQLite and does not add hidden/background
+General owns stable startup location and window reset. Stable choices commit immediately through the
+narrow Desktop bridge. The App does not expose or enable a macOS login item; packaged macOS startup
+only makes a best-effort removal of any retired registration. General does not add hidden/background
 launch, default Project, recovery or update policy.
 
 ## 外观与通知

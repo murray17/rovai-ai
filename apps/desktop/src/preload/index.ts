@@ -65,17 +65,6 @@ const api: RovaiApi = {
       return ipcRenderer.invoke('rovai:general-preferences-invalidate-new-conversation-defaults')
     }
   },
-  loginItem: {
-    get() {
-      return ipcRenderer.invoke('rovai:login-item-get')
-    },
-    setEnabled(enabled: boolean) {
-      return ipcRenderer.invoke('rovai:login-item-set-enabled', enabled)
-    },
-    openSystemSettings() {
-      return ipcRenderer.invoke('rovai:login-item-open-system-settings')
-    }
-  },
   windowControls: {
     getResetCapability() {
       return ipcRenderer.invoke('rovai:window-reset-capability')

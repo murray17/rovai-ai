@@ -2584,12 +2584,9 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 .general-settings-section:last-of-type { border-bottom: 0; }
 .general-settings-section .section-heading { margin-bottom: 8px; }
 .general-settings-section .section-heading h2 { margin: 0; font-size: 17px; }
-.general-setting-row { display: grid; gap: 2px; }
-.general-login-switch { padding-right: 2px; padding-left: 2px; }
-.general-login-switch input:disabled { cursor: default; opacity: .64; }
 .general-inline-status { display: flex; min-height: 28px; align-items: center; gap: 8px; margin: 4px 0 0; color: var(--muted); font-size: 10.5px; line-height: 1.5; }
 .general-inline-status.is-error { padding: 8px 10px; border-left: 3px solid var(--danger); color: var(--danger); background: var(--danger-soft); }
-.startup-location-options { display: grid; gap: 0; margin: 24px 0 0; padding: 0; border: 0; }
+.startup-location-options { display: grid; gap: 0; margin: 0; padding: 0; border: 0; }
 .startup-location-options legend { margin-bottom: 8px; color: var(--ink); font-size: 12px; font-weight: 680; }
 .startup-location-option { display: grid; min-height: 58px; grid-template-columns: 18px minmax(0, 1fr); gap: 10px; align-items: start; padding: 10px 2px; border-bottom: 1px solid var(--line); cursor: pointer; }
 .startup-location-option:has(input:checked) { padding-right: 10px; padding-left: 10px; color: var(--brand-ink); background: color-mix(in srgb, var(--brand-soft) 68%, var(--surface-raised)); box-shadow: inset 3px 0 0 var(--brand); }
