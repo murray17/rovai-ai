@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: steel-night
 mode: dark
-last_updated: 2026-08-13
+last_updated: 2026-08-14
 ---
 
 # Steel Night
@@ -43,6 +43,14 @@ Dark. `color-scheme: dark`.
 | `--surface-selected` | `#222c33` |
 | `--surface-hover` | `#1d252b` |
 | `--surface-sunken` | `#10161a` |
+| `--workspace-surface-subtle` | `#11171b` |
+| `--workspace-surface-raised` | `#1c2328` |
+| `--workspace-surface-hover` | `#1d252a` |
+| `--workspace-surface-selected` | `#22303a` |
+| `--workspace-line` / `--workspace-line-strong` | `#2b353b` / `#3d4950` |
+| `--workspace-steel` / `--workspace-steel-ink` | `#8fadc0` / `#b8d0df` |
+| `--workspace-attention-soft` | `#302617` |
+| `--workspace-faint` | `#8998a1` |
 | `--conversation-surface` | `#181d21` |
 | `--inspector-surface` | `#171d21` |
 | `--conversation-inspector-line` | `#53616b` |

@@ -9,6 +9,16 @@ const requiredTokens = [
   '--surface-subtle',
   '--surface-muted',
   '--surface-selected',
+  '--workspace-surface-subtle',
+  '--workspace-surface-raised',
+  '--workspace-surface-hover',
+  '--workspace-surface-selected',
+  '--workspace-line',
+  '--workspace-line-strong',
+  '--workspace-steel',
+  '--workspace-steel-ink',
+  '--workspace-attention-soft',
+  '--workspace-faint',
   '--conversation-surface',
   '--inspector-surface',
   '--conversation-inspector-line',
@@ -144,6 +154,11 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(day['--home-surface']).toBe('#ffffff')
     expect(day['--surface']).toBe('#fbfbfa')
     expect(day['--surface-subtle']).toBe('#f0f2f4')
+    expect(day['--workspace-surface-subtle']).toBe('#f4f5f4')
+    expect(day['--workspace-surface-raised']).toBe('#ffffff')
+    expect(day['--workspace-surface-selected']).toBe('#e4eaee')
+    expect(day['--workspace-line']).toBe('#d5dadd')
+    expect(day['--workspace-steel']).toBe('#476b85')
     expect(day['--line']).toBe('#dfe4e8')
     expect(day['--brand']).toBe('#526f88')
     expect(day['--brand-soft']).toBe('#e9eef3')
@@ -168,6 +183,11 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(night['--inspector-surface']).toBe('#171d21')
     expect(night['--surface']).toBe('#151a1e')
     expect(night['--surface-raised']).toBe('#1b2227')
+    expect(night['--workspace-surface-subtle']).toBe('#11171b')
+    expect(night['--workspace-surface-raised']).toBe('#1c2328')
+    expect(night['--workspace-surface-selected']).toBe('#22303a')
+    expect(night['--workspace-line']).toBe('#2b353b')
+    expect(night['--workspace-steel']).toBe('#8fadc0')
     expect(night['--brand']).toBe('#7897ae')
     expect(night['--brand-soft']).toBe('#22303a')
     expect(night['--mention-ink']).toBe('#9cc7e2')
@@ -197,12 +217,27 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
 .content.memory-content { grid-row: 1 / -1; }`)
     expect(css).not.toContain('.window-drag-strip-members')
     expect(css).not.toContain('.window-drag-strip-memory')
-    expect(css).toMatch(/\.memory-library\s*\{[^}]*padding: 30px 28px 24px/)
-    expect(css).toMatch(/\.memory-library-header\s*\{[^}]*align-items: flex-end[^}]*padding: 0 0 19px/)
+    expect(css).toMatch(/\.memory-library\s*\{[^}]*padding: 34px 28px 24px/)
+    expect(css).toMatch(/\.memory-library-header\s*\{[^}]*align-items: flex-end[^}]*padding: 0 0 17px[^}]*border-bottom: 0/)
+    expect(css).toMatch(/\.content\.memory-content\s*\{[^}]*border-top: 0[^}]*background: var\(--surface\)/)
+    expect(css).toContain('.memory-library-header .eyebrow')
     expect(css).toContain('.memory-page-notices')
     expect(css).not.toContain('.memory-page-kicker')
     expect(css).toMatch(/\.member-detail-scroll\s*\{[^}]*padding: 30px 26px 48px/)
     expect(css).toMatch(/\.member-detail-header\s*\{[^}]*-webkit-app-region: drag/)
+  })
+
+  it('uses solid, rule-free headers for the approved Memory, Appearance, and Reminder pages', () => {
+    expect(css).toMatch(/\.settings-content \.settings-panel:is\([^}]+\)\s*\{[^}]*border-top: 0[^}]*background: var\(--surface\)/)
+    expect(css).toMatch(/\.settings-panel:is\([^}]+\) > \.settings-page-heading\s*\{[^}]*border-bottom: 0/)
+    expect(css).toMatch(/\.memory-scope-tabs\s*\{[^}]*border: 0[^}]*background: var\(--workspace-surface-subtle\)/)
+    expect(css).toMatch(/\.memory-catalog\s*\{[^}]*background: var\(--workspace-surface-subtle\)/)
+    expect(css).toMatch(/\.memory-detail\s*\{[^}]*background: var\(--workspace-surface-subtle\)/)
+    expect(css).toMatch(/\.memory-search\s*\{[^}]*min-height: 38px[^}]*grid-template-columns: 18px minmax\(0, 1fr\)[^}]*border: 1px solid var\(--workspace-line\)[^}]*border-radius: 9px/)
+    expect(css).toMatch(/\.settings-panel-notifications \.notification-master-panel\s*\{[^}]*background: var\(--workspace-surface-subtle\)/)
+    expect(css).toMatch(/\.settings-panel-notifications \.notification-scenario\s*\{[^}]*background: var\(--workspace-surface-subtle\)/)
+    expect(css).toMatch(/\.settings-panel-notifications \.notification-scenario \.notification-switch\s*\{[^}]*background: var\(--workspace-surface-raised\)/)
+    expect(css).toMatch(/\.settings-panel-notifications \.notification-scenario-heading\s*\{[^}]*border-bottom: 0/)
   })
 
   it('keeps user and Agent narrative on one open surface and widens only work artifacts at 2K', () => {
@@ -284,18 +319,18 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
   })
 
   it('uses readable identity-colored Skill rows and a bounded MCP workbench', () => {
-    expect(css).toMatch(/\.skill-card-grid\s*\{[^}]*max-width:\s*940px[^}]*border-top:/)
+    expect(css).toMatch(/\.skill-card-grid\s*\{[^}]*max-width:\s*none[^}]*gap:\s*5px[^}]*border-radius:\s*12px[^}]*background:\s*var\(--surface-subtle\)/)
     expect(css).toMatch(/\.skill-card\s*\{[^}]*--skill-identity:\s*var\(--identity-1\)/)
-    expect(css).toMatch(/\.skill-library-columns, \.skill-card-primary\s*\{[^}]*grid-template-columns:\s*42px minmax\(0, 1fr\) var\(--skill-actions-width\)/)
-    expect(css).toMatch(/\.skill-library-columns > div, \.skill-card-controls\s*\{[^}]*grid-template-columns:\s*138px 62px 66px/)
-    expect(css).toMatch(/\.skill-card-mark\s*\{[^}]*width:\s*38px[^}]*height:\s*38px[^}]*color:\s*var\(--skill-identity\)/)
-    expect(css).toMatch(/\.skill-card-title > strong\s*\{[^}]*font-size:\s*14px/)
-    expect(css).toMatch(/\.skill-card-heading > p\s*\{[^}]*font-size:\s*12\.5px/)
-    expect(css).toMatch(/\.skill-source\s*\{[^}]*font-size:\s*10\.5px/)
+    expect(css).toMatch(/\.skill-card-primary\s*\{[^}]*grid-template-columns:\s*34px minmax\(0, 1fr\) var\(--skill-actions-width\)/)
+    expect(css).toMatch(/\.skill-card-controls\s*\{[^}]*grid-template-columns:\s*118px 48px 30px/)
+    expect(css).toMatch(/\.skill-card-mark\s*\{[^}]*width:\s*34px[^}]*height:\s*34px[^}]*color:\s*var\(--skill-identity\)/)
+    expect(css).toMatch(/\.skill-card-title > strong\s*\{[^}]*font-size:\s*13px/)
+    expect(css).toMatch(/\.skill-card-heading > p\s*\{[^}]*font-size:\s*11px/)
+    expect(css).toMatch(/\.skill-source\s*\{[^}]*font-size:\s*9px/)
     expect(css).toMatch(/\.skill-toggle\s*\{[^}]*width:\s*34px[^}]*height:\s*20px/)
     expect(css).toMatch(/\.skill-toggle\[aria-checked="true"\]\s*\{[^}]*background:\s*var\(--brand-soft\)/)
     expect(css).toMatch(/\.skill-source\.source-third-party\s*\{[^}]*background:\s*var\(--surface-muted\)/)
-    expect(css).toMatch(/\.skill-card-details\s*\{[^}]*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\)/)
+    expect(css).toMatch(/\.skill-card-details\s*\{[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)[^}]*border:\s*0[^}]*border-radius:\s*8px/)
     expect(css).toMatch(/\.skill-detail-source\s*\{[^}]*grid-column:\s*span 2/)
     expect(css).toMatch(/\.mcp-assignment-workbench\s*\{[^}]*height:\s*clamp\(370px, 46vh, 430px\)[^}]*grid-template-columns:\s*230px minmax\(0, 1fr\)/)
     expect(css).toMatch(/\.mcp-member-roster\s*\{[^}]*min-height:\s*0[^}]*overflow-y:\s*auto[^}]*scrollbar-gutter:\s*stable/)
@@ -308,9 +343,9 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).not.toContain('.mcp-assignment-scope')
     expect(css).not.toContain('.mcp-assignment-option-state')
     expect(css).not.toContain('.mcp-risk-badge')
-    expect(css).toMatch(/\.mcp-server-list\s*\{[^}]*border-top:\s*1px solid var\(--line\)/)
-    expect(css).toMatch(/\.mcp-server-row\s*\{[^}]*--mcp-identity:\s*var\(--identity-1\)[^}]*border-bottom:/)
-    expect(css).toMatch(/\.mcp-server-mark\s*\{[^}]*width:\s*38px[^}]*height:\s*38px/)
+    expect(css).toMatch(/\.mcp-server-list\s*\{[^}]*gap:\s*5px[^}]*padding:\s*7px[^}]*border:\s*0[^}]*border-radius:\s*12px/)
+    expect(css).toMatch(/\.mcp-server-row\s*\{[^}]*--mcp-identity:\s*var\(--identity-1\)[^}]*border:\s*0[^}]*border-radius:\s*9px/)
+    expect(css).toMatch(/\.mcp-server-mark\s*\{[^}]*width:\s*34px[^}]*height:\s*34px/)
   })
 
   it('keeps raw color literals inside the canonical token block', () => {

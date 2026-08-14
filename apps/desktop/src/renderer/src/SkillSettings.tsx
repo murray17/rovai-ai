@@ -29,6 +29,7 @@ export function SkillSettings(): React.JSX.Element {
   const [inspection, setInspection] = useState<SkillImportInspection | null>(null)
   const [confirmation, setConfirmation] = useState<Confirmation>(null)
   const [importTab, setImportTab] = useState<ImportTab>('local')
+  const [importOpen, setImportOpen] = useState(false)
   const [githubInput, setGithubInput] = useState('')
   const [search, setSearch] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
@@ -71,6 +72,10 @@ export function SkillSettings(): React.JSX.Element {
   const visibleSkills = useMemo(
     () => settingsVisibleSkills(skills, search),
     [search, skills]
+  )
+  const configurableSkillCount = useMemo(
+    () => settingsVisibleSkills(skills, '')?.length ?? null,
+    [skills]
   )
 
   const inspectLocalImport = async (): Promise<void> => {
@@ -209,9 +214,22 @@ export function SkillSettings(): React.JSX.Element {
     <div className="skill-settings">
       <SettingsPageHeader
         eyebrow="Settings / Skills"
-        title="Skill 管理"
-        description="管理可配置的 Rovai 内置、固定上游第三方与用户导入 Skill；来源可追溯，投递范围与启停状态各自独立。"
-        aside={<span className="settings-page-note">应用全局配置</span>}
+        title="Skills"
+        description="管理 Rovai AI 和队员可使用的 Skill。"
+        aside={(
+          <>
+            <span className="settings-page-note">应用全局配置</span>
+            <button
+              className="primary-button"
+              type="button"
+              aria-expanded={importOpen}
+              aria-controls="skill-import-panel"
+              onClick={() => setImportOpen((open) => !open)}
+            >
+              添加 Skill
+            </button>
+          </>
+        )}
       />
 
       {error && (
@@ -222,11 +240,17 @@ export function SkillSettings(): React.JSX.Element {
         </div>
       )}
 
-      <section className="skill-section">
-        <div className="skill-section-heading">
-          <div><h2>添加 Skill</h2></div>
-        </div>
-        <div className="skill-import-panel">
+      <div className="skill-section-stack">
+        <section id="skill-import-panel" className="skill-import-panel" hidden={!importOpen}>
+          <div className="skill-import-heading">
+            <div>
+              <h2>添加 Skill</h2>
+              <p>检查来源与内容后，再保存到 Rovai 的本机受管仓库。</p>
+            </div>
+            <button className="skill-import-close" type="button" aria-label="关闭添加 Skill" onClick={() => setImportOpen(false)}>
+              <CloseIcon />
+            </button>
+          </div>
           <div
             className="skill-import-tabs"
             role="tablist"
@@ -251,7 +275,7 @@ export function SkillSettings(): React.JSX.Element {
               <div id="skill-import-local-panel" className="skill-import-body" role="tabpanel" aria-labelledby="skill-import-local-tab">
                 <div className="skill-import-copy">
                   <strong>选择包含 <code>SKILL.md</code> 的完整目录</strong>
-                  <small>导入前会先生成安全预览；确认后复制到 Rovai 本机受管仓库，不再依赖原始文件夹。</small>
+                  <small>先生成安全预览；确认后复制完整内容，不再依赖原始文件夹。</small>
                 </div>
                 <button className="primary-button" type="button" disabled={busy !== null} onClick={() => void inspectLocalImport()}>
                   {busy === 'inspect-local' ? '正在检查…' : '选择文件夹'}
@@ -263,50 +287,50 @@ export function SkillSettings(): React.JSX.Element {
                 <label className="skill-import-github-field">
                   <span>GitHub Skill 链接</span>
                   <input className="skill-text-input" value={githubInput} onChange={(event) => setGithubInput(event.target.value)} placeholder="粘贴仓库或带 ref / 子目录的链接" />
-                  <small>检查时固定仓库、路径和 Revision；确认后保存完整副本。</small>
                 </label>
                 <button className="primary-button" type="button" disabled={busy !== null || githubInput.trim().length === 0} onClick={() => void inspectGithubImport()}>
                   {busy === 'inspect-github' ? '正在检查…' : '检查并导入'}
                 </button>
               </div>
               )}
-        </div>
-      </section>
+        </section>
 
-      <section className="skill-section">
-        <div className="skill-section-heading">
-          <div><h2>已安装 Skills</h2></div>
-          <span className="skill-section-count">{skills?.length ?? '—'} 个</span>
-        </div>
-        <label className="skill-search-row">
-          <SearchIcon />
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索 Skill 名称、简介或来源" aria-label="搜索 Skill" />
-        </label>
-        {skills === null && <div className="skill-empty" aria-live="polite">正在读取 Skill Library…</div>}
-        {skills?.length === 0 && <div className="skill-empty">还没有可用的 Skill。可以导入包含 <code>SKILL.md</code> 的目录。</div>}
-        {skills && skills.length > 0 && visibleSkills?.length === 0 && <div className="skill-empty">没有匹配“{search.trim()}”的 Skill。</div>}
-        {visibleSkills && visibleSkills.length > 0 && (
-          <div className="skill-card-grid">
-            <div className="skill-library-columns" aria-hidden="true">
-              <span />
-              <span>Skill</span>
-              <div><span>投递范围</span><span>状态</span><span>查看</span></div>
+        <section className="skill-section skill-library-section">
+          <div className="skill-section-heading">
+            <div>
+              <h2>已安装 Skills</h2>
+              <p>搜索 Skill，调整运行时生效组，或查看来源详情。</p>
             </div>
-            {visibleSkills.map((skill) => (
-              <SkillCard
-                key={skill.id}
-                skill={skill}
-                groups={groups}
-                operation={skillRowOperations[skill.id] ?? null}
-                busy={busy === `delete-${skill.id}` ? busy : null}
-                onToggleEnabled={() => void setEnabled(skill)}
-                onToggleGroup={(groupKey) => void toggleGroup(skill, groupKey)}
-                onDelete={() => setConfirmation({ kind: 'delete', skill })}
-              />
-            ))}
+            <span className="skill-section-count">{configurableSkillCount ?? '—'} 项</span>
           </div>
-        )}
-      </section>
+          <div className="skill-library-toolbar">
+            <label className="skill-search-row">
+              <SearchIcon />
+              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索 Skill 名称、简介或来源" aria-label="搜索 Skill" />
+            </label>
+            <div className="skill-library-legend" aria-hidden="true"><span>投递范围</span><span>状态</span><span>查看</span></div>
+          </div>
+          {skills === null && <div className="skill-empty" aria-live="polite">正在读取 Skill Library…</div>}
+          {skills?.length === 0 && <div className="skill-empty">还没有可用的 Skill。可以导入包含 <code>SKILL.md</code> 的目录。</div>}
+          {skills && skills.length > 0 && visibleSkills?.length === 0 && <div className="skill-empty">没有匹配“{search.trim()}”的 Skill。</div>}
+          {visibleSkills && visibleSkills.length > 0 && (
+            <div className="skill-card-grid">
+              {visibleSkills.map((skill) => (
+                <SkillCard
+                  key={skill.id}
+                  skill={skill}
+                  groups={groups}
+                  operation={skillRowOperations[skill.id] ?? null}
+                  busy={busy === `delete-${skill.id}` ? busy : null}
+                  onToggleEnabled={() => void setEnabled(skill)}
+                  onToggleGroup={(groupKey) => void toggleGroup(skill, groupKey)}
+                  onDelete={() => setConfirmation({ kind: 'delete', skill })}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
 
       <ImportInspectionDialog
         inspection={inspection}
@@ -409,9 +433,10 @@ export function SkillCard({
             type="button"
             aria-expanded={detailsOpen}
             aria-controls={detailsId}
+            aria-label={`${detailsOpen ? '收起' : '查看'} ${skill.name} 详情`}
             onClick={() => setDetailsOpen((open) => !open)}
           >
-            <span>详情</span><ChevronIcon />
+            <ChevronIcon />
           </button>
         </div>
       </div>
@@ -749,6 +774,10 @@ function ConfirmationDialog({ confirmation, busy, onClose, onConfirm }: {
 
 function SearchIcon(): React.JSX.Element {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" /></svg>
+}
+
+function CloseIcon(): React.JSX.Element {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
 }
 
 function ExternalLinkIcon(): React.JSX.Element {

@@ -16,13 +16,13 @@ export const THEME_OPTIONS: ReadonlyArray<{
     value: 'day',
     label: '日间',
     englishLabel: 'Porcelain Day',
-    description: '冷瓷灰与克制的 Steel 强调，适合长期协作。'
+    description: ''
   },
   {
     value: 'night',
     label: '夜间',
     englishLabel: 'Steel Night',
-    description: '冷石墨表面与低饱和 Steel，适合低光环境。'
+    description: ''
   }
 ]
 

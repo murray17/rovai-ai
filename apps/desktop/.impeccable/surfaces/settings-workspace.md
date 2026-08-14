@@ -1,5 +1,5 @@
 ---
-version: 1
+version: 2
 slug: "settings-workspace"
 primary_target: "apps/desktop/src/renderer/src/SettingsPageHeader.tsx"
 related_targets:
@@ -21,8 +21,10 @@ preference, detected availability, editable source and current effective state.
 
 Settings replaces the common 270px App rail with the grouped settings navigation defined by
 [`app-shell-navigation.md`](../../../../docs/ui/components/app-shell-navigation.md). Every category
-uses the shared borderless header with bottom divider, a direct title/description and page-specific
-actions. The content area does not add a second navigation column or page-sized outer card.
+uses the shared borderless header, a direct title/description and page-specific actions. Appearance
+and Reminder use a solid content plane without a decorative top edge, gradient wash or header
+divider; other categories retain their current composition until they are reviewed separately. The
+content area does not add a second navigation column or page-sized outer card.
 
 All categories implement Loading, Empty, Partial, Error, Disabled, Submitting and Recovery while
 retaining the header and navigation. A save, import, repair or probe failure keeps inputs, selection,
@@ -35,11 +37,16 @@ narrow Desktop bridge. The App does not expose or enable a macOS login item; pac
 only makes a best-effort removal of any retired registration. General does not add hidden/background
 launch, default Project, recovery or update policy.
 
+New-conversation defaults use the user-facing terms 队员 and 队长. Ten or fewer selectable teammates
+remain directly visible in a two-column chooser; only counts above ten collapse behind a searchable
+disclosure whose expanded chooser stays two-column. Narrow layouts reflow the chooser to one column.
+
 ## 外观与提醒
 
-Appearance presents exactly “跟随系统 / 日间 / 夜间”, with resolved result shown separately from
-saved preference. The cards describe Porcelain Day and Steel Night; switching preserves page state,
-focus and open overlays. Follow [`themes/README.md`](../../../../docs/ui/themes/README.md).
+Appearance presents exactly “跟随系统 / 日间 / 夜间”, with resolved result and saved preference
+remaining distinguishable in the page header. The quiet theme surfaces describe Porcelain Day and
+Steel Night; switching preserves page state, focus and open overlays. Follow
+[`themes/README.md`](../../../../docs/ui/themes/README.md).
 
 Reminder settings control only accepted transient heads-up categories. The production Renderer does
 not mount the persistent notification drawer, global bell or unread total; the Core notification read

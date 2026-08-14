@@ -1470,6 +1470,10 @@ describe('task event projections', () => {
     expect(markup).toContain('<strong>Rovai AI</strong>')
     expect(markup).toContain('队员')
     expect(markup).toContain('记忆，2 条普通提案待确认')
+    expect(markup).toContain('data-navigation-icon="square-pen"')
+    expect(markup).toContain('data-navigation-icon="users"')
+    expect(markup).toContain('data-navigation-icon="brain"')
+    expect(markup).toContain('data-navigation-icon="settings"')
     expect(markup).toContain('id="pinned-heading">置顶')
     expect(markup).toContain('快速对话讨论')
     expect(markup).toContain('rovai-ai')
@@ -1668,14 +1672,22 @@ describe('task event projections', () => {
     expect(applicationGroup).toContain('<strong>通用</strong>')
     expect(applicationGroup).toContain('<strong>外观</strong>')
     expect(applicationGroup).toContain('<strong>提醒</strong>')
+    expect(applicationGroup).toContain('data-navigation-icon="sliders-horizontal"')
+    expect(applicationGroup).toContain('data-navigation-icon="sun-moon"')
+    expect(applicationGroup).toContain('data-navigation-icon="bell-ring"')
     expect(applicationGroup.indexOf('<strong>通用</strong>')).toBeLessThan(applicationGroup.indexOf('<strong>外观</strong>'))
     expect(applicationGroup.indexOf('<strong>外观</strong>')).toBeLessThan(applicationGroup.indexOf('<strong>提醒</strong>'))
-    expect(capabilitiesGroup).toContain('<strong>Skill</strong>')
+    expect(capabilitiesGroup).toContain('<strong>Skills</strong>')
     expect(capabilitiesGroup).toContain('<strong>MCP</strong>')
     expect(capabilitiesGroup).toContain('<strong>Agent 运行时</strong>')
-    expect(capabilitiesGroup.indexOf('<strong>Skill</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>MCP</strong>'))
+    expect(capabilitiesGroup).toContain('data-navigation-icon="sparkles"')
+    expect(capabilitiesGroup).toContain('data-navigation-icon="blocks"')
+    expect(capabilitiesGroup).toContain('data-navigation-icon="cpu"')
+    expect(capabilitiesGroup.indexOf('<strong>Skills</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>MCP</strong>'))
     expect(capabilitiesGroup.indexOf('<strong>MCP</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>Agent 运行时</strong>'))
     expect(supportGroup).toContain('<strong>诊断与修复</strong>')
+    expect(supportGroup).toContain('data-navigation-icon="stethoscope"')
+    expect(markup).toContain('data-navigation-icon="arrow-left"')
     expect(markup).toContain('class="active" type="button" aria-current="page"')
     expect(markup).not.toContain('关于与更新')
     expect(markup).not.toContain('新对话')
@@ -1696,8 +1708,8 @@ describe('task event projections', () => {
     }
     const contentBySection: Record<NavigationSettingsSection, string> = {
       general: '通用',
-      skills: 'Skill 管理',
-      mcp: 'MCP 配置',
+      skills: 'Skills',
+      mcp: 'MCP',
       runtime: 'Agent 运行时',
       appearance: '外观',
       notifications: '提醒',
@@ -1726,13 +1738,14 @@ describe('task event projections', () => {
 
     expect(markup).not.toContain('notification-center-link')
     expect(markup).not.toContain('打开通知中心')
-    expect(markup).toContain('Rovai AI 不在前台时会先保留')
+    expect(markup).toContain('设置需要显示临时浮层的提醒。')
     expect(markup).toContain('aria-label="应用内提醒设置"')
     expect(markup).toContain('正在读取提醒设置')
+    expect(markup).not.toContain('关闭主开关时会保留四类选择')
     expect(markup).not.toContain('持久边界')
   })
 
-  it('keeps the resolved theme and saved preference in the Appearance page header', () => {
+  it('keeps the Appearance page header focused on choosing a theme', () => {
     const markup = renderToStaticMarkup(createElement(SettingsView, {
       appearance: { preference: 'night', resolvedTheme: 'night' },
       health: null,
@@ -1745,8 +1758,10 @@ describe('task event projections', () => {
       onThemeChange: () => undefined
     }))
 
-    expect(markup).toContain('当前 · Steel Night · 偏好：夜间')
-    expect(markup).toContain('瓷灰日间与 Steel Night 共享全部产品功能')
+    expect(markup).toContain('选择 Rovai AI 的界面主题。')
+    expect(markup).not.toContain('当前 · Steel Night')
+    expect(markup).not.toContain('当前呈现')
+    expect(markup).not.toContain('已生效')
     expect(markup).not.toContain('当前视觉语言')
   })
 
@@ -1770,7 +1785,8 @@ describe('task event projections', () => {
     expect(rescan).toBeGreaterThan(0)
     expect(rescan).toBeLessThan(headerEnd)
     expect(headerEnd).toBeLessThan(directory)
-    expect(markup).toContain('高级诊断与自定义启动入口')
+    expect(markup).toContain('管理本机 Agent 运行时及其可用状态。')
+    expect(markup).not.toContain('高级诊断与自定义启动入口')
   })
 
   it('replaces project navigation with the member roster on the members page', () => {
@@ -3552,7 +3568,9 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('记忆')
-    expect(markup).not.toContain('Memory / Governed context')
+    expect(markup).toContain('Memory / Library')
+    expect(markup).toContain('查看、搜索和管理长期记忆。')
+    expect(markup).toContain('记忆库')
     expect(markup).toContain('共同记忆')
     expect(markup).toContain('队员记忆')
     expect(markup).toContain('队员间记忆')
@@ -3560,6 +3578,9 @@ describe('task event projections', () => {
     expect(markup).toContain('待审核')
     expect(markup).toContain('建议复核')
     expect(markup).toContain('已停止沿用')
+    expect(markup).toContain('class="memory-search"')
+    expect(markup).toContain('type="search"')
+    expect(markup).not.toContain('范围、治理筛选和搜索只会缩小同一份权威列表')
     expect(markup).not.toContain('可回看 · 可修订 · 可遗忘')
     expect(markup.indexOf('memory-library-header'))
       .toBeLessThan(markup.indexOf('test-page-notice'))
@@ -3709,7 +3730,7 @@ describe('task event projections', () => {
     expect(markup).not.toContain('需要探测 Agent 运行时')
   })
 
-  it('keeps product operations visible and paths inside advanced diagnostics', () => {
+  it('keeps all product checks visible without exposing diagnostic or installation details', () => {
     const health: HealthStatus = {
       core: { ok: true, version: '0.0.1', dataDir: '/tmp/rovai' },
       database: { ok: true, path: '/tmp/rovai/rovai.db' },
@@ -3754,11 +3775,15 @@ describe('task event projections', () => {
     expect(markup).not.toContain('尚未检查')
     expect(markup).not.toContain('已检查')
     expect(markup).toContain('实验性')
-    expect(markup).toContain('检查可用性')
-    expect(markup).toContain('自查命令')
-    expect(markup).toContain('command -v codex &amp;&amp; codex --version')
-    expect(markup.match(/安装说明/g)?.length).toBe(9)
-    expect(markup).toContain('高级诊断与自定义启动入口')
+    expect(markup.match(/class="runtime-product-logo"/g)).toHaveLength(9)
+    expect(markup.match(/class="quiet-button runtime-product-check"/g)).toHaveLength(9)
+    expect(markup.match(/检查可用性/g)).toHaveLength(9)
+    expect(markup).toContain('codex-cli 1.0.0')
+    expect(markup).not.toContain('九种已支持产品')
+    expect(markup).not.toContain('自查命令')
+    expect(markup).not.toContain('command -v')
+    expect(markup).not.toContain('安装说明')
+    expect(markup).not.toContain('高级诊断与自定义启动入口')
     expect(markup).not.toContain('/opt/homebrew/bin/codex')
   })
 })

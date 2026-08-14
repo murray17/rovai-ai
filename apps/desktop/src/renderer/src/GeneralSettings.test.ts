@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { AgentProfile, GeneralPreferencesSnapshot } from '@contracts'
 import {
+  DEFAULT_MEMBER_COLLAPSE_THRESHOLD,
   GeneralSettings,
   ONE_CLICK_ENTRY_DESCRIPTIONS,
   ONE_CLICK_PROJECT_HELP,
@@ -21,7 +22,7 @@ describe('General settings', () => {
     expect(markup).toContain('type="radio"')
     expect(markup).toContain('上次使用的位置')
     expect(markup).toContain('快速对话')
-    expect(markup).toContain('已有会话、草稿、任务、审批和运行记录')
+    expect(markup).not.toContain('已有会话、草稿、任务、审批和运行记录')
     expect(markup).toContain('<h2 id="general-new-conversation-heading">新对话</h2>')
     expect(markup).toContain('保存默认配置')
     expect(markup).toContain('一键创建新对话')
@@ -29,7 +30,7 @@ describe('General settings', () => {
     expect(markup).toContain('role="tooltip"')
     expect(markup).not.toContain('general-help-button')
     expect(markup).toContain('使用入口对应的项目')
-    expect(markup).toContain('请先保存默认队员与默认负责人')
+    expect(markup).toContain('请先保存默认队员与默认队长')
     expect(markup).toContain('重置窗口大小与位置')
     expect(markup).not.toContain('记住窗口位置')
     expect(markup).not.toContain('隐藏启动')
@@ -67,7 +68,7 @@ describe('General settings', () => {
       initialPreferences: preferences,
       currentProjectLabel: 'rovai-ai'
     }))
-    expect(markup).toContain('当前生效：rovai-ai · 2 位默认队员 · 负责人 洛可')
+    expect(markup).toContain('当前生效：rovai-ai · 2 位默认队员 · 队长 洛可')
     expect(markup).toContain('aria-label="一键创建新对话" checked=""')
     expect(markup).not.toContain('默认队员配置需要重新确认')
   })
@@ -90,6 +91,25 @@ describe('General settings', () => {
       memberAgentIds: ['agent-a'],
       defaultLeadAgentId: 'agent-a'
     }, agents)).toBeNull()
+  })
+
+  it('shows up to ten members directly and collapses only when the count exceeds ten', () => {
+    const directMembers = Array.from({ length: DEFAULT_MEMBER_COLLAPSE_THRESHOLD }, (_, index) => (
+      profile(`agent-${index}`, `队员 ${index + 1}`)
+    ))
+    const collapsedMembers = [
+      ...directMembers,
+      profile(`agent-${DEFAULT_MEMBER_COLLAPSE_THRESHOLD}`, `队员 ${DEFAULT_MEMBER_COLLAPSE_THRESHOLD + 1}`)
+    ]
+
+    const directMarkup = renderToStaticMarkup(createElement(GeneralSettings, { agents: directMembers }))
+    const collapsedMarkup = renderToStaticMarkup(createElement(GeneralSettings, { agents: collapsedMembers }))
+
+    expect(directMarkup).not.toContain('class="general-default-member-picker"')
+    expect(directMarkup).not.toContain('aria-label="搜索默认队员"')
+    expect(collapsedMarkup).toContain('class="general-default-member-picker"')
+    expect(collapsedMarkup).toContain('共 11 位队员，展开后可多选')
+    expect(collapsedMarkup).toContain('aria-label="搜索默认队员"')
   })
 })
 

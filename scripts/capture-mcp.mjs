@@ -110,7 +110,7 @@ try {
     heading: document.querySelector('.settings-page-heading h1')?.textContent
   }))()`)
   assert(
-    JSON.stringify(initial.subnav) === JSON.stringify(['通用', '外观', '通知', 'Skill', 'MCP', 'Agent 运行时', '诊断与修复']),
+    JSON.stringify(initial.subnav) === JSON.stringify(['通用', '外观', '提醒', 'Skills', 'MCP', 'Agent 运行时', '诊断与修复']),
     `Settings navigation is incorrect: ${JSON.stringify(initial)}`
   )
   assert(JSON.stringify(initial.serverNames) === JSON.stringify(['context7', 'playwright']), `Fresh reviewed defaults are incorrect: ${JSON.stringify(initial)}`)
@@ -128,7 +128,7 @@ try {
   assert(initial.rosterHeadingBorderBottom === '0px', `Roster heading still has a separator: ${JSON.stringify(initial)}`)
   assert(new Set(initial.unselectedRosterBackgrounds).size === 1, `Unselected roster rows do not share one neutral background: ${JSON.stringify(initial)}`)
   assert(!initial.unselectedRosterBackgrounds.includes(initial.selectedRosterBackground), `Selected roster row is not the only persistent colored row: ${JSON.stringify(initial)}`)
-  assert(initial.sharedHeadingCount === 1 && initial.heading === 'MCP 配置', `MCP did not use the shared Settings heading: ${JSON.stringify(initial)}`)
+  assert(initial.sharedHeadingCount === 1 && initial.heading === 'MCP', `MCP did not use the shared Settings heading: ${JSON.stringify(initial)}`)
   assert(initial.legacyHeroCount === 0, `Legacy boxed Hero returned to MCP Settings: ${JSON.stringify(initial)}`)
 
   const rosterKeyboardStarted = await evaluate(cdp, `(() => {
@@ -303,9 +303,9 @@ try {
   for (const [navigationLabel, expectedHeading] of [
     ['通用', '通用'],
     ['外观', '外观'],
-    ['通知', '通知'],
-    ['Skill', 'Skill 管理'],
-    ['MCP', 'MCP 配置'],
+    ['提醒', '提醒'],
+    ['Skills', 'Skills'],
+    ['MCP', 'MCP'],
     ['Agent 运行时', 'Agent 运行时'],
     ['诊断与修复', '诊断与修复']
   ]) {

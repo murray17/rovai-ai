@@ -60,6 +60,15 @@ import {
   submittedRuntimeConfigurationKey
 } from './member-runtime-conflict'
 import type { MemberWorkspaceTab } from './MemberSidebar'
+import antigravityLogo from './assets/runtime-logos/antigravity-color.svg'
+import claudeCodeLogo from './assets/runtime-logos/claudecode-color.svg'
+import codeBuddyLogo from './assets/runtime-logos/codebuddy-color.svg'
+import codexLogo from './assets/runtime-logos/codex-color.svg'
+import copilotLogo from './assets/runtime-logos/copilot-color.svg'
+import kiroLogo from './assets/runtime-logos/kiro-color.svg'
+import openCodeLogo from './assets/runtime-logos/opencode.svg'
+import qoderLogo from './assets/runtime-logos/qoder-color.svg'
+import qwenLogo from './assets/runtime-logos/qwen-color.svg'
 
 type MembersViewProps = {
   agents: AgentProfile[]
@@ -816,6 +825,18 @@ const PRODUCT_RUNTIMES: AdapterKind[] = [
   'antigravity-app'
 ]
 
+const PRODUCT_RUNTIME_LOGOS: Record<AdapterKind, string> = {
+  'claude-code-cli': claudeCodeLogo,
+  'codex-cli': codexLogo,
+  'copilot-cli': copilotLogo,
+  'opencode-cli': openCodeLogo,
+  'kiro-cli': kiroLogo,
+  'qoder-cli': qoderLogo,
+  'codebuddy-cli': codeBuddyLogo,
+  'qwen-code': qwenLogo,
+  'antigravity-app': antigravityLogo
+}
+
 export type MemberRuntimeFormHandle = {
   discard(): void
 }
@@ -1356,12 +1377,11 @@ function MemberAvatarDialog({ open, agent, busy, returnFocusRef, onOpenChange, o
   )
 }
 
-export function RuntimeInstallationsPanel({ health, installations, onReload }: {
+export function RuntimeInstallationsPanel({ health, onReload }: {
   health: HealthStatus | null
   installations: AdapterInstallation[]
   onReload(): Promise<void>
 }): React.JSX.Element {
-  const [customOpen, setCustomOpen] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const availability = health?.runtimeAvailability ?? []
@@ -1399,69 +1419,12 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
     }
   }
 
-  const refresh = async (installationId: string): Promise<void> => {
-    setBusy(`refresh-${installationId}`)
-    setError(null)
-    try {
-      const result = await window.rovai.request<StoredCommandResult>('runtime.installations.refresh', {
-        commandId: crypto.randomUUID(),
-        installationId
-      })
-      assertApplied(result)
-      await onReload()
-    } catch (nextError) {
-      setError(errorMessage(nextError))
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const create = async (adapterKind: AdapterKind, executablePath: string, source: 'custom', authScope: string): Promise<void> => {
-    setBusy('create-installation')
-    setError(null)
-    try {
-      await createAndRefreshRuntimeInstallation(adapterKind, executablePath, source, authScope)
-      setCustomOpen(false)
-      await onReload()
-    } catch (nextError) {
-      setError(errorMessage(nextError))
-      throw nextError
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const toggle = async (installation: AdapterInstallation): Promise<void> => {
-    setBusy(`toggle-${installation.id}`)
-    setError(null)
-    try {
-      const result = await window.rovai.request<StoredCommandResult>('runtime.installations.update', {
-        commandId: crypto.randomUUID(),
-        command: {
-          installationId: installation.id,
-          expectedVersion: installation.version,
-          executablePath: installation.executablePath,
-          commandName: installation.commandName,
-          source: installation.source,
-          authScope: installation.authScope,
-          enabled: !installation.enabled
-        }
-      })
-      assertApplied(result)
-      await onReload()
-    } catch (nextError) {
-      setError(errorMessage(nextError))
-    } finally {
-      setBusy(null)
-    }
-  }
-
   return (
     <>
       <SettingsPageHeader
         eyebrow="Settings / Runtime"
         title="Agent 运行时"
-        description="选择产品、检查可用性并管理 Rovai 自动发现的本机入口。"
+        description="管理本机 Agent 运行时及其可用状态。"
         aside={(
           <button className="quiet-button" disabled={busy !== null} onClick={() => void rescan()}>
             {busy === 'rescan' ? '正在重新检测…' : '重新检测全部'}
@@ -1472,166 +1435,34 @@ export function RuntimeInstallationsPanel({ health, installations, onReload }: {
         <div className="section-heading">
           <div><h2>Agent 运行时目录</h2></div>
         </div>
-        <p className="section-intro">九种已支持产品始终显示。页面优先使用最近一次结果，缺失或过期时在后台刷新；重新检查会执行你的交互式登录 Shell 初始化，但只读取 PATH。</p>
 
-        <div className="runtime-installation-list">
+        <div className="runtime-product-list">
           {PRODUCT_RUNTIMES.map((runtimeKind) => {
             const item = availability.find((candidate) => candidate.runtimeKind === runtimeKind)
             const presentation = runtimeAvailabilityPresentation(item ?? null, health === null)
-            const help = productRuntimeHelp(runtimeKind)
             return (
-              <article key={runtimeKind} className="runtime-installation-row">
-                <div className="runtime-installation-main">
-                  <div>
-                    <strong>{adapterLabel(runtimeKind)}</strong>
-                    <span className={`runtime-snapshot-badge status-${presentation.status}`}>
-                      {presentation.label}
-                    </span>
-                  </div>
-                  <span>{item?.reportedVersion ?? adapterMaturityLabel(runtimeKind)}</span>
-                  {presentation.detail && <small>{presentation.detail}</small>}
-                  <small className="runtime-self-check">自查命令：<code>{help.selfCheckCommand}</code></small>
+              <article key={runtimeKind} className="runtime-product-row">
+                <span className="runtime-product-logo" aria-hidden="true">
+                  <img src={PRODUCT_RUNTIME_LOGOS[runtimeKind]} alt="" />
+                </span>
+                <div className="runtime-product-copy">
+                  <strong>{adapterLabel(runtimeKind)}</strong>
+                  <small>{item?.reportedVersion ?? adapterMaturityLabel(runtimeKind)}</small>
                 </div>
-                <div className="runtime-row-actions">
-                  <button className="quiet-button" disabled={busy !== null} onClick={() => void checkProduct(runtimeKind)}>
-                    {busy === `check-${runtimeKind}` ? '正在检查…' : '检查可用性'}
-                  </button>
-                  <a className="quiet-button" href={help.installationUrl} target="_blank" rel="noreferrer">安装说明</a>
-                </div>
+                <span className={`runtime-snapshot-badge runtime-product-status status-${presentation.status}`}>
+                  {presentation.label}
+                </span>
+                <button className="quiet-button runtime-product-check" disabled={busy !== null} onClick={() => void checkProduct(runtimeKind)}>
+                  {busy === `check-${runtimeKind}` ? '正在检查…' : '检查可用性'}
+                </button>
               </article>
             )
           })}
         </div>
         {error && <div className="inline-error" role="alert">{error}</div>}
-
-        <details className="member-advanced-settings runtime-advanced-diagnostics">
-          <summary>高级诊断与自定义启动入口</summary>
-          <p>以下路径和 fingerprint 仅用于诊断、审计与恢复；普通队员配置不会选择它们。</p>
-          <button className="quiet-button" onClick={() => setCustomOpen(true)}>添加自定义启动入口</button>
-          <div className="runtime-installation-list">
-            {installations.map((installation) => (
-              <article key={installation.id} className={`runtime-installation-row ${installation.enabled ? '' : 'disabled'}`}>
-                <div className="runtime-installation-main">
-                  <div><strong>{adapterLabel(installation.adapterKind)}</strong><RuntimeSnapshotBadge installation={installation} /></div>
-                  <code>{installation.executablePath}</code>
-                  <span>{installation.installationClass === 'managed_default' ? '受管默认入口' : '自定义入口'} · {installationSourceLabel(installation.source)} · generation {installation.generation}</span>
-                  <small>fingerprint：{installation.snapshot?.executableFingerprint ?? '—'}</small>
-                  {installation.relocationHistory[0] && <small>最近自动迁移：{formatTimestamp(installation.relocationHistory[0].createdAt)} · {installation.relocationHistory[0].result}</small>}
-                </div>
-                <dl>
-                  <div><dt>模型</dt><dd>{reportedModelCount(installation)}</dd></div>
-                  <div><dt>引用队员</dt><dd>{installation.referencedProfileCount}</dd></div>
-                  <div><dt>最近探测</dt><dd>{formatTimestamp(installation.lastProbeAttempt?.attemptedAt ?? installation.snapshot?.lastSuccessfulProbeAt)}</dd></div>
-                </dl>
-                <div className="runtime-row-actions">
-                  <button className="quiet-button" disabled={busy !== null || !installation.enabled} onClick={() => void refresh(installation.id)}>{busy === `refresh-${installation.id}` ? '探测中…' : '刷新能力'}</button>
-                  <button className="quiet-button" disabled={busy !== null} onClick={() => void toggle(installation)}>{installation.enabled ? '停用' : '启用'}</button>
-                </div>
-              </article>
-            ))}
-            {installations.length === 0 && <div className="runtime-empty">尚无内部 Installation；选择产品或检查可用性后会自动创建。</div>}
-          </div>
-        </details>
-
-        <CustomRuntimeDialog open={customOpen} busy={busy === 'create-installation'} onOpenChange={setCustomOpen} onSubmit={create} />
       </section>
     </>
   )
-}
-
-async function createAndRefreshRuntimeInstallation(
-  adapterKind: AdapterKind,
-  executablePath: string,
-  source: 'custom',
-  authScope: string
-): Promise<string> {
-  const result = await window.rovai.request<StoredCommandResult>('runtime.installations.create', {
-    commandId: crypto.randomUUID(),
-    command: {
-      adapterKind,
-      executablePath,
-      commandName: runtimeCommandName(adapterKind),
-      source,
-      authScope
-    }
-  })
-  assertApplied(result)
-  const installationId = result.resultEntity?.entityId ?? stringField(result.payload, 'installationId')
-  if (!installationId) throw new Error('新 Agent 运行时已创建，但暂时无法打开。请重新检测后重试。')
-  const refreshed = await window.rovai.request<StoredCommandResult>('runtime.installations.refresh', {
-    commandId: crypto.randomUUID(),
-    installationId
-  })
-  assertApplied(refreshed)
-  return installationId
-}
-
-function CustomRuntimeDialog({ open, busy, onOpenChange, onSubmit }: {
-  open: boolean
-  busy: boolean
-  onOpenChange(open: boolean): void
-  onSubmit(adapterKind: AdapterKind, executablePath: string, source: 'custom', authScope: string): Promise<void>
-}): React.JSX.Element {
-  const [adapterKind, setAdapterKind] = useState<AdapterKind>('codex-cli')
-  const [path, setPath] = useState('')
-  const [authScope, setAuthScope] = useState('default')
-  const [submitError, setSubmitError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!open) return
-    setAdapterKind('codex-cli')
-    setPath('')
-    setAuthScope('default')
-    setSubmitError(null)
-  }, [open])
-
-  const browse = async (): Promise<void> => {
-    setSubmitError(null)
-    try {
-      const selected = await window.rovai.selectRuntimeExecutable()
-      if (selected) setPath(selected)
-    } catch (nextError) {
-      setSubmitError(errorMessage(nextError))
-    }
-  }
-
-  const submit = async (event: FormEvent): Promise<void> => {
-    event.preventDefault()
-    setSubmitError(null)
-    try {
-      await onSubmit(adapterKind, path.trim(), 'custom', authScope.trim())
-    } catch (nextError) {
-      setSubmitError(errorMessage(nextError))
-    }
-  }
-
-  return (
-    <Dialog.Root open={open} onOpenChange={(value) => !busy && onOpenChange(value)}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="dialog-content runtime-dialog" aria-describedby="runtime-dialog-description">
-          <div className="dialog-heading"><div><Dialog.Title>添加本机 Agent 运行时</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭 Agent 运行时编辑" disabled={busy}>×</Dialog.Close></div>
-          <Dialog.Description id="runtime-dialog-description">选择本机已有 CLI。Rovai AI 会保存稳定路径，并按当前 Agent 运行时的安全准入级别检查版本、能力缺口或协议能力。</Dialog.Description>
-          <form onSubmit={(event) => void submit(event)}>
-            <label className="field-label">Agent 运行时类型<select value={adapterKind} onChange={(event) => setAdapterKind(event.target.value as AdapterKind)}><option value="codex-cli">Codex CLI</option><option value="opencode-cli">OpenCode</option><option value="copilot-cli">GitHub Copilot</option><option value="claude-code-cli">Claude Code</option><option value="kiro-cli">Kiro</option><option value="qoder-cli">Qoder</option><option value="codebuddy-cli">CodeBuddy</option><option value="qwen-code">Qwen Code</option><option value="antigravity-app">Antigravity（通过 agy companion）</option></select></label>
-            <label className="field-label">可执行文件路径
-              <span className="path-field"><input value={path} onChange={(event) => setPath(event.target.value)} placeholder={runtimePathPlaceholder(adapterKind)} autoFocus /><button className="quiet-button" type="button" onClick={() => void browse()}>浏览…</button></span>
-            </label>
-            <label className="field-label">认证 / 配置作用域<input value={authScope} onChange={(event) => setAuthScope(event.target.value)} placeholder="default" /></label>
-            <div className="authorization-box"><strong>边界说明</strong><ul><li>Rovai AI 保存的是这个启动入口，不固定上游版本。</li><li>刷新会执行该 Agent 运行时已验证安全的版本探测与协议握手。</li><li>Rovai AI 不修改 CLI 的全局配置或凭据。</li></ul></div>
-            {submitError && <div className="inline-error">{submitError}</div>}
-            <div className="dialog-actions"><Dialog.Close className="quiet-button" type="button" disabled={busy}>取消</Dialog.Close><button className="primary-button" disabled={busy || !path.trim() || !authScope.trim()}>{busy ? '正在探测…' : '添加并探测'}</button></div>
-          </form>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
-  )
-}
-
-function RuntimeSnapshotBadge({ installation }: { installation: AdapterInstallation }): React.JSX.Element {
-  const snapshot = installation.snapshot
-  const ready = installation.enabled && Boolean(snapshot) && !snapshot?.staleAt
-  return <span className={`runtime-snapshot-badge status-${ready ? 'available' : 'unavailable'}`}>{installation.enabled ? ready ? '可用' : '不可用' : '不可用'}</span>
 }
 
 function identityCommand(draft: IdentityDraft, agent: AgentProfile | null): CreateAgentProfileCommand | UpdateAgentProfileCommand {
@@ -1756,66 +1587,6 @@ function adapterMaturityLabel(kind: AdapterKind): string {
     'codebuddy-cli': '实验性',
     'qwen-code': '实验性',
     'antigravity-app': '实验性'
-  })[kind]
-}
-
-function installationSourceLabel(source: AdapterInstallation['source']): string {
-  return ({
-    manual: '手动入口',
-    env: '环境变量',
-    inherited_path: '应用继承 PATH',
-    login_shell: '登录 Shell PATH',
-    known_location: '平台常见目录',
-    custom: '高级自定义'
-  })[source]
-}
-
-function runtimeCommandName(kind: AdapterKind): string {
-  return ({
-    'codex-cli': 'codex',
-    'opencode-cli': 'opencode',
-    'copilot-cli': 'copilot',
-    'claude-code-cli': 'claude',
-    'kiro-cli': 'kiro-cli',
-    'qoder-cli': 'qodercli',
-    'codebuddy-cli': 'codebuddy',
-    'qwen-code': 'qwen',
-    'antigravity-app': 'agy'
-  })[kind]
-}
-
-function productRuntimeHelp(kind: AdapterKind): {
-  installationUrl: string
-  selfCheckCommand: string
-} {
-  const command = runtimeCommandName(kind)
-  return {
-    installationUrl: ({
-      'codex-cli': 'https://learn.chatgpt.com/docs/codex/cli',
-      'opencode-cli': 'https://opencode.ai/docs/',
-      'copilot-cli': 'https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli',
-      'claude-code-cli': 'https://docs.anthropic.com/en/docs/claude-code/getting-started',
-      'kiro-cli': 'https://kiro.dev/docs/cli/installation/',
-      'qoder-cli': 'https://docs.qoder.com/en/cli/quick-start',
-      'codebuddy-cli': 'https://www.codebuddy.cn/docs/cli/installation',
-      'qwen-code': 'https://qwenlm.github.io/qwen-code-docs/en/users/quickstart/',
-      'antigravity-app': 'https://antigravity.google/docs/cli-getting-started'
-    })[kind],
-    selfCheckCommand: `command -v ${command} && ${command} --version`
-  }
-}
-
-function runtimePathPlaceholder(kind: AdapterKind): string {
-  return ({
-    'codex-cli': '/opt/homebrew/bin/codex',
-    'opencode-cli': '/opt/homebrew/bin/opencode',
-    'copilot-cli': '/opt/homebrew/bin/copilot',
-    'claude-code-cli': '/opt/homebrew/bin/claude',
-    'kiro-cli': '/opt/homebrew/bin/kiro-cli',
-    'qoder-cli': '~/.local/bin/qodercli',
-    'codebuddy-cli': '/opt/homebrew/bin/codebuddy',
-    'qwen-code': '/opt/homebrew/bin/qwen',
-    'antigravity-app': '~/.local/bin/agy'
   })[kind]
 }
 

@@ -387,12 +387,13 @@ export function MemoryLibrary({
     >
       <header className="memory-library-header">
         <div>
+          <p className="eyebrow">Memory / Library</p>
           <h2 id="memory-library-title">记忆</h2>
-          <p>所有正在沿用的记忆都立即生效；形成来源仅用于说明和审计。</p>
+          <p>查看、搜索和管理长期记忆。</p>
         </div>
         <div className="memory-header-actions">
           <button className="quiet-button" type="button" onClick={() => void exportMemory()} disabled={!library}>导出…</button>
-          <button className="primary-button" type="button" onClick={openCreate} disabled={!library}>＋ 新增记忆</button>
+          <button className="primary-button" type="button" onClick={openCreate} disabled={!library}>新增记忆</button>
         </div>
       </header>
 
@@ -414,6 +415,10 @@ export function MemoryLibrary({
           <b>查看审核 →</b>
         </button>
       )}
+
+      <div className="memory-library-heading">
+        <h3>记忆库</h3>
+      </div>
 
       <nav className="memory-scope-tabs" aria-label="记忆范围">
         {scopeTabs.map(([value, label]) => (
@@ -445,7 +450,14 @@ export function MemoryLibrary({
             </button>
           ))}
         </div>
-        <label className="memory-search"><span className="sr-only">搜索记忆</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索正文、Retrieval Keys 或队员" disabled={loading} /></label>
+        <label className="memory-search">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" />
+            <path d="m20 20-3.5-3.5" />
+          </svg>
+          <span className="sr-only">搜索记忆</span>
+          <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索正文、Retrieval Keys 或队员" disabled={loading} />
+        </label>
       </div>
 
       <CapacityStrip library={library} scope={scope} />

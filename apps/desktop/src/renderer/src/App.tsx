@@ -2749,12 +2749,7 @@ export function SettingsView({
             <SettingsPageHeader
               eyebrow="Settings / Appearance"
               title="外观"
-              description="瓷灰日间与 Steel Night 共享全部产品功能、语义色和交互边界。"
-              aside={(
-                <span className="settings-page-note">
-                  当前 · {appearance.resolvedTheme === 'day' ? '瓷灰日间' : 'Steel Night'} · 偏好：{appearancePreferenceLabel(appearance.preference)}
-                </span>
-              )}
+              description="选择 Rovai AI 的界面主题。"
             />
             <AppearanceSettings
               appearance={appearance}
@@ -2772,12 +2767,6 @@ export function SettingsView({
       </div>
     </div>
   )
-}
-
-function appearancePreferenceLabel(preference: ThemePreference): string {
-  if (preference === 'system') return '跟随系统'
-  if (preference === 'day') return '日间'
-  return '夜间'
 }
 
 export function campSnapshotWithAnchoredMessages(

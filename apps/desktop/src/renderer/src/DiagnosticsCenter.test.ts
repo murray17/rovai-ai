@@ -1,6 +1,9 @@
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { DiagnosticCheck } from '@contracts'
 import {
+  DiagnosticsCenter,
   diagnosticActionForCheck,
   diagnosticCheckDetail,
   diagnosticChecksForFilter
@@ -26,6 +29,17 @@ function check(overrides: Partial<DiagnosticCheck>): DiagnosticCheck {
 }
 
 describe('DiagnosticsCenter projections', () => {
+  it('keeps the production actions while using the shared centered settings composition', () => {
+    const markup = renderToStaticMarkup(createElement(DiagnosticsCenter, { onNavigate: () => undefined }))
+    expect(markup).toContain('Settings / Diagnostics')
+    expect(markup).toContain('检查运行环境并处理可安全修复的问题。')
+    expect(markup).toContain('运行完整自检')
+    expect(markup).toContain('导出诊断 JSON')
+    expect(markup).toContain('class="diagnostics-body"')
+    expect(markup).toContain('隐私边界')
+    expect(markup).toContain('正在读取诊断事实')
+  })
+
   it('offers only explicitly supported next steps', () => {
     expect(diagnosticActionForCheck(check({
       id: 'skill-projections',

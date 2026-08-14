@@ -108,7 +108,7 @@ try {
       sqliteIsTheOnlyMemoryAuthority: true,
       restartPersistence: true,
       dayAndNightLayouts: true,
-      fullHeightP2HeaderWithoutBlankDragStrip: true,
+      fullHeightHeaderWithoutBlankDragStrip: true,
       horizontalOverflow: false
     },
     headerGeometry: {
@@ -126,7 +126,7 @@ try {
 }
 
 async function createHearthMemory(cdp, body) {
-  await clickButton(cdp, '.memory-library-header button', '＋ 新增记忆')
+  await clickButton(cdp, '.memory-library-header button', '新增记忆')
   await waitForSelector(cdp, '.memory-editor-dialog textarea')
   await replaceTextarea(cdp, body)
   await replaceRetrievalKeys(cdp, '验收记忆')
@@ -185,13 +185,13 @@ async function assertMemoryPageHeaderGeometry(cdp, context) {
   assert(
     !state.hasBlankDragStrip
       && Math.abs(state.contentTop) <= 0.5
-      && Math.abs(state.libraryTop - 3) <= 0.75
-      && Math.abs(state.headerTop - 33) <= 0.75
-      && state.topBorderWidth === '3px'
+      && Math.abs(state.libraryTop) <= 0.75
+      && Math.abs(state.headerTop - 34) <= 0.75
+      && state.topBorderWidth === '0px'
       && state.headerAlignment === 'flex-end'
       && !state.hasKicker
       && Math.abs(state.actionBottomDelta) <= 0.75,
-    `${context} did not match the P2 full-height header contract: ${JSON.stringify(state)}`
+    `${context} did not match the full-height rule-free header contract: ${JSON.stringify(state)}`
   )
   return state
 }

@@ -197,7 +197,7 @@ export function NotificationSettings(): React.JSX.Element {
       <SettingsPageHeader
         eyebrow="Settings / Reminders"
         title="提醒"
-        description="选择哪些新动态以临时浮层提醒；Rovai AI 不在前台时会先保留，回到应用后再显示。"
+        description="设置需要显示临时浮层的提醒。"
       />
       <section className="section-block notification-settings" aria-label="应用内提醒设置">
         {loading && !preference && (
@@ -302,9 +302,6 @@ export function NotificationPreferenceEditor({
           />
         ))}
       </div>
-      <p className="notification-scenario-footnote">
-        关闭主开关时会保留四类选择，重新开启后继续使用。
-      </p>
     </fieldset>
   )
 }

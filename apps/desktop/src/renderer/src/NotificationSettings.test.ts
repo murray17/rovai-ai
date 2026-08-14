@@ -60,7 +60,7 @@ describe('notification settings', () => {
     expect(markup).toContain('1 / 2 项已保留')
     expect(markup).toContain('2 / 2 项已保留')
     expect(markup.match(/disabled=""/g)).toHaveLength(4)
-    expect(markup).toContain('关闭主开关时会保留四类选择')
+    expect(markup).not.toContain('关闭主开关时会保留四类选择')
   })
 
   it('keeps the active preference focusable while exposing save and recovery states', () => {

@@ -19,6 +19,7 @@ import type {
   SettingsSection
 } from '@contracts'
 import { writeClipboardText } from './clipboard'
+import { NavigationIcon, type NavigationIconName } from './NavigationIcon'
 import { allNavigationCamps } from './ui-model'
 
 export interface CampDeleteAttempt {
@@ -548,10 +549,10 @@ export function CampNavigation({
               <>
                 <nav className="unified-primary-nav" aria-label="主要页面">
                   <button className={`rail-button ${view === 'compose' ? 'active' : ''}`} type="button" aria-label="新对话" title="新对话" onClick={onNewConversation} disabled={state !== 'ready' || creatingConversation}>
-                    <span className="rail-glyph" aria-hidden="true">＋</span><span className="rail-label">新对话</span>
+                    <span className="rail-glyph" aria-hidden="true"><NavigationIcon name="square-pen" /></span><span className="rail-label">新对话</span>
                   </button>
                   <button className={`rail-button ${view === 'members' ? 'active' : ''}`} type="button" aria-current={view === 'members' ? 'page' : undefined} aria-label="队员" title="队员" onClick={onMembers}>
-                    <span className="rail-glyph" aria-hidden="true">◎</span><span className="rail-label">队员</span>
+                    <span className="rail-glyph" aria-hidden="true"><NavigationIcon name="users" /></span><span className="rail-label">队员</span>
                   </button>
                   <button
                     className={`rail-button ${view === 'memory' ? 'active' : ''}`}
@@ -561,7 +562,7 @@ export function CampNavigation({
                     title={pendingMemoryCount > 0 ? `记忆 · ${pendingMemoryCount} 条普通提案待确认` : '记忆'}
                     onClick={onMemory}
                   >
-                    <span className="rail-glyph" aria-hidden="true">◈</span><span className="rail-label">记忆</span>
+                    <span className="rail-glyph" aria-hidden="true"><NavigationIcon name="brain" /></span><span className="rail-label">记忆</span>
                     {pendingMemoryCount > 0 && <i className="rail-badge-dot" aria-hidden="true" />}
                   </button>
                 </nav>
@@ -707,7 +708,7 @@ export function CampNavigation({
           aria-label="设置"
           onClick={onSettings}
         >
-          <span className="rail-glyph" aria-hidden="true">⚙</span><span className="rail-label">设置</span>
+          <span className="rail-glyph" aria-hidden="true"><NavigationIcon name="settings" /></span><span className="rail-label">设置</span>
         </button>
       </div>
               </>
@@ -779,7 +780,7 @@ export function CampNavigation({
 
 type SettingsSidebarItem = {
   key: NavigationSettingsSection
-  icon: string
+  icon: NavigationIconName
   label: string
 }
 
@@ -794,25 +795,25 @@ const SETTINGS_SIDEBAR_GROUPS: SettingsSidebarGroup[] = [
     key: 'application',
     label: '应用',
     items: [
-      { key: 'general', icon: '⌂', label: '通用' },
-      { key: 'appearance', icon: '◐', label: '外观' },
-      { key: 'notifications', icon: '♢', label: '提醒' }
+      { key: 'general', icon: 'sliders-horizontal', label: '通用' },
+      { key: 'appearance', icon: 'sun-moon', label: '外观' },
+      { key: 'notifications', icon: 'bell-ring', label: '提醒' }
     ]
   },
   {
     key: 'capabilities',
     label: '能力',
     items: [
-      { key: 'skills', icon: '◇', label: 'Skill' },
-      { key: 'mcp', icon: '⌘', label: 'MCP' },
-      { key: 'runtime', icon: '◈', label: 'Agent 运行时' }
+      { key: 'skills', icon: 'sparkles', label: 'Skills' },
+      { key: 'mcp', icon: 'blocks', label: 'MCP' },
+      { key: 'runtime', icon: 'cpu', label: 'Agent 运行时' }
     ]
   },
   {
     key: 'support',
     label: '支持',
     items: [
-      { key: 'diagnostics', icon: '⌁', label: '诊断与修复' }
+      { key: 'diagnostics', icon: 'stethoscope', label: '诊断与修复' }
     ]
   }
 ]
@@ -830,7 +831,7 @@ function SettingsSidebarNavigation({
     <div className="settings-sidebar-navigation">
       <div className="settings-sidebar-heading">
         <button className="settings-sidebar-back" type="button" onClick={onBack}>
-          <span aria-hidden="true">←</span>
+          <span aria-hidden="true"><NavigationIcon name="arrow-left" /></span>
           <strong>返回 App</strong>
         </button>
         <div className="settings-sidebar-title">
@@ -852,7 +853,7 @@ function SettingsSidebarNavigation({
                   key={item.key}
                   onClick={() => onSectionChange(item.key)}
                 >
-                  <span aria-hidden="true">{item.icon}</span>
+                  <span aria-hidden="true"><NavigationIcon name={item.icon} /></span>
                   <strong>{item.label}</strong>
                 </button>
               ))}

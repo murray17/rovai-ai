@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: porcelain-day
 mode: light
-last_updated: 2026-08-13
+last_updated: 2026-08-14
 ---
 
 # Porcelain Day
@@ -43,6 +43,14 @@ Light. `color-scheme: light`.
 | `--surface-selected` | `#e9ecee` |
 | `--surface-hover` | `#e8eaea` |
 | `--surface-sunken` | `#e4e8eb` |
+| `--workspace-surface-subtle` | `#f4f5f4` |
+| `--workspace-surface-raised` | `#ffffff` |
+| `--workspace-surface-hover` | `#e8ebec` |
+| `--workspace-surface-selected` | `#e4eaee` |
+| `--workspace-line` / `--workspace-line-strong` | `#d5dadd` / `#bdc6ca` |
+| `--workspace-steel` / `--workspace-steel-ink` | `#476b85` / `#34576f` |
+| `--workspace-attention-soft` | `#f4ecdf` |
+| `--workspace-faint` | `#71808a` |
 | `--conversation-surface` | `#ffffff` |
 | `--inspector-surface` | `#ffffff` |
 | `--conversation-inspector-line` | `#c7cfd6` |

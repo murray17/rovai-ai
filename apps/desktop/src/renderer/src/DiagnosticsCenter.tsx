@@ -31,10 +31,10 @@ const GROUP_ORDER: DiagnosticGroup[] = [
   'agent_runtimes'
 ]
 
-const STATUS_META: Record<DiagnosticStatus, { label: string; symbol: string }> = {
-  ok: { label: '正常', symbol: '✓' },
-  attention: { label: '需要处理', symbol: '!' },
-  unknown: { label: '暂时无法确认', symbol: '?' }
+const STATUS_META: Record<DiagnosticStatus, { label: string }> = {
+  ok: { label: '正常' },
+  attention: { label: '需要处理' },
+  unknown: { label: '暂时无法确认' }
 }
 
 export function DiagnosticsCenter({
@@ -194,7 +194,7 @@ export function DiagnosticsCenter({
       <SettingsPageHeader
         eyebrow="Settings / Diagnostics"
         title="诊断与修复"
-        description="检查本地依赖、受管内容和 Agent 运行时，并为可安全处理的问题提供明确下一步。"
+        description="检查运行环境并处理可安全修复的问题。"
         aside={(
           <>
             <button className="primary-button" type="button" onClick={() => void runFullCheck()} disabled={disabled}>
@@ -207,15 +207,16 @@ export function DiagnosticsCenter({
         )}
       />
 
+      <div className="diagnostics-body">
       <div className="diagnostics-privacy-note">
-        <span aria-hidden="true">▣</span>
+        <span aria-hidden="true"><DiagnosticGlyph name="shield" /></span>
         <p><strong>隐私边界：</strong>屏幕和 v5 导出不会包含 Token、Cookie、登录信息、用户消息、记忆正文、附件正文、Tool 输出或绝对 Home、Runtime、项目路径。</p>
       </div>
 
       {loading && <DiagnosticsLoading />}
       {!loading && initialError && !report && (
         <section className="diagnostics-state diagnostics-state-error" role="alert">
-          <span aria-hidden="true">!</span>
+          <span aria-hidden="true"><DiagnosticStatusIcon status="attention" /></span>
           <div><h2>无法读取诊断结果</h2><p>{initialError}</p></div>
           <button className="quiet-button" type="button" onClick={() => void runFullCheck()} disabled={running}>重试</button>
         </section>
@@ -237,12 +238,12 @@ export function DiagnosticsCenter({
           )}
           {notice && (
             <div className={`diagnostics-notice is-${notice.tone}`} role="status" aria-live="polite">
-              <span aria-hidden="true">{notice.tone === 'success' ? '✓' : notice.tone === 'attention' ? '!' : 'i'}</span>
+              <span aria-hidden="true"><DiagnosticStatusIcon status={notice.tone === 'success' ? 'ok' : notice.tone === 'attention' ? 'attention' : 'unknown'} /></span>
               <div><strong>{notice.title}</strong><small>{notice.detail}</small></div>
               {notice.exportPath && (
                 <button className="quiet-button compact" type="button" onClick={() => void window.rovai.revealDiagnosticsExport(notice.exportPath!)}>在 Finder 中显示</button>
               )}
-              <button className="icon-button" type="button" aria-label="关闭提示" onClick={() => setNotice(null)}>×</button>
+              <button className="icon-button" type="button" aria-label="关闭提示" onClick={() => setNotice(null)}><DiagnosticGlyph name="close" /></button>
             </div>
           )}
 
@@ -254,7 +255,7 @@ export function DiagnosticsCenter({
               <span className={`health-score ${issues.length === 0 ? 'is-ok' : ''}`}>{issues.length === 0 ? '全部正常' : `${issues.length} 项`}</span>
             </div>
             {issues.length === 0
-              ? <div className="diagnostics-issues-empty"><span aria-hidden="true">✓</span><div><strong>当前没有需要处理的问题</strong><p>暂时无法确认的项目仍保留在摘要和完整检查结果中。</p></div></div>
+              ? <div className="diagnostics-issues-empty"><span aria-hidden="true"><DiagnosticStatusIcon status="ok" /></span><div><strong>当前没有需要处理的问题</strong><p>暂时无法确认的项目仍保留在摘要和完整检查结果中。</p></div></div>
               : <div className="diagnostics-issue-list">{issues.map((check) => (
                   <DiagnosticIssue
                     key={check.id}
@@ -277,6 +278,7 @@ export function DiagnosticsCenter({
           />
         </>
       )}
+      </div>
     </div>
   )
 }
@@ -301,7 +303,9 @@ function DiagnosticsSummary({ report, recovery }: { report: DiagnosticsReport; r
   return (
     <section className="diagnostics-summary" aria-labelledby="diagnostics-summary-title">
       <div className="diagnostics-summary-primary">
-        <span className={`diagnostics-summary-mark ${healthy ? 'is-ok' : recovery ? 'is-recovery' : ''}`} aria-hidden="true">{healthy ? '✓' : recovery ? '↻' : '!'}</span>
+        <span className={`diagnostics-summary-mark ${healthy ? 'is-ok' : recovery ? 'is-recovery' : ''}`} aria-hidden="true">
+          {recovery ? <DiagnosticGlyph name="refresh" /> : <DiagnosticStatusIcon status={healthy ? 'ok' : 'attention'} />}
+        </span>
         <div><span>最近一次完整自检</span><h2 id="diagnostics-summary-title">{title}</h2><p>检查时间：{formatTimestamp(report.checkedAt)}。刷新失败时保留最近成功证据，并明确标注失败。</p></div>
       </div>
       <dl className="diagnostics-summary-counts">
@@ -330,7 +334,7 @@ function DiagnosticIssue({
   const copy = issueCopy(check)
   return (
     <article className="diagnostics-issue">
-      <span className="diagnostics-issue-mark" aria-label="需要处理">!</span>
+      <span className="diagnostics-issue-mark" aria-label="需要处理"><DiagnosticStatusIcon status="attention" /></span>
       <div className="diagnostics-issue-copy">
         <div><h3>{copy.title}</h3><span>{action?.kind.startsWith('repair_') ? '安全修复' : '用户操作'}</span></div>
         <p>{copy.reason}</p>
@@ -376,13 +380,13 @@ function DiagnosticsResults({
           const checks = visible.filter((check) => check.group === group)
           if (checks.length === 0) return null
           return (
-            <section className="diagnostics-result-group" key={group}>
-              <div className="diagnostics-result-group-heading"><strong>{groupLabel(group)}</strong><span>{checks.length} 项</span></div>
+            <details className="diagnostics-result-group" key={group} open>
+              <summary className="diagnostics-result-group-heading"><span><DiagnosticGlyph name="chevron" /><strong>{groupLabel(group)}</strong></span><span>{checks.length} 项</span></summary>
               {checks.map((check) => {
                 const action = resultActionForCheck(check)
                 return (
                   <div className="diagnostics-result-row" key={check.id}>
-                    <span className={`diagnostics-result-status is-${check.status}`} aria-label={STATUS_META[check.status].label}>{STATUS_META[check.status].symbol}</span>
+                    <span className={`diagnostics-result-status is-${check.status}`} aria-label={STATUS_META[check.status].label}><DiagnosticStatusIcon status={check.status} /></span>
                     <div className="diagnostics-result-name"><strong>{check.label}</strong><span>{STATUS_META[check.status].label}</span></div>
                     <div className="diagnostics-result-detail">{diagnosticCheckDetail(check)}</div>
                     {action && <button className="quiet-button compact" type="button" disabled={disabled} onClick={() => onAction(check)}>{repairingId === check.id ? '正在处理…' : action.label}</button>}
@@ -390,7 +394,7 @@ function DiagnosticsResults({
                   </div>
                 )
               })}
-            </section>
+            </details>
           )
         })}
         {visible.length === 0 && <div className="diagnostics-results-empty">当前筛选条件下没有检查结果。</div>}
@@ -402,7 +406,7 @@ function DiagnosticsResults({
 function DiagnosticDetails({ check, compact = false }: { check: DiagnosticCheck; compact?: boolean }): React.JSX.Element {
   return (
     <details className={`diagnostics-details ${compact ? 'is-compact' : ''}`}>
-      <summary>诊断详情</summary>
+      <summary><span>诊断详情</span><DiagnosticGlyph name="chevron" /></summary>
       <dl>
         <div><dt>状态代码</dt><dd><code>{check.code}</code></dd></div>
         {check.facts.map((fact) => <div key={fact.key}><dt>{factLabel(fact.key)}</dt><dd><code>{fact.value || '—'}</code></dd></div>)}
@@ -411,6 +415,29 @@ function DiagnosticDetails({ check, compact = false }: { check: DiagnosticCheck;
       <p><strong>检查证据：</strong>{check.detail}{check.stale ? '；这是最近成功证据，本次刷新未能确认。' : ''}</p>
     </details>
   )
+}
+
+function DiagnosticStatusIcon({ status }: { status: DiagnosticStatus }): React.JSX.Element {
+  if (status === 'ok') {
+    return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="m8 12 2.7 2.7L16.5 9" /></svg>
+  }
+  if (status === 'attention') {
+    return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.3 4.2 2.8 17.1A2 2 0 0 0 4.5 20h15a2 2 0 0 0 1.7-2.9L13.7 4.2a2 2 0 0 0-3.4 0Z" /><path d="M12 9v4" /><path d="M12 17h.01" /></svg>
+  }
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M9.8 9a2.4 2.4 0 0 1 4.65.8c0 1.8-2.45 2.05-2.45 3.7" /><path d="M12 17h.01" /></svg>
+}
+
+function DiagnosticGlyph({ name }: { name: 'shield' | 'close' | 'refresh' | 'chevron' }): React.JSX.Element {
+  if (name === 'shield') {
+    return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.6 2.8 8 7 10 4.2-2 7-5.4 7-10V6l-7-3Z" /><path d="m9 12 2 2 4-4" /></svg>
+  }
+  if (name === 'close') {
+    return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg>
+  }
+  if (name === 'refresh') {
+    return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5" /><path d="M4 17v-5h5" /><path d="M6.1 8.5A7 7 0 0 1 18.8 7L20 12M4 12l1.2 5a7 7 0 0 0 12.7-1.5" /></svg>
+  }
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 9.5 5 5 5-5" /></svg>
 }
 
 export function diagnosticActionForCheck(check: DiagnosticCheck): DiagnosticAction | null {

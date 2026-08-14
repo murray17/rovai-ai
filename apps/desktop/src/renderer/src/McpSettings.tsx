@@ -306,8 +306,8 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
     <div className="mcp-settings">
       <SettingsPageHeader
         eyebrow="Settings / MCP"
-        title="MCP 配置"
-        description="统一管理外部 MCP Server，并决定每位队员在后续执行中可以使用哪些 MCP。"
+        title="MCP"
+        description="管理 MCP 连接及队员可用范围。"
         aside={(
           <>
             <button className="quiet-button" type="button" onClick={() => void scan()} disabled={busy !== null || Boolean(config?.fileIssue)}>
@@ -320,90 +320,92 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
         )}
       />
 
-      <details className="mcp-source-disclosure">
-        <summary>
-          <span><b>配置源文件</b><code>{config?.path ?? '~/.rovai/mcp.json'}</code></span>
-          <span>查看标准 JSON</span>
-        </summary>
-        <div className="mcp-source-panel">
-          <div className="mcp-source-toolbar">
-            <p>这里只展示标准 <code>mcpServers</code>；内部元数据和敏感原文不会出现在预览中。</p>
-            <button className="quiet-button compact" type="button" onClick={() => void revealConfig()} disabled={busy !== null}>
-              {busy === 'reveal' ? '正在打开…' : '在 Finder 中显示'}
+      <div className="mcp-section-stack">
+        <details className="mcp-source-disclosure">
+          <summary>
+            <span><b>配置源文件</b><code>{config?.path ?? '~/.rovai/mcp.json'}</code></span>
+            <span>查看标准 JSON</span>
+          </summary>
+          <div className="mcp-source-panel">
+            <div className="mcp-source-toolbar">
+              <p>展示标准 <code>mcpServers</code>；内部元数据和敏感原文不出现在预览中。</p>
+              <button className="quiet-button compact" type="button" onClick={() => void revealConfig()} disabled={busy !== null}>
+                {busy === 'reveal' ? '正在打开…' : '在 Finder 中显示'}
+              </button>
+            </div>
+            <pre>{config?.publicConfigJson || '{\n  "mcpServers": {}\n}'}</pre>
+          </div>
+        </details>
+
+        {error && (
+          <div className="skill-page-error" role="alert">
+            <strong>操作未完成</strong><span>{error}</span>
+            <button className="quiet-button compact" type="button" onClick={() => setError(null)}>关闭</button>
+          </div>
+        )}
+
+        {config?.fileIssue && (
+          <div className="mcp-file-banner" role="alert">
+            <div>
+              <strong>无法使用 MCP 配置</strong>
+              <span>{issueText(config.fileIssue)} 原文件内容未被修改；后续新执行将不投影外部 MCP。</span>
+              <code>{config.path}</code>
+            </div>
+            <div className="mcp-file-actions">
+              <button className="quiet-button compact" type="button" onClick={() => void load()}>重新读取</button>
+              <button className="quiet-button compact" type="button" onClick={() => void revealConfig()}>打开文件</button>
+            </div>
+          </div>
+        )}
+
+        {config?.permissionIssue && !config.fileIssue && (
+          <div className="mcp-permission-banner" role="status">
+            <div><strong>配置文件权限过宽</strong><span>建议恢复为仅当前用户可读写。</span></div>
+            <button className="quiet-button compact" type="button" onClick={() => void repairPermissions()} disabled={busy !== null}>
+              {busy === 'permissions' ? '正在修复…' : '修复权限'}
             </button>
           </div>
-          <pre>{config?.publicConfigJson || '{\n  "mcpServers": {}\n}'}</pre>
-        </div>
-      </details>
+        )}
 
-      {error && (
-        <div className="skill-page-error" role="alert">
-          <strong>操作未完成</strong><span>{error}</span>
-          <button className="quiet-button compact" type="button" onClick={() => setError(null)}>关闭</button>
-        </div>
-      )}
-
-      {config?.fileIssue && (
-        <div className="mcp-file-banner" role="alert">
-          <div>
-            <strong>无法使用 MCP 配置</strong>
-            <span>{issueText(config.fileIssue)} 原文件内容未被修改；后续新执行将不投影外部 MCP。</span>
-            <code>{config.path}</code>
+        <section className="section-block mcp-assignment-section">
+          <div className="section-heading">
+            <div><h2>队员分配工作台</h2><p>选择队员，再勾选其后续新执行可以使用的 MCP。</p></div>
+            <span className="health-score">{members.length} 位队员</span>
           </div>
-          <div className="mcp-file-actions">
-            <button className="quiet-button compact" type="button" onClick={() => void load()}>重新读取</button>
-            <button className="quiet-button compact" type="button" onClick={() => void revealConfig()}>打开文件</button>
+          {config === null && <div className="skill-empty" aria-live="polite">正在读取 MCP 配置…</div>}
+          {config && members.length === 0 && <div className="skill-empty">当前没有可配置的队员。</div>}
+          {config && members.length > 0 && (
+            <McpAssignmentWorkbench
+              members={members}
+              servers={config.servers}
+              busy={busy}
+              disabled={Boolean(config.fileIssue)}
+              onAssignment={(agent, server, assigned) => void setAssignment(agent, server, assigned)}
+              onBulkAssignment={(agent, servers, assigned) => void setBulkAssignments(agent, servers, assigned)}
+            />
+          )}
+        </section>
+
+        <section className="section-block mcp-installed-section">
+          <div className="section-heading">
+            <div><h2>已安装的 MCP</h2><p>管理连接定义、启停状态与队员范围。</p></div>
+            <span className="health-score">{config?.servers.length ?? '—'} 个</span>
           </div>
-        </div>
-      )}
-
-      {config?.permissionIssue && !config.fileIssue && (
-        <div className="mcp-permission-banner" role="status">
-          <div><strong>配置文件权限过宽</strong><span>建议恢复为仅当前用户可读写。</span></div>
-          <button className="quiet-button compact" type="button" onClick={() => void repairPermissions()} disabled={busy !== null}>
-            {busy === 'permissions' ? '正在修复…' : '修复权限'}
-          </button>
-        </div>
-      )}
-
-      <section className="section-block mcp-assignment-section">
-        <div className="section-heading">
-          <div><span className="mcp-section-index">01</span><h2>队员分配工作台</h2><p>先选择队员，再搜索和勾选其后续新执行可以使用的 MCP。</p></div>
-          <span className="health-score">{members.length} 位队员</span>
-        </div>
-        {config === null && <div className="skill-empty" aria-live="polite">正在读取 MCP 配置…</div>}
-        {config && members.length === 0 && <div className="skill-empty">当前没有可配置的队员。</div>}
-        {config && members.length > 0 && (
-          <McpAssignmentWorkbench
-            members={members}
-            servers={config.servers}
-            busy={busy}
-            disabled={Boolean(config.fileIssue)}
-            onAssignment={(agent, server, assigned) => void setAssignment(agent, server, assigned)}
-            onBulkAssignment={(agent, servers, assigned) => void setBulkAssignments(agent, servers, assigned)}
-          />
-        )}
-      </section>
-
-      <section className="section-block mcp-installed-section">
-        <div className="section-heading">
-          <div><span className="mcp-section-index">02</span><h2>已安装的 MCP</h2><p>Server 的连接定义、启停与状态统一在这里管理。</p></div>
-          <span className="health-score">{config?.servers.length ?? '—'} 个</span>
-        </div>
-        {config && !config.fileIssue && config.servers.length === 0 && (
-          <div className="mcp-empty"><div><strong>还没有 MCP Server</strong><p>添加标准 JSON，或从本机 Agent 配置中选择可安全迁移的定义。</p></div></div>
-        )}
-        {config && !config.fileIssue && config.servers.length > 0 && (
-          <McpServerLibrary
-            members={members}
-            servers={config.servers}
-            busy={busy}
-            onToggleEnabled={(server) => void setEnabled(server)}
-            onEdit={(server) => setEditor({ serverId: server.serverId, definitionJson: server.definitionJson })}
-            onDelete={setDeleting}
-          />
-        )}
-      </section>
+          {config && !config.fileIssue && config.servers.length === 0 && (
+            <div className="mcp-empty"><div><strong>还没有 MCP Server</strong><p>添加标准 JSON，或从本机 Agent 配置中选择可安全迁移的定义。</p></div></div>
+          )}
+          {config && !config.fileIssue && config.servers.length > 0 && (
+            <McpServerLibrary
+              members={members}
+              servers={config.servers}
+              busy={busy}
+              onToggleEnabled={(server) => void setEnabled(server)}
+              onEdit={(server) => setEditor({ serverId: server.serverId, definitionJson: server.definitionJson })}
+              onDelete={setDeleting}
+            />
+          )}
+        </section>
+      </div>
 
       <JsonEditorDialog
         editor={editor}

@@ -1,5 +1,5 @@
 ---
-version: 2
+version: 3
 slug: "memory-workspace"
 primary_target: "apps/desktop/src/renderer/src/MemoryLibrary.tsx"
 related_targets:
@@ -15,14 +15,15 @@ perform explicit governed writes without confusing projected evidence with edita
 
 ## First view and hierarchy
 
-Keep the shared App rail, then a full-width Memory header, a compact four-part summary strip and a
-bounded attention banner when Hearth Review Items need review. The main workbench is a list/detail split, not a
-wall of cards. At desktop widths the list is at least 310px and the detail at least 390px; at the
-minimum window they reflow without whole-page horizontal scrolling.
+Keep the shared App rail, then a full-width Memory header with the English subtitle
+“Memory / Library”, four quiet summary surfaces and a bounded attention banner when Hearth Review
+Items need review. The header has no decorative top edge or bottom rule. The main workbench is a
+list/detail split, not a wall of cards. At desktop widths the list is at least 310px and the detail at
+least 390px; at the minimum window they reflow without whole-page horizontal scrolling.
 
 Memory uses current theme surfaces but preserves evidence tokens for source text, revisions and
-projection details. Steel establishes top edges, tabs and selection; attention marks pending review,
-not ordinary Memory content.
+projection details. Steel establishes subtitles, active tabs and selection rather than a decorative
+page edge; attention marks pending review, not ordinary Memory content.
 
 ## Summary, policy and Hearth review
 
