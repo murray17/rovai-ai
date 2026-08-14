@@ -43,10 +43,12 @@ pub struct Database {
     path: PathBuf,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.77";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 38;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.78";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 39;
 const V083_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.73";
 const V083_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 37;
+const V084_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.77";
+const V084_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 38;
 const V082_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.71";
 const V082_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 36;
 const V081_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.71";
@@ -81,6 +83,7 @@ struct CurrentMigrationState {
     v81: bool,
     v82: bool,
     v83: bool,
+    v84: bool,
 }
 
 impl CurrentMigrationState {
@@ -90,6 +93,24 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84;
+        }
+        if self.v84 {
+            return false;
+        }
+        if contract == V084_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V084_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -298,7 +319,8 @@ fn has_current_data_contract(path: &Path) -> bool {
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 80),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 81),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 82),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 83)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 83),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 84)
         "#,
         [],
         |row| {
@@ -317,6 +339,7 @@ fn has_current_data_contract(path: &Path) -> bool {
                 v81: row.get(11)?,
                 v82: row.get(12)?,
                 v83: row.get(13)?,
+                v84: row.get(14)?,
             })
         },
     );
@@ -1416,6 +1439,9 @@ impl Database {
             if !self.schema_migration_applied(83)? {
                 self.migrate_composer_reply_intent_v83()?;
             }
+            if !self.schema_migration_applied(84)? {
+                self.migrate_exact_scope_memory_view_v84()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -1714,6 +1740,9 @@ impl Database {
         }
         if !self.schema_migration_applied(83)? {
             self.migrate_composer_reply_intent_v83()?;
+        }
+        if !self.schema_migration_applied(84)? {
+            self.migrate_exact_scope_memory_view_v84()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -9079,6 +9108,71 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_exact_scope_memory_view_v84(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            -- v0.78 is an intentional pre-release clean break for the Memory domain.
+            -- Collaboration state, AgentProfiles, Camps, Tasks, and messages are preserved.
+            DROP TABLE memory_access_evidence;
+
+            DELETE FROM memory_supersession;
+            DELETE FROM hearth_review_item;
+            DELETE FROM memory_revision_retrieval_key;
+            DELETE FROM memory_revision;
+            DELETE FROM memory;
+            DELETE FROM memory_fts;
+
+            DELETE FROM event_log
+            WHERE event_type LIKE 'memory.%'
+               OR (event_type = 'command.result' AND command_type LIKE 'memory.%');
+
+            UPDATE memory_search_state
+            SET status = 'ready',
+                index_version = index_version + 1,
+                diagnostic_code = NULL,
+                rebuilt_at = datetime('now')
+            WHERE singleton = 1;
+
+            CREATE TABLE memory_access_evidence (
+                id TEXT PRIMARY KEY,
+                native_binding_id TEXT NOT NULL,
+                native_binding_generation INTEGER NOT NULL
+                    CHECK(native_binding_generation >= 1),
+                agent_id TEXT NOT NULL,
+                camp_id TEXT NOT NULL,
+                evidence_kind TEXT NOT NULL
+                    CHECK(evidence_kind IN ('entrypoint', 'view', 'search', 'read')),
+                query_digest TEXT,
+                memory_id TEXT NOT NULL,
+                observed_revision_id TEXT,
+                authorization_basis_digest TEXT NOT NULL,
+                outcome TEXT NOT NULL CHECK(outcome IN (
+                    'current', 'revision_changed', 'inactive', 'deleted',
+                    'access_changed', 'unavailable'
+                )),
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX memory_access_evidence_binding_memory_idx
+                ON memory_access_evidence(
+                    native_binding_id, native_binding_generation, memory_id, created_at
+                );
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v0.78', projection_schema_version = 39,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (84, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -13497,15 +13591,15 @@ mod tests {
             .execute_batch(
                 r#"
                 UPDATE rovai_data_contract
-                SET contract_version = 'v0.73', projection_schema_version = 37
+                SET contract_version = 'v0.77', projection_schema_version = 38
                 WHERE singleton = 1;
-                DELETE FROM schema_migration WHERE version = 83;
+                DELETE FROM schema_migration WHERE version = 84;
                 "#,
             )
             .unwrap();
         assert!(
             has_current_data_contract(&path),
-            "the exact v0.73/schema-37 marker without migration 83 is an upgrade source"
+            "the exact v0.77/schema-38 marker without migration 84 is an upgrade source"
         );
 
         database
@@ -13515,6 +13609,7 @@ mod tests {
                 UPDATE rovai_data_contract
                 SET contract_version = 'v0.71', projection_schema_version = 35
                 WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 83;
                 DELETE FROM schema_migration WHERE version = 81;
                 DELETE FROM schema_migration WHERE version = 82;
                 "#,
@@ -14049,7 +14144,13 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.77".to_string(), 38));
+        assert_eq!(
+            contract,
+            (
+                CURRENT_DATA_CONTRACT_VERSION.to_string(),
+                CURRENT_PROJECTION_SCHEMA_VERSION
+            )
+        );
         let v77_applied: i64 = database
             .connection()
             .query_row(
@@ -14159,7 +14260,13 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.77".to_string(), 38));
+        assert_eq!(
+            contract,
+            (
+                CURRENT_DATA_CONTRACT_VERSION.to_string(),
+                CURRENT_PROJECTION_SCHEMA_VERSION
+            )
+        );
         drop(database);
 
         let reopened = Database::open(&directory).expect("v80 database should reopen");
@@ -14263,7 +14370,13 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.77".to_string(), 38));
+        assert_eq!(
+            contract,
+            (
+                CURRENT_DATA_CONTRACT_VERSION.to_string(),
+                CURRENT_PROJECTION_SCHEMA_VERSION
+            )
+        );
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
@@ -15906,6 +16019,174 @@ mod tests {
     }
 
     #[test]
+    fn v84_clean_break_clears_only_memory_domain_state_and_admits_view_evidence() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v84-test-{}", Uuid::new_v4()));
+        let mut database = Database::open(&directory).expect("database should open");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO project(
+                    id, name, kind, root_path, git_common_dir, created_at, last_opened_at
+                ) VALUES (
+                    'v84-project', 'Preserved project', 'git',
+                    '/tmp/rovai-v84-project', '/tmp/rovai-v84-project/.git',
+                    '2026-08-14T00:00:00Z', '2026-08-14T00:00:00Z'
+                );
+
+                PRAGMA defer_foreign_keys = ON;
+                BEGIN IMMEDIATE;
+                INSERT INTO memory(
+                    id, scope_kind, kind, creation_origin, lifecycle_status,
+                    current_revision_id, version, created_at, updated_at
+                ) VALUES (
+                    'v84-memory', 'hearth', 'lesson', 'user', 'active',
+                    'v84-revision', 1, '2026-08-14T00:00:00Z',
+                    '2026-08-14T00:00:00Z'
+                );
+                INSERT INTO memory_revision(
+                    id, memory_id, body, body_utf8_bytes, body_digest,
+                    actor_kind, actor_id, created_at
+                ) VALUES (
+                    'v84-revision', 'v84-memory', 'pre-release Memory', 18,
+                    'sha256:v84', 'user', 'local_user', '2026-08-14T00:00:00Z'
+                );
+                INSERT INTO memory_revision_retrieval_key(
+                    revision_id, position, normalized_key
+                ) VALUES ('v84-revision', 0, 'pre release');
+                INSERT INTO memory_fts(memory_id, revision_id, retrieval_keys, body)
+                VALUES ('v84-memory', 'v84-revision', 'pre release', 'pre-release Memory');
+                INSERT INTO hearth_review_item(
+                    id, requested_action, status, candidate_kind, candidate_body,
+                    candidate_body_utf8_bytes, candidate_retrieval_keys_json,
+                    pending_key_digest, source_agent_id, source_camp_id,
+                    source_agent_run_id, source_execution_epoch, version, created_at
+                ) VALUES (
+                    'v84-review', 'add', 'pending', 'lesson', 'pending candidate',
+                    17, '["pending candidate"]', 'sha256:pending', 'agent_1',
+                    'old-camp', 'old-run', 1, 1, '2026-08-14T00:00:00Z'
+                );
+                COMMIT;
+
+                INSERT INTO event_log(
+                    event_id, event_type, payload_json, entity_type, entity_id,
+                    actor_type, actor_id, created_at
+                ) VALUES (
+                    'v84-memory-event', 'memory.created', '{}', 'memory',
+                    'v84-memory', 'user', 'local_user', '2026-08-14T00:00:00Z'
+                );
+                INSERT INTO event_log(
+                    event_id, event_type, payload_json, actor_type, actor_id,
+                    source_agent_run_id, execution_epoch, command_id, command_type,
+                    request_digest, request_digest_version, result_status, result_code,
+                    result_payload_json, created_at
+                ) VALUES (
+                    'v84-command-event', 'command.result', '{}', 'agent', 'agent_1',
+                    'old-run', 1, 'old-memory-command', 'memory.write',
+                    'sha256:request', 1, 'applied', 'memory.created', '{}',
+                    '2026-08-14T00:00:00Z'
+                );
+                INSERT INTO event_log(
+                    event_id, event_type, payload_json, actor_type, actor_id, created_at
+                ) VALUES (
+                    'v84-preserved-event', 'camp.preserved', '{}', 'system',
+                    'v84-test', '2026-08-14T00:00:00Z'
+                );
+
+                DELETE FROM schema_migration WHERE version = 84;
+                UPDATE rovai_data_contract
+                SET contract_version = 'v0.77', projection_schema_version = 38
+                WHERE singleton = 1;
+                "#,
+            )
+            .expect("pre-v84 Memory fixture should be valid");
+
+        database
+            .migrate_exact_scope_memory_view_v84()
+            .expect("v84 Memory clean break should apply atomically");
+
+        for table in [
+            "memory",
+            "memory_revision",
+            "memory_revision_retrieval_key",
+            "hearth_review_item",
+            "memory_supersession",
+            "memory_fts",
+        ] {
+            let count: i64 = database
+                .connection()
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "{table} should be empty after the clean break");
+        }
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM project WHERE id = 'v84-project'",
+                    [],
+                    |row| { row.get::<_, i64>(0) }
+                )
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM event_log WHERE event_id IN ('v84-memory-event', 'v84-command-event')",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM event_log WHERE event_id = 'v84-preserved-event'",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
+        let search_state: (String, Option<String>) = database
+            .connection()
+            .query_row(
+                "SELECT status, diagnostic_code FROM memory_search_state WHERE singleton = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(search_state, ("ready".to_string(), None));
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO memory_access_evidence(
+                    id, native_binding_id, native_binding_generation, agent_id,
+                    camp_id, evidence_kind, memory_id, observed_revision_id,
+                    authorization_basis_digest, outcome, created_at
+                ) VALUES (
+                    'v84-view-evidence', 'binding', 1, 'agent_1', 'camp', 'view',
+                    'memory', 'revision', 'sha256:authorization', 'current',
+                    '2026-08-14T00:00:00Z'
+                )
+                "#,
+                [],
+            )
+            .expect("v84 evidence schema should admit Memory View evidence");
+        assert!(has_current_data_contract(&directory.join("rovai.sqlite")));
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
     fn v82_migrates_legacy_review_rows_and_preserves_formal_memory() {
         let directory =
             std::env::temp_dir().join(format!("rovai-db-v82-fixture-{}", Uuid::new_v4()));
@@ -16584,7 +16865,14 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(agent_cli_contract, ("v0.77".to_string(), 38, 1));
+        assert_eq!(
+            agent_cli_contract,
+            (
+                CURRENT_DATA_CONTRACT_VERSION.to_string(),
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                1
+            )
+        );
         assert_eq!(foreign_key_violations, 0);
 
         drop(database);
@@ -17214,7 +17502,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.77".to_string(), 22));
+        assert_eq!(contract, (CURRENT_DATA_CONTRACT_VERSION.to_string(), 22));
         let migration_count: i64 = reopened
             .connection()
             .query_row(
@@ -17245,7 +17533,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, (38, 1));
+        assert_eq!(contract, (CURRENT_PROJECTION_SCHEMA_VERSION, 1));
         let error = database
             .connection()
             .execute(
@@ -17565,7 +17853,13 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.77".to_string(), 38));
+        assert_eq!(
+            contract,
+            (
+                CURRENT_DATA_CONTRACT_VERSION.to_string(),
+                CURRENT_PROJECTION_SCHEMA_VERSION
+            )
+        );
         let public_a2a_migration_applied: i64 = database
             .connection()
             .query_row(

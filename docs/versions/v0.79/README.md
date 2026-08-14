@@ -17,11 +17,10 @@ last_updated: 2026-08-14
 > 这些 `camps.*` 能力是 Desktop 内部的 typed IPC / Core read surface，不进入 Agent Built-in CLI、
 > help、catalog、Bootstrap 或模型可见工具集合。
 >
-> 前置主线版本：[v0.77 持久消息回复链与显式接收者修复](../v0.77/README.md)
+> 前置主线版本：[v0.78 完整 Exact-Scope Memory View 与 Copyable Target](../v0.78/README.md)
 >
-> 编号说明：`v0.78` 已由并行 continuation-routing prototype durable task 占用，因此本 worktree
-> 使用 `v0.79`。合入前必须重放到届时 canonical predecessor，并修正前后版本链接；不得覆盖
-> `v0.78` 的独立现场或把它静默并入本版本范围。
+> 主线重放说明：已完成的 v0.78 Memory 版本是本版本的 canonical predecessor；v0.79 保持独立的
+> Camp 打开性能范围，不覆盖或静默并入 v0.78 的 Memory 交付。
 
 ## 版本目标
 
@@ -188,7 +187,7 @@ hydration、serialization / IPC 与 React commit / paint，不能只给一个总
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
-| Version lifecycle | 已更新 | [版本索引](../README.md)、v0.77 lifecycle、本概览与[实施计划](implementation-plan.md)已切换到唯一 current v0.79；合入前仍须按 canonical v0.78 结果重放前后链接 |
+| Version lifecycle | 已更新 | [版本索引](../README.md)、v0.78 lifecycle、本概览与[实施计划](implementation-plan.md)已按 canonical predecessor 重放，并切换到唯一 current v0.79 |
 | ADR | 确认无需更新 | 本版本保留 ADR-0013 的 SQLite Read Side / sequence authority 与 ADR-0058 的 reconcile-before-read 语义；若 Checkpoint 0 需要改变二者，必须先新增替代 ADR |
 | Contracts | 确认无需更新 | 本次只开启版本，尚未冻结新的 wire shape；Checkpoint 0 必须在编码前新增或升级 Desktop open projection Contract，不能让版本文档代替字段合同 |
 | Architecture | 确认无需更新 | 当前仍是 Renderer → Electron Main allowlist → Core SQLite Read Side；若过程详情拆分形成新的稳定组件责任，实施前再更新 Architecture |

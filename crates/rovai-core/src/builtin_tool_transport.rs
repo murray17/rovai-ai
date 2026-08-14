@@ -6,13 +6,13 @@ use serde_json::{Map, Value, json};
 
 use crate::{command::canonical_json_digest, team_tool_catalog::builtin_tool_definitions};
 
-pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 10;
+pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 11;
 pub const BUILTIN_TOOL_IPC_PROTOCOL_VERSION: u32 = 1;
 pub const BUILTIN_TOOL_ENVELOPE_VERSION: u32 = 1;
 pub const BUILTIN_TOOL_RECEIPT_VERSION: u32 = 1;
-pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 10;
+pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 11;
 pub const BUILTIN_TOOL_AGENT_OUTPUT_CONTRACT_VERSION: u32 = 2;
-pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v10";
+pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v11";
 pub const BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES: usize = 1024 * 1024;
 pub const ROVAI_AGENT_CLI_ENV: &str = "ROVAI_AGENT_CLI";
 pub const ROVAI_CLI_CONTEXT_ENV: &str = "ROVAI_CLI_CONTEXT";
@@ -128,7 +128,7 @@ pub struct BuiltinToolCliIdentity {
     pub action: &'static str,
 }
 
-pub const BUILTIN_TOOL_CLI_IDENTITIES: [BuiltinToolCliIdentity; 12] = [
+pub const BUILTIN_TOOL_CLI_IDENTITIES: [BuiltinToolCliIdentity; 13] = [
     BuiltinToolCliIdentity {
         operation: "camp.message.send",
         group: "send",
@@ -173,6 +173,11 @@ pub const BUILTIN_TOOL_CLI_IDENTITIES: [BuiltinToolCliIdentity; 12] = [
         operation: "history.search",
         group: "history",
         action: "search",
+    },
+    BuiltinToolCliIdentity {
+        operation: "memory.view",
+        group: "memory",
+        action: "view",
     },
     BuiltinToolCliIdentity {
         operation: "memory.search",
@@ -725,6 +730,10 @@ fn error_contracts(operation: &str) -> Vec<BuiltinToolErrorContract> {
                 });
             }
         }
+        "memory.view" => errors.push(BuiltinToolErrorContract {
+            code: "memory.view_unavailable".to_string(),
+            recovery: BuiltinToolRecovery::Stop,
+        }),
         _ => {}
     }
     errors.sort_by(|left, right| left.code.cmp(&right.code));
@@ -739,7 +748,7 @@ pub fn projection_identity(operation: &str) -> Result<&'static str> {
         "memory.write" => Ok("memory-write-v2"),
         "team.create_task" | "team.get_task" | "team.list_tasks" | "team.update_task"
         | "camp.list" | "camp.search" | "camp.read" | "history.search" | "memory.search"
-        | "memory.read" => Ok("canonical-result-v1"),
+        | "memory.read" | "memory.view" => Ok("canonical-result-v1"),
         _ => bail!("unknown built-in operation for Agent output projection"),
     }
 }
@@ -862,9 +871,9 @@ mod tests {
 
     #[test]
     fn cli_mapping_is_complete_unique_and_contract_valid() {
-        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 10);
-        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 10);
-        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v10");
+        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 11);
+        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 11);
+        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v11");
         validate_builtin_tool_contract().unwrap();
         let operations = BUILTIN_TOOL_CLI_IDENTITIES
             .iter()
@@ -874,8 +883,8 @@ mod tests {
             .iter()
             .map(|identity| (identity.group, identity.action))
             .collect::<BTreeSet<_>>();
-        assert_eq!(operations.len(), 12);
-        assert_eq!(commands.len(), 12);
+        assert_eq!(operations.len(), 13);
+        assert_eq!(commands.len(), 13);
     }
 
     #[test]

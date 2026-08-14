@@ -53,11 +53,13 @@ pub fn agent_output_schema(operation: &str) -> Result<Value> {
         "team.create_task" => Ok(task_mutation_agent_schema(false)),
         "team.update_task" => Ok(task_mutation_agent_schema(true)),
         "team.get_task" | "team.list_tasks" | "camp.list" | "camp.search" | "camp.read"
-        | "history.search" | "memory.search" | "memory.read" => builtin_tool_definitions()
-            .into_iter()
-            .find(|definition| definition["name"].as_str() == Some(operation))
-            .map(|definition| definition["outputSchema"].clone())
-            .context("unknown built-in operation for Agent output schema"),
+        | "history.search" | "memory.view" | "memory.search" | "memory.read" => {
+            builtin_tool_definitions()
+                .into_iter()
+                .find(|definition| definition["name"].as_str() == Some(operation))
+                .map(|definition| definition["outputSchema"].clone())
+                .context("unknown built-in operation for Agent output schema")
+        }
         _ => bail!("unknown built-in operation for Agent output schema"),
     }
 }
@@ -115,7 +117,7 @@ fn project_success(operation: &str, result: &Value) -> Result<Value> {
         "team.create_task" => project_task_mutation(object, false),
         "team.update_task" => project_task_mutation(object, true),
         "team.get_task" | "team.list_tasks" | "camp.list" | "camp.search" | "camp.read"
-        | "history.search" | "memory.search" | "memory.read" => Ok(result.clone()),
+        | "history.search" | "memory.view" | "memory.search" | "memory.read" => Ok(result.clone()),
         _ => bail!("unknown built-in operation for Agent output projection"),
     }
 }
@@ -505,7 +507,7 @@ mod tests {
         ))
         .unwrap();
         let documents = golden.as_object().unwrap();
-        assert_eq!(documents.len(), 12);
+        assert_eq!(documents.len(), 13);
         for definition in builtin_tool_definitions() {
             let operation = definition["name"].as_str().unwrap();
             let fixture = documents

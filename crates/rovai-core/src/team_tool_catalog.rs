@@ -10,8 +10,8 @@ use crate::{
     },
     camp_message_send_teaching::CAMP_MESSAGE_SEND_SUMMARY,
     memory_retrieval::{
-        MEMORY_READ_TOOL_NAME, MEMORY_SEARCH_TOOL_NAME, MemoryReadInput, MemoryRetrievalService,
-        MemorySearchInput,
+        MEMORY_READ_TOOL_NAME, MEMORY_SEARCH_TOOL_NAME, MEMORY_VIEW_TOOL_NAME, MemoryReadInput,
+        MemoryRetrievalService, MemorySearchInput, MemoryViewInput,
     },
     memory_tool::{MEMORY_WRITE_TOOL_NAME, MemoryToolService, MemoryWriteToolInput},
     message_delivery::CAMP_MESSAGE_SEND_TOOL_NAME,
@@ -58,6 +58,9 @@ pub fn validate_builtin_tool_input(canonical_name: &str, input: &Value) -> Resul
         }
         MEMORY_READ_TOOL_NAME => {
             serde_json::from_value::<MemoryReadInput>(input.clone()).map(|_| ())
+        }
+        MEMORY_VIEW_TOOL_NAME => {
+            serde_json::from_value::<MemoryViewInput>(input.clone()).map(|_| ())
         }
         MEMORY_WRITE_TOOL_NAME => {
             serde_json::from_value::<MemoryWriteToolInput>(input.clone()).map(|_| ())
@@ -426,10 +429,15 @@ fn memory_search_result_schema(scope: &str, relationship: bool) -> Value {
         "retrievalKeys",
         "snippet",
     ];
+    let kinds = if relationship {
+        json!(["agreement", "lesson"])
+    } else {
+        json!(["preference", "agreement", "lesson"])
+    };
     let mut properties = json!({
         "memoryId": {"type": "string"},
         "revisionId": {"type": "string"},
-        "kind": {"type": "string", "enum": ["preference", "agreement", "lesson"]},
+        "kind": {"type": "string", "enum": kinds},
         "scope": {"const": scope},
         "retrievalKeys": {
             "type": "array",
@@ -462,9 +470,10 @@ fn memory_read_success_schema() -> Value {
                 "maxItems": 4,
                 "items": {
                     "oneOf": [
-                        memory_read_authorized_schema("hearth", false),
-                        memory_read_authorized_schema("companion", false),
-                        memory_read_authorized_schema("relationship", true),
+                        memory_read_authorized_schema("hearth", None, true),
+                        memory_read_authorized_schema("companion", None, true),
+                        memory_read_authorized_schema("relationship", Some("directed"), true),
+                        memory_read_authorized_schema("relationship", Some("mutual"), false),
                         {
                             "type": "object",
                             "additionalProperties": false,
@@ -484,22 +493,31 @@ fn memory_read_success_schema() -> Value {
     })
 }
 
-fn memory_read_authorized_schema(scope: &str, relationship: bool) -> Value {
-    let mut required = vec![
+fn memory_read_authorized_schema(
+    scope: &str,
+    relationship_direction: Option<&str>,
+    agent_can_revise: bool,
+) -> Value {
+    let required = vec![
         "memoryId",
         "cacheState",
-        "revisionId",
+        "target",
         "kind",
-        "scope",
+        "agentCanRevise",
         "retrievalKeys",
         "body",
     ];
-    let mut properties = json!({
+    let kinds = if relationship_direction.is_some() {
+        json!(["agreement", "lesson"])
+    } else {
+        json!(["preference", "agreement", "lesson"])
+    };
+    let properties = json!({
         "memoryId": {"type": "string"},
         "cacheState": {"type": "string", "enum": ["current", "revision_changed"]},
-        "revisionId": {"type": "string"},
-        "kind": {"type": "string", "enum": ["preference", "agreement", "lesson"]},
-        "scope": {"const": scope},
+        "target": memory_target_schema(scope, relationship_direction),
+        "kind": {"type": "string", "enum": kinds},
+        "agentCanRevise": {"const": agent_can_revise},
         "retrievalKeys": {
             "type": "array",
             "items": {"type": "string"},
@@ -507,16 +525,108 @@ fn memory_read_authorized_schema(scope: &str, relationship: bool) -> Value {
         },
         "body": {"type": "string"}
     });
-    if relationship {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": required,
+        "properties": properties
+    })
+}
+
+fn memory_target_schema(scope: &str, relationship_direction: Option<&str>) -> Value {
+    let mut required = vec!["memoryId", "revisionId", "scope"];
+    let mut properties = json!({
+        "memoryId": {"type": "string"},
+        "revisionId": {"type": "string"},
+        "scope": {"const": scope}
+    });
+    if let Some(direction) = relationship_direction {
         required.extend(["counterpartyAgentId", "direction"]);
         properties["counterpartyAgentId"] = json!({"type": "string"});
-        properties["direction"] = json!({"type": "string", "enum": ["mutual", "directed"]});
+        properties["direction"] = json!({"const": direction});
     }
     json!({
         "type": "object",
         "additionalProperties": false,
         "required": required,
         "properties": properties
+    })
+}
+
+fn memory_view_success_schema() -> Value {
+    json!({
+        "oneOf": [
+            memory_view_scope_schema("hearth", false, 32, 16 * 1024),
+            memory_view_scope_schema("companion", false, 32, 16 * 1024),
+            memory_view_scope_schema("relationship", true, 12, 12 * 1024)
+        ]
+    })
+}
+
+fn memory_view_scope_schema(
+    scope: &str,
+    relationship: bool,
+    max_items: usize,
+    max_body_bytes: usize,
+) -> Value {
+    let item_schema = if relationship {
+        json!({
+            "oneOf": [
+                memory_view_item_schema(scope, Some("directed"), true),
+                memory_view_item_schema(scope, Some("mutual"), false)
+            ]
+        })
+    } else {
+        memory_view_item_schema(scope, None, true)
+    };
+    let mut required = vec!["scope", "complete", "itemCount", "totalBodyBytes", "items"];
+    let mut properties = json!({
+        "scope": {"const": scope},
+        "complete": {"const": true},
+        "itemCount": {"type": "integer", "minimum": 0, "maximum": max_items},
+        "totalBodyBytes": {"type": "integer", "minimum": 0, "maximum": max_body_bytes},
+        "items": {
+            "type": "array",
+            "maxItems": max_items,
+            "items": item_schema
+        }
+    });
+    if relationship {
+        required.push("counterpartyAgentId");
+        properties["counterpartyAgentId"] = json!({"type": "string"});
+    }
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": required,
+        "properties": properties
+    })
+}
+
+fn memory_view_item_schema(
+    scope: &str,
+    relationship_direction: Option<&str>,
+    agent_can_revise: bool,
+) -> Value {
+    let kinds = if relationship_direction.is_some() {
+        json!(["agreement", "lesson"])
+    } else {
+        json!(["preference", "agreement", "lesson"])
+    };
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["target", "kind", "retrievalKeys", "body", "agentCanRevise"],
+        "properties": {
+            "target": memory_target_schema(scope, relationship_direction),
+            "kind": {"type": "string", "enum": kinds},
+            "retrievalKeys": {
+                "type": "array", "minItems": 1, "maxItems": 3,
+                "uniqueItems": true, "items": {"type": "string"}
+            },
+            "body": {"type": "string"},
+            "agentCanRevise": {"const": agent_can_revise}
+        }
     })
 }
 
@@ -612,6 +722,13 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
             "outputSchema": camp_read_success_schema()
         }),
         json!({
+            "name": MEMORY_VIEW_TOOL_NAME,
+            "title": "View one complete Memory scope",
+            "description": "Return the complete current applicable Memory set for Hearth, this Agent's Companion, or one exact Relationship pair. The result is never paginated or truncated; copy one returned target unchanged into memory.write revise.",
+            "inputSchema": MemoryRetrievalService::view_input_schema(),
+            "outputSchema": memory_view_success_schema()
+        }),
+        json!({
             "name": MEMORY_SEARCH_TOOL_NAME,
             "title": "Search current Memory",
             "description": "Search active Memory that is currently accessible to this Agent. Results are discovery hints, include immutable Scope identity for safe target selection, and do not include full bodies.",
@@ -621,14 +738,14 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
         json!({
             "name": MEMORY_READ_TOOL_NAME,
             "title": "Read current Memory",
-            "description": "Resolve stable Memory IDs against current Revision, lifecycle, Camp access, and Presence. Authorized current results include immutable Scope identity; stale/deleted results never return old bodies or target identity.",
+            "description": "Resolve stable Memory IDs against current Revision, lifecycle, Camp access, and Presence. Authorized current results include one copyable target; stale/deleted results never return old bodies or target identity.",
             "inputSchema": MemoryRetrievalService::read_input_schema(),
             "outputSchema": memory_read_success_schema()
         }),
         json!({
             "name": MEMORY_WRITE_TOOL_NAME,
             "title": "Write actor-bounded Memory",
-            "description": "Add or revise Memory within the current Agent's authority. Revise must copy the exact immutable Scope identity from memory.read. Companion and directed Relationship writes are immediately effective; Hearth writes create a pending user Review Item.",
+            "description": "Add or revise Memory within the current Agent's authority. Revise must copy the exact target from the deciding memory.view or current memory.read result. Companion and directed Relationship writes are immediately effective; Hearth writes create a pending user Review Item.",
             "inputSchema": MemoryToolService::write_input_schema(),
             "outputSchema": {
                 "oneOf": [
@@ -776,7 +893,7 @@ mod tests {
     }
 
     #[test]
-    fn memory_revise_schema_requires_one_complete_scope_identity() {
+    fn memory_revise_schema_requires_one_complete_copyable_target() {
         let old_shape = json!({
             "action": "revise",
             "memoryId": "memory_1",
@@ -786,21 +903,37 @@ mod tests {
         });
         assert!(validate_builtin_tool_input(MEMORY_WRITE_TOOL_NAME, &old_shape).is_err());
 
-        let mut companion = old_shape.clone();
-        companion["scope"] = json!("companion");
+        let companion = json!({
+            "action": "revise",
+            "target": {
+                "memoryId": "memory_1",
+                "revisionId": "revision_1",
+                "scope": "companion"
+            },
+            "body": "Replacement durable agreement.",
+            "retrievalKeys": ["replacement agreement"]
+        });
         validate_builtin_tool_input(MEMORY_WRITE_TOOL_NAME, &companion).unwrap();
 
-        let mut relationship = old_shape.clone();
-        relationship["scope"] = json!("relationship");
-        relationship["counterpartyAgentId"] = json!("agent_3");
-        relationship["direction"] = json!("directed");
+        let mut relationship = companion.clone();
+        relationship["target"] = json!({
+            "memoryId": "memory_1",
+            "revisionId": "revision_1",
+            "scope": "relationship",
+            "counterpartyAgentId": "agent_3",
+            "direction": "directed"
+        });
         validate_builtin_tool_input(MEMORY_WRITE_TOOL_NAME, &relationship).unwrap();
-        relationship["direction"] = json!("mutual");
+        relationship["target"]["direction"] = json!("mutual");
         assert!(validate_builtin_tool_input(MEMORY_WRITE_TOOL_NAME, &relationship).is_err());
 
-        let mut hearth = old_shape;
-        hearth["scope"] = json!("hearth");
-        hearth["counterpartyAgentId"] = json!("agent_3");
+        let mut hearth = companion;
+        hearth["target"] = json!({
+            "memoryId": "memory_1",
+            "revisionId": "revision_1",
+            "scope": "hearth",
+            "counterpartyAgentId": "agent_3"
+        });
         assert!(validate_builtin_tool_input(MEMORY_WRITE_TOOL_NAME, &hearth).is_err());
     }
 }

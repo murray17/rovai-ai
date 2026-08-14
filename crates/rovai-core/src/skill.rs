@@ -3750,12 +3750,13 @@ mod tests {
             "文件路径、SQLite、Markdown Projection 或 Skill Projection",
             "credentials",
             "当前队员 → counterparty",
-            "baseRevisionId",
+            "target",
             "Scope、Kind、counterparty 或 Relationship direction",
             "2,048 UTF-8 bytes",
             "1–3 个 key",
             "2–24 UTF-8 bytes",
             "48 UTF-8 bytes",
+            "rovai memory view --help",
             "rovai memory search --help",
             "rovai memory read --help",
             "rovai memory write --help",
@@ -3774,6 +3775,7 @@ mod tests {
             "`memory.read`",
             "`memory.write`",
             "`memory.propose_hearth`",
+            "baseRevisionId",
             "rovai memory --help",
         ] {
             assert!(!memory_semantics.contains(forbidden));

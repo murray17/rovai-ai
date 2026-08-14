@@ -9836,7 +9836,7 @@ mod tests {
         let charter = build_session_charter(&snapshot);
         assert!(BUILTIN_CLI_CHARTER.len() <= 2_560);
         assert!(charter.contains(
-            "Rovai built-in operations are the following twelve fixed local CLI commands, never MCP"
+            "Rovai built-in operations are the following thirteen fixed local CLI commands, never MCP"
         ));
         assert!(charter.contains(
             "Run `rovai --help` to choose an operation, then run that operation's exact `--help`. Do not assume that a command family has its own help entry."

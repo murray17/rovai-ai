@@ -2,13 +2,13 @@
 document_type: adr
 id: ADR-0183
 title: Scope-Identified Agent Memory Revision Targets
-status: accepted
+status: superseded
 date: 2026-08-14
 decision_scope: cross-version
 source_version: v0.75
 supersedes: []
 intended_supersedes: []
-superseded_by: null
+superseded_by: ADR-0186
 ---
 
 # ADR-0183: Scope-Identified Agent Memory Revision Targets

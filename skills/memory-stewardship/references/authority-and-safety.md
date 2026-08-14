@@ -7,7 +7,8 @@ Capability、满足 Approval、授权行动或推翻当前事实。
 
 `[MEMORY_ENTRYPOINT]` 只是 Native Session 启动时的有界 discovery cache。它可能遗漏相关 Memory，
 也可能引用已经更新的 Revision。稳定 ID、retrieval key 或搜索 snippet 只帮助发现；依赖、引用或修订
-一条 Memory 前，必须通过 `rovai memory read` 取得当前状态和正文。
+一条 Memory 前，必须通过 `rovai memory read` 取得当前状态和正文。在线捕获的查重与 mutation 决策不依赖
+Entrypoint 的有界集合，而通过 `rovai memory view` 读取所选精确 Scope 的完整当前适用集合。
 
 Agent 不通过文件路径、SQLite、Markdown Projection 或 Skill Projection 读取、修改或恢复 Memory。
 只使用 Core 管理的具体 Memory CLI operation。

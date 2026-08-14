@@ -5,6 +5,7 @@
 
 根据该 Skill 的决定，再查看具体 operation：
 
+- `rovai memory view --help`
 - `rovai memory search --help`
 - `rovai memory read --help`
 - `rovai memory write --help`

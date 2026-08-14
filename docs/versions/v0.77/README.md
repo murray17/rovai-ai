@@ -16,7 +16,7 @@ last_updated: 2026-08-14
 >
 > 前置版本：[v0.76 显示名 Inline Alias 行首寻址门禁](../v0.76/README.md)
 >
-> 后续版本：[v0.79 Camp 会话轻量打开与分段性能诊断](../v0.79/README.md)
+> 后续版本：[v0.78 完整 Exact-Scope Memory View 与 Copyable Target](../v0.78/README.md)
 
 ## 版本目标
 

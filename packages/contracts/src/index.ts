@@ -1812,6 +1812,8 @@ export interface MemoryCapacity {
   scopeKey: string
   activeCount: number
   maxCount: number
+  activeBodyBytes: number
+  maxBodyBytes: number | null
   agentOriginCount: number
   agentOriginMaxCount: number
 }

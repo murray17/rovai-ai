@@ -9,11 +9,11 @@ last_updated: 2026-08-14
 # Built-in Tool Runtime Architecture
 
 本文件说明 Rovai built-in operations 的长期组件结构。当前字段与版本以
-[Built-in Tool Transport v10](../contracts/builtin-tool-transport-v10.md)、
+[Built-in Tool Transport v11](../contracts/builtin-tool-transport-v11.md)、
 [Durable Task v3](../contracts/durable-task-v3.md) 和
 [Camp Message Send v7](../contracts/camp-message-send-v7.md)、
 [Current User Attention v4](../contracts/current-user-attention-v4.md)与
-[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md) 为准；v9 及更早 Transport 只保留
+[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md) 为准；v10 及更早 Transport 只保留
 historical 语义。决策理由见
 [ADR-0124](../adr/0124-cli-only-transport-for-rovai-built-in-operations.md)、
 [ADR-0135](../adr/0135-compact-agent-output-over-canonical-built-in-tool-envelope.md)、
@@ -46,8 +46,8 @@ Runtime 对齐的 Camp 协作 Skill、四项固定 GitHub 来源与 management p
 [ADR-0181](../adr/0181-twelve-skill-official-inventory-and-runtime-aligned-collaboration.md)。
 Memory 单命令的局部 Transport 决策见
 [ADR-0180](../adr/0180-single-agent-memory-write-command.md)，独立 Hearth Review 与 actor-bounded mutation
-组合见 [Online Memory Capture](online-memory-capture.md)。Search/Read/revise 的 Scope-identified target
-合同见 [ADR-0183](../adr/0183-scope-identified-agent-memory-revision-targets.md)。
+组合见 [Online Memory Capture](online-memory-capture.md)。Complete exact-Scope View 与 copyable target
+合同见 [ADR-0186](../adr/0186-complete-exact-scope-memory-view-and-copyable-target.md)。
 
 ## 总体路径
 
@@ -100,14 +100,14 @@ Core 只维护一份 catalog。它服务 IPC 校验、合同测试、Qualificati
 identity 不构成 Agent discovery 协议。
 
 Agent Runtime 没有 `rovai tool list`、`rovai tool describe`、隐藏 discovery、`tool invoke` 或
-`tool call`。Agent 只使用十二个固定业务命令：
+`tool call`。Agent 只使用十三个固定业务命令：
 
 ```text
 rovai send
 rovai task create|get|update|list
 rovai camp list|search|read
 rovai history search
-rovai memory search|read|write
+rovai memory view|search|read|write
 ```
 
 Agent 先用 `rovai --help` 选择 operation，再用该 operation 的精确 `--help`。根 `send` 使用
@@ -125,7 +125,7 @@ Send exact help 公开 line-leading display-name alias：它必须是 logical li
 显示名后跟 whitespace/EOF；trailing handoff 使用专门 final line。`--to` 仍只接受 canonical ID，稳定自动化
 优先使用 `agent_N`，`effectiveRecipients=[]` 表示没有 Agent 路由。Parser 和 alias map 属于 Domain Service；
 CLI、Runtime Adapter、Bootstrap 与 Skill 都不重写正文。该 teaching/schema 继续进入当前 catalog digest。
-v10 的 contract/CLI command version 与 Runtime capability 变化来自 Memory closed wire shape；Binding
+v11 的 contract/CLI command version 与 Runtime capability 变化来自 Memory View/target closed wire shape；Binding
 compatibility 继续同时校验 version 与 digest。
 
 ## Agent Result Projection
@@ -139,12 +139,14 @@ compatibility 继续同时校验 version 与 digest。
 | `team.get_task` | 完整 `TaskDetail` |
 | `team.update_task` | `{taskId, title, status, assigneeAgentId, version, changed, availableActions}` |
 | `team.list_tasks` | 紧凑 `TaskListPage` |
+| `memory.view` | complete exact-Scope canonical result；不分页、不截断 |
 | `memory.write` | `{outcome: effective, memoryId, revisionId} \| {outcome: review_pending, reviewItemId}` |
 | 其余六项 | 去除 Envelope wrapper 后的 canonical result |
 
-`memory.search` 与 authorized current/revised `memory.read` 的 canonical result 包含 Agent-relative immutable
-Scope identity。Agent revise 把同一字段组复制回 closed input；CLI 只传输，不推断或改写 target identity。
-Body-free stale/unavailable Read result 不含这些字段。
+`memory.view` item 与 authorized current/revised `memory.read` 的 canonical result 包含同一个 indivisible
+`target(memoryId, revisionId, complete Agent-relative Scope identity)`。Agent revise 原样复制 target；CLI 只
+传输，不推断、拆分或改写。Body-free stale/unavailable Read result 不含 target。`memory.search` 保留 flat
+Scope discovery metadata，不承担 complete exact-Scope duplicate judgment。
 
 Task service 在 mutation 事务中形成完整 exact-version `TaskDetail` canonical result，并由
 Command Gateway 持久化后才交给 Transport projection。CLI 不能在 commit 后重新读取 live Task，
@@ -366,9 +368,9 @@ failure 或 `delivery_unknown` 都不能替代它。各层不得通过复制完�
 
 Bootstrap v3 按固定顺序组装 Session Charter、`MEMBER_IDENTITY` 和 Memory Entrypoint。Charter
 文案变化本身不参与 Native Binding compatibility digest，也不主动轮换全部既有 Native Session；既有
-Run 与 Bootstrap Evidence 不回写，新建 Native Session 使用当前内置 Charter。Built-in Transport v10
+Run 与 Bootstrap Evidence 不回写，新建 Native Session 使用当前内置 Charter。Built-in Transport v11
 另外改变 catalog digest；Antigravity 的既有 binding compatibility 已包含 Built-in contract version 与
-catalog digest，因此会建立 replacement Session。其他 Runtime 的续接进程直接使用当前 v10 CLI、精确 help
+catalog digest，因此会建立 replacement Session。其他 Runtime 的续接进程直接使用当前 v11 CLI、精确 help
 与 official Skill Revision，不因 Charter copy 单独丢弃 Native Session。
 `MEMBER_IDENTITY` 是该 Native Session 唯一的 self identity，包含最新已提交的完整六字段；它只在
 既有 eligible Bootstrap boundary 原子读取，不进入 AgentRun Dynamic Context，不持久化 Identity
@@ -467,5 +469,5 @@ Activity。命令文本、时间、cwd 或输出相似度不能建立关联。Sh
   退出码 `3`，必须先确认当前状态；
 - `camp.message.send` 的内部 Camp 不变量失败：fail closed，不加入稳定 Agent error contract；
 - external MCP 失败：遵循其独立 non-blocking degradation，不回退为 built-in MCP；
-- 任一正式 Runtime 未通过 v10 command、projection、replay、fence 和 negative-path 验收：版本不
+- 任一正式 Runtime 未通过 v11 command、projection、replay、fence 和 negative-path 验收：版本不
   得完成。

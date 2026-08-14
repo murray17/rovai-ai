@@ -15,23 +15,20 @@ try {
   assert((await core.request('memory.hearthReviewItems.list')).length === 0,
     'Fresh Hearth Review queue is not empty')
 
-  let secretRejected = false
-  try {
-    await createMemory(core, {
-      scope: 'hearth',
-      kind: 'agreement',
-      body: 'Authorization: Bearer definitely-not-a-memory',
-      retrievalKeys: ['secret rejection'],
-      companionAgentId: null,
-      relationshipAgentIds: [],
-      direction: null,
-      directedActorAgentId: null,
-      reviewAfter: null
-    })
-  } catch (error) {
-    secretRejected = error.message.includes('memory.secret_rejected')
-  }
-  assert(secretRejected, 'Secret filter did not fail closed')
+  const secretRejected = await createMemory(core, {
+    scope: 'hearth',
+    kind: 'agreement',
+    body: 'Authorization: Bearer definitely-not-a-memory',
+    retrievalKeys: ['secret rejection'],
+    companionAgentId: null,
+    relationshipAgentIds: [],
+    direction: null,
+    directedActorAgentId: null,
+    reviewAfter: null
+  })
+  assert(secretRejected.status === 'rejected'
+    && secretRejected.code === 'memory.secret_rejected',
+  `Secret filter did not fail closed: ${JSON.stringify(secretRejected)}`)
 
   const firstCommandId = crypto.randomUUID()
   const firstCandidate = {
