@@ -59,7 +59,7 @@ the horizon means a shared world and a common plane for collaboration. Their del
 both ideas legible at Dock and rail sizes. Both shapes remain present in production brand lockups—the
 four-point star alone is not the Rovai brand mark.
 
-The theme-independent App icon uses a Graphite surface (`#151a1e`), Steel horizon (`#7897ae`) and
+The theme-independent App icon uses a pure Black carrier (`#000000`), Steel horizon (`#7897ae`) and
 Porcelain star (`#e7ecef`), with no outline around the carrier. Its star-to-horizon gap remains pure
 negative space: the App icon does not include a rendezvous point. Compact in-app marks omit the
 carrier, render the separated star-and-horizon geometry in `--rail-logo`, and place an Ember

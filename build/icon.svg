@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <title>Rovai AI</title>
-  <rect x="96" y="96" width="832" height="832" rx="190" fill="#151A1E" />
+  <rect x="96" y="96" width="832" height="832" rx="190" fill="#000000" />
   <path d="M512 214 L550 362 L700 405 L550 448 L512 596 L474 448 L324 405 L474 362 Z" fill="#E7ECEF" />
   <path d="M218 744 Q512 604 806 744" fill="none" stroke="#7897AE" stroke-width="58" stroke-linecap="round" />
 </svg>
