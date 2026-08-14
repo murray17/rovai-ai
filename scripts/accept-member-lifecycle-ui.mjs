@@ -200,7 +200,7 @@ try {
       && !memberWorkbenchStructure.hasProjectNavigation
       && !memberWorkbenchStructure.duplicateRoster
       && JSON.stringify(memberWorkbenchStructure.tabs) === JSON.stringify(['身份', '运行配置'])
-      && memberWorkbenchStructure.initialMember === '小狐狸'
+      && memberWorkbenchStructure.initialMember === '叮叮'
       && memberWorkbenchStructure.headerControls.presenceHeight === 28
       && memberWorkbenchStructure.headerControls.runtimeHeight === 28
       && memberWorkbenchStructure.headerControls.runtimeArrow
@@ -227,7 +227,7 @@ try {
   assert(
     memberPortraitGeometry.headerAvatarIsStatic
       && memberPortraitGeometry.hasPortraitButton
-      && memberPortraitGeometry.portraitLabel === '更换小狐狸的角色图片'
+      && memberPortraitGeometry.portraitLabel === '更换叮叮的角色图片'
       && memberPortraitGeometry.portraitTitle === '更换角色图片'
       && memberPortraitGeometry.width === 220
       && memberPortraitGeometry.height === 275
@@ -364,7 +364,7 @@ try {
   await assertNoHorizontalOverflow(running.cdp, 'Member identity in Forced Colors')
   await running.cdp.send('Emulation.setEmulatedMedia', { media: 'screen', features: [] })
   await setViewport(running.cdp, 1440, 920)
-  await selectMember(running.cdp, '小狐狸')
+  await selectMember(running.cdp, '叮叮')
   await openMemberRuntimeTab(running.cdp)
   const removedSummarySettings = await evaluate(running.cdp, `({
     advancedSettings: Boolean(document.querySelector('.member-advanced-settings')),
@@ -401,7 +401,7 @@ try {
       && hiddenHandleState.rosterExposesHandle === false,
     `Member configuration still exposes an internal handle: ${JSON.stringify(hiddenHandleState)}`
   )
-  await replaceInputValue(running.cdp, '.member-dialog input', '小河狸')
+  await replaceInputValue(running.cdp, '.member-dialog input', '芝士')
   await mouseClick(running.cdp, '.member-dialog button', '保存身份')
   await waitForText(running.cdp, '.member-dialog .inline-error', '该名称已被其他队员使用')
   await waitForSelector(running.cdp, '.member-dialog')
@@ -421,7 +421,7 @@ try {
   await waitForExpression(running.cdp,
     `document.activeElement?.textContent?.trim() === '编辑身份'`)
   assert(
-    (await request(running.cdp, 'members.get', { agentId: 'agent_1' })).displayName === '小狐狸',
+    (await request(running.cdp, 'members.get', { agentId: 'agent_1' })).displayName === '叮叮',
     'Escaping the identity dialog persisted an unsaved theme-switch draft'
   )
   await waitForExpression(running.cdp, `!document.querySelector('.app-toast')`, 5_000)
@@ -429,7 +429,7 @@ try {
   Object.assign(captures, await captureThemeMatrix(
     running.cdp,
     'fresh-members',
-    '小狐狸',
+    '叮叮',
     outputDir
   ))
   await mouseClick(running.cdp, '.unified-sidebar button[aria-label="设置"]')
@@ -658,13 +658,13 @@ try {
     '审批策略',
     'on-request'
   )
-  await mouseClick(running.cdp, '.member-sidebar-select', '小狐狸', true)
+  await mouseClick(running.cdp, '.member-sidebar-select', '叮叮', true)
   await waitForSelector(running.cdp, '.member-leave-dialog')
   await focusElement(running.cdp, '.member-leave-dialog button', '放弃更改')
   await pressKey(running.cdp, 'Enter')
   await waitForExpression(running.cdp,
     `!document.querySelector('.member-leave-dialog')
-      && document.querySelector('.member-detail-heading h2')?.textContent === '小狐狸'`)
+      && document.querySelector('.member-detail-heading h2')?.textContent === '叮叮'`)
   await selectMember(running.cdp, '咕咕')
   await openMemberRuntimeTab(running.cdp)
   await waitForText(running.cdp, '.member-runtime-parameters', '审批策略')
@@ -760,7 +760,7 @@ try {
   assert(
     snapshot.camp.defaultLeadAgentId === 'agent_1'
       && snapshot.members.length === 4,
-    `Fresh Camp did not include every present member with 小狐狸 as Lead: ${JSON.stringify(snapshot.camp)}`
+    `Fresh Camp did not include every present member with 叮叮 as Lead: ${JSON.stringify(snapshot.camp)}`
   )
   await focusContenteditableAndInsertText(running.cdp, '#camp-message', '@')
   await waitForSelector(running.cdp, '.structured-mention-menu')
@@ -784,26 +784,26 @@ try {
       && mentionMenuState.menuHeight > 0
       && mentionMenuState.hitVisibleMenu
       && mentionMenuState.options.length === 5
-      && mentionMenuState.options.some((option) => option?.includes('小狐狸')),
+      && mentionMenuState.options.some((option) => option?.includes('叮叮')),
     `Camp @ mention menu is clipped or incomplete: ${JSON.stringify(mentionMenuState)}`
   )
   captures.campMentionMenu = join(outputDir, 'camp-mention-menu-day-1440x920.png')
   await capture(running.cdp, captures.campMentionMenu)
   const selectedMention = await evaluate(running.cdp, `(() => {
     const option = [...document.querySelectorAll('.structured-mention-menu [role="option"]')]
-      .find((candidate) => candidate.querySelector('strong')?.textContent?.trim() === '小狐狸')
+      .find((candidate) => candidate.querySelector('strong')?.textContent?.trim() === '叮叮')
     option?.click()
     return Boolean(option)
   })()`)
-  assert(selectedMention, 'Could not select 小狐狸 from the Camp mention menu')
+  assert(selectedMention, 'Could not select 叮叮 from the Camp mention menu')
   await waitForExpression(running.cdp,
     `(() => {
       const editor = document.querySelector('#camp-message')
       const token = editor?.querySelector(
         '.structured-mention-token.member-mention[data-agent-id="agent_1"]'
       )
-      return editor?.textContent?.includes('@小狐狸')
-        && token?.textContent?.includes('小狐狸')
+      return editor?.textContent?.includes('@叮叮')
+        && token?.textContent?.includes('叮叮')
         && token?.getAttribute('contenteditable') === 'false'
         && !document.querySelector('.structured-mention-menu')
     })()`

@@ -3196,7 +3196,7 @@ impl Database {
             let canonical = [
                 (
                     "agent-luoke",
-                    "小狐狸",
+                    "叮叮",
                     "游学者",
                     "负责理解需求、调查项目、编写文档，并将明确的方案实现为可运行、可验证的代码变更。",
                     "[\"好奇\",\"灵活\",\"勤勉\"]",
@@ -3205,9 +3205,9 @@ impl Database {
                 ),
                 (
                     "agent-muwa",
-                    "小河狸",
+                    "芝士",
                     "鉴定士",
-                    "负责文档、方案和代码评审，检查事实、结构、边界、风险与实现是否一致，并给出明确、可执行的评审结论。",
+                    "负责文档、方案与代码评审，核查事实准确性、结构完整性、边界条件、潜在风险，以及方案与实现是否一致，并给出明确、可执行的评审结论与修改建议。",
                     "[\"严谨\",\"沉稳\",\"公正\"]",
                     "#B66E3C",
                     MUWA_AVATAR_REF,
@@ -13337,7 +13337,7 @@ impl Database {
             (
                 LUOKE_AGENT_ID,
                 "luoke",
-                "小狐狸",
+                "叮叮",
                 "游学者",
                 "负责理解需求、调查项目、编写文档，并将明确的方案实现为可运行、可验证的代码变更。",
                 "[\"好奇\",\"灵活\",\"勤勉\"]",
@@ -13348,9 +13348,9 @@ impl Database {
             (
                 MUWA_AGENT_ID,
                 "muwa",
-                "小河狸",
+                "芝士",
                 "鉴定士",
-                "负责文档、方案和代码评审，检查事实、结构、边界、风险与实现是否一致，并给出明确、可执行的评审结论。",
+                "负责文档、方案与代码评审，核查事实准确性、结构完整性、边界条件、潜在风险，以及方案与实现是否一致，并给出明确、可执行的评审结论与修改建议。",
                 "[\"严谨\",\"沉稳\",\"公正\"]",
                 "#B66E3C",
                 "[\"task.create\",\"task.update\",\"agent_run.create\",\"agent_run.retry\",\"agent_run.cancel\",\"member.call\",\"workspace.bind\",\"action.request\"]",
@@ -14377,9 +14377,12 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .expect("built-in identity");
-        assert_eq!(built_in_identity.0, "小河狸");
+        assert_eq!(built_in_identity.0, "芝士");
         assert_eq!(built_in_identity.1, "鉴定士");
-        assert!(built_in_identity.2.contains("评审"));
+        assert_eq!(
+            built_in_identity.2,
+            "负责文档、方案与代码评审，核查事实准确性、结构完整性、边界条件、潜在风险，以及方案与实现是否一致，并给出明确、可执行的评审结论与修改建议。"
+        );
         assert_eq!(built_in_identity.3, r#"["严谨","沉稳","公正"]"#);
         let removed_identity_columns = database
             .connection()
@@ -15306,7 +15309,7 @@ mod tests {
                     accent, runtime_enabled, profile_status, member_order,
                     created_at, updated_at
                 ) VALUES (
-                    'agent-custom-v42', 'custom-v42', 'customv42abcd', '小狐狸',
+                    'agent-custom-v42', 'custom-v42', 'customv42abcd', '叮叮',
                     'rovai://member-avatar/managed/123e4567-e89b-12d3-a456-426614174000',
                     '旧团队角色', '旧专业职责', '["旧标签"]', '旧准则', '旧课题',
                     '["task.create","memory.write"]', '#123456', 0, 'away', 17,
@@ -15398,7 +15401,7 @@ mod tests {
                 },
             )
             .expect("canonical profile should be reset");
-        assert_eq!(canonical.0, "小狐狸");
+        assert_eq!(canonical.0, "叮叮");
         assert_eq!(canonical.1, "游学者");
         assert!(canonical.2.contains("可运行、可验证的代码变更"));
         assert_eq!(canonical.3, r#"["好奇","灵活","勤勉"]"#);
@@ -15441,7 +15444,7 @@ mod tests {
                 },
             )
             .expect("custom profile should remain");
-        assert_eq!(custom.0, "小狐狸 · customv42abc");
+        assert_eq!(custom.0, "叮叮 · customv42abc");
         assert_eq!(custom.1, "");
         assert_eq!(custom.2, "");
         assert_eq!(custom.3, "[]");

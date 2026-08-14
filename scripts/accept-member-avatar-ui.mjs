@@ -90,7 +90,7 @@ try {
   const homeDayCapture = join(outputDir, 'home-day.png')
   await capture(first.cdp, homeDayCapture)
   await openMembers(first.cdp)
-  await selectMember(first.cdp, '小狐狸')
+  await selectMember(first.cdp, '叮叮')
   await assertBuiltinRenditions(first.cdp, 'day')
   await assertNoHorizontalOverflow(first.cdp, '1440×920 day member detail')
   const dayCapture = join(outputDir, 'member-avatar-day.png')
@@ -105,7 +105,7 @@ try {
       .every((image) => image.complete && image.naturalWidth > 0)`)
   const dayAvatarDialogCapture = join(outputDir, 'member-avatar-picker-day.png')
   await capture(first.cdp, dayAvatarDialogCapture)
-  await clickElementContaining(first.cdp, '.member-avatar-dialog .member-preset-card', '小狐狸')
+  await clickElementContaining(first.cdp, '.member-avatar-dialog .member-preset-card', '叮叮')
   await clickButton(first.cdp, '.member-avatar-dialog button', '保存角色图片')
   await waitForExpression(first.cdp, `!document.querySelector('.member-avatar-dialog')`, 30_000)
 
@@ -115,11 +115,11 @@ try {
   await assertDialogFitsViewport(first.cdp, '1440×920 day create dialog')
   const dayDialogCapture = join(outputDir, 'member-avatar-create-day.png')
   await capture(first.cdp, dayDialogCapture)
-  await replaceLabeledInput(first.cdp, '名称', '小狐狸副本')
+  await replaceLabeledInput(first.cdp, '名称', '叮叮副本')
   await clickButton(first.cdp, '.member-dialog button', '创建')
   await waitForExpression(first.cdp, `!document.querySelector('.member-dialog')`, 30_000)
   let presetCopy = (await request(first.cdp, 'members.list'))
-    .find((profile) => profile.displayName === '小狐狸副本')
+    .find((profile) => profile.displayName === '叮叮副本')
   assert(
     /^agent_[1-9]\d*$/.test(presetCopy?.agentId ?? '')
       && presetCopy?.agentId !== 'agent_1'
@@ -127,14 +127,14 @@ try {
       && presetCopy.avatarRef === null,
     `Identity-only create did not use a generated internal ID: ${JSON.stringify(presetCopy)}`
   )
-  await selectMember(first.cdp, '小狐狸副本')
+  await selectMember(first.cdp, '叮叮副本')
   await clickButton(first.cdp, '.member-identity-appearance button', '更换角色图片')
   await waitForSelector(first.cdp, '.member-avatar-dialog')
-  await clickElementContaining(first.cdp, '.member-avatar-dialog .member-preset-card', '小狐狸')
+  await clickElementContaining(first.cdp, '.member-avatar-dialog .member-preset-card', '叮叮')
   await clickButton(first.cdp, '.member-avatar-dialog button', '保存角色图片')
   await waitForExpression(first.cdp, `!document.querySelector('.member-avatar-dialog')`, 30_000)
   presetCopy = (await request(first.cdp, 'members.list'))
-    .find((profile) => profile.displayName === '小狐狸副本')
+    .find((profile) => profile.displayName === '叮叮副本')
   assert(
     presetCopy?.avatarRef === 'rovai://member-avatar/builtin/luoke/v1',
     `Independent built-in appearance save failed: ${JSON.stringify(presetCopy)}`
@@ -142,7 +142,7 @@ try {
   const canonicalLuoke = (await request(first.cdp, 'members.list'))
     .find((profile) => profile.agentId === 'agent_1')
   assert(
-    canonicalLuoke?.displayName === '小狐狸' && !Object.hasOwn(canonicalLuoke, 'handle'),
+    canonicalLuoke?.displayName === '叮叮' && !Object.hasOwn(canonicalLuoke, 'handle'),
     `Preset create mutated the canonical companion: ${JSON.stringify(canonicalLuoke)}`
   )
 

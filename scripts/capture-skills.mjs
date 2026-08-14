@@ -378,7 +378,7 @@ try {
     }
   })()`)
   if (groupMenu.groupCount !== 9
-      || !groupMenu.codexMemberName?.includes('小狐狸')
+      || !groupMenu.codexMemberName?.includes('叮叮')
       || !groupMenu.realAvatarRendered
       || groupMenu.legacyLetterAvatarVisible
       || groupMenu.verifiedCount !== 9

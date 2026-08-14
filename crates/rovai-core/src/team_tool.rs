@@ -1997,7 +1997,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .unwrap();
-        assert_eq!(message.0, "Please inspect this @小河狸");
+        assert_eq!(message.0, "Please inspect this @芝士");
         assert_eq!(message.1, r#"["agent_2"]"#);
         assert_eq!(
             serde_json::from_str::<Value>(&message.2).unwrap()["inlineOrder"],

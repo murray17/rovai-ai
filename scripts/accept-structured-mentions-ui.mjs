@@ -39,8 +39,8 @@ const skillPickerOnly = cliArguments.includes('--skill-picker-only')
 const databasePath = join(dataDir, 'rovai.sqlite')
 const acceptanceExecutablePath = '/usr/bin/true'
 const targetMembers = [
-  { agentId: 'agent_1', displayName: '小狐狸', teamRole: '游学者' },
-  { agentId: 'agent_2', displayName: '小河狸', teamRole: '鉴定士' },
+  { agentId: 'agent_1', displayName: '叮叮', teamRole: '游学者' },
+  { agentId: 'agent_2', displayName: '芝士', teamRole: '鉴定士' },
   { agentId: 'agent_3', displayName: '咕咕', teamRole: '巡夜人' }
 ]
 const targetMemberIds = targetMembers.map((member) => member.agentId)
@@ -53,7 +53,7 @@ const expectedContent = [
   { kind: 'member_mention', agentId: 'agent_3' },
   { kind: 'text', text: ' ，请给出结论。' }
 ]
-const expectedBody = '请同时检查这条消息：@小狐狸 @小河狸 @咕咕 ，请给出结论。'
+const expectedBody = '请同时检查这条消息：@叮叮 @芝士 @咕咕 ，请给出结论。'
 const currentUserMentionMessageId = 'message-current-user-mention-accept'
 const currentUserMentionText = '请选择 v0.65 的方案。'
 const currentUserMentionBody = `@你 ${currentUserMentionText}`
@@ -531,7 +531,7 @@ try {
   await evaluate(running.cdp, `window.getSelection()?.removeAllRanges()`)
   await mouseClick(running.cdp, '.structured-mention-token.member-mention.is-interactive')
   await waitForExpression(running.cdp,
-    `document.querySelector('.mention-profile-popover[aria-label="小狐狸的基础信息"]')?.classList.contains('is-positioned')`)
+    `document.querySelector('.mention-profile-popover[aria-label="叮叮的基础信息"]')?.classList.contains('is-positioned')`)
   await wait(180)
   const composerPopoverInspection = await inspectMentionPopover(running.cdp)
   assertSelectedMemberPopover(composerPopoverInspection, 'Composer')
@@ -636,7 +636,7 @@ try {
       && sentMentionInspection.backgroundColor === 'rgba(0, 0, 0, 0)'
       && sentMentionInspection.color === 'rgb(47, 97, 200)'
       && sentMentionInspection.role === 'button'
-      && sentMentionInspection.label === '查看小狐狸的基础信息'
+      && sentMentionInspection.label === '查看叮叮的基础信息'
       && sentMentionInspection.hasPopup === 'dialog',
     `Sent mention does not use the selected Feishu-style inline interaction: ${JSON.stringify(sentMentionInspection)}`
   )
@@ -645,7 +645,7 @@ try {
   await mouseClick(running.cdp,
     '.conversation-bubble.user .message-mention-token.is-interactive')
   await waitForExpression(running.cdp,
-    `document.querySelector('.mention-profile-popover[aria-label="小狐狸的基础信息"]')?.classList.contains('is-positioned')`)
+    `document.querySelector('.mention-profile-popover[aria-label="叮叮的基础信息"]')?.classList.contains('is-positioned')`)
   await wait(180)
   const historyPopoverInspection = await inspectMentionPopover(running.cdp)
   assertSelectedMemberPopover(historyPopoverInspection, 'History')
@@ -666,7 +666,7 @@ try {
   ]) {
     await activateLastInteractiveMentionWithKey(running.cdp, activation)
     await waitForExpression(running.cdp,
-      `document.querySelector('.mention-profile-popover[aria-label="小狐狸的基础信息"]')?.classList.contains('is-positioned')`)
+      `document.querySelector('.mention-profile-popover[aria-label="叮叮的基础信息"]')?.classList.contains('is-positioned')`)
     await wait(180)
     assertSelectedMemberPopover(await inspectMentionPopover(running.cdp), activation.code)
     assert(await mentionInteractionStayedInCamp(running.cdp),
@@ -1195,7 +1195,7 @@ function assertSelectedMemberPopover(inspection, context) {
     inspection
       && inspection.role === 'dialog'
       && inspection.ariaModal === 'false'
-      && inspection.ariaLabel === '小狐狸的基础信息'
+      && inspection.ariaLabel === '叮叮的基础信息'
       && inspection.contentKind === 'member'
       && inspection.positioned
       && inspection.position === 'fixed'
@@ -1204,7 +1204,7 @@ function assertSelectedMemberPopover(inspection, context) {
       && inspection.sideMinHeight >= 302
       && inspection.portraitWidth >= 126 && inspection.portraitWidth <= 129
       && inspection.portraitExists
-      && inspection.displayName === '小狐狸'
+      && inspection.displayName === '叮叮'
       && inspection.teamRole === '游学者'
       && inspection.statuses.length === 2
       && inspection.statuses[0].includes('在队')

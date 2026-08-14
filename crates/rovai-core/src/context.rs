@@ -9190,7 +9190,7 @@ mod tests {
         assert!(prepared.runtime_payload.starts_with("[SESSION_CHARTER]\n"));
         assert!(prepared.runtime_payload.contains("[MEMORY_ENTRYPOINT]"));
         assert!(prepared.runtime_payload.contains("[MEMBER_IDENTITY]"));
-        assert!(prepared.runtime_payload.contains("\"name\": \"小狐狸\""));
+        assert!(prepared.runtime_payload.contains("\"name\": \"叮叮\""));
         assert!(
             prepared
                 .runtime_payload
@@ -9232,7 +9232,7 @@ mod tests {
                 .rendered_payload
                 .contains("\"selfIsDefaultLead\":true")
         );
-        assert!(!prepared.rendered_payload.contains("\"name\": \"小狐狸\""));
+        assert!(!prepared.rendered_payload.contains("\"name\": \"叮叮\""));
         assert!(
             !prepared
                 .rendered_payload
@@ -9268,7 +9268,7 @@ mod tests {
                 CharterDeliveryMode::FirstPayload,
             )
             .unwrap();
-        assert!(initial_bootstrap.payload.contains("\"name\": \"小狐狸\""));
+        assert!(initial_bootstrap.payload.contains("\"name\": \"叮叮\""));
         let evidence: (String, i64, String, String) = fixture
             .database
             .connection()
@@ -9288,7 +9288,7 @@ mod tests {
         for blob_id in [&evidence.2, &evidence.3] {
             let component = store.read_text(&fixture.database, blob_id).unwrap();
             assert!(!component.contains("[MEMBER_IDENTITY]"));
-            assert!(!component.contains("\"name\": \"小狐狸\""));
+            assert!(!component.contains("\"name\": \"叮叮\""));
         }
         let blob_count_before_identity_update: i64 = fixture
             .database
@@ -9389,7 +9389,7 @@ mod tests {
                 .payload
                 .contains("\"growthTopic\": \"只用于之后创建的 Run\"")
         );
-        assert!(initial_bootstrap.payload.contains("\"name\": \"小狐狸\""));
+        assert!(initial_bootstrap.payload.contains("\"name\": \"叮叮\""));
         assert!(!initial_bootstrap.payload.contains("之后的狐狸"));
         let blob_count_after_identity_update: i64 = fixture
             .database
@@ -9477,7 +9477,7 @@ mod tests {
                 .rendered_payload
                 .contains("\"selfIsDefaultLead\":true")
         );
-        assert!(!initial.rendered_payload.contains("\"name\": \"小狐狸\""));
+        assert!(!initial.rendered_payload.contains("\"name\": \"叮叮\""));
         assert!(
             !initial
                 .rendered_payload
