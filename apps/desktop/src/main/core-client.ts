@@ -9,6 +9,9 @@ type PendingRequest = {
   resolve(value: unknown): void
   reject(error: Error): void
   timer: NodeJS.Timeout
+  method: CoreMethod | 'core.shutdown'
+  startedAt: number
+  traceId: string | null
 }
 
 type CoreWireResponse = {
@@ -234,6 +237,11 @@ export class CoreClient {
 
     const id = this.#nextId++
     const payload = `${JSON.stringify({ id, method, params })}\n`
+    const startedAt = performance.now()
+    const traceId = campOpenTraceId(params)
+    if (traceId && (method === 'camps.enter' || method === 'camps.open')) {
+      console.info(`[camp-open] trace=${traceId} stage=main_request method=${method}`)
+    }
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id)
@@ -242,7 +250,10 @@ export class CoreClient {
       this.#pending.set(id, {
         resolve: (value) => resolve(value as T),
         reject,
-        timer
+        timer,
+        method,
+        startedAt,
+        traceId
       })
       child.stdin.write(payload, (error) => {
         if (!error) return
@@ -260,6 +271,7 @@ export class CoreClient {
 
   #handleLine(line: string): void {
     let message: CoreWireResponse
+    const parseStartedAt = performance.now()
     try {
       message = JSON.parse(line) as CoreWireResponse
     } catch (error) {
@@ -277,6 +289,17 @@ export class CoreClient {
     if (!pending) return
     clearTimeout(pending.timer)
     this.#pending.delete(message.id)
+    if (
+      pending.traceId
+      && (pending.method === 'camps.enter' || pending.method === 'camps.open')
+    ) {
+      console.info(
+        `[camp-open] trace=${pending.traceId} stage=main_response method=${pending.method} `
+        + `roundtrip_ms=${(performance.now() - pending.startedAt).toFixed(1)} `
+        + `parse_ms=${(performance.now() - parseStartedAt).toFixed(1)} `
+        + `response_bytes=${Buffer.byteLength(line, 'utf8')}`
+      )
+    }
     if (message.error) {
       pending.reject(new Error(message.error.message ?? message.error.code ?? 'Core request failed'))
     } else {
@@ -295,6 +318,15 @@ export class CoreClient {
     }
     this.#pending.clear()
   }
+}
+
+function campOpenTraceId(params: unknown): string | null {
+  if (!params || typeof params !== 'object' || Array.isArray(params)) return null
+  const traceId = (params as Record<string, unknown>).traceId
+  return typeof traceId === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(traceId)
+    ? traceId.toLowerCase()
+    : null
 }
 
 function resolveCoreBinary(): string {

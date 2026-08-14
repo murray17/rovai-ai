@@ -14,6 +14,9 @@ import type {
   CampMessageAttachmentView,
   CampMessageAroundSnapshot,
   CampMessageView,
+  CampOpenCollectionCoverage,
+  CampOpenMessageCoverage,
+  CampOpenProjection,
   CampSnapshot,
   MessageDeliveryView,
   TaskStatus,
@@ -785,6 +788,9 @@ export function QuickChatWorkspace({
 
 export function CampWorkspace({
   snapshot,
+  openCoverage = null,
+  messageHistory = null,
+  onLoadEarlierMessages,
   optimisticMessages = [],
   projectName,
   agents,
@@ -812,6 +818,9 @@ export function CampWorkspace({
   onDismissRuntimeRecovery
 }: {
   snapshot: CampSnapshot
+  openCoverage?: CampOpenProjection['coverage'] | null
+  messageHistory?: CampOpenMessageCoverage | null
+  onLoadEarlierMessages?(): Promise<void>
   optimisticMessages?: CampMessageView[]
   projectName: string | null
   agents: AgentProfile[]
@@ -902,6 +911,9 @@ export function CampWorkspace({
   const inspectorTab = controlledInspectorTab ?? localInspectorTab
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null)
   const [taskFocusRequest, setTaskFocusRequest] = useState(0)
+  const [earlierMessageStatus, setEarlierMessageStatus] = useState<
+    'idle' | 'loading' | 'error'
+  >('idle')
   useEffect(() => {
     try {
       window.localStorage.setItem(CAMP_CONVERSATION_VIEW_STORAGE_KEY, conversationView)
@@ -2093,6 +2105,26 @@ export function CampWorkspace({
     onOpenInspector?.(tab)
   }
 
+  const loadEarlierMessages = async (): Promise<void> => {
+    if (!onLoadEarlierMessages || earlierMessageStatus === 'loading') return
+    const timeline = timelineScrollRef.current
+    const previousScrollHeight = timeline?.scrollHeight ?? 0
+    const previousScrollTop = timeline?.scrollTop ?? 0
+    setEarlierMessageStatus('loading')
+    try {
+      await onLoadEarlierMessages()
+      setEarlierMessageStatus('idle')
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          if (!timeline) return
+          timeline.scrollTop = previousScrollTop + timeline.scrollHeight - previousScrollHeight
+        })
+      })
+    } catch {
+      setEarlierMessageStatus('error')
+    }
+  }
+
   const openExecutionProcess = (
     agentId: string,
     trigger: HTMLButtonElement | null = null,
@@ -2208,6 +2240,29 @@ export function CampWorkspace({
               )}
             >
               <div className="timeline-track">
+              {messageHistory?.hasEarlier && (
+                <div className="camp-history-loader" role="status" aria-live="polite">
+                  <button
+                    className="quiet-button compact"
+                    type="button"
+                    disabled={earlierMessageStatus === 'loading'}
+                    onClick={() => void loadEarlierMessages()}
+                  >
+                    {earlierMessageStatus === 'loading' ? '正在加载更早消息…' : '加载更早消息'}
+                  </button>
+                  <span>
+                    已显示 {messageHistory.loadedCount} / {messageHistory.totalCount} 条
+                  </span>
+                </div>
+              )}
+              {earlierMessageStatus === 'error' && messageHistory?.hasEarlier && (
+                <div className="camp-history-error" role="alert">
+                  <span>较早消息暂时没有加载。</span>
+                  <button className="quiet-button compact" type="button" onClick={() => void loadEarlierMessages()}>
+                    重试
+                  </button>
+                </div>
+              )}
               {(() => {
                 const items: JSX.Element[] = []
                 let lastDayKey = ''
@@ -2463,6 +2518,7 @@ export function CampWorkspace({
               campId={snapshot.camp.id}
               truncatedEvidenceByRunId={truncatedEvidenceByRunId}
               loadedEvidenceCountByRunId={loadedEvidenceCountByRunId}
+              runHistoryComplete={openCoverage?.agentRuns.complete ?? true}
               cancellingTurnIds={cancellingTurnIds}
               focusedRunId={executionDrawerFocusedRunId}
               focusRequest={executionDrawerFocusRequest}
@@ -2500,12 +2556,13 @@ export function CampWorkspace({
             className="activity-tabs"
           >
             <Tabs.List className="tabs-list sticky-tabs" aria-label="会话详情">
-              <Tabs.Trigger value="tasks">任务 <small>{snapshot.tasks.length}</small></Tabs.Trigger>
+              <Tabs.Trigger value="tasks">任务 <small>{openCoverage?.tasks.totalCount ?? snapshot.tasks.length}</small></Tabs.Trigger>
               <Tabs.Trigger value="members">队员 <small>{campInspectorMembers(snapshot.members).length}</small></Tabs.Trigger>
             </Tabs.List>
             <Tabs.Content value="tasks" className="tab-scroll task-panel-scroll">
               <TaskPanel
                 snapshot={snapshot}
+                coverage={openCoverage?.tasks ?? null}
                 busy={busy}
                 focusTaskId={focusedTaskId}
                 focusRequest={taskFocusRequest}
@@ -2939,6 +2996,7 @@ function ExecutionDrawer({
   campId,
   truncatedEvidenceByRunId,
   loadedEvidenceCountByRunId,
+  runHistoryComplete,
   cancellingTurnIds,
   focusedRunId,
   focusRequest,
@@ -2955,6 +3013,7 @@ function ExecutionDrawer({
   campId: string
   truncatedEvidenceByRunId: Map<string, AgentRunExecutionEvidenceView[]>
   loadedEvidenceCountByRunId: Map<string, number>
+  runHistoryComplete: boolean
   cancellingTurnIds: ReadonlySet<string>
   focusedRunId: string | null
   focusRequest: ExecutionDrawerFocusRequest
@@ -3243,7 +3302,8 @@ function ExecutionDrawer({
             <div>
               <h2 id="execution-drawer-title">{drawerTitle}</h2>
               <p>
-                共 {process.runs.length} 次执行
+                {runHistoryComplete ? '共' : '当前载入'} {process.runs.length} 次执行
+                {!runHistoryComplete && ' · 更早执行尚未载入'}
                 {process.runs.some(agentRunCountsAsExecuting) && ' · 当前正在执行'}
               </p>
             </div>
@@ -5245,6 +5305,7 @@ function evidenceKindLabel(kind: PresentableExecutionEvidence['kind']): string {
 
 export function TaskPanel({
   snapshot,
+  coverage = null,
   busy,
   focusTaskId = null,
   focusRequest = 0,
@@ -5252,6 +5313,7 @@ export function TaskPanel({
   onOpenAgent = () => {}
 }: {
   snapshot: CampSnapshot
+  coverage?: CampOpenCollectionCoverage | null
   busy: boolean
   focusTaskId?: string | null
   focusRequest?: number
@@ -5529,6 +5591,11 @@ export function TaskPanel({
 
       {mode === 'list' && (
         <div className="task-list">
+          {coverage && !coverage.complete && (
+            <p className="task-history-note" role="status">
+              当前显示 {coverage.loadedCount} / {coverage.totalCount} 个任务；更早的已结束任务尚未载入。
+            </p>
+          )}
           {snapshot.tasks.map((task) => (
             <button className="task-list-row" type="button" key={task.taskId} onClick={() => beginEdit(task)}>
               <span className={`task-state-dot state-${task.status}`} aria-hidden="true" />

@@ -69,6 +69,7 @@ use rovai_core::{
         CampListInput, CampReadInput, CampSearchInput, HISTORY_SEARCH_TOOL_NAME,
         HistorySearchInput, invalid_input_error,
     },
+    camp_open::CampOpenService,
     collaboration::{
         CampActivationState, CampCollaborationMode, ChangeDefaultLeadCommand, CollaborationService,
         CreateCampCommand, CreateTaskCommand, DeleteCampCommand, DiscardPendingCampCommand,
@@ -138,7 +139,7 @@ use rovai_core::{
         PlannedShutdownCoordinator, RuntimeRouteBinding, RuntimeTerminalAdmission,
         RuntimeTerminalObservation, RuntimeTerminalOutcome, TerminalSettlementPermit,
     },
-    read_model::{READ_MODEL_SCHEMA_VERSION, ReadModelService},
+    read_model::{CampOpenProjection, READ_MODEL_SCHEMA_VERSION, ReadModelService},
     runtime::{
         AcknowledgeAgentRunCancellationCommand, AgentRunCancellationCandidate, AgentRunExecution,
         BindNativeSessionCommand, CancelCampTurnCommand, ClaimAgentRunCommand,
@@ -438,6 +439,76 @@ struct CampCreationMember {
 #[serde(rename_all = "camelCase")]
 struct CampIdParams {
     camp_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CampEnterParams {
+    trace_id: String,
+    command_id: String,
+    command: ReconcileDefaultLeadCommand,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CampOpenParams {
+    trace_id: String,
+    camp_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CampMessagePageParams {
+    camp_id: String,
+    before_sequence: i64,
+    through_global_sequence: i64,
+    #[serde(default = "default_camp_message_page_limit")]
+    limit: i64,
+}
+
+fn default_camp_message_page_limit() -> i64 {
+    50
+}
+
+fn normalized_camp_open_trace_id(trace_id: &str) -> Result<String> {
+    uuid::Uuid::parse_str(trace_id)
+        .map(|trace_id| trace_id.to_string())
+        .context("Camp open traceId must be a UUID")
+}
+
+struct CampOpenLogMetrics {
+    lock_ms: u128,
+    reconcile_ms: u128,
+    projection_ms: u128,
+    serialization_ms: u128,
+    payload_bytes: usize,
+}
+
+fn log_camp_open_projection(
+    trace_id: &str,
+    method: &str,
+    metrics: &CampOpenLogMetrics,
+    projection: &CampOpenProjection,
+) {
+    let CampOpenLogMetrics {
+        lock_ms,
+        reconcile_ms,
+        projection_ms,
+        serialization_ms,
+        payload_bytes,
+    } = metrics;
+    eprintln!(
+        "[camp-open] trace={trace_id} method={method} lock_ms={lock_ms} \
+         reconcile_ms={reconcile_ms} projection_ms={projection_ms} \
+         serialization_ms={serialization_ms} payload_bytes={payload_bytes} \
+         schema={} high_water={} messages={} runs={} evidence={} timeline={}",
+        projection.schema_version,
+        projection.through_global_sequence,
+        projection.messages.len(),
+        projection.agent_runs.len(),
+        projection.execution_evidence.len(),
+        projection.timeline.len(),
+    );
 }
 
 #[derive(Debug, Deserialize)]
@@ -3657,6 +3728,68 @@ impl Core {
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
             }
+            "camps.enter" => {
+                let params: CampEnterParams = serde_json::from_value(request.params.clone())?;
+                let trace_id = normalized_camp_open_trace_id(&params.trace_id)?;
+                let camp_id = params.command.camp_id.clone();
+                let lock_started_at = std::time::Instant::now();
+                let mut database = self.database.lock().await;
+                let lock_ms = lock_started_at.elapsed().as_millis();
+                let outcome = CampOpenService.enter(
+                    &mut database,
+                    &user_camp_command_envelope(params.command_id, camp_id, params.command),
+                )?;
+                let projection = outcome.projection;
+                let reconcile_ms = outcome
+                    .reconcile_duration
+                    .map(|duration| duration.as_millis())
+                    .unwrap_or(0);
+                let projection_ms = outcome.projection_duration.as_millis();
+                let serialization_started_at = std::time::Instant::now();
+                let value = serde_json::to_value(&projection)?;
+                let payload_bytes = serde_json::to_vec(&value)?.len();
+                let serialization_ms = serialization_started_at.elapsed().as_millis();
+                log_camp_open_projection(
+                    &trace_id,
+                    "camps.enter",
+                    &CampOpenLogMetrics {
+                        lock_ms,
+                        reconcile_ms,
+                        projection_ms,
+                        serialization_ms,
+                        payload_bytes,
+                    },
+                    &projection,
+                );
+                Ok(value)
+            }
+            "camps.open" => {
+                let params: CampOpenParams = serde_json::from_value(request.params.clone())?;
+                let trace_id = normalized_camp_open_trace_id(&params.trace_id)?;
+                let lock_started_at = std::time::Instant::now();
+                let mut database = self.database.lock().await;
+                let lock_ms = lock_started_at.elapsed().as_millis();
+                let outcome = CampOpenService.open(&mut database, &params.camp_id)?;
+                let projection = outcome.projection;
+                let projection_ms = outcome.projection_duration.as_millis();
+                let serialization_started_at = std::time::Instant::now();
+                let value = serde_json::to_value(&projection)?;
+                let payload_bytes = serde_json::to_vec(&value)?.len();
+                let serialization_ms = serialization_started_at.elapsed().as_millis();
+                log_camp_open_projection(
+                    &trace_id,
+                    "camps.open",
+                    &CampOpenLogMetrics {
+                        lock_ms,
+                        reconcile_ms: 0,
+                        projection_ms,
+                        serialization_ms,
+                        payload_bytes,
+                    },
+                    &projection,
+                );
+                Ok(value)
+            }
             "camps.delete" => {
                 let params: UserCommandParams<DeleteCampCommand> =
                     serde_json::from_value(request.params.clone())?;
@@ -3746,6 +3879,17 @@ impl Core {
                 Ok(serde_json::to_value(
                     ReadModelService.camp_snapshot(&mut database, &params.camp_id)?,
                 )?)
+            }
+            "camp.messages.page" => {
+                let params: CampMessagePageParams = serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(ReadModelService.camp_messages_page(
+                    &mut database,
+                    &params.camp_id,
+                    params.before_sequence,
+                    params.through_global_sequence,
+                    params.limit,
+                )?)?)
             }
             "camp.messages.around" => {
                 let params: CampMessageAroundParams =
@@ -11964,6 +12108,9 @@ mod tests {
         assert!(request_runs_outside_main_queue("runtime.product.ensure"));
         assert!(request_runs_outside_main_queue("runtime.product.check"));
         assert!(!request_runs_outside_main_queue("camps.snapshot"));
+        assert!(!request_runs_outside_main_queue("camps.enter"));
+        assert!(!request_runs_outside_main_queue("camps.open"));
+        assert!(!request_runs_outside_main_queue("camp.messages.page"));
         assert!(!request_runs_outside_main_queue(
             "camps.reconcileDefaultLead"
         ));

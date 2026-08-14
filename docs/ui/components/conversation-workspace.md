@@ -11,6 +11,20 @@ Camp 是开放阅读面，不按角色铺不同底色。时间线、Agent 执行
 Composer 共享主列；Inspector 是右侧辅助列。普通叙述保持 `76ch` 阅读宽度，代码、表格等工件
 可以扩展到 `930px`，2K Composer/工作区上限为 `1040px`。
 
+## 打开与渐进历史
+
+Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v1](../../contracts/camp-open-projection-v1.md)：
+Camp/成员、最近消息、当前运行摘要、pending Approval 和 Composer 可用即完成。项目导航恢复、侧栏刷新
+与可见来源确认在首屏后执行，失败不能撤销已打开会话。只显示“正在打开对话”的 Shell 不算完成。
+
+投影 coverage 不完整时，UI 必须把历史表达为“尚未加载”，不能表达为“不存在”。会话时间线顶部提供
+低强调度“加载更早消息”；加载时保持现有消息可读、按钮显示忙碌状态，失败原位允许重试。较早页 prepend
+后保持用户当前阅读锚点，不跳到顶部或最新消息。没有 earlier history 时不显示该控件。
+
+terminal Run Evidence 继续在用户展开精确 Run 后按需加载；关闭的 Drawer、隐藏 Inspector 或世界地图
+不得触发完整历史预取。普通 event refresh 使用轻量 open projection，并保留用户已经加载的较早消息、
+Draft、滚动位置、Inspector 选择和地图模式。
+
 ## 常规会话与世界地图
 
 会话阅读面可以在常规时间线与沉浸世界地图之间切换。切换入口与地图路线显隐使用阅读面内的紧凑

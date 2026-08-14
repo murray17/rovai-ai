@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.80
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -15,6 +15,8 @@ last_updated: 2026-08-14
 > 自动化门禁与 localhost 桌面/窄屏交互验收通过。
 >
 > 前置版本：[v0.79 Camp 会话轻量打开与分段性能诊断](../v0.79/README.md)
+>
+> 后续版本：[v0.81 Camp 轻量打开与渐进历史](../v0.81/README.md)
 
 ## 版本目标
 

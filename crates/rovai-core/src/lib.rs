@@ -10,6 +10,7 @@ pub mod camp_attachment;
 pub mod camp_content;
 pub mod camp_history;
 pub mod camp_message_send_teaching;
+pub mod camp_open;
 pub mod canonical_activity;
 pub mod collaboration;
 pub mod command;

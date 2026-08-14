@@ -20,9 +20,19 @@ pub const EVENT_BATCH_SCHEMA_VERSION: i64 = 9;
 pub const NAVIGATION_SCHEMA_VERSION: i64 = 3;
 pub const EXECUTION_EVIDENCE_PAGE_SCHEMA_VERSION: i64 = 1;
 pub const CAMP_MESSAGE_AROUND_SCHEMA_VERSION: i64 = 1;
+pub const CAMP_OPEN_SCHEMA_VERSION: i64 = 1;
+pub const CAMP_MESSAGE_PAGE_SCHEMA_VERSION: i64 = 1;
 pub const NAVIGATION_RECENT_CAMP_LIMIT: usize = 5;
 const EXECUTION_EVIDENCE_SNAPSHOT_LIMIT: i64 = 1_200;
 const CAMP_MESSAGE_AROUND_RADIUS: i64 = 20;
+const CAMP_OPEN_TASK_LIMIT: i64 = 100;
+const CAMP_OPEN_MESSAGE_LIMIT: i64 = 20;
+const CAMP_OPEN_DELIVERY_LIMIT: i64 = 200;
+const CAMP_OPEN_TURN_LIMIT: i64 = 64;
+const CAMP_OPEN_AGENT_RUN_LIMIT: i64 = 96;
+const CAMP_OPEN_EXECUTION_EVIDENCE_LIMIT: i64 = 80;
+const CAMP_OPEN_APPROVAL_LIMIT: i64 = 32;
+const CAMP_OPEN_TIMELINE_LIMIT: i64 = 160;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -505,6 +515,70 @@ pub struct CampSnapshot {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CampOpenCollectionCoverage {
+    pub loaded_count: i64,
+    pub total_count: i64,
+    pub omitted_count: i64,
+    pub complete: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CampOpenMessageCoverage {
+    pub loaded_count: i64,
+    pub total_count: i64,
+    pub omitted_count: i64,
+    pub complete: bool,
+    pub oldest_loaded_sequence: Option<i64>,
+    pub newest_loaded_sequence: Option<i64>,
+    pub has_earlier: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CampOpenCoverage {
+    pub tasks: CampOpenCollectionCoverage,
+    pub messages: CampOpenMessageCoverage,
+    pub message_deliveries: CampOpenCollectionCoverage,
+    pub turns: CampOpenCollectionCoverage,
+    pub agent_runs: CampOpenCollectionCoverage,
+    pub execution_evidence: CampOpenCollectionCoverage,
+    pub approvals: CampOpenCollectionCoverage,
+    pub timeline: CampOpenCollectionCoverage,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CampOpenProjection {
+    pub schema_version: i64,
+    pub through_global_sequence: i64,
+    pub camp: CampView,
+    pub members: Vec<CampMemberView>,
+    pub tasks: Vec<TaskView>,
+    pub messages: Vec<CampMessageView>,
+    pub message_deliveries: Vec<MessageDeliveryView>,
+    pub turns: Vec<CampTurnView>,
+    pub agent_runs: Vec<AgentRunView>,
+    pub execution_evidence: Vec<AgentRunExecutionEvidenceView>,
+    pub approvals: Vec<ApprovalView>,
+    pub timeline: Vec<DomainEventView>,
+    pub coverage: CampOpenCoverage,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CampMessagePage {
+    pub schema_version: i64,
+    pub camp_id: String,
+    pub through_global_sequence: i64,
+    pub requested_before_sequence: i64,
+    pub next_before_sequence: Option<i64>,
+    pub has_more: bool,
+    pub messages: Vec<CampMessageView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CampMessageAroundSnapshot {
     pub schema_version: i64,
     pub through_global_sequence: i64,
@@ -698,14 +772,19 @@ impl ReadModelService {
         let through_global_sequence = current_global_sequence(&transaction)?;
         let camp = load_camp(&transaction, camp_id)?.context("Camp does not exist")?;
         let members = load_members(&transaction, camp_id, camp.default_lead_agent_id.as_deref())?;
-        let tasks = load_tasks(&transaction, camp_id)?;
+        let tasks = load_tasks(&transaction, camp_id, None)?;
         let messages = load_messages(&transaction, camp_id, 1_000)?;
-        let message_deliveries = load_message_deliveries(&transaction, camp_id)?;
-        let turns = load_turns(&transaction, camp_id)?;
-        let agent_runs = load_agent_runs(&transaction, camp_id)?;
-        let execution_evidence = load_execution_evidence(&transaction, camp_id)?;
+        let message_deliveries = load_message_deliveries(&transaction, camp_id, None)?;
+        let turns = load_turns(&transaction, camp_id, None)?;
+        let agent_runs = load_agent_runs(&transaction, camp_id, None)?;
+        let execution_evidence = load_execution_evidence(
+            &transaction,
+            camp_id,
+            EXECUTION_EVIDENCE_SNAPSHOT_LIMIT,
+            false,
+        )?;
         let context_manifests = load_context_manifests(&transaction, camp_id)?;
-        let approvals = load_approvals(&transaction, camp_id)?;
+        let approvals = load_approvals(&transaction, camp_id, false, None)?;
         let actions = load_actions(&transaction, camp_id)?;
         let timeline = load_events(
             &transaction,
@@ -714,6 +793,7 @@ impl ReadModelService {
             through_global_sequence,
             500,
             true,
+            false,
         )?;
         transaction.commit()?;
         Ok(CampSnapshot {
@@ -731,6 +811,114 @@ impl ReadModelService {
             approvals,
             actions,
             timeline,
+        })
+    }
+
+    pub fn camp_open_projection(
+        &self,
+        database: &mut Database,
+        camp_id: &str,
+    ) -> Result<CampOpenProjection> {
+        let transaction = database.connection_mut().transaction()?;
+        let through_global_sequence = current_global_sequence(&transaction)?;
+        let camp = load_camp(&transaction, camp_id)?.context("Camp does not exist")?;
+        let members = load_members(&transaction, camp_id, camp.default_lead_agent_id.as_deref())?;
+        let counts = load_camp_open_counts(&transaction, camp_id)?;
+        let tasks = load_tasks(&transaction, camp_id, Some(CAMP_OPEN_TASK_LIMIT))?;
+        let messages = load_messages(&transaction, camp_id, CAMP_OPEN_MESSAGE_LIMIT)?;
+        let message_deliveries =
+            load_message_deliveries(&transaction, camp_id, Some(CAMP_OPEN_DELIVERY_LIMIT))?;
+        let turns = load_turns(&transaction, camp_id, Some(CAMP_OPEN_TURN_LIMIT))?;
+        let agent_runs = load_agent_runs(&transaction, camp_id, Some(CAMP_OPEN_AGENT_RUN_LIMIT))?;
+        let execution_evidence = load_execution_evidence(
+            &transaction,
+            camp_id,
+            CAMP_OPEN_EXECUTION_EVIDENCE_LIMIT,
+            true,
+        )?;
+        let approvals =
+            load_approvals(&transaction, camp_id, true, Some(CAMP_OPEN_APPROVAL_LIMIT))?;
+        let timeline = load_events(
+            &transaction,
+            Some(camp_id),
+            0,
+            through_global_sequence,
+            CAMP_OPEN_TIMELINE_LIMIT,
+            true,
+            true,
+        )?;
+        let coverage = CampOpenCoverage {
+            tasks: collection_coverage(tasks.len(), counts.tasks),
+            messages: message_coverage(&messages, counts.messages),
+            message_deliveries: collection_coverage(
+                message_deliveries.len(),
+                counts.message_deliveries,
+            ),
+            turns: collection_coverage(turns.len(), counts.turns),
+            agent_runs: collection_coverage(agent_runs.len(), counts.agent_runs),
+            execution_evidence: collection_coverage(
+                execution_evidence.len(),
+                counts.execution_evidence,
+            ),
+            approvals: collection_coverage(approvals.len(), counts.pending_approvals),
+            timeline: collection_coverage(timeline.len(), counts.timeline),
+        };
+        transaction.commit()?;
+        Ok(CampOpenProjection {
+            schema_version: CAMP_OPEN_SCHEMA_VERSION,
+            through_global_sequence,
+            camp,
+            members,
+            tasks,
+            messages,
+            message_deliveries,
+            turns,
+            agent_runs,
+            execution_evidence,
+            approvals,
+            timeline,
+            coverage,
+        })
+    }
+
+    pub fn camp_messages_page(
+        &self,
+        database: &mut Database,
+        camp_id: &str,
+        before_sequence: i64,
+        through_global_sequence: i64,
+        limit: i64,
+    ) -> Result<CampMessagePage> {
+        if before_sequence <= 0 {
+            anyhow::bail!("Camp Message cursor must be positive");
+        }
+        if through_global_sequence < 0 {
+            anyhow::bail!("Camp Message high-water must not be negative");
+        }
+        let limit = limit.clamp(1, 100);
+        let transaction = database.connection_mut().transaction()?;
+        let current_sequence = current_global_sequence(&transaction)?;
+        if through_global_sequence > current_sequence {
+            anyhow::bail!("Camp Message high-water is ahead of the current event sequence");
+        }
+        load_camp(&transaction, camp_id)?.context("Camp does not exist")?;
+        let mut messages = load_messages_before(&transaction, camp_id, before_sequence, limit + 1)?;
+        let has_more = messages.len() > limit as usize;
+        if has_more {
+            messages.remove(0);
+        }
+        let next_before_sequence = has_more
+            .then(|| messages.first().map(|message| message.sequence))
+            .flatten();
+        transaction.commit()?;
+        Ok(CampMessagePage {
+            schema_version: CAMP_MESSAGE_PAGE_SCHEMA_VERSION,
+            camp_id: camp_id.to_string(),
+            through_global_sequence,
+            requested_before_sequence: before_sequence,
+            next_before_sequence,
+            has_more,
+            messages,
         })
     }
 
@@ -888,6 +1076,7 @@ impl ReadModelService {
                 after_global_sequence,
                 through_global_sequence,
                 limit + 1,
+                false,
                 false,
             )?
         };
@@ -1113,6 +1302,91 @@ fn current_global_sequence(transaction: &Transaction<'_>) -> Result<i64> {
         .context("failed to capture global event sequence")
 }
 
+struct CampOpenCounts {
+    tasks: i64,
+    messages: i64,
+    message_deliveries: i64,
+    turns: i64,
+    agent_runs: i64,
+    execution_evidence: i64,
+    pending_approvals: i64,
+    timeline: i64,
+}
+
+fn load_camp_open_counts(transaction: &Transaction<'_>, camp_id: &str) -> Result<CampOpenCounts> {
+    transaction
+        .query_row(
+            r#"
+            SELECT
+              (SELECT COUNT(*) FROM task WHERE camp_id = ?1),
+              (SELECT COUNT(*) FROM camp_message
+               WHERE camp_id = ?1 AND tombstoned_at IS NULL),
+              (SELECT COUNT(*) FROM message_delivery WHERE camp_id = ?1),
+              (SELECT COUNT(*) FROM camp_turn WHERE camp_id = ?1),
+              (SELECT COUNT(*)
+               FROM agent_run
+               JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+               WHERE camp_turn.camp_id = ?1),
+              (SELECT COUNT(*)
+               FROM agent_run_execution_evidence AS evidence
+               JOIN agent_run ON agent_run.id = evidence.agent_run_id
+               JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+               WHERE camp_turn.camp_id = ?1),
+              (SELECT COUNT(*)
+               FROM approval
+               JOIN action_execution ON action_execution.id = approval.action_id
+               JOIN agent_run ON agent_run.id = action_execution.agent_run_id
+               JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+               WHERE camp_turn.camp_id = ?1 AND approval.status = 'pending'),
+              (SELECT COUNT(*)
+               FROM event_log
+               LEFT JOIN task AS event_task ON event_task.id = event_log.task_id
+               WHERE (event_log.camp_id = ?1
+                  OR (event_log.camp_id IS NULL AND event_task.camp_id = ?1))
+                 AND (event_log.entity_type = 'task'
+                   OR event_log.event_type = 'camp_turn.cancel_requested'))
+            "#,
+            [camp_id],
+            |row| {
+                Ok(CampOpenCounts {
+                    tasks: row.get(0)?,
+                    messages: row.get(1)?,
+                    message_deliveries: row.get(2)?,
+                    turns: row.get(3)?,
+                    agent_runs: row.get(4)?,
+                    execution_evidence: row.get(5)?,
+                    pending_approvals: row.get(6)?,
+                    timeline: row.get(7)?,
+                })
+            },
+        )
+        .context("failed to count Camp open projection coverage")
+}
+
+fn collection_coverage(loaded_count: usize, total_count: i64) -> CampOpenCollectionCoverage {
+    let loaded_count = i64::try_from(loaded_count).unwrap_or(i64::MAX);
+    let omitted_count = total_count.saturating_sub(loaded_count);
+    CampOpenCollectionCoverage {
+        loaded_count,
+        total_count,
+        omitted_count,
+        complete: omitted_count == 0,
+    }
+}
+
+fn message_coverage(messages: &[CampMessageView], total_count: i64) -> CampOpenMessageCoverage {
+    let base = collection_coverage(messages.len(), total_count);
+    CampOpenMessageCoverage {
+        loaded_count: base.loaded_count,
+        total_count: base.total_count,
+        omitted_count: base.omitted_count,
+        complete: base.complete,
+        oldest_loaded_sequence: messages.first().map(|message| message.sequence),
+        newest_loaded_sequence: messages.last().map(|message| message.sequence),
+        has_earlier: base.omitted_count > 0,
+    }
+}
+
 fn load_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<Option<CampView>> {
     transaction
         .query_row(
@@ -1180,7 +1454,11 @@ fn load_members(
         .context("failed to load Camp members")
 }
 
-fn load_tasks(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<TaskView>> {
+fn load_tasks(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    limit: Option<i64>,
+) -> Result<Vec<TaskView>> {
     let mut statement = transaction.prepare(
         r#"
         SELECT id, camp_id, title, description, acceptance_criteria_json,
@@ -1190,10 +1468,17 @@ fn load_tasks(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<TaskVi
                version, created_at, updated_at, closed_at
         FROM task
         WHERE camp_id = ?1
-        ORDER BY created_at DESC, id
+        ORDER BY
+          CASE
+            WHEN ?2 IS NOT NULL AND status IN ('pending', 'in_progress', 'blocked') THEN 0
+            WHEN ?2 IS NOT NULL THEN 1
+            ELSE 0
+          END,
+          created_at DESC, id
+        LIMIT COALESCE(?2, -1)
         "#,
     )?;
-    let rows = statement.query_map([camp_id], |row| {
+    let rows = statement.query_map(params![camp_id, limit], |row| {
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
@@ -1340,6 +1625,47 @@ fn load_messages(
     )?;
     let rows = statement
         .query_map(params![camp_id, limit], camp_message_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(statement);
+    let mut messages = hydrate_message_views(transaction, rows)?;
+    messages.reverse();
+    Ok(messages)
+}
+
+fn load_messages_before(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    before_sequence: i64,
+    limit: i64,
+) -> Result<Vec<CampMessageView>> {
+    let mut statement = transaction.prepare(
+        r#"
+        SELECT id, sequence,
+               (
+                   SELECT MAX(event_log.global_sequence)
+                   FROM event_log
+                   WHERE event_log.entity_type = 'camp_message'
+                     AND event_log.entity_id = camp_message.id
+                     AND event_log.event_type = 'camp_message.sent'
+               ),
+               author_type, author_id,
+               source_agent_run_id, body, structured_content_json, address_mode,
+               addressed_agent_ids_json,
+               reply_to_camp_message_id, camp_turn_id,
+               CASE WHEN author_type = 'agent'
+                    THEN recipient_presentation_json
+                    ELSE presentation_json
+               END, created_at
+        FROM camp_message
+        WHERE camp_id = ?1
+          AND tombstoned_at IS NULL
+          AND sequence < ?2
+        ORDER BY sequence DESC, id DESC
+        LIMIT ?3
+        "#,
+    )?;
+    let rows = statement
+        .query_map(params![camp_id, before_sequence, limit], camp_message_row)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     drop(statement);
     let mut messages = hydrate_message_views(transaction, rows)?;
@@ -1512,7 +1838,11 @@ fn render_structured_message_content(
     render_current_plain_text(transaction, content)
 }
 
-fn load_turns(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<CampTurnView>> {
+fn load_turns(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    limit: Option<i64>,
+) -> Result<Vec<CampTurnView>> {
     let mut statement = transaction.prepare(
         r#"
         SELECT id, trigger_type, trigger_id, status,
@@ -1530,11 +1860,18 @@ fn load_turns(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<CampTu
                execution_budget_exhaustion_command_id,
                version, created_at, updated_at, ended_at
         FROM camp_turn WHERE camp_id = ?1
-        ORDER BY created_at DESC, id
+        ORDER BY
+          CASE
+            WHEN ?2 IS NOT NULL AND status IN ('running', 'waiting') THEN 0
+            WHEN ?2 IS NOT NULL THEN 1
+            ELSE 0
+          END,
+          created_at DESC, id
+        LIMIT COALESCE(?2, -1)
         "#,
     )?;
     statement
-        .query_map([camp_id], |row| {
+        .query_map(params![camp_id, limit], |row| {
             Ok(CampTurnView {
                 id: row.get(0)?,
                 trigger_type: row.get(1)?,
@@ -1568,6 +1905,7 @@ fn load_turns(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<CampTu
 fn load_message_deliveries(
     transaction: &Transaction<'_>,
     camp_id: &str,
+    limit: Option<i64>,
 ) -> Result<Vec<MessageDeliveryView>> {
     let mut statement = transaction.prepare(
         r#"
@@ -1581,11 +1919,21 @@ fn load_message_deliveries(
                version, created_at, updated_at, ended_at
         FROM message_delivery
         WHERE camp_id = ?1
-        ORDER BY created_at, queue_sequence, id
+        ORDER BY
+          CASE
+            WHEN ?2 IS NOT NULL
+             AND status IN ('pending', 'running') THEN 0
+            WHEN ?2 IS NOT NULL THEN 1
+            ELSE 0
+          END,
+          CASE WHEN ?2 IS NULL THEN created_at END ASC,
+          CASE WHEN ?2 IS NOT NULL THEN created_at END DESC,
+          queue_sequence, id
+        LIMIT COALESCE(?2, -1)
         "#,
     )?;
-    Ok(statement
-        .query_map([camp_id], |row| {
+    let mut deliveries = statement
+        .query_map(params![camp_id, limit], |row| {
             Ok(MessageDeliveryView {
                 id: row.get(0)?,
                 message_id: row.get(1)?,
@@ -1611,10 +1959,22 @@ fn load_message_deliveries(
                 ended_at: row.get(21)?,
             })
         })?
-        .collect::<rusqlite::Result<Vec<_>>>()?)
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    if limit.is_some() {
+        deliveries.sort_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+    }
+    Ok(deliveries)
 }
 
-fn load_agent_runs(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<AgentRunView>> {
+fn load_agent_runs(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    limit: Option<i64>,
+) -> Result<Vec<AgentRunView>> {
     let mut statement = transaction.prepare(
         r#"
         SELECT agent_run.id, agent_run.camp_turn_id,
@@ -1685,11 +2045,22 @@ fn load_agent_runs(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<A
         JOIN camp ON camp.id = camp_turn.camp_id
         JOIN conversation ON conversation.id = agent_run.conversation_id
         WHERE camp_turn.camp_id = ?1
-        ORDER BY agent_run.created_at DESC, agent_run.id
+        ORDER BY
+          CASE
+            WHEN ?2 IS NOT NULL
+             AND (agent_run.status IN ('queued', 'running', 'waiting') OR (
+               agent_run.status IN ('failed', 'cancelled')
+               AND COALESCE(agent_run.last_error_code, '') = 'planned_shutdown_outcome_unknown'
+             )) THEN 0
+            WHEN ?2 IS NOT NULL THEN 1
+            ELSE 0
+          END,
+          agent_run.created_at DESC, agent_run.id
+        LIMIT COALESCE(?2, -1)
         "#,
     )?;
     let rows = statement
-        .query_map([camp_id], |row| {
+        .query_map(params![camp_id, limit], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -1816,6 +2187,8 @@ fn load_agent_runs(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<A
 fn load_execution_evidence(
     transaction: &Transaction<'_>,
     camp_id: &str,
+    limit: i64,
+    active_only: bool,
 ) -> Result<Vec<AgentRunExecutionEvidenceView>> {
     let mut statement = transaction.prepare(
         r#"
@@ -1830,6 +2203,7 @@ fn load_execution_evidence(
           JOIN agent_run ON agent_run.id = evidence.agent_run_id
           JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
           WHERE camp_turn.camp_id = ?1
+            AND (?3 = 0 OR agent_run.status IN ('queued', 'running', 'waiting'))
           ORDER BY evidence.occurred_at DESC,
                    evidence.agent_run_id DESC, evidence.sequence DESC
           LIMIT ?2
@@ -1838,10 +2212,7 @@ fn load_execution_evidence(
         "#,
     )?;
     let mut evidence = statement
-        .query_map(
-            params![camp_id, EXECUTION_EVIDENCE_SNAPSHOT_LIMIT],
-            execution_evidence_row,
-        )?
+        .query_map(params![camp_id, limit, active_only], execution_evidence_row)?
         .map(|row| execution_evidence_view(row?))
         .collect::<Result<Vec<_>>>()?;
     attach_canonical_activity(transaction, &mut evidence)?;
@@ -2285,7 +2656,12 @@ fn load_context_manifest_history_camps(
         .map_err(Into::into)
 }
 
-fn load_approvals(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<ApprovalView>> {
+fn load_approvals(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    pending_only: bool,
+    limit: Option<i64>,
+) -> Result<Vec<ApprovalView>> {
     let mut statement = transaction.prepare(
         r#"
         SELECT approval.id, approval.action_id, approval.action_kind,
@@ -2306,11 +2682,13 @@ fn load_approvals(transaction: &Transaction<'_>, camp_id: &str) -> Result<Vec<Ap
         JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
         JOIN conversation ON conversation.id = agent_run.conversation_id
         WHERE camp_turn.camp_id = ?1
+          AND (?2 = 0 OR approval.status = 'pending')
         ORDER BY approval.requested_at DESC, approval.id
+        LIMIT COALESCE(?3, -1)
         "#,
     )?;
     statement
-        .query_map([camp_id], |row| {
+        .query_map(params![camp_id, pending_only, limit], |row| {
             let canonical_input_json = row.get::<_, String>(12)?;
             let canonical_input = serde_json::from_str(&canonical_input_json).map_err(|error| {
                 rusqlite::Error::FromSqlConversionFailure(
@@ -2404,6 +2782,7 @@ fn load_events(
     through: i64,
     limit: i64,
     newest_first_window: bool,
+    presentation_only: bool,
 ) -> Result<Vec<DomainEventView>> {
     let order = if newest_first_window { "DESC" } else { "ASC" };
     let sql = format!(
@@ -2421,28 +2800,34 @@ fn load_events(
           AND (?3 IS NULL
                OR event_log.camp_id = ?3
                OR (event_log.camp_id IS NULL AND task.camp_id = ?3))
+          AND (?5 = 0
+               OR event_log.entity_type = 'task'
+               OR event_log.event_type = 'camp_turn.cancel_requested')
         ORDER BY event_log.global_sequence {order}
         LIMIT ?4
         "#,
     );
     let mut statement = transaction.prepare(&sql)?;
     let rows = statement
-        .query_map(params![after, through, camp_id, limit], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, Option<String>>(3)?,
-                row.get::<_, Option<String>>(4)?,
-                row.get::<_, Option<String>>(5)?,
-                row.get::<_, Option<String>>(6)?,
-                row.get::<_, Option<String>>(7)?,
-                row.get::<_, Option<String>>(8)?,
-                row.get::<_, Option<i64>>(9)?,
-                row.get::<_, String>(10)?,
-                row.get::<_, String>(11)?,
-            ))
-        })?
+        .query_map(
+            params![after, through, camp_id, limit, presentation_only],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, Option<i64>>(9)?,
+                    row.get::<_, String>(10)?,
+                    row.get::<_, String>(11)?,
+                ))
+            },
+        )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut events = rows
         .into_iter()
@@ -2827,6 +3212,63 @@ mod tests {
                 .messages
                 .iter()
                 .all(|message| message.id != "around-message-25")
+        );
+
+        let open = read_model
+            .camp_open_projection(&mut database, &camp_id)
+            .unwrap();
+        assert_eq!(open.schema_version, CAMP_OPEN_SCHEMA_VERSION);
+        assert_eq!(open.messages.len(), CAMP_OPEN_MESSAGE_LIMIT as usize);
+        assert_eq!(open.messages.first().unwrap().sequence, 1_031);
+        assert_eq!(open.messages.last().unwrap().sequence, 1_050);
+        assert_eq!(open.coverage.messages.loaded_count, 20);
+        assert_eq!(open.coverage.messages.total_count, 1_050);
+        assert_eq!(open.coverage.messages.omitted_count, 1_030);
+        assert!(open.coverage.messages.has_earlier);
+        assert!(!open.coverage.messages.complete);
+        let serialized_open = serde_json::to_value(&open).unwrap();
+        assert!(serialized_open.get("contextManifests").is_none());
+        assert!(serialized_open.get("actions").is_none());
+
+        let earlier = read_model
+            .camp_messages_page(
+                &mut database,
+                &camp_id,
+                1_031,
+                open.through_global_sequence,
+                50,
+            )
+            .unwrap();
+        assert_eq!(earlier.schema_version, CAMP_MESSAGE_PAGE_SCHEMA_VERSION);
+        assert_eq!(earlier.messages.len(), 50);
+        assert_eq!(earlier.messages.first().unwrap().sequence, 981);
+        assert_eq!(earlier.messages.last().unwrap().sequence, 1_030);
+        assert!(earlier.has_more);
+        assert_eq!(earlier.next_before_sequence, Some(981));
+        let oldest = read_model
+            .camp_messages_page(
+                &mut database,
+                &camp_id,
+                51,
+                open.through_global_sequence,
+                100,
+            )
+            .unwrap();
+        assert_eq!(oldest.messages.len(), 50);
+        assert_eq!(oldest.messages.first().unwrap().sequence, 1);
+        assert_eq!(oldest.messages.last().unwrap().sequence, 50);
+        assert!(!oldest.has_more);
+        assert_eq!(oldest.next_before_sequence, None);
+        assert!(
+            read_model
+                .camp_messages_page(
+                    &mut database,
+                    &camp_id,
+                    1_031,
+                    open.through_global_sequence + 1,
+                    50,
+                )
+                .is_err()
         );
 
         let around = read_model

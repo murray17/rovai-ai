@@ -1133,6 +1133,54 @@ export interface CampSnapshot {
   timeline: DomainEventView[]
 }
 
+export interface CampOpenCollectionCoverage {
+  loadedCount: number
+  totalCount: number
+  omittedCount: number
+  complete: boolean
+}
+
+export interface CampOpenMessageCoverage extends CampOpenCollectionCoverage {
+  oldestLoadedSequence: number | null
+  newestLoadedSequence: number | null
+  hasEarlier: boolean
+}
+
+export interface CampOpenProjection {
+  schemaVersion: 1
+  throughGlobalSequence: number
+  camp: CampSnapshot['camp']
+  members: CampMemberView[]
+  tasks: TaskView[]
+  messages: CampMessageView[]
+  messageDeliveries: MessageDeliveryView[]
+  turns: CampTurnView[]
+  agentRuns: AgentRunView[]
+  executionEvidence: AgentRunExecutionEvidenceView[]
+  approvals: ActionApprovalView[]
+  timeline: DomainEventView[]
+  coverage: {
+    tasks: CampOpenCollectionCoverage
+    messages: CampOpenMessageCoverage
+    messageDeliveries: CampOpenCollectionCoverage
+    turns: CampOpenCollectionCoverage
+    agentRuns: CampOpenCollectionCoverage
+    executionEvidence: CampOpenCollectionCoverage
+    approvals: CampOpenCollectionCoverage
+    timeline: CampOpenCollectionCoverage
+  }
+}
+
+export interface CampMessagePage {
+  schemaVersion: 1
+  campId: string
+  throughGlobalSequence: number
+  requestedBeforeSequence: number
+  nextBeforeSequence: number | null
+  hasMore: boolean
+  messages: CampMessageView[]
+}
+
 export interface CampMessageAroundSnapshot {
   schemaVersion: 1
   throughGlobalSequence: number
@@ -1976,10 +2024,13 @@ export type CoreMethod =
   | 'camps.rename'
   | 'camps.changeDefaultLead'
   | 'camps.reconcileDefaultLead'
+  | 'camps.enter'
+  | 'camps.open'
   | 'camps.delete'
   | 'campTurns.cancel'
   | 'agentRuns.resolveRecoveryBlocker'
   | 'camps.snapshot'
+  | 'camp.messages.page'
   | 'camp.messages.around'
   | 'agentRunEvidence.getContent'
   | 'agentRunEvidence.list'

@@ -1249,6 +1249,20 @@ button.camp-world-map-speech { cursor: pointer; font: inherit; }
 .camp-world-map.is-static .camp-world-map-route, .camp-world-map.is-static .camp-world-map-route[data-active], .camp-world-map.is-static .camp-world-map-agent-button::before, .camp-world-map.is-static .camp-world-map-speech { animation: none; transition: none; }
 .camp-world-map.is-static .camp-world-map-agent-button::before { opacity: 0; }
 .timeline-track { position: relative; width: min(790px, 100%); min-height: 100%; margin: 0 auto; }
+.camp-history-loader,
+.camp-history-error {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  margin: 0 auto 14px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.camp-history-loader .quiet-button,
+.camp-history-error .quiet-button { flex: 0 0 auto; }
+.camp-history-error { color: var(--danger); }
 .empty-camp-welcome {
   display: grid;
   min-height: 100%;
@@ -2160,6 +2174,7 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
 .task-action-button strong { font-size: 11px; font-weight: 650; }
 .task-action-button.is-back > span { background: transparent; }
 .task-list { display: grid; }
+.task-history-note { margin: 0; padding: 9px 12px; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .task-list-row {
   display: grid;
   width: 100%;

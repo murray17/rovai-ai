@@ -9,8 +9,10 @@ import type {
   CampActivationState,
   CampCreationPreflight,
   CampComposerDraftView,
+  CampMessagePage,
   CampMessageAroundSnapshot,
   CampMessageView,
+  CampOpenProjection,
   CampSnapshot,
   CreateCampRequest,
   CoreEvent,
@@ -140,11 +142,15 @@ interface OptimisticCampMessageEntry {
   message: CampMessageView
 }
 
+type CampSurfaceSnapshot = CampSnapshot & {
+  openCoverage?: CampOpenProjection['coverage']
+}
+
 const CAMP_SNAPSHOT_CACHE_LIMIT = 5
 
 export function rememberCampSnapshot(
-  cache: Map<string, CampSnapshot>,
-  snapshot: CampSnapshot,
+  cache: Map<string, CampSurfaceSnapshot>,
+  snapshot: CampSurfaceSnapshot,
   limit = CAMP_SNAPSHOT_CACHE_LIMIT
 ): void {
   cache.delete(snapshot.camp.id)
@@ -161,14 +167,64 @@ export function rememberCampSnapshot(
 }
 
 export function recentCampSnapshot(
-  cache: Map<string, CampSnapshot>,
+  cache: Map<string, CampSurfaceSnapshot>,
   campId: string
-): CampSnapshot | null {
+): CampSurfaceSnapshot | null {
   const snapshot = cache.get(campId) ?? null
   if (!snapshot) return null
   cache.delete(campId)
   cache.set(campId, snapshot)
   return snapshot
+}
+
+export function campOpenProjectionAsSnapshot(
+  projection: CampOpenProjection,
+  previous: CampSurfaceSnapshot | null = null
+): CampSurfaceSnapshot {
+  const previousEarlierMessages = previous?.camp.id === projection.camp.id
+    ? previous.messages.filter((message) =>
+        projection.messages.length > 0
+          && message.sequence < projection.messages[0].sequence
+      )
+    : []
+  const messagesById = new Map<string, CampMessageView>()
+  for (const message of previousEarlierMessages) messagesById.set(message.id, message)
+  for (const message of projection.messages) messagesById.set(message.id, message)
+  const messages = [...messagesById.values()].sort((left, right) =>
+    left.sequence - right.sequence || left.id.localeCompare(right.id)
+  )
+  const loadedCount = messages.length
+  const totalCount = Math.max(projection.coverage.messages.totalCount, loadedCount)
+  const omittedCount = Math.max(0, totalCount - loadedCount)
+  return {
+    schemaVersion: 29,
+    throughGlobalSequence: projection.throughGlobalSequence,
+    camp: projection.camp,
+    members: projection.members,
+    tasks: projection.tasks,
+    messages,
+    messageDeliveries: projection.messageDeliveries,
+    turns: projection.turns,
+    agentRuns: projection.agentRuns,
+    executionEvidence: projection.executionEvidence,
+    contextManifests: [],
+    approvals: projection.approvals,
+    actions: [],
+    timeline: projection.timeline,
+    openCoverage: {
+      ...projection.coverage,
+      messages: {
+        ...projection.coverage.messages,
+        loadedCount,
+        totalCount,
+        omittedCount,
+        complete: omittedCount === 0,
+        hasEarlier: omittedCount > 0,
+        oldestLoadedSequence: messages[0]?.sequence ?? null,
+        newestLoadedSequence: messages.at(-1)?.sequence ?? null
+      }
+    }
+  }
 }
 
 const CANCELLABLE_TURN_STATUSES = new Set<CampSnapshot['turns'][number]['status']>([
@@ -309,7 +365,7 @@ export function App(): React.JSX.Element {
   const [memoryRefreshKey, setMemoryRefreshKey] = useState(0)
   const [memoryFocusId, setMemoryFocusId] = useState<string | null>(null)
   const [memoryReviewDrawerSignal, setMemoryReviewDrawerSignal] = useState(0)
-  const [campSnapshot, setCampSnapshotState] = useState<CampSnapshot | null>(null)
+  const [campSnapshot, setCampSnapshotState] = useState<CampSurfaceSnapshot | null>(null)
   const [campInspectorVisible, setCampInspectorVisible] = useState(initialCampInspectorVisibility)
   const [campInspectorTab, setCampInspectorTab] = useState<CampInspectorTab>('tasks')
   const [optimisticCampMessages, setOptimisticCampMessages] = useState<OptimisticCampMessageEntry[]>([])
@@ -348,7 +404,8 @@ export function App(): React.JSX.Element {
   const [liveRuntimeEvents, setLiveRuntimeEvents] = useState<LiveRuntimeEvent[]>([])
   const campEventSequenceMarker = useRef(0)
   const campSelectionGeneration = useRef(0)
-  const campSnapshotCache = useRef(new Map<string, CampSnapshot>())
+  const campSnapshotCache = useRef(new Map<string, CampSurfaceSnapshot>())
+  const campSnapshotRef = useRef<CampSurfaceSnapshot | null>(null)
   const activeCampIdRef = useRef<string | null>(null)
   const viewRef = useRef<View>('compose')
   const notificationFocusSequence = useRef(0)
@@ -379,9 +436,44 @@ export function App(): React.JSX.Element {
     notificationPresentationRef.current = createNotificationPresentationCoordinator()
   }
 
-  const setCampSnapshot = useCallback((snapshot: CampSnapshot | null): void => {
+  const setCampSnapshot = useCallback((snapshot: CampSurfaceSnapshot | null): void => {
+    campSnapshotRef.current = snapshot
     if (snapshot) rememberCampSnapshot(campSnapshotCache.current, snapshot)
     setCampSnapshotState(snapshot)
+  }, [])
+
+  const requestCampProjection = useCallback(async (
+    campId: string,
+    mode: 'enter' | 'open'
+  ): Promise<{
+    snapshot: CampSurfaceSnapshot
+    traceId: string
+    startedAt: number
+  }> => {
+    const traceId = crypto.randomUUID()
+    const startedAt = performance.now()
+    const method = mode === 'enter' ? 'camps.enter' : 'camps.open'
+    console.info(`[camp-open] trace=${traceId} stage=renderer_request method=${method}`)
+    const projection = mode === 'enter'
+      ? await window.rovai.request<CampOpenProjection>('camps.enter', {
+          traceId,
+          commandId: crypto.randomUUID(),
+          command: { campId }
+        })
+      : await window.rovai.request<CampOpenProjection>('camps.open', { traceId, campId })
+    if (projection.schemaVersion !== 1) throw new Error('会话打开数据版本不兼容。')
+    console.info(
+      `[camp-open] trace=${traceId} stage=renderer_received method=${method} `
+      + `elapsed_ms=${(performance.now() - startedAt).toFixed(1)} `
+      + `schema=${projection.schemaVersion} high_water=${projection.throughGlobalSequence} `
+      + `messages=${projection.messages.length} runs=${projection.agentRuns.length} `
+      + `evidence=${projection.executionEvidence.length} timeline=${projection.timeline.length}`
+    )
+    return {
+      snapshot: campOpenProjectionAsSnapshot(projection, campSnapshotRef.current),
+      traceId,
+      startedAt
+    }
   }, [])
 
   useEffect(() => () => {
@@ -617,28 +709,11 @@ export function App(): React.JSX.Element {
     lastMainView.current = 'camp'
     setView('camp')
     try {
-      const reconciliationPromise = options.reconcileDefaultLead !== false
-        ? window.rovai.request<StoredCommandResult>('camps.reconcileDefaultLead', {
-          commandId: crypto.randomUUID(),
-          command: { campId }
-        })
-        : Promise.resolve<StoredCommandResult | null>(null)
-      // Both requests use Core's serialized main queue. Queue the read immediately
-      // after reconciliation so opening does not pay an extra Renderer/Main IPC turn.
-      const snapshotPromise = window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
-      const [reconciliation, snapshot] = await Promise.all([
-        reconciliationPromise,
-        snapshotPromise
-      ])
-      if (reconciliation?.status === 'rejected') {
-        throw new Error(commandFailureMessage(reconciliation))
-      }
-      if (snapshot.schemaVersion !== 29) throw new Error('会话数据版本不兼容。')
+      const { snapshot, traceId, startedAt } = await requestCampProjection(
+        campId,
+        options.reconcileDefaultLead === false ? 'open' : 'enter'
+      )
       if (selectionGeneration !== campSelectionGeneration.current) return false
-      if (snapshot.camp.projectBindingKind === 'directory') {
-        await restoreNavigationProject(snapshot.camp.projectPath)
-        if (selectionGeneration !== campSelectionGeneration.current) return false
-      }
       const snapshotProject = currentProjectForCamp(snapshot.camp)
       setCurrentProject(snapshotProject)
       persistCurrentProject(snapshotProject)
@@ -652,8 +727,27 @@ export function App(): React.JSX.Element {
       setCampSnapshot(snapshot)
       await afterNextPaint()
       if (selectionGeneration !== campSelectionGeneration.current) return false
-      await loadNavigation()
-      return selectionGeneration === campSelectionGeneration.current
+      console.info(
+        `[camp-open] trace=${traceId} stage=renderer_meaningful_paint `
+        + `elapsed_ms=${(performance.now() - startedAt).toFixed(1)}`
+      )
+      void (async () => {
+        if (snapshot.camp.projectBindingKind === 'directory') {
+          await restoreNavigationProject(snapshot.camp.projectPath)
+          if (selectionGeneration !== campSelectionGeneration.current) return
+        }
+        await loadNavigation()
+        if (selectionGeneration !== campSelectionGeneration.current) return
+        console.info(
+          `[camp-open] trace=${traceId} stage=renderer_background_complete `
+          + `elapsed_ms=${(performance.now() - startedAt).toFixed(1)}`
+        )
+      })().catch((nextError) => {
+        if (selectionGeneration === campSelectionGeneration.current) {
+          setError(errorMessage(nextError))
+        }
+      })
+      return true
     } catch (nextError) {
       if (selectionGeneration === campSelectionGeneration.current) {
         if (options.suppressErrors) {
@@ -667,16 +761,72 @@ export function App(): React.JSX.Element {
       }
       return false
     }
-  }, [loadNavigation, restoreNavigationProject, setCampSnapshot])
+  }, [loadNavigation, requestCampProjection, restoreNavigationProject, setCampSnapshot])
 
   const refreshActiveCampSnapshot = useCallback(async (campId: string): Promise<void> => {
-    const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
-    if (snapshot.schemaVersion !== 29) throw new Error('会话数据版本不兼容。')
+    const { snapshot } = await requestCampProjection(campId, 'open')
     if (activeCampIdRef.current !== campId) return
     if (snapshot.throughGlobalSequence < campEventSequenceMarker.current) return
     campEventSequenceMarker.current = snapshot.throughGlobalSequence
     setCampSnapshot(snapshot)
-  }, [])
+  }, [requestCampProjection, setCampSnapshot])
+
+  const loadEarlierCampMessages = useCallback(async (): Promise<void> => {
+    const requestedSnapshot = campSnapshotRef.current
+    const coverage = requestedSnapshot?.openCoverage?.messages
+    const beforeSequence = coverage?.oldestLoadedSequence ?? null
+    if (!requestedSnapshot || !coverage?.hasEarlier || beforeSequence === null) return
+    const campId = requestedSnapshot.camp.id
+    const selectionGeneration = campSelectionGeneration.current
+    const page = await window.rovai.request<CampMessagePage>('camp.messages.page', {
+      campId,
+      beforeSequence,
+      throughGlobalSequence: requestedSnapshot.throughGlobalSequence,
+      limit: 50
+    })
+    if (
+      page.schemaVersion !== 1
+      || page.campId !== campId
+      || page.throughGlobalSequence !== requestedSnapshot.throughGlobalSequence
+      || page.requestedBeforeSequence !== beforeSequence
+      || page.hasMore !== (page.nextBeforeSequence !== null)
+      || page.messages.some((message) => message.sequence >= beforeSequence)
+    ) {
+      throw new Error('较早消息数据不兼容，请重新打开会话。')
+    }
+    if (selectionGeneration !== campSelectionGeneration.current) return
+    const current = campSnapshotRef.current
+    if (!current || current.camp.id !== campId) return
+    const messagesById = new Map(current.messages.map((message) => [message.id, message]))
+    for (const message of page.messages) messagesById.set(message.id, message)
+    const messages = [...messagesById.values()].sort((left, right) =>
+      left.sequence - right.sequence || left.id.localeCompare(right.id)
+    )
+    const loadedCount = messages.length
+    const totalCount = page.hasMore
+      ? Math.max(current.openCoverage?.messages.totalCount ?? 0, loadedCount + 1)
+      : loadedCount
+    const omittedCount = Math.max(0, totalCount - loadedCount)
+    setCampSnapshot({
+      ...current,
+      messages,
+      openCoverage: current.openCoverage
+        ? {
+            ...current.openCoverage,
+            messages: {
+              ...current.openCoverage.messages,
+              loadedCount,
+              totalCount,
+              omittedCount,
+              complete: !page.hasMore,
+              hasEarlier: page.hasMore,
+              oldestLoadedSequence: messages[0]?.sequence ?? null,
+              newestLoadedSequence: messages.at(-1)?.sequence ?? null
+            }
+          }
+        : undefined
+    })
+  }, [setCampSnapshot])
 
   const refreshVisibleNotificationCamp = useCallback(async (
     _episode: NotificationEpisodeView,
@@ -831,14 +981,9 @@ export function App(): React.JSX.Element {
         lastMainView.current = 'members'
         setView('members')
       } else {
-        let snapshot: CampSnapshot
+        let opened: Awaited<ReturnType<typeof requestCampProjection>>
         try {
-          snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', {
-            campId: target.campId
-          })
-          if (snapshot.schemaVersion !== 29) {
-            throw new Error('会话数据版本不兼容。')
-          }
+          opened = await requestCampProjection(target.campId, 'enter')
         } catch (snapshotError) {
           const authoritativeNavigation = await loadNavigation()
           if (cancelled) return
@@ -862,12 +1007,10 @@ export function App(): React.JSX.Element {
           throw snapshotError
         }
         if (cancelled) return
+        const { snapshot, traceId, startedAt } = opened
         campSelectionGeneration.current += 1
+        const selectionGeneration = campSelectionGeneration.current
         campEventSequenceMarker.current = snapshot.throughGlobalSequence
-        if (snapshot.camp.projectBindingKind === 'directory') {
-          await restoreNavigationProject(snapshot.camp.projectPath)
-          if (cancelled) return
-        }
         const snapshotProject = currentProjectForCamp(snapshot.camp)
         setCurrentProject(snapshotProject)
         persistCurrentProject(snapshotProject)
@@ -876,6 +1019,32 @@ export function App(): React.JSX.Element {
         setNotificationFocus(null)
         lastMainView.current = 'camp'
         setView('camp')
+        startupResolvedSessionId.current = startupSnapshot.sessionId
+        setStartupStatus('resolved')
+        setStartupError(null)
+        await afterNextPaint()
+        if (cancelled || selectionGeneration !== campSelectionGeneration.current) return
+        console.info(
+          `[camp-open] trace=${traceId} stage=renderer_meaningful_paint source=startup `
+          + `elapsed_ms=${(performance.now() - startedAt).toFixed(1)}`
+        )
+        void (async () => {
+          if (snapshot.camp.projectBindingKind === 'directory') {
+            await restoreNavigationProject(snapshot.camp.projectPath)
+            if (cancelled || selectionGeneration !== campSelectionGeneration.current) return
+          }
+          await loadNavigation()
+          if (cancelled || selectionGeneration !== campSelectionGeneration.current) return
+          console.info(
+            `[camp-open] trace=${traceId} stage=renderer_background_complete source=startup `
+            + `elapsed_ms=${(performance.now() - startedAt).toFixed(1)}`
+          )
+        })().catch((nextError) => {
+          if (!cancelled && selectionGeneration === campSelectionGeneration.current) {
+            setError(errorMessage(nextError))
+          }
+        })
+        return
       }
       if (cancelled) return
       startupResolvedSessionId.current = startupSnapshot.sessionId
@@ -900,7 +1069,15 @@ export function App(): React.JSX.Element {
       cancelled = true
       window.clearTimeout(overviewTimer)
     }
-  }, [loadAgents, loadNavigation, loadOverview, restoreNavigationProject, startupSnapshot])
+  }, [
+    loadAgents,
+    loadNavigation,
+    loadOverview,
+    requestCampProjection,
+    restoreNavigationProject,
+    setCampSnapshot,
+    startupSnapshot
+  ])
 
   useEffect(() => {
     if (startupStatus !== 'resolved' || view !== 'compose') return
@@ -1115,11 +1292,9 @@ export function App(): React.JSX.Element {
     const campId = activeCampId
 
     const refreshSnapshot = async (): Promise<void> => {
-      const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', {
-        campId
-      })
-      if (snapshot.schemaVersion !== 29) throw new Error('会话数据版本不兼容。')
+      const { snapshot } = await requestCampProjection(campId, 'open')
       if (cancelled) return
+      if (snapshot.throughGlobalSequence < campEventSequenceMarker.current) return
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
     }
@@ -1178,7 +1353,7 @@ export function App(): React.JSX.Element {
       cancelled = true
       if (timer) clearTimeout(timer)
     }
-  }, [activeCampId, campSnapshot?.camp.id, loadNavigation])
+  }, [activeCampId, campSnapshot?.camp.id, requestCampProjection, setCampSnapshot])
 
   const chooseCurrentProject = (
     nextProject: CurrentProject,
@@ -1617,7 +1792,7 @@ export function App(): React.JSX.Element {
       if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
       await loadNavigation()
       if (activeCampId === camp.id) {
-        const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId: camp.id })
+        const { snapshot } = await requestCampProjection(camp.id, 'open')
         campEventSequenceMarker.current = snapshot.throughGlobalSequence
         setCampSnapshot(snapshot)
       }
@@ -1666,7 +1841,7 @@ export function App(): React.JSX.Element {
     try {
       const snapshot = campSnapshot?.camp.id === campId
         ? campSnapshot
-        : await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
+        : (await requestCampProjection(campId, 'open')).snapshot
       const cancellableIds = new Set(cancellableTurnIds(
         snapshot,
         camp ? 'camp_cleanup' : 'current_execution'
@@ -1737,8 +1912,8 @@ export function App(): React.JSX.Element {
         }
       })
       if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
-      const [snapshot] = await Promise.all([
-        window.rovai.request<CampSnapshot>('camps.snapshot', { campId: activeCampId }),
+      const [{ snapshot }] = await Promise.all([
+        requestCampProjection(activeCampId, 'open'),
         loadNavigation()
       ])
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
@@ -1854,9 +2029,8 @@ export function App(): React.JSX.Element {
             }
           : entry
       ))
-      void window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
-        .then(async (snapshot) => {
-          if (snapshot.schemaVersion !== 29) throw new Error('会话数据版本不兼容。')
+      void requestCampProjection(campId, 'open')
+        .then(async ({ snapshot }) => {
           if (selectionGeneration !== campSelectionGeneration.current) return
           campEventSequenceMarker.current = snapshot.throughGlobalSequence
           setCampSnapshot(snapshot)
@@ -1899,9 +2073,7 @@ export function App(): React.JSX.Element {
         reason: `用户选择 Agent 运行时原生选项：${optionId}。`
       })
       if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
-      const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', {
-        campId: activeCampId
-      })
+      const { snapshot } = await requestCampProjection(activeCampId, 'open')
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
     } catch (nextError) {
@@ -2082,6 +2254,13 @@ export function App(): React.JSX.Element {
           <CampWorkspace
             key={activeCampId}
             snapshot={visibleCampSnapshot}
+            openCoverage={campSnapshot?.camp.id === activeCampId
+              ? campSnapshot.openCoverage ?? null
+              : null}
+            messageHistory={campSnapshot?.camp.id === activeCampId
+              ? campSnapshot.openCoverage?.messages ?? null
+              : null}
+            onLoadEarlierMessages={loadEarlierCampMessages}
             optimisticMessages={optimisticCampMessages
               .filter((entry) => entry.campId === activeCampId)
               .map((entry) => entry.message)}
@@ -2115,7 +2294,7 @@ export function App(): React.JSX.Element {
         )}
 
         {!startupGateVisible && view === 'camp' && (!activeCampId || visibleCampSnapshot?.camp.id !== activeCampId) && (
-          <EmptyState title="正在打开对话" body="Rovai AI 正在从本地数据恢复会话、队员与运行状态。" />
+          <EmptyState title="正在打开对话" body="Rovai AI 正在读取最近消息与当前运行状态。" />
         )}
 
         {!startupGateVisible && view === 'compose' && (
@@ -2693,10 +2872,18 @@ function errorMessage(error: unknown): string {
   return localizeExecutionEngineTerms(error instanceof Error ? error.message : String(error))
 }
 
-function afterNextPaint(): Promise<void> {
+function afterNextPaint(timeoutMs = 250): Promise<void> {
   return new Promise((resolve) => {
+    let settled = false
+    const finish = (): void => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timeout)
+      resolve()
+    }
+    const timeout = window.setTimeout(finish, timeoutMs)
     window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => resolve())
+      window.requestAnimationFrame(finish)
     })
   })
 }

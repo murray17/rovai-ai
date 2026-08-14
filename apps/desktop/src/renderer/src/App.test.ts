@@ -9,6 +9,7 @@ import type {
   AgentRunExecutionEvidenceView,
   CampComposerDraftView,
   CampMessageView,
+  CampOpenProjection,
   CampSnapshot,
   CanonicalRuntimeActivityView,
   HealthStatus,
@@ -26,6 +27,7 @@ import {
   cancellableTurnIds,
   campCreationPreflightFromAgents,
   campMessageSendParams,
+  campOpenProjectionAsSnapshot,
   campSnapshotWithCurrentAnchor,
   campSnapshotWithAnchoredMessages,
   commandFailureMessage,
@@ -175,6 +177,99 @@ describe('Camp snapshot cache', () => {
 
     expect([...cache.keys()]).toEqual(['camp-1', 'camp-3'])
     expect(recentCampSnapshot(cache, 'camp-2')).toBeNull()
+  })
+
+  it('adapts the bounded open projection without restoring heavy history', () => {
+    const message = (id: string, sequence: number): CampMessageView => ({
+      id,
+      sequence,
+      timelineGlobalSequence: sequence,
+      authorType: 'user',
+      authorId: 'local_user',
+      sourceAgentRunId: null,
+      body: id,
+      content: [{ kind: 'text', text: id }],
+      attachments: [],
+      addressMode: 'default',
+      addressedAgentIds: [],
+      replyToCampMessageId: null,
+      campTurnId: null,
+      presentation: null,
+      createdAt: `2026-08-14T00:00:${String(sequence).padStart(2, '0')}Z`
+    })
+    const camp = {
+      id: 'camp-1',
+      title: 'Camp',
+      activationState: 'active' as const,
+      projectBindingKind: 'quick_chat' as const,
+      projectPath: '/quick-chat',
+      defaultLeadAgentId: null,
+      version: 1,
+      createdAt: '2026-08-14T00:00:00Z',
+      updatedAt: '2026-08-14T00:00:00Z'
+    }
+    const previous = {
+      schemaVersion: 29,
+      throughGlobalSequence: 10,
+      camp,
+      members: [],
+      tasks: [],
+      messages: [message('older', 1)],
+      messageDeliveries: [],
+      turns: [],
+      agentRuns: [],
+      executionEvidence: [],
+      contextManifests: [{ id: 'must-not-survive' }],
+      approvals: [],
+      actions: [{ id: 'must-not-survive' }],
+      timeline: []
+    } as unknown as CampSnapshot
+    const complete = {
+      loadedCount: 0,
+      totalCount: 0,
+      omittedCount: 0,
+      complete: true
+    }
+    const projection = {
+      schemaVersion: 1,
+      throughGlobalSequence: 20,
+      camp,
+      members: [],
+      tasks: [],
+      messages: [message('recent', 101)],
+      messageDeliveries: [],
+      turns: [],
+      agentRuns: [],
+      executionEvidence: [],
+      approvals: [],
+      timeline: [],
+      coverage: {
+        tasks: complete,
+        messages: {
+          loadedCount: 1,
+          totalCount: 101,
+          omittedCount: 100,
+          complete: false,
+          oldestLoadedSequence: 101,
+          newestLoadedSequence: 101,
+          hasEarlier: true
+        },
+        messageDeliveries: complete,
+        turns: complete,
+        agentRuns: complete,
+        executionEvidence: complete,
+        approvals: complete,
+        timeline: complete
+      }
+    } satisfies CampOpenProjection
+
+    const snapshot = campOpenProjectionAsSnapshot(projection, previous)
+
+    expect(snapshot.messages.map(({ id }) => id)).toEqual(['older', 'recent'])
+    expect(snapshot.contextManifests).toEqual([])
+    expect(snapshot.actions).toEqual([])
+    expect(snapshot.openCoverage?.messages.loadedCount).toBe(2)
+    expect(snapshot.openCoverage?.messages.omittedCount).toBe(99)
   })
 })
 
