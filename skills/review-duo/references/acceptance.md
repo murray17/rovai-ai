@@ -23,7 +23,7 @@
 6. Lead 独立完成 Spec，按预算 public-only 发布 parts 与带 current request locator 的 manifest；
 7. 搭档按预算 public-only 发布 Standards parts，最后只用 manifest 返回 Lead；
 8. Lead 验证可信 sender、直接父请求、真实 request ID 与 snapshot identifier；
-9. Lead 通过 current request locator 搜索取得 Camp ID，再 exact-read 两轴 manifests/parts 并验证 digest；
+9. Lead 通过 current request locator 搜索取得 Camp ID，再 exact-read 两轴 manifests/parts 并验证 expected/accepted parts、编号、finding 序列、ranges/counts、transmitted/total 数量、transmitted severity counts 与收件人集合；
 10. 在 Standards manifest 触发的续跑中 public-only 发布两个固定区块的有界摘要；
 11. 不修改代码或创建其它领域对象。
 
@@ -45,7 +45,7 @@ Standards 请求不含 Spec finding；Lead 在吸收 Standards 前锁定 Spec；
 
 ## Result transport
 
-覆盖单条 32 KiB hard rejection 边界、30 KiB working limit、多字节 UTF-8、零 finding、单 part、多 part、单 finding 过大、part rejected、manifest rejected、超过 128 parts、part ID 缺失、digest mismatch、Spec locator 唯一命中、重复 locator、Retry pointer、completion locator、recent history 中没有 Spec、最终摘要不复制全文，以及任何不完整传输都不能称为 complete。
+覆盖单条 32 KiB hard rejection 边界、30 KiB working limit、多字节 UTF-8、零 finding、单 part、多 part、单 finding 过大、part rejected、manifest rejected、超过 128 parts、part message ID 缺失、part 编号重复/断档、finding ID 重复/断档、range/count/severity 汇总不一致、public-only 消息出现 Agent recipient、Standards manifest 收件人不准确、Spec locator 唯一命中、重复 locator、Retry pointer、completion locator、recent history 中没有 Spec、最终摘要不复制全文，以及任何不完整传输都不能称为 complete。
 
 ## Fallback
 

@@ -3582,6 +3582,44 @@ mod tests {
         .unwrap();
         assert!(review_duo_standards.contains("rovai send --to <请求发送者 Agent ID>"));
         assert!(review_duo_standards.contains("Standards result locator"));
+        let review_duo_findings =
+            fs::read_to_string(review_duo_content.join("references").join("findings.md")).unwrap();
+        for required in [
+            "ID 必须形成从 `001` 到 manifest `Total` 的完整连续序列",
+            "accepted `effectiveRecipients` 必须为空",
+            "transmitted severity counts",
+        ] {
+            assert!(
+                review_duo_findings.contains(required),
+                "missing review-duo result transport rule: {required}"
+            );
+        }
+        let review_duo_protocol = [
+            review_duo_rules,
+            review_duo_findings,
+            fs::read_to_string(review_duo_content.join("references/acceptance.md")).unwrap(),
+            fs::read_to_string(review_duo_content.join("references/fallbacks.md")).unwrap(),
+            fs::read_to_string(review_duo_content.join("references/lead.md")).unwrap(),
+            review_duo_messages,
+            fs::read_to_string(review_duo_content.join("references/snapshot.md")).unwrap(),
+            fs::read_to_string(review_duo_content.join("references/spec-reviewer.md")).unwrap(),
+            review_duo_standards,
+        ]
+        .join("\n");
+        for retired_result_digest_rule in [
+            "Result digest",
+            "result digest",
+            "canonical result digest",
+            "canonical digest",
+            "digest 不匹配",
+            "digest 可验证",
+            "part/digest",
+        ] {
+            assert!(
+                !review_duo_protocol.contains(retired_result_digest_rule),
+                "retired review-duo result transport rule remains: {retired_result_digest_rule}"
+            );
+        }
         let tasteful_ui = skills
             .iter()
             .find(|skill| skill.name == "tasteful-ui")

@@ -90,9 +90,9 @@ rovai send --help
 4. 轴内处理精确重复；
 5. 按 30 KiB 工作上限计算结果 UTF-8 byte size，以完整 finding 为边界形成 Spec parts；
 6. 依次 public-only 发送所有 parts，保留 accepted `messageId`；
-7. 最后 public-only 发送 compact Spec manifest，在正文中包含精确行 `Spec source locator <accepted Standards request messageId>`、所有 part IDs 与 result digest。
+7. 最后 public-only 发送 compact Spec manifest，在正文中包含精确行 `Spec source locator <accepted Standards request messageId>`、expected part count、所有 accepted part IDs、编号、finding ranges 与 transmitted/total 数量。
 
-parts 与 manifest 都不带 `--to` 或 `--to-user`。只有预期 parts 与 manifest 全部 accepted 时，Spec 才完整锁定；部分发送失败时 manifest 必须降级为 `partial` 或 `failed` 并列出缺口。不要等待搭档结果后再决定自己的 Spec finding。Spec 缺失时发布 `not_assessed` manifest，不生成虚构 finding，也不写“通过”。
+parts 与 manifest 都不带 `--to` 或 `--to-user`，每次 accepted `effectiveRecipients` 都必须为空。只有预期 parts 与 manifest 全部 accepted，且结构字段与正文一致时，Spec 才完整锁定；部分发送失败或出现非预期收件人时，manifest 必须降级为 `partial` 或 `failed` 并列出缺口。不要等待搭档结果后再决定自己的 Spec finding。Spec 缺失时发布 `not_assessed` manifest，不生成虚构 finding，也不写“通过”。
 
 ## 等待搭档
 
@@ -115,9 +115,9 @@ Spec manifest 已发布而 Standards manifest 尚未返回时，可以通过 pub
 
 在继续前，用 current request ID 搜索 `Review completion locator <request messageId>` 和 `Replaces Standards request <request messageId>`。可信的既有 final 表示本次结果重复，可信 Retry pointer 表示请求已经被替代；两者都只作为补充，必要时 public-only 说明重复/迟到后结束，不再次组装报告。
 
-Standards parts 必须是该请求下由同一搭档发送的 public-only 直接回复，且 manifest 列出的 IDs、finding ranges 与 digest 可以验证。parts 自身不唤醒 Lead，也不能单独完成 Standards 轴。
+Standards parts 必须是该请求下由同一搭档发送的 public-only 直接回复，exact-read `addressing.effectiveAgentRecipients` 为空，且 manifest 列出的 expected part count、IDs、part 编号、finding ranges/counts 与 transmitted/total 数量都和正文一致。parts 自身不唤醒 Lead，也不能单独完成 Standards 轴。Standards manifest 的 exact-read `addressing.effectiveAgentRecipients` 必须恰好只包含当前 Review Lead Agent ID。
 
-格式缺失但语义完整时，可以做不改变结论的结构化整理；若无法确定 part 集合、finding 边界、严重度、digest 或 snapshot，只允许一次格式修正请求，不自行猜测。格式修正创建新的请求消息。
+格式缺失但语义完整时，可以做不改变结论的结构化整理；若无法确定 part 集合、finding 边界、ID 序列、严重度或 snapshot，只允许一次格式修正请求，不自行猜测。格式修正创建新的请求消息。
 
 ## 精确恢复两轴结果
 
@@ -137,11 +137,11 @@ rovai camp search --query 'Spec source locator <current Standards request messag
 rovai camp read --camp-id <campId> --mode item --message-id <messageId>
 ```
 
-若 `nextBodyOffset` 非空，继续增加 `--body-offset <nextBodyOffset> --body-limit 4000`，直到完整读取。Retry pointer 必须精确指向已经锁定的 Spec manifest message ID 与 digest；先 exact-read pointer，再 exact-read manifest。
+若 `nextBodyOffset` 非空，继续增加 `--body-offset <nextBodyOffset> --body-limit 4000`，直到完整读取。Retry pointer 必须精确指向已经锁定的 Spec manifest message ID；先 exact-read pointer，再 exact-read manifest。
 
 用同一个 `campId` exact-read 当前触发的 Standards manifest 及其所有 part IDs。若 Spec locator 缺失，可用 `rovai camp search --query 'Standards result locator <current Standards request messageId>' --limit 5` 取得 Camp ID，但这不能替代缺失的 Spec 结果。
 
-验证每轴 snapshot、状态、part 数量、message IDs、finding ranges、result digest 与传输状态。任何 locator 不唯一、message 不可读、part 缺失或 digest 不匹配时，不凭记忆重建；将 assembly 与对应轴标为 `partial` 或 `failed`，只报告可验证内容。
+验证每轴 snapshot、状态、expected part count、accepted message IDs、编号、finding ID 连续性、ranges/counts、transmitted/total 数量、transmitted severity counts、收件人集合与传输状态。任何 locator 不唯一、message 不可读、part 缺失、编号或 finding ID 重复/断档、汇总不一致或出现非预期收件人时，不凭记忆重建；将 assembly 与对应轴标为 `partial` 或 `failed`，只报告可验证内容。
 
 ## 检查 freshness
 
@@ -162,11 +162,11 @@ Spec
 
 机械组装有界摘要，不得跨轴合并、去重、改 finding 内容、严重度、置信度或轴内顺序，也不得生成掩盖一轴的 overall pass/fail。
 
-允许显示每轴数量、每轴最高严重度、按冻结顺序复制最多三条核心 finding 的 ID/severity/location/问题句、添加明确的跨轴 Related、标记 duo/solo/partial/stale，以及修复不改变语义的 Markdown。完整 findings 只通过 manifest、part message IDs 与 digest 引用，不在最终报告再次复制。
+允许显示每轴数量、每轴最高严重度、按冻结顺序复制最多三条核心 finding 的 ID/severity/location/问题句、添加明确的跨轴 Related、标记 duo/solo/partial/stale，以及修复不改变语义的 Markdown。完整 findings 只通过 manifest 与 part message IDs 引用，不在最终报告再次复制。
 
 发送前计算最终报告完整正文的 UTF-8 byte size 并保持不超过 30 KiB。Duo final 在快照信息后包含唯一纯文本行 `Review completion locator <current Standards request messageId>`；若任一轴无法完整恢复，报告必须写 `assembly partial`，不能称为 complete duo。
 
-通过 `rovai send --body <最终报告>` 发布普通 public-only 最终报告，不带 `--to` 或 `--to-user`。Core 会让它直接回复当前 Standards manifest；不要声称它回复启动标记，也不要再次唤醒搭档。
+通过 `rovai send --body <最终报告>` 发布普通 public-only 最终报告，不带 `--to` 或 `--to-user`，并确认 accepted `effectiveRecipients=[]`。Core 会让它直接回复当前 Standards manifest；不要声称它回复启动标记，也不要再次唤醒搭档。
 
 ## 完成与迟到结果
 

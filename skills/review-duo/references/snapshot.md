@@ -164,7 +164,7 @@ binary
 
 冻结 Coverage Manifest 时同时估算两个轴可能形成的 finding 数量和结果体量，但不能因为消息预算而少 review 代码或提前改变 finding 顺序。代码 coverage 与结果 transport 是两个独立状态。
 
-每个轴按 [Finding 与结果格式](findings.md) 使用 30 KiB 单消息工作上限、完整 finding 边界、最多 128 parts、最后 compact manifest 与 canonical result digest。Coverage 很大时在 manifest 中保留总数、分类、limited/skipped 和稳定 snapshot locator，不重复粘贴整份 diff 或大段文件清单；完整 coverage 仍由冻结 snapshot/manifest 作为依据。
+每个轴按 [Finding 与结果格式](findings.md) 使用 30 KiB 单消息工作上限、完整 finding 边界、最多 128 parts，以及列出 expected part count、accepted part IDs、编号、finding ranges 与 transmitted/total 数量的 compact manifest。Coverage 很大时在 manifest 中保留总数、分类、limited/skipped 和稳定 snapshot locator，不重复粘贴整份 diff 或大段文件清单；完整 coverage 仍由冻结 snapshot/manifest 作为依据。
 
 若结果无法在预算内完整传输，把 transport 和轴状态降为 `partial` 或 `failed`，列出未传输 finding IDs；不得把“代码已检查”误写成“完整结果已交付”。
 

@@ -147,7 +147,7 @@ Spec manifest 已经锁定。Standards 请求已经被系统接受，但这不�
 
 ## Accepted 语义
 
-`send accepted` 只证明公共 CampMessage 已提交、Message Delivery 已建立或被系统接受。
+`send accepted` 只证明公共 CampMessage 已提交，并为返回的 `effectiveRecipients` 建立相应 Message Delivery；空集合表示 public-only、没有 Agent Delivery。
 
 不证明对方已经开始、读完、完成、结果合格或整场 review 完成。不要在 accepted 后轮询或伪造进度。
 
@@ -173,12 +173,11 @@ Standards 请求本身不可能包含自己的 message ID；Standards manifest �
 Spec source locator <new request messageId>
 
 - Spec manifest：`<existing manifest messageId>`
-- Result digest：`sha256:...`
 
 Replaces Standards request <old request messageId>
 ```
 
-pointer 不带 `--to` 或 `--to-user`，正文必须小于 30 KiB。后续搜索唯一命中 pointer，再使用同一搜索结果中的 `campId` exact-read pointer 指向的旧 Spec manifest。若同一 request locator 出现多个可信 manifest/pointer，结果不唯一，停止确定性组装而不是选择最新一条。
+pointer 不带 `--to` 或 `--to-user`，正文必须小于 30 KiB，accepted `effectiveRecipients` 必须为空。后续搜索唯一命中 pointer，再使用同一搜索结果中的 `campId` exact-read pointer 指向的旧 Spec manifest。若同一 request locator 出现多个可信 manifest/pointer，结果不唯一，停止确定性组装而不是选择最新一条。
 
 ## 正式 Standards 结果
 
@@ -191,13 +190,13 @@ Review Lead 只接受最后的 Standards manifest：
 - snapshot identifier 与请求逐字一致；
 - 当前请求尚未采用过另一份有效结果。
 
-其它成员的公开意见不能代替固定搭档对当前请求的正式回复。parts 没有 Agent recipient，不能单独唤醒 Lead 或完成 Standards 轴；manifest 必须列出并校验全部 accepted part IDs 与 digest。
+其它成员的公开意见不能代替固定搭档对当前请求的正式回复。parts 的 exact-read `addressing.effectiveAgentRecipients` 必须为空，不能单独唤醒 Lead 或完成 Standards 轴；manifest 必须列出并校验 expected part count、全部 accepted part IDs、编号、finding ranges 与 transmitted/total 数量，且 exact-read 收件人只包含当前 Review Lead。
 
 ## 重复与 Retry
 
 同一请求的第一份有效结果生效。重复回复不重复加入、不重新排序、不再次发布最终报告。
 
-只有 send rejected、Delivery failed、结果结构损坏、part/digest 不完整或 snapshot 不匹配时允许 retry。
+只有 send rejected、Delivery failed、结果结构损坏、part 集合不完整、出现非预期收件人或 snapshot 不匹配时允许 retry。
 
 Retry 创建新的 Standards 请求消息，并从 accepted 输出冻结新的真实 request `messageId`。随后按上面的 Spec Source Locator 规则发送 current pointer。新 manifest 必须直接回复新请求且携带新 request ID；旧请求后续到达时，Lead 通过 `rovai camp search --query 'Replaces Standards request <old request messageId>' --limit 5` 验证它已被替代，只作补充，不推进新请求。
 
@@ -211,7 +210,7 @@ Retry 创建新的 Standards 请求消息，并从 accepted 输出冻结新的�
 
 固定搭档发来的独立消息若没有回复当前 Standards 请求，也不自动推进。必要时请其回复对应请求，或只作为补充阅读。
 
-Lead 组装完成后，通过 `rovai send --body <最终报告>` public-only 发布，不带 `--to` 或 `--to-user`。这条消息自动回复当前 Standards manifest；不要声称它回复启动标记，也不要再次唤醒搭档。
+Lead 组装完成后，通过 `rovai send --body <最终报告>` public-only 发布，不带 `--to` 或 `--to-user`，并确认 accepted `effectiveRecipients=[]`。这条消息自动回复当前 Standards manifest；不要声称它回复启动标记，也不要再次唤醒搭档。
 
 ## 无可靠 timer
 

@@ -74,12 +74,12 @@ Standards 请求
 5. 不跨轴合并或去重。同一问题同时违反两个轴时保留两条 finding，只增加相互引用。
 6. 缺少 Spec 时，Spec 轴显示“未评估”，不能显示通过。
 7. 评审默认只读，不修改代码、不创建 Task、不提交、不推送、不创建或更新 PR。
-8. `rovai send` 成功只证明公共消息和 Delivery 已建立，不证明搭档已经开始或完成。
+8. `rovai send` accepted 只证明公共消息已提交，并按返回的 `effectiveRecipients` 建立相应 Delivery；空集合表示 public-only。它不证明搭档已经开始或完成。
 9. 等待搭档时不 sleep、不轮询、不代写其结论。
 10. 最终报告固定按 `Standards`、`Spec` 顺序呈现，不生成会掩盖其中一轴的单一总分。
 11. Agent 不能选择任意 reply target；每次发送都由 Core 自动回复当前 AgentRun 的触发消息。
 12. 每条 `rovai send` 正文都先按 UTF-8 bytes 计算并保持在 30 KiB 工作上限内；32 KiB 是 Core 硬上限，不依赖 rejected 后再截断。
-13. 完整 finding 放在有界 parts 中，最后一条 axis manifest 锁定 part message IDs 与 digest；最终报告只做有界摘要并引用完整结果，不再次复制两轴全文。
+13. 完整 finding 放在有界 parts 中，最后一条 axis manifest 锁定 expected part count、accepted part message IDs、编号、finding ranges 与 transmitted/total 数量；最终报告只做有界摘要并引用完整结果，不再次复制两轴全文。
 14. accepted Standards request `messageId` 是本轮唯一关联键；Spec manifest 使用 `Spec source locator <request messageId>`，最终 Lead 先搜索取得 Camp ID，再 exact-read 完整结果。
 
 ## 默认分工
@@ -172,7 +172,7 @@ Skill-only v1 的完整 duo 只接受两类输入：两个成员都可解析的 
         ↓
 用 current request messageId 定位并 exact-read Spec manifest 与所有 parts
         ↓
-验证两轴 part IDs、digest 与传输完整性
+验证两轴 expected/accepted parts、编号、finding ranges、transmitted/total 数量与传输完整性
         ↓
 重新检查快照是否 stale
         ↓
@@ -220,7 +220,7 @@ Standards 评审者只依据冻结的 Diff 与 Standards 来源形成结果。Sp
 
 同一轴中的精确重复由该轴评审者在锁定前处理。
 
-轴结果的传输也属于锁定条件。所有预期 parts 和最后 manifest 都 accepted、message IDs 完整且 digest 可验证时，才可把该轴称为完整传输；缺 part、超预算、digest 不匹配或 locator 不唯一时必须标记 `partial` 或 `failed`。
+轴结果的传输也属于锁定条件。只有所有预期 parts 和最后 manifest 都 accepted，且 exact-read 后的发送者、直接父消息、snapshot、part 编号、finding IDs/ranges/counts、transmitted/total 数量与预期收件人集合全部一致，才可把该轴称为完整传输。缺 part、编号重复或断档、finding 缺失或重复、汇总数量不一致、出现非预期收件人、超预算或 locator 不唯一时，必须标记 `partial` 或 `failed`。
 
 ## 结果状态
 

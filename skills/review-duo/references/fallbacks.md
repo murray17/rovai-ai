@@ -8,7 +8,7 @@
 
 用户没有要求 duo-only 时，说明没有合格搭档，改为 `solo fallback`，当前队员先做 Standards 并锁定，再做 Spec 并锁定，最终明确不具备双人独立性。
 
-Solo 没有 Standards request message ID，也不能 self-route。两轴仍按预算发送 public-only parts 与 manifest，但 manifest 的 request/locator 字段写 `not_applicable_solo`，Standards manifest 不带 `--to`；当前 Run 使用自己刚形成且尚在上下文中的 canonical 结果发布有界最终摘要。不得伪造 duo locator、向自己发送，或把 solo manifest 描述为搭档回传。
+Solo 没有 Standards request message ID，也不能 self-route。两轴仍按预算发送 public-only parts 与 manifest，但 manifest 的 request/locator 字段写 `not_applicable_solo`，Standards manifest 不带 `--to`；当前 Run 使用自己刚形成且尚在上下文中的两轴结果发布有界最终摘要。不得伪造 duo locator、向自己发送，或把 solo manifest 描述为搭档回传。
 
 用户要求必须双人时停止，不虚构第二位 reviewer。
 
@@ -52,7 +52,7 @@ Spec 或 Standards 冲突时检查不受影响部分，冲突部分 blocked，�
 
 超大 diff 使用稳定 Coverage Manifest 和 chunks。无法完整覆盖时设为 partial，列出 covered、limited、unreviewed、原因和不能排除的风险。不静默抽样，不增加第三位隐藏 reviewer。
 
-结果正文与 diff 体量分别受控。每条发送先按 UTF-8 bytes 验证 30 KiB 工作上限；finding 按稳定轴内顺序分 parts，最后 manifest 列出 accepted part IDs 和 digest。任何 part rejected、缺失、超过 128 parts、locator 不唯一或 digest 不匹配时，把 transport 与轴状态降为 `partial`/`failed`，最终报告标记 `assembly partial`。不要用截断结果、recent history 或记忆补齐后声称 complete。
+结果正文与 diff 体量分别受控。每条发送先按 UTF-8 bytes 验证 30 KiB 工作上限；finding 按稳定轴内顺序分 parts，最后 manifest 列出 expected part count、accepted part IDs、编号、finding ranges 与 transmitted/total 数量。任何 part rejected、缺失、超过 128 parts、编号或 finding 序列不完整、汇总数量不一致、出现非预期收件人或 locator 不唯一时，把 transport 与轴状态降为 `partial`/`failed`，最终报告标记 `assembly partial`。不要用截断结果、recent history 或记忆补齐后声称 complete。
 
 ## Binary、generated 与测试
 

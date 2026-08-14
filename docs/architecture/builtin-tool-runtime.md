@@ -332,8 +332,10 @@ frontmatter 覆盖用户只回答上一题的续跑；搭档内部往返与无�
 Review Duo 因而把启动标记、Standards 请求与 Spec parts/manifest 作为初始 user trigger 的 sibling
 messages；Standards parts public-only 回复请求，最后 manifest 才寻址 Lead 并触发 continuation。Lead
 使用 accepted Standards request message ID 搜索唯一 Spec locator，取得 Camp ID 后用 `camp.read item`
-精确读取两轴 manifests/parts。每条结果使用 30 KiB 工作上限、轴内稳定分片和 digest，最终报告只做
-有界摘要并引用完整 parts；缺失或不一致时必须标记 partial，不能依赖 recent history 或记忆补齐。
+精确读取两轴 manifests/parts。每条结果使用 30 KiB 工作上限和轴内稳定分片；manifest 锁定 expected
+part count、accepted part message IDs、编号、finding ranges、transmitted/total 数量与 transmitted severity
+counts，Lead 同时验证可信发送者、直接父消息、snapshot 和收件人集合。最终报告只做有界摘要并引用
+完整 parts；缺失或不一致时必须标记 partial，不能依赖 recent history 或记忆补齐。
 `review-duo` 是带原则级 MIT attribution、但无 vendored upstream 的 Rovai original Skill；完整 duo v1
 只接受双方可解析的 Git-object-backed SHA 范围或用户已提供的稳定共享 patch/attachment。
 

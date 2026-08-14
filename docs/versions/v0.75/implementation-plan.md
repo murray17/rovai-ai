@@ -36,10 +36,18 @@ last_updated: 2026-08-14
 - [x] 将验证证据回填版本文档并标记完成；
 - [x] 提交并推送到 `main`。
 
+## Checkpoint 4：Review Duo 结果恢复
+
+- [x] 用 expected/accepted parts、连续 finding IDs、ranges/counts 与 transmitted/total 汇总冻结轴结果；
+- [x] 让发送者检查 accepted `effectiveRecipients`，让 Lead exact-read 验证可信发送者、reply、snapshot 与
+  `addressing.effectiveAgentRecipients`；
+- [x] 将最终报告保持为有界摘要，只引用可 exact-read 的 manifest 与 part message IDs；
+- [x] 从头审读 bundled Skill，运行 validator、official bundle 定向回归、文档治理和 diff 检查。
+
 ## 当前证据与缺口
 
 - 已完成：版本切换、ADR-0182、Camp Message Send v6、Core parser、help/schema/smoke 与 canonical
-  persistence/Delivery integration；
+  persistence/Delivery integration；Review Duo 结果恢复使用消息身份、关系、part 序列与正文结构；
 - 已通过：parser 8 项定向回归、完整 `rovai-core` lib 425 / CLI 11 / Core binary 73 tests（3 项既有
   manual Runtime smoke ignored）、文档 21 项单测、普通治理、真实 base CI、ADR generation check、Rust
   format、smoke script syntax 与 diff 检查；

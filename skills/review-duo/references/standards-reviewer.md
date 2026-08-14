@@ -44,19 +44,19 @@ finding 必须指向冻结 snapshot 中的具体行为，给出位置或全局�
 
 ## 锁定与返回
 
-从当前触发消息的可信元数据复制准确 Standards request `messageId`。按 [Finding 与结果格式](findings.md) 冻结 finding 顺序、计算 canonical digest，并在发送前测量每条正文的 UTF-8 bytes。
+从当前触发消息的可信元数据复制准确 Standards request `messageId`。按 [Finding 与结果格式](findings.md) 冻结 finding 顺序，并在发送前测量每条正文的 UTF-8 bytes。
 
-存在 findings 时，先把完整 finding blocks 分成 30 KiB 工作上限内的 parts。每个 part 通过不带 `--to` 或 `--to-user` 的 public-only `rovai send` 发送，并保留 accepted `messageId`。parts 都直接回复当前 Standards 请求，但不分别唤醒 Review Lead。
+存在 findings 时，先把完整 finding blocks 分成 30 KiB 工作上限内的 parts。每个 part 通过不带 `--to` 或 `--to-user` 的 public-only `rovai send` 发送，并保留 accepted `messageId`、确认 `effectiveRecipients=[]`。parts 都直接回复当前 Standards 请求，但不分别唤醒 Review Lead。
 
-最后形成 compact Standards manifest，列出真实 request ID、所有 accepted part IDs、finding ranges、coverage、限制和 result digest，并包含精确行：
+最后形成 compact Standards manifest，列出真实 request ID、expected part count、所有 accepted part IDs、编号、finding ranges/counts、transmitted/total 数量、transmitted severity counts、coverage 和限制，并包含精确行：
 
 ```text
 Standards result locator <current request messageId>
 ```
 
-需要确认参数时运行 `rovai send --help`，然后只对最后 manifest 使用 `rovai send --to <请求发送者 Agent ID> --body <manifest>`；不要使用 `--to-user`。可信请求发送者 Agent ID 是 Review Lead，不能根据显示名猜测。
+需要确认参数时运行 `rovai send --help`，然后只对最后 manifest 使用 `rovai send --to <请求发送者 Agent ID> --body <manifest>`；不要使用 `--to-user`。可信请求发送者 Agent ID 是 Review Lead，不能根据显示名猜测。accepted `effectiveRecipients` 必须恰好等于该 Agent ID。
 
-只有所有预期 parts 与 manifest 都 accepted、manifest message IDs 和 digest 完整时，结果才视为完整锁定。任一 part 失败时仍发送 compact manifest，但把传输与轴状态降为 `partial` 或 `failed` 并列出缺口；不得称为 complete。除非邀请者指出结构损坏、snapshot 不匹配或你明确发布勘误，不再改变 finding 的语义、严重度、置信度和顺序。
+只有所有预期 parts 与 manifest 都 accepted，且 manifest message IDs、编号、ranges/counts、transmitted/total 数量和 transmitted severity counts 与正文一致时，结果才视为完整锁定。任一 part 失败、结构不完整或出现非预期收件人时仍发送 compact manifest，但把传输与轴状态降为 `partial` 或 `failed` 并列出缺口；不得称为 complete。除非邀请者指出结构损坏、snapshot 不匹配或你明确发布勘误，不再改变 finding 的语义、严重度、置信度和顺序。
 
 发送后结束本次响应。
 

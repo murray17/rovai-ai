@@ -43,6 +43,10 @@ SPEC-002
 
 ID 在轴结果锁定后稳定，不因最终报告组装而重新编号。
 
+锁定轴内顺序后，从 `001` 开始连续编号。每个 part 中的 ID 严格递增且不重复。传输状态为 `complete` 时，按 part 编号连接全部正文后，ID 必须形成从 `001` 到 manifest `Total` 的完整连续序列；`partial` 或 `failed` 时，把未传输 ID 明确列入 `Unsent`。
+
+结构校验只把 fenced code 外、行首完全匹配 `### STD-<至少三位数字> ·` 或 `### SPEC-<至少三位数字> ·` 的标题视为 finding 起点；`Related`、正文和代码示例中的 ID 不计数。每个 finding block 到下一个同轴 finding 标题或消息结尾结束。part 的 range、count 与 severity 都从这些标题计算。
+
 ## Severity
 
 ```text
@@ -183,9 +187,9 @@ maximum parts per axis         =   128
 
 `working message limit` 已留下 2 KiB 安全余量，但仍必须测量最终序列化后的完整正文，不能只按字符数或 finding 数量估算。标题、snapshot、part 编号、coverage、limitations 和 locator 都计入正文。
 
-使用只读、stdin-based 的本地 byte counter / SHA-256 工具计算大小与 digest，不在被评审 workspace 创建结果文件。当前 Runtime 无法可靠计算时，把 transport 标为 `partial` 或 `failed`；不要让模型目测字数或编造 digest。
+使用只读、stdin-based 的本地 byte counter 计算大小，不在被评审 workspace 创建结果文件。当前 Runtime 无法可靠计算时，把 transport 标为 `partial` 或 `failed`；不要让模型目测字数。
 
-先按冻结的轴内顺序形成 canonical finding blocks，再以完整 finding 为边界分片。每个 part 的 findings payload 先限制在 26 KiB，加入结构字段后若超过 30 KiB，就把最后一条完整 finding 移到下一 part；不要把一个结构化 finding 从字段中间切开。
+先按冻结的轴内顺序形成完整 finding blocks，再以完整 finding 为边界分片。每个 part 的 findings payload 先限制在 26 KiB，加入结构字段后若超过 30 KiB，就把最后一条完整 finding 移到下一 part；不要把一个结构化 finding 从字段中间切开。
 
 单条 finding 本身超过 26 KiB 时，先删减大段代码复述或重复证据，改用稳定代码/Requirement/Standards locator，并在限制中标记 `evidence_limited_for_transport`；不得改变问题、severity、confidence、影响或建议方向。若保留完整语义后仍不能装入一个 part，该轴传输状态为 `failed`，不得静默截断或称为 complete。
 
@@ -193,9 +197,13 @@ maximum parts per axis         =   128
 
 超过 128 parts 时停止继续发送，把未传输 finding IDs 和数量写入 compact manifest，并把轴状态降为 `partial` 或 `failed`。超大 diff 的 coverage 状态与结果传输状态分别记录：代码可以完整 review 但结果传输失败，也可以结果完整传输但 coverage 本身为 partial。
 
+结果正文中不用于寻址的 `@agent_N` 或 `@<当前 Camp 成员完整显示名>` 必须放入 inline/fenced code，或使用反斜杠转义，避免被 Core 解析为 Agent recipient。每个 public-only part、Spec manifest/pointer 和最终报告的 accepted `effectiveRecipients` 必须为空；Standards manifest 必须只包含准确的 Review Lead Agent ID。出现其它收件人时，该消息不能计入有效结果集合。
+
 ## Axis Result Parts
 
 没有 finding 时不创建空 part，直接发布 manifest。存在 finding 时，先计算所有 part 边界和总数，再依次发送。
+
+每个 part 标题中的 `<total>` 必须等于 manifest `Expected parts`。有效 part 的 `<n>` 从 `1` 到该总数连续、唯一；manifest 中同一编号只允许对应一个 accepted message ID。
 
 ### Standards Part
 
@@ -209,6 +217,10 @@ maximum parts per axis         =   128
 **Findings 范围**
 
 `<first finding ID>..<last finding ID>`
+
+**Finding 数量**
+
+`<count>`
 
 <完整 finding blocks，保持冻结顺序>
 ```
@@ -228,12 +240,14 @@ Standards reviewer 对每个 part 使用不带 `--to` 或 `--to-user` 的 public
 
 `<first finding ID>..<last finding ID>`
 
+**Finding 数量**
+
+`<count>`
+
 <完整 finding blocks，保持冻结顺序>
 ```
 
-Review Lead 对每个 Spec part 使用不带 `--to` 或 `--to-user` 的 public-only `rovai send`。保留每次 accepted 结果的准确 `messageId`；发送 rejected 的 part 不得列为已传输。
-
-Canonical result digest 固定为：按冻结顺序取每个完整 finding block，统一 LF 换行、去掉行尾空白，以恰好两个 LF 连接，计算其 UTF-8 bytes 的 SHA-256；没有 finding 时对 ASCII `NO_FINDINGS` 计算。分片不能改变这个顺序或 digest。
+Review Lead 对每个 Spec part 使用不带 `--to` 或 `--to-user` 的 public-only `rovai send`。保留每次 accepted 结果的准确 `messageId` 并确认 `effectiveRecipients=[]`；发送 rejected 或带非预期收件人的 part 不得列为已传输。
 
 ## Axis Result Manifest
 
@@ -272,11 +286,12 @@ Standards result locator <当前触发 request messageId>
 **Finding 摘要**
 
 - Total：...
-- By severity：...
-- Highest severity：...
+- Transmitted：...
+- By transmitted severity：...
+- Highest transmitted severity：...
+- Expected parts：...
 - Parts：
-  - `1` → `<accepted messageId>` · `<first ID>..<last ID>`
-- Result digest：`sha256:<64 lowercase hex>`
+  - `1/<total>` → `<accepted messageId>` · `<first ID>..<last ID>` · `<count>`
 - Unsent：<没有则写“无”>
 
 **限制**
@@ -314,11 +329,12 @@ Spec source locator <accepted request messageId>
 **Finding 摘要**
 
 - Total：...
-- By severity：...
-- Highest severity：...
+- Transmitted：...
+- By transmitted severity：...
+- Highest transmitted severity：...
+- Expected parts：...
 - Parts：
-  - `1` → `<accepted messageId>` · `<first ID>..<last ID>`
-- Result digest：`sha256:<64 lowercase hex>`
+  - `1/<total>` → `<accepted messageId>` · `<first ID>..<last ID>` · `<count>`
 - Unsent：<没有则写“无”>
 
 **限制**
@@ -328,11 +344,13 @@ Spec source locator <accepted request messageId>
 
 “没有 finding”不自动等于“所有行为已证明正确”。必须同时看 coverage、运行验证和限制。
 
-Standards manifest 是 Standards reviewer 本次 Run 中唯一带 Agent recipient 的结果消息，使用 `rovai send --to <Review Lead Agent ID> --body <manifest>`；所有 parts 在它之前 public-only 发送。Spec manifest 始终 public-only。任何 part 缺失、rejected、超过预算或 digest 无法形成时，manifest 必须把传输和轴状态降级，列出缺口；不能因 manifest 本身 accepted 就称为完整结果。
+`Total` 是锁定轴结果的 finding 总数，`Transmitted` 是所有有效 accepted parts 中实际出现的数量。零 finding 时写 `Total: 0`、`Transmitted: 0`、`Expected parts: 0`、`Parts: 无` 和 `Unsent: 无`。只有 `Transmitted = Total`、`Unsent: 无`，且全部结构与关系校验通过时，传输状态才可为 `complete`。
+
+Standards manifest 是 Standards reviewer 本次 Run 中唯一带 Agent recipient 的结果消息，使用 `rovai send --to <Review Lead Agent ID> --body <manifest>`；accepted `effectiveRecipients` 必须恰好等于该 Lead Agent ID。所有 parts 在它之前 public-only 发送，Spec manifest 始终 public-only。任何 part 缺失、rejected、超过预算、编号或 finding 序列不完整、汇总数量不一致，或消息带有非预期收件人时，manifest 必须把传输和轴状态降级并列出缺口；不能因 manifest 本身 accepted 就称为完整结果。
 
 ## 锁定
 
-Axis Result 只有在所有预期 parts 与最后 manifest 都 accepted，manifest 列出的 message IDs 与实际结果一致且 digest 已固定后才视为锁定。发送被拒绝、part 缺失或 manifest 未返回 Review Lead 时不得假装已经锁定或完成。
+Axis Result 只有在所有预期 parts 与最后 manifest 都 accepted，manifest 列出的 expected part count、message IDs、part 编号、finding ranges/counts、transmitted/total 数量与 transmitted severity counts 都和 exact-read 正文一致，且每条消息的发送者、直接父消息、snapshot 和收件人集合都正确时才视为锁定。发送被拒绝、part 缺失或 manifest 未返回 Review Lead 时不得假装已经锁定或完成。
 
 允许修复 Markdown、补齐已经存在但格式丢失的字段、添加不改变语义的稳定引用。
 
@@ -376,7 +394,6 @@ Review completion locator <current Standards request messageId>
 - Core findings：<最多三条，按原轴内顺序复制 ID、severity、location 与问题句；不改写>
 - Full result manifest：`<messageId>`
 - Parts：`<messageId>`, ...
-- Result digest：`sha256:...`
 
 ## Spec（需求符合度）
 
@@ -389,7 +406,6 @@ Review completion locator <current Standards request messageId>
 - Core findings：<最多三条，按原轴内顺序复制 ID、severity、location 与问题句；不改写>
 - Full result manifest：`<messageId>`
 - Parts：`<messageId>`, ...
-- Result digest：`sha256:...`
 
 ## 评审边界
 
@@ -401,4 +417,4 @@ Review completion locator <current Standards request messageId>
 
 固定顺序为 Standards、Spec。最终报告完整正文同样必须在发送前测量并保持不超过 30 KiB；不得跨轴合并、去重、重新编号、改 severity/confidence、改轴内顺序，或用一个 overall pass/fail 掩盖另一轴。核心 finding 只复制冻结结果中最前面的三条，不重新挑选或改写；其余 findings 通过 manifest 与 parts 保持可精确读取。
 
-任一轴的 manifest/part 缺失、digest 不匹配或传输不是 complete 时，最终报告醒目标记 `assembly partial`，只报告可验证内容，不能称为完整双轴评审。`assembly partial` 是组装完整性，不是掩盖两轴状态的 overall pass/fail。
+任一轴的 manifest/part 缺失、结构校验失败或传输不是 complete 时，最终报告醒目标记 `assembly partial`，只报告可验证内容，不能称为完整双轴评审。`assembly partial` 是组装完整性，不是掩盖两轴状态的 overall pass/fail。
