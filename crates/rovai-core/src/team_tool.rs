@@ -416,14 +416,14 @@ impl TeamToolService {
                     "type": "string",
                     "minLength": 1,
                     "maxLength": CAMP_MESSAGE_SEND_MAX_BODY_BYTES,
-                    "description": "Exact public message body. Strict inline @agent_id tokens participate in addressing outside code, URLs, and escaped literal regions."
+                    "description": "Exact public message body. Canonical inline @agent_N tokens and exact active Camp member @display-name aliases followed by whitespace or end-of-body participate in addressing outside code, URLs, and escaped literal regions."
                 },
                 "to": {
                     "type": "array",
                     "maxItems": 16,
                     "uniqueItems": true,
                     "items": {"type": "string", "minLength": 1},
-                    "description": "Optional Agent to wake; repeat for multiple recipients. Input order is presentation metadata, never scheduling priority."
+                    "description": "Optional canonical Agent ID to wake; repeat for multiple recipients. Display names are not accepted here. Input order is presentation metadata, never scheduling priority."
                 },
                 "mentionUser": {
                     "type": "boolean",
@@ -2054,6 +2054,20 @@ mod tests {
     }
 
     #[test]
+    fn public_send_schema_teaches_alias_boundary_and_canonical_to_values() {
+        let schema = TeamToolService::camp_message_send_input_schema();
+        let body_description = schema["properties"]["body"]["description"]
+            .as_str()
+            .unwrap();
+        let to_description = schema["properties"]["to"]["description"].as_str().unwrap();
+
+        assert!(body_description.contains("exact active Camp member @display-name"));
+        assert!(body_description.contains("whitespace or end-of-body"));
+        assert!(to_description.contains("canonical Agent ID"));
+        assert!(to_description.contains("Display names are not accepted here"));
+    }
+
+    #[test]
     fn public_send_atomically_persists_one_message_and_canonical_deliveries() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
@@ -2178,6 +2192,63 @@ mod tests {
             .unwrap();
         assert!(durable_replay.replayed);
         assert_eq!(durable_replay.result.payload["messageId"], message_id);
+    }
+
+    #[test]
+    fn public_send_resolves_active_member_display_name_alias_before_delivery() {
+        let mut fixture = Fixture::new();
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET display_name = '爱丽丝' WHERE id = 'agent_2'",
+                [],
+            )
+            .unwrap();
+        let invocation = fixture.public_send_invocation(
+            "public-send-display-name-alias",
+            "@爱丽丝 v35 实现完成，请做只读 CR。",
+            &[],
+        );
+
+        let sent = TeamToolService::default()
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+
+        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
+        assert_eq!(
+            sent.result.payload["effectiveRecipients"],
+            json!(["agent_2"])
+        );
+        assert_eq!(
+            sent.result.payload["deliveryIds"].as_array().unwrap().len(),
+            1
+        );
+        let message_id = sent.result.payload["messageId"].as_str().unwrap();
+        let (body, content_json, delivery_count): (String, String, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT message.body, message.structured_content_json,
+                       (SELECT COUNT(*) FROM message_delivery
+                        WHERE message_id = message.id)
+                FROM camp_message AS message
+                WHERE message.id = ?1
+                "#,
+                [message_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(body, "@爱丽丝 v35 实现完成，请做只读 CR。");
+        assert_eq!(
+            serde_json::from_str::<Value>(&content_json).unwrap(),
+            json!([
+                {"kind": "member_mention", "agentId": "agent_2"},
+                {"kind": "text", "text": " v35 实现完成，请做只读 CR。"}
+            ])
+        );
+        assert_eq!(delivery_count, 1);
     }
 
     #[test]

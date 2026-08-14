@@ -11,7 +11,7 @@ last_updated: 2026-08-14
 本文件说明 Rovai built-in operations 的长期组件结构。当前字段与版本以
 [Built-in Tool Transport v9](../contracts/builtin-tool-transport-v9.md)、
 [Durable Task v3](../contracts/durable-task-v3.md) 和
-[Camp Message Send v5](../contracts/camp-message-send-v5.md)、
+[Camp Message Send v6](../contracts/camp-message-send-v6.md)、
 [Current User Attention v3](../contracts/current-user-attention-v3.md)与
 [Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md) 为准；v8 及更早 Transport 只保留
 historical 语义。决策理由见
@@ -36,6 +36,8 @@ self-active awareness 见
 [ADR-0153](../adr/0153-explicit-empty-self-active-task-snapshot.md)。
 Send 的显式 caller return 与 Core-managed reply reference 见
 [ADR-0163](../adr/0163-explicit-caller-return-and-core-managed-reply-reference.md)。
+当前 Camp 显示名 inline alias 的事务内解析与 canonical freeze 见
+[ADR-0182](../adr/0182-core-resolved-current-camp-display-name-inline-addressing-alias.md)。
 Current User Attention 与 progressive CLI teaching 分别见
 [ADR-0165](../adr/0165-core-owned-current-user-message-attention.md)和
 [ADR-0166](../adr/0166-progressive-built-in-cli-teaching.md)；完整十二项 official Skill inventory、
@@ -116,6 +118,12 @@ Agent 先用 `rovai --help` 选择 operation，再用该 operation 的精确 `--
 `--to-user` 组合成默认模式。`--to-user` 的精确字段帮助拥有“新产生且未解决的用户决定、回答或行动”
 正向条件、常规负向场景、消息局部不继承、无 Agent Delivery 与不代表用户批准。非例行组合只在
 `cli-operations` Send reference 中说明：用户和 Agent 必须各有相互独立的行动。
+
+Send exact help 同时公开 `@<exact active Camp member display name><whitespace|EOF>` alias，并明确
+`--to` 仍只接受 canonical ID、稳定自动化优先使用 `agent_N`、`effectiveRecipients=[]` 表示没有 Agent
+路由。Parser 和 alias map 属于 Domain Service；CLI、Runtime Adapter、Bootstrap 与 Skill 都不重写正文。
+该 Agent-facing teaching/schema 变化进入 v9 既有 catalog digest，Transport wire、Envelope、fixed command
+version 与 Runtime capability 不变，Binding compatibility 继续同时校验 version 与 digest。
 
 ## Agent Result Projection
 

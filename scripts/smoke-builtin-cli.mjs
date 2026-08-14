@@ -744,6 +744,8 @@ printf '%s\n' "$root_help" | grep -Fq ${shellQuote("Run `rovai --help` to choose
 send_help="$("$CLI" send --help)"
 printf '%s\n' "$send_help" | grep -Fq -- '--to-user'
 printf '%s\n' "$send_help" | grep -Fq -- 'Ordinary Camp messages are already visible to the user.'
+printf '%s\n' "$send_help" | grep -Fq -- 'exact active Camp member @display-name followed by whitespace or end-of-body'
+printf '%s\n' "$send_help" | grep -Fq -- '[] means no Agent was routed.'
 printf '%s\n' "$send_help" | grep -Fq -- 'User attention is message-local and is never inherited'
 printf '%s\n' "$send_help" | grep -Fq -- "rovai send --to agent_5 --body 'Please review and report back'"
 if printf '%s\n' "$send_help" | grep -Fq -- 'rovai send --to agent_5 --to-user'; then
@@ -853,9 +855,9 @@ ROVAI_JSON
 STEP=camp_message_send
 public_send="$("$CLI" send --input-file "$RUN_TMP/public-send.json")"
 assert_success "$public_send" 'camp.message.send'
-printf '%s\n' "$public_send" | "$JQ" -e '
+printf '%s\n' "$public_send" | "$JQ" -e --arg recipient ${shellQuote(input.recipientProfileId)} '
   (keys | sort) == ["effectiveRecipients", "messageId"]
-  and (.effectiveRecipients | type) == "array"
+  and .effectiveRecipients == [$recipient]
 ' >/dev/null
 public_message_id="$(printf '%s\n' "$public_send" | "$JQ" -er '.messageId')"
 

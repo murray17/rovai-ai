@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.74
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: in_progress
@@ -14,6 +14,8 @@ last_updated: 2026-08-14
 > 真实 duo dry-run 与当前 `main` 的严格 Clippy 基线仍有缺口，因此实施状态继续为 `in_progress`。
 >
 > 前置版本：[v0.73 在线长期记忆捕获与 Hearth 审核隔离](../v0.73/README.md)
+>
+> 后续版本：[v0.75 当前 Camp 成员显示名 Inline Alias](../v0.75/README.md)
 
 ## 版本目标
 

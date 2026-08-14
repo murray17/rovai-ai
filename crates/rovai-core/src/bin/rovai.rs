@@ -661,7 +661,7 @@ fn operation_help_text(description: &BuiltinToolDescription) -> String {
         if description.name == "camp.message.send" && argument.field == "to" {
             writeln!(
                 output,
-                "      Optional Agent to wake; repeat for multiple recipients."
+                "      Optional canonical Agent ID to wake; repeat for multiple recipients. Display names are accepted only as inline aliases."
             )
             .expect("writing help to a String cannot fail");
         }
@@ -839,7 +839,13 @@ mod tests {
             )
             .is_err()
         );
-        assert!(description.summary.contains("inline @agent_id"));
+        assert!(description.summary.contains("canonical inline @agent_N"));
+        assert!(
+            description
+                .summary
+                .contains("exact active Camp member @display-name")
+        );
+        assert!(description.summary.contains("inspect effectiveRecipients"));
         assert!(description.summary.contains("public-only"));
         assert!(description.summary.contains("--to-user"));
         let to = description
@@ -903,6 +909,9 @@ mod tests {
         assert!(help.contains("new unresolved user decision, answer, or action"));
         assert!(help.contains("User attention is message-local"));
         assert!(help.contains("does not represent user approval"));
+        assert!(help.contains("whitespace or end-of-body"));
+        assert!(help.contains("[] means no Agent was routed"));
+        assert!(help.contains("Display names are accepted only as inline aliases"));
         assert!(!help.contains("--to agent_5 --to-user"));
     }
 

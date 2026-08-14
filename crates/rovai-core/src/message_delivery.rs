@@ -432,13 +432,24 @@ struct InlineAddressingOccurrence {
     ordinal: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActiveCampAgent {
+    agent_id: String,
+    display_name: String,
+}
+
 pub fn persist_public_a2a_message(
     transaction: &Transaction<'_>,
     request: &SendPublicA2aMessage<'_>,
 ) -> Result<CommandHandlerResult> {
     let reply_to_camp_message_id =
         load_trigger_reply_reference(transaction, request.source_agent_run_id, request.camp_id)?;
-    let inline = parse_inline_addressing(request.body);
+    let active_agents = load_active_camp_agents(transaction, request.camp_id)?;
+    let active_agent_ids = active_agents
+        .iter()
+        .map(|agent| agent.agent_id.clone())
+        .collect::<HashSet<_>>();
+    let inline = parse_inline_addressing(request.body, &active_agents);
     let explicit_order = stable_unique(
         request
             .explicit_recipients
@@ -483,7 +494,6 @@ pub fn persist_public_a2a_message(
 
     let ancestor_agent_ids = load_lineage_agent_ids(transaction, request.source_agent_run_id)?;
     let immediate_caller = load_immediate_caller(transaction, request.source_agent_run_id)?;
-    let active_agent_ids = load_active_camp_agent_ids(transaction, request.camp_id)?;
     for (source, value) in &candidate_sources {
         let is_immediate_caller = immediate_caller
             .as_ref()
@@ -2096,24 +2106,30 @@ fn ensure_delivery_conversation(
     Ok(conversation_id)
 }
 
-fn load_active_camp_agent_ids(
+fn load_active_camp_agents(
     transaction: &Transaction<'_>,
     camp_id: &str,
-) -> Result<HashSet<String>> {
+) -> Result<Vec<ActiveCampAgent>> {
     let mut statement = transaction.prepare(
         r#"
-        SELECT camp_member.agent_id
+        SELECT camp_member.agent_id, agent_profile.display_name
         FROM camp_member
         JOIN agent_profile ON agent_profile.id = camp_member.agent_id
         WHERE camp_member.camp_id = ?1
           AND camp_member.status = 'active'
           AND camp_member.leave_requested_at IS NULL
           AND agent_profile.profile_status = 'present'
+        ORDER BY camp_member.agent_id ASC
         "#,
     )?;
     Ok(statement
-        .query_map([camp_id], |row| row.get::<_, String>(0))?
-        .collect::<rusqlite::Result<HashSet<_>>>()?)
+        .query_map([camp_id], |row| {
+            Ok(ActiveCampAgent {
+                agent_id: row.get(0)?,
+                display_name: row.get(1)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 fn load_trigger_reply_reference(
@@ -2292,7 +2308,7 @@ fn is_canonical_agent_id(value: &str) -> bool {
         && ordinal.bytes().all(|byte| byte.is_ascii_digit())
 }
 
-fn parse_inline_addressing(body: &str) -> InlineAddressing {
+fn parse_inline_addressing(body: &str, active_agents: &[ActiveCampAgent]) -> InlineAddressing {
     let bytes = body.as_bytes();
     let mut occurrences = Vec::new();
     let mut malformed = Vec::new();
@@ -2311,7 +2327,7 @@ fn parse_inline_addressing(body: &str) -> InlineAddressing {
             index += 1;
             continue;
         }
-        if fenced || inline_code || !bytes[index..].starts_with(b"@agent_") {
+        if fenced || inline_code || bytes[index] != b'@' {
             index += 1;
             continue;
         }
@@ -2331,26 +2347,85 @@ fn parse_inline_addressing(body: &str) -> InlineAddressing {
             index += 1;
             continue;
         }
-        let mut end = index + "@agent_".len();
-        while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_') {
-            end += 1;
+
+        if bytes[index..].starts_with(b"@agent_") {
+            let mut end = index + "@agent_".len();
+            while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_') {
+                end += 1;
+            }
+            let value = body[index + 1..end].to_string();
+            if is_canonical_agent_id(&value) {
+                occurrences.push(InlineAddressingOccurrence {
+                    agent_id: value,
+                    start_byte: index,
+                    end_byte: end,
+                    ordinal: occurrences.len(),
+                });
+            } else {
+                malformed.push(format!("@{value}"));
+            }
+            index = end;
+            continue;
         }
-        let value = body[index + 1..end].to_string();
-        if is_canonical_agent_id(&value) {
+
+        if let Some((agent_id, end_byte)) = match_display_name_mention(body, index, active_agents) {
             occurrences.push(InlineAddressingOccurrence {
-                agent_id: value,
+                agent_id: agent_id.to_string(),
                 start_byte: index,
-                end_byte: end,
+                end_byte,
                 ordinal: occurrences.len(),
             });
-        } else {
-            malformed.push(format!("@{value}"));
+            index = end_byte;
+            continue;
         }
-        index = end;
+
+        index += 1;
     }
     InlineAddressing {
         occurrences,
         malformed,
+    }
+}
+
+fn match_display_name_mention<'a>(
+    body: &str,
+    at_byte: usize,
+    active_agents: &'a [ActiveCampAgent],
+) -> Option<(&'a str, usize)> {
+    let tail = &body[at_byte + 1..];
+    let mut best_match: Option<(&str, usize, usize)> = None;
+    let mut ambiguous = false;
+
+    for agent in active_agents {
+        let display_name = agent.display_name.trim();
+        if display_name.is_empty() {
+            continue;
+        }
+        let Some(remainder) = tail.strip_prefix(display_name) else {
+            continue;
+        };
+        if !remainder.is_empty() && !remainder.chars().next().is_some_and(char::is_whitespace) {
+            continue;
+        }
+
+        let display_name_length = display_name.len();
+        let end_byte = at_byte + 1 + display_name_length;
+        match best_match {
+            Some((_, _, best_length)) if display_name_length < best_length => {}
+            Some((_, _, best_length)) if display_name_length == best_length => {
+                ambiguous = true;
+            }
+            _ => {
+                best_match = Some((agent.agent_id.as_str(), end_byte, display_name_length));
+                ambiguous = false;
+            }
+        }
+    }
+
+    if ambiguous {
+        None
+    } else {
+        best_match.map(|(agent_id, end_byte, _)| (agent_id, end_byte))
     }
 }
 
@@ -2416,6 +2491,7 @@ https://example.test/@agent_7
 ```
 @agent_6
 ```"#,
+            &[],
         );
         assert_eq!(
             parsed
@@ -2430,7 +2506,7 @@ https://example.test/@agent_7
 
     #[test]
     fn strict_inline_parser_reports_reserved_but_malformed_tokens() {
-        let parsed = parse_inline_addressing("@agent_0 @agent_01 @agent_x @agent_22");
+        let parsed = parse_inline_addressing("@agent_0 @agent_01 @agent_x @agent_22", &[]);
         assert_eq!(
             parsed
                 .occurrences
@@ -2440,6 +2516,101 @@ https://example.test/@agent_7
             vec!["agent_22"]
         );
         assert_eq!(parsed.malformed, vec!["@agent_0", "@agent_01", "@agent_x"]);
+    }
+
+    #[test]
+    fn exact_display_name_alias_routes_to_active_agent() {
+        let active_agents = vec![ActiveCampAgent {
+            agent_id: "agent_6".to_string(),
+            display_name: "爱丽丝".to_string(),
+        }];
+        let body = "@爱丽丝 v35 实现完成，请做只读 CR。";
+        let parsed = parse_inline_addressing(body, &active_agents);
+
+        assert_eq!(parsed.occurrences.len(), 1);
+        assert_eq!(parsed.occurrences[0].agent_id, "agent_6");
+        assert_eq!(
+            &body[parsed.occurrences[0].start_byte..parsed.occurrences[0].end_byte],
+            "@爱丽丝"
+        );
+        assert!(parsed.malformed.is_empty());
+    }
+
+    #[test]
+    fn display_name_alias_accepts_end_of_body_and_requires_whitespace_boundary() {
+        let active_agents = vec![ActiveCampAgent {
+            agent_id: "agent_6".to_string(),
+            display_name: "爱丽丝".to_string(),
+        }];
+
+        assert_eq!(
+            parse_inline_addressing("请 @爱丽丝", &active_agents).occurrences[0].agent_id,
+            "agent_6"
+        );
+        for body in ["@爱丽丝同学 请看一下", "@爱丽丝，请看一下"] {
+            assert!(
+                parse_inline_addressing(body, &active_agents)
+                    .occurrences
+                    .is_empty(),
+                "unexpected display-name mention in {body}"
+            );
+        }
+    }
+
+    #[test]
+    fn display_name_alias_uses_longest_match_and_canonical_tokens_take_precedence() {
+        let active_agents = vec![
+            ActiveCampAgent {
+                agent_id: "agent_6".to_string(),
+                display_name: "爱丽丝".to_string(),
+            },
+            ActiveCampAgent {
+                agent_id: "agent_7".to_string(),
+                display_name: "爱丽丝 助手".to_string(),
+            },
+            ActiveCampAgent {
+                agent_id: "agent_8".to_string(),
+                display_name: "agent_6".to_string(),
+            },
+        ];
+
+        assert_eq!(
+            parse_inline_addressing("@爱丽丝 助手 请处理", &active_agents).occurrences[0].agent_id,
+            "agent_7"
+        );
+        assert_eq!(
+            parse_inline_addressing("@agent_6 请处理", &active_agents).occurrences[0].agent_id,
+            "agent_6"
+        );
+    }
+
+    #[test]
+    fn display_name_alias_ignores_literal_regions_urls_escapes_and_ambiguous_names() {
+        let active_agents = vec![
+            ActiveCampAgent {
+                agent_id: "agent_6".to_string(),
+                display_name: "爱丽丝".to_string(),
+            },
+            ActiveCampAgent {
+                agent_id: "agent_7".to_string(),
+                display_name: "重复".to_string(),
+            },
+            ActiveCampAgent {
+                agent_id: "agent_8".to_string(),
+                display_name: "重复".to_string(),
+            },
+        ];
+        let parsed = parse_inline_addressing(
+            r#"`@爱丽丝 ` \@爱丽丝 https://example.test/@爱丽丝
+```
+@爱丽丝
+```
+@重复 请处理"#,
+            &active_agents,
+        );
+
+        assert!(parsed.occurrences.is_empty());
+        assert!(parsed.malformed.is_empty());
     }
 
     #[test]
