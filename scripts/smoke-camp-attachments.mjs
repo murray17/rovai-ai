@@ -12,7 +12,7 @@ const sourcePath = join(fixtureRoot, 'public-attachment.txt')
 const token = `PUBLIC_ATTACHMENT_TOKEN_${crypto.randomUUID().replaceAll('-', '').toUpperCase()}`
 const firstAgents = ['agent_1', 'agent_2']
 const laterAgent = 'agent_4'
-const contextFormatterVersion = 13
+const contextFormatterVersion = 14
 let core = null
 
 try {
@@ -270,8 +270,13 @@ async function waitFor(probe, label, timeoutMs) {
 
 async function makeAttachmentTreeRemovable(dataDirectory) {
   const rootDirectory = join(dataDirectory, 'camp-attachments')
-  const campDirectories = await readdir(rootDirectory).catch(() => [])
-  await Promise.all(campDirectories.map((campDirectory) =>
-    chmod(join(rootDirectory, campDirectory), 0o700).catch(() => undefined)
-  ))
+  await makeDirectoryTreeRemovable(rootDirectory)
+}
+
+async function makeDirectoryTreeRemovable(directory) {
+  await chmod(directory, 0o700).catch(() => undefined)
+  const entries = await readdir(directory, { withFileTypes: true }).catch(() => [])
+  await Promise.all(entries
+    .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink())
+    .map((entry) => makeDirectoryTreeRemovable(join(directory, entry.name))))
 }

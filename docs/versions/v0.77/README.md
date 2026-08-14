@@ -4,16 +4,15 @@ version: v0.77
 lifecycle: current
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: in_progress
+implementation_status: complete
 last_updated: 2026-08-14
 ---
 
 # Rovai-ai v0.77：持久消息回复链与显式接收者修复
 
-> 当前状态：用户已确认方案 C（轻量无框），并将 Composer 与时间线父引用收成无框单行、超出显示省略号；
-> 点击“回复”仍聚焦正文编辑器，但鼠标触发不增加 Composer 外框或光晕，键盘 `focus-visible` 保留；
-> 持久 Draft 边界、ADR-0185、Camp Composer Draft v1 与稳定 UI 合同已确认。Core schema、IPC、Renderer
-> 和自动化实现尚未开始。
+> 当前状态：用户已确认的方案 C（轻量无框）已完成实现与发布验收。Composer 与时间线父引用
+> 均为无框单行省略；鼠标点击“回复”聚焦编辑器但不增加输入框、描边或光晕，键盘路径保留局部
+> `focus-visible`。Core Draft schema/mutation、Draft-only send、IPC、Renderer、迁移、文档与真实打包 App 验收全部闭环。
 >
 > 前置版本：[v0.76 显示名 Inline Alias 行首寻址门禁](../v0.76/README.md)
 
@@ -95,6 +94,24 @@ Core 合同或安全状态机，失效作者错误与替代成员选择仍可独
 4. Porcelain Day / Steel Night、1440×920、1040×700、736px、360px、200% zoom 与键盘/屏幕阅读器验收通过；
 5. 定向/完整 Core 与 Renderer tests、typecheck、build、文档治理和 `git diff --check` 通过；
 6. 只有上述证据完成后才把本版本与实施计划标记为 `complete`。
+
+## 实现与验收结果
+
+- Data Contract 升级为 v0.77 / projection schema 38 / migration 83；旧 Draft 无损迁移为
+  `replyIntent=null`，content、attachment 与 reply intent 共享唯一 revision/expiry 边界；
+- user send 已删除 caller-supplied reply target，Core 只从 exact Draft 读取引用和结构化 Mention。
+  `reply_recipient_required`、`mention_target_unavailable` 与 `camp_message.invalid_reply` 均原子拒绝，
+  不产生 Message/Turn/Run/Delivery，也不回退 Default Lead；
+- Renderer 已交付稳定消息 Reply action、单行 dock、完整 fanout、away/left/removed chooser、
+  same-Camp anchor load 和 accepted parent quote；optimistic message 不暴露持久 Reply action；
+- 真实 arm64 打包 App 在隔离 `userData` 中验证了：可用原作者自动写入原子 Mention；
+  away 原作者不写入失效 Mention、展示“原作者当前不可接收，请选择其他成员”且禁用发送；
+  显式改选 `agent_2` 后只创建 `agent_2` 的 run，无 Default Lead fallback；
+- Porcelain Day / Steel Night 已完成 1440×920 真实 App 截图；原型完成 1440/1040/736/360
+  双主题窄屏对照；最小 1040×700 窗口在收起检查器后以 200% 缩放实测为 520×350 CSS viewport，
+  dock、父引用与执行操作无水平溢出；reduced-motion、pointer focus suppression、键盘触发和 ARIA 状态均纳入自动验收；
+- 定向 Core/Renderer tests、全量 Rust/TypeScript tests、typecheck、strict Clippy、build、文档治理、
+  结构化 Mention/Reply 真实 App acceptance 与附件 smoke 作为本版发布门禁。
 
 ## 跨版本文档影响
 

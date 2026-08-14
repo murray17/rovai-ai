@@ -55,7 +55,7 @@ const expectedContent = [
 ]
 const expectedBody = '请同时检查这条消息：@叮叮 @芝士 @咕咕 ，请给出结论。'
 const currentUserMentionMessageId = 'message-current-user-mention-accept'
-const currentUserMentionText = '请选择 v0.65 的方案。'
+const currentUserMentionText = '请选择 v0.65 的方案，并逐项说明交互状态、接收者变化、异常分支、键盘焦点、发送前校验以及消息引用在窄窗口下的表现，最后给出可以直接进入开发的结论和风险清单。'
 const currentUserMentionBody = `@你 ${currentUserMentionText}`
 const currentUserMentionContent = [
   { kind: 'current_user_mention', userId: 'local_user' },
@@ -535,9 +535,11 @@ try {
   await capture(running.cdp, composerCapture)
 
   await evaluate(running.cdp, `window.getSelection()?.removeAllRanges()`)
-  await mouseClick(running.cdp, '.structured-mention-token.member-mention.is-interactive')
-  await waitForExpression(running.cdp,
-    `document.querySelector('.mention-profile-popover[aria-label="叮叮的基础信息"]')?.classList.contains('is-positioned')`)
+  await mouseClickUntilExpression(
+    running.cdp,
+    `.structured-mention-token.member-mention.is-interactive[data-agent-id=${JSON.stringify(targetMemberIds[0])}]`,
+    `document.querySelector('.mention-profile-popover[aria-label="叮叮的基础信息"]')?.classList.contains('is-positioned')`
+  )
   await wait(180)
   const composerPopoverInspection = await inspectMentionPopover(running.cdp)
   assertSelectedMemberPopover(composerPopoverInspection, 'Composer')
@@ -648,10 +650,11 @@ try {
   )
 
   await evaluate(running.cdp, `window.getSelection()?.removeAllRanges()`)
-  await mouseClick(running.cdp,
-    `.conversation-bubble.user .message-mention-token.is-interactive[data-agent-id=${JSON.stringify(targetMemberIds[0])}]`)
-  await waitForExpression(running.cdp,
-    `document.querySelector('.mention-profile-popover[aria-label="叮叮的基础信息"]')?.classList.contains('is-positioned')`)
+  await mouseClickUntilExpression(
+    running.cdp,
+    `.conversation-bubble.user .message-mention-token.is-interactive[data-agent-id=${JSON.stringify(targetMemberIds[0])}]`,
+    `document.querySelector('.mention-profile-popover[aria-label="叮叮的基础信息"]')?.classList.contains('is-positioned')`
+  )
   await wait(180)
   const historyPopoverInspection = await inspectMentionPopover(running.cdp)
   assertSelectedMemberPopover(historyPopoverInspection, 'History')
@@ -699,9 +702,7 @@ try {
   // physical pointer outside the message before reading the transitioned style.
   await evaluate(running.cdp,
     `document.activeElement instanceof HTMLElement && document.activeElement.blur()`)
-  await running.cdp.send('Input.dispatchMouseEvent', {
-    type: 'mouseMoved', x: 2, y: 2, button: 'none', buttons: 0
-  })
+  await moveMouseAwayFromLastUserMessage(running.cdp)
   await wait(200)
   const hiddenOpacity = await lastCopyButtonOpacity(running.cdp)
   assert(hiddenOpacity < 0.05, `Copy button is visible without hover: ${hiddenOpacity}`)
@@ -711,9 +712,7 @@ try {
   const hoveredOpacity = await lastCopyButtonOpacity(running.cdp)
   assert(hoveredOpacity > 0.95, `Copy button did not appear on hover: ${hoveredOpacity}`)
 
-  await running.cdp.send('Input.dispatchMouseEvent', {
-    type: 'mouseMoved', x: 2, y: 2, button: 'none', buttons: 0
-  })
+  await moveMouseAwayFromLastUserMessage(running.cdp)
   await wait(200)
   assert(await lastCopyButtonOpacity(running.cdp) < 0.05,
     'Copy button did not hide after hover ended')
@@ -770,7 +769,18 @@ try {
       === ${JSON.stringify(currentUserMentionBody)}
       && message.querySelectorAll('.message-mention-token.current-user').length === 1
   })()`, 30_000)
-  await wait(180)
+  await waitForExpression(running.cdp, `(() => {
+    const token = document.querySelector(
+      '[data-message-id=${JSON.stringify(currentUserMentionMessageId)}] .message-mention-token.current-user'
+    )
+    if (!(token instanceof HTMLElement)) return false
+    const probe = document.createElement('span')
+    probe.style.color = 'var(--mention-ink)'
+    document.body.appendChild(probe)
+    const settled = getComputedStyle(token).color === getComputedStyle(probe).color
+    probe.remove()
+    return settled
+  })()`, 3_000)
 
   const currentUserMentionInspection = await evaluate(running.cdp, `(() => {
     const message = document.querySelector('[data-message-id=${JSON.stringify(currentUserMentionMessageId)}]')
@@ -867,6 +877,292 @@ try {
   const currentUserPasteCapture = join(outputDir, 'current-user-mention-paste-downgraded.png')
   await capture(running.cdp, currentUserPasteCapture)
 
+  // Reply-chain acceptance uses the same isolated Camp and real packaged App.
+  // Start from an empty durable Draft so the implicit recipient inserted by a
+  // normal reply and the absence of an invalid recipient are both observable.
+  await selectWholeEditor(running.cdp)
+  await pressKey(running.cdp, {
+    key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
+  })
+  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+    (draft) => deepEqual(draft.content, []) && draft.replyIntent === null, 10_000)
+  await reloadRenderer(running.cdp)
+  await setTheme(running.cdp, 'day')
+  await openCamp(running.cdp, campId)
+  await waitForSelector(running.cdp,
+    `[data-message-id=${JSON.stringify(currentUserMentionMessageId)}] .message-reply-button`, 30_000)
+  await moveMouseToElement(running.cdp,
+    `[data-message-id=${JSON.stringify(currentUserMentionMessageId)}] .message-bubble`)
+  await mouseClick(running.cdp,
+    `[data-message-id=${JSON.stringify(currentUserMentionMessageId)}] .message-reply-button`)
+  const availableReplyDraft = await waitForValue(async () =>
+    request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
+    draft.replyIntent?.replyToCampMessageId === currentUserMentionMessageId
+      && draft.replyIntent.author?.authorId === targetMemberIds[0]
+      && draft.replyIntent.author.recipientAvailability === 'available'
+      && draft.replyIntent.recipientSelectionRequired === false
+      && draft.content.some((segment) =>
+        segment.kind === 'member_mention' && segment.agentId === targetMemberIds[0]), 10_000)
+  await waitForExpression(running.cdp, `(() => (
+    document.activeElement?.id === 'camp-message'
+      && document.querySelector('.composer')?.classList.contains('suppress-reply-focus-ring')
+      && document.querySelector('.mention-target-summary')?.textContent === '发送给 @叮叮'
+  ))()`)
+  const lightweightReplyInspection = await inspectLightweightReply(running.cdp)
+  assert(
+    lightweightReplyInspection.theme === 'day'
+      && lightweightReplyInspection.editorFocused
+      && lightweightReplyInspection.focusRingSuppressed
+      && lightweightReplyInspection.composerBox.borderTopWidth === '1px'
+      && lightweightReplyInspection.composerBox.borderTopStyle === 'solid'
+      && lightweightReplyInspection.composerBox.borderTopColor
+        === lightweightReplyInspection.expectedControlLineColor
+      && lightweightReplyInspection.composerBox.backgroundColor
+        === lightweightReplyInspection.expectedInputColor
+      && lightweightReplyInspection.composerBox.boxShadow === 'none'
+      && lightweightReplyInspection.lineBorderWidth === '0px'
+      && lightweightReplyInspection.lineBackgroundColor === 'rgba(0, 0, 0, 0)'
+      && lightweightReplyInspection.lineBoxShadow === 'none'
+      && lightweightReplyInspection.copyWhiteSpace === 'nowrap'
+      && lightweightReplyInspection.copyOverflow === 'hidden'
+      && lightweightReplyInspection.excerptTextOverflow === 'ellipsis'
+      && lightweightReplyInspection.excerptWhiteSpace === 'nowrap'
+      && lightweightReplyInspection.excerptOverflows,
+    `Pointer reply is not the accepted one-line frameless treatment: ${JSON.stringify(lightweightReplyInspection)}`
+  )
+  const lightweightReplyCapture = join(outputDir, 'message-reply-lightweight-day.png')
+  await capture(running.cdp, lightweightReplyCapture)
+
+  // Cancel keeps any already inserted content by contract. Discard the Draft
+  // before the dangerous-boundary case so an invalid original-author Mention
+  // cannot be hidden by state left from the normal reply.
+  await mouseClick(running.cdp, '.composer-reply-cancel')
+  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+    (draft) => draft.replyIntent === null, 10_000)
+  await selectWholeEditor(running.cdp)
+  await pressKey(running.cdp, {
+    key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
+  })
+  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+    (draft) => deepEqual(draft.content, []) && draft.replyIntent === null, 10_000)
+  const originalAuthorProfile = await request(running.cdp, 'members.get', {
+    agentId: targetMemberIds[0]
+  })
+  const awayResult = await request(running.cdp, 'members.presence.set', {
+    commandId: crypto.randomUUID(),
+    command: {
+      agentId: targetMemberIds[0],
+      expectedVersion: originalAuthorProfile.version,
+      presence: 'away'
+    }
+  })
+  assert(awayResult.status === 'applied',
+    `Could not make the reply author unavailable: ${JSON.stringify(awayResult)}`)
+  await reloadRenderer(running.cdp)
+  await setTheme(running.cdp, 'night')
+  await openCamp(running.cdp, campId)
+  await mouseClick(running.cdp,
+    `[data-message-id=${JSON.stringify(currentUserMentionMessageId)}] .message-reply-button`)
+  const unavailableReplyDraft = await waitForValue(async () =>
+    request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
+    draft.replyIntent?.replyToCampMessageId === currentUserMentionMessageId
+      && draft.replyIntent.author?.authorId === targetMemberIds[0]
+      && draft.replyIntent.author.recipientAvailability === 'unavailable'
+      && draft.replyIntent.recipientSelectionRequired === true, 10_000)
+  assert(!unavailableReplyDraft.content.some((segment) =>
+    segment.kind === 'member_mention' && segment.agentId === targetMemberIds[0]),
+  `Unavailable reply author leaked into the Draft: ${JSON.stringify(unavailableReplyDraft)}`)
+  await waitForExpression(running.cdp, `(() => {
+    const repair = document.querySelector('.reply-recipient-repair')
+    const options = [...document.querySelectorAll('.reply-recipient-options button')]
+    return repair?.textContent?.includes('原作者当前不可接收，请选择其他成员')
+      && options.some((option) => option.textContent?.trim() === '@芝士')
+      && options.some((option) => option.textContent?.trim() === '@咕咕')
+      && options.some((option) => option.textContent?.trim() === '@所有队员')
+      && !options.some((option) => option.textContent?.trim() === '@叮叮')
+      && document.activeElement === options[0]
+  })()`)
+  await focusEditorAtEnd(running.cdp)
+  await running.cdp.send('Input.insertText', { text: '请基于上述引用继续。' })
+  const unresolvedReplyDraft = await waitForValue(async () =>
+    request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
+    draft.body.includes('请基于上述引用继续。')
+      && draft.replyIntent?.recipientSelectionRequired === true, 10_000)
+  const unresolvedReplyInspection = await evaluate(running.cdp, `(() => ({
+    theme: document.documentElement.dataset.theme,
+    warning: document.querySelector('.reply-recipient-repair-copy strong')?.textContent ?? null,
+    sendDisabled: document.querySelector('.composer-send')?.disabled ?? null,
+    summary: document.querySelector('.mention-target-summary')?.textContent ?? null
+  }))()`)
+  assert(
+    unresolvedReplyInspection.theme === 'night'
+      && unresolvedReplyInspection.warning === '原作者当前不可接收，请选择其他成员'
+      && unresolvedReplyInspection.sendDisabled === true
+      && unresolvedReplyInspection.summary.includes('Default Lead'),
+    `Unavailable reply did not block explicit sending: ${JSON.stringify(unresolvedReplyInspection)}`
+  )
+  const unavailableReplyCapture = join(outputDir, 'message-reply-recipient-required-night.png')
+  await capture(running.cdp, unavailableReplyCapture)
+
+  const messageSequenceBeforeRecipientRepair = Math.max(0,
+    ...(await request(running.cdp, 'camps.snapshot', { campId })).messages
+      .map((message) => message.sequence))
+  await mouseClick(running.cdp, '.reply-recipient-options button')
+  const resolvedReplyDraft = await waitForValue(async () =>
+    request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
+    draft.replyIntent?.replyToCampMessageId === currentUserMentionMessageId
+      && draft.replyIntent.recipientSelectionRequired === false
+      && draft.content.some((segment) =>
+        segment.kind === 'member_mention' && segment.agentId === targetMemberIds[1])
+      && !draft.content.some((segment) =>
+        segment.kind === 'member_mention' && segment.agentId === targetMemberIds[0]), 10_000)
+  await waitForExpression(running.cdp, `(() => (
+    !document.querySelector('.reply-recipient-repair')
+      && document.querySelector('.mention-target-summary')?.textContent === '发送给 @芝士'
+      && document.querySelector('.composer-send')?.disabled === false
+  ))()`)
+  await mouseClick(running.cdp, '.composer-send')
+  const sentReplySnapshot = await waitForValue(async () =>
+    request(running.cdp, 'camps.snapshot', { campId }), (snapshot) =>
+    snapshot.messages.some((message) => message.sequence > messageSequenceBeforeRecipientRepair)
+      && snapshot.messages.some((message) =>
+        message.authorType === 'user'
+          && message.replyToCampMessageId === currentUserMentionMessageId
+          && deepEqual(message.addressedAgentIds, [targetMemberIds[1]])), 30_000)
+  const sentReplyMessage = sentReplySnapshot.messages.find((message) =>
+    message.authorType === 'user'
+      && message.replyToCampMessageId === currentUserMentionMessageId
+      && deepEqual(message.addressedAgentIds, [targetMemberIds[1]]))
+  assert(sentReplyMessage,
+    `Resolved reply did not create the expected message: ${JSON.stringify(sentReplySnapshot.messages)}`)
+  await waitForSelector(running.cdp,
+    `[data-message-id=${JSON.stringify(sentReplyMessage.id)}] .reply-parent-quote`, 30_000)
+  const sentParentQuoteInspection = await evaluate(running.cdp, `(() => {
+    const quote = document.querySelector(
+      '[data-message-id=${JSON.stringify(sentReplyMessage.id)}] .reply-parent-quote'
+    )
+    const excerpt = quote?.querySelector('span')
+    if (!(quote instanceof HTMLElement) || !(excerpt instanceof HTMLElement)) return null
+    const quoteStyle = getComputedStyle(quote)
+    const excerptStyle = getComputedStyle(excerpt)
+    return {
+      text: quote.textContent,
+      borderTopWidth: quoteStyle.borderTopWidth,
+      backgroundColor: quoteStyle.backgroundColor,
+      whiteSpace: quoteStyle.whiteSpace,
+      excerptTextOverflow: excerptStyle.textOverflow,
+      excerptOverflows: excerpt.scrollWidth > excerpt.clientWidth
+    }
+  })()`)
+  assert(
+    sentParentQuoteInspection
+      && sentParentQuoteInspection.text.includes('叮叮')
+      && sentParentQuoteInspection.borderTopWidth === '0px'
+      && sentParentQuoteInspection.backgroundColor === 'rgba(0, 0, 0, 0)'
+      && sentParentQuoteInspection.whiteSpace === 'nowrap'
+      && sentParentQuoteInspection.excerptTextOverflow === 'ellipsis'
+      && sentParentQuoteInspection.excerptOverflows,
+    `Sent reply parent quote is not one-line and frameless: ${JSON.stringify(sentParentQuoteInspection)}`
+  )
+  const sentReplyCapture = join(outputDir, 'message-reply-sent-parent-quote-night.png')
+  await capture(running.cdp, sentReplyCapture)
+
+  // Exercise the production minimum window at effective 200% desktop zoom.
+  // Replying to the just-sent user message creates a normal quote without
+  // adding a recipient, so the dock and the accepted parent quote are visible
+  // together in the narrow CSS viewport.
+  await mouseClick(running.cdp,
+    `[data-message-id=${JSON.stringify(sentReplyMessage.id)}] .message-reply-button`)
+  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+    (draft) => draft.replyIntent?.replyToCampMessageId === sentReplyMessage.id
+      && draft.replyIntent.author?.authorType === 'user'
+      && draft.replyIntent.recipientSelectionRequired === false, 10_000)
+  if (await evaluate(running.cdp,
+    `document.querySelector('.topbar-inspector-toggle')?.getAttribute('aria-pressed') === 'true'`)) {
+    await mouseClick(running.cdp, '.topbar-inspector-toggle')
+    await waitForExpression(running.cdp,
+      `document.querySelector('.topbar-inspector-toggle')?.getAttribute('aria-pressed') === 'false'`)
+  }
+  await emulateDesktopZoom(running.cdp, 1040, 700, 2)
+  await waitForExpression(running.cdp, `(() => Boolean(
+    document.querySelector('.composer-box')
+      && document.querySelector('.composer-reply-line .composer-reply-copy > span')
+      && document.querySelector(
+        '[data-message-id=${JSON.stringify(sentReplyMessage.id)}] .reply-parent-quote'
+      )
+      && document.querySelector('.composer-send, .composer-stop')
+  ))()`)
+  const zoom200ReplyInspection = await evaluate(running.cdp, `(() => {
+    const box = document.querySelector('.composer-box')
+    const line = document.querySelector('.composer-reply-line')
+    const excerpt = line?.querySelector('.composer-reply-copy > span')
+    const parentQuote = document.querySelector(
+      '[data-message-id=${JSON.stringify(sentReplyMessage.id)}] .reply-parent-quote'
+    )
+    const action = document.querySelector('.composer-send, .composer-stop')
+    if (
+      !(box instanceof HTMLElement)
+      || !(line instanceof HTMLElement)
+      || !(excerpt instanceof HTMLElement)
+      || !(parentQuote instanceof HTMLElement)
+      || !(action instanceof HTMLElement)
+    ) return null
+    const boxRect = box.getBoundingClientRect()
+    const lineRect = line.getBoundingClientRect()
+    const actionRect = action.getBoundingClientRect()
+    return {
+      cssViewport: [innerWidth, innerHeight],
+      physicalViewport: [innerWidth * devicePixelRatio, innerHeight * devicePixelRatio],
+      devicePixelRatio,
+      documentOverflows: document.documentElement.scrollWidth > innerWidth,
+      boxFits: boxRect.left >= 0 && boxRect.right <= innerWidth + 1,
+      lineFits: line.scrollWidth <= line.clientWidth + 1,
+      lineHeight: lineRect.height,
+      excerptEllipsizes: getComputedStyle(excerpt).textOverflow === 'ellipsis'
+        && getComputedStyle(excerpt).whiteSpace === 'nowrap',
+      parentQuoteOneLine: getComputedStyle(parentQuote).whiteSpace === 'nowrap',
+      actionVisible: actionRect.left >= 0 && actionRect.right <= innerWidth + 1
+        && actionRect.top >= 0 && actionRect.bottom <= innerHeight + 1
+    }
+  })()`)
+  assert(
+    zoom200ReplyInspection
+      && deepEqual(zoom200ReplyInspection.cssViewport, [520, 350])
+      && deepEqual(zoom200ReplyInspection.physicalViewport, [1040, 700])
+      && zoom200ReplyInspection.devicePixelRatio === 2
+      && !zoom200ReplyInspection.documentOverflows
+      && zoom200ReplyInspection.boxFits
+      && zoom200ReplyInspection.lineFits
+      && zoom200ReplyInspection.excerptEllipsizes
+      && zoom200ReplyInspection.parentQuoteOneLine
+      && zoom200ReplyInspection.actionVisible,
+    `200% zoom hid or overflowed reply functionality: ${JSON.stringify(zoom200ReplyInspection)}`
+  )
+  const zoom200ReplyCapture = join(outputDir, 'message-reply-zoom-200-night.png')
+  await capture(running.cdp, zoom200ReplyCapture)
+
+  await mouseClick(running.cdp, '.composer-reply-cancel')
+  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+    (draft) => draft.replyIntent === null, 10_000)
+  await setViewport(running.cdp, 1440, 920)
+  await running.cdp.send('Page.bringToFront')
+  await running.cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true })
+  const keyboardReplyFocused = await evaluate(running.cdp, `(() => {
+    const button = document.querySelector(
+      '[data-message-id=${JSON.stringify(sentReplyMessage.id)}] .message-reply-button'
+    )
+    if (!(button instanceof HTMLButtonElement)) return false
+    button.focus()
+    return document.activeElement === button && button.getAttribute('aria-label') === '回复这条消息'
+  })()`)
+  assert(keyboardReplyFocused, 'Could not focus the Reply action for keyboard acceptance')
+  await pressNativeButtonEnter(running.cdp)
+  await waitForExpression(running.cdp, `(() => (
+    document.activeElement?.id === 'camp-message'
+      && !document.querySelector('.composer')?.classList.contains('suppress-reply-focus-ring')
+      && Boolean(document.querySelector('.composer-reply-line'))
+  ))()`)
+
   result = {
     acceptance: 'structured-mentions-ui',
     appPath,
@@ -881,7 +1177,11 @@ try {
       nativeSelection: selectionCapture,
       hoverCopy: copiedCapture,
       currentUserMention: currentUserMentionCapture,
-      currentUserPasteDowngraded: currentUserPasteCapture
+      currentUserPasteDowngraded: currentUserPasteCapture,
+      lightweightReply: lightweightReplyCapture,
+      unavailableReply: unavailableReplyCapture,
+      sentReply: sentReplyCapture,
+      zoom200Reply: zoom200ReplyCapture
     },
     campId,
     selectedSkillName: selectableSkill.name,
@@ -901,6 +1201,16 @@ try {
     currentUserMentionInspection,
     currentUserClipboardPayload,
     currentUserPasteDowngradedToText: true,
+    availableReplyDraft,
+    lightweightReplyInspection,
+    unavailableReplyDraft,
+    unresolvedReplyDraft,
+    unresolvedReplyInspection,
+    resolvedReplyDraft,
+    sentReplyMessage,
+    sentParentQuoteInspection,
+    zoom200ReplyInspection,
+    keyboardReplyPathEnabled: true,
     clipboardItemCountBeforeTest: clipboardArchive.length,
     clipboardRestored: false,
     isolatedUserDataRemoved: false
@@ -1057,6 +1367,10 @@ async function launchApp(userDataDir, port, width, height) {
     cdp = await connectCdp(target.webSocketDebuggerUrl)
     await cdp.send('Page.enable')
     await cdp.send('Page.bringToFront')
+    await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true })
+    await cdp.send('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-reduced-motion', value: 'reduce' }]
+    })
     await cdp.send('Emulation.setDeviceMetricsOverride', {
       width,
       height,
@@ -1088,7 +1402,9 @@ async function closeApp(app) {
   const startedAt = Date.now()
   while (Date.now() - startedAt < 5_000) {
     try {
-      await fetch(`http://127.0.0.1:${app.port}/json`)
+      await fetch(`http://127.0.0.1:${app.port}/json`, {
+        signal: AbortSignal.timeout(500)
+      })
     } catch {
       await terminateChild(app.child)
       return
@@ -1097,7 +1413,9 @@ async function closeApp(app) {
   }
   await terminateChild(app.child)
   try {
-    await fetch(`http://127.0.0.1:${app.port}/json`)
+    await fetch(`http://127.0.0.1:${app.port}/json`, {
+      signal: AbortSignal.timeout(500)
+    })
   } catch {
     return
   }
@@ -1250,6 +1568,25 @@ async function pressKey(cdp, activation) {
   })
 }
 
+async function pressNativeButtonEnter(cdp) {
+  await cdp.send('Input.dispatchKeyEvent', {
+    type: 'keyDown',
+    key: 'Enter',
+    code: 'Enter',
+    text: '\r',
+    unmodifiedText: '\r',
+    windowsVirtualKeyCode: 13,
+    nativeVirtualKeyCode: 36
+  })
+  await cdp.send('Input.dispatchKeyEvent', {
+    type: 'keyUp',
+    key: 'Enter',
+    code: 'Enter',
+    windowsVirtualKeyCode: 13,
+    nativeVirtualKeyCode: 36
+  })
+}
+
 async function selectWholeEditor(cdp) {
   const selected = await evaluate(cdp, `(() => {
     const editor = document.querySelector('#camp-message')
@@ -1300,7 +1637,7 @@ async function mentionInteractionStayedInCamp(cdp) {
 }
 
 async function mouseClick(cdp, selector, options = {}) {
-  const point = await evaluate(cdp, `(() => {
+  const scrolled = await evaluate(cdp, `(() => {
     const primary = [...document.querySelectorAll(${JSON.stringify(selector)})]
     const fallback = ${options.fallbackSelector
       ? `[...document.querySelectorAll(${JSON.stringify(options.fallbackSelector)})]`
@@ -1309,11 +1646,41 @@ async function mouseClick(cdp, selector, options = {}) {
     const element = candidates[${options.last ? 'candidates.length - 1' : '0'}]
     if (!element || element.disabled) return null
     element.scrollIntoView({ block: 'center', inline: 'center' })
+    return true
+  })()`)
+  assert(scrolled, `Could not click ${selector}`)
+  // Execution-drawer and timeline layout may settle after scrollIntoView. Read
+  // the hit point again after a short host-side wait so the real pointer click
+  // cannot land on a stale coordinate. Do not depend on requestAnimationFrame:
+  // Chromium may throttle it while another desktop window is in front.
+  await wait(80)
+  const point = await evaluate(cdp, `(() => {
+    const primary = [...document.querySelectorAll(${JSON.stringify(selector)})]
+    const fallback = ${options.fallbackSelector
+      ? `[...document.querySelectorAll(${JSON.stringify(options.fallbackSelector)})]`
+      : '[]'}
+    const candidates = primary.length > 0 ? primary : fallback
+    const element = candidates[${options.last ? 'candidates.length - 1' : '0'}]
+    if (!element || element.disabled) return null
     const rect = element.getBoundingClientRect()
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
   })()`)
   assert(point, `Could not click ${selector}`)
   await dispatchMouseClick(cdp, point)
+}
+
+async function mouseClickUntilExpression(cdp, selector, expression, attempts = 3) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    await mouseClick(cdp, selector)
+    try {
+      await waitForExpression(cdp, expression, 1_200)
+      return
+    } catch {
+      if (attempt + 1 === attempts) break
+      await wait(120)
+    }
+  }
+  throw new Error(`Real pointer click did not satisfy acceptance expression: ${expression}`)
 }
 
 async function moveMouseToElement(cdp, selector) {
@@ -1350,11 +1717,19 @@ async function dispatchMouseClick(cdp, point) {
 }
 
 async function moveMouseToLastUserMessage(cdp) {
-  const point = await evaluate(cdp, `(() => {
+  const scrolled = await evaluate(cdp, `(() => {
     const messages = [...document.querySelectorAll('.conversation-bubble.user')]
     const bubble = messages.at(-1)?.querySelector('.message-bubble')
     if (!bubble) return null
     bubble.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' })
+    return true
+  })()`)
+  assert(scrolled, 'Could not resolve the last user message hover point')
+  await wait(80)
+  const point = await evaluate(cdp, `(() => {
+    const messages = [...document.querySelectorAll('.conversation-bubble.user')]
+    const bubble = messages.at(-1)?.querySelector('.message-bubble')
+    if (!bubble) return null
     const rect = bubble.getBoundingClientRect()
     return { x: rect.left + Math.min(18, rect.width / 2), y: rect.top + rect.height / 2 }
   })()`)
@@ -1362,6 +1737,24 @@ async function moveMouseToLastUserMessage(cdp) {
   await cdp.send('Input.dispatchMouseEvent', {
     type: 'mouseMoved', x: point.x, y: point.y, button: 'none', buttons: 0
   })
+}
+
+async function moveMouseAwayFromLastUserMessage(cdp) {
+  const viewport = await evaluate(cdp, `({ width: innerWidth, height: innerHeight })`)
+  for (const point of [
+    { x: Math.max(2, viewport.width - 2), y: 2 },
+    { x: 2, y: Math.max(2, viewport.height - 2) },
+    { x: 2, y: 2 }
+  ]) {
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved', x: point.x, y: point.y, button: 'none', buttons: 0
+    })
+    await wait(40)
+  }
+  await waitForExpression(cdp, `(() => {
+    const messages = [...document.querySelectorAll('.conversation-bubble.user')]
+    return messages.length === 0 || !messages.at(-1).matches(':hover')
+  })()`, 2_000)
 }
 
 async function lastCopyButtonOpacity(cdp) {
@@ -1496,6 +1889,89 @@ async function setTheme(cdp, preference) {
     `document.documentElement.dataset.theme === ${JSON.stringify(expectedTheme)}`)
 }
 
+async function setViewport(cdp, width, height) {
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width,
+    height,
+    deviceScaleFactor: 1,
+    mobile: false
+  })
+  await waitForExpression(cdp,
+    `window.innerWidth === ${width} && window.innerHeight === ${height} && window.devicePixelRatio === 1`)
+}
+
+async function emulateDesktopZoom(cdp, physicalWidth, physicalHeight, zoomFactor) {
+  const cssWidth = Math.round(physicalWidth / zoomFactor)
+  const cssHeight = Math.round(physicalHeight / zoomFactor)
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: cssWidth,
+    height: cssHeight,
+    deviceScaleFactor: zoomFactor,
+    mobile: false,
+    screenWidth: physicalWidth,
+    screenHeight: physicalHeight
+  })
+  await waitForExpression(cdp, `(() => (
+    window.innerWidth === ${cssWidth}
+      && window.innerHeight === ${cssHeight}
+      && Math.abs(window.devicePixelRatio - ${zoomFactor}) < 0.01
+  ))()`)
+}
+
+async function inspectLightweightReply(cdp) {
+  return evaluate(cdp, `(() => {
+    const composer = document.querySelector('.composer')
+    const box = document.querySelector('.composer-box')
+    const line = document.querySelector('.composer-reply-line')
+    const copy = document.querySelector('.composer-reply-copy')
+    const excerpt = copy?.querySelector(':scope > span')
+    const editor = document.querySelector('#camp-message')
+    if (
+      !(composer instanceof HTMLElement)
+      || !(box instanceof HTMLElement)
+      || !(line instanceof HTMLElement)
+      || !(copy instanceof HTMLElement)
+      || !(excerpt instanceof HTMLElement)
+      || !(editor instanceof HTMLElement)
+    ) return null
+    const boxStyle = getComputedStyle(box)
+    const lineStyle = getComputedStyle(line)
+    const copyStyle = getComputedStyle(copy)
+    const excerptStyle = getComputedStyle(excerpt)
+    const probe = document.createElement('span')
+    probe.style.borderColor = 'var(--control-line)'
+    probe.style.backgroundColor = 'var(--input)'
+    document.body.appendChild(probe)
+    const probeStyle = getComputedStyle(probe)
+    const expectedControlLineColor = probeStyle.borderTopColor
+    const expectedInputColor = probeStyle.backgroundColor
+    probe.remove()
+    return {
+      theme: document.documentElement.dataset.theme,
+      editorFocused: document.activeElement === editor,
+      focusRingSuppressed: composer.classList.contains('suppress-reply-focus-ring')
+        && getComputedStyle(editor).outlineStyle === 'none',
+      composerBox: {
+        borderTopWidth: boxStyle.borderTopWidth,
+        borderTopColor: boxStyle.borderTopColor,
+        borderTopStyle: boxStyle.borderTopStyle,
+        backgroundColor: boxStyle.backgroundColor,
+        boxShadow: boxStyle.boxShadow
+      },
+      expectedControlLineColor,
+      expectedInputColor,
+      lineBorderWidth: lineStyle.borderTopWidth,
+      lineBackgroundColor: lineStyle.backgroundColor,
+      lineBoxShadow: lineStyle.boxShadow,
+      copyWhiteSpace: copyStyle.whiteSpace,
+      copyOverflow: copyStyle.overflow,
+      excerptTextOverflow: excerptStyle.textOverflow,
+      excerptWhiteSpace: excerptStyle.whiteSpace,
+      excerptOverflows: excerpt.scrollWidth > excerpt.clientWidth
+    }
+  })()`)
+}
+
 async function request(cdp, method, params = {}) {
   return evaluate(cdp,
     `window.rovai.request(${JSON.stringify(method)}, ${JSON.stringify(params)})`, true)
@@ -1556,7 +2032,9 @@ async function waitForTarget(port, stderr) {
   const startedAt = Date.now()
   while (Date.now() - startedAt < 20_000) {
     try {
-      const targets = await fetch(`http://127.0.0.1:${port}/json`)
+      const targets = await fetch(`http://127.0.0.1:${port}/json`, {
+        signal: AbortSignal.timeout(1_000)
+      })
         .then((response) => response.json())
       const target = targets.find((candidate) => candidate.type === 'page')
       if (target) return target
