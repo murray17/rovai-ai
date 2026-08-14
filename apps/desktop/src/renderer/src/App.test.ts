@@ -87,6 +87,7 @@ import {
   formatStopElapsed,
   isViewingNonTerminalAgentRun,
   loadCompleteAgentRunExecutionEvidence,
+  memberRuntimeConfigurationPresentation,
   preferredAgentProcessRun,
   rectanglesOverlap,
   runtimeOptionsForDisplay
@@ -1874,7 +1875,9 @@ describe('task event projections', () => {
     expect(markup).toContain('检查工作区')
     expect(markup).toContain('队员 <small>1</small>')
     expect(markup).toContain('协作队员')
-    expect(markup).toContain('默认负责人 · 洛可')
+    expect(markup).toContain('队长 · 洛可')
+    expect(markup).toContain('>队长</small>')
+    expect(markup).not.toContain('默认负责人 · 洛可')
     expect(markup).toContain('1 位在队 · 0 位暂离')
     expect(markup).not.toContain('上下文投递')
     expect(markup).not.toContain('AgentRun 上下文投递清单')
@@ -2248,8 +2251,10 @@ describe('task event projections', () => {
     expect(markup.indexOf('class="message-bubble"'))
       .toBeLessThan(markup.indexOf('class="message-copy-button"'))
     expect(markup).toContain('aria-label="Agent 执行台"')
+    expect(markup).toContain('class="run-pulse-title"')
     expect(markup).toContain('class="run-pulse-chip"')
     expect((markup.match(/class="run-pulse-chip(?: is-selected)?"/g) ?? [])).toHaveLength(1)
+    expect(markup).not.toContain('<small>执行过程</small>')
     expect(markup).toContain('data-agent-id="agent_2"')
     expect(markup).toContain('执行中')
     expect(markup.indexOf('class="local-message-avatar"'))
@@ -2535,6 +2540,65 @@ describe('task event projections', () => {
       .toBe('雾切响子 GitHub Copilot')
     expect(executionDrawerTitle('爱丽丝', 'codex-cli')).toBe('爱丽丝 Codex CLI')
     expect(executionDrawerTitle('药师寺惠', null)).toBe('药师寺惠')
+  })
+
+  it('presents the saved model, localized effort and model strategy without inventing Runtime defaults', () => {
+    const installation = codexInstallation()
+    installation.snapshot!.models = [{
+      id: 'gpt-5.6-sol',
+      displayName: 'GPT-5.6 Sol',
+      isDefault: true,
+      hidden: false,
+      deprecated: false,
+      options: [{
+        key: 'reasoning_effort',
+        label: 'Reasoning effort',
+        valueType: 'enum',
+        values: [{ value: 'xhigh', label: 'Extra high' }],
+        defaultValue: 'high',
+        scope: 'run'
+      }]
+    }]
+
+    expect(memberRuntimeConfigurationPresentation({
+      adapterKind: 'codex-cli',
+      model: {
+        mode: 'explicit',
+        modelId: 'gpt-5.6-sol',
+        options: { reasoning_effort: 'xhigh' }
+      },
+      permissions: { adapterKind: 'codex-cli', schemaVersion: 1, values: {} }
+    }, installation)).toEqual({
+      model: 'GPT-5.6 Sol',
+      effort: { label: '推理强度', value: '极高' },
+      strategy: '固定模型',
+      summary: 'GPT-5.6 Sol · 推理强度 极高'
+    })
+
+    expect(memberRuntimeConfigurationPresentation(
+      configuredRuntime('codex-cli'),
+      installation
+    )).toEqual({
+      model: 'Agent 运行时默认',
+      effort: null,
+      strategy: '跟随 Agent 运行时默认',
+      summary: 'Agent 运行时默认'
+    })
+
+    expect(memberRuntimeConfigurationPresentation({
+      adapterKind: 'claude-code-cli',
+      model: {
+        mode: 'explicit',
+        modelId: 'claude-sonnet-4-6',
+        options: { effort: 'high' }
+      },
+      permissions: { adapterKind: 'claude-code-cli', schemaVersion: 1, values: {} }
+    }, null)).toEqual({
+      model: 'claude-sonnet-4-6',
+      effort: { label: '思考强度', value: '高' },
+      strategy: '固定模型',
+      summary: 'claude-sonnet-4-6 · 思考强度 高'
+    })
   })
 
   it('keeps concurrent Runtime approvals in one dock directly above the composer', () => {

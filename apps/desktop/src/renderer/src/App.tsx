@@ -2401,6 +2401,7 @@ export function App(): React.JSX.Element {
               .map((entry) => entry.message)}
             projectName={activeCampProject?.name ?? null}
             agents={agents}
+            installations={installations}
             liveRuntimeEvents={liveRuntimeEvents}
             busy={busy === 'camp-message' || busy === 'change-default-lead' || busy?.startsWith('action-approval-') === true}
             onSend={sendCampMessage}

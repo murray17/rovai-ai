@@ -5,6 +5,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import * as Tabs from '@radix-ui/react-tabs'
 import type {
   ActionApprovalView,
+  AdapterInstallation,
   AgentProfile,
   AgentRunExecutionEvidencePage,
   AgentRunExecutionEvidenceView,
@@ -50,6 +51,7 @@ import { MemberPortrait } from './MemberPortrait'
 import { localizeExecutionEngineTerms } from './product-copy'
 import { writeClipboardText } from './clipboard'
 import { runtimeReadinessLabel } from './runtime-status'
+import { runtimeEditorInstallation } from './MemberRuntimeParameters'
 import { SafeMarkdown } from './SafeMarkdown'
 import { identityColorToken } from './theme'
 import { availableComposerSkillsForLead } from './composer-skill-picker'
@@ -794,6 +796,7 @@ export function CampWorkspace({
   optimisticMessages = [],
   projectName,
   agents,
+  installations = [],
   liveRuntimeEvents = [],
   busy,
   onSend,
@@ -824,6 +827,7 @@ export function CampWorkspace({
   optimisticMessages?: CampMessageView[]
   projectName: string | null
   agents: AgentProfile[]
+  installations?: AdapterInstallation[]
   liveRuntimeEvents?: LiveRuntimeEvent[]
   busy: boolean
   onSend(draft: CampComposerDraftView): Promise<CampMessageSendReceipt | void>
@@ -1140,6 +1144,15 @@ export function CampWorkspace({
   const executionBlocked = activeRuns.length > 0 || stopping
   const executionDrawerProcess = executionDrawerAgentId
     ? executionProcessByAgentId.get(executionDrawerAgentId) ?? null
+    : null
+  const executionDrawerProfile = executionDrawerProcess
+    ? profileById.get(executionDrawerProcess.agentId) ?? null
+    : null
+  const executionDrawerInstallation = executionDrawerProfile?.runtimeConfiguration
+    ? runtimeEditorInstallation(
+        installations,
+        executionDrawerProfile.runtimeConfiguration.adapterKind
+      )
     : null
   const pendingApprovals = snapshot.approvals.filter((approval) => approval.status === 'pending')
   const previousPendingApprovalCount = useRef(pendingApprovals.length)
@@ -2512,7 +2525,8 @@ export function CampWorkspace({
               key={executionDrawerProcess.agentId}
               process={executionDrawerProcess}
               member={memberById.get(executionDrawerProcess.agentId) ?? null}
-              profile={profileById.get(executionDrawerProcess.agentId) ?? null}
+              profile={executionDrawerProfile}
+              installation={executionDrawerInstallation}
               deliveries={snapshot.messageDeliveries}
               progressByRunId={executionProgressByRunId}
               campId={snapshot.camp.id}
@@ -2574,6 +2588,7 @@ export function CampWorkspace({
               <CampMembersPanel
                 snapshot={snapshot}
                 profileById={profileById}
+                installations={installations}
                 busy={busy}
                 onChangeLead={onChangeLead}
               />
@@ -2940,8 +2955,14 @@ function RunPulse({
   return (
     <div className="run-pulse" aria-label="Agent 执行台">
       <div className="run-pulse-heading">
-        <span className="run-pulse-mark" aria-hidden="true"><i /></span>
-        <strong>执行台</strong>
+        <span className="run-pulse-title">
+          <span className="run-pulse-mark" aria-hidden="true">
+            <svg viewBox="0 0 26 18">
+              <path d="M1.5 9h4.2l2.1-5.2 3.4 10.4 3.1-7.4 2.2 4.1h3.1l1.4-2.1h3.5" />
+            </svg>
+          </span>
+          <strong>执行台</strong>
+        </span>
         <span className="run-pulse-count" aria-live="polite">
           {stopping ? '正在停止本轮协作 · ' : activeProcessCount > 0 ? `${activeProcessCount} 位执行中 · ` : ''}
           {visibleProcesses.length} 位队员
@@ -2976,7 +2997,7 @@ function RunPulse({
                   size="list"
                   decorative
                 />
-                <span className="run-pulse-chip-copy"><strong>{memberName}</strong><small>执行过程</small></span>
+                <span className="run-pulse-chip-copy"><strong>{memberName}</strong></span>
                 <span className={`run-pulse-chip-state tone-${presentation.tone}`}>{presentation.label}</span>
               </button>
             </li>
@@ -2991,6 +3012,7 @@ function ExecutionDrawer({
   process,
   member,
   profile,
+  installation,
   deliveries,
   progressByRunId,
   campId,
@@ -3008,6 +3030,7 @@ function ExecutionDrawer({
   process: AgentExecutionProcess
   member: CampSnapshot['members'][number] | null
   profile: AgentProfile | null
+  installation: AdapterInstallation | null
   deliveries: MessageDeliveryView[]
   progressByRunId: Map<string, LiveExecutionProgress>
   campId: string
@@ -3243,6 +3266,9 @@ function ExecutionDrawer({
     displayName,
     profile?.runtimeConfiguration?.adapterKind ?? null
   )
+  const runtimeConfiguration = profile?.runtimeConfiguration
+    ? memberRuntimeConfigurationPresentation(profile.runtimeConfiguration, installation)
+    : null
   const accessibleHeight = Math.round(
     appliedHeight ?? measuredHeight ?? heightBounds?.min ?? EXECUTION_DRAWER_HARD_MIN_HEIGHT
   )
@@ -3300,7 +3326,12 @@ function ExecutionDrawer({
               decorative
             />
             <div>
-              <h2 id="execution-drawer-title">{drawerTitle}</h2>
+              <div className="execution-drawer-title-line">
+                <h2 id="execution-drawer-title">{drawerTitle}</h2>
+                {runtimeConfiguration && (
+                  <span className="execution-model-params">{runtimeConfiguration.summary}</span>
+                )}
+              </div>
               <p>
                 {runHistoryComplete ? '共' : '当前载入'} {process.runs.length} 次执行
                 {!runHistoryComplete && ' · 更早执行尚未载入'}
@@ -3880,11 +3911,13 @@ function RuntimeRecoveryDock({
 function CampMembersPanel({
   snapshot,
   profileById,
+  installations,
   busy,
   onChangeLead
 }: {
   snapshot: CampSnapshot
   profileById: Map<string, AgentProfile>
+  installations: AdapterInstallation[]
   busy: boolean
   onChangeLead(agentId: string): Promise<void>
 }): JSX.Element {
@@ -3892,6 +3925,18 @@ function CampMembersPanel({
   const defaultLead = members.find((member) => member.isDefaultLead) ?? null
   const presentCount = members.filter(campMemberIsLeadEligible).length
   const awayCount = members.length - presentCount
+  const [expandedRuntimeAgentIds, setExpandedRuntimeAgentIds] = useState<Set<string>>(
+    () => new Set()
+  )
+
+  const toggleRuntimeDetails = (agentId: string): void => {
+    setExpandedRuntimeAgentIds((current) => {
+      const next = new Set(current)
+      if (next.has(agentId)) next.delete(agentId)
+      else next.add(agentId)
+      return next
+    })
+  }
 
   return (
     <section aria-label="当前会话队员">
@@ -3910,14 +3955,14 @@ function CampMembersPanel({
               type="button"
               disabled={busy || presentCount === 0}
               aria-label={defaultLead
-                ? `默认负责人，${defaultLead.displayName}；更换默认负责人`
-                : '选择默认负责人'}
+                ? `队长，${defaultLead.displayName}；更换队长`
+                : '选择队长'}
             >
               {defaultLead
                 ? <MemberAvatar agentId={defaultLead.agentId} avatarRef={defaultLead.avatarRef} displayName={defaultLead.displayName} size="mention" decorative />
                 : <span className="camp-lead-picker-empty" aria-hidden="true">—</span>}
               <span className="camp-lead-picker-copy">
-                <strong>默认负责人 · {defaultLead?.displayName ?? '未设置'}</strong>
+                <strong>队长 · {defaultLead?.displayName ?? '未设置'}</strong>
                 <small>{defaultLead?.teamRole || '从在队队员中选择'}</small>
               </span>
               <svg className="camp-lead-picker-chevron" aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" viewBox="0 0 16 16">
@@ -3931,9 +3976,9 @@ function CampMembersPanel({
               align="end"
               sideOffset={5}
               collisionPadding={10}
-              aria-label="更换默认负责人"
+              aria-label="更换队长"
             >
-              <DropdownMenu.Label className="camp-lead-menu-label">选择默认负责人</DropdownMenu.Label>
+              <DropdownMenu.Label className="camp-lead-menu-label">选择队长</DropdownMenu.Label>
               <DropdownMenu.RadioGroup
                 value={defaultLead?.agentId ?? ''}
                 onValueChange={(agentId) => {
@@ -3981,6 +4026,14 @@ function CampMembersPanel({
             : profile?.runtimeReadiness.status === 'needs_attention'
               ? 'attention'
               : 'neutral'
+          const installation = profile?.runtimeConfiguration
+            ? runtimeEditorInstallation(installations, profile.runtimeConfiguration.adapterKind)
+            : null
+          const runtimeConfiguration = profile?.runtimeConfiguration
+            ? memberRuntimeConfigurationPresentation(profile.runtimeConfiguration, installation)
+            : null
+          const runtimeDetailsOpen = expandedRuntimeAgentIds.has(member.agentId)
+          const runtimeDetailsId = `camp-member-runtime-${member.agentId}`
           return (
             <article className={`camp-inspector-member-row ${present ? '' : 'is-away'}`} role="listitem" key={member.agentId}>
               <span className="camp-inspector-member-avatar">
@@ -3990,14 +4043,46 @@ function CampMembersPanel({
               <span className="camp-inspector-member-copy">
                 <span className="camp-inspector-member-name">
                   <strong>{member.displayName}</strong>
-                  {member.isDefaultLead && <small>负责人</small>}
+                  {member.isDefaultLead && <small>队长</small>}
                 </span>
                 <small>{member.teamRole || '团队角色未设置'}</small>
               </span>
               <span className={`camp-inspector-member-state ${present ? '' : 'is-away'}`}>
                 <strong>{presenceLabel}</strong>
-                <small className={`runtime-${runtimeTone}`}>{runtimeLabel}</small>
+                {runtimeConfiguration
+                  ? (
+                      <button
+                        className={`camp-inspector-runtime-toggle runtime-${runtimeTone}`}
+                        type="button"
+                        aria-expanded={runtimeDetailsOpen}
+                        aria-controls={runtimeDetailsId}
+                        aria-label={`${runtimeLabel}；${runtimeDetailsOpen ? '收起' : '展开'}模型信息`}
+                        onClick={() => toggleRuntimeDetails(member.agentId)}
+                      >
+                        <span>{runtimeLabel}</span>
+                        <svg aria-hidden="true" viewBox="0 0 16 16">
+                          <path d="m6 3.5 4.5 4.5L6 12.5" />
+                        </svg>
+                      </button>
+                    )
+                  : <small className={`runtime-${runtimeTone}`}>{runtimeLabel}</small>}
               </span>
+              {runtimeConfiguration && runtimeDetailsOpen && (
+                <dl
+                  className="camp-inspector-runtime-detail"
+                  id={runtimeDetailsId}
+                  aria-label={`${member.displayName}的当前模型配置`}
+                >
+                  <div><dt>模型</dt><dd>{runtimeConfiguration.model}</dd></div>
+                  {runtimeConfiguration.effort && (
+                    <div>
+                      <dt>{runtimeConfiguration.effort.label}</dt>
+                      <dd>{runtimeConfiguration.effort.value}</dd>
+                    </div>
+                  )}
+                  <div><dt>模型策略</dt><dd>{runtimeConfiguration.strategy}</dd></div>
+                </dl>
+              )}
             </article>
           )
         })}
@@ -5251,6 +5336,70 @@ function runtimeAdapterLabel(kind: string): string {
     'qwen-code': 'Qwen Code',
     'antigravity-app': 'Antigravity'
   } as Record<string, string>)[kind] ?? kind
+}
+
+export type MemberRuntimeConfigurationPresentation = {
+  model: string
+  effort: { label: '推理强度' | '思考强度'; value: string } | null
+  strategy: '固定模型' | '跟随 Agent 运行时默认'
+  summary: string
+}
+
+export function memberRuntimeConfigurationPresentation(
+  configuration: NonNullable<AgentProfile['runtimeConfiguration']>,
+  installation: AdapterInstallation | null
+): MemberRuntimeConfigurationPresentation {
+  const modelSelection = configuration.model
+  if (modelSelection.mode === 'runtime_default') {
+    return {
+      model: 'Agent 运行时默认',
+      effort: null,
+      strategy: '跟随 Agent 运行时默认',
+      summary: 'Agent 运行时默认'
+    }
+  }
+
+  const modelDescriptor = installation?.snapshot?.models.find(
+    (model) => model.id === modelSelection.modelId
+  ) ?? null
+  const model = modelDescriptor?.displayName.trim() || modelSelection.modelId
+  const effortKey = configuration.adapterKind === 'claude-code-cli'
+    ? 'effort'
+    : 'reasoning_effort'
+  const effortDescriptor = modelDescriptor?.options.find((option) => option.key === effortKey) ?? null
+  const rawEffort = modelSelection.options[effortKey]
+  const effort = effortDescriptor || typeof rawEffort === 'string'
+    ? {
+        label: configuration.adapterKind === 'claude-code-cli'
+          ? '思考强度' as const
+          : '推理强度' as const,
+        value: typeof rawEffort === 'string' && rawEffort
+          ? runtimeEffortValueLabel(rawEffort, effortDescriptor?.values ?? [])
+          : '跟随模型默认值'
+      }
+    : null
+
+  return {
+    model,
+    effort,
+    strategy: '固定模型',
+    summary: effort ? `${model} · ${effort.label} ${effort.value}` : model
+  }
+}
+
+function runtimeEffortValueLabel(
+  value: string,
+  choices: Array<{ value: string; label: string }>
+): string {
+  const commonLabels: Record<string, string> = {
+    minimal: '最低',
+    low: '低',
+    medium: '中',
+    high: '高',
+    xhigh: '极高',
+    max: '最高'
+  }
+  return commonLabels[value] ?? choices.find((choice) => choice.value === value)?.label ?? value
 }
 
 export function executionDrawerTitle(

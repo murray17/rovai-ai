@@ -1079,11 +1079,12 @@ button:disabled { opacity: 0.52; cursor: default; }
 .timeline-pane, .activity-pane { min-width: 0; min-height: 0; overflow: hidden; }
 .timeline-pane { display: flex; grid-column: 1; grid-row: 1; flex-direction: column; background: var(--conversation-surface); }
 .run-pulse { display: grid; min-height: 54px; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; padding: 8px 20px; border-top: 2px solid var(--line-strong); color: var(--muted); background: var(--surface); font-size: 11px; }
-.run-pulse-heading { display: flex; min-width: 0; align-items: center; gap: 7px; white-space: nowrap; }
-.run-pulse-mark { display: grid; width: 16px; height: 16px; place-items: center; border-radius: 50%; background: var(--brand-soft); }
-.run-pulse-mark i { width: 6px; height: 6px; border-radius: 50%; background: var(--brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 18%, transparent); }
+.run-pulse-heading { display: grid; min-width: 0; grid-template-rows: auto auto; align-items: center; justify-content: start; gap: 1px; white-space: nowrap; }
+.run-pulse-title { display: flex; min-width: 0; align-items: center; gap: 7px; }
+.run-pulse-mark { display: grid; width: 18px; height: 16px; place-items: center; color: var(--brand); }
+.run-pulse-mark svg { width: 18px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .run-pulse-heading strong { color: var(--brand-ink); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
-.run-pulse-count { color: var(--faint); font: 500 9.5px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.run-pulse-count { margin-left: 25px; color: var(--faint); font: 500 9.5px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .run-pulse-list { display: flex; min-width: 0; gap: 5px; margin: 0; overflow-x: auto; padding: 0; list-style: none; scrollbar-width: thin; }
 .run-pulse-list > li { min-width: 0; flex: 0 0 auto; }
 .run-pulse-chip { display: grid; width: 100%; min-width: 132px; max-width: 196px; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: var(--surface-raised); text-align: left; cursor: pointer; }
@@ -1091,7 +1092,7 @@ button:disabled { opacity: 0.52; cursor: default; }
 .run-pulse-chip.is-selected { border-color: var(--brand); background: var(--brand-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand) 8%, transparent); }
 .run-pulse-chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .run-pulse-chip .member-avatar { --member-avatar-size: 24px; }
-.run-pulse-chip-copy { display: grid; min-width: 0; gap: 1px; }
+.run-pulse-chip-copy { display: flex; min-width: 0; min-height: 24px; align-items: center; }
 .run-pulse-chip-copy strong, .run-pulse-chip-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .run-pulse-chip-copy strong { color: var(--ink); font-size: 11px; }
 .run-pulse-chip-copy small { color: var(--faint); font-size: 9px; }
@@ -1118,7 +1119,9 @@ button:disabled { opacity: 0.52; cursor: default; }
 .execution-drawer-header { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px 9px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 96%, var(--brand-soft)); }
 .execution-drawer-agent { display: flex; min-width: 0; align-items: center; gap: 8px; }
 .execution-drawer-agent > div { display: grid; min-width: 0; gap: 1px; }
+.execution-drawer-title-line { display: flex; min-width: 0; align-items: baseline; gap: 8px; }
 .execution-drawer-header h2 { overflow: hidden; margin: 0; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.execution-model-params { min-width: 0; overflow: hidden; color: var(--brand-ink); font: 600 9.5px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .execution-drawer-header p { overflow: hidden; margin: 0; color: var(--faint); font-size: 9.5px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
 .execution-drawer-header .quiet-button { flex: 0 0 auto; }
 .execution-drawer-body { min-height: 0; overflow: auto; padding: 12px 20px 18px; overscroll-behavior: contain; scroll-behavior: smooth; }
@@ -2315,6 +2318,17 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
 .camp-inspector-member-state { display: grid; min-width: 0; justify-items: end; gap: 3px; }
 .camp-inspector-member-state strong { color: var(--success); font-size: 8.5px; }
 .camp-inspector-member-state > small { max-width: 105px; overflow: hidden; color: var(--faint); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.camp-inspector-runtime-toggle { display: inline-flex; max-width: 126px; align-items: center; justify-content: flex-end; gap: 3px; padding: 0; border: 0; color: var(--faint); background: transparent; font-size: 8px; cursor: pointer; }
+.camp-inspector-runtime-toggle > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.camp-inspector-runtime-toggle svg { width: 10px; height: 10px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; transition: transform 120ms ease; }
+.camp-inspector-runtime-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+.camp-inspector-runtime-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.camp-inspector-runtime-toggle.runtime-ready { color: var(--success); }
+.camp-inspector-runtime-toggle.runtime-attention { color: var(--attention); }
+.camp-inspector-runtime-detail { display: grid; min-width: 0; grid-column: 2 / -1; gap: 3px; width: 100%; margin: -2px 0 2px; padding: 6px 8px; border-left: 1px solid var(--brand); background: var(--surface-subtle); }
+.camp-inspector-runtime-detail > div { display: grid; min-width: 0; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; }
+.camp-inspector-runtime-detail dt { color: var(--faint); font-size: 8.5px; }
+.camp-inspector-runtime-detail dd { min-width: 0; overflow: hidden; margin: 0; font: 600 8.7px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .camp-inspector-member-state.is-away strong { color: var(--faint); }
 .camp-inspector-member-state .runtime-ready { color: var(--success); }
 .camp-inspector-member-state .runtime-attention { color: var(--attention); }
