@@ -41,14 +41,18 @@ React 长历史成本，但不等同于应用内点击打开。若继续优化�
 - 首屏投影保留 Camp、成员、最近消息、活跃/最近运行摘要、pending Approval 与明确 coverage，移除
   Context Manifest、Action history 和 terminal Evidence 预取；
 - Renderer 在 meaningful paint 后再恢复项目导航、刷新侧栏，并保持 selection/high-water fence；
+- Renderer 在 cache miss 时保留当前工作区，投影返回后原子提交目标 Camp/项目；普通预算内不显示 loading，
+  超过 400 ms 仅在目标侧栏行显示非阻塞进度，失败与过期响应不撤销当前 surface；
 - 日志以匿名 trace 记录 Renderer、Main、Core 阶段和 payload/count，不记录用户内容或稳定实体 ID；
 - 会话顶部提供“加载更早消息”，prepend 后保持阅读位置；Run Evidence 继续按用户展开读取。
 
 ## 完成证据
 
 - Rust：library 453 passed；`rovai-core` binary 73 passed / 3 manual smoke ignored；最终窗口定向回归通过；
-- Renderer/Node：Vitest 51 files / 339 tests，Node 179 tests；TypeScript typecheck 通过；
+- Renderer/Node：Vitest 51 files / 340 tests，Node 179 tests；TypeScript typecheck 通过；
 - 质量门：Rust format、strict Clippy、Impeccable detector、1200 px 与约 1100 px 桌面 UI 验收通过；
+- 打开交互：隔离安装包暂停 Core 后，cache miss 的原工作区持续可见；400 ms 后只有目标侧栏行显示
+  进度，恢复 Core 后原子切换；快速 A→B 只提交最新目标，整个过程不出现整页打开占位；
 - 文档：`docs:test`、`docs:check`、diff-aware `docs:check:ci` 与 ADR generate check 通过；
 - 交付：arm64 Release App 构建、ad-hoc codesign、隔离 `userData` smoke 与
   `/Applications/Rovai AI.app` 提升通过，真实日常 `userData` 未迁移或覆盖。
@@ -57,7 +61,7 @@ React 长历史成本，但不等同于应用内点击打开。若继续优化�
 
 - 不改变 Agent CLI、Runtime tool、模型上下文或 `camps.snapshot` 纯读语义；
 - 不改变 Default Lead validity、发送准入、Draft、Message Delivery 或 Runtime activity 事实；
-- 不重设计 Camp 视觉世界，不用扩大缓存或隐藏 loading 文案替代真实性能改善；
+- 不重设计 Camp 视觉世界，不用扩大缓存或只改写 loading 文案替代真实性能改善；
 - 本版本不把 Renderer 改成 event-sourced projection，也不新增第二个持久数据库。
 
 ## 跨版本文档影响

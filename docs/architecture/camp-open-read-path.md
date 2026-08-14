@@ -15,7 +15,7 @@ last_updated: 2026-08-14
 
 | Component | Responsibility |
 | --- | --- |
-| Renderer enter controller | 生成 trace/command ID、selection generation 与 high-water fence；先 commit 轻量投影并完成 meaningful paint，再恢复项目导航、确认可见来源和刷新侧栏 |
+| Renderer enter controller | 生成 trace/command ID、selection generation 与 high-water fence；缓存未命中时保留当前 surface，投影到达后原子 commit 目标 Camp/项目并完成 meaningful paint，再恢复项目导航、确认可见来源和刷新侧栏 |
 | Electron Main bridge | allowlist typed method、记录不含内容的 IPC roundtrip/response bytes；不组装或缓存领域投影 |
 | Core Camp enter module | 在一次串行 request 中顺序执行 Default Lead reconcile 与 post-reconcile read；rejected 时 fail closed |
 | Core Camp open read model | 在单一 SQLite transaction 中组装有界首屏投影、coverage 与 high-water；不加载 Context Manifest/Action history |
@@ -28,10 +28,11 @@ last_updated: 2026-08-14
 ```text
 click / startup / notification target
   -> Renderer camps.enter(traceId, commandId, campId)
+  -> cache miss keeps the current surface; no target route is committed yet
   -> Core serialized reconcile
   -> Core bounded read transaction + throughGlobalSequence
   -> Main parses typed response
-  -> Renderer commits recent Camp surface
+  -> Renderer atomically commits target Camp ID + project + recent Camp surface
   -> next meaningful paint
   -> background project restore / campViewed / navigation refresh
 
@@ -41,12 +42,14 @@ Core event invalidates active Camp
   -> preserve explicitly loaded earlier message pages
 ```
 
-缓存只保存最近的有界投影。cache hit 可立即恢复阅读面，但仍由 high-water refresh 验证；schema mismatch、
-Core restart、Camp mismatch 或 sequence regression 使缓存失效。Renderer 不通过 event replay 补齐权威对象。
+缓存只保存最近的有界投影。cache hit 可立即恢复阅读面，但仍由 high-water refresh 验证；cache miss 不把
+当前 Snapshot 清空，也不提前切换 route。普通请求在 400 ms 内不呈现 loading，超过预算只在目标导航行
+显示非阻塞进度。schema mismatch、Core restart、Camp mismatch 或 sequence regression 使缓存失效。
+Renderer 不通过 event replay 补齐权威对象。
 
 ## Failure boundaries
 
-- enter reconcile/read 失败：保留原 surface 或显示可重试打开状态，不展示未 reconcile 的新 Camp；
+- enter reconcile/read 失败：保留原 surface 并显示非阻塞错误，不展示未 reconcile 的新 Camp；
 - 首屏后项目导航恢复失败：已打开 Camp 保持可用，在导航 surface 报错，不回退快速对话；
 - earlier page 失败：保留已加载消息和滚动位置，原位允许重试；
 - detail 失败：只影响对应 Drawer/Inspector，不覆盖会话与 Draft；

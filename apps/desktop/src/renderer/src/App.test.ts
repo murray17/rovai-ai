@@ -18,9 +18,11 @@ import type {
 } from '@contracts'
 import {
   AppHeader,
+  CAMP_OPEN_FEEDBACK_DELAY_MS,
   ControlledShutdownOverlay,
   WindowDragStrip,
   allNavigationCamps,
+  campActivationPreview,
   campActivationStateForCreation,
   campViewIsVisibleForReadAcknowledgement,
   campInspectorVisibleFromStoredValue,
@@ -161,6 +163,20 @@ function canonicalActivity(
 }
 
 describe('Camp snapshot cache', () => {
+  it('retains the current workspace until an uncached Camp projection is ready', () => {
+    const snapshot = (campId: string): CampSnapshot => ({
+      camp: { id: campId }
+    } as CampSnapshot)
+    const current = snapshot('camp-current')
+    const cachedTarget = snapshot('camp-target')
+
+    expect(campActivationPreview(current, 'camp-current', null, 'camp-target')).toBeNull()
+    expect(campActivationPreview(current, 'camp-current', cachedTarget, 'camp-target'))
+      .toBe(cachedTarget)
+    expect(campActivationPreview(current, 'camp-current', null, 'camp-current')).toBe(current)
+    expect(CAMP_OPEN_FEEDBACK_DELAY_MS).toBe(400)
+  })
+
   it('keeps a bounded least-recently-used Camp snapshot cache', () => {
     const snapshot = (campId: string): CampSnapshot => ({
       camp: { id: campId }
@@ -1524,6 +1540,7 @@ describe('task event projections', () => {
         }]
       },
       activeCampId: 'plain',
+      openingCampId: 'unread',
       onNewConversation: () => undefined,
       onMembers: () => undefined,
       onMemory: () => undefined,
@@ -1542,9 +1559,10 @@ describe('task event projections', () => {
     expect(markup).not.toContain('camp-marker-none')
     expect(markup).toContain('camp-marker-unread_completed')
     expect(markup).toContain('camp-marker-loading')
-    expect(markup).toContain('aria-label="unread 对话，有新回复"')
+    expect(markup).toContain('aria-busy="true" aria-label="unread 对话，有新回复，正在打开"')
     expect(markup).toContain('title="unread 对话 · 有新回复"')
     expect(markup).toContain('<span class="sr-only">有新回复</span>')
+    expect(markup).toContain('class="camp-loading-spinner camp-open-spinner" role="img" aria-label="正在打开对话"')
     expect(markup).toContain('role="img" aria-label="正在运行"')
     expect(markup.match(/class="camp-draft-badge">草稿/g)).toHaveLength(3)
     expect(markup).toContain('aria-expanded="true" aria-controls="camp-group-content-directory--repo"')

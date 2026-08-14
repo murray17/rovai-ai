@@ -843,10 +843,6 @@ button:disabled { opacity: 0.52; cursor: default; }
 .health-item span { margin-top: 3px; overflow-wrap: anywhere; color: var(--muted); font-size: 11px; }
 
 .empty-inline { margin: 12px; padding: 20px 16px; border: 1px dashed var(--line-strong); border-radius: 8px; color: var(--muted); font-size: 12px; line-height: 1.55; text-align: center; }
-.empty-state { max-width: 700px; margin-top: 28px; padding: 64px 28px; border: 1px dashed var(--line-strong); border-radius: 12px; background: color-mix(in srgb, var(--surface) 76%, transparent); text-align: center; }
-.empty-state > span { display: inline-grid; width: 44px; height: 44px; place-items: center; border-radius: 50%; color: var(--brand); background: var(--brand-soft); font-size: 22px; }
-.empty-state h2 { margin: 16px 0 8px; font: 650 21px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif; }
-.empty-state p { max-width: 460px; margin: 0 auto 18px; color: var(--muted); font-size: 13px; line-height: 1.55; }
 
 /* User-governed long-term Memory */
 .memory-library { display: grid; gap: 16px; padding-bottom: 24px; }

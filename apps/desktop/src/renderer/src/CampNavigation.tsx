@@ -177,6 +177,7 @@ export function CampNavigation({
   state,
   navigation,
   activeCampId,
+  openingCampId = null,
   currentProjectKey = 'quick-chat',
   shellOnlyProjectPath = null,
   creatingConversation = false,
@@ -207,6 +208,7 @@ export function CampNavigation({
   state: 'loading' | 'ready' | 'error'
   navigation: NavigationSnapshot | null
   activeCampId: string | null
+  openingCampId?: string | null
   currentProjectKey?: string
   shellOnlyProjectPath?: string | null
   creatingConversation?: boolean
@@ -580,6 +582,7 @@ export function CampNavigation({
                 key={camp.id}
                 camp={camp}
                 active={camp.id === activeCampId}
+                opening={camp.id === openingCampId}
                 pinned
                 onTogglePin={() => void togglePin('camp', camp.id, camp)}
                 onCopyCampId={() => void copyCampId(camp)}
@@ -606,6 +609,7 @@ export function CampNavigation({
                 projectExpanded={!collapsedProjectGroups.has(groupKey)}
                 loadingMore={loadingGroups.has(groupKey)}
                 activeCampId={activeCampId}
+                openingCampId={openingCampId}
                 currentProject={currentProjectKey === project.projectKey}
                 createDisabled={creatingConversation}
                 pinned
@@ -649,6 +653,7 @@ export function CampNavigation({
                 projectExpanded={!collapsedProjectGroups.has(groupKey)}
                 loadingMore={loadingGroups.has(groupKey)}
                 activeCampId={activeCampId}
+                openingCampId={openingCampId}
                 currentProject={currentProjectKey === project.projectKey}
                 createDisabled={creatingConversation}
                 pinned={pins.some((pin) => pin.kind === 'project' && pin.targetKey === project.projectKey)}
@@ -679,6 +684,7 @@ export function CampNavigation({
             projectExpanded={!collapsedProjectGroups.has('quick-chat')}
             loadingMore={loadingGroups.has('quick-chat')}
             activeCampId={activeCampId}
+            openingCampId={openingCampId}
             currentProject={currentProjectKey === 'quick-chat'}
             createDisabled={creatingConversation}
             onShowMore={() => void showMore('quick-chat', null, quickChatRecentCamps, quickChatTotalCount)}
@@ -956,6 +962,7 @@ function CampGroup({
   projectExpanded,
   loadingMore,
   activeCampId,
+  openingCampId,
   currentProject,
   createDisabled,
   pinned = false,
@@ -980,6 +987,7 @@ function CampGroup({
   projectExpanded: boolean
   loadingMore: boolean
   activeCampId: string | null
+  openingCampId: string | null
   currentProject: boolean
   createDisabled: boolean
   pinned?: boolean
@@ -1059,6 +1067,7 @@ function CampGroup({
             key={camp.id}
             camp={camp}
             active={camp.id === activeCampId}
+            opening={camp.id === openingCampId}
             pinned={false}
             onTogglePin={() => onToggleCampPin(camp)}
             onCopyCampId={() => onCopyCampId(camp)}
@@ -1081,6 +1090,7 @@ function CampGroup({
 function CampRow({
   camp,
   active,
+  opening,
   pinned,
   onTogglePin,
   onCopyCampId,
@@ -1089,6 +1099,7 @@ function CampRow({
 }: {
   camp: NavigationCampItem
   active: boolean
+  opening: boolean
   pinned: boolean
   onTogglePin(): void
   onCopyCampId(): void
@@ -1128,12 +1139,13 @@ function CampRow({
     onSelect: () => onAction('delete', camp)
   })
   return (
-    <div className={`camp-nav-row ${active ? 'selected' : ''}`}>
+    <div className={`camp-nav-row${active ? ' selected' : ''}${opening ? ' opening' : ''}`}>
       <button
         className="camp-nav-open"
         type="button"
         aria-current={active ? 'page' : undefined}
-        aria-label={hasNewReply ? `${title}，有新回复` : title}
+        aria-busy={opening || undefined}
+        aria-label={`${hasNewReply ? `${title}，有新回复` : title}${opening ? '，正在打开' : ''}`}
         title={hasNewReply ? `${title} · 有新回复` : title}
         onClick={() => onCamp(camp)}
       >
@@ -1143,7 +1155,9 @@ function CampRow({
         <span className="truncate">{title}</span>
         {hasNewReply && <span className="sr-only">有新回复</span>}
         {camp.activationState === 'pending' && <span className="camp-draft-badge">草稿</span>}
-        {camp.marker === 'loading' && <span className="camp-loading-spinner camp-marker-loading" role="img" aria-label="正在运行" />}
+        {opening
+          ? <span className="camp-loading-spinner camp-open-spinner" role="img" aria-label="正在打开对话" />
+          : camp.marker === 'loading' && <span className="camp-loading-spinner camp-marker-loading" role="img" aria-label="正在运行" />}
       </button>
       <SidebarActionMenu
         target={`camp:${camp.id}`}

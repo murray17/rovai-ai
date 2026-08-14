@@ -147,6 +147,7 @@ type CampSurfaceSnapshot = CampSnapshot & {
 }
 
 const CAMP_SNAPSHOT_CACHE_LIMIT = 5
+export const CAMP_OPEN_FEEDBACK_DELAY_MS = 400
 
 export function rememberCampSnapshot(
   cache: Map<string, CampSurfaceSnapshot>,
@@ -175,6 +176,18 @@ export function recentCampSnapshot(
   cache.delete(campId)
   cache.set(campId, snapshot)
   return snapshot
+}
+
+export function campActivationPreview<T extends CampSnapshot>(
+  currentSnapshot: T | null,
+  activeCampId: string | null,
+  cachedSnapshot: T | null,
+  targetCampId: string
+): T | null {
+  if (activeCampId === targetCampId && currentSnapshot?.camp.id === targetCampId) {
+    return currentSnapshot
+  }
+  return cachedSnapshot?.camp.id === targetCampId ? cachedSnapshot : null
 }
 
 export function campOpenProjectionAsSnapshot(
@@ -400,10 +413,12 @@ export function App(): React.JSX.Element {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
+  const [openingCampId, setOpeningCampId] = useState<string | null>(null)
   const [runtimeRecovery, setRuntimeRecovery] = useState<CampRuntimeRecovery | null>(null)
   const [liveRuntimeEvents, setLiveRuntimeEvents] = useState<LiveRuntimeEvent[]>([])
   const campEventSequenceMarker = useRef(0)
   const campSelectionGeneration = useRef(0)
+  const campOpenFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const campSnapshotCache = useRef(new Map<string, CampSurfaceSnapshot>())
   const campSnapshotRef = useRef<CampSurfaceSnapshot | null>(null)
   const activeCampIdRef = useRef<string | null>(null)
@@ -442,6 +457,19 @@ export function App(): React.JSX.Element {
     setCampSnapshotState(snapshot)
   }, [])
 
+  const clearCampOpenFeedback = useCallback((): void => {
+    if (campOpenFeedbackTimer.current !== null) {
+      clearTimeout(campOpenFeedbackTimer.current)
+      campOpenFeedbackTimer.current = null
+    }
+    setOpeningCampId(null)
+  }, [])
+
+  const cancelPendingCampActivation = useCallback((): void => {
+    campSelectionGeneration.current += 1
+    clearCampOpenFeedback()
+  }, [clearCampOpenFeedback])
+
   const requestCampProjection = useCallback(async (
     campId: string,
     mode: 'enter' | 'open'
@@ -478,6 +506,12 @@ export function App(): React.JSX.Element {
 
   useEffect(() => () => {
     notificationPresentationRef.current?.cancel()
+  }, [])
+
+  useEffect(() => () => {
+    if (campOpenFeedbackTimer.current !== null) {
+      clearTimeout(campOpenFeedbackTimer.current)
+    }
   }, [])
 
   useEffect(() => {
@@ -696,35 +730,54 @@ export function App(): React.JSX.Element {
     } = {}
   ): Promise<boolean> => {
     const selectionGeneration = ++campSelectionGeneration.current
-    if (!options.preserveNotificationFocus) {
-      setNotificationFocus(null)
-      setNotificationAnchor(null)
-    }
-    if (activeCampIdRef.current !== campId) {
-      const cachedSnapshot = recentCampSnapshot(campSnapshotCache.current, campId)
-      setCampSnapshot(cachedSnapshot)
-      campEventSequenceMarker.current = cachedSnapshot?.throughGlobalSequence ?? 0
-    }
-    setActiveCampId(campId)
-    lastMainView.current = 'camp'
-    setView('camp')
-    try {
-      const { snapshot, traceId, startedAt } = await requestCampProjection(
-        campId,
-        options.reconcileDefaultLead === false ? 'open' : 'enter'
-      )
-      if (selectionGeneration !== campSelectionGeneration.current) return false
+    clearCampOpenFeedback()
+    const cachedSnapshot = activeCampIdRef.current === campId
+      ? null
+      : recentCampSnapshot(campSnapshotCache.current, campId)
+    const previewSnapshot = campActivationPreview(
+      campSnapshotRef.current,
+      activeCampIdRef.current,
+      cachedSnapshot,
+      campId
+    )
+    const commitCampSurface = (snapshot: CampSurfaceSnapshot): void => {
       const snapshotProject = currentProjectForCamp(snapshot.camp)
       setCurrentProject(snapshotProject)
       persistCurrentProject(snapshotProject)
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
+      if (!options.preserveNotificationFocus) {
+        setNotificationFocus(null)
+        setNotificationAnchor(null)
+      }
       if (options.anchoredMessages && options.anchoredMessages.length > 0) {
         setNotificationAnchor({
           campId,
           messages: options.anchoredMessages
         })
       }
+      setActiveCampId(campId)
       setCampSnapshot(snapshot)
+      lastMainView.current = 'camp'
+      setView('camp')
+    }
+    if (previewSnapshot) {
+      commitCampSurface(previewSnapshot)
+    } else {
+      campOpenFeedbackTimer.current = setTimeout(() => {
+        campOpenFeedbackTimer.current = null
+        if (selectionGeneration === campSelectionGeneration.current) {
+          setOpeningCampId(campId)
+        }
+      }, CAMP_OPEN_FEEDBACK_DELAY_MS)
+    }
+    try {
+      const { snapshot, traceId, startedAt } = await requestCampProjection(
+        campId,
+        options.reconcileDefaultLead === false ? 'open' : 'enter'
+      )
+      if (selectionGeneration !== campSelectionGeneration.current) return false
+      clearCampOpenFeedback()
+      commitCampSurface(snapshot)
       await afterNextPaint()
       if (selectionGeneration !== campSelectionGeneration.current) return false
       console.info(
@@ -750,6 +803,7 @@ export function App(): React.JSX.Element {
       return true
     } catch (nextError) {
       if (selectionGeneration === campSelectionGeneration.current) {
+        clearCampOpenFeedback()
         if (options.suppressErrors) {
           setActiveCampId(null)
           setCampSnapshot(null)
@@ -761,7 +815,7 @@ export function App(): React.JSX.Element {
       }
       return false
     }
-  }, [loadNavigation, requestCampProjection, restoreNavigationProject, setCampSnapshot])
+  }, [clearCampOpenFeedback, loadNavigation, requestCampProjection, restoreNavigationProject, setCampSnapshot])
 
   const refreshActiveCampSnapshot = useCallback(async (campId: string): Promise<void> => {
     const { snapshot } = await requestCampProjection(campId, 'open')
@@ -950,7 +1004,7 @@ export function App(): React.JSX.Element {
     let cancelled = false
 
     const showQuickChat = (): void => {
-      campSelectionGeneration.current += 1
+      cancelPendingCampActivation()
       setActiveCampId(null)
       setCampSnapshot(null)
       setNotificationFocus(null)
@@ -963,7 +1017,7 @@ export function App(): React.JSX.Element {
       if (target.kind === 'quick_chat') {
         showQuickChat()
       } else if (target.kind === 'memory') {
-        campSelectionGeneration.current += 1
+        cancelPendingCampActivation()
         setActiveCampId(null)
         setCampSnapshot(null)
         setMemoryFocusId(null)
@@ -972,7 +1026,7 @@ export function App(): React.JSX.Element {
       } else if (target.kind === 'members') {
         const nextAgents = await loadAgents()
         if (cancelled) return
-        campSelectionGeneration.current += 1
+        cancelPendingCampActivation()
         setActiveCampId(null)
         setCampSnapshot(null)
         setSelectedMemberId(restoredMemberId(target.agentId, nextAgents))
@@ -1008,7 +1062,7 @@ export function App(): React.JSX.Element {
         }
         if (cancelled) return
         const { snapshot, traceId, startedAt } = opened
-        campSelectionGeneration.current += 1
+        cancelPendingCampActivation()
         const selectionGeneration = campSelectionGeneration.current
         campEventSequenceMarker.current = snapshot.throughGlobalSequence
         const snapshotProject = currentProjectForCamp(snapshot.camp)
@@ -1070,6 +1124,7 @@ export function App(): React.JSX.Element {
       window.clearTimeout(overviewTimer)
     }
   }, [
+    cancelPendingCampActivation,
     loadAgents,
     loadNavigation,
     loadOverview,
@@ -1446,6 +1501,7 @@ export function App(): React.JSX.Element {
 
   const chooseView = (nextView: View): void => {
     const commit = (): void => {
+      if (nextView !== 'camp') cancelPendingCampActivation()
       if (nextView === 'members' && viewRef.current !== 'members') {
         setMemberReturnTarget(memberReturnTargetForSource(
           viewRef.current,
@@ -1529,7 +1585,7 @@ export function App(): React.JSX.Element {
         await activateCamp(memberReturnTarget.campId, { suppressErrors: true })
         return
       }
-      campSelectionGeneration.current += 1
+      cancelPendingCampActivation()
       setActiveCampId(null)
       setCampSnapshot(null)
       setNotificationFocus(null)
@@ -1540,15 +1596,13 @@ export function App(): React.JSX.Element {
 
   const beginNewConversation = (): void => {
     void requestMemberTransition(async () => {
+      cancelPendingCampActivation()
       await requestNewConversation(currentProjectWorkspace(displayNavigation, currentProject))
     })
   }
 
   const chooseCamp = (camp: NavigationCampItem): void => {
     void requestMemberTransition(() => {
-      chooseCurrentProject(currentProjectForCamp(camp))
-      lastMainView.current = 'camp'
-      setNotificationFocus(null)
       return activateCamp(camp.id, {
         reconcileDefaultLead: camp.activationState !== 'pending'
       }).then(() => undefined)
@@ -1761,7 +1815,7 @@ export function App(): React.JSX.Element {
         persistCurrentProject(fallback)
       }
       if (removingActiveCamp) {
-        campSelectionGeneration.current += 1
+        cancelPendingCampActivation()
         setActiveCampId(null)
         setCampSnapshot(null)
         setNotificationFocus(null)
@@ -1820,7 +1874,7 @@ export function App(): React.JSX.Element {
       }
       campSnapshotCache.current.delete(camp.id)
       if (activeCampId === camp.id) {
-        campSelectionGeneration.current += 1
+        cancelPendingCampActivation()
         setActiveCampId(null)
         setCampSnapshot(null)
         lastMainView.current = 'compose'
@@ -1965,7 +2019,7 @@ export function App(): React.JSX.Element {
       throw new Error(commandFailureMessage(result))
     }
     if (result.status !== 'rejected' && activeCampIdRef.current === draft.campId) {
-      campSelectionGeneration.current += 1
+      cancelPendingCampActivation()
       setActiveCampId(null)
       setCampSnapshot(null)
       if (lastMainView.current === 'camp') lastMainView.current = 'compose'
@@ -2169,6 +2223,7 @@ export function App(): React.JSX.Element {
         state={startupGateVisible ? 'loading' : state}
         navigation={displayNavigation}
         activeCampId={activeCampId}
+        openingCampId={openingCampId}
         currentProjectKey={currentProjectKey}
         shellOnlyProjectPath={shellOnlyCurrentProjectPath}
         creatingConversation={busy === 'create-camp'}
@@ -2199,14 +2254,18 @@ export function App(): React.JSX.Element {
         onSettingsSectionChange={chooseSettingsSection}
         onSettingsBack={closeSettings}
         onOpenProject={() => void openProject()}
-        onSelectProject={(project) => chooseCurrentProject(
-          project
-            ? { kind: 'directory', projectPath: project.projectPath }
-            : { kind: 'quick_chat' },
-          project ? { name: project.name, projectPath: project.projectPath } : null
-        )}
+        onSelectProject={(project) => {
+          cancelPendingCampActivation()
+          chooseCurrentProject(
+            project
+              ? { kind: 'directory', projectPath: project.projectPath }
+              : { kind: 'quick_chat' },
+            project ? { name: project.name, projectPath: project.projectPath } : null
+          )
+        }}
         onCreateInProject={(project) => {
           void requestMemberTransition(async () => {
+            cancelPendingCampActivation()
             await requestNewConversation(project
               ? { name: project.name, projectPath: project.projectPath }
               : null)
@@ -2291,10 +2350,6 @@ export function App(): React.JSX.Element {
             onConfigureRuntime={configureMemberRuntime}
             onDismissRuntimeRecovery={() => setRuntimeRecovery(null)}
           />
-        )}
-
-        {!startupGateVisible && view === 'camp' && (!activeCampId || visibleCampSnapshot?.camp.id !== activeCampId) && (
-          <EmptyState title="正在打开对话" body="Rovai AI 正在读取最近消息与当前运行状态。" />
         )}
 
         {!startupGateVisible && view === 'compose' && (
@@ -2581,10 +2636,6 @@ function appearancePreferenceLabel(preference: ThemePreference): string {
   if (preference === 'system') return '跟随系统'
   if (preference === 'day') return '日间'
   return '夜间'
-}
-
-function EmptyState({ title, body, action, onAction }: { title: string; body: string; action?: string; onAction?(): void }): React.JSX.Element {
-  return <section className="empty-state"><span>⌁</span><h2>{title}</h2><p>{body}</p>{action && onAction && <button className="primary-button" onClick={onAction}>{action}</button>}</section>
 }
 
 export function campSnapshotWithAnchoredMessages(
