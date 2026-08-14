@@ -28,6 +28,14 @@ last_updated: 2026-08-14
 - [x] 运行定向/完整 Core、文档治理、格式、syntax 与 diff 门禁；
 - [x] 复查只包含 v0.76 范围并交付。
 
+## Checkpoint 3：普通会话可见即已读
+
+- [x] 会话区只在应用前台和“会话”视图采集当前视口内的 message/turn/pending approval 精确来源 ID；
+- [x] Core 新增有观察边界的幂等可见来源确认，拒绝跨 Camp、屏幕外、已 Clear 与边界后新注意力；
+- [x] 确认成功后立即刷新 Inbox 和全局角标，失败保持未读并有界重试；
+- [x] Current User Attention/Notification Episode v4、Architecture、UI 与文档路由同步；
+- [x] TypeScript、Renderer/Core 定向测试、macOS 打包和真实 Notification UI acceptance 通过。
+
 ## 当前证据与缺口
 
 - `cargo test -p rovai-core`：433 个 library tests、11 个 CLI tests、73 个 Core binary tests 通过，

@@ -49,7 +49,8 @@ import {
   type CampMessageSendReceipt,
   type CampInspectorTab,
   type CampRuntimeRecovery,
-  type NotificationFocusTarget
+  type NotificationFocusTarget,
+  type VisibleNotificationSources
 } from './CampWorkspace'
 import {
   CampNavigation,
@@ -319,6 +320,7 @@ export function App(): React.JSX.Element {
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0)
   const [notificationRefreshSignal, setNotificationRefreshSignal] = useState(0)
   const [notificationFocus, setNotificationFocus] = useState<NotificationFocusTarget | null>(null)
+  const [visibleNotificationSources, setVisibleNotificationSources] = useState<VisibleNotificationSources | null>(null)
   const [notificationAnchor, setNotificationAnchor] = useState<{
     campId: string
     messages: readonly CampMessageView[]
@@ -1460,7 +1462,8 @@ export function App(): React.JSX.Element {
   }, [])
 
   const completeNotificationNavigation = useCallback((requestId: number): void => {
-    notificationPresentationRef.current?.complete(requestId)
+    if (!notificationPresentationRef.current?.complete(requestId)) return
+    setNotificationFocus((current) => current?.requestId === requestId ? null : current)
   }, [])
 
   const cancelNotificationNavigation = useCallback((): void => {
@@ -2060,6 +2063,7 @@ export function App(): React.JSX.Element {
             onOpenInspector={openCampInspector}
             notificationFocus={notificationFocus}
             onNotificationFocusPresented={completeNotificationNavigation}
+            onVisibleNotificationSources={setVisibleNotificationSources}
             runtimeRecovery={runtimeRecovery?.campId === activeCampId ? runtimeRecovery : null}
             onConfigureRuntime={configureMemberRuntime}
             onDismissRuntimeRecovery={() => setRuntimeRecovery(null)}
@@ -2162,13 +2166,18 @@ export function App(): React.JSX.Element {
         ref={notificationCenterRef}
         enabled={!startupGateVisible}
         activeCampId={activeCampId}
-        activeCampVisible={view === 'camp' && campSnapshot?.camp.id === activeCampId}
+        activeCampVisible={view === 'camp'
+          && campSnapshot?.camp.id === activeCampId
+          && !newConversationOpen
+          && !shuttingDown}
+        navigationActive={notificationFocus !== null}
         refreshSignal={notificationRefreshSignal}
         onUnreadCountChange={setNotificationUnreadCount}
         onNavigate={navigateFromNotification}
         onPresentNavigation={presentNotificationNavigation}
         onCancelNavigation={cancelNotificationNavigation}
         onRefreshVisibleCamp={refreshVisibleNotificationCamp}
+        visibleSources={visibleNotificationSources}
       />
       {shuttingDown && <ControlledShutdownOverlay />}
     </div>

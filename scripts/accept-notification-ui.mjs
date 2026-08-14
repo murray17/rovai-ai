@@ -137,6 +137,53 @@ try {
     'An Episode admitted while heads-up was disabled still opened a heads-up')
   await setPrimaryHeadsUpPreference(dayApp.cdp, true)
 
+  await insertMessageMention(
+    'message-mention-ordinary-open',
+    '直接进入会话后，这条可见消息应自动已读。'
+  )
+  await assertNotificationBadge(dayApp.cdp, 2)
+  const openedCampWithoutNotificationAction = await evaluate(dayApp.cdp, `(() => {
+    const button = document.querySelector('.settings-sidebar-back')
+    button?.click()
+    return Boolean(button)
+  })()`)
+  assert(openedCampWithoutNotificationAction,
+    'Could not return to the fixture Camp without using a notification action')
+  await waitForSelector(dayApp.cdp, '.camp-workspace')
+  const refreshedCampThroughSidebar = await evaluate(dayApp.cdp, `(() => {
+    const button = document.querySelector('.camp-nav-open[aria-current="page"]')
+    button?.click()
+    return Boolean(button)
+  })()`)
+  assert(refreshedCampThroughSidebar,
+    'Could not refresh the active Camp through ordinary sidebar navigation')
+  await evaluate(dayApp.cdp, `(() => {
+    const button = [...document.querySelectorAll('.camp-conversation-view-controls button')]
+      .find((candidate) => candidate.textContent?.trim() === '会话')
+    if (button?.getAttribute('aria-pressed') !== 'true') button?.click()
+  })()`)
+  await waitForExpression(dayApp.cdp, `(() => {
+    const message = document.querySelector(
+      '[data-message-id="message-mention-ordinary-open"]'
+    )
+    const viewport = document.querySelector('.timeline-scroll')
+    if (!message || !viewport || viewport.hidden) return false
+    const messageRect = message.getBoundingClientRect()
+    const viewportRect = viewport.getBoundingClientRect()
+    return messageRect.bottom > viewportRect.top && messageRect.top < viewportRect.bottom
+  })()`)
+  await assertNotificationBadge(dayApp.cdp, 1)
+  const ordinaryOpenInbox = await request(dayApp.cdp, 'notifications.inbox', {
+    filter: 'all',
+    limit: 50
+  })
+  const ordinaryOpenEpisode = ordinaryOpenInbox.items.find(
+    (item) => item.mention?.messageId === 'message-mention-ordinary-open'
+  )
+  assert(ordinaryOpenEpisode?.unread === false
+      && ordinaryOpenEpisode.unacknowledgedMentionCount === 0,
+  `Ordinary Camp visibility did not acknowledge the exact Mention: ${JSON.stringify(ordinaryOpenInbox)}`)
+
   await closeApp(dayApp)
   dayApp = null
   await wait(500)
@@ -224,22 +271,22 @@ try {
   await openNotificationCenter(compactApp.cdp)
   await selectNotificationFilter(compactApp.cdp, '全部')
   await waitForExpression(compactApp.cdp,
-    `document.querySelectorAll('.notification-row').length === 7`)
-  await assertNotificationDrawer(compactApp.cdp, 7, 'compact reduced-motion', 3)
+    `document.querySelectorAll('.notification-row').length === 8`)
+  await assertNotificationDrawer(compactApp.cdp, 8, 'compact reduced-motion', 3)
   await clickButton(compactApp.cdp, '.notification-drawer-actions button', '全部已读')
   await waitForExpression(compactApp.cdp,
     `document.querySelector('.notification-drawer-header span')?.textContent === '0 项未读'`)
   await assertNotificationBadge(compactApp.cdp, 0)
 
   await emulateDesktopZoom(compactApp.cdp, 1040, 700, 2)
-  await assertNotificationDrawer(compactApp.cdp, 7, '200% zoom', 0)
+  await assertNotificationDrawer(compactApp.cdp, 8, '200% zoom', 0)
   await assertZoomedNotificationFunctionality(compactApp.cdp)
   await selectNotificationFilter(compactApp.cdp, '未读')
   await waitForExpression(compactApp.cdp,
     `document.querySelectorAll('.notification-row').length === 0`)
   await selectNotificationFilter(compactApp.cdp, '全部')
   await waitForExpression(compactApp.cdp,
-    `document.querySelectorAll('.notification-row').length === 7`)
+    `document.querySelectorAll('.notification-row').length === 8`)
   const zoomCapture = join(outputDir, 'notification-center-night-200-percent.png')
   await capture(compactApp.cdp, zoomCapture)
   await emulateDesktopZoom(compactApp.cdp, 1040, 700, 1)
@@ -280,6 +327,7 @@ try {
       unreadEpisodeBadgeAndAccessibleName: true,
       persistentDrawerAndFixedCopy: true,
       exactMentionAcknowledgementAndNavigation: true,
+      ordinaryCampVisibilityAcknowledgement: true,
       delayedFocusHandshake: true,
       boundedMarkAllAndRevisionBoundedClear: true,
       fiveNotificationPreferences: true,
@@ -920,6 +968,7 @@ async function connectCdp(url) {
   const socket = new WebSocket(url)
   const pending = new Map()
   let nextId = 1
+  let closed = false
   await new Promise((resolveOpen, rejectOpen) => {
     socket.addEventListener('open', resolveOpen, { once: true })
     socket.addEventListener('error', rejectOpen, { once: true })
@@ -934,12 +983,17 @@ async function connectCdp(url) {
     else request.resolve(message)
   })
   socket.addEventListener('close', () => {
+    closed = true
     for (const request of pending.values()) request.reject(new Error('CDP connection closed'))
     pending.clear()
   })
   return {
     send(method, params = {}) {
       return new Promise((resolveSend, rejectSend) => {
+        if (closed || socket.readyState !== WebSocket.OPEN) {
+          rejectSend(new Error('CDP connection is not open'))
+          return
+        }
         const id = nextId++
         pending.set(id, { resolve: resolveSend, reject: rejectSend })
         socket.send(JSON.stringify({ id, method, params }))

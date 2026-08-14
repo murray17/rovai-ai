@@ -367,6 +367,22 @@ export type NotificationFocusTarget = {
   approvalId?: string
   active?: boolean
 }
+export type VisibleNotificationSources = {
+  campId: string
+  snapshotSequence: number
+  messageIds: string[]
+  campTurnIds: string[]
+  approvalIds: string[]
+}
+
+type VisibilityRect = Pick<DOMRect, 'top' | 'right' | 'bottom' | 'left'>
+
+export function rectanglesOverlap(left: VisibilityRect, right: VisibilityRect): boolean {
+  return left.bottom > right.top
+    && left.top < right.bottom
+    && left.right > right.left
+    && left.left < right.right
+}
 export interface CampRuntimeRecoveryTarget {
   agentId: string
   blockerCode: string
@@ -752,6 +768,7 @@ export function CampWorkspace({
   onOpenInspector,
   notificationFocus = null,
   onNotificationFocusPresented,
+  onVisibleNotificationSources,
   runtimeRecovery = null,
   onConfigureRuntime,
   onDismissRuntimeRecovery
@@ -778,6 +795,7 @@ export function CampWorkspace({
   onOpenInspector?(tab: CampInspectorTab): void
   notificationFocus?: NotificationFocusTarget | null
   onNotificationFocusPresented?(requestId: number): void
+  onVisibleNotificationSources?(sources: VisibleNotificationSources): void
   runtimeRecovery?: CampRuntimeRecovery | null
   onConfigureRuntime?(agentId: string): void
   onDismissRuntimeRecovery?(): void
@@ -813,6 +831,7 @@ export function CampWorkspace({
     position: CampTimelineReadingPosition
   } | null>(null)
   const timelinePositionSaveTimer = useRef<number | null>(null)
+  const lastVisibleNotificationSources = useRef<string | null>(null)
   const [conversationView, setConversationView] = useState<CampConversationView>(() => {
     if (typeof window === 'undefined') return 'world'
     try {
@@ -1346,6 +1365,80 @@ export function CampWorkspace({
     lastTimelineItem.current = { campId, itemId: nextLastId }
   }, [conversationTimeline, conversationView, snapshot.camp.id])
 
+  useEffect(() => {
+    if (!onVisibleNotificationSources) return undefined
+    let frame: number | null = null
+    const publish = (): void => {
+      frame = null
+      const timeline = timelineScrollRef.current
+      const canObserve = conversationView === 'conversation'
+        && document.visibilityState === 'visible'
+        && document.hasFocus()
+        && timeline !== null
+        && !timeline.hidden
+      const messageIds = new Set<string>()
+      const campTurnIds = new Set<string>()
+      const approvalIds = new Set<string>()
+      if (canObserve && timeline) {
+        const viewport = timeline.getBoundingClientRect()
+        for (const node of timeline.querySelectorAll<HTMLElement>('[data-message-id]')) {
+          if (!rectanglesOverlap(node.getBoundingClientRect(), viewport)) continue
+          const messageId = node.dataset.messageId
+          const campTurnId = node.dataset.campTurnId
+          if (messageId) messageIds.add(messageId)
+          if (campTurnId) campTurnIds.add(campTurnId)
+        }
+        const approvalNode = approvalDockRef.current?.querySelector<HTMLElement>(
+          '[data-approval-id]'
+        ) ?? null
+        if (approvalNode && rectanglesOverlap(approvalNode.getBoundingClientRect(), {
+          top: 0,
+          right: window.innerWidth,
+          bottom: window.innerHeight,
+          left: 0
+        })) {
+          const approvalId = approvalNode.dataset.approvalId
+          if (approvalId) approvalIds.add(approvalId)
+        }
+      }
+      const sources: VisibleNotificationSources = {
+        campId: snapshot.camp.id,
+        snapshotSequence: snapshot.throughGlobalSequence,
+        messageIds: [...messageIds].sort(),
+        campTurnIds: [...campTurnIds].sort(),
+        approvalIds: [...approvalIds].sort()
+      }
+      const signature = JSON.stringify(sources)
+      if (lastVisibleNotificationSources.current === signature) return
+      lastVisibleNotificationSources.current = signature
+      onVisibleNotificationSources(sources)
+    }
+    const schedule = (): void => {
+      if (frame !== null) return
+      frame = window.requestAnimationFrame(publish)
+    }
+    const timeline = timelineScrollRef.current
+    schedule()
+    timeline?.addEventListener('scroll', schedule, { passive: true })
+    window.addEventListener('resize', schedule)
+    window.addEventListener('focus', schedule)
+    document.addEventListener('visibilitychange', schedule)
+    return () => {
+      if (frame !== null) window.cancelAnimationFrame(frame)
+      timeline?.removeEventListener('scroll', schedule)
+      window.removeEventListener('resize', schedule)
+      window.removeEventListener('focus', schedule)
+      document.removeEventListener('visibilitychange', schedule)
+    }
+  }, [
+    conversationView,
+    onVisibleNotificationSources,
+    snapshot.approvals,
+    snapshot.camp.id,
+    snapshot.messages,
+    snapshot.throughGlobalSequence
+  ])
+
   const submitMessage = async (): Promise<void> => {
     if (
       executionBlocked
@@ -1803,7 +1896,7 @@ export function CampWorkspace({
                       className={`timeline-node conversation-bubble ${campMessage.authorType}${followsSameAuthor ? ' same-author' : ''}`}
                       key={campMessage.id}
                       data-message-id={campMessage.id}
-                      data-camp-turn-id={sourceRun?.campTurnId}
+                      data-camp-turn-id={campMessage.campTurnId ?? sourceRun?.campTurnId}
                       tabIndex={-1}
                       style={member ? { '--agent-accent': identityColorToken(member.agentId) } as React.CSSProperties : undefined}
                     >

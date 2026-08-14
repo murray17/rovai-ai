@@ -1965,6 +1965,7 @@ export type CoreMethod =
   | 'notifications.inbox'
   | 'notifications.changesSince'
   | 'notifications.acknowledge'
+  | 'notifications.acknowledgeVisibleSources'
   | 'notifications.markAllRead'
   | 'notifications.clear'
   | 'notifications.preference.get'

@@ -25,6 +25,10 @@ Main action 只执行 Core 返回的 typed action。不可用动作保持 disabl
 `acknowledge_only` 呈现为“知道了”，只持久化精确确认并留在 Drawer，不进入会话导航。Approval 卡片
 必须优先提供仍 pending 的可处理动作，不能让已处理的旧 Approval 形成 disabled 主按钮。
 
+普通进入会话后的已读不依赖这些 action。Drawer 关闭、应用在前台且会话区真实可见时，Renderer 以
+精确 `messageId/campTurnId/approvalId` 回报当前视口；Core 只确认观察边界内匹配的 Active Attention，
+成功后立即重读 Inbox，使全局角标同步减少。该路径不得从主/次动作猜测来源全集。
+
 ## Heads-up
 
 同时最多展示一个 heads-up。相同 Episode 新版本原地更新，不排入第二张；关闭或超时后仅 Journal 的新
@@ -55,6 +59,6 @@ acknowledgement ID 提供“知道了”。可见队列与 overflow 都保留精
 
 ## References
 
-- [Notification Episode v3](../../contracts/notification-episode-v3.md)
-- [Current User Attention v3](../../contracts/current-user-attention-v3.md)
+- [Notification Episode v4](../../contracts/notification-episode-v4.md)
+- [Current User Attention v4](../../contracts/current-user-attention-v4.md)
 - [DESIGN.md](../../../DESIGN.md)

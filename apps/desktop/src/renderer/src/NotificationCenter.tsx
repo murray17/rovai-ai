@@ -19,6 +19,7 @@ import type {
   NotificationSemantic,
   StoredCommandResult
 } from '@contracts'
+import type { VisibleNotificationSources } from './CampWorkspace'
 
 type LoadState = 'loading' | 'ready' | 'error'
 
@@ -180,6 +181,7 @@ interface NotificationCenterProps {
   enabled: boolean
   activeCampId: string | null
   activeCampVisible: boolean
+  navigationActive: boolean
   refreshSignal: number
   onUnreadCountChange(count: number): void
   onNavigate(
@@ -195,6 +197,7 @@ interface NotificationCenterProps {
     episode: NotificationEpisodeView,
     action: NotificationActionView
   ): Promise<boolean>
+  visibleSources: VisibleNotificationSources | null
 }
 
 export const NotificationCenter = forwardRef<NotificationCenterHandle, NotificationCenterProps>(
@@ -202,12 +205,14 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
     enabled,
     activeCampId,
     activeCampVisible,
+    navigationActive,
     refreshSignal,
     onUnreadCountChange,
     onNavigate,
     onPresentNavigation,
     onCancelNavigation,
-    onRefreshVisibleCamp
+    onRefreshVisibleCamp,
+    visibleSources
   }: NotificationCenterProps, ref): React.JSX.Element {
     const [open, setOpen] = useState(false)
     const [filter, setFilter] = useState<NotificationEpisodeFilter>('all')
@@ -223,6 +228,7 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
     const [loadingMore, setLoadingMore] = useState(false)
     const [preference, setPreference] = useState<NotificationPreference | null>(null)
     const [headsUpState, setHeadsUpState] = useState<NotificationHeadsUpState>(emptyHeadsUpState)
+    const [visibleAcknowledgementRetry, setVisibleAcknowledgementRetry] = useState(0)
     const changeCursor = useRef(0)
     const baselineReady = useRef(false)
     const pollRunning = useRef(false)
@@ -231,6 +237,8 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
     const loadGeneration = useRef(0)
     const returnFocusRef = useRef<HTMLButtonElement | null>(null)
     const navigationGeneration = useRef(0)
+    const visibleAcknowledgementKey = useRef<string | null>(null)
+    const visibleAcknowledgementRunning = useRef(false)
 
     useImperativeHandle(ref, () => ({
       open(trigger = null): void {
@@ -316,6 +324,77 @@ export const NotificationCenter = forwardRef<NotificationCenterHandle, Notificat
       setHeadsUpState(emptyHeadsUpState())
       void loadInbox(filter).catch(() => undefined)
     }, [filter, loadInbox, open])
+
+    useEffect(() => {
+      if (
+        !enabled
+        || !baselineReady.current
+        || unreadCount === 0
+        || open
+        || navigationActive
+        || !activeCampVisible
+        || !visibleSources
+        || visibleSources.campId !== activeCampId
+        || document.visibilityState !== 'visible'
+        || !document.hasFocus()
+      ) return undefined
+      const sourceCount = visibleSources.messageIds.length
+        + visibleSources.campTurnIds.length
+        + visibleSources.approvalIds.length
+      if (sourceCount === 0) return undefined
+      const key = JSON.stringify({
+        throughChangeSequence,
+        ...visibleSources
+      })
+      if (visibleAcknowledgementRunning.current || visibleAcknowledgementKey.current === key) {
+        return undefined
+      }
+      visibleAcknowledgementRunning.current = true
+      visibleAcknowledgementKey.current = key
+      let cancelled = false
+      let retryTimer: number | null = null
+      void window.rovai.request<StoredCommandResult>(
+        'notifications.acknowledgeVisibleSources',
+        {
+          commandId: crypto.randomUUID(),
+          command: {
+            campId: visibleSources.campId,
+            observedThroughChangeSequence: throughChangeSequence,
+            visibleMessageIds: visibleSources.messageIds,
+            visibleCampTurnIds: visibleSources.campTurnIds,
+            visibleApprovalIds: visibleSources.approvalIds
+          }
+        }
+      ).then((result) => {
+        if (result.status !== 'applied') throw new Error(commandFailure(result))
+        if (!cancelled) return loadInbox(filter, false, true)
+        return undefined
+      }).catch(() => {
+        if (cancelled) return
+        visibleAcknowledgementKey.current = null
+        retryTimer = window.setTimeout(() => {
+          setVisibleAcknowledgementRetry((value) => value + 1)
+        }, 2_500)
+      }).finally(() => {
+        visibleAcknowledgementRunning.current = false
+      })
+      return () => {
+        cancelled = true
+        if (retryTimer !== null) window.clearTimeout(retryTimer)
+      }
+    }, [
+      activeCampId,
+      activeCampVisible,
+      enabled,
+      filter,
+      loadInbox,
+      navigationActive,
+      open,
+      throughChangeSequence,
+      unreadCount,
+      visibleAcknowledgementRetry,
+      visibleSources
+    ])
 
     const acknowledgeAction = useCallback(async (
       episode: NotificationEpisodeView,

@@ -17,7 +17,7 @@ last_updated: 2026-08-14
 
 - **何时阅读：** 修改领域真源、Managed Content、Blob 或 read side 时阅读。
 - **当前架构：** [Notification Episode](../architecture/notification-episodes.md)
-- **当前合同：** [Notification Episode v3](../contracts/notification-episode-v3.md)
+- **当前合同：** [Notification Episode v4](../contracts/notification-episode-v4.md)
 
 <!-- adr-current-primary:begin topic=core-data -->
 | ADR | Decision |
@@ -75,7 +75,7 @@ Related: ADR-0100 的 Session identity delivery 位于 session-context-bootstrap
 
 - **何时阅读：** 修改 A2A、Task、Message、Delivery、协作责任或公共输出时阅读。
 - **当前架构：** [Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
-- **当前合同：** [Durable Task v3](../contracts/durable-task-v3.md)、[Camp Message Send v7](../contracts/camp-message-send-v7.md)、[Current User Attention v3](../contracts/current-user-attention-v3.md)、[Message Delivery v2](../contracts/message-delivery-v2.md)、[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)
+- **当前合同：** [Durable Task v3](../contracts/durable-task-v3.md)、[Camp Message Send v7](../contracts/camp-message-send-v7.md)、[Current User Attention v4](../contracts/current-user-attention-v4.md)、[Message Delivery v2](../contracts/message-delivery-v2.md)、[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)
 
 <!-- adr-current-primary:begin topic=collaboration-task-message -->
 | ADR | Decision |

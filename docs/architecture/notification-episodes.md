@@ -2,7 +2,7 @@
 document_type: architecture
 authority: notification-episode-architecture
 status: accepted
-last_updated: 2026-08-13
+last_updated: 2026-08-14
 ---
 
 # Notification Episode 架构
@@ -21,6 +21,7 @@ Core Notification module
   ├─ inbox() ────────────── current hydrated Episode views
   ├─ changesSince() ─────── journal identities + current Episode + exact signal hydration
   ├─ acknowledge() ──────── one observed occurrence
+  ├─ acknowledgeVisibleSources() ─ exact visible sources through observed journal boundary
   ├─ clear() ────────────── through attention revision
   └─ markAllRead() ──────── through global change sequence
 
@@ -33,7 +34,7 @@ Electron Main 和 Renderer 不保存副本或聚合状态。`event_log` 可以�
 
 ## 深模块 seam
 
-外部 interface 只暴露五个通知行为和 preference。聚合、原因优先级、逐 Mention 选择、approval generation、
+外部 interface 只暴露六个通知行为和 preference。聚合、原因优先级、逐 Mention 选择、approval generation、
 版本/注意力 revision、clear reappearance、Journal floor 和 hydration 全部隐藏在 Core module 内；同一
 interface 也是测试面。SQLite triggers 是该 implementation 的 source adapters，不成为 Renderer interface。
 
@@ -59,6 +60,12 @@ Journal 另外保存 disposition change 的精确 acknowledgement identity 与 C
 Eligible Attention；其旧 pending signal 按 identity 失效。Episode `primaryAction + secondaryActions` 只是
 推荐/展示动作，不是全部 attention identity 的索引。
 
+会话区是可见性传感器，不拥有通知集合。它只在前台“会话”视图中收集与时间线视口相交的
+`messageId/campTurnId`，以及实际展开可见的 pending `approvalId`。Core 的
+`acknowledgeVisibleSources()` 再以当前用户、Camp、Active Attention 与 Renderer 已观察 Journal high-water
+交叉验证并原子确认；因此普通导航可以自然消角标，但屏幕外来源和边界后新到达的通知不会被顺带读掉。
+Episode 推荐动作从不参与该来源集合。
+
 ## 并发和恢复
 
 - 每个 attention-worthy source 先获得全局 change sequence，再以同一边界写 Occurrence 与 Journal；
@@ -70,6 +77,7 @@ Eligible Attention；其旧 pending signal 按 identity 失效。Episode `primar
   才提交共享 cursor，失败保持原边界重试。
 - Renderer 按 Journal 顺序先归约 exact invalidation、再接收同 change 的新 signal；普通 Inbox hydration
   不改变临时队列，reset/重新建立 baseline 时直接清空且不从 Episode actions 恢复。
+- 可见来源确认 applied 后立即重读 Inbox 更新全局角标；失败保持未读并在来源仍可见时退避重试。
 
 ## 保留
 
@@ -80,5 +88,5 @@ cascade 和 Journal trigger 收口。
 ## References
 
 - [ADR-0175](../adr/0175-core-owned-notification-occurrence-episode-and-change-journal.md)
-- [Notification Episode v3](../contracts/notification-episode-v3.md)
-- [Current User Attention v3](../contracts/current-user-attention-v3.md)
+- [Notification Episode v4](../contracts/notification-episode-v4.md)
+- [Current User Attention v4](../contracts/current-user-attention-v4.md)

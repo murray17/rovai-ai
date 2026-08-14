@@ -77,6 +77,7 @@ import {
   isViewingNonTerminalAgentRun,
   loadCompleteAgentRunExecutionEvidence,
   preferredAgentProcessRun,
+  rectanglesOverlap,
   runtimeOptionsForDisplay
 } from './CampWorkspace'
 import {
@@ -173,6 +174,22 @@ describe('Camp snapshot cache', () => {
 })
 
 describe('task event projections', () => {
+  it('treats only timeline nodes that overlap the visible viewport as observed', () => {
+    const viewport = { top: 100, right: 500, bottom: 500, left: 100 }
+    expect(rectanglesOverlap(
+      { top: 120, right: 480, bottom: 240, left: 120 },
+      viewport
+    )).toBe(true)
+    expect(rectanglesOverlap(
+      { top: 500, right: 480, bottom: 620, left: 120 },
+      viewport
+    )).toBe(false)
+    expect(rectanglesOverlap(
+      { top: 120, right: 100, bottom: 240, left: 20 },
+      viewport
+    )).toBe(false)
+  })
+
   it('accepts only file payloads and keeps a dragged directory as one attachment input', () => {
     const directoryFile = { name: '项目资料' } as File
     const directoryItem = {
