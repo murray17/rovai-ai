@@ -528,13 +528,14 @@ export function CampNavigation({
             <svg
               className="rail-logo-mark"
               data-brand-mark="horizon"
+              data-brand-layout="separated"
               width="20"
               height="20"
               viewBox="0 0 24 24"
               aria-hidden="true"
             >
-              <path d="M12 1.2 L13.35 7.05 L19 8.6 L13.35 10.15 L12 17.4 L10.65 10.15 L5 8.6 L10.65 7.05 Z" fill="currentColor" />
-              <path d="M3 20.5 Q12 14.2 21 20.5" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" />
+              <path d="M12 2 L13.16 7.3 L17.76 8.84 L13.16 10.38 L12 15.68 L10.84 10.38 L6.24 8.84 L10.84 7.3 Z" fill="currentColor" />
+              <path d="M3 20.96 Q12 15.96 21 20.96" fill="none" stroke="currentColor" strokeWidth="2.08" strokeLinecap="round" />
             </svg>
             <span><strong>Rovai AI</strong></span>
           </span>

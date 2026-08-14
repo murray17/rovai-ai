@@ -10,6 +10,7 @@ colors:
   graphite-surface: "#151a1e"
   ink-day: "#171b20"
   ink-night: "#e7ecef"
+  ember-rendezvous: "#d3a45f"
 typography:
   body:
     fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif'
@@ -53,15 +54,17 @@ use decoration to soften or obscure commands, diffs, approvals, errors or uncert
 
 ## Brand Mark
 
-The canonical Rovai mark is a four-point star rising directly from a curved horizon. The star means
-direction; the horizon means a shared world and a common plane for collaboration. Both shapes remain
-present in production brand lockups—the four-point star alone is not the Rovai brand mark.
+The canonical Rovai mark is a four-point star held above a curved horizon. The star means direction;
+the horizon means a shared world and a common plane for collaboration. Their deliberate gap keeps
+both ideas legible at Dock and rail sizes. Both shapes remain present in production brand lockups—the
+four-point star alone is not the Rovai brand mark.
 
 The theme-independent App icon uses a Graphite surface (`#151a1e`), Steel horizon (`#7897ae`) and
-Porcelain star (`#e7ecef`), with no outline around the carrier. Compact in-app marks omit the carrier
-and render the same touching star-and-horizon geometry in `--rail-logo`, so Day and Night keep one
-silhouette while using their own contrast-safe Steel value. Brand geometry and color do not indicate
-status, identity, approval or evidence.
+Porcelain star (`#e7ecef`), with no outline around the carrier. A fixed Ember rendezvous point
+(`#d3a45f`) sits at the center of the App icon's horizon. Compact in-app marks omit both the carrier
+and the rendezvous point, rendering the separated star-and-horizon geometry in `--rail-logo` so Day
+and Night keep one silhouette while using their own contrast-safe Steel value. The rendezvous point
+is brand geometry and never indicates status, identity, approval or evidence.
 
 ## Colors
 
