@@ -51,6 +51,14 @@ import { availableComposerSkillsForLead } from './composer-skill-picker'
 import { createStructuredMessageClipboardData } from './structured-message-clipboard'
 import { CampWorldMap } from './CampWorldMap'
 import { projectCampWorldMap } from './camp-world-map-model'
+import {
+  CAMP_TIMELINE_READING_POSITIONS_STORAGE_KEY,
+  campTimelineIsNearBottom,
+  campTimelineReadingPositionFromStoredValue,
+  restoredCampTimelineScrollTop,
+  storedCampTimelineReadingPositionsWithUpdate,
+  type CampTimelineReadingPosition
+} from './camp-timeline-position'
 
 const NON_TERMINAL_RUNS = new Set(['queued', 'running', 'waiting'])
 const EXECUTION_EVIDENCE_PAGE_LIMIT = 1_000
@@ -315,6 +323,36 @@ function persistExecutionDrawerHeight(height: number | null): void {
     }
   } catch {
     // Session persistence is an enhancement; resizing remains usable if storage is unavailable.
+  }
+}
+
+function storedCampTimelineReadingPosition(
+  campId: string
+): CampTimelineReadingPosition | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return campTimelineReadingPositionFromStoredValue(
+      window.localStorage.getItem(CAMP_TIMELINE_READING_POSITIONS_STORAGE_KEY),
+      campId
+    )
+  } catch {
+    return null
+  }
+}
+
+function persistCampTimelineReadingPosition(
+  campId: string,
+  position: CampTimelineReadingPosition
+): void {
+  if (typeof window === 'undefined') return
+  try {
+    const current = window.localStorage.getItem(CAMP_TIMELINE_READING_POSITIONS_STORAGE_KEY)
+    window.localStorage.setItem(
+      CAMP_TIMELINE_READING_POSITIONS_STORAGE_KEY,
+      storedCampTimelineReadingPositionsWithUpdate(current, campId, position)
+    )
+  } catch {
+    // Reading-position persistence is an enhancement; the timeline remains usable without it.
   }
 }
 
@@ -769,7 +807,12 @@ export function CampWorkspace({
   const attachmentPreparationQueue = useRef<Promise<void>>(Promise.resolve())
   const timelineScrollRef = useRef<HTMLDivElement>(null)
   const approvalDockRef = useRef<HTMLElement>(null)
-  const lastTimelineItemId = useRef<string | null>(null)
+  const lastTimelineItem = useRef<{ campId: string; itemId: string | null } | null>(null)
+  const timelineReadingPosition = useRef<{
+    campId: string
+    position: CampTimelineReadingPosition
+  } | null>(null)
+  const timelinePositionSaveTimer = useRef<number | null>(null)
   const [conversationView, setConversationView] = useState<CampConversationView>(() => {
     if (typeof window === 'undefined') return 'world'
     try {
@@ -1208,13 +1251,100 @@ export function CampWorkspace({
     }
   }, [notificationFocus, onNotificationFocusPresented, snapshot.messages, snapshot.agentRuns])
 
-  useEffect(() => {
-    const nextLastId = conversationTimeline.at(-1)?.id ?? null
-    if (!nextLastId || nextLastId === lastTimelineItemId.current) return
-    lastTimelineItemId.current = nextLastId
+  const flushTimelineReadingPosition = useCallback((campId?: string): void => {
+    if (timelinePositionSaveTimer.current !== null) {
+      window.clearTimeout(timelinePositionSaveTimer.current)
+      timelinePositionSaveTimer.current = null
+    }
+    const current = timelineReadingPosition.current
+    if (!current || (campId && current.campId !== campId)) return
+    persistCampTimelineReadingPosition(current.campId, current.position)
+  }, [])
+
+  const recordTimelineReadingPosition = useCallback((
+    campId: string,
+    scroll: HTMLElement
+  ): void => {
+    timelineReadingPosition.current = {
+      campId,
+      position: {
+        scrollTop: Math.max(0, scroll.scrollTop),
+        followingLatest: campTimelineIsNearBottom(
+          scroll.scrollTop,
+          scroll.scrollHeight,
+          scroll.clientHeight
+        )
+      }
+    }
+    if (timelinePositionSaveTimer.current !== null) {
+      window.clearTimeout(timelinePositionSaveTimer.current)
+    }
+    timelinePositionSaveTimer.current = window.setTimeout(() => {
+      timelinePositionSaveTimer.current = null
+      const current = timelineReadingPosition.current
+      if (current) persistCampTimelineReadingPosition(current.campId, current.position)
+    }, 180)
+  }, [])
+
+  useLayoutEffect(() => {
+    const campId = snapshot.camp.id
+    if (conversationView === 'conversation') {
+      const scroll = timelineScrollRef.current
+      if (scroll) {
+        const current = timelineReadingPosition.current?.campId === campId
+          ? timelineReadingPosition.current.position
+          : storedCampTimelineReadingPosition(campId)
+        const scrollTop = restoredCampTimelineScrollTop(
+          current,
+          scroll.scrollHeight,
+          scroll.clientHeight
+        )
+        scroll.scrollTop = scrollTop
+        timelineReadingPosition.current = {
+          campId,
+          position: {
+            scrollTop,
+            followingLatest: current?.followingLatest !== false
+              || campTimelineIsNearBottom(scrollTop, scroll.scrollHeight, scroll.clientHeight)
+          }
+        }
+        lastTimelineItem.current = {
+          campId,
+          itemId: conversationTimeline.at(-1)?.id ?? null
+        }
+      }
+    }
+    return () => flushTimelineReadingPosition(campId)
+  }, [conversationView, flushTimelineReadingPosition, snapshot.camp.id])
+
+  useLayoutEffect(() => {
+    if (conversationView !== 'conversation') return
     const scroll = timelineScrollRef.current
-    if (scroll) scroll.scrollTop = scroll.scrollHeight
-  }, [conversationTimeline])
+    if (!scroll) return
+    const campId = snapshot.camp.id
+    const nextLastId = conversationTimeline.at(-1)?.id ?? null
+    const previous = lastTimelineItem.current
+    if (!previous || previous.campId !== campId) {
+      lastTimelineItem.current = { campId, itemId: nextLastId }
+      return
+    }
+    if (nextLastId === previous.itemId) return
+    const position = timelineReadingPosition.current?.campId === campId
+      ? timelineReadingPosition.current.position
+      : null
+    if (position?.followingLatest !== false) {
+      scroll.scrollTop = scroll.scrollHeight
+    }
+    timelineReadingPosition.current = {
+      campId,
+      position: {
+        scrollTop: Math.max(0, scroll.scrollTop),
+        followingLatest: position?.followingLatest !== false
+          && campTimelineIsNearBottom(scroll.scrollTop, scroll.scrollHeight, scroll.clientHeight)
+      }
+    }
+    lastTimelineItem.current = { campId, itemId: nextLastId }
+  }, [conversationTimeline, conversationView, snapshot.camp.id])
 
   const submitMessage = async (): Promise<void> => {
     if (
@@ -1590,6 +1720,10 @@ export function CampWorkspace({
               tabIndex={-1}
               aria-label="对话时间线"
               hidden={conversationView !== 'conversation'}
+              onScroll={(event) => recordTimelineReadingPosition(
+                snapshot.camp.id,
+                event.currentTarget
+              )}
             >
               <div className="timeline-track">
               {(() => {

@@ -126,6 +126,37 @@ interface OptimisticCampMessageEntry {
   message: CampMessageView
 }
 
+const CAMP_SNAPSHOT_CACHE_LIMIT = 5
+
+export function rememberCampSnapshot(
+  cache: Map<string, CampSnapshot>,
+  snapshot: CampSnapshot,
+  limit = CAMP_SNAPSHOT_CACHE_LIMIT
+): void {
+  cache.delete(snapshot.camp.id)
+  if (limit <= 0) {
+    cache.clear()
+    return
+  }
+  cache.set(snapshot.camp.id, snapshot)
+  while (cache.size > limit) {
+    const oldestCampId = cache.keys().next().value
+    if (oldestCampId === undefined) break
+    cache.delete(oldestCampId)
+  }
+}
+
+export function recentCampSnapshot(
+  cache: Map<string, CampSnapshot>,
+  campId: string
+): CampSnapshot | null {
+  const snapshot = cache.get(campId) ?? null
+  if (!snapshot) return null
+  cache.delete(campId)
+  cache.set(campId, snapshot)
+  return snapshot
+}
+
 const CANCELLABLE_TURN_STATUSES = new Set<CampSnapshot['turns'][number]['status']>([
   'running',
   'waiting'
@@ -264,7 +295,7 @@ export function App(): React.JSX.Element {
   const [memoryRefreshKey, setMemoryRefreshKey] = useState(0)
   const [memoryFocusId, setMemoryFocusId] = useState<string | null>(null)
   const [memoryReviewDrawerSignal, setMemoryReviewDrawerSignal] = useState(0)
-  const [campSnapshot, setCampSnapshot] = useState<CampSnapshot | null>(null)
+  const [campSnapshot, setCampSnapshotState] = useState<CampSnapshot | null>(null)
   const [campInspectorVisible, setCampInspectorVisible] = useState(initialCampInspectorVisibility)
   const [campInspectorTab, setCampInspectorTab] = useState<CampInspectorTab>('tasks')
   const [optimisticCampMessages, setOptimisticCampMessages] = useState<OptimisticCampMessageEntry[]>([])
@@ -304,6 +335,7 @@ export function App(): React.JSX.Element {
   const [liveRuntimeEvents, setLiveRuntimeEvents] = useState<LiveRuntimeEvent[]>([])
   const campEventSequenceMarker = useRef(0)
   const campSelectionGeneration = useRef(0)
+  const campSnapshotCache = useRef(new Map<string, CampSnapshot>())
   const activeCampIdRef = useRef<string | null>(null)
   const viewRef = useRef<View>('compose')
   const notificationButtonRef = useRef<HTMLButtonElement>(null)
@@ -334,6 +366,11 @@ export function App(): React.JSX.Element {
   if (notificationPresentationRef.current === null) {
     notificationPresentationRef.current = createNotificationPresentationCoordinator()
   }
+
+  const setCampSnapshot = useCallback((snapshot: CampSnapshot | null): void => {
+    if (snapshot) rememberCampSnapshot(campSnapshotCache.current, snapshot)
+    setCampSnapshotState(snapshot)
+  }, [])
 
   useEffect(() => () => {
     notificationPresentationRef.current?.cancel()
@@ -559,22 +596,31 @@ export function App(): React.JSX.Element {
       setNotificationFocus(null)
       setNotificationAnchor(null)
     }
-    if (activeCampId !== campId) {
-      setCampSnapshot(null)
-      campEventSequenceMarker.current = 0
+    if (activeCampIdRef.current !== campId) {
+      const cachedSnapshot = recentCampSnapshot(campSnapshotCache.current, campId)
+      setCampSnapshot(cachedSnapshot)
+      campEventSequenceMarker.current = cachedSnapshot?.throughGlobalSequence ?? 0
     }
     setActiveCampId(campId)
     lastMainView.current = 'camp'
     setView('camp')
     try {
-      if (options.reconcileDefaultLead !== false) {
-        const reconciliation = await window.rovai.request<StoredCommandResult>('camps.reconcileDefaultLead', {
+      const reconciliationPromise = options.reconcileDefaultLead !== false
+        ? window.rovai.request<StoredCommandResult>('camps.reconcileDefaultLead', {
           commandId: crypto.randomUUID(),
           command: { campId }
         })
-        if (reconciliation.status === 'rejected') throw new Error(commandFailureMessage(reconciliation))
+        : Promise.resolve<StoredCommandResult | null>(null)
+      // Both requests use Core's serialized main queue. Queue the read immediately
+      // after reconciliation so opening does not pay an extra Renderer/Main IPC turn.
+      const snapshotPromise = window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
+      const [reconciliation, snapshot] = await Promise.all([
+        reconciliationPromise,
+        snapshotPromise
+      ])
+      if (reconciliation?.status === 'rejected') {
+        throw new Error(commandFailureMessage(reconciliation))
       }
-      const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
       if (snapshot.schemaVersion !== 29) throw new Error('会话数据版本不兼容。')
       if (selectionGeneration !== campSelectionGeneration.current) return false
       if (snapshot.camp.projectBindingKind === 'directory') {
@@ -613,7 +659,7 @@ export function App(): React.JSX.Element {
       }
       return false
     }
-  }, [activeCampId, loadNavigation, restoreNavigationProject])
+  }, [loadNavigation, restoreNavigationProject, setCampSnapshot])
 
   const refreshActiveCampSnapshot = useCallback(async (campId: string): Promise<void> => {
     const snapshot = await window.rovai.request<CampSnapshot>('camps.snapshot', { campId })
@@ -1541,6 +1587,7 @@ export function App(): React.JSX.Element {
         }
         throw new Error(commandFailureMessage(result))
       }
+      campSnapshotCache.current.delete(camp.id)
       if (activeCampId === camp.id) {
         campSelectionGeneration.current += 1
         setActiveCampId(null)
@@ -1986,6 +2033,7 @@ export function App(): React.JSX.Element {
 
         {!startupGateVisible && view === 'camp' && activeCampId && visibleCampSnapshot?.camp.id === activeCampId && (
           <CampWorkspace
+            key={activeCampId}
             snapshot={visibleCampSnapshot}
             optimisticMessages={optimisticCampMessages
               .filter((entry) => entry.campId === activeCampId)
