@@ -7,6 +7,7 @@ import type {
   AgentProfile,
   AgentRunView,
   AgentRunExecutionEvidenceView,
+  CampComposerDraftView,
   CampMessageView,
   CampSnapshot,
   CanonicalRuntimeActivityView,
@@ -57,6 +58,8 @@ import {
   attachmentDragKind,
   campConversationViewFromStoredValue,
   campConversationTimeline,
+  composerDraftNeedsReplyRepair,
+  composerRecipientSummary,
   campInspectorMembers,
   campMemberIsLeadEligible,
   clampExecutionDrawerHeight,
@@ -151,6 +154,61 @@ function canonicalActivity(
 }
 
 describe('task event projections', () => {
+  it('shows the complete structured recipient fanout and never infers recipients from a reply', () => {
+    const members: CampSnapshot['members'] = [
+      {
+        agentId: 'agent_1', displayName: '叮叮', teamRole: 'Lead', avatarRef: null,
+        accent: '#D56A4A', membershipStatus: 'active', leaveRequestedAt: null,
+        profilePresence: 'present', memberOrder: 0, isDefaultLead: true, version: 1
+      },
+      {
+        agentId: 'agent_2', displayName: '芝士', teamRole: 'Reviewer', avatarRef: null,
+        accent: '#4F7F9F', membershipStatus: 'active', leaveRequestedAt: null,
+        profilePresence: 'present', memberOrder: 1, isDefaultLead: false, version: 1
+      }
+    ]
+    expect(composerRecipientSummary([], members)).toBe('Default Lead · 叮叮')
+    expect(composerRecipientSummary([
+      { kind: 'member_mention', agentId: 'agent_2' },
+      { kind: 'member_mention', agentId: 'agent_1' }
+    ], members)).toBe('发送给 @芝士、@叮叮')
+    expect(composerRecipientSummary([{ kind: 'all_members_mention' }], members))
+      .toBe('发送给 @所有队员（叮叮、芝士）')
+  })
+
+  it('requires explicit repair only until an unavailable reply author is visibly replaced', () => {
+    const base: CampComposerDraftView = {
+      campId: 'camp-1', body: '继续', revision: 4, attachments: [],
+      updatedAt: '2026-08-14T00:00:00Z', expiresAt: '2026-08-21T00:00:00Z',
+      content: [{ kind: 'member_mention', agentId: 'agent_2' }],
+      replyIntent: {
+        replyToCampMessageId: 'message-1', targetState: 'available', excerpt: '原消息',
+        recipientSelectionRequired: false,
+        author: {
+          authorType: 'agent', authorId: 'agent_2', displayName: '芝士',
+          recipientAvailability: 'unavailable'
+        }
+      }
+    }
+    expect(composerDraftNeedsReplyRepair(base)).toBe(true)
+    expect(composerDraftNeedsReplyRepair({
+      ...base,
+      content: [{ kind: 'member_mention', agentId: 'agent_1' }]
+    })).toBe(false)
+    expect(composerDraftNeedsReplyRepair({
+      ...base,
+      content: [],
+      replyIntent: { ...base.replyIntent!, recipientSelectionRequired: true }
+    })).toBe(true)
+    expect(composerDraftNeedsReplyRepair({
+      ...base,
+      content: [],
+      replyIntent: {
+        ...base.replyIntent!, targetState: 'message_unavailable', author: null, excerpt: null
+      }
+    })).toBe(true)
+  })
+
   it('accepts only file payloads and keeps a dragged directory as one attachment input', () => {
     const directoryFile = { name: '项目资料' } as File
     const directoryItem = {
@@ -514,6 +572,18 @@ describe('task event projections', () => {
           errorMessage: null,
           createdAt: '2026-07-30T09:59:00Z'
         }],
+        replyIntent: {
+          replyToCampMessageId: 'message-parent',
+          targetState: 'available',
+          author: {
+            authorType: 'agent',
+            authorId: 'agent_2',
+            displayName: '芝士',
+            recipientAvailability: 'available'
+          },
+          excerpt: '原消息',
+          recipientSelectionRequired: false
+        },
         updatedAt: '2026-07-30T09:59:00Z',
         expiresAt: '2026-08-06T09:59:00Z'
       },
@@ -528,6 +598,7 @@ describe('task event projections', () => {
       body: '立即显示这条消息',
       addressMode: 'explicit',
       addressedAgentIds: ['agent_2'],
+      replyToCampMessageId: 'message-parent',
       attachments: [{
         id: 'attachment-1',
         displayName: '说明.txt'
@@ -546,6 +617,7 @@ describe('task event projections', () => {
       content: [{ kind: 'member_mention', agentId: 'agent_2' }],
       revision: 7,
       attachments: [],
+      replyIntent: null,
       updatedAt: '2026-08-03T00:00:00Z',
       expiresAt: '2026-08-10T00:00:00Z'
     })
@@ -559,6 +631,7 @@ describe('task event projections', () => {
     expect(params).not.toHaveProperty('address')
     expect(params).not.toHaveProperty('agentIds')
     expect(params).not.toHaveProperty('preparedAttachmentIds')
+    expect(params).not.toHaveProperty('replyToCampMessageId')
     expect(params.execution).not.toHaveProperty('expectedOutput')
   })
 
@@ -1547,7 +1620,7 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('给 洛可 发消息')
-    expect(markup).toContain('未提及时发送给负责人')
+    expect(markup).toContain('Default Lead · 洛可')
     expect(markup).toContain('开始这段协作')
     expect(markup).toContain('快速对话')
     expect(markup).toContain('负责人 · 洛可')
@@ -1612,6 +1685,12 @@ describe('task event projections', () => {
       ...result,
       payload: { blockerCode: 'runtime_not_configured' }
     })).toBeNull()
+    expect(commandFailureMessage({ ...result, code: 'reply_recipient_required' }))
+      .toBe('原作者当前不可接收，请选择其他成员。')
+    expect(commandFailureMessage({ ...result, code: 'mention_target_unavailable' }))
+      .toBe('消息未发送：一位收件人当前不可接收，请重新选择。')
+    expect(commandFailureMessage({ ...result, code: 'camp_message.invalid_reply' }))
+      .toBe('消息未发送：引用的消息当前不可用。请取消引用后重试。')
   })
 
   it('summarizes empty Camp runtime readiness without inventing Ready state', () => {
@@ -2090,6 +2169,9 @@ describe('task event projections', () => {
     expect(terminalMarkup).not.toContain('来自执行')
     expect(terminalMarkup).not.toContain('message-run-origin')
     expect(terminalMarkup).toContain('复制入口已完成。')
+    expect(terminalMarkup).toContain('reply-parent-quote')
+    expect(terminalMarkup).toContain('你 ·')
+    expect(terminalMarkup).toContain('aria-label="回复这条消息"')
 
     const restoredMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
       snapshot: {

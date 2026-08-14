@@ -10,7 +10,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use chrono::{Duration, Utc};
-use rusqlite::{OptionalExtension, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -20,7 +20,7 @@ use crate::{
         StructuredCampMessageContent, StructuredCampMessageSegment, normalize_content,
         render_current_plain_text, validate_user_authored_content,
     },
-    current_user::CURRENT_USER_ID,
+    current_user::{CURRENT_USER_ID, CurrentUserResolver},
     db::Database,
 };
 
@@ -78,8 +78,38 @@ pub struct CampComposerDraftView {
     pub content: StructuredCampMessageContent,
     pub revision: i64,
     pub attachments: Vec<PreparedAttachmentView>,
+    pub reply_intent: Option<CampComposerReplyIntentView>,
     pub updated_at: Option<String>,
     pub expires_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CampComposerReplyIntentView {
+    pub reply_to_camp_message_id: String,
+    pub target_state: String,
+    pub author: Option<CampComposerReplyAuthorView>,
+    pub excerpt: Option<String>,
+    pub recipient_selection_required: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CampComposerReplyAuthorView {
+    pub author_type: String,
+    pub author_id: String,
+    pub display_name: String,
+    pub recipient_availability: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CampComposerReplyRecipient {
+    Member {
+        #[serde(rename = "agentId")]
+        agent_id: String,
+    },
+    AllMembers,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,7 +146,9 @@ impl CampAttachmentStore {
             .connection()
             .query_row(
                 r#"
-                SELECT structured_content_json, revision, updated_at, expires_at
+                SELECT structured_content_json, revision,
+                       reply_to_camp_message_id, recipient_selection_required,
+                       updated_at, expires_at
                 FROM camp_composer_draft
                 WHERE camp_id = ?1
                 "#,
@@ -125,15 +157,17 @@ impl CampAttachmentStore {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, i64>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, bool>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
                     ))
                 },
             )
             .optional()?;
         let attachments = load_prepared_attachments(database, camp_id)?;
         Ok(match draft {
-            Some((content, revision, updated_at, expires_at)) => {
+            Some((content, revision, reply_to, recipient_required, updated_at, expires_at)) => {
                 let content = normalize_content(serde_json::from_str(&content)?);
                 validate_user_authored_content(&content)?;
                 CampComposerDraftView {
@@ -142,6 +176,12 @@ impl CampAttachmentStore {
                     content,
                     revision,
                     attachments,
+                    reply_intent: project_reply_intent(
+                        database,
+                        camp_id,
+                        reply_to.as_deref(),
+                        recipient_required,
+                    )?,
                     updated_at: Some(updated_at),
                     expires_at: Some(expires_at),
                 }
@@ -152,6 +192,7 @@ impl CampAttachmentStore {
                 content: Vec::new(),
                 revision: 0,
                 attachments,
+                reply_intent: None,
                 updated_at: None,
                 expires_at: None,
             },
@@ -252,6 +293,161 @@ impl CampAttachmentStore {
                 anyhow::bail!("draft_changed");
             }
         }
+        self.load_draft(database, camp_id)
+    }
+
+    pub fn start_reply(
+        &self,
+        database: &mut Database,
+        camp_id: &str,
+        expected_revision: i64,
+        reply_to_camp_message_id: &str,
+    ) -> Result<CampComposerDraftView> {
+        validate_component(camp_id, "Camp")?;
+        validate_component(reply_to_camp_message_id, "Camp Message")?;
+        ensure_camp_exists(database, camp_id)?;
+        let transaction = database
+            .connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let target = transaction
+            .query_row(
+                r#"
+                SELECT author_type, author_id
+                FROM camp_message
+                WHERE id = ?1 AND camp_id = ?2 AND tombstoned_at IS NULL
+                "#,
+                params![reply_to_camp_message_id, camp_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        let Some((author_type, author_id)) = target else {
+            anyhow::bail!("camp_message.invalid_reply");
+        };
+        let current = load_draft_mutation_state(&transaction, camp_id)?;
+        require_expected_revision(current.as_ref(), expected_revision)?;
+        let mut content = current
+            .as_ref()
+            .map(|draft| draft.content.clone())
+            .unwrap_or_default();
+        let recipient_selection_required = if author_type == "agent" {
+            if active_reply_agent(&transaction, camp_id, &author_id)? {
+                ensure_leading_recipient(
+                    &mut content,
+                    StructuredCampMessageSegment::MemberMention {
+                        agent_id: author_id,
+                    },
+                );
+                false
+            } else {
+                true
+            }
+        } else {
+            false
+        };
+        persist_reply_mutation(
+            &transaction,
+            camp_id,
+            expected_revision,
+            current.as_ref(),
+            content,
+            Some(reply_to_camp_message_id),
+            recipient_selection_required,
+        )?;
+        transaction.commit()?;
+        self.load_draft(database, camp_id)
+    }
+
+    pub fn cancel_reply(
+        &self,
+        database: &mut Database,
+        camp_id: &str,
+        expected_revision: i64,
+    ) -> Result<CampComposerDraftView> {
+        validate_component(camp_id, "Camp")?;
+        ensure_camp_exists(database, camp_id)?;
+        let transaction = database
+            .connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = load_draft_mutation_state(&transaction, camp_id)?;
+        require_expected_revision(current.as_ref(), expected_revision)?;
+        let Some(current) = current.as_ref() else {
+            transaction.commit()?;
+            return self.load_draft(database, camp_id);
+        };
+        persist_reply_mutation(
+            &transaction,
+            camp_id,
+            expected_revision,
+            Some(current),
+            current.content.clone(),
+            None,
+            false,
+        )?;
+        transaction.commit()?;
+        self.load_draft(database, camp_id)
+    }
+
+    pub fn resolve_reply_recipient(
+        &self,
+        database: &mut Database,
+        camp_id: &str,
+        expected_revision: i64,
+        recipient: CampComposerReplyRecipient,
+    ) -> Result<CampComposerDraftView> {
+        validate_component(camp_id, "Camp")?;
+        ensure_camp_exists(database, camp_id)?;
+        let transaction = database
+            .connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = load_draft_mutation_state(&transaction, camp_id)?;
+        require_expected_revision(current.as_ref(), expected_revision)?;
+        let current = current.as_ref().context("camp_message.invalid_reply")?;
+        let reply_to = current
+            .reply_to_camp_message_id
+            .as_deref()
+            .context("camp_message.invalid_reply")?;
+        let original_author = transaction
+            .query_row(
+                "SELECT author_type, author_id FROM camp_message WHERE id = ?1 AND camp_id = ?2",
+                params![reply_to, camp_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?
+            .context("camp_message.invalid_reply")?;
+        let mut content = current.content.clone();
+        if original_author.0 == "agent"
+            && !active_reply_agent(&transaction, camp_id, &original_author.1)?
+        {
+            content.retain(|segment| {
+                !matches!(
+                    segment,
+                    StructuredCampMessageSegment::MemberMention { agent_id }
+                        if agent_id == &original_author.1
+                )
+            });
+        }
+        let replacement = match recipient {
+            CampComposerReplyRecipient::Member { agent_id } => {
+                if !active_reply_agent(&transaction, camp_id, &agent_id)? {
+                    anyhow::bail!("mention_target_unavailable");
+                }
+                StructuredCampMessageSegment::MemberMention { agent_id }
+            }
+            CampComposerReplyRecipient::AllMembers => {
+                StructuredCampMessageSegment::AllMembersMention
+            }
+        };
+        ensure_leading_recipient(&mut content, replacement);
+        persist_reply_mutation(
+            &transaction,
+            camp_id,
+            expected_revision,
+            Some(current),
+            content,
+            Some(reply_to),
+            false,
+        )?;
+        transaction.commit()?;
         self.load_draft(database, camp_id)
     }
 
@@ -547,6 +743,282 @@ impl CampAttachmentStore {
         }
         Ok(camps.len())
     }
+}
+
+#[derive(Debug, Clone)]
+struct DraftMutationState {
+    content: StructuredCampMessageContent,
+    revision: i64,
+    reply_to_camp_message_id: Option<String>,
+    recipient_selection_required: bool,
+}
+
+fn load_draft_mutation_state(
+    connection: &Connection,
+    camp_id: &str,
+) -> Result<Option<DraftMutationState>> {
+    let stored = connection
+        .query_row(
+            r#"
+            SELECT structured_content_json, revision,
+                   reply_to_camp_message_id, recipient_selection_required
+            FROM camp_composer_draft
+            WHERE camp_id = ?1
+            "#,
+            [camp_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, bool>(3)?,
+                ))
+            },
+        )
+        .optional()?;
+    stored
+        .map(|(content, revision, reply_to_camp_message_id, required)| {
+            let content = normalize_content(serde_json::from_str(&content)?);
+            validate_user_authored_content(&content)?;
+            Ok(DraftMutationState {
+                content,
+                revision,
+                reply_to_camp_message_id,
+                recipient_selection_required: required,
+            })
+        })
+        .transpose()
+}
+
+fn require_expected_revision(
+    current: Option<&DraftMutationState>,
+    expected_revision: i64,
+) -> Result<()> {
+    if current.map_or(0, |draft| draft.revision) != expected_revision {
+        anyhow::bail!("draft_changed");
+    }
+    Ok(())
+}
+
+fn persist_reply_mutation(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    expected_revision: i64,
+    current: Option<&DraftMutationState>,
+    content: StructuredCampMessageContent,
+    reply_to_camp_message_id: Option<&str>,
+    recipient_selection_required: bool,
+) -> Result<bool> {
+    let content = normalize_content(content);
+    validate_user_authored_content(&content)?;
+    if current.is_some_and(|draft| {
+        draft.content == content
+            && draft.reply_to_camp_message_id.as_deref() == reply_to_camp_message_id
+            && draft.recipient_selection_required == recipient_selection_required
+    }) {
+        return Ok(false);
+    }
+    let content_json = serde_json::to_string(&content)?;
+    let body = render_current_plain_text(transaction, &content)?;
+    let (now, expires_at) = draft_times();
+    if expected_revision == 0 {
+        transaction.execute(
+            r#"
+            INSERT INTO camp_composer_draft(
+                camp_id, body, structured_content_json, revision,
+                reply_to_camp_message_id, recipient_selection_required,
+                created_at, updated_at, expires_at
+            ) VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6, ?6, ?7)
+            "#,
+            params![
+                camp_id,
+                body,
+                content_json,
+                reply_to_camp_message_id,
+                recipient_selection_required,
+                now,
+                expires_at,
+            ],
+        )?;
+    } else {
+        let updated = transaction.execute(
+            r#"
+            UPDATE camp_composer_draft
+            SET body = ?3,
+                structured_content_json = ?4,
+                reply_to_camp_message_id = ?5,
+                recipient_selection_required = ?6,
+                revision = revision + 1,
+                updated_at = ?7,
+                expires_at = ?8
+            WHERE camp_id = ?1 AND revision = ?2
+            "#,
+            params![
+                camp_id,
+                expected_revision,
+                body,
+                content_json,
+                reply_to_camp_message_id,
+                recipient_selection_required,
+                now,
+                expires_at,
+            ],
+        )?;
+        if updated != 1 {
+            anyhow::bail!("draft_changed");
+        }
+    }
+    Ok(true)
+}
+
+fn ensure_leading_recipient(
+    content: &mut StructuredCampMessageContent,
+    recipient: StructuredCampMessageSegment,
+) {
+    let covered = content.iter().any(|segment| match (&recipient, segment) {
+        (
+            StructuredCampMessageSegment::MemberMention {
+                agent_id: requested,
+            },
+            StructuredCampMessageSegment::MemberMention { agent_id: existing },
+        ) => requested == existing,
+        (
+            StructuredCampMessageSegment::MemberMention { .. },
+            StructuredCampMessageSegment::AllMembersMention,
+        )
+        | (
+            StructuredCampMessageSegment::AllMembersMention,
+            StructuredCampMessageSegment::AllMembersMention,
+        ) => true,
+        _ => false,
+    });
+    if covered {
+        return;
+    }
+    let has_leading_whitespace = matches!(
+        content.first(),
+        Some(StructuredCampMessageSegment::Text { text })
+            if text.chars().next().is_some_and(char::is_whitespace)
+    );
+    content.insert(0, recipient);
+    if !has_leading_whitespace {
+        content.insert(
+            1,
+            StructuredCampMessageSegment::Text {
+                text: " ".to_string(),
+            },
+        );
+    }
+    *content = normalize_content(std::mem::take(content));
+}
+
+fn active_reply_agent(connection: &Connection, camp_id: &str, agent_id: &str) -> Result<bool> {
+    connection
+        .query_row(
+            r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM camp_member
+                JOIN agent_profile ON agent_profile.id = camp_member.agent_id
+                WHERE camp_member.camp_id = ?1
+                  AND camp_member.agent_id = ?2
+                  AND camp_member.status = 'active'
+                  AND camp_member.leave_requested_at IS NULL
+                  AND agent_profile.profile_status = 'present'
+            )
+            "#,
+            params![camp_id, agent_id],
+            |row| row.get(0),
+        )
+        .context("failed to resolve reply author availability")
+}
+
+fn project_reply_intent(
+    database: &Database,
+    camp_id: &str,
+    reply_to_camp_message_id: Option<&str>,
+    recipient_selection_required: bool,
+) -> Result<Option<CampComposerReplyIntentView>> {
+    let Some(reply_to_camp_message_id) = reply_to_camp_message_id else {
+        return Ok(None);
+    };
+    let target = database
+        .connection()
+        .query_row(
+            r#"
+            SELECT author_type, author_id, body
+            FROM camp_message
+            WHERE id = ?1 AND camp_id = ?2 AND tombstoned_at IS NULL
+            "#,
+            params![reply_to_camp_message_id, camp_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((author_type, author_id, body)) = target else {
+        return Ok(Some(CampComposerReplyIntentView {
+            reply_to_camp_message_id: reply_to_camp_message_id.to_string(),
+            target_state: "message_unavailable".to_string(),
+            author: None,
+            excerpt: None,
+            recipient_selection_required,
+        }));
+    };
+    let (display_name, recipient_availability) = match author_type.as_str() {
+        "agent" => {
+            let display_name = database
+                .connection()
+                .query_row(
+                    "SELECT display_name FROM agent_profile WHERE id = ?1",
+                    [&author_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?
+                .unwrap_or_else(|| author_id.clone());
+            let availability = if active_reply_agent(database.connection(), camp_id, &author_id)? {
+                "available"
+            } else {
+                "unavailable"
+            };
+            (display_name, availability.to_string())
+        }
+        "user" => {
+            let display_name = if author_id == CURRENT_USER_ID {
+                CurrentUserResolver::resolve("zh-CN")
+                    .display_name
+                    .to_string()
+            } else {
+                author_id.clone()
+            };
+            (display_name, "not_applicable".to_string())
+        }
+        "system" => ("系统".to_string(), "not_applicable".to_string()),
+        _ => (author_id.clone(), "not_applicable".to_string()),
+    };
+    let excerpt = body
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(160)
+        .collect();
+    Ok(Some(CampComposerReplyIntentView {
+        reply_to_camp_message_id: reply_to_camp_message_id.to_string(),
+        target_state: "available".to_string(),
+        author: Some(CampComposerReplyAuthorView {
+            author_type,
+            author_id,
+            display_name,
+            recipient_availability,
+        }),
+        excerpt: Some(excerpt),
+        recipient_selection_required,
+    }))
 }
 
 pub fn consume_prepared_attachments(
@@ -1733,6 +2205,61 @@ mod tests {
             .unwrap();
     }
 
+    fn insert_test_member(database: &Database, camp_id: &str, agent_id: &str) {
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO camp_member(
+                    camp_id, agent_id, status, capability_overrides_json,
+                    version, joined_at
+                ) VALUES (?1, ?2, 'active', '{}', 1, '2026-08-14T00:00:00Z')
+                "#,
+                params![camp_id, agent_id],
+            )
+            .unwrap();
+    }
+
+    fn insert_test_message(
+        database: &Database,
+        camp_id: &str,
+        message_id: &str,
+        sequence: i64,
+        author_type: &str,
+        author_id: &str,
+        body: &str,
+    ) {
+        let content = serde_json::to_string(&vec![Segment::Text {
+            text: body.to_string(),
+        }])
+        .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO camp_message(
+                    id, camp_id, sequence, author_type, author_id, body,
+                    structured_content_json, content_digest, address_mode,
+                    addressed_agent_ids_json, version, created_at, updated_at
+                ) VALUES (
+                    ?1, ?2, ?3, ?4, ?5, ?6, ?7,
+                    'sha256:test-reply-parent', 'default', '[]', 1,
+                    '2026-08-14T00:00:00Z', '2026-08-14T00:00:00Z'
+                )
+                "#,
+                params![
+                    message_id,
+                    camp_id,
+                    sequence,
+                    author_type,
+                    author_id,
+                    body,
+                    content,
+                ],
+            )
+            .unwrap();
+    }
+
     #[test]
     fn structured_draft_save_uses_exact_monotonic_revisions() {
         let directory =
@@ -1815,6 +2342,240 @@ mod tests {
             .unwrap();
         assert_eq!(persisted_revision, 3);
 
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn reply_mutations_keep_reference_and_recipient_resolution_in_one_exact_draft() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai-draft-reply-test-{}", Uuid::new_v4()));
+        let mut database = Database::open(&directory).unwrap();
+        let camp_id = "camp-draft-reply";
+        insert_test_camp(&database, camp_id);
+        insert_test_member(&database, camp_id, "agent_2");
+        insert_test_member(&database, camp_id, "agent_3");
+        insert_test_message(
+            &database,
+            camp_id,
+            "reply-agent-message",
+            1,
+            "agent",
+            "agent_2",
+            "第一行\n第二行",
+        );
+        insert_test_message(
+            &database,
+            camp_id,
+            "reply-user-message",
+            2,
+            "user",
+            CURRENT_USER_ID,
+            "用户消息",
+        );
+        let store = CampAttachmentStore::new(&directory);
+        let saved = store
+            .save_content(
+                &mut database,
+                camp_id,
+                0,
+                vec![Segment::Text {
+                    text: "继续处理".into(),
+                }],
+            )
+            .unwrap();
+
+        let replying = store
+            .start_reply(
+                &mut database,
+                camp_id,
+                saved.revision,
+                "reply-agent-message",
+            )
+            .unwrap();
+        assert_eq!(replying.revision, saved.revision + 1);
+        assert_eq!(
+            replying.content,
+            vec![
+                Segment::MemberMention {
+                    agent_id: "agent_2".into()
+                },
+                Segment::Text {
+                    text: " 继续处理".into()
+                }
+            ]
+        );
+        let intent = replying.reply_intent.as_ref().unwrap();
+        assert_eq!(intent.reply_to_camp_message_id, "reply-agent-message");
+        assert_eq!(intent.target_state, "available");
+        assert_eq!(intent.excerpt.as_deref(), Some("第一行 第二行"));
+        assert_eq!(
+            intent.author.as_ref().unwrap().recipient_availability,
+            "available"
+        );
+        assert!(!intent.recipient_selection_required);
+
+        let idempotent = store
+            .start_reply(
+                &mut database,
+                camp_id,
+                replying.revision,
+                "reply-agent-message",
+            )
+            .unwrap();
+        assert_eq!(idempotent.revision, replying.revision);
+
+        let cancelled = store
+            .cancel_reply(&mut database, camp_id, idempotent.revision)
+            .unwrap();
+        assert!(cancelled.reply_intent.is_none());
+        assert!(matches!(
+            cancelled.content.first(),
+            Some(Segment::MemberMention { agent_id }) if agent_id == "agent_2"
+        ));
+
+        let user_reply = store
+            .start_reply(
+                &mut database,
+                camp_id,
+                cancelled.revision,
+                "reply-user-message",
+            )
+            .unwrap();
+        assert_eq!(
+            user_reply
+                .reply_intent
+                .as_ref()
+                .unwrap()
+                .author
+                .as_ref()
+                .unwrap()
+                .recipient_availability,
+            "not_applicable"
+        );
+        assert_eq!(user_reply.content, cancelled.content);
+
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET profile_status = 'away' WHERE id = 'agent_2'",
+                [],
+            )
+            .unwrap();
+        let unavailable = store
+            .start_reply(
+                &mut database,
+                camp_id,
+                user_reply.revision,
+                "reply-agent-message",
+            )
+            .unwrap();
+        assert!(
+            unavailable
+                .reply_intent
+                .as_ref()
+                .unwrap()
+                .recipient_selection_required
+        );
+        assert_eq!(
+            unavailable
+                .reply_intent
+                .as_ref()
+                .unwrap()
+                .author
+                .as_ref()
+                .unwrap()
+                .recipient_availability,
+            "unavailable"
+        );
+
+        let resolved = store
+            .resolve_reply_recipient(
+                &mut database,
+                camp_id,
+                unavailable.revision,
+                CampComposerReplyRecipient::Member {
+                    agent_id: "agent_3".into(),
+                },
+            )
+            .unwrap();
+        assert!(
+            !resolved
+                .reply_intent
+                .as_ref()
+                .unwrap()
+                .recipient_selection_required
+        );
+        assert!(resolved.content.iter().any(|segment| matches!(
+            segment,
+            Segment::MemberMention { agent_id } if agent_id == "agent_3"
+        )));
+        assert!(!resolved.content.iter().any(|segment| matches!(
+            segment,
+            Segment::MemberMention { agent_id } if agent_id == "agent_2"
+        )));
+
+        let conflict = store
+            .cancel_reply(&mut database, camp_id, unavailable.revision)
+            .unwrap_err();
+        assert!(conflict.to_string().contains("draft_changed"));
+        let invalid = store
+            .start_reply(&mut database, camp_id, resolved.revision, "missing-message")
+            .unwrap_err();
+        assert!(invalid.to_string().contains("camp_message.invalid_reply"));
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn unavailable_reply_author_never_inserts_an_invalid_mention() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-draft-unavailable-reply-test-{}",
+            Uuid::new_v4()
+        ));
+        let mut database = Database::open(&directory).unwrap();
+        let camp_id = "camp-unavailable-reply";
+        insert_test_camp(&database, camp_id);
+        insert_test_member(&database, camp_id, "agent_2");
+        insert_test_message(
+            &database,
+            camp_id,
+            "away-agent-message",
+            1,
+            "agent",
+            "agent_2",
+            "已经离队的作者",
+        );
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET profile_status = 'away' WHERE id = 'agent_2'",
+                [],
+            )
+            .unwrap();
+        let store = CampAttachmentStore::new(&directory);
+        let reply = store
+            .start_reply(&mut database, camp_id, 0, "away-agent-message")
+            .unwrap();
+        assert!(reply.content.is_empty());
+        assert_eq!(reply.revision, 1);
+        assert!(
+            reply
+                .reply_intent
+                .as_ref()
+                .unwrap()
+                .recipient_selection_required
+        );
+
+        store.discard_draft(&mut database, camp_id).unwrap();
+        assert!(
+            store
+                .load_draft(&database, camp_id)
+                .unwrap()
+                .reply_intent
+                .is_none()
+        );
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }

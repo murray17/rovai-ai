@@ -103,7 +103,6 @@ try {
     commandId: sendCommandId,
     campId,
     draftRevision: firstDraft.revision,
-    replyToCampMessageId: null,
     execution: {
       taskId: null,
       purpose: 'Verify configured Camp intake and public reply.',
@@ -148,7 +147,6 @@ try {
     commandId: crypto.randomUUID(),
     campId,
     draftRevision: followUpDraft.revision,
-    replyToCampMessageId: null,
     execution: {
       taskId: null,
       purpose: 'Verify continued Camp conversation.',

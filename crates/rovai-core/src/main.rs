@@ -62,7 +62,7 @@ use rovai_core::{
         COMPACTION_HOOK_IPC_PROTOCOL_VERSION, CompactionHookIpcRequest, CompactionHookIpcResponse,
         builtin_tool_catalog_digest, builtin_tool_description, recovery_for_error_code,
     },
-    camp_attachment::CampAttachmentStore,
+    camp_attachment::{CampAttachmentStore, CampComposerReplyRecipient},
     camp_content::StructuredCampMessageContent,
     camp_history::{
         CAMP_LIST_TOOL_NAME, CAMP_READ_TOOL_NAME, CAMP_SEARCH_TOOL_NAME, CampHistoryService,
@@ -574,7 +574,6 @@ struct SendCampMessageParams {
     command_id: String,
     camp_id: String,
     draft_revision: i64,
-    reply_to_camp_message_id: Option<String>,
     execution: Option<ExecutionRequest>,
 }
 
@@ -590,6 +589,29 @@ struct SaveCampComposerDraftParams {
     camp_id: String,
     expected_revision: i64,
     content: StructuredCampMessageContent,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct StartCampComposerReplyParams {
+    camp_id: String,
+    expected_revision: i64,
+    reply_to_camp_message_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct MutateCampComposerReplyParams {
+    camp_id: String,
+    expected_revision: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ResolveCampComposerReplyRecipientParams {
+    camp_id: String,
+    expected_revision: i64,
+    recipient: CampComposerReplyRecipient,
 }
 
 #[derive(Debug, Deserialize)]
@@ -3824,6 +3846,44 @@ impl Core {
                     )?,
                 )?)
             }
+            "camp.composerDraft.startReply" => {
+                let params: StartCampComposerReplyParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    CampAttachmentStore::new(&self.data_dir).start_reply(
+                        &mut database,
+                        &params.camp_id,
+                        params.expected_revision,
+                        &params.reply_to_camp_message_id,
+                    )?,
+                )?)
+            }
+            "camp.composerDraft.cancelReply" => {
+                let params: MutateCampComposerReplyParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    CampAttachmentStore::new(&self.data_dir).cancel_reply(
+                        &mut database,
+                        &params.camp_id,
+                        params.expected_revision,
+                    )?,
+                )?)
+            }
+            "camp.composerDraft.resolveReplyRecipient" => {
+                let params: ResolveCampComposerReplyRecipientParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    CampAttachmentStore::new(&self.data_dir).resolve_reply_recipient(
+                        &mut database,
+                        &params.camp_id,
+                        params.expected_revision,
+                        params.recipient,
+                    )?,
+                )?)
+            }
             "camp.composerDraft.removeAttachment" => {
                 let params: RemovePreparedAttachmentParams =
                     serde_json::from_value(request.params.clone())?;
@@ -4114,7 +4174,6 @@ impl Core {
             payload: SendUserCampDraftCommand {
                 camp_id: params.camp_id.clone(),
                 draft_revision: params.draft_revision,
-                reply_to_camp_message_id: params.reply_to_camp_message_id.clone(),
                 execution: params.execution.clone(),
             },
         };

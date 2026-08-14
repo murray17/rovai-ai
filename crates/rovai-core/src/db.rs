@@ -43,8 +43,10 @@ pub struct Database {
     path: PathBuf,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.73";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 37;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.76";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 38;
+const V083_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.73";
+const V083_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 37;
 const V082_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.71";
 const V082_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 36;
 const V081_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.71";
@@ -78,6 +80,7 @@ struct CurrentMigrationState {
     v80: bool,
     v81: bool,
     v82: bool,
+    v83: bool,
 }
 
 impl CurrentMigrationState {
@@ -87,6 +90,23 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83;
+        }
+        if self.v83 {
+            return false;
+        }
+        if contract == V083_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V083_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -277,7 +297,8 @@ fn has_current_data_contract(path: &Path) -> bool {
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 79),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 80),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 81),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 82)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 82),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 83)
         "#,
         [],
         |row| {
@@ -295,6 +316,7 @@ fn has_current_data_contract(path: &Path) -> bool {
                 v80: row.get(10)?,
                 v81: row.get(11)?,
                 v82: row.get(12)?,
+                v83: row.get(13)?,
             })
         },
     );
@@ -1391,6 +1413,9 @@ impl Database {
             if !self.schema_migration_applied(82)? {
                 self.migrate_memory_store_v3_v82()?;
             }
+            if !self.schema_migration_applied(83)? {
+                self.migrate_composer_reply_intent_v83()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -1686,6 +1711,9 @@ impl Database {
         }
         if !self.schema_migration_applied(82)? {
             self.migrate_memory_store_v3_v82()?;
+        }
+        if !self.schema_migration_applied(83)? {
+            self.migrate_composer_reply_intent_v83()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -9020,6 +9048,37 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_composer_reply_intent_v83(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE camp_composer_draft
+            ADD COLUMN reply_to_camp_message_id TEXT REFERENCES camp_message(id);
+
+            ALTER TABLE camp_composer_draft
+            ADD COLUMN recipient_selection_required INTEGER NOT NULL DEFAULT 0
+                CHECK(recipient_selection_required IN (0, 1));
+
+            UPDATE pending_execution_intent
+            SET payload_json = json_remove(payload_json, '$.replyToCampMessageId')
+            WHERE request_method = 'camp.messages.send'
+              AND json_type(payload_json, '$.replyToCampMessageId') IS NOT NULL;
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v0.76', projection_schema_version = 38,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (83, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -13425,13 +13484,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn current_data_contract_accepts_current_and_exact_v071_schema35_and_older_sources() {
+    fn current_data_contract_accepts_current_and_exact_upgrade_sources() {
         let directory =
             std::env::temp_dir().join(format!("rovai-current-contract-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
         let path = directory.join("rovai.sqlite");
 
         assert!(has_current_data_contract(&path));
+
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                UPDATE rovai_data_contract
+                SET contract_version = 'v0.73', projection_schema_version = 37
+                WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 83;
+                "#,
+            )
+            .unwrap();
+        assert!(
+            has_current_data_contract(&path),
+            "the exact v0.73/schema-37 marker without migration 83 is an upgrade source"
+        );
 
         database
             .connection()
@@ -15903,6 +15978,92 @@ mod tests {
             0
         );
         drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v83_preserves_existing_composer_drafts_and_installs_null_reply_state() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai-db-v83-draft-test-{}", Uuid::new_v4()));
+        let mut database = Database::open(&directory).expect("database should open");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO camp(
+                    id, title, name_origin, collaboration_mode,
+                    project_binding_kind, project_path, last_message_sequence,
+                    version, created_at, updated_at
+                ) VALUES (
+                    'v83-camp', 'Reply migration', 'user', 'peer',
+                    'quick_chat', '/quick-chat-v83', 0,
+                    1, '2026-08-14T00:00:00Z', '2026-08-14T00:00:00Z'
+                );
+                INSERT INTO camp_composer_draft(
+                    camp_id, body, structured_content_json, revision,
+                    created_at, updated_at, expires_at
+                ) VALUES (
+                    'v83-camp', '保留正文',
+                    '[{"kind":"text","text":"保留正文"}]', 7,
+                    '2026-08-14T00:00:00Z', '2026-08-14T00:01:00Z',
+                    '2026-08-21T00:01:00Z'
+                );
+
+                ALTER TABLE camp_composer_draft
+                    DROP COLUMN recipient_selection_required;
+                ALTER TABLE camp_composer_draft
+                    DROP COLUMN reply_to_camp_message_id;
+                DELETE FROM schema_migration WHERE version = 83;
+                UPDATE rovai_data_contract
+                SET contract_version = 'v0.73', projection_schema_version = 37
+                WHERE singleton = 1;
+                "#,
+            )
+            .expect("v82 Draft fixture should be restorable");
+
+        database
+            .migrate_composer_reply_intent_v83()
+            .expect("v83 migration should apply");
+
+        let draft: (String, String, i64, Option<String>, bool) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT body, structured_content_json, revision,
+                       reply_to_camp_message_id, recipient_selection_required
+                FROM camp_composer_draft WHERE camp_id = 'v83-camp'
+                "#,
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(draft.0, "保留正文");
+        assert_eq!(draft.1, "[{\"kind\":\"text\",\"text\":\"保留正文\"}]");
+        assert_eq!(draft.2, 7);
+        assert_eq!(draft.3, None);
+        assert!(!draft.4);
+        let contract: (String, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT contract_version, projection_schema_version
+                FROM rovai_data_contract WHERE singleton = 1
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(contract, ("v0.76".into(), 38));
+        assert!(database.schema_migration_applied(83).unwrap());
+        drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 

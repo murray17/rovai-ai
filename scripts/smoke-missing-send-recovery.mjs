@@ -273,7 +273,6 @@ async function startFollowUpRun(request, campId, body, purpose) {
     commandId: crypto.randomUUID(),
     campId,
     draftRevision: savedDraft.revision,
-    replyToCampMessageId: null,
     execution: { taskId: null, purpose, completionRole: 'required' }
   })
   return acceptedRunId(sent, campId)

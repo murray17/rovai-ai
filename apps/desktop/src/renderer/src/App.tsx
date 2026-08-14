@@ -1675,7 +1675,7 @@ export function App(): React.JSX.Element {
   }
 
   const settlePendingCampOnLeave = async (draft: CampComposerDraftView): Promise<void> => {
-    if (draft.body.trim() || draft.attachments.length > 0) {
+    if (draft.body.trim() || draft.attachments.length > 0 || draft.replyIntent) {
       await loadNavigation()
       return
     }
@@ -2473,7 +2473,7 @@ export function optimisticCampMessage(
     attachments: draft.attachments,
     addressMode: broadcast ? 'broadcast' : explicitlyMentionedIds.length > 0 ? 'explicit' : 'default',
     addressedAgentIds,
-    replyToCampMessageId: null,
+    replyToCampMessageId: draft.replyIntent?.replyToCampMessageId ?? null,
     campTurnId: null,
     presentation: null,
     createdAt
@@ -2488,7 +2488,6 @@ export function campMessageSendParams(
   commandId: string
   campId: string
   draftRevision: number
-  replyToCampMessageId: null
   execution: {
     taskId: null
     purpose: string
@@ -2499,7 +2498,6 @@ export function campMessageSendParams(
     commandId,
     campId,
     draftRevision: draft.revision,
-    replyToCampMessageId: null,
     execution: {
       taskId: null,
       purpose: draft.body.trim(),
@@ -2536,6 +2534,15 @@ export function campCreationPreflightFromAgents(
 }
 
 export function commandFailureMessage(result: StoredCommandResult): string {
+  if (result.code === 'reply_recipient_required') {
+    return '原作者当前不可接收，请选择其他成员。'
+  }
+  if (result.code === 'mention_target_unavailable') {
+    return '消息未发送：一位收件人当前不可接收，请重新选择。'
+  }
+  if (result.code === 'camp_message.invalid_reply') {
+    return '消息未发送：引用的消息当前不可用。请取消引用后重试。'
+  }
   if (
     result.code === 'camp_message.no_addressable_member'
     || result.code === 'camp.default_lead_invariant'

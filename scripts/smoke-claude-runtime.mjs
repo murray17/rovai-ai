@@ -78,7 +78,6 @@ try {
     campId,
     body: 'Reply with exactly ROVAI_CLAUDE_RUN_TWO and nothing else. Do not call tools.',
     address: { mode: 'default' },
-    replyToCampMessageId: null,
     execution: {
       taskId: null,
       purpose: 'Verify Claude Code Native Session resume.',

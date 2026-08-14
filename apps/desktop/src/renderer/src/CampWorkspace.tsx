@@ -10,7 +10,9 @@ import type {
   AgentRunExecutionEvidenceView,
   AgentRunView,
   CampComposerDraftView,
+  CampComposerReplyRecipient,
   CampMessageAttachmentView,
+  CampMessageAroundSnapshot,
   CampMessageView,
   CampSnapshot,
   MessageDeliveryView,
@@ -68,6 +70,45 @@ export type CampConversationView = 'conversation' | 'world'
 type AttachmentKind = 'file' | 'directory'
 type AttachmentDragKind = 'files' | 'directory'
 type AttachmentPreparationInput = { file: File; kindHint: AttachmentKind }
+type ReplyFocusModality = 'pointer' | 'keyboard'
+
+export function composerDraftNeedsReplyRepair(draft: CampComposerDraftView | null): boolean {
+  const intent = draft?.replyIntent
+  if (!intent) return false
+  if (intent.targetState === 'message_unavailable' || intent.recipientSelectionRequired) return true
+  const author = intent.author
+  return author?.authorType === 'agent'
+    && author.recipientAvailability === 'unavailable'
+    && draft.content.some((segment) =>
+      segment.kind === 'member_mention' && segment.agentId === author.authorId
+    )
+}
+
+export function composerRecipientSummary(
+  content: StructuredCampMessageContent,
+  members: CampSnapshot['members']
+): string {
+  const addressableMembers = members.filter((member) =>
+    member.membershipStatus === 'active' && member.profilePresence === 'present'
+  )
+  if (content.some((segment) => segment.kind === 'all_members_mention')) {
+    const names = addressableMembers.map((member) => member.displayName)
+    return names.length > 0
+      ? `发送给 @所有队员（${names.join('、')}）`
+      : '发送给 @所有队员（当前无可用队员）'
+  }
+  const mentionedIds = [...new Set(content.flatMap((segment) =>
+    segment.kind === 'member_mention' ? [segment.agentId] : []
+  ))]
+  if (mentionedIds.length > 0) {
+    const memberById = new Map(members.map((member) => [member.agentId, member]))
+    return `发送给 ${mentionedIds.map((agentId) =>
+      `@${memberById.get(agentId)?.displayName ?? '不可用队员'}`
+    ).join('、')}`
+  }
+  const defaultLead = members.find((member) => member.isDefaultLead)
+  return `Default Lead · ${defaultLead?.displayName ?? '当前不可用'}`
+}
 
 export function campConversationViewFromStoredValue(value: string | null): CampConversationView {
   return value === 'conversation' ? 'conversation' : 'world'
@@ -750,6 +791,9 @@ export function CampWorkspace({
   const [failedAttachments, setFailedAttachments] = useState<Array<{ id: string; name: string; kind: AttachmentKind; error: string }>>([])
   const [attachmentDragState, setAttachmentDragState] = useState<AttachmentDragKind | null>(null)
   const [composerSubmitting, setComposerSubmitting] = useState(false)
+  const [replyMutating, setReplyMutating] = useState(false)
+  const [replyInteractionError, setReplyInteractionError] = useState<string | null>(null)
+  const [suppressReplyFocusRing, setSuppressReplyFocusRing] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const [mentionPopover, setMentionPopover] = useState<MentionPopoverRequest | null>(null)
   const [composerSkillCatalog, setComposerSkillCatalog] = useState<{
@@ -768,6 +812,12 @@ export function CampWorkspace({
   const dragActivityTimer = useRef<number | null>(null)
   const attachmentPreparationQueue = useRef<Promise<void>>(Promise.resolve())
   const timelineScrollRef = useRef<HTMLDivElement>(null)
+  const replyRepairFirstOptionRef = useRef<HTMLButtonElement>(null)
+  const [anchoredMessages, setAnchoredMessages] = useState<CampMessageView[]>([])
+  const [replyAnchorWindows, setReplyAnchorWindows] = useState(
+    () => new Map<string, CampMessageView[] | null>()
+  )
+  const replyAnchorLoads = useRef(new Map<string, Promise<CampMessageView[] | null>>())
   const approvalDockRef = useRef<HTMLElement>(null)
   const lastTimelineItemId = useRef<string | null>(null)
   const [conversationView, setConversationView] = useState<CampConversationView>(() => {
@@ -933,12 +983,27 @@ export function CampWorkspace({
     [executionProcesses]
   )
   const visibleCampMessages = useMemo(() => {
-    const persistedIds = new Set(snapshot.messages.map((message) => message.id))
-    return [
-      ...snapshot.messages,
-      ...optimisticMessages.filter((message) => !persistedIds.has(message.id))
-    ]
-  }, [optimisticMessages, snapshot.messages])
+    const messages = new Map<string, CampMessageView>()
+    for (const message of anchoredMessages) messages.set(message.id, message)
+    for (const message of snapshot.messages) messages.set(message.id, message)
+    for (const message of optimisticMessages) {
+      if (!messages.has(message.id)) messages.set(message.id, message)
+    }
+    return [...messages.values()].sort((left, right) =>
+      left.sequence - right.sequence || left.id.localeCompare(right.id)
+    )
+  }, [anchoredMessages, optimisticMessages, snapshot.messages])
+  const visibleMessageById = useMemo(
+    () => new Map(visibleCampMessages.map((message) => [message.id, message])),
+    [visibleCampMessages]
+  )
+  const replyParentById = useMemo(() => {
+    const messages = new Map(visibleMessageById)
+    for (const windowMessages of replyAnchorWindows.values()) {
+      for (const message of windowMessages ?? []) messages.set(message.id, message)
+    }
+    return messages
+  }, [replyAnchorWindows, visibleMessageById])
   const conversationTimeline = useMemo(
     () => campConversationTimeline(
       visibleCampMessages,
@@ -956,6 +1021,11 @@ export function CampWorkspace({
     ]
   )
   const defaultLead = snapshot.members.find((member) => member.isDefaultLead) ?? null
+  const replyRepairRequired = composerDraftNeedsReplyRepair(composerDraft)
+  const recipientSummary = useMemo(
+    () => composerRecipientSummary(messageContent, snapshot.members),
+    [messageContent, snapshot.members]
+  )
   const composerSkills = useMemo(
     () => availableComposerSkillsForLead(
       composerSkillCatalog.skills,
@@ -1061,6 +1131,183 @@ export function CampWorkspace({
     })
   )
 
+  const loadReplyAnchorWindow = useCallback((messageId: string): Promise<CampMessageView[] | null> => {
+    const existing = replyAnchorLoads.current.get(messageId)
+    if (existing) return existing
+    const campId = snapshot.camp.id
+    const request = window.rovai.request<CampMessageAroundSnapshot>('camp.messages.around', {
+      campId,
+      messageId
+    }).then((around) => {
+      if (
+        around.schemaVersion !== 1
+        || around.campId !== campId
+        || around.anchorMessageId !== messageId
+        || (around.sourceAvailable && !around.messages.some((message) => message.id === messageId))
+      ) throw new Error('消息定位合同不兼容。')
+      return around.sourceAvailable ? around.messages : null
+    }).catch(() => null).then((messages) => {
+      if (draftCampId.current === campId) {
+        setReplyAnchorWindows((current) => {
+          const next = new Map(current)
+          next.set(messageId, messages)
+          return next
+        })
+      }
+      return messages
+    }).finally(() => {
+      replyAnchorLoads.current.delete(messageId)
+    })
+    replyAnchorLoads.current.set(messageId, request)
+    return request
+  }, [snapshot.camp.id])
+
+  useEffect(() => {
+    const missingReplyIds = new Set(visibleCampMessages.flatMap((message) => {
+      const replyId = message.replyToCampMessageId
+      return replyId && !visibleMessageById.has(replyId) && !replyAnchorWindows.has(replyId)
+        ? [replyId]
+        : []
+    }))
+    for (const messageId of missingReplyIds) void loadReplyAnchorWindow(messageId)
+  }, [loadReplyAnchorWindow, replyAnchorWindows, visibleCampMessages, visibleMessageById])
+
+  const syncReplyDraft = (draft: CampComposerDraftView): CampComposerDraftView => {
+    applyComposerDraft(draft.campId, draft)
+    setMessageContent(draft.content)
+    draftContent.current = draft.content
+    return draft
+  }
+
+  const mutateReplyDraft = (
+    method:
+      | 'camp.composerDraft.startReply'
+      | 'camp.composerDraft.cancelReply'
+      | 'camp.composerDraft.resolveReplyRecipient',
+    params: Record<string, unknown>
+  ): Promise<CampComposerDraftView> => {
+    if (draftSaveTimer.current !== null) {
+      window.clearTimeout(draftSaveTimer.current)
+      draftSaveTimer.current = null
+    }
+    const campId = snapshot.camp.id
+    const localContent = draftContent.current
+    return queueDraftMutation(campId, async (draft) => {
+      const exactDraft = JSON.stringify(draft.content) === JSON.stringify(localContent)
+        ? draft
+        : await window.rovai.request<CampComposerDraftView>('camp.composerDraft.save', {
+            campId,
+            expectedRevision: draft.revision,
+            content: localContent
+          })
+      return window.rovai.request<CampComposerDraftView>(method, {
+        campId,
+        expectedRevision: exactDraft.revision,
+        ...params
+      })
+    }).then(syncReplyDraft)
+  }
+
+  const focusComposerAtEnd = (modality: ReplyFocusModality): void => {
+    setSuppressReplyFocusRing(modality === 'pointer')
+    window.requestAnimationFrame(() => {
+      const editor = composerEditorRef.current
+      if (!editor) return
+      editor.focus({ preventScroll: true })
+      const selection = window.getSelection()
+      const range = document.createRange()
+      range.selectNodeContents(editor)
+      range.collapse(false)
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+    })
+  }
+
+  const startReply = async (
+    message: CampMessageView,
+    modality: ReplyFocusModality
+  ): Promise<void> => {
+    if (message.id.startsWith('optimistic:') || replyMutating) return
+    setReplyMutating(true)
+    setReplyInteractionError(null)
+    try {
+      const draft = await mutateReplyDraft('camp.composerDraft.startReply', {
+        replyToCampMessageId: message.id
+      })
+      if (composerDraftNeedsReplyRepair(draft)) {
+        setSuppressReplyFocusRing(false)
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => replyRepairFirstOptionRef.current?.focus())
+        })
+      } else {
+        focusComposerAtEnd(modality)
+      }
+    } catch (error) {
+      setReplyInteractionError(replyDraftErrorMessage(error))
+    } finally {
+      setReplyMutating(false)
+    }
+  }
+
+  const cancelReply = async (): Promise<void> => {
+    if (replyMutating) return
+    setReplyMutating(true)
+    setReplyInteractionError(null)
+    try {
+      await mutateReplyDraft('camp.composerDraft.cancelReply', {})
+      focusComposerAtEnd('keyboard')
+    } catch (error) {
+      setReplyInteractionError(replyDraftErrorMessage(error))
+    } finally {
+      setReplyMutating(false)
+    }
+  }
+
+  const resolveReplyRecipient = async (recipient: CampComposerReplyRecipient): Promise<void> => {
+    if (replyMutating) return
+    setReplyMutating(true)
+    setReplyInteractionError(null)
+    try {
+      await mutateReplyDraft('camp.composerDraft.resolveReplyRecipient', { recipient })
+      focusComposerAtEnd('keyboard')
+    } catch (error) {
+      setReplyInteractionError(replyDraftErrorMessage(error))
+    } finally {
+      setReplyMutating(false)
+    }
+  }
+
+  const revealReplyParent = async (messageId: string): Promise<void> => {
+    setConversationView('conversation')
+    const existing = timelineScrollRef.current?.querySelector<HTMLElement>(
+      `[data-message-id="${CSS.escape(messageId)}"]`
+    )
+    if (existing) {
+      existing.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      existing.focus({ preventScroll: true })
+      return
+    }
+    const messages = replyAnchorWindows.get(messageId) ?? await loadReplyAnchorWindow(messageId)
+    if (!messages) {
+      setReplyInteractionError('引用的消息当前不可用。')
+      return
+    }
+    setAnchoredMessages((current) => {
+      const merged = new Map(current.map((message) => [message.id, message]))
+      for (const message of messages) merged.set(message.id, message)
+      return [...merged.values()]
+    })
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const target = timelineScrollRef.current?.querySelector<HTMLElement>(
+          `[data-message-id="${CSS.escape(messageId)}"]`
+        )
+        target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        target?.focus({ preventScroll: true })
+      })
+    })
+  }
+
   useEffect(() => {
     const campId = snapshot.camp.id
     let cancelled = false
@@ -1077,6 +1324,11 @@ export function CampWorkspace({
     setPreparingAttachments([])
     setFailedAttachments([])
     setAttachmentDragState(null)
+    setAnchoredMessages([])
+    setReplyAnchorWindows(new Map())
+    replyAnchorLoads.current.clear()
+    setReplyInteractionError(null)
+    setSuppressReplyFocusRing(false)
     setMessageContent([])
     draftContent.current = []
     draftCampId.current = campId
@@ -1099,6 +1351,7 @@ export function CampWorkspace({
             content: [],
             revision: 0,
             attachments: [],
+            replyIntent: null,
             updatedAt: null,
             expiresAt: null
           }
@@ -1135,10 +1388,10 @@ export function CampWorkspace({
   }, [pendingApprovals.length])
 
   useEffect(() => {
-    if (busy || composerSubmitting) return
+    if (busy || composerSubmitting || replyRepairRequired) return
     if (approvalDockRef.current?.contains(document.activeElement)) return
     composerEditorRef.current?.focus()
-  }, [busy, composerSubmitting])
+  }, [busy, composerSubmitting, replyRepairRequired])
 
   useEffect(() => {
     if (!notificationFocus?.active || notificationFocus.kind === 'approval') return
@@ -1221,14 +1474,17 @@ export function CampWorkspace({
       executionBlocked
       || !message.trim()
       || hasUnavailableMention
+      || replyRepairRequired
       || busy
       || composerSubmitting
+      || replyMutating
       || composerDraft === null
       || preparingAttachments.length > 0
       || failedAttachments.length > 0
     ) return
     setComposerSubmitting(true)
     let sendAttempted = false
+    let restoreEditorFocus = true
     try {
       if (draftSaveTimer.current !== null) {
         window.clearTimeout(draftSaveTimer.current)
@@ -1249,6 +1505,7 @@ export function CampWorkspace({
         content: [],
         revision: 0,
         attachments: [],
+        replyIntent: null,
         updatedAt: null,
         expiresAt: null
       }
@@ -1259,19 +1516,29 @@ export function CampWorkspace({
     } catch {
       if (sendAttempted) {
         const campId = snapshot.camp.id
-        void window.rovai.request<CampComposerDraftView>('camp.composerDraft.get', { campId })
-          .then((draft) => {
-            if (draftCampId.current !== campId) return
-            applyComposerDraft(campId, draft)
-            setMessageContent(draft.content)
-            draftContent.current = draft.content
-          })
-          .catch(() => undefined)
+        try {
+          const draft = await window.rovai.request<CampComposerDraftView>(
+            'camp.composerDraft.get',
+            { campId }
+          )
+          if (draftCampId.current === campId) {
+            syncReplyDraft(draft)
+            if (composerDraftNeedsReplyRepair(draft)) {
+              restoreEditorFocus = false
+              window.requestAnimationFrame(() => {
+                window.requestAnimationFrame(() => replyRepairFirstOptionRef.current?.focus())
+              })
+            }
+          }
+        } catch {
+          // The App-level error remains visible; a later Camp refresh can recover the Draft.
+        }
       }
-      composerEditorRef.current?.focus()
     } finally {
       setComposerSubmitting(false)
-      window.requestAnimationFrame(() => composerEditorRef.current?.focus())
+      if (restoreEditorFocus) {
+        window.requestAnimationFrame(() => composerEditorRef.current?.focus())
+      }
     }
   }
 
@@ -1664,6 +1931,13 @@ export function CampWorkspace({
                   const campMessageDeliveries = snapshot.messageDeliveries.filter((delivery) =>
                     delivery.messageId === campMessage.id
                   )
+                  const replyParentId = campMessage.replyToCampMessageId
+                  const replyParent = replyParentId ? replyParentById.get(replyParentId) ?? null : null
+                  const replyParentUnavailable = Boolean(
+                    replyParentId
+                    && replyAnchorWindows.has(replyParentId)
+                    && replyAnchorWindows.get(replyParentId) === null
+                  )
                   items.push(
                     <article
                       className={`timeline-node conversation-bubble ${campMessage.authorType}${followsSameAuthor ? ' same-author' : ''}`}
@@ -1726,12 +2000,26 @@ export function CampWorkspace({
                               <MessageSurface
                                 copied={copiedMessageId === campMessage.id}
                                 hasDelivery={campMessageDeliveries.length > 0}
+                                onReply={campMessage.id.startsWith('optimistic:')
+                                  ? undefined
+                                  : (modality) => void startReply(campMessage, modality)}
                                 onCopy={() => copyMessage(
                                   campMessage.id,
                                   displayBody,
                                   campMessage.content
                                 )}
                               >
+                                {replyParentId && (
+                                  <ReplyParentQuote
+                                    parent={replyParent}
+                                    authorLabel={replyParent
+                                      ? campMessageAuthorLabel(replyParent, snapshot.members)
+                                      : null}
+                                    unavailable={replyParentUnavailable}
+                                    loading={!replyParent && !replyParentUnavailable}
+                                    onReveal={() => void revealReplyParent(replyParentId)}
+                                  />
+                                )}
                                 {campMessage.authorType === 'agent'
                                   && !campMessage.content?.some((segment) =>
                                     segment.kind === 'current_user_mention'
@@ -1924,8 +2212,18 @@ export function CampWorkspace({
           )}
 
           <form
-        className={attachmentDragState ? 'composer is-dragging-attachments' : 'composer'}
+        className={[
+          'composer',
+          attachmentDragState ? 'is-dragging-attachments' : '',
+          suppressReplyFocusRing ? 'suppress-reply-focus-ring' : ''
+        ].filter(Boolean).join(' ')}
         onSubmit={(event) => void submit(event)}
+        onKeyDownCapture={() => setSuppressReplyFocusRing(false)}
+        onBlurCapture={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+            setSuppressReplyFocusRing(false)
+          }
+        }}
       >
         <div className="composer-box">
           {attachmentDragState && (
@@ -1967,6 +2265,82 @@ export function CampWorkspace({
                   </div>
                 )
               : null}
+            {composerDraft?.replyIntent && (
+              <div className="composer-reply-region">
+                <div
+                  className={`composer-reply-line${replyRepairRequired ? ' needs-repair' : ''}`}
+                  title={`${composerDraft.replyIntent.author?.displayName ?? '引用消息'} · ${composerDraft.replyIntent.excerpt ?? '引用的消息当前不可用'}`}
+                >
+                  <ReplyMark />
+                  <span className="composer-reply-copy">
+                    <strong>回复 {composerDraft.replyIntent.author?.displayName ?? '引用消息'}</strong>
+                    <span>{composerDraft.replyIntent.excerpt ?? '引用的消息当前不可用'}</span>
+                  </span>
+                  <button
+                    ref={composerDraft.replyIntent.targetState === 'message_unavailable'
+                      ? replyRepairFirstOptionRef
+                      : undefined}
+                    className="composer-reply-cancel"
+                    type="button"
+                    aria-label="取消回复"
+                    disabled={replyMutating}
+                    onClick={() => void cancelReply()}
+                  >
+                    取消
+                  </button>
+                </div>
+                {replyRepairRequired && (
+                  <div className="reply-recipient-repair" role="alert" aria-live="assertive">
+                    {composerDraft.replyIntent.targetState === 'message_unavailable'
+                      ? (
+                          <div className="reply-recipient-repair-copy">
+                            <strong>引用的消息当前不可用</strong>
+                            <span>请取消引用后再发送，草稿内容会继续保留。</span>
+                          </div>
+                        )
+                      : (
+                          <>
+                            <div className="reply-recipient-repair-copy">
+                              <strong>原作者当前不可接收，请选择其他成员</strong>
+                              <span>引用会保留；只有你显式选择新接收者后才能发送。</span>
+                            </div>
+                            <div className="reply-recipient-options" aria-label="选择替代接收者">
+                              {composerMembers.filter((member) => member.mentionable !== false).map((member, index) => (
+                                <button
+                                  ref={index === 0 ? replyRepairFirstOptionRef : undefined}
+                                  className="quiet-button compact"
+                                  type="button"
+                                  key={member.agentId}
+                                  disabled={replyMutating}
+                                  onClick={() => void resolveReplyRecipient({
+                                    kind: 'member',
+                                    agentId: member.agentId
+                                  })}
+                                >
+                                  @{member.displayName}
+                                </button>
+                              ))}
+                              <button
+                                ref={composerMembers.every((member) => member.mentionable === false)
+                                  ? replyRepairFirstOptionRef
+                                  : undefined}
+                                className="quiet-button compact"
+                                type="button"
+                                disabled={replyMutating}
+                                onClick={() => void resolveReplyRecipient({ kind: 'all_members' })}
+                              >
+                                @所有队员
+                              </button>
+                            </div>
+                          </>
+                        )}
+                  </div>
+                )}
+                <span className="composer-reply-status" role="status" aria-live="polite">
+                  {replyInteractionError ?? ''}
+                </span>
+              </div>
+            )}
             <StructuredMentionComposer
               id="camp-message"
               value={messageContent}
@@ -1980,7 +2354,7 @@ export function CampWorkspace({
               skillCatalogStatus={composerSkillCatalog.status}
               ariaLabel={`给 ${defaultLead?.displayName ?? '默认负责人'} 发消息`}
               placeholder="继续提问、补充约束或交付下一项职责…"
-              disabled={busy || composerSubmitting}
+              disabled={busy || composerSubmitting || replyMutating}
               editorRef={composerEditorRef}
               onActivateMemberMention={(member, trigger, focusPanel) =>
                 openMemberProfilePopover(member.agentId, trigger, focusPanel)}
@@ -1994,9 +2368,14 @@ export function CampWorkspace({
                   focusPanel
                 )}
             />
-            <span className="mention-target-summary">
-              未提及时发送给负责人
+            <span className="mention-target-summary" title={recipientSummary}>
+              {recipientSummary}
             </span>
+            {!composerDraft?.replyIntent && replyInteractionError && (
+              <span className="composer-reply-status" role="status" aria-live="polite">
+                {replyInteractionError}
+              </span>
+            )}
           </div>
           <div className="composer-actions">
             {!executionBlocked && <span className="composer-hint">Enter</span>}
@@ -2019,8 +2398,10 @@ export function CampWorkspace({
                     disabled={
                       !message.trim()
                       || hasUnavailableMention
+                      || replyRepairRequired
                       || busy
                       || composerSubmitting
+                      || replyMutating
                       || composerDraft === null
                       || preparingAttachments.length > 0
                       || failedAttachments.length > 0
@@ -3416,20 +3797,82 @@ function StopOutcomeEvent({
   )
 }
 
+function campMessageAuthorLabel(
+  message: CampMessageView,
+  members: CampSnapshot['members']
+): string {
+  if (message.authorType === 'user') return '你'
+  if (message.authorType === 'system') return '系统'
+  return members.find((member) => member.agentId === message.authorId)?.displayName
+    ?? message.authorId
+}
+
+function ReplyParentQuote({
+  parent,
+  authorLabel,
+  unavailable,
+  loading,
+  onReveal
+}: {
+  parent: CampMessageView | null
+  authorLabel: string | null
+  unavailable: boolean
+  loading: boolean
+  onReveal(): void
+}): JSX.Element {
+  if (!parent) {
+    return (
+      <div className={`reply-parent-quote is-static${unavailable ? ' is-unavailable' : ''}`}>
+        <ReplyMark />
+        <span>{unavailable ? '引用的消息当前不可用' : loading ? '正在载入引用…' : '引用消息'}</span>
+      </div>
+    )
+  }
+  const excerpt = parent.body.split(/\s+/u).filter(Boolean).join(' ')
+  const label = `${authorLabel ?? '原消息'} · ${excerpt}`
+  return (
+    <button className="reply-parent-quote" type="button" title={label} onClick={onReveal}>
+      <ReplyMark />
+      <strong>{authorLabel ?? '原消息'}</strong>
+      <span>{excerpt}</span>
+    </button>
+  )
+}
+
+function ReplyMark(): JSX.Element {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M6.3 4.1 2.7 7.3l3.6 3.2M3 7.3h5.4c2.7 0 4.2 1.2 4.6 3.6" />
+    </svg>
+  )
+}
+
 function MessageSurface({
   copied,
   hasDelivery,
+  onReply,
   onCopy,
   children
 }: {
   copied: boolean
   hasDelivery: boolean
+  onReply?(modality: ReplyFocusModality): void
   onCopy(): void
   children: React.ReactNode
 }): JSX.Element {
   return (
     <div className={`message-surface${hasDelivery ? ' has-delivery' : ''}${copied ? ' copied' : ''}`}>
       {children}
+      {onReply && (
+        <button
+          className="message-reply-button"
+          type="button"
+          aria-label="回复这条消息"
+          onClick={(event) => onReply(event.detail === 0 ? 'keyboard' : 'pointer')}
+        >
+          回复
+        </button>
+      )}
       <MessageCopyButton copied={copied} onCopy={onCopy} />
       <span className="copy-feedback" role="status" aria-live="polite">
         {copied ? '已复制' : ''}
@@ -3754,6 +4197,16 @@ function attachmentErrorMessage(error: unknown): string {
   if (message.includes('unsupported item')) return '文件夹包含不支持的项目'
   if (message.includes('regular files and directories')) return '仅支持普通文件或文件夹'
   return '安全接入失败，可移除后重试'
+}
+
+function replyDraftErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  if (message.includes('draft_changed')) return '草稿已在其他位置更新，请重试。'
+  if (message.includes('mention_target_unavailable')) {
+    return '所选成员当前不可接收，请选择其他成员。'
+  }
+  if (message.includes('camp_message.invalid_reply')) return '引用的消息当前不可用。'
+  return '回复状态未能更新，草稿内容已保留，请重试。'
 }
 
 type TaskTimelineCardPresentation = {

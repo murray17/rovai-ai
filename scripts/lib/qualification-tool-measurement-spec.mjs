@@ -112,7 +112,6 @@ export async function materializeToolMeasurementFixtures({
       commandId: crypto.randomUUID(),
       campId,
       draftRevision: saved.revision,
-      replyToCampMessageId: null,
       execution: null
     })
     const result = response.commandResult ?? response

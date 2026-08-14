@@ -1,0 +1,772 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rovai AI · 消息回复链交互稿</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #eceeef;
+      --surface: #fbfbfa;
+      --surface-raised: #ffffff;
+      --surface-subtle: #f0f2f4;
+      --surface-muted: #e7eaed;
+      --surface-hover: #e8eaea;
+      --conversation-surface: #ffffff;
+      --ink: #171b20;
+      --muted: #616a73;
+      --faint: #6e7382;
+      --line: #dfe4e8;
+      --line-strong: #c7cfd6;
+      --control-line: #8b9389;
+      --brand: #526f88;
+      --brand-hover: #3d5874;
+      --brand-contrast: #ffffff;
+      --brand-soft: #e9eef3;
+      --brand-ink: #405f7e;
+      --mention: #2f61c8;
+      --mention-soft: rgba(47, 97, 200, 0.08);
+      --success: #3e775c;
+      --success-soft: #e7f1ea;
+      --attention: #8a6226;
+      --attention-soft: #f8edda;
+      --danger: #a24c46;
+      --danger-soft: #f7e6e3;
+      --identity-1: #a65f4a;
+      --identity-2: #39777a;
+      --identity-3: #74628f;
+      --focus: #526f88;
+      --focus-soft: rgba(82, 111, 136, 0.16);
+      --shadow: 0 18px 56px rgba(38, 45, 58, 0.14);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--canvas);
+      font-synthesis: none;
+      text-rendering: optimizeLegibility;
+    }
+
+    :root[data-theme="night"] {
+      color-scheme: dark;
+      --canvas: #0d1114;
+      --surface: #151a1e;
+      --surface-raised: #1b2227;
+      --surface-subtle: #1a2024;
+      --surface-muted: #242d33;
+      --surface-hover: #1d252b;
+      --conversation-surface: #181d21;
+      --ink: #e7ecef;
+      --muted: #abb5bc;
+      --faint: #919da6;
+      --line: #333e46;
+      --line-strong: #53616b;
+      --control-line: #687b88;
+      --brand: #7897ae;
+      --brand-hover: #b1c8d8;
+      --brand-contrast: #091116;
+      --brand-soft: #22303a;
+      --brand-ink: #c0d4e1;
+      --mention: #9cc7e2;
+      --mention-soft: rgba(156, 199, 226, 0.08);
+      --success: #82b695;
+      --success-soft: #1a2b22;
+      --attention: #d2ac70;
+      --attention-soft: #302719;
+      --danger: #d6857f;
+      --danger-soft: #321e1d;
+      --identity-1: #c98572;
+      --identity-2: #70b0ae;
+      --identity-3: #a89ac8;
+      --focus: #8fb3cb;
+      --focus-soft: rgba(143, 179, 203, 0.18);
+      --shadow: 0 22px 64px rgba(0, 0, 0, 0.42);
+    }
+
+    * { box-sizing: border-box; }
+    html { min-width: 320px; background: var(--canvas); }
+    body { min-width: 320px; margin: 0; padding: 22px; background: var(--canvas); }
+    button, textarea, [contenteditable="true"] { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, [contenteditable="true"]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+    button:disabled { opacity: .46; cursor: not-allowed; }
+    button:not(:disabled) { cursor: pointer; }
+
+    .prototype-shell { width: min(1180px, 100%); margin: 0 auto; }
+    .prototype-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 13px; }
+    .prototype-kicker { margin: 0 0 5px; color: var(--brand-ink); font: 700 10px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .11em; text-transform: uppercase; }
+    .prototype-heading h1 { margin: 0; font-size: clamp(20px, 3vw, 28px); line-height: 1.18; letter-spacing: -.035em; }
+    .prototype-heading p:last-child { max-width: 680px; margin: 7px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+    .theme-toggle { flex: 0 0 auto; min-height: 34px; padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: 7px; color: var(--muted); background: var(--surface); }
+    .theme-toggle:hover { color: var(--ink); background: var(--surface-muted); }
+
+    .choice-bar { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-bottom: 9px; }
+    .choice-button { display: grid; min-width: 0; min-height: 61px; grid-template-columns: auto minmax(0, 1fr); gap: 4px 9px; align-content: center; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: var(--surface); text-align: left; }
+    .choice-button:hover { border-color: var(--line-strong); color: var(--ink); background: var(--surface-raised); }
+    .choice-button[aria-pressed="true"] { border-color: var(--brand); color: var(--ink); background: var(--brand-soft); box-shadow: inset 3px 0 0 var(--brand); }
+    .choice-number { grid-row: 1 / span 2; align-self: center; color: var(--brand-ink); font: 700 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .choice-button strong { overflow: hidden; color: inherit; font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .choice-button small { overflow: hidden; color: var(--faint); font-size: 9.5px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+
+    .scenario-bar { display: flex; align-items: center; gap: 5px; margin-bottom: 10px; padding: 6px; overflow-x: auto; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); scrollbar-width: thin; }
+    .scenario-label { flex: 0 0 auto; padding: 0 6px 0 3px; color: var(--faint); font: 700 9.5px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; text-transform: uppercase; }
+    .scenario-button { flex: 0 0 auto; min-height: 31px; padding: 5px 9px; border: 1px solid transparent; border-radius: 6px; color: var(--muted); background: transparent; font-size: 11px; }
+    .scenario-button:hover { color: var(--ink); background: var(--surface-muted); }
+    .scenario-button[aria-pressed="true"] { border-color: var(--line); color: var(--brand-ink); background: var(--brand-soft); font-weight: 700; }
+
+    .app-window { overflow: hidden; border: 1px solid var(--line-strong); border-radius: 11px; background: var(--conversation-surface); box-shadow: var(--shadow); }
+    .window-bar { display: grid; min-height: 51px; grid-template-columns: 220px minmax(0, 1fr) auto; align-items: center; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .brand-lockup { display: flex; align-items: center; gap: 9px; padding: 0 14px; }
+    .brand-mark { display: grid; width: 25px; height: 25px; place-items: center; border-radius: 7px; color: var(--brand-contrast); background: var(--brand); font: 800 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .brand-lockup strong { font-size: 12px; letter-spacing: -.01em; }
+    .camp-title { min-width: 0; padding: 0 18px; border-left: 1px solid var(--line); }
+    .camp-title strong, .camp-title span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .camp-title strong { font-size: 12px; }
+    .camp-title span { margin-top: 2px; color: var(--faint); font: 9.5px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .member-stack { display: flex; align-items: center; padding: 0 15px; }
+    .member-stack span { display: grid; width: 27px; height: 27px; margin-left: -6px; place-items: center; border: 2px solid var(--surface); border-radius: 50%; color: var(--surface-raised); background: var(--identity-1); font-size: 9px; font-weight: 800; }
+    .member-stack span:first-child { margin-left: 0; }
+    .member-stack span:nth-child(2) { background: var(--identity-2); }
+    .member-stack span:nth-child(3) { background: var(--identity-3); }
+
+    .workspace { display: grid; min-height: 690px; grid-template-columns: 220px minmax(0, 1fr); }
+    .rail { padding: 14px 10px; border-right: 1px solid var(--line); background: var(--surface-subtle); }
+    .rail-section-title { margin: 6px 7px 8px; color: var(--faint); font: 700 9px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .09em; text-transform: uppercase; }
+    .rail-item { display: flex; width: 100%; min-height: 34px; align-items: center; gap: 9px; padding: 6px 8px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; text-align: left; font-size: 11.5px; }
+    .rail-item:hover { color: var(--ink); background: var(--surface-muted); }
+    .rail-item.active { color: var(--brand-ink); background: var(--surface-raised); font-weight: 700; box-shadow: inset 2px 0 0 var(--brand); }
+    .rail-dot { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: var(--success); }
+    .rail-item small { margin-left: auto; color: var(--faint); font: 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .rail-rule { height: 1px; margin: 13px 7px; background: var(--line); }
+    .rail-member { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 39px; padding: 5px 7px; color: var(--muted); font-size: 11px; }
+    .mini-avatar { display: grid; width: 26px; height: 26px; place-items: center; border-radius: 50%; color: var(--surface-raised); background: var(--identity-1); font-size: 9px; font-weight: 800; }
+    .rail-member:nth-of-type(3) .mini-avatar { background: var(--identity-2); }
+    .rail-member:nth-of-type(4) .mini-avatar { background: var(--identity-3); }
+    .member-state { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+    .member-state.away { border: 1px solid var(--attention); background: transparent; }
+
+    .conversation { display: grid; min-width: 0; grid-template-rows: minmax(0, 1fr) auto; background: var(--conversation-surface); }
+    .timeline { min-height: 0; padding: 24px 27px 28px; overflow-y: auto; scroll-behavior: smooth; }
+    .timeline-track { width: min(790px, 100%); margin: 0 auto; }
+    .day-rule { display: flex; align-items: center; gap: 12px; margin: 0 0 18px; color: var(--faint); font: 500 10px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .day-rule::before, .day-rule::after { height: 1px; flex: 1 1 auto; background: var(--line); content: ""; }
+
+    .message { position: relative; display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 10px; margin: 16px 0; padding: 1px; border-radius: 8px; scroll-margin: 80px; }
+    .message::before { position: absolute; z-index: 0; inset: -6px -8px; border-radius: 8px; background: transparent; content: ""; pointer-events: none; transition: background-color 120ms ease; }
+    .message:hover::before, .message:focus-within::before, .message.is-target::before { background: color-mix(in srgb, var(--brand) 7%, var(--conversation-surface)); }
+    .message > * { position: relative; z-index: 1; }
+    .avatar { display: grid; width: 32px; height: 32px; place-items: center; border: 1px solid color-mix(in srgb, var(--brand) 36%, var(--line)); border-radius: 50%; color: var(--surface-raised); background: var(--identity-1); font-size: 10px; font-weight: 800; }
+    .message[data-author="muwa"] .avatar { background: var(--identity-2); }
+    .message[data-author="qingyu"] .avatar { background: var(--identity-3); }
+    .message[data-author="you"] .avatar { color: var(--brand-ink); background: var(--surface-raised); }
+    .message-main { min-width: 0; padding-right: 62px; }
+    .message-meta { display: flex; min-height: 20px; align-items: baseline; gap: 7px; margin-bottom: 3px; }
+    .message-meta strong { color: var(--identity-1); font-size: 11.5px; }
+    .message[data-author="muwa"] .message-meta strong { color: var(--identity-2); }
+    .message[data-author="qingyu"] .message-meta strong { color: var(--identity-3); }
+    .message[data-author="you"] .message-meta strong { color: var(--brand-ink); }
+    .message-meta time, .message-meta span { color: var(--faint); font: 500 9.5px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .message-copy { max-width: 72ch; color: var(--ink); font-size: 12.5px; line-height: 1.62; white-space: pre-wrap; }
+    .message-actions { position: absolute; z-index: 2; top: -2px; right: 0; display: flex; gap: 2px; opacity: 0; transition: opacity 100ms ease; }
+    .message:hover .message-actions, .message:focus-within .message-actions { opacity: 1; }
+    .message-action { min-height: 28px; padding: 4px 7px; border: 1px solid transparent; border-radius: 5px; color: var(--faint); background: transparent; font-size: 10px; }
+    .message-action:hover { border-color: var(--line); color: var(--ink); background: var(--surface-raised); }
+    .availability { display: inline-flex; align-items: center; gap: 4px; }
+    .availability::before { width: 6px; height: 6px; border-radius: 50%; background: var(--success); content: ""; }
+    .availability.away::before { border: 1px solid var(--attention); background: transparent; }
+
+    .parent-quote { display: grid; width: min(560px, 100%); min-width: 0; grid-template-columns: 2px minmax(0, 1fr); align-items: center; gap: 9px; margin: 2px 0 7px; padding: 0; border: 0; color: var(--muted); background: transparent; text-align: left; }
+    .parent-quote::before { align-self: stretch; border-radius: 1px; background: var(--line-strong); content: ""; }
+    .quote-line { display: block; min-width: 0; overflow: hidden; color: var(--muted); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .quote-line strong, .quote-line span { display: inline; }
+    .quote-line strong { color: var(--brand-ink); font-size: 10.5px; }
+    .quote-separator { color: var(--faint); }
+    .parent-quote:hover .quote-line strong { text-decoration: underline; text-underline-offset: 2px; }
+
+    .composer { padding: 0 27px 16px; background: var(--conversation-surface); }
+    .composer-wrap { width: min(790px, 100%); margin: 0 auto; }
+    .recipient-ledger { display: none; align-items: center; gap: 6px; margin: 0 9px -1px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 8px 8px 0 0; background: var(--surface-subtle); }
+    .recipient-ledger-label { flex: 0 0 auto; color: var(--faint); font: 700 9px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .06em; text-transform: uppercase; }
+    .ledger-options { display: flex; min-width: 0; flex: 1 1 auto; flex-wrap: wrap; gap: 4px; }
+    .ledger-option { min-height: 26px; padding: 4px 7px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); background: var(--surface-raised); font-size: 9.5px; }
+    .ledger-option:hover { border-color: var(--brand); color: var(--brand-ink); }
+    .ledger-option[aria-pressed="true"] { border-color: var(--brand); color: var(--brand-ink); background: var(--brand-soft); font-weight: 700; }
+    .ledger-status { flex: 0 1 auto; overflow: hidden; color: var(--faint); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+    .reply-dock { display: none; grid-template-columns: 3px minmax(0, 1fr) auto; gap: 10px; align-items: center; margin: 0 9px -1px; padding: 7px 10px; border: 1px solid var(--line-strong); border-bottom: 0; border-radius: 8px 8px 0 0; background: var(--surface-subtle); }
+    .reply-dock.visible { display: grid; }
+    .reply-rail { align-self: stretch; border-radius: 2px; background: var(--brand); }
+    .reply-copy { width: 100%; min-width: 0; grid-template-columns: minmax(0, 1fr); gap: 0; margin: 0; }
+    .reply-copy::before { display: none; }
+    .reply-close { width: 27px; height: 27px; padding: 0; border: 0; border-radius: 5px; color: var(--faint); background: transparent; font-size: 17px; }
+    .reply-close:hover { color: var(--ink); background: var(--surface-muted); }
+    .recipient-repair { display: none; margin: 0 9px -1px; padding: 10px 12px 11px; border: 1px solid var(--line-strong); border-top: 1px solid var(--line); background: var(--attention-soft); }
+    .recipient-repair.visible { display: block; }
+    .repair-message { display: flex; align-items: flex-start; gap: 7px; margin: 0; color: var(--attention); font-size: 11px; font-weight: 700; line-height: 1.45; }
+    .repair-message::before { content: "!"; }
+    .repair-help { margin: 4px 0 8px 18px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+    .recipient-options { display: flex; flex-wrap: wrap; gap: 6px; margin-left: 18px; }
+    .recipient-option { min-height: 30px; padding: 5px 9px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--ink); background: var(--surface-raised); font-size: 10.5px; }
+    .recipient-option:hover { border-color: var(--brand); color: var(--brand-ink); background: var(--brand-soft); }
+
+    .composer-box { position: relative; display: flex; min-height: 82px; align-items: flex-end; gap: 8px; padding: 9px 8px 8px 12px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--surface-raised); }
+    .reply-dock.visible ~ .composer-box, .recipient-repair.visible ~ .composer-box { border-radius: 0 0 8px 8px; }
+    .editor-column { min-width: 0; flex: 1 1 auto; align-self: stretch; }
+    .editor { min-height: 45px; padding: 3px 0; outline: 0; color: var(--ink); font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
+    .editor.suppress-focus-visible:focus-visible { outline: 0; }
+    .editor:empty::before { color: var(--faint); content: attr(data-placeholder); pointer-events: none; }
+    .mention-token { display: inline; padding: 0 1px; border-radius: 3px; color: var(--mention); background: transparent; font-weight: 650; white-space: nowrap; }
+    .mention-token.unavailable { color: var(--attention); text-decoration: underline wavy currentColor; text-underline-offset: 2px; }
+    .mention-token.unavailable::after { margin-left: 2px; content: "!"; }
+    .recipient-summary { margin-top: 3px; overflow: hidden; color: var(--faint); font-size: 10px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+    .recipient-summary strong { color: var(--brand-ink); font-weight: 700; }
+    .composer-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; padding-bottom: 2px; }
+    .draft-state { color: var(--faint); font: 600 9px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+    .send-button { min-height: 31px; padding: 5px 13px; border: 1px solid var(--brand); border-radius: 6px; color: var(--brand-contrast); background: var(--brand); font-size: 11.5px; font-weight: 700; }
+    .send-button:hover:not(:disabled) { border-color: var(--brand-hover); background: var(--brand-hover); }
+    .composer-note { min-height: 22px; margin: 5px 3px 0; color: var(--faint); font-size: 9.5px; line-height: 1.45; }
+    .composer-note.success { color: var(--success); }
+
+    .app-window[data-variant="recipient-first"] .recipient-ledger { display: flex; }
+    .app-window[data-variant="recipient-first"] .reply-dock.visible { margin-top: 0; border-radius: 0; background: var(--surface-raised); }
+    .app-window[data-variant="recipient-first"] .recipient-ledger ~ .reply-dock.visible ~ .composer-box,
+    .app-window[data-variant="recipient-first"] .recipient-ledger ~ .recipient-repair.visible ~ .composer-box { border-radius: 0 0 8px 8px; }
+    .app-window[data-variant="recipient-first"] .recipient-summary { color: var(--muted); }
+
+    .app-window[data-variant="lightweight"] .reply-dock.visible { grid-template-columns: 2px minmax(0, 1fr) auto; gap: 7px; margin: 0 0 5px; padding: 4px 5px 4px 8px; border: 0; border-radius: 0; background: transparent; }
+    .app-window[data-variant="lightweight"] .reply-copy strong { font-weight: 600; }
+    .app-window[data-variant="lightweight"] .reply-close { width: 24px; height: 24px; }
+    .app-window[data-variant="lightweight"] .reply-dock.visible ~ .composer-box { border-radius: 8px; }
+    .app-window[data-variant="lightweight"] .recipient-repair.visible ~ .composer-box { border-radius: 0 0 8px 8px; }
+    .app-window[data-variant="lightweight"] .recipient-repair { margin: 0 0 -1px; border-radius: 8px 8px 0 0; }
+
+    @media (hover: none) {
+      .message-actions { position: static; margin-top: 6px; opacity: 1; }
+      .message-main { padding-right: 0; }
+    }
+
+    @media (max-width: 840px) {
+      body { padding: 14px; }
+      .workspace { min-height: 660px; grid-template-columns: 1fr; }
+      .rail { display: none; }
+      .window-bar { grid-template-columns: auto minmax(0, 1fr) auto; }
+      .brand-lockup strong { display: none; }
+      .camp-title { border-left: 0; }
+      .prototype-heading { align-items: flex-start; }
+      .choice-button small { white-space: normal; }
+    }
+
+    @media (max-width: 560px) {
+      body { padding: 0; }
+      .prototype-shell { width: 100%; }
+      .prototype-heading { display: none; }
+      .choice-bar { display: flex; gap: 0; margin: 0; overflow-x: auto; border-bottom: 1px solid var(--line); background: var(--surface); }
+      .choice-button { min-width: 132px; min-height: 49px; border-width: 0 1px 0 0; border-radius: 0; background: transparent; }
+      .choice-button[aria-pressed="true"] { box-shadow: inset 0 -2px 0 var(--brand); }
+      .choice-button small { display: none; }
+      .scenario-bar { margin: 0; border-width: 0 0 1px; border-radius: 0; }
+      .app-window { border: 0; border-radius: 0; box-shadow: none; }
+      .window-bar { min-height: 48px; grid-template-columns: 42px minmax(0, 1fr) auto; }
+      .brand-lockup { padding: 0 8px; }
+      .brand-mark { width: 24px; height: 24px; }
+      .camp-title { padding: 0 8px; }
+      .member-stack { padding: 0 8px 0 4px; }
+      .member-stack span { width: 24px; height: 24px; }
+      .member-stack span:nth-child(n+3) { display: none; }
+      .workspace { min-height: 616px; }
+      .timeline { padding: 18px 14px 22px; }
+      .message { grid-template-columns: 28px minmax(0, 1fr); gap: 8px; }
+      .avatar { width: 28px; height: 28px; }
+      .message-main { padding-right: 0; }
+      .message-actions { position: static; margin-top: 5px; opacity: 1; }
+      .message-copy { font-size: 12px; }
+      .composer { padding: 0 10px 10px; }
+      .reply-dock, .recipient-repair { margin-right: 4px; margin-left: 4px; }
+      .recipient-ledger { align-items: flex-start; margin-right: 4px; margin-left: 4px; }
+      .recipient-ledger-label { padding-top: 7px; }
+      .ledger-status { display: none; }
+      .composer-box { min-height: 92px; flex-direction: column; align-items: stretch; }
+      .composer-actions { justify-content: space-between; }
+      .draft-state { display: none; }
+      .send-button { margin-left: auto; }
+      .recipient-options { margin-left: 0; }
+      .repair-help { margin-left: 0; }
+    }
+  </style>
+</head>
+<body>
+  <main class="prototype-shell">
+    <header class="prototype-heading">
+      <div>
+        <p class="prototype-kicker">v0.76 interaction review</p>
+        <h1>消息回复链与显式接收者</h1>
+        <p id="choice-description">已确认方案 C：无框引用仍展示作者与摘要，固定一行并在超出时省略；点击回复聚焦输入框但不增加外框。</p>
+      </div>
+      <button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">切换 Steel Night</button>
+    </header>
+
+    <nav class="choice-bar" aria-label="交互方案">
+      <button class="choice-button" type="button" data-variant="balanced" aria-pressed="false">
+        <span class="choice-number">01</span><strong>平衡型</strong><small>单行引用，异常原位修复</small>
+      </button>
+      <button class="choice-button" type="button" data-variant="recipient-first" aria-pressed="false">
+        <span class="choice-number">02</span><strong>接收者优先</strong><small>收件人选择始终露出，最稳妥</small>
+      </button>
+      <button class="choice-button" type="button" data-variant="lightweight" aria-pressed="true">
+        <span class="choice-number">03</span><strong>轻量无框 · 已确认</strong><small>无框单行引用，异常完整展开</small>
+      </button>
+    </nav>
+
+    <nav class="scenario-bar" aria-label="交互场景">
+      <span class="scenario-label">场景</span>
+      <button class="scenario-button" type="button" data-scenario="active" aria-pressed="true">作者可用</button>
+      <button class="scenario-button" type="button" data-scenario="away" aria-pressed="false">作者已暂离</button>
+      <button class="scenario-button" type="button" data-scenario="self" aria-pressed="false">回复你的消息</button>
+      <button class="scenario-button" type="button" data-scenario="fanout" aria-pressed="false">已有多人 Mention</button>
+      <button class="scenario-button" type="button" data-scenario="race" aria-pressed="false">发送瞬间失效</button>
+    </nav>
+
+    <section class="app-window" id="app-window" data-variant="lightweight" aria-label="Rovai AI Camp 回复交互稿">
+      <header class="window-bar">
+        <div class="brand-lockup"><span class="brand-mark">RV</span><strong>Rovai AI</strong></div>
+        <div class="camp-title"><strong>v0.76 · 回复链设计</strong><span>CAMP / PRODUCT-DELIVERY</span></div>
+        <div class="member-stack" aria-label="3 位成员"><span>洛</span><span>沐</span><span>青</span></div>
+      </header>
+
+      <div class="workspace">
+        <aside class="rail" aria-label="Camp 导航与成员">
+          <p class="rail-section-title">Camps</p>
+          <button class="rail-item active" type="button"><span class="rail-dot"></span>产品交付<small>4</small></button>
+          <button class="rail-item" type="button"><span class="rail-dot"></span>架构治理<small>2</small></button>
+          <button class="rail-item" type="button"><span class="rail-dot"></span>发布检查<small>1</small></button>
+          <div class="rail-rule"></div>
+          <p class="rail-section-title">Members</p>
+          <div class="rail-member"><span class="mini-avatar">洛</span><span>洛可 · Lead</span><i class="member-state"></i></div>
+          <div class="rail-member"><span class="mini-avatar">沐</span><span>沐瓦</span><i class="member-state away"></i></div>
+          <div class="rail-member"><span class="mini-avatar">青</span><span>青屿</span><i class="member-state"></i></div>
+        </aside>
+
+        <section class="conversation">
+          <div class="timeline" id="timeline">
+            <div class="timeline-track" id="timeline-track">
+              <div class="day-rule">今天 · 14 AUG</div>
+
+              <article class="message" id="msg-41" data-author="luoke" data-kind="agent" data-available="true" data-name="洛可" data-excerpt="Core Draft 应该持久化 reply target，避免导航后引用消失，并确保 Mention 与父引用在失败重试后仍属于同一个 Draft revision。">
+                <div class="avatar" aria-hidden="true">洛</div>
+                <div class="message-main">
+                  <div class="message-meta"><strong>洛可</strong><time>10:18</time><span class="availability">可接收</span></div>
+                  <div class="message-copy">Core Draft 应该持久化 reply target，避免导航后引用消失。Mention 仍然是单独、可见的 Structured Content。</div>
+                  <div class="message-actions">
+                    <button class="message-action reply-action" type="button" aria-label="回复洛可的消息">回复</button>
+                    <button class="message-action copy-action" type="button">复制</button>
+                  </div>
+                </div>
+              </article>
+
+              <article class="message" id="msg-42" data-author="you" data-kind="self" data-available="true" data-name="你" data-excerpt="发送前还要把真正的接收者完整展示出来。">
+                <div class="avatar" aria-hidden="true">你</div>
+                <div class="message-main">
+                  <div class="message-meta"><strong>你</strong><time>10:21</time></div>
+                  <div class="message-copy"><span class="mention-token">@洛可</span> 发送前还要把真正的接收者完整展示出来，不能让引用关系替代寻址。</div>
+                  <div class="message-actions">
+                    <button class="message-action reply-action" type="button" aria-label="回复你的消息">回复</button>
+                    <button class="message-action copy-action" type="button">复制</button>
+                  </div>
+                </div>
+              </article>
+
+              <article class="message" id="msg-43" data-author="muwa" data-kind="agent" data-available="false" data-name="沐瓦" data-excerpt="如果原作者已经 away，引用可以保留，但发送必须暂停。">
+                <div class="avatar" aria-hidden="true">沐</div>
+                <div class="message-main">
+                  <div class="message-meta"><strong>沐瓦</strong><time>10:26</time><span class="availability away">已暂离</span></div>
+                  <div class="message-copy">如果原作者已经 away，引用可以保留，但发送必须暂停，直到用户明确选择新的成员。</div>
+                  <div class="message-actions">
+                    <button class="message-action reply-action" type="button" aria-label="回复沐瓦的消息">回复</button>
+                    <button class="message-action copy-action" type="button">复制</button>
+                  </div>
+                </div>
+              </article>
+
+              <article class="message" id="msg-44" data-author="qingyu" data-kind="agent" data-available="true" data-name="青屿" data-excerpt="Core 拒绝 mention_target_unavailable 后，草稿和引用都要保留。">
+                <div class="avatar" aria-hidden="true">青</div>
+                <div class="message-main">
+                  <div class="message-meta"><strong>青屿</strong><time>10:31</time><span class="availability">可接收</span></div>
+                  <div class="message-copy">Core 拒绝 <code>mention_target_unavailable</code> 后，草稿和引用都要保留，不能改投负责人。</div>
+                  <div class="message-actions">
+                    <button class="message-action reply-action" type="button" aria-label="回复青屿的消息">回复</button>
+                    <button class="message-action copy-action" type="button">复制</button>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </div>
+
+          <footer class="composer">
+            <div class="composer-wrap">
+              <div class="recipient-ledger" id="recipient-ledger">
+                <span class="recipient-ledger-label">实际交给</span>
+                <div class="ledger-options" aria-label="显式接收者">
+                  <button class="ledger-option" type="button" data-direct-recipient="luoke" aria-pressed="false">@洛可</button>
+                  <button class="ledger-option" type="button" data-direct-recipient="qingyu" aria-pressed="false">@青屿</button>
+                  <button class="ledger-option" type="button" data-direct-recipient="all" aria-pressed="false">@所有队员</button>
+                </div>
+                <span class="ledger-status" id="ledger-status">无 Mention 时交给 Default Lead</span>
+              </div>
+              <div class="reply-dock" id="reply-dock">
+                <span class="reply-rail" aria-hidden="true"></span>
+                <button class="parent-quote reply-copy" id="draft-parent-link" type="button">
+                  <span class="quote-line"><strong id="reply-title">回复 @洛可</strong><span class="quote-separator" aria-hidden="true"> · </span><span class="quote-excerpt" id="reply-excerpt"></span></span>
+                </button>
+                <button class="reply-close" id="reply-close" type="button" aria-label="取消引用">×</button>
+              </div>
+
+              <div class="recipient-repair" id="recipient-repair" aria-live="polite">
+                <p class="repair-message" id="repair-message">原作者当前不可接收，请选择其他成员</p>
+                <p class="repair-help" id="repair-help">引用会保留；选择后才会写入新的结构化 Mention。</p>
+                <div class="recipient-options" id="recipient-options">
+                  <button class="recipient-option" type="button" data-replacement="luoke">改发给 @洛可</button>
+                  <button class="recipient-option" type="button" data-replacement="qingyu">改发给 @青屿</button>
+                  <button class="recipient-option" type="button" data-replacement="all">改发给 @所有队员</button>
+                </div>
+              </div>
+
+              <div class="composer-box">
+                <div class="editor-column">
+                  <div class="editor" id="editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="消息正文" data-placeholder="输入消息；使用 @ 选择接收者"></div>
+                  <div class="recipient-summary" id="recipient-summary">实际接收者：<strong>Default Lead · 洛可</strong></div>
+                </div>
+                <div class="composer-actions">
+                  <span class="draft-state" id="draft-state">DRAFT R7 · 已持久化</span>
+                  <button class="send-button" id="send-button" type="button">发送</button>
+                </div>
+              </div>
+              <div class="composer-note" id="composer-note" role="status" aria-live="polite">引用和接收者是两条独立事实；发送前始终显示完整 fanout。</div>
+            </div>
+          </footer>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    (() => {
+      const root = document.documentElement;
+      const editor = document.getElementById('editor');
+      const appWindow = document.getElementById('app-window');
+      const choiceDescription = document.getElementById('choice-description');
+      const replyDock = document.getElementById('reply-dock');
+      const replyTitle = document.getElementById('reply-title');
+      const replyExcerpt = document.getElementById('reply-excerpt');
+      const draftParentLink = document.getElementById('draft-parent-link');
+      const repair = document.getElementById('recipient-repair');
+      const repairMessage = document.getElementById('repair-message');
+      const repairHelp = document.getElementById('repair-help');
+      const recipientSummary = document.getElementById('recipient-summary');
+      const sendButton = document.getElementById('send-button');
+      const composerNote = document.getElementById('composer-note');
+      const draftState = document.getElementById('draft-state');
+      const ledgerStatus = document.getElementById('ledger-status');
+      const timelineTrack = document.getElementById('timeline-track');
+      let replyTarget = null;
+      let mentions = [];
+      let body = '';
+      let blocked = false;
+      let raceArmed = false;
+      let raceFailed = false;
+      let draftRevision = 7;
+
+      const memberNames = { luoke: '洛可', muwa: '沐瓦', qingyu: '青屿', all: '所有队员' };
+      const variantDescriptions = {
+        balanced: '备选对照：引用使用轻边界容器，固定一行并在接收者失效时展开修复选择。',
+        'recipient-first': '备选对照：完整接收者选择始终可见，适合高风险 Camp，但占用更多 Composer 高度。',
+        lightweight: '已确认方案 C：无框引用仍展示作者与摘要，固定一行并在超出时省略；点击回复聚焦输入框但不增加外框。'
+      };
+
+      function escapeHtml(value) {
+        return value.replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]);
+      }
+
+      function syncBodyFromEditor() {
+        const clone = editor.cloneNode(true);
+        clone.querySelectorAll('.mention-token').forEach(token => token.remove());
+        body = clone.innerText.trim();
+      }
+
+      function renderEditor() {
+        const tokens = mentions.map(mention => `<span class="mention-token${mention.unavailable ? ' unavailable' : ''}" contenteditable="false" data-member="${mention.id}">@${memberNames[mention.id]}</span>`).join(' ');
+        const separator = tokens && body ? ' ' : '';
+        editor.innerHTML = `${tokens}${separator}${escapeHtml(body)}`;
+      }
+
+      function persistDraft() {
+        draftRevision += 1;
+        draftState.textContent = `DRAFT R${draftRevision} · 已持久化`;
+      }
+
+      function setActiveScenario(name) {
+        document.querySelectorAll('.scenario-button').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.scenario === name)));
+      }
+
+      function setRepairState({ visible, message, help } = {}) {
+        repair.classList.toggle('visible', Boolean(visible));
+        if (message) repairMessage.textContent = message;
+        if (help) repairHelp.textContent = help;
+      }
+
+      function updateRecipientSummary() {
+        const availableMentions = mentions.filter(mention => !mention.unavailable);
+        const unavailableMentions = mentions.filter(mention => mention.unavailable);
+        document.querySelectorAll('.ledger-option').forEach(button => {
+          button.setAttribute('aria-pressed', String(availableMentions.some(mention => mention.id === button.dataset.directRecipient)));
+        });
+        if (unavailableMentions.length) {
+          recipientSummary.innerHTML = `实际接收者：<strong>未解决</strong> · @${unavailableMentions.map(item => memberNames[item.id]).join('、@')} 已失效`;
+          ledgerStatus.textContent = '存在失效 Mention，发送已阻断';
+          return;
+        }
+        if (availableMentions.length) {
+          recipientSummary.innerHTML = `实际接收者：<strong>@${availableMentions.map(item => memberNames[item.id]).join('、@')}</strong>`;
+          ledgerStatus.textContent = `完整 fanout · ${availableMentions.length === 1 && availableMentions[0].id === 'all' ? '全员' : `${availableMentions.length} 人`}`;
+          return;
+        }
+        recipientSummary.innerHTML = '实际接收者：<strong>Default Lead · 洛可</strong>';
+        ledgerStatus.textContent = blocked ? '请选择一个可用成员' : '无 Mention 时交给 Default Lead';
+      }
+
+      function updateSendState() {
+        sendButton.disabled = blocked;
+        sendButton.textContent = blocked ? '等待选择' : '发送';
+        updateRecipientSummary();
+      }
+
+      function focusMessage(messageId) {
+        const target = document.getElementById(messageId);
+        if (!target) return;
+        document.querySelectorAll('.message.is-target').forEach(message => message.classList.remove('is-target'));
+        target.classList.add('is-target');
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const replyButton = target.querySelector('.reply-action');
+        if (replyButton) replyButton.focus({ preventScroll: true });
+        window.setTimeout(() => target.classList.remove('is-target'), 1500);
+      }
+
+      function focusEditor(showVisibleFocus = false) {
+        editor.classList.toggle('suppress-focus-visible', !showVisibleFocus);
+        editor.focus({ preventScroll: true });
+      }
+
+      function startReply(message, options = {}) {
+        syncBodyFromEditor();
+        replyTarget = {
+          id: message.id,
+          name: message.dataset.name,
+          excerpt: message.dataset.excerpt,
+          kind: message.dataset.kind,
+          authorId: message.dataset.author
+        };
+        replyDock.classList.add('visible');
+        replyTitle.textContent = replyTarget.kind === 'self' ? '引用你的消息' : `${message.dataset.available === 'true' ? '回复' : '引用'} @${replyTarget.name}`;
+        replyExcerpt.textContent = replyTarget.excerpt;
+        draftParentLink.dataset.parent = replyTarget.id;
+        blocked = false;
+        setRepairState({ visible: false });
+
+        if (options.existingMentions) mentions = options.existingMentions.map(id => ({ id, unavailable: false }));
+        if (replyTarget.kind === 'agent' && message.dataset.available === 'true') {
+          if (!mentions.some(mention => mention.id === replyTarget.authorId || mention.id === 'all')) {
+            mentions.push({ id: replyTarget.authorId, unavailable: false });
+          }
+        } else if (replyTarget.kind === 'agent') {
+          blocked = true;
+          setRepairState({
+            visible: true,
+            message: '原作者当前不可接收，请选择其他成员',
+            help: '引用已经保留，但没有插入失效 Mention；选择后才允许发送。'
+          });
+        }
+
+        body = options.body || body || '请按这条结论继续处理，并把验证结果回到 Camp。';
+        raceArmed = Boolean(options.race);
+        raceFailed = false;
+        renderEditor();
+        persistDraft();
+        updateSendState();
+        composerNote.className = 'composer-note';
+        composerNote.textContent = raceArmed ? '预检时作者仍可用；点击发送可模拟提交瞬间失效。' : '回复目标和结构化 Mention 已一起写入同一 Core Draft。';
+        if (!options.suppressFocus) focusEditor(Boolean(options.showVisibleFocus));
+      }
+
+      function resetDraft() {
+        replyTarget = null;
+        mentions = [];
+        body = '';
+        blocked = false;
+        raceArmed = false;
+        raceFailed = false;
+        replyDock.classList.remove('visible');
+        setRepairState({ visible: false });
+        renderEditor();
+        updateSendState();
+        composerNote.className = 'composer-note';
+        composerNote.textContent = '引用和接收者是两条独立事实；发送前始终显示完整 fanout。';
+      }
+
+      function runScenario(name, suppressFocus = false, showVisibleFocus = false) {
+        resetDraft();
+        setActiveScenario(name);
+        if (name === 'active') {
+          startReply(document.getElementById('msg-41'), { body: '请按这条结论继续处理，并把验证结果回到 Camp。', suppressFocus, showVisibleFocus });
+        } else if (name === 'away') {
+          startReply(document.getElementById('msg-43'), { body: '请继续补齐这个危险边界。', suppressFocus, showVisibleFocus });
+        } else if (name === 'self') {
+          startReply(document.getElementById('msg-42'), { body: '补充一下：引用我的消息时，不要从历史记录猜接收者。', suppressFocus, showVisibleFocus });
+        } else if (name === 'fanout') {
+          startReply(document.getElementById('msg-41'), { existingMentions: ['qingyu'], body: '你们一起检查 Draft 和发送事务。', suppressFocus, showVisibleFocus });
+        } else if (name === 'race') {
+          startReply(document.getElementById('msg-41'), { body: '请提交最终验证。', race: true, suppressFocus, showVisibleFocus });
+        }
+      }
+
+      function chooseReplacement(memberId) {
+        syncBodyFromEditor();
+        mentions = mentions.filter(mention => !mention.unavailable);
+        if (memberId === 'all') {
+          mentions = [{ id: 'all', unavailable: false }];
+        } else if (!mentions.some(mention => mention.id === memberId || mention.id === 'all')) {
+          mentions.push({ id: memberId, unavailable: false });
+        }
+        blocked = false;
+        raceArmed = false;
+        setRepairState({ visible: false });
+        renderEditor();
+        persistDraft();
+        updateSendState();
+        composerNote.className = 'composer-note success';
+        composerNote.textContent = `已显式选择 @${memberNames[memberId]}；引用仍指向原消息。`;
+        editor.focus();
+      }
+
+      function toggleDirectRecipient(memberId) {
+        syncBodyFromEditor();
+        const hadUnavailable = mentions.some(mention => mention.unavailable);
+        mentions = mentions.filter(mention => !mention.unavailable);
+        if (memberId === 'all') {
+          mentions = mentions.some(mention => mention.id === 'all') ? [] : [{ id: 'all', unavailable: false }];
+        } else {
+          mentions = mentions.filter(mention => mention.id !== 'all');
+          const existing = mentions.findIndex(mention => mention.id === memberId);
+          if (existing >= 0 && !hadUnavailable) mentions.splice(existing, 1);
+          else if (existing < 0) mentions.push({ id: memberId, unavailable: false });
+        }
+        blocked = false;
+        raceArmed = false;
+        setRepairState({ visible: false });
+        renderEditor();
+        persistDraft();
+        updateSendState();
+        composerNote.className = 'composer-note success';
+        composerNote.textContent = mentions.length ? '接收者已由你显式更新；引用目标没有变化。' : '已移除显式 Mention；当前发送将明确交给 Default Lead。';
+        editor.focus();
+      }
+
+      function appendSentMessage() {
+        syncBodyFromEditor();
+        const article = document.createElement('article');
+        article.className = 'message';
+        article.id = `msg-sent-${Date.now()}`;
+        article.dataset.author = 'you';
+        const quote = replyTarget ? `<button class="parent-quote" type="button" data-parent="${replyTarget.id}"><span class="quote-line"><strong>${replyTarget.kind === 'self' ? '你' : escapeHtml(replyTarget.name)}</strong><span class="quote-separator" aria-hidden="true"> · </span><span class="quote-excerpt">${escapeHtml(replyTarget.excerpt)}</span></span></button>` : '';
+        const mentionCopy = mentions.map(mention => `<span class="mention-token">@${memberNames[mention.id]}</span>`).join(' ');
+        article.innerHTML = `<div class="avatar" aria-hidden="true">你</div><div class="message-main"><div class="message-meta"><strong>你</strong><time>刚刚</time></div>${quote}<div class="message-copy">${mentionCopy}${mentionCopy && body ? ' ' : ''}${escapeHtml(body || '收到。')}</div><div class="message-actions"><button class="message-action copy-action" type="button">复制</button></div></div>`;
+        timelineTrack.appendChild(article);
+        article.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        resetDraft();
+        persistDraft();
+        composerNote.className = 'composer-note success';
+        composerNote.textContent = '消息已接收：父引用随消息写入，Draft 在 accepted 后清空。';
+      }
+
+      document.querySelectorAll('.scenario-button').forEach(button => button.addEventListener('click', event => runScenario(button.dataset.scenario, false, event.detail === 0)));
+      document.querySelectorAll('.choice-button').forEach(button => button.addEventListener('click', () => {
+        const variant = button.dataset.variant;
+        appWindow.dataset.variant = variant;
+        choiceDescription.textContent = variantDescriptions[variant];
+        document.querySelectorAll('.choice-button').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+      }));
+
+      document.addEventListener('click', event => {
+        const replyButton = event.target.closest('.reply-action');
+        if (replyButton) {
+          setActiveScenario('manual');
+          startReply(replyButton.closest('.message'), { showVisibleFocus: event.detail === 0 });
+          return;
+        }
+        const parentLink = event.target.closest('.parent-quote[data-parent]');
+        if (parentLink) focusMessage(parentLink.dataset.parent);
+        const copyButton = event.target.closest('.copy-action');
+        if (copyButton) {
+          const text = copyButton.closest('.message')?.querySelector('.message-copy')?.innerText || '';
+          navigator.clipboard?.writeText(text);
+          copyButton.textContent = '已复制';
+          window.setTimeout(() => { copyButton.textContent = '复制'; }, 900);
+        }
+      });
+
+      document.getElementById('reply-close').addEventListener('click', () => {
+        syncBodyFromEditor();
+        replyTarget = null;
+        replyDock.classList.remove('visible');
+        blocked = mentions.some(mention => mention.unavailable);
+        if (!blocked) setRepairState({ visible: false });
+        renderEditor();
+        persistDraft();
+        updateSendState();
+        composerNote.className = 'composer-note';
+        composerNote.textContent = '引用已取消；正文里可见的 Mention 保持不变。';
+      });
+
+      document.querySelectorAll('.recipient-option').forEach(button => button.addEventListener('click', () => chooseReplacement(button.dataset.replacement)));
+      document.querySelectorAll('.ledger-option').forEach(button => button.addEventListener('click', () => toggleDirectRecipient(button.dataset.directRecipient)));
+
+      sendButton.addEventListener('click', () => {
+        syncBodyFromEditor();
+        if (blocked) return;
+        if (raceArmed && !raceFailed) {
+          raceFailed = true;
+          raceArmed = false;
+          blocked = true;
+          mentions = mentions.map(mention => mention.id === 'luoke' ? { ...mention, unavailable: true } : mention);
+          renderEditor();
+          setRepairState({
+            visible: true,
+            message: '洛可刚刚离开 Camp，Core 已拒绝本次发送',
+            help: '正文与引用均已保留；必须显式选择新的接收者，不会改投 Default Lead。'
+          });
+          persistDraft();
+          updateSendState();
+          composerNote.className = 'composer-note';
+          composerNote.textContent = 'mention_target_unavailable · 没有写消息、没有创建 Run、没有 fallback。';
+          return;
+        }
+        appendSentMessage();
+      });
+
+      editor.addEventListener('input', () => {
+        syncBodyFromEditor();
+        draftState.textContent = `DRAFT R${draftRevision} · 保存中…`;
+        window.clearTimeout(editor.saveTimer);
+        editor.saveTimer = window.setTimeout(persistDraft, 350);
+      });
+
+      editor.addEventListener('blur', () => editor.classList.remove('suppress-focus-visible'));
+
+      document.getElementById('theme-toggle').addEventListener('click', event => {
+        const night = root.dataset.theme !== 'night';
+        root.dataset.theme = night ? 'night' : '';
+        event.currentTarget.setAttribute('aria-pressed', String(night));
+        event.currentTarget.textContent = night ? '切换 Porcelain Day' : '切换 Steel Night';
+      });
+
+      runScenario('active', true);
+    })();
+  </script>
+</body>
+</html>

@@ -416,7 +416,6 @@ async function sendCampMessage(request, input) {
     commandId: crypto.randomUUID(),
     campId: input.campId,
     draftRevision: saved.revision,
-    replyToCampMessageId: null,
     execution: input.execution
   })
 }

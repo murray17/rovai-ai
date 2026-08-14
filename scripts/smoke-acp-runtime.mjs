@@ -109,7 +109,6 @@ try {
           campId: camp.id,
           body,
           address: { mode: 'explicit', agentIds: [profile.agentId] },
-          replyToCampMessageId: null,
           execution: {
             taskId: null,
             purpose,
@@ -170,7 +169,6 @@ try {
         campId: camp.id,
         body: `Use the file editing tool exactly once to create ${writePath} with exactly ${writeToken} and a trailing newline. Do not call shell, list, read, or any verification tool before or after the edit. Then immediately reply exactly ACP_WRITE_OK.`,
         address: { mode: 'explicit', agentIds: [profile.agentId] },
-        replyToCampMessageId: null,
         execution: {
           taskId: null,
           purpose: 'Verify ACP permission mediation and one-time file write authorization',
@@ -256,7 +254,6 @@ try {
         campId: camp.id,
         body: `Use the file editing tool exactly once to create ${deniedPath} with exactly DENIED_WRITE and a trailing newline. Do not call shell, list, read, or any verification tool before or after the edit. Then immediately reply exactly ACP_DENIED_WRITE_OK.`,
         address: { mode: 'explicit', agentIds: [profile.agentId] },
-        replyToCampMessageId: null,
         execution: {
           taskId: null,
           purpose: 'Create the requested file and report the concrete result',

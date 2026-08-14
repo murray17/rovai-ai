@@ -215,7 +215,6 @@ async function sendCampMessage(request, campId, agentId, body, purpose) {
     commandId: crypto.randomUUID(),
     campId,
     draftRevision: saved.revision,
-    replyToCampMessageId: null,
     execution: {
       taskId: null,
       purpose,

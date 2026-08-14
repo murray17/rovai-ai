@@ -404,7 +404,6 @@ try {
               commandId: crypto.randomUUID(),
               campId,
               draftRevision: before.revision + 1,
-              replyToCampMessageId: null,
               execution: null
             })
           } catch {

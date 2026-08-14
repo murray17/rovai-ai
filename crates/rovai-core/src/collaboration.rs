@@ -236,7 +236,6 @@ fn required_completion_role() -> String {
 pub struct SendUserCampDraftCommand {
     pub camp_id: String,
     pub draft_revision: i64,
-    pub reply_to_camp_message_id: Option<String>,
     pub execution: Option<ExecutionRequest>,
 }
 
@@ -482,11 +481,14 @@ impl CollaborationService {
                 r#"
                 INSERT INTO camp_composer_draft(
                     camp_id, body, structured_content_json, revision,
+                    reply_to_camp_message_id, recipient_selection_required,
                     created_at, updated_at, expires_at
-                ) VALUES (?1, ?2, ?3, 1, ?4, ?4, ?5)
+                ) VALUES (?1, ?2, ?3, 1, ?4, 0, ?5, ?5, ?6)
                 ON CONFLICT(camp_id) DO UPDATE SET
                     body = excluded.body,
                     structured_content_json = excluded.structured_content_json,
+                    reply_to_camp_message_id = excluded.reply_to_camp_message_id,
+                    recipient_selection_required = 0,
                     revision = camp_composer_draft.revision + 1,
                     updated_at = excluded.updated_at,
                     expires_at = excluded.expires_at
@@ -495,6 +497,7 @@ impl CollaborationService {
                     envelope.payload.camp_id,
                     envelope.payload.body,
                     serde_json::to_string(&content)?,
+                    envelope.payload.reply_to_camp_message_id,
                     now.to_rfc3339(),
                     expires_at,
                 ],
@@ -514,7 +517,6 @@ impl CollaborationService {
             payload: SendUserCampDraftCommand {
                 camp_id: envelope.payload.camp_id.clone(),
                 draft_revision,
-                reply_to_camp_message_id: envelope.payload.reply_to_camp_message_id.clone(),
                 execution: envelope.payload.execution.clone(),
             },
         };
@@ -1145,7 +1147,11 @@ impl CollaborationService {
                 SELECT
                     EXISTS(
                         SELECT 1 FROM camp_composer_draft
-                        WHERE camp_id = ?1 AND length(trim(body)) > 0
+                        WHERE camp_id = ?1
+                          AND (
+                            length(trim(body)) > 0
+                            OR reply_to_camp_message_id IS NOT NULL
+                          )
                     )
                     OR EXISTS(
                         SELECT 1 FROM prepared_attachment WHERE camp_id = ?1
@@ -1207,7 +1213,11 @@ impl CollaborationService {
                   )
                   AND NOT EXISTS(
                       SELECT 1 FROM camp_composer_draft
-                      WHERE camp_id = camp.id AND length(trim(body)) > 0
+                      WHERE camp_id = camp.id
+                        AND (
+                          length(trim(body)) > 0
+                          OR reply_to_camp_message_id IS NOT NULL
+                        )
                   )
                   AND NOT EXISTS(
                       SELECT 1 FROM prepared_attachment WHERE camp_id = camp.id
@@ -1983,19 +1993,6 @@ impl CollaborationService {
                     "Actor lacks agent_run.create",
                 ));
             }
-            if let Some(reply_id) = &envelope.payload.reply_to_camp_message_id
-                && !entity_belongs_to_camp(
-                    transaction,
-                    "camp_message",
-                    reply_id,
-                    &envelope.payload.camp_id,
-                )?
-            {
-                return Ok(rejected(
-                    "camp_message.invalid_reply",
-                    "Reply target is outside the Camp",
-                ));
-            }
             let submission = match load_structured_draft_submission(
                 transaction,
                 &envelope.payload.camp_id,
@@ -2100,7 +2097,7 @@ impl CollaborationService {
                     structured_content: &submission.structured_content,
                     prepared_attachment_ids: &submission.prepared_attachment_ids,
                     address_mode: submission.address.mode(),
-                    reply_to_camp_message_id: envelope.payload.reply_to_camp_message_id.as_deref(),
+                    reply_to_camp_message_id: submission.reply_to_camp_message_id.as_deref(),
                     resolution: &resolution,
                     execution: envelope.payload.execution.as_ref(),
                     task_admission: task_admission.as_ref(),
@@ -2166,6 +2163,7 @@ struct CampMessageSubmission {
     structured_content: StructuredCampMessageContent,
     prepared_attachment_ids: Vec<String>,
     address: CampMessageAddress,
+    reply_to_camp_message_id: Option<String>,
     generated_camp_name: String,
 }
 
@@ -2194,15 +2192,24 @@ fn load_structured_draft_submission(
     let stored = transaction
         .query_row(
             r#"
-            SELECT structured_content_json, revision
+            SELECT structured_content_json, revision,
+                   reply_to_camp_message_id, recipient_selection_required
             FROM camp_composer_draft
             WHERE camp_id = ?1
             "#,
             [camp_id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, bool>(3)?,
+                ))
+            },
         )
         .optional()?;
-    let Some((content_json, revision)) = stored else {
+    let Some((content_json, revision, reply_to_camp_message_id, recipient_required)) = stored
+    else {
         return Ok(Err(rejected(
             "draft_changed",
             "Camp Composer Draft no longer matches the requested Revision",
@@ -2213,6 +2220,30 @@ fn load_structured_draft_submission(
             "draft_changed",
             "Camp Composer Draft no longer matches the requested Revision",
         )));
+    }
+    if recipient_required {
+        return Ok(Err(rejected(
+            "reply_recipient_required",
+            "Reply author is unavailable; choose an explicit replacement recipient",
+        )));
+    }
+    if let Some(reply_id) = &reply_to_camp_message_id {
+        let reply_is_available: bool = transaction.query_row(
+            r#"
+            SELECT EXISTS(
+                SELECT 1 FROM camp_message
+                WHERE id = ?1 AND camp_id = ?2 AND tombstoned_at IS NULL
+            )
+            "#,
+            params![reply_id, camp_id],
+            |row| row.get(0),
+        )?;
+        if !reply_is_available {
+            return Ok(Err(rejected(
+                "camp_message.invalid_reply",
+                "Reply target is outside the Camp or no longer available",
+            )));
+        }
     }
 
     let content = normalize_content(
@@ -2280,6 +2311,7 @@ fn load_structured_draft_submission(
         structured_content: content,
         prepared_attachment_ids,
         address,
+        reply_to_camp_message_id,
         generated_camp_name,
     }))
 }
@@ -4353,27 +4385,6 @@ fn camp_is_pending(transaction: &Connection, camp_id: &str) -> Result<bool> {
         .unwrap_or(false))
 }
 
-pub(crate) fn entity_belongs_to_camp(
-    transaction: &Transaction<'_>,
-    entity_type: &str,
-    entity_id: &str,
-    camp_id: &str,
-) -> Result<bool> {
-    let sql = match entity_type {
-        "camp_message" => "SELECT COUNT(*) FROM camp_message WHERE id = ?1 AND camp_id = ?2",
-        "task" => "SELECT COUNT(*) FROM task WHERE id = ?1 AND camp_id = ?2",
-        "agent_run" => {
-            "SELECT COUNT(*) FROM agent_run JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id WHERE agent_run.id = ?1 AND camp_turn.camp_id = ?2"
-        }
-        "conversation_message" => {
-            "SELECT COUNT(*) FROM conversation_message JOIN conversation ON conversation.id = conversation_message.conversation_id WHERE conversation_message.id = ?1 AND conversation.camp_id = ?2"
-        }
-        _ => return Ok(false),
-    };
-    let count: i64 = transaction.query_row(sql, params![entity_id, camp_id], |row| row.get(0))?;
-    Ok(count == 1)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -6101,6 +6112,260 @@ mod tests {
         assert!(stored_digest.starts_with("sha256:"));
 
         store.remove_camp(&camp_id).unwrap();
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn user_send_consumes_reply_only_from_the_exact_core_draft() {
+        let (mut database, directory) = test_database();
+        let service = CollaborationService::default();
+        let camp_id =
+            create_camp_with_members(&service, &mut database, &directory, &["agent_2", "agent_1"]);
+        let parent = service
+            .send_test_camp_message(
+                &mut database,
+                &user_envelope(
+                    "reply-parent-send",
+                    Some(&camp_id),
+                    TestCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: None,
+                        body: "原消息".into(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: TestCampMessageAddress::Default,
+                        reply_to_camp_message_id: None,
+                        execution: None,
+                    },
+                ),
+            )
+            .unwrap();
+        let parent_id = parent.result.payload["campMessageId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let store = CampAttachmentStore::new(&directory);
+        let draft = store
+            .save_body(&mut database, &camp_id, "引用用户消息")
+            .unwrap();
+        let draft = store
+            .start_reply(&mut database, &camp_id, draft.revision, &parent_id)
+            .unwrap();
+        let sent = service
+            .send_user_camp_draft(
+                &mut database,
+                &user_envelope(
+                    "reply-draft-only-send",
+                    Some(&camp_id),
+                    SendUserCampDraftCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: draft.revision,
+                        execution: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(sent.result.status, CommandResultStatus::Applied);
+        let reply_id = sent.result.payload["campMessageId"].as_str().unwrap();
+        let stored_reply: Option<String> = database
+            .connection()
+            .query_row(
+                "SELECT reply_to_camp_message_id FROM camp_message WHERE id = ?1",
+                [reply_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored_reply.as_deref(), Some(parent_id.as_str()));
+        assert_eq!(row_count(&database, "camp_composer_draft"), 0);
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn unavailable_reply_recipient_and_snapshot_races_reject_without_fallback_state() {
+        let (mut database, directory) = test_database();
+        let service = CollaborationService::default();
+        let camp_id =
+            create_camp_with_members(&service, &mut database, &directory, &["agent_2", "agent_1"]);
+        let parent = service
+            .send_test_camp_message(
+                &mut database,
+                &user_envelope(
+                    "unavailable-reply-parent",
+                    Some(&camp_id),
+                    TestCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: None,
+                        body: "Agent 原消息".into(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: TestCampMessageAddress::Default,
+                        reply_to_camp_message_id: None,
+                        execution: None,
+                    },
+                ),
+            )
+            .unwrap();
+        let parent_id = parent.result.payload["campMessageId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        database
+            .connection()
+            .execute(
+                "UPDATE camp_message SET author_type = 'agent', author_id = 'agent_2' WHERE id = ?1",
+                [&parent_id],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET profile_status = 'away' WHERE id = 'agent_2'",
+                [],
+            )
+            .unwrap();
+        let store = CampAttachmentStore::new(&directory);
+        let draft = store
+            .save_body(&mut database, &camp_id, "不得回退给负责人")
+            .unwrap();
+        let draft = store
+            .start_reply(&mut database, &camp_id, draft.revision, &parent_id)
+            .unwrap();
+        assert!(
+            draft
+                .reply_intent
+                .as_ref()
+                .unwrap()
+                .recipient_selection_required
+        );
+        let before = (
+            row_count(&database, "camp_message"),
+            row_count(&database, "camp_turn"),
+            row_count(&database, "agent_run"),
+        );
+        let rejected = service
+            .send_user_camp_draft(
+                &mut database,
+                &user_envelope(
+                    "unresolved-reply-send",
+                    Some(&camp_id),
+                    SendUserCampDraftCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: draft.revision,
+                        execution: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(rejected.result.code, "reply_recipient_required");
+        assert_eq!(
+            before,
+            (
+                row_count(&database, "camp_message"),
+                row_count(&database, "camp_turn"),
+                row_count(&database, "agent_run"),
+            )
+        );
+        assert_eq!(row_count(&database, "camp_composer_draft"), 1);
+
+        let resolved = store
+            .resolve_reply_recipient(
+                &mut database,
+                &camp_id,
+                draft.revision,
+                crate::camp_attachment::CampComposerReplyRecipient::Member {
+                    agent_id: "agent_1".into(),
+                },
+            )
+            .unwrap();
+        let accepted = service
+            .send_user_camp_draft(
+                &mut database,
+                &user_envelope(
+                    "resolved-reply-send",
+                    Some(&camp_id),
+                    SendUserCampDraftCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: resolved.revision,
+                        execution: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(accepted.result.status, CommandResultStatus::Applied);
+        let addressed: String = database
+            .connection()
+            .query_row(
+                "SELECT addressed_agent_ids_json FROM camp_message WHERE id = ?1",
+                [accepted.result.payload["campMessageId"].as_str().unwrap()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(addressed, "[\"agent_1\"]");
+
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET profile_status = 'present' WHERE id = 'agent_2'",
+                [],
+            )
+            .unwrap();
+        let race_draft = store
+            .save_body(&mut database, &camp_id, "点击后作者才失效")
+            .unwrap();
+        let race_draft = store
+            .start_reply(&mut database, &camp_id, race_draft.revision, &parent_id)
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET profile_status = 'away' WHERE id = 'agent_2'",
+                [],
+            )
+            .unwrap();
+        let race_before = row_count(&database, "camp_message");
+        let race = service
+            .send_user_camp_draft(
+                &mut database,
+                &user_envelope(
+                    "reply-author-race-send",
+                    Some(&camp_id),
+                    SendUserCampDraftCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: race_draft.revision,
+                        execution: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(race.result.code, "mention_target_unavailable");
+        assert_eq!(row_count(&database, "camp_message"), race_before);
+        assert_eq!(row_count(&database, "camp_composer_draft"), 1);
+
+        database
+            .connection()
+            .execute(
+                "UPDATE camp_message SET tombstoned_at = '2026-08-14T12:00:00Z' WHERE id = ?1",
+                [&parent_id],
+            )
+            .unwrap();
+        let missing_parent = service
+            .send_user_camp_draft(
+                &mut database,
+                &user_envelope(
+                    "reply-parent-tombstoned-send",
+                    Some(&camp_id),
+                    SendUserCampDraftCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: race_draft.revision,
+                        execution: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(missing_parent.result.code, "camp_message.invalid_reply");
+        assert_eq!(row_count(&database, "camp_message"), race_before);
+
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }

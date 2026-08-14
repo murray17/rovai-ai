@@ -78,7 +78,6 @@ try {
     commandId: crypto.randomUUID(),
     campId,
     draftRevision: firstDraft.revision,
-    replyToCampMessageId: null,
     execution: {
       taskId: null,
       purpose: 'Verify two addressed Camp members can read the same public attachment path.',
@@ -117,7 +116,6 @@ try {
     commandId: crypto.randomUUID(),
     campId,
     draftRevision: savedLaterDraft.revision,
-    replyToCampMessageId: null,
     execution: {
       taskId: null,
       purpose: 'Verify a later Camp member can discover the earlier public attachment path.',

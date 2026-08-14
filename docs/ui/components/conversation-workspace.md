@@ -43,6 +43,34 @@ Agent 公共正文不显示“来自执行”来源条，也不投影 compact �
 当前可操作的队员头像、显示名和 Mention 可打开同一个锚定人物信息卡，不导航。已离开、移除或
 不可解析身份保持静态。精确 token 行为见[结构化 Mention](structured-mentions.md)。
 
+## 消息回复与父引用
+
+稳定的 user/agent 公共消息在内容列右上角与“复制”并列提供“回复”；鼠标悬停、消息内键盘聚焦或
+粗指针环境下可见。optimistic message 在取得稳定 Message ID 前不提供回复入口。点击回复把同 Camp
+父消息写入 Core Composer Draft，并在 Composer 内显示轻量无框 reply dock：正常状态不绘制独立边框、
+底色或阴影；作者与有界摘要共用一个可视行，超出可用宽度显示省略号，末尾保留取消按钮。
+
+鼠标点击“回复”后正文编辑器获得焦点和插入光标，但不得因为程序化 focus 改变 Composer 的边框、阴影
+或增加包围框。键盘激活“回复”或通过 Tab 进入编辑器时，必须保留只作用于编辑器的可见
+`focus-visible` 提示；不得用去除全部焦点反馈来实现鼠标无框。
+
+回复当前可寻址 Agent 是一次明确的用户双意图：同一 Draft revision 设置 reply target，并插入或复用
+可见 Member Mention。接收者摘要仍单独展示完整 fanout；已有其他 Mention 时显示全部成员，
+`@所有队员` 已覆盖作者时不重复插入。回复当前用户自己的消息只建立引用，不从原消息的历史 recipient、
+作者或 reply relation 猜 Agent；无 Mention 时必须明确显示当前 Default Lead。
+
+原作者已退出 Camp、变为 `away`、被移除或不可解析时，reply dock 保留引用，但不插入失效 Mention，
+并原位显示“原作者当前不可接收，请选择其他成员”。发送保持阻断，直到用户从当前可提及成员中显式
+选择；不提供“仍然发送”或自动改交 Default Lead。若作者在点击后才失效，Core rejection 后正文、附件、
+引用和错误保持，替代选择必须移除失效作者 token 并写入新 Mention。
+
+取消 reply dock 只清除 reply intent；正文中已经可见的 Mention 保持不变。accepted 消息在正文前显示
+一层紧凑父引用，作者与摘要同样只占一个可视行，超出显示省略号；点击通过 same-Camp anchor load 定位并
+聚焦原消息。父消息不可用时显示“引用的消息当前不可用”，不落到最近消息。不递归展开祖先、不缩进
+时间线，也不创建私密 thread。失效作者错误和替代成员选择独立展开，不受单行引用规则裁切。领域与字段边界见
+[Camp Composer Draft v1](../../contracts/camp-composer-draft-v1.md)，评审方向见
+[HTML 交互稿](../../prototypes/message-reply-chain/README.md)。
+
 ## Camp 执行过程
 
 同一 Camp 中每个曾有 AgentRun 的队员只保留一个 Agent 过程入口。按需 Drawer 以时间顺序展示
@@ -83,7 +111,8 @@ Agent/AgentRun 级 Stop。终态用户取消以一条“你已在 {耗时} 后�
 ## Camp Composer
 
 Composer 与消息轨道同宽同轴，Inspector 显隐不得改变二者关系。发送、Stop、Approval Dock、
-附件、Skill 候选和 Mention 都使用同一 Core-owned Draft；任何浮层都不能建立第二份草稿真源。
+附件、Skill 候选、Mention 和 reply intent 都使用同一 Core-owned Draft；任何浮层都不能建立第二份
+草稿真源。回复条位于附件队列之上、正文编辑器之内，并与 Composer 共用开放工作面，不创建 focus trap。
 
 ### Skill 快速选择
 

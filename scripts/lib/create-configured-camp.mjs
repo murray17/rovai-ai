@@ -34,7 +34,6 @@ export async function createConfiguredCampAndSend(request, input) {
     commandId: input.commandId,
     campId,
     draftRevision: savedDraft.revision,
-    replyToCampMessageId: null,
     execution: {
       taskId: null,
       purpose: input.purpose,

@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-structured-mentions
 status: accepted
-last_updated: 2026-08-13
+last_updated: 2026-08-14
 ---
 
 # 结构化 Mention
@@ -16,6 +16,16 @@ Hover、Focus 或信息卡打开时只使用 8% mention feedback。它是 Core S
 从候选选中队员或所有队员后，Composer 在 Mention 后补一个普通空格并把光标放到空格后；已有
 空白时复用，不重复插入。编辑时 Member Mention 是不可拆分的原子单元。`@所有队员` 的 Composer
 信息卡读取当前可提及队员，历史消息读取发送时冻结的收件人 ID。
+
+点击当前可寻址 Agent 消息的“回复”是一个明确 Mention 来源：Core 在设置 Draft reply target 的同一
+revision mutation 中把该 Agent 的 canonical Member Mention 插入正文开头；已有相同 Mention 或
+`@所有队员` 时复用，不能重复。该规则只把用户手势转换为可见 Structured Content；reply relation
+本身永远不参与发送寻址。
+
+原作者已 `away`、退出 Camp、被移除或不可解析时，不得生成该作者的 Mention lookalike 或失效 token。
+Composer 保留引用并要求用户显式选择新的有效 Mention；发送前后都不得把失败的显式意图忽略后回退
+Default Lead。Snapshot 后才失效的 token 使用既有 unavailable 样式与 Core error，替代选择移除原作者
+失效 occurrence 后再插入新 token。取消引用不删除已经可见的 Mention。
 
 ## 锚定人物信息卡
 

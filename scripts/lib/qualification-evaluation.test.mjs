@@ -157,7 +157,6 @@ test('Qualification dispatch consumes one persisted structured composer draft re
         commandId: 'command-1',
         campId: 'camp-1',
         draftRevision: 5,
-        replyToCampMessageId: null,
         execution
       }
     }

@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.75
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -14,6 +14,8 @@ last_updated: 2026-08-14
 > 与全部治理证据均已发布到 `main`。
 >
 > 前置版本：[v0.74 Runtime 对齐的协作 Skill 与双轴代码评审](../v0.74/README.md)
+>
+> 后续版本：[v0.76 持久消息回复链与显式接收者修复](../v0.76/README.md)
 
 ## 版本目标
 

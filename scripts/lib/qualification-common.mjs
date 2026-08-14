@@ -238,7 +238,6 @@ export async function dispatchQualificationPrompt(request, {
     commandId,
     campId,
     draftRevision: savedDraft.revision,
-    replyToCampMessageId: null,
     execution
   })
 }

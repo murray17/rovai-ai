@@ -264,7 +264,6 @@ const EDITOR_STYLE: CSSProperties = {
   lineHeight: 1.5,
   whiteSpace: 'pre-wrap',
   overflowWrap: 'anywhere',
-  outline: 0,
   cursor: 'text'
 }
 

@@ -730,9 +730,27 @@ export interface CampComposerDraftView {
   content: StructuredCampMessageContent
   revision: number
   attachments: PreparedAttachmentView[]
+  replyIntent: CampComposerReplyIntentView | null
   updatedAt: string | null
   expiresAt: string | null
 }
+
+export interface CampComposerReplyIntentView {
+  replyToCampMessageId: string
+  targetState: 'available' | 'message_unavailable'
+  author: {
+    authorType: 'user' | 'agent' | 'system'
+    authorId: string
+    displayName: string
+    recipientAvailability: 'available' | 'unavailable' | 'not_applicable'
+  } | null
+  excerpt: string | null
+  recipientSelectionRequired: boolean
+}
+
+export type CampComposerReplyRecipient =
+  | { kind: 'member'; agentId: string }
+  | { kind: 'all_members' }
 
 export interface AttachmentPreview {
   mediaType: string
@@ -1958,6 +1976,9 @@ export type CoreMethod =
   | 'tasks.get'
   | 'camp.composerDraft.get'
   | 'camp.composerDraft.save'
+  | 'camp.composerDraft.startReply'
+  | 'camp.composerDraft.cancelReply'
+  | 'camp.composerDraft.resolveReplyRecipient'
   | 'camp.composerDraft.removeAttachment'
   | 'camp.composerDraft.discard'
   | 'camp.messages.send'
