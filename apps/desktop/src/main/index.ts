@@ -11,7 +11,7 @@ import type {
   StartupLocationMode,
   ThemePreference
 } from '@contracts'
-import { CoreClient } from './core-client'
+import { CoreClient, desktopSkillLibraryRoot } from './core-client'
 import {
   isThemePreference,
   nativeThemeSource,
@@ -140,9 +140,10 @@ const allowedMethods = new Set<CoreMethod>([
 ])
 const APP_NAME = 'Rovai-ai'
 app.setName(APP_NAME)
+const hasExplicitUserDataDirectory = app.commandLine.hasSwitch('user-data-dir')
 const isolatedAcceptanceInstance =
   process.env.ROVAI_ALLOW_ISOLATED_INSTANCE === '1'
-  && app.commandLine.hasSwitch('user-data-dir')
+  && hasExplicitUserDataDirectory
 const primaryInstance = isolatedAcceptanceInstance || app.requestSingleInstanceLock()
 if (!primaryInstance) app.quit()
 const core = new CoreClient()
@@ -325,9 +326,10 @@ if (primaryInstance) void app.whenReady().then(async () => {
   void memberAvatars.cleanupStaleTemporaryDirectories().catch(() => undefined)
   core.start({
     removedSkillProjectRoots: removedSkillProjectRoots(),
-    skillLibraryRoot: isolatedAcceptanceInstance
-      ? join(app.getPath('userData'), 'managed-skill-library')
-      : undefined
+    skillLibraryRoot: desktopSkillLibraryRoot(
+      app.getPath('userData'),
+      hasExplicitUserDataDirectory
+    ) ?? undefined
   })
   core.onEvent((event) => mainWindow?.webContents.send('rovai:event', event))
   createWindow()

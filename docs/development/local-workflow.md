@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: local-development-workflow
-last_updated: 2026-08-13
+last_updated: 2026-08-14
 ---
 
 # 本地开发与 App 隔离流程
@@ -24,9 +24,12 @@ last_updated: 2026-08-13
 进程还必须使用独立 `userData`。显式隔离的 Desktop 实例会同时把 Core Skill Library 绑定到该
 `userData` 下的 `managed-skill-library/`；只隔离 SQLite、却继续共享日常 Skill Library 不构成完整隔离。
 
-无论通道如何，Core 都只接受显式绝对 `--data-dir`。它会在打开 SQLite 和执行 startup recovery
-之前独占该目录的 `.rovai-core-instance.lock`；第二个 Core 必须拒绝启动且不得修改数据库。该文件
-会保留供诊断使用，进程退出时释放的是操作系统锁，不要把“删除锁文件”当作并发修复手段。
+无论通道如何，Core 都只接受显式绝对 `--data-dir`，并要求 Skill Library 选择恰好为以下一种：
+日常 Desktop 显式传入 `--use-default-skill-library`；Desktop 只要显式收到 `--user-data-dir`，以及
+其他开发、Smoke 或验收入口，都必须显式传入绝对 `--skill-library-root`。缺失或同时传入两种选择时，
+Core 必须在创建、修复或清理 Skill Revision 前失败。Core 会在打开 SQLite 和执行 startup recovery
+之前独占 data-dir 下的 `.rovai-core-instance.lock`；第二个 Core 必须拒绝启动且不得修改数据库。
+该文件会保留供诊断使用，进程退出时释放的是操作系统锁，不要把“删除锁文件”当作并发修复手段。
 
 ## AI 必读规则
 
@@ -35,8 +38,8 @@ last_updated: 2026-08-13
 1. 先读取根目录 `AGENTS.md`、[开发者指南](README.md)和本文；
 2. 执行 `git status --short`，保留不属于当前任务的并行改动；
 3. 明确本次属于“开发版”“打包产物”还是“自动验收”，并在更新中写出目标通道；
-4. 在命令执行前解析精确、绝对的 `userData`；没有独立目录证据时不得启动 App/Core；Core 自身的
-   独占锁是最终防线，不替代通道选择；
+4. 在命令执行前解析精确、绝对的 `userData` 和隔离 Skill Library；没有两者的独立目录证据时不得
+   启动开发、Smoke 或验收 App/Core；Core 的启动参数门和独占锁是最终防线，不替代通道选择；
 5. 真实日常数据默认只读。诊断不授权启动第二个 Core、写 SQLite、取消 Run、Retry 或发送消息；
 6. 不得为了方便直接调用 `electron-vite dev`、直接打开 `dist/.../Rovai-ai.app`，或让
    `rovai-core --data-dir` 指向日常目录；

@@ -126,7 +126,10 @@ async function configureClaude(request, _health) {
 }
 
 function startCore(dataDirectory, environment = {}) {
-  const child = spawn(join(root, 'target', 'debug', 'rovai-core'), ['--data-dir', dataDirectory], {
+  const child = spawn(join(root, 'target', 'debug', 'rovai-core'), [
+    '--data-dir', dataDirectory,
+    '--skill-library-root', join(dataDirectory, 'managed-skill-library')
+  ], {
     cwd: root,
     env: { ...process.env, ...environment },
     stdio: ['pipe', 'pipe', 'pipe']

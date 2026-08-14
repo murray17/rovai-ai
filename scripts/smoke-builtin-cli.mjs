@@ -971,12 +971,12 @@ function shellQuote(value) {
 }
 
 function startCore(dataDirectory) {
-  const child = spawn(coreExecutable, ['--data-dir', dataDirectory], {
+  const child = spawn(coreExecutable, [
+    '--data-dir', dataDirectory,
+    '--skill-library-root', skillLibraryRoot
+  ], {
     cwd: root,
-    env: {
-      ...process.env,
-      ROVAI_SKILL_LIBRARY_ROOT: skillLibraryRoot
-    },
+    env: process.env,
     stdio: ['pipe', 'pipe', 'pipe']
   })
   const pending = new Map()

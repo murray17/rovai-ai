@@ -22,7 +22,10 @@ try {
   await runCommand('git', ['add', 'README.md'], projectRoot)
   await runCommand('git', ['commit', '-m', 'fixture'], projectRoot)
 
-  core = spawn(join(root, 'target', 'debug', 'rovai-core'), ['--data-dir', dataDir], {
+  core = spawn(join(root, 'target', 'debug', 'rovai-core'), [
+    '--data-dir', dataDir,
+    '--skill-library-root', join(dataDir, 'managed-skill-library')
+  ], {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe']
   })

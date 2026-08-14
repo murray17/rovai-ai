@@ -7983,10 +7983,7 @@ fn main() -> Result<()> {
 
 async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> Result<()> {
     let data_dir = parse_data_dir()?;
-    let skill_library_root = match parse_skill_library_root()? {
-        Some(root) => root,
-        None => SkillLibraryService::default_root()?,
-    };
+    let skill_library_root = parse_skill_library_root()?;
     let _data_dir_lock = CoreDataDirLock::acquire(&data_dir)?;
     let mcp_config_path = parse_mcp_config_path()?;
     let mut database = Database::open(&data_dir)?;
@@ -11285,8 +11282,11 @@ fn parse_data_dir() -> Result<PathBuf> {
     parse_data_dir_from(std::env::args().skip(1))
 }
 
-fn parse_skill_library_root() -> Result<Option<PathBuf>> {
-    parse_skill_library_root_from(std::env::args().skip(1))
+fn parse_skill_library_root() -> Result<PathBuf> {
+    match parse_skill_library_root_from(std::env::args().skip(1))? {
+        SkillLibraryRootSelection::Explicit(root) => Ok(root),
+        SkillLibraryRootSelection::Default => SkillLibraryService::default_root(),
+    }
 }
 
 fn parse_removed_skill_project_roots() -> Result<Vec<String>> {
@@ -11343,34 +11343,54 @@ fn parse_data_dir_from(args: impl IntoIterator<Item = String>) -> Result<PathBuf
     )
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum SkillLibraryRootSelection {
+    Explicit(PathBuf),
+    Default,
+}
+
 fn parse_skill_library_root_from(
     args: impl IntoIterator<Item = String>,
-) -> Result<Option<PathBuf>> {
+) -> Result<SkillLibraryRootSelection> {
     let mut args = args.into_iter();
     let mut skill_library_root = None;
+    let mut use_default_skill_library = false;
     while let Some(arg) = args.next() {
-        if arg != "--skill-library-root" {
-            continue;
-        }
-        let path = args
-            .next()
-            .map(PathBuf::from)
-            .context("--skill-library-root requires a path")?;
-        if !path.is_absolute()
-            || path.components().any(|component| {
-                matches!(
-                    component,
-                    std::path::Component::CurDir | std::path::Component::ParentDir
-                )
-            })
-        {
-            anyhow::bail!("--skill-library-root requires a normalized absolute path");
-        }
-        if skill_library_root.replace(path).is_some() {
-            anyhow::bail!("--skill-library-root may be provided only once");
+        if arg == "--use-default-skill-library" {
+            if use_default_skill_library {
+                anyhow::bail!("--use-default-skill-library may be provided only once");
+            }
+            use_default_skill_library = true;
+        } else if arg == "--skill-library-root" {
+            let path = args
+                .next()
+                .map(PathBuf::from)
+                .context("--skill-library-root requires a path")?;
+            if !path.is_absolute()
+                || path.components().any(|component| {
+                    matches!(
+                        component,
+                        std::path::Component::CurDir | std::path::Component::ParentDir
+                    )
+                })
+            {
+                anyhow::bail!("--skill-library-root requires a normalized absolute path");
+            }
+            if skill_library_root.replace(path).is_some() {
+                anyhow::bail!("--skill-library-root may be provided only once");
+            }
         }
     }
-    Ok(skill_library_root)
+    match (skill_library_root, use_default_skill_library) {
+        (Some(_), true) => anyhow::bail!(
+            "--skill-library-root and --use-default-skill-library are mutually exclusive"
+        ),
+        (Some(root), false) => Ok(SkillLibraryRootSelection::Explicit(root)),
+        (None, true) => Ok(SkillLibraryRootSelection::Default),
+        (None, false) => anyhow::bail!(
+            "rovai-core requires exactly one Skill Library selection: pass an explicit absolute --skill-library-root for isolated instances or --use-default-skill-library for the daily App"
+        ),
+    }
 }
 
 fn parse_mcp_config_path() -> Result<Option<PathBuf>> {
@@ -11469,9 +11489,13 @@ mod tests {
     }
 
     #[test]
-    fn skill_library_root_is_optional_explicit_absolute_and_unique() {
-        assert_eq!(parse_skill_library_root_from(Vec::new()).unwrap(), None);
-
+    fn skill_library_selection_is_explicit_exclusive_and_normalized() {
+        assert!(
+            parse_skill_library_root_from(Vec::new())
+                .unwrap_err()
+                .to_string()
+                .contains("requires exactly one Skill Library selection")
+        );
         let directory = std::env::temp_dir().join("rovai-core-isolated-skill-library");
         assert_eq!(
             parse_skill_library_root_from(vec![
@@ -11479,7 +11503,11 @@ mod tests {
                 directory.to_string_lossy().into_owned(),
             ])
             .unwrap(),
-            Some(directory.clone())
+            SkillLibraryRootSelection::Explicit(directory.clone())
+        );
+        assert_eq!(
+            parse_skill_library_root_from(vec!["--use-default-skill-library".to_string()]).unwrap(),
+            SkillLibraryRootSelection::Default
         );
         assert!(
             parse_skill_library_root_from(vec![
@@ -11500,6 +11528,25 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("only once")
+        );
+        assert!(
+            parse_skill_library_root_from(vec![
+                "--use-default-skill-library".to_string(),
+                "--use-default-skill-library".to_string(),
+            ])
+            .unwrap_err()
+            .to_string()
+            .contains("only once")
+        );
+        assert!(
+            parse_skill_library_root_from(vec![
+                "--skill-library-root".to_string(),
+                directory.to_string_lossy().into_owned(),
+                "--use-default-skill-library".to_string(),
+            ])
+            .unwrap_err()
+            .to_string()
+            .contains("mutually exclusive")
         );
     }
 

@@ -524,13 +524,12 @@ function startCore() {
     : join(root, 'target', 'debug', 'rovai-core')
   const child = spawn(coreExecutable, [
     '--data-dir',
-    dataDir
+    dataDir,
+    '--skill-library-root',
+    libraryRoot
   ], {
     cwd: root,
-    env: {
-      ...process.env,
-      ROVAI_SKILL_LIBRARY_ROOT: libraryRoot
-    },
+    env: process.env,
     stdio: ['pipe', 'pipe', 'pipe']
   })
   child.stderr.pipe(process.stderr)

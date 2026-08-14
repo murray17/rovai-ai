@@ -1,4 +1,4 @@
-import { basename, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { dispatchQualificationPrompt } from '../../lib/qualification-common.mjs'
@@ -105,7 +105,10 @@ export async function createEvidenceCamp({ core, commandPrefix, name, body, proj
 }
 
 function startCore(executable, dataDirectory) {
-  const child = spawn(executable, ['--data-dir', dataDirectory], {
+  const child = spawn(executable, [
+    '--data-dir', dataDirectory,
+    '--skill-library-root', join(dataDirectory, 'managed-skill-library')
+  ], {
     cwd: repositoryRoot,
     stdio: ['pipe', 'pipe', 'pipe']
   })

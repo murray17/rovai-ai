@@ -528,7 +528,10 @@ function summarizeFacts(facts) {
 }
 
 function startCore(dataDirectory) {
-  const child = spawn(coreExecutable, ['--data-dir', dataDirectory], {
+  const child = spawn(coreExecutable, [
+    '--data-dir', dataDirectory,
+    '--skill-library-root', join(dataDirectory, 'managed-skill-library')
+  ], {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe']
   })

@@ -165,7 +165,10 @@ function assert(condition, message) {
 }
 
 function startCore(dataDirectory) {
-  const child = spawn(join(root, 'target', 'debug', 'rovai-core'), ['--data-dir', dataDirectory], {
+  const child = spawn(join(root, 'target', 'debug', 'rovai-core'), [
+    '--data-dir', dataDirectory,
+    '--skill-library-root', join(dataDirectory, 'managed-skill-library')
+  ], {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe']
   })

@@ -424,6 +424,7 @@ function startCore() {
     : join(root, 'target', 'debug', 'rovai-core')
   const child = spawn(coreExecutable, [
     '--data-dir', dataDir,
+    '--skill-library-root', join(dataDir, 'managed-skill-library'),
     '--mcp-config-path', mcpConfigPath
   ], {
     cwd: root,

@@ -820,7 +820,10 @@ async function connectCdp(url) {
 }
 
 function startCore(dataDirectory) {
-  const child = spawn(join(root, 'resources', 'bin', 'rovai-core'), ['--data-dir', dataDirectory], {
+  const child = spawn(join(root, 'resources', 'bin', 'rovai-core'), [
+    '--data-dir', dataDirectory,
+    '--skill-library-root', join(dataDirectory, 'managed-skill-library')
+  ], {
     cwd: root,
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, TMPDIR: runtimeTempDir }

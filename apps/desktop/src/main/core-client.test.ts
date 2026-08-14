@@ -11,7 +11,7 @@ vi.mock('electron', () => ({
   }
 }))
 
-import { CoreClient, coreLaunchArguments } from './core-client'
+import { CoreClient, coreLaunchArguments, desktopSkillLibraryRoot } from './core-client'
 
 const temporaryRoots: string[] = []
 
@@ -25,6 +25,10 @@ afterEach(() => {
 
 describe('CoreClient planned shutdown', () => {
   it('passes an isolated Skill Library root to Core', () => {
+    expect(desktopSkillLibraryRoot('/tmp/rovai-accept/user-data', true)).toBe(
+      '/tmp/rovai-accept/user-data/managed-skill-library'
+    )
+    expect(desktopSkillLibraryRoot('/daily/user-data', false)).toBeNull()
     expect(coreLaunchArguments(
       '/tmp/rovai-accept/user-data',
       '/tmp/rovai-accept/user-data/managed-skill-library',
@@ -39,7 +43,8 @@ describe('CoreClient planned shutdown', () => {
     ])
     expect(coreLaunchArguments('/daily/user-data', null, [])).toEqual([
       '--data-dir',
-      '/daily/user-data'
+      '/daily/user-data',
+      '--use-default-skill-library'
     ])
   })
 

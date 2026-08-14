@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { access } from 'node:fs/promises'
-import { basename, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { runCaptured } from './qualification-common.mjs'
 
 export async function findCompetingRovaiProcesses() {
@@ -57,7 +57,11 @@ export function startQualificationCore({
   onNotification = null
 }) {
   const executable = resolve(coreExecutable)
-  const args = ['--data-dir', resolve(dataDirectory)]
+  const resolvedDataDirectory = resolve(dataDirectory)
+  const args = [
+    '--data-dir', resolvedDataDirectory,
+    '--skill-library-root', join(resolvedDataDirectory, 'managed-skill-library')
+  ]
   const environment = { ...process.env }
   for (const key of Object.keys(environment)) {
     if (key.startsWith('ROVAI_QUALIFICATION_')) delete environment[key]

@@ -1,7 +1,7 @@
 ---
 document_type: development-index
 authority: development-routing
-last_updated: 2026-08-13
+last_updated: 2026-08-14
 ---
 
 # Rovai-ai 开发者指南
@@ -14,8 +14,9 @@ last_updated: 2026-08-13
 
 先阅读[本地开发与 App 隔离流程](local-workflow.md)。日常使用的 `.app` 必须安装在仓库外；
 `dist/` 只是可覆盖的打包产物。开发、打包验收和自动测试都不得共享日常 `userData`。
-所有 `rovai-core` 启动都必须收到显式绝对 `--data-dir`，并在打开 SQLite 或执行 startup recovery
-之前获取该目录的进程级独占锁；这是启动器检查之外的最终写入边界。
+所有 `rovai-core` 启动都必须收到显式绝对 `--data-dir`，并在互斥的日常默认 Skill Library 与绝对
+隔离 `--skill-library-root` 中恰好选择一个；开发和测试只能选择隔离 Library。Core 会在打开 SQLite
+或执行 startup recovery 之前获取 data-dir 的进程级独占锁；这些约束是启动器检查之外的最终写入边界。
 
 为 durable Task 创建或复用隔离目录时，同时阅读
 [Git Worktree 生命周期与清理](worktrees.md)。Rovai-ai 的 Rust、Electron 和打包生成物会让每个
@@ -32,7 +33,8 @@ pnpm dev
 `pnpm dev` 会构建 Debug 版 `rovai-core` 与 bundled `rovai` Agent CLI、复制到
 `resources/bin/`，再构建 macOS 文件面板原生预热器到 `resources/native/`，然后启动
 Electron Vite 开发环境。该入口通过 `scripts/dev-desktop.mjs` 自动传入隔离 `userData`、拒绝日常
-数据目录并锁定单一开发实例；Core 还会独占同一数据目录。不要直接运行 `electron-vite dev` 绕过它。
+数据目录和独立 Skill Library，并锁定单一开发实例；Core 还会独占同一数据目录。不要直接运行
+`electron-vite dev` 绕过它。
 
 只重新构建 Debug Core：
 

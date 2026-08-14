@@ -44,10 +44,20 @@ export function coreLaunchArguments(
 ): string[] {
   const args = ['--data-dir', userDataPath]
   if (skillLibraryRoot) args.push('--skill-library-root', skillLibraryRoot)
+  else args.push('--use-default-skill-library')
   for (const executionRoot of removedSkillProjectRoots) {
     args.push('--removed-skill-project-root', executionRoot)
   }
   return args
+}
+
+export function desktopSkillLibraryRoot(
+  userDataPath: string,
+  hasExplicitUserDataDirectory: boolean
+): string | null {
+  return hasExplicitUserDataDirectory
+    ? join(userDataPath, 'managed-skill-library')
+    : null
 }
 
 type CoreStartOptions = {
