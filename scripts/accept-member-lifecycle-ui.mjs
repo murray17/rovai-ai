@@ -166,7 +166,7 @@ try {
     duplicateRoster: Boolean(document.querySelector('.member-list, .member-workbench')),
     tabs: [...document.querySelectorAll('.member-tabs [role="tab"]')]
       .map((tab) => tab.textContent?.trim()),
-    initialMember: document.querySelector('.member-detail-heading h2')?.textContent,
+    initialMember: document.querySelector('.member-detail-heading h1')?.textContent,
     headerControls: (() => {
       const presence = document.querySelector('.member-detail-statuses > span')
       const runtime = document.querySelector('.member-header-runtime')
@@ -184,8 +184,8 @@ try {
     !memberWorkbenchStructure.hasBlankDragStrip
       && Math.abs(memberWorkbenchStructure.contentTop) <= 0.5
       && Math.abs(memberWorkbenchStructure.workspaceTop) <= 0.5
-      && Math.abs(memberWorkbenchStructure.headerTop - 33) <= 0.75
-      && memberWorkbenchStructure.workspaceTopBorder === '3px'
+      && Math.abs(memberWorkbenchStructure.headerTop - 30) <= 0.75
+      && memberWorkbenchStructure.workspaceTopBorder === '0px'
       && memberWorkbenchStructure.sidebarWidth === 270
       && memberWorkbenchStructure.hasRoster
       && memberWorkbenchStructure.returnControl.width > 240
@@ -196,7 +196,7 @@ try {
       && memberWorkbenchStructure.returnControl.keycap === '⌘['
       && memberWorkbenchStructure.returnControl.arrowWidth === 32
       && memberWorkbenchStructure.returnControl.separateFromHeading
-      && memberWorkbenchStructure.detailBackgroundImage.includes('linear-gradient')
+      && memberWorkbenchStructure.detailBackgroundImage === 'none'
       && !memberWorkbenchStructure.hasProjectNavigation
       && !memberWorkbenchStructure.duplicateRoster
       && JSON.stringify(memberWorkbenchStructure.tabs) === JSON.stringify(['身份', '运行配置'])
@@ -438,15 +438,16 @@ try {
   await waitForSelector(running.cdp, '.runtime-installations')
   const runtimeSettingsState = await evaluate(running.cdp, `(() => {
     const panel = document.querySelector('.runtime-installations')
-    const productRows = panel?.querySelector(':scope > .runtime-installation-list')
-      ?.querySelectorAll(':scope > .runtime-installation-row')
+    const productRows = panel?.querySelectorAll(
+      ':scope > .runtime-product-list > .runtime-product-row'
+    )
     const labels = [...(productRows ?? [])]
       .map((row) => row.querySelector('strong')?.textContent)
     const advanced = panel?.querySelector('.runtime-advanced-diagnostics')
     return {
       rowCount: productRows?.length ?? 0,
       labels,
-      advancedOpen: advanced?.open,
+      hasAdvancedDiagnostics: Boolean(advanced),
       explainsShell: panel?.textContent?.includes('交互式登录 Shell 初始化'),
       exposesMemberPathPicker: Boolean(
         panel?.querySelector(':scope > input, :scope > .path-field')
@@ -457,10 +458,10 @@ try {
     runtimeSettingsState.rowCount === 9
       && runtimeSettingsState.labels.includes('Codex CLI')
       && runtimeSettingsState.labels.includes('Antigravity')
-      && runtimeSettingsState.advancedOpen === false
-      && runtimeSettingsState.explainsShell
+      && !runtimeSettingsState.hasAdvancedDiagnostics
+      && !runtimeSettingsState.explainsShell
       && !runtimeSettingsState.exposesMemberPathPicker,
-    `Runtime settings did not preserve the nine-product or advanced-only path boundary: ${JSON.stringify(runtimeSettingsState)}`
+    `Runtime settings did not preserve the nine-product managed catalog boundary: ${JSON.stringify(runtimeSettingsState)}`
   )
   await setViewport(running.cdp, 1040, 700)
   await setTheme(running.cdp, 'night')
@@ -519,6 +520,7 @@ try {
     const summaryStyle = summary ? getComputedStyle(summary) : null
     return {
       tagName: parameters?.tagName,
+      expanded: parameters?.open,
       visible: Boolean(parameters && parameters.getBoundingClientRect().height > 0),
       background: style?.backgroundColor,
       leftBorder: style?.borderLeftWidth,
@@ -531,18 +533,22 @@ try {
     }
   })()`)
   assert(
-    runtimeParametersState.tagName === 'SECTION'
+    runtimeParametersState.tagName === 'DETAILS'
+      && runtimeParametersState.expanded === false
       && runtimeParametersState.visible
       && runtimeParametersState.background === 'rgba(0, 0, 0, 0)'
       && runtimeParametersState.leftBorder === '0px'
       && runtimeParametersState.rightBorder === '0px'
       && runtimeParametersState.bottomBorder === '0px'
       && runtimeParametersState.topBorder === '1px'
-      && runtimeParametersState.summaryBackground === 'rgba(0, 0, 0, 0)'
+      && runtimeParametersState.summaryBackground !== 'rgba(0, 0, 0, 0)'
       && runtimeParametersState.summaryBorderWidth === '0px'
       && !runtimeParametersState.exposesInstallation,
-    `Member Runtime parameters were not a direct plain section: ${JSON.stringify(runtimeParametersState)}`
+    `Member Runtime parameters were not a collapsed plain disclosure: ${JSON.stringify(runtimeParametersState)}`
   )
+  await mouseClick(running.cdp, '.member-runtime-parameters > summary')
+  await waitForExpression(running.cdp,
+    `document.querySelector('.member-runtime-parameters')?.open === true`)
   await waitForText(running.cdp, '.member-runtime-parameters', '模型策略')
   await selectFieldValue(
     running.cdp,
@@ -616,7 +622,7 @@ try {
   await pressKey(running.cdp, 'Enter')
   await waitForExpression(running.cdp,
     `!document.querySelector('.member-leave-dialog')
-      && document.querySelector('.member-detail-heading h2')?.textContent === '咕咕'`)
+      && document.querySelector('.member-detail-heading h1')?.textContent === '咕咕'`)
   assert(
     (await runtimeParameterValues(running.cdp)).modelMode === 'explicit',
     'Continuing a dirty Runtime edit lost the current member draft'
@@ -664,7 +670,7 @@ try {
   await pressKey(running.cdp, 'Enter')
   await waitForExpression(running.cdp,
     `!document.querySelector('.member-leave-dialog')
-      && document.querySelector('.member-detail-heading h2')?.textContent === '叮叮'`)
+      && document.querySelector('.member-detail-heading h1')?.textContent === '叮叮'`)
   await selectMember(running.cdp, '咕咕')
   await openMemberRuntimeTab(running.cdp)
   await waitForText(running.cdp, '.member-runtime-parameters', '审批策略')
@@ -1118,7 +1124,7 @@ async function captureThemeMatrix(cdp, prefix, selectedName, directory) {
       await setViewport(cdp, width, height)
       await setTheme(cdp, theme)
       await waitForExpression(cdp,
-        `document.querySelector('.member-detail-heading h2')?.textContent === ${JSON.stringify(selectedName)}`)
+        `document.querySelector('.member-detail-heading h1')?.textContent === ${JSON.stringify(selectedName)}`)
       await waitForExpression(cdp,
         `[...document.querySelectorAll('.member-avatar img, .member-portrait img')]
           .every((image) => image.complete && image.naturalWidth > 0)`)
@@ -1326,7 +1332,7 @@ async function openCamp(cdp, title) {
 async function selectMember(cdp, displayName) {
   await mouseClick(cdp, '.member-sidebar-select', displayName, true)
   await waitForExpression(cdp,
-    `document.querySelector('.member-detail-heading h2')?.textContent === ${JSON.stringify(displayName)}`)
+    `document.querySelector('.member-detail-heading h1')?.textContent === ${JSON.stringify(displayName)}`)
 }
 
 async function openMemberRuntimeTab(cdp) {
