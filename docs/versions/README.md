@@ -126,4 +126,4 @@ last_updated: 2026-08-14
 | v0.72 | `historical` | Camp 会话区沉浸世界地图、真实执行播报与只读协作叙事 | [v0.72/README.md](v0.72/README.md) |
 | v0.73 | `historical` | best-effort 在线长期记忆捕获、actor-bounded mutation、隔离 Hearth Review 与 Built-in Transport v9；真实 Runtime/UI 矩阵未完成即冻结 | [v0.73/README.md](v0.73/README.md) |
 | v0.74 | `historical` | Runtime 对齐的 Campfire/Grill Duo、双轴代码评审与十二项 official Skill inventory；真实 duo dry-run 与严格 Clippy 基线未完成即冻结 | [v0.74/README.md](v0.74/README.md) |
-| v0.75 | `current` | 当前 Camp 成员显示名的确定性 inline addressing alias | [v0.75/README.md](v0.75/README.md) |
+| v0.75 | `current` | 当前 Camp 成员显示名 inline alias；Scope-identified Memory 与事务/幂等正确性收口 | [v0.75/README.md](v0.75/README.md) |

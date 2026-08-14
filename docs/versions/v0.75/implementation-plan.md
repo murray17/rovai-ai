@@ -2,7 +2,7 @@
 document_type: implementation-plan
 version: v0.75
 authority: implementation-plan-and-acceptance
-status: complete
+status: in_progress
 last_updated: 2026-08-14
 ---
 
@@ -44,11 +44,26 @@ last_updated: 2026-08-14
 - [x] 将最终报告保持为有界摘要，只引用可 exact-read 的 manifest 与 part message IDs；
 - [x] 从头审读 bundled Skill，运行 validator、official bundle 定向回归、文档治理和 diff 检查。
 
+## Checkpoint 5：Memory correctness closure
+
+- [x] 移除与 ADR-0022/0026 冲突的 Supersession same-Scope/Kind 门禁，并把 successor candidate、cycle 与
+  最终容量检查全部放到首个写入前；
+- [x] Search/authorized Read 返回 Agent-relative Scope identity，body-free stale/unavailable 结果省略身份；
+- [x] Revise closed input 重复 Scope identity，Core 在 CAS/no-change 前校验 authorization 与 exact target；
+- [x] 将 typed Memory command 的可预期领域错误收敛为 durable rejected result，保留基础设施 `Err`；
+- [x] 升级 Memory Capture v2、Built-in Tool Transport v10、ADR-0183、Skill、Architecture 与文档路由；
+- [ ] 增加 Supersession cross-Scope/final-capacity、Relationship counterparty、wrong-target anti-oracle、
+  Presence/quota/capacity durable replay 回归并运行完整门禁；
+- [ ] 提交并以非强推方式快进发布到 `main`。
+
 ## 当前证据与缺口
 
 - 已完成：版本切换、ADR-0182、Camp Message Send v6、Core parser、help/schema/smoke 与 canonical
-  persistence/Delivery integration；Review Duo 结果恢复使用消息身份、关系、part 序列与正文结构；
+  persistence/Delivery integration；Review Duo 结果恢复使用消息身份、关系、part 序列与正文结构；Memory
+  correctness closure 的实现、合同和定向回归已完成；
 - 已通过：parser 8 项定向回归、完整 `rovai-core` lib 425 / CLI 11 / Core binary 73 tests（3 项既有
   manual Runtime smoke ignored）、文档 21 项单测、普通治理、真实 base CI、ADR generation check、Rust
-  format、smoke script syntax 与 diff 检查；
-- 已发布：实现提交 `80bd36aa` 已推送到 `main`；本计划不再保留发布缺口。
+  format、smoke script syntax 与 diff 检查；Memory closure 已在变基前通过完整 Rust、pnpm、typecheck、
+  Clippy 与定向测试，尚待最新 `main` 基线门禁；
+- 已发布：alias 实现提交 `80bd36aa` 与 Review Duo 结构校准已推送到 `main`；Memory correctness closure
+  尚待最新基线完整验证与本次 `main` 发布。

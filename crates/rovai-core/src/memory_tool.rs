@@ -106,10 +106,60 @@ impl MemoryToolService {
                     "type": "object",
                     "additionalProperties": false,
                     "required": [
-                        "action", "memoryId", "baseRevisionId", "body", "retrievalKeys"
+                        "action", "scope", "memoryId", "baseRevisionId", "body", "retrievalKeys"
                     ],
                     "properties": {
                         "action": {"const": "revise"},
+                        "scope": {
+                            "const": "companion",
+                            "description": "Immutable target identity copied from memory.read."
+                        },
+                        "memoryId": {"type": "string", "minLength": 1},
+                        "baseRevisionId": {"type": "string", "minLength": 1},
+                        "body": body.clone(),
+                        "retrievalKeys": retrieval_keys.clone()
+                    }
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                        "action", "scope", "memoryId", "baseRevisionId", "body", "retrievalKeys",
+                        "counterpartyAgentId", "direction"
+                    ],
+                    "properties": {
+                        "action": {"const": "revise"},
+                        "scope": {
+                            "const": "relationship",
+                            "description": "Immutable target identity copied from memory.read."
+                        },
+                        "memoryId": {"type": "string", "minLength": 1},
+                        "baseRevisionId": {"type": "string", "minLength": 1},
+                        "body": body.clone(),
+                        "retrievalKeys": retrieval_keys.clone(),
+                        "counterpartyAgentId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "Exact immutable counterparty identity copied from memory.read."
+                        },
+                        "direction": {
+                            "const": "directed",
+                            "description": "Exact immutable direction copied from memory.read."
+                        }
+                    }
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                        "action", "scope", "memoryId", "baseRevisionId", "body", "retrievalKeys"
+                    ],
+                    "properties": {
+                        "action": {"const": "revise"},
+                        "scope": {
+                            "const": "hearth",
+                            "description": "Immutable target identity copied from memory.read."
+                        },
                         "memoryId": {"type": "string", "minLength": 1},
                         "baseRevisionId": {"type": "string", "minLength": 1},
                         "body": body,
@@ -218,16 +268,6 @@ fn map_memory_tool_error(error: anyhow::Error) -> anyhow::Error {
         return TeamToolInvocationError {
             code: invocation.code.clone(),
             message: invocation.message.clone(),
-        }
-        .into();
-    }
-    let message = error.to_string();
-    if let Some((code, detail)) = message.split_once(':')
-        && code.starts_with("memory.")
-    {
-        return TeamToolInvocationError {
-            code: code.to_string(),
-            message: detail.trim().to_string(),
         }
         .into();
     }

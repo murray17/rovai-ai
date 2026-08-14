@@ -14,7 +14,8 @@ description: 在 Rovai-ai 中发现并维护可能值得跨未来 AgentRun 保�
 1. 应用当前事实高于 Memory 的权威与安全边界。
 2. 把候选压缩成一条原子的未来协作路标。
 3. 选择最小合法 Scope 与 Kind；Relationship 只考虑当前队员承担的 directed 方向。
-4. 执行 `search -> read -> add/revise/stop`，只做一次最小 mutation。
+4. 执行 `search -> read -> add/revise/stop`，只做一次最小 mutation；revise 必须逐字段复用 read 返回的
+   Memory ID、Revision ID 与 Scope identity。
 5. 按 `rovai memory write` 的 `outcome` 准确说明结果：`effective` 已生效；`review_pending` 只表示 Hearth
    Review Item 等待用户决定。
 

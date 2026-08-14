@@ -194,4 +194,5 @@ generated_from: docs/adr-front-matter
 | [ADR-0180](0180-single-agent-memory-write-command.md) | Single Agent Memory Write Command with Outcome-Discriminated Output | `accepted` | `cross-version` | [v0.73](../versions/v0.73/README.md) | — |
 | [ADR-0181](0181-twelve-skill-official-inventory-and-runtime-aligned-collaboration.md) | Twelve-Skill Official Inventory and Runtime-Aligned Collaboration | `accepted` | `cross-version` | [v0.74](../versions/v0.74/README.md) | — |
 | [ADR-0182](0182-core-resolved-current-camp-display-name-inline-addressing-alias.md) | Core-Resolved Current-Camp Display-Name Inline Addressing Alias | `accepted` | `cross-version` | [v0.75](../versions/v0.75/README.md) | — |
+| [ADR-0183](0183-scope-identified-agent-memory-revision-targets.md) | Scope-Identified Agent Memory Revision Targets | `accepted` | `cross-version` | [v0.75](../versions/v0.75/README.md) | — |
 <!-- adr-history:end -->

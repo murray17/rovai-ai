@@ -16,7 +16,9 @@
    - `current`：使用返回的当前正文；
    - `revision_changed`：使用新正文与新 Revision ID，丢弃缓存表述；
    - `inactive`、`deleted`、`access_changed`、`unavailable`：停止使用，不复原或猜测旧正文。
-6. revise 使用本次 read 返回的最新 `revisionId` 作为 `baseRevisionId`。
+6. revise 只允许选择本次 read 中同时返回正文与 Scope 身份的结果；把最新 `revisionId` 作为
+   `baseRevisionId`，并原样复制 `scope`。Relationship 还必须原样复制 `counterpartyAgentId` 与
+   `direction`。ID、Scope、counterparty 或 direction 有一项不能确定或不完全匹配时停止，不 revise。
 
 ## 只做一次最小 mutation
 
@@ -30,8 +32,8 @@
    - `review_pending`：`reviewItemId` 只定位等待用户决定的 Hearth Review Item，不能声称已保存为 Memory；
    - 失败：遵循安全 recovery，不声称已写入，不猜测或泄露其他候选 ID/正文/keys。
 
-不要通过连续 Revision 打磨细小措辞。revise 只更新正文和完整 Retrieval Key 集合，不能改变 Scope、
-Kind、counterparty 或 direction。
+不要通过连续 Revision 打磨细小措辞。revise 中的 Scope identity 只是不可变目标断言；命令只更新正文和
+完整 Retrieval Key 集合，不能改变 Scope、Kind、counterparty 或 direction。
 
 Companion add 示例：
 
@@ -45,5 +47,19 @@ Companion add 示例：
 }
 ```
 
-Hearth add 使用相同 shape，把 `scope` 设为 `hearth`；修订只提交 `action`、`memoryId`、最新
-`baseRevisionId`、`body` 与完整 `retrievalKeys`。
+Hearth add 使用相同 shape，把 `scope` 设为 `hearth`。Relationship revise 示例：
+
+```json
+{
+  "action": "revise",
+  "scope": "relationship",
+  "counterpartyAgentId": "agent_3",
+  "direction": "directed",
+  "memoryId": "memory_123",
+  "baseRevisionId": "revision_456",
+  "body": "交接时同时提供测试命令、结果与对应提交。",
+  "retrievalKeys": ["交接证据", "测试结果"]
+}
+```
+
+Companion/Hearth revise 同样复制 read 的 `scope`，但不带 Relationship 两字段。

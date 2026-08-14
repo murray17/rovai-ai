@@ -29,8 +29,10 @@ Architecture 解释组件如何组成，Version 文档记录交付范围；它�
 | [Diagnostics Center v1（当前）](diagnostics-center-v1.md) | `diagnostics.check` typed read model、三态分类、显式单项修复映射、Recovery 与集中脱敏的 `rovai-diagnostics-v5` |
 | [Accepted Input Recovery v1（当前）](accepted-input-recovery-v1.md) | accepted Runtime input 的启动分类、`recovery_blocked`、Scheduler fence、用户命令与 Stop/预算 outcome-unknown 收敛 |
 | [Collaboration State v2（当前）](collaboration-state-v2.md) | peer-only routing identity、稳定 CampMember 选择、Lead ID/Boolean、完整 projection digest、独立 inclusion、accepted ACK 与 v0.50 clean break |
-| [Memory Capture v1（当前）](memory-capture-v1.md) | best-effort 在线捕获、actor-bounded add/revise、隔离 Hearth Review Item、双 CAS、候选清除、发布去重闭包与 Forget safeguard |
-| [Built-in Tool Transport v9（当前）](builtin-tool-transport-v9.md) | 十二项固定命令、统一 `memory.write`、effective/review_pending 闭合输出、v9 catalog/help/Skill/九 Runtime rollout |
+| [Memory Capture v2（当前）](memory-capture-v2.md) | v1 捕获/Review/Forget 边界加 Agent-relative Scope identity、revise target assertion、durable domain rejection 与 Supersession 原子顺序 |
+| [Memory Capture v1 (historical)](memory-capture-v1.md) | 初版 best-effort 在线捕获、actor-bounded add/revise、隔离 Hearth Review Item、双 CAS、候选清除与 Forget safeguard；不含 Scope-identified revise |
+| [Built-in Tool Transport v10（当前）](builtin-tool-transport-v10.md) | 十二项固定命令、Scope-identified Memory Search/Read/revise、durable Memory rejection 与 v10 catalog/capability |
+| [Built-in Tool Transport v9 (historical)](builtin-tool-transport-v9.md) | 统一 `memory.write` 与 effective/review_pending 初版；Search/Read/revise 不含完整 Scope identity |
 | [Built-in Tool Transport v8 (historical)](builtin-tool-transport-v8.md) | v0.70 十三项命令、独立 `memory.propose_hearth` 与 Camp Message Send v5；不作为 v0.73 CLI context/catalog 入口 |
 | [Built-in Tool Transport v7 (historical)](builtin-tool-transport-v7.md) | v0.67 的 Camp Message Send v4、exact Camp read addressing 与初版渐进式 CLI 教学；不作为 v0.73 CLI context/catalog 入口 |
 | [Built-in Tool Transport v7 Errata](builtin-tool-transport-v7-errata.md) | 历史 v7 locator-present recovery 勘误；其 self-write exact-read 语义已由 v8/v9 继承 |

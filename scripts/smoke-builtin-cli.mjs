@@ -305,7 +305,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    contractVersion: 9,
+    contractVersion: 10,
     ipcProtocolVersion: 1,
     runtimeCount: results.length,
     operationCountPerRuntime: expectedOperations.length,
@@ -333,9 +333,9 @@ function nativeSessionIdForRun(events, agentRunId, startedEvent) {
 function assertBuiltinCliCapability(label, installation) {
   const snapshot = installation?.snapshot
   if (snapshot?.probeStatus !== 'ready'
-      || !snapshot.capabilities.includes('builtin_cli.transport.v9')
+      || !snapshot.capabilities.includes('builtin_cli.transport.v10')
       || !snapshot.models.length) {
-    throw new Error(`${label} is not ready for Built-in CLI v9: ${JSON.stringify(snapshot)}`)
+    throw new Error(`${label} is not ready for Built-in CLI v10: ${JSON.stringify(snapshot)}`)
   }
 }
 
@@ -669,7 +669,7 @@ function verificationScript(input) {
     action: 'add',
     scope: 'companion',
     kind: 'preference',
-    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v9 qualification.`,
+    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v10 qualification.`,
     retrievalKeys: [`cli-${input.slug.slice(0, 18)}`]
   })
   const hearth = JSON.stringify({
@@ -895,13 +895,19 @@ memory_id="$(printf '%s\n' "$memory_write" | "$JQ" -er '.memoryId')"
 STEP=memory_search
 memory_search="$("$CLI" memory search --query ${shellQuote(`cli-${input.slug.slice(0, 18)}`)} --limit 6)"
 assert_success "$memory_search" 'memory.search'
-printf '%s\n' "$memory_search" | "$JQ" -e --arg memoryId "$memory_id" '.results | any(.memoryId == $memoryId)' >/dev/null
+printf '%s\n' "$memory_search" | "$JQ" -e --arg memoryId "$memory_id" '
+  .results | any(.memoryId == $memoryId and .scope == "companion"
+    and (has("counterpartyAgentId") | not) and (has("direction") | not))
+' >/dev/null
 
 STEP=memory_read
 memory_read_input="$("$JQ" -nc --arg memoryId "$memory_id" '{memoryIds:[$memoryId]}')"
 memory_read="$(printf '%s\n' "$memory_read_input" | "$CLI" memory read)"
 assert_success "$memory_read" 'memory.read'
-printf '%s\n' "$memory_read" | "$JQ" -e --arg memoryId "$memory_id" '.memories | any(.memoryId == $memoryId and .cacheState == "current")' >/dev/null
+printf '%s\n' "$memory_read" | "$JQ" -e --arg memoryId "$memory_id" '
+  .memories | any(.memoryId == $memoryId and .cacheState == "current" and .scope == "companion"
+    and (has("counterpartyAgentId") | not) and (has("direction") | not))
+' >/dev/null
 
 cat > "$RUN_TMP/hearth.json" <<'ROVAI_JSON'
 ${hearth}

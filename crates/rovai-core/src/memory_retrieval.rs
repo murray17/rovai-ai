@@ -36,6 +36,11 @@ pub struct MemorySearchResult {
     pub memory_id: String,
     pub revision_id: String,
     pub kind: MemoryKind,
+    pub scope: MemoryScopeKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub counterparty_agent_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direction: Option<RelationshipDirection>,
     pub retrieval_keys: Vec<String>,
     pub snippet: String,
 }
@@ -85,6 +90,12 @@ pub struct MemoryReadResult {
     pub revision_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<MemoryKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<MemoryScopeKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub counterparty_agent_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direction: Option<RelationshipDirection>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub retrieval_keys: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -268,6 +279,7 @@ impl MemoryRetrievalService {
             let snippet = truncate_utf8(&raw_snippet, snippet_limit);
             snippet_budget = snippet_budget.saturating_sub(snippet.len());
             let kind = memory.kind.context("active Memory has no Kind")?;
+            let scope_identity = authorized_scope_identity(&memory, &identity.run.agent_id)?;
             record_evidence(
                 database,
                 &identity,
@@ -281,6 +293,9 @@ impl MemoryRetrievalService {
                 memory_id,
                 revision_id,
                 kind,
+                scope: scope_identity.scope,
+                counterparty_agent_id: scope_identity.counterparty_agent_id,
+                direction: scope_identity.direction,
                 retrieval_keys: memory.current_retrieval_keys,
                 snippet,
             });
@@ -366,11 +381,16 @@ impl MemoryRetrievalService {
                     } else {
                         MemoryCacheState::Current
                     };
+                    let scope_identity =
+                        authorized_scope_identity(&memory, &identity.run.agent_id)?;
                     MemoryReadResult {
                         memory_id: memory_id.clone(),
                         cache_state: state,
                         revision_id: Some(revision_id),
                         kind: memory.kind,
+                        scope: Some(scope_identity.scope),
+                        counterparty_agent_id: scope_identity.counterparty_agent_id,
+                        direction: scope_identity.direction,
                         retrieval_keys: memory.current_retrieval_keys,
                         body: Some(body),
                     }
@@ -399,11 +419,48 @@ impl MemoryRetrievalService {
             if result.body.is_none() {
                 result.retrieval_keys.clear();
                 result.kind = None;
+                result.scope = None;
+                result.counterparty_agent_id = None;
+                result.direction = None;
                 result.revision_id = None;
             }
             results.push(result);
         }
         Ok(MemoryReadOutput { memories: results })
+    }
+}
+
+#[derive(Debug)]
+struct AuthorizedScopeIdentity {
+    scope: MemoryScopeKind,
+    counterparty_agent_id: Option<String>,
+    direction: Option<RelationshipDirection>,
+}
+
+fn authorized_scope_identity(
+    memory: &MemoryView,
+    agent_id: &str,
+) -> Result<AuthorizedScopeIdentity> {
+    let scope = memory.scope.context("active Memory has no Scope")?;
+    match scope {
+        MemoryScopeKind::Hearth | MemoryScopeKind::Companion => Ok(AuthorizedScopeIdentity {
+            scope,
+            counterparty_agent_id: None,
+            direction: None,
+        }),
+        MemoryScopeKind::Relationship => {
+            let counterparty_agent_id = memory
+                .relationship_agent_ids
+                .iter()
+                .find(|candidate| candidate.as_str() != agent_id)
+                .cloned()
+                .context("authorized Relationship Memory has no counterparty")?;
+            Ok(AuthorizedScopeIdentity {
+                scope,
+                counterparty_agent_id: Some(counterparty_agent_id),
+                direction: memory.direction,
+            })
+        }
     }
 }
 
@@ -600,6 +657,9 @@ fn unavailable_result(memory_id: &str, state: MemoryCacheState) -> MemoryReadRes
         cache_state: state,
         revision_id: None,
         kind: None,
+        scope: None,
+        counterparty_agent_id: None,
+        direction: None,
         retrieval_keys: Vec::new(),
         body: None,
     }

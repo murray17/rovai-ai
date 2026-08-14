@@ -208,6 +208,10 @@ _Avoid_: Memory authority, confidence, approval state, model priority
 The immutable application-level ownership and maximum visibility boundary selected when a Memory is created: Hearth, one Companion, or one unordered Relationship pair. Moving content to another scope creates a new Memory rather than changing the existing Memory's boundary.
 _Avoid_: mutable label, folder path, Camp visibility, revision field
 
+**Agent Memory Scope Identity**:
+The authenticated-Agent-relative projection of one Memory's immutable target boundary: `scope`, plus `counterpartyAgentId` and `direction` for Relationship. Authorized current Search/Read results expose it so a revise can repeat the exact target assertion; it never grants access, changes Scope, or substitutes for Core authorization.
+_Avoid_: editable Scope fields, Memory capability, inferred counterparty, body-based target identity
+
 **Memory Kind**:
 The immutable semantic classification selected when a Memory is created: Preference, Agreement, or Lesson. Reclassification creates a new Memory; Kind is not a tag or Revision field.
 _Avoid_: mutable category, generic fact type, personality label
@@ -217,7 +221,7 @@ The applicability state of one Memory: `active`, `retired`, or `forgotten`. A ma
 _Avoid_: Revision history, review schedule, superseded status
 
 **Memory Supersession**:
-An explicit user-authorized predecessor-to-successor relationship between two Memories. It retires the predecessor while preserving which new Memory replaced it; publishing a new Revision of the same Memory is not Supersession.
+An explicit user-authorized predecessor-to-successor relationship between two Memories. It atomically retires each predecessor while preserving which new Memory replaced it; the successor may intentionally use a different Scope, Kind, or direction because those immutable changes require a new Memory identity. Publishing a new Revision of the same Memory is not Supersession.
 _Avoid_: ordinary revision, implicit duplicate, targetless status
 
 **Memory Forget**:
@@ -253,11 +257,11 @@ A short, Revision-bound discovery phrase that helps an Agent find one Memory wit
 _Avoid_: Memory authority, mutable tag, task fact, permission label
 
 **Memory Search**:
-An authorized search over the current Agent's applicable active current MemoryRevisions, including entries omitted from its bounded Memory Entrypoint. Search returns discovery metadata and snippets rather than granting access or returning complete bodies.
+An authorized search over the current Agent's applicable active current MemoryRevisions, including entries omitted from its bounded Memory Entrypoint. Search returns discovery metadata, Agent Memory Scope Identity and snippets rather than granting access or returning complete bodies.
 _Avoid_: complete Memory Library search, historical Revision search, authorization by ID possession
 
 **Memory Read**:
-An authorized, bounded read of the latest current Revision for stable Memory IDs. Every call revalidates the active AgentRun, Memory applicability and Lifecycle, and reports whether the Entrypoint cache is current, revised, inactive, deleted, access-changed or unavailable; a stale reference never returns an old or unauthorized body.
+An authorized, bounded read of the latest current Revision for stable Memory IDs. Every call revalidates the active AgentRun, Memory applicability and Lifecycle; authorized current/revised results include Agent Memory Scope Identity, while inactive, deleted, access-changed and unavailable results remain body- and identity-free. A stale reference never returns an old or unauthorized body.
 _Avoid_: frozen Entrypoint body, historical Revision read, Session rotation, capability by reference
 
 **Preference Memory**:

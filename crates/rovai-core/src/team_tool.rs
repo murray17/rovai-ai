@@ -1576,9 +1576,9 @@ mod tests {
         managed_blob::ManagedBlobStore,
         memory::{
             AcceptHearthReviewItemCommand, CreateMemoryCommand, ForgetMemoryCommand,
-            MemoryCreationOrigin, MemoryKind, MemoryScopeKind, MemoryService,
-            RejectHearthReviewItemCommand, RelationshipDirection, RetireMemoryCommand,
-            ReviseMemoryCommand,
+            MEMORY_AGENT_MUTATIONS_PER_RUN, MemoryCreationOrigin, MemoryKind, MemoryScopeKind,
+            MemoryService, RejectHearthReviewItemCommand, RelationshipDirection,
+            RetireMemoryCommand, ReviseMemoryCommand,
         },
         memory_retrieval::{
             MemoryCacheState, MemoryReadInput, MemoryRetrievalInvocation, MemoryRetrievalService,
@@ -1878,19 +1878,37 @@ mod tests {
             body: &str,
             retrieval_keys: &[&str],
         ) -> CommandExecution {
+            let target = MemoryService::default()
+                .get(&self.database, memory_id)
+                .unwrap();
+            let scope = target
+                .as_ref()
+                .and_then(|memory| memory.scope)
+                .unwrap_or(MemoryScopeKind::Hearth);
+            let counterparty_agent_id = target.as_ref().and_then(|memory| {
+                (scope == MemoryScopeKind::Relationship).then(|| {
+                    memory
+                        .relationship_agent_ids
+                        .iter()
+                        .find(|agent_id| agent_id.as_str() != "agent_1")
+                        .cloned()
+                        .unwrap()
+                })
+            });
             self.memory_write(
                 call_id,
                 MemoryWriteToolInput {
                     action: "revise".to_string(),
-                    scope: None,
+                    scope: Some(scope),
                     kind: None,
                     body: body.to_string(),
                     retrieval_keys: retrieval_keys
                         .iter()
                         .map(|value| (*value).to_string())
                         .collect(),
-                    counterparty_agent_id: None,
-                    direction: None,
+                    counterparty_agent_id,
+                    direction: (scope == MemoryScopeKind::Relationship)
+                        .then_some(RelationshipDirection::Directed),
                     memory_id: Some(memory_id.to_string()),
                     base_revision_id: Some(base_revision_id.to_string()),
                 },
@@ -4208,6 +4226,9 @@ Use this exact public input @agent_2";
             )
             .unwrap();
         assert_eq!(search.results[0].memory_id, memory_id);
+        assert_eq!(search.results[0].scope, MemoryScopeKind::Hearth);
+        assert!(search.results[0].counterparty_agent_id.is_none());
+        assert!(search.results[0].direction.is_none());
         let current = retrieval
             .read(
                 &mut fixture.database,
@@ -4222,6 +4243,9 @@ Use this exact public input @agent_2";
             )
             .unwrap();
         assert_eq!(current.memories[0].cache_state, MemoryCacheState::Current);
+        assert_eq!(current.memories[0].scope, Some(MemoryScopeKind::Hearth));
+        assert!(current.memories[0].counterparty_agent_id.is_none());
+        assert!(current.memories[0].direction.is_none());
         assert!(
             current.memories[0]
                 .body
@@ -4300,6 +4324,13 @@ Use this exact public input @agent_2";
         assert_eq!(inactive.memories[0].cache_state, MemoryCacheState::Inactive);
         assert!(inactive.memories[0].body.is_none());
         assert!(inactive.memories[0].retrieval_keys.is_empty());
+        assert!(inactive.memories[0].scope.is_none());
+        assert!(
+            serde_json::to_value(&inactive.memories[0])
+                .unwrap()
+                .get("scope")
+                .is_none()
+        );
 
         service
             .forget(
@@ -4333,6 +4364,106 @@ Use this exact public input @agent_2";
             MemoryCacheState::Unavailable
         );
         assert!(deleted.memories.iter().all(|memory| memory.body.is_none()));
+    }
+
+    #[test]
+    fn memory_search_and_read_identify_relationship_counterparties() {
+        let mut fixture = Fixture::new();
+        let service = MemoryService::default();
+        let create_relationship =
+            |fixture: &mut Fixture, command_id: &str, counterparty: &str| -> String {
+                service
+                    .create(
+                        &mut fixture.database,
+                        &user_envelope(
+                            command_id,
+                            None,
+                            CreateMemoryCommand {
+                                scope: MemoryScopeKind::Relationship,
+                                kind: MemoryKind::Agreement,
+                                body: "Provide exact test evidence during every handoff."
+                                    .to_string(),
+                                retrieval_keys: vec!["test handoff".to_string()],
+                                companion_agent_id: None,
+                                relationship_agent_ids: vec![
+                                    "agent_1".to_string(),
+                                    counterparty.to_string(),
+                                ],
+                                direction: Some(RelationshipDirection::Directed),
+                                directed_actor_agent_id: Some("agent_1".to_string()),
+                                review_after: None,
+                            },
+                        ),
+                    )
+                    .unwrap()
+                    .result
+                    .payload["memoryId"]
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            };
+        let agent_two_memory =
+            create_relationship(&mut fixture, "relationship-agent-two", "agent_2");
+        let agent_three_memory =
+            create_relationship(&mut fixture, "relationship-agent-three", "agent_3");
+
+        let retrieval = MemoryRetrievalService;
+        let search = retrieval
+            .search(
+                &mut fixture.database,
+                &MemoryRetrievalInvocation {
+                    native_binding_id: fixture.credential.native_binding_id.clone(),
+                    binding_credential: fixture.credential.binding_credential.clone(),
+                    runtime_tool_call_id: "search-similar-relationships".to_string(),
+                    input: MemorySearchInput {
+                        query: "test handoff".to_string(),
+                        limit: Some(6),
+                    },
+                },
+            )
+            .unwrap();
+        for (memory_id, counterparty) in [
+            (&agent_two_memory, "agent_2"),
+            (&agent_three_memory, "agent_3"),
+        ] {
+            let result = search
+                .results
+                .iter()
+                .find(|result| &result.memory_id == memory_id)
+                .unwrap();
+            assert_eq!(result.scope, MemoryScopeKind::Relationship);
+            assert_eq!(result.counterparty_agent_id.as_deref(), Some(counterparty));
+            assert_eq!(result.direction, Some(RelationshipDirection::Directed));
+        }
+
+        let read = retrieval
+            .read(
+                &mut fixture.database,
+                &MemoryRetrievalInvocation {
+                    native_binding_id: fixture.credential.native_binding_id.clone(),
+                    binding_credential: fixture.credential.binding_credential.clone(),
+                    runtime_tool_call_id: "read-similar-relationships".to_string(),
+                    input: MemoryReadInput {
+                        memory_ids: vec![agent_two_memory, agent_three_memory],
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(read.memories.len(), 2);
+        assert_eq!(read.memories[0].scope, Some(MemoryScopeKind::Relationship));
+        assert_eq!(
+            read.memories[0].counterparty_agent_id.as_deref(),
+            Some("agent_2")
+        );
+        assert_eq!(
+            read.memories[1].counterparty_agent_id.as_deref(),
+            Some("agent_3")
+        );
+        assert!(
+            read.memories
+                .iter()
+                .all(|memory| memory.direction == Some(RelationshipDirection::Directed))
+        );
     }
 
     #[test]
@@ -4470,6 +4601,41 @@ Use this exact public input @agent_2";
             directed_memory.directed_actor_agent_id.as_deref(),
             Some("agent_1")
         );
+        let wrong_identity_wrong_base = fixture
+            .memory_write(
+                "directed-wrong-target-wrong-base",
+                MemoryWriteToolInput {
+                    action: "revise".to_string(),
+                    scope: Some(MemoryScopeKind::Relationship),
+                    kind: None,
+                    body: "This must not revise the relationship selected for agent two."
+                        .to_string(),
+                    retrieval_keys: vec!["wrong counterparty".to_string()],
+                    counterparty_agent_id: Some("agent_3".to_string()),
+                    direction: Some(RelationshipDirection::Directed),
+                    memory_id: Some(directed_memory.id.clone()),
+                    base_revision_id: Some(Uuid::new_v4().to_string()),
+                },
+            )
+            .unwrap();
+        assert_memory_unavailable(&wrong_identity_wrong_base);
+        let wrong_identity_exact = fixture
+            .memory_write(
+                "directed-wrong-target-exact",
+                MemoryWriteToolInput {
+                    action: "revise".to_string(),
+                    scope: Some(MemoryScopeKind::Relationship),
+                    kind: None,
+                    body: "I will provide agent two with exact handoff evidence.".to_string(),
+                    retrieval_keys: vec!["exact handoff".to_string()],
+                    counterparty_agent_id: Some("agent_3".to_string()),
+                    direction: Some(RelationshipDirection::Directed),
+                    memory_id: Some(directed_memory.id.clone()),
+                    base_revision_id: directed_memory.current_revision_id.clone(),
+                },
+            )
+            .unwrap();
+        assert_memory_unavailable(&wrong_identity_exact);
 
         let mutual_error = fixture
             .memory_write(
@@ -4486,8 +4652,13 @@ Use this exact public input @agent_2";
                     base_revision_id: None,
                 },
             )
-            .unwrap_err();
-        assert!(mutual_error.to_string().contains("memory.scope_forbidden"));
+            .unwrap();
+        assert_eq!(mutual_error.result.status, CommandResultStatus::Rejected);
+        assert_eq!(mutual_error.result.code, "memory.scope_forbidden");
+        assert_eq!(
+            mutual_error.result.payload,
+            json!({"message": "Agent Relationship writes must be directed"})
+        );
 
         let other_companion_body = "Agent two owns this Companion lesson.";
         let other_companion_key = "agent two lesson";
@@ -4678,6 +4849,90 @@ Use this exact public input @agent_2";
     }
 
     #[test]
+    fn agent_memory_domain_rejections_are_durable_across_state_changes_and_retries() {
+        let mut fixture = Fixture::new();
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET profile_status = 'away' WHERE id = 'agent_3'",
+                [],
+            )
+            .unwrap();
+        let input = MemoryWriteToolInput {
+            action: "add".to_string(),
+            scope: Some(MemoryScopeKind::Relationship),
+            kind: Some(MemoryKind::Agreement),
+            body: "I will give agent three exact retry evidence.".to_string(),
+            retrieval_keys: vec!["retry evidence".to_string()],
+            counterparty_agent_id: Some("agent_3".to_string()),
+            direction: Some(RelationshipDirection::Directed),
+            memory_id: None,
+            base_revision_id: None,
+        };
+        let first = fixture
+            .memory_write("durable-counterparty-rejection", input.clone())
+            .unwrap();
+        assert_eq!(first.result.status, CommandResultStatus::Rejected);
+        assert_eq!(first.result.code, "memory.direction_forbidden");
+        assert!(!first.replayed);
+
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET profile_status = 'present' WHERE id = 'agent_3'",
+                [],
+            )
+            .unwrap();
+        let replay = fixture
+            .memory_write("durable-counterparty-rejection", input)
+            .unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.result, first.result);
+        assert!(
+            MemoryService::default()
+                .list(&fixture.database)
+                .unwrap()
+                .memories
+                .iter()
+                .all(|memory| memory.current_body.as_deref()
+                    != Some("I will give agent three exact retry evidence."))
+        );
+
+        for index in 0..MEMORY_AGENT_MUTATIONS_PER_RUN {
+            let persisted = fixture.hearth_review_add(
+                &format!("quota-write-{index}"),
+                &format!("Durable quota candidate number {index}."),
+                &format!("quota key {index}"),
+            );
+            assert_eq!(persisted.result.status, CommandResultStatus::Accepted);
+        }
+        let quota_input = MemoryWriteToolInput {
+            action: "add".to_string(),
+            scope: Some(MemoryScopeKind::Companion),
+            kind: Some(MemoryKind::Lesson),
+            body: "This write must remain rejected on every replay.".to_string(),
+            retrieval_keys: vec!["quota replay".to_string()],
+            counterparty_agent_id: None,
+            direction: None,
+            memory_id: None,
+            base_revision_id: None,
+        };
+        let quota = fixture
+            .memory_write("durable-run-quota-rejection", quota_input.clone())
+            .unwrap();
+        assert_eq!(quota.result.status, CommandResultStatus::Rejected);
+        assert_eq!(quota.result.code, "memory.run_quota_exceeded");
+        assert!(!quota.replayed);
+        let quota_replay = fixture
+            .memory_write("durable-run-quota-rejection", quota_input)
+            .unwrap();
+        assert!(quota_replay.replayed);
+        assert_eq!(quota_replay.result, quota.result);
+    }
+
+    #[test]
     fn hearth_review_terminalizes_candidates_and_reconciles_exact_publication() {
         let mut fixture = Fixture::new();
         let tools = MemoryToolService;
@@ -4856,7 +5111,7 @@ Use this exact public input @agent_2";
                     runtime_tool_call_id: "hearth-revise-first".to_string(),
                     input: MemoryWriteToolInput {
                         action: "revise".to_string(),
-                        scope: None,
+                        scope: Some(MemoryScopeKind::Hearth),
                         kind: None,
                         body: candidate_body.to_string(),
                         retrieval_keys: vec!["candidate marker".to_string()],
@@ -4976,7 +5231,7 @@ Use this exact public input @agent_2";
                     runtime_tool_call_id: "hearth-revise-before-forget".to_string(),
                     input: MemoryWriteToolInput {
                         action: "revise".to_string(),
-                        scope: None,
+                        scope: Some(MemoryScopeKind::Hearth),
                         kind: None,
                         body: "A pending target revision must clear when forgotten.".to_string(),
                         retrieval_keys: vec!["forget target".to_string()],

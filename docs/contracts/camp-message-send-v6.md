@@ -211,6 +211,6 @@ authority; no family-level teaching alias is added.
 - [ADR-0163: Explicit Caller Return and Core-Managed Reply Reference](../adr/0163-explicit-caller-return-and-core-managed-reply-reference.md)
 - [Current User Attention v3](current-user-attention-v3.md)
 - [Message Delivery v2](message-delivery-v2.md)
-- [Built-in Tool Transport v9](builtin-tool-transport-v9.md)
+- [Built-in Tool Transport v10](builtin-tool-transport-v10.md)
 - [Camp Message Send v5 (historical)](camp-message-send-v5.md)
 - [Public A2A Message and Message Delivery architecture](../architecture/public-a2a-message-delivery.md)

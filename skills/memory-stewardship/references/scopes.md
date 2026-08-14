@@ -2,6 +2,8 @@
 
 多个 Scope 看似合理时，选择能完整表达含义的最小 Scope。修订不能改变既有 Memory 的
 Scope、Kind、counterparty 或 Relationship direction；需要不同身份时重新判断是否新增。
+Search/Read 返回的 Scope identity 是目标身份而非可编辑字段；revise 必须逐字段复制并让 Core 校验，不能
+仅凭相似正文或“这个 Memory 也在我的可修改集合中”推断目标。
 
 ## Companion
 
