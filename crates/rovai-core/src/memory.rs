@@ -2805,8 +2805,21 @@ impl MemoryService {
             .memories
             .into_iter()
             .filter(|memory| memory.lifecycle != "forgotten")
-            .collect::<Vec<_>>();
-        let review_items = self.list_hearth_review_items(database)?;
+            .map(|memory| {
+                let mut exported = serde_json::to_value(memory)?;
+                let revisions = exported
+                    .get_mut("revisions")
+                    .and_then(Value::as_array_mut)
+                    .context("Memory export projection has no Revision array")?;
+                for revision in revisions {
+                    revision
+                        .as_object_mut()
+                        .context("Memory export Revision is not an object")?
+                        .remove("createdFromHearthReviewItemId");
+                }
+                Ok(exported)
+            })
+            .collect::<Result<Vec<_>>>()?;
         let mut statement = database.connection().prepare(
             r#"
             SELECT predecessor_memory_id, successor_memory_id, created_at
@@ -2827,7 +2840,6 @@ impl MemoryService {
             "format": "rovai-memory-export-v3",
             "exportedAt": Utc::now().to_rfc3339(),
             "memories": memories,
-            "hearthReviewItems": review_items,
             "supersessions": supersessions,
         }))
     }
@@ -3489,6 +3501,13 @@ impl MemoryService {
                     if record.lifecycle != "active" {
                         return Ok(rejected("memory.unavailable", "Memory is unavailable"));
                     }
+                    let is_hearth = record.scope.as_ref().map(|scope| scope.kind)
+                        == Some(MemoryScopeKind::Hearth);
+                    if !is_hearth
+                        && !memory_mutable_by_agent(transaction, &record, agent_id, camp_id)?
+                    {
+                        return Ok(rejected("memory.unavailable", "Memory is unavailable"));
+                    }
                     if record.current_revision_id.as_deref() != Some(base_revision_id) {
                         return Ok(rejected(
                             "memory.revision_conflict",
@@ -3506,9 +3525,7 @@ impl MemoryService {
                             "Memory body and Retrieval Keys are unchanged",
                         ));
                     }
-                    if record.scope.as_ref().map(|scope| scope.kind)
-                        == Some(MemoryScopeKind::Hearth)
-                    {
+                    if is_hearth {
                         return save_hearth_review_item(
                             transaction,
                             &normalized,
@@ -3520,9 +3537,6 @@ impl MemoryService {
                             &normalized.payload.body,
                             &normalized.payload.retrieval_keys,
                         );
-                    }
-                    if !memory_mutable_by_agent(transaction, &record, agent_id, camp_id)? {
-                        return Ok(rejected("memory.unavailable", "Memory is unavailable"));
                     }
                     let revision_id = Uuid::new_v4().to_string();
                     let now = Utc::now().to_rfc3339();

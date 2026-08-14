@@ -116,7 +116,7 @@ try {
 
   const exported = await core.request('memory.export')
   assert(exported.format === 'rovai-memory-export-v3'
-    && Array.isArray(exported.hearthReviewItems),
+    && !Object.hasOwn(exported, 'hearthReviewItems'),
   'Memory export v3 format is unstable')
   assert(!JSON.stringify(exported).includes(forgetBody), 'Forgotten body leaked into export')
   assert(!exported.memories.some((memory) => memory.id === forgetCandidate.payload.memoryId),
