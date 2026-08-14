@@ -66,7 +66,8 @@ describe('member runtime parameters', () => {
     ['claude-code-cli', '权限模式', 'bypassPermissions'],
     ['qoder-cli', '权限模式', 'bypass_permissions'],
     ['codebuddy-cli', '权限模式', 'bypassPermissions'],
-    ['qwen-code', '审批模式', 'yolo']
+    ['qwen-code', '审批模式', 'yolo'],
+    ['trae-cn-cli', '权限模式', 'default']
   ] as const)('renders %s with its native permission value', (kind, label, value) => {
     const installation = runtimeInstallation(kind)
     const markup = renderToStaticMarkup(createElement(MemberRuntimeParameters, {
@@ -245,6 +246,8 @@ function runtimePermissionDefaults(kind: AdapterKind): Record<string, unknown> {
       return { permission_mode: 'bypassPermissions' }
     case 'qwen-code':
       return { approval_mode: 'yolo' }
+    case 'trae-cn-cli':
+      return { permission_mode: 'default' }
     case 'antigravity-app':
       return {
         mode: 'accept-edits',

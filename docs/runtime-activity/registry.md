@@ -2,7 +2,7 @@
 document_type: runtime-activity-mapping-registry
 authority: runtime-activity-mapping-catalog
 classifier_version: activity-v1
-last_updated: 2026-08-11
+last_updated: 2026-08-15
 ---
 
 # Runtime Activity Mapping Registry
@@ -18,6 +18,7 @@ last_updated: 2026-08-11
 | `qoder-cli` | Qoder | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | Skill turn 通过 |
 | `codebuddy-cli` | CodeBuddy | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | Skill turn 通过 |
 | `qwen-code` | Qwen Code | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | Skill turn 通过 |
+| `trae-cn-cli` | TRAE CLI CN | ACP v1 | `fine_grained` | 同 ACP 合同；实际 Probe 已证明稳定 `toolCallId`、结构化 permission request 与 started→terminal lifecycle | 受控 fixture 通过 | `traecli 0.120.52` completion/cancel、Approval allow/deny、Missing-Send tool→final 与 MCP Projection 正式 Smoke 通过 |
 | `claude-code-cli` | Claude Code | Claude stream-json | `run_level` | 当前不生成未报告的 command/file/tool；只显示 Run/final result | 受控 fixture 通过 | Skill turn 通过；MCP projection 通过 |
 | `antigravity-app` | Antigravity | Antigravity managed log | `run_level` | 当前内部步骤不推断；Core Team Tool 可使用 Catalog 验证 canonical name | 受控 fixture 通过 | manual completion + Skill turn 通过 |
 
@@ -32,7 +33,7 @@ Coverage 只描述 Core 实际能看到的粒度，不是产品支持等级。�
 - `ROVAI_MCP_PROJECTION_SMOKE_ADAPTERS=kiro-cli pnpm smoke:mcp-projection`：Kiro `2.15.1` 实际调用 Core 投影工具，返回 `rovai-projection:kiro`。
 - 此前的 Codex、Claude Code、OpenCode 投影 smoke，以及四 Runtime 原生 MCP smoke 均保持通过。全适配器投影命令随后启动过，但本轮在 Kiro 阶段按用户要求停止，未将该未完成命令记为通过。
 
-以上记录证明真实 Runtime 的连接、会话和可观测边界；它不替代九 Runtime 的受控 Mapping fixture，也不允许 Core 根据未发生的工具调用补写 Canonical Activity。
+以上记录证明真实 Runtime 的连接、会话和可观测边界；它不替代十 Runtime 的受控 Mapping fixture，也不允许 Core 根据未发生的工具调用补写 Canonical Activity。
 
 ## Protocol mapping
 

@@ -4,7 +4,8 @@ const ACP_ADAPTERS = new Set([
   'kiro-cli',
   'qoder-cli',
   'codebuddy-cli',
-  'qwen-code'
+  'qwen-code',
+  'trae-cn-cli'
 ])
 
 export function validateAcpRecoveryProtocolFixture(fixture) {

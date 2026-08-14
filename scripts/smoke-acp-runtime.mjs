@@ -87,6 +87,11 @@ try {
       adapterKind: 'copilot-cli',
       permissionValues: { allow_all: process.env.ROVAI_COPILOT_ALLOW_ALL ?? 'off' },
       token: 'ROVAI_COPILOT_ACP_OK'
+    },
+    {
+      adapterKind: 'trae-cn-cli',
+      permissionValues: { permission_mode: process.env.ROVAI_TRAE_PERMISSION_MODE ?? 'default' },
+      token: 'ROVAI_TRAE_ACP_OK'
     }
   ].filter((specification) => !process.env.ROVAI_ACP_SMOKE_ADAPTER || specification.adapterKind === process.env.ROVAI_ACP_SMOKE_ADAPTER)
   const results = []
@@ -104,16 +109,10 @@ try {
     const body = `Do not call tools or inspect files. Reply with exactly ${specification.token} and nothing else.`
     const purpose = `Verify the ${specification.adapterKind} ACP execution path without tools`
     const sent = camp
-      ? await request('camp.messages.send', {
-          commandId: crypto.randomUUID(),
-          campId: camp.id,
-          body,
-          address: { mode: 'explicit', agentIds: [profile.agentId] },
-          execution: {
-            taskId: null,
-            purpose,
-            completionRole: 'required'
-          }
+      ? await sendExistingCampMessage(request, camp.id, body, {
+          taskId: null,
+          purpose,
+          completionRole: 'required'
         })
       : await createConfiguredCampAndSend(request, {
           commandId: crypto.randomUUID(),
@@ -160,21 +159,24 @@ try {
       output: output.body
     })
 
-    if (['opencode-cli', 'copilot-cli'].includes(specification.adapterKind)) {
+    if (['opencode-cli', 'copilot-cli', 'trae-cn-cli'].includes(specification.adapterKind)) {
       const writeToken = 'ROVAI_ACP_APPROVED_WRITE'
-      const adapterFileStem = specification.adapterKind === 'opencode-cli' ? 'OPENCODE' : 'COPILOT'
+      const adapterFileStem = ({
+        'opencode-cli': 'OPENCODE',
+        'copilot-cli': 'COPILOT',
+        'trae-cn-cli': 'TRAE'
+      })[specification.adapterKind]
       const writePath = join(projectRoot, `ACP_APPROVED_${adapterFileStem}.txt`)
-      const writeRequest = await request('camp.messages.send', {
-        commandId: crypto.randomUUID(),
-        campId: camp.id,
-        body: `Use the file editing tool exactly once to create ${writePath} with exactly ${writeToken} and a trailing newline. Do not call shell, list, read, or any verification tool before or after the edit. Then immediately reply exactly ACP_WRITE_OK.`,
-        address: { mode: 'explicit', agentIds: [profile.agentId] },
-        execution: {
+      const writeRequest = await sendExistingCampMessage(
+        request,
+        camp.id,
+        `Use the file editing tool exactly once to create ${writePath} with exactly ${writeToken} and a trailing newline. Do not call shell, list, read, or any verification tool before or after the edit. Then immediately reply exactly ACP_WRITE_OK.`,
+        {
           taskId: null,
           purpose: 'Verify ACP permission mediation and one-time file write authorization',
           completionRole: 'required'
         }
-      })
+      )
       const writeRunId = writeRequest.commandResult?.payload?.agentRunIds?.[0]
       if (!writeRunId) throw new Error(`ACP write AgentRun was not accepted: ${JSON.stringify(writeRequest)}`)
       const resolvedApprovals = new Set()
@@ -247,19 +249,22 @@ try {
 
       const approvalExpected = specification.permissionValues.permission === 'ask'
         || specification.permissionValues.allow_all === 'off'
+        || specification.permissionValues.permission_mode === 'default'
       if (approvalExpected) {
         const deniedPath = join(projectRoot, `ACP_DENIED_${adapterFileStem}.txt`)
-        const deniedRequest = await request('camp.messages.send', {
-        commandId: crypto.randomUUID(),
-        campId: camp.id,
-        body: `Use the file editing tool exactly once to create ${deniedPath} with exactly DENIED_WRITE and a trailing newline. Do not call shell, list, read, or any verification tool before or after the edit. Then immediately reply exactly ACP_DENIED_WRITE_OK.`,
-        address: { mode: 'explicit', agentIds: [profile.agentId] },
-        execution: {
-          taskId: null,
-          purpose: 'Create the requested file and report the concrete result',
-          completionRole: 'required'
-        }
-      })
+        const deniedBody = specification.adapterKind === 'trae-cn-cli'
+          ? `Use the Bash tool exactly once to run this command and do not use any other tool: printf 'DENIED_WRITE\\n' > '${deniedPath}'. Do not simulate or explain the tool call. Then immediately reply exactly ACP_DENIED_WRITE_OK.`
+          : `Use the file editing tool exactly once to create ${deniedPath} with exactly DENIED_WRITE and a trailing newline. Do not call shell, list, read, or any verification tool before or after the edit. Then immediately reply exactly ACP_DENIED_WRITE_OK.`
+        const deniedRequest = await sendExistingCampMessage(
+          request,
+          camp.id,
+          deniedBody,
+          {
+            taskId: null,
+            purpose: 'Create the requested file and report the concrete result',
+            completionRole: 'required'
+          }
+        )
         const deniedRunId = deniedRequest.commandResult?.payload?.agentRunIds?.[0]
         if (!deniedRunId) throw new Error(`ACP denied AgentRun was not accepted: ${JSON.stringify(deniedRequest)}`)
         const deniedApprovals = new Set()
@@ -304,6 +309,7 @@ try {
           throw new Error(`ACP denial did not fail closed: ${JSON.stringify({ deniedRun, deniedActions, deniedApprovals: deniedApprovals.size, deniedFileExists })}`)
         }
         results.at(-1).denial = {
+          path: 'rovai_approval_denied',
           resolved: deniedApprovals.size,
           actionStatuses: deniedActions.map((action) => action.status),
           fileCreated: deniedFileExists
@@ -324,6 +330,21 @@ try {
     if (core.exitCode === null) core.kill('SIGTERM')
   }
   await rm(fixtureRoot, { recursive: true, force: true })
+}
+
+async function sendExistingCampMessage(request, campId, body, execution) {
+  const draft = await request('camp.composerDraft.get', { campId })
+  const saved = await request('camp.composerDraft.save', {
+    campId,
+    expectedRevision: draft.revision,
+    content: [{ kind: 'text', text: body }]
+  })
+  return request('camp.messages.send', {
+    commandId: crypto.randomUUID(),
+    campId,
+    draftRevision: saved.revision,
+    execution
+  })
 }
 
 async function run(command, args, cwd) {

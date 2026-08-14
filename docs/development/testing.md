@@ -138,7 +138,7 @@ pnpm build:desktop
 | 命令 | 主要范围 | 外部要求 |
 | --- | --- | --- |
 | `pnpm smoke:core` | 全新数据库、普通目录、空 Git 仓库、导航、重启和删除 | Git；不调用模型 |
-| `pnpm smoke:member-config` | 九种产品目录、Installation、成员 Runtime 配置、Readiness 和重启 | 不调用模型；可用 `ROVAI_*_BIN` 覆盖发现 |
+| `pnpm smoke:member-config` | 十种产品目录、Installation、成员 Runtime 配置、Readiness 和重启 | 不调用模型；可用 `ROVAI_*_BIN` 覆盖发现；Settings Preview 不进入该矩阵 |
 | `pnpm smoke:memory` | Memory Migration、治理、Revision、导出、投影恢复和权限 | 不调用模型 |
 | `pnpm smoke:mcp-presets` | Context7、Playwright reviewed default 的真实 MCP initialize 与 tools/list | 联网；不调用模型 |
 
@@ -150,18 +150,18 @@ pnpm build:desktop
 | 命令 | 默认或支持的 Runtime | 额外说明 |
 | --- | --- | --- |
 | `pnpm smoke:intake` | Codex | 创建 Git fixture；验证 Camp 消息、连续 Conversation、重启和删除 |
-| `pnpm smoke:acp-runtime` | OpenCode + Copilot | `ROVAI_ACP_SMOKE_ADAPTER` 可选其中一个 |
+| `pnpm smoke:acp-runtime` | OpenCode + Copilot + TRAE | `ROVAI_ACP_SMOKE_ADAPTER` 可选其中一个；TRAE 使用 `traecli acp serve` 与动态 Session capability，并覆盖 completion、后继 Session load、allow-once 与 deny |
 | `pnpm smoke:claude-runtime` | Claude Code | 验证原生权限、连续性和 Resume |
 | `pnpm smoke:antigravity-runtime` | Antigravity + Codex | 包含 Antigravity 到 Codex 换绑 |
 | `pnpm smoke:action-approval` | Codex | 验证越界动作的 Approval 与唯一副作用 |
 | `pnpm smoke:multi-agent` | Codex | 同一 CampTurn 的两个真实并发 AgentRun |
-| `pnpm smoke:builtin-cli` | 全部九种正式 Runtime | 每个真实 AgentRun 只使用固定业务命令，调用十三项 CLI operation，验证旧 send 输入拒绝、Projection/schema、冲突 recovery、release fence、Replay 与后续 AgentRun 新 lease；transport-independent indeterminate 由 CLI response-loss test 覆盖；任一 Runtime 缺失、未认证或漏项即失败 |
-| `pnpm smoke:skills` | Codex 默认；selector 接受全部九种 Product Runtime | `ROVAI_SKILL_SMOKE_ADAPTERS=all` 会逐一尝试九组真实投递与发现；只有本机 Runtime 已安装、已认证、已接入 AgentRun 且全部通过时才成功 |
+| `pnpm smoke:builtin-cli` | 全部十种正式 Runtime | 每个真实 AgentRun 只使用固定业务命令，调用十三项 CLI operation，验证旧 send 输入拒绝、Projection/schema、冲突 recovery、release fence、Replay 与后续 AgentRun 新 lease；transport-independent indeterminate 由 CLI response-loss test 覆盖；任一选中 Runtime 缺失、未认证或漏项即失败 |
+| `pnpm smoke:skills` | Codex 默认；selector 接受九种已证明 Skill projection 的 Runtime | `ROVAI_SKILL_SMOKE_ADAPTERS=all` 会逐一尝试既有九组真实投递与发现；TRAE 第一版没有静态 Skill 路径证据，明确不在该 selector 中 |
 | `pnpm smoke:mcp` | Codex、Claude Code、OpenCode、Copilot；可选 CodeBuddy、Qwen Code | 默认前四种；保留 Runtime 原生配置并逐 Run 追加 MCP；OpenCode 默认使用 `opencode/mimo-v2.5-free` |
-| `pnpm smoke:mcp-projection` | Codex、Claude Code、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen Code | 通过真实 Core、Assignment、AgentRun Projection 与 ContextManifest 验证原生配置保留及 Adapter-specific 同名策略；Codex 同名项应跳过，另外七种应由 Rovai 整项优先；默认八种 |
+| `pnpm smoke:mcp-projection` | Codex、Claude Code、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE | 通过真实 Core、Assignment、AgentRun Projection 与 ContextManifest 验证原生配置保留及 Adapter-specific 同名策略；Codex 同名项应跳过，另外八种应由 Rovai 整项优先；默认九种 |
 | `pnpm smoke:memory-runtime` | Codex + Claude Code | 可只选一种；Claude 有 bounded model/budget 配置 |
 | `pnpm smoke:recovery` | OpenCode 默认 | 可选择其他产品 Runtime；创建 Git fixture 并杀死 Core 验证恢复 |
-| `pnpm smoke:missing-send-recovery` | 全部九种正式 Runtime | 每种 Runtime 使用独立临时 data-dir/Git workspace，真实执行 zero-send 与 accepted-send suppression；六个 ACP 额外执行 tool→final 并生成独立协议 fixture；任一项缺失即失败 |
+| `pnpm smoke:missing-send-recovery` | 全部十种 Runtime | 每种 Runtime 使用独立临时 data-dir/Git workspace，真实执行 zero-send 与 accepted-send suppression；七个 ACP 额外执行 tool→final 并生成独立协议 fixture；TRAE 使用同一严格 candidate/抑制规则 |
 | `pnpm accept:planned-shutdown` | Claude Code + packaged App | 在隔离 Git workspace/`userData` 中等待真实 input accepted 后退出，验证 deadline、自然 child exit、无伪 terminal、进程 reap、重启 blocker 与关闭 modal 截图；运行前先执行 `pnpm package:mac` |
 
 `pnpm smoke:runtime-permissions` 是 `smoke:action-approval` 与
@@ -202,6 +202,7 @@ Team Case 可在密封 manifest 中声明 `collaboration` 合同。Runner 将它
 | `ROVAI_MCP_SMOKE_ADAPTERS` | MCP Runtime 列表 |
 | `ROVAI_MCP_OPENCODE_MODEL` | MCP Smoke 的 OpenCode model；默认 `opencode/mimo-v2.5-free` |
 | `ROVAI_MCP_PROJECTION_SMOKE_ADAPTERS` | 同名 MCP Projection Runtime 列表或 `all` |
+| `ROVAI_MCP_TRAE_MODEL` | TRAE MCP Projection Smoke 的可选显式动态模型 ID；省略时使用 Runtime 当前默认 |
 | `ROVAI_CORE_EXECUTABLE` | 让 MCP Projection Smoke 使用指定 Core，例如 packaged App 内的 Release Core |
 | `ROVAI_MCP_QODER_MODEL` / `ROVAI_MCP_CODEBUDDY_MODEL` / `ROVAI_MCP_QWEN_MODEL` | 同名 MCP Projection Smoke 的显式模型 |
 | `ROVAI_MEMORY_RUNTIME_ADAPTERS` | Memory Runtime 列表 |
@@ -246,4 +247,4 @@ fixture、截图、窗口尺寸和直接调用 capture 脚本的方法见
 - 任何声明会写文件的测试都必须把目标限制在临时 fixture；失败后先检查脚本是否保留
   了排查路径，再决定清理。
 - 模型回复、耗时和费用不是稳定断言。测试应断言协议、状态、证据和限定 marker。
-- 某个 Smoke 通过只证明该 suite 的范围，不代表九种 Runtime 的完整兼容性复核。
+- 某个 Smoke 通过只证明该 suite 的范围，不代表十种 Runtime 的完整兼容性复核；未启用的 TRAE Skill 或 compaction 轴也不能从其他 suite 推断。

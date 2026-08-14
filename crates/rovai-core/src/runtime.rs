@@ -5139,7 +5139,7 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn recovery_boundaries_are_closed_over_the_nine_adapter_catalog() {
+    fn recovery_boundaries_are_closed_over_the_ten_adapter_catalog() {
         for adapter_kind in AdapterKind::ALL {
             let expected = if adapter_kind.uses_acp() {
                 MissingSendRecoveryBoundary::AcpEndTurnAssistantSuffix

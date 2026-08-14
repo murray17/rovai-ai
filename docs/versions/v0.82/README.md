@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.82
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -13,6 +13,8 @@ last_updated: 2026-08-15
 > 当前状态：实现、自动验证与同机隔离安装包冷启动对照均已完成。
 >
 > 前置版本：[v0.81 Camp 轻量打开与渐进历史](../v0.81/README.md)
+>
+> 后续版本：[v0.83 TRAE CLI CN Runtime](../v0.83/README.md)
 
 ## 版本目标
 

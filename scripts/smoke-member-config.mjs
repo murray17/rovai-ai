@@ -145,6 +145,7 @@ function startCore(dataDirectory) {
     'ROVAI_QODER_BIN',
     'ROVAI_CODEBUDDY_BIN',
     'ROVAI_QWEN_BIN',
+    'ROVAI_TRAE_CN_BIN',
     'ROVAI_ANTIGRAVITY_BIN'
   ]) {
     delete childEnvironment[key]

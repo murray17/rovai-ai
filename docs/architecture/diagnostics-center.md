@@ -52,7 +52,7 @@ export
 - `diagnostics.check` never resolves, canonicalizes, stats, or enumerates a historical Skill execution root;
   Observation is evidence, not filesystem access authority.
 - `unknown` is evidence insufficiency and never enters the attention issue list.
-- Runtime Catalog visibility and Runtime issue eligibility are different: all nine are visible, only selected
+- Runtime Catalog visibility and Runtime issue eligibility are different: all supported Adapters are visible, only selected
   unavailable products become attention.
 - Repair and its post-action read are a two-step protocol; mutation success alone is not health success.
 - v5 is built from an allowlist and still receives a final recursive redaction pass; raw health/profile/camp objects

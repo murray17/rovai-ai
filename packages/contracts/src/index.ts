@@ -9,6 +9,7 @@ export type AdapterKind =
   | 'qoder-cli'
   | 'codebuddy-cli'
   | 'qwen-code'
+  | 'trae-cn-cli'
   | 'antigravity-app'
 
 export type RuntimeOptionScope = 'run' | 'session' | 'host'

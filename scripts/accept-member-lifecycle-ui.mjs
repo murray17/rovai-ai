@@ -443,10 +443,16 @@ try {
     )
     const labels = [...(productRows ?? [])]
       .map((row) => row.querySelector('strong')?.textContent)
+    const pendingRows = [...(productRows ?? [])]
+      .filter((row) => row.textContent?.includes('待支持'))
     const advanced = panel?.querySelector('.runtime-advanced-diagnostics')
     return {
       rowCount: productRows?.length ?? 0,
       labels,
+      pendingCount: pendingRows.length,
+      pendingActionsDisabled: pendingRows.every(
+        (row) => row.querySelector('button')?.disabled === true
+      ),
       hasAdvancedDiagnostics: Boolean(advanced),
       explainsShell: panel?.textContent?.includes('交互式登录 Shell 初始化'),
       exposesMemberPathPicker: Boolean(
@@ -455,20 +461,24 @@ try {
     }
   })()`)
   assert(
-    runtimeSettingsState.rowCount === 9
+    runtimeSettingsState.rowCount === 11
       && runtimeSettingsState.labels.includes('Codex CLI')
       && runtimeSettingsState.labels.includes('Antigravity')
+      && runtimeSettingsState.labels.includes('TRAE CLI（中国企业版）')
+      && runtimeSettingsState.labels.includes('DeepSeek Harness')
+      && runtimeSettingsState.pendingCount === 1
+      && runtimeSettingsState.pendingActionsDisabled
       && !runtimeSettingsState.hasAdvancedDiagnostics
       && !runtimeSettingsState.explainsShell
       && !runtimeSettingsState.exposesMemberPathPicker,
-    `Runtime settings did not preserve the nine-product managed catalog boundary: ${JSON.stringify(runtimeSettingsState)}`
+    `Runtime settings did not preserve ten managed products plus one pending preview: ${JSON.stringify(runtimeSettingsState)}`
   )
   await setViewport(running.cdp, 1040, 700)
   await setTheme(running.cdp, 'night')
   await assertNoHorizontalOverflow(running.cdp, 'Runtime settings at 1040×700 Night')
   captures.runtimeSettings = join(
     outputDir,
-    'runtime-settings-nine-products-night-1040x700.png'
+    'runtime-settings-ten-products-one-preview-night-1040x700.png'
   )
   await capture(running.cdp, captures.runtimeSettings)
   await closeApp(running)
@@ -1106,7 +1116,7 @@ try {
       memberOrderLeadInheritance: 'agent_2',
       restartPersistence: true,
       dayAndNightWideCompactMatrix: true,
-      runtimeSettingsNineProductsAndAdvancedPathBoundary: true,
+      runtimeSettingsTenProductsAndPendingPreviewBoundary: true,
       horizontalOverflow: false
     },
     captures

@@ -739,17 +739,7 @@ impl SkillLibraryService {
     pub fn list_delivery_groups(&self, database: &Database) -> Result<Vec<SkillDeliveryGroupView>> {
         let registry = AgentRuntimeAdapterRegistry::default();
         let profiles = AgentProfileService::default().list_profiles(database)?;
-        let adapter_kinds = [
-            AdapterKind::CodexCli,
-            AdapterKind::OpencodeCli,
-            AdapterKind::CopilotCli,
-            AdapterKind::ClaudeCodeCli,
-            AdapterKind::AntigravityApp,
-            AdapterKind::KiroCli,
-            AdapterKind::QoderCli,
-            AdapterKind::CodebuddyCli,
-            AdapterKind::QwenCode,
-        ];
+        let adapter_kinds = AdapterKind::ALL;
         Ok(SkillDeliveryGroupKey::ALL
             .into_iter()
             .map(|key| {

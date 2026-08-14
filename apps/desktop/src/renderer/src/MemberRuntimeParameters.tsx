@@ -144,6 +144,8 @@ function runtimeParametersFor(
       return <CodeBuddyRuntimeParameters {...props} />
     case 'qwen-code':
       return <QwenRuntimeParameters {...props} />
+    case 'trae-cn-cli':
+      return <TraeRuntimeParameters {...props} />
     case 'antigravity-app':
       return <AntigravityRuntimeParameters {...props} />
   }
@@ -217,6 +219,15 @@ function QwenRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element 
     <div className="runtime-parameter-form">
       <ModelFields {...props} optionKey="reasoning_effort" optionLabel="推理强度" />
       <PermissionSelect {...props} fieldKey="approval_mode" label="审批模式" />
+    </div>
+  )
+}
+
+function TraeRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element {
+  return (
+    <div className="runtime-parameter-form">
+      <ModelFields {...props} />
+      <PermissionSelect {...props} fieldKey="permission_mode" label="权限模式" />
     </div>
   )
 }

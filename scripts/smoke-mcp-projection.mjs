@@ -37,7 +37,8 @@ const allAdapters = [
   'kiro-cli',
   'qoder-cli',
   'codebuddy-cli',
-  'qwen-code'
+  'qwen-code',
+  'trae-cn-cli'
 ]
 const adapters = selected.length === 1 && selected[0] === 'all' ? allAdapters : selected
 let core = null
@@ -410,7 +411,8 @@ function selectedModel(adapterKind) {
     'opencode-cli': process.env.ROVAI_MCP_OPENCODE_MODEL ?? 'opencode/mimo-v2.5-free',
     'qoder-cli': process.env.ROVAI_MCP_QODER_MODEL ?? 'deepseek/deepseek-v4-flash-pg',
     'codebuddy-cli': process.env.ROVAI_MCP_CODEBUDDY_MODEL ?? 'deepseek-v4-flash',
-    'qwen-code': process.env.ROVAI_MCP_QWEN_MODEL ?? 'deepseek-v4-flash(openai)'
+    'qwen-code': process.env.ROVAI_MCP_QWEN_MODEL ?? 'deepseek-v4-flash(openai)',
+    'trae-cn-cli': process.env.ROVAI_MCP_TRAE_MODEL
   })[adapterKind] ?? null
 }
 

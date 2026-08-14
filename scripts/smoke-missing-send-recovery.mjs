@@ -21,7 +21,8 @@ const allSpecifications = [
   ['kiro-cli', 'Kiro'],
   ['qoder-cli', 'Qoder'],
   ['codebuddy-cli', 'CodeBuddy'],
-  ['qwen-code', 'Qwen']
+  ['qwen-code', 'Qwen'],
+  ['trae-cn-cli', 'TRAE']
 ].map(([adapterKind, label]) => ({
   adapterKind,
   label,

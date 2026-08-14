@@ -36,6 +36,7 @@ pub enum AdapterKind {
     QoderCli,
     CodebuddyCli,
     QwenCode,
+    TraeCnCli,
     AntigravityApp,
 }
 
@@ -83,7 +84,7 @@ impl MissingSendRecoveryMode {
 }
 
 impl AdapterKind {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::CodexCli,
         Self::OpencodeCli,
         Self::CopilotCli,
@@ -93,6 +94,7 @@ impl AdapterKind {
         Self::QoderCli,
         Self::CodebuddyCli,
         Self::QwenCode,
+        Self::TraeCnCli,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -105,6 +107,7 @@ impl AdapterKind {
             Self::QoderCli => "qoder-cli",
             Self::CodebuddyCli => "codebuddy-cli",
             Self::QwenCode => "qwen-code",
+            Self::TraeCnCli => "trae-cn-cli",
             Self::AntigravityApp => "antigravity-app",
         }
     }
@@ -119,6 +122,7 @@ impl AdapterKind {
             Self::QoderCli => "qodercli",
             Self::CodebuddyCli => "codebuddy",
             Self::QwenCode => "qwen",
+            Self::TraeCnCli => "traecli",
             Self::AntigravityApp => "agy",
         }
     }
@@ -133,6 +137,7 @@ impl AdapterKind {
             Self::QoderCli => "Qoder",
             Self::CodebuddyCli => "CodeBuddy",
             Self::QwenCode => "Qwen Code",
+            Self::TraeCnCli => "TRAE CLI（中国企业版）",
             Self::AntigravityApp => "Antigravity",
         }
     }
@@ -146,6 +151,7 @@ impl AdapterKind {
                 | Self::QoderCli
                 | Self::CodebuddyCli
                 | Self::QwenCode
+                | Self::TraeCnCli
         )
     }
 
@@ -159,6 +165,7 @@ impl AdapterKind {
             Self::QoderCli => "ROVAI_QODER_BIN",
             Self::CodebuddyCli => "ROVAI_CODEBUDDY_BIN",
             Self::QwenCode => "ROVAI_QWEN_BIN",
+            Self::TraeCnCli => "ROVAI_TRAE_CN_BIN",
             Self::AntigravityApp => "ROVAI_ANTIGRAVITY_BIN",
         }
     }
@@ -178,6 +185,7 @@ impl AdapterKind {
             | Self::QoderCli
             | Self::CodebuddyCli
             | Self::QwenCode
+            | Self::TraeCnCli
             | Self::AntigravityApp => PublicOutputMode::ExplicitSendOnly,
         }
     }
@@ -195,6 +203,7 @@ impl AdapterKind {
             | Self::QoderCli
             | Self::CodebuddyCli
             | Self::QwenCode
+            | Self::TraeCnCli
             | Self::AntigravityApp => MissingSendRecoveryMode::IfNoAcceptedSend,
         }
     }
@@ -213,6 +222,7 @@ impl FromStr for AdapterKind {
             "qoder-cli" => Ok(Self::QoderCli),
             "codebuddy-cli" => Ok(Self::CodebuddyCli),
             "qwen-code" => Ok(Self::QwenCode),
+            "trae-cn-cli" => Ok(Self::TraeCnCli),
             "antigravity-app" => Ok(Self::AntigravityApp),
             _ => anyhow::bail!("unsupported Adapter kind: {value}"),
         }
@@ -4023,6 +4033,7 @@ mod tests {
                 AdapterKind::QoderCli,
                 AdapterKind::CodebuddyCli,
                 AdapterKind::QwenCode,
+                AdapterKind::TraeCnCli,
             ]
         );
     }
@@ -4040,12 +4051,12 @@ mod tests {
     }
 
     #[test]
-    fn missing_send_recovery_is_enabled_independently_for_every_adapter() {
+    fn missing_send_recovery_follows_each_adapter_final_boundary_evidence() {
         for kind in AdapterKind::ALL {
             assert_eq!(
                 kind.missing_send_recovery_mode(),
                 MissingSendRecoveryMode::IfNoAcceptedSend,
-                "{} must recover a reliable final only when no send was accepted",
+                "{} must not publish beyond its qualified final boundary",
                 kind.as_str(),
             );
             assert_eq!(

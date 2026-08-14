@@ -811,7 +811,7 @@ function sourceTypeLabel(sourceType: SkillView['currentRevision']['sourceType'])
 }
 
 function adapterLabel(adapter: AdapterKind): string {
-  return ({ 'codex-cli': 'Codex', 'opencode-cli': 'OpenCode', 'copilot-cli': 'Copilot', 'claude-code-cli': 'Claude Code', 'antigravity-app': 'Antigravity', 'kiro-cli': 'Kiro', 'qoder-cli': 'Qoder', 'codebuddy-cli': 'CodeBuddy', 'qwen-code': 'Qwen' } as Partial<Record<AdapterKind, string>>)[adapter] ?? adapter
+  return ({ 'codex-cli': 'Codex', 'opencode-cli': 'OpenCode', 'copilot-cli': 'Copilot', 'claude-code-cli': 'Claude Code', 'antigravity-app': 'Antigravity', 'kiro-cli': 'Kiro', 'qoder-cli': 'Qoder', 'codebuddy-cli': 'CodeBuddy', 'qwen-code': 'Qwen', 'trae-cn-cli': 'TRAE CLI CN' } as Partial<Record<AdapterKind, string>>)[adapter] ?? adapter
 }
 
 function parseGithubImportInput(input: string): { repositoryUrl: string; subdirectory?: string; gitRef?: string } {

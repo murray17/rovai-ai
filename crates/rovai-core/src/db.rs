@@ -43,8 +43,10 @@ pub struct Database {
     path: PathBuf,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.80";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 40;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.83";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 41;
+const V086_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.80";
+const V086_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 40;
 const V085_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.78";
 const V085_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 39;
 const V083_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.73";
@@ -87,6 +89,7 @@ struct CurrentMigrationState {
     v83: bool,
     v84: bool,
     v85: bool,
+    v86: bool,
 }
 
 impl CurrentMigrationState {
@@ -96,6 +99,26 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86;
+        }
+        if self.v86 {
+            return false;
+        }
+        if contract == V086_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V086_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -343,7 +366,8 @@ fn has_current_data_contract(path: &Path) -> bool {
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 82),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 83),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 84),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 85)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 85),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 86)
         "#,
         [],
         |row| {
@@ -364,6 +388,7 @@ fn has_current_data_contract(path: &Path) -> bool {
                 v83: row.get(13)?,
                 v84: row.get(14)?,
                 v85: row.get(15)?,
+                v86: row.get(16)?,
             })
         },
     );
@@ -1469,6 +1494,9 @@ impl Database {
             if !self.schema_migration_applied(85)? {
                 self.migrate_composer_recipient_continuation_v85()?;
             }
+            if !self.schema_migration_applied(86)? {
+                self.migrate_trae_runtime_catalog_v86()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -1774,6 +1802,9 @@ impl Database {
         if !self.schema_migration_applied(85)? {
             self.migrate_composer_recipient_continuation_v85()?;
         }
+        if !self.schema_migration_applied(86)? {
+            self.migrate_trae_runtime_catalog_v86()?;
+        }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
         {
@@ -1802,7 +1833,8 @@ impl Database {
                         'kiro-cli',
                         'qoder-cli',
                         'codebuddy-cli',
-                        'qwen-code'
+                        'qwen-code',
+                        'trae-cn-cli'
                     )),
                     executable_path TEXT NOT NULL,
                     command_name TEXT NOT NULL,
@@ -1972,7 +2004,7 @@ impl Database {
         self.add_column_if_missing(
             "agent_profile",
             "selected_runtime_adapter_kind",
-            "selected_runtime_adapter_kind TEXT CHECK(selected_runtime_adapter_kind IS NULL OR selected_runtime_adapter_kind IN ('codex-cli','opencode-cli','copilot-cli','claude-code-cli','antigravity-app','kiro-cli','qoder-cli','codebuddy-cli','qwen-code'))",
+            "selected_runtime_adapter_kind TEXT CHECK(selected_runtime_adapter_kind IS NULL OR selected_runtime_adapter_kind IN ('codex-cli','opencode-cli','copilot-cli','claude-code-cli','antigravity-app','kiro-cli','qoder-cli','codebuddy-cli','qwen-code','trae-cn-cli'))",
         )?;
         self.add_column_if_missing(
             "adapter_capability_snapshot",
@@ -9242,6 +9274,206 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_trae_runtime_catalog_v86(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(
+                r#"
+                CREATE TABLE adapter_installation_v86 (
+                    id TEXT PRIMARY KEY,
+                    adapter_kind TEXT NOT NULL CHECK(adapter_kind IN (
+                        'codex-cli', 'opencode-cli', 'copilot-cli',
+                        'claude-code-cli', 'antigravity-app', 'kiro-cli',
+                        'qoder-cli', 'codebuddy-cli', 'qwen-code', 'trae-cn-cli'
+                    )),
+                    executable_path TEXT NOT NULL,
+                    command_name TEXT NOT NULL,
+                    installation_class TEXT NOT NULL
+                        CHECK(installation_class IN ('managed_default', 'custom')),
+                    source TEXT NOT NULL CHECK(source IN (
+                        'manual', 'env', 'inherited_path', 'login_shell',
+                        'known_location', 'custom'
+                    )),
+                    auth_scope TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+                    generation INTEGER NOT NULL DEFAULT 1 CHECK(generation >= 1),
+                    path_state TEXT NOT NULL DEFAULT 'valid'
+                        CHECK(path_state IN ('valid', 'path_missing')),
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                INSERT INTO adapter_installation_v86(
+                    id, adapter_kind, executable_path, command_name,
+                    installation_class, source, auth_scope, enabled, generation,
+                    path_state, version, created_at, updated_at
+                )
+                SELECT id, adapter_kind, executable_path, command_name,
+                       installation_class, source, auth_scope, enabled, generation,
+                       path_state, version, created_at, updated_at
+                FROM adapter_installation;
+
+                CREATE TABLE agent_profile_v86 (
+                    uuid TEXT PRIMARY KEY,
+                    id TEXT NOT NULL UNIQUE,
+                    slug TEXT NOT NULL UNIQUE,
+                    display_name TEXT NOT NULL,
+                    accent TEXT NOT NULL,
+                    runtime_enabled INTEGER NOT NULL DEFAULT 0,
+                    visual_state_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    avatar_ref TEXT,
+                    default_capabilities_json TEXT NOT NULL DEFAULT '[]',
+                    default_provider TEXT,
+                    default_model TEXT,
+                    profile_status TEXT NOT NULL DEFAULT 'present',
+                    version INTEGER NOT NULL DEFAULT 1,
+                    archived_at TEXT,
+                    handle TEXT,
+                    default_runtime_installation_id TEXT REFERENCES adapter_installation(id),
+                    default_model_selection_json TEXT,
+                    default_permission_config_json TEXT,
+                    member_order INTEGER NOT NULL DEFAULT 0,
+                    removed_at TEXT,
+                    selected_runtime_adapter_kind TEXT CHECK(
+                        selected_runtime_adapter_kind IS NULL OR
+                        selected_runtime_adapter_kind IN (
+                            'codex-cli', 'opencode-cli', 'copilot-cli',
+                            'claude-code-cli', 'antigravity-app', 'kiro-cli',
+                            'qoder-cli', 'codebuddy-cli', 'qwen-code', 'trae-cn-cli'
+                        )
+                    ),
+                    team_role TEXT NOT NULL DEFAULT '',
+                    professional_responsibilities TEXT NOT NULL DEFAULT '',
+                    personality_traits_json TEXT NOT NULL DEFAULT '[]',
+                    working_principles TEXT NOT NULL DEFAULT '',
+                    growth_topic TEXT NOT NULL DEFAULT ''
+                );
+
+                INSERT INTO agent_profile_v86(
+                    uuid, id, slug, display_name, accent, runtime_enabled,
+                    visual_state_json, created_at, updated_at, avatar_ref,
+                    default_capabilities_json, default_provider, default_model,
+                    profile_status, version, archived_at, handle,
+                    default_runtime_installation_id, default_model_selection_json,
+                    default_permission_config_json, member_order, removed_at,
+                    selected_runtime_adapter_kind, team_role,
+                    professional_responsibilities, personality_traits_json,
+                    working_principles, growth_topic
+                )
+                SELECT uuid, id, slug, display_name, accent, runtime_enabled,
+                       visual_state_json, created_at, updated_at, avatar_ref,
+                       default_capabilities_json, default_provider, default_model,
+                       profile_status, version, archived_at, handle,
+                       default_runtime_installation_id, default_model_selection_json,
+                       default_permission_config_json, member_order, removed_at,
+                       selected_runtime_adapter_kind, team_role,
+                       professional_responsibilities, personality_traits_json,
+                       working_principles, growth_topic
+                FROM agent_profile;
+
+                DROP TABLE agent_profile;
+                DROP TABLE adapter_installation;
+                ALTER TABLE adapter_installation_v86 RENAME TO adapter_installation;
+                ALTER TABLE agent_profile_v86 RENAME TO agent_profile;
+
+                CREATE UNIQUE INDEX adapter_installation_managed_default_unique
+                    ON adapter_installation(adapter_kind, auth_scope)
+                    WHERE installation_class = 'managed_default';
+                CREATE UNIQUE INDEX adapter_installation_custom_path_unique
+                    ON adapter_installation(adapter_kind, executable_path, auth_scope)
+                    WHERE installation_class = 'custom';
+                CREATE INDEX adapter_installation_kind_idx
+                    ON adapter_installation(
+                        adapter_kind, installation_class, enabled, created_at
+                    );
+
+                CREATE UNIQUE INDEX agent_profile_handle_unique
+                    ON agent_profile(handle) WHERE handle IS NOT NULL;
+                CREATE INDEX agent_profile_member_order_idx
+                    ON agent_profile(profile_status, member_order, id);
+                CREATE INDEX agent_profile_status_order_idx
+                    ON agent_profile(profile_status, member_order, id);
+
+                CREATE TRIGGER agent_profile_presence_insert_guard
+                BEFORE INSERT ON agent_profile
+                WHEN NEW.profile_status NOT IN ('present', 'away', 'removed')
+                  OR (NEW.profile_status = 'removed' AND NEW.removed_at IS NULL)
+                  OR (NEW.profile_status <> 'removed' AND NEW.removed_at IS NOT NULL)
+                BEGIN
+                    SELECT RAISE(ABORT, 'invalid agent_profile presence');
+                END;
+
+                CREATE TRIGGER agent_profile_presence_update_guard
+                BEFORE UPDATE OF profile_status, removed_at ON agent_profile
+                WHEN NEW.profile_status NOT IN ('present', 'away', 'removed')
+                  OR (NEW.profile_status = 'removed' AND NEW.removed_at IS NULL)
+                  OR (NEW.profile_status <> 'removed' AND NEW.removed_at IS NOT NULL)
+                  OR (OLD.profile_status = 'removed' AND NEW.profile_status <> 'removed')
+                  OR (OLD.profile_status = 'removed' AND NEW.removed_at <> OLD.removed_at)
+                BEGIN
+                    SELECT RAISE(ABORT, 'invalid agent_profile presence');
+                END;
+
+                CREATE TRIGGER agent_profile_runtime_configuration_insert
+                BEFORE INSERT ON agent_profile
+                WHEN ((NEW.selected_runtime_adapter_kind IS NOT NULL)
+                        + (NEW.default_runtime_installation_id IS NOT NULL)
+                        + (NEW.default_model_selection_json IS NOT NULL)
+                        + (NEW.default_permission_config_json IS NOT NULL))
+                     NOT IN (0, 4)
+                BEGIN
+                    SELECT RAISE(ABORT, 'Member Runtime Configuration must be complete or absent');
+                END;
+
+                CREATE TRIGGER agent_profile_runtime_configuration_update
+                BEFORE UPDATE OF selected_runtime_adapter_kind,
+                                 default_runtime_installation_id,
+                                 default_model_selection_json,
+                                 default_permission_config_json
+                ON agent_profile
+                WHEN ((NEW.selected_runtime_adapter_kind IS NOT NULL)
+                        + (NEW.default_runtime_installation_id IS NOT NULL)
+                        + (NEW.default_model_selection_json IS NOT NULL)
+                        + (NEW.default_permission_config_json IS NOT NULL))
+                     NOT IN (0, 4)
+                BEGIN
+                    SELECT RAISE(ABORT, 'Member Runtime Configuration must be complete or absent');
+                END;
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v0.83', projection_schema_version = 41,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (86, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v86 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -9442,7 +9674,8 @@ impl Database {
                             selected_runtime_adapter_kind IS NULL OR
                             selected_runtime_adapter_kind IN (
                                 'codex-cli','opencode-cli','copilot-cli','claude-code-cli',
-                                'antigravity-app','kiro-cli','qoder-cli','codebuddy-cli','qwen-code'
+                                'antigravity-app','kiro-cli','qoder-cli','codebuddy-cli','qwen-code',
+                                'trae-cn-cli'
                             )
                         ),
                         team_role TEXT NOT NULL DEFAULT '',
@@ -13662,6 +13895,7 @@ mod tests {
                 UPDATE rovai_data_contract
                 SET contract_version = 'v0.78', projection_schema_version = 39
                 WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 86;
                 DELETE FROM schema_migration WHERE version = 85;
                 "#,
             )
@@ -16194,6 +16428,7 @@ mod tests {
                     'v84-preserved-event', 'camp.preserved', '{}', 'system',
                     'v84-test', '2026-08-14T00:00:00Z'
                 );
+                DELETE FROM schema_migration WHERE version = 86;
                 DELETE FROM schema_migration WHERE version = 85;
                 DELETE FROM schema_migration WHERE version = 84;
                 UPDATE rovai_data_contract
@@ -16373,6 +16608,133 @@ mod tests {
             .unwrap();
         assert_eq!(contract, ("v0.80".into(), 40));
         assert!(database.schema_migration_applied(85).unwrap());
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v86_preserves_runtime_bindings_and_admits_only_the_new_trae_kind() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai-db-v86-runtime-test-{}", Uuid::new_v4()));
+        let mut database = Database::open(&directory).expect("database should open");
+        crate::agent_profile::configure_test_runtime(&database, &["agent_1"]);
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                DELETE FROM schema_migration WHERE version = 86;
+                UPDATE rovai_data_contract
+                SET contract_version = 'v0.80', projection_schema_version = 40
+                WHERE singleton = 1;
+                "#,
+            )
+            .expect("v85 Runtime fixture should be restorable");
+
+        database
+            .migrate_trae_runtime_catalog_v86()
+            .expect("v86 Runtime catalog migration should apply atomically");
+
+        let preserved: (String, String) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT profile.selected_runtime_adapter_kind,
+                       installation.adapter_kind
+                FROM agent_profile AS profile
+                JOIN adapter_installation AS installation
+                  ON installation.id = profile.default_runtime_installation_id
+                WHERE profile.id = 'agent_1'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            preserved,
+            ("codex-cli".to_string(), "codex-cli".to_string())
+        );
+
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO adapter_installation(
+                    id, adapter_kind, executable_path, command_name,
+                    installation_class, source, auth_scope,
+                    enabled, version, created_at, updated_at
+                ) VALUES (
+                    'adapter-test-trae', 'trae-cn-cli', '/tmp/traecli-v86', 'traecli',
+                    'managed_default', 'custom', 'test-user',
+                    1, 1, datetime('now'), datetime('now')
+                );
+
+                UPDATE agent_profile
+                SET selected_runtime_adapter_kind = 'trae-cn-cli',
+                    default_runtime_installation_id = 'adapter-test-trae',
+                    default_model_selection_json = '{"source":"runtime_default"}',
+                    default_permission_config_json =
+                        '{"adapterKind":"trae-cn-cli","schemaVersion":1,"values":{"permission_mode":"default"}}'
+                WHERE id = 'agent_2';
+                "#,
+            )
+            .expect("v86 constraints should admit a complete TRAE binding");
+
+        let trae: (String, String) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT profile.selected_runtime_adapter_kind,
+                       installation.command_name
+                FROM agent_profile AS profile
+                JOIN adapter_installation AS installation
+                  ON installation.id = profile.default_runtime_installation_id
+                WHERE profile.id = 'agent_2'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(trae, ("trae-cn-cli".to_string(), "traecli".to_string()));
+        assert!(
+            database
+                .connection()
+                .execute(
+                    r#"
+                    INSERT INTO adapter_installation(
+                        id, adapter_kind, executable_path, command_name,
+                        installation_class, source, auth_scope,
+                        enabled, version, created_at, updated_at
+                    ) VALUES (
+                        'adapter-test-deepseek', 'deepseek-harness', '/tmp/dsh', 'dsh',
+                        'managed_default', 'custom', 'test-user',
+                        1, 1, datetime('now'), datetime('now')
+                    )
+                    "#,
+                    [],
+                )
+                .is_err(),
+            "DeepSeek Harness remains a UI-only pending entry"
+        );
+        let contract: (String, i64) = database
+            .connection()
+            .query_row(
+                "SELECT contract_version, projection_schema_version FROM rovai_data_contract WHERE singleton = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(contract, ("v0.83".to_string(), 41));
+        assert!(database.schema_migration_applied(86).unwrap());
+        assert_eq!(
+            database
+                .connection()
+                .prepare("PRAGMA foreign_key_check")
+                .unwrap()
+                .query_map([], |_| Ok(()))
+                .unwrap()
+                .count(),
+            0
+        );
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }

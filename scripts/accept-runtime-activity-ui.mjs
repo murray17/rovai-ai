@@ -62,6 +62,7 @@ const runtimes = [
   runtime('qoder', 'qoder-cli', 'Qoder', 'search_workspace', acp('search', 'search_workspace', 'tool', 'tool.web.search')),
   runtime('codebuddy', 'codebuddy-cli', 'CodeBuddy', 'mcp_call', acp('mcp_tool_call', 'mcp_call', 'tool', 'tool.call')),
   runtime('qwen', 'qwen-code', 'Qwen Code', 'write_file', acp('write_file', 'write_file', 'file', 'file.write')),
+  runtime('trae', 'trae-cn-cli', 'TRAE CLI（中国企业版）', 'edit_file', acp('edit_file', 'edit_file', 'file', 'file.write')),
   runtime('claude', 'claude-code-cli', 'Claude Code', null, {
     protocol: 'claude-stream-json', domain: 'runtime', semantic: 'runtime.run', runLevelOnly: true
   }),
@@ -308,8 +309,8 @@ try {
   const observed = await collectRuntimeRows(app.cdp)
   assertRuntimeRows(observed)
   const totalToolRows = observed.reduce((total, row) => total + row.toolTitles.length, 0)
-  assert(totalToolRows === 8,
-    `Expected exactly eight observed tool rows and one honest run-level row: ${JSON.stringify(observed)}`)
+  assert(totalToolRows === 9,
+    `Expected exactly nine observed tool rows and one honest run-level row: ${JSON.stringify(observed)}`)
 
   const recoveryBlockerPresentation = await verifyRecoveryBlockerPresentation(app.cdp)
   const recoveryBlockerCapture = join(outputDir, 'runtime-activity-recovery-blocker.png')

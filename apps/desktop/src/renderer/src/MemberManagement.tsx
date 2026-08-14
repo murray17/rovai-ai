@@ -65,10 +65,12 @@ import claudeCodeLogo from './assets/runtime-logos/claudecode-color.svg'
 import codeBuddyLogo from './assets/runtime-logos/codebuddy-color.svg'
 import codexLogo from './assets/runtime-logos/codex-color.svg'
 import copilotLogo from './assets/runtime-logos/copilot-color.svg'
+import deepSeekLogo from './assets/runtime-logos/deepseek-color.svg'
 import kiroLogo from './assets/runtime-logos/kiro-color.svg'
 import openCodeLogo from './assets/runtime-logos/opencode.svg'
 import qoderLogo from './assets/runtime-logos/qoder-color.svg'
 import qwenLogo from './assets/runtime-logos/qwen-color.svg'
+import traeLogo from './assets/runtime-logos/trae-color.svg'
 
 type MembersViewProps = {
   agents: AgentProfile[]
@@ -263,11 +265,6 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
       .catch((nextError) => setError(errorMessage(nextError)))
   }, [])
 
-  const checkRuntime = useCallback((adapterKind: AdapterKind): void => {
-    void window.rovai.request('runtime.product.check', { runtimeKind: adapterKind })
-      .catch((nextError) => setError(errorMessage(nextError)))
-  }, [])
-
   const changePresence = async (presence: 'present' | 'away'): Promise<void> => {
     if (!selectedAgent) return
     await runCommand(`presence-${presence}`, 'members.presence.set', {
@@ -456,7 +453,6 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
                     onSave={saveRuntime}
                     onClear={clearRuntime}
                     onRuntimeEnsure={ensureRuntime}
-                    onRuntimeSelected={checkRuntime}
                     onOpenRuntimeSettings={onOpenRuntimeSettings}
                   />
                 </div>
@@ -828,6 +824,7 @@ const PRODUCT_RUNTIMES: AdapterKind[] = [
   'qoder-cli',
   'codebuddy-cli',
   'qwen-code',
+  'trae-cn-cli',
   'antigravity-app'
 ]
 
@@ -840,8 +837,30 @@ const PRODUCT_RUNTIME_LOGOS: Record<AdapterKind, string> = {
   'qoder-cli': qoderLogo,
   'codebuddy-cli': codeBuddyLogo,
   'qwen-code': qwenLogo,
+  'trae-cn-cli': traeLogo,
   'antigravity-app': antigravityLogo
 }
+
+type RuntimeCatalogEntry =
+  | { state: 'supported'; runtimeKind: AdapterKind }
+  | {
+      state: 'pending'
+      id: 'deepseek-harness'
+      label: 'DeepSeek Harness'
+      detail: '尚未接入 AgentRun'
+      logo: string
+    }
+
+const RUNTIME_CATALOG: RuntimeCatalogEntry[] = [
+  ...PRODUCT_RUNTIMES.map((runtimeKind) => ({ state: 'supported' as const, runtimeKind })),
+  {
+    state: 'pending',
+    id: 'deepseek-harness',
+    label: 'DeepSeek Harness',
+    detail: '尚未接入 AgentRun',
+    logo: deepSeekLogo
+  }
+]
 
 export type MemberRuntimeFormHandle = {
   discard(): void
@@ -862,7 +881,6 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
   onSave(adapterKind: AdapterKind, draft: MemberRuntimeDraft | null): Promise<void>
   onClear(): Promise<void>
   onRuntimeEnsure?(adapterKind: AdapterKind): void
-  onRuntimeSelected?(adapterKind: AdapterKind): void
   onOpenRuntimeSettings(): void
 }>(function MemberRuntimeForm({
   agent,
@@ -874,7 +892,6 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
   onSave,
   onClear,
   onRuntimeEnsure,
-  onRuntimeSelected,
   onOpenRuntimeSettings
 }, ref): React.JSX.Element {
   const initialStateRef = useRef<MemberRuntimeEditorState | null>(null)
@@ -1010,7 +1027,6 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
                 : null)
               setSubmitError(null)
               setConflict(false)
-              if (nextKind) onRuntimeSelected?.(nextKind)
             }}
           >
             <option value="">不选择 Agent 运行时</option>
@@ -1445,7 +1461,27 @@ export function RuntimeInstallationsPanel({ health, onReload }: {
         </div>
 
         <div className="runtime-product-list">
-          {PRODUCT_RUNTIMES.map((runtimeKind) => {
+          {RUNTIME_CATALOG.map((entry) => {
+            if (entry.state === 'pending') {
+              return (
+                <article key={entry.id} className="runtime-product-row">
+                  <span className="runtime-product-logo" aria-hidden="true">
+                    <img src={entry.logo} alt="" />
+                  </span>
+                  <div className="runtime-product-copy">
+                    <strong>{entry.label}</strong>
+                    <small>{entry.detail}</small>
+                  </div>
+                  <span className="runtime-snapshot-badge runtime-product-status status-unknown">
+                    待支持
+                  </span>
+                  <button className="quiet-button runtime-product-check" type="button" disabled>
+                    尚未开放
+                  </button>
+                </article>
+              )
+            }
+            const runtimeKind = entry.runtimeKind
             const item = availability.find((candidate) => candidate.runtimeKind === runtimeKind)
             const presentation = runtimeAvailabilityPresentation(item ?? null, health === null)
             return (
@@ -1580,6 +1616,7 @@ function adapterLabel(kind: AdapterKind): string {
     'qoder-cli': 'Qoder',
     'codebuddy-cli': 'CodeBuddy',
     'qwen-code': 'Qwen Code',
+    'trae-cn-cli': 'TRAE CLI（中国企业版）',
     'antigravity-app': 'Antigravity'
   })[kind]
 }
@@ -1594,6 +1631,7 @@ function adapterMaturityLabel(kind: AdapterKind): string {
     'qoder-cli': '实验性',
     'codebuddy-cli': '实验性',
     'qwen-code': '实验性',
+    'trae-cn-cli': '实验性',
     'antigravity-app': '实验性'
   })[kind]
 }

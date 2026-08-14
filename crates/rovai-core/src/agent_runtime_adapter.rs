@@ -440,6 +440,9 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::QwenCode => json!({
                 "approval_mode": "yolo",
             }),
+            AdapterKind::TraeCnCli => json!({
+                "permission_mode": "default",
+            }),
             AdapterKind::AntigravityApp => json!({
                 "mode": "accept-edits",
                 "sandbox": "off",
@@ -462,7 +465,8 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::KiroCli
             | AdapterKind::QoderCli
             | AdapterKind::CodebuddyCli
-            | AdapterKind::QwenCode => resolve_acp_runtime(kind, input),
+            | AdapterKind::QwenCode
+            | AdapterKind::TraeCnCli => resolve_acp_runtime(kind, input),
         }
     }
 
@@ -489,6 +493,9 @@ impl AgentRuntimeAdapterRegistry {
                 [SkillDeliveryGroupKey::Qwen],
                 SkillDiscoveryVerification::Verified,
             ),
+            AdapterKind::TraeCnCli => {
+                native_skill_discovery([], SkillDiscoveryVerification::DocumentationOnly)
+            }
         }
     }
 
@@ -502,7 +509,10 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::KiroCli
             | AdapterKind::QoderCli
             | AdapterKind::CodebuddyCli
-            | AdapterKind::QwenCode => additive_native_mcp_projection(McpSameNamePolicy::RovaiWins),
+            | AdapterKind::QwenCode
+            | AdapterKind::TraeCnCli => {
+                additive_native_mcp_projection(McpSameNamePolicy::RovaiWins)
+            }
         }
     }
 
@@ -528,6 +538,16 @@ impl AgentRuntimeAdapterRegistry {
             }
             AdapterKind::QwenCode => {
                 acp_capability_snapshot(observation, qwen_permission_options())
+            }
+            AdapterKind::TraeCnCli => {
+                let permission_options = observation
+                    .session_result
+                    .as_ref()
+                    .filter(|_| observation.probe_status == "ready")
+                    .map(trae_permission_options)
+                    .transpose()?
+                    .unwrap_or_default();
+                acp_capability_snapshot(observation, permission_options)
             }
             AdapterKind::KiroCli => acp_capability_snapshot(observation, Vec::new()),
             kind => anyhow::bail!("{} does not use the ACP snapshot mapper", kind.as_str()),
@@ -1365,6 +1385,45 @@ fn qwen_permission_options() -> Vec<PermissionOptionDescriptor> {
     }]
 }
 
+fn trae_permission_options(session_result: &Value) -> Result<Vec<PermissionOptionDescriptor>> {
+    let modes = session_result
+        .pointer("/modes/availableModes")
+        .and_then(Value::as_array)
+        .context("TRAE ACP Session did not report available permission modes")?;
+    let mut choices = modes
+        .iter()
+        .filter_map(|mode| {
+            mode.get("id").and_then(Value::as_str).map(|id| {
+                choice(
+                    id,
+                    mode.get("name")
+                        .and_then(Value::as_str)
+                        .filter(|name| !name.trim().is_empty())
+                        .unwrap_or(id),
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    choices.sort_by(|left, right| left.value.cmp(&right.value));
+    choices.dedup_by(|left, right| left.value == right.value);
+    if !choices.iter().any(|entry| entry.value == "default") {
+        anyhow::bail!("TRAE ACP Session did not advertise the safe default permission mode");
+    }
+    Ok(vec![PermissionOptionDescriptor {
+        key: "permission_mode".to_string(),
+        label: "permission-mode".to_string(),
+        description: "TRAE CLI CN's native permission mode reported by the current ACP Session. Rovai does not enable --yolo by default.".to_string(),
+        value_type: "enum".to_string(),
+        choices,
+        recommended_value: json!("default"),
+        scope: RuntimeOptionScope::Host,
+        risk: "elevated".to_string(),
+        supported: true,
+        required: true,
+        unsupported_reason: None,
+    }])
+}
+
 fn claude_code_permission_options() -> Vec<PermissionOptionDescriptor> {
     vec![PermissionOptionDescriptor {
         key: "permission_mode".to_string(),
@@ -1742,6 +1801,10 @@ mod tests {
             ),
             (AdapterKind::QwenCode, json!({"approval_mode": "yolo"})),
             (
+                AdapterKind::TraeCnCli,
+                json!({"permission_mode": "default"}),
+            ),
+            (
                 AdapterKind::AntigravityApp,
                 json!({
                     "mode": "accept-edits",
@@ -1981,6 +2044,75 @@ mod tests {
             snapshot
                 .capabilities
                 .contains(&BUILTIN_TOOL_RUNTIME_CAPABILITY.to_string())
+        );
+        assert!(
+            snapshot
+                .capabilities
+                .contains(&"context.charter.first_payload".to_string())
+        );
+    }
+
+    #[test]
+    fn trae_catalog_comes_from_the_negotiated_acp_session() {
+        let snapshot = AgentRuntimeAdapterRegistry::default()
+            .acp_capability_snapshot(AcpProbeObservation {
+                adapter_kind: AdapterKind::TraeCnCli,
+                reported_version: Some("trae-cli version 0.120.52".to_string()),
+                executable_fingerprint: Some("sha256:trae".to_string()),
+                authentication_status: "authenticated".to_string(),
+                probe_status: "ready".to_string(),
+                capabilities: vec![
+                    "tool_call.stable_id".to_string(),
+                    "context.charter.native_append".to_string(),
+                ],
+                initialize_result: Some(json!({
+                    "protocolVersion": 1,
+                    "agentCapabilities": {"loadSession": true}
+                })),
+                session_result: Some(json!({
+                    "sessionId": "trae-test",
+                    "configOptions": [{
+                        "id": "model",
+                        "name": "Model",
+                        "currentValue": "GLM-5.2",
+                        "options": [
+                            {"value": "GLM-5.2", "name": "GLM-5.2"},
+                            {"value": "DeepSeek-V3.2", "name": "DeepSeek-V3.2"}
+                        ]
+                    }],
+                    "modes": {
+                        "currentModeId": "default",
+                        "availableModes": [
+                            {"id": "default", "name": "Default"},
+                            {"id": "plan", "name": "Plan"},
+                            {"id": "bypass_permissions", "name": "Bypass permissions"}
+                        ]
+                    }
+                })),
+                attempted_at: "2026-08-15T00:00:00Z".to_string(),
+                last_error: None,
+            })
+            .expect("TRAE ACP catalog should map");
+
+        assert_eq!(snapshot.models.len(), 2);
+        assert_eq!(snapshot.models[0].id, "GLM-5.2");
+        assert!(snapshot.models[0].is_default);
+        assert_eq!(snapshot.permission_options[0].key, "permission_mode");
+        assert_eq!(
+            snapshot.permission_options[0].recommended_value,
+            json!("default")
+        );
+        assert!(
+            snapshot.permission_options[0]
+                .choices
+                .iter()
+                .any(|choice| choice.value == "plan")
+        );
+        assert!(snapshot.capabilities.contains(&"session.load".to_string()));
+        assert!(
+            snapshot
+                .capabilities
+                .contains(&"context.charter.native_append".to_string())
         );
         assert!(
             snapshot
@@ -2334,7 +2466,16 @@ mod tests {
                 .delivery_groups,
             [SkillDeliveryGroupKey::Qwen]
         );
-        for kind in AdapterKind::ALL {
+        let trae = registry.skill_discovery(AdapterKind::TraeCnCli);
+        assert!(trae.delivery_groups.is_empty());
+        assert_eq!(
+            trae.verification,
+            SkillDiscoveryVerification::DocumentationOnly
+        );
+        for kind in AdapterKind::ALL
+            .into_iter()
+            .filter(|kind| *kind != AdapterKind::TraeCnCli)
+        {
             assert_eq!(
                 registry.skill_discovery(kind).verification,
                 SkillDiscoveryVerification::Verified,
@@ -2356,6 +2497,7 @@ mod tests {
             AdapterKind::QoderCli,
             AdapterKind::CodebuddyCli,
             AdapterKind::QwenCode,
+            AdapterKind::TraeCnCli,
         ] {
             let capability = registry.mcp_projection(kind);
             assert!(capability.supports_stdio);

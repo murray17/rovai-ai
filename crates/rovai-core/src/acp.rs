@@ -1084,6 +1084,7 @@ impl AcpMissingSendRecoveryCollector {
 pub struct AcpRuntime {
     owner: AcpRuntimeOwner,
     host: Arc<AcpHost>,
+    runtime_compatibility_digest: String,
     mcp_projection_digest: String,
     session_id: RwLock<Option<String>>,
     execution_root: PathBuf,
@@ -1100,6 +1101,7 @@ impl AcpRuntime {
     fn from_host(
         owner: AcpRuntimeOwner,
         host: Arc<AcpHost>,
+        runtime_compatibility_digest: String,
         mcp_projection_digest: String,
         execution_root: PathBuf,
         attachment_access_root: Option<PathBuf>,
@@ -1108,6 +1110,7 @@ impl AcpRuntime {
         Arc::new(Self {
             owner,
             host,
+            runtime_compatibility_digest,
             mcp_projection_digest,
             session_id: RwLock::new(None),
             execution_root,
@@ -1567,6 +1570,7 @@ impl AcpCliRuntimeAdapter {
         if let Some(existing) = existing {
             if existing.execution_epoch() == execution_epoch
                 && existing.host.is_alive()
+                && existing.runtime_compatibility_digest == runtime_compatibility_digest
                 && existing.mcp_projection_digest == mcp_projection_digest
                 && existing.attachment_access_root.as_deref() == Some(attachment_access_root)
             {
@@ -1621,6 +1625,7 @@ impl AcpCliRuntimeAdapter {
                 execution_epoch,
             },
             host,
+            runtime_compatibility_digest.to_string(),
             mcp_projection_digest.to_string(),
             execution_root,
             Some(attachment_access_root.to_path_buf()),
@@ -1739,11 +1744,12 @@ impl AcpCliRuntimeAdapter {
 }
 
 fn completed_run_release_disposition(adapter_kind: AdapterKind) -> FleetReleaseDisposition {
-    if adapter_kind == AdapterKind::KiroCli {
+    if matches!(adapter_kind, AdapterKind::KiroCli | AdapterKind::TraeCnCli) {
         // Kiro keeps a Native Session locked for the lifetime of its ACP
-        // process. Its additive MCP configuration is also frozen per
-        // AgentRun, so a successor Run cannot safely reuse this Host. Stop it
-        // here so the successor process can load the persisted Session.
+        // process. TRAE's first supported build has only been qualified with
+        // run-scoped Hosts. Stop either Host here so the successor process can
+        // load the persisted Session without extending unverified warm-reuse
+        // state across AgentRuns.
         FleetReleaseDisposition::Stop
     } else {
         FleetReleaseDisposition::Reusable
@@ -1937,6 +1943,22 @@ fn configure_runtime_command(
                 command.arg("--mcp-config").arg(config.path());
                 return Ok(Some(config));
             }
+        }
+        AdapterKind::TraeCnCli => {
+            let configured = values
+                .get("permission_mode")
+                .and_then(Value::as_str)
+                .context("TRAE CLI CN Runtime requires permission_mode")?;
+            health::configure_acp_command(command, runtime.adapter_kind, false);
+            let legacy_read_only = permission_semantics == PermissionSemantics::CoreEnforcedV1
+                && workspace.access == "read_only";
+            command.arg("--permission-mode").arg(if legacy_read_only {
+                "plan"
+            } else {
+                configured
+            });
+            // TRAE receives Rovai MCP definitions through session/new or
+            // session/load. Native MCP configuration remains untouched.
         }
         AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp => {
             bail!("Runtime is not implemented through ACP")
@@ -2874,9 +2896,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn completed_kiro_run_uses_stop_disposition() {
+    fn completed_run_disposition_preserves_adapter_reuse_evidence() {
         assert_eq!(
             completed_run_release_disposition(AdapterKind::KiroCli),
+            FleetReleaseDisposition::Stop
+        );
+        assert_eq!(
+            completed_run_release_disposition(AdapterKind::TraeCnCli),
             FleetReleaseDisposition::Stop
         );
 

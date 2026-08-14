@@ -16,6 +16,7 @@ last_updated: 2026-08-15
 | 新增或修改 ADR、Architecture、Contract、版本文档或文档路由 | [ADR 治理与准入](adr/README.md)、[CURRENT](adr/CURRENT.md)、对应目录 README，并运行通用文档门禁 |
 | 判断当前版本目标、范围、进度或验收口径 | 从[版本索引中的唯一 `current` 条目](versions/README.md)进入对应版本概览与实施计划 |
 | 查询已接入与候选 Agent Runtime 的实测兼容性 | [Runtime 兼容性清单](runtime-compatibility.md) |
+| 新增 Agent Runtime、建立真实 Probe 或判断 Settings Preview 边界 | [Runtime Catalog Boundaries](architecture/runtime-catalog-boundaries.md)、[当前版本](versions/v0.83/README.md)、[TRAE Research/Probe](research/trae-cli-runtime/README.md)及相关 Runtime/Activity ADR |
 | 新增或修改 Runtime Activity 映射规则 | [Runtime Activity Mapping 维护指南](runtime-activity/README.md)及[Registry](runtime-activity/registry.md) |
 | 修改内置 Agent CLI、IPC、Envelope、receipt、Projection 或幂等合同 | [Built-in Tool Transport v11 合同](contracts/builtin-tool-transport-v11.md)、[Camp Message Send v7](contracts/camp-message-send-v7.md)及[Current User Attention v4](contracts/current-user-attention-v4.md) |
 | 修改 Memory 在线捕获、complete exact-Scope View、Agent mutation、copyable target、Hearth Review、active body quota、clean break、候选清除、Forget 闭包或审核并发 | [Online Memory Capture 架构](architecture/online-memory-capture.md)、[Memory Capture v3](contracts/memory-capture-v3.md)、[ADR-0178](adr/0178-best-effort-online-memory-capture-and-actor-bounded-mutation.md)、[ADR-0179](adr/0179-normalized-memory-store-v3-with-isolated-hearth-review.md)及[ADR-0186](adr/0186-complete-exact-scope-memory-view-and-copyable-target.md) |
@@ -69,7 +70,8 @@ last_updated: 2026-08-15
 
 ### 其他文档
 
-`runtime-compatibility.md` 保存 Agent Runtime 实测兼容性证据；`docs/runtime-activity/` 长期维护
+`runtime-compatibility.md` 保存 Agent Runtime 实测兼容性证据；`docs/research/` 保存实现前的来源简报、
+可复核 Probe 记录与脱敏 Capability Snapshot，不拥有产品准入或当前版本状态；`docs/runtime-activity/` 长期维护
 跨 Runtime 活动映射目录和变更门禁；`docs/ui/` 和
 `docs/development/` 分别拥有 UI 规范与本地开发流程。它们都不是领域架构或版本状态
 真源。本地开发统一从 [开发者指南](development/README.md) 进入。

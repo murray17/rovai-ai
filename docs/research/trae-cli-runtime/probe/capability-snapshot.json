@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "runtimeKind": "trae-cn-cli",
+  "observedBuild": {
+    "version": "0.120.52",
+    "commit": "6756e52a9238b6d493928e55b05127957dbfefb4",
+    "buildDate": "2026-08-12T01:31:30Z"
+  },
+  "launch": {
+    "executable": "traecli",
+    "args": ["acp", "serve"],
+    "protocol": "acp-v1"
+  },
+  "initialize": {
+    "protocolVersion": 1,
+    "authMethods": [],
+    "agentCapabilities": {
+      "loadSession": true,
+      "sessionListAdvertised": true,
+      "mcpHttpAdvertised": true,
+      "mcpSseAdvertised": true
+    }
+  },
+  "sessionNew": {
+    "sessionId": "<redacted-non-empty>",
+    "modelConfigOption": {
+      "id": "model",
+      "type": "select",
+      "currentValue": "GLM-5.2",
+      "availableValueCount": 16
+    },
+    "modes": ["default", "bypass_permissions", "plan"]
+  },
+  "verifiedBehavior": {
+    "promptTerminalStopReasons": ["end_turn", "cancelled"],
+    "stableToolCallId": true,
+    "structuredPermissionRequest": true,
+    "permissionOptionIds": ["allow", "session_level_allow", "always_allow", "reject"],
+    "sessionLoadAcrossHosts": true,
+    "modelConfigRoundTrip": true,
+    "appendSystemPromptRoleSystem": true,
+    "nativeAppendMarkerObserved": true,
+    "additiveMcpPerSession": true,
+    "mcpAbsentFromUnconfiguredSiblingSession": true,
+    "jsonRpcOnlyStdout": true
+  },
+  "rovaiPolicy": {
+    "publicOutputMode": "explicit_send_only",
+    "charterDelivery": "first_payload",
+    "nativeSystemPromptCapability": "observed",
+    "charterCorrectnessDependsOnNativeSystemPrompt": false,
+    "missingSendRecovery": "if_no_accepted_send",
+    "hostWarmReuse": "disabled",
+    "externalMcpProjection": "additive_per_run",
+    "skillDiscovery": "documentation_only_empty",
+    "defaultPermissionMode": "default",
+    "defaultYolo": false
+  }
+}

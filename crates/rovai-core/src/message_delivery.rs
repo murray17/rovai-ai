@@ -1625,7 +1625,8 @@ fn process_dispatch_attempt(
         | AdapterKind::KiroCli
         | AdapterKind::QoderCli
         | AdapterKind::CodebuddyCli
-        | AdapterKind::QwenCode => CharterDeliveryMode::FirstPayload,
+        | AdapterKind::QwenCode
+        | AdapterKind::TraeCnCli => CharterDeliveryMode::FirstPayload,
         AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli => CharterDeliveryMode::NativeAppend,
     };
     let frozen_snapshot: String = transaction.query_row(

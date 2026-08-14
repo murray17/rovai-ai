@@ -98,6 +98,12 @@ do not expose internal “found/not checked” stages. Use recent Core cache imm
 asynchronous refresh. Executable path, fingerprint, backoff and audit remain inside the advanced
 diagnostic disclosure.
 
+The Runtime settings list may append a separately typed presentation-only preview row after supported
+products. A preview must say `待支持` and `尚未接入 AgentRun`, expose no health/configuration action and
+remain absent from member selection, diagnostics and every execution surface. It is not a Product Runtime
+state or count; logo treatment must not imply readiness. Promotion removes the preview and follows normal
+Adapter admission instead of reinterpreting preview data.
+
 Diagnostics full check is read-only. Summary counts partition all checks into normal, needs attention
 and temporarily unknown. There is no “repair all”; each issue has one bounded next step and is
 rechecked after action. v5 export remains allowlisted/redacted and uses an explicit Save Dialog.

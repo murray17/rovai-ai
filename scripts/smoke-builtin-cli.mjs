@@ -41,7 +41,8 @@ const allRuntimeSpecifications = [
   ['kiro-cli', 'Kiro'],
   ['qoder-cli', 'Qoder'],
   ['codebuddy-cli', 'CodeBuddy'],
-  ['qwen-code', 'Qwen']
+  ['qwen-code', 'Qwen'],
+  ['trae-cn-cli', 'TRAE']
 ].map(([adapterKind, label]) => ({ adapterKind, label, slug: adapterKind.replaceAll('-', '_') }))
 const selectedAdapters = new Set((process.env.ROVAI_BUILTIN_CLI_ADAPTERS
   ?? allRuntimeSpecifications.map((value) => value.adapterKind).join(','))
@@ -116,7 +117,7 @@ try {
   })
   await sendCampMessage(core.request, {
     campId: historyCampId,
-    body: `${historyMarker}: shared historical evidence for all nine Runtime qualifications.`,
+    body: `${historyMarker}: shared historical evidence for all ${runtimeSpecifications.length} Runtime qualifications.`,
     execution: null
   })
 

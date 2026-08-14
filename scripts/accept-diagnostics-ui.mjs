@@ -117,7 +117,7 @@ try {
       missingMcpRemainsMissing: true,
       explicitMcpPermissionRepairAndRecheck: true,
       repairPreservesMcpJsonBytes: true,
-      allNineRuntimesVisibleWithoutUnusedIssues: true,
+      allTenRuntimesVisibleWithoutUnusedIssues: true,
       attentionAndUnknownFilters: true,
       v5CentralRedactionAndNoV4: true,
       dayDesktopAndCompactReducedMotionLayouts: true,
@@ -158,7 +158,7 @@ async function createFixture(name, withPermissionIssue) {
 async function assertDiagnosticsReport(cdp, expected) {
   await waitForExpression(cdp,
     `Boolean(document.querySelector('.diagnostics-summary')
-      && document.querySelectorAll('.diagnostics-result-row').length === 15)`, 20_000)
+      && document.querySelectorAll('.diagnostics-result-row').length === 16)`, 20_000)
   const state = await evaluate(cdp, `({
     attention: Number(document.querySelector('.diagnostics-summary-counts .is-attention dd')?.textContent),
     unknown: Number(document.querySelector('.diagnostics-summary-counts .is-unknown dd')?.textContent),
@@ -180,8 +180,8 @@ async function assertDiagnosticsReport(cdp, expected) {
     `${expected.context} unknown was ${state.unknown}`)
   assert(state.issues === expected.issueCount,
     `${expected.context} issue count was ${state.issues}`)
-  assert(state.rows === 15 && state.runtimes === 9,
-    `${expected.context} did not render 15 checks / 9 Runtimes: ${JSON.stringify(state)}`)
+  assert(state.rows === 16 && state.runtimes === 10,
+    `${expected.context} did not render 16 checks / 10 Runtimes: ${JSON.stringify(state)}`)
   assert(!state.prototypeSwitcher && !state.repairAll,
     `${expected.context} rendered a prototype or repair-all control`)
   assert(!state.documentOverflow && !state.centerOverflow,
@@ -196,7 +196,7 @@ function assertV5Export(exported, fixture) {
   assert(exported?.diagnostics?.schemaVersion === 1,
     'Diagnostics export omitted the typed report')
   assert(Array.isArray(exported?.diagnostics?.checks)
-      && exported.diagnostics.checks.length === 15,
+      && exported.diagnostics.checks.length === 16,
   'Diagnostics export did not contain all checks')
   const serialized = JSON.stringify(exported)
   assert(!serialized.includes('rovai-diagnostics-v4'), 'Diagnostics export retained v4')

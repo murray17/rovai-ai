@@ -43,7 +43,7 @@ interface DiagnosticCheck {
 “需要处理的问题”；`unknown` 只进入摘要和完整结果。Renderer 不根据文案、版本或路径补造状态。
 
 固定检查范围为 Rust Core、应用数据目录、Git、SQLite `PRAGMA quick_check`、Skill 投影、MCP
-配置和 Product Runtime Catalog 的全部九个 Runtime。Runtime 结果附稳定 `subjectId = AdapterKind`；
+配置和 Product Runtime Catalog 的全部受支持 Runtime。Runtime 结果附稳定 `subjectId = AdapterKind`；
 未被未移除队员选择的 Runtime 即使未安装也返回 `ok / runtime_not_in_use`。已被选择的 Runtime：
 
 - 当前可用为 `ok`；

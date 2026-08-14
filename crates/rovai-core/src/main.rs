@@ -860,6 +860,7 @@ struct Core {
     qoder_cli: AcpCliRuntimeAdapter,
     codebuddy_cli: AcpCliRuntimeAdapter,
     qwen_code: AcpCliRuntimeAdapter,
+    trae_cn_cli: AcpCliRuntimeAdapter,
     runtime_fleet: Arc<AgentRuntimeFleetManager>,
     builtin_tool_leases: Arc<BuiltinToolLeaseRegistry>,
     claude_code_cli: ClaudeCodeCliRuntimeAdapter,
@@ -1121,6 +1122,7 @@ fn runtime_display_name(kind: AdapterKind) -> &'static str {
         AdapterKind::QoderCli => "Qoder CLI",
         AdapterKind::CodebuddyCli => "CodeBuddy CLI",
         AdapterKind::QwenCode => "Qwen Code",
+        AdapterKind::TraeCnCli => "TRAE CLI（中国企业版）",
         AdapterKind::AntigravityApp => "Antigravity",
     }
 }
@@ -2178,7 +2180,14 @@ impl Core {
         {
             return Some(AgentRunRuntime::Acp(runtime));
         }
-        self.qwen_code
+        if let Some(runtime) = self
+            .qwen_code
+            .get_agent_run(agent_run_id, execution_epoch)
+            .await
+        {
+            return Some(AgentRunRuntime::Acp(runtime));
+        }
+        self.trae_cn_cli
             .get_agent_run(agent_run_id, execution_epoch)
             .await
             .map(AgentRunRuntime::Acp)
@@ -2288,6 +2297,7 @@ impl Core {
             self.qoder_cli.shutdown_all(),
             self.codebuddy_cli.shutdown_all(),
             self.qwen_code.shutdown_all(),
+            self.trae_cn_cli.shutdown_all(),
             self.claude_code_cli.shutdown_all(),
             self.antigravity_app.shutdown_all(),
         );
@@ -2304,6 +2314,7 @@ impl Core {
                 self.qoder_cli.shutdown_all(),
                 self.codebuddy_cli.shutdown_all(),
                 self.qwen_code.shutdown_all(),
+                self.trae_cn_cli.shutdown_all(),
                 self.claude_code_cli.shutdown_all(),
                 self.antigravity_app.shutdown_all(),
             );
@@ -2325,6 +2336,7 @@ impl Core {
             rovai_core::agent_profile::AdapterKind::QoderCli => Some(&self.qoder_cli),
             rovai_core::agent_profile::AdapterKind::CodebuddyCli => Some(&self.codebuddy_cli),
             rovai_core::agent_profile::AdapterKind::QwenCode => Some(&self.qwen_code),
+            rovai_core::agent_profile::AdapterKind::TraeCnCli => Some(&self.trae_cn_cli),
             rovai_core::agent_profile::AdapterKind::CodexCli
             | rovai_core::agent_profile::AdapterKind::ClaudeCodeCli
             | rovai_core::agent_profile::AdapterKind::AntigravityApp => None,
@@ -4492,7 +4504,8 @@ impl Core {
             | rovai_core::agent_profile::AdapterKind::KiroCli
             | rovai_core::agent_profile::AdapterKind::QoderCli
             | rovai_core::agent_profile::AdapterKind::CodebuddyCli
-            | rovai_core::agent_profile::AdapterKind::QwenCode) => {
+            | rovai_core::agent_profile::AdapterKind::QwenCode
+            | rovai_core::agent_profile::AdapterKind::TraeCnCli) => {
                 let probe = health::acp_capability_probe_at(executable_path, kind).await;
                 registry.acp_capability_snapshot(AcpProbeObservation {
                     adapter_kind: kind,
@@ -5230,7 +5243,8 @@ impl Core {
                 | rovai_core::agent_profile::AdapterKind::KiroCli
                 | rovai_core::agent_profile::AdapterKind::QoderCli
                 | rovai_core::agent_profile::AdapterKind::CodebuddyCli
-                | rovai_core::agent_profile::AdapterKind::QwenCode) => {
+                | rovai_core::agent_profile::AdapterKind::QwenCode
+                | rovai_core::agent_profile::AdapterKind::TraeCnCli) => {
                     if let Some(adapter) = self.acp_adapter(kind) {
                         adapter
                             .forget_agent_run(&candidate.agent_run_id, candidate.execution_epoch)
@@ -7932,7 +7946,8 @@ impl Core {
             | rovai_core::agent_profile::AdapterKind::KiroCli
             | rovai_core::agent_profile::AdapterKind::QoderCli
             | rovai_core::agent_profile::AdapterKind::CodebuddyCli
-            | rovai_core::agent_profile::AdapterKind::QwenCode) => {
+            | rovai_core::agent_profile::AdapterKind::QwenCode
+            | rovai_core::agent_profile::AdapterKind::TraeCnCli) => {
                 if let Some(adapter) = self.acp_adapter(kind) {
                     adapter
                         .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
@@ -8516,12 +8531,19 @@ async fn run_core(
         )?,
         qwen_code: AcpCliRuntimeAdapter::new(
             rovai_core::agent_profile::AdapterKind::QwenCode,
-            acp_tx,
+            acp_tx.clone(),
             data_dir.join("runtime/qwen"),
             runtime_fleet.clone(),
             compaction_detector_policies
                 .policy_for(AdapterKind::QwenCode)
                 .unwrap_or(CompactionDetectorPolicy::Disabled),
+        )?,
+        trae_cn_cli: AcpCliRuntimeAdapter::new(
+            rovai_core::agent_profile::AdapterKind::TraeCnCli,
+            acp_tx,
+            data_dir.join("runtime/trae-cn"),
+            runtime_fleet.clone(),
+            CompactionDetectorPolicy::Disabled,
         )?,
         claude_code_cli,
         antigravity_app,
@@ -10102,7 +10124,9 @@ async fn persist_acp_prompt_completion(
     };
     let terminal_discriminator =
         canonical_json_digest(params).unwrap_or_else(|_| format!("{prompt_id}:{stop_reason}"));
-    if adapter_kind == AdapterKind::KiroCli && !core.planned_shutdown.shutdown_started() {
+    if matches!(adapter_kind, AdapterKind::KiroCli | AdapterKind::TraeCnCli)
+        && !core.planned_shutdown.shutdown_started()
+    {
         runtime_route_permit.complete_callback();
         if let Some(adapter) = core.acp_adapter(adapter_kind) {
             adapter
@@ -10113,7 +10137,7 @@ async fn persist_acp_prompt_completion(
             .planned_shutdown
             .enter_runtime_route()
             .await
-            .context("Kiro terminal route was fenced during Host teardown")?;
+            .context("non-reusable ACP terminal route was fenced during Host teardown")?;
     }
     let mut terminal_admission = core
         .admit_planned_shutdown_terminal(

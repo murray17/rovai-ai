@@ -55,15 +55,15 @@ fixture、采集 Run Git observation 或验证 Git 相关 UI。
 
 ## Agent Runtime 是按用途选择的能力
 
-基础安装、TypeScript/Rust 测试、App 启动和非模型 Smoke 不要求九个 Runtime 全部存在。
+基础安装、TypeScript/Rust 测试、App 启动和非模型 Smoke 不要求十个 Runtime 全部存在。
 实际启动 AgentRun 或执行真实 Runtime Smoke 时，只需要对应测试所声明的 Runtime
 已安装、可发现并完成上游认证。
 
 Core 的正式 Runtime 产品目录以
 [`AdapterKind::ALL`](../../crates/rovai-core/src/agent_profile.rs)为准。当前目录包含
 Codex CLI、OpenCode、GitHub Copilot、Claude Code、Antigravity、Kiro、Qoder、
-CodeBuddy 和 Qwen Code。各测试只覆盖其中明确列出的子集；例如
-`smoke:acp-runtime` 只覆盖 OpenCode 和 Copilot。
+CodeBuddy、Qwen Code 和 TRAE CLI CN。各测试只覆盖其中明确列出的子集；例如
+`smoke:acp-runtime` 覆盖 OpenCode、Copilot 和 TRAE。
 
 优先使用应用“设置 → 执行引擎”和诊断页的 Runtime Discovery/Deep Probe 检查路径、
 版本、认证和能力。只有在排查 PATH 或覆盖搜索时，才使用 Core 定义的环境变量：
@@ -78,6 +78,7 @@ ROVAI_KIRO_BIN
 ROVAI_QODER_BIN
 ROVAI_CODEBUDDY_BIN
 ROVAI_QWEN_BIN
+ROVAI_TRAE_CN_BIN
 ```
 
 环境变量只改变对应进程的发现输入，不应写入仓库、截图、诊断导出或用户内容。

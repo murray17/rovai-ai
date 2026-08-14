@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-08-13
+last_updated: 2026-08-15
 ---
 
 # Agent Runtime 兼容性清单
@@ -9,7 +9,8 @@ last_updated: 2026-08-13
 本文件维护 Agent Runtime 的本机实测证据和复核条件。它不是产品 Runtime Registry、
 Roadmap 或用户可见能力来源；正式目录以代码中的 `AdapterKind`、Migration、健康探测和
 测试为准。跨版本边界见
-[ADR-0065](adr/0065-verified-runtime-catalog-and-documentation-only-compatibility.md)。
+[ADR-0065](adr/0065-verified-runtime-catalog-and-documentation-only-compatibility.md)与
+[ADR-0189](adr/0189-settings-only-runtime-preview-outside-product-catalog.md)。
 
 兼容性清单中的自然语言结论本身不会自动创建产品类型。v0.42 起，Rovai-owned built-in
 operations 的正式准入基线是 [ADR-0124](adr/0124-cli-only-transport-for-rovai-built-in-operations.md)：
@@ -17,7 +18,39 @@ Runtime 必须能执行 bundled `rovai` CLI，经 private local IPC 调用 Core 
 Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP config 已完全
 退出当前架构；用户 External MCP 是另一条独立能力，不参与 built-in tool 准入判断。
 
-## 当前 Built-in CLI 正式接入
+## 当前 Product Runtime Catalog
+
+当前 closed `AdapterKind` 包含十种可执行 Runtime：Codex CLI、OpenCode、GitHub Copilot、
+Claude Code、Antigravity、Kiro、Qoder、CodeBuddy、Qwen Code 与 TRAE CLI CN。设置页的
+DeepSeek Harness “待支持”行是 Renderer-only Preview，不在这个目录中，也没有 Installation、
+Probe、成员选择、诊断或 AgentRun 语义。
+
+### TRAE CLI CN v0.83 准入记录
+
+2026-08-15 在临时工作目录直接启动 `traecli acp serve`，实测版本为 `0.120.52`、build commit
+`6756e52a9238b6d493928e55b05127957dbfefb4`、build date `2026-08-12T01:31:30Z`。本次没有修改
+用户级 TRAE 配置，也没有把当前模型、Session 或 instruction 路径写为静态产品能力。
+
+| 能力轴 | 实测结论 | Rovai v0.83 边界 |
+| --- | --- | --- |
+| Protocol / auth | `initialize.protocolVersion = 1`；当前登录态 `authMethods=[]`；stdout 仅合法 JSON-RPC | 明确认证错误映射 `authentication_required`；协议/shape 缺失映射 `incompatible`；I/O/timeout 保持 transient |
+| Session / model | `session/new` 返回稳定 ID、动态 model select（本次 16 项）和 `default/bypass_permissions/plan` modes；跨 Host `session/load` 通过 | Catalog 每次从 Session 建立；只要求并默认安全 `default`，不默认 `--yolo` |
+| Prompt / cancel | 普通 prompt 返回 `end_turn`；tool 期间 cancel 返回 `cancelled` 且目标文件未出现 | 进入既有 ACP terminal/cancel 边界；第一版 Run 完成后停止 Host，不声称 warm reuse |
+| Tool / Approval | `toolCallId` 生命周期稳定；结构化 permission request 的 option ID 可执行 allow/reject | 映射现有 Action/Approval；拒绝后无文件，allow-once 后只有目标写入 |
+| External MCP | Session A 通过 `mcpServers` 追加 fixture 并真实调用；同 Host 未配置 Session B 不可见 | 沿用 `AdditivePerRun / RovaiWins`，不新增 Transport、全局配置副本或额外 MCP 隔离层 |
+| System prompt / Charter | `append_system_prompt` 实际形成独立 system message，marker Probe 通过；冲突实验中模型仍可能选择 user 指令 | capability 保留为观察证据；正式 AgentRun 沿用 `FirstPayload` Charter，不写 TRAE 配置，也不把 native append 当作唯一正确性边界 |
+| Skill / recovery | TRAE 会读取原生用户 instruction，但未证明 Rovai Skill 路径；ACP `end_turn` assistant suffix 稳定 | Skill discovery 保持 documentation-only empty；Missing-Send Recovery 的 zero-send、accepted-send suppression、tool→final 三场景通过 |
+
+脱敏 Snapshot、Probe 步骤和分类限制见
+[TRAE CLI CN ACP Probe](research/trae-cli-runtime/probe/README.md)。真实 Ready 只证明上述安装与账号；
+上游 executable、协议或 capability 改变后必须重新 Probe。
+
+同日定向正式验收通过：`smoke:acp-runtime` 完成 completion、Native Session 续接、Approval
+allow-once/deny；`smoke:missing-send-recovery` 在 tool→final 场景观察 8 个结构化 ACP tool event；
+`smoke:mcp-projection` 返回 `rovai-projection:trae_cn`。TRAE Host 在 durable terminal 对后继 Run
+可见前停止，后继 Host 再以 `session/load` 恢复同一 Session，避免 cwd、权限或 Run 配置跨 Host 延伸。
+
+## 既有九 Runtime Built-in CLI 正式接入证据
 
 2026-08-13 的 v0.67 `pnpm smoke:builtin-cli` 为九个 Runtime 分别创建隔离 Core data-dir、Skill Library
 和 Git workspace，并运行真实模型 AgentRun。每个 Runtime 都完成 13 个 canonical operation、16 条目标
@@ -45,6 +78,9 @@ Skill 使用证据。
 | Qoder | `1.1.17` / `deepseek/deepseek-v4-flash-pg` | pass | pass / pass | logical + native | pass / pass |
 | CodeBuddy | `2.133.1` / `deepseek-v4-flash` | pass | pass / pass | logical + native | pass / pass |
 | Qwen Code | `0.21.5` / `deepseek-v4-flash(openai)` | pass | pass / pass | logical + native | pass / pass |
+
+这张 v0.67 表是前九种 Runtime 的历史真实矩阵，不把 v0.83 新增的 TRAE 冒充为已运行同一轮
+十三操作与 Skill 验收。TRAE 的本版定向 AgentRun/MCP 证据单独记录在上节与 v0.83 实施计划中。
 
 九个 Runtime 的 Envelope/Projection 样本分别观测到 57.4%–57.9% 字节缩减；这是 observability
 metric，不是兼容性门槛。Antigravity 的 `agent_run.started` 在首轮日志确认前没有 Session ID，因此
@@ -220,6 +256,7 @@ External MCP Library、Assignment 与 Runtime-native Projection 保持独立。v
 | Qoder | `AdditivePerRun` / `RovaiWins` | native `--mcp-config`，不使用 strict/allowlist | 待 v0.43 矩阵 |
 | CodeBuddy | `AdditivePerRun` / `RovaiWins` | native `--mcp-config`，不使用 strict | 待 v0.43 矩阵 |
 | Qwen Code | `AdditivePerRun` / `RovaiWins` | native `--mcp-config`，不使用 allowlist | 待 v0.43 矩阵 |
+| TRAE CLI CN | `AdditivePerRun` / `RovaiWins` | ACP Session `session/new` / `session/load` 的 `mcpServers` | `0.120.52` 原生 Session A/B 追加与不泄漏 Probe、正式 Core smoke 均通过 |
 | Antigravity | `Unsupported` | 无不修改 Global/Workspace 文件的逐 Run 动态通道 | 诊断披露；配置页保持中立 |
 
 ## 历史：内置 MCP / Antigravity 专项复核
@@ -242,16 +279,18 @@ External MCP Library、Assignment 与 Runtime-native Projection 保持独立。v
 [v0.30](versions/v0.30/README.md)，完整十三工具与 Qualification 结果见
 [v0.31](versions/v0.31/README.md)。
 
-## 已调研但未进入产品目录
+## 未接入候选与 Settings Preview
 
-这些名称不应出现在 `AdapterKind`、数据库 kind、Contracts、设置选项或运行时健康目录。
+普通调研候选不应出现在 `AdapterKind`、数据库 kind、Contracts、设置选项或运行时健康目录。
+ADR-0189 只允许 Runtime 设置页追加严格 presentation-only 的 Preview；Preview 不改变本文件的
+准入结论，也不进入任何 Core surface。
 
-| Runtime | 调研版本 / 状态 | 观察结果 | 未接入原因 | 复核条件 |
+| Runtime | 调研版本 / 状态 | 观察结果 | 当前边界 / 未接入原因 | 复核条件 |
 |---|---:|---|---|---|
-| Kimi CLI | 0.29.2 | ACP 可初始化；调用方 `mcpServers` 会与用户、项目、项目本地及插件 MCP 合并 | 尚未进入九 Runtime 产品目录，也没有 additive 同名与恢复矩阵 | 完成登录、真实 turn、恢复/取消、native preservation 与 same-name policy 复核 |
+| Kimi CLI | 0.29.2 | ACP 可初始化；调用方 `mcpServers` 会与用户、项目、项目本地及插件 MCP 合并 | 尚未进入 Product Runtime Catalog，也没有 additive 同名与恢复矩阵 | 完成登录、真实 turn、恢复/取消、native preservation 与 same-name policy 复核 |
 | Grok CLI | 0.2.112；本机未登录 | ACP 可初始化；初始化阶段可观察到个人 MCP | 缺少登录后的完整 Session、工具与 additive precedence 证据 | 完成登录、真实 turn、恢复/取消与 MCP 行为复核 |
 | Cursor Agent | 2025.09.18-7ae6800 | 支持 headless 与 resume；已验证入口会读取项目 `.cursor/mcp.json` | 尚无稳定的逐 Run additive channel 与同名证据 | 上游提供动态追加入口并完成 native preservation、同名与恢复复核 |
-| TRAE | CLI 未公开；App 可用 | 官方 Enterprise 页面仍将 CLI 标为 coming soon；App 诊断日志会记录继承的进程环境，不适合作为当前 AgentRun 隔离入口 | 没有公开稳定 CLI/协议；App 自动化与凭据/环境边界尚无可接受合同 | 官方发布可脚本化协议并完成环境、认证、Session、取消和 MCP 隔离复核 |
+| DeepSeek Harness | Settings Preview；未实现 | 仅显示名称、图标、`待支持` 与 disabled 状态；没有 executable、Adapter、Probe 或 capability 结论 | Renderer-only preview，不属于 Product Runtime Catalog | 取得明确入口和协议后，完成 Adapter、认证、Session、终态、取消、Approval、Tool ID、MCP、Activity、Migration 与真实 AgentRun 准入 |
 
 ## 后续准入规则
 

@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.82
+current_version: v0.83
 last_updated: 2026-08-15
 ---
 
@@ -133,4 +133,5 @@ last_updated: 2026-08-15
 | v0.79 | `historical` | Camp 会话轻量打开投影、分段性能诊断与按需历史加载 | [v0.79/README.md](v0.79/README.md) |
 | v0.80 | `historical` | Core-owned 接收者延续、失效修复与 Composer 路由去重 | [v0.80/README.md](v0.80/README.md) |
 | v0.81 | `historical` | Camp 轻量打开、渐进历史与分段性能诊断 | [v0.81/README.md](v0.81/README.md) |
-| v0.82 | `current` | 冷启动恢复壳层、轻量 Camp 存在性检查与 bundled Skill 快速路径 | [v0.82/README.md](v0.82/README.md) |
+| v0.82 | `historical` | 冷启动恢复壳层、轻量 Camp 存在性检查与 bundled Skill 快速路径 | [v0.82/README.md](v0.82/README.md) |
+| v0.83 | `current` | TRAE CLI CN Runtime、实证 ACP 准入与设置页待支持预告边界 | [v0.83/README.md](v0.83/README.md) |

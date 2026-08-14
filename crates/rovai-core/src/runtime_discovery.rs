@@ -679,14 +679,19 @@ mod tests {
     }
 
     #[test]
-    fn known_catalog_has_exactly_nine_stable_products() {
+    fn known_catalog_has_exactly_ten_stable_products() {
         let entries = catalog_entries();
-        assert_eq!(entries.len(), 9);
+        assert_eq!(entries.len(), 10);
         assert_eq!(entries[0]["runtimeKind"], "codex-cli");
         assert!(
             entries
                 .iter()
                 .any(|entry| entry["runtimeKind"] == "qwen-code")
+        );
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry["runtimeKind"] == "trae-cn-cli")
         );
     }
 

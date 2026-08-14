@@ -200,4 +200,5 @@ generated_from: docs/adr-front-matter
 | [ADR-0186](0186-complete-exact-scope-memory-view-and-copyable-target.md) | Complete Exact-Scope Memory View and Copyable Revision Target | `accepted` | `cross-version` | [v0.78](../versions/v0.78/README.md) | — |
 | [ADR-0187](0187-durable-composer-recipient-continuation.md) | Durable Composer Recipient Continuation | `accepted` | `cross-version` | [v0.80](../versions/v0.80/README.md) | — |
 | [ADR-0188](0188-bundled-skill-bootstrap-fast-path-and-execution-integrity.md) | Bundled Skill Bootstrap Fast Path and Execution-Time Integrity | `accepted` | `cross-version` | [v0.82](../versions/v0.82/README.md) | — |
+| [ADR-0189](0189-settings-only-runtime-preview-outside-product-catalog.md) | Settings-Only Runtime Preview Outside the Product Catalog | `accepted` | `cross-version` | [v0.83](../versions/v0.83/README.md) | — |
 <!-- adr-history:end -->

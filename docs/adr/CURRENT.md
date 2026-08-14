@@ -128,6 +128,7 @@ Related: Context selection、Self/Peer identity 与 Runtime admission 从相应 
 | [ADR-0164](0164-accepted-input-recovery-requires-proven-native-turn-reconciliation.md) | Accepted Input Recovery Requires Proven Native Turn Reconciliation |
 | [ADR-0168](0168-planned-shutdown-preserves-runtime-terminal-authority.md) | Planned Shutdown Preserves Runtime Terminal Authority |
 | [ADR-0177](0177-controlled-shutdown-fences-product-execution.md) | Controlled Shutdown Fences Product Execution Without Claiming Runtime Outcome |
+| [ADR-0189](0189-settings-only-runtime-preview-outside-product-catalog.md) | Settings-Only Runtime Preview Outside the Product Catalog |
 <!-- adr-current-primary:end -->
 
 Related: Session redelivery、Skill/MCP projection 与 Qualification 分别保留独立 primary。
