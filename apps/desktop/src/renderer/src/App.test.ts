@@ -90,6 +90,7 @@ import {
   memberRuntimeConfigurationPresentation,
   preferredAgentProcessRun,
   rectanglesOverlap,
+  runPulseMemberNameLines,
   runtimeOptionsForDisplay
 } from './CampWorkspace'
 import {
@@ -2255,6 +2256,7 @@ describe('task event projections', () => {
     expect(markup).toContain('class="run-pulse-chip"')
     expect((markup.match(/class="run-pulse-chip(?: is-selected)?"/g) ?? [])).toHaveLength(1)
     expect(markup).not.toContain('<small>执行过程</small>')
+    expect(markup).toContain('class="run-pulse-chip-copy"><strong><span>沐瓦</span></strong>')
     expect(markup).toContain('data-agent-id="agent_2"')
     expect(markup).toContain('执行中')
     expect(markup.indexOf('class="local-message-avatar"'))
@@ -2540,6 +2542,23 @@ describe('task event projections', () => {
       .toBe('雾切响子 GitHub Copilot')
     expect(executionDrawerTitle('爱丽丝', 'codex-cli')).toBe('爱丽丝 Codex CLI')
     expect(executionDrawerTitle('药师寺惠', null)).toBe('药师寺惠')
+  })
+
+  it('splits execution dock member names into two six-grapheme lines and truncates after twelve', () => {
+    expect(runPulseMemberNameLines('洛可')).toEqual(['洛可'])
+    expect(runPulseMemberNameLines('星野未来产品经理')).toEqual(['星野未来产品', '经理'])
+    expect(runPulseMemberNameLines('一二三四五六七八九十甲乙')).toEqual([
+      '一二三四五六',
+      '七八九十甲乙'
+    ])
+    expect(runPulseMemberNameLines('一二三四五六七八九十甲乙丙')).toEqual([
+      '一二三四五六',
+      '七八九十甲乙…'
+    ])
+    expect(runPulseMemberNameLines('👨‍👩‍👧‍👦一二三四五六')).toEqual([
+      '👨‍👩‍👧‍👦一二三四五',
+      '六'
+    ])
   })
 
   it('presents the saved model, localized effort and model strategy without inventing Runtime defaults', () => {

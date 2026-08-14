@@ -2930,6 +2930,32 @@ export function CampWorkspace({
   )
 }
 
+const RUN_PULSE_MEMBER_NAME_LINE_LENGTH = 6
+const RUN_PULSE_MEMBER_NAME_SEGMENTER = new Intl.Segmenter(undefined, {
+  granularity: 'grapheme'
+})
+
+export function runPulseMemberNameLines(
+  displayName: string
+): [firstLine: string, secondLine?: string] {
+  const graphemes = Array.from(
+    RUN_PULSE_MEMBER_NAME_SEGMENTER.segment(displayName),
+    (entry) => entry.segment
+  )
+  if (graphemes.length <= RUN_PULSE_MEMBER_NAME_LINE_LENGTH) return [displayName]
+
+  const firstLine = graphemes.slice(0, RUN_PULSE_MEMBER_NAME_LINE_LENGTH).join('')
+  const secondLineEnd = RUN_PULSE_MEMBER_NAME_LINE_LENGTH * 2
+  const secondLine = graphemes
+    .slice(RUN_PULSE_MEMBER_NAME_LINE_LENGTH, secondLineEnd)
+    .join('')
+
+  return [
+    firstLine,
+    graphemes.length > secondLineEnd ? `${secondLine}…` : secondLine
+  ]
+}
+
 function RunPulse({
   processes,
   memberById,
@@ -2974,6 +3000,7 @@ function RunPulse({
           if (!run) return null
           const member = memberById.get(process.agentId)
           const memberName = member?.displayName ?? process.agentId
+          const memberNameLines = runPulseMemberNameLines(memberName)
           const presentation = agentRunPresentation(
             run,
             stopping && NON_TERMINAL_RUNS.has(run.status)
@@ -2997,7 +3024,12 @@ function RunPulse({
                   size="list"
                   decorative
                 />
-                <span className="run-pulse-chip-copy"><strong>{memberName}</strong></span>
+                <span className="run-pulse-chip-copy">
+                  <strong>
+                    <span>{memberNameLines[0]}</span>
+                    {memberNameLines[1] && <span>{memberNameLines[1]}</span>}
+                  </strong>
+                </span>
                 <span className={`run-pulse-chip-state tone-${presentation.tone}`}>{presentation.label}</span>
               </button>
             </li>

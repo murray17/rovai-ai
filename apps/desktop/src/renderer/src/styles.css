@@ -1092,10 +1092,9 @@ button:disabled { opacity: 0.52; cursor: default; }
 .run-pulse-chip.is-selected { border-color: var(--brand); background: var(--brand-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand) 8%, transparent); }
 .run-pulse-chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .run-pulse-chip .member-avatar { --member-avatar-size: 24px; }
-.run-pulse-chip-copy { display: flex; min-width: 0; min-height: 24px; align-items: center; }
-.run-pulse-chip-copy strong, .run-pulse-chip-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.run-pulse-chip-copy strong { color: var(--ink); font-size: 11px; }
-.run-pulse-chip-copy small { color: var(--faint); font-size: 9px; }
+.run-pulse-chip-copy { display: grid; min-width: 0; min-height: 24px; align-items: center; margin-inline-start: 4px; }
+.run-pulse-chip-copy strong { display: grid; min-width: 0; align-content: center; color: var(--ink); font-size: 11px; line-height: 1.08; }
+.run-pulse-chip-copy strong > span { overflow: hidden; white-space: nowrap; }
 .run-pulse-chip-state { display: inline-flex; align-items: center; gap: 4px; font-size: 9px; font-weight: 750; white-space: nowrap; }
 .run-pulse-chip-state::before { width: 6px; height: 6px; border: 1px solid currentColor; border-radius: 50%; background: var(--surface-muted); content: ""; }
 .run-pulse-chip-state.tone-info { color: var(--info); }
