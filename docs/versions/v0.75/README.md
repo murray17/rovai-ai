@@ -4,14 +4,14 @@ version: v0.75
 lifecycle: current
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: in_progress
+implementation_status: complete
 last_updated: 2026-08-14
 ---
 
 # Rovai-ai v0.75：当前 Camp 成员显示名 Inline Alias
 
-> 当前状态：显示名 inline alias、canonical freeze、exact help、合同/架构路由和自动化证据均已完成；
-> 等待提交并推送后关闭发布计划。
+> 当前状态：显示名 inline alias、canonical freeze、exact help、合同/架构路由、自动化证据与 `main`
+> 发布均已完成。
 >
 > 前置版本：[v0.74 Runtime 对齐的协作 Skill 与双轴代码评审](../v0.74/README.md)
 

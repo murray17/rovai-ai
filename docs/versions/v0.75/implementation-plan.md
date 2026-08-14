@@ -2,7 +2,7 @@
 document_type: implementation-plan
 version: v0.75
 authority: implementation-plan-and-acceptance
-status: in_progress
+status: complete
 last_updated: 2026-08-14
 ---
 
@@ -34,7 +34,7 @@ last_updated: 2026-08-14
 
 - [x] 复查只纳入 v0.75 范围，不包含并行的品牌资源改动；
 - [x] 将验证证据回填版本文档并标记完成；
-- [ ] 提交并推送到 `main`。
+- [x] 提交并推送到 `main`。
 
 ## 当前证据与缺口
 
@@ -43,4 +43,4 @@ last_updated: 2026-08-14
 - 已通过：parser 8 项定向回归、完整 `rovai-core` lib 425 / CLI 11 / Core binary 73 tests（3 项既有
   manual Runtime smoke ignored）、文档 21 项单测、普通治理、真实 base CI、ADR generation check、Rust
   format、smoke script syntax 与 diff 检查；
-- 尚未完成：提交与推送；完成后本计划不再保留发布缺口。
+- 已发布：实现提交 `80bd36aa` 已推送到 `main`；本计划不再保留发布缺口。
