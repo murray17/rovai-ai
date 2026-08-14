@@ -1,13 +1,75 @@
 ---
 document_type: development-guide
-authority: test-command-routing
-last_updated: 2026-08-13
+authority: test-policy-and-command-routing
+last_updated: 2026-08-14
 ---
 
 # 测试与 Smoke Test
 
 [`package.json#scripts`](../../package.json)是 JavaScript 命令名和组合的真源。Rust 测试
 目标由 Cargo workspace 和测试代码决定。
+
+## Rust 测试准入与退役门槛
+
+测试总数不是质量指标，本仓库不设置“每个功能必须新增几项测试”或“每个 PR 最多新增几项测试”的
+固定配额。评审门槛是每项测试是否拥有清晰、唯一且值得长期维护的合同；相同覆盖应优先扩展既有
+owner，而不是继续增加平行 fixture 和断言。
+
+### 新增独立测试
+
+新增一个 Rust `#[test]` 前必须同时满足以下条件：
+
+1. **拥有独立失败语义**：覆盖新的状态转换、错误分支、安全边界、兼容入口或可复现 regression；
+   仅再次证明已有 happy path、同一个 schema 字段或同一个 mapping case 不构成新增理由。
+2. **选中最低成本 owner**：纯函数和常量优先由单元测试、类型系统或模块级 `const` assertion 负责；
+   只有跨模块事务、持久化、重启或进程边界才建立完整 SQLite / Runtime fixture。Integration 测试只
+   证明 seam 能传递结果，输入矩阵仍由较低层的唯一 owner 负责。
+3. **先检查等价覆盖**：同一 setup、同一执行路径、仅输入或期望值不同的 case，优先加入表驱动测试；
+   同一份稳定 JSON、schema、digest 或教学文案只保留一个 golden/fixture owner，其他层只断言自己
+   消费的结构或传递合同。
+4. **结果必须确定且隔离**：断言业务 outcome、持久状态或公开合同，不依赖 inode 必须变化、未冻结的
+   wall clock、线程调度、目录枚举顺序或真实网络偶然性。文件与数据库只能使用临时 fixture；真实
+   Runtime / 模型验证归入明确的 Smoke，不混入普通 `cargo test`。
+5. **重复执行必须证明额外性质**：确定性 replay、parser 或 database call 默认执行一次。循环、并发或
+   多次重启只在测试明确拥有 race、顺序、幂等窗口或有界统计性质时使用，并在名称或邻近注释中说明
+   次数为何影响合同。
+6. **名称描述当前合同**：使用行为与结果命名，不使用 `checkpoint_N` 等已结束里程碑。Migration fixture
+   可以保留受支持的 source contract / schema 版本，因为版本本身就是兼容入口。
+
+永久禁用的测试代码不予准入：不得用 `#[cfg(any())]`、注释掉的 `#[test]` 或永远为假的 feature 条件
+保存未来可能有用的测试。仍有当前合同就修复并启用；合同已退出就删除，由 Git 历史保存。只有需要
+人工凭据、真实外部 Runtime 或专用硬件的可执行验证才能使用带原因的 `#[ignore = "..."]`，并应优先
+由上文定义的 Smoke 入口拥有。
+
+新增测试的变更说明至少回答四件事：合同 owner 是谁、修复前哪个输入会失败、为何不能扩展现有测试、
+以及最小验证命令是什么。使用完整数据库或进程 fixture 时，还必须说明为什么较低层测试不足。无法
+回答时，不新增独立测试函数。
+
+### 删除、合并或改写测试
+
+删除 active test 必须给出以下一种可审阅证据：生产路径与合同在同一改动中退出；等价合同已有唯一
+owner 并保留全部有意义的 case；或约束已上移到类型系统、编译期 assertion 或更强的边界测试。合并为
+表驱动测试时，必须逐项保留原测试的正向、负向和边界输入，不能只保留最常见 case。
+
+以下类别不得仅因测试长、数量多、名称含旧版本或执行较慢而删除：
+
+- 当前支持来源的数据库 Migration 与业务数据保留 / clean-break 验证；
+- unknown outcome、崩溃恢复、重启 reconciliation、generation / execution fencing；
+- 权限、symlink、path traversal、fail-closed 与 closed schema；
+- raw body、token、credential、Authorization 等泄密防护；
+- Unicode 边界、immutable manifest、幂等冲突与只读 replay lookup。
+
+Migration 测试只有在最低支持升级版本和 fresh-database baseline 已于同一改动中明确收口后才能退役。
+大测试若确实拥有多个独立失败原因，应按 owner 拆分；拆分后测试数增加是可接受结果，不能为了净减少
+数量而牺牲故障定位。
+
+测试清理的变更说明应记录删除/合并前后的可执行测试清单变化、保留下来的 successor owner，以及定向
+和全量命令。可以用以下命令核对数量，但数量只用于解释 diff，不作为通过门槛：
+
+```bash
+cargo test -p rovai-core --lib -- --list
+cargo test --workspace -- --list
+```
 
 ## 测试层级
 

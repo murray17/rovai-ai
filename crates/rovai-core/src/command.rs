@@ -591,18 +591,12 @@ mod tests {
                 ))
             })
             .expect("first command should apply");
-        let mut replay = None;
-        for _ in 0..99 {
-            replay = Some(
-                gateway
-                    .execute(&mut database, &envelope, |_| {
-                        calls.set(calls.get() + 1);
-                        Ok(CommandHandlerResult::rejected("must.not.run", Value::Null))
-                    })
-                    .expect("duplicate command should replay"),
-            );
-        }
-        let replay = replay.expect("at least one replay should be observed");
+        let replay = gateway
+            .execute(&mut database, &envelope, |_| {
+                calls.set(calls.get() + 1);
+                Ok(CommandHandlerResult::rejected("must.not.run", Value::Null))
+            })
+            .expect("duplicate command should replay");
 
         assert!(!first.replayed);
         assert!(replay.replayed);

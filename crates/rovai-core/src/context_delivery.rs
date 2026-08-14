@@ -91,14 +91,14 @@ mod tests {
 
     #[test]
     fn profile_v3_is_current_and_has_a_stable_digest() {
-        let profile = current_context_delivery_profile().unwrap();
-        assert_eq!(profile.profile_version, 3);
-        assert_eq!(profile.max_public_messages, 15);
-        assert_eq!(profile.max_public_history_chars, 24_000);
-        assert_eq!(profile.max_message_body_chars, 2_000);
-        assert_eq!(profile.max_public_reference_chain_messages, 3);
-        assert_eq!(profile.max_self_active_tasks, 8);
-        assert_eq!(profile.canonical_digest().unwrap().len(), 64);
+        assert_eq!(
+            current_context_delivery_profile().unwrap(),
+            CONTEXT_DELIVERY_PROFILE_V3
+        );
+        assert_eq!(
+            CONTEXT_DELIVERY_PROFILE_V3.canonical_digest().unwrap(),
+            "b5b51476f868c7898bce4932aacd6b013d10686e908e13378c02a70b29abfb9e"
+        );
     }
 
     #[test]
