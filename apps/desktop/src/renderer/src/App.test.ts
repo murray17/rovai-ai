@@ -42,7 +42,9 @@ import {
   rememberCampSnapshot,
   runtimeRecoveryFromCommandResult,
   SettingsView,
+  StartupRouteLoading,
   shouldLoadRuntimeHealth,
+  startupGateShouldBeVisible,
   windowDragStripPage
 } from './App'
 import {
@@ -161,6 +163,40 @@ function canonicalActivity(
     ...overrides
   }
 }
+
+describe('cold startup route presentation', () => {
+  it('removes the global gate as soon as Main Window Session returns a target', () => {
+    expect(startupGateShouldBeVisible(null)).toBe(true)
+    expect(startupGateShouldBeVisible({
+      schemaVersion: 1,
+      sessionId: 'session-1',
+      startupLocationMode: 'last_location',
+      lastSettingsSection: 'general',
+      restorableLocationStatus: 'valid',
+      restorableLocation: { kind: 'camp', campId: 'camp-1' }
+    })).toBe(false)
+  })
+
+  it('renders Camp recovery as a local content state with an inline retry', () => {
+    const loading = renderToStaticMarkup(createElement(StartupRouteLoading, {
+      kind: 'camp',
+      waiting: false,
+      error: null,
+      onRetry: () => undefined
+    }))
+    const waiting = renderToStaticMarkup(createElement(StartupRouteLoading, {
+      kind: 'camp',
+      waiting: true,
+      error: 'Core unavailable',
+      onRetry: () => undefined
+    }))
+    expect(loading).toContain('data-startup-route="camp"')
+    expect(loading).toContain('正在恢复对话')
+    expect(loading).not.toContain('startup-gate')
+    expect(waiting).toContain('Core unavailable')
+    expect(waiting).toContain('重试')
+  })
+})
 
 describe('Camp snapshot cache', () => {
   it('retains the current workspace until an uncached Camp projection is ready', () => {

@@ -12,6 +12,7 @@ use std::{
     future::Future,
     path::{Path, PathBuf},
     sync::Arc,
+    time::Instant,
 };
 
 use acp::{AcpCliRuntimeAdapter, AcpIncoming, AcpRuntime};
@@ -3727,6 +3728,13 @@ impl Core {
                     &user_camp_command_envelope(params.command_id, camp_id, params.command),
                 )?;
                 Ok(serde_json::to_value(execution.result)?)
+            }
+            "camps.exists" => {
+                let params: CampIdParams = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ReadModelService.camp_exists(&database, &params.camp_id)?,
+                )?)
             }
             "camps.enter" => {
                 let params: CampEnterParams = serde_json::from_value(request.params.clone())?;
@@ -8248,25 +8256,41 @@ fn probe_authentication_status(status: health::AgentRuntimeProbeStatus) -> &'sta
 }
 
 fn main() -> Result<()> {
+    let startup_started_at = Instant::now();
     // This snapshot is intentionally captured before Tokio exists. Runtime discovery and every
     // child launch receive it explicitly; Rovai never mutates process-global PATH.
+    let runtime_search_started_at = Instant::now();
     let runtime_search_environment = Arc::new(RuntimeSearchEnvironment::capture_initial());
     runtime_search_environment.activate_for_runtime_commands();
+    eprintln!(
+        "[startup] stage=runtime_search_ready duration_ms={} elapsed_ms={}",
+        runtime_search_started_at.elapsed().as_millis(),
+        startup_started_at.elapsed().as_millis(),
+    );
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .context("failed to create Core Tokio Runtime")?;
-    let result = runtime.block_on(run_core(runtime_search_environment));
+    let result = runtime.block_on(run_core(runtime_search_environment, startup_started_at));
     runtime.shutdown_timeout(Duration::from_millis(250));
     result
 }
 
-async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> Result<()> {
+async fn run_core(
+    runtime_search_environment: Arc<RuntimeSearchEnvironment>,
+    startup_started_at: Instant,
+) -> Result<()> {
     let data_dir = parse_data_dir()?;
     let skill_library_root = parse_skill_library_root()?;
     let _data_dir_lock = CoreDataDirLock::acquire(&data_dir)?;
     let mcp_config_path = parse_mcp_config_path()?;
+    let database_started_at = Instant::now();
     let mut database = Database::open(&data_dir)?;
+    eprintln!(
+        "[startup] stage=database_ready duration_ms={} elapsed_ms={}",
+        database_started_at.elapsed().as_millis(),
+        startup_started_at.elapsed().as_millis(),
+    );
     let controlled_shutdown_recovery = ExecutionRuntimeService::default()
         .recover_interrupted_controlled_shutdowns(&mut database)?;
     if controlled_shutdown_recovery.cycles_settled != 0
@@ -8348,8 +8372,18 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
     mcp_config.migrate_agent_ids(&database.agent_id_aliases()?)?;
     let mcp_projection = McpProjectionService::new(&data_dir);
     skill_library.cleanup_expired_staging()?;
-    let bundled_skills_changed = skill_library.install_bundled_skills(&mut database)?;
-    if bundled_skills_changed {
+    let bundled_skills_started_at = Instant::now();
+    let bundled_skills = skill_library.install_bundled_skills(&mut database)?;
+    eprintln!(
+        "[startup] stage=bundled_skills_ready duration_ms={} elapsed_ms={} fast_path_count={} materialized_count={} repaired_count={} changed={}",
+        bundled_skills_started_at.elapsed().as_millis(),
+        startup_started_at.elapsed().as_millis(),
+        bundled_skills.fast_path_count,
+        bundled_skills.materialized_count,
+        bundled_skills.repaired_count,
+        bundled_skills.changed,
+    );
+    if bundled_skills.changed {
         SkillProjectionReconciler.mark_observed_roots_dirty(&mut database, false)?;
     }
     for execution_root in controlled_shutdown_recovery
@@ -8538,6 +8572,10 @@ async fn run_core(runtime_search_environment: Arc<RuntimeSearchEnvironment>) -> 
         runtime_check_shutdown_rx,
     ));
 
+    eprintln!(
+        "[startup] stage=core_ready elapsed_ms={}",
+        startup_started_at.elapsed().as_millis(),
+    );
     eprintln!("rovai-core {} ready", env!("CARGO_PKG_VERSION"));
     let runtime_discovery_core = core.clone();
     let mut runtime_discovery_handle = tokio::spawn(async move {

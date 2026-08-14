@@ -631,6 +631,17 @@ pub struct EventBatch {
 pub struct ReadModelService;
 
 impl ReadModelService {
+    pub fn camp_exists(&self, database: &Database, camp_id: &str) -> Result<bool> {
+        database
+            .connection()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM camp WHERE id = ?1)",
+                [camp_id],
+                |row| row.get(0),
+            )
+            .context("failed to check Camp existence")
+    }
+
     pub fn list_camps(&self, database: &Database) -> Result<Vec<CampListItem>> {
         let mut statement = database.connection().prepare(
             r#"
@@ -2925,6 +2936,12 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
+        assert!(ReadModelService.camp_exists(&database, &camp_id).unwrap());
+        assert!(
+            !ReadModelService
+                .camp_exists(&database, "missing-camp")
+                .unwrap()
+        );
         let content = vec![
             Segment::Text {
                 text: "请 ".to_string(),

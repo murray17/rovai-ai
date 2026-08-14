@@ -183,6 +183,7 @@ export function MemoryLibrary({
   const reviewCount = library?.memories.filter((memory) =>
     memory.lifecycle === 'active' && memory.reviewDue
   ).length ?? 0
+  const loading = library === null && error === null
 
   const run = async (key: string, operation: () => Promise<void>): Promise<void> => {
     setBusy(key)
@@ -377,28 +378,34 @@ export function MemoryLibrary({
   })
 
   return (
-    <section className="memory-library" aria-labelledby="memory-library-title">
+    <section
+      className="memory-library"
+      aria-labelledby="memory-library-title"
+      aria-busy={loading}
+      data-startup-route="memory"
+      data-startup-status={loading ? 'loading' : error && !library ? 'waiting' : 'ready'}
+    >
       <header className="memory-library-header">
         <div>
           <h2 id="memory-library-title">记忆</h2>
           <p>所有正在沿用的记忆都立即生效；形成来源仅用于说明和审计。</p>
         </div>
         <div className="memory-header-actions">
-          <button className="quiet-button" type="button" onClick={() => void exportMemory()}>导出…</button>
-          <button className="primary-button" type="button" onClick={openCreate}>＋ 新增记忆</button>
+          <button className="quiet-button" type="button" onClick={() => void exportMemory()} disabled={!library}>导出…</button>
+          <button className="primary-button" type="button" onClick={openCreate} disabled={!library}>＋ 新增记忆</button>
         </div>
       </header>
 
       {topNotices && <div className="memory-page-notices">{topNotices}</div>}
 
-      {error && <div className="memory-error" role="alert"><strong>操作未完成</strong><span>{error}</span></div>}
+      {error && <div className="memory-error" role="alert"><strong>操作未完成</strong><span>{error}</span>{!library && <button className="quiet-button compact" type="button" onClick={() => { setError(null); void load().catch((nextError) => setError(errorMessage(nextError))) }}>重试</button>}</div>}
       {feedback && <div className="memory-feedback" role="status">{feedback}</div>}
 
       <div className="memory-summary-strip" aria-label="记忆概览">
-        <div><strong>{activeCount}</strong><span>正在沿用</span></div>
-        <div className={pending.length > 0 ? 'attention' : ''}><strong>{pending.length}</strong><span>待审核</span></div>
-        <div><strong>{agentCount}</strong><span>队员形成</span></div>
-        <div><strong>{reviewCount}</strong><span>建议复核</span></div>
+        <div><strong>{loading ? '—' : activeCount}</strong><span>正在沿用</span></div>
+        <div className={pending.length > 0 ? 'attention' : ''}><strong>{loading ? '—' : pending.length}</strong><span>待审核</span></div>
+        <div><strong>{loading ? '—' : agentCount}</strong><span>队员形成</span></div>
+        <div><strong>{loading ? '—' : reviewCount}</strong><span>建议复核</span></div>
       </div>
 
       {pending.length > 0 && (
@@ -415,6 +422,7 @@ export function MemoryLibrary({
             type="button"
             className={scope === value ? 'active' : ''}
             aria-current={scope === value ? 'page' : undefined}
+            disabled={loading}
             onClick={() => setScope(value)}
           >
             {label}
@@ -430,13 +438,14 @@ export function MemoryLibrary({
               type="button"
               className={governance === value ? 'active' : ''}
               aria-pressed={governance === value}
+              disabled={loading}
               onClick={() => setGovernance(value)}
             >
               {label}
             </button>
           ))}
         </div>
-        <label className="memory-search"><span className="sr-only">搜索记忆</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索正文、Retrieval Keys 或队员" /></label>
+        <label className="memory-search"><span className="sr-only">搜索记忆</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索正文、Retrieval Keys 或队员" disabled={loading} /></label>
       </div>
 
       <CapacityStrip library={library} scope={scope} />
@@ -445,7 +454,8 @@ export function MemoryLibrary({
         <div className="memory-catalog">
           <div className="memory-catalog-heading"><strong>{scopeTabs.find(([value]) => value === scope)?.[1]}</strong><span>{visibleMemories.length} 条</span></div>
           <div className="memory-catalog-list">
-            {!library && <EmptyMemory text="正在读取记忆…" />}
+            {loading && <EmptyMemory text="正在读取记忆…" />}
+            {!library && !loading && <EmptyMemory text="暂时无法读取记忆。" />}
             {library && visibleMemories.length === 0 && <EmptyMemory text="当前筛选下没有记忆。" />}
             {visibleMemories.map((memory) => (
               <button key={memory.id} type="button" className={`memory-catalog-item ${selectedMemoryId === memory.id ? 'selected' : ''}`} onClick={() => setSelectedMemoryId(memory.id)}>
@@ -458,6 +468,7 @@ export function MemoryLibrary({
         </div>
         <MemoryDetail
           memory={selectedMemory}
+          loading={loading}
           agents={agents}
           busy={busy}
           onRevise={openRevise}
@@ -516,6 +527,7 @@ function CapacityStrip({ library, scope }: { library: MemoryLibraryView | null; 
 
 function MemoryDetail({
   memory,
+  loading,
   agents,
   busy,
   onRevise,
@@ -525,6 +537,7 @@ function MemoryDetail({
   onForget
 }: {
   memory: MemoryRecord | null
+  loading: boolean
   agents: AgentProfile[]
   busy: string | null
   onRevise(memory: MemoryRecord): void
@@ -534,7 +547,7 @@ function MemoryDetail({
   onForget(memory: MemoryRecord): void
 }): React.JSX.Element {
   if (!memory) {
-    return <aside className="memory-detail empty"><span aria-hidden="true">⌁</span><strong>选择一条记忆查看详情</strong><p>这里会显示正文、来源、Retrieval Keys、版本历史和治理操作。</p></aside>
+    return <aside className="memory-detail empty"><span aria-hidden="true">⌁</span><strong>{loading ? '正在读取记忆' : '选择一条记忆查看详情'}</strong><p>{loading ? '列表与治理状态会在本地数据就绪后显示。' : '这里会显示正文、来源、Retrieval Keys、版本历史和治理操作。'}</p></aside>
   }
   const people = memoryPeople(memory, agents)
   return (

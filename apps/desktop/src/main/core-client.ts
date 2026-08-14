@@ -110,9 +110,12 @@ export class CoreClient {
       this.#skillLibraryRoot,
       this.#removedSkillProjectRoots
     )
+    const coreStartedAt = performance.now()
+    console.info('[startup] stage=core_spawn')
     const child = spawn(binary, args, {
       stdio: ['pipe', 'pipe', 'pipe']
     })
+    let readyReported = false
     this.#child = child
     this.#emit({ method: 'runtime.state', params: { status: 'starting' } })
     this.#stableTimer = setTimeout(() => {
@@ -125,7 +128,11 @@ export class CoreClient {
     child.stderr.on('data', (chunk) => {
       const text = String(chunk).trimEnd()
       console.error(`[rovai-core] ${text}`)
-      if (text.includes('rovai-core') && text.includes('ready')) {
+      if (!readyReported && text.includes('rovai-core') && text.includes('ready')) {
+        readyReported = true
+        console.info(
+          `[startup] stage=core_ready elapsed_ms=${(performance.now() - coreStartedAt).toFixed(1)}`
+        )
         this.#emit({ method: 'runtime.state', params: { status: 'ready' } })
       }
     })

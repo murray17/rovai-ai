@@ -1,7 +1,7 @@
 ---
 document_type: contracts-index
 authority: protocol-contract-routing
-last_updated: 2026-08-14
+last_updated: 2026-08-15
 ---
 
 # 长期接口合同
@@ -22,7 +22,7 @@ Architecture 解释组件如何组成，Version 文档记录交付范围；它�
 
 | 合同 | 权威范围 |
 | --- | --- |
-| [Camp Open Projection v1（当前）](camp-open-projection-v1.md) | Desktop `camps.enter/open`、有界首屏投影、coverage/high-water、earlier message page 与 data-minimized trace |
+| [Camp Open Projection v1（当前）](camp-open-projection-v1.md) | Desktop `camps.enter/open/exists`、有界首屏投影、coverage/high-water、earlier message page 与 data-minimized trace |
 | [Benchmark Protocol v3（当前）](benchmark-protocol-v3.md) | 版本化 Run 信封、Product/Environment fingerprint、五层 Evidence、Adapter/derived projection、逐轴比较资格与 disclosure |
 | [Semantic Judge Views v1（当前）](semantic-judge-views-v1.md) | Process/Blinded Outcome 双视图、模型可见 evidence allowlist、本地 Evidence ID、双 Replica、逐项 reconciliation 与 Hard Outcome non-interference |
 | [Tool Interaction Measurement v1（当前）](tool-interaction-measurement-v1.md) | Opportunity-based Camp/Memory/A2A trace、确定性 oracle/coverage 与独立 Tool-Use Judge 边界 |

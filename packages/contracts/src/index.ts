@@ -2024,6 +2024,7 @@ export type CoreMethod =
   | 'camps.rename'
   | 'camps.changeDefaultLead'
   | 'camps.reconcileDefaultLead'
+  | 'camps.exists'
   | 'camps.enter'
   | 'camps.open'
   | 'camps.delete'

@@ -87,11 +87,7 @@ import {
   liveRuntimeEventFromCore,
   type LiveRuntimeEvent
 } from './ui-model'
-import {
-  campExistsInAuthoritativeNavigation,
-  restoredMemberId,
-  startupTargetFromSnapshot
-} from './startup-location'
+import { restoredMemberId, startupTargetFromSnapshot } from './startup-location'
 import {
   currentProjectForCamp,
   currentProjectGroup,
@@ -120,6 +116,12 @@ export type WindowDragStripPage = Extract<View, 'compose' | 'settings'>
 
 export function windowDragStripPage(view: View): WindowDragStripPage | null {
   return view === 'compose' || view === 'settings' ? view : null
+}
+
+export function startupGateShouldBeVisible(
+  snapshot: DesktopStartupSnapshot | null
+): boolean {
+  return snapshot === null
 }
 
 export function campViewIsVisibleForReadAcknowledgement(
@@ -386,6 +388,7 @@ export function App(): React.JSX.Element {
   const [state, setState] = useState<LoadState>('loading')
   const [shuttingDown, setShuttingDown] = useState(false)
   const [startupSnapshot, setStartupSnapshot] = useState<DesktopStartupSnapshot | null>(null)
+  const [startupRouteTarget, setStartupRouteTarget] = useState<RestorableLocation | null>(null)
   const [startupStatus, setStartupStatus] = useState<StartupStatus>('loading')
   const [startupError, setStartupError] = useState<string | null>(null)
   const [locationSaveError, setLocationSaveError] = useState<string | null>(null)
@@ -432,6 +435,8 @@ export function App(): React.JSX.Element {
   const navigationRequest = useRef<Promise<NavigationSnapshot> | null>(null)
   const overviewRequest = useRef<Promise<boolean> | null>(null)
   const startupSnapshotRequest = useRef<Promise<void> | null>(null)
+  const startupTraceId = useRef(crypto.randomUUID())
+  const startupStartedAt = useRef(performance.now())
   const lastMainView = useRef<View>('compose')
   const newConversationReturnFocus = useRef<HTMLElement | null>(null)
   const liveRuntimeEventSequence = useRef(0)
@@ -690,10 +695,41 @@ export function App(): React.JSX.Element {
     if (startupSnapshotRequest.current) return startupSnapshotRequest.current
     const request = (async (): Promise<void> => {
       try {
+        console.info(
+          `[startup] trace=${startupTraceId.current} stage=main_session_request `
+          + `elapsed_ms=${(performance.now() - startupStartedAt.current).toFixed(1)}`
+        )
         const snapshot = await window.rovai.desktopSession.getStartupSnapshot()
+        const target = startupTargetFromSnapshot(snapshot)
+        cancelPendingCampActivation()
+        setActiveCampId(null)
+        setCampSnapshot(null)
+        setNotificationFocus(null)
+        setStartupRouteTarget(target)
+        if (target.kind === 'camp') {
+          lastMainView.current = 'camp'
+          setView('camp')
+        } else if (target.kind === 'members') {
+          setSelectedMemberId(target.agentId)
+          setMemberTab(target.tab)
+          setMemberReturnTarget({ kind: 'app' })
+          lastMainView.current = 'members'
+          setView('members')
+        } else if (target.kind === 'memory') {
+          setMemoryFocusId(null)
+          lastMainView.current = 'memory'
+          setView('memory')
+        } else {
+          lastMainView.current = 'compose'
+          setView('compose')
+        }
         setStartupSnapshot(snapshot)
         setSettingsSection(snapshot.lastSettingsSection)
         setStartupError(null)
+        console.info(
+          `[startup] trace=${startupTraceId.current} stage=main_session_received `
+          + `target=${target.kind} elapsed_ms=${(performance.now() - startupStartedAt.current).toFixed(1)}`
+        )
       } catch (nextError) {
         setStartupStatus('waiting')
         setStartupError(errorMessage(nextError))
@@ -704,7 +740,7 @@ export function App(): React.JSX.Element {
       if (startupSnapshotRequest.current === request) startupSnapshotRequest.current = null
     }).catch(() => undefined)
     return request
-  }, [])
+  }, [cancelPendingCampActivation, setCampSnapshot])
 
   const commitRestorableLocation = useCallback(async (
     location: RestorableLocation
@@ -927,8 +963,9 @@ export function App(): React.JSX.Element {
   }, [loadStartupSnapshot])
 
   useEffect(() => {
+    if (startupStatus !== 'resolved') return
     void loadGeneralPreferences().catch((nextError) => setError(errorMessage(nextError)))
-  }, [loadGeneralPreferences])
+  }, [loadGeneralPreferences, startupStatus])
 
   useEffect(() => {
     if (
@@ -995,13 +1032,12 @@ export function App(): React.JSX.Element {
   ])
 
   useEffect(() => {
-    // Resolve the frozen Main Window Session with only the authority required by
-    // its target. The full Overview is deliberately not part of this startup gate.
     if (
       !startupSnapshot
       || startupResolvedSessionId.current === startupSnapshot.sessionId
     ) return
     let cancelled = false
+    let overviewTimer: number | null = null
 
     const showQuickChat = (): void => {
       cancelPendingCampActivation()
@@ -1012,50 +1048,81 @@ export function App(): React.JSX.Element {
       setView('compose')
     }
 
+    const scheduleOverview = (): void => {
+      if (overviewTimer !== null) return
+      overviewTimer = window.setTimeout(() => {
+        void loadOverview(true)
+      }, 0)
+    }
+
+    const paintRouteShell = async (target: RestorableLocation): Promise<boolean> => {
+      await afterNextPaint()
+      if (cancelled) return false
+      console.info(
+        `[startup] trace=${startupTraceId.current} stage=renderer_route_shell_paint `
+        + `target=${target.kind} elapsed_ms=${(performance.now() - startupStartedAt.current).toFixed(1)}`
+      )
+      return true
+    }
+
+    const complete = (): void => {
+      startupResolvedSessionId.current = startupSnapshot.sessionId
+      setStartupStatus('resolved')
+      setStartupError(null)
+      setStartupRouteTarget(null)
+    }
+
+    const logRouteContentPaint = async (target: RestorableLocation['kind']): Promise<void> => {
+      await afterNextPaint()
+      if (cancelled) return
+      console.info(
+        `[startup] trace=${startupTraceId.current} stage=renderer_route_content_paint `
+        + `target=${target} elapsed_ms=${(performance.now() - startupStartedAt.current).toFixed(1)}`
+      )
+    }
+
     const resolve = async (): Promise<void> => {
       const target = startupTargetFromSnapshot(startupSnapshot)
+      if (!await paintRouteShell(target)) return
       if (target.kind === 'quick_chat') {
         showQuickChat()
+        scheduleOverview()
+        complete()
+        await logRouteContentPaint(target.kind)
+        return
       } else if (target.kind === 'memory') {
-        cancelPendingCampActivation()
-        setActiveCampId(null)
-        setCampSnapshot(null)
-        setMemoryFocusId(null)
-        lastMainView.current = 'memory'
-        setView('memory')
+        scheduleOverview()
+        complete()
+        return
       } else if (target.kind === 'members') {
-        const nextAgents = await loadAgents()
+        const agentsRequest = loadAgents()
+        scheduleOverview()
+        const nextAgents = await agentsRequest
         if (cancelled) return
-        cancelPendingCampActivation()
-        setActiveCampId(null)
-        setCampSnapshot(null)
         setSelectedMemberId(restoredMemberId(target.agentId, nextAgents))
-        setMemberTab(target.tab)
-        setMemberReturnTarget({ kind: 'app' })
-        lastMainView.current = 'members'
-        setView('members')
+        complete()
+        await logRouteContentPaint(target.kind)
+        return
       } else {
+        const projectionRequest = requestCampProjection(target.campId, 'enter')
+        scheduleOverview()
         let opened: Awaited<ReturnType<typeof requestCampProjection>>
         try {
-          opened = await requestCampProjection(target.campId, 'enter')
+          opened = await projectionRequest
         } catch (snapshotError) {
-          const authoritativeNavigation = await loadNavigation()
+          let exists: boolean
+          try {
+            exists = await window.rovai.request<boolean>('camps.exists', {
+              campId: target.campId
+            })
+          } catch {
+            throw snapshotError
+          }
           if (cancelled) return
-          const exists = await campExistsInAuthoritativeNavigation(
-            target.campId,
-            authoritativeNavigation,
-            (projectPath, offset) => window.rovai.request<NavigationCampPage>(
-              'navigation.groupCamps',
-              { projectPath, offset, limit: 200 }
-            )
-          )
           if (!exists) {
             showQuickChat()
-            if (!cancelled) {
-              startupResolvedSessionId.current = startupSnapshot.sessionId
-              setStartupStatus('resolved')
-              setStartupError(null)
-            }
+            complete()
+            await logRouteContentPaint('quick_chat')
             return
           }
           throw snapshotError
@@ -1073,11 +1140,13 @@ export function App(): React.JSX.Element {
         setNotificationFocus(null)
         lastMainView.current = 'camp'
         setView('camp')
-        startupResolvedSessionId.current = startupSnapshot.sessionId
-        setStartupStatus('resolved')
-        setStartupError(null)
+        complete()
         await afterNextPaint()
         if (cancelled || selectionGeneration !== campSelectionGeneration.current) return
+        console.info(
+          `[startup] trace=${startupTraceId.current} stage=renderer_route_content_paint `
+          + `target=camp elapsed_ms=${(performance.now() - startupStartedAt.current).toFixed(1)}`
+        )
         console.info(
           `[camp-open] trace=${traceId} stage=renderer_meaningful_paint source=startup `
           + `elapsed_ms=${(performance.now() - startedAt).toFixed(1)}`
@@ -1100,20 +1169,10 @@ export function App(): React.JSX.Element {
         })
         return
       }
-      if (cancelled) return
-      startupResolvedSessionId.current = startupSnapshot.sessionId
-      setStartupStatus('resolved')
-      setStartupError(null)
     }
 
     setStartupStatus('loading')
     const resolution = resolve()
-    // resolve() synchronously queues a restored Camp/Member authority request before
-    // its first await. Defer Overview so those route-critical reads stay ahead of
-    // sidebar, Runtime, Memory and pin hydration in Core's serialized queue.
-    const overviewTimer = window.setTimeout(() => {
-      void loadOverview(true)
-    }, 0)
     void resolution.catch((nextError) => {
       if (cancelled) return
       setStartupStatus('waiting')
@@ -1121,7 +1180,7 @@ export function App(): React.JSX.Element {
     })
     return () => {
       cancelled = true
-      window.clearTimeout(overviewTimer)
+      if (overviewTimer !== null) window.clearTimeout(overviewTimer)
     }
   }, [
     cancelPendingCampActivation,
@@ -1183,6 +1242,7 @@ export function App(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
+    if (startupStatus !== 'resolved') return
     if (!shouldLoadRuntimeHealth(
       view,
       settingsSection,
@@ -1190,7 +1250,7 @@ export function App(): React.JSX.Element {
       healthAttempted
     )) return
     void loadHealth().catch((nextError) => setError(errorMessage(nextError)))
-  }, [health, healthAttempted, loadHealth, settingsSection, view])
+  }, [health, healthAttempted, loadHealth, settingsSection, startupStatus, view])
 
   useEffect(() => {
     if (state !== 'ready') return
@@ -2176,7 +2236,10 @@ export function App(): React.JSX.Element {
     memory: 'memory-content',
     settings: 'settings-content'
   }
-  const startupGateVisible = startupStatus !== 'resolved'
+  const startupGateVisible = startupGateShouldBeVisible(startupSnapshot)
+  const startupRoutePending = !startupGateVisible && startupStatus !== 'resolved'
+    ? startupRouteTarget
+    : null
   const inlineNotices = memoryReviewNotice || memoryAutoNotice.count > 0 || error || locationSaveError
     ? (
         <>
@@ -2237,19 +2300,23 @@ export function App(): React.JSX.Element {
           chooseView('memory')
         }}
         pendingMemoryCount={pendingMemoryCount}
-        memberSidebar={view === 'members' ? (
-          <MemberSidebar
-            agents={agents}
-            runtimeAvailability={health?.runtimeAvailability ?? []}
-            runtimeDiscoveryPending={health === null || healthLoading}
-            selectedAgentId={selectedMemberId}
-            returnTarget={memberReturnTarget}
-            onBack={closeMembers}
-            onSelect={chooseMember}
-            onCreate={(trigger) => membersViewRef.current?.requestCreate(trigger)}
-            onReload={loadMemberData}
-          />
-        ) : null}
+        memberSidebar={view === 'members'
+          ? startupRoutePending?.kind === 'members'
+            ? <StartupMemberSidebar />
+            : (
+                <MemberSidebar
+                  agents={agents}
+                  runtimeAvailability={health?.runtimeAvailability ?? []}
+                  runtimeDiscoveryPending={health === null || healthLoading}
+                  selectedAgentId={selectedMemberId}
+                  returnTarget={memberReturnTarget}
+                  onBack={closeMembers}
+                  onSelect={chooseMember}
+                  onCreate={(trigger) => membersViewRef.current?.requestCreate(trigger)}
+                  onReload={loadMemberData}
+                />
+              )
+          : null}
         onSettings={() => chooseView('settings')}
         onSettingsSectionChange={chooseSettingsSection}
         onSettingsBack={closeSettings}
@@ -2307,6 +2374,15 @@ export function App(): React.JSX.Element {
             <span>{toast}</span>
             <button className="icon-button" type="button" aria-label="关闭提示" onClick={() => setToast(null)}>×</button>
           </div>
+        )}
+
+        {!startupGateVisible && startupRoutePending?.kind === 'camp' && view === 'camp' && (
+          <StartupRouteLoading
+            kind="camp"
+            waiting={startupStatus === 'waiting'}
+            error={startupError}
+            onRetry={retryStartup}
+          />
         )}
 
         {!startupGateVisible && view === 'camp' && activeCampId && visibleCampSnapshot?.camp.id === activeCampId && (
@@ -2394,27 +2470,38 @@ export function App(): React.JSX.Element {
         )}
 
         {!startupGateVisible && view === 'members' && (
-          <MembersView
-            ref={membersViewRef}
-            agents={agents}
-            topNotices={inlineNotices}
-            installations={installations}
-            runtimeAvailability={health?.runtimeAvailability ?? []}
-            runtimeDiscoveryPending={health === null || healthLoading}
-            selectedAgentId={selectedMemberId}
-            activeTab={memberTab}
-            runtimeFocusRequest={memberRuntimeFocusRequest}
-            onSelectedAgentChange={(agentId, tab) => {
-              setSelectedMemberId(agentId)
-              setMemberTab(tab)
-            }}
-            onTabChange={setMemberTab}
-            onReload={loadMemberData}
-            onOpenRuntimeSettings={() => {
-              chooseSettingsSection('runtime')
-              chooseView('settings')
-            }}
-          />
+          startupRoutePending?.kind === 'members'
+            ? (
+                <StartupRouteLoading
+                  kind="members"
+                  waiting={startupStatus === 'waiting'}
+                  error={startupError}
+                  onRetry={retryStartup}
+                />
+              )
+            : (
+                <MembersView
+                  ref={membersViewRef}
+                  agents={agents}
+                  topNotices={inlineNotices}
+                  installations={installations}
+                  runtimeAvailability={health?.runtimeAvailability ?? []}
+                  runtimeDiscoveryPending={health === null || healthLoading}
+                  selectedAgentId={selectedMemberId}
+                  activeTab={memberTab}
+                  runtimeFocusRequest={memberRuntimeFocusRequest}
+                  onSelectedAgentChange={(agentId, tab) => {
+                    setSelectedMemberId(agentId)
+                    setMemberTab(tab)
+                  }}
+                  onTabChange={setMemberTab}
+                  onReload={loadMemberData}
+                  onOpenRuntimeSettings={() => {
+                    chooseSettingsSection('runtime')
+                    chooseView('settings')
+                  }}
+                />
+              )
         )}
       </main>
 
@@ -2438,7 +2525,7 @@ export function App(): React.JSX.Element {
         })}
       />
       <NotificationAttentionController
-        enabled={!startupGateVisible}
+        enabled={startupStatus === 'resolved'}
         activeCampId={activeCampId}
         activeCampVisible={view === 'camp'
           && campSnapshot?.camp.id === activeCampId
@@ -2485,6 +2572,60 @@ export function StartupGate({
       {error && <small role="alert">{error}</small>}
       {waiting && <button className="quiet-button" type="button" onClick={onRetry}>重试恢复</button>}
     </section>
+  )
+}
+
+export function StartupRouteLoading({
+  kind,
+  waiting,
+  error,
+  onRetry
+}: {
+  kind: 'camp' | 'members'
+  waiting: boolean
+  error: string | null
+  onRetry(): void
+}): React.JSX.Element {
+  const label = kind === 'camp' ? '对话' : '队员'
+  return (
+    <section
+      className={`startup-route-loading startup-route-loading-${kind}`}
+      aria-busy={!waiting}
+      aria-live="polite"
+      data-startup-route={kind}
+      data-startup-status={waiting ? 'waiting' : 'loading'}
+    >
+      <header className="startup-route-status">
+        <span className="startup-route-progress" aria-hidden="true" />
+        <div>
+          <h2>{waiting ? `${label}暂时无法恢复` : `正在恢复${label}`}</h2>
+          <p>{waiting
+            ? '恢复目标仍被保留，可以在本地服务恢复后重试。'
+            : `页面框架已经就绪，正在读取${label}的权威本地数据。`}</p>
+        </div>
+        {waiting && (
+          <button className="quiet-button" type="button" onClick={onRetry}>重试</button>
+        )}
+      </header>
+      {error && <p className="startup-route-error" role="alert">{error}</p>}
+      <div className="startup-route-skeleton" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+        <span />
+      </div>
+    </section>
+  )
+}
+
+function StartupMemberSidebar(): React.JSX.Element {
+  return (
+    <div className="startup-member-sidebar" aria-hidden="true">
+      <span />
+      <span />
+      <span />
+      <span />
+    </div>
   )
 }
 

@@ -46,6 +46,9 @@ import { RestorableLocationStore, parseRestorableLocation } from './restorable-l
 import { DesktopSessionRegistry } from './desktop-session'
 import { parseClipboardWriteRequest } from './clipboard-write'
 
+const mainStartupStartedAt = performance.now()
+console.info('[startup] stage=main_module_loaded elapsed_ms=0.0')
+
 const allowedMethods = new Set<CoreMethod>([
   'health.check',
   'diagnostics.check',
@@ -111,6 +114,7 @@ const allowedMethods = new Set<CoreMethod>([
   'camps.rename',
   'camps.changeDefaultLead',
   'camps.reconcileDefaultLead',
+  'camps.exists',
   'camps.enter',
   'camps.open',
   'camps.delete',
@@ -313,6 +317,9 @@ function createWindow(): void {
 }
 
 if (primaryInstance) void app.whenReady().then(async () => {
+  console.info(
+    `[startup] stage=electron_ready elapsed_ms=${(performance.now() - mainStartupStartedAt).toFixed(1)}`
+  )
   removeRetiredLoginItemRegistration()
   await deleteRetiredManagedDirectory(app.getPath('userData'))
   appearanceFilePath = join(app.getPath('userData'), 'appearance.json')
@@ -328,11 +335,19 @@ if (primaryInstance) void app.whenReady().then(async () => {
   generalPreferences = loadedGeneralPreferences
   restorableLocations = loadedRestorableLocations
   navigationPreferences = loadedNavigationPreferences
+  console.info(
+    `[startup] stage=main_session_stores_ready elapsed_ms=${(performance.now() - mainStartupStartedAt).toFixed(1)}`
+  )
   themePreference = readThemePreference(appearanceFilePath)
   nativeTheme.themeSource = nativeThemeSource(themePreference)
   nativeTheme.on('updated', publishAppearance)
   publishAppearance()
   void memberAvatars.cleanupStaleTemporaryDirectories().catch(() => undefined)
+  core.onEvent((event) => mainWindow?.webContents.send('rovai:event', event))
+  createWindow()
+  console.info(
+    `[startup] stage=window_created elapsed_ms=${(performance.now() - mainStartupStartedAt).toFixed(1)}`
+  )
   core.start({
     removedSkillProjectRoots: removedSkillProjectRoots(),
     skillLibraryRoot: desktopSkillLibraryRoot(
@@ -340,8 +355,6 @@ if (primaryInstance) void app.whenReady().then(async () => {
       hasExplicitUserDataDirectory
     ) ?? undefined
   })
-  core.onEvent((event) => mainWindow?.webContents.send('rovai:event', event))
-  createWindow()
 
   const openPanelPrewarm = prewarmMacOpenPanel({
     platform: process.platform,

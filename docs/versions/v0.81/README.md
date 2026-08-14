@@ -1,11 +1,11 @@
 ---
 document_type: version-overview
 version: v0.81
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
-last_updated: 2026-08-14
+last_updated: 2026-08-15
 ---
 
 # Rovai-ai v0.81：Camp 轻量打开与渐进历史
@@ -13,6 +13,8 @@ last_updated: 2026-08-14
 > 当前状态：Camp 轻量打开、渐进历史、分段耗时日志与安装版验收均已完成。
 >
 > 前置版本：[v0.80 接收者延续与可修复路由](../v0.80/README.md)
+>
+> 后续版本：[v0.82 冷启动恢复壳层与 bundled Skill 快速路径](../v0.82/README.md)
 
 ## 版本目标
 

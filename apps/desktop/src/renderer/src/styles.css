@@ -2733,6 +2733,28 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 .startup-gate > p:not(.settings-page-eyebrow) { max-width: 560px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
 .startup-gate > small { max-width: 560px; color: var(--danger); font-size: 10.5px; line-height: 1.5; overflow-wrap: anywhere; }
 .startup-gate > button { margin-top: 6px; }
+.startup-route-loading { display: flex; width: 100%; min-height: 0; flex: 1 1 auto; flex-direction: column; overflow: hidden; background: var(--surface); }
+.startup-route-loading-camp { height: 100%; background: var(--conversation-surface); }
+.startup-route-loading-members { border-top: 3px solid var(--brand); background: var(--home-surface); }
+.startup-route-status { display: flex; min-height: 70px; flex: 0 0 auto; align-items: center; gap: 12px; padding: 15px 20px; border-bottom: 1px solid var(--line); background: var(--surface-raised); }
+.startup-route-status > div { display: grid; min-width: 0; gap: 4px; }
+.startup-route-status h2 { margin: 0; color: var(--ink); font-size: 14px; font-weight: 680; }
+.startup-route-status p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.startup-route-status button { flex: 0 0 auto; margin-left: auto; }
+.startup-route-progress { width: 15px; height: 15px; flex: 0 0 15px; border: 2px solid color-mix(in srgb, var(--info) 24%, transparent); border-top-color: var(--info); border-radius: 50%; animation: startup-route-spin 700ms linear infinite; }
+.startup-route-loading[data-startup-status="waiting"] .startup-route-progress { border-color: var(--attention); animation: none; }
+.startup-route-error { margin: 0; padding: 9px 20px; border-bottom: 1px solid color-mix(in srgb, var(--danger) 24%, var(--line)); color: var(--danger); background: var(--danger-soft); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.startup-route-skeleton { display: grid; width: min(860px, calc(100% - 48px)); gap: 15px; margin: 28px auto; }
+.startup-route-skeleton span { display: block; height: 76px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-subtle); }
+.startup-route-skeleton span:nth-child(2) { width: 82%; }
+.startup-route-skeleton span:nth-child(3) { width: 91%; }
+.startup-route-skeleton span:nth-child(4) { width: 68%; }
+.startup-member-sidebar { display: grid; min-height: 0; flex: 1 1 auto; align-content: start; gap: 8px; padding: 12px 10px; }
+.startup-member-sidebar span { height: 50px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-subtle); }
+@keyframes startup-route-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .startup-route-progress { animation: none; }
+}
 .skill-eyebrow { margin: 0; color: var(--brand-ink); font-size: 9px; font-weight: 750; letter-spacing: 0.13em; text-transform: uppercase; }
 .settings-page-note, .skill-section-count { flex: 0 0 auto; padding: 5px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--surface); font: 700 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
 .settings-page-note { border-color: color-mix(in srgb, var(--brand) 32%, var(--line)); color: var(--brand-ink); background: var(--brand-soft); }

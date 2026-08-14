@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-08-14
+last_updated: 2026-08-15
 ---
 
 # Camp 会话工作区
@@ -30,6 +30,12 @@ Camp/成员、最近消息、当前运行摘要、pending Approval 和 Composer 
 terminal Run Evidence 继续在用户展开精确 Run 后按需加载；关闭的 Drawer、隐藏 Inspector 或世界地图
 不得触发完整历史预取。普通 event refresh 使用轻量 open projection，并保留用户已经加载的较早消息、
 Draft、滚动位置、Inspector 选择和地图模式。
+
+冷启动恢复与应用内切换的呈现边界不同。Main Window Session 一旦给出恢复目标，全局 StartupGate 必须
+关闭并显示对应一级页面框架；Camp shell 可暂时显示标题区、局部状态与结构占位，但不得伪装成 meaningful
+content，也不得在 `camps.enter` 成功前提交 active Camp。Members 与 Memory 同样在自己的内容区域读取，
+不能继续占用全屏“正在恢复上次位置”。失败留在局部 surface 重试；仅明确 `camps.exists === false` 的已删除
+Camp 可以回到 Quick Chat。Notification navigation、恢复位置写入和已读确认要等权威 route commit。
 
 ## 常规会话与世界地图
 

@@ -3,7 +3,7 @@ document_type: architecture
 architecture: skill-projection-reconciliation
 authority: skill-projection-access-and-reconciliation-boundaries
 status: accepted
-last_updated: 2026-08-14
+last_updated: 2026-08-15
 ---
 
 # Skill Projection Reconciliation Architecture
@@ -15,6 +15,8 @@ SkillExposureSnapshot 的长期组件边界。决策理由见
 [ADR-0161](../adr/0161-event-driven-root-scoped-skill-projection-reconciliation.md)。当前 official
 inventory 与 system-required policy 见
 [ADR-0181](../adr/0181-twelve-skill-official-inventory-and-runtime-aligned-collaboration.md)。
+bundled bootstrap 与执行完整性时机见
+[ADR-0188](../adr/0188-bundled-skill-bootstrap-fast-path-and-execution-integrity.md)。
 
 ## 三层状态
 
@@ -71,11 +73,22 @@ Main 在启动 Core 时把 Navigation preference 中完整的 removed-root 集�
 `CoreClient` 保存的启动参数副本，因此 Core 自动重启也不会短暂把已移除 root 当作 active，或把已经
 恢复的 root 再次标为 removed。
 
+## Bundled bootstrap 与完整性门禁
+
+Core ready 前先从 embedded bundled definitions 在内存计算 expected digest。数据库 current digest 与
+文件树 paths/types/sizes/modes 全部匹配时，bootstrap 不创建 staging、不复制、不 `fsync`、不读取全文；
+只继续检查 system-required DB configuration。bundle 变化或轻量检查不匹配时才执行完整 materialize、
+digest verify 与 publish/repair。
+
+这条快速路径不是 Revision 内容证明。下方 AgentRun preflight 在 Runtime launch 前仍读取并哈希该 Run
+需要的精确 current Revision；同大小内容篡改、bootstrap 后漂移或任何 digest mismatch 都在此 fail closed。
+Bootstrap report 只服务启动性能诊断，不进入 SkillExposureSnapshot。
+
 ## 触发矩阵
 
 | 触发 | Library / DB | 项目 filesystem |
 | --- | --- | --- |
-| App 启动 / Core 恢复 | 加载 Library、observation、dirty、removed、active Run recovery | 不枚举、不 canonicalize 历史 roots |
+| App 启动 / Core 恢复 | 加载 Library；unchanged bundled Revision 走 digest + 私有 Library 文件树元数据快速路径；加载 observation、dirty、removed、active Run recovery | 不枚举、不 canonicalize 历史 execution roots |
 | Skill install/update/enable/assignment/delete | 提交 desired state；把已有 observation roots 标 dirty/pending cleanup | 不访问 |
 | Runtime selection/config change | 提交配置；标记相关已知 projection dirty | 不访问 |
 | 新 AgentRun | 读取当前 Run root 与 Runtime Groups | 只 reconcile/verify 当前 canonical root |

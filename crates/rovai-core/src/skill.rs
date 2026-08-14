@@ -439,6 +439,14 @@ struct BundledDefinition {
     management_policy: SkillManagementPolicy,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BundledSkillBootstrapReport {
+    pub changed: bool,
+    pub fast_path_count: usize,
+    pub materialized_count: usize,
+    pub repaired_count: usize,
+}
+
 const MATTPOCOCK_SKILLS_REPOSITORY: &str = "https://github.com/mattpocock/skills";
 const MATTPOCOCK_SKILLS_REVISION: &str = "84fdeffd12f2ee307994d1eb6feb48173b6e0502";
 
@@ -1560,12 +1568,45 @@ impl SkillLibraryService {
         })
     }
 
-    pub fn install_bundled_skills(&self, database: &mut Database) -> Result<bool> {
-        let mut changed = strip_official_skill_name_prefixes(database)?;
+    pub fn install_bundled_skills(
+        &self,
+        database: &mut Database,
+    ) -> Result<BundledSkillBootstrapReport> {
+        let mut report = BundledSkillBootstrapReport {
+            changed: strip_official_skill_name_prefixes(database)?,
+            fast_path_count: 0,
+            materialized_count: 0,
+            repaired_count: 0,
+        };
         for definition in BUNDLED_SKILLS {
             if definition.name.starts_with("rovai-") {
                 anyhow::bail!("official Skill names must not use the rovai- prefix");
             }
+            let expected = bundled_candidate_snapshot(definition)?;
+            let existing = load_existing_skill_by_name(database, definition.name)?;
+            if let Some(existing) = &existing
+                && existing.origin != SkillOrigin::Official
+            {
+                anyhow::bail!(
+                    "Imported Skill {} conflicts with a required official Skill",
+                    definition.name
+                );
+            }
+            if let Some(existing) = existing
+                .as_ref()
+                .filter(|value| value.current_digest == expected.content_digest)
+                && bundled_revision_tree_matches(
+                    &self.revision_content_path(&existing.id, &existing.current_revision_id),
+                    definition,
+                )?
+            {
+                report.fast_path_count += 1;
+                if restore_system_required_skill_configuration(database, definition.name)? {
+                    report.changed = true;
+                }
+                continue;
+            }
+
             let token = format!("bundled-{}-{}", definition.name, Uuid::new_v4());
             let staging_root = self.root.join(".staging").join(token);
             let source = staging_root.join(definition.name);
@@ -1575,12 +1616,13 @@ impl SkillLibraryService {
                 definition.name,
                 &staging_root.join(format!(".verify-{}", definition.name)),
             )?;
-            let existing = load_existing_skill_by_name(database, definition.name)?;
-            if let Some(existing) = &existing
-                && existing.origin != SkillOrigin::Official
+            report.materialized_count += 1;
+            if verified.content_digest != expected.content_digest
+                || verified.file_count != expected.file_count
+                || verified.total_bytes != expected.total_bytes
             {
                 anyhow::bail!(
-                    "Imported Skill {} conflicts with a required official Skill",
+                    "materialized bundled Skill {} does not match its embedded definition",
                     definition.name
                 );
             }
@@ -1593,22 +1635,13 @@ impl SkillLibraryService {
                     .context("Bundled Skill disappeared during verification")?;
                 let current_content =
                     self.revision_content_path(&existing.id, &existing.current_revision_id);
-                if self
-                    .verify_revision_identity(
-                        &existing.id,
-                        &existing.current_revision_id,
-                        definition.name,
-                        &existing.current_digest,
-                    )
-                    .is_err()
-                {
-                    remove_directory_if_present(&current_content)?;
-                    publish_directory(
-                        &staging_root.join(format!(".verify-{}", definition.name)),
-                        &current_content,
-                    )?;
-                    database.connection().execute(
-                        r#"
+                remove_directory_if_present(&current_content)?;
+                publish_directory(
+                    &staging_root.join(format!(".verify-{}", definition.name)),
+                    &current_content,
+                )?;
+                database.connection().execute(
+                    r#"
                         INSERT INTO event_log(
                             event_id, event_type, payload_json,
                             entity_type, entity_id, actor_type, actor_id, created_at
@@ -1617,21 +1650,21 @@ impl SkillLibraryService {
                             'skill', ?3, 'system', 'skill-library-bootstrap', ?4
                         )
                         "#,
-                        params![
-                            Uuid::new_v4().to_string(),
-                            serde_json::to_string(&json!({
-                                "skillId": existing.id,
-                                "revisionId": existing.current_revision_id,
-                                "contentDigest": existing.current_digest,
-                            }))?,
-                            existing.id,
-                            Utc::now().to_rfc3339(),
-                        ],
-                    )?;
-                    changed = true;
-                }
+                    params![
+                        Uuid::new_v4().to_string(),
+                        serde_json::to_string(&json!({
+                            "skillId": existing.id,
+                            "revisionId": existing.current_revision_id,
+                            "contentDigest": existing.current_digest,
+                        }))?,
+                        existing.id,
+                        Utc::now().to_rfc3339(),
+                    ],
+                )?;
+                report.repaired_count += 1;
+                report.changed = true;
                 if restore_system_required_skill_configuration(database, definition.name)? {
-                    changed = true;
+                    report.changed = true;
                 }
                 remove_directory_if_present(&staging_root)?;
                 continue;
@@ -1782,10 +1815,10 @@ impl SkillLibraryService {
             }
             result?;
             restore_system_required_skill_configuration(database, definition.name)?;
-            changed = true;
+            report.changed = true;
             remove_directory_if_present(&staging_root)?;
         }
-        Ok(changed)
+        Ok(report)
     }
 
     pub fn cleanup_expired_staging(&self) -> Result<()> {
@@ -2288,14 +2321,22 @@ fn inspect_candidate_tree(source: &Path, expected_name: &str) -> Result<Candidat
 fn candidate_snapshot(
     content_root: &Path,
     expected_name: &str,
-    mut collector: CandidateCollector,
+    collector: CandidateCollector,
 ) -> Result<CandidateSnapshot> {
     let skill_md = content_root.join("SKILL.md");
     if !skill_md.is_file() {
         anyhow::bail!("Skill directory must contain a regular SKILL.md");
     }
     let skill_text = fs::read_to_string(&skill_md).context("SKILL.md must be valid UTF-8 text")?;
-    let frontmatter = parse_skill_frontmatter(&skill_text)?;
+    candidate_snapshot_from_text(&skill_text, expected_name, collector)
+}
+
+fn candidate_snapshot_from_text(
+    skill_text: &str,
+    expected_name: &str,
+    mut collector: CandidateCollector,
+) -> Result<CandidateSnapshot> {
+    let frontmatter = parse_skill_frontmatter(skill_text)?;
     if frontmatter.name != expected_name {
         anyhow::bail!(
             "SKILL.md name '{}' must match directory name '{}'",
@@ -2324,6 +2365,128 @@ fn candidate_snapshot(
         file_count: collector.records.len(),
         total_bytes: collector.total_bytes,
     })
+}
+
+fn bundled_candidate_snapshot(definition: &BundledDefinition) -> Result<CandidateSnapshot> {
+    validate_skill_name(definition.name)?;
+    let mut collector = CandidateCollector::default();
+    let mut skill_text = None;
+    let mut paths = BTreeSet::new();
+    for (relative, content, mode) in definition.files {
+        let relative = Path::new(relative);
+        ensure_relative_path(relative)?;
+        let normalized_path = relative.to_string_lossy().replace('\\', "/");
+        if !paths.insert(normalized_path.clone()) {
+            anyhow::bail!(
+                "bundled Skill {} contains duplicate file path {}",
+                definition.name,
+                normalized_path
+            );
+        }
+        let bytes = content.as_bytes();
+        let size = bytes.len() as u64;
+        if size > MAX_SKILL_FILE_BYTES {
+            anyhow::bail!("Skill file exceeds maximum file size");
+        }
+        collector.total_bytes = collector
+            .total_bytes
+            .checked_add(size)
+            .context("Skill total size overflowed")?;
+        if collector.total_bytes > MAX_SKILL_TOTAL_BYTES {
+            anyhow::bail!("Skill package exceeds maximum total size");
+        }
+        let normalized_mode = *mode & 0o777;
+        let executable = normalized_mode & 0o111 != 0;
+        if executable {
+            collector.executable_file_count += 1;
+        }
+        if executable || looks_like_script(relative, &bytes[..bytes.len().min(8 * 1024)]) {
+            collector.script_file_count += 1;
+        }
+        if bytes[..bytes.len().min(8 * 1024)].contains(&0) {
+            collector.binary_candidate_count += 1;
+        }
+        let mut digest = Sha256::new();
+        digest.update(bytes);
+        collector.records.push(FileDigestRecord {
+            path: normalized_path,
+            mode: normalized_mode,
+            size,
+            digest: digest.finalize().into(),
+        });
+        if relative == Path::new("SKILL.md") {
+            skill_text = Some(*content);
+        }
+    }
+    if collector.records.len() > MAX_SKILL_FILES {
+        anyhow::bail!("Skill package exceeds maximum file count");
+    }
+    candidate_snapshot_from_text(
+        skill_text.context("Skill directory must contain a regular SKILL.md")?,
+        definition.name,
+        collector,
+    )
+}
+
+fn bundled_revision_tree_matches(
+    content_root: &Path,
+    definition: &BundledDefinition,
+) -> Result<bool> {
+    let mut expected = BTreeMap::new();
+    for (relative, content, mode) in definition.files {
+        let relative = Path::new(relative);
+        ensure_relative_path(relative)?;
+        expected.insert(
+            relative.to_string_lossy().replace('\\', "/"),
+            (*mode & 0o777, content.len() as u64),
+        );
+    }
+    let Ok(root_metadata) = fs::symlink_metadata(content_root) else {
+        return Ok(false);
+    };
+    if !root_metadata.file_type().is_dir() {
+        return Ok(false);
+    }
+    let mut actual = BTreeMap::new();
+    if !collect_revision_tree_metadata(content_root, Path::new(""), 0, &mut actual)? {
+        return Ok(false);
+    }
+    Ok(actual == expected)
+}
+
+fn collect_revision_tree_metadata(
+    content_root: &Path,
+    relative: &Path,
+    depth: usize,
+    files: &mut BTreeMap<String, (u32, u64)>,
+) -> Result<bool> {
+    if depth > MAX_SKILL_DEPTH {
+        return Ok(false);
+    }
+    let path = content_root.join(relative);
+    let metadata = fs::symlink_metadata(&path)?;
+    if metadata.file_type().is_symlink() {
+        return Ok(false);
+    }
+    if metadata.file_type().is_dir() {
+        for entry in sorted_directory_entries(&path)? {
+            let child = relative.join(entry.file_name());
+            if ensure_relative_path(&child).is_err()
+                || !collect_revision_tree_metadata(content_root, &child, depth + 1, files)?
+            {
+                return Ok(false);
+            }
+        }
+        return Ok(true);
+    }
+    if !metadata.file_type().is_file() {
+        return Ok(false);
+    }
+    files.insert(
+        relative.to_string_lossy().replace('\\', "/"),
+        (metadata.permissions().mode() & 0o777, metadata.len()),
+    );
+    Ok(files.len() <= MAX_SKILL_FILES)
 }
 
 #[derive(Debug, Default)]
@@ -3288,7 +3451,16 @@ mod tests {
         let data = temporary_directory("rovai-skill-db");
         let mut database = Database::open(&data).unwrap();
         let service = SkillLibraryService::new(root.clone()).unwrap();
-        service.install_bundled_skills(&mut database).unwrap();
+        let initial_bootstrap = service.install_bundled_skills(&mut database).unwrap();
+        assert!(initial_bootstrap.changed);
+        assert_eq!(initial_bootstrap.fast_path_count, 0);
+        assert_eq!(initial_bootstrap.materialized_count, BUNDLED_SKILLS.len());
+        assert_eq!(initial_bootstrap.repaired_count, 0);
+        let unchanged_bootstrap = service.install_bundled_skills(&mut database).unwrap();
+        assert!(!unchanged_bootstrap.changed);
+        assert_eq!(unchanged_bootstrap.fast_path_count, BUNDLED_SKILLS.len());
+        assert_eq!(unchanged_bootstrap.materialized_count, 0);
+        assert_eq!(unchanged_bootstrap.repaired_count, 0);
         let skills = service.list(&database).unwrap();
         let initial_order = skills
             .iter()
@@ -3781,7 +3953,11 @@ mod tests {
             assert!(!memory_semantics.contains(forbidden));
         }
         fs::write(content.join("SKILL.md"), "corrupted by local edit").unwrap();
-        service.install_bundled_skills(&mut database).unwrap();
+        let repair_bootstrap = service.install_bundled_skills(&mut database).unwrap();
+        assert!(repair_bootstrap.changed);
+        assert_eq!(repair_bootstrap.fast_path_count, BUNDLED_SKILLS.len() - 1);
+        assert_eq!(repair_bootstrap.materialized_count, 1);
+        assert_eq!(repair_bootstrap.repaired_count, 1);
         assert!(
             fs::read_to_string(content.join("SKILL.md"))
                 .unwrap()

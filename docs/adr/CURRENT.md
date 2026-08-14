@@ -1,7 +1,7 @@
 ---
 document_type: adr-current
 authority: current-cross-version-adr-navigation
-last_updated: 2026-08-14
+last_updated: 2026-08-15
 ---
 
 # 当前跨版本架构决策
@@ -207,6 +207,7 @@ Related: Session entrypoint 与 Built-in operation 只作为交叉导航，不�
 | [ADR-0166](0166-progressive-built-in-cli-teaching.md) | Progressive Built-In CLI Teaching |
 | [ADR-0180](0180-single-agent-memory-write-command.md) | Single Agent Memory Write Command with Outcome-Discriminated Output |
 | [ADR-0181](0181-twelve-skill-official-inventory-and-runtime-aligned-collaboration.md) | Twelve-Skill Official Inventory and Runtime-Aligned Collaboration |
+| [ADR-0188](0188-bundled-skill-bootstrap-fast-path-and-execution-integrity.md) | Bundled Skill Bootstrap Fast Path and Execution-Time Integrity |
 <!-- adr-current-primary:end -->
 
 Related: 具体 Skill 名称或版本不是治理例外；长期边界仍按本主题的一般 ADR 准入规则判断。

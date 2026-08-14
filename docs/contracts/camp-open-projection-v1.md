@@ -4,7 +4,7 @@ name: Camp Open Projection
 version: v1
 status: accepted
 source_version: v0.81
-last_updated: 2026-08-14
+last_updated: 2026-08-15
 ---
 
 # Camp Open Projection v1
@@ -41,6 +41,15 @@ Camp 的事件失效、发送完成、Approval/Task/Lead mutation 后刷新；�
 
 两种方法都必须在一个 SQLite read transaction 中捕获 `throughGlobalSequence`。Renderer 只能接纳
 同一 Camp 且 high-water 不倒退的响应。
+
+### `camps.exists`
+
+请求为 `{ campId: string }`，响应为 boolean。它只用于 `camps.enter` 失败后的冷启动目标失效判定，执行
+一次 indexed SQLite existence read，不返回 Camp 数据、Navigation 或错误详情。只有明确 `false` 才允许
+Renderer 把冻结目标降级为 Quick Chat；`true` 或该检查自身失败都必须保留局部错误并允许重试。
+
+`camps.exists` 不替代 `camps.enter`，不得用于构造页面、绕过 Default Lead reconcile、预取全量导航或向
+Agent/Runtime 暴露。它是 v0.82 对本 Desktop-only 合同的 additive method，投影 shape 与 v1 窗口不变。
 
 ## Projection
 
@@ -146,3 +155,4 @@ payload 或其他稳定实体 ID；未知或非法 trace ID 直接拒绝，不�
 - [Camp Open Read Path](../architecture/camp-open-read-path.md)
 - [Camp 会话工作区](../ui/components/conversation-workspace.md)
 - [v0.81 实施计划](../versions/v0.81/implementation-plan.md)
+- [v0.82 实施计划](../versions/v0.82/implementation-plan.md)

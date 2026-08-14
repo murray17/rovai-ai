@@ -1,7 +1,7 @@
 ---
 document_type: documentation-index
 authority: documentation-routing
-last_updated: 2026-08-14
+last_updated: 2026-08-15
 ---
 
 # Rovai-ai 文档导航
@@ -22,7 +22,8 @@ last_updated: 2026-08-14
 | 修改通知来源、Episode 聚合、未读/清除、会话可见确认、增量、浮层设置或类型化导航 | [Notification Episode v4](contracts/notification-episode-v4.md)、[Current User Attention v4](contracts/current-user-attention-v4.md)、[ADR-0175](adr/0175-core-owned-notification-occurrence-episode-and-change-journal.md)及[Notification Episode 架构](architecture/notification-episodes.md) |
 | 修改 Camp 文件/目录附件、Composer 拖放、快照限制或 Runtime 附件路径 | [Camp Attachment v1](contracts/camp-attachment-v1.md)、[ADR-0169](adr/0169-core-owned-directory-attachment-snapshots.md)及[会话区拖放 UI](ui/components/conversation-drop-zone.md) |
 | 修改用户消息回复、接收者延续、Composer 路由优先级、失效换人或 Draft-only user send | [ADR-0185](adr/0185-durable-composer-reply-intent-and-explicit-recipient-resolution.md)、[ADR-0187](adr/0187-durable-composer-recipient-continuation.md)、[Camp Composer Draft v2](contracts/camp-composer-draft-v2.md)、[Camp Composer Draft 架构](architecture/camp-composer-draft.md)及[Camp 会话工作区](ui/components/conversation-workspace.md) |
-| 修改 Camp 打开、启动恢复、轻量投影、会话历史分页、high-water/cache 或首屏性能日志 | [Camp Open Projection v1](contracts/camp-open-projection-v1.md)、[Camp Open Read Path](architecture/camp-open-read-path.md)、[ADR-0013](adr/0013-managed-content-and-read-side-v2.md)、[ADR-0058](adr/0058-collaboration-v4-presence-aware-admission.md)及[Camp 会话工作区](ui/components/conversation-workspace.md) |
+| 修改 Camp 打开、冷启动恢复壳层、轻量投影/存在性检查、会话历史分页、high-water/cache 或首屏性能日志 | [Camp Open Projection v1](contracts/camp-open-projection-v1.md)、[Camp Open Read Path](architecture/camp-open-read-path.md)、[ADR-0013](adr/0013-managed-content-and-read-side-v2.md)、[ADR-0058](adr/0058-collaboration-v4-presence-aware-admission.md)及[Camp 会话工作区](ui/components/conversation-workspace.md) |
+| 修改 bundled Skill 冷启动 bootstrap、Revision 快速验证或 AgentRun 执行前完整性门禁 | [ADR-0188](adr/0188-bundled-skill-bootstrap-fast-path-and-execution-integrity.md)、[Skill Projection Reconciliation](architecture/skill-projection-reconciliation.md)及[ADR-0075](adr/0075-runtime-integrity-at-change-and-execution-boundaries.md) |
 | 修改 CLI 教学分层、Agent inline 寻址、协作 Skill 消息拓扑、`cli-operations` 触发/reference，或 official Skill 精确集合、固定 GitHub 来源与管理策略 | [ADR-0163](adr/0163-explicit-caller-return-and-core-managed-reply-reference.md)、[ADR-0166](adr/0166-progressive-built-in-cli-teaching.md)、[ADR-0182](adr/0182-core-resolved-current-camp-display-name-inline-addressing-alias.md)、[ADR-0184](adr/0184-line-leading-display-name-inline-addressing-alias.md)、[ADR-0181](adr/0181-twelve-skill-official-inventory-and-runtime-aligned-collaboration.md)及[Built-in Tool Runtime 架构](architecture/builtin-tool-runtime.md) |
 | 修改 Task 状态、字段、可见性、权限、列表、CampMember 收口、self-active awareness 或 linked execution 准入 | [Durable Task v3](contracts/durable-task-v3.md)、[ADR-0152](adr/0152-lead-owned-task-responsibility-and-self-active-task-awareness.md)、[ADR-0153](adr/0153-explicit-empty-self-active-task-snapshot.md)及[ADR-0137](adr/0137-one-time-task-linked-responsibility-admission.md) |
 | 修改 AgentRun 公共消息/Task 选择、正文/历史预算、引用链或投递 Profile | [ADR-0132](adr/0132-public-reference-context-closure-profile-v2.md)、[ADR-0152](adr/0152-lead-owned-task-responsibility-and-self-active-task-awareness.md)、[Context Delivery Profile v3](contracts/context-delivery-profile-v3.md)及[Message Delivery v2](contracts/message-delivery-v2.md) |
