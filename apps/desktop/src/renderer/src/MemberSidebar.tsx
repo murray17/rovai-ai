@@ -246,7 +246,7 @@ export function MemberSidebar({
               title={sorting ? '完成调整顺序' : '调整顺序'}
               aria-pressed={sorting}
               onClick={toggleSorting}
-            >{sorting ? '完成' : '⇅'}</button>
+            >{sorting ? '完成' : <SidebarIcon name="sort" />}</button>
           )}
           {members.length > 0 && (
             <button
@@ -254,7 +254,7 @@ export function MemberSidebar({
               aria-label="新增队员"
               title="新增队员"
               onClick={(event) => onCreate(event.currentTarget)}
-            >＋</button>
+            ><SidebarIcon name="plus" /></button>
           )}
         </div>
       </div>
@@ -436,7 +436,7 @@ function MemberSidebarRow({
                 event.preventDefault()
                 onMove(agent, event.key === 'ArrowUp' ? -1 : 1)
               }}
-            >⋮⋮</button>
+            ><SidebarIcon name="grip" /></button>
           )
         : (
             <button
@@ -447,10 +447,39 @@ function MemberSidebarRow({
               data-tooltip={`${product} · ${runtime.label}${runtime.detail ? ` · ${runtime.detail}` : ''}`}
               onClick={() => onSelect(agent.agentId, 'runtime', true)}
             >
-              <span aria-hidden="true">{compact === 'available' ? '✓' : compact === 'unconfigured' ? '○' : compact === 'action' ? '!' : '…'}</span>
+              <span aria-hidden="true"><RuntimeStatusIcon state={compact} /></span>
             </button>
           )}
     </div>
+  )
+}
+
+function SidebarIcon({ name }: { name: 'sort' | 'plus' | 'grip' }): React.JSX.Element {
+  if (name === 'plus') {
+    return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12" /></svg>
+  }
+  if (name === 'grip') {
+    return (
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M7 5h.01M13 5h.01M7 10h.01M13 10h.01M7 15h.01M13 15h.01" />
+      </svg>
+    )
+  }
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path d="m5 3-2 2 2 2M3 5h14M15 13l2 2-2 2M17 15H3" />
+    </svg>
+  )
+}
+
+function RuntimeStatusIcon({ state }: { state: CompactRuntimeState }): React.JSX.Element {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <circle cx="10" cy="10" r="7" />
+      {state === 'available' && <path d="m6.8 10.1 2.1 2.1 4.5-4.7" />}
+      {state === 'action' && <path d="M10 6.4v4.5M10 13.8h.01" />}
+      {state === 'neutral' && <path d="M7 10h.01M10 10h.01M13 10h.01" />}
+    </svg>
   )
 }
 

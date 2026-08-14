@@ -3489,6 +3489,8 @@ describe('task event projections', () => {
     expect(markup).toContain('class="member-runtime-entry-arrow"')
     expect(markup).toContain('class="member-detail-page"')
     expect(markup).toContain('Member / Long-lived identity')
+    expect(markup).toContain('<h1>沐瓦</h1>')
+    expect(markup).not.toContain('<h2>沐瓦</h2>')
     expect(markup).not.toContain('member-detail-avatar-button')
     expect(markup).not.toContain('memory-capability-toggle')
     expect(markup).toContain('>身份</button>')

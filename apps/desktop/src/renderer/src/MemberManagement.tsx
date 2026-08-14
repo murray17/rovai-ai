@@ -616,7 +616,7 @@ function MemberDetailHeader({
         />
         <div>
           <span className="member-page-kicker">Member / Long-lived identity</span>
-          <h2>{agent.displayName}</h2>
+          <h1>{agent.displayName}</h1>
           <p>{agent.teamRole || '团队角色未设置'}</p>
           <div className="member-detail-statuses">
             <span className={`presence-${agent.presence}`}>{memberPresenceLabel(agent.presence)}</span>
@@ -640,7 +640,13 @@ function MemberDetailHeader({
       <div className="member-detail-actions">
         <button className="quiet-button" type="button" disabled={busy !== null} onClick={(event) => onEdit(event.currentTarget)}>编辑身份</button>
         <details className="member-detail-menu">
-          <summary aria-label={`管理 ${agent.displayName}`} title="更多操作">•••</summary>
+          <summary aria-label={`管理 ${agent.displayName}`} title="更多操作">
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <circle cx="4.5" cy="10" r="1" />
+              <circle cx="10" cy="10" r="1" />
+              <circle cx="15.5" cy="10" r="1" />
+            </svg>
+          </summary>
           <div role="menu">
             <button type="button" role="menuitem" disabled={busy !== null} onClick={(event) => {
               closeParentDetails(event.currentTarget)
@@ -986,8 +992,9 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
         </div>
       </div>
 
-      <form onSubmit={(event) => void submit(event)}>
-        <label className="field-label" htmlFor="member-runtime-select">Agent 运行时
+      <form className="member-runtime-form" onSubmit={(event) => void submit(event)}>
+        <div className="member-runtime-primary">
+          <label className="field-label" htmlFor="member-runtime-select">Agent 运行时
           <select
             id="member-runtime-select"
             value={selectedKind}
@@ -1011,32 +1018,33 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
               <option key={kind} value={kind}>{adapterLabel(kind)}</option>
             ))}
           </select>
-          <span className="field-help">完整的模型与权限参数只会在 Agent 运行时可用并通过当前能力快照校验后原子保存。</span>
-        </label>
+          </label>
 
-        <div className={`runtime-installation-summary status-${runtimeStatus.status}`} role="status" aria-live="polite">
-          <div className="runtime-installation-primary">
-            <em className={`runtime-user-status status-${runtimeStatus.status}`}>
-              <i aria-hidden="true" />
-              <strong>{selectedKind ? adapterLabel(selectedKind) : runtimeStatus.label}</strong>
-              {selectedKind && <span>{runtimeStatus.label}</span>}
-            </em>
-            {reportedVersion && <code>{reportedVersion}</code>}
-          </div>
-          {runtimeStatus.detail && <small className="runtime-status-detail">{runtimeStatus.detail}</small>}
-          {selectedKind && (
-            runtimeStatus.status === 'not_installed'
-            || runtimeStatus.status === 'authentication_required'
-            || runtimeStatus.status === 'version_unsupported'
-            || runtimeStatus.status === 'unavailable'
-          ) && (
-            <div className="runtime-installation-action">
-              <button className="quiet-button" type="button" onClick={onOpenRuntimeSettings}>
-                前往 Agent 运行时
-              </button>
+          <div className={`runtime-installation-summary status-${runtimeStatus.status}`} role="status" aria-live="polite">
+            <div className="runtime-installation-primary">
+              <em className={`runtime-user-status status-${runtimeStatus.status}`}>
+                <i aria-hidden="true" />
+                <strong>{selectedKind ? adapterLabel(selectedKind) : runtimeStatus.label}</strong>
+                {selectedKind && <span>{runtimeStatus.label}</span>}
+              </em>
+              {reportedVersion && <code>{reportedVersion}</code>}
             </div>
-          )}
+            {runtimeStatus.detail && <small className="runtime-status-detail">{runtimeStatus.detail}</small>}
+            {selectedKind && (
+              runtimeStatus.status === 'not_installed'
+              || runtimeStatus.status === 'authentication_required'
+              || runtimeStatus.status === 'version_unsupported'
+              || runtimeStatus.status === 'unavailable'
+            ) && (
+              <div className="runtime-installation-action">
+                <button className="quiet-button" type="button" onClick={onOpenRuntimeSettings}>
+                  前往 Agent 运行时
+                </button>
+              </div>
+            )}
+          </div>
         </div>
+        <span className="field-help member-runtime-help">完整的模型与权限参数只会在 Agent 运行时可用并通过当前能力快照校验后原子保存。</span>
 
         {selectedKind && (
           <MemberRuntimeParameters

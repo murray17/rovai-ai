@@ -74,7 +74,8 @@ describe('v0.29 member sidebar', () => {
     expect(markup).toContain('placeholder="名称或团队角色"')
     expect(markup).toContain('沐瓦，Codex CLI，可用；打开运行配置')
     expect(markup).toContain('runtime-available')
-    expect(markup).toContain('>✓</span>')
+    expect(markup).toContain('<circle cx="10" cy="10" r="7"></circle>')
+    expect(markup).not.toContain('>✓</span>')
     expect(markup).not.toContain('secret-match')
   })
 
