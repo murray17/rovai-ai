@@ -17,7 +17,7 @@ last_updated: 2026-08-14
 | [AgentRun Recovery](agent-run-recovery.md) | AgentRun、Native Session、Runtime Input Delivery 与 Native Turn 分离，accepted-input blocker、Scheduler fence、用户/预算安全收敛与未来 reconcile capability |
 | [Built-in Tool Runtime](builtin-tool-runtime.md) | Agent CLI v10、Core Router、Runtime Fleet、精确 help、Scope-identified Memory、line-leading display-name alias、十二项 official Skill 与 Runtime 对齐协作消息、peer routing Dynamic Context、ContextManifest/ACK 与外部 MCP 的关系 |
 | [Native Session Bootstrap Redelivery](native-session-bootstrap-redelivery.md) | compaction detector、Session Observer、Bootstrap/Member Identity 重投递、Redelivery v2、Dynamic Context 与 accepted-input 水位 |
-| [Notification Episode](notification-episodes.md) | Occurrence/Disposition/Episode/Change Journal 原子投影、五方法 Core 深模块、read hydration、并发边界与保留 |
+| [Notification Episode](notification-episodes.md) | Occurrence/Disposition/Episode/Change Journal 原子投影、可见来源精确确认、read hydration、并发边界与保留 |
 | [Online Memory Capture](online-memory-capture.md) | best-effort Skill discovery、Scope-identified Search/Read/revise、durable rejection、Agent Memory Facade、原子 Supersession、隔离 Hearth Review、formal publication、候选清除与 Forget 闭包 |
 | [Planned Shutdown](planned-shutdown.md) | Core execution/terminal 双准入、durable shutdown cycle、可靠 Runtime terminal 优先、product fence 启动补偿、统一 deadline、route reap 与 Desktop child-exit 边界 |
 | [Public A2A Message 与 Message Delivery](public-a2a-message-delivery.md) | 公共 Structured Message、canonical/line-leading display-name addressing、正交 Current User Attention、forward/caller-return Delivery、原子通知、Context gate 与 UI projection 边界 |

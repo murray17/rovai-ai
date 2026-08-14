@@ -6,8 +6,7 @@ import {
   useState,
   type FormEvent,
   type JSX,
-  type ReactNode,
-  type RefObject
+  type ReactNode
 } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
@@ -188,9 +187,6 @@ export function CampNavigation({
   onMembers,
   onMemory,
   pendingMemoryCount,
-  notificationUnreadCount = 0,
-  notificationButtonRef,
-  onNotifications = () => undefined,
   memberSidebar = null,
   onSettings,
   onSettingsSectionChange = () => undefined,
@@ -221,9 +217,6 @@ export function CampNavigation({
   onMembers(): void
   onMemory(): void
   pendingMemoryCount: number
-  notificationUnreadCount?: number
-  notificationButtonRef?: RefObject<HTMLButtonElement | null>
-  onNotifications?(): void
   memberSidebar?: ReactNode
   onSettings(): void
   onSettingsSectionChange?(section: NavigationSettingsSection): void
@@ -540,26 +533,6 @@ export function CampNavigation({
             </svg>
             <span><strong>Rovai AI</strong></span>
           </span>
-          <button
-            ref={notificationButtonRef}
-            className="notification-trigger"
-            type="button"
-            aria-label={notificationUnreadCount > 0
-              ? `通知，${notificationUnreadCount} 项未读`
-              : '通知'}
-            title="通知"
-            onClick={onNotifications}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M6.5 10.5a5.5 5.5 0 0 1 11 0c0 5 2 5.2 2 6.5h-15c0-1.3 2-1.5 2-6.5Z" />
-              <path d="M9.7 19a2.5 2.5 0 0 0 4.6 0" />
-            </svg>
-            {notificationUnreadCount > 0 && (
-              <span className="notification-trigger-badge" aria-hidden="true">
-                {notificationUnreadCount > 99 ? '99+' : notificationUnreadCount}
-              </span>
-            )}
-          </button>
         </div>
         {view === 'settings'
           ? (
@@ -817,7 +790,7 @@ const SETTINGS_SIDEBAR_GROUPS: SettingsSidebarGroup[] = [
     items: [
       { key: 'general', icon: '⌂', label: '通用' },
       { key: 'appearance', icon: '◐', label: '外观' },
-      { key: 'notifications', icon: '♢', label: '通知' }
+      { key: 'notifications', icon: '♢', label: '提醒' }
     ]
   },
   {
@@ -1123,6 +1096,7 @@ function CampRow({
   onAction(kind: 'rename' | 'delete', camp: NavigationCampItem): void
 }): JSX.Element {
   const title = camp.title
+  const hasNewReply = camp.marker === 'unread_completed'
   const menuLabels = campNavigationMenuLabels(pinned)
   const menuItems: SidebarActionMenuItem[] = camp.activationState === 'pending'
     ? []
@@ -1159,13 +1133,15 @@ function CampRow({
         className="camp-nav-open"
         type="button"
         aria-current={active ? 'page' : undefined}
-        title={title}
+        aria-label={hasNewReply ? `${title}，有新回复` : title}
+        title={hasNewReply ? `${title} · 有新回复` : title}
         onClick={() => onCamp(camp)}
       >
         <span className="camp-marker-slot" aria-hidden="true">
-          {camp.marker === 'unread_completed' && <i className="task-dot camp-marker-unread_completed" />}
+          {hasNewReply && <i className="task-dot camp-marker-unread_completed" />}
         </span>
         <span className="truncate">{title}</span>
+        {hasNewReply && <span className="sr-only">有新回复</span>}
         {camp.activationState === 'pending' && <span className="camp-draft-badge">草稿</span>}
         {camp.marker === 'loading' && <span className="camp-loading-spinner camp-marker-loading" role="img" aria-label="正在运行" />}
       </button>

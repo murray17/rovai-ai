@@ -129,9 +129,9 @@ use rovai_core::{
         runtime_waiting_recipients,
     },
     notification::{
-        AcknowledgeNotificationEpisodeCommand, ClearNotificationEpisodeCommand,
-        MarkAllNotificationEpisodesReadCommand, NotificationEpisodeFilter,
-        NotificationEpisodeService, UpdateNotificationPreferenceCommand,
+        AcknowledgeNotificationEpisodeCommand, AcknowledgeVisibleNotificationSourcesCommand,
+        ClearNotificationEpisodeCommand, MarkAllNotificationEpisodesReadCommand,
+        NotificationEpisodeFilter, NotificationEpisodeService, UpdateNotificationPreferenceCommand,
     },
     planned_shutdown::{
         ActiveExecutionKey, ActiveExecutionSnapshot, ExecutionLaunchPermit,
@@ -4010,6 +4010,17 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 let execution = NotificationEpisodeService::default().acknowledge(
+                    &mut database,
+                    &user_command_envelope(params.command_id, params.command),
+                )?;
+                emit(&self.output, "notification_episode.changed", json!({}));
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "notifications.acknowledgeVisibleSources" => {
+                let params: UserCommandParams<AcknowledgeVisibleNotificationSourcesCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                let execution = NotificationEpisodeService::default().acknowledge_visible_sources(
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;

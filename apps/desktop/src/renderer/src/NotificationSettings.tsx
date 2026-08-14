@@ -72,11 +72,7 @@ const NOTIFICATION_SCENARIOS: readonly NotificationScenario[] = [
   }
 ]
 
-export function NotificationSettings({
-  onOpenNotificationCenter
-}: {
-  onOpenNotificationCenter(trigger: HTMLButtonElement): void
-}): React.JSX.Element {
+export function NotificationSettings(): React.JSX.Element {
   const [preference, setPreference] = useState<NotificationPreference | null>(null)
   const [loading, setLoading] = useState(true)
   const [savingKey, setSavingKey] = useState<NotificationPreferenceKey | null>(null)
@@ -199,29 +195,17 @@ export function NotificationSettings({
   return (
     <>
       <SettingsPageHeader
-        eyebrow="Settings / Notifications"
-        title="通知"
-        description="这里只决定当前窗口何时显示临时浮层；通知事项仍会保存在通知中心。"
-        aside={(
-          <button
-            className="notification-center-link"
-            type="button"
-            onClick={(event) => onOpenNotificationCenter(event.currentTarget)}
-          >
-            打开通知中心
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M5 11 11 5M6.5 5H11v4.5" />
-            </svg>
-          </button>
-        )}
+        eyebrow="Settings / Reminders"
+        title="提醒"
+        description="选择哪些新动态以临时浮层提醒；Rovai AI 不在前台时会先保留，回到应用后再显示。"
       />
-      <section className="section-block notification-settings" aria-label="通知浮层设置">
+      <section className="section-block notification-settings" aria-label="应用内提醒设置">
         {loading && !preference && (
-          <p className="notification-settings-state" role="status">正在读取通知设置…</p>
+          <p className="notification-settings-state" role="status">正在读取提醒设置…</p>
         )}
         {!loading && !preference && (
           <div className="notification-settings-state" role="alert">
-            <span>{error ?? '通知设置暂时不可用。'}</span>
+            <span>{error ?? '提醒设置暂时不可用。'}</span>
             <button className="quiet-button compact" type="button" onClick={() => void load()}>
               重试
             </button>
@@ -262,7 +246,7 @@ export function NotificationPreferenceEditor({
 
   return (
     <fieldset className="notification-switches" aria-busy={Boolean(savingKey)}>
-      <legend>浮层提醒类别</legend>
+      <legend>应用内提醒类别</legend>
       <div className="notification-master-panel">
         <span className="notification-master-icon" aria-hidden="true">
           <svg viewBox="0 0 20 20">
@@ -272,12 +256,12 @@ export function NotificationPreferenceEditor({
         </span>
         <div className="notification-master-copy">
           <div className="notification-master-title">
-            <h2>浮层提醒</h2>
+            <h2>应用内提醒</h2>
             <span className={headsUpEnabled ? '' : 'is-off'}>
               {headsUpEnabled ? '已开启' : '已关闭'}
             </span>
           </div>
-          <p>显示不抢焦点的新提醒；重新开启时不补弹旧事项。</p>
+          <p>新动态到达时不抢焦点；离开应用期间先保留，重新开启时不补弹旧事项。</p>
         </div>
         <div className="notification-master-control">
           <span
@@ -288,7 +272,7 @@ export function NotificationPreferenceEditor({
             {statusLabel ?? ''}
           </span>
           <NotificationSwitch
-            label="浮层提醒"
+            label="应用内提醒"
             checked={headsUpEnabled}
             disabled={Boolean(savingKey && savingKey !== 'headsUpEnabled')}
             busy={savingKey === 'headsUpEnabled'}

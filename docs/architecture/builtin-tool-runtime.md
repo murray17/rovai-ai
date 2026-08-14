@@ -12,7 +12,7 @@ last_updated: 2026-08-14
 [Built-in Tool Transport v10](../contracts/builtin-tool-transport-v10.md)、
 [Durable Task v3](../contracts/durable-task-v3.md) 和
 [Camp Message Send v7](../contracts/camp-message-send-v7.md)、
-[Current User Attention v3](../contracts/current-user-attention-v3.md)与
+[Current User Attention v4](../contracts/current-user-attention-v4.md)与
 [Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md) 为准；v9 及更早 Transport 只保留
 historical 语义。决策理由见
 [ADR-0124](../adr/0124-cli-only-transport-for-rovai-built-in-operations.md)、

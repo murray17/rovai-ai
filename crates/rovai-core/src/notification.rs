@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use rusqlite::{OptionalExtension, Row, Transaction, named_params, params};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::HashSet;
 
 use crate::{
     camp_content::{StructuredCampMessageContent, render_current_plain_text, validate_content},
@@ -416,6 +417,21 @@ impl DomainCommand for AcknowledgeNotificationEpisodeCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AcknowledgeVisibleNotificationSourcesCommand {
+    pub camp_id: String,
+    pub observed_through_change_sequence: i64,
+    pub visible_message_ids: Vec<String>,
+    pub visible_camp_turn_ids: Vec<String>,
+    pub visible_approval_ids: Vec<String>,
+}
+
+impl sealed::Sealed for AcknowledgeVisibleNotificationSourcesCommand {}
+impl DomainCommand for AcknowledgeVisibleNotificationSourcesCommand {
+    const TYPE: &'static str = "notification_episode.acknowledge_visible_sources";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ClearNotificationEpisodeCommand {
     pub episode_id: String,
     pub through_attention_revision: i64,
@@ -737,6 +753,133 @@ impl NotificationEpisodeService {
                     "acknowledgementId": payload.acknowledgement_id,
                     "observedEpisodeVersion": payload.observed_episode_version,
                     "throughChangeSequence": change_clock(transaction)?.0,
+                }),
+            ))
+        })
+    }
+
+    pub fn acknowledge_visible_sources(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<AcknowledgeVisibleNotificationSourcesCommand>,
+    ) -> Result<CommandExecution> {
+        let recipient_user_id = user_id(&envelope.actor)?.to_string();
+        self.gateway.execute(database, envelope, |transaction| {
+            let payload = &envelope.payload;
+            let source_count = payload.visible_message_ids.len()
+                + payload.visible_camp_turn_ids.len()
+                + payload.visible_approval_ids.len();
+            if payload.camp_id.trim().is_empty()
+                || payload.observed_through_change_sequence < 0
+                || source_count == 0
+                || source_count > 600
+                || payload
+                    .visible_message_ids
+                    .iter()
+                    .chain(&payload.visible_camp_turn_ids)
+                    .chain(&payload.visible_approval_ids)
+                    .any(|source_id| source_id.trim().is_empty())
+            {
+                return Ok(rejected(
+                    "notification_episode.invalid_visible_sources_boundary",
+                    "campId, observedThroughChangeSequence and visible source IDs must define a bounded non-empty observation",
+                ));
+            }
+            let current_sequence = change_clock(transaction)?.0;
+            if payload.observed_through_change_sequence > current_sequence {
+                return Ok(rejected(
+                    "notification_episode.future_visible_sources_boundary",
+                    "observedThroughChangeSequence is ahead of the durable high-water",
+                ));
+            }
+            let visible_message_ids = payload
+                .visible_message_ids
+                .iter()
+                .map(String::as_str)
+                .collect::<HashSet<_>>();
+            let visible_camp_turn_ids = payload
+                .visible_camp_turn_ids
+                .iter()
+                .map(String::as_str)
+                .collect::<HashSet<_>>();
+            let visible_approval_ids = payload
+                .visible_approval_ids
+                .iter()
+                .map(String::as_str)
+                .collect::<HashSet<_>>();
+            let occurrence_ids = {
+                let mut statement = transaction.prepare(
+                    r#"
+                    SELECT occurrence.id, occurrence.semantic, occurrence.source_id,
+                           disposition.resolved_at
+                    FROM notification_occurrence AS occurrence
+                    JOIN notification_occurrence_disposition AS disposition
+                      ON disposition.occurrence_id = occurrence.id
+                    JOIN notification_episode_disposition AS episode_disposition
+                      ON episode_disposition.episode_id = occurrence.episode_id
+                    WHERE occurrence.recipient_user_id = ?1
+                      AND occurrence.camp_id = ?2
+                      AND occurrence.admitted_change_sequence <= ?3
+                      AND occurrence.admitted_attention_revision
+                          > episode_disposition.cleared_through_attention_revision
+                      AND disposition.acknowledged_at IS NULL
+                    ORDER BY occurrence.admitted_change_sequence, occurrence.id
+                    "#,
+                )?;
+                statement
+                    .query_map(
+                        params![
+                            recipient_user_id,
+                            payload.camp_id,
+                            payload.observed_through_change_sequence
+                        ],
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, String>(1)?,
+                                row.get::<_, String>(2)?,
+                                row.get::<_, Option<String>>(3)?,
+                            ))
+                        },
+                    )?
+                    .filter_map(|candidate| match candidate {
+                        Ok((id, semantic, source_id, resolved_at)) => {
+                            let visible = match semantic.as_str() {
+                                "user_mention" => visible_message_ids.contains(source_id.as_str()),
+                                "turn_completed" | "turn_failed" | "turn_incomplete" => {
+                                    visible_camp_turn_ids.contains(source_id.as_str())
+                                }
+                                "approval_pending" => {
+                                    resolved_at.is_none()
+                                        && visible_approval_ids.contains(source_id.as_str())
+                                }
+                                _ => false,
+                            };
+                            visible.then_some(Ok(id))
+                        }
+                        Err(error) => Some(Err(error)),
+                    })
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            let now = chrono::Utc::now().to_rfc3339();
+            let mut changed = 0;
+            for occurrence_id in &occurrence_ids {
+                changed += transaction.execute(
+                    r#"
+                    UPDATE notification_occurrence_disposition
+                    SET acknowledged_at = ?2, updated_at = ?2
+                    WHERE occurrence_id = ?1 AND acknowledged_at IS NULL
+                    "#,
+                    params![occurrence_id, now],
+                )?;
+            }
+            Ok(applied_change(
+                "notification_episode.visible_sources_acknowledged",
+                changed,
+                json!({
+                    "campId": payload.camp_id,
+                    "observedThroughChangeSequence": payload.observed_through_change_sequence,
+                    "resultingChangeSequence": change_clock(transaction)?.0,
                 }),
             ))
         })
@@ -3143,6 +3286,126 @@ mod tests {
         assert_eq!(
             stale.result.code,
             "notification_episode.stale_acknowledgement_boundary"
+        );
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn visible_sources_acknowledge_only_exact_sources_within_the_observed_boundary() {
+        let (directory, mut database) = test_database();
+        insert_camp(&database, "camp-visible", "Visible sources");
+        insert_turn(&database, "turn-visible", "camp-visible", "running");
+        insert_mention(
+            &database,
+            "message-visible-before",
+            "camp-visible",
+            Some("turn-visible"),
+            1,
+            "2026-08-01T00:01:00Z",
+        );
+        let service = NotificationEpisodeService::default();
+        let observed = service
+            .inbox(
+                &mut database,
+                CURRENT_USER_ID,
+                NotificationEpisodeFilter::All,
+                None,
+                50,
+            )
+            .unwrap();
+
+        insert_mention(
+            &database,
+            "message-visible-after",
+            "camp-visible",
+            Some("turn-visible"),
+            2,
+            "2026-08-01T00:02:00Z",
+        );
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE camp_turn
+                SET status = 'failed', version = 2,
+                    ended_at = '2026-08-01T00:03:00Z',
+                    updated_at = '2026-08-01T00:03:00Z'
+                WHERE id = 'turn-visible'
+                "#,
+                [],
+            )
+            .unwrap();
+
+        service
+            .acknowledge_visible_sources(
+                &mut database,
+                &envelope(
+                    "ack-visible-observed",
+                    Some("camp-visible"),
+                    AcknowledgeVisibleNotificationSourcesCommand {
+                        camp_id: "camp-visible".to_string(),
+                        observed_through_change_sequence: observed.through_change_sequence,
+                        visible_message_ids: vec![
+                            "message-visible-before".to_string(),
+                            "message-visible-after".to_string(),
+                        ],
+                        visible_camp_turn_ids: vec!["turn-visible".to_string()],
+                        visible_approval_ids: Vec::new(),
+                    },
+                ),
+            )
+            .unwrap();
+        let after_stale_boundary = service
+            .inbox(
+                &mut database,
+                CURRENT_USER_ID,
+                NotificationEpisodeFilter::All,
+                None,
+                50,
+            )
+            .unwrap();
+        assert_eq!(after_stale_boundary.unread_count, 1);
+        assert_eq!(
+            after_stale_boundary.items[0].unacknowledged_mention_count,
+            1
+        );
+        assert_eq!(
+            after_stale_boundary.items[0].primary_action.kind,
+            NotificationActionKind::OpenCampTurn
+        );
+
+        service
+            .acknowledge_visible_sources(
+                &mut database,
+                &envelope(
+                    "ack-visible-current",
+                    Some("camp-visible"),
+                    AcknowledgeVisibleNotificationSourcesCommand {
+                        camp_id: "camp-visible".to_string(),
+                        observed_through_change_sequence: after_stale_boundary
+                            .through_change_sequence,
+                        visible_message_ids: vec!["message-visible-after".to_string()],
+                        visible_camp_turn_ids: vec!["turn-visible".to_string()],
+                        visible_approval_ids: Vec::new(),
+                    },
+                ),
+            )
+            .unwrap();
+        let after_current_boundary = service
+            .inbox(
+                &mut database,
+                CURRENT_USER_ID,
+                NotificationEpisodeFilter::All,
+                None,
+                50,
+            )
+            .unwrap();
+        assert_eq!(after_current_boundary.unread_count, 0);
+        assert_eq!(
+            after_current_boundary.items[0].unacknowledged_mention_count,
+            0
         );
 
         drop(database);

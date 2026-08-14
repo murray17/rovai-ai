@@ -49,7 +49,8 @@ import {
   type CampMessageSendReceipt,
   type CampInspectorTab,
   type CampRuntimeRecovery,
-  type NotificationFocusTarget
+  type NotificationFocusTarget,
+  type VisibleNotificationSources
 } from './CampWorkspace'
 import {
   CampNavigation,
@@ -59,10 +60,9 @@ import {
 import { NewConversationDialog } from './NewConversationDialog'
 import { AppearanceSettings } from './AppearanceSettings'
 import {
-  NotificationCenter,
-  type NotificationCenterHandle,
+  NotificationAttentionController,
   type NotificationNavigationResult
-} from './NotificationCenter'
+} from './NotificationAttentionController'
 import {
   createNotificationPresentationCoordinator,
   type NotificationPresentationCoordinator
@@ -118,6 +118,20 @@ export type WindowDragStripPage = Extract<View, 'compose' | 'settings'>
 
 export function windowDragStripPage(view: View): WindowDragStripPage | null {
   return view === 'compose' || view === 'settings' ? view : null
+}
+
+export function campViewIsVisibleForReadAcknowledgement(
+  view: View,
+  activeCampId: string | null,
+  snapshotCampId: string | null,
+  visibilityState: DocumentVisibilityState,
+  hasFocus: boolean
+): boolean {
+  return view === 'camp'
+    && activeCampId !== null
+    && snapshotCampId === activeCampId
+    && visibilityState === 'visible'
+    && hasFocus
 }
 
 interface OptimisticCampMessageEntry {
@@ -316,9 +330,8 @@ export function App(): React.JSX.Element {
   const [currentProject, setCurrentProject] = useState<CurrentProject>(() => readCurrentProject())
   const [currentWorkspaceHint, setCurrentWorkspaceHint] = useState<WorkspaceSelection | null>(null)
   const [activeCampId, setActiveCampId] = useState<string | null>(null)
-  const [notificationUnreadCount, setNotificationUnreadCount] = useState(0)
-  const [notificationRefreshSignal, setNotificationRefreshSignal] = useState(0)
   const [notificationFocus, setNotificationFocus] = useState<NotificationFocusTarget | null>(null)
+  const [visibleNotificationSources, setVisibleNotificationSources] = useState<VisibleNotificationSources | null>(null)
   const [notificationAnchor, setNotificationAnchor] = useState<{
     campId: string
     messages: readonly CampMessageView[]
@@ -338,11 +351,10 @@ export function App(): React.JSX.Element {
   const campSnapshotCache = useRef(new Map<string, CampSnapshot>())
   const activeCampIdRef = useRef<string | null>(null)
   const viewRef = useRef<View>('compose')
-  const notificationButtonRef = useRef<HTMLButtonElement>(null)
-  const notificationCenterRef = useRef<NotificationCenterHandle>(null)
   const notificationFocusSequence = useRef(0)
   const notificationFocusRef = useRef<NotificationFocusTarget | null>(null)
   const notificationPresentationRef = useRef<NotificationPresentationCoordinator | null>(null)
+  const campViewedAcknowledgementKey = useRef<string | null>(null)
   const healthRequest = useRef<Promise<HealthStatus> | null>(null)
   const agentListRequest = useRef<Promise<AgentProfile[]> | null>(null)
   const navigationRequest = useRef<Promise<NavigationSnapshot> | null>(null)
@@ -639,10 +651,6 @@ export function App(): React.JSX.Element {
       }
       setCampSnapshot(snapshot)
       await afterNextPaint()
-      await window.rovai.request('navigation.campViewed', {
-        campId,
-        throughGlobalSequence: snapshot.throughGlobalSequence
-      })
       if (selectionGeneration !== campSelectionGeneration.current) return false
       await loadNavigation()
       return selectionGeneration === campSelectionGeneration.current
@@ -868,10 +876,6 @@ export function App(): React.JSX.Element {
         setNotificationFocus(null)
         lastMainView.current = 'camp'
         setView('camp')
-        void window.rovai.request('navigation.campViewed', {
-          campId: target.campId,
-          throughGlobalSequence: snapshot.throughGlobalSequence
-        }).catch(() => undefined)
       }
       if (cancelled) return
       startupResolvedSessionId.current = startupSnapshot.sessionId
@@ -963,6 +967,62 @@ export function App(): React.JSX.Element {
     }, 1_800)
     return () => clearInterval(timer)
   }, [loadNavigation, state])
+
+  useEffect(() => {
+    if (
+      view !== 'camp'
+      || !activeCampId
+      || campSnapshot?.camp.id !== activeCampId
+    ) return undefined
+    const campId = activeCampId
+    const throughGlobalSequence = campSnapshot.throughGlobalSequence
+    const key = `${campId}:${throughGlobalSequence}`
+    let cancelled = false
+    let retryTimer: number | null = null
+    const acknowledgeVisibleCamp = async (): Promise<void> => {
+      if (!campViewIsVisibleForReadAcknowledgement(
+        view,
+        activeCampId,
+        campSnapshot.camp.id,
+        document.visibilityState,
+        document.hasFocus()
+      )) return
+      if (campViewedAcknowledgementKey.current === key) return
+      campViewedAcknowledgementKey.current = key
+      try {
+        await window.rovai.request('navigation.campViewed', {
+          campId,
+          throughGlobalSequence
+        })
+        if (!cancelled) await loadNavigation()
+      } catch {
+        if (campViewedAcknowledgementKey.current === key) {
+          campViewedAcknowledgementKey.current = null
+        }
+        if (!cancelled) {
+          retryTimer = window.setTimeout(() => {
+            retryTimer = null
+            void acknowledgeVisibleCamp()
+          }, 2_500)
+        }
+      }
+    }
+    void acknowledgeVisibleCamp()
+    window.addEventListener('focus', acknowledgeVisibleCamp)
+    document.addEventListener('visibilitychange', acknowledgeVisibleCamp)
+    return () => {
+      cancelled = true
+      if (retryTimer !== null) window.clearTimeout(retryTimer)
+      window.removeEventListener('focus', acknowledgeVisibleCamp)
+      document.removeEventListener('visibilitychange', acknowledgeVisibleCamp)
+    }
+  }, [
+    activeCampId,
+    campSnapshot?.camp.id,
+    campSnapshot?.throughGlobalSequence,
+    loadNavigation,
+    view
+  ])
 
   useEffect(() => {
     return window.rovai.onEvent((event: CoreEvent) => {
@@ -1062,11 +1122,6 @@ export function App(): React.JSX.Element {
       if (cancelled) return
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
-      await window.rovai.request('navigation.campViewed', {
-        campId,
-        throughGlobalSequence: snapshot.throughGlobalSequence
-      })
-      if (!cancelled) await loadNavigation()
     }
 
     const poll = async (): Promise<void> => {
@@ -1460,7 +1515,8 @@ export function App(): React.JSX.Element {
   }, [])
 
   const completeNotificationNavigation = useCallback((requestId: number): void => {
-    notificationPresentationRef.current?.complete(requestId)
+    if (!notificationPresentationRef.current?.complete(requestId)) return
+    setNotificationFocus((current) => current?.requestId === requestId ? null : current)
   }, [])
 
   const cancelNotificationNavigation = useCallback((): void => {
@@ -1807,10 +1863,6 @@ export function App(): React.JSX.Element {
           setOptimisticCampMessages((current) =>
             current.filter((entry) => entry.commandId !== commandId)
           )
-          await window.rovai.request('navigation.campViewed', {
-            campId,
-            throughGlobalSequence: snapshot.throughGlobalSequence
-          })
           if (selectionGeneration === campSelectionGeneration.current) await loadNavigation()
         })
         .catch((nextError) => setError(errorMessage(nextError)))
@@ -1958,11 +2010,6 @@ export function App(): React.JSX.Element {
           chooseView('memory')
         }}
         pendingMemoryCount={pendingMemoryCount}
-        notificationUnreadCount={notificationUnreadCount}
-        notificationButtonRef={notificationButtonRef}
-        onNotifications={() => {
-          notificationCenterRef.current?.open(notificationButtonRef.current)
-        }}
         memberSidebar={view === 'members' ? (
           <MemberSidebar
             agents={agents}
@@ -2060,6 +2107,7 @@ export function App(): React.JSX.Element {
             onOpenInspector={openCampInspector}
             notificationFocus={notificationFocus}
             onNotificationFocusPresented={completeNotificationNavigation}
+            onVisibleNotificationSources={setVisibleNotificationSources}
             runtimeRecovery={runtimeRecovery?.campId === activeCampId ? runtimeRecovery : null}
             onConfigureRuntime={configureMemberRuntime}
             onDismissRuntimeRecovery={() => setRuntimeRecovery(null)}
@@ -2103,9 +2151,6 @@ export function App(): React.JSX.Element {
             installations={installations}
             busy={busy}
             section={settingsSection}
-            onOpenNotifications={(trigger) => {
-              notificationCenterRef.current?.open(trigger)
-            }}
             onDiagnosticsNavigate={(section) => chooseSettingsSection(section)}
             onReload={async () => {
               await Promise.all([loadOverview(), loadHealth()])
@@ -2158,17 +2203,20 @@ export function App(): React.JSX.Element {
           activationState: campActivationStateForCreation('dialog')
         })}
       />
-      <NotificationCenter
-        ref={notificationCenterRef}
+      <NotificationAttentionController
         enabled={!startupGateVisible}
         activeCampId={activeCampId}
-        activeCampVisible={view === 'camp' && campSnapshot?.camp.id === activeCampId}
-        refreshSignal={notificationRefreshSignal}
-        onUnreadCountChange={setNotificationUnreadCount}
+        activeCampVisible={view === 'camp'
+          && campSnapshot?.camp.id === activeCampId
+          && !newConversationOpen
+          && !shuttingDown}
+        navigationActive={notificationFocus !== null}
         onNavigate={navigateFromNotification}
         onPresentNavigation={presentNotificationNavigation}
         onCancelNavigation={cancelNotificationNavigation}
         onRefreshVisibleCamp={refreshVisibleNotificationCamp}
+        onError={setToast}
+        visibleSources={visibleNotificationSources}
       />
       {shuttingDown && <ControlledShutdownOverlay />}
     </div>
@@ -2287,7 +2335,6 @@ export function SettingsView({
   installations,
   busy,
   section,
-  onOpenNotifications,
   onDiagnosticsNavigate,
   onReload,
   onThemeChange
@@ -2301,7 +2348,6 @@ export function SettingsView({
   installations: AdapterInstallation[]
   busy: string | null
   section: SettingsSection
-  onOpenNotifications(trigger: HTMLButtonElement): void
   onDiagnosticsNavigate(section: 'mcp' | 'runtime', runtimeKind?: AdapterKind): void
   onReload(): Promise<void>
   onThemeChange(preference: ThemePreference): void
@@ -2342,7 +2388,7 @@ export function SettingsView({
           </>
         )}
         {section === 'notifications' && (
-          <NotificationSettings onOpenNotificationCenter={onOpenNotifications} />
+          <NotificationSettings />
         )}
         {section === 'diagnostics' && (
           <DiagnosticsCenter onNavigate={onDiagnosticsNavigate} />

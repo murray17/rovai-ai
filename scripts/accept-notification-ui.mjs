@@ -36,106 +36,115 @@ let compactApp = null
 try {
   dayApp = await launchApp(firstPort, 1440, 920, false)
   await setTheme(dayApp.cdp, 'day')
-  await assertNotificationBadge(dayApp.cdp, 4)
+  await assertNotificationCenterHidden(dayApp.cdp)
   assert(!(await evaluate(dayApp.cdp, `Boolean(document.querySelector('.notification-heads-up'))`)),
     'Existing Episode history was replayed as a heads-up after launch')
-
-  await openNotificationCenter(dayApp.cdp)
-  await assertNotificationDrawer(dayApp.cdp, 4, 'day desktop')
-  const drawerCapture = join(outputDir, 'notification-center-day.png')
-  await capture(dayApp.cdp, drawerCapture)
-  await closeDialogWithEscape(dayApp.cdp)
-  assert(await evaluate(dayApp.cdp,
-    `document.activeElement === document.querySelector('.notification-trigger')`),
-  'Closing the notification center did not restore focus to the bell')
-
   const initialInbox = await request(dayApp.cdp, 'notifications.inbox', {
     filter: 'all',
     limit: 50
   })
-  const initialMention = initialInbox.items.find(
-    (item) => item.mention?.messageId === 'message-mention-initial'
-  )
-  assert(initialMention, `Initial Mention Episode was unavailable: ${JSON.stringify(initialInbox)}`)
-  await evaluate(dayApp.cdp, `(() => {
-    const probe = {
-      originalFocus: HTMLElement.prototype.focus,
-      suppressedAttempts: 0
-    }
-    window.__notificationFocusDelayProbe = probe
-    HTMLElement.prototype.focus = function (...args) {
-      if (this.dataset?.messageId === 'message-mention-initial'
-          && probe.suppressedAttempts < 4) {
-        probe.suppressedAttempts += 1
-        return
-      }
-      return probe.originalFocus.apply(this, args)
-    }
-  })()`)
-  await openNotificationCenter(dayApp.cdp)
-  await clickEpisodeAction(dayApp.cdp, initialMention.id, '查看消息')
-  await waitForExpression(dayApp.cdp, `!document.querySelector('.notification-drawer')`)
-  await waitForExpression(dayApp.cdp,
-    `window.__notificationFocusDelayProbe?.suppressedAttempts === 4`, 15_000)
-  await waitForExpression(dayApp.cdp,
-    `document.activeElement?.dataset?.messageId === 'message-mention-initial'`, 15_000)
-  await waitForExpression(dayApp.cdp, `
-    document.querySelector('[data-message-id="message-mention-initial"]')
-      ?.classList.contains('notification-focus-target') === true
-  `, 15_000)
-  await wait(1_800)
-  assert(await evaluate(dayApp.cdp, `
-    !document.querySelector('.notification-drawer')
-      && document.activeElement?.dataset?.messageId === 'message-mention-initial'
-  `), 'Delayed notification focus did not remain stable after the presentation timeout boundary')
-  await evaluate(dayApp.cdp, `(() => {
-    const probe = window.__notificationFocusDelayProbe
-    if (probe?.originalFocus) HTMLElement.prototype.focus = probe.originalFocus
-    delete window.__notificationFocusDelayProbe
-  })()`)
-  await assertNotificationBadge(dayApp.cdp, 3)
-  const clickedInbox = await request(dayApp.cdp, 'notifications.inbox', {
-    filter: 'all',
-    limit: 50
-  })
-  const clickedEpisode = clickedInbox.items.find((item) => item.id === initialMention.id)
-  assert(clickedEpisode?.unread === false
-      && clickedEpisode.unacknowledgedMentionCount === 0
-      && clickedEpisode.reasons.some(
-        (reason) => reason.semantic === 'user_mention' && reason.state === 'acknowledged'
-      ),
-  `Exact Mention acknowledgement did not persist: ${JSON.stringify(clickedInbox)}`)
-  await openNotificationCenter(dayApp.cdp)
-  await assertNotificationDrawer(dayApp.cdp, 4, 'day desktop after exact acknowledgement', 3)
-  assert(!(await evaluate(dayApp.cdp,
-    `document.querySelector('[data-notification-id="${initialMention.id}"]')
-      ?.classList.contains('unread')`)),
-  'The acknowledged Mention Episode returned to its unread presentation')
-  await closeDialogWithEscape(dayApp.cdp)
-
-  const markBoundary = await request(dayApp.cdp, 'notifications.inbox', {
-    filter: 'all',
-    limit: 50
-  })
-  const readAllResult = await request(dayApp.cdp, 'notifications.markAllRead', {
-    commandId: crypto.randomUUID(),
-    command: { throughChangeSequence: markBoundary.throughChangeSequence }
-  })
-  assert(readAllResult.status === 'applied',
-    `Could not normalize the Episode fixture: ${JSON.stringify(readAllResult)}`)
-  await assertNotificationBadge(dayApp.cdp, 0)
+  assert(initialInbox.unreadCount === 4,
+    `Historical Episode fixture was incomplete: ${JSON.stringify(initialInbox)}`)
+  await markAllNotificationsRead(dayApp.cdp)
 
   await openNotificationSettings(dayApp.cdp)
   await assertNotificationPreferences(dayApp.cdp)
+  await assertNotificationCenterHidden(dayApp.cdp)
   const settingsCapture = join(outputDir, 'notification-settings-day.png')
   await capture(dayApp.cdp, settingsCapture)
   await setPrimaryHeadsUpPreference(dayApp.cdp, false)
   await insertTerminalTurn('turn-completed-muted', 'completed')
-  await assertNotificationBadge(dayApp.cdp, 1)
-  await wait(3_000)
+  await wakeReminderController(dayApp.cdp)
+  await waitForUnreadCount(dayApp.cdp, 1)
+  await wait(600)
   assert(!(await evaluate(dayApp.cdp, `Boolean(document.querySelector('.notification-heads-up'))`)),
     'An Episode admitted while heads-up was disabled still opened a heads-up')
+  await markAllNotificationsRead(dayApp.cdp)
   await setPrimaryHeadsUpPreference(dayApp.cdp, true)
+
+  await insertMessageMention(
+    'message-mention-ordinary-open',
+    '直接进入会话后，这条可见消息应自动已读。'
+  )
+  await wakeReminderController(dayApp.cdp)
+  await waitForUnreadCount(dayApp.cdp, 1)
+  await waitForSelector(dayApp.cdp, '.notification-heads-up', 15_000)
+  const openedCampWithoutNotificationAction = await evaluate(dayApp.cdp, `(() => {
+    const button = document.querySelector('.settings-sidebar-back')
+    button?.click()
+    return Boolean(button)
+  })()`)
+  assert(openedCampWithoutNotificationAction,
+    'Could not return to the fixture Camp without using a notification action')
+  await waitForSelector(dayApp.cdp, '.camp-nav-open')
+  const openedCampThroughSidebar = await evaluate(dayApp.cdp, `(() => {
+    const button = [...document.querySelectorAll('.camp-nav-open')]
+      .find((candidate) => candidate.textContent?.includes('v0.71 通知 Episode 验收 Camp'))
+    button?.click()
+    return Boolean(button)
+  })()`)
+  assert(openedCampThroughSidebar,
+    'Could not open the fixture Camp through ordinary sidebar navigation')
+  await waitForSelector(dayApp.cdp, '.camp-workspace')
+  await evaluate(dayApp.cdp, `(() => {
+    const button = [...document.querySelectorAll('.camp-conversation-view-controls button')]
+      .find((candidate) => candidate.textContent?.trim() === '会话')
+    if (button?.getAttribute('aria-pressed') !== 'true') button?.click()
+  })()`)
+  await waitForExpression(dayApp.cdp, `(() => {
+    const message = document.querySelector(
+      '[data-message-id="message-mention-ordinary-open"]'
+    )
+    const viewport = document.querySelector('.timeline-scroll')
+    if (!message || !viewport || viewport.hidden) return false
+    const messageRect = message.getBoundingClientRect()
+    const viewportRect = viewport.getBoundingClientRect()
+    return messageRect.bottom > viewportRect.top && messageRect.top < viewportRect.bottom
+  })()`)
+  await waitForUnreadCount(dayApp.cdp, 0)
+  const ordinaryOpenInbox = await request(dayApp.cdp, 'notifications.inbox', {
+    filter: 'all',
+    limit: 50
+  })
+  const ordinaryOpenEpisode = ordinaryOpenInbox.items.find(
+    (item) => item.mention?.messageId === 'message-mention-ordinary-open'
+  )
+  assert(ordinaryOpenEpisode?.unread === false
+      && ordinaryOpenEpisode.unacknowledgedMentionCount === 0,
+  `Ordinary Camp visibility did not acknowledge the exact Mention: ${JSON.stringify(ordinaryOpenInbox)}`)
+
+  const memoryOpened = await evaluate(dayApp.cdp, `(() => {
+    const button = document.querySelector('.unified-sidebar button[aria-label^="记忆"]')
+    button?.click()
+    return Boolean(button)
+  })()`)
+  assert(memoryOpened, 'Could not leave the Camp before testing its completion marker')
+  await waitForSelector(dayApp.cdp, '.memory-library')
+  await insertTerminalTurn('turn-completed-marker', 'completed')
+  await wakeReminderController(dayApp.cdp)
+  await waitForExpression(dayApp.cdp,
+    `Boolean(document.querySelector('.camp-marker-unread_completed'))`, 15_000)
+  const markerState = await evaluate(dayApp.cdp, `(() => {
+    const marker = document.querySelector('.camp-marker-unread_completed')
+    const button = marker?.closest('.camp-nav-open')
+    return {
+      label: button?.getAttribute('aria-label') ?? '',
+      title: button?.getAttribute('title') ?? ''
+    }
+  })()`)
+  assert(markerState.label.includes('有新回复') && markerState.title.includes('有新回复'),
+    `The Camp completion marker was not exposed accessibly: ${JSON.stringify(markerState)}`)
+  const openedMarkerCamp = await evaluate(dayApp.cdp, `(() => {
+    const marker = document.querySelector('.camp-marker-unread_completed')
+    const button = marker?.closest('.camp-nav-open')
+    button?.click()
+    return Boolean(button)
+  })()`)
+  assert(openedMarkerCamp, 'Could not open the Camp carrying the completion marker')
+  await waitForSelector(dayApp.cdp, '.camp-workspace')
+  await waitForExpression(dayApp.cdp,
+    `!document.querySelector('.camp-marker-unread_completed')`, 15_000)
+  await markAllNotificationsRead(dayApp.cdp)
 
   await closeApp(dayApp)
   dayApp = null
@@ -143,7 +152,7 @@ try {
 
   compactApp = await launchApp(firstPort + 1, 1040, 700, true)
   await setTheme(compactApp.cdp, 'night')
-  await assertNotificationBadge(compactApp.cdp, 1)
+  await assertNotificationCenterHidden(compactApp.cdp)
   assert(!(await evaluate(compactApp.cdp, `Boolean(document.querySelector('.notification-heads-up'))`)),
     'Unread Episode history was replayed as a heads-up after restart')
   await openNotificationSettings(compactApp.cdp)
@@ -162,11 +171,18 @@ try {
   await focusNewConversation(compactApp.cdp)
 
   await insertRunningTurn('turn-mention-live')
+  await simulateWindowAttention(compactApp.cdp, false)
   await insertMessageMention(
     'message-mention-live-1',
     '第一条实时消息提到你。',
     'turn-mention-live'
   )
+  await wakeReminderController(compactApp.cdp)
+  await waitForUnreadCount(compactApp.cdp, 1)
+  await wait(800)
+  assert(!(await evaluate(compactApp.cdp, `Boolean(document.querySelector('.notification-heads-up'))`)),
+    'A reminder became visible while Rovai AI was not attentive')
+  await simulateWindowAttention(compactApp.cdp, true)
   await waitForSelector(compactApp.cdp, '.notification-heads-up', 15_000)
   assert(await evaluate(compactApp.cdp, `(() => {
     window.__notificationAcceptHeadsUp = document.querySelector('.notification-heads-up')
@@ -178,6 +194,7 @@ try {
     '第二条实时消息提到你。',
     'turn-mention-live'
   )
+  await wakeReminderController(compactApp.cdp)
   await waitForExpression(compactApp.cdp, `
     document.querySelector('.notification-heads-up')?.textContent
       ?.includes('第二条实时消息提到你。') === true
@@ -188,7 +205,6 @@ try {
   assert(await evaluate(compactApp.cdp,
     `document.activeElement?.getAttribute('aria-label') === '新对话'`),
   'The updated Episode heads-up stole keyboard focus')
-  await assertNotificationBadge(compactApp.cdp, 2)
   const aggregateInbox = await request(compactApp.cdp, 'notifications.inbox', {
     filter: 'unread',
     limit: 50
@@ -202,71 +218,26 @@ try {
   `Same-turn Mentions did not materialize as one partially readable Episode: ${JSON.stringify(aggregateInbox)}`)
   await clickFirstButton(compactApp.cdp, '.notification-heads-up-close')
   await waitForExpression(compactApp.cdp, `!document.querySelector('.notification-heads-up')`)
-  await focusNewConversation(compactApp.cdp)
-
-  await insertTerminalTurn('turn-completed-live', 'completed')
+  const headsUpCapture = join(outputDir, 'notification-heads-up-compact-reduced-motion.png')
+  await simulateWindowAttention(compactApp.cdp, false)
+  await insertTerminalTurn('turn-completed-background', 'completed')
+  await wakeReminderController(compactApp.cdp)
+  await wait(800)
+  assert(!(await evaluate(compactApp.cdp, `Boolean(document.querySelector('.notification-heads-up'))`)),
+    'A background completion reminder started its timer before the App regained attention')
+  await simulateWindowAttention(compactApp.cdp, true)
   await waitForSelector(compactApp.cdp, '.notification-heads-up', 15_000)
-  assert(await evaluate(compactApp.cdp,
-    `document.activeElement?.getAttribute('aria-label') === '新对话'`),
-  'The completion heads-up stole keyboard focus')
   const headsUpText = await evaluate(compactApp.cdp,
     `document.querySelector('.notification-heads-up')?.textContent ?? ''`)
   assert(headsUpText.includes('等待你的下一步')
       && headsUpText.includes('本轮协作已经完成')
       && !headsUpText.includes('README.md'),
-  `The heads-up did not use fixed data-minimized copy: ${JSON.stringify(headsUpText)}`)
-  await assertNotificationBadge(compactApp.cdp, 3)
-  const headsUpCapture = join(outputDir, 'notification-heads-up-compact-reduced-motion.png')
+  `The deferred heads-up did not use fixed data-minimized copy: ${JSON.stringify(headsUpText)}`)
   await capture(compactApp.cdp, headsUpCapture)
-
   await clickFirstButton(compactApp.cdp, '.notification-heads-up-close')
   await waitForExpression(compactApp.cdp, `!document.querySelector('.notification-heads-up')`)
-  await openNotificationCenter(compactApp.cdp)
-  await selectNotificationFilter(compactApp.cdp, '全部')
-  await waitForExpression(compactApp.cdp,
-    `document.querySelectorAll('.notification-row').length === 7`)
-  await assertNotificationDrawer(compactApp.cdp, 7, 'compact reduced-motion', 3)
-  await clickButton(compactApp.cdp, '.notification-drawer-actions button', '全部已读')
-  await waitForExpression(compactApp.cdp,
-    `document.querySelector('.notification-drawer-header span')?.textContent === '0 项未读'`)
-  await assertNotificationBadge(compactApp.cdp, 0)
-
-  await emulateDesktopZoom(compactApp.cdp, 1040, 700, 2)
-  await assertNotificationDrawer(compactApp.cdp, 7, '200% zoom', 0)
-  await assertZoomedNotificationFunctionality(compactApp.cdp)
-  await selectNotificationFilter(compactApp.cdp, '未读')
-  await waitForExpression(compactApp.cdp,
-    `document.querySelectorAll('.notification-row').length === 0`)
-  await selectNotificationFilter(compactApp.cdp, '全部')
-  await waitForExpression(compactApp.cdp,
-    `document.querySelectorAll('.notification-row').length === 7`)
-  const zoomCapture = join(outputDir, 'notification-center-night-200-percent.png')
-  await capture(compactApp.cdp, zoomCapture)
-  await emulateDesktopZoom(compactApp.cdp, 1040, 700, 1)
-
-  const visibleEpisodes = await request(compactApp.cdp, 'notifications.inbox', {
-    filter: 'all',
-    limit: 50
-  })
-  for (const episode of visibleEpisodes.items) {
-    const result = await request(compactApp.cdp, 'notifications.clear', {
-      commandId: crypto.randomUUID(),
-      command: {
-        episodeId: episode.id,
-        throughAttentionRevision: episode.attentionRevision
-      }
-    })
-    assert(result.status === 'applied',
-      `Could not clear Episode ${episode.id}: ${JSON.stringify(result)}`)
-  }
-  await waitForExpression(compactApp.cdp,
-    `document.querySelectorAll('.notification-row').length === 0`, 15_000)
-  const emptyInbox = await request(compactApp.cdp, 'notifications.inbox', {
-    filter: 'all',
-    limit: 50
-  })
-  assert(emptyInbox.unreadCount === 0 && emptyInbox.items.length === 0,
-    `Packaged Episode commands did not persist: ${JSON.stringify(emptyInbox)}`)
+  await assertNotificationCenterHidden(compactApp.cdp)
+  await markAllNotificationsRead(compactApp.cdp)
 
   console.log(JSON.stringify({
     ok: true,
@@ -277,28 +248,24 @@ try {
       packagedRendererToCoreIpc: true,
       sourceFactsMaterializeEpisodes: true,
       existingEpisodesDoNotReplayHeadsUp: true,
-      unreadEpisodeBadgeAndAccessibleName: true,
-      persistentDrawerAndFixedCopy: true,
-      exactMentionAcknowledgementAndNavigation: true,
-      delayedFocusHandshake: true,
-      boundedMarkAllAndRevisionBoundedClear: true,
+      notificationCenterHidden: true,
+      lightweightReminderSettings: true,
+      ordinaryCampVisibilityAcknowledgement: true,
+      campCompletionMarkerVisibleUntilCampIsOpened: true,
       fiveNotificationPreferences: true,
       preferenceFailurePreservesFocusAndScroll: true,
       headsUpPreferenceTakesEffectWithoutReplay: true,
       restartPersistence: true,
+      backgroundSignalsWaitForAppAttention: true,
       liveHeadsUpWithoutFocusTheft: true,
       sameTurnMentionsUpdateOneHeadsUpInPlace: true,
-      escapeRestoresBellFocus: true,
       dayDesktopAndNightCompactReducedMotionLayouts: true,
-      twoHundredPercentZoomKeepsDrawerFunctional: true,
       horizontalOverflow: false
     },
     captures: {
-      drawer: drawerCapture,
       settings: settingsCapture,
       compactSettings: compactSettingsCapture,
-      compactHeadsUp: headsUpCapture,
-      zoomedDrawer: zoomCapture
+      compactHeadsUp: headsUpCapture
     }
   }, null, 2))
 } finally {
@@ -370,6 +337,11 @@ async function insertTerminalTurn(turnId, status, modifier = 'now') {
   assert(['completed', 'failed', 'cancelled'].includes(status),
     `Unsupported terminal fixture status: ${status}`)
   const timestamp = sqliteTimestamp(modifier)
+  const markerEventType = status === 'completed'
+    ? 'agent_run.succeeded'
+    : status === 'failed'
+      ? 'agent_run.failed'
+      : 'camp_turn.status_changed'
   await runProcess('/usr/bin/sqlite3', [databasePath, `
     PRAGMA foreign_keys = ON;
     INSERT INTO camp_turn(
@@ -385,6 +357,15 @@ async function insertTerminalTurn(turnId, status, modifier = 'now') {
       ${sqlLiteral(`notification-accept:${turnId}`)}, ${sqlLiteral(status)},
       1, ${timestamp}, datetime(${timestamp}, '+1 day'), 86400, 32, 16, 1,
       1, ${timestamp}, ${timestamp}, ${timestamp}
+    );
+    INSERT INTO event_log(
+      event_id, event_type, payload_json, camp_id,
+      entity_type, entity_id, created_at
+    ) VALUES (
+      ${sqlLiteral(`notification-marker:${turnId}`)},
+      ${sqlLiteral(markerEventType)},
+      ${sqlLiteral(JSON.stringify({ status }))},
+      ${sqlLiteral(campId)}, 'camp_turn', ${sqlLiteral(turnId)}, ${timestamp}
     );
   `])
 }
@@ -442,74 +423,63 @@ async function insertMessageMention(messageId, body, campTurnId = null, modifier
   `])
 }
 
-async function openNotificationCenter(cdp) {
-  const opened = await evaluate(cdp, `(() => {
-    const button = document.querySelector('.notification-trigger')
-    button?.click()
-    return button?.getAttribute('aria-label') ?? null
-  })()`)
-  assert(opened, 'The global notification button was unavailable')
-  await waitForSelector(cdp, '.notification-drawer')
-}
-
-async function selectNotificationFilter(cdp, label) {
-  const selected = await evaluate(cdp, `(() => {
-    const button = [...document.querySelectorAll('.notification-filter button')]
-      .find((candidate) => candidate.textContent?.trim() === ${JSON.stringify(label)})
-    button?.click()
-    return Boolean(button)
-  })()`)
-  assert(selected, `Notification filter ${JSON.stringify(label)} was unavailable`)
-  await waitForExpression(cdp, `
-    [...document.querySelectorAll('.notification-filter button')]
-      .find((candidate) => candidate.textContent?.trim() === ${JSON.stringify(label)})
-      ?.getAttribute('aria-pressed') === 'true'
-  `)
-}
-
-async function assertNotificationDrawer(cdp, expectedRows, context, expectedUnread = expectedRows) {
+async function assertNotificationCenterHidden(cdp) {
   const state = await evaluate(cdp, `({
-    rows: document.querySelectorAll('.notification-row').length,
-    title: document.querySelector('.notification-drawer-header')?.textContent ?? '',
-    copy: document.querySelector('.notification-list')?.textContent ?? '',
-    drawerOverflow: (() => {
-      const node = document.querySelector('.notification-drawer')
-      return node ? node.scrollWidth > node.clientWidth + 1 : true
-    })(),
-    documentOverflow: document.documentElement.scrollWidth > window.innerWidth,
-    closeName: document.querySelector('.notification-drawer .dialog-close')?.getAttribute('aria-label')
+    trigger: Boolean(document.querySelector('.notification-trigger')),
+    drawer: Boolean(document.querySelector('.notification-drawer')),
+    centerLink: Boolean(document.querySelector('.notification-center-link')),
+    documentOverflow: document.documentElement.scrollWidth > window.innerWidth + 1
   })`)
-  assert(state.rows === expectedRows,
-    `${context} Episode row count was ${state.rows}, expected ${expectedRows}`)
-  if (expectedUnread !== null) {
-    assert(state.title.includes(`${expectedUnread} 项未读`),
-      `${context} unread Episode summary was incorrect: ${JSON.stringify(state.title)}`)
-  }
-  assert(state.copy.includes('待审批')
-      && state.copy.includes('等待你的下一步')
-      && state.copy.includes('执行未完成')
-      && state.copy.includes('提到你')
-      && state.copy.includes('打开会话')
-      && !state.copy.includes('打开 Camp')
-      && !state.copy.includes('README.md'),
-  `${context} content was not fixed and data-minimized: ${JSON.stringify(state.copy)}`)
-  assert(!state.drawerOverflow && !state.documentOverflow,
-    `${context} notification center overflowed horizontally: ${JSON.stringify(state)}`)
-  assert(state.closeName === '关闭通知中心',
-    `${context} notification center close button had no accessible name`)
+  assert(!state.trigger && !state.drawer && !state.centerLink && !state.documentOverflow,
+    `Notification Center remained visible or caused overflow: ${JSON.stringify(state)}`)
 }
 
-async function assertNotificationBadge(cdp, expected, timeout = 15_000) {
-  await waitForExpression(cdp, `(() => {
-    const button = document.querySelector('.notification-trigger')
-    return button?.getAttribute('aria-label') === ${JSON.stringify(
-      expected > 0 ? `通知，${expected} 项未读` : '通知'
-    )}
-  })()`, timeout)
-  const badge = await evaluate(cdp,
-    `document.querySelector('.notification-trigger-badge')?.textContent?.trim() ?? null`)
-  assert(badge === (expected > 0 ? String(expected) : null),
-    `Notification badge was ${JSON.stringify(badge)}, expected ${expected}`)
+async function markAllNotificationsRead(cdp) {
+  const inbox = await request(cdp, 'notifications.inbox', { filter: 'all', limit: 1 })
+  if (inbox.unreadCount > 0) {
+    const result = await request(cdp, 'notifications.markAllRead', {
+      commandId: crypto.randomUUID(),
+      command: { throughChangeSequence: inbox.throughChangeSequence }
+    })
+    assert(result.status === 'applied',
+      `Could not normalize reminder attention: ${JSON.stringify(result)}`)
+  }
+  await wakeReminderController(cdp)
+  await waitForUnreadCount(cdp, 0)
+}
+
+async function waitForUnreadCount(cdp, expected, timeout = 15_000) {
+  await waitForExpression(cdp, `
+    window.rovai.request('notifications.inbox', { filter: 'all', limit: 1 })
+      .then((inbox) => inbox.unreadCount === ${JSON.stringify(expected)})
+  `, timeout, true)
+}
+
+async function wakeReminderController(cdp) {
+  await evaluate(cdp, `window.dispatchEvent(new Event('focus'))`)
+  await wait(160)
+}
+
+async function simulateWindowAttention(cdp, attentive) {
+  const state = await evaluate(cdp, `(() => {
+    if (${JSON.stringify(attentive)}) {
+      if (window.__notificationAcceptOriginalHasFocus) {
+        Document.prototype.hasFocus = window.__notificationAcceptOriginalHasFocus
+        delete window.__notificationAcceptOriginalHasFocus
+      }
+      window.dispatchEvent(new Event('focus'))
+    } else {
+      if (!window.__notificationAcceptOriginalHasFocus) {
+        window.__notificationAcceptOriginalHasFocus = Document.prototype.hasFocus
+      }
+      Document.prototype.hasFocus = () => false
+      window.dispatchEvent(new Event('blur'))
+    }
+    return document.hasFocus()
+  })()`)
+  assert(state === attentive,
+    `Could not simulate App attention=${attentive}: document.hasFocus()=${state}`)
+  await wait(160)
 }
 
 async function openNotificationSettings(cdp) {
@@ -522,11 +492,11 @@ async function openNotificationSettings(cdp) {
   await waitForSelector(cdp, '.settings-sidebar-menu')
   const selected = await evaluate(cdp, `(() => {
     const button = [...document.querySelectorAll('.settings-sidebar-menu button')]
-      .find((candidate) => candidate.textContent?.includes('通知'))
+      .find((candidate) => candidate.textContent?.includes('提醒'))
     button?.click()
     return Boolean(button)
   })()`)
-  assert(selected, 'Notification Settings entry was unavailable')
+  assert(selected, 'Reminder Settings entry was unavailable')
   await waitForSelector(cdp, '.notification-settings')
 }
 
@@ -549,7 +519,7 @@ async function assertNotificationPreferences(cdp) {
   assert(state.values.every(Boolean),
     `Notification preferences did not default on: ${JSON.stringify(state.values)}`)
   assert(JSON.stringify(state.names) === JSON.stringify([
-    '浮层提醒', '待审批', '提到你', '本轮完成', '执行未完成'
+    '应用内提醒', '待审批', '提到你', '本轮完成', '执行未完成'
   ]), `Notification preference order or accessible names drifted: ${JSON.stringify(state.names)}`)
   assert(JSON.stringify(state.scenarios) === JSON.stringify(['需要响应', '本轮结果'])
       && state.scenarioCounts.every((count) => count === '2 / 2 项已开启')
@@ -678,38 +648,6 @@ async function focusNewConversation(cdp) {
   assert(focused === '新对话', 'Could not establish the heads-up focus baseline')
 }
 
-async function closeDialogWithEscape(cdp) {
-  await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' })
-  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape' })
-  await waitForExpression(cdp, `!document.querySelector('.notification-drawer')`)
-  await wait(50)
-}
-
-async function clickEpisodeAction(cdp, episodeId, label) {
-  const clicked = await evaluate(cdp, `(() => {
-    const row = document.querySelector(
-      '[data-notification-id=${JSON.stringify(episodeId)}]'
-    )
-    const button = [...(row?.querySelectorAll('button') ?? [])]
-      .find((candidate) => candidate.textContent?.trim() === ${JSON.stringify(label)})
-    if (!button || button.disabled) return false
-    button.click()
-    return true
-  })()`)
-  assert(clicked, `Could not click ${JSON.stringify(label)} for Episode ${episodeId}`)
-}
-
-async function clickButton(cdp, selector, label) {
-  const clicked = await evaluate(cdp, `(() => {
-    const button = [...document.querySelectorAll(${JSON.stringify(selector)})]
-      .find((candidate) => candidate.textContent?.trim() === ${JSON.stringify(label)})
-    if (!button || button.disabled) return false
-    button.click()
-    return true
-  })()`)
-  assert(clicked, `Could not click enabled button ${JSON.stringify(label)} within ${selector}`)
-}
-
 async function clickFirstButton(cdp, selector) {
   const clicked = await evaluate(cdp, `(() => {
     const button = document.querySelector(${JSON.stringify(selector)})
@@ -750,43 +688,6 @@ async function emulateDesktopZoom(cdp, physicalWidth, physicalHeight, zoomFactor
   })()`)
 }
 
-async function assertZoomedNotificationFunctionality(cdp) {
-  const state = await evaluate(cdp, `(() => {
-    const drawer = document.querySelector('.notification-drawer')
-    const list = document.querySelector('.notification-list')
-    const close = document.querySelector('.notification-drawer .dialog-close')
-    const closeRect = close?.getBoundingClientRect()
-    const before = list?.scrollTop ?? 0
-    if (list) list.scrollTop = list.scrollHeight
-    const after = list?.scrollTop ?? 0
-    if (list) list.scrollTop = before
-    return {
-      cssViewport: [window.innerWidth, window.innerHeight],
-      devicePixelRatio: window.devicePixelRatio,
-      physicalViewport: [
-        Math.round(window.innerWidth * window.devicePixelRatio),
-        Math.round(window.innerHeight * window.devicePixelRatio)
-      ],
-      drawerVisible: Boolean(drawer),
-      closeVisible: Boolean(closeRect
-        && closeRect.width > 0
-        && closeRect.height > 0
-        && closeRect.bottom > 0
-        && closeRect.top < window.innerHeight),
-      filtersVisible: document.querySelectorAll('.notification-filter button').length === 2,
-      scrollable: Boolean(list && list.scrollHeight > list.clientHeight && after > before),
-      drawerOverflow: drawer ? drawer.scrollWidth > drawer.clientWidth + 1 : true,
-      documentOverflow: document.documentElement.scrollWidth > window.innerWidth + 1
-    }
-  })()`)
-  assert(state.cssViewport[0] === 520 && state.cssViewport[1] === 350
-      && Math.abs(state.devicePixelRatio - 2) < 0.01
-      && state.physicalViewport[0] === 1040 && state.physicalViewport[1] === 700
-      && state.drawerVisible && state.closeVisible && state.filtersVisible && state.scrollable
-      && !state.drawerOverflow && !state.documentOverflow,
-  `200% zoom hid Notification Center functionality: ${JSON.stringify(state)}`)
-}
-
 async function launchApp(port, width, height, reducedMotion) {
   const executable = join(appPath, 'Contents', 'MacOS', 'Rovai-ai')
   const stderr = []
@@ -821,7 +722,7 @@ async function launchApp(port, width, height, reducedMotion) {
     await waitForExpression(cdp,
       `Boolean(window.rovai && document.querySelector('.app-shell'))`, 45_000)
     await waitForExpression(cdp,
-      `Boolean(document.querySelector('.notification-trigger'))`, 45_000)
+      `Boolean(document.querySelector('.unified-sidebar'))`, 45_000)
     const health = await request(cdp, 'health.check')
     assert(await realpath(health.database.path) === await realpath(databasePath),
       `Isolated App opened the wrong database: ${JSON.stringify(health.database.path)}`)
@@ -920,6 +821,7 @@ async function connectCdp(url) {
   const socket = new WebSocket(url)
   const pending = new Map()
   let nextId = 1
+  let closed = false
   await new Promise((resolveOpen, rejectOpen) => {
     socket.addEventListener('open', resolveOpen, { once: true })
     socket.addEventListener('error', rejectOpen, { once: true })
@@ -934,12 +836,17 @@ async function connectCdp(url) {
     else request.resolve(message)
   })
   socket.addEventListener('close', () => {
+    closed = true
     for (const request of pending.values()) request.reject(new Error('CDP connection closed'))
     pending.clear()
   })
   return {
     send(method, params = {}) {
       return new Promise((resolveSend, rejectSend) => {
+        if (closed || socket.readyState !== WebSocket.OPEN) {
+          rejectSend(new Error('CDP connection is not open'))
+          return
+        }
         const id = nextId++
         pending.set(id, { resolve: resolveSend, reject: rejectSend })
         socket.send(JSON.stringify({ id, method, params }))

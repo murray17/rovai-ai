@@ -35,15 +35,15 @@ narrow Desktop bridge. The App does not expose or enable a macOS login item; pac
 only makes a best-effort removal of any retired registration. General does not add hidden/background
 launch, default Project, recovery or update policy.
 
-## 外观与通知
+## 外观与提醒
 
 Appearance presents exactly “跟随系统 / 日间 / 夜间”, with resolved result shown separately from
 saved preference. The cards describe Porcelain Day and Steel Night; switching preserves page state,
 focus and open overlays. Follow [`themes/README.md`](../../../../docs/ui/themes/README.md).
 
-Notification settings control the accepted categories and floating preference without making Toast
-the durable notification center. The persistent drawer, unread count and focus return use the same
-theme surfaces and existing notification read model.
+Reminder settings control only accepted transient heads-up categories. The production Renderer does
+not mount the persistent notification drawer, global bell or unread total; the Core notification read
+model stays durable while the visible controller uses only a lightweight high-water baseline.
 
 Notification settings contain one master heads-up switch and exactly four default-on categories:
 待审批、提到你、本轮完成、执行未完成. The last category controls both `turn_failed` and
@@ -53,13 +53,14 @@ notification category or setting.
 The master heads-up control is the dominant panel. Its four child categories sit below in two open
 scenario groups: “需要响应” contains 待审批 and 提到你; “本轮结果” contains 本轮完成 and
 执行未完成. Turning the master off disables delivery without erasing child choices, and group
-counts describe those choices as retained rather than active. “打开通知中心” remains a tertiary
-header action; do not repeat the same persistence explanation in a separate boundary card.
+counts describe those choices as retained rather than active. Do not add an “打开通知中心” action or
+repeat the persistence explanation in a separate boundary card. Explain instead that signals arriving
+while the App is not attentive are retained in memory and shown after the user returns.
 
 Current User Mention creates one immutable Occurrence per source message. Occurrences in one CampTurn
 share a durable Episode card but remain independently acknowledged; the earliest unacknowledged
 message is the current exact action. Settings only affect Journal-qualified transient heads-up and
-never durable Episode admission, acknowledgement, clearing or the global unread count.
+never durable Episode admission, acknowledgement, clearing or the Core unread fact.
 
 ## Skill
 
