@@ -656,10 +656,9 @@ export function QuickChatWorkspace({
     <section className="workspace-shell new-conversation-workspace quick-chat-workspace" aria-label="快速对话">
       <div className="new-conversation-main">
         <div className="new-conversation-stage">
-          <svg className="quick-chat-mark" width="96" height="66" viewBox="0 0 72 56" aria-hidden="true">
-            <path d="M36 4 L38.8 15.2 L50 18 L38.8 20.8 L36 32 L33.2 20.8 L22 18 L33.2 15.2 Z" fill="var(--brand)" />
-            <path d="M8 52 Q36 35 64 52" stroke="var(--brand)" strokeWidth="2" fill="none" strokeLinecap="round" />
-            <circle cx="36" cy="46.5" r="3" fill="var(--ember)" />
+          <svg className="quick-chat-mark" data-brand-mark="horizon" width="96" height="66" viewBox="0 0 72 56" aria-hidden="true">
+            <path d="M36 4 L38.8 15.2 L50 18 L38.8 20.8 L36 40 L33.2 20.8 L22 18 L33.2 15.2 Z" fill="currentColor" />
+            <path d="M8 52 Q36 35 64 52" stroke="currentColor" strokeWidth="5" fill="none" strokeLinecap="round" />
           </svg>
           <p className="eyebrow quick-chat-eyebrow">Quick Chat</p>
           <h2>开始下一段协作</h2>

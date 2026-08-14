@@ -51,6 +51,18 @@ use decoration to soften or obscure commands, diffs, approvals, errors or uncert
 - identity, status, evidence and brand colors kept semantically separate;
 - one shared component and state matrix across both themes.
 
+## Brand Mark
+
+The canonical Rovai mark is a four-point star rising directly from a curved horizon. The star means
+direction; the horizon means a shared world and a common plane for collaboration. Both shapes remain
+present in production brand lockups—the four-point star alone is not the Rovai brand mark.
+
+The theme-independent App icon uses a Graphite surface (`#151a1e`), Steel rim and horizon
+(`#7897ae`) and Porcelain star (`#e7ecef`). Compact in-app marks omit the carrier and render the same
+touching star-and-horizon geometry in `--rail-logo`, so Day and Night keep one silhouette while using
+their own contrast-safe Steel value. Brand geometry and color do not indicate status, identity,
+approval or evidence.
+
 ## Colors
 
 The canonical values live in [Porcelain Day](docs/ui/themes/porcelain-day.md) and

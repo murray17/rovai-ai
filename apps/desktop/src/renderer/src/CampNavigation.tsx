@@ -525,7 +525,17 @@ export function CampNavigation({
         <div className="unified-sidebar-drag" aria-hidden="true" />
         <div className="unified-brand">
           <span className="rail-logo" role="img" aria-label="Rovai AI">
-            <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1 L14.2 9.8 L23 12 L14.2 14.2 L12 23 L9.8 14.2 L1 12 L9.8 9.8 Z" fill="currentColor" /></svg>
+            <svg
+              className="rail-logo-mark"
+              data-brand-mark="horizon"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path d="M12 1.2 L13.35 7.05 L19 8.6 L13.35 10.15 L12 17.4 L10.65 10.15 L5 8.6 L10.65 7.05 Z" fill="currentColor" />
+              <path d="M3 20.5 Q12 14.2 21 20.5" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" />
+            </svg>
             <span><strong>Rovai AI</strong></span>
           </span>
           <button

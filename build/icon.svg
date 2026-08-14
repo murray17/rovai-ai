@@ -1,12 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#2E3560"></stop>
-      <stop offset="1" stop-color="#1A1F3C"></stop>
-    </linearGradient>
-  </defs>
-  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"></rect>
-  <path d="M512 230 L556 376 L702 420 L556 464 L512 610 L468 464 L322 420 L468 376 Z" fill="#FFFFFF"></path>
-  <path d="M240 760 Q512 620 784 760" stroke="#FFFFFF" stroke-width="36" fill="none" stroke-linecap="round"></path>
-  <circle cx="512" cy="782" r="30" fill="#E0B268"></circle>
+  <title>Rovai AI</title>
+  <rect x="96" y="96" width="832" height="832" rx="190" fill="#151A1E" stroke="#7897AE" stroke-width="20" />
+  <path d="M212 750 Q512 590 812 750" fill="none" stroke="#7897AE" stroke-width="72" stroke-linecap="round" />
+  <path d="M512 198 L550 354 L698 400 L550 446 L512 638 L474 446 L326 400 L474 354 Z" fill="#E7ECEF" />
 </svg>
