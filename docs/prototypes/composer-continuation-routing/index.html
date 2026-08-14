@@ -1,0 +1,951 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="day" data-input-modality="pointer">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rovai AI · Composer 延续路由交互稿</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #eceeef;
+      --surface: #fbfbfa;
+      --surface-raised: #ffffff;
+      --surface-subtle: #f0f2f4;
+      --surface-muted: #e7eaed;
+      --surface-hover: #e8eaea;
+      --conversation: #ffffff;
+      --input: #ffffff;
+      --ink: #171b20;
+      --muted: #616a73;
+      --faint: #6e7382;
+      --line: #dfe4e8;
+      --line-strong: #c7cfd6;
+      --control-line: #8b9389;
+      --brand: #526f88;
+      --brand-hover: #3d5874;
+      --brand-contrast: #ffffff;
+      --brand-soft: #e9eef3;
+      --brand-ink: #405f7e;
+      --mention: #2f61c8;
+      --mention-hover: #244ea7;
+      --mention-soft: rgba(47, 97, 200, 0.08);
+      --success: #3e775c;
+      --success-soft: #e7f1ea;
+      --attention: #8a6226;
+      --attention-soft: #f8edda;
+      --danger: #a24c46;
+      --danger-soft: #f7e6e3;
+      --focus: #526f88;
+      --focus-soft: rgba(82, 111, 136, 0.16);
+      --identity-1: #a65f4a;
+      --identity-2: #39777a;
+      --identity-3: #74628f;
+      --shadow-float: 0 18px 56px rgba(38, 45, 58, 0.14);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--canvas);
+      font-synthesis: none;
+      text-rendering: optimizeLegibility;
+    }
+
+    :root[data-theme="night"] {
+      color-scheme: dark;
+      --canvas: #0d1114;
+      --surface: #151a1e;
+      --surface-raised: #1b2227;
+      --surface-subtle: #1a2024;
+      --surface-muted: #242d33;
+      --surface-hover: #1d252b;
+      --conversation: #181d21;
+      --input: #1b2227;
+      --ink: #e7ecef;
+      --muted: #abb5bc;
+      --faint: #919da6;
+      --line: #333e46;
+      --line-strong: #53616b;
+      --control-line: #687b88;
+      --brand: #7897ae;
+      --brand-hover: #b1c8d8;
+      --brand-contrast: #091116;
+      --brand-soft: #22303a;
+      --brand-ink: #c0d4e1;
+      --mention: #9cc7e2;
+      --mention-hover: #c2ddeb;
+      --mention-soft: rgba(156, 199, 226, 0.08);
+      --success: #82b695;
+      --success-soft: #1a2b22;
+      --attention: #d2ac70;
+      --attention-soft: #302719;
+      --danger: #d6857f;
+      --danger-soft: #321e1d;
+      --focus: #8fb3cb;
+      --focus-soft: rgba(143, 179, 203, 0.18);
+      --identity-1: #c98572;
+      --identity-2: #70b0ae;
+      --identity-3: #a89ac8;
+      --shadow-float: 0 22px 64px rgba(0, 0, 0, 0.42);
+    }
+
+    * { box-sizing: border-box; }
+    html { min-width: 320px; background: var(--canvas); }
+    body { min-width: 320px; margin: 0; padding: 22px; color: var(--ink); background: var(--canvas); }
+    button, [contenteditable="true"] { font: inherit; }
+    button { color: inherit; }
+    button:disabled { cursor: not-allowed; opacity: .48; }
+    button:not(:disabled) { cursor: pointer; }
+    button:active:not(:disabled) { transform: translateY(1px); }
+    ::selection { color: var(--ink); background: var(--brand-soft); }
+    :where(button, [tabindex]):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+    .review-page { width: min(1260px, 100%); margin: 0 auto; }
+    .review-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 28px; margin: 0 0 16px; }
+    .review-copy { max-width: 850px; }
+    .review-copy h1 { max-width: 720px; margin: 0; font-size: clamp(22px, 3.2vw, 32px); line-height: 1.14; letter-spacing: -.03em; }
+    .review-copy p { max-width: 74ch; margin: 9px 0 0; color: var(--muted); font-size: 12.5px; line-height: 1.62; }
+    .theme-button { flex: 0 0 auto; min-height: 34px; padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: 7px; color: var(--muted); background: var(--surface); }
+    .theme-button:hover { color: var(--ink); background: var(--surface-muted); }
+
+    .review-controls { margin-bottom: 11px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--surface); }
+    .scenario-row { display: flex; align-items: center; gap: 3px; min-height: 46px; padding: 6px; overflow-x: auto; scrollbar-width: thin; }
+    .scenario-row > strong { flex: 0 0 auto; padding: 0 9px 0 5px; color: var(--faint); font-size: 10px; font-weight: 720; }
+    .scenario-button { flex: 0 0 auto; min-height: 31px; padding: 5px 9px; border: 1px solid transparent; border-radius: 5px; color: var(--muted); background: transparent; font-size: 11px; }
+    .scenario-button:hover { color: var(--ink); background: var(--surface-muted); }
+    .scenario-button[aria-pressed="true"] { border-color: var(--line); color: var(--brand-ink); background: var(--brand-soft); font-weight: 680; }
+    .state-readout { display: grid; min-height: 40px; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 7px 11px; border-top: 1px solid var(--line); }
+    .state-readout p { margin: 0; color: var(--muted); font-size: 10.5px; line-height: 1.45; }
+    .state-readout p strong { color: var(--ink); font-weight: 680; }
+    .reload-button { min-height: 27px; padding: 4px 8px; border: 0; border-radius: 5px; color: var(--brand-ink); background: transparent; font-size: 10px; }
+    .reload-button:hover { background: var(--brand-soft); }
+
+    .priority-map { display: flex; min-width: 0; align-items: center; gap: 5px; margin: 0 0 11px; overflow-x: auto; color: var(--faint); font-size: 10px; scrollbar-width: none; }
+    .priority-map::-webkit-scrollbar { display: none; }
+    .priority-map > strong { flex: 0 0 auto; margin-right: 3px; color: var(--muted); }
+    .priority-step { flex: 0 0 auto; padding: 3px 6px; border-radius: 4px; }
+    .priority-step.is-current { color: var(--brand-ink); background: var(--brand-soft); font-weight: 700; }
+    .priority-chevron { width: 11px; height: 11px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
+
+    .app-window { overflow: hidden; border: 1px solid var(--line-strong); border-radius: 11px; background: var(--conversation); box-shadow: var(--shadow-float); }
+    .app-topbar { display: grid; min-height: 50px; grid-template-columns: 244px minmax(0, 1fr) auto; align-items: center; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .brand-lockup { display: flex; align-items: center; gap: 9px; padding: 0 15px; }
+    .brand-symbol { width: 25px; height: 25px; flex: 0 0 auto; color: var(--brand); }
+    .brand-symbol .rendezvous { fill: #d3a45f; stroke: none; }
+    :root[data-theme="night"] .brand-symbol .rendezvous { fill: #d2aa72; }
+    .brand-lockup strong { font-size: 12px; letter-spacing: -.01em; }
+    .camp-heading { min-width: 0; padding: 0 18px; border-left: 1px solid var(--line); }
+    .camp-heading strong, .camp-heading span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .camp-heading strong { font-size: 12px; }
+    .camp-heading span { margin-top: 2px; color: var(--faint); font-size: 9.5px; }
+    .topbar-tools { display: flex; align-items: center; gap: 5px; padding: 0 12px; }
+    .topbar-tool { display: grid; width: 30px; height: 30px; place-items: center; padding: 0; border: 0; border-radius: 6px; color: var(--faint); background: transparent; }
+    .topbar-tool:hover { color: var(--ink); background: var(--surface-muted); }
+    .topbar-tool svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
+
+    .workspace { display: grid; min-height: 670px; grid-template-columns: 244px minmax(0, 1fr); }
+    .rail { min-width: 0; padding: 14px 10px; border-right: 1px solid var(--line); background: var(--surface-subtle); }
+    .rail-title { margin: 5px 8px 7px; color: var(--faint); font-size: 9px; font-weight: 720; letter-spacing: .06em; text-transform: uppercase; }
+    .rail-row { display: grid; width: 100%; min-height: 35px; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 6px 8px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; text-align: left; font-size: 11.5px; }
+    .rail-row:hover { color: var(--ink); background: var(--surface-muted); }
+    .rail-row.is-active { color: var(--brand-ink); background: var(--surface-raised); box-shadow: inset 2px 0 0 var(--brand); font-weight: 680; }
+    .rail-row i { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+    .rail-row small { color: var(--faint); font-size: 9px; }
+    .rail-rule { height: 1px; margin: 14px 8px; background: var(--line); }
+    .member-row { display: grid; min-height: 42px; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 5px 7px; }
+    .member-avatar, .message-avatar { display: grid; place-items: center; border-radius: 50%; color: var(--surface-raised); font-size: 9px; font-weight: 750; }
+    .member-avatar { width: 28px; height: 28px; }
+    .member-row:nth-of-type(2) .member-avatar { background: var(--identity-1); }
+    .member-row:nth-of-type(3) .member-avatar { background: var(--identity-2); }
+    .member-row:nth-of-type(4) .member-avatar { background: var(--identity-3); }
+    .member-copy { min-width: 0; }
+    .member-copy strong, .member-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .member-copy strong { font-size: 10.5px; }
+    .member-copy small { margin-top: 1px; color: var(--faint); font-size: 8.5px; }
+    .presence { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+    .presence.is-away { border: 1px solid var(--attention); background: transparent; }
+
+    .conversation { display: grid; min-width: 0; grid-template-rows: minmax(0, 1fr) auto; background: var(--conversation); }
+    .timeline { min-height: 0; padding: 24px 27px 29px; overflow-y: auto; scrollbar-color: var(--line-strong) transparent; }
+    .timeline-track { width: min(790px, 100%); margin: 0 auto; }
+    .date-rule { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; color: var(--faint); font-size: 10px; }
+    .date-rule::before, .date-rule::after { height: 1px; flex: 1 1 auto; background: var(--line); content: ""; }
+    .message { position: relative; display: grid; min-width: 0; grid-template-columns: 32px minmax(0, 1fr); gap: 10px; margin: 16px 0; padding: 1px; border: 0; border-radius: 8px; outline: 0; scroll-margin: 70px; }
+    .message::before { position: absolute; z-index: 0; inset: -6px -8px; border-radius: 8px; background: transparent; content: ""; pointer-events: none; transition: background-color 120ms ease; }
+    .message:hover::before, .message.is-located::before { background: color-mix(in srgb, var(--brand) 7%, var(--conversation)); }
+    .message > * { position: relative; z-index: 1; }
+    .message-avatar { width: 32px; height: 32px; background: var(--identity-1); }
+    .message[data-author="muwa"] .message-avatar { background: var(--identity-2); }
+    .message[data-author="qingyu"] .message-avatar { background: var(--identity-3); }
+    .message[data-kind="self"] .message-avatar { border: 1px solid var(--line-strong); color: var(--brand-ink); background: var(--surface-raised); }
+    .message-main { min-width: 0; padding-right: 66px; }
+    .message-meta { display: flex; min-height: 20px; align-items: baseline; gap: 7px; margin-bottom: 3px; }
+    .message-meta strong { color: var(--identity-1); font-size: 11.5px; }
+    .message[data-author="muwa"] .message-meta strong { color: var(--identity-2); }
+    .message[data-author="qingyu"] .message-meta strong { color: var(--identity-3); }
+    .message[data-kind="self"] .message-meta strong { color: var(--brand-ink); }
+    .message-meta span, .message-meta time { color: var(--faint); font-size: 9.5px; }
+    .message-body { max-width: 72ch; color: var(--ink); font-size: 12.5px; line-height: 1.62; white-space: pre-wrap; }
+    .message-actions { position: absolute; z-index: 2; top: -2px; right: 0; display: flex; gap: 2px; opacity: 0; transition: opacity 100ms ease; }
+    .message:hover .message-actions, .message:focus-within .message-actions { opacity: 1; }
+    .message-action { min-height: 27px; padding: 4px 7px; border: 1px solid transparent; border-radius: 5px; color: var(--faint); background: transparent; font-size: 10px; }
+    .message-action:hover { border-color: var(--line); color: var(--ink); background: var(--surface-raised); }
+    .mention-token { display: inline; padding: 0 1px; color: var(--mention); background: transparent; font-weight: 650; white-space: nowrap; }
+    .message-parent { display: grid; width: min(570px, 100%); min-width: 0; grid-template-columns: 2px minmax(0, 1fr); align-items: center; gap: 8px; margin: 2px 0 7px; padding: 0; border: 0; color: var(--muted); background: transparent; text-align: left; }
+    .message-parent::before { align-self: stretch; border-radius: 1px; background: var(--line-strong); content: ""; }
+    .message-parent span { min-width: 0; overflow: hidden; font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .message-parent strong { color: var(--brand-ink); }
+
+    .composer { padding: 0 27px 15px; background: var(--conversation); }
+    .composer-track { width: min(790px, 100%); margin: 0 auto; }
+    .reply-line { display: none; min-width: 0; grid-template-columns: 14px minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 2px 0 5px; color: var(--faint); font-size: 10.5px; }
+    .reply-line.is-visible { display: grid; }
+    .reply-mark { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
+    .reply-copy { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .reply-copy strong { color: var(--muted); font-weight: 680; }
+    .reply-cancel { width: 24px; height: 24px; padding: 0; border: 0; border-radius: 5px; color: var(--faint); background: transparent; }
+    .reply-cancel:hover { color: var(--ink); background: var(--surface-muted); }
+    .reply-cancel svg, .continuation-clear svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 1.6; }
+
+    .repair-panel { display: none; gap: 8px; margin-bottom: -1px; padding: 10px 11px 11px; border: 1px solid color-mix(in srgb, var(--attention) 42%, var(--line)); border-radius: 8px 8px 0 0; color: var(--attention); background: var(--attention-soft); }
+    .repair-panel.is-visible { display: grid; }
+    .repair-heading { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 6px; align-items: start; }
+    .repair-heading svg { width: 14px; height: 14px; margin-top: 1px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.6; }
+    .repair-heading strong, .repair-heading span { display: block; }
+    .repair-heading strong { font-size: 11px; }
+    .repair-heading span { margin-top: 2px; color: color-mix(in srgb, var(--attention) 78%, var(--ink)); font-size: 10px; line-height: 1.45; }
+    .repair-options { display: flex; flex-wrap: wrap; gap: 5px; padding-left: 22px; }
+    .repair-option { min-height: 27px; padding: 4px 8px; border: 1px solid color-mix(in srgb, var(--attention) 40%, var(--line)); border-radius: 5px; color: var(--attention); background: var(--surface-raised); font-size: 10px; }
+    .repair-option:hover { border-color: var(--attention); }
+
+    .composer-box { position: relative; display: flex; min-height: 88px; align-items: flex-end; gap: 9px; padding: 9px 8px 8px 12px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--input); }
+    .repair-panel.is-visible + .composer-box { border-radius: 0 0 8px 8px; }
+    .composer-main { display: flex; min-width: 0; flex: 1 1 auto; align-self: stretch; flex-direction: column; }
+    .message-editor { min-height: 48px; max-height: 170px; flex: 1 1 auto; overflow-y: auto; padding: 3px 0 5px; border: 0; outline: 0; color: var(--ink); background: transparent; caret-color: var(--brand); font-size: 13px; line-height: 1.52; white-space: pre-wrap; overflow-wrap: anywhere; scrollbar-color: var(--line-strong) transparent; }
+    .message-editor:empty::before { color: var(--faint); content: attr(data-placeholder); pointer-events: none; }
+    .message-editor:focus { border: 0; outline: 0; box-shadow: none; }
+    :root[data-input-modality="keyboard"] .message-editor:focus { box-shadow: inset 0 -1px 0 var(--focus); }
+    :root[data-input-modality="pointer"] .message-editor:focus { box-shadow: none; }
+
+    .draft-assets { display: none; min-width: 0; padding: 0 0 4px; }
+    .draft-assets.is-visible { display: flex; }
+    .draft-asset { display: inline-flex; min-width: 0; max-width: 100%; align-items: center; gap: 5px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); background: var(--surface-subtle); font-size: 9.5px; }
+    .draft-asset svg { width: 12px; height: 12px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
+    .draft-asset span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .route-line { display: flex; min-width: 0; min-height: 22px; align-items: center; }
+    .continuation-note { display: none; min-width: 0; align-items: center; gap: 4px; color: var(--muted); font-size: 10px; line-height: 1.35; }
+    .continuation-note.is-visible { display: flex; }
+    .continuation-arrow { width: 14px; height: 14px; flex: 0 0 auto; fill: none; stroke: var(--brand); stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.45; }
+    .continuation-label { flex: 0 0 auto; }
+    .continuation-recipient { min-width: 0; overflow: hidden; color: var(--mention); font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
+    .continuation-clear { display: grid; width: 21px; height: 21px; flex: 0 0 auto; place-items: center; padding: 0; border: 0; border-radius: 5px; color: var(--faint); background: transparent; }
+    .continuation-clear:hover { color: var(--danger); background: var(--danger-soft); }
+    .default-route { display: none; min-width: 0; overflow: hidden; color: var(--faint); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .default-route.is-visible { display: block; }
+    .default-route strong { color: var(--brand-ink); font-weight: 680; }
+
+    .composer-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; padding-bottom: 2px; }
+    .attach-button { display: grid; width: 28px; height: 28px; place-items: center; padding: 0; border: 0; border-radius: 5px; color: var(--faint); background: transparent; }
+    .attach-button:hover { color: var(--ink); background: var(--surface-muted); }
+    .attach-button svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
+    .enter-hint { padding: 2px 4px; border: 1px solid var(--line); border-radius: 4px; color: var(--faint); background: var(--surface-subtle); font-size: 9px; font-weight: 650; }
+    .send-button { min-height: 29px; padding: 5px 12px; border: 1px solid var(--brand); border-radius: 6px; color: var(--brand-contrast); background: var(--brand); font-size: 11.5px; font-weight: 680; }
+    .send-button:hover:not(:disabled) { border-color: var(--brand-hover); background: var(--brand-hover); }
+
+    .toast { position: fixed; z-index: 80; right: 20px; bottom: 20px; max-width: min(390px, calc(100vw - 40px)); padding: 9px 11px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow-float); font-size: 11px; opacity: 0; pointer-events: none; transform: translateY(8px); transition: opacity 150ms ease, transform 150ms cubic-bezier(.16, 1, .3, 1); }
+    .toast.is-visible { opacity: 1; transform: translateY(0); }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+    @media (hover: none) {
+      .message-actions { position: static; margin-top: 5px; opacity: 1; }
+      .message-main { padding-right: 0; }
+    }
+
+    @media (max-width: 900px) {
+      body { padding: 14px; }
+      .app-topbar { grid-template-columns: 52px minmax(0, 1fr) auto; }
+      .brand-lockup { padding: 0 13px; }
+      .brand-lockup strong { display: none; }
+      .camp-heading { border-left: 0; }
+      .workspace { grid-template-columns: 1fr; min-height: 640px; }
+      .rail { display: none; }
+    }
+
+    @media (max-width: 620px) {
+      body { padding: 0; }
+      .review-page { width: 100%; }
+      .review-header { margin: 0; padding: 15px 14px 12px; }
+      .review-copy h1 { font-size: 20px; }
+      .review-copy p { display: none; }
+      .theme-button { min-height: 31px; padding: 5px 8px; font-size: 10px; }
+      .review-controls { margin: 0; border-right: 0; border-left: 0; }
+      .state-readout { grid-template-columns: 1fr; gap: 3px; }
+      .reload-button { display: none; }
+      .priority-map { margin: 8px 12px; }
+      .app-window { border-right: 0; border-left: 0; border-radius: 0; box-shadow: none; }
+      .app-topbar { min-height: 47px; grid-template-columns: 43px minmax(0, 1fr) auto; }
+      .brand-lockup { padding: 0 9px; }
+      .brand-symbol { width: 23px; height: 23px; }
+      .camp-heading { padding: 0 7px; }
+      .topbar-tools { padding: 0 7px; }
+      .workspace { min-height: 590px; }
+      .timeline { padding: 18px 14px 23px; }
+      .message { grid-template-columns: 28px minmax(0, 1fr); gap: 8px; }
+      .message-avatar { width: 28px; height: 28px; }
+      .message-main { padding-right: 0; }
+      .message-actions { position: static; margin-top: 5px; opacity: 1; }
+      .composer { padding: 0 10px 10px; }
+      .composer-box { min-height: 106px; flex-direction: column; align-items: stretch; }
+      .composer-actions { justify-content: flex-end; }
+      .enter-hint { display: none; }
+      .repair-options { padding-left: 0; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="review-page">
+    <header class="review-header">
+      <div class="review-copy">
+        <h1>让下一条消息延续刚刚确认的接收者</h1>
+        <p>延续只继承上一条已接受用户消息中的唯一非 Lead 接收者。它不是回复关系，也不和正文里的结构化 Mention 竞争；一旦出现更明确的路由事实，延续就退场。</p>
+      </div>
+      <button class="theme-button" id="theme-button" type="button" aria-pressed="false">Steel Night</button>
+    </header>
+
+    <section class="review-controls" aria-label="交互场景">
+      <div class="scenario-row" role="group" aria-label="切换延续路由场景">
+        <strong>场景</strong>
+        <button class="scenario-button" type="button" data-scenario="continuation" aria-pressed="true">延续可用</button>
+        <button class="scenario-button" type="button" data-scenario="dismissed" aria-pressed="false">× 后重载</button>
+        <button class="scenario-button" type="button" data-scenario="reply-agent" aria-pressed="false">回复 Agent</button>
+        <button class="scenario-button" type="button" data-scenario="reply-self" aria-pressed="false">回复自己</button>
+        <button class="scenario-button" type="button" data-scenario="manual" aria-pressed="false">手动 @</button>
+        <button class="scenario-button" type="button" data-scenario="cleared" aria-pressed="false">删空 @ 后</button>
+        <button class="scenario-button" type="button" data-scenario="fanout" aria-pressed="false">多人</button>
+        <button class="scenario-button" type="button" data-scenario="broadcast" aria-pressed="false">@所有</button>
+        <button class="scenario-button" type="button" data-scenario="invalid-empty" aria-pressed="false">空白时失效</button>
+        <button class="scenario-button" type="button" data-scenario="invalid-meaningful" aria-pressed="false">输入后失效</button>
+        <button class="scenario-button" type="button" data-scenario="default" aria-pressed="false">默认 Lead</button>
+      </div>
+      <div class="state-readout">
+        <p id="state-readout"><strong>延续候选成立。</strong> 下一条发送时才把 @沐瓦物化为结构化 Mention，不创建回复关系。</p>
+        <button class="reload-button" id="reload-button" type="button">模拟重新进入 Camp</button>
+      </div>
+    </section>
+
+    <div class="priority-map" aria-label="Composer 路由状态优先级">
+      <strong>状态优先级</strong>
+      <span class="priority-step" data-priority="repair">修复</span>
+      <svg class="priority-chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="m4.5 2.5 3.5 3.5-3.5 3.5"/></svg>
+      <span class="priority-step" data-priority="reply">回复</span>
+      <svg class="priority-chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="m4.5 2.5 3.5 3.5-3.5 3.5"/></svg>
+      <span class="priority-step" data-priority="explicit">显式 Mention</span>
+      <svg class="priority-chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="m4.5 2.5 3.5 3.5-3.5 3.5"/></svg>
+      <span class="priority-step is-current" data-priority="continuation">延续</span>
+      <svg class="priority-chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="m4.5 2.5 3.5 3.5-3.5 3.5"/></svg>
+      <span class="priority-step" data-priority="default">默认 Lead</span>
+    </div>
+
+    <section class="app-window" aria-label="Rovai AI Composer 延续路由原型">
+      <header class="app-topbar">
+        <div class="brand-lockup">
+          <svg class="brand-symbol" viewBox="0 0 32 32" aria-hidden="true">
+            <path d="M16 3.5c.75 5.2 3.2 7.65 8.4 8.4-5.2.75-7.65 3.2-8.4 8.4-.75-5.2-3.2-7.65-8.4-8.4 5.2-.75 7.65-3.2 8.4-8.4Z" fill="currentColor"/>
+            <path d="M5.2 26.2c3.1-4.05 6.7-6.05 10.8-6.05s7.7 2 10.8 6.05" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
+            <circle class="rendezvous" cx="16" cy="20.3" r="1.6"/>
+          </svg>
+          <strong>Rovai AI</strong>
+        </div>
+        <div class="camp-heading"><strong>产品交付 · 路由边界</strong><span>Camp 会话 · 3 位队员</span></div>
+        <div class="topbar-tools">
+          <button class="topbar-tool" type="button" aria-label="查看 Camp 成员">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.4 9.1a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm5.1-.8a2.4 2.4 0 1 0 0-4.8M2.6 16.2v-1.1a4.8 4.8 0 0 1 9.6 0v1.1m1.1-5.1a4 4 0 0 1 4.1 4v1.1"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <aside class="rail" aria-label="Camp 与成员">
+          <p class="rail-title">Camps</p>
+          <button class="rail-row is-active" type="button"><i></i><span>产品交付</span><small>4</small></button>
+          <button class="rail-row" type="button"><i></i><span>回复链验收</span><small>2</small></button>
+          <button class="rail-row" type="button"><i></i><span>发布检查</span><small>1</small></button>
+          <div class="rail-rule"></div>
+          <p class="rail-title">Members</p>
+          <div class="member-row"><span class="member-avatar">洛</span><span class="member-copy"><strong>洛可</strong><small>Lead · 可接收</small></span><i class="presence"></i></div>
+          <div class="member-row"><span class="member-avatar">沐</span><span class="member-copy"><strong>沐瓦</strong><small id="muwa-member-copy">队员 · 可接收</small></span><i class="presence" id="muwa-presence"></i></div>
+          <div class="member-row"><span class="member-avatar">青</span><span class="member-copy"><strong>青屿</strong><small>队员 · 可接收</small></span><i class="presence"></i></div>
+        </aside>
+
+        <section class="conversation">
+          <div class="timeline" id="timeline">
+            <div class="timeline-track" id="timeline-track">
+              <div class="date-rule">今天</div>
+
+              <article class="message" id="message-lead" data-author="luoke" data-kind="agent" data-name="洛可" data-available="true" data-excerpt="先把接收者继承和回复关系拆成两条独立事实。">
+                <div class="message-avatar" aria-hidden="true">洛</div>
+                <div class="message-main">
+                  <div class="message-meta"><strong>洛可</strong><time>10:18</time><span>Lead</span></div>
+                  <div class="message-body">先把接收者继承和回复关系拆成两条独立事实，再处理失效时的发送门禁。</div>
+                  <div class="message-actions"><button class="message-action reply-action" type="button">回复</button><button class="message-action" type="button">复制</button></div>
+                </div>
+              </article>
+
+              <article class="message" id="message-source" data-author="you" data-kind="self" data-name="你" data-available="true" data-excerpt="请先梳理延续状态的出现条件和优先级。">
+                <div class="message-avatar" aria-hidden="true">你</div>
+                <div class="message-main">
+                  <div class="message-meta"><strong>你</strong><time>10:21</time><span>已接受</span></div>
+                  <div class="message-body"><span class="mention-token">@沐瓦</span> 请先梳理延续状态的出现条件和优先级。</div>
+                  <div class="message-actions"><button class="message-action reply-action" type="button">回复</button><button class="message-action" type="button">复制</button></div>
+                </div>
+              </article>
+
+              <article class="message" id="message-muwa" data-author="muwa" data-kind="agent" data-name="沐瓦" data-available="true" data-excerpt="延续状态应该更轻，不要做成第二条回复栏。">
+                <div class="message-avatar" aria-hidden="true">沐</div>
+                <div class="message-main">
+                  <div class="message-meta"><strong>沐瓦</strong><time>10:26</time><span id="muwa-message-state">可接收</span></div>
+                  <div class="message-body">延续状态应该更轻，不要做成第二条回复栏；真正发送时再落为结构化 Mention。</div>
+                  <div class="message-actions"><button class="message-action reply-action" type="button">回复</button><button class="message-action" type="button">复制</button></div>
+                </div>
+              </article>
+
+              <article class="message" id="message-qingyu" data-author="qingyu" data-kind="agent" data-name="青屿" data-available="true" data-excerpt="正文已经有内容后，候选失效必须阻断发送。">
+                <div class="message-avatar" aria-hidden="true">青</div>
+                <div class="message-main">
+                  <div class="message-meta"><strong>青屿</strong><time>10:31</time><span>可接收</span></div>
+                  <div class="message-body">正文已经有内容后，候选失效必须阻断发送；空白 Draft 才可以直接回到默认 Lead。</div>
+                  <div class="message-actions"><button class="message-action reply-action" type="button">回复</button><button class="message-action" type="button">复制</button></div>
+                </div>
+              </article>
+            </div>
+          </div>
+
+          <footer class="composer">
+            <form class="composer-track" id="composer-form">
+              <div class="reply-line" id="reply-line">
+                <svg class="reply-mark" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.2 4 2.7 7.4l3.5 3.4M3 7.4h5.2c3.1 0 4.7 1.5 4.7 4.4"/></svg>
+                <span class="reply-copy" id="reply-copy"></span>
+                <button class="reply-cancel" id="reply-cancel" type="button" aria-label="取消回复">
+                  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg>
+                </button>
+              </div>
+
+              <div class="repair-panel" id="repair-panel" role="alert" aria-live="assertive">
+                <div class="repair-heading">
+                  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.3 14 13H2L8 2.3Zm0 3.2v3.8m0 2.1v.2"/></svg>
+                  <div><strong id="repair-title">沐瓦当前不可接收，请选择其他成员</strong><span id="repair-detail">正文和附件会保留；选择前不会发送，也不会静默改投 Lead。</span></div>
+                </div>
+                <div class="repair-options" aria-label="选择新的接收者">
+                  <button class="repair-option" type="button" data-replacement="qingyu">改发给 @青屿</button>
+                  <button class="repair-option" type="button" data-replacement="lead">明确改由 Lead 接收</button>
+                </div>
+              </div>
+
+              <div class="composer-box" id="composer-box">
+                <div class="composer-main">
+                  <div class="message-editor" id="message-editor" contenteditable="true" role="textbox" aria-label="消息正文" aria-multiline="true" data-placeholder="继续提问、补充约束或交付下一项职责…"></div>
+                  <div class="draft-assets" id="draft-assets" aria-live="polite">
+                    <span class="draft-asset">
+                      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5.5 8.7 4.1-4.1a2.2 2.2 0 0 1 3.1 3.1l-5.4 5.4a3.2 3.2 0 0 1-4.5-4.5l5.3-5.3"/></svg>
+                      <span>检查清单.pdf · 已保留</span>
+                    </span>
+                  </div>
+                  <div class="route-line" aria-live="polite">
+                    <div class="continuation-note" id="continuation-note" role="group" aria-label="沿用上一条用户消息的接收者">
+                      <svg class="continuation-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v5.2c0 2 1.4 3.3 3.5 3.3h4.2M9.5 8.8l2.3 2.2-2.3 2.2"/></svg>
+                      <span class="continuation-label">继续发给</span>
+                      <strong class="continuation-recipient" id="continuation-recipient">@沐瓦</strong>
+                      <button class="continuation-clear" id="continuation-clear" type="button" aria-label="取消继续发给沐瓦，改由 Lead 接收" title="取消延续">
+                        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg>
+                      </button>
+                    </div>
+                    <span class="default-route" id="default-route">默认由 <strong>Lead · 洛可</strong> 接收</span>
+                  </div>
+                </div>
+                <div class="composer-actions">
+                  <button class="attach-button" id="attach-button" type="button" aria-label="添加附件">
+                    <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M6.2 9.6 10.9 5a2.4 2.4 0 0 1 3.4 3.4l-6.1 6.1a3.7 3.7 0 0 1-5.2-5.2l6-6"/></svg>
+                  </button>
+                  <span class="enter-hint">Enter</span>
+                  <button class="send-button" id="send-button" type="submit">发送</button>
+                </div>
+              </div>
+            </form>
+          </footer>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="sr-only" id="live-region" aria-live="polite"></div>
+
+  <script>
+    (() => {
+      const root = document.documentElement;
+      const members = {
+        luoke: { id: 'luoke', name: '洛可', lead: true },
+        muwa: { id: 'muwa', name: '沐瓦', lead: false },
+        qingyu: { id: 'qingyu', name: '青屿', lead: false }
+      };
+      const sourceMessageId = 'message-source';
+      const dismissedStorageKey = 'rovai.continuation-prototype.dismissed-source.v1';
+      const scenarioButtons = [...document.querySelectorAll('.scenario-button')];
+      const prioritySteps = [...document.querySelectorAll('.priority-step')];
+      const editor = document.getElementById('message-editor');
+      const draftAssets = document.getElementById('draft-assets');
+      const continuationNote = document.getElementById('continuation-note');
+      const continuationRecipient = document.getElementById('continuation-recipient');
+      const continuationClear = document.getElementById('continuation-clear');
+      const defaultRoute = document.getElementById('default-route');
+      const replyLine = document.getElementById('reply-line');
+      const replyCopy = document.getElementById('reply-copy');
+      const repairPanel = document.getElementById('repair-panel');
+      const sendButton = document.getElementById('send-button');
+      const stateReadout = document.getElementById('state-readout');
+      const muwaPresence = document.getElementById('muwa-presence');
+      const muwaMemberCopy = document.getElementById('muwa-member-copy');
+      const muwaMessageState = document.getElementById('muwa-message-state');
+      const timelineTrack = document.getElementById('timeline-track');
+      const toast = document.getElementById('toast');
+      const liveRegion = document.getElementById('live-region');
+      let toastTimer = null;
+
+      const state = {
+        scenario: 'continuation',
+        sourceId: sourceMessageId,
+        candidateId: 'muwa',
+        candidateAvailable: true,
+        dismissedSourceId: readDismissedSource(),
+        candidateSuppressed: false,
+        explicitRecipientIds: [],
+        allMembers: false,
+        recipientTouched: false,
+        body: '补充一下这个边界。',
+        attachmentCount: 0,
+        reply: null,
+        replyMayRestoreContinuation: false,
+        replyInsertedRecipientId: null,
+        routingTouchedDuringReply: false,
+        repairRequired: false
+      };
+
+      function readDismissedSource() {
+        try { return sessionStorage.getItem(dismissedStorageKey); }
+        catch { return null; }
+      }
+
+      function writeDismissedSource(value) {
+        try {
+          if (value) sessionStorage.setItem(dismissedStorageKey, value);
+          else sessionStorage.removeItem(dismissedStorageKey);
+        } catch { /* file previews can disable storage */ }
+      }
+
+      function escapeHtml(value) {
+        return String(value).replace(/[&<>'"]/g, character => ({
+          '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+        })[character]);
+      }
+
+      function showToast(message) {
+        toast.textContent = message;
+        toast.classList.add('is-visible');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => toast.classList.remove('is-visible'), 1800);
+        liveRegion.textContent = '';
+        requestAnimationFrame(() => { liveRegion.textContent = message; });
+      }
+
+      function setMuwaAvailability(available) {
+        state.candidateAvailable = available;
+        muwaPresence.classList.toggle('is-away', !available);
+        muwaMemberCopy.textContent = available ? '队员 · 可接收' : '队员 · 已暂离';
+        muwaMessageState.textContent = available ? '可接收' : '已暂离';
+        document.getElementById('message-muwa').dataset.available = String(available);
+      }
+
+      function hasExplicitRoute() {
+        return state.allMembers || state.explicitRecipientIds.length > 0;
+      }
+
+      function continuationEligible() {
+        return Boolean(
+          state.candidateId
+          && !members[state.candidateId]?.lead
+          && state.candidateAvailable
+          && state.dismissedSourceId !== state.sourceId
+          && !state.candidateSuppressed
+          && !state.recipientTouched
+        );
+      }
+
+      function showContinuation() {
+        return continuationEligible()
+          && !state.reply
+          && !hasExplicitRoute()
+          && !state.repairRequired;
+      }
+
+      function showDefaultRoute() {
+        return !state.reply
+          && !hasExplicitRoute()
+          && !showContinuation()
+          && !state.repairRequired;
+      }
+
+      function activePriority() {
+        if (state.repairRequired) return 'repair';
+        if (state.reply) return 'reply';
+        if (hasExplicitRoute()) return 'explicit';
+        if (showContinuation()) return 'continuation';
+        return 'default';
+      }
+
+      function syncBodyFromEditor() {
+        const clone = editor.cloneNode(true);
+        clone.querySelectorAll('.mention-token').forEach(token => token.remove());
+        state.body = clone.innerText.trim();
+      }
+
+      function renderEditor() {
+        const mentionIds = state.allMembers ? ['all'] : state.explicitRecipientIds;
+        const mentions = mentionIds.map(id => id === 'all'
+          ? '<span class="mention-token" contenteditable="false">@所有队员</span>'
+          : `<span class="mention-token" contenteditable="false">@${escapeHtml(members[id].name)}</span>`
+        ).join(' ');
+        editor.innerHTML = `${mentions}${mentions && state.body ? ' ' : ''}${escapeHtml(state.body)}`;
+      }
+
+      function render() {
+        continuationNote.classList.toggle('is-visible', showContinuation());
+        defaultRoute.classList.toggle('is-visible', showDefaultRoute());
+        replyLine.classList.toggle('is-visible', Boolean(state.reply));
+        repairPanel.classList.toggle('is-visible', state.repairRequired);
+        draftAssets.classList.toggle('is-visible', state.attachmentCount > 0);
+        sendButton.disabled = state.repairRequired;
+        sendButton.textContent = state.repairRequired ? '等待选择' : '发送';
+        continuationRecipient.textContent = state.candidateId
+          ? `@${members[state.candidateId].name}`
+          : '';
+        continuationClear.setAttribute('aria-label', state.candidateId
+          ? `取消继续发给${members[state.candidateId].name}，改由 Lead 接收`
+          : '取消延续');
+        if (state.reply) {
+          replyCopy.innerHTML = `<strong>${state.reply.kind === 'self' ? '引用你的消息' : `回复 @${escapeHtml(state.reply.name)}`}</strong> · ${escapeHtml(state.reply.excerpt)}`;
+        }
+        prioritySteps.forEach(step => step.classList.toggle('is-current', step.dataset.priority === activePriority()));
+      }
+
+      function resetState({ preserveDismissal = false } = {}) {
+        state.sourceId = sourceMessageId;
+        state.candidateId = 'muwa';
+        state.candidateAvailable = true;
+        if (!preserveDismissal) {
+          state.dismissedSourceId = null;
+          writeDismissedSource(null);
+        } else {
+          state.dismissedSourceId = readDismissedSource();
+        }
+        state.candidateSuppressed = false;
+        state.explicitRecipientIds = [];
+        state.allMembers = false;
+        state.recipientTouched = false;
+        state.body = '';
+        state.attachmentCount = 0;
+        state.reply = null;
+        state.replyMayRestoreContinuation = false;
+        state.replyInsertedRecipientId = null;
+        state.routingTouchedDuringReply = false;
+        state.repairRequired = false;
+        setMuwaAvailability(true);
+      }
+
+      function setScenarioButton(name) {
+        scenarioButtons.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.scenario === name)));
+      }
+
+      function applyScenario(name, { preserveDismissal = false } = {}) {
+        resetState({ preserveDismissal });
+        state.scenario = name;
+        setScenarioButton(name);
+
+        if (name === 'continuation') {
+          state.body = '补充一下这个边界。';
+          stateReadout.innerHTML = '<strong>延续候选成立。</strong> 下一条发送时才把 @沐瓦物化为结构化 Mention，不创建回复关系。';
+        } else if (name === 'dismissed') {
+          state.dismissedSourceId = sourceMessageId;
+          writeDismissedSource(sourceMessageId);
+          state.candidateSuppressed = true;
+          state.recipientTouched = true;
+          state.body = '换一个新问题。';
+          stateReadout.innerHTML = '<strong>同一来源已取消。</strong> 重新进入 Camp 或刷新后仍回到默认 Lead，直到新的合格消息被接受。';
+        } else if (name === 'reply-agent') {
+          state.body = '继续检查 Draft 的安全边界。';
+          renderEditor();
+          startReply(document.getElementById('message-muwa'), { renderAfter: false });
+          stateReadout.innerHTML = '<strong>回复优先。</strong> 延续隐藏；回复 Agent 自动加入 @沐瓦，取消回复后 Mention 仍保留。';
+        } else if (name === 'reply-self') {
+          state.body = '这里补充一条背景。';
+          renderEditor();
+          startReply(document.getElementById('message-source'), { renderAfter: false });
+          stateReadout.innerHTML = '<strong>只建立引用。</strong> 回复自己的消息不产生 Mention；取消且未改接收者时，延续标签恢复。';
+        } else if (name === 'manual') {
+          state.explicitRecipientIds = ['qingyu'];
+          state.recipientTouched = true;
+          state.candidateSuppressed = true;
+          state.body = '请检查这个危险边界。';
+          stateReadout.innerHTML = '<strong>显式 Mention 优先。</strong> 正文已清楚写出 @青屿，底部不再重复“实际接收者”。';
+        } else if (name === 'cleared') {
+          state.recipientTouched = true;
+          state.candidateSuppressed = true;
+          state.body = '接收者已被我删空。';
+          stateReadout.innerHTML = '<strong>用户改过接收者。</strong> 即使 Mention 被删空，本 Draft 也不重新弹出延续，而是明确回到 Lead。';
+        } else if (name === 'fanout') {
+          state.explicitRecipientIds = ['muwa', 'qingyu'];
+          state.recipientTouched = true;
+          state.candidateSuppressed = true;
+          state.body = '请一起核对。';
+          stateReadout.innerHTML = '<strong>多人 fanout 已完整可见。</strong> 不显示延续，也不在底部再抄写一次接收者摘要。';
+        } else if (name === 'broadcast') {
+          state.allMembers = true;
+          state.recipientTouched = true;
+          state.candidateSuppressed = true;
+          state.body = '请所有队员同步检查。';
+          stateReadout.innerHTML = '<strong>@所有队员是显式寻址。</strong> 它高于历史延续候选，底部不再重复接收者摘要。';
+        } else if (name === 'invalid-empty') {
+          state.body = '';
+          setMuwaAvailability(false);
+          state.candidateSuppressed = true;
+          stateReadout.innerHTML = '<strong>空白 Draft 初始化时目标已失效。</strong> 不建立延续，直接采用默认 Lead；没有需要保留的用户输入。';
+        } else if (name === 'invalid-meaningful') {
+          state.body = '我已经开始补充正文，并附上了检查清单。';
+          state.attachmentCount = 1;
+          setMuwaAvailability(false);
+          state.repairRequired = true;
+          stateReadout.innerHTML = '<strong>有意义的 Draft 中目标才失效。</strong> 正文与附件冻结保留，发送被阻止，必须显式改选。';
+        } else if (name === 'default') {
+          state.candidateId = null;
+          state.sourceId = null;
+          state.body = '这是一个新的问题。';
+          stateReadout.innerHTML = '<strong>没有合格来源。</strong> 新 Camp、上一轮发给 Lead、多人或 @所有队员，都只显示默认 Lead 文案。';
+        }
+
+        renderEditor();
+        render();
+      }
+
+      function startReply(message, { renderAfter = true } = {}) {
+        syncBodyFromEditor();
+        state.replyMayRestoreContinuation = showContinuation();
+        state.reply = {
+          id: message.id,
+          authorId: message.dataset.author,
+          kind: message.dataset.kind,
+          name: message.dataset.name,
+          excerpt: message.dataset.excerpt,
+          available: message.dataset.available === 'true'
+        };
+        state.replyInsertedRecipientId = null;
+        state.routingTouchedDuringReply = false;
+
+        if (state.reply.kind === 'agent' && state.reply.available) {
+          if (!state.explicitRecipientIds.includes(state.reply.authorId) && !state.allMembers) {
+            state.explicitRecipientIds = [state.reply.authorId];
+            state.replyInsertedRecipientId = state.reply.authorId;
+          }
+          state.recipientTouched = true;
+          state.candidateSuppressed = true;
+        } else if (state.reply.kind === 'agent') {
+          state.repairRequired = true;
+        }
+
+        if (renderAfter) {
+          renderEditor();
+          render();
+          editor.focus({ preventScroll: true });
+          stateReadout.innerHTML = state.reply.kind === 'self'
+            ? '<strong>回复暂时遮住延续。</strong> 取消且未调整接收者后，原延续候选会恢复。'
+            : '<strong>回复优先。</strong> 引用和 @接收者同时进入 Draft；取消引用不会删除已经可见的 Mention。';
+        }
+      }
+
+      function cancelReply() {
+        const canRestore = state.reply?.kind === 'self'
+          && state.replyMayRestoreContinuation
+          && !state.routingTouchedDuringReply
+          && !hasExplicitRoute();
+        const keptMention = Boolean(state.replyInsertedRecipientId && hasExplicitRoute());
+        state.reply = null;
+        state.replyMayRestoreContinuation = false;
+        state.replyInsertedRecipientId = null;
+        state.repairRequired = false;
+        if (canRestore) {
+          state.recipientTouched = false;
+          state.candidateSuppressed = false;
+        }
+        render();
+        stateReadout.innerHTML = keptMention
+          ? '<strong>引用已取消。</strong> 回复动作加入的 Mention 仍在正文中，所以延续不会恢复。'
+          : canRestore
+            ? '<strong>引用已取消。</strong> 接收者没有被修改，之前暂时隐藏的延续标签已恢复。'
+            : '<strong>引用已取消。</strong> 当前 Draft 由已有路由事实决定。';
+        editor.focus({ preventScroll: true });
+      }
+
+      function dismissContinuation() {
+        state.dismissedSourceId = state.sourceId;
+        writeDismissedSource(state.sourceId);
+        state.candidateSuppressed = true;
+        state.recipientTouched = true;
+        state.scenario = 'dismissed';
+        setScenarioButton('dismissed');
+        render();
+        stateReadout.innerHTML = '<strong>已取消本次延续。</strong> 当前 Draft 回到 Lead；同一来源消息不会在导航或重载后再次触发。';
+        showToast('已取消延续；当前默认由 Lead · 洛可接收');
+        editor.focus({ preventScroll: true });
+      }
+
+      function chooseReplacement(target) {
+        state.repairRequired = false;
+        state.recipientTouched = true;
+        state.candidateSuppressed = true;
+        state.routingTouchedDuringReply = true;
+        if (target === 'lead') {
+          state.explicitRecipientIds = ['luoke'];
+          state.allMembers = false;
+          stateReadout.innerHTML = '<strong>已显式改由 @洛可接收。</strong> 结构化 Mention 记录用户选择，不是失效后的静默 fallback。';
+        } else {
+          state.explicitRecipientIds = [target];
+          state.allMembers = false;
+          stateReadout.innerHTML = `<strong>已改发给 @${escapeHtml(members[target].name)}。</strong> 正文和附件保持原样。`;
+        }
+        renderEditor();
+        render();
+        editor.focus({ preventScroll: true });
+      }
+
+      function finalExplicitRecipientIds() {
+        if (state.allMembers) return ['all'];
+        if (state.explicitRecipientIds.length) return [...state.explicitRecipientIds];
+        if (showContinuation()) return [state.candidateId];
+        return [];
+      }
+
+      function sendMessage() {
+        if (state.repairRequired) return;
+        syncBodyFromEditor();
+        const recipients = finalExplicitRecipientIds();
+        const message = document.createElement('article');
+        const messageId = `message-sent-${Date.now()}`;
+        message.className = 'message';
+        message.id = messageId;
+        message.dataset.author = 'you';
+        message.dataset.kind = 'self';
+        message.dataset.name = '你';
+        message.dataset.available = 'true';
+        message.dataset.excerpt = state.body || '收到。';
+        const mentionCopy = recipients.map(id => id === 'all'
+          ? '<span class="mention-token">@所有队员</span>'
+          : `<span class="mention-token">@${escapeHtml(members[id].name)}</span>`
+        ).join(' ');
+        const parent = state.reply
+          ? `<button class="message-parent" type="button" data-parent="${state.reply.id}"><span><strong>${state.reply.kind === 'self' ? '你' : escapeHtml(state.reply.name)}</strong> · ${escapeHtml(state.reply.excerpt)}</span></button>`
+          : '';
+        message.innerHTML = `
+          <div class="message-avatar" aria-hidden="true">你</div>
+          <div class="message-main">
+            <div class="message-meta"><strong>你</strong><time>刚刚</time><span>已接受</span></div>
+            ${parent}
+            <div class="message-body">${mentionCopy}${mentionCopy && state.body ? ' ' : ''}${escapeHtml(state.body || '收到。')}</div>
+            <div class="message-actions"><button class="message-action reply-action" type="button">回复</button><button class="message-action" type="button">复制</button></div>
+          </div>`;
+        timelineTrack.appendChild(message);
+
+        const nextCandidateId = recipients.length === 1
+          && recipients[0] !== 'all'
+          && !members[recipients[0]].lead
+          ? recipients[0]
+          : null;
+        state.sourceId = messageId;
+        state.candidateId = nextCandidateId;
+        state.candidateAvailable = Boolean(nextCandidateId);
+        state.dismissedSourceId = null;
+        writeDismissedSource(null);
+        state.candidateSuppressed = false;
+        state.explicitRecipientIds = [];
+        state.allMembers = false;
+        state.recipientTouched = false;
+        state.body = '';
+        state.attachmentCount = 0;
+        state.reply = null;
+        state.replyMayRestoreContinuation = false;
+        state.replyInsertedRecipientId = null;
+        state.routingTouchedDuringReply = false;
+        state.repairRequired = false;
+        renderEditor();
+        render();
+        message.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        stateReadout.innerHTML = nextCandidateId
+          ? `<strong>消息已被 Core 接受。</strong> 最终恰好显式发给 @${escapeHtml(members[nextCandidateId].name)}；下一份 Draft 建立新的延续候选。`
+          : '<strong>消息已被 Core 接受。</strong> 最终不是唯一非 Lead 接收者；下一份 Draft 回到默认 Lead。';
+        showToast(nextCandidateId ? `下一条将继续发给 @${members[nextCandidateId].name}` : '下一条默认由 Lead · 洛可接收');
+      }
+
+      scenarioButtons.forEach(button => button.addEventListener('click', () => applyScenario(button.dataset.scenario)));
+      document.getElementById('theme-button').addEventListener('click', event => {
+        const night = root.dataset.theme !== 'night';
+        root.dataset.theme = night ? 'night' : 'day';
+        event.currentTarget.setAttribute('aria-pressed', String(night));
+        event.currentTarget.textContent = night ? 'Porcelain Day' : 'Steel Night';
+      });
+      document.getElementById('reload-button').addEventListener('click', () => {
+        applyScenario(state.dismissedSourceId === sourceMessageId ? 'dismissed' : state.scenario, { preserveDismissal: true });
+        showToast('已从持久 Draft 状态重新投影');
+      });
+      continuationClear.addEventListener('click', dismissContinuation);
+      document.getElementById('reply-cancel').addEventListener('click', cancelReply);
+      document.querySelectorAll('.repair-option').forEach(button => button.addEventListener('click', () => chooseReplacement(button.dataset.replacement)));
+      document.getElementById('attach-button').addEventListener('click', () => {
+        state.attachmentCount += 1;
+        render();
+        showToast('已添加 1 个演示附件');
+      });
+      document.getElementById('composer-form').addEventListener('submit', event => {
+        event.preventDefault();
+        sendMessage();
+      });
+      editor.addEventListener('input', syncBodyFromEditor);
+      editor.addEventListener('keydown', event => {
+        if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+          event.preventDefault();
+          sendMessage();
+        }
+      });
+      document.addEventListener('pointerdown', () => { root.dataset.inputModality = 'pointer'; }, { capture: true });
+      document.addEventListener('keydown', event => {
+        if (event.key === 'Tab') root.dataset.inputModality = 'keyboard';
+      }, { capture: true });
+      document.addEventListener('click', event => {
+        const replyButton = event.target.closest('.reply-action');
+        if (replyButton) {
+          startReply(replyButton.closest('.message'));
+          return;
+        }
+        const parent = event.target.closest('.message-parent[data-parent]');
+        if (parent) {
+          const target = document.getElementById(parent.dataset.parent);
+          if (!target) return;
+          target.classList.add('is-located');
+          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          setTimeout(() => target.classList.remove('is-located'), 1200);
+        }
+      });
+
+      applyScenario(readDismissedSource() === sourceMessageId ? 'dismissed' : 'continuation', { preserveDismissal: true });
+    })();
+  </script>
+</body>
+</html>
