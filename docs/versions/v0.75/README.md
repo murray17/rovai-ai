@@ -4,14 +4,14 @@ version: v0.75
 lifecycle: current
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: in_progress
+implementation_status: complete
 last_updated: 2026-08-14
 ---
 
 # Rovai-ai v0.75：显示名 Inline Alias、Review Duo 与 Memory 正确性收口
 
-> 当前状态：显示名 inline alias 与 Review Duo 结果恢复已发布；随后发现的 Memory Supersession 原子顺序、
-> Scope target identity 与 durable rejection 缺口正在同一 current version 纠正，并升级 Built-in Transport v10。
+> 当前状态：显示名 inline alias、Review Duo 结果恢复、Memory correctness closure、Built-in Transport v10
+> 与全部治理证据均已发布到 `main`。
 >
 > 前置版本：[v0.74 Runtime 对齐的协作 Skill 与双轴代码评审](../v0.74/README.md)
 
@@ -101,8 +101,11 @@ Content、Delivery、预算、lineage、幂等和 compact output 链路。显示
 7. Review Duo 通过 Skill validator、official bundle 回归、结果传输残留扫描与独立成品审读；
 8. 只有上述证据完成后，才把本版本和实施计划状态改为 `complete`。
 
-显示名与 Review Duo 的既有门槛已完成；Memory correctness closure 的实现和定向回归已完成，最新 `main`
-基线的完整门禁与发布证据仍待回填。[实施与验收计划](implementation-plan.md)记录逐项状态。
+上述门槛已完成：最新 `main` 基线上的完整 `rovai-core` 测试通过（lib 430、CLI 11、Core binary 73，另有
+3 项既有 manual Runtime smoke 按原标记忽略），文档 21 项单测、Vitest 329 项、Node/benchmark 179 项、
+TypeScript typecheck、Clippy `-D warnings`、Rust format、普通治理、真实 base CI、ADR generation check、
+smoke/qualification script syntax 与 `git diff --check` 均通过。Memory 实现提交 `91bb0bf5` 已快进发布到
+`main`；[实施与验收计划](implementation-plan.md)记录逐项证据。
 
 ## 跨版本文档影响
 
