@@ -14049,7 +14049,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.73".to_string(), 37));
+        assert_eq!(contract, ("v0.77".to_string(), 38));
         let v77_applied: i64 = database
             .connection()
             .query_row(
@@ -14159,7 +14159,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.73".to_string(), 37));
+        assert_eq!(contract, ("v0.77".to_string(), 38));
         drop(database);
 
         let reopened = Database::open(&directory).expect("v80 database should reopen");
@@ -14263,7 +14263,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.73".to_string(), 37));
+        assert_eq!(contract, ("v0.77".to_string(), 38));
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
@@ -16795,7 +16795,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(agent_cli_contract, ("v0.73".to_string(), 37, 1));
+        assert_eq!(agent_cli_contract, ("v0.77".to_string(), 38, 1));
         assert_eq!(foreign_key_violations, 0);
 
         drop(database);
@@ -17425,7 +17425,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.73".to_string(), 22));
+        assert_eq!(contract, ("v0.77".to_string(), 22));
         let migration_count: i64 = reopened
             .connection()
             .query_row(
@@ -17456,7 +17456,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, (37, 1));
+        assert_eq!(contract, (38, 1));
         let error = database
             .connection()
             .execute(
@@ -17776,7 +17776,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.73".to_string(), 37));
+        assert_eq!(contract, ("v0.77".to_string(), 38));
         let public_a2a_migration_applied: i64 = database
             .connection()
             .query_row(

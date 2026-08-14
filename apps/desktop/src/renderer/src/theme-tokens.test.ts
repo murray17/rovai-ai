@@ -213,9 +213,10 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.message-bubble\s*\{[^}]*max-width: min\(var\(--conversation-prose-width\), 100%\)[^}]*background: transparent/)
     expect(css).not.toMatch(/\.message-bubble\s*\{[^}]*background: var\(--brand-soft\)/)
     expect(css).toContain('.conversation-bubble:is(.user, .agent):hover::before')
-    expect(css).toMatch(/\.message-body\s*\{[^}]*position: relative[^}]*padding-right: 30px/)
+    expect(css).toMatch(/\.message-body\s*\{[^}]*position: relative[^}]*padding-right: 76px/)
     expect(css).toMatch(/\.message-surface\s*\{[^}]*position: static/)
     expect(css).toContain('.conversation-bubble:hover .message-copy-button')
+    expect(css).toContain('.conversation-bubble:hover .message-reply-button')
     expect(css).not.toContain('.message-surface.has-delivery .message-copy-button')
     expect(css).toMatch(
       /@media\s*\(min-width:\s*1800px\)[\s\S]*?\.timeline-track\s*\{[^}]*width:\s*min\(var\(--conversation-wide-width\), 100%\)/

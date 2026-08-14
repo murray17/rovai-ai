@@ -195,6 +195,12 @@ try {
   // the newly materialized navigation row.
   await reloadRenderer(running.cdp)
   await openCamp(running.cdp, campId)
+  await mouseClick(running.cdp, '.camp-conversation-view-controls button:first-child')
+  await waitForExpression(running.cdp, `(() => {
+    const button = document.querySelector('.camp-conversation-view-controls button:first-child')
+    const timeline = document.querySelector('.camp-timeline')
+    return button?.getAttribute('aria-pressed') === 'true' && !timeline?.hidden
+  })()`)
   const initialSnapshot = await request(running.cdp, 'camps.snapshot', { campId })
   assert(initialSnapshot.schemaVersion === 29,
     `Camp snapshot schema is not v29: ${initialSnapshot.schemaVersion}`)
@@ -247,7 +253,7 @@ try {
   })()`)
   assert(
     skillPickerInspection
-      && skillPickerInspection.menuLabel === '选择当前 Lead 可用的 Skill'
+      && skillPickerInspection.menuLabel === '选择当前负责人可用的 Skill'
       && skillPickerInspection.menuRole === 'listbox'
       && skillPickerInspection.optionRole === 'option'
       && skillPickerInspection.optionName === selectableSkill.name
@@ -643,7 +649,7 @@ try {
 
   await evaluate(running.cdp, `window.getSelection()?.removeAllRanges()`)
   await mouseClick(running.cdp,
-    '.conversation-bubble.user .message-mention-token.is-interactive')
+    `.conversation-bubble.user .message-mention-token.is-interactive[data-agent-id=${JSON.stringify(targetMemberIds[0])}]`)
   await waitForExpression(running.cdp,
     `document.querySelector('.mention-profile-popover[aria-label="叮叮的基础信息"]')?.classList.contains('is-positioned')`)
   await wait(180)
@@ -760,7 +766,7 @@ try {
   await openCamp(running.cdp, campId)
   await waitForExpression(running.cdp, `(() => {
     const message = document.querySelector('[data-message-id=${JSON.stringify(currentUserMentionMessageId)}]')
-    return message?.querySelector('.structured-message-body')?.textContent
+    return message?.querySelector('.current-user-markdown-body, .structured-message-body')?.textContent
       === ${JSON.stringify(currentUserMentionBody)}
       && message.querySelectorAll('.message-mention-token.current-user').length === 1
   })()`, 30_000)
@@ -777,7 +783,7 @@ try {
     const mentionInkColor = getComputedStyle(colorProbe).color
     colorProbe.remove()
     return {
-      messageText: message.querySelector('.structured-message-body')?.textContent ?? null,
+      messageText: message.querySelector('.current-user-markdown-body, .structured-message-body')?.textContent ?? null,
       tokenText: token.textContent,
       label: token.getAttribute('aria-label'),
       role: token.getAttribute('role'),
