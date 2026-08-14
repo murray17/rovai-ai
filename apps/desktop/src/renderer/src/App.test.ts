@@ -5,6 +5,7 @@ import type {
   ActionApprovalView,
   AdapterInstallation,
   AgentProfile,
+  AgentRunView,
   AgentRunExecutionEvidenceView,
   CampMessageView,
   CampSnapshot,
@@ -45,6 +46,7 @@ import {
 import {
   CampWorkspace,
   QuickChatWorkspace,
+  RunExecutionDisclosure,
   TaskPanel,
   agentExecutionProcesses,
   agentRunTerminalNote,
@@ -2730,6 +2732,51 @@ describe('task event projections', () => {
       kind: 'tool',
       step: { status: 'recorded' }
     })
+  })
+
+  it('does not present an ACP protocol kind as Copilot execution detail', () => {
+    const progress = buildLiveExecutionProgress([{
+      id: 'copilot-tool-call', agentRunId: 'run-copilot', eventType: 'runtime.action',
+      payload: {
+        toolCallId: 'tool-1', kind: 'execute', title: '检查工作区状态', status: 'pending'
+      },
+      canonical: canonicalActivity('tool-1', {
+        activityDomain: 'shell', semanticKind: 'shell.execute',
+        presentationHint: '检查工作区状态', phase: 'started', outcome: 'unknown'
+      }),
+      createdAt: '2026-08-14T00:00:00Z'
+    }], 'run-copilot')
+
+    expect(progress.items[0]).toMatchObject({
+      kind: 'tool',
+      step: {
+        title: '检查工作区状态',
+        detail: '',
+        status: 'running'
+      }
+    })
+    expect(executionEvidenceCopyText('runtime.action', { kind: 'execute' })).toBeNull()
+
+    const run: AgentRunView = {
+      id: 'run-copilot', campTurnId: 'turn-1', conversationId: 'conversation-copilot',
+      agentId: 'agent-copilot', taskId: null, responsibilityKey: 'direct:agent-copilot',
+      responsibilityGeneration: 0, purpose: '检查工作区状态', completionRole: 'required',
+      status: 'running', waitReason: null, executionEpoch: 1,
+      terminalResolutionSource: null, terminalReasonCode: null,
+      permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct',
+      a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
+      executionEvidenceCount: 1, hasUnsettledExternalEffects: false,
+      workspace: { path: '/repo' }, startingGitObservation: null, endingGitObservation: null,
+      version: 1, createdAt: '2026-08-14T00:00:00Z', startedAt: '2026-08-14T00:00:01Z',
+      endedAt: null, updatedAt: '2026-08-14T00:00:02Z'
+    }
+    const markup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run, progress, campId: 'camp-1', focused: true
+    }))
+    expect(markup).toContain('tool-call-static')
+    expect(markup).not.toContain('tool-call-disclosure')
+    expect(markup).not.toContain('tool-call-chevron')
+    expect(markup).not.toContain('>execute<')
   })
 
   it('uses the Core Codex presentation hint without parsing the command in Renderer', () => {

@@ -386,7 +386,7 @@ export function buildLiveExecutionProgress(
           ? jsonPreview(payload.output)
           : Object.prototype.hasOwnProperty.call(payload, 'input') && payload.input != null
             ? jsonPreview(payload.input)
-            : stringField(payload, 'kind') ?? '',
+            : '',
         status: canonicalActivityStatus(canonical, activityStatus(nativeStatus, event.eventType)),
         activityDomain: canonical?.activityDomain ?? 'unknown',
         toolName: canonical?.toolName ?? null,
@@ -618,7 +618,6 @@ export function executionEvidenceCopyText(
   if (eventType === 'runtime.action') {
     return fullEvidenceValue(payload.output)
       ?? fullEvidenceValue(payload.input)
-      ?? stringField(payload, 'kind')
   }
   if (eventType === 'command.output.delta') {
     return fullEvidenceValue(payload.delta ?? payload.output)

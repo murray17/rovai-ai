@@ -3969,7 +3969,7 @@ function ToolCallDetail({
   )
 }
 
-function RunExecutionDisclosure({
+export function RunExecutionDisclosure({
   run,
   progress,
   campId,
@@ -4118,16 +4118,30 @@ function RunExecutionDisclosure({
         if (item.kind !== 'tool') return null
         const step = item.step
         const fullEvidence = completeEvidence.byToolId.get(step.id)
+        const hasDetail = Boolean(step.detail || fullEvidence)
+        const summary = (
+          <>
+            <ToolCallIcon activityDomain={step.activityDomain} status={step.status} />
+            <span className="tool-call-title">{step.title}</span>
+            <span className={`tool-call-result status-${step.status}`}>
+              {toolCallStatusLabel(step.status)}
+            </span>
+            {hasDetail && <span className="tool-call-chevron" aria-hidden="true">⌄</span>}
+          </>
+        )
+        if (!hasDetail) {
+          return (
+            <div
+              className={`process-action tool-call-summary tool-call-static status-${step.status}`}
+              key={item.key}
+            >
+              {summary}
+            </div>
+          )
+        }
         return (
           <details className={`process-action tool-call-disclosure status-${step.status}`} key={item.key}>
-            <summary>
-              <ToolCallIcon activityDomain={step.activityDomain} status={step.status} />
-              <span className="tool-call-title">{step.title}</span>
-              <span className={`tool-call-result status-${step.status}`}>
-                {toolCallStatusLabel(step.status)}
-              </span>
-              <span className="tool-call-chevron" aria-hidden="true">⌄</span>
-            </summary>
+            <summary className="tool-call-summary">{summary}</summary>
             {step.detail && (
               <ToolCallDetail
                 campId={campId}

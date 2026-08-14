@@ -57,7 +57,7 @@ const runtimes = [
     }
   }),
   runtime('opencode', 'opencode-cli', 'OpenCode', 'read_file', acp('read', 'read_file', 'file', 'file.read')),
-  runtime('copilot', 'copilot-cli', 'GitHub Copilot', 'edit_file', acp('edit', 'edit_file', 'file', 'file.write')),
+  runtime('copilot', 'copilot-cli', 'GitHub Copilot', 'edit_file', acp('edit', 'edit_file', 'file', 'file.write', null)),
   runtime('kiro', 'kiro-cli', 'Kiro', 'execute', acp('execute', 'execute', 'shell', 'shell.execute')),
   runtime('qoder', 'qoder-cli', 'Qoder', 'search_workspace', acp('search', 'search_workspace', 'tool', 'tool.web.search')),
   runtime('codebuddy', 'codebuddy-cli', 'CodeBuddy', 'mcp_call', acp('mcp_tool_call', 'mcp_call', 'tool', 'tool.call')),
@@ -596,12 +596,12 @@ function runtimesLengthHint(key) {
   return ['codex', 'opencode', 'copilot', 'kiro', 'qoder', 'codebuddy', 'qwen', 'claude', 'antigravity'].indexOf(key)
 }
 
-function acp(kind, toolName, domain, semantic) {
+function acp(kind, toolName, domain, semantic, output = 'fixture completed') {
   return {
     protocol: 'acp-v1', domain, semantic,
     evidenceKind: 'runtime.action', eventType: 'runtime.action', payload: {
       toolCallId: `op-${toolName}`, status: 'completed', kind,
-      toolName, title: toolName, output: 'fixture completed'
+      toolName, title: toolName, output
     }
   }
 }
@@ -1362,6 +1362,10 @@ async function collectRuntimeRows(cdp) {
           '.execution-run-list, .execution-run-item, [aria-label="选择 AgentRun"]'
         ).length,
         toolTitles: [...document.querySelectorAll('.execution-drawer .tool-call-title')].map((node) => node.textContent?.trim() ?? ''),
+        staticToolTitles: [...document.querySelectorAll('.execution-drawer .tool-call-static .tool-call-title')]
+          .map((node) => node.textContent?.trim() ?? ''),
+        expandableToolTitles: [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure .tool-call-title')]
+          .map((node) => node.textContent?.trim() ?? ''),
         toolSourceLabelCount: document.querySelectorAll('.execution-drawer .tool-call-source').length,
         hasVisibleSourceLabel: /Core 已验证|Runtime 报告/.test(
           document.querySelector('.execution-drawer')?.textContent ?? ''
@@ -1985,6 +1989,12 @@ function assertRuntimeRows(observed) {
     }
     assert(row.toolTitles.length === 1 && row.toolTitles[0] === expected.expectedToolName,
       `${expected.runtimeName} tool title mismatch: ${JSON.stringify(row)}`)
+    if (expected.adapterKind === 'copilot-cli') {
+      assert(row.staticToolTitles.length === 1
+        && row.staticToolTitles[0] === expected.expectedToolName
+        && row.expandableToolTitles.length === 0,
+      `${expected.runtimeName} exposed an empty Tool disclosure: ${JSON.stringify(row)}`)
+    }
     assert(row.toolSourceLabelCount === 0 && row.hasVisibleSourceLabel === false,
       `${expected.runtimeName} exposed a redundant source label: ${JSON.stringify(row)}`)
   }
