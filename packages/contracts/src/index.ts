@@ -195,7 +195,7 @@ export interface AgentProfile {
   removedAt: string | null
 }
 
-export interface CreateAgentProfileCommand {
+export interface AgentProfileIdentityInput {
   displayName: string
   teamRole: string
   professionalResponsibilities: string
@@ -204,7 +204,11 @@ export interface CreateAgentProfileCommand {
   growthTopic: string
 }
 
-export interface UpdateAgentProfileCommand extends CreateAgentProfileCommand {
+export interface CreateAgentProfileCommand extends AgentProfileIdentityInput {
+  avatarRef?: string | null
+}
+
+export interface UpdateAgentProfileCommand extends AgentProfileIdentityInput {
   agentId: string
   expectedVersion: number
 }

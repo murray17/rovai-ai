@@ -382,7 +382,7 @@ fn operation_help(args: &[String]) -> Result<Option<BuiltinToolDescription>> {
 }
 
 fn is_family_help(args: &[String]) -> bool {
-    matches!(args, [family, help] if help == "--help" && matches!(family.as_str(), "task" | "camp" | "history" | "memory"))
+    matches!(args, [family, help] if help == "--help" && matches!(family.as_str(), "member" | "task" | "camp" | "history" | "memory"))
 }
 
 fn load_context() -> Result<BuiltinToolCliContext> {
@@ -592,7 +592,7 @@ enum BuiltinToolIpcFailure {
 
 fn print_root_help() {
     println!(
-        "Rovai Agent CLI\n\nOperations:\n  rovai send\n  rovai task create|get|list|update\n  rovai camp list|search|read\n  rovai history search\n  rovai memory view|search|read|write\n\nRun `rovai --help` to choose an operation, then run that operation's exact `--help`. Do not assume that a command family has its own help entry. Each operation supports direct flags, JSON stdin/heredoc, or --input-file <path>."
+        "Rovai Agent CLI\n\nOperations:\n  rovai send\n  rovai member create\n  rovai task create|get|list|update\n  rovai camp list|search|read\n  rovai history search\n  rovai memory view|search|read|write\n\nRun `rovai --help` to choose an operation, then run that operation's exact `--help`. Do not assume that a command family has its own help entry. Each operation supports direct flags, JSON stdin/heredoc, or --input-file <path>."
     );
 }
 
@@ -685,6 +685,20 @@ fn operation_help_text(description: &BuiltinToolDescription) -> String {
             )
             .expect("writing help to a String cannot fail");
         }
+        if description.name == "member.create" && argument.field == "creationKey" {
+            writeln!(
+                output,
+                "      Generate one new lowercase UUID after confirmation; reuse it only for an exact retry."
+            )
+            .expect("writing help to a String cannot fail");
+        }
+        if description.name == "member.create" && argument.field == "avatarFile" {
+            writeln!(
+                output,
+                "      Optional run-readable PNG/JPEG path. If unavailable, omit it and Rovai uses the default avatar."
+            )
+            .expect("writing help to a String cannot fail");
+        }
     }
     let examples = operation_help_examples(&description.name);
     writeln!(output, "\nExamples:").expect("writing help to a String cannot fail");
@@ -697,6 +711,10 @@ fn operation_help_text(description: &BuiltinToolDescription) -> String {
 fn operation_help_examples(operation: &str) -> &'static [&'static str] {
     match operation {
         "camp.message.send" => &CAMP_MESSAGE_SEND_HELP_EXAMPLES,
+        "member.create" => &[
+            "rovai member create --creation-key 2b945f3f-4b45-4ae5-92b2-739fce600338 --display-name 'Nova' --team-role 'Researcher'",
+            "rovai member create --input-file confirmed-member.json",
+        ],
         "team.create_task" => {
             &["rovai task create --title 'Prepare release notes' --assignee-agent-id agent_27"]
         }
@@ -807,7 +825,7 @@ mod tests {
         assert!(builtin_tool_identity_by_command("memory", "propose-hearth").is_none());
         assert!(builtin_tool_identity_by_command("tool", "list").is_none());
         assert!(builtin_tool_identity_by_command("tool", "describe").is_none());
-        for family in ["task", "camp", "history", "memory"] {
+        for family in ["member", "task", "camp", "history", "memory"] {
             let args = [family.to_string(), "--help".to_string()];
             assert!(operation_help(&args).unwrap().is_none());
             assert!(is_family_help(&args));
@@ -815,9 +833,10 @@ mod tests {
     }
 
     #[test]
-    fn exact_help_surface_covers_all_thirteen_operations_and_no_family_aliases() {
+    fn exact_help_surface_covers_all_fourteen_operations_and_no_family_aliases() {
         let exact_paths: &[&[&str]] = &[
             &["send", "--help"],
+            &["member", "create", "--help"],
             &["task", "create", "--help"],
             &["task", "get", "--help"],
             &["task", "list", "--help"],
@@ -831,7 +850,7 @@ mod tests {
             &["memory", "read", "--help"],
             &["memory", "write", "--help"],
         ];
-        assert_eq!(exact_paths.len(), 13);
+        assert_eq!(exact_paths.len(), 14);
         for path in exact_paths {
             let args = path
                 .iter()
@@ -842,7 +861,7 @@ mod tests {
                 "missing exact help for {path:?}"
             );
         }
-        for family in ["task", "camp", "history", "memory"] {
+        for family in ["member", "task", "camp", "history", "memory"] {
             let args = vec![family.to_string(), "--help".to_string()];
             assert!(operation_help(&args).unwrap().is_none());
             assert!(is_family_help(&args));

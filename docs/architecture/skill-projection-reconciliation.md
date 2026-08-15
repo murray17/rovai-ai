@@ -14,7 +14,7 @@ SkillExposureSnapshot 的长期组件边界。决策理由见
 [ADR-0158](../adr/0158-default-all-runtime-delivery-for-managed-skills.md)和
 [ADR-0161](../adr/0161-event-driven-root-scoped-skill-projection-reconciliation.md)。当前 official
 inventory 与 system-required policy 见
-[ADR-0181](../adr/0181-twelve-skill-official-inventory-and-runtime-aligned-collaboration.md)。
+[ADR-0191](../adr/0191-agent-mediated-member-creation-and-thirteen-skill-inventory.md)。
 bundled bootstrap 与执行完整性时机见
 [ADR-0188](../adr/0188-bundled-skill-bootstrap-fast-path-and-execution-integrity.md)。
 
@@ -41,7 +41,8 @@ SkillExposureSnapshot (immutable start-time evidence in ContextManifest)
 
 Skill Library view 的 `managementPolicy` 来自 bundled official manifest，而不是用户可改数据库字段。
 `cli-operations` 与 `memory-stewardship` 为 `system_required`：bundled install 以 DB-only 事务恢复 enabled
-与全部九组 Assignment，命令边界拒绝修改；其他 Skill 为 `user_managed`。该策略只决定 Library desired
+与全部九组 Assignment，命令边界拒绝修改；其余十一项 official Skill 为 `user_managed`。当前 inventory
+精确为十三项，名称和 provenance 由 ADR-0191 冻结。该策略只决定 Library desired
 state，不改变 projection ownership、preflight、Snapshot 或 Runtime load 证明。
 
 ## 组件职责
@@ -83,6 +84,10 @@ digest verify 与 publish/repair。
 这条快速路径不是 Revision 内容证明。下方 AgentRun preflight 在 Runtime launch 前仍读取并哈希该 Run
 需要的精确 current Revision；同大小内容篡改、bootstrap 后漂移或任何 digest mismatch 都在此 fail closed。
 Bootstrap report 只服务启动性能诊断，不进入 SkillExposureSnapshot。
+
+若新版本认领的 official 名称在 bootstrap 前已作为 imported Skill 存在，Core 在发布 bundle 前原地提升：
+保留 Skill ID、enablement 与 group assignments，把 origin 切为 official，追加不可变 bundled Revision 和
+审计事件。official inventory 建立后，同名 import 仍被拒绝；这条迁移不允许 imported 内容覆盖 bundle。
 
 ## 触发矩阵
 

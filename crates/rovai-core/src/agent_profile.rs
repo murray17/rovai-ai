@@ -547,6 +547,8 @@ pub struct AgentProfileView {
 #[serde(deny_unknown_fields)]
 pub struct CreateAgentProfileCommand {
     pub display_name: String,
+    #[serde(default)]
+    pub avatar_ref: Option<String>,
     pub team_role: String,
     pub professional_responsibilities: String,
     pub personality_traits: Vec<String>,
@@ -1523,6 +1525,9 @@ impl AgentProfileService {
             &envelope.payload.working_principles,
             &envelope.payload.growth_topic,
         )?;
+        crate::member_avatar::validate_new_member_avatar_ref(
+            envelope.payload.avatar_ref.as_deref(),
+        )?;
         self.gateway.execute(database, envelope, |transaction| {
             if profile_display_name_exists(transaction, &identity.display_name, None)? {
                 return Ok(CommandHandlerResult::rejected(
@@ -1543,7 +1548,7 @@ impl AgentProfileService {
                     runtime_enabled, visual_state_json, profile_status, member_order, version,
                     created_at, updated_at, archived_at
                 ) VALUES (
-                    ?9, ?1, ?1, NULL, ?2, NULL,
+                    ?9, ?1, ?1, NULL, ?2, ?10,
                     ?3, ?4, ?5,
                     ?6, ?7,
                     '[]', '',
@@ -1562,6 +1567,7 @@ impl AgentProfileService {
                     identity.growth_topic,
                     now,
                     profile_uuid,
+                    envelope.payload.avatar_ref,
                 ],
             )?;
             Ok(CommandHandlerResult::applied(
@@ -3533,6 +3539,25 @@ pub(crate) fn validate_stored_member_identity(
     Ok(())
 }
 
+pub(crate) fn validate_member_identity_input(
+    display_name: &str,
+    team_role: &str,
+    professional_responsibilities: &str,
+    personality_traits: &[String],
+    working_principles: &str,
+    growth_topic: &str,
+) -> Result<()> {
+    normalize_member_identity(
+        display_name,
+        team_role,
+        professional_responsibilities,
+        personality_traits,
+        working_principles,
+        growth_topic,
+    )?;
+    Ok(())
+}
+
 fn normalize_member_identity(
     display_name: &str,
     team_role: &str,
@@ -4145,6 +4170,7 @@ mod tests {
     fn create_identity(display_name: &str, responsibilities: &str) -> CreateAgentProfileCommand {
         CreateAgentProfileCommand {
             display_name: display_name.to_string(),
+            avatar_ref: None,
             team_role: String::new(),
             professional_responsibilities: responsibilities.to_string(),
             personality_traits: Vec::new(),

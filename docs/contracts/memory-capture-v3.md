@@ -232,5 +232,5 @@ pending candidate migration、导出或确认步骤。
 
 - [ADR-0186: Complete Exact-Scope Memory View](../adr/0186-complete-exact-scope-memory-view-and-copyable-target.md)
 - [Memory Capture v2 (historical)](memory-capture-v2.md)
-- [Built-in Tool Transport v11](builtin-tool-transport-v11.md)
+- [Built-in Tool Transport v12](builtin-tool-transport-v12.md)
 - [Online Memory Capture architecture](../architecture/online-memory-capture.md)

@@ -9,6 +9,7 @@ use crate::{
         HistorySearchInput,
     },
     camp_message_send_teaching::CAMP_MESSAGE_SEND_SUMMARY,
+    member_studio::{MEMBER_CREATE_TOOL_NAME, MemberCreateInput, member_create_input_schema},
     memory_retrieval::{
         MEMORY_READ_TOOL_NAME, MEMORY_SEARCH_TOOL_NAME, MEMORY_VIEW_TOOL_NAME, MemoryReadInput,
         MemoryRetrievalService, MemorySearchInput, MemoryViewInput,
@@ -32,6 +33,9 @@ pub fn validate_builtin_tool_input(canonical_name: &str, input: &Value) -> Resul
     let valid = match canonical_name {
         CAMP_MESSAGE_SEND_TOOL_NAME => {
             serde_json::from_value::<CampMessageSendInput>(input.clone()).map(|_| ())
+        }
+        MEMBER_CREATE_TOOL_NAME => {
+            serde_json::from_value::<MemberCreateInput>(input.clone()).map(|_| ())
         }
         TEAM_CREATE_TASK_TOOL_NAME => {
             serde_json::from_value::<TeamCreateTaskInput>(input.clone()).map(|_| ())
@@ -336,6 +340,20 @@ fn task_list_success_schema() -> Value {
             },
             "nextCursor": {"type": ["string", "null"]},
             "truncated": {"type": "boolean"}
+        }
+    })
+}
+
+fn member_create_success_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["agentId", "version", "avatarRef", "avatarStatus"],
+        "properties": {
+            "agentId": {"type": "string"},
+            "version": {"type": "integer", "minimum": 1},
+            "avatarRef": {"type": ["string", "null"]},
+            "avatarStatus": {"type": "string", "enum": ["saved", "not_requested"]}
         }
     })
 }
@@ -664,6 +682,13 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
                     "allocatedAgentRunResponsibilities": {"type": "integer", "minimum": 1}
                 }
             }
+        }),
+        json!({
+            "name": MEMBER_CREATE_TOOL_NAME,
+            "title": "Create a confirmed Rovai member",
+            "description": "Create one durable Rovai member from the final member card only after the user explicitly confirms it in this direct user-triggered run. Reuse creationKey only for an exact retry. avatarFile is optional and must name a run-readable local PNG or JPEG; Rovai safely normalizes and imports it without persisting the path. If image preparation is unavailable or fails, retry without avatarFile to use the default avatar.",
+            "inputSchema": member_create_input_schema(),
+            "outputSchema": member_create_success_schema()
         }),
         json!({
             "name": TEAM_CREATE_TASK_TOOL_NAME,

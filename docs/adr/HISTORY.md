@@ -192,7 +192,7 @@ generated_from: docs/adr-front-matter
 | [ADR-0178](0178-best-effort-online-memory-capture-and-actor-bounded-mutation.md) | Best-Effort Online Memory Capture and Actor-Bounded Agent Mutation | `accepted` | `cross-version` | [v0.73](../versions/v0.73/README.md) | — |
 | [ADR-0179](0179-normalized-memory-store-v3-with-isolated-hearth-review.md) | Normalized Memory Store v3 with Isolated Hearth Review | `accepted` | `cross-version` | [v0.73](../versions/v0.73/README.md) | — |
 | [ADR-0180](0180-single-agent-memory-write-command.md) | Single Agent Memory Write Command with Outcome-Discriminated Output | `accepted` | `cross-version` | [v0.73](../versions/v0.73/README.md) | — |
-| [ADR-0181](0181-twelve-skill-official-inventory-and-runtime-aligned-collaboration.md) | Twelve-Skill Official Inventory and Runtime-Aligned Collaboration | `accepted` | `cross-version` | [v0.74](../versions/v0.74/README.md) | — |
+| [ADR-0181](0181-twelve-skill-official-inventory-and-runtime-aligned-collaboration.md) | Twelve-Skill Official Inventory and Runtime-Aligned Collaboration | `superseded` | `cross-version` | [v0.74](../versions/v0.74/README.md) | [ADR-0191](0191-agent-mediated-member-creation-and-thirteen-skill-inventory.md) |
 | [ADR-0182](0182-core-resolved-current-camp-display-name-inline-addressing-alias.md) | Core-Resolved Current-Camp Display-Name Inline Addressing Alias | `accepted` | `cross-version` | [v0.75](../versions/v0.75/README.md) | — |
 | [ADR-0183](0183-scope-identified-agent-memory-revision-targets.md) | Scope-Identified Agent Memory Revision Targets | `superseded` | `cross-version` | [v0.75](../versions/v0.75/README.md) | [ADR-0186](0186-complete-exact-scope-memory-view-and-copyable-target.md) |
 | [ADR-0184](0184-line-leading-display-name-inline-addressing-alias.md) | Line-Leading Display-Name Inline Addressing Alias | `accepted` | `cross-version` | [v0.76](../versions/v0.76/README.md) | — |
@@ -202,4 +202,5 @@ generated_from: docs/adr-front-matter
 | [ADR-0188](0188-bundled-skill-bootstrap-fast-path-and-execution-integrity.md) | Bundled Skill Bootstrap Fast Path and Execution-Time Integrity | `accepted` | `cross-version` | [v0.82](../versions/v0.82/README.md) | — |
 | [ADR-0189](0189-settings-only-runtime-preview-outside-product-catalog.md) | Settings-Only Runtime Preview Outside the Product Catalog | `accepted` | `cross-version` | [v0.83](../versions/v0.83/README.md) | — |
 | [ADR-0190](0190-user-placeable-agent-execution-console.md) | User-Placeable Agent Execution Console | `accepted` | `cross-version` | [v0.84](../versions/v0.84/README.md) | — |
+| [ADR-0191](0191-agent-mediated-member-creation-and-thirteen-skill-inventory.md) | Agent-Mediated Member Creation and Thirteen-Skill Official Inventory | `accepted` | `cross-version` | [v0.85](../versions/v0.85/README.md) | — |
 <!-- adr-history:end -->

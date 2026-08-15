@@ -3,6 +3,10 @@
     "canonicalResult": {"status":"accepted","messageId":"msg_123","visibility":"camp_public","campTurnId":"turn_123","effectiveRecipients":["agent_27"],"recipientPresentation":{},"recipientSetDigest":"sha256:recipient-set","deliveryIds":["delivery_123"],"allocatedAgentRunResponsibilities":1},
     "agentOutput": {"messageId":"msg_123","effectiveRecipients":["agent_27"]}
   },
+  "member.create": {
+    "canonicalResult": {"agentId":"agent_27","version":1,"avatarRef":"rovai://member-avatar/managed/2b945f3f-4b45-4ae5-92b2-739fce600338","avatarStatus":"saved"},
+    "agentOutput": {"agentId":"agent_27","version":1,"avatarRef":"rovai://member-avatar/managed/2b945f3f-4b45-4ae5-92b2-739fce600338","avatarStatus":"saved"}
+  },
   "team.create_task": {
     "canonicalResult": {"taskId":"task_123","campId":"camp_123","title":"Prepare release","description":"","acceptanceCriteria":[],"status":"pending","assigneeAgentId":"agent_27","blockedReason":null,"completionSummary":null,"cancelReason":null,"createdByType":"agent","createdById":"agent_27","sourceAgentRunId":"run_123","closedByType":null,"closedById":null,"closedByAgentRunId":null,"version":1,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","closedAt":null,"availableActions":["update"]},
     "agentOutput": {"taskId":"task_123","title":"Prepare release","status":"pending","assigneeAgentId":"agent_27","version":1,"availableActions":["update"]}

@@ -8,6 +8,7 @@ license.workspace = true
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 json5 = "0.4"
 libc = "0.2"
 rusqlite = { version = "0.38", features = ["bundled"] }

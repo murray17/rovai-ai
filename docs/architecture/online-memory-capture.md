@@ -15,7 +15,7 @@ live-authorized retrieval 与用户审核面。长期决策见
 [ADR-0180](../adr/0180-single-agent-memory-write-command.md)和
 [ADR-0186](../adr/0186-complete-exact-scope-memory-view-and-copyable-target.md)；精确字段与状态见
 [Memory Capture v3](../contracts/memory-capture-v3.md)，CLI transport 见
-[Built-in Tool Transport v11](../contracts/builtin-tool-transport-v11.md)。
+[Built-in Tool Transport v12](../contracts/builtin-tool-transport-v12.md)。
 
 Architecture/Contract `accepted` 不表示代码已实现；当前完成度只从
 [v0.78 实施计划](../versions/v0.78/implementation-plan.md)判断。
@@ -34,7 +34,7 @@ current input / A2A handoff / explicit long-term commitment / verified result
                               v
                     rovai memory write
                               |
-          CLI v11 + Core BuiltinToolRouter + active lease
+          CLI v12 + Core BuiltinToolRouter + active lease
                               |
                               v
                  Agent Memory Capture Facade
@@ -63,7 +63,7 @@ Skill discovery 是 Runtime-native 行为，没有 durable Opportunity object、
 | Module | Narrow interface | Owns | Does not own |
 | --- | --- | --- | --- |
 | `memory-stewardship` Skill | Runtime-native discovery + progressive references | durable-value、Scope、atomicity、view/add/revise judgment；search/read broad recall | authorization、persistence、deterministic per-turn loading |
-| Built-in Tool Runtime | `memory.view/search/read/write` | CLI parsing、active lease、Envelope/projection/replay transport、v11 schema/capability fencing | Memory semantics、review lifecycle、candidate visibility |
+| Built-in Tool Runtime | `memory.view/search/read/write` | CLI parsing、active lease、Envelope/projection/replay transport、v12 schema/capability fencing | Memory semantics、review lifecycle、candidate visibility |
 | Agent Memory Capture Facade | one validated add/revise request | actor resolution、common canonicalization、安全/配额 admission、Scope target assertion、route selection | semantic similarity、user review decision |
 | Direct Memory Mutation | Companion / directed Relationship add/revise | formal publication、Revision CAS、capacity、body-free result | Hearth pending content、mutual mutation |
 | Hearth Review | submit/read/accept/reject/invalidate | isolated candidate、Review CAS、stale derivation、terminal clearing | formal Memory before accept、Agent read API |
@@ -236,7 +236,7 @@ Skill prose or FTS.
 ## References
 
 - [Memory Capture v3](../contracts/memory-capture-v3.md)
-- [Built-in Tool Transport v11](../contracts/builtin-tool-transport-v11.md)
+- [Built-in Tool Transport v12](../contracts/builtin-tool-transport-v12.md)
 - [Built-in Tool Runtime](builtin-tool-runtime.md)
 - [ADR-0068: Brokered Memory Retrieval](../adr/0068-brokered-memory-retrieval-and-session-entrypoint.md)
 - [ADR-0186: Complete Exact-Scope Memory View](../adr/0186-complete-exact-scope-memory-view-and-copyable-target.md)

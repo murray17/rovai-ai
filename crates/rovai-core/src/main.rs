@@ -112,6 +112,7 @@ use rovai_core::{
     },
     mcp_import::McpImportScanner,
     mcp_projection::{McpProjectionRequest, McpProjectionService, PreparedMcpProjection},
+    member_studio::{MEMBER_CREATE_TOOL_NAME, MemberCreateError, MemberCreateInput, create_member},
     memory::{
         AcceptHearthReviewItemCommand, CreateMemoryCommand, ForgetMemoryCommand, MemoryService,
         ReactivateMemoryCommand, RejectHearthReviewItemCommand, RetireMemoryCommand,
@@ -2640,6 +2641,34 @@ impl Core {
                         .as_str()
                         .map(str::to_string);
                     command_execution_payload(execution)
+                }
+                MEMBER_CREATE_TOOL_NAME => {
+                    let input = serde_json::from_value::<MemberCreateInput>(request.input)
+                        .context("member.create input is invalid")?;
+                    let outcome =
+                        create_member(&mut database, &self.data_dir, &authenticated_run, input)?;
+                    evidence_replayed = outcome.execution.replayed;
+                    evidence_receipt_id = outcome.execution.result.payload["agentId"]
+                        .as_str()
+                        .map(str::to_string);
+                    let avatar_ref = outcome.avatar_ref;
+                    let mut payload = command_execution_payload(outcome.execution)?;
+                    let object = payload
+                        .as_object_mut()
+                        .context("member.create result is not an object")?;
+                    object.insert(
+                        "avatarStatus".to_string(),
+                        Value::String(if avatar_ref.is_some() {
+                            "saved".to_string()
+                        } else {
+                            "not_requested".to_string()
+                        }),
+                    );
+                    object.insert(
+                        "avatarRef".to_string(),
+                        avatar_ref.map(Value::String).unwrap_or(Value::Null),
+                    );
+                    Ok(payload)
                 }
                 TEAM_CREATE_TASK_TOOL_NAME => {
                     let input = serde_json::from_value::<TeamCreateTaskInput>(request.input)
@@ -11549,6 +11578,7 @@ fn command_rejection_details(code: &str, payload: &Value) -> Option<Value> {
         return payload.get("details").cloned();
     }
     let allowed_fields: &[&str] = match code {
+        "agent_profile.display_name_conflict" => &["displayName"],
         "task.version_conflict" => &["taskId", "currentVersion"],
         "memory.version_conflict" => &["memoryId", "currentVersion"],
         _ => return None,
@@ -11566,6 +11596,13 @@ fn command_rejection_details(code: &str, payload: &Value) -> Option<Value> {
 }
 
 fn classify_builtin_operation_error(error: &anyhow::Error) -> (String, String, Option<Value>) {
+    if let Some(error) = error.downcast_ref::<MemberCreateError>() {
+        return (
+            error.code.to_string(),
+            error.message.to_string(),
+            error.details.clone(),
+        );
+    }
     if let Some(error) = error.downcast_ref::<BuiltinOperationError>() {
         return (
             error.code.clone(),

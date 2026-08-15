@@ -50,6 +50,14 @@ allow-once/deny；`smoke:missing-send-recovery` 在 tool→final 场景观察 8 
 `smoke:mcp-projection` 返回 `rovai-projection:trae_cn`。TRAE Host 在 durable terminal 对后继 Run
 可见前停止，后继 Host 再以 `session/load` 恢复同一 Session，避免 cwd、权限或 Run 配置跨 Host 延伸。
 
+### v0.85 Transport v12 当前基线
+
+当前字段级合同已推进到 [Built-in Tool Transport v12](contracts/builtin-tool-transport-v12.md)，固定十四项
+operation，并加入 direct user-triggered 的 `member.create`。catalog、CLI help/projection、幂等重放、
+A2A 拒绝、头像路径 Evidence 脱敏和十 Runtime qualification 脚本已通过确定性门禁或完成脚本对齐。
+本版本未重跑十种 Runtime 的真实十四项联合 matrix，因此下方十三项表仍只是各历史版本的实机证据，
+不能推导为 v12 pass。
+
 ## 既有九 Runtime Built-in CLI 正式接入证据
 
 2026-08-13 的 v0.67 `pnpm smoke:builtin-cli` 为九个 Runtime 分别创建隔离 Core data-dir、Skill Library
@@ -91,7 +99,7 @@ Native Session：Adapter 在终态对外可见前停止持有 Session lock 的 p
 `session/load`；smoke 现以 session ID 相等作为硬断言。transport-independent response-loss、
 `outcome_indeterminate` 与无 locator stop 继续由确定性 CLI/Core 测试覆盖。
 
-当前字段级合同以 [Built-in Tool Transport v8](contracts/builtin-tool-transport-v8.md) 为唯一真源，
+该历史矩阵当时的字段级合同为 [Built-in Tool Transport v8](contracts/builtin-tool-transport-v8.md)，
 调用结构以 [Built-in Tool Runtime Architecture](architecture/builtin-tool-runtime.md) 为准。上方九 Runtime
 矩阵仍是 v7 的真实模型证据，不能冒充 v8 收窄后的 schema/help/Charter/Skill 教学已经完成实机复测；v8
 的确定性测试已证明 catalog digest、三类分离示例与 Antigravity binding replacement。

@@ -3,17 +3,17 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-08-14
+last_updated: 2026-08-15
 ---
 
 # Built-in Tool Runtime Architecture
 
 本文件说明 Rovai built-in operations 的长期组件结构。当前字段与版本以
-[Built-in Tool Transport v11](../contracts/builtin-tool-transport-v11.md)、
+[Built-in Tool Transport v12](../contracts/builtin-tool-transport-v12.md)、
 [Durable Task v3](../contracts/durable-task-v3.md) 和
 [Camp Message Send v7](../contracts/camp-message-send-v7.md)、
 [Current User Attention v4](../contracts/current-user-attention-v4.md)与
-[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md) 为准；v10 及更早 Transport 只保留
+[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md) 为准；v11 及更早 Transport 只保留
 historical 语义。决策理由见
 [ADR-0124](../adr/0124-cli-only-transport-for-rovai-built-in-operations.md)、
 [ADR-0135](../adr/0135-compact-agent-output-over-canonical-built-in-tool-envelope.md)、
@@ -41,9 +41,9 @@ Send 的显式 caller return 与 Core-managed reply reference 见
 门禁见 [ADR-0184](../adr/0184-line-leading-display-name-inline-addressing-alias.md)。
 Current User Attention 与 progressive CLI teaching 分别见
 [ADR-0165](../adr/0165-core-owned-current-user-message-attention.md)和
-[ADR-0166](../adr/0166-progressive-built-in-cli-teaching.md)；完整十二项 official Skill inventory、
+[ADR-0166](../adr/0166-progressive-built-in-cli-teaching.md)；完整十三项 official Skill inventory、Agent 主导队员创建、
 Runtime 对齐的 Camp 协作 Skill、四项固定 GitHub 来源与 management policy 见
-[ADR-0181](../adr/0181-twelve-skill-official-inventory-and-runtime-aligned-collaboration.md)。
+[ADR-0191](../adr/0191-agent-mediated-member-creation-and-thirteen-skill-inventory.md)。
 Memory 单命令的局部 Transport 决策见
 [ADR-0180](../adr/0180-single-agent-memory-write-command.md)，独立 Hearth Review 与 actor-bounded mutation
 组合见 [Online Memory Capture](online-memory-capture.md)。Complete exact-Scope View 与 copyable target
@@ -63,7 +63,8 @@ Core BuiltinToolRouter
     ├── Public Camp Message / Message Delivery service
     ├── Collaboration / Task service
     ├── Camp History service
-    └── Memory Retrieval / Mutation service
+    ├── Memory Retrieval / Mutation service
+    └── Member Profile service + narrow managed-avatar importer
 ```
 
 业务调用的响应路径是：
@@ -100,10 +101,11 @@ Core 只维护一份 catalog。它服务 IPC 校验、合同测试、Qualificati
 identity 不构成 Agent discovery 协议。
 
 Agent Runtime 没有 `rovai tool list`、`rovai tool describe`、隐藏 discovery、`tool invoke` 或
-`tool call`。Agent 只使用十三个固定业务命令：
+`tool call`。Agent 只使用十四个固定业务命令：
 
 ```text
 rovai send
+rovai member create
 rovai task create|get|update|list
 rovai camp list|search|read
 rovai history search
@@ -125,8 +127,14 @@ Send exact help 公开 line-leading display-name alias：它必须是 logical li
 显示名后跟 whitespace/EOF；trailing handoff 使用专门 final line。`--to` 仍只接受 canonical ID，稳定自动化
 优先使用 `agent_N`，`effectiveRecipients=[]` 表示没有 Agent 路由。Parser 和 alias map 属于 Domain Service；
 CLI、Runtime Adapter、Bootstrap 与 Skill 都不重写正文。该 teaching/schema 继续进入当前 catalog digest。
-v11 的 contract/CLI command version 与 Runtime capability 变化来自 Memory View/target closed wire shape；Binding
+v12 的 contract/CLI command version 与 Runtime capability 变化来自 `member.create` closed wire shape；Binding
 compatibility 继续同时校验 version 与 digest。
+
+`member.create` 只接受 attested active、direct user-triggered AgentRun。Agent 依照 `member-studio` 展示完整
+名牌并取得用户确认，可选地把当前 Run 中 Core 可读的 PNG/JPEG 路径交给 CLI；Core 在领域提交前完成
+有界解码、轻量方形粗裁和 managed asset 发布。临时路径只存在于调用输入，不进入 Command payload、
+canonical result 或 Evidence；这条 narrow importer 与 Renderer 上传继续写出相同的 avatar manifest v1，
+但不形成通用文件导入或 Main↔Core bridge。
 
 ## Agent Result Projection
 
@@ -135,6 +143,7 @@ compatibility 继续同时校验 version 与 digest。
 | Operation | Projection |
 | --- | --- |
 | `camp.message.send` | `{messageId, effectiveRecipients}` |
+| `member.create` | `{agentId, version, avatarRef, avatarStatus}` |
 | `team.create_task` | `{taskId, title, status, assigneeAgentId, version, availableActions}` |
 | `team.get_task` | 完整 `TaskDetail` |
 | `team.update_task` | `{taskId, title, status, assigneeAgentId, version, changed, availableActions}` |
@@ -368,9 +377,9 @@ failure 或 `delivery_unknown` 都不能替代它。各层不得通过复制完�
 
 Bootstrap v3 按固定顺序组装 Session Charter、`MEMBER_IDENTITY` 和 Memory Entrypoint。Charter
 文案变化本身不参与 Native Binding compatibility digest，也不主动轮换全部既有 Native Session；既有
-Run 与 Bootstrap Evidence 不回写，新建 Native Session 使用当前内置 Charter。Built-in Transport v11
+Run 与 Bootstrap Evidence 不回写，新建 Native Session 使用当前内置 Charter。Built-in Transport v12
 另外改变 catalog digest；Antigravity 的既有 binding compatibility 已包含 Built-in contract version 与
-catalog digest，因此会建立 replacement Session。其他 Runtime 的续接进程直接使用当前 v11 CLI、精确 help
+catalog digest，因此会建立 replacement Session。其他 Runtime 的续接进程直接使用当前 v12 CLI、精确 help
 与 official Skill Revision，不因 Charter copy 单独丢弃 Native Session。
 `MEMBER_IDENTITY` 是该 Native Session 唯一的 self identity，包含最新已提交的完整六字段；它只在
 既有 eligible Bootstrap boundary 原子读取，不进入 AgentRun Dynamic Context，不持久化 Identity
@@ -469,5 +478,5 @@ Activity。命令文本、时间、cwd 或输出相似度不能建立关联。Sh
   退出码 `3`，必须先确认当前状态；
 - `camp.message.send` 的内部 Camp 不变量失败：fail closed，不加入稳定 Agent error contract；
 - external MCP 失败：遵循其独立 non-blocking degradation，不回退为 built-in MCP；
-- 任一正式 Runtime 未通过 v11 command、projection、replay、fence 和 negative-path 验收：版本不
+- 任一正式 Runtime 未通过 v12 command、projection、replay、fence 和 negative-path 验收：版本不
   得完成。

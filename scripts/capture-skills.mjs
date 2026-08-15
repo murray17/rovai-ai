@@ -82,15 +82,15 @@ try {
   await waitForExpression(cdp, `Boolean(document.querySelector('.settings-sidebar-menu'))`, 5_000)
   await openSection(cdp, 'Skill')
   await waitForExpression(cdp, `Boolean(document.querySelector('.skill-settings')) && (
-    document.querySelectorAll('.skill-card').length === 10
+    document.querySelectorAll('.skill-card').length === 11
       || Boolean(document.querySelector('.skill-page-error'))
   )`, 30_000)
   const initialSkillState = await evaluate(cdp, `({
     cardCount: document.querySelectorAll('.skill-card').length,
     error: document.querySelector('.skill-page-error')?.textContent?.trim() ?? null
   })`)
-  if (initialSkillState.cardCount !== 10 || initialSkillState.error) {
-    throw new Error(`Skill settings did not load the ten configurable official Skills: ${JSON.stringify(initialSkillState)}`)
+  if (initialSkillState.cardCount !== 11 || initialSkillState.error) {
+    throw new Error(`Skill settings did not load the eleven configurable official Skills: ${JSON.stringify(initialSkillState)}`)
   }
 
   await waitForEvaluation(cdp, `(async () => (
@@ -282,7 +282,9 @@ try {
         'diagnosing-bugs',
         'grill-duo',
         'grill-duo-with-docs',
+        'member-studio',
         'memory-stewardship',
+        'review-duo',
         'tasteful-ui',
         'tdd',
         'worktree',
@@ -292,16 +294,18 @@ try {
         'cli-operations',
         'memory-stewardship'
       ])
-      || result.bundledCount !== 5
+      || result.bundledCount !== 7
       || !result.bundledBadges.every((badge) => badge === 'Rovai')
       || result.thirdPartyCount !== 4
-      || result.enabledOfficialCount !== 9
+      || result.enabledOfficialCount !== 11
       || JSON.stringify(result.skillNames) !== JSON.stringify([
         'analyze-agent-codebase',
         'campfire',
         'diagnosing-bugs',
         'grill-duo',
         'grill-duo-with-docs',
+        'member-studio',
+        'review-duo',
         'tasteful-ui',
         'tdd',
         'worktree',

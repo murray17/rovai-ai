@@ -189,7 +189,7 @@ Related: Session entrypoint 与 Built-in operation 只作为交叉导航，不�
 
 - **何时阅读：** 修改 Skill/MCP projection、Built-in transport、CLI、catalog 或 Agent output 时阅读。
 - **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
-- **当前合同：** [Built-in Tool Transport v11](../contracts/builtin-tool-transport-v11.md)
+- **当前合同：** [Built-in Tool Transport v12](../contracts/builtin-tool-transport-v12.md)
 
 <!-- adr-current-primary:begin topic=skills-mcp-builtins -->
 | ADR | Decision |
@@ -207,8 +207,8 @@ Related: Session entrypoint 与 Built-in operation 只作为交叉导航，不�
 | [ADR-0161](0161-event-driven-root-scoped-skill-projection-reconciliation.md) | Event-Driven Root-Scoped Skill Projection Reconciliation |
 | [ADR-0166](0166-progressive-built-in-cli-teaching.md) | Progressive Built-In CLI Teaching |
 | [ADR-0180](0180-single-agent-memory-write-command.md) | Single Agent Memory Write Command with Outcome-Discriminated Output |
-| [ADR-0181](0181-twelve-skill-official-inventory-and-runtime-aligned-collaboration.md) | Twelve-Skill Official Inventory and Runtime-Aligned Collaboration |
 | [ADR-0188](0188-bundled-skill-bootstrap-fast-path-and-execution-integrity.md) | Bundled Skill Bootstrap Fast Path and Execution-Time Integrity |
+| [ADR-0191](0191-agent-mediated-member-creation-and-thirteen-skill-inventory.md) | Agent-Mediated Member Creation and Thirteen-Skill Official Inventory |
 <!-- adr-current-primary:end -->
 
 Related: 具体 Skill 名称或版本不是治理例外；长期边界仍按本主题的一般 ADR 准入规则判断。

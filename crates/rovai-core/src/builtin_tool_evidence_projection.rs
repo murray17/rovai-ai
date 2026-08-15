@@ -6,7 +6,8 @@ use crate::{
         CAMP_LIST_TOOL_NAME, CAMP_READ_TOOL_NAME, CAMP_SEARCH_TOOL_NAME, HISTORY_SEARCH_TOOL_NAME,
     },
     command::canonical_json_digest,
-    memory_retrieval::{MEMORY_READ_TOOL_NAME, MEMORY_SEARCH_TOOL_NAME},
+    member_studio::MEMBER_CREATE_TOOL_NAME,
+    memory_retrieval::{MEMORY_READ_TOOL_NAME, MEMORY_SEARCH_TOOL_NAME, MEMORY_VIEW_TOOL_NAME},
     memory_secret,
     memory_tool::MEMORY_WRITE_TOOL_NAME,
     message_delivery::CAMP_MESSAGE_SEND_TOOL_NAME,
@@ -87,6 +88,32 @@ fn project_input(operation: &str, input: &Value) -> Result<Value> {
             );
             insert_identifier(&mut projected, "taskId", input.get("taskId"));
             insert_content_facts(&mut projected, input.get("body"));
+        }
+        MEMBER_CREATE_TOOL_NAME => {
+            insert_identifier(&mut projected, "creationKey", input.get("creationKey"));
+            insert_semantic_text(&mut projected, "displayName", input.get("displayName"));
+            insert_semantic_text(&mut projected, "teamRole", input.get("teamRole"));
+            insert_semantic_text(
+                &mut projected,
+                "professionalResponsibilities",
+                input.get("professionalResponsibilities"),
+            );
+            insert_bounded_semantic_array(
+                &mut projected,
+                "personalityTraits",
+                input.get("personalityTraits"),
+                80,
+            );
+            insert_semantic_text(
+                &mut projected,
+                "workingPrinciples",
+                input.get("workingPrinciples"),
+            );
+            insert_semantic_text(&mut projected, "growthTopic", input.get("growthTopic"));
+            projected.insert(
+                "avatarFilePresent".to_string(),
+                json!(input.get("avatarFile").and_then(Value::as_str).is_some()),
+            );
         }
         TEAM_CREATE_TASK_TOOL_NAME => {
             insert_semantic_text(&mut projected, "title", input.get("title"));
@@ -191,6 +218,14 @@ fn project_input(operation: &str, input: &Value) -> Result<Value> {
         MEMORY_READ_TOOL_NAME => {
             insert_string_array(&mut projected, "memoryIds", input.get("memoryIds"));
         }
+        MEMORY_VIEW_TOOL_NAME => {
+            insert_enum(&mut projected, "scope", input.get("scope"));
+            insert_identifier(
+                &mut projected,
+                "counterpartyAgentId",
+                input.get("counterpartyAgentId"),
+            );
+        }
         MEMORY_WRITE_TOOL_NAME => {
             project_memory_mutation_input(&mut projected, input);
         }
@@ -231,6 +266,12 @@ fn project_result(operation: &str, result: &Value) -> Result<Value> {
                 "allocatedAgentRunResponsibilities",
                 result.get("allocatedAgentRunResponsibilities"),
             );
+        }
+        MEMBER_CREATE_TOOL_NAME => {
+            insert_identifier(&mut projected, "agentId", result.get("agentId"));
+            insert_i64(&mut projected, "version", result.get("version"));
+            insert_identifier(&mut projected, "avatarRef", result.get("avatarRef"));
+            insert_enum(&mut projected, "avatarStatus", result.get("avatarStatus"));
         }
         TEAM_CREATE_TASK_TOOL_NAME | TEAM_GET_TASK_TOOL_NAME | TEAM_UPDATE_TASK_TOOL_NAME => {
             project_task_result(&mut projected, result);
@@ -300,6 +341,14 @@ fn project_result(operation: &str, result: &Value) -> Result<Value> {
             projected.insert("memories".to_string(), Value::Array(memories.values));
             projected.insert("memoryCount".to_string(), json!(memories.total));
             projected.insert("memoriesTruncated".to_string(), json!(memories.truncated));
+        }
+        MEMORY_VIEW_TOOL_NAME => {
+            insert_enum(&mut projected, "scope", result.get("scope"));
+            insert_bool(&mut projected, "complete", result.get("complete"));
+            insert_i64(&mut projected, "itemCount", result.get("itemCount"));
+            let memories = project_object_array(result.get("items"), project_memory_result);
+            projected.insert("items".to_string(), Value::Array(memories.values));
+            projected.insert("itemsTruncated".to_string(), json!(memories.truncated));
         }
         MEMORY_WRITE_TOOL_NAME => {
             insert_enum(&mut projected, "outcome", result.get("outcome"));
@@ -669,6 +718,30 @@ mod tests {
                 .unwrap()
                 .contains("Please review the patch")
         );
+    }
+
+    #[test]
+    fn member_create_records_avatar_presence_without_persisting_the_local_path() {
+        let projected = projection(
+            MEMBER_CREATE_TOOL_NAME,
+            json!({
+                "creationKey": "2b945f3f-4b45-4ae5-92b2-739fce600338",
+                "displayName": "Nova",
+                "teamRole": "Researcher",
+                "avatarFile": "/private/run/avatar.png"
+            }),
+            json!({
+                "agentId": "agent_27",
+                "version": 1,
+                "avatarRef": "rovai://member-avatar/managed/2b945f3f-4b45-4ae5-92b2-739fce600338",
+                "avatarStatus": "saved"
+            }),
+        );
+        assert_eq!(projected["canonicalInput"]["avatarFilePresent"], true);
+        assert_eq!(projected["canonicalResult"]["agentId"], "agent_27");
+        let encoded = serde_json::to_string(&projected).unwrap();
+        assert!(!encoded.contains("/private/run/avatar.png"));
+        assert!(!encoded.contains("avatarFile\""));
     }
 
     #[test]

@@ -10,7 +10,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use rusqlite::{OptionalExtension, Row, Transaction, params};
+use rusqlite::{OptionalExtension, Row, Transaction, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -123,6 +123,12 @@ const MEMORY_STEWARDSHIP_WORKFLOW_REFERENCE: &str =
     include_str!("../../../skills/memory-stewardship/references/read-write-workflow.md");
 const MEMORY_STEWARDSHIP_CONTENT_REFERENCE: &str =
     include_str!("../../../skills/memory-stewardship/references/content-and-keys.md");
+const MEMBER_STUDIO_RULES: &str = include_str!("../../../skills/member-studio/SKILL.md");
+const MEMBER_STUDIO_OPENAI: &str = include_str!("../../../skills/member-studio/agents/openai.yaml");
+const MEMBER_STUDIO_IDENTITY_REFERENCE: &str =
+    include_str!("../../../skills/member-studio/references/identity-generation.md");
+const MEMBER_STUDIO_AVATAR_REFERENCE: &str =
+    include_str!("../../../skills/member-studio/references/avatar-sourcing.md");
 const WORKTREE_RULES: &str = include_str!("../../../skills/worktree/SKILL.md");
 const WORKTREE_OPENAI: &str = include_str!("../../../skills/worktree/agents/openai.yaml");
 const GRILL_DUO_RULES: &str = include_str!("../../../skills/grill-duo/SKILL.md");
@@ -427,6 +433,7 @@ struct ExistingSkill {
     lifecycle_status: String,
     current_revision_id: String,
     current_digest: String,
+    current_source_type: SkillRevisionSourceType,
     version: i64,
 }
 
@@ -512,6 +519,21 @@ const MEMORY_STEWARDSHIP_FILES: &[(&str, &str, u32)] = &[
     (
         "references/content-and-keys.md",
         MEMORY_STEWARDSHIP_CONTENT_REFERENCE,
+        0o644,
+    ),
+];
+
+const MEMBER_STUDIO_FILES: &[(&str, &str, u32)] = &[
+    ("SKILL.md", MEMBER_STUDIO_RULES, 0o644),
+    ("agents/openai.yaml", MEMBER_STUDIO_OPENAI, 0o644),
+    (
+        "references/identity-generation.md",
+        MEMBER_STUDIO_IDENTITY_REFERENCE,
+        0o644,
+    ),
+    (
+        "references/avatar-sourcing.md",
+        MEMBER_STUDIO_AVATAR_REFERENCE,
         0o644,
     ),
 ];
@@ -620,6 +642,13 @@ const BUNDLED_SKILLS: &[BundledDefinition] = &[
         upstream_repository: None,
         upstream_revision: None,
         management_policy: SkillManagementPolicy::SystemRequired,
+    },
+    BundledDefinition {
+        name: "member-studio",
+        files: MEMBER_STUDIO_FILES,
+        upstream_repository: None,
+        upstream_revision: None,
+        management_policy: SkillManagementPolicy::UserManaged,
     },
     BundledDefinition {
         name: "worktree",
@@ -1573,18 +1602,16 @@ impl SkillLibraryService {
                 anyhow::bail!("official Skill names must not use the rovai- prefix");
             }
             let expected = bundled_candidate_snapshot(definition)?;
-            let existing = load_existing_skill_by_name(database, definition.name)?;
-            if let Some(existing) = &existing
-                && existing.origin != SkillOrigin::Official
-            {
-                anyhow::bail!(
-                    "Imported Skill {} conflicts with a required official Skill",
-                    definition.name
-                );
+            let promoted = promote_imported_skill_to_official(database, definition.name)?;
+            if promoted {
+                report.changed = true;
             }
-            if let Some(existing) = existing
-                .as_ref()
-                .filter(|value| value.current_digest == expected.content_digest)
+            let existing = load_existing_skill_by_name(database, definition.name)?;
+            if !promoted
+                && let Some(existing) = existing.as_ref().filter(|value| {
+                    value.current_digest == expected.content_digest
+                        && value.current_source_type == SkillRevisionSourceType::Bundled
+                })
                 && bundled_revision_tree_matches(
                     &self.revision_content_path(&existing.id, &existing.current_revision_id),
                     definition,
@@ -1616,10 +1643,10 @@ impl SkillLibraryService {
                     definition.name
                 );
             }
-            if existing
-                .as_ref()
-                .is_some_and(|value| value.current_digest == verified.content_digest)
-            {
+            if existing.as_ref().is_some_and(|value| {
+                value.current_digest == verified.content_digest
+                    && value.current_source_type == SkillRevisionSourceType::Bundled
+            }) {
                 let existing = existing
                     .as_ref()
                     .context("Bundled Skill disappeared during verification")?;
@@ -2078,7 +2105,8 @@ fn load_existing_skill_by_name(database: &Database, name: &str) -> Result<Option
         .query_row(
             r#"
             SELECT skill.id, skill.origin, skill.enabled, skill.lifecycle_status,
-                   skill.current_revision_id, revision.content_digest, skill.version
+                   skill.current_revision_id, revision.content_digest, skill.version,
+                   revision.source_type
             FROM skill
             JOIN skill_revision AS revision ON revision.id = skill.current_revision_id
             WHERE skill.name = ?1
@@ -2094,11 +2122,52 @@ fn load_existing_skill_by_name(database: &Database, name: &str) -> Result<Option
                     current_revision_id: row.get(4)?,
                     current_digest: row.get(5)?,
                     version: row.get(6)?,
+                    current_source_type: SkillRevisionSourceType::parse(&row.get::<_, String>(7)?)
+                        .map_err(anyhow_to_sql_error)?,
                 })
             },
         )
         .optional()
         .map_err(Into::into)
+}
+
+fn promote_imported_skill_to_official(database: &mut Database, name: &str) -> Result<bool> {
+    let existing = load_existing_skill_by_name(database, name)?;
+    let Some(existing) = existing.filter(|skill| skill.origin == SkillOrigin::Imported) else {
+        return Ok(false);
+    };
+    let transaction = database
+        .connection_mut()
+        .transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let now = Utc::now().to_rfc3339();
+    let changed = transaction.execute(
+        r#"
+        UPDATE skill
+        SET origin = 'official', lifecycle_status = 'active',
+            deletion_requested_at = NULL, version = version + 1, updated_at = ?1
+        WHERE id = ?2 AND version = ?3 AND origin = 'imported'
+        "#,
+        params![now, existing.id, existing.version],
+    )?;
+    if changed != 1 {
+        anyhow::bail!("Imported Skill changed while being promoted to official inventory");
+    }
+    append_skill_event(
+        &transaction,
+        "skill.import_promoted_to_official",
+        &existing.id,
+        &ActorRef::System {
+            component_id: "skill-library-bootstrap".to_string(),
+        },
+        json!({
+            "skillId": existing.id,
+            "name": name,
+            "previousOrigin": "imported",
+            "origin": "official",
+        }),
+    )?;
+    transaction.commit()?;
+    Ok(true)
 }
 
 fn insert_revision(
@@ -3465,6 +3534,7 @@ mod tests {
                 "diagnosing-bugs",
                 "grill-duo",
                 "grill-duo-with-docs",
+                "member-studio",
                 "memory-stewardship",
                 "review-duo",
                 "tasteful-ui",
@@ -4124,7 +4194,7 @@ mod tests {
         service.install_bundled_skills(&mut database).unwrap();
 
         let skills = service.list(&database).unwrap();
-        assert_eq!(skills.len(), 12);
+        assert_eq!(skills.len(), 13);
         assert!(skills.iter().all(|skill| !skill.name.starts_with("rovai-")));
         let restored = skills
             .iter()
@@ -4161,6 +4231,73 @@ mod tests {
         fs::write(location.join("SKILL.md"), "tampered").unwrap();
         assert!(service.reveal_location(&database, &skill.id).is_err());
         remove_directory_if_present(&root).unwrap();
+        remove_directory_if_present(&data).unwrap();
+    }
+
+    #[test]
+    fn bootstrap_promotes_a_preexisting_import_when_inventory_claims_its_name() {
+        let root = temporary_directory("rovai-skill-library");
+        let source = temporary_directory("rovai-skill-source");
+        let data = temporary_directory("rovai-skill-db");
+        let mut database = Database::open(&data).unwrap();
+        let service = SkillLibraryService::new(root.clone()).unwrap();
+        let definition = BUNDLED_SKILLS
+            .iter()
+            .find(|definition| definition.name == "member-studio")
+            .unwrap();
+        let imported_path = source.join("member-studio");
+        materialize_bundled_definition(&imported_path, definition).unwrap();
+        let inspection = service.inspect_import(&database, &imported_path).unwrap();
+        let candidate = &inspection.candidates[0];
+        service
+            .commit_import(
+                &mut database,
+                &user_envelope(
+                    "import-member-studio-before-bundle",
+                    CommitSkillImportCommand {
+                        staging_token: inspection.staging_token.clone(),
+                        candidate_name: candidate.name.clone(),
+                        expected_digest: candidate.content_digest.clone(),
+                        expected_skill_version: candidate.existing_skill_version,
+                        confirm_update: false,
+                    },
+                ),
+            )
+            .unwrap();
+        let imported = service
+            .list(&database)
+            .unwrap()
+            .into_iter()
+            .find(|skill| skill.name == "member-studio")
+            .unwrap();
+        assert_eq!(imported.origin, SkillOrigin::Imported);
+
+        service.install_bundled_skills(&mut database).unwrap();
+
+        let promoted = service
+            .list(&database)
+            .unwrap()
+            .into_iter()
+            .find(|skill| skill.name == "member-studio")
+            .unwrap();
+        assert_eq!(promoted.id, imported.id);
+        assert_eq!(promoted.origin, SkillOrigin::Official);
+        assert_ne!(promoted.current_revision.id, imported.current_revision.id);
+        assert_eq!(
+            promoted.current_revision.source_type,
+            SkillRevisionSourceType::Bundled
+        );
+        let promotion_events: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM event_log WHERE event_type = 'skill.import_promoted_to_official'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(promotion_events, 1);
+        remove_directory_if_present(&root).unwrap();
+        remove_directory_if_present(&source).unwrap();
         remove_directory_if_present(&data).unwrap();
     }
 

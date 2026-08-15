@@ -2,14 +2,14 @@
 document_type: adr
 id: ADR-0181
 title: Twelve-Skill Official Inventory and Runtime-Aligned Collaboration
-status: accepted
+status: superseded
 date: 2026-08-14
 decision_scope: cross-version
 source_version: v0.74
 supersedes:
   - ADR-0176
 intended_supersedes: []
-superseded_by: null
+superseded_by: ADR-0191
 ---
 
 # ADR-0181: Twelve-Skill Official Inventory and Runtime-Aligned Collaboration

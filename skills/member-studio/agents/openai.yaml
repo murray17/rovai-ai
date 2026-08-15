@@ -1,0 +1,4 @@
+interface:
+  display_name: "伙伴入队"
+  short_description: "从一个名字整理队员身份与头像，确认后加入 Rovai 名册"
+  default_prompt: "使用 $member-studio 创建一位新队员：从名字开始，帮我整理团队角色、专业职责、性格底色、工作准则和成长课题，并准备合适的头像。先展示完整队员名牌，我确认后加入队伍。"

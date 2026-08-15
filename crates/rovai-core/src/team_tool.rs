@@ -24,6 +24,7 @@ use crate::{
     },
     db::Database,
     execution_budget::{PRODUCT_MAX_ACCEPTED_A2A, camp_turn_execution_budget_now},
+    member_studio::MEMBER_CREATE_TOOL_NAME,
     message_delivery::{
         CAMP_MESSAGE_SEND_MAX_BODY_BYTES, CAMP_MESSAGE_SEND_TOOL_NAME, SendPublicA2aMessage,
         dispatch_accepted_deliveries, persist_public_a2a_message,
@@ -34,8 +35,9 @@ pub const TEAM_CREATE_TASK_TOOL_NAME: &str = "team.create_task";
 pub const TEAM_GET_TASK_TOOL_NAME: &str = "team.get_task";
 pub const TEAM_UPDATE_TASK_TOOL_NAME: &str = "team.update_task";
 pub const TEAM_LIST_TASKS_TOOL_NAME: &str = "team.list_tasks";
-pub const TEAM_TOOL_NAMES: [&str; 13] = [
+pub const TEAM_TOOL_NAMES: [&str; 14] = [
     CAMP_MESSAGE_SEND_TOOL_NAME,
+    MEMBER_CREATE_TOOL_NAME,
     TEAM_CREATE_TASK_TOOL_NAME,
     TEAM_GET_TASK_TOOL_NAME,
     TEAM_UPDATE_TASK_TOOL_NAME,
@@ -2141,6 +2143,114 @@ mod tests {
         assert!(body_description.contains("whitespace or end-of-body"));
         assert!(to_description.contains("canonical Agent ID"));
         assert!(to_description.contains("Display names are not accepted here"));
+    }
+
+    #[test]
+    fn confirmed_direct_run_can_create_one_idempotent_member_but_a2a_cannot() {
+        let mut fixture = Fixture::new();
+        let authenticated_run = AuthenticatedTeamToolRun {
+            camp_id: fixture.camp_id.clone(),
+            agent_id: "agent_1".to_string(),
+            agent_run_id: fixture.source_run_id.clone(),
+            execution_epoch: fixture.source_epoch,
+        };
+        let creation_key = Uuid::new_v4().to_string();
+        let input = crate::member_studio::MemberCreateInput {
+            creation_key: creation_key.clone(),
+            display_name: "Nova Test Member".to_string(),
+            team_role: "Researcher".to_string(),
+            professional_responsibilities: "Synthesize bounded evidence.".to_string(),
+            personality_traits: vec!["Precise".to_string()],
+            working_principles: "State evidence and uncertainty.".to_string(),
+            growth_topic: "Shorten feedback loops.".to_string(),
+            avatar_file: None,
+        };
+        let first = crate::member_studio::create_member(
+            &mut fixture.database,
+            &fixture.directory,
+            &authenticated_run,
+            input.clone(),
+        )
+        .unwrap();
+        assert_eq!(first.execution.result.status, CommandResultStatus::Applied);
+        assert!(!first.execution.replayed);
+        assert!(first.avatar_ref.is_none());
+        let replay = crate::member_studio::create_member(
+            &mut fixture.database,
+            &fixture.directory,
+            &authenticated_run,
+            input,
+        )
+        .unwrap();
+        assert!(replay.execution.replayed);
+        assert_eq!(
+            replay.execution.result.payload["agentId"],
+            first.execution.result.payload["agentId"]
+        );
+        let changed = crate::member_studio::create_member(
+            &mut fixture.database,
+            &fixture.directory,
+            &authenticated_run,
+            crate::member_studio::MemberCreateInput {
+                creation_key: creation_key.clone(),
+                display_name: "Nova Test Member".to_string(),
+                team_role: "Changed after confirmation".to_string(),
+                professional_responsibilities: "Synthesize bounded evidence.".to_string(),
+                personality_traits: vec!["Precise".to_string()],
+                working_principles: "State evidence and uncertainty.".to_string(),
+                growth_topic: "Shorten feedback loops.".to_string(),
+                avatar_file: None,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(
+            changed
+                .downcast_ref::<crate::member_studio::MemberCreateError>()
+                .unwrap()
+                .code,
+            "member.creation_key_conflict"
+        );
+
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET invocation_kind = 'a2a' WHERE id = ?1",
+                [&fixture.source_run_id],
+            )
+            .unwrap();
+        let blocked = crate::member_studio::create_member(
+            &mut fixture.database,
+            &fixture.directory,
+            &authenticated_run,
+            crate::member_studio::MemberCreateInput {
+                creation_key: Uuid::new_v4().to_string(),
+                display_name: "Blocked A2A Member".to_string(),
+                team_role: String::new(),
+                professional_responsibilities: String::new(),
+                personality_traits: Vec::new(),
+                working_principles: String::new(),
+                growth_topic: String::new(),
+                avatar_file: None,
+            },
+        )
+        .unwrap_err();
+        let blocked = blocked
+            .downcast_ref::<crate::member_studio::MemberCreateError>()
+            .unwrap();
+        assert_eq!(blocked.code, "member.user_confirmation_required");
+        assert_eq!(
+            fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM agent_profile WHERE display_name = 'Blocked A2A Member'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
     }
 
     #[test]
