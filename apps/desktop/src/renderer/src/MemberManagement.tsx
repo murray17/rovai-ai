@@ -974,10 +974,6 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
     resetFromAgent()
   }, [agent, dirty, resetFromAgent])
 
-  useEffect(() => {
-    if (selectedKind) onRuntimeEnsure?.(selectedKind)
-  }, [onRuntimeEnsure, selectedKind])
-
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
     if (!canSave) return
@@ -1424,13 +1420,6 @@ export function RuntimeInstallationsPanel({ health, onReload }: {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const availability = health?.runtimeAvailability ?? []
-
-  useEffect(() => {
-    for (const runtimeKind of PRODUCT_RUNTIMES) {
-      void window.rovai.request('runtime.product.ensure', { runtimeKind })
-        .catch(() => undefined)
-    }
-  }, [])
 
   const checkProduct = async (runtimeKind: AdapterKind): Promise<void> => {
     setBusy(`check-${runtimeKind}`)

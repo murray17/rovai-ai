@@ -154,7 +154,7 @@ use rovai_core::{
     runtime_discovery::{
         RuntimeDiscoveryObservation, RuntimeDiscoveryStatus, RuntimeSearchEnvironment,
         catalog_entries, discover_runtime_path, discover_runtime_version, is_executable_file,
-        with_runtime_search_environment,
+        runtime_allows_unattended_cli_execution, with_runtime_search_environment,
     },
     runtime_resolution::RuntimeResolutionService,
     skill::{
@@ -1254,7 +1254,9 @@ impl Core {
             match result {
                 Ok(observation) => {
                     self.publish_runtime_discovery(observation.clone()).await;
-                    if observation.discovery_status == RuntimeDiscoveryStatus::Found {
+                    if observation.discovery_status == RuntimeDiscoveryStatus::Found
+                        && runtime_allows_unattended_cli_execution(observation.runtime_kind)
+                    {
                         let search = search.clone();
                         version_tasks.spawn(async move {
                             let mut observation = observation;
@@ -8200,7 +8202,8 @@ fn registered_runtime_checks_due(
     installations
         .iter()
         .filter(|installation| {
-            installation.enabled
+            runtime_allows_unattended_cli_execution(installation.adapter_kind)
+                && installation.enabled
                 && installation.installation_class == InstallationClass::ManagedDefault
                 && registered_runtime_refresh_is_due(installation, now)
                 && !probe_retry_is_deferred(installation, now)
@@ -8224,7 +8227,11 @@ fn runtime_checks_after_discovery(
     scheduled.extend(
         selected
             .iter()
-            .filter(|kind| found.contains(kind) && !registered.contains(kind))
+            .filter(|kind| {
+                runtime_allows_unattended_cli_execution(**kind)
+                    && found.contains(kind)
+                    && !registered.contains(kind)
+            })
             .copied(),
     );
     scheduled
@@ -12041,6 +12048,10 @@ mod tests {
         disabled_registered.adapter_kind = AdapterKind::KiroCli;
         disabled_registered.enabled = false;
 
+        let mut interactive_registered =
+            managed_runtime_fixture(&(now - chrono::Duration::hours(30)).to_rfc3339(), None);
+        interactive_registered.adapter_kind = AdapterKind::TraeCnCli;
+
         let found = BTreeSet::from([
             AdapterKind::CodexCli,
             AdapterKind::OpencodeCli,
@@ -12048,13 +12059,15 @@ mod tests {
             AdapterKind::ClaudeCodeCli,
             AdapterKind::KiroCli,
             AdapterKind::QwenCode,
+            AdapterKind::TraeCnCli,
         ]);
-        let selected = BTreeSet::from([AdapterKind::CodexCli]);
+        let selected = BTreeSet::from([AdapterKind::CodexCli, AdapterKind::TraeCnCli]);
         let installations = [
             fresh_registered,
             due_registered,
             deferred_registered,
             disabled_registered,
+            interactive_registered,
         ];
 
         assert_eq!(
@@ -12065,6 +12078,12 @@ mod tests {
             registered_runtime_checks_due(&installations, now),
             BTreeSet::from([AdapterKind::CopilotCli])
         );
+        assert!(runtime_allows_unattended_cli_execution(
+            AdapterKind::CodexCli
+        ));
+        assert!(!runtime_allows_unattended_cli_execution(
+            AdapterKind::TraeCnCli
+        ));
     }
 
     #[test]

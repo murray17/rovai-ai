@@ -342,6 +342,14 @@ pub fn discover_runtime_path(
     }
 }
 
+pub fn runtime_allows_unattended_cli_execution(kind: AdapterKind) -> bool {
+    // TRAE CLI initializes its token store even for `--version` and checks
+    // macOS Keychain support by writing a temporary `test-key-*` item. That can
+    // present SecurityAgent UI, so every TRAE process launch must stay behind an
+    // explicit user action or an execution path.
+    !matches!(kind, AdapterKind::TraeCnCli)
+}
+
 pub async fn discover_runtime_version(
     observation: &mut RuntimeDiscoveryObservation,
     search: &RuntimeSearchEnvironment,
@@ -811,5 +819,15 @@ mod tests {
             "version enrichment is a separate bounded step"
         );
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn unattended_cli_execution_excludes_trae_keyring_initialization() {
+        assert!(runtime_allows_unattended_cli_execution(
+            AdapterKind::CodexCli
+        ));
+        assert!(!runtime_allows_unattended_cli_execution(
+            AdapterKind::TraeCnCli
+        ));
     }
 }
