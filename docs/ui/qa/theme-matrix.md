@@ -2,7 +2,7 @@
 document_type: ui-qa-contract
 authority: renderer-theme-verification
 status: accepted
-last_updated: 2026-08-13
+last_updated: 2026-08-16
 ---
 
 # Renderer 主题覆盖矩阵
@@ -27,7 +27,8 @@ Porcelain Day 与 Steel Night 必须在同一生产组件、数据和功能上�
 
 - `1040×700`: 最小窗口，无整页横向滚动或被遮挡的主要操作。
 - `1440×920`: 默认桌面基准。
-- `2560×1440`: prose/artifact/wide 三种宽度仍有清楚层级。
+- `2560×1440`: prose/artifact/wide/Composer 四种宽度仍有清楚层级，Composer 在 Day/Night
+  都以 `1440px` 为上限且不拉宽时间线、Dock 或执行台。
 - 200% zoom: Dialog、Dock、菜单、Popover 和 Inspector 仍可达。
 - reduced motion: 状态仍清楚，不依赖动画传达。
 

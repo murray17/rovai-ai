@@ -428,15 +428,30 @@ try {
   await openCamp(app.cdp, composerLayoutCampId)
   await waitForExpression(app.cdp,
     `document.querySelector('.camp-workspace')?.getAttribute('aria-label') === ${JSON.stringify(`会话：${composerLayoutCampTitle}`)}`)
+  await evaluate(app.cdp, `(() => {
+    const grid = document.querySelector('.workspace-grid')
+    const toggle = document.querySelector('.topbar-inspector-toggle[aria-pressed="false"]')
+    if (grid?.classList.contains('inspector-collapsed')) toggle?.click()
+    return true
+  })()`)
+  await waitForExpression(app.cdp, `!document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed')`)
   await wait(200)
   const wideComposerLayout = await collectWideComposerLayout(app.cdp)
   assert(wideComposerLayout.viewportWidth === 2560 && wideComposerLayout.viewportHeight === 1440,
     `2K viewport did not apply: ${JSON.stringify(wideComposerLayout)}`)
   assert(wideComposerLayout.documentScrollWidth <= wideComposerLayout.viewportWidth + 1
-    && wideComposerLayout.composerBoxWidth >= 1038
-    && wideComposerLayout.composerBoxWidth <= 1042,
-    `2K composer did not expand to about 1040px: ${JSON.stringify(wideComposerLayout)}`)
+    && wideComposerLayout.composerBoxWidth >= 1438
+    && wideComposerLayout.composerBoxWidth <= 1442
+    && wideComposerLayout.timelineTrackWidth >= 1038
+    && wideComposerLayout.timelineTrackWidth <= 1042,
+    `2K Composer or timeline width regressed: ${JSON.stringify(wideComposerLayout)}`)
   assert(Math.abs(wideComposerLayout.leftInset - wideComposerLayout.rightInset) <= 12
+    && wideComposerLayout.centerAxisDelta <= 1
+    && (wideComposerLayout.composerRouteRailWidth == null
+      || Math.abs(wideComposerLayout.composerRouteRailWidth - wideComposerLayout.composerBoxWidth) <= 1)
+    && (wideComposerLayout.composerRouteRailCenterDelta == null
+      || wideComposerLayout.composerRouteRailCenterDelta <= 1)
+    && !wideComposerLayout.inspectorCollapsed
     && wideComposerLayout.actionGap === 5
     && wideComposerLayout.enterHint === 'Enter'
     && wideComposerLayout.sendLabel === '发送'
@@ -446,6 +461,47 @@ try {
     `2K composer alignment or Enter/Send adjacency regressed: ${JSON.stringify(wideComposerLayout)}`)
   const wideCapture = join(outputDir, 'runtime-activity-wide.png')
   await capture(app.cdp, wideCapture)
+
+  await evaluate(app.cdp, `(() => {
+    document.querySelector('.topbar-inspector-toggle[aria-pressed="true"]')?.click()
+    return true
+  })()`)
+  await waitForExpression(app.cdp, `document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed')`)
+  const wideComposerWithoutInspector = await collectWideComposerLayout(app.cdp)
+  assert(wideComposerWithoutInspector.documentScrollWidth <= wideComposerWithoutInspector.viewportWidth + 1
+    && wideComposerWithoutInspector.composerBoxWidth >= 1438
+    && wideComposerWithoutInspector.composerBoxWidth <= 1442
+    && wideComposerWithoutInspector.timelineTrackWidth >= 1038
+    && wideComposerWithoutInspector.timelineTrackWidth <= 1042
+    && Math.abs(wideComposerWithoutInspector.leftInset - wideComposerWithoutInspector.rightInset) <= 12
+    && wideComposerWithoutInspector.centerAxisDelta <= 1
+    && wideComposerWithoutInspector.inspectorCollapsed,
+    `2K Composer expanded incorrectly with Inspector hidden: ${JSON.stringify(wideComposerWithoutInspector)}`)
+  const wideWithoutInspectorCapture = join(outputDir, 'runtime-activity-wide-inspector-hidden.png')
+  await capture(app.cdp, wideWithoutInspectorCapture)
+
+  await evaluate(app.cdp, `(() => {
+    document.querySelector('.topbar-inspector-toggle[aria-pressed="false"]')?.click()
+    return true
+  })()`)
+  await waitForExpression(app.cdp, `!document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed')`)
+  await app.cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 1799, height: 920, deviceScaleFactor: 1, mobile: false
+  })
+  await waitForExpression(app.cdp, `innerWidth === 1799 && innerHeight === 920`)
+  const regularComposerLayout = await collectWideComposerLayout(app.cdp)
+  assert(regularComposerLayout.documentScrollWidth <= regularComposerLayout.viewportWidth + 1
+    && regularComposerLayout.composerBoxWidth >= 1038
+    && regularComposerLayout.composerBoxWidth <= 1042
+    && regularComposerLayout.timelineTrackWidth >= 788
+    && regularComposerLayout.timelineTrackWidth <= 792
+    && Math.abs(regularComposerLayout.leftInset - regularComposerLayout.rightInset) <= 12
+    && regularComposerLayout.centerAxisDelta <= 1,
+    `Composer did not retain the 1040px cap below 1800px: ${JSON.stringify(regularComposerLayout)}`)
+  await app.cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 2560, height: 1440, deviceScaleFactor: 1, mobile: false
+  })
+  await waitForExpression(app.cdp, `innerWidth === 2560 && innerHeight === 1440`)
 
   await openCamp(app.cdp, campId)
   await waitForExpression(app.cdp,
@@ -1268,11 +1324,15 @@ async function collectWideComposerLayout(cdp) {
   return evaluate(cdp, `(() => {
     const composer = document.querySelector('.composer')
     const composerBox = composer?.querySelector('.composer-box')
+    const composerRouteRail = composer?.querySelector('.composer-route-rail')
+    const timelineTrack = document.querySelector('.timeline-track')
     const actions = composerBox?.querySelector('.composer-actions')
     const hint = actions?.querySelector('.composer-hint')
     const send = actions?.querySelector('.composer-send')
     const composerRect = composer?.getBoundingClientRect()
     const composerBoxRect = composerBox?.getBoundingClientRect()
+    const composerRouteRailRect = composerRouteRail?.getBoundingClientRect()
+    const timelineTrackRect = timelineTrack?.getBoundingClientRect()
     const hintRect = hint?.getBoundingClientRect()
     const sendRect = send?.getBoundingClientRect()
     const actionStyle = actions ? getComputedStyle(actions) : null
@@ -1281,8 +1341,17 @@ async function collectWideComposerLayout(cdp) {
       viewportHeight: innerHeight,
       documentScrollWidth: document.documentElement.scrollWidth,
       composerBoxWidth: composerBoxRect?.width ?? 0,
+      composerRouteRailWidth: composerRouteRailRect?.width ?? null,
+      timelineTrackWidth: timelineTrackRect?.width ?? 0,
       leftInset: composerRect && composerBoxRect ? composerBoxRect.left - composerRect.left : 0,
       rightInset: composerRect && composerBoxRect ? composerRect.right - composerBoxRect.right : 0,
+      centerAxisDelta: composerBoxRect && timelineTrackRect
+        ? Math.abs((composerBoxRect.left + composerBoxRect.width / 2) - (timelineTrackRect.left + timelineTrackRect.width / 2))
+        : Number.POSITIVE_INFINITY,
+      composerRouteRailCenterDelta: composerBoxRect && composerRouteRailRect
+        ? Math.abs((composerBoxRect.left + composerBoxRect.width / 2) - (composerRouteRailRect.left + composerRouteRailRect.width / 2))
+        : null,
+      inspectorCollapsed: document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed') ?? false,
       actionGap: Number.parseFloat(actionStyle?.columnGap ?? actionStyle?.gap ?? '0'),
       enterHint: hint?.textContent?.trim() ?? null,
       sendLabel: send?.textContent?.trim() ?? null,

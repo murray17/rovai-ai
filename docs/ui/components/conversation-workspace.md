@@ -9,7 +9,8 @@ last_updated: 2026-08-16
 
 Camp 是开放阅读面，不按角色铺不同底色。时间线、Agent 执行台、Approval/Recovery Dock 和
 Composer 共享主列；Inspector 是右侧辅助列。普通叙述保持 `76ch` 阅读宽度，代码、表格等工件
-可以扩展到 `930px`，2K Composer/工作区上限为 `1040px`。
+可以扩展到 `930px`，宽会话轨道与 Dock 上限保持 `1040px`；Composer 常规上限为 `1040px`，
+viewport `>= 1800px` 时独立扩展到 `1440px`。
 
 ## 打开与渐进历史
 
@@ -195,7 +196,8 @@ Agent/AgentRun 级 Stop。终态用户取消以一条“你已在 {耗时} 后�
 
 ## Camp Composer
 
-Composer 与消息轨道同宽同轴，Inspector 显隐不得改变二者关系。发送、Stop、Approval Dock、
+Composer 与消息轨道共享中心轴但拥有独立宽度；`.composer-box` 与 `.composer-route-rail` 必须同宽、
+居中、同轴，Inspector 显隐不得改变这些关系。发送、Stop、Approval Dock、
 附件、Skill 候选、Mention、reply intent 和 continuation intent 都使用同一 Core-owned Draft；任何浮层
 都不能建立第二份草稿真源。回复条位于附件队列之上、正文编辑器之内，并与 Composer 共用开放工作面，
 不创建 focus trap。鼠标点击 Composer 任意位置都不增加编辑器内层描边；键盘进入仍保留局部焦点提示。

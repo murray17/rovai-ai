@@ -114,6 +114,7 @@
   --conversation-prose-width: 76ch;
   --conversation-artifact-width: 930px;
   --conversation-wide-width: 1040px;
+  --conversation-composer-width: 1040px;
 
 }
 
@@ -2398,12 +2399,12 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
 
 details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-size: 11px; cursor: pointer; }
 .composer { position: relative; flex: 0 0 auto; margin: 0; padding: 0 27px 14px; background: var(--conversation-surface); }
-.composer-route-rail { display: flex; width: min(var(--conversation-wide-width), 100%); min-height: 34px; margin: 0 auto 5px; align-items: center; gap: 7px; padding: 0 4px 0 2px; color: var(--faint); }
+.composer-route-rail { display: flex; width: min(var(--conversation-composer-width), 100%); min-height: 34px; margin: 0 auto 5px; align-items: center; gap: 7px; padding: 0 4px 0 2px; color: var(--faint); }
 .composer-route-rail::before { width: 2px; height: 16px; flex: 0 0 2px; border-radius: 3px; background: var(--brand); content: ""; }
 .composer-route-rail .mention-target-summary { display: inline-flex; min-width: 0; align-items: center; gap: 4px; }
 .composer-route-rail .mention-target-summary > svg { width: 12px; height: 12px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.35; }
 .composer-route-rail .mention-target-summary > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.composer-box { position: relative; display: grid; width: min(var(--conversation-wide-width), 100%); margin: 0 auto; gap: 2px; padding: 8px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--input); overflow: visible; transition: border-color 120ms ease, box-shadow 120ms ease; }
+.composer-box { position: relative; display: grid; width: min(var(--conversation-composer-width), 100%); margin: 0 auto; gap: 2px; padding: 8px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--input); overflow: visible; transition: border-color 120ms ease, box-shadow 120ms ease; }
 .composer-box:focus-within { border-color: var(--brand); box-shadow: 0 0 0 3px var(--focus-soft); }
 .composer.suppress-pointer-focus-ring .composer-box:focus-within { border-color: var(--control-line); box-shadow: none; }
 .composer.is-dragging-attachments { z-index: 10; }
@@ -2546,6 +2547,9 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
   .composer-box { transition: none; }
 }
 @media (min-width: 1800px) {
+  :root {
+    --conversation-composer-width: 1440px;
+  }
   .timeline-track { width: min(var(--conversation-wide-width), 100%); }
   .timeline-event-card { width: min(var(--conversation-artifact-width), 100%); }
   .approval-dock, .runtime-recovery-dock { width: min(var(--conversation-wide-width), calc(100% - 54px)); }

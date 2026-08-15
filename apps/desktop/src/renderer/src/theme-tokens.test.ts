@@ -257,10 +257,15 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.structured-mention-editor:focus-visible\s*\{[^}]*outline:\s*0/)
     expect(css).not.toContain('.composer.suppress-reply-focus-ring')
     expect(css).toMatch(/\.composer-continuation\s*\{[^}]*background:\s*transparent|\.composer-continuation\s*\{[^}]*color:/)
-    expect(css).toMatch(/\.composer-route-rail\s*\{[^}]*width:\s*min\(var\(--conversation-wide-width\), 100%\)[^}]*min-height:\s*34px/)
+    expect(css).toContain('--conversation-wide-width: 1040px;')
+    expect(css).toContain('--conversation-composer-width: 1040px;')
+    expect(css).toMatch(/\.composer-route-rail\s*\{[^}]*width:\s*min\(var\(--conversation-composer-width\), 100%\)[^}]*min-height:\s*34px/)
     expect(css).not.toContain('.message-surface.has-delivery .message-copy-button')
     expect(css).toMatch(
       /@media\s*\(min-width:\s*1800px\)[\s\S]*?\.timeline-track\s*\{[^}]*width:\s*min\(var\(--conversation-wide-width\), 100%\)/
+    )
+    expect(css).toMatch(
+      /@media\s*\(min-width:\s*1800px\)\s*\{\s*:root\s*\{[^}]*--conversation-composer-width:\s*1440px/
     )
     expect(css).toMatch(
       /\.conversation-bubble\.agent \.safe-markdown > :where\(pre, table\)\s*\{[^}]*width:\s*min\(var\(--conversation-artifact-width\), 100%\)/
@@ -280,9 +285,9 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).not.toContain('.tool-output-copy-button {\n  border: 1px')
   })
 
-  it('keeps the Composer on the responsive wide track with split tool and send actions', () => {
+  it('keeps the Composer on its responsive centered track with split tool and send actions', () => {
     expect(css).toMatch(
-      /\.composer-box\s*\{[^}]*width:\s*min\(var\(--conversation-wide-width\),\s*100%\)/
+      /\.composer-box\s*\{[^}]*width:\s*min\(var\(--conversation-composer-width\),\s*100%\)/
     )
     expect(css).toMatch(/\.composer-action-row\s*\{[^}]*justify-content:\s*space-between/)
     expect(css).toMatch(/\.composer-tools, \.composer-actions\s*\{[^}]*gap:\s*5px/)

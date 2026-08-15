@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: steel-night
 mode: dark
-last_updated: 2026-08-14
+last_updated: 2026-08-16
 ---
 
 # Steel Night
@@ -150,6 +150,7 @@ Night inherits the shared non-color structure from `:root`; aliases resolve agai
 | `--conversation-prose-width` | `76ch` |
 | `--conversation-artifact-width` | `930px` |
 | `--conversation-wide-width` | `1040px` |
+| `--conversation-composer-width` | `1040px`; viewport `>= 1800px` 时为 `1440px` |
 
 ## Brand, semantic, identity, and evidence color rules
 

@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: desktop-ui-acceptance-infrastructure
-last_updated: 2026-08-14
+last_updated: 2026-08-16
 ---
 
 # 桌面 UI 验收与隔离数据
@@ -173,9 +173,10 @@ pnpm accept:runtime-activity-ui
   显隐或页签。收起/展开不改变队列，解决最后一项后焦点返回 Composer；
 - Drawer 不提供 Agent 或 Run 级 Stop/Cancel/Retry；唯一 CampTurn Stop、Approval Dock 与 Composer 在
   `2560×1440`、`1440×920`、`1040×700`、200% zoom 和 reduced motion 下均可见、可键盘到达且不互相遮挡；
-- `2560×1440` 下 `.composer-box` 与会话工作列都接近 1040px，`Enter` keycap 位于发送按钮紧邻
-  左侧；用户与所有 Agent 普通正文使用同一开放阅读表面，叙述保持约 76ch，代码、表格、Task
-  和审批等现有结构化内容才可进入更宽工件通道，身份色只进入头像、名称或身份点；
+- `2560×1440` 下 `.composer-box` 与可见 `.composer-route-rail` 都接近 1440px、居中且同轴；Inspector
+  显隐后仍不超过 1440px。`.timeline-track`、Approval/Recovery Dock 与会话宽轨保持约 1040px，
+  `Enter` keycap 位于发送按钮紧邻左侧；用户与所有 Agent 普通正文使用同一开放阅读表面，叙述保持约
+  76ch，代码、表格、Task 和审批等现有结构化内容才可进入既有工件通道，身份色只进入头像、名称或身份点；
 - Canonical Activity 未报告工具时仍不补造 Tool 行；同一 Runtime 真实报告的 Tool 名称和 source 继续
   与 Runtime evidence 一致。
 - 超过 Renderer 预览上限且由 Managed Blob 保存完整 Payload 的 Tool 输出只在原 Evidence `pre`

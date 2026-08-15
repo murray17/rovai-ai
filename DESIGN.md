@@ -96,8 +96,9 @@ values and evidence.
 - Body copy is normally 12.5–13px with 1.6–1.7 line height.
 - Secondary text is not smaller than 10.5px. Smaller type is limited to short metadata that still
   meets contrast requirements.
-- Narrative prose is bounded at `76ch`; code, tables and other artifacts may grow to `930px`; wide
-  conversation composition reaches `1040px` on 2K displays.
+- Narrative prose is bounded at `76ch`; code, tables and other artifacts may grow to `930px`; the
+  shared wide conversation track remains `1040px`, while Composer reaches `1440px` at viewports
+  `>= 1800px`.
 - Weight, size, placement and whitespace establish hierarchy before color does.
 
 ## Layout
@@ -107,8 +108,9 @@ The minimum supported window is `1040×700`; reference checks also cover `1440×
 `2560×1440`, 200% zoom and reduced motion.
 
 Spacing follows the existing `4 / 8 / 12 / 16 / 20 / 24 / 32px` rhythm. Content stays aligned to
-stable axes. Ordinary conversation prose, Composer and the message copy affordance share a content
-track; wide artifacts may expand without moving narrative text. The whole app must not acquire a
+stable axes. Ordinary conversation prose and the message copy affordance share a content track;
+Composer uses an independent centered track, with its route rail and input box kept equal-width and
+coaxial. Wide artifacts may expand without moving narrative text. The whole app must not acquire a
 horizontal scrollbar.
 
 ## Elevation & Depth
