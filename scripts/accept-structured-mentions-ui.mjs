@@ -36,6 +36,7 @@ const outputDir = suppliedOutputDir
 const acceptanceHome = join(fixtureRoot, 'home')
 const debugPort = Number(process.env.ROVAI_STRUCTURED_MENTIONS_ACCEPT_DEBUG_PORT ?? 9491)
 const skillPickerOnly = cliArguments.includes('--skill-picker-only')
+const continuationOnly = cliArguments.includes('--continuation-only')
 const databasePath = join(dataDir, 'rovai.sqlite')
 const acceptanceExecutablePath = '/usr/bin/true'
 const targetMembers = [
@@ -300,6 +301,162 @@ try {
       selectedSkillText,
       skillPickerInspection,
       structuredContent: selectedSkillDraft.content,
+      clipboardItemCountBeforeTest: clipboardArchive.length,
+      clipboardRestored: false,
+      isolatedUserDataRemoved: false
+    }
+  } else if (continuationOnly) {
+    await selectWholeEditor(running.cdp)
+    await pressKey(running.cdp, {
+      key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
+    })
+    await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+      (draft) => deepEqual(draft.content, []), 10_000)
+    await waitForExpression(running.cdp, `(() => {
+      const rail = document.querySelector('.composer-route-rail')
+      const summary = rail?.querySelector('.mention-target-summary')
+      return rail?.getAttribute('aria-label') === '接收者路由'
+        && summary?.textContent?.trim() === ${JSON.stringify(`默认由 Lead · ${targetMembers[0].displayName}接收`)}
+    })()`)
+    const defaultRouteInspection = await evaluate(running.cdp, `(() => {
+      const rail = document.querySelector('.composer-route-rail')
+      const box = document.querySelector('.composer-box')
+      const summary = rail?.querySelector('.mention-target-summary')
+      const actionRow = box?.querySelector('.composer-action-row')
+      const attachmentButton = box?.querySelector('button[aria-label="添加文件"]')
+      const fileInput = box?.querySelector('input[type="file"]')
+      const composer = box?.closest('.composer')
+      if (!(rail instanceof HTMLElement)
+          || !(box instanceof HTMLElement)
+          || !(summary instanceof HTMLElement)
+          || !(actionRow instanceof HTMLElement)
+          || !(attachmentButton instanceof HTMLButtonElement)
+          || !(fileInput instanceof HTMLInputElement)
+          || !(composer instanceof HTMLElement)) return null
+      const railRect = rail.getBoundingClientRect()
+      const boxRect = box.getBoundingClientRect()
+      const composerRect = composer.getBoundingClientRect()
+      const composerStyle = getComputedStyle(composer)
+      const availableWidth = composerRect.width
+        - Number.parseFloat(composerStyle.paddingLeft)
+        - Number.parseFloat(composerStyle.paddingRight)
+      return {
+        railBeforeBox: rail.nextElementSibling === box,
+        routeOutsideInput: !box.contains(summary),
+        sharedLeftEdge: Math.abs(railRect.left - boxRect.left) < 0.5,
+        sharedWidth: Math.abs(railRect.width - boxRect.width) < 0.5,
+        boxWidth: boxRect.width,
+        fillsResponsiveTrack: Math.abs(boxRect.width - Math.min(1040, availableWidth)) < 1,
+        boxDisplay: getComputedStyle(box).display,
+        actionRowInsideBox: box.contains(actionRow),
+        attachmentLabel: attachmentButton.getAttribute('aria-label'),
+        acceptsMultipleFiles: fileInput.multiple,
+        fileInputDisplay: getComputedStyle(fileInput).display,
+        hasAiBeautifyAction: Boolean(document.querySelector('[aria-label*="美化"]'))
+      }
+    })()`)
+    assert(
+      defaultRouteInspection
+        && defaultRouteInspection.railBeforeBox
+        && defaultRouteInspection.routeOutsideInput
+        && defaultRouteInspection.sharedLeftEdge
+        && defaultRouteInspection.sharedWidth
+        && defaultRouteInspection.boxWidth <= 1041
+        && defaultRouteInspection.fillsResponsiveTrack
+        && defaultRouteInspection.boxDisplay === 'grid'
+        && defaultRouteInspection.actionRowInsideBox
+        && defaultRouteInspection.attachmentLabel === '添加文件'
+        && defaultRouteInspection.acceptsMultipleFiles
+        && defaultRouteInspection.fileInputDisplay === 'none'
+        && !defaultRouteInspection.hasAiBeautifyAction,
+      `Composer default route rail does not match option A: ${JSON.stringify(defaultRouteInspection)}`
+    )
+    await focusEditorAtEnd(running.cdp)
+    await running.cdp.send('Input.insertText', { text: '@' })
+    await waitForExpression(running.cdp, `(() => (
+      [...document.querySelectorAll('.structured-mention-menu button[role="option"]')]
+        .some((option) => option.querySelector('strong')?.textContent === ${JSON.stringify(targetMembers[1].displayName)})
+    ))()`)
+    await mouseClickMentionOption(running.cdp, targetMembers[1].displayName)
+    await waitForExpression(running.cdp, `(() => (
+      document.querySelector('#camp-message')?.textContent === ${JSON.stringify(`@${targetMembers[1].displayName} `)}
+        && document.activeElement?.id === 'camp-message'
+        && !document.querySelector('.composer-route-rail')
+    ))()`)
+    await focusEditorAtEnd(running.cdp)
+    const continuationMessageText = '继续发送验收'
+    await running.cdp.send('Input.insertText', { text: continuationMessageText })
+    const addressedDraft = await waitForValue(async () =>
+      request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
+      draft.body === `@${targetMembers[1].displayName} ${continuationMessageText}`
+        && deepEqual(draft.content, [
+          { kind: 'member_mention', agentId: targetMemberIds[1] },
+          { kind: 'text', text: ` ${continuationMessageText}` }
+        ]), 10_000)
+    await waitForExpression(running.cdp,
+      `document.querySelector('.composer .composer-send')?.disabled === false`)
+    const continuationStartedAt = Date.now()
+    await mouseClick(running.cdp, '.composer .composer-send')
+    await waitForExpression(running.cdp, `(() => {
+      const continuation = document.querySelector('.composer-continuation')
+      return continuation?.getAttribute('aria-label') === ${JSON.stringify(`继续发给 ${targetMembers[1].displayName}`)}
+        && continuation.textContent?.includes(${JSON.stringify(`继续发给 @${targetMembers[1].displayName}`)})
+        && document.querySelector('#camp-message')?.textContent === ''
+    })()`, 5_000)
+    const continuationVisibleAfterAcceptedSendMs = Date.now() - continuationStartedAt
+    const continuedDraft = await waitForValue(async () =>
+      request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
+      draft.content.length === 0
+        && draft.replyIntent === null
+        && draft.continuationIntent?.recipient.agentId === targetMemberIds[1], 5_000)
+    await focusEditorAtEnd(running.cdp)
+    await pressKey(running.cdp, {
+      key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37, nativeVirtualKeyCode: 123
+    })
+    const continuationLayoutInspection = await evaluate(running.cdp, `(() => {
+      const rail = document.querySelector('.composer-route-rail')
+      const continuation = rail?.querySelector('.composer-continuation')
+      const box = document.querySelector('.composer-box')
+      const editor = document.querySelector('#camp-message')
+      if (!(rail instanceof HTMLElement)
+          || !(continuation instanceof HTMLElement)
+          || !(box instanceof HTMLElement)
+          || !(editor instanceof HTMLElement)) return null
+      const railRect = rail.getBoundingClientRect()
+      const boxRect = box.getBoundingClientRect()
+      const boxStyle = getComputedStyle(box)
+      const editorStyle = getComputedStyle(editor)
+      return {
+        railBeforeBox: rail.nextElementSibling === box,
+        continuationOutsideInput: !box.contains(continuation),
+        sharedLeftEdge: Math.abs(railRect.left - boxRect.left) < 0.5,
+        sharedWidth: Math.abs(railRect.width - boxRect.width) < 0.5,
+        keyboardFocusOnBox: boxStyle.boxShadow !== 'none',
+        editorOutlineStyle: editorStyle.outlineStyle,
+        editorOutlineWidth: editorStyle.outlineWidth
+      }
+    })()`)
+    assert(
+      continuationLayoutInspection
+        && continuationLayoutInspection.railBeforeBox
+        && continuationLayoutInspection.continuationOutsideInput
+        && continuationLayoutInspection.sharedLeftEdge
+        && continuationLayoutInspection.sharedWidth
+        && continuationLayoutInspection.keyboardFocusOnBox
+        && continuationLayoutInspection.editorOutlineStyle === 'none'
+        && Number.parseFloat(continuationLayoutInspection.editorOutlineWidth) === 0,
+      `Composer continuation route rail or focus treatment regressed: ${JSON.stringify(continuationLayoutInspection)}`
+    )
+    result = {
+      acceptance: 'composer-continuation-ui',
+      appPath,
+      campId,
+      addressedDraft,
+      continuedDraft,
+      defaultRouteInspection,
+      continuationLayoutInspection,
+      continuationVisibleAfterAcceptedSendMs,
+      requiredRendererReload: false,
       clipboardItemCountBeforeTest: clipboardArchive.length,
       clipboardRestored: false,
       isolatedUserDataRemoved: false
@@ -1021,7 +1178,20 @@ try {
       && document.querySelector('.mention-target-summary')?.textContent === '发送给 @芝士'
       && document.querySelector('.composer-send')?.disabled === false
   ))()`)
+  const continuationStartedAt = Date.now()
   await mouseClick(running.cdp, '.composer-send')
+  await waitForExpression(running.cdp, `(() => {
+    const continuation = document.querySelector('.composer-continuation')
+    return continuation?.getAttribute('aria-label') === '继续发给 芝士'
+      && continuation.textContent?.includes('继续发给 @芝士')
+      && document.querySelector('#camp-message')?.textContent === ''
+  })()`, 5_000)
+  const continuationVisibleAfterAcceptedSendMs = Date.now() - continuationStartedAt
+  const continuedDraft = await waitForValue(async () =>
+    request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
+    draft.content.length === 0
+      && draft.replyIntent === null
+      && draft.continuationIntent?.recipient.agentId === targetMemberIds[1], 5_000)
   const sentReplySnapshot = await waitForValue(async () =>
     request(running.cdp, 'camps.snapshot', { campId }), (snapshot) =>
     snapshot.messages.some((message) => message.sequence > messageSequenceBeforeRecipientRepair)
@@ -1207,6 +1377,8 @@ try {
     unresolvedReplyDraft,
     unresolvedReplyInspection,
     resolvedReplyDraft,
+    continuedDraft,
+    continuationVisibleAfterAcceptedSendMs,
     sentReplyMessage,
     sentParentQuoteInspection,
     zoom200ReplyInspection,

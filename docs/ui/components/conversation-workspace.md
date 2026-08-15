@@ -102,8 +102,9 @@ Agent 公共正文不显示“来自执行”来源条，也不投影 compact �
 ## Recipient continuation
 
 当最近一条已接受 user message 的最终路由恰好是一个非 Lead 成员，且当前 Draft 没有 reply、显式
-Mention、修复或手动接收者修改时，Composer 左下显示轻量无框标签“继续发给 @成员”。标签不是正文
-Mention，也不创建父引用；发送成功时 Core 才把对象物化为 canonical Structured Mention。
+Mention、修复或手动接收者修改时，Composer 输入面上方的独立无框路由轨显示“继续发给 @成员”。
+路由轨与输入面共用同一条宽度轨道，但不计入正文编辑区高度。标签不是正文 Mention，也不创建父引用；
+发送成功时 Core 才把对象物化为 canonical Structured Mention。
 
 标签与默认 Lead 文案占用同一行。标签出现时不显示默认文案；显式 Member Mention、多人 Mention、
 `@所有队员` 和 reply 出现时两者都隐藏。点击标签的关闭按钮只取消当前来源延续并恢复

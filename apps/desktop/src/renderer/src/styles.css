@@ -2363,7 +2363,14 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
 
 details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-size: 11px; cursor: pointer; }
 .composer { position: relative; flex: 0 0 auto; margin: 0; padding: 0 27px 14px; background: var(--conversation-surface); }
-.composer-box { position: relative; display: flex; width: min(790px, 100%); margin: 0 auto; align-items: flex-end; gap: 8px; padding: 8px 8px 8px 12px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--input); overflow: visible; }
+.composer-route-rail { display: flex; width: min(var(--conversation-wide-width), 100%); min-height: 34px; margin: 0 auto 5px; align-items: center; gap: 7px; padding: 0 4px 0 2px; color: var(--faint); }
+.composer-route-rail::before { width: 2px; height: 16px; flex: 0 0 2px; border-radius: 3px; background: var(--brand); content: ""; }
+.composer-route-rail .mention-target-summary { display: inline-flex; min-width: 0; align-items: center; gap: 4px; }
+.composer-route-rail .mention-target-summary > svg { width: 12px; height: 12px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.35; }
+.composer-route-rail .mention-target-summary > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-box { position: relative; display: grid; width: min(var(--conversation-wide-width), 100%); margin: 0 auto; gap: 2px; padding: 8px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--input); overflow: visible; transition: border-color 120ms ease, box-shadow 120ms ease; }
+.composer-box:focus-within { border-color: var(--brand); box-shadow: 0 0 0 3px var(--focus-soft); }
+.composer.suppress-pointer-focus-ring .composer-box:focus-within { border-color: var(--control-line); box-shadow: none; }
 .composer.is-dragging-attachments { z-index: 10; }
 .composer.is-dragging-attachments .composer-box { border-color: var(--brand); box-shadow: 0 0 0 3px var(--focus-soft); }
 .composer-destination { position: absolute; z-index: 2; top: -11px; left: 14px; display: inline-flex; min-height: 20px; align-items: center; padding: 2px 8px; border: 1px solid color-mix(in srgb, var(--brand) 44%, var(--line)); border-radius: 999px; color: var(--brand-ink); background: var(--surface-raised); box-shadow: 0 2px 7px color-mix(in srgb, var(--ink) 9%, transparent); font-size: 9px; font-weight: 750; white-space: nowrap; }
@@ -2393,8 +2400,7 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .composer textarea:focus-visible { outline: 0; }
 .structured-mention-composer { width: 100%; }
 .structured-mention-editor { width: 100%; max-height: 180px; overflow-y: auto; outline: 0; }
-.structured-mention-editor:focus-visible { border-radius: 3px; outline: 2px solid var(--focus); outline-offset: 2px; }
-.composer.suppress-pointer-focus-ring .structured-mention-editor:focus-visible { outline: 0; }
+.structured-mention-editor:focus-visible { outline: 0; }
 .composer-reply-region { display: grid; min-width: 0; gap: 4px; padding: 1px 0 2px; }
 .composer-reply-line {
   display: grid;
@@ -2424,10 +2430,11 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .reply-recipient-empty { color: color-mix(in srgb, var(--attention) 78%, var(--ink)); font-size: 10px; line-height: 1.45; }
 .composer-reply-status { min-height: 0; color: var(--danger); font-size: 10px; line-height: 1.4; }
 .composer-continuation { display: inline-flex; width: fit-content; max-width: 100%; min-height: 20px; align-items: center; gap: 4px; overflow: hidden; color: var(--faint); font-size: 10px; line-height: 1.35; white-space: nowrap; }
+.composer-route-rail .composer-continuation { width: 100%; }
 .composer-continuation > svg { flex: 0 0 auto; width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.35; }
 .composer-continuation > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .composer-continuation strong { color: var(--mention-ink); font-weight: 680; }
-.composer-continuation button { display: grid; flex: 0 0 auto; width: 20px; height: 20px; margin: 0; padding: 0; place-items: center; border: 0; border-radius: 4px; color: var(--faint); background: transparent; cursor: pointer; }
+.composer-continuation button { display: grid; flex: 0 0 auto; width: 26px; height: 26px; margin: 0 0 0 auto; padding: 0; place-items: center; border: 0; border-radius: 5px; color: var(--faint); background: transparent; cursor: pointer; }
 .composer-continuation button svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 1.35; }
 .composer-continuation button:hover:not(:disabled) { color: var(--ink); background: var(--surface-muted); }
 .composer-continuation button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
@@ -2450,12 +2457,18 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 }
 .structured-mention-token.is-unavailable::after { margin-left: 3px; content: "!"; }
 .structured-mention-empty { margin: 0; padding: 9px 8px; color: var(--faint); font-size: 11px; }
-.composer-actions { display: flex; flex: 0 0 auto; gap: 5px; align-items: center; padding-bottom: 3px; }
+.composer-action-row { display: flex; min-width: 0; min-height: 32px; align-items: center; justify-content: space-between; gap: 10px; padding: 2px 0 0; }
+.composer-tools, .composer-actions { display: flex; min-width: 0; align-items: center; gap: 5px; }
+.composer-file-input { display: none; }
+.composer-attachment-button { display: grid; width: 28px; height: 28px; flex: 0 0 28px; padding: 0; place-items: center; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; }
+.composer-attachment-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.55; }
+.composer-attachment-button:hover:not(:disabled), .composer-attachment-button:focus-visible { color: var(--ink); background: var(--surface-muted); }
+.composer-attachment-button:focus-visible { outline: 0; }
+.composer-attachment-button:disabled { cursor: default; opacity: .42; }
 .composer-hint { padding: 2px 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--faint); background: var(--surface-subtle); font: 650 9px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
 .composer-send { min-height: 28px; padding: 5px 12px; border-radius: 6px; font-size: 12px; font-weight: 650; }
 .composer-stop { min-height: 28px; padding: 5px 14px; border-color: var(--danger); border-radius: 6px; color: var(--danger-contrast); background: var(--danger); font-size: 12px; font-weight: 700; }
 .composer-stop:hover:not(:disabled) { border-color: color-mix(in srgb, var(--danger) 82%, black); background: color-mix(in srgb, var(--danger) 82%, black); }
-.composer-box .mention-target-summary { margin-top: 2px; }
 .composer-attachment-strip { display: flex; gap: 7px; min-width: 0; max-width: 100%; padding: 1px 0 4px; overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-width: thin; }
 .attachment-card { position: relative; display: flex; flex: 0 0 188px; min-width: 0; height: 52px; align-items: stretch; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); overflow: hidden; }
 .attachment-open { display: flex; flex: 1 1 auto; min-width: 0; align-items: center; gap: 8px; padding: 5px 26px 5px 5px; border: 0; color: inherit; background: transparent; text-align: left; }
@@ -2495,9 +2508,9 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 }
 @media (prefers-reduced-motion: reduce) {
   .conversation-drop-layer { animation: none; }
+  .composer-box { transition: none; }
 }
 @media (min-width: 1800px) {
-  .composer-box { width: min(1040px, 100%); }
   .timeline-track { width: min(var(--conversation-wide-width), 100%); }
   .timeline-event-card { width: min(var(--conversation-artifact-width), 100%); }
   .approval-dock, .runtime-recovery-dock { width: min(var(--conversation-wide-width), calc(100% - 54px)); }

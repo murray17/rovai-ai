@@ -252,9 +252,12 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.message-surface\s*\{[^}]*position: static/)
     expect(css).toContain('.conversation-bubble:hover .message-copy-button')
     expect(css).toContain('.conversation-bubble:hover .message-reply-button')
-    expect(css).toContain('.composer.suppress-pointer-focus-ring .structured-mention-editor:focus-visible')
+    expect(css).toContain('.composer-box:focus-within')
+    expect(css).toContain('.composer.suppress-pointer-focus-ring .composer-box:focus-within')
+    expect(css).toMatch(/\.structured-mention-editor:focus-visible\s*\{[^}]*outline:\s*0/)
     expect(css).not.toContain('.composer.suppress-reply-focus-ring')
     expect(css).toMatch(/\.composer-continuation\s*\{[^}]*background:\s*transparent|\.composer-continuation\s*\{[^}]*color:/)
+    expect(css).toMatch(/\.composer-route-rail\s*\{[^}]*width:\s*min\(var\(--conversation-wide-width\), 100%\)[^}]*min-height:\s*34px/)
     expect(css).not.toContain('.message-surface.has-delivery .message-copy-button')
     expect(css).toMatch(
       /@media\s*\(min-width:\s*1800px\)[\s\S]*?\.timeline-track\s*\{[^}]*width:\s*min\(var\(--conversation-wide-width\), 100%\)/
@@ -277,11 +280,13 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).not.toContain('.tool-output-copy-button {\n  border: 1px')
   })
 
-  it('widens the 2K composer and keeps the Enter keycap beside Send', () => {
+  it('keeps the Composer on the responsive wide track with split tool and send actions', () => {
     expect(css).toMatch(
-      /@media\s*\(min-width:\s*1800px\)\s*\{\s*\.composer-box\s*\{[^}]*width:\s*min\(1040px,\s*100%\)/
+      /\.composer-box\s*\{[^}]*width:\s*min\(var\(--conversation-wide-width\),\s*100%\)/
     )
-    expect(css).toMatch(/\.composer-actions\s*\{[^}]*gap:\s*5px[^}]*align-items:\s*center/)
+    expect(css).toMatch(/\.composer-action-row\s*\{[^}]*justify-content:\s*space-between/)
+    expect(css).toMatch(/\.composer-tools, \.composer-actions\s*\{[^}]*gap:\s*5px/)
+    expect(css).toMatch(/\.composer-attachment-button\s*\{[^}]*width:\s*28px[^}]*height:\s*28px/)
     expect(css).toMatch(/\.composer-hint\s*\{[^}]*border:\s*1px solid var\(--line\)[^}]*white-space:\s*nowrap/)
     expect(css).toMatch(/\.composer-send\s*\{[^}]*min-height:\s*28px/)
   })

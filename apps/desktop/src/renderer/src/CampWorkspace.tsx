@@ -868,6 +868,7 @@ export function CampWorkspace({
     status: 'loading' | 'ready' | 'error'
   }>({ skills: [], groups: [], status: 'loading' })
   const composerEditorRef = useRef<HTMLDivElement>(null)
+  const composerFileInputRef = useRef<HTMLInputElement>(null)
   const draftSaveTimer = useRef<number | null>(null)
   const campLeaveTimer = useRef<{ campId: string; timer: number } | null>(null)
   const draftContent = useRef<StructuredCampMessageContent>([])
@@ -1849,8 +1850,8 @@ export function CampWorkspace({
       if (sendReceipt?.agentRunIds.length || sendReceipt?.campTurnId) {
         setSubmittedExecutionRequest(sendReceipt)
       }
-      const emptyDraft: CampComposerDraftView = {
-        campId: snapshot.camp.id,
+      const acceptedDraftFallback: CampComposerDraftView = {
+        campId,
         body: '',
         content: [],
         revision: 0,
@@ -1860,10 +1861,12 @@ export function CampWorkspace({
         updatedAt: null,
         expiresAt: null
       }
-      setMessageContent([])
-      draftContent.current = []
-      composerDraftRef.current = emptyDraft
-      setComposerDraft(emptyDraft)
+      if (draftCampId.current === campId) syncReplyDraft(acceptedDraftFallback)
+      const nextDraft = await window.rovai.request<CampComposerDraftView>(
+        'camp.composerDraft.get',
+        { campId }
+      )
+      if (draftCampId.current === campId) syncReplyDraft(nextDraft)
     } catch {
       if (sendAttempted) {
         const campId = snapshot.camp.id
@@ -2647,6 +2650,47 @@ export function CampWorkspace({
           }
         }}
       >
+        {(continuationVisible && continuationIntent) || (
+          composerDraft
+          && recipientSummary
+          && !composerDraft.replyIntent
+          && !continuationRepairRequired
+        )
+          ? (
+              <div className="composer-route-rail" aria-label="接收者路由">
+                {continuationVisible && continuationIntent
+                  ? (
+                      <span className="composer-continuation" aria-label={`继续发给 ${continuationIntent.recipient.displayName}`}>
+                        <svg aria-hidden="true" viewBox="0 0 16 16">
+                          <path d="M3 3.5v3.25c0 1.8 1.45 3.25 3.25 3.25H13" />
+                          <path d="m10.5 7.5 2.5 2.5-2.5 2.5" />
+                        </svg>
+                        <span>继续发给 <strong>@{continuationIntent.recipient.displayName}</strong></span>
+                        <button
+                          type="button"
+                          aria-label={`取消继续发给 ${continuationIntent.recipient.displayName}`}
+                          title="取消继续发送"
+                          disabled={routingMutating}
+                          onClick={() => void dismissContinuation()}
+                        >
+                          <svg aria-hidden="true" viewBox="0 0 12 12">
+                            <path d="m3 3 6 6M9 3 3 9" />
+                          </svg>
+                        </button>
+                      </span>
+                    )
+                  : recipientSummary && (
+                      <span className="mention-target-summary" title={recipientSummary}>
+                        <svg aria-hidden="true" viewBox="0 0 16 16">
+                          <path d="M3 3.5v3.25c0 1.8 1.45 3.25 3.25 3.25H13" />
+                          <path d="m10.5 7.5 2.5 2.5-2.5 2.5" />
+                        </svg>
+                        <span>{recipientSummary}</span>
+                      </span>
+                    )}
+              </div>
+            )
+          : null}
         <div className="composer-box">
           {attachmentDragState && (
             <span className="composer-destination">将添加到这条消息</span>
@@ -2816,76 +2860,76 @@ export function CampWorkspace({
                   focusPanel
                 )}
             />
-            {continuationVisible && continuationIntent && (
-              <span className="composer-continuation" aria-label={`继续发给 ${continuationIntent.recipient.displayName}`}>
-                <svg aria-hidden="true" viewBox="0 0 16 16">
-                  <path d="M3 3.5v3.25c0 1.8 1.45 3.25 3.25 3.25H13" />
-                  <path d="m10.5 7.5 2.5 2.5-2.5 2.5" />
-                </svg>
-                <span>继续发给 <strong>@{continuationIntent.recipient.displayName}</strong></span>
-                <button
-                  type="button"
-                  aria-label={`取消继续发给 ${continuationIntent.recipient.displayName}`}
-                  title="取消继续发送"
-                  disabled={routingMutating}
-                  onClick={() => void dismissContinuation()}
-                >
-                  <svg aria-hidden="true" viewBox="0 0 12 12">
-                    <path d="m3 3 6 6M9 3 3 9" />
-                  </svg>
-                </button>
-              </span>
-            )}
-            {composerDraft
-              && recipientSummary
-              && !composerDraft?.replyIntent
-              && !continuationVisible
-              && !continuationRepairRequired
-              && (
-                <span className="mention-target-summary" title={recipientSummary}>
-                  {recipientSummary}
-                </span>
-              )}
             {!composerDraft?.replyIntent && replyInteractionError && (
               <span className="composer-reply-status" role="status" aria-live="polite">
                 {replyInteractionError}
               </span>
             )}
           </div>
-          <div className="composer-actions">
-            {!executionBlocked && <span className="composer-hint">Enter</span>}
-            {executionBlocked
-              ? (
-                  <button
-                    className="danger-button composer-stop"
-                    type="button"
-                    aria-label={stopping ? '正在停止当前执行' : '停止当前执行'}
-                    onClick={onStop}
-                    disabled={stopping || activeRuns.length === 0}
-                  >
-                    {stopping ? '正在停止…' : '停止'}
-                  </button>
-                )
-              : (
-                  <button
-                    className="primary-button composer-send"
-                    type="submit"
-                    disabled={
-                      !message.trim()
-                      || hasUnavailableMention
-                      || replyRepairRequired
-                      || continuationRepairRequired
-                      || busy
-                      || composerSubmitting
-                      || routingMutating
-                      || composerDraft === null
-                      || preparingAttachments.length > 0
-                      || failedAttachments.length > 0
-                    }
-                  >
-                    {busy || composerSubmitting ? '发送中…' : preparingAttachments.length > 0 ? '处理中…' : '发送'}
-                  </button>
-                )}
+          <div className="composer-action-row">
+            <div className="composer-tools">
+              <input
+                ref={composerFileInputRef}
+                className="composer-file-input"
+                type="file"
+                multiple
+                tabIndex={-1}
+                onChange={(event) => {
+                  const files = Array.from(event.currentTarget.files ?? [])
+                  event.currentTarget.value = ''
+                  if (files.length > 0) {
+                    void prepareFiles(files.map((file) => ({ file, kindHint: 'file' })))
+                  }
+                }}
+              />
+              <button
+                className="composer-attachment-button"
+                type="button"
+                aria-label="添加文件"
+                title="添加文件"
+                disabled={busy || composerSubmitting || routingMutating}
+                onClick={() => composerFileInputRef.current?.click()}
+              >
+                <svg aria-hidden="true" viewBox="0 0 18 18">
+                  <path d="m6.2 9.8 4.65-4.65a2.5 2.5 0 0 1 3.54 3.54l-6.1 6.1a4 4 0 0 1-5.66-5.66l6.1-6.1" />
+                </svg>
+              </button>
+            </div>
+            <div className="composer-actions">
+              {!executionBlocked && <span className="composer-hint">Enter</span>}
+              {executionBlocked
+                ? (
+                    <button
+                      className="danger-button composer-stop"
+                      type="button"
+                      aria-label={stopping ? '正在停止当前执行' : '停止当前执行'}
+                      onClick={onStop}
+                      disabled={stopping || activeRuns.length === 0}
+                    >
+                      {stopping ? '正在停止…' : '停止'}
+                    </button>
+                  )
+                : (
+                    <button
+                      className="primary-button composer-send"
+                      type="submit"
+                      disabled={
+                        !message.trim()
+                        || hasUnavailableMention
+                        || replyRepairRequired
+                        || continuationRepairRequired
+                        || busy
+                        || composerSubmitting
+                        || routingMutating
+                        || composerDraft === null
+                        || preparingAttachments.length > 0
+                        || failedAttachments.length > 0
+                      }
+                    >
+                      {busy || composerSubmitting ? '发送中…' : preparingAttachments.length > 0 ? '处理中…' : '发送'}
+                    </button>
+                  )}
+            </div>
           </div>
         </div>
           </form>
