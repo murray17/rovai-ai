@@ -99,6 +99,10 @@ Agent 公共正文不显示“来自执行”来源条，也不投影 compact �
 [Camp Composer Draft v2](../../contracts/camp-composer-draft-v2.md)，评审方向见
 [HTML 交互稿](../../prototypes/message-reply-chain/README.md)。
 
+正文编辑器的折叠光标位于绝对开头时，`Backspace` 等价于取消 reply dock：只清除 reply intent，保留正文、
+附件和所有可见 Mention，并让光标继续停在正文开头。有选区、光标不在开头或 IME 正在合成时不得触发该
+快捷行为，仍由结构化编辑器处理正文或原子 Mention。
+
 ## Recipient continuation
 
 当最近一条已接受 user message 的最终路由恰好是一个非 Lead 成员，且当前 Draft 没有 reply、显式

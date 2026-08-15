@@ -9,6 +9,7 @@ import {
   mentionQueryAfterTypedText,
   skillQueryAfterNativeTextInput,
   skillQueryAfterTypedText,
+  shouldHandleStructuredComposerBackspaceAtStart,
   shouldSubmitStructuredComposerOnEnter,
   structuredMentionOptions,
   structuredSkillOptions
@@ -220,5 +221,33 @@ describe('StructuredMentionComposer', () => {
       isComposing: false,
       suggestionMenuOpen: false
     })).toBe(true)
+  })
+
+  it('offers Backspace-at-start only for a collapsed caret outside IME composition', () => {
+    expect(shouldHandleStructuredComposerBackspaceAtStart({
+      key: 'Backspace',
+      isComposing: false,
+      selection: { anchor: 0, focus: 0 }
+    })).toBe(true)
+    expect(shouldHandleStructuredComposerBackspaceAtStart({
+      key: 'Backspace',
+      isComposing: false,
+      selection: { anchor: 0, focus: 1 }
+    })).toBe(false)
+    expect(shouldHandleStructuredComposerBackspaceAtStart({
+      key: 'Backspace',
+      isComposing: false,
+      selection: { anchor: 1, focus: 1 }
+    })).toBe(false)
+    expect(shouldHandleStructuredComposerBackspaceAtStart({
+      key: 'Delete',
+      isComposing: false,
+      selection: { anchor: 0, focus: 0 }
+    })).toBe(false)
+    expect(shouldHandleStructuredComposerBackspaceAtStart({
+      key: 'Backspace',
+      isComposing: true,
+      selection: { anchor: 0, focus: 0 }
+    })).toBe(false)
   })
 })

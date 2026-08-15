@@ -66,6 +66,7 @@ export interface StructuredMentionComposerProps {
   editorRef?: RefObject<HTMLDivElement | null>
   onChange(content: StructuredCampMessageContent): void
   onSubmit(): void | Promise<void>
+  onBackspaceAtStart?(): void | Promise<void>
   onPasteFiles?(files: File[]): void
   onActivateMemberMention?(
     member: StructuredMentionMember,
@@ -241,6 +242,17 @@ export function shouldSubmitStructuredComposerOnEnter(input: {
     && !input.suggestionMenuOpen
 }
 
+export function shouldHandleStructuredComposerBackspaceAtStart(input: {
+  key: string
+  isComposing: boolean
+  selection: StructuredMentionSelection
+}): boolean {
+  return input.key === 'Backspace'
+    && !input.isComposing
+    && input.selection.anchor === 0
+    && input.selection.focus === 0
+}
+
 const TOKEN_STYLE: CSSProperties = {
   display: 'inline',
   maxWidth: '100%',
@@ -284,6 +296,7 @@ export function StructuredMentionComposer({
   editorRef: providedEditorRef,
   onChange,
   onSubmit,
+  onBackspaceAtStart,
   onPasteFiles,
   onActivateMemberMention,
   onActivateAllMembersMention
@@ -517,6 +530,7 @@ export function StructuredMentionComposer({
       || event.nativeEvent.isComposing
       || event.nativeEvent.keyCode === 229
     if (isComposing) return
+    if (document.activeElement !== event.currentTarget) return
 
     if (menuOpen && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
       event.preventDefault()
@@ -541,6 +555,19 @@ export function StructuredMentionComposer({
       }
       setQuery(null)
       if (event.key === 'Tab') return
+    }
+    if (
+      onBackspaceAtStart
+      && shouldHandleStructuredComposerBackspaceAtStart({
+        key: event.key,
+        isComposing,
+        selection: currentSelection()
+      })
+    ) {
+      event.preventDefault()
+      setQuery(null)
+      void onBackspaceAtStart()
+      return
     }
     if (event.key === 'Backspace') {
       event.preventDefault()

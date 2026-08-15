@@ -1373,7 +1373,10 @@ export function CampWorkspace({
     }).then(syncReplyDraft)
   }
 
-  const focusComposerAtEnd = (modality: ReplyFocusModality): void => {
+  const focusComposerAtBoundary = (
+    modality: ReplyFocusModality,
+    boundary: 'start' | 'end'
+  ): void => {
     setSuppressPointerFocusRing(modality === 'pointer')
     window.requestAnimationFrame(() => {
       const editor = composerEditorRef.current
@@ -1382,7 +1385,7 @@ export function CampWorkspace({
       const selection = window.getSelection()
       const range = document.createRange()
       range.selectNodeContents(editor)
-      range.collapse(false)
+      range.collapse(boundary === 'start')
       selection?.removeAllRanges()
       selection?.addRange(range)
     })
@@ -1405,7 +1408,7 @@ export function CampWorkspace({
           window.requestAnimationFrame(() => recipientRepairFirstOptionRef.current?.focus())
         })
       } else {
-        focusComposerAtEnd(modality)
+        focusComposerAtBoundary(modality, 'end')
       }
     } catch (error) {
       setReplyInteractionError(replyDraftErrorMessage(error))
@@ -1414,13 +1417,13 @@ export function CampWorkspace({
     }
   }
 
-  const cancelReply = async (): Promise<void> => {
+  const cancelReply = async (focusBoundary: 'start' | 'end' = 'end'): Promise<void> => {
     if (routingMutating) return
     setRoutingMutating(true)
     setReplyInteractionError(null)
     try {
       await mutateRoutingDraft('camp.composerDraft.cancelReply', {})
-      focusComposerAtEnd('keyboard')
+      focusComposerAtBoundary('keyboard', focusBoundary)
     } catch (error) {
       setReplyInteractionError(replyDraftErrorMessage(error))
     } finally {
@@ -1434,7 +1437,7 @@ export function CampWorkspace({
     setReplyInteractionError(null)
     try {
       await mutateRoutingDraft('camp.composerDraft.resolveReplyRecipient', { recipient })
-      focusComposerAtEnd('keyboard')
+      focusComposerAtBoundary('keyboard', 'end')
     } catch (error) {
       setReplyInteractionError(replyDraftErrorMessage(error))
     } finally {
@@ -1460,7 +1463,7 @@ export function CampWorkspace({
           }
         )
       )
-      if (restoreFocus) focusComposerAtEnd('keyboard')
+      if (restoreFocus) focusComposerAtBoundary('keyboard', 'end')
     } catch (error) {
       setReplyInteractionError(replyDraftErrorMessage(error))
     } finally {
@@ -1474,7 +1477,7 @@ export function CampWorkspace({
     setReplyInteractionError(null)
     try {
       await mutateRoutingDraft('camp.composerDraft.resolveContinuationRecipient', { agentId })
-      focusComposerAtEnd('keyboard')
+      focusComposerAtBoundary('keyboard', 'end')
     } catch (error) {
       setReplyInteractionError(replyDraftErrorMessage(error))
     } finally {
@@ -2969,6 +2972,9 @@ export function CampWorkspace({
               id="camp-message"
               value={messageContent}
               onChange={changeMessage}
+              onBackspaceAtStart={composerDraft?.replyIntent
+                ? () => cancelReply('start')
+                : undefined}
               onPasteFiles={(files) => void prepareFiles(
                 files.map((file) => ({ file, kindHint: 'file' }))
               )}

@@ -37,6 +37,7 @@ const acceptanceHome = join(fixtureRoot, 'home')
 const debugPort = Number(process.env.ROVAI_STRUCTURED_MENTIONS_ACCEPT_DEBUG_PORT ?? 9491)
 const skillPickerOnly = cliArguments.includes('--skill-picker-only')
 const continuationOnly = cliArguments.includes('--continuation-only')
+const replyBackspaceOnly = cliArguments.includes('--reply-backspace-only')
 const databasePath = join(dataDir, 'rovai.sqlite')
 const acceptanceExecutablePath = '/usr/bin/true'
 const targetMembers = [
@@ -301,6 +302,91 @@ try {
       selectedSkillText,
       skillPickerInspection,
       structuredContent: selectedSkillDraft.content,
+      clipboardItemCountBeforeTest: clipboardArchive.length,
+      clipboardRestored: false,
+      isolatedUserDataRemoved: false
+    }
+  } else if (replyBackspaceOnly) {
+    await selectWholeEditor(running.cdp)
+    await pressKey(running.cdp, {
+      key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
+    })
+    await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+      (draft) => deepEqual(draft.content, []) && draft.replyIntent === null, 10_000)
+
+    await closeApp(running)
+    running = null
+    await insertCurrentUserMentionFixture(databasePath, campId)
+    running = await launchApp(dataDir, debugPort, 1440, 920)
+    await setTheme(running.cdp, 'day')
+    await openCamp(running.cdp, campId)
+    await mouseClick(running.cdp, '.camp-conversation-view-controls button:first-child')
+    await waitForSelector(running.cdp,
+      `[data-message-id=${JSON.stringify(currentUserMentionMessageId)}] .message-reply-button`, 30_000)
+    await moveMouseToElement(running.cdp,
+      `[data-message-id=${JSON.stringify(currentUserMentionMessageId)}] .message-bubble`)
+    await mouseClick(running.cdp,
+      `[data-message-id=${JSON.stringify(currentUserMentionMessageId)}] .message-reply-button`)
+    const availableReplyDraft = await waitForValue(async () =>
+      request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
+      draft.replyIntent?.replyToCampMessageId === currentUserMentionMessageId
+        && draft.replyIntent.author?.authorId === targetMemberIds[0]
+        && draft.replyIntent.recipientSelectionRequired === false
+        && draft.content.some((segment) =>
+          segment.kind === 'member_mention' && segment.agentId === targetMemberIds[0]), 10_000)
+
+    await focusEditorAtStart(running.cdp)
+    await pressKey(running.cdp, {
+      key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
+    })
+    const cancelledReplyDraft = await waitForValue(async () =>
+      request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
+      draft.replyIntent === null && deepEqual(draft.content, availableReplyDraft.content), 10_000)
+    await waitForExpression(running.cdp, `(() => {
+      const editor = document.querySelector('#camp-message')
+      const selection = window.getSelection()
+      if (!(editor instanceof HTMLElement)
+          || document.activeElement !== editor
+          || !selection?.isCollapsed
+          || !selection.anchorNode
+          || document.querySelector('.composer-reply-line')) return false
+      const beforeCaret = document.createRange()
+      beforeCaret.selectNodeContents(editor)
+      beforeCaret.setEnd(selection.anchorNode, selection.anchorOffset)
+      return beforeCaret.toString().length === 0
+    })()`)
+    const keyboardInspection = await evaluate(running.cdp, `(() => {
+      const editor = document.querySelector('#camp-message')
+      const selection = window.getSelection()
+      if (!(editor instanceof HTMLElement) || !selection?.anchorNode) return null
+      const beforeCaret = document.createRange()
+      beforeCaret.selectNodeContents(editor)
+      beforeCaret.setEnd(selection.anchorNode, selection.anchorOffset)
+      return {
+        editorFocused: document.activeElement === editor,
+        caretCollapsed: selection.isCollapsed,
+        caretAtStart: beforeCaret.toString().length === 0,
+        replyDockPresent: Boolean(document.querySelector('.composer-reply-line')),
+        editorText: editor.textContent
+      }
+    })()`)
+    assert(
+      keyboardInspection
+        && keyboardInspection.editorFocused
+        && keyboardInspection.caretCollapsed
+        && keyboardInspection.caretAtStart
+        && !keyboardInspection.replyDockPresent
+        && keyboardInspection.editorText?.includes(`@${targetMembers[0].displayName}`),
+      `Backspace at body start did not preserve the expected editor state: ${JSON.stringify(keyboardInspection)}`
+    )
+
+    result = {
+      acceptance: 'composer-reply-backspace-ui',
+      appPath,
+      campId,
+      availableReplyDraft,
+      cancelledReplyDraft,
+      keyboardInspection,
       clipboardItemCountBeforeTest: clipboardArchive.length,
       clipboardRestored: false,
       isolatedUserDataRemoved: false
@@ -1090,12 +1176,33 @@ try {
   const lightweightReplyCapture = join(outputDir, 'message-reply-lightweight-day.png')
   await capture(running.cdp, lightweightReplyCapture)
 
-  // Cancel keeps any already inserted content by contract. Discard the Draft
-  // before the dangerous-boundary case so an invalid original-author Mention
-  // cannot be hidden by state left from the normal reply.
-  await mouseClick(running.cdp, '.composer-reply-cancel')
-  await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
-    (draft) => draft.replyIntent === null, 10_000)
+  // Match Feishu's reply-dock keyboard boundary: Backspace at the absolute
+  // body start cancels only the reply intent and keeps the visible Mention.
+  await focusEditorAtStart(running.cdp)
+  await pressKey(running.cdp, {
+    key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
+  })
+  const replyCancelledFromBodyStart = await waitForValue(async () =>
+    request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
+    draft.replyIntent === null && deepEqual(draft.content, availableReplyDraft.content), 10_000)
+  assert(deepEqual(replyCancelledFromBodyStart.content, availableReplyDraft.content),
+    `Backspace at body start changed reply-authored content: ${JSON.stringify(replyCancelledFromBodyStart)}`)
+  await waitForExpression(running.cdp, `(() => {
+    const editor = document.querySelector('#camp-message')
+    const selection = window.getSelection()
+    if (!(editor instanceof HTMLElement)
+        || document.activeElement !== editor
+        || !selection?.isCollapsed
+        || !selection.anchorNode
+        || document.querySelector('.composer-reply-line')) return false
+    const beforeCaret = document.createRange()
+    beforeCaret.selectNodeContents(editor)
+    beforeCaret.setEnd(selection.anchorNode, selection.anchorOffset)
+    return beforeCaret.toString().length === 0
+  })()`)
+
+  // Discard the remaining content before the dangerous-boundary case so an
+  // invalid original-author Mention cannot be hidden by the normal reply.
   await selectWholeEditor(running.cdp)
   await pressKey(running.cdp, {
     key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 51
@@ -1635,6 +1742,22 @@ async function focusEditorAtEnd(cdp) {
     return document.activeElement === editor
   })()`)
   assert(focused, 'Could not focus the Structured Mention editor')
+}
+
+async function focusEditorAtStart(cdp) {
+  const focused = await evaluate(cdp, `(() => {
+    const editor = document.querySelector('#camp-message')
+    if (!(editor instanceof HTMLElement)) return false
+    editor.focus()
+    const range = document.createRange()
+    range.selectNodeContents(editor)
+    range.collapse(true)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    return document.activeElement === editor
+  })()`)
+  assert(focused, 'Could not focus the start of the Structured Mention editor')
 }
 
 async function mouseClickMentionOption(cdp, displayName) {
