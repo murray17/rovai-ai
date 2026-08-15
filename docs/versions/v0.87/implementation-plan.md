@@ -2,7 +2,7 @@
 document_type: implementation-plan
 version: v0.87
 authority: implementation-plan-and-acceptance
-status: in_progress
+status: complete
 last_updated: 2026-08-16
 ---
 
@@ -35,9 +35,9 @@ last_updated: 2026-08-16
 - [x] 用 fake ACP Host 覆盖首次真实任务恰好一个进程、无 `--version`、同进程证据升级 Ready；
 - [x] 覆盖静态 Installation → 成员原子配置 → frozen binding → live Ready 生命周期；
 - [x] 覆盖 Renderer 状态、说明、按钮文案和其他 Runtime 不变；
-- [ ] 完成 Rust fmt/test/strict Clippy、TypeScript/Vitest、文档治理与 UI detector；
-- [ ] 完成 macOS package、签名/架构检查、隔离启动验收和 `/Applications` 安装；
-- [ ] 提交并推送 `main`。
+- [x] 完成 Rust fmt/test/strict Clippy、TypeScript/Vitest、文档治理与 UI detector；
+- [x] 完成 macOS package、签名/架构检查、隔离启动验收和 `/Applications` 安装；
+- [x] 提交并推送 `main`。
 
 ## Rust 测试退役说明
 
@@ -48,4 +48,21 @@ fake ACP execution 证明真实任务只启动一次，AgentProfile lifecycle �
 
 ## 自动验收证据
 
-最终门禁完成后在这里回填命令、通过数量、package 路径和安装验收结论；在此之前不得把本版本标为 complete。
+- Rust：`cargo fmt --all -- --check` 与 `cargo clippy -p rovai-core --all-targets -- -D warnings`
+  通过；`cargo test -p rovai-core` 在干净的 `720e3b7f` 快照通过 lib 471/471、CLI 12/12、
+  Core 79/79，另有 3 个仅手工真实 Runtime smoke 按设计 ignored；首次全量运行中一个 2 秒 Codex
+  version fixture 在系统高负载下超时，隔离连续 5 次和无并行打包负载的完整重跑均通过。
+- Frontend 与脚本：同一干净实现快照通过 `pnpm typecheck` 和 `pnpm test`；其中文档单测 21/21、
+  Vitest 342/342、Node 脚本测试 186/186。后续同 `main` Composer 提交另行通过其新增测试，不改变
+  本版本 Runtime 验收范围。
+- 文档治理：`pnpm docs:adr:generate`、`pnpm docs:test`、`pnpm docs:check` 通过；ADR history、
+  version pointer、Contract/Architecture/UI 路由一致。Impeccable detector 按规则执行一次，仅报告
+  `styles.css` 中既有 side-tab/layout advisory，本版本新增 Renderer 规则无命中。
+- macOS：在干净的 `44757673` 快照运行 `pnpm package:mac`，生成
+  `dist/mac-arm64/Rovai-ai.app`；App、`rovai-core` 与 `rovai` 均通过 strict codesign 检查并确认为
+  arm64，内置二进制 UUID 与 release 产物一致。
+- 隔离验收：以 `ROVAI_ALLOW_ISOLATED_INSTANCE=1` 和一次性 `--user-data-dir` 启动打包 App，Desktop
+  与 Core 到达 `core_ready`；进程参数证明 SQLite 和 managed Skill Library 均位于该隔离目录。
+- 安装提升：旧日常 App 正常退出后，以已验收产物替换 `/Applications/Rovai AI.app`，未修改
+  `~/Library/Application Support/Rovai-ai`；安装位置的 codesign、arm64、UUID 与 `app.asar` SHA-256
+  复核一致，并从 `/Applications` 重新启动确认 Desktop、Helper 与 Core 均不再指向仓库 `dist/`。

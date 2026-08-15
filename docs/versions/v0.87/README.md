@@ -4,16 +4,22 @@ version: v0.87
 lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: in_progress
+implementation_status: complete
 last_updated: 2026-08-16
 ---
 
 # Rovai-ai v0.87：TRAE 静态检测与执行期验证
 
-> 当前状态：P0/P1/P2 实现已进入全量回归与打包验收；发布结论以
-> [实施计划](implementation-plan.md)的最终证据为准。
+> 交付状态：P0/P1/P2 实现、全量回归、macOS 打包与 `/Applications` 提升均已完成；
+> 可复现证据见[实施计划](implementation-plan.md)。
 >
 > 前置版本：[v0.86 Benchmark Tool-use Measurement v2](../v0.86/README.md)
+
+## 历史勘误（2026-08-16）
+
+v0.88 建立时，本版本的实现已经提交，但长耗时全量回归与安装提升尚未回填，因而历史切换提交把
+`implementation_status` 冻结成了 `in_progress`。同日完成的门禁、隔离启动和安装证据证明 v0.87
+交付闭合；本次只更正该状态与验收事实，不改变已经生效的 v0.88 current 指针或本版本技术范围。
 
 ## 版本目标
 
