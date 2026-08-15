@@ -443,7 +443,9 @@ try {
     && wideComposerLayout.composerBoxWidth >= 1438
     && wideComposerLayout.composerBoxWidth <= 1442
     && wideComposerLayout.timelineTrackWidth >= 1038
-    && wideComposerLayout.timelineTrackWidth <= 1042,
+    && wideComposerLayout.timelineTrackWidth <= 1042
+    && wideComposerLayout.wideMediaMatches
+    && wideComposerLayout.composerWidthToken === '1440px',
     `2K Composer or timeline width regressed: ${JSON.stringify(wideComposerLayout)}`)
   assert(Math.abs(wideComposerLayout.leftInset - wideComposerLayout.rightInset) <= 12
     && wideComposerLayout.centerAxisDelta <= 1
@@ -475,6 +477,8 @@ try {
     && wideComposerWithoutInspector.timelineTrackWidth <= 1042
     && Math.abs(wideComposerWithoutInspector.leftInset - wideComposerWithoutInspector.rightInset) <= 12
     && wideComposerWithoutInspector.centerAxisDelta <= 1
+    && wideComposerWithoutInspector.wideMediaMatches
+    && wideComposerWithoutInspector.composerWidthToken === '1440px'
     && wideComposerWithoutInspector.inspectorCollapsed,
     `2K Composer expanded incorrectly with Inspector hidden: ${JSON.stringify(wideComposerWithoutInspector)}`)
   const wideWithoutInspectorCapture = join(outputDir, 'runtime-activity-wide-inspector-hidden.png')
@@ -489,14 +493,19 @@ try {
     width: 1799, height: 920, deviceScaleFactor: 1, mobile: false
   })
   await waitForExpression(app.cdp, `innerWidth === 1799 && innerHeight === 920`)
+  await wait(200)
   const regularComposerLayout = await collectWideComposerLayout(app.cdp)
   assert(regularComposerLayout.documentScrollWidth <= regularComposerLayout.viewportWidth + 1
     && regularComposerLayout.composerBoxWidth >= 1038
     && regularComposerLayout.composerBoxWidth <= 1042
+    && (regularComposerLayout.composerRouteRailWidth == null
+      || Math.abs(regularComposerLayout.composerRouteRailWidth - regularComposerLayout.composerBoxWidth) <= 1)
     && regularComposerLayout.timelineTrackWidth >= 788
     && regularComposerLayout.timelineTrackWidth <= 792
     && Math.abs(regularComposerLayout.leftInset - regularComposerLayout.rightInset) <= 12
-    && regularComposerLayout.centerAxisDelta <= 1,
+    && regularComposerLayout.centerAxisDelta <= 1
+    && !regularComposerLayout.wideMediaMatches
+    && regularComposerLayout.composerWidthToken === '1040px',
     `Composer did not retain the 1040px cap below 1800px: ${JSON.stringify(regularComposerLayout)}`)
   await app.cdp.send('Emulation.setDeviceMetricsOverride', {
     width: 2560, height: 1440, deviceScaleFactor: 1, mobile: false
@@ -1339,6 +1348,9 @@ async function collectWideComposerLayout(cdp) {
     return {
       viewportWidth: innerWidth,
       viewportHeight: innerHeight,
+      visualViewportWidth: window.visualViewport?.width ?? null,
+      wideMediaMatches: matchMedia('(min-width: 1800px)').matches,
+      composerWidthToken: getComputedStyle(document.documentElement).getPropertyValue('--conversation-composer-width').trim(),
       documentScrollWidth: document.documentElement.scrollWidth,
       composerBoxWidth: composerBoxRect?.width ?? 0,
       composerRouteRailWidth: composerRouteRailRect?.width ?? null,
