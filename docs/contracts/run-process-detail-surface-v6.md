@@ -46,6 +46,11 @@ Task related execution、停止结果和世界地图入口在 `inspector` placem
 Execution Tab，并打开精确 Agent/Run。普通 Runtime、A2A、Snapshot refresh 与恢复事件仍不得自动打开
 详情、切换 Agent/Tab、滚动或抢 Composer 焦点。
 
+用户显式发送产生新 AgentRun 时，若当前没有在可见执行 surface 中查看另一个 non-terminal Run，Renderer
+自动打开并聚焦回执中的首个 Run。唯一抑制场景是用户正在可见的“任务”Tab 新建任务表单中输入：此时消费
+本次自动聚焦请求但保留任务草稿，不在离开表单后补跳。仅浏览任务列表、编辑既有任务或查看队员不构成
+抑制；右侧隐藏的旧 Run selection 也不得被误判为当前正在查看执行。
+
 位置按钮至少 28×28px，具有动作型可访问名称。切换后焦点进入另一位置的对应 placement 控件；关闭或
 在详情内按 Escape 时，焦点返回仍连接的真实 Agent selector，无法连接时返回当前 placement 控件。
 Tabs 继续使用 manual activation 与方向键/Home/End。

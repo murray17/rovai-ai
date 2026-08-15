@@ -256,6 +256,23 @@ export function isViewingNonTerminalAgentRun(
   return Boolean(focusedRun && NON_TERMINAL_RUNS.has(focusedRun.status))
 }
 
+export function taskCreationBlocksSubmittedRunAutoFocus(
+  taskCreationActive: boolean,
+  inspectorVisible: boolean,
+  inspectorSurfaceTab: CampInspectorSurfaceTab
+): boolean {
+  return taskCreationActive && inspectorVisible && inspectorSurfaceTab === 'tasks'
+}
+
+export function executionConsoleIsVisible(
+  placement: ExecutionConsolePlacement,
+  inspectorVisible: boolean,
+  inspectorSurfaceTab: CampInspectorSurfaceTab
+): boolean {
+  return placement === 'bottom'
+    || (inspectorVisible && inspectorSurfaceTab === 'execution')
+}
+
 export function agentRunTerminalNote(
   run: Pick<AgentRunView, 'terminalReasonCode'>
 ): string | null {
@@ -924,6 +941,7 @@ export function CampWorkspace({
     && executionInspectorActive
     ? 'execution'
     : inspectorTab
+  const [taskCreationActive, setTaskCreationActive] = useState(false)
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null)
   const [taskFocusRequest, setTaskFocusRequest] = useState(0)
   const [earlierMessageStatus, setEarlierMessageStatus] = useState<
@@ -2239,10 +2257,22 @@ export function CampWorkspace({
 
   useEffect(() => {
     if (!submittedExecutionRequest) return
+    if (taskCreationBlocksSubmittedRunAutoFocus(
+      taskCreationActive,
+      inspectorVisible,
+      inspectorSurfaceTab
+    )) {
+      setSubmittedExecutionRequest(null)
+      return
+    }
     const targetRun = firstSubmittedAgentRun(submittedExecutionRequest, snapshot.agentRuns)
     if (!targetRun) return
     setSubmittedExecutionRequest(null)
-    if (isViewingNonTerminalAgentRun(
+    if (executionConsoleIsVisible(
+      executionPlacement,
+      inspectorVisible,
+      inspectorSurfaceTab
+    ) && isViewingNonTerminalAgentRun(
       executionDrawerAgentId,
       executionDrawerFocusedRunId,
       snapshot.agentRuns
@@ -2254,8 +2284,12 @@ export function CampWorkspace({
   }, [
     executionDrawerAgentId,
     executionDrawerFocusedRunId,
+    executionPlacement,
+    inspectorSurfaceTab,
+    inspectorVisible,
     snapshot.agentRuns,
-    submittedExecutionRequest
+    submittedExecutionRequest,
+    taskCreationActive
   ])
 
   const executionDrawer = executionDrawerProcess ? (
@@ -2653,6 +2687,7 @@ export function CampWorkspace({
                 focusRequest={taskFocusRequest}
                 onTasksChanged={onTasksChanged}
                 onOpenAgent={openExecutionProcess}
+                onCreateModeChange={setTaskCreationActive}
               />
             </Tabs.Content>
             <Tabs.Content value="members" className="tab-scroll camp-members-panel">
@@ -5672,7 +5707,8 @@ export function TaskPanel({
   focusTaskId = null,
   focusRequest = 0,
   onTasksChanged,
-  onOpenAgent = () => {}
+  onOpenAgent = () => {},
+  onCreateModeChange
 }: {
   snapshot: CampSnapshot
   coverage?: CampOpenCollectionCoverage | null
@@ -5681,6 +5717,7 @@ export function TaskPanel({
   focusRequest?: number
   onTasksChanged(): Promise<void>
   onOpenAgent?(agentId: string, trigger?: HTMLButtonElement): void
+  onCreateModeChange?(active: boolean): void
 }): JSX.Element {
   const [mode, setMode] = useState<'list' | 'create' | 'edit'>('list')
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
@@ -5700,6 +5737,11 @@ export function TaskPanel({
     : null
   const activeMembers = snapshot.members.filter((member) =>
     member.membershipStatus === 'active' && member.leaveRequestedAt === null)
+
+  useEffect(() => {
+    onCreateModeChange?.(mode === 'create')
+    return () => onCreateModeChange?.(false)
+  }, [mode, onCreateModeChange])
 
   const resetForm = (): void => {
     setMode('list')

@@ -81,6 +81,7 @@ import {
   executionDrawerHeightFromStoredValue,
   executionDrawerIsNearBottom,
   executionDrawerTitle,
+  executionConsoleIsVisible,
   executionDisclosureOpenAfterActivity,
   executionDisclosureIsLiveOpen,
   firstSubmittedAgentRun,
@@ -91,7 +92,8 @@ import {
   preferredAgentProcessRun,
   rectanglesOverlap,
   runPulseMemberNameLines,
-  runtimeOptionsForDisplay
+  runtimeOptionsForDisplay,
+  taskCreationBlocksSubmittedRunAutoFocus
 } from './CampWorkspace'
 import {
   describeInitialCampSelectionAdjustments,
@@ -2219,6 +2221,15 @@ describe('task event projections', () => {
       .toBe(false)
     expect(isViewingNonTerminalAgentRun(null, 'run-muwa', groupedSnapshot.agentRuns))
       .toBe(false)
+    expect(taskCreationBlocksSubmittedRunAutoFocus(true, true, 'tasks')).toBe(true)
+    expect(taskCreationBlocksSubmittedRunAutoFocus(true, true, 'members')).toBe(false)
+    expect(taskCreationBlocksSubmittedRunAutoFocus(true, true, 'execution')).toBe(false)
+    expect(taskCreationBlocksSubmittedRunAutoFocus(true, false, 'tasks')).toBe(false)
+    expect(taskCreationBlocksSubmittedRunAutoFocus(false, true, 'tasks')).toBe(false)
+    expect(executionConsoleIsVisible('bottom', false, 'tasks')).toBe(true)
+    expect(executionConsoleIsVisible('inspector', true, 'execution')).toBe(true)
+    expect(executionConsoleIsVisible('inspector', true, 'tasks')).toBe(false)
+    expect(executionConsoleIsVisible('inspector', false, 'execution')).toBe(false)
     expect(executionDrawerIsNearBottom(648, 1_000, 320)).toBe(true)
     expect(executionDrawerIsNearBottom(647, 1_000, 320)).toBe(false)
     expect(executionDrawerHeightBounds(600, 54, 920)).toEqual({ min: 160, max: 434 })

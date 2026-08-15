@@ -69,7 +69,7 @@ last_updated: 2026-08-15
 | ADR | 已更新 | [ADR-0191](../../adr/0191-agent-mediated-member-creation-and-thirteen-skill-inventory.md)替代 ADR-0181，冻结十三项 inventory、Agent 确认、direct-user authority、头像导入和 imported→official 晋升边界。 |
 | Contracts | 已更新 | [Built-in Tool Transport v12](../../contracts/builtin-tool-transport-v12.md)替代 v11，增加第十四项 `member.create` 及其 input/result/error/idempotency/evidence 合同。 |
 | Architecture | 已更新 | [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)记录 member.create 路由与 Core 头像 importer；[Skill Projection Reconciliation](../../architecture/skill-projection-reconciliation.md)记录十三项 inventory 和同名 imported 晋升。 |
-| UI | 确认无需更新 | Settings 已按 Core `user_managed` 列表自动渲染，队员管理已有后续身份/头像编辑入口；本版本不改变 Renderer wire 或交互合同。 |
+| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)收窄显式发送后的自动聚焦抑制：仅保护可见的新建任务表单，浏览任务/队员仍可打开对应 AgentRun；不改变 Renderer wire。 |
 | Runtime Activity | 确认无需更新 | `member.create` 继续使用通用 Built-in Tool Evidence/Activity 投影，没有新增 Canonical Activity kind 或 Runtime-specific mapping。 |
 | Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md)把当前 capability 基线推进到 v12/十四项，并明确本版本未重跑十 Runtime 真实 matrix。 |
 | Documentation routing | 已更新 | [文档导航](../../README.md)、ADR/Contract/Architecture 索引与 CURRENT 路由到 v0.85、ADR-0191 和 Transport v12。 |

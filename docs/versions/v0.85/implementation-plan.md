@@ -58,3 +58,10 @@ last_updated: 2026-08-15
   `rovai member create --help` 的实际 CLI 输出通过人工核对；
 - 未运行 `pnpm smoke:builtin-cli`、`pnpm smoke:skills`、Settings capture 或真实十 Runtime 十四项联合 matrix；
   本版本只声明脚本、确定性合同和 Core 行为通过，不声明新的实机 Runtime 兼容性证据。
+
+## 完成后维护
+
+- [x] 收窄显式发送后的 AgentRun 自动聚焦保护：只有可见的新建任务表单消费本次聚焦请求，任务列表、
+  既有任务编辑与队员浏览仍可自动打开执行，右侧隐藏的旧 Run selection 不再阻止新 Run 定位；
+- [x] `pnpm typecheck`、目标 89 项 Renderer 测试、全量 `pnpm test`、diff-aware 文档门禁、macOS arm64
+  打包/严格签名与隔离 `accept:runtime-activity-ui` 验收通过。

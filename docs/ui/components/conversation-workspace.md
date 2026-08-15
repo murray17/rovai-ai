@@ -138,7 +138,9 @@ Mention，本 Draft 也只回到默认 Lead，不能让路由控件反复出现�
 
 打开过程入口时，先定位最新 running，其次最新 non-terminal，最后最新 terminal Run。用户显式
 发送成功且未在查看 non-terminal Run 时，按 Core 有序回执打开首个 Run 的精确 stage，但不夺走
-Composer 焦点。后台 A2A、Runtime 事件、重载与恢复不得自动打开、切换或抢焦点。
+Composer 焦点。若用户正在可见的“任务”Tab 新建任务，Renderer 消费本次自动聚焦请求但不切走表单，
+离开表单后也不补跳；仅浏览任务、编辑既有任务或查看队员仍按回执自动打开执行。右侧不可见的旧 Run
+selection 不算“正在查看 non-terminal Run”。后台 A2A、Runtime 事件、重载与恢复不得自动打开、切换或抢焦点。
 
 聚焦 live Run 且用户停留详情底部时可跟随最新输出；手动上滚后暂停，回到底部恢复。该跟随
 不能滚动公共消息时间线。Drawer 空间不足时收缩、滚动或变为摘要，不能遮住 Approval Dock、
