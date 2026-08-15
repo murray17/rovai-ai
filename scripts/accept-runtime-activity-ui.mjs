@@ -26,6 +26,9 @@ const campId = 'camp-runtime-activity-v055'
 const campTitle = 'v0.55 Agent 执行过程验收'
 const composerLayoutCampId = 'camp-composer-layout-v056'
 const composerLayoutCampTitle = 'v0.56 Composer 布局验收'
+const ambientEncounterCampId = 'camp-world-map-ambient-v087-12'
+const ambientEncounterCampTitle = 'v0.87 世界地图偶遇验收'
+const ambientEncounterAgentIds = Array.from({ length: 11 }, (_, index) => `agent_ambient_${index + 1}`)
 const runArticleSelector = 'article.timeline-node.conversation-bubble.agent'
 const activeAgentId = 'agent_101'
 const worldMapVisibleRuntimeCount = 4
@@ -716,12 +719,30 @@ async function seedFixture() {
     ${sqlLiteral(JSON.stringify({ adapterKind: entry.adapterKind, schemaVersion: 1, values: {} }))},
     'Runtime Activity 验收', '', '[]', '', ''
   )`).join(',\n')
+  const ambientProfileRows = ambientEncounterAgentIds.map((agentId, index) => `(
+    ${sqlLiteral(`uuid-${agentId}`)}, ${sqlLiteral(agentId)},
+    ${sqlLiteral(`ambient-${index + 1}`)}, ${sqlLiteral(`闲时队员 ${index + 1}`)},
+    ${sqlLiteral(['#5B6C8F', '#4C7A78', '#6B668E', '#7A6756'][index % 4])},
+    1, '{}', ${sqlLiteral(now)}, ${sqlLiteral(now)}, '[]', 'present', 1,
+    ${sqlLiteral(`ambient_${index + 1}`)}, ${300 + index},
+    'codex-cli', 'installation-runtime-codex',
+    '{"mode":"runtime_default"}',
+    '{"adapterKind":"codex-cli","schemaVersion":1,"values":{}}',
+    'member', '', '[]', '', ''
+  )`).join(',\n')
   const memberRows = runtimes.map((entry) => `(
     ${sqlLiteral(campId)}, ${sqlLiteral(entry.agentId)}, 'active', '{}', 1, ${sqlLiteral(now)}
+  )`).join(',\n')
+  const ambientMemberRows = ambientEncounterAgentIds.map((agentId) => `(
+    ${sqlLiteral(ambientEncounterCampId)}, ${sqlLiteral(agentId)}, 'active', '{}', 1, ${sqlLiteral(now)}
   )`).join(',\n')
   const conversationRows = runtimes.map((entry) => `(
     ${sqlLiteral(`conversation-${entry.key}`)}, ${sqlLiteral(campId)}, ${sqlLiteral(entry.agentId)},
     1, ${sqlLiteral(now)}, ${sqlLiteral(now)}
+  )`).join(',\n')
+  const ambientConversationRows = ambientEncounterAgentIds.map((agentId, index) => `(
+    ${sqlLiteral(`conversation-ambient-${index + 1}`)}, ${sqlLiteral(ambientEncounterCampId)},
+    ${sqlLiteral(agentId)}, 1, ${sqlLiteral(now)}, ${sqlLiteral(now)}
   )`).join(',\n')
   const turnRows = [
     ...runtimes.map((entry, index) => {
@@ -834,7 +855,7 @@ async function seedFixture() {
       default_permission_config_json, team_role,
       professional_responsibilities, personality_traits_json,
       working_principles, growth_topic
-    ) VALUES ${profileRows};
+    ) VALUES ${profileRows}, ${ambientProfileRows};
     INSERT INTO camp(
       id, title, name_origin, collaboration_mode, project_binding_kind,
       project_path, default_lead_agent_id, last_message_sequence,
@@ -847,14 +868,18 @@ async function seedFixture() {
       ${sqlLiteral(composerLayoutCampId)}, ${sqlLiteral(composerLayoutCampTitle)}, 'user', 'peer', 'quick_chat',
       '', ${sqlLiteral(runtimes[0].agentId)}, 0, 1,
       ${sqlLiteral(now)}, ${sqlLiteral(now)}
+    ), (
+      ${sqlLiteral(ambientEncounterCampId)}, ${sqlLiteral(ambientEncounterCampTitle)}, 'user', 'peer', 'quick_chat',
+      '', ${sqlLiteral(ambientEncounterAgentIds[0])}, 0, 1,
+      ${sqlLiteral(now)}, ${sqlLiteral(now)}
     );
     INSERT INTO camp_member(
       camp_id, agent_id, status, capability_overrides_json, version, joined_at
-    ) VALUES ${memberRows}, (
+    ) VALUES ${memberRows}, ${ambientMemberRows}, (
       ${sqlLiteral(composerLayoutCampId)}, ${sqlLiteral(runtimes[0].agentId)}, 'active', '{}', 1, ${sqlLiteral(now)}
     );
     INSERT INTO conversation(id, camp_id, agent_id, version, created_at, updated_at)
-    VALUES ${conversationRows}, (
+    VALUES ${conversationRows}, ${ambientConversationRows}, (
       'conversation-composer-layout', ${sqlLiteral(composerLayoutCampId)}, ${sqlLiteral(runtimes[0].agentId)},
       1, ${sqlLiteral(now)}, ${sqlLiteral(now)}
     );
@@ -2236,17 +2261,13 @@ async function verifyCampWorldMap(cdp, capturesDirectory) {
     features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }]
   })
   await waitForExpression(cdp, `!document.querySelector('.camp-world-map')?.classList.contains('is-static')`)
-  await waitForExpression(cdp,
-    `Boolean(document.querySelector('.camp-world-map-speech.is-ambient'))`, 32_000)
   const livePresentation = await evaluate(cdp, `(() => ({
-    ambientLabel: document.querySelector('.camp-world-map-speech.is-ambient .camp-world-map-speech-kind')?.textContent?.trim() ?? '',
-    realSpeechCount: document.querySelectorAll('.camp-world-map-speech.is-real').length,
-    activeRouteCount: document.querySelectorAll('.camp-world-map-route[data-active]').length
+    ambientKind: document.querySelector('.camp-world-map')?.dataset.ambientKind ?? null,
+    realSpeechCount: document.querySelectorAll('.camp-world-map-speech.is-real').length
   }))()`)
-  assert(livePresentation.ambientLabel === '闲时 · 环境预设'
-    && livePresentation.realSpeechCount === 1
-    && livePresentation.activeRouteCount > 0,
-  `Live world map did not distinguish preset idle speech from real output: ${JSON.stringify(livePresentation)}`)
+  assert(livePresentation.ambientKind === 'none'
+    && livePresentation.realSpeechCount === 1,
+  `Authoritative world map speech did not suppress ambient output: ${JSON.stringify(livePresentation)}`)
   const liveDayCapture = join(capturesDirectory, 'camp-world-map-live-day-1440x920.png')
   await capture(cdp, liveDayCapture)
 
@@ -2398,6 +2419,7 @@ async function verifyCampWorldMap(cdp, capturesDirectory) {
     `document.querySelector('.camp-world-map-speech.is-real')?.textContent?.trim() ?? ''`)
   assert(staticTextAfterMotionChange.includes('执行 · 正在运行'),
     'Reduced motion removed the real execution text')
+  const ambientAcceptance = await verifyCampWorldMapAmbientStates(cdp, capturesDirectory)
 
   return {
     verified: {
@@ -2408,6 +2430,11 @@ async function verifyCampWorldMap(cdp, capturesDirectory) {
       labeledIdlePreset: true,
       fixedRouteToggle: true,
       reducedMotionKeepsRealText: true,
+      reducedMotionKeepsAmbientText: ambientAcceptance.reducedMotionKeepsAmbientText,
+      allIdleSolo: ambientAcceptance.solo,
+      controlledEncounter: ambientAcceptance.encounter,
+      crowdedAmbientCaption: ambientAcceptance.crowdedCaption,
+      condensedAmbientCaption: ambientAcceptance.condensedCaption,
       inactiveWindowPausesMotionKeepsRealText: true,
       existingResizableExecutionDrawer: true,
       compressedContainerLayout: compressedPresentation,
@@ -2422,7 +2449,182 @@ async function verifyCampWorldMap(cdp, capturesDirectory) {
       compressedNight: compressedCapture,
       wideDay: wideCapture,
       compactDay: compactCapture,
-      zoom200Day: zoomCapture
+      zoom200Day: zoomCapture,
+      ambientSoloReduced: ambientAcceptance.captures.solo,
+      ambientEncounterShared: ambientAcceptance.captures.sharedEncounter,
+      ambientEncounterCrowded: ambientAcceptance.captures.crowdedEncounter,
+      ambientEncounterCondensed: ambientAcceptance.captures.condensedEncounter
+    }
+  }
+}
+
+async function verifyCampWorldMapAmbientStates(cdp, capturesDirectory) {
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 1440, height: 920, deviceScaleFactor: 1, mobile: false,
+    screenWidth: 1440, screenHeight: 920
+  })
+  await cdp.send('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-reduced-motion', value: 'reduce' }]
+  })
+
+  await openCamp(cdp, composerLayoutCampId)
+  await selectCampConversationView(cdp, 'world')
+  await waitForExpression(cdp, `document.querySelector('.camp-world-map')?.dataset.ambientKind === 'solo'`, 14_000)
+  const solo = await evaluate(cdp, `(() => {
+    const map = document.querySelector('.camp-world-map')
+    const speech = document.querySelector('.camp-world-map-speech.is-ambient')
+    return {
+      agentCount: document.querySelectorAll('.camp-world-map-agent').length,
+      ambientKind: map?.dataset.ambientKind ?? null,
+      motionState: map?.dataset.motionState ?? null,
+      label: speech?.querySelector('.camp-world-map-speech-kind')?.textContent?.trim() ?? '',
+      tagName: speech?.tagName ?? null,
+      tabIndex: speech?.tabIndex ?? null,
+      ariaLive: speech?.getAttribute('aria-live') ?? null,
+      animationName: speech ? getComputedStyle(speech).animationName : null,
+      captionCount: document.querySelectorAll('.camp-world-map-live-caption').length
+    }
+  })()`)
+  assert(solo.agentCount === 1
+    && solo.ambientKind === 'solo'
+    && solo.motionState === 'paused'
+    && solo.label === '闲时 · 环境预设'
+    && solo.tagName === 'DIV'
+    && solo.tabIndex === -1
+    && solo.ariaLive === null
+    && solo.animationName === 'none'
+    && solo.captionCount === 0,
+  `Reduced-motion solo ambient state was not static and non-interactive: ${JSON.stringify(solo)}`)
+  const soloCapture = join(capturesDirectory, 'camp-world-map-ambient-solo-reduced-1440x920.png')
+  await capture(cdp, soloCapture)
+
+  await openCamp(cdp, ambientEncounterCampId)
+  await selectCampConversationView(cdp, 'world')
+  await waitForExpression(cdp,
+    `document.querySelector('.camp-world-map')?.dataset.ambientKind === 'encounter'`, 14_000)
+  const encounter = await evaluate(cdp, `(() => {
+    const map = document.querySelector('.camp-world-map')
+    const bubble = document.querySelector('.camp-world-map-ambient-encounter')
+    const caption = document.querySelector('.camp-world-map-live-caption')
+    const participants = [...document.querySelectorAll('[data-ambient-encounter-participant]')]
+    return {
+      agentCount: document.querySelectorAll('.camp-world-map-agent').length,
+      population: map?.dataset.population ?? null,
+      ambientKind: map?.dataset.ambientKind ?? null,
+      motionState: map?.dataset.motionState ?? null,
+      bubbleCount: document.querySelectorAll('.camp-world-map-ambient-encounter').length,
+      bubbleDisplay: bubble ? getComputedStyle(bubble).display : null,
+      participantSides: participants.map((node) => node.dataset.ambientEncounterParticipant).sort(),
+      captionTagName: caption?.tagName ?? null,
+      captionTabIndex: caption?.tabIndex ?? null,
+      captionAriaLive: caption?.getAttribute('aria-live') ?? null,
+      captionText: caption?.textContent?.replace(/\s+/g, ' ').trim() ?? '',
+      captionDisplay: caption ? getComputedStyle(caption).display : null
+    }
+  })()`)
+  assert(encounter.agentCount === 11
+    && encounter.population === 'crowded'
+    && encounter.ambientKind === 'encounter'
+    && encounter.motionState === 'paused'
+    && encounter.bubbleCount === 1
+    && encounter.bubbleDisplay === 'none'
+    && JSON.stringify(encounter.participantSides) === JSON.stringify(['left', 'right'])
+    && encounter.captionTagName === 'DIV'
+    && encounter.captionTabIndex === -1
+    && encounter.captionAriaLive === null
+    && encounter.captionText.includes('闲时预设 · 偶遇')
+    && encounter.captionDisplay !== 'none',
+  `Controlled crowded encounter did not use one shared event and a static caption: ${JSON.stringify(encounter)}`)
+  const crowdedEncounterCapture = join(capturesDirectory, 'camp-world-map-ambient-encounter-crowded-1440x920.png')
+  await capture(cdp, crowdedEncounterCapture)
+
+  const sharedEncounter = await evaluate(cdp, `(() => {
+    const map = document.querySelector('.camp-world-map')
+    const caption = document.querySelector('.camp-world-map-live-caption')
+    if (map) map.dataset.population = 'normal'
+    if (caption instanceof HTMLElement) caption.style.display = 'none'
+    const bubble = document.querySelector('.camp-world-map-ambient-encounter')
+    const frame = document.querySelector('.camp-world-map-frame')
+    const participants = [...document.querySelectorAll('[data-ambient-encounter-participant]')]
+    const bubbleBounds = bubble?.getBoundingClientRect()
+    const frameBounds = frame?.getBoundingClientRect()
+    const participantBounds = participants.map((node) => node.getBoundingClientRect())
+    return {
+      bubbleDisplay: bubble ? getComputedStyle(bubble).display : null,
+      bubbleWidth: bubbleBounds?.width ?? 0,
+      bubbleHeight: bubbleBounds?.height ?? 0,
+      bubbleInsideFrame: Boolean(bubbleBounds && frameBounds
+        && bubbleBounds.left >= frameBounds.left - 1
+        && bubbleBounds.right <= frameBounds.right + 1
+        && bubbleBounds.top >= frameBounds.top - 1
+        && bubbleBounds.bottom <= frameBounds.bottom + 1),
+      pointerEvents: bubble ? getComputedStyle(bubble).pointerEvents : null,
+      buttonCount: bubble?.querySelectorAll('button').length ?? -1,
+      pseudoContent: bubble ? getComputedStyle(bubble, '::after').content : null,
+      participantHorizontalSeparation: participantBounds.length === 2
+        ? Math.abs(participantBounds[0].left - participantBounds[1].left)
+        : 0
+    }
+  })()`)
+  assert(sharedEncounter.bubbleDisplay !== 'none'
+    && sharedEncounter.bubbleWidth > 180
+    && sharedEncounter.bubbleHeight > 30
+    && sharedEncounter.bubbleInsideFrame
+    && sharedEncounter.pointerEvents === 'none'
+    && sharedEncounter.buttonCount === 0
+    && ['none', 'normal'].includes(sharedEncounter.pseudoContent)
+    && sharedEncounter.participantHorizontalSeparation >= 24,
+  `Shared encounter bubble reused directional or interactive speech semantics: ${JSON.stringify(sharedEncounter)}`)
+  const sharedEncounterCapture = join(capturesDirectory, 'camp-world-map-ambient-encounter-shared-1440x920.png')
+  await capture(cdp, sharedEncounterCapture)
+  await evaluate(cdp, `(() => {
+    const map = document.querySelector('.camp-world-map')
+    const caption = document.querySelector('.camp-world-map-live-caption')
+    if (map) map.dataset.population = 'crowded'
+    if (caption instanceof HTMLElement) caption.style.removeProperty('display')
+    return true
+  })()`)
+
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 520, height: 350, deviceScaleFactor: 1, mobile: false,
+    screenWidth: 520, screenHeight: 350
+  })
+  await waitForExpression(cdp,
+    `document.querySelector('.camp-world-map')?.dataset.density === 'condensed'`)
+  const condensed = await evaluate(cdp, `(() => {
+    const map = document.querySelector('.camp-world-map')
+    const caption = document.querySelector('.camp-world-map-live-caption')
+    const bounds = caption?.getBoundingClientRect()
+    return {
+      density: map?.dataset.density ?? null,
+      ambientKind: map?.dataset.ambientKind ?? null,
+      captionText: caption?.textContent?.replace(/\s+/g, ' ').trim() ?? '',
+      captionTagName: caption?.tagName ?? null,
+      captionVisible: Boolean(bounds && bounds.width > 0 && bounds.height > 0),
+      documentOverflow: document.documentElement.scrollWidth - innerWidth
+    }
+  })()`)
+  assert(condensed.density === 'condensed'
+    && condensed.ambientKind === 'encounter'
+    && condensed.captionText.includes('闲时预设 · 偶遇')
+    && condensed.captionTagName === 'DIV'
+    && condensed.captionVisible
+    && condensed.documentOverflow <= 1,
+  `Condensed encounter did not retain its one-line ambient caption: ${JSON.stringify(condensed)}`)
+  const condensedEncounterCapture = join(capturesDirectory, 'camp-world-map-ambient-encounter-condensed-520x350.png')
+  await capture(cdp, condensedEncounterCapture)
+
+  return {
+    reducedMotionKeepsAmbientText: true,
+    solo,
+    encounter,
+    crowdedCaption: true,
+    condensedCaption: condensed,
+    captures: {
+      solo: soloCapture,
+      sharedEncounter: sharedEncounterCapture,
+      crowdedEncounter: crowdedEncounterCapture,
+      condensedEncounter: condensedEncounterCapture
     }
   }
 }
@@ -2431,9 +2633,12 @@ async function waitForWorldMapFit(cdp) {
   await waitForExpression(cdp, `(() => {
     const stage = document.querySelector('.camp-conversation-stage')?.getBoundingClientRect()
     const frame = document.querySelector('.camp-world-map-frame')?.getBoundingClientRect()
-    return Boolean(stage && frame
-      && frame.width <= stage.width + 1
-      && frame.height <= stage.height + 1)
+    if (!stage || !frame) return false
+    const sourceRatio = 1148 / 646
+    const expectedWidth = Math.min(stage.width, stage.height * sourceRatio)
+    const expectedHeight = expectedWidth / sourceRatio
+    return Math.abs(frame.width - expectedWidth) <= 2
+      && Math.abs(frame.height - expectedHeight) <= 2
   })()`)
 }
 

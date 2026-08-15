@@ -210,10 +210,6 @@ const CAMP_WORLD_MAP_RENDEZVOUS_NODES: readonly CampWorldMapNodeId[] = [
   'harbor'
 ]
 
-const AMBIENT_TASKS = ['港湾巡望', '营地日常', '路标维护', '公开地图整理', '协作间隙']
-const AMBIENT_ACTIONS = ['核对界面层级', '检查路线标记', '记录环境线索', '复查协作入口', '整理沿途见闻']
-const AMBIENT_ADVERBS = ['安静地', '慢慢地', '仔细地', '从容地', '顺手']
-
 function routeWeight(route: CampWorldMapRoute): number {
   const from = CAMP_WORLD_MAP_NODES[route.from]
   const to = CAMP_WORLD_MAP_NODES[route.to]
@@ -336,23 +332,6 @@ export function campWorldMapInitialNodes(
     used.add(selected)
   }
   return placements
-}
-
-function seededPick<T>(items: readonly T[], seed: number): T {
-  return items[seed % items.length]
-}
-
-export function campWorldMapAmbientSpeech(
-  campId: string,
-  agentId: string,
-  nodeId: CampWorldMapNodeId,
-  sequence: number
-): string {
-  const seed = campWorldMapStableHash(`${campId}:${agentId}:${nodeId}:${sequence}`)
-  const task = seededPick(AMBIENT_TASKS, seed)
-  const action = seededPick(AMBIENT_ACTIONS, seed >>> 5)
-  const adverb = seededPick(AMBIENT_ADVERBS, seed >>> 11)
-  return `${task}时，在${CAMP_WORLD_MAP_NODES[nodeId].label}${adverb}${action}。`
 }
 
 export function campWorldMapPlainText(value: string): string {

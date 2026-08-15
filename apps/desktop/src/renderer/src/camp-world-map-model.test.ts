@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import type { AgentRunView, CampMemberView } from '@contracts'
 import type { LiveExecutionProgress } from './ui-model'
 import {
-  campWorldMapAmbientSpeech,
   campWorldMapInitialNodes,
   campWorldMapPlainText,
   campWorldMapRendezvousNode,
@@ -89,15 +88,6 @@ describe('Camp world map model', () => {
     expect(path?.at(-1)?.to).toBe('harbor')
     expect(path?.every((edge, index) => index === 0 || path[index - 1]?.to === edge.from)).toBe(true)
     expect(campWorldMapRendezvousNode('build', 'memory')).toBe('a2a')
-  })
-
-  it('builds deterministic, explicitly preset idle copy from task, place, adverb and action', () => {
-    const first = campWorldMapAmbientSpeech('camp_1', 'agent_1', 'remote', 3)
-    const second = campWorldMapAmbientSpeech('camp_1', 'agent_1', 'remote', 3)
-
-    expect(second).toBe(first)
-    expect(first).toContain('观测台')
-    expect(first.endsWith('。')).toBe(true)
   })
 
   it('normalizes Markdown and truncates by grapheme without leaking formatting syntax', () => {

@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.87
+current_version: v0.88
 last_updated: 2026-08-16
 ---
 
@@ -138,4 +138,5 @@ last_updated: 2026-08-16
 | v0.84 | `historical` | 可切换的底部执行台与右侧 Inspector 执行 Sidecar | [v0.84/README.md](v0.84/README.md) |
 | v0.85 | `historical` | Agent 主导的伙伴入队、受控头像导入与十三项 official Skill inventory | [v0.85/README.md](v0.85/README.md) |
 | v0.86 | `historical` | Benchmark Tool-use Measurement v2、Memory/Task/Camp 证据闭合与 A2A 反馈链投影 | [v0.86/README.md](v0.86/README.md) |
-| v0.87 | `current` | TRAE 静态 Runtime 检测、首次真实任务同进程验证与可选静态版本 | [v0.87/README.md](v0.87/README.md) |
+| v0.87 | `historical` | TRAE 静态 Runtime 检测、首次真实任务同进程验证与可选静态版本 | [v0.87/README.md](v0.87/README.md) |
+| v0.88 | `current` | Camp 世界地图环境片段、全局闲时调度与拥挤布局字幕回退 | [v0.88/README.md](v0.88/README.md) |

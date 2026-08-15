@@ -12,12 +12,21 @@ import { MemberAvatar } from './MemberAvatar'
 import { identityColorToken } from './theme'
 import harborCityMapUrl from './assets/world-map/harbor-city-2k.webp'
 import {
+  CampWorldMapAmbientScheduler,
+  campWorldMapCaption,
+  createCampWorldMapAmbientHistory,
+  createCampWorldMapAmbientRandom,
+  recordCampWorldMapAmbientEvent,
+  selectCampWorldMapAmbientEvent,
+  type CampWorldMapAmbientDisplayedEvent,
+  type CampWorldMapAmbientParticipant
+} from './camp-world-map-ambient'
+import {
   CAMP_WORLD_MAP_HEIGHT,
   CAMP_WORLD_MAP_NODE_IDS,
   CAMP_WORLD_MAP_NODES,
   CAMP_WORLD_MAP_ROUTES,
   CAMP_WORLD_MAP_WIDTH,
-  campWorldMapAmbientSpeech,
   campWorldMapInitialNodes,
   campWorldMapRendezvousNode,
   campWorldMapShortestPath,
@@ -50,16 +59,8 @@ type WorldMapAgentMotion = {
   movement: WorldMapMovement | null
   queue: CampWorldMapPathEdge[]
   nextMoveAt: number
-  nextAmbientAt: number
-  ambientSequence: number
   rendezvousKey: string | null
   rendezvousSide: -1 | 0 | 1
-}
-
-type WorldMapAmbientBubble = {
-  agentId: string
-  text: string
-  expiresAt: number
 }
 
 type CampWorldMapProps = {
@@ -168,17 +169,29 @@ export function CampWorldMap({
 }: CampWorldMapProps): JSX.Element {
   const reducedMotion = usePrefersReducedMotion()
   const windowActive = useWindowActive()
-  const motionActive = active && windowActive && !reducedMotion
+  const sceneActive = active && windowActive
+  const motionActive = sceneActive && !reducedMotion
+  const hasAuthoritativeSpeech = agents.some((agent) => agent.speech !== null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const agentElementById = useRef(new Map<string, HTMLDivElement>())
   const routeElementById = useRef(new Map<string, SVGPathElement>())
   const motionByAgentId = useRef(new Map<string, WorldMapAgentMotion>())
+  const motionCampIdRef = useRef(campId)
   const activeRouteUsers = useRef(new Map<string, Map<string, WorldMapMovementKind>>())
   const rendezvousRef = useRef(rendezvous)
+  const agentsRef = useRef(agents)
+  const campIdRef = useRef(campId)
+  const sceneActiveRef = useRef(sceneActive)
+  const motionActiveRef = useRef(motionActive)
+  const hasAuthoritativeSpeechRef = useRef(hasAuthoritativeSpeech)
+  const ambientSchedulerRef = useRef<CampWorldMapAmbientScheduler | null>(null)
+  const ambientScheduleStartedRef = useRef(false)
+  const ambientScheduleRunningRef = useRef(false)
   const [frameSize, setFrameSize] = useState<{ width: number; height: number } | null>(null)
   const [density, setDensity] = useState<'regular' | 'compact' | 'condensed'>('regular')
-  const [ambientBubble, setAmbientBubble] = useState<WorldMapAmbientBubble | null>(null)
-  const ambientBubbleRef = useRef<WorldMapAmbientBubble | null>(null)
+  const [ambientEvent, setAmbientEvent] = useState<CampWorldMapAmbientDisplayedEvent | null>(null)
+  const ambientEventRef = useRef<CampWorldMapAmbientDisplayedEvent | null>(null)
+  const ambientEventCampIdRef = useRef<string | null>(null)
   const agentIdsKey = agents.map((agent) => agent.agentId).join('\u0000')
   const agentModesKey = agents.map((agent) => `${agent.agentId}:${agent.mode}`).join('\u0000')
   const initialNodes = useMemo(
@@ -190,9 +203,13 @@ export function CampWorldMap({
     rendezvousRef.current = rendezvous
   }, [rendezvous])
 
-  useEffect(() => {
-    ambientBubbleRef.current = ambientBubble
-  }, [ambientBubble])
+  useLayoutEffect(() => {
+    agentsRef.current = agents
+    campIdRef.current = campId
+    sceneActiveRef.current = sceneActive
+    motionActiveRef.current = motionActive
+    hasAuthoritativeSpeechRef.current = hasAuthoritativeSpeech
+  }, [agents, campId, hasAuthoritativeSpeech, motionActive, sceneActive])
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current
@@ -334,6 +351,14 @@ export function CampWorldMap({
 
   useLayoutEffect(() => {
     const now = typeof performance === 'undefined' ? 0 : performance.now()
+    if (motionCampIdRef.current !== campId) {
+      for (const motion of motionByAgentId.current.values()) {
+        if (motion.movement) deactivateRoute(motion.movement.edge.routeId, motion.agentId)
+      }
+      motionByAgentId.current.clear()
+      activeRouteUsers.current.clear()
+      motionCampIdRef.current = campId
+    }
     const activeIds = new Set(agents.map((agent) => agent.agentId))
     for (const [agentId, motion] of motionByAgentId.current) {
       if (activeIds.has(agentId)) continue
@@ -353,8 +378,6 @@ export function CampWorldMap({
         movement: null,
         queue: [],
         nextMoveAt: now + 2_800 + (campWorldMapStableHash(`${agent.agentId}:move`) % 5_000),
-        nextAmbientAt: now + 5_000 + (campWorldMapStableHash(`${agent.agentId}:speech`) % 8_000),
-        ambientSequence: 0,
         rendezvousKey: null,
         rendezvousSide: 0
       } satisfies WorldMapAgentMotion
@@ -365,19 +388,128 @@ export function CampWorldMap({
     }
   }, [agentIdsKey, agentModesKey, agents, campId, cancelMovement, deactivateRoute, initialNodes, setAgentPoint])
 
-  useEffect(() => {
-    if (!ambientBubble) return
-    const agent = agents.find((candidate) => candidate.agentId === ambientBubble.agentId)
-    if (agent?.mode === 'idle') return
-    ambientBubbleRef.current = null
-    setAmbientBubble(null)
-  }, [agentModesKey, agents, ambientBubble])
+  const isAmbientEventValid = useCallback((event: CampWorldMapAmbientDisplayedEvent): boolean => {
+    if (campIdRef.current !== ambientEventCampIdRef.current) return false
+    if (!sceneActiveRef.current || hasAuthoritativeSpeechRef.current) return false
+    const participantMotions = event.agentIds.map((agentId) => motionByAgentId.current.get(agentId))
+    if (participantMotions.some((motion) => !motion || motion.mode !== 'idle' || motion.rendezvousKey)) {
+      return false
+    }
+    if (event.kind === 'encounter') {
+      const [left, right] = participantMotions
+      return Boolean(left && right
+        && !left.movement
+        && !right.movement
+        && left.nodeId === event.nodeId
+        && right.nodeId === event.nodeId)
+    }
+    const motion = participantMotions[0]
+    if (!motion) return false
+    if (event.motion === 'moving') {
+      return motionActiveRef.current && motion.movement?.kind === 'ambient'
+    }
+    return !motion.movement && motion.nodeId === event.nodeId
+  }, [])
 
   useEffect(() => {
-    if (motionActive) return
-    ambientBubbleRef.current = null
-    setAmbientBubble(null)
-  }, [motionActive])
+    if (typeof window === 'undefined') return
+    const history = createCampWorldMapAmbientHistory()
+    const random = createCampWorldMapAmbientRandom(campId)
+    let disposed = false
+    ambientEventRef.current = null
+    ambientEventCampIdRef.current = null
+    setAmbientEvent(null)
+    ambientScheduleStartedRef.current = sceneActiveRef.current
+    ambientScheduleRunningRef.current = false
+
+    const scheduler = new CampWorldMapAmbientScheduler({
+      clock: {
+        now: () => performance.now(),
+        setTimeout: (callback, delay) => window.setTimeout(callback, delay),
+        clearTimeout: (handle) => window.clearTimeout(handle as number)
+      },
+      random,
+      select: (now, selectionRandom) => {
+        if (campIdRef.current !== campId
+          || !sceneActiveRef.current
+          || hasAuthoritativeSpeechRef.current
+          || ambientEventRef.current) return null
+        const participants: CampWorldMapAmbientParticipant[] = []
+        for (const agent of agentsRef.current) {
+          const motion = motionByAgentId.current.get(agent.agentId)
+          if (!motion) continue
+          participants.push({
+            agentId: agent.agentId,
+            nodeId: motion.nodeId,
+            mode: agent.mode,
+            motion: motion.movement && motionActiveRef.current ? 'moving' : 'stationary',
+            rendezvousKey: motion.rendezvousKey
+          })
+        }
+        return selectCampWorldMapAmbientEvent({
+          now,
+          hasAuthoritativeSpeech: hasAuthoritativeSpeechRef.current,
+          participants,
+          history
+        }, selectionRandom)
+      },
+      onDisplayed: (event) => recordCampWorldMapAmbientEvent(history, event, event.startedAt),
+      onEventChange: (event) => {
+        if (disposed || ambientSchedulerRef.current !== scheduler) return
+        ambientEventRef.current = event
+        ambientEventCampIdRef.current = event ? campId : null
+        setAmbientEvent(event)
+      }
+    })
+    ambientSchedulerRef.current = scheduler
+    if (sceneActiveRef.current && !hasAuthoritativeSpeechRef.current) {
+      scheduler.start('initial')
+      ambientScheduleStartedRef.current = true
+      ambientScheduleRunningRef.current = true
+    }
+
+    return () => {
+      disposed = true
+      scheduler.suspend()
+      if (ambientSchedulerRef.current === scheduler) {
+        ambientSchedulerRef.current = null
+        ambientScheduleRunningRef.current = false
+        ambientEventRef.current = null
+        ambientEventCampIdRef.current = null
+      }
+    }
+  }, [campId])
+
+  useEffect(() => {
+    const scheduler = ambientSchedulerRef.current
+    if (!scheduler) return
+    const shouldRun = sceneActive && !hasAuthoritativeSpeech
+    if (!shouldRun && ambientScheduleRunningRef.current) {
+      scheduler.suspend()
+      ambientScheduleRunningRef.current = false
+      return
+    }
+    if (shouldRun && !ambientScheduleRunningRef.current) {
+      scheduler.start(ambientScheduleStartedRef.current ? 'subsequent' : 'initial')
+      ambientScheduleStartedRef.current = true
+      ambientScheduleRunningRef.current = true
+    }
+  }, [campId, hasAuthoritativeSpeech, sceneActive])
+
+  useLayoutEffect(() => {
+    if (!sceneActive || !reducedMotion) return
+    const now = typeof performance === 'undefined' ? 0 : performance.now()
+    for (const motion of motionByAgentId.current.values()) {
+      if (motion.mode !== 'idle' || motion.movement?.kind !== 'ambient') continue
+      cancelMovement(motion, motion.movement.pausedAt ?? now)
+    }
+  }, [cancelMovement, reducedMotion, sceneActive])
+
+  useEffect(() => {
+    const event = ambientEventRef.current
+    if (!event || isAmbientEventValid(event)) return
+    ambientSchedulerRef.current?.cancelCurrentAndReschedule()
+  }, [agentModesKey, hasAuthoritativeSpeech, isAmbientEventValid, motionActive, rendezvous])
 
   useEffect(() => {
     if (!motionActive || typeof window === 'undefined') return
@@ -426,6 +558,8 @@ export function CampWorldMap({
     }
     const chooseAmbientPath = (motion: WorldMapAgentMotion, now: number): void => {
       if (motion.mode === 'waiting' || motion.rendezvousKey) return
+      const ambient = ambientEventRef.current
+      if (ambient?.motion === 'stationary' && ambient.agentIds.includes(motion.agentId)) return
       if (nextRandom(motion) < 0.48) {
         motion.nextMoveAt = now + 6_000 + nextRandom(motion) * 10_000
         return
@@ -457,6 +591,8 @@ export function CampWorldMap({
     const updateMovement = (motion: WorldMapAgentMotion, now: number): void => {
       const movement = motion.movement
       if (!movement) {
+        const ambient = ambientEventRef.current
+        if (ambient?.motion === 'stationary' && ambient.agentIds.includes(motion.agentId)) return
         if (!motion.rendezvousKey && now >= motion.nextMoveAt) chooseAmbientPath(motion, now)
         return
       }
@@ -477,32 +613,13 @@ export function CampWorldMap({
       }
       if (progress >= 1) finishMovement(motion, now)
     }
-    const updateAmbientBubble = (now: number): void => {
-      const current = ambientBubbleRef.current
-      if (current && now >= current.expiresAt) {
-        ambientBubbleRef.current = null
-        setAmbientBubble(null)
-      }
-      if (ambientBubbleRef.current) return
-      const eligible = [...motionByAgentId.current.values()]
-        .filter((motion) => motion.mode === 'idle' && !motion.rendezvousKey && now >= motion.nextAmbientAt)
-        .sort((left, right) => left.nextAmbientAt - right.nextAmbientAt || left.agentId.localeCompare(right.agentId))
-      const motion = eligible[0]
-      if (!motion) return
-      motion.ambientSequence += 1
-      motion.nextAmbientAt = now + 30_000 + nextRandom(motion) * 24_000
-      const next = {
-        agentId: motion.agentId,
-        text: campWorldMapAmbientSpeech(campId, motion.agentId, motion.nodeId, motion.ambientSequence),
-        expiresAt: now + 5_600
-      }
-      ambientBubbleRef.current = next
-      setAmbientBubble(next)
-    }
     const tick = (now: number): void => {
       reconcileRendezvous(now)
       for (const motion of motionByAgentId.current.values()) updateMovement(motion, now)
-      updateAmbientBubble(now)
+      const ambient = ambientEventRef.current
+      if (ambient && !isAmbientEventValid(ambient)) {
+        ambientSchedulerRef.current?.cancelCurrentAndReschedule()
+      }
       frame = window.requestAnimationFrame(tick)
     }
 
@@ -517,6 +634,7 @@ export function CampWorldMap({
     cancelMovement,
     clearRendezvousOffset,
     deactivateRoute,
+    isAmbientEventValid,
     motionActive,
     setAgentPoint,
     showRendezvousOffset,
@@ -551,8 +669,18 @@ export function CampWorldMap({
   const frameStyle = frameSize
     ? { width: `${frameSize.width}px`, height: `${frameSize.height}px` }
     : undefined
-  const condensedRealAgent = density === 'condensed'
-    ? agents.find((agent) => agent.speech?.kind === 'real') ?? null
+  const visibleAmbientEvent = ambientEvent && ambientEventCampIdRef.current === campId
+    ? ambientEvent
+    : null
+  const realAgent = agents.find(
+    (agent) => agent.speech?.kind === 'real' && agent.hasExecutionProcess
+  ) ?? null
+  const captionCandidate = campWorldMapCaption(agents, visibleAmbientEvent)
+  const caption = density === 'condensed' || (agents.length > 6 && !realAgent)
+    ? captionCandidate
+    : null
+  const encounterNode = visibleAmbientEvent?.kind === 'encounter'
+    ? CAMP_WORLD_MAP_NODES[visibleAmbientEvent.nodeId]
     : null
 
   return (
@@ -561,6 +689,8 @@ export function CampWorldMap({
       data-density={density}
       data-motion-state={motionActive ? 'active' : 'paused'}
       data-population={agents.length > 6 ? 'crowded' : 'normal'}
+      data-ambient-kind={visibleAmbientEvent?.kind ?? 'none'}
+      data-ambient-beat-id={visibleAmbientEvent?.beatId}
       aria-label="会话世界地图"
     >
       <div
@@ -594,22 +724,35 @@ export function CampWorldMap({
           </svg>
           <div className="camp-world-map-agents">
             {agents.map((agent) => {
-              const ambient = ambientBubble?.agentId === agent.agentId
+              const ambient = visibleAmbientEvent?.kind === 'solo'
+                && visibleAmbientEvent.agentIds[0] === agent.agentId
                 ? {
-                    key: `${agent.agentId}:ambient:${ambientBubble.text}`,
+                    key: visibleAmbientEvent.eventId,
                     label: '闲时 · 环境预设',
-                    text: ambientBubble.text
+                    text: visibleAmbientEvent.text
                   }
                 : null
               const speech = agent.speech ?? ambient
               const canOpenProcess = agent.hasExecutionProcess
+              const encounterIndex = visibleAmbientEvent?.kind === 'encounter'
+                ? visibleAmbientEvent.agentIds.indexOf(agent.agentId)
+                : -1
+              const encounterSide = encounterIndex === 0 ? -1 : encounterIndex === 1 ? 1 : 0
               return (
                 <div
                   className="camp-world-map-agent"
                   data-mode={agent.mode}
+                  data-ambient-encounter-participant={encounterSide < 0
+                    ? 'left'
+                    : encounterSide > 0
+                      ? 'right'
+                      : undefined}
                   key={agent.agentId}
                   ref={(element) => setAgentElement(agent.agentId, element)}
-                  style={{ '--world-map-agent-color': identityColorToken(agent.agentId) } as CSSProperties}
+                  style={{
+                    '--world-map-agent-color': identityColorToken(agent.agentId),
+                    '--world-map-ambient-offset': `${encounterSide * 14}px`
+                  } as CSSProperties}
                 >
                   <button
                     className="camp-world-map-agent-button"
@@ -662,17 +805,47 @@ export function CampWorldMap({
               )
             })}
           </div>
-          {condensedRealAgent?.speech && (
-            <button
-              className="camp-world-map-live-caption"
-              type="button"
-              title={condensedRealAgent.speech.text}
-              onClick={(event) => onOpenExecutionProcess(condensedRealAgent.agentId, event.currentTarget)}
+          {visibleAmbientEvent?.kind === 'encounter' && encounterNode && (
+            <div
+              className="camp-world-map-ambient-encounter"
+              data-beat-id={visibleAmbientEvent.beatId}
+              key={visibleAmbientEvent.eventId}
+              title={visibleAmbientEvent.text}
+              style={{
+                '--world-map-encounter-shift': encounterNode.x < 225
+                  ? '-18%'
+                  : encounterNode.x > CAMP_WORLD_MAP_WIDTH - 225
+                    ? '-82%'
+                    : '-50%',
+                left: `${encounterNode.x / CAMP_WORLD_MAP_WIDTH * 100}%`,
+                top: `${encounterNode.y / CAMP_WORLD_MAP_HEIGHT * 100}%`
+              } as CSSProperties}
             >
-              <strong>真实执行 · {condensedRealAgent.displayName}</strong>
-              <span>{condensedRealAgent.speech.text}</span>
-            </button>
+              <span className="camp-world-map-speech-kind">闲时预设 · 偶遇</span>
+              <span className="camp-world-map-speech-text">{visibleAmbientEvent.text}</span>
+            </div>
           )}
+          {caption && (caption.interactive
+            ? (
+                <button
+                  className={`camp-world-map-live-caption is-${caption.kind}`}
+                  type="button"
+                  title={caption.text}
+                  onClick={(event) => onOpenExecutionProcess(caption.agentId, event.currentTarget)}
+                >
+                  <strong>{caption.label}</strong>
+                  <span>{caption.text}</span>
+                </button>
+              )
+            : (
+                <div
+                  className={`camp-world-map-live-caption is-${caption.kind}`}
+                  title={caption.text}
+                >
+                  <strong>{caption.label}</strong>
+                  <span>{caption.text}</span>
+                </div>
+              ))}
           {agents.length === 0 && (
             <div className="camp-world-map-empty">
               当前会话暂无可在地图中呈现的队员。
