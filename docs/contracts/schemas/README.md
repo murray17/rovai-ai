@@ -11,6 +11,7 @@ Schema version 与 raw-byte SHA-256；实现必须先验证 catalog，再按唯�
 
 当前包含：
 
+- `gather-completion-input-v1.schema.json`：Gather Barrier 冻结并交给原 initiator continuation 的 mandatory Current Input。
 - `semantic-judge-view-suite-v1.schema.json`：Semantic Judge Views v1 的 Suite envelope 与逐项 Review projection。
 - `tool-interaction-measurement-v2.schema.json`：当前 Tool Measurement Opportunity、runtime compatibility、Canonical Interaction、Memory readback 与 Task assessment；v1 仅用于历史 replay。
 - `tool-use-judge-pack-v2.schema.json`：当前独立 Tool-Use Judge 的 treatment-blind Model-Visible Pack 与 audit Evidence Map；v1 仅用于历史 replay。

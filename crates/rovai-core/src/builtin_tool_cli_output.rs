@@ -27,6 +27,20 @@ pub fn agent_output_schema(operation: &str) -> Result<Value> {
                 }
             }
         })),
+        "team.gather" => Ok(json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["gatherId", "requestMessageId", "effectiveRecipients", "completion"],
+            "properties": {
+                "gatherId": {"type": "string"},
+                "requestMessageId": {"type": "string"},
+                "effectiveRecipients": {
+                    "type": "array", "minItems": 1, "maxItems": 16,
+                    "uniqueItems": true, "items": {"type": "string"}
+                },
+                "completion": {"const": "deferred"}
+            }
+        })),
         "memory.write" => Ok(json!({
             "oneOf": [
                 {
@@ -95,6 +109,20 @@ fn project_success(operation: &str, result: &Value) -> Result<Value> {
             "effectiveRecipients": object
                 .get("effectiveRecipients")
                 .context("camp.message.send result has no effectiveRecipients")?,
+        })),
+        "team.gather" => Ok(json!({
+            "gatherId": object
+                .get("gatherId")
+                .context("team.gather result has no gatherId")?,
+            "requestMessageId": object
+                .get("requestMessageId")
+                .context("team.gather result has no requestMessageId")?,
+            "effectiveRecipients": object
+                .get("effectiveRecipients")
+                .context("team.gather result has no effectiveRecipients")?,
+            "completion": object
+                .get("completion")
+                .context("team.gather result has no completion")?,
         })),
         "memory.write" => match object.get("outcome").and_then(Value::as_str) {
             Some("effective") => Ok(json!({
@@ -509,7 +537,7 @@ mod tests {
         ))
         .unwrap();
         let documents = golden.as_object().unwrap();
-        assert_eq!(documents.len(), 14);
+        assert_eq!(documents.len(), 15);
         for definition in builtin_tool_definitions() {
             let operation = definition["name"].as_str().unwrap();
             let fixture = documents

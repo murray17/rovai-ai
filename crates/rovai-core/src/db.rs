@@ -43,8 +43,10 @@ pub struct Database {
     path: PathBuf,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.83";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 41;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.89";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 42;
+const V087_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.83";
+const V087_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 41;
 const V086_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.80";
 const V086_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 40;
 const V085_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.78";
@@ -90,6 +92,7 @@ struct CurrentMigrationState {
     v84: bool,
     v85: bool,
     v86: bool,
+    v87: bool,
 }
 
 impl CurrentMigrationState {
@@ -99,6 +102,27 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87;
+        }
+        if self.v87 {
+            return false;
+        }
+        if contract == V087_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V087_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -367,7 +391,8 @@ fn has_current_data_contract(path: &Path) -> bool {
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 83),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 84),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 85),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 86)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 86),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 87)
         "#,
         [],
         |row| {
@@ -389,6 +414,7 @@ fn has_current_data_contract(path: &Path) -> bool {
                 v84: row.get(14)?,
                 v85: row.get(15)?,
                 v86: row.get(16)?,
+                v87: row.get(17)?,
             })
         },
     );
@@ -1497,6 +1523,9 @@ impl Database {
             if !self.schema_migration_applied(86)? {
                 self.migrate_trae_runtime_catalog_v86()?;
             }
+            if !self.schema_migration_applied(87)? {
+                self.migrate_durable_gather_v87()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -1804,6 +1833,9 @@ impl Database {
         }
         if !self.schema_migration_applied(86)? {
             self.migrate_trae_runtime_catalog_v86()?;
+        }
+        if !self.schema_migration_applied(87)? {
+            self.migrate_durable_gather_v87()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -5760,11 +5792,6 @@ impl Database {
                 CREATE INDEX task_camp_assignee_status_idx
                     ON task(camp_id, assignee_agent_id, status, created_at DESC, id DESC);
 
-                ALTER TABLE agent_run ADD COLUMN task_version_at_admission INTEGER;
-                ALTER TABLE agent_run ADD COLUMN assignee_agent_id_at_admission TEXT;
-                ALTER TABLE message_delivery ADD COLUMN task_version_at_admission INTEGER;
-                ALTER TABLE message_delivery ADD COLUMN assignee_agent_id_at_admission TEXT;
-
                 DELETE FROM event_log
                 WHERE event_type = 'command.result'
                   AND command_type IN (
@@ -5781,6 +5808,25 @@ impl Database {
                 VALUES (65, datetime('now'));
                 "#,
             )?;
+            for (table, column, definition) in [
+                ("agent_run", "task_version_at_admission", "INTEGER"),
+                ("agent_run", "assignee_agent_id_at_admission", "TEXT"),
+                ("message_delivery", "task_version_at_admission", "INTEGER"),
+                ("message_delivery", "assignee_agent_id_at_admission", "TEXT"),
+            ] {
+                let exists: bool = transaction.query_row(
+                    &format!(
+                        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('{table}') WHERE name = ?1)"
+                    ),
+                    [column],
+                    |row| row.get(0),
+                )?;
+                if !exists {
+                    transaction.execute_batch(&format!(
+                        "ALTER TABLE {table} ADD COLUMN {column} {definition};"
+                    ))?;
+                }
+            }
             transaction.commit()?;
             Ok(())
         })();
@@ -9470,6 +9516,531 @@ impl Database {
             .optional()?
         {
             anyhow::bail!("v86 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
+    fn migrate_durable_gather_v87(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+            transaction.execute_batch(
+                r#"
+                ALTER TABLE camp_turn ADD COLUMN
+                    accepted_a2a_allocated INTEGER NOT NULL DEFAULT 0
+                    CHECK(accepted_a2a_allocated >= 0 AND accepted_a2a_allocated <= 16);
+                ALTER TABLE camp_turn ADD COLUMN
+                    agent_run_responsibilities_allocated INTEGER NOT NULL DEFAULT 0
+                    CHECK(agent_run_responsibilities_allocated >= 0 AND agent_run_responsibilities_allocated <= 32);
+                UPDATE camp_turn
+                SET accepted_a2a_allocated = a2a_run_slots_allocated,
+                    agent_run_responsibilities_allocated = a2a_run_slots_allocated;
+
+                CREATE TABLE gather_record (
+                    id TEXT PRIMARY KEY,
+                    camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
+                    camp_turn_id TEXT NOT NULL REFERENCES camp_turn(id) ON DELETE CASCADE,
+                    request_message_id TEXT NOT NULL UNIQUE
+                        REFERENCES camp_message(id) ON DELETE CASCADE,
+                    initiator_agent_id TEXT NOT NULL REFERENCES agent_profile(id),
+                    initiator_agent_run_id TEXT NOT NULL REFERENCES agent_run(id),
+                    initiator_conversation_id TEXT NOT NULL REFERENCES conversation(id),
+                    command_id TEXT NOT NULL UNIQUE,
+                    status TEXT NOT NULL CHECK(status IN (
+                        'collecting', 'ready', 'completing', 'completed',
+                        'completion_failed', 'cancelled'
+                    )),
+                    completion_input_schema_version INTEGER,
+                    completion_input_json TEXT CHECK(
+                        completion_input_json IS NULL OR json_valid(completion_input_json)
+                    ),
+                    completion_input_digest TEXT,
+                    completion_delivery_id TEXT UNIQUE,
+                    completion_run_id TEXT UNIQUE REFERENCES agent_run(id),
+                    cancellation_reason_code TEXT,
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    ready_at TEXT,
+                    completion_started_at TEXT,
+                    completed_at TEXT,
+                    cancelled_at TEXT,
+                    updated_at TEXT NOT NULL,
+                    CHECK(
+                        (status IN ('ready', 'completing', 'completed', 'completion_failed')
+                         AND completion_input_schema_version IS NOT NULL
+                         AND completion_input_json IS NOT NULL
+                         AND completion_input_digest IS NOT NULL
+                         AND completion_delivery_id IS NOT NULL
+                         AND ready_at IS NOT NULL)
+                        OR status IN ('collecting', 'cancelled')
+                    ),
+                    CHECK(
+                        completion_run_id IS NULL
+                        OR status IN ('completing', 'completed', 'completion_failed', 'cancelled')
+                    )
+                );
+
+                CREATE INDEX gather_record_turn_status_idx
+                    ON gather_record(camp_turn_id, status, created_at);
+                CREATE INDEX gather_record_initiator_status_idx
+                    ON gather_record(camp_id, initiator_agent_id, status, created_at);
+                "#,
+            )?;
+
+            transaction.execute_batch(
+                r#"
+                CREATE TABLE message_delivery_v87 (
+                    id TEXT PRIMARY KEY,
+                    camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
+                    camp_turn_id TEXT NOT NULL REFERENCES camp_turn(id) ON DELETE CASCADE,
+                    message_id TEXT NOT NULL REFERENCES camp_message(id) ON DELETE CASCADE,
+                    recipient_agent_id TEXT NOT NULL REFERENCES agent_profile(id),
+                    recipient_canonical_position INTEGER
+                        CHECK(recipient_canonical_position IS NULL OR recipient_canonical_position >= 0),
+                    recipient_digest TEXT,
+                    message_body_digest TEXT,
+                    reply_to_camp_message_id TEXT REFERENCES camp_message(id),
+                    task_id TEXT REFERENCES task(id),
+                    task_version_at_admission INTEGER,
+                    assignee_agent_id_at_admission TEXT REFERENCES agent_profile(id),
+                    source_agent_run_id TEXT NOT NULL REFERENCES agent_run(id),
+                    edge_kind TEXT CHECK(edge_kind IN ('forward', 'return')),
+                    target_parent_agent_run_id TEXT REFERENCES agent_run(id),
+                    return_to_agent_run_id TEXT REFERENCES agent_run(id),
+                    a2a_root_agent_run_id TEXT REFERENCES agent_run(id),
+                    a2a_depth INTEGER NOT NULL DEFAULT 0 CHECK(a2a_depth BETWEEN 0 AND 5),
+                    ancestor_agent_ids_json TEXT CHECK(
+                        ancestor_agent_ids_json IS NULL OR json_valid(ancestor_agent_ids_json)
+                    ),
+                    recipient_presentation_snapshot_json TEXT CHECK(
+                        recipient_presentation_snapshot_json IS NULL
+                        OR json_valid(recipient_presentation_snapshot_json)
+                    ),
+                    frozen_snapshot_json TEXT NOT NULL CHECK(json_valid(frozen_snapshot_json)),
+                    delivery_kind TEXT NOT NULL DEFAULT 'public_a2a'
+                        CHECK(delivery_kind IN ('public_a2a', 'gather_completion')),
+                    dispatch_disposition TEXT NOT NULL DEFAULT 'dispatch'
+                        CHECK(dispatch_disposition IN ('dispatch', 'gather_captured')),
+                    completion_role TEXT DEFAULT 'required'
+                        CHECK(completion_role IN ('required', 'optional')),
+                    gather_id TEXT REFERENCES gather_record(id) ON DELETE CASCADE,
+                    gather_dispatch_delivery_id TEXT REFERENCES message_delivery_v87(id),
+                    target_conversation_id TEXT REFERENCES conversation(id),
+                    camp_message_boundary_sequence INTEGER NOT NULL DEFAULT 0
+                        CHECK(camp_message_boundary_sequence >= 0),
+                    queue_sequence INTEGER NOT NULL CHECK(queue_sequence >= 1),
+                    status TEXT NOT NULL CHECK(status IN (
+                        'pending', 'running', 'settled', 'failed', 'cancelled',
+                        'interrupted_before_dispatch'
+                    )),
+                    dispatch_phase TEXT NOT NULL CHECK(dispatch_phase IN (
+                        'never_attempted', 'attempting', 'attempted_waiting',
+                        'materialized', 'terminal'
+                    )),
+                    wait_condition TEXT CHECK(wait_condition IN (
+                        'target_busy', 'runtime_unavailable', 'capacity_unavailable'
+                    )),
+                    dispatch_attempt_count INTEGER NOT NULL DEFAULT 0
+                        CHECK(dispatch_attempt_count >= 0),
+                    active_dispatch_attempt_id TEXT,
+                    scheduler_correlation_id TEXT,
+                    context_manifest_id TEXT,
+                    target_agent_run_id TEXT UNIQUE REFERENCES agent_run(id),
+                    retry_generation INTEGER NOT NULL DEFAULT 0 CHECK(retry_generation >= 0),
+                    manual_intervention_required INTEGER NOT NULL DEFAULT 0
+                        CHECK(manual_intervention_required IN (0, 1)),
+                    failure_code TEXT,
+                    failure_detail_json TEXT CHECK(
+                        failure_detail_json IS NULL OR json_valid(failure_detail_json)
+                    ),
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    ended_at TEXT,
+                    UNIQUE(message_id, recipient_agent_id),
+                    UNIQUE(camp_id, recipient_agent_id, queue_sequence),
+                    CHECK(
+                        (dispatch_attempt_count = 0 AND dispatch_phase = 'never_attempted')
+                        OR (status = 'interrupted_before_dispatch' AND dispatch_attempt_count = 0)
+                        OR dispatch_attempt_count > 0
+                        OR dispatch_disposition = 'gather_captured'
+                    ),
+                    CHECK(
+                        (status = 'pending' AND target_agent_run_id IS NULL AND ended_at IS NULL)
+                        OR (status = 'running' AND target_agent_run_id IS NOT NULL
+                            AND dispatch_phase = 'materialized' AND ended_at IS NULL)
+                        OR (status IN ('settled', 'failed', 'cancelled',
+                                      'interrupted_before_dispatch')
+                            AND dispatch_phase = 'terminal' AND ended_at IS NOT NULL)
+                    ),
+                    CHECK(
+                        (dispatch_phase = 'attempted_waiting' AND wait_condition IS NOT NULL)
+                        OR (dispatch_phase <> 'attempted_waiting' AND wait_condition IS NULL)
+                    ),
+                    CHECK(
+                        status <> 'interrupted_before_dispatch'
+                        OR (manual_intervention_required = 1 AND dispatch_attempt_count = 0)
+                    ),
+                    CHECK(
+                        (delivery_kind = 'public_a2a'
+                         AND recipient_canonical_position IS NOT NULL
+                         AND recipient_digest IS NOT NULL
+                         AND message_body_digest IS NOT NULL
+                         AND edge_kind IS NOT NULL
+                         AND a2a_root_agent_run_id IS NOT NULL
+                         AND ancestor_agent_ids_json IS NOT NULL
+                         AND recipient_presentation_snapshot_json IS NOT NULL
+                         AND target_conversation_id IS NULL)
+                        OR
+                        (delivery_kind = 'gather_completion'
+                         AND dispatch_disposition = 'dispatch'
+                         AND completion_role = 'required'
+                         AND gather_id IS NOT NULL
+                         AND target_conversation_id IS NOT NULL
+                         AND recipient_canonical_position IS NULL
+                         AND recipient_digest IS NULL
+                         AND message_body_digest IS NULL
+                         AND reply_to_camp_message_id IS NULL
+                         AND task_id IS NULL
+                         AND task_version_at_admission IS NULL
+                         AND assignee_agent_id_at_admission IS NULL
+                         AND edge_kind IS NULL
+                         AND target_parent_agent_run_id IS NULL
+                         AND return_to_agent_run_id IS NULL
+                         AND a2a_root_agent_run_id IS NULL
+                         AND a2a_depth = 0
+                         AND ancestor_agent_ids_json IS NULL
+                         AND recipient_presentation_snapshot_json IS NULL)
+                    ),
+                    CHECK(
+                        (dispatch_disposition = 'dispatch' AND completion_role IS NOT NULL
+                         AND gather_dispatch_delivery_id IS NULL)
+                        OR
+                        (dispatch_disposition = 'gather_captured'
+                         AND delivery_kind = 'public_a2a'
+                         AND edge_kind = 'return'
+                         AND completion_role IS NULL
+                         AND gather_id IS NOT NULL
+                         AND gather_dispatch_delivery_id IS NOT NULL
+                         AND status = 'settled'
+                         AND dispatch_phase = 'terminal'
+                         AND target_agent_run_id IS NULL)
+                    ),
+                    CHECK(
+                        delivery_kind <> 'public_a2a'
+                        OR (edge_kind = 'forward'
+                            AND target_parent_agent_run_id = source_agent_run_id
+                            AND return_to_agent_run_id IS NULL
+                            AND a2a_depth BETWEEN 1 AND 5)
+                        OR (edge_kind = 'return'
+                            AND return_to_agent_run_id IS NOT NULL
+                            AND a2a_depth BETWEEN 0 AND 4)
+                    )
+                );
+
+                INSERT INTO message_delivery_v87(
+                    id, camp_id, camp_turn_id, message_id,
+                    recipient_agent_id, recipient_canonical_position,
+                    recipient_digest, message_body_digest,
+                    reply_to_camp_message_id, task_id,
+                    task_version_at_admission, assignee_agent_id_at_admission,
+                    source_agent_run_id, edge_kind,
+                    target_parent_agent_run_id, return_to_agent_run_id,
+                    a2a_root_agent_run_id, a2a_depth,
+                    ancestor_agent_ids_json, recipient_presentation_snapshot_json,
+                    frozen_snapshot_json, delivery_kind, dispatch_disposition,
+                    completion_role, gather_id, gather_dispatch_delivery_id,
+                    target_conversation_id, camp_message_boundary_sequence, queue_sequence,
+                    status, dispatch_phase, wait_condition,
+                    dispatch_attempt_count, active_dispatch_attempt_id,
+                    scheduler_correlation_id, context_manifest_id,
+                    target_agent_run_id, retry_generation,
+                    manual_intervention_required, failure_code, failure_detail_json,
+                    version, created_at, updated_at, ended_at
+                )
+                SELECT id, camp_id, camp_turn_id, message_id,
+                       recipient_agent_id, recipient_canonical_position,
+                       recipient_digest, message_body_digest,
+                       reply_to_camp_message_id, task_id,
+                       task_version_at_admission, assignee_agent_id_at_admission,
+                       source_agent_run_id, edge_kind,
+                       target_parent_agent_run_id, return_to_agent_run_id,
+                       a2a_root_agent_run_id, a2a_depth,
+                       ancestor_agent_ids_json, recipient_presentation_snapshot_json,
+                       json_set(frozen_snapshot_json,
+                           '$.schemaVersion', 3,
+                           '$.deliveryKind', 'public_a2a',
+                           '$.dispatchDisposition', 'dispatch',
+                           '$.completionRole', 'required'),
+                       'public_a2a', 'dispatch', 'required', NULL, NULL, NULL,
+                       (SELECT sequence FROM camp_message WHERE camp_message.id = message_delivery.message_id),
+                       queue_sequence, status, dispatch_phase, wait_condition,
+                       dispatch_attempt_count, active_dispatch_attempt_id,
+                       scheduler_correlation_id, context_manifest_id,
+                       target_agent_run_id, retry_generation,
+                       manual_intervention_required, failure_code, failure_detail_json,
+                       version, created_at, updated_at, ended_at
+                FROM message_delivery;
+
+                DROP TABLE message_delivery;
+                ALTER TABLE message_delivery_v87 RENAME TO message_delivery;
+
+                CREATE INDEX message_delivery_recipient_pending_idx
+                    ON message_delivery(camp_id, recipient_agent_id, queue_sequence)
+                    WHERE status = 'pending';
+                CREATE INDEX message_delivery_wait_condition_idx
+                    ON message_delivery(recipient_agent_id, wait_condition, queue_sequence)
+                    WHERE status = 'pending' AND wait_condition IS NOT NULL;
+                CREATE INDEX message_delivery_camp_turn_idx
+                    ON message_delivery(camp_turn_id, status, created_at);
+                CREATE INDEX message_delivery_message_idx
+                    ON message_delivery(message_id, recipient_canonical_position);
+                CREATE INDEX message_delivery_gather_idx
+                    ON message_delivery(gather_id, delivery_kind, status, created_at)
+                    WHERE gather_id IS NOT NULL;
+                "#,
+            )?;
+
+            let create_agent_run: String = transaction.query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_run'",
+                [],
+                |row| row.get(0),
+            )?;
+            let mut create_agent_run_v87 = create_agent_run.replacen(
+                "CREATE TABLE agent_run",
+                "CREATE TABLE agent_run_v87",
+                1,
+            );
+            if create_agent_run_v87 == create_agent_run {
+                create_agent_run_v87 = create_agent_run.replacen(
+                    "CREATE TABLE \"agent_run\"",
+                    "CREATE TABLE agent_run_v87",
+                    1,
+                );
+            }
+            create_agent_run_v87 = create_agent_run_v87.replacen(
+                "CHECK(invocation_kind IN ('direct', 'a2a'))",
+                "CHECK(invocation_kind IN ('direct', 'a2a', 'gather_completion'))",
+                1,
+            );
+            create_agent_run_v87 = create_agent_run_v87.replacen(
+                "trigger_message_delivery_id TEXT REFERENCES message_delivery(id)",
+                "trigger_message_delivery_id TEXT REFERENCES message_delivery(id), trigger_delivery_generation INTEGER NOT NULL DEFAULT 0 CHECK(trigger_delivery_generation >= 0)",
+                1,
+            );
+            if !create_agent_run_v87.contains("gather_completion")
+                || !create_agent_run_v87.contains("trigger_delivery_generation")
+            {
+                anyhow::bail!("v87 could not extend the AgentRun invocation/trigger schema");
+            }
+            let agent_run_columns = {
+                let mut statement = transaction.prepare("PRAGMA table_info(agent_run)")?;
+                statement
+                    .query_map([], |row| row.get::<_, String>(1))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            let quoted_agent_run_columns = agent_run_columns
+                .iter()
+                .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let agent_run_schema_objects = {
+                let mut statement = transaction.prepare(
+                    r#"
+                    SELECT name, sql
+                    FROM sqlite_master
+                    WHERE (
+                            (type = 'index' AND tbl_name = 'agent_run')
+                         OR (type = 'trigger' AND instr(lower(sql), 'agent_run') > 0)
+                    )
+                      AND sql IS NOT NULL
+                    ORDER BY type, name
+                    "#,
+                )?;
+                statement
+                    .query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            transaction.execute_batch(&create_agent_run_v87)?;
+            transaction.execute_batch(&format!(
+                r#"
+                INSERT INTO agent_run_v87({quoted_agent_run_columns}, trigger_delivery_generation)
+                SELECT {quoted_agent_run_columns}, 0 FROM agent_run;
+                "#
+            ))?;
+            for (name, sql) in &agent_run_schema_objects {
+                if sql
+                    .trim_start()
+                    .to_ascii_uppercase()
+                    .starts_with("CREATE TRIGGER")
+                {
+                    transaction.execute_batch(&format!(
+                        "DROP TRIGGER \"{}\";",
+                        name.replace('"', "\"\"")
+                    ))?;
+                }
+            }
+            transaction.execute_batch(
+                r#"
+                DROP TABLE agent_run;
+                ALTER TABLE agent_run_v87 RENAME TO agent_run;
+                "#,
+            )?;
+            for (name, sql) in agent_run_schema_objects {
+                if name != "agent_run_trigger_delivery_unique" {
+                    transaction.execute_batch(&sql).with_context(|| {
+                        format!("failed to restore AgentRun schema object {name}")
+                    })?;
+                }
+            }
+            transaction.execute_batch(
+                r#"
+                CREATE UNIQUE INDEX agent_run_trigger_delivery_generation_unique
+                    ON agent_run(trigger_message_delivery_id, trigger_delivery_generation)
+                    WHERE trigger_message_delivery_id IS NOT NULL;
+                "#,
+            )?;
+
+            // Formatter v15 is additive for direct/A2A Runs, so retain immutable v14
+            // manifests for exact recovery while admitting newly materialized v15 rows.
+            let create_context_manifest: String = transaction.query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest'",
+                [],
+                |row| row.get(0),
+            )?;
+            let mut create_context_manifest_v87 = create_context_manifest.replacen(
+                "CREATE TABLE context_manifest",
+                "CREATE TABLE context_manifest_v87",
+                1,
+            );
+            if create_context_manifest_v87 == create_context_manifest {
+                create_context_manifest_v87 = create_context_manifest.replacen(
+                    "CREATE TABLE \"context_manifest\"",
+                    "CREATE TABLE context_manifest_v87",
+                    1,
+                );
+            }
+            create_context_manifest_v87 = create_context_manifest_v87.replacen(
+                "CHECK(formatter_version = 14)",
+                "CHECK(formatter_version IN (14, 15))",
+                1,
+            );
+            if !create_context_manifest_v87.contains("formatter_version IN (14, 15)") {
+                anyhow::bail!("v87 could not extend the ContextManifest formatter constraint");
+            }
+            let context_manifest_columns = {
+                let mut statement = transaction.prepare("PRAGMA table_info(context_manifest)")?;
+                statement
+                    .query_map([], |row| row.get::<_, String>(1))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            let quoted_context_manifest_columns = context_manifest_columns
+                .iter()
+                .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+                .collect::<Vec<_>>()
+                .join(", ");
+            transaction.execute_batch(&create_context_manifest_v87)?;
+            transaction.execute_batch(&format!(
+                "INSERT INTO context_manifest_v87({quoted_context_manifest_columns}) SELECT {quoted_context_manifest_columns} FROM context_manifest"
+            ))?;
+            transaction.execute_batch(
+                r#"
+                DROP INDEX IF EXISTS context_manifest_blob_idx;
+                DROP INDEX IF EXISTS context_manifest_bootstrap_idx;
+                DROP TABLE context_manifest;
+                ALTER TABLE context_manifest_v87 RENAME TO context_manifest;
+                CREATE INDEX context_manifest_blob_idx
+                    ON context_manifest(rendered_payload_blob_id);
+                CREATE INDEX context_manifest_bootstrap_idx
+                    ON context_manifest(bootstrap_evidence_id);
+                "#,
+            )?;
+
+            transaction.execute_batch(
+                r#"
+
+                CREATE TABLE gather_item (
+                    dispatch_delivery_id TEXT PRIMARY KEY
+                        REFERENCES message_delivery(id) ON DELETE CASCADE,
+                    gather_id TEXT NOT NULL REFERENCES gather_record(id) ON DELETE CASCADE,
+                    recipient_agent_id TEXT NOT NULL REFERENCES agent_profile(id),
+                    active_retry_generation INTEGER NOT NULL DEFAULT 0
+                        CHECK(active_retry_generation >= 0),
+                    target_agent_run_id TEXT REFERENCES agent_run(id),
+                    status TEXT NOT NULL CHECK(status IN (
+                        'pending', 'running', 'succeeded', 'failed',
+                        'cancelled', 'interrupted_before_dispatch'
+                    )),
+                    terminal_source TEXT CHECK(terminal_source IN ('delivery', 'agent_run')),
+                    fallback_summary TEXT,
+                    fallback_summary_digest TEXT,
+                    fallback_summary_original_bytes INTEGER
+                        CHECK(fallback_summary_original_bytes IS NULL
+                              OR fallback_summary_original_bytes >= 0),
+                    fallback_summary_truncated INTEGER NOT NULL DEFAULT 0
+                        CHECK(fallback_summary_truncated IN (0, 1)),
+                    error_code TEXT,
+                    terminal_resolution_source TEXT,
+                    terminal_reason_code TEXT,
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    started_at TEXT,
+                    ended_at TEXT,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(gather_id, recipient_agent_id),
+                    CHECK(
+                        (status IN ('pending', 'running')
+                         AND terminal_source IS NULL AND ended_at IS NULL)
+                        OR (status IN ('succeeded', 'failed', 'cancelled',
+                                      'interrupted_before_dispatch')
+                            AND terminal_source IS NOT NULL AND ended_at IS NOT NULL)
+                    ),
+                    CHECK(
+                        (status = 'pending' AND target_agent_run_id IS NULL)
+                        OR status <> 'pending'
+                    ),
+                    CHECK(
+                        fallback_summary IS NULL
+                        OR (fallback_summary_digest IS NOT NULL
+                            AND fallback_summary_original_bytes IS NOT NULL)
+                    )
+                );
+
+                CREATE INDEX gather_item_gather_status_idx
+                    ON gather_item(gather_id, status, recipient_agent_id);
+                CREATE INDEX gather_item_target_run_idx
+                    ON gather_item(target_agent_run_id, active_retry_generation)
+                    WHERE target_agent_run_id IS NOT NULL;
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v0.89', projection_schema_version = 42,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (87, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v87 migration left a foreign-key violation in {table} row {row_id}");
         }
         Ok(())
     }
@@ -13893,8 +14464,25 @@ mod tests {
             .execute_batch(
                 r#"
                 UPDATE rovai_data_contract
+                SET contract_version = 'v0.83', projection_schema_version = 41
+                WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 87;
+                "#,
+            )
+            .unwrap();
+        assert!(
+            has_current_data_contract(&path),
+            "the exact v0.83/schema-41 marker without migration 87 is an upgrade source"
+        );
+
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                UPDATE rovai_data_contract
                 SET contract_version = 'v0.78', projection_schema_version = 39
                 WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 87;
                 DELETE FROM schema_migration WHERE version = 86;
                 DELETE FROM schema_migration WHERE version = 85;
                 "#,
@@ -14547,7 +15135,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(manifest_schema.contains("formatter_version = 14"));
+        assert!(manifest_schema.contains("formatter_version IN (14, 15)"));
         drop(database);
 
         let reopened = Database::open(&directory).expect("v79 database should reopen");
@@ -16517,7 +17105,19 @@ mod tests {
                 [],
             )
             .expect("v84 evidence schema should admit Memory View evidence");
-        assert!(has_current_data_contract(&directory.join("rovai.sqlite")));
+        let contract: (String, i64, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT contract_version, projection_schema_version,
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 84)
+                FROM rovai_data_contract WHERE singleton = 1
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(contract, ("v0.78".to_string(), 39, 1));
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
@@ -17435,7 +18035,7 @@ mod tests {
     #[test]
     fn v65_installs_durable_task_v2_and_sets_v047_contract() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v65-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
+        let mut database = Database::open(&directory).expect("database should open");
         database
             .connection()
             .execute_batch(
@@ -17443,8 +18043,6 @@ mod tests {
                 PRAGMA foreign_keys = OFF;
                 ALTER TABLE agent_run DROP COLUMN task_version_at_admission;
                 ALTER TABLE agent_run DROP COLUMN assignee_agent_id_at_admission;
-                ALTER TABLE message_delivery DROP COLUMN task_version_at_admission;
-                ALTER TABLE message_delivery DROP COLUMN assignee_agent_id_at_admission;
                 DROP INDEX task_camp_status_created_idx;
                 DROP INDEX task_camp_assignee_status_idx;
                 DROP TABLE task;
@@ -17495,10 +18093,11 @@ mod tests {
                 "#,
             )
             .expect("test should restore the pre-v65 Task contract");
-        drop(database);
+        database
+            .migrate_durable_task_v2_v65()
+            .expect("v65 database should migrate");
 
-        let reopened = Database::open(&directory).expect("v65 database should reopen");
-        let counts: (i64, i64) = reopened
+        let counts: (i64, i64) = database
             .connection()
             .query_row(
                 r#"
@@ -17512,7 +18111,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(counts, (1, 0));
-        let contract: (String, i64, i64) = reopened
+        let contract: (String, i64, i64) = database
             .connection()
             .query_row(
                 r#"
@@ -17525,7 +18124,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(contract, ("v0.47".to_string(), 25, 1));
-        let task_columns = reopened
+        let task_columns = database
             .connection()
             .prepare("SELECT name FROM pragma_table_info('task') ORDER BY cid")
             .unwrap()
@@ -17545,7 +18144,7 @@ mod tests {
             assert!(task_columns.iter().any(|column| column == required));
         }
 
-        drop(reopened);
+        drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
@@ -18385,7 +18984,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(manifest_schema.contains("formatter_version = 14"));
+        assert!(manifest_schema.contains("formatter_version IN (14, 15)"));
         assert!(manifest_schema.contains("CHECK(context_delivery_profile_version = 3)"));
         assert!(manifest_schema.contains("collaboration_state_included INTEGER NOT NULL"));
         let delivery_schema: String = database

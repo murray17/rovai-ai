@@ -3,6 +3,10 @@
     "canonicalResult": {"status":"accepted","messageId":"msg_123","visibility":"camp_public","campTurnId":"turn_123","effectiveRecipients":["agent_27"],"recipientPresentation":{},"recipientSetDigest":"sha256:recipient-set","deliveryIds":["delivery_123"],"allocatedAgentRunResponsibilities":1},
     "agentOutput": {"messageId":"msg_123","effectiveRecipients":["agent_27"]}
   },
+  "team.gather": {
+    "canonicalResult": {"status":"accepted","gatherId":"gather_123","requestMessageId":"msg_gather_123","campTurnId":"turn_123","effectiveRecipients":["agent_27","agent_28"],"dispatchDeliveryIds":["delivery_27","delivery_28"],"completion":"deferred","allocatedAgentRunResponsibilities":3},
+    "agentOutput": {"gatherId":"gather_123","requestMessageId":"msg_gather_123","effectiveRecipients":["agent_27","agent_28"],"completion":"deferred"}
+  },
   "member.create": {
     "canonicalResult": {"agentId":"agent_27","version":1,"avatarRef":"rovai://member-avatar/managed/2b945f3f-4b45-4ae5-92b2-739fce600338","avatarStatus":"saved"},
     "agentOutput": {"agentId":"agent_27","version":1,"avatarRef":"rovai://member-avatar/managed/2b945f3f-4b45-4ae5-92b2-739fce600338","avatarStatus":"saved"}

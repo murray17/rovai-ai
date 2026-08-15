@@ -104,6 +104,8 @@ const CLI_OPERATIONS_OPENAI: &str =
     include_str!("../../../skills/cli-operations/agents/openai.yaml");
 const CLI_OPERATIONS_SEND_REFERENCE: &str =
     include_str!("../../../skills/cli-operations/references/send.md");
+const CLI_OPERATIONS_GATHER_REFERENCE: &str =
+    include_str!("../../../skills/cli-operations/references/gather.md");
 const CLI_OPERATIONS_TASK_REFERENCE: &str =
     include_str!("../../../skills/cli-operations/references/task.md");
 const CLI_OPERATIONS_CAMP_HISTORY_REFERENCE: &str =
@@ -480,6 +482,11 @@ const CLI_OPERATIONS_FILES: &[(&str, &str, u32)] = &[
     ("SKILL.md", CLI_OPERATIONS_RULES, 0o644),
     ("agents/openai.yaml", CLI_OPERATIONS_OPENAI, 0o644),
     ("references/send.md", CLI_OPERATIONS_SEND_REFERENCE, 0o644),
+    (
+        "references/gather.md",
+        CLI_OPERATIONS_GATHER_REFERENCE,
+        0o644,
+    ),
     ("references/task.md", CLI_OPERATIONS_TASK_REFERENCE, 0o644),
     (
         "references/camp-history.md",
@@ -3636,6 +3643,7 @@ mod tests {
             service.revision_content_path(&cli_operations.id, &cli_operations.current_revision.id);
         for reference in [
             "send.md",
+            "gather.md",
             "task.md",
             "camp-history.md",
             "memory.md",
@@ -3658,6 +3666,13 @@ mod tests {
         assert!(send_reference.contains("相互独立的行动时才组合"));
         assert!(send_reference.contains("不是 Core authorization 或角色拒绝规则"));
         assert!(!send_reference.contains("需要用户查看或决定时增加 User attention"));
+        let gather_reference =
+            fs::read_to_string(cli_operations_content.join("references/gather.md")).unwrap();
+        assert!(gather_reference.contains("接受后结束"));
+        assert!(gather_reference.contains("不要轮询"));
+        assert!(gather_reference.contains("不会立即物化 Lead Run"));
+        assert!(gather_reference.contains("mandatory Current Input"));
+        assert!(gather_reference.contains("原 initiator Conversation"));
         let cli_openai =
             fs::read_to_string(cli_operations_content.join("agents/openai.yaml")).unwrap();
         assert!(cli_openai.contains("display_name: \"CLI 操作协调\""));

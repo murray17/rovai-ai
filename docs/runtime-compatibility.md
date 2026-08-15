@@ -66,13 +66,34 @@ Session response 更新认证、模型、权限和 capability Ready，随后在�
 执行后台主动检查。规范边界见 [ADR-0192](adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)
 与 [Runtime Launch and Verification v1](contracts/runtime-launch-and-verification-v1.md)。
 
-### v0.85 Transport v12 当前基线
+### v0.89 Transport v13 当前基线
 
-当前字段级合同已推进到 [Built-in Tool Transport v12](contracts/builtin-tool-transport-v12.md)，固定十四项
-operation，并加入 direct user-triggered 的 `member.create`。catalog、CLI help/projection、幂等重放、
-A2A 拒绝、头像路径 Evidence 脱敏和十 Runtime qualification 脚本已通过确定性门禁或完成脚本对齐。
-本版本未重跑十种 Runtime 的真实十四项联合 matrix，因此下方十三项表仍只是各历史版本的实机证据，
-不能推导为 v12 pass。
+当前字段级合同已推进到 [Built-in Tool Transport v13](contracts/builtin-tool-transport-v13.md)，固定十五项
+operation；在 v12 的 `member.create` 之外新增异步 `team.gather -> rovai gather`。catalog、CLI
+help/projection、幂等重放、Gather completion、Evidence 脱敏和十 Runtime qualification 脚本均已完成
+确定性门禁与脚本对齐。
+
+2026-08-16 使用隔离 Core data-dir、Skill Library、Git workspace 与 Native Session 执行 v13 真实模型
+matrix。完整 pass 都覆盖十五项 canonical operation、三种 Send 输入、Gather captured return、唯一 Completion
+Delivery/Run、stale-version conflict、旧 lease fencing、后继三条 exact read 和新 lease。结果不是 10/10：
+
+| Runtime | 本轮版本 / model | v13 结果 | 结论 |
+| --- | --- | --- | --- |
+| Codex CLI | `codex-cli 0.147.0` / `gpt-5.6-sol` | 完整 pass；38 条首轮 Evidence，投影缩减 56.7% | pass |
+| OpenCode | `1.18.10` / `opencode/big-pickle` | 完整 pass | pass |
+| GitHub Copilot CLI | `GitHub Copilot CLI 1.0.79` / `claude-sonnet-5` | 完整 pass | pass |
+| Claude Code | `2.1.220` / runtime default | 完整 pass | pass |
+| Antigravity | `1.1.13` / runtime default | 完整 pass | pass |
+| Kiro | 当前安装未解析 | 显式 executable 下 60 秒产品配置仍为 `resolved=null`，未进入 Run | 本机 readiness blocked |
+| Qoder | `1.1.17` / `deepseek/deepseek-v4-flash-pg` | 首轮十五项及 Gather/Completion pass；successor 返回 `Insufficient Balance` | 外部余额 blocked |
+| CodeBuddy | `2.133.1` / `deepseek-v4-flash` | 两个独立 fixture 均在零工具调用时返回 `runtime_prompt_refusal` | 外部模型 blocked |
+| Qwen Code | 当前安装未解析 | 显式 executable 下 60 秒产品配置仍为 `resolved=null`，未进入 Run | 本机 readiness blocked |
+| TRAE CLI CN | 静态版本允许为空 / runtime default | 完整 pass；38 条首轮 Evidence，投影缩减 56.5% | pass |
+
+因此当前可陈述为 `6 full pass + 1 Gather 主闭环 pass 后外部阻塞 + 3 pre-Gather blocked`，不能陈述为
+十 Runtime v13 pass。Kiro/Qwen 复测时观测到早于本轮存在的对应 ACP 孤儿进程；这只是本机相关事实，
+尚未证明是 `resolved=null` 的唯一原因。Qoder 与 CodeBuddy 的错误来自 Runtime 明确终态，均未出现 Gather
+合同断言失败。下方历史表仍只代表各版本当时的实机证据，不能补足本轮缺口。
 
 ## 既有九 Runtime Built-in CLI 正式接入证据
 

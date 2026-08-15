@@ -13,8 +13,8 @@ use rovai_core::builtin_tool_cli_output::project_envelope;
 use rovai_core::builtin_tool_transport::{
     BUILTIN_TOOL_CONTRACT_VERSION, BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
     BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES, BuiltinToolArgument, BuiltinToolCliContext,
-    BuiltinToolDescription, BuiltinToolIpcRequest, BuiltinToolIpcRequestBody,
-    BuiltinToolIpcResponse, COMPACTION_HOOK_IPC_PROTOCOL_VERSION,
+    BuiltinToolCliIdentity, BuiltinToolDescription, BuiltinToolIpcRequest,
+    BuiltinToolIpcRequestBody, BuiltinToolIpcResponse, COMPACTION_HOOK_IPC_PROTOCOL_VERSION,
     COMPACTION_OBSERVATION_OUTBOX_SCHEMA_VERSION, CompactionHookIpcRequest,
     CompactionHookIpcResponse, CompactionObservationOutboxRecord, ROVAI_CLI_CONTEXT_ENV,
     builtin_tool_description, builtin_tool_identity_by_command,
@@ -71,11 +71,15 @@ fn run() -> Result<u8> {
         print_invalid_input();
         return Ok(2);
     }
+    if invocation_identity(&args).is_none() {
+        print_invalid_input();
+        return Ok(2);
+    }
 
     let context = load_context()?;
     let auth = context.auth()?;
     let request = match args.as_slice() {
-        [command, rest @ ..] if command == "send" => {
+        [command, rest @ ..] if matches!(command.as_str(), "send" | "gather") => {
             let identity = builtin_tool_identity_by_command(command, "")
                 .with_context(|| format!("unknown Rovai command: rovai {command}"))?;
             let description = builtin_tool_description(identity.operation)?;
@@ -381,6 +385,16 @@ fn operation_help(args: &[String]) -> Result<Option<BuiltinToolDescription>> {
         .transpose()
 }
 
+fn invocation_identity(args: &[String]) -> Option<BuiltinToolCliIdentity> {
+    match args {
+        [command, ..] if matches!(command.as_str(), "send" | "gather") => {
+            builtin_tool_identity_by_command(command, "")
+        }
+        [group, action, ..] => builtin_tool_identity_by_command(group, action),
+        _ => None,
+    }
+}
+
 fn is_family_help(args: &[String]) -> bool {
     matches!(args, [family, help] if help == "--help" && matches!(family.as_str(), "member" | "task" | "camp" | "history" | "memory"))
 }
@@ -592,7 +606,7 @@ enum BuiltinToolIpcFailure {
 
 fn print_root_help() {
     println!(
-        "Rovai Agent CLI\n\nOperations:\n  rovai send\n  rovai member create\n  rovai task create|get|list|update\n  rovai camp list|search|read\n  rovai history search\n  rovai memory view|search|read|write\n\nRun `rovai --help` to choose an operation, then run that operation's exact `--help`. Do not assume that a command family has its own help entry. Each operation supports direct flags, JSON stdin/heredoc, or --input-file <path>."
+        "Rovai Agent CLI\n\nOperations:\n  rovai send\n  rovai gather\n  rovai member create\n  rovai task create|get|list|update\n  rovai camp list|search|read\n  rovai history search\n  rovai memory view|search|read|write\n\nRun `rovai --help` to choose an operation, then run that operation's exact `--help`. Do not assume that a command family has its own help entry. Each operation supports direct flags, JSON stdin/heredoc, or --input-file <path>."
     );
 }
 
@@ -665,6 +679,13 @@ fn operation_help_text(description: &BuiltinToolDescription) -> String {
             )
             .expect("writing help to a String cannot fail");
         }
+        if description.name == "team.gather" && argument.field == "to" {
+            writeln!(
+                output,
+                "      Canonical member target; repeat as needed. Duplicate targets are frozen once."
+            )
+            .expect("writing help to a String cannot fail");
+        }
         if description.name == "camp.message.send" && argument.field == "mentionUser" {
             for line in CAMP_MESSAGE_SEND_TO_USER_HELP.lines() {
                 if line.is_empty() {
@@ -705,12 +726,23 @@ fn operation_help_text(description: &BuiltinToolDescription) -> String {
     for example in examples {
         writeln!(output, "  {example}").expect("writing help to a String cannot fail");
     }
+    if description.name == "team.gather" {
+        writeln!(
+            output,
+            "\nGather is asynchronous. After acceptance, end the current Lead Run. Do not poll, repeat Gather, or wait synchronously; Rovai delivers one FIFO completion after every member Run is terminal."
+        )
+        .expect("writing help to a String cannot fail");
+    }
     output
 }
 
 fn operation_help_examples(operation: &str) -> &'static [&'static str] {
     match operation {
         "camp.message.send" => &CAMP_MESSAGE_SEND_HELP_EXAMPLES,
+        "team.gather" => &[
+            "rovai gather --to agent_2 --to agent_3 --body '请分别分析并公开回复'",
+            "rovai gather --input-file gather.json",
+        ],
         "member.create" => &[
             "rovai member create --creation-key 2b945f3f-4b45-4ae5-92b2-739fce600338 --display-name 'Nova' --team-role 'Researcher'",
             "rovai member create --input-file confirmed-member.json",
@@ -822,7 +854,16 @@ mod tests {
                 .operation,
             "camp.message.send"
         );
+        assert_eq!(
+            builtin_tool_identity_by_command("gather", "")
+                .unwrap()
+                .operation,
+            "team.gather"
+        );
         assert!(builtin_tool_identity_by_command("memory", "propose-hearth").is_none());
+        assert!(
+            invocation_identity(&["memory".to_string(), "propose-hearth".to_string()]).is_none()
+        );
         assert!(builtin_tool_identity_by_command("tool", "list").is_none());
         assert!(builtin_tool_identity_by_command("tool", "describe").is_none());
         for family in ["member", "task", "camp", "history", "memory"] {
@@ -833,9 +874,10 @@ mod tests {
     }
 
     #[test]
-    fn exact_help_surface_covers_all_fourteen_operations_and_no_family_aliases() {
+    fn exact_help_surface_covers_all_fifteen_operations_and_no_family_aliases() {
         let exact_paths: &[&[&str]] = &[
             &["send", "--help"],
+            &["gather", "--help"],
             &["member", "create", "--help"],
             &["task", "create", "--help"],
             &["task", "get", "--help"],
@@ -850,7 +892,7 @@ mod tests {
             &["memory", "read", "--help"],
             &["memory", "write", "--help"],
         ];
-        assert_eq!(exact_paths.len(), 14);
+        assert_eq!(exact_paths.len(), 15);
         for path in exact_paths {
             let args = path
                 .iter()

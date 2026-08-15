@@ -260,6 +260,7 @@ pub struct AgentRunView {
     pub execution_epoch: i64,
     pub permission_semantics: String,
     pub invocation_kind: String,
+    pub trigger_delivery_generation: i64,
     pub a2a_parent_agent_run_id: Option<String>,
     pub a2a_root_agent_run_id: Option<String>,
     pub a2a_depth: i64,
@@ -596,10 +597,6 @@ pub struct MessageDeliveryView {
     pub camp_turn_id: String,
     pub task_id: Option<String>,
     pub recipient_agent_id: String,
-    pub recipient_canonical_position: i64,
-    pub edge_kind: String,
-    pub target_parent_agent_run_id: Option<String>,
-    pub return_to_agent_run_id: Option<String>,
     pub status: String,
     pub dispatch_phase: String,
     pub wait_condition: Option<String>,
@@ -613,6 +610,33 @@ pub struct MessageDeliveryView {
     pub created_at: String,
     pub updated_at: String,
     pub ended_at: Option<String>,
+    #[serde(flatten)]
+    pub kind: MessageDeliveryKindView,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(
+    tag = "deliveryKind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum MessageDeliveryKindView {
+    PublicA2a {
+        dispatch_disposition: String,
+        completion_role: Option<String>,
+        gather_id: Option<String>,
+        gather_dispatch_delivery_id: Option<String>,
+        recipient_canonical_position: i64,
+        edge_kind: String,
+        target_parent_agent_run_id: Option<String>,
+        return_to_agent_run_id: Option<String>,
+    },
+    GatherCompletion {
+        dispatch_disposition: String,
+        completion_role: String,
+        gather_id: String,
+        target_conversation_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1864,8 +1888,9 @@ fn load_turns(
                execution_budget_elapsed_seconds,
                execution_budget_max_agent_run_responsibilities,
                execution_budget_max_accepted_a2a,
-               execution_budget_root_agent_run_responsibilities + a2a_run_slots_allocated,
-               a2a_run_slots_allocated,
+               execution_budget_root_agent_run_responsibilities
+                 + agent_run_responsibilities_allocated,
+               accepted_a2a_allocated,
                execution_budget_exhausted_at,
                execution_budget_exhaustion_reason,
                execution_budget_exhaustion_command_id,
@@ -1921,13 +1946,16 @@ fn load_message_deliveries(
     let mut statement = transaction.prepare(
         r#"
         SELECT id, message_id, camp_turn_id, task_id, recipient_agent_id,
-               recipient_canonical_position, edge_kind,
-               target_parent_agent_run_id, return_to_agent_run_id,
                status, dispatch_phase,
                wait_condition, dispatch_attempt_count, retry_generation,
                context_manifest_id, target_agent_run_id,
                manual_intervention_required, failure_code,
-               version, created_at, updated_at, ended_at
+               version, created_at, updated_at, ended_at,
+               delivery_kind, dispatch_disposition, completion_role,
+               gather_id, gather_dispatch_delivery_id,
+               recipient_canonical_position, edge_kind,
+               target_parent_agent_run_id, return_to_agent_run_id,
+               target_conversation_id
         FROM message_delivery
         WHERE camp_id = ?1
         ORDER BY
@@ -1945,29 +1973,78 @@ fn load_message_deliveries(
     )?;
     let mut deliveries = statement
         .query_map(params![camp_id, limit], |row| {
+            let delivery_kind = row.get::<_, String>(18)?;
+            let kind = match delivery_kind.as_str() {
+                "public_a2a" => MessageDeliveryKindView::PublicA2a {
+                    dispatch_disposition: row.get(19)?,
+                    completion_role: row.get(20)?,
+                    gather_id: row.get(21)?,
+                    gather_dispatch_delivery_id: row.get(22)?,
+                    recipient_canonical_position: row.get::<_, Option<i64>>(23)?.ok_or_else(
+                        || {
+                            rusqlite::Error::InvalidColumnType(
+                                23,
+                                "recipient_canonical_position".to_string(),
+                                rusqlite::types::Type::Null,
+                            )
+                        },
+                    )?,
+                    edge_kind: row.get::<_, Option<String>>(24)?.ok_or_else(|| {
+                        rusqlite::Error::InvalidColumnType(
+                            24,
+                            "edge_kind".to_string(),
+                            rusqlite::types::Type::Null,
+                        )
+                    })?,
+                    target_parent_agent_run_id: row.get(25)?,
+                    return_to_agent_run_id: row.get(26)?,
+                },
+                "gather_completion" => MessageDeliveryKindView::GatherCompletion {
+                    dispatch_disposition: row.get(19)?,
+                    completion_role: row.get::<_, Option<String>>(20)?.ok_or_else(|| {
+                        rusqlite::Error::InvalidColumnType(
+                            20,
+                            "completion_role".to_string(),
+                            rusqlite::types::Type::Null,
+                        )
+                    })?,
+                    gather_id: row.get::<_, Option<String>>(21)?.ok_or_else(|| {
+                        rusqlite::Error::InvalidColumnType(
+                            21,
+                            "gather_id".to_string(),
+                            rusqlite::types::Type::Null,
+                        )
+                    })?,
+                    target_conversation_id: row.get::<_, Option<String>>(27)?.ok_or_else(|| {
+                        rusqlite::Error::InvalidColumnType(
+                            27,
+                            "target_conversation_id".to_string(),
+                            rusqlite::types::Type::Null,
+                        )
+                    })?,
+                },
+                _ => return Err(rusqlite::Error::InvalidQuery),
+            };
             Ok(MessageDeliveryView {
                 id: row.get(0)?,
                 message_id: row.get(1)?,
                 camp_turn_id: row.get(2)?,
                 task_id: row.get(3)?,
                 recipient_agent_id: row.get(4)?,
-                recipient_canonical_position: row.get(5)?,
-                edge_kind: row.get(6)?,
-                target_parent_agent_run_id: row.get(7)?,
-                return_to_agent_run_id: row.get(8)?,
-                status: row.get(9)?,
-                dispatch_phase: row.get(10)?,
-                wait_condition: row.get(11)?,
-                dispatch_attempt_count: row.get(12)?,
-                retry_generation: row.get(13)?,
-                context_manifest_id: row.get(14)?,
-                target_agent_run_id: row.get(15)?,
-                manual_intervention_required: row.get::<_, i64>(16)? != 0,
-                failure_code: row.get(17)?,
-                version: row.get(18)?,
-                created_at: row.get(19)?,
-                updated_at: row.get(20)?,
-                ended_at: row.get(21)?,
+                status: row.get(5)?,
+                dispatch_phase: row.get(6)?,
+                wait_condition: row.get(7)?,
+                dispatch_attempt_count: row.get(8)?,
+                retry_generation: row.get(9)?,
+                context_manifest_id: row.get(10)?,
+                target_agent_run_id: row.get(11)?,
+                manual_intervention_required: row.get::<_, i64>(12)? != 0,
+                failure_code: row.get(13)?,
+                version: row.get(14)?,
+                created_at: row.get(15)?,
+                updated_at: row.get(16)?,
+                ended_at: row.get(17)?,
+                kind,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1998,6 +2075,7 @@ fn load_agent_runs(
                agent_run.terminal_reason_code,
                agent_run.execution_epoch, agent_run.permission_semantics,
                agent_run.invocation_kind,
+               agent_run.trigger_delivery_generation,
                agent_run.a2a_parent_agent_run_id,
                agent_run.a2a_root_agent_run_id, agent_run.a2a_depth,
                (SELECT COUNT(*)
@@ -2089,20 +2167,21 @@ fn load_agent_runs(
                 row.get::<_, i64>(13)?,
                 row.get::<_, String>(14)?,
                 row.get::<_, String>(15)?,
-                row.get::<_, Option<String>>(16)?,
+                row.get::<_, i64>(16)?,
                 row.get::<_, Option<String>>(17)?,
-                row.get::<_, i64>(18)?,
+                row.get::<_, Option<String>>(18)?,
                 row.get::<_, i64>(19)?,
-                row.get::<_, i64>(20)? != 0,
-                row.get::<_, Option<String>>(21)?,
+                row.get::<_, i64>(20)?,
+                row.get::<_, i64>(21)? != 0,
                 row.get::<_, Option<String>>(22)?,
                 row.get::<_, Option<String>>(23)?,
-                row.get::<_, String>(24)?,
-                row.get::<_, i64>(25)?,
-                row.get::<_, String>(26)?,
-                row.get::<_, Option<String>>(27)?,
+                row.get::<_, Option<String>>(24)?,
+                row.get::<_, String>(25)?,
+                row.get::<_, i64>(26)?,
+                row.get::<_, String>(27)?,
                 row.get::<_, Option<String>>(28)?,
-                row.get::<_, String>(29)?,
+                row.get::<_, Option<String>>(29)?,
+                row.get::<_, String>(30)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -2125,6 +2204,7 @@ fn load_agent_runs(
                 execution_epoch,
                 permission_semantics,
                 invocation_kind,
+                trigger_delivery_generation,
                 a2a_parent_agent_run_id,
                 a2a_root_agent_run_id,
                 a2a_depth,
@@ -2157,6 +2237,7 @@ fn load_agent_runs(
                     execution_epoch,
                     permission_semantics,
                     invocation_kind,
+                    trigger_delivery_generation,
                     a2a_parent_agent_run_id,
                     a2a_root_agent_run_id,
                     a2a_depth,

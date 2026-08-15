@@ -100,6 +100,7 @@ Related: ADR-0100 的 Session identity delivery 位于 session-context-bootstrap
 | [ADR-0170](0170-current-run-committed-self-write-exact-read.md) | Current-Run Committed Self-Write Exact Read |
 | [ADR-0182](0182-core-resolved-current-camp-display-name-inline-addressing-alias.md) | Core-Resolved Current-Camp Display-Name Inline Addressing Alias |
 | [ADR-0184](0184-line-leading-display-name-inline-addressing-alias.md) | Line-Leading Display-Name Inline Addressing Alias |
+| [ADR-0193](0193-durable-gather-barrier-over-unified-message-delivery.md) | Durable Gather Barrier over Unified Message Delivery |
 <!-- adr-current-primary:end -->
 
 Related: Context selection、Self/Peer identity 与 Runtime admission 从相应 primary 主题进入。
@@ -138,7 +139,7 @@ Related: Session redelivery、Skill/MCP projection 与 Qualification 分别保�
 
 - **何时阅读：** 修改 Native Session、Bootstrap、Dynamic Context、Profile、redelivery 或 accepted-input ACK 时阅读。
 - **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Native Session Bootstrap Redelivery](../architecture/native-session-bootstrap-redelivery.md)、[Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)
-- **当前合同：** [Context Delivery Profile v3](../contracts/context-delivery-profile-v3.md)、[ContextManifest Evidence v12](../contracts/context-manifest-evidence-v12.md)、[Collaboration State v2](../contracts/collaboration-state-v2.md)
+- **当前合同：** [Context Delivery Profile v3](../contracts/context-delivery-profile-v3.md)、[ContextManifest Evidence v13](../contracts/context-manifest-evidence-v13.md)、[Collaboration State v2](../contracts/collaboration-state-v2.md)
 
 <!-- adr-current-primary:begin topic=session-context-bootstrap -->
 | ADR | Decision |
@@ -159,6 +160,7 @@ Related: Session redelivery、Skill/MCP projection 与 Qualification 分别保�
 | [ADR-0149](0149-bounded-whole-history-omission-evidence.md) | Bounded Whole-History Omission Evidence |
 | [ADR-0152](0152-lead-owned-task-responsibility-and-self-active-task-awareness.md) | Lead-Owned Task Responsibility and Self-Active Task Awareness |
 | [ADR-0153](0153-explicit-empty-self-active-task-snapshot.md) | Explicit Empty Self-Active Task Snapshot |
+| [ADR-0194](0194-mandatory-typed-gather-completion-current-input.md) | Mandatory Typed Gather Completion Current Input |
 <!-- adr-current-primary:end -->
 
 Related: Member identity、Message delivery、Memory entrypoint 与 Evidence 仍从各自 primary 主题进入。
@@ -190,7 +192,7 @@ Related: Session entrypoint 与 Built-in operation 只作为交叉导航，不�
 
 - **何时阅读：** 修改 Skill/MCP projection、Built-in transport、CLI、catalog 或 Agent output 时阅读。
 - **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
-- **当前合同：** [Built-in Tool Transport v12](../contracts/builtin-tool-transport-v12.md)
+- **当前合同：** [Built-in Tool Transport v13](../contracts/builtin-tool-transport-v13.md)
 
 <!-- adr-current-primary:begin topic=skills-mcp-builtins -->
 | ADR | Decision |

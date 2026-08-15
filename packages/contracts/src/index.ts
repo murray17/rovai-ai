@@ -835,7 +835,8 @@ export interface AgentRunView {
     | null
   executionEpoch: number
   permissionSemantics: 'core_enforced_v1' | 'runtime_managed_v2'
-  invocationKind: 'direct' | 'a2a'
+  invocationKind: 'direct' | 'a2a' | 'gather_completion'
+  triggerDeliveryGeneration: number
   a2aParentAgentRunId: string | null
   a2aRootAgentRunId: string | null
   a2aDepth: number
@@ -1039,7 +1040,7 @@ export interface ContextManifestView {
   mcpProjectionDigest: string
   selfActiveTaskEvidence: unknown
   selfActiveTaskEvidenceDigest: string
-  formatterVersion: 14
+  formatterVersion: 15
   renderedPayloadDigest: string
   delivery: RuntimeInputDeliveryView | null
   createdAt: string
@@ -1203,16 +1204,12 @@ export interface CampMessageAroundParams {
   messageId: string
 }
 
-export interface MessageDeliveryView {
+interface MessageDeliveryBaseView {
   id: string
   messageId: string
   campTurnId: string
   taskId: string | null
   recipientAgentId: string
-  recipientCanonicalPosition: number
-  edgeKind: 'forward' | 'return'
-  targetParentAgentRunId: string | null
-  returnToAgentRunId: string | null
   status: 'pending' | 'running' | 'settled' | 'failed' | 'cancelled' | 'interrupted_before_dispatch' | string
   dispatchPhase: 'never_attempted' | 'attempting' | 'attempted_waiting' | 'materialized' | 'terminal' | string
   waitCondition: 'target_busy' | 'runtime_unavailable' | 'capacity_unavailable' | null
@@ -1227,6 +1224,27 @@ export interface MessageDeliveryView {
   updatedAt: string
   endedAt: string | null
 }
+
+export type MessageDeliveryView = MessageDeliveryBaseView & (
+  | {
+      deliveryKind: 'public_a2a'
+      dispatchDisposition: 'dispatch' | 'gather_captured'
+      completionRole: 'required' | 'optional' | null
+      gatherId: string | null
+      gatherDispatchDeliveryId: string | null
+      recipientCanonicalPosition: number
+      edgeKind: 'forward' | 'return'
+      targetParentAgentRunId: string | null
+      returnToAgentRunId: string | null
+    }
+  | {
+      deliveryKind: 'gather_completion'
+      dispatchDisposition: 'dispatch'
+      completionRole: 'required'
+      gatherId: string
+      targetConversationId: string
+    }
+)
 
 export interface EventBatch {
   schemaVersion: 9

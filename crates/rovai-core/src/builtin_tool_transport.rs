@@ -6,13 +6,13 @@ use serde_json::{Map, Value, json};
 
 use crate::{command::canonical_json_digest, team_tool_catalog::builtin_tool_definitions};
 
-pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 12;
+pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 13;
 pub const BUILTIN_TOOL_IPC_PROTOCOL_VERSION: u32 = 1;
 pub const BUILTIN_TOOL_ENVELOPE_VERSION: u32 = 1;
 pub const BUILTIN_TOOL_RECEIPT_VERSION: u32 = 1;
-pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 12;
+pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 13;
 pub const BUILTIN_TOOL_AGENT_OUTPUT_CONTRACT_VERSION: u32 = 2;
-pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v12";
+pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v13";
 pub const BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES: usize = 1024 * 1024;
 pub const ROVAI_AGENT_CLI_ENV: &str = "ROVAI_AGENT_CLI";
 pub const ROVAI_CLI_CONTEXT_ENV: &str = "ROVAI_CLI_CONTEXT";
@@ -128,10 +128,15 @@ pub struct BuiltinToolCliIdentity {
     pub action: &'static str,
 }
 
-pub const BUILTIN_TOOL_CLI_IDENTITIES: [BuiltinToolCliIdentity; 14] = [
+pub const BUILTIN_TOOL_CLI_IDENTITIES: [BuiltinToolCliIdentity; 15] = [
     BuiltinToolCliIdentity {
         operation: "camp.message.send",
         group: "send",
+        action: "",
+    },
+    BuiltinToolCliIdentity {
+        operation: "team.gather",
+        group: "gather",
         action: "",
     },
     BuiltinToolCliIdentity {
@@ -723,6 +728,25 @@ fn error_contracts(operation: &str) -> Vec<BuiltinToolErrorContract> {
                 });
             }
         }
+        "team.gather" => {
+            for (code, recovery) in [
+                ("gather.default_lead_required", BuiltinToolRecovery::Stop),
+                ("gather.no_recipients", BuiltinToolRecovery::FixInput),
+                ("gather.addressing_invalid", BuiltinToolRecovery::FixInput),
+                ("gather.fanout_exceeded", BuiltinToolRecovery::FixInput),
+                ("gather.turn_not_active", BuiltinToolRecovery::Stop),
+                (
+                    "gather.execution_budget_exceeded",
+                    BuiltinToolRecovery::Stop,
+                ),
+                ("gather.idempotency_conflict", BuiltinToolRecovery::Stop),
+            ] {
+                errors.push(BuiltinToolErrorContract {
+                    code: code.to_string(),
+                    recovery,
+                });
+            }
+        }
         "member.create" => {
             for code in [
                 "member.invalid_creation_key",
@@ -772,6 +796,7 @@ pub fn projection_identity(operation: &str) -> Result<&'static str> {
         // The compact Agent projection is still the same two-field v1 shape;
         // the domain send contract is v4 and remains hidden behind it.
         "camp.message.send" => Ok("camp-message-send-v1"),
+        "team.gather" => Ok("gather-v1"),
         "memory.write" => Ok("memory-write-v2"),
         "member.create" | "team.create_task" | "team.get_task" | "team.list_tasks"
         | "team.update_task" | "camp.list" | "camp.search" | "camp.read" | "history.search"
@@ -797,6 +822,9 @@ pub fn recovery_for_error_code(code: &str) -> BuiltinToolRecovery {
                 | "message.task_recipient_ambiguous"
                 | "message.invalid_task"
                 | "message.execution_budget_exceeded"
+                | "gather.no_recipients"
+                | "gather.addressing_invalid"
+                | "gather.fanout_exceeded"
                 | "member.invalid_creation_key"
                 | "member.invalid_identity"
                 | "member.avatar_invalid"
@@ -902,9 +930,9 @@ mod tests {
 
     #[test]
     fn cli_mapping_is_complete_unique_and_contract_valid() {
-        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 12);
-        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 12);
-        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v12");
+        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 13);
+        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 13);
+        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v13");
         validate_builtin_tool_contract().unwrap();
         let operations = BUILTIN_TOOL_CLI_IDENTITIES
             .iter()
@@ -914,8 +942,8 @@ mod tests {
             .iter()
             .map(|identity| (identity.group, identity.action))
             .collect::<BTreeSet<_>>();
-        assert_eq!(operations.len(), 14);
-        assert_eq!(commands.len(), 14);
+        assert_eq!(operations.len(), 15);
+        assert_eq!(commands.len(), 15);
     }
 
     #[test]

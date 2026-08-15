@@ -2475,7 +2475,8 @@ export function CampWorkspace({
                   const followsSameAuthor = messageAuthorKey !== null
                     && previousMessageAuthorKey === messageAuthorKey
                   const campMessageDeliveries = snapshot.messageDeliveries.filter((delivery) =>
-                    delivery.messageId === campMessage.id
+                    delivery.deliveryKind === 'public_a2a'
+                    && delivery.messageId === campMessage.id
                   )
                   const replyParentId = campMessage.replyToCampMessageId
                   const replyParent = replyParentId ? replyParentById.get(replyParentId) ?? null : null
@@ -3651,7 +3652,13 @@ function ExecutionDrawer({
                         </div>
                         <div className="execution-run-meta">
                           <span>执行 <code>{shortIdentity(run.id)}</code></span>
-                          <span>{run.invocationKind === 'a2a' ? 'A2A' : '直接执行'}</span>
+                          <span>
+                            {run.invocationKind === 'a2a'
+                              ? 'A2A'
+                              : run.invocationKind === 'gather_completion'
+                                ? '统一综合'
+                                : '直接执行'}
+                          </span>
                           {run.invocationKind === 'a2a' && <span>深度 {run.a2aDepth}</span>}
                           <span>本轮 <code>{shortIdentity(run.campTurnId)}</code></span>
                         </div>
@@ -3689,8 +3696,9 @@ function AgentRunDeliveryRecipients({
   deliveries: MessageDeliveryView[]
   memberById: Map<string, CampSnapshot['members'][number]>
 }): JSX.Element | null {
-  if (deliveries.length === 0) return null
-  const ordered = deliveries.slice().sort((left, right) =>
+  const publicDeliveries = deliveries.filter(isPublicA2aDelivery)
+  if (publicDeliveries.length === 0) return null
+  const ordered = publicDeliveries.slice().sort((left, right) =>
     left.recipientCanonicalPosition - right.recipientCanonicalPosition
   )
   return (
@@ -3764,8 +3772,9 @@ function CampMessageDeliveryFooter({
     focusPanel: boolean
   ): void
 }): JSX.Element | null {
-  if (deliveries.length === 0) return null
-  const ordered = deliveries.slice().sort((left, right) =>
+  const publicDeliveries = deliveries.filter(isPublicA2aDelivery)
+  if (publicDeliveries.length === 0) return null
+  const ordered = publicDeliveries.slice().sort((left, right) =>
     left.recipientCanonicalPosition - right.recipientCanonicalPosition
   )
   const deliveryAccent = ordered.length === 1
@@ -3824,6 +3833,12 @@ function CampMessageDeliveryFooter({
       </span>
     </footer>
   )
+}
+
+function isPublicA2aDelivery(
+  delivery: MessageDeliveryView
+): delivery is Extract<MessageDeliveryView, { deliveryKind: 'public_a2a' }> {
+  return delivery.deliveryKind === 'public_a2a'
 }
 
 function MentionProfilePopover({

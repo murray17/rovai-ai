@@ -109,6 +109,7 @@ pub(crate) struct DeliveryContextPreview<'a> {
     pub agent_id: &'a str,
     pub task_id: Option<&'a str>,
     pub execution_epoch: i64,
+    pub invocation_kind: &'a str,
     pub a2a_parent_agent_run_id: Option<&'a str>,
     pub a2a_root_agent_run_id: Option<&'a str>,
     pub a2a_depth: i64,
@@ -699,11 +700,13 @@ impl ContextService {
         let shared_message_evidence_digest =
             canonical_json_digest(&serde_json::to_value(&shared_message_evidence)?)?;
         let current_input_source = json!({
+            "invocationKind": snapshot.invocation_kind,
             "sourceCampMessageId": current_input.source_camp_message_id,
             "conversationMessageId": current_input.source_conversation_message_id,
             "sourceContentDigest": current_input.source_content_digest,
             "projectedBodyDigest": current_input.projected_body_digest,
             "mentionsCurrentUser": current_input.mentions_current_user,
+            "gatherCompletion": gather_completion_manifest_evidence(&snapshot, &current_input)?,
         });
         let attachment_digest = canonical_json_digest(&serde_json::to_value(&attachment_refs)?)?;
         let originating_public_user_message_ref = shared_conversation
@@ -1183,11 +1186,13 @@ impl ContextService {
             "runNoticePayload": rendered_run_notices.payload_json,
             "runNoticeDigest": rendered_run_notices.digest,
             "currentInputSource": {
+                "invocationKind": snapshot.invocation_kind,
                 "sourceCampMessageId": current_input.source_camp_message_id,
                 "conversationMessageId": current_input.source_conversation_message_id,
                 "sourceContentDigest": current_input.source_content_digest,
                 "projectedBodyDigest": current_input.projected_body_digest,
                 "mentionsCurrentUser": current_input.mentions_current_user,
+                "gatherCompletion": gather_completion_manifest_evidence(&snapshot, &current_input)?,
             },
             "attachmentRefs": attachment_refs,
             "attachmentDigest": canonical_json_digest(&serde_json::to_value(&attachment_refs)?)?,
@@ -1752,7 +1757,7 @@ fn prospective_delivery_snapshot(
         agent_id: request.agent_id.to_string(),
         task_id: request.task_id.map(str::to_string),
         execution_epoch: request.execution_epoch,
-        invocation_kind: "a2a".to_string(),
+        invocation_kind: request.invocation_kind.to_string(),
         a2a_parent_agent_run_id: request.a2a_parent_agent_run_id.map(str::to_string),
         a2a_root_agent_run_id: request.a2a_root_agent_run_id.map(str::to_string),
         a2a_depth: request.a2a_depth,
@@ -3359,6 +3364,16 @@ fn load_originating_public_user_message<R: ContextReadConnection>(
     profile: ContextDeliveryProfile,
     starting_agent_run_id: Option<&str>,
 ) -> Result<Option<SharedMessage>> {
+    if snapshot.invocation_kind == "gather_completion" {
+        if snapshot.a2a_depth != 0
+            || snapshot.a2a_parent_agent_run_id.is_some()
+            || snapshot.a2a_root_agent_run_id.is_some()
+            || snapshot.trigger_message_delivery_id.is_none()
+        {
+            anyhow::bail!("Gather Completion AgentRun has invalid lineage metadata");
+        }
+        return Ok(None);
+    }
     if snapshot.invocation_kind == "direct" {
         if snapshot.a2a_depth != 0 || snapshot.a2a_parent_agent_run_id.is_some() {
             anyhow::bail!("Direct AgentRun has invalid A2A lineage metadata");
@@ -3675,6 +3690,58 @@ impl CurrentInput {
     }
 }
 
+fn gather_completion_manifest_evidence(
+    snapshot: &RunSnapshot,
+    current_input: &CurrentInput,
+) -> Result<Option<Value>> {
+    if snapshot.invocation_kind != "gather_completion" {
+        return Ok(None);
+    }
+    let items = current_input
+        .payload
+        .get("items")
+        .and_then(Value::as_array)
+        .context("Gather Completion Current Input has no items")?;
+    let ordered_refs = items
+        .iter()
+        .map(|item| {
+            let captured_message_refs = item
+                .get("capturedMessages")
+                .and_then(Value::as_array)
+                .context("Gather Completion Item has no capturedMessages")?
+                .iter()
+                .map(|message| {
+                    Ok(json!({
+                        "messageId": message.get("messageId").and_then(Value::as_str).context("captured messageId missing")?,
+                        "sourceAgentRunId": message.get("sourceAgentRunId").and_then(Value::as_str).context("captured sourceAgentRunId missing")?,
+                        "retryGeneration": message.get("retryGeneration").and_then(Value::as_i64).context("captured retryGeneration missing")?,
+                        "sequence": message.get("sequence").and_then(Value::as_i64).context("captured sequence missing")?,
+                        "contentDigest": message.get("contentDigest").and_then(Value::as_str).context("captured contentDigest missing")?,
+                    }))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            Ok(json!({
+                "recipientAgentId": item.get("recipientAgentId").and_then(Value::as_str).context("Gather Item recipientAgentId missing")?,
+                "dispatchDeliveryId": item.get("dispatchDeliveryId").and_then(Value::as_str).context("Gather Item dispatchDeliveryId missing")?,
+                "targetAgentRunId": item.get("targetAgentRunId"),
+                "status": item.get("status").and_then(Value::as_str).context("Gather Item status missing")?,
+                "capturedMessageRefs": captured_message_refs,
+            }))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Some(json!({
+        "invocationKind": "gather_completion",
+        "gatherId": current_input.payload.get("gatherId"),
+        "completionDeliveryId": snapshot.trigger_message_delivery_id,
+        "requestMessageId": current_input.payload.get("requestMessageId"),
+        "completionInputSchemaVersion": crate::gather::GATHER_COMPLETION_INPUT_SCHEMA_VERSION,
+        "completionInputDigest": current_input.source_content_digest,
+        "completionInputByteLength": serde_json::to_vec(&current_input.payload)?.len(),
+        "gatherSnapshotDigest": current_input.source_content_digest,
+        "orderedItemRefs": ordered_refs,
+    })))
+}
+
 #[derive(Debug)]
 struct TriggerCampMessage {
     id: String,
@@ -3866,6 +3933,94 @@ fn load_current_input<R: ContextReadConnection>(
     database: &R,
     snapshot: &RunSnapshot,
 ) -> Result<CurrentInput> {
+    if snapshot.invocation_kind == "gather_completion" {
+        let delivery_id = snapshot
+            .trigger_message_delivery_id
+            .as_deref()
+            .context("Gather Completion AgentRun requires a trigger Delivery")?;
+        let row = database
+            .context_connection()
+            .query_row(
+                r#"
+                SELECT gather.id, gather.command_id,
+                       gather.request_message_id,
+                       gather.completion_input_schema_version,
+                       gather.completion_input_json,
+                       gather.completion_input_digest,
+                       delivery.camp_message_boundary_sequence
+                FROM message_delivery AS delivery
+                JOIN gather_record AS gather ON gather.id = delivery.gather_id
+                JOIN camp_message AS request ON request.id = gather.request_message_id
+                WHERE delivery.id = ?1
+                  AND delivery.delivery_kind = 'gather_completion'
+                  AND delivery.dispatch_disposition = 'dispatch'
+                  AND delivery.completion_role = 'required'
+                  AND delivery.camp_id = ?2
+                  AND delivery.camp_turn_id = ?3
+                  AND delivery.recipient_agent_id = ?4
+                  AND delivery.target_conversation_id = ?5
+                  AND delivery.message_id = gather.request_message_id
+                  AND request.sequence <= delivery.camp_message_boundary_sequence
+                  AND gather.status IN ('ready', 'completing')
+                  AND (gather.completion_run_id IS NULL
+                       OR gather.completion_run_id = ?6)
+                  AND (
+                        (delivery.status = 'pending'
+                         AND delivery.dispatch_phase = 'attempting'
+                         AND delivery.active_dispatch_attempt_id IS NOT NULL)
+                     OR (delivery.status = 'running'
+                         AND delivery.dispatch_phase = 'materialized'
+                         AND delivery.target_agent_run_id = ?6)
+                  )
+                "#,
+                params![
+                    delivery_id,
+                    snapshot.camp_id,
+                    snapshot.camp_turn_id,
+                    snapshot.agent_id,
+                    snapshot.conversation_id,
+                    snapshot.agent_run_id,
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, i64>(6)?,
+                    ))
+                },
+            )
+            .optional()?
+            .context("Gather Completion input binding is invalid")?;
+        if row.3 != crate::gather::GATHER_COMPLETION_INPUT_SCHEMA_VERSION
+            || row.6 != snapshot.camp_message_boundary_sequence
+            || sha256_text(&row.4) != row.5
+        {
+            anyhow::bail!("Gather Completion input evidence is inconsistent");
+        }
+        let payload: Value =
+            serde_json::from_str(&row.4).context("Gather Completion Current Input is invalid")?;
+        if payload.get("source") != Some(&json!({"type": "gather_completed"}))
+            || payload.get("gatherId").and_then(Value::as_str) != Some(row.0.as_str())
+            || payload.get("commandId").and_then(Value::as_str) != Some(row.1.as_str())
+            || payload.get("requestMessageId").and_then(Value::as_str) != Some(row.2.as_str())
+            || !payload.get("items").is_some_and(Value::is_array)
+        {
+            anyhow::bail!("Gather Completion Current Input shape is inconsistent");
+        }
+        return Ok(CurrentInput {
+            id: row.0,
+            payload,
+            source_camp_message_id: Some(row.2),
+            source_conversation_message_id: None,
+            source_content_digest: row.5.clone(),
+            projected_body_digest: row.5,
+            mentions_current_user: false,
+        });
+    }
     match (
         snapshot.trigger_camp_message_id.as_deref(),
         snapshot.trigger_conversation_message_id.as_deref(),
@@ -4016,7 +4171,7 @@ fn count_a2a_runs<R: ContextReadConnection>(database: &R, camp_turn_id: &str) ->
     database
         .context_connection()
         .query_row(
-            "SELECT a2a_run_slots_allocated FROM camp_turn WHERE id = ?1",
+            "SELECT accepted_a2a_allocated FROM camp_turn WHERE id = ?1",
             [camp_turn_id],
             |row| row.get(0),
         )
@@ -4329,8 +4484,11 @@ fn load_existing_manifest(
     if row.2 != snapshot.camp_message_boundary_sequence {
         anyhow::bail!("Stored ContextManifest no longer matches its frozen AgentRun input");
     }
-    if row.15 != CONTEXT_FORMATTER_VERSION {
+    if row.15 != CONTEXT_FORMATTER_VERSION && row.15 != 14 {
         anyhow::bail!("Stored ContextManifest uses an obsolete context formatter");
+    }
+    if snapshot.invocation_kind == "gather_completion" && row.15 != CONTEXT_FORMATTER_VERSION {
+        anyhow::bail!("Gather completion requires the current context formatter");
     }
     let shared_message_evidence: Value = serde_json::from_str(&row.21)
         .context("Stored ContextManifest Shared Message evidence is invalid")?;
@@ -4469,6 +4627,25 @@ fn validate_frozen_current_input_source<R: ContextReadConnection>(
     snapshot: &RunSnapshot,
     frozen: &FrozenDeliveryContext,
 ) -> Result<()> {
+    if snapshot.invocation_kind == "gather_completion" {
+        let expected = load_current_input(database, snapshot)?;
+        let current_input_json = frozen
+            .rendered_payload
+            .rsplit_once("[CURRENT_INPUT]\n")
+            .map(|(_, suffix)| suffix)
+            .and_then(|suffix| {
+                suffix
+                    .split_once("\n[/CURRENT_INPUT]")
+                    .map(|(value, _)| value)
+            })
+            .context("Gather Completion frozen Context has no Current Input section")?;
+        let current_input: Value = serde_json::from_str(current_input_json)
+            .context("Gather Completion frozen Current Input is invalid")?;
+        if current_input != expected.payload {
+            anyhow::bail!("Gather Completion frozen Current Input changed after Barrier");
+        }
+        return Ok(());
+    }
     let camp_message_id = snapshot
         .trigger_camp_message_id
         .as_deref()
@@ -9836,7 +10013,7 @@ mod tests {
         let charter = build_session_charter(&snapshot);
         assert!(BUILTIN_CLI_CHARTER.len() <= 2_560);
         assert!(charter.contains(
-            "Rovai built-in operations are the following fourteen fixed local CLI commands, never MCP"
+            "Rovai built-in operations are the following fifteen fixed local CLI commands, never MCP"
         ));
         assert!(charter.contains(
             "Run `rovai --help` to choose an operation, then run that operation's exact `--help`. Do not assume that a command family has its own help entry."
@@ -9844,15 +10021,19 @@ mod tests {
         assert!(!charter.contains("tool list"));
         assert!(!charter.contains("tool describe"));
         assert!(charter.contains("`rovai send`"));
+        assert!(charter.contains("`rovai gather`"));
+        assert!(charter.contains("Acceptance is asynchronous: end the Lead Run"));
         assert!(charter.contains(
             "Runtime narration and the Runtime final response are private execution evidence, not Camp messages;"
         ));
         assert!(charter.contains("successfully call `rovai send` before ending"));
         assert!(charter.contains("current authenticated AgentRun Camp"));
         assert!(charter.contains("Ordinary Camp messages are already visible to the user"));
-        assert!(charter.contains(
-            "Add `--to-user` only when the current message creates a new unresolved user decision, answer, or action"
-        ));
+        assert!(
+            charter.contains(
+                "Add `--to-user` only for a new unresolved user decision, answer, action"
+            )
+        );
         assert!(charter.contains("User attention is message-local and is never inherited"));
         assert!(!charter.contains("campId"));
         assert!(!charter.contains("--camp-id"));
@@ -10303,6 +10484,7 @@ mod tests {
                     agent_id: &snapshot.agent_id,
                     task_id: None,
                     execution_epoch: 1,
+                    invocation_kind: "a2a",
                     a2a_parent_agent_run_id: Some(&snapshot.agent_run_id),
                     a2a_root_agent_run_id: Some(&snapshot.agent_run_id),
                     a2a_depth: 1,

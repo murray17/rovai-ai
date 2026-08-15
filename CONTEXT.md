@@ -4,6 +4,38 @@ Rovai-ai is a local multi-Agent workbench in which long-lived Agent identities c
 
 ## Domain Glossary
 
+**Gather**:
+A durable Default-Lead operation that publishes one shared public request, accepts one responsibility per canonical
+recipient, and schedules exactly one original-Lead completion after every GatherItem is terminal. It is not a private
+inbox, a polling protocol, or a collection of ordinary Lead continuations.
+_Avoid_: message batch, parallel send alias, temporary suppression window, current-Lead handoff
+
+**GatherItem**:
+One member responsibility identified by its forward Message Delivery `dispatchDeliveryId`. A visible member return is
+result evidence but never the Item terminal authority; the pre-run Delivery terminal or current-generation member Run
+terminal owns settlement.
+_Avoid_: recipient text, message ID responsibility, mention-derived state, early-return completion
+
+**Gather-Captured Delivery**:
+An exact public return from the current GatherItem target Run and retry generation to the frozen initiator. Its
+CampMessage, Structured Mention and reply remain public, while the Delivery settles without an attempt or Lead AgentRun.
+_Avoid_: hidden message, parsed-body capture, suppress-wake flag, free accepted A2A
+
+**Gather Barrier**:
+The transaction boundary that observes the last terminal Item, freezes mandatory completion input, CAS-marks the Gather
+ready and creates one Completion Delivery. The Barrier never materializes an AgentRun directly.
+_Avoid_: process-local counter, periodic scan, direct Lead spawn, mutable result snapshot
+
+**Completion Delivery**:
+A required internal Message Delivery queued in the frozen initiator Conversation's normal recipient FIFO. It is causal
+to the Gather request but is not an Effective Recipient of that public CampMessage.
+_Avoid_: public recipient, private message, Default-Lead reroute, Session-ID route authority
+
+**Gather-Completed Current Input**:
+The mandatory typed input for a `gather_completion` Run, containing every Item, captured reference, bounded fallback and
+safe error. Optional public history may duplicate it but cannot replace or partially omit it.
+_Avoid_: recent-history inference, live Gather reconstruction, partial item list
+
 **Camp**:
 A shared collaboration aggregate containing participants, public discussion, private Agent continuities, resources, and outcomes. Its Core-owned Activation State is `pending | active`: explicit Dialog creation becomes Active immediately and may validly contain no public messages, while one-click creation begins as a Pending Camp Draft and becomes Active only with its first accepted user message. A Camp created without a user-configured name starts as `未命名对话`; its first accepted user message generates the name only while the user has never explicitly named or renamed that Camp. The product may present an Active Camp as a conversation, but domain code must not call it a Conversation. User deletion permanently removes the Camp aggregate; Rovai-ai does not model Camp archive or trash.
 _Avoid_: Public Conversation, Task, Project, Archived Camp

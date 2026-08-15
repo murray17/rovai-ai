@@ -171,10 +171,11 @@ use rovai_core::{
         PreparedSkillExposure, ReconcileSkillProjectionsCommand, SkillProjectionReconciler,
     },
     team_tool::{
-        BuiltinToolBindingCredential, CampMessageSendInput, CampMessageSendInvocation,
-        TEAM_CREATE_TASK_TOOL_NAME, TEAM_GET_TASK_TOOL_NAME, TEAM_LIST_TASKS_TOOL_NAME,
-        TEAM_UPDATE_TASK_TOOL_NAME, TeamCreateTaskInput, TeamGetTaskInput, TeamListTasksInput,
-        TeamTaskToolInvocation, TeamToolInvocationError, TeamToolService, TeamUpdateTaskInput,
+        BuiltinToolBindingCredential, CampMessageSendInput, CampMessageSendInvocation, GatherInput,
+        GatherInvocation, TEAM_CREATE_TASK_TOOL_NAME, TEAM_GET_TASK_TOOL_NAME,
+        TEAM_LIST_TASKS_TOOL_NAME, TEAM_UPDATE_TASK_TOOL_NAME, TeamCreateTaskInput,
+        TeamGetTaskInput, TeamListTasksInput, TeamTaskToolInvocation, TeamToolInvocationError,
+        TeamToolService, TeamUpdateTaskInput,
     },
     team_tool_catalog::validate_builtin_tool_input,
 };
@@ -2689,6 +2690,32 @@ impl Core {
                         }?;
                     evidence_replayed = execution.replayed;
                     evidence_receipt_id = execution.result.payload["messageId"]
+                        .as_str()
+                        .map(str::to_string);
+                    command_execution_payload(execution)
+                }
+                rovai_core::gather::GATHER_TOOL_NAME => {
+                    let input = serde_json::from_value::<GatherInput>(request.input)
+                        .context("team.gather input is invalid")?;
+                    let invocation = GatherInvocation {
+                        native_binding_id: request.native_binding_id,
+                        binding_credential: request.binding_credential,
+                        runtime_tool_call_id: request.runtime_tool_call_id,
+                        input,
+                    };
+                    let execution =
+                        if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
+                            service.gather_attested(
+                                &mut database,
+                                &invocation,
+                                agent_run_id,
+                                *execution_epoch,
+                            )
+                        } else {
+                            service.gather(&mut database, &invocation)
+                        }?;
+                    evidence_replayed = execution.replayed;
+                    evidence_receipt_id = execution.result.payload["gatherId"]
                         .as_str()
                         .map(str::to_string);
                     command_execution_payload(execution)
@@ -8043,7 +8070,7 @@ impl Core {
                 },
                 camp_id: Some(execution.camp_id.clone()),
                 expected_versions: Vec::new(),
-                execution_epoch: Some(execution.execution_epoch),
+                execution_epoch: None,
                 payload: RecordAdapterCapabilitySnapshotCommand {
                     installation_id: execution.runtime.installation_id.clone(),
                     expected_installation_version: installation_version,
@@ -8148,7 +8175,7 @@ impl Core {
                     },
                     camp_id: Some(execution.camp_id.clone()),
                     expected_versions: Vec::new(),
-                    execution_epoch: Some(execution.execution_epoch),
+                    execution_epoch: None,
                     payload: RecordAdapterCapabilitySnapshotCommand {
                         installation_id: installation.id,
                         expected_installation_version: installation.version,

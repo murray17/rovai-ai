@@ -6,6 +6,7 @@ use crate::{
         CAMP_LIST_TOOL_NAME, CAMP_READ_TOOL_NAME, CAMP_SEARCH_TOOL_NAME, HISTORY_SEARCH_TOOL_NAME,
     },
     command::canonical_json_digest,
+    gather::GATHER_TOOL_NAME,
     member_studio::MEMBER_CREATE_TOOL_NAME,
     memory_retrieval::{MEMORY_READ_TOOL_NAME, MEMORY_SEARCH_TOOL_NAME, MEMORY_VIEW_TOOL_NAME},
     memory_secret,
@@ -89,6 +90,10 @@ fn project_input(operation: &str, input: &Value) -> Result<Value> {
                 input.get("mentionUser"),
             );
             insert_identifier(&mut projected, "taskId", input.get("taskId"));
+            insert_content_facts(&mut projected, input.get("body"));
+        }
+        GATHER_TOOL_NAME => {
+            insert_string_array(&mut projected, "recipientAgentIds", input.get("to"));
             insert_content_facts(&mut projected, input.get("body"));
         }
         MEMBER_CREATE_TOOL_NAME => {
@@ -281,6 +286,32 @@ fn project_result(operation: &str, result: &Value) -> Result<Value> {
                 result.get("effectiveRecipients"),
             );
             insert_string_array(&mut projected, "deliveryIds", result.get("deliveryIds"));
+            insert_i64(
+                &mut projected,
+                "allocatedAgentRunResponsibilities",
+                result.get("allocatedAgentRunResponsibilities"),
+            );
+        }
+        GATHER_TOOL_NAME => {
+            insert_enum(&mut projected, "status", result.get("status"));
+            insert_identifier(&mut projected, "gatherId", result.get("gatherId"));
+            insert_identifier(
+                &mut projected,
+                "requestMessageId",
+                result.get("requestMessageId"),
+            );
+            insert_identifier(&mut projected, "campTurnId", result.get("campTurnId"));
+            insert_string_array(
+                &mut projected,
+                "effectiveRecipients",
+                result.get("effectiveRecipients"),
+            );
+            insert_string_array(
+                &mut projected,
+                "dispatchDeliveryIds",
+                result.get("dispatchDeliveryIds"),
+            );
+            insert_enum(&mut projected, "completion", result.get("completion"));
             insert_i64(
                 &mut projected,
                 "allocatedAgentRunResponsibilities",

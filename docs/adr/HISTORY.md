@@ -204,4 +204,6 @@ generated_from: docs/adr-front-matter
 | [ADR-0190](0190-user-placeable-agent-execution-console.md) | User-Placeable Agent Execution Console | `accepted` | `cross-version` | [v0.84](../versions/v0.84/README.md) | — |
 | [ADR-0191](0191-agent-mediated-member-creation-and-thirteen-skill-inventory.md) | Agent-Mediated Member Creation and Thirteen-Skill Official Inventory | `accepted` | `cross-version` | [v0.85](../versions/v0.85/README.md) | — |
 | [ADR-0192](0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md) | Purpose-Scoped Runtime Launch and Execution-Deferred Verification | `accepted` | `cross-version` | [v0.87](../versions/v0.87/README.md) | — |
+| [ADR-0193](0193-durable-gather-barrier-over-unified-message-delivery.md) | Durable Gather Barrier over Unified Message Delivery | `accepted` | `cross-version` | [v0.89](../versions/v0.89/README.md) | — |
+| [ADR-0194](0194-mandatory-typed-gather-completion-current-input.md) | Mandatory Typed Gather Completion Current Input | `accepted` | `cross-version` | [v0.89](../versions/v0.89/README.md) | — |
 <!-- adr-history:end -->

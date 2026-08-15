@@ -29,6 +29,7 @@ const expectedOperations = [
   'memory.view',
   'memory.write',
   'team.create_task',
+  'team.gather',
   'team.get_task',
   'team.list_tasks',
   'team.update_task'
@@ -104,7 +105,7 @@ try {
         )
       }
     }
-    assertBuiltinCliCapability(specification.adapterKind, specification.installation)
+    assertBuiltinCliCapability(specification.adapterKind, specification.installation, true)
   }
 
   const historyCampId = await createCamp(core.request, {
@@ -126,6 +127,7 @@ try {
     specification.currentMarker = `ROVAI_CURRENT_${specification.slug.toUpperCase()}_V1`
     specification.successMarker = `ROVAI_BUILTIN_CLI_${specification.slug.toUpperCase()}_OK`
     specification.resumeMarker = `ROVAI_BUILTIN_CLI_${specification.slug.toUpperCase()}_RESUME_OK`
+    specification.gatherMarker = `ROVAI_GATHER_${specification.slug.toUpperCase()}_RETURN_OK`
     specification.contextPathFile = join(projectRoot, `.context-path-${specification.slug}`)
     specification.resumeContextPathFile = join(projectRoot, `.resume-context-path-${specification.slug}`)
     specification.resumeCompletionFile = join(projectRoot, `.resume-complete-${specification.slug}`)
@@ -167,12 +169,18 @@ try {
 
   const results = []
   for (const specification of runtimeSpecifications) {
-    process.stderr.write(`\n[builtin-cli] ${specification.adapterKind}: full 14-operation Run\n`)
+    process.stderr.write(`\n[builtin-cli] ${specification.adapterKind}: full 15-operation Run\n`)
     const source = await startVerificationRun(core, specification, false)
     const sourceSnapshot = await waitForRun(core, specification.campId, source.agentRunId, {
       marker: specification.successMarker,
       timeoutMs: 720_000
     })
+    specification.installation = (await core.request('runtime.installations.list')).find((candidate) =>
+      candidate.adapterKind === specification.adapterKind
+        && candidate.installationClass === 'managed_default'
+        && candidate.authScope === 'default'
+    )
+    assertBuiltinCliCapability(specification.adapterKind, specification.installation)
     const evidence = await builtinEvidence(
       core.request,
       specification.campId,
@@ -214,6 +222,19 @@ try {
       core,
       specification,
       specification.recipientProfileId
+    )
+    const gatherResult = terminalEvidence.find((entry) =>
+      entry.payload?.canonicalTool === 'team.gather'
+        && entry.payload?.status === 'completed'
+    )?.payload?.coreEnvelope?.result
+    if (!gatherResult?.gatherId) {
+      throw new Error(`${specification.adapterKind} Gather acceptance did not retain a gatherId`)
+    }
+    const gatherCompletion = await waitForGatherCompletion(
+      core,
+      specification,
+      gatherResult.gatherId,
+      source.agentRunId
     )
     const firstContextPath = (await readFile(specification.contextPathFile, 'utf8')).trim()
     await assertFencedContext(firstContextPath, specification.adapterKind, 'initial')
@@ -292,6 +313,10 @@ try {
       resumedAgentRunId: resumed.agentRunId,
       recipientAgentRunId: recipientRun?.id,
       recipientRunStatusAtObservation: recipientRun?.status,
+      gatherId: gatherResult.gatherId,
+      gatherCompletionDeliveryId: gatherCompletion.completionDelivery.id,
+      gatherCompletionRunId: gatherCompletion.completionRun.id,
+      gatherCapturedReturnVerified: true,
       operations: observedOperations,
       fullRunEvidenceCount: evidence.length,
       agentOutputReduction: measureAgentOutputReduction(evidence),
@@ -310,7 +335,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    contractVersion: 12,
+    contractVersion: 13,
     ipcProtocolVersion: 1,
     runtimeCount: results.length,
     operationCountPerRuntime: expectedOperations.length,
@@ -335,12 +360,17 @@ function nativeSessionIdForRun(events, agentRunId, startedEvent) {
   return bound?.params?.nativeThreadId ?? startedEvent?.params?.nativeThreadId ?? null
 }
 
-function assertBuiltinCliCapability(label, installation) {
+function assertBuiltinCliCapability(label, installation, allowDeferred = false) {
   const snapshot = installation?.snapshot
+  if (allowDeferred
+      && label === 'trae-cn-cli'
+      && snapshot?.probeStatus === 'installed_unverified') {
+    return
+  }
   if (snapshot?.probeStatus !== 'ready'
-      || !snapshot.capabilities.includes('builtin_cli.transport.v12')
+      || !snapshot.capabilities.includes('builtin_cli.transport.v13')
       || !snapshot.models.length) {
-    throw new Error(`${label} is not ready for Built-in CLI v12: ${JSON.stringify(snapshot)}`)
+    throw new Error(`${label} is not ready for Built-in CLI v13: ${JSON.stringify(snapshot)}`)
   }
 }
 
@@ -456,7 +486,7 @@ async function startVerificationRun(coreClient, specification, resumed) {
       taskId: null,
       purpose: resumed
         ? `Verify ${specification.adapterKind} resume/process reuse receives a new active CLI lease.`
-        : `Verify ${specification.adapterKind} executes all 14 CLI-only built-in operations.`,
+        : `Verify ${specification.adapterKind} executes all 15 CLI-only built-in operations.`,
       completionRole: 'required'
     }
   })
@@ -516,6 +546,68 @@ async function waitForRecipientRun(coreClient, specification, recipientProfileId
     await delay(400)
   }
   throw new Error(`${specification.adapterKind} recipient Run did not complete`)
+}
+
+async function waitForGatherCompletion(coreClient, specification, gatherId, sourceAgentRunId) {
+  const deadline = Date.now() + 720_000
+  const resolvedApprovals = new Set()
+  while (Date.now() < deadline) {
+    const snapshot = await coreClient.request('camps.snapshot', { campId: specification.campId })
+    const gatherDeliveries = snapshot.messageDeliveries.filter((delivery) =>
+      delivery.gatherId === gatherId
+    )
+    const completionDeliveries = gatherDeliveries.filter((delivery) =>
+      delivery.deliveryKind === 'gather_completion'
+    )
+    if (completionDeliveries.length > 1) {
+      throw new Error(`${specification.adapterKind} Gather created duplicate completion Deliveries`)
+    }
+    const completionDelivery = completionDeliveries[0]
+    const completionRun = completionDelivery?.targetAgentRunId
+      ? snapshot.agentRuns.find((run) => run.id === completionDelivery.targetAgentRunId)
+      : null
+    // A normal public A2A Delivery from the source verification can already occupy
+    // the recipient FIFO before the Gather forward is materialized. Resolve that
+    // recipient's bounded Runtime approvals too, otherwise the Gather Delivery can
+    // remain queued behind a waiting Run that is not itself Gather-associated yet.
+    for (const run of snapshot.agentRuns.filter((candidate) =>
+      candidate.id === completionRun?.id
+        || candidate.agentId === specification.recipientProfileId
+        || gatherDeliveries.some((delivery) => delivery.targetAgentRunId === candidate.id)
+    )) {
+      await resolvePendingApprovals(coreClient.request, snapshot, run.id, resolvedApprovals)
+    }
+    if (completionRun && ['failed', 'cancelled', 'interrupted'].includes(completionRun.status)) {
+      throw new Error(`${specification.adapterKind} Gather completion entered ${completionRun.status}`)
+    }
+    if (completionRun?.status === 'succeeded') {
+      const completionRuns = snapshot.agentRuns.filter((run) =>
+        run.invocationKind === 'gather_completion'
+          && run.agentId === specification.agentId
+          && run.conversationId === snapshot.agentRuns.find((candidate) => candidate.id === sourceAgentRunId)?.conversationId
+      )
+      const capturedReturns = gatherDeliveries.filter((delivery) =>
+        delivery.deliveryKind === 'public_a2a'
+          && delivery.dispatchDisposition === 'gather_captured'
+      )
+      const capturedMessages = capturedReturns.map((delivery) =>
+        snapshot.messages.find((message) => message.id === delivery.messageId)
+      )
+      if (completionRuns.length !== 1
+          || completionRun.invocationKind !== 'gather_completion'
+          || capturedReturns.length < 1
+          || !capturedMessages.some((message) => message?.body?.includes(specification.gatherMarker))) {
+        throw new Error(`${specification.adapterKind} Gather did not prove captured return and one completion: ${JSON.stringify({
+          gatherDeliveries,
+          completionRuns,
+          capturedMessages
+        })}`)
+      }
+      return { snapshot, completionDelivery, completionRun }
+    }
+    await delay(400)
+  }
+  throw new Error(`${specification.adapterKind} Gather completion timed out`)
 }
 
 async function resolvePendingApprovals(request, snapshot, agentRunId, resolvedApprovals) {
@@ -614,6 +706,13 @@ function projectEnvelopeForMeasurement(envelope) {
         messageId: envelope.result.messageId,
         effectiveRecipients: envelope.result.effectiveRecipients
       }
+    case 'team.gather':
+      return selectFields(envelope.result, [
+        'gatherId',
+        'requestMessageId',
+        'effectiveRecipients',
+        'completion'
+      ])
     case 'memory.write':
       return envelope.result.outcome === 'effective'
         ? {
@@ -689,7 +788,7 @@ function verificationScript(input) {
     action: 'add',
     scope: 'companion',
     kind: 'preference',
-    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v12 qualification.`,
+    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v13 qualification.`,
     retrievalKeys: [`cli-${input.slug.slice(0, 18)}`]
   })
   const hearth = JSON.stringify({
@@ -700,7 +799,7 @@ function verificationScript(input) {
     retrievalKeys: [`hearth-${input.slug.slice(0, 14)}`]
   })
   const publicSend = JSON.stringify({
-    body: `Please confirm the ${input.adapterKind} qualification record; ${input.recipientProfileId} independently verify the retained evidence.`,
+    body: `Run rovai send --to-user --body 'ROVAI_PUBLIC_A2A_${input.slug.toUpperCase()}_ACK' exactly once, then finish. Do not reply to another Agent.`,
     to: [input.recipientProfileId],
     mentionUser: true
   })
@@ -756,7 +855,7 @@ assert_fix_input() {
 }
 
 STEP=version
-"$CLI" --version | grep -q 'contract-v12 ipc-v1'
+"$CLI" --version | grep -q 'contract-v13 ipc-v1'
 
 STEP=exact_help
 root_help="$("$CLI" --help)"
@@ -772,6 +871,10 @@ printf '%s\n' "$send_help" | grep -Fq -- "rovai send --to agent_5 --body 'Please
 if printf '%s\n' "$send_help" | grep -Fq -- 'rovai send --to agent_5 --to-user'; then
   exit 1
 fi
+gather_help="$("$CLI" gather --help)"
+printf '%s\n' "$gather_help" | grep -Eq -- '--to[[:space:]]+field=to type=array repeatable'
+printf '%s\n' "$gather_help" | grep -Fq -- 'Gather is asynchronous.'
+printf '%s\n' "$gather_help" | grep -Fq -- 'Do not poll, repeat Gather, or wait synchronously'
 member_help="$("$CLI" member create --help)"
 printf '%s\n' "$member_help" | grep -Fq -- '--creation-key'
 printf '%s\n' "$member_help" | grep -Fq -- '--avatar-file'
@@ -903,6 +1006,18 @@ printf '%s\n' "$public_send" | "$JQ" -e --arg recipient ${shellQuote(input.recip
 ' >/dev/null
 public_message_id="$(printf '%s\n' "$public_send" | "$JQ" -er '.messageId')"
 
+STEP=team_gather
+gather_result="$("$CLI" gather \
+  --to ${shellQuote(input.recipientProfileId)} \
+  --body ${shellQuote(`Run rovai send --to ${input.agentId} --body '${input.gatherMarker}' exactly once, then finish.`)})"
+assert_success "$gather_result" 'team.gather'
+printf '%s\n' "$gather_result" | "$JQ" -e --arg recipient ${shellQuote(input.recipientProfileId)} '
+  (keys | sort) == ["completion", "effectiveRecipients", "gatherId", "requestMessageId"]
+  and .completion == "deferred"
+  and .effectiveRecipients == [$recipient]
+' >/dev/null
+gather_id="$(printf '%s\n' "$gather_result" | "$JQ" -er '.gatherId')"
+
 STEP=camp_message_send_direct_user_only
 user_only="$("$CLI" send --to-user --body ${shellQuote(`Direct user-only ${input.adapterKind}`)})"
 assert_success "$user_only" 'camp.message.send'
@@ -922,7 +1037,8 @@ STEP=freeze_send_locators
   --arg publicMessageId "$public_message_id" \
   --arg directUserOnlyMessageId "$user_only_id" \
   --arg stdinUserOnlyMessageId "$stdin_user_only_id" \
-  '{publicMessageId:$publicMessageId,directUserOnlyMessageId:$directUserOnlyMessageId,stdinUserOnlyMessageId:$stdinUserOnlyMessageId}' \
+  --arg gatherId "$gather_id" \
+  '{publicMessageId:$publicMessageId,directUserOnlyMessageId:$directUserOnlyMessageId,stdinUserOnlyMessageId:$stdinUserOnlyMessageId,gatherId:$gatherId}' \
   > ${shellQuote(input.sendEvidencePath)}
 
 cat > "$RUN_TMP/memory-write.json" <<'ROVAI_JSON'
@@ -986,7 +1102,7 @@ trap - EXIT
 printf '%s\n' ${shellQuote(JSON.stringify({
     ok: true,
     marker: input.successMarker,
-    operationCount: 14,
+    operationCount: 15,
     versionConflict: 'refresh_then_decide'
   }))}
 `

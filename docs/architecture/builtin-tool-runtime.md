@@ -3,15 +3,15 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-08-15
+last_updated: 2026-08-16
 ---
 
 # Built-in Tool Runtime Architecture
 
 本文件说明 Rovai built-in operations 的长期组件结构。当前字段与版本以
-[Built-in Tool Transport v12](../contracts/builtin-tool-transport-v12.md)、
+[Built-in Tool Transport v13](../contracts/builtin-tool-transport-v13.md)、
 [Durable Task v3](../contracts/durable-task-v3.md) 和
-[Camp Message Send v7](../contracts/camp-message-send-v7.md)、
+[Camp Message Send v8](../contracts/camp-message-send-v8.md)、
 [Current User Attention v4](../contracts/current-user-attention-v4.md)与
 [Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md) 为准；v11 及更早 Transport 只保留
 historical 语义。决策理由见
@@ -29,7 +29,7 @@ Runtime Input Delivery Evidence 与 Profile/Formatter/Manifest 权责见
 [ADR-0147](../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)；whole-history
 omission 的 bounded aggregate 边界见
 [ADR-0149](../adr/0149-bounded-whole-history-omission-evidence.md)和
-[ContextManifest Evidence v12](../contracts/context-manifest-evidence-v12.md)。Task authority 与
+[ContextManifest Evidence v13](../contracts/context-manifest-evidence-v13.md)。Task authority 与
 self-active awareness 见
 [ADR-0152](../adr/0152-lead-owned-task-responsibility-and-self-active-task-awareness.md)；真实空集合
 的显式 clearing snapshot 见
@@ -101,16 +101,21 @@ Core 只维护一份 catalog。它服务 IPC 校验、合同测试、Qualificati
 identity 不构成 Agent discovery 协议。
 
 Agent Runtime 没有 `rovai tool list`、`rovai tool describe`、隐藏 discovery、`tool invoke` 或
-`tool call`。Agent 只使用十四个固定业务命令：
+`tool call`。Agent 只使用十五个固定业务命令：
 
 ```text
 rovai send
+rovai gather
 rovai member create
 rovai task create|get|update|list
 rovai camp list|search|read
 rovai history search
 rovai memory view|search|read|write
 ```
+
+`rovai gather` 只在当前 Default Lead 需要向多个成员派发同一共享主题、并在所有责任终态后统一继续时
+使用。它由持久 Gather Barrier 产生一条普通 FIFO Completion Delivery；成员仍用正常公开 send 返回，
+精确 return capture 不会逐条物化 Lead Run。组件边界见[持久 Gather Barrier](durable-gather-barrier.md)。
 
 Agent 先用 `rovai --help` 选择 operation，再用该 operation 的精确 `--help`。根 `send` 使用
 `rovai send --help`；分组命令必须包含 action，例如 `rovai task create --help`。不存在
@@ -377,21 +382,21 @@ failure 或 `delivery_unknown` 都不能替代它。各层不得通过复制完�
 
 Bootstrap v3 按固定顺序组装 Session Charter、`MEMBER_IDENTITY` 和 Memory Entrypoint。Charter
 文案变化本身不参与 Native Binding compatibility digest，也不主动轮换全部既有 Native Session；既有
-Run 与 Bootstrap Evidence 不回写，新建 Native Session 使用当前内置 Charter。Built-in Transport v12
+Run 与 Bootstrap Evidence 不回写，新建 Native Session 使用当前内置 Charter。Built-in Transport v13
 另外改变 catalog digest；Antigravity 的既有 binding compatibility 已包含 Built-in contract version 与
-catalog digest，因此会建立 replacement Session。其他 Runtime 的续接进程直接使用当前 v12 CLI、精确 help
+catalog digest，因此会建立 replacement Session。其他 Runtime 的续接进程直接使用当前 v13 CLI、精确 help
 与 official Skill Revision，不因 Charter copy 单独丢弃 Native Session。
 `MEMBER_IDENTITY` 是该 Native Session 唯一的 self identity，包含最新已提交的完整六字段；它只在
 既有 eligible Bootstrap boundary 原子读取，不进入 AgentRun Dynamic Context，不持久化 Identity
 Blob、snapshot、digest 或 history。身份编辑不轮换 Session，也不构造下一 Run 的 patch。
 
-Context Formatter v14 的 `COLLABORATION_STATE` schema v2 只描述 peers。Core 从 stable current
+Context Formatter v15 的 `COLLABORATION_STATE` schema v2 只描述 peers。Core 从 stable current
 CampMembers 中排除 `snapshot.agent_id`；away 和 leave-requested 关系保留到正式 `left`。每个 peer
 只含 Agent ID、Name、Team Role 和 Professional Responsibilities；Default Lead 只以
 `defaultLeadAgentId` 和派生的 `selfIsDefaultLead` 表达。调用资格仍在 BuiltinToolRouter/Domain
 Service admission 时按当前 membership、Presence、Runtime、Capability、quota 与 fence 重判。
 
-Core 先构建完整 v2 projection，再计算 `collaboration_state_digest`。ContextManifest v12 无论本轮是否
+Core 先构建完整 v2 projection，再计算 `collaboration_state_digest`。ContextManifest v13 无论本轮是否
 渲染 section 都冻结该完整 digest，并以 `collaborationStateIncluded` 单独记录 inclusion。只有 Runtime
 Input accepted ACK 才把 `conversation.native_collaboration_state_digest` 推进到 Delivery 冻结的完整
 digest；failure、`delivery_unknown` 和未 accepted 输入不推进。因此 self identity 编辑和其他不改变
@@ -400,14 +405,14 @@ digest；failure、`delivery_unknown` 和未 accepted 输入不推进。因此 s
 ### Self Active Task Projection
 
 Profile v3 对目标 Agent 当前 Camp 中自己负责的 active Task 按 `updatedAt DESC, taskId DESC` 选择最多
-八项。Formatter v14 在 `COLLABORATION_STATE` 后、`SHARED_CONVERSATION` 前独立输出 compact
+八项。Formatter v15 在 `COLLABORATION_STATE` 后、`SHARED_CONVERSATION` 前独立输出 compact
 `SELF_ACTIVE_TASKS`，每项只有 `taskId/title/status`。真实 candidate 空集合必须输出
 `{"tasks":[]}`，以覆盖同一 Native Session 的旧责任认知；只有候选存在但 Runtime payload budget
 将所有 Task entry 淘汰时才省略整个 section。Default Lead 不获得其他成员 Task 的隐式 projection。
 公共历史先为 Runtime budget 让位，随后从 Task tail 移除，并以 aggregate `omittedCount` 说明
 selection/budget omission。
 
-ContextManifest v12 冻结 inclusion、有序 `taskId/version/updatedAt` references、optional omission count
+ContextManifest v13 冻结 inclusion、有序 `taskId/version/updatedAt` references、optional omission count
 与 exact projection digest；真实空集合为 `included:true`、空 refs 与 empty projection digest，预算
 全量淘汰为 `included:false`、空 refs 与 positive omission count。A2A preflight 和 direct
 materialization 使用同一 selector。该 Evidence 不创建 freshness watermark、delta 或 ACK，恢复只

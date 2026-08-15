@@ -30,6 +30,7 @@ use crate::{
         FrozenCampTurnExecutionBudget, camp_turn_execution_budget_now,
         freeze_camp_turn_execution_budget,
     },
+    gather::cancel_gathers_for_initiator,
     message_delivery::cancel_pending_turn_deliveries,
     runtime::AgentRunWorkspace,
 };
@@ -3690,8 +3691,8 @@ pub(crate) fn exhaust_camp_turn_execution_budget(
             r#"
             SELECT camp_id, status, execution_budget_exhausted_at,
                    execution_budget_root_agent_run_responsibilities
-                     + a2a_run_slots_allocated,
-                   a2a_run_slots_allocated,
+                     + agent_run_responsibilities_allocated,
+                   accepted_a2a_allocated,
                    execution_budget_elapsed_seconds,
                    execution_budget_max_agent_run_responsibilities,
                    execution_budget_max_accepted_a2a,
@@ -4275,6 +4276,16 @@ pub(crate) fn end_camp_membership(
     if changed == 0 {
         return Ok(());
     }
+
+    cancel_gathers_for_initiator(
+        transaction,
+        camp_id,
+        agent_id,
+        "gather_initiator_left_camp",
+        actor,
+        execution_epoch,
+        now,
+    )?;
 
     let released = {
         let mut statement = transaction.prepare(

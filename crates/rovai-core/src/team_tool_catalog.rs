@@ -9,6 +9,7 @@ use crate::{
         HistorySearchInput,
     },
     camp_message_send_teaching::CAMP_MESSAGE_SEND_SUMMARY,
+    gather::GATHER_TOOL_NAME,
     member_studio::{MEMBER_CREATE_TOOL_NAME, MemberCreateInput, member_create_input_schema},
     memory_retrieval::{
         MEMORY_READ_TOOL_NAME, MEMORY_SEARCH_TOOL_NAME, MEMORY_VIEW_TOOL_NAME, MemoryReadInput,
@@ -17,7 +18,7 @@ use crate::{
     memory_tool::{MEMORY_WRITE_TOOL_NAME, MemoryToolService, MemoryWriteToolInput},
     message_delivery::CAMP_MESSAGE_SEND_TOOL_NAME,
     team_tool::{
-        CampMessageSendInput, TEAM_CREATE_TASK_TOOL_NAME, TEAM_GET_TASK_TOOL_NAME,
+        CampMessageSendInput, GatherInput, TEAM_CREATE_TASK_TOOL_NAME, TEAM_GET_TASK_TOOL_NAME,
         TEAM_LIST_TASKS_TOOL_NAME, TEAM_UPDATE_TASK_TOOL_NAME, TeamCreateTaskInput,
         TeamGetTaskInput, TeamListTasksInput, TeamToolService, TeamUpdateTaskInput,
     },
@@ -34,6 +35,7 @@ pub fn validate_builtin_tool_input(canonical_name: &str, input: &Value) -> Resul
         CAMP_MESSAGE_SEND_TOOL_NAME => {
             serde_json::from_value::<CampMessageSendInput>(input.clone()).map(|_| ())
         }
+        GATHER_TOOL_NAME => serde_json::from_value::<GatherInput>(input.clone()).map(|_| ()),
         MEMBER_CREATE_TOOL_NAME => {
             serde_json::from_value::<MemberCreateInput>(input.clone()).map(|_| ())
         }
@@ -680,6 +682,37 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
                         "items": {"type": "string"}
                     },
                     "allocatedAgentRunResponsibilities": {"type": "integer", "minimum": 1}
+                }
+            }
+        }),
+        json!({
+            "name": GATHER_TOOL_NAME,
+            "title": "Gather parallel member responses",
+            "description": "Current Default Lead only. Publish one shared topic to canonical members, then end the current Run. Members reply normally and remain publicly visible; Rovai waits for every member Run to finish and later delivers exactly one FIFO continuation with the complete frozen result set. Do not poll, repeat the Gather, or keep the Lead Run occupied while waiting.",
+            "inputSchema": TeamToolService::gather_input_schema(),
+            "outputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "status", "gatherId", "requestMessageId", "campTurnId",
+                    "effectiveRecipients", "dispatchDeliveryIds", "completion",
+                    "allocatedAgentRunResponsibilities"
+                ],
+                "properties": {
+                    "status": {"const": "accepted"},
+                    "gatherId": {"type": "string"},
+                    "requestMessageId": {"type": "string"},
+                    "campTurnId": {"type": "string"},
+                    "effectiveRecipients": {
+                        "type": "array", "minItems": 1, "maxItems": 16,
+                        "uniqueItems": true, "items": {"type": "string"}
+                    },
+                    "dispatchDeliveryIds": {
+                        "type": "array", "minItems": 1, "maxItems": 16,
+                        "uniqueItems": true, "items": {"type": "string"}
+                    },
+                    "completion": {"const": "deferred"},
+                    "allocatedAgentRunResponsibilities": {"type": "integer", "minimum": 2}
                 }
             }
         }),

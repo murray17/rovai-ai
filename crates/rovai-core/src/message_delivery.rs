@@ -25,6 +25,13 @@ use crate::{
     current_user::CURRENT_USER_ID,
     db::Database,
     execution_budget::{PRODUCT_MAX_ACCEPTED_A2A, camp_turn_execution_budget_now},
+    gather::{
+        GatherAcceptance, GatherCapture, cancel_gather_for_delivery, cancel_gathers_for_turn,
+        completion_delivery_for_item, mark_completion_materialized, mark_item_materialized,
+        persist_gather_item, persist_gather_record, reopen_item_for_retry, resolve_gather_capture,
+        settle_completion_for_agent_run, settle_item_from_agent_run_terminal,
+        settle_item_from_delivery_terminal, validate_completion_retry,
+    },
     runtime::AgentRunWorkspace,
     runtime_basis::capture_run_runtime_basis,
 };
@@ -77,7 +84,8 @@ impl MessageDeliveryService {
             let target = transaction
                 .query_row(
                     r#"
-                    SELECT camp_id, status, version, retry_generation
+                    SELECT camp_id, status, version, retry_generation,
+                           delivery_kind, gather_id
                     FROM message_delivery WHERE id = ?1
                     "#,
                     [&envelope.payload.delivery_id],
@@ -87,11 +95,15 @@ impl MessageDeliveryService {
                             row.get::<_, String>(1)?,
                             row.get::<_, i64>(2)?,
                             row.get::<_, i64>(3)?,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, Option<String>>(5)?,
                         ))
                     },
                 )
                 .optional()?;
-            let Some((camp_id, status, version, retry_generation)) = target else {
+            let Some((camp_id, status, version, retry_generation, delivery_kind, gather_id)) =
+                target
+            else {
                 return Ok(rejected(
                     "message_delivery.not_found",
                     "Message Delivery does not exist",
@@ -114,6 +126,32 @@ impl MessageDeliveryService {
                     "message_delivery.retry_not_allowed",
                     "Only failed or interrupted-before-dispatch Deliveries may be retried",
                 ));
+            }
+            if delivery_kind == "gather_completion"
+                && !validate_completion_retry(transaction, &envelope.payload.delivery_id)?
+            {
+                return Ok(rejected(
+                    "message_delivery.retry_not_allowed",
+                    "A Gather Completion Delivery cannot create a second continuation",
+                ));
+            }
+            if delivery_kind == "public_a2a" && gather_id.is_some() {
+                let gather_status: String = transaction.query_row(
+                    r#"
+                    SELECT gather.status
+                    FROM gather_item AS item
+                    JOIN gather_record AS gather ON gather.id = item.gather_id
+                    WHERE item.dispatch_delivery_id = ?1
+                    "#,
+                    [&envelope.payload.delivery_id],
+                    |row| row.get(0),
+                )?;
+                if gather_status != "collecting" {
+                    return Ok(rejected(
+                        "message_delivery.retry_not_allowed",
+                        "A Gather forward Delivery cannot be retried after the Barrier is ready",
+                    ));
+                }
             }
             let next_generation = retry_generation + 1;
             let retry_id = Uuid::new_v4().to_string();
@@ -145,6 +183,7 @@ impl MessageDeliveryService {
                 UPDATE message_delivery
                 SET status = 'pending', dispatch_phase = 'never_attempted',
                     wait_condition = NULL, active_dispatch_attempt_id = NULL,
+                    target_agent_run_id = NULL,
                     retry_generation = ?2, manual_intervention_required = 0,
                     failure_code = NULL, failure_detail_json = NULL,
                     ended_at = NULL, version = version + 1, updated_at = ?3
@@ -157,6 +196,14 @@ impl MessageDeliveryService {
                     envelope.payload.expected_version,
                 ],
             )?;
+            if delivery_kind == "public_a2a" && gather_id.is_some() {
+                reopen_item_for_retry(
+                    transaction,
+                    &envelope.payload.delivery_id,
+                    next_generation,
+                    &now,
+                )?;
+            }
             append_domain_event(
                 transaction,
                 "message_delivery.retry_requested",
@@ -205,11 +252,13 @@ impl MessageDeliveryService {
         if !matches!(envelope.actor, ActorRef::User { .. }) {
             anyhow::bail!("Only a User may explicitly cancel a Message Delivery");
         }
-        self.gateway.execute(database, envelope, |transaction| {
+        let delivery_id = envelope.payload.delivery_id.clone();
+        let execution = self.gateway.execute(database, envelope, |transaction| {
             let target = transaction
                 .query_row(
                     r#"
-                    SELECT camp_id, camp_turn_id, status, dispatch_phase, version
+                    SELECT camp_id, camp_turn_id, status, dispatch_phase, version,
+                           delivery_kind
                     FROM message_delivery WHERE id = ?1
                     "#,
                     [&envelope.payload.delivery_id],
@@ -220,11 +269,13 @@ impl MessageDeliveryService {
                             row.get::<_, String>(2)?,
                             row.get::<_, String>(3)?,
                             row.get::<_, i64>(4)?,
+                            row.get::<_, String>(5)?,
                         ))
                     },
                 )
                 .optional()?;
-            let Some((camp_id, camp_turn_id, status, phase, version)) = target else {
+            let Some((camp_id, camp_turn_id, status, phase, version, delivery_kind)) = target
+            else {
                 return Ok(rejected(
                     "message_delivery.not_found",
                     "Message Delivery does not exist",
@@ -278,6 +329,25 @@ impl MessageDeliveryService {
                     "failureCode": "explicit_cancelled",
                 }),
             )?;
+            if delivery_kind == "gather_completion" {
+                cancel_gather_for_delivery(
+                    transaction,
+                    &envelope.payload.delivery_id,
+                    "explicit_completion_delivery_cancelled",
+                    &envelope.actor,
+                    None,
+                    &now,
+                )?;
+            }
+            settle_item_from_delivery_terminal(
+                transaction,
+                &envelope.payload.delivery_id,
+                "cancelled",
+                Some("explicit_cancelled"),
+                &envelope.actor,
+                None,
+                &now,
+            )?;
             crate::runtime::recompute_camp_turn(
                 transaction,
                 &camp_id,
@@ -297,7 +367,20 @@ impl MessageDeliveryService {
                     entity_id: envelope.payload.delivery_id.clone(),
                 }),
             ))
-        })
+        })?;
+        if !execution.replayed
+            && execution.result.status != crate::command::CommandResultStatus::Rejected
+            && let Some(completion_delivery_id) =
+                completion_delivery_for_item(database.connection(), &delivery_id)?
+        {
+            let _ = dispatch_delivery(
+                database,
+                &completion_delivery_id,
+                DeliveryDispatchTrigger::Accepted,
+                true,
+            )?;
+        }
+        Ok(execution)
     }
 }
 
@@ -360,18 +443,37 @@ struct DispatchDelivery {
     camp_id: String,
     camp_turn_id: String,
     message_id: String,
-    message_sequence: i64,
+    camp_message_boundary_sequence: i64,
     recipient_agent_id: String,
     task_id: Option<String>,
     task_version_at_admission: Option<i64>,
     assignee_agent_id_at_admission: Option<String>,
     source_agent_run_id: String,
-    edge_kind: String,
+    delivery_kind: String,
+    completion_role: String,
+    gather_id: Option<String>,
+    target_conversation_id: Option<String>,
+    edge_kind: Option<String>,
     target_parent_agent_run_id: Option<String>,
     return_to_agent_run_id: Option<String>,
-    a2a_root_agent_run_id: String,
+    a2a_root_agent_run_id: Option<String>,
     a2a_depth: i64,
     retry_generation: i64,
+}
+
+#[derive(Debug, Clone)]
+pub enum PublicA2aOperation<'a> {
+    Send,
+    Gather {
+        gather_id: &'a str,
+        initiator_conversation_id: &'a str,
+    },
+}
+
+impl PublicA2aOperation<'_> {
+    fn is_gather(&self) -> bool {
+        matches!(self, Self::Gather { .. })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -388,6 +490,7 @@ pub struct SendPublicA2aMessage<'a> {
     pub explicit_recipients: &'a [String],
     pub mention_user: bool,
     pub task_id: Option<&'a str>,
+    pub operation: PublicA2aOperation<'a>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -442,6 +545,29 @@ pub fn persist_public_a2a_message(
     transaction: &Transaction<'_>,
     request: &SendPublicA2aMessage<'_>,
 ) -> Result<CommandHandlerResult> {
+    let is_gather = request.operation.is_gather();
+    if is_gather {
+        let default_lead_agent_id = transaction
+            .query_row(
+                "SELECT default_lead_agent_id FROM camp WHERE id = ?1",
+                [request.camp_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten();
+        if default_lead_agent_id.as_deref() != Some(request.author_agent_id) {
+            return Ok(rejected(
+                "gather.default_lead_required",
+                "Only the current Camp Default Lead may start a Gather",
+            ));
+        }
+        if request.mention_user || request.task_id.is_some() {
+            return Ok(rejected(
+                "gather.addressing_invalid",
+                "Gather accepts only one shared body and recipient targets",
+            ));
+        }
+    }
     let reply_to_camp_message_id =
         load_trigger_reply_reference(transaction, request.source_agent_run_id, request.camp_id)?;
     let active_agents = load_active_camp_agents(transaction, request.camp_id)?;
@@ -495,9 +621,10 @@ pub fn persist_public_a2a_message(
     let ancestor_agent_ids = load_lineage_agent_ids(transaction, request.source_agent_run_id)?;
     let immediate_caller = load_immediate_caller(transaction, request.source_agent_run_id)?;
     for (source, value) in &candidate_sources {
-        let is_immediate_caller = immediate_caller
-            .as_ref()
-            .is_some_and(|caller| caller.agent_id == *value);
+        let is_immediate_caller = !is_gather
+            && immediate_caller
+                .as_ref()
+                .is_some_and(|caller| caller.agent_id == *value);
         let reason = if value == request.author_agent_id {
             Some("self_target")
         } else if ancestor_agent_ids.contains(value) && !is_immediate_caller {
@@ -525,7 +652,11 @@ pub fn persist_public_a2a_message(
     offenders.dedup();
     if !offenders.is_empty() {
         return Ok(rejected_with_details(
-            "message.addressing_invalid",
+            if is_gather {
+                "gather.addressing_invalid"
+            } else {
+                "message.addressing_invalid"
+            },
             "One or more recipients are invalid; fix every reported item and resend with a new requestId",
             json!({
                 "offending": offenders,
@@ -541,10 +672,25 @@ pub fn persist_public_a2a_message(
     effective_recipients.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
     effective_recipients.dedup();
 
+    if is_gather && effective_recipients.is_empty() {
+        return Ok(rejected(
+            "gather.no_recipients",
+            "Gather requires at least one effective recipient",
+        ));
+    }
+
     if effective_recipients.len() > CAMP_MESSAGE_SEND_MAX_FANOUT {
         return Ok(rejected_with_details(
-            "message.fanout_exceeded",
-            "A public A2A send accepts at most 16 recipients",
+            if is_gather {
+                "gather.fanout_exceeded"
+            } else {
+                "message.fanout_exceeded"
+            },
+            if is_gather {
+                "A Gather accepts at most 16 recipients"
+            } else {
+                "A public A2A send accepts at most 16 recipients"
+            },
             json!({
                 "recipientCount": effective_recipients.len(),
                 "absoluteLimit": CAMP_MESSAGE_SEND_MAX_FANOUT,
@@ -552,14 +698,19 @@ pub fn persist_public_a2a_message(
             }),
         ));
     }
-    let has_forward_recipient = effective_recipients.iter().any(|recipient| {
-        !immediate_caller
-            .as_ref()
-            .is_some_and(|caller| caller.agent_id == *recipient)
-    });
+    let has_forward_recipient = is_gather
+        || effective_recipients.iter().any(|recipient| {
+            !immediate_caller
+                .as_ref()
+                .is_some_and(|caller| caller.agent_id == *recipient)
+        });
     if has_forward_recipient && request.current_a2a_depth >= MESSAGE_DELIVERY_MAX_A2A_DEPTH {
         return Ok(rejected_with_details(
-            "message.a2a_depth_exhausted",
+            if is_gather {
+                "gather.addressing_invalid"
+            } else {
+                "message.a2a_depth_exhausted"
+            },
             "A forward recipient would exceed the maximum delivery depth of five",
             json!({
                 "currentDepth": request.current_a2a_depth,
@@ -601,6 +752,22 @@ pub fn persist_public_a2a_message(
         .as_ref()
         .map(|_| request.task_id.expect("admitted Task"));
 
+    let captures = effective_recipients
+        .iter()
+        .map(|recipient| {
+            if is_gather
+                || !immediate_caller
+                    .as_ref()
+                    .is_some_and(|caller| caller.agent_id == *recipient)
+            {
+                Ok(None)
+            } else {
+                resolve_gather_capture(transaction, request.source_agent_run_id, recipient)
+            }
+        })
+        .collect::<Result<Vec<Option<GatherCapture>>>>()?;
+    let captured_return_count = captures.iter().filter(|capture| capture.is_some()).count() as i64;
+
     let now_instant = camp_turn_execution_budget_now();
     let now = now_instant.to_rfc3339();
     let turn = transaction
@@ -611,7 +778,8 @@ pub fn persist_public_a2a_message(
                    execution_budget_max_agent_run_responsibilities,
                    execution_budget_max_accepted_a2a,
                    execution_budget_root_agent_run_responsibilities,
-                   a2a_run_slots_allocated
+                   accepted_a2a_allocated,
+                   agent_run_responsibilities_allocated
             FROM camp_turn
             WHERE id = ?1 AND camp_id = ?2
             "#,
@@ -626,6 +794,7 @@ pub fn persist_public_a2a_message(
                     row.get::<_, i64>(5)?,
                     row.get::<_, i64>(6)?,
                     row.get::<_, i64>(7)?,
+                    row.get::<_, i64>(8)?,
                 ))
             },
         )
@@ -638,11 +807,16 @@ pub fn persist_public_a2a_message(
         max_agent_run_responsibilities,
         max_accepted_a2a,
         root_agent_run_responsibilities,
-        allocated_a2a,
+        allocated_accepted_a2a,
+        allocated_run_responsibilities,
     )) = turn
     else {
         return Ok(rejected(
-            "message.turn_not_active",
+            if is_gather {
+                "gather.turn_not_active"
+            } else {
+                "message.turn_not_active"
+            },
             "The source CampTurn does not exist",
         ));
     };
@@ -651,55 +825,77 @@ pub fn persist_public_a2a_message(
         || budget_exhausted_at.is_some()
     {
         return Ok(rejected(
-            "message.turn_not_active",
+            if is_gather {
+                "gather.turn_not_active"
+            } else {
+                "message.turn_not_active"
+            },
             "The current CampTurn is no longer accepting public sends",
         ));
     }
 
-    let requested_slots = effective_recipients.len() as i64;
-    let next_accepted_a2a = allocated_a2a + requested_slots;
-    let next_responsibilities = root_agent_run_responsibilities + next_accepted_a2a;
+    let requested_accepted_a2a = effective_recipients.len() as i64;
+    let requested_run_responsibilities =
+        requested_accepted_a2a - captured_return_count + i64::from(is_gather);
+    let next_accepted_a2a = allocated_accepted_a2a + requested_accepted_a2a;
+    let next_allocated_run_responsibilities =
+        allocated_run_responsibilities + requested_run_responsibilities;
+    let next_responsibilities =
+        root_agent_run_responsibilities + next_allocated_run_responsibilities;
     let deadline = chrono::DateTime::parse_from_rfc3339(&deadline_at)
         .context("CampTurn Execution Budget deadline is invalid")?
         .with_timezone(&chrono::Utc);
-    if requested_slots > 0
+    if requested_accepted_a2a > 0
         && (now_instant >= deadline
             || next_accepted_a2a > max_accepted_a2a
             || next_accepted_a2a > PRODUCT_MAX_ACCEPTED_A2A
             || next_responsibilities > max_agent_run_responsibilities)
     {
         return Ok(rejected_with_details(
-            "message.execution_budget_exceeded",
+            if is_gather {
+                "gather.execution_budget_exceeded"
+            } else {
+                "message.execution_budget_exceeded"
+            },
             "The effective recipient set does not fit the remaining frozen CampTurn budget",
             json!({
-                "requestedRecipients": requested_slots,
-                "remainingAcceptedA2a": (max_accepted_a2a - allocated_a2a).max(0),
+                "requestedRecipients": requested_accepted_a2a,
+                "requestedAgentRunResponsibilities": requested_run_responsibilities,
+                "remainingAcceptedA2a": (max_accepted_a2a - allocated_accepted_a2a).max(0),
                 "remainingAgentRunResponsibilities":
                     (max_agent_run_responsibilities
                         - root_agent_run_responsibilities
-                        - allocated_a2a).max(0),
+                        - allocated_run_responsibilities).max(0),
                 "newRequestIdRequired": true,
             }),
         ));
     }
-    if requested_slots > 0 {
+    if requested_accepted_a2a > 0 {
         let updated = transaction.execute(
             r#"
             UPDATE camp_turn
             SET a2a_run_slots_allocated = a2a_run_slots_allocated + ?2,
-                version = version + 1, updated_at = ?3
+                accepted_a2a_allocated = accepted_a2a_allocated + ?2,
+                agent_run_responsibilities_allocated =
+                    agent_run_responsibilities_allocated + ?3,
+                version = version + 1, updated_at = ?4
             WHERE id = ?1
               AND status IN ('running', 'waiting')
               AND cancel_requested_at IS NULL
               AND execution_budget_exhausted_at IS NULL
-              AND execution_budget_deadline_at > ?3
-              AND a2a_run_slots_allocated + ?2
+              AND execution_budget_deadline_at > ?4
+              AND accepted_a2a_allocated + ?2
                     <= execution_budget_max_accepted_a2a
               AND execution_budget_root_agent_run_responsibilities
-                    + a2a_run_slots_allocated + ?2
+                    + agent_run_responsibilities_allocated + ?3
                     <= execution_budget_max_agent_run_responsibilities
             "#,
-            params![request.camp_turn_id, requested_slots, now],
+            params![
+                request.camp_turn_id,
+                requested_accepted_a2a,
+                requested_run_responsibilities,
+                now
+            ],
         )?;
         if updated != 1 {
             anyhow::bail!("CampTurn changed before Message Delivery slots were reserved");
@@ -800,6 +996,26 @@ pub fn persist_public_a2a_message(
         agent_id: request.author_agent_id.to_string(),
         source_agent_run_id: request.source_agent_run_id.to_string(),
     };
+    if let PublicA2aOperation::Gather {
+        gather_id,
+        initiator_conversation_id,
+    } = &request.operation
+    {
+        persist_gather_record(
+            transaction,
+            &GatherAcceptance {
+                gather_id,
+                command_id: request.command_id,
+                camp_id: request.camp_id,
+                camp_turn_id: request.camp_turn_id,
+                request_message_id: &message_id,
+                initiator_agent_id: request.author_agent_id,
+                initiator_agent_run_id: request.source_agent_run_id,
+                initiator_conversation_id,
+                now: &now,
+            },
+        )?;
+    }
     let root_agent_run_id = request
         .current_a2a_root_agent_run_id
         .unwrap_or(request.source_agent_run_id);
@@ -815,9 +1031,10 @@ pub fn persist_public_a2a_message(
     };
     let mut delivery_ids = Vec::with_capacity(effective_recipients.len());
     for (position, recipient_agent_id) in effective_recipients.iter().enumerate() {
-        let lineage = if let Some(caller) = immediate_caller
-            .as_ref()
-            .filter(|caller| caller.agent_id == *recipient_agent_id)
+        let lineage = if !is_gather
+            && let Some(caller) = immediate_caller
+                .as_ref()
+                .filter(|caller| caller.agent_id == *recipient_agent_id)
         {
             DeliveryLineage {
                 edge_kind: "return",
@@ -836,6 +1053,34 @@ pub fn persist_public_a2a_message(
                 a2a_depth: request.current_a2a_depth + 1,
                 ancestor_agent_ids: forward_lineage_snapshot.clone(),
             }
+        };
+        let capture = captures[position].as_ref();
+        let gather_id = match (&request.operation, capture) {
+            (PublicA2aOperation::Gather { gather_id, .. }, _) => Some(*gather_id),
+            (_, Some(capture)) => Some(capture.gather_id.as_str()),
+            _ => None,
+        };
+        let dispatch_disposition = if capture.is_some() {
+            "gather_captured"
+        } else {
+            "dispatch"
+        };
+        let completion_role = if capture.is_some() {
+            None
+        } else if is_gather {
+            Some("optional")
+        } else {
+            Some("required")
+        };
+        let initial_status = if capture.is_some() {
+            "settled"
+        } else {
+            "pending"
+        };
+        let initial_phase = if capture.is_some() {
+            "terminal"
+        } else {
+            "never_attempted"
         };
         let delivery_id = Uuid::new_v4().to_string();
         let queue_sequence: i64 = transaction.query_row(
@@ -856,7 +1101,13 @@ pub fn persist_public_a2a_message(
             "explicit": explicit_order.contains(recipient_agent_id),
         });
         let frozen_snapshot = json!({
-            "schemaVersion": 2,
+            "schemaVersion": 3,
+            "deliveryKind": "public_a2a",
+            "dispatchDisposition": dispatch_disposition,
+            "completionRole": completion_role,
+            "gatherId": gather_id,
+            "gatherDispatchDeliveryId": capture.map(|value| value.dispatch_delivery_id.as_str()),
+            "gatherSourceRetryGeneration": capture.map(|value| value.source_retry_generation),
             "messageId": message_id,
             "campId": request.camp_id,
             "campTurnId": request.camp_turn_id,
@@ -889,7 +1140,9 @@ pub fn persist_public_a2a_message(
                 target_parent_agent_run_id, return_to_agent_run_id,
                 a2a_root_agent_run_id, a2a_depth,
                 ancestor_agent_ids_json, recipient_presentation_snapshot_json,
-                frozen_snapshot_json, queue_sequence,
+                frozen_snapshot_json, delivery_kind, dispatch_disposition,
+                completion_role, gather_id, gather_dispatch_delivery_id,
+                target_conversation_id, camp_message_boundary_sequence, queue_sequence,
                 status, dispatch_phase, wait_condition,
                 dispatch_attempt_count, active_dispatch_attempt_id,
                 scheduler_correlation_id, context_manifest_id,
@@ -898,11 +1151,12 @@ pub fn persist_public_a2a_message(
                 version, created_at, updated_at, ended_at
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
-                ?9, ?10, ?22, ?23, ?11, ?12, ?13, ?14, ?15, ?16,
-                ?17, ?18, ?19, ?20,
-                'pending', 'never_attempted', NULL,
+                ?9, ?10, ?23, ?24, ?11, ?12, ?13, ?14, ?15, ?16,
+                ?17, ?18, ?19,
+                'public_a2a', ?25, ?26, ?27, ?28, NULL, ?20, ?21,
+                ?29, ?30, NULL,
                 0, NULL, NULL, NULL, NULL, 0, 0, NULL, NULL,
-                1, ?21, ?21, NULL
+                1, ?22, ?22, ?31
             )
             "#,
             params![
@@ -925,14 +1179,31 @@ pub fn persist_public_a2a_message(
                 serde_json::to_string(&lineage.ancestor_agent_ids)?,
                 serde_json::to_string(&presentation_snapshot)?,
                 serde_json::to_string(&frozen_snapshot)?,
+                camp_sequence,
                 queue_sequence,
                 now,
                 task_admission.as_ref().map(|value| value.task_version),
                 task_admission
                     .as_ref()
                     .map(|value| value.assignee_agent_id.as_str()),
+                dispatch_disposition,
+                completion_role,
+                gather_id,
+                capture.map(|value| value.dispatch_delivery_id.as_str()),
+                initial_status,
+                initial_phase,
+                capture.map(|_| now.as_str()),
             ],
         )?;
+        if is_gather {
+            persist_gather_item(
+                transaction,
+                gather_id.context("Gather forward Delivery has no Gather identity")?,
+                &delivery_id,
+                recipient_agent_id,
+                &now,
+            )?;
+        }
         crate::collaboration::append_domain_event(
             transaction,
             "message_delivery.accepted",
@@ -947,6 +1218,11 @@ pub fn persist_public_a2a_message(
                 "recipientAgentId": recipient_agent_id,
                 "recipientCanonicalPosition": position,
                 "queueSequence": queue_sequence,
+                "deliveryKind": "public_a2a",
+                "dispatchDisposition": dispatch_disposition,
+                "completionRole": completion_role,
+                "gatherId": gather_id,
+                "gatherDispatchDeliveryId": capture.map(|value| value.dispatch_delivery_id.as_str()),
                 "edgeKind": lineage.edge_kind,
                 "targetParentAgentRunId": lineage.target_parent_agent_run_id,
                 "returnToAgentRunId": lineage.return_to_agent_run_id,
@@ -969,8 +1245,45 @@ pub fn persist_public_a2a_message(
             "recipientSetDigest": recipient_set_digest,
             "deliveryIds": delivery_ids,
             "publicOnly": delivery_ids.is_empty(),
+            "operation": if is_gather { "gather" } else { "send" },
         }),
     )?;
+
+    if let PublicA2aOperation::Gather { gather_id, .. } = &request.operation {
+        append_domain_event(
+            transaction,
+            "gather.accepted",
+            Some(request.camp_id),
+            Some(("gather", gather_id)),
+            &actor,
+            Some(request.execution_epoch),
+            &json!({
+                "gatherId": gather_id,
+                "requestMessageId": message_id,
+                "campTurnId": request.camp_turn_id,
+                "effectiveRecipients": effective_recipients,
+                "dispatchDeliveryIds": delivery_ids,
+                "completion": "deferred",
+            }),
+        )?;
+        return Ok(CommandHandlerResult::accepted(
+            "gather.accepted",
+            json!({
+                "status": "accepted",
+                "gatherId": gather_id,
+                "requestMessageId": message_id,
+                "campTurnId": request.camp_turn_id,
+                "effectiveRecipients": effective_recipients,
+                "dispatchDeliveryIds": delivery_ids,
+                "completion": "deferred",
+                "allocatedAgentRunResponsibilities": next_responsibilities,
+            }),
+            Some(EntityReference {
+                entity_type: "gather".to_string(),
+                entity_id: (*gather_id).to_string(),
+            }),
+        ));
+    }
 
     Ok(CommandHandlerResult::accepted(
         "camp_message.send_accepted",
@@ -1070,9 +1383,57 @@ pub fn mark_unstarted_deliveries_interrupted_before_dispatch(
                 "manualInterventionRequired": true,
             }),
         )?;
+        settle_item_from_delivery_terminal(
+            &transaction,
+            delivery_id,
+            "interrupted_before_dispatch",
+            Some("interrupted_before_dispatch"),
+            &actor,
+            None,
+            &now,
+        )?;
+    }
+    let barrier_completion_ids = {
+        let mut statement = transaction.prepare(
+            r#"
+            SELECT id
+            FROM message_delivery
+            WHERE delivery_kind = 'gather_completion'
+              AND status = 'pending'
+              AND dispatch_phase = 'never_attempted'
+              AND dispatch_attempt_count = 0
+            ORDER BY created_at, id
+            "#,
+        )?;
+        statement
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    for delivery_id in &barrier_completion_ids {
+        transaction.execute(
+            r#"
+            UPDATE message_delivery
+            SET status = 'interrupted_before_dispatch', dispatch_phase = 'terminal',
+                manual_intervention_required = 1,
+                failure_code = 'interrupted_before_dispatch',
+                failure_detail_json = ?2,
+                version = version + 1, updated_at = ?3, ended_at = ?3
+            WHERE id = ?1 AND status = 'pending'
+              AND dispatch_phase = 'never_attempted'
+              AND dispatch_attempt_count = 0
+            "#,
+            params![
+                delivery_id,
+                serde_json::to_string(&json!({
+                    "manualInterventionRequired": true,
+                    "message": "该 Gather Completion 因上次运行中断而未开始",
+                }))?,
+                now,
+            ],
+        )?;
     }
     transaction.commit()?;
-    Ok(delivery_ids.len())
+    Ok(delivery_ids.len() + barrier_completion_ids.len())
 }
 
 pub fn dispatch_pending_for_recipient(
@@ -1161,12 +1522,24 @@ pub fn dispatch_delivery(
     let Some(attempt_id) = establish_dispatch_attempt(database, delivery_id, trigger)? else {
         return Ok(DeliveryDispatchOutcome::NotDispatchable);
     };
-    process_dispatch_attempt(
+    let outcome = process_dispatch_attempt(
         database,
         delivery_id,
         &attempt_id,
         recipient_capacity_available,
-    )
+    )?;
+    if matches!(outcome, DeliveryDispatchOutcome::Terminal { .. })
+        && let Some(completion_delivery_id) =
+            completion_delivery_for_item(database.connection(), delivery_id)?
+    {
+        let _ = dispatch_delivery(
+            database,
+            &completion_delivery_id,
+            DeliveryDispatchTrigger::Accepted,
+            true,
+        )?;
+    }
+    Ok(outcome)
 }
 
 pub(crate) struct AgentRunDeliverySettlement<'a> {
@@ -1175,6 +1548,7 @@ pub(crate) struct AgentRunDeliverySettlement<'a> {
     pub agent_run_error_code: Option<&'a str>,
     pub terminal_resolution_source: Option<&'a str>,
     pub terminal_reason_code: Option<&'a str>,
+    pub final_output: Option<&'a str>,
     pub actor: &'a ActorRef,
     pub execution_epoch: Option<i64>,
     pub now: &'a str,
@@ -1190,6 +1564,7 @@ pub(crate) fn settle_materialized_delivery_for_agent_run(
         agent_run_error_code,
         terminal_resolution_source,
         terminal_reason_code,
+        final_output,
         actor,
         execution_epoch,
         now,
@@ -1272,6 +1647,27 @@ pub(crate) fn settle_materialized_delivery_for_agent_run(
             "terminalReasonCode": terminal_reason_code,
         }),
     )?;
+    settle_item_from_agent_run_terminal(
+        transaction,
+        agent_run_id,
+        agent_run_status,
+        final_output,
+        agent_run_error_code.or(failure_code),
+        terminal_resolution_source,
+        terminal_reason_code,
+        actor,
+        execution_epoch,
+        now,
+    )?;
+    settle_completion_for_agent_run(
+        transaction,
+        agent_run_id,
+        agent_run_status,
+        agent_run_error_code.or(failure_code),
+        actor,
+        execution_epoch,
+        now,
+    )?;
     Ok(Some(SettledDelivery {
         delivery_id,
         camp_id,
@@ -1305,6 +1701,14 @@ pub(crate) fn cancel_pending_turn_deliveries(
     execution_epoch: Option<i64>,
     now: &str,
 ) -> Result<usize> {
+    cancel_gathers_for_turn(
+        transaction,
+        camp_turn_id,
+        failure_code,
+        actor,
+        execution_epoch,
+        now,
+    )?;
     let deliveries = {
         let mut statement = transaction.prepare(
             r#"
@@ -1513,6 +1917,16 @@ fn process_dispatch_attempt(
             &actor,
             &now,
         )?;
+        if delivery.delivery_kind == "gather_completion" {
+            cancel_gather_for_delivery(
+                &transaction,
+                &delivery.id,
+                "camp_turn_no_longer_active",
+                &actor,
+                None,
+                &now,
+            )?;
+        }
         transaction.commit()?;
         return Ok(outcome);
     }
@@ -1531,15 +1945,68 @@ fn process_dispatch_attempt(
             &actor,
             &now,
         )?;
+        if delivery.delivery_kind == "gather_completion" {
+            cancel_gather_for_delivery(
+                &transaction,
+                &delivery.id,
+                "initiator_no_longer_eligible",
+                &actor,
+                None,
+                &now,
+            )?;
+        }
         transaction.commit()?;
         return Ok(outcome);
     }
-    let conversation_id = ensure_delivery_conversation(
-        &transaction,
-        &delivery.camp_id,
-        &delivery.recipient_agent_id,
-        &now,
-    )?;
+    let conversation_id = if delivery.delivery_kind == "gather_completion" {
+        let conversation_id = delivery
+            .target_conversation_id
+            .as_deref()
+            .context("Gather Completion Delivery has no frozen Conversation")?;
+        let route_valid: bool = transaction.query_row(
+            r#"
+            SELECT EXISTS(
+                SELECT 1 FROM conversation
+                WHERE id = ?1 AND camp_id = ?2 AND agent_id = ?3
+            )
+            "#,
+            params![
+                conversation_id,
+                delivery.camp_id,
+                delivery.recipient_agent_id
+            ],
+            |row| row.get(0),
+        )?;
+        if !route_valid {
+            let outcome = terminal_dispatch(
+                &transaction,
+                &delivery,
+                attempt_id,
+                "failed",
+                "gather_initiator_conversation_invalid",
+                &actor,
+                &now,
+            )?;
+            cancel_gather_for_delivery(
+                &transaction,
+                &delivery.id,
+                "gather_initiator_conversation_invalid",
+                &actor,
+                None,
+                &now,
+            )?;
+            transaction.commit()?;
+            return Ok(outcome);
+        }
+        conversation_id.to_string()
+    } else {
+        ensure_delivery_conversation(
+            &transaction,
+            &delivery.camp_id,
+            &delivery.recipient_agent_id,
+            &now,
+        )?
+    };
     let target_busy: bool = transaction.query_row(
         r#"
         SELECT EXISTS(
@@ -1551,7 +2018,23 @@ fn process_dispatch_attempt(
         [&conversation_id],
         |row| row.get(0),
     )?;
-    if target_busy {
+    let fifo_predecessor_pending: bool = transaction.query_row(
+        r#"
+        SELECT EXISTS(
+            SELECT 1
+            FROM message_delivery AS current
+            JOIN message_delivery AS predecessor
+              ON predecessor.camp_id = current.camp_id
+             AND predecessor.recipient_agent_id = current.recipient_agent_id
+             AND predecessor.queue_sequence < current.queue_sequence
+            WHERE current.id = ?1
+              AND predecessor.status = 'pending'
+        )
+        "#,
+        [&delivery.id],
+        |row| row.get(0),
+    )?;
+    if target_busy || fifo_predecessor_pending {
         wait_dispatch_attempt(
             &transaction,
             &delivery,
@@ -1644,10 +2127,15 @@ fn process_dispatch_attempt(
         agent_id: &delivery.recipient_agent_id,
         task_id: delivery.task_id.as_deref(),
         execution_epoch: 1,
+        invocation_kind: if delivery.delivery_kind == "gather_completion" {
+            "gather_completion"
+        } else {
+            "a2a"
+        },
         a2a_parent_agent_run_id: delivery.target_parent_agent_run_id.as_deref(),
-        a2a_root_agent_run_id: Some(&delivery.a2a_root_agent_run_id),
+        a2a_root_agent_run_id: delivery.a2a_root_agent_run_id.as_deref(),
         a2a_depth: delivery.a2a_depth,
-        camp_message_boundary_sequence: delivery.message_sequence,
+        camp_message_boundary_sequence: delivery.camp_message_boundary_sequence,
         conversation_message_boundary_sequence: current_conversation_boundary,
         trigger_camp_message_id: Some(&delivery.message_id),
         trigger_message_delivery_id: &delivery.id,
@@ -1699,7 +2187,7 @@ fn process_dispatch_attempt(
         &frozen_context,
     )?;
     if frozen_context.charter_delivery_mode != charter_delivery_mode
-        || frozen_context.camp_message_boundary_sequence != delivery.message_sequence
+        || frozen_context.camp_message_boundary_sequence != delivery.camp_message_boundary_sequence
         || frozen_context.conversation_message_boundary_sequence > current_conversation_boundary
     {
         anyhow::bail!("Message Delivery frozen Context no longer matches its dispatch target");
@@ -1710,7 +2198,8 @@ fn process_dispatch_attempt(
         INSERT INTO agent_run(
             id, camp_turn_id, conversation_id, task_id,
             task_version_at_admission, assignee_agent_id_at_admission,
-            trigger_camp_message_id, trigger_message_delivery_id, input_ready_at,
+            trigger_camp_message_id, trigger_message_delivery_id,
+            trigger_delivery_generation, input_ready_at,
             initial_camp_context_through_sequence,
             initial_conversation_context_through_sequence,
             responsibility_key, responsibility_generation,
@@ -1741,8 +2230,8 @@ fn process_dispatch_attempt(
             invocation_kind, a2a_parent_agent_run_id,
             a2a_root_agent_run_id, a2a_depth
         ) VALUES (
-            ?1, ?2, ?3, ?4, ?33, ?34, ?5, ?6, ?7, ?8, ?9,
-            ?10, 0, NULL, 'initial', ?11, 'required',
+            ?1, ?2, ?3, ?4, ?33, ?34, ?5, ?6, ?35, ?7, ?8, ?9,
+            ?10, ?35, NULL, 'initial', ?11, ?36,
             ?12, ?13, 'runtime_managed_v2',
             ?14, ?15, ?16, ?17, ?18, ?19, ?18, ?19,
             ?20, ?21, ?22, ?23, ?24, ?25,
@@ -1751,7 +2240,7 @@ fn process_dispatch_attempt(
             NULL, NULL, 0, NULL,
             0, NULL, NULL, NULL, NULL, NULL, 1,
             ?7, NULL, NULL, ?7,
-            'a2a', ?30, ?31, ?32
+            ?37, ?30, ?31, ?32
         )
         "#,
         params![
@@ -1762,13 +2251,20 @@ fn process_dispatch_attempt(
             delivery.message_id,
             delivery.id,
             now,
-            delivery.message_sequence,
+            delivery.camp_message_boundary_sequence,
             conversation_boundary,
             format!("message-delivery/{}", delivery.id),
-            format!(
-                "Handle public message from AgentRun {}",
-                delivery.source_agent_run_id
-            ),
+            if delivery.delivery_kind == "gather_completion" {
+                format!(
+                    "Synthesize completed Gather {}",
+                    delivery.gather_id.as_deref().unwrap_or("unknown")
+                )
+            } else {
+                format!(
+                    "Handle public message from AgentRun {}",
+                    delivery.source_agent_run_id
+                )
+            },
             serde_json::to_string(&effective_config)?,
             serde_json::to_string(&workspace)?,
             runtime.adapter_kind.as_str(),
@@ -1795,6 +2291,13 @@ fn process_dispatch_attempt(
             delivery.a2a_depth,
             delivery.task_version_at_admission,
             delivery.assignee_agent_id_at_admission,
+            delivery.retry_generation,
+            delivery.completion_role,
+            if delivery.delivery_kind == "gather_completion" {
+                "gather_completion"
+            } else {
+                "a2a"
+            },
         ],
     )?;
     let attempt_updated = transaction.execute(
@@ -1821,6 +2324,18 @@ fn process_dispatch_attempt(
     if attempt_updated != 1 || delivery_updated != 1 {
         anyhow::bail!("Message Delivery changed before AgentRun materialization");
     }
+    if delivery.delivery_kind == "gather_completion" {
+        mark_completion_materialized(&transaction, &delivery.id, &agent_run_id, &now)?;
+    } else if delivery.gather_id.is_some() {
+        mark_item_materialized(
+            &transaction,
+            &delivery.id,
+            &agent_run_id,
+            delivery.retry_generation,
+            &actor,
+            &now,
+        )?;
+    }
     append_domain_event(
         &transaction,
         "message_delivery.materialized",
@@ -1833,6 +2348,10 @@ fn process_dispatch_attempt(
             "contextFrozen": true,
             "targetAgentRunId": agent_run_id,
             "recipientAgentId": delivery.recipient_agent_id,
+            "deliveryKind": delivery.delivery_kind,
+            "completionRole": delivery.completion_role,
+            "gatherId": delivery.gather_id,
+            "retryGeneration": delivery.retry_generation,
             "edgeKind": delivery.edge_kind,
             "returnToAgentRunId": delivery.return_to_agent_run_id,
         }),
@@ -1847,8 +2366,14 @@ fn process_dispatch_attempt(
         &json!({
             "campTurnId": delivery.camp_turn_id,
             "taskId": delivery.task_id,
-            "invocationKind": "a2a",
+            "invocationKind": if delivery.delivery_kind == "gather_completion" {
+                "gather_completion"
+            } else {
+                "a2a"
+            },
             "messageDeliveryId": delivery.id,
+            "triggerDeliveryGeneration": delivery.retry_generation,
+            "gatherId": delivery.gather_id,
             "triggerCampMessageId": delivery.message_id,
             "edgeKind": delivery.edge_kind,
             "a2aParentAgentRunId": delivery.target_parent_agent_run_id,
@@ -1870,17 +2395,19 @@ fn load_dispatch_delivery(
         .query_row(
             r#"
             SELECT delivery.id, delivery.camp_id, delivery.camp_turn_id,
-                   delivery.message_id, message.sequence,
+                   delivery.message_id, delivery.camp_message_boundary_sequence,
                    delivery.recipient_agent_id, delivery.task_id,
                    delivery.task_version_at_admission,
                    delivery.assignee_agent_id_at_admission,
-                   delivery.source_agent_run_id, delivery.edge_kind,
+                   delivery.source_agent_run_id,
+                   delivery.delivery_kind, delivery.completion_role,
+                   delivery.gather_id, delivery.target_conversation_id,
+                   delivery.edge_kind,
                    delivery.target_parent_agent_run_id,
                    delivery.return_to_agent_run_id,
                    delivery.a2a_root_agent_run_id,
                    delivery.a2a_depth, delivery.retry_generation
             FROM message_delivery AS delivery
-            JOIN camp_message AS message ON message.id = delivery.message_id
             WHERE delivery.id = ?1 AND delivery.status = 'pending'
               AND delivery.dispatch_phase = 'attempting'
               AND delivery.active_dispatch_attempt_id = ?2
@@ -1892,18 +2419,22 @@ fn load_dispatch_delivery(
                     camp_id: row.get(1)?,
                     camp_turn_id: row.get(2)?,
                     message_id: row.get(3)?,
-                    message_sequence: row.get(4)?,
+                    camp_message_boundary_sequence: row.get(4)?,
                     recipient_agent_id: row.get(5)?,
                     task_id: row.get(6)?,
                     task_version_at_admission: row.get(7)?,
                     assignee_agent_id_at_admission: row.get(8)?,
                     source_agent_run_id: row.get(9)?,
-                    edge_kind: row.get(10)?,
-                    target_parent_agent_run_id: row.get(11)?,
-                    return_to_agent_run_id: row.get(12)?,
-                    a2a_root_agent_run_id: row.get(13)?,
-                    a2a_depth: row.get(14)?,
-                    retry_generation: row.get(15)?,
+                    delivery_kind: row.get(10)?,
+                    completion_role: row.get(11)?,
+                    gather_id: row.get(12)?,
+                    target_conversation_id: row.get(13)?,
+                    edge_kind: row.get(14)?,
+                    target_parent_agent_run_id: row.get(15)?,
+                    return_to_agent_run_id: row.get(16)?,
+                    a2a_root_agent_run_id: row.get(17)?,
+                    a2a_depth: row.get(18)?,
+                    retry_generation: row.get(19)?,
                 })
             },
         )
@@ -2043,6 +2574,15 @@ fn terminal_dispatch(
             "status": status,
             "failureCode": failure_code,
         }),
+    )?;
+    settle_item_from_delivery_terminal(
+        transaction,
+        &delivery.id,
+        status,
+        Some(failure_code),
+        actor,
+        None,
+        now,
     )?;
     Ok(DeliveryDispatchOutcome::Terminal {
         status: status.to_string(),

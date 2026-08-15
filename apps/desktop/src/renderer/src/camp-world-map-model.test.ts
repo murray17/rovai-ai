@@ -54,6 +54,7 @@ function run(
     executionEpoch: 1,
     permissionSemantics: 'runtime_managed_v2',
     invocationKind: 'direct',
+    triggerDeliveryGeneration: 0,
     a2aParentAgentRunId: null,
     a2aRootAgentRunId: null,
     a2aDepth: 0,
@@ -166,6 +167,7 @@ describe('Camp world map model', () => {
     const source = run('run_source', 'alice', 'running')
     const target = run('run_target', 'kyoko', 'running', {
       invocationKind: 'a2a',
+      triggerDeliveryGeneration: 0,
       a2aParentAgentRunId: source.id,
       a2aRootAgentRunId: source.id,
       a2aDepth: 1,

@@ -23,10 +23,11 @@ use crate::{
     context_index::index_camp_message,
     db::Database,
     execution_budget::{CampTurnExecutionBudgetExhaustionReason, camp_turn_execution_budget_now},
+    gather::completion_delivery_for_member_run,
     git::GitObservation,
     message_delivery::{
         AgentRunDeliverySettlement, CAMP_MESSAGE_SEND_MAX_BODY_BYTES, DeliveryDispatchTrigger,
-        cancel_pending_turn_deliveries, dispatch_pending_for_recipient,
+        cancel_pending_turn_deliveries, dispatch_delivery, dispatch_pending_for_recipient,
         settle_materialized_delivery_for_agent_run,
     },
     planned_shutdown::{RuntimeTerminalOutcome, TerminalSettlementPermit},
@@ -1672,6 +1673,7 @@ impl ExecutionRuntimeService {
                     agent_run_error_code: Some("accepted_input_outcome_unknown"),
                     terminal_resolution_source: None,
                     terminal_reason_code: None,
+                    final_output: None,
                     actor: &envelope.actor,
                     execution_epoch: Some(execution_epoch),
                     now: &now,
@@ -2034,6 +2036,7 @@ impl ExecutionRuntimeService {
                         agent_run_error_code: Some("accepted_input_outcome_unknown"),
                         terminal_resolution_source: None,
                         terminal_reason_code: None,
+                        final_output: None,
                         actor: &envelope.actor,
                         execution_epoch: Some(envelope.payload.execution_epoch),
                         now: &now,
@@ -2111,6 +2114,7 @@ impl ExecutionRuntimeService {
                     agent_run_error_code: Some(&cancel_reason_code),
                     terminal_resolution_source: None,
                     terminal_reason_code: None,
+                    final_output: None,
                     actor: &envelope.actor,
                     execution_epoch: Some(envelope.payload.execution_epoch),
                     now: &now,
@@ -2941,6 +2945,7 @@ impl ExecutionRuntimeService {
                     agent_run_error_code: None,
                     terminal_resolution_source: Some("runtime_terminal"),
                     terminal_reason_code,
+                    final_output: Some(&envelope.payload.final_output),
                     actor: &envelope.actor,
                     execution_epoch: Some(envelope.payload.execution_epoch),
                     now: &target.now,
@@ -3279,6 +3284,7 @@ impl ExecutionRuntimeService {
                     agent_run_error_code: Some(&envelope.payload.error_code),
                     terminal_resolution_source: None,
                     terminal_reason_code: None,
+                    final_output: None,
                     actor: &envelope.actor,
                     execution_epoch: Some(target.execution_epoch),
                     now: &target.now,
@@ -3417,6 +3423,7 @@ impl ExecutionRuntimeService {
                     agent_run_error_code: Some(&envelope.payload.error_code),
                     terminal_resolution_source,
                     terminal_reason_code: None,
+                    final_output: None,
                     actor: &envelope.actor,
                     execution_epoch: Some(envelope.payload.execution_epoch),
                     now: &target.now,
@@ -3693,6 +3700,7 @@ impl ExecutionRuntimeService {
                     agent_run_error_code: Some(error_code),
                     terminal_resolution_source: None,
                     terminal_reason_code: None,
+                    final_output: None,
                     actor: &actor,
                     execution_epoch: Some(execution_epoch),
                     now: &now,
@@ -3878,6 +3886,7 @@ impl ExecutionRuntimeService {
                 agent_run_error_code: Some(&terminal.error_code),
                 terminal_resolution_source: Some("runtime_terminal"),
                 terminal_reason_code: Some(terminal_reason_code),
+                final_output: None,
                 actor: &actor,
                 execution_epoch: Some(terminal.execution_epoch),
                 now: &target.now,
@@ -4456,33 +4465,27 @@ pub(crate) fn recompute_camp_turn(
     let delivery_states = {
         let mut statement = transaction.prepare(
             r#"
-            SELECT delivery.status, target.completion_role, target.status
+            SELECT delivery.status, delivery.completion_role
             FROM message_delivery AS delivery
-            LEFT JOIN agent_run AS target ON target.id = delivery.target_agent_run_id
             WHERE delivery.camp_turn_id = ?1
             ORDER BY delivery.created_at, delivery.id
             "#,
         )?;
         statement
             .query_map([camp_turn_id], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                ))
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?
     };
     let has_nonterminal_delivery = delivery_states
         .iter()
-        .any(|(status, _, _)| matches!(status.as_str(), "pending" | "running"));
-    let has_failed_delivery = delivery_states
-        .iter()
-        .any(|(status, target_role, target_status)| {
-            matches!(status.as_str(), "failed" | "interrupted_before_dispatch")
-                && !(target_role.as_deref() == Some("optional")
-                    && matches!(target_status.as_deref(), Some("failed" | "cancelled")))
-        });
+        .any(|(status, _)| matches!(status.as_str(), "pending" | "running"));
+    let has_failed_delivery = delivery_states.iter().any(|(status, completion_role)| {
+        matches!(
+            status.as_str(),
+            "failed" | "cancelled" | "interrupted_before_dispatch"
+        ) && completion_role.as_deref() == Some("required")
+    });
     let (next_status, next_aggregate_reason) = if budget_exhausted_at.is_some() {
         if has_nonterminal || has_nonterminal_delivery {
             ("waiting", None)
@@ -4582,6 +4585,16 @@ fn pump_target_after_run_terminal(database: &mut Database, agent_run_id: &str) -
         DeliveryDispatchTrigger::TargetRunEnded,
         true,
     )?;
+    if let Some(completion_delivery_id) =
+        completion_delivery_for_member_run(database.connection(), agent_run_id)?
+    {
+        let _ = dispatch_delivery(
+            database,
+            &completion_delivery_id,
+            DeliveryDispatchTrigger::Accepted,
+            true,
+        )?;
+    }
     Ok(())
 }
 

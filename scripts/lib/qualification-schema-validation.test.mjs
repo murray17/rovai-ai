@@ -21,10 +21,11 @@ test('v0.34 schema catalog digests, references, and draft 2020-12 metaschemas co
   )
 })
 
-test('cross-version Qualification contract schema catalog is independent of frozen history', () => {
+test('cross-version contract schema catalog is independent of frozen history', () => {
   const catalog = validateQualificationContractSchemaCatalog()
-  assert.equal(catalog.catalogVersion, '1.3.0')
+  assert.equal(catalog.catalogVersion, '1.4.0')
   assert.deepEqual(catalog.schemas.map((entry) => entry.file), [
+    'gather-completion-input-v1.schema.json',
     'semantic-judge-view-suite-v1.schema.json',
     'tool-interaction-measurement-v1.schema.json',
     'tool-interaction-measurement-v2.schema.json',

@@ -1,4 +1,4 @@
 interface:
   display_name: "CLI 操作协调"
-  short_description: "在命令选择、多步协作和复杂恢复时提供 Rovai CLI 指引"
-  default_prompt: "使用 $cli-operations 为这个需求选择正确的 Rovai 操作，协调必要的多步流程，并安全处理复杂恢复。"
+  short_description: "在 Send、Gather、Task、检索与 Memory 之间选择并安全协调"
+  default_prompt: "使用 $cli-operations 选择正确的 Rovai 操作，协调并行 Gather 或必要的多步流程，并安全处理复杂恢复。"

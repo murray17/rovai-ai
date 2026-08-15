@@ -1,4 +1,5 @@
 export async function configureProductRuntime(request, adapterKind, agentIds) {
+  const allowsExecutionDeferredVerification = adapterKind === 'trae-cn-cli'
   for (const agentId of agentIds) {
     let resolved = null
     for (let attempt = 0; attempt < 240; attempt += 1) {
@@ -32,14 +33,22 @@ export async function configureProductRuntime(request, adapterKind, agentIds) {
       }
       resolved = await request('members.get', { agentId })
       if (resolved.runtimeConfiguration?.adapterKind === adapterKind
-          && resolved.runtimeReadiness?.status === 'ready') {
+          && (resolved.runtimeReadiness?.status === 'ready'
+            || (allowsExecutionDeferredVerification
+              && resolved.runtimeReadiness?.status === 'installed_unverified'))) {
         break
       }
       await new Promise((resolveWait) => setTimeout(resolveWait, 250))
     }
-    if (resolved.runtimeConfiguration?.adapterKind !== adapterKind
-        || resolved.runtimeReadiness?.status !== 'ready') {
-      throw new Error(`Product Runtime was not resolved: ${JSON.stringify(resolved)}`)
+    if (resolved?.runtimeConfiguration?.adapterKind !== adapterKind
+        || (resolved?.runtimeReadiness?.status !== 'ready'
+          && (!allowsExecutionDeferredVerification
+            || resolved?.runtimeReadiness?.status !== 'installed_unverified'))) {
+      throw new Error(`Product Runtime was not resolved: ${JSON.stringify({
+        adapterKind,
+        agentId,
+        resolved
+      })}`)
     }
   }
 
@@ -48,7 +57,9 @@ export async function configureProductRuntime(request, adapterKind, agentIds) {
       && candidate.installationClass === 'managed_default'
       && candidate.authScope === 'default'
   )
-  if (installation?.snapshot?.probeStatus !== 'ready') {
+  if (installation?.snapshot?.probeStatus !== 'ready'
+      && (!allowsExecutionDeferredVerification
+        || installation?.snapshot?.probeStatus !== 'installed_unverified')) {
     throw new Error(`Managed Product Runtime is not ready: ${JSON.stringify({
       adapterKind,
       installation

@@ -3,15 +3,15 @@ document_type: architecture
 architecture: public-a2a-message-delivery
 authority: public-message-and-delivery-boundaries
 status: accepted
-last_updated: 2026-08-14
+last_updated: 2026-08-16
 ---
 
 # Public A2A Message 与 Message Delivery 架构
 
 本文件定义 v0.45 以后 Agent-to-Agent 协作的长期组件边界。字段级输入、错误和状态合同
-分别见 [Camp Message Send v7](../contracts/camp-message-send-v7.md)、
+分别见 [Camp Message Send v8](../contracts/camp-message-send-v8.md)、
 [Current User Attention v4](../contracts/current-user-attention-v4.md)、
-[Message Delivery v2](../contracts/message-delivery-v2.md) 与
+[Message Delivery v3](../contracts/message-delivery-v3.md) 与
 [Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)；决策理由见
 [ADR-0130](../adr/0130-public-a2a-message-and-unified-delivery.md) 和
 [ADR-0131](../adr/0131-recipient-scoped-event-driven-delivery-recovery.md)，显式 caller return 与 Core 管理
@@ -23,6 +23,9 @@ reply reference 见
 门禁见 [ADR-0184](../adr/0184-line-leading-display-name-inline-addressing-alias.md)。
 Current User Attention 的身份、内容与原子通知决定见
 [ADR-0165](../adr/0165-core-owned-current-user-message-attention.md)。
+持久 Gather capture、Barrier 与 Completion Delivery 见
+[ADR-0193](../adr/0193-durable-gather-barrier-over-unified-message-delivery.md)及
+[持久 Gather Barrier](durable-gather-barrier.md)。
 
 ## 1. 一条公共事实，多个收件人责任
 
@@ -87,6 +90,15 @@ Read Side 和 Renderer 都不得重新解析投影正文。
 Message Delivery Dispatch Pump 是投递、排队和物化的唯一权威。它读取 Delivery 自己冻结的
 recipient、message、Task、`forward | return` edge、target lineage 和 presentation snapshot，不重新
 解析正文或扩大目标。
+
+Message Delivery v3 以 `deliveryKind`、`dispatchDisposition` 和 `completionRole` 形成 closed union。普通
+public A2A 继续拥有 message/edge/lineage；Gather 的精确 return 可以作为 `gather_captured` 直接 settled，
+但其 CampMessage 始终公开；Barrier 创建的 `gather_completion` 没有公开 recipient/edge lineage，却继续进入
+同一 recipient FIFO 与 Dispatch Pump。Delivery-level completionRole 让 pre-run terminal 也能被 CampTurn
+正确解释为 optional member result 或 required completion。
+
+retry generation 是 Delivery 当前物化责任的一部分。Delivery 只保存 current target pointer；历史 attempt 与
+AgentRun 以 `(triggerMessageDeliveryId, triggerDeliveryGeneration)` 保留，retry 不改写旧 Run。
 
 Forward Delivery 把 source Run 作为 target parent 并将 depth 加一。Return Delivery 保留 source Run
 作为因果作者，但把 target parent/root/depth 恢复为 Immediate Caller 原先的调用 lineage；它仍进入

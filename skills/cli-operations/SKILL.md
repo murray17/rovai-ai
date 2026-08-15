@@ -1,6 +1,6 @@
 ---
 name: cli-operations
-description: 当不确定当前工作应使用 CampMessage、持久 Task、Camp/History 检索还是 Memory，普通消息是否应升级为 Task，一次业务事件需要协调多个 Rovai 操作，或 CLI 返回要求 refresh、confirm_outcome 等业务状态判断时使用。普通单一操作、收件人参数和具体 flags 应直接查看对应 operation 的 --help，不要因此自动加载本 Skill。
+description: 当不确定当前工作应使用 CampMessage、Gather、持久 Task、Camp/History 检索还是 Memory，需要由 Default Lead 并行征集多个成员后统一综合，普通消息是否应升级为 Task，一次业务事件需要协调多个 Rovai 操作，或 CLI 返回要求 refresh、confirm_outcome 等业务状态判断时使用。普通单一操作、收件人参数和具体 flags 应直接查看对应 operation 的 --help，不要因此自动加载本 Skill。
 ---
 
 # Rovai CLI 操作协调
@@ -15,6 +15,7 @@ description: 当不确定当前工作应使用 CampMessage、持久 Task、Camp/
 先判断用户需要留下什么领域事实：
 
 - Camp 中可见的答复、状态、问题或一次性协作消息：选择 CampMessage。
+- 当前 Default Lead 要把同一主题并行交给多个成员，并在全部成员 Run 终态后只收到一次统一续跑：选择 Gather。
 - 跨 AgentRun 仍需追踪、可独立交接和验收的责任：选择 Task。
 - 查找 Camp、消息或稳定 ID 对应的历史事实：选择 Camp/History 读取。
 - 跨未来 AgentRun 仍有价值的稳定偏好、约定或经验：转交 Memory 治理判断。
@@ -37,6 +38,7 @@ Memory 代替 Task、项目文档或历史证据。
 
 - 需要决定公开消息、Agent routing、User attention 或是否无需 Task 时，读取
   [Send](references/send.md)。
+- 需要并行征集成员结果并让原 Lead 稍后统一综合时，读取 [Gather](references/gather.md)。
 - 需要判断消息是否升级为持久责任，或协调 Task 与消息 linkage 时，读取
   [Task](references/task.md)。
 - 需要在当前 Camp、指定 Camp、跨 Camp 历史或稳定 ID exact read 之间选择时，读取

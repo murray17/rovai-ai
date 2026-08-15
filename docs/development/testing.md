@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-08-14
+last_updated: 2026-08-16
 ---
 
 # 测试与 Smoke Test
@@ -155,7 +155,7 @@ pnpm build:desktop
 | `pnpm smoke:antigravity-runtime` | Antigravity + Codex | 包含 Antigravity 到 Codex 换绑 |
 | `pnpm smoke:action-approval` | Codex | 验证越界动作的 Approval 与唯一副作用 |
 | `pnpm smoke:multi-agent` | Codex | 同一 CampTurn 的两个真实并发 AgentRun |
-| `pnpm smoke:builtin-cli` | 全部十种正式 Runtime | 每个真实 AgentRun 只使用固定业务命令，调用十四项 CLI operation，验证旧 send 输入拒绝、Projection/schema、冲突 recovery、release fence、Replay 与后续 AgentRun 新 lease；transport-independent indeterminate 由 CLI response-loss test 覆盖；任一选中 Runtime 缺失、未认证或漏项即失败 |
+| `pnpm smoke:builtin-cli` | 全部十种正式 Runtime | 每个真实 AgentRun 只使用固定业务命令，调用十五项 CLI operation；Gather case 额外验证成员公开回传被 capture、Lead 不逐条唤醒且只创建一次 completion。其余仍验证旧 send 输入拒绝、Projection/schema、冲突 recovery、release fence、Replay 与后续 AgentRun 新 lease；transport-independent indeterminate 由 CLI response-loss test 覆盖；任一选中 Runtime 缺失、未认证或漏项即失败 |
 | `pnpm smoke:skills` | Codex 默认；selector 接受九种已证明 Skill projection 的 Runtime | `ROVAI_SKILL_SMOKE_ADAPTERS=all` 会逐一尝试既有九组真实投递与发现；TRAE 第一版没有静态 Skill 路径证据，明确不在该 selector 中 |
 | `pnpm smoke:mcp` | Codex、Claude Code、OpenCode、Copilot；可选 CodeBuddy、Qwen Code | 默认前四种；保留 Runtime 原生配置并逐 Run 追加 MCP；OpenCode 默认使用 `opencode/mimo-v2.5-free` |
 | `pnpm smoke:mcp-projection` | Codex、Claude Code、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE | 通过真实 Core、Assignment、AgentRun Projection 与 ContextManifest 验证原生配置保留及 Adapter-specific 同名策略；Codex 同名项应跳过，另外八种应由 Rovai 整项优先；默认九种 |

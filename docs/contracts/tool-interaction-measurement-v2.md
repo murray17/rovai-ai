@@ -4,7 +4,7 @@ contract: tool-interaction-measurement
 version: 2
 authority: qualification-tool-opportunity-trace-and-tool-use-judge
 status: accepted
-last_updated: 2026-08-15
+last_updated: 2026-08-16
 ---
 
 # Tool Interaction Measurement v2
@@ -39,9 +39,10 @@ v2 的闭合 Adapter/operation 集为：
 | `camp_message_send` | `camp.message.send` | recipient/预注册 Task link、Message/Delivery/Run/receipt 与 effect identity；语义协作质量不在本 Judge 重复评分 |
 
 未知 operation 只能保留通用 Tool Ledger lifecycle，不能获得 Adapter oracle verdict 或 Tool-Use Judge verdict。
-当前 Transport v12 新增的 `member.create` 已纳入 Core `operationProjection@2`、catalog 穷举门禁和
-Tool Ledger mutation taxonomy，但本合同不伪造其专用语义评测：人类确认、六字段身份质量、头像安全和后续
-成员价值需要独立 Opportunity/Effect contract，不得并入 Task 或 A2A 结果。
+Transport v13 保留 `member.create` 并新增 `team.gather`；两者都已纳入 Core `operationProjection@2` 与
+catalog 穷举门禁，但本合同不伪造专用语义评测。人类确认、六字段身份质量、头像安全和后续成员价值需要
+独立 Opportunity/Effect contract；Gather 的编排必要性、成员结果与 Lead 综合质量由 Collaboration
+contract/Judge 负责，均不得并入 Task 或普通 A2A 结果。
 
 Private Fixture v2 可以以 symbol 预置 Camp Message、Memory 与 Task；materialization 后才把新鲜
 Message/Memory/Revision/Task identity 与 Task version 代入 sealed oracle。因此 `get/update/list` 可以在

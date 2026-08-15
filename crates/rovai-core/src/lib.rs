@@ -25,6 +25,7 @@ pub mod db;
 pub mod diagnostics;
 pub mod execution_budget;
 pub mod execution_evidence;
+pub mod gather;
 pub mod git;
 pub mod managed_blob;
 pub mod mcp;

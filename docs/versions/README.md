@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.88
+current_version: v0.89
 last_updated: 2026-08-16
 ---
 
@@ -139,4 +139,5 @@ last_updated: 2026-08-16
 | v0.85 | `historical` | Agent 主导的伙伴入队、受控头像导入与十三项 official Skill inventory | [v0.85/README.md](v0.85/README.md) |
 | v0.86 | `historical` | Benchmark Tool-use Measurement v2、Memory/Task/Camp 证据闭合与 A2A 反馈链投影 | [v0.86/README.md](v0.86/README.md) |
 | v0.87 | `historical` | TRAE 静态 Runtime 检测、首次真实任务同进程验证与可选静态版本 | [v0.87/README.md](v0.87/README.md) |
-| v0.88 | `current` | Camp 世界地图环境片段、全局闲时调度与拥挤布局字幕回退 | [v0.88/README.md](v0.88/README.md) |
+| v0.88 | `historical` | Camp 世界地图环境片段、全局闲时调度与拥挤布局字幕回退 | [v0.88/README.md](v0.88/README.md) |
+| v0.89 | `current` | 持久 Gather Barrier、统一 Completion Delivery 与类型化聚合输入 | [v0.89/README.md](v0.89/README.md) |
