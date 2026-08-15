@@ -51,11 +51,11 @@ last_updated: 2026-08-16
 - [x] Rust fmt、定向/全量测试与 strict Clippy 通过；
 - [x] TypeScript typecheck、Vitest、Node package tests、docs governance 通过；
 - [x] Runtime/CLI product smoke 与必要 crash/concurrency fixtures 已执行并诚实记录结果；
-- [ ] macOS package、签名、架构与隔离 `userData` 启动验收通过；
+- [x] macOS package、签名、架构与隔离 `userData` 启动验收通过；
 - [ ] 解除 Kiro/Qwen 本机 readiness、CodeBuddy 模型拒绝与 Qoder 余额阻塞，补齐十 Runtime 完整 v13 pass；
 - [ ] 满足全部发布门后把本计划及 overview 标记 complete；
-- [ ] 提交并无 force 推送 `main`；
-- [ ] 从已验收产物升级 `/Applications/Rovai-ai.app`，不覆盖日常 `userData`。
+- [x] 提交并无 force 推送 `main`；
+- [x] 从已验收产物升级 `/Applications/Rovai AI.app`，不覆盖日常 `userData`。
 
 ## 当前验收事实
 
@@ -70,3 +70,10 @@ last_updated: 2026-08-16
   验收的对应 ACP 孤儿进程。本记录只陈述相关环境事实，不把孤儿进程未经证明地认定为唯一原因；
 - smoke 夹具已修复普通 A2A ACK 诱发的 Agent 往返链，并自动结算同 recipient FIFO 前序 Run 的有界权限审批；
   该修复不改变产品语义或 Gather 断言。
+- `pnpm package:mac` 从已推送的 `4386a0a7` 构建 323 MiB arm64 App；App、Core 与 CLI ad-hoc 签名通过，
+  package 内 Core/CLI UUID 与 release resources 分别一致；
+- 打包 App 以显式隔离 `userData` 启动至 Core ready，fresh database 为 Migration 87 / contract `v0.89`，
+  controlled shutdown 自然完成且无遗留子进程；
+- 日常 App 正常退出后保留旧 bundle 与 SQLite 恢复副本，再升级 `/Applications/Rovai AI.app`。从安装位置
+  重启后日常数据由 Migration 86 升到 87，14 Camp、10 Agent、137 CampMessage、4 Task 与 92 个历史
+  AgentRun 均保持原计数和终态分布。

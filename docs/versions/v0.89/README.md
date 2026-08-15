@@ -12,7 +12,7 @@ last_updated: 2026-08-16
 
 > 当前状态：设计、合同、Core、Transport、CLI、Context 与确定性门禁已完成；真实 Runtime v13
 > 矩阵已取得 6 个完整 pass、1 个 Gather 主闭环 pass 后外部余额阻塞，以及 3 个本机 Runtime/模型阻塞。
-> macOS 发布完成后仍需解除这些外部阻塞，才把实现状态改为 complete。
+> 已完成 macOS 打包、隔离启动与 `/Applications` 升级；仍需解除这些外部阻塞，才把实现状态改为 complete。
 >
 > 前置版本：[v0.88 Camp 世界地图环境片段与全局闲时调度](../v0.88/README.md)
 
