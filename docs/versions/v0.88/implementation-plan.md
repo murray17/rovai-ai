@@ -35,6 +35,8 @@ last_updated: 2026-08-16
 - [x] 拆分 `sceneActive` 与 `motionActive`，让 reduced motion 保留静态闲时文案；
 - [x] 实现 `real > waiting > encounter ambient > solo ambient` 底部仲裁；
 - [x] 在 condensed 与 crowded 布局提供统一字幕回退，并保持真实/等待内容可操作性。
+- [x] 移除普通闲时气泡标签与偶遇触发的头像临时位移；底部回退字幕继续保留来源标签。
+- [x] 将角色逐帧位置更新收敛为合成层 transform，缓存路径长度并稳定角色/路径 DOM ref。
 
 ## Checkpoint 4：自动与视觉验收
 
@@ -53,7 +55,8 @@ last_updated: 2026-08-16
   静态文案、11 人 crowded、确定性 encounter、单个共享气泡、condensed、Day/Night、`2560×1440`、
   `1040×700` 与 200% zoom；所有布局均无文档横向溢出；
 - 截图目检发现并修复港湾边缘共享气泡裁切，复跑后气泡完整位于地图 frame 内；闲时气泡保持中性色、
-  无真实 A2A 箭头或交互，crowded/condensed 使用非交互单行字幕；
+  无额外标签、真实 A2A 箭头或交互，且不再移动参与者头像；crowded/condensed 使用带来源标签的
+  非交互单行字幕；
 - Impeccable detector 对本次世界地图 TSX/CSS 新增区域无命中；报告的 warning 均位于未修改的既有全局样式。
 
 以上证据只证明 Renderer 闲时调度、呈现与离线/隔离 UI 回归闭合，不把任何环境片段或偶遇提升为

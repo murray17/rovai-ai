@@ -38,6 +38,7 @@ import {
 } from './camp-world-map-model'
 
 type WorldMapPoint = { x: number; y: number }
+type WorldMapFrameSize = { width: number; height: number }
 type WorldMapMovementKind = 'ambient' | 'run' | 'a2a'
 
 type WorldMapMovement = {
@@ -142,6 +143,25 @@ function pointForNode(nodeId: CampWorldMapNodeId): WorldMapPoint {
   return { x: node.x, y: node.y }
 }
 
+function positionAgentElement(
+  element: HTMLDivElement,
+  point: WorldMapPoint,
+  frameSize: WorldMapFrameSize | null
+): void {
+  if (frameSize) {
+    element.style.setProperty(
+      '--world-map-agent-x',
+      `${point.x / CAMP_WORLD_MAP_WIDTH * frameSize.width}px`
+    )
+    element.style.setProperty(
+      '--world-map-agent-y',
+      `${point.y / CAMP_WORLD_MAP_HEIGHT * frameSize.height}px`
+    )
+  }
+  element.classList.toggle('is-edge-left', point.x < 225)
+  element.classList.toggle('is-edge-right', point.x > CAMP_WORLD_MAP_WIDTH - 225)
+}
+
 function routeDirection(edge: CampWorldMapPathEdge): { start: number; end: number } {
   const route = ROUTE_BY_ID.get(edge.routeId)
   return route?.from === edge.from ? { start: 0, end: 1 } : { start: 1, end: 0 }
@@ -174,7 +194,10 @@ export function CampWorldMap({
   const hasAuthoritativeSpeech = agents.some((agent) => agent.speech !== null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const agentElementById = useRef(new Map<string, HTMLDivElement>())
+  const agentElementRefById = useRef(new Map<string, (element: HTMLDivElement | null) => void>())
   const routeElementById = useRef(new Map<string, SVGPathElement>())
+  const routeElementRefById = useRef(new Map<string, (element: SVGPathElement | null) => void>())
+  const routeLengthById = useRef(new Map<string, number>())
   const motionByAgentId = useRef(new Map<string, WorldMapAgentMotion>())
   const motionCampIdRef = useRef(campId)
   const activeRouteUsers = useRef(new Map<string, Map<string, WorldMapMovementKind>>())
@@ -187,7 +210,8 @@ export function CampWorldMap({
   const ambientSchedulerRef = useRef<CampWorldMapAmbientScheduler | null>(null)
   const ambientScheduleStartedRef = useRef(false)
   const ambientScheduleRunningRef = useRef(false)
-  const [frameSize, setFrameSize] = useState<{ width: number; height: number } | null>(null)
+  const [frameSize, setFrameSize] = useState<WorldMapFrameSize | null>(null)
+  const frameSizeRef = useRef<WorldMapFrameSize | null>(null)
   const [density, setDensity] = useState<'regular' | 'compact' | 'condensed'>('regular')
   const [ambientEvent, setAmbientEvent] = useState<CampWorldMapAmbientDisplayedEvent | null>(null)
   const ambientEventRef = useRef<CampWorldMapAmbientDisplayedEvent | null>(null)
@@ -198,6 +222,8 @@ export function CampWorldMap({
     () => campWorldMapInitialNodes(campId, agents.map((agent) => agent.agentId)),
     [agentIdsKey, campId]
   )
+  const initialNodesRef = useRef(initialNodes)
+  initialNodesRef.current = initialNodes
 
   useEffect(() => {
     rendezvousRef.current = rendezvous
@@ -224,8 +250,13 @@ export function CampWorldMap({
         height = bounds.height
         width = height * sourceRatio
       }
+      const next = { width: Math.max(1, width), height: Math.max(1, height) }
+      frameSizeRef.current = next
+      for (const motion of motionByAgentId.current.values()) {
+        const element = agentElementById.current.get(motion.agentId)
+        if (element) positionAgentElement(element, motion.point, next)
+      }
       setFrameSize((current) => {
-        const next = { width: Math.max(1, width), height: Math.max(1, height) }
         return current
           && Math.abs(current.width - next.width) < 0.5
           && Math.abs(current.height - next.height) < 0.5
@@ -278,10 +309,7 @@ export function CampWorldMap({
     motion.point = point
     const element = agentElementById.current.get(motion.agentId)
     if (!element) return
-    element.style.left = `${point.x / CAMP_WORLD_MAP_WIDTH * 100}%`
-    element.style.top = `${point.y / CAMP_WORLD_MAP_HEIGHT * 100}%`
-    element.classList.toggle('is-edge-left', point.x < 225)
-    element.classList.toggle('is-edge-right', point.x > CAMP_WORLD_MAP_WIDTH - 225)
+    positionAgentElement(element, point, frameSizeRef.current)
   }, [])
 
   const clearRendezvousOffset = useCallback((motion: WorldMapAgentMotion): void => {
@@ -305,10 +333,7 @@ export function CampWorldMap({
     now: number
   ): void => {
     const direction = routeDirection(edge)
-    const path = routeElementById.current.get(edge.routeId)
-    const length = path && typeof path.getTotalLength === 'function'
-      ? path.getTotalLength()
-      : routeFallbackLength(edge)
+    const length = routeLengthById.current.get(edge.routeId) ?? routeFallbackLength(edge)
     motion.nodeId = edge.from
     motion.movement = {
       edge,
@@ -365,6 +390,7 @@ export function CampWorldMap({
       if (motion.movement) deactivateRoute(motion.movement.edge.routeId, agentId)
       motionByAgentId.current.delete(agentId)
       agentElementById.current.delete(agentId)
+      agentElementRefById.current.delete(agentId)
     }
     for (const agent of agents) {
       const existing = motionByAgentId.current.get(agent.agentId)
@@ -386,7 +412,7 @@ export function CampWorldMap({
       motionByAgentId.current.set(agent.agentId, motion)
       setAgentPoint(motion, motion.point)
     }
-  }, [agentIdsKey, agentModesKey, agents, campId, cancelMovement, deactivateRoute, initialNodes, setAgentPoint])
+  }, [agentIdsKey, agentModesKey, campId, cancelMovement, deactivateRoute, initialNodes, setAgentPoint])
 
   const isAmbientEventValid = useCallback((event: CampWorldMapAmbientDisplayedEvent): boolean => {
     if (campIdRef.current !== ambientEventCampIdRef.current) return false
@@ -410,6 +436,12 @@ export function CampWorldMap({
     }
     return !motion.movement && motion.nodeId === event.nodeId
   }, [])
+
+  const cancelAmbientEventIfInvalid = useCallback((): void => {
+    const event = ambientEventRef.current
+    if (!event || isAmbientEventValid(event)) return
+    ambientSchedulerRef.current?.cancelCurrentAndReschedule()
+  }, [isAmbientEventValid])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -506,10 +538,8 @@ export function CampWorldMap({
   }, [cancelMovement, reducedMotion, sceneActive])
 
   useEffect(() => {
-    const event = ambientEventRef.current
-    if (!event || isAmbientEventValid(event)) return
-    ambientSchedulerRef.current?.cancelCurrentAndReschedule()
-  }, [agentModesKey, hasAuthoritativeSpeech, isAmbientEventValid, motionActive, rendezvous])
+    cancelAmbientEventIfInvalid()
+  }, [agentModesKey, cancelAmbientEventIfInvalid, hasAuthoritativeSpeech, motionActive, rendezvous])
 
   useEffect(() => {
     if (!motionActive || typeof window === 'undefined') return
@@ -530,6 +560,7 @@ export function CampWorldMap({
     }
     const reconcileRendezvous = (now: number): void => {
       const currentKeys = new Set(rendezvousRef.current.map((item) => item.key))
+      let startedRendezvous = false
       for (const motion of motionByAgentId.current.values()) {
         if (!motion.rendezvousKey || currentKeys.has(motion.rendezvousKey)) continue
         cancelMovement(motion, now)
@@ -554,7 +585,9 @@ export function CampWorldMap({
         target.rendezvousSide = 1
         startPath(source, campWorldMapShortestPath(source.nodeId, meetingNode), 'a2a', now)
         startPath(target, campWorldMapShortestPath(target.nodeId, meetingNode), 'a2a', now)
+        startedRendezvous = true
       }
+      if (startedRendezvous) cancelAmbientEventIfInvalid()
     }
     const chooseAmbientPath = (motion: WorldMapAgentMotion, now: number): void => {
       if (motion.mode === 'waiting' || motion.rendezvousKey) return
@@ -587,6 +620,7 @@ export function CampWorldMap({
       }
       if (movement.kind === 'a2a') showRendezvousOffset(motion)
       else motion.nextMoveAt = now + 4_500 + nextRandom(motion) * 9_500
+      cancelAmbientEventIfInvalid()
     }
     const updateMovement = (motion: WorldMapAgentMotion, now: number): void => {
       const movement = motion.movement
@@ -616,10 +650,6 @@ export function CampWorldMap({
     const tick = (now: number): void => {
       reconcileRendezvous(now)
       for (const motion of motionByAgentId.current.values()) updateMovement(motion, now)
-      const ambient = ambientEventRef.current
-      if (ambient && !isAmbientEventValid(ambient)) {
-        ambientSchedulerRef.current?.cancelCurrentAndReschedule()
-      }
       frame = window.requestAnimationFrame(tick)
     }
 
@@ -632,9 +662,9 @@ export function CampWorldMap({
   }, [
     campId,
     cancelMovement,
+    cancelAmbientEventIfInvalid,
     clearRendezvousOffset,
     deactivateRoute,
-    isAmbientEventValid,
     motionActive,
     setAgentPoint,
     showRendezvousOffset,
@@ -642,7 +672,7 @@ export function CampWorldMap({
     startPath
   ])
 
-  const setAgentElement = (agentId: string, element: HTMLDivElement | null): void => {
+  const setAgentElement = useCallback((agentId: string, element: HTMLDivElement | null): void => {
     if (!element) {
       agentElementById.current.delete(agentId)
       return
@@ -651,20 +681,37 @@ export function CampWorldMap({
     const motion = motionByAgentId.current.get(agentId)
     if (motion) setAgentPoint(motion, motion.point)
     else {
-      const node = initialNodes[agentId] ?? 'camp'
-      element.style.left = `${CAMP_WORLD_MAP_NODES[node].x / CAMP_WORLD_MAP_WIDTH * 100}%`
-      element.style.top = `${CAMP_WORLD_MAP_NODES[node].y / CAMP_WORLD_MAP_HEIGHT * 100}%`
+      const node = initialNodesRef.current[agentId] ?? 'camp'
+      positionAgentElement(element, CAMP_WORLD_MAP_NODES[node], frameSizeRef.current)
     }
-  }
+  }, [setAgentPoint])
 
-  const setRouteElement = (routeId: string, element: SVGPathElement | null): void => {
+  const agentElementRef = useCallback((agentId: string) => {
+    const existing = agentElementRefById.current.get(agentId)
+    if (existing) return existing
+    const callback = (element: HTMLDivElement | null): void => setAgentElement(agentId, element)
+    agentElementRefById.current.set(agentId, callback)
+    return callback
+  }, [setAgentElement])
+
+  const setRouteElement = useCallback((routeId: string, element: SVGPathElement | null): void => {
     if (!element) {
       routeElementById.current.delete(routeId)
+      routeLengthById.current.delete(routeId)
       return
     }
     routeElementById.current.set(routeId, element)
+    routeLengthById.current.set(routeId, element.getTotalLength())
     renderRouteActivity(routeId)
-  }
+  }, [renderRouteActivity])
+
+  const routeElementRef = useCallback((routeId: string) => {
+    const existing = routeElementRefById.current.get(routeId)
+    if (existing) return existing
+    const callback = (element: SVGPathElement | null): void => setRouteElement(routeId, element)
+    routeElementRefById.current.set(routeId, callback)
+    return callback
+  }, [setRouteElement])
 
   const frameStyle = frameSize
     ? { width: `${frameSize.width}px`, height: `${frameSize.height}px` }
@@ -718,7 +765,7 @@ export function CampWorldMap({
                 data-kind={route.kind}
                 d={route.d}
                 key={route.id}
-                ref={(element) => setRouteElement(route.id, element)}
+                ref={routeElementRef(route.id)}
               />
             ))}
           </svg>
@@ -748,11 +795,8 @@ export function CampWorldMap({
                       ? 'right'
                       : undefined}
                   key={agent.agentId}
-                  ref={(element) => setAgentElement(agent.agentId, element)}
-                  style={{
-                    '--world-map-agent-color': identityColorToken(agent.agentId),
-                    '--world-map-ambient-offset': `${encounterSide * 14}px`
-                  } as CSSProperties}
+                  ref={agentElementRef(agent.agentId)}
+                  style={{ '--world-map-agent-color': identityColorToken(agent.agentId) } as CSSProperties}
                 >
                   <button
                     className="camp-world-map-agent-button"
@@ -787,7 +831,9 @@ export function CampWorldMap({
                           onClick={(event) => onOpenExecutionProcess(agent.agentId, event.currentTarget)}
                           key={speech.key}
                         >
-                          <span className="camp-world-map-speech-kind">{speech.label}</span>
+                          {agent.speech && (
+                            <span className="camp-world-map-speech-kind">{speech.label}</span>
+                          )}
                           <span className="camp-world-map-speech-text">{speech.text}</span>
                         </button>
                       )
@@ -797,7 +843,9 @@ export function CampWorldMap({
                           title={speech.text}
                           key={speech.key}
                         >
-                          <span className="camp-world-map-speech-kind">{speech.label}</span>
+                          {agent.speech && (
+                            <span className="camp-world-map-speech-kind">{speech.label}</span>
+                          )}
                           <span className="camp-world-map-speech-text">{speech.text}</span>
                         </div>
                       ))}
@@ -821,7 +869,6 @@ export function CampWorldMap({
                 top: `${encounterNode.y / CAMP_WORLD_MAP_HEIGHT * 100}%`
               } as CSSProperties}
             >
-              <span className="camp-world-map-speech-kind">闲时预设 · 偶遇</span>
               <span className="camp-world-map-speech-text">{visibleAmbientEvent.text}</span>
             </div>
           )}

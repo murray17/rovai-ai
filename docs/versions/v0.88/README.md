@@ -43,8 +43,9 @@ last_updated: 2026-08-16
 - `sceneActive` 与 `motionActive` 分离；`prefers-reduced-motion` 只关闭动画，不关闭静态环境片段；
 - 底部仲裁顺序固定为 `real > waiting > encounter ambient > solo ambient`。紧凑布局统一使用底部字幕；
   7 人及以上可保留真实气泡，但在没有真实播报时用 waiting/ambient 字幕回退，不再直接隐藏闲时内容；
-- 单人标签固定为“闲时 · 环境预设”，偶遇标签固定为“闲时预设 · 偶遇”；偶遇使用单个共享气泡，
-  不复用真实 A2A rendezvous 状态、颜色或视觉语义；
+- 普通闲时气泡只显示正文；紧凑/拥挤底部字幕保留“闲时 · 环境预设”或“闲时预设 · 偶遇”来源标签。
+  偶遇使用单个共享气泡，不复用真实 A2A rendezvous 状态、颜色、视觉语义或临时头像位移；
+- 角色位置以合成层 transform 更新，路径长度与 DOM ref 稳定缓存，避免逐帧布局写入和快照刷新造成抖动；
 - 扩展 selector、调度器和 UI 的确定性测试，并扩展 `accept:world-map-ui` 的全 idle、reduced motion、
   condensed、crowded 与可控 encounter 场景。
 

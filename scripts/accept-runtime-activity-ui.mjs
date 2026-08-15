@@ -2546,7 +2546,8 @@ async function verifyCampWorldMapAmbientStates(cdp, capturesDirectory) {
       agentCount: document.querySelectorAll('.camp-world-map-agent').length,
       ambientKind: map?.dataset.ambientKind ?? null,
       motionState: map?.dataset.motionState ?? null,
-      label: speech?.querySelector('.camp-world-map-speech-kind')?.textContent?.trim() ?? '',
+      labelCount: speech?.querySelectorAll('.camp-world-map-speech-kind').length ?? -1,
+      text: speech?.querySelector('.camp-world-map-speech-text')?.textContent?.trim() ?? '',
       tagName: speech?.tagName ?? null,
       tabIndex: speech?.tabIndex ?? null,
       ariaLive: speech?.getAttribute('aria-live') ?? null,
@@ -2557,7 +2558,9 @@ async function verifyCampWorldMapAmbientStates(cdp, capturesDirectory) {
   assert(solo.agentCount === 1
     && solo.ambientKind === 'solo'
     && solo.motionState === 'paused'
-    && solo.label === '闲时 · 环境预设'
+    && solo.labelCount === 0
+    && solo.text.length > 0
+    && !solo.text.includes('闲时 · 环境预设')
     && solo.tagName === 'DIV'
     && solo.tabIndex === -1
     && solo.ariaLive === null
@@ -2583,7 +2586,15 @@ async function verifyCampWorldMapAmbientStates(cdp, capturesDirectory) {
       motionState: map?.dataset.motionState ?? null,
       bubbleCount: document.querySelectorAll('.camp-world-map-ambient-encounter').length,
       bubbleDisplay: bubble ? getComputedStyle(bubble).display : null,
+      bubbleLabelCount: bubble?.querySelectorAll('.camp-world-map-speech-kind').length ?? -1,
       participantSides: participants.map((node) => node.dataset.ambientEncounterParticipant).sort(),
+      compositorPositioned: [...document.querySelectorAll('.camp-world-map-agent')].every((node) => {
+        const style = getComputedStyle(node)
+        return style.left === '0px'
+          && style.top === '0px'
+          && node.style.getPropertyValue('--world-map-agent-x').length > 0
+          && node.style.getPropertyValue('--world-map-agent-y').length > 0
+      }),
       captionTagName: caption?.tagName ?? null,
       captionTabIndex: caption?.tabIndex ?? null,
       captionAriaLive: caption?.getAttribute('aria-live') ?? null,
@@ -2597,7 +2608,9 @@ async function verifyCampWorldMapAmbientStates(cdp, capturesDirectory) {
     && encounter.motionState === 'paused'
     && encounter.bubbleCount === 1
     && encounter.bubbleDisplay === 'none'
+    && encounter.bubbleLabelCount === 0
     && JSON.stringify(encounter.participantSides) === JSON.stringify(['left', 'right'])
+    && encounter.compositorPositioned
     && encounter.captionTagName === 'DIV'
     && encounter.captionTabIndex === -1
     && encounter.captionAriaLive === null
@@ -2629,6 +2642,7 @@ async function verifyCampWorldMapAmbientStates(cdp, capturesDirectory) {
         && bubbleBounds.bottom <= frameBounds.bottom + 1),
       pointerEvents: bubble ? getComputedStyle(bubble).pointerEvents : null,
       buttonCount: bubble?.querySelectorAll('button').length ?? -1,
+      labelCount: bubble?.querySelectorAll('.camp-world-map-speech-kind').length ?? -1,
       pseudoContent: bubble ? getComputedStyle(bubble, '::after').content : null,
       participantHorizontalSeparation: participantBounds.length === 2
         ? Math.abs(participantBounds[0].left - participantBounds[1].left)
@@ -2641,9 +2655,10 @@ async function verifyCampWorldMapAmbientStates(cdp, capturesDirectory) {
     && sharedEncounter.bubbleInsideFrame
     && sharedEncounter.pointerEvents === 'none'
     && sharedEncounter.buttonCount === 0
+    && sharedEncounter.labelCount === 0
     && ['none', 'normal'].includes(sharedEncounter.pseudoContent)
-    && sharedEncounter.participantHorizontalSeparation >= 24,
-  `Shared encounter bubble reused directional or interactive speech semantics: ${JSON.stringify(sharedEncounter)}`)
+    && sharedEncounter.participantHorizontalSeparation <= 1,
+  `Shared encounter bubble moved avatars or reused directional/interactive speech semantics: ${JSON.stringify(sharedEncounter)}`)
   const sharedEncounterCapture = join(capturesDirectory, 'camp-world-map-ambient-encounter-shared-1440x920.png')
   await capture(cdp, sharedEncounterCapture)
   await evaluate(cdp, `(() => {
