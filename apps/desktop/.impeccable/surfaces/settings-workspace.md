@@ -21,10 +21,12 @@ preference, detected availability, editable source and current effective state.
 
 Settings replaces the common 270px App rail with the grouped settings navigation defined by
 [`app-shell-navigation.md`](../../../../docs/ui/components/app-shell-navigation.md). Every category
-uses the shared borderless header, a direct title/description and page-specific actions. Appearance
-and Reminder use a solid content plane without a decorative top edge, gradient wash or header
-divider; other categories retain their current composition until they are reviewed separately. The
-content area does not add a second navigation column or page-sized outer card.
+uses the shared borderless header, a direct title/description and page-specific actions. Appearance,
+Reminder and Agent Runtime use a solid content plane without a decorative top edge, gradient wash or
+header divider. Agent Runtime shares the same centered `1040px` title/body track as Skills and MCP;
+its catalog uses one quiet surface with individually raised rows. Other categories retain their
+current composition until they are reviewed separately. The content area does not add a second
+navigation column or page-sized outer card.
 
 All categories implement Loading, Empty, Partial, Error, Disabled, Submitting and Recovery while
 retaining the header and navigation. A save, import, repair or probe failure keeps inputs, selection,
