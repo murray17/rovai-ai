@@ -4,13 +4,13 @@ version: v0.84
 lifecycle: current
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: in_progress
+implementation_status: complete
 last_updated: 2026-08-15
 ---
 
 # Rovai-ai v0.84：可切换执行台与 Inspector Sidecar
 
-> 当前状态：交互方向已确认，Renderer、自动验收与打包交付正在实施。
+> 当前状态：Renderer、自动验收、`main` 推送与 `/Applications` 安装交付均已完成。
 >
 > 前置版本：[v0.83 TRAE CLI CN Runtime](../v0.83/README.md)
 

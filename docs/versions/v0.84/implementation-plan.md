@@ -2,7 +2,7 @@
 document_type: implementation-plan
 version: v0.84
 authority: implementation-plan-and-acceptance
-status: in_progress
+status: complete
 last_updated: 2026-08-15
 ---
 
@@ -39,10 +39,10 @@ last_updated: 2026-08-15
 
 ## Checkpoint 4：交付
 
-- [ ] 回填真实验证结果并把版本状态更新为 complete；
-- [ ] 提交 worktree，快进合入并推送 `main`；
-- [ ] 从最终 `main` 构建，退出旧安装版后替换 `/Applications/Rovai-ai.app`；
-- [ ] 从安装位置启动并确认进程不引用仓库 `dist/`。
+- [x] 回填真实验证结果并把版本状态更新为 complete；
+- [x] 提交 worktree，快进合入并推送 `main`；
+- [x] 从最终 `main` 构建，退出旧安装版后替换 `/Applications/Rovai AI.app`；
+- [x] 从安装位置启动并确认进程不引用仓库 `dist/`。
 
 ## 验证结果
 
