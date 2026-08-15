@@ -2004,37 +2004,18 @@ impl Core {
             (selected, installations)
         };
         let now = chrono::Utc::now();
-        let mut scheduled = observations
+        let found = observations
             .iter()
             .filter_map(|(kind, observation)| {
                 (observation.discovery_status == RuntimeDiscoveryStatus::Found).then_some(*kind)
             })
             .collect::<BTreeSet<_>>();
-        for kind in selected {
-            if observations.get(&kind).is_none_or(|observation| {
-                observation.discovery_status != RuntimeDiscoveryStatus::Missing
-            }) {
-                scheduled.insert(kind);
-            }
-        }
-        for installation in &installations {
-            if !installation.enabled
-                || installation.installation_class
-                    != rovai_core::agent_profile::InstallationClass::ManagedDefault
-                || probe_retry_is_deferred(installation, now)
-            {
-                continue;
-            }
-            scheduled.insert(installation.adapter_kind);
-        }
-        for kind in scheduled {
+        for kind in runtime_checks_after_discovery(&found, &selected, &installations, now) {
             self.schedule_runtime_check(kind).await;
         }
     }
 
     async fn schedule_expired_runtime_checks(&self) {
-        let observations = self.runtime_discovery.read().await.clone();
-        let diagnostics = self.runtime_product_diagnostics.read().await.clone();
         let installations = {
             let database = self.database.lock().await;
             AgentProfileService::default()
@@ -2042,27 +2023,8 @@ impl Core {
                 .unwrap_or_default()
         };
         let now = chrono::Utc::now();
-        let mut registered = BTreeSet::new();
-        for installation in installations {
-            registered.insert(installation.adapter_kind);
-            if installation.enabled
-                && installation.installation_class
-                    == rovai_core::agent_profile::InstallationClass::ManagedDefault
-                && registered_runtime_refresh_is_due(&installation, now)
-                && !probe_retry_is_deferred(&installation, now)
-            {
-                self.schedule_runtime_check(installation.adapter_kind).await;
-            }
-        }
-        for (kind, observation) in observations {
-            if !registered.contains(&kind)
-                && observation.discovery_status == RuntimeDiscoveryStatus::Found
-                && diagnostics
-                    .get(&kind)
-                    .is_some_and(|diagnostic| !product_runtime_diagnostic_is_fresh(diagnostic, now))
-            {
-                self.schedule_runtime_check(kind).await;
-            }
+        for kind in registered_runtime_checks_due(&installations, now) {
+            self.schedule_runtime_check(kind).await;
         }
     }
 
@@ -8231,6 +8193,43 @@ fn registered_runtime_refresh_is_due(
     })
 }
 
+fn registered_runtime_checks_due(
+    installations: &[AdapterInstallationView],
+    now: chrono::DateTime<chrono::Utc>,
+) -> BTreeSet<AdapterKind> {
+    installations
+        .iter()
+        .filter(|installation| {
+            installation.enabled
+                && installation.installation_class == InstallationClass::ManagedDefault
+                && registered_runtime_refresh_is_due(installation, now)
+                && !probe_retry_is_deferred(installation, now)
+        })
+        .map(|installation| installation.adapter_kind)
+        .collect()
+}
+
+fn runtime_checks_after_discovery(
+    found: &BTreeSet<AdapterKind>,
+    selected: &BTreeSet<AdapterKind>,
+    installations: &[AdapterInstallationView],
+    now: chrono::DateTime<chrono::Utc>,
+) -> BTreeSet<AdapterKind> {
+    let registered = installations
+        .iter()
+        .filter(|installation| installation.installation_class == InstallationClass::ManagedDefault)
+        .map(|installation| installation.adapter_kind)
+        .collect::<BTreeSet<_>>();
+    let mut scheduled = registered_runtime_checks_due(installations, now);
+    scheduled.extend(
+        selected
+            .iter()
+            .filter(|kind| found.contains(kind) && !registered.contains(kind))
+            .copied(),
+    );
+    scheduled
+}
+
 fn classify_native_resume_failure(error: &anyhow::Error) -> NativeSessionResumeFailure {
     let diagnostic = error
         .chain()
@@ -12016,6 +12015,55 @@ mod tests {
         assert!(
             managed_installation_is_usable(&deferred),
             "a transient refresh failure retains the last successful snapshot"
+        );
+    }
+
+    #[test]
+    fn automatic_runtime_checks_are_limited_to_selected_or_due_registered_products() {
+        let now = chrono::Utc::now();
+        let mut fresh_registered =
+            managed_runtime_fixture(&(now - chrono::Duration::hours(23)).to_rfc3339(), None);
+        fresh_registered.adapter_kind = AdapterKind::ClaudeCodeCli;
+
+        let mut due_registered =
+            managed_runtime_fixture(&(now - chrono::Duration::hours(24)).to_rfc3339(), None);
+        due_registered.adapter_kind = AdapterKind::CopilotCli;
+
+        let retry_at = (now + chrono::Duration::minutes(5)).to_rfc3339();
+        let mut deferred_registered = managed_runtime_fixture(
+            &(now - chrono::Duration::hours(30)).to_rfc3339(),
+            Some(&retry_at),
+        );
+        deferred_registered.adapter_kind = AdapterKind::QwenCode;
+
+        let mut disabled_registered =
+            managed_runtime_fixture(&(now - chrono::Duration::hours(30)).to_rfc3339(), None);
+        disabled_registered.adapter_kind = AdapterKind::KiroCli;
+        disabled_registered.enabled = false;
+
+        let found = BTreeSet::from([
+            AdapterKind::CodexCli,
+            AdapterKind::OpencodeCli,
+            AdapterKind::CopilotCli,
+            AdapterKind::ClaudeCodeCli,
+            AdapterKind::KiroCli,
+            AdapterKind::QwenCode,
+        ]);
+        let selected = BTreeSet::from([AdapterKind::CodexCli]);
+        let installations = [
+            fresh_registered,
+            due_registered,
+            deferred_registered,
+            disabled_registered,
+        ];
+
+        assert_eq!(
+            runtime_checks_after_discovery(&found, &selected, &installations, now),
+            BTreeSet::from([AdapterKind::CodexCli, AdapterKind::CopilotCli])
+        );
+        assert_eq!(
+            registered_runtime_checks_due(&installations, now),
+            BTreeSet::from([AdapterKind::CopilotCli])
         );
     }
 
