@@ -1168,6 +1168,8 @@ try {
       && lightweightReplyInspection.lineBoxShadow === 'none'
       && lightweightReplyInspection.copyWhiteSpace === 'nowrap'
       && lightweightReplyInspection.copyOverflow === 'hidden'
+      && lightweightReplyInspection.authorFlexShrink === '0'
+      && !lightweightReplyInspection.authorOverflows
       && lightweightReplyInspection.excerptTextOverflow === 'ellipsis'
       && lightweightReplyInspection.excerptWhiteSpace === 'nowrap'
       && lightweightReplyInspection.excerptOverflows,
@@ -1318,15 +1320,23 @@ try {
     const quote = document.querySelector(
       '[data-message-id=${JSON.stringify(sentReplyMessage.id)}] .reply-parent-quote'
     )
+    const author = quote?.querySelector('strong')
     const excerpt = quote?.querySelector('span')
-    if (!(quote instanceof HTMLElement) || !(excerpt instanceof HTMLElement)) return null
+    if (
+      !(quote instanceof HTMLElement)
+      || !(author instanceof HTMLElement)
+      || !(excerpt instanceof HTMLElement)
+    ) return null
     const quoteStyle = getComputedStyle(quote)
+    const authorStyle = getComputedStyle(author)
     const excerptStyle = getComputedStyle(excerpt)
     return {
       text: quote.textContent,
       borderTopWidth: quoteStyle.borderTopWidth,
       backgroundColor: quoteStyle.backgroundColor,
       whiteSpace: quoteStyle.whiteSpace,
+      authorFlexShrink: authorStyle.flexShrink,
+      authorOverflows: author.scrollWidth > author.clientWidth,
       excerptTextOverflow: excerptStyle.textOverflow,
       excerptOverflows: excerpt.scrollWidth > excerpt.clientWidth
     }
@@ -1337,6 +1347,8 @@ try {
       && sentParentQuoteInspection.borderTopWidth === '0px'
       && sentParentQuoteInspection.backgroundColor === 'rgba(0, 0, 0, 0)'
       && sentParentQuoteInspection.whiteSpace === 'nowrap'
+      && sentParentQuoteInspection.authorFlexShrink === '0'
+      && !sentParentQuoteInspection.authorOverflows
       && sentParentQuoteInspection.excerptTextOverflow === 'ellipsis'
       && sentParentQuoteInspection.excerptOverflows,
     `Sent reply parent quote is not one-line and frameless: ${JSON.stringify(sentParentQuoteInspection)}`
@@ -2219,6 +2231,7 @@ async function inspectLightweightReply(cdp) {
     const box = document.querySelector('.composer-box')
     const line = document.querySelector('.composer-reply-line')
     const copy = document.querySelector('.composer-reply-copy')
+    const author = copy?.querySelector('strong')
     const excerpt = copy?.querySelector(':scope > span')
     const editor = document.querySelector('#camp-message')
     if (
@@ -2226,12 +2239,14 @@ async function inspectLightweightReply(cdp) {
       || !(box instanceof HTMLElement)
       || !(line instanceof HTMLElement)
       || !(copy instanceof HTMLElement)
+      || !(author instanceof HTMLElement)
       || !(excerpt instanceof HTMLElement)
       || !(editor instanceof HTMLElement)
     ) return null
     const boxStyle = getComputedStyle(box)
     const lineStyle = getComputedStyle(line)
     const copyStyle = getComputedStyle(copy)
+    const authorStyle = getComputedStyle(author)
     const excerptStyle = getComputedStyle(excerpt)
     const probe = document.createElement('span')
     probe.style.borderColor = 'var(--control-line)'
@@ -2260,6 +2275,8 @@ async function inspectLightweightReply(cdp) {
       lineBoxShadow: lineStyle.boxShadow,
       copyWhiteSpace: copyStyle.whiteSpace,
       copyOverflow: copyStyle.overflow,
+      authorFlexShrink: authorStyle.flexShrink,
+      authorOverflows: author.scrollWidth > author.clientWidth,
       excerptTextOverflow: excerptStyle.textOverflow,
       excerptWhiteSpace: excerptStyle.whiteSpace,
       excerptOverflows: excerpt.scrollWidth > excerpt.clientWidth

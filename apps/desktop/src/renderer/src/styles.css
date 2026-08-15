@@ -1815,8 +1815,8 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
   white-space: nowrap;
 }
 .reply-parent-quote svg { width: 13px; height: 13px; flex: 0 0 13px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.4; }
-.reply-parent-quote strong { max-width: 38%; flex: 0 1 auto; overflow: hidden; color: var(--muted); font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
-.reply-parent-quote span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reply-parent-quote strong { max-width: 38%; min-width: 0; flex: 0 0 auto; overflow: hidden; color: var(--muted); font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
+.reply-parent-quote span { min-width: 0; flex: 1 1 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .reply-parent-quote:hover { color: var(--brand-ink); }
 .reply-parent-quote:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .reply-parent-quote.is-static { cursor: default; }
@@ -2449,8 +2449,8 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 }
 .composer-reply-line > svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.4; }
 .composer-reply-copy { display: flex; min-width: 0; gap: 4px; overflow: hidden; white-space: nowrap; }
-.composer-reply-copy strong { max-width: 42%; flex: 0 1 auto; overflow: hidden; color: var(--muted); font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
-.composer-reply-copy > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-reply-copy strong { max-width: 42%; min-width: 0; flex: 0 0 auto; overflow: hidden; color: var(--muted); font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
+.composer-reply-copy > span { min-width: 0; flex: 1 1 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-reply-line.needs-repair { color: var(--attention); }
 .composer-reply-line.needs-repair .composer-reply-copy strong { color: var(--attention); }
 .composer-reply-cancel { min-height: 22px; padding: 2px 5px; border: 0; border-radius: 4px; color: var(--faint); background: transparent; cursor: pointer; font-size: 9.5px; }
