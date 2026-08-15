@@ -261,7 +261,10 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
   }
 
   const ensureRuntime = useCallback((adapterKind: AdapterKind): void => {
-    void window.rovai.request('runtime.product.ensure', { runtimeKind: adapterKind })
+    const method = adapterKind === 'trae-cn-cli'
+      ? 'runtime.product.check'
+      : 'runtime.product.ensure'
+    void window.rovai.request(method, { runtimeKind: adapterKind })
       .catch((nextError) => setError(errorMessage(nextError)))
   }, [])
 
@@ -1045,7 +1048,9 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
                   type="button"
                   disabled={runtimeDiscoveryPending || busy !== null}
                   onClick={() => onRuntimeEnsure?.(selectedKind)}
-                >{runtimeDiscoveryPending ? '检查中…' : '重新检查'}</button>
+                >{runtimeDiscoveryPending
+                    ? selectedKind === 'trae-cn-cli' ? '正在扫描…' : '检查中…'
+                    : selectedKind === 'trae-cn-cli' ? '重新扫描安装' : '重新检查'}</button>
               )}
             </div>
             {runtimeStatus.detail && <small className="runtime-status-detail">{runtimeStatus.detail}</small>}
@@ -1501,7 +1506,9 @@ export function RuntimeInstallationsPanel({ health, onReload }: {
                   {presentation.label}
                 </span>
                 <button className="quiet-button runtime-product-check" disabled={busy !== null} onClick={() => void checkProduct(runtimeKind)}>
-                  {busy === `check-${runtimeKind}` ? '正在检查…' : '检查可用性'}
+                  {busy === `check-${runtimeKind}`
+                    ? runtimeKind === 'trae-cn-cli' ? '正在扫描…' : '正在检查…'
+                    : runtimeKind === 'trae-cn-cli' ? '重新扫描安装' : '检查可用性'}
                 </button>
               </article>
             )

@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-08-15
+last_updated: 2026-08-16
 ---
 
 # Runtime Catalog Boundaries
@@ -11,7 +11,9 @@ last_updated: 2026-08-15
 本文件定义 Runtime 名称出现在产品中时的权威分层。准入理由见
 [ADR-0065](../adr/0065-verified-runtime-catalog-and-documentation-only-compatibility.md)、
 [ADR-0066](../adr/0066-managed-product-runtime-resolution.md)与
-[ADR-0189](../adr/0189-settings-only-runtime-preview-outside-product-catalog.md)。实测版本和能力只由
+[ADR-0189](../adr/0189-settings-only-runtime-preview-outside-product-catalog.md)，Runtime 启动与延迟验证边界见
+[ADR-0192](../adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)和
+[Runtime Launch and Verification v1](../contracts/runtime-launch-and-verification-v1.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 三层目录
@@ -19,7 +21,7 @@ last_updated: 2026-08-15
 | 层 | 真源 | 可以驱动 | 不能驱动 |
 | --- | --- | --- | --- |
 | Product Runtime Catalog | Rust/TypeScript closed `AdapterKind` 与 `AgentRuntimeAdapter` Registry | Installation、Probe、成员配置、AgentRun、诊断、Migration、Runtime Activity | 未接入候选或 roadmap |
-| Product Runtime Availability | Core 对某一 Product Runtime 的 discovery/deep-probe snapshot | checking、ready、needs login、not installed、incompatible、transient failure 等当前机器状态 | 新产品身份或静默 Runtime fallback |
+| Product Runtime Availability | Core 对某一 Product Runtime 的 discovery、静态身份或 active/execution-deferred verification snapshot | checking、installed unverified、ready、needs login、not installed、incompatible、transient failure 等当前机器状态 | 新产品身份、静态伪造 Ready 或静默 Runtime fallback |
 | Settings Runtime Preview Catalog | Renderer 内受审查的静态 presentation rows | Runtime 设置页中的名称、图标、`待支持`文案和 disabled 状态 | Contracts、Core request、数据库、成员选择、诊断、Probe、AgentRun 或支持数量 |
 
 Product Runtime Catalog 当前包含十种可执行 Adapter。Preview 与它不是“同一目录的另一种状态”；
@@ -31,7 +33,7 @@ Renderer 只在绘制 Runtime 设置列表时组合两种 row。产品目录的�
 新增 Product Runtime 必须原子建立：
 
 1. 稳定 wire identity、可执行发现和 Installation/Migration closed kind；
-2. 深度 Probe 对协议、认证、必需 capability 与 transient failure 的诚实分类；
+2. 由 Adapter launch policy 明确选择 active Probe 或 execution-deferred verification，并对协议、认证、必需 capability 与 transient failure 诚实分类；
 3. 冻结模型、权限、Session、MCP、cwd 和进程策略的 AgentRun Adapter；
 4. prompt 终态、cancel、Action/Approval、Tool ID、Runtime Activity 与兼容性证据；
 5. 成员配置、Runtime 设置、诊断、测试与文档投影。
@@ -43,6 +45,16 @@ Renderer 只在绘制 Runtime 设置列表时组合两种 row。产品目录的�
 `trae-cn-cli` 通过既有 ACP v1 Host 启动 `traecli acp serve`。模型与 permission mode catalog 来自
 每次真实 Session 返回；默认只接受安全的 `default`，不默认使用 `--yolo`。Session 恢复走
 `session/load`，第一版完成 Run 后停止 Host。
+
+TRAE 是 static-only inspection Runtime。Core 的 discovery、设置页 check/ensure、managed/custom refresh、
+health/diagnostics 与 dispatch preflight 只验证 ordinary executable、canonical path、fingerprint 和可信静态
+version，不启动 `traecli`。这些证据持久化为 `installed_unverified`，不能声明登录、ACP、模型、权限或
+Session Ready；版本没有可信 `Info.plist` / Go main-module metadata 时保持 unknown。
+
+成员可以在该状态下原子保存 Runtime default model 与 `permission_mode=default`。首次真实 AgentRun 只启动
+一个 TRAE Host，从同一个 Host 的 `initialize` 与 `session/new|load` response 生成 Ready snapshot 后继续发送
+任务输入。失败使用该 Host 已有错误分类，不启动 replacement 或 diagnostic process。相同 path/fingerprint 的
+静态复扫保留 Ready；身份变化回到 `installed_unverified`，等待下一次真实执行重新验证。
 
 External MCP 沿用现有 `AdditivePerRun`：当前 AgentRun 的冻结 Definition 通过
 `session/new` / `session/load` 参数追加，不写 Runtime 用户级或 Workspace 配置。这里不新增独立

@@ -357,6 +357,10 @@ pub struct ClaudeCodeProbeObservation {
 /// omits that flag.
 pub const ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID: &str = "antigravity://runtime-default";
 pub const CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID: &str = "claude-code://runtime-default";
+/// Frozen model identity used only while TRAE is statically installed but has
+/// not yet exposed its live model catalog. The first real ACP Session leaves
+/// the Runtime's current model untouched.
+pub const TRAE_RUNTIME_DEFAULT_MODEL_ID: &str = "trae-cn-cli://runtime-default";
 pub const KIRO_ADDITIVE_AGENT_NAME: &str = "rovai";
 
 /// Writes the Kiro custom Agent used by Rovai-ai ACP Hosts. Native MCP sources
@@ -552,6 +556,91 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::KiroCli => acp_capability_snapshot(observation, Vec::new()),
             kind => anyhow::bail!("{} does not use the ACP snapshot mapper", kind.as_str()),
         }
+    }
+
+    pub fn trae_installed_unverified_snapshot(
+        &self,
+        reported_version: Option<String>,
+        executable_fingerprint: String,
+        observed_at: String,
+    ) -> Result<AdapterCapabilitySnapshot> {
+        let permission_options = trae_static_permission_options();
+        let permission_schema_digest =
+            canonical_json_digest(&serde_json::to_value(&permission_options)?)?;
+        Ok(AdapterCapabilitySnapshot {
+            reported_version,
+            executable_fingerprint: Some(executable_fingerprint),
+            authentication_status: "unknown".to_string(),
+            probe_status: "installed_unverified".to_string(),
+            permission_schema_version: 1,
+            permission_schema_digest,
+            capabilities: Vec::new(),
+            protocols: Vec::new(),
+            models: Vec::new(),
+            permission_options,
+            observed_at: Some(observed_at.clone()),
+            last_attempted_at: observed_at,
+            last_successful_probe_at: None,
+            stale_at: None,
+            last_error: None,
+            native_session_compatibility_key: None,
+        })
+    }
+
+    pub fn trae_live_session_capability_snapshot(
+        &self,
+        reported_version: Option<String>,
+        executable_fingerprint: String,
+        initialize_result: Value,
+        session_result: Value,
+        observed_at: String,
+    ) -> Result<AdapterCapabilitySnapshot> {
+        let mut capabilities = Vec::new();
+        if initialize_result
+            .pointer("/agentCapabilities/loadSession")
+            .and_then(Value::as_bool)
+            == Some(true)
+        {
+            capabilities.push("session.load".to_string());
+        }
+        if session_result
+            .get("configOptions")
+            .and_then(Value::as_array)
+            .is_some_and(|options| {
+                options.iter().any(|option| {
+                    option.get("id").and_then(Value::as_str) == Some("model")
+                        && option
+                            .get("options")
+                            .and_then(Value::as_array)
+                            .is_some_and(|values| !values.is_empty())
+                })
+            })
+        {
+            capabilities.push("model.dynamic_catalog".to_string());
+        }
+        if session_result
+            .pointer("/modes/availableModes")
+            .and_then(Value::as_array)
+            .is_some_and(|modes| {
+                modes
+                    .iter()
+                    .any(|mode| mode.get("id").and_then(Value::as_str) == Some("default"))
+            })
+        {
+            capabilities.push("permission.mode_catalog".to_string());
+        }
+        self.acp_capability_snapshot(AcpProbeObservation {
+            adapter_kind: AdapterKind::TraeCnCli,
+            reported_version,
+            executable_fingerprint: Some(executable_fingerprint),
+            authentication_status: "authenticated".to_string(),
+            probe_status: "ready".to_string(),
+            capabilities,
+            initialize_result: Some(initialize_result),
+            session_result: Some(session_result),
+            attempted_at: observed_at,
+            last_error: None,
+        })
     }
 
     pub fn claude_code_capability_snapshot(
@@ -1422,6 +1511,24 @@ fn trae_permission_options(session_result: &Value) -> Result<Vec<PermissionOptio
         required: true,
         unsupported_reason: None,
     }])
+}
+
+fn trae_static_permission_options() -> Vec<PermissionOptionDescriptor> {
+    vec![PermissionOptionDescriptor {
+        key: "permission_mode".to_string(),
+        label: "permission-mode".to_string(),
+        description:
+            "TRAE CLI CN 的安全启动权限模式；更多模式只会在首次真实任务建立 ACP Session 后显示。"
+                .to_string(),
+        value_type: "enum".to_string(),
+        choices: vec![choice("default", "default")],
+        recommended_value: json!("default"),
+        scope: RuntimeOptionScope::Host,
+        risk: "elevated".to_string(),
+        supported: true,
+        required: true,
+        unsupported_reason: None,
+    }]
 }
 
 fn claude_code_permission_options() -> Vec<PermissionOptionDescriptor> {

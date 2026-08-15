@@ -1,11 +1,11 @@
 ---
 document_type: version-overview
 version: v0.86
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
-last_updated: 2026-08-15
+last_updated: 2026-08-16
 ---
 
 # Rovai-ai v0.86：Benchmark Tool-use Measurement v2
@@ -14,6 +14,8 @@ last_updated: 2026-08-15
 > 本版本只准备评测能力，不把尚未执行的真实模型 Trial 写成通过结论。
 >
 > 前置版本：[v0.85 Agent 主导的伙伴入队](../v0.85/README.md)
+>
+> 后继版本：[v0.87 TRAE 静态检测与执行期验证](../v0.87/README.md)
 
 ## 版本目标
 

@@ -203,4 +203,5 @@ generated_from: docs/adr-front-matter
 | [ADR-0189](0189-settings-only-runtime-preview-outside-product-catalog.md) | Settings-Only Runtime Preview Outside the Product Catalog | `accepted` | `cross-version` | [v0.83](../versions/v0.83/README.md) | — |
 | [ADR-0190](0190-user-placeable-agent-execution-console.md) | User-Placeable Agent Execution Console | `accepted` | `cross-version` | [v0.84](../versions/v0.84/README.md) | — |
 | [ADR-0191](0191-agent-mediated-member-creation-and-thirteen-skill-inventory.md) | Agent-Mediated Member Creation and Thirteen-Skill Official Inventory | `accepted` | `cross-version` | [v0.85](../versions/v0.85/README.md) | — |
+| [ADR-0192](0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md) | Purpose-Scoped Runtime Launch and Execution-Deferred Verification | `accepted` | `cross-version` | [v0.87](../versions/v0.87/README.md) | — |
 <!-- adr-history:end -->

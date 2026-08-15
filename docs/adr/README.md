@@ -1,7 +1,7 @@
 ---
 document_type: adr-index
 authority: architecture-decisions
-last_updated: 2026-08-14
+last_updated: 2026-08-16
 ---
 
 # Rovai-ai Architecture Decision Records
@@ -301,3 +301,4 @@ pnpm docs:adr:generate -- --check
 | [ADR-0189](0189-settings-only-runtime-preview-outside-product-catalog.md) | Settings-Only Runtime Preview Outside the Product Catalog | `accepted` | [v0.83](../versions/v0.83/README.md) | 冻结 Renderer-only Runtime Preview 与可执行 Product Runtime Catalog 的权威边界 |
 | [ADR-0190](0190-user-placeable-agent-execution-console.md) | User-Placeable Agent Execution Console | `accepted` | [v0.84](../versions/v0.84/README.md) | 冻结默认底部、可移入 Inspector 且不复制执行事实的唯一执行 console 边界 |
 | [ADR-0191](0191-agent-mediated-member-creation-and-thirteen-skill-inventory.md) | Agent-Mediated Member Creation and Thirteen-Skill Official Inventory | `accepted` | [v0.85](../versions/v0.85/README.md) | ← ADR-0181；冻结十三项 official Skill、Agent 确认后的队员创建、受控头像导入与 imported→official 晋升 |
+| [ADR-0192](0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md) | Purpose-Scoped Runtime Launch and Execution-Deferred Verification | `accepted` | [v0.87](../versions/v0.87/README.md) | 局部覆盖 ADR-0066/0083/0127；冻结启动目的、TRAE 静态检测、`installed_unverified` 与同一真实进程验证 |

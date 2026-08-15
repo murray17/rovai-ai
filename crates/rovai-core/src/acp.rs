@@ -20,13 +20,15 @@ use rovai_core::{
         RuntimePermissionOption,
     },
     agent_profile::{AdapterKind, FrozenAgentRuntimeConfig},
-    agent_runtime_adapter::write_kiro_additive_agent_config,
+    agent_runtime_adapter::{TRAE_RUNTIME_DEFAULT_MODEL_ID, write_kiro_additive_agent_config},
     builtin_tool_transport::{BUILTIN_TOOL_CONTRACT_VERSION, builtin_tool_catalog_digest},
     command::canonical_json_digest,
     compaction::{CompactionDetectorPolicy, CompactionObserverLease},
     mcp::McpServerDefinition,
     runtime::{AgentRunWorkspace, PermissionSemantics},
-    runtime_discovery::configure_active_runtime_command,
+    runtime_discovery::{
+        RuntimeLaunchPurpose, configure_active_runtime_command, runtime_launch_allowed,
+    },
 };
 use serde_json::{Value, json};
 use tokio::{
@@ -226,6 +228,7 @@ pub(crate) struct AcpHost {
     known_sessions: RwLock<HashSet<String>>,
     incoming: mpsc::UnboundedSender<AcpIncoming>,
     alive: AtomicBool,
+    initialize_result: RwLock<Option<Value>>,
     startup_diagnostics: Mutex<String>,
     private_config_root: Option<PathBuf>,
     detector_config_root: Option<PathBuf>,
@@ -249,6 +252,12 @@ impl AcpHost {
         private_runtime_dir: &Path,
         attachment_access_root: Option<&Path>,
     ) -> Result<Arc<Self>> {
+        if !runtime_launch_allowed(
+            frozen_runtime.adapter_kind,
+            RuntimeLaunchPurpose::AgentExecution,
+        ) {
+            bail!("Runtime launch policy rejected Agent execution");
+        }
         let private_config_root =
             prepare_private_host_config(private_runtime_dir, frozen_runtime.adapter_kind)?;
         let host_instance_id = uuid::Uuid::new_v4().to_string();
@@ -333,6 +342,7 @@ impl AcpHost {
             known_sessions: RwLock::new(HashSet::new()),
             incoming,
             alive: AtomicBool::new(true),
+            initialize_result: RwLock::new(None),
             startup_diagnostics: Mutex::new(String::new()),
             private_config_root,
             detector_config_root,
@@ -364,6 +374,7 @@ impl AcpHost {
             .await;
         match initialized {
             Ok(result) if result.get("protocolVersion").and_then(Value::as_u64) == Some(1) => {
+                *host.initialize_result.write().await = Some(result);
                 if frozen_runtime.adapter_kind == AdapterKind::CopilotCli {
                     // Copilot eagerly loads --additional-mcp-config before it
                     // replies to initialize. Preserve the original minimal
@@ -1087,6 +1098,7 @@ pub struct AcpRuntime {
     runtime_compatibility_digest: String,
     mcp_projection_digest: String,
     session_id: RwLock<Option<String>>,
+    session_result: RwLock<Option<Value>>,
     execution_root: PathBuf,
     attachment_access_root: Option<PathBuf>,
     workspace_access: String,
@@ -1113,6 +1125,7 @@ impl AcpRuntime {
             runtime_compatibility_digest,
             mcp_projection_digest,
             session_id: RwLock::new(None),
+            session_result: RwLock::new(None),
             execution_root,
             attachment_access_root,
             workspace_access,
@@ -1184,6 +1197,7 @@ impl AcpRuntime {
                     )
                     .await?
             };
+            *self.session_result.write().await = Some(result.clone());
             result
                 .get("sessionId")
                 .and_then(Value::as_str)
@@ -1194,7 +1208,9 @@ impl AcpRuntime {
         self.host.remember_session(&session_id).await;
         if self.host.adapter_kind == AdapterKind::KiroCli {
             self.set_model(&session_id, model).await?;
-        } else {
+        } else if !(self.host.adapter_kind == AdapterKind::TraeCnCli
+            && model == TRAE_RUNTIME_DEFAULT_MODEL_ID)
+        {
             self.set_config_option(&session_id, "model", model).await?;
         }
         if self.host.adapter_kind == AdapterKind::KiroCli
@@ -1223,6 +1239,12 @@ impl AcpRuntime {
                 .await;
         }
         Ok(session_id)
+    }
+
+    pub async fn verification_evidence(&self) -> Option<(Value, Value)> {
+        let initialize = self.host.initialize_result.read().await.clone()?;
+        let session = self.session_result.read().await.clone()?;
+        Some((initialize, session))
     }
 
     async fn set_config_option(
@@ -2894,6 +2916,112 @@ fn canonicalize_allow_missing(path: &Path) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rovai_core::agent_profile::{AdapterPermissionConfig, ResolvedModelSelection};
+    use std::os::unix::fs::PermissionsExt;
+
+    #[tokio::test]
+    async fn deferred_trae_verification_reuses_the_only_agent_process() {
+        let root =
+            std::env::temp_dir().join(format!("rovai-trae-agent-process-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("traecli");
+        let invocation_log = root.join("invocations");
+        std::fs::write(
+            &executable,
+            format!(
+                r#"#!/bin/sh
+printf '%s\n' "$*" >> '{}'
+IFS= read -r initialize || exit 1
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"loadSession":true}}}}}}'
+IFS= read -r session || exit 1
+printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"session-real","models":{{"currentModelId":"trae-default","availableModels":[{{"modelId":"trae-default","name":"TRAE Default"}}]}},"configOptions":[{{"id":"model","currentValue":"trae-default","options":[{{"value":"trae-default","name":"TRAE Default"}}]}}],"modes":{{"currentModeId":"default","availableModes":[{{"id":"default","name":"Default"}}]}}}}}}'
+while IFS= read -r ignored; do :; done
+"#,
+                invocation_log.display()
+            ),
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&executable, permissions).unwrap();
+
+        let frozen = FrozenAgentRuntimeConfig {
+            adapter_kind: AdapterKind::TraeCnCli,
+            installation_id: "installation-trae".to_string(),
+            installation_generation: 1,
+            search_environment_generation: 1,
+            executable_path: executable.to_string_lossy().to_string(),
+            auth_scope: "default".to_string(),
+            reported_version: None,
+            executable_fingerprint: "sha256:static".to_string(),
+            capabilities: Vec::new(),
+            protocol_version: "acp-v1".to_string(),
+            model: ResolvedModelSelection {
+                source: "runtime_default".to_string(),
+                model_id: TRAE_RUNTIME_DEFAULT_MODEL_ID.to_string(),
+                options: json!({}),
+            },
+            permissions: AdapterPermissionConfig {
+                adapter_kind: AdapterKind::TraeCnCli,
+                schema_version: 1,
+                values: json!({"permission_mode": "default"}),
+            },
+            native_session_compatibility_key: None,
+            binding_compatibility_digest: "sha256:binding".to_string(),
+            host_config_digest: "sha256:host".to_string(),
+            config_digest: "sha256:config".to_string(),
+        };
+        let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+        let (incoming, _receiver) = mpsc::unbounded_channel();
+        let host = AcpHost::spawn(
+            &root,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &frozen,
+            incoming,
+            None,
+            CompactionDetectorPolicy::Disabled,
+            true,
+            &BTreeMap::new(),
+            &root.join("private"),
+            None,
+        )
+        .await
+        .unwrap();
+        let runtime = AcpRuntime::from_host(
+            AcpRuntimeOwner {
+                agent_run_id: "agent-run-trae".to_string(),
+                execution_epoch: 1,
+            },
+            host.clone(),
+            "sha256:compatibility".to_string(),
+            "sha256:mcp".to_string(),
+            root.clone(),
+            None,
+            "runtime_managed".to_string(),
+        );
+        let session_id = runtime
+            .start_or_resume_session(
+                None,
+                false,
+                TRAE_RUNTIME_DEFAULT_MODEL_ID,
+                &json!({}),
+                &BTreeMap::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(session_id, "session-real");
+        let (initialize, session) = runtime.verification_evidence().await.unwrap();
+        assert_eq!(initialize["protocolVersion"], 1);
+        assert_eq!(session["sessionId"], "session-real");
+        host.shutdown().await;
+
+        let invocations = std::fs::read_to_string(&invocation_log).unwrap();
+        assert_eq!(invocations.lines().count(), 1);
+        assert_eq!(invocations.trim(), "acp serve --permission-mode default");
+        assert!(!invocations.contains("--version"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn completed_run_disposition_preserves_adapter_reuse_evidence() {

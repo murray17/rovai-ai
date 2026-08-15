@@ -8,6 +8,7 @@ export type RuntimeUserStatus =
   | 'unconfigured'
   | 'checking'
   | 'available'
+  | 'installed_unverified'
   | 'authentication_required'
   | 'not_installed'
   | 'version_unsupported'
@@ -24,6 +25,7 @@ const STATUS_LABELS: Record<RuntimeUserStatus, string> = {
   unconfigured: '未配置 Agent 运行时',
   checking: '正在检查…',
   available: '可用',
+  installed_unverified: '已安装',
   authentication_required: '需要登录',
   not_installed: '未安装',
   version_unsupported: '版本不支持',
@@ -56,6 +58,11 @@ export function runtimeAvailabilityPresentation(
       return availability.checking || availability.diagnosticCode === null
         ? presentation('checking')
         : presentation('unknown', '最近一次后台检查未能确认可用性，请稍后重试。')
+    case 'installed_unverified':
+      return presentation(
+        'installed_unverified',
+        '已检测到 TRAE CLI。为避免 macOS 钥匙串弹窗，登录状态与运行能力将在首次实际任务中验证。'
+      )
     case 'ready':
       return presentation(
         'available',
@@ -117,6 +124,23 @@ export function memberRuntimePresentation(
   const blockerCodes = new Set(
     agent.runtimeReadiness.blockers.map((blocker) => blocker.code)
   )
+  if (
+    agent.runtimeReadiness.status === 'installed_unverified'
+    || blockerCodes.has('runtime_verification_deferred')
+  ) {
+    if (
+      availabilityStatus.status === 'authentication_required'
+      || availabilityStatus.status === 'not_installed'
+      || availabilityStatus.status === 'version_unsupported'
+      || availabilityStatus.status === 'unavailable'
+    ) {
+      return availabilityStatus
+    }
+    return presentation(
+      'installed_unverified',
+      '已检测到 TRAE CLI。为避免 macOS 钥匙串弹窗，登录状态与运行能力将在首次实际任务中验证。'
+    )
+  }
   if (blockerCodes.has('runtime_authentication_required')) {
     return presentation('authentication_required', '请先完成该 Agent 运行时的登录。')
   }
@@ -158,6 +182,7 @@ export function runtimeReadinessLabel(
   return ({
     runtime_not_configured: '未配置 Agent 运行时',
     needs_attention: '不可用',
+    installed_unverified: '已安装，待首次运行验证',
     ready: '可用'
   })[status]
 }

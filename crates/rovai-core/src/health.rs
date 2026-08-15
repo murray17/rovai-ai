@@ -12,7 +12,10 @@ use rovai_core::{
     agent_runtime_adapter::{
         KIRO_ADDITIVE_AGENT_NAME, executable_fingerprint, write_kiro_additive_agent_config,
     },
-    runtime_discovery::configure_active_runtime_command,
+    runtime_discovery::{
+        RuntimeLaunchPurpose, configure_active_runtime_command, discover_static_runtime_version,
+        runtime_launch_allowed,
+    },
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -793,6 +796,23 @@ async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> 
     }
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let fingerprint = executable_fingerprint_async(canonical.clone()).await;
+    if !runtime_launch_allowed(kind, RuntimeLaunchPurpose::HealthProbe) {
+        return AcpCapabilityProbe {
+            result: agent_probe_result(
+                kind.as_str(),
+                Some(path_text),
+                discover_static_runtime_version(kind, &canonical),
+                fingerprint,
+                AgentRuntimeProbeStatus::ProbeFailed,
+                Vec::new(),
+                acp_required_capabilities(kind),
+                Some("runtime_launch_disallowed_for_health_probe".to_string()),
+                probed_at,
+            ),
+            initialize_result: None,
+            session_result: None,
+        };
+    }
     let version_output = match timeout(
         Duration::from_secs(15),
         runtime_command(&canonical)
@@ -936,6 +956,9 @@ async fn run_acp_probe(
     kind: AdapterKind,
     include_session: bool,
 ) -> Result<(Value, Option<Value>, Option<TraeBehavioralProbeEvidence>)> {
+    if !runtime_launch_allowed(kind, RuntimeLaunchPurpose::HealthProbe) {
+        bail!("runtime_launch_disallowed_for_health_probe");
+    }
     let probe_root = env::temp_dir().join(format!("rovai-acp-probe-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&probe_root)?;
     if kind == AdapterKind::KiroCli {
@@ -2266,6 +2289,7 @@ pub fn find_adapter(kind: AdapterKind) -> Option<PathBuf> {
 mod tests {
     use super::*;
     use rovai_core::agent_runtime_adapter::{AcpProbeObservation, AgentRuntimeAdapterRegistry};
+    use std::os::unix::fs::PermissionsExt;
 
     #[test]
     fn additive_acp_launch_shapes_match_the_verified_cli_contracts() {
@@ -2390,28 +2414,29 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires an installed and authenticated TRAE CLI CN Runtime"]
-    async fn trae_capability_probe_real_runtime_smoke() {
-        let path = find_adapter(AdapterKind::TraeCnCli).expect("TRAE CLI CN must be installed");
-        let probe = acp_probe_at(&path, AdapterKind::TraeCnCli, true).await;
+    async fn trae_health_probe_is_guarded_before_any_child_process_launch() {
+        let directory =
+            env::temp_dir().join(format!("rovai-trae-health-guard-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let marker = directory.join("executed");
+        let runtime = directory.join("traecli");
+        std::fs::write(
+            &runtime,
+            format!("#!/bin/sh\nprintf ran > '{}'\n", marker.display()),
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&runtime).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&runtime, permissions).unwrap();
+
+        let probe = acp_capability_probe_at(&runtime, AdapterKind::TraeCnCli).await;
+        assert_eq!(probe.result.status, AgentRuntimeProbeStatus::ProbeFailed);
         assert_eq!(
-            probe.result.status,
-            AgentRuntimeProbeStatus::Ready,
-            "{:?}",
-            probe.result.detail
+            probe.result.detail.as_deref(),
+            Some("runtime_launch_disallowed_for_health_probe")
         );
-        for capability in [
-            "session.load",
-            "model.dynamic_catalog",
-            "permission.mode_catalog",
-            "mcp.additive_per_run",
-            "context.charter.native_append",
-        ] {
-            assert!(
-                probe.result.capabilities.contains(&capability.to_string()),
-                "TRAE Probe did not observe {capability}"
-            );
-        }
+        assert!(!marker.exists(), "health probe must not execute TRAE");
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

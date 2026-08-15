@@ -1,5 +1,5 @@
 ---
-version: 1
+version: 2
 slug: "member-workspace"
 primary_target: "apps/desktop/src/renderer/src/MemberManagement.tsx"
 related_targets:
@@ -45,6 +45,8 @@ Runtime health must not reorder or hide teammates.
 
 Roster Runtime shortcuts use the approved compact `✓`, `!` and `…` states rather than product logos.
 Each shortcut has a full accessible label and opens that teammate's Runtime configuration.
+TRAE 的静态 Installation 使用中性的“已安装”状态，不借用 `✓` 暗示 Ready；完整 accessible label 说明登录与
+能力将在首次实际任务验证。加载或复扫期间仍使用 `…`，不得把延迟验证画成失败。
 
 ## Detail and editing
 
@@ -56,6 +58,10 @@ and actual-size previews. The durable asset and fallback rules are in
 that Runtime. The Runtime, model and permissions save atomically through the existing command. Keep
 “运行参数” directly visible by default in the vertical reading flow. Do not restore the removed
 “高级设置”, summary-model configuration or “对话压缩模型”.
+
+For an `installed_unverified` TRAE installation, expose only Runtime default model and the safe
+`permission_mode=default`. Its action reads “重新扫描安装”, and supporting copy says the first real
+task performs login/capability verification. Do not offer explicit models before a real Session catalog.
 
 After Runtime configuration, keep Memory Capability and the danger zone. Do not expose Installation
 IDs, executable paths or internal bindings in the ordinary profile.

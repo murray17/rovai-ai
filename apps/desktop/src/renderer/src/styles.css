@@ -3551,6 +3551,7 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 .new-camp-member-copy > small { overflow: hidden; color: var(--faint); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
 .new-camp-runtime-status { display: flex; align-items: center; gap: 5px; color: var(--attention); font-size: 10px; white-space: nowrap; }
 .new-camp-runtime-status.ready { color: var(--success); }
+.new-camp-runtime-status.deferred { color: var(--brand-ink); }
 .new-camp-runtime-status i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .new-camp-lead-field { display: grid; gap: 6px; margin-top: 12px; color: var(--muted); font-size: 11.5px; font-weight: 650; }
 .new-camp-lead-field select {
@@ -3849,6 +3850,7 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 .runtime-user-status i { width: 7px; height: 7px; border: 1px solid currentColor; border-radius: 50%; background: currentColor; }
 .runtime-user-status.status-checking { color: var(--info); }
 .runtime-user-status.status-available { color: var(--success); }
+.runtime-user-status.status-installed_unverified { color: var(--brand-ink); }
 .runtime-user-status.status-authentication_required,
 .runtime-user-status.status-version_unsupported,
 .runtime-user-status.status-unavailable { color: var(--attention); }
@@ -4502,6 +4504,7 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 .member-header-runtime:hover .member-runtime-entry-arrow,
 .member-header-runtime:focus-visible .member-runtime-entry-arrow { opacity: 1; transform: translateX(1px); }
 .member-header-runtime.status-available { color: var(--brand-ink); }
+.member-header-runtime.status-installed_unverified { color: var(--brand-ink); }
 .member-header-runtime.status-authentication_required,
 .member-header-runtime.status-version_unsupported,
 .member-header-runtime.status-unavailable { color: var(--attention); }
@@ -4712,6 +4715,7 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 }
 .runtime-snapshot-badge::before { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: currentColor; content: ""; }
 .runtime-snapshot-badge.status-available { color: var(--success); }
+.runtime-snapshot-badge.status-installed_unverified { color: var(--brand-ink); background: var(--info-soft); }
 .runtime-snapshot-badge.status-checking { color: var(--info); background: var(--info-soft); }
 .runtime-snapshot-badge.status-authentication_required,
 .runtime-snapshot-badge.status-version_unsupported { color: var(--attention); background: var(--attention-soft); }

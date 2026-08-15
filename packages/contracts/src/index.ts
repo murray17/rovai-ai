@@ -57,6 +57,7 @@ export interface AdapterCapabilitySnapshot {
   authenticationStatus: string
   probeStatus:
     | 'ready'
+    | 'installed_unverified'
     | 'not_installed'
     | 'authentication_required'
     | 'missing_capabilities'
@@ -167,6 +168,7 @@ export interface MemberRuntimeConfiguration {
 export type RuntimeReadinessStatus =
   | 'runtime_not_configured'
   | 'needs_attention'
+  | 'installed_unverified'
   | 'ready'
 
 export type MemberPresence = 'present' | 'away' | 'removed'
@@ -314,6 +316,7 @@ export type ProductRuntimeAvailabilityStatus =
   | 'detecting'
   | 'missing'
   | 'found_uninspected'
+  | 'installed_unverified'
   | 'checking'
   | 'ready'
   | 'authentication_required'

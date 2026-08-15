@@ -14,7 +14,7 @@ use crate::{
     agent_identity::allocate_agent_id,
     agent_runtime_adapter::{
         AdapterRuntimeResolutionInput, AgentRuntimeAdapterRegistry, ExecutableFileIdentity,
-        observe_executable_file_identity,
+        TRAE_RUNTIME_DEFAULT_MODEL_ID, observe_executable_file_identity,
     },
     collaboration::end_camp_membership,
     command::{
@@ -342,7 +342,7 @@ pub struct FrozenAgentRuntimeConfig {
     pub search_environment_generation: i64,
     pub executable_path: String,
     pub auth_scope: String,
-    pub reported_version: String,
+    pub reported_version: Option<String>,
     pub executable_fingerprint: String,
     pub capabilities: Vec<String>,
     pub protocol_version: String,
@@ -502,6 +502,7 @@ pub struct MemberCampMembershipView {
 pub enum RuntimeReadinessStatus {
     RuntimeNotConfigured,
     NeedsAttention,
+    InstalledUnverified,
     Ready,
 }
 
@@ -713,6 +714,16 @@ pub struct RecordAdapterCapabilitySnapshotCommand {
 
 #[derive(Debug, Clone)]
 pub struct VerifiedManagedInstallation {
+    pub adapter_kind: AdapterKind,
+    pub executable_path: String,
+    pub command_name: String,
+    pub source: InstallationSource,
+    pub auth_scope: String,
+    pub snapshot: AdapterCapabilitySnapshot,
+}
+
+#[derive(Debug, Clone)]
+pub struct DiscoveredManagedInstallation {
     pub adapter_kind: AdapterKind,
     pub executable_path: String,
     pub command_name: String,
@@ -1143,7 +1154,12 @@ impl AgentProfileService {
                 json!({ "installationId": runtime.installation_id }),
             )));
         }
-        if probe_status.as_deref() != Some("ready") {
+        let execution_deferred = runtime.adapter_kind == AdapterKind::TraeCnCli
+            && runtime.model.source == "runtime_default"
+            && runtime.model.model_id == TRAE_RUNTIME_DEFAULT_MODEL_ID
+            && probe_status.as_deref() == Some("installed_unverified")
+            && authentication_status.as_deref() == Some("unknown");
+        if probe_status.as_deref() != Some("ready") && !execution_deferred {
             return Ok(Some(runtime_blocker(
                 "runtime_probe_required",
                 json!({
@@ -1402,6 +1418,158 @@ impl AgentProfileService {
                     previous_fingerprint,
                     verified.snapshot.executable_fingerprint,
                     verified.source.as_str(),
+                    now,
+                ],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(installation_id)
+    }
+
+    pub fn commit_discovered_managed_installation(
+        &self,
+        database: &mut Database,
+        discovered: DiscoveredManagedInstallation,
+    ) -> Result<String> {
+        validate_installation(&discovered.executable_path, &discovered.auth_scope)?;
+        validate_command_name(&discovered.command_name)?;
+        validate_snapshot(&discovered.snapshot)?;
+        if discovered.snapshot.probe_status != "installed_unverified"
+            || discovered.snapshot.executable_fingerprint.is_none()
+        {
+            anyhow::bail!("static managed Installation requires installed_unverified evidence");
+        }
+        if discovered.source == InstallationSource::Custom {
+            anyhow::bail!("managed Installation cannot use a custom source");
+        }
+        let executable_identity =
+            observe_executable_file_identity(Path::new(&discovered.executable_path)).ok();
+
+        let transaction = database.connection_mut().transaction()?;
+        let existing = transaction
+            .query_row(
+                r#"
+                SELECT installation.id, installation.executable_path,
+                       snapshot.executable_fingerprint, snapshot.probe_status
+                FROM adapter_installation AS installation
+                LEFT JOIN adapter_capability_snapshot AS snapshot
+                  ON snapshot.installation_id = installation.id
+                WHERE installation.adapter_kind = ?1
+                  AND installation.auth_scope = ?2
+                  AND installation.installation_class = 'managed_default'
+                "#,
+                params![discovered.adapter_kind.as_str(), discovered.auth_scope],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let next_fingerprint = discovered.snapshot.executable_fingerprint.as_deref();
+        let (
+            installation_id,
+            previous_path,
+            previous_fingerprint,
+            identity_changed,
+            preserve_ready,
+        ) = if let Some((id, path, fingerprint, probe_status)) = existing {
+            let identity_changed =
+                path != discovered.executable_path || fingerprint.as_deref() != next_fingerprint;
+            transaction.execute(
+                if identity_changed {
+                    r#"
+                    UPDATE adapter_installation
+                    SET executable_path = ?2, command_name = ?3, source = ?4,
+                        enabled = 1, path_state = 'valid',
+                        generation = generation + 1, version = version + 1,
+                        updated_at = ?5
+                    WHERE id = ?1
+                    "#
+                } else {
+                    r#"
+                    UPDATE adapter_installation
+                    SET command_name = ?3, source = ?4, enabled = 1,
+                        path_state = 'valid', updated_at = ?5
+                    WHERE id = ?1
+                    "#
+                },
+                params![
+                    id,
+                    discovered.executable_path,
+                    discovered.command_name,
+                    discovered.source.as_str(),
+                    now,
+                ],
+            )?;
+            let preserve_ready = !identity_changed && probe_status.as_deref() == Some("ready");
+            (id, path, fingerprint, identity_changed, preserve_ready)
+        } else {
+            let id = format!("adapter-installation-{}", Uuid::new_v4());
+            transaction.execute(
+                r#"
+                INSERT INTO adapter_installation(
+                    id, adapter_kind, executable_path, command_name,
+                    installation_class, source, auth_scope, enabled,
+                    generation, path_state, version, created_at, updated_at
+                ) VALUES (
+                    ?1, ?2, ?3, ?4, 'managed_default', ?5, ?6, 1,
+                    1, 'valid', 1, ?7, ?7
+                )
+                "#,
+                params![
+                    id,
+                    discovered.adapter_kind.as_str(),
+                    discovered.executable_path,
+                    discovered.command_name,
+                    discovered.source.as_str(),
+                    discovered.auth_scope,
+                    now,
+                ],
+            )?;
+            (id, String::new(), None, false, false)
+        };
+
+        if !preserve_ready {
+            upsert_static_capability_snapshot(
+                &transaction,
+                &installation_id,
+                &discovered.snapshot,
+            )?;
+        }
+        if let (Some(identity), Some(fingerprint)) =
+            (executable_identity.as_ref(), next_fingerprint)
+        {
+            upsert_runtime_executable_identity(
+                &transaction,
+                &installation_id,
+                &discovered.executable_path,
+                fingerprint,
+                identity,
+                &discovered.snapshot.last_attempted_at,
+            )?;
+        }
+        if identity_changed {
+            transaction.execute(
+                r#"
+                INSERT INTO adapter_relocation_audit(
+                    id, installation_id, previous_path, next_path,
+                    previous_fingerprint, next_fingerprint, source,
+                    result, diagnostic_code, created_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'succeeded', NULL, ?8)
+                "#,
+                params![
+                    format!("adapter-relocation-{}", Uuid::new_v4()),
+                    installation_id,
+                    previous_path,
+                    discovered.executable_path,
+                    previous_fingerprint,
+                    discovered.snapshot.executable_fingerprint,
+                    discovered.source.as_str(),
                     now,
                 ],
             )?;
@@ -1728,7 +1896,7 @@ impl AgentProfileService {
                 ));
             }
             let Some(ready) =
-                ready_managed_runtime_snapshot(transaction, envelope.payload.adapter_kind)?
+                configurable_managed_runtime_snapshot(transaction, envelope.payload.adapter_kind)?
             else {
                 return Ok(CommandHandlerResult::rejected(
                     "runtime_configuration_unavailable",
@@ -1750,6 +1918,13 @@ impl AgentProfileService {
                 model: envelope.payload.model.clone(),
                 permissions: envelope.payload.permissions.clone(),
             };
+            if ready.execution_deferred && !matches!(binding.model, ModelSelection::RuntimeDefault)
+            {
+                return Ok(CommandHandlerResult::rejected(
+                    "runtime_model_requires_verification",
+                    json!({ "adapterKind": envelope.payload.adapter_kind }),
+                ));
+            }
             if let Some(issue) = runtime_configuration_issue(
                 &ready.models_json,
                 ready.permission_schema_version,
@@ -2211,7 +2386,10 @@ impl AgentProfileService {
         envelope: &CommandEnvelope<RecordAdapterCapabilitySnapshotCommand>,
     ) -> Result<CommandExecution> {
         validate_snapshot(&envelope.payload.snapshot)?;
-        let executable_identity = if envelope.payload.snapshot.probe_status == "ready" {
+        let executable_identity = if matches!(
+            envelope.payload.snapshot.probe_status.as_str(),
+            "ready" | "installed_unverified"
+        ) {
             database
                 .connection()
                 .query_row(
@@ -2247,18 +2425,85 @@ impl AgentProfileService {
             }
             let snapshot = &envelope.payload.snapshot;
             let successful = snapshot.probe_status == "ready";
-            let previous_fingerprint = transaction
+            let previous_snapshot = transaction
                 .query_row(
                     r#"
-                    SELECT executable_fingerprint
+                    SELECT executable_fingerprint, probe_status
                     FROM adapter_capability_snapshot
                     WHERE installation_id = ?1
                     "#,
                     [&envelope.payload.installation_id],
-                    |row| row.get::<_, Option<String>>(0),
+                    |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?)),
                 )
-                .optional()?
-                .flatten();
+                .optional()?;
+            let previous_fingerprint = previous_snapshot
+                .as_ref()
+                .and_then(|(fingerprint, _)| fingerprint.clone());
+            if snapshot.probe_status == "installed_unverified" {
+                let preserve_ready =
+                    previous_snapshot
+                        .as_ref()
+                        .is_some_and(|(fingerprint, probe_status)| {
+                            probe_status == "ready"
+                                && fingerprint.as_deref()
+                                    == snapshot.executable_fingerprint.as_deref()
+                        });
+                let identity_changed = previous_fingerprint.is_some()
+                    && snapshot.executable_fingerprint.is_some()
+                    && previous_fingerprint != snapshot.executable_fingerprint;
+                if identity_changed {
+                    transaction.execute(
+                        r#"
+                        UPDATE adapter_installation
+                        SET generation = generation + 1, version = version + 1,
+                            path_state = 'valid', updated_at = ?2
+                        WHERE id = ?1
+                        "#,
+                        params![envelope.payload.installation_id, snapshot.last_attempted_at,],
+                    )?;
+                } else {
+                    transaction.execute(
+                        r#"
+                        UPDATE adapter_installation
+                        SET path_state = 'valid', updated_at = ?2
+                        WHERE id = ?1
+                        "#,
+                        params![envelope.payload.installation_id, snapshot.last_attempted_at,],
+                    )?;
+                }
+                if !preserve_ready {
+                    upsert_static_capability_snapshot(
+                        transaction,
+                        &envelope.payload.installation_id,
+                        snapshot,
+                    )?;
+                }
+                if let (Some((executable_path, identity)), Some(executable_fingerprint)) = (
+                    executable_identity.as_ref(),
+                    snapshot.executable_fingerprint.as_deref(),
+                ) {
+                    upsert_runtime_executable_identity(
+                        transaction,
+                        &envelope.payload.installation_id,
+                        executable_path,
+                        executable_fingerprint,
+                        identity,
+                        &snapshot.last_attempted_at,
+                    )?;
+                }
+                return Ok(CommandHandlerResult::applied(
+                    "adapter_installation.static_snapshot_recorded",
+                    json!({
+                        "installationId": envelope.payload.installation_id,
+                        "probeStatus": snapshot.probe_status,
+                        "preservedReadySnapshot": preserve_ready,
+                    }),
+                    Some(EntityReference {
+                        entity_type: "adapter_installation".to_string(),
+                        entity_id: envelope.payload.installation_id.clone(),
+                    }),
+                ));
+            }
             let failure_class = if successful {
                 "none"
             } else if snapshot.probe_status == "not_installed" {
@@ -2719,6 +2964,64 @@ fn upsert_successful_capability_snapshot(
     Ok(())
 }
 
+fn upsert_static_capability_snapshot(
+    transaction: &Transaction<'_>,
+    installation_id: &str,
+    snapshot: &AdapterCapabilitySnapshot,
+) -> Result<()> {
+    if snapshot.probe_status != "installed_unverified" {
+        anyhow::bail!("only installed_unverified evidence can replace a static snapshot");
+    }
+    transaction.execute(
+        r#"
+        INSERT INTO adapter_capability_snapshot(
+            installation_id, reported_version, executable_fingerprint,
+            authentication_status, probe_status, permission_schema_version,
+            permission_schema_digest,
+            capabilities_json, protocols_json, model_catalog_json,
+            permission_options_json, observed_at, last_attempted_at,
+            last_successful_probe_at, stale_at, last_error,
+            native_session_compatibility_key
+        ) VALUES (
+            ?1, ?2, ?3, ?4, 'installed_unverified', ?5, ?6, ?7, ?8, ?9,
+            ?10, ?11, ?12, NULL, NULL, NULL, NULL
+        )
+        ON CONFLICT(installation_id) DO UPDATE SET
+            reported_version = excluded.reported_version,
+            executable_fingerprint = excluded.executable_fingerprint,
+            authentication_status = excluded.authentication_status,
+            probe_status = 'installed_unverified',
+            permission_schema_version = excluded.permission_schema_version,
+            permission_schema_digest = excluded.permission_schema_digest,
+            capabilities_json = excluded.capabilities_json,
+            protocols_json = excluded.protocols_json,
+            model_catalog_json = excluded.model_catalog_json,
+            permission_options_json = excluded.permission_options_json,
+            observed_at = excluded.observed_at,
+            last_attempted_at = excluded.last_attempted_at,
+            last_successful_probe_at = NULL,
+            stale_at = NULL,
+            last_error = NULL,
+            native_session_compatibility_key = NULL
+        "#,
+        params![
+            installation_id,
+            snapshot.reported_version,
+            snapshot.executable_fingerprint,
+            snapshot.authentication_status,
+            snapshot.permission_schema_version,
+            snapshot.permission_schema_digest,
+            serde_json::to_string(&snapshot.capabilities)?,
+            serde_json::to_string(&snapshot.protocols)?,
+            serde_json::to_string(&snapshot.models)?,
+            serde_json::to_string(&snapshot.permission_options)?,
+            snapshot.observed_at,
+            snapshot.last_attempted_at,
+        ],
+    )?;
+    Ok(())
+}
+
 fn upsert_runtime_executable_identity(
     transaction: &Transaction<'_>,
     installation_id: &str,
@@ -3025,13 +3328,23 @@ pub(crate) fn resolve_frozen_runtime_binding(
             json!({ "installationId": installation_id }),
         )));
     }
+    let adapter_kind = AdapterKind::from_str(&adapter_kind)?;
+    if adapter_kind != binding.adapter_kind || adapter_kind != binding.permissions.adapter_kind {
+        return Ok(Err(runtime_blocker(
+            "runtime_permission_adapter_mismatch",
+            json!({ "installationId": installation_id }),
+        )));
+    }
     if authentication_status.as_deref() == Some("authentication_required") {
         return Ok(Err(runtime_blocker(
             "runtime_authentication_required",
             json!({ "installationId": installation_id }),
         )));
     }
-    if probe_status.as_deref() != Some("ready") {
+    let execution_deferred = adapter_kind == AdapterKind::TraeCnCli
+        && probe_status.as_deref() == Some("installed_unverified")
+        && authentication_status.as_deref() == Some("unknown");
+    if probe_status.as_deref() != Some("ready") && !execution_deferred {
         return Ok(Err(runtime_blocker(
             "runtime_probe_required",
             json!({
@@ -3041,7 +3354,6 @@ pub(crate) fn resolve_frozen_runtime_binding(
         )));
     }
     let (
-        Some(reported_version),
         Some(executable_fingerprint),
         Some(permission_schema_version),
         Some(capabilities_json),
@@ -3049,7 +3361,6 @@ pub(crate) fn resolve_frozen_runtime_binding(
         Some(models_json),
         Some(permission_options_json),
     ) = (
-        reported_version,
         executable_fingerprint,
         permission_schema_version,
         capabilities_json,
@@ -3063,8 +3374,19 @@ pub(crate) fn resolve_frozen_runtime_binding(
             json!({ "installationId": installation_id }),
         )));
     };
+    let effective_models_json = if execution_deferred {
+        if !matches!(binding.model, ModelSelection::RuntimeDefault) {
+            return Ok(Err(runtime_blocker(
+                "runtime_model_requires_verification",
+                json!({ "installationId": installation_id }),
+            )));
+        }
+        serde_json::to_string(&deferred_trae_models())?
+    } else {
+        models_json
+    };
     if let Some(issue) = runtime_configuration_issue(
-        &models_json,
+        &effective_models_json,
         permission_schema_version,
         &permission_options_json,
         binding,
@@ -3072,15 +3394,8 @@ pub(crate) fn resolve_frozen_runtime_binding(
         return Ok(Err(runtime_blocker(issue.code, issue.payload)));
     }
 
-    let adapter_kind = AdapterKind::from_str(&adapter_kind)?;
-    if adapter_kind != binding.adapter_kind || adapter_kind != binding.permissions.adapter_kind {
-        return Ok(Err(runtime_blocker(
-            "runtime_permission_adapter_mismatch",
-            json!({ "installationId": installation_id }),
-        )));
-    }
     let models: Vec<ModelDescriptor> =
-        serde_json::from_str(&models_json).context("invalid Adapter model catalog")?;
+        serde_json::from_str(&effective_models_json).context("invalid Adapter model catalog")?;
     let model = match resolve_model_selection(&models, &binding.model)? {
         Ok(model) => model,
         Err(blocker) => return Ok(Err(blocker)),
@@ -3089,8 +3404,11 @@ pub(crate) fn resolve_frozen_runtime_binding(
         serde_json::from_str(&capabilities_json).context("invalid Adapter capabilities")?;
     capabilities.sort();
     capabilities.dedup();
-    let protocols: Vec<String> =
-        serde_json::from_str(&protocols_json).context("invalid Adapter protocols")?;
+    let protocols: Vec<String> = if execution_deferred {
+        vec!["acp-v1".to_string()]
+    } else {
+        serde_json::from_str(&protocols_json).context("invalid Adapter protocols")?
+    };
     let permission_descriptors: Vec<PermissionOptionDescriptor> =
         serde_json::from_str(&permission_options_json)
             .context("invalid Adapter permission descriptors")?;
@@ -3406,6 +3724,15 @@ fn runtime_readiness(
     let Some(probe_status) = probe_status else {
         return Ok(needs_attention("runtime_probe_required", None));
     };
+    if adapter_kind == AdapterKind::TraeCnCli && probe_status == "installed_unverified" {
+        return Ok(RuntimeReadiness {
+            status: RuntimeReadinessStatus::InstalledUnverified,
+            blockers: vec![RuntimeReadinessBlocker {
+                code: "runtime_verification_deferred".to_string(),
+                detail: None,
+            }],
+        });
+    }
     if probe_status != "ready" {
         return Ok(needs_attention(&format!("runtime_{probe_status}"), None));
     }
@@ -3448,22 +3775,24 @@ fn needs_attention(code: &str, detail: Option<String>) -> RuntimeReadiness {
     }
 }
 
-struct ReadyManagedRuntimeSnapshot {
+struct ConfigurableManagedRuntimeSnapshot {
     installation_id: String,
     permission_schema_version: i64,
     models_json: String,
     permissions_json: String,
+    execution_deferred: bool,
 }
 
-fn ready_managed_runtime_snapshot(
+fn configurable_managed_runtime_snapshot(
     transaction: &Transaction<'_>,
     adapter_kind: AdapterKind,
-) -> Result<Option<ReadyManagedRuntimeSnapshot>> {
+) -> Result<Option<ConfigurableManagedRuntimeSnapshot>> {
     transaction
         .query_row(
             r#"
             SELECT installation.id, snapshot.permission_schema_version,
-                   snapshot.model_catalog_json, snapshot.permission_options_json
+                   snapshot.model_catalog_json, snapshot.permission_options_json,
+                   snapshot.probe_status
             FROM adapter_installation AS installation
             JOIN adapter_capability_snapshot AS snapshot
               ON snapshot.installation_id = installation.id
@@ -3472,22 +3801,49 @@ fn ready_managed_runtime_snapshot(
               AND installation.installation_class = 'managed_default'
               AND installation.enabled = 1
               AND installation.path_state = 'valid'
-              AND snapshot.probe_status = 'ready'
               AND snapshot.stale_at IS NULL
-              AND snapshot.authentication_status = 'authenticated'
+              AND (
+                    (snapshot.probe_status = 'ready'
+                     AND snapshot.authentication_status = 'authenticated')
+                    OR
+                    (?1 = 'trae-cn-cli'
+                     AND snapshot.probe_status = 'installed_unverified'
+                     AND snapshot.authentication_status = 'unknown')
+              )
             "#,
             [adapter_kind.as_str()],
             |row| {
-                Ok(ReadyManagedRuntimeSnapshot {
+                let execution_deferred = row.get::<_, String>(4)? == "installed_unverified";
+                Ok(ConfigurableManagedRuntimeSnapshot {
                     installation_id: row.get(0)?,
                     permission_schema_version: row.get(1)?,
-                    models_json: row.get(2)?,
+                    models_json: if adapter_kind == AdapterKind::TraeCnCli {
+                        let stored = row.get::<_, String>(2)?;
+                        let models: Vec<ModelDescriptor> =
+                            serde_json::from_str(&stored).map_err(|error| {
+                                rusqlite::Error::FromSqlConversionFailure(
+                                    2,
+                                    rusqlite::types::Type::Text,
+                                    Box::new(error),
+                                )
+                            })?;
+                        if execution_deferred && models.is_empty() {
+                            serde_json::to_string(&deferred_trae_models()).map_err(|error| {
+                                rusqlite::Error::ToSqlConversionFailure(Box::new(error))
+                            })?
+                        } else {
+                            stored
+                        }
+                    } else {
+                        row.get(2)?
+                    },
                     permissions_json: row.get(3)?,
+                    execution_deferred,
                 })
             },
         )
         .optional()
-        .context("failed to load ready managed Runtime snapshot")
+        .context("failed to load configurable managed Runtime snapshot")
 }
 
 fn probe_diagnostic_code(probe_status: &str, failure_class: &str) -> Option<&'static str> {
@@ -3769,10 +4125,15 @@ fn member_runtime_defaults_for_snapshot(
     adapter_kind: AdapterKind,
     snapshot: &AdapterCapabilitySnapshot,
 ) -> Result<Option<MemberRuntimeConfiguration>> {
-    if snapshot.probe_status != "ready"
-        || snapshot.authentication_status != "authenticated"
-        || snapshot.stale_at.is_some()
-    {
+    let execution_deferred = adapter_kind == AdapterKind::TraeCnCli
+        && snapshot.probe_status == "installed_unverified"
+        && snapshot.authentication_status == "unknown"
+        && snapshot.executable_fingerprint.is_some()
+        && snapshot.stale_at.is_none();
+    let ready = snapshot.probe_status == "ready"
+        && snapshot.authentication_status == "authenticated"
+        && snapshot.stale_at.is_none();
+    if !ready && !execution_deferred {
         return Ok(None);
     }
     let model = ModelSelection::RuntimeDefault;
@@ -3787,7 +4148,11 @@ fn member_runtime_defaults_for_snapshot(
         model: model.clone(),
         permissions: permissions.clone(),
     };
-    let models_json = serde_json::to_string(&snapshot.models)?;
+    let models_json = if execution_deferred {
+        serde_json::to_string(&deferred_trae_models())?
+    } else {
+        serde_json::to_string(&snapshot.models)?
+    };
     let permissions_json = serde_json::to_string(&snapshot.permission_options)?;
     if runtime_configuration_issue(
         &models_json,
@@ -3804,6 +4169,17 @@ fn member_runtime_defaults_for_snapshot(
         model,
         permissions,
     }))
+}
+
+fn deferred_trae_models() -> Vec<ModelDescriptor> {
+    vec![ModelDescriptor {
+        id: TRAE_RUNTIME_DEFAULT_MODEL_ID.to_string(),
+        display_name: "TRAE CLI runtime default".to_string(),
+        is_default: true,
+        hidden: false,
+        deprecated: false,
+        options: Vec::new(),
+    }]
 }
 
 fn permission_value_matches_descriptor(
@@ -3843,6 +4219,7 @@ fn validate_snapshot(snapshot: &AdapterCapabilitySnapshot) -> Result<()> {
     if !matches!(
         snapshot.probe_status.as_str(),
         "ready"
+            | "installed_unverified"
             | "not_installed"
             | "authentication_required"
             | "missing_capabilities"
@@ -3859,13 +4236,6 @@ fn validate_snapshot(snapshot: &AdapterCapabilitySnapshot) -> Result<()> {
     if snapshot.probe_status == "ready" {
         if snapshot.observed_at.is_none() {
             anyhow::bail!("Ready Adapter snapshot requires observedAt");
-        }
-        if snapshot
-            .reported_version
-            .as_deref()
-            .is_none_or(str::is_empty)
-        {
-            anyhow::bail!("Ready Adapter snapshot requires reportedVersion");
         }
         if snapshot
             .executable_fingerprint
@@ -3886,7 +4256,30 @@ fn validate_snapshot(snapshot: &AdapterCapabilitySnapshot) -> Result<()> {
             anyhow::bail!("Ready Adapter snapshot requires an available default model");
         }
     }
-    if snapshot.probe_status != "ready" && snapshot.last_error.is_none() {
+    if snapshot.probe_status == "installed_unverified" {
+        if snapshot.observed_at.is_none()
+            || snapshot
+                .executable_fingerprint
+                .as_deref()
+                .is_none_or(str::is_empty)
+        {
+            anyhow::bail!(
+                "Installed-unverified Adapter snapshot requires static observation and fingerprint"
+            );
+        }
+        if snapshot.authentication_status != "unknown"
+            || snapshot.last_successful_probe_at.is_some()
+            || snapshot.stale_at.is_some()
+            || snapshot.last_error.is_some()
+        {
+            anyhow::bail!("Installed-unverified Adapter snapshot cannot claim probe evidence");
+        }
+    }
+    if !matches!(
+        snapshot.probe_status.as_str(),
+        "ready" | "installed_unverified"
+    ) && snapshot.last_error.is_none()
+    {
         anyhow::bail!("Failed Adapter snapshot requires lastError");
     }
     validate_model_descriptors(&snapshot.models)?;
@@ -4040,7 +4433,7 @@ mod tests {
     use super::*;
     use crate::{
         collaboration::{AddCampMemberCommand, CollaborationService, CreateCampCommand},
-        command::{ActorRef, CommandEnvelope},
+        command::{ActorRef, CommandEnvelope, CommandResultStatus},
     };
 
     #[test]
@@ -5168,6 +5561,152 @@ mod tests {
         );
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn trae_static_installation_defers_verification_to_the_same_real_session() {
+        let (mut database, directory) = database();
+        let service = AgentProfileService::default();
+        let executable_path = directory.join("traecli");
+        std::fs::write(&executable_path, b"static-trae-fixture").unwrap();
+        let fingerprint = "sha256:trae-static".to_string();
+        let observed_at = chrono::Utc::now().to_rfc3339();
+        let static_snapshot = AgentRuntimeAdapterRegistry::default()
+            .trae_installed_unverified_snapshot(None, fingerprint.clone(), observed_at.clone())
+            .unwrap();
+        let installation_id = service
+            .commit_discovered_managed_installation(
+                &mut database,
+                DiscoveredManagedInstallation {
+                    adapter_kind: AdapterKind::TraeCnCli,
+                    executable_path: executable_path.to_string_lossy().to_string(),
+                    command_name: "traecli".to_string(),
+                    source: InstallationSource::InheritedPath,
+                    auth_scope: "default".to_string(),
+                    snapshot: static_snapshot,
+                },
+            )
+            .unwrap();
+        let installation = service
+            .managed_installation(&database, AdapterKind::TraeCnCli, "default")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            installation.snapshot.as_ref().unwrap().probe_status,
+            "installed_unverified"
+        );
+        let defaults = installation.member_runtime_defaults.clone().unwrap();
+        assert_eq!(defaults.model, ModelSelection::RuntimeDefault);
+        assert_eq!(
+            defaults.permissions.values,
+            json!({"permission_mode": "default"})
+        );
+
+        let profile = service.get_profile(&database, "agent_1").unwrap().unwrap();
+        let configured = service
+            .set_runtime(
+                &mut database,
+                &user_command(
+                    "configure-static-trae",
+                    SetMemberRuntimeConfigurationCommand {
+                        agent_id: profile.agent_id.clone(),
+                        expected_version: profile.version,
+                        adapter_kind: AdapterKind::TraeCnCli,
+                        model: defaults.model,
+                        permissions: defaults.permissions.clone(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(configured.result.status, CommandResultStatus::Applied);
+        let configured_profile = service
+            .get_profile(&database, &profile.agent_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            configured_profile.runtime_readiness.status,
+            RuntimeReadinessStatus::InstalledUnverified
+        );
+
+        let binding = ResolvedRuntimeBinding {
+            adapter_kind: AdapterKind::TraeCnCli,
+            installation_id: installation_id.clone(),
+            model: ModelSelection::RuntimeDefault,
+            permissions: defaults.permissions,
+        };
+        let deferred = resolve_frozen_runtime_binding(database.connection(), &binding)
+            .unwrap()
+            .unwrap();
+        assert_eq!(deferred.reported_version, None);
+        assert_eq!(deferred.model.model_id, TRAE_RUNTIME_DEFAULT_MODEL_ID);
+        assert!(deferred.capabilities.is_empty());
+        assert!(
+            service
+                .runtime_dispatch_blocker(&database, &deferred)
+                .unwrap()
+                .is_none(),
+            "static identity is sufficient to launch one real verification process"
+        );
+
+        let live_snapshot = AgentRuntimeAdapterRegistry::default()
+            .trae_live_session_capability_snapshot(
+                None,
+                fingerprint,
+                json!({
+                    "protocolVersion": 1,
+                    "agentCapabilities": {"loadSession": true}
+                }),
+                json!({
+                    "sessionId": "session-live",
+                    "models": {
+                        "currentModelId": "trae-default",
+                        "availableModels": [
+                            {"modelId": "trae-default", "name": "TRAE Default"}
+                        ]
+                    },
+                    "configOptions": [{
+                        "id": "model",
+                        "currentValue": "trae-default",
+                        "options": [{"value": "trae-default", "name": "TRAE Default"}]
+                    }],
+                    "modes": {
+                        "currentModeId": "default",
+                        "availableModes": [{"id": "default", "name": "Default"}]
+                    }
+                }),
+                chrono::Utc::now().to_rfc3339(),
+            )
+            .unwrap();
+        assert_eq!(live_snapshot.reported_version, None);
+        service
+            .record_snapshot(
+                &mut database,
+                &user_command(
+                    "record-live-trae",
+                    RecordAdapterCapabilitySnapshotCommand {
+                        installation_id,
+                        expected_installation_version: installation.version,
+                        snapshot: live_snapshot,
+                    },
+                ),
+            )
+            .unwrap();
+        let verified_profile = service
+            .get_profile(&database, &profile.agent_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            verified_profile.runtime_readiness.status,
+            RuntimeReadinessStatus::Ready
+        );
+        let verified = resolve_frozen_runtime_binding(database.connection(), &binding)
+            .unwrap()
+            .unwrap();
+        assert_eq!(verified.reported_version, None);
+        assert_eq!(verified.model.model_id, "trae-default");
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

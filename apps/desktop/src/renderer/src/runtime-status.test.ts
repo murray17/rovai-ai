@@ -15,6 +15,7 @@ describe('Runtime user status projection', () => {
   it.each([
     ['detecting', '正在检查…'],
     ['found_uninspected', '正在检查…'],
+    ['installed_unverified', '已安装'],
     ['checking', '正在检查…'],
     ['ready', '可用'],
     ['authentication_required', '需要登录'],
@@ -77,6 +78,35 @@ describe('Runtime user status projection', () => {
     expect(runtimeReadinessLabel('ready')).toBe('可用')
     expect(runtimeReadinessLabel('runtime_not_configured')).toBe('未配置 Agent 运行时')
     expect(runtimeReadinessLabel('needs_attention')).toBe('不可用')
+    expect(runtimeReadinessLabel('installed_unverified')).toBe('已安装，待首次运行验证')
+  })
+
+  it('presents deferred TRAE verification without claiming readiness', () => {
+    const traeAvailability = availability('installed_unverified', 'trae-cn-cli')
+    const agent = {
+      ...profile({
+        status: 'installed_unverified',
+        blockers: [{ code: 'runtime_verification_deferred', detail: null }]
+      }),
+      runtimeConfiguration: {
+        adapterKind: 'trae-cn-cli' as const,
+        model: { mode: 'runtime_default' as const },
+        permissions: {
+          adapterKind: 'trae-cn-cli' as const,
+          schemaVersion: 1,
+          values: { permission_mode: 'default' }
+        }
+      }
+    }
+
+    const result = memberRuntimePresentation(
+      agent,
+      'trae-cn-cli',
+      traeAvailability
+    )
+    expect(result.status).toBe('installed_unverified')
+    expect(result.label).toBe('已安装')
+    expect(result.detail).toContain('首次实际任务中验证')
   })
 })
 

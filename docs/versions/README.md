@@ -1,8 +1,8 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.86
-last_updated: 2026-08-15
+current_version: v0.87
+last_updated: 2026-08-16
 ---
 
 # Rovai-ai 版本记录
@@ -137,4 +137,5 @@ last_updated: 2026-08-15
 | v0.83 | `historical` | TRAE CLI CN Runtime、实证 ACP 准入与设置页待支持预告边界 | [v0.83/README.md](v0.83/README.md) |
 | v0.84 | `historical` | 可切换的底部执行台与右侧 Inspector 执行 Sidecar | [v0.84/README.md](v0.84/README.md) |
 | v0.85 | `historical` | Agent 主导的伙伴入队、受控头像导入与十三项 official Skill inventory | [v0.85/README.md](v0.85/README.md) |
-| v0.86 | `current` | Benchmark Tool-use Measurement v2、Memory/Task/Camp 证据闭合与 A2A 反馈链投影 | [v0.86/README.md](v0.86/README.md) |
+| v0.86 | `historical` | Benchmark Tool-use Measurement v2、Memory/Task/Camp 证据闭合与 A2A 反馈链投影 | [v0.86/README.md](v0.86/README.md) |
+| v0.87 | `current` | TRAE 静态 Runtime 检测、首次真实任务同进程验证与可选静态版本 | [v0.87/README.md](v0.87/README.md) |

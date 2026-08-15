@@ -1,5 +1,5 @@
 ---
-version: 2
+version: 3
 slug: "settings-workspace"
 primary_target: "apps/desktop/src/renderer/src/SettingsPageHeader.tsx"
 related_targets:
@@ -95,10 +95,16 @@ writes after conflict and refreshes.
 ## Agent 运行时与诊断
 
 Runtime settings always show the complete Product Runtime Catalog. User-facing states are limited to
-checking, available, needs login, not installed, unsupported, unavailable and temporarily unknown;
+checking, installed but awaiting first-run verification, available, needs login, not installed,
+unsupported, unavailable and temporarily unknown;
 do not expose internal “found/not checked” stages. Use recent Core cache immediately and request
 asynchronous refresh. Executable path, fingerprint, backoff and audit remain inside the advanced
 diagnostic disclosure.
+
+TRAE is the static-inspection exception: its row says “已安装” after path/fingerprint detection, explains
+that login and ACP capabilities will be verified by the first real task, and labels its action “重新扫描安装”.
+That action may refresh static identity but must not be described as an active availability check. Other
+Runtime rows retain “检查可用性” and their existing active-check behavior.
 
 The Runtime settings list may append a separately typed presentation-only preview row after supported
 products. A preview must say `待支持` and `尚未接入 AgentRun`, expose no health/configuration action and

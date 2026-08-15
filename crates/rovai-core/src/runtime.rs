@@ -549,7 +549,7 @@ fn validate_frozen_runtime_columns(
         && search_environment_generation == Some(runtime.search_environment_generation)
         && executable_path == Some(runtime.executable_path.as_str())
         && auth_scope == Some(runtime.auth_scope.as_str())
-        && reported_version == Some(runtime.reported_version.as_str())
+        && reported_version == runtime.reported_version.as_deref()
         && executable_fingerprint == Some(runtime.executable_fingerprint.as_str())
         && capabilities.as_ref() == Some(&runtime.capabilities)
         && model.as_ref() == Some(&runtime.model)
@@ -5214,7 +5214,7 @@ mod tests {
                 search_environment_generation: 1,
                 executable_path: "/tmp/codex".to_string(),
                 auth_scope: "test-user".to_string(),
-                reported_version: "1.2.3".to_string(),
+                reported_version: Some("1.2.3".to_string()),
                 executable_fingerprint: "sha256:test".to_string(),
                 capabilities: Vec::new(),
                 protocol_version: "codex-app-server-v2".to_string(),
@@ -5269,7 +5269,7 @@ mod tests {
         let frozen = resume_execution(None, None, 1, 1).runtime;
         let mut upgraded = frozen.clone();
         upgraded.installation_generation = 2;
-        upgraded.reported_version = "2.0.0".to_string();
+        upgraded.reported_version = Some("2.0.0".to_string());
         upgraded.executable_fingerprint = "sha256:runtime-v2".to_string();
         upgraded.model.model_id = "gpt-next-default".to_string();
         assert!(runtime_logical_identity_matches(&frozen, &upgraded));
@@ -7150,7 +7150,7 @@ mod tests {
         let frozen = candidate.frozen_runtime().unwrap();
         let mut effective = frozen.clone();
         effective.installation_generation += 1;
-        effective.reported_version = "2.0.0".to_string();
+        effective.reported_version = Some("2.0.0".to_string());
         effective.executable_fingerprint = "sha256:runtime-v2".to_string();
         effective.host_config_digest = "sha256:host-v2".to_string();
         effective.config_digest.clear();
@@ -7229,9 +7229,12 @@ mod tests {
             .unwrap();
         assert_eq!(state.0, "queued");
         assert_eq!(state.1, 2);
-        assert_eq!(state.2, frozen.reported_version);
+        assert_eq!(Some(state.2.as_str()), frozen.reported_version.as_deref());
         assert_eq!(state.3, frozen.executable_fingerprint);
-        assert_eq!(state.4, effective.reported_version);
+        assert_eq!(
+            Some(state.4.as_str()),
+            effective.reported_version.as_deref()
+        );
         assert_eq!(state.5, effective.executable_fingerprint);
         assert_eq!(state.6, 1);
         let effective_config: Value = serde_json::from_str(&state.7).unwrap();

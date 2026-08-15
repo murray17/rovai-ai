@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-08-15
+last_updated: 2026-08-16
 ---
 
 # Agent Runtime 兼容性清单
@@ -42,13 +42,29 @@ Probe、成员选择、诊断或 AgentRun 语义。
 | Skill / recovery | TRAE 会读取原生用户 instruction，但未证明 Rovai Skill 路径；ACP `end_turn` assistant suffix 稳定 | Skill discovery 保持 documentation-only empty；Missing-Send Recovery 的 zero-send、accepted-send suppression、tool→final 三场景通过 |
 
 脱敏 Snapshot、Probe 步骤和分类限制见
-[TRAE CLI CN ACP Probe](research/trae-cli-runtime/probe/README.md)。真实 Ready 只证明上述安装与账号；
-上游 executable、协议或 capability 改变后必须重新 Probe。
+[TRAE CLI CN ACP Probe](research/trae-cli-runtime/probe/README.md)。这组 v0.83 主动 Probe 是历史准入证据，
+不代表当前产品会在设置检查、诊断或后台刷新时重放这些进程。
 
 同日定向正式验收通过：`smoke:acp-runtime` 完成 completion、Native Session 续接、Approval
 allow-once/deny；`smoke:missing-send-recovery` 在 tool→final 场景观察 8 个结构化 ACP tool event；
 `smoke:mcp-projection` 返回 `rovai-projection:trae_cn`。TRAE Host 在 durable terminal 对后继 Run
 可见前停止，后继 Host 再以 `session/load` 恢复同一 Session，避免 cwd、权限或 Run 配置跨 Host 延伸。
+
+### v0.87 静态检查与执行期再验证
+
+从 v0.87 起，TRAE 的 `--version`、主动 ACP Probe 和独立登录检查不再用于 discovery、设置页自检、
+Installation refresh、诊断或 dispatch preflight。当前 launch policy 只允许真实 AgentRun 启动 TRAE；
+静态检查只证明 path、执行位、canonical identity 与 fingerprint，并投影为 `installed_unverified`。
+
+版本仅从进程内解析的 `.app/Contents/Info.plist` 或明确 TRAE main module 的 Go build information 获取；
+不存在可信字段时 `reportedVersion = null` 是正常结果。第一次真实任务复用其唯一 ACP Host 的 initialize 与
+Session response 更新认证、模型、权限和 capability Ready，随后在同一 Host 继续任务。握手失败不会再启动
+诊断或 replacement TRAE process。上游 executable identity 改变时，静态 preflight 先回到
+`installed_unverified`，下一次真实 AgentRun 再完成验证。
+
+该规则不撤销上方 `0.120.52` 的准入结论，只改变产品何时重取本机动态证据；其他 Runtime 仍按各自 policy
+执行后台主动检查。规范边界见 [ADR-0192](adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)
+与 [Runtime Launch and Verification v1](contracts/runtime-launch-and-verification-v1.md)。
 
 ### v0.85 Transport v12 当前基线
 

@@ -2912,6 +2912,8 @@ export function campCreationPreflightFromAgents(
     }))
   const initialLeadAgentId = presentMembers
     .find((member) => member.runtimeReadiness === 'ready')
+    ?.agentId ?? presentMembers
+    .find((member) => member.runtimeReadiness === 'installed_unverified')
     ?.agentId ?? presentMembers[0]?.agentId ?? null
   const blockers: CampCreationPreflight['blockers'] = presentMembers.length === 0
     ? [{ code: 'no_present_members', detail: '当前没有在队的队员。' }]

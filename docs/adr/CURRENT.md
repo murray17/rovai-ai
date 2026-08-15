@@ -1,7 +1,7 @@
 ---
 document_type: adr-current
 authority: current-cross-version-adr-navigation
-last_updated: 2026-08-15
+last_updated: 2026-08-16
 ---
 
 # 当前跨版本架构决策
@@ -107,8 +107,8 @@ Related: Context selection、Self/Peer identity 与 Runtime admission 从相应 
 ## Runtime execution 与 security
 
 - **何时阅读：** 修改 Runtime ownership、权限、安全、Fleet、执行恢复或诊断读写边界时阅读。
-- **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Diagnostics Center](../architecture/diagnostics-center.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)、[Planned Shutdown](../architecture/planned-shutdown.md)
-- **当前合同：** [Diagnostics Center v1](../contracts/diagnostics-center-v1.md)、[Accepted Input Recovery v1](../contracts/accepted-input-recovery-v1.md)、[Planned Shutdown v2](../contracts/planned-shutdown-v2.md)
+- **当前架构：** [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Diagnostics Center](../architecture/diagnostics-center.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)、[Planned Shutdown](../architecture/planned-shutdown.md)
+- **当前合同：** [Runtime Launch and Verification v1](../contracts/runtime-launch-and-verification-v1.md)、[Diagnostics Center v1](../contracts/diagnostics-center-v1.md)、[Accepted Input Recovery v1](../contracts/accepted-input-recovery-v1.md)、[Planned Shutdown v2](../contracts/planned-shutdown-v2.md)
 
 <!-- adr-current-primary:begin topic=runtime-execution-security -->
 | ADR | Decision |
@@ -129,6 +129,7 @@ Related: Context selection、Self/Peer identity 与 Runtime admission 从相应 
 | [ADR-0168](0168-planned-shutdown-preserves-runtime-terminal-authority.md) | Planned Shutdown Preserves Runtime Terminal Authority |
 | [ADR-0177](0177-controlled-shutdown-fences-product-execution.md) | Controlled Shutdown Fences Product Execution Without Claiming Runtime Outcome |
 | [ADR-0189](0189-settings-only-runtime-preview-outside-product-catalog.md) | Settings-Only Runtime Preview Outside the Product Catalog |
+| [ADR-0192](0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md) | Purpose-Scoped Runtime Launch and Execution-Deferred Verification |
 <!-- adr-current-primary:end -->
 
 Related: Session redelivery、Skill/MCP projection 与 Qualification 分别保留独立 primary。

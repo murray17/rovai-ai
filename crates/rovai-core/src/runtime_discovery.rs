@@ -14,6 +14,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use plist::Value as PlistValue;
 use serde::Serialize;
 use tokio::{io::AsyncReadExt, process::Command as TokioCommand, time::timeout};
 use uuid::Uuid;
@@ -27,6 +28,7 @@ const SHELL_PATH_TIMEOUT: Duration = Duration::from_secs(3);
 const VERSION_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_SHELL_PATH_BYTES: u64 = 64 * 1024;
 const MAX_VERSION_OUTPUT_BYTES: usize = 8 * 1024;
+const GO_BUILD_INFO_MAGIC: &[u8] = b"\xff Go buildinf:";
 
 static ACTIVE_RUNTIME_COMMAND_PATH: OnceLock<RwLock<OsString>> = OnceLock::new();
 tokio::task_local! {
@@ -107,6 +109,25 @@ pub enum RuntimeDiscoveryStatus {
     Detecting,
     Found,
     Missing,
+}
+
+/// Every Runtime child process must have an explicit product purpose. Some
+/// third-party CLIs perform credential-store initialization even for metadata
+/// commands, so "the user clicked a button" is not itself launch authority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeLaunchPurpose {
+    DiscoveryVersion,
+    AvailabilityCheck,
+    InstallationRefresh,
+    HealthProbe,
+    DispatchPreflight,
+    AgentExecution,
+}
+
+pub fn runtime_launch_allowed(kind: AdapterKind, purpose: RuntimeLaunchPurpose) -> bool {
+    !matches!(kind, AdapterKind::TraeCnCli)
+        || matches!(purpose, RuntimeLaunchPurpose::AgentExecution)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -342,14 +363,6 @@ pub fn discover_runtime_path(
     }
 }
 
-pub fn runtime_allows_unattended_cli_execution(kind: AdapterKind) -> bool {
-    // TRAE CLI initializes its token store even for `--version` and checks
-    // macOS Keychain support by writing a temporary `test-key-*` item. That can
-    // present SecurityAgent UI, so every TRAE process launch must stay behind an
-    // explicit user action or an execution path.
-    !matches!(kind, AdapterKind::TraeCnCli)
-}
-
 pub async fn discover_runtime_version(
     observation: &mut RuntimeDiscoveryObservation,
     search: &RuntimeSearchEnvironment,
@@ -357,7 +370,22 @@ pub async fn discover_runtime_version(
     let Some(path) = observation.executable_path.as_deref() else {
         return;
     };
+    if !runtime_launch_allowed(
+        observation.runtime_kind,
+        RuntimeLaunchPurpose::DiscoveryVersion,
+    ) {
+        observation.reported_version =
+            discover_static_runtime_version(observation.runtime_kind, Path::new(path));
+        observation.diagnostic_code = observation
+            .reported_version
+            .is_none()
+            .then(|| "runtime_version_unavailable_static_only".to_string());
+        observation.observed_at = chrono::Utc::now().to_rfc3339();
+        return;
+    }
     match bounded_version_command(
+        observation.runtime_kind,
+        RuntimeLaunchPurpose::DiscoveryVersion,
         Path::new(path),
         version_arguments(observation.runtime_kind),
         search,
@@ -371,6 +399,100 @@ pub async fn discover_runtime_version(
     observation.observed_at = chrono::Utc::now().to_rfc3339();
 }
 
+/// Reads version metadata without starting the target executable. Unknown is
+/// an honest result: fingerprints identify content but are not semantic
+/// versions.
+pub fn discover_static_runtime_version(kind: AdapterKind, executable: &Path) -> Option<String> {
+    if kind != AdapterKind::TraeCnCli {
+        return None;
+    }
+    static_bundle_version(executable).or_else(|| static_go_main_module_version(executable))
+}
+
+fn static_bundle_version(executable: &Path) -> Option<String> {
+    let contents = executable.ancestors().find(|ancestor| {
+        ancestor.file_name() == Some(OsStr::new("Contents"))
+            && ancestor
+                .parent()
+                .and_then(Path::extension)
+                .is_some_and(|extension| extension == "app")
+    })?;
+    let plist = PlistValue::from_file(contents.join("Info.plist")).ok()?;
+    let dictionary = plist.as_dictionary()?;
+    ["CFBundleShortVersionString", "CFBundleVersion"]
+        .into_iter()
+        .filter_map(|key| dictionary.get(key).and_then(PlistValue::as_string))
+        .map(str::trim)
+        .find(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn static_go_main_module_version(executable: &Path) -> Option<String> {
+    let bytes = fs::read(executable).ok()?;
+    let offset = bytes
+        .windows(GO_BUILD_INFO_MAGIC.len())
+        .position(|window| window == GO_BUILD_INFO_MAGIC)?;
+    let header = bytes.get(offset..offset.checked_add(32)?)?;
+    let flags = *header.get(15)?;
+    // Modern Go binaries inline two varint-prefixed strings after the header.
+    // Pointer-based legacy records require executable virtual-address mapping
+    // and are deliberately treated as unknown rather than guessed.
+    if flags & 2 == 0 {
+        return None;
+    }
+    let mut cursor = offset.checked_add(32)?;
+    let _go_toolchain = take_go_build_string(&bytes, &mut cursor)?;
+    let module_info = take_go_build_string(&bytes, &mut cursor)?;
+    let module_info = strip_go_module_framing(module_info);
+    module_info.lines().find_map(|line| {
+        let mut fields = line.split('\t');
+        if fields.next()? != "mod" {
+            return None;
+        }
+        let module_path = fields.next()?;
+        let version = fields.next()?.trim();
+        let product_path = module_path.to_ascii_lowercase();
+        if !product_path.contains("trae")
+            || version.is_empty()
+            || matches!(version, "(devel)" | "devel")
+        {
+            return None;
+        }
+        Some(version.to_string())
+    })
+}
+
+fn take_go_build_string<'a>(bytes: &'a [u8], cursor: &mut usize) -> Option<&'a str> {
+    let length = take_uvarint(bytes, cursor)?;
+    let length = usize::try_from(length).ok()?;
+    let end = cursor.checked_add(length)?;
+    let value = std::str::from_utf8(bytes.get(*cursor..end)?).ok()?;
+    *cursor = end;
+    Some(value)
+}
+
+fn take_uvarint(bytes: &[u8], cursor: &mut usize) -> Option<u64> {
+    let mut value = 0_u64;
+    for shift in (0..=63).step_by(7) {
+        let byte = *bytes.get(*cursor)?;
+        *cursor += 1;
+        if byte < 0x80 {
+            return (shift != 63 || byte <= 1).then_some(value | u64::from(byte) << shift);
+        }
+        value |= u64::from(byte & 0x7f) << shift;
+    }
+    None
+}
+
+fn strip_go_module_framing(value: &str) -> &str {
+    let bytes = value.as_bytes();
+    if bytes.len() >= 33 && bytes.get(bytes.len() - 17) == Some(&b'\n') {
+        &value[16..value.len() - 16]
+    } else {
+        value
+    }
+}
+
 fn version_arguments(kind: AdapterKind) -> &'static [&'static str] {
     match kind {
         AdapterKind::AntigravityApp => &["--version"],
@@ -379,10 +501,15 @@ fn version_arguments(kind: AdapterKind) -> &'static [&'static str] {
 }
 
 async fn bounded_version_command(
+    kind: AdapterKind,
+    purpose: RuntimeLaunchPurpose,
     executable: &Path,
     arguments: &[&str],
     search: &RuntimeSearchEnvironment,
 ) -> Result<String> {
+    if !runtime_launch_allowed(kind, purpose) {
+        anyhow::bail!("runtime_launch_disallowed_for_{purpose:?}");
+    }
     let mut command = TokioCommand::new(executable);
     command
         .args(arguments)
@@ -822,12 +949,138 @@ mod tests {
     }
 
     #[test]
-    fn unattended_cli_execution_excludes_trae_keyring_initialization() {
-        assert!(runtime_allows_unattended_cli_execution(
-            AdapterKind::CodexCli
+    fn runtime_launch_policy_reserves_trae_for_real_agent_execution() {
+        for purpose in [
+            RuntimeLaunchPurpose::DiscoveryVersion,
+            RuntimeLaunchPurpose::AvailabilityCheck,
+            RuntimeLaunchPurpose::InstallationRefresh,
+            RuntimeLaunchPurpose::HealthProbe,
+            RuntimeLaunchPurpose::DispatchPreflight,
+        ] {
+            assert!(!runtime_launch_allowed(AdapterKind::TraeCnCli, purpose));
+            assert!(runtime_launch_allowed(AdapterKind::CodexCli, purpose));
+        }
+        assert!(runtime_launch_allowed(
+            AdapterKind::TraeCnCli,
+            RuntimeLaunchPurpose::AgentExecution
         ));
-        assert!(!runtime_allows_unattended_cli_execution(
-            AdapterKind::TraeCnCli
-        ));
+    }
+
+    #[tokio::test]
+    async fn trae_version_enrichment_is_static_and_never_executes_the_cli() {
+        let directory = env::temp_dir().join(format!("rovai-trae-static-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        let marker = directory.join("executed");
+        let runtime = directory.join("traecli");
+        executable(
+            &runtime,
+            &format!(
+                "#!/bin/sh\nprintf ran > '{}'\nprintf 'trae 9.9.9\\n'\n",
+                marker.display()
+            ),
+        );
+        let search = test_search(vec![SearchPathEntry {
+            path: directory.clone(),
+            sources: vec![SearchPathSource::InheritedPath],
+        }]);
+        let mut observation = discover_runtime_path(AdapterKind::TraeCnCli, &search);
+        discover_runtime_version(&mut observation, &search).await;
+        assert!(
+            !marker.exists(),
+            "TRAE metadata reads must never start the CLI"
+        );
+        assert_eq!(observation.reported_version, None);
+        assert_eq!(
+            observation.diagnostic_code.as_deref(),
+            Some("runtime_version_unavailable_static_only")
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[tokio::test]
+    async fn concurrent_trae_metadata_checks_never_execute_the_cli() {
+        let directory = env::temp_dir().join(format!("rovai-trae-concurrent-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        let marker = directory.join("executed");
+        let runtime = directory.join("traecli");
+        executable(
+            &runtime,
+            &format!("#!/bin/sh\nprintf ran >> '{}'\n", marker.display()),
+        );
+        let search = test_search(vec![SearchPathEntry {
+            path: directory.clone(),
+            sources: vec![SearchPathSource::InheritedPath],
+        }]);
+        let observation = discover_runtime_path(AdapterKind::TraeCnCli, &search);
+        let mut checks = tokio::task::JoinSet::new();
+        for _ in 0..32 {
+            let mut observation = observation.clone();
+            let search = search.clone();
+            checks.spawn(async move {
+                discover_runtime_version(&mut observation, &search).await;
+                observation
+            });
+        }
+        while let Some(result) = checks.join_next().await {
+            let result = result.unwrap();
+            assert_eq!(result.discovery_status, RuntimeDiscoveryStatus::Found);
+            assert_eq!(result.reported_version, None);
+        }
+        assert!(
+            !marker.exists(),
+            "concurrent TRAE checks must remain file-only"
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn trae_static_version_accepts_bundle_and_go_module_metadata_only() {
+        let directory = env::temp_dir().join(format!("rovai-trae-version-{}", Uuid::new_v4()));
+        let executable = directory.join("TRAE.app/Contents/MacOS/traecli");
+        fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        fs::write(&executable, b"not launched").unwrap();
+        fs::write(
+            directory.join("TRAE.app/Contents/Info.plist"),
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+            <plist version="1.0"><dict>
+              <key>CFBundleShortVersionString</key><string>0.120.99</string>
+            </dict></plist>"#,
+        )
+        .unwrap();
+        assert_eq!(
+            discover_static_runtime_version(AdapterKind::TraeCnCli, &executable).as_deref(),
+            Some("0.120.99")
+        );
+
+        let go_binary = directory.join("trae-go");
+        let mut build_info = Vec::from(GO_BUILD_INFO_MAGIC);
+        build_info.extend([8, 2]);
+        build_info.extend([0; 16]);
+        append_go_build_string(&mut build_info, "go1.25.0");
+        append_go_build_string(
+            &mut build_info,
+            "path\tgithub.com/trae-ai/trae-cli\nmod\tgithub.com/trae-ai/trae-cli\tv0.121.0\n",
+        );
+        fs::write(&go_binary, build_info).unwrap();
+        assert_eq!(
+            discover_static_runtime_version(AdapterKind::TraeCnCli, &go_binary).as_deref(),
+            Some("v0.121.0")
+        );
+        assert_eq!(
+            discover_static_runtime_version(AdapterKind::CodexCli, &go_binary),
+            None
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    fn append_go_build_string(target: &mut Vec<u8>, value: &str) {
+        let mut length = value.len() as u64;
+        while length >= 0x80 {
+            target.push((length as u8) | 0x80);
+            length >>= 7;
+        }
+        target.push(length as u8);
+        target.extend_from_slice(value.as_bytes());
     }
 }

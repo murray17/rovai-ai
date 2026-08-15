@@ -28,7 +28,7 @@ export type CompactRuntimeState = 'available' | 'action' | 'neutral'
 export function compactRuntimeState(status: RuntimeUserStatus): CompactRuntimeState {
   if (status === 'available') return 'available'
   if (status === 'unconfigured') return 'neutral'
-  if (status === 'checking' || status === 'unknown') return 'neutral'
+  if (status === 'checking' || status === 'unknown' || status === 'installed_unverified') return 'neutral'
   return 'action'
 }
 

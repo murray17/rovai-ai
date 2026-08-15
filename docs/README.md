@@ -1,7 +1,7 @@
 ---
 document_type: documentation-index
 authority: documentation-routing
-last_updated: 2026-08-15
+last_updated: 2026-08-16
 ---
 
 # Rovai-ai 文档导航
@@ -17,6 +17,7 @@ last_updated: 2026-08-15
 | 判断当前版本目标、范围、进度或验收口径 | 从[版本索引中的唯一 `current` 条目](versions/README.md)进入对应版本概览与实施计划 |
 | 查询已接入与候选 Agent Runtime 的实测兼容性 | [Runtime 兼容性清单](runtime-compatibility.md) |
 | 新增 Agent Runtime、建立真实 Probe 或判断 Settings Preview 边界 | [Runtime Catalog Boundaries](architecture/runtime-catalog-boundaries.md)、[TRAE Runtime 准入版本](versions/v0.83/README.md)、[TRAE Research/Probe](research/trae-cli-runtime/README.md)及相关 Runtime/Activity ADR |
+| 修改 Runtime 子进程启动、自检/刷新、静态 Installation、`installed_unverified`、执行期验证或 nullable Runtime version | [ADR-0192](adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)、[Runtime Launch and Verification v1](contracts/runtime-launch-and-verification-v1.md)及[Runtime Catalog Boundaries](architecture/runtime-catalog-boundaries.md) |
 | 新增或修改 Runtime Activity 映射规则 | [Runtime Activity Mapping 维护指南](runtime-activity/README.md)及[Registry](runtime-activity/registry.md) |
 | 修改内置 Agent CLI、IPC、Envelope、receipt、Projection、队员创建或幂等合同 | [Built-in Tool Transport v12 合同](contracts/builtin-tool-transport-v12.md)、[ADR-0191](adr/0191-agent-mediated-member-creation-and-thirteen-skill-inventory.md)、[Camp Message Send v7](contracts/camp-message-send-v7.md)及[Current User Attention v4](contracts/current-user-attention-v4.md) |
 | 修改 Memory 在线捕获、complete exact-Scope View、Agent mutation、copyable target、Hearth Review、active body quota、clean break、候选清除、Forget 闭包或审核并发 | [Online Memory Capture 架构](architecture/online-memory-capture.md)、[Memory Capture v3](contracts/memory-capture-v3.md)、[ADR-0178](adr/0178-best-effort-online-memory-capture-and-actor-bounded-mutation.md)、[ADR-0179](adr/0179-normalized-memory-store-v3-with-isolated-hearth-review.md)及[ADR-0186](adr/0186-complete-exact-scope-memory-view-and-copyable-target.md) |
