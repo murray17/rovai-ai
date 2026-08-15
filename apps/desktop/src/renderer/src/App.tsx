@@ -101,10 +101,6 @@ import {
   shouldInvalidateNewConversationDefaults,
   type CurrentProject
 } from './new-conversation-preferences'
-import {
-  memberReturnTargetForSource,
-  type MemberReturnTarget
-} from './member-return'
 
 export { allNavigationCamps }
 
@@ -396,7 +392,6 @@ export function App(): React.JSX.Element {
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null)
   const [memberTab, setMemberTab] = useState<MemberWorkspaceTab>('identity')
   const [memberRuntimeFocusRequest, setMemberRuntimeFocusRequest] = useState(0)
-  const [memberReturnTarget, setMemberReturnTarget] = useState<MemberReturnTarget>({ kind: 'app' })
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general')
   const [generalPreferences, setGeneralPreferences] = useState<GeneralPreferencesSnapshot | null>(null)
   const [currentProject, setCurrentProject] = useState<CurrentProject>(() => readCurrentProject())
@@ -712,7 +707,6 @@ export function App(): React.JSX.Element {
         } else if (target.kind === 'members') {
           setSelectedMemberId(target.agentId)
           setMemberTab(target.tab)
-          setMemberReturnTarget({ kind: 'app' })
           lastMainView.current = 'members'
           setView('members')
         } else if (target.kind === 'memory') {
@@ -1562,18 +1556,6 @@ export function App(): React.JSX.Element {
   const chooseView = (nextView: View): void => {
     const commit = (): void => {
       if (nextView !== 'camp') cancelPendingCampActivation()
-      if (nextView === 'members' && viewRef.current !== 'members') {
-        setMemberReturnTarget(memberReturnTargetForSource(
-          viewRef.current,
-          activeCampIdRef.current
-            ? {
-                campId: activeCampIdRef.current,
-                contextLabel: activeCampContextLabel,
-                title: activeCampTitle
-              }
-            : null
-        ))
-      }
       if (nextView !== 'settings') lastMainView.current = nextView
       if (nextView !== 'camp') setNotificationFocus(null)
       setView(nextView)
@@ -1637,21 +1619,6 @@ export function App(): React.JSX.Element {
     setStartupStatus('loading')
     setStartupError(null)
     void loadStartupSnapshot()
-  }
-
-  const closeMembers = (): void => {
-    void requestMemberTransition(async () => {
-      if (memberReturnTarget.kind === 'conversation') {
-        await activateCamp(memberReturnTarget.campId, { suppressErrors: true })
-        return
-      }
-      cancelPendingCampActivation()
-      setActiveCampId(null)
-      setCampSnapshot(null)
-      setNotificationFocus(null)
-      lastMainView.current = 'compose'
-      setView('compose')
-    })
   }
 
   const beginNewConversation = (): void => {
@@ -2300,23 +2267,6 @@ export function App(): React.JSX.Element {
           chooseView('memory')
         }}
         pendingMemoryCount={pendingMemoryCount}
-        memberSidebar={view === 'members'
-          ? startupRoutePending?.kind === 'members'
-            ? <StartupMemberSidebar />
-            : (
-                <MemberSidebar
-                  agents={agents}
-                  runtimeAvailability={health?.runtimeAvailability ?? []}
-                  runtimeDiscoveryPending={health === null || healthLoading}
-                  selectedAgentId={selectedMemberId}
-                  returnTarget={memberReturnTarget}
-                  onBack={closeMembers}
-                  onSelect={chooseMember}
-                  onCreate={(trigger) => membersViewRef.current?.requestCreate(trigger)}
-                  onReload={loadMemberData}
-                />
-              )
-          : null}
         onSettings={() => chooseView('settings')}
         onSettingsSectionChange={chooseSettingsSection}
         onSettingsBack={closeSettings}
@@ -2481,27 +2431,38 @@ export function App(): React.JSX.Element {
                 />
               )
             : (
-                <MembersView
-                  ref={membersViewRef}
-                  agents={agents}
-                  topNotices={inlineNotices}
-                  installations={installations}
-                  runtimeAvailability={health?.runtimeAvailability ?? []}
-                  runtimeDiscoveryPending={health === null || healthLoading}
-                  selectedAgentId={selectedMemberId}
-                  activeTab={memberTab}
-                  runtimeFocusRequest={memberRuntimeFocusRequest}
-                  onSelectedAgentChange={(agentId, tab) => {
-                    setSelectedMemberId(agentId)
-                    setMemberTab(tab)
-                  }}
-                  onTabChange={setMemberTab}
-                  onReload={loadMemberData}
-                  onOpenRuntimeSettings={() => {
-                    chooseSettingsSection('runtime')
-                    chooseView('settings')
-                  }}
-                />
+                <div className="members-workspace">
+                  <MemberSidebar
+                    agents={agents}
+                    runtimeAvailability={health?.runtimeAvailability ?? []}
+                    runtimeDiscoveryPending={health === null || healthLoading}
+                    selectedAgentId={selectedMemberId}
+                    onSelect={chooseMember}
+                    onCreate={(trigger) => membersViewRef.current?.requestCreate(trigger)}
+                    onReload={loadMemberData}
+                  />
+                  <MembersView
+                    ref={membersViewRef}
+                    agents={agents}
+                    topNotices={inlineNotices}
+                    installations={installations}
+                    runtimeAvailability={health?.runtimeAvailability ?? []}
+                    runtimeDiscoveryPending={health === null || healthLoading}
+                    selectedAgentId={selectedMemberId}
+                    activeTab={memberTab}
+                    runtimeFocusRequest={memberRuntimeFocusRequest}
+                    onSelectedAgentChange={(agentId, tab) => {
+                      setSelectedMemberId(agentId)
+                      setMemberTab(tab)
+                    }}
+                    onTabChange={setMemberTab}
+                    onReload={loadMemberData}
+                    onOpenRuntimeSettings={() => {
+                      chooseSettingsSection('runtime')
+                      chooseView('settings')
+                    }}
+                  />
+                </div>
               )
         )}
       </main>
@@ -2616,17 +2577,6 @@ export function StartupRouteLoading({
         <span />
       </div>
     </section>
-  )
-}
-
-function StartupMemberSidebar(): React.JSX.Element {
-  return (
-    <div className="startup-member-sidebar" aria-hidden="true">
-      <span />
-      <span />
-      <span />
-      <span />
-    </div>
   )
 }
 

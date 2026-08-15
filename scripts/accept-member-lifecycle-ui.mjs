@@ -139,27 +139,13 @@ try {
   const memberWorkbenchStructure = await evaluate(running.cdp, `({
     hasBlankDragStrip: Boolean(document.querySelector('.window-drag-strip-members')),
     contentTop: document.querySelector('.content.members-content')?.getBoundingClientRect().top,
-    workspaceTop: document.querySelector('.members-view')?.getBoundingClientRect().top,
+    workspaceTop: document.querySelector('.members-workspace')?.getBoundingClientRect().top,
     headerTop: document.querySelector('.member-detail-header')?.getBoundingClientRect().top,
     workspaceTopBorder: getComputedStyle(document.querySelector('.members-view')).borderTopWidth,
     sidebarWidth: document.querySelector('.unified-sidebar')?.getBoundingClientRect().width,
     hasRoster: Boolean(document.querySelector('.member-sidebar')),
-    returnControl: (() => {
-      const button = document.querySelector('.member-context-return')
-      const bounds = button?.getBoundingClientRect()
-      const arrow = button?.querySelector('.member-context-return-arrow')?.getBoundingClientRect()
-      return {
-        width: bounds?.width,
-        height: bounds?.height,
-        ariaLabel: button?.getAttribute('aria-label'),
-        title: button?.getAttribute('title'),
-        text: button?.textContent?.replace(/\s+/g, ' ').trim(),
-        keycap: button?.querySelector('kbd')?.textContent,
-        arrowWidth: arrow?.width,
-        separateFromHeading: button?.closest('.member-return-context')
-          ?.nextElementSibling?.classList.contains('member-sidebar-heading')
-      }
-    })(),
+    rosterWidth: document.querySelector('.member-sidebar')?.getBoundingClientRect().width,
+    hasReturnControl: Boolean(document.querySelector('.member-context-return')),
     detailBackground: getComputedStyle(document.querySelector('.members-view')).backgroundColor,
     detailBackgroundImage: getComputedStyle(document.querySelector('.members-view')).backgroundImage,
     hasProjectNavigation: Boolean(document.querySelector('.navigation-projects')),
@@ -175,6 +161,9 @@ try {
       return {
         presenceHeight: presenceBounds?.height,
         runtimeHeight: runtimeBounds?.height,
+        presenceBackground: presence ? getComputedStyle(presence).backgroundColor : null,
+        runtimeBackground: runtime ? getComputedStyle(runtime).backgroundColor : null,
+        runtimeBorderWidth: runtime ? getComputedStyle(runtime).borderWidth : null,
         runtimeArrow: Boolean(runtime?.querySelector('.member-runtime-entry-arrow')),
         runtimeTitle: runtime?.getAttribute('title')
       }
@@ -188,21 +177,18 @@ try {
       && memberWorkbenchStructure.workspaceTopBorder === '0px'
       && memberWorkbenchStructure.sidebarWidth === 270
       && memberWorkbenchStructure.hasRoster
-      && memberWorkbenchStructure.returnControl.width > 240
-      && memberWorkbenchStructure.returnControl.height === 54
-      && memberWorkbenchStructure.returnControl.ariaLabel === '返回 App'
-      && memberWorkbenchStructure.returnControl.title === '返回 App'
-      && memberWorkbenchStructure.returnControl.text === '返回 App⌘['
-      && memberWorkbenchStructure.returnControl.keycap === '⌘['
-      && memberWorkbenchStructure.returnControl.arrowWidth === 32
-      && memberWorkbenchStructure.returnControl.separateFromHeading
+      && memberWorkbenchStructure.rosterWidth === 236
+      && !memberWorkbenchStructure.hasReturnControl
       && memberWorkbenchStructure.detailBackgroundImage === 'none'
-      && !memberWorkbenchStructure.hasProjectNavigation
+      && memberWorkbenchStructure.hasProjectNavigation
       && !memberWorkbenchStructure.duplicateRoster
       && JSON.stringify(memberWorkbenchStructure.tabs) === JSON.stringify(['身份', '运行配置'])
       && memberWorkbenchStructure.initialMember === '叮叮'
-      && memberWorkbenchStructure.headerControls.presenceHeight === 28
-      && memberWorkbenchStructure.headerControls.runtimeHeight === 28
+      && memberWorkbenchStructure.headerControls.presenceHeight < 20
+      && memberWorkbenchStructure.headerControls.runtimeHeight < 20
+      && memberWorkbenchStructure.headerControls.presenceBackground === 'rgba(0, 0, 0, 0)'
+      && memberWorkbenchStructure.headerControls.runtimeBackground === 'rgba(0, 0, 0, 0)'
+      && memberWorkbenchStructure.headerControls.runtimeBorderWidth === '0px'
       && memberWorkbenchStructure.headerControls.runtimeArrow
       && memberWorkbenchStructure.headerControls.runtimeTitle === '打开运行配置',
     `v0.29 member workbench structure is unexpected: ${JSON.stringify(memberWorkbenchStructure)}`
@@ -263,6 +249,11 @@ try {
     [640, 288, true]
   ]) {
     await setViewport(running.cdp, width, 700)
+    if (width === 820) {
+      await mouseClick(running.cdp, '.member-sidebar-actions button[aria-label="折叠队员名册"]')
+      await waitForExpression(running.cdp,
+        `document.querySelector('.member-sidebar')?.getBoundingClientRect().width === 76`)
+    }
     await assertNoHorizontalOverflow(running.cdp, `Member identity at ${width}px`)
     const responsiveState = await evaluate(running.cdp, `(() => {
       const copy = document.querySelector('.member-identity-copy')?.getBoundingClientRect()
@@ -285,6 +276,9 @@ try {
     )
   }
   await setViewport(running.cdp, 1440, 920)
+  await mouseClick(running.cdp, '.member-sidebar-actions button[aria-label="展开队员名册"]')
+  await waitForExpression(running.cdp,
+    `document.querySelector('.member-sidebar')?.getBoundingClientRect().width === 236`)
 
   captures.memberIdentityRefinement = join(
     outputDir,
@@ -298,15 +292,13 @@ try {
   await waitForExpression(running.cdp,
     `!document.querySelector('.member-avatar-dialog')
       && document.activeElement === document.querySelector('.member-portrait-button')`)
-  await mouseClick(running.cdp, '.member-context-return')
-  await waitForSelector(running.cdp, '.new-conversation-workspace', 30_000)
   await mouseClick(running.cdp, '.unified-sidebar button[aria-label="记忆"]')
   await waitForSelector(running.cdp, '.memory-library', 30_000)
   await openMembers(running.cdp)
-  await waitForText(running.cdp, '.member-context-return', '返回 App')
-  await pressKey(running.cdp, '[', { meta: true })
-  await waitForSelector(running.cdp, '.new-conversation-workspace', 30_000)
-  await openMembers(running.cdp)
+  assert(
+    !await evaluate(running.cdp, `Boolean(document.querySelector('.member-context-return'))`),
+    'Member page still exposed a dedicated return control'
+  )
   const initialMemberOrder = (await request(running.cdp, 'members.list'))
     .map((profile) => profile.agentId)
   await mouseClick(running.cdp, '.member-sidebar-actions button[aria-label="调整队员顺序"]')
@@ -331,6 +323,20 @@ try {
     `document.querySelector('[data-member-order-handle="agent_1"]')?.disabled === false`)
   await mouseClick(running.cdp, '.member-sidebar-actions button[aria-label="完成调整队员顺序"]')
   await waitForSelector(running.cdp, '.member-runtime-shortcut')
+  const runtimeShortcutState = await evaluate(running.cdp, `({
+    glyphs: [...document.querySelectorAll('.member-runtime-shortcut > span')]
+      .map((node) => node.textContent?.trim()),
+    hasProductIcon: Boolean(document.querySelector('.member-runtime-shortcut svg'))
+  })`)
+  assert(
+    runtimeShortcutState.glyphs.length === 4
+      && runtimeShortcutState.glyphs.every((glyph) => ['✓', '!', '…'].includes(glyph))
+      && !runtimeShortcutState.hasProductIcon,
+    `Member Runtime shortcuts are unexpected: ${JSON.stringify(runtimeShortcutState)}`
+  )
+  await mouseClick(running.cdp, '.member-sidebar-actions button[aria-label="折叠队员名册"]')
+  await waitForExpression(running.cdp,
+    `document.querySelector('.member-sidebar')?.getBoundingClientRect().width === 76`)
   await setViewport(running.cdp, 720, 460)
   await running.cdp.send('Emulation.setEmulatedMedia', {
     media: 'screen',
@@ -364,6 +370,9 @@ try {
   await assertNoHorizontalOverflow(running.cdp, 'Member identity in Forced Colors')
   await running.cdp.send('Emulation.setEmulatedMedia', { media: 'screen', features: [] })
   await setViewport(running.cdp, 1440, 920)
+  await mouseClick(running.cdp, '.member-sidebar-actions button[aria-label="展开队员名册"]')
+  await waitForExpression(running.cdp,
+    `document.querySelector('.member-sidebar')?.getBoundingClientRect().width === 236`)
   await selectMember(running.cdp, '叮叮')
   await openMemberRuntimeTab(running.cdp)
   const removedSummarySettings = await evaluate(running.cdp, `({
@@ -530,8 +539,9 @@ try {
     const summaryStyle = summary ? getComputedStyle(summary) : null
     return {
       tagName: parameters?.tagName,
-      expanded: parameters?.open,
       visible: Boolean(parameters && parameters.getBoundingClientRect().height > 0),
+      bodyVisible: Boolean(parameters?.querySelector('.member-runtime-parameters-body')
+        ?.getBoundingClientRect().height > 0),
       background: style?.backgroundColor,
       leftBorder: style?.borderLeftWidth,
       rightBorder: style?.borderRightWidth,
@@ -543,22 +553,19 @@ try {
     }
   })()`)
   assert(
-    runtimeParametersState.tagName === 'DETAILS'
-      && runtimeParametersState.expanded === false
+    runtimeParametersState.tagName === 'SECTION'
       && runtimeParametersState.visible
+      && runtimeParametersState.bodyVisible
       && runtimeParametersState.background === 'rgba(0, 0, 0, 0)'
       && runtimeParametersState.leftBorder === '0px'
       && runtimeParametersState.rightBorder === '0px'
       && runtimeParametersState.bottomBorder === '0px'
       && runtimeParametersState.topBorder === '1px'
-      && runtimeParametersState.summaryBackground !== 'rgba(0, 0, 0, 0)'
+      && runtimeParametersState.summaryBackground === 'rgba(0, 0, 0, 0)'
       && runtimeParametersState.summaryBorderWidth === '0px'
       && !runtimeParametersState.exposesInstallation,
-    `Member Runtime parameters were not a collapsed plain disclosure: ${JSON.stringify(runtimeParametersState)}`
+    `Member Runtime parameters were not directly visible with an inline status: ${JSON.stringify(runtimeParametersState)}`
   )
-  await mouseClick(running.cdp, '.member-runtime-parameters > summary')
-  await waitForExpression(running.cdp,
-    `document.querySelector('.member-runtime-parameters')?.open === true`)
   await waitForText(running.cdp, '.member-runtime-parameters', '模型策略')
   await selectFieldValue(
     running.cdp,
@@ -594,8 +601,8 @@ try {
     `[...document.querySelectorAll('.member-form-actions button')]
       .map((button) => button.textContent?.trim())`)
   assert(
-    JSON.stringify(runtimeActionLabels) === JSON.stringify(['保存运行时']),
-    `Runtime actions were not consolidated into one save button: ${JSON.stringify(runtimeActionLabels)}`
+    JSON.stringify(runtimeActionLabels) === JSON.stringify(['放弃更改', '保存运行配置']),
+    `Runtime actions did not expose discard and save: ${JSON.stringify(runtimeActionLabels)}`
   )
   await selectFieldValue(
     running.cdp,
@@ -622,9 +629,8 @@ try {
     '审批策略',
     'never'
   )
-  await mouseClick(running.cdp, '.member-context-return')
+  await mouseClick(running.cdp, '.unified-sidebar button[aria-label="记忆"]')
   await waitForSelector(running.cdp, '.member-leave-dialog')
-  await pressKey(running.cdp, '[', { meta: true })
   await waitForExpression(running.cdp,
     `Boolean(document.querySelector('.member-leave-dialog'))
       && Boolean(document.querySelector('.members-view'))`)
@@ -642,7 +648,7 @@ try {
     'member-runtime-parameters-day-1040x700.png'
   )
   await capture(running.cdp, captures.memberRuntimeParameters)
-  await mouseClick(running.cdp, '.member-form-actions button', '保存运行时')
+  await mouseClick(running.cdp, '.member-form-actions button', '保存运行配置')
   await waitForText(running.cdp, '.app-toast', 'Codex CLI 已保存。')
   const configuredRuntime = await waitForProfile(
     running.cdp,
@@ -664,7 +670,7 @@ try {
       .find((candidate) =>
         candidate.querySelector('.member-section-heading h3')?.textContent?.trim() === 'Agent 运行时')
     const save = [...(section?.querySelectorAll('.member-form-actions button') ?? [])]
-      .find((button) => button.textContent?.trim() === '保存运行时')
+      .find((button) => button.textContent?.trim() === '保存运行配置')
     return section?.querySelector('.field-label select')?.disabled === false
       && save?.disabled === true
   })()`)
@@ -695,7 +701,7 @@ try {
     '',
     'Agent 运行时'
   )
-  await mouseClick(running.cdp, '.member-form-actions button', '保存运行时')
+  await mouseClick(running.cdp, '.member-form-actions button', '保存运行配置')
   await waitForText(running.cdp, '.app-toast', 'Agent 运行时已清除。')
   await waitForProfile(running.cdp, 'agent_3',
     (profile) => profile.presence === 'present'
@@ -771,7 +777,6 @@ try {
     `User message is not selectable/copyable: ${JSON.stringify(userMessageCopyState)}`
   )
   await mouseClick(running.cdp, '.conversation-bubble.user .message-copy-button')
-  await waitForText(running.cdp, '.conversation-bubble.user .copy-feedback', '已复制')
   let snapshot = await request(running.cdp, 'camps.snapshot', { campId })
   assert(
     snapshot.camp.defaultLeadAgentId === 'agent_1'
@@ -827,35 +832,29 @@ try {
   await replaceContenteditableText(running.cdp, '#camp-message', '')
 
   await openMembers(running.cdp)
-  const quickChatReturnState = await evaluate(running.cdp, `(() => {
-    const button = document.querySelector('.member-context-return')
-    return {
-      label: button?.getAttribute('aria-label'),
-      eyebrow: button?.querySelector('small')?.textContent,
-      title: button?.querySelector('strong')?.textContent,
-      appFallback: button?.classList.contains('is-app-return')
-    }
-  })()`)
+  const quickChatRosterState = await evaluate(running.cdp, `({
+    hasReturnControl: Boolean(document.querySelector('.member-context-return')),
+    hasProjectNavigation: Boolean(document.querySelector('.navigation-projects')),
+    rosterWidth: document.querySelector('.member-sidebar')?.getBoundingClientRect().width,
+    selectedMember: document.querySelector('.member-detail-heading h1')?.textContent
+  })`)
   assert(
-    quickChatReturnState.label === `返回会话：${campTitle}（快速对话）`
-      && quickChatReturnState.eyebrow === '返回会话 · 快速对话'
-      && quickChatReturnState.title === campTitle
-      && !quickChatReturnState.appFallback,
-    `Quick Chat Camp did not become an exact Member return target: ${JSON.stringify(quickChatReturnState)}`
+    !quickChatRosterState.hasReturnControl
+      && quickChatRosterState.hasProjectNavigation
+      && quickChatRosterState.rosterWidth === 236,
+    `Member content roster did not coexist with global navigation: ${JSON.stringify(quickChatRosterState)}`
   )
   await mouseClick(running.cdp, '.unified-sidebar button[aria-label="设置"]')
   await waitForSelector(running.cdp, '.settings-sidebar-menu', 30_000)
   await mouseClick(running.cdp, '.settings-sidebar-back', '返回 App', true)
   await waitForSelector(running.cdp, '.members-view', 30_000)
-  await waitForText(running.cdp, '.member-context-return', campTitle)
-  captures.memberQuickChatReturn = join(
+  await waitForText(running.cdp, '.member-detail-heading h1', quickChatRosterState.selectedMember)
+  captures.memberContentRoster = join(
     outputDir,
-    'member-quick-chat-return-day-1440x920.png'
+    'member-content-roster-day-1440x920.png'
   )
-  await capture(running.cdp, captures.memberQuickChatReturn)
-  await pressKey(running.cdp, '[', { meta: true })
-  await waitForText(running.cdp, '.topbar h1', campTitle)
-  await waitForSelector(running.cdp, '.camp-workspace', 30_000)
+  await capture(running.cdp, captures.memberContentRoster)
+  await openCamp(running.cdp, campTitle)
   await openMembers(running.cdp)
   await selectMember(running.cdp, '小兔')
   const qiluBeforeRemoval = await request(running.cdp, 'members.get', {
@@ -953,13 +952,13 @@ try {
   await capture(running.cdp, captures.freshCampInheritedLead)
   await openCamp(running.cdp, projectCampTitle)
   await openMembers(running.cdp)
-  const projectReturnState = await evaluate(running.cdp, `(() => {
-    const button = document.querySelector('.member-context-return')
-    const title = button?.querySelector('strong')
+  const projectNavigationState = await evaluate(running.cdp, `(() => {
+    const button = [...document.querySelectorAll('.camp-nav-open')]
+      .find((candidate) => candidate.getAttribute('title')?.startsWith(${JSON.stringify(projectCampTitle)}))
+    const title = button?.querySelector('.truncate')
     const titleStyle = title ? getComputedStyle(title) : null
     return {
-      label: button?.getAttribute('aria-label'),
-      eyebrow: button?.querySelector('small')?.textContent,
+      hasReturnControl: Boolean(document.querySelector('.member-context-return')),
       title: title?.textContent,
       titleOverflows: Boolean(title && title.scrollWidth > title.clientWidth),
       titleOverflow: titleStyle?.overflow,
@@ -968,24 +967,21 @@ try {
     }
   })()`)
   assert(
-    projectReturnState.label === `返回会话：${projectCampTitle}（project-return）`
-      && projectReturnState.eyebrow === '返回会话 · project-return'
-      && projectReturnState.title === projectCampTitle
-      && projectReturnState.titleOverflows
-      && projectReturnState.titleOverflow === 'hidden'
-      && projectReturnState.titleTextOverflow === 'ellipsis'
-      && projectReturnState.titleWhiteSpace === 'nowrap',
-    `Directory Camp did not preserve its Project return context: ${JSON.stringify(projectReturnState)}`
+    !projectNavigationState.hasReturnControl
+      && projectNavigationState.title === projectCampTitle
+      && projectNavigationState.titleOverflows
+      && projectNavigationState.titleOverflow === 'hidden'
+      && projectNavigationState.titleTextOverflow === 'ellipsis'
+      && projectNavigationState.titleWhiteSpace === 'nowrap',
+    `Directory Camp was not preserved in global navigation: ${JSON.stringify(projectNavigationState)}`
   )
-  await assertNoHorizontalOverflow(running.cdp, 'Member return with a long directory Camp title')
-  captures.memberProjectReturn = join(
+  await assertNoHorizontalOverflow(running.cdp, 'Member workspace with a long directory Camp title')
+  captures.memberProjectNavigation = join(
     outputDir,
-    'member-project-return-day-1440x920.png'
+    'member-project-navigation-day-1440x920.png'
   )
-  await capture(running.cdp, captures.memberProjectReturn)
-  await mouseClick(running.cdp, '.member-context-return')
-  await waitForText(running.cdp, '.topbar h1', projectCampTitle)
-  await waitForSelector(running.cdp, '.camp-workspace', 30_000)
+  await capture(running.cdp, captures.memberProjectNavigation)
+  await openCamp(running.cdp, projectCampTitle)
   const projectSnapshot = await request(running.cdp, 'camps.snapshot', {
     campId: projectCampId
   })
@@ -999,10 +995,9 @@ try {
   })
   assert(
     deletedProjectCamp.status === 'applied',
-    `Could not delete the stale Member return target: ${JSON.stringify(deletedProjectCamp)}`
+    `Could not delete the project Camp fixture: ${JSON.stringify(deletedProjectCamp)}`
   )
-  await mouseClick(running.cdp, '.member-context-return')
-  await waitForSelector(running.cdp, '.new-conversation-workspace', 30_000)
+  await openCamp(running.cdp, campTitle)
   await closeApp(running)
   running = null
 
@@ -1080,19 +1075,16 @@ try {
       v14MemberRuntimeResetOnSchemaV41: true,
       mentionComposerUsesMemberName: true,
       contextSettingsDestinationRemoved: true,
-      contextualMemberSidebarAndTabs: true,
-      appFallbackMemberReturn: true,
-      quickChatCampExactMemberReturn: true,
-      directoryCampExactMemberReturn: true,
-      longMemberReturnTitleEllipsis: true,
-      commandBracketMemberReturn: true,
-      memberReturnShortcutBlockedByDialog: true,
-      settingsRoundTripPreservesMemberReturn: true,
-      invalidMemberReturnTargetFallsBackApp: true,
+      contentMemberRosterAndTabs: true,
+      globalNavigationPreservedOnMembers: true,
+      dedicatedMemberReturnRemoved: true,
+      rosterExpanded236Collapsed76: true,
+      compactRuntimeShortcutSymbols: true,
+      settingsRoundTripPreservesMemberSelection: true,
+      longCampTitleEllipsisInGlobalNavigation: true,
       fullHeightP2HeaderWithoutBlankDragStrip: true,
       campComposerMentionMenuVisibleAndKeyboardSelectable: true,
-      memberContextReturnAndThemeSurface: true,
-      equalHeaderStatusControlsAndRuntimeArrow: true,
+      inlineHeaderStatusAndRuntimeArrow: true,
       manualMemberTabsArrowHomeEndKeyboard: true,
       memoryTrackSwitchLocalSaveAndReducerRollback: true,
       clickableMemberPortraitAndSymmetricIdentitySpacing: true,
@@ -1102,13 +1094,13 @@ try {
       summaryModelAdvancedSettingsRemoved: true,
       memberHandlesHiddenAndDuplicateNameBlocked: true,
       campThemeSurfacesStrongDividerAndPreservedRailMessageColors: true,
-      userMessageSelectableAndCopyable: true,
+      userMessageSelectableAndCopyEntry: true,
       freshNoRuntimeComposerToastAndDraft: true,
       leaveByMouseAndRejoinByKeyboard: true,
       themeSwitchPreservesDialogDraftAndFocus: true,
       radixEscapeAndFocusReturn: true,
       runtimeClearDoesNotChangePresence: true,
-      memberRuntimeParametersDirectPlainSingleSaveAndAtomicClear: true,
+      memberRuntimeParametersExpandedDiscardSaveAndAtomicClear: true,
       dirtyRuntimeGuardContinueAndDiscard: true,
       removalRetainsIdentityAvatarRuntimeAndHistory: true,
       removedHiddenFromActiveRoster: true,
@@ -1133,6 +1125,23 @@ async function captureThemeMatrix(cdp, prefix, selectedName, directory) {
     for (const theme of ['day', 'night']) {
       await setViewport(cdp, width, height)
       await setTheme(cdp, theme)
+      // Startup route restoration can land after the first renderer paint for an
+      // upgraded profile. Re-open the workbench before each visual capture so the
+      // matrix measures the requested surface instead of that transient route.
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (!await evaluate(cdp, `Boolean(document.querySelector('.members-view'))`)) {
+          await openMembers(cdp)
+        }
+        if (!await evaluate(cdp,
+          `document.querySelector('.member-detail-heading h1')?.textContent === ${JSON.stringify(selectedName)}`)) {
+          await selectMember(cdp, selectedName)
+        }
+        await wait(500)
+        if (await evaluate(cdp,
+          `document.querySelector('.member-detail-heading h1')?.textContent === ${JSON.stringify(selectedName)}`)) {
+          break
+        }
+      }
       await waitForExpression(cdp,
         `document.querySelector('.member-detail-heading h1')?.textContent === ${JSON.stringify(selectedName)}`)
       await waitForExpression(cdp,

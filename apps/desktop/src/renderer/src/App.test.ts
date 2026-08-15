@@ -1789,7 +1789,7 @@ describe('task event projections', () => {
     expect(markup).not.toContain('高级诊断与自定义启动入口')
   })
 
-  it('replaces project navigation with the member roster on the members page', () => {
+  it('keeps global project navigation on the members page', () => {
     const markup = renderToStaticMarkup(createElement(CampNavigation, {
       view: 'members',
       state: 'ready',
@@ -1808,7 +1808,6 @@ describe('task event projections', () => {
         }]
       },
       activeCampId: null,
-      memberSidebar: createElement('section', { 'aria-label': '队员名册' }, '唯一队员名册'),
       onNewConversation: () => undefined,
       onMembers: () => undefined,
       onMemory: () => undefined,
@@ -1823,12 +1822,11 @@ describe('task event projections', () => {
       onError: () => undefined
     }))
 
-    expect(markup).toContain('唯一队员名册')
     expect(markup).toContain('跳转到对话')
     expect(markup).toContain('新对话')
     expect(markup).toContain('设置')
-    expect(markup).not.toContain('should-not-render')
-    expect(markup).not.toContain('id="projects-heading"')
+    expect(markup).toContain('should-not-render')
+    expect(markup).toContain('id="projects-heading"')
   })
 
   it('keeps an unready Default Lead selectable while warning that execution is blocked', () => {
@@ -3488,7 +3486,7 @@ describe('task event projections', () => {
     expect(markup).toContain('title="更换角色图片"')
     expect(markup).toContain('class="member-runtime-entry-arrow"')
     expect(markup).toContain('class="member-detail-page"')
-    expect(markup).toContain('Member / Long-lived identity')
+    expect(markup).not.toContain('Member / Long-lived identity')
     expect(markup).toContain('<h1>沐瓦</h1>')
     expect(markup).not.toContain('<h2>沐瓦</h2>')
     expect(markup).not.toContain('member-detail-avatar-button')
@@ -3498,7 +3496,7 @@ describe('task event projections', () => {
     expect(markup).not.toContain('member-list')
     expect(markup).not.toContain('@muwa')
     expect(markup).not.toContain('身份强调色')
-    expect(markup).not.toContain('保存运行配置')
+    expect(markup).toContain('保存运行配置')
   })
 
   it('keeps a visible draggable member header skeleton when no member is selected', () => {
@@ -3630,10 +3628,10 @@ describe('task event projections', () => {
     expect(markup).not.toContain('/opt/homebrew/bin/codex')
     expect(markup).toContain('<h3>Agent 运行时</h3>')
     expect(markup).toContain('Agent 运行时')
-    expect(markup).toContain('保存运行时')
-    expect(markup).not.toContain('放弃更改')
+    expect(markup).toContain('保存运行配置')
+    expect(markup).toContain('放弃更改')
     expect(markup).not.toContain('清除 Agent 运行时')
-    expect(markup).toContain('选择产品并使用当前能力快照')
+    expect(markup).toContain('选择执行产品，并确认当前安装与可用状态')
   })
 
   it('keeps a missing Product Runtime as an unsaved draft and links to its checks', () => {
@@ -3655,11 +3653,11 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('GitHub Copilot')
-    expect(markup).toContain('只会在 Agent 运行时可用并通过当前能力快照校验后原子保存')
+    expect(markup).toContain('运行时、模型与权限会作为一份配置共同保存')
     expect(markup).toContain('未安装')
     expect(markup).toContain('前往 Agent 运行时')
-    expect(markup).toContain('<button class="primary-button" disabled="">保存运行时</button>')
-    expect(markup).not.toContain('放弃更改')
+    expect(markup).toContain('<button class="primary-button" disabled="">保存运行配置</button>')
+    expect(markup).toContain('放弃更改')
     expect(markup).not.toContain('清除 Agent 运行时')
   })
 

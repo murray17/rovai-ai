@@ -106,20 +106,15 @@ export function MemberRuntimeParameters({
         </p>
       )
   return (
-    <details className="member-runtime-parameters">
-      <summary>
-        <span>
-          <strong id="member-runtime-parameters-title">运行参数</strong>
-          <small>模型、模型参数与 Agent 运行时原生权限</small>
-        </span>
-        <svg viewBox="0 0 20 20" aria-hidden="true">
-          <path d="m5.5 7.5 4.5 4.5 4.5-4.5" />
-        </svg>
-      </summary>
+    <section className="member-runtime-parameters" aria-labelledby="member-runtime-parameters-title">
+      <header className="member-runtime-parameters-heading">
+        <strong id="member-runtime-parameters-title">运行参数</strong>
+        <small>模型、模型参数与 Agent 运行时原生权限。</small>
+      </header>
       <div className="member-runtime-parameters-body" aria-labelledby="member-runtime-parameters-title">
         {content}
       </div>
-    </details>
+    </section>
   )
 }
 

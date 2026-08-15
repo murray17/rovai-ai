@@ -19,18 +19,19 @@ import {
   type RuntimeUserStatus
 } from './runtime-status'
 import { identityColorToken } from './theme'
-import type { MemberReturnTarget } from './member-return'
 
 export type MemberWorkspaceTab = 'identity' | 'runtime'
 
-export type CompactRuntimeState = 'available' | 'unconfigured' | 'action' | 'neutral'
+export type CompactRuntimeState = 'available' | 'action' | 'neutral'
 
 export function compactRuntimeState(status: RuntimeUserStatus): CompactRuntimeState {
   if (status === 'available') return 'available'
-  if (status === 'unconfigured') return 'unconfigured'
+  if (status === 'unconfigured') return 'neutral'
   if (status === 'checking' || status === 'unknown') return 'neutral'
   return 'action'
 }
+
+const MEMBER_ROSTER_STORAGE_KEY = 'rovai-member-roster-width-v1'
 
 export function filterMembers(
   agents: AgentProfile[],
@@ -45,40 +46,11 @@ export function filterMembers(
   ))
 }
 
-export interface MemberReturnShortcutEvent {
-  key: string
-  code: string
-  metaKey: boolean
-  ctrlKey: boolean
-  altKey: boolean
-  shiftKey: boolean
-  repeat: boolean
-  defaultPrevented: boolean
-  isComposing: boolean
-}
-
-export function shouldHandleMemberReturnShortcut(
-  event: MemberReturnShortcutEvent,
-  transientSurfaceOpen: boolean
-): boolean {
-  return !transientSurfaceOpen
-    && !event.defaultPrevented
-    && !event.repeat
-    && !event.isComposing
-    && event.metaKey
-    && !event.ctrlKey
-    && !event.altKey
-    && !event.shiftKey
-    && (event.code === 'BracketLeft' || event.key === '[')
-}
-
 export function MemberSidebar({
   agents,
   runtimeAvailability,
   runtimeDiscoveryPending,
   selectedAgentId,
-  returnTarget,
-  onBack,
   onSelect,
   onCreate,
   onReload
@@ -87,8 +59,6 @@ export function MemberSidebar({
   runtimeAvailability: ProductRuntimeAvailability[]
   runtimeDiscoveryPending: boolean
   selectedAgentId: string | null
-  returnTarget: MemberReturnTarget
-  onBack(): void
   onSelect(agentId: string, tab: MemberWorkspaceTab, focusRuntime: boolean): void
   onCreate(trigger: HTMLButtonElement): void
   onReload(): Promise<void>
@@ -99,6 +69,14 @@ export function MemberSidebar({
   )
   const [query, setQuery] = useState('')
   const [sorting, setSorting] = useState(false)
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false
+    try {
+      return window.localStorage.getItem(MEMBER_ROSTER_STORAGE_KEY) === 'collapsed'
+    } catch {
+      return false
+    }
+  })
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [dragAgentId, setDragAgentId] = useState<string | null>(null)
@@ -114,19 +92,6 @@ export function MemberSidebar({
     && selectedAgentId
     && !visibleAgents.some((agent) => agent.agentId === selectedAgentId)
   )
-
-  useEffect(() => {
-    const handleReturnShortcut = (event: KeyboardEvent): void => {
-      const transientSurfaceOpen = Boolean(document.querySelector(
-        '[role="dialog"], dialog[open], [role="menu"][data-state="open"], [data-radix-menu-content][data-state="open"], details[open] [role="menu"]'
-      ))
-      if (!shouldHandleMemberReturnShortcut(event, transientSurfaceOpen)) return
-      event.preventDefault()
-      onBack()
-    }
-    window.addEventListener('keydown', handleReturnShortcut)
-    return () => window.removeEventListener('keydown', handleReturnShortcut)
-  }, [onBack])
 
   const updateScrollEdges = useCallback((): void => {
     const element = scrollRef.current
@@ -203,44 +168,37 @@ export function MemberSidebar({
     })
   }
 
+  const toggleCollapsed = (): void => {
+    if (sorting) return
+    setCollapsed((current) => {
+      const next = !current
+      try {
+        window.localStorage.setItem(MEMBER_ROSTER_STORAGE_KEY, next ? 'collapsed' : 'expanded')
+      } catch {
+        // This preference is optional; the roster still works when storage is unavailable.
+      }
+      return next
+    })
+  }
+
   return (
-    <section className="member-sidebar" aria-label="队员名册">
-      <div className="member-return-context">
-        <button
-          className={returnTarget.kind === 'app'
-            ? 'member-context-return is-app-return'
-            : 'member-context-return'}
-          type="button"
-          aria-label={returnTarget.kind === 'conversation'
-            ? `返回会话：${returnTarget.title}（${returnTarget.contextLabel}）`
-            : '返回 App'}
-          title={returnTarget.kind === 'conversation'
-            ? `返回会话：${returnTarget.title}（${returnTarget.contextLabel}）`
-            : '返回 App'}
-          onClick={onBack}
-        >
-          <span className="member-context-return-arrow" aria-hidden="true">
-            <svg viewBox="0 0 20 20">
-              <path d="M12.5 4.5 7 10l5.5 5.5M7.5 10h8" />
-            </svg>
-          </span>
-          <span className="member-context-return-copy">
-            {returnTarget.kind === 'conversation' && (
-              <small>返回会话 · {returnTarget.contextLabel}</small>
-            )}
-            <strong>{returnTarget.kind === 'conversation' ? returnTarget.title : '返回 App'}</strong>
-          </span>
-          <kbd aria-hidden="true">⌘[</kbd>
-        </button>
-      </div>
+    <section className={`member-sidebar ${collapsed ? 'is-collapsed' : ''} ${sorting ? 'is-sorting' : ''}`} aria-label="队员名册">
       <div className="member-sidebar-heading">
         <div className="member-sidebar-title">
           <strong>队员</strong>
           <span>{members.length}</span>
         </div>
         <div className="member-sidebar-actions">
+          <button
+            className="optional-action"
+            type="button"
+            aria-label="新增队员"
+            title="新增队员"
+            onClick={(event) => onCreate(event.currentTarget)}
+          ><SidebarIcon name="plus" /></button>
           {members.length > 0 && (
             <button
+              className="optional-action"
               type="button"
               aria-label={sorting ? '完成调整队员顺序' : '调整队员顺序'}
               title={sorting ? '完成调整顺序' : '调整顺序'}
@@ -248,14 +206,13 @@ export function MemberSidebar({
               onClick={toggleSorting}
             >{sorting ? '完成' : <SidebarIcon name="sort" />}</button>
           )}
-          {members.length > 0 && (
-            <button
-              type="button"
-              aria-label="新增队员"
-              title="新增队员"
-              onClick={(event) => onCreate(event.currentTarget)}
-            ><SidebarIcon name="plus" /></button>
-          )}
+          <button
+            type="button"
+            aria-label={collapsed ? '展开队员名册' : '折叠队员名册'}
+            title={collapsed ? '展开队员名册' : '折叠队员名册'}
+            disabled={sorting}
+            onClick={toggleCollapsed}
+          ><SidebarIcon name={collapsed ? 'expand' : 'collapse'} /></button>
         </div>
       </div>
 
@@ -275,7 +232,7 @@ export function MemberSidebar({
         </div>
       )}
 
-      {sorting && <p className="member-sidebar-mode-note">拖拽，或聚焦把手后按上、下方向键调整 Member Order。</p>}
+      {sorting && <p className="member-sidebar-mode-note">拖动队员排序；聚焦右侧把手后也可按 ↑↓ 移动。</p>}
       {selectedHidden && (
         <p className="member-sidebar-selection-note">当前队员未出现在筛选结果中。<button type="button" onClick={() => setQuery('')}>清除筛选</button></p>
       )}
@@ -381,7 +338,7 @@ function MemberSidebarRow({
   const runtimeLabel = `${agent.displayName}，${product}，${runtime.label}；打开运行配置`
   return (
     <div
-      className={`member-sidebar-row ${selected ? 'selected' : ''} ${dragOver ? 'drag-over' : ''}`}
+      className={`member-sidebar-row presence-${agent.presence} ${selected ? 'selected' : ''} ${dragOver ? 'drag-over' : ''}`}
       draggable={sorting && !busy}
       onDragStart={(event) => {
         if (!sorting) return
@@ -406,6 +363,7 @@ function MemberSidebarRow({
         className="member-sidebar-select"
         type="button"
         aria-current={selected ? 'true' : undefined}
+        aria-label={`${agent.displayName}，${agent.teamRole || '团队角色未设置'}`}
         title={`${agent.displayName} · ${agent.teamRole || '团队角色未设置'}`}
         onClick={() => onSelect(agent.agentId, 'identity', false)}
       >
@@ -447,14 +405,14 @@ function MemberSidebarRow({
               data-tooltip={`${product} · ${runtime.label}${runtime.detail ? ` · ${runtime.detail}` : ''}`}
               onClick={() => onSelect(agent.agentId, 'runtime', true)}
             >
-              <span aria-hidden="true"><RuntimeStatusIcon state={compact} /></span>
+              <span aria-hidden="true">{compact === 'available' ? '✓' : compact === 'action' ? '!' : '…'}</span>
             </button>
           )}
     </div>
   )
 }
 
-function SidebarIcon({ name }: { name: 'sort' | 'plus' | 'grip' }): React.JSX.Element {
+function SidebarIcon({ name }: { name: 'sort' | 'plus' | 'grip' | 'collapse' | 'expand' }): React.JSX.Element {
   if (name === 'plus') {
     return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12" /></svg>
   }
@@ -465,20 +423,19 @@ function SidebarIcon({ name }: { name: 'sort' | 'plus' | 'grip' }): React.JSX.El
       </svg>
     )
   }
+  if (name === 'collapse' || name === 'expand') {
+    return (
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M4 4h12v12H4zM8 4v12" />
+        {name === 'collapse'
+          ? <path d="m12 7 3 3-3 3" />
+          : <path d="m15 7-3 3 3 3" />}
+      </svg>
+    )
+  }
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true">
       <path d="m5 3-2 2 2 2M3 5h14M15 13l2 2-2 2M17 15H3" />
-    </svg>
-  )
-}
-
-function RuntimeStatusIcon({ state }: { state: CompactRuntimeState }): React.JSX.Element {
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true">
-      <circle cx="10" cy="10" r="7" />
-      {state === 'available' && <path d="m6.8 10.1 2.1 2.1 4.5-4.7" />}
-      {state === 'action' && <path d="M10 6.4v4.5M10 13.8h.01" />}
-      {state === 'neutral' && <path d="M7 10h.01M10 10h.01M13 10h.01" />}
     </svg>
   )
 }

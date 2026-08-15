@@ -19,27 +19,32 @@ edit or remove a teammate without confusing identity with Runtime state.
 
 ## Information priority
 
-1. Source-aware return, page title and the active roster.
+1. The persistent App navigation and the active roster.
 2. Selected teammate identity, team role, Presence and Runtime availability.
 3. Professional profile, work principles and personality background.
-4. Runtime configuration and the default-collapsed Runtime Parameters.
+4. Runtime configuration and the directly visible Runtime Parameters.
 5. Memory Capability and destructive removal.
 
 ## First view and layout
 
-Use the shared 270px App rail. Inside the page, keep the roster as the stable navigation column and
-the selected teammate as the flexible detail surface. At narrow supported widths the roster is 250px;
-the detail scrolls internally instead of shrinking identity or actions below usability.
+Keep the shared 270px App rail visible on the teammate page. Inside the content area, keep a 236px
+roster as the stable secondary navigation column and the selected teammate as the flexible detail
+surface. The user can explicitly collapse the roster to 76px; remember that presentation preference
+locally. The detail scrolls internally instead of shrinking identity or actions below usability.
 
 The header uses the controlled portrait plus a separate circular icon. Presence and Runtime are two
-distinct badges: “在队” is static; “{Runtime} 可用 →” uses arrow, hover, focus and an accessible name to
-show it opens existing Runtime configuration. Never merge the two meanings.
+distinct inline facts: “在队” is static; “{Runtime} 可用 →” uses arrow, hover, focus and an accessible
+name to show it opens existing Runtime configuration. Do not put the Runtime fact in a grey card or
+merge the two meanings.
 
 ## Roster and order
 
 Roster order comes from the authoritative Member Order. Reordering is explicit, keyboard accessible
 and preserves selection. Identity color and avatar remain stable across reorder. Loading or partial
 Runtime health must not reorder or hide teammates.
+
+Roster Runtime shortcuts use the approved compact `✓`, `!` and `…` states rather than product logos.
+Each shortcut has a full accessible label and opens that teammate's Runtime configuration.
 
 ## Detail and editing
 
@@ -49,8 +54,8 @@ and actual-size previews. The durable asset and fallback rules are in
 
 “运行配置” retains the product Runtime, model, reasoning, permission and sandbox fields exposed by
 that Runtime. The Runtime, model and permissions save atomically through the existing command. Keep
-“运行参数” present and collapsed by default. Do not restore the removed “高级设置”, summary-model
-configuration or “对话压缩模型”.
+“运行参数” directly visible by default in the vertical reading flow. Do not restore the removed
+“高级设置”, summary-model configuration or “对话压缩模型”.
 
 After Runtime configuration, keep Memory Capability and the danger zone. Do not expose Installation
 IDs, executable paths or internal bindings in the ordinary profile.

@@ -50,13 +50,14 @@ Core-owned Pending Camp 并进入同一 Composer，第一条消息成功后再�
 全新安装默认“通用”。设置页面的局部构图见
 [`settings-workspace` surface brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)。
 
-从具体 Camp 进入队员页时，返回控件显示来源上下文并精确回到同一 Camp，不区分 directory
-Project 与快速对话；从 Memory、Quick Chat 首页或启动恢复进入时只显示“返回 App”。返回目标只在
-当前 Renderer 窗口存活，并遵守未保存 Runtime 草稿保护。
+队员页继续显示普通全局侧栏和 Project / Camp 导航，不再用队员名册覆盖该槽位，也不提供独立的
+“返回对话 / 返回 App”控件。队员名册位于内容区左侧；用户通过全局侧栏切换页面或会话，所有切换
+继续遵守未保存 Runtime 草稿保护。
 
 ## 响应式与可访问性
 
-270px rail 不收缩。最小 `1040×700` 下内容区自行重排，不能让 rail、菜单或主要操作被裁切。
+270px rail 不收缩。队员内容区名册默认 236px，可显式收起到 76px。最小 `1040×700` 下内容区自行
+重排，不能让 rail、名册、菜单或主要操作被裁切。
 Project/Camp 行、菜单、临时提醒和设置返回均可键盘操作，Icon-only 控件有可访问名称；选中、展开和
 未读状态不能只靠颜色。Camp 行“有新回复”只在真正打开该会话、窗口可见且拥有焦点后消除；后台
 Snapshot 刷新、设置/记忆页和应用失焦均不得提前清除。

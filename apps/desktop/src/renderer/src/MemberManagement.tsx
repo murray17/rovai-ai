@@ -441,7 +441,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
                   />
                 </div>
                 <div id="member-runtime-panel" role="tabpanel" aria-labelledby="member-runtime-tab" hidden={activeTab !== 'runtime'}>
-                  <p className="member-runtime-intro">为这位队员设置后续执行使用的 Agent 运行时、模型和该运行时提供的权限选项。保存后仅影响之后开始的新执行。</p>
+                  <p className="member-runtime-intro">设置这位队员后续执行使用的 Agent 运行时、模型和权限。保存后仅影响之后开始的新执行。</p>
                   <MemberRuntimeForm
                     ref={runtimeFormRef}
                     agent={selectedAgent}
@@ -611,7 +611,6 @@ function MemberDetailHeader({
           className="member-detail-avatar"
         />
         <div>
-          <span className="member-page-kicker">Member / Long-lived identity</span>
           <h1>{agent.displayName}</h1>
           <p>{agent.teamRole || '团队角色未设置'}</p>
           <div className="member-detail-statuses">
@@ -1005,7 +1004,7 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
       <div className="member-section-heading">
         <div>
           <h3>Agent 运行时</h3>
-          <p>选择产品并使用当前能力快照配置模型、参数和该 Agent 运行时的原生权限。</p>
+          <p>选择执行产品，并确认当前安装与可用状态。</p>
         </div>
       </div>
 
@@ -1044,6 +1043,14 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
                 {selectedKind && <span>{runtimeStatus.label}</span>}
               </em>
               {reportedVersion && <code>{reportedVersion}</code>}
+              {selectedKind && (
+                <button
+                  className="runtime-status-refresh"
+                  type="button"
+                  disabled={runtimeDiscoveryPending || busy !== null}
+                  onClick={() => onRuntimeEnsure?.(selectedKind)}
+                >{runtimeDiscoveryPending ? '检查中…' : '重新检查'}</button>
+              )}
             </div>
             {runtimeStatus.detail && <small className="runtime-status-detail">{runtimeStatus.detail}</small>}
             {selectedKind && (
@@ -1060,7 +1067,7 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
             )}
           </div>
         </div>
-        <span className="field-help member-runtime-help">完整的模型与权限参数只会在 Agent 运行时可用并通过当前能力快照校验后原子保存。</span>
+        <span className="field-help member-runtime-help">运行时、模型与权限会作为一份配置共同保存。</span>
 
         {selectedKind && (
           <MemberRuntimeParameters
@@ -1084,9 +1091,17 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
         )}
         {submitError && <div className="inline-error">{submitError}</div>}
         <div className="member-form-actions">
-          <button className="primary-button" disabled={!canSave || busy !== null}>
-            {busy === 'runtime' || busy === 'runtime-clear' ? '正在保存…' : '保存运行时'}
-          </button>
+          <span className={`member-runtime-save-state ${dirty ? 'is-dirty' : ''}`}>
+            {dirty ? '有未保存更改' : '当前配置已保存'}
+          </span>
+          <div>
+            <button className="quiet-button" type="button" disabled={!dirty || busy !== null} onClick={resetFromAgent}>
+              放弃更改
+            </button>
+            <button className="primary-button" disabled={!canSave || busy !== null}>
+              {busy === 'runtime' || busy === 'runtime-clear' ? '正在保存…' : '保存运行配置'}
+            </button>
+          </div>
         </div>
       </form>
     </section>

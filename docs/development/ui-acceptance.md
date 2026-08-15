@@ -117,21 +117,22 @@ fixture 和截图路径用于排查。可用 `ROVAI_PLANNED_SHUTDOWN_ACCEPT_FIXT
 `ROVAI_PLANNED_SHUTDOWN_ACCEPT_OUTPUT_DIR` 指定绝对隔离位置，用
 `ROVAI_KEEP_PLANNED_SHUTDOWN_FIXTURE=1` 保留成功 fixture；不得指向日常 App 数据目录。
 
-### 队员页来源返回门禁
+### 队员页内容名册门禁
 
-修改成员页入口、名册顶部、Main Window Session 导航状态或离开保护后，至少运行：
+修改成员页入口、内容名册、Runtime 快捷入口、排序或离开保护后，至少运行：
 
 ```bash
 pnpm package:mac
 pnpm accept:member-lifecycle-ui
 ```
 
-隔离夹具必须分别证明：从 directory Project Camp 与“快速对话”分组 Camp 进入时，
-`.member-context-return` 显示真实上下文和 Camp 标题并返回同一稳定 Camp；从 Memory、Quick Chat
-首页或启动直达进入时显示“返回 App”并回到 Quick Chat 首页。删除返回目标后必须安全降级为 App。
-点击和 `⌘[` 都要经过现有未保存 Runtime 草稿确认；Dialog/Menu 打开时快捷键不得穿透。
-验收同时覆盖 1440×920、1040×700、200% zoom、reduced motion、Forced Colors、长标题截断和
-侧栏无横向溢出，并保留队员半身照、Runtime 入口、排序、筛选、创建/编辑/移除功能。
+隔离夹具必须证明：队员页继续显示普通 270px 全局侧栏及 Project / Camp 导航；内容区只有一份队员
+名册，默认约 236px，并可显式收至约 76px且记住偏好。名册 Runtime 入口显示 `✓ / ! / …`，不显示
+产品 Logo；点击后精确选择该队员并聚焦运行配置。排序模式显示真实拖拽和键盘把手，并通过既有
+`members.reorder` 持久化。运行配置保持模型、权限和沙箱功能，运行参数默认展开，状态与版本使用
+开放式行内排版而不是灰色卡片。通过全局导航离开时仍要经过现有未保存 Runtime 草稿确认。
+验收同时覆盖 1440×920、1040×700、200% zoom、reduced motion、Forced Colors 和无横向溢出，并
+保留队员半身照、筛选、创建、编辑、Presence 与移除功能。
 
 ### Agent 执行过程门禁
 
