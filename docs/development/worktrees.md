@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: local-worktree-lifecycle
-last_updated: 2026-08-13
+last_updated: 2026-08-15
 ---
 
 # Git Worktree 生命周期与清理
@@ -19,7 +19,7 @@ Git worktree 共享 Git object database，但不共享工作目录里的生成�
 | --- | --- |
 | `target/` | Rust Debug、Test、Release、依赖与 incremental 产物 |
 | `node_modules/` | pnpm 依赖目录与链接树 |
-| `resources/bin/`、`resources/native/` | 开发 App 使用的 Core、CLI 与原生辅助程序 |
+| `resources/bin/` | 开发 App 使用的 Core 与 CLI |
 | `out/` | Electron Vite 构建结果 |
 | `dist/` | `.app` 与 DMG 打包结果 |
 

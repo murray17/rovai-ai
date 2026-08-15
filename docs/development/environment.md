@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: development-environment
-last_updated: 2026-08-09
+last_updated: 2026-08-15
 ---
 
 # 开发环境与依赖
@@ -14,7 +14,6 @@ last_updated: 2026-08-09
 | 包管理器 | 使用 pnpm；尚未声明最低版本或 `packageManager` pin | `pnpm-lock.yaml`、`package.json#scripts` |
 | Rust | Cargo workspace 使用 edition 2024；尚未声明 `rust-version` 或固定 toolchain | `Cargo.toml` |
 | macOS App | 最低 macOS 14.0，当前打包命令目标为 arm64 | `package.json#build.mac`、`package:mac`、`dist:mac` |
-| macOS 原生构建 | Xcode Command Line Tools（`xcrun clang++`） | `scripts/build-open-panel-prewarm.mjs` |
 
 当前已记录和验证的开发、打包主机范围是 macOS 14+ Apple Silicon。其他平台不应仅凭
 Electron、Node 或 Rust 能够启动就宣称受支持。
@@ -26,7 +25,6 @@ node --version
 pnpm --version
 rustc --version
 cargo --version
-xcrun --find clang++
 ```
 
 只有声明了 Git 前置条件的测试才必须额外检查：

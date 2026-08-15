@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: macos-build-and-packaging
-last_updated: 2026-08-13
+last_updated: 2026-08-15
 ---
 
 # macOS 构建、签名与打包
@@ -11,7 +11,7 @@ last_updated: 2026-08-13
 
 ## 构建
 
-构建 Release Core、bundled Agent CLI、macOS 文件面板原生预热器和 Electron：
+构建 Release Core、bundled Agent CLI 和 Electron：
 
 ```bash
 pnpm build
@@ -21,7 +21,6 @@ pnpm build
 
 ```bash
 pnpm core:build
-pnpm native:build:macos
 pnpm build:desktop
 ```
 
@@ -90,8 +89,6 @@ codesign --verify --strict \
   "dist/mac-arm64/Rovai-ai.app/Contents/Resources/bin/rovai-core"
 codesign --verify --strict \
   "dist/mac-arm64/Rovai-ai.app/Contents/Resources/bin/rovai"
-codesign --verify --strict \
-  "dist/mac-arm64/Rovai-ai.app/Contents/Resources/native/open-panel-prewarm.node"
 ```
 
 正式分发需要独立配置 Developer ID、Hardened Runtime entitlement 和 Apple
@@ -130,7 +127,6 @@ Ready。
 file "dist/mac-arm64/Rovai-ai.app/Contents/MacOS/Rovai-ai"
 file "dist/mac-arm64/Rovai-ai.app/Contents/Resources/bin/rovai-core"
 file "dist/mac-arm64/Rovai-ai.app/Contents/Resources/bin/rovai"
-file "dist/mac-arm64/Rovai-ai.app/Contents/Resources/native/open-panel-prewarm.node"
 ```
 
 需要确认本次 release Core 已进入 App 时，可比较 Mach-O UUID：

@@ -12,4 +12,14 @@ describe('macOS package metadata', () => {
     expect(packageMetadata.build.mac.extendInfo.CFBundleDisplayName).toBe('Rovai AI')
     expect(packageMetadata.build.mac.extendInfo.CFBundleName).toBeUndefined()
   })
+
+  it('does not build or package a native open-panel prewarmer', () => {
+    expect(packageMetadata.scripts).not.toHaveProperty('native:build:macos')
+    expect(packageMetadata.scripts.dev).not.toContain('native:build:macos')
+    expect(packageMetadata.scripts['build:desktop']).not.toContain('native:build:macos')
+    expect(packageMetadata.build.extraResources.map(({ to }: { to: string }) => to)).toEqual([
+      'bin/rovai-core',
+      'bin/rovai'
+    ])
+  })
 })

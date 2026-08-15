@@ -27,9 +27,8 @@
     "test:rust:core": "cargo test -p rovai-core --bin rovai-core",
     "test:rust:full": "cargo test --workspace",
     "test:rust:staged": "node scripts/check-rust-staged.mjs",
-    "native:build:macos": "node scripts/build-open-panel-prewarm.mjs",
-    "dev": "pnpm core:build:debug && pnpm native:build:macos && node scripts/dev-desktop.mjs",
-    "build:desktop": "pnpm native:build:macos && electron-vite build",
+    "dev": "pnpm core:build:debug && node scripts/dev-desktop.mjs",
+    "build:desktop": "electron-vite build",
     "build": "pnpm core:build && pnpm build:desktop",
     "typecheck": "tsc --noEmit",
     "test": "pnpm docs:test && pnpm docs:check && vitest run && node --test scripts/lib/check-rust-staged.test.mjs scripts/lib/copilot-native-turn-reconciliation-evidence.test.mjs scripts/lib/dev-desktop.test.mjs scripts/lib/missing-send-recovery-protocol.test.mjs scripts/lib/qualification-acceptance-v034.test.mjs scripts/lib/qualification-acceptance-v036.test.mjs scripts/lib/qualification-artifacts.test.mjs scripts/lib/qualification-bundle.test.mjs scripts/lib/qualification-case-v3.test.mjs scripts/lib/qualification-collaboration.test.mjs scripts/lib/qualification-collaboration-ledger.test.mjs scripts/lib/qualification-core.test.mjs scripts/lib/qualification-demo-cases.test.mjs scripts/lib/qualification-diagnostic-portfolio.test.mjs scripts/lib/qualification-evaluation.test.mjs scripts/lib/qualification-evidence-index.test.mjs scripts/lib/qualification-isolation.test.mjs scripts/lib/qualification-judge-views.test.mjs scripts/lib/qualification-observation.test.mjs scripts/lib/qualification-public-report.test.mjs scripts/lib/qualification-recovery.test.mjs scripts/lib/qualification-schema-validation.test.mjs scripts/lib/qualification-semantic-evidence.test.mjs scripts/lib/qualification-semantic-judge.test.mjs scripts/lib/qualification-tool-evidence.test.mjs scripts/lib/qualification-tool-ledger.test.mjs scripts/lib/qualification-tool-use-judge.test.mjs scripts/lib/qualification-workspace-mutation-ledger.test.mjs scripts/lib/tool-interaction-measurement/index.test.mjs scripts/lib/qualification-tool-measurement-spec.test.mjs scripts/benchmark-paired-collaboration.test.mjs scripts/benchmark/*.test.mjs scripts/benchmark/**/*.test.mjs",
@@ -136,10 +135,6 @@
       {
         "from": "resources/bin/rovai",
         "to": "bin/rovai"
-      },
-      {
-        "from": "resources/native/open-panel-prewarm.node",
-        "to": "native/open-panel-prewarm.node"
       }
     ],
     "afterPack": "scripts/after-pack.cjs",

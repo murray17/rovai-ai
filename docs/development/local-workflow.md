@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: local-development-workflow
-last_updated: 2026-08-14
+last_updated: 2026-08-15
 ---
 
 # 本地开发与 App 隔离流程
@@ -54,7 +54,7 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-`pnpm dev` 先构建 Debug Core 和原生模块，再通过 `scripts/dev-desktop.mjs` 启动 Electron。启动器会：
+`pnpm dev` 先构建 Debug Core 与 bundled Agent CLI，再通过 `scripts/dev-desktop.mjs` 启动 Electron。启动器会：
 
 - 为当前仓库解析稳定、独立的开发 `userData` 并在启动日志中打印精确路径；
 - 让 Desktop 通过显式 Core 参数把 Skill Library 固定在该开发 `userData` 内；
