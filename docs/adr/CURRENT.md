@@ -264,7 +264,7 @@ Related: Runtime Activity 与 Execution Evidence 作为输入，不替代 Qualif
 
 - **何时阅读：** 修改产品身份、Renderer surface、Run detail 或稳定 UI/UX 合同时阅读。
 - **当前架构：** [Diagnostics Center](../architecture/diagnostics-center.md)；其他主题 architecture summary pending
-- **当前合同：** [Run Process Detail Surface v3](../contracts/run-process-detail-surface-v3.md)
+- **当前合同：** [Run Process Detail Surface v6](../contracts/run-process-detail-surface-v6.md)
 
 <!-- adr-current-primary:begin topic=product-renderer -->
 | ADR | Decision |
@@ -274,6 +274,7 @@ Related: Runtime Activity 与 Execution Evidence 作为输入，不替代 Qualif
 | [ADR-0084](0084-conversation-surface-controls-and-stop-outcome-projection.md) | Conversation Surface Controls and Stop Outcome Projection |
 | [ADR-0154](0154-agent-level-execution-process-surface.md) | Agent-Level Continuous Execution Process Surface |
 | [ADR-0160](0160-focused-camp-inspector-and-single-approval-surface.md) | Focused Camp Inspector and Single Approval Surface |
+| [ADR-0190](0190-user-placeable-agent-execution-console.md) | User-Placeable Agent Execution Console |
 <!-- adr-current-primary:end -->
 
 Related: 具体 UI 交互继续以 docs/ui/ 为权威；ADR 只记录长期高成本边界。

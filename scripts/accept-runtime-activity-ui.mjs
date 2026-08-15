@@ -306,6 +306,64 @@ try {
     && JSON.stringify(agentDock.inspectorTabLabels) === JSON.stringify(['任务', '队员']),
   `Removed top Run/Audit entries or legacy Inspector tabs returned: ${JSON.stringify(agentDock)}`)
 
+  await evaluate(app.cdp, `document.querySelector('.run-pulse-bottom .execution-placement-button')?.click()`)
+  await waitForExpression(app.cdp, `(() => {
+    const activeTab = document.querySelector('.activity-tabs > .tabs-list [role="tab"][data-state="active"]')
+    return activeTab?.textContent?.includes('执行')
+      && Boolean(document.querySelector('.run-pulse-inspector'))
+      && !document.querySelector('.timeline-pane > .run-pulse')
+  })()`)
+  await evaluate(app.cdp, `(() => {
+    const chip = [...document.querySelectorAll('.run-pulse-inspector .run-pulse-chip[data-agent-id]')]
+      .find((candidate) => candidate.dataset.agentId === ${JSON.stringify(activeAgentId)})
+    chip?.click()
+    return Boolean(chip)
+  })()`)
+  await waitForExpression(app.cdp,
+    `document.querySelector('.execution-drawer')?.dataset.placement === 'inspector'`)
+  const executionSidecar = await collectExecutionSidecar(app.cdp)
+  assert(JSON.stringify(executionSidecar.inspectorTabLabels) === JSON.stringify(['任务', '队员', '执行'])
+    && executionSidecar.activeTab === '执行'
+    && executionSidecar.bottomDockCount === 0
+    && executionSidecar.sideDockCount === 1
+    && executionSidecar.chipCount === runtimes.length
+    && executionSidecar.uniqueAgentIds.length === runtimes.length
+    && executionSidecar.verticalRows
+    && executionSidecar.fullWidthRows
+    && executionSidecar.listScrollHeight > executionSidecar.listClientHeight
+    && executionSidecar.listOverflowY === 'auto'
+    && executionSidecar.drawerPlacement === 'inspector'
+    && !executionSidecar.resizeHandle
+    && executionSidecar.selectedAgentId === activeAgentId
+    && !executionSidecar.horizontalOverflow,
+  `Inspector execution Sidecar contract failed: ${JSON.stringify(executionSidecar)}`)
+  const executionSidecarCapture = join(outputDir, 'runtime-activity-execution-sidecar.png')
+  await capture(app.cdp, executionSidecarCapture)
+
+  await evaluate(app.cdp,
+    `document.querySelector('.run-pulse-inspector .execution-placement-button')?.click()`)
+  await waitForExpression(app.cdp, `(() => {
+    const drawer = document.querySelector('.execution-drawer')
+    return Boolean(document.querySelector('.timeline-pane > .run-pulse.run-pulse-bottom'))
+      && !document.querySelector('.activity-tabs [role="tab"][value="execution"]')
+      && drawer?.dataset.placement === 'bottom'
+      && Boolean(drawer.querySelector('.execution-drawer-resize-handle'))
+  })()`)
+  const returnedExecutionDock = await collectAgentDock(app.cdp)
+  const returnedExecutionSelection = await evaluate(app.cdp, `(() => ({
+    selectedAgentId: document.querySelector('.run-pulse-bottom .run-pulse-chip.is-selected')?.dataset.agentId ?? null,
+    drawerPlacement: document.querySelector('.execution-drawer')?.dataset.placement ?? null,
+    resizeHandle: Boolean(document.querySelector('.execution-drawer .execution-drawer-resize-handle')),
+    inspectorTabLabels: [...document.querySelectorAll('.activity-tabs > .tabs-list [role="tab"]')]
+      .map((tab) => tab.textContent?.replace(/\\d+/g, '').replace(/\\s+/g, ' ').trim() ?? '')
+  }))()`)
+  assert(returnedExecutionDock.followsTimeline
+    && returnedExecutionSelection.selectedAgentId === activeAgentId
+    && returnedExecutionSelection.drawerPlacement === 'bottom'
+    && returnedExecutionSelection.resizeHandle
+    && JSON.stringify(returnedExecutionSelection.inspectorTabLabels) === JSON.stringify(['任务', '队员']),
+  `Execution console did not return to the production bottom surface: ${JSON.stringify({ returnedExecutionDock, returnedExecutionSelection })}`)
+
   const observed = await collectRuntimeRows(app.cdp)
   assertRuntimeRows(observed)
   const totalToolRows = observed.reduce((total, row) => total + row.toolTitles.length, 0)
@@ -529,6 +587,8 @@ try {
       conversationPresentation,
       messageAuthorProfileTriggers,
       agentLevelProcessDock: agentDock,
+      executionSidecar,
+      executionReturnedToBottom: returnedExecutionSelection,
       recipientOnlyHandoffFooter: handoffFooter,
       wideComposerLayout,
       wideConversationLayout,
@@ -539,6 +599,7 @@ try {
     captures: {
       top: topCapture,
       authorPopover: authorPopoverCapture,
+      executionSidecar: executionSidecarCapture,
       bottom: bottomCapture,
       toolOutput: toolOutputCapture,
       recoveryBlocker: recoveryBlockerCapture,
@@ -1054,6 +1115,39 @@ async function collectAgentDock(cdp) {
       topRunBadgeCount: document.querySelectorAll('.topbar .run-badge').length,
       auditTabCount,
       inspectorTabLabels
+    }
+  })()`)
+}
+
+async function collectExecutionSidecar(cdp) {
+  return evaluate(cdp, `(() => {
+    const sideDock = document.querySelector('.run-pulse-inspector')
+    const list = sideDock?.querySelector('.run-pulse-list')
+    const chips = [...(list?.querySelectorAll('.run-pulse-chip[data-agent-id]') ?? [])]
+    const rects = chips.map((chip) => chip.getBoundingClientRect())
+    const agentIds = chips.map((chip) => chip.dataset.agentId ?? '').filter(Boolean)
+    const inspectorTabLabels = [...document.querySelectorAll('.activity-tabs > .tabs-list [role="tab"]')]
+      .map((tab) => tab.textContent?.replace(/\\d+/g, '').replace(/\\s+/g, ' ').trim() ?? '')
+    const activeTab = document.querySelector('.activity-tabs > .tabs-list [role="tab"][data-state="active"]')
+      ?.textContent?.replace(/\\d+/g, '').replace(/\\s+/g, ' ').trim() ?? null
+    const drawer = document.querySelector('.execution-drawer')
+    return {
+      inspectorTabLabels,
+      activeTab,
+      bottomDockCount: document.querySelectorAll('.timeline-pane > .run-pulse').length,
+      sideDockCount: document.querySelectorAll('.run-pulse-inspector').length,
+      chipCount: chips.length,
+      uniqueAgentIds: [...new Set(agentIds)],
+      verticalRows: rects.every((rect, index) => index === 0
+        || (Math.abs(rect.x - rects[0].x) <= 1 && rect.y > rects[index - 1].y)),
+      fullWidthRows: rects.every((rect) => list && Math.abs(rect.width - list.clientWidth) <= 4),
+      listClientHeight: list?.clientHeight ?? 0,
+      listScrollHeight: list?.scrollHeight ?? 0,
+      listOverflowY: list ? getComputedStyle(list).overflowY : null,
+      drawerPlacement: drawer?.dataset.placement ?? null,
+      resizeHandle: Boolean(drawer?.querySelector('.execution-drawer-resize-handle')),
+      selectedAgentId: sideDock?.querySelector('.run-pulse-chip.is-selected')?.dataset.agentId ?? null,
+      horizontalOverflow: document.documentElement.scrollWidth > innerWidth + 1
     }
   })()`)
 }

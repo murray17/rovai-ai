@@ -136,7 +136,7 @@ pnpm accept:member-lifecycle-ui
 
 ### Agent 执行过程门禁
 
-Renderer 的权威行为见 [Run Process Detail Surface v3](../contracts/run-process-detail-surface-v3.md) 与
+Renderer 的权威行为见 [Run Process Detail Surface v6](../contracts/run-process-detail-surface-v6.md) 与
 [当前 UI 详规：Camp 执行过程](../ui/components/conversation-workspace.md#camp-执行过程)。修改 AgentRun 分组、执行台、Drawer、
 Task Related execution、停止结果或 Inspector 页签后，至少运行：
 
@@ -162,9 +162,13 @@ pnpm accept:runtime-activity-ui
   Home/End、Enter 恢复默认和 ARIA 数值均通过。用户高度在同一 Main Window Session 的收起重开、
   切换 Agent/Camp 后保持；调整不得改变所选 Agent/stage，sticky-bottom 仍跟随，手动上滚仍暂停；
   最大高度在 1040×700 与 200% zoom 下不覆盖消息历史、Agent 执行台、Approval Dock 或 Composer；
-- Inspector 仅有“任务 / 队员”，不存在 Context Delivery/Approval/Activity/Audit Tab、旧 route/state
-  或另一条过程时间线；“队员”读取真实 CampMember/AgentProfile，并用既有 Core 命令切换一个符合
-  presence/leave 约束的 Default Lead；Task/停止结果入口按 Agent 打开过程，顶栏不存在执行入口；
+- 默认底部 placement 下 Inspector 仅有“任务 / 队员”；点击“移到右侧”后底部 Run Pulse/Drawer
+  消失，Inspector 自动显示并增加、激活唯一“执行”第三 Tab。右侧入口为全宽纵向列表、最多约四行且
+  超出内部滚动；详情不显示 resize separator。点击“移回底部”恢复横向 Run Pulse、底部 Drawer、
+  原基础 Tab、selected Agent/focused Run 和底部高度偏好；任一时刻不存在第二条过程时间线或重复入口；
+- Context Delivery/Approval/Activity/Audit Tab、旧 route/state 不得返回；“队员”读取真实
+  CampMember/AgentProfile，并用既有 Core 命令切换一个符合 presence/leave 约束的 Default Lead；
+  Task/停止结果/世界地图入口在当前 placement 按 Agent 打开过程，顶栏不存在执行入口；
 - Approval Dock 是唯一普通审批决定 surface；顶栏与通知摘要只展开、定位并聚焦 Dock，不改变 Inspector
   显隐或页签。收起/展开不改变队列，解决最后一项后焦点返回 Composer；
 - Drawer 不提供 Agent 或 Run 级 Stop/Cancel/Retry；唯一 CampTurn Stop、Approval Dock 与 Composer 在

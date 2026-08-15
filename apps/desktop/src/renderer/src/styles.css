@@ -1096,7 +1096,7 @@ button:disabled { opacity: 0.52; cursor: default; }
 .workspace-grid.inspector-collapsed { grid-template-columns: minmax(0, 1fr); }
 .timeline-pane, .activity-pane { min-width: 0; min-height: 0; overflow: hidden; }
 .timeline-pane { display: flex; grid-column: 1; grid-row: 1; flex-direction: column; background: var(--conversation-surface); }
-.run-pulse { display: grid; min-height: 54px; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; padding: 8px 20px; border-top: 2px solid var(--line-strong); color: var(--muted); background: var(--surface); font-size: 11px; }
+.run-pulse { display: grid; min-height: 54px; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 20px; border-top: 2px solid var(--line-strong); color: var(--muted); background: var(--surface); font-size: 11px; }
 .run-pulse-heading { display: grid; min-width: 0; grid-template-rows: auto auto; align-items: center; justify-content: start; gap: 1px; white-space: nowrap; }
 .run-pulse-title { display: flex; min-width: 0; align-items: center; gap: 7px; }
 .run-pulse-mark { display: grid; width: 18px; height: 16px; place-items: center; color: var(--brand); }
@@ -1124,6 +1124,10 @@ button:disabled { opacity: 0.52; cursor: default; }
 .run-pulse-chip-state.tone-danger { color: var(--danger); }
 .run-pulse-chip-state.tone-danger::before { background: currentColor; }
 .run-pulse-chip-state.tone-neutral { color: var(--muted); }
+.execution-placement-button { display: inline-flex; min-width: 30px; min-height: 30px; align-items: center; justify-content: center; gap: 6px; padding: 0 7px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; font-size: 9.5px; font-weight: 680; white-space: nowrap; cursor: pointer; }
+.execution-placement-button:hover { color: var(--ink); background: var(--surface-hover); }
+.execution-placement-button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.execution-placement-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.55; }
 .activity-pane { display: flex; grid-column: 2; grid-row: 1 / span 2; flex-direction: column; border-left: 1px solid var(--conversation-inspector-line); color: var(--ink); background: var(--inspector-surface); }
 .conversation-controls { min-width: 0; grid-column: 1; grid-row: 2; background: var(--conversation-surface); }
 .execution-drawer { position: relative; display: grid; min-height: 0; max-height: min(320px, 38vh); flex: 0 0 auto; grid-template-rows: auto minmax(0, 1fr); border-top: 1px solid var(--line); color: var(--ink); background: var(--surface); overflow: hidden; }
@@ -1182,20 +1186,50 @@ button:disabled { opacity: 0.52; cursor: default; }
 .execution-run-recipient { display: inline-flex; min-width: 0; align-items: center; gap: 5px; color: var(--muted); font-size: 9px; }
 .execution-run-recipient .member-avatar { --member-avatar-size: 18px; }
 .execution-process-card .execution-disclosure { max-width: none; margin-top: 8px; }
+.execution-sidecar-panel { display: grid; min-width: 0; min-height: 0; flex: 1 1 auto; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
+.run-pulse-inspector { min-height: 0; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; gap: 5px 8px; padding: 7px 8px 6px; border-top: 0; border-bottom: 1px solid var(--line); background: var(--inspector-surface); }
+.run-pulse-inspector .run-pulse-heading { grid-column: 1; grid-row: 1; }
+.run-pulse-inspector .execution-placement-button { grid-column: 2; grid-row: 1; justify-self: end; }
+.run-pulse-inspector .run-pulse-list { display: grid; max-height: min(172px, 28vh); grid-column: 1 / -1; grid-row: 2; gap: 2px; overflow-x: hidden; overflow-y: auto; padding-right: 2px; }
+.run-pulse-inspector .run-pulse-list > li { min-width: 0; }
+.run-pulse-inspector .run-pulse-chip { width: 100%; min-width: 0; max-width: none; min-height: 40px; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 7px; padding: 5px 7px; border-color: transparent; background: transparent; }
+.run-pulse-inspector .run-pulse-chip:hover { border-color: transparent; background: var(--surface-hover); }
+.run-pulse-inspector .run-pulse-chip.is-selected { border-color: var(--control-line); background: var(--brand-soft); box-shadow: none; }
+.run-pulse-inspector .run-pulse-chip-copy { margin-inline-start: 0; }
+.execution-sidecar-detail { min-width: 0; min-height: 0; overflow: hidden; }
+.execution-sidecar-empty { display: grid; height: 100%; place-items: center; padding: 24px; color: var(--faint); text-align: center; font-size: 11px; line-height: 1.55; }
+.execution-drawer-inspector { height: 100%; max-height: none; border-top: 0; }
+.execution-drawer-inspector .execution-drawer-header { align-items: flex-start; padding: 10px 11px 9px; }
+.execution-drawer-inspector .execution-drawer-agent { align-items: flex-start; }
+.execution-drawer-inspector .execution-drawer-title-line { display: grid; gap: 1px; }
+.execution-drawer-inspector .execution-model-params { max-width: 170px; }
+.execution-drawer-inspector .execution-drawer-header p { font-size: 9px; }
+.execution-drawer-inspector .execution-drawer-header .quiet-button { min-width: 28px; padding: 0 6px; }
+.execution-drawer-inspector .execution-drawer-body { padding: 10px 10px 17px; }
+.execution-drawer-inspector .execution-process-card { padding: 9px; }
+.execution-drawer-inspector .execution-run-recipients { display: grid; grid-template-columns: auto minmax(0, 1fr); }
+.execution-drawer-inspector .tool-output-copy-button { flex: 0 0 auto; white-space: nowrap; }
 .inspector-meta { flex: 0 0 auto; overflow: hidden; padding: 8px 12px; border-top: 1px solid var(--line); color: var(--faint); font: 500 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 1040px) {
   .run-pulse { padding-right: 14px; padding-left: 14px; }
   .run-pulse-count { display: none; }
   .run-pulse-chip { min-width: 122px; max-width: 176px; }
+  .execution-placement-button span { display: none; }
   .execution-drawer { max-height: min(270px, 38vh); }
   .execution-drawer-header, .execution-drawer-body { padding-right: 14px; padding-left: 14px; }
+  .run-pulse-inspector { padding-right: 8px; padding-left: 8px; }
+  .run-pulse-inspector .run-pulse-chip { min-width: 0; max-width: none; }
+  .execution-drawer-inspector { max-height: none; }
+  .execution-drawer-inspector .execution-drawer-header, .execution-drawer-inspector .execution-drawer-body { padding-right: 10px; padding-left: 10px; }
+  .execution-drawer-inspector .execution-model-params { max-width: 122px; }
 }
 
 @media (max-width: 1040px) and (max-height: 760px) {
   .execution-drawer { max-height: 210px; }
   .execution-drawer-header { padding-top: 11px; padding-bottom: 8px; }
   .execution-drawer-body { padding-top: 10px; padding-bottom: 12px; }
+  .execution-drawer-inspector { max-height: none; }
 }
 .timeline-scroll, .tab-scroll { min-height: 0; overflow: auto; }
 .timeline-scroll { flex: 1 1 auto; padding: 22px 27px 30px; }

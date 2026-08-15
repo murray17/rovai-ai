@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.83
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -14,6 +14,8 @@ last_updated: 2026-08-15
 > Missing-Send、MCP Projection、打包态 UI 与交付门禁均已通过。
 >
 > 前置版本：[v0.82 冷启动恢复壳层与 bundled Skill 快速路径](../v0.82/README.md)
+>
+> 后续版本：[v0.84 可切换执行台与 Inspector Sidecar](../v0.84/README.md)
 
 ## 版本目标
 

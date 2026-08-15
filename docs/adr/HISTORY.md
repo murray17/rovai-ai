@@ -201,4 +201,5 @@ generated_from: docs/adr-front-matter
 | [ADR-0187](0187-durable-composer-recipient-continuation.md) | Durable Composer Recipient Continuation | `accepted` | `cross-version` | [v0.80](../versions/v0.80/README.md) | — |
 | [ADR-0188](0188-bundled-skill-bootstrap-fast-path-and-execution-integrity.md) | Bundled Skill Bootstrap Fast Path and Execution-Time Integrity | `accepted` | `cross-version` | [v0.82](../versions/v0.82/README.md) | — |
 | [ADR-0189](0189-settings-only-runtime-preview-outside-product-catalog.md) | Settings-Only Runtime Preview Outside the Product Catalog | `accepted` | `cross-version` | [v0.83](../versions/v0.83/README.md) | — |
+| [ADR-0190](0190-user-placeable-agent-execution-console.md) | User-Placeable Agent Execution Console | `accepted` | `cross-version` | [v0.84](../versions/v0.84/README.md) | — |
 <!-- adr-history:end -->

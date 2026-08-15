@@ -41,7 +41,7 @@ Camp 可以回到 Quick Chat。Notification navigation、恢复位置写入和�
 
 会话阅读面可以在常规时间线与沉浸世界地图之间切换。切换入口与地图路线显隐使用阅读面内的紧凑
 悬浮控件，不占用 Camp Header 或独立工具栏；左侧导航、Inspector、Approval/Recovery Dock、Composer
-与 Agent 执行台保持既有位置和权威。切换不得清空时间线滚动、Draft、Inspector 选择、Approval、
+与 Agent 执行台保持当前用户选择的承载位置和权威。切换不得清空时间线滚动、Draft、Inspector 选择、Approval、
 执行台焦点或正在接收的真实活动更新。
 
 世界地图只消费当前 Camp 中可呈现队员和既有 AgentRun、Runtime activity、A2A/Delivery 事实的有界
@@ -122,17 +122,32 @@ Mention，本 Draft 也只回到默认 Lead，不能让路由控件反复出现�
 
 ## Camp 执行过程
 
-同一 Camp 中每个曾有 AgentRun 的队员只保留一个 Agent 过程入口。按需 Drawer 以时间顺序展示
+同一 Camp 中每个曾有 AgentRun 的队员只保留一个 Agent 过程入口。按需详情 surface 以时间顺序展示
 该 Agent 的独立 Run stage、状态、收件人与证据；这只是 Renderer grouping，不创建 Process
 领域对象，也不合并 AgentRun。
+
+执行台默认位于时间线底部：横向队员过程入口下方打开可调高度详情。用户可通过具名操作把同一执行台
+移到现有 Inspector；此时底部入口与详情完全移除，Inspector 临时增加“执行”第三 Tab，并自动显示、
+激活该 Tab。右侧使用既有 310px / compact 260px 宽度，不新增可拖宽 Sidecar。移回底部后恢复用户
+切换前最后使用的“任务 / 队员”基础 Tab；新 Camp workspace 和应用重开仍从底部开始。
+
+两个位置共享当前 Agent 与精确 Run selection、Evidence load 和状态投影，不允许同时存在两套过程列表
+或详情。底部入口保持横向；右侧入口改为全宽纵向行，按 CampMember 顺序显示头像、名称和非颜色状态，
+最多约四行，更多队员在列表内部滚动。右侧详情占据剩余高度并独立滚动，不显示高度把手；底部详情继续
+保留鼠标、键盘调高与 Main Window Session 内高度偏好。
 
 打开过程入口时，先定位最新 running，其次最新 non-terminal，最后最新 terminal Run。用户显式
 发送成功且未在查看 non-terminal Run 时，按 Core 有序回执打开首个 Run 的精确 stage，但不夺走
 Composer 焦点。后台 A2A、Runtime 事件、重载与恢复不得自动打开、切换或抢焦点。
 
-聚焦 live Run 且用户停留 Drawer 底部时可跟随最新输出；手动上滚后暂停，回到底部恢复。该跟随
+聚焦 live Run 且用户停留详情底部时可跟随最新输出；手动上滚后暂停，回到底部恢复。该跟随
 不能滚动公共消息时间线。Drawer 空间不足时收缩、滚动或变为摘要，不能遮住 Approval Dock、
 Composer 或唯一 Stop。
+
+Task related execution、停止结果和世界地图入口在右侧承载时必须显示 Inspector、激活“执行”并打开
+精确 Agent/Run。关闭详情只清除 selection，保留位置和队员入口；隐藏 Inspector 只改变可见性，再次
+显示时保留“执行”Tab、Agent 与 Run。位置切换后焦点进入另一位置的对应切换控件，详情关闭/Escape
+优先返回仍连接的真实过程入口，无法返回时落到当前位置切换控件。
 
 命令、文件操作及其失败作为可展开 Tool Call 留在对应 Run stage。超长 Tool 输出只渲染有界的
 开头预览；完整内容由轻量、Icon-only 且有可访问名称的复制控件按需从 Core 读取，不能为了复制
@@ -198,10 +213,14 @@ Message Mention 通知导航必须以 `campId + sourceMessageId` 加载和定位
 
 ## Camp 右侧详情栏（Inspector）
 
-ordinary Inspector 只有“任务 / 队员”。Task 提供列表与详情责任层；队员读取当前 CampMember 与
+默认底部执行台时，ordinary Inspector 只有“任务 / 队员”。Task 提供列表与详情责任层；队员读取当前 CampMember 与
 AgentProfile，并通过既有 versioned Core 命令提供唯一 Default Lead 选择器。ContextManifest 与
 Runtime Input Delivery Evidence 继续存在于 Core/Snapshot，但不进入普通 Inspector；审批只在
 Approval Dock 决定。
+
+仅当用户把执行台移到右侧时，Inspector 增加条件式“执行”第三 Tab；它承载同一 Agent 过程详情，
+不是新的 Activity/Audit timeline，也不改变 Task、队员、Default Lead 或 Approval 边界。移回底部后
+该 Tab 从 DOM 和键盘顺序中消失。
 
 Inspector 可从 Camp 顶栏完整隐藏/恢复，常规宽 310px，`1040–1179px` 为 260px。隐藏不会改变
 当前页签、Draft、选择或消息滚动位置。

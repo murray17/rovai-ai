@@ -80,6 +80,8 @@ const EXECUTION_DRAWER_KEYBOARD_PAGE_STEP = 80
 const CAMP_CONVERSATION_VIEW_STORAGE_KEY = 'rovai.camp-conversation-view.v1'
 export type CampInspectorTab = 'tasks' | 'members'
 export type CampConversationView = 'conversation' | 'world'
+type ExecutionConsolePlacement = 'bottom' | 'inspector'
+type CampInspectorSurfaceTab = CampInspectorTab | 'execution'
 type AttachmentKind = 'file' | 'directory'
 type AttachmentDragKind = 'files' | 'directory'
 type AttachmentPreparationInput = { file: File; kindHint: AttachmentKind }
@@ -904,6 +906,8 @@ export function CampWorkspace({
   })
   const [worldMapRoutesVisible, setWorldMapRoutesVisible] = useState(false)
   const [localInspectorTab, setLocalInspectorTab] = useState<CampInspectorTab>('tasks')
+  const [executionPlacement, setExecutionPlacement] = useState<ExecutionConsolePlacement>('bottom')
+  const [executionInspectorActive, setExecutionInspectorActive] = useState(false)
   const [executionDrawerAgentId, setExecutionDrawerAgentId] = useState<string | null>(null)
   const [executionDrawerFocusedRunId, setExecutionDrawerFocusedRunId] = useState<string | null>(null)
   const [executionDrawerFocusRequest, setExecutionDrawerFocusRequest] = useState<ExecutionDrawerFocusRequest>({
@@ -913,7 +917,13 @@ export function CampWorkspace({
   const [resolvingRecoveryBlockerId, setResolvingRecoveryBlockerId] = useState<string | null>(null)
   const [submittedExecutionRequest, setSubmittedExecutionRequest] = useState<CampMessageSendReceipt | null>(null)
   const executionDrawerTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const bottomPlacementButtonRef = useRef<HTMLButtonElement>(null)
+  const inspectorPlacementButtonRef = useRef<HTMLButtonElement>(null)
   const inspectorTab = controlledInspectorTab ?? localInspectorTab
+  const inspectorSurfaceTab: CampInspectorSurfaceTab = executionPlacement === 'inspector'
+    && executionInspectorActive
+    ? 'execution'
+    : inspectorTab
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null)
   const [taskFocusRequest, setTaskFocusRequest] = useState(0)
   const [earlierMessageStatus, setEarlierMessageStatus] = useState<
@@ -1024,14 +1034,23 @@ export function CampWorkspace({
     setExecutionDrawerAgentId(null)
     setExecutionDrawerFocusedRunId(null)
     setSubmittedExecutionRequest(null)
+    setExecutionPlacement('bottom')
+    setExecutionInspectorActive(false)
     executionDrawerTriggerRef.current = null
   }, [snapshot.camp.id])
   useLayoutEffect(() => {
     if (executionDrawerAgentId !== null) return
     const trigger = executionDrawerTriggerRef.current
     executionDrawerTriggerRef.current = null
-    if (trigger?.isConnected) trigger.focus({ preventScroll: true })
-  }, [executionDrawerAgentId])
+    if (trigger?.isConnected) {
+      trigger.focus({ preventScroll: true })
+      return
+    }
+    const fallback = executionPlacement === 'inspector'
+      ? inspectorPlacementButtonRef.current
+      : bottomPlacementButtonRef.current
+    fallback?.focus({ preventScroll: true })
+  }, [executionDrawerAgentId, executionPlacement])
 
   const message = useMemo(
     () => structuredCampContentPlainText(messageContent, snapshot.members),
@@ -2116,9 +2135,43 @@ export function CampWorkspace({
     onInspectorTabChange?.(tab)
   }
 
+  const selectInspectorSurfaceTab = (tab: CampInspectorSurfaceTab): void => {
+    if (tab === 'execution') {
+      setExecutionInspectorActive(true)
+      return
+    }
+    setExecutionInspectorActive(false)
+    selectInspectorTab(tab)
+  }
+
   const openInspector = (tab: CampInspectorTab): void => {
+    setExecutionInspectorActive(false)
     selectInspectorTab(tab)
     onOpenInspector?.(tab)
+  }
+
+  const focusPlacementButton = (placement: ExecutionConsolePlacement): void => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const target = placement === 'inspector'
+          ? inspectorPlacementButtonRef.current
+          : bottomPlacementButtonRef.current
+        target?.focus({ preventScroll: true })
+      })
+    })
+  }
+
+  const moveExecutionToInspector = (): void => {
+    setExecutionPlacement('inspector')
+    setExecutionInspectorActive(true)
+    onOpenInspector?.(inspectorTab)
+    focusPlacementButton('inspector')
+  }
+
+  const moveExecutionToBottom = (): void => {
+    setExecutionPlacement('bottom')
+    setExecutionInspectorActive(false)
+    focusPlacementButton('bottom')
   }
 
   const loadEarlierMessages = async (): Promise<void> => {
@@ -2148,6 +2201,10 @@ export function CampWorkspace({
   ): void => {
     const process = executionProcessByAgentId.get(agentId)
     if (!process) return
+    if (executionPlacement === 'inspector') {
+      setExecutionInspectorActive(true)
+      onOpenInspector?.(inspectorTab)
+    }
     const requestedRun = options.runId
       ? process.runs.find((run) => run.id === options.runId) ?? null
       : null
@@ -2200,6 +2257,30 @@ export function CampWorkspace({
     snapshot.agentRuns,
     submittedExecutionRequest
   ])
+
+  const executionDrawer = executionDrawerProcess ? (
+    <ExecutionDrawer
+      key={executionDrawerProcess.agentId}
+      placement={executionPlacement}
+      process={executionDrawerProcess}
+      member={memberById.get(executionDrawerProcess.agentId) ?? null}
+      profile={executionDrawerProfile}
+      installation={executionDrawerInstallation}
+      deliveries={snapshot.messageDeliveries}
+      progressByRunId={executionProgressByRunId}
+      campId={snapshot.camp.id}
+      truncatedEvidenceByRunId={truncatedEvidenceByRunId}
+      loadedEvidenceCountByRunId={loadedEvidenceCountByRunId}
+      runHistoryComplete={openCoverage?.agentRuns.complete ?? true}
+      cancellingTurnIds={cancellingTurnIds}
+      focusedRunId={executionDrawerFocusedRunId}
+      focusRequest={executionDrawerFocusRequest}
+      onClose={closeExecutionProcess}
+      onResolveRecoveryBlocker={resolveRecoveryBlocker}
+      resolvingRecoveryBlockerId={resolvingRecoveryBlockerId}
+      memberById={memberById}
+    />
+  ) : null
 
   return (
     <section className="workspace-shell camp-workspace" aria-label={`会话：${snapshot.camp.title}`}>
@@ -2516,35 +2597,19 @@ export function CampWorkspace({
               />
             </div>
           </div>
-          <RunPulse
-            processes={executionProcesses}
-            memberById={memberById}
-            stopping={stopping}
-            selectedAgentId={executionDrawerAgentId}
-            onOpen={openExecutionProcess}
-          />
-          {executionDrawerProcess && (
-            <ExecutionDrawer
-              key={executionDrawerProcess.agentId}
-              process={executionDrawerProcess}
-              member={memberById.get(executionDrawerProcess.agentId) ?? null}
-              profile={executionDrawerProfile}
-              installation={executionDrawerInstallation}
-              deliveries={snapshot.messageDeliveries}
-              progressByRunId={executionProgressByRunId}
-              campId={snapshot.camp.id}
-              truncatedEvidenceByRunId={truncatedEvidenceByRunId}
-              loadedEvidenceCountByRunId={loadedEvidenceCountByRunId}
-              runHistoryComplete={openCoverage?.agentRuns.complete ?? true}
-              cancellingTurnIds={cancellingTurnIds}
-              focusedRunId={executionDrawerFocusedRunId}
-              focusRequest={executionDrawerFocusRequest}
-              onClose={closeExecutionProcess}
-              onResolveRecoveryBlocker={resolveRecoveryBlocker}
-              resolvingRecoveryBlockerId={resolvingRecoveryBlockerId}
+          {executionPlacement === 'bottom' && (
+            <RunPulse
+              placement="bottom"
+              placementButtonRef={bottomPlacementButtonRef}
+              processes={executionProcesses}
               memberById={memberById}
+              stopping={stopping}
+              selectedAgentId={executionDrawerAgentId}
+              onOpen={openExecutionProcess}
+              onMovePlacement={moveExecutionToInspector}
             />
           )}
+          {executionPlacement === 'bottom' && executionDrawer}
         </section>
 
         {inspectorVisible && <aside
@@ -2567,14 +2632,17 @@ export function CampWorkspace({
           }}
         >
           <Tabs.Root
-            value={inspectorTab}
-            onValueChange={(value) => selectInspectorTab(value as CampInspectorTab)}
+            value={inspectorSurfaceTab}
+            onValueChange={(value) => selectInspectorSurfaceTab(value as CampInspectorSurfaceTab)}
             activationMode="manual"
             className="activity-tabs"
           >
             <Tabs.List className="tabs-list sticky-tabs" aria-label="会话详情">
               <Tabs.Trigger value="tasks">任务 <small>{openCoverage?.tasks.totalCount ?? snapshot.tasks.length}</small></Tabs.Trigger>
               <Tabs.Trigger value="members">队员 <small>{campInspectorMembers(snapshot.members).length}</small></Tabs.Trigger>
+              {executionPlacement === 'inspector' && (
+                <Tabs.Trigger value="execution">执行 <small>{executionProcesses.length}</small></Tabs.Trigger>
+              )}
             </Tabs.List>
             <Tabs.Content value="tasks" className="tab-scroll task-panel-scroll">
               <TaskPanel
@@ -2596,6 +2664,27 @@ export function CampWorkspace({
                 onChangeLead={onChangeLead}
               />
             </Tabs.Content>
+            {executionPlacement === 'inspector' && (
+              <Tabs.Content value="execution" className="execution-sidecar-panel">
+                <RunPulse
+                  placement="inspector"
+                  placementButtonRef={inspectorPlacementButtonRef}
+                  processes={executionProcesses}
+                  memberById={memberById}
+                  stopping={stopping}
+                  selectedAgentId={executionDrawerAgentId}
+                  onOpen={openExecutionProcess}
+                  onMovePlacement={moveExecutionToBottom}
+                />
+                <div className="execution-sidecar-detail">
+                  {executionDrawer ?? (
+                    <div className="execution-sidecar-empty">
+                      选择一位队员，查看连续执行历史。
+                    </div>
+                  )}
+                </div>
+              </Tabs.Content>
+            )}
           </Tabs.Root>
           <div className="inspector-meta">
             {snapshot.agentRuns.length > 0 && `run ${shortIdentity(snapshot.agentRuns[snapshot.agentRuns.length - 1].id)} · `}seq {snapshot.throughGlobalSequence}
@@ -3001,17 +3090,23 @@ export function runPulseMemberNameLines(
 }
 
 function RunPulse({
+  placement,
+  placementButtonRef,
   processes,
   memberById,
   stopping,
   selectedAgentId,
-  onOpen
+  onOpen,
+  onMovePlacement
 }: {
+  placement: ExecutionConsolePlacement
+  placementButtonRef: RefObject<HTMLButtonElement | null>
   processes: AgentExecutionProcess[]
   memberById: Map<string, CampSnapshot['members'][number]>
   stopping: boolean
   selectedAgentId: string | null
   onOpen(agentId: string, trigger: HTMLButtonElement): void
+  onMovePlacement(): void
 }): JSX.Element {
   const visibleProcesses = processes.slice().sort((left, right) => {
     const leftPosition = memberById.get(left.agentId)?.memberOrder ?? Number.MAX_SAFE_INTEGER
@@ -3022,8 +3117,12 @@ function RunPulse({
     process.runs.some(agentRunCountsAsExecuting)
   ).length
   if (visibleProcesses.length === 0) return <></>
+  const placementLabel = placement === 'bottom' ? '移到右侧' : '移回底部'
+  const placementAriaLabel = placement === 'bottom'
+    ? '将执行台移到右侧检查器'
+    : '将执行台移回会话底部'
   return (
-    <div className="run-pulse" aria-label="Agent 执行台">
+    <div className={`run-pulse run-pulse-${placement}`} aria-label="Agent 执行台">
       <div className="run-pulse-heading">
         <span className="run-pulse-title">
           <span className="run-pulse-mark" aria-hidden="true">
@@ -3080,11 +3179,37 @@ function RunPulse({
           )
         })}
       </ul>
+      <button
+        ref={placementButtonRef}
+        className="execution-placement-button"
+        type="button"
+        aria-label={placementAriaLabel}
+        title={placementLabel}
+        onClick={onMovePlacement}
+      >
+        <ExecutionPlacementIcon target={placement === 'bottom' ? 'inspector' : 'bottom'} />
+        <span>{placementLabel}</span>
+      </button>
     </div>
   )
 }
 
+function ExecutionPlacementIcon({ target }: { target: ExecutionConsolePlacement }): JSX.Element {
+  return target === 'inspector' ? (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M15.5 3.5v13" />
+      <path d="m7 6.5 3.5 3.5L7 13.5" />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M3.5 15.5h13" />
+      <path d="m6.5 7 3.5 3.5L13.5 7" />
+    </svg>
+  )
+}
+
 function ExecutionDrawer({
+  placement,
   process,
   member,
   profile,
@@ -3103,6 +3228,7 @@ function ExecutionDrawer({
   resolvingRecoveryBlockerId,
   memberById
 }: {
+  placement: ExecutionConsolePlacement
   process: AgentExecutionProcess
   member: CampSnapshot['members'][number] | null
   profile: AgentProfile | null
@@ -3152,7 +3278,7 @@ function ExecutionDrawer({
     followingLatestRef.current = following
     setFollowingLatestState((current) => current === following ? current : following)
   }
-  const appliedHeight = preferredHeight !== null && heightBounds
+  const appliedHeight = placement === 'bottom' && preferredHeight !== null && heightBounds
     ? clampExecutionDrawerHeight(preferredHeight, heightBounds)
     : null
 
@@ -3250,6 +3376,11 @@ function ExecutionDrawer({
   useLayoutEffect(() => {
     const drawer = drawerRef.current
     const timelinePane = drawer?.parentElement
+    if (placement !== 'bottom') {
+      setHeightBounds(null)
+      setMeasuredHeight(null)
+      return undefined
+    }
     if (!drawer || !timelinePane) return undefined
     const runPulse = timelinePane.querySelector<HTMLElement>('.run-pulse')
     const measure = (): void => {
@@ -3276,7 +3407,7 @@ function ExecutionDrawer({
       observer?.disconnect()
       window.removeEventListener('resize', measure)
     }
-  }, [])
+  }, [placement])
 
   useLayoutEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -3355,21 +3486,25 @@ function ExecutionDrawer({
   const defaultMaxHeight = heightBounds && typeof window !== 'undefined'
     ? defaultExecutionDrawerMaxHeight(window.innerWidth, window.innerHeight, heightBounds)
     : null
-  const drawerStyle: CSSProperties | undefined = appliedHeight === null
-    ? defaultMaxHeight === null ? undefined : { maxHeight: defaultMaxHeight }
-    : { height: appliedHeight, minHeight: appliedHeight, maxHeight: appliedHeight }
+  const drawerStyle: CSSProperties | undefined = placement === 'inspector'
+    ? undefined
+    : appliedHeight === null
+      ? defaultMaxHeight === null ? undefined : { maxHeight: defaultMaxHeight }
+      : { height: appliedHeight, minHeight: appliedHeight, maxHeight: appliedHeight }
 
   return (
     <section
       id="agent-execution-drawer"
       ref={drawerRef}
-      className={`execution-drawer${preferredHeight !== null ? ' is-user-sized' : ''}${resizing ? ' is-resizing' : ''}`}
+      className={`execution-drawer execution-drawer-${placement}${preferredHeight !== null && placement === 'bottom' ? ' is-user-sized' : ''}${resizing ? ' is-resizing' : ''}`}
       role="region"
       aria-labelledby="execution-drawer-title"
       tabIndex={-1}
-      data-user-sized={preferredHeight !== null ? 'true' : 'false'}
+      data-placement={placement}
+      data-user-sized={preferredHeight !== null && placement === 'bottom' ? 'true' : 'false'}
       style={drawerStyle}
     >
+      {placement === 'bottom' && (
         <div
           className="execution-drawer-resize-handle"
           role="separator"
@@ -3392,6 +3527,7 @@ function ExecutionDrawer({
           onKeyDown={handleResizeKeyDown}
           onDoubleClick={resetPreferredHeight}
         />
+      )}
         <header className="execution-drawer-header">
           <div className="execution-drawer-agent">
             <MemberAvatar
