@@ -67,6 +67,64 @@ test('Process and blinded Outcome Packs expose disjoint evidence views', () => {
   ), true)
 })
 
+test('Process Pack preserves reply and Task linkage without claiming contribution causality', () => {
+  const fixture = dualViewFixture({ buildPacks: false })
+  const source = structuredClone(fixture.sourcePack)
+  const reference = structuredClone(source.payload.collaborationFacts[0].evidenceReferences[0])
+  source.payload.untrustedEvidence.push({
+    segmentId: 'segment-reply',
+    kind: 'participant_message',
+    authorPseudonym: 'member-002',
+    visibility: 'public_to_camp',
+    content: 'The boundary check fails when the revision is stale; add an exact-version test.',
+    evidenceReference: reference
+  })
+  const common = {
+    callId: 'call-2',
+    senderPseudonym: 'member-002',
+    recipientPseudonym: 'member-001',
+    visibility: 'public_to_camp',
+    evidenceReferences: [reference]
+  }
+  source.payload.collaborationFacts.push(
+    ...['accepted_call', 'recipient_input', 'recipient_run', 'public_camp_message'].map((factType) => ({
+      factId: `collaboration-fact:call-2:${factType}`,
+      factType,
+      contentSegmentId: 'segment-reply',
+      ...common
+    })),
+    {
+      factId: 'collaboration-fact:call-2:reply',
+      factType: 'later_independent_call',
+      contentSegmentId: 'segment-call',
+      ...common
+    },
+    {
+      factId: 'collaboration-fact:call-2:task',
+      factType: 'task_fact',
+      contentSegmentId: 'segment-reply',
+      ...common
+    }
+  )
+  source.payloadDigest = `sha256:${digestJson(source.payload)}`
+
+  const pack = buildJudgeViewPack({
+    view: 'process',
+    sourcePack: source,
+    configuration: fixture.process.configuration,
+    producerDigest: 'a'.repeat(64)
+  })
+  const reply = pack.payload.modelInput.interactions.find((interaction) => (
+    interaction.observations.replyObserved
+  ))
+  assert.ok(reply)
+  assert.equal(reply.replyToMessageSegmentId !== null, true)
+  assert.equal(reply.observations.taskLinked, true)
+  assert.equal(pack.payload.modelInput.checklistCoverage.find((item) => (
+    item.checklistItem === 'SER.collaboration.contribution_value'
+  )).coverage.state, 'partial')
+})
+
 test('Outcome model input identity is invariant to treatment, Trial, member, Call, and actual Evidence IDs', () => {
   const fixture = dualViewFixture({ buildPacks: false })
   const sourceB = structuredClone(fixture.sourcePack)

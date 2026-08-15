@@ -9,30 +9,45 @@ import {
 } from './qualification-common.mjs'
 
 export const TOOL_MEASUREMENT_SPEC_SCHEMA_ID = 'rovai.qualification.tool-measurement-spec'
-export const TOOL_MEASUREMENT_SPEC_SCHEMA_VERSION = '1.0.0'
-export const TOOL_MEASUREMENT_PROJECTION_POLICY = 'qualification-tool-measurement-v1'
+export const TOOL_MEASUREMENT_SPEC_SCHEMA_VERSION = '2.0.0'
+export const TOOL_MEASUREMENT_PROJECTION_POLICY = 'qualification-tool-measurement-v2'
 
-const ADAPTERS = new Set([
-  'camp_history',
-  'memory_retrieval',
-  'memory_mutation',
-  'camp_message_send'
-])
+const ADAPTER_OPERATIONS = Object.freeze({
+  camp_history: Object.freeze(['camp.list', 'camp.search', 'history.search', 'camp.read']),
+  memory_retrieval: Object.freeze(['memory.view', 'memory.search', 'memory.read']),
+  memory_mutation: Object.freeze(['memory.write']),
+  camp_message_send: Object.freeze(['camp.message.send']),
+  task_coordination: Object.freeze([
+    'team.create_task',
+    'team.get_task',
+    'team.update_task',
+    'team.list_tasks'
+  ])
+})
+const ADAPTERS = new Set(Object.keys(ADAPTER_OPERATIONS))
 const MODES = new Set(['forced_use', 'natural_use', 'non_use_control'])
 const PARTITIONS = new Set(['development', 'holdout'])
 const MEMORY_SCOPES = new Set(['hearth', 'companion', 'relationship'])
-const MEMORY_KINDS = new Set(['preference', 'agreement', 'fact', 'lesson', 'commitment'])
+const MEMORY_KINDS = new Set(['preference', 'agreement', 'lesson'])
+const SEMANTIC_ITEMS = new Set([
+  'SER.tool_use.selection_necessity',
+  'SER.tool_use.input_strategy',
+  'SER.tool_use.result_interpretation',
+  'SER.tool_use.downstream_use',
+  'SER.memory.retention_quality'
+])
 
 export async function admitToolMeasurementPack(packDirectory, caseRecord) {
   const pack = await loadToolMeasurementPack(packDirectory, caseRecord)
   const admissionWithoutDigest = {
     schemaId: 'rovai.qualification.tool-measurement-pack-admission',
-    schemaVersion: '1.0.0',
+    schemaVersion: '2.0.0',
     specificationId: pack.spec.specificationId,
     caseId: caseRecord.contract.manifest.id,
     caseSeal: withDigest(caseRecord.seal),
     partition: pack.spec.partition,
     projectionPolicyId: pack.spec.projectionPolicyId,
+    runtimeCompatibilityDigest: withDigest(digestJson(pack.spec.runtimeCompatibility)),
     opportunityCount: pack.spec.opportunities.length,
     opportunityStructureDigest: withDigest(digestJson(pack.spec.opportunities)),
     specificationDigest: pack.references.specificationDigest,
@@ -50,7 +65,7 @@ export async function admitToolMeasurementPack(packDirectory, caseRecord) {
 export async function retainPreparedToolFixtureManifest(evidenceDirectory, manifest) {
   const expected = manifestWithoutPayloadDigest(manifest)
   if (manifest?.schemaId !== 'rovai.qualification.prepared-tool-fixture-manifest'
-      || manifest.schemaVersion !== '1.0.0'
+      || manifest.schemaVersion !== '2.0.0'
       || manifest.payloadDigest !== withDigest(digestJson(expected))) {
     throw new Error('Prepared Tool Fixture Manifest identity is invalid')
   }
@@ -67,12 +82,13 @@ export async function verifyToolMeasurementPack(packDirectory, caseRecord) {
   const admission = JSON.parse(await readFile(join(pack.root, 'measurement-admission.json'), 'utf8'))
   const expectedWithoutDigest = {
     schemaId: 'rovai.qualification.tool-measurement-pack-admission',
-    schemaVersion: '1.0.0',
+    schemaVersion: '2.0.0',
     specificationId: pack.spec.specificationId,
     caseId: caseRecord.contract.manifest.id,
     caseSeal: withDigest(caseRecord.seal),
     partition: pack.spec.partition,
     projectionPolicyId: pack.spec.projectionPolicyId,
+    runtimeCompatibilityDigest: withDigest(digestJson(pack.spec.runtimeCompatibility)),
     opportunityCount: pack.spec.opportunities.length,
     opportunityStructureDigest: withDigest(digestJson(pack.spec.opportunities)),
     specificationDigest: pack.references.specificationDigest,
@@ -169,15 +185,44 @@ export async function materializeToolMeasurementFixtures({
       }))
     })
   }
+  for (const task of pack.fixture.tasks) {
+    const response = await request('tasks.create', {
+      commandId: crypto.randomUUID(),
+      campId,
+      title: task.title,
+      description: task.description,
+      acceptanceCriteria: task.acceptanceCriteria,
+      assigneeAgentId: task.assigneeAgentId
+    })
+    const result = response.commandResult ?? response
+    const taskId = result.payload?.taskId
+    if (result.status !== 'applied' || typeof taskId !== 'string') {
+      throw new Error(`Task fixture materialization failed for ${task.symbol}`)
+    }
+    entities.push({
+      symbol: task.symbol,
+      entityType: 'task',
+      entityId: taskId,
+      revisionId: null,
+      version: Number.isSafeInteger(result.payload?.version) ? result.payload.version : 1,
+      contentDigest: withDigest(digestJson({
+        title: task.title,
+        description: task.description,
+        acceptanceCriteria: task.acceptanceCriteria,
+        assigneeAgentId: task.assigneeAgentId
+      }))
+    })
+  }
   const manifestWithoutDigest = {
     schemaId: 'rovai.qualification.prepared-tool-fixture-manifest',
-    schemaVersion: '1.0.0',
+    schemaVersion: '2.0.0',
     specificationId: pack.spec.specificationId,
     caseId: pack.admission.caseId,
     caseSeal: pack.admission.caseSeal,
     armId,
     treatment,
     specificationDigest: pack.references.specificationDigest,
+    runtimeCompatibilityDigest: withDigest(digestJson(pack.spec.runtimeCompatibility)),
     fixtureDigest: pack.references.fixtureDigest,
     oracleDigest: pack.references.oracleDigest,
     entities: entities.sort((left, right) => left.symbol.localeCompare(right.symbol))
@@ -198,6 +243,7 @@ export function materializeMeasurementSpecForBuilder(pack, preparedManifest) {
   }]))
   return {
     specificationId: pack.spec.specificationId,
+    runtimeCompatibility: structuredClone(pack.spec.runtimeCompatibility),
     opportunities: pack.spec.opportunities.map((opportunity) => ({
       opportunityId: opportunity.opportunityId,
       adapter: opportunity.adapter,
@@ -207,6 +253,25 @@ export function materializeMeasurementSpecForBuilder(pack, preparedManifest) {
       oracle: resolveOracleSymbols(oracleById.get(opportunity.opportunityId), identityBySymbol)
     }))
   }
+}
+
+export function assertToolMeasurementRuntimeCompatibility(pack, releaseCore) {
+  const expected = pack?.spec?.runtimeCompatibility
+  if (!expected || !releaseCore) {
+    throw new Error('Tool Measurement runtime compatibility is unavailable')
+  }
+  const actual = {
+    builtinToolCatalogDigest: withDigest(releaseCore.builtinToolCatalogDigest),
+    builtinToolContractVersion: releaseCore.builtinToolContractVersion,
+    builtinToolIpcProtocolVersion: releaseCore.builtinToolIpcProtocolVersion,
+    operationProjectionSchemaVersion: releaseCore.builtinToolEvidenceProjectionVersion
+  }
+  if (canonicalJson(expected) !== canonicalJson(actual)) {
+    throw new Error(
+      'Tool Measurement Pack is incompatible with the running Built-in Tool catalog or Evidence projection'
+    )
+  }
+  return true
 }
 
 export async function loadToolMeasurementPack(packDirectory, caseRecord) {
@@ -244,7 +309,7 @@ export async function loadToolMeasurementPack(packDirectory, caseRecord) {
 function validateSpec(spec, caseRecord) {
   exactKeys(spec, [
     'schemaId', 'schemaVersion', 'specificationId', 'case', 'partition',
-    'projectionPolicyId', 'fixtureFile', 'oracleFile', 'opportunities'
+    'projectionPolicyId', 'runtimeCompatibility', 'fixtureFile', 'oracleFile', 'opportunities'
   ], 'Tool Measurement Spec')
   if (spec.schemaId !== TOOL_MEASUREMENT_SPEC_SCHEMA_ID
       || spec.schemaVersion !== TOOL_MEASUREMENT_SPEC_SCHEMA_VERSION
@@ -252,6 +317,20 @@ function validateSpec(spec, caseRecord) {
     throw new Error('Tool Measurement Spec identity is unsupported')
   }
   stableId(spec.specificationId, 'specificationId')
+  exactKeys(spec.runtimeCompatibility, [
+    'builtinToolCatalogDigest',
+    'builtinToolContractVersion',
+    'builtinToolIpcProtocolVersion',
+    'operationProjectionSchemaVersion'
+  ], 'Tool Measurement runtime compatibility')
+  if (!/^sha256:[a-f0-9]{64}$/.test(spec.runtimeCompatibility.builtinToolCatalogDigest)
+      || ![
+        spec.runtimeCompatibility.builtinToolContractVersion,
+        spec.runtimeCompatibility.builtinToolIpcProtocolVersion,
+        spec.runtimeCompatibility.operationProjectionSchemaVersion
+      ].every((value) => Number.isSafeInteger(value) && value >= 1)) {
+    throw new Error('Tool Measurement runtime compatibility identity is invalid')
+  }
   if (!PARTITIONS.has(spec.partition)) throw new Error('Tool Measurement Spec partition is invalid')
   exactKeys(spec.case, ['caseId', 'caseSeal'], 'Tool Measurement Spec case binding')
   if (spec.case.caseId !== caseRecord.contract.manifest.id
@@ -276,16 +355,39 @@ function validateSpec(spec, caseRecord) {
     }
     boundedStrings(opportunity.allowedOperations, 'allowedOperations', 1, 8)
     boundedStrings(opportunity.semanticItems, 'semanticItems', 0, 5)
+    if (opportunity.allowedOperations.some((operation) => (
+      !ADAPTER_OPERATIONS[opportunity.adapter].includes(operation)
+    ))) {
+      throw new Error(`Tool Measurement Opportunity ${opportunity.opportunityId} has a cross-adapter operation`)
+    }
+    if (opportunity.semanticItems.some((item) => !SEMANTIC_ITEMS.has(item))) {
+      throw new Error(`Tool Measurement Opportunity ${opportunity.opportunityId} has an unknown semantic item`)
+    }
+    if (opportunity.adapter === 'camp_message_send' && opportunity.semanticItems.length > 0) {
+      throw new Error('A2A semantic quality belongs to the Process Judge')
+    }
+    if (opportunity.adapter !== 'memory_mutation'
+        && opportunity.semanticItems.includes('SER.memory.retention_quality')) {
+      throw new Error('Memory retention quality is only valid for memory_mutation')
+    }
   }
 }
 
 function validateFixture(fixture, spec) {
-  exactKeys(fixture, ['schemaVersion', 'specificationId', 'campMessages', 'memories'], 'Tool fixture')
-  if (fixture.schemaVersion !== 1 || fixture.specificationId !== spec.specificationId) {
+  exactKeys(
+    fixture,
+    ['schemaVersion', 'specificationId', 'campMessages', 'memories', 'tasks'],
+    'Tool fixture'
+  )
+  if (fixture.schemaVersion !== 2 || fixture.specificationId !== spec.specificationId) {
     throw new Error('Tool fixture identity mismatch')
   }
-  if (!Array.isArray(fixture.campMessages) || !Array.isArray(fixture.memories)
-      || fixture.campMessages.length > 256 || fixture.memories.length > 128) {
+  if (!Array.isArray(fixture.campMessages)
+      || !Array.isArray(fixture.memories)
+      || !Array.isArray(fixture.tasks)
+      || fixture.campMessages.length > 256
+      || fixture.memories.length > 128
+      || fixture.tasks.length > 128) {
     throw new Error('Tool fixture collection is invalid')
   }
   const symbols = new Set()
@@ -317,11 +419,23 @@ function validateFixture(fixture, spec) {
       boundedStrings(revision.retrievalKeys, 'Memory revision retrievalKeys', 1, 16)
     }
   }
+  for (const task of fixture.tasks) {
+    exactKeys(task, [
+      'symbol', 'title', 'description', 'acceptanceCriteria', 'assigneeAgentId'
+    ], 'Task fixture')
+    addSymbol(symbols, task.symbol)
+    boundedText(task.title, 'Task fixture title', 1, 240)
+    boundedText(task.description, 'Task fixture description', 0, 4_000)
+    boundedStrings(task.acceptanceCriteria, 'Task fixture acceptanceCriteria', 0, 32)
+    if (task.assigneeAgentId !== null) {
+      stableId(task.assigneeAgentId, 'Task fixture assigneeAgentId')
+    }
+  }
 }
 
 function validateOracle(oracle, spec, fixture) {
   exactKeys(oracle, ['schemaVersion', 'specificationId', 'opportunities'], 'Tool oracle')
-  if (oracle.schemaVersion !== 1 || oracle.specificationId !== spec.specificationId
+  if (oracle.schemaVersion !== 2 || oracle.specificationId !== spec.specificationId
       || !Array.isArray(oracle.opportunities)
       || oracle.opportunities.length !== spec.opportunities.length) {
     throw new Error('Tool oracle identity or cardinality mismatch')
@@ -329,7 +443,8 @@ function validateOracle(oracle, spec, fixture) {
   const expected = new Set(spec.opportunities.map((item) => item.opportunityId))
   const symbols = new Set([
     ...fixture.campMessages.map((item) => item.symbol),
-    ...fixture.memories.map((item) => item.symbol)
+    ...fixture.memories.map((item) => item.symbol),
+    ...fixture.tasks.map((item) => item.symbol)
   ])
   for (const item of oracle.opportunities) {
     exactKeys(item, ['opportunityId', 'oracle'], 'Tool oracle opportunity')
@@ -344,8 +459,14 @@ function validateOracleValue(value, symbols, depth = 0) {
   if (value === null || typeof value === 'boolean' || Number.isFinite(value)) return
   if (typeof value === 'string') {
     boundedText(value, 'Tool oracle value', 1, 512)
-    if (value.startsWith('$symbol:') && !symbols.has(value.slice(8))) {
-      throw new Error(`Tool oracle references unknown fixture symbol ${value.slice(8)}`)
+    if (value.startsWith('$symbol:')) {
+      const { symbol, field } = parseSymbolReference(value)
+      if (!symbols.has(symbol)) {
+        throw new Error(`Tool oracle references unknown fixture symbol ${symbol}`)
+      }
+      if (field !== null && !['entityId', 'revisionId', 'version', 'contentDigest'].includes(field)) {
+        throw new Error(`Tool oracle references unsupported fixture identity field ${field}`)
+      }
     }
     return
   }
@@ -364,9 +485,15 @@ function validateOracleValue(value, symbols, depth = 0) {
 
 function resolveOracleSymbols(value, identityBySymbol) {
   if (typeof value === 'string' && value.startsWith('$symbol:')) {
-    const identity = identityBySymbol[value.slice(8)]
+    const { symbol, field } = parseSymbolReference(value)
+    const identity = identityBySymbol[symbol]
     if (!identity) throw new Error(`Prepared fixture omitted ${value}`)
-    return structuredClone(identity)
+    if (field === null) return structuredClone(identity)
+    const selected = identity[field]
+    if (selected === undefined || selected === null) {
+      throw new Error(`Prepared fixture ${symbol} omitted ${field}`)
+    }
+    return structuredClone(selected)
   }
   if (Array.isArray(value)) return value.map((item) => resolveOracleSymbols(item, identityBySymbol))
   if (value && typeof value === 'object') {
@@ -376,6 +503,14 @@ function resolveOracleSymbols(value, identityBySymbol) {
     ]))
   }
   return value
+}
+
+function parseSymbolReference(value) {
+  const reference = value.slice('$symbol:'.length)
+  const separator = reference.lastIndexOf('#')
+  return separator === -1
+    ? { symbol: reference, field: null }
+    : { symbol: reference.slice(0, separator), field: reference.slice(separator + 1) }
 }
 
 function memoryCommand(memory) {

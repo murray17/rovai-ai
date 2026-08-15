@@ -1,7 +1,7 @@
 ---
 document_type: schema-index
 authority: cross-version-contract-schema-catalog
-last_updated: 2026-08-13
+last_updated: 2026-08-15
 ---
 
 # Cross-version contract schemas
@@ -12,8 +12,8 @@ Schema version 与 raw-byte SHA-256；实现必须先验证 catalog，再按唯�
 当前包含：
 
 - `semantic-judge-view-suite-v1.schema.json`：Semantic Judge Views v1 的 Suite envelope 与逐项 Review projection。
-- `tool-interaction-measurement-v1.schema.json`：Tool Measurement Opportunity、Canonical Interaction 与逐 Opportunity assessment。
-- `tool-use-judge-pack-v1.schema.json`：独立 Tool-Use Judge 的 treatment-blind Model-Visible Pack 与 audit Evidence Map。
+- `tool-interaction-measurement-v2.schema.json`：当前 Tool Measurement Opportunity、runtime compatibility、Canonical Interaction、Memory readback 与 Task assessment；v1 仅用于历史 replay。
+- `tool-use-judge-pack-v2.schema.json`：当前独立 Tool-Use Judge 的 treatment-blind Model-Visible Pack 与 audit Evidence Map；v1 仅用于历史 replay。
 - `tool-use-judge-configuration-v1.schema.json`：冻结模型 snapshot、prompt、decoding、retry 与 tool-disabled capabilities。
 - `tool-use-judge-replica-result-v1.schema.json`：双 Replica exact item output、attempt 与 typed unavailable 证据。
 - `tool-use-review-v1.schema.json`：不投票、不平均的逐项 agreement/disagreement reconciliation。

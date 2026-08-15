@@ -206,6 +206,87 @@ test('Evidence Index exposes retrieved Camp content only for explicitly bound To
   assert.equal(references.messageContents['unretrieved-message'], undefined)
 })
 
+test('Evidence Index binds Memory v3 readback and Task state as separate Judge-safe semantic records', () => {
+  const input = fixture()
+  const memoryBody = 'Use the latest sealed verifier revision.'
+  input.snapshot.executionEvidence[0] = {
+    id: 'memory-read-evidence',
+    agentRunId: 'run-1',
+    sequence: 1,
+    occurredAt: '2026-08-04T00:00:04.000Z',
+    isTruncated: false,
+    safeIdentity: {
+      sourceAuthority: 'core',
+      operationProjection: {
+        schemaVersion: 2,
+        operation: 'memory.read',
+        canonicalInput: { memoryIds: ['memory-1'] },
+        canonicalResult: {
+          memories: [{
+            memoryId: 'memory-1',
+            cacheState: 'current',
+            target: {
+              memoryId: 'memory-1',
+              revisionId: 'revision-2',
+              scope: 'hearth'
+            },
+            body: memoryBody,
+            bodyTruncated: false
+          }]
+        }
+      }
+    }
+  }
+  input.snapshot.tasks[0] = {
+    id: 'task-1',
+    sourceAgentRunId: 'run-1',
+    status: 'completed',
+    assigneeAgentId: 'agent-reviewer',
+    version: 2,
+    titleDigest: sha256('Review the boundary'),
+    descriptionDigest: sha256('Check exact evidence.'),
+    completedAt: '2026-08-04T00:00:08.000Z'
+  }
+
+  const { artifact, references } = buildEvidenceIndex(input)
+  const records = new Map(artifact.payload.records.map((record) => [record.evidenceId, record]))
+  const memoryReference = references.toolSemanticContents[
+    `memory-read-evidence:sha256:${sha256(memoryBody)}`
+  ]
+  const taskReference = references.taskStates['task-1']
+
+  assert.ok(memoryReference)
+  assert.equal(records.get(memoryReference.evidenceId).safeForJudge, true)
+  assert.equal(records.get(memoryReference.evidenceId).contentDigest, `sha256:${sha256(memoryBody)}`)
+  assert.ok(taskReference)
+  assert.equal(records.get(taskReference.evidenceId).safeForJudge, true)
+  assert.deepEqual(references.tasks['task-1'], {
+    artifactId: artifact.artifactId,
+    evidenceId: 'core.task:task-1'
+  })
+})
+
+test('Evidence Index never creates semantic Memory content for a redacted projection', () => {
+  const input = fixture()
+  input.snapshot.executionEvidence[0].safeIdentity = {
+    sourceAuthority: 'core',
+    operationProjection: {
+      schemaVersion: 2,
+      operation: 'memory.read',
+      canonicalInput: { memoryIds: ['memory-secret'] },
+      canonicalResult: {
+        memories: [{
+          memoryId: 'memory-secret',
+          bodyRedacted: true,
+          bodyCharCount: 40
+        }]
+      }
+    }
+  }
+  const { references } = buildEvidenceIndex(input)
+  assert.deepEqual(references.toolSemanticContents, {})
+})
+
 function fixture() {
   const snapshot = {
     schemaVersion: 19,

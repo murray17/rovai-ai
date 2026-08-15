@@ -36,6 +36,8 @@ test('Collaboration message evidence projects only delivered Public A2A bodies w
       messages: [{
         id: 'message-1',
         authorId: 'agent-lead',
+        sequence: 11,
+        replyToCampMessageId: 'message-parent',
         createdAt: '2026-08-04T00:00:01.000Z',
         body: 'Review the transition and list concrete defects.'
       }, {
@@ -54,6 +56,7 @@ test('Collaboration message evidence projects only delivered Public A2A bodies w
         messageId: 'message-1',
         senderAgentId: 'agent-lead',
         recipientAgentId: 'agent-reviewer',
+        taskId: 'task-review',
         contentDigest: sha256('Review the transition and list concrete defects.')
       }, {
         callId: 'delivery-2',
@@ -61,6 +64,7 @@ test('Collaboration message evidence projects only delivered Public A2A bodies w
         messageId: 'message-1',
         senderAgentId: 'agent-lead',
         recipientAgentId: 'agent-tester',
+        taskId: 'task-review',
         contentDigest: sha256('Review the transition and list concrete defects.')
       }],
       metrics: {
@@ -82,6 +86,9 @@ test('Collaboration message evidence projects only delivered Public A2A bodies w
     delivery.callId
   )), ['delivery-1', 'delivery-2'])
   assert.equal(artifact.payload.messages[0].visibility, 'public_to_camp')
+  assert.equal(artifact.payload.messages[0].sequence, 11)
+  assert.equal(artifact.payload.messages[0].replyToMessageId, 'message-parent')
+  assert.deepEqual(artifact.payload.messages[0].taskIds, ['task-review'])
   assert.equal(JSON.stringify(artifact).includes('unrelated camp message'), false)
 
   const oversizedBody = 'x'.repeat(50_001)

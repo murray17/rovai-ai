@@ -54,7 +54,7 @@ function normalizeOperationProjection(payload) {
     'projectionDigest', 'resultDigest', 'schemaVersion'
   ].sort()
   if (JSON.stringify(keys) !== JSON.stringify(expectedKeys)
-      || projection.schemaVersion !== 1
+      || ![1, 2].includes(projection.schemaVersion)
       || typeof projection.operation !== 'string'
       || projection.operation !== payload.canonicalTool
       || typeof projection.inputDigest !== 'string'
@@ -107,7 +107,11 @@ function safeProjectionValue(value, operation, position, depth) {
         || (/secret/i.test(key) && !/SecretDetected$/.test(key))) {
       return false
     }
-    if (key === 'body' && !(position === 'input' && operation === 'memory.write')) return false
+    const memorySemanticBody = key === 'body' && (
+      (position === 'input' && operation === 'memory.write')
+      || (position === 'result' && ['memory.read', 'memory.view'].includes(operation))
+    )
+    if (key === 'body' && !memorySemanticBody) return false
     if (!safeProjectionValue(item, operation, position, depth + 1)) return false
   }
   return true

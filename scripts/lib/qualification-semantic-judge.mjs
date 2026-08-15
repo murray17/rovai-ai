@@ -696,6 +696,9 @@ function buildCollaborationFacts({
       : typeof segment.callId === 'string' ? [segment.callId] : []
     return callIds.map((callId) => [callId, segment])
   }))
+  const segmentByMessage = new Map(sourceSegments
+    .filter((segment) => typeof segment.messageId === 'string')
+    .map((segment) => [segment.messageId, segment]))
   for (const call of collaborationLedger?.payload?.calls ?? []) {
     const evidenceReferences = safeReferences(
       call.evidenceReferences,
@@ -716,8 +719,26 @@ function buildCollaborationFacts({
     facts.push(
       { factId: `collaboration-fact:${call.callId}:accepted`, factType: 'accepted_call', ...common },
       { factId: `collaboration-fact:${call.callId}:input`, factType: 'recipient_input', ...common },
-      { factId: `collaboration-fact:${call.callId}:run`, factType: 'recipient_run', ...common }
+      { factId: `collaboration-fact:${call.callId}:run`, factType: 'recipient_run', ...common },
+      { factId: `collaboration-fact:${call.callId}:message`, factType: 'public_camp_message', ...common }
     )
+    const replyToMessageId = sourceSegment?.replyToMessageId ?? null
+    const parentSegment = replyToMessageId ? segmentByMessage.get(replyToMessageId) ?? null : null
+    if (parentSegment) {
+      facts.push({
+        factId: `collaboration-fact:${call.callId}:reply`,
+        factType: 'later_independent_call',
+        ...common,
+        contentSegmentId: parentSegment.segmentId
+      })
+    }
+    if (call.taskId) {
+      facts.push({
+        factId: `collaboration-fact:${call.callId}:task`,
+        factType: 'task_fact',
+        ...common
+      })
+    }
   }
   for (const fact of collaborationLedger?.payload?.routeFacts ?? []) {
     const references = safeReferences(

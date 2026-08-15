@@ -2,7 +2,7 @@
 document_type: architecture
 authority: benchmark-protocol-components-and-boundaries
 status: accepted
-last_updated: 2026-08-13
+last_updated: 2026-08-15
 ---
 
 # Benchmark Protocol 架构
@@ -61,11 +61,18 @@ counterfactual protocol 证明。
 
 ## Tool-use 与 paired counterfactual
 
-Tool-use measurement 由 Case 预注册的 Opportunity 驱动。Core 只投影 operation-specific、digest-bound、长度有界的
-canonical input/result；Runner 以 sealed oracle 确定性判断实体、revision、cursor、receipt/effect 与 coverage。原始 Tool
+Tool-use measurement 由 Case 预注册的 Opportunity 驱动。v2 Pack 还必须冻结并核对 Core Built-in catalog digest、
+contract/IPC version 与 operation projection version；任何漂移都在 dispatch 前 fail closed。Core 只投影
+operation-specific、digest-bound、长度有界的 canonical input/result；Runner 以 sealed oracle 确定性判断实体、
+revision、cursor、Task state、Memory exact readback、receipt/effect 与 coverage。原始 Tool
 payload、secret、完整 transcript 和 oracle answer 不进入模型。Camp message send 的 mechanical integrity 可进入 Tool
 Interaction，但 delegation/handoff/contribution/feedback/integration 仍由 Process Judge判断，避免同一构念被两套 Judge
 重复评估。
+
+当前闭合 Adapter 包含 Camp/history retrieval、Memory v3 view/search/read/write、Task create/get/update/list 与 A2A send。
+Memory applied receipt 只证明写入；只有预注册 readback 且同一 Memory/Revision/body digest 被权威 read/view 返回时，
+才证明 immediate effective state。跨 Turn 的自动注入与行为改变仍要求多阶段或 paired Case。Process View 可见
+source-bound reply parent 与 Task linkage，但这两类时序关系不能升级为贡献因果。
 
 Tool-Use Judge 是独立 advisory review，复用双 Replica、reverse order、tool-disabled、local Evidence closure 和
 non-interference 不变量，但只见 treatment-blind allowlist。它不重判 Tool 是否执行成功，也不生成 Tool score。
@@ -106,7 +113,7 @@ Bundle/文件始终是投影的唯一权威源。默认 Rovai 投影只创建一
 
 - [Benchmark Protocol v3](../contracts/benchmark-protocol-v3.md)
 - [Semantic Judge Views v1](../contracts/semantic-judge-views-v1.md)
-- [Tool Interaction Measurement v1](../contracts/tool-interaction-measurement-v1.md)
+- [Tool Interaction Measurement v2](../contracts/tool-interaction-measurement-v2.md)
 - [Paired Collaboration Experiment v1](../contracts/paired-collaboration-experiment-v1.md)
 - [ADR-0171](../adr/0171-opportunity-based-tool-interaction-measurement.md)
 - [ADR-0172](../adr/0172-paired-collaboration-value-and-outcome-conditioned-efficiency.md)

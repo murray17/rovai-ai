@@ -13,7 +13,7 @@ import {
 export const SEMANTIC_JUDGE_CONTENT_POLICY_ID = 'semantic-judge-content-allowlist-v1'
 export const COLLABORATION_MESSAGE_EVIDENCE_SCHEMA_ID =
   'rovai.qualification.collaboration-message-evidence'
-export const COLLABORATION_MESSAGE_EVIDENCE_SCHEMA_VERSION = '1.0.0'
+export const COLLABORATION_MESSAGE_EVIDENCE_SCHEMA_VERSION = '2.0.0'
 
 // This is an executable allowlist, not documentation about what the caller
 // usually supplies.  buildSemanticJudgeUntrustedEvidence only projects the
@@ -85,6 +85,8 @@ export function buildCollaborationMessageEvidence({
     if (!projectedByMessageId.has(message.id)) {
       projectedByMessageId.set(message.id, {
         messageId: message.id,
+        sequence: Number.isSafeInteger(message.sequence) ? message.sequence : null,
+        replyToMessageId: message.replyToCampMessageId ?? message.replyToMessageId ?? null,
         authorAgentProfileId: message.authorId ?? call.senderAgentId,
         visibility: 'public_to_camp',
         createdAt: message.createdAt ?? call.acceptedAt,
@@ -106,14 +108,19 @@ export function buildCollaborationMessageEvidence({
       callId: call.callId,
       deliveryId: call.deliveryId,
       recipientAgentProfileId: call.recipientAgentId,
+      taskId: call.taskId ?? null,
       deliveryEvidenceReference: evidenceReferences?.messageDeliveries?.[call.deliveryId] ?? null,
       sourceDelivery: structuredClone(deliveryById.get(call.deliveryId) ?? null)
     })
   }
-  const messages = [...projectedByMessageId.values()].map((message) => ({
-    ...message,
-    deliveries: message.deliveries.sort((left, right) => left.callId.localeCompare(right.callId))
-  }))
+  const messages = [...projectedByMessageId.values()].map((message) => {
+    const deliveries = message.deliveries.sort((left, right) => left.callId.localeCompare(right.callId))
+    return {
+      ...message,
+      taskIds: [...new Set(deliveries.map((delivery) => delivery.taskId).filter(Boolean))].sort(),
+      deliveries
+    }
+  })
   messages.sort((left, right) => (
     String(left.createdAt ?? '').localeCompare(String(right.createdAt ?? ''))
       || left.messageId.localeCompare(right.messageId)
@@ -208,7 +215,7 @@ export function validateCollaborationMessageEvidence(artifact, {
   collaborationLedger = null
 } = {}) {
   if (artifact?.schemaId !== COLLABORATION_MESSAGE_EVIDENCE_SCHEMA_ID
-      || artifact.schemaVersion !== COLLABORATION_MESSAGE_EVIDENCE_SCHEMA_VERSION
+      || !['1.0.0', COLLABORATION_MESSAGE_EVIDENCE_SCHEMA_VERSION].includes(artifact.schemaVersion)
       || artifact.payloadDigest !== `sha256:${digestJson(artifact.payload)}`
       || artifact.artifactId !== `collaboration-message-evidence:${artifact.payloadDigest.slice(-32)}`
       || artifact.payload?.policyId !== SEMANTIC_JUDGE_CONTENT_POLICY_ID
@@ -270,6 +277,11 @@ export function validateCollaborationMessageEvidence(artifact, {
       if (metadata.contentDigest !== `sha256:${digestJson(message.sourceMessage)}`
           || message.sourceMessage?.id !== message.messageId
           || message.sourceMessage?.bodyDigest !== message.bodyDigest
+          || (message.replyToMessageId ?? null)
+            !== (message.sourceMessage?.replyToCampMessageId
+              ?? message.sourceMessage?.replyToMessageId
+              ?? null)
+          || (message.sequence ?? null) !== (message.sourceMessage?.sequence ?? null)
           || (message.sourceMessage?.authorId ?? null) !== message.authorAgentProfileId) {
         throw new Error(`Collaboration message ${message.messageId} metadata is not source-bound`)
       }
@@ -298,6 +310,7 @@ export function validateCollaborationMessageEvidence(artifact, {
         if (!call
             || call.senderMemberId !== message.authorAgentProfileId
             || call.recipientMemberId !== delivery.recipientAgentProfileId
+            || (call.taskId ?? null) !== (delivery.taskId ?? null)
             || canonicalJson(call.contentEvidenceReference)
               !== canonicalJson(message.evidenceReference)) {
           throw new Error(`Collaboration message ${message.messageId} attribution differs from Ledger`)
@@ -362,6 +375,9 @@ export async function buildSemanticJudgeUntrustedEvidence({
         kind: 'participant_message',
         callIds: message.deliveries.map((delivery) => delivery.callId),
         messageId: message.messageId ?? null,
+        sequence: message.sequence ?? null,
+        replyToMessageId: message.replyToMessageId ?? null,
+        taskIds: Array.isArray(message.taskIds) ? [...message.taskIds] : [],
         createdAt: message.createdAt ?? null,
         authorAgentProfileId: message.authorAgentProfileId,
         visibility: message.visibility,

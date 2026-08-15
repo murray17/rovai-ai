@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import {
   QUALIFICATION_RUNNER_VERSION,
   atomicWriteJson,
+  canonicalJson,
   digestJson,
   sha256,
   writePrivateJsonExclusive
@@ -73,6 +74,9 @@ export function buildEvidenceIndex({
     executionEvidence: {},
     messages: {},
     messageContents: {},
+    tasks: {},
+    taskStates: {},
+    toolSemanticContents: {},
     messageDeliveries: {},
     contextManifests: {},
     inboxMessages: {},
@@ -328,14 +332,33 @@ export function buildEvidenceIndex({
     }
     for (const task of snapshot.tasks ?? []) {
       if (!trialRunIds.has(task.sourceAgentRunId)) continue
+      const taskEvidenceId = stableEvidenceId('core.task', task.id)
       addSourceRecord({
-        evidenceId: stableEvidenceId('core.task', task.id),
+        evidenceId: taskEvidenceId,
         evidenceType: 'core_domain',
         authorityClass: 'core',
         sourceId: 'core.camp-snapshot',
         observedAt: task.completedAt ?? task.updatedAt ?? task.createdAt,
         content: task
       })
+      references.tasks[task.id] = evidenceReference(artifactId, taskEvidenceId)
+      const taskState = buildTaskStateContent(task)
+      const taskStateEvidenceId = stableEvidenceId('core.task-state', task.id)
+      addSourceRecord({
+        evidenceId: taskStateEvidenceId,
+        evidenceType: 'core_domain',
+        authorityClass: 'core',
+        sourceId: 'core.camp-snapshot',
+        observedAt: task.completedAt ?? task.updatedAt ?? task.createdAt,
+        content: {
+          taskId: task.id,
+          stateDigest: withSha256Prefix(sha256(taskState))
+        },
+        contentDigestOverride: sha256(taskState),
+        safeForJudge: true,
+        safeForPublic: false
+      })
+      references.taskStates[task.id] = evidenceReference(artifactId, taskStateEvidenceId)
     }
     for (const action of snapshot.actions ?? []) {
       if (!trialRunIds.has(action.agentRunId)) continue
@@ -387,6 +410,37 @@ export function buildEvidenceIndex({
         safeForPublic: false
       })
       references.executionEvidence[evidence.id] = evidenceReference(artifactId, evidenceId)
+      for (const semantic of extractMemorySemanticResultContents(
+        evidence.safeIdentity?.operationProjection
+      )) {
+        const semanticEvidenceId = stableEvidenceId(
+          'core.tool-semantic-content',
+          `${evidence.id}:${semantic.identity}:${semantic.contentDigest}`
+        )
+        addSourceRecord({
+          evidenceId: semanticEvidenceId,
+          evidenceType: 'runtime_activity',
+          authorityClass: 'core',
+          sourceId: 'core.agent-run-execution-evidence',
+          sourceSequence: evidence.sequence,
+          observedAt: evidence.occurredAt,
+          clockDomain: 'core_persisted_wall_clock',
+          content: {
+            executionEvidenceId: evidence.id,
+            operation: evidence.safeIdentity.operationProjection.operation,
+            identity: semantic.identity,
+            contentDigest: semantic.contentDigest
+          },
+          coverage,
+          contentDigestOverride: semantic.contentDigest,
+          safeForJudge: true,
+          safeForPublic: false
+        })
+        references.toolSemanticContents[`${evidence.id}:${semantic.contentDigest}`] = evidenceReference(
+          artifactId,
+          semanticEvidenceId
+        )
+      }
     }
   }
 
@@ -604,6 +658,48 @@ export function buildEvidenceIndex({
   }
   validateEvidenceIndex(artifact)
   return { artifact, references }
+}
+
+export function buildTaskStateContent(task) {
+  return canonicalJson(compactObject({
+    taskId: task?.id ?? task?.taskId ?? null,
+    status: task?.status ?? null,
+    assigneeAgentId: task?.assigneeAgentId ?? null,
+    version: task?.version ?? null,
+    titleDigest: task?.titleDigest
+      ?? (typeof task?.title === 'string' ? sha256(task.title) : null),
+    descriptionDigest: task?.descriptionDigest
+      ?? (typeof task?.description === 'string' ? sha256(task.description) : null),
+    acceptanceCriteriaDigest: Array.isArray(task?.acceptanceCriteria)
+      ? withSha256Prefix(digestJson(task.acceptanceCriteria))
+      : null,
+    blockedReasonDigest: typeof task?.blockedReason === 'string'
+      ? withSha256Prefix(sha256(task.blockedReason))
+      : null,
+    completionSummaryDigest: typeof task?.completionSummary === 'string'
+      ? withSha256Prefix(sha256(task.completionSummary))
+      : null
+  }))
+}
+
+export function extractMemorySemanticResultContents(operationProjection) {
+  const operation = operationProjection?.operation
+  if (!['memory.read', 'memory.view'].includes(operation)) return []
+  const result = operationProjection.canonicalResult ?? operationProjection.result
+  const records = operation === 'memory.view' ? result?.items : result?.memories
+  if (!Array.isArray(records)) return []
+  return records.flatMap((record, index) => {
+    if (typeof record?.body !== 'string' || record.bodyRedacted === true) return []
+    const memoryId = record.memoryId ?? record.target?.memoryId ?? `index-${index}`
+    const revisionId = record.revisionId ?? record.target?.revisionId ?? 'revision-unavailable'
+    return [{
+      identity: `${memoryId}:${revisionId}`,
+      memoryId: typeof memoryId === 'string' ? memoryId : null,
+      revisionId: typeof revisionId === 'string' ? revisionId : null,
+      content: record.body,
+      contentDigest: withSha256Prefix(sha256(record.body))
+    }]
+  })
 }
 
 export async function retainEvidenceIndexArtifact(evidenceDirectory, artifact) {

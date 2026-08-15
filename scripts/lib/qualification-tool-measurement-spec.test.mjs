@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import {
   admitToolMeasurementPack,
+  assertToolMeasurementRuntimeCompatibility,
   materializeMeasurementSpecForBuilder,
   materializeToolMeasurementFixtures,
   verifyToolMeasurementPack
@@ -16,10 +17,22 @@ test('measurement pack seals opportunities, fixture and oracle and materializes 
     const caseRecord = fakeCaseRecord()
     await writePack(root, caseRecord)
     const admission = await admitToolMeasurementPack(root, caseRecord)
-    assert.equal(admission.opportunityCount, 3)
+    assert.equal(admission.opportunityCount, 4)
     assert.equal(JSON.stringify(admission).includes('remember the blue kite'), false)
 
     const pack = await verifyToolMeasurementPack(root, caseRecord)
+    assert.equal(assertToolMeasurementRuntimeCompatibility(pack, {
+      builtinToolCatalogDigest: 'e'.repeat(64),
+      builtinToolContractVersion: 1,
+      builtinToolIpcProtocolVersion: 1,
+      builtinToolEvidenceProjectionVersion: 2
+    }), true)
+    assert.throws(() => assertToolMeasurementRuntimeCompatibility(pack, {
+      builtinToolCatalogDigest: 'f'.repeat(64),
+      builtinToolContractVersion: 1,
+      builtinToolIpcProtocolVersion: 1,
+      builtinToolEvidenceProjectionVersion: 2
+    }), /incompatible/)
     let draftRevision = 0
     let nextMessage = 1
     let nextMemoryRevision = 1
@@ -40,6 +53,9 @@ test('measurement pack seals opportunities, fixture and oracle and materializes 
       if (method === 'memory.revise') {
         return { status: 'applied', payload: { revisionId: `revision-${nextMemoryRevision++}` } }
       }
+      if (method === 'tasks.create') {
+        return { status: 'applied', payload: { taskId: 'task-1', version: 1 } }
+      }
       throw new Error(`unexpected method ${method}`)
     }
     const prepared = await materializeToolMeasurementFixtures({
@@ -52,15 +68,19 @@ test('measurement pack seals opportunities, fixture and oracle and materializes 
     assert.deepEqual(prepared.entities.map((item) => item.symbol), [
       'memory:preference',
       'message:distractor',
-      'message:relevant'
+      'message:relevant',
+      'task:review'
     ])
     assert.equal(calls.filter((call) => call.method === 'camp.messages.send').length, 2)
     assert.equal(calls.some((call) => call.method === 'camp.messages.send'
       && call.input.execution !== null), false)
 
     const builderSpec = materializeMeasurementSpecForBuilder(pack, prepared)
-    assert.equal(builderSpec.opportunities[0].oracle.requiredEntity.entityId, 'message-1')
-    assert.equal(builderSpec.opportunities[1].oracle.requiredMemory.entityId, 'memory-1')
+    assert.deepEqual(builderSpec.opportunities[0].oracle.requiredMessageIds, ['message-1'])
+    assert.equal(builderSpec.opportunities[1].oracle.expectedMemories[0].memoryId, 'memory-1')
+    assert.equal(builderSpec.opportunities[1].oracle.expectedMemories[0].revisionId, 'revision-2')
+    assert.equal(builderSpec.opportunities[3].oracle.requiredTaskIds[0], 'task-1')
+    assert.deepEqual(builderSpec.opportunities[3].oracle.requiredVersions, [1])
     assert.equal(JSON.stringify(builderSpec).includes('$symbol:'), false)
   } finally {
     await rm(root, { recursive: true, force: true })
@@ -91,7 +111,7 @@ test('measurement pack rejects post-hoc opportunities and unknown fixture symbol
     const caseRecord = fakeCaseRecord()
     await writePack(root, caseRecord)
     const oracle = JSON.parse(await readFile(join(root, 'oracle.json'), 'utf8'))
-    oracle.opportunities[0].oracle.requiredEntity = '$symbol:message:missing'
+    oracle.opportunities[0].oracle.requiredMessageIds = ['$symbol:message:missing#entityId']
     await writeJson(join(root, 'oracle.json'), oracle)
     await assert.rejects(
       admitToolMeasurementPack(root, caseRecord),
@@ -113,11 +133,17 @@ async function writePack(root, caseRecord) {
   await mkdir(root, { recursive: true })
   await writeJson(join(root, 'measurement-spec.json'), {
     schemaId: 'rovai.qualification.tool-measurement-spec',
-    schemaVersion: '1.0.0',
+    schemaVersion: '2.0.0',
     specificationId: 'tool-spec:DC-901:1',
     case: { caseId: 'DC-901', caseSeal: `sha256:${caseRecord.seal}` },
     partition: 'holdout',
-    projectionPolicyId: 'qualification-tool-measurement-v1',
+    projectionPolicyId: 'qualification-tool-measurement-v2',
+    runtimeCompatibility: {
+      builtinToolCatalogDigest: `sha256:${'e'.repeat(64)}`,
+      builtinToolContractVersion: 1,
+      builtinToolIpcProtocolVersion: 1,
+      operationProjectionSchemaVersion: 2
+    },
     fixtureFile: 'fixture.json',
     oracleFile: 'oracle.json',
     opportunities: [
@@ -141,11 +167,18 @@ async function writePack(root, caseRecord) {
         mode: 'non_use_control',
         allowedOperations: ['memory.write'],
         semanticItems: ['SER.memory.retention_quality']
+      },
+      {
+        opportunityId: 'OP-TASK-1',
+        adapter: 'task_coordination',
+        mode: 'natural_use',
+        allowedOperations: ['team.get_task', 'team.update_task'],
+        semanticItems: ['SER.tool_use.input_strategy', 'SER.tool_use.result_interpretation']
       }
     ]
   })
   await writeJson(join(root, 'fixture.json'), {
-    schemaVersion: 1,
+    schemaVersion: 2,
     specificationId: 'tool-spec:DC-901:1',
     campMessages: [
       { symbol: 'message:relevant', body: 'The release phrase is blue kite.' },
@@ -167,23 +200,57 @@ async function writePack(root, caseRecord) {
         retrievalKeys: ['current release preference', 'blue kite'],
         reviewAfter: null
       }]
+    }],
+    tasks: [{
+      symbol: 'task:review',
+      title: 'Review the qualification evidence',
+      description: 'Verify the exact receipt and current revision.',
+      acceptanceCriteria: ['Cite the receipt', 'Reject stale revisions'],
+      assigneeAgentId: null
     }]
   })
   await writeJson(join(root, 'oracle.json'), {
-    schemaVersion: 1,
+    schemaVersion: 2,
     specificationId: 'tool-spec:DC-901:1',
     opportunities: [
       {
         opportunityId: 'OP-CAMP-1',
-        oracle: { requiredEntity: '$symbol:message:relevant' }
+        oracle: {
+          requiredOperations: ['camp.search', 'camp.read'],
+          requiredMessageIds: ['$symbol:message:relevant#entityId'],
+          forbiddenMessageIds: ['$symbol:message:distractor#entityId'],
+          requireCompletePagination: true
+        }
       },
       {
         opportunityId: 'OP-MEMORY-1',
-        oracle: { requiredMemory: '$symbol:memory:preference' }
+        oracle: {
+          requiredOperations: ['memory.search', 'memory.read'],
+          expectedMemories: [{
+            memoryId: '$symbol:memory:preference#entityId',
+            revisionId: '$symbol:memory:preference#revisionId',
+            cacheState: 'current'
+          }],
+          forbiddenMemoryIds: [],
+          staleRevisionIds: []
+        }
       },
       {
         opportunityId: 'OP-NO-CALL-1',
-        oracle: { expectedCallCount: 0 }
+        oracle: {}
+      },
+      {
+        opportunityId: 'OP-TASK-1',
+        oracle: {
+          requiredOperations: ['team.get_task', 'team.update_task'],
+          requiredTaskIds: ['$symbol:task:review#entityId'],
+          forbiddenTaskIds: [],
+          requiredStatuses: ['completed'],
+          requiredAssigneeAgentIds: [],
+          requireEffectBinding: true,
+          requireMutationReceipt: true,
+          requiredVersions: ['$symbol:task:review#version']
+        }
       }
     ]
   })

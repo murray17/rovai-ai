@@ -1,5 +1,5 @@
 {
-  "catalogVersion": "1.2.0",
+  "catalogVersion": "1.3.0",
   "hashAlgorithm": "sha256",
   "digestInput": "raw_file_bytes",
   "schemas": [
@@ -16,10 +16,22 @@
       "digest": "sha256:f8d267dfd79500a2ced9904967f1704adb10e97b29ce94794e50e2b8a9dd27e3"
     },
     {
+      "file": "tool-interaction-measurement-v2.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/contracts/tool-interaction-measurement-v2.schema.json",
+      "schemaVersion": "2.0.0",
+      "digest": "sha256:830564c85714f09db074a13ee02651d276d9c4452e09acb31749d0bb8f198d4a"
+    },
+    {
       "file": "tool-use-judge-pack-v1.schema.json",
       "schemaUri": "https://schemas.rovai.invalid/contracts/tool-use-judge-pack-v1.schema.json",
       "schemaVersion": "1.0.0",
       "digest": "sha256:db3999ba739b376f7c0a951acd801a838361b9fc481e39363119283a82658074"
+    },
+    {
+      "file": "tool-use-judge-pack-v2.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/contracts/tool-use-judge-pack-v2.schema.json",
+      "schemaVersion": "2.0.0",
+      "digest": "sha256:ba41bd544606c79e8c0fa6a8a49859d7b10785049167687d7df920d7100ad54e"
     },
     {
       "file": "tool-use-judge-configuration-v1.schema.json",

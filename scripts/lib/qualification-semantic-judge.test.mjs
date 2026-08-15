@@ -40,7 +40,10 @@ test('Judge Configuration and allowlist Pack are schema-valid, pseudonymized, an
   assert.equal(serialized.includes('returnObligation'), false)
   assert.equal(fixture.pack.payload.checklistCoverage.length, 11)
   assert.equal(fixture.pack.payload.workspaceChanges[0].boundedContextSegmentId, 'segment-code')
-  assert.equal(fixture.pack.payload.collaborationFacts.length, 3)
+  assert.equal(fixture.pack.payload.collaborationFacts.length, 4)
+  assert.equal(fixture.pack.payload.collaborationFacts.some((fact) => (
+    fact.factType === 'public_camp_message'
+  )), true)
   const coverage = new Map(fixture.pack.payload.checklistCoverage.map((item) => [
     item.checklistItem,
     item.coverage

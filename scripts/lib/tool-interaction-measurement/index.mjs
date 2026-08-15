@@ -10,13 +10,13 @@ import {
 } from '../qualification-common.mjs'
 import { validateQualificationContractArtifactSchema } from '../qualification-schema-validation.mjs'
 
-export const TOOL_INTERACTION_MEASUREMENT_SCHEMA_VERSION = '1.0.0'
+export const TOOL_INTERACTION_MEASUREMENT_SCHEMA_VERSION = '2.0.0'
 export const TOOL_INTERACTION_MEASUREMENT_SCHEMA_ID =
   'rovai.qualification.tool-interaction-measurement'
 export const TOOL_USE_JUDGE_PACK_SCHEMA_ID = 'rovai.qualification.tool-use-judge-pack'
 export const TOOL_INTERACTION_SOURCE_SCHEMA_ID = 'rovai.qualification.tool-interaction-source'
-export const TOOL_INTERACTION_MEASUREMENT_POLICY_ID = 'tool-interaction-measurement-v1'
-export const TOOL_USE_JUDGE_PACK_POLICY_ID = 'tool-use-judge-pack-treatment-blind-v1'
+export const TOOL_INTERACTION_MEASUREMENT_POLICY_ID = 'tool-interaction-measurement-v2'
+export const TOOL_USE_JUDGE_PACK_POLICY_ID = 'tool-use-judge-pack-treatment-blind-v2'
 
 const SCHEMA_VERSION = TOOL_INTERACTION_MEASUREMENT_SCHEMA_VERSION
 const MEASUREMENT_SCHEMA_ID = TOOL_INTERACTION_MEASUREMENT_SCHEMA_ID
@@ -24,13 +24,20 @@ const JUDGE_PACK_SCHEMA_ID = TOOL_USE_JUDGE_PACK_SCHEMA_ID
 const MEASUREMENT_POLICY_ID = TOOL_INTERACTION_MEASUREMENT_POLICY_ID
 const JUDGE_POLICY_ID = TOOL_USE_JUDGE_PACK_POLICY_ID
 const MAX_TEXT_CHARACTERS = 20_000
+const MAX_ORACLE_LIST_ITEMS = 64
 
 const MODES = new Set(['forced_use', 'natural_use', 'non_use_control'])
 const ADAPTER_OPERATIONS = Object.freeze({
-  camp_history: Object.freeze(['camp.list', 'camp.search', 'camp.read']),
-  memory_retrieval: Object.freeze(['memory.search', 'memory.read']),
+  camp_history: Object.freeze(['camp.list', 'camp.search', 'history.search', 'camp.read']),
+  memory_retrieval: Object.freeze(['memory.view', 'memory.search', 'memory.read']),
   memory_mutation: Object.freeze(['memory.write']),
-  camp_message_send: Object.freeze(['camp.message.send'])
+  camp_message_send: Object.freeze(['camp.message.send']),
+  task_coordination: Object.freeze([
+    'team.create_task',
+    'team.get_task',
+    'team.update_task',
+    'team.list_tasks'
+  ])
 })
 
 export const TOOL_USE_JUDGE_CHECKLIST = Object.freeze([
@@ -121,6 +128,7 @@ export function buildToolInteractionMeasurement({
     specification: {
       specificationId: specification.specificationId,
       specificationDigest: digest(measurementSpec),
+      runtimeCompatibility: structuredClone(specification.runtimeCompatibility),
       opportunityCount: opportunities.length
     },
     sourceCoverage,
@@ -194,15 +202,15 @@ function projectToolUseJudgePayload(measurement, task) {
       interactions.flatMap((interaction) => interaction.evidenceReferences),
       localEvidence.byReference
     )
-    const retrievedContentEvidenceIds = localIdsForReferences(
+    const semanticResultEvidenceIds = localIdsForReferences(
       effectBindings
-        .filter((binding) => binding.kind === 'retrieved_content')
+        .filter((binding) => ['retrieved_content', 'task_state'].includes(binding.kind))
         .flatMap((binding) => binding.evidenceReferences),
       localEvidence.byReference
     )
     const downstreamEvidenceIds = localIdsForReferences(
       effectBindings
-        .filter((binding) => binding.kind !== 'retrieved_content')
+        .filter((binding) => !['retrieved_content', 'task_state'].includes(binding.kind))
         .flatMap((binding) => binding.evidenceReferences),
       localEvidence.byReference
     )
@@ -211,7 +219,7 @@ function projectToolUseJudgePayload(measurement, task) {
       interactions,
       effectBindings,
       interactionEvidenceIds,
-      retrievedContentEvidenceIds,
+      semanticResultEvidenceIds,
       downstreamEvidenceIds
     })
     return {
@@ -287,7 +295,7 @@ export function buildToolInteractionSourceArtifact({
     throw new Error('Tool Interaction source requires a Prepared Fixture reference')
   }
   const payload = {
-    policyId: 'tool-interaction-private-replay-source-v1',
+    policyId: 'tool-interaction-private-replay-source-v2',
     measurementArtifact: artifactReference(measurement),
     preparedFixtureArtifact: structuredClone(preparedFixtureArtifact),
     measurementSpec: structuredClone(measurementSpec),
@@ -331,7 +339,7 @@ export function validateToolInteractionSourceArtifact(artifact, measurement) {
     'toolEvidence',
     'effectEvidence'
   ], 'Tool Interaction source payload')
-  if (artifact.payload.policyId !== 'tool-interaction-private-replay-source-v1'
+  if (artifact.payload.policyId !== 'tool-interaction-private-replay-source-v2'
       || canonicalJson(artifact.payload.measurementArtifact) !== canonicalJson(
         artifactReference(measurement)
       )) {
@@ -344,7 +352,7 @@ export function validateToolInteractionSourceArtifact(artifact, measurement) {
   )
   if (artifact.payload.preparedFixtureArtifact.schemaId
         !== 'rovai.qualification.prepared-tool-fixture-manifest'
-      || artifact.payload.preparedFixtureArtifact.schemaVersion !== '1.0.0'
+      || artifact.payload.preparedFixtureArtifact.schemaVersion !== '2.0.0'
       || !stableDigest(artifact.payload.preparedFixtureArtifact.payloadDigest)) {
     throw new Error('Prepared Tool Fixture reference identity is invalid')
   }
@@ -400,8 +408,9 @@ export async function retainToolInteractionArtifacts(
 }
 
 function normalizeMeasurementSpec(value) {
-  assertExactKeys(value, ['specificationId', 'opportunities'], 'measurementSpec')
+  assertExactKeys(value, ['specificationId', 'runtimeCompatibility', 'opportunities'], 'measurementSpec')
   requireIdentifier(value.specificationId, 'measurementSpec.specificationId')
+  const runtimeCompatibility = normalizeRuntimeCompatibility(value.runtimeCompatibility)
   if (!Array.isArray(value.opportunities) || value.opportunities.length === 0) {
     throw new Error('measurementSpec.opportunities must be a non-empty array')
   }
@@ -451,7 +460,31 @@ function normalizeMeasurementSpec(value) {
       oracle
     }
   })
-  return { specificationId: value.specificationId, opportunities }
+  return { specificationId: value.specificationId, runtimeCompatibility, opportunities }
+}
+
+function normalizeRuntimeCompatibility(value) {
+  assertExactKeys(value, [
+    'builtinToolCatalogDigest',
+    'builtinToolContractVersion',
+    'builtinToolIpcProtocolVersion',
+    'operationProjectionSchemaVersion'
+  ], 'measurementSpec.runtimeCompatibility')
+  const result = {
+    builtinToolCatalogDigest: stableDigest(value.builtinToolCatalogDigest),
+    builtinToolContractVersion: value.builtinToolContractVersion,
+    builtinToolIpcProtocolVersion: value.builtinToolIpcProtocolVersion,
+    operationProjectionSchemaVersion: value.operationProjectionSchemaVersion
+  }
+  if (!result.builtinToolCatalogDigest
+      || ![
+        result.builtinToolContractVersion,
+        result.builtinToolIpcProtocolVersion,
+        result.operationProjectionSchemaVersion
+      ].every((item) => Number.isSafeInteger(item) && item >= 1)) {
+    throw new Error('measurementSpec.runtimeCompatibility is invalid')
+  }
+  return result
 }
 
 function normalizeOracle(adapter, value) {
@@ -460,12 +493,29 @@ function normalizeOracle(adapter, value) {
   const adapterKeys = {
     camp_history: ['requiredMessageIds', 'forbiddenMessageIds', 'requireCompletePagination'],
     memory_retrieval: ['expectedMemories', 'forbiddenMemoryIds', 'staleRevisionIds'],
-    memory_mutation: ['expectedMemoryId', 'expectedRevisionId', 'expectedAction', 'requireReceipt'],
+    memory_mutation: [
+      'expectedMemoryId',
+      'expectedRevisionId',
+      'expectedAction',
+      'requireReceipt',
+      'requireEffectiveReadback'
+    ],
     camp_message_send: [
       'requiredRecipientAgentIds',
       'forbiddenRecipientAgentIds',
+      'requiredTaskIds',
+      'forbiddenTaskIds',
       'requireEffectBinding',
       'requireReceipt'
+    ],
+    task_coordination: [
+      'requiredTaskIds',
+      'forbiddenTaskIds',
+      'requiredStatuses',
+      'requiredAssigneeAgentIds',
+      'requiredVersions',
+      'requireEffectBinding',
+      'requireMutationReceipt'
     ]
   }[adapter]
   assertExactKeys(value, [...common, ...adapterKeys], `${adapter} oracle`, {
@@ -508,11 +558,22 @@ function normalizeOracle(adapter, value) {
     result.expectedRevisionId = optionalIdentifier(value.expectedRevisionId, 'expectedRevisionId')
     result.expectedAction = optionalIdentifier(value.expectedAction, 'expectedAction')
     result.requireReceipt = booleanDefault(value.requireReceipt, true)
-  } else {
+    result.requireEffectiveReadback = booleanDefault(value.requireEffectiveReadback, false)
+  } else if (adapter === 'camp_message_send') {
     result.requiredRecipientAgentIds = normalizedIdentifiers(value.requiredRecipientAgentIds)
     result.forbiddenRecipientAgentIds = normalizedIdentifiers(value.forbiddenRecipientAgentIds)
+    result.requiredTaskIds = normalizedIdentifiers(value.requiredTaskIds)
+    result.forbiddenTaskIds = normalizedIdentifiers(value.forbiddenTaskIds)
     result.requireEffectBinding = booleanDefault(value.requireEffectBinding, true)
     result.requireReceipt = booleanDefault(value.requireReceipt, true)
+  } else {
+    result.requiredTaskIds = normalizedIdentifiers(value.requiredTaskIds)
+    result.forbiddenTaskIds = normalizedIdentifiers(value.forbiddenTaskIds)
+    result.requiredStatuses = normalizedIdentifiers(value.requiredStatuses)
+    result.requiredAssigneeAgentIds = normalizedIdentifiers(value.requiredAssigneeAgentIds)
+    result.requiredVersions = normalizedIntegers(value.requiredVersions)
+    result.requireEffectBinding = booleanDefault(value.requireEffectBinding, true)
+    result.requireMutationReceipt = booleanDefault(value.requireMutationReceipt, true)
   }
   return result
 }
@@ -693,6 +754,7 @@ function normalizeEffects(effectEvidence) {
     ids.add(effect.effectId)
     if (![
       'retrieved_content',
+      'task_state',
       'message',
       'workspace_change',
       'verification',
@@ -703,8 +765,8 @@ function normalizeEffects(effectEvidence) {
     const content = effect.content === undefined
       ? null
       : requireBoundedString(effect.content, 'effect content', MAX_TEXT_CHARACTERS)
-    if (effect.kind === 'retrieved_content' && content === null) {
-      throw new Error('retrieved_content Evidence requires bounded exact content')
+    if (['retrieved_content', 'task_state'].includes(effect.kind) && content === null) {
+      throw new Error(`${effect.kind} Evidence requires bounded exact content`)
     }
     const computedDigest = content === null ? null : `sha256:${sha256(content)}`
     const suppliedDigest = stableDigest(effect.contentDigest)
@@ -768,10 +830,13 @@ function assessOpportunity({ opportunity, interactions, effectBindings, sourceCo
   } else if (opportunity.adapter === 'memory_retrieval') {
     oracleMatch = assessMemoryRetrieval(opportunity.oracle, interactions)
   } else if (opportunity.adapter === 'memory_mutation') {
-    oracleMatch = assessMemoryMutation(opportunity.oracle, interactions)
-  } else {
+    oracleMatch = assessMemoryMutation(opportunity.oracle, interactions, effectBindings)
+  } else if (opportunity.adapter === 'camp_message_send') {
     oracleMatch = assessCampMessageSend(opportunity.oracle, interactions)
     effectBinding = assessEffectBinding(opportunity.oracle, effectBindings)
+  } else {
+    oracleMatch = assessTaskCoordination(opportunity.oracle, interactions)
+    effectBinding = assessTaskEffectBinding(opportunity.oracle, effectBindings)
   }
   const statuses = [common.mechanicalIntegrity.status, oracleMatch.status, effectBinding.status]
     .filter((status) => status !== 'not_applicable')
@@ -886,7 +951,10 @@ function assessMemoryRetrieval(oracle, interactions) {
   const readRecords = interactions
     .filter((item) => item.canonicalTool === 'memory.read')
     .flatMap((item) => extractMemoryRecords(item.operationProjection.result))
-  const allRecords = interactions.flatMap((item) => extractMemoryRecords(item.operationProjection.result))
+  const allRecords = interactions.flatMap((item) => extractMemoryRecords(
+    item.operationProjection.result,
+    item.canonicalTool === 'memory.view' ? 'current' : null
+  ))
   const authoritativeRecords = readRecords.length > 0 ? readRecords : allRecords
   let expectedObserved = 0
   let staleObserved = 0
@@ -919,7 +987,7 @@ function assessMemoryRetrieval(oracle, interactions) {
   }, reasons)
 }
 
-function assessMemoryMutation(oracle, interactions) {
+function assessMemoryMutation(oracle, interactions, effectBindings) {
   const identities = new Set(interactions.flatMap((item) => (
     extractResultIdentities(item.operationProjection.result)
   )))
@@ -936,13 +1004,73 @@ function assessMemoryMutation(oracle, interactions) {
   }
   const receiptCount = interactions.filter((item) => item.receiptId).length
   if (oracle.requireReceipt && receiptCount !== interactions.length) reasons.push('mutation_receipt_missing')
+  const expectedBodyDigests = new Set(interactions
+    .map((item) => item.operationProjection.input?.body)
+    .filter((body) => typeof body === 'string')
+    .map((body) => `sha256:${sha256(body)}`))
+  const readbackBindings = effectBindings.filter((binding) => binding.kind === 'retrieved_content')
+  const matchingReadbackCount = readbackBindings.filter((binding) => (
+    expectedBodyDigests.size === 0 || expectedBodyDigests.has(binding.contentDigest)
+  )).length
+  if (oracle.requireEffectiveReadback && readbackBindings.length === 0) {
+    reasons.push('memory_effective_readback_missing')
+  } else if (oracle.requireEffectiveReadback && matchingReadbackCount === 0) {
+    reasons.push('memory_effective_readback_mismatch')
+  }
   return assessment(reasons.length > 0 ? 'fail' : 'pass', {
     expectedMemoryIdentityObserved: oracle.expectedMemoryId ? identities.has(oracle.expectedMemoryId) : null,
     expectedRevisionIdentityObserved: oracle.expectedRevisionId
       ? identities.has(oracle.expectedRevisionId)
       : null,
     receiptRequired: oracle.requireReceipt,
-    receiptCount
+    receiptCount,
+    effectiveReadbackRequired: oracle.requireEffectiveReadback,
+    readbackCount: readbackBindings.length,
+    matchingReadbackCount
+  }, reasons)
+}
+
+function assessTaskCoordination(oracle, interactions) {
+  const records = interactions.flatMap((item) => extractTaskRecords(item.operationProjection.result))
+  const taskIds = new Set(records.map((record) => record.taskId).filter(Boolean))
+  const statuses = new Set(records.map((record) => record.status).filter(Boolean))
+  const assignees = new Set(records.map((record) => record.assigneeAgentId).filter(Boolean))
+  const versions = new Set(records.map((record) => record.version).filter(Number.isSafeInteger))
+  const requiredTaskObserved = oracle.requiredTaskIds.filter((id) => taskIds.has(id)).length
+  const forbiddenTaskObserved = oracle.forbiddenTaskIds.filter((id) => taskIds.has(id)).length
+  const requiredStatusObserved = oracle.requiredStatuses.filter((status) => statuses.has(status)).length
+  const requiredAssigneeObserved = oracle.requiredAssigneeAgentIds
+    .filter((agentId) => assignees.has(agentId)).length
+  const requiredVersionObserved = oracle.requiredVersions.filter((version) => versions.has(version)).length
+  const mutating = interactions.filter((item) => (
+    ['team.create_task', 'team.update_task'].includes(item.canonicalTool)
+  ))
+  const mutationReceiptCount = mutating.filter((item) => item.receiptId).length
+  const reasons = []
+  if (requiredTaskObserved !== oracle.requiredTaskIds.length) reasons.push('required_task_identity_missing')
+  if (forbiddenTaskObserved > 0) reasons.push('forbidden_task_identity_used')
+  if (requiredStatusObserved !== oracle.requiredStatuses.length) reasons.push('required_task_status_missing')
+  if (requiredAssigneeObserved !== oracle.requiredAssigneeAgentIds.length) {
+    reasons.push('required_task_assignee_missing')
+  }
+  if (requiredVersionObserved !== oracle.requiredVersions.length) {
+    reasons.push('required_task_version_missing')
+  }
+  if (oracle.requireMutationReceipt && mutationReceiptCount !== mutating.length) {
+    reasons.push('task_mutation_receipt_missing')
+  }
+  return assessment(reasons.length > 0 ? 'fail' : 'pass', {
+    requiredTaskCount: oracle.requiredTaskIds.length,
+    observedRequiredTaskCount: requiredTaskObserved,
+    observedForbiddenTaskCount: forbiddenTaskObserved,
+    requiredStatusCount: oracle.requiredStatuses.length,
+    observedRequiredStatusCount: requiredStatusObserved,
+    requiredAssigneeCount: oracle.requiredAssigneeAgentIds.length,
+    observedRequiredAssigneeCount: requiredAssigneeObserved,
+    requiredVersionCount: oracle.requiredVersions.length,
+    observedRequiredVersionCount: requiredVersionObserved,
+    mutationCount: mutating.length,
+    mutationReceiptCount
   }, reasons)
 }
 
@@ -953,14 +1081,24 @@ function assessCampMessageSend(oracle, interactions) {
   const requiredObserved = oracle.requiredRecipientAgentIds.filter((id) => recipients.has(id)).length
   const forbiddenObserved = oracle.forbiddenRecipientAgentIds.filter((id) => recipients.has(id)).length
   const receiptCount = interactions.filter((item) => item.receiptId).length
+  const taskIds = new Set(interactions
+    .map((item) => item.operationProjection.input?.taskId)
+    .filter((value) => typeof value === 'string'))
+  const requiredTaskObserved = oracle.requiredTaskIds.filter((id) => taskIds.has(id)).length
+  const forbiddenTaskObserved = oracle.forbiddenTaskIds.filter((id) => taskIds.has(id)).length
   const reasons = []
   if (requiredObserved !== oracle.requiredRecipientAgentIds.length) reasons.push('required_recipient_missing')
   if (forbiddenObserved > 0) reasons.push('forbidden_recipient_observed')
+  if (requiredTaskObserved !== oracle.requiredTaskIds.length) reasons.push('required_task_link_missing')
+  if (forbiddenTaskObserved > 0) reasons.push('forbidden_task_link_observed')
   if (oracle.requireReceipt && receiptCount !== interactions.length) reasons.push('send_receipt_missing')
   return assessment(reasons.length > 0 ? 'fail' : 'pass', {
     requiredRecipientCount: oracle.requiredRecipientAgentIds.length,
     observedRequiredRecipientCount: requiredObserved,
     observedForbiddenRecipientCount: forbiddenObserved,
+    requiredTaskCount: oracle.requiredTaskIds.length,
+    observedRequiredTaskCount: requiredTaskObserved,
+    observedForbiddenTaskCount: forbiddenTaskObserved,
     receiptRequired: oracle.requireReceipt,
     receiptCount
   }, reasons)
@@ -974,12 +1112,20 @@ function assessEffectBinding(oracle, effectBindings) {
   }, messageBindings.length > 0 ? [] : ['accepted_send_effect_unbound'])
 }
 
+function assessTaskEffectBinding(oracle, effectBindings) {
+  if (!oracle.requireEffectBinding) return notApplicableAssessment()
+  const bindings = effectBindings.filter((binding) => binding.kind === 'task_state')
+  return assessment(bindings.length > 0 ? 'pass' : 'fail', {
+    boundEffectCount: bindings.length
+  }, bindings.length > 0 ? [] : ['task_state_effect_unbound'])
+}
+
 function projectOperation(operation, source) {
-  if (!isObject(source) || source.schemaVersion !== 1 || source.operation !== operation) {
+  if (!isObject(source) || ![1, 2].includes(source.schemaVersion) || source.operation !== operation) {
     throw new Error('Core operation projection identity is invalid')
   }
   return {
-    schemaVersion: 1,
+    schemaVersion: source.schemaVersion,
     operation,
     input: source.input === null || source.input === undefined
       ? null
@@ -1001,7 +1147,7 @@ function validateCoreOperationProjection(value, operation) {
     'resultDigest',
     'projectionDigest'
   ], 'Core operationProjection')
-  if (value.schemaVersion !== 1 || value.operation !== operation
+  if (![1, 2].includes(value.schemaVersion) || value.operation !== operation
       || !isObject(value.canonicalInput)
       || (value.canonicalResult !== null && !isObject(value.canonicalResult))) {
     throw new Error('Core operationProjection identity is invalid')
@@ -1048,13 +1194,16 @@ function projectOperationInput(operation, value) {
     cursor: boundedNullableString(value.cursor),
     limit: boundedInteger(value.limit)
   })
-  if (operation === 'camp.search') return compactObject({
+  if (operation === 'camp.search' || operation === 'history.search') return compactObject({
     query: boundedNullableString(value.query),
     queryCharCount: boundedInteger(value.queryCharCount),
     queryTruncated: booleanOrNull(value.queryTruncated),
     queryRedacted: booleanOrNull(value.queryRedacted),
     limit: boundedInteger(value.limit),
     cursor: boundedNullableString(value.cursor),
+    campIds: normalizedIdentifiers(value.campIds),
+    dateFrom: boundedNullableString(value.dateFrom),
+    dateTo: boundedNullableString(value.dateTo),
     beforeSequence: boundedInteger(value.beforeSequence),
     afterSequence: boundedInteger(value.afterSequence)
   })
@@ -1085,10 +1234,13 @@ function projectOperationInput(operation, value) {
   if (operation === 'memory.read') return {
     memoryIds: normalizedIdentifiers(value.memoryIds)
   }
+  if (operation === 'memory.view') return compactObject({
+    scope: boundedNullableString(value.scope),
+    counterpartyAgentId: boundedNullableString(value.counterpartyAgentId)
+  })
   if (operation === 'memory.write') return compactObject({
     action: boundedNullableString(value.action),
-    memoryId: boundedNullableString(value.memoryId),
-    baseRevisionId: boundedNullableString(value.baseRevisionId ?? value.expectedRevisionId),
+    target: normalizeMemoryTarget(value.target),
     kind: boundedNullableString(value.kind),
     scope: boundedNullableString(value.scope),
     body: boundedNullableString(value.body),
@@ -1102,6 +1254,42 @@ function projectOperationInput(operation, value) {
     counterpartyAgentId: boundedNullableString(value.counterpartyAgentId),
     direction: boundedNullableString(value.direction),
     contentDigest: stableDigest(value.contentDigest ?? value.bodyDigest)
+  })
+  if (operation === 'team.create_task') return compactObject({
+    title: boundedNullableString(value.title),
+    titleCharCount: boundedInteger(value.titleCharCount),
+    titleTruncated: booleanOrNull(value.titleTruncated),
+    description: boundedNullableString(value.description),
+    descriptionCharCount: boundedInteger(value.descriptionCharCount),
+    descriptionTruncated: booleanOrNull(value.descriptionTruncated),
+    acceptanceCriteria: boundedStrings(value.acceptanceCriteria, 32),
+    assigneeAgentId: boundedNullableString(value.assigneeAgentId)
+  })
+  if (operation === 'team.get_task') return compactObject({
+    taskId: boundedNullableString(value.taskId)
+  })
+  if (operation === 'team.update_task') return compactObject({
+    taskId: boundedNullableString(value.taskId),
+    expectedVersion: boundedInteger(value.expectedVersion),
+    requestedStatus: boundedNullableString(value.requestedStatus),
+    assigneeAgentId: boundedNullableString(value.assigneeAgentId),
+    clearAssignee: booleanOrNull(value.clearAssignee),
+    clearAcceptanceCriteria: booleanOrNull(value.clearAcceptanceCriteria),
+    changedFields: boundedStrings(value.changedFields, 32),
+    title: boundedNullableString(value.title),
+    description: boundedNullableString(value.description),
+    acceptanceCriteria: boundedStrings(value.acceptanceCriteria, 32),
+    blockedReason: boundedNullableString(value.blockedReason),
+    completionSummary: boundedNullableString(value.completionSummary),
+    cancelReason: boundedNullableString(value.cancelReason)
+  })
+  if (operation === 'team.list_tasks') return compactObject({
+    statuses: boundedStrings(value.statuses, 32),
+    assigneeAgentId: boundedNullableString(value.assigneeAgentId),
+    unassignedOnly: booleanOrNull(value.unassignedOnly),
+    limit: boundedInteger(value.limit),
+    cursor: boundedNullableString(value.cursor),
+    cursorDigest: stableDigest(value.cursorDigest)
   })
   return compactObject({
     recipientAgentIds: normalizedIdentifiers(
@@ -1128,7 +1316,7 @@ function projectOperationResult(operation, value) {
     truncated: booleanOrNull(value.truncated),
     nextCursor: boundedNullableString(value.nextCursor)
   })
-  if (operation === 'camp.search') return compactObject({
+  if (operation === 'camp.search' || operation === 'history.search') return compactObject({
     messageIds: normalizedIdentifiers(
       value.messageIds ?? value.results?.map((item) => item?.messageId)
     ),
@@ -1156,12 +1344,19 @@ function projectOperationResult(operation, value) {
     bodyTruncated: booleanOrNull(value.bodyTruncated ?? value.items?.some((item) => item?.bodyTruncated)),
     nextBodyOffset: boundedInteger(value.nextBodyOffset)
   })
-  if (operation === 'memory.search' || operation === 'memory.read') return compactObject({
-    memories: normalizeMemoryRecords(value.memories ?? value.results),
+  if (operation === 'memory.search' || operation === 'memory.read' || operation === 'memory.view') return compactObject({
+    scope: boundedNullableString(value.scope),
+    counterpartyAgentId: boundedNullableString(value.counterpartyAgentId),
+    complete: booleanOrNull(value.complete),
+    memories: normalizeMemoryRecords(value.memories ?? value.results ?? value.items),
     resultCount: boundedInteger(value.resultCount),
     memoryCount: boundedInteger(value.memoryCount),
+    itemCount: boundedInteger(value.itemCount),
+    totalBodyBytes: boundedInteger(value.totalBodyBytes),
     resultsTruncated: booleanOrNull(value.resultsTruncated),
     memoriesTruncated: booleanOrNull(value.memoriesTruncated),
+    itemsTruncated: booleanOrNull(value.itemsTruncated),
+    semanticBodiesTruncated: booleanOrNull(value.semanticBodiesTruncated),
     truncated: booleanOrNull(value.truncated),
     searchIncomplete: booleanOrNull(value.searchIncomplete),
     nextCursor: boundedNullableString(value.nextCursor)
@@ -1173,6 +1368,17 @@ function projectOperationResult(operation, value) {
     reviewItemId: boundedNullableString(value.reviewItemId),
     action: boundedNullableString(value.action),
     version: boundedInteger(value.version)
+  })
+  if (['team.create_task', 'team.get_task', 'team.update_task'].includes(operation)) {
+    return normalizeTaskRecord(value)
+  }
+  if (operation === 'team.list_tasks') return compactObject({
+    tasks: normalizeTaskRecords(value.tasks),
+    taskCount: boundedInteger(value.taskCount),
+    tasksTruncated: booleanOrNull(value.tasksTruncated),
+    truncated: booleanOrNull(value.truncated),
+    nextCursor: boundedNullableString(value.nextCursor),
+    nextCursorDigest: stableDigest(value.nextCursorDigest)
   })
   return compactObject({
     status: boundedNullableString(value.status),
@@ -1189,12 +1395,51 @@ function projectOperationResult(operation, value) {
 function normalizeMemoryRecords(value) {
   if (!Array.isArray(value)) return []
   return value.slice(0, 64).map((record) => compactObject({
-    memoryId: boundedNullableString(record?.memoryId),
-    revisionId: boundedNullableString(record?.revisionId),
+    memoryId: boundedNullableString(record?.memoryId ?? record?.target?.memoryId),
+    revisionId: boundedNullableString(record?.revisionId ?? record?.target?.revisionId),
+    target: normalizeMemoryTarget(record?.target),
     cacheState: boundedNullableString(record?.cacheState),
     status: boundedNullableString(record?.status),
-    kind: boundedNullableString(record?.kind)
+    kind: boundedNullableString(record?.kind),
+    scope: boundedNullableString(record?.scope ?? record?.target?.scope),
+    counterpartyAgentId: boundedNullableString(
+      record?.counterpartyAgentId ?? record?.target?.counterpartyAgentId
+    ),
+    direction: boundedNullableString(record?.direction ?? record?.target?.direction),
+    agentCanRevise: booleanOrNull(record?.agentCanRevise),
+    retrievalKeys: boundedStrings(record?.retrievalKeys, 32),
+    body: boundedNullableString(record?.body),
+    bodyCharCount: boundedInteger(record?.bodyCharCount),
+    bodyTruncated: booleanOrNull(record?.bodyTruncated),
+    bodyRedacted: booleanOrNull(record?.bodyRedacted)
   }))
+}
+
+function normalizeMemoryTarget(value) {
+  if (!isObject(value)) return null
+  return compactObject({
+    memoryId: boundedNullableString(value.memoryId),
+    revisionId: boundedNullableString(value.revisionId),
+    scope: boundedNullableString(value.scope),
+    counterpartyAgentId: boundedNullableString(value.counterpartyAgentId),
+    direction: boundedNullableString(value.direction)
+  })
+}
+
+function normalizeTaskRecord(value) {
+  if (!isObject(value)) return {}
+  return compactObject({
+    taskId: boundedNullableString(value.taskId),
+    status: boundedNullableString(value.status),
+    assigneeAgentId: boundedNullableString(value.assigneeAgentId),
+    version: boundedInteger(value.version),
+    changed: booleanOrNull(value.changed)
+  })
+}
+
+function normalizeTaskRecords(value) {
+  if (!Array.isArray(value)) return []
+  return value.slice(0, 64).map(normalizeTaskRecord)
 }
 
 function buildLocalEvidenceMap(measurement) {
@@ -1221,7 +1466,7 @@ function buildChecklistCoverage({
   interactions,
   effectBindings,
   interactionEvidenceIds,
-  retrievedContentEvidenceIds,
+  semanticResultEvidenceIds,
   downstreamEvidenceIds
 }) {
   return TOOL_USE_CHECKLIST.map((checklistItem) => {
@@ -1241,14 +1486,20 @@ function buildChecklistCoverage({
         && interactions.every((item) => item.operationProjection.result === null)) {
       coverage = { state: 'unavailable', reason: { code: 'tool_result_projection_unavailable' } }
     } else if (checklistItem === 'SER.tool_use.result_interpretation'
-        && !effectBindings.some((binding) => binding.kind === 'retrieved_content')) {
+        && ['camp_history', 'memory_retrieval', 'task_coordination'].includes(opportunity.adapter)
+        && !effectBindings.some((binding) => (
+          ['retrieved_content', 'task_state'].includes(binding.kind)
+        ))) {
       coverage = { state: 'unavailable', reason: { code: 'semantic_result_content_unavailable' } }
     } else if (checklistItem === 'SER.tool_use.downstream_use'
-        && !effectBindings.some((binding) => binding.kind !== 'retrieved_content')) {
+        && !effectBindings.some((binding) => (
+          !['retrieved_content', 'task_state'].includes(binding.kind)
+        ))) {
       coverage = { state: 'unavailable', reason: { code: 'downstream_semantic_relation_unbound' } }
     } else if (checklistItem === 'SER.tool_use.downstream_use'
         && effectBindings
           .filter((binding) => binding.kind !== 'retrieved_content')
+          .filter((binding) => binding.kind !== 'task_state')
           .every((binding) => binding.relation === 'candidate_trial_delivery_no_causal_attribution')) {
       coverage = {
         state: 'partial',
@@ -1256,7 +1507,7 @@ function buildChecklistCoverage({
       }
     }
     const evidenceIds = checklistItem === 'SER.tool_use.result_interpretation'
-      ? uniqueStrings([...interactionEvidenceIds, ...retrievedContentEvidenceIds])
+      ? uniqueStrings([...interactionEvidenceIds, ...semanticResultEvidenceIds])
       : checklistItem === 'SER.tool_use.downstream_use'
         ? uniqueStrings([...interactionEvidenceIds, ...downstreamEvidenceIds])
         : [...interactionEvidenceIds]
@@ -1301,7 +1552,7 @@ function defaultSemanticItems(adapter) {
 function validateMeasurementArtifact(artifact) {
   validateEnvelope(artifact, MEASUREMENT_SCHEMA_ID, 'Tool Interaction Measurement')
   validateQualificationContractArtifactSchema(
-    'tool-interaction-measurement-v1.schema.json',
+    'tool-interaction-measurement-v2.schema.json',
     artifact
   )
   assertNoScoreKeys(artifact)
@@ -1315,8 +1566,9 @@ function validateMeasurementArtifact(artifact) {
   ], 'Tool Interaction Measurement payload')
   if (artifact.payload.policyId !== MEASUREMENT_POLICY_ID) throw new Error('measurement policy is invalid')
   assertExactKeys(artifact.payload.specification, [
-    'specificationId', 'specificationDigest', 'opportunityCount'
+    'specificationId', 'specificationDigest', 'runtimeCompatibility', 'opportunityCount'
   ], 'measurement specification reference')
+  normalizeRuntimeCompatibility(artifact.payload.specification.runtimeCompatibility)
   validateCoverage(artifact.payload.sourceCoverage)
   if (!Array.isArray(artifact.payload.interactions)
       || !Array.isArray(artifact.payload.opportunities)) {
@@ -1353,7 +1605,7 @@ function validateMeasurementArtifact(artifact) {
 
 function validateJudgePackArtifact(artifact, measurement) {
   validateEnvelope(artifact, JUDGE_PACK_SCHEMA_ID, 'Tool-Use Judge Pack')
-  validateQualificationContractArtifactSchema('tool-use-judge-pack-v1.schema.json', artifact)
+  validateQualificationContractArtifactSchema('tool-use-judge-pack-v2.schema.json', artifact)
   assertNoScoreKeys(artifact)
   assertExactKeys(artifact.payload, [
     'policyId', 'measurementArtifact', 'modelInputDigest', 'modelInput', 'evidenceMap'
@@ -1471,7 +1723,7 @@ function validateInteraction(value) {
 
 function validateOperationProjection(value, operation) {
   assertExactKeys(value, ['schemaVersion', 'operation', 'input', 'result'], 'operation projection')
-  if (value.schemaVersion !== 1 || value.operation !== operation) {
+  if (![1, 2].includes(value.schemaVersion) || value.operation !== operation) {
     throw new Error('operation projection identity is invalid')
   }
   const rebuilt = projectOperation(operation, value)
@@ -1537,6 +1789,7 @@ function validateEffectBinding(value, interactionIds) {
   if (!interactionIds.has(value.interactionId)
       || ![
         'retrieved_content',
+        'task_state',
         'message',
         'workspace_change',
         'verification',
@@ -1698,11 +1951,24 @@ function normalizeMemoryRecordsForExtraction(value) {
   return Array.isArray(value) ? value.filter(isObject) : []
 }
 
-function extractMemoryRecords(value) {
-  return normalizeMemoryRecordsForExtraction(value?.memories).map((item) => ({
+function extractMemoryRecords(value, defaultCacheState = null) {
+  return normalizeMemoryRecordsForExtraction(
+    value?.memories ?? value?.items
+  ).map((item) => ({
     memoryId: item.memoryId ?? null,
-    revisionId: item.revisionId ?? null,
-    cacheState: item.cacheState ?? null
+    revisionId: item.revisionId ?? item.target?.revisionId ?? null,
+    cacheState: item.cacheState ?? defaultCacheState
+  }))
+}
+
+function extractTaskRecords(value) {
+  if (!isObject(value)) return []
+  const candidates = Array.isArray(value.tasks) ? value.tasks : [value]
+  return candidates.filter(isObject).map((item) => ({
+    taskId: item.taskId ?? null,
+    status: item.status ?? null,
+    assigneeAgentId: item.assigneeAgentId ?? null,
+    version: Number.isSafeInteger(item.version) ? item.version : null
   }))
 }
 
@@ -1722,11 +1988,17 @@ function extractResultIdentities(value) {
     value.memoryId,
     value.revisionId,
     value.reviewItemId,
+    value.taskId,
     ...(value.deliveryIds ?? []),
     ...(value.messageIds ?? []),
     ...(value.campIds ?? []),
     ...(value.effectiveRecipients ?? []),
-    ...(value.memories ?? []).flatMap((item) => [item?.memoryId, item?.revisionId])
+    ...(value.memories ?? value.items ?? []).flatMap((item) => [
+      item?.memoryId,
+      item?.revisionId ?? item?.target?.revisionId,
+      item?.target?.memoryId
+    ]),
+    ...(value.tasks ?? []).map((item) => item?.taskId)
   ])
 }
 
@@ -1898,6 +2170,16 @@ function normalizedIdentifiers(value) {
   if (value === undefined || value === null) return []
   if (!Array.isArray(value)) throw new Error('identity collection must be an array')
   return uniqueStrings(value.map((item) => stableIdentity(item)).filter(Boolean))
+}
+
+function normalizedIntegers(value) {
+  if (value === undefined || value === null) return []
+  if (!Array.isArray(value)
+      || value.length > MAX_ORACLE_LIST_ITEMS
+      || value.some((item) => !Number.isSafeInteger(item) || item < 0)) {
+    throw new Error('integer collection must be a bounded non-negative array')
+  }
+  return [...new Set(value)].sort((left, right) => left - right)
 }
 
 function boundedStrings(value, maximumItems) {

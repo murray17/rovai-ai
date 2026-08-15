@@ -55,7 +55,9 @@ use rovai_core::{
         ClaudeCodeProbeObservation, CodexProbeObservation, ExecutableIntegrityStatus,
         executable_fingerprint as fingerprint_executable, verify_executable_integrity,
     },
-    builtin_tool_evidence_projection::project_builtin_tool_invocation,
+    builtin_tool_evidence_projection::{
+        BUILTIN_TOOL_EVIDENCE_PROJECTION_SCHEMA_VERSION, project_builtin_tool_invocation,
+    },
     builtin_tool_transport::{
         BUILTIN_TOOL_CONTRACT_VERSION, BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
         BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES, BuiltinToolError, BuiltinToolInvocationEnvelope,
@@ -4376,6 +4378,8 @@ impl Core {
                         "builtinToolContractVersion": BUILTIN_TOOL_CONTRACT_VERSION,
                         "builtinToolIpcProtocolVersion": BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
                         "builtinToolCatalogDigest": builtin_tool_catalog_digest()?,
+                        "builtinToolEvidenceProjectionVersion":
+                            BUILTIN_TOOL_EVIDENCE_PROJECTION_SCHEMA_VERSION,
                     },
                     "database": {
                         "ok": true,

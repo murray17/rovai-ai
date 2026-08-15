@@ -53,6 +53,12 @@ export function buildCollaborationLedger({
     const eventReference = call.acceptanceEventId
       ? evidenceReferences.events[call.acceptanceEventId]
       : null
+    const taskReference = call.taskId
+      ? evidenceReferences.tasks?.[call.taskId] ?? null
+      : null
+    const taskStateReference = call.taskId
+      ? evidenceReferences.taskStates?.[call.taskId] ?? null
+      : null
     const contentReference = currentSurface
       ? evidenceReferences.messageContents?.[call.messageId]
       : evidenceReferences.inboxMessages?.[call.inboxMessageId]
@@ -87,7 +93,9 @@ export function buildCollaborationLedger({
       inputReference,
       contextManifestReference,
       eventReference,
-      runReference
+      runReference,
+      taskReference,
+      taskStateReference
     ].filter(Boolean))
     if (evidenceReferencesForCall.some((reference) => (
       reference.artifactId !== evidenceIndex.artifactId

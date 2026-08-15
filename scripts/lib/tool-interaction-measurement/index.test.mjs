@@ -141,6 +141,216 @@ test('Memory Retrieval deterministically rejects stale revision and cache state'
   assert.equal(opportunity.deterministicAssessment.oracleMatch.facts.observedRequiredFactCount, 0)
 })
 
+test('v2 adapters measure history.search, memory.view and Task lifecycle without rewarding call volume', () => {
+  const measurement = buildToolInteractionMeasurement({
+    caseId: 'case-v2-adapters',
+    trialId: 'trial-v2-adapters',
+    producerDigest: PRODUCER_DIGEST,
+    measurementSpec: spec([
+      {
+        opportunityId: 'OP-HISTORY',
+        adapter: 'camp_history',
+        mode: 'natural_use',
+        allowedOperations: ['history.search'],
+        oracle: {
+          requiredOperations: ['history.search'],
+          requiredMessageIds: ['message-history']
+        }
+      },
+      {
+        opportunityId: 'OP-MEMORY-VIEW',
+        adapter: 'memory_retrieval',
+        mode: 'forced_use',
+        allowedOperations: ['memory.view'],
+        oracle: {
+          requiredOperations: ['memory.view'],
+          expectedMemories: [{
+            memoryId: 'memory-v3',
+            revisionId: 'revision-v3',
+            cacheState: 'current'
+          }]
+        }
+      },
+      {
+        opportunityId: 'OP-TASK',
+        adapter: 'task_coordination',
+        mode: 'forced_use',
+        allowedOperations: ['team.create_task', 'team.update_task'],
+        oracle: {
+          requiredOperations: ['team.create_task', 'team.update_task'],
+          requiredTaskIds: ['task-1'],
+          requiredStatuses: ['completed'],
+          requiredAssigneeAgentIds: ['agent-reviewer'],
+          requiredVersions: [1, 2],
+          requireEffectBinding: true,
+          requireMutationReceipt: true
+        }
+      }
+    ]),
+    toolEvidence: completeEvidence([
+      coreInteraction({
+        schemaVersion: 2,
+        toolCallId: 'history-search-1',
+        canonicalTool: 'history.search',
+        input: { query: 'prior decision', campIds: ['camp-older'], limit: 4 },
+        result: {
+          results: [{ messageId: 'message-history', sequence: 7 }],
+          resultCount: 1,
+          searchIncomplete: false
+        },
+        evidenceId: 'history-search-1'
+      }),
+      coreInteraction({
+        schemaVersion: 2,
+        toolCallId: 'memory-view-1',
+        canonicalTool: 'memory.view',
+        input: { scope: 'hearth' },
+        result: {
+          scope: 'hearth',
+          complete: true,
+          items: [{
+            target: {
+              memoryId: 'memory-v3',
+              revisionId: 'revision-v3',
+              scope: 'hearth'
+            },
+            kind: 'lesson',
+            body: 'Use the sealed verifier before publishing.',
+            retrievalKeys: ['sealed verifier'],
+            agentCanRevise: true
+          }],
+          itemCount: 1,
+          semanticBodiesTruncated: false
+        },
+        evidenceId: 'memory-view-1'
+      }),
+      coreInteraction({
+        schemaVersion: 2,
+        toolCallId: 'task-create-1',
+        canonicalTool: 'team.create_task',
+        input: {
+          title: 'Review the verifier boundary',
+          description: 'Check the sealed verifier and report evidence.',
+          acceptanceCriteria: ['Cite the verifier receipt.'],
+          assigneeAgentId: 'agent-reviewer'
+        },
+        result: { taskId: 'task-1', status: 'pending', assigneeAgentId: 'agent-reviewer', version: 1 },
+        receiptId: 'receipt-task-create',
+        evidenceId: 'task-create-1'
+      }),
+      coreInteraction({
+        schemaVersion: 2,
+        toolCallId: 'task-update-1',
+        canonicalTool: 'team.update_task',
+        input: {
+          taskId: 'task-1',
+          expectedVersion: 1,
+          requestedStatus: 'completed',
+          completionSummary: 'Verified the sealed boundary.'
+        },
+        result: { taskId: 'task-1', status: 'completed', assigneeAgentId: 'agent-reviewer', version: 2 },
+        receiptId: 'receipt-task-update',
+        evidenceId: 'task-update-1'
+      })
+    ]),
+    effectEvidence: [
+      {
+        effectId: 'memory-view-content',
+        kind: 'retrieved_content',
+        content: 'Use the sealed verifier before publishing.',
+        relatedToolCallIds: ['memory-view-1'],
+        relatedResultIdentities: ['memory-v3', 'revision-v3'],
+        evidenceReference: reference('memory-view-content')
+      },
+      {
+        effectId: 'task-state-1',
+        kind: 'task_state',
+        content: '{"assigneeAgentId":"agent-reviewer","status":"completed","taskId":"task-1","version":2}',
+        relatedResultIdentities: ['task-1'],
+        evidenceReference: reference('task-state-1')
+      }
+    ]
+  })
+
+  assert.deepEqual(measurement.payload.denominator, {
+    basis: 'pre_registered_opportunities',
+    total: 3,
+    pass: 3,
+    fail: 0,
+    indeterminate: 0
+  })
+  assert.equal(measurement.schemaVersion, '2.0.0')
+  assert.equal(measurement.payload.interactions.length, 4)
+  assert.equal(measurement.payload.opportunities.find((item) => item.adapter === 'task_coordination')
+    .deterministicAssessment.effectBinding.status, 'pass')
+  assert.equal(measurement.payload.opportunities.find((item) => item.adapter === 'task_coordination')
+    .deterministicAssessment.oracleMatch.facts.observedRequiredVersionCount, 2)
+})
+
+test('Memory write effectiveness requires an exact authoritative readback when pre-registered', () => {
+  const inputBody = 'Always compare the current revision before revising Memory.'
+  const base = {
+    caseId: 'case-memory-effective',
+    trialId: 'trial-memory-effective',
+    producerDigest: PRODUCER_DIGEST,
+    measurementSpec: spec([{
+      opportunityId: 'OP-MEMORY-EFFECTIVE',
+      adapter: 'memory_mutation',
+      mode: 'forced_use',
+      allowedOperations: ['memory.write'],
+      oracle: {
+        requiredOperations: ['memory.write'],
+        expectedMemoryId: 'memory-effective',
+        expectedRevisionId: 'revision-effective',
+        expectedAction: 'add',
+        requireReceipt: true,
+        requireEffectiveReadback: true
+      }
+    }]),
+    toolEvidence: completeEvidence([coreInteraction({
+      schemaVersion: 2,
+      toolCallId: 'memory-write-effective',
+      canonicalTool: 'memory.write',
+      input: {
+        action: 'add',
+        scope: 'hearth',
+        kind: 'lesson',
+        body: inputBody,
+        retrievalKeys: ['memory revision']
+      },
+      result: {
+        outcome: 'applied',
+        memoryId: 'memory-effective',
+        revisionId: 'revision-effective'
+      },
+      receiptId: 'receipt-memory-effective',
+      evidenceId: 'memory-write-effective'
+    })])
+  }
+  const missing = buildToolInteractionMeasurement(base)
+  assert.equal(missing.payload.opportunities[0].status, 'fail')
+  assert.deepEqual(
+    missing.payload.opportunities[0].deterministicAssessment.oracleMatch.reasonCodes,
+    ['memory_effective_readback_missing']
+  )
+
+  const effective = buildToolInteractionMeasurement({
+    ...base,
+    effectEvidence: [{
+      effectId: 'memory-effective-readback',
+      kind: 'retrieved_content',
+      content: inputBody,
+      relatedResultIdentities: ['memory-effective', 'revision-effective'],
+      evidenceReference: reference('memory-effective-readback')
+    }]
+  })
+  assert.equal(effective.payload.opportunities[0].status, 'pass')
+  assert.equal(
+    effective.payload.opportunities[0].deterministicAssessment.oracleMatch.facts.matchingReadbackCount,
+    1
+  )
+})
+
 test('non-use control passes only with complete Core coverage; missing coverage is indeterminate', () => {
   const request = {
     caseId: 'case-non-use',
@@ -220,6 +430,8 @@ test('current camp.message.send binds accepted Core result to Message effect and
       mode: 'natural_use',
       oracle: {
         requiredRecipientAgentIds: ['agent-reviewer'],
+        requiredTaskIds: ['task-1'],
+        forbiddenTaskIds: ['task-unrelated'],
         requireEffectBinding: true,
         requireReceipt: true
       }
@@ -235,6 +447,11 @@ test('current camp.message.send binds accepted Core result to Message effect and
   })
 
   assert.equal(measurement.payload.opportunities[0].status, 'pass')
+  assert.equal(
+    measurement.payload.opportunities[0].deterministicAssessment.oracleMatch.facts
+      .observedRequiredTaskCount,
+    1
+  )
   assert.equal(
     measurement.payload.opportunities[0].deterministicAssessment.effectBinding.status,
     'pass'
@@ -602,7 +819,7 @@ test('private replay source reproduces deterministic oracle assessment without e
     toolEvidence,
     preparedFixtureArtifact: {
       schemaId: 'rovai.qualification.prepared-tool-fixture-manifest',
-      schemaVersion: '1.0.0',
+      schemaVersion: '2.0.0',
       payloadDigest: digestIdentity('9'),
       locator: 'prepared/fixture.json'
     },
@@ -661,7 +878,16 @@ function campMeasurement({ oracleCanary }) {
 }
 
 function spec(opportunities) {
-  return { specificationId: 'tool-measurement-test-spec', opportunities }
+  return {
+    specificationId: 'tool-measurement-test-spec',
+    runtimeCompatibility: {
+      builtinToolCatalogDigest: digestIdentity('e'),
+      builtinToolContractVersion: 1,
+      builtinToolIpcProtocolVersion: 1,
+      operationProjectionSchemaVersion: 2
+    },
+    opportunities
+  }
 }
 
 function completeEvidence(interactions) {
@@ -669,6 +895,7 @@ function completeEvidence(interactions) {
 }
 
 function coreInteraction({
+  schemaVersion = 1,
   toolCallId,
   canonicalTool,
   input,
@@ -682,7 +909,7 @@ function coreInteraction({
   const inputDigest = digestIdentity('c')
   const resultDigest = digestIdentity('d')
   const operationProjectionWithoutDigest = {
-    schemaVersion: 1,
+    schemaVersion,
     operation: canonicalTool,
     canonicalInput: input,
     canonicalResult: result,

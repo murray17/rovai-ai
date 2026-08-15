@@ -19,14 +19,17 @@ const MUTATING_CORE_TOOLS = new Set([
   'camp.message.send',
   'team.create_task',
   'team.update_task',
-  'memory.write'
+  'memory.write',
+  'member.create'
 ])
 const READ_ONLY_CORE_TOOLS = new Set([
+  'team.get_task',
   'team.list_tasks',
   'camp.list',
   'camp.search',
   'history.search',
   'camp.read',
+  'memory.view',
   'memory.search',
   'memory.read'
 ])

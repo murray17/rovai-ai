@@ -77,6 +77,8 @@ import {
 import {
   bindToolEvidenceReferences,
   buildEvidenceIndex,
+  buildTaskStateContent,
+  extractMemorySemanticResultContents,
   retainEvidenceIndexArtifact
 } from './lib/qualification-evidence-index.mjs'
 import {
@@ -97,6 +99,7 @@ import {
 } from './lib/qualification-semantic-evidence.mjs'
 import { publishQualificationEvidenceBundle } from './lib/qualification-bundle.mjs'
 import {
+  assertToolMeasurementRuntimeCompatibility,
   materializeMeasurementSpecForBuilder,
   materializeToolMeasurementFixtures,
   retainPreparedToolFixtureManifest,
@@ -275,6 +278,12 @@ async function runTrial(options) {
       workspacePath,
       isolationProfileAdmission
     })
+    if (toolMeasurementPack) {
+      assertToolMeasurementRuntimeCompatibility(
+        toolMeasurementPack,
+        environmentManifest.releaseCore
+      )
+    }
     await atomicWriteJson(join(evidenceDirectory, 'environment-manifest.json'), environmentManifest)
     await appendLifecycle('preflight_ready', {
       environmentManifestDigest: digestJson(environmentManifest),
@@ -941,6 +950,9 @@ async function runTrial(options) {
       specificationDigest: toolMeasurementPack.references.specificationDigest,
       fixtureDigest: toolMeasurementPack.references.fixtureDigest,
       oracleDigest: toolMeasurementPack.references.oracleDigest,
+      runtimeCompatibilityDigest: `sha256:${digestJson(
+        toolMeasurementPack.spec.runtimeCompatibility
+      )}`,
       preparedFixtureDigest: preparedToolFixtureManifest?.payloadDigest ?? null,
       preparedFixtureLocator: preparedToolFixtureLocator,
       status: toolInteractionMeasurement ? 'measured' : 'unavailable',
@@ -1157,7 +1169,8 @@ async function collectEnvironmentManifest({
       readModelSchema: health.core.readModelSchema,
       builtinToolContractVersion: health.core.builtinToolContractVersion,
       builtinToolIpcProtocolVersion: health.core.builtinToolIpcProtocolVersion,
-      builtinToolCatalogDigest: health.core.builtinToolCatalogDigest
+      builtinToolCatalogDigest: health.core.builtinToolCatalogDigest,
+      builtinToolEvidenceProjectionVersion: health.core.builtinToolEvidenceProjectionVersion
     },
     host: { platform: platform(), type: osType(), release: release(), architecture: arch(), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone },
     case: { id: caseRecord.contract.manifest.id, version: caseRecord.contract.manifest.version, seal: caseRecord.seal },
@@ -1552,7 +1565,7 @@ function collectToolRetrievedFixtureMessageIds(toolEvidence, preparedManifest) {
     .map((entity) => entity.entityId))
   const observed = new Set()
   for (const record of toolEvidence?.ledger ?? []) {
-    if (!['camp.search', 'camp.read'].includes(record.canonicalTool)) continue
+    if (!['camp.search', 'history.search', 'camp.read'].includes(record.canonicalTool)) continue
     const result = record.operationProjection?.canonicalResult
       ?? record.operationProjection?.result
       ?? null
@@ -1609,6 +1622,52 @@ async function buildToolInteractionEffectEvidence({
       content: message.body,
       contentDigest: `sha256:${sha256(message.body)}`,
       relatedResultIdentities: [messageId],
+      evidenceReference: reference
+    })
+  }
+
+  for (const record of rawToolEvidence?.ledger ?? []) {
+    if (record.authorityClass !== 'core' || !record.operationProjection) continue
+    for (const semantic of extractMemorySemanticResultContents(record.operationProjection)) {
+      const reference = (record.sourceEvidenceIds ?? []).map((evidenceId) => (
+        evidenceReferences.toolSemanticContents?.[`${evidenceId}:${semantic.contentDigest}`]
+      )).find(Boolean)
+      if (!reference) continue
+      effects.push({
+        effectId: `retrieved-memory-content:${sha256(`${record.toolCallId}:${semantic.identity}`).slice(0, 32)}`,
+        kind: 'retrieved_content',
+        content: semantic.content,
+        contentDigest: semantic.contentDigest,
+        relatedToolCallIds: [record.toolCallId],
+        relatedResultIdentities: [semantic.memoryId, semantic.revisionId].filter(Boolean),
+        evidenceReference: reference
+      })
+    }
+  }
+
+  const measuredTaskIds = new Set((rawToolEvidence?.ledger ?? [])
+    .filter((record) => (
+      record.authorityClass === 'core'
+      && record.canonicalTool?.startsWith('team.')
+      && record.operationProjection
+    ))
+    .flatMap((record) => {
+      const result = record.operationProjection.canonicalResult
+        ?? record.operationProjection.result
+        ?? null
+      return [result?.taskId, ...(result?.tasks ?? []).map((task) => task?.taskId)]
+    })
+    .filter((value) => typeof value === 'string'))
+  for (const task of (finalSnapshot?.tasks ?? []).filter((item) => measuredTaskIds.has(item.id))) {
+    const reference = evidenceReferences.taskStates?.[task.id]
+    if (!reference) continue
+    const content = buildTaskStateContent(task)
+    effects.push({
+      effectId: `task-state:${sha256(task.id).slice(0, 32)}`,
+      kind: 'task_state',
+      content,
+      contentDigest: `sha256:${sha256(content)}`,
+      relatedResultIdentities: [task.id],
       evidenceReference: reference
     })
   }

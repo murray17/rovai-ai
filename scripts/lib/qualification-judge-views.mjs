@@ -942,6 +942,7 @@ function buildProcessModelInput(source, registry) {
       && interaction.observations.accepted
       && interaction.observations.recipientInput
       && interaction.observations.recipientRun
+      && interaction.observations.publicMessage
   ))
   return {
     view: 'process',
@@ -1145,6 +1146,7 @@ function projectInteractions(source, segments, registry) {
         recipientPseudonym: fact.recipientPseudonym,
         visibility: fact.visibility,
         contentSegmentId: fact.contentSegmentId,
+        replyContentSegmentId: null,
         factTypes: new Set(),
         evidenceReferences: []
       })
@@ -1152,7 +1154,11 @@ function projectInteractions(source, segments, registry) {
     const interaction = byCall.get(fact.callId)
     interaction.factTypes.add(fact.factType)
     interaction.evidenceReferences.push(...(fact.evidenceReferences ?? []))
-    interaction.contentSegmentId ??= fact.contentSegmentId
+    if (fact.factType === 'later_independent_call') {
+      interaction.replyContentSegmentId ??= fact.contentSegmentId
+    } else {
+      interaction.contentSegmentId ??= fact.contentSegmentId
+    }
   }
   return [...byCall.values()].map((interaction, index) => ({
     interactionId: `interaction-${String(index + 1).padStart(3, '0')}`,
@@ -1161,10 +1167,16 @@ function projectInteractions(source, segments, registry) {
     recipientPseudonym: interaction.recipientPseudonym,
     visibility: interaction.visibility,
     messageSegmentId: projectedMessageBySource.get(interaction.contentSegmentId)?.segmentId ?? null,
+    replyToMessageSegmentId: projectedMessageBySource.get(
+      interaction.replyContentSegmentId
+    )?.segmentId ?? null,
     observations: {
       accepted: interaction.factTypes.has('accepted_call'),
       recipientInput: interaction.factTypes.has('recipient_input'),
-      recipientRun: interaction.factTypes.has('recipient_run')
+      recipientRun: interaction.factTypes.has('recipient_run'),
+      publicMessage: interaction.factTypes.has('public_camp_message'),
+      replyObserved: interaction.factTypes.has('later_independent_call'),
+      taskLinked: interaction.factTypes.has('task_fact')
     },
     evidenceIds: registry.ids(interaction.evidenceReferences)
   }))

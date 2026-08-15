@@ -214,6 +214,92 @@ test('Core Built-in coverage is complete only with a durable pre-effect start fe
   )
 })
 
+test('Tool evidence admits v2 Memory semantic projection and current read-only taxonomy', () => {
+  const projection = {
+    schemaVersion: 2,
+    operation: 'memory.read',
+    canonicalInput: { memoryIds: ['memory-1'], memoryIdsCount: 1, memoryIdsOmittedCount: 0 },
+    canonicalResult: {
+      memories: [{
+        memoryId: 'memory-1',
+        cacheState: 'current',
+        target: { memoryId: 'memory-1', revisionId: 'revision-1', scope: 'hearth' },
+        body: 'Use exact revision evidence.',
+        bodyCharCount: 28,
+        bodyTruncated: false
+      }],
+      memoryCount: 1,
+      memoriesTruncated: false
+    },
+    digestBinding: {
+      input: { evidenceField: 'rawInputDigest', digest: 'sha256:memory-input' },
+      result: { evidenceField: 'rawOutputDigest', digest: 'sha256:memory-output' }
+    },
+    inputDigest: 'sha256:memory-input',
+    resultDigest: 'sha256:memory-output'
+  }
+  projection.projectionDigest = digestJson(projection)
+  const result = deriveToolEvidence({
+    agentRuns: [{ id: 'run-1', campTurnId: 'turn-1', executionEvidenceCount: 1 }],
+    executionEvidence: [runtimeAction('memory-read', 1, {
+      toolCallId: 'sha256:memory-call',
+      status: 'completed',
+      kind: 'builtin_tool_invocation',
+      sourceAuthority: 'core',
+      canonicalTool: 'memory.read',
+      authorizationDecision: 'allowed',
+      rawInputDigest: 'sha256:memory-input',
+      rawOutputDigest: 'sha256:memory-output',
+      idempotentReplay: false,
+      operationProjection: projection
+    })]
+  }, { campTurnId: 'turn-1' }, {
+    coverage: { state: 'complete', reason: null },
+    declaredTotal: 1
+  })
+  assert.equal(result.ledger[0].operationProjection.schemaVersion, 2)
+  assert.equal(result.ledger[0].operationProjection.canonicalResult.memories[0].body,
+    'Use exact revision evidence.')
+  assert.equal(result.ledger[0].mutationIntent, 'no')
+})
+
+test('current member.create remains an explicit mutation even without a semantic adapter', () => {
+  const projection = {
+    schemaVersion: 2,
+    operation: 'member.create',
+    canonicalInput: { creationKey: 'creation-1', displayName: 'Nova', avatarFilePresent: false },
+    canonicalResult: { agentId: 'agent-27', version: 1, avatarStatus: 'none' },
+    digestBinding: {
+      input: { evidenceField: 'rawInputDigest', digest: 'sha256:member-input' },
+      result: { evidenceField: 'rawOutputDigest', digest: 'sha256:member-output' }
+    },
+    inputDigest: 'sha256:member-input',
+    resultDigest: 'sha256:member-output'
+  }
+  projection.projectionDigest = digestJson(projection)
+  const result = deriveToolEvidence({
+    agentRuns: [{ id: 'run-1', campTurnId: 'turn-1', executionEvidenceCount: 1 }],
+    executionEvidence: [runtimeAction('member-create', 1, {
+      toolCallId: 'sha256:member-call',
+      status: 'completed',
+      kind: 'builtin_tool_invocation',
+      sourceAuthority: 'core',
+      canonicalTool: 'member.create',
+      authorizationDecision: 'allowed',
+      rawInputDigest: 'sha256:member-input',
+      rawOutputDigest: 'sha256:member-output',
+      idempotentReplay: false,
+      receiptId: 'receipt-member-create',
+      operationProjection: projection
+    })]
+  }, { campTurnId: 'turn-1' }, {
+    coverage: { state: 'complete', reason: null },
+    declaredTotal: 1
+  })
+  assert.equal(result.ledger[0].canonicalTool, 'member.create')
+  assert.equal(result.ledger[0].mutationIntent, 'yes')
+})
+
 function toolSnapshot() {
   return {
     agentRuns: [

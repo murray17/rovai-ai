@@ -17,13 +17,15 @@ use crate::{
     },
 };
 
-pub const BUILTIN_TOOL_EVIDENCE_PROJECTION_SCHEMA_VERSION: i64 = 1;
+pub const BUILTIN_TOOL_EVIDENCE_PROJECTION_SCHEMA_VERSION: i64 = 2;
 
 const SEMANTIC_TEXT_LIMIT_CHARS: usize = 512;
 const IDENTIFIER_LIMIT_CHARS: usize = 256;
 const STRING_ARRAY_LIMIT: usize = 32;
 const RESULT_ITEM_LIMIT: usize = 64;
 const ACCEPTANCE_CRITERION_LIMIT_CHARS: usize = 256;
+const MEMORY_SEMANTIC_BODY_LIMIT_CHARS: usize = 2_048;
+const MEMORY_VIEW_SEMANTIC_ITEM_LIMIT: usize = 8;
 
 /// Builds the only operation-specific Built-in Tool projection admitted to
 /// Execution Evidence. The interface deliberately accepts the already-computed
@@ -168,6 +170,21 @@ fn project_input(operation: &str, input: &Value) -> Result<Value> {
             .filter(|field| input.get(*field).is_some())
             .collect::<Vec<_>>();
             projected.insert("changedFields".to_string(), json!(changed_fields));
+            for field in [
+                "title",
+                "description",
+                "blockedReason",
+                "completionSummary",
+                "cancelReason",
+            ] {
+                insert_semantic_text(&mut projected, field, input.get(field));
+            }
+            insert_bounded_semantic_array(
+                &mut projected,
+                "acceptanceCriteria",
+                input.get("acceptanceCriteria"),
+                ACCEPTANCE_CRITERION_LIMIT_CHARS,
+            );
         }
         TEAM_LIST_TASKS_TOOL_NAME => {
             insert_string_array(&mut projected, "statuses", input.get("statuses"));
@@ -238,8 +255,11 @@ fn project_memory_mutation_input(projected: &mut Map<String, Value>, input: &Val
     insert_enum(projected, "action", input.get("action"));
     insert_enum(projected, "scope", input.get("scope"));
     insert_enum(projected, "kind", input.get("kind"));
-    insert_identifier(projected, "memoryId", input.get("memoryId"));
-    insert_identifier(projected, "baseRevisionId", input.get("baseRevisionId"));
+    if let Some(target) = input.get("target") {
+        projected.insert("target".to_string(), project_memory_target(target));
+    }
+    insert_memory_semantic_body(projected, input.get("body"));
+    insert_bounded_semantic_array(projected, "retrievalKeys", input.get("retrievalKeys"), 64);
     insert_identifier(
         projected,
         "counterpartyAgentId",
@@ -331,24 +351,57 @@ fn project_result(operation: &str, result: &Value) -> Result<Value> {
             insert_i64(&mut projected, "nextCursor", result.get("nextCursor"));
         }
         MEMORY_SEARCH_TOOL_NAME => {
-            let memories = project_object_array(result.get("results"), project_memory_result);
+            let memories = project_object_array(result.get("results"), |item| {
+                project_memory_result(item, false)
+            });
             projected.insert("results".to_string(), Value::Array(memories.values));
             projected.insert("resultCount".to_string(), json!(memories.total));
             projected.insert("resultsTruncated".to_string(), json!(memories.truncated));
         }
         MEMORY_READ_TOOL_NAME => {
-            let memories = project_object_array(result.get("memories"), project_memory_result);
+            let memories = project_object_array(result.get("memories"), |item| {
+                project_memory_result(item, true)
+            });
             projected.insert("memories".to_string(), Value::Array(memories.values));
             projected.insert("memoryCount".to_string(), json!(memories.total));
             projected.insert("memoriesTruncated".to_string(), json!(memories.truncated));
         }
         MEMORY_VIEW_TOOL_NAME => {
             insert_enum(&mut projected, "scope", result.get("scope"));
+            insert_identifier(
+                &mut projected,
+                "counterpartyAgentId",
+                result.get("counterpartyAgentId"),
+            );
             insert_bool(&mut projected, "complete", result.get("complete"));
             insert_i64(&mut projected, "itemCount", result.get("itemCount"));
-            let memories = project_object_array(result.get("items"), project_memory_result);
-            projected.insert("items".to_string(), Value::Array(memories.values));
-            projected.insert("itemsTruncated".to_string(), json!(memories.truncated));
+            insert_i64(
+                &mut projected,
+                "totalBodyBytes",
+                result.get("totalBodyBytes"),
+            );
+            let source = result
+                .get("items")
+                .and_then(Value::as_array)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            let values = source
+                .iter()
+                .take(RESULT_ITEM_LIMIT)
+                .enumerate()
+                .map(|(index, item)| {
+                    project_memory_result(item, index < MEMORY_VIEW_SEMANTIC_ITEM_LIMIT)
+                })
+                .collect::<Vec<_>>();
+            projected.insert("items".to_string(), Value::Array(values));
+            projected.insert(
+                "itemsTruncated".to_string(),
+                json!(source.len() > RESULT_ITEM_LIMIT),
+            );
+            projected.insert(
+                "semanticBodiesTruncated".to_string(),
+                json!(source.len() > MEMORY_VIEW_SEMANTIC_ITEM_LIMIT),
+            );
         }
         MEMORY_WRITE_TOOL_NAME => {
             insert_enum(&mut projected, "outcome", result.get("outcome"));
@@ -421,12 +474,46 @@ fn project_read_item(item: &Value) -> Value {
     Value::Object(projected)
 }
 
-fn project_memory_result(item: &Value) -> Value {
+fn project_memory_result(item: &Value, include_body: bool) -> Value {
     let mut projected = Map::new();
     insert_identifier(&mut projected, "memoryId", item.get("memoryId"));
     insert_identifier(&mut projected, "revisionId", item.get("revisionId"));
     insert_enum(&mut projected, "cacheState", item.get("cacheState"));
     insert_enum(&mut projected, "kind", item.get("kind"));
+    insert_enum(&mut projected, "scope", item.get("scope"));
+    insert_identifier(
+        &mut projected,
+        "counterpartyAgentId",
+        item.get("counterpartyAgentId"),
+    );
+    insert_enum(&mut projected, "direction", item.get("direction"));
+    insert_bool(&mut projected, "agentCanRevise", item.get("agentCanRevise"));
+    insert_bounded_semantic_array(
+        &mut projected,
+        "retrievalKeys",
+        item.get("retrievalKeys"),
+        64,
+    );
+    if let Some(target) = item.get("target") {
+        projected.insert("target".to_string(), project_memory_target(target));
+    }
+    if include_body {
+        insert_memory_semantic_body(&mut projected, item.get("body"));
+    }
+    Value::Object(projected)
+}
+
+fn project_memory_target(target: &Value) -> Value {
+    let mut projected = Map::new();
+    insert_identifier(&mut projected, "memoryId", target.get("memoryId"));
+    insert_identifier(&mut projected, "revisionId", target.get("revisionId"));
+    insert_enum(&mut projected, "scope", target.get("scope"));
+    insert_identifier(
+        &mut projected,
+        "counterpartyAgentId",
+        target.get("counterpartyAgentId"),
+    );
+    insert_enum(&mut projected, "direction", target.get("direction"));
     Value::Object(projected)
 }
 
@@ -572,6 +659,20 @@ fn insert_content_facts(projected: &mut Map<String, Value>, value: Option<&Value
     );
 }
 
+fn insert_memory_semantic_body(projected: &mut Map<String, Value>, value: Option<&Value>) {
+    let Some(value) = value.and_then(Value::as_str) else {
+        return;
+    };
+    projected.insert("bodyCharCount".to_string(), json!(value.chars().count()));
+    if contains_projection_secret(value) {
+        projected.insert("bodyRedacted".to_string(), json!(true));
+        return;
+    }
+    let (bounded, truncated) = truncate_chars(value, MEMORY_SEMANTIC_BODY_LIMIT_CHARS);
+    projected.insert("body".to_string(), json!(bounded));
+    projected.insert("bodyTruncated".to_string(), json!(truncated));
+}
+
 fn insert_opaque_cursor(projected: &mut Map<String, Value>, value: Option<&Value>) {
     let Some(value) = value.and_then(Value::as_str) else {
         return;
@@ -611,6 +712,7 @@ fn contains_projection_secret(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::team_tool::TEAM_TOOL_NAMES;
 
     fn digest(value: &Value) -> String {
         canonical_json_digest(value).unwrap()
@@ -658,27 +760,189 @@ mod tests {
     }
 
     #[test]
-    fn memory_results_project_revision_and_cache_state_without_body() {
+    fn memory_read_projects_v3_target_and_secret_filtered_semantic_body() {
         let projected = projection(
             MEMORY_READ_TOOL_NAME,
             json!({"memoryIds": ["memory-1"]}),
             json!({"memories": [{
                 "memoryId": "memory-1",
-                "revisionId": "revision-2",
                 "cacheState": "revision_changed",
+                "target": {
+                    "memoryId": "memory-1",
+                    "revisionId": "revision-2",
+                    "scope": "companion"
+                },
                 "kind": "lesson",
-                "body": "private durable memory body"
+                "retrievalKeys": ["qualification", "evidence"],
+                "body": "Always bind qualification evidence to its authoritative receipt."
             }]}),
         );
         let result = &projected["canonicalResult"]["memories"][0];
         assert_eq!(result["memoryId"], "memory-1");
-        assert_eq!(result["revisionId"], "revision-2");
+        assert_eq!(result["target"]["revisionId"], "revision-2");
         assert_eq!(result["cacheState"], "revision_changed");
+        assert_eq!(
+            result["body"],
+            "Always bind qualification evidence to its authoritative receipt."
+        );
+        assert_eq!(result["bodyRedacted"], Value::Null);
+    }
+
+    #[test]
+    fn memory_view_is_supported_and_bounds_semantic_content() {
+        let projected = projection(
+            MEMORY_VIEW_TOOL_NAME,
+            json!({"scope": "hearth"}),
+            json!({
+                "scope": "hearth",
+                "complete": true,
+                "itemCount": 9,
+                "totalBodyBytes": 9_000,
+                "items": (0..9).map(|index| json!({
+                    "target": {
+                        "memoryId": format!("memory-{index}"),
+                        "revisionId": format!("revision-{index}"),
+                        "scope": "hearth"
+                    },
+                    "kind": "lesson",
+                    "retrievalKeys": [format!("key-{index}")],
+                    "body": format!("Durable lesson {index}"),
+                    "agentCanRevise": true
+                })).collect::<Vec<_>>()
+            }),
+        );
+        assert_eq!(projected["canonicalInput"]["scope"], "hearth");
+        assert_eq!(projected["canonicalResult"]["complete"], true);
+        assert_eq!(
+            projected["canonicalResult"]["items"][0]["target"]["revisionId"],
+            "revision-0"
+        );
+        assert_eq!(
+            projected["canonicalResult"]["items"][0]["body"],
+            "Durable lesson 0"
+        );
+        assert_eq!(
+            projected["canonicalResult"]["items"][8]["body"],
+            Value::Null
+        );
+        assert_eq!(
+            projected["canonicalResult"]["semanticBodiesTruncated"],
+            true
+        );
+    }
+
+    #[test]
+    fn memory_semantic_content_fails_closed_on_credentials() {
+        let projected = projection(
+            MEMORY_WRITE_TOOL_NAME,
+            json!({
+                "action": "add",
+                "scope": "hearth",
+                "kind": "lesson",
+                "body": "api_key = abcdefghijklmnop",
+                "retrievalKeys": ["credential hygiene"]
+            }),
+            json!({
+                "outcome": "applied",
+                "memoryId": "memory-1",
+                "revisionId": "revision-1"
+            }),
+        );
+        assert_eq!(projected["canonicalInput"]["bodyRedacted"], true);
+        assert_eq!(projected["canonicalInput"]["body"], Value::Null);
         assert!(
             !serde_json::to_string(&projected)
                 .unwrap()
-                .contains("private durable memory body")
+                .contains("abcdefghijklmnop")
         );
+    }
+
+    #[test]
+    fn memory_revise_projects_v3_target_and_retention_strategy() {
+        let projected = projection(
+            MEMORY_WRITE_TOOL_NAME,
+            json!({
+                "action": "revise",
+                "target": {
+                    "memoryId": "memory-current",
+                    "revisionId": "revision-current",
+                    "scope": "relationship",
+                    "counterpartyAgentId": "agent-reviewer",
+                    "direction": "directed"
+                },
+                "body": "Use the latest revision before applying a relationship agreement.",
+                "retrievalKeys": ["latest revision", "relationship agreement"]
+            }),
+            json!({
+                "outcome": "applied",
+                "memoryId": "memory-current",
+                "revisionId": "revision-next"
+            }),
+        );
+        let input = &projected["canonicalInput"];
+        assert_eq!(input["target"]["revisionId"], "revision-current");
+        assert_eq!(input["target"]["counterpartyAgentId"], "agent-reviewer");
+        assert_eq!(input["retrievalKeys"][0], "latest revision");
+        assert_eq!(
+            input["body"],
+            "Use the latest revision before applying a relationship agreement."
+        );
+    }
+
+    #[test]
+    fn task_update_projects_semantic_handoff_and_completion_fields() {
+        let projected = projection(
+            TEAM_UPDATE_TASK_TOOL_NAME,
+            json!({
+                "taskId": "task-review",
+                "expectedVersion": 2,
+                "status": "completed",
+                "title": "Review the evidence boundary",
+                "description": "Verify the receipt and exact revision.",
+                "acceptanceCriteria": ["Cite the receipt.", "Check stale revision behavior."],
+                "completionSummary": "Receipt and stale revision behavior verified."
+            }),
+            json!({
+                "taskId": "task-review",
+                "status": "completed",
+                "assigneeAgentId": "agent-reviewer",
+                "version": 3,
+                "changed": true
+            }),
+        );
+        let input = &projected["canonicalInput"];
+        assert_eq!(input["requestedStatus"], "completed");
+        assert_eq!(
+            input["completionSummary"],
+            "Receipt and stale revision behavior verified."
+        );
+        assert_eq!(
+            input["acceptanceCriteria"][1],
+            "Check stale revision behavior."
+        );
+        assert_eq!(projected["canonicalResult"]["version"], 3);
+    }
+
+    #[test]
+    fn every_current_builtin_catalog_operation_has_start_and_terminal_projections() {
+        for operation in TEAM_TOOL_NAMES {
+            let input = json!({});
+            let result = json!({});
+            let input_digest = digest(&input);
+            let result_digest = digest(&result);
+            project_builtin_tool_invocation(operation, &input, None, &input_digest, None)
+                .unwrap_or_else(|error| {
+                    panic!("missing start projection for {operation}: {error}")
+                });
+            project_builtin_tool_invocation(
+                operation,
+                &input,
+                Some(&result),
+                &input_digest,
+                Some(&result_digest),
+            )
+            .unwrap_or_else(|error| panic!("missing terminal projection for {operation}: {error}"));
+        }
     }
 
     #[test]
