@@ -321,12 +321,6 @@ button:disabled { opacity: 0.52; cursor: default; }
 }
 .topbar-inspector-toggle svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.6; }
 .topbar-inspector-toggle:hover { color: var(--ink); background: var(--surface-muted); }
-.topbar-inspector-toggle.is-visible {
-  color: var(--brand-ink);
-  background: var(--brand-soft);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand) 12%, transparent);
-}
-.topbar-inspector-toggle.is-hidden:hover { color: var(--brand-ink); }
 
 .unified-sidebar {
   position: relative;
