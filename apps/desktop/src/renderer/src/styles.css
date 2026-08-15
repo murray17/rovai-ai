@@ -319,7 +319,7 @@ button:disabled { opacity: 0.52; cursor: default; }
   background: transparent;
   cursor: pointer;
 }
-.topbar-inspector-toggle svg { width: 18px; height: 18px; }
+.topbar-inspector-toggle svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.6; }
 .topbar-inspector-toggle:hover { color: var(--ink); background: var(--surface-muted); }
 .topbar-inspector-toggle.is-visible {
   color: var(--brand-ink);
@@ -4180,17 +4180,16 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
   cursor: pointer;
   font-size: 12px;
 }
-.member-sidebar-actions button svg,
-.member-order-handle svg {
-  width: 16px;
-  height: 16px;
+.member-sidebar-actions button svg {
+  width: 17px;
+  height: 17px;
   fill: none;
   stroke: currentColor;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 1.55;
+  stroke-width: 1.6;
 }
-.member-order-handle svg { stroke-width: 2.2; }
+.member-order-handle svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2.2; }
 .member-sidebar-actions button:hover,
 .member-sidebar-filter button:hover { color: var(--ink); background: var(--surface-muted); }
 .member-sidebar-actions button[aria-pressed="true"] { color: var(--brand-ink); background: var(--brand-soft); }

@@ -13,6 +13,7 @@ import type {
   StoredCommandResult
 } from '@contracts'
 import { MemberAvatar } from './MemberAvatar'
+import { PanelToggleIcon } from './PanelToggleIcon'
 import { localizeExecutionEngineTerms } from './product-copy'
 import {
   memberRuntimePresentation,
@@ -212,7 +213,7 @@ export function MemberSidebar({
             title={collapsed ? '展开队员名册' : '折叠队员名册'}
             disabled={sorting}
             onClick={toggleCollapsed}
-          ><SidebarIcon name={collapsed ? 'expand' : 'collapse'} /></button>
+          ><PanelToggleIcon side="left" visible={!collapsed} /></button>
         </div>
       </div>
 
@@ -412,9 +413,9 @@ function MemberSidebarRow({
   )
 }
 
-function SidebarIcon({ name }: { name: 'sort' | 'plus' | 'grip' | 'collapse' | 'expand' }): React.JSX.Element {
+function SidebarIcon({ name }: { name: 'sort' | 'plus' | 'grip' }): React.JSX.Element {
   if (name === 'plus') {
-    return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12" /></svg>
+    return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4.5v11M4.5 10h11" /></svg>
   }
   if (name === 'grip') {
     return (
@@ -423,19 +424,9 @@ function SidebarIcon({ name }: { name: 'sort' | 'plus' | 'grip' | 'collapse' | '
       </svg>
     )
   }
-  if (name === 'collapse' || name === 'expand') {
-    return (
-      <svg viewBox="0 0 20 20" aria-hidden="true">
-        <path d="M4 4h12v12H4zM8 4v12" />
-        {name === 'collapse'
-          ? <path d="m12 7 3 3-3 3" />
-          : <path d="m15 7-3 3 3 3" />}
-      </svg>
-    )
-  }
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true">
-      <path d="m5 3-2 2 2 2M3 5h14M15 13l2 2-2 2M17 15H3" />
+      <path d="M4.5 5h11M4.5 10h8M4.5 15h5" />
     </svg>
   )
 }

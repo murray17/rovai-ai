@@ -60,6 +60,7 @@ import {
   type NavigationSettingsSection
 } from './CampNavigation'
 import { NewConversationDialog } from './NewConversationDialog'
+import { PanelToggleIcon } from './PanelToggleIcon'
 import { AppearanceSettings } from './AppearanceSettings'
 import {
   NotificationAttentionController,
@@ -2628,22 +2629,7 @@ export function AppHeader({
             title={inspectorVisible ? '隐藏右侧检查器' : '显示右侧检查器'}
             onClick={onToggleInspector}
           >
-            {inspectorVisible
-              ? (
-                  <svg aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" viewBox="0 0 24 24">
-                    <rect height="16" rx="2.5" width="17" x="3.5" y="4" />
-                    <path d="M15 4v16" />
-                    <path d="M15 4h3.5A2.5 2.5 0 0 1 21 6.5v11a2.5 2.5 0 0 1-2.5 2.5H15z" fill="currentColor" opacity=".14" stroke="none" />
-                    <path d="m17 9 3 3-3 3" />
-                  </svg>
-                )
-              : (
-                  <svg aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" viewBox="0 0 24 24">
-                    <rect height="16" rx="2.5" width="17" x="3.5" y="4" />
-                    <path d="M18 4v16" strokeDasharray="2 2" />
-                    <path d="m16 9-3 3 3 3" />
-                  </svg>
-                )}
+            <PanelToggleIcon side="right" visible={inspectorVisible} />
           </button>
         </div>
       )}
