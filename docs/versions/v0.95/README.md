@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.95
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -14,6 +14,8 @@ last_updated: 2026-08-16
 > 当前状态：设计、实施、协议 dry-run 与自动验收已完成。
 >
 > 前置版本：[v0.94 核心模型输入精简与结构化 Run Facts](../v0.94/README.md)
+>
+> 后续版本：[v0.96 运行监控与原生 Usage 观测](../v0.96/README.md)
 
 ## 版本目标
 

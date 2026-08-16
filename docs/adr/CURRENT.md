@@ -240,6 +240,7 @@ Related: 具体 Skill 名称或版本不是治理例外；长期边界仍按本�
 | [ADR-0116](0116-projection-pinned-classifier-version-and-explicit-historical-reprojection.md) | Projection-Pinned Classifier Version and Explicit Historical Reprojection |
 | [ADR-0117](0117-observation-capability-coverage-levels-across-runtime-adapters.md) | Observation-Capability Coverage Levels Across Runtime Adapters |
 | [ADR-0122](0122-current-canonical-activity-projection-and-deferred-identity-replay.md) | Current Canonical Activity Projection and Deferred Identity Replay |
+| [ADR-0201](0201-sparse-runtime-usage-and-clean-break-monitoring.md) | Sparse Runtime Usage Authority and Clean-Break Monitoring Enrollment |
 <!-- adr-current-primary:end -->
 
 Related: Diagnostics、Qualification 与 ContextManifest Evidence 不因此合并为同一 authority。

@@ -1302,6 +1302,34 @@ _Avoid_: synthetic permission request, Core Action policy, proof of an unreporte
 A provider-reported or Core-intervened fact about one AgentRun operation, including its source identity and observed phase or result. It never asserts behavior that the Runtime did not report or Core did not perform.
 _Avoid_: inferred operation, reconstructed workspace change, UI event
 
+**Monitoring Collection Epoch**:
+The persistent clean-break boundary for one compatible Runtime Monitoring dataset. Only explicitly enrolled AgentRun
+execution epochs after its start belong to monitoring; earlier Core facts remain retained but are not backfilled or
+interpreted as monitoring history.
+_Avoid_: database reset, historical migration, query time range, Runtime session
+
+**Monitoring Run Enrollment**:
+The immutable admission fact that one AgentRun execution epoch belongs to a Monitoring Collection Epoch with its
+Runtime, parser and observable-field support frozen. Existing timestamps or a later Core generation cannot infer it.
+_Avoid_: AgentRun existence, Runtime readiness, historical eligibility inference, Usage row
+
+**Runtime Usage Observation**:
+A sparse, source-identified Token, Cache, Context or Cost observation reported by one Runtime/provider boundary or by
+an explicitly labeled local estimator. It is separate from Execution Evidence, keeps missing fields unknown, and is
+never model-visible activity.
+_Avoid_: Runtime Evidence, Canonical Runtime Activity, fully populated usage row, inferred Provider bill
+
+**Runtime Usage Coverage**:
+The field-specific ratio of observed Usage to Monitoring Run Enrollment facts whose frozen Runtime/parser support made
+that field eligible. It describes observation completeness, not Runtime quality, product support or a zero value.
+_Avoid_: Runtime Activity Coverage Level, support tier, success rate, missing-as-zero
+
+**Provider Billing Bucket**:
+A Provider-reported amount for a bounded time range and available billing dimensions such as project, API key, model
+or line item. It is not an AgentRun cost unless stable request linkage or an equivalent isolated attribution dimension
+proves that grain.
+_Avoid_: exact Run cost, Runtime estimate, automatic per-Run allocation, subscription request price
+
 **Source Evidence Key**:
 The source-scoped identity used to recognize and deduplicate one incoming Runtime Evidence event.
 It may include the event phase and is not an operation identity; equal-looking keys from different

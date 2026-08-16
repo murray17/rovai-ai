@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.95
+current_version: v0.96
 last_updated: 2026-08-16
 ---
 
@@ -146,4 +146,5 @@ last_updated: 2026-08-16
 | v0.92 | `historical` | Grill Duo 有界开放轮次、自包含协议与自然语言路由收敛 | [v0.92/README.md](v0.92/README.md) |
 | v0.93 | `historical` | Review Duo 四消息会话语义、结果有界化与 Grill Duo CLI 去重 | [v0.93/README.md](v0.93/README.md) |
 | v0.94 | `historical` | 核心模型输入精简、历史投影收敛与结构化 Run Facts | [v0.94/README.md](v0.94/README.md) |
-| v0.95 | `current` | Official Skill 测试去文案化、场景验收分层与协作协议去重 | [v0.95/README.md](v0.95/README.md) |
+| v0.95 | `historical` | Official Skill 测试去文案化、场景验收分层与协作协议去重 | [v0.95/README.md](v0.95/README.md) |
+| v0.96 | `current` | Clean-break 运行监控、原生 Usage 观测与诚实 Coverage | [v0.96/README.md](v0.96/README.md) |
