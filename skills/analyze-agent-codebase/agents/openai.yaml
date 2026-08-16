@@ -1,4 +1,4 @@
 interface:
   display_name: "Agent 代码库分析"
-  short_description: "从代码证据重建 Agent 仓库的架构、执行流、记忆、工具与扩展机制"
-  default_prompt: "使用 $analyze-agent-codebase 从代码证据剖析这个 Agent 仓库，并输出可追溯的架构结论。"
+  short_description: "从源码、配置和测试证据还原 Agent 系统的真实架构与执行机制"
+  default_prompt: "使用 $analyze-agent-codebase 从入口和调用链分析这个 Agent 仓库，区分已确认、推断和未知，并给出可追溯的架构结论。"
