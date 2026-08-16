@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import type { AgentProfile, McpServerView } from '@contracts'
 import {
   McpAssignmentWorkbench,
+  McpLibraryEmptyState,
   McpServerLibrary,
   McpSettings,
   bulkAssignmentTargets,
@@ -20,7 +21,7 @@ describe('MCP settings', () => {
     expect(markup).toContain('class="settings-page-heading"')
     expect(markup).toContain('<h1>MCP</h1>')
     expect(markup).not.toContain('project-hero')
-    expect(markup).toContain('从本机 Agent 导入')
+    expect(markup).toContain('从本机配置导入')
     expect(markup).toContain('添加 MCP')
     expect(markup).toContain('管理 MCP 连接及队员可用范围。')
     expect(markup).toContain('class="mcp-section-stack"')
@@ -31,6 +32,21 @@ describe('MCP settings', () => {
     expect(markup).not.toContain('mcp-section-index')
     expect(markup).not.toContain('Context7')
     expect(markup).not.toContain('配置和分配从后续新执行开始生效')
+  })
+
+  it('offers only manual add and local import from the empty Library state', () => {
+    const markup = renderToStaticMarkup(createElement(McpLibraryEmptyState, {
+      busy: null,
+      onImport: () => undefined,
+      onAdd: () => undefined
+    }))
+
+    expect(markup).toContain('还没有 MCP Server')
+    expect(markup).toContain('从本机配置导入')
+    expect(markup).toContain('手动添加')
+    expect(markup.match(/<button/g)).toHaveLength(2)
+    expect(markup).not.toContain('内置')
+    expect(markup).not.toContain('官方预设')
   })
 
   it('renders a searchable assignment workbench with real member avatars and a bounded roster', () => {
@@ -110,7 +126,6 @@ describe('MCP settings', () => {
   it('formats transport, source, and import facts deterministically', () => {
     expect(mcpTransportLabel('stdio')).toBe('Stdio')
     expect(mcpTransportLabel('streamable_http')).toBe('Streamable HTTP')
-    expect(mcpSourceLabel('builtin')).toBe('Rovai 内置')
     expect(mcpSourceLabel('user')).toBe('用户添加')
     expect(mcpSourceLabel('import')).toBe('本机导入')
     expect(importCompatibilityLabel('portable', 'none')).toBe('可导入')
@@ -158,7 +173,6 @@ function server(overrides: Partial<McpServerView> = {}): McpServerView {
     enabled: true,
     assignedAgentIds: ['agent_0'],
     source: 'user',
-    presetId: null,
     riskLevel: 'standard',
     riskAcknowledged: false,
     definitionJson: '{"mcpServers":{"docs":{"command":"node"}}}',

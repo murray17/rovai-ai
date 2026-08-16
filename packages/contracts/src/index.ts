@@ -1728,8 +1728,7 @@ export interface McpServerView {
   endpoint: string
   enabled: boolean
   assignedAgentIds: string[]
-  source: 'builtin' | 'user' | 'import'
-  presetId: string | null
+  source: 'user' | 'import'
   riskLevel: 'standard' | 'high'
   riskAcknowledged: boolean
   definitionJson: string

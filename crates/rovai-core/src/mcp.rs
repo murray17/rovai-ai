@@ -25,10 +25,6 @@ const MAX_ARGUMENTS: usize = 256;
 const MAX_MAP_ENTRIES: usize = 128;
 const MAX_STRING_BYTES: usize = 64 * 1024;
 
-const CONTEXT7_PRESET_ID: &str = "context7";
-const PLAYWRIGHT_PRESET_ID: &str = "playwright";
-pub const PLAYWRIGHT_MCP_PACKAGE: &str = "@playwright/mcp@0.0.78";
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct McpConfigFile {
@@ -39,52 +35,12 @@ pub struct McpConfigFile {
 }
 
 impl McpConfigFile {
-    fn reviewed_defaults() -> Self {
-        let mut mcp_servers = BTreeMap::new();
-        mcp_servers.insert(
-            CONTEXT7_PRESET_ID.to_string(),
-            McpServerDefinition::StreamableHttp {
-                url: "https://mcp.context7.com/mcp".to_string(),
-                headers: BTreeMap::new(),
-            },
-        );
-        mcp_servers.insert(
-            PLAYWRIGHT_PRESET_ID.to_string(),
-            McpServerDefinition::Stdio {
-                command: "npx".to_string(),
-                args: vec![
-                    "-y".to_string(),
-                    PLAYWRIGHT_MCP_PACKAGE.to_string(),
-                    "--isolated".to_string(),
-                ],
-                cwd: None,
-                env: BTreeMap::new(),
-            },
-        );
-        let servers = [
-            (CONTEXT7_PRESET_ID, McpRiskLevel::Standard),
-            (PLAYWRIGHT_PRESET_ID, McpRiskLevel::High),
-        ]
-        .into_iter()
-        .map(|(name, risk_level)| {
-            (
-                name.to_string(),
-                McpServerMetadata {
-                    server_id: Uuid::new_v4().to_string(),
-                    enabled: false,
-                    source: McpServerSource::Builtin,
-                    preset_id: Some(name.to_string()),
-                    risk_level,
-                    risk_acknowledged: false,
-                },
-            )
-        })
-        .collect();
+    fn empty() -> Self {
         Self {
-            mcp_servers,
+            mcp_servers: BTreeMap::new(),
             rovai: McpRovaiMetadata {
                 schema_version: MCP_SCHEMA_VERSION,
-                servers,
+                servers: BTreeMap::new(),
                 assignments: Vec::new(),
             },
         }
@@ -131,8 +87,6 @@ pub struct McpServerMetadata {
     pub server_id: String,
     pub enabled: bool,
     pub source: McpServerSource,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub preset_id: Option<String>,
     pub risk_level: McpRiskLevel,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub risk_acknowledged: bool,
@@ -141,7 +95,6 @@ pub struct McpServerMetadata {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum McpServerSource {
-    Builtin,
     User,
     Import,
 }
@@ -208,7 +161,6 @@ pub struct McpServerView {
     pub enabled: bool,
     pub assigned_agent_ids: Vec<String>,
     pub source: McpServerSource,
-    pub preset_id: Option<String>,
     pub risk_level: McpRiskLevel,
     pub risk_acknowledged: bool,
     pub definition_json: String,
@@ -348,6 +300,14 @@ pub struct McpConfigStore {
     path: PathBuf,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum McpConfigMigrationOutcome {
+    Missing,
+    Unchanged,
+    Migrated,
+    ResetInvalid,
+}
+
 struct LoadedConfig {
     exists: bool,
     digest: String,
@@ -374,6 +334,99 @@ impl McpConfigStore {
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    pub fn migrate_pre_release_config(&self) -> Result<McpConfigMigrationOutcome> {
+        let metadata = match fs::symlink_metadata(&self.path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(McpConfigMigrationOutcome::Missing);
+            }
+            Err(error) => return Err(error).context("failed to inspect pre-release MCP config"),
+        };
+        if !metadata.file_type().is_file() || metadata.len() > MAX_CONFIG_BYTES {
+            fs::remove_file(&self.path).with_context(|| {
+                format!(
+                    "failed to remove unsupported pre-release MCP config {}",
+                    self.path.display()
+                )
+            })?;
+            return Ok(McpConfigMigrationOutcome::ResetInvalid);
+        }
+
+        let bytes = fs::read(&self.path)
+            .with_context(|| format!("failed to read MCP config {}", self.path.display()))?;
+        let mut document = match parse_json_no_duplicates::<Value>(&bytes) {
+            Ok(Value::Object(document)) => document,
+            Ok(_) | Err(_) => return self.reset_invalid_pre_release_config(),
+        };
+        let Some(Value::Object(mut mcp_servers)) = document.remove("mcpServers") else {
+            return self.reset_invalid_pre_release_config();
+        };
+        let Some(Value::Object(mut rovai)) = document.remove("_rovai") else {
+            return self.reset_invalid_pre_release_config();
+        };
+        let Some(Value::Object(server_metadata)) = rovai.get_mut("servers") else {
+            return self.reset_invalid_pre_release_config();
+        };
+
+        let mut changed = false;
+        let mut builtin_names = BTreeSet::new();
+        let mut builtin_server_ids = BTreeSet::new();
+        for (name, metadata) in server_metadata.iter_mut() {
+            let Value::Object(metadata) = metadata else {
+                continue;
+            };
+            if metadata.remove("presetId").is_some() {
+                changed = true;
+            }
+            if metadata.get("source").and_then(Value::as_str) == Some("builtin") {
+                builtin_names.insert(name.clone());
+                if let Some(server_id) = metadata.get("serverId").and_then(Value::as_str) {
+                    builtin_server_ids.insert(server_id.to_string());
+                }
+            }
+        }
+        if !builtin_names.is_empty() {
+            changed = true;
+            for name in &builtin_names {
+                mcp_servers.remove(name);
+                server_metadata.remove(name);
+            }
+            let Some(Value::Array(assignments)) = rovai.get_mut("assignments") else {
+                return self.reset_invalid_pre_release_config();
+            };
+            assignments.retain(|assignment| {
+                let server_id = assignment.get("serverId").and_then(Value::as_str);
+                server_id.is_none() || server_id.is_some_and(|id| !builtin_server_ids.contains(id))
+            });
+        }
+
+        document.insert("mcpServers".to_string(), Value::Object(mcp_servers));
+        document.insert("_rovai".to_string(), Value::Object(rovai));
+        let mut config = match serde_json::from_value::<McpConfigFile>(Value::Object(document)) {
+            Ok(config) => config,
+            Err(_) => return self.reset_invalid_pre_release_config(),
+        };
+        normalize_config(&mut config);
+        if !validate_config(&config).is_empty() {
+            return self.reset_invalid_pre_release_config();
+        }
+        if !changed {
+            return Ok(McpConfigMigrationOutcome::Unchanged);
+        }
+        self.write(&config)?;
+        Ok(McpConfigMigrationOutcome::Migrated)
+    }
+
+    fn reset_invalid_pre_release_config(&self) -> Result<McpConfigMigrationOutcome> {
+        fs::remove_file(&self.path).with_context(|| {
+            format!(
+                "failed to remove invalid pre-release MCP config {}",
+                self.path.display()
+            )
+        })?;
+        Ok(McpConfigMigrationOutcome::ResetInvalid)
     }
 
     pub fn migrate_agent_ids(&self, mappings: &BTreeMap<String, String>) -> Result<bool> {
@@ -469,7 +522,6 @@ impl McpConfigStore {
                     server_id: Uuid::new_v4().to_string(),
                     enabled: false,
                     source: McpServerSource::User,
-                    preset_id: None,
                     risk_level: McpRiskLevel::Standard,
                     risk_acknowledged: false,
                 },
@@ -708,7 +760,6 @@ impl McpConfigStore {
                                 server_id: Uuid::new_v4().to_string(),
                                 enabled: false,
                                 source: McpServerSource::Import,
-                                preset_id: None,
                                 risk_level: McpRiskLevel::Standard,
                                 risk_acknowledged: false,
                             },
@@ -811,7 +862,7 @@ impl McpConfigStore {
 
     fn load_or_initialize(&self) -> Result<LoadedConfig> {
         if !self.path.exists() {
-            self.write_new(&McpConfigFile::reviewed_defaults())?;
+            self.write_new(&McpConfigFile::empty())?;
         }
         self.load()
     }
@@ -928,7 +979,6 @@ impl McpConfigStore {
                         enabled: metadata.enabled,
                         assigned_agent_ids,
                         source: metadata.source,
-                        preset_id: metadata.preset_id.clone(),
                         risk_level: metadata.risk_level,
                         risk_acknowledged: metadata.risk_acknowledged,
                         definition_json: single_public_json(name, definition, true)?,
@@ -1579,23 +1629,52 @@ mod tests {
         format!(r#"{{"mcpServers":{{"{name}":{{"command":"{command}","args":["server.js"]}}}}}}"#)
     }
 
+    fn config_with_server(
+        name: &str,
+        source: McpServerSource,
+        risk_level: McpRiskLevel,
+    ) -> McpConfigFile {
+        let mut config = McpConfigFile::empty();
+        config.mcp_servers.insert(
+            name.to_string(),
+            McpServerDefinition::Stdio {
+                command: "node".to_string(),
+                args: vec!["server.js".to_string()],
+                cwd: None,
+                env: BTreeMap::new(),
+            },
+        );
+        config.rovai.servers.insert(
+            name.to_string(),
+            McpServerMetadata {
+                server_id: Uuid::new_v4().to_string(),
+                enabled: false,
+                source,
+                risk_level,
+                risk_acknowledged: false,
+            },
+        );
+        config
+    }
+
     #[test]
-    fn missing_file_atomically_materializes_reviewed_disabled_defaults() {
-        let (root, store) = temporary_store("defaults");
+    fn missing_file_atomically_materializes_an_exact_empty_library() {
+        let (root, store) = temporary_store("empty-default");
+        assert_eq!(
+            store.migrate_pre_release_config().unwrap(),
+            McpConfigMigrationOutcome::Missing
+        );
+        assert!(!store.path().exists());
         let view = store.get(&agents()).unwrap();
         assert!(view.exists);
-        assert_eq!(view.servers.len(), 2);
-        assert!(view.servers.iter().all(|server| !server.enabled));
-        assert!(
-            view.servers
-                .iter()
-                .all(|server| server.assigned_agent_ids.is_empty())
-        );
-        assert!(view.public_config_json.contains(PLAYWRIGHT_MCP_PACKAGE));
+        assert!(view.servers.is_empty());
+        assert_eq!(view.public_config_json, "{\n  \"mcpServers\": {}\n}\n");
         assert!(!view.public_config_json.contains("_rovai"));
         let raw = fs::read_to_string(store.path()).unwrap();
-        assert!(raw.contains("\"_rovai\""));
-        assert!(raw.contains("\"schemaVersion\": 2"));
+        assert_eq!(
+            raw,
+            "{\n  \"mcpServers\": {},\n  \"_rovai\": {\n    \"schemaVersion\": 2,\n    \"servers\": {},\n    \"assignments\": []\n  }\n}\n"
+        );
         assert_eq!(
             fs::metadata(store.path()).unwrap().permissions().mode() & 0o777,
             0o600
@@ -1606,7 +1685,7 @@ mod tests {
     #[test]
     fn legacy_assignment_agent_ids_are_replaced_atomically_without_server_changes() {
         let (root, store) = temporary_store("agent-id-migration");
-        let mut config = McpConfigFile::reviewed_defaults();
+        let mut config = config_with_server("docs", McpServerSource::User, McpRiskLevel::Standard);
         let server_id = config
             .rovai
             .servers
@@ -1647,6 +1726,103 @@ mod tests {
                 )]))
                 .unwrap()
         );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn pre_release_migration_removes_only_builtin_sources_and_their_assignments() {
+        let (root, store) = temporary_store("builtin-clean-break");
+        fs::create_dir_all(store.path().parent().unwrap()).unwrap();
+        fs::write(
+            store.path(),
+            r#"{
+              "mcpServers": {
+                "builtin-renamed": {"command": "custom-browser"},
+                "context7": {"url": "https://user.example/mcp"},
+                "playwright": {"command": "imported-browser"}
+              },
+              "_rovai": {
+                "schemaVersion": 2,
+                "servers": {
+                  "builtin-renamed": {
+                    "serverId": "11111111-1111-4111-8111-111111111111",
+                    "enabled": true,
+                    "source": "builtin",
+                    "presetId": "playwright",
+                    "riskLevel": "high",
+                    "riskAcknowledged": true
+                  },
+                  "context7": {
+                    "serverId": "22222222-2222-4222-8222-222222222222",
+                    "enabled": true,
+                    "source": "user",
+                    "riskLevel": "standard"
+                  },
+                  "playwright": {
+                    "serverId": "33333333-3333-4333-8333-333333333333",
+                    "enabled": false,
+                    "source": "import",
+                    "riskLevel": "standard"
+                  }
+                },
+                "assignments": [
+                  {"serverId": "11111111-1111-4111-8111-111111111111", "agentId": "agent_1"},
+                  {"serverId": "22222222-2222-4222-8222-222222222222", "agentId": "agent_1"},
+                  {"serverId": "33333333-3333-4333-8333-333333333333", "agentId": "agent_2"}
+                ]
+              }
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            store.migrate_pre_release_config().unwrap(),
+            McpConfigMigrationOutcome::Migrated
+        );
+        let first_bytes = fs::read(store.path()).unwrap();
+        let migrated = store.load().unwrap().config.unwrap();
+        assert_eq!(
+            migrated.mcp_servers.keys().cloned().collect::<Vec<_>>(),
+            ["context7".to_string(), "playwright".to_string()]
+        );
+        assert_eq!(
+            migrated.rovai.assignments,
+            [
+                McpAssignment {
+                    server_id: "22222222-2222-4222-8222-222222222222".to_string(),
+                    agent_id: "agent_1".to_string(),
+                },
+                McpAssignment {
+                    server_id: "33333333-3333-4333-8333-333333333333".to_string(),
+                    agent_id: "agent_2".to_string(),
+                },
+            ]
+        );
+        let raw = String::from_utf8(first_bytes.clone()).unwrap();
+        assert!(!raw.contains("builtin-renamed"));
+        assert!(!raw.contains("presetId"));
+        assert_eq!(
+            store.migrate_pre_release_config().unwrap(),
+            McpConfigMigrationOutcome::Unchanged
+        );
+        assert_eq!(fs::read(store.path()).unwrap(), first_bytes);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn invalid_pre_release_config_is_removed_before_empty_initialization() {
+        let (root, store) = temporary_store("invalid-clean-break");
+        fs::create_dir_all(store.path().parent().unwrap()).unwrap();
+        fs::write(store.path(), b"{broken").unwrap();
+
+        assert_eq!(
+            store.migrate_pre_release_config().unwrap(),
+            McpConfigMigrationOutcome::ResetInvalid
+        );
+        assert!(!store.path().exists());
+        assert!(store.get(&agents()).unwrap().servers.is_empty());
 
         let _ = fs::remove_dir_all(root);
     }
@@ -1841,17 +2017,24 @@ mod tests {
     #[test]
     fn high_risk_requires_acknowledgement_only_when_first_effective() {
         let (root, store) = temporary_store("risk");
+        store
+            .write_new(&config_with_server(
+                "browser",
+                McpServerSource::User,
+                McpRiskLevel::High,
+            ))
+            .unwrap();
         let initial = store.get(&agents()).unwrap();
-        let playwright = initial
+        let browser = initial
             .servers
             .iter()
-            .find(|server| server.name == PLAYWRIGHT_PRESET_ID)
+            .find(|server| server.name == "browser")
             .unwrap();
         let assigned = store
             .set_assignment(
                 SetMcpAssignmentParams {
                     expected_config_digest: initial.config_digest,
-                    server_id: playwright.server_id.clone(),
+                    server_id: browser.server_id.clone(),
                     agent_id: "agent_2".to_string(),
                     assigned: true,
                     acknowledge_high_risk: false,
@@ -1866,7 +2049,7 @@ mod tests {
             .set_enabled(
                 SetMcpServerEnabledParams {
                     expected_config_digest: config.config_digest.clone(),
-                    server_id: playwright.server_id.clone(),
+                    server_id: browser.server_id.clone(),
                     enabled: true,
                     acknowledge_high_risk: false,
                 },
@@ -1881,7 +2064,7 @@ mod tests {
             .set_enabled(
                 SetMcpServerEnabledParams {
                     expected_config_digest: config.config_digest,
-                    server_id: playwright.server_id.clone(),
+                    server_id: browser.server_id.clone(),
                     enabled: true,
                     acknowledge_high_risk: true,
                 },

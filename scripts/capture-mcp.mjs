@@ -82,7 +82,7 @@ try {
   await waitForExpression(cdp, `Boolean(document.querySelector('.settings-workbench'))`, 10_000)
   await clickButtonByText(cdp, '.settings-sidebar-menu button', 'MCP')
   await waitForExpression(cdp, `Boolean(document.querySelector('.mcp-settings'))`, 10_000)
-  await waitForExpression(cdp, `document.querySelectorAll('.mcp-server-row').length === 2`, 30_000)
+  await waitForExpression(cdp, `Boolean(document.querySelector('.mcp-empty')) && document.querySelectorAll('.mcp-server-row').length === 0`, 30_000)
 
   const initial = await evaluate(cdp, `(() => ({
     subnav: [...document.querySelectorAll('.settings-sidebar-menu strong')].map((node) => node.textContent?.trim()),
@@ -107,13 +107,19 @@ try {
       .map((node) => getComputedStyle(node).backgroundColor),
     sharedHeadingCount: document.querySelectorAll('.settings-page-heading').length,
     legacyHeroCount: document.querySelectorAll('.project-hero').length,
-    heading: document.querySelector('.settings-page-heading h1')?.textContent
+    heading: document.querySelector('.settings-page-heading h1')?.textContent,
+    emptyActions: [...document.querySelectorAll('.mcp-empty button')].map((node) => node.textContent?.trim()),
+    builtinCopyVisible: document.querySelector('.mcp-settings')?.innerText.includes('内置') ?? false,
+    officialPresetCopyVisible: document.querySelector('.mcp-settings')?.innerText.includes('官方预设') ?? false
   }))()`)
   assert(
     JSON.stringify(initial.subnav) === JSON.stringify(['通用', '外观', '提醒', 'Skills', 'MCP', 'Agent 运行时', '诊断与修复']),
     `Settings navigation is incorrect: ${JSON.stringify(initial)}`
   )
-  assert(JSON.stringify(initial.serverNames) === JSON.stringify(['context7', 'playwright']), `Fresh reviewed defaults are incorrect: ${JSON.stringify(initial)}`)
+  assert(initial.serverNames.length === 0, `Fresh MCP Library is not empty: ${JSON.stringify(initial)}`)
+  assert(JSON.stringify(initial.emptyActions) === JSON.stringify(['从本机配置导入', '手动添加']), `Empty Library actions are incorrect: ${JSON.stringify(initial)}`)
+  assert(!initial.builtinCopyVisible && !initial.officialPresetCopyVisible, `Preset copy is still visible: ${JSON.stringify(initial)}`)
+  assert(initial.publicPreview.includes('"mcpServers": {}'), `Fresh public MCP JSON is not empty: ${JSON.stringify(initial)}`)
   assert(initial.memberRows > 0 && initial.memberAvatars === initial.memberRows, `Member Assignment roster or avatars are missing: ${JSON.stringify(initial)}`)
   assert(initial.rosterOverflowY === 'auto', `Member roster is not independently scrollable: ${JSON.stringify(initial)}`)
   if (initial.memberRows >= 8) assert(initial.rosterScrollable, `Tall member roster did not overflow inside the workbench: ${JSON.stringify(initial)}`)
@@ -155,13 +161,15 @@ try {
   })()`, 5_000)
 
   await setValue(cdp, '.mcp-assignment-chooser-heading input', 'play')
-  await waitForExpression(cdp, `document.querySelectorAll('.mcp-assignment-option').length === 1 && document.querySelector('.mcp-assignment-option')?.dataset.mcpServerName === 'playwright'`, 5_000)
+  await waitForExpression(cdp, `document.querySelectorAll('.mcp-assignment-option').length === 0`, 5_000)
   await setValue(cdp, '.mcp-assignment-chooser-heading input', '')
   await clickButtonByText(cdp, '.mcp-assignment-toolbar button', '只看未分配')
   await waitForExpression(cdp, `[...document.querySelectorAll('.mcp-assignment-option input')].every((node) => !node.checked)`, 5_000)
   await clickButtonByText(cdp, '.mcp-assignment-toolbar button', '全部')
 
-  await clickButtonByText(cdp, '.mcp-settings button', '从本机 Agent 导入')
+  await capture(cdp, `${outputPrefix}-empty-day.png`)
+
+  await clickButtonByText(cdp, '.mcp-settings button', '从本机配置导入')
   await waitForExpression(cdp, `Boolean(document.querySelector('.mcp-import-dialog'))`, 30_000)
   const importPreview = await evaluate(cdp, `(() => ({
     candidateCount: document.querySelectorAll('.mcp-import-candidate').length,
@@ -194,7 +202,7 @@ try {
     return Boolean(button) && !button.disabled
   })()`, 5_000)
   await clickButtonByText(cdp, '.mcp-import-dialog button', '导入所选')
-  await waitForExpression(cdp, `document.querySelectorAll('.mcp-server-row').length === 3`, 15_000)
+  await waitForExpression(cdp, `document.querySelectorAll('.mcp-server-row').length === 1`, 15_000)
   const imported = await evaluate(cdp, `(() => {
     const row = [...document.querySelectorAll('.mcp-server-row')]
       .find((node) => node.querySelector('.mcp-server-title strong')?.textContent === 'imported_docs')
@@ -214,7 +222,7 @@ try {
     mcpServers: { 'smoke-http': { url: 'https://example.test/mcp' } }
   }, null, 2))
   await clickButtonByText(cdp, '.mcp-editor-dialog button', '保存')
-  await waitForExpression(cdp, `document.querySelectorAll('.mcp-server-row').length === 4`, 10_000)
+  await waitForExpression(cdp, `document.querySelectorAll('.mcp-server-row').length === 2`, 10_000)
   await waitForExpression(cdp, `document.activeElement?.textContent?.includes('添加 MCP')`, 5_000)
 
   await evaluate(cdp, `[...document.querySelectorAll('.mcp-member-roster-row')].at(-1)?.click()`)
@@ -223,7 +231,7 @@ try {
   await waitForExpression(cdp, `(() => {
     const options = [...document.querySelectorAll('.mcp-assignment-option')]
     const checked = options.filter((node) => node.querySelector('input')?.checked).map((node) => node.dataset.mcpServerName)
-    return checked.length === 4 && checked.includes('playwright') && !document.querySelector('.mcp-risk-dialog')
+    return checked.length === 2 && checked.includes('imported_docs') && checked.includes('smoke-http') && !document.querySelector('.mcp-risk-dialog')
   })()`, 15_000)
   await clickButtonByText(cdp, '.mcp-bulk-actions button', '清空当前筛选')
   await waitForExpression(cdp, `document.querySelectorAll('.mcp-assignment-option input:checked').length === 0`, 15_000)
@@ -295,9 +303,9 @@ try {
   await clickRowButton(cdp, 'smoke-http', '删除')
   await waitForExpression(cdp, `Boolean(document.querySelector('.compact-dialog'))`, 5_000)
   await clickButtonByText(cdp, '.compact-dialog button', '删除')
-  await waitForExpression(cdp, `document.querySelectorAll('.mcp-server-row').length === 3`, 10_000)
+  await waitForExpression(cdp, `document.querySelectorAll('.mcp-server-row').length === 1`, 10_000)
   const finalNames = await evaluate(cdp, `[...document.querySelectorAll('.mcp-server-title > strong')].map((node) => node.textContent)`)
-  assert(JSON.stringify(finalNames) === JSON.stringify(['context7', 'imported_docs', 'playwright']), `Delete did not converge: ${JSON.stringify(finalNames)}`)
+  assert(JSON.stringify(finalNames) === JSON.stringify(['imported_docs']), `Delete did not converge: ${JSON.stringify(finalNames)}`)
 
   const sharedSettingsHeadings = []
   for (const [navigationLabel, expectedHeading] of [
@@ -327,14 +335,13 @@ try {
     subnav: initial.subnav,
     sourceStatus: importPreview.sourceStatus,
     importedSecretRedacted: true,
-    reviewedDefaultsMaterialized: true,
+    freshLibraryEmpty: true,
     noAutomaticImportScan: true,
     rosterKeyboardNavigation: true,
     assignmentSearchAndFilter: true,
     searchInChooserHeading: true,
     neutralRosterWithSelectedSteelState: true,
     persistentRiskUiRemoved: true,
-    highRiskMutationUsesOrdinaryFlow: true,
     memberAssignmentEdited: true,
     bulkAssignmentEdited: true,
     enableTogglePersisted: true,
@@ -348,6 +355,7 @@ try {
     finalNames,
     sharedSettingsHeadings,
     screenshots: [
+      `${outputPrefix}-empty-day.png`,
       `${outputPrefix}-day.png`,
       `${outputPrefix}-day-clean.png`,
       `${outputPrefix}-library-clean.png`,

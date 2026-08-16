@@ -3128,6 +3128,7 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 .mcp-empty { display: flex; gap: 20px; align-items: center; justify-content: space-between; padding: 22px 18px; border: 1px dashed var(--line-strong); border-radius: 8px; background: var(--surface-subtle); }
 .mcp-empty strong { font-size: 13px; }
 .mcp-empty p { max-width: 570px; margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.mcp-empty-actions { display: flex; flex: 0 0 auto; gap: 8px; align-items: center; }
 .mcp-transport { padding: 3px 7px; border-radius: 999px; color: var(--brand-ink); background: var(--brand-soft); font: 750 9px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.4px; }
 .mcp-transport.transport-http { color: var(--attention); background: var(--attention-soft); }
 .mcp-config-path { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--evidence-muted); background: var(--evidence-canvas); font: 500 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -3274,7 +3275,6 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 .mcp-server-main > p { margin: 0; color: var(--muted); font-size: 10.5px; line-height: 1.4; }
 .mcp-server-main > code { overflow: hidden; color: var(--faint); font: 9.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .mcp-source-badge { padding: 1px 5px; border: 0; border-radius: 5px; color: var(--faint); background: var(--surface-subtle); font-size: 9px; font-weight: 600; }
-.mcp-source-badge.source-builtin { color: var(--brand-ink); background: var(--brand-soft); }
 .mcp-source-badge.source-import { color: var(--muted); background: var(--surface-subtle); }
 .mcp-server-assignees { display: grid; min-width: 0; justify-items: center; gap: 4px; }
 .mcp-server-assignees > span { overflow: hidden; max-width: 100%; color: var(--muted); font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
@@ -4883,6 +4883,7 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
   .mcp-server-row { grid-template-columns: minmax(0, 1fr); }
   .mcp-server-actions { max-width: none; justify-content: flex-start; }
   .mcp-empty { align-items: flex-start; flex-direction: column; }
+  .mcp-empty-actions { width: 100%; flex-wrap: wrap; }
   .memory-row, .memory-row.proposal { grid-template-columns: minmax(0, 1fr); }
   .memory-actions { max-width: none; justify-content: flex-start; }
   .memory-editor-grid { grid-template-columns: 1fr; }

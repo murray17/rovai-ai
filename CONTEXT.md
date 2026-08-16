@@ -1619,12 +1619,8 @@ The Adapter-declared rule for resolving a collision between a requested Rovai MC
 _Avoid_: universal Rovai precedence, universal native precedence, field merge, unrecorded collision
 
 **MCP Configuration File**:
-The application-global `~/.rovai/mcp.json` file that is the sole source of truth for external MCP Server definitions, enablement, immutable Server identities, and MCP Assignments. Its public `mcpServers` object contains only connection definitions, while one hidden sibling `_rovai` object contains schema version, identity, enablement, provenance, and Assignment state. Production code neither falls back to old brand paths nor migrates or accepts an old MCP schema; SQLite does not duplicate MCP Assignment truth. Parsing rejects duplicate JSON object keys rather than accepting last-key-wins behavior.
+The application-global `~/.rovai/mcp.json` file that is the sole source of truth for external MCP Server definitions, enablement, immutable Server identities, and MCP Assignments. Its public `mcpServers` object contains only connection definitions, while one hidden sibling `_rovai` object contains schema version, identity, enablement, provenance, and Assignment state. A new file starts with an empty Library; Rovai-ai does not materialize product-owned third-party Servers. Production code neither falls back to old brand paths nor accepts an old MCP schema; SQLite does not duplicate MCP Assignment truth. Parsing rejects duplicate JSON object keys rather than accepting last-key-wins behavior.
 _Avoid_: MCP database truth, generated Runtime projection, synchronized source config
-
-**Reviewed MCP Default**:
-One of the Context7 and Playwright Server definitions atomically materialized only when a new MCP Configuration File is created. It starts disabled and unassigned, becomes an ordinary editable or deletable definition after creation, is never restored automatically, and is not overwritten by an application upgrade. Playwright retains high-permission risk provenance and uses an exact reviewed package version with isolated state.
-_Avoid_: enabled-by-default Server, managed subscription, floating dependency, auto-restored preset
 
 **MCP Environment Reference**:
 A strict `${NAME}` placeholder resolved by Core from the Agent Host environment while materializing an AgentRun projection. References may occupy all or part of an `env` or `headers` string value, `$${NAME}` escapes a literal placeholder, and no Shell syntax or interpolation in `command`, `args`, `url`, or `cwd` is supported. Runtime Adapters receive resolved values rather than interpreting references independently.
@@ -1659,7 +1655,7 @@ The earliest Runtime version for which development-time acceptance proves an Ada
 _Avoid_: tested-version ceiling, exact-version allowlist, user-machine preflight Smoke
 
 **Real MCP Smoke**:
-A development-time acceptance run that launches an actual Runtime CLI against actual MCP protocol processes or reviewed remote endpoints. Same-name Smokes use distinguishable native and Rovai Server results to prove the Adapter-specific Same-Name Policy while separately proving that non-conflicting native Servers remain available; default Smokes exercise Context7 and isolated Playwright. Missing prerequisites produce an explicit unverified result and can never be replaced by a mock success.
+A development-time acceptance run that launches an actual Runtime CLI against actual MCP protocol processes or explicitly supplied remote endpoints. Same-name Smokes use distinguishable native and Rovai Server results to prove the Adapter-specific Same-Name Policy while separately proving that non-conflicting native Servers remain available. Missing prerequisites produce an explicit unverified result and can never be replaced by a mock success.
 _Avoid_: user-machine startup probe, rendered-config snapshot, mocked protocol success
 
 **MCP Runtime Projection**:

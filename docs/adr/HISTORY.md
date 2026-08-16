@@ -208,4 +208,5 @@ generated_from: docs/adr-front-matter
 | [ADR-0194](0194-mandatory-typed-gather-completion-current-input.md) | Mandatory Typed Gather Completion Current Input | `accepted` | `cross-version` | [v0.89](../versions/v0.89/README.md) | — |
 | [ADR-0195](0195-generation-scoped-last-gather-return.md) | Generation-Scoped Last Gather Return with Independent Bound | `accepted` | `cross-version` | [v0.90](../versions/v0.90/README.md) | — |
 | [ADR-0196](0196-self-contained-gather-completion-request.md) | Self-Contained Gather Request in Mandatory Completion Input | `accepted` | `cross-version` | [v0.90](../versions/v0.90/README.md) | — |
+| [ADR-0197](0197-empty-user-owned-mcp-library.md) | Empty User-Owned MCP Library Without Product Presets | `accepted` | `cross-version` | [v0.91](../versions/v0.91/README.md) | — |
 <!-- adr-history:end -->

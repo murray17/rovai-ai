@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.90
+current_version: v0.91
 last_updated: 2026-08-16
 ---
 
@@ -141,4 +141,5 @@ last_updated: 2026-08-16
 | v0.87 | `historical` | TRAE 静态 Runtime 检测、首次真实任务同进程验证与可选静态版本 | [v0.87/README.md](v0.87/README.md) |
 | v0.88 | `historical` | Camp 世界地图环境片段、全局闲时调度与拥挤布局字幕回退 | [v0.88/README.md](v0.88/README.md) |
 | v0.89 | `historical` | 持久 Gather Barrier、统一 Completion Delivery 与类型化聚合输入 | [v0.89/README.md](v0.89/README.md) |
-| v0.90 | `current` | Gather 当前代最后结果、独立回传限额与 self-contained completion | [v0.90/README.md](v0.90/README.md) |
+| v0.90 | `historical` | Gather 当前代最后结果、独立回传限额与 self-contained completion | [v0.90/README.md](v0.90/README.md) |
+| v0.91 | `current` | 空 MCP Library、预发布 clean break 与用户自主管理 | [v0.91/README.md](v0.91/README.md) |

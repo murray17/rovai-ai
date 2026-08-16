@@ -111,8 +111,9 @@ use rovai_core::{
     git,
     managed_blob::ManagedBlobStore,
     mcp::{
-        CommitMcpImportParams, CreateMcpServerParams, DeleteMcpServerParams, McpConfigStore,
-        SetMcpAssignmentParams, SetMcpServerEnabledParams, UpdateMcpServerParams,
+        CommitMcpImportParams, CreateMcpServerParams, DeleteMcpServerParams,
+        McpConfigMigrationOutcome, McpConfigStore, SetMcpAssignmentParams,
+        SetMcpServerEnabledParams, UpdateMcpServerParams,
     },
     mcp_import::McpImportScanner,
     mcp_projection::{McpProjectionRequest, McpProjectionService, PreparedMcpProjection},
@@ -8828,6 +8829,15 @@ async fn run_core(
         Some(path) => path,
         None => McpConfigStore::default_path()?,
     });
+    match mcp_config.migrate_pre_release_config()? {
+        McpConfigMigrationOutcome::Migrated => {
+            eprintln!("Pre-release MCP config migrated to the empty-default schema");
+        }
+        McpConfigMigrationOutcome::ResetInvalid => {
+            eprintln!("Invalid pre-release MCP config removed; the Library will initialize empty");
+        }
+        McpConfigMigrationOutcome::Missing | McpConfigMigrationOutcome::Unchanged => {}
+    }
     mcp_config.migrate_agent_ids(&database.agent_id_aliases()?)?;
     let mcp_projection = McpProjectionService::new(&data_dir);
     skill_library.cleanup_expired_staging()?;

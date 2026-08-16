@@ -302,18 +302,20 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
     }
   }
 
+  const libraryIsEmpty = Boolean(config && !config.fileIssue && config.servers.length === 0)
+
   return (
     <div className="mcp-settings">
       <SettingsPageHeader
         eyebrow="Settings / MCP"
         title="MCP"
         description="管理 MCP 连接及队员可用范围。"
-        aside={(
+        aside={libraryIsEmpty ? undefined : (
           <>
-            <button className="quiet-button" type="button" onClick={() => void scan()} disabled={busy !== null || Boolean(config?.fileIssue)}>
-              {busy === 'scan' ? '正在读取…' : '从本机 Agent 导入'}
+            <button className="quiet-button" type="button" onClick={() => void scan()} disabled={config === null || busy !== null || Boolean(config.fileIssue)}>
+              {busy === 'scan' ? '正在读取…' : '从本机配置导入'}
             </button>
-            <button className="primary-button" type="button" onClick={() => setEditor({ serverId: null, definitionJson: NEW_SERVER_JSON })} disabled={busy !== null || Boolean(config?.fileIssue)}>
+            <button className="primary-button" type="button" onClick={() => setEditor({ serverId: null, definitionJson: NEW_SERVER_JSON })} disabled={config === null || busy !== null || Boolean(config.fileIssue)}>
               添加 MCP
             </button>
           </>
@@ -392,7 +394,11 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
             <span className="health-score">{config?.servers.length ?? '—'} 个</span>
           </div>
           {config && !config.fileIssue && config.servers.length === 0 && (
-            <div className="mcp-empty"><div><strong>还没有 MCP Server</strong><p>添加标准 JSON，或从本机 Agent 配置中选择可安全迁移的定义。</p></div></div>
+            <McpLibraryEmptyState
+              busy={busy}
+              onImport={() => void scan()}
+              onAdd={() => setEditor({ serverId: null, definitionJson: NEW_SERVER_JSON })}
+            />
           )}
           {config && !config.fileIssue && config.servers.length > 0 && (
             <McpServerLibrary
@@ -433,6 +439,28 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
   )
 }
 
+export function McpLibraryEmptyState({
+  busy,
+  onImport,
+  onAdd
+}: {
+  busy: string | null
+  onImport(): void
+  onAdd(): void
+}): React.JSX.Element {
+  return (
+    <div className="mcp-empty">
+      <div><strong>还没有 MCP Server</strong><p>手动添加标准 JSON，或从本机 Agent 配置中选择可安全迁移的定义。</p></div>
+      <div className="mcp-empty-actions">
+        <button className="quiet-button" type="button" onClick={onImport} disabled={busy !== null}>
+          {busy === 'scan' ? '正在读取…' : '从本机配置导入'}
+        </button>
+        <button className="primary-button" type="button" onClick={onAdd} disabled={busy !== null}>手动添加</button>
+      </div>
+    </div>
+  )
+}
+
 export function McpAssignmentWorkbench({
   members,
   servers,
@@ -469,8 +497,8 @@ export function McpAssignmentWorkbench({
   const focusMember = (index: number): void => {
     const member = members[index]
     if (!member) return
+    document.getElementById(memberOptionId(member.agentId))?.focus()
     setSelectedAgentId(member.agentId)
-    requestAnimationFrame(() => document.getElementById(memberOptionId(member.agentId))?.focus())
   }
 
   const onRosterKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
@@ -788,7 +816,7 @@ function ImportDialog({
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="dialog-content mcp-import-dialog">
-          <Dialog.Title>从本机 Agent 导入</Dialog.Title>
+          <Dialog.Title>从本机配置导入</Dialog.Title>
           <Dialog.Description>只读取本机用户级配置并生成预览。导入结果统一停用且不分配队员；来源明文凭据不会复制或显示。</Dialog.Description>
           <div className="mcp-import-sources" aria-label="读取来源">
             {inspection.sources.map((source) => (
@@ -906,7 +934,6 @@ export function mcpTransportLabel(transport: McpServerView['transport']): string
 }
 
 export function mcpSourceLabel(source: McpServerView['source']): string {
-  if (source === 'builtin') return 'Rovai 内置'
   if (source === 'import') return '本机导入'
   return '用户添加'
 }
@@ -935,9 +962,6 @@ function sourceLabel(source: McpImportCandidate['sourceKind']): string {
 }
 
 function serverInitial(server: McpServerView): string {
-  if (server.presetId === 'github') return 'GH'
-  if (server.presetId === 'context7') return 'C7'
-  if (server.presetId === 'playwright') return 'PW'
   return server.name.slice(0, 2).toUpperCase()
 }
 

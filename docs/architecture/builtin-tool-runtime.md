@@ -467,7 +467,9 @@ user-configured MCP    ── Runtime-native MCP Projection
 两条路径不共享 catalog、授权、receipt、生命周期或代理层。外部 MCP 继续由 Library、Assignment、
 Projection 和 Exposure Snapshot 管理；built-in operations 永不进入 `McpProjectionInput`、
 Runtime MCP config 或 MCP runtime-name mapping。`rovai_team` 没有保留语义，同名外部 Server 只是
-普通第三方 MCP。
+普通第三方 MCP。新建 MCP Library 为空，Rovai-ai 不物化或恢复任何产品内置第三方 Server；定义只
+来自用户手动添加或确认导入。见
+[ADR-0197](../adr/0197-empty-user-owned-mcp-library.md)。
 
 ## Activity、Evidence 与故障边界
 

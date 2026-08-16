@@ -140,7 +140,6 @@ pnpm build:desktop
 | `pnpm smoke:core` | 全新数据库、普通目录、空 Git 仓库、导航、重启和删除 | Git；不调用模型 |
 | `pnpm smoke:member-config` | 十种产品目录、Installation、成员 Runtime 配置、Readiness 和重启 | 不调用模型；可用 `ROVAI_*_BIN` 覆盖发现；Settings Preview 不进入该矩阵 |
 | `pnpm smoke:memory` | Memory Migration、治理、Revision、导出、投影恢复和权限 | 不调用模型 |
-| `pnpm smoke:mcp-presets` | Context7、Playwright reviewed default 的真实 MCP initialize 与 tools/list | 联网；不调用模型 |
 
 ### 真实 Runtime Smoke
 
