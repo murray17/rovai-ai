@@ -6,6 +6,17 @@ use crate::{
     team_tool_catalog::builtin_tool_definitions,
 };
 
+/// Builds the fixed Agent-facing error for a mutation whose outcome cannot be proven.
+pub fn outcome_indeterminate_agent_error() -> Value {
+    json!({
+        "error": {
+            "code": "builtin_tool.outcome_indeterminate",
+            "message": "The operation may already have committed. Confirm the exact current state before proceeding; do not blindly repeat the mutation. If confirmation is unavailable, report the uncertainty.",
+            "recovery": "confirm_outcome"
+        }
+    })
+}
+
 /// Builds the closed Agent-facing success schema for one canonical operation.
 ///
 /// Most operations deliberately reuse their canonical business-result schema. The two compact
@@ -213,13 +224,7 @@ fn project_task_mutation(object: &Map<String, Value>, include_changed: bool) -> 
 
 fn project_error(error: &BuiltinToolError) -> Result<Value> {
     if error.code == "builtin_tool.outcome_indeterminate" {
-        return Ok(json!({
-            "error": {
-                "code": "builtin_tool.outcome_indeterminate",
-                "message": "Confirm current state before acting again.",
-                "recovery": "confirm_outcome"
-            }
-        }));
+        return Ok(outcome_indeterminate_agent_error());
     }
     let mut projected = Map::new();
     projected.insert("code".to_string(), Value::String(error.code.clone()));
@@ -461,7 +466,7 @@ mod tests {
             project_envelope(&envelope).unwrap(),
             json!({"error": {
                 "code": "builtin_tool.outcome_indeterminate",
-                "message": "Confirm current state before acting again.",
+                "message": "The operation may already have committed. Confirm the exact current state before proceeding; do not blindly repeat the mutation. If confirmation is unavailable, report the uncertainty.",
                 "recovery": "confirm_outcome"
             }})
         );

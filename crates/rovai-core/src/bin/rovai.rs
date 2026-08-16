@@ -9,7 +9,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
-use rovai_core::builtin_tool_cli_output::project_envelope;
+use rovai_core::builtin_tool_cli_output::{outcome_indeterminate_agent_error, project_envelope};
 use rovai_core::builtin_tool_transport::{
     BUILTIN_TOOL_CONTRACT_VERSION, BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
     BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES, BuiltinToolArgument, BuiltinToolCliContext,
@@ -129,13 +129,7 @@ fn run() -> Result<u8> {
         Err(BuiltinToolIpcFailure::OutcomeIndeterminate) => {
             println!(
                 "{}",
-                serde_json::to_string(&json!({
-                    "error": {
-                        "code": "builtin_tool.outcome_indeterminate",
-                        "message": "Confirm current state before acting again.",
-                        "recovery": "confirm_outcome"
-                    }
-                }))?
+                serde_json::to_string(&outcome_indeterminate_agent_error())?
             );
             return Ok(3);
         }
@@ -1117,7 +1111,7 @@ mod tests {
             &Uuid::new_v4().to_string(),
             rovai_core::builtin_tool_transport::BuiltinToolError {
                 code: "builtin_tool.outcome_indeterminate".to_string(),
-                message: "Confirm current state before acting again.".to_string(),
+                message: "The operation may already have committed. Confirm the exact current state before proceeding; do not blindly repeat the mutation. If confirmation is unavailable, report the uncertainty.".to_string(),
                 recovery: rovai_core::builtin_tool_transport::BuiltinToolRecovery::ConfirmOutcome,
                 details: None,
             },
