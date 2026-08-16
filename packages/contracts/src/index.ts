@@ -399,6 +399,208 @@ export interface DiagnosticsReport {
   checks: DiagnosticCheck[]
 }
 
+export type MonitoringRange = '24h' | '7d' | '30d'
+export type MonitoringAvailability = 'available' | 'partial' | 'unavailable'
+
+export interface MonitoringFilter {
+  range: MonitoringRange
+  adapterKind?: AdapterKind
+  agentId?: string
+  terminalStatus?: 'succeeded' | 'failed' | 'cancelled'
+}
+
+export interface MonitoringCollectionBoundary {
+  schemaVersion: 1
+  collectionEpoch: string
+  collectionStartedAt: string
+  requestedStartAt: string
+  effectiveStartAt: string
+  endAt: string
+  observedAt: string
+}
+
+export interface MonitoringMetric<T = number> {
+  availability: MonitoringAvailability
+  value: T | null
+  numerator: number | null
+  denominator: number | null
+  observedCount: number
+  eligibleCount: number
+  coverage: number | null
+  source: string
+  quality: string[]
+  latestObservedAt: string | null
+  diagnosticCode: string | null
+}
+
+export interface MonitoringMoneyValue {
+  amount: string
+  currency: string
+  quality: string
+  grain: string
+  pricingCatalogVersion: string | null
+  reconciledThrough: string | null
+}
+
+export interface MonitoringAttentionSummary {
+  total: number
+  activeWithoutVisibleActivity: number
+  deliveryUnknown: number
+  pendingApprovals: number
+}
+
+export interface MonitoringTrendBucket {
+  startAt: string
+  endAt: string
+  runs: number
+  succeeded: number
+  failed: number
+  cancelled: number
+}
+
+export interface MonitoringRuntimeSummaryRow {
+  adapterKind: AdapterKind
+  runs: number
+  activeRuns: number
+  successRate: MonitoringMetric<number>
+  endToEndP95Millis: MonitoringMetric<number>
+}
+
+export interface MonitoringSummaryView {
+  schemaVersion: 1
+  collection: MonitoringCollectionBoundary
+  filter: MonitoringFilter
+  runs: MonitoringMetric<number>
+  activeRuns: MonitoringMetric<number>
+  successRate: MonitoringMetric<number>
+  endToEndP95Millis: MonitoringMetric<number>
+  nativeSessionContinuationRate: MonitoringMetric<number>
+  cacheReadTokenShare: MonitoringMetric<number>
+  bestAvailableCost: MonitoringMetric<MonitoringMoneyValue[]>
+  trend: MonitoringTrendBucket[]
+  terminalDistribution: {
+    succeeded: number
+    failed: number
+    cancelled: number
+    active: number
+  }
+  byRuntime: MonitoringRuntimeSummaryRow[]
+  attention: MonitoringAttentionSummary
+}
+
+export interface MonitoringUsageBreakdownRow {
+  adapterKind: AdapterKind
+  modelId: string
+  observedRunCount: number
+  eligibleRunCount: number
+  coverage: number | null
+  inputTokens: number | null
+  outputTokens: number | null
+  reasoningOutputTokens: number | null
+  cacheReadInputTokens: number | null
+  cacheWriteInputTokens: number | null
+}
+
+export interface MonitoringCostLayerView {
+  quality: string
+  grain: string
+  values: MonitoringMoneyValue[]
+  observedCount: number
+  eligibleCount: number
+  coverage: number | null
+}
+
+export interface MonitoringUsageView {
+  schemaVersion: 1
+  collection: MonitoringCollectionBoundary
+  filter: MonitoringFilter
+  inputTokens: MonitoringMetric<number>
+  outputTokens: MonitoringMetric<number>
+  reasoningOutputTokens: MonitoringMetric<number>
+  cacheReadInputTokens: MonitoringMetric<number>
+  cacheWriteInputTokens: MonitoringMetric<number>
+  cacheReadTokenShare: MonitoringMetric<number>
+  requestCacheHitRate: MonitoringMetric<number>
+  cacheReadWriteAmortization: MonitoringMetric<number>
+  contextUsageRate: MonitoringMetric<number>
+  cacheSavingsEstimate: MonitoringMetric<MonitoringMoneyValue[]>
+  costLayers: MonitoringCostLayerView[]
+  byRuntimeAndModel: MonitoringUsageBreakdownRow[]
+}
+
+export interface MonitoringReliabilityView {
+  schemaVersion: 1
+  collection: MonitoringCollectionBoundary
+  filter: MonitoringFilter
+  queueP95Millis: MonitoringMetric<number>
+  inputAcceptanceP95Millis: MonitoringMetric<number>
+  firstVisibleActivityP95Millis: MonitoringMetric<number>
+  executionP95Millis: MonitoringMetric<number>
+  endToEndP95Millis: MonitoringMetric<number>
+  session: {
+    continuationRate: MonitoringMetric<number>
+    eligibleRuns: number
+    factCount: number
+    resumeRequested: number
+    succeeded: number
+    newSessions: number
+    rejected: number
+    incompatible: number
+    ambiguous: number
+    failed: number
+    fallbackToNewSession: number
+    unresolved: number
+  }
+  context: {
+    usageRate: MonitoringMetric<number>
+    deliveryAcceptedRuns: number
+    deliveryCoverage: number | null
+  }
+  approval: {
+    requested: number
+    resolved: number
+    pending: number
+    waitP95Millis: MonitoringMetric<number>
+  }
+  toolDuration: {
+    eligibleCalls: number
+    pairedCalls: number
+    coverage: number | null
+    pairedElapsedMillis: number | null
+    wallClockUnionMillis: number | null
+    unpairedStartedCalls: number
+    terminalOnlyCalls: number
+    conflictingCalls: number
+    diagnosticCode?: string | null
+  }
+  activity: {
+    runCoverage: MonitoringMetric<number>
+    evidenceCount: number
+  }
+  compaction: {
+    coverage: MonitoringMetric<number>
+    observationCount: number
+  }
+  runtimeHealth: Array<{
+    adapterKind: AdapterKind
+    runCount: number
+    activeRunCount: number
+    failedRunCount: number
+    latestErrorCode: string | null
+    latestObservedAt: string | null
+  }>
+  attention: MonitoringAttentionSummary
+}
+
+export interface MonitoringSnapshot {
+  schemaVersion: 1
+  collection: MonitoringCollectionBoundary
+  filter: MonitoringFilter
+  summary: MonitoringSummaryView
+  usage: MonitoringUsageView
+  reliability: MonitoringReliabilityView
+}
+
 export type StartPreflightBlockerCode =
   | 'runtime_not_configured'
   | 'runtime_probe_required'
@@ -1434,6 +1636,7 @@ export type SettingsSection =
   | 'runtime'
   | 'appearance'
   | 'notifications'
+  | 'monitoring'
   | 'diagnostics'
 
 export type MemberWorkspaceLocationTab = 'identity' | 'runtime'
@@ -1979,6 +2182,7 @@ export interface RejectHearthReviewItemCommand {
 export type CoreMethod =
   | 'health.check'
   | 'diagnostics.check'
+  | 'monitoring.snapshot'
   | 'runtime.discovery.rescan'
   | 'runtime.product.ensure'
   | 'runtime.product.check'
@@ -2110,5 +2314,7 @@ export interface RovaiApi {
   exportMemory(): Promise<string | null>
   exportDiagnostics(): Promise<string | null>
   revealDiagnosticsExport(path: string): Promise<void>
+  exportMonitoring(filter: MonitoringFilter): Promise<string | null>
+  revealMonitoringExport(path: string): Promise<void>
   platform: NodeJS.Platform
 }

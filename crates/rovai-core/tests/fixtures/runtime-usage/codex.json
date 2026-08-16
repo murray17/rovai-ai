@@ -1,0 +1,26 @@
+{
+  "method": "thread/tokenUsage/updated",
+  "params": {
+    "threadId": "thread-fixture",
+    "turnId": "turn-fixture",
+    "tokenUsage": {
+      "last": {
+        "inputTokens": 120,
+        "cachedInputTokens": 40,
+        "cacheWriteInputTokens": 10,
+        "outputTokens": 30,
+        "reasoningOutputTokens": 8,
+        "totalTokens": 150
+      },
+      "total": {
+        "inputTokens": 320,
+        "cachedInputTokens": 100,
+        "cacheWriteInputTokens": 20,
+        "outputTokens": 80,
+        "reasoningOutputTokens": 18,
+        "totalTokens": 400
+      },
+      "modelContextWindow": 200000
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "result": "done",
+  "session_id": "session-fixture",
+  "usage": {
+    "input_tokens": 70,
+    "cache_creation_input_tokens": 15,
+    "cache_read_input_tokens": 25,
+    "output_tokens": 20
+  },
+  "total_cost_usd": "0.0042"
+}

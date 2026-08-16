@@ -808,6 +808,7 @@ const SETTINGS_SIDEBAR_GROUPS: SettingsSidebarGroup[] = [
     key: 'support',
     label: '支持',
     items: [
+      { key: 'monitoring', icon: 'chart-line', label: '运行监控' },
       { key: 'diagnostics', icon: 'stethoscope', label: '诊断与修复' }
     ]
   }

@@ -254,6 +254,17 @@ impl ExecutionEvidenceService {
                 occurred_at,
             ],
         )?;
+        transaction.execute(
+            r#"
+            UPDATE monitoring_run_enrollment
+            SET first_visible_activity_at = COALESCE(
+                    first_visible_activity_at, ?3
+                ),
+                evidence_count = evidence_count + 1
+            WHERE agent_run_id = ?1 AND execution_epoch = ?2
+            "#,
+            params![agent_run_id, execution_epoch, occurred_at],
+        )?;
         let facts = canonical_activity::classify_evidence(
             agent_run_id,
             execution_epoch,
@@ -269,6 +280,7 @@ impl ExecutionEvidenceService {
             execution_epoch,
             sequence,
             &id,
+            &occurred_at,
             &facts,
         )?;
         transaction.commit()?;
@@ -615,6 +627,7 @@ fn upsert_canonical_activity(
     execution_epoch: i64,
     sequence: i64,
     evidence_id: &str,
+    occurred_at: &str,
     facts: &EvidenceActivityFacts,
 ) -> Result<Option<CanonicalRuntimeActivity>> {
     if !facts.is_activity {
@@ -651,6 +664,8 @@ fn upsert_canonical_activity(
             .context("Activity Evidence must produce a Canonical Runtime Activity")?,
     };
     let now = chrono::Utc::now().to_rfc3339();
+    let started_at = (facts.phase == "started").then_some(occurred_at);
+    let terminal_at = (facts.phase == "terminal").then_some(occurred_at);
     transaction.execute(
         r#"
         INSERT INTO canonical_runtime_activity(
@@ -658,10 +673,11 @@ fn upsert_canonical_activity(
             activity_domain, semantic_kind, tool_name, presentation_hint,
             phase, outcome, credibility, coverage_level, source_authority,
             source_evidence_ids_json, first_evidence_sequence,
-            last_evidence_sequence, revision, created_at, updated_at
+            last_evidence_sequence, revision, created_at, updated_at,
+            started_at, terminal_at
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-            ?14, ?15, ?16, ?17, ?18, ?18
+            ?14, ?15, ?16, ?17, ?18, ?18, ?19, ?20
         )
         ON CONFLICT(agent_run_id, execution_epoch, operation_id, classifier_version)
         DO UPDATE SET
@@ -677,6 +693,12 @@ fn upsert_canonical_activity(
             source_evidence_ids_json = excluded.source_evidence_ids_json,
             last_evidence_sequence = excluded.last_evidence_sequence,
             revision = excluded.revision,
+            started_at = COALESCE(
+                canonical_runtime_activity.started_at, excluded.started_at
+            ),
+            terminal_at = COALESCE(
+                excluded.terminal_at, canonical_runtime_activity.terminal_at
+            ),
             updated_at = excluded.updated_at
         "#,
         params![
@@ -698,6 +720,8 @@ fn upsert_canonical_activity(
             projection.last_evidence_sequence,
             projection.revision,
             now,
+            started_at,
+            terminal_at,
         ],
     )?;
     Ok(Some(projection))

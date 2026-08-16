@@ -19,6 +19,7 @@ Porcelain Day 与 Steel Night 必须在同一生产组件、数据和功能上�
 | Agent Process Drawer | Required | Required | running、terminal、recovery blocked、长证据 |
 | Task / Inspector / Approval Dock | Required | Required | layering、focus、danger/attention 语义 |
 | 队员 / Memory / Settings | Required | Required | identity、evidence、表单、列表、partial/recovery |
+| Runtime Monitoring | Required | Required | Empty/Partial/Populated/Stale/Error、Coverage、未知值、长表格 |
 | New Conversation / Reminders | Required | Required | Dialog/heads-up、后台暂存、focus 不被抢占 |
 | Planned shutdown | Required | Required | modal 文案、进度、无操作按钮、未知效果警告 |
 | 主题切换中的活动 UI | Required | Required | focus、Draft、选择、滚动、Dialog 不改变 |

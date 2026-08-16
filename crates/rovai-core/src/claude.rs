@@ -61,6 +61,7 @@ pub struct ClaudeCodeRunResult {
     pub native_session_id: String,
     pub native_turn_id: String,
     pub final_output: String,
+    pub usage: Option<Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -387,6 +388,13 @@ impl ClaudeCodeCliRuntimeAdapter {
             native_session_id,
             native_turn_id,
             final_output,
+            usage: (!output.usage.is_null() || output.total_cost_usd.is_some()).then(|| {
+                serde_json::json!({
+                    "session_id": output.session_id,
+                    "usage": output.usage,
+                    "total_cost_usd": output.total_cost_usd,
+                })
+            }),
         })
     }
 }
@@ -452,6 +460,10 @@ struct ClaudeCodeJsonResult {
     result: String,
     #[serde(default)]
     session_id: Option<String>,
+    #[serde(default)]
+    usage: Value,
+    #[serde(default)]
+    total_cost_usd: Option<Value>,
 }
 
 #[derive(Debug)]
@@ -732,6 +744,8 @@ mod tests {
             is_error: true,
             result: "provider detail".to_string(),
             session_id: Some(session_id.to_string()),
+            usage: Value::Null,
+            total_cost_usd: None,
         };
         let error = validate_claude_terminal_result(&terminal_failure, session_id, native_turn_id)
             .expect_err("a structured non-success result should be terminal failure proof");

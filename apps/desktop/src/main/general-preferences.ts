@@ -16,6 +16,7 @@ const SETTINGS_SECTIONS = new Set<SettingsSection>([
   'runtime',
   'appearance',
   'notifications',
+  'monitoring',
   'diagnostics'
 ])
 

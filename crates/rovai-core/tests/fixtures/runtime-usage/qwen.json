@@ -1,0 +1,1 @@
+{"method":"session/update","params":{"sessionId":"qwen-session","update":{"sessionUpdate":"usage_update","used":3072,"size":32768}}}

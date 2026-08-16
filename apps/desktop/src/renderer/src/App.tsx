@@ -77,6 +77,7 @@ import { SettingsPageHeader } from './SettingsPageHeader'
 import { GeneralSettings } from './GeneralSettings'
 import { MemoryLibrary } from './MemoryLibrary'
 import { DiagnosticsCenter } from './DiagnosticsCenter'
+import { RuntimeMonitoring } from './RuntimeMonitoring'
 import { localizeExecutionEngineTerms } from './product-copy'
 import {
   applyAppearanceSnapshot,
@@ -2696,6 +2697,9 @@ export function SettingsView({
         )}
         {section === 'notifications' && (
           <NotificationSettings />
+        )}
+        {section === 'monitoring' && (
+          <RuntimeMonitoring agents={agents} />
         )}
         {section === 'diagnostics' && (
           <DiagnosticsCenter onNavigate={onDiagnosticsNavigate} />

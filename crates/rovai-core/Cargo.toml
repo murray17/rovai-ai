@@ -12,7 +12,7 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 json5 = "0.4"
 libc = "0.2"
 plist = "1"
-rusqlite = { version = "0.38", features = ["bundled"] }
+rusqlite = { version = "0.38", features = ["bundled", "functions"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

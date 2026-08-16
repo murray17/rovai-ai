@@ -136,6 +136,11 @@ use rovai_core::{
         mark_unstarted_deliveries_interrupted_before_dispatch, runtime_waiting_camps,
         runtime_waiting_recipients,
     },
+    monitoring::{
+        MonitoringFilter, MonitoringService, NativeSessionOutcome, ParsedRuntimeUsage,
+        RuntimeUsageBuffer, RuntimeUsageFlushTarget, parse_acp_usage_message,
+        parse_claude_result_usage, parse_codex_usage_message,
+    },
     notification::{
         AcknowledgeNotificationEpisodeCommand, AcknowledgeVisibleNotificationSourcesCommand,
         ClearNotificationEpisodeCommand, MarkAllNotificationEpisodesReadCommand,
@@ -199,6 +204,7 @@ const PLANNED_SHUTDOWN_CLEANUP_RESERVE: Duration = Duration::from_secs(2);
 const PLANNED_SHUTDOWN_OUTPUT_RESERVE: Duration = Duration::from_millis(250);
 const PLANNED_SHUTDOWN_GUARD_GRACE: Duration = Duration::from_millis(250);
 const PLANNED_SHUTDOWN_FENCE_SETTLEMENT_RESERVE: Duration = Duration::from_secs(1);
+const RUNTIME_USAGE_FLUSH_INTERVAL: Duration = Duration::from_secs(4);
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -301,6 +307,7 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
         "health.check"
             | "diagnostics.check"
             | "diagnostics.export"
+            | "monitoring.snapshot"
             | "runtime.installations.refresh"
             | "runtime.discovery.rescan"
             | "runtime.product.ensure"
@@ -845,6 +852,7 @@ struct ClaudeInputAcceptanceTarget<'a> {
 
 struct Core {
     database: Mutex<Database>,
+    runtime_usage: Mutex<RuntimeUsageBuffer>,
     output: mpsc::UnboundedSender<String>,
     runtime_search_environment: RwLock<Arc<RuntimeSearchEnvironment>>,
     runtime_discovery:
@@ -4393,6 +4401,11 @@ impl Core {
                 )?)?)
             }
             "diagnostics.check" => Ok(serde_json::to_value(self.diagnostics_report().await)?),
+            "monitoring.snapshot" => {
+                let filter: MonitoringFilter = serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                MonitoringService::snapshot(&mut database, &filter)
+            }
             "diagnostics.export" => {
                 let report = self.diagnostics_report().await;
                 let database = self.database.lock().await;
@@ -4884,6 +4897,21 @@ impl Core {
                 return;
             }
         };
+        {
+            let mut database = self.database.lock().await;
+            let compaction_observable = self
+                .compaction_detector_policies
+                .policy_for(execution.runtime.adapter_kind)
+                == Some(CompactionDetectorPolicy::BestEffort);
+            if let Err(error) =
+                MonitoringService::enroll_run(&mut database, &execution, compaction_observable)
+            {
+                eprintln!(
+                    "failed to enroll AgentRun {} in Runtime Monitoring: {error:#}",
+                    execution.agent_run_id
+                );
+            }
+        }
         let active_key =
             ActiveExecutionKey::new(&execution.agent_run_id, execution.execution_epoch);
         if !self
@@ -6177,6 +6205,20 @@ impl Core {
                 binding.result.code
             );
         }
+        {
+            let mut database = self.database.lock().await;
+            MonitoringService::record_session_outcome(
+                &mut database,
+                execution,
+                NativeSessionOutcome::Succeeded,
+                false,
+                None,
+                Some(native_session_id),
+            )
+            .context("failed to record successful Native Session continuation")?;
+            MonitoringService::record_session_fallback(&mut database, execution, native_session_id)
+                .context("failed to record Native Session fallback")?;
+        }
         Ok(())
     }
 
@@ -6737,9 +6779,12 @@ impl Core {
             .context("failed to prepare the Camp Attachment access root")?;
         let resume_disposition = {
             let mut database = self.database.lock().await;
-            ExecutionRuntimeService::default()
+            let disposition = ExecutionRuntimeService::default()
                 .prepare_native_session_resume(&mut database, execution)
-                .context("failed to prepare Native Session resume")?
+                .context("failed to prepare Native Session resume")?;
+            MonitoringService::record_session_decision(&mut database, execution, disposition)
+                .context("failed to record Runtime Monitoring Native Session decision")?;
+            disposition
         };
         if resume_disposition == NativeSessionResumeDisposition::Controlled {
             emit(
@@ -6897,12 +6942,23 @@ impl Core {
         let thread_id = match thread {
             Ok(thread_id) => thread_id,
             Err(error) if resumable_session_id.is_some() => {
-                if resume_disposition == NativeSessionResumeDisposition::Controlled {
+                if resume_disposition != NativeSessionResumeDisposition::New {
+                    let failure = classify_native_resume_failure(&error);
                     let mut database = self.database.lock().await;
-                    ExecutionRuntimeService::default().record_native_session_resume_failure(
+                    if resume_disposition == NativeSessionResumeDisposition::Controlled {
+                        ExecutionRuntimeService::default().record_native_session_resume_failure(
+                            &mut database,
+                            execution,
+                            failure,
+                        )?;
+                    }
+                    MonitoringService::record_session_outcome(
                         &mut database,
                         execution,
-                        classify_native_resume_failure(&error),
+                        monitoring_outcome_for_resume_failure(failure),
+                        false,
+                        Some("native_session_resume_failed"),
+                        None,
                     )?;
                 }
                 let replacement_binding =
@@ -7308,6 +7364,16 @@ impl Core {
                         NativeSessionResumeFailure::Ambiguous,
                     )?;
                 }
+                if resume_disposition != NativeSessionResumeDisposition::New {
+                    MonitoringService::record_session_outcome(
+                        &mut database,
+                        execution,
+                        NativeSessionOutcome::Ambiguous,
+                        false,
+                        Some("native_session_resume_outcome_unknown"),
+                        None,
+                    )?;
+                }
                 ContextService.mark_input_delivery_unknown(
                     &mut database,
                     &delivery.id,
@@ -7328,6 +7394,26 @@ impl Core {
                 output,
             )
             .await?;
+        }
+        if let Some(usage) = result.usage.as_ref() {
+            let observations = parse_claude_result_usage(usage);
+            if let Err(error) = buffer_runtime_usage(
+                self,
+                &execution.agent_run_id,
+                execution.execution_epoch,
+                &format!(
+                    "claude-result:{}:{}",
+                    result.native_session_id, result.native_turn_id
+                ),
+                &observations,
+            )
+            .await
+            {
+                eprintln!(
+                    "failed to persist Claude Code Usage for AgentRun {}: {error:#}",
+                    execution.agent_run_id
+                );
+            }
         }
         self.complete_one_shot_agent_run(
             execution,
@@ -7350,6 +7436,19 @@ impl Core {
         missing_send_recovery_candidate: &MissingSendRecoveryCandidate,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
+        if let Err(error) = flush_runtime_usage_run(
+            self,
+            &execution.agent_run_id,
+            execution.execution_epoch,
+            "terminal_flush",
+        )
+        .await
+        {
+            eprintln!(
+                "failed to flush Runtime Usage before terminal settlement for AgentRun {}: {error:#}",
+                execution.agent_run_id
+            );
+        }
         let mut runtime_route_permit = self
             .planned_shutdown
             .enter_runtime_route()
@@ -7761,6 +7860,16 @@ impl Core {
                         NativeSessionResumeFailure::Ambiguous,
                     )?;
                 }
+                if resume_disposition != NativeSessionResumeDisposition::New {
+                    MonitoringService::record_session_outcome(
+                        &mut database,
+                        execution,
+                        NativeSessionOutcome::Ambiguous,
+                        false,
+                        Some("native_session_resume_outcome_unknown"),
+                        None,
+                    )?;
+                }
                 ContextService.mark_input_delivery_unknown(
                     &mut database,
                     &input_delivery.id,
@@ -7886,12 +7995,23 @@ impl Core {
                     && !(execution.runtime.adapter_kind == AdapterKind::TraeCnCli
                         && execution.runtime.model.model_id == TRAE_RUNTIME_DEFAULT_MODEL_ID) =>
             {
-                if resume_disposition == NativeSessionResumeDisposition::Controlled {
+                if resume_disposition != NativeSessionResumeDisposition::New {
+                    let failure = classify_native_resume_failure(&error);
                     let mut database = self.database.lock().await;
-                    ExecutionRuntimeService::default().record_native_session_resume_failure(
+                    if resume_disposition == NativeSessionResumeDisposition::Controlled {
+                        ExecutionRuntimeService::default().record_native_session_resume_failure(
+                            &mut database,
+                            execution,
+                            failure,
+                        )?;
+                    }
+                    MonitoringService::record_session_outcome(
                         &mut database,
                         execution,
-                        classify_native_resume_failure(&error),
+                        monitoring_outcome_for_resume_failure(failure),
+                        false,
+                        Some("native_session_resume_failed"),
+                        None,
                     )?;
                 }
                 adapter
@@ -8197,6 +8317,19 @@ impl Core {
         error: &anyhow::Error,
         runtime_terminal_observed: bool,
     ) {
+        if let Err(flush_error) = flush_runtime_usage_run(
+            self,
+            &execution.agent_run_id,
+            execution.execution_epoch,
+            "terminal_flush",
+        )
+        .await
+        {
+            eprintln!(
+                "failed to flush Runtime Usage before failing AgentRun {}: {flush_error:#}",
+                execution.agent_run_id
+            );
+        }
         let ending_git_observation = self
             .observe_run_git(&execution.project_binding_kind, &execution.project_path)
             .await;
@@ -8705,6 +8838,15 @@ fn classify_native_resume_failure(error: &anyhow::Error) -> NativeSessionResumeF
     }
 }
 
+fn monitoring_outcome_for_resume_failure(
+    failure: NativeSessionResumeFailure,
+) -> NativeSessionOutcome {
+    match failure {
+        NativeSessionResumeFailure::Incompatible => NativeSessionOutcome::Incompatible,
+        NativeSessionResumeFailure::Ambiguous => NativeSessionOutcome::Ambiguous,
+    }
+}
+
 fn probe_authentication_status(status: health::AgentRuntimeProbeStatus) -> &'static str {
     match status {
         health::AgentRuntimeProbeStatus::AuthenticationRequired => "authentication_required",
@@ -8910,6 +9052,7 @@ async fn run_core(
     let planned_shutdown = PlannedShutdownCoordinator::new(uuid::Uuid::new_v4().to_string());
     let core = Arc::new(Core {
         database: Mutex::new(database),
+        runtime_usage: Mutex::new(RuntimeUsageBuffer::default()),
         output: output_tx.clone(),
         runtime_search_environment: RwLock::new(runtime_search_environment.clone()),
         runtime_discovery: RwLock::new(
@@ -9046,6 +9189,11 @@ async fn run_core(
         core.clone(),
         runtime_check_rx,
         runtime_check_shutdown_rx,
+    ));
+    let (runtime_usage_shutdown_tx, runtime_usage_shutdown_rx) = oneshot::channel();
+    let mut runtime_usage_handle = tokio::spawn(process_runtime_usage_flusher(
+        core.clone(),
+        runtime_usage_shutdown_rx,
     ));
 
     eprintln!(
@@ -9303,6 +9451,9 @@ async fn run_core(
             join_or_abort_until(&mut event_handle, fence_settlement_deadline).await;
         let acp_event_quiesced =
             join_or_abort_until(&mut acp_event_handle, fence_settlement_deadline).await;
+        let _ = runtime_usage_shutdown_tx.send(());
+        let runtime_usage_quiesced =
+            join_or_abort_until(&mut runtime_usage_handle, fence_settlement_deadline).await;
 
         let unresolved_executions_before_fence = match tokio::time::timeout_at(
             fence_settlement_deadline,
@@ -9333,7 +9484,8 @@ async fn run_core(
             && builtin_tools_fenced
             && agent_tasks_quiesced
             && event_quiesced
-            && acp_event_quiesced;
+            && acp_event_quiesced
+            && runtime_usage_quiesced;
         let controlled_fence_settlement = if fence_prerequisites_quiesced {
             Some(
                 tokio::time::timeout_at(output_deadline, async {
@@ -9410,7 +9562,8 @@ async fn run_core(
             || !agent_tasks_quiesced
             || !runtimes_quiesced
             || !event_quiesced
-            || !acp_event_quiesced;
+            || !acp_event_quiesced
+            || !runtime_usage_quiesced;
 
         let report = PlannedShutdownReport {
             protocol_version: PLANNED_SHUTDOWN_PROTOCOL_VERSION,
@@ -9467,6 +9620,8 @@ async fn run_core(
         let _ = event_handle.await;
         let _ = acp_shutdown_tx.send(());
         let _ = acp_event_handle.await;
+        let _ = runtime_usage_shutdown_tx.send(());
+        let _ = runtime_usage_handle.await;
         let (flush_tx, flush_rx) = oneshot::channel();
         output_control_tx
             .send(OutputControl::CloseAndFlush(flush_tx))
@@ -9933,6 +10088,23 @@ async fn process_agent_run_acp_message(
         return;
     }
 
+    let usage = parse_acp_usage_message(adapter_kind, &method, &params);
+    if !usage.is_empty()
+        && let Err(error) = buffer_runtime_usage(
+            core,
+            agent_run_id,
+            execution_epoch,
+            &canonical_json_digest(&message)
+                .unwrap_or_else(|_| format!("acp:{method}:{agent_run_id}:{execution_epoch}")),
+            &usage,
+        )
+        .await
+    {
+        eprintln!(
+            "failed to persist {} Usage for AgentRun {agent_run_id}: {error:#}",
+            adapter_kind.as_str()
+        );
+    }
     let completed_action = match runtime.observe_message(&method, &params).await {
         Ok(completion) => completion,
         Err(error) => {
@@ -9941,6 +10113,9 @@ async fn process_agent_run_acp_message(
         }
     };
     let (event_type, payload) = normalize_acp_event(&method, &params);
+    if event_type == "runtime.usage" {
+        return;
+    }
     let evidence =
         match persist_runtime_evidence(core, agent_run_id, execution_epoch, event_type, &payload)
             .await
@@ -10005,6 +10180,11 @@ async fn process_agent_run_acp_message(
     }
     if method != "rovai/acp_prompt_completed" {
         return;
+    }
+    if let Err(error) =
+        flush_runtime_usage_run(core, agent_run_id, execution_epoch, "terminal_flush").await
+    {
+        eprintln!("failed to flush ACP Usage for AgentRun {agent_run_id}: {error:#}");
     }
     if let Err(error) = persist_acp_prompt_completion(
         core,
@@ -10830,6 +11010,13 @@ async fn process_acp_agent_run_exit(
     if core.planned_shutdown.shutdown_started() {
         return;
     }
+    if let Err(error) =
+        flush_runtime_usage_run(core, agent_run_id, execution_epoch, "host_exit_flush").await
+    {
+        eprintln!(
+            "failed to flush ACP Usage after Host exit for AgentRun {agent_run_id}: {error:#}"
+        );
+    }
     if acp_runtime_on_host(
         core,
         adapter_kind,
@@ -10899,6 +11086,112 @@ async fn process_acp_agent_run_exit(
     }
 }
 
+async fn buffer_runtime_usage(
+    core: &Core,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    source_identity: &str,
+    observations: &[ParsedRuntimeUsage],
+) -> Result<()> {
+    if observations.is_empty() {
+        return Ok(());
+    }
+    let run = {
+        let database = core.database.lock().await;
+        MonitoringService::enrolled_usage_run(&database, agent_run_id, execution_epoch)?
+    };
+    let Some(run) = run else {
+        return Ok(());
+    };
+    core.runtime_usage.lock().await.observe_run(
+        &run,
+        source_identity,
+        observations,
+        Instant::now(),
+    )?;
+    Ok(())
+}
+
+async fn flush_runtime_usage(
+    core: &Core,
+    target: RuntimeUsageFlushTarget,
+    reason: &'static str,
+) -> Result<usize> {
+    let batches = core.runtime_usage.lock().await.drain(target);
+    if batches.is_empty() {
+        return Ok(0);
+    }
+    let persistence = {
+        let mut database = core.database.lock().await;
+        MonitoringService::record_usage_batches(&mut database, &batches)
+    };
+    match persistence {
+        Ok(inserted) => {
+            core.runtime_usage.lock().await.complete(&batches);
+            if inserted > 0 {
+                emit(
+                    &core.output,
+                    "monitoring.changed",
+                    json!({ "reason": reason, "observationCount": inserted }),
+                );
+            }
+            Ok(inserted)
+        }
+        Err(error) => {
+            core.runtime_usage.lock().await.restore(batches)?;
+            Err(error)
+        }
+    }
+}
+
+async fn flush_runtime_usage_run(
+    core: &Core,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    reason: &'static str,
+) -> Result<usize> {
+    flush_runtime_usage(
+        core,
+        RuntimeUsageFlushTarget::Run {
+            agent_run_id: agent_run_id.to_string(),
+            execution_epoch,
+        },
+        reason,
+    )
+    .await
+}
+
+async fn process_runtime_usage_flusher(core: Arc<Core>, mut shutdown: oneshot::Receiver<()>) {
+    let mut interval = tokio::time::interval_at(
+        tokio::time::Instant::now() + RUNTIME_USAGE_FLUSH_INTERVAL,
+        RUNTIME_USAGE_FLUSH_INTERVAL,
+    );
+    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            _ = interval.tick() => {
+                if let Err(error) = flush_runtime_usage(
+                    &core,
+                    RuntimeUsageFlushTarget::Periodic,
+                    "usage_flush",
+                ).await {
+                    eprintln!("periodic Runtime Usage flush failed: {error:#}");
+                }
+            }
+            _ = &mut shutdown => {
+                if let Err(error) = flush_runtime_usage(
+                    &core,
+                    RuntimeUsageFlushTarget::All,
+                    "shutdown_flush",
+                ).await {
+                    eprintln!("terminal Runtime Usage shutdown flush failed: {error:#}");
+                }
+                break;
+            }
+        }
+    }
+}
+
 async fn process_agent_run_codex_message(
     core: &Arc<Core>,
     output: &mpsc::UnboundedSender<String>,
@@ -10955,7 +11248,24 @@ async fn process_agent_run_codex_message(
         return;
     }
 
+    let usage = parse_codex_usage_message(&method, &params);
+    if !usage.is_empty()
+        && let Err(error) = buffer_runtime_usage(
+            core,
+            agent_run_id,
+            execution_epoch,
+            &canonical_json_digest(&message)
+                .unwrap_or_else(|_| format!("codex:{method}:{agent_run_id}:{execution_epoch}")),
+            &usage,
+        )
+        .await
+    {
+        eprintln!("failed to persist Codex Usage for AgentRun {agent_run_id}: {error:#}");
+    }
     runtime.observe_agent_message(&method, &params).await;
+    if method == "thread/tokenUsage/updated" {
+        return;
+    }
     let (event_type, payload) = codex::normalize_event(&method, &params);
     let evidence =
         match persist_runtime_evidence(core, agent_run_id, execution_epoch, event_type, &payload)
@@ -11077,6 +11387,11 @@ async fn process_agent_run_codex_message(
     if runtime.turn_id().await.as_deref() != Some(completed.turn_id.as_str()) {
         eprintln!("ignored fenced native Turn completion for AgentRun {agent_run_id}");
         return;
+    }
+    if let Err(error) =
+        flush_runtime_usage_run(core, agent_run_id, execution_epoch, "terminal_flush").await
+    {
+        eprintln!("failed to flush Codex Usage for AgentRun {agent_run_id}: {error:#}");
     }
     let missing_send_recovery_candidate = completed.final_agent_message.clone().map(|body| {
         MissingSendRecoveryCandidate::new(MissingSendRecoveryBoundary::CodexCompletedTurn, body)
@@ -11640,6 +11955,13 @@ async fn process_agent_run_exit(
 ) {
     if core.planned_shutdown.shutdown_started() {
         return;
+    }
+    if let Err(error) =
+        flush_runtime_usage_run(core, agent_run_id, execution_epoch, "host_exit_flush").await
+    {
+        eprintln!(
+            "failed to flush Codex Usage after Host exit for AgentRun {agent_run_id}: {error:#}"
+        );
     }
     if core
         .codex_cli
@@ -12749,6 +13071,8 @@ mod tests {
         assert!(request_runs_outside_main_queue("health.check"));
         assert!(request_runs_outside_main_queue("diagnostics.check"));
         assert!(request_runs_outside_main_queue("diagnostics.export"));
+        assert!(request_runs_outside_main_queue("monitoring.snapshot"));
+        assert!(!request_runs_outside_main_queue("monitoring.summary"));
         assert!(request_runs_outside_main_queue(
             "runtime.installations.refresh"
         ));

@@ -1704,6 +1704,8 @@ describe('task event projections', () => {
     expect(capabilitiesGroup.indexOf('<strong>Skills</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>MCP</strong>'))
     expect(capabilitiesGroup.indexOf('<strong>MCP</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>Agent 运行时</strong>'))
     expect(supportGroup).toContain('<strong>诊断与修复</strong>')
+    expect(supportGroup).toContain('<strong>运行监控</strong>')
+    expect(supportGroup).toContain('data-navigation-icon="chart-line"')
     expect(supportGroup).toContain('data-navigation-icon="stethoscope"')
     expect(markup).toContain('data-navigation-icon="arrow-left"')
     expect(markup).toContain('class="active" type="button" aria-current="page"')
@@ -1731,6 +1733,7 @@ describe('task event projections', () => {
       runtime: 'Agent 运行时',
       appearance: '外观',
       notifications: '提醒',
+      monitoring: '运行监控',
       diagnostics: '诊断与修复'
     }
     for (const [section, heading] of Object.entries(contentBySection) as Array<[NavigationSettingsSection, string]>) {

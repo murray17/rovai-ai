@@ -42,6 +42,7 @@ Renderer 目标由 Impeccable 解析为 `apps/desktop` project root，因此受�
 - [队员工作区](../../apps/desktop/.impeccable/surfaces/member-workspace.md)
 - [记忆工作区](../../apps/desktop/.impeccable/surfaces/memory-workspace.md)
 - [设置工作区](../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
+- [运行监控](../../apps/desktop/.impeccable/surfaces/runtime-monitoring.md)
 - [创建新对话 Dialog](../../apps/desktop/.impeccable/surfaces/new-conversation-dialog.md)
 
 brief 只拥有具体 surface 的信息优先级和构图；它不能覆盖全局设计、主题、ADR、Contract 或当前

@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-monitoring
 authority: runtime-usage-collection-rollup-and-read-boundaries
 status: accepted
-last_updated: 2026-08-16
+last_updated: 2026-08-17
 ---
 
 # Runtime Monitoring 架构
@@ -20,17 +20,18 @@ clean-break enrollment 与成本 grain 由 [ADR-0201](../adr/0201-sparse-runtime
 | Monitoring Run Enrollment | 在新 AgentRun/execution epoch 的执行准入点冻结 adapter、Runtime version、model config 和 parser/capability support；决定监控 eligible universe |
 | Runtime Transport | 继续拥有 Codex app-server、Claude stream-json、ACP 和 Antigravity 进程/消息边界；不直接聚合产品指标 |
 | Runtime Usage Dialect Registry | 按 adapter + Runtime/protocol version 选择字段路径、scope、counter/input/reasoning/cost semantics 和 parser version；未经 Fixture 不开放私有字段 |
-| Raw Usage Store | 对一个 source observation 追加一次稀疏数字/身份/语义事实；幂等身份独立于 parser version，不保存正文 |
+| Runtime Usage Buffer | 在内存按 Run/source semantics 去重并合并稀疏更新；全局 4 秒节拍批量 drain，终态/Host exit/shutdown 强制 drain |
+| Raw Usage Store | 每次 flush 保存一条或多条 coalesced 稀疏数字/身份/语义事实，并单独保存 constituent source dedupe digest；不保存正文 |
 | Normalized Usage Projection | 把已证明的 raw 字段归一化到互斥输入桶、输出子类、Context gauge 和 cost layer；版本化、可重建、不补缺失值 |
 | Parser State | 按 epoch/session/model/counter family 保存 cumulative baseline、segment、cursor 与 reset；不保存 transcript 正文 |
 | Native Session Fact | 记录 enrollment Run 的 resume request、launch disposition、实际 outcome、fallback 和 reason；旧 attempt 不回填 |
 | Canonical Runtime Activity | 继续拥有可观察 operation identity、phase、outcome 和 Activity Coverage；Usage 不进入此 authority |
-| Monitoring Rollup | 从 enrollment、Core facts 和 normalized Usage 构建小时级 additive totals、counts 和可合并 distribution sketch；可从当前 epoch 重建 |
-| Monitoring Read Service | 在单一 SQLite read transaction 中应用 collection clamp、range/filter/eligibility，组装 summary/usage/reliability 和每项 Coverage |
+| Monitoring Rollup | 写入时维护 Run Usage/Cost 与小时级 Usage/Run status rollup；历史趋势只读 rollup，不扫描 Evidence/Transcript |
+| Monitoring Read Service | 唯一 `monitoring.snapshot` 在单一 SQLite read transaction 中应用 collection clamp、range/filter/eligibility，一次组装三个子视图和 Coverage |
 | Runtime Fleet Snapshot | 提供当前 active/warm/burst Host 的 data-minimized 计数；历史只从 cutover 后明确样本开始 |
-| Provider Billing Integration | 后续以独立凭据/同步边界写 Provider Billing Bucket；没有 linkage 时保持聚合，不写精确 Run cost |
-| Electron Main / Preload | 只 allowlist 三个 typed read method 和用户发起的脱敏导出；不直读 SQLite、Runtime logs 或 Provider credential |
-| Renderer Monitoring Surface | 展示 Core response、range/filter、Coverage、quality、freshness 和 collection boundary；不重算权威指标或推断缺失值 |
+| Provider Billing Integration | 后续以独立后台同步边界写 Provider Billing Bucket；看板只读已保存结果，open/refresh 永不触发对账 |
+| Electron Main / Preload | 只 allowlist `monitoring.snapshot` 和用户发起的脱敏导出；导出复用同一快照，不直读 SQLite/日志/凭据 |
+| Renderer Monitoring Surface | 展示同一快照的三个 Tab；可见时每 12 秒轮询，持久化事件 300ms debounce，隐藏/卸载即停止 |
 
 ## Collection and parsing flow
 
@@ -41,17 +42,19 @@ new AgentRun execution admission
 Runtime native message/result
   -> existing Transport route binds AgentRun + execution epoch
   -> adapter/version Usage Dialect parses sparse fields
-  -> Raw Usage Store deduplicates source identity
+  -> in-memory Usage Buffer deduplicates/coalesces
+  -> four-second batch or forced terminal flush
+  -> Raw Usage Store persists coalesced values + source dedupe identities
   -> validation + cumulative/gauge state
   -> Normalized Usage Projection
-  -> hourly rollup invalidation/rebuild input
+  -> Run/hour rollups updated in the same short transaction
 
 Core lifecycle / Delivery / Approval / Context / Compaction / Probe
 Canonical Runtime Activity
-Normalized Usage Projection
-  -> Monitoring Read Service(collection clamp + filter + eligibility)
-  -> summary | usage | reliability
-  -> typed Desktop bridge
+Run/hour rollups + narrow Core projections
+  -> monitoring.snapshot(collection clamp + filter + eligibility)
+  -> { summary, usage, reliability }
+  -> one typed Desktop bridge call
   -> Renderer
 ```
 
@@ -66,6 +69,11 @@ Migration creates a new collection epoch and empty monitoring tables. It does no
 occurs only for a new execution epoch after the cutover, so a Run already active while the app upgrades remains outside
 monitoring even if its terminal arrives later. Recovery of an enrolled v0.96 Run remains enrolled; an old Run does not
 become eligible merely because it is recovered by a new Core generation.
+
+Each recovered execution keeps its own enrollment for epoch-bound Usage, Session and Activity lineage. The read side
+collapses lifecycle, trend and Coverage to one logical `(collectionEpoch, agentRunId)`: only the first enrollment adds
+the Run rollup, later epochs inherit its logical bucket, and the AgentRun terminal trigger migrates that single row.
+Additive delta Usage may span epochs, while observed sets and latest Context remain keyed by logical AgentRun.
 
 Every query returns:
 
@@ -107,27 +115,54 @@ path/version/Fixture and an incremental bounded parser; v0.96 clean break does n
 - **Codex CLI:** `thread/tokenUsage/updated` preserves last/total/context and input/cache-write/output/reasoning fields;
   Fixture decides delta semantics and resume baseline.
 - **ACP:** the common parser reads standard `usage_update` as Context Gauge plus optional cumulative Session Cost and
-  prompt terminal Usage as a separate boundary. OpenCode, Copilot, Kiro, Qoder, CodeBuddy, Qwen and TRAE use separate
-  dialect/version entries for private fields.
+  prompt terminal Usage as a separate boundary. Standard cost requires both amount and an explicit valid currency;
+  missing currency remains unknown. OpenCode, Copilot, Kiro, Qoder, CodeBuddy, Qwen and TRAE use separate dialect/version
+  entries for private fields.
 - **Antigravity:** no native Usage dialect is enabled. An optional versioned local tokenizer writes only
   `tokenizer_estimated` input/final-output observations and never Cache or native Coverage.
 
 ## Existing fact composition
 
 Monitoring does not copy existing facts into a second authority. The Read Service joins enrolled Run IDs to current
-AgentRun, Runtime Input Delivery, Approval, ContextManifest, Compaction, Probe and Canonical Activity tables. Rollups may
-cache counts/distributions, but their lineage remains the authoritative rows and current-epoch Usage projection.
+AgentRun, Runtime Input Delivery, Approval, Compaction and Canonical Activity tables. ContextManifest omission,
+Bootstrap redelivery and Runtime Probe/auth/active-host composition remain explicit implementation-plan gaps; enrolled
+Run health is not presented as a substitute. Rollups may cache counts/distributions, but their lineage remains the
+authoritative rows and current-epoch Usage projection.
 
 Tool Duration derives only from strict operation identity. `pairedElapsedSum` answers accumulated call time;
 `wallClockUnion` answers how much clock time was covered by one or more paired Tool calls. Parallel calls make those
 values intentionally different. Run-level or unpaired activity can raise eligible/partial counts but contributes no
 duration.
 
+## Database mutex and refresh discipline
+
+Core currently owns one Database Mutex. Monitoring therefore keeps database critical sections deliberately narrow:
+
+- Runtime event handling only performs a scalar enrollment lookup before buffering; it does not write on each update;
+- a single global four-second tick flushes all pending Usage in one transaction, while a terminal boundary bypasses the
+  cadence and forces that Run's pending batch;
+- enrollment projects Usage capability booleans, first-visible activity and Evidence counts so snapshot assembly does
+  not parse per-Run capability JSON or scan immutable Evidence;
+- trend queries read `monitoring_run_rollup_hourly`; lifecycle/P95 and Usage/Context return scalar aggregates, while
+  Runtime/Model breakdowns return controlled dimension groups; exact decimal Cost is selected per logical Run and
+  aggregated inside SQLite; Delivery/Approval P95 and Tool timing count/sum/wall-clock union likewise use indexed SQL
+  CTE/window aggregation rather than materializing unbounded Run, Usage, Cost or activity detail rows in Core;
+- no monitoring critical section reads a Managed Blob, parses a Runtime Transcript, performs a network request or
+  starts Provider reconciliation.
+
+The Renderer owns one 12-second visible-page interval regardless of the number of cards. `monitoring.changed` and
+`agent_run.terminal` share a 300ms debounce, so the forced Usage flush and terminal event normally collapse into one
+refresh. A single-flight gate coalesces overlapping poll/event/manual/filter triggers instead of queueing concurrent
+Database Mutex work. `visibilitychange` stops/restarts polling, and component unmount cancels timers/subscription. A
+future separate SQLite read connection is not implied by this design; it requires profiling and its own concurrency
+contract.
+
 ## Cost and billing composition
 
 Runtime cost, public-price estimate and Provider billing remain separate stores/qualities. A `bestAvailable` selector
-first partitions by grain, filter dimensions, time range and currency, then chooses the strongest available source
-inside that partition. It never replaces preserved lower layers.
+first partitions by logical Run, grain, filter dimensions, time range and currency, chooses the strongest available
+source per Run, then sums the selected rows while preserving mixed quality labels. It never replaces preserved lower
+layers or drops a lower-quality value belonging to a Run that has no higher-quality match.
 
 Provider billing sync is outside the monitoring read module and outside the monitoring page's configuration. A bucket
 without request linkage or an isolated project/API-key dimension can be compared at aggregate range only. Any explicit

@@ -1,0 +1,1 @@
+{"method":"session/update","params":{"sessionId":"kiro-session","update":{"sessionUpdate":"usage_update","used":1024,"size":16384}}}

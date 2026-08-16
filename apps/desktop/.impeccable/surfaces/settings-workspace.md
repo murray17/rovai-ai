@@ -116,6 +116,10 @@ Diagnostics full check is read-only. Summary counts partition all checks into no
 and temporarily unknown. There is no “repair all”; each issue has one bounded next step and is
 rechecked after action. v5 export remains allowlisted/redacted and uses an explicit Save Dialog.
 
+Runtime monitoring follows its dedicated [`runtime-monitoring.md`](runtime-monitoring.md) surface
+brief. It shares this workspace's borderless header and content track while keeping sparse Usage,
+Coverage, clean-break and freshness semantics local to that page.
+
 ## Inheritance and hard boundaries
 
 Inherit root [`DESIGN.md`](../../../../DESIGN.md), theme and accessibility contracts. This brief does

@@ -4,13 +4,13 @@ name: Runtime Monitoring
 version: v1
 status: accepted
 source_version: v0.96
-last_updated: 2026-08-16
+last_updated: 2026-08-17
 ---
 
 # Runtime Monitoring v1
 
-本合同冻结 v0.96 的 Monitoring Collection、Runtime Usage Observation、Native Session fact、三个只读
-查询、Coverage、Tool Duration 和 Cost layer。架构组合见
+本合同冻结 v0.96 的 Monitoring Collection、Runtime Usage Observation、Native Session fact、单一只读
+快照、Coverage、Tool Duration 和 Cost layer。架构组合见
 [Runtime Monitoring](../architecture/runtime-monitoring.md)，长期来源与 clean-break 决策见
 [ADR-0201](../adr/0201-sparse-runtime-usage-and-clean-break-monitoring.md)。
 
@@ -73,6 +73,11 @@ Enrollment 以 `(collectionEpoch, agentRunId, executionEpoch)` 唯一。只有�
 新准入的 execution 才能建立。Migration 不为旧 Run 建行；cutover 时已经 active 的 execution 也不建立。
 所有监控查询必须先从 Enrollment 限定集合，不能从 AgentRun 时间戳反向制造 enrollment。
 
+Enrollment 保留 execution epoch 是为了绑定 Usage、Session 与 Tool 事实；生命周期分母和 Run trend 则以
+`(collectionEpoch, agentRunId)` 为唯一逻辑 Run。Recovery 新 epoch 继承首次 enrollment 的逻辑时间桶，不能
+再次增加 `runCount`；终态只迁移这一条逻辑 Run 的状态。跨 epoch 的可加 delta 可以求和，但
+observed/eligible Coverage 仍按 `agentRunId` 去重，Context Gauge 只取该逻辑 Run 的最新观测。
+
 ## Runtime Usage Observation
 
 ### Raw identity
@@ -117,9 +122,15 @@ interface RuntimeUsageRawObservation {
 }
 ```
 
-`sourceIdentityDigest` 在同一 Adapter source scope 内唯一，且唯一约束不包含 parser version。同一个原始
-事件由新 parser 重放时不能成为第二笔 Usage。所有 Native ID 在持久化前使用本机密钥 digest；响应与导出
-不返回这些 digest。
+Runtime Update 先在内存按 Run、dialect、scope、counter/input/cost semantics 合并。普通运行期间由全局
+4 秒节拍持久化；AgentRun terminal、Runtime Host exit 与 Core shutdown 必须强制 Flush。Raw observation
+表达一次 flush 中的 coalesced 稀疏数字，不要求每个 Runtime Update 各占一行。持久层必须同时保存每个
+constituent source observation 的独立 digest，使 Core 重启后的 replay 仍可从混合 batch 中剔除，而不会把
+旧值再次加入新值。
+
+`sourceIdentityDigest`/constituent digest 的唯一约束不包含 parser version。同一个原始事件由新 parser
+重放时不能成为第二笔 Usage。所有 Native ID 在持久化前使用本机密钥 digest；响应与导出不返回这些 digest。
+Usage Update 不写 AgentRun Execution Evidence，也不作为逐 Update Renderer event 转发。
 
 `RuntimeUsageFields` 的每个字段都允许 `null`：
 
@@ -169,6 +180,7 @@ interface RuntimeUsageNormalizedObservation {
 - `gauge`：只表达观测时状态，不加入范围 Token/Cost sum；
 - resume 无可靠 baseline：保留 cumulative/gauge，当前 Run delta 为 `null`；
 - ACP `usage_update.used/size` 是 Context Gauge；可选 cost 默认是 cumulative Session Cost；
+- ACP 标准 Cost 只有在 `amount` 与合法三位大写 `currency` 同时存在时才保存；不得把缺失币种补成 USD；
 - prompt terminal `result.usage` 与 `usage_update` 是不同边界，不能因为字段同名就相加。
 
 ### Cost representation
@@ -306,11 +318,24 @@ interface MonitoringMoneyValue {
 - 聚合 `0` 只在至少一个 observed fact 明确支持时成立；
 - `quality` 是有序去重集合，不用一个最佳标签覆盖底层来源。
 
-## Methods
+## Method
 
-三个方法都在一个 SQLite read transaction 中捕获 collection boundary 和数据。响应 `schemaVersion = 1`。
+产品只暴露 `monitoring.snapshot`。它在一个 SQLite read transaction 中捕获 collection boundary，一次组装
+三个子视图；Renderer、Electron 导出与任何卡片都不得改为独立方法或独立 database lock。响应
+`schemaVersion = 1`。
 
-### `monitoring.summary`
+```ts
+interface MonitoringSnapshot {
+  schemaVersion: 1
+  collection: MonitoringCollectionBoundary
+  filter: MonitoringFilter
+  summary: MonitoringSummaryView
+  usage: MonitoringUsageView
+  reliability: MonitoringReliabilityView
+}
+```
+
+### `summary`
 
 ```ts
 interface MonitoringSummaryView {
@@ -334,7 +359,7 @@ interface MonitoringSummaryView {
 `bestAvailableCost` 可以因币种/粒度返回多项，不能隐式 FX 汇总。Runtime row 不拥有精确模型 Usage 时，
 model-related value 为 partial/unavailable。
 
-### `monitoring.usage`
+### `usage`
 
 ```ts
 interface MonitoringUsageView {
@@ -362,7 +387,7 @@ interface MonitoringUsageView {
 `requestCacheHitRate` 只使用具有稳定 `model_call` boundary 且 Cache 字段可判定的调用。Run/Turn/Session
 聚合值不充当调用数。
 
-### `monitoring.reliability`
+### `reliability`
 
 ```ts
 interface MonitoringReliabilityView {
@@ -394,7 +419,7 @@ interface MonitoringReliabilityView {
 | Execution | `endedAt - startedAt` |
 | End-to-end | `endedAt - createdAt` |
 | Input acceptance | `delivery.acceptedAt - delivery.preparedAt`；accepted only |
-| First visible activity | `first Evidence occurredAt - delivery.acceptedAt`；两端都存在，不称首 Token |
+| First visible activity | enrollment 的持久化 `firstVisibleActivityAt - delivery.acceptedAt`；投影来源为首个合法 Evidence，但查询不扫描 Evidence，也不称首 Token |
 | Session continuation | `resumeOutcome=succeeded / eligible terminal Session facts` |
 | Cache Read Token share | `read / (uncached + read + write)`；互斥桶已知 |
 | Request cache hit | `model calls with read>0 / cache-observable model calls` |
@@ -450,6 +475,10 @@ currency + grain + effective time range + adapter/model/project/api-key dimensio
 tokenizer_price_estimated`。`allocated` 永远保持 allocated，不自动覆盖一个精确 Run value。无 request linkage
 或隔离维度的 billing bucket 只在 aggregate grain 展示。
 
+范围汇总必须先在每个逻辑 Run 的相同 `currency + grain + filter dimensions` 内选择最高质量，再把已选行
+按 currency/grain/quality 相加。若部分 Run 有 Provider reconciled、其余 Run 只有 Runtime reported，响应
+必须保留两种 quality 与 mixed Coverage；不能先全局选择最高层而漏掉其余 Run 的已保存金额。
+
 ## Antigravity estimate boundary
 
 Antigravity v1 native support snapshot 的 Token/Cache/Context/Cost 全为 false。本地 Tokenizer 若启用：
@@ -463,9 +492,24 @@ Antigravity v1 native support snapshot 的 Token/Cache/Context/Cost 全为 false
 
 ## Rollup
 
-小时级 rollup 只能存 additive total/count、min/max、eligible/observed 和可合并 distribution sketch。它必须
-携带 collection epoch、filter dimensions、projection/parser/catalog version 与 freshness。P50/P95 不得存成
-随后再平均的最终百分位。Rollup 删除后可由当前 epoch Enrollment、Core fact 与 normalized observation 重建。
+运行期间的 Usage/Cost 汇总读取 per-Run rollup；历史 trend 只读取小时级（未来可增加日级）Run rollup，
+页面刷新不得扫描 raw Usage、Execution Evidence、Runtime Transcript 或 Blob。小时/日 rollup 只能存
+additive total/count、min/max、eligible/observed 和可合并 distribution sketch，并携带 collection epoch、
+filter dimensions、projection/parser/catalog version 与 freshness。P50/P95 不得存成随后再平均的最终百分位。
+Rollup 删除后可由当前 epoch Enrollment、Core fact 与 normalized observation 重建。
+
+Core 使用单一 Database Mutex 时，所有 snapshot SQL 必须是有索引的短查询。持锁期间禁止读取 Blob、解析
+大型 JSON、扫描 Transcript、发起网络请求或执行 Provider Usage/Cost 对账。Enrollment 应预投影 capability、
+first-visible 与 Evidence count 等读侧标量。Lifecycle/P95、Usage/Context、精确十进制 Cost、Delivery、
+Approval 与 Tool interval 的 count/P95/sum/union 都在 SQL CTE/window/aggregate 中返回有界标量或受控维度
+分组，不把 Run、Usage、Cost 或活动明细无界物化到 Core；历史趋势只读小时/日 rollup。独立 SQLite read
+connection 不属于 v1；如规模需要，须另立并发决策。
+
+Renderer 仅在 monitoring surface mounted 且 `document.hidden = false` 时轮询，间隔固定 12 秒（必须保持在
+10～15 秒范围）。`monitoring.changed`/`agent_run.terminal` 使用 300ms debounce 触发同一个 snapshot refresh；
+同一时刻最多一个 snapshot request 在途，poll/event/manual/filter 触发合并为下一次刷新。隐藏或卸载时取消
+interval、debounce 与 subscription。页面 open/refresh 只能读已保存 cost/reconciliation，
+不得触发 Provider API 或价格同步。
 
 ## Errors and privacy
 

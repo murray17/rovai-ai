@@ -1,0 +1,17 @@
+{
+  "method": "rovai/acp_prompt_completed",
+  "params": {
+    "sessionId": "session-fixture",
+    "turnId": "turn-fixture",
+    "result": {
+      "usage": {
+        "inputTokens": 100,
+        "outputTokens": 24,
+        "totalTokens": 124,
+        "thoughtTokens": 6,
+        "cachedReadTokens": 30,
+        "cachedWriteTokens": 10
+      }
+    }
+  }
+}

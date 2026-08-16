@@ -5,6 +5,8 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, screen, sh
 import type {
   AppearanceSnapshot,
   CoreMethod,
+  MonitoringFilter,
+  MonitoringSnapshot,
   NavigationPin,
   SaveMemberAvatarAssetInput,
   SettingsSection,
@@ -51,6 +53,7 @@ console.info('[startup] stage=main_module_loaded elapsed_ms=0.0')
 const allowedMethods = new Set<CoreMethod>([
   'health.check',
   'diagnostics.check',
+  'monitoring.snapshot',
   ...RUNTIME_RENDERER_CORE_METHODS,
   'members.list',
   'members.get',
@@ -163,6 +166,7 @@ let mainWindow: BrowserWindow | null = null
 let themePreference: ThemePreference = 'system'
 let appearanceFilePath = ''
 let lastDiagnosticsExportPath: string | null = null
+let lastMonitoringExportPath: string | null = null
 let lastAppearanceSignature = ''
 let generalPreferences: GeneralPreferencesStore | null = null
 let restorableLocations: RestorableLocationStore | null = null
@@ -723,6 +727,48 @@ ipcMain.handle('rovai:export-diagnostics', async () => {
 ipcMain.handle('rovai:reveal-diagnostics-export', (_event, path: unknown) => {
   if (typeof path !== 'string' || path !== lastDiagnosticsExportPath) {
     throw new Error('只能显示本次会话刚刚导出的诊断文件。')
+  }
+  shell.showItemInFolder(path)
+})
+
+ipcMain.handle('rovai:export-monitoring', async (_event, filter: MonitoringFilter) => {
+  const result = mainWindow
+    ? await dialog.showSaveDialog(mainWindow, {
+        title: '导出 Rovai AI 运行监控数据',
+        defaultPath: `rovai-runtime-monitoring-${new Date().toISOString().slice(0, 10)}.json`,
+        filters: [{ name: 'JSON', extensions: ['json'] }]
+      })
+    : await dialog.showSaveDialog({
+        title: '导出 Rovai AI 运行监控数据',
+        defaultPath: `rovai-runtime-monitoring-${new Date().toISOString().slice(0, 10)}.json`,
+        filters: [{ name: 'JSON', extensions: ['json'] }]
+      })
+  if (result.canceled || !result.filePath) return null
+  const snapshot = await core.request<MonitoringSnapshot>('monitoring.snapshot', filter)
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    ...snapshot
+  }
+  const temporary = `${result.filePath}.rovai-${randomUUID()}.tmp`
+  try {
+    await writeFile(temporary, `${JSON.stringify(payload, null, 2)}\n`, {
+      mode: 0o600,
+      flag: 'wx'
+    })
+    await chmod(temporary, 0o600)
+    await rename(temporary, result.filePath)
+    await chmod(result.filePath, 0o600)
+  } catch (error) {
+    await unlink(temporary).catch(() => undefined)
+    throw error
+  }
+  lastMonitoringExportPath = result.filePath
+  return result.filePath
+})
+
+ipcMain.handle('rovai:reveal-monitoring-export', (_event, path: unknown) => {
+  if (typeof path !== 'string' || path !== lastMonitoringExportPath) {
+    throw new Error('只能显示本次会话刚刚导出的运行监控文件。')
   }
   shell.showItemInFolder(path)
 })
